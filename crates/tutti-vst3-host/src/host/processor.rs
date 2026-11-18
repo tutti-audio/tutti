@@ -200,10 +200,10 @@ pub struct Vst3Processor<T: Vst3Sample> {
     // The scratch is listed first so it drops before the rest.
     pub(super) audio: AudioIO,
     seq: SeqScratch,
-    /// Sequencer-context texts cut at the room of one event's text, and events
-    /// past a stream's room, since activation.
-    seq_refused: Tally<u64>,
-    seq_refused_writer: TallyWriter<u64>,
+    /// Sequencer-context texts cut at the room of one event's text since
+    /// activation.
+    seq_truncated: Tally<u64>,
+    seq_truncated_writer: TallyWriter<u64>,
     audio_side: AudioSide,
     /// What `getProcessContextRequirements` answered at activation; `None` when
     /// the plugin does not implement the interface.
@@ -272,7 +272,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             carried,
             declared,
         } = parts;
-        let seq_refused = tally();
+        let seq_truncated = tally();
         let mut pending = RtVec::new();
         let refused = carried
             .into_iter()
@@ -282,8 +282,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             _format: std::marker::PhantomData,
             audio,
             seq: SeqScratch::default(),
-            seq_refused_writer: seq_refused.writer(),
-            seq_refused,
+            seq_truncated_writer: seq_truncated.writer(),
+            seq_truncated,
             audio_side,
             context_requirements,
             drain,
@@ -758,12 +758,12 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         self.audio.output.events.dropped()
     }
 
-    /// Sequencer-context texts (chord, scale and note-expression text) cut at
-    /// the room of one event's text
-    /// ([`MAX_EVENT_TEXT_LEN`](tutti_vst3_ffi::MAX_EVENT_TEXT_LEN) UTF-16 units),
-    /// and chords, scales and texts past a stream's room, since activation.
-    pub fn sequencer_refused(&self) -> u64 {
-        self.seq_refused.get()
+    /// Sequencer-context texts (chord, scale and note-expression text) cut
+    /// since activation because they were longer than the room of one event's
+    /// text ([`MAX_EVENT_TEXT_LEN`](tutti_vst3_ffi::MAX_EVENT_TEXT_LEN) UTF-16
+    /// units). The plugin gets the text up to the cut, on a character boundary.
+    pub fn sequencer_texts_truncated(&self) -> u64 {
+        self.seq_truncated.get()
     }
 
     /// Host parameter points not handed to the plugin whole since
@@ -956,17 +956,17 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         fill_chords(
             expressive.and_then(|e| e.chords),
             &mut seq.chords,
-            &self.seq_refused_writer,
+            &self.seq_truncated_writer,
         );
         fill_scales(
             expressive.and_then(|e| e.scales),
             &mut seq.scales,
-            &self.seq_refused_writer,
+            &self.seq_truncated_writer,
         );
         fill_expr_texts(
             expressive.and_then(|e| e.expr_texts),
             &mut seq.expr_texts,
-            &self.seq_refused_writer,
+            &self.seq_truncated_writer,
         );
         let events = InputEvents {
             midi: ctx.midi_events,

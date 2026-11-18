@@ -108,93 +108,34 @@ fn pitch_bend_center_is_half() {
     assert!((value.get() - 0.5).abs() < 0.01);
 }
 
+/// Polyphonic pressure and program change have no `IMidiMapping` slot: they
+/// are not mapped controllers, and a poly pressure reaches the plugin as MIDI
+/// with its note.
 #[test]
-fn program_change_decodes_to_its_slot_as_program_over_127() {
-    let MappedController {
-        channel,
-        controller,
-        value,
-    } = mapped(&(
-        Offset::ZERO,
-        midi::program_change(MidiChannel::of(6), 127, None),
-    ))
-    .unwrap();
-    assert_eq!(
-        (channel, controller),
-        (MidiChannel::of(6), CTRL_PROGRAM_CHANGE)
-    );
-    assert_eq!(value.get(), 1.0);
-    let half = mapped(&(
-        Offset::ZERO,
-        midi::program_change(MidiChannel::FIRST, 0, None),
-    ))
-    .unwrap();
-    assert_eq!(half.value.get(), 0.0);
-}
+fn poly_pressure_and_program_change_stay_midi_with_their_note() {
+    let pressure = (at(5), midi::poly_pressure(MidiChannel::FIRST, 60, u32::MAX));
+    let program = (at(7), midi::program_change(MidiChannel::FIRST, 5, None));
+    assert_eq!(mapped(&pressure), None);
+    assert_eq!(mapped(&program), None);
 
-#[test]
-fn poly_pressure_decodes_to_its_slot_over_the_full_width() {
-    let MappedController {
-        channel,
-        controller,
-        value,
-    } = mapped(&(
-        Offset::ZERO,
-        midi::poly_pressure(MidiChannel::of(1), 60, u32::MAX),
-    ))
-    .unwrap();
-    assert_eq!(
-        (channel, controller),
-        (MidiChannel::of(1), CTRL_POLY_PRESSURE)
-    );
-    assert_eq!(value.get(), 1.0);
-}
-
-/// The slots `scan` asks for are the table's: a program change or a pressure
-/// mapped by the plugin reaches the table and routes to its parameter, and an
-/// unmapped one stays a MIDI event.
-#[test]
-fn program_change_and_poly_pressure_route_through_the_table() {
-    let slots = [
-        Slot {
-            channel: 0,
-            controller: CTRL_PROGRAM_CHANGE as i16,
-            id: 700,
-        },
-        Slot {
-            channel: 0,
-            controller: CTRL_POLY_PRESSURE as i16,
-            id: 701,
-        },
-    ];
-    let mapping = MidiCcMapping::from_slots(&slots);
-    assert!(!mapping.is_empty());
-    let events = [
-        (at(3), midi::program_change(MidiChannel::FIRST, 127, None)),
-        (at(5), midi::poly_pressure(MidiChannel::FIRST, 60, u32::MAX)),
-        (at(7), midi::program_change(MidiChannel::of(1), 5, None)),
-    ];
+    let events = [pressure, program];
     let mut filtered = FilteredMidi::new();
-    let mut params = ParameterChanges::reserved(2, 2);
-    route_cc_events(&mapping, &events, &mut filtered, &mut params);
+    let mut params = ParameterChanges::reserved(1, 1);
+    route_cc_events(&mod_wheel_mapping(500), &events, &mut filtered, &mut params);
+    assert_eq!(filtered.len(), 2, "both stay in the MIDI stream");
+    assert!(params.queue(ParamId::new(500u32)).is_none());
 
-    let program = params
-        .queue(ParamId::new(700u32))
-        .expect("program change mapped");
-    assert_eq!(
-        (
-            program.points[0].sample_offset,
-            program.points[0].value.get()
-        ),
-        (3, 1.0)
-    );
-    let pressure = params.queue(ParamId::new(701u32)).expect("pressure mapped");
-    assert_eq!(pressure.points[0].sample_offset, 5);
-    assert_eq!(
-        filtered.len(),
-        1,
-        "the unmapped channel's program change stays MIDI"
-    );
+    // The pressure is for a sounding note: its Note On goes through the same encoder.
+    let mut encoder = crate::events::MidiEncoder::default();
+    encoder.encode(&(at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)));
+    let staged = encoder.encode(&filtered[0]).to_vec();
+    match staged.as_slice() {
+        [event] => match event.payload {
+            crate::events::Payload::PolyPressure(p) => assert_eq!(p.pitch, 60),
+            other => panic!("expected a poly pressure, got {other:?}"),
+        },
+        other => panic!("expected one event, got {other:?}"),
+    }
 }
 
 #[test]

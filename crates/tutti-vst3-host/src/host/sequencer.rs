@@ -4,7 +4,7 @@
 //! The Processor converts a block's [`ExpressiveContext`]
 //! into these buffers and stages them as [`InputEvents`](crate::InputEvents).
 
-use crate::events::{Utf16Chord, Utf16Scale, Utf16Text, event_text};
+use crate::events::{EventText, Utf16Chord, Utf16Scale, Utf16Text, event_text};
 use tutti_plugin_types::{
     ChordChanges, ExpressiveContext, HARMONY_CAPACITY, NoteExpressionIntValue,
     NoteExpressionTextChanges, ScaleChanges,
@@ -14,11 +14,11 @@ use tutti_rt::{RtVec, TallyWriter};
 /// The buffers the sequencer-context conversion in `Vst3Processor::process_shared`
 /// fills each block.
 ///
-/// Every stream holds at most [`HARMONY_CAPACITY`] events (the shared types cap
-/// them) and every text at most
-/// [`MAX_EVENT_TEXT_LEN`](tutti_vst3_ffi::MAX_EVENT_TEXT_LEN) UTF-16 units, both
-/// inline: filling them allocates nothing, from the first block on. A text cut
-/// at its room, or an event past a stream's, is counted.
+/// Each stream is an `RtVec` of [`HARMONY_CAPACITY`], the capacity of the shared
+/// streams it is filled from, so every event fits; every text holds at most
+/// [`MAX_EVENT_TEXT_LEN`](tutti_vst3_ffi::MAX_EVENT_TEXT_LEN) UTF-16 units. All of
+/// it is inline: filling allocates nothing, from the first block on. A text cut
+/// at its room is counted.
 #[derive(Default)]
 pub(super) struct SeqScratch {
     pub(super) chords: RtVec<Utf16Chord, HARMONY_CAPACITY>,
@@ -26,32 +26,39 @@ pub(super) struct SeqScratch {
     pub(super) expr_texts: RtVec<Utf16Text, HARMONY_CAPACITY>,
 }
 
-/// Adds one to `refused` when `kept` is false.
-fn count_refused(kept: bool, refused: &TallyWriter<u64>) {
-    if !kept {
-        refused.add(1);
+/// `src` as an event text, counting it in `truncated` when it was cut.
+fn counted_text(src: &str, truncated: &TallyWriter<u64>) -> EventText {
+    let text = event_text(src);
+    if text.is_overflowed() {
+        truncated.add(1);
     }
+    text
+}
+
+/// Appends `item`: the source streams hold at most [`HARMONY_CAPACITY`] events
+/// and so does the buffer, which `clear` emptied, so the push always fits.
+fn append<T>(out: &mut RtVec<T, HARMONY_CAPACITY>, item: T) {
+    let fitted = out.push(item);
+    debug_assert!(fitted, "a stream and its buffer share one capacity");
 }
 
 /// Refills `out` from `chords`; an absent stream leaves it empty.
 pub(super) fn fill_chords(
     chords: Option<&ChordChanges>,
     out: &mut RtVec<Utf16Chord, HARMONY_CAPACITY>,
-    refused: &TallyWriter<u64>,
+    truncated: &TallyWriter<u64>,
 ) {
     out.clear();
     for c in chords.into_iter().flat_map(|c| c.changes.iter()) {
-        let text = event_text(&c.text);
-        count_refused(!text.is_overflowed(), refused);
-        count_refused(
-            out.push(Utf16Chord {
+        append(
+            out,
+            Utf16Chord {
                 sample_offset: c.sample_offset,
                 root: c.root,
                 bass_note: c.bass_note,
                 mask: c.mask,
-                text,
-            }),
-            refused,
+                text: counted_text(&c.text, truncated),
+            },
         );
     }
 }
@@ -60,20 +67,18 @@ pub(super) fn fill_chords(
 pub(super) fn fill_scales(
     scales: Option<&ScaleChanges>,
     out: &mut RtVec<Utf16Scale, HARMONY_CAPACITY>,
-    refused: &TallyWriter<u64>,
+    truncated: &TallyWriter<u64>,
 ) {
     out.clear();
     for s in scales.into_iter().flat_map(|s| s.changes.iter()) {
-        let text = event_text(&s.text);
-        count_refused(!text.is_overflowed(), refused);
-        count_refused(
-            out.push(Utf16Scale {
+        append(
+            out,
+            Utf16Scale {
                 sample_offset: s.sample_offset,
                 root: s.root,
                 mask: s.mask,
-                text,
-            }),
-            refused,
+                text: counted_text(&s.text, truncated),
+            },
         );
     }
 }
@@ -82,20 +87,18 @@ pub(super) fn fill_scales(
 pub(super) fn fill_expr_texts(
     texts: Option<&NoteExpressionTextChanges>,
     out: &mut RtVec<Utf16Text, HARMONY_CAPACITY>,
-    refused: &TallyWriter<u64>,
+    truncated: &TallyWriter<u64>,
 ) {
     out.clear();
     for t in texts.into_iter().flat_map(|t| t.changes.iter()) {
-        let text = event_text(&t.text);
-        count_refused(!text.is_overflowed(), refused);
-        count_refused(
-            out.push(Utf16Text {
+        append(
+            out,
+            Utf16Text {
                 sample_offset: t.sample_offset,
                 note_id: t.note_id,
                 type_id: t.type_id,
-                text,
-            }),
-            refused,
+                text: counted_text(&t.text, truncated),
+            },
         );
     }
 }
@@ -223,6 +226,25 @@ mod seq_scratch_tests {
         fill_chords(Some(&changes(&[chord(0, &long)])), &mut out, &writer);
         assert_eq!(refused.get(), 1);
         assert_eq!(out[0].text.len(), tutti_vst3_ffi::MAX_EVENT_TEXT_LEN);
+    }
+
+    /// A cut never splits a surrogate pair: a text whose last kept unit would be
+    /// a pair's high half loses that half too, and is counted.
+    #[test]
+    fn a_cut_does_not_split_a_surrogate_pair() {
+        let truncated = tally::<u64>();
+        let writer = truncated.writer();
+        let mut out = RtVec::new();
+        // 255 one-unit characters, then U+1F3B5 (units 0xD83C 0xDFB5): the
+        // pair's high half is the 256th unit.
+        let name = format!(
+            "{}\u{1F3B5}",
+            "a".repeat(tutti_vst3_ffi::MAX_EVENT_TEXT_LEN - 1)
+        );
+        fill_chords(Some(&changes(&[chord(0, &name)])), &mut out, &writer);
+        assert_eq!(out[0].text.len(), tutti_vst3_ffi::MAX_EVENT_TEXT_LEN - 1);
+        assert!(out[0].text.iter().all(|&unit| unit == u16::from(b'a')));
+        assert_eq!(truncated.get(), 1);
     }
 
     /// The block's integer expressions reach the plugin's event list: the

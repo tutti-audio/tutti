@@ -208,6 +208,9 @@ impl Vst3Loaded {
     /// Also forwards any MIDI-learn CCs the audio thread captured to the
     /// plugin's `IMidiLearn`, which the SDK requires on this thread.
     ///
+    /// This and [`Control::take_reported_edits`](tutti_plugin_types::Control::take_reported_edits)
+    /// pop the same queue: a notification one takes, the other never sees.
+    ///
     /// Must be called on the main thread; not while inside
     /// [`Vst3Processor::process`](crate::Vst3Processor::process).
     pub fn poll_plugin_notifications(

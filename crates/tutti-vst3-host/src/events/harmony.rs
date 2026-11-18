@@ -11,11 +11,19 @@ use super::{Chord, Event, ExpressionText, Payload, Scale};
 /// and the buffer reports it ([`RtVec::is_overflowed`]).
 pub type EventText = RtVec<u16, MAX_EVENT_TEXT_LEN>;
 
-/// `src` as an [`EventText`], cut at the room. Never allocates.
+/// `src` as an [`EventText`], cut at the room, on a character boundary: a
+/// surrogate pair the cut would split is dropped whole. Never allocates.
 #[must_use]
 pub fn event_text(src: &str) -> EventText {
     let mut text = EventText::new();
     text.extend(src.encode_utf16());
+    if text.is_overflowed()
+        && text
+            .last()
+            .is_some_and(|unit| (0xD800..0xDC00).contains(unit))
+    {
+        text.pop();
+    }
     text
 }
 
