@@ -1,7 +1,7 @@
 use super::*;
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::BridgeMessage;
-use tutti_plugin_types::{Control, Request};
+use tutti_plugin_types::{Control, ProcessOutput, Request};
 use tutti_vst3_host::Vst3Loaded;
 
 type Vst3Instance = Served<Vst3Loaded>;
@@ -34,9 +34,9 @@ impl Served<Vst3Loaded> {
 }
 
 use std::path::Path;
+use tutti_buffers::InputOutput;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::widen_velocity;
-use tutti_plugin_types::PluginAudio;
 use tutti_ump::{MidiChannel, U7};
 
 /// Sets `TUTTI_PROBE_MISBEHAVIOUR` until the guard drops (a panic
@@ -100,13 +100,19 @@ fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
         let input_slices: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
         let mut output_slices: Vec<&mut [f32]> =
             output.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let buffer = PluginAudio::new(
+        let buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
         )
         .expect("equal channels");
-        instance.render(buffer, &ctx, &mut out).expect("renders");
+        instance
+            .render_f32(&mut PluginIo {
+                buffer,
+                ctx: &ctx,
+                out: &mut out,
+            })
+            .expect("renders");
     }
     (output[0][0] - ACTIVATION_COUNT_BASE) as u32
 }
@@ -673,7 +679,7 @@ fn test_vst3_process_f32_silence() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
@@ -683,7 +689,11 @@ fn test_vst3_process_f32_silence() {
     let ctx = tutti_plugin_types::ProcessContext::new();
     // Should not panic
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(buffer, &ctx, &mut out);
+    let _output = instance.render_f32(&mut PluginIo {
+        buffer,
+        ctx: &ctx,
+        out: &mut out,
+    });
 }
 
 #[test]
@@ -710,7 +720,7 @@ fn test_vst3_process_f32_with_note() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = PluginAudio::new(
+        let buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
@@ -719,7 +729,11 @@ fn test_vst3_process_f32_with_note() {
 
         let ctx = tutti_plugin_types::ProcessContext::new().midi(&note_on);
         let mut out = tutti_plugin_types::ProcessOutput::default();
-        let _output = instance.render(buffer, &ctx, &mut out);
+        let _output = instance.render_f32(&mut PluginIo {
+            buffer,
+            ctx: &ctx,
+            out: &mut out,
+        });
 
         for ch in output_data.iter() {
             for &sample in ch.iter() {
@@ -740,7 +754,7 @@ fn test_vst3_process_f32_with_note() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = PluginAudio::new(
+        let buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
@@ -749,7 +763,11 @@ fn test_vst3_process_f32_with_note() {
 
         let mut out = tutti_plugin_types::ProcessOutput::default();
 
-        let _output = instance.render(buffer, &empty_ctx, &mut out);
+        let _output = instance.render_f32(&mut PluginIo {
+            buffer,
+            ctx: &empty_ctx,
+            out: &mut out,
+        });
 
         for ch in output_data.iter() {
             for &sample in ch.iter() {

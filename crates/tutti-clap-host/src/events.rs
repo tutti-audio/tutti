@@ -931,8 +931,6 @@ pub struct InputEventList {
     /// [`param_points_dropped`](Self::param_points_dropped). A tally, so an
     /// app reads it from any thread.
     param_points_dropped: TallyWriter<u64>,
-    /// The reading end of `param_points_dropped`.
-    param_points_tally: Tally<u64>,
     /// MIDI messages a banked Program Change could not stage for lack of
     /// room: see [`midi_dropped`](Self::midi_dropped).
     midi_dropped: u64,
@@ -967,7 +965,6 @@ impl InputEventList {
     /// ([`sysex_assembler`], about 132 KiB), so no push allocates. Off the
     /// audio thread.
     pub fn new(rooms: InputRooms) -> Self {
-        let param_points_tally = tally::<u64>();
         let mut order = StableOrder::default();
         order.reserve(rooms.total());
         Self {
@@ -982,8 +979,7 @@ impl InputEventList {
             edits_pushed: 0,
             expressions_pushed: 0,
             transport_pushed: 0,
-            param_points_dropped: param_points_tally.writer(),
-            param_points_tally,
+            param_points_dropped: tally::<u64>().writer(),
             midi_dropped: 0,
             refused: 0,
             notes: Self::per_note_state(1),
@@ -1119,13 +1115,13 @@ impl InputEventList {
     /// since the list was built; zero while the host stays within the room
     /// it was activated for.
     pub fn param_points_dropped(&self) -> u64 {
-        self.param_points_tally.get()
+        self.param_points_dropped.get()
     }
 
     /// The reading end of the count [`param_points_dropped`](Self::param_points_dropped)
     /// gives, for a reader on another thread.
     pub fn param_points_tally(&self) -> Tally<u64> {
-        self.param_points_tally.clone()
+        self.param_points_dropped.tally()
     }
 
     /// SysEx messages dropped whole since the list was built: longer than

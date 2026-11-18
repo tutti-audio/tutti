@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_types::MaxBlock;
 
+use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_fixtures::main_thread;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
@@ -26,9 +27,9 @@ use tutti_plugin_host::{HostedNode, InProcClient, NodeControls, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
     EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
-    MainWorkHandle, Origin, ParameterInfo, PluginAudio, PluginBus, PluginDescriptor, PluginError,
-    PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused, RenderModeSupport,
-    RestartRules, Samples, Speaker, Stuck, WindowHandle,
+    MainWorkHandle, Origin, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo,
+    PluginResult, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused,
+    RenderModeSupport, RestartRules, Samples, Speaker, Stuck, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
@@ -346,19 +347,42 @@ impl Processor for RecProcessor {
         tutti_plugin_types::MIDI_STACK_BOUND
     }
 
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+        let PluginIo { buffer, ctx, out } = io;
+        match buffer.by_width() {
+            ByWidth::F32(buffer) => self.render(buffer, ctx, out),
+            ByWidth::F64(_) => unreachable!("the graph is f32"),
+        }
+    }
+
+    fn stop(&mut self) {}
+
+    fn reset(&mut self) {
+        self.pos = 0;
+        self.rig.resets.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn chunk(&self) -> Option<NonZeroUsize> {
+        self.rig.chunk
+    }
+}
+
+impl RecProcessor {
+    /// One 32-bit block: the graph's.
+    fn render(
+        &mut self,
+        buffer: &mut InputOutput<'_, f32>,
+        ctx: &ProcessContext<'_>,
+        out: &mut ProcessOutput,
+    ) -> PluginResult<()> {
         if self.rig.fail.load(Ordering::Relaxed) {
             return Err(PluginError::Block(FAILURE));
         }
         let emitted = self.rig.emit.load(Ordering::Relaxed);
-        io.out
-            .emit_midi((0..emitted).map(|_| tutti_plugin_types::WireMidi {
-                offset: 0,
-                ump: tutti_ump::Ump([0x2090_3C40, 0, 0, 0]),
-            }));
-        let PluginAudio::F32(buffer) = &mut io.buffer else {
-            unreachable!("the graph is f32");
-        };
+        out.emit_midi((0..emitted).map(|_| tutti_plugin_types::WireMidi {
+            offset: 0,
+            ump: tutti_ump::Ump([0x2090_3C40, 0, 0, 0]),
+        }));
         let frames = buffer.frames().0;
         let (input, mut output) = buffer.split();
         let poison = self.rig.poison.load(Ordering::Relaxed);
@@ -369,7 +393,6 @@ impl Processor for RecProcessor {
             }
         }
         if self.rig.record {
-            let ctx = io.ctx;
             let transport = ctx.transport.expect("a transport is attached");
             self.rig.seen.lock().unwrap().push(Seen {
                 frames,
@@ -404,25 +427,13 @@ impl Processor for RecProcessor {
             self.pos += frames;
             if self.pos >= chunk.get() {
                 self.pos = 0;
-                io.out
-                    .count_midi_lost(self.rig.lose.load(Ordering::Relaxed));
+                out.count_midi_lost(self.rig.lose.load(Ordering::Relaxed));
                 if self.rig.unsent.load(Ordering::Relaxed) {
-                    io.out.set_params_unsent();
+                    out.set_params_unsent();
                 }
             }
         }
         Ok(())
-    }
-
-    fn stop(&mut self) {}
-
-    fn reset(&mut self) {
-        self.pos = 0;
-        self.rig.resets.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn chunk(&self) -> Option<NonZeroUsize> {
-        self.rig.chunk
     }
 }
 

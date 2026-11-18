@@ -4,9 +4,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
-    Edit, EditDrain, EditSink, NoteExpressionChanges, PluginAudio, PluginError, PluginIo,
-    PluginResult, Processor, SampleFormat,
+    Edit, EditDrain, EditSink, NoteExpressionChanges, PluginError, PluginIo, PluginResult,
+    Processor, SampleFormat,
 };
 use tutti_rt::Reader;
 use tutti_units::Normalized;
@@ -193,7 +194,7 @@ impl ClapProcessor {
 
     /// Renders one block, with the buffers, the context and the output taken
     /// apart. [`Processor::process`] is this with a [`PluginIo`]; a caller whose
-    /// channel tables have distinct lifetimes, as `PluginAudio` allows, calls
+    /// channel tables have distinct lifetimes, as an `InputOutput` allows, calls
     /// this one.
     ///
     /// # Errors
@@ -201,9 +202,9 @@ impl ClapProcessor {
     /// [`PluginError::Process`] when the buffer's sample format is not the one
     /// the processor was activated with; [`PluginError::Block`] when the plugin
     /// failed the block.
-    pub fn render(
+    pub fn render<S: Float>(
         &mut self,
-        buffer: &mut PluginAudio<'_>,
+        buffer: &mut InputOutput<'_, S>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
@@ -213,9 +214,9 @@ impl ClapProcessor {
     /// One block from the shared vocabulary: converts the context into CLAP's
     /// (note expressions into scratch), processes, and
     /// copies what the plugin emitted into `out`.
-    fn process_shared(
+    fn process_shared<S: Float>(
         &mut self,
-        buffer: &mut PluginAudio<'_>,
+        buffer: &mut InputOutput<'_, S>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {
@@ -361,7 +362,7 @@ impl Processor for ClapProcessor {
             .unwrap_or(std::num::NonZeroU32::MIN)
     }
 
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)
     }
