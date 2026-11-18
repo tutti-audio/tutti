@@ -149,7 +149,7 @@ pub fn pre_delay_frames(pre_delay: Seconds, rate: SampleRate) -> Samples {
 // built without the heap. Every `Stage` is about 8 KB whatever its variant (an
 // `Inline` array of `Stage` is as large as its largest member), so a short
 // all-pass stage costs as much as an `Fdn`.
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stage {
     /// Sparse taps: early reflections. No feedback.
@@ -348,7 +348,7 @@ impl Default for Line {
 
 /// The feedback matrix `A` of an [`Fdn`]. Structured, not a bag of floats.
 // Boxed, `Dense` would allocate; it is a control-side tool and the rest are small.
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum Matrix {
     /// The identity: every line feeds only itself (combs).

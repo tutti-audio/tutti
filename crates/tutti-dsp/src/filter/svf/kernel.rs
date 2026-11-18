@@ -49,12 +49,10 @@ pub enum SvfType {
 
 /// Pure SVF coefficient set computed from filter parameters.
 ///
-/// Public so a voice engine that runs the same topology across SIMD lanes
-/// (`tutti-polysynth`'s voice bank) derives its coefficients from this one
-/// function rather than a copy of it. The per-sample recurrence those
-/// coefficients feed is `v3 = v0 - ic2; v1 = a1*ic1 + a2*v3;
-/// v2 = ic2 + a2*ic1 + a3*v3; ic1 = 2*v1 - ic1; ic2 = 2*v2 - ic2;
-/// y = m0*v0 + m1*v1 + m2*v2` (Simper's trapezoidal SVF).
+/// The per-sample recurrence these coefficients feed is
+/// `v3 = v0 - ic2; v1 = a1*ic1 + a2*v3; v2 = ic2 + a2*ic1 + a3*v3;
+/// ic1 = 2*v1 - ic1; ic2 = 2*v2 - ic2; y = m0*v0 + m1*v1 + m2*v2`
+/// (Simper's trapezoidal SVF).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SvfCoeffs {
     /// The prewarped integrator gain, `tan(pi * fc / sr)` (a shelf's divided or

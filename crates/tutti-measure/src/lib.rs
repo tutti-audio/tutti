@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-//! Audio measurement for the Tutti audio engine over `&[f32]`: waveform blocks,
+//! Audio measurement over [`tutti_buffers`] views: waveform blocks,
 //! onsets, pitch, EBU R128 loudness, stereo correlation, spectra, spectral shape,
 //! silence regions, vectorscope points, tempo, beats, key, chords and the short-time
 //! Fourier transform. These are measurements, not processors: they read audio and
@@ -248,10 +248,7 @@
 //!
 //! ## Features
 //!
-//! None: `default = []`.
-//!
-//! `tutti-export` uses it for loudness measurement.
-#![forbid(unsafe_code)]
+//! - `serde`: `Serialize` and `Deserialize` for [`PeakBlocks`] and [`PeakBlock`]. Off by default.
 //!
 //! ## Items
 //!
@@ -304,6 +301,7 @@
 //!   [`ChromaMeter`]; [`estimate_key`] finds a [`Key`] by
 //!   Krumhansl-Schmuckler over a [`KeyProfile`]; [`detect_chords`] with a
 //!   [`ChordConfig`] smooths triads into [`ChordSpan`]s by Viterbi.
+#![forbid(unsafe_code)]
 
 mod align;
 mod beat;

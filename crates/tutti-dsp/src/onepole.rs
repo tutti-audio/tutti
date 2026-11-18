@@ -1,0 +1,50 @@
+//! The one-pole's pole and how long it rings: `exp(-2 pi fc / fs)` and the frames its
+//! decay takes to fall to a floor.
+
+use tutti_types::{Db, Hz, SampleRate};
+
+/// The pole `exp(-2 pi fc / fs)` of the one-pole low-pass of cutoff `cutoff` at `rate`.
+pub(crate) fn cutoff_pole(cutoff: Hz, rate: SampleRate) -> f64 {
+    libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate.get())
+}
+
+/// The frames, fractional (a count `Samples` does not cover), for the decay `pole^n` to reach `floor`: `ln(floor) / ln(pole)`.
+/// A pole of 0 or less decays at once (0 frames), and one of 1 or more never does
+/// (infinite); a floor at or above 0 dB is already reached (0 frames).
+pub(crate) fn ring_frames(pole: f64, floor: Db) -> f64 {
+    if pole <= 0.0 {
+        return 0.0;
+    }
+    if pole >= 1.0 {
+        return f64::INFINITY;
+    }
+    let target = libm::log(Db::to_amplitude_f64(f64::from(floor.get())));
+    (target / libm::log(pole)).max(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pole of 0.5 halves each frame, so 2^-10 is reached after 10 frames; 6.020599913 dB
+    /// per halving puts 2^-10 at -20 log10(1024) dB.
+    #[test]
+    fn ring_frames_of_a_half_pole_to_two_to_the_minus_ten_is_ten() {
+        let floor = Db(Db::from_amplitude_f64(1.0 / 1024.0) as f32);
+        assert!((ring_frames(0.5, floor) - 10.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn ring_frames_edges_are_instant_for_pole_zero_and_never_for_pole_one() {
+        assert_eq!(ring_frames(0.0, Db(-60.0)), 0.0);
+        assert_eq!(ring_frames(1.0, Db(-60.0)), f64::INFINITY);
+    }
+
+    /// `exp(-2 pi fc / fs)` for fc = fs / (2 pi) is `exp(-1)`.
+    #[test]
+    fn cutoff_pole_at_rate_over_two_pi_is_exp_minus_one() {
+        let rate = SampleRate::SR_48K;
+        let fc = Hz((48_000.0 / std::f64::consts::TAU) as f32);
+        assert!((cutoff_pole(fc, rate) - (-1.0f64).exp()).abs() < 1e-6);
+    }
+}

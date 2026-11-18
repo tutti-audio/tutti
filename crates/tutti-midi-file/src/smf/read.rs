@@ -52,12 +52,13 @@ use winnow::combinator::{alt, dispatch, eof, fail, peek, repeat};
 use winnow::error::ContextError;
 use winnow::token::{literal, take};
 
-use tutti_ump::{MidiGroup, Voice1, parse_exact};
+use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, Voice1, parse_exact};
 
 use super::{SmfDivision, SmfParts};
+use crate::file::split_extra;
 use crate::file::{
-    FileEvent, MalformedMeta, Meta, MicrosPerQuarter, OtherMetaKind, SmfFormat, TextKind, Tick,
-    Track,
+    FileEvent, MalformedMeta, Meta, MicrosPerQuarter, OtherMetaKind, SmfFormat, SmpteOffset,
+    TextKind, Tick, Track,
 };
 use crate::{ReadError, SmfParseError};
 
@@ -249,10 +250,47 @@ fn meta_of(kind: u8, data: &[u8]) -> Item {
                 kind,
                 data: data.into(),
             },
-            (None, None) => Meta::Malformed(MalformedMeta::new(kind, data)),
+            (None, None) => fixed_or_id_meta(kind, data)
+                .unwrap_or(Meta::Malformed(MalformedMeta::new(kind, data))),
         },
     };
     Item::Event(FileEvent::Meta(meta))
+}
+
+/// The Sequence Number, MIDI Channel Prefix, SMPTE Offset or Sequencer-Specific
+/// event of `kind` and `data`: `None` for another kind, or for data the kind
+/// does not define (a channel past 15, an SMPTE field out of its range, no
+/// manufacturer id).
+fn fixed_or_id_meta(kind: u8, data: &[u8]) -> Option<Meta> {
+    match kind {
+        0x00 => split_extra(data).map(|([a, b], extra)| Meta::SequenceNumber {
+            number: u16::from_be_bytes([a, b]),
+            extra,
+        }),
+        0x20 => split_extra(data).and_then(|([channel], extra)| {
+            MidiChannel::new(channel).map(|channel| Meta::ChannelPrefix { channel, extra })
+        }),
+        0x54 => split_extra(data).and_then(|(wire, extra)| {
+            SmpteOffset::from_wire(wire).map(|offset| Meta::SmpteOffset { offset, extra })
+        }),
+        0x7F => {
+            // One id byte, or a `00` and two.
+            let id_len = if data.first() == Some(&0) { 3 } else { 1 };
+            let (id, rest) = data.split_at_checked(id_len)?;
+            let mut bytes = [0u8; 3];
+            bytes[..id_len].copy_from_slice(id);
+            let [Some(a), Some(b), Some(c)] = bytes.map(U7::new) else {
+                return None;
+            };
+            ManufacturerId::from_sysex_bytes([a, b, c]).map(|manufacturer| {
+                Meta::SequencerSpecific {
+                    manufacturer,
+                    data: rest.into(),
+                }
+            })
+        }
+        _ => None,
+    }
 }
 
 /// A meta event after its `FF`: type, length, data.

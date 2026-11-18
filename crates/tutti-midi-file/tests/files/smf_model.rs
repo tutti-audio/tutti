@@ -13,8 +13,10 @@ use tutti_fixtures::{RangeContract, check_range_contract};
 
 use tutti_midi_file::{
     FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
-    ReadError, SmfDivision, SmfFormat, SmfParseError, TextKind, Tick, Timebase, Track, TracksError,
+    ReadError, SmfDivision, SmfFormat, SmfParseError, SmpteFractionalFrames, SmpteOffset, TextKind,
+    Tick, Timebase, Track, TracksError,
 };
+use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
     Address, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, TicksPerQuarterNote, U7,
@@ -132,13 +134,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
 
         let events = &file.tracks()[0].events();
         let at = |i: usize| &events[i];
-        assert_eq!(
-            at(0).1,
-            FileEvent::Meta(Meta::Other {
-                kind: OtherMetaKind::of(0),
-                data: vec![0, 5].into()
-            })
-        );
+        assert_eq!(at(0).1, FileEvent::Meta(Meta::sequence_number(5)));
         assert_eq!(at(1).1, FileEvent::Meta(Meta::text(TextKind::Text, "text")));
         assert_eq!(file.tracks()[0].name(), Some("Lead"));
         assert_eq!(at(5).1, FileEvent::Meta(Meta::text(TextKind::Lyric, "la")));
@@ -155,10 +151,13 @@ fn every_event_kind_survives_a_read_and_a_write() {
         );
         assert_eq!(
             at(13).1,
-            FileEvent::Meta(Meta::Other {
-                kind: OtherMetaKind::of(0x54),
-                data: vec![0x21, 30, 15, 10, 50].into()
-            })
+            FileEvent::Meta(Meta::smpte_offset(
+                SmpteOffset::new(
+                    SmpteTimecode::new(1, 30, 15, 10, SmpteFrameRate::Fps25).unwrap(),
+                    SmpteFractionalFrames::of(50),
+                )
+                .unwrap()
+            ))
         );
         assert_eq!(
             at(14).1,
@@ -466,7 +465,7 @@ fn the_tempo_map_pools_every_track() {
 
 /// No Set Tempo at tick 0: 120 BPM, the MIDI default, governs until the first;
 /// a Set Tempo later does not govern the beats before it.
-/// Spec: smf/delta-times#1
+/// Spec: smf/delta-times#1, smf/formats#12
 #[test]
 fn a_file_with_no_tempo_plays_at_120() {
     let none = read(&smf(0, &[vec![RawEvent::note_on(0, 0, 60, 100)]]));
@@ -870,14 +869,17 @@ fn microseconds_per_quarter_is_0_to_16777215() {
     });
 }
 
-/// Every meta type the reader types (the text events `01` to `09`, End of
-/// Track, Set Tempo, Time and Key Signature) is refused as an `Other`, and so
+/// Every meta type the reader types (Sequence Number, the text events `01` to
+/// `09`, Channel Prefix, End of Track, Set Tempo, SMPTE Offset, Time and Key
+/// Signature, Sequencer-Specific) is refused as an `Other`, and so
 /// is a type byte with its top bit set; every other type byte below 128 is
 /// taken.
 /// Spec: smf/track-chunks#25
 #[test]
 fn an_other_meta_kind_is_a_type_byte_with_no_variant() {
-    let typed = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 0x2F, 0x51, 0x58, 0x59];
+    let typed = [
+        0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x20, 0x2F, 0x51, 0x54, 0x58, 0x59, 0x7F,
+    ];
     for kind in 0..=u8::MAX {
         let expected = kind < 0x80 && !typed.contains(&kind);
         assert_eq!(OtherMetaKind::new(kind).is_some(), expected, "{kind:#04x}");
@@ -950,10 +952,12 @@ fn what_an_smf_cannot_hold_is_refused() {
 #[test]
 fn an_event_longer_than_28_bits_is_too_large() {
     let sysex = |len: usize| {
+        let mut data = vec![0; len];
+        data[len - 1] = 0xF7;
         MidiFile::smf(
             SmfFormat::SingleTrack,
             SMF_DIVISION,
-            vec![track(vec![(0, FileEvent::SysEx(vec![0; len].into()))])],
+            vec![track(vec![(0, FileEvent::SysEx(data.into()))])],
         )
         .map(drop)
     };

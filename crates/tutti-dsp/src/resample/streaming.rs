@@ -29,8 +29,8 @@ use tutti_types::{ChannelLayout, SampleRate, Samples};
 /// time resolution and more work — and a point the enum does not list cannot be
 /// expressed at all.
 ///
-/// Shaped like `FftSize` in `tutti-sampler`: constants named for their numbers,
-/// `MIN`/`MAX` bounds, and a fallible constructor for anything else.
+/// Constants named for their numbers, `MIN`/`MAX` bounds, and a fallible
+/// constructor for anything else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChunkSize {
     chunk: Samples,

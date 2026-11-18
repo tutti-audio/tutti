@@ -25,7 +25,7 @@ use tutti_types::{Feedback, Gain, SampleRate, SampleSpan, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 use super::routing::Routing;
-use super::taps::finite_or;
+use crate::finite::finite_or;
 use crate::{DelayLine, Glide, InterpolationMode, Steps, delay_step};
 
 /// What a delay reads while it runs: the delay in frames, and the two feedbacks, each

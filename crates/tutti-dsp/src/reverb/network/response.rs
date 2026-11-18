@@ -17,7 +17,7 @@ use tutti_types::{Amplitude, Db, Gain, Hz, SampleRate};
 use super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage, energy,
 };
-use crate::reverb::cutoff_pole;
+use crate::onepole::cutoff_pole;
 use crate::{Complex64, Lti};
 
 const ZERO: Complex64 = Complex64::new(0.0, 0.0);

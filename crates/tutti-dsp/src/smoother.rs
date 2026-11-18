@@ -11,9 +11,9 @@
 /// [`toward`](Self::toward), which is the same step with the state held by
 /// the caller.
 ///
-/// The value and the coefficient are bare `f32`: the value is whichever
-/// quantity the caller smooths (a gain, a degree of height), so no unit
-/// describes it, and a coefficient is a fraction with no unit of its own.
+/// The value is whichever quantity the caller smooths (a gain, a degree of
+/// height), so it is a bare `f32`; a coefficient is a fraction with no unit of
+/// its own.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Smoother {
     value: f32,
