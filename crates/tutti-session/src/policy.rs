@@ -145,7 +145,8 @@ pub(crate) fn output_cell(facts: FactsCell) -> Arc<Cell<OutputPolicy>> {
             .check()
             .map_err(RoutingError::Fold)
             .map_err(OutputPolicyError::from)?;
-        // Whether a routing has a place does not depend on the sample format.
+        // A check over the routing's shape against the root and the device, not a
+        // render: whether it has a place does not depend on the sample format.
         policy
             .routing()
             .fold::<f32>(&facts.root, &facts.placed)
