@@ -222,7 +222,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.graph.report_commit(out);
                 self.graph.report_rewired(out);
                 if self.graph.take_resumed() && !sent {
-                    self.publish_sent();
+                    self.graph.publish_sent();
                 }
             }
             Phase::Modulation => self
@@ -292,7 +292,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     pub fn commit(&mut self) -> Committed {
         let committed = self.graph.commit();
         if committed == Committed::Sent {
-            self.publish_sent();
+            self.graph.publish_sent();
         }
         committed
     }
@@ -309,13 +309,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             }
             Committed::Retry => false,
         }
-    }
-
-    /// Publish the compensation of the plan sent last: the per-channel
-    /// pre-roll to [`compensation`](Self::compensation), the total to
-    /// [`latency`](Self::latency). Nothing before the first plan.
-    pub(crate) fn publish_sent(&mut self) {
-        self.graph.publish_sent();
     }
 
     /// Reports the newest fault the stream raised since the last poll, if the
