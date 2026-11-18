@@ -44,7 +44,7 @@ fn a_departure_is_stamped_in_host_ticks_after_the_reading() {
 
 // What CoreMIDI holds a packet until is its stamp: one sent `Now` is stamped 0
 // (delivered at once) and one sent 2 s ahead is stamped 2 s of ticks after the
-// reading, never 0 and never earlier than a packet sent `Now` would be.
+// reading.
 #[test]
 fn a_now_packet_is_stamped_zero_and_a_scheduled_one_its_host_time() {
     let os = Instant::now() + Duration::from_secs(100);
