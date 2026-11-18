@@ -43,7 +43,7 @@ impl std::fmt::Debug for CrossfadeControls {
     }
 }
 
-/// Something an [`update`](Session::update) found for the host.
+/// Something an [`update`](crate::Session::update) found for the host.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum SessionEvent {
@@ -62,7 +62,7 @@ pub enum SessionEvent {
     CrossfadeLanded {
         /// The node it swapped behind.
         node: NodeKey,
-        /// The id [`Graph::crossfade`] returned.
+        /// The id [`crate::Graph::crossfade`] returned.
         id: CrossfadeId,
         /// The incoming node's controls.
         controls: CrossfadeControls,
@@ -73,7 +73,7 @@ pub enum SessionEvent {
     CrossfadeFailed {
         /// The node it was to swap behind.
         node: NodeKey,
-        /// The id [`Graph::crossfade`] returned.
+        /// The id [`crate::Graph::crossfade`] returned.
         id: CrossfadeId,
         /// Why.
         refused: CrossfadeRefused,
@@ -88,7 +88,7 @@ pub enum SessionEvent {
     /// commit lands.
     ///
     /// A feedback edge is listed as the pair of ports it joined (its delay
-    /// is not part of an [`Edge`](crate::Edge)). A modulation route onto a
+    /// is not part of an [`Edge`]). A modulation route onto a
     /// dropped edge, or a param or edge-gain lane the node's lost event
     /// outputs drove, is not listed: the route stays declared and reads
     /// unresolved (`Problem::Unresolved`) until its target
@@ -187,7 +187,7 @@ pub enum SessionEvent {
     /// The stream of a real-time clock reported a fault: a device unplugged
     /// mid-session, a callback that panicked, a timer that fell behind. The
     /// most recent one since the last poll, as
-    /// [`Session::faults`] counts them.
+    /// [`crate::Session::faults`] counts them.
     Fault(StreamFault),
     /// The sound card or its devices: a device that came or went, a
     /// restart wanted, done or failed ([`DeviceEvent`](crate::DeviceEvent)).
@@ -202,7 +202,7 @@ pub enum SessionEvent {
     /// once: a refusal when it starts or changes (the problems list holds it
     /// while it lasts), a target that has stayed unresolved for the session's
     /// warning time ([`SessionBuilder::unresolved_warning`](crate::SessionBuilder::unresolved_warning),
-    /// 4 s by default) of [`PhaseCx::now`], likely a key no node is ever bound to,
+    /// 4 s by default) of [`crate::PhaseCx::now`], likely a key no node is ever bound to,
     /// once per stretch it stays unresolved.
     Modulation(Problem),
     /// A MIDI event of the session's, by area (design 030, convention 1):
@@ -211,7 +211,7 @@ pub enum SessionEvent {
     /// See [`MidiReport`](crate::MidiReport).
     #[cfg(feature = "midi")]
     Midi(crate::MidiReport),
-    /// A stream an [`open_stream`](Session::open_stream) started opened or
+    /// A stream an [`open_stream`](crate::Session::open_stream) started opened or
     /// failed to. See [`SamplerEvent`](crate::SamplerEvent).
     #[cfg(feature = "sampler")]
     Sampler(crate::SamplerEvent),
@@ -232,9 +232,9 @@ pub enum SessionEvent {
     /// A reader of the root was opened again, because the root's width is no
     /// longer the one the reader has: a tap from
     /// [`Taps::open_output`](crate::Taps::open_output), or the master meter
-    /// once a host took it ([`Session::take_master_meter`]). `id` names the new
+    /// once a host took it ([`crate::Session::take_master_meter`]). `id` names the new
     /// reader, which the session holds until
-    /// [`Session::take_reopened`] claims it (an event left unread loses
+    /// [`crate::Session::take_reopened`] claims it (an event left unread loses
     /// nothing); `topology` is the root's now. The old reader reads closed, so
     /// no reader takes twelve channels for two: a tap's reads what its rings
     /// held when the commit that changed the root was applied and then ends
@@ -254,7 +254,7 @@ pub enum SessionEvent {
         topology: ChannelTopology,
     },
     /// A pool entry's change: its load landed or failed, a reload landed, or it
-    /// was released. See [`PoolEvent`](PoolEvent); `key` is the key the
+    /// was released. See [`PoolEvent`]; `key` is the key the
     /// app declared it under ([`PoolKey::get`](PoolKey::get)).
     Pool {
         /// The entry's key.

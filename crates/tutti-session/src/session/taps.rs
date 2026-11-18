@@ -47,7 +47,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// ([`TapReader::take_lost`](tutti_graph::TapReader::take_lost)). It flows from the first
     /// render that begins after this returns, and is closed by
     /// [`close_heard_tap`](Self::close_heard_tap) or, once its reader is
-    /// dropped, by the next [`Reclaim`](Phase::Reclaim) phase. The width is
+    /// dropped, by the next [`Reclaim`](crate::Phase::Reclaim) phase. The width is
     /// the device's when the session was built: a restart onto a device of
     /// another width counts the tap's blocks lost until it is opened again.
     ///
@@ -63,7 +63,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     }
 
     /// Closes the tap [`open_heard_tap`](Self::open_heard_tap) opened, now
-    /// rather than at the [`Reclaim`](Phase::Reclaim) phase that follows a
+    /// rather than at the [`Reclaim`](crate::Phase::Reclaim) phase that follows a
     /// dropped reader. The reader keeps what it was written.
     ///
     /// # Errors
@@ -93,7 +93,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     }
 
     /// Claims the reader reopened under `id`
-    /// ([`SessionEvent::RootReaderReopened`]): held until then.
+    /// ([`crate::SessionEvent::RootReaderReopened`]): held until then.
     ///
     /// # Errors
     ///

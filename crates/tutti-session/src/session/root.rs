@@ -38,7 +38,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// graph's outputs become exactly as many as `root` has, widened or
     /// narrowed (channels past it are dropped), with no floor of the device's
     /// ([`root_width`](crate::root_width)). Afterwards the width and the
-    /// declaration cannot disagree: [`Graph::widen_outputs`] refuses to widen a
+    /// declaration cannot disagree: [`crate::Graph::widen_outputs`] refuses to widen a
     /// declared root. Declare again to change both.
     ///
     /// A declaration that changes the root crossfades: the old root's outputs
@@ -132,12 +132,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// - The same when a declaration that waited for a root crossfade
     ///   ([`declare_root_topology`](Self::declare_root_topology)) could not be
     ///   placed once the fade ended; a later widening does not replace it.
-    /// - Otherwise `Refused` with [`Graph::widen_outputs`]'s last refusal: a
+    /// - Otherwise `Refused` with [`crate::Graph::widen_outputs`]'s last refusal: a
     ///   widening the declared root could not take
-    ///   ([`RootError::Width`](RootError::Width)), or
+    ///   ([`RootError::Width`]), or
     ///   channels past `MAX_CHANNELS`
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
-    ///   [`RootError::Fold`](RootError::Fold)); that
+    ///   [`RootError::Fold`]); that
     ///   is what a host's `MasterSources` longer than the root comes to.
     /// - Otherwise [`Pending`](RootTopologyStatus::Pending) while a declaration
     ///   waits for a root crossfade, and `Applied`.
