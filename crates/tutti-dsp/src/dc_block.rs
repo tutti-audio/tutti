@@ -9,7 +9,7 @@
 //! input decays as `R^n`, and the gain at `omega = 2 pi f / fs` is
 //! `|1 - e^(-j omega)| / |1 - R e^(-j omega)|`, which is `1/sqrt(2)` close to the corner.
 
-use tutti_buffers::{Float, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::ChannelLayout;
 use tutti_units::{Hz, SampleRate, Samples};
 

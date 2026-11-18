@@ -5,7 +5,7 @@
 //! scales the side and keeps the mid: `L' = M + w S`, `R' = M - w S`. Width 0 is the mono
 //! sum, 1 the pair as it is, 2 doubles the side.
 
-use tutti_buffers::{Float, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{SampleRate, StereoWidth};
 
 use crate::{GAIN_GLIDE, Glide, Lerp, Steps};

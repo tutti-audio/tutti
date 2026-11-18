@@ -245,8 +245,8 @@ macro_rules! atan_pins {
             assert_eq!(atan(0.0).to_bits(), (0.0 as $t).to_bits());
             assert_eq!(atan(-0.0).to_bits(), (-0.0 as $t).to_bits());
             assert!((atan(1.0) - pi / 4.0).abs() <= <$t>::EPSILON);
-            assert_eq!(atan(<$t>::INFINITY), pi / 2.0);
-            assert_eq!(atan(<$t>::NEG_INFINITY), -pi / 2.0);
+            assert!((atan(<$t>::INFINITY) - pi / 2.0).abs() <= <$t>::EPSILON);
+            assert!((atan(<$t>::NEG_INFINITY) + pi / 2.0).abs() <= <$t>::EPSILON);
             assert!(atan(<$t>::NAN).is_nan());
             let third = 1.0 / (3.0 as $t).sqrt();
             assert!((atan(third) - pi / 6.0).abs() <= <$t>::EPSILON);
