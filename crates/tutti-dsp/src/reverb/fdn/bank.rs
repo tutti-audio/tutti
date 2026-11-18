@@ -543,7 +543,7 @@ impl FdnBank {
     /// silent. No allocation.
     #[expect(
         clippy::needless_range_loop,
-        reason = "the per-line arrays (`c_len`, `c_out`, `pole`, `buf` rows) are indexed by one \
+        reason = "the per-line arrays (`c_len`, `c_out`, `pole`, `lines`) are indexed by one \
                   line number with the loop's scratch `d`; an iterator over any one of them \
                   would only hide the others"
     )]
@@ -616,10 +616,11 @@ impl FdnBank {
             // `m` scales the projection, so `m = 1` is the reflection to the bit.
             let sum = s.c_mix * sum;
             for j in 0..n {
-                let line = &mut s.lines[j];
-                line.put(s.c_in[j] * xd + d[j] - 2.0 * s.c_v[j] * sum);
-                line.advance();
+                s.lines[j].put(s.c_in[j] * xd + d[j] - 2.0 * s.c_v[j] * sum);
             }
+            // Every row moves on, the idle ones too: a line past `n` keeps the frames it held
+            // and a later regrowth reads them at the right age.
+            s.lines.iter_mut().for_each(DelayRing::advance);
 
             let (mid, side) = ((out_l + out_r) * 0.5, (out_l - out_r) * 0.5);
             let wet = s.c_wet;

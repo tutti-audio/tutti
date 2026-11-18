@@ -58,6 +58,12 @@ impl DelayRing {
         self.advance();
     }
 
+    /// The slot at the cursor: the frame `len` slots back, the oldest the ring holds.
+    #[inline]
+    pub(crate) fn oldest(&self) -> f32 {
+        self.buf[self.w]
+    }
+
     /// The frame `k` slots before the cursor, for `k` up to the length.
     #[inline]
     pub(crate) fn back(&self, k: usize) -> f32 {
@@ -86,9 +92,9 @@ impl DelayRing {
 mod tests {
     use super::DelayRing;
 
-    /// `back(k)` after `n` pushes of the ramp `0, 1, 2, ..` is the value pushed `k` frames
-    /// before the newest plus one slot: the ramp's value `n - k`, at every `k` the ring
-    /// holds and across several wraps.
+    /// After `n + 1` pushes of the ramp `0, 1, 2, ..` the newest value is `n`, one slot
+    /// back, so `back(k)` is the ramp's value `n + 1 - k`, at every `k` the ring holds and
+    /// across several wraps.
     #[test]
     fn a_read_k_slots_back_is_the_value_put_k_frames_earlier_across_the_wrap() {
         const LEN: usize = 5;
@@ -113,6 +119,7 @@ mod tests {
         for x in [1.0, 2.0, 3.0] {
             ring.push(x);
         }
+        assert_eq!(ring.oldest(), 1.0);
         assert_eq!(ring.back(0), 1.0);
         assert_eq!(ring.back(3), 1.0);
         ring.put(9.0);
@@ -127,7 +134,7 @@ mod tests {
         for n in 0..11 {
             ring.push((n * n) as f32);
         }
-        // Newest is 100, one back is 81 (the cursor has advanced past 100).
+        // The newest value, 100, is one slot back: the cursor has advanced past it.
         for d in 1..7 {
             let (a, b) = (ring.back(d), ring.back(d + 1));
             assert_eq!(ring.at(d as f32 + 0.5), (a + b) / 2.0);

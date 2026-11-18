@@ -695,3 +695,28 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
         assert_eq!(glides.wet.now() == target, chunk == wanted, "chunk {chunk}");
     }
 }
+
+/// Every row of the lines moves on each frame, those past the lines in use too: a line idle
+/// for `m` frames reads, at delay `m + 1`, the value it held one frame back when it went idle,
+/// and the same after it is regrown. A cursor that stood still while idle reads another slot.
+#[test]
+fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
+    let c = still(|c| c.pre_delay = Seconds(0.0));
+    let (mut bank, mut glides) = landed(&layout(8, false), RATE, &c);
+    run(&mut bank, &mut glides, &impulse(1), 1);
+    let held = bank.state.lines[7].back(1);
+    assert_ne!(held, 0.0, "the impulse reached the last line");
+
+    let m = 100;
+    bank.layout = layout(4, false);
+    bank.designed = None;
+    bank.aim(&mut glides, &c);
+    run(&mut bank, &mut glides, &vec![0.0; m], 7);
+    assert_eq!(bank.state.lines[7].back(m + 1), held, "idle for {m} frames");
+
+    bank.layout = layout(8, false);
+    bank.designed = None;
+    bank.aim(&mut glides, &c);
+    run(&mut bank, &mut glides, &vec![0.0; m], 7);
+    assert_eq!(bank.state.lines[7].back(2 * m + 1), held, "regrown");
+}

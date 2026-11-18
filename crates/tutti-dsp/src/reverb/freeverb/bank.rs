@@ -320,7 +320,7 @@ impl CombFilter {
     fn process(&mut self, input_block: &[f32], input_gain: f32, output_block: &mut [f32]) {
         for (out, &x) in output_block.iter_mut().zip(input_block) {
             let input = x * input_gain;
-            let output = self.buffer.back(0);
+            let output = self.buffer.oldest();
             self.filter_store = (output * self.damp2) + (self.filter_store * self.damp1);
             self.buffer
                 .push(input + (self.filter_store * self.feedback));
@@ -351,7 +351,7 @@ impl AllPassFilter {
     fn process(&mut self, block: &mut [f32]) {
         for sample in block {
             let input = *sample;
-            let bufout = self.buffer.back(0);
+            let bufout = self.buffer.oldest();
             *sample = bufout - input;
             self.buffer.push(input + (bufout * self.feedback));
         }
