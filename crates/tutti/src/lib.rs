@@ -358,10 +358,11 @@ pub mod graph {
         Edge as GraphEdge, Event, EventKind, EventOrderError, EventRejected, EventWriter,
         ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked,
         GraphInvalid, Harmony, HarmonyKind, InPlaceMask, NodeParts, Offset, ParamInput, ParamMod,
-        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeReader, ParamSegment,
-        Pass as DryPath, PlayClock, RenderMode, Resolution, SilenceMask, Sink as GraphSink,
-        SortedEvents, Source as GraphSource, SubBlocks, TransportChange, TransportChangeRejected,
-        TransportChanges, TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
+        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
+        ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution, SilenceMask,
+        Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks, TransportChange,
+        TransportChangeRejected, TransportChanges, TransportHistory, TransportPosition, UmpAt,
+        VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }

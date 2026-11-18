@@ -302,7 +302,7 @@ impl Decl {
         RouteKey(k)
     }
 
-    fn target(&mut self, t: TargetKey, min: f32, max: f32) {
+    fn target(&mut self, t: TargetKey, min: f64, max: f64) {
         self.targets.push((
             t,
             TargetDecl {
@@ -652,7 +652,7 @@ fn range_and_depth_edits_need_no_commit_and_a_follower_route_one() {
         node: key(1),
         param: UnitParam::Cutoff.into(),
     };
-    let cell = ed.param_range_cell(at).expect("a cell").load();
+    let cell = ed.param_range_cell(at).expect("a cell").current();
     assert_eq!((cell.min, cell.max), (0.0, 2000.0), "the store landed");
     let got = render(&mut ed, &mut exec, 128, 4_096);
     // Depth 0.1 of a 2000 span: ±200 about 500.
@@ -1864,4 +1864,31 @@ fn a_rate_change_after_a_steady_state_is_not_skipped() {
     assert_eq!(r.m.skipped(), skipped, "the apply ran");
     assert!(applied.republished.is_empty() && !applied.commit);
     assert_eq!(r.m.lane(cutoff_of(1)).expect("a lane").0, lane);
+}
+
+/// **A declared range reaches the port's cell at the unit's width.** The
+/// bounds are not `f32` figures: the cell holds them as declared, so the
+/// port clamps to the exact bound and a lane reads the exact span.
+#[test]
+fn a_declared_range_reaches_the_ports_cell_at_f64() {
+    let (lo, hi) = (1.0 + 1.0 / 1_073_741_824.0, 1_000.0 + 1.0 / 1_048_576.0);
+    assert_ne!(f64::from(lo as f32), lo, "f32 loses the lower bound");
+    assert_ne!(f64::from(hi as f32), hi, "f32 loses the upper bound");
+    let (mut ed, _exec) = editor(128);
+    let mut host = Host::default();
+    probe(&mut ed, &mut host, 1, 500.0);
+    ed.commit().expect("commits");
+    let mut decl = Decl::default();
+    decl.target(cutoff_of(1), lo, hi);
+    let wobble = decl.source(1, sine(2.0));
+    decl.route(1, wobble, cutoff_of(1), 0.3);
+    let mut m = Modulation::new();
+    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    m.commit(&mut ed).expect("commits");
+    let at = ParamIn {
+        node: key(1),
+        param: UnitParam::Cutoff.into(),
+    };
+    let cell = ed.param_range_cell(at).expect("a cell").current();
+    assert_eq!((cell.min, cell.max), (lo, hi));
 }

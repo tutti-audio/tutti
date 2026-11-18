@@ -1143,8 +1143,8 @@ fn a_nan_range_is_refused() {
     let at = param(PROBE, UnitParam::Cutoff);
     ed.spec_mut().connect_param(at, ev(1));
     for range in [
-        ParamRange::new(f32::NAN, 1.0),
-        ParamRange::new(0.0, f32::NAN),
+        ParamRange::new(f64::NAN, 1.0),
+        ParamRange::new(0.0, f64::NAN),
     ] {
         ed.spec_mut().set_param_range(at, range);
         match ed.commit() {
@@ -1157,7 +1157,7 @@ fn a_nan_range_is_refused() {
         }
     }
     ed.spec_mut()
-        .set_param_range(at, ParamRange::new(f32::NEG_INFINITY, 1.0));
+        .set_param_range(at, ParamRange::new(f64::NEG_INFINITY, 1.0));
     ed.commit().expect("an infinite bound is no bound");
 }
 
@@ -2022,8 +2022,8 @@ fn a_bad_range_move_is_refused() {
     let (mut ed, _exec) = probe_graph(64, &cutoff, &q);
     let at = param(PROBE, UnitParam::Cutoff);
     for range in [
-        ParamRange::new(f32::NAN, 1.0),
-        ParamRange::new(0.0, f32::NAN),
+        ParamRange::new(f64::NAN, 1.0),
+        ParamRange::new(0.0, f64::NAN),
     ] {
         assert!(matches!(
             ed.set_param_range(at, range),
@@ -2157,7 +2157,7 @@ struct Gen {
     /// `(step, probe, param, range)`: move a port's range with
     /// `Editor::set_param_range` after the step's commit, no commit of its
     /// own (`None`: unbounded).
-    ranges: Vec<(usize, usize, usize, Option<(f32, f32)>)>,
+    ranges: Vec<(usize, usize, usize, Option<(f64, f64)>)>,
     blocks: Vec<usize>,
 }
 
@@ -2167,7 +2167,7 @@ struct GenEdge {
     param: usize,
     /// `Ok(signal)` or `Err(ramp source)`.
     source: Result<usize, usize>,
-    range: Option<(f32, f32)>,
+    range: Option<(f64, f64)>,
     when: usize,
     until: usize,
 }
@@ -2258,7 +2258,7 @@ fn generator() -> impl Strategy<Value = Gen> {
                 (0..ns).prop_map(Ok),
                 (0..nr.max(1)).prop_map(move |r| if nr == 0 { Ok(0) } else { Err(r) })
             ],
-            prop::option::of((-2.0f32..0.0, 0.0f32..2.0)),
+            prop::option::of((-2.0f64..0.0, 0.0f64..2.0)),
             0..steps,
             0..steps + 1,
         )
@@ -2287,7 +2287,7 @@ fn generator() -> impl Strategy<Value = Gen> {
                     0..steps,
                     0..np,
                     0usize..2,
-                    prop::option::of((-1.5f32..0.5, -0.5f32..1.5)),
+                    prop::option::of((-1.5f64..0.5, -0.5f64..1.5)),
                 ),
                 0..4,
             ),
@@ -2537,22 +2537,26 @@ fn a_range_cell_handle_is_the_ports_own() {
     assert!(ed.param_range_cell(param(1, UnitParam::Cutoff)).is_none());
     let cell = ed.param_range_cell(at).expect("a declared, committed port");
     assert!(cell.same_cell(&ed.param_range_cell(at).expect("again")));
-    assert_eq!(cell.load(), ParamRange::UNBOUNDED);
+    assert_eq!(cell.current(), ParamRange::UNBOUNDED);
 
     ed.set_param_range(at, ParamRange::new(-0.5, 0.5))
         .expect("a range");
-    assert_eq!(cell.load(), ParamRange::new(-0.5, 0.5), "read back at once");
+    assert_eq!(
+        cell.current(),
+        ParamRange::new(-0.5, 0.5),
+        "read back at once"
+    );
 
     let frame = block(&mut exec, &mut ed, 64)[0].len() as u64;
     ed.set_param_range(at, ParamRange::new(-0.25, 0.25))
         .expect("a range");
-    assert_eq!(cell.load(), ParamRange::new(-0.25, 0.25));
+    assert_eq!(cell.current(), ParamRange::new(-0.25, 0.25));
     // An unrelated commit (another node joins): the cell is rewritten from
     // the spec, which holds the same range.
     ed.insert(NodeKey(3), "other", Unforkable(Signal { seed: 1 }));
     ed.commit().expect("commits");
     assert_eq!(
-        cell.load(),
+        cell.current(),
         ParamRange::new(-0.25, 0.25),
         "a commit keeps it"
     );

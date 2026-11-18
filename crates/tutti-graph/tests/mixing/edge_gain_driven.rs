@@ -547,14 +547,14 @@ fn a_source_is_structural_and_a_range_is_a_control() {
 
     ed.set_edge_gain_range(id, ParamRange::new(-1.0, 1.0))
         .expect("an edge with an entry");
-    assert_eq!(reader.load(), ParamRange::new(-1.0, 1.0));
+    assert_eq!(reader.current(), ParamRange::new(-1.0, 1.0));
     ed.commit().expect("commits");
     assert!(
         std::sync::Arc::ptr_eq(&driven, ed.base().expect("a plan")),
         "a range sends no plan"
     );
     assert!(matches!(
-        ed.set_edge_gain_range(id, ParamRange::new(f32::NAN, 1.0)),
+        ed.set_edge_gain_range(id, ParamRange::new(f64::NAN, 1.0)),
         Err(GraphInvalid::BadEdgeGain { .. })
     ));
 

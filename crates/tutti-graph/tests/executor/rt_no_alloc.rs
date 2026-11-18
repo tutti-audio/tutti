@@ -1110,6 +1110,120 @@ fn an_azimuth_param_port_is_allocation_free() {
     );
 }
 
+/// A range published by another thread while blocks render allocates and
+/// frees nothing on the audio thread: the control thread replaces a port's
+/// range as fast as it can (each publish allocates and retires on its own
+/// thread), every block lends once inside the gate, and the retired ranges
+/// are freed by the control side's `reclaim`, none left once the blocks stop.
+#[test]
+fn a_range_published_while_blocks_render_is_allocation_free() {
+    use std::sync::atomic::AtomicBool;
+    use tutti_graph::{ParamIn, ParamRange};
+    use tutti_units::{ArcDegrees, Azimuth};
+    let (mut ed, mut exec) = Editor::new(prepare(256));
+    ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
+    ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![Source::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        })]);
+    let azimuth = ParamIn {
+        node: NodeKey(1),
+        param: tutti_units::UnitParam::Azimuth.into(),
+    };
+    ed.spec_mut().connect_param(
+        azimuth,
+        EventOut {
+            node: NodeKey(4),
+            port: 0,
+        },
+    );
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    let transport = TransportPosition::default();
+    let mut out = vec![0.0f32; 256];
+    let stop = AtomicBool::new(false);
+    let ed = std::thread::scope(|scope| {
+        let control = scope.spawn(|| {
+            let mut ed = ed;
+            let mut k = 0u32;
+            while !stop.load(Ordering::Acquire) {
+                let half = 10.0 + f64::from(k % 160);
+                ed.set_param_range(azimuth, ParamRange::arc(Azimuth(180.0), ArcDegrees(half)))
+                    .expect("a bearing's range");
+                if k.is_multiple_of(8) {
+                    let _ = ed.reclaim();
+                }
+                k += 1;
+            }
+            ed
+        });
+        for _ in 0..4_000 {
+            assert_no_alloc::assert_no_alloc(|| {
+                exec.process(64, &transport, &[], &mut [&mut out[..64]]);
+            });
+        }
+        stop.store(true, Ordering::Release);
+        control.join().expect("the control thread ran")
+    });
+    assert_eq!(ed.reclaim(), 0, "no block is left holding a retired range");
+}
+
+/// Removing a node whose range was moved frees nothing on the audio thread:
+/// the unit holds a reader that keeps its range cell alive, and the commit
+/// that drops the node hands the unit back, so the cell and its range are
+/// freed by the control side's `collect`, never inside a block.
+#[test]
+fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
+    use tutti_graph::{ParamIn, ParamRange};
+    use tutti_units::{ArcDegrees, Azimuth};
+    let (mut ed, mut exec) = Editor::new(prepare(256));
+    ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
+    ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![Source::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        })]);
+    let azimuth = ParamIn {
+        node: NodeKey(1),
+        param: tutti_units::UnitParam::Azimuth.into(),
+    };
+    ed.spec_mut().connect_param(
+        azimuth,
+        EventOut {
+            node: NodeKey(4),
+            port: 0,
+        },
+    );
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    let transport = TransportPosition::default();
+    let mut out = vec![0.0f32; 256];
+    for half in [30.0, 60.0, 90.0] {
+        ed.set_param_range(azimuth, ParamRange::arc(Azimuth(180.0), ArcDegrees(half)))
+            .expect("a bearing's range");
+        assert_no_alloc::assert_no_alloc(|| {
+            exec.process(64, &transport, &[], &mut [&mut out[..64]]);
+        });
+    }
+    ed.remove(NodeKey(1));
+    ed.remove(NodeKey(4));
+    ed.spec_mut().topology.set_outputs(Vec::new());
+    ed.commit().expect("commits");
+    for _ in 0..8 {
+        assert_no_alloc::assert_no_alloc(|| {
+            exec.process(64, &transport, &[], &mut [&mut out[..64]]);
+        });
+    }
+    let mut gone = ed.collect();
+    gone.sort_unstable_by_key(|k| k.0);
+    assert_eq!(gone, [NodeKey(1), NodeKey(4)], "both units came back");
+}
+
 /// `contract::Direct`, the by-hand driver an instrument's allocation gate
 /// runs its node through, allocates nothing per block while it plays a full
 /// block of events into a node's event input, and while it collects a
@@ -1793,7 +1907,7 @@ fn driven_mixes_are_allocation_free_on(workers: usize) {
     let mut out = vec![0.0f32; 256];
     let lens = [64usize, 100, 256, 7];
     let mixes = [1.0f64, 0.0, 0.5, 0.25, 1.0, 0.75, 0.0, 1.0];
-    let ranges = [(0.0f32, 1.0f32), (0.25, 0.75), (-2.0, 2.0)];
+    let ranges = [(0.0f64, 1.0f64), (0.25, 0.75), (-2.0, 2.0)];
     let mut heard = false;
     for block in 0..120usize {
         if block == 60 {

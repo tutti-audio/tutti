@@ -61,7 +61,7 @@ use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
 use crate::event::Event;
 use crate::lane::{fade_in, ramp_in};
-use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
+use crate::param::{ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
 use crate::spec::EventOut;
 
 /// A fade an edge's lane runs over [`DECLICK`](crate::DECLICK), counted from the
@@ -212,7 +212,7 @@ impl Hash for EdgeGain {
 /// modulation moves around the base and the base is what the gain returns to. The
 /// range is the param port's own cell ([`ParamRanges`] over the one address
 /// [`EdgeGain::ADDR`]), so the driven step clamps to it as a port does and a
-/// control lane reads it through the same [`ParamRangeReader`].
+/// control lane reads it through the same [`ParamRangeCell`].
 ///
 /// [`Editor::set_edge_gain`]: crate::Editor::set_edge_gain
 #[derive(Clone, Debug)]
@@ -250,9 +250,15 @@ impl GainCell {
         self.base.store(base.get(), Ordering::Release);
     }
 
-    /// Store `range`. Wait-free.
+    /// Publish `range`. Control side.
     pub(crate) fn store_range(&self, range: ParamRange) {
         self.range.store(EdgeGain::ADDR, range);
+    }
+
+    /// Frees the ranges the audio thread has let go of; how many are still
+    /// held. Control side.
+    pub(crate) fn reclaim(&self) -> usize {
+        self.range.reclaim()
     }
 
     /// The base now. Wait-free.
@@ -269,16 +275,16 @@ impl GainCell {
         Arc::clone(&self.base).into()
     }
 
-    /// A read-only view of the range cell, for a control lane.
-    pub(crate) fn range_reader(&self) -> ParamRangeReader {
+    /// A read-only handle on the range cell, for a control lane.
+    pub(crate) fn range_cell(&self) -> ParamRangeCell {
         self.range
-            .reader(EdgeGain::ADDR)
+            .cell(EdgeGain::ADDR)
             .expect("the cell holds the gain's own address")
     }
 
     /// The range cells, for a driven lane's state.
-    fn ranges(&self) -> Arc<ParamRanges> {
-        Arc::clone(&self.range)
+    fn ranges(&self) -> &ParamRanges {
+        &self.range
     }
 }
 
