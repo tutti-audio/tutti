@@ -225,7 +225,7 @@ impl Gate {
             Gate::Comments => comments::check(&tree),
             Gate::Umbrella => umbrella::check(&tree),
             Gate::Buffers => {
-                let mut r = buffers::check(&tree, buffers::MIN_SITES);
+                let mut r = buffers::check(&tree, buffers::MIN_FILES);
                 let loops = buffers_loops::check(&tree, buffers_loops::MIN_SITES);
                 r.out.extend(loops.out);
                 r.findings.extend(loops.findings);

@@ -56,8 +56,9 @@ use std::collections::{BTreeMap, BTreeSet};
 /// The list of fixed sites, `<key>  <reason>` per line.
 pub(crate) const LIST: &str = "xtask/buffers-fixed.txt";
 
-/// The fewest sites a real run finds; fewer means the walk is broken.
-pub(super) const MIN_SITES: usize = 50;
+/// The fewest source files a real run reads; fewer means the walk is broken.
+/// It counts files, not sites: the list shrinks to zero as sites are fixed.
+pub(super) const MIN_FILES: usize = 500;
 
 const VIEWS: [&str; 7] = [
     "Interleaved",
@@ -556,7 +557,7 @@ fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
     }
 }
 
-pub(super) fn check(tree: &dyn Tree, min_sites: usize) -> Report {
+pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
     let mut r = Report::default();
     let Some(text) = tree.read(LIST) else {
         r.fail(format!("check-buffers: FAIL: {LIST} is missing"));
@@ -570,20 +571,21 @@ pub(super) fn check(tree: &dyn Tree, min_sites: usize) -> Report {
             return r;
         }
     };
+    let files = source_files(tree);
+    if files.len() < min_files {
+        r.fail(format!(
+            "check-buffers: FAIL: {} source files read, at least {min_files} expected; the walk is broken",
+            files.len()
+        ));
+        return r;
+    }
     let mut sites: BTreeMap<String, String> = BTreeMap::new();
-    for path in source_files(tree) {
+    for path in files {
         if let Some(src) = tree.read(&path) {
             for s in scan(&path, &src) {
                 sites.entry(s.key).or_insert(s.why);
             }
         }
-    }
-    if sites.len() < min_sites {
-        r.fail(format!(
-            "check-buffers: FAIL: {} sites found, at least {min_sites} expected; the walk is broken",
-            sites.len()
-        ));
-        return r;
     }
     let unlisted: Vec<_> = sites.keys().filter(|k| !rows.contains_key(*k)).collect();
     let stale: BTreeSet<_> = rows.keys().filter(|k| !sites.contains_key(*k)).collect();
@@ -721,8 +723,8 @@ mod tests {
     }
 
     #[test]
-    fn a_walk_that_finds_too_few_sites_fails() {
-        let r = check(&Mem::with(&[(LIST, ""), (F, "pub fn f() {}\n")]), 1);
+    fn a_walk_that_reads_too_few_files_fails() {
+        let r = check(&Mem::with(&[(LIST, ""), (F, "pub fn f() {}\n")]), 2);
         assert!(r.findings[0].contains("the walk is broken"));
     }
 
