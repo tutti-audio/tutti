@@ -390,8 +390,8 @@ impl tutti_graph::Node for ParamProbe {
 struct SineCurve;
 
 impl tutti_nodes::automation::Curve for SineCurve {
-    fn value_at(&self, beat: tutti_units::Beat) -> Option<f32> {
-        Some((beat.get() as f32 * 7.0).sin())
+    fn value_at(&self, beat: tutti_units::Beat) -> Option<f64> {
+        Some((beat.get() * 7.0).sin())
     }
 }
 

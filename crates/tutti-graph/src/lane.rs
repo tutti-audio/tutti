@@ -5,6 +5,19 @@ use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, Law};
 use tutti_units::{Azimuth, Normalized, Samples, UnitParam};
 
+use crate::param::CellValue;
+
+/// A control value, the unit's `f64` quantity, as the lane's float: the one
+/// crossing of a rendered ramp or segment into a lane, once per frame,
+/// saturating ([`Real::from_unit`](tutti_units::Real::from_unit)).
+///
+/// The graph's quantity to lane crossing for a value whose unit the producer
+/// does not name (a curve's value, a param event's).
+#[inline]
+pub fn control_in<F: Float>(value: f64) -> F {
+    F::from_unit(CellValue(value))
+}
+
 /// `value` as `param` holds it: wrapped onto the circle for a circular param
 /// ([`UnitParam::wrap`]), in the unit's `f64` and narrowed once to `F`.
 #[inline]

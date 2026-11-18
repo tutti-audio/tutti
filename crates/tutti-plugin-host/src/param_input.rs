@@ -9,7 +9,7 @@
 //! Processors for each block (`node`), so the two read a
 //! ramp, a segment and an address the same way.
 
-use tutti_graph::{Cx, Event, EventKind, Offset, ParamSegment};
+use tutti_graph::{Cx, Event, EventKind, Offset, ParamEvent, ParamKind, ParamSegment};
 use tutti_units::{ParamAddr, Samples};
 
 use tutti_plugin_types::ParameterQueue;
@@ -18,8 +18,10 @@ use tutti_units::ParamId;
 use super::param_delivery::ParamDelivery;
 use super::segment_points::SegmentPoints;
 
-/// The events of `events` (sorted by frame) on block frames
-/// `from..from + n`, placed on chunk frames from `at` on.
+/// The events of `events` and the param events of `params_in` (each sorted by
+/// frame) on block frames `from..from + n`, placed on chunk frames from `at`
+/// on. On one frame a param event comes before an event: a note sounds with
+/// the value its frame sets.
 ///
 /// - A ramp moves from where its parameter stood at the end of the frame
 ///   before its own (the segment in flight there, else the value the node
@@ -54,6 +56,7 @@ use super::segment_points::SegmentPoints;
 )]
 pub fn take(
     events: &[Event],
+    params_in: &[ParamEvent],
     from: usize,
     n: usize,
     at: usize,
@@ -62,7 +65,10 @@ pub fn take(
     params: &mut ParamDelivery,
     mut other: impl FnMut(&Event, usize),
 ) {
-    let first = events.partition_point(|e| e.offset.index() < from);
+    let (mut ei, mut pi) = (
+        events.partition_point(|e| e.offset.index() < from),
+        params_in.partition_point(|e| e.offset.index() < from),
+    );
     params.begin_walk();
     // This call's frame `i` as the node's absolute frame.
     let base = cx.env.frame.get();
@@ -83,16 +89,28 @@ pub fn take(
     // The frames whose segment points are sent: up to each event's, then
     // the rest of the piece.
     let mut done = from;
-    for e in &events[first..] {
-        let o = e.offset.index();
+    while let Some(next) = pick(events.get(ei), params_in.get(pi)) {
+        let o = match next {
+            Next::Event(e) => {
+                ei += 1;
+                e.offset.index()
+            }
+            Next::Param(p) => {
+                pi += 1;
+                p.offset.index()
+            }
+        };
         if o >= from + n {
             break;
         }
         let frame = at + o - from;
         segments.points(params, abs(done), abs(o), at + done - from, grid);
         done = o;
-        match e.kind {
-            EventKind::Ramp(ramp) => {
+        match next {
+            Next::Param(ParamEvent {
+                kind: ParamKind::Ramp(ramp),
+                ..
+            }) => {
                 let ParamAddr::Id(id) = ramp.addr() else {
                     continue;
                 };
@@ -120,7 +138,10 @@ pub fn take(
                     }
                 }
             }
-            EventKind::Segment(seg) => {
+            Next::Param(ParamEvent {
+                kind: ParamKind::Segment(seg),
+                ..
+            }) => {
                 // A plugin parameter takes point values: the segment's value
                 // on its frame, then points along it until it lands.
                 let ParamAddr::Id(id) = seg.addr() else {
@@ -129,14 +150,35 @@ pub fn take(
                 // Noted before the segment moves it, for a ramp later on
                 // this frame.
                 stood(segments, params, id, o, abs(o));
-                segments.start(params, id, seg, abs(o), frame, grid(abs(o)));
+                segments.start(params, id, *seg, abs(o), frame, grid(abs(o)));
             }
-            EventKind::Midi(_) | EventKind::Harmony(_) => other(e, frame),
-            // A plugin is no source a lane reads: nothing to re-send.
-            EventKind::Resync => {}
+            Next::Event(e) => match e.kind {
+                EventKind::Midi(_) | EventKind::Harmony(_) => other(e, frame),
+                // A plugin is no source a lane reads: nothing to re-send.
+                EventKind::Resync => {}
+            },
         }
     }
     segments.points(params, abs(done), abs(from + n), at + done - from, grid);
+}
+
+/// The next of an event list and a param event list, by frame.
+#[derive(Clone, Copy)]
+enum Next<'a> {
+    Event(&'a Event),
+    Param(&'a ParamEvent),
+}
+
+/// The earlier of the next event and the next param event; on one frame the
+/// param event, so a note sounds with the value its frame sets.
+fn pick<'a>(event: Option<&'a Event>, param: Option<&'a ParamEvent>) -> Option<Next<'a>> {
+    match (event, param) {
+        (None, None) => None,
+        (Some(e), None) => Some(Next::Event(e)),
+        (None, Some(p)) => Some(Next::Param(p)),
+        (Some(e), Some(p)) if e.offset < p.offset => Some(Next::Event(e)),
+        (Some(_), Some(p)) => Some(Next::Param(p)),
+    }
 }
 
 /// Where `address` stood at the end of the frame before block frame `o`
@@ -150,7 +192,7 @@ fn stood(
     address: ParamId,
     o: usize,
     abs: u64,
-) -> Option<f32> {
+) -> Option<f64> {
     params.frame_start(address, o, |params| {
         abs.checked_sub(1)
             .and_then(|f| segments.value_at(address, f))
@@ -200,7 +242,7 @@ mod tests {
     /// ramp's own arrival (frame 50) is never sent.
     #[test]
     fn a_ramp_reaches_a_plugin_along_its_shape() {
-        const TOL: f64 = 1e-6;
+        const TOL: f64 = 1e-12;
         let address = ParamId::new(7);
         let counters = Arc::new(DeliveryCounters::default());
         let mut params = ParamDelivery::new([address], Arc::clone(&counters));
@@ -216,8 +258,9 @@ mod tests {
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
         };
-        let at =
-            |i: usize, ramp: ParamRamp| Event::ramp(Offset::of(Samples(i), Samples(len)), ramp);
+        let at = |i: usize, ramp: ParamRamp| {
+            ParamEvent::ramp(Offset::of(Samples(i), Samples(len)), ramp)
+        };
         let events = [
             at(0, ParamRamp::foreign(ParamId::new(7), 0.0, Samples(8))),
             at(
@@ -228,6 +271,7 @@ mod tests {
             at(40, ParamRamp::foreign(ParamId::new(7), 0.0, Samples(4))),
         ];
         take(
+            &[],
             &events,
             0,
             len,
@@ -266,7 +310,7 @@ mod tests {
     /// way on frame 20.
     #[test]
     fn a_ramp_starts_from_the_value_before_its_frame() {
-        const TOL: f64 = 1e-6;
+        const TOL: f64 = 1e-12;
         let address = ParamId::new(7);
         let counters = Arc::new(DeliveryCounters::default());
         let mut params = ParamDelivery::new([address], Arc::clone(&counters));
@@ -284,25 +328,26 @@ mod tests {
         };
         let off = |i: usize| Offset::of(Samples(i), Samples(len));
         let events = [
-            Event::ramp(off(0), ParamRamp::foreign(ParamId::new(7), 0.2, Samples(0))),
-            Event::ramp(
+            ParamEvent::ramp(off(0), ParamRamp::foreign(ParamId::new(7), 0.2, Samples(0))),
+            ParamEvent::ramp(
                 off(10),
                 ParamRamp::foreign(ParamId::new(7), 0.4, Samples(0)),
             ),
-            Event::ramp(
+            ParamEvent::ramp(
                 off(10),
                 ParamRamp::foreign(ParamId::new(7), 1.0, Samples(4)),
             ),
-            Event::segment(
+            ParamEvent::segment(
                 off(20),
                 ParamSegment::foreign(ParamId::new(7), 0.9, 0.9, Samples(2), Law::Linear),
             ),
-            Event::ramp(
+            ParamEvent::ramp(
                 off(20),
                 ParamRamp::foreign(ParamId::new(7), 0.0, Samples(2)),
             ),
         ];
         take(
+            &[],
             &events,
             0,
             len,
@@ -351,7 +396,7 @@ mod tests {
     /// `take` over a whole `len`-frame block of `events`, its play clock
     /// starting at 1.
     fn walk(
-        events: &[Event],
+        events: &[ParamEvent],
         len: usize,
         segments: &mut SegmentPoints,
         params: &mut ParamDelivery,
@@ -362,7 +407,7 @@ mod tests {
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
         };
-        take(events, 0, len, 0, &cx, segments, params, |_, _| {});
+        take(&[], events, 0, len, 0, &cx, segments, params, |_, _| {});
     }
 
     /// **A parameter the plugin's list did not name keeps its start too.**
@@ -382,20 +427,17 @@ mod tests {
         segments.begin(64);
         let off = |i: usize| Offset::of(Samples(i), Samples(64));
         let events = [
-            Event::ramp(
+            ParamEvent::ramp(
                 off(10),
                 ParamRamp::foreign(ParamId::new(9), 0.4, Samples(0)),
             ),
-            Event::ramp(
+            ParamEvent::ramp(
                 off(10),
                 ParamRamp::foreign(ParamId::new(9), 1.0, Samples(4)),
             ),
         ];
         walk(&events, 64, &mut segments, &mut params);
-        assert_eq!(
-            queue(&mut params, address),
-            vec![(10, f64::from(0.4f32)), (10, 1.0)]
-        );
+        assert_eq!(queue(&mut params, address), vec![(10, 0.4), (10, 1.0)]);
     }
 
     /// **A frame's start is the walk's own.** A step to 0.2 on frame 10 of
@@ -412,7 +454,7 @@ mod tests {
         params.begin();
         segments.begin(64);
         let off = |i: usize| Offset::of(Samples(i), Samples(64));
-        let step = [Event::ramp(
+        let step = [ParamEvent::ramp(
             off(10),
             ParamRamp::foreign(ParamId::new(7), 0.2, Samples(0)),
         )];
@@ -420,7 +462,7 @@ mod tests {
         params.handed_off(false);
         params.begin();
         segments.begin(64);
-        let ramp = [Event::ramp(
+        let ramp = [ParamEvent::ramp(
             off(10),
             ParamRamp::foreign(ParamId::new(7), 1.0, Samples(4)),
         )];
@@ -430,7 +472,7 @@ mod tests {
         assert_eq!(got.len(), want.len(), "{got:?}");
         for ((o, v), (wo, wv)) in got.iter().zip(want) {
             assert_eq!(*o, wo, "{got:?}");
-            assert!((v - wv).abs() <= 1e-6, "frame {o}: {v} vs {wv}: {got:?}");
+            assert!((v - wv).abs() <= 1e-12, "frame {o}: {v} vs {wv}: {got:?}");
         }
     }
 
@@ -463,14 +505,15 @@ mod tests {
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
         };
-        let events: Vec<Event> = (0..300)
+        let events: Vec<ParamEvent> = (0..300)
             .map(|i| {
                 let v = if i % 2 == 0 { 0.25 } else { 0.75 };
                 let seg = ParamSegment::foreign(ParamId::new(7), v, v, Samples(2), Law::Linear);
-                Event::segment(Offset::of(Samples(i), Samples(len)), seg)
+                ParamEvent::segment(Offset::of(Samples(i), Samples(len)), seg)
             })
             .collect();
         take(
+            &[],
             &events,
             0,
             len,
@@ -493,5 +536,72 @@ mod tests {
             offsets.iter().all(|&o| (10 + o) % 32 != 0),
             "no point left on a grid frame: {offsets:?}"
         );
+    }
+
+    /// **On one frame a param event comes before an event.** A note at 5 and
+    /// at 10, a param step at 5 and at 10: the walk hands the events to `other`
+    /// on their frames, and each frame's param event is taken ahead of its
+    /// note, so the point is placed first.
+    #[test]
+    fn a_param_event_is_taken_before_an_event_on_its_frame() {
+        use tutti_ump::Ump;
+        let off = |i: usize| Offset::of(Samples(i), Samples(64));
+        let note = |i: usize| Event::midi(off(i), Ump([0x2090_3c64, 0, 0, 0]));
+        let step = |i: usize, v: f64| {
+            ParamEvent::ramp(off(i), ParamRamp::foreign(ParamId::new(7), v, Samples(0)))
+        };
+        let events = [note(5), note(10)];
+        let params = [step(5, 0.25), step(10, 0.75)];
+        let order: Vec<char> = {
+            let (mut ei, mut pi) = (0, 0);
+            let mut out = Vec::new();
+            while let Some(n) = pick(events.get(ei), params.get(pi)) {
+                match n {
+                    Next::Event(_) => {
+                        ei += 1;
+                        out.push('e');
+                    }
+                    Next::Param(_) => {
+                        pi += 1;
+                        out.push('p');
+                    }
+                }
+            }
+            out
+        };
+        assert_eq!(order, ['p', 'e', 'p', 'e']);
+
+        let address = ParamId::new(7);
+        let mut delivery = ParamDelivery::new([address], Arc::new(DeliveryCounters::default()));
+        delivery.prepare(64);
+        let mut segments = SegmentPoints::default();
+        segments.prepare(delivery.room());
+        delivery.begin();
+        segments.begin(64);
+        let env = env(64, 1);
+        let cx = Cx {
+            env: &env,
+            arrival: Latency::ZERO,
+            history: TransportHistory::none(),
+        };
+        let mut seen = Vec::new();
+        take(
+            &events,
+            &params,
+            0,
+            64,
+            0,
+            &cx,
+            &mut segments,
+            &mut delivery,
+            |_, frame| seen.push(frame),
+        );
+        assert_eq!(seen, [5, 10], "`other` sees the notes on their frames");
+        let frames: Vec<i32> = delivery.changes().queues[0]
+            .points
+            .iter()
+            .map(|p| p.sample_offset)
+            .collect();
+        assert_eq!(frames, [5, 10], "the param points land on frames 5 and 10");
     }
 }

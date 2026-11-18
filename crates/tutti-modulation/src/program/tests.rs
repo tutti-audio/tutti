@@ -399,7 +399,7 @@ fn depth_by_scales_the_offset_and_adds_its_corners() {
 /// holds is the frozen copy.
 struct Thawed;
 impl Curve for Thawed {
-    fn value_at(&self, _: Beat) -> Option<f32> {
+    fn value_at(&self, _: Beat) -> Option<f64> {
         Some(1.0)
     }
     fn frozen(&self) -> Option<Arc<dyn Curve>> {
@@ -738,7 +738,12 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
         let before = p
             .value_before(Some(az), None, &at_beat(b), 360.0, &[])
             .expect("a value");
-        assert!((before - want).abs() < 1e-2, "beat {b}: {before}");
+        // On the circle: at the seam itself the left limit is 180, and 180 is
+        // -180.
+        assert!(
+            Azimuth(before - want).wrap().get().abs() < 1e-2,
+            "beat {b}: {before}"
+        );
         // A height over the same curve is the straight line.
         let line = p
             .value_at(Some(UnitParam::Elevation), None, &at_beat(b), 360.0, &[])
