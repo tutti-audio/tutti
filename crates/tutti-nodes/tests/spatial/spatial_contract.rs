@@ -66,11 +66,11 @@ fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
     b
 }
 
-fn node() -> HrtfBinauralNode {
+fn node() -> HrtfBinauralNode<f32> {
     let rate = SAMPLE_RATE.get() as u32;
     let bytes = synthetic_hrir_sphere(rate, 64);
     // Born at the contract's rate; the graph prepares it at that rate too.
-    let node = HrtfBinauralNode::new(&bytes, SAMPLE_RATE).expect("the sphere parses");
+    let node = HrtfBinauralNode::<f32>::new(&bytes, SAMPLE_RATE).expect("the sphere parses");
     aim(&node.param_set(), Azimuth::new(90.0), Elevation::new(0.0));
     node
 }

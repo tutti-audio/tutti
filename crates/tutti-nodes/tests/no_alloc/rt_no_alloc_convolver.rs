@@ -23,7 +23,7 @@ fn response(seed: usize, len: usize) -> Vec<f32> {
 }
 
 /// The nodes under test: every layout at the widths it takes, with `len`-tap responses.
-fn nodes(len: usize) -> Vec<(String, ConvolverNode)> {
+fn nodes(len: usize) -> Vec<(String, ConvolverNode<f32>)> {
     let mut all = Vec::new();
     let irs = |n: usize| -> Vec<Vec<f32>> { (0..n).map(|p| response(3 + p, len)).collect() };
     for width in [1usize, 2, 6, MAX_CHANNELS] {
@@ -31,13 +31,13 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode)> {
         let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         all.push((
             format!("per channel x{width}"),
-            ConvolverNode::per_channel(&refs, Samples(32)).unwrap(),
+            ConvolverNode::<f32>::per_channel(&refs, Samples(32)).unwrap(),
         ));
     }
     let four = irs(4);
     all.push((
         "true stereo".into(),
-        ConvolverNode::true_stereo(
+        ConvolverNode::<f32>::true_stereo(
             Mono::new(&four[0]),
             Mono::new(&four[1]),
             Mono::new(&four[2]),
@@ -50,7 +50,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode)> {
     let views: Vec<Mono<'_, f32>> = eight.iter().map(|ir| Mono::new(ir)).collect();
     all.push((
         "ambisonic 1 to stereo".into(),
-        ConvolverNode::ambisonic(
+        ConvolverNode::<f32>::ambisonic(
             AmbisonicFormat::ambix(AmbisonicOrder::of(1)),
             ChannelTopology::from(Bed::Stereo),
             &views,
@@ -70,8 +70,13 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode)> {
         let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         all.push((
             format!("ambisonic order {order}"),
-            ConvolverNode::ambisonic(format, ChannelTopology::from(format), &views, Samples(32))
-                .unwrap(),
+            ConvolverNode::<f32>::ambisonic(
+                format,
+                ChannelTopology::from(format),
+                &views,
+                Samples(32),
+            )
+            .unwrap(),
         ));
     }
     all
@@ -105,7 +110,7 @@ fn lane() -> Vec<f32> {
 }
 
 /// `node` over every block length at each gain, under `assert_no_alloc`.
-fn sweep(name: &str, node: ConvolverNode, gains: &[Option<f32>], driven: bool) {
+fn sweep(name: &str, node: ConvolverNode<f32>, gains: &[Option<f32>], driven: bool) {
     let width = usize::from(node.outputs().count());
     let cell = node.gain();
     let mut rig = Direct::new(node, SampleRate::SR_48K, MAX_BLOCK);

@@ -6,6 +6,8 @@
 //! branches (the two-source width path and the mono fold) both reach
 //! `apply_spread`.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use tutti_buffers::Planes;
 use tutti_graph::Node;
 use tutti_graph::ParamNode;
@@ -18,7 +20,7 @@ use tutti_units::{Azimuth, Elevation, SampleRate, UnitParam};
 ///
 /// The node is not prepared: it runs at the 48 kHz it is built at, which is
 /// the rate this drives it at, and a one-frame block needs no sizing.
-fn tick(node: &mut VbapPannerNode, input: [f32; 2], out: &mut [f32]) {
+fn tick(node: &mut VbapPannerNode<f32>, input: [f32; 2], out: &mut [f32]) {
     let rendered = drive(
         node,
         SampleRate::SR_48K,
@@ -42,7 +44,7 @@ fn tick(node: &mut VbapPannerNode, input: [f32; 2], out: &mut [f32]) {
 /// light up more speakers than a point source at the same bearing does.
 #[test]
 fn spread_reaches_the_stereo_width_path() {
-    let mut node = VbapPannerNode::surround_5_1();
+    let mut node = VbapPannerNode::<f32>::surround_5_1();
     node.param_set().set(UnitParam::StereoWidth, 1.0); // the width>0 branch
     aim(&node.param_set(), Azimuth::new(0.0), Elevation::new(0.0));
 
