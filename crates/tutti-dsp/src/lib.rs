@@ -212,7 +212,7 @@ pub use delay::{
     DelayLayout, DelayLine, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
     Routing, RoutingError, delay_step,
 };
-pub use dither::sink::{DitherSink, DitherSpec};
+pub use dither::sink::DitherSink;
 pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
     BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallLanes,

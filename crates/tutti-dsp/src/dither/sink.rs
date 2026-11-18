@@ -1,140 +1,154 @@
-//! [`DitherSink`]: the dither noise as a [`Sink`] adapter, the one path an
-//! export and a live recording share.
+//! [`DitherSink`]: the stage that turns a float signal into an integer one, the
+//! one path an export and a live recording share.
 
-use tutti_buffers::{Interleaved, InterleavedMut, Sink, SinkFailed};
+use tutti_buffers::{
+    Float, Interleaved, InterleavedMut, Sample, Sink, SinkFailed, convert_counting_clips,
+};
 use tutti_types::{Amplitude, ChannelLayout, Samples};
 
 use crate::dither::{DitherNoise, DitherShape};
 
-/// Frames dithered and handed on at a time: the adapter's whole scratch.
+/// Frames dithered and converted at a time: the stage's whole scratch.
 ///
 /// A longer write goes through in pieces of this size. The noise advances once
 /// per sample in order, so the split changes nothing in what is written.
 const CHUNK: Samples = Samples(1024);
 
-/// What to add: the noise's shape and the size of one least significant bit of
-/// the depth the wrapped sink will quantize to.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DitherSpec {
-    /// The probability density of the noise.
-    pub shape: DitherShape,
-    /// One LSB of the target depth in the `[-1, 1]` float domain: `2^-(bits-1)`
-    /// (`IntDepth::lsb` in `tutti-codec`). The depth is the caller's to name:
-    /// a sink of floats has no LSB and takes no dither.
-    pub lsb: Amplitude,
+/// One least significant bit of the sample format `I` in the `[-1, 1]` float
+/// domain, or silence for a float format, which has none.
+fn lsb_of<I: Sample>() -> Amplitude {
+    I::STEP.map_or(Amplitude::SILENT, |step| Amplitude(step as f32))
 }
 
-/// A [`Sink`] that adds dither noise to every block before it reaches the sink
-/// it wraps.
+/// A [`Sink`] of floats `F` in front of a sink of integers `K`: each block is
+/// given dither noise one least significant bit of `K`'s format wide
+/// ([`Sample::STEP`]), converted to that format by the rule in [`Sample`] and
+/// written on, and the values the conversion clipped are counted
+/// ([`clipped`](Self::clipped)).
 ///
 /// It computes no noise of its own: [`DitherNoise`] does, seeded as an
 /// export's is, one draw per sample in the order the samples arrive, so the
-/// sequence is continuous across writes and across channels. Wrap the file
-/// sink of a recording (`FileOut`) and a live 16-bit take carries the dither
-/// an export of the same signal does; leave it unwrapped and the take is
-/// quantized as it always was.
-///
-/// With `None` for the [`DitherSpec`] the adapter is the identity: the block
-/// goes to the inner sink as it came, uncopied. Frames in are frames out, the
-/// layout is the inner sink's, a write the inner sink refuses is refused
-/// here ([`SinkFailed`]), and [`finalize`](Sink::finalize) is the inner
+/// sequence is continuous across writes and across channels. With `None` for
+/// the shape no noise is added and the conversion alone runs. Frames in are
+/// frames out, the layout is the inner sink's, a write the inner sink refuses is
+/// refused here ([`SinkFailed`]), and [`finalize`](Sink::finalize) is the inner
 /// sink's. A view whose width is not the inner sink's fails the write.
 ///
-/// Nothing allocates after [`new`](Self::new): the scratch is one chunk of
-/// 1024 frames, sized there.
+/// Nothing allocates after [`new`](Self::new): both scratches are one chunk of
+/// 1024 frames, sized there. An inner sink of a float format has no step, so
+/// no noise is added to it.
 ///
 /// # Examples
 ///
 /// ```
 /// use tutti_buffers::{Interleaved, Sink, SinkFailed};
-/// use tutti_dsp::{DitherShape, DitherSink, DitherSpec};
-/// use tutti_types::{Amplitude, ChannelLayout};
+/// use tutti_dsp::{DitherShape, DitherSink};
+/// use tutti_types::ChannelLayout;
 ///
 /// struct Count(usize);
 /// impl Sink for Count {
-///     type Sample = f32;
+///     type Sample = i16;
 ///     type Error = std::convert::Infallible;
 ///     fn layout(&self) -> ChannelLayout { ChannelLayout::MONO }
-///     fn write(&mut self, frames: Interleaved<'_, f32>) -> Result<(), SinkFailed> {
+///     fn write(&mut self, frames: Interleaved<'_, i16>) -> Result<(), SinkFailed> {
 ///         self.0 += frames.samples().len();
 ///         Ok(())
 ///     }
 ///     fn finalize(self) -> Result<(), Self::Error> { Ok(()) }
 /// }
 ///
-/// let lsb = Amplitude(1.0 / 32768.0); // 16 bit
-/// let spec = DitherSpec { shape: DitherShape::Triangular, lsb };
-/// let mut sink = DitherSink::new(Count(0), Some(spec));
-/// sink.write(Interleaved::new(&[0.0; 64], ChannelLayout::MONO).unwrap()).unwrap();
+/// let mut sink = DitherSink::<_, f32>::new(Count(0), Some(DitherShape::Triangular));
+/// sink.write(Interleaved::new(&[0.0f32; 64], ChannelLayout::MONO).unwrap()).unwrap();
+/// assert_eq!(sink.clipped(), 0);
 /// assert_eq!(sink.into_inner().0, 64);
 /// ```
 #[derive(Debug)]
-pub struct DitherSink<S> {
-    inner: S,
+pub struct DitherSink<K: Sink, F> {
+    inner: K,
+    layout: ChannelLayout,
     noise: DitherNoise,
-    spec: Option<DitherSpec>,
-    scratch: Vec<f32>,
+    shape: Option<DitherShape>,
+    lsb: Amplitude,
+    /// The chunk as floats, with its noise.
+    noisy: Vec<F>,
+    /// The chunk converted to the inner sink's format.
+    converted: Vec<K::Sample>,
+    clipped: u64,
 }
 
-impl<S: Sink<Sample = f32>> DitherSink<S> {
-    /// Wraps `inner`, dithering with `spec`, or passing through with `None`.
-    pub fn new(inner: S, spec: Option<DitherSpec>) -> Self {
-        let scratch = match spec {
-            Some(_) => Vec::with_capacity(inner.layout().interleaved_len(CHUNK)),
-            None => Vec::new(),
-        };
+impl<K: Sink, F: Float> DitherSink<K, F> {
+    /// Wraps `inner`, adding `shape`'s noise (none for `None`) at one LSB of
+    /// `inner`'s format.
+    pub fn new(inner: K, shape: Option<DitherShape>) -> Self {
+        let layout = inner.layout();
+        let room = layout.interleaved_len(CHUNK);
         Self {
             inner,
+            layout,
             noise: DitherNoise::new(),
-            spec,
-            scratch,
+            shape,
+            lsb: lsb_of::<K::Sample>(),
+            noisy: Vec::with_capacity(if shape.is_some() { room } else { 0 }),
+            converted: Vec::with_capacity(room),
+            clipped: 0,
         }
     }
 
+    /// The values the conversion has clipped so far.
+    #[must_use]
+    pub fn clipped(&self) -> u64 {
+        self.clipped
+    }
+
     /// The wrapped sink, for a caller that finishes it itself.
-    pub fn into_inner(self) -> S {
+    pub fn into_inner(self) -> K {
         self.inner
     }
 
     /// The wrapped sink, to read what it holds between writes.
-    pub fn get_mut(&mut self) -> &mut S {
+    pub fn get_mut(&mut self) -> &mut K {
         &mut self.inner
-    }
-
-    /// Whether a write reaches the inner sink as it came.
-    #[must_use]
-    pub fn is_identity(&self) -> bool {
-        self.spec.is_none()
     }
 }
 
-impl<S: Sink<Sample = f32>> Sink for DitherSink<S> {
-    type Sample = f32;
-    type Error = S::Error;
+impl<K: Sink, F: Float> Sink for DitherSink<K, F> {
+    type Sample = F;
+    type Error = K::Error;
 
     fn layout(&self) -> ChannelLayout {
-        self.inner.layout()
+        self.layout
     }
 
-    fn write(&mut self, frames: Interleaved<'_, f32>) -> Result<(), SinkFailed> {
-        let layout = self.inner.layout();
-        if frames.layout() != layout {
+    fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed> {
+        if frames.layout() != self.layout {
             return Err(SinkFailed);
         }
-        let Some(spec) = self.spec else {
-            return self.inner.write(frames);
-        };
+        let layout = self.layout;
         let mut at = Samples::ZERO;
         while at < frames.frames() {
             let end = (at + CHUNK).min(frames.frames());
-            self.scratch.clear();
-            self.scratch
-                .extend_from_slice(frames.slice(at..end).samples());
-            // The scratch holds whole frames at `layout`, so the views build.
-            let mut audio =
-                InterleavedMut::new(&mut self.scratch, layout).map_err(|_| SinkFailed)?;
-            self.noise.apply(spec.shape, spec.lsb, audio.reborrow());
-            self.inner.write(audio.as_interleaved())?;
+            let part = frames.slice(at..end);
+            // Within the capacity `new` reserved: neither grows.
+            self.converted.clear();
+            self.converted
+                .resize(part.samples().len(), K::Sample::SILENCE);
+            let converted =
+                InterleavedMut::new(&mut self.converted, layout).map_err(|_| SinkFailed)?;
+            let clipped = match self.shape {
+                Some(shape) => {
+                    self.noisy.clear();
+                    self.noisy.extend_from_slice(part.samples());
+                    let mut noisy =
+                        InterleavedMut::new(&mut self.noisy, layout).map_err(|_| SinkFailed)?;
+                    self.noise.apply(shape, self.lsb, noisy.reborrow());
+                    convert_counting_clips(noisy.as_interleaved(), converted)
+                }
+                None => convert_counting_clips(part, converted),
+            }
+            .map_err(|_| SinkFailed)?;
+            self.clipped += clipped as u64;
+            let block = Interleaved::new(&self.converted, layout).map_err(|_| SinkFailed)?;
+            self.inner.write(block)?;
             at = end;
         }
         Ok(())

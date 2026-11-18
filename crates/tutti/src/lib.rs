@@ -458,8 +458,8 @@ pub mod session {
     };
     #[cfg(feature = "io")]
     pub use tutti_session::{
-        DitherSink, DitherSpec, FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass,
-        Recorder, RecorderError,
+        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder,
+        RecorderError,
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{

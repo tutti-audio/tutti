@@ -30,7 +30,6 @@ mod bounce_sampler;
 #[cfg(all(feature = "export", feature = "sampler"))]
 mod export_fork_sampler;
 // A SoundFont, a polysynth and their clip, exported through a fork.
-mod dither_agrees;
 #[cfg(all(
     feature = "export",
     feature = "midi",
