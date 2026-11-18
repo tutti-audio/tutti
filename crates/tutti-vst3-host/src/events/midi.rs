@@ -11,7 +11,7 @@ use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn, SysexMessage,
     Ump, Voice1, Voice2, parse_exact,
 };
-use tutti_units::{Normalized, Semitones};
+use tutti_units::{Normalized, Semitones, Velocity};
 use tutti_voicing::{LIVE_NOTES, NOTE_CONTROLS, NoteControl, NoteEvent, PerNoteState};
 
 use super::{
@@ -443,7 +443,7 @@ fn note_on(
         Payload::NoteOn(NoteOn::new(
             channel.get().into(),
             note.get().into(),
-            NoteVelocity::new(velocity).normalized().get() as f32,
+            NoteVelocity::new(velocity).velocity().get() as f32,
             note_id,
         )),
     )
@@ -460,7 +460,7 @@ fn note_off(offset: i32, channel: MidiChannel, note: NoteNumber, velocity: u16) 
         Payload::NoteOff(NoteOff::new(
             channel.get().into(),
             note.get().into(),
-            NoteVelocity::new(velocity).normalized().get() as f32,
+            NoteVelocity::new(velocity).velocity().get() as f32,
             -1,
         )),
     )
@@ -498,7 +498,7 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
     let group = group_of_port(u16::try_from(event.header.bus_index).ok()?)?;
     // Notes and poly-pressure build native MIDI-2 Channel Voice events at their
     // full 16 and 32-bit width; VST3's `f32` velocity and pressure words widen
-    // exactly into `Normalized`.
+    // exactly into `Velocity` and `Normalized`.
     let built = match &event.payload {
         Payload::NoteOn(e) => {
             stream.note_on(e.noteId, midi_channel(e.channel), note_number(e.pitch));
@@ -506,7 +506,7 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
                 address(group, e.channel),
                 Voice2::note_on(
                     note_number(e.pitch),
-                    NoteVelocity::from_normalized(Normalized::clamped(f64::from(e.velocity))),
+                    NoteVelocity::from_velocity(Velocity::new_clamped(f64::from(e.velocity))),
                 ),
             ))
         }
@@ -516,7 +516,7 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
                 address(group, e.channel),
                 Voice2::note_off(
                     note_number(e.pitch),
-                    NoteVelocity::from_normalized(Normalized::clamped(f64::from(e.velocity))),
+                    NoteVelocity::from_velocity(Velocity::new_clamped(f64::from(e.velocity))),
                 ),
             ))
         }

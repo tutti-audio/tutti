@@ -156,6 +156,60 @@ fn an_mtc_full_message_writes_the_bytes_of_t9_and_reads_back() {
     }
 }
 
+/// M1 p.53 and T-9: the hours byte is `0rrhhhhh` and the last Quarter Frame
+/// carries its high half as `0rrh`, so one layout states the Full Message, the
+/// MMC time code and the cycle, for every rate and every hour. The expected
+/// bytes are built from the spec's rate codes (0 to 3) and the hour, not from
+/// the encoder.
+#[test]
+fn the_hours_byte_is_the_rate_over_the_hours_in_every_encoding() {
+    for (code, rate) in [
+        (0u8, MtcRate::Fps24),
+        (1, MtcRate::Fps25),
+        (2, MtcRate::Fps2997Df),
+        (3, MtcRate::Fps30),
+    ] {
+        for hours in 0..24u8 {
+            let time = MtcTimeCode::new(rate, hours, 0, 0, 0).unwrap();
+            let spec = (code << 5) | hours;
+            assert_eq!(time.hours_byte(), spec, "{rate:?} hour {hours}");
+            assert_eq!(MtcFullMessage::from(time).payload()[4], spec);
+            let nibbles = time.nibbles();
+            assert_eq!(nibbles[6], hours & 0x0F, "hours low nibble");
+            assert_eq!(
+                nibbles[7],
+                (code << 1) | (hours >> 4),
+                "rate over hours high"
+            );
+            assert_eq!(time.rate(), rate);
+            assert_eq!(MtcTimeCode::from_nibbles(nibbles), Some(time));
+        }
+    }
+}
+
+/// A time code holds its rate once: the SMPTE position it reads as is counted
+/// at the rate it was made with, and the position's labels are its own.
+#[test]
+fn an_mtc_time_code_reads_as_a_smpte_position_at_its_one_rate() {
+    for rate in MtcRate::ALL {
+        let time = MtcTimeCode::new(rate, 1, 2, 3, 4).unwrap();
+        assert_eq!(time.timecode().frame_rate(), rate.frame_rate());
+        assert_eq!(
+            (
+                time.timecode().hours(),
+                time.timecode().minutes(),
+                time.timecode().seconds(),
+                time.timecode().frames()
+            ),
+            (1, 2, 3, 4)
+        );
+        assert_eq!(
+            MtcTimeCode::from_timecode(rate, time.timecode()),
+            Some(time)
+        );
+    }
+}
+
 /// UMP section 7.7 (System Exclusive 7): the Full Message of 25 fps
 /// `01:02:03:04` is a Start of `7F 7F 01 01 21 02` and an End of `03 04`, in
 /// words `3616_7F7F 0101_2102` and `3632_0304 0`, on Group 6.

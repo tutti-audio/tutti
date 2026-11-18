@@ -79,6 +79,12 @@ impl MtcRate {
         self.frame_rate().labels_per_second() as u8
     }
 
+    /// The rate the hours byte `0rrhhhhh` names: its bits 5 and 6.
+    #[must_use]
+    pub const fn from_hours_byte(hours_byte: u8) -> Self {
+        Self::masked(hours_byte >> 5)
+    }
+
     /// The two-bit code on the wire.
     #[must_use]
     pub const fn code(self) -> u8 {
@@ -184,7 +190,8 @@ impl SmpteFrameRate {
 }
 
 /// An assembled SMPTE position: `HH:MM:SS:FF` plus the rate that gives the frame
-/// count meaning.
+/// count meaning, at any [`SmpteFrameRate`] (29.97 non-drop included).
+/// [`MtcTimeCode`](crate::MtcTimeCode) is the one at a rate MTC has a code for.
 ///
 /// The fields are the timecode's own *labels*, not a duration — under
 /// [`SmpteFrameRate::Fps2997Df`] some frame numbers never occur, so arithmetic on
@@ -294,6 +301,24 @@ impl SmpteTimecode {
             })
         } else {
             None
+        }
+    }
+
+    /// The position counted at `frame_rate`, already checked by the caller to be
+    /// the labels [`new`](Self::new) accepts.
+    pub(crate) const fn counted(
+        hours: u8,
+        minutes: u8,
+        seconds: u8,
+        frames: u8,
+        frame_rate: SmpteFrameRate,
+    ) -> Self {
+        Self {
+            hours,
+            minutes,
+            seconds,
+            frames,
+            frame_rate,
         }
     }
 

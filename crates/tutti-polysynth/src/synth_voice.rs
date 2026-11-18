@@ -28,7 +28,7 @@ use tutti_dsp::{PanLaw, pan_gains};
 use tutti_ump::{MidiChannel, NoteNumber};
 use tutti_units::{
     Amplitude, Depth, Hz, Normalized, Pan, Phase, PhaseIncrement, Resonance, SampleRate, Seconds,
-    Semitones,
+    Semitones, Velocity,
 };
 use tutti_voicing::{ChannelState, DEFAULT_MODULATION_RANGE};
 
@@ -48,7 +48,7 @@ enum GateEdge {
 pub(crate) struct SynthVoice {
     note: NoteNumber,
     channel: MidiChannel,
-    velocity: Normalized,
+    velocity: Velocity,
     gate: bool,
     edge: GateEdge,
     /// Jump the lanes' pitch and filter to their targets at the next control
@@ -72,7 +72,7 @@ pub(crate) struct SynthVoice {
     /// lane: the SVF's `Q` is fixed for the synth, so CC71 reaches only
     /// [`FilterType::Moog`], as it always has.
     base_filter_resonance: Resonance,
-    velocity_mod_value: Normalized,
+    velocity_mod_value: Velocity,
     /// Normalized CC74 (Brightness) position, `0..1` centered at `0.5` — a
     /// controller value, not a frequency. Mapped onto `base_filter_cutoff` as
     /// a `4^(v - 0.5)` factor in `modulated_cutoff`.
@@ -227,7 +227,7 @@ impl SynthVoice {
         Self {
             note: NoteNumber::default(),
             channel: MidiChannel::FIRST,
-            velocity: Normalized::of(0.0),
+            velocity: Velocity::SILENT,
             gate: false,
             edge: GateEdge::None,
             snap_tone: false,
@@ -236,7 +236,7 @@ impl SynthVoice {
             pitch: A4_FREQ,
             base_filter_cutoff,
             base_filter_resonance,
-            velocity_mod_value: Normalized::of(1.0),
+            velocity_mod_value: Velocity::MAX,
             cc_cutoff_value: Normalized::of(0.5),
             cc_resonance_value: Normalized::of(0.0),
             filter_mod: config.filter_mod,
@@ -260,7 +260,7 @@ impl SynthVoice {
         &mut self,
         note: NoteNumber,
         channel: MidiChannel,
-        velocity: Normalized,
+        velocity: Velocity,
         base_freq: impl Into<Hz>,
     ) {
         let base_freq = base_freq.into();
@@ -296,14 +296,14 @@ impl SynthVoice {
     pub(crate) fn reset(&mut self) {
         self.note = NoteNumber::default();
         self.channel = MidiChannel::FIRST;
-        self.velocity = Normalized::of(0.0);
+        self.velocity = Velocity::SILENT;
         self.envelope_level = Amplitude::SILENT;
         self.active = false;
         self.gate = false;
         self.edge = GateEdge::None;
         self.snap_tone = false;
         self.snap_gain = false;
-        self.velocity_mod_value = Normalized::of(1.0);
+        self.velocity_mod_value = Velocity::MAX;
         self.cc_cutoff_value = Normalized::of(0.5);
         self.cc_resonance_value = Normalized::of(0.0);
         self.lfo_phase = Phase::START;
@@ -542,7 +542,7 @@ impl SynthVoice {
         (self.cc_cutoff_value, self.cc_resonance_value)
     }
 
-    pub(crate) fn set_velocity_mod(&mut self, value: Normalized) {
+    pub(crate) fn set_velocity_mod(&mut self, value: Velocity) {
         self.velocity_mod_value = value;
     }
 
