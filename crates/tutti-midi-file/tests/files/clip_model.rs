@@ -504,7 +504,8 @@ fn an_smf_and_a_clip_of_the_same_messages_pair_the_same_notes() {
     let read = |f: &MidiFile| MidiFile::from_bytes(&f.to_bytes()).unwrap();
     let (a, b) = (read(&smf), read(&clip));
     assert_eq!(a.tracks()[0].notes(), b.tracks()[0].notes());
-    assert_eq!(a.tracks()[0].events()[0], b.tracks()[0].events()[0]);
+    // The file's Set Tempo and Time Signature come first.
+    assert_eq!(a.tracks()[0].events()[2], b.tracks()[0].events()[0]);
 }
 
 // ---- the configuration header (M2-116 sections 6 to 6.1.2) ----------------
