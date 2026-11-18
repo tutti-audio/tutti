@@ -273,27 +273,6 @@ impl Drop for PluginServer {
 /// ended outright: a bound on a wait for the shutdown, never a delay to it.
 const HOST_GONE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// The host's process id: its own statement in
-/// [`HOST_PID_ENV`](tutti_plugin_ipc::HOST_PID_ENV), else the parent in the
-/// process table (a server started by hand). `None` when neither names one.
-fn host_pid() -> Option<u32> {
-    host_pid_given(
-        std::env::var(tutti_plugin_ipc::HOST_PID_ENV)
-            .ok()
-            .as_deref(),
-        tutti_plugin_ipc_ffi::parent_process_id(),
-    )
-}
-
-/// [`host_pid`] over its two sources: the statement, if it is a process id past
-/// init's, else `parent`.
-fn host_pid_given(stated: Option<&str>, parent: Option<u32>) -> Option<u32> {
-    stated
-        .and_then(|v| v.parse::<u32>().ok())
-        .filter(|&pid| pid > 1)
-        .or(parent)
-}
-
 /// Starts the watch on the host. When the host ends, `host_gone` is stopped and
 /// `bell` rung so the main loop shuts down; if `served` is not stopped within
 /// [`HOST_GONE_GRACE`] the socket file at `socket_path` is removed and the
@@ -305,11 +284,7 @@ fn watch_host(
     bell: crate::main_loop::Bell,
     served: StopToken,
 ) {
-    let Some(host) = host_pid() else {
-        tracing::warn!("the host's process id is unknown: this server cannot notice its end");
-        return;
-    };
-    let watch = tutti_plugin_ipc_ffi::watch_host(host, move || {
+    let watch = tutti_plugin_ipc_ffi::watch_spawner(move || {
         tracing::info!("the host process is gone; shutting the server down");
         host_gone.stop();
         bell.ring();
@@ -321,28 +296,11 @@ fn watch_host(
             tutti_plugin_ipc_ffi::terminate_process()
         }
     });
-    if let Err(e) = watch {
-        tracing::warn!("the host watch cannot start: {e}");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::host_pid_given;
-
-    /// **A stated pid wins, if it is a pid past init's; otherwise the parent.**
-    #[test]
-    fn a_stated_host_pid_wins_and_the_parent_is_the_fallback() {
-        assert_eq!(host_pid_given(Some("4242"), Some(7)), Some(4242));
-        assert_eq!(host_pid_given(None, Some(7)), Some(7));
-        assert_eq!(host_pid_given(None, None), None);
-        for unusable in ["", "x", "-5", "4294967296", "1", "0"] {
-            assert_eq!(
-                host_pid_given(Some(unusable), Some(7)),
-                Some(7),
-                "{unusable:?} names no host"
-            );
+    match watch {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::warn!("the host's process id is unknown: this server cannot notice its end");
         }
-        assert_eq!(host_pid_given(Some("2"), None), Some(2));
+        Err(e) => tracing::warn!("the host watch cannot start: {e}"),
     }
 }

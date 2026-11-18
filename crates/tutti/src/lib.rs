@@ -618,7 +618,7 @@ pub mod plugin {
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
-        Mtime, PluginEntry, ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
+        Mtime, PluginEntry, ProbeFailure, RowChange, ScanError, ScanProgress,
     };
     pub use tutti_plugin_host::{BlockLosses, RebindError};
     pub use tutti_plugin_ipc::RandomSourceError;
@@ -638,6 +638,8 @@ pub mod plugin {
     pub use tutti_plugin_types::{
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
     };
+    // What a `ProbeFailure` holds.
+    pub use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeRefusal};
     pub use tutti_plugin_types::{Timeouts, ZeroTimeout};
 
     /// The plugin catalog: scanning, the database and the descriptors it

@@ -132,7 +132,7 @@ fn spawn_orphaned_server(tag: &str) -> Reaper {
         // server is concerned. `echo $!` hands the server's PID back; the
         // shell then exits at once.
         "{env}=$$ {exe:?} {socket:?} >/dev/null 2>&1 & echo $!",
-        env = tutti_plugin_ipc::HOST_PID_ENV
+        env = tutti_plugin_ipc_ffi::HOST_PID_ENV
     );
     let out = Command::new("/bin/sh")
         .arg("-c")
@@ -210,7 +210,7 @@ fn a_server_with_a_live_parent_serves_its_host() {
     let mut child = Command::new(exe)
         .arg(&socket)
         .env(
-            tutti_plugin_ipc::HOST_PID_ENV,
+            tutti_plugin_ipc_ffi::HOST_PID_ENV,
             std::process::id().to_string(),
         )
         .stdout(Stdio::null())
@@ -242,7 +242,7 @@ fn a_host_that_ends_after_connecting_ends_the_server() {
     // and waits for the end of its input.
     let script = format!(
         "{env}=$$ {exe:?} {socket:?} >/dev/null 2>&1 & echo $!; read _",
-        env = tutti_plugin_ipc::HOST_PID_ENV
+        env = tutti_plugin_ipc_ffi::HOST_PID_ENV
     );
     let mut host = Command::new("/bin/sh")
         .arg("-c")

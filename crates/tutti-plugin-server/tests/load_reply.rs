@@ -87,13 +87,13 @@ fn fixtures() -> (PathBuf, PathBuf) {
 
 /// A `plugin-server` process and its handshake connection, past `Ready`.
 fn start_server() -> (Server, Stream) {
-    let (server, stream, _) = start_server_for(std::process::id());
+    let (server, stream, _) = start_server_for_this_process();
     (server, stream)
 }
 
-/// [`start_server`] for a server that takes the process `host` for its host,
-/// and the socket it serves.
-fn start_server_for(host: u32) -> (Server, Stream, PathBuf) {
+/// [`start_server`], and the socket it serves. The server is this process's
+/// child and takes this process for its host.
+fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
     // The default config makes a fresh socket path that fits a socket address.
     let socket = tutti_plugin_ipc::BridgeConfig::at(
         tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
@@ -103,7 +103,10 @@ fn start_server_for(host: u32) -> (Server, Stream, PathBuf) {
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_plugin-server"))
             .arg(&socket)
-            .env(tutti_plugin_ipc::HOST_PID_ENV, host.to_string())
+            .env(
+                tutti_plugin_ipc_ffi::HOST_PID_ENV,
+                std::process::id().to_string(),
+            )
             .stdout(Stdio::piped())
             .spawn()
             .expect("spawn plugin-server"),
@@ -247,34 +250,81 @@ fn a_handshake_frame_that_does_not_decode_ends_the_server() {
 /// is gone: only the watch on the host process does. The server must leave by
 /// its own exit (status 0, not a signal), which only a teardown that ran
 /// reaches, and without the log of a plugin it had to leak.
-#[test]
-fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
-    let (_not_a_plugin, good) = fixtures();
-    let mut host = Command::new("sleep")
-        .arg("600")
-        .spawn()
-        .expect("spawn the stand-in host");
-    let (mut server, mut handshake, socket) = start_server_for(host.id());
-    assert!(matches!(
-        load(&mut handshake, &good, PluginFormat::Clap),
-        BridgeMessage::PluginLoaded { .. }
-    ));
-    drop(handshake);
-    let mut audio = connect(&socket, &mut server);
-    let mut control = connect(&socket, &mut server);
-    for stream in [&mut audio, &mut control] {
+///
+/// The host is a shell that spawns the server, so the server's parent is the
+/// process it names as its host, as a real host's is. This process adopts the
+/// server when the shell ends (a subreaper), so it can read the server's status.
+#[cfg(target_os = "linux")]
+mod host_ends_in_the_control_phase {
+    use super::*;
+    use std::io::BufRead as _;
+
+    #[test]
+    fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
+        // SAFETY: `prctl` with `PR_SET_CHILD_SUBREAPER` takes scalars and only
+        // changes where this process's orphaned descendants are reparented.
+        let rc = unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) };
+        assert_eq!(rc, 0, "PR_SET_CHILD_SUBREAPER failed: this test needs it");
+        let (_not_a_plugin, good) = fixtures();
+        let socket = tutti_plugin_ipc::BridgeConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+        )
+        .socket_path;
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let log = dir.path().join("server.log");
+        // The shell is the host until its input closes: it states its own pid,
+        // prints the server's, and waits.
+        let script = format!(
+            "{env}=$$ {exe:?} {socket:?} >{log:?} 2>&1 & echo $!; read _",
+            env = tutti_plugin_ipc_ffi::HOST_PID_ENV,
+            exe = env!("CARGO_BIN_EXE_plugin-server"),
+        );
+        let mut host = Server(
+            Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&script)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("spawn the host shell"),
+        );
+        let mut line = String::new();
+        std::io::BufReader::new(host.0.stdout.take().expect("piped"))
+            .read_line(&mut line)
+            .expect("the shell prints the server's pid");
+        let server: i32 = line.trim().parse().expect("the server's pid");
+
+        let mut handshake = connect(&socket, &mut host);
         assert!(matches!(
-            read_frame::<_, BridgeMessage>(stream),
+            read_frame::<_, BridgeMessage>(&mut handshake),
             Ok(BridgeMessage::Ready { .. })
         ));
-    }
+        assert!(matches!(
+            load(&mut handshake, &good, PluginFormat::Clap),
+            BridgeMessage::PluginLoaded { .. }
+        ));
+        drop(handshake);
+        let mut audio = connect(&socket, &mut host);
+        let mut control = connect(&socket, &mut host);
+        for stream in [&mut audio, &mut control] {
+            assert!(matches!(
+                read_frame::<_, BridgeMessage>(stream),
+                Ok(BridgeMessage::Ready { .. })
+            ));
+        }
 
-    host.kill().expect("the host ends");
-    host.wait().expect("reaped");
-    let (status, printed) = ended(&mut server);
-    assert_eq!(status.code(), Some(0), "{status:?}: {printed}");
-    assert!(
-        !printed.contains("leaking the plugin"),
-        "the plugin was leaked: {printed}"
-    );
+        drop(host.0.stdin.take());
+        host.0.wait().expect("the host ends");
+        let mut status = 0;
+        // SAFETY: `waitpid` on a pid this process adopted, writing one `c_int`.
+        let reaped = unsafe { libc::waitpid(server, &mut status, 0) };
+        assert_eq!(reaped, server, "the adopted server is reaped");
+        assert!(libc::WIFEXITED(status), "ended by a signal: {status}");
+        assert_eq!(libc::WEXITSTATUS(status), 0, "left by its own exit");
+        let printed = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            !printed.contains("leaking the plugin"),
+            "the plugin was leaked: {printed}"
+        );
+    }
 }

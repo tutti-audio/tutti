@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use tutti_plugin::catalog::{
     Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator, NO_SCAN_DIRS,
-    PluginDescriptor, PluginRef, ProbeFailure, ProbeFailureKind, ScanPoll,
+    PluginDescriptor, PluginRef, ProbeFailure, ScanPoll,
 };
 use tutti_plugin_contract::{
     Clap, Format, Vst2, Vst3, Vst3Cpp, bundle_of, clap_path, library, spec, state_with_fault,
@@ -31,6 +31,7 @@ use tutti_plugin_types::{
     MainThreadMarker, MaxBlock, Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash,
     TailVerdict,
 };
+use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeOutcome, ProbeRefusal};
 use tutti_vst2_host::Vst2Loaded;
 
 /// A catalog whose probes run in the `plugin-probe` built in this profile, named
@@ -313,9 +314,14 @@ fn clap_named(dir: &tempfile::TempDir, name: &str) -> PathBuf {
 fn a_plugin_that_crashes_in_init_is_a_crash() {
     let dir = tempfile::tempdir().unwrap();
     let failure = probe(&clap_named(&dir, "init-crash")).expect_err("must not probe");
-    assert_eq!(failure.kind, ProbeFailureKind::Crashed, "{failure:?}");
+    assert!(
+        matches!(
+            failure.error,
+            ProbeError::Died(ProbeDeath::Signal(_) | ProbeDeath::Status(_))
+        ),
+        "{failure:?}"
+    );
     assert!(failure.blacklistable(), "{failure:?}");
-    assert!(failure.reason.contains("crashed"), "{failure:?}");
 }
 
 /// **A plugin that never returns from its init is a timeout**, and the probe is
@@ -327,20 +333,25 @@ fn a_plugin_that_hangs_in_init_times_out() {
     let dir = tempfile::tempdir().unwrap();
     let failure = probe_with_timeout(&clap_named(&dir, "init-hang"), Duration::from_secs(2))
         .expect_err("must not probe");
-    assert_eq!(failure.kind, ProbeFailureKind::TimedOut, "{failure:?}");
+    assert!(
+        matches!(failure.error, ProbeError::TimedOut { .. }),
+        "{failure:?}"
+    );
     assert!(failure.blacklistable(), "{failure:?}");
-    assert!(failure.reason.contains("timed out"), "{failure:?}");
 }
 
-/// A plugin whose init refuses is a result: the probe finished, with the
-/// plugin's reason, and the scan records it.
+/// **A plugin whose init refuses is a result, not a crash**: the probe finished,
+/// with the stage it was refused at and the loader's reason, and the scan does not
+/// blacklist it, since only a crash or a hang does.
 #[test]
-fn a_plugin_that_refuses_to_load_is_a_typed_failure() {
+fn a_plugin_that_refuses_to_load_is_a_refusal_at_a_stage() {
     let dir = tempfile::tempdir().unwrap();
     let failure = probe(&clap_named(&dir, "init-refuse")).expect_err("must not probe");
-    assert_eq!(failure.kind, ProbeFailureKind::LoadFailed, "{failure:?}");
-    assert!(failure.reason.contains("entry init failed"), "{failure:?}");
-    assert!(failure.blacklistable());
+    let ProbeError::Refused(ProbeRefusal::Load { reason, .. }) = &failure.error else {
+        panic!("a refusal at a load stage: {failure:?}");
+    };
+    assert!(reason.contains("entry init failed"), "{reason}");
+    assert!(!failure.blacklistable(), "{failure:?}");
 }
 
 /// **A plugin that prints from its init still probes**: stdout and stderr carry
@@ -522,15 +533,14 @@ fn measure_with_fault(fault: u32, timeout: Duration) -> Result<(), ProbeFailure>
 
 /// **A plugin that crashes while rendering is the crash a load is**: it loads,
 /// its descriptor reads (a plain probe is fine), and the measuring probe dies with
-/// no result file, which a failure of kind `Crashed` calls blacklistable.
+/// no result file, which a failure that `Died` calls blacklistable.
 #[test]
 fn a_plugin_that_crashes_while_measured_is_a_crash() {
     probe(&clap_path()).expect("it loads and describes");
     let failure = measure_with_fault(spec::FAULT_CRASH, DEFAULT_MEASURE_TIMEOUT)
         .expect_err("must not measure");
-    assert_eq!(failure.kind, ProbeFailureKind::Crashed, "{failure:?}");
+    assert!(matches!(failure.error, ProbeError::Died(_)), "{failure:?}");
     assert!(failure.blacklistable(), "{failure:?}");
-    assert!(failure.reason.contains("crashed"), "{failure:?}");
 }
 
 /// **A plugin that hangs while rendering is the timeout a load's hang is**, and
@@ -540,7 +550,10 @@ fn a_plugin_that_crashes_while_measured_is_a_crash() {
 fn a_plugin_that_hangs_while_measured_times_out() {
     let failure =
         measure_with_fault(spec::FAULT_HANG, Duration::from_secs(3)).expect_err("must not measure");
-    assert_eq!(failure.kind, ProbeFailureKind::TimedOut, "{failure:?}");
+    assert!(
+        matches!(failure.error, ProbeError::TimedOut { .. }),
+        "{failure:?}"
+    );
     assert!(failure.blacklistable());
 }
 
@@ -553,6 +566,193 @@ fn a_state_the_plugin_refuses_is_a_failure() {
     std::fs::write(&file, b"not a state").unwrap();
     let failure =
         measure_db(&clap_path(), &file, DEFAULT_MEASURE_TIMEOUT).expect_err("must not measure");
-    assert_eq!(failure.kind, ProbeFailureKind::LoadFailed, "{failure:?}");
-    assert!(failure.reason.contains("refused the state"), "{failure:?}");
+    assert!(
+        matches!(
+            failure.error,
+            ProbeError::Refused(ProbeRefusal::StateRefused { .. })
+        ),
+        "{failure:?}"
+    );
+    assert!(
+        failure.reason().contains("refused the state"),
+        "{failure:?}"
+    );
+    assert!(!failure.blacklistable(), "{failure:?}");
+}
+
+// ---- the probe's own exits and refusals, through the binary ----
+
+/// What `plugin-probe` did with `args` (after the path and the result file): its
+/// exit and the result file it left, if any.
+fn run_probe(
+    path: &Path,
+    args: &[&std::ffi::OsStr],
+) -> (std::process::ExitStatus, Option<ProbeOutcome>) {
+    let dir = tempfile::tempdir().unwrap();
+    let result = dir.path().join("result");
+    let status = std::process::Command::new(tutti_fixtures::plugin_probe())
+        .arg(path)
+        .arg(&result)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("spawn");
+    (
+        status,
+        tutti_plugin_types::read_result(&result).expect("a whole result or none"),
+    )
+}
+
+/// **A refusal is a clean exit with a typed result**, never a crash: the probe
+/// writes its result and exits with `ProbeExit::Written`, so a host reads it as an
+/// answer about the file.
+#[track_caller]
+fn assert_refused(path: &Path, args: &[&std::ffi::OsStr], refusal: &ProbeRefusal) {
+    let (status, outcome) = run_probe(path, args);
+    assert_eq!(status.code(), Some(i32::from(ProbeExit::Written.code())));
+    assert_eq!(outcome, Some(ProbeOutcome::Failed(refusal.clone())));
+}
+
+/// **A file that is not there is `Missing`**, which no scan blacklists.
+#[test]
+fn a_missing_file_is_a_missing_refusal() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_refused(&dir.path().join("Gone.clap"), &[], &ProbeRefusal::Missing);
+}
+
+/// **A path that names no format is `UnsupportedFormat`.**
+#[test]
+fn a_path_with_no_format_is_an_unsupported_format_refusal() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.txt");
+    std::fs::write(&path, b"x").unwrap();
+    assert_refused(&path, &[], &ProbeRefusal::UnsupportedFormat);
+}
+
+/// **A format the probe was not built with is `FormatNotCompiled`**, never a
+/// load failure of the plugin: Audio Units are macOS's alone.
+#[cfg(not(target_os = "macos"))]
+mod au_absent {
+    use super::*;
+    use tutti_plugin_types::PluginFormat;
+
+    #[test]
+    fn a_format_not_compiled_in_is_a_refusal() {
+        assert_refused(
+            &clap_path(),
+            &["--as".as_ref(), "au".as_ref()],
+            &ProbeRefusal::FormatNotCompiled(PluginFormat::AudioUnit),
+        );
+    }
+}
+
+/// **A `--state` file that cannot be read is `StateUnreadable`**: the caller's
+/// fault, written as a result.
+#[test]
+fn an_unreadable_state_file_is_a_refusal() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("no-such-state");
+    let (status, outcome) = run_probe(
+        &clap_path(),
+        &["--measure".as_ref(), "--state".as_ref(), state.as_os_str()],
+    );
+    assert_eq!(status.code(), Some(i32::from(ProbeExit::Written.code())));
+    assert!(
+        matches!(
+            outcome,
+            Some(ProbeOutcome::Failed(ProbeRefusal::StateUnreadable(_)))
+        ),
+        "{outcome:?}"
+    );
+}
+
+/// The probe's watch on its host, through the real binary and the shared plugin
+/// hung in its first render block, so only the watch can end it.
+#[cfg(unix)]
+mod host_watch {
+    use super::*;
+    use std::io::BufRead as _;
+    use std::os::unix::process::ExitStatusExt;
+
+    /// The signal the watch ends the probe with.
+    const SIGKILL: i32 = 9;
+
+    /// The command line of a probe that hangs in its first block.
+    fn hanging_probe(dir: &tempfile::TempDir) -> std::process::Command {
+        let state = dir.path().join("state");
+        std::fs::write(&state, state_with_fault::<Clap>(spec::FAULT_HANG)).unwrap();
+        let mut probe = std::process::Command::new(tutti_fixtures::plugin_probe());
+        probe
+            .arg(clap_path())
+            .arg(dir.path().join("result"))
+            .args(["--measure", "--state"])
+            .arg(state)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        probe
+    }
+
+    /// **A probe ends with its host**: its host is the shell that spawned it and
+    /// stated its pid, and the probe is not this process's child, so only the watch
+    /// on the host can end it. The probe's end is learned from the OS (a watch on
+    /// its pid), not polled for: a probe that outlives its host fails by hanging.
+    #[test]
+    fn a_hung_probe_dies_with_its_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let probe = hanging_probe(&dir);
+        let command: Vec<String> = std::iter::once(probe.get_program())
+            .chain(probe.get_args())
+            .map(|a| format!("{a:?}"))
+            .collect();
+        let script = format!(
+            "{env}=$$ {} </dev/null >/dev/null 2>&1 & echo $!; read _",
+            command.join(" "),
+            env = tutti_plugin_ipc_ffi::HOST_PID_ENV
+        );
+        let mut host = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn the host shell");
+        let mut line = String::new();
+        std::io::BufReader::new(host.stdout.take().expect("piped"))
+            .read_line(&mut line)
+            .expect("the shell prints the probe's pid");
+        let probe: u32 = line.trim().parse().expect("the probe's pid");
+        let (gone, ended) = std::sync::mpsc::channel();
+        tutti_plugin_ipc_ffi::watch_host(probe, move || gone.send(()).expect("listening"))
+            .expect("the watch starts");
+
+        drop(host.stdin.take());
+        host.wait().expect("the host ends");
+        ended.recv().expect("the probe ends with its host");
+    }
+
+    /// **A stated host that is not the probe's parent is not trusted**: the pid a
+    /// live process holds may have been another's, so the probe takes its host as
+    /// gone and ends at once, though the process stated is running.
+    #[test]
+    fn a_stated_pid_that_is_not_the_parent_is_not_trusted() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut stranger = std::process::Command::new("sleep")
+            .arg("600")
+            .spawn()
+            .expect("sleep");
+        let status = hanging_probe(&dir)
+            .env(
+                tutti_plugin_ipc_ffi::HOST_PID_ENV,
+                stranger.id().to_string(),
+            )
+            .status()
+            .expect("the probe ends");
+        stranger.kill().expect("kill the stranger");
+        stranger.wait().expect("reap it");
+
+        assert_eq!(status.signal(), Some(SIGKILL), "ended by the watch's kill");
+        assert_eq!(ProbeDeath::of(status), ProbeDeath::Signal(SIGKILL));
+    }
 }

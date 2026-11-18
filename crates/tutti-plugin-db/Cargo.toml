@@ -22,7 +22,8 @@ default = []
 serde = ["dep:serde", "tutti-plugin-types/serde"]
 
 [dependencies]
-tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
+# `ProbeError`: the typed account a failed probe holds (the probe's wire types).
+tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["probe-wire"] }
 # `spawn_named` and `StopToken`: the scan's worker thread and its stop request.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", features = ["derive"], optional = true }

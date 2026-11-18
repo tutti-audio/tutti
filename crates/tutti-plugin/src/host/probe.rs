@@ -4,30 +4,22 @@
 //! The wire is the file (`tutti_plugin_types::probe_wire`), not a socket or a
 //! stream. The child's stdout and stderr go to the null device, because plugins
 //! print from their init code. With the result file the outcomes are
-//! unambiguous: a file means the probe finished, with a descriptor or the
-//! loader's own failure; no file and a signal or a non-zero exit means it
-//! crashed; no file at the deadline means it hung.
+//! unambiguous: a file means the probe finished, with a descriptor or a typed
+//! refusal; no file and an exit means it died, and its [`ExitStatus`] says how
+//! (a signal, a panic, one of its own failing codes, a plugin's `exit`); no file
+//! at the deadline means it hung. The host states its pid to the child
+//! ([`HOST_PID_ENV`]), which ends itself with the host.
 
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use tutti_plugin_ipc::Reaped;
-use tutti_plugin_types::BridgeError;
+use tutti_plugin_ipc_ffi::HOST_PID_ENV;
 use tutti_plugin_types::{
-    Helper, Locator, PluginDescriptor, PluginFormat, ProbeOutcome, read_result,
+    Deadline, Helper, Locator, PluginDescriptor, PluginFormat, ProbeDeath, ProbeError,
+    ProbeOutcome, ProbeRefusal, ResultError, read_result,
 };
 use tutti_rt::StopToken;
-
-/// Why a probe returned no descriptors.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum ProbeError {
-    /// The caller's [`StopToken`] was stopped, and the child was killed.
-    #[error("the probe was cancelled")]
-    Cancelled,
-    /// The probe ran, or could not be started, and failed.
-    #[error(transparent)]
-    Bridge(#[from] BridgeError),
-}
 
 /// How long a probe may take, spawn and the plugin's load included, unless the
 /// caller says otherwise. A cold plugin can take seconds to `dlopen`; the old
@@ -42,10 +34,10 @@ const POLL: Duration = Duration::from_millis(5);
 ///
 /// # Errors
 ///
-/// [`BridgeError::ProbeNotFound`] if the binary cannot be located;
-/// [`BridgeError::LoadFailed`] if the probe ran to its end and the plugin could
-/// not be read; [`BridgeError::ProcessCrashed`] if it died without a result;
-/// [`BridgeError::Timeout`] if it did not finish within `timeout` (it is killed);
+/// [`ProbeError::ProbeNotFound`] if the binary cannot be located;
+/// [`ProbeError::Refused`] if the probe ran to its end and refused the plugin;
+/// [`ProbeError::Died`] if it ended without a result, by the status it names;
+/// [`ProbeError::TimedOut`] if it did not finish within `timeout` (it is killed);
 /// [`ProbeError::Cancelled`] if `stop` was requested (the child is killed and
 /// reaped before this returns).
 pub(crate) fn probe_metadata_with(
@@ -63,17 +55,17 @@ pub(crate) fn probe_metadata_with(
 /// [`PluginDescriptor::measured`] set where the plugin could be measured. It
 /// renders the plugin, so give it the long deadline
 /// ([`DEFAULT_MEASURE_TIMEOUT`](crate::host::db_probe::DEFAULT_MEASURE_TIMEOUT)):
-/// a plugin that crashes or hangs while rendering is
-/// [`BridgeError::ProcessCrashed`] or [`BridgeError::Timeout`], as in the load.
+/// a plugin that crashes or hangs while rendering is [`ProbeError::Died`] or
+/// [`ProbeError::TimedOut`], as in the load.
 ///
 /// `state` is a file of the bytes a plugin's own `save_state` wrote, which puts
-/// the plugin in that state before the measurement (`--state`), for a file of one
-/// plugin; the record carries a hash of it.
+/// the plugin in that state before the measurement (`--state`); the record carries
+/// a hash of it.
 ///
 /// # Errors
 ///
 /// As [`probe_metadata_with`]; a plugin that refuses `state` is
-/// [`BridgeError::LoadFailed`].
+/// [`ProbeRefusal::StateRefused`].
 pub(crate) fn measure_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
@@ -100,13 +92,13 @@ fn run(
 ) -> Result<Vec<PluginDescriptor>, ProbeError> {
     let probe = locator
         .resolve(Helper::Probe)
-        .ok_or(BridgeError::ProbeNotFound)?;
+        .ok_or(ProbeError::ProbeNotFound)?;
     // A directory of the probe's own (mode 0700), removed when it drops, on a
     // panic as well: the result path is not a name in a shared directory.
     let dir = tempfile::Builder::new()
         .prefix("tutti-probe-")
         .tempdir()
-        .map_err(BridgeError::Io)?;
+        .map_err(|e| ProbeError::Io(e.kind()))?;
     let result = dir.path().join("result");
 
     let child = Command::new(&probe)
@@ -116,11 +108,14 @@ fn run(
         // not name in its own extension.
         .args(["--as", format.extension_id()])
         .args(flags)
+        // The probe ends with this process: a plugin hung in its init does not
+        // outlive its host.
+        .env(HOST_PID_ENV, std::process::id().to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(BridgeError::Io)?;
+        .map_err(|e| ProbeError::Io(e.kind()))?;
     let mut child = Reaped::new(child);
     let status = wait(&mut child, timeout, stop);
     // The file is read even after a timeout or a bad exit: it is the only proof
@@ -128,56 +123,23 @@ fn run(
     let file = read_result(&result);
     let outcome = match (file, status) {
         (Ok(Some(outcome)), _) => outcome,
-        (Err(e), _) => return Err(BridgeError::from(e).into()),
-        (Ok(None), Waited::Exited) => return Err(BridgeError::ProcessCrashed.into()),
-        (Ok(None), Waited::TimedOut) => {
-            return Err(BridgeError::Timeout {
-                operation: "probe",
-                after: timeout,
-                partial: false,
-            }
-            .into());
-        }
-        (Ok(None), Waited::Lost(e)) => return Err(BridgeError::Io(e).into()),
+        (Err(e), _) => return Err(ProbeError::Result(e)),
+        (Ok(None), Waited::Exited(status)) => return Err(ProbeError::Died(ProbeDeath::of(status))),
+        (Ok(None), Waited::TimedOut) => return Err(ProbeError::TimedOut { after: timeout }),
+        (Ok(None), Waited::Lost(e)) => return Err(ProbeError::Io(e.kind())),
         (Ok(None), Waited::Cancelled) => return Err(ProbeError::Cancelled),
     };
     match outcome {
-        ProbeOutcome::Described(plugins) if plugins.is_empty() => Err(
-            BridgeError::load_from_server(plugin_path, "the file holds no plugin".to_string())
-                .into(),
-        ),
+        ProbeOutcome::Described(plugins) if plugins.is_empty() => Err(ProbeRefusal::Empty.into()),
         ProbeOutcome::Described(plugins) => Ok(plugins),
-        ProbeOutcome::Failed(message) => {
-            Err(BridgeError::load_from_server(plugin_path, message).into())
-        }
+        ProbeOutcome::Failed(refusal) => Err(refusal.into()),
         // `ProbeOutcome` is `#[non_exhaustive]`: an outcome from a newer probe.
-        other => Err(BridgeError::UnexpectedMessage {
-            expected: "a described or failed probe outcome",
-            got: format!("{other:?}").into(),
-        }
-        .into()),
-    }
-}
-
-/// When a probe's time is up: a rule over clock readings, which its caller takes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Deadline(Option<Instant>);
-
-impl Deadline {
-    /// The deadline `timeout` after `now`; one the clock cannot represent never
-    /// passes.
-    fn after(now: Instant, timeout: Duration) -> Self {
-        Self(now.checked_add(timeout))
-    }
-
-    /// Whether the time is up at `now`: at the deadline itself, and after.
-    fn passed(self, now: Instant) -> bool {
-        self.0.is_some_and(|at| now >= at)
+        other => Err(ResultError::Malformed(format!("an unknown outcome: {other:?}")).into()),
     }
 }
 
 enum Waited {
-    Exited,
+    Exited(ExitStatus),
     TimedOut,
     Cancelled,
     Lost(std::io::Error),
@@ -189,7 +151,7 @@ fn wait(child: &mut Child, timeout: Duration, stop: &StopToken) -> Waited {
     let deadline = Deadline::after(Instant::now(), timeout);
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return Waited::Exited,
+            Ok(Some(status)) => return Waited::Exited(status),
             Ok(None) if stop.is_stopped() => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -219,7 +181,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use tempfile::TempDir;
-    use tutti_plugin_types::BridgeResult;
+    use tutti_plugin_types::{ProbeExit, ResultError};
 
     /// A `plugin-probe` stand-in: a shell script given the plugin path as `$1`
     /// and the result file as `$2`, as the real one is.
@@ -230,7 +192,7 @@ mod tests {
         Locator::at(path)
     }
 
-    fn probe(locator: &Locator, timeout: Duration) -> BridgeResult<Vec<PluginDescriptor>> {
+    fn probe(locator: &Locator, timeout: Duration) -> Result<Vec<PluginDescriptor>, ProbeError> {
         probe_metadata_with(
             locator,
             Path::new("/plugins/Some.clap"),
@@ -238,10 +200,6 @@ mod tests {
             timeout,
             &StopToken::new(),
         )
-        .map_err(|e| match e {
-            ProbeError::Bridge(e) => e,
-            ProbeError::Cancelled => panic!("nothing cancelled this probe"),
-        })
     }
 
     /// A probe that does not finish by the deadline is killed and reaped, and the
@@ -284,7 +242,7 @@ mod tests {
         );
         let pid = raiser.join().unwrap();
 
-        assert!(matches!(&result, Err(ProbeError::Cancelled)), "{result:?}");
+        assert_eq!(result.unwrap_err(), ProbeError::Cancelled);
         let alive = Command::new("kill")
             .args(["-0", pid.trim()])
             .stderr(Stdio::null())
@@ -298,17 +256,41 @@ mod tests {
         );
     }
 
-    /// No result file and an exit, by status or by signal, is a crash.
+    /// **No result file and an exit is a death the host tells by its status**: a
+    /// signal, a panic's status, a code of the probe's own and a plugin's `exit` are
+    /// four different ends, and the probe's own failing codes are its own.
     #[test]
-    fn exiting_without_a_result_is_a_crash() {
-        for body in ["exit 7", "exit 0", "kill -SEGV $$"] {
+    fn exiting_without_a_result_is_told_by_its_status() {
+        let cases = [
+            ("exit 7", ProbeDeath::Status(7)),
+            ("exit 0", ProbeDeath::Exited(ProbeExit::Written)),
+            ("exit 75", ProbeDeath::Exited(ProbeExit::ResultUnwritable)),
+            // A plugin's own `exit`, by the codes the probe once used.
+            ("exit 2", ProbeDeath::Status(2)),
+            ("exit 3", ProbeDeath::Status(3)),
+            ("exit 101", ProbeDeath::Panicked),
+            ("kill -SEGV $$", ProbeDeath::Signal(11)),
+        ];
+        for (body, death) in cases {
             let dir = TempDir::new().unwrap();
             let result = probe(&stand_in(&dir, body), Duration::from_secs(10));
-            assert!(
-                matches!(result, Err(BridgeError::ProcessCrashed)),
-                "`{body}`: {result:?}"
-            );
+            assert_eq!(result.unwrap_err(), ProbeError::Died(death), "`{body}`");
         }
+    }
+
+    /// **The host states its pid to the probe**, as it does to a plugin-server, so
+    /// the probe watches the host and not whatever its parent is by then.
+    #[test]
+    fn the_probe_is_told_the_hosts_pid() {
+        let dir = TempDir::new().unwrap();
+        let seen = dir.path().join("seen");
+        let locator = stand_in(
+            &dir,
+            &format!("echo \"${HOST_PID_ENV}\" > {}", seen.display()),
+        );
+        let _ = probe(&locator, Duration::from_secs(10));
+        let told = std::fs::read_to_string(&seen).unwrap();
+        assert_eq!(told.trim(), std::process::id().to_string());
     }
 
     /// **A partial result is never read as a result**: a staging file left by a
@@ -319,17 +301,17 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let staged = stand_in(&dir, "printf 'TPRB\\001' > \"$2.tmp\"");
         let result = probe(&staged, Duration::from_secs(10));
-        assert!(
-            matches!(result, Err(BridgeError::ProcessCrashed)),
-            "{result:?}"
+        assert_eq!(
+            result.unwrap_err(),
+            ProbeError::Died(ProbeDeath::Exited(ProbeExit::Written))
         );
 
         let dir = TempDir::new().unwrap();
-        let cut = stand_in(&dir, "printf 'TPRB\\001' > \"$2\"");
+        let cut = stand_in(&dir, "printf 'TPR' > \"$2\"");
         let result = probe(&cut, Duration::from_secs(10));
-        assert!(
-            matches!(result, Err(BridgeError::ProbeResult(_))),
-            "{result:?}"
+        assert_eq!(
+            result.unwrap_err(),
+            ProbeError::Result(ResultError::Truncated)
         );
     }
 
@@ -338,10 +320,10 @@ mod tests {
     #[test]
     fn a_missing_probe_binary_is_probe_not_found() {
         let missing = Locator::at("/definitely/not/plugin-probe");
-        assert!(matches!(
-            probe(&missing, Duration::from_secs(1)),
-            Err(BridgeError::ProbeNotFound)
-        ));
+        assert_eq!(
+            probe(&missing, Duration::from_secs(1)).unwrap_err(),
+            ProbeError::ProbeNotFound
+        );
     }
 
     /// The deadline is the caller's: a probe that does not exit times out under
@@ -351,28 +333,17 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let hangs = stand_in(&dir, "exec sleep 300");
         let up = probe(&hangs, Duration::ZERO);
-        assert!(matches!(up, Err(BridgeError::Timeout { .. })), "{up:?}");
+        assert_eq!(
+            up.unwrap_err(),
+            ProbeError::TimedOut {
+                after: Duration::ZERO
+            }
+        );
 
         let dir = TempDir::new().unwrap();
         let exits = stand_in(&dir, "exit 1");
         let long = probe(&exits, Duration::from_secs(10));
-        assert!(matches!(long, Err(BridgeError::ProcessCrashed)), "{long:?}");
-    }
-
-    /// A deadline is up at its instant and after, and not before; one the clock
-    /// cannot hold never is.
-    #[test]
-    fn a_deadline_is_up_at_its_instant_and_after() {
-        let start = Instant::now();
-        let deadline = Deadline::after(start, Duration::from_secs(15));
-        assert!(!deadline.passed(start));
-        assert!(!deadline.passed(start + Duration::from_millis(14_999)));
-        assert!(deadline.passed(start + Duration::from_secs(15)));
-        assert!(deadline.passed(start + Duration::from_secs(16)));
-        assert!(Deadline::after(start, Duration::ZERO).passed(start));
-        assert!(
-            !Deadline::after(start, Duration::MAX).passed(start + Duration::from_secs(1 << 30))
-        );
+        assert_eq!(long.unwrap_err(), ProbeError::Died(ProbeDeath::Status(1)));
     }
 
     /// The default allows a cold plugin well past the old five seconds.

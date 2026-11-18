@@ -34,7 +34,8 @@ use tutti_graph::{MAX_NODE_TAIL, Offset, UmpAt};
 use tutti_plugin_types::{
     Controller, InProcess, LatencyVerdict, Load, MainThreadMarker, MaxBlock, Measured, NotChecked,
     PROBE_FLOOR, PluginAudio, PluginDescriptor, PluginError, PluginIo, PluginTail, Prepare,
-    ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash, TailVerdict, Verdict,
+    ProbeConfig, ProbeRefusal, ProcessContext, ProcessOutput, Processor, StateHash, TailVerdict,
+    Verdict,
 };
 use tutti_ump::{
     Address, Attribute, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2,
@@ -361,14 +362,14 @@ fn judge(
 ///
 /// # Errors
 ///
-/// The plugin refused `state`: a measurement of a state it would not take is no
-/// measurement, and the caller asked for that state.
+/// [`ProbeRefusal::StateRefused`]: the plugin refused `state`. A measurement of a
+/// state it would not take is no measurement, and the caller asked for that state.
 pub fn measure<L: InProcess>(
     main: MainThreadMarker,
     path: &Path,
     descriptor: &PluginDescriptor,
     state: Option<&[u8]>,
-) -> Result<Option<Measured>, String> {
+) -> Result<Option<Measured>, ProbeRefusal> {
     // The plugin closes on this thread when `loaded` drops, so the collector it is
     // given never receives work.
     let (_collector, work) = tutti_plugin_types::MainWork::new();
@@ -379,7 +380,10 @@ pub fn measure<L: InProcess>(
     if let Some(bytes) = state {
         loaded
             .load_state(main, bytes, tutti_plugin_types::StateUse::Project)
-            .map_err(|e| format!("{}: the plugin refused the state: {e}", descriptor.id))?;
+            .map_err(|e| ProbeRefusal::StateRefused {
+                plugin: descriptor.id.clone(),
+                reason: e.to_string(),
+            })?;
     }
     let state = StateHash::of(
         &loaded
