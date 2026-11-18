@@ -25,7 +25,8 @@
 //!
 //! Its fork is a transform in the mode the cell holds when it is made, which
 //! it keeps: a later write to the cell does not reach it, as an export renders
-//! the session as it stood at the fork. It has no state of the notes: an offline render starts its clip from the top.
+//! the session as it stood at the fork. It has no state of the notes: an
+//! offline render starts its clip from the top.
 
 use std::num::NonZeroU32;
 use tutti_buffers::Float;
