@@ -10,8 +10,7 @@ use tutti_units::Samples;
 use crate::DelayLine;
 
 /// Lookahead ring buffers + sliding-window-minimum tracker for the limiter. The gains it
-/// pushes and the minimum it holds are per-sample levels in `F`; they become `Amplitude` once
-/// that unit stores `f64`.
+/// pushes and the minimum it holds are per-sample levels in `F`.
 #[derive(Clone, Debug)]
 pub(crate) struct LookaheadRing<F: Float> {
     /// One delay line per audio channel, read at the lookahead by the whole-frame reader;
@@ -74,16 +73,10 @@ impl<F: Float> LookaheadRing<F> {
     /// pushed `lookahead` frames before it is read back. The channels' lines are
     /// independent, so a block runs one channel at a time.
     #[inline]
-    pub(crate) fn delay_scaled<S: Float>(
-        &mut self,
-        c: usize,
-        input: &[S],
-        gains: &[F],
-        out: &mut [S],
-    ) {
+    pub(crate) fn delay_scaled(&mut self, c: usize, input: &[F], gains: &[F], out: &mut [F]) {
         let line = &mut self.lines[c];
-        for ((o, x), &g) in out.iter_mut().zip(input).zip(gains) {
-            line.push_sample(x.convert_to::<F>());
+        for ((o, &x), &g) in out.iter_mut().zip(input).zip(gains) {
+            line.push_sample(x);
             let d = line.read_whole(self.lookahead);
             // A NaN in both operands: x86 returns the first one's and which
             // is first is up to the compiler, so pick the delayed sample's
@@ -91,12 +84,11 @@ impl<F: Float> LookaheadRing<F> {
             // is held to the level the detector read it at, so its product with the
             // gain (a divide of the ceiling by that level, or 0) is finite and not
             // `inf * 0`.
-            *o = (if d.is_nan() {
+            *o = if d.is_nan() {
                 d + d
             } else {
                 d.clamp(-held::<F>(), held::<F>()) * g
-            })
-            .convert_to::<S>();
+            };
         }
     }
 }

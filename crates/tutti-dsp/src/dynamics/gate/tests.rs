@@ -1,6 +1,6 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
-use tutti_buffers::{Mono, Planes, PlanesMut};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Db, SampleRate, Seconds};
 
 use super::*;
@@ -83,11 +83,16 @@ fn hostile() -> Vec<GateControls> {
 }
 
 /// A bank at `rate` at rest on `c`: aimed and landed, nothing gliding.
-fn runner_at(c: &GateControls, rate: SampleRate) -> GateBank<f32> {
+fn bank_at<F: Float + Lanes + Lerp>(c: &GateControls, rate: SampleRate) -> GateBank<F> {
     let mut bank = GateBank::new(rate);
     bank.aim(c);
     bank.settle();
     bank
+}
+
+/// [`bank_at`] in `f32` at `rate`.
+fn runner_at(c: &GateControls, rate: SampleRate) -> GateBank<f32> {
+    bank_at(c, rate)
 }
 
 /// [`runner_at`] at 48 kHz.
@@ -97,24 +102,24 @@ fn runner(c: &GateControls) -> GateBank<f32> {
 
 /// `audio` (one slice per channel) through `bank`, keyed by `key`, with `lane` as the
 /// threshold lane when given, in calls of at most `block` frames.
-fn run_in(
-    bank: &mut GateBank<f32>,
-    audio: &[&[f32]],
-    key: &[&[f32]],
-    lane: Option<&[f32]>,
+fn run_in<F: Float + Lanes + Lerp>(
+    bank: &mut GateBank<F>,
+    audio: &[&[F]],
+    key: &[&[F]],
+    lane: Option<&[F]>,
     block: usize,
-) -> Vec<Vec<f32>> {
+) -> Vec<Vec<F>> {
     let n = audio[0].len();
-    let mut out = vec![vec![0.0f32; n]; audio.len()];
+    let mut out = vec![vec![F::ZERO; n]; audio.len()];
     let mut at = 0;
     while at < n {
         let end = (at + block).min(n);
-        let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
-        let kk: Vec<&[f32]> = key.iter().map(|c| &c[at..end]).collect();
+        let a: Vec<&[F]> = audio.iter().map(|c| &c[at..end]).collect();
+        let kk: Vec<&[F]> = key.iter().map(|c| &c[at..end]).collect();
         let lanes = GateLanes {
             threshold: lane.map(|l| Mono::new(&l[at..end])),
         };
-        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
+        let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
             lanes,
             Planes::new(&kk).unwrap(),
@@ -127,22 +132,22 @@ fn run_in(
 }
 
 /// [`run_in`] in calls of [`CHUNK`] frames.
-fn run(
-    bank: &mut GateBank<f32>,
-    audio: &[&[f32]],
-    key: &[&[f32]],
-    lane: Option<&[f32]>,
-) -> Vec<Vec<f32>> {
+fn run<F: Float + Lanes + Lerp>(
+    bank: &mut GateBank<F>,
+    audio: &[&[F]],
+    key: &[&[F]],
+    lane: Option<&[F]>,
+) -> Vec<Vec<F>> {
     run_in(bank, audio, key, lane, CHUNK)
 }
 
 /// One channel of `audio` and of the key, as the stereo pair the tests run.
-fn run_mono(
-    bank: &mut GateBank<f32>,
-    audio: &[f32],
-    key: &[f32],
-    lane: Option<&[f32]>,
-) -> Vec<f32> {
+fn run_mono<F: Float + Lanes + Lerp>(
+    bank: &mut GateBank<F>,
+    audio: &[F],
+    key: &[F],
+    lane: Option<&[F]>,
+) -> Vec<F> {
     run(bank, &[audio, audio], &[key, key], lane).remove(0)
 }
 
@@ -166,8 +171,11 @@ fn the_design_holds_the_figures_of_its_definition() {
         Seconds(0.001).one_pole_coeff(RATE) as f32,
         Seconds(0.1).one_pole_coeff(RATE) as f32,
     );
-    assert_eq!(m.ballistics.follow_raw(0.0, 1.0), attack);
-    assert_eq!(m.ballistics.follow_raw(1.0, 0.0), 1.0 - release);
+    assert_eq!(m.ballistics.follow_raw(&mut Smoothed::at(0.0), 1.0), attack);
+    assert_eq!(
+        m.ballistics.follow_raw(&mut Smoothed::at(1.0), 0.0),
+        1.0 - release
+    );
     assert_eq!(m.range, Db(-12.0));
 
     let m = Design::<f32>::of(
@@ -181,12 +189,12 @@ fn the_design_holds_the_figures_of_its_definition() {
         RATE,
     );
     assert_eq!(
-        m.ballistics.follow_raw(0.0, 1.0),
+        m.ballistics.follow_raw(&mut Smoothed::at(0.0), 1.0),
         1.0,
         "an attack under 0 is instant"
     );
     assert_eq!(
-        m.ballistics.follow_raw(1.0, 0.0),
+        m.ballistics.follow_raw(&mut Smoothed::at(1.0), 0.0),
         0.0,
         "a release under 0 is instant"
     );
@@ -600,60 +608,111 @@ fn a_hold_keeps_a_hovering_key_from_chattering() {
     );
 }
 
-/// The render does not depend on how the stream is cut: calls of 1, 7, 33, 64, 100 and 255
-/// frames give the bits of one call, with a threshold lane, a key that moves and a range
-/// glide in flight.
+/// The follower of a gate opening from closed after `frames` frames of an attack of `tau`
+/// seconds at 48 kHz: `1 - a^frames` with `a = exp(-1 / (tau rate))`.
+fn opened(tau: f64, frames: usize) -> f64 {
+    1.0 - (-(frames as f64) / (tau * RATE.get())).exp()
+}
+
+/// The gain of a gate `open` of the way from closed at `range` dB: `r + open (1 - r)`, `r` the
+/// range as an amplitude.
+fn gain_at(range: f64, open: f64) -> f64 {
+    let r = 10f64.powf(range / 20.0);
+    r + open * (1.0 - r)
+}
+
+/// The render is the closed form whatever the calls cut the stream into: a key over a lane's
+/// threshold (and under the aimed one) opens the gate along the one-pole `1 - a^n`, then falls
+/// silent at frame 517 (inside a block of 7, 33, 64, 100 and 255 frames alike) with no hold, so
+/// the follower releases as `f b^m` from the `f` the step found, and the range glides linearly in
+/// dB over the 240 steps of 5 ms at 48 kHz, in calls of 1, 7, 33, 64, 100 and 255 frames and in
+/// one call.
 #[test]
-fn a_split_stream_renders_the_bits_of_the_whole() {
-    let n = 3000;
-    let c = controls(-20.0, 0.002, 0.01, 0.03, -30.0);
-    let to = controls(-20.0, 0.002, 0.01, 0.03, -6.0);
-    let audio = noise(1, n, 0.8);
-    let key = noise(2, n, 0.5);
-    let lane: Vec<f32> = (0..n).map(|i| -30.0 + (i % 700) as f32 * 0.03).collect();
-    let render = |block: usize| {
-        let mut k = runner(&c);
-        k.aim(&to);
-        run_in(&mut k, &[&audio, &audio], &[&key, &key], Some(&lane), block)
+fn a_cut_stream_follows_the_one_pole_and_glide_closed_forms() {
+    let (tau, release, steps, n, step_at) = (0.002, 0.03, 240usize, 1_200usize, 517usize);
+    let (from, to) = (-30.0, -6.0);
+    let c = controls(-10.0, tau, 0.0, release, from);
+    let aimed = controls(-10.0, tau, 0.0, release, to);
+    let b = (-1.0 / (release * RATE.get())).exp();
+    let open = |frames: usize| {
+        if frames <= step_at {
+            opened(tau, frames)
+        } else {
+            opened(tau, step_at) * b.powi((frames - step_at) as i32)
+        }
     };
-    let whole = render(n);
-    for block in [1, 7, 33, 64, 100, 255] {
-        assert_eq!(render(block), whole, "blocks of {block}");
+    let ones = vec![1.0f64; n];
+    // -20 dB: over the lane's -30 dB threshold, under the aimed -10 dB one; then silence.
+    let key: Vec<f64> = (0..n)
+        .map(|i| if i < step_at { 0.1 } else { 0.0 })
+        .collect();
+    let lane = vec![-30.0f64; n];
+    for block in [1, 7, 33, 64, 100, 255, n] {
+        let mut k = bank_at::<f64>(&c, RATE);
+        k.aim(&aimed);
+        let out = run_in(&mut k, &[&ones], &[&key], Some(&lane), block).remove(0);
+        for (i, &y) in out.iter().enumerate() {
+            let range = from + (to - from) * ((i + 1).min(steps) as f64 / steps as f64);
+            let want = gain_at(range, open(i + 1));
+            assert!(
+                (y / want - 1.0).abs() < 1e-12,
+                "blocks of {block}, frame {i}: {y} vs {want}"
+            );
+        }
     }
 }
 
-/// A reset bank renders as a fresh one, bit for bit.
+/// A reset gate opens from closed along the one-pole closed form with no hold left: after wear
+/// under other controls and a reset, a key over the threshold gives `r + (1 - a^n)(1 - r)` from
+/// its first frame, the range landed on its target.
 #[test]
-fn a_reset_bank_renders_as_a_fresh_one() {
-    let n = 2000;
-    let c = controls(-24.0, 0.001, 0.02, 0.05, -50.0);
-    let audio = noise(3, n, 0.7);
-    let key = noise(4, n, 0.2);
-    let mut worn = runner(&c);
-    let _ = run(&mut worn, &[&audio], &[&key], None);
+fn a_reset_gate_opens_from_closed_along_the_closed_form() {
+    let (tau, range) = (0.001, -50.0);
+    let n = 2_000;
+    let c = controls(-24.0, tau, 0.02, 0.05, range);
+    let wear: Vec<f64> = noise(3, n, 0.7).iter().map(|&x| f64::from(x)).collect();
+    let mut worn = bank_at::<f64>(&c, RATE);
+    let _ = run(&mut worn, &[&wear], &[&wear], None);
     worn.aim(&controls(-10.0, 0.01, 0.1, 0.1, -3.0));
-    let _ = run(&mut worn, &[&audio], &[&key], None);
+    let _ = run(&mut worn, &[&wear], &[&wear], None);
     worn.aim(&c);
     worn.reset();
-    let mut fresh = runner(&c);
-    assert_eq!(
-        run(&mut worn, &[&audio], &[&key], None),
-        run(&mut fresh, &[&audio], &[&key], None)
-    );
+    let ones = vec![1.0f64; n];
+    let key = vec![0.5f64; n];
+    let out = run(&mut worn, &[&ones], &[&key], None).remove(0);
+    for (i, &y) in out.iter().enumerate() {
+        let want = gain_at(range, opened(tau, i + 1));
+        assert!((y / want - 1.0).abs() < 1e-12, "frame {i}: {y} vs {want}");
+    }
 }
 
-/// A clone continues exactly where the original is and shares nothing with it.
+/// A clone continues the one-pole where the original is and shares nothing with it: both open
+/// along the closed form on from the frame they were cloned at, and what the clone is aimed at
+/// and rendered under leaves the original's closed form unmoved.
 #[test]
-fn a_clone_continues_identically_and_shares_nothing() {
-    let n = 1500;
-    let c = controls(-24.0, 0.001, 0.02, 0.05, -50.0);
-    let audio = noise(5, n, 0.7);
-    let key = noise(6, n, 0.2);
-    let mut a = runner(&c);
-    let _ = run(&mut a, &[&audio], &[&key], None);
+fn a_clone_continues_along_the_closed_form_and_shares_nothing() {
+    let (tau, range) = (0.003, -50.0);
+    let c = controls(-24.0, tau, 0.02, 0.05, range);
+    let (before, after) = (700usize, 900usize);
+    let ones = vec![1.0f64; after];
+    let key = vec![0.5f64; after];
+    let mut a = bank_at::<f64>(&c, RATE);
+    let _ = run(&mut a, &[&ones[..before]], &[&key[..before]], None);
     let mut b = a.clone();
-    let from_a = run(&mut a, &[&audio], &[&key], None);
-    assert_eq!(run(&mut b, &[&audio], &[&key], None), from_a);
+    let on = |out: &[f64], what: &str| {
+        for (j, &y) in out.iter().enumerate() {
+            let want = gain_at(range, opened(tau, before + j + 1));
+            assert!(
+                (y / want - 1.0).abs() < 1e-12,
+                "{what}, frame {j}: {y} vs {want}"
+            );
+        }
+    };
+    on(&run(&mut b, &[&ones], &[&key], None)[0], "the clone");
+    // The clone moves to other controls and runs on; the original has not heard of it.
+    b.aim(&controls(-10.0, 0.0, 0.0, 0.0, -3.0));
+    let _ = run(&mut b, &[&ones], &[&key], None);
+    on(&run(&mut a, &[&ones], &[&key], None)[0], "the original");
 }
 
 /// A control below its floor or not finite is the floor or the default, and the render is
@@ -715,46 +774,6 @@ fn an_infinite_key_opens_the_gate_and_does_not_latch_it() {
     );
 }
 
-/// A render of an `f32` bank over `f64` views is its render of the `f32` views converted: the
-/// views are converted at the edges, and an `f32` input is exact in `f64`, so the two agree to the
-/// last bit (a tolerance of 0), with a threshold lane and a range glide in flight.
-#[test]
-fn an_f64_render_is_the_f32_render_converted() {
-    let n = 2_000;
-    let audio = noise(61, n, 0.9);
-    let key = noise(62, n, 0.3);
-    let lane: Vec<f32> = (0..n).map(|i| -40.0 + (i % 400) as f32 * 0.05).collect();
-    let (c, to) = (
-        controls(-20.0, 0.002, 0.01, 0.05, -40.0),
-        controls(-20.0, 0.002, 0.01, 0.05, -6.0),
-    );
-    let mut k = runner(&c);
-    k.aim(&to);
-    let want = run(&mut k, &[&audio], &[&key], Some(&lane)).remove(0);
-
-    let to64 = |x: &[f32]| x.iter().map(|&v| f64::from(v)).collect::<Vec<f64>>();
-    let (audio64, key64, lane64) = (to64(&audio), to64(&key), to64(&lane));
-    let mut k = runner(&c);
-    k.aim(&to);
-    let mut got = vec![0.0f64; n];
-    let mut at = 0;
-    while at < n {
-        let end = (at + CHUNK).min(n);
-        k.process(
-            GateLanes {
-                threshold: Some(Mono::new(&lane64[at..end])),
-            },
-            Planes::new(&[&key64[at..end]]).unwrap(),
-            Planes::new(&[&audio64[at..end]]).unwrap(),
-            PlanesMut::new(&mut [&mut got[at..end]]).unwrap(),
-        );
-        at = end;
-    }
-    for (i, (&g, &w)) in got.iter().zip(&want).enumerate() {
-        assert_eq!(g, f64::from(w), "frame {i}");
-    }
-}
-
 /// `audio` through an `f64` bank at 48 kHz aimed at `c` and landed, in one block, keyed by
 /// `key`.
 fn run_f64(c: &GateControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
@@ -802,4 +821,44 @@ fn an_f64_gate_opens_along_the_one_pole_closed_form_in_f64() {
         })
         .collect();
     assert_close_f64(&run_f64(&c, &key, &key), &want, 1e-12);
+}
+
+/// A gate released over 300 s at 192 kHz (a coefficient of `1.7e-8`, under half an ulp of a
+/// follower near 1) still closes in f32: opened at once by a loud key with no hold, then given
+/// silence, the follower falls as `a^n`, `a = 1 - c` with `c` the f32 coefficient, so over a
+/// quarter of a time constant the gain is `r + a^n (1 - r)` for the range `r` to within `2^-24`
+/// stationary in the follower (the product's rounding over `c`), half an ulp carried in its
+/// value, and `2^-24` for the gain's own rounding. The plain recurrence `f - c f`, computed here,
+/// stays frozen at 1.
+#[test]
+fn an_f32_three_hundred_second_release_at_192_khz_still_closes_along_the_closed_form() {
+    const CHUNK_FRAMES: usize = 1 << 16;
+    let (rate, tau, range) = (SampleRate::SR_192K, 300.0, -60.0);
+    let c = f64::from(Seconds(tau).one_pole_coeff(rate) as f32);
+    let mut plain = 1.0f32;
+    for _ in 0..1_000 {
+        plain += -(c as f32) * plain;
+    }
+    assert_eq!(plain, 1.0, "the plain recurrence moved");
+    let mut k = runner_at(&controls(-20.0, 0.0, 0.0, tau, range), rate);
+    let _ = run_mono(&mut k, &[1.0f32; 64], &[0.5f32; 64], None);
+    let n = (0.25 * tau * rate.get()) as usize;
+    let probes = [n / 4, n / 2, n - 1];
+    let (ones, quiet) = (vec![1.0f32; CHUNK_FRAMES], vec![0.0f32; CHUNK_FRAMES]);
+    let (mut seen, mut worst) = (0, 0.0f64);
+    while seen < n {
+        let m = CHUNK_FRAMES.min(n - seen);
+        let out = run_mono(&mut k, &ones[..m], &quiet[..m], None);
+        for &p in probes.iter().filter(|&&p| (seen..seen + m).contains(&p)) {
+            let want = gain_at(range, (-c).ln_1p().exp().powi(p as i32 + 1));
+            worst = worst.max((f64::from(out[p - seen]) - want).abs());
+            assert!(want < 0.99, "the gate has closed some by the probe");
+        }
+        seen += m;
+    }
+    let bound = 2f64.powi(-24) + 2f64.powi(-25) + 2f64.powi(-24);
+    assert!(
+        worst <= bound,
+        "{worst} off the closed form, bound {bound:e}"
+    );
 }
