@@ -118,10 +118,24 @@ fn int_float_int_exact<T: Int>() {
     }
 }
 
+/// `STEP` is one least significant bit: converting it gives raw `1`, its
+/// negation raw `-1`.
+fn step_is_one_lsb<T: Int>() {
+    let step = T::STEP.expect("an integer format has a step");
+    assert_eq!(T::from_f64(step).raw(), 1);
+    assert_eq!(T::from_f64(-step).raw(), -1);
+    assert_eq!(step, 1.0 / full_scale::<T>());
+}
+
 macro_rules! per_format {
     ($($name:ident: $t:ty),*) => {$(
         mod $name {
             use super::*;
+
+            #[test]
+            fn step_converts_to_one_least_significant_bit() {
+                step_is_one_lsb::<$t>();
+            }
 
             #[test]
             fn integer_to_float_divides_by_two_to_the_n_minus_one() {
@@ -292,4 +306,10 @@ fn silence_converts_to_silence() {
     );
     assert_eq!(<i8 as Sample>::SILENCE.convert_to::<f64>(), 0.0);
     assert_eq!(<I24 as Sample>::SILENCE, I24::ZERO);
+}
+
+#[test]
+fn a_float_format_has_no_step() {
+    assert_eq!(f32::STEP, None);
+    assert_eq!(f64::STEP, None);
 }
