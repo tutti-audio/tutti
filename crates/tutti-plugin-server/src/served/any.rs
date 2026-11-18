@@ -108,6 +108,17 @@ macro_rules! served {
                 }
             }
 
+            /// Leaves the plugin as a panic in a call into it does
+            /// (`Lifecycle::guarded` replaces it with `Poisoned`).
+            #[cfg(test)]
+            pub(crate) fn poison(&mut self) {
+                match self {
+                    $($(#[$cfg])* Self::$name(plugin) => plugin.lifecycle = tutti_plugin_types::Lifecycle::Poisoned,)*
+                    #[allow(unreachable_patterns)] // every arm is feature-gated
+                    _ => unreachable!("no format is served"),
+                }
+            }
+
             /// [`plugin`](Self::plugin), exclusively.
             #[allow(unreachable_patterns)] // as above
             pub(crate) fn plugin_mut(&mut self) -> &mut dyn ServedPlugin {

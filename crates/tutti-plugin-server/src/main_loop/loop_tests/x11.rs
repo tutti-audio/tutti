@@ -12,6 +12,26 @@ use tutti_plugin_types::ContentScale;
 
 use super::*;
 
+/// Selects the gui shape for the load that follows; the default again on drop.
+struct GuiShape;
+
+impl GuiShape {
+    fn embeddable() -> Self {
+        let probe = crate::test_utils::clap();
+        probe.set_gui_mode(GuiMode::Embeddable);
+        probe.gui_reset();
+        Self
+    }
+}
+
+impl Drop for GuiShape {
+    fn drop(&mut self) {
+        let probe = crate::test_utils::clap();
+        probe.gui_command(tutti_clap_test_plugin::GUI_CMD_NONE);
+        probe.set_gui_mode(GuiMode::Absent);
+    }
+}
+
 /// The editor opens on the served instance, a resize the plugin asks for
 /// reaches the host with no message to carry it, the host's size is taken, and
 /// a close destroys the plugin's editor. Needs a window number that means the
@@ -19,7 +39,7 @@ use super::*;
 #[test]
 fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let _shape = crate::test_utils::clap_probe_gui_shape(GuiMode::Embeddable);
+    let _shape = GuiShape::embeddable();
     let probe = crate::test_utils::clap();
     probe.gui_command(GUI_CMD_REQUEST_RESIZE);
     let (mut session, _slab) = session("editor");
@@ -97,7 +117,7 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
 #[test]
 fn unloading_a_plugin_closes_its_editor_and_says_so() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let _shape = crate::test_utils::clap_probe_gui_shape(GuiMode::Embeddable);
+    let _shape = GuiShape::embeddable();
     let probe = crate::test_utils::clap();
     let (mut session, _slab) = session("unload");
     let mut script = Script::new([

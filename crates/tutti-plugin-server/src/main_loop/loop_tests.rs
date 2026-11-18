@@ -400,7 +400,7 @@ fn a_lost_plugin_ends_the_server_abnormally() {
         fixture.session.handle(main, load_message()).expect("load"),
         crate::session::Reaction::Reply(BridgeMessage::PluginLoaded { .. })
     ));
-    crate::served::tests::lose(fixture.session.plugin.as_mut().expect("loaded"));
+    fixture.session.lose_plugin();
     let render = RenderThread::spawn(
         fixture.side.take().expect("run once"),
         Some(Box::new(fixture.audio.take().expect("run once"))),

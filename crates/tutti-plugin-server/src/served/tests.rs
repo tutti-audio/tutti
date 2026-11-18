@@ -62,16 +62,6 @@ impl<F: ServerSide> Render for Served<F> {
     }
 }
 
-/// Leaves the loaded CLAP plugin as a panic in a call into it does
-/// (`Lifecycle::guarded` replaces the plugin with `Poisoned`).
-#[cfg(feature = "clap")]
-pub(crate) fn lose(plugin: &mut AnyServed) {
-    let AnyServed::Clap(served) = plugin else {
-        panic!("a CLAP plugin");
-    };
-    served.lifecycle = Lifecycle::Poisoned;
-}
-
 impl<F: ServerSide> Served<F> {
     /// A parameter's value, which the plugin must have.
     fn normalized(&self, main: MainThreadMarker, id: ParamId) -> f64 {
@@ -154,4 +144,30 @@ fn a_load_opens_the_file_as_the_format_it_names() {
     );
     let plugin = load_any(path, PluginFormat::Clap).expect("a CLAP plugin under another name");
     assert!(matches!(plugin, AnyServed::Clap(_)));
+}
+
+/// A plugin reads as lost once a call into it panicked, and not before: what
+/// the server loop ends on.
+fn assert_poison_reads_as_lost(mut plugin: AnyServed) {
+    assert!(!plugin.plugin().is_lost());
+    plugin.poison();
+    assert!(plugin.plugin().is_lost());
+}
+
+/// **A poisoned CLAP plugin reads as lost, and a fresh one does not.**
+#[cfg(feature = "clap")]
+#[test]
+fn a_poisoned_clap_plugin_reads_as_lost_and_a_fresh_one_does_not() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let path = Path::new(crate::test_utils::clap_probe_path());
+    assert_poison_reads_as_lost(load_any(path, PluginFormat::Clap).expect("load"));
+}
+
+/// **A poisoned VST3 plugin reads as lost, and a fresh one does not.**
+#[cfg(feature = "vst3")]
+#[test]
+fn a_poisoned_vst3_plugin_reads_as_lost_and_a_fresh_one_does_not() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let path = Path::new(crate::test_utils::vst3_probe_path());
+    assert_poison_reads_as_lost(load_any(path, PluginFormat::Vst3).expect("load"));
 }

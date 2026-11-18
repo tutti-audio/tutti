@@ -289,8 +289,6 @@ pub(crate) mod test_utils {
         ParamCommand,
         /// The plugin's refusal of an activation rate.
         ActivateRefusal,
-        /// The plugin's editor: no command pending and no GUI.
-        Gui,
     }
 
     /// The one guard of this module: puts the reference plugin back to its
@@ -312,11 +310,6 @@ pub(crate) mod test_utils {
                     clap().param_command(tutti_clap_test_plugin::PARAM_CMD_NONE);
                 }
                 Reset::ActivateRefusal => clap().set_activate_refusal(u64::MAX),
-                Reset::Gui => {
-                    let probe = clap();
-                    probe.gui_command(tutti_clap_test_plugin::GUI_CMD_NONE);
-                    probe.set_gui_mode(tutti_clap_test_plugin::GuiMode::Absent);
-                }
             }
         }
     }
@@ -455,17 +448,6 @@ pub(crate) mod test_utils {
     #[cfg(feature = "clap")]
     pub fn clap_probe_reset_activation_count() {
         clap().reset_activation();
-    }
-
-    /// Gives the reference plugin an editor of `mode` for the load that follows,
-    /// and resets what it recorded of its editor, until the returned guard
-    /// drops, which removes the editor and clears a command not yet run.
-    #[cfg(feature = "clap")]
-    pub fn clap_probe_gui_shape(mode: tutti_clap_test_plugin::GuiMode) -> Restore {
-        let probe = clap();
-        probe.set_gui_mode(mode);
-        probe.gui_reset();
-        Restore(Reset::Gui)
     }
 
     /// Make the reference plugin's `activate` refuse `rate` until the returned

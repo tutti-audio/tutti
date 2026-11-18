@@ -39,7 +39,7 @@ pub(crate) use any::AnyServed;
 pub(crate) use format::ServerSide;
 
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;
 
 /// What the plugin was asked to render with: the block's audio, in the width
 /// the plugin was activated at.

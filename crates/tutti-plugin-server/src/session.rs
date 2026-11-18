@@ -84,7 +84,7 @@ impl Reaction {
 pub(crate) struct Session {
     /// The hosted plugin, or `None` before a load and after an unload. Every
     /// handler that needs one refuses explicitly rather than going silent.
-    pub(crate) plugin: Option<AnyServed>,
+    plugin: Option<AnyServed>,
     /// What the plugin's drops off the main thread hand over: run on every tick and
     /// after an unload.
     work: MainWork,
@@ -467,6 +467,12 @@ impl Session {
             }
             M::Shutdown => Ok(Reaction::Shutdown),
         }
+    }
+
+    /// Leaves the loaded plugin as a panic in a call into it does.
+    #[cfg(test)]
+    pub(crate) fn lose_plugin(&mut self) {
+        self.plugin.as_mut().expect("a plugin is loaded").poison();
     }
 
     /// Whether the loaded plugin is lost (a call into it panicked).
@@ -1551,6 +1557,29 @@ mod tests {
             s.handle(main_thread(), HostMessage::Shutdown).unwrap(),
             Reaction::Shutdown
         ));
+    }
+
+    /// **A session whose plugin was lost reports it, and one whose plugin runs
+    /// does not**: what the server loop ends on.
+    #[test]
+    #[cfg(feature = "clap")]
+    fn a_session_reports_a_lost_clap_plugin() {
+        let _lock = crate::test_utils::plugin_load_lock();
+        let (mut s, _shm) = load_clap("lost_clap", SampleFormat::Float32);
+        assert!(!s.plugin_lost());
+        s.lose_plugin();
+        assert!(s.plugin_lost());
+    }
+
+    /// As above, for VST3.
+    #[test]
+    #[cfg(feature = "vst3")]
+    fn a_session_reports_a_lost_vst3_plugin() {
+        let _lock = crate::test_utils::plugin_load_lock();
+        let (mut s, _shm) = load_vst3_probe("lost_vst3");
+        assert!(!s.plugin_lost());
+        s.lose_plugin();
+        assert!(s.plugin_lost());
     }
 
     /// **An editor error reaches the wire as its own text**, without the
