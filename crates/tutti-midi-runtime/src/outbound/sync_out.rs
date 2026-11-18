@@ -155,14 +155,16 @@ impl SyncOut {
     /// use tutti_midi_runtime::{SyncMessages, SyncOut};
     /// use tutti_ump::MidiGroup;
     ///
-    /// let (_node, controls) = SyncOut::new(MidiGroup::masked(2))
-    ///     .messages(SyncMessages {
-    ///         clock: true,
-    ///         mmc: Some(Recipient::AllCall),
-    ///         rate: MtcRate::Fps30,
-    ///         ..SyncMessages::OFF
-    ///     })
-    ///     .into_node();
+    /// // An f32 graph's node; any float format takes the same.
+    /// let (_node, controls): (Box<dyn tutti_graph::Node<f32>>, _) =
+    ///     SyncOut::new(MidiGroup::masked(2))
+    ///         .messages(SyncMessages {
+    ///             clock: true,
+    ///             mmc: Some(Recipient::AllCall),
+    ///             rate: MtcRate::Fps30,
+    ///             ..SyncMessages::OFF
+    ///         })
+    ///         .into_node();
     /// assert!(controls.messages().get().clock);
     /// ```
     #[must_use]
