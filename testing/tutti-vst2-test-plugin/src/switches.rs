@@ -336,6 +336,7 @@ pub extern "C" fn tutti_vst2_probe_reset_switches() {
     PRESET_TRACE.store(0, Ordering::SeqCst);
     PRESET_TRACE_LEN.store(0, Ordering::SeqCst);
     EDITOR_OPENS.store(false, Ordering::SeqCst);
+    EDITOR_HAS_NO_SIZE.store(false, Ordering::SeqCst);
     KEY_CONSUMED.store(false, Ordering::SeqCst);
     ACCEPT_STRING_TO_PARAMETER.store(false, Ordering::SeqCst);
     tutti_vst2_probe_reset_trace();
@@ -632,4 +633,17 @@ pub extern "C" fn tutti_vst2_probe_set_editor_opens(opens: bool) {
 
 pub(crate) fn editor_opens() -> bool {
     EDITOR_OPENS.load(Ordering::SeqCst)
+}
+
+static EDITOR_HAS_NO_SIZE: AtomicBool = AtomicBool::new(false);
+
+/// Make the probe's editor answer `effEditGetRect` with an empty rect (0 by 0), as a plugin
+/// that sizes its editor on neither call does. Off by default.
+#[unsafe(no_mangle)]
+pub extern "C" fn tutti_vst2_probe_set_editor_has_no_size(no_size: bool) {
+    EDITOR_HAS_NO_SIZE.store(no_size, Ordering::SeqCst);
+}
+
+pub(crate) fn editor_has_no_size() -> bool {
+    EDITOR_HAS_NO_SIZE.load(Ordering::SeqCst)
 }

@@ -323,7 +323,7 @@ fn an_out_of_range_parameter_index_is_refused_before_dispatch() {
 }
 
 /// The MIDI-program family decodes name, program number, bank pair and the
-/// drum-kit flag across the FFI.
+/// `kMidiIsOmni` flag across the FFI.
 /// Spec: vst2.eff.GetMidiProgramName, vst2.struct.VstMidiProgramName
 #[test]
 fn midi_program_metadata_round_trips() {
@@ -344,20 +344,20 @@ fn midi_program_metadata_round_trips() {
     // The probe reports -1, which must decode to absence.
     assert_eq!(program.parent_category, None);
     assert!(
-        !program.is_drum_kit,
-        "program 0 is melodic; the flag must vary per program"
+        !program.is_omni,
+        "program 0 does not set kMidiIsOmni; the flag must vary per program"
     );
 
-    // Program 1 is the drum kit, and its program-change number advances —
+    // Program 1 sets kMidiIsOmni, and its program-change number advances —
     // proving the host wrote `this_program_index` before dispatching rather
     // than describing program 0 every time.
-    let (drum_kit, _) = instance
+    let (omni, _) = instance
         .loaded()
         .midi_program(main_thread(), 0, 1)
         .expect("program 1 is serviced");
-    assert_eq!(drum_kit.name, "Probe Program 1");
-    assert_eq!(drum_kit.midi_program, base_program + 1);
-    assert!(drum_kit.is_drum_kit);
+    assert_eq!(omni.name, "Probe Program 1");
+    assert_eq!(omni.midi_program, base_program + 1);
+    assert!(omni.is_omni);
 
     reset_switches(&path);
 }

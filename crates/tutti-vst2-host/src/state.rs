@@ -26,9 +26,10 @@
 //! does with a program chunk it is handed while another program is current; setting the
 //! program first is the only order the opcodes' wording allows.
 
-use tutti_plugin_types::{MainThreadMarker, StateFrame};
+use tutti_plugin_types::{MainThreadMarker, Normalized, Request, RescanScope, StateFrame};
 
 use crate::error::{Result, Vst2Error};
+use crate::host::host_write;
 use crate::loaded::Vst2Loaded;
 
 /// State format tags:
@@ -218,17 +219,42 @@ impl Vst2Loaded {
     /// Restores a state blob previously produced by
     /// [`read_state`](Self::read_state).
     ///
-    /// Parameter values are clamped to `[0.0, 1.0]` before they are written.
+    /// A host write end to end: a plugin's `audioMasterAutomate` echo of what the restore
+    /// sets is not reported as its own edit. The program is selected inside
+    /// `effBeginSetProgram` / `effEndSetProgram` as [`set_program`](Self::set_program)
+    /// does, and the restore raises a rescan of the parameters' values, as a program
+    /// change does.
     ///
     /// # Errors
     ///
-    /// Returns [`Vst2Error::TooManyParameters`] or [`Vst2Error::NoSetParameter`] if the blob is malformed (unknown
-    /// header, truncated, or an empty chunk), if a parameter snapshot holds
-    /// more parameters than the plugin declares, or if it exposes no `setParameter` to write
-    /// parameters with. A plugin's own refusal of a chunk is not an error here: the header
+    /// Returns [`Vst2Error::TooManyParameters`], [`Vst2Error::ParameterOutOfRange`] or
+    /// [`Vst2Error::NoSetParameter`] if the blob is malformed (unknown header, truncated,
+    /// or an empty chunk), if a parameter snapshot holds more parameters than the plugin
+    /// declares or a value that is not on `0..=1` (NaN included; none is clamped), or if the
+    /// plugin exposes no `setParameter` to write parameters with. A refused snapshot writes
+    /// nothing. A plugin's own refusal of a chunk is not an error here: the header
     /// gives `effSetChunk` no return value to refuse with.
-    pub(crate) fn write_state(&self, main: MainThreadMarker, data: &[u8]) -> Result<()> {
+    pub(crate) fn write_state(&mut self, main: MainThreadMarker, data: &[u8]) -> Result<()> {
         let state = parse_state_header(data)?;
+        if let StateHeader::Params { count, values, .. } = &state {
+            // `.max(0)` as in `read_state`: `numParams` is raw from the
+            // `AEffect`. Unclamped, a plugin declaring `-1` makes this
+            // comparison `0 > -1` and rejects the empty snapshot
+            // `read_state` just wrote for that same plugin.
+            let actual_count = self.instance.get_info().parameters.max(0);
+            if *count > actual_count {
+                return Err(Vst2Error::TooManyParameters {
+                    saved: *count,
+                    actual: actual_count,
+                });
+            }
+            for index in 0..*count {
+                let value = saved_value(values, index);
+                if Normalized::new(f64::from(value)).is_none() {
+                    return Err(Vst2Error::ParameterOutOfRange { index, value });
+                }
+            }
+        }
         // The program first: a program chunk is the current program's, and a parameter
         // snapshot is its values. A recorded index the plugin does not have (or `-1`, for a
         // plugin that had no programs) selects nothing.
@@ -236,49 +262,48 @@ impl Vst2Loaded {
         if let Some(program) = *program
             && (0..self.instance.read_num_programs()).contains(&program)
         {
-            self.instance.change_preset(main, program);
+            host_write(|| {
+                self.instance
+                    .with_preset_bracket(main, |instance| instance.change_preset(main, program));
+            });
         }
-        match state {
+        let written = match state {
             StateHeader::Chunk { payload, .. } => {
                 // `effSetChunk` has no return value in the header (aeffect.h documents
                 // none, and a JUCE plugin answers 0 after loading), so there is no refusal
                 // to read: the call returning is all that is known.
-                self.instance.load_preset_data(main, payload);
+                host_write(|| self.instance.load_preset_data(main, payload));
                 Ok(())
             }
-            StateHeader::Params { count, values, .. } => {
-                // `.max(0)` as in `read_state`: `numParams` is raw from the
-                // `AEffect`. Unclamped, a plugin declaring `-1` makes this
-                // comparison `0 > -1` and rejects the empty snapshot
-                // `read_state` just wrote for that same plugin.
-                let actual_count = self.instance.get_info().parameters.max(0);
-                if count > actual_count {
-                    return Err(Vst2Error::TooManyParameters {
-                        saved: count,
-                        actual: actual_count,
-                    });
+            StateHeader::Params { count, values, .. } => (0..count).try_for_each(|index| {
+                if host_write(|| {
+                    self.instance
+                        .set_parameter(index, saved_value(values, index))
+                }) {
+                    Ok(())
+                } else {
+                    // Reporting success here would claim a preset was
+                    // restored while every value went nowhere.
+                    Err(Vst2Error::NoSetParameter { index })
                 }
-
-                for i in 0..count {
-                    let offset = i as usize * 4;
-                    let value = f32::from_le_bytes([
-                        values[offset],
-                        values[offset + 1],
-                        values[offset + 2],
-                        values[offset + 3],
-                    ]);
-                    let value = value.clamp(0.0, 1.0);
-                    if !self.instance.set_parameter(i, value) {
-                        // Reporting success here would claim a preset was
-                        // restored while every value went nowhere.
-                        return Err(Vst2Error::NoSetParameter { index: i });
-                    }
-                }
-
-                Ok(())
-            }
-        }
+            }),
+        };
+        // What was written moved values the plugin does not report: the host reads
+        // them again, whatever part of the restore went in.
+        let _ = Request::RescanParams(RescanScope::Values).raise(self.host.requests());
+        written
     }
+}
+
+/// The `index`th `f32` of a parameter snapshot's values, which hold a whole number of them.
+fn saved_value(values: &[u8], index: i32) -> f32 {
+    let offset = index as usize * 4;
+    f32::from_le_bytes([
+        values[offset],
+        values[offset + 1],
+        values[offset + 2],
+        values[offset + 3],
+    ])
 }
 
 #[cfg(test)]

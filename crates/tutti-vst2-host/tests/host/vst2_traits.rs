@@ -15,10 +15,11 @@ use tutti_graph::Offset;
 use tutti_plugin_types::{
     AutomationMode, Control, Controller, EditorWindow, Event, Hand, HostOp, Lifecycle, Loaded,
     MaxBlock, Normalized, Notice, ParameterChanges, PluginAudio, PluginError, PluginIo, Prepare,
-    ProcessContext, ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate, Samples, Stage,
+    ProcessContext, ProcessOutput, Processor, RenderMode, Request, RescanScope, SampleFormat,
+    SampleRate, Samples, Stage,
 };
 use tutti_types::ParamId;
-use tutti_ump::MidiChannel;
+use tutti_ump::{Address, MidiChannel, MidiGroup};
 use tutti_vst2_host::{Vst2Controller, Vst2Loaded, Vst2Processor};
 use tutti_vst2_test_plugin::{ProcessCapture, ProcessEntry};
 
@@ -200,6 +201,45 @@ fn render_f32(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> Vec<Ve
     };
     processor.process(&mut io).expect("the block renders");
     vec![left.to_vec(), right.to_vec()]
+}
+
+/// The probe's record of the program opcodes it received, in order: [`preset_event`]s.
+fn preset_trace() -> Vec<i32> {
+    let packed = with_symbol("tutti_vst2_probe_preset_trace", |p| {
+        // SAFETY: the probe exports this symbol with exactly this signature.
+        let f: extern "C" fn() -> i32 = unsafe { std::mem::transmute(p) };
+        f()
+    });
+    let len = with_symbol("tutti_vst2_probe_preset_trace_len", |p| {
+        // SAFETY: the probe exports this symbol with exactly this signature.
+        let f: extern "C" fn() -> i32 = unsafe { std::mem::transmute(p) };
+        f()
+    });
+    (0..len).map(|i| (packed >> (i * 2)) & 0b11).collect()
+}
+
+/// The program opcodes `preset_trace` records. Mirrored from the probe.
+mod preset_event {
+    pub const BEGIN: i32 = 1;
+    pub const CHANGE: i32 = 2;
+    pub const END: i32 = 3;
+}
+
+/// What one silent stereo block reports in its [`ProcessOutput`].
+fn render_out(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> ProcessOutput {
+    let input = [0.0f32; BLOCK];
+    let mut left = [0.0f32; BLOCK];
+    let mut right = [0.0f32; BLOCK];
+    let inputs = [input.as_slice(), input.as_slice()];
+    let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
+    let mut out = ProcessOutput::default();
+    let mut io = PluginIo {
+        buffer: PluginAudio::new(Samples(BLOCK), &inputs, &mut outputs).expect("equal channels"),
+        ctx,
+        out: &mut out,
+    };
+    processor.process(&mut io).expect("the block renders");
+    out
 }
 
 fn rejoin(processor: Vst2Processor, controller: Vst2Controller) -> Vst2Loaded {
@@ -535,6 +575,122 @@ fn a_processor_that_outlives_its_controller_renders_silence_and_destroys_nothing
         .expect("the drop did not panic");
     assert_eq!(close_count(), 1, "the audio thread closed nothing more");
     assert_eq!(trace(), [], "and called nothing in it");
+}
+
+/// **A block reports the MIDI it lost, once**: a message of a Group other than 0 reaches
+/// VST2's one input nowhere (M2-104 2.1.2), and the block's `ProcessOutput` counts it, the next
+/// block reporting only what is new.
+#[test]
+fn a_block_reports_the_midi_it_lost_once() {
+    let probe = Probe::acquire();
+    let (mut processor, controller) = probe.activate();
+    let at = |group: u8| {
+        (
+            Offset::of(Samples(3), Samples(BLOCK)),
+            midi::note_on(
+                Address::new(MidiGroup::new(group).expect("a group"), MidiChannel::FIRST),
+                60,
+                0x4000,
+            ),
+        )
+    };
+    let events = [at(0), at(1), at(2)];
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(out.midi_dropped(), 2, "the two of other Groups");
+    let out = render_out(&mut processor, &ProcessContext::new());
+    assert_eq!(out.midi_dropped(), 0, "nothing new");
+    drop(rejoin(processor, controller));
+}
+
+/// **A refused block reports the events the plugin never heard**: a closed plugin refuses
+/// every audio entry, so the block's MIDI is lost, and the refusals are counted.
+#[test]
+fn a_refused_block_reports_its_midi_as_lost() {
+    let probe = Probe::acquire();
+    let (mut processor, controller) = probe.activate();
+    let events = [(
+        Offset::of(Samples(3), Samples(BLOCK)),
+        midi::note_on(MidiChannel::FIRST, 60, 0x4000),
+    )];
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(out.midi_dropped(), 0, "a live plugin hears it");
+    assert_eq!(processor.entries_refused(), 0);
+
+    drop(controller);
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(out.midi_dropped(), 1, "a closed plugin hears nothing");
+    assert!(processor.entries_refused() > 0);
+}
+
+/// **A restore is a host write inside a program bracket, and it raises a rescan**: the
+/// plugin's `audioMasterAutomate` echo of each value is not reported as its own edit, the
+/// program is selected between `effBeginSetProgram` and `effEndSetProgram`, and the host is
+/// asked to read the values again.
+#[test]
+fn a_restore_is_a_host_write_in_a_program_bracket_and_raises_a_rescan() {
+    let probe = Probe::acquire();
+    let mut loaded = probe.load();
+    let state = parameter_state(1, &[0.25, 0.75]);
+    set_flag("tutti_vst2_probe_set_echo_set_parameter", true);
+    Control::load_state(
+        &mut loaded,
+        main_thread(),
+        &state,
+        tutti_plugin_types::StateUse::Project,
+    )
+    .expect("restores");
+    set_flag("tutti_vst2_probe_set_echo_set_parameter", false);
+
+    assert_eq!(
+        preset_trace(),
+        [preset_event::BEGIN, preset_event::CHANGE, preset_event::END]
+    );
+    assert_eq!(
+        Control::parameter(&loaded, main_thread(), ParamId::new(1)),
+        Some(Normalized::of(0.75))
+    );
+    let mut edits = Vec::new();
+    loaded.take_reported_edits(main_thread(), &mut edits);
+    assert_eq!(edits, Vec::new(), "the echo is the host's own write");
+    let mut requests = Vec::new();
+    loaded.take_requests(main_thread(), &mut requests);
+    assert!(requests.contains(&Request::RescanParams(RescanScope::Values)));
+}
+
+/// **A saved value off `0..=1` refuses the whole restore**: NaN is not a value to clamp,
+/// and no earlier value of the snapshot is written either.
+#[test]
+fn a_saved_value_that_is_not_a_normalized_one_refuses_the_restore() {
+    let probe = Probe::acquire();
+    let mut loaded = probe.load();
+    let before = Control::parameter(&loaded, main_thread(), ParamId::new(0));
+    for bad in [f32::NAN, f32::INFINITY, -0.5, 1.5] {
+        let state = parameter_state(0, &[0.9, bad]);
+        let error = Control::load_state(
+            &mut loaded,
+            main_thread(),
+            &state,
+            tutti_plugin_types::StateUse::Project,
+        )
+        .expect_err("refused");
+        assert!(matches!(error, PluginError::State(_)), "{error:?}");
+        assert_eq!(
+            Control::parameter(&loaded, main_thread(), ParamId::new(0)),
+            before,
+            "{bad}: nothing was written"
+        );
+    }
+}
+
+/// A `PRM\x01` state of `program` and `values`.
+fn parameter_state(program: i32, values: &[f32]) -> Vec<u8> {
+    let mut state = b"PRM\x01".to_vec();
+    state.extend_from_slice(&program.to_le_bytes());
+    state.extend_from_slice(&(values.len() as i32).to_le_bytes());
+    for value in values {
+        state.extend_from_slice(&value.to_le_bytes());
+    }
+    state
 }
 
 /// **No duplicate stop or suspend**, whichever way the plugin goes: a stop is

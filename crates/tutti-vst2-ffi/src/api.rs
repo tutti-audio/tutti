@@ -1103,9 +1103,8 @@ bitflags! {
     /// Flags in [`MidiProgramName::flags`] — VST 2.4's `VstMidiProgramNameFlags`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct MidiProgramFlags: i32 {
-        /// The program is a General MIDI drum kit rather than a melodic sound,
-        /// so its keys are individual instruments and `effGetMidiKeyName` is
-        /// the way to label them.
+        /// `kMidiIsOmni`: the program is for omni mode, where channel 0 is used
+        /// for inquiries and program changes; the default is multi mode.
         const IS_OMNI = 1;
     }
 }
