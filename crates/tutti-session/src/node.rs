@@ -289,7 +289,7 @@ impl<F: Float> SessionNode<F> for tutti_graph::EventInletNode {
 
 /// The metronome as a graph node: its settings are shared through the
 /// transport, no controls and no params.
-impl<F: Float> SessionNode<F> for tutti_nodes::ClickNode {
+impl<F: Float> SessionNode<F> for tutti_nodes::ClickNode<F> {
     fn reclaimer(_: &<Self as IntoNode<F>>::Controls) -> Reclaims {
         Reclaims::Nothing
     }

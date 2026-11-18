@@ -43,6 +43,7 @@
 //! `BusStripNode::render`.
 
 use crate::ramp::LastGood;
+use tutti_buffers::Float;
 use tutti_graph::{
     Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
 };
@@ -290,13 +291,13 @@ impl BusStripNode {
     /// the same arithmetic in the same order as one gain per frame applied to
     /// every channel would, so the order of the loops changes no bit.
     #[inline]
-    fn render(
+    fn render<F: Float>(
         &mut self,
-        inputs: &Inputs<'_>,
-        outputs: &mut Outputs<'_, '_>,
+        inputs: &Inputs<'_, F>,
+        outputs: &mut Outputs<'_, '_, F>,
         size: usize,
-        volume: Option<&[f32]>,
-        balance: Option<&[f32]>,
+        volume: Option<&[F]>,
+        balance: Option<&[F]>,
     ) {
         let fed = (volume.is_some(), balance.is_some());
         let fed_bits = u8::from(fed.0) | u8::from(fed.1) << 1;
@@ -325,14 +326,21 @@ impl BusStripNode {
             let (start, end) = (from.on(side), target.on(side));
             // `(i + 1) / size`, not `(i + 1) * (1 / size)`: the division is
             // exact at the last frame (`size / size == 1`), so the ramp lands
-            // on the target rather than an ulp beside it. Through `i32`, which
-            // has a SIMD conversion; it rounds as `usize` would.
-            debug_assert!(i32::try_from(size).is_ok());
-            let n = size as i32 as f32;
-            // The samples are `f32`: the endpoints narrow once per block, and the ramp runs in
-            // the sample width.
-            let (start, end) = (start.get() as f32, end.get() as f32);
-            let ramp = |i: usize| lerp(start, end, (i + 1) as i32 as f32 / n);
+            // on the target rather than an ulp beside it.
+            // The endpoints cross into the sample width once per block, and the ramp runs in it.
+            let (start, end) = (F::from_unit(start), F::from_unit(end));
+            // The fraction is `(i + 1)` times `1 / size`, both in the sample width, and the last
+            // frame is `1` itself, so the ramp lands on the target exactly.
+            debug_assert!(u32::try_from(size).is_ok());
+            let inv = F::from_design(1.0 / size as f64);
+            let ramp = |i: usize| {
+                let t = if i + 1 == size {
+                    F::ONE
+                } else {
+                    F::from_count((i + 1) as u32) * inv
+                };
+                lerp(start, end, t)
+            };
             let steady = end;
             match (ramping, volume.is_some() || balance.is_some()) {
                 (false, false) => scale(x, y, |_| steady),
@@ -346,12 +354,12 @@ impl BusStripNode {
     /// [`scale`] by `base(i)` times a channel's [`fed_gain`](Self::fed_gain),
     /// with `side` a constant in each loop so only its side is computed.
     #[inline(always)]
-    fn scale_fed(
-        x: &[f32],
-        y: &mut [f32],
-        base: impl Fn(usize) -> f32,
-        volume: Option<&[f32]>,
-        balance: Option<&[f32]>,
+    fn scale_fed<F: Float>(
+        x: &[F],
+        y: &mut [F],
+        base: impl Fn(usize) -> F,
+        volume: Option<&[F]>,
+        balance: Option<&[F]>,
         side: Side,
     ) {
         match side {
@@ -371,20 +379,35 @@ impl BusStripNode {
     /// one that is not fed: [`gains_for`](Self::gains_for), computing only what
     /// that side takes (a channel without a mirror, the fader alone).
     ///
-    /// The param port carries raw values, so this is the boundary where an
-    /// untyped float becomes a typed quantity again. Not ramped: a fed value
-    /// is already a signal, and the graph that feeds it owns its continuity.
+    /// Not ramped: a fed value is already a signal in the sample width, and the graph that
+    /// feeds it owns its continuity.
     #[inline(always)]
-    fn fed_gain(volume: Option<&[f32]>, balance: Option<&[f32]>, i: usize, side: Side) -> f32 {
-        // A fed value changes every frame, so its gain is computed per frame as `f64` units and
-        // narrows once, into the sample width.
-        let fader = volume.map_or(Amplitude::UNITY, |v| Amplitude(f64::from(v[i])));
+    fn fed_gain<F: Float>(volume: Option<&[F]>, balance: Option<&[F]>, i: usize, side: Side) -> F {
+        // The lanes are already the sample width: a fed value is used as it is, and the side
+        // gains are `Balance::gains`' arithmetic in that width (a NaN balance reads as unity).
+        let fader = volume.map_or(F::ONE, |v| v[i]);
         if side == Side::Mid {
-            return fader.get() as f32;
+            return fader;
         }
-        let balance = balance.map_or(Balance::CENTER, |b| Balance(f64::from(b[i])));
-        let (l, r) = balance.gains();
-        ((if side == Side::Right { r } else { l }) * fader.get()).get() as f32
+        let one = F::ONE;
+        // Comparisons, not `clamp` and `min`: a NaN falls through to unity, and the selects
+        // vectorise where the NaN-propagating forms do not.
+        let at_most_one = |x: F| if x < one { x } else { one };
+        let b = balance.map_or(F::ZERO, |b| {
+            let b = b[i];
+            if b < -one {
+                -one
+            } else if b > one {
+                one
+            } else {
+                b
+            }
+        });
+        let side_gain = match side {
+            Side::Right => at_most_one(one + b),
+            _ => at_most_one(one - b),
+        };
+        side_gain * fader
     }
 }
 
@@ -395,7 +418,7 @@ impl BusStripNode {
 /// ulps above zero and a strip faded to nothing would leak. Over the sample width's bare
 /// gains, narrowed once per block: a per-frame `f64` ramp would not vectorise with the product.
 #[inline(always)]
-fn lerp(from: f32, to: f32, t: f32) -> f32 {
+fn lerp<F: Float>(from: F, to: F, t: F) -> F {
     tutti_dsp::lerp(from, to, t)
 }
 
@@ -404,7 +427,7 @@ fn lerp(from: f32, to: f32, t: f32) -> f32 {
 /// `#[inline(always)]` so each caller's `gain` is compiled into the loop and
 /// the loop vectorises with it.
 #[inline(always)]
-fn scale(x: &[f32], y: &mut [f32], gain: impl Fn(usize) -> f32) {
+fn scale<F: Float>(x: &[F], y: &mut [F], gain: impl Fn(usize) -> F) {
     for (i, (y, &x)) in y.iter_mut().zip(x).enumerate() {
         *y = x * gain(i);
     }
@@ -416,7 +439,7 @@ impl Default for BusStripNode {
     }
 }
 
-impl Node for BusStripNode {
+impl<F: Float> Node<F> for BusStripNode {
     /// `channels` in and out, volume then balance modulatable.
     /// Volume and balance are per-frame gains, so it stops
     /// with its input.
@@ -435,7 +458,7 @@ impl Node for BusStripNode {
     /// rate.
     fn prepare(&mut self, _: &Prepare) {}
 
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let size = io.frames();
         let (volume, balance) = (
             self.declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
@@ -459,7 +482,7 @@ impl Node for BusStripNode {
     }
 }
 
-impl ParamNode for BusStripNode {
+impl<F: Float> ParamNode<F> for BusStripNode {
     /// Volume, and balance on a bus with a left/right pair.
     fn param_set(&self) -> ParamSet {
         self.declared_set()
@@ -474,17 +497,17 @@ impl ParamNode for BusStripNode {
         if let Some(cell) = &mut fork.balance {
             cell.detach();
         }
-        Node::reset(&mut fork);
+        Node::<F>::reset(&mut fork);
         fork
     }
 }
 
 /// Inserted with its [`ParamSet`] as its controls and a fork from the values
 /// last set through it ([`tutti_graph::param_parts`]).
-impl IntoNode for BusStripNode {
+impl<F: Float> IntoNode<F> for BusStripNode {
     type Controls = ParamSet;
 
-    fn into_parts(self) -> NodeParts<ParamSet> {
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
         tutti_graph::param_parts(self)
     }
 }
@@ -512,7 +535,7 @@ mod tests {
     fn the_strip_is_light() {
         for topology in [BusTopology::MONO, BusTopology::STEREO] {
             let strip = BusStripNode::new(topology);
-            assert_eq!(strip.shape().cost, tutti_graph::Cost::Light);
+            assert_eq!(Node::<f32>::shape(&strip).cost, tutti_graph::Cost::Light);
         }
     }
 
@@ -520,7 +543,7 @@ mod tests {
     /// `ParamSet` — rather than by calling the setter, so the test covers the
     /// path `AudioParam<U, P>` uses. `false` if the strip refused it.
     fn set_param(strip: &BusStripNode, param: UnitParam, value: f32) -> bool {
-        strip.param_set().set(param, f64::from(value))
+        ParamNode::<f32>::param_set(strip).set(param, f64::from(value))
     }
 
     fn set_balance(strip: &BusStripNode, balance: f64) {
@@ -609,16 +632,27 @@ mod tests {
     fn the_shape_declares_volume_then_balance() {
         let s = BusStripNode::new(width(6));
         assert_eq!(
-            s.shape().params.as_slice(),
+            Node::<f32>::shape(&s).params.as_slice(),
             &[UnitParam::Volume, UnitParam::Balance][..]
         );
         assert_eq!(
-            (s.shape().audio_in().count(), s.shape().audio_out().count()),
+            (
+                Node::<f32>::shape(&s).audio_in().count(),
+                Node::<f32>::shape(&s).audio_out().count()
+            ),
             (6, 6)
         );
         s.set_volume(Amplitude(0.5));
-        assert_eq!(s.param_base(0), Some(0.5), "volume's base is its control");
-        assert_eq!(s.param_base(1), Some(0.0), "balance's base is centre");
+        assert_eq!(
+            Node::<f32>::param_base(&s, 0),
+            Some(0.5),
+            "volume's base is its control"
+        );
+        assert_eq!(
+            Node::<f32>::param_base(&s, 1),
+            Some(0.0),
+            "balance's base is centre"
+        );
     }
 
     /// A bus with nothing to balance declares no balance port and no balance
@@ -628,12 +662,16 @@ mod tests {
         for bus in pairless_buses() {
             let s = BusStripNode::new(bus);
             assert_eq!(
-                s.shape().params.as_slice(),
+                Node::<f32>::shape(&s).params.as_slice(),
                 &[UnitParam::Volume][..],
                 "{bus:?}"
             );
-            assert_eq!(s.param_base(0), Some(1.0));
-            assert_eq!(s.param_base(1), None, "{bus:?}: no balance port");
+            assert_eq!(Node::<f32>::param_base(&s, 0), Some(1.0));
+            assert_eq!(
+                Node::<f32>::param_base(&s, 1),
+                None,
+                "{bus:?}: no balance port"
+            );
             assert!(s.balance().is_none(), "{bus:?}");
         }
     }
@@ -707,7 +745,7 @@ mod tests {
         let mut framed = BusStripNode::stereo();
         framed.set_volume(Amplitude(0.6));
         set_balance(&framed, 0.25);
-        let mut block = framed.fork_fresh();
+        let mut block = ParamNode::<f32>::fork_fresh(&framed);
 
         const N: usize = 8;
         let samples: [(f32, f32); N] = [
@@ -745,6 +783,38 @@ mod tests {
         let (lv, rv) = (vec![l; size], vec![r; size]);
         let out = drive(strip, RATE, Planes::new(&[&lv, &rv]).unwrap(), &[]);
         (0..size).map(|i| [out[0][i], out[1][i]]).collect()
+    }
+
+    /// A fader moved from 1 to 1/4 ramps a DC block along `1 - (3/4)(i + 1)/N`, landing on 1/4
+    /// exactly at the last frame, at both widths. Each sample is `from (1 - t) + to t` with the
+    /// fraction `t`, both products and the sum rounded once, so it is off the line by at most
+    /// four half-ulps of the larger endpoint: `bound`, `4 * 2^-24` at `f32` and `4 * 2^-53` at
+    /// `f64`.
+    fn ramp_is_the_line_in<F: Float + core::fmt::Debug>(bound: f64) {
+        const N: usize = 1000;
+        let mut s = BusStripNode::mono();
+        let ones = vec![F::ONE; N];
+        let steady: Vec<Vec<F>> = drive(&mut s, RATE, Planes::new(&[&ones]).unwrap(), &[]);
+        assert!(steady[0].iter().all(|&v| v == F::ONE));
+        s.set_volume(Amplitude(0.25));
+        let out = drive(&mut s, RATE, Planes::new(&[&ones]).unwrap(), &[]);
+        let mut worst = 0.0f64;
+        for (i, &y) in out[0].iter().enumerate() {
+            let line = 1.0 - 0.75 * (i + 1) as f64 / N as f64;
+            worst = worst.max((Into::<f64>::into(y) - line).abs());
+        }
+        assert!(worst < bound, "worst {worst:e} vs bound {bound:e}");
+        assert_eq!(out[0][N - 1], F::lit(0.25), "the ramp lands on the target");
+    }
+
+    #[test]
+    fn the_f32_ramp_is_the_line_to_four_half_ulps_and_lands_exactly() {
+        ramp_is_the_line_in::<f32>(4.0 * 2f64.powi(-24));
+    }
+
+    #[test]
+    fn the_f64_ramp_is_the_line_to_four_half_ulps_and_lands_exactly() {
+        ramp_is_the_line_in::<f64>(4.0 * 2f64.powi(-53));
     }
 
     /// Largest sample-to-sample jump across `frames`, on either channel.
@@ -843,7 +913,7 @@ mod tests {
                 .all(|f| *f == [0.0, 0.0])
         );
 
-        s.reset();
+        Node::<f32>::reset(&mut s);
         s.set_volume(Amplitude(0.25));
         assert!(
             process_dc(&mut s, 16, 1.0, 1.0)

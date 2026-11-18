@@ -100,11 +100,7 @@ fn strip(c: &mut Criterion) {
         );
         fill_noise(&mut d);
         d.node.set_volume(Amplitude(0.5));
-        assert!(
-            d.node
-                .param_set()
-                .set(tutti_units::UnitParam::Balance, 0.25)
-        );
+        assert!(ParamNode::<f32>::param_set(&*d.node).set(tutti_units::UnitParam::Balance, 0.25));
         d.block();
         g.bench_with_input(BenchmarkId::new("steady", width), &width, |b, _| {
             b.iter(|| {

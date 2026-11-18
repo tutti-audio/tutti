@@ -3,21 +3,6 @@ use super::*;
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
 
-/// A step closes `coeff` of the gap: a tenth up, a tenth down, all of it
-/// at 1, none at 0.
-#[test]
-fn a_step_closes_the_coefficient_of_the_gap() {
-    assert_eq!(Smoother::toward(0.0, 1.0, 0.1), 0.1);
-    assert_eq!(Smoother::toward(1.0, 0.0, 0.1), 0.9);
-    assert_eq!(Smoother::toward(0.0, 1.0, 1.0), 1.0);
-    assert_eq!(Smoother::toward(0.25, 1.0, 0.0), 0.25);
-    let mut s = Smoother::new(0.5);
-    s.seed(0.0);
-    assert_eq!(s.step(1.0), 0.5);
-    assert_eq!(s.step(1.0), 0.75);
-    assert_eq!(s.value(), 0.75);
-}
-
 /// In `f64`, `n` steps of coefficient `c` from `y0` toward a wide target `t` land on the
 /// closed form `t - (t - y0) * (1 - c)^n` to `2^-45`, a bound an `f32` state cannot meet.
 #[test]
@@ -28,7 +13,7 @@ fn an_f64_smoother_follows_the_closed_form_of_the_one_pole() {
     let mut y = y0;
     let got: Vec<f64> = (0..32)
         .map(|_| {
-            y = Smoother::toward(y, t, c);
+            y = smooth_toward(y, t, c);
             y
         })
         .collect();
@@ -40,7 +25,8 @@ fn an_f64_smoother_follows_the_closed_form_of_the_one_pole() {
 /// the full gap at 1 is the target, and none at 0 holds.
 #[test]
 fn an_f32_step_closes_the_coefficient_of_the_gap() {
-    assert_eq!(Smoother::toward(0.0_f32, 1.0, 0.1), 0.1_f32);
-    assert_eq!(Smoother::toward(1.0_f32, 0.0, 1.0), 0.0);
-    assert_eq!(Smoother::toward(0.25_f32, 1.0, 0.0), 0.25);
+    assert_eq!(smooth_toward(0.0_f32, 1.0, 0.1), 0.1_f32);
+    assert_eq!(smooth_toward(1.0_f32, 0.0, 0.1), 0.9_f32);
+    assert_eq!(smooth_toward(1.0_f32, 0.0, 1.0), 0.0);
+    assert_eq!(smooth_toward(0.25_f32, 1.0, 0.0), 0.25);
 }

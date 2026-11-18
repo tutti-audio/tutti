@@ -496,6 +496,20 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     #[must_use]
     fn from_phase(p: RunningPhase) -> Self;
 
+    /// A 64-bit word read as a `0.64` fixed-point fraction, as data of this width in `[0, 1)`:
+    /// the top [`MANTISSA_DIGITS`](Real::MANTISSA_DIGITS) bits kept and truncated, so the value
+    /// is uniform over the grid of `2^-MANTISSA_DIGITS` for uniform bits and never rounds up to
+    /// `1.0`. The integer converts exactly and so does the scaling.
+    ///
+    /// ```
+    /// use tutti_buffers::Float;
+    ///
+    /// assert_eq!(f32::from_fraction_bits(1 << 63), 0.5);
+    /// assert_eq!(f64::from_fraction_bits(u64::MAX), 1.0 - 2f64.powi(-53));
+    /// ```
+    #[must_use]
+    fn from_fraction_bits(bits: u64) -> Self;
+
     /// A read position as its whole frames and a fraction of this width in `[0, 1)`:
     /// the top bits of the position's fraction (the width's mantissa, capped at the
     /// fraction's own [`FRACTION_BITS`](ReadPosition::FRACTION_BITS)) as an integer,
@@ -570,10 +584,14 @@ pub trait Float: Real + Sample + bytemuck::Pod {
 macro_rules! position_crossings {
     ($t:ty) => {
         #[inline]
+        fn from_fraction_bits(bits: u64) -> Self {
+            let digits = <$t as Real>::MANTISSA_DIGITS;
+            let top = bits >> (u64::BITS - digits);
+            top as $t * (1.0 / (1_u64 << digits) as $t)
+        }
+        #[inline]
         fn from_phase(p: RunningPhase) -> Self {
-            let bits = <$t as Real>::MANTISSA_DIGITS;
-            let top = p.get() >> (u64::BITS - bits);
-            top as $t * (1.0 / (1_u64 << bits) as $t)
+            Self::from_fraction_bits(p.get())
         }
         #[inline]
         fn split_position(p: ReadPosition) -> (Samples, Self) {
@@ -844,6 +862,24 @@ mod tests {
         assert_eq!(
             Float::offset_position(base, -2.5_f32).get(),
             (7_u64 << 32) + (1 << 31) + 5
+        );
+    }
+
+    /// A fraction word keeps its top mantissa bits: 0 is 0, `2^63` is a half, and the largest
+    /// word is `1 - 2^-digits`, below 1 (`u64::MAX as f32 / 2^64` would round to exactly 1).
+    #[test]
+    fn a_fraction_word_truncates_to_the_width_and_stays_below_one() {
+        assert_eq!(f32::from_fraction_bits(0), 0.0);
+        assert_eq!(f64::from_fraction_bits(0), 0.0);
+        assert_eq!(f32::from_fraction_bits(1 << 63), 0.5);
+        assert_eq!(f64::from_fraction_bits(1 << 63), 0.5);
+        assert_eq!(f32::from_fraction_bits(u64::MAX), 1.0 - 2f32.powi(-24));
+        assert_eq!(f64::from_fraction_bits(u64::MAX), 1.0 - 2f64.powi(-53));
+        assert!(f32::from_fraction_bits(u64::MAX) < 1.0);
+        assert_eq!(
+            u64::MAX as f32 / 2f32.powi(64),
+            1.0,
+            "the naive form rounds up"
         );
     }
 }

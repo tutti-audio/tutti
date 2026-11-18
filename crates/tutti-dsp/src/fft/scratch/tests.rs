@@ -1,6 +1,7 @@
 use super::*;
 use crate::Complex32;
 use crate::{CosineWindow, Window};
+use tutti_units::Real;
 
 #[test]
 fn forward_finds_a_tone_in_the_right_bin() {
@@ -75,7 +76,11 @@ fn reused_scratch_gives_identical_results() {
     let size = 512;
     let a: Vec<f32> = (0..size).map(|i| (i as f32 / 11.0).sin()).collect();
     let b: Vec<f32> = (0..size).map(|i| (i as f32 / 3.0).cos()).collect();
-    let window = CosineWindow::HANN.coefficients(size);
+    let window: Vec<f32> = CosineWindow::HANN
+        .coefficients(size)
+        .into_iter()
+        .map(f32::from_design)
+        .collect();
 
     let mut shared = FftScratch::new();
     let mut first = vec![Complex32::default(); size / 2 + 1];
