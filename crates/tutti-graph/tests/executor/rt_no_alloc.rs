@@ -1153,7 +1153,7 @@ fn a_range_published_while_blocks_render_is_allocation_free() {
                 let half = 10.0 + f64::from(k % 160);
                 ed.set_param_range(azimuth, ParamRange::arc(Azimuth(180.0), ArcDegrees(half)))
                     .expect("a bearing's range");
-                if k % 8 == 0 {
+                if k.is_multiple_of(8) {
                     let _ = ed.reclaim();
                 }
                 k += 1;
