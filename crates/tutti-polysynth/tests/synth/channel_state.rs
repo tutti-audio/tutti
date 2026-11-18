@@ -232,7 +232,7 @@ fn rpn_0_sets_the_bend_range_per_channel() {
             0.2,
         );
         let tone = play(&mut h, &[], 0.5);
-        // Full wheel is 1 - 2^-31 of the travel.
+        // Full wheel spans the whole range.
         assert_hz(&tone, A4 * ratio(f64::from(semitones)));
     }
 

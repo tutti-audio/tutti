@@ -2517,8 +2517,9 @@ mod tests {
 
     // (`use super::*` is already in scope from the top of this module.)
     use tutti_fixtures::midi;
-    use tutti_midi_protocol::{signed_f32_to_bend, widen_value, widen_velocity};
-    use tutti_ump::{Bank, Sysex7Packets, parse_exact};
+    use tutti_midi_protocol::{widen_value, widen_velocity};
+    use tutti_ump::{Bank, BendValue, Sysex7Packets, parse_exact};
+    use tutti_units::Bipolar;
 
     // --- Param-change denormalization (host 0..1 → CLAP plain) ---
 
@@ -3955,7 +3956,7 @@ mod tests {
 
     #[test]
     fn per_note_pitch_bend_becomes_tuning_note_expression() {
-        let bend = signed_f32_to_bend(0.5);
+        let bend = BendValue::from_bipolar(Bipolar::of(0.5));
         let midi = (
             at(11),
             midi::per_note_pitch_bend(MidiChannel::of(3), 60, bend.get()),
@@ -3984,7 +3985,7 @@ mod tests {
     /// in this block and after a `clear`, while channel 4 stays at ±48 (24).
     #[test]
     fn the_input_list_follows_the_per_note_bend_range() {
-        let half = signed_f32_to_bend(0.5);
+        let half = BendValue::from_bipolar(Bipolar::of(0.5));
         let bend = |channel: u8| {
             (
                 at(0),

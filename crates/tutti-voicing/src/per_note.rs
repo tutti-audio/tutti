@@ -56,7 +56,7 @@
 
 use alloc::vec;
 use alloc::vec::Vec;
-use tutti_midi_protocol::{PitchBendSensitivity, bend_to_signed_f32};
+use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_ump::BendValue;
 use tutti_ump::{
     Address, Attribute, MidiChannel, NoteId, NoteNumber, PerNoteManagement, Pitch,
@@ -404,9 +404,9 @@ impl PerNoteState {
         let range = self
             .channel_index(address)
             .map_or(self.default_range, |c| self.ranges[c]);
-        let bend = self.held[at].get(Held::BEND).map_or(0.0, |v| {
-            f64::from(bend_to_signed_f32(BendValue::new(v))) * range.get()
-        });
+        let bend = self.held[at]
+            .get(Held::BEND)
+            .map_or(0.0, |v| BendValue::new(v).bipolar().get() * range.get());
         let q = f64::from(told.q7_25()) + bend * f64::from(1u32 << 25);
         Pitch::from_q7_25(libm::round(q).clamp(0.0, f64::from(u32::MAX)) as u32)
     }

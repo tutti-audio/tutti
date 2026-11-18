@@ -37,7 +37,9 @@ fn len(list: &EventList) -> usize {
 /// later block's per-note bends are read at: the list keeps it.
 #[test]
 fn a_per_note_bend_range_outlives_its_block() {
-    use tutti_midi_protocol::{PitchBendSensitivity, signed_f32_to_bend};
+    use tutti_midi_protocol::PitchBendSensitivity;
+    use tutti_ump::BendValue;
+    use tutti_units::Bipolar;
 
     let list = EventList::input();
     let mut stager = Stager::default();
@@ -63,7 +65,11 @@ fn a_per_note_bend_range_outlives_its_block() {
 
     let bend = [(
         Offset::ZERO,
-        midi::per_note_pitch_bend(MidiChannel::FIRST, 60, signed_f32_to_bend(0.25).get()),
+        midi::per_note_pitch_bend(
+            MidiChannel::FIRST,
+            60,
+            BendValue::from_bipolar(Bipolar::of(0.25)).get(),
+        ),
     )];
     assert!(stager.stage(
         &list,
@@ -95,12 +101,18 @@ fn a_per_note_bend_range_outlives_its_block() {
 #[test]
 fn vst3_and_clap_bend_one_stream_by_the_same_semitones() {
     use tutti_clap_host::{ClapEvent, EventList as _, InputEventList};
-    use tutti_midi_protocol::{PitchBendSensitivity, signed_f32_to_bend};
+    use tutti_midi_protocol::PitchBendSensitivity;
+    use tutti_ump::BendValue;
+    use tutti_units::Bipolar;
 
     let bend = |channel: u8| {
         (
             Offset::ZERO,
-            midi::per_note_pitch_bend(MidiChannel::of(channel), 60, signed_f32_to_bend(0.25).get()),
+            midi::per_note_pitch_bend(
+                MidiChannel::of(channel),
+                60,
+                BendValue::from_bipolar(Bipolar::of(0.25)).get(),
+            ),
         )
     };
     let first = [
