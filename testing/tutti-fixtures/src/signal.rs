@@ -5,8 +5,8 @@
 //! [`read_wav_f32`]), and the narrowing check [`wide_signal`] with [`assert_close_f64`].
 //!
 //! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
-//! this crate's root. Every figure here is plain
-//! `f32` samples; only the arguments that name a quantity are units.
+//! this crate's root. The figures are plain `f32` samples, except the `f64` narrowing
+//! check's; only the arguments that name a quantity are units.
 //!
 //! These are definitions, not references: a test pins an analytic figure with
 //! them (a sine's amplitude, an impulse's position), never a render against

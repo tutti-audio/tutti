@@ -187,8 +187,8 @@ fn an_f64_delay_step_with_feedback_follows_the_closed_form_recursion() {
     assert_close_f64(&got, &want, 2f64.powi(-50));
 }
 
-/// A read at `100000.3` frames on a long `f64` line, in every interpolating mode's linear
-/// case, is the lerp of its two wide slots at the `f64` fraction, to `2^-45`.
+/// A linear read at `100000.3` frames on a long `f64` line is the lerp of its two
+/// wide slots at the `f64` fraction, to `2^-45`.
 #[test]
 fn an_f64_line_read_at_a_wide_position_is_the_lerp_of_the_wide_slots() {
     use tutti_fixtures::signal::wide_signal;
