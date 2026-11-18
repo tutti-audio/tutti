@@ -124,12 +124,7 @@ pub(crate) struct Options {
     #[cfg(feature = "midi")]
     midi_ports: tutti_midi_runtime::MidiInputPorts,
     unresolved_warning: std::time::Duration,
-    #[cfg(feature = "plugin")]
-    pub(crate) snapshot_interval: std::time::Duration,
-    #[cfg(feature = "plugin")]
-    pub(crate) recovery: Option<crate::RecoveryPolicy>,
-    #[cfg(feature = "plugin")]
-    pub(crate) hang: crate::HangPolicy,
+    pub(crate) plugins: crate::session::parts::PluginOptions,
     spawner: crate::jobs::Spawner,
     pool: crate::PoolConfig,
 }
@@ -167,12 +162,7 @@ impl Default for Options {
             #[cfg(feature = "midi")]
             midi_ports: tutti_midi_runtime::MidiInputPorts::FIRST_GROUP,
             unresolved_warning: crate::modulation::UNRESOLVED_WARNING,
-            #[cfg(feature = "plugin")]
-            snapshot_interval: crate::plugin::SNAPSHOT_INTERVAL,
-            #[cfg(feature = "plugin")]
-            recovery: Some(crate::RecoveryPolicy::default()),
-            #[cfg(feature = "plugin")]
-            hang: crate::HangPolicy::default(),
+            plugins: Default::default(),
             spawner: crate::jobs::Spawner::default(),
             pool: crate::PoolConfig::default(),
         }
@@ -851,7 +841,7 @@ impl<C: Clock> SessionBuilder<C> {
     #[cfg(feature = "plugin")]
     #[must_use]
     pub fn snapshot_interval(mut self, every: std::time::Duration) -> Self {
-        self.opts.snapshot_interval = every;
+        self.opts.plugins.snapshot_interval = every;
         self
     }
 
@@ -873,7 +863,7 @@ impl<C: Clock> SessionBuilder<C> {
     #[cfg(feature = "plugin")]
     #[must_use]
     pub fn plugin_recovery(mut self, policy: Option<crate::RecoveryPolicy>) -> Self {
-        self.opts.recovery = policy;
+        self.opts.plugins.recovery = policy;
         self
     }
 
@@ -884,7 +874,7 @@ impl<C: Clock> SessionBuilder<C> {
     #[cfg(feature = "plugin")]
     #[must_use]
     pub fn plugin_hang(mut self, policy: crate::HangPolicy) -> Self {
-        self.opts.hang = policy;
+        self.opts.plugins.hang = policy;
         self
     }
 
@@ -989,7 +979,7 @@ impl<C: Clock> SessionBuilder<C> {
             streamer,
             parts.graph.prepared().sample_rate(),
         )?;
-        let (plugins, _early_work) = crate::session::parts::PluginPart::new(&self.opts);
+        let (plugins, _early_work) = crate::session::parts::PluginPart::new(&self.opts.plugins);
         let table = parts.graph.value_table();
         let click_settings = Arc::clone(&parts.click_settings);
         let session = Session {

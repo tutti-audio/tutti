@@ -4,8 +4,12 @@
 use tutti_buffers::Float;
 use tutti_rt::MainThreadMarker;
 
-use crate::builder::Options;
 use crate::graph::Graph;
+use crate::pool::Defer;
+
+/// No plugin policy is set.
+#[derive(Debug, Default)]
+pub(crate) struct PluginOptions;
 
 /// No plugin is hosted.
 #[derive(Debug)]
@@ -16,8 +20,13 @@ pub(crate) struct PluginPart;
 pub(crate) struct EarlyWork;
 
 impl PluginPart {
-    pub(crate) fn new(_: &Options) -> (Self, EarlyWork) {
+    pub(crate) fn new(_: &PluginOptions) -> (Self, EarlyWork) {
         (Self, EarlyWork)
+    }
+
+    /// No discard is deferred.
+    pub(crate) fn main_deferral(&self) -> Option<Defer> {
+        None
     }
 
     /// No work is handed over.

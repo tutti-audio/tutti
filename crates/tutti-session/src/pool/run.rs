@@ -6,7 +6,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use tutti_rt::MainThreadMarker;
 
 use crate::jobs::panic_message;
-use crate::pool::entry::{Defer, LoadError, Step, Value};
+use crate::pool::entry::{LoadError, Step, Value};
 use crate::pool::open::OpenCx;
 use crate::pool::stamp::Stamp;
 use crate::pool::table::{Opening, Start, Worker};
@@ -36,7 +36,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Each landing starts the next.
     pub(crate) fn pool_pump(&mut self) {
         while let Some(Worker { flight, work, file }) = self.pool.entries.next_worker() {
-            let defer = self.main_deferral();
+            let defer = self.plugins.main_deferral();
             // A main stage the worker made drops its output on the main thread
             // wherever the stage itself is dropped: the jobs' channel, a session
             // that ends.
@@ -55,20 +55,6 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
                     session.land_pool_load(flight, stamp, done);
                 },
             );
-        }
-    }
-
-    /// What a main stage dropped off the main thread hands its discard to: the
-    /// session's main-work collector (feature `plugin`).
-    fn main_deferral(&self) -> Option<Defer> {
-        #[cfg(feature = "plugin")]
-        {
-            let work = self.plugins.work.clone();
-            Some(std::sync::Arc::new(move |discard| work.defer(discard)))
-        }
-        #[cfg(not(feature = "plugin"))]
-        {
-            None
         }
     }
 

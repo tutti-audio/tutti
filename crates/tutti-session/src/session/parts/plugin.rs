@@ -10,10 +10,31 @@ use tutti_buffers::Float;
 use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle};
 use tutti_rt::LockExt;
 
-use crate::builder::Options;
 use crate::graph::Graph;
-use crate::plugin::RenderModeState;
+use crate::plugin::{RenderModeState, SNAPSHOT_INTERVAL};
+use crate::pool::Defer;
 use crate::{HangPolicy, PoolKey, RecoveryPolicy};
+
+/// The plugin policies a builder sets.
+#[derive(Debug)]
+pub(crate) struct PluginOptions {
+    /// How often a healthy plugin's state is captured.
+    pub(crate) snapshot_interval: Duration,
+    /// What a hosted plugin's death or hang does.
+    pub(crate) recovery: Option<RecoveryPolicy>,
+    /// When a hosted plugin's unanswered blocks are a hang.
+    pub(crate) hang: HangPolicy,
+}
+
+impl Default for PluginOptions {
+    fn default() -> Self {
+        Self {
+            snapshot_interval: SNAPSHOT_INTERVAL,
+            recovery: Some(RecoveryPolicy::default()),
+            hang: HangPolicy::default(),
+        }
+    }
+}
 
 /// Plugin hosting: what runs a hosted plugin's phases and what its closes hand over.
 #[derive(Debug)]
@@ -44,8 +65,10 @@ pub(crate) struct PluginPart {
 
 impl PluginPart {
     /// The part for a session built with `options`, and the guard that runs
-    /// the work already handed over when the session drops.
-    pub(crate) fn new(options: &Options) -> (Self, EarlyWork) {
+    /// the work already handed over when the session drops. The guard is
+    /// stored as `Session`'s first field: fields drop in order, so the
+    /// plugins close before the part's collector, which the guard's drop runs.
+    pub(crate) fn new(options: &PluginOptions) -> (Self, EarlyWork) {
         let (main_work, work) = MainWork::new();
         let main_work = SharedWork::new(main_work);
         let early = EarlyWork(main_work.clone());
@@ -62,6 +85,13 @@ impl PluginPart {
             },
             early,
         )
+    }
+
+    /// What a main stage dropped off the main thread hands its discard to: this
+    /// part's collector.
+    pub(crate) fn main_deferral(&self) -> Option<Defer> {
+        let work = self.work.clone();
+        Some(Arc::new(move |discard| work.defer(discard)))
     }
 
     /// Runs the work other threads handed to the main thread, when `main` is the

@@ -1,6 +1,6 @@
 //! The parts of a [`Session`](super::Session): each owns one subsystem's bookkeeping and the
 //! methods that use it. A part of a feature comes from the module the feature picks: the real
-//! one when the feature is on, and a stub with the same method signatures, doing nothing,
+//! one when the feature is on, and a stub with the signatures the feature-independent code calls, doing nothing,
 //! when it is off. `Session`'s fields and phases name the part and never the feature.
 
 mod output;
@@ -48,7 +48,7 @@ pub(crate) use device::DevicePart;
 pub use midi::MidiNodes;
 pub(crate) use midi::MidiPart;
 pub(crate) use output::OutputPart;
-pub(crate) use plugin::{EarlyWork, PluginPart};
+pub(crate) use plugin::{EarlyWork, PluginOptions, PluginPart};
 pub(crate) use pool::PoolPart;
 pub(crate) use reports::Reports;
 pub(crate) use sampler::SamplerPart;
