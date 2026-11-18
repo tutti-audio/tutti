@@ -879,7 +879,7 @@ mod tests {
             ceiling: Db::new(0.0),
             ..LimiterControls::DEFAULT
         };
-        let y = drive_kernel(&mut k, &[(0, controls)], &[x.clone()]);
+        let y = drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x));
         let want: Vec<f64> = (0..x.len())
             .map(|n| n.checked_sub(latency).map_or(0.0, |m| x[m]))
             .collect();

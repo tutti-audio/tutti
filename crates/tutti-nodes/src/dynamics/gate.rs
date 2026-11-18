@@ -697,7 +697,7 @@ mod tests {
             range: Db::new(-80.0),
             ..GateControls::DEFAULT
         };
-        let y = drive_kernel(&mut k, &[(0, controls)], &[x.clone()]);
+        let y = drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x));
         assert_close_f64(&y[0], &x, 2.0f64.powi(-50));
     }
 }

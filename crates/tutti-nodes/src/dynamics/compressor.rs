@@ -772,7 +772,7 @@ mod tests {
         let y = drive_kernel(
             &mut k,
             &[(0, four(threshold, ratio, 0.0, 0.0))],
-            &[key.clone()],
+            std::slice::from_ref(&key),
         );
         let level = 20.0 * key[0].log10();
         let want = f64::from(threshold) + (level - f64::from(threshold)) / f64::from(ratio);
