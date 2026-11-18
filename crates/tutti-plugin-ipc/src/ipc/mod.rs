@@ -610,8 +610,9 @@ impl Ipc {
     }
 
     /// Loads the preset `id` into this plugin: `false` when it refused it. No
-    /// main thread: the served control is thread-agnostic. A fork restores
-    /// with this, then [`load_state`](Self::load_state), before activation.
+    /// main thread: the served control is thread-agnostic. A served fork
+    /// restores with this, then [`load_state`](Self::load_state), after the
+    /// server has loaded the state and activated the plugin at launch.
     pub fn load_preset(&self, id: &PresetId) -> bool {
         self.link.bridge.load_preset(id.clone())
     }

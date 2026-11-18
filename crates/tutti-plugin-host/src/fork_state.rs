@@ -50,8 +50,10 @@ impl ForkState {
 
     /// Restores the `fresh` plugin: its preset first, then its state. In that
     /// order because a preset change may move every parameter, and the state
-    /// is what the live plugin holds now. Call before the fresh plugin is
-    /// activated: a plugin may take its mode from the state at activation.
+    /// is what the live plugin holds now. The in-process fork calls it before
+    /// activation; a served fork calls it after the launch, which loaded the
+    /// state and activated the plugin (a plugin may take its mode from the
+    /// state at activation), so the state goes in again over the preset.
     ///
     /// # Errors
     ///

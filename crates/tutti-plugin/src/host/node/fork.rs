@@ -18,9 +18,10 @@
 //! 1. **Ask the live instance for its state** — its current preset (when it
 //!    lists any), its saved state and the render mode it runs in, over the
 //!    control channel `PluginHandle::save_state` already uses. Nothing else
-//!    of the live instance is touched: no reset, no rate change, no block. It is not free, though: the
-//!    save runs on the live bridge thread, which queues the live instance's blocks behind it for
-//!    as long as the plugin takes to serialise — the same stall a project
+//!    of the live instance is touched: no reset, no rate change, no block.
+//!    It is not free, though: the save runs on the live bridge thread, which
+//!    queues the live instance's blocks behind it for as long as the plugin
+//!    takes to serialise — the same stall a project
 //!    save causes. (Blocks it misses meanwhile read as silence, as for any
 //!    late reply.)
 //!
@@ -50,11 +51,13 @@
 //!    its CPU is not spent on the live server's audio thread. It is launched
 //!    at the live node's rate; the editor then prepares it at the fork's
 //!    rate, which reaches the new server as a rate change.
-//! 3. **Check it is the same plugin** (its id). The state went in with the
-//!    launch, and a current preset goes in over it, then the state again
-//!    (`ForkState::restore`, the in-process fork's too). Parameters come
-//!    with it: the state is the format's own save/load (CLAP `clap.state`, VST3 `getState`/`setState`, AU class
-//!    info), which is what a project save restores parameters from.
+//! 3. **Check it is the same plugin** (its id). The server loaded the state
+//!    and activated the plugin at launch; a current preset then goes in over
+//!    the active plugin, and the state again after it (`ForkState::restore`,
+//!    which the in-process fork runs before activation). Parameters come
+//!    with it: the state is the format's own save/load (CLAP `clap.state`,
+//!    VST3 `getState`/`setState`, AU class info), which is what a project
+//!    save restores parameters from.
 //! 4. **Give it the live node's meter and a reader of its tempo map**
 //!    (a clone, registered at the gather: the tempo the plugin is told is
 //!    the project's map, live or offline). Everything else it reads comes

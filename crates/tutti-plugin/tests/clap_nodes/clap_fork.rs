@@ -1340,13 +1340,13 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
     );
 }
 
-/// **A fork's restore loads the live preset, then the live state, into a fresh
+/// **A fork's restore loads the live preset and the live state into a fresh
 /// served instance**: `ForkState::restore` over a launched `Ipc`, against the
 /// real server. The plugin's preset file is accepted (a refused preset is a
 /// `Rejected` restore), and the state, which goes in after it, is what the
 /// instance holds: the live gain, not the preset's.
 #[test]
-fn a_served_restore_loads_the_preset_then_the_state() {
+fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance() {
     use tutti_plugin_host::ForkState;
     use tutti_plugin_ipc::{Ipc, unique_socket_path};
     use tutti_plugin_types::{Load, PluginFormat, PresetId, RenderMode, StateUse};
