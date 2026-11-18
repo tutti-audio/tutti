@@ -9,7 +9,7 @@
 
 use tutti_buffers::{Float, Fold, Mono, MonoMut};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{ArcDegrees, Azimuth, Elevation, Spread, StereoWidth};
+use tutti_units::{ArcDegrees, Azimuth, Elevation, Gain, Spread, StereoWidth};
 
 use crate::{Glide, Lerp};
 
@@ -40,8 +40,8 @@ const MAX_WIDTH: f32 = (180.0 / WIDTH_HALF_ANGLE.get()) as f32;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VbapGains {
     mono: bool,
-    a: [f32; MAX_CHANNELS],
-    b: [f32; MAX_CHANNELS],
+    a: [Gain; MAX_CHANNELS],
+    b: [Gain; MAX_CHANNELS],
 }
 
 impl VbapGains {
@@ -51,9 +51,9 @@ impl VbapGains {
     /// `l * g/2 + r * g/2` up to rounding), which is what lets a glide cross
     /// from one branch to the other without a step.
     #[inline]
-    pub fn pair(&self, s: usize) -> (f32, f32) {
+    pub fn pair(&self, s: usize) -> (Gain, Gain) {
         if self.mono {
-            let half = self.a[s] * 0.5;
+            let half = Gain(self.a[s].get() * 0.5);
             (half, half)
         } else {
             (self.a[s], self.b[s])
@@ -95,9 +95,13 @@ impl VbapGains {
         let (from, to, n) = (&glide.from, &glide.to, glide.n);
         // The gain at step `k`, `Glide::at`'s rule (the target from the last step on)
         // for one speaker's pair: `at` would blend all of the set for each frame. The
-        // gains are solved in `f32` and enter the render's format here.
-        let blend = |from: f32, to: f32, k: u32| {
-            F::from_f32(if k >= n { to } else { from.lerp(&to, k, n) })
+        // gains enter the render's format here.
+        let blend = |from: Gain, to: Gain, k: u32| {
+            F::from_f64(if k >= n {
+                to.get()
+            } else {
+                from.get().lerp(&to.get(), k, n)
+            })
         };
         let steps = first..;
         // A pair of ends that are the same bits is a held gain, which skips the
@@ -109,8 +113,8 @@ impl VbapGains {
                 fold.frame(&[l, r], &mut m);
                 m[0]
             };
-            if g_from.to_bits() == g_to.to_bits() {
-                let g_to = F::from_f32(g_to);
+            if g_from.get().to_bits() == g_to.get().to_bits() {
+                let g_to = F::from_f64(g_to.get());
                 for ((o, &l), &r) in out.iter_mut().zip(left).zip(right) {
                     *o = mono(l, r) * g_to;
                 }
@@ -122,8 +126,10 @@ impl VbapGains {
         } else {
             let (a_from, b_from) = from.pair(s);
             let (a_to, b_to) = to.pair(s);
-            if a_from.to_bits() == a_to.to_bits() && b_from.to_bits() == b_to.to_bits() {
-                let (a_to, b_to) = (F::from_f32(a_to), F::from_f32(b_to));
+            if a_from.get().to_bits() == a_to.get().to_bits()
+                && b_from.get().to_bits() == b_to.get().to_bits()
+            {
+                let (a_to, b_to) = (F::from_f64(a_to.get()), F::from_f64(b_to.get()));
                 for ((o, &l), &r) in out.iter_mut().zip(left).zip(right) {
                     *o = l * a_to + r * b_to;
                 }
@@ -142,21 +148,21 @@ impl VbapGains {
 impl Lerp for VbapGains {
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
         if self.mono && to.mono {
-            let mut a = [0.0; MAX_CHANNELS];
+            let mut a = [Gain::SILENT; MAX_CHANNELS];
             for (g, (from, to)) in a.iter_mut().zip(self.a.iter().zip(&to.a)) {
-                *g = from.lerp(to, k, n);
+                *g = Gain(from.get().lerp(&to.get(), k, n));
             }
             return Self {
                 mono: true,
                 a,
-                b: [0.0; MAX_CHANNELS],
+                b: [Gain::SILENT; MAX_CHANNELS],
             };
         }
-        let (mut a, mut b) = ([0.0; MAX_CHANNELS], [0.0; MAX_CHANNELS]);
+        let (mut a, mut b) = ([Gain::SILENT; MAX_CHANNELS], [Gain::SILENT; MAX_CHANNELS]);
         for s in 0..MAX_CHANNELS {
             let (from, to) = (self.pair(s), to.pair(s));
-            a[s] = from.0.lerp(&to.0, k, n);
-            b[s] = from.1.lerp(&to.1, k, n);
+            a[s] = Gain(from.0.get().lerp(&to.0.get(), k, n));
+            b[s] = Gain(from.1.get().lerp(&to.1.get(), k, n));
         }
         Self { mono: false, a, b }
     }
@@ -259,17 +265,17 @@ impl VbapKernel {
         };
         let count = self.layout.speaker_count();
         if width < MONO_WIDTH {
-            let mut a = [0.0; MAX_CHANNELS];
+            let mut a = [Gain::SILENT; MAX_CHANNELS];
             self.layout
                 .gains_into(azimuth, elevation, spread, &mut a[..count]);
             return VbapGains {
                 mono: true,
                 a,
-                b: [0.0; MAX_CHANNELS],
+                b: [Gain::SILENT; MAX_CHANNELS],
             };
         }
         let (left, right) = virtual_sources(azimuth, width);
-        let (mut a, mut b) = ([0.0; MAX_CHANNELS], [0.0; MAX_CHANNELS]);
+        let (mut a, mut b) = ([Gain::SILENT; MAX_CHANNELS], [Gain::SILENT; MAX_CHANNELS]);
         self.layout
             .gains_into(left, elevation, spread, &mut a[..count]);
         self.layout

@@ -25,14 +25,14 @@ fn render<F: Float>(
 
 use crate::Glide;
 
-fn gains(mono: bool, a0: f32, b0: f32) -> VbapGains {
+fn gains(mono: bool, a0: f64, b0: f64) -> VbapGains {
     let mut g = VbapGains {
         mono,
-        a: [0.0; MAX_CHANNELS],
-        b: [0.0; MAX_CHANNELS],
+        a: [Gain::SILENT; MAX_CHANNELS],
+        b: [Gain::SILENT; MAX_CHANNELS],
     };
-    g.a[0] = a0;
-    g.b[0] = b0;
+    g.a[0] = Gain(a0);
+    g.b[0] = Gain(b0);
     g
 }
 
@@ -64,8 +64,7 @@ fn a_held_gain_is_the_fold_times_g_or_the_pair_weighed() {
     }
 }
 
-/// In `f64` a held gain is `l * a + r * b` and a glide reads `k / 16` at step `k`, with the
-/// `f32` gains widened exactly.
+/// In `f64` a held gain is `l * a + r * b` and a glide reads `k / 16` at step `k`.
 #[test]
 fn an_f64_render_weighs_the_pair_by_the_widened_gains() {
     let fold = stereo_to_mono::<f64>();
@@ -74,7 +73,7 @@ fn an_f64_render_weighs_the_pair_by_the_widened_gains() {
     let held = Glide::landed(gains(false, 0.3, 0.7)).by(16);
     render(&held, 1, Some(0), &fold, &l, &r, &mut out);
     for i in 0..2 {
-        assert_eq!(out[i], l[i] * f64::from(0.3f32) + r[i] * f64::from(0.7f32));
+        assert_eq!(out[i], l[i] * 0.3 + r[i] * 0.7);
     }
     let mut glide = Glide::landed(gains(true, 0.0, 0.0)).by(16);
     glide.aim(gains(true, 1.0, 0.0));
@@ -211,10 +210,10 @@ fn a_huge_width_saturates_instead_of_overflowing() {
         let got = solve(width);
         for s in 0..11 {
             let (a, b) = got.pair(s);
-            assert!(a.is_finite() && b.is_finite(), "width {width}");
+            assert!(a.get().is_finite() && b.get().is_finite(), "width {width}");
         }
-        let power: f32 = (0..11).map(|s| got.pair(s).0.powi(2)).sum();
-        assert!((power - 1.0).abs() < 1e-4, "width {width}: power {power}");
+        let power: f64 = (0..11).map(|s| got.pair(s).0.get().powi(2)).sum();
+        assert!((power - 1.0).abs() < 1e-12, "width {width}: power {power}");
         assert_eq!(got, saturated, "width {width}");
     }
 }
