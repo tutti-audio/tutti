@@ -334,7 +334,7 @@ impl Plugin {
                     data,
                     tutti_plugin_types::StateUse::Project,
                 )
-                .map_err(|e| e.to_string())
+                .map_err(tutti_plugin_types::StateError::from)
             }
         });
         let (client, handle, restored) = tutti_plugin_host::load_client_restoring(
@@ -352,7 +352,9 @@ impl Plugin {
                 handle,
                 plugin,
             },
-            restored,
+            // The served path reports a refusal as the server's text, so this
+            // one does too until the whole result is typed.
+            restored.map(|restored| restored.map_err(|refused| refused.to_string())),
         ))
     }
 
