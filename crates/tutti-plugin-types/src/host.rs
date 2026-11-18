@@ -30,9 +30,9 @@ use tutti_buffers::{Float, InputOutput};
 
 use crate::{
     AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorWindow,
-    KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginAudio, PluginDescriptor,
-    PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
-    ProcessWake, SampleRate, Samples, WindowHandle,
+    KeyEvent, KeyUse, LoadedPlugin, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError,
+    PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
+    SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
@@ -418,7 +418,7 @@ pub trait Processor: Send {
     /// # Errors
     ///
     /// [`PluginError::Process`] when the plugin failed the block.
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()>;
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()>;
 
     /// Ends processing (CLAP `stop_processing`, VST3 `setProcessing(false)`) so
     /// the realtime thread can hand the Processor back. Realtime. Processing
@@ -901,41 +901,18 @@ pub fn process_block<P: Processor, S: Float>(
     frames: Samples,
     ctx: &ProcessContext<'_>,
     out: &mut ProcessOutput,
-) -> PluginResult<()>
-where
-    for<'a> PluginAudio<'a>: From<InputOutput<'a, 'a, 'a, S>>,
-{
+) -> PluginResult<()> {
     let mut table: ChannelTable<&mut [S]> = outputs.iter_mut().map(|o| &mut **o).collect();
-    let audio = PluginAudio::new(frames, inputs, &mut table)
+    let buffer = InputOutput::from_slices(frames, inputs, &mut table)
         .map_err(|_| PluginError::Block("the block's channels differ in length"))?;
-    audio.process(processor, ctx, out)
+    processor.process(&mut PluginIo { buffer, ctx, out })
 }
 
-impl<'a> PluginAudio<'a> {
-    /// This block through `processor`, whichever width it carries.
-    ///
-    /// # Errors
-    ///
-    /// [`PluginError::Process`] when the plugin failed the block.
-    pub fn process<P: Processor>(
-        self,
-        processor: &mut P,
-        ctx: &'a ProcessContext<'a>,
-        out: &'a mut ProcessOutput,
-    ) -> PluginResult<()> {
-        processor.process(&mut PluginIo {
-            buffer: self,
-            ctx,
-            out,
-        })
-    }
-}
-
-/// One block's buffers, inputs and outputs.
+/// One block's buffers at the sample width `S`, inputs and outputs.
 #[derive(Debug)]
-pub struct PluginIo<'a> {
-    /// The channel tables, in the width the plugin was activated at.
-    pub buffer: PluginAudio<'a>,
+pub struct PluginIo<'a, S: Float> {
+    /// The channel tables.
+    pub buffer: InputOutput<'a, 'a, 'a, S>,
     /// The block's MIDI, transport and automation.
     pub ctx: &'a ProcessContext<'a>,
     /// What the plugin emitted: MIDI, parameter changes, note expression.

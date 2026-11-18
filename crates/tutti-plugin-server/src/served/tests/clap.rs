@@ -1,5 +1,6 @@
 use super::*;
 use crate::served::format::clap::{THREAD_POOL, flush_out_of_band, pool_participants};
+use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::Control;
@@ -387,7 +388,7 @@ fn a_deactivated_instance_renders_silence_and_tells_the_host() {
     let input_slices: Vec<&[f64]> = input.iter().map(|v| v.as_slice()).collect();
     let mut output = vec![vec![0.5f64; 64]; 2];
     let mut output_slices: Vec<&mut [f64]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
@@ -395,7 +396,11 @@ fn a_deactivated_instance_renders_silence_and_tells_the_host() {
     .expect("equal channels");
     let mut out = tutti_plugin_types::ProcessOutput::default();
     instance
-        .render(buffer, &ProcessContext::new(), &mut out)
+        .render_f64(&mut PluginIo {
+            buffer,
+            ctx: &ProcessContext::new(),
+            out: &mut out,
+        })
         .expect("silence");
     assert!(output.iter().flatten().all(|&s| s == 0.0), "silent");
     assert!(!instance.is_processing(), "the plugin was not started");
@@ -987,7 +992,7 @@ fn process_blocks(instance: &mut ClapInstance, blocks: usize) {
         let input_slices: Vec<&[f32]> = input_data.iter().map(|v| v.as_slice()).collect();
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let buffer = PluginAudio::new(
+        let buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
@@ -995,7 +1000,11 @@ fn process_blocks(instance: &mut ClapInstance, blocks: usize) {
         .expect("equal channels");
         let mut out = tutti_plugin_types::ProcessOutput::default();
         instance
-            .render(buffer, &ProcessContext::new(), &mut out)
+            .render_f32(&mut PluginIo {
+                buffer,
+                ctx: &ProcessContext::new(),
+                out: &mut out,
+            })
             .expect("block processes");
     }
 }
@@ -1060,7 +1069,7 @@ fn test_clap_process_f32_silence() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
@@ -1070,7 +1079,11 @@ fn test_clap_process_f32_silence() {
     let ctx = ProcessContext::new();
     // Should not panic
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(buffer, &ctx, &mut out);
+    let _output = instance.render_f32(&mut PluginIo {
+        buffer,
+        ctx: &ctx,
+        out: &mut out,
+    });
 }
 
 /// The host feeds a NoteOn and collects audio back.
@@ -1107,7 +1120,7 @@ fn test_clap_process_f32_with_note() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = PluginAudio::new(
+        let buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
@@ -1116,7 +1129,11 @@ fn test_clap_process_f32_with_note() {
 
         let ctx = ProcessContext::new().midi(&note_on);
         let mut out = tutti_plugin_types::ProcessOutput::default();
-        let _output = instance.render(buffer, &ctx, &mut out);
+        let _output = instance.render_f32(&mut PluginIo {
+            buffer,
+            ctx: &ctx,
+            out: &mut out,
+        });
 
         // Check output for non-zero samples
         for ch in output_data.iter() {
@@ -1138,7 +1155,7 @@ fn test_clap_process_f32_with_note() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = PluginAudio::new(
+        let buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
@@ -1146,7 +1163,11 @@ fn test_clap_process_f32_with_note() {
         .expect("equal channels");
 
         let mut out = tutti_plugin_types::ProcessOutput::default();
-        let _output = instance.render(buffer, &empty_ctx, &mut out);
+        let _output = instance.render_f32(&mut PluginIo {
+            buffer,
+            ctx: &empty_ctx,
+            out: &mut out,
+        });
 
         for ch in output_data.iter() {
             for &sample in ch.iter() {
@@ -1220,7 +1241,7 @@ fn test_reference_process_f32_silence() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
@@ -1229,7 +1250,11 @@ fn test_reference_process_f32_silence() {
 
     let ctx = ProcessContext::new();
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(buffer, &ctx, &mut out);
+    let _output = instance.render_f32(&mut PluginIo {
+        buffer,
+        ctx: &ctx,
+        out: &mut out,
+    });
 }
 
 #[test]
@@ -1256,7 +1281,7 @@ fn test_reference_process_f32_with_note() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = PluginAudio::new(
+        let buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
@@ -1270,7 +1295,11 @@ fn test_reference_process_f32_with_note() {
         };
 
         let mut out = tutti_plugin_types::ProcessOutput::default();
-        let _output = instance.render(buffer, &ctx, &mut out);
+        let _output = instance.render_f32(&mut PluginIo {
+            buffer,
+            ctx: &ctx,
+            out: &mut out,
+        });
     }
 }
 
@@ -1328,7 +1357,7 @@ fn test_clap_lifecycle_processing_starts_on_process() {
     let input_slices: Vec<&[f32]> = input_data.iter().map(|v| v.as_slice()).collect();
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
@@ -1336,7 +1365,11 @@ fn test_clap_lifecycle_processing_starts_on_process() {
     .expect("equal channels");
     let mut out = tutti_plugin_types::ProcessOutput::default();
     instance
-        .render(buffer, &ProcessContext::new(), &mut out)
+        .render_f32(&mut PluginIo {
+            buffer,
+            ctx: &ProcessContext::new(),
+            out: &mut out,
+        })
         .expect("process should succeed");
 
     assert!(
@@ -1724,7 +1757,7 @@ fn test_clap_process_with_param_automation() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
@@ -1733,7 +1766,11 @@ fn test_clap_process_with_param_automation() {
 
     let ctx = ProcessContext::new().params(&changes);
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(buffer, &ctx, &mut out);
+    let _output = instance.render_f32(&mut PluginIo {
+        buffer,
+        ctx: &ctx,
+        out: &mut out,
+    });
 }
 
 #[test]
@@ -1763,7 +1800,7 @@ fn test_clap_process_with_note_expression() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
@@ -1774,7 +1811,11 @@ fn test_clap_process_with_note_expression() {
         .midi(&note_on)
         .note_expression(&expr_changes);
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(buffer, &ctx, &mut out);
+    let _output = instance.render_f32(&mut PluginIo {
+        buffer,
+        ctx: &ctx,
+        out: &mut out,
+    });
 }
 
 #[test]
@@ -1796,7 +1837,7 @@ fn test_clap_process_with_transport() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
@@ -1805,7 +1846,11 @@ fn test_clap_process_with_transport() {
 
     let ctx = ProcessContext::new().transport(&transport);
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(buffer, &ctx, &mut out);
+    let _output = instance.render_f32(&mut PluginIo {
+        buffer,
+        ctx: &ctx,
+        out: &mut out,
+    });
 }
 
 // ── Miscellaneous ──
@@ -2028,7 +2073,7 @@ fn test_clap_sample_rate_change() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
@@ -2037,7 +2082,11 @@ fn test_clap_sample_rate_change() {
 
     let ctx = ProcessContext::new();
     let mut out = tutti_plugin_types::ProcessOutput::default();
-    let _output = instance.render(buffer, &ctx, &mut out);
+    let _output = instance.render_f32(&mut PluginIo {
+        buffer,
+        ctx: &ctx,
+        out: &mut out,
+    });
 }
 
 #[test]
@@ -2060,7 +2109,7 @@ fn test_clap_sample_rate_cycle_multiple() {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-        let buffer = PluginAudio::new(
+        let buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
@@ -2069,7 +2118,11 @@ fn test_clap_sample_rate_cycle_multiple() {
 
         let ctx = ProcessContext::new();
         let mut out = tutti_plugin_types::ProcessOutput::default();
-        let _output = instance.render(buffer, &ctx, &mut out);
+        let _output = instance.render_f32(&mut PluginIo {
+            buffer,
+            ctx: &ctx,
+            out: &mut out,
+        });
     }
 }
 

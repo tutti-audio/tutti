@@ -34,10 +34,10 @@ use crate::support;
 use support::active::{Activate, Active, ActiveExt};
 use support::main_thread;
 
+use tutti_buffers::InputOutput;
 use tutti_clap_host::{AudioPortFlags, ClapLoaded, ClapProcessContext, LoadOptions};
 use tutti_clap_test_plugin::{PREFERRED_DIALECT_DEFAULT, REPORTED_LATENCY_SAMPLES, probe_tag};
 use tutti_graph::Offset;
-use tutti_plugin_types::PluginAudio;
 use tutti_ump::{MidiGroup, Sysex7Packets, Ump};
 use tutti_units::Samples;
 
@@ -220,7 +220,7 @@ fn drive_block(
     {
         let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = PluginAudio::new(
+        let mut buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(in_refs[0].len()),
             &in_refs,
             &mut out_refs,
@@ -488,7 +488,7 @@ fn host_handles_in_place_style_buffers() {
     {
         let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = PluginAudio::new(
+        let mut buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(in_refs[0].len()),
             &in_refs,
             &mut out_refs,
@@ -979,7 +979,7 @@ fn drive_midi_block(inst: &mut Active<f32>, midi: &[UmpAt]) {
     let mut outs: Vec<Vec<f32>> = (0..2).map(|_| vec![0.0; frames]).collect();
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let mut buffer = PluginAudio::new(
+    let mut buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(in_refs[0].len()),
         &in_refs,
         &mut out_refs,

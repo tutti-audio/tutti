@@ -538,3 +538,34 @@ fn silence_of_a_narrowed_view_spares_the_frames_outside_it() {
     out.slice_mut(Samples(1)..Samples(3)).silence();
     assert_eq!((l, r), ([1.0, 0.0, 0.0, 1.0], [2.0, 0.0, 0.0, 2.0]));
 }
+
+/// A block is the arm of its own width, and a write through the arm is a write
+/// in the caller's channel: no copy stands between them.
+#[test]
+fn a_block_by_width_is_its_own_width_and_writes_through() {
+    use tutti_buffers::{ByWidth, InputOutput};
+
+    let mut wide = [0.0f64; 4];
+    let mut planes = [&mut wide[..]];
+    let mut block = InputOutput::new(
+        Samples(4),
+        Planes::default(),
+        PlanesMut::new(&mut planes).expect("one plane"),
+    )
+    .expect("equal lengths");
+    let ByWidth::F64(io) = block.by_width() else {
+        panic!("an f64 block is the F64 arm");
+    };
+    io.output().plane_mut(0).samples_mut().fill(0.1);
+    assert_eq!(wide, [0.1; 4]);
+
+    let mut narrow = [0.0f32; 4];
+    let mut planes = [&mut narrow[..]];
+    let mut block = InputOutput::new(
+        Samples(4),
+        Planes::default(),
+        PlanesMut::new(&mut planes).expect("one plane"),
+    )
+    .expect("equal lengths");
+    assert!(matches!(block.by_width(), ByWidth::F32(_)));
+}

@@ -6,6 +6,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
+use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
 use tutti_rt::LockExt;
 
@@ -14,8 +15,8 @@ use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_plugin_types::{
     AutomationMode, Control, Controller, EditorWindow, Event, Hand, HostOp, Lifecycle, Loaded,
-    MaxBlock, Notice, ParameterChanges, PluginAudio, PluginError, PluginIo, Prepare,
-    ProcessContext, ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate, Samples, Stage,
+    MaxBlock, Notice, ParameterChanges, PluginError, PluginIo, Prepare, ProcessContext,
+    ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate, Samples, Stage,
 };
 use tutti_ump::{Address, MidiChannel, MidiGroup};
 use tutti_units::Normalized;
@@ -190,7 +191,7 @@ fn render_f32(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> Vec<Ve
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: PluginAudio::new(
+        buffer: InputOutput::from_slices(
             tutti_plugin_types::Samples(inputs[0].len()),
             &inputs,
             &mut outputs,
@@ -234,7 +235,8 @@ fn render_out(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> Proces
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: PluginAudio::new(Samples(BLOCK), &inputs, &mut outputs).expect("equal channels"),
+        buffer: InputOutput::from_slices(Samples(BLOCK), &inputs, &mut outputs)
+            .expect("equal channels"),
         ctx,
         out: &mut out,
     };
@@ -286,7 +288,7 @@ fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     let mut out = ProcessOutput::default();
     processor
         .process(&mut PluginIo {
-            buffer: PluginAudio::new(
+            buffer: InputOutput::from_slices(
                 tutti_plugin_types::Samples(inputs[0].len()),
                 &inputs,
                 &mut outputs,
@@ -306,7 +308,7 @@ fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     let inputs32 = [input32.as_slice(), input32.as_slice()];
     let mut outputs32 = [left32.as_mut_slice(), right32.as_mut_slice()];
     let refused = processor.process(&mut PluginIo {
-        buffer: PluginAudio::new(
+        buffer: InputOutput::from_slices(
             tutti_plugin_types::Samples(inputs32[0].len()),
             &inputs32,
             &mut outputs32,
@@ -317,6 +319,37 @@ fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     });
     assert!(matches!(refused, Err(PluginError::Block(_))), "{refused:?}");
     assert_eq!(capture().process_calls, calls, "the plugin was not entered");
+    drop(rejoin(processor, controller));
+}
+
+/// **A 32-bit activation refuses a 64-bit block without entering the plugin**:
+/// no silent conversion in either direction.
+#[test]
+fn a_32_bit_activation_refuses_a_64_bit_block() {
+    let probe = Probe::acquire();
+    let (mut processor, controller) = probe.activate();
+    let calls = capture().process_calls;
+
+    let input = [0.0f64; BLOCK];
+    let mut left = [0.0f64; BLOCK];
+    let mut right = [0.0f64; BLOCK];
+    let inputs = [input.as_slice(), input.as_slice()];
+    let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
+    let ctx = ProcessContext::new();
+    let mut out = ProcessOutput::default();
+    let refused = processor.process(&mut PluginIo {
+        buffer: InputOutput::from_slices(
+            tutti_plugin_types::Samples(inputs[0].len()),
+            &inputs,
+            &mut outputs,
+        )
+        .expect("equal channels"),
+        ctx: &ctx,
+        out: &mut out,
+    });
+    assert!(matches!(refused, Err(PluginError::Block(_))), "{refused:?}");
+    assert_eq!(capture().process_calls, calls, "the plugin was not entered");
+    assert!(left.iter().all(|&v| v == 0.0), "the outputs are untouched");
     drop(rejoin(processor, controller));
 }
 
@@ -417,7 +450,7 @@ fn a_write_to_a_parameter_the_plugin_lacks_is_reported_in_the_output() {
         let inputs = [input.as_slice(), input.as_slice()];
         let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
         let mut io = PluginIo {
-            buffer: PluginAudio::new(
+            buffer: InputOutput::from_slices(
                 tutti_plugin_types::Samples(inputs[0].len()),
                 &inputs,
                 &mut outputs,
@@ -462,7 +495,7 @@ fn a_block_with_automation_midi_and_transport_does_not_allocate() {
         let inputs = [input.as_slice(), input.as_slice()];
         let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
         let mut io = PluginIo {
-            buffer: PluginAudio::new(
+            buffer: InputOutput::from_slices(
                 tutti_plugin_types::Samples(inputs[0].len()),
                 &inputs,
                 &mut outputs,

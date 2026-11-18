@@ -22,10 +22,9 @@ use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
     AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, Load,
     LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
-    ParamEdit, ParamWriteError, ParameterInfo, PluginAudio, PluginDescriptor, PluginError,
-    PluginResult, Prepare, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
-    RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate, Samples, Seat, Stage, State,
-    StateError, StateUse, TrackInfo,
+    ParamEdit, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginIo,
+    PluginResult, Prepare, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request,
+    SampleFormat, SampleRate, Samples, Seat, Stage, State, StateError, StateUse, TrackInfo,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -41,30 +40,33 @@ pub(crate) use format::ServerSide;
 #[cfg(test)]
 mod tests;
 
-/// What the plugin was asked to render with: the block's audio, in the width
-/// the plugin was activated at.
+/// What the plugin is asked to render with: a block's audio, in the width the
+/// plugin was activated at.
 ///
 /// The pipeline's one door into a plugin, so its tests drive a stand-in that
-/// is not a plugin.
+/// is not a plugin. Object-safe, so a render seat holds its plugin with the
+/// format erased; one method per width the shared memory carries. A plugin not
+/// running (a rate it refused left it deactivated) fills the block with
+/// silence. `io.out` is the caller's and reused: it is cleared before it is
+/// filled.
 pub(crate) trait Render {
     /// What the plugin can consume, as it reports now.
     fn features(&self) -> Features;
 
-    /// Renders one block, or fills it with silence when the plugin is not
-    /// running (a rate it refused left it deactivated).
-    ///
-    /// `out` is the caller's and reused: it is cleared before it is filled.
+    /// Renders one 32-bit block.
     ///
     /// # Errors
     ///
     /// [`PluginError::Process`] (or another variant) when the plugin failed
     /// the block.
-    fn render<'a>(
-        &mut self,
-        buffer: PluginAudio<'a>,
-        ctx: &'a ProcessContext<'a>,
-        out: &'a mut ProcessOutput,
-    ) -> PluginResult<()>;
+    fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()>;
+
+    /// Renders one 64-bit block.
+    ///
+    /// # Errors
+    ///
+    /// As [`render_f32`](Self::render_f32).
+    fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()>;
 }
 
 /// What the session asks of the loaded plugin, with its format erased.
