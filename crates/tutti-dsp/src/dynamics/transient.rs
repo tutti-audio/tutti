@@ -36,8 +36,9 @@
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_types::{Amplitude, Db, SampleRate, Seconds};
 
-use super::shared::{CHUNK, Follower, GAIN_GLIDE, floored, key_levels};
-use crate::delay::finite_or;
+use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
+use crate::finite::finite_or;
+use crate::follower::Follower;
 use crate::{Glide, Lerp};
 
 /// The controls of a [`TransientBank`]: the dB the two branches of the gain reach.

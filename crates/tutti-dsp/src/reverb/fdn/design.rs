@@ -27,8 +27,8 @@ use tutti_types::{
     Amplitude, Db, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds, StereoWidth,
 };
 
-use crate::delay::finite_or;
-use crate::reverb::cutoff_pole;
+use crate::finite::finite_or;
+use crate::onepole::cutoff_pole;
 use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, pre_delay_frames,
@@ -223,7 +223,7 @@ fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
 
 /// `v` if finite, else `default`, exactly: a time is not narrowed.
 fn finite_secs(v: Seconds, default: Seconds) -> Seconds {
-    if v.get().is_finite() { v } else { default }
+    Seconds(finite_or(v.get(), default.get()))
 }
 
 impl FdnLayout {

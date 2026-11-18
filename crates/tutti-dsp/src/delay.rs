@@ -12,7 +12,7 @@ pub use bank::{DelayBank, DelayGlides, DelayLanes};
 pub use layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 pub use max_delay::{MaxDelay, MaxDelayError};
 pub use routing::{Routing, RoutingError};
-pub(crate) use taps::{finite_or, ring_seconds, trips};
+pub(crate) use taps::{ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
 
 use tutti_types::Samples;

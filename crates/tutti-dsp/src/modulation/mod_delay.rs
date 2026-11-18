@@ -40,7 +40,7 @@ use tutti_types::{
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};
-use crate::delay::finite_or;
+use crate::finite::finite_or;
 use crate::{DelayLine, Glide, InterpolationMode, MaxDelay, delay_step};
 
 /// The LFO's slowest rate: 0.01 Hz, a lane's value and a cell's alike. A rate below it

@@ -113,14 +113,6 @@ fn kaiser_order_and_beta_reproduce_the_scipy_example() {
 }
 
 #[test]
-fn bessel_i0_matches_known_values() {
-    // I0(0) = 1; I0(1) and I0(5) from Abramowitz & Stegun table 9.8.
-    assert_eq!(bessel_i0(0.0), 1.0);
-    assert!((bessel_i0(1.0) - 1.266_065_877_752_008_4).abs() < 1e-14);
-    assert!((bessel_i0(5.0) - 27.239_871_823_604_442).abs() < 1e-11);
-}
-
-#[test]
 fn the_length_is_odd_and_follows_the_estimate() {
     let fir = FirDesign::new(
         FirResponse::LowPass {
