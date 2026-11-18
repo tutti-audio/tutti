@@ -139,14 +139,20 @@ impl LaneControls {
         self.0.program.publish(program);
     }
 
-    /// Frees the programs the lane has let go of since the last publish (one
-    /// a block still held when [`publish`](Self::publish) replaced it),
-    /// without publishing; returns how many are still held. Control thread,
-    /// every tick of its owner (the [`Modulation`](crate::Modulation)
-    /// reconciler's [`reclaim`](crate::Modulation::reclaim)); with nothing
-    /// retired it is a lock and a length check.
+    /// Frees the programs and the ranges the lane has let go of since their
+    /// last publish (one a block still held when [`publish`](Self::publish) or
+    /// a plugin lane's range change replaced it), without publishing; returns
+    /// how many are still held. Control thread, every tick of its owner (the
+    /// [`Modulation`](crate::Modulation) reconciler's
+    /// [`reclaim`](crate::Modulation::reclaim)); with nothing retired it is a
+    /// lock and a length check per cell. A port's range cell is its editor's
+    /// to sweep.
     pub fn reclaim(&self) -> usize {
-        self.0.program.reclaim()
+        let range = match &self.0.range {
+            RangeSource::Own(c) => c.reclaim(),
+            RangeSource::Port(_) | RangeSource::None => 0,
+        };
+        self.0.program.reclaim() + range
     }
 
     /// How many programs the lane's cell holds retired: replaced, and not
@@ -1182,6 +1188,33 @@ mod tests {
         assert!(gone.upgrade().is_some(), "retired, pinned until a scan");
         assert_eq!(controls.reclaim(), 0);
         assert!(gone.upgrade().is_none(), "freed by the reclaim");
+    }
+
+    /// **A plugin lane's range a block still held when it was set anew is freed
+    /// by the lane's next `reclaim`**, with no further set.
+    #[test]
+    fn reclaim_frees_a_range_a_block_held_across_its_replacement() {
+        let mut node = ControlLaneNode::for_foreign(
+            ParamId::new(0),
+            ControlProgram::default(),
+            None,
+            (0.0, 1.0),
+        );
+        let controls = node.controls();
+        let RangeSource::Own(cell) = &controls.0.range else {
+            panic!("a plugin lane owns its range cell");
+        };
+        {
+            // A block in progress across the range change.
+            let RangeReader::Own(reader) = &mut node.range else {
+                panic!("a plugin lane reads its own cell");
+            };
+            let _held = reader.lend();
+            assert!(controls.set_range(0.25, 0.75));
+        }
+        assert_eq!(cell.retired_len(), 1, "retired, pinned until a scan");
+        assert_eq!(controls.reclaim(), 0);
+        assert_eq!(cell.retired_len(), 0, "freed by the lane's reclaim");
     }
 
     /// A plugin lane's range is its own cell, set from the next block; an
