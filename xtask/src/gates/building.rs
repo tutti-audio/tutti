@@ -39,7 +39,8 @@
 //!   named in the generics or the `where` clause). A function with no parameter has no
 //!   first one.
 //! - `ctor-result`: no receiver, a built type wrapped in `Result`, on any owner.
-//! - `range-macro`: a `macro_rules!` outside `tutti-types` whose body holds a
+//! - `range-macro`: a `macro_rules!` outside `tutti-units` and `tutti-types` (the homes of
+//!   `ranged!` and `id!`) whose body holds a
 //!   `fn new` of one parameter returning `Option<..>`, the `new(raw) -> Option`
 //!   signature of a range-checked type.
 //! - `option-arg`: a receiver by value, a built type of `Self` or the owner (no wrapper:
@@ -817,9 +818,10 @@ pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
             .filter(|b| b.open < p && p < b.close)
             .max_by_key(|b| b.open)
     };
-    let in_types = path.starts_with("crates/tutti-types/");
+    let in_macro_home =
+        path.starts_with("crates/tutti-units/") || path.starts_with("crates/tutti-types/");
     let mut sites = BTreeSet::new();
-    if !in_types {
+    if !in_macro_home {
         for (open, close, name) in &macros {
             if writes_range_type(&code[open + 1..*close]) {
                 sites.insert(Site {
@@ -1265,11 +1267,12 @@ mod tests {
     }
 
     #[test]
-    fn a_macro_writing_a_range_type_is_a_violation_outside_tutti_types_only() {
+    fn a_macro_writing_a_range_type_is_a_violation_outside_its_homes_only() {
         let src = "macro_rules! ranged { ($n:ident) => { impl $n { pub fn new(raw: u8) -> Option<Self> { todo!() } } }; }\n\
                    macro_rules! plain { ($n:ident) => { impl $n { pub fn new(a: u8, b: u8) -> Option<Self> { todo!() } } }; }";
         assert_eq!(rules(src), one("ranged", "range-macro"));
-        assert!(scan("crates/tutti-types/src/lib.rs", src).is_empty());
+        assert!(scan("crates/tutti-units/src/lib.rs", src).is_empty());
+        assert!(scan("crates/tutti-types/src/id.rs", src).is_empty());
     }
 
     #[test]

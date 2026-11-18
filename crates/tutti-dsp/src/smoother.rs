@@ -6,7 +6,7 @@
 ///
 /// The coefficient comes in already derived, from the time constant and the
 /// rate the smoother is stepped at (`Seconds::one_pole_coeff` in
-/// `tutti-types`), so the smoother knows no time and no rate. A follower with
+/// `tutti-units`), so the smoother knows no time and no rate. A follower with
 /// separate attack and release coefficients picks one per step with
 /// [`toward`](Self::toward), which is the same step with the state held by
 /// the caller.

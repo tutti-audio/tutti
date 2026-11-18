@@ -133,8 +133,8 @@
 2 crates/tutti-session/tests/wiring/graph.rs
 1 crates/tutti-session/tests/wiring/typed_params.rs
 1 crates/tutti-session/tests/wiring/vocabulary.rs
-2 crates/tutti-types/src/value/unit_param.rs
-1 crates/tutti-types/src/value/units/amounts.rs
+2 crates/tutti-units/src/unit_param.rs
+1 crates/tutti-units/src/units/amounts.rs
 1 crates/tutti-vst2-host/src/host.rs
 3 xtask/src/gates/comments.rs
 2 xtask/src/gates/doc_refs.rs

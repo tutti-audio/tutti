@@ -9,9 +9,9 @@
 //! - `setter`: a `pub fn` named `set_*`, on any owner or none.
 //! - `set`: a `pub fn` named `set`.
 //! - `unit`: a `pub` method (a receiver) that returns `()` (no return type, or `-> ()`)
-//!   and has a parameter whose type names a unit of `tutti-types` (`Hz`, `Seconds`, ..).
+//!   and has a parameter whose type names a unit of `tutti-units` (`Hz`, `Seconds`, ..).
 //!
-//! The units are read from `crates/tutti-types/src/value`: every `struct Name(f32)` or
+//! The units are read from `crates/tutti-units/src`: every `struct Name(f32)` or
 //! `struct Name(f64)` (a `*OutOfRange` error aside).
 //!
 //! **Blind spots.** The scan is lexical: it does not see an item a macro writes, an owner
@@ -48,7 +48,7 @@ pub(super) const ALLOW: &[(&str, &str)] = &[
 ];
 
 const ROOT: &str = "crates/tutti-session/src";
-const UNITS: &str = "crates/tutti-types/src/value";
+const UNITS: &str = "crates/tutti-units/src";
 
 /// The fewest files a real run reads, and the fewest units it finds; fewer means the walk
 /// is broken.
@@ -96,7 +96,7 @@ fn is_receiver(param: &str) -> bool {
     (p.ends_with("self") && !p.contains(':')) || p.starts_with("self:")
 }
 
-/// The units of `tutti-types`: `struct Name(f32)` and `struct Name(f64)`.
+/// The units of `tutti-units`: `struct Name(f32)` and `struct Name(f64)`.
 fn units(tree: &dyn Tree) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     for file in tree.files(UNITS, &skipped) {
@@ -377,7 +377,7 @@ mod tests {
     use super::super::fake::Mem;
     use super::*;
 
-    const HZ: &str = "crates/tutti-types/src/value/units/hz.rs";
+    const HZ: &str = "crates/tutti-units/src/units/hz.rs";
     const A: &str = "crates/tutti-session/src/a.rs";
     const SESSION: &str = "crates/tutti-session/src/session.rs";
     const KNOBS: &str = "crates/tutti-session/src/knobs.rs";
@@ -528,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn the_units_are_the_float_newtypes_of_tutti_types() {
+    fn the_units_are_the_float_newtypes_of_tutti_units() {
         let tree = Mem::with(&[(
             HZ,
             "pub struct Hz(pub f32);\nunit! { pub struct Db(pub f32): Display }\n\

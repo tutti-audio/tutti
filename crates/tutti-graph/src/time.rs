@@ -4,7 +4,7 @@
 //! There are two kinds of time in a
 //! graph and they must not mix:
 //!
-//! - a **[`Frame`]** (`tutti-types`) is an absolute position on the
+//! - a **[`Frame`]** (`tutti-units`) is an absolute position on the
 //!   executor's clock — [`Env::frame`](crate::Env::frame) is the one at the
 //!   start of the block;
 //! - an **[`Offset`]** is a position *inside the current block*, and means

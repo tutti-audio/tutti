@@ -10,7 +10,7 @@ use tutti_units::Beat;
 /// when the value is built ([`new`](Self::new)), so a clip never meets a beat
 /// that has no frame.
 ///
-/// [`Beat`] is `tutti-types`' unit over an `f64`, which holds NaN and the
+/// [`Beat`] is `tutti-units`' unit over an `f64`, which holds NaN and the
 /// infinities; this type is where an event's beat is refused for them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimedMidiEvent {

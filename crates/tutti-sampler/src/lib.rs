@@ -42,7 +42,7 @@
 //! (reading faster raises the pitch), `SrcRatio` is sample-rate conversion
 //! (derived from the file and engine rates, never set by the user), and
 //! `StretchFactor` drives the phase vocoder (duration changes, pitch does not).
-//! All three are `tutti-types` types.
+//! All three are `tutti-units` types.
 //!
 //! ## Quick start
 //!

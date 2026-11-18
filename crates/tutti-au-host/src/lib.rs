@@ -48,7 +48,7 @@
 //!
 //! **The shared vocabulary.** `TransportInfo` and
 //! `WindowHandle` come from `tutti-plugin-types`, and `Samples` / `Seconds` from
-//! `tutti-types`; all are re-exported here.
+//! `tutti-units`; all are re-exported here.
 //!
 //! **Subprocess isolation.** This crate hosts in-process. `tutti-plugin-server`
 //! wraps it in a subprocess behind its `au` feature, and `tutti-plugin` is the
@@ -237,6 +237,6 @@ pub use tutti_plugin_types::{TransportInfo, WindowHandle};
 // Unit types this crate's API hands back: `Samples` from `get_latency`,
 // `Seconds` from `get_tail_time`. Re-exported because a consumer that cannot
 // name a returned type cannot bind it — `tutti-plugin-server` depends on this
-// crate but not on `tutti-types`.
+// crate but not on `tutti-units`.
 pub use tutti_units::Samples;
 pub use tutti_units::Seconds;

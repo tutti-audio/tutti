@@ -48,6 +48,7 @@ mod toml;
 mod umbrella;
 // Backs the local `umbrella-api` recipe (it needs the docs nightly): not a gate.
 mod umbrella_api;
+mod units_bare;
 mod use_tree;
 mod value_traits;
 mod values;
@@ -162,6 +163,8 @@ pub(crate) enum Gate {
     Logging,
     /// A test asserts no wall-clock time and sleeps for no event (a per-file ratchet).
     TestTime,
+    /// `tutti-units` names no allocation and no atomic.
+    UnitsBare,
 }
 
 impl Gate {
@@ -194,6 +197,7 @@ impl Gate {
             Gate::Umbrella => "gate check-umbrella".to_owned(),
             Gate::Logging => "gate check-logging".to_owned(),
             Gate::TestTime => "gate check-test-time".to_owned(),
+            Gate::UnitsBare => "gate check-units-bare".to_owned(),
         }
     }
 
@@ -235,6 +239,7 @@ impl Gate {
             Gate::Values => values::check(&tree, values::MIN_FILES, values::MIN_UNITS),
             Gate::Logging => logging::check(&tree, logging::ALLOW),
             Gate::TestTime => test_time::check(&tree),
+            Gate::UnitsBare => units_bare::check(&tree, units_bare::MIN_FILES),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),
             Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
             Gate::Conformance => {

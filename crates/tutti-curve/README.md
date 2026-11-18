@@ -2,7 +2,7 @@
 
 Easing curves and automation: a few ways a value can move between two points, and a list of timed points that describes how a setting changes over a song.
 
-It depends only on `tutti-types` (units such as hertz and decibels), so you can use it on its own wherever you need to shape or sample a value over time.
+It depends only on `tutti-units` (units such as hertz and decibels), so you can use it on its own wherever you need to shape or sample a value over time.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

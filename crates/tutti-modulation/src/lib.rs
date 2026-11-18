@@ -39,7 +39,7 @@
 //!   (`ControlLaneNode`) and the reconcile that wires them into a graph
 //!   (`Modulation`) are `tutti-nodes`'.
 //!
-//! It depends only on `tutti-types` and `tutti-curve` (for `Law`).
+//! It depends only on `tutti-units`, `tutti-types` and `tutti-curve` (for `Law`).
 //!
 //! ## Example
 //!

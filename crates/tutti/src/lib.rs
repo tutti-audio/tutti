@@ -283,7 +283,7 @@ pub mod nodes {
     };
 }
 
-/// The unit vocabulary (`tutti-types`, `tutti-buffers`) a program names less
+/// The unit vocabulary (`tutti-units`, `tutti-types`, `tutti-buffers`) a program names less
 /// often than the root's units: moments and notes, the parameter cell and its
 /// addresses, shape terms (`Tail`, `Latency`), the edge traits (`Source`,
 /// `Sink`, `Pull`), channel folds and the range errors.

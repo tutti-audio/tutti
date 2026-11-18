@@ -120,8 +120,8 @@
 //!
 //! ## Where it sits
 //!
-//! Depends on `tutti-types` ([`Samples`], [`ChannelLayout`], [`ChannelTopology`], the
-//! meter vocabulary), `tutti-graph` (`Offset`), `tutti-rt`, `tutti-ump` and
+//! Depends on `tutti-units` ([`Samples`]) and `tutti-types` ([`ChannelLayout`],
+//! [`ChannelTopology`], the meter vocabulary), `tutti-graph` (`Offset`), `tutti-rt`, `tutti-ump` and
 //! `tutti-midi-protocol`, re-exporting the parts format crates need so none of them takes its
 //! own dependency for the type names.
 //! All four format hosts and `tutti-plugin` depend on it.
@@ -244,7 +244,7 @@ pub use tutti_rt::{RequestBit, RequestBits, RequestWord};
 pub use tutti_types::MaxBlock;
 pub use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 /// Re-exported so every format crate spells a sample count the same way
-/// without each taking its own `tutti-types` dependency — `ChannelLayout`
+/// without each taking its own `tutti-units` dependency — `ChannelLayout`
 /// above is here for the same reason.
 pub use tutti_units::{SampleRate, Samples};
 

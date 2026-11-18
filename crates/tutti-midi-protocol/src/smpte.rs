@@ -194,7 +194,7 @@ impl SmpteFrameRate {
     /// nearest frame, `MmcPosition::from_seconds` down, with the fraction as
     /// its subframes.
     ///
-    /// The count is an `f64` and not a unit: no `tutti_types` unit counts
+    /// The count is an `f64` and not a unit: no `tutti_units` unit counts
     /// timecode frames (a `Frame` is a graph sample frame).
     ///
     /// [`SmpteTimecode::from_seconds`]: SmpteTimecode::from_seconds

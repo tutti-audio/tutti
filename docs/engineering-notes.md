@@ -98,8 +98,11 @@ crates/             everything shipped, directory name = package name
                     #   Bevy-mandatory member.
   tutti-session     # Bevy-free API layer: the cross-crate composition both
                     #   umbrellas use (design 015). Not an umbrella itself.
-  tutti-types       # Engine value vocabulary + io::{Source, Sink, Pull}.
-                    #   No workspace dependency; forbids `unsafe`.
+  tutti-units       # The unit newtypes (`Hz`, `Seconds`, `Beat`, ...), `Samples`,
+                    #   `Latency`, `Tail`. `no_std`, no alloc, no atomics; no
+                    #   workspace dependency; forbids `unsafe`.
+  tutti-types       # Channel layouts, meter, notes, `Param<U>`, ids. Names only
+                    #   tutti-units; forbids `unsafe`.
   tutti-rt          # Real-time-safe shared-memory primitives: the lock-free and
                     #   `unsafe` runtime structure, every loom model, `Publisher`.
   tutti-graph       # The graph: `Node` contract, Topology->Plan compiler (PDC),
@@ -111,7 +114,7 @@ crates/             everything shipped, directory name = package name
   tutti-codec       # File codecs: the encoders and FileOut, the decoder (Wave, FileIn).
   tutti-modulation         # Pure modulation: the route compiler, curves. Audio-free.
   tutti-export      # Offline rendering and export
-  tutti-dsp         # Pure algorithms over slices. Names only tutti-types.
+  tutti-dsp         # Pure algorithms over slices. Names only tutti-units, tutti-types and tutti-buffers.
   tutti-nodes       # DSP nodes (LFO, dynamics, convolution, automation, VBAP and HRTF panners).
   tutti-sampler     # Sample playback (streaming, audition)
   tutti-polysynth   # Polyphonic subtractive/wavetable synth
@@ -131,7 +134,7 @@ vendor/             third-party code we never edit
 
 ## Unit Types (MANDATORY)
 
-`tutti_types` defines the engine's measurement vocabulary. **Use
+`tutti_units` defines the engine's measurement vocabulary. **Use
 the unit newtype, never the bare float**, for any quantity one covers — in struct
 fields, function signatures, `Param<U>`, and return types alike.
 

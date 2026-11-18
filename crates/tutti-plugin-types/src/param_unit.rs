@@ -10,7 +10,7 @@
 //! [`ParameterInfo::unit`](crate::ParameterInfo::unit) whatever this says.
 //!
 //! `ParamUnit` is a runtime tag and lives here, with the hosts, not in
-//! `tutti-types` beside the compile-time units: a second name for
+//! `tutti-units` beside the compile-time units: a second name for
 //! `Hz` or `Db` there would be two names for one behaviour.
 
 use crate::ParamRange;

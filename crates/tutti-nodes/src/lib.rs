@@ -164,8 +164,8 @@
 //!
 //! The `tutti` crate re-exports this one as `tutti::nodes`;
 //! `tutti-polysynth`, `tutti-export` and `tutti-plugin` build on
-//! it. It re-exports the unit types (`Hz`, `Db`, `Seconds`, …) and `Param` from
-//! `tutti-types`.
+//! it. It re-exports the unit types (`Hz`, `Db`, `Seconds`, …) from `tutti-units` and
+//! `Param` from `tutti-types`.
 //!
 //! ## Features
 //!

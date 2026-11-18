@@ -12,7 +12,7 @@ members = [
     "crates/tutti-curve",
     # The sample formats (`Sample`, `Float`, `I24`) and the borrowed mono, interleaved
     # and planar views over them, with the conversions between formats and layouts:
-    # layer 1, `tutti-types` alone (and `libm`).
+    # layer 2, `tutti-units` and `tutti-types` alone (and `libm`).
     "crates/tutti-buffers",
     "crates/tutti-cpal",
     "crates/tutti-units",

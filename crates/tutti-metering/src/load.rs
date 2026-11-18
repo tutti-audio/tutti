@@ -14,7 +14,7 @@ pub const LOAD_MEAN_TIME_CONSTANT: Seconds = Seconds(0.3);
 /// A load is render time over the block's real-time budget
 /// (`frames / sample_rate`): `0.5` used half the time the device allows, and
 /// anything above `1.0` missed the deadline. It is a plain `f32`: no unit in
-/// `tutti_types` is a fraction of a time budget (`Mix` and
+/// `tutti_units` is a fraction of a time budget (`Mix` and
 /// `Depth` are controls with a `0..=1` range, and a load has no upper bound),
 /// and a reading has no algebra to guard.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

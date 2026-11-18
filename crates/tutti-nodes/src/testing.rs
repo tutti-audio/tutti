@@ -525,7 +525,7 @@ mod tests {
     /// saw starts at the top of its ramp, +1.0, rather than at −1.0.
     ///
     /// The edge row does not tell a start of `1.0 - ε` from `1.0`, which the saw also emits
-    /// as +1.0; that `Phase::wrapped` stays under 1.0 is pinned in `tutti-types`.
+    /// as +1.0; that `Phase::wrapped` stays under 1.0 is pinned in `tutti-units`.
     #[test]
     fn with_phase_wraps_into_one_cycle_and_reset_restores_it() {
         let quarter = 2.0 * 0.25 - 1.0; // the saw's value at 0.25 turns

@@ -13,7 +13,7 @@
 //! - a fork starts from each index's own value;
 //! - the sample-accuracy contract's param row drives index 1.
 //!
-//! The kind-and-index encoding itself is pinned in `tutti-types`
+//! The kind-and-index encoding itself is pinned in `tutti-units`
 //! (`unit_param.rs`); the session side in its own suites.
 
 use tutti_graph::testing as common;
