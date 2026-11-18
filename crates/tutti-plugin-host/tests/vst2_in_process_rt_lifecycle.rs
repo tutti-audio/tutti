@@ -366,9 +366,17 @@ fn a_prepare_on_the_main_thread_tells_the_plugin_at_once() {
     assert_eq!(after.sample_rate, 96_000.0, "told in the prepare");
     assert_eq!(after.suspend_count, before.suspend_count + 1);
     assert_eq!(after.resume_count, before.resume_count + 1);
-    assert_eq!(loaded.unit.unlent_blocks(), 0, "no block went without it");
+    assert_eq!(
+        loaded.unit.controls().block_losses().unlent,
+        0,
+        "no block went without it"
+    );
     process_block(&mut loaded.unit, BLOCK);
-    assert_eq!(loaded.unit.unlent_blocks(), 0, "the new Processor renders");
+    assert_eq!(
+        loaded.unit.controls().block_losses().unlent,
+        0,
+        "the new Processor renders"
+    );
 
     drop(loaded.handle);
 }
@@ -658,13 +666,13 @@ fn the_shape_declares_the_plugins_buses() {
 /// **A block whose plugin refuses its audio entry is counted though it carries no MIDI**:
 /// the plugin raises its input count past the buffer it was activated with (before the host
 /// restarts it), so every entry is refused, the block renders silence without failing, and
-/// the node's `refused_entries` says so.
+/// the node's `entries_refused` count says so.
 fn a_refused_block_with_no_midi_is_counted() {
     let _guard = lock_probe();
     let mut loaded = load();
     drive_block(&mut loaded.unit);
     assert_eq!(
-        loaded.unit.refused_entries(),
+        loaded.unit.controls().block_losses().entries_refused,
         0,
         "a live plugin refuses none"
     );
@@ -676,10 +684,14 @@ fn a_refused_block_with_no_midi_is_counted() {
     });
     process_block(&mut loaded.unit, BLOCK);
     assert!(
-        loaded.unit.refused_entries() > 0,
+        loaded.unit.controls().block_losses().entries_refused > 0,
         "the plugin's refusal reaches the node"
     );
-    assert_eq!(loaded.unit.failed_blocks(), 0, "the block did not fail");
+    assert_eq!(
+        loaded.unit.controls().block_losses().failed,
+        0,
+        "the block did not fail"
+    );
     drop(loaded.handle);
 }
 

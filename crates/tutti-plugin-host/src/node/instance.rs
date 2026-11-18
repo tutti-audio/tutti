@@ -11,14 +11,14 @@
 //! back at the audio thread's next poll.
 
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
+use parking_lot::Mutex;
 use tutti_plugin_types::{
     Event, Hand, HostOp, InProcess, Layout, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin,
-    PluginError, Prepare, Processor, RenderMode, RenderModeSupport, SampleRate, Samples, State,
-    Successor, standing,
+    PluginError, PluginFailure, PluginInvalidation, Prepare, Processor, RenderMode,
+    RenderModeSupport, SampleRate, Samples, State, Successor, standing,
 };
 use tutti_rt::Rt;
 
@@ -31,7 +31,7 @@ use tutti_plugin_types::PluginTail;
 /// What the plugin changed about itself since the last
 /// [`Instance::pump`]: each field is a re-read the core did after the
 /// plugin's own request.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct Changes {
     /// The new latency, when it moved.
     pub(super) latency: Option<Samples>,
@@ -42,6 +42,85 @@ pub(super) struct Changes {
     pub(super) io: bool,
     /// What the plugin asked the transport to do, in the order it asked.
     pub(super) transport: Vec<tutti_plugin_types::TransportRequest>,
+    /// What the instance has to say of the plugin itself since the last
+    /// pump, in the order it happened: a refused rate, the rate taken again
+    /// after one, a restart that would not stop, the plugin's death.
+    pub(super) reports: Vec<PluginInvalidation>,
+}
+
+/// What the lifecycle reported that stopped an event from taking effect.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum Trouble {
+    /// The plugin would not run at `rate`.
+    #[error("{reason}")]
+    Refused {
+        /// The rate that was refused.
+        rate: SampleRate,
+        /// Why.
+        reason: Arc<PluginError>,
+    },
+    /// The plugin would not stop: it runs as it was.
+    #[error("{reason}")]
+    Stuck {
+        /// Why.
+        reason: Arc<PluginError>,
+    },
+    /// A call into the plugin panicked: the plugin is lost.
+    #[error("{reason}")]
+    Lost {
+        /// Why.
+        reason: Arc<PluginError>,
+    },
+}
+
+impl Trouble {
+    fn reason(&self) -> &Arc<PluginError> {
+        match self {
+            Self::Refused { reason, .. } | Self::Stuck { reason } | Self::Lost { reason } => reason,
+        }
+    }
+}
+
+/// Whether the plugin is lost, and why: set once, by the instance, when its
+/// lifecycle poisons, and readable with no lock by the nodes over the
+/// instance and the handle's [`Health`](tutti_plugin_types::Health). A latch:
+/// nothing else is published through it, so a node dropped while the control
+/// side holds the instance reads it directly.
+#[derive(Debug, Default)]
+pub(super) struct Lost(OnceLock<PluginFailure>);
+
+impl Lost {
+    /// Whether the plugin is lost.
+    pub(super) fn is_lost(&self) -> bool {
+        self.0.get().is_some()
+    }
+
+    /// Why the plugin is lost, once it is.
+    pub(super) fn cause(&self) -> Option<PluginFailure> {
+        self.0.get().cloned()
+    }
+
+    /// Latches `cause`; `false` when the plugin was lost already.
+    fn latch(&self, cause: PluginFailure) -> bool {
+        self.0.set(cause).is_ok()
+    }
+}
+
+/// The latency and tail the control side last read, readable while the
+/// instance is locked: what a node's `shape` declares to the graph compile.
+/// Copied in and out under a lock that is never held across a plugin call.
+#[derive(Debug, Default)]
+pub(super) struct Figures(Mutex<(Samples, PluginTail)>);
+
+impl Figures {
+    /// The latency and tail as last published.
+    pub(super) fn get(&self) -> (Samples, PluginTail) {
+        *self.0.lock()
+    }
+
+    fn publish(&self, latency: Samples, tail: PluginTail) {
+        *self.0.lock() = (latency, tail);
+    }
 }
 
 /// A plugin of hosting `F` and where it is in its life.
@@ -59,19 +138,19 @@ pub(super) struct Instance<F: Loaded> {
     prepare: Prepare,
     /// What the pump has not yet reported.
     changes: Changes,
-    /// What the control side has not yet been told about the plugin's rate:
-    /// `Some(Some(..))` a refusal, `Some(None)` the rate taken again after one.
-    /// Read by [`take_rate_report`](Self::take_rate_report).
-    rate_report: Option<Option<(SampleRate, String)>>,
-    /// The last rate change was refused (the report above says so once).
+    /// What the control side has not yet been told about the plugin, in the
+    /// order it happened: a refused rate, a rate taken again after one, a
+    /// restart that would not stop, the plugin's death. Read by
+    /// [`take_reports`](Self::take_reports).
+    reports: Vec<PluginInvalidation>,
+    /// The last rate change was refused (the reports say so once).
     rate_refused: bool,
     /// A successor was committed ([`commit`](Self::commit)).
     committed: bool,
-    /// Whether the plugin is lost, readable with no lock: a node dropped while
-    /// the control side holds the instance reads it. A latch: it is set once,
-    /// nothing is published through it, and a reader that misses it only
-    /// hands a Processor back that nothing then collects, so no fence is needed.
-    lost: Arc<AtomicBool>,
+    /// Whether the plugin is lost, and why, readable with no lock.
+    lost: Arc<Lost>,
+    /// The latency and tail as of the last step, for a node's `shape`.
+    figures: Arc<Figures>,
 }
 
 impl<F: InProcess> Instance<F> {
@@ -138,20 +217,22 @@ impl<F: Loaded> Instance<F> {
             origin,
             prepare,
             changes: Changes::default(),
-            rate_report: None,
+            reports: Vec::new(),
             rate_refused: false,
             committed: false,
-            lost: Arc::new(AtomicBool::new(false)),
+            lost: Arc::default(),
+            figures: Arc::default(),
         };
         let refused = this.drive(main, Event::Op(HostOp::Activate(prepare)));
-        if let Some(reason) = refused {
+        if let Some(trouble) = refused {
             return Err((
                 LoadStage::Activation,
-                format!("activation failed: {reason}"),
+                format!("activation failed: {trouble}"),
             ));
         }
         // What the activation read is the baseline, not a change.
         this.changes = Changes::default();
+        this.reports.clear();
         Ok((this, rt))
     }
 
@@ -174,20 +255,27 @@ impl<F: Loaded> Instance<F> {
             origin: None,
             prepare,
             changes: Changes::default(),
-            rate_report: None,
+            reports: Vec::new(),
             rate_refused: false,
             committed: false,
-            lost: Arc::new(AtomicBool::new(false)),
+            lost: Arc::default(),
+            figures: Arc::default(),
         };
+        this.publish_figures();
         (this, rt)
     }
 
-    /// Steps `event` and keeps what it told; the reason of a refused
-    /// activation, if it was one.
-    fn drive(&mut self, main: MainThreadMarker, event: Event) -> Option<String> {
-        let mut refused = None;
+    /// Steps `event` and keeps what it told; what stopped it from taking
+    /// effect, if something did.
+    ///
+    /// A lifecycle that poisons latches the plugin lost, and reports its
+    /// death once.
+    fn drive(&mut self, main: MainThreadMarker, event: Event) -> Option<Trouble> {
+        let mut trouble = None;
         let changes = &mut self.changes;
-        let state = self.state.clone();
+        // The lifecycle takes the state by value and hands the next back; a
+        // fresh state is no allocation, so the one held is moved, not cloned.
+        let state = std::mem::replace(&mut self.state, Lifecycle::<F>::initial_state());
         self.state =
             self.lifecycle
                 .drive(state, event, &mut self.hand, main, |notice| match notice {
@@ -195,18 +283,49 @@ impl<F: Loaded> Instance<F> {
                     Notice::TailChanged(tail) => changes.tail = Some(tail),
                     Notice::IoChanged => changes.io = true,
                     Notice::Transport(request) => changes.transport.push(request),
-                    Notice::Refused { reason, .. }
-                    | Notice::Stuck { reason }
-                    | Notice::Lost { reason } => refused = Some(reason.to_string()),
+                    Notice::Refused { rate, reason } => {
+                        trouble = Some(Trouble::Refused {
+                            rate,
+                            reason: Arc::new(reason),
+                        });
+                    }
+                    Notice::Stuck { reason } => {
+                        trouble = Some(Trouble::Stuck {
+                            reason: Arc::new(reason),
+                        });
+                    }
+                    Notice::Lost { reason } => {
+                        trouble = Some(Trouble::Lost {
+                            reason: Arc::new(reason),
+                        });
+                    }
                     Notice::ParamValuesChanged
                     | Notice::NoteExpressionChanged
                     | Notice::ParamTitlesChanged
                     | Notice::Reloaded => {}
                 });
+        self.publish_figures();
         if self.lifecycle.is_poisoned() {
-            self.lost.store(true, Ordering::Release);
+            let source = trouble.as_ref().map_or_else(
+                || {
+                    Arc::new(PluginError::Other(
+                        "a call into the plugin panicked".to_string(),
+                    ))
+                },
+                |trouble| Arc::clone(trouble.reason()),
+            );
+            let cause = PluginFailure::Panicked { source };
+            if self.lost.latch(cause.clone()) {
+                self.reports.push(PluginInvalidation::Crashed { cause });
+            }
         }
-        refused
+        trouble
+    }
+
+    /// Publishes the latency and tail the state holds.
+    fn publish_figures(&self) {
+        let (latency, tail) = self.figures();
+        self.figures.publish(latency, tail);
     }
 
     /// The plugin's `Control` surface (parameters, state, presets), wherever
@@ -215,24 +334,28 @@ impl<F: Loaded> Instance<F> {
         self.lifecycle.control()
     }
 
-    /// The latency and tail as the control side last read them. Dispatches
-    /// nothing, so the graph compile may call it.
-    pub(super) fn figures(&self) -> (Samples, PluginTail) {
+    /// The latency and tail as the state last read them.
+    fn figures(&self) -> (Samples, PluginTail) {
         (
             self.state.latency().unwrap_or_default(),
             self.state.tail().unwrap_or_default(),
         )
     }
 
-    /// The ports the plugin last reported, with its latency and tail: what a
-    /// node rebuilt over it declares. `None` before the lifecycle has read a
-    /// layout, and once the plugin is lost.
-    pub(super) fn reading(&self) -> Option<(&Layout, Samples, PluginTail)> {
+    /// The cell the latency and tail are published in, shared with the nodes
+    /// over this instance: their `shape` reads it with the instance locked.
+    pub(super) fn figure_cell(&self) -> Arc<Figures> {
+        Arc::clone(&self.figures)
+    }
+
+    /// The ports the plugin last reported: what a node rebuilt over it
+    /// declares. `None` before the lifecycle has read a layout, and once the
+    /// plugin is lost.
+    pub(super) fn layout(&self) -> Option<&Layout> {
         if self.lifecycle.is_poisoned() {
             return None;
         }
-        let (latency, tail) = self.figures();
-        Some((self.state.layout()?, latency, tail))
+        self.state.layout()
     }
 
     /// Whether the plugin can take a successor realtime end now.
@@ -276,11 +399,11 @@ impl<F: Loaded> Instance<F> {
     /// renders silence; [`settlement`](Self::settlement) says when the way is
     /// the successor's. A plugin that refuses the restart renders nothing until
     /// one it takes: the refusal is kept for the control side, as a rate's is
-    /// ([`take_rate_report`](Self::take_rate_report)).
+    /// ([`take_reports`](Self::take_reports)).
     pub(super) fn commit(&mut self, main: MainThreadMarker, successor: Successor<F::Processor>) {
         self.hand.install(successor);
-        if let Some(why) = self.drive(main, Event::Op(HostOp::Relend)) {
-            self.note_refusal(why);
+        if let Some(trouble) = self.drive(main, Event::Op(HostOp::Relend)) {
+            self.note(trouble);
         }
         self.committed = true;
     }
@@ -298,9 +421,9 @@ impl<F: Loaded> Instance<F> {
         }
     }
 
-    /// The flag [`lost_flag`](Self::lost_flag) shares: set when the lifecycle poisons, shared with the nodes over this
-    /// instance.
-    pub(super) fn lost_flag(&self) -> Arc<AtomicBool> {
+    /// The latch set when the lifecycle poisons, shared with the nodes over
+    /// this instance and the handle's health.
+    pub(super) fn lost_latch(&self) -> Arc<Lost> {
         Arc::clone(&self.lost)
     }
 
@@ -354,9 +477,12 @@ impl<F: Loaded> Instance<F> {
             let _ = rt.poll(Processor::stop);
         }
         match refused {
-            None => true,
-            Some(why) => {
-                self.note_refusal(why);
+            None => {
+                self.settle();
+                true
+            }
+            Some(trouble) => {
+                self.note(trouble);
                 false
             }
         }
@@ -376,23 +502,21 @@ impl<F: Loaded> Instance<F> {
     ///
     /// # Errors
     ///
-    /// Why the plugin did not take the rate, worded as the other formats word it
-    /// (`standing`: where the plugin stands). The refusal is also kept for
-    /// [`take_rate_report`](Self::take_rate_report), which is how the control side
-    /// hears of one the audio thread's parked rate caused.
+    /// Why the plugin did not take the rate, worded as the other formats word
+    /// it (`standing`: where the plugin stands). What went wrong is also kept
+    /// for [`take_reports`](Self::take_reports), by its kind: a refusal of the
+    /// rate, a restart that would not stop, or the plugin's death. That is how
+    /// the control side hears of one the audio thread's parked rate caused.
+    ///
+    /// A rate that is taken after a refusal is reported taken
+    /// (`PluginInvalidation::RateRestored`) when the plugin renders at it: at
+    /// once with `rt`, and at the pump that finishes the parked plan without.
     pub(super) fn set_sample_rate(
         &mut self,
         main: MainThreadMarker,
         rate: SampleRate,
         rt: Option<&mut Rt<F::Processor>>,
     ) -> Result<(), String> {
-        let refused = |this: &Self, why: &str| {
-            format!(
-                "plugin refused sample rate {} ({}): {why}",
-                rate.get(),
-                standing(this.state.renders(), this.prepare.rate())
-            )
-        };
         let wanted = self.prepare.with_rate(rate);
         let mut outcome = self.drive(main, Event::Op(HostOp::Reconfigure(wanted)));
         if let Some(rt) = rt {
@@ -404,31 +528,89 @@ impl<F: Loaded> Instance<F> {
             outcome = outcome.or(ticked);
             let _ = rt.poll(Processor::stop);
         }
-        let result = match outcome {
-            Some(why) => Err(refused(self, &why)),
+        match outcome {
+            Some(trouble) => {
+                // A plugin that died on the way is lost, whatever its last
+                // reply said: the caller hears what the reports say.
+                let trouble = match trouble {
+                    Trouble::Refused { reason, .. } | Trouble::Stuck { reason }
+                        if self.lost.is_lost() =>
+                    {
+                        Trouble::Lost { reason }
+                    }
+                    trouble => trouble,
+                };
+                let reason = self.worded(rate, &trouble);
+                self.note(trouble);
+                Err(reason)
+            }
             None => {
                 self.prepare = wanted;
+                self.settle();
                 Ok(())
             }
-        };
-        match &result {
-            Err(reason) => {
-                self.rate_refused = true;
-                self.rate_report = Some(Some((rate, reason.clone())));
-            }
-            Ok(()) if self.rate_refused => {
-                self.rate_refused = false;
-                self.rate_report = Some(None);
-            }
-            Ok(()) => {}
         }
-        result
     }
 
-    /// The refusal (or the recovery from one) not yet reported, once: what the
-    /// control side turns into `PluginInvalidation::RateRefused` or `RateRestored`.
-    pub(super) fn take_rate_report(&mut self) -> Option<Option<(SampleRate, String)>> {
-        self.rate_report.take()
+    /// Why the plugin did not run at `rate`, as the formats word a refusal.
+    fn worded(&self, rate: SampleRate, trouble: &Trouble) -> String {
+        match trouble {
+            Trouble::Refused { reason, .. } => format!(
+                "plugin refused sample rate {} ({}): {reason}",
+                rate.get(),
+                standing(self.state.renders(), self.prepare.rate())
+            ),
+            Trouble::Stuck { reason } => format!(
+                "plugin would not stop for sample rate {} ({}): {reason}",
+                rate.get(),
+                standing(self.state.renders(), self.prepare.rate())
+            ),
+            Trouble::Lost { reason } => format!(
+                "plugin was lost changing to sample rate {}: {reason}",
+                rate.get()
+            ),
+        }
+    }
+
+    /// What the plugin did not do, kept for the control side by its kind.
+    /// A death is reported by [`drive`](Self::drive), where the latch is set.
+    fn note(&mut self, trouble: Trouble) {
+        // A lost plugin is reported as lost, once, by `drive`: what it
+        // refused on the way is not a refusal of a rate.
+        if self.lost.is_lost() {
+            return;
+        }
+        match trouble {
+            Trouble::Refused { rate, reason } => {
+                self.rate_refused = true;
+                self.reports.push(PluginInvalidation::RateRefused {
+                    rate,
+                    reason: reason.to_string(),
+                });
+            }
+            Trouble::Stuck { reason } => {
+                self.reports.push(PluginInvalidation::Stuck {
+                    reason: reason.to_string(),
+                });
+            }
+            Trouble::Lost { .. } => {}
+        }
+    }
+
+    /// The plugin runs again after refusing a rate: reported once.
+    fn restored(&mut self) {
+        if self.rate_refused {
+            self.rate_refused = false;
+            self.reports.push(PluginInvalidation::RateRestored);
+        }
+    }
+
+    /// What the control side has not yet been told about the plugin, once: a
+    /// refused rate, the rate taken again after one, a restart that would not
+    /// stop, the plugin's death. [`pump`](Self::pump) returns them with the
+    /// plugin's changes.
+    fn take_reports(&mut self) -> Vec<PluginInvalidation> {
+        std::mem::take(&mut self.reports)
     }
 
     /// The main thread's tick: delivers what the plugin asked for, collects a
@@ -451,21 +633,26 @@ impl<F: Loaded> Instance<F> {
             self.changes.io = true;
         }
         for request in asked {
-            if let Some(why) = self.drive(main, Event::Request(request)) {
-                self.note_refusal(why);
+            if let Some(trouble) = self.drive(main, Event::Request(request)) {
+                self.note(trouble);
             }
         }
-        if let Some(why) = self.drive(main, Event::Tick) {
-            self.note_refusal(why);
+        match self.drive(main, Event::Tick) {
+            Some(trouble) => self.note(trouble),
+            None => self.settle(),
         }
-        std::mem::take(&mut self.changes)
+        let mut changes = std::mem::take(&mut self.changes);
+        changes.reports = self.take_reports();
+        changes
     }
 
-    /// A refusal the pump's plan met (a parked rate change), kept for the
-    /// control side.
-    fn note_refusal(&mut self, why: String) {
-        self.rate_refused = true;
-        self.rate_report = Some(Some((self.prepare.rate(), why)));
+    /// A plugin that refused a rate has taken one when it renders again with
+    /// no plan under way: a parked change that was waiting for the audio
+    /// thread's Processor has finished, or the plugin's own restart ran.
+    fn settle(&mut self) {
+        if self.rate_refused && self.state.renders() && !self.state.is_busy() {
+            self.restored();
+        }
     }
 
     /// The plugin's parameter edits since the last call.
@@ -500,10 +687,7 @@ impl<F: Loaded> Instance<F> {
     /// a refusal of the rate before it is over.
     pub(super) fn retuned(&mut self, rate: SampleRate) {
         self.prepare = self.prepare.with_rate(rate);
-        if self.rate_refused {
-            self.rate_refused = false;
-            self.rate_report = Some(None);
-        }
+        self.restored();
     }
 }
 
@@ -550,14 +734,14 @@ mod tests {
             None,
         )
         .expect("loads");
-        assert_eq!(instance.take_rate_report(), None, "nothing to report yet");
+        assert!(instance.take_reports().is_empty(), "nothing to report yet");
         instance
             .set_sample_rate(main_thread(), SampleRate::SR_96K, None)
             .expect("a real rate is taken");
         assert_eq!(instance.prepare.rate(), SampleRate::SR_96K);
-        assert_eq!(instance.take_rate_report(), None, "a plain change");
+        assert!(instance.take_reports().is_empty(), "a plain change");
         assert!(instance.renders());
-        assert!(!instance.lost_flag().load(Ordering::Acquire));
+        assert!(!instance.lost_latch().is_lost());
     }
 
     /// **A rate change made off the realtime thread completes at the pump,
@@ -657,5 +841,109 @@ mod tests {
         assert!(instance.set_render_mode(main_thread(), RenderMode::Offline, Some(&mut rt)));
         assert_eq!(fake.told_render_mode(), Some(RenderMode::Offline));
         assert!(!cycled(&fake), "{:?}", fake.calls());
+    }
+
+    /// **A panic out of a call into the plugin latches it lost, with the
+    /// reason, and reports its death once**: the cause is a
+    /// `PluginFailure::Panicked`, readable with no lock through the latch, and
+    /// the next pump has nothing more to say.
+    #[test]
+    fn a_panicked_plugin_is_latched_lost_with_a_panicked_cause_reported_once() {
+        use tutti_plugin_types::Request;
+        let (mut instance, _rt, fake) = adopted(RenderModeSupport::Live);
+        let lost = instance.lost_latch();
+        assert!(!lost.is_lost(), "a live plugin");
+        fake.panic_in_latency(true);
+        assert!(Request::LatencyChanged.raise(fake.request_word()));
+        let changes = instance.pump(main_thread());
+        assert!(lost.is_lost());
+        assert!(
+            matches!(lost.cause(), Some(PluginFailure::Panicked { .. })),
+            "{:?}",
+            lost.cause()
+        );
+        assert!(
+            matches!(
+                changes.reports.as_slice(),
+                [PluginInvalidation::Crashed { .. }]
+            ),
+            "{:?}",
+            changes.reports
+        );
+        assert!(instance.pump(main_thread()).reports.is_empty(), "told once");
+    }
+
+    /// **A restart the plugin would not stop for is reported as stuck, not as a
+    /// refused rate**: the plugin runs as it was, so nothing was refused and
+    /// nothing is to be restored.
+    #[test]
+    fn a_restart_that_would_not_stop_is_stuck_not_a_refused_rate() {
+        let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
+        fake.stick_deactivations(1);
+        let why = instance
+            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
+            .expect_err("the fake will not stop");
+        assert!(why.contains("would not stop"), "{why}");
+        let reports = instance.take_reports();
+        assert!(
+            matches!(reports.as_slice(), [PluginInvalidation::Stuck { .. }]),
+            "{reports:?}"
+        );
+        assert!(!instance.rate_refused);
+        assert!(instance.renders(), "as it was");
+    }
+
+    /// **A refused rate is reported with the rate that was refused, and the
+    /// recovery is reported once, when the plugin renders again** (here by its
+    /// activation for a render mode, not by a rate change that would have
+    /// reported it).
+    #[test]
+    fn a_refusal_names_the_rate_and_the_recovery_is_reported_when_it_renders_again() {
+        let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
+        fake.refuse_rate(Some(SampleRate::SR_96K));
+        instance
+            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
+            .expect_err("refused");
+        let reports = instance.take_reports();
+        assert!(
+            matches!(
+                reports.as_slice(),
+                [PluginInvalidation::RateRefused { rate, .. }] if *rate == SampleRate::SR_96K
+            ),
+            "{reports:?}"
+        );
+        assert!(!instance.renders());
+
+        fake.refuse_rate(None);
+        assert!(instance.set_render_mode(main_thread(), RenderMode::Offline, Some(&mut rt)));
+        assert!(instance.renders(), "the activation for the mode ran");
+        let reports = instance.take_reports();
+        assert!(
+            matches!(reports.as_slice(), [PluginInvalidation::RateRestored]),
+            "{reports:?}"
+        );
+        assert!(instance.pump(main_thread()).reports.is_empty(), "told once");
+    }
+
+    /// **A plugin that panics in the middle of a restart is reported lost and
+    /// nothing else**: the refusal its failed activation raises is not a
+    /// refused rate.
+    #[test]
+    fn a_panic_during_a_restart_reports_the_death_and_no_refusal() {
+        let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
+        fake.panic_in_activate(true);
+        let why = instance
+            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
+            .expect_err("the plugin is lost");
+        assert!(
+            why.starts_with("plugin was lost changing to sample rate 96000"),
+            "{why}"
+        );
+        let reports = instance.take_reports();
+        assert!(
+            matches!(reports.as_slice(), [PluginInvalidation::Crashed { .. }]),
+            "{reports:?}"
+        );
+        assert!(instance.lost_latch().is_lost());
     }
 }
