@@ -1,9 +1,11 @@
 # Library code that has not yet reached the width rule (`cargo xtask check-width`).
 #
 # A quantity has one width, data is generic over the graph's `F`, and every crossing is a
-# named place. One `<path>  <max>  migrating: <PR or step>` row per file that still holds a
-# refused form; the gate fails on a file over its max, on a file with no row over 0, and on a
-# row whose file holds no site, so the list only shrinks and ends empty. The forms and what
+# named place. One `<path>  <max>  <reason>` row per file that still holds a refused form;
+# the gate fails on a file over its max, on a file with no row over 0, and on a row whose file
+# holds no site, so the list only shrinks. The reason is `migrating: <PR or step>` (debt, which
+# ends) or `spec: <the external fact>` (a width an outside specification fixes, which stays
+# counted); the list ends with `spec:` rows only. The forms and what
 # counts as library code are in the gate's docs (xtask/src/gates/width.rs).
 #
 # step  R1/S7 dsp: banks to one float, then PolySynth, SoundFont and GM generic over F
