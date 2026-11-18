@@ -1,16 +1,12 @@
 //! [`Normalized`], a neutral value on `0..=1`.
 
 crate::ranged! {
-    /// A parameter value on the host's `0..=1` scale.
+    /// A position on the unit interval, `0..=1`, with no meaning beyond it.
     ///
-    /// The four hosted plugin formats disagree about which domain a parameter
-    /// value is in: VST3 and VST2 speak normalized natively, AU and CLAP speak
-    /// the plugin's own units. The shared seam picks normalized, leaving each
-    /// format to convert at its own edge, so what a `Normalized` means in plain
-    /// units is the format's answer, never a formula over a range. Carried only
-    /// in prose over a bare `f64`, that rule is unenforceable: writing
-    /// `set_parameter(id, 20_000.0)` against a filter cutoff compiles and sets
-    /// the parameter to full scale rather than 20 kHz.
+    /// It is what a plugin parameter's normalized value and a MIDI velocity or
+    /// controller value scaled to `0..=1` are, before anything reads them as a
+    /// level, a depth or a mix. Which plain value a position stands for is the
+    /// reader's answer, never a formula here.
     ///
     /// A `Normalized` is always a finite value on `0..=1`. [`new`](Self::new)
     /// refuses anything else (NaN included) and so does deserializing one.
