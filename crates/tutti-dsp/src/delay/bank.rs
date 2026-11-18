@@ -84,14 +84,14 @@ fn position_of(secs: Seconds, max: Seconds, rate: SampleRate, cap: usize) -> Rea
 /// The loop's feedback and cross-feedback bounded as a pair ([`Feedback::stable_pair`]), in
 /// the state float. A pair already inside `bound` (`Feedback::MAX_STABLE` in `F`; this mirrors
 /// `Feedback::stable_pair`'s own in-bound test) is returned as it is, in `F`; one outside it is
-/// scaled by `Feedback`'s rule, which narrows through `f32` until `Feedback` stores `f64`.
+/// scaled by `Feedback`'s rule in `f64`.
 #[inline(always)]
 fn stable_pair<F: Float>(fb: F, cross: F, bound: F) -> (F, F) {
     if fb >= F::ZERO && cross >= F::ZERO && fb + cross <= bound {
         return (fb, cross);
     }
-    let (fb, cross) = Feedback::stable_pair(fb.to_f32(), cross.to_f32());
-    (F::from_f32(fb.get()), F::from_f32(cross.get()))
+    let (fb, cross) = Feedback::stable_pair(fb.into(), cross.into());
+    (F::from_unit(fb), F::from_unit(cross))
 }
 
 /// The per-frame lanes a delay reads beside its audio, in the audio's sample format, each
@@ -191,11 +191,11 @@ impl<F: Float + Lerp> DelayBank<F> {
             };
         }
         let steps = Steps::Fixed(glides.steps);
-        let fb = F::from_f32(finite_or(controls.feedback.get(), 0.0));
+        let fb = F::from_unit(Feedback(finite_or(controls.feedback.get(), 0.0)));
         let cross = if self.routing.is_none() {
             F::ZERO
         } else {
-            F::from_f32(finite_or(controls.cross_feedback.get(), 0.0))
+            F::from_unit(Feedback(finite_or(controls.cross_feedback.get(), 0.0)))
         };
         glides.feedback.aim_by(fb, steps);
         glides.cross.aim_by(cross, steps);
@@ -235,7 +235,7 @@ impl<F: Float + Lerp> DelayBank<F> {
             plane.map_or_else(Default::default, |p| &mut p.into_samples_mut()[..frames])
         });
         let g = *glides;
-        let bound = F::from_f32(Feedback::MAX_STABLE.get());
+        let bound = F::from_unit(Feedback::MAX_STABLE);
         let (time, feedback) = (
             lanes.time.map(|l| l.samples()),
             lanes.feedback.map(|l| l.samples()),

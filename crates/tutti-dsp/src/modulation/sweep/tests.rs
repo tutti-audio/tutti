@@ -24,7 +24,7 @@ fn step(x: f64) -> Stagger {
 #[test]
 fn a_sweep_refuses_what_its_line_cannot_hold() {
     let line = MaxDelay::of(Seconds(0.05));
-    let ok = |base: f64, lo: f64, hi: f64, fb: f32| {
+    let ok = |base: f64, lo: f64, hi: f64, fb: f64| {
         Sweep::new(Seconds(base), line, Seconds(lo), Seconds(hi), Feedback(fb))
     };
     // The edge of each rule is in; the next value out is refused.
@@ -68,7 +68,7 @@ fn a_sweep_refuses_what_its_line_cannot_hold() {
             "{lo}..{hi}"
         );
     }
-    for fb in [-0.01f32, 0.991, 5.0, f32::NAN, f32::INFINITY] {
+    for fb in [-0.01f64, 0.991, 5.0, f64::NAN, f64::INFINITY] {
         assert!(
             matches!(ok(0.01, 0.0, 0.01, fb), Err(SweepError::FeedbackMax(_))),
             "{fb}"

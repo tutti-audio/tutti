@@ -36,7 +36,7 @@ fn sine_gain(d: f64, n: usize) -> f64 {
     1.0 - (d.abs() - d * u) / 2.0
 }
 
-fn tremolo(wave: OscillatorWave, rate: Hz, depth: f32) -> Tremolo {
+fn tremolo(wave: OscillatorWave, rate: Hz, depth: f64) -> Tremolo {
     let mut t = Tremolo::new(wave, RATE);
     t.aim(&TremoloControls {
         rate,
@@ -45,7 +45,7 @@ fn tremolo(wave: OscillatorWave, rate: Hz, depth: f32) -> Tremolo {
     t
 }
 
-fn gains(depth: f32, frames: usize, blocks: &[usize]) -> Vec<f32> {
+fn gains(depth: f64, frames: usize, blocks: &[usize]) -> Vec<f32> {
     let mut t = tremolo(OscillatorWave::Sine, Hz(HZ), depth);
     let ones = vec![vec![1.0f32; frames]];
     run(frames, blocks, &ones, |i, o| t.process(i, o)).remove(0)
@@ -67,13 +67,14 @@ fn depth_zero_is_unity() {
 #[test]
 fn the_output_is_the_input_times_the_closed_form_gain() {
     let x = noise(2, 1_920, 1.0);
-    for d in [1.0f32, 0.5, -0.75] {
+    for d in [1.0f64, 0.5, -0.75] {
         let mut t = tremolo(OscillatorWave::Sine, Hz(HZ), d);
         let out = run(1_920, &[1_920], std::slice::from_ref(&x), |i, o| {
             t.process(i, o)
         });
         for (n, (&y, &x)) in out[0].iter().zip(&x).enumerate() {
-            let want = f64::from(x) * sine_gain(f64::from(d), n);
+            let want = f64::from(x) * sine_gain(d, n);
+            // The samples are `f32`, which sets the tolerance.
             assert!((f64::from(y) - want).abs() < 1e-5, "depth {d}, frame {n}");
         }
     }
@@ -148,7 +149,7 @@ fn a_square_wave_switches_between_unity_and_one_minus_depth() {
     assert!(g[250..470].iter().all(|&g| (g - 0.25).abs() < 1e-6));
 }
 
-fn auto_pan(law: PanLaw, depth: f32) -> AutoPan {
+fn auto_pan(law: PanLaw, depth: f64) -> AutoPan {
     let mut p = AutoPan::new(OscillatorWave::Sine, law, RATE);
     p.aim(&AutoPanControls {
         rate: Hz(HZ),
@@ -163,12 +164,12 @@ fn auto_pan(law: PanLaw, depth: f32) -> AutoPan {
 fn auto_pan_places_by_pan_gains_at_the_lfo_position() {
     let ones = vec![vec![1.0f32; 960]; 2];
     for law in [PanLaw::SquareRoot, PanLaw::Rp036] {
-        for d in [1.0f32, 0.4, -0.7] {
+        for d in [1.0f64, 0.4, -0.7] {
             let mut p = auto_pan(law, d);
             let out = run(960, &[37, 200], &ones, |i, o| p.process(i, o));
             for (n, (&out_l, &out_r)) in out[0].iter().zip(&out[1]).enumerate() {
                 let u = (TAU * HZ * n as f64 / RATE.get()).sin();
-                let (l, r) = pan_gains(Pan((f64::from(d) * u) as f32), law);
+                let (l, r) = pan_gains(Pan((d * u) as f32), law);
                 assert!(
                     (f64::from(out_l) - l.get()).abs() < 1e-5,
                     "{law:?} {d} L {n}"

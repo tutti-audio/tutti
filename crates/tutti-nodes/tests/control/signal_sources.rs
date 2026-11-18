@@ -339,7 +339,7 @@ fn lane_to_probe(
     ed: &mut Editor,
     from: u64,
     source: u32,
-    depth: f32,
+    depth: f64,
     knob: f32,
     lane: u64,
     probe: u64,

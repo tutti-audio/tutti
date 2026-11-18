@@ -19,11 +19,11 @@ use super::*;
 /// - `Balance * f32`, `Balance + Balance` — a position on a segment, as `Pan`
 ///   is. There is no `From` between `Balance`, `Pan` and `StereoBalance`: a
 ///   balance only attenuates, a pan places a source, a reading is not a control.
-/// - `Feedback * f32` — scaling walks a coefficient across the stability
+/// - `Feedback * f64` — scaling walks a coefficient across the stability
 ///   bound unchecked. `new_clamped` / `stable_pair` are the ways in.
-/// - `Drive * f32` — a shaper's response is nonlinear, so "twice the
+/// - `Drive * f64` — a shaper's response is nonlinear, so "twice the
 ///   drive" is not twice anything.
-/// - `BitDepth + BitDepth`, `BitDepth * f32` — a word length is chosen, not
+/// - `BitDepth + BitDepth`, `BitDepth * f64` — a word length is chosen, not
 ///   accumulated, and twice the bits is not twice anything audible (about 6 dB of
 ///   signal-to-noise ratio per bit). A depth from a number is
 ///   `BitDepth::new_clamped`.
@@ -63,12 +63,12 @@ fn cross_coupled_feedback_is_bounded_as_a_pair() {
     // the SAME recirculation, each individually legal, summing to 1.98.
     let (d, c) = Feedback::stable_pair(0.99, 0.99);
     assert!(
-        d.get() + c.get() <= Feedback::MAX_STABLE.get() + 1e-6,
+        d.get() + c.get() <= Feedback::MAX_STABLE.get() * (1.0 + 4.0 * f64::EPSILON),
         "combined feedback {} still runs away",
         d.get() + c.get()
     );
     // Scaled together, so the balance between them survives.
-    assert!((d.get() - c.get()).abs() < 1e-6);
+    assert!((d.get() - c.get()).abs() < 1e-15);
 
     // A pair that is already stable passes through untouched.
     let (d, c) = Feedback::stable_pair(0.5, 0.2);
@@ -76,7 +76,7 @@ fn cross_coupled_feedback_is_bounded_as_a_pair() {
 
     // Ratio preserved when scaling is needed.
     let (d, c) = Feedback::stable_pair(0.8, 0.4);
-    assert!((d.get() / c.get() - 2.0).abs() < 1e-5);
+    assert!((d.get() / c.get() - 2.0).abs() < 1e-15);
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn depth_keeps_the_range_contract() {
         get: Depth::get,
         of: Some(Depth::of),
         valid: &[-1.0, -0.5, 0.0, 0.25, 1.0],
-        invalid: &[-1.001, 1.001, f32::NAN, f32::INFINITY, f32::NEG_INFINITY],
+        invalid: &[-1.001, 1.001, f64::NAN, f64::INFINITY, f64::NEG_INFINITY],
     };
     tutti_fixtures::check_range_contract(&c);
     tutti_fixtures::check_range_serde(&c);
@@ -108,9 +108,9 @@ fn depth_keeps_the_range_contract() {
 /// never leaves its range.
 #[test]
 fn depth_saturates_only_by_name_and_through_a_cell() {
-    assert_eq!(Depth::clamped(f32::NAN), Depth::NONE);
-    assert_eq!(Depth::clamped(f32::INFINITY), Depth::FULL);
-    assert_eq!(Depth::clamped(f32::NEG_INFINITY), Depth::INVERTED);
+    assert_eq!(Depth::clamped(f64::NAN), Depth::NONE);
+    assert_eq!(Depth::clamped(f64::INFINITY), Depth::FULL);
+    assert_eq!(Depth::clamped(f64::NEG_INFINITY), Depth::INVERTED);
     assert_eq!(<Depth as Unit>::from_raw(9.0), Depth::FULL);
     assert_eq!(<Depth as Unit>::from_raw(-0.5).get(), -0.5);
 }
@@ -127,11 +127,10 @@ fn drive_is_not_a_gain() {
 /// `0.99 · x / (d + c)` per coefficient, so the sum is the bound.
 #[test]
 fn stable_pair_keeps_the_ratio_and_survives_infinity() {
-    // 1e-6 absolute: a few f32 ulps at these magnitudes (the sums land
-    // within 2e-7 of the bound).
-    let near = |got: (Feedback, Feedback), want: (f32, f32)| {
+    // 1e-15 absolute: a few f64 ulps at these magnitudes.
+    let near = |got: (Feedback, Feedback), want: (f64, f64)| {
         assert!(
-            (got.0.get() - want.0).abs() < 1e-6 && (got.1.get() - want.1).abs() < 1e-6,
+            (got.0.get() - want.0).abs() < 1e-15 && (got.1.get() - want.1).abs() < 1e-15,
             "got {got:?}, want {want:?}"
         );
     };
@@ -147,20 +146,20 @@ fn stable_pair_keeps_the_ratio_and_survives_infinity() {
     // Negative raises to zero, so the other takes the bound alone.
     near(Feedback::stable_pair(-1.0, 2.0), (0.0, 0.99));
     // An infinity takes the whole bound; two share it.
-    near(Feedback::stable_pair(f32::INFINITY, 0.0), (0.99, 0.0));
-    near(Feedback::stable_pair(0.3, f32::INFINITY), (0.0, 0.99));
+    near(Feedback::stable_pair(f64::INFINITY, 0.0), (0.99, 0.0));
+    near(Feedback::stable_pair(0.3, f64::INFINITY), (0.0, 0.99));
     near(
-        Feedback::stable_pair(f32::INFINITY, f32::INFINITY),
+        Feedback::stable_pair(f64::INFINITY, f64::INFINITY),
         (0.495, 0.495),
     );
-    near(Feedback::stable_pair(f32::NEG_INFINITY, 0.5), (0.0, 0.5));
-    // A sum that overflows `f32` keeps its ratio too.
-    near(Feedback::stable_pair(f32::MAX, f32::MAX), (0.495, 0.495));
-    // The sum is the bound to within f32 rounding, even at the extreme.
-    let (d, c) = Feedback::stable_pair(0.0, f32::MAX);
-    assert!((d.get() + c.get() - 0.99).abs() < 1e-6);
+    near(Feedback::stable_pair(f64::NEG_INFINITY, 0.5), (0.0, 0.5));
+    // A sum that overflows `f64` keeps its ratio too.
+    near(Feedback::stable_pair(f64::MAX, f64::MAX), (0.495, 0.495));
+    // The sum is the bound to within f64 rounding, even at the extreme.
+    let (d, c) = Feedback::stable_pair(0.0, f64::MAX);
+    assert!((d.get() + c.get() - 0.99).abs() < 1e-15);
     // NaN stays NaN in its own coefficient; the other clamps alone.
-    let (d, c) = Feedback::stable_pair(f32::NAN, 2.0);
+    let (d, c) = Feedback::stable_pair(f64::NAN, 2.0);
     assert!(d.get().is_nan());
     assert_eq!(c, Feedback::MAX_STABLE);
 }
@@ -168,7 +167,7 @@ fn stable_pair_keeps_the_ratio_and_survives_infinity() {
 /// Without serde the same refusals hold through `new`, `TryFrom` and `of`.
 #[test]
 fn depth_refuses_what_is_outside_minus_one_to_one() {
-    for bad in [-1.001, 1.001, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [-1.001, 1.001, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(Depth::new(bad), None, "{bad}");
         assert!(Depth::try_from(bad).is_err(), "{bad}");
         assert!(
@@ -178,7 +177,7 @@ fn depth_refuses_what_is_outside_minus_one_to_one() {
     }
     for ok in [-1.0, -0.0, 0.0, 0.5, 1.0] {
         assert_eq!(Depth::new(ok).map(Depth::get), Some(ok));
-        assert_eq!(f32::from(Depth::try_from(ok).unwrap()), ok);
+        assert_eq!(f64::from(Depth::try_from(ok).unwrap()), ok);
     }
 }
 

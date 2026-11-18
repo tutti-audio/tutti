@@ -8,7 +8,7 @@
 
 use tutti_curve::Law;
 
-use tutti_units::{Depth, Phase};
+use tutti_units::{Depth, Phase, Real};
 
 // =========================================================================
 // Value vocabulary
@@ -164,7 +164,8 @@ impl core::fmt::Display for LfoShape {
 /// `Depth`.
 #[inline]
 pub fn shape(x: f32, depth: Depth, polarity: Polarity, curve: Law) -> f32 {
-    let depth = depth.get();
+    // The depth crosses into the `f32` lane once per call.
+    let depth = f32::from_unit(depth);
     match polarity {
         // Bipolar: preserve sign, curve the magnitude, restore sign.
         Polarity::Bipolar => {

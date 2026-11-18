@@ -356,7 +356,7 @@ fn the_distortion_holds_off_non_finite_controls() {
 fn a_distortion_built_with_a_non_finite_drive_renders_finite() {
     use tutti_nodes::{DistortionNode, ShapeKind};
     for bad in BAD {
-        let mut node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(bad));
+        let mut node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(f64::from(bad)));
         node.prepare(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
         assert!(
             render_node_finite(&mut node, SampleRate::SR_48K, 4, 1),

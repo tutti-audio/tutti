@@ -26,7 +26,7 @@ impl FreeverbControls {
     /// The comb loop gain these controls make, `room * 0.28 + 0.7`: in `0.7..=0.98`.
     #[must_use]
     pub fn feedback(&self) -> Feedback {
-        Feedback(position(self.room, Self::GENERAL_MIDI.room) * 0.28 + 0.7)
+        Feedback(f64::from(position(self.room, Self::GENERAL_MIDI.room)) * 0.28 + 0.7)
     }
 
     /// The comb's damping, `damp * 0.4`: the one-pole's own pole, in `0..=0.4`, designed in

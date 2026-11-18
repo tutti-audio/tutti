@@ -131,7 +131,7 @@ fn delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
         MaxDelay::of(Seconds::new(1.0_f64)),
         DelayControls {
             time: Seconds::new(0.5_f64),
-            feedback: Feedback::new(0.0_f32),
+            feedback: Feedback::new(0.0_f64),
             ..DelayControls::DEFAULT
         },
     );
@@ -229,7 +229,7 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
         MaxDelay::of(Seconds::new(1.0_f64)),
         DelayControls {
             time: Seconds::new(0.5_f64),
-            feedback: Feedback::new(0.3_f32),
+            feedback: Feedback::new(0.3_f64),
             ..DelayControls::DEFAULT
         },
     );
@@ -426,7 +426,7 @@ mod convolver {
             MaxDelay::of(Seconds::new(1.0_f64)),
             DelayControls {
                 time: Seconds::new(0.5_f64),
-                feedback: Feedback::new(0.0_f32),
+                feedback: Feedback::new(0.0_f64),
                 ..DelayControls::DEFAULT
             },
         ));
@@ -434,7 +434,7 @@ mod convolver {
             MaxDelay::of(Seconds::new(1.0_f64)),
             DelayControls {
                 time: Seconds::new(0.5_f64),
-                feedback: Feedback::new(0.0_f32),
+                feedback: Feedback::new(0.0_f64),
                 ..DelayControls::DEFAULT
             },
         ));

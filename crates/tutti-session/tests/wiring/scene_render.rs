@@ -45,7 +45,7 @@ fn saw() -> ForkByClone<Osc> {
 fn low_pass(cutoff: f64) -> SvfFilterNode<f64> {
     SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(cutoff), Q(0.9))
 }
-fn shaper(drive: f32) -> DistortionNode<f32> {
+fn shaper(drive: f64) -> DistortionNode<f32> {
     DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(drive))
 }
 fn limiter() -> LimiterNode<f32> {
@@ -57,7 +57,7 @@ fn limiter() -> LimiterNode<f32> {
 }
 
 /// The scene's waveshaper drive, unless a test says otherwise.
-const DRIVE: f32 = 1.5;
+const DRIVE: f64 = 1.5;
 
 /// The nodes a scene declares, for the tests that edit it.
 struct Scene {
@@ -76,7 +76,7 @@ fn scene(with_limiter: bool) -> Scene {
 }
 
 /// [`scene`], with the waveshaper at `drive`.
-fn scene_driven(with_limiter: bool, drive: f32) -> Scene {
+fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
@@ -345,7 +345,7 @@ fn a_crossfade_follows_its_law_to_the_new_filter() {
         let x = (k + 1) as f64 / (FADE + 1) as f64;
         let g_in = x * x * x * (6.0 * x * x - 15.0 * x + 10.0);
         let blend = (1.0 - g_in) * f64::from(old_in[f]) + g_in * f64::from(new_in[f]);
-        let want = (f64::from(DRIVE) * blend).tanh();
+        let want = (DRIVE * blend).tanh();
         assert!(
             (f64::from(b[f]) - want).abs() < 1e-6,
             "fade frame {k}: {}, the law gives {want}",

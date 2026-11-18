@@ -195,7 +195,7 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
             steps: 0,
             delays: vec![Glide::landed(F::ZERO); layout.width()].into_boxed_slice(),
             depth: Glide::landed(F::from_f64(d.depth.get())),
-            feedback: Glide::landed(F::from_f32(d.feedback.get())),
+            feedback: Glide::landed(F::from_unit(d.feedback)),
             clock: SweepClock::new(layout.offsets()),
             layout,
         }
@@ -279,7 +279,7 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         self.depth
             .aim_by(F::from_f64(design.depth.get()), Steps::Rate(DELAY_SLEW));
         self.feedback
-            .aim_by(F::from_f32(design.feedback.get()), Steps::Fixed(self.steps));
+            .aim_by(F::from_unit(design.feedback), Steps::Fixed(self.steps));
         if first {
             self.depth.settle();
             self.feedback.settle();
@@ -337,7 +337,7 @@ mod tests {
         BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus")
     }
 
-    fn controls(rate: f64, depth: f64, feedback: f32) -> ModDelayControls {
+    fn controls(rate: f64, depth: f64, feedback: f64) -> ModDelayControls {
         ModDelayControls {
             rate: Hz(rate),
             depth: Seconds(depth),
@@ -1038,7 +1038,7 @@ mod tests {
 
     /// An `f64` block through a `ModDelayKernel::<f64>` with no depth is a fixed delay of the
     /// base `d` whole frames: the loop `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]` of
-    /// the wide signal (`g` the `f32` the control holds, widened), to 2^-45.
+    /// the wide signal, to 2^-45.
     #[test]
     fn an_f64_kernel_with_no_depth_is_a_fixed_delay_in_f64() {
         use tutti_dsp::Sweep;
@@ -1058,7 +1058,7 @@ mod tests {
             feedback: Feedback(0.6),
         };
         let x = wide_signal(len);
-        let g = f64::from(0.6f32);
+        let g = 0.6;
         let mut v = vec![0.0f64; len];
         for n in 0..len {
             v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);

@@ -388,7 +388,7 @@ mod tests {
     ];
 
     // The node tests run `F = f32`, the session's audio format: their tolerances are `f32`'s.
-    fn hard_clip(channels: u16, drive: f32) -> DistortionNode<f32> {
+    fn hard_clip(channels: u16, drive: f64) -> DistortionNode<f32> {
         prepared(DistortionNode::<f32>::with_channels(
             channels,
             ShapeKind::HardClip,
@@ -510,7 +510,7 @@ mod tests {
             let out = drive(&mut n, RATE, Planes::new(&[&x]).unwrap(), &[Some(&fed)]);
             assert!(out[0].iter().all(|&y| y == 0.5), "fed {bad}");
         }
-        let mut built = hard_clip(1, f32::NAN);
+        let mut built = hard_clip(1, f64::NAN);
         let out = drive_block(&mut built, &[&x]);
         assert!(out[0].iter().all(|&y| y == 0.25), "built with NaN");
     }
@@ -790,7 +790,7 @@ mod tests {
     }
 
     /// An `f64` block through a `DistortionKernel::<f64>` of `Softsign` at the drive `h`
-    /// (an `f32` control read exactly) is `h x / (1 + |h x|)` in `f64`, to 2^-45, and its
+    /// is `h x / (1 + |h x|)` in `f64`, to 2^-45, and its
     /// first-order antialiased form on a signal that alternates in sign is
     /// `(F(x[n]) - F(x[n-1])) / (x[n] - x[n-1])` with `F(u) = |u| - ln(1 + |u|)` the
     /// antiderivative of `u / (1 + |u|)` that is 0 at 0, the history starting at 0.
@@ -804,9 +804,9 @@ mod tests {
             .enumerate()
             .map(|(n, v)| if n % 2 == 0 { *v } else { -2.0 * v })
             .collect();
-        let h = f64::from(1.7f32);
+        let h = 1.7;
         let controls = WaveshaperControls {
-            drive: Drive::new(1.7),
+            drive: Drive::new(h),
         };
         let render = |order: Antialiasing| {
             let mut k = DistortionKernel::<f64>::new(ShapeKind::Softsign, BusTopology::MONO);

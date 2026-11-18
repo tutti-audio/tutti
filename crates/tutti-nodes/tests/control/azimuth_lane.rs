@@ -136,7 +136,7 @@ fn roll(
 }
 
 /// A constant layer of `depth` of the range's span, positive.
-fn constant(depth: f32) -> Layer {
+fn constant(depth: f64) -> Layer {
     Layer {
         id: LayerId(1),
         clock: Clock::Seconds {

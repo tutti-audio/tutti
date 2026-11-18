@@ -157,8 +157,8 @@ fn delay_line() {
             layout,
             DelayControls {
                 time: Seconds(0.05),
-                feedback: Feedback::new(0.5_f32),
-                cross_feedback: Feedback::new(0.3_f32),
+                feedback: Feedback::new(0.5_f64),
+                cross_feedback: Feedback::new(0.3_f64),
             },
         )
     })
@@ -393,7 +393,7 @@ fn phaser() {
         PhaserNode::<f32>::stereo(
             Stages::of(4),
             PhaserControls {
-                feedback: Feedback::new(0.3_f32),
+                feedback: Feedback::new(0.3_f64),
                 ..PhaserControls::DEFAULT
             },
         )

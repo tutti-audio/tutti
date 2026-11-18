@@ -1,7 +1,7 @@
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::BusTopology;
 use tutti_units::{
-    Feedback, Gain, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Seconds,
+    Feedback, Gain, Hz, PhaseIncrement, ReadPosition, Real, SampleRate, SampleSpan, Seconds,
 };
 
 use super::*;
@@ -21,7 +21,7 @@ fn bus(width: u16) -> BusTopology {
     BusTopology::assumed(width.into()).expect("a test width is one bus")
 }
 
-fn controls(rate: f64, depth: f64, feedback: f32) -> ModDelayControls {
+fn controls(rate: f64, depth: f64, feedback: f64) -> ModDelayControls {
     ModDelayControls {
         rate: Hz(rate),
         depth: Seconds(depth),
@@ -157,11 +157,11 @@ fn the_controls_are_made_safe() {
         );
     }
     for (fb, want) in [
-        (0.3f32, 0.3),
+        (0.3f64, 0.3),
         (5.0, 0.99),
         (-1.0, 0.0),
-        (f32::NAN, 0.0),
-        (f32::INFINITY, 0.0),
+        (f64::NAN, 0.0),
+        (f64::INFINITY, 0.0),
     ] {
         assert_eq!(
             chorus.design(&controls(1.0, 0.005, fb)).feedback,
@@ -192,7 +192,7 @@ fn a_sweep_with_no_feedback_ignores_the_control_and_is_a_pure_delay() {
     // The centre is 2 ms, 96 frames.
     assert_eq!(bank.position(0.0), frames(96.0));
     let mut delays = [Glide::landed(0.0f32)];
-    let mut feedback = Glide::landed(design.feedback.get());
+    let mut feedback = Glide::landed(f32::from_unit(design.feedback));
     let mut x = vec![0.0f32; 400];
     x[0] = 1.0;
     let y = run(&mut bank, &mut delays, &mut feedback, &[x], 64).remove(0);
@@ -449,7 +449,7 @@ fn the_slew_is_frames_of_delay_per_frame() {
 
 /// With no sweep (depth 0, the glide at the base) an `f64` bank is a fixed delay of the
 /// base `d` whole frames: a signal of more than 24 significant bits returns `d` frames later
-/// exactly, and with feedback `g` (the `f32` the control holds, widened) it is the loop
+/// exactly, and with feedback `g` it is the loop
 /// `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]`, to 2^-45.
 #[test]
 fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
@@ -490,7 +490,7 @@ fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
     };
     assert_close_f64(&run_with(0.0), &delayed(&x), 0.0);
 
-    let g = f64::from(0.6f32);
+    let g = 0.6;
     let mut v = vec![0.0f64; len];
     for n in 0..len {
         v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
