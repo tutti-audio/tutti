@@ -706,7 +706,7 @@ fn validate_refuses_a_malformed_entry() {
         fan.edge(1),
         EdgeGain {
             base: amp(1.0),
-            range: tutti_graph::ParamRange::new(f32::NAN, 1.0),
+            range: tutti_graph::ParamRange::new(f64::NAN, 1.0),
             source: None,
             fade: tutti_graph::EdgeFade::None,
         },

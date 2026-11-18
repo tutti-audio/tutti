@@ -42,7 +42,7 @@ use std::sync::Arc;
 use crate::NodeKey;
 use crate::mode::NodeMix;
 use tutti_buffers::Float;
-use tutti_rt::{PackedAtomic, RtScope};
+use tutti_rt::{Publisher, Reader, RtScope};
 use tutti_units::{
     ArcDegrees, Azimuth, Normalized, ParamAddr, Quantity, Real, Samples, UnitAddr, UnitParam,
 };
@@ -247,9 +247,8 @@ pub struct ParamIn {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CellValue(pub(crate) f64);
 
-/// The boundary to the `f32` word a param segment or range bound carries: a
-/// control value narrows here, saturating. Not API: B2 and B3 widen those
-/// words and delete it.
+/// The boundary to the `f32` word a param segment carries: a control value
+/// narrows here, saturating. Not API: B3 widens that word and deletes it.
 #[doc(hidden)]
 #[must_use]
 pub fn control_word(v: f64) -> f32 {
@@ -266,29 +265,29 @@ impl Quantity for CellValue {
 /// for a line, an arc of the circle for a circular param
 /// ([`arc`](Self::arc)).
 ///
-/// Bare `f32` bounds, not a unit type: a param port is erased over its unit
-/// (a cutoff is `Hz`, a threshold `Db`), as the `ParamRamp` wire is.
-/// Crossed bounds
+/// Bare `f64` bounds, the unit's own width, not a unit type: a param port is
+/// erased over its unit (a cutoff is `Hz`, a threshold `Db`), as the
+/// `ParamRamp` wire is. Crossed bounds
 /// are ordered where they are applied, never a panic; a NaN bound never
 /// reaches the audio thread
 /// ([`GraphInvalid::BadParamRange`](crate::GraphInvalid::BadParamRange)).
 /// Compared and hashed by bits, so a spec holding one stays `Eq + Hash`.
-/// Plain bytes (`Pod`), so a port's live range is one
-/// [`PackedAtomic`] word.
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C)]
+/// Sixteen bytes, so a port's live range is published whole through a
+/// [`ParamRangeCell`] and a reader sees one publish's `min` and `max`
+/// together.
+#[derive(Clone, Copy, Debug)]
 pub struct ParamRange {
     /// The lowest value.
-    pub min: f32,
+    pub min: f64,
     /// The highest value.
-    pub max: f32,
+    pub max: f64,
 }
 
 impl ParamRange {
     /// No clamp at all.
     pub const UNBOUNDED: Self = Self {
-        min: f32::NEG_INFINITY,
-        max: f32::INFINITY,
+        min: f64::NEG_INFINITY,
+        max: f64::INFINITY,
     };
 
     /// `min..=max`. For a circular param ([`UnitParam::is_circular`]) the
@@ -297,7 +296,7 @@ impl ParamRange {
     /// [`GraphInvalid::BadParamRange`](crate::GraphInvalid::BadParamRange));
     /// [`arc`](Self::arc) writes one by its centre.
     #[must_use]
-    pub const fn new(min: f32, max: f32) -> Self {
+    pub const fn new(min: f64, max: f64) -> Self {
         Self { min, max }
     }
 
@@ -326,18 +325,16 @@ impl ParamRange {
     #[must_use]
     pub fn arc(centre: Azimuth, half_span: ArcDegrees) -> Self {
         let half = half_span.get().abs();
-        // The bounds are the port's erased `f32` pair: the unit's `f64`
-        // narrows once, here.
         Self {
-            min: (centre.get() - half) as f32,
-            max: (centre.get() + half) as f32,
+            min: centre.get() - half,
+            max: centre.get() + half,
         }
     }
 
     /// The bounds, ordered so `clamp` cannot panic.
     #[inline]
     #[must_use]
-    pub fn ordered(self) -> (f32, f32) {
+    pub fn ordered(self) -> (f64, f64) {
         (self.min.min(self.max), self.max.max(self.min))
     }
 
@@ -350,12 +347,12 @@ impl ParamRange {
         if !param.is_some_and(UnitParam::is_circular) {
             return RangeView::Line { lo, hi };
         }
-        let half = (f64::from(hi) - f64::from(lo)) * 0.5;
+        let half = (hi - lo) * 0.5;
         if !(lo.is_finite() && hi.is_finite()) || half >= 180.0 {
             return RangeView::Circle;
         }
         RangeView::Arc {
-            centre: Azimuth((f64::from(lo) + f64::from(hi)) * 0.5),
+            centre: Azimuth((lo + hi) * 0.5),
             half: ArcDegrees(half),
         }
     }
@@ -377,9 +374,9 @@ pub enum RangeView {
     /// A line: values are clamped to `lo..=hi`.
     Line {
         /// The lowest value.
-        lo: f32,
+        lo: f64,
         /// The highest value.
-        hi: f32,
+        hi: f64,
     },
     /// The whole circle: values are wrapped onto `-180..180`.
     Circle,
@@ -399,7 +396,7 @@ impl RangeView {
     #[must_use]
     pub fn span(self) -> f64 {
         match self {
-            Self::Line { lo, hi } => f64::from(hi) - f64::from(lo),
+            Self::Line { lo, hi } => hi - lo,
             Self::Circle => 360.0,
             Self::Arc { half, .. } => (half * 2.0).get(),
         }
@@ -412,13 +409,15 @@ impl RangeView {
     #[must_use]
     pub fn constrain<F: Float>(self, value: F) -> F {
         match self {
-            Self::Line { lo, hi } => value.clamp(F::from_f32(lo), F::from_f32(hi)),
+            Self::Line { lo, hi } => {
+                value.clamp(F::from_unit(CellValue(lo)), F::from_unit(CellValue(hi)))
+            }
             Self::Circle => wrap_in(UnitParam::Azimuth, value),
             Self::Arc { centre, half } => {
                 // The arc is in the unit's `f64`; the lane value widens to it
                 // and the result narrows once.
-                let d = centre.shortest_arc_to(Azimuth(value.to_f64()));
-                F::from_f64(centre.rotate_by(d.clamp(-half, half)).get())
+                let d = centre.shortest_arc_to(Azimuth(value.into()));
+                F::from_unit(centre.rotate_by(d.clamp(-half, half)))
             }
         }
     }
@@ -428,7 +427,7 @@ impl RangeView {
     #[inline]
     pub(crate) fn constrain_lane<F: Float>(self, lane: &mut [F]) {
         if let Self::Line { lo, hi } = self {
-            let (lo, hi) = (F::from_f32(lo), F::from_f32(hi));
+            let (lo, hi) = (F::from_unit(CellValue(lo)), F::from_unit(CellValue(hi)));
             for v in lane {
                 *v = v.clamp(lo, hi);
             }
@@ -442,12 +441,12 @@ impl RangeView {
     /// Whether `value` is within the range: between the bounds for a line, on
     /// the arc for an arc, and any finite bearing for the whole circle.
     #[must_use]
-    pub fn contains(self, value: f32) -> bool {
+    pub fn contains(self, value: f64) -> bool {
         match self {
             Self::Line { lo, hi } => (lo..=hi).contains(&value),
             Self::Circle => value.is_finite(),
             Self::Arc { centre, half } => {
-                let d = centre.shortest_arc_to(Azimuth(f64::from(value)));
+                let d = centre.shortest_arc_to(Azimuth(value));
                 d >= -half && d <= half
             }
         }
@@ -789,29 +788,30 @@ pub(crate) fn render_ramps<F: Float>(
 }
 
 /// The live range of each of one key's declared param ports: what the fused
-/// step clamps a modulated value to, read once per block.
+/// step clamps a modulated value to, lent once per block.
 ///
 /// A range is a control, as a base is: written on the control side
 /// ([`Editor::set_param_range`](crate::Editor::set_param_range), and every
 /// commit from the spec), read by the audio thread at the start of the
-/// port's step, so a move lands on the next block and costs a store, not a
+/// port's step, so a move lands on the next block and costs a publish, not a
 /// plan. The spec's range is its initial value; the plan carries no range.
 ///
-/// One [`PackedAtomic`] per port: both bounds in one word, so a reader never
-/// pairs one write's `min` with another's `max` (two `AtomicF32`s, as two
-/// `Param<U>`s would be, could). Each is an `Arc`, so a reader outside the
-/// graph (a control lane, doc 014 §4.2) can read the very cell the port
-/// clamps to through a [`ParamRangeReader`].
+/// One [`Publisher`] per port: both bounds are published whole, so a reader
+/// never pairs one publish's `min` with another's `max` (two atomics could).
+/// Each is an `Arc`, so a reader outside the graph (a control lane) reads
+/// the very cell the port clamps to through a [`ParamRangeCell`].
 ///
-/// Kept by the editor per key, and shared with the state of each unit
-/// placed there that declares the same params: a
-/// crossfade keeps the key's running state, and that state reads these
-/// cells. A unit declaring a different list gets fresh cells, so the unit it
-/// replaces never reads a range meant for another param.
+/// Kept by the editor per key, and read by the state of each unit placed
+/// there that declares the same params (through readers registered on the
+/// control side, [`readers`](Self::readers)): a crossfade keeps the key's
+/// running state, and that state reads these cells. A unit declaring a
+/// different list gets fresh cells, so the unit it replaces never reads a
+/// range meant for another param. The editor sweeps them with
+/// [`reclaim`](Self::reclaim).
 #[derive(Debug)]
 pub(crate) struct ParamRanges {
     declared: ParamPorts,
-    cells: Box<[Arc<PackedAtomic<ParamRange>>]>,
+    cells: Box<[ParamRangeCell]>,
 }
 
 impl ParamRanges {
@@ -820,7 +820,7 @@ impl ParamRanges {
         Arc::new(Self {
             declared,
             cells: (0..declared.len())
-                .map(|_| Arc::new(PackedAtomic::new(ParamRange::UNBOUNDED)))
+                .map(|_| ParamRangeCell(Arc::new(Publisher::new(ParamRange::UNBOUNDED))))
                 .collect(),
         })
     }
@@ -830,16 +830,21 @@ impl ParamRanges {
         self.declared
     }
 
-    /// A read-only view of `param`'s cell, if it is one of these ports.
+    /// A read-only handle on `param`'s cell, if it is one of these ports.
     /// Control side.
-    pub(crate) fn reader(&self, param: UnitAddr) -> Option<ParamRangeReader> {
-        self.cells
-            .get(self.declared.index_of(param)?)
-            .map(|c| ParamRangeReader(Arc::clone(c)))
+    pub(crate) fn cell(&self, param: UnitAddr) -> Option<ParamRangeCell> {
+        self.cells.get(self.declared.index_of(param)?).cloned()
     }
 
-    /// Set `param`'s range; `false` if it is not one of these ports.
-    /// Control side.
+    /// One reader per port, in port order, for a unit's param state.
+    /// Control side: registers and allocates.
+    pub(crate) fn readers(&self) -> Vec<ParamRangeReader> {
+        self.cells.iter().map(ParamRangeCell::reader).collect()
+    }
+
+    /// Publishes `range` as `param`'s range when it differs from the one
+    /// published; `false` if `param` is not one of these ports. Control
+    /// side.
     pub(crate) fn store(&self, param: UnitAddr, range: ParamRange) -> bool {
         let Some(cell) = self
             .declared
@@ -848,42 +853,69 @@ impl ParamRanges {
         else {
             return false;
         };
-        cell.store(range);
+        if cell.current() != range {
+            cell.0.publish(range);
+        }
         true
     }
 
-    /// Port `k`'s range now (unbounded past the last port). Wait-free.
-    #[inline]
-    pub(crate) fn load(&self, k: usize) -> ParamRange {
-        self.cells
-            .get(k)
-            .map_or(ParamRange::UNBOUNDED, |c| c.load())
+    /// Frees the ranges the audio thread has let go of; how many are still
+    /// held by a block. Control side.
+    pub(crate) fn reclaim(&self) -> usize {
+        self.cells.iter().map(|c| c.0.reclaim()).sum()
     }
 }
 
-/// A read-only view of one param port's live range: the very cell the port
-/// clamps to, for a reader outside the graph (a control lane, which loads it
-/// once per block for its span, doc 014 §4.2). Handed out by
-/// [`Editor::param_range_cell`](crate::Editor::param_range_cell).
+/// A read-only handle on one param port's live range cell, for the control
+/// side: a control lane's source for the span it scales by and, through
+/// [`reader`](Self::reader), the reader its node lends once per block. Handed
+/// out by [`Editor::param_range_cell`](crate::Editor::param_range_cell).
 ///
 /// Read-only on purpose: the spec is the range's one writer
 /// ([`Editor::set_param_range`](crate::Editor::set_param_range) stores into
 /// the spec and this cell together, and every commit rewrites the cell from
-/// the spec), so a store that went to the cell alone would be undone by the
+/// the spec), so a publish that went to the cell alone would be undone by the
 /// next commit.
 #[derive(Clone, Debug)]
-pub struct ParamRangeReader(Arc<PackedAtomic<ParamRange>>);
+pub struct ParamRangeCell(Arc<Publisher<ParamRange>>);
 
-impl ParamRangeReader {
-    /// The range now: both bounds as one store left them. Wait-free.
-    #[inline]
-    pub fn load(&self) -> ParamRange {
-        self.0.load()
+impl ParamRangeCell {
+    /// The range now: both bounds as one publish left them. Control side
+    /// (it locks); the audio thread reads through a
+    /// [`ParamRangeReader`].
+    #[must_use]
+    pub fn current(&self) -> ParamRange {
+        *self.0.current()
     }
 
-    /// Whether `self` and `other` read the same cell.
+    /// A reader of the cell, registered here for the thread that will lend
+    /// it. Control side: allocates.
+    pub fn reader(&self) -> ParamRangeReader {
+        ParamRangeReader(self.0.reader())
+    }
+
+    /// Whether `self` and `other` are the same cell.
+    #[must_use]
     pub fn same_cell(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// A param port's live range as the audio thread reads it: a [`Reader`] on
+/// the port's cell, registered on the control side
+/// ([`ParamRangeCell::reader`]) and kept by the node that clamps. It lends
+/// once per block and never keeps the loan across blocks. It keeps its cell
+/// alive, so it is dropped where its node is: on the control side, when a
+/// commit hands the retired unit back.
+#[derive(Debug)]
+pub struct ParamRangeReader(Reader<ParamRange>);
+
+impl ParamRangeReader {
+    /// The range this block: both bounds as one publish left them. Wait-free
+    /// and free-free.
+    #[inline]
+    pub fn load(&mut self) -> ParamRange {
+        *self.0.lend()
     }
 }
 
@@ -948,9 +980,10 @@ pub(crate) struct ParamState<F: Float> {
     /// yet to run: a unit for which this is false and whose op lists no
     /// driven port skips the whole step.
     busy: bool,
-    /// Each port's live range (see [`ParamRanges`]); `None` only for a unit
-    /// with no declared params.
-    ranges: Option<Arc<ParamRanges>>,
+    /// Each port's live range reader, in port order (see [`ParamRanges`]);
+    /// empty for a unit with no declared params and for one whose ports are
+    /// unbounded.
+    ranges: Vec<ParamRangeReader>,
 }
 
 impl<F: Float> Default for ParamState<F> {
@@ -964,19 +997,20 @@ impl<F: Float> Default for ParamState<F> {
             declick: 0,
             framed: [false; MAX_PARAM_PORTS],
             busy: false,
-            ranges: None,
+            ranges: Vec::new(),
         }
     }
 }
 
 impl<F: Float> ParamState<F> {
     /// State for `ports` declared params at blocks of up to `max` frames,
-    /// clamping to `ranges`. Allocates nothing when `ports` is 0.
+    /// clamping to `ranges` (a reader per port; none: unbounded). Allocates
+    /// nothing when `ports` is 0.
     pub(crate) fn new(
         ports: usize,
         max: usize,
         declick: usize,
-        ranges: Option<Arc<ParamRanges>>,
+        ranges: Vec<ParamRangeReader>,
     ) -> Self {
         if ports == 0 {
             return Self::default();
@@ -1007,8 +1041,8 @@ impl<F: Float> ParamState<F> {
     /// State for **one** port at blocks of up to `max` frames, clamping to
     /// `ranges`: an edge gain's lane (doc 013, "Edge gain"), which runs the
     /// param port's step on its own.
-    pub(crate) fn lane(max: usize, declick: usize, ranges: Arc<ParamRanges>) -> Self {
-        Self::new(1, max, declick, Some(ranges))
+    pub(crate) fn lane(max: usize, declick: usize, ranges: &ParamRanges) -> Self {
+        Self::new(1, max, declick, ranges.readers())
     }
 
     /// The lane has run a block undriven: its first block under a source is
@@ -1122,8 +1156,8 @@ impl<F: Float> ParamState<F> {
                 // the value to where they put it.
                 let range = self
                     .ranges
-                    .as_ref()
-                    .map_or(ParamRange::UNBOUNDED, |r| r.load(k));
+                    .get_mut(k)
+                    .map_or(ParamRange::UNBOUNDED, ParamRangeReader::load);
                 let view = range.view(Some(param.param));
                 view.constrain_lane(out);
             }
@@ -1425,5 +1459,40 @@ mod tests {
         // A ramp of 3 frames at 20: its frame and the frame it lands on, 22.
         let ramp = ParamRamp::new(key, Hz(8.0), Samples(3));
         assert_eq!(corners(&[Event::ramp(at(20), ramp)]), [20, 22]);
+    }
+
+    /// **A range's two bounds are one publish's.** While another thread
+    /// publishes `-k..k` as fast as it can, a reader that lends once per
+    /// block never reads a `min` that is not the negation of its `max` (a
+    /// torn pair would), and it ends on the last publish; the cell has
+    /// nothing retired once the reader is idle.
+    #[test]
+    fn a_range_is_read_whole_while_another_thread_publishes() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        const LAST: u32 = 20_000;
+        let addr: UnitAddr = UnitParam::Cutoff.into();
+        let ranges = ParamRanges::new(ParamPorts::of(&[addr]));
+        let mut reader = ranges.readers().remove(0);
+        let done = AtomicBool::new(false);
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                for k in 1..=LAST {
+                    let k = f64::from(k);
+                    assert!(ranges.store(addr, ParamRange::new(-k, k)));
+                }
+                done.store(true, Ordering::Release);
+            });
+            loop {
+                let finished = done.load(Ordering::Acquire);
+                let r = reader.load();
+                assert_eq!(r.min, -r.max, "one publish's bounds: {r:?}");
+                if finished {
+                    break;
+                }
+            }
+        });
+        let last = f64::from(LAST);
+        assert_eq!(reader.load(), ParamRange::new(-last, last));
+        assert_eq!(ranges.reclaim(), 0, "nothing is held once the reader idles");
     }
 }

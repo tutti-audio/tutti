@@ -24,7 +24,7 @@ fn plugin(node: u64, id: u32) -> TargetKey {
     TargetKey::param(node, ParamAddr::Id(ParamId::new(id)))
 }
 
-fn ranged(min: f32, max: f32) -> TargetDecl {
+fn ranged(min: f64, max: f64) -> TargetDecl {
     TargetDecl {
         min,
         max,
@@ -588,7 +588,7 @@ fn each_refusal_fires_by_name() {
     let r1 = [(RouteKey(1), route(1, to(1), 0.5))];
     // A NaN range bound.
     assert_eq!(
-        run(&one_lfo, &r1, &[(target(1), ranged(f32::NAN, 1.0))]),
+        run(&one_lfo, &r1, &[(target(1), ranged(f64::NAN, 1.0))]),
         Err(CompileError::NanRange(target(1)))
     );
     // A circular target's range is an arc, min at most max: 170..-170 would

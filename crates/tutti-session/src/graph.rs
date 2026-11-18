@@ -1200,7 +1200,8 @@ impl<F: Float> Graph<F> {
 
     /// Runs every node's reclaimer ([`SessionNode::reclaimer`], kept by
     /// [`add`](Self::add) and [`crossfade`](Self::crossfade), dropped with
-    /// the node) and (`plugin`) reclaims every hosted plugin's meter cell,
+    /// the node), the editor's param range cells ([`Editor::reclaim`]) and
+    /// (`plugin`) every hosted plugin's meter cell,
     /// so a cell that stopped publishing still has what it retired freed.
     /// Returns how many retired values are still pinned. Control thread:
     /// the session's [`Reclaim`](crate::Phase::Reclaim) phase.
@@ -1211,6 +1212,9 @@ impl<F: Float> Graph<F> {
             .filter_map(|entry| entry.reclaimer.as_ref())
             .map(crate::Reclaimer::reclaim)
             .sum();
+        // The editor's range cells: a range a control moved or a commit
+        // rewrote retires the one a block may still hold.
+        let pinned = pinned + self.editor.reclaim();
         // The engine's output folds (offline or on a device): the declaration
         // retires a set, and a block may hold it when it does. Not observable
         // from outside the engine (a held loan is the audio thread's); the

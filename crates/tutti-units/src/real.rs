@@ -80,9 +80,26 @@ pub trait Real:
     /// ```
     #[must_use]
     fn from_unit<Q: Quantity>(q: Q) -> Self;
+    /// A design figure as data: a coefficient, a pole or a gain (`g`, `k`, a
+    /// biquad's `a2`) that a kernel's design computes in `f64` from its
+    /// quantities, crossing once inside that design function. A figure is not a
+    /// [`Quantity`], so it does not cross with [`from_unit`](Self::from_unit); it
+    /// saturates the same way: a value past this width's range clamps to
+    /// `±MAX`, an infinity included, and NaN stays NaN.
+    ///
+    /// ```
+    /// use tutti_units::Real;
+    ///
+    /// let g = (core::f64::consts::PI * 1_000.0 / 48_000.0).tan();
+    /// assert_eq!(f32::from_design(g), g as f32);
+    /// assert_eq!(f32::from_design(1e300), f32::MAX);
+    /// assert_eq!(f64::from_design(g), g);
+    /// ```
+    #[must_use]
+    fn from_design(x: f64) -> Self;
     /// A numeric literal in a generic kernel: `F::lit(0.5)`. Only a literal
-    /// argument; any other value crosses with [`from_unit`](Self::from_unit) or
-    /// `From`.
+    /// argument; any other value crosses with [`from_unit`](Self::from_unit), a
+    /// computed design figure with [`from_design`](Self::from_design), or `From`.
     ///
     /// ```
     /// use tutti_units::Real;
@@ -201,7 +218,10 @@ macro_rules! real_impl {
             const NAN: Self = $t::NAN;
             #[inline]
             fn from_unit<Q: Quantity>(q: Q) -> Self {
-                let x = q.value();
+                Self::from_design(q.value())
+            }
+            #[inline]
+            fn from_design(x: f64) -> Self {
                 if x.is_nan() {
                     Self::NAN
                 } else {
@@ -370,6 +390,20 @@ mod tests {
         assert_eq!(f64::from_unit(Hz(f64::INFINITY)), f64::MAX);
         assert_eq!(f64::from_unit(Hz(f64::NEG_INFINITY)), -f64::MAX);
         assert!(f64::from_unit(Hz(f64::NAN)).is_nan());
+    }
+
+    #[test]
+    fn from_design_saturates_a_figure_and_keeps_nan_at_both_widths() {
+        assert_eq!(f32::from_design(1e300), f32::MAX);
+        assert_eq!(f32::from_design(-1e300), -f32::MAX);
+        assert_eq!(f32::from_design(f64::INFINITY), f32::MAX);
+        assert_eq!(f64::from_design(f64::NEG_INFINITY), -f64::MAX);
+        assert!(f32::from_design(f64::NAN).is_nan());
+        assert!(f64::from_design(f64::NAN).is_nan());
+        assert_eq!(f32::from_design(0.5), 0.5_f32);
+        for x in [0.1, 1e300, -1e-300, 0.999_999_999] {
+            assert_eq!(f64::from_design(x), x);
+        }
     }
 
     #[test]

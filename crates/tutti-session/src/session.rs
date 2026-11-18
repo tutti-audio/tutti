@@ -71,7 +71,7 @@ pub enum Phase {
     Poll,
     /// Frees, here, what the audio thread let go of in every cell the
     /// session publishes to (`Publisher::reclaim`): the project meter and the
-    /// plugin slots following it, the modulation
+    /// plugin slots following it, the graph's param ranges, the modulation
     /// lanes' programs, the session's clips, the hardware input's MPE
     /// request and port set. A value a block still held when it was
     /// replaced stays retired until a scan after the block ends; a cell
