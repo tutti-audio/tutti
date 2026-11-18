@@ -551,8 +551,9 @@ jobs:
             echo "loom=false" >> "$GITHUB_OUTPUT"
           fi
           # The macOS editor, release and doctest runs are for pushes only: Linux runs the same tests, and
-          # `clippy (macos)` lints and documents what only macOS compiles.
+          # `clippy (macos)` lints what only macOS compiles. The macOS `test` is for pushes only too.
           echo 'test_more_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+          echo 'test_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           if echo "$changed" | grep -qE '^(Cargo\.(toml|lock)|deny\.toml|rust-toolchain\.toml|\.github/workflows/ci\.yml)$|/Cargo\.toml$'; then
             echo "deps=true" >> "$GITHUB_OUTPUT"
           else
@@ -560,10 +561,8 @@ jobs:
           fi
           if echo "$changed" | grep -qE '^(crates/(tutti-rt|tutti-cpal|tutti-midi-hardware|tutti-coremidi-ffi|tutti-au-[a-z]+|tutti-vst2-[a-z]+|tutti-vst3-[a-z]+|tutti-clap-[a-z]+|tutti-plugin[a-z-]*)/|crates/tutti-session/(src|tests)/plugin|testing/tutti-(shared-plugin[a-z0-9-]*|clap-test-plugin|vst2-[a-z]+|vst2-test-plugin|plugin-contract|fixtures)/|vendor/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
-            echo 'test_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           else
             echo "macos=false" >> "$GITHUB_OUTPUT"
-            echo 'test_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           fi
 
   loom:
