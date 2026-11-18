@@ -107,7 +107,7 @@ fn a_mono_view_is_left_alone() {
     assert_eq!(out[0], [7.0; 4]);
 }
 
-fn widen(width: f32, settle: bool, l: &[f64], r: &[f64]) -> (Vec<f64>, Vec<f64>) {
+fn widen(width: f64, settle: bool, l: &[f64], r: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let mut bank = WidthBank::<f64>::new(SampleRate::SR_48K);
     bank.aim(&WidthControls {
         width: StereoWidth(width),
@@ -161,7 +161,7 @@ fn the_width_glides_linearly_and_lands_exactly() {
 #[test]
 fn a_bad_width_is_refused_or_floored() {
     let (l, r) = ([1.0], [0.0]);
-    assert_eq!(widen(f32::NAN, true, &l, &r).0, [1.0]);
+    assert_eq!(widen(f64::NAN, true, &l, &r).0, [1.0]);
     assert_eq!(widen(-3.0, true, &l, &r).0, [0.5]);
 }
 
@@ -177,8 +177,7 @@ fn a_mono_view_is_not_widened() {
     assert_eq!(out[0], [7.0; 4]);
 }
 
-/// An `f64` bank at width 1 returns a 29-bit signal exactly, and at another width `w` (an
-/// `f32` control read exactly) is `M = (L + R) / 2` and `S = w (L - R) / 2` as `L' = M + S`,
+/// An `f64` bank at width 1 returns a 29-bit signal exactly, and at another width `w` is `M = (L + R) / 2` and `S = w (L - R) / 2` as `L' = M + S`,
 /// `R' = M - S` in `f64`, to 2^-45.
 #[test]
 fn an_f64_bank_is_the_identity_at_unity_and_the_mid_side_matrix_at_other_widths() {
@@ -188,8 +187,8 @@ fn an_f64_bank_is_the_identity_at_unity_and_the_mid_side_matrix_at_other_widths(
     let (a, b) = widen(1.0, true, &l, &r);
     assert_close_f64(&a, &l, 0.0);
     assert_close_f64(&b, &r, 0.0);
-    let w = f64::from(0.3f32);
-    let (a, b) = widen(0.3, true, &l, &r);
+    let w = 0.3;
+    let (a, b) = widen(w, true, &l, &r);
     let mid: Vec<f64> = l.iter().zip(&r).map(|(l, r)| (l + r) / 2.0).collect();
     let side: Vec<f64> = l.iter().zip(&r).map(|(l, r)| w * (l - r) / 2.0).collect();
     let (want_l, want_r): (Vec<f64>, Vec<f64>) =

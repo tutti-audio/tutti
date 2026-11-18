@@ -374,9 +374,8 @@ fn fold_to_front(azimuth: Azimuth) -> Azimuth {
 #[inline]
 fn apply_spread(spread: Spread, gains: &mut [Gain]) {
     // Unwrapped once here: the blend below is interpolation arithmetic on the
-    // scalar, which `Spread` deliberately does not define operators for. `Spread` is an
-    // `f32` unit; the blend is `f64`.
-    let spread = f64::from(spread.get());
+    // scalar, which `Spread` deliberately does not define operators for.
+    let spread = spread.get();
     if spread <= 0.0 {
         return;
     }

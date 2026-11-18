@@ -158,7 +158,7 @@ fn decay_diffusion_follows_the_papers_rule() {
 /// every lattice is a plain delay.
 #[test]
 fn diffusion_scales_every_lattice_coefficient_and_zero_makes_them_delays() {
-    let gains = |k: f32| {
+    let gains = |k: f64| {
         let mut n = Box::new(Network::new(SampleRate::SR_48K));
         let c = PlateControls {
             diffusion: Mix(k),
@@ -207,10 +207,10 @@ fn non_finite_controls_are_the_default_and_wild_ones_are_clamped() {
     };
     let wild = PlateControls {
         decay: Seconds(f64::NAN),
-        damping: Mix(f32::INFINITY),
+        damping: Mix(f64::INFINITY),
         bandwidth: Hz(f64::NAN),
         pre_delay: Seconds(f64::NAN),
-        diffusion: Mix(f32::NAN),
+        diffusion: Mix(f64::NAN),
         ..PlateControls::DEFAULT
     };
     assert_eq!(

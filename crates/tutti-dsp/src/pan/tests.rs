@@ -1,6 +1,6 @@
 use super::*;
 
-fn gains(pan: f32, law: PanLaw) -> (f64, f64) {
+fn gains(pan: f64, law: PanLaw) -> (f64, f64) {
     let (l, r) = pan_gains(Pan(pan), law);
     (l.get(), r.get())
 }
@@ -61,6 +61,6 @@ fn a_pan_out_of_range_is_the_nearer_end_and_nan_is_the_centre() {
     for law in [PanLaw::SquareRoot, PanLaw::Rp036] {
         assert_eq!(gains(3.0, law), gains(1.0, law));
         assert_eq!(gains(-3.0, law), gains(-1.0, law));
-        assert_eq!(gains(f32::NAN, law), gains(0.0, law));
+        assert_eq!(gains(f64::NAN, law), gains(0.0, law));
     }
 }

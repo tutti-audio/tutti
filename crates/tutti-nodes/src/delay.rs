@@ -271,7 +271,7 @@ mod tests {
     const RATE: SampleRate = SampleRate::of(1_024.0);
     const MAX: MaxDelay = MaxDelay::of(Seconds(1.0));
 
-    fn controls(time: f64, feedback: f32, cross: f32) -> DelayControls {
+    fn controls(time: f64, feedback: f64, cross: f64) -> DelayControls {
         DelayControls {
             time: Seconds(time),
             feedback: Feedback(feedback),
@@ -715,14 +715,14 @@ mod tests {
     }
 
     /// An `f64` block through a `DelayKernel::<f64>` at a whole delay `d` is the loop
-    /// `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]` of the wide signal (`g` the `f32`
-    /// the control holds, widened), to 2^-45: any step that narrows to `f32` is off by 1e-8.
+    /// `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]` of the wide signal, to 2^-45: any step that narrows to
+    /// `f32` is off by 1e-8.
     #[test]
     fn an_f64_kernel_runs_the_delay_loop_in_f64() {
         use tutti_fixtures::signal::{assert_close_f64, wide_signal};
         let (d, len) = (16usize, 200usize);
         let x = wide_signal(len);
-        let g = f64::from(0.6f32);
+        let g = 0.6;
         let mut v = vec![0.0f64; len];
         for n in 0..len {
             v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);

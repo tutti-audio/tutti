@@ -86,7 +86,7 @@ fn delay_of(w: usize) -> DelayNode<f32> {
 const LANE: NodeKey = NodeKey(9_000);
 
 /// A constant offset of `depth` × the port's span.
-fn konst(depth: f32) -> Layer {
+fn konst(depth: f64) -> Layer {
     Layer {
         id: LayerId(1),
         clock: Clock::Beats {
@@ -167,7 +167,7 @@ fn render(
 #[derive(Clone, Copy)]
 enum MixIs {
     /// Set to `v` before the unit is placed (steady from the first block).
-    Set(f32),
+    Set(f64),
     /// Driven to `v` by a control lane on the mix's port.
     Fed(f32),
 }
@@ -956,9 +956,9 @@ fn mix_cases() -> Vec<MixCase> {
 fn each_fed_mix_is_the_one_the_graph_blends() {
     for w in [1usize, 2, 6] {
         for case in mix_cases() {
-            let at = |v: f32| {
+            let at = |v: f64| {
                 (
-                    render_mix((case.make)(w), MixIs::Fed(v)),
+                    render_mix((case.make)(w), MixIs::Fed(v as f32)),
                     render_mix((case.make)(w), MixIs::Set(v)),
                 )
             };
@@ -988,7 +988,7 @@ fn each_fed_mix_is_the_one_the_graph_blends() {
 
 /// A distortion at drive `d` over `x`, as the node renders it: the expected
 /// output of a modulated drive, from the unmodulated node.
-fn plain_distortion(d: f32) -> Vec<f32> {
+fn plain_distortion(d: f64) -> Vec<f32> {
     render(
         parts_of(DistortionNode::<f32>::with_channels(
             1u16,

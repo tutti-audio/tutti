@@ -37,7 +37,7 @@ unit! {
     /// It is also a position on a `0..1` scale among a node's own settings,
     /// not only between dry and wet (a reverb's diffusion or size, which each
     /// algorithm maps onto its scale).
-    pub struct Mix(pub f32): Unit, Ordered, Bounded;
+    pub struct Mix(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable` / `Additive`: see the type doc. Two blends
 // summing to 1.4 is off the end of the crossfade.
@@ -55,7 +55,7 @@ impl Mix {
     /// Constrain into `0..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Mix {
+    pub fn new_clamped(v: f64) -> Mix {
         Mix(v).clamp(Self::DRY, Self::WET)
     }
 }
@@ -73,7 +73,7 @@ unit! {
     /// balance control on a stereo pair is [`Balance`].
     /// Distinct from [`Depth`]: a pan position and a modulation amount are
     /// different quantities that happen to share a range.
-    pub struct Pan(pub f32): Unit, Ordered, Bounded, Signed;
+    pub struct Pan(pub f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable`: half of a pan position is not a pan position — the
 // same argument `Mix` makes. Moving a source is `Azimuth::lerp_shortest`'s
@@ -91,7 +91,7 @@ impl Pan {
     /// Constrain into `-1..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Pan {
+    pub fn new_clamped(v: f64) -> Pan {
         Pan(v).clamp(Self::LEFT, Self::RIGHT)
     }
 }
@@ -106,7 +106,7 @@ unit! {
     /// side, and it holds no power constant. A [`Pan`] places a source with a
     /// panner's law, and [`StereoBalance`] is the engine's measured balance, a
     /// reading; there is no conversion between the three.
-    pub struct Balance(pub f32): Unit, Ordered, Bounded, Signed;
+    pub struct Balance(pub f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable` / `Additive`: a position on a segment, as `Pan` is; half a
 // balance is not a balance, and two do not sum.
@@ -122,7 +122,7 @@ impl Balance {
     /// Constrain into `-1..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Balance {
+    pub fn new_clamped(v: f64) -> Balance {
         Balance(v).clamp(Self::LEFT, Self::RIGHT)
     }
 
@@ -134,8 +134,7 @@ impl Balance {
     #[inline]
     #[must_use]
     pub fn gains(self) -> (Amplitude, Amplitude) {
-        // A balance is not yet `f64`; its position widens exactly into the `f64` amplitudes.
-        let b = f64::from(self.0.clamp(-1.0, 1.0));
+        let b = self.0.clamp(-1.0, 1.0);
         (Amplitude((1.0 - b).min(1.0)), Amplitude((1.0 + b).min(1.0)))
     }
 }
@@ -146,7 +145,7 @@ unit! {
     /// Must stay below 1.0 or the loop it feeds grows without bound — a
     /// delay line at unity feedback never decays. [`MAX_STABLE`](Self::MAX_STABLE)
     /// is the one ceiling every consumer clamps against.
-    pub struct Feedback(pub f32): Unit, Ordered, Bounded;
+    pub struct Feedback(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable`: scaling a coefficient walks it across the stability
 // bound with no check. `new_clamped` is the only way in.
@@ -167,7 +166,7 @@ impl Feedback {
     /// Constrain into the stable range.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Feedback {
+    pub fn new_clamped(v: f64) -> Feedback {
         Feedback(v).clamp(Self::NONE, Self::MAX_STABLE)
     }
 
@@ -178,8 +177,7 @@ impl Feedback {
     /// [`Feedback::MAX_STABLE`] independently still permits a combined 1.98 and a
     /// runaway. This scales the pair down together when their sum would
     /// exceed the bound, preserving their ratio, so the pair sums to
-    /// [`MAX_STABLE`](Self::MAX_STABLE) at most, to within `f32` rounding
-    /// (`(0.0, f32::MAX)` sums to 0.9900002).
+    /// [`MAX_STABLE`](Self::MAX_STABLE) at most, to within `f64` rounding.
     ///
     /// Negative coefficients are raised to zero. A NaN stays NaN in its own
     /// coefficient and the other is clamped on its own, as [`new_clamped`]
@@ -189,7 +187,7 @@ impl Feedback {
     /// [`new_clamped`]: Self::new_clamped
     #[inline]
     #[must_use]
-    pub fn stable_pair(direct: f32, cross: f32) -> (Feedback, Feedback) {
+    pub fn stable_pair(direct: f64, cross: f64) -> (Feedback, Feedback) {
         if direct.is_nan() || cross.is_nan() {
             return (Self::new_clamped(direct), Self::new_clamped(cross));
         }
@@ -205,7 +203,7 @@ impl Feedback {
         }
         // The sum overflowed, or an input is infinite.
         if d.is_infinite() || c.is_infinite() {
-            let (wd, wc) = (f32::from(d.is_infinite()), f32::from(c.is_infinite()));
+            let (wd, wc) = (f64::from(d.is_infinite()), f64::from(c.is_infinite()));
             let share = Self::MAX_STABLE.0 / (wd + wc);
             return (Feedback(wd * share), Feedback(wc * share));
         }
@@ -216,7 +214,10 @@ impl Feedback {
     }
 }
 
+// `Depth` is a `Unit` (below), which is already a `Quantity`, so it takes the
+// type and its error without the macro's own `Quantity` impl.
 crate::ranged! {
+    @items []
     /// A bipolar modulation amount, `-1..=1`.
     ///
     /// Signed on purpose: a negative depth inverts the modulator, so an LFO at
@@ -225,7 +226,7 @@ crate::ranged! {
     /// and `Feedback` do not.
     ///
     /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
-    /// anything outside `-1..=1`, and so do `TryFrom<f32>` and serde.
+    /// anything outside `-1..=1`, and so do `TryFrom<f64>` and serde.
     /// [`of`](Self::of) is for a literal. [`clamped`](Self::clamped) is the one
     /// saturating constructor, for a value that arrives from a lane or a knob;
     /// [`Unit::from_raw`] is it too, since a cell holds any float.
@@ -240,8 +241,8 @@ crate::ranged! {
     #[repr(transparent)]
     #[derive(Default)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "f32", into = "f32"))]
-    Depth(f32), DepthOutOfRange, "within -1..=1",
+    #[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
+    Depth(f64), DepthOutOfRange, "within -1..=1",
     |raw| raw >= -1.0 && raw <= 1.0
 }
 
@@ -259,7 +260,7 @@ impl Depth {
     /// `raw` constrained into `-1..=1`; NaN is [`NONE`](Self::NONE).
     #[inline]
     #[must_use]
-    pub const fn clamped(raw: f32) -> Depth {
+    pub const fn clamped(raw: f64) -> Depth {
         if raw.is_nan() {
             Depth::NONE
         } else if raw < -1.0 {
@@ -289,7 +290,7 @@ impl Depth {
     ///
     /// # Panics
     ///
-    /// Panics if `lo > hi`, matching `f32::clamp`.
+    /// Panics if `lo > hi`, matching `f64::clamp`.
     #[inline]
     #[must_use]
     pub fn clamp(self, lo: Self, hi: Self) -> Self {
@@ -322,13 +323,13 @@ impl core::fmt::Display for Depth {
 /// `from_raw` saturates ([`Depth::clamped`]): a parameter cell holds any
 /// float, and a unit's `from_raw` cannot refuse.
 impl Unit for Depth {
-    type Raw = f32;
+    type Raw = f64;
     #[inline]
-    fn from_raw(v: f32) -> Self {
+    fn from_raw(v: f64) -> Self {
         Self::clamped(v)
     }
     #[inline]
-    fn to_raw(self) -> f32 {
+    fn to_raw(self) -> f64 {
         self.0
     }
 }
@@ -459,7 +460,7 @@ unit! {
     /// because it is **not a multiplier on the signal**: it selects or
     /// parameterizes a shaping curve. Typing it as a gain would license
     /// `sample * drive`, which is meaningless for a curve selector.
-    pub struct Drive(pub f32): Unit, Ordered, Bounded;
+    pub struct Drive(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable`: "twice the drive" is not twice anything — the curve's
 // response is nonlinear by construction.
@@ -477,7 +478,7 @@ unit! {
     /// Not a [`Mix`] — it blends no pair of signals; it is a geometric
     /// property of the panning solution, and the VBAP panner consumes it as
     /// such. Sharing `Mix`'s range is not sharing its meaning.
-    pub struct Spread(pub f32): Unit, Ordered, Bounded;
+    pub struct Spread(pub f64): Unit, Ordered, Bounded;
 }
 
 impl Spread {
@@ -489,7 +490,7 @@ impl Spread {
     /// Constrain into `0..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Spread {
+    pub fn new_clamped(v: f64) -> Spread {
         Spread(v).clamp(Self::POINT, Self::DIFFUSE)
     }
 }
@@ -502,7 +503,7 @@ unit! {
     /// component against the mid, so it reshapes the stereo image rather than
     /// making the signal louder. Typing it as a gain would invite it into
     /// signal multiplications where it does not belong.
-    pub struct StereoWidth(pub f32): Unit, Ordered, Bounded;
+    pub struct StereoWidth(pub f64): Unit, Ordered, Bounded;
 }
 
 impl StereoWidth {
@@ -515,7 +516,7 @@ impl StereoWidth {
     /// the source is a legitimate effect. NaN stays NaN.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> StereoWidth {
+    pub fn new_clamped(v: f64) -> StereoWidth {
         StereoWidth(if v < 0.0 { 0.0 } else { v })
     }
 }
@@ -532,7 +533,7 @@ unit! {
     ///
     /// Not an [`Amplitude`] or a [`Drive`]: it is a resolution, a count of bits and
     /// not a factor on a signal.
-    pub struct BitDepth(pub f32): Unit, Ordered, Bounded;
+    pub struct BitDepth(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive`: two word lengths do not sum into a third; the bits a quantizer
 // keeps are chosen, not accumulated.
@@ -548,7 +549,7 @@ impl BitDepth {
     /// Constrain into `1..=32`. NaN stays NaN.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> BitDepth {
+    pub fn new_clamped(v: f64) -> BitDepth {
         BitDepth(v).clamp(Self::MIN, Self::MAX)
     }
 }

@@ -13,7 +13,7 @@
 //! `LfoShape` and `Waveform` are re-exported so `use tutti_nodes::LfoShape`
 //! resolves here.
 
-use tutti_units::UnitParam;
+use tutti_units::{Real, UnitParam};
 
 use tutti_buffers::Float;
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
@@ -253,10 +253,11 @@ impl<F: Float> Node<F> for LfoNode {
             "a node with no inputs arrives at zero"
         );
         let size = io.frames();
-        // A driven depth is clamped into a `Depth` (a written one is one). A
+        // A driven depth is clamped into `-1..=1` (a written one is within it). A
         // non-finite driven frame reads the cell instead: a NaN rate would
-        // leave the phase NaN for good.
-        let depth_cell = self.depth.load();
+        // leave the phase NaN for good. The cell crosses into the lane's format once
+        // per block.
+        let depth_cell = f32::from_unit(self.depth.load());
         let depth_lane = self
             .declared_param::<{ UnitParam::Depth as u16 }, _>(&io)
             .frames();
@@ -265,8 +266,7 @@ impl<F: Float> Node<F> for LfoNode {
                 // `Depth` holds an `f32`, so a driven depth narrows to it.
                 .map(|l| l[i].to_f32())
                 .filter(|v| v.is_finite())
-                .map_or(depth_cell, Depth::clamped)
-                .get()
+                .map_or(depth_cell, |v| v.clamp(-1.0, 1.0))
         };
         let offset = self.phase_offset;
         match self.clock {
@@ -563,7 +563,7 @@ mod tests {
     /// LFO flat, which is silent in both senses.
     #[test]
     fn negative_depth_inverts_instead_of_silencing() {
-        let first = |depth: f32| {
+        let first = |depth: f64| {
             let lfo = LfoNode::new(LfoShape::Square).with_depth(Depth::of(depth));
             render(lfo, 48_000.0, 1)[0]
         };

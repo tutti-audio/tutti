@@ -25,7 +25,7 @@ fn frames(frames: f64) -> Seconds {
 }
 
 /// A delay's controls: `time`, the feedback and the cross-feedback.
-fn controls(time: Seconds, feedback: f32, cross: f32) -> DelayControls {
+fn controls(time: Seconds, feedback: f64, cross: f64) -> DelayControls {
     DelayControls {
         time,
         feedback: Feedback::new(feedback),
@@ -59,7 +59,7 @@ fn render(node: DelayNode<f32>, inputs: &[Vec<f32>]) -> Vec<Vec<f32>> {
 /// frames in between are exactly silent.
 #[test]
 fn an_impulse_echoes_at_the_delay_scaled_by_the_feedback_each_period() {
-    let (d, g) = (16usize, 0.5f32);
+    let (d, g) = (16usize, 0.5f64);
     let node = DelayNode::<f32>::mono(MAX, controls(frames(d as f64), g, 0.0));
     let out = render(node, &[impulse(Samples(d * 8 + 5))]);
     for (i, &y) in out[0].iter().enumerate() {
@@ -68,7 +68,10 @@ fn an_impulse_echoes_at_the_delay_scaled_by_the_feedback_each_period() {
         } else {
             0.0
         };
-        assert!((y - want).abs() < 1e-6, "frame {i}: got {y}, want {want}");
+        assert!(
+            (f64::from(y) - want).abs() < 1e-6,
+            "frame {i}: got {y}, want {want}"
+        );
     }
 }
 
@@ -118,7 +121,7 @@ fn a_fractional_delay_is_a_sine_delayed_by_that_time_within_the_interpolators_er
 /// to the `c`, and nowhere else (up to the lap that would wrap back to 0).
 #[test]
 fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
-    let (n, d, amount) = (6usize, 8usize, 0.5f32);
+    let (n, d, amount) = (6usize, 8usize, 0.5f64);
     let bus = BusTopology::assumed(6u16.into()).expect("six channels are one bus");
     // Channel c is fed by channel c - 1.
     let layout = DelayLayout::new(bus, MAX, InterpolationMode::Linear)
@@ -137,7 +140,7 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
                 0.0
             };
             assert!(
-                (y - want).abs() < 1e-6,
+                (f64::from(y) - want).abs() < 1e-6,
                 "channel {c}, frame {i}: got {y}, want {want}"
             );
         }
@@ -150,12 +153,12 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
 /// its square.
 #[test]
 fn the_stereo_cross_feedback_ping_pongs_the_echo() {
-    let (d, amount) = (8usize, 0.5f32);
+    let (d, amount) = (8usize, 0.5f64);
     let node = DelayNode::<f32>::stereo(MAX, controls(frames(8.0), 0.0, amount));
     let mut left = vec![0.0; d * 5];
     left[0] = 1.0;
     let out = render(node, &[left.clone(), vec![0.0; left.len()]]);
-    let mut want = vec![vec![0.0f32; left.len()]; 2];
+    let mut want = vec![vec![0.0f64; left.len()]; 2];
     want[0][d] = 1.0;
     want[1][2 * d] = amount;
     want[0][3 * d] = amount * amount;
@@ -163,7 +166,7 @@ fn the_stereo_cross_feedback_ping_pongs_the_echo() {
     for c in 0..2 {
         for i in 0..left.len() {
             assert!(
-                (out[c][i] - want[c][i]).abs() < 1e-6,
+                (f64::from(out[c][i]) - want[c][i]).abs() < 1e-6,
                 "channel {c}, frame {i}: got {}, want {}",
                 out[c][i],
                 want[c][i]

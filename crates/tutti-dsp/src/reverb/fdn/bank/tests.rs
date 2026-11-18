@@ -284,7 +284,7 @@ fn a_frozen_network_keeps_its_energy() {
 #[test]
 fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
     let l = layout(8, true);
-    let at = |diffusion: f32, freeze: bool| {
+    let at = |diffusion: f64, freeze: bool| {
         still(|c| {
             c.diffusion = Mix(diffusion);
             c.freeze = freeze;
@@ -345,7 +345,7 @@ fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
 fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
     let n = 8;
     let l = layout(n, false);
-    let echo = |wet: Db, width: f32| {
+    let echo = |wet: Db, width: f64| {
         let c = still(|c| {
             c.pre_delay = Seconds(0.1);
             c.wet = wet;
@@ -542,7 +542,7 @@ fn the_tail_is_the_networks_under_the_ceiling() {
 #[test]
 fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
     let l = layout(8, false);
-    let bands = |size: f32| {
+    let bands = |size: f64| {
         still(|c| {
             c.decay = [Seconds(1.5), Seconds(3.0), Seconds(0.6)];
             c.size = Mix(size);

@@ -92,7 +92,7 @@ impl<F: Float + Lerp> WidthBank<F> {
     pub fn new(rate: SampleRate) -> Self {
         let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
-            width: Glide::landed(F::from_f32(StereoWidth::NATURAL.get())),
+            width: Glide::landed(F::from_unit(StereoWidth::NATURAL)),
             steps,
         }
     }
@@ -105,10 +105,12 @@ impl<F: Float + Lerp> WidthBank<F> {
     /// Aims at `controls`: the width glides over [`GAIN_GLIDE`]. A width that is not
     /// finite leaves the aim as it is. No allocation.
     pub fn aim(&mut self, controls: &WidthControls) {
-        let w = controls.width.get();
-        if w.is_finite() {
-            self.width
-                .aim_by(F::from_f32(w.max(0.0)), Steps::Fixed(self.steps));
+        let w = controls.width;
+        if w.get().is_finite() {
+            self.width.aim_by(
+                F::from_unit(StereoWidth::new_clamped(w.get())),
+                Steps::Fixed(self.steps),
+            );
         }
     }
 
@@ -132,7 +134,7 @@ impl<F: Float + Lerp> WidthBank<F> {
         let blended = self.width.blended(frames);
         let taken = self.width.taken();
         let held = self.width.target();
-        if blended == 0 && held == F::from_f32(StereoWidth::NATURAL.get()) {
+        if blended == 0 && held == F::from_unit(StereoWidth::NATURAL) {
             out_l.copy_from_slice(l);
             out_r.copy_from_slice(r);
         } else {

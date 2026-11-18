@@ -70,7 +70,7 @@ pub struct HrtfBinauralNode<F: FftFloat> {
 struct Held {
     azimuth: LastGood<f64>,
     elevation: LastGood<f64>,
-    blend: LastGood,
+    blend: LastGood<f64>,
 }
 
 impl<F: FftFloat> Clone for HrtfBinauralNode<F> {
@@ -206,7 +206,7 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
         let blend = Mix(self.good.blend.read(
             self.declared_param::<{ UnitParam::Wet as u16 }, _>(&io)
                 .last_frame()
-                .map_or_else(|| self.blend.load().get(), F::to_f32),
+                .map_or_else(|| self.blend.load().get(), Into::into),
         ));
         let size = io.frames();
         let (inputs, mut outputs) = io.split();

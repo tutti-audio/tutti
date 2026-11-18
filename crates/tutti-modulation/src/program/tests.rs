@@ -26,7 +26,7 @@ fn at_play(play: f64, epoch: u32) -> ProgramTime {
     }
 }
 
-fn amount(depth: f32) -> Amount {
+fn amount(depth: f64) -> Amount {
     Amount {
         depth: Depth::of(depth),
         polarity: Polarity::Bipolar,
@@ -172,6 +172,7 @@ fn layers_sum_in_id_order_in_f64() {
     let b = program(vec![l(1, 0.1), l(2, 0.7), l(3, 0.3)]);
     assert_eq!(a, b);
     let span = 1.0e7;
+    // Each layer's offset is `shape`'s `f32` depth, widened.
     let want =
         (0.5f64 + f64::from(0.1f32) * span + f64::from(0.7f32) * span + f64::from(0.3f32) * span)
             as f32;
