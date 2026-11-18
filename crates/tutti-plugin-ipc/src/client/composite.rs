@@ -4,8 +4,8 @@ use super::audio::{AudioBridge, BridgeListener, BridgeThread, Fate, HarmonyInput
 use super::remote_editor::RemoteEditor;
 use crate::ServerWatch;
 use crate::protocol::{
-    MidiEventVec, Normalized, NoteExpressionChanges, ParamId, ParameterChanges, ParameterInfo,
-    Preset, PresetId, TransportChanges, TransportInfo,
+    MidiEventVec, NoteExpressionChanges, ParamId, ParameterChanges, ParameterInfo, Preset,
+    PresetId, TransportChanges, TransportInfo,
 };
 use crossbeam::queue::ArrayQueue;
 use dpi::Size;
@@ -20,6 +20,7 @@ use tutti_plugin_types::{ContentScale, EditorCapabilities, WindowHandle};
 use tutti_plugin_types::{Editor, EditorWindow, Load, Origin, PluginFormat, Timeouts};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, ParamEdit};
 use tutti_rt::{LockExt, PackedAtomic, Tally, TallyWriter, tally};
+use tutti_units::Normalized;
 use tutti_units::SampleRate;
 
 /// Gives the audio instance the editor instance's state when the user changed

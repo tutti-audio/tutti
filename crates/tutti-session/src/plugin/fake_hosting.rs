@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use tutti_graph::NodeKey;
 use tutti_plugin_host::{PluginControls, PluginHandle};
-use tutti_plugin_types::{Normalized, ParameterInfo, PluginFailure, PluginTail};
+use tutti_plugin_types::{ParameterInfo, PluginFailure, PluginTail};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 

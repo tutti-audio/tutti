@@ -320,7 +320,7 @@ impl PointPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Normalized;
+    use tutti_units::Normalized;
 
     fn at(offset: i32, value: f64) -> ParameterPoint {
         ParameterPoint {

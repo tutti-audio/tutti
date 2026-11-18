@@ -136,9 +136,9 @@ use tutti_plugin_host::{
     NodeControls, Notice, PluginControls, PluginHandle, PluginStatus, Subscription,
 };
 use tutti_plugin_types::{
-    BridgeError, Normalized, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh,
-    PluginTail,
+    BridgeError, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh, PluginTail,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 
@@ -2374,7 +2374,8 @@ mod tests {
     use super::*;
     use crate::{RecoveryPolicy, Task};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use tutti_plugin_types::{Normalized, ParameterInfo};
+    use tutti_plugin_types::ParameterInfo;
+    use tutti_units::Normalized;
     use tutti_units::ParamId;
 
     /// The controls of a plugin's node, counting nothing yet.

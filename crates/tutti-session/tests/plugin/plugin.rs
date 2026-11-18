@@ -573,7 +573,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
         .params()
         .get(id)
         .expect("the plugin declares the gain")
-        .set(tutti_plugin_types::Normalized::of(0.25))
+        .set(tutti_units::Normalized::of(0.25))
         .expect("the gain is writable");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !is_quarter(param(&s, node, id)) {
@@ -1292,7 +1292,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
         .params()
         .get(id)
         .expect("the plugin declares the gain")
-        .set(tutti_plugin_types::Normalized::of(0.25))
+        .set(tutti_units::Normalized::of(0.25))
         .expect("the gain is writable");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !is_quarter(param(&s, node, id)) {

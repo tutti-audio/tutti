@@ -206,11 +206,10 @@ pub use tutti_plugin_types::SampleFormat;
 //   cross-format vocabulary shared with the host crates
 //   (`tutti-{vst2,vst3,clap,au}-host`) via `tutti-plugin-types`.
 pub use tutti_plugin_types::{
-    AutomationMode, BusChannels, ChannelLayout, ChordChanges, LoadedPlugin, Normalized,
-    NoteExpressionChanges, NoteExpressionIntChanges, NoteExpressionTextChanges, ParamEdit,
-    ParameterChanges, ParameterInfo, ParameterPoint, ParameterQueue, PluginDescriptor,
-    PluginFormat, PluginTail, Preset, PresetId, RenderMode, Samples, ScaleChanges,
-    TransportChanges, TransportInfo,
+    AutomationMode, BusChannels, ChannelLayout, ChordChanges, LoadedPlugin, NoteExpressionChanges,
+    NoteExpressionIntChanges, NoteExpressionTextChanges, ParamEdit, ParameterChanges,
+    ParameterInfo, ParameterPoint, ParameterQueue, PluginDescriptor, PluginFormat, PluginTail,
+    Preset, PresetId, RenderMode, Samples, ScaleChanges, TransportChanges, TransportInfo,
 };
 pub use tutti_units::ParamId;
 
@@ -223,7 +222,7 @@ mod tests {
         ChordValue, Load, NoteExpressionIntValue, NoteExpressionTextValue, ScaleValue, WireMidi,
     };
     use tutti_ump::{CCNumber, Message, MidiChannel, U7, Ump, Voice2};
-    use tutti_units::SampleRate;
+    use tutti_units::{Normalized, SampleRate};
 
     use tutti_fixtures::midi;
 

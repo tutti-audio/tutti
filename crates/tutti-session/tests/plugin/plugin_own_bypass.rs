@@ -16,9 +16,9 @@ use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
-use tutti_plugin_types::Normalized;
 use tutti_session::{NodeMode, Session};
 use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples, Seconds};
 

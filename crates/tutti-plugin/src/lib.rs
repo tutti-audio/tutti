@@ -386,9 +386,7 @@ pub use tutti_plugin_types::Features;
 // `PresetId`, so a caller must be able to name them without depending on
 // tutti-plugin-types.
 pub use tutti_plugin_types::{FeatureReport, Preset, PresetId, PresetSupport};
-// `AnyThread::parameter_descriptors` lists `ParamId`s, and
-// `set_parameter_value` takes a `Normalized`.
-pub use tutti_plugin_types::Normalized;
+// `AnyThread::parameter_descriptors` lists `ParamId`s.
 pub use tutti_units::ParamId;
 
 /// Discovering, persisting, and loading plugins.

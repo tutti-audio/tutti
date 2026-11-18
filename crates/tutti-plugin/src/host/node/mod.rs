@@ -110,10 +110,11 @@ use tutti_plugin_ipc::{
 };
 use tutti_plugin_types::{
     BridgeError, BridgeResult, Features, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock,
-    Normalized, ParameterChanges, PluginDescriptor, PluginInvalidation, PluginTail, Prepare,
-    ResyncClass, SampleFormat,
+    ParameterChanges, PluginDescriptor, PluginInvalidation, PluginTail, Prepare, ResyncClass,
+    SampleFormat,
 };
 use tutti_types::ChannelLayout;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 

@@ -13,8 +13,8 @@ use std::time::Duration;
 use tutti_types::ChannelLayout;
 
 use tutti_plugin::catalog::PluginRef;
-use tutti_plugin_types::Normalized;
 use tutti_session::Session;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
 

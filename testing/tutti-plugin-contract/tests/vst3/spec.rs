@@ -16,8 +16,9 @@ use tutti_plugin_contract::spec::{Mode, Param};
 use tutti_plugin_contract::{
     Active, BLOCK, Format, Kind, RATE, Render, Vst3, Vst3Cpp, prepare, select, set_mode, transcript,
 };
-use tutti_plugin_types::{Control, Normalized, ProcessContext, Processor, SampleFormat, Samples};
+use tutti_plugin_types::{Control, ProcessContext, Processor, SampleFormat, Samples};
 use tutti_ump::{CCNumber, MidiChannel, U7};
+use tutti_units::Normalized;
 use tutti_vst3_host::{Vst3Loaded, Vst3Processor};
 
 fn active<F: Format<L = Vst3Loaded>>() -> Active<Vst3Loaded> {

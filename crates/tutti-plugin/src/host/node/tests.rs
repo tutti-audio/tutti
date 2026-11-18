@@ -21,10 +21,11 @@ use tutti_plugin_ipc::unique_socket_path;
 use tutti_plugin_ipc::{BridgeEvent, BridgeThread};
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, PROTOCOL_VERSION};
 use tutti_plugin_types::{
-    ChannelLayout, Features, LoadedPlugin, Normalized, ParameterInfo, PluginBus, PluginDescriptor,
-    PluginTail, Samples,
+    ChannelLayout, Features, LoadedPlugin, ParameterInfo, PluginBus, PluginDescriptor, PluginTail,
+    Samples,
 };
 use tutti_plugin_types::{EditorPresence, PluginClass, SampleFormat};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
 

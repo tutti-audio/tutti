@@ -11,7 +11,7 @@
 //! wants the value a gesture began or ended at reads it from the neighbouring
 //! change, or from the parameter, itself; nothing is made up here.
 
-use crate::Normalized;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// One parameter edit, in the order the plugin made it: the plugin takes hold

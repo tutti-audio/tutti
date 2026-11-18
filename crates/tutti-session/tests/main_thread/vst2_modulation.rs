@@ -12,12 +12,12 @@ use tutti_session::Root;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_plugin::catalog::PluginRef;
-use tutti_plugin_types::Normalized;
 use tutti_session::{
     DetachedSession, EventInPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
     SessionEvent,
 };
 use tutti_types::ChannelLayout;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Depth, SampleRate};
 
