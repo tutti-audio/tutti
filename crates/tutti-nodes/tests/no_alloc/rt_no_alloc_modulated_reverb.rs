@@ -66,11 +66,21 @@ fn the_swept_delay_corners_are_allocation_free_and_finite() {
     };
     for width in [1u16, 2, 6] {
         for corners in [&CORNERS, &HELD] {
-            sweep(|| ModDelayNode::chorus(bus(width)), corners, 1.5, None);
-            sweep(|| ModDelayNode::flanger(bus(width)), corners, 1.5, None);
+            sweep(
+                || ModDelayNode::<f32>::chorus(bus(width)),
+                corners,
+                1.5,
+                None,
+            );
+            sweep(
+                || ModDelayNode::<f32>::flanger(bus(width)),
+                corners,
+                1.5,
+                None,
+            );
             sweep(
                 || {
-                    ModDelayNode::new(
+                    ModDelayNode::<f32>::new(
                         bus(width),
                         Sweep::FLANGER,
                         Stagger::of_step(PhaseIncrement(0.37)),
@@ -85,7 +95,7 @@ fn the_swept_delay_corners_are_allocation_free_and_finite() {
         }
     }
     sweep(
-        || ModDelayNode::general_midi_chorus(BusTopology::STEREO),
+        || ModDelayNode::<f32>::general_midi_chorus(BusTopology::STEREO),
         &CORNERS,
         1.5,
         None,

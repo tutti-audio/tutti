@@ -153,7 +153,7 @@ fn delay_line() {
         )
         .with_times(ChannelTimes::each(&[Seconds(0.07)]).unwrap())
         .unwrap();
-        DelayNode::from_layout(
+        DelayNode::<f32>::from_layout(
             layout,
             DelayControls {
                 time: Seconds(0.05),
@@ -375,7 +375,7 @@ fn lfo() {
 #[test]
 fn chorus() {
     IsolateRow::new("ModDelayNode (stereo chorus)", || {
-        ModDelayNode::chorus(BusTopology::STEREO)
+        ModDelayNode::<f32>::chorus(BusTopology::STEREO)
     })
     .control("rate", |c| assert!(c.param_set().set(UnitParam::Rate, 3.0)))
     .control("depth", |c| {
@@ -390,7 +390,7 @@ fn chorus() {
 #[test]
 fn phaser() {
     IsolateRow::new("PhaserNode (stereo, 4 stages)", || {
-        PhaserNode::stereo(
+        PhaserNode::<f32>::stereo(
             Stages::of(4),
             PhaserControls {
                 feedback: Feedback::new(0.3_f32),
