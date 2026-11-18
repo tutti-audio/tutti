@@ -153,7 +153,7 @@ pub(crate) fn limiter_gain<F: Float>(peak_db: F, threshold: F, ceiling: F) -> F 
 ///
 /// **Silence and the extremes.** A zero peak is under any finite threshold, so exact digital
 /// silence takes the `below` gain `10^((ceiling - threshold)/20)`. To keep that boost
-/// finite (`0 * inf` is NaN) the gap is clamped to `MAX_GAP_DB`, the threshold amplitude
+/// finite (`0 * inf` is NaN) the gap is clamped to `MAX_GAP`, the threshold amplitude
 /// to `f32::MIN_POSITIVE` and the ceiling's amplitude to `MAX_OVER` and to
 /// `f32::MAX * threshold` (so `over / peak`, with a peak over the threshold, never
 /// overflows: where the threshold is clamped a ceiling above 4 holds at 4); and `below` is
