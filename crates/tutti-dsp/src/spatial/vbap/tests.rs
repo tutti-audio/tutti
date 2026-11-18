@@ -139,9 +139,9 @@ fn a_glide_between_the_branches_blends_their_pairs() {
 
 #[test]
 fn the_stereo_spread_wraps_instead_of_leaving_the_canonical_range() {
-    // Near the rear seam at full width, one source crosses 180. A raw
-    // `f32` sum would hand vbap 185 degrees, outside the -180..180 range
-    // every other path maintains.
+    // Near the rear seam at full width, one source crosses 180 and wraps to
+    // the other side: vbap never sees 185 degrees, outside the -180..180
+    // range every other path maintains.
     let (a, b) = virtual_sources(Azimuth(170.0), 1.0);
     assert_eq!(a, Azimuth(-175.0));
     assert_eq!(b, Azimuth(155.0));
@@ -151,8 +151,7 @@ fn the_stereo_spread_wraps_instead_of_leaving_the_canonical_range() {
     assert_eq!(a, Azimuth(-155.0));
     assert_eq!(b, Azimuth(175.0));
 
-    // Both stay in range for every bearing and width, which is the
-    // property the raw-f32 form could not offer.
+    // Both stay in range for every bearing and width.
     for deg in -180..=180 {
         for w in [0.0, 0.25, 0.5, 1.0] {
             let (a, b) = virtual_sources(Azimuth(f64::from(deg)), w);

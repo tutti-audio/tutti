@@ -66,6 +66,7 @@ impl OutputStage {
             }
             if ramp.done >= ramp.frames {
                 if ramp.now != 1.0 {
+                    // The ramp's gain is an `f32` level (an `Amplitude`).
                     block
                         .iter_mut()
                         .skip(c)

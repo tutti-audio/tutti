@@ -40,7 +40,7 @@ pub fn describe(
     format: Option<PluginFormat>,
 ) -> Result<Vec<PluginDescriptor>, String> {
     if !path.exists() {
-        return Err(format!("Plugin not found: {}", path.display()));
+        return Err(format!("plugin not found: {}", path.display()));
     }
     // Only VST2 reads it; a build without that format has nothing to hand it to.
     let _ = main;

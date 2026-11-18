@@ -25,7 +25,7 @@ use tutti_graph::contract::Direct;
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
 use tutti_types::Bed;
-use tutti_units::{Azimuth, Elevation, SampleRate};
+use tutti_units::{ArcDegrees, Azimuth, Elevation, SampleRate};
 
 /// Warmup before measuring, in frames: two seconds at 48 kHz, 40 glide
 /// lengths, so a held source has landed.
@@ -61,17 +61,13 @@ fn bench(c: &mut Criterion) {
             for _ in 0..WARMUP_FRAMES / block {
                 d.block();
             }
-            let mut bearing = 0.0f32;
+            let mut bearing = Azimuth::FRONT;
             let id = BenchmarkId::new(format!("{speakers}sp"), block);
             g.bench_with_input(id, &speakers, |b, _| {
                 b.iter(|| {
                     if moving {
-                        bearing = if bearing > 170.0 {
-                            -170.0
-                        } else {
-                            bearing + 7.0
-                        };
-                        aim(&params, Azimuth(f64::from(bearing)), Elevation::LEVEL);
+                        bearing = bearing.rotate_by(ArcDegrees(7.0));
+                        aim(&params, bearing, Elevation::LEVEL);
                     }
                     d.block();
                     black_box(d.output().plane(0).samples()[block - 1]);

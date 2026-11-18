@@ -33,6 +33,7 @@ fn session() -> tutti_session::DetachedSession<&'static str, f64> {
 /// **A bounce into memory holds `0.75 * FINE` in every frame, as `f64`.**
 #[test]
 fn an_f64_bounce_into_planes_keeps_the_figure_f32_rounds_away() {
+    // Setup: `f32` loses the figure, so a pass is not a rounded one.
     assert_ne!(f64::from((0.75 * FINE) as f32), 0.75 * FINE);
     let planes = session()
         .bounce(

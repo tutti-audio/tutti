@@ -3760,6 +3760,7 @@ fn render<F: Float>(
                 } else {
                     F::ZERO
                 };
+                // A fade law's gains are `f32` levels.
                 old * F::from_f32(go) + new * F::from_f32(gn)
             }
             _ => new,

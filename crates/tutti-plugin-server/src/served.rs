@@ -31,6 +31,8 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 mod any;
+#[cfg(served_au)]
+mod au;
 mod format;
 
 pub(crate) use any::AnyServed;
@@ -69,7 +71,7 @@ pub(crate) trait Render {
 ///
 /// Object-safe, implemented by [`Served<F>`] alone; the
 /// `served!` table's enum lends it as a trait object.
-pub(crate) trait ServedPlugin: Render {
+pub(crate) trait ServedPlugin {
     /// The plugin's catalog identity.
     fn descriptor(&self) -> &PluginDescriptor;
     /// The plugin's wiring as last read: buses, latency, tail, capabilities.
@@ -93,6 +95,9 @@ pub(crate) trait ServedPlugin: Render {
     /// returns what the host should be told. Between blocks, on the thread
     /// that loaded the plugin.
     fn poll(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage>;
+    /// Whether the plugin is lost: a call into it panicked, and nothing of it
+    /// runs any more.
+    fn is_lost(&self) -> bool;
     /// Brings the Processor home from the render thread and deactivates the
     /// plugin, so it can be dropped. `false` when the Processor did not come
     /// (a render thread stuck inside the plugin): dropping the plugin then
@@ -285,7 +290,7 @@ impl<F: ServerSide> Served<F> {
         before_restore: &mut dyn FnMut(),
         hand: Hand<F::Processor>,
         ties: Ties,
-    ) -> PluginResult<(Self, Option<String>)> {
+    ) -> PluginResult<(Self, Option<PluginError>)> {
         Self::activate(
             main,
             Self::open(main, work, path, load)?,
@@ -313,7 +318,7 @@ impl<F: ServerSide> Served<F> {
     /// `hand` is the Processor's way to the thread that renders: the server's
     /// is [`Hand::threaded`], whose other end is the render thread's seat
     /// ([`crate::render::End`]); a [`Hand::local`] keeps the Processor in this
-    /// value, which then renders through [`Render`].
+    /// value.
     ///
     /// # Errors
     ///
@@ -329,9 +334,12 @@ impl<F: ServerSide> Served<F> {
         before_restore: &mut dyn FnMut(),
         hand: Hand<F::Processor>,
         ties: Ties,
-    ) -> PluginResult<(Self, Option<String>)> {
+    ) -> PluginResult<(Self, Option<PluginError>)> {
         let activation_failed = |reason: String| {
-            load_failed(LoadStage::Activation, format!("activate failed: {reason}"))
+            load_failed(
+                LoadStage::Activation,
+                format!("the activation failed: {reason}"),
+            )
         };
         let prepare = MaxBlock::new(Samples(block_size))
             .map(|block| Prepare::new(sample_rate, block))
@@ -364,11 +372,8 @@ impl<F: ServerSide> Served<F> {
         let state_error = state.and_then(|(data, state_use)| {
             before_restore();
             match this.lifecycle.control() {
-                Some(control) => control
-                    .load_state(main, data, state_use)
-                    .err()
-                    .map(|e| e.to_string()),
-                None => Some(lost().to_string()),
+                Some(control) => control.load_state(main, data, state_use).err(),
+                None => Some(lost()),
             }
         });
         let mut refusal = this.drive(
@@ -533,12 +538,11 @@ impl<F: ServerSide> Served<F> {
                 tracing::warn!("plugin would not stop: {reason}");
             }
             Notice::Lost { reason } => {
+                // The wire has no "lost" message, and the buses are not what
+                // changed: nothing is sent here. The loop ends the server on
+                // `is_lost` (see `main_loop::serve_every`), so the host sees its
+                // process exit as a crash.
                 tracing::error!("plugin lost: {reason}");
-                // The wire has no "lost" message, and a new one would be a
-                // protocol change. `IoChanged` is the closest signal: it makes
-                // the host re-read an instance that now renders silence.
-                let io = self.io_changed();
-                self.events.push(io);
                 return Some(reason);
             }
         }
@@ -690,30 +694,6 @@ impl<F: ServerSide> Served<F> {
     }
 }
 
-impl<F: ServerSide> Render for Served<F> {
-    fn features(&self) -> Features {
-        self.wiring.features
-    }
-
-    fn render<'a>(
-        &mut self,
-        buffer: PluginAudio<'a>,
-        ctx: &'a ProcessContext<'a>,
-        out: &'a mut ProcessOutput,
-    ) -> PluginResult<()> {
-        // A rate change the plugin refused left it deactivated (the host was
-        // told when it happened): the block is silence and the plugin is not
-        // touched.
-        let Some(processor) = self.lifecycle.processor() else {
-            out.clear();
-            let mut buffer = buffer;
-            buffer.clear_outputs();
-            return Ok(());
-        };
-        buffer.process(processor, ctx, out)
-    }
-}
-
 impl<F: ServerSide> ServedPlugin for Served<F> {
     fn descriptor(&self) -> &PluginDescriptor {
         &self.descriptor
@@ -734,6 +714,10 @@ impl<F: ServerSide> ServedPlugin for Served<F> {
             self.events.push(BridgeMessage::ProcessRequested);
         }
         std::mem::take(&mut self.events)
+    }
+
+    fn is_lost(&self) -> bool {
+        self.lifecycle.is_poisoned()
     }
 
     fn quiesce(&mut self, main: MainThreadMarker) -> bool {
@@ -762,7 +746,7 @@ impl<F: ServerSide> ServedPlugin for Served<F> {
                 "the plugin has no configuration to change".to_string(),
             ));
         };
-        if self.is_active() && (previous.rate().get() - rate.get()).abs() < f64::EPSILON {
+        if self.is_active() && previous.rate() == rate {
             return Ok(());
         }
         let wanted = previous.with_rate(rate);

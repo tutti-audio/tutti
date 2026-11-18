@@ -2,12 +2,15 @@
 //! plugin's descriptors and the bell. An X11 editor runs its own display
 //! connection, so there is no window system to pump; the native loop for the
 //! platform that needs one (macOS: `CFRunLoop` with the socket as a source)
-//! replaces the wait and the pump together, without touching the loop's logic.
+//! replaces the wait, without touching the loop's logic.
 
-use crate::bell::Bell;
-use crate::transport::Transport;
 use tutti_plugin_ipc_ffi::{Interest, Ready, Watch};
-use tutti_plugin_types::{BridgeResult, MainThreadMarker, Wakeups};
+use tutti_plugin_types::{BridgeResult, Wakeups};
+
+#[path = "unix_bell.rs"]
+mod bell;
+
+pub(crate) use bell::Bell;
 
 /// The platform's concrete listener and stream, not the crate's dispatch enum.
 ///
@@ -16,9 +19,8 @@ use tutti_plugin_types::{BridgeResult, MainThreadMarker, Wakeups};
 pub(crate) type Listener = interprocess::os::unix::uds_local_socket::Listener;
 pub(crate) type Stream = interprocess::os::unix::uds_local_socket::Stream;
 
-/// The reactor: what the loop waits with, and the window system's half (nothing
-/// to pump here). It keeps the scratch of the wait, so a steady watch set
-/// allocates nothing.
+/// The reactor: what the loop waits with. It keeps the scratch of the wait, so a
+/// steady watch set allocates nothing.
 #[derive(Debug, Default)]
 pub(crate) struct Native {
     asked: Vec<Watch>,
@@ -26,40 +28,9 @@ pub(crate) struct Native {
 }
 
 impl Native {
-    /// Waits until `transport`'s socket is readable (`Ok(true)`), a descriptor
-    /// the plugin asked to have watched (`wakeups`) is ready (into `ready`, the
-    /// socket not readable: `Ok(false)`), the `bell` rings, or `timeout` passes
-    /// (`Ok(false)`, `ready` empty), then pumps the window system's events. The
-    /// socket, the bell and the plugin's descriptors are one `poll(2)`:
+    /// The one `poll(2)` over `stream`, the bell and the plugin's descriptors:
     /// whichever is ready first ends the wait the instant it is.
-    ///
-    /// A transport that is not a socket (a test's script) has no descriptor to
-    /// poll: its own wait stands, and no plugin descriptor is watched.
-    ///
-    /// # Errors
-    ///
-    /// The transport's wait fails.
-    pub(crate) fn wait(
-        &mut self,
-        transport: &mut dyn Transport,
-        main: MainThreadMarker,
-        timeout: std::time::Duration,
-        wakeups: &Wakeups,
-        bell: &Bell,
-        ready: &mut Vec<Ready>,
-    ) -> BridgeResult<bool> {
-        ready.clear();
-        let readable = if let Some(stream) = transport.stream() {
-            self.wait_on(stream, wakeups, timeout, bell, ready)?
-        } else {
-            transport.wait_readable(Some(timeout), bell)?
-        };
-        self.pump(main);
-        Ok(readable)
-    }
-
-    /// The one `poll(2)` over `stream`, the bell and the plugin's descriptors.
-    fn wait_on(
+    pub(super) fn wait_on(
         &mut self,
         stream: &Stream,
         wakeups: &Wakeups,
@@ -93,9 +64,6 @@ impl Native {
         ready.extend(self.got.iter().filter(|r| r.fd != bell.fd()).copied());
         Ok(readable)
     }
-
-    /// Pumps the window system's events: none yet.
-    fn pump(&mut self, _main: MainThreadMarker) {}
 }
 
 /// Waits up to `timeout` (`None`: for ever) for `stream` to have something to
