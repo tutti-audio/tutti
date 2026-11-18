@@ -18,13 +18,14 @@ use crate::ties::{Patience, Ties};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
     AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, Load,
     LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
     ParamEdit, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginIo,
     PluginResult, Prepare, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request,
-    SampleFormat, SampleRate, Samples, Seat, Stage, State, StateError, StateUse, TrackInfo,
+    SampleRate, Samples, Seat, Stage, State, StateError, StateUse, TrackInfo, Widths,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -81,12 +82,8 @@ pub(crate) trait ServedPlugin {
     /// The sample format the session renders this plugin in: 64-bit only when
     /// it was asked for **and** the plugin runs at it ([`Features::F64_AUDIO`]),
     /// never the request alone.
-    fn negotiated(&self, prefer_f64: bool) -> SampleFormat {
-        if prefer_f64 && self.loaded().features.contains(Features::F64_AUDIO) {
-            SampleFormat::Float64
-        } else {
-            SampleFormat::Float32
-        }
+    fn negotiated(&self, requested: FloatWidth) -> FloatWidth {
+        Widths::new(self.loaded().features.contains(Features::F64_AUDIO)).negotiate(requested)
     }
     /// The plugin's control surface, which is also its editor's window calls
     /// ([`EditorWindow`](tutti_plugin_types::EditorWindow)): the editor of a
@@ -287,7 +284,7 @@ impl<F: ServerSide> Served<F> {
         load: &Load,
         sample_rate: SampleRate,
         block_size: usize,
-        prefer_f64: bool,
+        requested: FloatWidth,
         state: Option<(&[u8], StateUse)>,
         before_restore: &mut dyn FnMut(),
         hand: Hand<F::Processor>,
@@ -298,7 +295,7 @@ impl<F: ServerSide> Served<F> {
             Self::open(main, work, path, load)?,
             sample_rate,
             block_size,
-            prefer_f64,
+            requested,
             state,
             before_restore,
             hand,
@@ -313,7 +310,7 @@ impl<F: ServerSide> Served<F> {
     /// refusal of the state, if it refused: the plugin is then activated at its
     /// defaults (a plugin at its defaults beats none).
     ///
-    /// With `prefer_f64` the plugin is activated at 64-bit; one that refuses it
+    /// With a `requested` of 64-bit the plugin is activated at 64-bit; one that refuses it
     /// is activated at 32-bit. What it runs at is its wiring's
     /// [`Features::F64_AUDIO`], never the request.
     ///
@@ -331,7 +328,7 @@ impl<F: ServerSide> Served<F> {
         loaded: F,
         sample_rate: SampleRate,
         block_size: usize,
-        prefer_f64: bool,
+        requested: FloatWidth,
         state: Option<(&[u8], StateUse)>,
         before_restore: &mut dyn FnMut(),
         hand: Hand<F::Processor>,
@@ -380,18 +377,17 @@ impl<F: ServerSide> Served<F> {
         });
         let mut refusal = this.drive(
             main,
-            Event::Op(HostOp::Activate(if prefer_f64 {
-                prepare.with_format(SampleFormat::Float64)
-            } else {
-                prepare
-            })),
+            Event::Op(HostOp::Activate(prepare.with_format(requested))),
         );
-        if prefer_f64 && refusal.is_some() && !this.lifecycle.is_poisoned() {
+        if requested == FloatWidth::F64 && refusal.is_some() && !this.lifecycle.is_poisoned() {
             // A plugin that will not take 64-bit audio runs at 32-bit: the
             // refusal was told to nobody.
             this.refused = false;
             this.events.clear();
-            refusal = this.drive(main, Event::Op(HostOp::Activate(prepare)));
+            refusal = this.drive(
+                main,
+                Event::Op(HostOp::Activate(prepare.with_format(FloatWidth::F32))),
+            );
         }
         if this.state.stage() != Stage::Active {
             return Err(activation_failed(

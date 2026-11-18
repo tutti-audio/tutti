@@ -10,11 +10,12 @@
 //! (`effSetProcessPrecision`). The scratch is built for that format and holds
 //! rows of that width only: a block of the other width is converted at the
 //! scratch by the [`Sample`] rule, and `processReplacingF64` is entered only
-//! through a scratch built for [`SampleFormat::Float64`].
+//! through a scratch built for [`FloatWidth::F64`].
 
 use num_traits::Float as VstFloat;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_plugin_types::{ChannelLayout, SampleFormat, Samples};
+use tutti_plugin_types::{ChannelLayout, Samples};
 
 use crate::buffer::AudioBuffer;
 use crate::host::RenderHandle;
@@ -35,12 +36,13 @@ use crate::host::RenderHandle;
 ///
 /// ```compile_fail,E0616
 /// # use tutti_vst2_ffi::scratch::RenderScratch;
-/// # use tutti_plugin_types::{ChannelLayout, SampleFormat};
+/// # use tutti_buffers::FloatWidth;
+/// # use tutti_plugin_types::ChannelLayout;
 /// let scratch = RenderScratch::new(
 ///     ChannelLayout::from(2u8),
 ///     ChannelLayout::from(2u8),
 ///     64,
-///     SampleFormat::Float32,
+///     FloatWidth::F32,
 /// );
 /// let _ = &scratch.rows;
 /// ```
@@ -89,33 +91,33 @@ impl RenderScratch {
     /// Call once at load time, never on the audio thread: this is the only
     /// allocation on the render path. `block_size` is the maximum block in
     /// frames; a process call may render fewer, never more. `format` is
-    /// [`SampleFormat::Float64`] only for a plugin that installed
+    /// [`FloatWidth::F64`] only for a plugin that installed
     /// `processReplacingF64` and was told 64-bit precision
-    /// ([`negotiate`](tutti_plugin_types::negotiate)).
+    /// ([`Widths::negotiate`](tutti_plugin_types::Widths::negotiate)).
     #[must_use]
     pub fn new(
         num_inputs: ChannelLayout,
         num_outputs: ChannelLayout,
         block_size: usize,
-        format: SampleFormat,
+        format: FloatWidth,
     ) -> Self {
         let (i, o) = (
             usize::from(num_inputs.count()),
             usize::from(num_outputs.count()),
         );
         let rows = match format {
-            SampleFormat::Float32 => Format::F32(Rows::new(i, o, block_size)),
-            SampleFormat::Float64 => Format::F64(Rows::new(i, o, block_size)),
+            FloatWidth::F32 => Format::F32(Rows::new(i, o, block_size)),
+            FloatWidth::F64 => Format::F64(Rows::new(i, o, block_size)),
         };
         Self { rows, block_size }
     }
 
     /// The width the plugin is entered at.
     #[must_use]
-    pub fn format(&self) -> SampleFormat {
+    pub fn format(&self) -> FloatWidth {
         match self.rows {
-            Format::F32(_) => SampleFormat::Float32,
-            Format::F64(_) => SampleFormat::Float64,
+            Format::F32(_) => FloatWidth::F32,
+            Format::F64(_) => FloatWidth::F64,
         }
     }
 
@@ -272,21 +274,21 @@ mod tests {
     #[should_panic(expected = "exceeds the scratch's block size")]
     fn a_render_past_the_block_size_is_refused() {
         let layout = ChannelLayout::from(2u8);
-        RenderScratch::new(layout, layout, 64, SampleFormat::Float32).check_block(65);
+        RenderScratch::new(layout, layout, 64, FloatWidth::F32).check_block(65);
     }
 
     /// A render at the block size is accepted.
     #[test]
     fn a_render_at_the_block_size_is_accepted() {
         let layout = ChannelLayout::from(2u8);
-        RenderScratch::new(layout, layout, 64, SampleFormat::Float32).check_block(64);
+        RenderScratch::new(layout, layout, 64, FloatWidth::F32).check_block(64);
     }
 
     /// **The scratch holds the width it was built for**, and only that one.
     #[test]
     fn the_scratch_is_built_for_one_format() {
         let layout = ChannelLayout::from(2u8);
-        for format in [SampleFormat::Float32, SampleFormat::Float64] {
+        for format in [FloatWidth::F32, FloatWidth::F64] {
             assert_eq!(
                 RenderScratch::new(layout, layout, 8, format).format(),
                 format

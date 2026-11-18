@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use tutti_au_ffi::{RenderNotify, Renderer};
 use tutti_plugin_types::{
-    Loaded, MainThreadMarker, PluginError, Prepare, Refused, RestartRules, Stuck, sysex_assembler,
+    Loaded, MainThreadMarker, PluginError, Prepare, Refused, RestartRules, Stuck, Widths,
+    sysex_assembler,
 };
 use tutti_rt::Publisher;
 
@@ -31,6 +32,11 @@ impl Loaded for AuLoaded {
     /// fires *after* the AU has already changed the value. A rate or stream
     /// format change is the host's own reconfiguration, applied by `activate`.
     const RESTARTS: RestartRules = RestartRules::NONE;
+
+    /// An AUv2 unit renders 32-bit audio only.
+    fn widths(&self) -> Widths {
+        Widths::F32
+    }
 
     /// Initializes the unit so it can render.
     ///

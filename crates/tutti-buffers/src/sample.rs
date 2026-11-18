@@ -25,8 +25,10 @@ mod sealed {
 /// The storage formats a [`Sample`] can be, as a value: what an encoder, a
 /// device or a file header dispatches on at run time.
 ///
-/// [`Sample::FORMAT`] names an implementor's variant.
+/// [`Sample::FORMAT`] names an implementor's variant. With the `serde` feature
+/// it is the variant's name on a wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum SampleFormat {
     /// Signed 8-bit integer.
@@ -41,6 +43,68 @@ pub enum SampleFormat {
     F32,
     /// 64-bit float.
     F64,
+}
+
+/// The two float widths, as a value: what a plugin ABI, a shared-memory slab or a
+/// wire says audio is exchanged in, where an integer format is not a choice.
+///
+/// [`Float::WIDTH`] names an implementor's variant. It converts to the
+/// [`SampleFormat`] of the same width, and a [`SampleFormat`] converts back only
+/// when it is a float. With the `serde` feature it is the variant's name on a
+/// wire.
+///
+/// ```
+/// use tutti_buffers::{FloatWidth, SampleFormat};
+///
+/// assert_eq!(SampleFormat::from(FloatWidth::F64), SampleFormat::F64);
+/// assert_eq!(FloatWidth::try_from(SampleFormat::F32), Ok(FloatWidth::F32));
+/// assert!(FloatWidth::try_from(SampleFormat::I16).is_err());
+/// assert_eq!(FloatWidth::F64.bytes(), 8);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum FloatWidth {
+    /// 32-bit float.
+    F32,
+    /// 64-bit float.
+    F64,
+}
+
+impl From<FloatWidth> for SampleFormat {
+    fn from(width: FloatWidth) -> Self {
+        match width {
+            FloatWidth::F32 => Self::F32,
+            FloatWidth::F64 => Self::F64,
+        }
+    }
+}
+
+impl FloatWidth {
+    /// The bytes one value occupies: 4 or 8.
+    #[must_use]
+    pub const fn bytes(self) -> usize {
+        match self {
+            Self::F32 => size_of::<f32>(),
+            Self::F64 => size_of::<f64>(),
+        }
+    }
+}
+
+/// An integer [`SampleFormat`] is no [`FloatWidth`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0:?} is not a float width")]
+pub struct NotAFloat(pub SampleFormat);
+
+impl TryFrom<SampleFormat> for FloatWidth {
+    type Error = NotAFloat;
+
+    fn try_from(format: SampleFormat) -> Result<Self, NotAFloat> {
+        match format {
+            SampleFormat::F32 => Ok(Self::F32),
+            SampleFormat::F64 => Ok(Self::F64),
+            integer => Err(NotAFloat(integer)),
+        }
+    }
 }
 
 /// A storage format: what a file, a device, a plugin port or a wire holds one
@@ -363,6 +427,17 @@ pub enum ByWidth<T: OverFloat> {
     F64(T::At<f64>),
 }
 
+impl<T: OverFloat> ByWidth<T> {
+    /// The width this value is at.
+    #[must_use]
+    pub const fn width(&self) -> FloatWidth {
+        match self {
+            Self::F32(_) => FloatWidth::F32,
+            Self::F64(_) => FloatWidth::F64,
+        }
+    }
+}
+
 impl<T: OverFloat> core::fmt::Debug for ByWidth<T>
 where
     T::At<f32>: core::fmt::Debug,
@@ -397,6 +472,9 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     /// BS.775 / Dolby consumer downmix for a channel folded into the front
     /// pair.
     const MINUS_3_DB: Self;
+
+    /// This width as a value.
+    const WIDTH: FloatWidth;
 
     /// A running phase in cycles as data of this width, in `[0, 1)`: the top
     /// [`MANTISSA_DIGITS`](Real::MANTISSA_DIGITS) bits of the position as an integer,
@@ -509,6 +587,7 @@ macro_rules! position_crossings {
 
 impl Float for f32 {
     const MINUS_3_DB: Self = core::f32::consts::FRAC_1_SQRT_2;
+    const WIDTH: FloatWidth = FloatWidth::F32;
     position_crossings!(f32);
     #[inline]
     fn from_f32(x: f32) -> Self {
@@ -526,6 +605,7 @@ impl Float for f32 {
 
 impl Float for f64 {
     const MINUS_3_DB: Self = core::f64::consts::FRAC_1_SQRT_2;
+    const WIDTH: FloatWidth = FloatWidth::F64;
     position_crossings!(f64);
     #[inline]
     fn from_f32(x: f32) -> Self {

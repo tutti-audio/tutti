@@ -17,10 +17,11 @@
 //! tells a dual-precision plugin which width to configure for. It states the
 //! width the host WILL call the plugin at, so 64 goes only to a plugin that
 //! declared `effFlagsCanDoubleReplacing` and was loaded with
-//! `Precision::Double`; every other plugin is told 32.
+//! `FloatWidth::F64`; every other plugin is told 32.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use tutti_buffers::FloatWidth;
 use tutti_rt::LockExt;
 
 use tutti_vst2_host::Vst2ProcessContext;
@@ -29,7 +30,7 @@ use tutti_vst2_test_plugin::{ProcessCapture, ProcessEntry};
 #[path = "support/active.rs"]
 mod active;
 
-use active::{Active, ActiveExt, Precision};
+use active::{Active, ActiveExt};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -129,7 +130,7 @@ fn read_capture(path: &Path) -> ProcessCapture {
 
 /// Load the probe, with `effFlagsCanDoubleReplacing` set or clear, telling it
 /// it will be processed at `precision`.
-fn load_probe(declares_f64: bool, precision: Precision) -> (Active, PathBuf) {
+fn load_probe(declares_f64: bool, precision: FloatWidth) -> (Active, PathBuf) {
     let path = tutti_fixtures::vst2_probe().to_path_buf();
     reset_probe(&path);
     clear_probe_env();
@@ -137,7 +138,7 @@ fn load_probe(declares_f64: bool, precision: Precision) -> (Active, PathBuf) {
         // SAFETY: the caller holds `PROBE_LOCK`.
         unsafe { std::env::set_var("TUTTI_VST2_PROBE_F64", "1") };
     }
-    let instance = Active::load_with_precision(&path, SAMPLE_RATE, BLOCK, precision)
+    let instance = Active::load_at_width(&path, SAMPLE_RATE, BLOCK, precision)
         .unwrap_or_else(|e| panic!("host failed to load reference plugin at {path:?}: {e:?}"));
     // The AEffect is built; clearing now keeps the variable from outliving
     // this load.
@@ -173,7 +174,7 @@ fn render_f64(instance: &mut Active, input_value: f64) -> Vec<Vec<f64>> {
 #[test]
 fn f64_capable_plugin_is_entered_through_the_f64_slot() {
     let _guard = lock_probe();
-    let (mut instance, path) = load_probe(true, Precision::Double);
+    let (mut instance, path) = load_probe(true, FloatWidth::F64);
     assert!(
         instance.loaded().metadata().supports_f64,
         "the probe was asked to declare effFlagsCanDoubleReplacing but the \
@@ -202,7 +203,7 @@ fn f64_capable_plugin_is_entered_through_the_f64_slot() {
 #[test]
 fn f64_render_preserves_precision_f32_cannot_carry() {
     let _guard = lock_probe();
-    let (mut instance, path) = load_probe(true, Precision::Double);
+    let (mut instance, path) = load_probe(true, FloatWidth::F64);
 
     // Guard the fixture, per channel, against the tag rounding the difference
     // back off. Checking only the bare round trip is not enough: a narrowing
@@ -246,7 +247,7 @@ fn f64_render_preserves_precision_f32_cannot_carry() {
 #[test]
 fn plugin_without_f64_support_falls_back_to_the_f32_slot() {
     let _guard = lock_probe();
-    let (mut instance, path) = load_probe(false, Precision::Double);
+    let (mut instance, path) = load_probe(false, FloatWidth::F64);
     assert!(
         !instance.loaded().metadata().supports_f64,
         "the default probe must not declare effFlagsCanDoubleReplacing"
@@ -283,7 +284,7 @@ fn plugin_without_f64_support_falls_back_to_the_f32_slot() {
 fn set_process_precision_announces_the_width_the_host_will_use() {
     let _guard = lock_probe();
 
-    let announced = |declares_f64: bool, precision: Precision| {
+    let announced = |declares_f64: bool, precision: FloatWidth| {
         let (instance, path) = load_probe(declares_f64, precision);
         let cap = read_capture(&path);
         assert_eq!(
@@ -299,22 +300,22 @@ fn set_process_precision_announces_the_width_the_host_will_use() {
     };
 
     assert_eq!(
-        announced(true, Precision::Double),
+        announced(true, FloatWidth::F64),
         1,
         "declared f64 and the caller will use process_f64: announce 64-bit"
     );
     assert_eq!(
-        announced(true, Precision::Single),
+        announced(true, FloatWidth::F32),
         0,
         "the plugin can do f64 but the caller will call f32: announcing 64 \
          would promise a width the host never uses"
     );
     assert_eq!(
-        announced(false, Precision::Double),
+        announced(false, FloatWidth::F64),
         0,
         "no effFlagsCanDoubleReplacing: the host cannot enter it at 64"
     );
-    assert_eq!(announced(false, Precision::Single), 0);
+    assert_eq!(announced(false, FloatWidth::F32), 0);
 }
 
 /// A plugin told 32 is not entered at 64: `process_f64` narrows through the
@@ -323,7 +324,7 @@ fn set_process_precision_announces_the_width_the_host_will_use() {
 #[test]
 fn a_plugin_told_32_bit_is_entered_through_the_f32_slot() {
     let _guard = lock_probe();
-    let (mut instance, path) = load_probe(true, Precision::Single);
+    let (mut instance, path) = load_probe(true, FloatWidth::F32);
     assert!(instance.loaded().metadata().supports_f64, "fixture");
 
     let _ = render_f64(&mut instance, 0.0);
@@ -338,7 +339,7 @@ fn a_plugin_told_32_bit_is_entered_through_the_f32_slot() {
 #[test]
 fn set_process_precision_precedes_the_load_resume() {
     let _guard = lock_probe();
-    let (_instance, path) = load_probe(true, Precision::Double);
+    let (_instance, path) = load_probe(true, FloatWidth::F64);
 
     let cap = read_capture(&path);
     assert_eq!(cap.set_precision_count, 1);

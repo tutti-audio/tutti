@@ -297,9 +297,9 @@ pub mod types {
         PlaneIterMut, Planes, PlanesMut,
     };
     pub use tutti_buffers::{
-        BufferError, FiniteSource, Float, Fold, FoldEnd, FoldError, FoldLevel, FoldLevels,
-        FoldSpec, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed, Source, StereoPlanes,
-        Stop,
+        BufferError, FiniteSource, Float, FloatWidth, Fold, FoldEnd, FoldError, FoldLevel,
+        FoldLevels, FoldSpec, NotAFloat, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed,
+        Source, StereoPlanes, Stop,
     };
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{
@@ -635,9 +635,9 @@ pub mod plugin {
         ClapFeature, ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper,
         InvalidContentScale, KeyEvent, KeyUse, LatencyVerdict, Load, Locator, Measured, NotChecked,
         ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainUnit, PluginClass,
-        PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig, SampleFormat,
-        StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category,
-        Vst3PlugType, Vst3SubCategories,
+        PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig, StateError,
+        StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType,
+        Vst3SubCategories,
     };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
     pub use tutti_plugin_types::{

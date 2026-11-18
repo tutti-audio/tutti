@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 use tutti_fixtures::main_thread;
 
+use tutti_buffers::FloatWidth;
 use tutti_plugin::BridgeConfig;
 use tutti_plugin::PluginClient;
 use tutti_plugin_contract::spec::{self, Mode, Param};
@@ -21,7 +22,7 @@ use tutti_plugin_contract::{
 use tutti_plugin_ipc::{BridgeConfig as IpcConfig, BridgeEvent, Ipc, Launched};
 use tutti_plugin_types::{
     BridgeError, BridgeResult, Control, Editor, Load, LoadStage, MainThreadMarker, ParamEdit,
-    SampleFormat, SampleRate,
+    SampleRate,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -156,7 +157,7 @@ fn served<F: Format>(
             sink.lock().unwrap().push(edit);
         }
     })));
-    let active = Active::activate(ipc, prepare(RATE, BLOCK, SampleFormat::Float32))
+    let active = Active::activate(ipc, prepare(RATE, BLOCK, FloatWidth::F32))
         .unwrap_or_else(|(_, why)| panic!("{}: the served plugin activates: {why:?}", F::NAME));
     (active, heard)
 }

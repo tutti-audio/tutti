@@ -8,10 +8,11 @@ use tutti_plugin_types::MainThreadMarker;
 
 use tutti_rt::{DrainMark, DrainWatch};
 
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Control, Controller, Edit, EditDrain, EditQueue, EditSink, Loaded, ParamAccess, ParamEdit,
     PluginError, PluginResult, PluginTail, Prepare, Processor, Refused, Request, RestartRules,
-    SampleFormat, Samples, Stuck, Wraps,
+    Samples, Stuck, Widths, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -575,16 +576,21 @@ impl Loaded for Vst3Loaded {
     /// VST3 restarts for latency and for the buses (`kIoChanged`).
     const RESTARTS: RestartRules = RestartRules::VST3;
 
+    /// 64-bit when the plugin answers `canProcessSampleSize(kSample64)`.
+    fn widths(&self) -> Widths {
+        Widths::new(self.info.supports_f64)
+    }
+
     fn activate(
         self,
         main: MainThreadMarker,
         prepare: Prepare,
     ) -> Result<(ProcessorAny, Vst3Controller), Refused<Self>> {
         match prepare.format() {
-            SampleFormat::Float64 => self
+            FloatWidth::F64 => self
                 .activate_typed::<f64>(main, prepare)
                 .map(|(p, c)| (ProcessorAny::F64(p), c)),
-            _ => self
+            FloatWidth::F32 => self
                 .activate_typed::<f32>(main, prepare)
                 .map(|(p, c)| (ProcessorAny::F32(p), c)),
         }

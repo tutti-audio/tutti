@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::BusChannels;
-use super::SampleFormat;
+use tutti_buffers::FloatWidth;
 
 /// Shared-memory slab descriptor: the shape both processes must agree on before
 /// either maps a byte.
@@ -34,7 +34,7 @@ pub struct SlabLayout {
     /// boundary, not the host's configured maximum buffer size.
     pub samples_per_channel: usize,
     /// Width of one sample in the rings, which fixes their stride.
-    pub format: SampleFormat,
+    pub format: FloatWidth,
     /// Ring depth, per direction. Carried on the wire (rather than assumed) so
     /// the opening side can reject a peer built with a different depth instead
     /// of silently addressing the wrong slot.
@@ -46,14 +46,6 @@ pub struct SlabLayout {
 }
 
 impl SlabLayout {
-    /// Returns the size of one sample in bytes, per [`format`](Self::format).
-    pub fn sample_size(&self) -> usize {
-        match self.format {
-            SampleFormat::Float32 => std::mem::size_of::<f32>(),
-            SampleFormat::Float64 => std::mem::size_of::<f64>(),
-        }
-    }
-
     /// Total flat channels the input direction occupies (sum across input buses).
     pub fn input_channels(&self) -> usize {
         self.inputs.iter().map(|l| l.count() as usize).sum()
@@ -64,9 +56,28 @@ impl SlabLayout {
         self.outputs.iter().map(|l| l.count() as usize).sum()
     }
 
+    /// Bytes one channel of one slot occupies, or `None` when it does not fit
+    /// in `usize`. The one stride formula: the checked size and every offset
+    /// are built on it.
+    #[must_use]
+    pub(crate) fn checked_channel_bytes(&self) -> Option<usize> {
+        self.samples_per_channel.checked_mul(self.format.bytes())
+    }
+
+    /// Bytes one channel of one slot occupies.
+    ///
+    /// For a layout whose whole size [`checked_byte_size_with_header`] answered,
+    /// as every mapped slab's did: each figure below that size fits.
+    ///
+    /// [`checked_byte_size_with_header`]: Self::checked_byte_size_with_header
+    pub(crate) fn channel_bytes(&self) -> usize {
+        self.checked_channel_bytes()
+            .expect("a mapped layout's size was checked, so its channel stride fits")
+    }
+
     /// Bytes one direction's ring occupies: every slot, every channel.
     pub(crate) fn ring_bytes(&self, channels: usize) -> usize {
-        self.slots as usize * channels * self.samples_per_channel * self.sample_size()
+        self.slots as usize * channels * self.channel_bytes()
     }
 
     /// Returns the bytes the input ring occupies, across all slots and channels.
@@ -96,8 +107,7 @@ impl SlabLayout {
         let ring = |channels: usize| {
             (self.slots as usize)
                 .checked_mul(channels)?
-                .checked_mul(self.samples_per_channel)?
-                .checked_mul(self.sample_size())
+                .checked_mul(self.checked_channel_bytes()?)
         };
         header_bytes
             .checked_add(ring(channels(&self.inputs)?)?)?
@@ -114,7 +124,7 @@ mod tests {
     fn layout(inputs: &[ChannelLayout], outputs: &[ChannelLayout]) -> SlabLayout {
         SlabLayout {
             samples_per_channel: 64,
-            format: SampleFormat::Float32,
+            format: FloatWidth::F32,
             // Derived, not a literal: every other construction site uses
             // `RING_SLOTS`, and a helper that hardcodes the depth would keep
             // passing if the ring ever grew.
@@ -188,8 +198,8 @@ mod tests {
     fn f64_doubles_the_region() {
         let mut l = layout(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO]);
         let f32_bytes = l.input_ring_bytes();
-        l.format = SampleFormat::Float64;
-        assert_eq!(l.sample_size(), 8);
+        l.format = FloatWidth::F64;
+        assert_eq!(l.channel_bytes(), 64 * 8);
         assert_eq!(l.input_ring_bytes(), f32_bytes * 2);
         assert_eq!(l.input_channels(), 2, "format does not affect width");
     }

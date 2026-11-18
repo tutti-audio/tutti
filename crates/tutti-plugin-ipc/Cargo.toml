@@ -29,7 +29,7 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["serde", "probe-wire"] }
 # The sample width of a slab region (`Float`) and the block views the tests build.
-tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers", features = ["serde"] }
 # The shared mapping and the OS calls, behind safe calls.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 

@@ -11,6 +11,7 @@
 
 use std::path::Path;
 
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Hand, Load, LoadStage, MainThreadMarker, MainWorkHandle, PluginError, PluginFormat,
     PluginResult, StateUse,
@@ -54,7 +55,7 @@ macro_rules! served {
                 load: &Load,
                 sample_rate: tutti_plugin_types::SampleRate,
                 block_size: usize,
-                prefer_f64: bool,
+                requested: FloatWidth,
                 state: Option<(&[u8], StateUse)>,
                 before_restore: &mut dyn FnMut(),
                 ties: Ties,
@@ -75,7 +76,7 @@ macro_rules! served {
                             load,
                             sample_rate,
                             block_size,
-                            prefer_f64,
+                            requested,
                             state,
                             before_restore,
                             hand,

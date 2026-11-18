@@ -9,7 +9,7 @@ use tutti_plugin_types::MainThreadMarker;
 
 use tutti_plugin_types::{
     Control, Controller, EditDrain, EditQueue, EditSink, Loaded, PluginError, PluginTail, Prepare,
-    Refused, RestartRules, Samples, Stuck,
+    Refused, RestartRules, Samples, Stuck, Widths,
 };
 use tutti_rt::Publisher;
 use tutti_units::Normalized;
@@ -253,6 +253,11 @@ impl Loaded for ClapLoaded {
 
     /// CLAP restarts for latency and for the audio ports.
     const RESTARTS: RestartRules = RestartRules::CLAP;
+
+    /// 64-bit when every audio port advertises it, as of the last port read.
+    fn widths(&self) -> Widths {
+        Widths::new(self.audio.supports_f64)
+    }
 
     /// Splits the plugin into its two halves. A refusal is the configuration's
     /// end, not the plugin's: CLAP plugins routinely decline 64-bit audio or a

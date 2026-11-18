@@ -37,7 +37,7 @@ use crate::{
 use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
     MainThreadMarker, Prepare, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
-    StateUse, TimerId, TrackInfo, Wakeups,
+    StateUse, TimerId, TrackInfo, Wakeups, Widths,
 };
 use tutti_plugin_ipc_ffi::{FdId, Ready};
 use tutti_units::Normalized;
@@ -367,6 +367,15 @@ pub trait Loaded: Control + Sized + Send {
 
     /// What this format needs a restart for. A reload restarts on every format.
     const RESTARTS: RestartRules;
+
+    /// The float widths the plugin processes audio in, as of now. An
+    /// activation at a width outside it is refused, and
+    /// [`Widths::negotiate`] turns a request into the width one accepts.
+    ///
+    /// An out-of-process plugin answers the width its load settled on, not
+    /// every width the plugin could process: its slab runs one width until a
+    /// reload.
+    fn widths(&self) -> Widths;
 
     /// Splits the plugin. On failure the whole plugin comes back in the error.
     ///

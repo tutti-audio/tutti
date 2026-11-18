@@ -6,11 +6,11 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tutti_buffers::FloatWidth;
 use tutti_fixtures::{machine_lock, main_thread};
 use tutti_plugin_types::{
     ChannelLayout, Control, Controller, Loaded, LoadedPlugin, MaxBlock, ParamAccess, ParameterInfo,
-    PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleFormat, SampleRate,
-    Samples,
+    PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleRate, Samples,
 };
 use tutti_units::ParamId;
 
@@ -163,7 +163,7 @@ fn mock_with(
     use std::io::Read;
     let layout = SlabLayout {
         samples_per_channel: CEILING,
-        format: SampleFormat::Float32,
+        format: FloatWidth::F32,
         slots: RING_SLOTS as u32,
         inputs: vec![ChannelLayout::STEREO],
         outputs: vec![ChannelLayout::STEREO],
@@ -328,7 +328,7 @@ fn mock_with(
             latency_samples: Samples(5),
             ..LoadedPlugin::default()
         },
-        format: SampleFormat::Float32,
+        format: FloatWidth::F32,
         ceiling: CEILING,
         slab,
         rate: RATE,

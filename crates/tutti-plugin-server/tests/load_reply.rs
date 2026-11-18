@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, read_frame, socket_name, write_frame};
-use tutti_plugin_types::SampleFormat;
 use tutti_plugin_types::{Load, PluginFormat, SampleRate};
 
 /// Kills the server if the test fails before it shuts it down.
@@ -68,7 +68,7 @@ fn load_choosing(
             load,
             sample_rate: SampleRate::SR_48K,
             block_size: 512,
-            preferred_format: SampleFormat::Float32,
+            preferred_format: FloatWidth::F32,
             shm_name: "load-reply".into(),
             state: None,
         },

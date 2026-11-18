@@ -14,10 +14,10 @@ use clap_sys::events::{
 use clap_sys::fixedpoint::{CLAP_BEATTIME_FACTOR, CLAP_SECTIME_FACTOR};
 use clap_sys::process::{CLAP_PROCESS_SLEEP, CLAP_PROCESS_TAIL, clap_process_status};
 use std::sync::atomic::Ordering;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
-use tutti_plugin_types::SampleFormat;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
 
@@ -168,7 +168,7 @@ impl ClapProcessor {
         let empty_params = ParameterChanges::new();
         let params = ctx.params.unwrap_or(&empty_params);
         match (self.format(), buffer.by_width()) {
-            (SampleFormat::Float32, ByWidth::F32(io)) => {
+            (FloatWidth::F32, ByWidth::F32(io)) => {
                 let frames = io.frames();
                 let (inputs, outputs) = io.split();
                 self.process_impl(
@@ -181,7 +181,7 @@ impl ClapProcessor {
                     ctx.transport_changes,
                 )
             }
-            (SampleFormat::Float64, ByWidth::F64(io)) => {
+            (FloatWidth::F64, ByWidth::F64(io)) => {
                 let frames = io.frames();
                 let (inputs, outputs) = io.split();
                 self.process_impl(
