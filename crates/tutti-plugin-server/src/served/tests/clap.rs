@@ -1,5 +1,6 @@
 use super::*;
 use crate::served::format::clap::{THREAD_POOL, flush_out_of_band, pool_participants};
+use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::Control;

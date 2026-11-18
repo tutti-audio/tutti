@@ -2,6 +2,7 @@
 
 use super::*;
 use tutti_au_host::AuLoaded;
+use tutti_buffers::InputOutput;
 
 impl Served<AuLoaded> {
     /// `load_first` for the plugin `load` chooses, in

@@ -17,6 +17,7 @@ use tutti_au_ffi::{Element, Scope};
 use tutti_au_host::AuLoaded;
 use tutti_au_host::component::{AuComponentRef, find_component};
 use tutti_au_host::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
+use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::{Load, MainWork, MaxBlock, Prepare, SampleRate};
 use tutti_units::Samples;
@@ -701,7 +702,7 @@ fn an_in_process_au_dropped_while_rendered_is_disposed_by_the_control_tick() {
         let mut right = [0.0f32; FRAMES];
         let input: Vec<&[f32]> = input.iter().map(|c| c.as_slice()).collect();
         let mut output = [&mut left[..], &mut right[..]];
-        let mut block = tutti_buffers::InputOutput::new(
+        let mut block = InputOutput::new(
             tutti_units::Samples(FRAMES),
             tutti_buffers::Planes::new(&input).expect("equal planes"),
             tutti_buffers::PlanesMut::new(&mut output).expect("equal planes"),

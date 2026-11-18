@@ -1,8 +1,8 @@
 //! `Served<F>` against each format's reference plugin.
 
 use super::*;
-use tutti_buffers::{Float, InputOutput};
-use tutti_plugin_types::{PluginFormat, PluginIo, ProcessContext, ProcessOutput, Processor};
+use tutti_buffers::Float;
+use tutti_plugin_types::{PluginFormat, PluginIo, ProcessContext, Processor};
 
 #[cfg(served_au)]
 mod au;

@@ -1,7 +1,7 @@
 use super::*;
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::BridgeMessage;
-use tutti_plugin_types::{Control, Request};
+use tutti_plugin_types::{Control, ProcessOutput, Request};
 use tutti_vst3_host::Vst3Loaded;
 
 type Vst3Instance = Served<Vst3Loaded>;
