@@ -254,18 +254,20 @@ impl<'a> SortedEvents<'a> {
         })
     }
 
-    /// These events with `params` beside them, if the param events are sorted
-    /// by offset and every offset is below `frames`.
+    /// `events` with the param events `params` beside them, if each list is
+    /// sorted by offset and every offset is below `frames`.
     ///
     /// # Errors
     ///
     /// [`EventOrderError::OutOfBlock`] or [`EventOrderError::Unsorted`],
-    /// naming the first offending index of `params`.
-    pub fn with_params(
-        self,
+    /// naming the first offending index of the list at fault (the events
+    /// first).
+    pub fn with_both(
+        events: &'a [Event],
         params: &'a [ParamEvent],
         frames: usize,
     ) -> Result<Self, EventOrderError> {
+        let this = Self::new(events, frames)?;
         for (i, e) in params.iter().enumerate() {
             if e.offset.index() >= frames {
                 return Err(EventOrderError::OutOfBlock { at: i });
@@ -274,7 +276,7 @@ impl<'a> SortedEvents<'a> {
                 return Err(EventOrderError::Unsorted { at: i });
             }
         }
-        Ok(Self { params, ..self })
+        Ok(Self { params, ..this })
     }
 
     /// Sorts `events` in place by offset (stably), then views them. Fails only
@@ -308,7 +310,10 @@ impl<'a> SortedEvents<'a> {
     /// These events with `params` beside them, which the executor's own rules
     /// keep sorted and in-block. Checked in debug builds.
     pub(crate) fn trusted_params(self, params: &'a [ParamEvent], frames: usize) -> Self {
-        debug_assert_eq!(self.with_params(params, frames).map(|_| ()), Ok(()));
+        debug_assert_eq!(
+            Self::with_both(self.events, params, frames).map(|_| ()),
+            Ok(())
+        );
         Self { params, ..self }
     }
 

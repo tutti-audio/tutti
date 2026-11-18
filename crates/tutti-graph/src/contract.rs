@@ -1867,9 +1867,7 @@ pub fn drive_input_params<F: Float>(
         .map(|p| {
             let list = events.get(p).copied().unwrap_or(&[]);
             let plist = param_events.get(p).copied().unwrap_or(&[]);
-            SortedEvents::new(list, frames)
-                .and_then(|e| e.with_params(plist, frames))
-                .expect("sorted events inside the block")
+            SortedEvents::with_both(list, plist, frames).expect("sorted events inside the block")
         })
         .collect();
     let mut out_events: Vec<Vec<Event>> = (0..usize::from(shape.event_out))
@@ -2530,9 +2528,8 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
         }
         let mut sorted = [SortedEvents::EMPTY; crate::node::MAX_PORTS];
         for ((slot, list), params) in sorted.iter_mut().zip(&self.events_in).zip(&self.params_in) {
-            *slot = SortedEvents::new(list, len)
-                .and_then(|e| e.with_params(params, len))
-                .expect("sorted events inside the block");
+            *slot =
+                SortedEvents::with_both(list, params, len).expect("sorted events inside the block");
         }
         let dropped = crate::event::PortCount::default();
         let lost = core::cell::Cell::new(0u32);

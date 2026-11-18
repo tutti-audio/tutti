@@ -121,7 +121,7 @@ tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::normali
 tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::resample
 
 # tutti-graph
-tutti-graph  with-prefix  crates/tutti-graph/src/event.rs::ParamRamp::with_shape
+tutti-graph  with-prefix  crates/tutti-graph/src/param_event.rs::ParamRamp::with_shape
 tutti-graph  with-prefix  crates/tutti-graph/src/graph.rs::NodeSpec::with_latency
 tutti-graph  with-prefix  crates/tutti-graph/src/graph.rs::NodeSpec::with_tail
 tutti-graph  with-prefix  crates/tutti-graph/src/node.rs::TransportPosition::with_recording
@@ -152,6 +152,7 @@ tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_mode
 tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_param_range
 tutti-graph  node-ctor  crates/tutti-graph/src/inlet.rs::InletNode::new
 tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::new
+tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::with_both
 tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::sort
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of

@@ -1660,9 +1660,7 @@ impl<F: Float> Reference<F> {
                 .iter()
                 .zip(&pm_ins)
                 .map(|(v, p)| {
-                    SortedEvents::new(v, frames)
-                        .and_then(|e| e.with_params(p, frames))
-                        .expect("the reference sorted them")
+                    SortedEvents::with_both(v, p, frames).expect("the reference sorted them")
                 })
                 .collect();
             let drops = crate::event::PortCount::default();
