@@ -222,9 +222,13 @@ impl PitchDetector {
         let mut best_tau = min_period;
         let mut best_val = self.cumulative_mean[min_period];
 
-        for tau in min_period + 1..=max_period {
-            if self.cumulative_mean[tau] < best_val {
-                best_val = self.cumulative_mean[tau];
+        for (tau, &mean) in self.cumulative_mean[..=max_period]
+            .iter()
+            .enumerate()
+            .skip(min_period + 1)
+        {
+            if mean < best_val {
+                best_val = mean;
                 best_tau = tau;
             }
         }

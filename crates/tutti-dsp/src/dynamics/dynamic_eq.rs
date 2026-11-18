@@ -187,7 +187,7 @@ pub struct DynamicEqBank {
     q: Q,
     rate: SampleRate,
     /// The detector's band-pass on the key.
-    key: KeyStage,
+    key: KeyStage<f32>,
     /// The mean square of the key, in the detector's one-pole.
     mean_square: f64,
     /// The smoothed gain change's size in dB, not below 0; its sign is the mode's.
@@ -339,7 +339,7 @@ impl DynamicEqBank {
             .get()
             .min(output.frames().get())
             .min(key.frames().get());
-        let mut levels = [Amplitude::SILENT; PERIOD.get()];
+        let mut levels = [0.0f32; PERIOD.get()];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(PERIOD.get() - self.phase.get());
@@ -350,7 +350,7 @@ impl DynamicEqBank {
             let levels = &mut levels[..n];
             self.key.levels(&key, start..end, levels);
             for &level in levels.iter() {
-                self.frame(level);
+                self.frame(Amplitude(f64::from(level)));
             }
             let span = Samples(start)..Samples(end);
             self.bell.process(

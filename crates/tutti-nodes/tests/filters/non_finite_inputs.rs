@@ -152,7 +152,7 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         }
     }
     check("limiter", || {
-        let n = LimiterNode::stereo(LimiterControls {
+        let n = LimiterNode::<f32>::stereo(LimiterControls {
             threshold: Db(-6.0),
             ceiling: Db(-1.0),
             ..LimiterControls::DEFAULT
@@ -166,7 +166,7 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         (Box::new(n), cells)
     });
     check("brickwall", || {
-        let n = BrickwallLimiterNode::new(Db(-1.0));
+        let n = BrickwallLimiterNode::<f32>::new(Db(-1.0));
         let cells = vec![(
             "ceiling",
             n.param_set().cell(UnitParam::Ceiling).unwrap(),

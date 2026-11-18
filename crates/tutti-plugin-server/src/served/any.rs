@@ -58,11 +58,11 @@ macro_rules! served {
                 state: Option<(&[u8], StateUse)>,
                 before_restore: &mut dyn FnMut(),
                 ties: Ties,
-            ) -> PluginResult<(Self, Option<String>, Box<dyn RenderEnd>)> {
+            ) -> PluginResult<(Self, Option<PluginError>, Box<dyn RenderEnd>)> {
                 if !path.exists() {
                     return Err(PluginError::Load {
                         stage: LoadStage::Scanning,
-                        reason: "Plugin not found".to_string(),
+                        reason: "the plugin file does not exist".to_string(),
                     });
                 }
                 match format {
@@ -90,7 +90,7 @@ macro_rules! served {
                         Err(PluginError::Load {
                             stage: LoadStage::Opening,
                             reason: format!(
-                                "Unsupported plugin format: {}. Supported: {}.",
+                                "unsupported plugin format {}; served: {}",
                                 format.extension_id(),
                                 served.join(", ")
                             ),
@@ -104,6 +104,17 @@ macro_rules! served {
             pub(crate) fn plugin(&self) -> &dyn ServedPlugin {
                 match self {
                     $($(#[$cfg])* Self::$name(plugin) => plugin,)*
+                    _ => unreachable!("no format is served"),
+                }
+            }
+
+            /// Leaves the plugin as a panic in a call into it does
+            /// (`Lifecycle::guarded` replaces it with `Poisoned`).
+            #[cfg(test)]
+            pub(crate) fn poison(&mut self) {
+                match self {
+                    $($(#[$cfg])* Self::$name(plugin) => plugin.lifecycle = tutti_plugin_types::Lifecycle::Poisoned,)*
+                    #[allow(unreachable_patterns)] // every arm is feature-gated
                     _ => unreachable!("no format is served"),
                 }
             }
@@ -125,6 +136,8 @@ served! {
     Clap(tutti_clap_host::ClapLoaded, PluginFormat::Clap),
     #[cfg(feature = "vst3")]
     Vst3(tutti_vst3_host::Vst3Loaded, PluginFormat::Vst3),
-    #[cfg(all(feature = "au", target_os = "macos"))]
+    // A row of the macro's input cannot sit in a module; `served_au` is the one
+    // spelling of "AU is served here" (`build.rs`), and `served/au.rs` is its module.
+    #[cfg(served_au)]
     Au(tutti_au_host::AuLoaded, PluginFormat::AudioUnit),
 }

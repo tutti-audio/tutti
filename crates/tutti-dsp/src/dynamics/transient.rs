@@ -176,7 +176,7 @@ impl TransientBank {
         let width = input.channels().min(output.channels());
         let blended = self.amounts.blended(frames);
         let taken = self.amounts.taken();
-        let mut gains = [Amplitude::SILENT; CHUNK];
+        let mut gains = [0.0f64; CHUNK];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(CHUNK);
@@ -191,18 +191,20 @@ impl TransientBank {
                 } else {
                     self.amounts.target()
                 };
-                let level = *g;
+                let level = Amplitude(*g);
                 let fast = self.fast.follow(self.envelopes.0, level);
                 let slow = self.slow.follow(self.envelopes.1, level);
                 self.envelopes = (fast, slow);
-                *g = gain_db(fast, slow, a.attack, a.sustain).to_amplitude();
+                *g = gain_db(fast, slow, a.attack, a.sustain)
+                    .to_amplitude()
+                    .get();
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
                 for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<f64>() * g.get()).convert_to::<S>();
+                    *y = (x.convert_to::<f64>() * g).convert_to::<S>();
                 }
             }
             start = end;

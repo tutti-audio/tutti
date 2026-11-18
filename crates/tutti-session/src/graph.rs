@@ -770,7 +770,7 @@ impl<F: Float> Graph<F> {
     }
 }
 
-impl Graph {
+impl<F: Float> Graph<F> {
     /// Opens an inlet: audio a thread of your own pushes into the graph. A
     /// ring of `capacity` frames and `width` channels is read by an
     /// [`InletNode`] (unwired; declare what it feeds like any node), and the
@@ -800,7 +800,7 @@ impl Graph {
         width: ChannelLayout,
         capacity: Samples,
         producer_rate: SampleRate,
-    ) -> Result<(Key<InletNode>, TapWriter), InletError> {
+    ) -> Result<(Key<InletNode<F>>, TapWriter<F>), InletError> {
         let (ring, writer) = InletRing::pair(width, capacity, producer_rate);
         Ok((self.add_inlet(ring)?, writer))
     }
@@ -814,14 +814,14 @@ impl Graph {
     ///
     /// [`InletError::RateMismatch`] when the ring's rate is not the graph's;
     /// nothing is opened.
-    pub fn add_inlet(&mut self, ring: InletRing) -> Result<Key<InletNode>, InletError> {
+    pub fn add_inlet(&mut self, ring: InletRing<F>) -> Result<Key<InletNode<F>>, InletError> {
         let node = self.inlet_node(ring)?;
         Ok(self.add(node).0)
     }
 
     /// The node for `ring`, once its rate is the graph's: what
     /// [`add_inlet`](Self::add_inlet) adds and an input's reopening swaps in.
-    pub(crate) fn inlet_node(&self, ring: InletRing) -> Result<InletNode, InletError> {
+    pub(crate) fn inlet_node(&self, ring: InletRing<F>) -> Result<InletNode<F>, InletError> {
         let graph = self.editor.prepare().sample_rate();
         if ring.rate() != graph {
             return Err(InletError::RateMismatch {
@@ -1963,7 +1963,7 @@ impl<F: Float> Graph<F> {
     }
 }
 
-impl Graph {
+impl<F: Float> Graph<F> {
     /// Applies `decl` to the editor through `m` (doc 014 §8.2), resolving the
     /// host's keys through `keys`. A native target's knob is its node's own
     /// `Param` cell, from the node's `ParamSet`. Marks the graph edited
@@ -2004,7 +2004,7 @@ impl<F: Float> Graph<F> {
     }
 }
 
-impl Graph {
+impl<F: Float> Graph<F> {
     /// Schedules the note-envelope resyncs `m` owes, after the commit that
     /// sent their nodes (`Modulation::send_resyncs`).
     pub(crate) fn send_mod_resyncs(&mut self, m: &mut tutti_nodes::Modulation) {

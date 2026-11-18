@@ -55,10 +55,10 @@ impl Node for Bands {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for k in 0..2 {
+        for (k, thr) in self.thr.iter().enumerate() {
             match io.param(k) {
                 ParamInput::Base => {
-                    let base = self.thr[k].load().0;
+                    let base = thr.load().0;
                     io.output(k).fill(base as f32);
                 }
                 ParamInput::Frames { values: v, .. } => io.output(k).copy_from_slice(v),

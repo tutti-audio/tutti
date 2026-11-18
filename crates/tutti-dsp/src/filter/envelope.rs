@@ -190,7 +190,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     /// allocation.
     pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
         let frames = input.frames().get().min(output.frames().get());
-        let mut levels = [Amplitude::SILENT; GRID.get()];
+        let mut levels = [0.0f64; GRID.get()];
         let mut start = 0;
         while start < frames {
             if self.phase == Samples::ZERO {
@@ -202,7 +202,9 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
             let levels = &mut levels[..n];
             key_levels(&input, start..end, levels);
             for l in levels.iter() {
-                self.env = self.follower.follow(self.env, l.min(Amplitude::UNITY));
+                self.env = self
+                    .follower
+                    .follow(self.env, Amplitude(*l).min(Amplitude::UNITY));
             }
             let range = Samples(start)..Samples(end);
             self.bank.process(

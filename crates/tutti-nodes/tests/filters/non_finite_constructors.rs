@@ -73,7 +73,7 @@ fn sweep() {
         for pos in 0..4 {
             let v = |i: usize, ok: f32| if i == pos { b } else { ok };
             add(probe(&format!("compressor arg{pos}"), b, || {
-                Box::new(CompressorNode::new(
+                Box::new(CompressorNode::<f32>::new(
                     BusTopology::STEREO,
                     KeySource::Sidechain,
                     CompressorControls {
@@ -90,7 +90,7 @@ fn sweep() {
                 ))
             }));
             add(probe(&format!("gate arg{pos}"), b, || {
-                Box::new(GateNode::new(
+                Box::new(GateNode::<f32>::new(
                     BusTopology::STEREO,
                     KeySource::Sidechain,
                     GateControls {
@@ -105,7 +105,7 @@ fn sweep() {
             }));
         }
         add(probe("compressor knee", b, || {
-            Box::new(CompressorNode::new(
+            Box::new(CompressorNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 CompressorControls {
@@ -115,7 +115,7 @@ fn sweep() {
             ))
         }));
         add(probe("compressor makeup", b, || {
-            Box::new(CompressorNode::new(
+            Box::new(CompressorNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 CompressorControls {
@@ -125,7 +125,7 @@ fn sweep() {
             ))
         }));
         add(probe("gate range", b, || {
-            Box::new(GateNode::new(
+            Box::new(GateNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 GateControls {
@@ -139,14 +139,14 @@ fn sweep() {
             ))
         }));
         add(probe("limiter thr", b, || {
-            Box::new(LimiterNode::stereo(LimiterControls {
+            Box::new(LimiterNode::<f32>::stereo(LimiterControls {
                 threshold: d(b),
                 ceiling: d(-1.0),
                 ..LimiterControls::DEFAULT
             }))
         }));
         add(probe("limiter ceil", b, || {
-            Box::new(LimiterNode::stereo(LimiterControls {
+            Box::new(LimiterNode::<f32>::stereo(LimiterControls {
                 threshold: d(-6.0),
                 ceiling: d(b),
                 ..LimiterControls::DEFAULT
@@ -155,14 +155,14 @@ fn sweep() {
         // The lookahead is a `Lookahead`, which refuses a non-finite value by type
         // (`a_lookahead_keeps_the_range_checked_shape` in tutti-dsp).
         add(probe("limiter release", b, || {
-            Box::new(LimiterNode::stereo(LimiterControls {
+            Box::new(LimiterNode::<f32>::stereo(LimiterControls {
                 threshold: d(-6.0),
                 ceiling: d(-1.0),
                 release: s(b),
             }))
         }));
         add(probe("brickwall", b, || {
-            Box::new(BrickwallLimiterNode::new(d(b)))
+            Box::new(BrickwallLimiterNode::<f32>::new(d(b)))
         }));
         add(probe("eq freq", b, || {
             Box::new(EqBandNode::<f64>::new(

@@ -4,11 +4,7 @@
 use std::ops::Range;
 
 use tutti_buffers::{Float, Planes};
-use tutti_units::{Amplitude, Ballistics, Db, Seconds};
-
-/// The largest finite sample of the `f32` format the limiter's delay lines hold: a level never
-/// exceeds it.
-pub(super) const SAMPLE_MAX: f64 = f32::MAX as f64; // the f32 delay-line format's bound
+use tutti_units::{Ballistics, Db, Seconds};
 
 /// The frames a pass over a block takes at a time: the levels of a stretch become its gains
 /// in a stack array.
@@ -18,26 +14,33 @@ pub(super) const CHUNK: usize = 64;
 /// stream, so the de-zipper does not depend on the block.
 pub const GAIN_GLIDE: Seconds = Seconds(0.005);
 
-/// `x`'s magnitude as a level: a NaN reads as quiet (0) and an infinity as the largest
-/// finite level, so a detector never sees a value its dB conversion turns into an infinity.
+/// The level an infinite sample is held to: `f32::MAX` (770 dB), a deliberate f32-range limit
+/// applied at both widths, so the level's dB, and the gain over it, stay finite.
 #[inline]
-pub(super) fn level(x: f64) -> Amplitude {
+pub(super) fn held<F: Float>() -> F {
+    F::from_f32(f32::MAX)
+}
+
+/// `x`'s magnitude as a level: a NaN reads as quiet (0) and an infinity as [`held`], so a
+/// detector never sees a value its dB conversion turns into an infinity.
+#[inline]
+pub(super) fn level<F: Float>(x: F) -> F {
     let a = x.abs();
-    Amplitude(if a.is_nan() { 0.0 } else { a.min(SAMPLE_MAX) })
+    if a.is_nan() { F::ZERO } else { a.min(held()) }
 }
 
 /// The key's level at each frame of `frames`: the loudest channel of `key`, into `out`
-/// (as long as `frames`).
+/// (as long as `frames`): per-sample levels in `F`.
 #[inline]
-pub(crate) fn key_levels<S: Float>(
+pub(crate) fn key_levels<S: Float, F: Float>(
     key: &Planes<'_, S>,
     frames: Range<usize>,
-    out: &mut [Amplitude],
+    out: &mut [F],
 ) {
-    out.fill(Amplitude::SILENT);
+    out.fill(F::ZERO);
     for plane in key.iter() {
         for (m, x) in out.iter_mut().zip(&plane.samples()[frames.clone()]) {
-            *m = m.max(level(x.convert_to::<f64>()));
+            *m = m.max(level(x.convert_to::<F>()));
         }
     }
 }

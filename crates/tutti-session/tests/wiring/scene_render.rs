@@ -48,8 +48,8 @@ fn low_pass(cutoff: f64) -> SvfFilterNode<f64> {
 fn shaper(drive: f32) -> DistortionNode {
     DistortionNode::new(ShapeKind::Tanh, Drive::new(drive))
 }
-fn limiter() -> LimiterNode {
-    LimiterNode::mono(LimiterControls {
+fn limiter() -> LimiterNode<f32> {
+    LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(-12.0),
         ceiling: Db(-1.0),
         ..LimiterControls::DEFAULT

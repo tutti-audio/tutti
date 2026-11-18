@@ -3,7 +3,7 @@
 use super::*;
 use tutti_plugin_types::PluginFormat;
 
-#[cfg(all(feature = "au", target_os = "macos"))]
+#[cfg(served_au)]
 mod au;
 #[cfg(feature = "clap")]
 mod clap;
@@ -35,31 +35,30 @@ impl<F: ServerSide> Served<F> {
         )
         .map(|(served, _)| served)
     }
+}
 
-    /// [`load_first`](Self::load_first) for the plugin `load` chooses, in
-    /// 32-bit.
-    #[cfg_attr(not(all(feature = "au", target_os = "macos")), allow(dead_code))]
-    fn load_with(
-        main: MainThreadMarker,
-        path: &Path,
-        load: &Load,
-        rate: f64,
-        block: usize,
-    ) -> PluginResult<Self> {
-        Self::load(
-            main,
-            &tutti_fixtures::detached_work(),
-            path,
-            load,
-            SampleRate::of(rate),
-            block,
-            false,
-            None,
-            &mut || {},
-            Hand::local(),
-            crate::ties::ties().expect("bells").0,
-        )
-        .map(|(served, _)| served)
+/// A plugin loaded on a [`Hand::local`] renders in place: the Processor is
+/// this value's, as a test that calls the plugin needs it (production renders
+/// through [`crate::render::End`], which holds the Processor on its thread).
+impl<F: ServerSide> Render for Served<F> {
+    fn features(&self) -> Features {
+        self.wiring.features
+    }
+
+    fn render<'a>(
+        &mut self,
+        buffer: PluginAudio<'a>,
+        ctx: &'a ProcessContext<'a>,
+        out: &'a mut ProcessOutput,
+    ) -> PluginResult<()> {
+        // A rate change the plugin refused left it deactivated: silence.
+        let Some(processor) = self.lifecycle.processor() else {
+            out.clear();
+            let mut buffer = buffer;
+            buffer.clear_outputs();
+            return Ok(());
+        };
+        buffer.process(processor, ctx, out)
     }
 }
 
@@ -110,7 +109,7 @@ fn load_missing_path_errors() {
     assert_refused(
         load_any(Path::new("/nonexistent/plugin.vst3"), PluginFormat::Vst3),
         LoadStage::Scanning,
-        "not found",
+        "does not exist",
     );
 }
 
@@ -127,7 +126,7 @@ fn a_vst2_load_is_refused() {
         std::fs::write(&tmp, b"fake").unwrap();
         let result = load_any(&tmp, PluginFormat::Vst2);
         let _ = std::fs::remove_file(&tmp);
-        assert_refused(result, LoadStage::Opening, "Unsupported plugin format");
+        assert_refused(result, LoadStage::Opening, "unsupported plugin format");
     }
 }
 
@@ -145,4 +144,30 @@ fn a_load_opens_the_file_as_the_format_it_names() {
     );
     let plugin = load_any(path, PluginFormat::Clap).expect("a CLAP plugin under another name");
     assert!(matches!(plugin, AnyServed::Clap(_)));
+}
+
+/// A plugin reads as lost once a call into it panicked, and not before: what
+/// the server loop ends on.
+fn assert_poison_reads_as_lost(mut plugin: AnyServed) {
+    assert!(!plugin.plugin().is_lost());
+    plugin.poison();
+    assert!(plugin.plugin().is_lost());
+}
+
+/// **A poisoned CLAP plugin reads as lost, and a fresh one does not.**
+#[cfg(feature = "clap")]
+#[test]
+fn a_poisoned_clap_plugin_reads_as_lost_and_a_fresh_one_does_not() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let path = Path::new(crate::test_utils::clap_probe_path());
+    assert_poison_reads_as_lost(load_any(path, PluginFormat::Clap).expect("load"));
+}
+
+/// **A poisoned VST3 plugin reads as lost, and a fresh one does not.**
+#[cfg(feature = "vst3")]
+#[test]
+fn a_poisoned_vst3_plugin_reads_as_lost_and_a_fresh_one_does_not() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let path = Path::new(crate::test_utils::vst3_probe_path());
+    assert_poison_reads_as_lost(load_any(path, PluginFormat::Vst3).expect("load"));
 }

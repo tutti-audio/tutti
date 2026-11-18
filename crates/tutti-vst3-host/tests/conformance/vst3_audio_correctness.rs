@@ -287,14 +287,13 @@ fn every_bus_and_channel_carries_its_own_audio() {
 
     let mut mismatches = Vec::new();
     for (bus, &channels) in out_layout.iter().enumerate() {
-        for ch in 0..channels {
+        for (ch, plane) in rendered.out[bus][..channels].iter().enumerate() {
             // The probe pairs input and output slots by index, and substitutes
             // silence where the host supplied no matching input.
             let has_input = bus < in_layout.len() && ch < in_layout[bus];
-            for i in 0..FRAMES {
+            for (i, &actual) in plane[..FRAMES].iter().enumerate() {
                 let src = if has_input { input_at(bus, ch, i) } else { 0.0 };
                 let expected = src + probe_tag(bus, ch);
-                let actual = rendered.out[bus][ch][i];
                 if actual != expected {
                     mismatches.push(format!(
                         "bus {bus} ch {ch} sample {i}: expected {expected}, got {actual}"

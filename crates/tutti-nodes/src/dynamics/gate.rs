@@ -2,7 +2,9 @@
 //! its own signal.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, GateBank, GateControls, GateLanes, KeyFilter, KeySource};
+use tutti_dsp::{
+    COEFF_INTERVAL, GateBank, GateControls, GateLanes, KeyFilter, KeySource, Lanes, Lerp,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Db, Hz, Q, SampleRate, Seconds, Tail};
@@ -64,9 +66,13 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, a fork of it starts from
 /// the values last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares
 /// it at the device rate before its first block.
-pub type GateNode = KernelNode<GateKernel>;
+///
+/// `F` is the state precision of the detector, the gain and the key filter, `f64` by default:
+/// an `f64` graph runs them in `f64`, and a view of the other sample format is converted at
+/// the edges.
+pub type GateNode<F = f64> = KernelNode<GateKernel<F>>;
 
-impl GateNode {
+impl<F: Float + Lanes + Lerp> GateNode<F> {
     /// A gate on the bus `input`, its detector on `key`, running at `controls`.
     ///
     /// The main bus keeps its speaker placement; a [`KeySource::Sidechain`] is a second bus
@@ -187,17 +193,17 @@ control_set! {
 /// parks: its follower must keep tracking the key, which the main input's silence says
 /// nothing of.
 #[derive(Clone, Debug)]
-pub struct GateKernel {
+pub struct GateKernel<F: Float + Lanes> {
     input: BusTopology,
     key: KeySource,
     filter: KeyFilter,
     /// `None` until [`prepare`](Kernel::prepare).
-    bank: Option<GateBank>,
+    bank: Option<GateBank<F>>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl GateKernel {
+impl<F: Float + Lanes + Lerp> GateKernel<F> {
     /// A gate on `input` whose detector reads `key`.
     fn new(input: BusTopology, key: KeySource, filter: KeyFilter) -> Self {
         Self {
@@ -216,7 +222,7 @@ impl GateKernel {
     }
 }
 
-impl Kernel for GateKernel {
+impl<F: Float + Lanes + Lerp> Kernel for GateKernel<F> {
     type Set = GateSet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -293,10 +299,14 @@ impl GateSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::drive_kernel;
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
+
+    // The nodes under test are `f32` (the session's audio format), so their tolerances are
+    // `f32`'s; each node has an `f64` kernel test below.
 
     /// The controls of a gate the tests name four of: the closed floor is -80 dB (the
     /// node's range before it was a control), not `GateControls::DEFAULT`'s 0 dB.
@@ -318,8 +328,8 @@ mod tests {
         }
     }
 
-    fn gate(threshold: f64, attack: f64, hold: f64, release: f64) -> GateNode {
-        GateNode::new(
+    fn gate(threshold: f64, attack: f64, hold: f64, release: f64) -> GateNode<f32> {
+        GateNode::<f32>::new(
             BusTopology::MONO,
             KeySource::Sidechain,
             four(threshold, attack, hold, release),
@@ -330,7 +340,7 @@ mod tests {
     /// cell with it.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(GateNode::new(
+        assert_param_fork(GateNode::<f32>::new(
             BusTopology::STEREO,
             KeySource::Sidechain,
             with_range(four(-30.0, 0.001, 0.01, 0.1), -20.0),
@@ -376,7 +386,7 @@ mod tests {
     #[test]
     fn a_quiet_side_chain_closes_the_gate() {
         let mut node = prepared_at(
-            GateNode::new(
+            GateNode::<f32>::new(
                 BusTopology::MONO,
                 KeySource::Sidechain,
                 with_range(four(-20.0, 0.001, 0.001, 0.001), -60.0),
@@ -399,7 +409,7 @@ mod tests {
     #[test]
     fn a_range_over_zero_reads_as_zero() {
         let mut node = prepared_at(
-            GateNode::new(
+            GateNode::<f32>::new(
                 BusTopology::MONO,
                 KeySource::Sidechain,
                 with_range(four(-20.0, 0.001, 0.01, 0.1), 10.0),
@@ -423,7 +433,7 @@ mod tests {
     #[test]
     fn the_range_attenuates_rather_than_mutes() {
         let mut node = prepared_at(
-            GateNode::new(
+            GateNode::<f32>::new(
                 BusTopology::MONO,
                 KeySource::Sidechain,
                 with_range(four(-20.0, 0.001, 0.001, 0.001), -12.0),
@@ -457,7 +467,7 @@ mod tests {
     #[test]
     fn a_stereo_gate_is_linked() {
         let mut node = prepared_at(
-            GateNode::new(
+            GateNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 four(-20.0, 0.0001, 0.01, 0.1),
@@ -485,21 +495,29 @@ mod tests {
             .expect("at most one bus wide");
         for (node, inputs, outputs) in [
             (
-                GateNode::new(BusTopology::MONO, KeySource::Sidechain, c),
+                GateNode::<f32>::new(BusTopology::MONO, KeySource::Sidechain, c),
                 2,
                 1,
             ),
             (
-                GateNode::new(BusTopology::STEREO, KeySource::Sidechain, c),
+                GateNode::<f32>::new(BusTopology::STEREO, KeySource::Sidechain, c),
                 4,
                 2,
             ),
-            (GateNode::new(wide, KeySource::Sidechain, c), 8, 4),
-            (GateNode::new(BusTopology::MONO, KeySource::Own, c), 1, 1),
-            (GateNode::new(BusTopology::STEREO, KeySource::Own, c), 2, 2),
-            (GateNode::new(wide, KeySource::Own, c), 4, 4),
-            (GateNode::mono(c), 1, 1),
-            (GateNode::stereo(c), 2, 2),
+            (GateNode::<f32>::new(wide, KeySource::Sidechain, c), 8, 4),
+            (
+                GateNode::<f32>::new(BusTopology::MONO, KeySource::Own, c),
+                1,
+                1,
+            ),
+            (
+                GateNode::<f32>::new(BusTopology::STEREO, KeySource::Own, c),
+                2,
+                2,
+            ),
+            (GateNode::<f32>::new(wide, KeySource::Own, c), 4, 4),
+            (GateNode::<f32>::mono(c), 1, 1),
+            (GateNode::<f32>::stereo(c), 2, 2),
         ] {
             let shape = node.shape();
             assert_eq!(
@@ -521,8 +539,8 @@ mod tests {
             ..GateControls::DEFAULT
         };
         for node in [
-            GateNode::new(BusTopology::STEREO, KeySource::Sidechain, c),
-            GateNode::new(BusTopology::MONO, KeySource::Own, c),
+            GateNode::<f32>::new(BusTopology::STEREO, KeySource::Sidechain, c),
+            GateNode::<f32>::new(BusTopology::MONO, KeySource::Own, c),
         ] {
             let bases: Vec<_> = (0..5).map(|k| node.param_base(k)).collect();
             assert_eq!(
@@ -537,7 +555,7 @@ mod tests {
     /// one under the threshold is closed to the range.
     #[test]
     fn the_mono_shorthand_gates_on_its_own_signal() {
-        let mk = || GateNode::mono(with_range(four(-20.0, 0.0001, 0.001, 0.001), -40.0));
+        let mk = || GateNode::<f32>::mono(with_range(four(-20.0, 0.0001, 0.001, 0.001), -40.0));
         let mut out = [0.0f32];
         let mut node = prepared_at(mk(), RATE_44K);
         for _ in 0..500 {
@@ -556,7 +574,7 @@ mod tests {
     #[test]
     fn gate_declares_its_params() {
         let m = prepared_at(
-            GateNode::new(
+            GateNode::<f32>::new(
                 BusTopology::MONO,
                 KeySource::Sidechain,
                 with_range(four(-20.0, 0.0001, 0.01, 0.1), -30.0),
@@ -663,5 +681,23 @@ mod tests {
             out[0], 1.0,
             "a -6 dB key is still over the -20 dB threshold"
         );
+    }
+
+    /// An `f64` kernel keeps its gain in `f64`: a key over the threshold with an instant attack
+    /// opens the gate to a gain of 1 to 2^-50 whatever the range, so a signal of more than 24
+    /// bits comes out as it went in.
+    #[test]
+    fn an_f64_kernel_with_an_open_gate_passes_a_wide_signal_unchanged() {
+        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+        let x = wide_signal(128);
+        let mut k = GateKernel::<f64>::new(BusTopology::MONO, KeySource::Own, KeyFilter::Off);
+        k.prepare(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(128)));
+        let controls = GateControls {
+            threshold: Db::new(-40.0),
+            range: Db::new(-80.0),
+            ..GateControls::DEFAULT
+        };
+        let y = drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x));
+        assert_close_f64(&y[0], &x, 2.0f64.powi(-50));
     }
 }

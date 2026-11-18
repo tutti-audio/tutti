@@ -54,6 +54,7 @@
 //!
 //! There is no gain: a level belongs in a node downstream of this one.
 
+use tutti_buffers::Float;
 use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples, Tail};
 
@@ -84,17 +85,17 @@ use crate::tap::{TapReader, TapWriter};
 /// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
 #[derive(Debug)]
-pub struct InletRing {
-    reader: TapReader,
+pub struct InletRing<F: Float = f32> {
+    reader: TapReader<F>,
     rate: SampleRate,
 }
 
-impl InletRing {
+impl<F: Float> InletRing<F> {
     /// A ring of `width` channels and `capacity` frames, its producer running
     /// at `rate`, and the writer the producer fills it with. Allocates; control
     /// side.
     #[must_use = "the writer is the only way to fill the ring"]
-    pub fn pair(width: ChannelLayout, capacity: Samples, rate: SampleRate) -> (Self, TapWriter) {
+    pub fn pair(width: ChannelLayout, capacity: Samples, rate: SampleRate) -> (Self, TapWriter<F>) {
         let (reader, writer) = TapReader::pair(usize::from(width.count()), capacity);
         (Self { reader, rate }, writer)
     }
@@ -114,7 +115,7 @@ impl InletRing {
     /// The reader, for an [`InletNode`]: the rate was checked by whoever
     /// took the ring in.
     #[must_use]
-    pub fn into_reader(self) -> TapReader {
+    pub fn into_reader(self) -> TapReader<F> {
         self.reader
     }
 }
@@ -152,23 +153,23 @@ impl InletRing {
 /// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
 #[derive(Debug)]
-pub struct InletNode {
-    ring: TapReader,
+pub struct InletNode<F: Float = f32> {
+    ring: TapReader<F>,
 }
 
-impl InletNode {
+impl<F: Float> InletNode<F> {
     /// An inlet over `ring`: the reader of an [`InletRing`]
     /// ([`into_reader`](InletRing::into_reader)) whose rate the caller has
     /// checked against the graph's. The node is as wide as the ring.
     #[must_use]
-    pub fn new(ring: TapReader) -> Self {
+    pub fn new(ring: TapReader<F>) -> Self {
         Self { ring }
     }
 
     /// An inlet of `width` channels over a new ring of `capacity` frames, and
     /// the writer the producer fills it with. Allocates; control side.
     #[must_use = "the writer is the only way to fill the ring"]
-    pub fn pair(width: ChannelLayout, capacity: Samples) -> (Self, TapWriter) {
+    pub fn pair(width: ChannelLayout, capacity: Samples) -> (Self, TapWriter<F>) {
         let (ring, writer) = TapReader::pair(usize::from(width.count()), capacity);
         (Self::new(ring), writer)
     }
@@ -180,7 +181,7 @@ impl InletNode {
     }
 }
 
-impl Node for InletNode {
+impl<F: Float> Node<F> for InletNode<F> {
     /// As wide as the ring. A live source: [`Tail::Unbounded`], so the
     /// executor never skips it as silent.
     fn shape(&self) -> Shape {
@@ -195,14 +196,14 @@ impl Node for InletNode {
 
     fn prepare(&mut self, _: &Prepare) {}
 
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let (_, mut outputs) = io.split();
         // Width check BEFORE any pop: popping consumes from the ring, so
         // popping and then declining to write would throw frames away. A
         // block this node cannot fill is silence, written, not left as the
         // arena held it.
         if outputs.len() != usize::from(self.ring.layout().count()) || outputs.is_empty() {
-            outputs.iter_mut().for_each(|plane| plane.fill(0.0));
+            outputs.iter_mut().for_each(|plane| plane.fill(F::ZERO));
             return Status::Modified;
         }
         // The frames the ring holds, then silence for the rest.
@@ -211,7 +212,7 @@ impl Node for InletNode {
             .and_then(|planes| self.ring.pop_planes(planes))
             .map_or(0, Samples::get);
         for plane in outputs.iter_mut() {
-            plane[popped..].fill(0.0);
+            plane[popped..].fill(F::ZERO);
         }
         Status::Modified
     }
@@ -221,10 +222,10 @@ impl Node for InletNode {
 
 /// Inserted **unforkable**: no fork source, so a fork of a graph that needs
 /// the inlet fails naming it (see the module docs). No controls.
-impl IntoNode for InletNode {
+impl<F: Float> IntoNode<F> for InletNode<F> {
     type Controls = ();
 
-    fn into_parts(self) -> NodeParts<()> {
+    fn into_parts(self) -> NodeParts<(), F> {
         NodeParts {
             node: Box::new(self),
             controls: (),

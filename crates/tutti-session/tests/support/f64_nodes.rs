@@ -4,7 +4,7 @@
 use tutti_buffers::Float;
 use tutti_graph::{Cx, Io, Node, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_types::{ChannelLayout, Param};
-use tutti_units::Amplitude;
+use tutti_units::{Amplitude, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.
 pub const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
@@ -32,17 +32,34 @@ pub struct Gain(pub Param<Amplitude>);
 impl<F: Float> Node<F> for Gain {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
+            .with_param_addrs(self.declared_ports().as_slice())
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
-        let gain = F::from_f64(self.0.load().get());
+        let size = io.frames();
+        let driven = self
+            .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            .frames();
+        let cell = self.0.load().get();
         let (ins, mut outs) = io.split();
-        for (o, i) in outs.get(0).iter_mut().zip(ins.get(0)) {
-            *o = *i * gain;
+        for (n, (o, i)) in outs
+            .get(0)
+            .iter_mut()
+            .zip(ins.get(0))
+            .enumerate()
+            .take(size)
+        {
+            // A lane's frames are `f32` words; the product is in `F`.
+            let gain = driven.map_or(cell, |lane| f64::from(lane[n]));
+            *o = *i * F::from_f64(gain);
         }
         Status::Modified
     }
     fn reset(&mut self) {}
+
+    fn param_base(&self, k: usize) -> Option<f32> {
+        self.declared_base(k)
+    }
 }
 
 impl<F: Float> ParamNode<F> for Gain {

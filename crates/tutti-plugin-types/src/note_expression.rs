@@ -17,7 +17,6 @@
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use tutti_midi_protocol::unit_f32_to_value;
 use tutti_ump::{CCNumber, ControlValue, NoteNumber, RegisteredPerNoteController, Voice2};
 
 use tutti_units::Normalized;
@@ -189,11 +188,7 @@ pub fn per_note_message(
     note: NoteNumber,
     unit: Normalized,
 ) -> Option<Voice2> {
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "a controller value is 32 bits"
-    )]
-    let value = unit_f32_to_value(unit.get() as f32);
+    let value = ControlValue::from_normalized(unit);
     if expression == NoteExpressionType::Pressure {
         return Some(Voice2::PolyPressure { note, value });
     }

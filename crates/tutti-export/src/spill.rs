@@ -4,7 +4,7 @@
 //! the graph rendered for it and is read back twice (measured, then written)
 //! without rendering again. The audio is held in memory while the spills
 //! together stay inside a budget, and past it a spill moves to a temporary
-//! file of interleaved little-endian `f32` beside its target, which is
+//! file of interleaved samples in the render's float format beside its target, which is
 //! removed when the spill is dropped.
 
 use std::fs::File;

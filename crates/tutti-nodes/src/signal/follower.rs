@@ -1,6 +1,7 @@
 //! [`EnvelopeFollowerNode`]: an audio input's level, sent to control lanes
 //! on the play-clock grid.
 
+use tutti_buffers::Float;
 use tutti_graph::{Cost, Io};
 use tutti_modulation::{LevelFollower, SignalKind, SignalSource, SourceId};
 use tutti_types::ChannelLayout;
@@ -57,13 +58,14 @@ impl SourcePorts for LevelFollower {
     const COST: Cost = Cost::Moderate;
     const MIDI_IN: bool = false;
 
-    fn hear(&mut self, io: &Io<'_>, from: usize, to: usize) {
+    fn hear<F: Float>(&mut self, io: &Io<'_, F>, from: usize, to: usize) {
         let channels = io.input_count();
         for i in from..to {
             let mut level = 0.0f32;
             for c in 0..channels {
                 // `max` ignores a NaN operand: a NaN sample reads 0.
-                level = level.max(io.input(c)[i].abs());
+                // The level is an `f32` lane word: a wide sample narrows once here.
+                level = level.max(io.input(c)[i].abs().convert_to::<f32>());
             }
             self.follow(level);
         }

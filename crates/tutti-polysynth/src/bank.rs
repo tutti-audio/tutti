@@ -499,11 +499,11 @@ impl VoiceBank {
         let (g, k) = split(lane);
         // The lane's phase is `f32` state: it narrows once per note start.
         self.phase[g].as_mut_array()[k] = phase.get() as f32;
-        for i in 0..4 {
-            self.z[g][i].as_mut_array()[k] = 0.0;
+        for z in &mut self.z[g][..4] {
+            z.as_mut_array()[k] = 0.0;
         }
-        for i in 0..3 {
-            self.pink[g][i].as_mut_array()[k] = 0.0;
+        for pink in &mut self.pink[g][..3] {
+            pink.as_mut_array()[k] = 0.0;
         }
     }
 

@@ -10,13 +10,14 @@
 //! A test finds a repo file through [`repo_root`] and [`asset`], never through
 //! a relative `..` path, so moving a crate never changes what a test reads.
 //!
-//! A test, bench or example binary lives at `<profile>/deps/<exe>` (examples at
-//! `<profile>/examples/<exe>`), under `<target>` or `<target>/<triple>`, and
-//! cargo drops the dev-dependency cdylibs and the workspace's binaries into the
-//! same profile directory. So the running executable names the profile
-//! directory ([`profile_dir`]) and nothing else is configured: no build script,
-//! no environment variable, and the answer is right under `CARGO_TARGET_DIR` and
-//! `--target`, because a test binary is built for the target it runs on.
+//! Cargo builds a test or bench binary, and a dev-dependency's cdylib, in its
+//! package's build directory, `<profile>/build/<package>/<hash>/out/`. An
+//! example lands in `<profile>/examples/`, and a workspace binary in `<profile>/`
+//! itself, under `<target>` or `<target>/<triple>`. So the running executable
+//! names the profile directory ([`profile_dir`]) and nothing else is configured:
+//! no build script, no environment variable, and the answer is right under
+//! `CARGO_TARGET_DIR` and `--target`, because a test binary is built for the
+//! target it runs on.
 //!
 //! This crate is a dev-dependency only; it is never linked into a shipped
 //! binary.
@@ -28,12 +29,12 @@
 //! failure rather than a property of the machine. A skip would leave the suite
 //! one typo away from reporting success having executed nothing.
 //!
-//! **The newest candidate wins, not the first.** Cargo writes a cdylib to
-//! `<profile>/deps/<name>` and hardlinks it up to `<profile>/<name>` without
-//! always refreshing the uplifted copy, so the more obvious path can hold an
-//! *older build of the same plugin*. A stale probe makes a suite run green
-//! against behaviour the tests no longer set, and can silently reverse a
-//! test result.
+//! **The newest candidate wins, not the first.** A package has one build
+//! directory per feature set and profile settings (`<hash>`), so the same
+//! plugin can sit in several of them, and a binary's uplifted copy in
+//! `<profile>/` can be older than the one beside it. A stale probe makes a
+//! suite run green against behaviour the tests no longer set, and can silently
+//! reverse a test result.
 
 // Test-only `unsafe` the suites need lives here, each behind a safe call with
 // its argument at the site (`ScopedEnv`, `StandInWindow`, the counting
@@ -154,8 +155,9 @@ pub fn asset(rel: &str) -> PathBuf {
     path
 }
 
-/// The profile directory a binary at `exe` belongs to: its parent, or its
-/// grandparent when the parent is `deps` or `examples`.
+/// The profile directory a binary at `exe` belongs to: the directory above
+/// `build/<package>/<hash>/out/` for a test or bench, above `examples/` for an
+/// example, and its own directory for a workspace binary.
 ///
 /// Pure over the path, so the layouts are testable without cargo.
 ///
@@ -164,14 +166,16 @@ pub fn asset(rel: &str) -> PathBuf {
 /// Panics when `exe` has no parent directory.
 pub fn profile_dir_of(exe: &Path) -> PathBuf {
     let dir = exe.parent().expect("an executable path has a parent");
-    let in_artifact_dir = dir
-        .file_name()
-        .is_some_and(|n| n == "deps" || n == "examples");
-    if in_artifact_dir {
-        dir.parent().unwrap_or(dir).to_path_buf()
-    } else {
-        dir.to_path_buf()
+    let named =
+        |p: Option<&Path>, name: &str| p.and_then(Path::file_name).is_some_and(|n| n == name);
+    let mut up = dir.ancestors();
+    if named(Some(dir), "out") && named(up.nth(3), "build") {
+        return up.next().unwrap_or(dir).to_path_buf();
     }
+    if named(Some(dir), "examples") {
+        return dir.parent().unwrap_or(dir).to_path_buf();
+    }
+    dir.to_path_buf()
 }
 
 /// The profile directory of the running test, bench or example binary.
@@ -191,10 +195,16 @@ pub fn lib_filename(lib_stem: &str) -> String {
     format!("{}{lib_stem}.{}", names::LIB_PREFIX, names::LIB_EXT)
 }
 
-/// Where cargo may have put the artifact `name` under `profile`:
-/// `<profile>/deps/<name>` and `<profile>/<name>`.
-pub fn candidates_in(profile: &Path, name: &str) -> [PathBuf; 2] {
-    [profile.join("deps").join(name), profile.join(name)]
+/// Where cargo may have put `package`'s artifact `name` under `profile`:
+/// `<profile>/<name>`, then `<profile>/build/<package>/<hash>/out/<name>` for
+/// every build directory of the package.
+pub fn candidates_in(profile: &Path, package: &str, name: &str) -> Vec<PathBuf> {
+    let builds = std::fs::read_dir(profile.join("build").join(package))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|hash| hash.path().join("out").join(name));
+    std::iter::once(profile.join(name)).chain(builds).collect()
 }
 
 /// The newest existing regular file among `candidates`, or `None`.
@@ -223,18 +233,18 @@ fn searched(candidates: &[PathBuf]) -> String {
 /// The reference plugin cdylib for `lib_stem` (a crate name with `_`), the
 /// newest copy under the running binary's profile directory.
 ///
-/// `what` names the plugin crate for the panic message.
+/// `package` is the plugin's package, whose build directory holds the cdylib.
 ///
 /// # Panics
 ///
 /// If it does not exist, naming every path tried. The plugin is a
 /// dev-dependency built by the same `cargo test`, so this is a build failure,
 /// not a missing install.
-pub fn cdylib(lib_stem: &str, what: &str) -> PathBuf {
-    let tried = candidates_in(&profile_dir(), &lib_filename(lib_stem));
+pub fn cdylib(lib_stem: &str, package: &str) -> PathBuf {
+    let tried = candidates_in(&profile_dir(), package, &lib_filename(lib_stem));
     newest_existing(&tried).unwrap_or_else(|| {
         panic!(
-            "reference plugin `{what}` not found.\nSearched:{}\n\
+            "reference plugin `{package}` not found.\nSearched:{}\n\
              It is a dev-dependency built by this same `cargo test`, so this is \
              a build failure, not a missing install.",
             searched(&tried)
@@ -267,7 +277,7 @@ pub fn plugin_probe() -> PathBuf {
 /// The newest `bin` under the profile directory; `package` names what builds it.
 fn workspace_binary(bin: &str, package: &str) -> PathBuf {
     let name = format!("{bin}{}", std::env::consts::EXE_SUFFIX);
-    let tried = candidates_in(&profile_dir(), &name);
+    let tried = candidates_in(&profile_dir(), package, &name);
     newest_existing(&tried).unwrap_or_else(|| {
         panic!(
             "`{bin}` not found.\nSearched:{}\n\
@@ -370,7 +380,7 @@ mod tests {
     use super::*;
 
     /// The rule the module docs call load-bearing: newest wins, so a stale
-    /// uplifted copy cannot shadow a fresh one in `deps/`.
+    /// copy in another build directory cannot shadow a fresh one.
     #[test]
     fn newest_wins_over_first() {
         let dir = std::env::temp_dir().join(format!("tfr-newest-{}", std::process::id()));
@@ -412,16 +422,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A test or bench binary is in `deps/`, an example in `examples/`, and a
-    /// plain binary beside its profile; a target triple only adds a level above.
+    /// A test or bench binary is in its package's `build/<package>/<hash>/out/`,
+    /// an example in `examples/`, and a plain binary beside its profile; a
+    /// target triple only adds a level above. An `out/` that is not under
+    /// `build/` is a plain directory.
     #[test]
     fn the_profile_dir_is_derived_from_the_executable_path() {
         let p = |s: &str| profile_dir_of(Path::new(s));
-        assert_eq!(p("/t/debug/deps/a-1f"), Path::new("/t/debug"));
+        assert_eq!(
+            p("/t/debug/build/tutti/9a6f/out/a-1f"),
+            Path::new("/t/debug")
+        );
         assert_eq!(p("/t/debug/examples/ex"), Path::new("/t/debug"));
         assert_eq!(p("/t/release/plugin-server"), Path::new("/t/release"));
+        assert_eq!(p("/opt/app/x/y/out/tool"), Path::new("/opt/app/x/y/out"));
         assert_eq!(
-            p("/t/x86_64-pc-windows-msvc/debug/deps/a-1f.exe"),
+            p("/t/x86_64-pc-windows-msvc/debug/build/tutti-rt/1f/out/a-1f.exe"),
             Path::new("/t/x86_64-pc-windows-msvc/debug")
         );
         assert_eq!(
@@ -486,15 +502,26 @@ mod tests {
         asset("soundfonts/no_such_font.sf2");
     }
 
+    /// The uplifted copy, then one candidate per build directory of the package
+    /// and none from another package's.
     #[test]
-    fn candidates_are_deps_then_the_uplifted_copy() {
+    fn candidates_are_the_uplifted_copy_then_each_build_directory() {
+        let profile = std::env::temp_dir().join(format!("tfx-cand-{}", std::process::id()));
+        for dir in ["build/pkg/a1/out", "build/pkg/b2/out", "build/other/c3/out"] {
+            std::fs::create_dir_all(profile.join(dir)).unwrap();
+        }
+        let mut found = candidates_in(&profile, "pkg", "x");
+        found[1..].sort();
         assert_eq!(
-            candidates_in(Path::new("/t/debug"), "x"),
+            found,
             [
-                PathBuf::from("/t/debug/deps/x"),
-                PathBuf::from("/t/debug/x")
+                profile.join("x"),
+                profile.join("build/pkg/a1/out/x"),
+                profile.join("build/pkg/b2/out/x"),
             ]
         );
+        assert_eq!(candidates_in(&profile, "none", "x"), [profile.join("x")]);
+        let _ = std::fs::remove_dir_all(&profile);
     }
 
     #[test]

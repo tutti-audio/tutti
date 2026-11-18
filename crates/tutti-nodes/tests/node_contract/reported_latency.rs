@@ -271,7 +271,7 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     use tutti_units::{Db, Samples, Seconds};
 
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
-    let (lim, _) = g.add_with_controls(LimiterNode::mono(LimiterControls {
+    let (lim, _) = g.add_with_controls(LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(-1.0),
         ceiling: Db(-0.3),
         ..LimiterControls::DEFAULT

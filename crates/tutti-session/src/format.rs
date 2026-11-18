@@ -1,4 +1,4 @@
-//! [`Sealed`]: the steps of an update that only an `f32` session has.
+//! [`Sealed`]: the steps of an update that depend on the session's float format.
 //!
 //! A private module with a public trait, so [`SessionFloat`](crate::SessionFloat)
 //! names it and no other crate can implement it.
@@ -6,34 +6,34 @@
 #[cfg(feature = "device")]
 use crate::DeviceClock;
 use crate::{AppKey, Clock, PhaseCx, Session, SessionEvent};
-use tutti_buffers::Float;
 
-/// A point in a phase where an `f32` session has work an `f64` one does not.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug)]
-pub enum Step {
-    /// What the session's jobs and the pool landed, and the removals' leftovers.
-    Landings,
-    /// Modulation applied.
-    Modulation,
-    /// The declarations re-applied after the commit.
-    Reapply,
-    /// The plugins served.
-    Plugins,
-}
-
-/// The steps of an update that depend on the session's float format being
-/// `f32`: the phases that serve jobs, the pool, modulation and plugins.
-pub trait Sealed: Float {
-    /// The `f32`-only part of `step` of a phase: all of it on an `f32` session,
-    /// none on an `f64` one.
+/// The steps of an update that depend on the session's float format: the
+/// ones that serve plugins (`f32` at their FFI) and land a sampler stream.
+pub trait Sealed: tutti_rt::RingFloat {
+    /// Serves the hosted plugins in `Phase::Plugins`: only an `f32` session
+    /// hosts plugins, so an `f64` one has nobody to serve.
     #[doc(hidden)]
-    fn host<K: AppKey, C: Clock<Float = Self>>(
+    fn serve_plugins<K: AppKey, C: Clock<Float = Self>>(
         session: &mut Session<K, C>,
-        step: Step,
         cx: PhaseCx<'_>,
         out: &mut Vec<SessionEvent>,
     );
+
+    /// Lands what a hosted plugin's job ended with: only an `f32` session
+    /// hosts plugins, so an `f64` one submits no plugin job.
+    #[doc(hidden)]
+    #[cfg(feature = "plugin")]
+    fn land_plugin<K: AppKey, C: Clock<Float = Self>>(
+        session: &mut Session<K, C>,
+        landing: crate::jobs::PluginLanding<'_>,
+        out: &mut Vec<SessionEvent>,
+    );
+
+    /// Swaps the pooled plugins into their nodes: only an `f32` session
+    /// hosts plugins.
+    #[doc(hidden)]
+    #[cfg(feature = "plugin")]
+    fn swap_pooled_plugins<K: AppKey, C: Clock<Float = Self>>(session: &mut Session<K, C>);
 
     /// Announces the render mode to the hosted plugins: only an `f32` session
     /// hosts plugins, so an `f64` one has nobody to tell.
@@ -50,13 +50,29 @@ pub trait Sealed: Float {
 }
 
 impl Sealed for f32 {
-    fn host<K: AppKey, C: Clock<Float = f32>>(
+    fn serve_plugins<K: AppKey, C: Clock<Float = f32>>(
         session: &mut Session<K, C>,
-        step: Step,
         cx: PhaseCx<'_>,
         out: &mut Vec<SessionEvent>,
     ) {
-        session.host_step(step, cx, out);
+        #[cfg(feature = "plugin")]
+        session.serve_plugins(cx, out);
+        #[cfg(not(feature = "plugin"))]
+        let _ = (session, cx, out);
+    }
+
+    #[cfg(feature = "plugin")]
+    fn land_plugin<K: AppKey, C: Clock<Float = f32>>(
+        session: &mut Session<K, C>,
+        landing: crate::jobs::PluginLanding<'_>,
+        out: &mut Vec<SessionEvent>,
+    ) {
+        session.land_plugin_job(landing, out);
+    }
+
+    #[cfg(feature = "plugin")]
+    fn swap_pooled_plugins<K: AppKey, C: Clock<Float = f32>>(session: &mut Session<K, C>) {
+        session.swap_pooled_plugins();
     }
 
     fn announce_render_mode<K: AppKey, C: Clock<Float = f32>>(session: &mut Session<K, C>) {
@@ -76,13 +92,23 @@ impl Sealed for f32 {
 }
 
 impl Sealed for f64 {
-    fn host<K: AppKey, C: Clock<Float = f64>>(
+    fn serve_plugins<K: AppKey, C: Clock<Float = f64>>(
         _: &mut Session<K, C>,
-        _: Step,
         _: PhaseCx<'_>,
         _: &mut Vec<SessionEvent>,
     ) {
     }
+
+    #[cfg(feature = "plugin")]
+    fn land_plugin<K: AppKey, C: Clock<Float = f64>>(
+        _: &mut Session<K, C>,
+        _: crate::jobs::PluginLanding<'_>,
+        _: &mut Vec<SessionEvent>,
+    ) {
+    }
+
+    #[cfg(feature = "plugin")]
+    fn swap_pooled_plugins<K: AppKey, C: Clock<Float = f64>>(_: &mut Session<K, C>) {}
 
     fn announce_render_mode<K: AppKey, C: Clock<Float = f64>>(_: &mut Session<K, C>) {}
 

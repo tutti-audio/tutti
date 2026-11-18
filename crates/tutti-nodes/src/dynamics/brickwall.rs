@@ -36,9 +36,11 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// in the cell keeps the last ceiling the node clamped at, a NaN frame on the ceiling
 /// port clamps at the cell's ceiling, and a NaN given to [`new`](Self::new) starts the
 /// node at 0 dB. `+-inf` dB are ceilings: `+inf` passes everything, `-inf` mutes.
-pub type BrickwallLimiterNode = KernelNode<BrickwallKernel>;
+///
+/// `F` is the precision the ceiling is held and the clamp runs in, `f64` by default.
+pub type BrickwallLimiterNode<F = f64> = KernelNode<BrickwallKernel<F>>;
 
-impl BrickwallLimiterNode {
+impl<F: Float> BrickwallLimiterNode<F> {
     /// Builds a stereo brickwall limiter clamping at `ceiling_db`.
     ///
     /// **This is a hard clipper, not [`LimiterNode`](super::LimiterNode).** It has no
@@ -93,12 +95,12 @@ control_set! {
 /// The hard clipper as a [`Kernel`]: a [`BrickwallBank`], memoryless, so no latency and no
 /// tail. It holds no ring-out and never parks: its tail is none.
 #[derive(Clone, Debug)]
-pub struct BrickwallKernel {
+pub struct BrickwallKernel<F: Float> {
     input: BusTopology,
-    bank: BrickwallBank,
+    bank: BrickwallBank<F>,
 }
 
-impl BrickwallKernel {
+impl<F: Float> BrickwallKernel<F> {
     /// A clipper on `input`, at the full scale until aimed.
     fn new(input: BusTopology) -> Self {
         Self {
@@ -108,7 +110,7 @@ impl BrickwallKernel {
     }
 }
 
-impl Kernel for BrickwallKernel {
+impl<F: Float> Kernel for BrickwallKernel<F> {
     type Set = BrickwallSet;
 
     /// A cell that moves reaches the clamp within 16 frames, wherever the blocks fall.
@@ -156,17 +158,21 @@ impl BrickwallSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::drive_kernel;
     use crate::test_support::{RATE_44K, prepared, prepared_at, sample_gain, tick, tick_fed};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_types::ChannelLayout;
     use tutti_units::{Tail, UnitParam};
 
+    // The nodes under test are `f32` (the session's audio format), so their tolerances are
+    // `f32`'s; each node has an `f64` kernel test below.
+
     /// The shape declares the ceiling, a zero latency and no tail, and the width it was
     /// built for.
     #[test]
     fn the_shape_declares_the_ceiling_no_latency_and_no_tail() {
-        let b = prepared(BrickwallLimiterNode::new(Db::new(-1.0)));
+        let b = prepared(BrickwallLimiterNode::<f32>::new(Db::new(-1.0)));
         let shape = b.shape();
         assert_eq!(shape.params.as_slice(), &[UnitParam::Ceiling][..]);
         assert_eq!(
@@ -180,14 +186,14 @@ mod tests {
 
     #[test]
     fn a_brickwall_fork_shares_no_cell() {
-        assert_param_fork(BrickwallLimiterNode::new(Db::new(-1.0)));
+        assert_param_fork(BrickwallLimiterNode::<f32>::new(Db::new(-1.0)));
     }
 
     /// A ceiling set through the brickwall's `ParamSet` reaches the clip on
     /// the next block: the node designs from the cell once per block.
     #[test]
     fn a_brickwall_ceiling_set_by_address_reaches_the_clip() {
-        let mut bw = prepared_at(BrickwallLimiterNode::new(Db::new(0.0)), RATE_44K);
+        let mut bw = prepared_at(BrickwallLimiterNode::<f32>::new(Db::new(0.0)), RATE_44K);
         let set = bw.param_set();
         assert!(set.set(UnitParam::Ceiling, -6.0));
         let mut out = [0.0f32; 2];
@@ -198,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_brickwall_clips_at_ceiling() {
-        let mut bw = prepared(BrickwallLimiterNode::new(Db::new(0.0)));
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::new(Db::new(0.0)));
 
         let mut out = [0.0f32; 2];
         tick(&mut bw, &[2.0, -3.0], &mut out);
@@ -217,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_brickwall_adjustable_ceiling() {
-        let mut bw = prepared(BrickwallLimiterNode::new(Db::new(-6.0)));
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::new(Db::new(-6.0)));
         let ceiling_lin = sample_gain(Db::new(-6.0));
 
         let mut out = [0.0f32; 2];
@@ -232,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_brickwall_passes_quiet_signal() {
-        let mut bw = prepared(BrickwallLimiterNode::new(Db::new(0.0)));
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::new(Db::new(0.0)));
 
         let mut out = [0.0f32; 2];
         tick(&mut bw, &[0.3, -0.2], &mut out);
@@ -244,7 +250,7 @@ mod tests {
     #[test]
     fn brickwall_fed_ceiling_modulates_clip() {
         // A fed ceiling held low clips harder than one held high.
-        let mut bw = prepared(BrickwallLimiterNode::new(Db::new(0.0)));
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::new(Db::new(0.0)));
         let mut out = [0.0f32; 2];
         // Ceiling -12 dB ≈ 0.251 linear: 1.0 clips to ~0.251.
         tick_fed(&mut bw, &[1.0, 1.0], &[Some(-12.0)], &mut out);
@@ -263,7 +269,7 @@ mod tests {
     /// its own.
     #[test]
     fn brickwall_a_fed_nan_ceiling_clamps_at_the_cell() {
-        let mut bw = prepared_at(BrickwallLimiterNode::new(Db::new(-6.0)), RATE_44K);
+        let mut bw = prepared_at(BrickwallLimiterNode::<f32>::new(Db::new(-6.0)), RATE_44K);
         let cell = sample_gain(Db::new(-6.0));
         let mut out = [0.0f32; 2];
         tick_fed(&mut bw, &[1.0, -1.0], &[Some(f32::NAN)], &mut out);
@@ -278,7 +284,7 @@ mod tests {
     /// construction starts at 0 dB.
     #[test]
     fn brickwall_a_nan_cell_keeps_the_last_ceiling() {
-        let mut bw = prepared_at(BrickwallLimiterNode::new(Db::new(-6.0)), RATE_44K);
+        let mut bw = prepared_at(BrickwallLimiterNode::<f32>::new(Db::new(-6.0)), RATE_44K);
         let set = bw.param_set();
         let mut out = [0.0f32; 2];
         assert!(set.set(UnitParam::Ceiling, f32::NAN));
@@ -293,7 +299,10 @@ mod tests {
         let next = sample_gain(Db::new(-12.0));
         assert!((out[0] - next).abs() < 1e-6, "{}", out[0]);
 
-        let mut born_nan = prepared_at(BrickwallLimiterNode::new(Db::new(f64::NAN)), RATE_44K);
+        let mut born_nan = prepared_at(
+            BrickwallLimiterNode::<f32>::new(Db::new(f64::NAN)),
+            RATE_44K,
+        );
         tick(&mut born_nan, &[2.0, -2.0], &mut out);
         assert_eq!(out, [1.0, -1.0], "a NaN-built brickwall clamps at 0 dB");
         assert!(born_nan.param_set().set(UnitParam::Ceiling, f32::NAN));
@@ -323,7 +332,7 @@ mod tests {
             })
             .collect();
         let refs: Vec<&[f32]> = ins.iter().map(|c| &c[..]).collect();
-        let mut bw = prepared(BrickwallLimiterNode::with_bus(
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::with_bus(
             BusTopology::unassigned(ChannelLayout::from(3u16)).unwrap(),
             Db::new(0.0),
         ));
@@ -351,7 +360,7 @@ mod tests {
 
     #[test]
     fn brickwall_with_bus_reports_arity_and_clips_all() {
-        let mut bw = prepared(BrickwallLimiterNode::with_bus(
+        let mut bw = prepared(BrickwallLimiterNode::<f32>::with_bus(
             BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
             Db::new(0.0),
         ));
@@ -367,5 +376,24 @@ mod tests {
         }
         assert!((out[0] - 1.0).abs() < 1e-4);
         assert!((out[1] + 1.0).abs() < 1e-4);
+    }
+
+    /// An `f64` kernel clamps at the ceiling its control holds: over `-20 dB` a signal of more
+    /// than 24 bits leaves at `10^(-20 / 20)`, to 1e-15.
+    #[test]
+    fn an_f64_kernel_clamps_a_wide_signal_at_the_f64_ceiling() {
+        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+        let x = wide_signal(128);
+        let mut k = BrickwallKernel::<f64>::new(BusTopology::MONO);
+        k.prepare(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(128)));
+        let controls = BrickwallControls {
+            ceiling: Db::new(-20.0),
+        };
+        let y = drive_kernel(&mut k, &[(0, controls)], &[x]);
+        assert_close_f64(
+            &y[0],
+            &vec![Db::new(-20.0).to_amplitude().get(); 128],
+            1e-15,
+        );
     }
 }

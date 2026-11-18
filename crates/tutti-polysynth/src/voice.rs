@@ -11,10 +11,10 @@
 use std::num::NonZeroUsize;
 
 use crate::note_id::PerNoteMap;
-use tutti_midi_protocol::{Heard, unit_f32_to_velocity, velocity_to_unit_f32};
+use tutti_midi_protocol::Heard;
 use tutti_ump::Voice2;
 use tutti_ump::{MidiChannel, NoteId, NoteNumber, NoteVelocity};
-use tutti_units::{Amplitude, Semitones};
+use tutti_units::{Amplitude, Normalized, Semitones};
 use tutti_voicing::{
     ChannelState, Command, Glide, MasterGain, Mode, NoteControl, Order, Patch, Rules, Steal,
     VoiceSpec, Voicing,
@@ -93,7 +93,7 @@ pub(crate) struct VoiceSlot {
     id: NoteId,
     note: NoteNumber,
     channel: MidiChannel,
-    velocity: f32,
+    velocity: Normalized,
     envelope_level: Amplitude,
     state: VoiceState,
 }
@@ -105,7 +105,7 @@ impl Default for VoiceSlot {
             id: NoteId::default(),
             note: NoteNumber::default(),
             channel: MidiChannel::FIRST,
-            velocity: 0.0,
+            velocity: Normalized::of(0.0),
             envelope_level: Amplitude::SILENT,
             state: VoiceState::Idle,
         }
@@ -129,7 +129,7 @@ impl VoiceSlot {
     }
 
     #[cfg(test)]
-    pub(crate) fn velocity(&self) -> f32 {
+    pub(crate) fn velocity(&self) -> Normalized {
         self.velocity
     }
 
@@ -167,7 +167,7 @@ impl VoiceSlot {
         id: NoteId,
         note: NoteNumber,
         channel: MidiChannel,
-        velocity: f32,
+        velocity: Normalized,
     ) {
         self.voice_id = voice_id;
         self.id = id;
@@ -192,7 +192,7 @@ impl VoiceSlot {
 
     /// Update identity, note and velocity for legato retrigger (the slot keeps
     /// sounding but now represents a new note, hence a new [`NoteId`]).
-    pub(crate) fn update_note(&mut self, id: NoteId, note: NoteNumber, velocity: f32) {
+    pub(crate) fn update_note(&mut self, id: NoteId, note: NoteNumber, velocity: Normalized) {
         self.id = id;
         self.note = note;
         self.velocity = velocity;
@@ -306,7 +306,7 @@ pub(crate) enum Gate {
         channel: MidiChannel,
         /// How far the key sounds from its equal-tempered pitch.
         tune: Semitones,
-        velocity: f32,
+        velocity: Normalized,
         legato: bool,
         /// The glide the stream asked for, if any.
         glide: Option<Glide>,
@@ -356,7 +356,7 @@ impl VoiceAllocator {
         &mut self,
         channel: MidiChannel,
         message: &Voice2,
-        strike: Option<(NoteId, f32)>,
+        strike: Option<(NoteId, Normalized)>,
     ) -> AllocationResult {
         // Only a note message asks about the voices (to forget the ones that
         // ended, to choose a victim, to return to a held key).
@@ -374,7 +374,7 @@ impl VoiceAllocator {
 
     /// Carries out the commands the core returned, which are in
     /// `self.commands`: the slot table follows them and each leaves its gate.
-    fn carry_out(&mut self, strike: Option<(NoteId, f32)>) -> AllocationResult {
+    fn carry_out(&mut self, strike: Option<(NoteId, Normalized)>) -> AllocationResult {
         let mut result = AllocationResult::Unavailable;
         for i in 0..self.commands.len() {
             match self.commands[i] {
@@ -483,16 +483,16 @@ impl VoiceAllocator {
     /// when it is that key, else the key the core returned to (a mono note-off),
     /// named the way a MIDI 1.0 note is and at the velocity it was struck.
     fn strike_of(
-        strike: Option<(NoteId, f32)>,
+        strike: Option<(NoteId, Normalized)>,
         channel: MidiChannel,
         key: NoteNumber,
         velocity16: u16,
-    ) -> (NoteId, f32) {
+    ) -> (NoteId, Normalized) {
         match strike {
             Some((id, v)) if id.channel_note().is_some_and(|(_, note)| note == key) => (id, v),
             _ => (
                 NoteId::from_channel_note(channel, key),
-                velocity_to_unit_f32(NoteVelocity::new(velocity16)),
+                NoteVelocity::new(velocity16).normalized(),
             ),
         }
     }
@@ -533,14 +533,14 @@ impl VoiceAllocator {
         id: NoteId,
         note: NoteNumber,
         channel: MidiChannel,
-        velocity: f32,
+        velocity: Normalized,
         attribute: tutti_ump::Attribute,
     ) -> AllocationResult {
         // 16 bits, never 0 (a zero velocity is a note-off).
-        let v16 = unit_f32_to_velocity(velocity).max(NoteVelocity::new(1));
+        let v16 = NoteVelocity::from_normalized(velocity).max(NoteVelocity::new(1));
         let on = Voice2::NoteOn {
             note,
-            velocity: NoteVelocity::new(v16.get()),
+            velocity: v16,
             attribute,
         };
         self.run(channel, &on, Some((id, velocity)))

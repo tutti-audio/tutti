@@ -1052,7 +1052,7 @@ fn stretching_preserves_the_signals_level() {
         let mut input = vec![vec![0.0f32; size]];
         let mut out = vec![vec![0.0f32; size]];
         let mut phase = Phase::START;
-        let inc = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
+        let step = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
         let (mut in_sq, mut in_n) = (0.0f64, 0usize);
         let (mut out_sq, mut out_n) = (0.0f64, 0usize);
 
@@ -1061,9 +1061,9 @@ fn stretching_preserves_the_signals_level() {
         const WARM: usize = 500;
         for blk in 0..2000 {
             for slot in input[0].iter_mut() {
-                // The unit's input is an `f32` sample.
-                let s = (phase.sin() * 0.5) as f32;
-                phase = phase.advance(inc);
+                // The stretcher's input is `f32` samples: the tone narrows here.
+                let s = phase.sin() as f32 * 0.5;
+                phase = phase.advance(step);
                 *slot = s;
                 if blk >= WARM {
                     in_sq += (s as f64).powi(2);
@@ -1108,15 +1108,15 @@ fn slowing_down_loses_level_only_as_far_as_the_overlap_allows() {
         let mut input = vec![vec![0.0f32; size]];
         let mut out = vec![vec![0.0f32; size]];
         let mut phase = Phase::START;
-        let inc = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
+        let step = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
         let (mut in_sq, mut in_n) = (0.0f64, 0usize);
         let (mut out_sq, mut out_n) = (0.0f64, 0usize);
 
         for blk in 0..2000 {
             for slot in input[0].iter_mut() {
-                // The unit's input is an `f32` sample.
-                let s = (phase.sin() * 0.5) as f32;
-                phase = phase.advance(inc);
+                // The stretcher's input is `f32` samples: the tone narrows here.
+                let s = phase.sin() as f32 * 0.5;
+                phase = phase.advance(step);
                 *slot = s;
                 if blk >= 500 {
                     in_sq += (s as f64).powi(2);

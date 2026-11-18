@@ -340,7 +340,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     for strip in &sums {
         add_stereo(&mut s, master, *strip);
     }
-    let (limiter, _) = s.graph().add(LimiterNode::stereo(LimiterControls {
+    let (limiter, _) = s.graph().add(LimiterNode::<f32>::stereo(LimiterControls {
         threshold: Db(-1.0),
         ceiling: Db(0.0),
         ..LimiterControls::DEFAULT

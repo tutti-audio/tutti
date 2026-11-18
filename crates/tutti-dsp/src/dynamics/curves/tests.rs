@@ -180,12 +180,12 @@ fn a_nan_peak_takes_the_below_gain() {
     assert!(curve.below > Amplitude(1.0));
 }
 
-/// A threshold past the clamp (under -6165 dB, or `-inf`) and a peak down to the smallest
+/// A threshold past the clamp (under -758 dB, or `-inf`) and a peak down to the smallest
 /// subnormal never make a gain that is not finite, and the output `peak * gain` never passes
 /// the ceiling: the boost under the threshold is held to the ceiling over the clamped threshold.
 #[test]
 fn a_threshold_past_the_clamp_never_overshoots_the_ceiling() {
-    for threshold in [f64::NEG_INFINITY, -7_000.0, -6_165.0, -2_000.0] {
+    for threshold in [f64::NEG_INFINITY, -800.0, -758.0, -2_000.0] {
         for ceiling in [-6.0, 0.0, 12.0, 20.0] {
             let curve = LimiterCurve::new(Db(threshold), Db(ceiling));
             let bound = Db(ceiling).to_amplitude().get() * (1.0 + 1e-12);
@@ -203,4 +203,32 @@ fn a_threshold_past_the_clamp_never_overshoots_the_ceiling() {
             }
         }
     }
+}
+
+/// The generic dB helpers at `f32` are the closed forms (`20 log10 x`, `10^(d / 20)`) in `f64`
+/// narrowed once, to two ulps, over a sweep that includes silence, the extremes and the infinities: `level_db` pins
+/// silence at `Db::FLOOR`.
+#[test]
+fn the_generic_db_helpers_narrow_to_the_f32_closed_forms() {
+    let ulps =
+        |got: f32, want: f32| (got - want).abs() <= 2.0 * f32::EPSILON * want.abs().max(1e-30);
+    for k in -300..=300 {
+        let x = 10f32.powf(k as f32 / 10.0);
+        let (got, want) = (level_db::<f32>(x), (20.0 * f64::from(x).log10()) as f32);
+        assert!(
+            ulps(got, want) || (got - want).abs() < 1e-5,
+            "level {x}: {got} vs {want}"
+        );
+    }
+    assert_eq!(level_db::<f32>(0.0), Db::FLOOR.get() as f32);
+    assert_eq!(level_db::<f32>(-1.0), Db::FLOOR.get() as f32);
+    assert_eq!(level_db::<f32>(f32::INFINITY), f32::INFINITY);
+    assert!(level_db::<f32>(f32::NAN).is_nan());
+    for k in -4000..=4000 {
+        let d = k as f32 / 10.0;
+        let (got, want) = (db_gain::<f32>(d), 10f64.powf(f64::from(d) / 20.0) as f32);
+        assert!(ulps(got, want), "{d} dB: {got} vs {want}");
+    }
+    assert_eq!(db_gain::<f32>(f32::NEG_INFINITY), 0.0);
+    assert_eq!(db_gain::<f32>(f32::INFINITY), f32::INFINITY);
 }

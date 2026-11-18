@@ -41,11 +41,11 @@ use crate::BlockConfig;
 
 /// The float formats a session renders in: `f32` and `f64`. Sealed.
 ///
-/// The graph, its taps and meters, the transport, the metronome, MIDI, the
-/// offline, system and device clocks and a bounce work in either. What lands
-/// through the session's jobs (the pool, a sampler stream, an analysis,
-/// modulation) and what is `f32` by its nodes or its FFI (plugins, the
-/// instruments) is hosted by an `f32` session alone: each is an `impl` on
+/// The graph, its taps, meters and inlets, the transport, the metronome, MIDI,
+/// the offline, system and device clocks, a bounce, the session's jobs (the
+/// pool, a sampler stream, an analysis) and modulation work in either. What is
+/// `f32` by its FFI or its nodes (plugins, the instruments, a take, the capture
+/// inputs) is hosted by an `f32` session alone: each is an `impl` on
 /// `Session<K, C>` where `C: Clock<Float = f32>`, and the trait is the seam where
 /// an `f64` session has nothing to do.
 pub trait SessionFloat: Float + crate::format::Sealed {}

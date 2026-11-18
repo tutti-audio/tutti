@@ -12,8 +12,10 @@
 //! is ignored wherever it comes from (the node keeps the last ceiling for a NaN
 //! cell, and a NaN frame on the lane clamps at the aimed ceiling).
 
-use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Amplitude, Db};
+
+use super::curves::db_gain;
 
 /// The controls of a [`BrickwallBank`]: the ceiling.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -34,17 +36,17 @@ impl Default for BrickwallControls {
     }
 }
 
-/// The amplitude of `ceiling`, or `None` for a NaN, which has none.
+/// The amplitude of a ceiling of `db` decibels, or `None` for a NaN, which has none.
 #[inline]
-fn amplitude(ceiling: Db) -> Option<Amplitude> {
-    let linear = ceiling.to_amplitude();
-    (!linear.get().is_nan()).then_some(linear)
+fn amplitude<F: Float>(db: F) -> Option<F> {
+    let linear = db_gain(db);
+    (!linear.is_nan()).then_some(linear)
 }
 
 /// `x` clamped to `+-ceiling`. `ceiling` is never NaN (`clamp` panics on one) and
 /// never negative.
 #[inline]
-fn clip(x: f32, ceiling: f32) -> f32 {
+fn clip<F: Float>(x: F, ceiling: F) -> F {
     x.clamp(-ceiling, ceiling)
 }
 
@@ -62,22 +64,25 @@ pub struct BrickwallLanes<'a, S: Float = f32> {
 /// a sample past the new one), and the clip is memoryless, so the render does not depend on
 /// how the input is cut into blocks.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BrickwallBank {
+pub struct BrickwallBank<F: Float> {
     ceiling: Amplitude,
+    /// The precision the clamp runs in.
+    precision: core::marker::PhantomData<F>,
 }
 
-impl BrickwallBank {
+impl<F: Float> BrickwallBank<F> {
     /// A clipper at the full scale, 0 dB.
     #[must_use]
     pub const fn new() -> Self {
         Self {
             ceiling: Amplitude::UNITY,
+            precision: core::marker::PhantomData,
         }
     }
 
     /// Aims at `controls`: a NaN ceiling is the default's, 0 dB.
     pub fn aim(&mut self, controls: &BrickwallControls) {
-        self.ceiling = amplitude(controls.ceiling).unwrap_or(Amplitude::UNITY);
+        self.ceiling = Amplitude(amplitude::<f64>(controls.ceiling.get()).unwrap_or(1.0));
     }
 
     /// Runs `input` into `output`, every frame clamped at the ceiling: its own on a driven
@@ -93,8 +98,7 @@ impl BrickwallBank {
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
-        // The clip runs on `f32` samples: the ceiling narrows once per block.
-        let base = self.ceiling.get() as f32;
+        let base = F::from_f64(self.ceiling.get());
         match lanes.ceiling {
             // Each frame's ceiling is converted once, for every channel.
             Some(lane) => {
@@ -102,11 +106,10 @@ impl BrickwallBank {
                 for i in 0..frames {
                     let ceiling = lane
                         .get(i)
-                        .and_then(|x| amplitude(Db(x.convert_to::<f64>())))
-                        // A driven frame's ceiling narrows to the `f32` clip, once per frame.
-                        .map_or(base, |a| a.get() as f32);
+                        .and_then(|x| amplitude(x.convert_to::<F>()))
+                        .unwrap_or(base);
                     for c in 0..width {
-                        let x = input.plane(c).samples()[i].convert_to::<f32>();
+                        let x = input.plane(c).samples()[i].convert_to::<F>();
                         output.plane_mut(c).samples_mut()[i] = clip(x, ceiling).convert_to::<S>();
                     }
                 }
@@ -117,7 +120,7 @@ impl BrickwallBank {
                     let mut plane = output.plane_mut(c);
                     let ys = &mut plane.samples_mut()[..frames];
                     for (y, x) in ys.iter_mut().zip(xs) {
-                        *y = clip(x.convert_to::<f32>(), base).convert_to::<S>();
+                        *y = clip(x.convert_to::<F>(), base).convert_to::<S>();
                     }
                 }
             }
@@ -125,7 +128,7 @@ impl BrickwallBank {
     }
 }
 
-impl Default for BrickwallBank {
+impl<F: Float> Default for BrickwallBank<F> {
     fn default() -> Self {
         Self::new()
     }

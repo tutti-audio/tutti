@@ -14,7 +14,7 @@
 use crate::SynthConfig;
 use crate::UnisonVoices;
 use crate::bank::{CONTROL_BLOCK, VoiceBank};
-use crate::mpe::{Expression, MpeControl};
+use crate::mpe::MpeControl;
 use crate::synth_voice::SynthVoice;
 use crate::tuning::{A4_FREQ, key_freq};
 use crate::voice::Gate;
@@ -22,14 +22,13 @@ use crate::{UnisonEngine, VoiceAllocator, VoiceAllocatorConfig};
 use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::{PitchBendSensitivity, UniversalReader};
 use tutti_midi_protocol::{channel_voice, narrow_value};
-use tutti_midi_protocol::{value_to_unit_f32, velocity_to_unit_f32};
 use tutti_types::Param;
 use tutti_ump::ControlValue;
 use tutti_ump::NoteId;
 use tutti_ump::{
     Attribute, CCNumber, MidiChannel, NoteNumber, RegisteredPerNoteController, Ump, Voice2,
 };
-use tutti_units::{Amplitude, Hz, SampleRate, Semitones, Tail};
+use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Semitones, Tail};
 use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 
 /// A polyphonic subtractive synthesizer: a MIDI-driven voice allocator over a
@@ -271,7 +270,7 @@ impl PolySynth {
                 velocity,
                 attribute,
             } => {
-                self.handle_note_on(note, velocity_to_unit_f32(velocity), channel, attribute);
+                self.handle_note_on(note, velocity.normalized(), channel, attribute);
             }
             // Release velocity is not used: the release is the envelope's.
             Voice2::NoteOff { note, .. } => self.handle_note_off(note, channel),
@@ -286,7 +285,7 @@ impl PolySynth {
                     // controllers are this synth's own.
                     None => {
                         self.bend_message(channel, &voice);
-                        self.handle_cc(controller, value_to_unit_f32(value));
+                        self.handle_cc(controller, value.normalized());
                     }
                 }
             }
@@ -333,7 +332,7 @@ impl PolySynth {
     fn handle_note_on(
         &mut self,
         note: NoteNumber,
-        vel_norm: f32,
+        vel_norm: Normalized,
         channel: MidiChannel,
         attribute: Attribute,
     ) {
@@ -378,20 +377,20 @@ impl PolySynth {
                 return;
             }
             NoteControl::Pressure(value) => {
-                MpeControl::Pressure(Expression::from_control(ControlValue::new(value)))
+                MpeControl::Pressure(ControlValue::new(value).normalized())
             }
             NoteControl::Registered(RegisteredPerNoteController::Volume, value) => {
-                MpeControl::Gain(Expression::from_control(ControlValue::new(value)))
+                MpeControl::Gain(ControlValue::new(value).normalized())
             }
             NoteControl::Registered(RegisteredPerNoteController::Brightness, value) => {
-                MpeControl::Slide(Expression::from_control(ControlValue::new(value)))
+                MpeControl::Slide(ControlValue::new(value).normalized())
             }
             // The index is a wire byte, not a 7-bit value: 0xCA is not CC74.
             NoteControl::Assignable(index, value) if index == CCNumber::BRIGHTNESS.get() => {
-                MpeControl::Slide(Expression::from_control(ControlValue::new(value)))
+                MpeControl::Slide(ControlValue::new(value).normalized())
             }
             NoteControl::Assignable(index, value) if index == CCNumber::VOLUME.get() => {
-                MpeControl::Gain(Expression::from_control(ControlValue::new(value)))
+                MpeControl::Gain(ControlValue::new(value).normalized())
             }
             NoteControl::Registered(..) | NoteControl::Assignable(..) => return,
         };
@@ -434,7 +433,9 @@ impl PolySynth {
         }
     }
 
-    fn handle_cc(&mut self, cc_num: CCNumber, value: f32) {
+    fn handle_cc(&mut self, cc_num: CCNumber, value: Normalized) {
+        // A voice's controls are `f32` DSP state: narrowed once here.
+        let value = value.get() as f32;
         match cc_num {
             CCNumber::RESONANCE => {
                 self.voices
@@ -527,7 +528,7 @@ impl PolySynth {
         note: NoteNumber,
         channel: MidiChannel,
         tune: Semitones,
-        vel_norm: f32,
+        vel_norm: Normalized,
         is_legato: bool,
         glide: Option<Glide>,
     ) {
@@ -542,6 +543,8 @@ impl PolySynth {
                 voice.set_start_phases(unison.randomize_phases());
             }
         }
+        // The voice's velocity is `f32` DSP state: narrowed once here.
+        let vel_norm = vel_norm.get() as f32;
         voice.set_velocity_mod(vel_norm);
         voice.set_tune(tune);
         if is_legato {

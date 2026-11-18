@@ -198,10 +198,10 @@ pub fn load_n(count: usize) -> (Vec<GraphUnit>, Vec<tutti_plugin_host::PluginHan
 
 /// A sine block at full-ish scale, so "audio arrived" is unambiguous.
 pub fn fill_sine(input: &mut Planes, channels: usize, block_index: usize) {
-    for ch in 0..channels {
-        for i in 0..BLOCK {
+    for plane in &mut input.0[..channels] {
+        for (i, y) in plane[..BLOCK].iter_mut().enumerate() {
             let t = (block_index * BLOCK + i) as f32 / SAMPLE_RATE as f32;
-            input.0[ch][i] = (t * 440.0 * std::f32::consts::TAU).sin() * 0.5;
+            *y = (t * 440.0 * std::f32::consts::TAU).sin() * 0.5;
         }
     }
 }

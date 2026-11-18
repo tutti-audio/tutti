@@ -4,6 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use tutti_buffers::Float;
 use tutti_curve::Piece;
 use tutti_graph::{
     Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Law, Node,
@@ -926,7 +927,7 @@ fn has_seconds(program: &ControlProgram) -> bool {
     })
 }
 
-impl Node for ControlLaneNode {
+impl<F: Float> Node<F> for ControlLaneNode {
     /// No audio; one event input (signal sources), one event output
     /// (segments to the target).
     ///
@@ -948,7 +949,7 @@ impl Node for ControlLaneNode {
         self.scratch.reserve(SOURCE_EVENT_CAPACITY.get() as usize);
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let env = cx.env;
         let len = env.block_len.get();
         if len == 0 {
@@ -1081,8 +1082,8 @@ struct LaneFork {
     native: bool,
 }
 
-impl ForkSource for LaneFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float> ForkSource<F> for LaneFork {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(ControlLaneNode::fresh_over(
             &self.shared,
             &self.make,
@@ -1093,10 +1094,10 @@ impl ForkSource for LaneFork {
 
 /// Inserted with its [`LaneControls`], and a fork that reads the last
 /// published program and the knob and range values at the gather.
-impl IntoNode for ControlLaneNode {
+impl<F: Float> IntoNode<F> for ControlLaneNode {
     type Controls = LaneControls;
 
-    fn into_parts(self) -> NodeParts<LaneControls> {
+    fn into_parts(self) -> NodeParts<LaneControls, F> {
         let controls = self.controls();
         let fork = LaneFork {
             shared: Arc::clone(&self.shared),

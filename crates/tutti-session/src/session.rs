@@ -15,7 +15,7 @@ use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{At, Beat, Bpm, SampleRate, Samples};
 
 use crate::RootDeclaration;
-use crate::format::{Sealed, Step};
+use crate::format::Sealed;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
 use crate::{Clock, Offline, RealTime, SessionFloat};
 use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, TempoError};
@@ -614,10 +614,13 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     #[cfg(feature = "midi-hardware")]
     pub(crate) midi_policy: crate::MidiPolicy,
     #[cfg(feature = "sampler")]
-    pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer>,
+    pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::Running, C::Float>>,
     /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
     #[cfg(feature = "sampler")]
     pub(crate) sampler_opens: tutti_types::Mint,
+    /// What the opens landed, until the host takes it ([`Session::take_stream`]).
+    #[cfg(feature = "sampler")]
+    pub(crate) sampler_streams: crate::sampler::OpenedStreams<C::Float>,
     /// The count of the stream's faults the last poll saw.
     pub(crate) faults_seen: u64,
     /// The one-shot listing of the output devices, until it answers.
@@ -787,41 +790,13 @@ impl<K: AppKey, F: SessionFloat> Session<K, crate::Detached<F>> {
     }
 }
 
-/// `f32` because jobs, modulation and plugins land on `f32` sessions only.
+/// `f32` because a plugin format is `f32` at its FFI.
+#[cfg(feature = "plugin")]
 impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
-    /// The part of a phase only an `f32` session has: what serves the nodes
-    /// the engine inserts and the features built of `f32` nodes (jobs and the
-    /// pool, exports, modulation, MIDI, plugins). The `f64` session has none.
-    pub(crate) fn host_step(&mut self, step: Step, cx: PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
-        match step {
-            Step::Landings => {
-                self.land_jobs(out);
-                // What those landings and the holds' ends changed, and the pool's
-                // stages on this thread.
-                self.pool_events(cx.main, out);
-                // What the graph's own removals left declared.
-                self.forget_removed();
-            }
-            Step::Modulation => self
-                .mods
-                .modulation_phase(&mut self.graph, cx.mods, cx.now, out),
-            Step::Reapply => {
-                // The re-apply's commit, as the update's own: published
-                // on `Sent`.
-                if self.mods.reapply(&mut self.graph, cx.mods, cx.now, out) {
-                    self.commit_reporting(out);
-                }
-                self.mods.resync(&mut self.graph);
-                self.report_rewired(out);
-            }
-            Step::Plugins => {
-                #[cfg(feature = "plugin")]
-                {
-                    self.plugins_phase(cx, out);
-                    self.rebind_plugins(cx.main, out);
-                }
-            }
-        }
+    /// Serves the plugins: the part of a phase only an `f32` session has.
+    pub(crate) fn serve_plugins(&mut self, cx: PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
+        self.plugins_phase(cx, out);
+        self.rebind_plugins(cx.main, out);
     }
 }
 
@@ -876,6 +851,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             disk_streamer,
             #[cfg(feature = "sampler")]
             sampler_opens,
+            #[cfg(feature = "sampler")]
+            sampler_streams,
             faults_seen,
             #[cfg(feature = "device")]
             output_listing,
@@ -941,6 +918,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 disk_streamer,
                 #[cfg(feature = "sampler")]
                 sampler_opens,
+                #[cfg(feature = "sampler")]
+                sampler_streams,
                 faults_seen,
                 #[cfg(feature = "device")]
                 output_listing,
@@ -1199,7 +1178,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         match phase {
             Phase::Collect => {
                 // First, so what a job landed is in the graph this update commits.
-                C::Float::host(self, Step::Landings, cx, out);
+                self.land_jobs(out);
+                // What those landings and the holds' ends changed, and the pool's
+                // stages on this thread.
+                self.pool_events(cx.main, out);
+                // What the graph's own removals left declared.
+                self.forget_removed();
                 // Before the collect, as a frame's spawns run before its
                 // commit: a crossfade lands on the update that first finds
                 // the re-prepare resumed.
@@ -1262,8 +1246,18 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 }
                 self.resumed = false;
             }
-            Phase::Modulation => C::Float::host(self, Step::Modulation, cx, out),
-            Phase::AfterCommit => C::Float::host(self, Step::Reapply, cx, out),
+            Phase::Modulation => self
+                .mods
+                .modulation_phase(&mut self.graph, cx.mods, cx.now, out),
+            Phase::AfterCommit => {
+                // The re-apply's commit, as the update's own: published
+                // on `Sent`.
+                if self.mods.reapply(&mut self.graph, cx.mods, cx.now, out) {
+                    self.commit_reporting(out);
+                }
+                self.mods.resync(&mut self.graph);
+                self.report_rewired(out);
+            }
             Phase::MidiOut => {
                 #[cfg(feature = "midi")]
                 {
@@ -1272,7 +1266,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     }
                 }
             }
-            Phase::Plugins => C::Float::host(self, Step::Plugins, cx, out),
+            Phase::Plugins => C::Float::serve_plugins(self, cx, out),
             Phase::RenderMode => C::Float::announce_render_mode(self),
             Phase::Poll => {
                 // Who the session is on the wire is in force, and the devices

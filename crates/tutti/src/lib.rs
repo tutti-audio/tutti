@@ -416,9 +416,10 @@ pub mod session {
     // The pool.
     pub use tutti_session::Load as PoolLoad;
     pub use tutti_session::{
-        Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
-        PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
-        PoolState, RefreshPool, RefreshReport, RetryError, WhenLoadedError, stranded_loads,
+        Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, Parking, PoolConfig,
+        PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome,
+        PoolReport, PoolSet, PoolState, RefreshPool, RefreshReport, RetryError, Sharing,
+        WhenLoadedError, stranded_loads,
     };
     pub use tutti_session::{Task, WorkerError};
 

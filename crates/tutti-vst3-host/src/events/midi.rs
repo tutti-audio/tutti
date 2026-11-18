@@ -1,10 +1,7 @@
 //! A UMP event to VST3 event and back.
 
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{
-    PitchBendSensitivity, unit_f32_to_value, unit_f32_to_velocity, value_to_unit_f32,
-    velocity_to_unit_f32, widen,
-};
+use tutti_midi_protocol::{PitchBendSensitivity, widen};
 use tutti_plugin_types::{
     NoteExpressionType, NoteExpressionValue, WireMidi, expression_of_per_note_controller,
     group_of_port, per_note_message, per_note_tuning, plugin_note_id,
@@ -340,8 +337,10 @@ impl MidiEncoder {
                         self.out.extend(reset.map(|e| on_bus(e, bus)));
                     }
                     if let Some(key) = note {
-                        self.out
-                            .push(on_bus(pressure_event(offset, channel, key, id, 0.0), bus));
+                        self.out.push(on_bus(
+                            pressure_event(offset, channel, key, id, Normalized::of(0.0)),
+                            bus,
+                        ));
                     }
                     continue;
                 }
@@ -358,19 +357,23 @@ fn on_bus(mut event: Event, bus: i32) -> Event {
 }
 
 /// A `PolyPressure` of the note `id` on `note`.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "VST3's pressure word is `f32`"
+)]
 fn pressure_event(
     offset: i32,
     channel: MidiChannel,
     note: NoteNumber,
     id: NoteId,
-    pressure: f32,
+    pressure: Normalized,
 ) -> Event {
     Event::at(
         offset,
         Payload::PolyPressure(PolyPressure::new(
             channel.get().into(),
             note.get().into(),
-            pressure,
+            pressure.get() as f32,
             plugin_note_id(id),
         )),
     )
@@ -411,19 +414,23 @@ fn control_event(
             channel,
             note,
             id,
-            value_to_unit_f32(ControlValue::new(value)),
+            ControlValue::new(value).normalized(),
         )),
         NoteControl::Registered(controller, value) => expression(
             expression_of_per_note_controller(controller.number())?,
-            f64::from(value_to_unit_f32(ControlValue::new(value))),
+            ControlValue::new(value).normalized().get(),
         ),
         NoteControl::Assignable(index, value) => expression(
             expression_of_per_note_controller(index)?,
-            f64::from(value_to_unit_f32(ControlValue::new(value))),
+            ControlValue::new(value).normalized().get(),
         ),
     }
 }
 
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "VST3's velocity word is `f32`"
+)]
 fn note_on(
     offset: i32,
     channel: MidiChannel,
@@ -436,20 +443,24 @@ fn note_on(
         Payload::NoteOn(NoteOn::new(
             channel.get().into(),
             note.get().into(),
-            velocity_to_unit_f32(NoteVelocity::new(velocity)),
+            NoteVelocity::new(velocity).normalized().get() as f32,
             note_id,
         )),
     )
 }
 
 /// A note-off naming no note (`-1`).
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "VST3's velocity word is `f32`"
+)]
 fn note_off(offset: i32, channel: MidiChannel, note: NoteNumber, velocity: u16) -> Event {
     Event::at(
         offset,
         Payload::NoteOff(NoteOff::new(
             channel.get().into(),
             note.get().into(),
-            velocity_to_unit_f32(NoteVelocity::new(velocity)),
+            NoteVelocity::new(velocity).normalized().get() as f32,
             -1,
         )),
     )
@@ -485,8 +496,9 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
     // and an event bus is a UMP Group, as it is on the input side. A bus past the
     // 16 Groups names none, and the event is dropped.
     let group = group_of_port(u16::try_from(event.header.bus_index).ok()?)?;
-    // Notes and poly-pressure build native MIDI-2 Channel Voice events so the
-    // plugin's f32 velocity and pressure keep their full 16 and 32-bit width.
+    // Notes and poly-pressure build native MIDI-2 Channel Voice events at their
+    // full 16 and 32-bit width; VST3's `f32` velocity and pressure words widen
+    // exactly into `Normalized`.
     let built = match &event.payload {
         Payload::NoteOn(e) => {
             stream.note_on(e.noteId, midi_channel(e.channel), note_number(e.pitch));
@@ -494,7 +506,7 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
                 address(group, e.channel),
                 Voice2::note_on(
                     note_number(e.pitch),
-                    NoteVelocity::new(unit_f32_to_velocity(e.velocity).get()),
+                    NoteVelocity::from_normalized(Normalized::clamped(f64::from(e.velocity))),
                 ),
             ))
         }
@@ -504,7 +516,7 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
                 address(group, e.channel),
                 Voice2::note_off(
                     note_number(e.pitch),
-                    NoteVelocity::new(unit_f32_to_velocity(e.velocity).get()),
+                    NoteVelocity::from_normalized(Normalized::clamped(f64::from(e.velocity))),
                 ),
             ))
         }
@@ -512,7 +524,7 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
             address(group, e.channel),
             Voice2::PolyPressure {
                 note: note_number(e.pitch),
-                value: unit_f32_to_value(e.pressure),
+                value: ControlValue::from_normalized(Normalized::clamped(f64::from(e.pressure))),
             },
         )),
         Payload::Data(d) => {

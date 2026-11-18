@@ -57,7 +57,7 @@ fn a_write_reaches_the_cell_the_key_names() {
 
     // A `Seconds` param is an `f64` cell: the write is exact for a value an
     // `f32` holds.
-    let (comp, controls) = s.graph().add(CompressorNode::new(
+    let (comp, controls) = s.graph().add(CompressorNode::<f32>::new(
         BusTopology::MONO,
         KeySource::Sidechain,
         CompressorControls {

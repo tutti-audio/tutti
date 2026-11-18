@@ -82,7 +82,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
 
     // The latent path, on output 2.
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
-    let (eff, _) = s.graph().add(LimiterNode::mono(LimiterControls {
+    let (eff, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
         threshold: Db(-1.0),
         ceiling: Db(-0.3),
         ..LimiterControls::DEFAULT
@@ -107,14 +107,9 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
             let deadline = Instant::now() + Duration::from_secs(10);
             let (stream, reader) = 'opened: loop {
                 for event in s.update() {
-                    if let SessionEvent::Sampler(SamplerEvent::Opened {
-                        id: opened,
-                        stream,
-                        reader,
-                    }) = event
-                    {
+                    if let SessionEvent::Sampler(SamplerEvent::Opened { id: opened }) = event {
                         assert_eq!(opened, id);
-                        break 'opened (stream, reader);
+                        break 'opened s.take_stream(id).expect("the landed stream");
                     }
                 }
                 assert!(Instant::now() < deadline, "the stream did not open");

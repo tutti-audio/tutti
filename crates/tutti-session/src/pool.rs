@@ -78,7 +78,8 @@ pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use data::{SoundFontFile, soundfont};
 pub(crate) use entry::Staged;
 pub use entry::{
-    Declared, IntoPool, Life, Load, LoadError, Parking, PoolEntry, PoolSet, stranded_loads,
+    Declared, IntoPool, Life, Load, LoadError, Owned, Parking, PoolEntry, PoolSet, Sharing,
+    stranded_loads,
 };
 pub use job::{PoolJobError, PoolLoaded, RefreshPool};
 pub use key::PoolKey;
@@ -95,8 +96,7 @@ pub(crate) use table::{Hold, HoldKind};
 #[cfg(test)]
 mod tests;
 
-/// `f32` because a pooled entry is a plugin or a sampler voice opened through `OpenCx`, which is `f32`.
-impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Declares what the session keeps loaded: the whole set, each time.
     ///
     /// The set is diffed against the one declared before, by key and by
@@ -127,7 +127,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// on the main thread and this call is not on it. A key of the same kind
     /// whose load is [`Load::on_worker`] is not refused. The call refuses the
     /// set whole: nothing of it is applied.
-    pub fn pool<P>(&mut self, parts: impl IntoPool<P>) -> Result<(), PoolError<P>>
+    pub fn pool<P>(&mut self, parts: impl IntoPool<P, C::Float>) -> Result<(), PoolError<P>>
     where
         P: crate::AppKey,
     {
@@ -256,8 +256,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 }
 
 #[cfg(all(feature = "sampler", codec))]
-/// `f32` because a pooled entry is a plugin or a sampler voice opened through `OpenCx`, which is `f32`.
-impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// What the `audio_file` entry under `key` read: its wave, or its stream's
     /// header ([`AudioEntry`]).
     ///
@@ -269,7 +268,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// [`HandleError::NotPooled`] when the key is not declared (never, or
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
-    pub fn audio<P>(&self, key: &P) -> Result<AudioEntry, HandleError<P>>
+    pub fn audio<P>(&self, key: &P) -> Result<AudioEntry<C::Float>, HandleError<P>>
     where
         P: crate::AppKey,
     {
@@ -278,8 +277,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 }
 
 #[cfg(feature = "soundfont")]
-/// `f32` because a pooled entry is a plugin or a sampler voice opened through `OpenCx`, which is `f32`.
-impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// The SoundFont of the `soundfont` entry under `key`, shared by its `Arc`.
     /// The handle owns nothing: dropping it leaves the entry loaded.
     ///

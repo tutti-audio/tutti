@@ -645,7 +645,7 @@ impl Planner<'_> {
                         .args(["--bench", &bench, "--profile", "profiling", "--no-run"]),
                 );
                 let mut samply = Cmd::sh("samply record")
-                    .arg(format!("target/profiling/deps/{bench}-*"))
+                    .arg(format!("target/profiling/build/{pkg}/*/out/{bench}-*"))
                     .args(["--bench", "--profile-time", &secs]);
                 samply.glob = true;
                 self.run(samply);
