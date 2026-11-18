@@ -80,8 +80,8 @@ impl Vst3Loaded {
     pub fn unit_by_bus(
         &self,
         main: MainThreadMarker,
-        media_type: crate::MediaType,
-        direction: crate::BusDirection,
+        media_type: tutti_vst3_ffi::MediaType,
+        direction: tutti_vst3_ffi::BusDirection,
         bus_index: i32,
         channel: i32,
     ) -> Option<crate::UnitId> {
@@ -182,7 +182,7 @@ impl Vst3Loaded {
             .component_state(main)
             .map_err(|e| Vst3Error::PluginError {
                 stage: LoadStage::Initialization,
-                code: e.code(),
+                source: e,
             })
     }
 
@@ -244,7 +244,7 @@ impl Vst3Loaded {
                 .set_component_state(main, component)
                 .map_err(|e| Vst3Error::PluginError {
                     stage: LoadStage::Initialization,
-                    code: e.code(),
+                    source: e,
                 })?;
 
             self.push_controller_state(main, component);

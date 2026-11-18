@@ -19,8 +19,8 @@
 //! list lends a queue a larger buffer for a block
 //! ([`QueueState::lend_from`]).
 
+use super::Lost;
 use crate::guard::Out;
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use tutti_plugin_types::ffi_guard;
 use vst3::Steinberg::{
     Vst::{IParamValueQueue, IParamValueQueueTrait, kNoParamId},
@@ -52,7 +52,7 @@ pub struct ParamValueQueueImpl {
     /// Points the plugin's `addPoint` could not add as new points (the
     /// queue full; it kept the latest value). Atomic, not in `state`, so a COM
     /// entry that finds `state` borrowed still counts its refusal.
-    dropped: AtomicU64,
+    dropped: Lost,
 }
 
 impl Class for ParamValueQueueImpl {
@@ -163,7 +163,7 @@ impl ParamValueQueueImpl {
                 param_id,
                 points: PointBuf::with_capacity(points),
             }),
-            dropped: AtomicU64::new(0),
+            dropped: Lost::new(),
         })
     }
 
@@ -195,12 +195,12 @@ impl ParamValueQueueImpl {
 
     /// Points the plugin added past this queue's room, since it was built.
     pub(crate) fn points_dropped(&self) -> u64 {
-        self.dropped.load(Relaxed)
+        self.dropped.get()
     }
 
     /// Counts one dropped point.
     fn count_dropped(&self) {
-        self.dropped.fetch_add(1, Relaxed);
+        self.dropped.add(1);
     }
 }
 

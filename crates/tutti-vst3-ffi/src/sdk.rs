@@ -30,7 +30,7 @@ pub fn cid_to_string(cid: &[u8; 16]) -> String {
 
 /// Converts a 16-byte `Guid` (`[u8; 16]`) to a `TUID` (`[i8; 16]`).
 #[must_use]
-pub fn guid_as_tuid(guid: &vst3::com_scrape_types::Guid) -> TUID {
+pub(crate) fn guid_as_tuid(guid: &vst3::com_scrape_types::Guid) -> TUID {
     std::array::from_fn(|i| guid[i] as i8)
 }
 
@@ -42,7 +42,7 @@ pub fn guid_as_tuid(guid: &vst3::com_scrape_types::Guid) -> TUID {
 /// aliases they define as exactly that type. Naming it through an alias rather
 /// than mirroring the `cfg` means a change in the bindings surfaces as a type
 /// error at [`sdk_enum_i32`]'s call sites, not as a silently stale copy.
-pub type SdkEnum = vst3::Steinberg::Vst::MediaTypes;
+pub(crate) type SdkEnum = vst3::Steinberg::Vst::MediaTypes;
 
 /// Widens an SDK enum constant to the `int32` the ABI fields carrying it use
 /// (`BusInfo::mediaType`, `ProcessSetup::processMode`, `IBStream::seek`'s
@@ -79,7 +79,7 @@ pub const fn sdk_enum_u32(v: SdkEnum) -> u32 {
 /// Sealed: only the structs this crate lists below implement it. They are the
 /// out-parameter and event records of the SDK, which a plugin fills in or the
 /// host fills field by field.
-pub trait Zeroable: private::Sealed + Sized {}
+pub(crate) trait Zeroable: private::Sealed + Sized {}
 
 mod private {
     pub trait Sealed {}
@@ -113,7 +113,7 @@ zeroable!(
 /// What a C host writes as `ParameterInfo info = {};` before handing it to a
 /// plugin to fill in.
 #[must_use]
-pub fn zeroed<T: Zeroable>() -> T {
+pub(crate) fn zeroed<T: Zeroable>() -> T {
     // SAFETY: `Zeroable` is implemented only for the SDK structs listed above,
     // each made of integers, floats, arrays of them, raw pointers and unions of
     // those, for which all-zero bytes is a valid value (null pointers, `0`,

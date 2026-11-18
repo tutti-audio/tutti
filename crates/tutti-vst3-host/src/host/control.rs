@@ -19,8 +19,8 @@ use crate::types::PluginInfo;
 
 use super::keys::view_key_of;
 use super::loaded::Vst3Loaded;
-use crate::BusDirection;
 use keyboard_types::KeyState;
+use tutti_vst3_ffi::BusDirection;
 
 /// A `Vst3Error` as the shared vocabulary's error.
 pub(crate) fn plugin_error(error: Vst3Error) -> PluginError {
@@ -29,9 +29,9 @@ pub(crate) fn plugin_error(error: Vst3Error) -> PluginError {
             stage,
             reason: cause.to_string(),
         },
-        Vst3Error::PluginError { stage, code } => PluginError::Load {
+        Vst3Error::PluginError { stage, source } => PluginError::Load {
             stage,
-            reason: format!("the plugin returned code {code}"),
+            reason: format!("the plugin returned {source}"),
         },
         Vst3Error::StateError(reason) => PluginError::State(reason),
         Vst3Error::StateFrame(frame) => PluginError::State(frame.to_string()),
@@ -514,7 +514,7 @@ impl Control for Vst3Loaded {
     /// are not an editor's, and the [`Vst3Controller`](crate::Vst3Controller)
     /// adds them on [`flush_edits`](Control::flush_edits).
     fn take_reported_edits(&mut self, _main: MainThreadMarker, out: &mut Vec<ParamEdit>) {
-        use crate::{ParameterEditEvent, PluginNotification};
+        use tutti_vst3_ffi::{ParameterEditEvent, PluginNotification};
         while let Some(notification) = self.plugin.handler().pop_notification() {
             match notification {
                 PluginNotification::Edit(ParameterEditEvent::PerformEdit { param_id, value }) => {
@@ -535,7 +535,7 @@ impl Control for Vst3Loaded {
     }
 
     /// The notifications the host's bounded queue refused because nobody
-    /// drained it, edits among them ([`NOTIFICATION_CAPACITY`](crate::NOTIFICATION_CAPACITY)).
+    /// drained it, edits among them ([`NOTIFICATION_CAPACITY`](tutti_vst3_ffi::NOTIFICATION_CAPACITY)).
     fn dropped_reported_edits(&self) -> u64 {
         self.plugin.handler().dropped_notifications()
     }
@@ -605,9 +605,9 @@ impl EditorWindow for Vst3Loaded {
     ) -> PluginResult<dpi::Size> {
         self.embed_editor(main, parent, scale)
             .map_err(|error| match error {
-                Vst3Error::PluginError { code, .. } => {
+                Vst3Error::PluginError { source, .. } => {
                     PluginError::Editor(tutti_plugin_types::EditorError::PluginError(format!(
-                        "IPlugView::attached failed with code {code}"
+                        "IPlugView::attached failed with {source}"
                     )))
                 }
                 other => plugin_error(other),

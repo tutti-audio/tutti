@@ -3,8 +3,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use tutti_vst3_ffi::Module;
-pub use tutti_vst3_ffi::{ClassInfo, FactoryFlags, FactoryInfo};
+use tutti_vst3_ffi::{ClassInfo, FactoryInfo};
+use tutti_vst3_ffi::{LoadError as ModuleLoadError, Module};
 
 use crate::error::{LoadCause, LoadStage, Result, Vst3Error};
 
@@ -37,8 +37,8 @@ impl Library {
     pub fn load(lib_path: &Path) -> Result<Arc<Self>> {
         let module = Module::open(lib_path).map_err(|e| Vst3Error::LoadFailed {
             path: lib_path.to_path_buf(),
-            stage: e.stage,
-            cause: LoadCause::Module(e.reason),
+            stage: e.stage(),
+            cause: LoadCause::Module(module_cause(&e)),
         })?;
         Ok(Arc::new(Self { module }))
     }
@@ -73,7 +73,16 @@ impl Library {
             .class_info(index)
             .map_err(|e| Vst3Error::PluginError {
                 stage: LoadStage::Factory,
-                code: e.code(),
+                source: e,
             })
+    }
+}
+
+/// The load error's text with its cause: the OS loader's message is the
+/// `source`, which `Display` leaves out.
+fn module_cause(error: &ModuleLoadError) -> String {
+    match std::error::Error::source(error) {
+        Some(source) => format!("{error}: {source}"),
+        None => error.to_string(),
     }
 }

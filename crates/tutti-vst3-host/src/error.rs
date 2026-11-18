@@ -59,15 +59,14 @@ pub enum Vst3Error {
         cause: LoadCause,
     },
 
-    /// A plugin call returned a non-OK `tresult`. `code` is the raw VST3 return
-    /// code as defined in `pluginterfaces/base/funknown.h`.
-    #[error("Plugin error at {stage}: code {code}")]
+    /// A plugin call returned a non-OK `tresult` (`pluginterfaces/base/funknown.h`).
+    #[error("Plugin error at {stage}: {source}")]
     PluginError {
         /// Which step the failing call belonged to.
         stage: LoadStage,
-        /// The raw VST3 `tresult`, passed through unmapped so a caller can
-        /// distinguish the SDK's specific codes.
-        code: i32,
+        /// The `tresult` the call answered, by name.
+        #[source]
+        source: tutti_vst3_ffi::Vst3Error,
     },
 
     /// An audio bus reports a channel count no layout holds (negative, or

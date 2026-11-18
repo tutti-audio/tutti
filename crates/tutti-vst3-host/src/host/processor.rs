@@ -40,8 +40,7 @@ pub(super) const EDIT_CAPACITY: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("the plugin's process failed: {error}")]
 pub struct ProcessFailed {
-    /// What failed, by name; [`StatusError::code`](crate::StatusError::code) is
-    /// the raw `tresult`.
+    /// What failed, by name.
     pub error: tutti_vst3_ffi::Vst3Error,
 }
 

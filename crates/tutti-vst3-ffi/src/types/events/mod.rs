@@ -34,7 +34,7 @@ pub const K_DATA_TYPE_MIDI_SYSEX: u32 =
 
 /// An SDK event ordinal as the `u16` of `Event::type`, which every ordinal fits.
 #[allow(clippy::cast_possible_truncation)]
-const fn tag(ordinal: crate::SdkEnum) -> u16 {
+const fn tag(ordinal: crate::sdk::SdkEnum) -> u16 {
     ordinal as u16
 }
 

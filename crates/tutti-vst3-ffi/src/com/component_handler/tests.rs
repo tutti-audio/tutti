@@ -41,10 +41,9 @@ fn edit_gestures_forward_in_order_with_their_operands() {
     ));
 }
 
-/// `restartComponent` carries the raw flag word through unchanged — the
-/// host decodes it with [`RestartFlags::from_bits`], so swallowing or
-/// masking bits here would silently drop a latency or I/O change. It does
-/// not occupy the notification queue.
+/// `restartComponent` carries every flag of the word through — swallowing or
+/// masking one here would silently drop a latency or I/O change. It does not
+/// occupy the notification queue.
 /// Spec: vst3.IComponentHandler.restartComponent
 #[test]
 fn restart_component_forwards_the_raw_flag_word() {
@@ -57,7 +56,10 @@ fn restart_component_forwards_the_raw_flag_word() {
         assert_eq!(ptr.restartComponent(0b1010), kResultOk);
     }
 
-    assert_eq!(handler.take_restart_bits(), 0b1010);
+    assert_eq!(
+        handler.take_restart(),
+        RestartFlags::IO_CHANGED | RestartFlags::LATENCY_CHANGED
+    );
     assert!(handler.pop_notification().is_none());
 }
 
@@ -76,26 +78,34 @@ fn restart_flags_merge_across_calls_and_reset_on_take() {
         ptr.restartComponent(RestartFlags_::kLatencyChanged);
     }
 
-    let flags = RestartFlags::from_bits(handler.take_restart_bits());
-    assert!(flags.latency_changed, "the earlier request survives");
-    assert!(flags.io_changed, "the later request lands too");
-    assert!(!flags.param_values_changed);
+    let flags = handler.take_restart();
+    assert!(
+        flags.contains(RestartFlags::LATENCY_CHANGED),
+        "the earlier request survives"
+    );
+    assert!(
+        flags.contains(RestartFlags::IO_CHANGED),
+        "the later request lands too"
+    );
+    assert!(!flags.contains(RestartFlags::PARAM_VALUES_CHANGED));
 
-    assert_eq!(handler.take_restart_bits(), 0, "a take consumes the flags");
+    assert!(
+        handler.take_restart().is_empty(),
+        "a take consumes the flags"
+    );
 
     // SAFETY: the test calls a COM method on a live object it owns, with arguments valid for
     // the call.
     unsafe { ptr.restartComponent(RestartFlags_::kParamValuesChanged) };
     assert_eq!(
-        handler.take_restart_bits(),
-        RestartFlags_::kParamValuesChanged,
-        "a request after a take starts from zero"
+        handler.take_restart(),
+        RestartFlags::PARAM_VALUES_CHANGED,
+        "a request after a take starts from none"
     );
 }
 
 /// A full queue drops the newest notification and counts it; it neither
-/// grows nor evicts what is already queued. The drop raises the sticky
-/// overflow flag, which one take reports and clears.
+/// grows nor evicts what is already queued.
 #[test]
 fn overflow_is_counted_and_keeps_the_queued_events() {
     let handler = ComponentHandler::new();
@@ -112,8 +122,6 @@ fn overflow_is_counted_and_keeps_the_queued_events() {
 
     assert_eq!(handler.dropped_notifications(), extra as u64);
     assert_eq!(handler.pending_notifications(), NOTIFICATION_CAPACITY);
-    assert!(handler.take_overflowed(), "a drop raises the flag");
-    assert!(!handler.take_overflowed(), "a take reports it once");
     let got = drain(&handler);
     assert_eq!(got.len(), NOTIFICATION_CAPACITY);
     assert!(
@@ -124,21 +132,20 @@ fn overflow_is_counted_and_keeps_the_queued_events() {
         "the oldest event is kept; the overflow is the newest"
     );
 
-    // Room again once drained; the count is cumulative, and a push that
+    // Room again once drained; the count is cumulative, and a push that fits
+    // does not move it.
     // SAFETY: the test calls a COM method on a live object it owns, with arguments valid for
     // the call.
-    // fits does not raise the flag.
     unsafe { ptr.endEdit(7) };
     assert_eq!(drain(&handler).len(), 1);
     assert_eq!(handler.dropped_notifications(), extra as u64);
-    assert!(!handler.take_overflowed());
 }
 
 /// The point of this module: a plugin calling the handler from its
 /// process thread must not allocate there. Every callback runs inside
 /// `assert_no_alloc`, `IProgress::start` with a description past the
 /// inline capacity included, as does a push into a full queue, and so
-/// does the host's side (`take_restart_bits`, `pop_notification`, and
+/// does the host's side (`take_restart`, `pop_notification`, and
 /// dropping what it pops) — which is what the plugin server's restart
 /// poll calls.
 #[test]
@@ -180,7 +187,7 @@ fn callbacks_and_the_host_drain_do_not_allocate() {
         unit.notifyProgramListChange(2, -1);
         unit2.notifyUnitByBusChange();
 
-        assert_eq!(handler.take_restart_bits(), RestartFlags_::kLatencyChanged);
+        assert_eq!(handler.take_restart(), RestartFlags::LATENCY_CHANGED);
         let mut n = 0;
         while handler.pop_notification().is_some() {
             n += 1;
@@ -190,42 +197,44 @@ fn callbacks_and_the_host_drain_do_not_allocate() {
     assert!(handler.dropped_notifications() > 0, "the full path ran");
 }
 
+/// Each flag is the bit `ivsteditcontroller.h` gives it (`kReloadComponent` is
+/// bit 0, through `kParamIDMappingChanged` at bit 11).
+/// Spec: vst3.IComponentHandler.restartComponent
 #[test]
-fn restart_flags_decode_individual_bits() {
-    let latency = RestartFlags::from_bits(RestartFlags_::kLatencyChanged);
-    assert!(latency.latency_changed);
-    assert!(!latency.io_changed);
-    assert!(!latency.param_values_changed);
-
-    let io = RestartFlags::from_bits(RestartFlags_::kIoChanged);
-    assert!(io.io_changed);
-    assert!(!io.latency_changed);
-
-    assert!(
-        RestartFlags::from_bits(RestartFlags_::kMidiCCAssignmentChanged).midi_cc_assignment_changed
-    );
-    assert!(RestartFlags::from_bits(RestartFlags_::kReloadComponent).reload_component);
-    assert!(RestartFlags::from_bits(RestartFlags_::kParamTitlesChanged).param_titles_changed);
-    assert!(RestartFlags::from_bits(RestartFlags_::kParamValuesChanged).param_values_changed);
+fn restart_flags_are_the_header_bits() {
+    for (bit, flag) in [
+        RestartFlags::RELOAD_COMPONENT,
+        RestartFlags::IO_CHANGED,
+        RestartFlags::PARAM_VALUES_CHANGED,
+        RestartFlags::LATENCY_CHANGED,
+        RestartFlags::PARAM_TITLES_CHANGED,
+        RestartFlags::MIDI_CC_ASSIGNMENT_CHANGED,
+        RestartFlags::NOTE_EXPRESSION_CHANGED,
+        RestartFlags::IO_TITLES_CHANGED,
+        RestartFlags::PREFETCHABLE_SUPPORT_CHANGED,
+        RestartFlags::ROUTING_INFO_CHANGED,
+        RestartFlags::KEYSWITCH_CHANGED,
+        RestartFlags::PARAM_ID_MAPPING_CHANGED,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(flag.bits(), 1 << bit);
+    }
 }
 
+/// A flag the SDK does not define is not carried: the word holds only the
+/// flags it names.
 #[test]
-fn restart_flags_decode_combined_bits() {
-    let flags = RestartFlags::from_bits(
-        RestartFlags_::kLatencyChanged
-            | RestartFlags_::kIoChanged
-            | RestartFlags_::kParamValuesChanged,
-    );
-    assert!(flags.latency_changed);
-    assert!(flags.io_changed);
-    assert!(flags.param_values_changed);
-    assert!(!flags.param_titles_changed);
-    assert!(!flags.reload_component);
-}
+fn restart_component_drops_bits_the_sdk_does_not_define() {
+    let handler = ComponentHandler::new();
+    let ptr = handler.to_com_ptr::<IComponentHandler>().unwrap();
 
-#[test]
-fn restart_flags_decode_zero_is_empty() {
-    assert_eq!(RestartFlags::from_bits(0), RestartFlags::default());
+    // SAFETY: the test calls a COM method on a live object it owns, with arguments valid for
+    // the call.
+    unsafe { ptr.restartComponent(RestartFlags_::kIoChanged | (1 << 30)) };
+
+    assert_eq!(handler.take_restart(), RestartFlags::IO_CHANGED);
 }
 
 /// `IProgress::start` mints the id the plugin then quotes back on

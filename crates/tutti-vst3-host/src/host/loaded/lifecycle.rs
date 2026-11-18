@@ -3,6 +3,7 @@
 use super::*;
 use crate::host::midi_mapping::{MidiCcMapping, declared_assignments, scan};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginVersion};
+use tutti_vst3_ffi::RestartFlags;
 
 impl Vst3Loaded {
     /// Reads a plugin's metadata without initializing it.
@@ -34,7 +35,7 @@ impl Vst3Loaded {
             .check_instantiable(&class.cid)
             .map_err(|e| Vst3Error::PluginError {
                 stage: LoadStage::Instantiation,
-                code: e.code(),
+                source: e,
             })?;
         Ok(build_plugin_info_raw(&library, &class))
     }
@@ -69,7 +70,7 @@ impl Vst3Loaded {
                 Err(e) => {
                     refused.get_or_insert(Vst3Error::PluginError {
                         stage: LoadStage::Instantiation,
-                        code: e.code(),
+                        source: e,
                     });
                 }
             }
@@ -120,11 +121,11 @@ impl Vst3Loaded {
                 },
                 CreateError::Create(e) => Vst3Error::PluginError {
                     stage: LoadStage::Instantiation,
-                    code: e.code(),
+                    source: e,
                 },
                 _ => Vst3Error::PluginError {
                     stage: LoadStage::Instantiation,
-                    code: 0,
+                    source: tutti_vst3_ffi::Vst3Error::InternalError,
                 },
             })?;
         // The buses and the 64-bit answer are read once the component is
@@ -167,6 +168,7 @@ impl Vst3Loaded {
             declared: None,
             midi_cc: Publisher::new(MidiCcCell(MidiCcMapping::empty())),
             assignments: Vec::new(),
+            dropped_seen: 0,
         }
     }
 
@@ -180,7 +182,7 @@ impl Vst3Loaded {
     ///
     /// This is the single polling entry point for everything the plugin reports
     /// asynchronously between process calls:
-    /// - **the return value** — the coalesced [`RestartOutcome`] of every
+    /// - **the return value** — the coalesced [`RestartFlags`] of every
     ///   `restartComponent` since the last poll (or
     ///   `take_restart`). Nothing in it has been acted on:
     ///   `kIoChanged` and `kLatencyChanged` both need a deactivate/reactivate
@@ -199,11 +201,12 @@ impl Vst3Loaded {
     /// next, in no guaranteed order.
     ///
     /// Collects nothing: a caller that keeps events supplies its own storage.
-    /// Notifications past [`NOTIFICATION_CAPACITY`](crate::NOTIFICATION_CAPACITY)
+    /// Notifications past [`NOTIFICATION_CAPACITY`](tutti_vst3_ffi::NOTIFICATION_CAPACITY)
     /// unread are dropped and counted in
-    /// [`dropped_notifications`](Self::dropped_notifications), and the next
-    /// poll reports
-    /// [`notifications_overflowed`](RestartOutcome::notifications_overflowed).
+    /// [`dropped_notifications`](Self::dropped_notifications); the next poll
+    /// adds [`PARAM_VALUES_CHANGED`](RestartFlags::PARAM_VALUES_CHANGED) to its
+    /// flags, because an edit gesture may have lost its last `PerformEdit` and
+    /// any parameter value may be stale.
     ///
     /// Also forwards any MIDI-learn CCs the audio thread captured to the
     /// plugin's `IMidiLearn`, which the SDK requires on this thread.
@@ -217,7 +220,7 @@ impl Vst3Loaded {
         &mut self,
         _main: MainThreadMarker,
         mut on_event: impl FnMut(PluginNotification),
-    ) -> RestartOutcome {
+    ) -> RestartFlags {
         // `kIoChanged` is deliberately NOT acted on here. The spec requires
         // deactivate → re-ask → reactivate (`ivsteditcontroller.h:125-127`),
         // and this method holds a `&mut Vst3Loaded`, which cannot deactivate
@@ -233,7 +236,11 @@ impl Vst3Loaded {
         }
         // After the drain, so a drop made before it is reported now rather
         // than one poll late.
-        restart.notifications_overflowed = self.plugin.handler().take_overflowed();
+        let dropped = self.plugin.handler().dropped_notifications();
+        if dropped != self.dropped_seen {
+            self.dropped_seen = dropped;
+            restart |= RestartFlags::PARAM_VALUES_CHANGED;
+        }
         // Forward any live CCs the audio thread captured for MIDI-learn to the
         // plugin's IMidiLearn on this (main) thread, as the SDK requires. No-op
         // unless learn is armed and the plugin implements IMidiLearn.
@@ -241,7 +248,7 @@ impl Vst3Loaded {
         restart
     }
 
-    /// The coalesced [`RestartOutcome`] of every `restartComponent` since the
+    /// The coalesced [`RestartFlags`] of every `restartComponent` since the
     /// last take (or poll), leaving none pending. Reads one atomic word:
     /// wait-free, allocation-free, and touches neither the notification queue
     /// nor the plugin, so it is the restart poll for a caller on an audio
@@ -249,14 +256,12 @@ impl Vst3Loaded {
     ///
     /// Queued edits, progress and unit news stay queued for
     /// [`poll_plugin_notifications`](Self::poll_plugin_notifications).
-    pub(crate) fn take_restart(&self) -> RestartOutcome {
-        RestartOutcome::from_flags(RestartFlags::from_bits(
-            self.plugin.handler().take_restart_bits(),
-        ))
+    pub(crate) fn take_restart(&self) -> RestartFlags {
+        self.plugin.handler().take_restart()
     }
 
-    /// Drops every queued notification unread, and clears the overflow flag
-    /// with them, returning how many there were. Lock-free and
+    /// Drops every queued notification unread, and takes the drops so far as
+    /// seen, returning how many there were. Lock-free and
     /// allocation-free (no notification owns heap memory), so a caller on an
     /// audio thread that has no use for edits, progress or unit news — the
     /// plugin server — keeps the queue from filling with a backlog.
@@ -267,7 +272,7 @@ impl Vst3Loaded {
         while self.plugin.handler().pop_notification().is_some() {
             n += 1;
         }
-        self.plugin.handler().take_overflowed();
+        self.dropped_seen = self.plugin.handler().dropped_notifications();
         n
     }
 
@@ -277,7 +282,7 @@ impl Vst3Loaded {
     }
 
     /// Notifications the plugin sent that were dropped because
-    /// [`NOTIFICATION_CAPACITY`](crate::NOTIFICATION_CAPACITY) were already
+    /// [`NOTIFICATION_CAPACITY`](tutti_vst3_ffi::NOTIFICATION_CAPACITY) were already
     /// unread. Cumulative over the instance's life; a rising count means the
     /// host polls too rarely (or not at all) for this plugin.
     pub fn dropped_notifications(&self) -> u64 {
@@ -320,7 +325,7 @@ impl Vst3Loaded {
             .initialize_component(main)
             .map_err(|e| Vst3Error::PluginError {
                 stage: LoadStage::Initialization,
-                code: e.code(),
+                source: e,
             })?;
 
         for (direction, name) in [

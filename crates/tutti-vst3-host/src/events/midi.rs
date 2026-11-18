@@ -112,7 +112,7 @@ impl MidiEncoder {
             buses,
             groups_dropped: 0,
             unsendable_dropped: 0,
-            out: Box::new(RtVec::new()),
+            out: RtVec::boxed(),
         }
     }
 

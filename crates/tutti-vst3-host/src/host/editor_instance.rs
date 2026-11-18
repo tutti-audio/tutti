@@ -63,14 +63,14 @@ impl Vst3Editor {
 
     /// Drains the editor instance's notifications into `edits` and `dirty`.
     ///
-    /// NOT HANDLED: the returned `RestartOutcome`. In particular a
-    /// `kParamValuesChanged` (or `notifications_overflowed`) from this editor
+    /// NOT HANDLED: the returned `RestartFlags`. In particular a
+    /// `kParamValuesChanged` (or a dropped notification) from this editor
     /// instance is dropped, so a preset loaded inside the plugin's own UI does
     /// not refresh the host's parameter values (its state still reaches the
     /// audio instance on close). Progress / unit notifications
     /// are not surfaced either.
     fn drain(&mut self, main: MainThreadMarker) {
-        use crate::{ParameterEditEvent, PluginNotification};
+        use tutti_vst3_ffi::{ParameterEditEvent, PluginNotification};
         let (edits, dirty) = (&mut self.edits, &mut self.dirty);
         let _restart = self.inner.poll_plugin_notifications(main, |n| match n {
             // The plugin's editor reported one of its own `ParamID`s.

@@ -402,7 +402,7 @@ impl<T: Vst3Sample> Staged<T> {
             .map(drop)
             .map_err(|e| Vst3Error::PluginError {
                 stage: LoadStage::Setup,
-                code: e.code(),
+                source: e,
             })
     }
 
@@ -441,7 +441,7 @@ impl<T: Vst3Sample> Staged<T> {
                 if let Some(error) = refused {
                     return Err(Vst3Error::PluginError {
                         stage: LoadStage::Activation,
-                        code: error.code(),
+                        source: error,
                     });
                 }
             }
@@ -490,7 +490,7 @@ impl<T: Vst3Sample> Staged<T> {
         if let Err(error) = result {
             return Err(Vst3Error::PluginError {
                 stage: LoadStage::Activation,
-                code: error.code(),
+                source: error,
             });
         }
         if active {
