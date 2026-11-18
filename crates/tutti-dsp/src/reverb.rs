@@ -16,7 +16,7 @@ pub(crate) mod freeverb;
 pub(crate) mod network;
 pub(crate) mod plate;
 
-use tutti_types::{Hz, SampleRate, Seconds, Tail};
+use tutti_types::{SampleRate, Seconds, Tail};
 
 use crate::{Ring, Steps};
 
@@ -31,11 +31,6 @@ const RAMP: Seconds = Seconds(0.020);
 pub(crate) fn ramp(rate: SampleRate) -> Steps {
     let chunks = RAMP.to_samples_ceil(rate).get().div_ceil(CHUNK);
     Steps::Fixed(u32::try_from(chunks).unwrap_or(u32::MAX).max(1))
-}
-
-/// The pole `exp(-2 pi fc / fs)` of the one-pole low-pass of cutoff `cutoff` at `rate`.
-pub(crate) fn cutoff_pole(cutoff: Hz, rate: SampleRate) -> f64 {
-    libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate.get())
 }
 
 /// `buf[(w - delay) mod cap]` interpolated linearly to a fractional `delay` of at least 0:

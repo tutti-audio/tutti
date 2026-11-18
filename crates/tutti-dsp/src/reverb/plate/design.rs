@@ -30,7 +30,7 @@
 
 use tutti_types::{Amplitude, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds};
 
-use crate::delay::finite_or;
+use crate::finite::finite_or;
 use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{
     Absorption, AllPass, AllPassForm, Fdn, Gains, Inline, Line, LineModulation, MAX_DENSE,

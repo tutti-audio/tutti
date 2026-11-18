@@ -13,6 +13,8 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, Hz, SampleRate, Samples};
 
 use crate::COEFF_INTERVAL;
+use crate::finite::finite_or;
+use crate::onepole::{cutoff_pole, ring_frames};
 
 /// The default corner: 10 Hz, well under the audible band's low end and a few time
 /// constants (`1 / 2 pi fc`, 16 ms) from settling a step.
@@ -27,16 +29,9 @@ pub const MIN_DC_CORNER: Hz = Hz(1.0);
 /// finite as [`DC_CORNER`].
 #[must_use]
 pub fn dc_pole(corner: Hz, rate: SampleRate) -> f64 {
-    let corner = if corner.get().is_finite() {
-        corner.get()
-    } else {
-        DC_CORNER.get()
-    };
-    let corner = f64::from(corner).clamp(
-        f64::from(MIN_DC_CORNER.get()),
-        f64::from(rate.nyquist().get()),
-    );
-    (-core::f64::consts::TAU * corner / rate.get()).exp()
+    let corner = finite_or(corner.get(), DC_CORNER.get());
+    let corner = corner.clamp(MIN_DC_CORNER.get(), rate.nyquist().get());
+    cutoff_pole(Hz(corner), rate)
 }
 
 /// The pole `taken` frames along the line from `from` to `to`.
@@ -125,9 +120,7 @@ impl DcBlocker {
     #[must_use]
     pub fn tail(controls: &DcBlockerControls, rate: SampleRate) -> Samples {
         let r = dc_pole(controls.corner, rate);
-        let floor = 10f64.powf(f64::from(crate::TAIL_FLOOR.get()) / 20.0);
-        let frames = (floor.ln() / r.ln()).ceil() + 1.0;
-        Samples(frames as usize)
+        Samples((ring_frames(r, crate::TAIL_FLOOR).ceil() as usize).saturating_add(1))
     }
 
     /// Runs `input` into `output`, channel `c` through its own recursion. The channels

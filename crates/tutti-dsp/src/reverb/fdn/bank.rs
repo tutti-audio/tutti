@@ -56,8 +56,9 @@ use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_types::{Hz, MAX_CHANNELS, SampleRate, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
+use crate::onepole::cutoff_pole;
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
-use crate::reverb::{CHUNK, cutoff_pole, ramp, read, tail_of};
+use crate::reverb::{CHUNK, ramp, read, tail_of};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
 /// How far a line's length moves in a chunk, in frames.
