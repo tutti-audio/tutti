@@ -27,7 +27,7 @@ pub(super) fn level(x: f32) -> f32 {
 /// The key's level at each frame of `frames`: the loudest channel of `key`, into `out`
 /// (as long as `frames`).
 #[inline]
-pub(super) fn key_levels<S: Float>(key: &Planes<'_, S>, frames: Range<usize>, out: &mut [f32]) {
+pub(crate) fn key_levels<S: Float>(key: &Planes<'_, S>, frames: Range<usize>, out: &mut [f32]) {
     out.fill(0.0);
     for plane in key.iter() {
         for (m, x) in out.iter_mut().zip(&plane.samples()[frames.clone()]) {
@@ -44,7 +44,7 @@ pub(super) const MAX_KNEE_DB: f32 = 400.0;
 /// NaN reads as 0 (instant) and an infinite one holds (coefficient 0), as
 /// [`Seconds::one_pole_coeff`] says. `Ballistics::new` refuses those, so a hostile control is
 /// brought into range here.
-pub(super) fn floored(attack: Seconds, release: Seconds) -> Ballistics {
+pub(crate) fn floored(attack: Seconds, release: Seconds) -> Ballistics {
     // `max` reads NaN and a negative time as 0. `clamp` caps +inf at `f64::MAX` seconds, whose
     // coefficient is 0 at every rate: `t * rate` overflows to infinity above 1 Hz, and below
     // it `exp(-1 / (t * rate))` of a subnormal exponent is exactly 1.
@@ -56,7 +56,7 @@ pub(super) fn floored(attack: Seconds, release: Seconds) -> Ballistics {
 /// The one-pole coefficients of a follower on a quantity that grows toward a target and falls
 /// back: the attack's while the quantity rises and the release's while it falls.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct Follower {
+pub(crate) struct Follower {
     pub(super) attack: f32,
     pub(super) release: f32,
 }
@@ -71,7 +71,7 @@ impl Follower {
     };
 
     /// The follower of `ballistics` at `rate`.
-    pub(super) fn of(ballistics: Ballistics, rate: SampleRate) -> Self {
+    pub(crate) fn of(ballistics: Ballistics, rate: SampleRate) -> Self {
         let (attack, release) = ballistics.coeffs(rate);
         Self { attack, release }
     }
@@ -79,7 +79,7 @@ impl Follower {
     /// One step of `state` toward `target`, at the attack's coefficient while the target is
     /// above `state` and at the release's otherwise.
     #[inline]
-    pub(super) fn follow(&self, state: f32, target: f32) -> f32 {
+    pub(crate) fn follow(&self, state: f32, target: f32) -> f32 {
         let coeff = if target > state {
             self.attack
         } else {

@@ -23,7 +23,7 @@ mod note_expression;
 mod output;
 mod stage;
 
-pub use harmony::{Utf16Chord, Utf16Scale, Utf16Text};
+pub use harmony::{EventText, Utf16Chord, Utf16Scale, Utf16Text, event_text};
 pub use midi::MidiEncoder;
 pub use note_expression::{expression_type_from_id, expression_type_id};
 pub use output::OutputStream;
@@ -63,7 +63,7 @@ impl EventExt for Event {
 /// The frame offset a UMP event stages at: `sampleOffset` is an `i32`, and a
 /// `u32` past `i32::MAX` would wrap negative and index the plugin's buffers
 /// out of bounds.
-fn sample_offset(frame_offset: u32) -> i32 {
+pub(crate) fn sample_offset(frame_offset: u32) -> i32 {
     i32::try_from(frame_offset).unwrap_or(i32::MAX)
 }
 

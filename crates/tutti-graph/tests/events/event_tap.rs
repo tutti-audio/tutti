@@ -115,7 +115,7 @@ impl Node for Script {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, self.ports)
-            .with_event_capacity(self.cap)
+            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
             .with_latency(Latency::new(Samples(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -731,7 +731,7 @@ impl Node for Probe {
     fn shape(&self) -> Shape {
         let shape = Shape::EMPTY.with_events(self.ports as u16, 0);
         if self.capacity > 0 {
-            shape.with_event_capacity(self.capacity)
+            shape.with_event_capacity(tutti_graph::testing::cap_of(self.capacity))
         } else {
             shape
         }

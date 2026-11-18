@@ -413,6 +413,10 @@ impl Vst3Loaded {
             }
         }
         let Some(audio_side) = loaded.plugin.audio_side() else {
+            // The plugin is active and no Processor will run it: it is put back as
+            // it was, and what an earlier rejoin carried stays with it.
+            loaded.deactivate_plugin(main);
+            loaded.carried = carried;
             return Err(Refused {
                 plugin: Some(loaded),
                 reason: PluginError::Other(
@@ -436,8 +440,11 @@ impl Vst3Loaded {
         let (sink, drain) = tutti_plugin_types::edits(EDIT_CAPACITY);
         let (reports_in, reports_out) = tutti_plugin_types::edits(EDIT_CAPACITY);
         let (beat, watch) = tutti_rt::drain_clock();
+        // The Processor holds the first `EDIT_CAPACITY` carried writes and refuses
+        // the rest, counted; the Controller keeps a record of what it holds.
         let handed = carried
             .iter()
+            .take(EDIT_CAPACITY)
             .map(|&(id, value)| Handed {
                 id,
                 value,

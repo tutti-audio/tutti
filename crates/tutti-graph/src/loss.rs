@@ -116,14 +116,24 @@ impl Dropped {
         self.log.clear();
     }
 
+    /// `lost` events a merge cut: charged to the node whose input bound cut
+    /// them, or to no node for a merge with none.
+    pub(crate) fn charge_merge(&mut self, bound: Option<crate::plan::InputBound>, lost: u64) {
+        match bound {
+            Some(b) => self.at_node(b.unit, u32::try_from(lost).unwrap_or(u32::MAX)),
+            None => self.count(lost),
+        }
+    }
+
     /// `n` events lost where no node owns them (a merge).
     pub(crate) fn count(&mut self, n: u64) {
         self.total += n;
         self.unreported += n;
     }
 
-    /// `count` events the plan's unit `unit` took in and did not deliver
-    /// (`Io::count_lost`): charged to the node, no port.
+    /// `count` events charged to the plan's unit `unit`, no port: events the
+    /// node took in and did not deliver (`Io::count_lost`), or events cut from
+    /// its declared input bound before it ran.
     pub(crate) fn at_node(&mut self, unit: u32, count: u32) {
         self.note(Owner::Unit(unit), None, count, 0);
     }

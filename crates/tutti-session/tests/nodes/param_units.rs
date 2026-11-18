@@ -11,7 +11,7 @@ use std::any::TypeId;
 use tutti_session::HasParam;
 use tutti_types::{
     Amplitude, Azimuth, Balance, BitDepth, CompressionRatio, Db, Depth, Drive, Elevation, Feedback,
-    HoldFactor, Hz, Mix, Q, Resonance, Seconds, Spread, StereoWidth, UnitParam,
+    HoldFactor, Hz, Mix, Q, Resonance, Seconds, Semitones, Spread, StereoWidth, UnitParam,
 };
 
 /// Whether `N`'s param of kind `P` is in `U`: the unit a key's method for it
@@ -66,6 +66,9 @@ units! {
         tutti_nodes::BrickwallLimiterNode { Ceiling => Db }
         tutti_nodes::DistortionNode { Drive => Drive }
         tutti_nodes::BitCrusherNode { BitDepth => BitDepth, HoldFactor => HoldFactor }
+        tutti_nodes::EnvelopeFilterNode {
+            Cutoff => Hz, Q => Q, Attack => Seconds, Release => Seconds, Semitones => Semitones
+        }
         tutti_nodes::TransientShaperNode { GainDb => Db }
         tutti_nodes::BusStripNode { Volume => Amplitude, Balance => Balance }
         tutti_nodes::CrossoverNode { Cutoff => Hz }

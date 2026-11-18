@@ -33,4 +33,5 @@ pub use multiband::{
     BandReductions, BandSettings, BankShape, MultibandBank, MultibandLanes, MultibandSettings,
 };
 pub use shared::GAIN_GLIDE;
+pub(crate) use shared::{Follower, floored, key_levels};
 pub use transient::{TransientBank, TransientControls};

@@ -109,7 +109,7 @@ impl Node for RampEvery {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
-            .with_event_capacity(16)
+            .with_event_capacity(tutti_graph::testing::cap_of(16))
             .with_latency(Latency::new(Samples(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}

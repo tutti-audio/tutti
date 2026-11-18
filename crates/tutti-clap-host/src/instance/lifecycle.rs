@@ -31,7 +31,7 @@ use tutti_types::{MaxBlock, ParamId};
 /// The UMPs one block's input note port holds at the most: a graph event
 /// port's largest capacity and the room behind it for note-offs
 /// ([`note_off_room`]).
-const INPUT_PORT_UMPS: usize = note_off_room(MAX_EVENT_PORT_CAPACITY as usize);
+const INPUT_PORT_UMPS: usize = note_off_room(MAX_EVENT_PORT_CAPACITY.get() as usize);
 /// The events the plugin's output list holds besides parameter values, in one
 /// block: notes, MIDI, note expressions, SysEx and gestures. A push past it is
 /// refused and counted ([`ClapProcessor::output_events_refused`]).

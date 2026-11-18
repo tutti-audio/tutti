@@ -97,7 +97,9 @@ struct Steps {
 
 impl Node for Steps {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(8)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(8))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

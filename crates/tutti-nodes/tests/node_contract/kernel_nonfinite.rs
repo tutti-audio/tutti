@@ -17,11 +17,12 @@ use tutti_nodes::{
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    TiltFilterConfig, TiltFilterNode, TransientShaperConfig, TransientShaperNode,
+    EnvelopeFilterConfig, EnvelopeFilterNode, TiltFilterConfig, TiltFilterNode,
+    TransientShaperConfig, TransientShaperNode,
 };
 use tutti_types::{
     BitDepth, BusTopology, ChannelLayout, Db, Drive, Feedback, Frame, HoldFactor, Hz, MaxBlock,
-    Mix, Q, Resonance, SampleRate, Samples, Seconds,
+    Mix, Q, Resonance, SampleRate, Samples, Seconds, Semitones,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -138,6 +139,13 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "dynamic eq",
             Box::new(DynamicEqNode::from(
                 DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).threshold(Db(-60.0)),
+            )),
+        ),
+        (
+            "envelope filter",
+            Box::new(EnvelopeFilterNode::from(
+                EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz(500.0), SvfType::BandPass)
+                    .depth(Semitones(24.0)),
             )),
         ),
         (

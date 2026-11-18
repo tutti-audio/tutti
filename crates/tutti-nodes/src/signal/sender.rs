@@ -13,7 +13,7 @@ use super::PlayWalk;
 /// thins its grid (doubling the stride: a 4096-frame block's grid is 128
 /// points), never a corner; past it with no grid left to thin it sends what
 /// fits and re-sends where it stands at the next block's first frame.
-pub const SOURCE_EVENT_CAPACITY: u32 = 256;
+pub const SOURCE_EVENT_CAPACITY: std::num::NonZeroU32 = std::num::NonZeroU32::new(256).unwrap();
 
 /// How a control source's node is wired: its cost, whether it has a MIDI
 /// input, and how it reads its audio input.
@@ -212,7 +212,7 @@ impl<S: SourcePorts> SourceNode<S> {
     /// block's grid points and `reserve` other stops would not fit.
     fn stride(&self, cx: &Cx<'_>, walk: &PlayWalk, len: usize, reserve: usize) -> Option<u64> {
         let mut stride = u64::from(S::GRID?.stride());
-        let room = (SOURCE_EVENT_CAPACITY as usize).saturating_sub(reserve);
+        let room = (SOURCE_EVENT_CAPACITY.get() as usize).saturating_sub(reserve);
         while grid_points(cx, walk, len, self.epoch, stride) > room && stride < len as u64 {
             stride *= 2;
         }

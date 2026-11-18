@@ -442,13 +442,14 @@ impl<F: Float> Executor<F> {
                             );
                             st.dropped.charge_delay(plan, delay, lost);
                         }
-                        Op::EventMerge { srcs, dst } => {
+                        Op::EventMerge { srcs, dst, bound } => {
                             let lost = event_merge_op(
                                 &plan.event_list[srcs.range()],
                                 dst,
+                                bound,
                                 &mut *st.events,
                             );
-                            st.dropped.count(lost);
+                            st.dropped.charge_merge(bound, lost);
                         }
                         Op::Node { unit, .. } => {
                             // One record per node op, lowered at compile time and

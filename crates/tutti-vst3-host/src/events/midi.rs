@@ -10,6 +10,7 @@ use tutti_plugin_types::{
     expression_of_per_note_controller, group_of_port, per_note_message, per_note_tuning,
     plugin_note_id,
 };
+use tutti_rt::RtVec;
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn, SysexMessage,
     Ump, Voice1, Voice2, parse_exact,
@@ -87,9 +88,10 @@ pub struct MidiEncoder {
     buses: usize,
     groups_dropped: u64,
     unsendable_dropped: u64,
-    /// What the last [`encode`](Self::encode) made, reserved for the most one
-    /// packet can.
-    out: Vec<Event>,
+    /// What the last [`encode`](Self::encode) made: room for the most one
+    /// packet can make ([`MAX_EVENTS`]), allocated once with the encoder: its
+    /// storage is too large to move about by value.
+    out: Box<RtVec<Event, MAX_EVENTS>>,
 }
 
 impl Default for MidiEncoder {
@@ -113,7 +115,7 @@ impl MidiEncoder {
             buses,
             groups_dropped: 0,
             unsendable_dropped: 0,
-            out: Vec::with_capacity(MAX_EVENTS),
+            out: Box::new(RtVec::new()),
         }
     }
 
@@ -191,7 +193,14 @@ impl MidiEncoder {
         if let Ok(message) = (*ump).decode() {
             self.message(offset, message);
         }
-        &self.out
+        // A packet's events are one unit. `MAX_EVENTS` is the most one makes, so
+        // an overflow is a bound that does not hold: the packet is dropped whole
+        // and counted, never sent in part.
+        if self.out.is_overflowed() {
+            self.out.clear();
+            self.unsendable_dropped += 1;
+        }
+        self.out.as_slice()
     }
 
     fn message(&mut self, offset: i32, message: Message) {
