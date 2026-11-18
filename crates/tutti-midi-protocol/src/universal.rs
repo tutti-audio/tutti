@@ -80,7 +80,7 @@ tutti_units::ranged! {
 
 /// One MTC Quarter Frame (System Common `F1`, data byte `0nnn dddd`): the piece
 /// of the cycle it is and the nibble of the time code it carries (M1 p.53). Eight
-/// of them in a cycle state one position ([`MtcTimeCode::quarter_frames`]).
+/// of them in a cycle state one position ([`QuarterFrameCycle`], from [`MtcTimeCode::cycle`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct QuarterFrame {
     /// Which piece of the cycle: `0` is the frames' low nibble, `7` the hours'
