@@ -567,7 +567,9 @@ impl MidiSendBuffer {
     }
 
     /// Stages the piece (see `stage_piece`) and hands it to the plugin
-    /// through `render`, if any event is in it.
+    /// through `render`, if any event is in it. Returns how many events it
+    /// staged: MIDI 1.0 messages and whole SysEx messages, the unit of
+    /// [`events_dropped`](Self::events_dropped).
     pub fn send_piece(
         &mut self,
         render: &mut RenderHandle,
@@ -575,13 +577,16 @@ impl MidiSendBuffer {
         start: usize,
         len: usize,
         total: usize,
-    ) {
+    ) -> usize {
         if let Some(events_ptr) = self.stage_piece(midi_events, start, len, total) {
             // SAFETY: `stage_piece` returns a pointer valid until the next
             // `stage` call or `drop`. It is used immediately and never
             // retained. The VST2 spec requires the plugin to copy any event
             // data it needs before `process_events` returns.
             render.process_events(unsafe { &*events_ptr });
+            self.order.len()
+        } else {
+            0
         }
     }
 

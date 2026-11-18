@@ -29,7 +29,7 @@
 //! of this file compared WAV against FLAC with a `<= 1 LSB` float tolerance and
 //! passed with the FLAC quantizer mutated back to truncation — the exact
 //! historical bug the export README documents. A round-versus-truncate
-//! disagreement is *precisely* one LSB (0.7 → 22937 vs 22936), so any tolerance
+//! disagreement is *precisely* one LSB (0.7 → 22938 vs 22937), so any tolerance
 //! wide enough to absorb a decoder's normalization is also wide enough to
 //! swallow the bug. Both sides are therefore quantized back to integers at the
 //! file's own depth and those integers are compared exactly.
@@ -196,8 +196,8 @@ fn dominant_freq(samples: &[f32], channels: usize, rate: f64) -> f64 {
 /// `tutti_codec::Pcm` rounds.
 ///
 /// The historical failure (not rerun): a private truncating converter
-/// (`(clamped * 32767.0) as i32` in FLAC in place of the shared rounding one)
-/// failed at sample 0 of the Int16 0.7 case, 22936 vs 22937. One LSB, which is the whole
+/// (`(clamped * 32768.0) as i32` in FLAC in place of the shared rounding one)
+/// failed at sample 0 of the Int16 0.7 case, 22937 vs 22938. One LSB, which is the whole
 /// point: a float-tolerance
 /// version of this test would pass a truncating converter.
 #[test]
@@ -238,13 +238,13 @@ fn flac_and_wav_agree_sample_for_sample() {
             // NOT a float tolerance. Both files are lossless at the same depth,
             // read by the same decoder, so the honest claim is *bit* equality —
             // and a float comparison cannot express it. A round-versus-truncate
-            // disagreement is exactly one LSB (0.7 -> 22937 vs 22936, the bug
+            // disagreement is exactly one LSB (0.7 -> 22938 vs 22937, the bug
             // the export README documents), so any tolerance wide enough to
             // absorb the decoder's own normalization is also wide enough to
             // swallow the bug. Quantize both back to integers and compare those.
             let scale = match bit_depth {
-                Pcm::Int16 => 32_767.0f32,
-                _ => 8_388_607.0f32,
+                Pcm::Int16 => 32_768.0f32,
+                _ => 8_388_608.0f32,
             };
             let q = |s: f32| (s * scale).round() as i64;
             let bad = (0..n).find(|&i| q(ws[i]) != q(fs[i]));
@@ -290,8 +290,8 @@ fn aiff_and_wav_agree_sample_for_sample() {
             assert!(n > 1000, "{bit_depth:?} @ {level}: too little audio");
             // Integer comparison, for the reason given in the FLAC case.
             let scale = match bit_depth {
-                Pcm::Int16 => 32_767.0f32,
-                _ => 8_388_607.0f32,
+                Pcm::Int16 => 32_768.0f32,
+                _ => 8_388_608.0f32,
             };
             let q = |s: f32| (s * scale).round() as i64;
             let bad = (0..n).find(|&i| q(ws[i]) != q(as_[i]));
@@ -377,7 +377,7 @@ fn the_flac_compression_level_changes_the_size_not_the_samples() {
     )
     .unwrap();
     let (_, _, ws) = decode(&wav, "wav");
-    let q = |s: f32| (s * 32_767.0).round() as i64;
+    let q = |s: f32| (s * 32_768.0).round() as i64;
 
     let mut sizes = Vec::new();
     for level in [
@@ -474,7 +474,7 @@ fn a_flac_decodes_to_exactly_the_rendered_frames_with_a_valid_md5() {
             g.pipe_output(id);
             built(g)
         };
-        for (bit_depth, scale) in [(Pcm::Int16, 32_767.0f32), (Pcm::Int24, 8_388_607.0)] {
+        for (bit_depth, scale) in [(Pcm::Int16, 32_768.0f32), (Pcm::Int24, 8_388_608.0)] {
             for frames in [1usize, 15, 63, 64, 4095, 4096, 4097, 3 * 4096 + 17] {
                 let cfg = |format| ExportConfig {
                     render: RenderConfig {

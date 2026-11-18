@@ -78,9 +78,9 @@ pub struct Vst2ProcessContext<'a> {
     /// Events to deliver before the block renders, each carrying its own frame
     /// offset within the block. Empty is normal for an effect.
     pub midi: &'a [UmpAt],
-    /// Transport state for this block. `None` leaves the plugin's `VstTimeInfo`
-    /// reporting a stopped transport, which is what a plugin syncing to host
-    /// tempo will see.
+    /// Transport state for this block. `None` makes the plugin's `VstTimeInfo`
+    /// report a stopped transport at the origin ([`TransportInfo::new`]), which is what a
+    /// plugin syncing to host tempo will see.
     pub transport: Option<&'a TransportInfo>,
     /// The sample rate, reported to the plugin in its `VstTimeInfo` when
     /// [`transport`](Self::transport) is set. It does not reconfigure the

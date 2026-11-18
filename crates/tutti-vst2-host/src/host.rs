@@ -483,10 +483,8 @@ impl Host for HostState {
         self.time_info.read()
     }
 
-    /// Host identification, in vst-rs's `(version, vendor, product)` form.
-    /// vst-rs's default returns placeholder strings ("vendor string" /
-    /// "product string"); this reports Tutti's real identity so a plugin that
-    /// keys behaviour off the host name sees the truth.
+    /// Host identification, as `(version, vendor, product)`: Tutti's identity, answered
+    /// from `'static` strings so the audio thread's query allocates nothing.
     fn get_info(&self) -> (isize, &str, &str) {
         (1, "Tutti", "Tutti VST2 Host")
     }
@@ -1269,5 +1267,39 @@ mod tests {
         // allocates.
         assert!(host.dropped_param_changes().get() > 0);
         assert!(host.dropped_midi_out().get() > 0);
+    }
+
+    /// **Every other `audioMaster` callback the audio thread can reach allocates nothing.**
+    /// A plugin asks for the time, the rate, the block size, the process level, the host's
+    /// name, its latencies, its automation state and what it can do, and raises edits and
+    /// notices, from inside `process`; each is answered from fixed storage or a constant.
+    /// (`automate` and `process_plugin_events`, which fill queues, are covered by
+    /// `both_audio_thread_callbacks_are_allocation_free`.)
+    #[test]
+    fn every_query_and_notice_the_audio_thread_reaches_is_allocation_free() {
+        let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
+        let _scope = host.enter_process();
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..4 {
+                let _ = host.get_time_info(0);
+                let _ = host.get_info();
+                let _ = host.get_block_size();
+                let _ = host.get_sample_rate();
+                let _ = host.get_process_level();
+                let _ = host.get_input_latency();
+                let _ = host.get_output_latency();
+                let _ = host.get_automation_state();
+                let _ = host.get_plugin_id();
+                let _ = host.can_do("sendVstTimeInfo");
+                let _ = host.can_do("a capability nobody asked about");
+                let _ = host.io_changed();
+                host.update_display();
+                let _ = host.size_window(640, 480);
+                host.begin_edit(0);
+                host.end_edit(0);
+                host.idle();
+                host.refused_callback(1);
+            }
+        });
     }
 }

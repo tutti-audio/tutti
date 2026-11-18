@@ -250,9 +250,9 @@ pub struct MidiProgram {
     pub bank: Option<(u8, u8)>,
     /// Enclosing category index, or `None` at the top level (VST2 uses `-1`).
     pub parent_category: Option<i32>,
-    /// Set when the plugin declares this program a drum kit, whose keys are
-    /// individual instruments — the cue to query key names.
-    pub is_drum_kit: bool,
+    /// `kMidiIsOmni`: the program is for omni mode, where channel 0 is used for inquiries
+    /// and program changes (the SDK's default is multi mode).
+    pub is_omni: bool,
 }
 
 /// A category grouping MIDI programs.
@@ -378,7 +378,7 @@ impl MidiProgram {
             midi_program: raw.midi_program,
             bank: decode_bank(raw.midi_bank_msb, raw.midi_bank_lsb),
             parent_category: decode_parent_category(raw.parent_category_index),
-            is_drum_kit: api::MidiProgramFlags::from_bits_truncate(raw.flags)
+            is_omni: api::MidiProgramFlags::from_bits_truncate(raw.flags)
                 .contains(api::MidiProgramFlags::IS_OMNI),
         }
     }
@@ -900,10 +900,11 @@ mod tests {
         assert_eq!(decode_parent_category(3), Some(3));
     }
 
-    /// The drum-kit flag drives whether a host queries key names at all, so it
-    /// must be decoded from the right bit.
+    /// `kMidiIsOmni` is bit 0 of a program's flags (`aeffectx.h`: `kMidiIsOmni = 1`), and
+    /// no other bit sets it.
+    /// Spec: vst2.struct.VstMidiProgramName
     #[test]
-    fn the_drum_kit_flag_decodes_from_the_program_flags() {
+    fn kmidiisomni_decodes_from_bit_zero_of_the_program_flags() {
         let mut raw = api::MidiProgramName {
             this_program_index: 2,
             name: label("Acoustic Kit"),
@@ -916,14 +917,16 @@ mod tests {
         };
 
         let melodic = MidiProgram::decode(2, &raw);
-        assert!(!melodic.is_drum_kit);
+        assert!(!melodic.is_omni);
         assert_eq!(melodic.name, "Acoustic Kit");
         assert_eq!(melodic.midi_program, 32);
         assert_eq!(melodic.bank, Some((1, 0)));
         assert_eq!(melodic.parent_category, None);
 
-        raw.flags = api::MidiProgramFlags::IS_OMNI.bits();
-        assert!(MidiProgram::decode(2, &raw).is_drum_kit);
+        raw.flags = 1;
+        assert!(MidiProgram::decode(2, &raw).is_omni);
+        raw.flags = !1;
+        assert!(!MidiProgram::decode(2, &raw).is_omni);
     }
 
     /// Key names decode their name and carry back the coordinates queried, so

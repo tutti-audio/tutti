@@ -50,6 +50,16 @@ pub enum Vst2Error {
     #[error("the plugin has no editor")]
     NoEditor,
 
+    /// The plugin's editor opened but reports no positive size, so the host has no window
+    /// size to give it.
+    #[error("the plugin's editor reports the size {width} by {height}")]
+    NoEditorSize {
+        /// The width `effEditGetRect` reported.
+        width: i32,
+        /// The height `effEditGetRect` reported.
+        height: i32,
+    },
+
     /// The plugin's `effEditOpen` answered that the editor did not open.
     #[error("the plugin's editor did not open")]
     EditorOpenFailed,
@@ -77,6 +87,15 @@ pub enum Vst2Error {
         saved: i32,
         /// The count the plugin has.
         actual: i32,
+    },
+
+    /// A saved parameter value is not on `0..=1` (NaN included), so the state is corrupt.
+    #[error("the saved value of parameter {index} is {value}, which is not on 0..=1")]
+    ParameterOutOfRange {
+        /// The parameter whose saved value is refused.
+        index: i32,
+        /// The value the state holds.
+        value: f32,
     },
 
     /// The plugin exposes no `setParameter`, so a parameter cannot be restored.

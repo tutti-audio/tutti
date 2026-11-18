@@ -532,8 +532,8 @@ plugin left there — usually zero, so the parameter silently collapses to the r
 | 72 | `parent_category_index` | `i32` | Category index, or **-1 = uncategorised** |
 | 76 | `flags` | `i32` | `MidiProgramFlags` |
 
-`MidiProgramFlags`: `IS_OMNI = 1` — the program is a GM drum kit, so its keys are separate
-instruments and `effGetMidiKeyName` is how to label them.
+`MidiProgramFlags`: `IS_OMNI = 1` (`kMidiIsOmni`) — the program is for omni mode, where channel 0
+is used for inquiries and program changes; the default is multi mode.
 
 ### `MidiProgramCategory` (76 bytes)
 
