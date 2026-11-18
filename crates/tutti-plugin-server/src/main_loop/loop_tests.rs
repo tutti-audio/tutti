@@ -431,8 +431,7 @@ fn a_lost_plugin_ends_the_server_abnormally() {
 
 /// **An audio connection that breaks the protocol ends the session, typed.** A
 /// frame that does not decode kills the render thread's connection while the
-/// control connection goes on; the loop reports it as `AudioConnection` (it
-/// used to end audio silently).
+/// control connection goes on; the loop reports it as `AudioConnection`.
 #[test]
 fn an_undecodable_audio_frame_ends_the_session() {
     use std::io::Write as _;

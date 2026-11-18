@@ -234,14 +234,14 @@ impl AudioSlab {
     /// makes before reading a block back.
     #[inline]
     pub fn has_output(&self, seq: u64) -> bool {
-        self.output_sequence(seq) == seq
+        seq != 0 && self.output_sequence(seq) == seq
     }
 
     /// True when the input ring holds block `seq` — the server's check before
     /// feeding the plugin.
     #[inline]
     pub fn has_input(&self, seq: u64) -> bool {
-        self.input_sequence(seq) == seq
+        seq != 0 && self.input_sequence(seq) == seq
     }
 
     // ---- Internal helpers ----
@@ -250,7 +250,7 @@ impl AudioSlab {
     fn write_region<T: Float>(
         &self,
         writer: &mut MappingWriter,
-        open: &mut u64,
+        open: &mut Option<u64>,
         direction: Direction,
         seq: u64,
         channel: usize,
@@ -261,9 +261,9 @@ impl AudioSlab {
         if data.len() > self.layout.samples_per_channel {
             return Err(SlabAccessError::Length);
         }
-        if *open != seq {
+        if *open != Some(seq) {
             self.mapping.header().begin(direction, slot_for(seq));
-            *open = seq;
+            *open = Some(seq);
         }
         writer.write(offset, bytemuck::cast_slice(data));
         Ok(())
@@ -286,7 +286,7 @@ impl AudioSlab {
         let copy_samples = self.layout.samples_per_channel.min(output.len());
         let slot = slot_for(seq);
         let header = self.mapping.header();
-        let held = header.sequence(direction, slot) == seq;
+        let held = seq != 0 && header.sequence(direction, slot) == seq;
         if held {
             self.mapping.read(
                 offset,
@@ -371,8 +371,8 @@ pub struct SlabWriter {
     writer: MappingWriter,
     direction: Direction,
     /// The block whose slot this writer has marked busy and not yet
-    /// published; 0 (no block) between blocks.
-    open: u64,
+    /// published; `None` between blocks.
+    open: Option<u64>,
 }
 
 impl SlabWriter {
@@ -381,7 +381,7 @@ impl SlabWriter {
             slab: Arc::new(slab),
             writer,
             direction,
-            open: 0,
+            open: None,
         }
     }
 
@@ -424,7 +424,7 @@ impl SlabWriter {
     /// slot marked valid while later channels are still being copied.
     #[inline]
     pub fn publish(&mut self, seq: u64) {
-        self.open = 0;
+        self.open = None;
         self.slab
             .mapping
             .header()
@@ -719,6 +719,28 @@ mod tests {
             out.iter().all(|&s| s == 0.0),
             "a refused read leaves silence, not block 1's audio or the caller's old bytes"
         );
+    }
+
+    /// **Sequence 0 is no block.** Real sequences start at 1 and a never-written
+    /// slot reads 0, so a peer-supplied 0 must not match one; a write of block 0
+    /// still marks its slot busy, so it cannot be read half-written either.
+    #[test]
+    fn block_zero_is_never_held_and_marks_its_slot_busy() {
+        let (host, mut server) = pair("zero", stereo_layout(64, FloatWidth::F32));
+        assert!(
+            !host.has_output(0) && !host.has_input(0),
+            "a fresh slab holds no block 0"
+        );
+        let mut out = vec![9.0f32; 64];
+        assert_eq!(host.read_output_into(0, 0, &mut out).unwrap(), 0);
+        assert!(out.iter().all(|&s| s == 0.0));
+
+        server.write(2, 0, &[2.0f32; 64]).unwrap();
+        server.publish(2);
+        assert!(host.has_output(2));
+        assert_eq!(slot_for(0), slot_for(2));
+        server.write(0, 0, &[7.0f32; 64]).unwrap();
+        assert!(!host.has_output(2), "block 0's write marked the slot busy");
     }
 
     /// **The busy mark.** The peer's first write of block 3 reuses block 1's

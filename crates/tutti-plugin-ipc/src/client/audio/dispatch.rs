@@ -5,6 +5,7 @@ use super::lifecycle::Lifecycle;
 use super::messages::{AudioResponse, Command, Unsolicited};
 use super::payload_pool::PayloadPool;
 use super::progress::StateProgress;
+use crate::error::unexpected_message;
 use crate::protocol::{
     BridgeMessage, HostMessage, ParamId, ParameterChanges, ParameterPoint, ParameterQueue,
     ProcessAudioData,
@@ -564,12 +565,7 @@ pub(super) fn handle(
                         }
                         // Any other kind is no answer to a block: counting it
                         // as one would keep a hung plugin looking alive.
-                        other => {
-                            return Err(BridgeError::UnexpectedMessage {
-                                expected: "AudioProcessed",
-                                got: format!("{other:?}").into(),
-                            });
-                        }
+                        other => return Err(unexpected_message("AudioProcessed", &other)),
                     }
                     // Counted after the push: a reader that sees the count
                     // finds the reply queued.

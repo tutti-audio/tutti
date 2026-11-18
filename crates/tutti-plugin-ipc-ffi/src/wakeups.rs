@@ -88,8 +88,6 @@ pub struct Ready {
 
 #[cfg(test)]
 mod tests {
-    use super::FdId;
-
     /// A negative number names no descriptor: `-1` would fault in a borrow.
     #[test]
     fn an_fd_id_refuses_every_negative_number() {

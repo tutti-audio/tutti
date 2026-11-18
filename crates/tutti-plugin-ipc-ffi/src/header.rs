@@ -20,11 +20,12 @@
 //! and a second load, which must still name `seq`. Without the busy mark a
 //! reader that started on block N accepts half of N and half of N+2 when the
 //! writer reuses the slot; without the fence the copy's loads may be satisfied
-//! after the recheck on a weakly ordered CPU. The header's atomics are `loom`'s under `--cfg loom`, and
-//! the `loom_model` module below runs `publish`, `sequence`, `initialize` and
-//! `validate` under every interleaving and reordering the memory model permits
-//! between threads; it does not cover a reader in another process or a creator
-//! that crashed mid-initialize.
+//! after the recheck on a weakly ordered CPU. The header's atomics are `loom`'s
+//! under `--cfg loom`, and the `loom_model` module below runs `begin`,
+//! `publish`, `sequence`, `recheck`, `initialize` and `validate` under every
+//! interleaving and reordering the memory model permits between threads; it
+//! does not cover a reader in another process or a creator that crashed
+//! mid-initialize.
 //!
 //! # Sequence numbers, not a "newest" index
 //!
@@ -242,7 +243,9 @@ impl SlabHeader {
     /// Marks `slot` as being rewritten, in `direction`: until the next
     /// [`publish`](Self::publish) no reader accepts it.
     ///
-    /// Call before the first sample write of a block. The `Release` fence
+    /// Call before the first sample write of a block. A block is published once
+    /// per slot, ever: republishing the same sequence into a slot is an ABA,
+    /// and a reader that copied the first would accept the second's samples. The `Release` fence
     /// keeps the sample writes after the mark, so a reader that copies any of
     /// them sees `BUSY` (or a later block) at its [`recheck`](Self::recheck).
     #[inline]
