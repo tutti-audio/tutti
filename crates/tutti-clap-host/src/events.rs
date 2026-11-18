@@ -876,15 +876,13 @@ impl InputRooms {
     /// [`Narrower::MAX_MESSAGES`] MIDI 1.0 messages, one event each, so no
     /// block the graph sends is refused.
     ///
-    /// `event_input` is the node's declared bound
-    /// (`Shape::event_input_capacity`, `Prepare::event_input`): the graph
-    /// never sends more, a note-off included, so no room is held past it. The
-    /// cost is `event_input * MAX_MESSAGES` events of 112 bytes
-    /// (`size_of::<ClapEvent>()`), plus the sort's scratch: at a 512-frame
-    /// block, 512 events and 2560 messages, about 287 KB per activation; at
-    /// the loader's 4096-frame activation, 4096 events and 20480 messages,
-    /// about 2.3 MB (the largest block the bound is sized for, 8192 frames,
-    /// costs about 4.6 MB).
+    /// `event_input` is the bound the node is declared for
+    /// (`Shape::event_input_capacity`, `Prepare::event_input`, at most the
+    /// node's own intake of 256 events): the graph never sends more, a
+    /// note-off included, so no room is held past it. The cost at 256 is 1280
+    /// MIDI events of 112 bytes (`size_of::<ClapEvent>()`), 143 360 bytes,
+    /// and the sort's scratch for them (8 bytes an event) 10 240 more: about
+    /// 154 KB for the MIDI share, whatever the block.
     #[must_use]
     pub const fn for_port(event_input: NonZeroU32) -> Self {
         Self::new((event_input.get() as usize).saturating_mul(Narrower::MAX_MESSAGES))
@@ -1092,9 +1090,6 @@ impl InputEventList {
         self.groups_dropped
     }
 
-    /// How many more MIDI events the block can stage: the MIDI room less
-    /// what is staged. The other sources' events are added after the MIDI, and
-    /// each has a room of its own.
     /// The events one block's MIDI room holds: its messages over
     /// [`Narrower::MAX_MESSAGES`], the bound [`InputRooms::for_port`] was
     /// built from. `None` for a list with no MIDI room.
@@ -1103,6 +1098,9 @@ impl InputEventList {
         NonZeroU32::new(u32::try_from(self.midi_room / Narrower::MAX_MESSAGES).unwrap_or(u32::MAX))
     }
 
+    /// How many more MIDI events the block can stage: the MIDI room less
+    /// what is staged. The other sources' events are added after the MIDI, and
+    /// each has a room of its own.
     fn midi_room(&self) -> usize {
         self.midi_room.saturating_sub(self.midi_pushed)
     }

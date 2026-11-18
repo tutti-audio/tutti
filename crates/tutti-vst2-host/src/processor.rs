@@ -425,6 +425,11 @@ impl Vst2Processor {
 }
 
 impl Processor for Vst2Processor {
+    /// Takes the node's own intake: events go to the plugin's own queue.
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        tutti_plugin_types::MIDI_STACK_BOUND
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)

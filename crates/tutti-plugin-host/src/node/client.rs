@@ -146,9 +146,13 @@ pub struct InProcClient<F: Loaded> {
     /// announced since.
     prepared_mode: tutti_graph::RenderMode,
     /// The events per block the node declares it accepts on its event input
-    /// (`Shape::event_input_capacity`): the activation's bound until a
-    /// `prepare` computes it from the graph's block.
+    /// (`Shape::event_input_capacity`): [`event_input_bound`](tutti_plugin_types::event_input_bound) for the graph's
+    /// block, held to `event_room`.
     pub(super) event_input: std::num::NonZeroU32,
+    /// The room of the last Processor this node saw (`Processor::event_input`),
+    /// kept while the Processor is away (recalled for a restart or lent to the
+    /// realtime end), so the declared bound never rises to the density's alone.
+    pub(super) event_room: std::num::NonZeroU32,
     /// The parameter events on the event input, as changes only: a slot per
     /// parameter the plugin declared at load and no spares (`closed`: the
     /// node addresses only its declared parameters), the value last
@@ -518,6 +522,7 @@ impl<F: Loaded> InProcClient<F> {
         spares: usize,
         controls: Option<PluginControls>,
         pipeline: Option<Samples>,
+        event_room: Option<std::num::NonZeroU32>,
     ) -> Self {
         // A slot per declared parameter: every parameter can move in one
         // block. Its point room is sized in `prepare`. `spares` is how many
@@ -549,11 +554,15 @@ impl<F: Loaded> InProcClient<F> {
             let instance = inner.lock();
             (instance.lost_flag(), instance.event_input())
         };
-        // The activation's bound, held to what the Processor's storage takes.
-        let event_input = rt
+        // The Processor's room: the one on offer, else the predecessor's, else
+        // the activation's own bound (a node built before its Processor
+        // reached it, with no predecessor).
+        let event_room = rt
             .poll(Processor::stop)
-            .and_then(|processor| processor.event_input())
-            .map_or(event_input, |held| event_input.min(held));
+            .map(|processor| processor.event_input())
+            .or(event_room)
+            .unwrap_or(event_input);
+        let event_input = event_input.min(event_room);
         let failed = tally();
         Self {
             inner,
@@ -581,6 +590,7 @@ impl<F: Loaded> InProcClient<F> {
             rate_refused: false,
             prepared_mode: tutti_graph::RenderMode::Realtime,
             event_input,
+            event_room,
             params,
             segments,
             phase: Samples(0),
@@ -707,18 +717,22 @@ impl<F: Loaded> InProcClient<F> {
         true
     }
 
+    /// Whether no Processor is held by the realtime end: lent away or not yet
+    /// arrived. A test's view of the recall the declared bound survives.
+    #[cfg(test)]
+    pub(super) fn rt_unlent(&mut self) -> bool {
+        self.rt.held().is_none()
+    }
+
     /// The events per block the node declares for `p`'s block:
-    /// [`EVENT_INPUT_DENSITY`](tutti_plugin_types::EVENT_INPUT_DENSITY) of it,
-    /// at most what the Processor's input storage takes. The bound from before
-    /// when the Processor is on offer to the realtime end.
+    /// [`event_input_bound`](tutti_plugin_types::event_input_bound) of it, at
+    /// most the room of the Processor's input storage. The room is read from
+    /// the Processor when it is held here and kept across a recall.
     pub(super) fn bound_for(&mut self, p: &tutti_graph::Prepare) -> std::num::NonZeroU32 {
-        let wanted = tutti_plugin_types::EVENT_INPUT_DENSITY.capacity(p);
-        match self.rt.held() {
-            Some(processor) => processor
-                .event_input()
-                .map_or(wanted, |held| wanted.min(held)),
-            None => self.event_input,
+        if let Some(processor) = self.rt.held() {
+            self.event_room = processor.event_input();
         }
+        tutti_plugin_types::event_input_bound(p).min(self.event_room)
     }
 
     /// Tells the plugin the render mode `p` carries when it is not the mode
@@ -1170,6 +1184,10 @@ mod render_tests {
     }
 
     impl Processor for Scripted {
+        fn event_input(&self) -> std::num::NonZeroU32 {
+            tutti_plugin_types::MIDI_STACK_BOUND
+        }
+
         fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
             if self.fail {
                 return Err(PluginError::Block("scripted failure"));
@@ -1284,6 +1302,10 @@ mod sanitize_tests {
     struct Poisoned;
 
     impl Processor for Poisoned {
+        fn event_input(&self) -> std::num::NonZeroU32 {
+            tutti_plugin_types::MIDI_STACK_BOUND
+        }
+
         fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
             if let PluginAudio::F32(buf) = &mut io.buffer {
                 buf.output().plane_mut(0).samples_mut().copy_from_slice(&[

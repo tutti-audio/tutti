@@ -458,15 +458,20 @@ pub trait Processor: Send {
         None
     }
 
-    /// The most events per block the input storage this Processor was built
-    /// with takes from the node's event input, or `None` for one that holds
-    /// no bound of its own (it stages into the plugin's own storage). The node
-    /// declares at most this as its `Shape::event_input_capacity`, so the
-    /// graph's cut is the only cut: the Processor is never sent what it
-    /// would refuse. Read from the node's `prepare`.
-    fn event_input(&self) -> Option<NonZeroU32> {
-        None
-    }
+    /// The most events per block this Processor takes from the node's event
+    /// input, as it was built: the room of its own input storage (a CLAP
+    /// list, a chunk's MIDI, the node's intake for a format that stages into
+    /// the plugin's own). The node declares at most this as its
+    /// `Shape::event_input_capacity`, so the graph cuts what the Processor
+    /// would otherwise refuse, in frame order and keeping note-offs. Read
+    /// from the node's `prepare`.
+    ///
+    /// **A served plugin has a second cut.** A chunk spans several blocks, and
+    /// its MIDI is one list of [`MIDI_STACK_CAPACITY`](crate::MIDI_STACK_CAPACITY) events that every block
+    /// of the chunk adds to, so a chunk can overflow with every block within
+    /// the declared bound. That cut keeps note-offs (it displaces a note-on
+    /// for one) and is counted as MIDI lost, once.
+    fn event_input(&self) -> NonZeroU32;
 
     /// The frames of latency this Processor adds to the plugin's own (the
     /// [`Controller::latency`] figure): the served pipeline's chunk, which it

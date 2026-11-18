@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use tutti_buffers::{Float, Planes};
-use tutti_plugin_types::{BlockStatus, MIDI_STACK_CAPACITY};
+use tutti_plugin_types::{BlockStatus, MIDI_STACK_BOUND, MidiIntake};
 use tutti_plugin_types::{
     ChordValue, ParameterChanges, PluginAudio, PluginIo, PluginResult, ProcessContext,
     ProcessOutput, Processor, SampleRate, Samples, ScaleValue, TransportInfo, WireMidi,
@@ -33,6 +33,9 @@ pub struct IpcProcessor {
     /// The payload of the chunk being filled: gathered when the chunk begins,
     /// shipped when it completes (possibly a call later).
     pending: BlockPayload,
+    /// Takes every block's MIDI into `pending`: a note-off displaces a note-on
+    /// when the chunk is full, and a SysEx that lost a packet loses the rest.
+    intake: MidiIntake,
     /// The chunk's parameter changes as the bridge takes them: the node's
     /// list copied in when the chunk ships, then swapped for a free buffer.
     params: ParameterChanges,
@@ -51,6 +54,7 @@ impl IpcProcessor {
         let (queues, points) = link.param_room(batcher.chunk());
         Self {
             pending: BlockPayload::new(link.rate()),
+            intake: MidiIntake::default(),
             link,
             batcher,
             params: ParameterChanges::reserved_bridged(queues, points),
@@ -70,6 +74,7 @@ impl Processor for IpcProcessor {
             ctx: io.ctx,
             out: &mut *io.out,
             pending: &mut self.pending,
+            intake: &mut self.intake,
             rate: self.link.rate(),
             params: &mut self.params,
             over: 0,
@@ -100,7 +105,8 @@ impl Processor for IpcProcessor {
         if over > 0 {
             // Taken into a chunk already holding the most it can: counted
             // lost, as the served node counts what its cap drops.
-            io.out.count_midi_lost(over);
+            io.out
+                .count_midi_lost(usize::try_from(over).unwrap_or(usize::MAX));
         }
         Ok(())
     }
@@ -114,16 +120,21 @@ impl Processor for IpcProcessor {
     /// graph node's own reset counts the SysEx it cuts.)
     fn reset(&mut self) {
         self.batcher.reset();
+        // The chunk's MIDI is dropped with it, and a SysEx open in it is cut.
+        let _ = self.intake.lose(&mut self.pending.midi);
         self.pending = BlockPayload::new(self.link.rate());
         self.params.clear();
         // A refused reset is counted (`PluginControls::refused_commands`).
         let _ = self.link.bridge.reset_rt();
     }
 
-    /// A chunk's MIDI is an inline `MidiEventVec`: [`MIDI_STACK_CAPACITY`]
-    /// events, taken from every block the chunk spans.
-    fn event_input(&self) -> Option<std::num::NonZeroU32> {
-        std::num::NonZeroU32::new(MIDI_STACK_CAPACITY as u32)
+    /// A block's MIDI is as large as a chunk's: [`MIDI_STACK_CAPACITY`](tutti_plugin_types::MIDI_STACK_CAPACITY)
+    /// events. A chunk spans several blocks and every one adds to its one
+    /// list, so a served plugin has a second, chunk-level cut: a note-on is
+    /// displaced for a note-off and every event lost is counted once as MIDI
+    /// lost.
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        MIDI_STACK_BOUND
     }
 
     /// The pipeline's chunk: the frames every submission carries.
@@ -171,11 +182,12 @@ struct Piece<'a, 'c> {
     ctx: &'a ProcessContext<'c>,
     out: &'a mut ProcessOutput,
     pending: &'a mut BlockPayload,
+    intake: &'a mut MidiIntake,
     /// The rate the chunk's placeholder transport is at.
     rate: SampleRate,
     params: &'a mut ParameterChanges,
-    /// MIDI the chunk had no room for.
-    over: usize,
+    /// MIDI the chunk had no room for, or gave up for a note-off.
+    over: u64,
     /// What the plugin said at the end of the chunk collected in this call.
     said: BlockStatus,
 }
@@ -203,6 +215,7 @@ impl Chunks for Piece<'_, '_> {
     /// when it completes ([`payload`](Chunks::payload)).
     fn begin(&mut self, _at: usize, _chunk: usize) {
         *self.pending = BlockPayload::new(self.rate);
+        self.intake.new_chunk();
     }
 
     /// The piece's MIDI and harmony join the chunk at `at`, the piece's first
@@ -214,9 +227,7 @@ impl Chunks for Piece<'_, '_> {
                 offset: offset.get().saturating_add(at32),
                 ump: *ump,
             };
-            if self.pending.midi.try_push(event).is_err() {
-                self.over += 1;
-            }
+            self.over += self.intake.push_displacing(&mut self.pending.midi, event);
         }
         // The chunk's harmony carries the degrees a plugin acts on, shifted to
         // the chunk's frames. Chord and scale text is not carried yet: cloning
@@ -321,6 +332,7 @@ impl Chunks for Piece<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_plugin_types::MIDI_STACK_CAPACITY;
     use tutti_types::ParamId;
 
     /// **A piece carries input when it holds an event, a parameter change or a non-silent frame,
@@ -357,6 +369,57 @@ mod tests {
             carries_input(&with_params, Planes::new(&one).expect("one")),
             "a parameter"
         );
+    }
+
+    /// **A chunk full of note-ons keeps the note-off that arrives after it**,
+    /// whichever block of the chunk brings it: the note-off takes the place of
+    /// a note-on (the one of its own key), the chunk stays at its cap, and the
+    /// one event lost is counted once.
+    #[test]
+    fn a_full_chunk_keeps_a_later_note_off_and_counts_one_loss() {
+        use tutti_fixtures::midi;
+        use tutti_graph::{Offset, UmpAt};
+        use tutti_ump::MidiChannel;
+
+        let at = Offset::of(Samples(0), Samples(64));
+        let ons: Vec<UmpAt> = (0..MIDI_STACK_CAPACITY)
+            .map(|k| {
+                (
+                    at,
+                    midi::note_on(MidiChannel::FIRST, (k % 128) as u8, 0x8000),
+                )
+            })
+            .collect();
+        let off: [UmpAt; 1] = [(at, midi::note_off(MidiChannel::FIRST, 5, 0))];
+        let mut out = ProcessOutput::default();
+        let mut pending = BlockPayload::new(SampleRate::SR_48K);
+        let mut intake = MidiIntake::default();
+        let mut params = ParameterChanges::reserved(1, 4);
+        let mut over = 0;
+        for events in [&ons[..], &off[..]] {
+            let ctx = ProcessContext::new().midi(events);
+            let mut piece = Piece {
+                ctx: &ctx,
+                out: &mut out,
+                pending: &mut pending,
+                intake: &mut intake,
+                rate: SampleRate::SR_48K,
+                params: &mut params,
+                over: 0,
+                said: BlockStatus::Continue,
+            };
+            piece.take(0, 64, 0);
+            over += piece.over;
+        }
+        assert_eq!(pending.midi.len(), MIDI_STACK_CAPACITY, "at its cap");
+        assert!(
+            pending.midi.iter().any(|e| matches!(
+                e.ump.note_key_event(),
+                Some(tutti_ump::NoteKeyEvent::Off(_))
+            )),
+            "the note-off is in the chunk"
+        );
+        assert_eq!(over, 1, "one event given up for it, counted once");
     }
 
     /// **A piece's chords and scales join the chunk shifted to the chunk's
@@ -396,6 +459,7 @@ mod tests {
             ctx: &ctx,
             out: &mut out,
             pending: &mut pending,
+            intake: &mut MidiIntake::default(),
             rate: SampleRate::SR_48K,
             params: &mut params,
             over: 0,

@@ -221,6 +221,7 @@ where
         spares,
         None,
         None,
+        None,
     );
     Ok(Wired {
         client,
@@ -278,6 +279,7 @@ where
         parameters,
         spares,
         controls,
+        None,
         None,
     ))
 }

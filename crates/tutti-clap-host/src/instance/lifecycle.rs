@@ -289,17 +289,18 @@ impl ClapLoaded {
 }
 
 /// The rooms of the input event list for a block of `max_frames`: the MIDI
-/// the node is sent ([`InputRooms::for_port`] of `event_input`, the
-/// activation's [`Prepare::event_input`]), the parameter points the host's chunk can arrive with
-/// (`ParameterChanges::point_budget` for the plugin's parameters with a room of
-/// `ParameterQueue::chunk_room`: the chunk's pooled points, and one more in
-/// every queue for the value a skipped block carries, which the bridge
-/// prepends), and the edits the Controller can queue ([`EDIT_CAPACITY`]), the
-/// note expressions ([`INPUT_NOTE_EXPRESSIONS`]) and the transport changes
-/// (`MAX_TRANSPORT_CHANGES`), each source with a room of its own that the MIDI
-/// and the parameter points do not count. So a chunk the host's pool bounded
-/// reaches the plugin whole; past it (a set nothing bounded) the list's own
-/// overflow policy applies (`InputEventList::add_param_changes`).
+/// the node is declared to send ([`InputRooms::for_port`] of `event_input`,
+/// the activation's [`Prepare::event_input`]), the parameter points the
+/// host's chunk can arrive with (`ParameterChanges::point_budget` for the
+/// plugin's parameters with a room of `ParameterQueue::chunk_room`: the
+/// chunk's pooled points, and one more in every queue for the value a skipped
+/// block carries, which the bridge prepends), and the edits the Controller
+/// can queue ([`EDIT_CAPACITY`]), the note expressions
+/// ([`INPUT_NOTE_EXPRESSIONS`]) and the transport changes
+/// (`MAX_TRANSPORT_CHANGES`), each source with a room of its own that the
+/// MIDI and the parameter points do not count. So a chunk the host's pool
+/// bounded reaches the plugin whole; past it (a set nothing bounded) the
+/// list's own overflow policy applies (`InputEventList::add_param_changes`).
 fn input_rooms(table: &RangeTable, max_frames: usize, event_input: NonZeroU32) -> InputRooms {
     let param_points =
         ParameterChanges::point_budget(table.ranges.len(), ParameterQueue::chunk_room(max_frames));

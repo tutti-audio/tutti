@@ -68,6 +68,9 @@ pub struct Rebinder<F: Loaded> {
     /// The pipeline the node had when the rebinder was made, for a node over
     /// a plugin whose `controls` hold none.
     pipeline: Samples,
+    /// The Processor's event room the node last saw: the room of a successor
+    /// until its own Processor reaches it.
+    event_room: std::num::NonZeroU32,
     /// The node declares a bypass of the plugin's own.
     own_bypass: bool,
     tempo: TempoReader,
@@ -87,6 +90,7 @@ impl<F: Loaded> Clone for Rebinder<F> {
             spares: self.spares,
             controls: self.controls.clone(),
             pipeline: self.pipeline,
+            event_room: self.event_room,
             own_bypass: self.own_bypass,
             tempo: self.tempo.clone(),
         }
@@ -155,6 +159,7 @@ where
             self.spares,
             self.controls.clone(),
             Some(pipeline),
+            Some(self.event_room),
         )
         .bind(self.tempo.clone());
         Ok((
@@ -278,6 +283,7 @@ impl<F: Loaded> InProcClient<F> {
             spares: self.spares,
             controls: self.controls.clone(),
             pipeline: self.pipeline,
+            event_room: self.event_room,
             own_bypass: self.declared.ports.own_bypass,
             tempo,
         }
@@ -361,25 +367,25 @@ mod tests {
         (fake, rebinder, node, inner)
     }
 
-    /// **The node declares the bound one event per frame of its block gives,
-    /// within the graph's port limits** (`EventDensity::per_frame`: a floor
-    /// of 256 events, a cap of 8192): 256 at the 64-frame block it was
-    /// built for, 2048 at 2048 frames, 8192 at 1 << 20.
+    /// **The node declares at most what its own MIDI intake takes**
+    /// (`MIDI_STACK_CAPACITY`, 256 events a block): the density's floor at a
+    /// 64-frame block, its 2048 at 2048 frames and its cap of 8192 at 1 << 20
+    /// all declare 256.
     #[test]
-    fn the_node_declares_one_event_per_frame_of_its_block_as_its_input_bound() {
+    fn the_node_declares_no_more_than_its_midi_intake_takes() {
         let (_fake, _rebinder, node, _inner) = rig();
         let bound = |node: &PluginNode<FakeLoaded>| node.shape().event_input_capacity;
         assert_eq!(bound(&node).map(|n| n.get()), Some(256));
         let node = contract::prepared(node, SR, 2048);
-        assert_eq!(bound(&node).map(|n| n.get()), Some(2048));
+        assert_eq!(bound(&node).map(|n| n.get()), Some(256));
         let node = contract::prepared(node, SR, 1 << 20);
-        assert_eq!(bound(&node).map(|n| n.get()), Some(8_192));
+        assert_eq!(bound(&node).map(|n| n.get()), Some(256));
     }
 
     /// **The node never declares more than its Processor's input storage
     /// takes**, whatever the graph's block: a Processor holding 100 events a
-    /// block (as a served one's chunk holds its MIDI) bounds the node at 100
-    /// at a block whose density gives 2048, and the density's figure under it.
+    /// block bounds the node at 100 at blocks whose density gives 256 and
+    /// 2048; one holding more than the intake leaves the intake's 256.
     #[test]
     fn the_node_declares_no_more_than_its_processor_takes() {
         let (fake, _rebinder, node, _inner) = rig();
@@ -388,14 +394,35 @@ mod tests {
         let node = contract::prepared(node, SR, 2048);
         assert_eq!(bound(&node).map(|n| n.get()), Some(100));
         let node = contract::prepared(node, SR, 64);
-        assert_eq!(
-            bound(&node).map(|n| n.get()),
-            Some(100),
-            "the density's floor of 256 is cut to what the Processor takes"
-        );
+        assert_eq!(bound(&node).map(|n| n.get()), Some(100));
         fake.hold_events(4096);
         let node = contract::prepared(node, SR, 2048);
-        assert_eq!(bound(&node).map(|n| n.get()), Some(2048));
+        assert_eq!(bound(&node).map(|n| n.get()), Some(256));
+    }
+
+    /// **A node with no Processor to read declares the room its predecessor
+    /// last saw**, not the density's alone: a successor built (a restart's) with
+    /// its Processor not yet lent is prepared at 2048 frames and declares 100
+    /// where the plain density would give 256.
+    #[test]
+    fn a_node_without_its_processor_declares_the_last_room_it_saw() {
+        let (fake, _rebinder, node, _inner) = rig();
+        fake.hold_events(100);
+        let node = contract::prepared(node, SR, 2048);
+        let (mut successor, _pending) = node
+            .client
+            .rebinder(tempo())
+            .prepare()
+            .expect("a successor");
+        assert!(
+            successor.client.rt_unlent(),
+            "the successor holds no Processor yet"
+        );
+        let successor = contract::prepared(successor, SR, 2048);
+        assert_eq!(
+            successor.shape().event_input_capacity.map(|n| n.get()),
+            Some(100)
+        );
     }
 
     /// A node over the plugin's ports now, committed at once: the caller's

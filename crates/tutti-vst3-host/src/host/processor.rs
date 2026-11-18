@@ -22,8 +22,7 @@ use crate::types::{
     Vst3Sample, to_process_context,
 };
 use tutti_vst3_ffi::{
-    AudioSide, BusBuffers, Busy, EventList, FlushIo, MIDI_EVENT_ROOM, ParameterChangesImpl,
-    ProcessIo,
+    AudioSide, BusBuffers, Busy, EventList, FlushIo, ParameterChangesImpl, ProcessIo,
 };
 
 use super::midi_learn::MidiLearnProducer;
@@ -910,10 +909,15 @@ impl ProcessorAny {
 }
 
 impl Processor for ProcessorAny {
-    /// The input list's MIDI room ([`MIDI_EVENT_ROOM`]): what it takes
-    /// however full the other sources are.
-    fn event_input(&self) -> Option<std::num::NonZeroU32> {
-        std::num::NonZeroU32::new(MIDI_EVENT_ROOM as u32)
+    /// The input list's MIDI share is [`MIDI_STACK_CAPACITY`](tutti_plugin_types::MIDI_STACK_CAPACITY) events whatever
+    /// the other sources hold (`EVENT_CAPACITY` less the expression and
+    /// harmony rooms), the node's own intake size. A packet that encodes to
+    /// several VST3 events (a note with per-note values held, a bend
+    /// sensitivity change re-sending each live note's bend) is staged whole or
+    /// not at all and counted, so a block of such packets can overflow the
+    /// share inside this bound.
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        tutti_plugin_types::MIDI_STACK_BOUND
     }
 
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {

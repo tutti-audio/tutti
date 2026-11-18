@@ -55,6 +55,10 @@ impl Fake {
 }
 
 impl Processor for Fake {
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        tutti_plugin_types::MIDI_STACK_BOUND
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         let PluginAudio::F32(buf) = &mut io.buffer else {
             unreachable!("the probe renders 32-bit");

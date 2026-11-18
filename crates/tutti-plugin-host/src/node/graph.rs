@@ -97,10 +97,10 @@ where
     /// over); what was delivered to the plugin is kept.
     fn prepare(&mut self, p: &Prepare) {
         let this = &mut self.client;
-        // What the graph sends the event input in a block: the density's
-        // bound for the graph's block, never more than the Processor's input
-        // storage takes (`Processor::event_input`), so the graph's cut is the
-        // only cut. A Processor on offer keeps the last bound.
+        // What the event input is declared to take in a block: the density's
+        // bound for the graph's block, at most the Processor's input room
+        // (`Processor::event_input`; the last one seen while it is away). A
+        // served plugin has a second cut at its chunk (`Processor::event_input`).
         this.event_input = this.bound_for(p);
         // A Processor that follows the graph takes its rate, block and
         // quantum live (no restart, no main thread); one that does not is

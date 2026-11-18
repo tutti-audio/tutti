@@ -46,8 +46,7 @@ pub use component_handler::{
 };
 pub(crate) use event_list::event_list_ptr;
 pub use event_list::{
-    EVENT_CAPACITY, EventList, MIDI_EVENT_ROOM, NOTE_EXPRESSION_ROOM, SYSEX_OUT_ROOM, Staged,
-    Staging,
+    EVENT_CAPACITY, EventList, NOTE_EXPRESSION_ROOM, SYSEX_OUT_ROOM, Staged, Staging,
 };
 pub(crate) use host_application::HostApplication;
 pub(crate) use param_changes::param_changes_ptr;

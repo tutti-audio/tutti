@@ -237,7 +237,7 @@ struct Shared {
     /// until the host polls it; `0` when it has not asked.
     resize_request: AtomicU64,
     /// The events per block the fake's input storage takes
-    /// (`FakePlugin::hold_events`); `0` for no bound of its own.
+    /// (`FakePlugin::hold_events`); `0` for the node's intake room.
     event_input: AtomicU32,
     /// How the fake takes a render mode (`FakePlugin::take_render_mode`):
     /// `0` at activation, `1` live, `2` not at all.
@@ -424,7 +424,7 @@ impl FakePlugin {
     }
 
     /// The fake's Processor takes `per_block` events a block on its event
-    /// input from now on (`Processor::event_input`); none by default.
+    /// input from now on (`Processor::event_input`); the node's intake room by default.
     pub fn hold_events(&self, per_block: u32) {
         self.0.event_input.store(per_block, Ordering::Relaxed);
     }
@@ -910,8 +910,9 @@ impl Controller for FakeController {
 }
 
 impl Processor for FakeProcessor {
-    fn event_input(&self) -> Option<std::num::NonZeroU32> {
+    fn event_input(&self) -> std::num::NonZeroU32 {
         std::num::NonZeroU32::new(self.shared.event_input.load(Ordering::Relaxed))
+            .unwrap_or(crate::MIDI_STACK_BOUND)
     }
 
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {

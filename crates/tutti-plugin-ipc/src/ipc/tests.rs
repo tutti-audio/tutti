@@ -369,12 +369,9 @@ fn the_served_processor_takes_what_a_chunks_midi_holds() {
     for block in [48, 1000] {
         let (ipc, _server) = mock();
         let (processor, _controller) = activate(ipc, block);
-        let held = processor.event_input().map(|n| n.get() as usize);
-        assert_eq!(
-            held,
-            Some(tutti_plugin_types::MidiEventVec::new().capacity())
-        );
-        assert_eq!(held, Some(tutti_plugin_types::MIDI_STACK_CAPACITY));
+        let held = processor.event_input().get() as usize;
+        assert_eq!(held, tutti_plugin_types::MidiEventVec::new().capacity());
+        assert_eq!(held, tutti_plugin_types::MIDI_STACK_CAPACITY);
     }
 }
 

@@ -1,9 +1,7 @@
-//! **A CLAP node declares the event-input bound its list was built with**, in
-//! process: the density's figure for the graph's block, never past what the
-//! activation's input list holds, so the graph's cut is the only cut.
-//!
-//! The load activates at the loader's largest block (4096 frames), so the
-//! list holds 4096 events (one per frame, `EventDensity::per_frame(1)`).
+//! **A CLAP node declares the event-input bound its list holds**, in process:
+//! the density's figure for the graph's block, at most the node's own MIDI
+//! intake (256 events) and the activation's input list (built for the same
+//! bound), so what the graph sends is what the list takes.
 
 #![cfg(feature = "clap")]
 
@@ -25,7 +23,7 @@ fn declared_at(node: &mut impl Node, frames: usize) -> Option<u32> {
 }
 
 #[test]
-fn the_declared_bound_is_the_density_up_to_the_activations_room() {
+fn the_declared_bound_is_what_the_list_holds_and_the_intake_takes() {
     let _lock = machine_lock();
     let (client, _handle) = tutti_plugin_host::load_client::<ClapLoaded>(
         main_thread(),
@@ -38,11 +36,9 @@ fn the_declared_bound_is_the_density_up_to_the_activations_room() {
     let mut node = client.bind(
         tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
     );
-    assert_eq!(declared_at(&mut node, 64), Some(256), "the density's floor");
-    assert_eq!(declared_at(&mut node, 2048), Some(2048), "one a frame");
-    assert_eq!(
-        declared_at(&mut node, 8192),
-        Some(4096),
-        "a graph block past the activation's is held to the activation's room"
-    );
+    // The activation's list holds 256 events (the intake's size), whatever
+    // the block the graph is prepared for.
+    for frames in [64, 2048, 8192] {
+        assert_eq!(declared_at(&mut node, frames), Some(256), "{frames} frames");
+    }
 }

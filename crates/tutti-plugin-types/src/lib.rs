@@ -301,7 +301,7 @@ pub use harmony::{
 pub use lifecycle::{
     EFFECT_CAPACITY, EVENT_INPUT_DENSITY, Effect, Event, FDS_PER_TICK, HostOp, MAX_STEP_EFFECTS,
     Notice, Prepare, Reply, Request, RescanScope, RestartRules, Stage, State, TIMERS_PER_TICK,
-    TimerId, standing, step,
+    TimerId, event_input_bound, standing, step,
 };
 pub use load_stage::LoadStage;
 pub use main_thread::{MainThreadMarker, MainWork, MainWorkHandle};
@@ -313,7 +313,8 @@ pub use metadata::{
     Processing,
 };
 pub use midi::{
-    MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi, group_of_port,
+    MIDI_STACK_BOUND, MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi,
+    group_of_port,
 };
 pub use midi_intake::MidiIntake;
 pub use timeouts::{Timeouts, ZeroTimeout};
