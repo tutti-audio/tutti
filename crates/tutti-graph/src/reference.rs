@@ -1950,10 +1950,11 @@ fn ref_port<F: Float>(
             from + (b1 - from) * progress_in::<F>(i + 1, frames)
         }
     };
+    let bound = |v: f64| F::from_unit(CellValue(v));
     let (lo, hi) = if range.min <= range.max {
-        (F::from_f32(range.min), F::from_f32(range.max))
+        (bound(range.min), bound(range.max))
     } else {
-        (F::from_f32(range.max), F::from_f32(range.min))
+        (bound(range.max), bound(range.min))
     };
     // The event source's value at every frame, the base before its
     // first event; it replaces the base, clamped.

@@ -117,7 +117,7 @@ use crate::held::Held;
 use crate::kernels::AudioRing;
 use crate::lane::{fade_gains, ramp_in};
 use crate::node::Shape;
-use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
+use crate::param::{ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
 use crate::pass::Pass;
 use crate::spec::EventOut;
 use tutti_buffers::Float;
@@ -298,7 +298,7 @@ pub(crate) struct ModeCell {
     /// The range a driven mix is clamped to: the param port's own cell over
     /// the one address [`NodeMix::ADDR`], so the lane's step clamps to it as a
     /// port does and a control lane reads it through the same
-    /// [`ParamRangeReader`].
+    /// [`ParamRangeCell`].
     range: Arc<ParamRanges>,
 }
 
@@ -314,10 +314,16 @@ impl ModeCell {
         }
     }
 
-    /// Store the range a driven mix is clamped to (narrowed to `0..=1`).
-    /// Wait-free.
+    /// Publish the range a driven mix is clamped to (narrowed to `0..=1`).
+    /// Control side.
     pub(crate) fn store_range(&self, range: ParamRange) {
         self.range.store(NodeMix::ADDR, NodeMix::lane_range(range));
+    }
+
+    /// Frees the ranges the audio thread has let go of; how many are still
+    /// held. Control side.
+    pub(crate) fn reclaim(&self) -> usize {
+        self.range.reclaim()
     }
 
     /// The mix as a width-erased cell: the very cell the executor reads and
@@ -328,16 +334,16 @@ impl ModeCell {
         Arc::clone(&self.mix).into()
     }
 
-    /// A read-only view of the range cell, for a control lane.
-    pub(crate) fn range_reader(&self) -> ParamRangeReader {
+    /// A read-only handle on the range cell, for a control lane.
+    pub(crate) fn range_cell(&self) -> ParamRangeCell {
         self.range
-            .reader(NodeMix::ADDR)
+            .cell(NodeMix::ADDR)
             .expect("the cell holds the mix's own address")
     }
 
     /// The range cells, for a driven lane's state.
-    pub(crate) fn ranges(&self) -> Arc<ParamRanges> {
-        Arc::clone(&self.range)
+    pub(crate) fn ranges(&self) -> &ParamRanges {
+        &self.range
     }
 
     /// Store `mode`. Wait-free.

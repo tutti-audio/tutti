@@ -521,7 +521,7 @@ fn the_mix_port_is_refused_as_a_param_is() {
     ));
 
     let mut nan = rig.spec.clone();
-    nan.set_param_range(mix_of(2), ParamRange::new(f32::NAN, 1.0));
+    nan.set_param_range(mix_of(2), ParamRange::new(f64::NAN, 1.0));
     assert!(matches!(
         nan.validate().unwrap_err()[..],
         [GraphInvalid::BadParamRange { at, .. }] if at == mix_of(2)
@@ -714,15 +714,15 @@ fn the_mix_cell_is_the_one_writer() {
     // And its range is the mode cell's.
     let at = mix_of(1);
     let range = ed.param_range_cell(at).expect("the mix has a range cell");
-    assert_eq!(range.load(), NodeMix::DEFAULT_RANGE);
+    assert_eq!(range.current(), NodeMix::DEFAULT_RANGE);
     ed.set_param_range(at, ParamRange::new(-3.0, 3.0))
         .expect("set");
     assert_eq!(
-        range.load(),
+        range.current(),
         ParamRange::new(0.0, 1.0),
         "narrowed to the blend"
     );
     ed.set_param_range(at, ParamRange::new(0.25, 0.5))
         .expect("set");
-    assert_eq!(range.load(), ParamRange::new(0.25, 0.5));
+    assert_eq!(range.current(), ParamRange::new(0.25, 0.5));
 }

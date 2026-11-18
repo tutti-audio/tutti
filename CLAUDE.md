@@ -202,7 +202,8 @@ touched.
 - Add a unit only for a distinct range or a distinct algebra.
 - A quantity has one width: continuous units are `f64`, positions and counts are integers.
   Data is generic over the graph's `F`. A quantity becomes data only through `F::from_unit(u)`,
-  `F::lit(x)` for a literal, a kernel's `Design::of`, or the graph's lane render;
+  `F::lit(x)` for a literal, a kernel's `Design::of` (a figure it computes, a coefficient or
+  pole, crosses with `F::from_design`), or the graph's lane render;
   `cargo xtask check-width` holds it.
 ### Range-checked values
 
