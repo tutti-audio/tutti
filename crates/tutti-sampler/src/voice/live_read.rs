@@ -53,9 +53,9 @@
 //! instead. A block that reads nothing tells the ring so (`PosReader::idle`), so a
 //! paused voice holds no refill back.
 
+use crate::SamplerFloat;
 use tutti_buffers::Float;
 use tutti_graph::FadeLaw;
-use tutti_rt::RingFloat;
 use tutti_types::MAX_CHANNELS;
 use tutti_units::{Amplitude, ReadRate, SamplePosition, Samples};
 
@@ -91,16 +91,12 @@ impl Fade {
     /// 1 from the fade's end on.
     #[inline]
     fn weight<F: Float>(frames: usize, k: usize) -> F {
-        F::from_f64(
-            FadeLaw::EqualAmplitude
-                .between(
-                    Amplitude::SILENT,
-                    Amplitude::UNITY,
-                    Samples(k),
-                    Samples(frames),
-                )
-                .get(),
-        )
+        F::from_unit(FadeLaw::EqualAmplitude.between(
+            Amplitude::SILENT,
+            Amplitude::UNITY,
+            Samples(k),
+            Samples(frames),
+        ))
     }
 }
 
@@ -137,7 +133,7 @@ struct State<F: Float> {
 
 /// A live voice's reader over its stream's ring.
 #[derive(Debug)]
-pub(crate) struct LiveRead<F: RingFloat = f32> {
+pub(crate) struct LiveRead<F: SamplerFloat = f32> {
     ring: SharedReader<F>,
     /// The ring's one reader, this voice's alone (see the module docs);
     /// `None` once severed, in a clone, or for a ring whose reader was taken.
@@ -152,7 +148,7 @@ pub(crate) struct LiveRead<F: RingFloat = f32> {
     st: State<F>,
 }
 
-impl<F: RingFloat> Clone for LiveRead<F> {
+impl<F: SamplerFloat> Clone for LiveRead<F> {
     /// The same ring and read state, without the reader: a clone renders
     /// silence until it is severed and handed a file (see the module docs).
     fn clone(&self) -> Self {
@@ -165,7 +161,7 @@ impl<F: RingFloat> Clone for LiveRead<F> {
     }
 }
 
-impl<F: RingFloat> LiveRead<F> {
+impl<F: SamplerFloat> LiveRead<F> {
     /// A reader over `ring` through its one `reader` and the reader of the
     /// ring's control registered beside it (`None`: silent), `width` wide (at most
     /// [`MAX_CHANNELS`]), placing the ring's channels by `place`. Both
@@ -470,7 +466,7 @@ impl<E: FnMut(usize, &[F]), F: Float> Out<'_, E, F> {
 /// `st.width` wide and lands on as many lanes as there are, so a reader
 /// wider than the caller drops its last channels.
 #[allow(clippy::too_many_arguments)] // one block's read, and where it goes
-fn steady_lanes<F: RingFloat>(
+fn steady_lanes<F: SamplerFloat>(
     block: &Block<'_, F>,
     map: &RingMap<F>,
     place: &Place<F>,
@@ -621,16 +617,12 @@ impl<F: Float> State<F> {
         let out_ramp = if left > declick {
             F::ONE
         } else {
-            F::from_f64(
-                FadeLaw::EqualAmplitude
-                    .between(
-                        Amplitude::UNITY,
-                        Amplitude::SILENT,
-                        Samples(declick - left),
-                        Samples(declick),
-                    )
-                    .get(),
-            )
+            F::from_unit(FadeLaw::EqualAmplitude.between(
+                Amplitude::UNITY,
+                Amplitude::SILENT,
+                Samples(declick - left),
+                Samples(declick),
+            ))
         };
         fade.started |= new;
 
@@ -669,7 +661,7 @@ impl<F: Float> State<F> {
 /// into `out`: `true` when it sounded or is silent by the arrangement, `false`
 /// when the window lacks a tap.
 #[inline]
-fn read_ring<F: RingFloat>(
+fn read_ring<F: SamplerFloat>(
     block: &Block<'_, F>,
     src: usize,
     place: &Place<F>,

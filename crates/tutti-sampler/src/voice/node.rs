@@ -22,11 +22,12 @@ use super::disk_voice::DiskVoice;
 use super::disk_voice::VoiceHealth;
 use super::slot::{PlaybackSlot, stretch_wanted};
 use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
+use crate::SamplerFloat;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, ParamSet, Prepare,
     Shape, Status,
 };
-use tutti_rt::{Reader, RingFloat};
+use tutti_rt::Reader;
 use tutti_transport::TempoReader;
 use tutti_types::{ChannelLayout, Param};
 use tutti_units::{Amplitude, SampleRate, Tail, UnitParam};
@@ -61,7 +62,7 @@ use tutti_units::{Amplitude, SampleRate, Tail, UnitParam};
 /// set to the gain last set, with a stretch filter of its own. It reads its render's
 /// transport from its block's `Env`. A disk voice's node
 /// forks only for an offline render.
-pub struct VoiceNode<F: RingFloat = f32> {
+pub struct VoiceNode<F: SamplerFloat = f32> {
     /// The single voice plus its resident stretch filter and the per-sample
     /// read, shared with the pool's slots.
     pub(crate) slot: PlaybackSlot<F>,
@@ -97,7 +98,7 @@ pub struct VoiceNode<F: RingFloat = f32> {
     reach: Reach,
 }
 
-impl<F: RingFloat> VoiceNode<F> {
+impl<F: SamplerFloat> VoiceNode<F> {
     /// Wraps a single [`Voice`] as a standalone stereo graph node. Builds the
     /// resident stretch processor once (like a mixer slot), off any hot path.
     pub fn new(voice: Voice<F>) -> Self {
@@ -120,7 +121,7 @@ impl<F: RingFloat> VoiceNode<F> {
         // `prepare` re-rates the filter to the graph's rate.
         let sample_rate = SampleRate::SR_44K1;
         let stretch = stretch_wanted(&voice.play).then(|| {
-            let unit = stretch::Unit::with_channels(sample_rate, channels);
+            let unit = stretch::Unit::<F>::with_channels(sample_rate, channels);
             unit.set_stretch_factor(voice.play.stretch);
             unit.set_pitch_cents(voice.play.pitch);
             unit
@@ -233,7 +234,10 @@ impl<F: RingFloat> VoiceNode<F> {
         // scales by, the source's own cell what the disk tier's does.
         // A cell holding a NaN or an infinity (a host can write anything into
         // it) is the gain the voice already has.
-        let gain = driven.map_or_else(|| self.gain.load(), |v| Amplitude(v.to_f64().max(0.0)));
+        let gain = driven.map_or_else(
+            || self.gain.load(),
+            |v| Amplitude(Into::<f64>::into(v).max(0.0)),
+        );
         let gain = if gain.get().is_finite() {
             gain
         } else {
@@ -311,7 +315,7 @@ impl<F: RingFloat> VoiceNode<F> {
 
 // Hand-rolled: wraps a non-`Debug` `PlaybackSlot`. Print the wrapped `Voice`
 // (which is `Debug`) and leave the resident stretch DSP out.
-impl<F: RingFloat> std::fmt::Debug for VoiceNode<F> {
+impl<F: SamplerFloat> std::fmt::Debug for VoiceNode<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VoiceNode")
             .field("voice", &self.slot.voice)
@@ -319,7 +323,7 @@ impl<F: RingFloat> std::fmt::Debug for VoiceNode<F> {
     }
 }
 
-impl<F: RingFloat> From<Voice<F>> for VoiceNode<F> {
+impl<F: SamplerFloat> From<Voice<F>> for VoiceNode<F> {
     fn from(voice: Voice<F>) -> Self {
         Self::new(voice)
     }
@@ -329,11 +333,11 @@ impl<F: RingFloat> From<Voice<F>> for VoiceNode<F> {
 // `UnitParam::Volume`. Block-rate in the voice (read once per block, as its
 // cell is), so a driven port is read the same way: its value on the block's
 // last frame.
-tutti_graph::declare_params!([F: RingFloat] VoiceNode<F>, n {
+tutti_graph::declare_params!([F: SamplerFloat] VoiceNode<F>, n {
     Volume => Amplitude = &n.gain,
 });
 
-impl<F: RingFloat> Node<F> for VoiceNode<F> {
+impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
     /// No inputs, [`channels`](Self::channels) outputs; a source, never
     /// skipped, with the ring-out of `ring_out`.
     fn shape(&self) -> Shape {
@@ -425,7 +429,7 @@ impl<F: RingFloat> Node<F> for VoiceNode<F> {
 /// at a time and only the ones that changed (a loop set again would restart
 /// the free-running cursor's lap). A disk voice's loop is its stream's, so
 /// only a memory voice takes one here.
-fn apply_steering<F: RingFloat>(voice: &mut Voice<F>, was: &Steering, now: &Steering) {
+fn apply_steering<F: SamplerFloat>(voice: &mut Voice<F>, was: &Steering, now: &Steering) {
     if now.window != was.window
         && let Some(window) = now.window
     {
@@ -450,7 +454,7 @@ fn apply_steering<F: RingFloat>(voice: &mut Voice<F>, was: &Steering, now: &Stee
 }
 
 /// A voice node's fork source: see "Forks" on [`VoiceNode`].
-struct VoiceNodeFork<F: RingFloat> {
+struct VoiceNodeFork<F: SamplerFloat> {
     /// The voice as inserted. Shares with the live node what a `Voice`
     /// clone shares (a memory voice's gain cell, a disk voice's stream
     /// record and control cell, never its ring reader); a fork copies it
@@ -468,7 +472,7 @@ struct VoiceNodeFork<F: RingFloat> {
     tempo: Option<TempoReader>,
 }
 
-impl<F: RingFloat> ForkSource<F> for VoiceNodeFork<F> {
+impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
     fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         let mut voice = self.template.fork_copy(mode)?;
         apply_steering(&mut voice, &Steering::default(), &self.steering.current());
@@ -490,7 +494,7 @@ impl<F: RingFloat> ForkSource<F> for VoiceNodeFork<F> {
     }
 }
 
-impl<F: RingFloat> IntoNode<F> for VoiceNode<F> {
+impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
     type Controls = VoiceNodeHandle<F>;
 
     fn into_parts(self) -> NodeParts<VoiceNodeHandle<F>, F> {

@@ -5,8 +5,8 @@
 //! geometry expresses both, and [`Unit::input_rate`] tells the caller how fast
 //! to feed it.
 
-use tutti_buffers::{Float, Mono, MonoMut, Sample, convert_mono};
-use tutti_dsp::StftGeometry;
+use tutti_buffers::Float;
+use tutti_dsp::{FftFloat, StftGeometry};
 
 use super::vocoder::Vocoder;
 use super::{FftSize, MAX_BUFFER_SIZE};
@@ -56,12 +56,12 @@ use tutti_units::{Cents, ReadRate, SampleRate, StretchFactor};
 /// independent — there is no phase locking between them, so a correlated
 /// source can drift channel-to-channel. Fixing that is a separate question from
 /// width.
-pub struct Unit {
+pub struct Unit<F: Float + FftFloat> {
     /// The per-channel state, owned. Boxed so a `Unit` moves as a pointer:
     /// the pool's drain moves filters in and out of `VoiceCommand`s, which
     /// stay small (and a move out of a field frees nothing, where a move out
     /// of a `Box<Unit>` would free the box on the audio thread).
-    pub(super) ch: Box<Channels>,
+    pub(super) ch: Box<Channels<F>>,
     /// The unit's declared width — one vocoder per channel.
     pub(super) width: ChannelLayout,
     /// Written only through [`set_stretch_factor`](Self::set_stretch_factor),
@@ -89,21 +89,21 @@ pub struct Unit {
 
 /// A [`Unit`]'s per-channel state: one vocoder per channel, and `process`'s
 /// block scratch.
-pub(super) struct Channels {
+pub(super) struct Channels<F: Float + FftFloat> {
     /// One per channel; its length is the unit's width.
-    pub(super) vocoders: Vec<Vocoder>,
+    pub(super) vocoders: Vec<Vocoder<F>>,
     /// `process`'s per-block working buffers, one pair per channel. Carry
     /// nothing between blocks: `process` overwrites `scratch_in` from its
     /// input and clears `scratch_out` before draining into it.
-    /// Each is a `Box<[f32]>` of `MAX_BUFFER_SIZE`, fixed here; `process`
+    /// Each is a `Box<[F]>` of `MAX_BUFFER_SIZE`, fixed here; `process`
     /// slices a run of it and splits a longer block into runs.
-    pub(super) scratch_in: Vec<Box<[f32]>>,
-    pub(super) scratch_out: Vec<Box<[f32]>>,
+    pub(super) scratch_in: Vec<Box<[F]>>,
+    pub(super) scratch_out: Vec<Box<[F]>>,
 }
 
 // Hand-rolled: holds non-`Debug` vocoders and block scratch buffers. Print the
 // live stretch/pitch atomics and the enabled flag.
-impl std::fmt::Debug for Unit {
+impl<F: Float + FftFloat> std::fmt::Debug for Unit<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Unit")
             .field("channels", &self.width)
@@ -114,7 +114,7 @@ impl std::fmt::Debug for Unit {
     }
 }
 
-impl Unit {
+impl<F: Float + FftFloat> Unit<F> {
     /// Creates a stereo unit at `sample_rate`, with the default FFT size
     /// ([`FftSize::N2048`]), unity stretch and no transposition (bypassing).
     /// Allocates: control thread.
@@ -157,8 +157,8 @@ impl Unit {
         let n = width.count() as usize;
         // One channel plans and builds the shared tables; the rest are fresh
         // vocoders on them.
-        let first = Vocoder::new(geometry);
-        let mut vocoders: Vec<Vocoder> = (1..n).map(|_| first.clone_fresh()).collect();
+        let first = Vocoder::<F>::new(geometry);
+        let mut vocoders: Vec<Vocoder<F>> = (1..n).map(|_| first.clone_fresh()).collect();
         vocoders.push(first);
         Self::from_vocoders(vocoders, width, StretchFactor::UNITY, Cents(0.0), true)
     }
@@ -167,7 +167,7 @@ impl Unit {
     /// sized here: a unit must be usable without a later hook, and this is the
     /// control thread.
     fn from_vocoders(
-        vocoders: Vec<Vocoder>,
+        vocoders: Vec<Vocoder<F>>,
         width: ChannelLayout,
         stretch_factor: StretchFactor,
         pitch_cents: Cents,
@@ -176,7 +176,7 @@ impl Unit {
         let n = vocoders.len();
         let scratch = || {
             (0..n)
-                .map(|_| vec![0.0f32; MAX_BUFFER_SIZE].into_boxed_slice())
+                .map(|_| vec![F::ZERO; MAX_BUFFER_SIZE].into_boxed_slice())
                 .collect::<Vec<_>>()
         };
         Self {
@@ -480,7 +480,7 @@ pub(super) fn clamp_stretch(factor: StretchFactor) -> StretchFactor {
     }
 }
 
-impl Unit {
+impl<F: Float + FftFloat> Unit<F> {
     /// Filter frames `frames` of the lanes `input` into the same frames of
     /// `output`, `n` lanes each (`n` ≥ 1: the caller's width): exactly
     /// what one [`tick`](Self::tick) per frame, each handed `n` input
@@ -506,7 +506,7 @@ impl Unit {
     ///   `tick` leaves them.
     ///
     /// Allocation-free.
-    pub(crate) fn filter_lanes<F: Float, I: AsRef<[F]>, O: AsMut<[F]>>(
+    pub(crate) fn filter_lanes<I: AsRef<[F]>, O: AsMut<[F]>>(
         &mut self,
         input: &[I],
         output: &mut [O],
@@ -536,18 +536,18 @@ impl Unit {
         for (c, v) in self.ch.vocoders.iter_mut().enumerate() {
             let src = input[if c < n { c } else { 0 }].as_ref();
             let mut debt = start;
-            let mut one = [0.0f32];
+            let mut one = [F::ZERO];
             for i in frames.clone() {
                 debt += rate;
                 while debt >= 1.0 {
                     debt -= 1.0;
-                    v.input.push(&[src[i].convert_to::<f32>()]);
+                    v.input.push(&[src[i]]);
                     v.process(analysis_hop, synthesis_hop);
                 }
                 if c < n_out {
-                    one[0] = 0.0;
+                    one[0] = F::ZERO;
                     v.output.drain(&mut one);
-                    output[c].as_mut()[i] = one[0].convert_to::<F>();
+                    output[c].as_mut()[i] = one[0];
                 }
             }
             end = debt;
@@ -556,7 +556,7 @@ impl Unit {
     }
 }
 
-impl Clone for Unit {
+impl<F: Float + FftFloat> Clone for Unit<F> {
     /// A fresh filter: the same width, window and parameters, its own
     /// vocoders with none of this one's running state, and its own block
     /// scratch. See "Owned, not shared" on [`Unit`] for who clones, and why
@@ -576,7 +576,7 @@ impl Clone for Unit {
 
 // The filter's frame and block entry points. A slot's filter is never a graph
 // node, so these are plain methods rather than a `tutti_graph::Node` impl.
-impl Unit {
+impl<F: Float + FftFloat> Unit<F> {
     /// Clears the running state: every vocoder's rings and phase history, and
     /// the intake debt. Allocation-free.
     pub fn reset(&mut self) {
@@ -608,7 +608,7 @@ impl Unit {
     /// Processes one frame: `input` in (one sample per channel; a short frame
     /// fans channel 0 to the rest), `output` out. Allocation-free; safe on the
     /// audio thread.
-    pub fn tick<F: Float>(&mut self, input: &[F], output: &mut [F]) {
+    pub fn tick(&mut self, input: &[F], output: &mut [F]) {
         // `input` is the source frame the caller already produced (in-memory index
         // or streaming ring pop). This unit does not own or pull a source.
         //
@@ -637,16 +637,16 @@ impl Unit {
         while self.intake_debt >= 1.0 {
             self.intake_debt -= 1.0;
             for (c, v) in self.ch.vocoders.iter_mut().enumerate() {
-                v.input.push(&[src(c).convert_to::<f32>()]);
+                v.input.push(&[src(c)]);
                 v.process(analysis_hop, synthesis_hop);
             }
         }
 
-        let mut one = [0.0f32];
+        let mut one = [F::ZERO];
         for (c, o) in output.iter_mut().enumerate().take(n) {
-            one[0] = 0.0;
+            one[0] = F::ZERO;
             self.ch.vocoders[c].output.drain(&mut one);
-            *o = one[0].convert_to::<F>();
+            *o = one[0];
         }
     }
 
@@ -662,7 +662,7 @@ impl Unit {
     /// # Panics
     ///
     /// If a slice of `input` or `output` holds fewer than `size` frames.
-    pub fn process<F: Float>(&mut self, size: usize, input: &[&[F]], output: &mut [&mut [F]]) {
+    pub fn process(&mut self, size: usize, input: &[&[F]], output: &mut [&mut [F]]) {
         // The scratch is fixed at MAX_BUFFER_SIZE so a block can never
         // reallocate it; a longer block is split here rather than clamped,
         // which would leave the tail of `output` unwritten.
@@ -676,13 +676,7 @@ impl Unit {
 
     /// `process` for frames `at..at + size` of each slice, with `size` at
     /// most the scratch capacity (a larger one panics on the slice).
-    fn process_run<F: Float>(
-        &mut self,
-        at: usize,
-        size: usize,
-        input: &[&[F]],
-        output: &mut [&mut [F]],
-    ) {
+    fn process_run(&mut self, at: usize, size: usize, input: &[&[F]], output: &mut [&mut [F]]) {
         // One scratch pair per channel (not one flat strided buffer): the
         // vocoder API is per-channel `push`/`pop` over a contiguous run of
         // samples, so channel-major is what it wants. A frame-major buffer
@@ -697,14 +691,14 @@ impl Unit {
             // Fewer input channels than vocoders: mirror `tick`'s
             // fan-from-channel-0 rather than emitting silence.
             let src_ch = if c < in_ch { c } else { 0 };
-            convert_into(&input[src_ch][frames.clone()], &mut s[..size]);
+            s[..size].copy_from_slice(&input[src_ch][frames.clone()]);
         }
 
         let out_ch = output.len().min(channels);
 
         if !self.is_processing() {
             for (lane, scratch) in output[..out_ch].iter_mut().zip(&self.ch.scratch_in) {
-                convert_into(&scratch[..size], &mut lane[frames.clone()]);
+                lane[frames.clone()].copy_from_slice(&scratch[..size]);
             }
             return;
         }
@@ -730,23 +724,13 @@ impl Unit {
 
         for c in 0..channels {
             let out = &mut self.ch.scratch_out[c][..size];
-            out.fill(0.0);
+            out.fill(F::ZERO);
             self.ch.vocoders[c].output.drain(out);
             let Some(lane) = output[..out_ch].get_mut(c) else {
                 continue;
             };
             // `out` was cleared, so it is zero past what the vocoder had.
-            convert_into(out, &mut lane[frames.clone()]);
+            lane[frames.clone()].copy_from_slice(out);
         }
     }
-}
-
-/// `dst` as `src` in `dst`'s format, the two one length by construction.
-#[inline]
-fn convert_into<A: Sample, B: Sample>(src: &[A], dst: &mut [B]) {
-    let done = convert_mono(Mono::new(src), MonoMut::new(dst));
-    debug_assert!(
-        done.is_ok(),
-        "a block and its scratch are one length: {done:?}"
-    );
 }

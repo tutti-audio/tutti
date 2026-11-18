@@ -65,14 +65,6 @@ crates/tutti-polysynth/src/polysynth/node.rs  1  migrating: dsp S7/instruments
 crates/tutti-polysynth/src/synth.rs  1  migrating: dsp S7/instruments
 crates/tutti-polysynth/src/synth_voice.rs  1  migrating: dsp S7/instruments
 crates/tutti-polysynth/src/unison.rs  1  migrating: dsp S7/instruments
-crates/tutti-sampler/src/lanes.rs  1  migrating: dsp S7/instruments
-crates/tutti-sampler/src/streamer/io/refill.rs  2  migrating: dsp S7/instruments
-crates/tutti-sampler/src/stretch/vocoder.rs  2  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/interp.rs  1  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/live_read.rs  2  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/loop_span.rs  2  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/memory_source.rs  4  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/node.rs  1  migrating: dsp S7/instruments
 crates/tutti-session/src/bounce.rs  1  migrating: B2/B3
 crates/tutti-session/src/builder.rs  1  migrating: B2/B3
 crates/tutti-session/src/clock.rs  3  migrating: B2/B3

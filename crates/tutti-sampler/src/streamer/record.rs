@@ -70,7 +70,7 @@ pub(super) struct Record<F: RingFloat = f32> {
     /// How full the ring was at the last refill, as a fraction of its
     /// capacity: what the loop asks whether the stream is healthy by. A ring
     /// occupancy, not audio, so no sample format or unit applies.
-    fill: f32,
+    fill: f64,
     /// Its work panicked: faulted, and removed at the end of the cycle
     /// ([`Streams::reap`]).
     dead: bool,
@@ -155,7 +155,7 @@ impl<F: RingFloat> Record<F> {
     }
 
     /// How full the ring was at the last refill (0 before the first).
-    pub(super) fn fill(&self) -> f32 {
+    pub(super) fn fill(&self) -> f64 {
         self.fill
     }
 
