@@ -1,19 +1,19 @@
 //! A param lane carries the graph's float: in an `f64` graph a driven param
 //! reaches its node as `&[f64]`, the port ramps in `f64`, and the range clamps
-//! in `f64`; the edge-weight and mix lanes ramp in `f64`. The lane's event
-//! words (a ramp's target) are `f32` by spec.
+//! in `f64`; the edge-weight and mix lanes ramp in `f64`. A param event's ramp
+//! or segment is rendered from its `f64` payload.
 
 use tutti_buffers::Float;
 use tutti_graph::testing as common;
 
 use common::prepare;
 use tutti_graph::{
-    Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, OutPort, ParamEvent, ParamIn,
-    ParamNode, ParamRamp, ParamRange, ParamSet, Params, Prepare, Shape, Source, Status,
-    TransportPosition, declare_params,
+    Cx, Editor, EventOut, Executor, ForkByClone, Io, Law, Node, NodeKey, OutPort, ParamEvent,
+    ParamIn, ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, Prepare, Shape,
+    Source, Status, TransportPosition, declare_params,
 };
 use tutti_types::{ChannelLayout, Param};
-use tutti_units::{Hz, ParamKey, Samples, UnitParam};
+use tutti_units::{Azimuth, Hz, ParamKey, Samples, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.
 const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
@@ -382,4 +382,154 @@ fn an_f64_mix_ramps_in_f64() {
             "frame {k}: {v} vs {want}"
         );
     }
+}
+
+/// Starts a [`ParamSegment`] at the first frame of the first block.
+#[derive(Clone)]
+struct Segment(ParamSegment);
+
+impl<F: Float> Node<F> for Segment {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_param_events()
+            .with_event_capacity(tutti_graph::testing::cap_of(4))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+        if cx.env.frame.get() == 0 {
+            let offset = io.offset(0).expect("inside the block");
+            let _ = io
+                .event_out(0)
+                .push_param(ParamEvent::segment(offset, self.0));
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// Writes its `Azimuth` lane (zero where nothing drives it) to its one output.
+#[derive(Clone)]
+struct Bearing;
+
+impl Node<f64> for Bearing {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Azimuth])
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, f64>) -> Status {
+        match io.param(0).frames() {
+            Some(values) => io.output(0).copy_from_slice(values),
+            None => io.output(0).fill(0.0),
+        }
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+    fn param_base(&self, _: usize) -> Option<f64> {
+        Some(0.0)
+    }
+}
+
+/// One `f64` block of `lane` with `segment` driving its param `param`.
+fn render_segment(
+    lane: impl tutti_graph::IntoNode<f64>,
+    param: UnitParam,
+    segment: ParamSegment,
+) -> Vec<f64> {
+    let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
+    ed.insert(LANE, "lane", lane);
+    ed.insert(SRC, "segment", ForkByClone(Segment(segment)));
+    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
+        node: LANE,
+        port: 0,
+    })]);
+    ed.spec_mut().connect_param(
+        ParamIn {
+            node: LANE,
+            param: param.into(),
+        },
+        EventOut { node: SRC, port: 0 },
+    );
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    block(&mut exec, &mut ed)
+}
+
+/// **A segment whose endpoints `f32` cannot hold renders exactly in `f64`.**
+/// From `FINE` to just under 3, linear over four frames: every frame is
+/// `from + (to - from) * (k / 4)` to the bit, and the end is the end.
+#[test]
+fn a_segment_f32_cannot_hold_renders_exactly_in_f64() {
+    let (from, to) = (FINE, 3.0 - 1.0 / 1_099_511_627_776.0);
+    assert_ne!(f64::from(from as f32), from, "f32 loses the start");
+    assert_ne!(f64::from(to as f32), to, "f32 loses the end");
+    let seg = ParamSegment::new(
+        ParamKey::<Hz>::CUTOFF,
+        Hz(from),
+        Hz(to),
+        Samples(4),
+        Law::Linear,
+    );
+    let out = render_segment(Params(Lane(Param::new(Hz(BASE)))), UnitParam::Cutoff, seg);
+    for k in 1..4 {
+        assert_eq!(
+            out[k - 1],
+            from + (to - from) * (k as f64 / 4.0),
+            "frame {}",
+            k - 1
+        );
+    }
+    assert_eq!(out[3], to, "it lands on its end");
+    assert_eq!(out[15], to, "and holds it");
+}
+
+/// **A ten-minute segment advances one frame per frame at its end.** A ramp
+/// of one Hz a frame over 2.88e7 frames (ten minutes at 48 kHz, past the 2^24
+/// frames an `f32` count holds), entered 16 frames from its end: each frame
+/// is one more than the last. A progress in `f32` would step by two there.
+#[test]
+fn a_ten_minute_segment_steps_one_frame_per_frame_at_its_end() {
+    const LEN: usize = 28_800_000;
+    let odd = LEN - 1;
+    assert_ne!(f64::from(odd as f32), odd as f64, "f32 cannot count there");
+    let seg = ParamSegment::new(
+        ParamKey::<Hz>::CUTOFF,
+        Hz(0.0),
+        Hz(LEN as f64),
+        Samples(LEN),
+        Law::Linear,
+    )
+    .resumed(Samples(LEN - 16), Samples(LEN));
+    let out = render_segment(Params(Lane(Param::new(Hz(BASE)))), UnitParam::Cutoff, seg);
+    for (j, pair) in out.windows(2).enumerate() {
+        assert!(
+            (pair[1] - pair[0] - 1.0).abs() < 1e-7,
+            "frame {}: {} then {}",
+            j,
+            pair[0],
+            pair[1]
+        );
+    }
+    assert!((out[0] - (LEN - 16) as f64).abs() < 1e-7, "{}", out[0]);
+}
+
+/// **A circular ramp across the seam takes the short way at `f64`.** From
+/// 180 less 1e-8 to -180 plus 1e-8: `f32` rounds both ends to ±180 and has no
+/// arc at all, where `f64` has one of 2e-8 through 180, and every frame is
+/// `wrap(from + arc * k / 4)` to the bit, none anywhere near 0.
+#[test]
+fn a_circular_segment_across_the_seam_takes_the_short_way_in_f64() {
+    let (from, to) = (180.0 - 1e-8, -180.0 + 1e-8);
+    assert_eq!(from as f32, 180.0, "f32 rounds the start onto the seam");
+    assert_eq!(to as f32, -180.0, "and the end");
+    let seg = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples(4), Law::Linear);
+    let out = render_segment(ForkByClone(Bearing), UnitParam::Azimuth, seg);
+    let arc = UnitParam::Azimuth.arc(from, to);
+    assert!((arc - 2e-8).abs() < 1e-12, "the short arc is {arc}");
+    for k in 1..4 {
+        let want = Azimuth(from + arc * (k as f64 / 4.0)).wrap().get();
+        assert_eq!(out[k - 1], want, "frame {}", k - 1);
+        assert!(out[k - 1].abs() > 179.0, "frame {}: {}", k - 1, out[k - 1]);
+    }
+    assert_eq!(out[3], to, "it lands on its end");
 }

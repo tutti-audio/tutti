@@ -2159,7 +2159,7 @@ fn ref_port<F: Float>(
 
 /// `k / n` as the progress a lane's ramp reads, narrowed once to `F`.
 fn progress_in<F: Float>(k: usize, n: usize) -> F {
-    F::from_f64(Normalized::progress(Samples(k), Samples(n)).get())
+    F::from_unit(Normalized::progress(Samples(k), Samples(n)))
 }
 
 /// `from + (to - from) * law(t)` in the unit's `f64`; a circular param takes

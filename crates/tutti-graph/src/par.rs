@@ -670,7 +670,7 @@ impl<F: Float> Shared<'_, '_, F> {
                 let e = EventsView {
                     view: self.events.view(held_events),
                 };
-                let lost = fifo.push(e.ev(src));
+                let lost = fifo.push_slot(e.slot(src));
                 dropped.charge_feedback(self.plan, feedback, u64::from(lost));
             }
         }

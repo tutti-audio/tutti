@@ -517,7 +517,7 @@ impl<F: Float> SumLane<F> {
                     EdgeFade::In => self.prev.unwrap_or(F::ZERO),
                     _ => self.prev.unwrap_or(self.target),
                 };
-                if start.to_f64().to_bits() == to.to_f64().to_bits() {
+                if Into::<f64>::into(start).to_bits() == Into::<f64>::into(to).to_bits() {
                     self.fade.finished = Some(want);
                     self.prev = Some(to);
                 } else {

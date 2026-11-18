@@ -461,8 +461,8 @@ impl<F: Float> MixRun<F> {
     /// Whether the whole block is steady [`Mix::WET`]: nothing to blend.
     pub(crate) fn is_wet(&self) -> bool {
         !self.driven
-            && self.from.to_f64().to_bits() == 1.0f64.to_bits()
-            && self.to.to_f64().to_bits() == 1.0f64.to_bits()
+            && Into::<f64>::into(self.from).to_bits() == 1.0f64.to_bits()
+            && Into::<f64>::into(self.to).to_bits() == 1.0f64.to_bits()
     }
 
     /// Which of the four things a block's mix is.
@@ -481,7 +481,8 @@ impl<F: Float> MixRun<F> {
     /// Whether the mix does not move across the block (a driven block moves
     /// at every frame, whatever its ends are).
     fn is_static(&self) -> bool {
-        !self.driven && self.from.to_f64().to_bits() == self.to.to_f64().to_bits()
+        !self.driven
+            && Into::<f64>::into(self.from).to_bits() == Into::<f64>::into(self.to).to_bits()
     }
 
     /// The mix at frame `i` of the block; `lane` is the driving lane's values

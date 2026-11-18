@@ -925,7 +925,13 @@ pub(super) fn finish<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
                 let buf = arena.slot_mut(s, frames);
                 let v = buf[0];
                 buf.fill(v);
-                flags.set(s, flag(v == F::ZERO && v.to_f64().is_sign_positive(), true));
+                flags.set(
+                    s,
+                    flag(
+                        v == F::ZERO && Into::<f64>::into(v).is_sign_positive(),
+                        true,
+                    ),
+                );
             }
         }
         Status::Bypass => {

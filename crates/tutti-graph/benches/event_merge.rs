@@ -3,8 +3,10 @@
 //! source order)`.
 //!
 //! The number it puts on the event size: what a merge of 32-byte events costs
-//! (`midi/<k>x<n>`), and what the same graph costs when the sources write
-//! param events beside them (`midi_with_params`, `params`).
+//! (`midi/<k>x<n>`), what the same merge costs when the sources write param
+//! events (`params/<k>x<n>`, their `f64` payload in a buffer of its own), and
+//! both together (`mixed/<k>x<n>`: `n` of each), so a MIDI event does not pay
+//! for a param payload and the param buffer's merge is one more pass.
 //!
 //! ```text
 //! cargo bench -p tutti-graph --bench event_merge
@@ -15,12 +17,12 @@ use std::num::NonZeroU32;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, Io, Node, NodeKey, Prepare, Shape,
-    Status, TransportPosition, Unforkable,
+    Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, Io, Law, Node, NodeKey, ParamEvent,
+    ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_types::MaxBlock;
 use tutti_ump::Ump;
-use tutti_units::{SampleRate, Samples};
+use tutti_units::{ParamId, SampleRate, Samples};
 
 const BLOCK: usize = 1024;
 
@@ -29,6 +31,10 @@ const BLOCK: usize = 1024;
 enum Mix {
     /// `n` MIDI events.
     Midi,
+    /// `n` param events.
+    Params,
+    /// `n` MIDI events and `n` param events.
+    Mixed,
 }
 
 struct Source {
@@ -38,19 +44,26 @@ struct Source {
 
 impl Node for Source {
     fn shape(&self) -> Shape {
-        Shape::EMPTY
+        let shape = Shape::EMPTY
             .with_events(0, 1)
-            .with_event_capacity(NonZeroU32::new(self.n * 2).expect("a capacity"))
+            .with_event_capacity(NonZeroU32::new(self.n * 2).expect("a capacity"));
+        match self.mix {
+            Mix::Midi => shape,
+            Mix::Params | Mix::Mixed => shape.with_param_events(),
+        }
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let out = io.event_out(0);
         for i in 0..self.n as usize {
             let at = cx.env.offset(i * BLOCK / self.n as usize).expect("inside");
-            match self.mix {
-                Mix::Midi => {
-                    let _ = out.push(Event::midi(at, Ump([0x2090_3c64, 0, 0, 0])));
-                }
+            if matches!(self.mix, Mix::Midi | Mix::Mixed) {
+                let _ = out.push(Event::midi(at, Ump([0x2090_3c64, 0, 0, 0])));
+            }
+            if matches!(self.mix, Mix::Params | Mix::Mixed) {
+                let seg =
+                    ParamSegment::foreign(ParamId::new(1), 0.0, 1.0, Samples(32), Law::Linear);
+                let _ = out.push_param(ParamEvent::segment(at, seg));
             }
         }
         Status::Modified
@@ -66,7 +79,7 @@ impl Node for Sink {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
-        black_box(io.events(0).len());
+        black_box(io.events(0).len() + io.events(0).params().len());
         Status::Modified
     }
     fn reset(&mut self) {}
@@ -102,10 +115,16 @@ fn bench(c: &mut Criterion) {
     let transport = TransportPosition::default();
     for (k, n) in [(2u64, 64u32), (4, 256), (8, 256)] {
         g.throughput(Throughput::Elements(k * u64::from(n)));
-        let mut exec = rig(k, n, Mix::Midi);
-        g.bench_with_input(BenchmarkId::new("midi", format!("{k}x{n}")), &n, |b, _| {
-            b.iter(|| exec.process(BLOCK, &transport, &[], &mut []));
-        });
+        for (name, mix) in [
+            ("midi", Mix::Midi),
+            ("params", Mix::Params),
+            ("mixed", Mix::Mixed),
+        ] {
+            let mut exec = rig(k, n, mix);
+            g.bench_with_input(BenchmarkId::new(name, format!("{k}x{n}")), &n, |b, _| {
+                b.iter(|| exec.process(BLOCK, &transport, &[], &mut []));
+            });
+        }
     }
     g.finish();
 }

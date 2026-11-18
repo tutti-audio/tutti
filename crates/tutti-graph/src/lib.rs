@@ -505,9 +505,15 @@
 //! # Events and timing
 //!
 //! Events ([`Event`], [`EventKind`]: MIDI 2.0 [`Ump`](tutti_ump::Ump) packets,
-//! [`ParamRamp`] and [`ParamSegment`] automation, [`Harmony`]) travel on
-//! graph ports ([`EventIn`], [`EventOut`]), so the same delay compensation that aligns audio aligns
-//! them. An event input may have several sources, merged by offset and then
+//! [`Harmony`]) and param events ([`ParamEvent`]: [`ParamRamp`] and
+//! [`ParamSegment`] automation) travel on graph ports ([`EventIn`],
+//! [`EventOut`]), so the same delay compensation that aligns audio aligns
+//! them. A param event carries the unit's `f64` quantity and is larger than
+//! the 32 bytes an [`Event`] is held to, so it travels in a buffer of its own
+//! beside the port's events, merged and delayed with them
+//! ([`SortedEvents::params`], [`EventWriter::push_param`]); a node that
+//! writes them declares it ([`Shape::with_param_events`]), and only the
+//! buffers its outputs reach have room for them. An event input may have several sources, merged by offset and then
 //! by the source port's `(NodeKey, port)` — a property of the wiring, not of
 //! the order edges were listed in. An audio input port, and a
 //! global output channel, holds a set of sources, which the graph sums
@@ -582,7 +588,12 @@
 //! law) is a quantity; the graph renders it into a per-sample lane in `F`
 //! once per block or segment ([`ramp_in`], [`fade_gains`],
 //! [`fade_in`]), so a param lane ([`ParamInput::frames`]), an edge weight's
-//! ramp, a mix and a crossfade all run in the graph's float. A meter
+//! ramp, a mix and a crossfade all run in the graph's float. A param event's
+//! ramp or segment is rendered in `f64`, from the unit's quantity and `u32`
+//! frame counts, and crosses to `F` once per frame ([`control_in`]): a
+//! segment ten minutes long advances one frame per frame at its end in an
+//! `f32` graph as in an `f64` one, and a circular param (`Azimuth`) turns the
+//! short arc before the crossing. A meter
 //! accumulates a block's figures in `F` over chunks of at most 256 frames, each
 //! folded into `f64`, and reads them as `f64`. Quantities are `f64` too: time
 //! ([`Env::frame`] is a `u64` [`Frame`](tutti_units::Frame) and the transport
