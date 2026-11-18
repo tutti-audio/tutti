@@ -4,13 +4,14 @@
 use super::node_op::{CONSTANT, SILENT, flag};
 use super::state::Ring;
 use crate::arena::Role;
-use crate::event::{Event, merge_into};
+use crate::event::{Event, merge_into, merge_params};
 use crate::gain::{self, SumLane, Weight};
 use crate::kernels::{AudioRing, EventFifo};
 use crate::node::MAX_PORTS;
+use crate::param_event::ParamEvent;
 use crate::plan::GainPortOp;
 use crate::plan::InputBound;
-use crate::slots::{AudioSlots, EventSlots, SlotFlags, borrow_events, event_pair};
+use crate::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags, borrow_events, event_pair};
 use tutti_buffers::Float;
 
 /// An audio delay's ring.
@@ -109,7 +110,7 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
         let source = gains
             .iter()
             .find(|g| usize::from(g.lane) == k)
-            .map(|g| (g.from, &events.ev(g.slot)[..]));
+            .map(|g| (g.from, &events.pev(g.slot)[..]));
         *w = SumLane::weight(lane, frames, source);
     }
     // Requests, then sorted by slot; the order of addition is the `Read`
@@ -168,7 +169,7 @@ pub(crate) fn event_delay_op<E: EventSlots + ?Sized>(
 ) -> u64 {
     let (input, output) = event_pair(events, src, dst);
     output.clear();
-    fifo.run(input, output, frames) as u64
+    u64::from(fifo.run(input, output, frames))
 }
 
 /// [`Op::EventMerge`](crate::Op::EventMerge) of the slots `list` into `dst`. Returns the events it
@@ -188,18 +189,26 @@ pub(crate) fn event_merge_op<E: EventSlots + ?Sized>(
     }
     reqs[list.len()] = (dst, Role::Write(0));
     let mut ins: [&[Event]; MAX_PORTS] = [&[]; MAX_PORTS];
-    let mut output: Option<&mut Vec<Event>> = None;
+    let mut pins: [&[ParamEvent]; MAX_PORTS] = [&[]; MAX_PORTS];
+    let mut output: Option<&mut EventSlot> = None;
     borrow_events(
         events,
         &mut reqs[..=list.len()],
-        |port, v| ins[port as usize] = v,
+        |port, v| {
+            ins[port as usize] = &v.events;
+            pins[port as usize] = &v.params;
+        },
         |_, v| output = Some(v),
     );
-    let output = output.expect("dst borrowed");
-    output.clear();
+    let EventSlot { events, params } = output.expect("dst borrowed");
+    events.clear();
+    params.clear();
     let room = bound.map_or(usize::MAX, |b| b.capacity.get() as usize);
-    let room = output.capacity().min(room);
-    merge_into(&ins[..list.len()], output, room) as u64
+    let room = events.capacity().min(room);
+    // The param events are never bounded by a node's input capacity: the slot
+    // holds every one its sources can write.
+    let lost = merge_params(&pins[..list.len()], params, params.capacity());
+    u64::from(lost) + u64::from(merge_into(&ins[..list.len()], events, room))
 }
 
 /// [`Op::Output`](crate::Op::Output): slot `src` into `out`, through the channel's alignment
