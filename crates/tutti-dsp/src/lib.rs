@@ -181,9 +181,9 @@ pub use dynamics::{
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};
 pub use filter::{
     Biquad, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
-    CrossoverModel, DirectForm1, EnvelopeFilterBank, EnvelopeFilterControls, LadderBank,
-    LadderCoefficients, LadderCoeffs, LadderControls, LadderDesign, LadderModel, LadderType, Lanes,
-    MAX_SPLITS, SOLVE_CEILING, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType,
+    CrossoverModel, EnvelopeFilterBank, EnvelopeFilterControls, LadderBank, LadderCoefficients,
+    LadderCoeffs, LadderControls, LadderDesign, LadderModel, LadderType, Lanes, MAX_SPLITS,
+    SOLVE_CEILING, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType,
     fit_to_rate, ladder_step, svf_step,
 };
 pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};

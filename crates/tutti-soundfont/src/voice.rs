@@ -2,9 +2,8 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
-use tutti_buffers::{Mono, MonoMut};
 use tutti_dsp::{
-    Biquad, DirectForm1, PanLaw, SOLVE_CEILING, SvfControls, SvfModel, SvfType, pan_gains,
+    PanLaw, SOLVE_CEILING, SvfCoefficients, SvfControls, SvfModel, SvfType, pan_gains, svf_step,
 };
 use tutti_sf2::{SamplePool, Side};
 use tutti_ump::ControlValue;
@@ -35,25 +34,39 @@ use crate::volume_envelope::VolumeEnvelope;
 /// in decibels, here already converted). `None` from [`SOLVE_CEILING`] of the
 /// rate up: the filter would do nothing there.
 ///
-/// The `Q` handed to the design is not the peak height: a 2-pole low-pass of
-/// quality `q` peaks a little above `q`, so the figure is lowered by
-/// rustysynth's fit, whose peak is within 3% of the one asked for. A resonance
-/// of 1 (0 dB) lands on Butterworth.
-fn low_pass(cutoff: f32, resonance: f32, rate: SampleRate) -> Option<Biquad> {
-    const PEAK_OFFSET: f32 = 1.0 - core::f32::consts::FRAC_1_SQRT_2;
+/// The filter is the trapezoidal state-variable low-pass, `1 / (s^2 + s / q + 1)`
+/// under the prewarped bilinear map, designed in `f64` and narrowed once to the
+/// voice's `f32`. Its DC gain is 1 for every `q`. The prototype's peak height is
+/// `P = q / sqrt(1 - 1 / (4 q^2))` for `q > 1 / sqrt(2)` (the maximum of
+/// `|H|^2 = 1 / ((1 - x^2)^2 + x^2 / q^2)` over `x`, at `x^2 = 1 - 1 / (2 q^2)`),
+/// and the bilinear map moves the peak along the frequency axis and not its
+/// height. Solving `q^4 - P^2 q^2 + P^2 / 4 = 0` for the peak `P` the spec asks
+/// for gives `q^2 = (P^2 + P sqrt(P^2 - 1)) / 2`, so the peak is the resonance
+/// up to [`SvfControls::MAX_Q`] (a resonance of about 60 dB; the model clamps
+/// `q` there and a larger resonance peaks at that cap), and a resonance of 1
+/// (0 dB) is `q = 1 / sqrt(2)`, Butterworth.
+fn low_pass(cutoff: f32, resonance: f32, rate: SampleRate) -> Option<SvfCoefficients<f32>> {
+    low_pass_model(cutoff, resonance, rate).map(|model| SvfCoefficients::from(&model))
+}
+
+/// The model [`low_pass`] narrows: the `f64` design of the voice's low-pass.
+fn low_pass_model(cutoff: f32, resonance: f32, rate: SampleRate) -> Option<SvfModel> {
     // The voice's cutoff is an `f32` state; the design takes it as `Hz`.
     let cutoff = Hz(f64::from(cutoff));
     if cutoff.get() >= SOLVE_CEILING * rate.get() {
         return None;
     }
-    let q = resonance - PEAK_OFFSET / (1.0 + 6.0 * (resonance - 1.0));
+    // A resonance below 0 dB asks for no peak.
+    let peak = f64::from(resonance).max(1.0);
+    let q = libm::sqrt(0.5 * (peak * peak + peak * libm::sqrt(peak * peak - 1.0)));
     let controls = SvfControls {
         ty: SvfType::LowPass,
         freq: cutoff,
-        q: Q(q),
-        gain: Db(0.0),
+        // `Q` stores an `f32`: the design's `f64` ratio crosses to it here.
+        q: Q(q as f32),
+        gain: Db::UNITY,
     };
-    Some(SvfModel::new(controls, rate).biquad())
+    Some(SvfModel::new(controls, rate))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,8 +118,9 @@ pub(crate) struct Voice {
     oscillator: Oscillator,
     rate: SampleRate,
     /// The low-pass, or `None` while the cutoff is too near Nyquist to filter.
-    low_pass: Option<Biquad>,
-    history: DirectForm1,
+    low_pass: Option<SvfCoefficients<f32>>,
+    /// The low-pass's integrator state `[ic1eq, ic2eq]`.
+    history: [f32; 2],
 
     block: Vec<f32>,
 
@@ -181,7 +195,7 @@ impl Voice {
             oscillator: Oscillator::new(settings),
             rate: settings.rate(),
             low_pass: None,
-            history: DirectForm1::default(),
+            history: [0_f32; 2],
             block: vec![0_f32; settings.block_len()],
             previous_mix_gain_left: 0_f32,
             previous_mix_gain_right: 0_f32,
@@ -284,7 +298,7 @@ impl Voice {
         RegionEx::start_vibrato(&mut self.vib_lfo, region, key, velocity);
         RegionEx::start_modulation(&mut self.mod_lfo, region, key, velocity);
         RegionEx::start_oscillator(&mut self.oscillator, region);
-        self.history.reset();
+        self.history = [0_f32; 2];
         self.low_pass = low_pass(self.cutoff, self.resonance, self.rate);
 
         self.smoothed_cutoff = self.cutoff;
@@ -463,10 +477,18 @@ impl Voice {
             self.low_pass = low_pass(self.smoothed_cutoff, self.resonance, self.rate);
         }
         match &self.low_pass {
-            Some(section) => self
-                .history
-                .process(section, MonoMut::new(&mut self.block[..])),
-            None => self.history.hold(Mono::new(&self.block[..])),
+            Some(section) => {
+                for sample in &mut self.block {
+                    *sample = svf_step(section, &mut self.history, *sample);
+                }
+            }
+            // The state a low-pass at DC would hold at the block's last sample, so the
+            // section takes over without a step.
+            None => {
+                if let Some(&last) = self.block.last() {
+                    self.history = [0_f32, last];
+                }
+            }
         }
 
         self.previous_mix_gain_left = self.current_mix_gain_left;
@@ -529,6 +551,7 @@ impl Voice {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_dsp::Complex64;
     use tutti_units::Amplitude;
 
     const RATE: SampleRate = SampleRate::SR_44K1;
@@ -538,16 +561,14 @@ mod tests {
     /// running a sine through the section the voice runs.
     fn gain(resonance: f32, hz: f32) -> f64 {
         let section = low_pass(CUTOFF, resonance, RATE).expect("below Nyquist");
-        let mut state = DirectForm1::default();
+        let mut state = [0_f32; 2];
         let w = core::f64::consts::TAU * f64::from(hz) / RATE.get();
         let mut peak = 0.0f64;
-        for chunk in 0..1_000 {
-            let mut block: Vec<f32> = (0..8)
-                .map(|n| (w * f64::from(chunk * 8 + n)).sin() as f32)
-                .collect();
-            state.process(&section, MonoMut::new(&mut block));
-            if chunk >= 800 {
-                peak = block.iter().fold(peak, |p, &y| p.max(f64::from(y).abs()));
+        for n in 0..8_000 {
+            let x = (w * f64::from(n)).sin() as f32;
+            let y = svf_step(&section, &mut state, x);
+            if n >= 6_400 {
+                peak = peak.max(f64::from(y).abs());
             }
         }
         peak
@@ -562,9 +583,21 @@ mod tests {
         1.0 / ((1.0 - s * s).powi(2) + (s / q).powi(2)).sqrt()
     }
 
-    /// The `q` the voice asks for at a resonance, SF2 2.04 section 8.1.3.
+    /// The prototype's `q` whose peak height `q / sqrt(1 - 1 / (4 q^2))` is
+    /// `resonance`, found by bisection on that closed form, so the oracle is
+    /// not the voice's own inversion.
     fn q_of(resonance: f64) -> f64 {
-        resonance - (1.0 - 0.5f64.sqrt()) / (1.0 + 6.0 * (resonance - 1.0))
+        let peak = |q: f64| q / (1.0 - 0.25 / (q * q)).sqrt();
+        let (mut lo, mut hi) = (0.5f64.sqrt(), resonance.max(1.0) + 1.0);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if peak(mid) < resonance {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
     }
 
     /// SF2 2.04 section 8.1.3, initialFilterFc and initialFilterQ: the filter is
@@ -578,30 +611,49 @@ mod tests {
     }
 
     /// At the cutoff the 2-pole response is `q` (RBJ: `|H(w0)| = Q`), and the
-    /// resonant peak is the spec's initialFilterQ above DC, within the 3% the
-    /// fit promises.
+    /// resonant peak is the spec's initialFilterQ above DC. The sweep finds the
+    /// peak on a 5 Hz grid from sine runs of 8000 frames sampled at 44.1 kHz, so
+    /// the tolerance is the sum of three derived losses. Grid: `ln|H|` near its
+    /// maximum at `x0` falls by `f'' dx^2 / (4 f0)`, with `f = (1 - x^2)^2 + x^2 /
+    /// q^2`, `f'' = 8 - 4 / q^2`, `f0 = (4 q^2 - 1) / (4 q^4)` and `dx = 2.5 / 500`
+    /// the half grid step. Sampling: the sine's crest falls between samples, at
+    /// worst `1 - cos(pi / 88)` for 88 frames a period. Settling: the section's
+    /// envelope `exp(-g n / (2 q))` after the 6400 frames before the measurement.
     /// Spec: sf2.synth.filter.resonance.peak, sf2.gen.initialFilterQ
     #[test]
     fn the_gain_at_the_cutoff_is_q_and_the_peak_is_the_spec_peak_height() {
+        let g = (core::f64::consts::PI * f64::from(CUTOFF) / RATE.get()).tan();
         for db in [0.0f32, 6.0, 12.0, 24.0] {
             let resonance = SoundFontMath::decibels_to_linear(db);
+            let want = f64::from(resonance);
+            let q = q_of(want);
+            let sampling = 1.0 - (core::f64::consts::PI / 88.0).cos();
+            let settling = (-g * 6_400.0 / (2.0 * q)).exp();
             let at_cutoff = gain(resonance, CUTOFF);
-            let q = q_of(f64::from(resonance));
             assert!(
-                (at_cutoff / q - 1.0).abs() < 0.02,
+                (at_cutoff / q - 1.0).abs() < sampling + settling,
                 "{db} dB: {at_cutoff} vs {q}"
             );
             let peak = (300..700)
                 .step_by(5)
                 .map(|hz| gain(resonance, hz as f32))
                 .fold(0.0f64, f64::max);
-            let want = f64::from(resonance);
-            let peak_db = Db::from_amplitude(Amplitude::new(peak)).get();
-            // 0 dB asks for no peak: the Butterworth maximum is 1.
-            assert!(
-                (peak / want - 1.0).abs() < 0.03 || (db == 0.0 && (peak_db < 0.1)),
-                "{db} dB: peak {peak_db:.2} dB"
+            let (f2, f0, dx) = (
+                8.0 - 4.0 / (q * q),
+                (4.0 * q * q - 1.0) / (4.0 * q.powi(4)),
+                0.005,
             );
+            let grid = f2 * dx * dx / (4.0 * f0);
+            let tolerance = grid + sampling + settling;
+            if db == 0.0 {
+                // 0 dB asks for no peak: the Butterworth maximum is its DC gain, 1.
+                assert!(peak < 1.0 + tolerance, "{db} dB: peak {peak}");
+            } else {
+                assert!(
+                    (peak / want - 1.0).abs() < tolerance,
+                    "{db} dB: peak {peak} vs {want}, tolerance {tolerance:e}"
+                );
+            }
         }
     }
 
@@ -630,5 +682,165 @@ mod tests {
     fn a_cutoff_near_nyquist_is_no_filter() {
         assert!(low_pass(0.4 * RATE.get() as f32, 1.0, RATE).is_some());
         assert!(low_pass(0.5 * RATE.get() as f32, 1.0, RATE).is_none());
+    }
+
+    /// `H(e^jw)` of the trapezoidal section with coefficients `c`, from its state
+    /// space `s' = A s + B x`, `y = m0 x + m1 v1 + m2 v2` solved at `z = e^jw`:
+    /// `ic1' = (2 a1 - 1) ic1 - 2 a2 ic2 + 2 a2 x`, `ic2' = 2 a2 ic1 + (1 - 2 a3)
+    /// ic2 + 2 a3 x`, `v1 = a1 ic1 + a2 (x - ic2)`, `v2 = ic2 + a2 ic1 + a3 (x - ic2)`.
+    fn response(c: &SvfCoefficients<f64>, w: f64) -> f64 {
+        let z = Complex64::from_polar(1.0, w);
+        let one = Complex64::new(1.0, 0.0);
+        let (m00, m01) = (z - one * (2.0 * c.a1 - 1.0), one * (2.0 * c.a2));
+        let (m10, m11) = (one * (-2.0 * c.a2), z - one * (1.0 - 2.0 * c.a3));
+        let (b0, b1) = (one * (2.0 * c.a2), one * (2.0 * c.a3));
+        let det = m00 * m11 - m01 * m10;
+        let s1 = (b0 * m11 - m01 * b1) / det;
+        let s2 = (m00 * b1 - m10 * b0) / det;
+        let v1 = s1 * c.a1 + (one - s2) * c.a2;
+        let v2 = s2 + s1 * c.a2 + (one - s2) * c.a3;
+        (one * c.m0 + v1 * c.m1 + v2 * c.m2).norm()
+    }
+
+    /// The `f32` set widened exactly, to analyse what the voice runs.
+    fn widened(c: &SvfCoefficients<f32>) -> SvfCoefficients<f64> {
+        SvfCoefficients {
+            a1: f64::from(c.a1),
+            a2: f64::from(c.a2),
+            a3: f64::from(c.a3),
+            m0: f64::from(c.m0),
+            m1: f64::from(c.m1),
+            m2: f64::from(c.m2),
+        }
+    }
+
+    /// The L1 norm of the impulse response from a unit error in `ic2eq` to the
+    /// output, in `f64` over the narrowed coefficients, summed until the response
+    /// is under 1e-12 for a whole 4800 frames.
+    fn error_norm(c: &SvfCoefficients<f64>, frames: usize) -> f64 {
+        let mut state = [0.0f64, 1.0];
+        let mut norm = 0.0;
+        let mut tail = 0.0f64;
+        for n in 0..frames {
+            let h = svf_step(c, &mut state, 0.0).abs();
+            norm += h;
+            if n + 4_800 >= frames {
+                tail = tail.max(h);
+            }
+        }
+        assert!(tail < 1e-12, "the response has not decayed: {tail:e}");
+        norm
+    }
+
+    /// The frames the section needs to forget its start to `eps`: the slow
+    /// envelope is `exp(-g n / (2 q))`, so `(2 q / g) ln(1 / eps)`.
+    fn settle(q: f64, cutoff: f32, rate: SampleRate, eps: f64) -> usize {
+        let g = (core::f64::consts::PI * f64::from(cutoff) / rate.get()).tan();
+        (2.0 * q / g * (1.0 / eps).ln()).ceil() as usize
+    }
+
+    /// The `f32` voice filter at SF2's 20 Hz floor, 48 kHz and 96 kHz, at 0 dB
+    /// and 12 dB, against its analytic response. `x` is a DC input not exactly
+    /// representable after the section's scalings, so the state rounds.
+    ///
+    /// The rounding error bound is `A u (5 |h|_1 + 1)`, `A` the state's amplitude
+    /// and `u = 2^-24`. From `svf_step`, the roundings on `A`-sized values are
+    /// `v2 = ic2 + a2 ic1` (1), `v2 + a3 v3` (2) and `ic2' = 2 v2 - ic2` (3), each
+    /// at most `A u` (the products `a2 ic1`, `a3 v3` and the sums for `v1`, `v3`,
+    /// `ic1'` are small values and their errors are second order). Errors 1 and 2
+    /// enter `ic2'` doubled, error 3 once, so `5 A u` in `ic2eq`, and each
+    /// travels to the output through the impulse response of a unit `ic2eq`
+    /// error, summing to at most `|h|_1`; `y = v2` also carries error 1 and 2
+    /// directly, and is bounded by one more `A u` with the two errors folded.
+    #[test]
+    fn the_f32_low_pass_at_the_20_hz_floor_holds_dc_to_the_rounding_bound() {
+        let u = f64::from(f32::EPSILON) / 2.0;
+        let x = 0.3_f32;
+        let a = f64::from(x);
+        for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
+            for db in [0.0f32, 12.0] {
+                let resonance = SoundFontMath::decibels_to_linear(db);
+                let c32 = low_pass(20.0, resonance, rate).expect("below Nyquist");
+                let q = q_of(f64::from(resonance));
+                let frames = settle(q, 20.0, rate, 1e-13);
+                let norm = error_norm(&widened(&c32), frames);
+                let bound = a * u * (5.0 * norm + 1.0);
+                let mut state = [0_f32; 2];
+                let mut worst = 0.0f64;
+                for n in 0..frames + 4_800 {
+                    let y = svf_step(&c32, &mut state, x);
+                    if n >= frames {
+                        worst = worst.max((f64::from(y) - a).abs());
+                    }
+                }
+                eprintln!("{rate:?} {db} dB: deviation {worst:e}, bound {bound:e}, |h|_1 {norm}");
+                assert!(worst > 0.0, "{rate:?} {db} dB: no rounding occurred");
+                assert!(
+                    worst <= bound,
+                    "{rate:?} {db} dB: deviation {worst:e} over {bound:e}"
+                );
+            }
+        }
+    }
+
+    /// The `f32` voice filter at the 20 Hz floor has the analytic magnitude at
+    /// the cutoff. The oracle is `|H(fc)|` of the `f32`-narrowed coefficients,
+    /// evaluated in `f64`; the output is within the rounding bound of
+    /// [`the_f32_low_pass_at_the_20_hz_floor_holds_dc_to_the_rounding_bound`]
+    /// (relative to the state's amplitude `q`, which is `|H|` for a unit sine). The
+    /// narrowing itself moves `|H(fc)|` by at most `u / (g (g + k)) + 6 u`. `a2`
+    /// and `a3` keep relative precision (`g a1` and `g^2 a1`), and `ln|H|` at
+    /// `x = 1` moves by at most 1 per unit relative change of `g` or `k`
+    /// (`d ln|H| / d ln x = -f' / (2 f) = -1` at `x = 1`): `6 u` covers them. `a1 =
+    /// 1 / (1 + g (g + k))` is within `g (g + k)` of 1, so its absolute rounding
+    /// `u` is a relative change `u / (g (g + k))` of the damping term the section
+    /// loses per step, and of `k`: the dominant term at this extreme.
+    /// The window is whole periods, so the quadrature projection is exact.
+    /// Spec: sf2.synth.filter.shape, sf2.gen.initialFilterFc
+    #[test]
+    fn the_f32_low_pass_at_the_20_hz_floor_has_its_analytic_magnitude_at_the_cutoff() {
+        let u = f64::from(f32::EPSILON) / 2.0;
+        let hz = 20.0;
+        for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
+            assert_eq!(rate.get() % hz, 0.0, "the window is whole periods");
+            let period = (rate.get() / hz) as usize;
+            for db in [0.0f32, 12.0] {
+                let resonance = SoundFontMath::decibels_to_linear(db);
+                let model = low_pass_model(20.0, resonance, rate).expect("below Nyquist");
+                let c64 = SvfCoefficients::<f64>::from(&model);
+                let c32 = SvfCoefficients::<f32>::from(&model);
+                let w = core::f64::consts::TAU * hz / rate.get();
+                let (h64, h32) = (response(&c64, w), response(&widened(&c32), w));
+                let q = q_of(f64::from(resonance));
+                let g = (core::f64::consts::PI * 20.0 / rate.get()).tan();
+                let narrowing = u / (g * (g + 1.0 / q)) + 6.0 * u;
+                assert!(
+                    (h32 / h64 - 1.0).abs() <= narrowing,
+                    "{rate:?} {db} dB: narrowing moved |H| from {h64} to {h32}, bound {narrowing:e}"
+                );
+                let frames = settle(q, 20.0, rate, 1e-13);
+                let norm = error_norm(&widened(&c32), frames);
+                let bound = u * (5.0 * norm + 1.0);
+                let mut state = [0_f32; 2];
+                let (mut re, mut im) = (0.0f64, 0.0f64);
+                for n in 0..frames.next_multiple_of(period) + 8 * period {
+                    let x = (w * n as f64).sin() as f32;
+                    let y = f64::from(svf_step(&c32, &mut state, x));
+                    if n >= frames.next_multiple_of(period) {
+                        re += y * (w * n as f64).sin();
+                        im += y * (w * n as f64).cos();
+                    }
+                }
+                let magnitude = 2.0 * re.hypot(im) / (8 * period) as f64;
+                eprintln!(
+                    "{rate:?} {db} dB: |H| {magnitude}, oracle {h32}, bound {bound:e}, narrowing {:e}",
+                    (h32 / h64 - 1.0).abs()
+                );
+                assert!(
+                    (magnitude / h32 - 1.0).abs() <= bound,
+                    "{rate:?} {db} dB: {magnitude} vs {h32}, bound {bound:e}"
+                );
+            }
+        }
     }
 }
