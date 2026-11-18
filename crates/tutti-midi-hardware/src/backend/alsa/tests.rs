@@ -795,9 +795,13 @@ fn a_pump_whose_reads_fail_ends_and_raises_its_latch() {
         Duration::ZERO,
     ));
     let (producer, _inlet) = ports.open_input_port("dies");
-    let died = tutti_rt::FaultLatch::new();
+    let died = tutti_rt::FaultLatch::<crate::InputFault>::new();
     super::input::pump(poller, clock, &died, producer);
-    assert!(died.is_raised(), "a pump that gave up raises the latch");
+    assert_eq!(
+        died.cause(),
+        Some(crate::InputFault::ReadFailed(crate::fault::Errno::new(EIO))),
+        "a pump that gave up raises the latch, for the read's errno"
+    );
 }
 
 /// `EIO`, what the injected failure reads as.
