@@ -213,7 +213,10 @@ impl RunLoop {
     pub(crate) fn describe(&self, out: &mut Wakeups) {
         let state = self.state();
         for &fd in state.event_handlers.keys() {
-            out.watch(FdId::new(fd), Interest::READ);
+            // Registration refused a negative number.
+            if let Some(id) = FdId::new(fd) {
+                out.watch(id, Interest::READ);
+            }
         }
         for entry in state.timers.values() {
             out.due_at(entry.last_fired + entry.period);
@@ -387,7 +390,7 @@ impl RunLoop {
 
     /// `IRunLoop::registerEventHandler`: calls `handler.onFDIsSet(fd)` from
     /// [`dispatch`](Self::dispatch) when `fd` is readable. A null
-    /// handler is ignored.
+    /// handler is ignored; so is a negative `fd` (`kResultFalse`).
     ///
     /// # Safety
     ///
@@ -403,6 +406,10 @@ impl RunLoop {
     ) -> tresult {
         if handler.is_null() {
             return kResultOk;
+        }
+        // A negative number names no descriptor, so no wait could watch it.
+        if FdId::new(fd).is_none() {
+            return kResultFalse;
         }
         let mut state = self.state();
         if !state.on_ui_thread() {
@@ -579,6 +586,23 @@ mod tests {
         run_loop.run_iteration(tutti_fixtures::main_thread());
 
         assert_eq!(handler.calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// A negative descriptor is refused at registration and never reaches a
+    /// wait, which would fault on it.
+    #[test]
+    fn an_event_handler_on_a_negative_descriptor_is_refused() {
+        let run_loop = RunLoop::new();
+        run_loop.bind(tutti_fixtures::main_thread());
+        let handler = std::ptr::NonNull::<IEventHandler>::dangling().as_ptr();
+        for fd in [-1, i32::MIN] {
+            // SAFETY: a refused registration never dereferences `handler`.
+            let result = unsafe { run_loop.register_event_handler(handler, fd, None) };
+            assert_eq!(result, kResultFalse);
+        }
+        let mut wakeups = Wakeups::default();
+        run_loop.describe(&mut wakeups);
+        assert!(wakeups.watches().is_empty());
     }
 
     /// A handler that does nothing, kept alive by the test.

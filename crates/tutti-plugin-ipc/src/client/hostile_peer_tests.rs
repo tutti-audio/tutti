@@ -1106,6 +1106,66 @@ fn a_valid_but_wrong_reply_type_does_not_satisfy_the_request() {
     );
 }
 
+/// Submits block `seq` through the bridge's audio entry, as the node's batcher does.
+fn submit_block(bridge: &PluginBridge, seq: u64) {
+    let submitted = bridge.submit(
+        seq,
+        64,
+        Default::default(),
+        &mut tutti_plugin_types::ParameterChanges::new(),
+        Default::default(),
+        Default::default(),
+        tutti_plugin_types::TransportInfo::new(SampleRate::SR_48K),
+        Default::default(),
+    );
+    assert!(submitted.block, "the block was accepted");
+}
+
+/// **A wrong-kind reply to a block is a protocol error, and not an answer.**
+/// A server that answers every `ProcessAudio` with junk of another kind must
+/// not read as a live plugin (the hang verdict counts answers): the host ends
+/// the connection typed, and counts no reply.
+#[test]
+fn a_wrong_kind_reply_to_a_block_is_a_protocol_error_and_not_an_answer() {
+    let mock = MockServer::start("wrong-kind-block", |msg| match msg {
+        HostMessage::ProcessAudio(_) => Action::Reply(Box::new(BridgeMessage::StateChunk {
+            seq: 0,
+            last: true,
+            bytes: vec![1],
+        })),
+        _ => Action::Silent,
+    });
+
+    submit_block(&mock.bridge, 1);
+    mock.wait_for_crash("the junk reply to end the connection");
+    assert_eq!(
+        mock.bridge.block_counts().replies,
+        0,
+        "a reply of the wrong kind was counted as the plugin answering"
+    );
+}
+
+/// **A reply naming a block that was never sent is refused**, not recorded as
+/// that block's fate: a peer-supplied `seq` far ahead would claim a word of the
+/// fate ring and make every later fate that maps to it read as unanswered.
+#[test]
+fn a_reply_to_a_block_never_sent_is_a_protocol_error() {
+    let mock = MockServer::start("future-seq", |msg| match msg {
+        HostMessage::ProcessAudio(_) => Action::Reply(Box::new(BridgeMessage::AudioProcessed {
+            latency_us: 0,
+            seq: u64::MAX >> 1,
+            midi_out: Default::default(),
+            status: Default::default(),
+            refused: false,
+        })),
+        _ => Action::Silent,
+    });
+
+    submit_block(&mock.bridge, 1);
+    mock.wait_for_crash("the reply to a block never sent to end the connection");
+    assert_eq!(mock.bridge.block_counts().replies, 0);
+}
+
 /// A server that accepts requests but never answers must not hang the host.
 ///
 /// Distinct from death: the connection stays open, so there is no EOF to notice.

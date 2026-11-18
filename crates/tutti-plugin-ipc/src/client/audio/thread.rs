@@ -42,16 +42,24 @@ impl BridgeThread {
         let thread_channels = channels.clone();
         let thread_payloads = payloads.clone();
         let thread_lifecycle = lifecycle.clone();
-        let handle = tutti_rt::spawn_named("plugin-bridge", None, move |_| {
-            run_thread(
-                thread_channels,
-                sleeper,
-                thread_payloads,
-                thread_lifecycle,
-                listener,
-                socket_path,
-            )
-        })?;
+        // Every block passes through this thread (callback, doorbell, bridge,
+        // server, bridge, next callback), and the OS elevates only the audio
+        // callback's own thread, so a default-priority bridge delays the
+        // reply. A refusal is an outcome on the handle, not an error.
+        let handle = tutti_rt::spawn_named(
+            "plugin-bridge",
+            Some(tutti_rt::PriorityRequest::Highest),
+            move |_| {
+                run_thread(
+                    thread_channels,
+                    sleeper,
+                    thread_payloads,
+                    thread_lifecycle,
+                    listener,
+                    socket_path,
+                )
+            },
+        )?;
 
         Ok(Self {
             channels,
