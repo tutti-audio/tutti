@@ -125,7 +125,7 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
     match load(&mut stream, &not_a_plugin, PluginFormat::Vst3) {
         BridgeMessage::Error { message } => {
             assert!(
-                !message.contains("Unsupported plugin format"),
+                !message.contains("unsupported plugin format"),
                 "the library was refused before a format read it: {message}"
             );
             assert!(

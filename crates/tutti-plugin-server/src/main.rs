@@ -7,7 +7,7 @@
 //! down and not the DAW.
 
 use std::env;
-use tutti_plugin_server::{BridgeConfig, PluginServer};
+use tutti_plugin_server::PluginServer;
 use tutti_plugin_types::BridgeResult;
 
 fn main() -> BridgeResult<()> {
@@ -17,7 +17,5 @@ fn main() -> BridgeResult<()> {
         .nth(1)
         .expect("Socket path required as first argument");
 
-    let config = BridgeConfig::at(socket_path.into());
-
-    PluginServer::new(config)?.run()
+    PluginServer::new(socket_path.into())?.run()
 }

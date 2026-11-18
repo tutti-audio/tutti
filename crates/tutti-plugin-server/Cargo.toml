@@ -33,11 +33,10 @@ au = ["dep:tutti-au-host"]
 # The wire, the shared-memory slab and the state chunking: the process edge's
 # other end (the host's is the same crate).
 tutti-plugin-ipc = { version = "0.0.1", path = "../tutti-plugin-ipc" }
-# The shared bundle-layout walk (`bundle::any_module_in_bundle`). Direct rather
-# than reached through the wire crate, because this is a dependency in its own
-# right and a re-export would hide that.
 # The editor's sizes, which name their unit (`dpi::Size`).
 dpi.workspace = true
+# The plugin vocabulary: the capability traits the formats implement, the
+# lifecycle, and the bundle-layout walk (`bundle::any_module_in_bundle`).
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 # The sample width of the served pipeline's channels (`Float`) and the block views.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
@@ -65,9 +64,8 @@ tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true 
 # The OS calls of the host watchdog and the connection wait, behind safe calls.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
-# `ParamId`, and an unchecked `SampleRate` (`Unit::from_raw`) in the tests.
+# `ParamId`, in the served plugin's parameter calls.
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
 
 [dev-dependencies]
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }

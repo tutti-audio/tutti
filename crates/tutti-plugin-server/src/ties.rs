@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use tutti_rt::{Doorbell, LockExt, Sleeper, StopToken, doorbell};
 
-use crate::bell::Bell;
+use crate::main_loop::Bell;
 
 /// How long a wait is given: a deadline, as a value of the clock it is asked
 /// at. It reads no clock, so its arithmetic is tested with made-up instants.

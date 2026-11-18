@@ -2,6 +2,33 @@
 
 use super::*;
 use tutti_au_host::AuLoaded;
+
+impl Served<AuLoaded> {
+    /// `load_first` for the plugin `load` chooses, in
+    /// 32-bit.
+    fn load_with(
+        main: MainThreadMarker,
+        path: &Path,
+        load: &Load,
+        rate: f64,
+        block: usize,
+    ) -> PluginResult<Self> {
+        Self::load(
+            main,
+            &tutti_fixtures::detached_work(),
+            path,
+            load,
+            SampleRate::of(rate),
+            block,
+            false,
+            None,
+            &mut || {},
+            Hand::local(),
+            crate::ties::ties().expect("bells").0,
+        )
+        .map(|(served, _)| served)
+    }
+}
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
