@@ -120,11 +120,9 @@ fn test_compute_limiter_gain() {
     assert!(gain < 1.0);
 }
 
-/// The reviewer's measurement of the old curve at (-6, -0.3) dB, which
-/// went -60 -> -54.3, -7 -> -1.3, -6.1 -> -0.4, -5.9 -> -6.0, 0 -> -6.0:
-/// non-monotonic, with a 5.7 dB drop at the knee. With the threshold
-/// driving the input the output is `min(in + 5.7, -0.3)`, on both the
-/// dB form and the block's linear form.
+/// At (-6, -0.3) dB the output is monotonic: `min(in + 5.7, -0.3)`, with no drop at
+/// the knee (-60 -> -54.3, -7 -> -1.3, -6.1 -> -0.4, 0 -> -0.3), on both the dB form
+/// and the block's linear form.
 #[test]
 fn the_curve_is_the_input_plus_the_drive_up_to_the_ceiling() {
     let (threshold, ceiling) = (Db(-6.0), Db(-0.3));

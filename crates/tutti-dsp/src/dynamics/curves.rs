@@ -1,26 +1,18 @@
 //! The gain curves and conversions the dynamics processors share.
 //!
-//! The gain-computation curves live here rather than in any one processor, so
-//! a compressor and a gate pin silence at the same floor.
+//! The gain-computation curves, shared by the compressor, the gate and the
+//! limiter, and the amplitude-to-decibel conversion that floors silence.
 
 use tutti_types::{Amplitude, CompressionRatio, Db};
 
-/// Amplitude as decibels, for the dynamics detectors.
+/// Amplitude as decibels, floored: an amplitude of zero or below is `Db::FLOOR`
+/// (`-144`, about the 24-bit noise floor) rather than `-inf`.
 ///
-/// **This is where the dynamics floor is applied.** `Db::from_amplitude` gives
-/// silence `-inf`, because what to substitute for it is the consumer's choice;
-/// this is the consumer that chooses, so every detector pins at one floor:
-/// `Db::FLOOR` is `-144`, roughly the 24-bit noise floor. Per-site floors are
-/// what let this diverge — a detector at `-96` against `tutti-export`'s `-144`
-/// against a third site with none. The exact value is inaudible in a
-/// compressor, since anything near either floor is far below any usable
-/// threshold; the agreement is the point.
-///
-/// The guard buys agreement, not `NaN` containment: the gain curves tolerate
-/// `-inf` on their own ([`compute_compressor_gain_reduction`] sends it down the
-/// `input_db <= below` branch and returns `Db::UNITY`). What it does buy is a
-/// level every caller can compare, clamp and display without special-casing
-/// infinity.
+/// Every detector reads its level through this function, so they all pin silence
+/// at the one floor and a level can be compared, clamped and displayed without
+/// special-casing infinity. The gain curves also accept `-inf`:
+/// [`compute_compressor_gain_reduction`] sends it down the `input_db <= below`
+/// branch and returns `Db::UNITY`.
 #[inline]
 pub fn amplitude_to_db(amp: impl Into<Amplitude>) -> Db {
     let amp = amp.into();
