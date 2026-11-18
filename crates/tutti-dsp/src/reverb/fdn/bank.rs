@@ -700,6 +700,7 @@ pub(crate) fn rescale_bands(g: [f32; 3], pole: [f32; 2]) -> [f32; 3] {
     }
     let peak = peak_response(g, pole);
     if peak > 1.0 {
+        // The gains are `Amplitude` (`f32`) figures: the rescale narrows back to them.
         g.map(|x| (f64::from(x) * 0.9999 / peak) as f32)
     } else {
         g

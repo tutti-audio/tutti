@@ -4,6 +4,9 @@ use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
 use super::*;
 use crate::reverb::network::Stage;
 
+// The tests other than the `f64` ones run the `f32` instantiation, so their tolerances are
+// `f32`'s.
+
 /// Controls with no modulation and no damping: the tank is a pure loop of unit-magnitude
 /// all-passes and delays.
 fn still(decay: f64) -> PlateControls {
