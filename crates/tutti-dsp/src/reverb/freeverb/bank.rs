@@ -30,13 +30,11 @@
 //!
 //! **Format.** The state is `f32`; a view of another [`Float`] is converted at the edges.
 
-use core::cmp;
-
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_types::{Gain, Mix, SampleRate, Seconds, Tail};
 
 use super::design::FreeverbControls;
-use crate::delay::{ring_seconds, trips};
+use crate::delay::{DelayRing, ring_seconds, trips};
 use crate::reverb::{CHUNK, ramp};
 use crate::{Glide, Steps, TAIL_FLOOR};
 
@@ -295,9 +293,7 @@ impl FreeverbBank {
 
 #[derive(Debug, Clone)]
 struct CombFilter {
-    buffer: Vec<f32>,
-
-    buffer_index: usize,
+    buffer: DelayRing,
     filter_store: f32,
 
     feedback: f32,
@@ -308,8 +304,7 @@ struct CombFilter {
 impl CombFilter {
     fn new(buffer_size: usize) -> Self {
         Self {
-            buffer: vec![0_f32; buffer_size],
-            buffer_index: 0,
+            buffer: DelayRing::new(buffer_size),
             filter_store: 0_f32,
             feedback: 0_f32,
             damp1: 0_f32,
@@ -318,50 +313,25 @@ impl CombFilter {
     }
 
     fn mute(&mut self) {
-        self.buffer.fill(0.0);
-        self.buffer_index = 0;
+        self.buffer.clear();
         self.filter_store = 0_f32;
     }
 
     fn process(&mut self, input_block: &[f32], input_gain: f32, output_block: &mut [f32]) {
-        let buffer_length = self.buffer.len();
-        let output_block_length = output_block.len();
-
-        let mut block_index: usize = 0;
-        while block_index < output_block_length {
-            if self.buffer_index == buffer_length {
-                self.buffer_index = 0;
-            }
-
-            let src_rem = buffer_length - self.buffer_index;
-            let dst_rem = output_block_length - block_index;
-            let rem = cmp::min(src_rem, dst_rem);
-
-            for t in 0..rem {
-                let block_pos = block_index + t;
-                let buffer_pos = self.buffer_index + t;
-
-                let input = input_block[block_pos] * input_gain;
-
-                let output = self.buffer[buffer_pos];
-
-                self.filter_store = (output * self.damp2) + (self.filter_store * self.damp1);
-
-                self.buffer[buffer_pos] = input + (self.filter_store * self.feedback);
-                output_block[block_pos] += output;
-            }
-
-            self.buffer_index += rem;
-            block_index += rem;
+        for (out, &x) in output_block.iter_mut().zip(input_block) {
+            let input = x * input_gain;
+            let output = self.buffer.oldest();
+            self.filter_store = (output * self.damp2) + (self.filter_store * self.damp1);
+            self.buffer
+                .push(input + (self.filter_store * self.feedback));
+            *out += output;
         }
     }
 }
 
 #[derive(Debug, Clone)]
 struct AllPassFilter {
-    buffer: Vec<f32>,
-
-    buffer_index: usize,
+    buffer: DelayRing,
 
     feedback: f32,
 }
@@ -369,45 +339,21 @@ struct AllPassFilter {
 impl AllPassFilter {
     fn new(buffer_size: usize) -> Self {
         Self {
-            buffer: vec![0_f32; buffer_size],
-            buffer_index: 0,
+            buffer: DelayRing::new(buffer_size),
             feedback: 0_f32,
         }
     }
 
     fn mute(&mut self) {
-        self.buffer.fill(0.0);
-        self.buffer_index = 0;
+        self.buffer.clear();
     }
 
     fn process(&mut self, block: &mut [f32]) {
-        let buffer_length = self.buffer.len();
-        let block_length = block.len();
-
-        let mut block_index: usize = 0;
-        while block_index < block_length {
-            if self.buffer_index == buffer_length {
-                self.buffer_index = 0;
-            }
-
-            let src_rem = buffer_length - self.buffer_index;
-            let dst_rem = block_length - block_index;
-            let rem = cmp::min(src_rem, dst_rem);
-
-            for t in 0..rem {
-                let block_pos = block_index + t;
-                let buffer_pos = self.buffer_index + t;
-
-                let input = block[block_pos];
-
-                let bufout = self.buffer[buffer_pos];
-
-                block[block_pos] = bufout - input;
-                self.buffer[buffer_pos] = input + (bufout * self.feedback);
-            }
-
-            self.buffer_index += rem;
-            block_index += rem;
+        for sample in block {
+            let input = *sample;
+            let bufout = self.buffer.oldest();
+            *sample = bufout - input;
+            self.buffer.push(input + (bufout * self.feedback));
         }
     }
 }

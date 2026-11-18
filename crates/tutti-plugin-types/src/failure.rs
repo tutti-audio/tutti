@@ -15,14 +15,15 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::BridgeError;
+use crate::{BridgeError, PluginError};
 
 /// Why a hosted plugin is dead.
 ///
 /// The variants from [`Connect`](Self::Connect) to [`Bridge`](Self::Bridge) are
 /// a served plugin's death, latched by the bridge; [`Terminated`](Self::Terminated)
-/// is the host ending it; [`Unreported`](Self::Unreported) is a backend that
-/// could not say.
+/// is the host ending it; [`Panicked`](Self::Panicked) is an in-process plugin's
+/// death, latched by its lifecycle; [`Unreported`](Self::Unreported) is a
+/// backend that could not say.
 ///
 /// A cause that came from an underlying error carries it as the variant's
 /// [`source`](std::error::Error::source), not as text.
@@ -79,6 +80,12 @@ pub enum PluginFailure {
         /// Why the host did it.
         reason: TerminationReason,
     },
+    /// A call into a plugin that runs in this process panicked: its lifecycle
+    /// poisoned and the plugin is lost.
+    Panicked {
+        /// What the lifecycle recorded of the call.
+        source: Arc<PluginError>,
+    },
     /// A backend reported the plugin dead and could not say why.
     Unreported,
 }
@@ -101,6 +108,7 @@ impl std::fmt::Display for PluginFailure {
                 write!(f, "the plugin-server's connection failed: {source}")
             }
             Self::Terminated { reason } => write!(f, "the plugin-server was ended: {reason}"),
+            Self::Panicked { source } => write!(f, "the plugin panicked and is lost: {source}"),
             Self::Unreported => {
                 f.write_str("the plugin died for a reason its backend did not report")
             }
@@ -120,6 +128,7 @@ impl std::error::Error for PluginFailure {
             | Self::Io { source }
             | Self::Protocol { source }
             | Self::Bridge { source } => Some(&**source),
+            Self::Panicked { source } => Some(&**source),
             Self::Terminated { .. }
             | Self::StreamClosed
             | Self::ServerExited { .. }
