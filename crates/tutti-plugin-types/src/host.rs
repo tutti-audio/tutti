@@ -22,7 +22,7 @@
 //! implementation's `unsafe` states, per format, why the two halves may reach
 //! one plugin instance at once.
 
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::time::Instant;
 
 use dpi::Size;
@@ -457,6 +457,21 @@ pub trait Processor: Send {
     fn chunk(&self) -> Option<NonZeroUsize> {
         None
     }
+
+    /// The most events per block this Processor takes from the node's event
+    /// input, as it was built: the room of its own input storage (a CLAP
+    /// list, a chunk's MIDI, the node's intake for a format that stages into
+    /// the plugin's own). The node declares at most this as its
+    /// `Shape::event_input_capacity`, so the graph cuts what the Processor
+    /// would otherwise refuse, in frame order and keeping note-offs. Read
+    /// from the node's `prepare`.
+    ///
+    /// **A served plugin has a second cut.** A chunk spans several blocks, and
+    /// its MIDI is one list of [`MIDI_STACK_CAPACITY`](crate::MIDI_STACK_CAPACITY) events that every block
+    /// of the chunk adds to, so a chunk can overflow with every block within
+    /// the declared bound. That cut keeps note-offs (it displaces a note-on
+    /// for one) and is counted as MIDI lost, once.
+    fn event_input(&self) -> NonZeroU32;
 
     /// The frames of latency this Processor adds to the plugin's own (the
     /// [`Controller::latency`] figure): the served pipeline's chunk, which it

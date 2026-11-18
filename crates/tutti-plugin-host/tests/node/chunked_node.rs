@@ -319,6 +319,10 @@ impl InProcess for Rec {
 }
 
 impl Processor for RecProcessor {
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        tutti_plugin_types::MIDI_STACK_BOUND
+    }
+
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         let PluginAudio::F32(buffer) = &mut io.buffer else {
             unreachable!("the graph is f32");

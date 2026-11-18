@@ -188,13 +188,16 @@ mod vst2 {
     use tutti_session::Losses;
     use tutti_ump::MidiChannel;
 
-    /// **Lost MIDI is counted as the MIDI inlets count theirs.** A block with 300
-    /// notes holds 256 (`MIDI_STACK_CAPACITY`): the 44 past it are `lost` and
-    /// nothing else; a block within the cap adds nothing; and the same view
-    /// reports a plugin that runs in this process with no server and no
-    /// pipeline.
+    /// **MIDI past the plugin node's declared input bound is the graph's dropped
+    /// events, not the plugin's loss.** A block with 300 notes is cut by the
+    /// graph to the bound (`MIDI_STACK_BOUND`, 256) before the plugin runs: the
+    /// 44 past it are reported once as `EventsDropped` at the node with no
+    /// port, the plugin's own `losses()` stay empty, and a block within the
+    /// bound drops nothing more. The same view reports a plugin that runs in
+    /// this process with no server and no pipeline.
     #[test]
-    fn midi_past_a_blocks_capacity_reads_as_lost() {
+    fn midi_past_the_nodes_input_bound_is_reported_as_dropped_events() {
+        use tutti_session::SessionEvent;
         let mut s = offline();
         let node = s
             .load_plugin_blocking(
@@ -226,18 +229,36 @@ mod vst2 {
 
         let notes =
             |n: usize| (0..n).map(|i| midi::note_on(MidiChannel::FIRST, (i % 128) as u8, 0xFFFF));
+        let cut = 300 - u64::from(tutti_plugin_types::MIDI_STACK_BOUND.get());
+        let dropped = |events: Vec<SessionEvent>| {
+            events
+                .into_iter()
+                .filter_map(|e| match e {
+                    SessionEvent::EventsDropped {
+                        node: n,
+                        port: None,
+                        count,
+                        ..
+                    } if n == node.into() => Some(count),
+                    _ => None,
+                })
+                .sum::<u64>()
+        };
         writer.push_all(notes(300).map(|n| (tutti_session::Stamp::NextBlock, n)));
         render_block(&s);
+        assert_eq!(dropped(s.update()), cut, "the graph's cut, reported once");
         assert_eq!(
-            losses(),
-            Losses::lost(300 - tutti_plugin_types::MIDI_STACK_CAPACITY as u64)
+            s.plugin_view(node).unwrap().losses(),
+            Losses::NONE,
+            "not the plugin's loss"
         );
         writer.push_all(notes(10).map(|n| (tutti_session::Stamp::NextBlock, n)));
         render_block(&s);
         assert_eq!(
-            losses(),
-            Losses::lost(300 - tutti_plugin_types::MIDI_STACK_CAPACITY as u64),
-            "a block within the cap lost nothing more"
+            dropped(s.update()),
+            0,
+            "a block within the bound drops nothing"
         );
+        assert_eq!(s.plugin_view(node).unwrap().losses(), Losses::NONE);
     }
 }

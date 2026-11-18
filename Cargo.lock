@@ -3115,6 +3115,7 @@ dependencies = [
  "tutti-buffers",
  "tutti-clap-test-plugin",
  "tutti-fixtures",
+ "tutti-graph",
  "tutti-midi-protocol",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
