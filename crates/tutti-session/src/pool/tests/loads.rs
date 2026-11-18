@@ -114,7 +114,7 @@ impl PoolEntry for Stub {
         self.version
     }
 
-    fn load(&self) -> Load<Arc<Made>> {
+    fn load<S: tutti_buffers::Float>(&self) -> Load<Arc<Made>, S> {
         let Self {
             name,
             version,
@@ -380,7 +380,7 @@ fn a_session_stage_that_panics_fails_its_entry_and_not_the_update() {
         type Loaded = ();
         type Handle = ();
         fn identity(&self) {}
-        fn load(&self) -> Load<()> {
+        fn load<S: tutti_buffers::Float>(&self) -> Load<(), S> {
             Load::on_session(|_| panic!("the port is gone"))
         }
         fn handle(_: &(), _: &Life) {}
@@ -403,7 +403,7 @@ fn a_ready_load_lands_at_the_declaration_with_the_value_it_was_given() {
         type Loaded = Arc<Made>;
         type Handle = Arc<Made>;
         fn identity(&self) {}
-        fn load(&self) -> Load<Arc<Made>> {
+        fn load<S: tutti_buffers::Float>(&self) -> Load<Arc<Made>, S> {
             Load::ready(Arc::clone(&self.0))
         }
         fn handle(loaded: &Arc<Made>, _: &Life) -> Arc<Made> {
@@ -834,7 +834,7 @@ fn a_panic_in_a_main_stage_fails_its_entry_and_not_the_update() {
         type Loaded = ();
         type Handle = ();
         fn identity(&self) {}
-        fn load(&self) -> Load<()> {
+        fn load<S: tutti_buffers::Float>(&self) -> Load<(), S> {
             Load::on_worker_then_main(|| Ok(()), |(), _main| panic!("the plugin aborted"))
         }
         fn handle(_: &(), _: &Life) {}

@@ -112,7 +112,7 @@ impl PoolEntry for Probe {
         self.version
     }
 
-    fn load(&self) -> Load<u32> {
+    fn load<S: tutti_buffers::Float>(&self) -> Load<u32, S> {
         let (version, initial, fail, runs) = (
             self.version,
             self.initial,
@@ -490,7 +490,7 @@ fn a_handle_of_another_kind_or_an_undeclared_key_is_refused() {
         type Loaded = ();
         type Handle = ();
         fn identity(&self) {}
-        fn load(&self) -> Load<()> {
+        fn load<S: tutti_buffers::Float>(&self) -> Load<(), S> {
             Load::on_worker(|| Ok(()))
         }
         fn handle((): &(), _: &Life) {}
@@ -537,7 +537,7 @@ impl PoolEntry for Twin {
         self.0
     }
 
-    fn load(&self) -> Load<u32> {
+    fn load<S: tutti_buffers::Float>(&self) -> Load<u32, S> {
         let version = self.0;
         Load::on_worker(move || Ok(version))
     }

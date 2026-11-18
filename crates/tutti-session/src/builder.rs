@@ -956,7 +956,7 @@ impl<C: Clock> SessionBuilder<C> {
     ) -> Result<Session<&'static str, N>> {
         #[cfg(feature = "sampler")]
         let disk_streamer = if streamer {
-            Some(tutti_sampler::DiskStreamer::new(
+            Some(tutti_sampler::DiskStreamer::start(
                 parts.graph.prepared().sample_rate(),
                 tutti_sampler::DiskStreamerConfig::default(),
             )?)

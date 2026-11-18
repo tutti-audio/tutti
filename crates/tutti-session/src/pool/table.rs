@@ -7,6 +7,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
+use tutti_buffers::Float;
 use tutti_rt::MainThreadMarker;
 
 use crate::job::Ticket;
@@ -189,7 +190,7 @@ impl Stage {
 }
 
 /// One key's entry.
-struct Slot {
+struct Slot<S: Float> {
     kind: TypeId,
     identity: Box<dyn ErasedIdentity>,
     /// The app's pool names it.
@@ -222,14 +223,14 @@ struct Slot {
     /// The load that may land: an older one is stale.
     generation: u64,
     /// The kind's load, again, for a retry.
-    reload: Reload,
+    reload: Reload<S>,
     /// Whether the kind reads the loaded value as lost.
     lost: fn(&Value) -> bool,
     /// How another key's entry of the same identity gets this one's value.
     share: Option<Cloner>,
 }
 
-impl Slot {
+impl<S: Float> Slot<S> {
     fn state(&self) -> PoolState {
         if self.declared {
             self.state.clone()
@@ -278,9 +279,9 @@ impl Slot {
 
 /// A load the diff started: the session runs it and lands the result under
 /// the same flight.
-pub(crate) struct Start {
+pub(crate) struct Start<S: Float> {
     pub(crate) flight: u64,
-    pub(crate) load: Load<Value>,
+    pub(crate) load: Load<Value, S>,
 }
 
 /// One load, in flight, and the entries waiting on it. An entry waits on the
@@ -314,9 +315,9 @@ struct Queued {
 }
 
 /// A stage on the session's thread, waiting for the next update.
-pub(crate) struct Opening {
+pub(crate) struct Opening<S: Float> {
     pub(crate) flight: u64,
-    pub(crate) open: Box<dyn FnOnce(&mut crate::OpenCx<'_>) -> Result<Value, LoadError> + Send>,
+    pub(crate) open: Box<dyn FnOnce(&mut crate::OpenCx<'_, S>) -> Result<Value, LoadError> + Send>,
 }
 
 /// A stage on the main thread, with its worker's output, waiting for an update
@@ -342,20 +343,20 @@ struct Pending {
 }
 
 /// The pool's entries by key, which a wait reads.
-type Slots = BTreeMap<PoolKey, Slot>;
+type Slots<S> = BTreeMap<PoolKey, Slot<S>>;
 
 /// The pool: every key's entry, the loads in flight, and the events not yet
 /// reported.
 pub(crate) struct Pool<A: crate::AppKey, C: Clock> {
     config: PoolConfig,
-    slots: BTreeMap<PoolKey, Slot>,
+    slots: Slots<C::Float>,
     last_generation: u64,
     flights: BTreeMap<u64, Flight>,
     /// Worker stages not started, in declaration order.
     queue: VecDeque<Queued>,
     /// Worker stages started and not landed.
     running: usize,
-    openings: Vec<Opening>,
+    openings: Vec<Opening<C::Float>>,
     main: Vec<MainItem>,
     /// An update has run on the main thread: the stages that wait for it run.
     main_seen: bool,
@@ -365,7 +366,7 @@ pub(crate) struct Pool<A: crate::AppKey, C: Clock> {
     /// The snapshot holds, with their order.
     ranks: Vec<Rank>,
     last_rank: u64,
-    waiters: Vec<Box<dyn FnMut(&Slots) -> bool + Send>>,
+    waiters: Vec<Box<dyn FnMut(&Slots<C::Float>) -> bool + Send>>,
     /// Runs waiting for an entry to load, in the order they were asked.
     when_loaded: Vec<WhenLoaded<A, C>>,
     last_when: u64,
@@ -407,7 +408,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// asked of and do not: the caller has run or refused them first
     /// ([`waiting_runs`](Self::waiting_runs)).
     #[cfg(feature = "device")]
-    pub(crate) fn rebind<N: Clock>(self) -> Pool<A, N> {
+    pub(crate) fn rebind<N: Clock<Float = C::Float>>(self) -> Pool<A, N> {
         debug_assert!(
             self.when_loaded.is_empty(),
             "no run waits when the session changes clock"
@@ -480,8 +481,8 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// there is no main thread. Nothing is applied.
     pub(crate) fn declare<K: Ord + Clone + fmt::Debug + Send + Sync + 'static>(
         &mut self,
-        set: PoolSet<K>,
-    ) -> Result<Vec<Start>, PoolError<K>> {
+        set: PoolSet<K, C::Float>,
+    ) -> Result<Vec<Start<C::Float>>, PoolError<K>> {
         let mut named = BTreeSet::new();
         for item in &set.items {
             if !named.insert(PoolKey::new(&item.key)) {
@@ -515,7 +516,12 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         Ok(starts)
     }
 
-    fn declare_one<K>(&mut self, key: &PoolKey, order: usize, item: Item<K>) -> Option<Start> {
+    fn declare_one<K>(
+        &mut self,
+        key: &PoolKey,
+        order: usize,
+        item: Item<K, C::Float>,
+    ) -> Option<Start<C::Float>> {
         let Item {
             kind,
             identity,
@@ -601,7 +607,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// Starts `key`'s load: it shares a load in flight or a loaded value of the
     /// same identity under another key when the entry shares, and is a flight
     /// of its own otherwise. The slot's old flight, if any, is superseded.
-    fn begin(&mut self, key: &PoolKey, load: Load<Value>) -> Option<Start> {
+    fn begin(&mut self, key: &PoolKey, load: Load<Value, C::Float>) -> Option<Start<C::Float>> {
         let generation = self.next_generation();
         let needs_main = load.needs_main();
         let stage = if matches!(load.step, Step::Session(_)) {
@@ -799,11 +805,11 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         self.running -= 1;
     }
 
-    pub(crate) fn open(&mut self, opening: Opening) {
+    pub(crate) fn open(&mut self, opening: Opening<C::Float>) {
         self.openings.push(opening);
     }
 
-    pub(crate) fn take_openings(&mut self) -> Vec<Opening> {
+    pub(crate) fn take_openings(&mut self) -> Vec<Opening<C::Float>> {
         std::mem::take(&mut self.openings)
     }
 
@@ -965,7 +971,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     ///
     /// [`RetryError::NotPooled`] when the key is not declared;
     /// [`RetryError::NotFailed`] when its entry is neither failed nor lost.
-    pub(crate) fn retry<K>(&mut self, key: &K) -> Result<Option<Start>, RetryError<K>>
+    pub(crate) fn retry<K>(&mut self, key: &K) -> Result<Option<Start<C::Float>>, RetryError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
@@ -1024,7 +1030,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
 
     /// Every declared entry's outcome as a report of `K` keys, `None` while any
     /// declared entry is pending.
-    fn report<K: Clone + 'static>(slots: &Slots) -> Option<PoolReport<K>> {
+    fn report<K: Clone + 'static>(slots: &Slots<C::Float>) -> Option<PoolReport<K>> {
         let mut entries: Vec<(usize, K, PoolOutcome)> = Vec::new();
         for (key, slot) in slots.iter().filter(|(_, slot)| slot.declared) {
             if slot.pending() {
@@ -1051,7 +1057,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// The wait ends when its [`Job`](crate::Job) is dropped.
     pub(crate) fn wait_loaded<K: Clone + Send + 'static>(&mut self, ticket: Ticket<PoolLoaded<K>>) {
         let mut ticket = Some(ticket);
-        let mut waiter = move |slots: &Slots| {
+        let mut waiter = move |slots: &Slots<C::Float>| {
             let Some(ticket_ref) = ticket.as_ref().filter(|t| !t.cancelled()) else {
                 return true;
             };
@@ -1147,7 +1153,10 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// read under, and reports what moved and what could not be read. An entry
     /// that changed since the check began (reloaded, undeclared, failed) is
     /// left alone.
-    pub(crate) fn reload_changed(&mut self, checked: Vec<Checked>) -> (Vec<Start>, RefreshReport) {
+    pub(crate) fn reload_changed(
+        &mut self,
+        checked: Vec<Checked>,
+    ) -> (Vec<Start<C::Float>>, RefreshReport) {
         let mut refreshed = RefreshReport::default();
         for Checked { key, was, now } in checked {
             let current = self.slots.get(&key).is_some_and(|slot| {

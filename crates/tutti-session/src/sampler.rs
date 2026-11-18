@@ -45,6 +45,16 @@ pub enum SamplerEvent {
         /// The voice's side of the stream.
         reader: StreamReader,
     },
+    /// [`Opened`](Self::Opened) on an `f64` session: its streams decode into
+    /// `f64` rings, which an `f32` voice does not read.
+    OpenedF64 {
+        /// The id [`Session::open_stream`] returned.
+        id: SamplerLoad,
+        /// The control side of the stream.
+        stream: Stream<f64>,
+        /// The voice's side of the stream.
+        reader: StreamReader<f64>,
+    },
     /// An open did not finish, and will not.
     OpenFailed {
         /// The id [`Session::open_stream`] returned.
@@ -81,8 +91,7 @@ pub enum SamplerError {
     Job(#[from] WorkerError),
 }
 
-/// `f32` because an opened stream lands through the session's jobs, which land on `f32` sessions.
-impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Opens `path` as a disk stream, its reader starting at `place`, on the
     /// session's spawner. Returns at once; the stream lands as
     /// [`SamplerEvent::Opened`] with the returned id in a later
@@ -113,7 +122,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             move || opening.wait(),
             move |_, done, events| {
                 let event = match done {
-                    Ok(Ok((stream, reader))) => SamplerEvent::Opened { id, stream, reader },
+                    Ok(Ok((stream, reader))) => {
+                        <C::Float as crate::format::Sealed>::opened(id, stream, reader)
+                    }
                     Ok(Err(error)) => SamplerEvent::OpenFailed {
                         id,
                         error: error.into(),

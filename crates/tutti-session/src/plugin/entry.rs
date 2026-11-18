@@ -458,7 +458,7 @@ impl PoolEntry for PluginEntry {
         (self.id.clone(), self.hosting)
     }
 
-    fn load(&self) -> Load<LoadedPlugin> {
+    fn load<S: tutti_buffers::Float>(&self) -> Load<LoadedPlugin, S> {
         let cx = self.cx.clone();
         let loadable = match &self.resolved {
             Ok(loadable) => loadable.clone().hosting(self.hosting),
@@ -546,8 +546,10 @@ impl<K> PluginDeclaration<K> {
     }
 }
 
-impl<K: Ord + Clone + fmt::Debug + Send + Sync + 'static> IntoPool<K> for PluginDeclaration<K> {
-    fn into_pool(self, set: &mut PoolSet<K>) {
+impl<K: Ord + Clone + fmt::Debug + Send + Sync + 'static, S: tutti_buffers::Float> IntoPool<K, S>
+    for PluginDeclaration<K>
+{
+    fn into_pool(self, set: &mut PoolSet<K, S>) {
         // One instance per key: a plugin is never shared.
         Declared::new(self.key, self.entry).into_pool(set);
     }

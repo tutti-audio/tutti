@@ -146,7 +146,7 @@ impl PoolEntry for AudioFile {
         (self.path.clone(), self.tier)
     }
 
-    fn load(&self) -> Load<Self::Loaded> {
+    fn load<S: tutti_buffers::Float>(&self) -> Load<Self::Loaded, S> {
         let (path, tier) = (self.path.clone(), self.tier);
         Load::on_worker(move || match tier {
             Tier::Resident => resident(path),
@@ -224,7 +224,7 @@ impl PoolEntry for SoundFontFile {
         self.path.clone()
     }
 
-    fn load(&self) -> Load<Self::Loaded> {
+    fn load<S: tutti_buffers::Float>(&self) -> Load<Self::Loaded, S> {
         let path = self.path.clone();
         Load::on_worker(move || {
             tutti_sf2::SoundFont::open(path)

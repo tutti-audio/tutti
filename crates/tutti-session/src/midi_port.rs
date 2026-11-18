@@ -476,7 +476,7 @@ impl PoolEntry for MidiInputEntry {
         self.saved.clone()
     }
 
-    fn load(&self) -> Load<InputLoaded> {
+    fn load<S: tutti_buffers::Float>(&self) -> Load<InputLoaded, S> {
         let saved = self.saved.clone();
         Load::on_session(move |cx| {
             let id = cx.mint_resource_id();
@@ -533,7 +533,7 @@ impl PoolEntry for MidiOutputEntry {
         (self.saved.clone(), self.options.clone())
     }
 
-    fn load(&self) -> Load<OutputLoaded> {
+    fn load<S: tutti_buffers::Float>(&self) -> Load<OutputLoaded, S> {
         let saved = self.saved.clone();
         let options = self.options.clone();
         Load::on_session(move |cx| {
