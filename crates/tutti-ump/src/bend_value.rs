@@ -1,5 +1,7 @@
 //! The 32-bit pitch bend word of a MIDI 2.0 Pitch Bend or Per-Note Pitch Bend.
 
+use tutti_units::Bipolar;
+
 /// The 32-bit value of a MIDI 2.0 Pitch Bend or Per-Note Pitch Bend (M2-104
 /// sections 7.4.11 and 7.4.7), centred on [`CENTER`](Self::CENTER).
 ///
@@ -58,6 +60,30 @@ impl BendValue {
     #[must_use]
     pub const fn get(self) -> u32 {
         self.0
+    }
+
+    /// The bend as a position on `-1..=1`: `(get() - 2^31) / 2^31`.
+    ///
+    /// [`CENTER`](Self::CENTER) is `0.0`, `0` is `-1.0` and `u32::MAX` is
+    /// `1 - 2^-31`. The value is exact in `f64`.
+    #[inline]
+    #[must_use]
+    pub fn bipolar(self) -> Bipolar {
+        let scale = f64::from(Self::CENTER.0);
+        // The word is on `0..=u32::MAX`, so the quotient is on `-1..1`.
+        Bipolar::clamped((f64::from(self.0) - scale) / scale)
+    }
+
+    /// The bend at position `b` of the 32-bit range: `round(2^31 + b * 2^31)`,
+    /// saturating at `u32::MAX`, so `+1.0` is `u32::MAX`. Inverse of
+    /// [`bipolar`](Self::bipolar).
+    #[inline]
+    #[must_use]
+    pub fn from_bipolar(b: Bipolar) -> Self {
+        let scale = f64::from(Self::CENTER.0);
+        // The rounded word is on `0..=2^32`; the cast saturates at the wire's
+        // 32-bit maximum.
+        Self(libm::round(scale + b.get() * scale) as u32)
     }
 }
 

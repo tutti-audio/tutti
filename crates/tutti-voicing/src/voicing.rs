@@ -55,14 +55,13 @@ use alloc::vec::Vec;
 use core::num::{NonZeroU16, NonZeroUsize};
 
 use tutti_midi_protocol::{
-    GeneralMidi, Heard, KeyTable, Timing, TuningMessage, Universal, bend_to_signed_f32,
-    narrow_value,
+    GeneralMidi, Heard, KeyTable, Timing, TuningMessage, Universal, narrow_value,
 };
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
     RegisteredData, Rpn, U7, Ump, Voice2,
 };
-use tutti_units::{Amplitude, Seconds, Semitones};
+use tutti_units::{Amplitude, Bipolar, Seconds, Semitones};
 
 use crate::channel::{Bend, ChannelState};
 use crate::master::{Master, MasterGain};
@@ -799,7 +798,7 @@ impl Voicing {
                 self.channels[channel.index()].set_pressure(pressure.normalized());
             }
             Voice2::PitchBend(bend) => {
-                let position = bend_to_signed_f32(bend);
+                let position = bend.bipolar();
                 self.bend(channel, |b| b.position = position);
             }
             // The channel's registered parameters: the pitch bend sensitivity
@@ -1653,7 +1652,7 @@ impl Voicing {
                     let b = n.holds.sostenuto_up().is_now();
                     a || b
                 });
-                self.bend(channel, |b| b.position = 0.0);
+                self.bend(channel, |b| b.position = Bipolar::ZERO);
             }
         }
     }
@@ -2668,6 +2667,9 @@ mod tests {
 
     // ---- bends -------------------------------------------------------------
 
+    /// The wheel at the wire's maximum word: `1 - 2^-31` of full travel.
+    const TOP: f64 = 1.0 - 1.0 / 2_147_483_648.0;
+
     fn bend(v: u32) -> Voice2 {
         Voice2::PitchBend(BendValue::new(v))
     }
@@ -2695,7 +2697,10 @@ mod tests {
         s.send(2, bend(u32::MAX), &One);
         s.on(2, 60);
         s.core.forget_notes();
-        assert_eq!(s.core.channel_pitch(MidiChannel::of(2)), Semitones(2.0));
+        assert_eq!(
+            s.core.channel_pitch(MidiChannel::of(2)),
+            Semitones(2.0 * TOP)
+        );
         assert!(s.core.holds(id(1)).is_none());
         s.core.reset();
         assert_eq!(s.core.channel_pitch(MidiChannel::of(2)), Semitones(0.0));
@@ -2721,7 +2726,10 @@ mod tests {
             let mut s = Sim::new(POLY);
             s.send(1, rpn(semitones, cents, low), &One);
             let up = s.send(1, bend(u32::MAX), &One);
-            assert!((retunes(&up)[0].1 - want).abs() < 1e-12, "{up:?} {want}");
+            assert!(
+                (retunes(&up)[0].1 - want * TOP).abs() < 1e-12,
+                "{up:?} {want}"
+            );
             assert_eq!(
                 s.core.channel_pitch(MidiChannel::of(1)),
                 Semitones(retunes(&up)[0].1)
@@ -2746,13 +2754,13 @@ mod tests {
         let mut s = Sim::new(POLY);
         s.send(1, relative(0, 3 << 25), &One);
         let up = s.send(1, bend(u32::MAX), &One);
-        assert_eq!(retunes(&up)[0].1, 5.0, "{up:?}");
+        assert_eq!(retunes(&up)[0].1, 5.0 * TOP, "{up:?}");
         s.send(1, relative(0, -(1 << 25)), &One);
         let up = s.send(1, bend(u32::MAX), &One);
-        assert_eq!(retunes(&up)[0].1, 4.0, "{up:?}");
+        assert_eq!(retunes(&up)[0].1, 4.0 * TOP, "{up:?}");
         // Another channel holds its own.
         let other = s.send(2, bend(u32::MAX), &One);
-        assert_eq!(retunes(&other)[0].1, 2.0);
+        assert_eq!(retunes(&other)[0].1, 2.0 * TOP);
     }
 
     /// The spec is silent at the ends of the range; this core saturates: a
@@ -2803,7 +2811,7 @@ mod tests {
         let up = s.send(3, bend(u32::MAX), &One);
         assert_eq!(retunes(&up).len(), 1);
         assert_eq!(retunes(&up)[0].0, 3);
-        assert_eq!(retunes(&up)[0].1, 2.0, "{up:?}");
+        assert_eq!(retunes(&up)[0].1, 2.0 * TOP, "{up:?}");
         let down = s.send(3, bend(0), &One);
         assert_eq!(retunes(&down)[0].1, -2.0);
         assert_eq!(retunes(&s.send(3, bend(1 << 31), &One)), [(3, 0.0)]);
@@ -2814,9 +2822,9 @@ mod tests {
         let mut s = Sim::new(POLY);
         s.send(0, bend(u32::MAX), &One);
         let c = s.send(0, rpn0(12.0), &One);
-        assert_eq!(retunes(&c)[0].1, 12.0, "{c:?}");
+        assert_eq!(retunes(&c)[0].1, 12.0 * TOP, "{c:?}");
         let other = s.send(1, bend(u32::MAX), &One);
-        assert_eq!(retunes(&other)[0].1, 2.0, "channel 1 keeps its range");
+        assert_eq!(retunes(&other)[0].1, 2.0 * TOP, "channel 1 keeps its range");
     }
 
     /// Reset All Controllers centres the wheel and leaves the sensitivity
@@ -2828,7 +2836,7 @@ mod tests {
         s.send(0, bend(u32::MAX), &One);
         assert_eq!(retunes(&s.cc(0, 121, 0)), [(0, 0.0)]);
         let again = s.send(0, bend(u32::MAX), &One);
-        assert_eq!(retunes(&again)[0].1, 12.0);
+        assert_eq!(retunes(&again)[0].1, 12.0 * TOP);
     }
 
     /// A channel's wheel and sensitivity are its own: whatever the instrument
@@ -2841,7 +2849,7 @@ mod tests {
         let c = s.send(2, bend(0xC000_0000), &One);
         assert_eq!(retunes(&c), [(2, 1.0)]);
         let c = s.send(0, rpn0(12.0), &One);
-        assert_eq!(retunes(&c), [(0, 12.0)]);
+        assert_eq!(retunes(&c), [(0, 12.0 * TOP)]);
         assert_eq!(retunes(&s.cc(1, 121, 0)), [(1, 0.0)]);
     }
 
@@ -2853,7 +2861,7 @@ mod tests {
         s.send(0, bend(u32::MAX), &One);
         s.core.reset();
         let c = s.send(0, bend(u32::MAX), &One);
-        assert_eq!(retunes(&c)[0].1, 2.0);
+        assert_eq!(retunes(&c)[0].1, 2.0 * TOP);
     }
 
     // ---- a pedal or a panic is its channel's ----------------------------------
@@ -3329,9 +3337,9 @@ mod tests {
         // Fine: 0x3000 is half way between 0x2000 and 0x4000, 50 cents up.
         let r = retunes(&s.send(2, registered(1, 0x3000 << 18), &One));
         assert_eq!(r[0].1, 1.5, "{r:?}");
-        // Full bend up at range 2 adds 2.
+        // The top word at range 2 adds `2 * TOP`.
         let r = retunes(&s.send(2, bend(u32::MAX), &One));
-        assert_eq!(r[0].1, 3.5, "{r:?}");
+        assert_eq!(r[0].1, 1.5 + 2.0 * TOP, "{r:?}");
         // Another channel is untouched.
         assert!(s.core.channel_pitch(MidiChannel::of(3)).0 == 0.0);
     }

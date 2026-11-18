@@ -4,7 +4,7 @@ use super::*;
 /// These must not compile; the ledger is here so a future contributor does
 /// not "helpfully" add them.
 ///
-/// - `Bipolar + Bipolar`, `Bipolar * f32` — a sum or a scaled amount can leave
+/// - `Bipolar + Bipolar`, `Bipolar * f64` — a sum or a scaled amount can leave
 ///   `-1..=1`. Do the arithmetic on the raw number and call `Bipolar::new` (or
 ///   `clamped`). `Neg` stays: the other sign of an amount is in range.
 /// - `Mix + Mix`, `Mix * f64` — a blend *position* does
@@ -276,7 +276,7 @@ fn bipolar_keeps_the_range_contract() {
         get: Bipolar::get,
         of: Some(Bipolar::of),
         valid: &[-1.0, -0.5, 0.0, 0.25, 1.0],
-        invalid: &[-1.001, 1.001, f32::NAN, f32::INFINITY, f32::NEG_INFINITY],
+        invalid: &[-1.001, 1.001, f64::NAN, f64::INFINITY, f64::NEG_INFINITY],
     };
     tutti_fixtures::check_range_contract(&c);
     tutti_fixtures::check_range_serde(&c);
@@ -285,7 +285,7 @@ fn bipolar_keeps_the_range_contract() {
 /// Without serde the same refusals hold through `new`, `TryFrom` and `of`.
 #[test]
 fn bipolar_refuses_what_is_outside_minus_one_to_one() {
-    for bad in [-1.001, 1.001, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [-1.001, 1.001, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(Bipolar::new(bad), None, "{bad}");
         assert!(Bipolar::try_from(bad).is_err(), "{bad}");
         assert!(
@@ -295,7 +295,7 @@ fn bipolar_refuses_what_is_outside_minus_one_to_one() {
     }
     for ok in [-1.0, -0.0, 0.0, 0.5, 1.0] {
         assert_eq!(Bipolar::new(ok).map(Bipolar::get), Some(ok));
-        assert_eq!(f32::from(Bipolar::try_from(ok).unwrap()), ok);
+        assert_eq!(f64::from(Bipolar::try_from(ok).unwrap()), ok);
     }
 }
 
@@ -313,7 +313,7 @@ fn bipolar_orders_negates_and_saturates_only_by_name() {
     );
     assert_eq!(Bipolar::clamped(-2.0), Bipolar::MIN);
     assert_eq!(Bipolar::clamped(2.0), Bipolar::MAX);
-    assert_eq!(Bipolar::clamped(f32::NAN), Bipolar::ZERO);
+    assert_eq!(Bipolar::clamped(f64::NAN), Bipolar::ZERO);
     assert_eq!(<Bipolar as Unit>::from_raw(9.0), Bipolar::MAX);
     assert_eq!(<Bipolar as Unit>::from_raw(-0.5).get(), -0.5);
     assert_eq!(<Bipolar as Unit>::to_raw(Bipolar::of(0.5)), 0.5);

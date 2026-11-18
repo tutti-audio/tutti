@@ -9,7 +9,6 @@ use std::num::NonZeroUsize;
 use tutti_buffers::Planes;
 use tutti_curve::Law;
 use tutti_fixtures::midi;
-use tutti_midi_protocol::bend_to_signed_f32;
 use tutti_midi_protocol::{widen_bend, widen_value, widen_velocity};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
@@ -2453,7 +2452,7 @@ fn a_midi_2_note_on_at_velocity_0_holds_its_key() {
 fn midi1_and_midi2_controllers_reach_the_same_state() {
     let bend14 = 12_288u16;
     let wide_bend = widen_bend(U14::of(bend14)).get();
-    let expected = bend_to_signed_f32(BendValue::new(wide_bend));
+    let expected = BendValue::new(wide_bend).bipolar();
     for message in [
         Message::Midi1(address(0), Voice1::PitchBend(U14::of(bend14))),
         Message::Midi2(address(0), Voice2::PitchBend(BendValue::new(wide_bend))),
@@ -2463,7 +2462,7 @@ fn midi1_and_midi2_controllers_reach_the_same_state() {
         // The synth keeps where the pitch stands: the wheel times the range.
         assert_eq!(
             synth.bends[MidiChannel::FIRST.index()],
-            synth.config.pitch_bend_range * f64::from(expected),
+            synth.config.pitch_bend_range * expected.get(),
             "{message:?}"
         );
     }
@@ -3202,12 +3201,13 @@ fn a_legato_move_returns_the_voice_to_the_new_keys_own_pitch() {
         "{}",
         freq(&s)
     );
-    // A bend recomputes the pitch from the voice's note: the new key's, a
-    // whole tone (the default range) up.
+    // A bend recomputes the pitch from the voice's note: the new key's, up by
+    // the top wire word (`1 - 2^-31` of a whole tone, the default range).
     queue_midi(&mut s, &[ev_bend(1, 16383)]);
     s.tick(&[], &mut out);
+    let top = 1.0 - 1.0 / 2_147_483_648.0;
     assert!(
-        (freq(&s) / key_freq(66) - 1.0).abs() < 1e-12,
+        (freq(&s) / (key_freq(64) * 2.0_f64.powf(2.0 * top / 12.0)) - 1.0).abs() < 1e-12,
         "{}",
         freq(&s)
     );
