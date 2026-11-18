@@ -7,7 +7,7 @@
 
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
-use tutti_export::{EventLossPolicy, FileTarget, Rendered, write_buffers};
+use tutti_export::{EventLossPolicy, FileTarget, Rendered, Resample, write_buffers};
 use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
@@ -15,7 +15,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// The extensible `WAVE_FORMAT` header written for a float or wide file.
 const HEADER: usize = 68;
 
-fn write<F: tutti_buffers::Float>(
+fn write<F: tutti_dsp::FftFloat>(
     planes: Vec<Vec<F>>,
     format: Format,
     dither: Option<DitherShape>,
@@ -161,5 +161,51 @@ fn an_f64_render_converts_to_integers_by_the_rule() {
     assert_eq!(
         [sample(0), sample(2), sample(6)],
         [4_194_304, -4_194_304, -8_388_608]
+    );
+}
+
+/// An f64 render resampled 48 kHz -> 96 kHz stays f64: a 1 kHz sine, far inside
+/// the resampler's flat passband, comes out as the analytic sine at the output
+/// rate to a relative 1e-9, a hundred times under what a trip through `f32`
+/// (relative epsilon 1.2e-7) could hold. The first and last 4096 output frames
+/// are left out: the converter's edge transient is not passband.
+#[test]
+fn an_f64_resample_holds_f64_precision_against_the_analytic_sine() {
+    const HZ: f64 = 1000.0;
+    const OUT: SampleRate = SampleRate::SR_96K;
+    let frames = 48_000;
+    let plane: Vec<f64> = (0..frames)
+        .map(|n| (std::f64::consts::TAU * HZ * n as f64 / RATE.get()).sin())
+        .collect();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.wav");
+    let rendered = Rendered::new(vec![plane.clone(), plane], RATE, 0).unwrap();
+    let target = FileTarget::new(&path, Format::Wav(Pcm::Float64), ChannelLayout::STEREO)
+        .resample(Some(Resample::to(OUT)));
+    write_buffers(&rendered, &target, EventLossPolicy::Fail).unwrap();
+
+    let bytes = std::fs::read(&path).unwrap();
+    let left: Vec<f64> = bytes[HEADER..]
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|b| f64::from_le_bytes(*b))
+        .step_by(2)
+        .collect();
+    assert_eq!(
+        left.len(),
+        2 * frames,
+        "the file holds the frames at 96 kHz"
+    );
+    let edge = 4096;
+    let worst = (edge..left.len() - edge)
+        .map(|m| {
+            let want = (std::f64::consts::TAU * HZ * m as f64 / OUT.get()).sin();
+            (left[m] - want).abs()
+        })
+        .fold(0.0, f64::max);
+    assert!(
+        worst < 1e-9,
+        "worst deviation {worst:e} from the analytic sine"
     );
 }
