@@ -640,9 +640,8 @@ impl<F: Float> MemorySource<F> {
     /// channel count need not match `out.len()` —
     /// `read_frame` owns that policy.
     #[inline]
-    pub fn sample_raw_into(&self, position: f64, out: &mut [F]) {
-        let len = self.wave.len().get() as f64;
-        if position >= len {
+    pub fn sample_raw_into(&self, position: SamplePosition, out: &mut [F]) {
+        if position >= SamplePosition(0.0).advanced_by(self.wave.len()) {
             out.fill(F::ZERO);
             return;
         }
@@ -681,14 +680,14 @@ impl<F: Float> MemorySource<F> {
                     out.fill(F::ZERO);
                     return;
                 }
-                self.sample_raw_into((len - 1.0 - pos.get()).max(0.0), out);
+                self.sample_raw_into(SamplePosition((len - 1.0 - pos.get()).max(0.0)), out);
             }
             Direction::Forward => match LoopSpan::from_setting(self.loop_, self.wave.len().get()) {
                 Some(span) => {
                     let (p, looped) = span.place(pos.get());
-                    self.read_looped_raw_into(&span, p, looped, out);
+                    self.read_looped_raw_into(&span, SamplePosition(p), looped, out);
                 }
-                None => self.sample_raw_into(pos.get(), out),
+                None => self.sample_raw_into(pos, out),
             },
         }
     }
@@ -696,8 +695,14 @@ impl<F: Float> MemorySource<F> {
     /// One un-gained frame of this wave on `span`, at `p` placed on it: silent
     /// at and past the file's end, as an unlooped read is.
     #[inline]
-    fn read_looped_raw_into(&self, span: &LoopSpan, p: f64, looped: bool, out: &mut [F]) {
-        if p >= self.wave.len().get() as f64 {
+    fn read_looped_raw_into(
+        &self,
+        span: &LoopSpan,
+        p: SamplePosition,
+        looped: bool,
+        out: &mut [F],
+    ) {
+        if p >= SamplePosition(0.0).advanced_by(self.wave.len()) {
             out.fill(F::ZERO);
             return;
         }
@@ -866,7 +871,7 @@ impl<F: Float> MemorySource<F> {
             });
             (index[i], frac[i], live[i]) = match at {
                 Some(at) => {
-                    let (idx, f) = split_position(at);
+                    let (idx, f) = split_position(SamplePosition(at));
                     // `idx` ≤ `len` (a fraction rounding up to the next
                     // frame), and `len` fits a `u32` (above).
                     (idx as u32, f, true)
@@ -970,7 +975,7 @@ impl<F: Float> MemorySource<F> {
     /// applied. One scalar gain across every channel — per-channel level is the
     /// mixer strip's job, not the reader's.
     #[inline]
-    pub fn sample_into(&self, position: f64, out: &mut [F]) {
+    pub fn sample_into(&self, position: SamplePosition, out: &mut [F]) {
         self.sample_raw_into(position, out);
         let gain = self.block_gain();
         for s in out.iter_mut() {
@@ -1037,10 +1042,10 @@ impl<F: Float> MemorySource<F> {
         match &span {
             Some(span) => {
                 let looped = self.looped.load(Ordering::Relaxed);
-                self.read_looped_raw_into(span, pos, looped, out);
+                self.read_looped_raw_into(span, SamplePosition(pos), looped, out);
                 self.apply_gain(out);
             }
-            None => self.sample_into(pos, out),
+            None => self.sample_into(SamplePosition(pos), out),
         }
 
         // One output sample's worth of source material.

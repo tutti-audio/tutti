@@ -44,9 +44,7 @@ use super::fault::FirstError;
 #[cfg(codec)]
 use tutti_buffers::Source;
 use tutti_buffers::{Float, Wave};
-#[cfg(codec)]
-use tutti_types::Samples;
-use tutti_types::{ChannelLayout, SamplePosition};
+use tutti_types::{ChannelLayout, SamplePosition, Samples};
 
 use super::Loop;
 use super::interp::{
@@ -237,13 +235,13 @@ impl<F: Float> OfflineRead<F> {
                     out.fill(F::ZERO);
                     return;
                 }
-                open.read_into((len - 1.0 - pos.get()).max(0.0), place, out);
+                open.read_into(SamplePosition((len - 1.0 - pos.get()).max(0.0)), place, out);
             }
             (Direction::Forward, Some(span)) => {
                 let (p, looped) = span.place(pos.get());
-                open.read_looped_into(&span, p, looped, place, out);
+                open.read_looped_into(&span, SamplePosition(p), looped, place, out);
             }
-            (Direction::Forward, None) => open.read_into(pos.get(), place, out),
+            (Direction::Forward, None) => open.read_into(pos, place, out),
         }
     }
 
@@ -357,8 +355,8 @@ impl<F: Float> Open<F> {
 
     /// Interpolate position `p` into `out` as `read_frame` would from the
     /// whole file resident: silence at and past the end.
-    fn read_into(&mut self, p: f64, place: &Place<F>, out: &mut [F]) {
-        if p >= self.len() as f64 {
+    fn read_into(&mut self, p: SamplePosition, place: &Place<F>, out: &mut [F]) {
+        if p >= SamplePosition(0.0).advanced_by(Samples(self.len())) {
             out.fill(F::ZERO);
             return;
         }
@@ -375,12 +373,12 @@ impl<F: Float> Open<F> {
     fn read_looped_into(
         &mut self,
         span: &LoopSpan,
-        p: f64,
+        p: SamplePosition,
         looped: bool,
         place: &Place<F>,
         out: &mut [F],
     ) {
-        if p >= self.len() as f64 {
+        if p >= SamplePosition(0.0).advanced_by(Samples(self.len())) {
             out.fill(F::ZERO);
             return;
         }
@@ -438,7 +436,7 @@ impl<F> Page<F> {
 
 impl<F: Float> Pages<F> {
     /// Interpolate position `p` (`< len`) into `out`.
-    fn read_into(&mut self, p: f64, place: &Place<F>, out: &mut [F]) {
+    fn read_into(&mut self, p: SamplePosition, place: &Place<F>, out: &mut [F]) {
         // The file's width: the placement reads all of it (a file wider than
         // a frame is folded, or refused when the voice is built).
         let ch = self.channels.min(MAX_WAVE_CHANNELS);
@@ -456,7 +454,7 @@ impl<F: Float> Pages<F> {
     fn read_looped_into(
         &mut self,
         span: &LoopSpan,
-        p: f64,
+        p: SamplePosition,
         looped: bool,
         place: &Place<F>,
         out: &mut [F],

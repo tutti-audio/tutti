@@ -406,7 +406,7 @@ pub(crate) fn hermite_lanes<F: Float>(out: &mut [F], y: [&[F]; 4], t: &[F]) {
 pub fn read_frame<S: Sample, F: Float>(
     wave: &Arc<Wave<S>>,
     place: &Place<F>,
-    position: f64,
+    position: SamplePosition,
     out: &mut [F],
 ) {
     if out.is_empty() {
@@ -439,7 +439,7 @@ pub fn read_frame<S: Sample, F: Float>(
 ///
 /// `len` must be non-zero.
 #[inline]
-pub(crate) fn tap_indices<F: Float>(len: usize, position: f64) -> ([usize; 4], F) {
+pub(crate) fn tap_indices<F: Float>(len: usize, position: SamplePosition) -> ([usize; 4], F) {
     let (idx, frac) = split_position(position);
     let last = len - 1;
     ([0, 1, 2, 3].map(|t| tap(idx, last, t)), frac)
@@ -462,8 +462,8 @@ pub(crate) fn tap(idx: usize, last: usize, t: usize) -> usize {
 /// A position's whole frame and the fraction past it, as every tap layout
 /// ([`tap_indices`], and a loop's, `LoopSpan::taps`) takes them.
 #[inline]
-pub(crate) fn split_position<F: Float>(position: f64) -> (usize, F) {
-    let mut idx = position.floor() as usize;
+pub(crate) fn split_position<F: Float>(position: SamplePosition) -> (usize, F) {
+    let mut idx = position.get().floor() as usize;
     let mut frac = F::from_f64(position.fract());
     // A fraction a hair under 1 rounds to 1.0 in `f32`: "frame n, all the
     // way to n + 1", which the cubic returns as frame n + 1 only to within
@@ -489,7 +489,7 @@ pub(crate) fn read_looped_frame<S: Sample, F: Float>(
     wave: &Arc<Wave<S>>,
     place: &Place<F>,
     span: &LoopSpan,
-    pos: f64,
+    pos: SamplePosition,
     looped: bool,
     out: &mut [F],
 ) {
@@ -837,7 +837,7 @@ mod tests {
             )
             .expect("a placeable wave")
         };
-        super::read_frame(wave, &place, position, out);
+        super::read_frame(wave, &place, SamplePosition(position), out);
     }
 
     /// The `(left, right)` of a two-channel read.
@@ -854,7 +854,10 @@ mod tests {
     #[test]
     fn a_position_a_hair_under_a_frame_reads_that_frame() {
         let below = 5.0 - 1e-12;
-        assert_eq!(tap_indices::<f32>(100, below), ([4, 5, 6, 7], 0.0));
+        assert_eq!(
+            tap_indices::<f32>(100, SamplePosition(below)),
+            ([4, 5, 6, 7], 0.0)
+        );
         let mut wave = Wave::new(1, SampleRate::SR_48K);
         for i in 0..16 {
             wave.append(Interleaved::new(&[(i as f32 + 1.0) * 0.1234567], wave.layout()).unwrap())
@@ -1262,7 +1265,7 @@ mod tests {
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
         assert!(!place.is_direct());
         let mut out = [9.0f32; 8];
-        super::read_frame(&w, &place, 4.0, &mut out);
+        super::read_frame(&w, &place, SamplePosition(4.0), &mut out);
         assert_eq!(out, [0.0, 1.0, 2.0, 3.0, 6.0, 7.0, 4.0, 5.0]);
         // The engine's own order needs no fold.
         let own = constant_wave(ChannelTopology::assumed(ChannelLayout::from(8u16)), &frame);
@@ -1322,7 +1325,7 @@ mod tests {
         ));
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
         let mut out = [9.0f32; 8];
-        super::read_frame(&w, &place, 4.0, &mut out);
+        super::read_frame(&w, &place, SamplePosition(4.0), &mut out);
         assert!(
             (out[0] - <f32 as tutti_buffers::Float>::MINUS_3_DB).abs() < 1e-6,
             "{out:?}"
@@ -1339,7 +1342,7 @@ mod tests {
         super::read_frame(
             &quad,
             &Place::for_wave(&quad, ChannelLayout::STEREO).unwrap(),
-            4.0,
+            SamplePosition(4.0),
             &mut out,
         );
         let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;

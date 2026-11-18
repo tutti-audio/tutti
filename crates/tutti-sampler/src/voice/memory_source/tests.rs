@@ -1375,11 +1375,11 @@ fn an_f64_source_reads_each_channel_in_f64() {
     }
     let source = MemorySource::<f64>::new(Arc::new(wave)).expect("a stereo wave places");
     let mut out = [0.0f64; 2];
-    source.sample_raw_into(3.0, &mut out);
+    source.sample_raw_into(SamplePosition(3.0), &mut out);
     assert_eq!(out, [3.0, -6.0]);
-    source.sample_raw_into(3.5, &mut out);
+    source.sample_raw_into(SamplePosition(3.5), &mut out);
     assert_eq!(out, [3.5, -7.0]);
     source.set_gain(Amplitude(0.5));
-    source.sample_into(3.0, &mut out);
+    source.sample_into(SamplePosition(3.0), &mut out);
     assert_eq!(out, [1.5, -3.0]);
 }

@@ -262,9 +262,10 @@ fn refill_one(
     buffer.resize(n * ch, 0.0);
     let mapping = writer.content().current.clone();
     let read_ok = writer.fill_with(&mapping, to, buffer);
-    writer.push_interleaved(buffer);
+    // A refused push is the stream's decode fault, as a failed read is.
+    let pushed = writer.push_interleaved(buffer).is_ok();
     Refilled {
-        read_ok,
+        read_ok: read_ok && pushed,
         primed: false,
         fill,
     }

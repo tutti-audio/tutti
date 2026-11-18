@@ -31,7 +31,7 @@
 use std::sync::Arc;
 
 use super::prefetch::RegionOut;
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::{ChannelLayout, SamplePosition, SampleRate, Samples};
 
 use crate::Loop;
 use crate::nonempty;
@@ -138,7 +138,7 @@ impl Arrangement {
             if pos >= len as f64 {
                 return None;
             }
-            let (taps, frac) = tap_indices(len, (len as f64 - 1.0 - pos).max(0.0));
+            let (taps, frac) = tap_indices(len, SamplePosition((len as f64 - 1.0 - pos).max(0.0)));
             return Some((taps.map(|f| (len - 1 - f) as u64), frac));
         }
         match self.span {
@@ -148,11 +148,11 @@ impl Arrangement {
                 if pos >= len as f64 {
                     return None;
                 }
-                let (taps, frac) = tap_indices(len, pos);
+                let (taps, frac) = tap_indices(len, SamplePosition(pos));
                 Some((taps.map(|f| f as u64), frac))
             }
             Some(_) => {
-                let (idx, frac) = split_position(pos);
+                let (idx, frac) = split_position(SamplePosition(pos));
                 Some((
                     [
                         idx.saturating_sub(1),
@@ -1017,15 +1017,22 @@ mod tests {
                         read_frame(
                             &wave,
                             &Place::FAN,
-                            (len as f64 - 1.0 - pos).max(0.0),
+                            SamplePosition((len as f64 - 1.0 - pos).max(0.0)),
                             &mut memory,
                         );
                     }
                 } else if let Some(span) = span_of(mapping) {
                     let (p, looped) = span.place(pos);
-                    read_looped_frame(&wave, &Place::FAN, &span, p, looped, &mut memory);
+                    read_looped_frame(
+                        &wave,
+                        &Place::FAN,
+                        &span,
+                        SamplePosition(p),
+                        looped,
+                        &mut memory,
+                    );
                 } else if pos < len as f64 {
-                    read_frame(&wave, &Place::FAN, pos, &mut memory);
+                    read_frame(&wave, &Place::FAN, SamplePosition(pos), &mut memory);
                 }
                 let mut live = [0.0f32];
                 if let Some((taps, frac)) = arrangement.taps(pos) {
@@ -1104,7 +1111,10 @@ mod tests {
         writer.set_resident(Arc::clone(&wave));
         let mut held = vec![0.0f32; 10_000];
         writer.fill_with(&Mapping::plain(Samples::new(LEN)), 0, &mut held);
-        assert_eq!(writer.push_interleaved(&held), tutti_types::Samples(10_000));
+        assert_eq!(
+            writer.push_interleaved(&held).expect("the ring\'s width"),
+            tutti_types::Samples(10_000)
+        );
         let _ = reader.claim(0, [(0, 64), (0, 0)]);
         assert_eq!(writer.in_flight_end(), 64);
         (writer, reader, wave)

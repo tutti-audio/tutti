@@ -722,7 +722,7 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
             .collect();
         let (mut writer, reader, pos) =
             RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 8192 + 64, 2u16);
-        writer.push_interleaved(&flat);
+        writer.push_interleaved(&flat).expect("the ring\'s width");
         let ring = std::sync::Arc::clone(&reader);
         // ONE `Cells`, shared by the source and the gate — `DiskVoice::new`
         // requires it, and the published stretch rate is read back through

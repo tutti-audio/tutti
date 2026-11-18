@@ -60,7 +60,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 use tutti_buffers::Float;
-use tutti_types::Samples;
+use tutti_types::{SamplePosition, Samples};
 
 /// A loop over whole file frames `[start, end)`, with a crossfade into it: the
 /// one value every tier takes (a memory voice, a disk voice, a stream, a pool
@@ -353,7 +353,7 @@ impl LoopSpan {
     pub(crate) fn taps<F: Float>(
         &self,
         len: usize,
-        pos: f64,
+        pos: SamplePosition,
         looped: bool,
     ) -> ([LoopTap<F>; 4], F) {
         let (idx, frac) = super::interp::split_position(pos);
@@ -505,7 +505,7 @@ mod tests {
     fn a_position_before_the_loop_reads_the_file_behind_it() {
         let span = LoopSpan::unbounded(2_000, 4_000, 0).expect("a loop");
         for looped in [false, true] {
-            let (taps, _) = span.taps::<f32>(10_000, 1_500.5, looped);
+            let (taps, _) = span.taps::<f32>(10_000, SamplePosition(1_500.5), looped);
             assert_eq!(taps.map(|t| t.frame), [1_499, 1_500, 1_501, 1_502]);
         }
     }
@@ -516,7 +516,7 @@ mod tests {
     fn taps_wrap_through_the_loop() {
         let span = LoopSpan::unbounded(10, 20, 0).expect("a loop");
         let frames = |pos, looped| {
-            let (taps, _) = span.taps::<f32>(100, pos, looped);
+            let (taps, _) = span.taps::<f32>(100, SamplePosition(pos), looped);
             taps.map(|t| t.frame)
         };
         assert_eq!(frames(18.5, false), [17, 18, 19, 10]);
