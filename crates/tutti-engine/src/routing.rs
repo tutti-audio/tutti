@@ -6,7 +6,7 @@
 //! it ([`OutputLevels`]), whose changes ramp over
 //! the declick length ([`declick_frames`](tutti_graph::declick_frames)) instead of swapping folds.
 
-use tutti_buffers::{Fold, FoldError, FoldLevels};
+use tutti_buffers::{Float, Fold, FoldError, FoldLevels};
 use tutti_graph::fold_to_topology_with;
 use tutti_types::{ChannelLayout, ChannelTopology, MAX_CHANNELS};
 use tutti_units::Amplitude;
@@ -142,11 +142,11 @@ impl Routing {
     ///
     /// [`RoutingError`] naming what has no place: the monitor fold, the map's
     /// width or outputs, or the fold into the device.
-    pub fn fold(
+    pub fn fold<F: Float>(
         &self,
         root: &ChannelTopology,
         device: &ChannelTopology,
-    ) -> Result<Fold, RoutingError> {
+    ) -> Result<Fold<F>, RoutingError> {
         let heard = self.monitor.as_ref().unwrap_or(root);
         let to_heard = match &self.monitor {
             Some(monitor) => Some(fold_to_topology_with(root, monitor, self.levels)?),
@@ -465,10 +465,10 @@ mod tests {
             ..Routing::default()
         };
         // Two heard channels on a six-output device: fine.
-        assert!(routing.fold(&five_one, &five_one).is_ok());
+        assert!(routing.fold::<f32>(&five_one, &five_one).is_ok());
         // On a stereo device output 3 does not exist.
         assert_eq!(
-            routing.fold(&five_one, &stereo).map(|_| ()),
+            routing.fold::<f32>(&five_one, &stereo).map(|_| ()),
             Err(RoutingError::MapPast {
                 output: 2,
                 device: ChannelLayout::STEREO
@@ -480,12 +480,12 @@ mod tests {
             ..routing
         };
         assert_eq!(
-            wide.fold(&five_one, &five_one).map(|_| ()),
+            wide.fold::<f32>(&five_one, &five_one).map(|_| ()),
             Err(RoutingError::MapWidth {
                 map: 3,
                 heard: ChannelLayout::STEREO
             })
         );
-        assert!(wide.fold(&five_one, &five_one).unwrap_err().is_map());
+        assert!(wide.fold::<f32>(&five_one, &five_one).unwrap_err().is_map());
     }
 }

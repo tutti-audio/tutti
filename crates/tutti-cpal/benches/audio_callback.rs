@@ -121,11 +121,7 @@ fn bench_vs_render(c: &mut Criterion) {
     let mut block16 = OutputBlock::new(st3, ChannelLayout::STEREO);
     let mut data16 = vec![0i16; FRAMES * 2];
     group.bench_function("full_callback_i16", |b| {
-        b.iter(|| {
-            block16.render_with(black_box(&mut data16), |x: f32| {
-                cpal::Sample::from_sample(x)
-            })
-        });
+        b.iter(|| block16.render(black_box(&mut data16)));
     });
 
     group.finish();

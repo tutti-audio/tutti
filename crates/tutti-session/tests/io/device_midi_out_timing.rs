@@ -16,7 +16,7 @@ use tutti_session::{EventInPort, LiveSession, Session, midi_sink};
 use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
-use tutti_units::{Beat, SampleRate, Seconds};
+use tutti_units::{Beat, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 512;
@@ -86,8 +86,8 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
 /// last one after reading `Instant::now()` into the return.
 fn render(stream: &ManualStream, blocks: usize, delay: Option<Duration>) -> Instant {
     let one = || match delay {
-        Some(delay) => stream.render_block_delayed(BLOCK, delay),
-        None => stream.render_block(BLOCK),
+        Some(delay) => stream.render_block_delayed(Samples(BLOCK), delay),
+        None => stream.render_block(Samples(BLOCK)),
     };
     for _ in 1..blocks {
         one().expect("the stream is open");

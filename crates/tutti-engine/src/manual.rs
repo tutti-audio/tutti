@@ -10,6 +10,7 @@ use std::fmt::Display;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tutti_buffers::{Float, Sample};
 use tutti_rt::LockExt;
 use tutti_units::Samples;
 
@@ -50,7 +51,7 @@ use crate::stream::{OutputSpec, RunningStream, StreamDriver};
 /// let (driver, stream) = ManualStreamDriver::new();
 /// output.start_with(state, driver)?;
 ///
-/// let block = stream.render_block(256).expect("the stream is open");
+/// let block = stream.render_block(Samples(256)).expect("the stream is open");
 /// assert_eq!(block.len(), 256 * 2);
 ///
 /// output.stop();
@@ -59,8 +60,8 @@ use crate::stream::{OutputSpec, RunningStream, StreamDriver};
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct ManualStreamDriver {
-    slot: Arc<Mutex<Option<OutputBlock>>>,
+pub struct ManualStreamDriver<F: Float = f32> {
+    slot: Arc<Mutex<Option<OutputBlock<F>>>>,
     faults: Arc<Mutex<Option<Arc<StreamFaults>>>>,
 }
 
@@ -71,16 +72,16 @@ pub struct ManualStreamDriver {
 /// is how a test observes the stop. Each call takes a mutex around the block;
 /// this type is for tests and tools, not the audio thread.
 #[derive(Debug)]
-pub struct ManualStream {
-    slot: Arc<Mutex<Option<OutputBlock>>>,
+pub struct ManualStream<F: Float = f32> {
+    slot: Arc<Mutex<Option<OutputBlock<F>>>>,
     faults: Arc<Mutex<Option<Arc<StreamFaults>>>>,
 }
 
-impl ManualStreamDriver {
+impl<F: Float> ManualStreamDriver<F> {
     /// Creates a driver and the handle that runs its callbacks.
     #[allow(clippy::new_without_default, reason = "returns a pair, not Self")]
     #[must_use]
-    pub fn new() -> (Self, ManualStream) {
+    pub fn new() -> (Self, ManualStream<F>) {
         let slot = Arc::new(Mutex::new(None));
         let faults = Arc::new(Mutex::new(None));
         (
@@ -93,22 +94,23 @@ impl ManualStreamDriver {
     }
 }
 
-impl ManualStream {
-    fn with_block<R>(&self, f: impl FnOnce(&mut OutputBlock) -> R) -> Option<R> {
+impl<F: Float> ManualStream<F> {
+    fn with_block<R>(&self, f: impl FnOnce(&mut OutputBlock<F>) -> R) -> Option<R> {
         let mut guard = self.slot.lock_recover();
         guard.as_mut().map(f)
     }
 
     /// Runs one callback, exactly as a device driver would, into a buffer of
-    /// `f32`. Returns `None` if no stream is open.
-    pub fn callback_once(&self, data: &mut [f32]) -> Option<()> {
+    /// any [`Sample`] format ([`OutputBlock::render`]). Returns `None` if no
+    /// stream is open.
+    pub fn callback_once<S: Sample>(&self, data: &mut [S]) -> Option<()> {
         self.with_block(|b| b.render(data))
     }
 
     /// Renders `frames` frames at the stream's width and returns the
-    /// interleaved `f32` buffer, or `None` if no stream is open. Allocates the
-    /// returned buffer.
-    pub fn render_block(&self, frames: usize) -> Option<Vec<f32>> {
+    /// interleaved buffer in the graph's format, or `None` if no stream is
+    /// open. Allocates the returned buffer.
+    pub fn render_block(&self, frames: Samples) -> Option<Vec<F>> {
         self.render_block_inner(frames, None)
     }
 
@@ -116,13 +118,13 @@ impl ManualStream {
     /// reports `delay` between the callback and the block's playing, as a
     /// backend's callback info does: what
     /// [`OutputStream::latency`](crate::OutputStream::latency) then reads.
-    pub fn render_block_delayed(&self, frames: usize, delay: Duration) -> Option<Vec<f32>> {
+    pub fn render_block_delayed(&self, frames: Samples, delay: Duration) -> Option<Vec<F>> {
         self.render_block_inner(frames, Some(delay))
     }
 
-    fn render_block_inner(&self, frames: usize, delay: Option<Duration>) -> Option<Vec<f32>> {
+    fn render_block_inner(&self, frames: Samples, delay: Option<Duration>) -> Option<Vec<F>> {
         let layout = self.with_block(|b| b.layout())?;
-        let mut out = vec![0.0f32; layout.interleaved_len(Samples(frames))];
+        let mut out = vec![F::ZERO; layout.interleaved_len(frames)];
         self.with_block(|b| b.render_delayed_with(&mut out, delay, |x| x))?;
         if let Some(faults) = self.faults.lock_recover().as_ref() {
             faults.delivered();
@@ -161,32 +163,32 @@ impl ManualStream {
 /// The running handle of a [`ManualStreamDriver`] stream. Dropping it stops
 /// the stream: every [`ManualStream`] call then returns `None`.
 #[derive(Debug)]
-pub struct ManualRunning {
-    slot: Arc<Mutex<Option<OutputBlock>>>,
+pub struct ManualRunning<F: Float = f32> {
+    slot: Arc<Mutex<Option<OutputBlock<F>>>>,
 }
 
-impl RunningStream for ManualRunning {
+impl<F: Float> RunningStream for ManualRunning<F> {
     fn stop(self: Box<Self>) {
         // Drop does it.
     }
 }
 
-impl Drop for ManualRunning {
+impl<F: Float> Drop for ManualRunning<F> {
     fn drop(&mut self) {
         *self.slot.lock_recover() = None;
     }
 }
 
-impl StreamDriver for ManualStreamDriver {
-    type Running = ManualRunning;
+impl<F: Float> StreamDriver<F> for ManualStreamDriver<F> {
+    type Running = ManualRunning<F>;
     type Error = Infallible;
 
     fn open(
         self,
         _spec: &OutputSpec,
-        block: OutputBlock,
+        block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
-    ) -> Result<ManualRunning, Infallible> {
+    ) -> Result<ManualRunning<F>, Infallible> {
         // The stream's sink reaches the handle here rather than through a
         // separate wiring call: `open` is the one place both the driver and
         // the sink are in scope, and a generic `start_with` cannot know it is

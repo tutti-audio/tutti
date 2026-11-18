@@ -310,26 +310,70 @@ impl MicIn {
         let owned = Owned::spawn("tutti-input-stream", move || {
             let (d, c) = (&device, &cfg);
             let stream = match sample_format {
-                cpal::SampleFormat::I8 => build_input::<i8>(d, c, capture, cb_faults, cb_latency)?,
-                cpal::SampleFormat::I16 => {
-                    build_input::<i16>(d, c, capture, cb_faults, cb_latency)?
-                }
-                cpal::SampleFormat::I32 => {
-                    build_input::<i32>(d, c, capture, cb_faults, cb_latency)?
-                }
-                cpal::SampleFormat::U8 => build_input::<u8>(d, c, capture, cb_faults, cb_latency)?,
-                cpal::SampleFormat::U16 => {
-                    build_input::<u16>(d, c, capture, cb_faults, cb_latency)?
-                }
-                cpal::SampleFormat::U32 => {
-                    build_input::<u32>(d, c, capture, cb_faults, cb_latency)?
-                }
-                cpal::SampleFormat::F32 => {
-                    build_input::<f32>(d, c, capture, cb_faults, cb_latency)?
-                }
-                cpal::SampleFormat::F64 => {
-                    build_input::<f64>(d, c, capture, cb_faults, cb_latency)?
-                }
+                cpal::SampleFormat::I8 => build_input(
+                    d,
+                    c,
+                    capture,
+                    cb_faults,
+                    cb_latency,
+                    edge::from_native::<i8>,
+                )?,
+                cpal::SampleFormat::I16 => build_input(
+                    d,
+                    c,
+                    capture,
+                    cb_faults,
+                    cb_latency,
+                    edge::from_native::<i16>,
+                )?,
+                cpal::SampleFormat::I32 => build_input(
+                    d,
+                    c,
+                    capture,
+                    cb_faults,
+                    cb_latency,
+                    edge::from_native::<i32>,
+                )?,
+                cpal::SampleFormat::U8 => build_input(
+                    d,
+                    c,
+                    capture,
+                    cb_faults,
+                    cb_latency,
+                    edge::from_offset::<u8>,
+                )?,
+                cpal::SampleFormat::U16 => build_input(
+                    d,
+                    c,
+                    capture,
+                    cb_faults,
+                    cb_latency,
+                    edge::from_offset::<u16>,
+                )?,
+                cpal::SampleFormat::U32 => build_input(
+                    d,
+                    c,
+                    capture,
+                    cb_faults,
+                    cb_latency,
+                    edge::from_offset::<u32>,
+                )?,
+                cpal::SampleFormat::F32 => build_input(
+                    d,
+                    c,
+                    capture,
+                    cb_faults,
+                    cb_latency,
+                    edge::from_native::<f32>,
+                )?,
+                cpal::SampleFormat::F64 => build_input(
+                    d,
+                    c,
+                    capture,
+                    cb_faults,
+                    cb_latency,
+                    edge::from_native::<f64>,
+                )?,
                 // Checked above, before the thread is spawned.
                 _ => unreachable!("sample format checked before spawn"),
             };
@@ -499,11 +543,7 @@ impl Capture {
     /// result to the rings, a chunk of frames at a time. A full ring refuses
     /// whole frames and counts them lost (the writer does); neither ring can
     /// stall the other or the caller. Allocation-free.
-    fn block<T>(&mut self, data: &[T])
-    where
-        T: cpal::SizedSample,
-        f32: cpal::FromSample<T>,
-    {
+    fn block<T: Copy>(&mut self, data: &[T], convert: fn(T) -> f32) {
         let device = self.select.src_layout();
         let selected = self.select.dst_layout();
         let whole = device.interleaved_len(device.from_interleaved_len(data.len()));
@@ -512,7 +552,7 @@ impl Capture {
             let frames = device.from_interleaved_len(run.len());
             let held = &mut self.device[..run.len()];
             for (slot, s) in held.iter_mut().zip(run) {
-                *slot = s.to_sample();
+                *slot = convert(*s);
             }
             let pushed = &mut self.chunk[..selected.interleaved_len(frames)];
             // The chunks are sized to the run, so the views agree in width and frames.
@@ -550,21 +590,18 @@ impl Capture {
 /// # Why the scratch is allocated before the stream runs
 ///
 /// `data: &[T]` is generic over [`cpal::SizedSample`], so the samples must be
-/// converted to `f32` before the selection can see them — a per-frame convert
+/// converted to `f32` (by the rule in `Sample`, through the signed format of an offset-binary one) before the selection can see them — a per-frame convert
 /// is unavoidable. **This is the RT input callback, so it must not allocate**:
 /// the device frame and the chunk are `Vec`s sized once in [`Capture::new`] to
 /// the device's width and the selection's, and never grown.
-fn build_input<T>(
+fn build_input<T: cpal::SizedSample + 'static>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     mut capture: Capture,
     faults: Arc<StreamFaults>,
     latency: Arc<StreamLatency>,
-) -> Result<cpal::Stream>
-where
-    T: cpal::SizedSample,
-    f32: cpal::FromSample<T>,
-{
+    convert: fn(T) -> f32,
+) -> Result<cpal::Stream> {
     let delivering = Arc::clone(&faults);
     // Set by a panic in `capture.block`, whose state may be torn: the capture
     // then does nothing, and its source answers `Failed` (the faults' latch).
@@ -580,7 +617,7 @@ where
                 latency.record(edge::input_delay(&info.timestamp()));
                 // A panic must not unwind out of the device's C frame.
                 let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    capture.block(data);
+                    capture.block(data, convert);
                 }));
                 if let Err(payload) = ran {
                     failed = true;

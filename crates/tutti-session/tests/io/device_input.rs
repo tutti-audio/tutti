@@ -103,7 +103,9 @@ fn poll(session: &mut LiveSession) -> Vec<SessionEvent> {
 /// One block rendered, its first stereo frame.
 fn first_frame(session: &mut LiveSession, stream: &ManualStream) -> [f32; 2] {
     let _ = session.update();
-    let block = stream.render_block(16).expect("the stream is open");
+    let block = stream
+        .render_block(Samples(16))
+        .expect("the stream is open");
     [block[0], block[1]]
 }
 
@@ -263,7 +265,7 @@ fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
     assert_eq!((none.input, none.output), (None, None), "nothing reported");
 
     stream
-        .render_block_delayed(64, Duration::from_millis(10))
+        .render_block_delayed(Samples(64), Duration::from_millis(10))
         .expect("open");
     let cell = record
         .lock()
@@ -286,7 +288,7 @@ fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
         (None, None),
         "the new streams have reported nothing"
     );
-    new.render_block_delayed(64, Duration::from_millis(10))
+    new.render_block_delayed(Samples(64), Duration::from_millis(10))
         .expect("open");
     assert_eq!(session.device().latency().output, Some(Samples(441)));
 }
