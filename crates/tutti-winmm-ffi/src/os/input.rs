@@ -13,7 +13,7 @@
 //!   looked it up finds anything, then waits (bounded) for the callbacks already
 //!   inside to leave; only a `Closed` it gets back from that lets it reset,
 //!   unprepare and close the port, and a callback or close that cannot be
-//!   settled is a `Leaked` this file forgets;
+//!   settled is a `Leaked`, which keeps the port open and the state allocated;
 //! - the callback is not confined to what a `MIDIINPROC` may call. It takes two
 //!   user-mode locks, which are outside that list: the registry's, held only for
 //!   a scan of the open inputs' slots, and the handler's `Mutex` in `dispatch`,
@@ -43,7 +43,7 @@ use windows_sys::Win32::Media::{
 use super::InputPort;
 use super::error::{Error, MmOperation, OsOperation, check};
 use super::sleeper::{TimerWaiter, TimerWaker, waitable_timer};
-use crate::lifetime::{Closed, Outcome, Owner, Poll, Registry, Slot};
+use crate::lifetime::{Outcome, Owner, Poll, Registry, Slot};
 
 /// How many SysEx buffers an input keeps with winmm, and how long each is:
 /// a message longer than one buffer arrives as consecutive [`Event::Long`]s.
@@ -147,6 +147,9 @@ static REGISTRY: Registry<Shared> = Registry::new();
 /// the port: the drop waits for the callbacks in flight, the handler's own is
 /// one of them, so the wait ends at its bound and the port stays open with its
 /// buffers allocated for the life of the process. Drop it from another thread.
+///
+/// The handler is dropped with the input's state, which can be on winmm's
+/// thread after the `MidiIn` is gone, so it must be fit to run there.
 pub struct MidiIn {
     /// Taken by `Drop`.
     owner: Option<Owner<'static, Shared>>,
@@ -309,7 +312,7 @@ impl Drop for MidiIn {
                 "winmm MIDI input: the worker could not be woken, so the port is left open: {e}"
             );
             std::mem::forget(self.worker.take());
-            closing.leak().forget();
+            drop(closing.leak());
             return;
         }
         if let Some(worker) = self.worker.take()
@@ -333,22 +336,22 @@ impl Drop for MidiIn {
                     // A callback has not left: it may be in the handler, or
                     // winmm may call it again. The port is left open and the
                     // allocation kept.
-                    leaked.forget();
+                    drop(leaked);
                     return;
                 }
             }
         };
-        let released = self.teardown(&closed);
-        if let Outcome::Leaked(leaked) = closed.finish(released) {
-            // winmm may still hold the buffers: the allocation is kept for ever.
-            leaked.forget();
+        // A close winmm did not complete may leave it holding the buffers: the
+        // `Leaked` keeps the allocation for ever.
+        if let Outcome::Leaked(leaked) = closed.teardown(|slot| self.teardown(slot)) {
+            drop(leaked);
         }
     }
 }
 
 impl MidiIn {
     /// Resets and closes the port, once no callback is inside.
-    fn teardown(&self, closed: &Closed<Shared>) -> bool {
+    fn teardown(&self, closed: &Slot<Shared>) -> bool {
         // SAFETY: `handle` is the open input. A reset stops recording and
         // returns every queued buffer to its owner.
         unsafe { midiInReset(self.handle) };

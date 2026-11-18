@@ -14,10 +14,11 @@
 //! - [`Closing::poll`] reports [`Poll::Quiesced`] once the count reads 0. The
 //!   [`Closed`] it carries is the proof that no callback is inside or can
 //!   enter, and the teardown that frees what the OS holds (reset, unprepare,
-//!   close) takes its state only through it;
-//! - [`Poll::TimedOut`] and [`Closing::leak`] give a [`Leaked`] instead, which
-//!   owns the slot: dropping it frees the state, and [`Leaked::forget`] keeps it
-//!   allocated for good, for an OS edge that cannot promise the OS has let go.
+//!   close) runs only through [`Closed::teardown`], which says whether the OS
+//!   let go;
+//! - [`Poll::TimedOut`], [`Closing::leak`] and a teardown the OS did not
+//!   complete give a [`Leaked`] instead, which owns the slot and never frees it:
+//!   the OS may still reach the state, so dropping a `Leaked` leaks it.
 //!
 //! No callback that entered holds a reference the teardown could free, because
 //! the count is final (above) before the teardown starts, and the slot itself
@@ -26,7 +27,9 @@
 //! The owner decides what a wait is: [`Closing::poll`] takes the time as a
 //! `Duration` from any origin the caller keeps, and reads no clock.
 //!
-//! The models in `loom_model` and the tests below run this code.
+//! The models in `loom_model` and the tests above run this code.
+
+#![deny(unsafe_code)]
 
 use std::ops::Deref;
 use std::time::Duration;
@@ -120,7 +123,9 @@ impl<S> Registry<S> {
     pub(crate) fn enter(&self, id: usize) -> Option<Inside<S>> {
         let slots = self.slots();
         let (_, slot) = slots.iter().find(|(registered, _)| *registered == id)?;
-        slot.in_flight.fetch_add(1, Ordering::AcqRel);
+        // Relaxed: the registry lock orders this against the closer's `remove`,
+        // so a count the closer's load reads after it is final.
+        slot.in_flight.fetch_add(1, Ordering::Relaxed);
         Some(Inside(Arc::clone(slot)))
     }
 
@@ -142,7 +147,10 @@ impl<S> Deref for Inside<S> {
 
 impl<S> Drop for Inside<S> {
     fn drop(&mut self) {
-        self.0.in_flight.fetch_sub(1, Ordering::AcqRel);
+        // Release: pairs with the `Acquire` load in `Closing::poll`, so what the
+        // callback did with the state happens before a teardown that follows a
+        // count of 0.
+        self.0.in_flight.fetch_sub(1, Ordering::Release);
     }
 }
 
@@ -167,7 +175,7 @@ impl<S> Owner<'_, S> {
     }
 
     /// Removes the registration: no `enter` from here finds the slot.
-    pub(crate) fn unregister(&mut self) {
+    fn unregister(&mut self) {
         if std::mem::take(&mut self.registered) {
             self.registry.remove(self.id);
         }
@@ -200,6 +208,7 @@ impl<S> Drop for Owner<'_, S> {
 }
 
 /// A close that waits for the callbacks inside to leave.
+#[must_use = "a close that is never polled leaves the port open"]
 #[derive(Debug)]
 pub(crate) struct Closing<S> {
     slot: Arc<Slot<S>>,
@@ -229,7 +238,7 @@ impl<S> Closing<S> {
         }
         let since = *self.since.get_or_insert(now);
         if now.saturating_sub(since) >= self.bound {
-            return Poll::TimedOut(Leaked(self.slot));
+            return Poll::TimedOut(Leaked(Some(self.slot)));
         }
         Poll::Waiting(self)
     }
@@ -237,24 +246,25 @@ impl<S> Closing<S> {
     /// Gives up without waiting: the OS edge cannot promise it is done with the
     /// state.
     pub(crate) fn leak(self) -> Leaked<S> {
-        Leaked(self.slot)
+        Leaked(Some(self.slot))
     }
 }
 
 /// A closed input with no callback inside: the teardown may free what the OS
 /// holds of the state.
+#[must_use = "a closed input must be torn down"]
 #[derive(Debug)]
 pub(crate) struct Closed<S>(Arc<Slot<S>>);
 
 impl<S> Closed<S> {
-    /// The teardown is over. `released` is whether the OS has let go of the
-    /// state (the port closed, or gone); when it has not, the state is
-    /// [`Leaked`].
-    pub(crate) fn finish(self, released: bool) -> Outcome<S> {
-        if released {
+    /// Runs the teardown, which frees what the OS holds of the state and says
+    /// whether it let go (the port closed, or gone); when it did not, the state
+    /// is [`Leaked`].
+    pub(crate) fn teardown(self, f: impl FnOnce(&Slot<S>) -> bool) -> Outcome<S> {
+        if f(&self.0) {
             Outcome::Closed
         } else {
-            Outcome::Leaked(Leaked(self.0))
+            Outcome::Leaked(Leaked(Some(self.0)))
         }
     }
 }
@@ -276,18 +286,26 @@ pub(crate) enum Outcome<S> {
     Leaked(Leaked<S>),
 }
 
-/// A state the OS may still reach. Dropping it frees the state with its last
-/// reference; [`forget`](Self::forget) keeps it allocated for good.
-#[must_use]
+/// A state the OS may still reach: dropping it leaks the state, the port stays
+/// open, and the allocation lives for the life of the process.
+#[must_use = "dropping a `Leaked` leaves the port open and the state allocated for good"]
 #[derive(Debug)]
-pub(crate) struct Leaked<S>(Arc<Slot<S>>);
+pub(crate) struct Leaked<S>(Option<Arc<Slot<S>>>);
 
+impl<S> Drop for Leaked<S> {
+    fn drop(&mut self) {
+        if let Some(slot) = self.0.take() {
+            std::mem::forget(slot);
+        }
+    }
+}
+
+#[cfg(test)]
 impl<S> Leaked<S> {
-    /// Keeps the state allocated for the life of the process.
-    // `loom` reports a forgotten `Arc` as a leak, so its models never call this.
-    #[cfg_attr(loom, allow(dead_code))]
-    pub(crate) fn forget(self) {
-        std::mem::forget(self.0);
+    /// Frees the state with its last reference, for tests that know the OS has
+    /// let go.
+    pub(crate) fn release(mut self) {
+        drop(self.0.take());
     }
 }
 
@@ -298,6 +316,15 @@ mod tests {
     use super::*;
 
     const BOUND: Duration = Duration::from_millis(10);
+
+    impl<S> Poll<S> {
+        fn into_closed(self) -> Closed<S> {
+            let Poll::Quiesced(closed) = self else {
+                panic!("nothing is inside");
+            };
+            closed
+        }
+    }
 
     /// Counts its own drops.
     struct Counted<'a>(&'a AtomicUsize);
@@ -316,15 +343,22 @@ mod tests {
     }
 
     #[test]
-    fn enter_after_begin_close_finds_nothing_and_a_closing_flag_is_set_for_those_inside() {
+    fn a_callback_already_inside_sees_closing_once_the_close_begins() {
+        let registry = Registry::new();
+        let owner = registry.open(());
+        let inside = registry.enter(owner.id()).expect("open");
+        assert!(!inside.closing());
+        let _closing = owner.begin_close(BOUND);
+        assert!(inside.closing());
+    }
+
+    #[test]
+    fn enter_after_begin_close_finds_nothing() {
         let registry = Registry::new();
         let owner = registry.open(());
         let id = owner.id();
-        let inside = registry.enter(id).expect("open");
-        assert!(!inside.closing());
         assert!(!owner.slot().closing());
         let _closing = owner.begin_close(BOUND);
-        assert!(inside.closing());
         assert!(registry.enter(id).is_none());
     }
 
@@ -359,7 +393,7 @@ mod tests {
         let Poll::TimedOut(leaked) = closing.poll(t0 + BOUND) else {
             panic!("the bound has passed");
         };
-        leaked.forget();
+        leaked.release();
     }
 
     #[test]
@@ -391,12 +425,12 @@ mod tests {
         else {
             panic!("nothing is inside");
         };
-        assert!(matches!(closed.finish(true), Outcome::Closed));
+        assert!(matches!(closed.teardown(|_| true), Outcome::Closed));
         assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
 
     #[test]
-    fn an_unreleased_close_keeps_the_state_until_the_leak_is_dropped_or_forgotten() {
+    fn a_leaked_state_stays_allocated_when_the_leak_is_dropped_and_is_freed_only_by_release() {
         let drops = AtomicUsize::new(0);
         let registry = Registry::new();
         let Poll::Quiesced(closed) = registry
@@ -406,19 +440,26 @@ mod tests {
         else {
             panic!("nothing is inside");
         };
-        let Outcome::Leaked(leaked) = closed.finish(false) else {
+        let Outcome::Leaked(leaked) = closed.teardown(|_| false) else {
             panic!("the OS has not let go");
         };
-        assert_eq!(drops.load(Ordering::SeqCst), 0);
         drop(leaked);
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
 
         let registry = Registry::new();
-        registry
+        drop(registry.open(Counted(&drops)).begin_close(BOUND).leak());
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+
+        let Outcome::Leaked(leaked) = registry
             .open(Counted(&drops))
             .begin_close(BOUND)
-            .leak()
-            .forget();
+            .poll(Duration::ZERO)
+            .into_closed()
+            .teardown(|_| false)
+        else {
+            panic!("the OS has not let go");
+        };
+        leaked.release();
         assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
 }
@@ -438,6 +479,7 @@ mod tests {
 /// - a timed-out close never runs the teardown, and its [`Leaked`] frees the
 ///   state once the stuck callback has gone.
 #[cfg(all(test, loom))]
+#[allow(unsafe_code)]
 mod loom_model {
     use loom::cell::UnsafeCell;
     use loom::thread;
@@ -524,8 +566,13 @@ mod loom_model {
             let closed = wait(owner.begin_close(Duration::MAX));
             assert!(slot.closing());
             drop(slot);
-            closed.teardown();
-            assert!(matches!(closed.finish(true), Outcome::Closed));
+            assert!(matches!(
+                closed.teardown(|state| {
+                    state.teardown();
+                    true
+                }),
+                Outcome::Closed
+            ));
             for t in threads {
                 t.join().expect("callback");
             }
@@ -566,8 +613,13 @@ mod loom_model {
             let leaked = match owner.begin_close(Duration::ZERO).poll(Duration::ZERO) {
                 // The callback had not entered, and now cannot.
                 Poll::Quiesced(closed) => {
-                    closed.teardown();
-                    assert!(matches!(closed.finish(true), Outcome::Closed));
+                    assert!(matches!(
+                        closed.teardown(|state| {
+                            state.teardown();
+                            true
+                        }),
+                        Outcome::Closed
+                    ));
                     None
                 }
                 Poll::TimedOut(leaked) => Some(leaked),
@@ -578,7 +630,7 @@ mod loom_model {
             if let Some(leaked) = leaked {
                 // The callback is gone; the leak is the last reference.
                 assert_eq!(drops.load(Ordering::SeqCst), 0);
-                drop(leaked);
+                leaked.release();
             }
             assert_eq!(drops.load(Ordering::SeqCst), 1);
         });
@@ -594,7 +646,7 @@ mod loom_model {
             let leaked = owner.begin_close(Duration::MAX).leak();
             reader.join().expect("callback");
             assert_eq!(drops.load(Ordering::SeqCst), 0);
-            drop(leaked);
+            leaked.release();
             assert_eq!(drops.load(Ordering::SeqCst), 1);
         });
     }
@@ -606,12 +658,14 @@ mod loom_model {
             let registry: Shared = Arc::new(Registry::new());
             let owner = registry.open(Probe::new(&drops));
             let closed = wait(owner.begin_close(Duration::MAX));
-            closed.teardown();
-            let Outcome::Leaked(leaked) = closed.finish(false) else {
+            let Outcome::Leaked(leaked) = closed.teardown(|state| {
+                state.teardown();
+                false
+            }) else {
                 panic!("the OS did not let go");
             };
             assert_eq!(drops.load(Ordering::SeqCst), 0);
-            drop(leaked);
+            leaked.release();
             assert_eq!(drops.load(Ordering::SeqCst), 1);
         });
     }

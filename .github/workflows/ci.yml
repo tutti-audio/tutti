@@ -614,6 +614,7 @@ jobs:
         run: cargo test --locked -p tutti-rt --release --test doorbell_loom
       - if: matrix.group == 'rest'
         run: cargo test --locked -p tutti-plugin-ipc-ffi --release --lib loom_model
+      # `LOOM_MAX_PREEMPTIONS=3` bounds the run to under a second; unbounded, the two-callback model ran past 60 s.
       - if: matrix.group == 'rest'
         run: cargo test --locked -p tutti-winmm-ffi --release --lib loom_model
         env:
