@@ -20,10 +20,12 @@
 //! sends one a pass); past it the port refuses, and the executor counts it.
 //!
 //! The lanes are [`HarmonyChanges`] published to the node with [`Publisher`]
-//! ([`HarmonyControls::changes`]); the node reads them once per block.
+//! ([`HarmonyControls::set`]); the node reads them once per block.
 
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
 use tutti_buffers::Float;
+use tutti_rt::LockExt;
 
 use tutti_graph::{
     Cx, Event, EventDensity, EventWriter, ForkCause, ForkMode, ForkSource, Forked, Harmony,
@@ -179,11 +181,15 @@ impl HarmonyNode {
     }
 }
 
-/// The host's handle on a [`HarmonyNode`] in a graph: the cell its lanes are
-/// published through. Cheap to clone; every clone reaches the same node.
+/// The host's handle on a [`HarmonyNode`] in a graph: replace the lanes it
+/// sends. Cheap to clone; every clone reaches the same node.
 #[derive(Clone)]
 pub struct HarmonyControls {
     cell: Publisher<HarmonyChanges>,
+    /// Serializes `set`'s compare and publish (`Publisher` has no
+    /// compare-and-publish), so two control threads cannot each publish
+    /// against a stale read. The node never takes it.
+    serial: Arc<Mutex<()>>,
 }
 
 impl std::fmt::Debug for HarmonyControls {
@@ -193,15 +199,23 @@ impl std::fmt::Debug for HarmonyControls {
 }
 
 impl HarmonyControls {
-    /// The cell the node reads its lanes from, once per block. A publish
-    /// sends the new changes from the next block on, the node re-stating the
-    /// context in force on that block's first frame, so publish only lanes
-    /// that differ from [`current`](Publisher::current). The one publisher is
-    /// the control side's; free what it retires with
-    /// [`reclaim`](tutti_rt::Reclaim::reclaim). Control thread.
+    /// Sends `changes` from the next block on, the node re-stating the context
+    /// in force on that block's first frame. Changes equal to the lanes in
+    /// force change nothing. Control thread.
+    pub fn set(&self, changes: impl Into<Arc<HarmonyChanges>>) {
+        let changes = changes.into();
+        let _serial = self.serial.lock_recover();
+        let current = self.cell.current();
+        if Arc::ptr_eq(&current, &changes) || *current == *changes {
+            return;
+        }
+        self.cell.publish(changes);
+    }
+
+    /// The lanes in force: the ones the node sends from its next block.
     #[must_use]
-    pub fn changes(&self) -> Publisher<HarmonyChanges> {
-        self.cell.clone()
+    pub fn current(&self) -> Arc<HarmonyChanges> {
+        self.cell.current()
     }
 
     /// How many changes the lanes hold.
@@ -371,6 +385,7 @@ impl<F: Float> IntoNode<F> for HarmonyNode {
     fn into_parts(self) -> NodeParts<HarmonyControls, F> {
         let controls = HarmonyControls {
             cell: self.cell.clone(),
+            serial: Arc::default(),
         };
         let fork = HarmonyFork {
             cell: self.cell.clone(),

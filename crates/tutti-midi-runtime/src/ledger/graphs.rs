@@ -1073,9 +1073,7 @@ fn the_loss_count_is_exact_through_loops_and_replacements() {
         play(&mut exec, &first, passes);
         let (mut ons, mut ccs) = (ons1 * passes as usize, ccs1 * passes as usize);
         if replace {
-            controls
-                .events()
-                .publish(second.iter().copied().collect::<ClipEvents>());
+            controls.set(second.iter().copied().collect::<ClipEvents>());
             play(&mut exec, &second, 1);
             ons += ons2;
             ccs += ccs2;

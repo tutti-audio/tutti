@@ -1292,7 +1292,8 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// [`MidiError::NoEventInput`] when `target` is not in the graph or takes
     /// no MIDI; [`MidiError::BeatNotFinite`] when `at`, or an event moved by
-    /// it, is not a finite beat (nothing changes).
+    /// it, is not a finite beat (nothing changes); [`MidiError::ClipEvents`]
+    /// when the target's clip cannot be written (nothing changes).
     pub fn play_clip(
         &mut self,
         target: impl Into<NodeKey>,
@@ -1311,7 +1312,7 @@ impl<F: Float> Midi<'_, F> {
             .collect::<Result<Vec<_>>>()?;
         let clip = match self.clip(target) {
             Some(clip) => {
-                self.publish_clip(clip, events.into_iter().collect());
+                self.publish_clip(clip, events.into_iter().collect())?;
                 clip.erase()
             }
             None => {
@@ -1390,25 +1391,23 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NoClip`] when `target` has none.
+    /// [`MidiError::NoClip`] when `target` has none;
+    /// [`MidiError::ClipEvents`] when the clip's events cannot be written.
     #[must_use = "a target with no clip is an error"]
     pub fn stop_clip(&mut self, target: impl Into<NodeKey>) -> Result<()> {
         let target = target.into();
         match self.clip(target) {
-            Some(clip) => {
-                self.publish_clip(clip, ClipEvents::default());
-                Ok(())
-            }
+            Some(clip) => self.publish_clip(clip, ClipEvents::default()),
             None => Err(MidiError::NoClip(target)),
         }
     }
 
     /// Writes `events` as the events of `clip`, through the clip's target.
-    fn publish_clip(&self, clip: Key<MidiClipNode>, events: ClipEvents) {
+    fn publish_clip(&self, clip: Key<MidiClipNode>, events: ClipEvents) -> Result<()> {
         self.graph
             .value_table()
             .write(clip.events().to(events))
-            .expect("a clip's events are registered with its node");
+            .map_err(MidiError::ClipEvents)
     }
 
     /// Returns `target`'s clip node, if it has one.

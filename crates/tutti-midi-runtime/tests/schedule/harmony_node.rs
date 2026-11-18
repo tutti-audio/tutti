@@ -50,9 +50,7 @@ impl Node for Sink {
 
 /// Replaces the lanes `controls` publishes with `changes`.
 fn publish(controls: &HarmonyControls, changes: impl IntoIterator<Item = TimedHarmony>) {
-    controls
-        .changes()
-        .publish(changes.into_iter().collect::<HarmonyChanges>());
+    controls.set(changes.into_iter().collect::<HarmonyChanges>());
 }
 
 fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, Seen) {
@@ -243,12 +241,15 @@ fn a_change_on_the_loops_start_is_each_passs_context() {
     assert_eq!(*seen.lock().unwrap(), want);
 }
 
-/// **New lanes re-state from the next block.**
+/// **New lanes re-state from the next block; the same lanes cut nothing.**
 #[test]
-fn replaced_lanes_restate() {
+fn replaced_lanes_restate_and_the_same_lanes_do_not() {
     let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(lanes()), 512);
     block(&mut exec, 512, rolling(0));
+    // The same changes, beat order kept (at one beat, order is meaning).
+    publish(&controls, lanes());
     block(&mut exec, 512, rolling(512));
+    assert_eq!(seen.lock().unwrap().len(), 2, "the same lanes: nothing new");
     publish(&controls, [at(0, G)]);
     block(&mut exec, 512, rolling(1_024));
     assert_eq!(seen.lock().unwrap()[2..], [(1_024, G)]);

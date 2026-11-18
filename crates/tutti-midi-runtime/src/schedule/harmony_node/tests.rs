@@ -10,12 +10,13 @@ fn reclaim_frees_lanes_a_block_held_across_their_replacement() {
     let mut node = HarmonyNode::new([TimedHarmony::new(Beat(0.0), c_major)]);
     let controls = HarmonyControls {
         cell: node.cell.clone(),
+        serial: Arc::default(),
     };
     let gone = Arc::downgrade(&node.cell.current());
     {
         // A block in progress across the replacement.
         let _held = node.lanes.lend();
-        controls.changes().publish(HarmonyChanges::default());
+        controls.set(HarmonyChanges::default());
     }
     assert!(gone.upgrade().is_some(), "retired, pinned until a scan");
     assert_eq!(tutti_rt::Reclaim::reclaim(&controls), 0);

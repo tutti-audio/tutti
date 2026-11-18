@@ -430,27 +430,67 @@ impl Slot<Arc<MeterMap>> for MeterSlot {
     }
 }
 
-/// A value a node reads through a published cell: the node's [`Publisher`](tutti_rt::Publisher),
-/// published to when the value written differs from the one in force.
+/// A node's control side that holds one published value: what a
+/// [`PublishedSlot`] reads and replaces it through.
 #[cfg(feature = "midi")]
-pub(crate) struct PublishedSlot<T>(pub tutti_rt::Publisher<T>);
+pub(crate) trait Held: Send + Sync + 'static {
+    /// The value in force.
+    type Value;
+
+    /// The value now.
+    fn current(&self) -> Self::Value;
+
+    /// Replaces the value; an equal one changes nothing.
+    fn replace(&self, value: &Self::Value);
+}
 
 #[cfg(feature = "midi")]
-impl<T: PartialEq + Send + Sync + 'static> Slot<Arc<T>> for PublishedSlot<T> {
-    fn load(&self) -> Arc<T> {
+impl Held for tutti_midi_runtime::MidiClipControls {
+    type Value = Arc<tutti_midi_runtime::ClipEvents>;
+
+    fn current(&self) -> Self::Value {
+        Self::current(self)
+    }
+
+    fn replace(&self, value: &Self::Value) {
+        self.set(Arc::clone(value));
+    }
+}
+
+#[cfg(feature = "midi")]
+impl Held for tutti_midi_runtime::HarmonyControls {
+    type Value = Arc<tutti_midi_runtime::HarmonyChanges>;
+
+    fn current(&self) -> Self::Value {
+        Self::current(self)
+    }
+
+    fn replace(&self, value: &Self::Value) {
+        self.set(Arc::clone(value));
+    }
+}
+
+/// A value a node reads through a published cell, written through its
+/// control side ([`Held`]), which publishes when the value differs from the
+/// one in force.
+#[cfg(feature = "midi")]
+pub(crate) struct PublishedSlot<C>(pub C);
+
+#[cfg(feature = "midi")]
+impl<C: Held> Slot<C::Value> for PublishedSlot<C>
+where
+    C::Value: Send + Sync + 'static,
+{
+    fn load(&self) -> C::Value {
         self.0.current()
     }
 
-    fn check(&self, _: &Arc<T>) -> Result<(), SetRefusal> {
+    fn check(&self, _: &C::Value) -> Result<(), SetRefusal> {
         Ok(())
     }
 
-    /// Publishes `value` unless it equals the value in force, by value: the
-    /// node treats every publish as a replacement.
-    fn store(&self, value: &Arc<T>) {
-        if *self.0.current() != **value {
-            self.0.publish(Arc::clone(value));
-        }
+    fn store(&self, value: &C::Value) {
+        self.0.replace(value);
     }
 }
 

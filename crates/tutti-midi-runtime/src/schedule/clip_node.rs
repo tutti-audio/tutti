@@ -54,12 +54,14 @@
 //! holds its key.
 //!
 //! The clip itself is a [`ClipEvents`] published to the node with
-//! [`Publisher`] ([`MidiClipControls::events`]); the node reads it once per
+//! [`Publisher`] ([`MidiClipControls::set`]); the node reads it once per
 //! block.
 
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
 use tutti_buffers::Float;
+use tutti_rt::LockExt;
 
 use tutti_graph::{
     Cx, EventDensity, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
@@ -400,12 +402,16 @@ fn sorted(events: impl IntoIterator<Item = TimedMidiEvent>) -> Box<[ClipEvent]> 
         .collect()
 }
 
-/// The handle a host keeps on an inserted [`MidiClipNode`]: the cell its
-/// clip is published through. Cheap to clone; every clone reaches the same
-/// node. Control thread.
+/// The handle a host keeps on an inserted [`MidiClipNode`]: replace the clip
+/// it plays. Cheap to clone; every clone reaches the same node. Control
+/// thread.
 #[derive(Clone)]
 pub struct MidiClipControls {
     cell: Publisher<ClipEvents>,
+    /// Serializes `set`'s compare and publish (`Publisher` has no
+    /// compare-and-publish), so two control threads cannot each publish
+    /// against a stale read. The node never takes it.
+    serial: Arc<Mutex<()>>,
 }
 
 impl std::fmt::Debug for MidiClipControls {
@@ -415,15 +421,24 @@ impl std::fmt::Debug for MidiClipControls {
 }
 
 impl MidiClipControls {
-    /// The cell the node reads its clip from, once per block. A publish
-    /// replaces the clip from the next block on: the node ends every note the
-    /// previous clip left sounding, on that block's first frame, so publish
-    /// only a clip that differs from [`current`](Publisher::current). The
-    /// one publisher is the control side's; free what it retires with
-    /// [`reclaim`](tutti_rt::Reclaim::reclaim).
+    /// Plays `events` from the next block on. The node ends every note the
+    /// previous clip left sounding, on that block's first frame. A clip equal
+    /// to the one in force (the same events, each note-off paired to the same
+    /// note-on) changes nothing: no note is cut. Control thread.
+    pub fn set(&self, events: impl Into<Arc<ClipEvents>>) {
+        let events = events.into();
+        let _serial = self.serial.lock_recover();
+        let current = self.cell.current();
+        if Arc::ptr_eq(&current, &events) || *current == *events {
+            return;
+        }
+        self.cell.publish(events);
+    }
+
+    /// The clip in force: the one the node plays from its next block.
     #[must_use]
-    pub fn events(&self) -> Publisher<ClipEvents> {
-        self.cell.clone()
+    pub fn current(&self) -> Arc<ClipEvents> {
+        self.cell.current()
     }
 
     /// How many events the clip holds.
@@ -614,6 +629,7 @@ impl<F: Float> IntoNode<F> for MidiClipNode {
     fn into_parts(self) -> NodeParts<MidiClipControls, F> {
         let controls = MidiClipControls {
             cell: self.cell.clone(),
+            serial: Arc::default(),
         };
         let fork = ClipFork {
             cell: self.cell.clone(),

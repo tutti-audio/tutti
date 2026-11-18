@@ -14,12 +14,13 @@ fn reclaim_frees_a_clip_a_block_held_across_its_replacement() {
     let mut node = MidiClipNode::new([TimedMidiEvent::new(Beat(1.0), on).unwrap()]);
     let controls = MidiClipControls {
         cell: node.cell.clone(),
+        serial: Arc::default(),
     };
     let gone = Arc::downgrade(&node.cell.current());
     {
         // A block in progress across the replacement.
         let _held = node.clip.lend();
-        controls.events().publish(ClipEvents::default());
+        controls.set(ClipEvents::default());
     }
     assert!(gone.upgrade().is_some(), "retired, pinned until a scan");
     assert_eq!(tutti_rt::Reclaim::reclaim(&controls), 0);

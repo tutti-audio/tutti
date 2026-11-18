@@ -27,9 +27,7 @@ const RATE: f64 = 48_000.0;
 /// A clip at key 1 feeding the sink at key 2, blocks of at most `max`.
 /// Replaces the clip `controls` publishes with `events`.
 fn publish(controls: &MidiClipControls, events: impl IntoIterator<Item = TimedMidiEvent>) {
-    controls
-        .events()
-        .publish(events.into_iter().collect::<ClipEvents>());
+    controls.set(events.into_iter().collect::<ClipEvents>());
 }
 
 fn rig(clip: MidiClipNode, max: usize) -> (Editor, Executor, MidiClipControls, Seen) {
@@ -1049,4 +1047,20 @@ fn a_chase_larger_than_the_port_is_cut_short_and_counted() {
     );
     let refused: u32 = ed.take_event_losses().map(|l| l.count).sum();
     assert_eq!(refused, 480 - 256);
+}
+
+/// **Setting the events the clip already holds cuts nothing.** Note 60 is
+/// sounding; the same events (in another order) are set again; no note-off.
+#[test]
+fn setting_the_same_events_cuts_nothing() {
+    let events = [at(10, on(60)), at(1_000, off(60))];
+    let (_ed, mut exec, controls, seen) = rig(MidiClipNode::new(events), 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    publish(&controls, [events[1], events[0]]);
+    exec.process(64, &rolling(64), &[], &mut []);
+    assert_eq!(heard(&seen), vec![(10, on(60))]);
+    // A clip that differs does cut it.
+    publish(&controls, [at(5_000, on(72))]);
+    exec.process(64, &rolling(128), &[], &mut []);
+    assert_eq!(heard(&seen), vec![(10, on(60)), (128, off(60))]);
 }

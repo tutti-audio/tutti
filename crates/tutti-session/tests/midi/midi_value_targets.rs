@@ -337,3 +337,91 @@ fn blocks_adopting_written_values_do_not_allocate() {
     // The replaced clip's off, and the new note at 2 400 frames; the one chord.
     assert_eq!((after.0 - before.0, after.1 - before.1), (2, 1));
 }
+
+/// **A write after the clip's node is replaced reaches the new node, and the
+/// old one gets nothing**: the key names the node now at it, so the write is
+/// the new node's clip, which plays at the next block; the controls of the
+/// node it replaced still hold the clip it had.
+#[test]
+fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
+    let mut s = offline();
+    let (synth, seen) = tap(&mut s);
+    let (clip, old) = s.graph().add(MidiClipNode::new(note(
+        60,
+        MF,
+        Beat(0.0),
+        BeatDuration(1.0),
+    )));
+    s.graph()
+        .set_feed(synth, Feeder::Declared, vec![clip.events_out()]);
+    let _ = s.update();
+    let new = s
+        .graph()
+        .replace(
+            clip,
+            MidiClipNode::new([]),
+            tutti_units::Seconds(0.0),
+            tutti_graph::FadeLaw::EqualAmplitude,
+        )
+        .expect("the clip is there");
+    let _ = s.update();
+
+    let written = clip_of(note(64, MF, Beat(1.0 / 3.0), BeatDuration(1.0)));
+    s.set(clip.events().to(written)).unwrap();
+    assert_eq!(new.len(), 2, "the new node holds the written clip");
+    assert_eq!(old.len(), 2);
+    assert_eq!(
+        *old.current(),
+        clip_of(note(60, MF, Beat(0.0), BeatDuration(1.0))),
+        "the replaced node's clip is as it was"
+    );
+    play(&s);
+    blocks(&s, 18);
+    assert_eq!(note_ons(&seen), vec![(8_000, 64)]);
+}
+
+/// **`play_clip` on a target whose clip node was removed from the graph
+/// directly names the error**, and changes nothing.
+#[test]
+fn play_clip_after_the_clips_node_was_removed_directly_is_refused() {
+    let mut s = offline();
+    let (synth, _seen) = tap(&mut s);
+    s.midi()
+        .play_clip(synth, Beat(0.0), note(60, MF, Beat(0.0), BeatDuration(1.0)))
+        .unwrap();
+    let clip = s.midi().clip(synth).expect("the target's clip");
+    s.graph().remove(clip).expect("the clip is there");
+    let again = s
+        .midi()
+        .play_clip(synth, Beat(0.0), note(62, MF, Beat(0.0), BeatDuration(1.0)));
+    assert!(
+        matches!(
+            again,
+            Err(tutti_session::MidiError::ClipEvents(
+                ValueErrorKind::NoSuchTarget
+            ))
+        ),
+        "{again:?}"
+    );
+    let stopped = s.midi().stop_clip(synth);
+    assert!(
+        matches!(
+            stopped,
+            Err(tutti_session::MidiError::ClipEvents(
+                ValueErrorKind::NoSuchTarget
+            ))
+        ),
+        "{stopped:?}"
+    );
+}
+
+/// **A clip written with the `Arc` it already holds publishes nothing**, by
+/// pointer or by value: no note is cut either way.
+#[test]
+fn writing_the_clip_in_force_by_pointer_cuts_no_note() {
+    let (s, clip, seen) = sounding();
+    let held = s.get(clip.events()).unwrap();
+    s.set(clip.events().to(Arc::clone(&held))).unwrap();
+    blocks(&s, 1);
+    assert_eq!(note_offs(&seen), vec![]);
+}

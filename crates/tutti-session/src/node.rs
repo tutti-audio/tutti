@@ -334,7 +334,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {
     fn slots(node: NodeKey, controls: &tutti_midi_runtime::MidiClipControls) -> NodeSlots {
         NodeSlots::of(
             crate::value::SlotId::ClipEvents(node),
-            Arc::new(crate::value::PublishedSlot(controls.events()))
+            Arc::new(crate::value::PublishedSlot(controls.clone()))
                 as crate::value::SlotCell<Arc<tutti_midi_runtime::ClipEvents>>,
         )
     }
@@ -361,7 +361,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
     fn slots(node: NodeKey, controls: &tutti_midi_runtime::HarmonyControls) -> NodeSlots {
         NodeSlots::of(
             crate::value::SlotId::Harmony(node),
-            Arc::new(crate::value::PublishedSlot(controls.changes()))
+            Arc::new(crate::value::PublishedSlot(controls.clone()))
                 as crate::value::SlotCell<Arc<tutti_midi_runtime::HarmonyChanges>>,
         )
     }

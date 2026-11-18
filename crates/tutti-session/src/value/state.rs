@@ -166,15 +166,9 @@ impl ValueTable {
         let (gone, slots) = {
             let mut params = self.params.lock_recover();
             let gone = params.nodes.remove(&node);
-            let ids: Vec<SlotId> = params
+            let slots: Vec<_> = params
                 .slots
-                .keys()
-                .filter(|id| id.node() == Some(node))
-                .copied()
-                .collect();
-            let slots: Vec<_> = ids
-                .iter()
-                .filter_map(|id| params.slots.remove(id))
+                .extract_if(.., |id, _| id.node() == Some(node))
                 .collect();
             (gone, slots)
         };
@@ -304,5 +298,25 @@ impl<K: AppKey> Clone for Knobs<K> {
 impl<K: AppKey> fmt::Debug for Knobs<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Knobs").finish_non_exhaustive()
+    }
+}
+
+#[cfg(all(test, feature = "midi"))]
+mod tests {
+    use super::*;
+
+    /// **A write from a thread that holds the value lock is `Reentrant`**,
+    /// the whole call's error, and changes nothing: what `Midi::play_clip`
+    /// meets if it is ever reached from inside a `modify`.
+    #[test]
+    fn a_write_under_the_value_lock_is_reentrant() {
+        let table = ValueTable::new();
+        let target = crate::Key::<tutti_midi_runtime::MidiClipNode>::new(NodeKey(1)).events();
+        let held = table.enter().expect("the lock is free");
+        let refused = table.write(target.to(tutti_midi_runtime::ClipEvents::default()));
+        assert!(matches!(refused, Err(ValueErrorKind::Reentrant)));
+        drop(held);
+        let absent = table.write(target.to(tutti_midi_runtime::ClipEvents::default()));
+        assert!(matches!(absent, Err(ValueErrorKind::NoSuchTarget)));
     }
 }
