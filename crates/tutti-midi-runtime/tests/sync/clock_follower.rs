@@ -8,8 +8,8 @@
 
 use tutti_fixtures::midi;
 use tutti_midi_runtime::{ClockEvent, ClockFollower, ClockKind, ClockPosition, MidiClockDecoder};
-use tutti_types::{Bpm, Seconds};
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
+use tutti_units::{Bpm, Seconds};
 
 fn at(seconds: f64) -> Seconds {
     Seconds::new(seconds)

@@ -29,12 +29,10 @@ use tutti_graph::{
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_transport::ProjectMeter;
-use tutti_types::Latency;
 use tutti_types::LoopRange;
-use tutti_types::{
-    Beat, BeatsPerBar, Bpm, ChannelLayout, Frame, MeterChange, MeterMap, NoteValue, SampleRate,
-    Samples, TimeSignature,
-};
+use tutti_types::{BeatsPerBar, ChannelLayout, MeterChange, MeterMap, NoteValue, TimeSignature};
+use tutti_units::Latency;
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_vst2_test_plugin::ProcessCapture;
 
 const SAMPLE_RATE: f64 = 48_000.0;

@@ -6,7 +6,8 @@ use tutti_dsp::{
     COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorLanes, KeyFilter, KeySource,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, CompressionRatio, Db, Hz, MaxBlock, Q, SampleRate, Seconds, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -43,14 +44,14 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// [`key_filter`](Self::key_filter) puts a [`KeyFilter`] on the key: the detector hears the
 /// key through a high-pass or a band-pass, and the signal the gain is applied to is never
 /// filtered. It is off by default. A node built with one has two more controls after the
-/// makeup, the cutoff ([`UnitParam::Cutoff`](tutti_types::UnitParam::Cutoff), [`Hz`], 100 Hz) and
-/// the Q ([`UnitParam::Q`](tutti_types::UnitParam::Q), [`Q`], Butterworth); a node with
+/// makeup, the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and
+/// the Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth); a node with
 /// [`KeyFilter::Off`] declares neither, as a reverb that cannot freeze declares no freeze.
 /// The filter's coefficients glide to a new cutoff over one grid period.
 ///
 /// # Controls
 ///
-/// Threshold, knee, ratio, attack, release and makeup (as [`UnitParam::GainDb`](tutti_types::UnitParam::GainDb)) are live
+/// Threshold, knee, ratio, attack, release and makeup (as [`UnitParam::GainDb`](tutti_units::UnitParam::GainDb)) are live
 /// [`Params`](crate::Params) shared across clones, set through the node's
 /// [`ParamSet`](tutti_graph::ParamSet) or the graph's `set_param` (a knee under 0 reads as
 /// 0, a ratio under 1 as 1 and a time under 0 as 0: a compressor does not expand).
@@ -296,7 +297,7 @@ mod tests {
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     /// The controls of a compressor the tests name four of, the others at the default's.
     fn four(threshold: f32, ratio: f32, attack: f64, release: f64) -> CompressorControls {
@@ -627,8 +628,8 @@ mod tests {
             ][..]
         );
         assert_eq!(shape.audio_in().count(), 2);
-        assert_eq!(shape.latency, tutti_types::Latency::ZERO);
-        assert_eq!(shape.tail, tutti_types::Tail::None);
+        assert_eq!(shape.latency, tutti_units::Latency::ZERO);
+        assert_eq!(shape.tail, tutti_units::Tail::None);
         for (k, base) in [-20.0, 0.0, 4.0, 0.0001, 0.1, 0.0].into_iter().enumerate() {
             assert_eq!(m.param_base(k), Some(base), "control {k}'s base");
         }

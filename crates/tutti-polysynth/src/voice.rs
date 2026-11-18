@@ -12,9 +12,9 @@ use std::num::NonZeroUsize;
 
 use crate::note_id::PerNoteMap;
 use tutti_midi_protocol::{Heard, unit_f32_to_velocity, velocity_to_unit_f32};
-use tutti_types::{Amplitude, Semitones};
 use tutti_ump::Voice2;
 use tutti_ump::{MidiChannel, NoteId, NoteNumber, NoteVelocity};
+use tutti_units::{Amplitude, Semitones};
 use tutti_voicing::{
     ChannelState, Command, Glide, MasterGain, Mode, NoteControl, Order, Patch, Rules, Steal,
     VoiceSpec, Voicing,

@@ -29,8 +29,9 @@ use tutti_engine::Engine;
 use tutti_fixtures::midi;
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_transport::{LoopEdit, Transport};
+use tutti_types::ChannelLayout;
 use tutti_types::LoopRange;
-use tutti_types::{Amplitude, ChannelLayout, SampleRate};
+use tutti_units::{Amplitude, SampleRate};
 
 /// A stereo source that reads the transport per frame from its `Env`, so
 /// the gated loop below exercises `transport_at` and the executor's change
@@ -41,7 +42,7 @@ impl tutti_graph::Node for TransportTone {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::STEREO)
             .with_events(1, 0)
-            .with_tail(tutti_types::Tail::Unbounded)
+            .with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(
@@ -78,14 +79,14 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
     use tutti_graph::{Editor, EventIn, EventKind, Prepare, Unforkable};
     use tutti_graph::{OutPort, Source};
     use tutti_transport::{MotionEvent, TransportCommand};
-    use tutti_types::{At, Beat, Frame};
     use tutti_ump::{MidiChannel, U7};
+    use tutti_units::{At, Beat, Frame};
 
     let sample_rate = 48_000.0;
     let transport = Transport::new(SampleRate::of(sample_rate));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(sample_rate),
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -168,12 +169,12 @@ fn a_published_tempo_map_is_taken_without_allocating() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Editor, Prepare, Unforkable};
     use tutti_graph::{OutPort, Source};
-    use tutti_types::Bpm;
+    use tutti_units::Bpm;
 
     let transport = Transport::new(SampleRate::SR_48K);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -222,7 +223,7 @@ fn a_step_map_is_followed_without_allocating() {
     use tutti_graph::{OutPort, Source};
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     use tutti_transport::MotionEvent;
-    use tutti_types::{At, Beat, Bpm};
+    use tutti_units::{At, Beat, Bpm};
 
     let dense = |last: f64| {
         let mut points: Vec<TempoPoint> = (0..41)
@@ -242,7 +243,7 @@ fn a_step_map_is_followed_without_allocating() {
     let transport = Transport::new(SampleRate::SR_48K);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -308,7 +309,7 @@ fn a_step_map_is_followed_without_allocating() {
     let transport = Transport::new(SampleRate::SR_48K);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        tutti_types::MaxBlock::of(tutti_types::Samples(4_096)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(4_096)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -380,7 +381,7 @@ fn the_heard_tap_is_allocation_free() {
     let transport = Transport::new(SampleRate::SR_48K);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -401,7 +402,7 @@ fn the_heard_tap_is_allocation_free() {
 
     // 16 frames of ring against 1024-frame blocks: every block overflows.
     let first = taps
-        .open(layout, tutti_types::Samples(16))
+        .open(layout, tutti_units::Samples(16))
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
@@ -414,7 +415,7 @@ fn the_heard_tap_is_allocation_free() {
     taps.reclaim();
     // The reclaim queued a close; a new open queues a replacement behind it.
     let second = taps
-        .open(layout, tutti_types::Samples(4096))
+        .open(layout, tutti_units::Samples(4096))
         .expect("reopens")
         .reader()
         .expect("the audio thread is not behind");
@@ -458,8 +459,8 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, Unforkable};
     use tutti_graph::{OutPort, Source};
     use tutti_transport::{MotionEvent, TransportCommand};
-    use tutti_types::Tail;
-    use tutti_types::{At, Beat, Frame};
+    use tutti_units::Tail;
+    use tutti_units::{At, Beat, Frame};
 
     /// The beat of every frame, whole beats then the fraction.
     struct BeatWalk;
@@ -487,7 +488,7 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
 
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(sample_rate),
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     let (clock, sink) = (NodeKey(1), NodeKey(2));
     ed.insert(clock, "clock", Unforkable(BeatWalk));
@@ -575,7 +576,7 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(sample_rate));
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(sample_rate),
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     // Parks quickly, so the gated blocks below wake parked helpers.
     let pool = tutti_graph::WorkerPool::builder()
@@ -589,7 +590,7 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
         ed.insert(
             NodeKey(k + 1),
             "sine",
-            ForkByClone(crate::support::Sine::new(tutti_types::Hz(
+            ForkByClone(crate::support::Sine::new(tutti_units::Hz(
                 220.0 * (k + 1) as f32,
             ))),
         );
@@ -650,7 +651,7 @@ struct TwelveWide;
 impl tutti_graph::Node for TwelveWide {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::from(12u16))
-            .with_tail(tutti_types::Tail::Unbounded)
+            .with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(
@@ -676,7 +677,7 @@ fn a_714_root_block_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(48_000.0),
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
@@ -744,7 +745,7 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(48_000.0),
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
@@ -798,12 +799,13 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
 fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     use tutti_engine::{OutputLevels, OutputMap, OutputStrip, Routing};
     use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source, Unforkable};
-    use tutti_types::{Amplitude, Bed};
+    use tutti_types::Bed;
+    use tutti_units::Amplitude;
 
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(48_000.0),
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
@@ -884,7 +886,7 @@ fn a_routing_crossfade_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(48_000.0),
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
@@ -944,8 +946,8 @@ struct Latent;
 impl tutti_graph::Node for Latent {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_types::Latency::new(tutti_types::Samples(16)))
-            .with_tail(tutti_types::Tail::Unbounded)
+            .with_latency(tutti_units::Latency::new(tutti_units::Samples(16)))
+            .with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(
@@ -970,7 +972,8 @@ impl tutti_graph::Node for Latent {
 #[test]
 fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
     use tutti_graph::{Editor, Fade, FadeLaw, NodeKey, OutPort, Prepare, Source, Unforkable};
-    use tutti_types::{Bed, MaxBlock, Samples, Seconds};
+    use tutti_types::{Bed, MaxBlock};
+    use tutti_units::{Samples, Seconds};
 
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(

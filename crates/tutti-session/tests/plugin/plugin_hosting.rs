@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::BridgeError;
 use tutti_session::{LoadError, PoolEvent, Session, SessionEvent, Task};
-use tutti_types::{MaxBlock, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::Samples;
 
 fn session() -> Session {
     Session::builder()

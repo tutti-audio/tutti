@@ -1,6 +1,6 @@
 use alloc::vec;
 use alloc::vec::Vec;
-use tutti_types::{Beat, Unit};
+use tutti_units::{Beat, Unit};
 
 use crate::{Law, Piece};
 

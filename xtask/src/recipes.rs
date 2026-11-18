@@ -290,6 +290,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "no `log` dependency, and no print macro outside a main, a test or an example",
     ),
     (
+        "check-units-bare",
+        "",
+        "tutti-units names no allocation (`alloc`, `Vec`, `String`, `Box`, `Arc`) and no atomic outside its tests",
+    ),
+    (
         "check-test-time",
         "",
         "a test asserts no wall-clock time and sleeps for no event; a per-file ratchet",
@@ -565,7 +570,7 @@ impl Planner<'_> {
                 self.run(Cmd::sh("cargo test --locked --doc -p tutti-session --all-features").args(args));
             }
             "test-release" => self.lines(&[
-                "cargo nextest run --locked --release -p tutti-types -p tutti-rt -p tutti-graph",
+                "cargo nextest run --locked --release -p tutti-units -p tutti-types -p tutti-rt -p tutti-graph",
             ]),
             "test-all" => {
                 for d in ["test", "test-features", "test-doc", "test-release"] {
@@ -672,6 +677,7 @@ impl Planner<'_> {
             "check-values" => self.out.push(Step::Gate(Gate::Values)),
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
+            "check-units-bare" => self.out.push(Step::Gate(Gate::UnitsBare)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
@@ -793,7 +799,7 @@ impl Planner<'_> {
                     "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
-                    "check-session-api", "check-values",
+                    "check-session-api", "check-values", "check-units-bare",
                 ] {
                     self.dep(d)?;
                 }
@@ -864,6 +870,7 @@ const NO_STD_TARGET: &str = "aarch64-unknown-none";
 /// The `#![no_std]` crates in layer order, each with the features built on top of
 /// the bare build. A crate that becomes `no_std` is one line here.
 const NO_STD_CRATES: &[(&str, &[&str])] = &[
+    ("tutti-units", &["serde"]),
     ("tutti-types", &["serde"]),
     ("tutti-ump", &["serde"]),
     ("tutti-midi-protocol", &["serde"]),

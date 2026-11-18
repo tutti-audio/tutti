@@ -29,27 +29,23 @@ impl std::fmt::Display for TrackPart {
 /// and a read): each variant is one rule of the container, with where it was
 /// broken. A `track` is an index into the list given.
 ///
-/// [`SysExNotEnded`](Self::SysExNotEnded) to
-/// [`CopyrightNotTogether`](Self::CopyrightNotTogether) are the rules of
-/// SMF 1.0 a writer keeps: [`MidiFile::smf`](crate::MidiFile::smf) refuses what
-/// breaks them, and a read keeps such a file as it is. tutti's writer also
+/// [`SysExNotEnded`](Self::SysExNotEnded) and
+/// [`SysExInterrupted`](Self::SysExInterrupted) are the rules of SMF 1.0 a
+/// writer keeps that no type makes unwritable:
+/// [`MidiFile::smf`](crate::MidiFile::smf) refuses what breaks them. The rest
+/// of section 3.3's placement is a [`Layout`](crate::Layout)'s: the Sequence
+/// Number, SMPTE Offset and copyright notice are fields of its lead track or
+/// patterns, written first at tick 0, and a read makes a file keep it
+/// ([`MidiFile::normalized`](crate::MidiFile::normalized)). tutti's writer also
 /// refuses what the specification only recommends: the format 1 tempo map
 /// outside the first track
-/// ([`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack)), and the
-/// copyright placement ([`CopyrightNotFirst`](Self::CopyrightNotFirst),
-/// [`CopyrightNotTogether`](Self::CopyrightNotTogether)).
+/// ([`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack)).
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TracksError {
     /// The track list is empty.
     #[error("a file needs at least one track")]
     NoTracks,
-    /// A format 0 file has exactly one track.
-    #[error("a format 0 file has one track, not {tracks}")]
-    SingleTrack {
-        /// The tracks given.
-        tracks: usize,
-    },
     /// More tracks than the header's 16-bit count holds.
     #[error("{tracks} tracks are more than a file's 16-bit track count")]
     TooManyTracks {
@@ -89,14 +85,14 @@ pub enum TracksError {
         /// of the track if it is never ended.
         at: Tick,
     },
-    /// A System Exclusive message that does not end in `F7` (SMF 1.0 section
-    /// 3: it always ends with one, so the reader knows it has read all of it;
-    /// the last packet of a divided message ends with it).
-    #[error("track {track}: the SysEx message at tick {} does not end in F7", at.0)]
+    /// A divided System Exclusive message that is never ended by a packet ending
+    /// in `F7` (SMF 1.0 section 3: its last packet ends with it, so the reader
+    /// knows it has read all of it).
+    #[error("track {track}: the divided SysEx message at tick {} does not end in F7", at.0)]
     SysExNotEnded {
         /// The track.
         track: usize,
-        /// The tick of the last packet of the message.
+        /// The tick of its first packet.
         at: Tick,
     },
     /// A channel message or an `F0` event between the packets of a divided
@@ -109,72 +105,11 @@ pub enum TracksError {
         /// The tick of the event.
         at: Tick,
     },
-    /// A Sequence Number after the start of its track (SMF 1.0 section 3.3: at
-    /// time 0, before any nonzero delta-time and any transmittable MIDI event).
-    #[error("track {track}: the Sequence Number at tick {} is not at the start", at.0)]
-    SequenceNumberNotAtStart {
-        /// The track.
-        track: usize,
-        /// The tick of the event.
-        at: Tick,
-    },
-    /// A Sequence/Track Name after time 0 (SMF 1.0 section 3.3).
-    #[error("track {track}: the Track Name at tick {} is not at time 0", at.0)]
-    TrackNameNotAtStart {
-        /// The track.
-        track: usize,
-        /// The tick of the event.
-        at: Tick,
-    },
-    /// A Sequence Number in a track of a format 0 or 1 file other than the
-    /// first (SMF 1.0 section 3.3: such a file holds one sequence, whose number
-    /// is in the first track).
-    #[error("track {track}: a Sequence Number belongs in the first track")]
-    SequenceNumberNotInFirstTrack {
-        /// The track.
-        track: usize,
-    },
-    /// An SMPTE Offset in a track of a format 1 file other than the first
-    /// (SMF 1.0 section 3.3: it is stored with the tempo map and means nothing
-    /// in the other tracks).
-    #[error("track {track}: an SMPTE Offset belongs in the first track")]
-    SmpteOffsetNotInFirstTrack {
-        /// The track.
-        track: usize,
-    },
     /// A Set Tempo or Time Signature in a track of a format 1 file other than
     /// the first (SMF 1.0 section 2.2: the tempo map is stored as the first
     /// track).
     #[error("track {track}: the tempo map at tick {} belongs in the first track", at.0)]
     TempoMapNotInFirstTrack {
-        /// The track.
-        track: usize,
-        /// The tick of the event.
-        at: Tick,
-    },
-    /// An SMPTE Offset after the start of its track (SMF 1.0 section 3.3: at
-    /// the beginning, before any nonzero delta-time and any transmittable MIDI
-    /// event).
-    #[error("track {track}: the SMPTE Offset at tick {} is not at the start", at.0)]
-    SmpteOffsetNotAtStart {
-        /// The track.
-        track: usize,
-        /// The tick of the event.
-        at: Tick,
-    },
-    /// A copyright notice that is not the first event of the first track at
-    /// tick 0 (SMF 1.0 section 3.3).
-    #[error("track {track}: the copyright notice at tick {} is not the first event of the first track", at.0)]
-    CopyrightNotFirst {
-        /// The track.
-        track: usize,
-        /// The tick of the event.
-        at: Tick,
-    },
-    /// A second copyright notice in a file (SMF 1.0 section 3.3: all of a
-    /// file's notices go together in one event).
-    #[error("track {track}: a second copyright notice at tick {}", at.0)]
-    CopyrightNotTogether {
         /// The track.
         track: usize,
         /// The tick of the event.
@@ -216,7 +151,9 @@ pub enum Refusal {
     /// An SMF holds MIDI 1.0 channel messages, not packets.
     #[error("an SMF holds MIDI 1.0 channel messages, not packets")]
     SmfPacket,
-    /// A Clip File holds packets, not SMF events (`SysEx`, `Escape`, `Meta`).
+    /// A Clip File holds packets, not SMF events (`SysEx`, `Escape`, `Meta`) or
+    /// the fields of an SMF track (its Sequence Number, name, SMPTE Offset and
+    /// copyright notice).
     #[error("a Clip File holds packets, not SMF events")]
     ClipSmfEvent,
     /// A Utility message is the Clip File's own structure.

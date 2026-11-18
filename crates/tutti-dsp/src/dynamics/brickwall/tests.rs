@@ -1,7 +1,7 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use tutti_buffers::{Mono, Planes, PlanesMut};
-use tutti_types::Db;
+use tutti_units::Db;
 
 use super::*;
 use crate::testing::noise;

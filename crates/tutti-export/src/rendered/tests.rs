@@ -2,7 +2,8 @@
 //! `compile_fail` doctests on [`Rendered`](crate::Rendered).
 
 use crate::{Rendered, RenderedError};
-use tutti_types::{LayoutError, SampleRate, Samples};
+use tutti_types::LayoutError;
+use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

@@ -18,9 +18,11 @@ use tutti_session::{
     Crossfade, CrossfadeRefused, DetachedSession, EventInPort, Feeder, InPort, OutPort,
     RemoveError, Root, Session, SessionEvent, SessionNode, root_width,
 };
+use tutti_types::ChannelLayout;
 use tutti_types::MAX_CHANNELS;
-use tutti_types::{ChannelLayout, Drive, Hz, SampleRate, Samples, Seconds};
-use tutti_types::{Latency, Param, UnitParam};
+use tutti_types::Param;
+use tutti_units::{Drive, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Latency, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -813,7 +815,8 @@ fn a_removal_a_commit_and_an_update_run_on_any_thread() {
 #[test]
 fn an_update_frees_what_a_block_held_across_a_replacement() {
     use tutti_transport::MeterSlot;
-    use tutti_types::{Beat, MeterChange, MeterMap, TimeSignature};
+    use tutti_types::{MeterChange, MeterMap, TimeSignature};
+    use tutti_units::Beat;
 
     let mut s = detached(1);
     let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
@@ -1017,7 +1020,7 @@ fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoo
     use tutti_sampler::{MemorySource, Playback, SlotId, VoiceWindow};
     let source = MemorySource::placed(
         Arc::new(tutti_buffers::Wave::new(1, SampleRate::SR_48K)),
-        VoiceWindow::from(tutti_types::Beat(0.0)),
+        VoiceWindow::from(tutti_units::Beat(0.0)),
     )
     .expect("a placeable wave");
     handle

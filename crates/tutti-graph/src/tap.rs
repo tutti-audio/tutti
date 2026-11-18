@@ -39,7 +39,8 @@ use crate::TapId;
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, PlanesMut, Pull, Source};
 use tutti_rt::{ControlDrop, FaultLatch};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
-use tutti_types::{ChannelLayout, Frame, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Frame, Samples};
 
 use crate::slots::AudioSlots;
 use tutti_buffers::Float;

@@ -22,17 +22,17 @@
 //!
 //! ```rust,no_run
 //! use tutti_types::MaxBlock;
-//! use tutti_types::SampleRate;
+//! use tutti_units::SampleRate;
 //! use tutti_graph::{Editor, Prepare};
 //! use tutti_plugin::catalog::{
 //!     Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId,
 //! };
 //! use tutti_plugin_db::PluginDb;
 //! use tutti_plugin_types::PluginFormat;
-//! use tutti_types::Samples;
+//! use tutti_units::Samples;
 //! use tutti_graph::NodeKey;
 //! use tutti_transport::TempoReader;
-//! use tutti_types::Bpm;
+//! use tutti_units::Bpm;
 //!
 //! // `sample_rate` takes anything convertible to `SampleRate` — the engine's
 //! // unit type, not a bare rate that could be a block size.
@@ -389,7 +389,7 @@ pub use tutti_plugin_types::{FeatureReport, Preset, PresetId, PresetSupport};
 // `AnyThread::parameter_descriptors` lists `ParamId`s, and
 // `set_parameter_value` takes a `Normalized`.
 pub use tutti_plugin_types::Normalized;
-pub use tutti_types::ParamId;
+pub use tutti_units::ParamId;
 
 /// Discovering, persisting, and loading plugins.
 ///

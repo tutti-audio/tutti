@@ -30,7 +30,7 @@ use tutti_plugin_types::BridgeResult;
 ))]
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{Features, LoadedPlugin, PluginDescriptor, PluginRole};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// The audio node, wherever it runs.
 ///
@@ -91,7 +91,7 @@ macro_rules! placed {
 /// # Examples
 ///
 /// ```no_run
-/// use tutti_types::SampleRate;
+/// use tutti_units::SampleRate;
 /// use tutti_plugin::catalog::{Loadable, Plugin, PluginRef};
 ///
 /// let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3").expect("a plugin file");
@@ -136,7 +136,7 @@ impl Plugin {
     ///     .resolve(&PluginId::new(PluginFormat::Vst3, "vst3.00112233-44556677-8899AABB-CCDDEEFF"))
     ///     .bind()?;
     /// let (_collector, work) = tutti_plugin::MainWork::new();
-    /// let plugin = Plugin::open(None, &work, &foo, tutti_types::SampleRate::SR_48K)?;
+    /// let plugin = Plugin::open(None, &work, &foo, tutti_units::SampleRate::SR_48K)?;
     /// # Ok(()) }
     /// ```
     ///

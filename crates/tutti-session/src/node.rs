@@ -440,8 +440,8 @@ mod tests {
         {
             use std::sync::Arc;
             let source = tutti_sampler::MemorySource::placed(
-                Arc::new(tutti_buffers::Wave::new(1, tutti_types::SampleRate::SR_48K)),
-                tutti_sampler::VoiceWindow::from(tutti_types::Beat(0.0)),
+                Arc::new(tutti_buffers::Wave::new(1, tutti_units::SampleRate::SR_48K)),
+                tutti_sampler::VoiceWindow::from(tutti_units::Beat(0.0)),
             )
             .expect("a placeable wave");
             assert!(keeps_one(tutti_sampler::VoicePool::new()));
@@ -455,7 +455,7 @@ mod tests {
         // A node that publishes nothing keeps none.
         assert!(!keeps_one(
             tutti_nodes::automation::AutomationLaneNode::new(
-                tutti_nodes::automation::Trajectory::<tutti_types::Hz>::new()
+                tutti_nodes::automation::Trajectory::<tutti_units::Hz>::new()
             )
         ));
     }

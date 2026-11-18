@@ -85,8 +85,8 @@ use tutti_au_ffi::property::{
 use tutti_au_ffi::{Element, Property, Scope};
 
 use tutti_plugin_types::{MidiAssignment, MidiSource};
-use tutti_types::ParamId;
 use tutti_ump::{MidiChannel, U7};
+use tutti_units::ParamId;
 
 use crate::error::Result;
 use crate::types::*;

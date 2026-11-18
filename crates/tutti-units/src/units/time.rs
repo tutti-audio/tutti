@@ -1,0 +1,441 @@
+// Time and frequency.
+
+use super::*;
+
+unit! {
+    /// Frequency in Hertz. Used for filter cutoffs, LFO rates, EQ centers.
+    pub struct Hz(pub f32): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
+}
+
+unit! {
+    /// Time in seconds, short or long: attack/release, delay times, lookahead,
+    /// and a position or duration in a project.
+    ///
+    /// `f64`-backed: 53 bits of mantissa keep the spacing below a
+    /// nanosecond out to an hour and about a microsecond at a thousand years,
+    /// far finer than a frame at any sample rate. (An `f32` second has 24 bits:
+    /// 0.24 ms apart at one hour, more than a frame at 48 kHz past about
+    /// 256 s.) A DSP kernel that runs in `f32` narrows once at its edge
+    /// (`secs.get() as f32`), where the value is a short control time.
+    pub struct Seconds(pub f64): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
+}
+
+impl Hz {
+    /// No frequency: a rate of zero.
+    pub const ZERO: Hz = Hz(0.0);
+
+    /// The period of this frequency (`1 / f`), or `None` for a zero, a negative or a
+    /// non-finite frequency, which has none. The one route from a frequency to the time of
+    /// a cycle: [`Seconds::frequency`] is its inverse.
+    #[inline]
+    #[must_use]
+    pub fn period(self) -> Option<Seconds> {
+        let hz = f64::from(self.0);
+        if hz.is_finite() && hz > 0.0 {
+            Some(Seconds(1.0 / hz))
+        } else {
+            None
+        }
+    }
+}
+
+impl Seconds {
+    /// No time.
+    pub const ZERO: Seconds = Seconds(0.0);
+
+    /// The frequency this is the period of (`1 / t`), or `None` for a zero, a negative or a
+    /// non-finite time, and for a time whose frequency an `f32` cannot hold above 0 (one
+    /// that overflows or underflows). Computed in `f64` and narrowed once; [`Hz::period`] is
+    /// its inverse.
+    #[inline]
+    #[must_use]
+    pub fn frequency(self) -> Option<Hz> {
+        if !(self.0.is_finite() && self.0 > 0.0) {
+            return None;
+        }
+        let hz = (1.0 / self.0) as f32;
+        if hz.is_finite() && hz > 0.0 {
+            Some(Hz(hz))
+        } else {
+            None
+        }
+    }
+
+    /// This time as an `f32`, for a kernel that runs in `f32`: the one place a
+    /// control time narrows. A short time (a delay, an attack, a lookahead) is
+    /// exact enough in `f32`; a position or a long span is not, so keep those
+    /// as `Seconds`.
+    #[inline]
+    #[must_use]
+    pub fn to_f32(self) -> f32 {
+        self.0 as f32
+    }
+
+    /// A time held as an `f32` (a kernel's own state, a modulation lane's
+    /// value), widened exactly.
+    #[inline]
+    #[must_use]
+    pub fn from_f32(v: f32) -> Self {
+        Self(f64::from(v))
+    }
+
+    /// Frames in this span at `sample_rate`, rounded to nearest.
+    ///
+    /// The *measurement* form: how long is this, in frames. Three named
+    /// variants rather than one function with a rounding-mode argument —
+    /// the name puts the choice in the signature instead of making a reader
+    /// chase what a call site passed.
+    ///
+    /// A `Seconds` is `f64`, so a span built from a long frame count still
+    /// names that frame: the spacing stays below a frame at any audio rate for
+    /// every span a project can hold.
+    ///
+    /// A NaN, a negative span or a non-finite product gives zero frames, and
+    /// a span too large for `usize` saturates.
+    #[inline]
+    pub fn to_samples(self, sample_rate: impl Into<SampleRate>) -> Samples {
+        Self::frames(self.0 * sample_rate.into().get(), libm::round)
+    }
+
+    /// Frames fully elapsed in this span — rounds **down**.
+    ///
+    /// The *counting* form: how many whole frames have gone by.
+    #[inline]
+    pub fn to_samples_floor(self, sample_rate: impl Into<SampleRate>) -> Samples {
+        Self::frames(self.0 * sample_rate.into().get(), libm::floor)
+    }
+
+    /// Frames needed to hold this span — rounds **up**.
+    ///
+    /// The *allocation* form: a delay line sized for `max_delay` must hold at
+    /// least that long, so rounding to nearest would under-allocate for half
+    /// of all inputs.
+    #[inline]
+    pub fn to_samples_ceil(self, sample_rate: impl Into<SampleRate>) -> Samples {
+        Self::frames(self.0 * sample_rate.into().get(), libm::ceil)
+    }
+
+    /// Signed frames in this span at `sample_rate`, rounded to nearest, half
+    /// away from zero.
+    ///
+    /// The *offset* form of [`to_samples`](Self::to_samples): a shift of a
+    /// position can be negative (a device that reports too much latency, a
+    /// peer's clock ahead of ours), and `to_samples` clamps a negative span to
+    /// zero. A NaN gives 0, and a span too large for `i64` (an infinite one
+    /// included) saturates.
+    ///
+    /// It returns a bare `i64` because tutti has no signed frame unit:
+    /// [`Frame`](crate::Frame) is a `u64` position. A
+    /// [`core::time::Duration`] is unsigned, so a caller holding one builds a
+    /// `Seconds` from it and signs it by direction.
+    ///
+    /// ```
+    /// use tutti_units::{SampleRate, Seconds};
+    /// assert_eq!(Seconds::new(-0.5).to_frame_offset(SampleRate::SR_48K), -24_000);
+    /// ```
+    #[inline]
+    pub fn to_frame_offset(self, sample_rate: impl Into<SampleRate>) -> i64 {
+        let raw = self.0 * sample_rate.into().get();
+        // `as` saturates out-of-range and infinite values into `i64`.
+        if raw.is_nan() {
+            0
+        } else {
+            libm::round(raw) as i64
+        }
+    }
+
+    /// The per-sample coefficient of a one-pole smoother with this time
+    /// constant at `rate`: `c = 1 − exp(−1 / (τ · rate))`, the fraction of
+    /// the remaining gap one sample closes (`y += c · (x − y)`; 1 is
+    /// instant, 0 holds).
+    ///
+    /// After `τ` seconds of a unit step the smoother reads `1 − e⁻¹`. A
+    /// decay length `τ · rate` that is not above zero (a zero, negative or
+    /// NaN time constant) is instant: 1. An infinite one holds: 0.
+    ///
+    /// Computed in `f64` and rounded once to `f32` (a coefficient is a DSP
+    /// `f32`), so a long time constant
+    /// keeps its own rate (`c` is small but representable, where an `f32`
+    /// `1 − exp(…)` would cancel to 0). `τ · rate` is a decay length, not a
+    /// frame count, so none of the `to_samples*` rounding applies.
+    #[inline]
+    pub fn one_pole_coeff(self, rate: impl Into<SampleRate>) -> f32 {
+        Self::one_pole(self.0 * rate.into().get())
+    }
+
+    /// The coefficient of a one-pole smoother with this time constant
+    /// stepped once per `step` of audio time: `1 − exp(−step / τ)`, as
+    /// [`one_pole_coeff`](Self::one_pole_coeff) with the step in seconds
+    /// rather than one sample. For a smoother stepped once per block or per
+    /// display frame.
+    ///
+    /// A time constant that is not above zero (or NaN) is instant: 1. A
+    /// step that is not above zero (or NaN), with a positive time constant,
+    /// moves nothing: 0.
+    #[inline]
+    #[must_use]
+    pub fn one_pole_coeff_over(self, step: Seconds) -> f32 {
+        if self.0 > 0.0 {
+            if step.0 > 0.0 {
+                Self::one_pole(self.0 / step.0)
+            } else {
+                0.0
+            }
+        } else {
+            1.0
+        }
+    }
+
+    /// `1 − exp(−1 / n)` for a decay length of `n` steps: 1 for an `n`
+    /// that is not above zero (or NaN), 0 for an infinite one. The
+    /// exponential is `libm`'s, so the coefficient is the same on every
+    /// target.
+    #[inline]
+    fn one_pole(n: f64) -> f32 {
+        if n > 0.0 {
+            (1.0 - libm::exp(-1.0 / n)) as f32
+        } else {
+            1.0
+        }
+    }
+
+    /// Shared tail: apply `round`, then clamp into `usize`.
+    ///
+    /// Non-finite and negative inputs collapse to zero. `NaN as usize` is
+    /// already `0` in Rust and a negative cast already saturates, so this
+    /// changes no behaviour — it makes the behaviour *stated* rather than
+    /// inherited from a cast rule most readers do not have memorized.
+    #[inline]
+    fn frames(raw: f64, round: fn(f64) -> f64) -> Samples {
+        if !raw.is_finite() || raw <= 0.0 {
+            return Samples::ZERO;
+        }
+        Samples(round(raw) as usize)
+    }
+}
+
+// ── Sample rates ────────────────────────────────────────────────────────────
+
+/// Audio sample rate in Hertz.
+///
+/// `f64`-backed because sample rates routinely exceed `f32`'s
+/// integer-precision range (192 kHz is exact, but `1.0 / 48_000.0` in `f32`
+/// carries ~6e-8 of relative error, and a phase accumulator integrating
+/// that over a long render drifts audibly).
+///
+/// Defined once, here, so every crate names the same type.
+///
+/// A rate is finite and above zero: [`new`](Self::new) refuses anything else
+/// and [`of`](Self::of) panics on it, for a literal or a constant. The common
+/// rates are named constants (`SR_44K1`, `SR_48K`, ...).
+///
+/// There is no `Default` (a missing rate is visible where it is missing; the
+/// placeholder before a device's is known is [`DEFAULT`](Self::DEFAULT)) and
+/// no `Unit` impl (its `from_raw` could not refuse). A `u32` (file headers,
+/// device configs) goes through [`from_hz`](Self::from_hz), which refuses zero.
+/// Deliberately **not** from `f32`: that widening is lossless in isolation, but
+/// an `f32` rate has nearly always already lost precision upstream, and an
+/// implicit conversion would launder it in silently. A site that genuinely
+/// holds one writes `SampleRate::new(f64::from(x))`, where review can see it.
+///
+/// `new` and `of` take Hertz; serde reads and writes the bare `f64` and
+/// refuses what `new` refuses.
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
+pub struct SampleRate(f64);
+
+impl SampleRate {
+    /// The rate, or `None` when `raw` is NaN, infinite, zero or negative.
+    #[inline]
+    #[must_use]
+    pub const fn new(raw: f64) -> Option<Self> {
+        if raw.is_finite() && raw > 0.0 {
+            Some(Self(raw))
+        } else {
+            None
+        }
+    }
+
+    /// The rate for a literal or a constant. For a value that arrives from
+    /// outside, use [`new`](Self::new).
+    ///
+    /// # Panics
+    ///
+    /// When `raw` is not finite and above zero; in a `const` that is a compile
+    /// error.
+    #[inline]
+    #[must_use]
+    #[track_caller]
+    pub const fn of(raw: f64) -> Self {
+        match Self::new(raw) {
+            Some(rate) => rate,
+            None => panic!("a sample rate is finite and above zero"),
+        }
+    }
+
+    /// Returns the raw Hertz, discarding the unit.
+    ///
+    /// Reach for this at a boundary the unit types do not cross (C ABI, IPC,
+    /// WIT), not to do arithmetic the type deliberately omits.
+    #[inline]
+    #[must_use]
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+
+    /// The rate of a whole number of Hertz (a file header, a device config),
+    /// or `None` for zero.
+    #[inline]
+    #[must_use]
+    pub const fn from_hz(hz: u32) -> Option<Self> {
+        Self::new(hz as f64)
+    }
+
+    /// Returns the smaller of the two, in this unit.
+    #[inline]
+    #[must_use]
+    pub fn min(self, other: Self) -> Self {
+        Self(f64::min(self.0, other.0))
+    }
+
+    /// Returns the larger of the two, in this unit.
+    #[inline]
+    #[must_use]
+    pub fn max(self, other: Self) -> Self {
+        Self(f64::max(self.0, other.0))
+    }
+
+    /// Clamps into `lo..=hi`, in this unit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `lo > hi`, matching `f64::clamp`.
+    #[inline]
+    #[must_use]
+    pub fn clamp(self, lo: Self, hi: Self) -> Self {
+        Self(f64::clamp(self.0, lo.0, hi.0))
+    }
+}
+
+impl core::fmt::Display for SampleRate {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+// Deliberately absent, and the omissions are load-bearing:
+//
+// - `Add` / `Sub` (`Additive`) — 44.1 kHz plus 48 kHz is not a rate.
+// - `Mul<f64>` / `Div<f64>` (`Scalable`) — a scaled rate is a *different
+//   device rate*; re-derive it from the device rather than scaling a stale one.
+// - `Div<SampleRate> -> f64` (`Ratio`) — that quotient is `SrcRatio`, and
+//   `SrcRatio::for_rates` owns the derivation along with its unity tolerance
+//   and its non-positive guard. A bare operator here would let callers bypass
+//   both.
+//
+// `Mul<f64>`'s replacement is `nyquist` / `nyquist_scaled` below, per the rule
+// that an omission ships with the method that supersedes it. Without them the
+// scaling escapes to raw floats (`sample_rate * 0.499`,
+// `sample_rate.get() / 2.0`), each an unlabelled anti-aliasing margin.
+
+impl SampleRate {
+    /// 44.1 kHz — the historic CD-audio rate.
+    pub const SR_44K1: Self = Self(44_100.0);
+
+    /// 48 kHz — the typical pro-audio default.
+    pub const SR_48K: Self = Self(48_000.0);
+
+    /// 88.2 kHz, twice the CD rate.
+    pub const SR_88K2: Self = Self(88_200.0);
+
+    /// 96 kHz.
+    pub const SR_96K: Self = Self(96_000.0);
+
+    /// 192 kHz.
+    pub const SR_192K: Self = Self(192_000.0);
+
+    /// 22.05 kHz, half the CD rate.
+    pub const SR_22K05: Self = Self(22_050.0);
+
+    /// 8 kHz, the telephone rate.
+    pub const SR_8K: Self = Self(8_000.0);
+
+    /// The placeholder rate for anything built before the device's is known.
+    ///
+    /// The **one** such constant. Everything that has not been given a rate
+    /// must start from the *same* one, or a graph built before the device
+    /// opens is inconsistent with itself, so the value has one owner and it is
+    /// the unit's.
+    ///
+    /// 44.1 kHz. The placeholder is replaced before the first real block, so
+    /// its value only affects rate-dependent defaults computed before
+    /// `prepare` (a filter's initial coefficients).
+    pub const DEFAULT: Self = Self::SR_44K1;
+
+    /// The frames in one second at this rate, rounded up: what a buffer holding
+    /// a second of audio needs. A rate is above zero, so at least one frame.
+    #[inline]
+    #[must_use]
+    pub fn one_second(self) -> Samples {
+        Seconds::new(1.0).to_samples_ceil(self)
+    }
+
+    /// The Nyquist frequency: the highest representable at this rate.
+    ///
+    /// Returns [`Hz`] because the result is a *signal* frequency — something to
+    /// compare a cutoff against — not a clock rate. That crossing is the whole
+    /// reason the method exists: it is the one sanctioned bridge between the
+    /// two, so a filter clamping its cutoff does not reach for a raw float.
+    ///
+    /// Narrowing to `Hz`'s `f32` is safe here: Nyquist is at most ~96 kHz for
+    /// any real device rate, well inside `f32`'s exact-integer range.
+    #[inline]
+    #[must_use]
+    pub fn nyquist(self) -> Hz {
+        Hz((self.0 * 0.5) as f32)
+    }
+
+    /// Nyquist scaled by `margin`, for filters that must stay *below* it.
+    ///
+    /// A biquad or ladder evaluated exactly at Nyquist is degenerate — `tan`
+    /// diverges — so cutoffs clamp slightly under. The margin is the caller's
+    /// because the safe distance is topology-specific (an SVF tolerates 0.499,
+    /// an all-pass chain wants more headroom); naming it as an argument keeps
+    /// that a stated choice rather than a bare literal beside a multiply.
+    ///
+    /// `margin` is clamped to `0.0..=1.0`: above 1.0 it would return a
+    /// frequency *above* Nyquist, which is the bug this guards.
+    #[inline]
+    #[must_use]
+    pub fn nyquist_scaled(self, margin: f32) -> Hz {
+        Hz((self.0 * f64::from(margin.clamp(0.0, 1.0)) * 0.5) as f32)
+    }
+}
+
+impl TryFrom<f64> for SampleRate {
+    type Error = SampleRateOutOfRange;
+
+    #[inline]
+    fn try_from(raw: f64) -> Result<Self, SampleRateOutOfRange> {
+        Self::new(raw).ok_or(SampleRateOutOfRange(raw))
+    }
+}
+
+impl From<SampleRate> for f64 {
+    #[inline]
+    fn from(rate: SampleRate) -> f64 {
+        rate.0
+    }
+}
+
+/// A raw number that is not a sample rate: NaN, infinite, zero or negative
+/// (see [`SampleRate::new`]).
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+#[error("a sample rate is finite and above zero, got {0}")]
+pub struct SampleRateOutOfRange(pub f64);
+
+#[cfg(test)]
+mod tests;

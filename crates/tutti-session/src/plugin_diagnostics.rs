@@ -8,7 +8,7 @@
 
 use tutti_graph::{BusRef, BusSource, MAX_BUSES};
 use tutti_plugin_types::{BlockCounts, BusRole, PluginBus, TerminationReason};
-use tutti_types::{Samples, Tail};
+use tutti_units::{Samples, Tail};
 
 use crate::plugin::HostedPlugin;
 

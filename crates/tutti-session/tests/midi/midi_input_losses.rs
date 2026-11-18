@@ -9,8 +9,8 @@ use tutti_graph::Losses;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, persistent_endpoint};
 use tutti_session::{Session, midi_input};
-use tutti_types::SampleRate;
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
+use tutti_units::SampleRate;
 
 const KEYS: u32 = 1;
 /// The hardware inlet's capacity: what a device may push between two blocks.

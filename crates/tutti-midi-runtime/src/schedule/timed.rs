@@ -1,7 +1,7 @@
 //! [`TimedMidiEvent`]: a MIDI event at a beat.
 
-use tutti_types::Beat;
 use tutti_ump::Ump;
+use tutti_units::Beat;
 
 /// One [`Ump`] tagged with the finite beat at which it fires.
 ///
@@ -10,7 +10,7 @@ use tutti_ump::Ump;
 /// when the value is built ([`new`](Self::new)), so a clip never meets a beat
 /// that has no frame.
 ///
-/// [`Beat`] is `tutti-types`' unit over an `f64`, which holds NaN and the
+/// [`Beat`] is `tutti-units`' unit over an `f64`, which holds NaN and the
 /// infinities; this type is where an event's beat is refused for them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimedMidiEvent {
@@ -33,7 +33,7 @@ impl TimedMidiEvent {
     /// `None` when the moved beat is not finite.
     #[inline]
     #[must_use]
-    pub fn shifted(self, by: tutti_types::BeatDuration) -> Option<Self> {
+    pub fn shifted(self, by: tutti_units::BeatDuration) -> Option<Self> {
         Self::new(self.beat + by, self.event)
     }
 

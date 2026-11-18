@@ -47,7 +47,8 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, Unforkable};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_types::{ChannelLayout, Hz, Q, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Hz, Q, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const FRAMES: usize = 256;

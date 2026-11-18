@@ -27,7 +27,7 @@ use tutti_session::{
     Bounce, BounceTail, ExportClock, InPort, OutPort, Range, Session, Stem, Workers,
 };
 use tutti_types::ChannelLayout;
-use tutti_types::{SampleRate, Samples, Seconds};
+use tutti_units::{SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BRANCHES: usize = 8;

@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{BridgeError, BridgeResult, ResyncKind, StateError};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// How many block periods the bridge thread will wait for a `ProcessAudio`
 /// reply before abandoning the block.
@@ -626,7 +626,7 @@ pub(super) fn handle(
                     other => {
                         return Err(BridgeError::UnexpectedMessage {
                             expected: "SampleRateSet",
-                            got: format!("{other:?}"),
+                            got: format!("{other:?}").into(),
                         });
                     }
                 }

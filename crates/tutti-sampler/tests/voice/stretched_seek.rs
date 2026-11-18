@@ -19,7 +19,7 @@ use tutti_buffers::Wave;
 use tutti_graph::contract;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
-use tutti_types::{Beat, Bpm, SampleRate, StretchFactor};
+use tutti_units::{Beat, Bpm, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;

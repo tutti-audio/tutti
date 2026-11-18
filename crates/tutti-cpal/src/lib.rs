@@ -36,7 +36,7 @@
 //! use tutti_graph::{OutPort, Source};
 //! use tutti_engine::Engine;
 //! use tutti_transport::Transport;
-//! use tutti_types::{Hz, Samples};
+//! use tutti_units::{Hz, Samples};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{Editor, Prepare};
 //! use tutti_nodes::testing::Osc;

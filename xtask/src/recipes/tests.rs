@@ -82,6 +82,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         ("check-errors", "gate check-errors"),
         ("check-logging", "gate check-logging"),
         ("check-test-time", "gate check-test-time"),
+        ("check-units-bare", "gate check-units-bare"),
         ("check-guards", "gate check-guards"),
         ("check-hosting", "gate check-hosting"),
         ("check-session", "gate check-session"),
@@ -111,6 +112,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         "gate check-errors",
         "gate check-logging",
         "gate check-test-time",
+        "gate check-units-bare",
         "gate check-guards",
         "gate check-hosting",
         "gate check-session",
@@ -413,6 +415,8 @@ fn check_no_std_builds_each_listed_crate_for_the_bare_metal_target() {
     assert_eq!(
         steps,
         [
+            "cargo build --locked -p tutti-units --no-default-features --target aarch64-unknown-none",
+            "cargo build --locked -p tutti-units --no-default-features --target aarch64-unknown-none --features serde",
             "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none --features serde",
             "cargo build --locked -p tutti-ump --no-default-features --target aarch64-unknown-none",

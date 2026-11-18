@@ -8,7 +8,7 @@ use std::any::Any;
 use std::fs::File;
 use std::path::Path;
 use tutti_buffers::{I24, Planes, Sample, SampleFormat, Wave};
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 use symphonia::core::audio::sample::{SampleFormat as FileFormat, i24};
 use symphonia::core::audio::{AudioSpec, GenericAudioBufferRef};

@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn typed_parameter_and_rate_fields_keep_their_wire_widths() {
         use crate::protocol::{BridgeMessage, HostMessage, Normalized, ParamEdit, ParamId};
-        use tutti_types::SampleRate;
+        use tutti_units::SampleRate;
 
         let set = HostMessage::SetParameter {
             param_id: ParamId::new(0x0102_0304),

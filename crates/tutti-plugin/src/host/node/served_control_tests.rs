@@ -12,7 +12,7 @@
 use tutti_fixtures::{machine_lock, main_thread};
 use tutti_plugin_ipc::{BridgeConfig, Ipc, Launched};
 use tutti_plugin_types::{AnyThread, Control, Health, RenderMode, SampleRate, StateUse};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use super::real_stall_tests::plugin_server_path;
 

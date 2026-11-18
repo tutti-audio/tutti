@@ -30,7 +30,8 @@ use tutti_nodes::{
     CrossoverNode, DelayControls, DelayNode, LimiterControls, LimiterNode, MaxDelay,
     MultibandCompressorNode,
 };
-use tutti_types::{ChannelLayout, Db, Feedback, Hz, Samples, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, Feedback, Hz, Samples, Seconds};
 
 fn impulse(port: u16) -> Excite {
     Excite::Impulse {

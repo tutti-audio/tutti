@@ -1,6 +1,6 @@
 use std::io::Read;
 
-use tutti_types::{Cents, SampleRate, Samples};
+use tutti_units::{Cents, SampleRate, Samples};
 
 use crate::binary_reader::ReadExt;
 use crate::error::Error;

@@ -36,7 +36,7 @@ use tutti_vst2_host::Vst2Loaded;
 use tutti_graph::RenderMode;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 use tutti_vst2_test_plugin::ProcessCapture;
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -163,7 +163,7 @@ fn drive_blocks_in(
     let rate = SampleRate::of(hz);
     Node::prepare(
         unit,
-        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_types::Samples(max)))
+        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(max)))
             .with_render_mode(mode),
     );
     let silence = vec![0.0f32; frames];
@@ -171,9 +171,9 @@ fn drive_blocks_in(
         .map(|_| &silence[..])
         .collect();
     let env = Env {
-        frame: tutti_types::Frame::new(0),
+        frame: tutti_units::Frame::new(0),
         sample_rate: rate,
-        block_len: tutti_types::Samples(frames),
+        block_len: tutti_units::Samples(frames),
         transport: TransportPosition::default(),
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,

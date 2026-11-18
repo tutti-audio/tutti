@@ -10,7 +10,7 @@
 #       node-ctor     a public constructor on a `*Node`
 #       config-width  a `*Config` constructor whose first parameter is not a width
 #       ctor-result   a receiverless `pub fn` returning its type in a `Result`
-#       range-macro   a `macro_rules!` writing a range type outside tutti-types
+#       range-macro   a `macro_rules!` writing a range type outside tutti-units and tutti-types
 #       option-arg    a chained option (`self` in, `Self` out) that takes an `Option`
 # key   `<file>::<Owner>::<fn>`, or `<file>::<macro>` for `range-macro`.
 

@@ -20,7 +20,8 @@ use tutti_nodes::testing::Const;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::fake::{Call, FakePlugin};
 use tutti_plugin_types::{ContentScale, EditorError};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 /// A detached session with a fake plugin (with an editor) at a node.
 fn session_with_editor() -> (DetachedSession, NodeKey, FakePlugin) {

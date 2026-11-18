@@ -4,7 +4,8 @@
 use tutti_buffers::{
     BufferError, Float, Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut,
 };
-use tutti_types::{ChannelLayout, ChannelTopology, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::Samples;
 
 const M: f32 = <f32 as Float>::MINUS_3_DB;
 

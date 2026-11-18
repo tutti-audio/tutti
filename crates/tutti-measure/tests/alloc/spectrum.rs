@@ -11,7 +11,7 @@ use tutti_measure::{
     Banding, BandsPerOctave, Framing, FrequencyBand, Measure, Meter, PeakDecay, Smoothing,
     SpectrumConfig, SpectrumTime,
 };
-use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Db, Hz, SampleRate, Samples, Seconds};
 
 /// Construction allocates (so the counter is live); then many frames across
 /// block sizes that split frames, a reset, and more frames allocate nothing,

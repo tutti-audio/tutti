@@ -5,12 +5,12 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Tick, Track};
+use tutti_midi_file::{Layout, LeadTrack, MidiFile, SmfDivision, Tick, Track};
 use tutti_session::{
     DetachedSession, MidiError, MidiLoad, MidiReport, Session, SessionEvent, WorkerError,
 };
-use tutti_types::SampleRate;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
+use tutti_units::SampleRate;
 
 fn session() -> DetachedSession {
     Session::builder()
@@ -28,9 +28,8 @@ fn write_file(dir: &Path, name: &str, key: u8) -> (std::path::PathBuf, MidiFile)
         U7::of(100),
     );
     let file = MidiFile::smf(
-        SmfFormat::SingleTrack,
         SmfDivision::per_quarter(480),
-        vec![track],
+        Layout::Format0(LeadTrack::new(track)),
     )
     .expect("builds");
     let path = dir.join(name);

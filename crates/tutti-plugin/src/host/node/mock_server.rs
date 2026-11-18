@@ -20,8 +20,8 @@ use tutti_plugin_types::{
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
-use tutti_types::ParamId;
-use tutti_types::{Beat, Bpm, SampleRate, Samples};
+use tutti_units::ParamId;
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 pub(super) const SR: SampleRate = SampleRate::SR_48K;
 /// The slab's chunk ceiling, and the block the graph is prepared for: the

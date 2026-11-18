@@ -20,7 +20,7 @@ use tutti_plugin_types::{
 };
 use tutti_rt::Publisher;
 use tutti_types::ChannelTopology;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 use tutti_vst3_ffi::{
     BusDirection, CreateError, EditorError, MediaType, Plugin, PluginNotification, RestartFlags,
 };

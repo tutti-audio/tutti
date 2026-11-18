@@ -17,10 +17,8 @@ use tutti_nodes::{
     ModDelayControls, ModDelayNode, PhaserControls, PhaserNode, Stages, Stagger, SvfFilterNode,
     SvfType, Sweep, SweepRange,
 };
-use tutti_types::{
-    BusTopology, ChannelLayout, Feedback, Hz, PhaseIncrement, Q, Resonance, SampleRate, Seconds,
-    UnitParam,
-};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{Feedback, Hz, PhaseIncrement, Q, Resonance, SampleRate, Seconds, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const LEN: usize = 2_048;

@@ -90,8 +90,9 @@ use tutti_midi_runtime::{
 };
 use tutti_tempo::TempoMap;
 use tutti_transport::{ProjectMeter, TransportSettings};
-use tutti_types::{At, Beat, Bpm, Frame, MeterMap, Seconds};
+use tutti_types::MeterMap;
 use tutti_ump::MidiGroup;
+use tutti_units::{At, Beat, Bpm, Frame, Seconds};
 
 use crate::MidiReport;
 
@@ -252,7 +253,7 @@ impl Follow {
     }
 
     /// The tap's rate, to compare with the graph's.
-    pub(crate) fn tap_rate(&self) -> tutti_types::SampleRate {
+    pub(crate) fn tap_rate(&self) -> tutti_units::SampleRate {
         self.tap.rate()
     }
 
@@ -411,7 +412,7 @@ pub(crate) const CLOCK_LEAD: Seconds = Seconds::new(4.0 * tutti_graph::DECLICK.g
 /// (tutti-engine, "A timed command ... is seen ahead"), so a command that far on
 /// is always seen with its whole fade ahead, and a poll that is late lands it at
 /// `next` plus the declick and not on `next`, where it would be late.
-pub(crate) fn placed_frame(at: Seconds, rate: tutti_types::SampleRate, next: Frame) -> Frame {
+pub(crate) fn placed_frame(at: Seconds, rate: tutti_units::SampleRate, next: Frame) -> Frame {
     Frame::nearest((at + CLOCK_LEAD).get() * rate.get())
         .max(next + tutti_graph::declick_frames(rate))
 }
@@ -420,9 +421,9 @@ pub(crate) fn placed_frame(at: Seconds, rate: tutti_types::SampleRate, next: Fra
 /// ahead of it is as a time and a beat.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Stand {
-    rate: tutti_types::SampleRate,
+    rate: tutti_units::SampleRate,
     frame: Frame,
-    span: tutti_types::Samples,
+    span: tutti_units::Samples,
     seconds: Seconds,
     playing: bool,
 }
@@ -579,7 +580,7 @@ impl ClockFollow {
     }
 
     /// The tap's rate, to compare with the graph's.
-    pub(crate) fn tap_rate(&self) -> tutti_types::SampleRate {
+    pub(crate) fn tap_rate(&self) -> tutti_units::SampleRate {
         self.tap.rate()
     }
 
@@ -663,7 +664,7 @@ impl MachineFollow {
     }
 
     /// The tap's rate, to compare with the graph's.
-    pub(crate) fn tap_rate(&self) -> tutti_types::SampleRate {
+    pub(crate) fn tap_rate(&self) -> tutti_units::SampleRate {
         self.tap.rate()
     }
 

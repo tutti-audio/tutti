@@ -10,7 +10,7 @@ use super::mcoded7::{self, Mcoded7Error};
 /// The zlib compression level of [`encode_body`]: 6, zlib's default.
 const ZLIB_LEVEL: u8 = 6;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The most bytes a decoded body may have: the caller's bound on what a peer
     /// can make it allocate, since a few bytes of zlib inflate to a great many.
     #[derive(Eq, Hash, PartialOrd, Ord)]

@@ -29,8 +29,8 @@ use tutti_midi_runtime::{
     MidiInputPorts,
 };
 use tutti_rt::{Counter, Gauge, LockExt};
-use tutti_types::{Resyncs, Seconds};
 use tutti_ump::StreamConfig;
+use tutti_units::{Resyncs, Seconds};
 
 use crate::job::Ticket;
 use crate::midi::{LossReaders, LossWriters, UmpOut, loss_cells};
@@ -1061,7 +1061,7 @@ impl Ports {
         &mut self,
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph,
-        rate: tutti_types::SampleRate,
+        rate: tutti_units::SampleRate,
         events: Vec<tutti_midi_device::DeviceEvent>,
         now: std::time::Instant,
         out: &mut Vec<SessionEvent>,
@@ -1180,7 +1180,7 @@ impl Ports {
         &mut self,
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph,
-        rate: tutti_types::SampleRate,
+        rate: tutti_units::SampleRate,
         arrived: &DeviceInfo,
         out: &mut Vec<SessionEvent>,
     ) -> Edits {

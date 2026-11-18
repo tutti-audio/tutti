@@ -11,7 +11,8 @@ use tutti_graph::ForkByClone;
 use tutti_graph::TapId;
 use tutti_nodes::testing::Const;
 use tutti_session::{NotReopened, OutPort, Reopened, Root, RootReader, Session, SessionEvent};
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 64;
 

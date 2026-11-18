@@ -59,7 +59,8 @@
 use std::sync::Arc;
 
 use tutti_buffers::{Float, Mono, MonoMut, Sample};
-use tutti_types::{Db, Hz, MaxBlock, SampleRate, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use crate::{FirDesign, FirError, FirResponse};
 
@@ -68,7 +69,7 @@ use crate::{FirDesign, FirError, FirResponse};
 /// and a few dB under what `f32` does, for about 70 taps in the first stage.
 const DEFAULT_ATTENUATION: Db = Db(100.0);
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The top of the band the oversampler keeps flat, as a fraction of the base rate's
     /// Nyquist frequency: above 0 and below 1.
     ///

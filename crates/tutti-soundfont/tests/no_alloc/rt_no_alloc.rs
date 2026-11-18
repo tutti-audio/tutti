@@ -31,13 +31,13 @@ use tutti_graph::Offset;
 use tutti_midi_protocol::widen_velocity;
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Polyphony, Settings, SoundFontUnit};
-use tutti_types::Samples;
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, Data128, Flex, Message, MidiChannel, MidiGroup, NoteNumber,
     NoteVelocity, PerNoteManagement, RegisteredPerNoteController, Stream, Sysex7Packet,
     SysexStatus, System, U7, U14, Ump, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
+use tutti_units::Samples;
 
 /// Load the committed test SoundFont, failing loudly if the checkout lacks it.
 fn load_test_soundfont() -> Arc<SoundFont> {

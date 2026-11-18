@@ -16,7 +16,7 @@ use tutti_measure::PitchHop;
 use tutti_measure::{
     DetectionFunction, OnsetConfig, StftRequest, YinConfig, detect_onsets, istft_transform, stft,
 };
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 const SR: SampleRate = SampleRate::SR_48K;
 

@@ -16,7 +16,7 @@
 //! memory for the same noise and lags a tempo ramp by it; the window lags a ramp
 //! by half of itself, two beats at most.
 
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 /// Ticks the fit looks back over: two quarter notes at 24 per quarter.
 pub(crate) const WINDOW: usize = 48;

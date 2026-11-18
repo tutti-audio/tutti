@@ -41,7 +41,8 @@ use tutti_session::{
     Range, Session, SessionEvent,
 };
 use tutti_session::{RecoveryFailure, ReloadCause};
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 512;
@@ -154,8 +155,8 @@ fn request_for(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
-            tutti_types::Seconds(0.0),
-            tutti_types::Seconds(seconds),
+            tutti_units::Seconds(0.0),
+            tutti_units::Seconds(seconds),
         ))
         .sample_rate(RATE)
         .clock(ExportClock::frozen())
@@ -428,11 +429,11 @@ fn export_leftovers_drop_on_the_main_thread() {
 // --- Recovery ---------------------------------------------------------------
 
 /// The reference plugin's applied `Gain` parameter.
-fn gain_param(_s: &Session, _node: NodeKey) -> tutti_types::ParamId {
-    tutti_types::ParamId::new(tutti_clap_test_plugin::params_state::GAIN_PARAM_ID)
+fn gain_param(_s: &Session, _node: NodeKey) -> tutti_units::ParamId {
+    tutti_units::ParamId::new(tutti_clap_test_plugin::params_state::GAIN_PARAM_ID)
 }
 
-fn param(s: &Session, node: NodeKey, id: tutti_types::ParamId) -> Option<f64> {
+fn param(s: &Session, node: NodeKey, id: tutti_units::ParamId) -> Option<f64> {
     s.plugin_view(node)
         .expect("hosted")
         .handle()

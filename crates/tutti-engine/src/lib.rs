@@ -34,7 +34,7 @@
 //! - **The device.** Opening a sound card's stream is `tutti-cpal`'s job; this
 //!   crate owns the block seam under it ([`StreamDriver`], [`OutputBlock`]), so a
 //!   driver of any other clock calls the same block.
-//! - **The value vocabulary.** The unit newtypes, the `Source`/`Sink` traits
+//! - **The value vocabulary.** The unit newtypes are `tutti-units`'; the `Source`/`Sink` traits
 //!   and the meter math are `tutti-types`'. Delay compensation (`latency_plan`,
 //!   `delays`) is `tutti-graph`'s pure pass, applied by the graph compiler.
 //! - **The worker pool and the pre-roll table.** `tutti-graph`'s.
@@ -52,7 +52,8 @@
 //! ```rust
 //! use tutti_types::MaxBlock;
 //! use tutti_graph::{OutPort, Source};
-//! use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples, Tail};
+//! use tutti_units::{Beat, Bpm, SampleRate, Samples, Tail};
+//! use tutti_types::ChannelLayout;
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::NodeKey;
 //! use tutti_engine::Engine;

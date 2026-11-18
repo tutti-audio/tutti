@@ -41,7 +41,8 @@ use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{MotionEvent, Transport};
-use tutti_types::{Beat, BeatDuration, Bpm, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const MAX_BLOCK: usize = 4_096;

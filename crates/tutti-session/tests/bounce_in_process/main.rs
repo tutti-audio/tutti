@@ -19,8 +19,9 @@ use tutti_session::{
 };
 use tutti_tempo::TempoMap;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::{Beat, Bpm, ChannelLayout, MaxBlock, SampleRate, Samples, Seconds};
+use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

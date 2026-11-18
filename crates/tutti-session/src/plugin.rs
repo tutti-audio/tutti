@@ -139,8 +139,8 @@ use tutti_plugin_types::{
     BridgeError, Normalized, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh,
     PluginTail,
 };
-use tutti_types::ParamId;
-use tutti_types::{SampleRate, Samples};
+use tutti_units::ParamId;
+use tutti_units::{SampleRate, Samples};
 
 mod entry;
 #[cfg(test)]
@@ -1213,7 +1213,7 @@ impl HostedPlugin {
 
     /// Parameter `id`'s value, as a modulation lane's knob starts at it:
     /// `None` while not read, `Some(None)` for one it does not list.
-    pub(crate) fn param_value(&self, id: tutti_types::ParamId) -> Option<Option<f32>> {
+    pub(crate) fn param_value(&self, id: tutti_units::ParamId) -> Option<Option<f32>> {
         self.mirror.get(id).map(|v| v.map(|v| v.get() as f32))
     }
 
@@ -2375,7 +2375,7 @@ mod tests {
     use crate::{RecoveryPolicy, Task};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tutti_plugin_types::{Normalized, ParameterInfo};
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     /// The controls of a plugin's node, counting nothing yet.
     fn node_controls() -> NodeControls {
@@ -2454,7 +2454,7 @@ mod tests {
         fn crash_cause(&self) -> Option<PluginFailure> {
             self.is_crashed().then_some(PluginFailure::StreamClosed)
         }
-        fn rate_refusal(&self) -> Option<(tutti_types::SampleRate, String)> {
+        fn rate_refusal(&self) -> Option<(tutti_units::SampleRate, String)> {
             None
         }
         fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
@@ -2764,7 +2764,7 @@ mod tests {
         for crossfade in [false, true] {
             let mut rig = rig(None);
             let replacement = tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(1.0));
-            let fade = tutti_types::Seconds(0.0);
+            let fade = tutti_units::Seconds(0.0);
             let law = tutti_graph::FadeLaw::EqualAmplitude;
             if crossfade {
                 assert!(matches!(

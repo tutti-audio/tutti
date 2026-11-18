@@ -16,7 +16,7 @@ use tutti_plugin_types::{
     ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
     TrackInfo, WindowHandle, Wraps, bypass_parameter,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use super::ClapLoaded;
 use super::controller::ClapController;

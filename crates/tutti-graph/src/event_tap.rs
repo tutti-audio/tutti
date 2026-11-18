@@ -46,8 +46,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use tutti_rt::{ControlDrop, Overflow, RingReader, RingWriter, ring};
-use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
+use tutti_units::{Frame, SampleRate};
 
 use crate::event::{EventKind, note_off_room};
 use crate::node::Env;

@@ -16,8 +16,8 @@ use tutti_graph::EventKind;
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::Samples;
 use tutti_ump::MidiChannel;
+use tutti_units::Samples;
 
 /// Frames from a note's onset to its first non-zero sample on the fixture's
 /// preset 0 at 48 kHz.

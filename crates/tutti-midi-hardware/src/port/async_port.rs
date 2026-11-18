@@ -27,8 +27,8 @@ use tutti_midi_runtime::{DeviceInput, InputId};
 use tutti_rt::{
     Counter, CounterWriter, Overflow, PushError, RingReader, RingWriter, counter, ring,
 };
-use tutti_types::Resyncs;
 use tutti_ump::{Message, Ump, Utility};
+use tutti_units::Resyncs;
 
 use crate::InputTiming;
 

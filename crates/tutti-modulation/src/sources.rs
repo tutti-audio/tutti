@@ -6,7 +6,7 @@
 //! (the audio or the MIDI that feeds their node) is the host's to wire, keyed
 //! by whatever the host keys its nodes by, so it is not here.
 
-use tutti_types::{BeatsPerCycle, Hz, PhaseIncrement, Seconds};
+use tutti_units::{BeatsPerCycle, Hz, PhaseIncrement, Seconds};
 
 use crate::{Adsr, Clock, LfoShape, Source, Waveform};
 

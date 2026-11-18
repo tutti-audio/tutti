@@ -136,7 +136,8 @@ mod measurer {
     use crate::control::{CancelToken, Progress};
     use crate::{Outcome, Rendered};
     use tutti_measure::{LoudnessConfig, measure_loudness};
-    use tutti_types::{Amplitude, Bed, ChannelTopology, Hz, Samples};
+    use tutti_types::{Bed, ChannelTopology};
+    use tutti_units::{Amplitude, Hz, Samples};
 
     const RATE: SampleRate = SampleRate::SR_48K;
 

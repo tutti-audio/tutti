@@ -7,7 +7,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{PlateBank, PlateControls, PlateGlides};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
-use tutti_types::{BusTopology, Depth, Hz, MaxBlock, Mix, SampleRate, Seconds, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -91,7 +92,7 @@ impl Default for PlateReverbConfig {
 /// # The controls
 ///
 /// The ports are the decay (an RT60 in seconds), the damping, the pre-delay, the input
-/// bandwidth (as [`UnitParam::Cutoff`](tutti_types::UnitParam::Cutoff)), the modulation
+/// bandwidth (as [`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff)), the modulation
 /// depth and the diffusion. Each lands whole on the 32-frame grid and glides in the bank.
 ///
 /// # The tail

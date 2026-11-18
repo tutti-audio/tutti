@@ -5,20 +5,20 @@
 //! tick grid and the SysEx event, M2-104 section 7.7 for SysEx7 packets), not
 //! read back from the code under test.
 
-use crate::common::{metrical, sequences};
+use crate::common::{self, metrical, sequences};
 use crate::support::{Division, RawEvent, build_smf};
 use std::sync::Arc;
 
 use tutti_midi_device::{ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
-    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, SmfFormat, TextKind,
-    Tick, TimelineDrop, Track, TrackPart, TracksError,
+    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, TextKind, Tick,
+    TimelineDrop, Track, TrackPart, TracksError,
 };
-use tutti_types::{Beat, Bpm};
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, SysexStatus,
     TicksPerQuarterNote, U7, Ump, Voice1, Voice2,
 };
+use tutti_units::{Beat, Bpm};
 
 const TPQ: u16 = 480;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
@@ -36,12 +36,10 @@ fn on(tick: u64, key: u8) -> (Tick, FileEvent) {
 }
 
 fn file(tracks: Vec<Track>) -> MidiFile {
-    let format = if tracks.len() == 1 {
-        SmfFormat::SingleTrack
-    } else {
-        SmfFormat::Parallel
+    let [track] = tracks.as_slice() else {
+        return crate::common::format1(SMF_DIVISION, tracks).unwrap();
     };
-    MidiFile::smf(format, SMF_DIVISION, tracks).unwrap()
+    crate::common::format0(SMF_DIVISION, track.clone()).unwrap()
 }
 
 // ---- Tick ------------------------------------------------------------------
@@ -130,7 +128,7 @@ fn notes_in_any_order_leave_the_events_in_tick_order() {
     assert_eq!(ticks, [0, 0, 480, 480, 960, 960]);
     assert_eq!(track.end(), Tick(960));
     // And a file takes it as it is.
-    MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track]).unwrap();
+    crate::common::format0(SMF_DIVISION, track).unwrap();
 }
 
 /// `meta(tick, Meta::tempo(bpm))` is the one way to place a Set Tempo, and
@@ -208,7 +206,7 @@ fn collecting_events_sorts_them_by_tick_keeping_ties_in_order() {
 fn the_timeline_is_the_messages_at_their_beats_and_not_the_meta_events() {
     let tempo_track = Track::new()
         .meta(Tick(0), Meta::tempo(Bpm::of(60.0)))
-        .meta(Tick(0), Meta::text(TextKind::TrackName, "tempo"));
+        .named("tempo");
     let notes = Track::new()
         .note(
             Tick(480),
@@ -242,12 +240,10 @@ fn the_timeline_is_the_messages_at_their_beats_and_not_the_meta_events() {
 
 /// A SysEx event goes out as its SysEx7 packets (M2-104 section 7.7) on
 /// the first Group, all at the event's beat: ten payload bytes are a Start of six
-/// and an End of four. A divided message that is not ended (`F0` with no
-/// closing `F7`) and one with a byte of 128 or more are listed as dropped.
+/// and an End of four. A message with a byte of 128 or more is listed as dropped.
 /// Spec: smf/track-chunks#19
 #[test]
 fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
-    // A reader keeps an unended `F0` and a writer would refuse it.
     let mut whole = vec![0xF0, 11];
     whole.extend(1..=10u8);
     whole.push(0xF7);
@@ -257,7 +253,6 @@ fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
         &[vec![
             RawEvent::tempo(0, 500_000),
             RawEvent::new(960, whole),
-            RawEvent::new(0, [0xF0, 3, 1, 2, 3]), // divided: no F7
             RawEvent::new(0, [0xF0, 2, 0x90, 0xF7]), // 8-bit data
         ]],
     ))
@@ -272,22 +267,15 @@ fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
             (Beat(2.0), SysexStatus::End, vec![7, 8, 9, 10]),
         ]
     );
-    // The unended `F0` is dropped when the next event ends it unfinished,
-    // and the 8-bit one is dropped with its bytes.
+    // An `F0` event with an 8-bit byte is read as the escape of the bytes it
+    // sends, which no SysEx7 packet holds.
     assert_eq!(
         timeline.dropped,
-        [
-            (
-                Beat(2.0),
-                FileEvent::SysEx(vec![1, 2, 3].into()),
-                TimelineDrop::Unfinished
-            ),
-            (
-                Beat(2.0),
-                FileEvent::SysEx(vec![0x90, 0xF7].into()),
-                TimelineDrop::NotSevenBit
-            ),
-        ]
+        [(
+            Beat(2.0),
+            FileEvent::Escape(vec![0xF0, 0x90, 0xF7].into()),
+            TimelineDrop::BareEscape
+        ),]
     );
 }
 
@@ -314,7 +302,10 @@ fn sysex7(packets: &[(Beat, Ump)]) -> Vec<(Beat, SysexStatus, Vec<u8>)> {
 #[test]
 fn a_divided_sysex_is_a_start_continues_and_an_end_each_at_its_events_beat() {
     let track = Track::new()
-        .push(Tick(0), FileEvent::SysEx(vec![0x43, 0x12, 0x00].into()))
+        .push(
+            Tick(0),
+            FileEvent::SysEx(common::start(&[0x43, 0x12, 0x00])),
+        )
         .unwrap()
         .push(
             Tick(200),
@@ -350,7 +341,7 @@ fn a_divided_sysex_is_a_start_continues_and_an_end_each_at_its_events_beat() {
 fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_intervene() {
     let part: Vec<u8> = (1..=8).collect();
     let track = Track::new()
-        .push(Tick(0), FileEvent::SysEx(part.clone().into()))
+        .push(Tick(0), FileEvent::SysEx(common::start(&part.clone())))
         .unwrap()
         .push(Tick(10), Meta::text(TextKind::Marker, "m"))
         .unwrap()
@@ -370,25 +361,25 @@ fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_i
 
 /// SMF 1.0 section 3.2: an `F7` event with no `F0` before it is an escape of
 /// arbitrary bytes, which no SysEx7 packet holds, and it is reported; a divided
-/// message with a transmittable event between its parts, or never ended, is
+/// message with a transmittable event of another track between its parts is
 /// reported whole and its parts send nothing.
 /// Spec: smf/track-chunks#20, smf/track-chunks#21
 #[test]
 fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
     let escape = FileEvent::Escape(vec![0xF3, 0x01].into());
-    let first = FileEvent::SysEx(vec![1, 2].into());
+    let first = FileEvent::SysEx(common::start(&[1, 2]));
     let second = FileEvent::Escape(vec![3, 0xF7].into());
-    // A reader keeps messages a writer would refuse.
     let f = MidiFile::from_bytes(&build_smf(
-        0,
+        1,
         Division::Metrical(TPQ),
-        &[vec![
-            RawEvent::new(0, [0xF7, 2, 0xF3, 0x01]),
-            RawEvent::new(10, [0xF0, 2, 1, 2]),
-            RawEvent::note_on(10, 0, 60, 100),
-            RawEvent::new(10, [0xF7, 2, 3, 0xF7]),
-            RawEvent::new(10, [0xF0, 2, 1, 2]),
-        ]],
+        &[
+            vec![
+                RawEvent::new(0, [0xF7, 2, 0xF3, 0x01]),
+                RawEvent::new(10, [0xF0, 2, 1, 2]),
+                RawEvent::new(20, [0xF7, 2, 3, 0xF7]),
+            ],
+            vec![RawEvent::note_on(15, 0, 60, 100)],
+        ],
     ))
     .unwrap();
     let timeline = metrical(&f).timeline();
@@ -399,9 +390,8 @@ fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
         timeline.dropped,
         [
             (beat(0.0), escape, TimelineDrop::BareEscape),
-            (beat(10.0), first.clone(), TimelineDrop::Unfinished),
+            (beat(10.0), first, TimelineDrop::Unfinished),
             (beat(30.0), second, TimelineDrop::BareEscape),
-            (beat(40.0), first, TimelineDrop::Unfinished),
         ]
     );
 }
@@ -417,7 +407,7 @@ fn a_format_2_file_has_no_metrical_view_but_each_track_has_a_timeline() {
         NoteNumber::of(60),
         U7::of(100),
     );
-    let f = MidiFile::smf(SmfFormat::Sequential, SMF_DIVISION, vec![a, Track::new()]).unwrap();
+    let f = crate::common::format2(SMF_DIVISION, vec![a, Track::new()]).unwrap();
     assert!(f.timebase().metrical().is_none());
     let beats: Vec<Beat> = f.tracks()[0]
         .timeline(sequences(&f).ticks_per_quarter())
@@ -433,8 +423,8 @@ fn a_format_2_file_has_no_metrical_view_but_each_track_has_a_timeline() {
 /// listed as `UnknownPacket`.
 #[test]
 fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
-    let part = FileEvent::SysEx(vec![1, 0x90].into());
-    let end = FileEvent::Escape(vec![2, 0xF7].into());
+    let part = FileEvent::SysEx(common::start(&[1]));
+    let end = FileEvent::Escape(vec![0x90, 0xF7].into());
     let track = Track::new()
         .push(Tick(0), part.clone())
         .unwrap()
@@ -519,16 +509,8 @@ fn the_tempo_map_is_one_shared_value() {
 fn a_refused_track_list_names_the_rule_and_where() {
     let config = |r: Result<MidiFile, TracksError>| r.expect_err("the list is refused");
     assert_eq!(
-        config(MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![])),
+        config(crate::common::format2(SMF_DIVISION, vec![])),
         TracksError::NoTracks
-    );
-    assert_eq!(
-        config(MidiFile::smf(
-            SmfFormat::SingleTrack,
-            SMF_DIVISION,
-            vec![Track::new(), Track::new()]
-        )),
-        TracksError::SingleTrack { tracks: 2 }
     );
     // An SMF holds the first Group only.
     let g2 = Message::midi1(
@@ -537,7 +519,7 @@ fn a_refused_track_list_names_the_rule_and_where() {
     );
     let t = Track::new().push(Tick(0), g2).unwrap();
     assert_eq!(
-        config(MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![t])),
+        config(crate::common::format0(SMF_DIVISION, t)),
         TracksError::Refused {
             track: 0,
             part: TrackPart::Events,
@@ -586,12 +568,7 @@ fn two_tempos_on_one_tick_are_kept_and_the_later_governs() {
             (Tick(0), FileEvent::Meta(Meta::tempo(Bpm::of(60.0)))),
         ]
     );
-    let file = MidiFile::smf(
-        SmfFormat::SingleTrack,
-        SmfDivision::per_quarter(480),
-        vec![track],
-    )
-    .unwrap();
+    let file = crate::common::format0(SmfDivision::per_quarter(480), track).unwrap();
     assert_eq!(
         metrical(&file).tempo_map().tempo_at(Beat(0.0)),
         Bpm::of(60.0)

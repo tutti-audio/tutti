@@ -22,7 +22,8 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, WorkerPool};
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, Wave};
-use tutti_types::{Beat, Bpm, FrameClock, LoopRange, SampleRate, Samples};
+use tutti_types::{FrameClock, LoopRange};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const MAX_BLOCK: usize = 64;

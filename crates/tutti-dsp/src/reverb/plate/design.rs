@@ -28,7 +28,7 @@
 //! late, and a T30 fit reads it 8 to 10% longer at the paper's diffusion.
 //!
 
-use tutti_types::{Amplitude, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds};
+use tutti_units::{Amplitude, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds};
 
 use crate::finite::finite_or;
 use crate::reverb::fdn::design::MAX_PRE_DELAY;

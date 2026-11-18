@@ -6,9 +6,9 @@ use std::num::NonZeroUsize;
 
 use crate::support::{note_on, step};
 use tutti_midi_protocol::{Addressee, GeneralMidi, Heard, Universal};
-use tutti_types::Semitones;
 use tutti_ump::{Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, Rpn, U7, U14, Voice2};
 use tutti_ump::{BendValue, ControlValue};
+use tutti_units::Semitones;
 use tutti_voicing::{Command, Rules, Voicing};
 
 fn say(core: &mut Voicing, to: Addressee, message: Universal) -> Vec<Command> {

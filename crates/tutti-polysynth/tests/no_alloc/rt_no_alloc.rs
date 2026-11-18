@@ -25,12 +25,12 @@ use tutti_fixtures::midi;
 use tutti_midi_protocol::widen_velocity;
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_types::MaxBlock;
-use tutti_types::{Hz, Q, SampleRate};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
     PerNoteManagement, RegisteredPerNoteController, Rpn, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
+use tutti_units::{Hz, Q, SampleRate};
 
 fn note_on(channel: u8, note: u8, vel: u8) -> Ump {
     midi::note_on(
@@ -455,7 +455,7 @@ fn a_clip_into_a_synth_is_allocation_free() {
     use tutti_graph::NodeKey;
     use tutti_graph::{Editor, EventEdge, EventIn, EventOut, Prepare, TransportPosition};
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
-    use tutti_types::{Beat, Bpm, Samples};
+    use tutti_units::{Beat, Bpm, Samples};
 
     const BLOCK: usize = 256;
     // A note on or off every 37 frames over the first 8 192.

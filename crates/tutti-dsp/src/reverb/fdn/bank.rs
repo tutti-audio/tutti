@@ -53,7 +53,8 @@
 //! **Format.** The state is `f32`; a view of another [`Float`] is converted at the edges.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{Hz, MAX_CHANNELS, SampleRate, Seconds, Tail};
+use tutti_types::MAX_CHANNELS;
+use tutti_units::{Hz, SampleRate, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
 use crate::delay::DelayRing;

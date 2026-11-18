@@ -153,7 +153,7 @@ pub const CI_SUB_ID_1: u8 = 0x0D;
 /// must invalidate its MUID and start a new Discovery Transaction.
 pub const CI_VERSION: CiVersion = CiVersion::of(0x02);
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The Message Format Version byte (M2-101 §5.2.1, §5.3, §5.4): `0x01` to
     /// `0x1F`.
     ///
@@ -231,7 +231,7 @@ impl From<CiDeviceId> for u8 {
     }
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A 28-bit **MIDI Unique Identifier** (M2-101 §3.3): the random address a CI
     /// device gives itself. Four 7-bit bytes, least significant first, on the wire.
     ///

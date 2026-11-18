@@ -2,7 +2,8 @@
 
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{TransientShaperConfig, TransientShaperNode};
-use tutti_types::{ChannelLayout, Db, SampleRate, UnitAddr, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, SampleRate, UnitAddr, UnitParam};
 
 fn feed(rig: &mut BlockRig) {
     for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {

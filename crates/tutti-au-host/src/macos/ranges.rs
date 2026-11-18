@@ -20,7 +20,7 @@ use crate::parameters;
 /// Declared plain-unit bounds for one AU parameter, as reported by
 /// `kAudioUnitProperty_ParameterInfo`.
 ///
-/// Raw `f32` Hz/dB/percent/seconds, not `tutti_types` unit newtypes: which
+/// Raw `f32` Hz/dB/percent/seconds, not `tutti_units` unit newtypes: which
 /// physical unit these bounds are in is per-parameter and only known at runtime
 /// from `AudioUnitParameterInfo::unit`, and the values cross the AudioToolbox C
 /// ABI verbatim.

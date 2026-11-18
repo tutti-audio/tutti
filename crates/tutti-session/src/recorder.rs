@@ -35,7 +35,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tutti_buffers::{FiniteSource, InterleavedMut, Pull, Sample, Sink, SinkFailed, Source};
 use tutti_rt::{FaultLatch, StopToken, ThreadHandle, spawn_named};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// How long a [`Recorder`] parks when a [`Starved`](Pull::Starved) source
 /// yields nothing, unless the caller names another
@@ -208,7 +209,8 @@ pub enum PumpPass {
 /// use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable};
 /// use tutti_session::{PumpLoop, PumpPass};
 /// use tutti_graph::{OutPort, Source};
-/// use tutti_types::{Beat, Bpm, ChannelLayout, MaxBlock, SampleRate, Samples};
+/// use tutti_units::{Beat, Bpm, SampleRate, Samples};
+/// use tutti_types::{ChannelLayout, MaxBlock};
 /// use tutti_buffers::Sink;
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{TapAlign, TapId};
@@ -439,7 +441,8 @@ where
 /// ```no_run
 /// use tutti_codec::{FileOut, Format, Pcm, Spec};
 /// use tutti_session::Recorder;
-/// use tutti_types::{ChannelLayout, SampleRate};
+/// use tutti_units::SampleRate;
+/// use tutti_types::ChannelLayout;
 ///
 /// # fn go(reader: tutti_graph::TapReader) -> Result<(), Box<dyn std::error::Error>> {
 /// // A stereo tap and a stereo sink pair: a tap is a `Source` as it is.

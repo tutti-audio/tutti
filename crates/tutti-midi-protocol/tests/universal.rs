@@ -5,12 +5,12 @@ use tutti_midi_protocol::{
     Addressed, Addressee, GeneralMidi, Heard, MtcFullMessage, MtcRate, MtcTimeCode,
     NotSysexDeviceId, Read, Recipient, SysexDeviceId, Universal, UniversalReader, read,
 };
-use tutti_types::Seconds;
 use tutti_ump::Voice1;
 use tutti_ump::{
     Address, DeviceIdentity, ManufacturerId, Message, MidiChannel, MidiGroup, NoteNumber,
     SoftwareRevision, Sysex7Packets, SysexMessage, U7, Ump,
 };
+use tutti_units::Seconds;
 
 fn parse(bytes: &[u8]) -> Read {
     read(SysexMessage::from_framed(bytes).expect("a framed message"))

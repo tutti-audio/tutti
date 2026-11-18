@@ -30,8 +30,9 @@ use tutti_graph::{
     Cx, EventKind, GraphBuilder, Io, Node, Prepare, Resolution, Shape, Status, Unforkable,
     contract_tests,
 };
-use tutti_types::{ChannelLayout, Frame, Latency, Samples, Tail, UnitParam};
+use tutti_types::ChannelLayout;
 use tutti_ump::{CCNumber, MidiChannel, Ump};
+use tutti_units::{Frame, Latency, Samples, Tail, UnitParam};
 
 /// A MIDI 2.0 volume controller (CC 7): the event every event row is excited
 /// by. It is not a held key, so a recompile that replaces the feeder closes
@@ -404,8 +405,8 @@ impl Node for BeatEcho {
 fn rolling_at_two() -> tutti_graph::TransportPosition {
     tutti_graph::TransportPosition::new(
         true,
-        tutti_types::Bpm::of(120.0),
-        tutti_types::Beat(2.0),
+        tutti_units::Bpm::of(120.0),
+        tutti_units::Beat(2.0),
         None,
     )
 }
@@ -417,7 +418,7 @@ fn rolling_at_two() -> tutti_graph::TransportPosition {
 fn the_transport_harnesses_hand_the_node_their_transport() {
     use tutti_graph::contract::{BlockRig, Direct, drive_input, prepared};
     use tutti_graph::{Env, Offset, TransportChanges};
-    use tutti_types::{Beat, Bpm, SampleRate};
+    use tutti_units::{Beat, Bpm, SampleRate};
     let rate = SampleRate::SR_48K;
     let per_frame = 1.0 / 24_000.0;
 

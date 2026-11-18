@@ -262,7 +262,7 @@ impl Session {
                 self.discard_staged();
                 self.drop_plugin(main);
                 self.rate_refused = None;
-                self.render.send(ToRender::DropSlab);
+                self.render.detach_slab();
                 Ok(Reaction::None)
             }
 
@@ -439,9 +439,9 @@ impl Session {
 
             M::SetupSharedMemory { shm_name, layout } => {
                 let slab = AudioSlab::open(shm_name, layout)?;
-                // The render thread sizes its scratch to the most a block may
-                // carry and refuses any block longer.
-                self.render.send(ToRender::Slab(slab));
+                // The scratch is sized here, to the most a block may carry; the
+                // render thread refuses any block longer.
+                self.render.attach_slab(slab);
                 Ok(BridgeMessage::SharedMemoryReady.into())
             }
             M::Shutdown => Ok(Reaction::Shutdown),
@@ -471,7 +471,7 @@ impl Session {
             )
         }) {
             let params = plugin.plugin().parameter_count(main);
-            self.render.send(ToRender::FitParams(params));
+            self.render.fit_params(params);
         }
         self.publish();
         events
@@ -517,6 +517,7 @@ impl Session {
     /// closed here. Allocates only to hold what it tells the host.
     pub(crate) fn tick(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage> {
         self.work.run(main);
+        self.render.report_losses();
         let mut told = self.drain_async_events(main);
         if self.editor_open
             && let Some(control) = self
@@ -533,6 +534,11 @@ impl Session {
             told.push(BridgeMessage::EditorClosed);
         }
         told
+    }
+
+    /// Reports what the render thread lost in the session, once it has stopped.
+    pub(crate) fn report_final_losses(&mut self) {
+        self.render.report_final_losses();
     }
 
     /// Opens the plugin's editor on the served instance itself: embedded in
@@ -689,14 +695,14 @@ impl Session {
         self.clock = Clock { format: negotiated };
         self.max_block = block_size;
         // The plugin's own parameter output is held in fixed storage
-        // reserved by the render thread before its first block: a queue per
+        // reserved here, before its first block: a queue per
         // parameter, each within a block's chunk room
         // (`ParameterChanges::reserved`).
-        self.render.send(ToRender::Format(negotiated));
-        self.render.send(ToRender::Params {
-            queues: plugin.plugin().parameter_count(main),
-            points: ParameterQueue::chunk_room(block_size),
-        });
+        self.render.set_format(negotiated);
+        self.render.reserve_params(
+            plugin.plugin().parameter_count(main),
+            ParameterQueue::chunk_room(block_size),
+        );
         self.plugin = Some(plugin);
         self.rate_refused = None;
         self.publish();
@@ -942,7 +948,7 @@ mod tests {
 
         /// Attaches the host's slab, as `SetupSharedMemory` does.
         fn attach(&mut self, slab: tutti_plugin_ipc::SlabWriter) {
-            self.session.render.send(ToRender::Slab(slab));
+            self.session.render.attach_slab(slab);
         }
 
         /// One message of either connection: a block or a reset is the render
@@ -992,7 +998,7 @@ mod tests {
     use tutti_plugin_types::Features;
     use tutti_plugin_types::LoadStage;
     use tutti_plugin_types::{MidiEventVec, Normalized, NoteExpressionChanges, ParameterChanges};
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     fn assert_none(r: Reaction) {
         assert!(matches!(r, Reaction::None), "got {r:?}");
@@ -1266,10 +1272,10 @@ mod tests {
         enum Expect {
             /// Nothing to say, and nothing waiting on it.
             Silent,
-            /// A refusal whose message carries this substring.
-            Refusal(&'static str),
             /// A reply frame whose payload must be absent or empty.
             EmptyPayload,
+            /// A block's reply that publishes nothing: the host reads silence.
+            RefusedBlock,
         }
         use Expect::*;
 
@@ -1305,7 +1311,7 @@ mod tests {
                         tutti_plugin_types::SampleRate::SR_48K,
                     )
                 }),
-                Refusal("No plugin loaded"),
+                RefusedBlock,
             ),
             (
                 "SetParameter",
@@ -1326,7 +1332,12 @@ mod tests {
 
             match expect {
                 Silent => assert!(matches!(r, Reaction::None), "{name}: got {r:?}"),
-                Refusal(needle) => assert_error_contains(r, needle),
+                RefusedBlock => match r.into_reply() {
+                    BridgeMessage::AudioProcessed { refused, .. } => {
+                        assert!(refused, "{name}: a block with no plugin publishes nothing")
+                    }
+                    other => panic!("{name}: expected a refused block, got {other:?}"),
+                },
                 EmptyPayload => match r.into_reply() {
                     BridgeMessage::ParameterValue { value } => {
                         assert!(value.is_none(), "{name}: got a value with no plugin")
@@ -1879,7 +1890,7 @@ mod tests {
         for (seq, frames) in [(1, 0), (2, 513), (3, 1 << 40)] {
             assert!(!block(&mut s, seq, frames), "{frames} frames published");
         }
-        assert_eq!(s.side().refused_blocks(), 3);
+        assert_eq!(s.render.losses().refused_blocks, 3);
         assert_eq!(
             visits(Site::Process),
             processes_at_load,
@@ -1888,7 +1899,7 @@ mod tests {
 
         assert!(block(&mut s, 4, 512), "a block within bounds renders");
         assert_eq!(visits(Site::Process), processes_at_load + 1);
-        assert_eq!(s.side().refused_blocks(), 3);
+        assert_eq!(s.render.losses().refused_blocks, 3);
     }
 
     /// **A block never renders into a slab laid out unlike the plugin's ports.**
@@ -1943,7 +1954,11 @@ mod tests {
             !block(&mut s, &mut host, 1, 2),
             "published into a mono slab"
         );
-        assert_eq!(s.side().refused_blocks(), 1, "the refusal is counted");
+        assert_eq!(
+            s.render.losses().refused_blocks,
+            1,
+            "the refusal is counted"
+        );
         assert_eq!(
             visits(Site::Process),
             processes_at_load,
@@ -1957,7 +1972,7 @@ mod tests {
             block(&mut s, &mut matching, 2, 2),
             "the matching slab renders"
         );
-        assert_eq!(s.side().refused_blocks(), 1);
+        assert_eq!(s.render.losses().refused_blocks, 1);
     }
 
     /// What [`clap_round_trip`] observed.
@@ -2722,15 +2737,15 @@ mod tests {
                     "a failed block publishes nothing, so the host reads silence"
                 );
             }
-            assert_eq!(s.side().pipeline().failed_blocks(), 3);
+            assert_eq!(s.render.losses().failed_blocks, 3);
             assert!(s.drain_async_events(main_thread()).is_empty());
-            s.side().pipeline().failed_blocks()
+            s.render.losses().failed_blocks
         };
         assert_eq!(failing, 3);
         // The same server code with a plugin that behaves renders and publishes.
         let (mut s, mut shm) = load_vst3_probe("renders_vst3");
         assert!(run_silent_block(&mut s, &mut shm, 1, 128));
-        assert_eq!(s.side().pipeline().failed_blocks(), 0);
+        assert_eq!(s.render.losses().failed_blocks, 0);
     }
 
     /// The same for CLAP: a block the plugin fails (`CLAP_PROCESS_ERROR`) is
@@ -2751,13 +2766,13 @@ mod tests {
                 tutti_clap_test_plugin::StatusMode::Error,
             );
             assert!(!run_silent_block(&mut s, &mut shm, 1, 64));
-            assert_eq!(s.side().pipeline().failed_blocks(), 1);
+            assert_eq!(s.render.losses().failed_blocks, 1);
         }
         assert!(
             run_silent_block(&mut s, &mut shm, 2, 64),
             "the next block renders"
         );
-        assert_eq!(s.side().pipeline().failed_blocks(), 1);
+        assert_eq!(s.render.losses().failed_blocks, 1);
     }
 
     /// **An idle dispatch allocates nothing**: the drain every message is
@@ -2841,9 +2856,7 @@ mod tests {
             "reserved at load"
         );
 
-        s.side()
-            .pipeline_mut()
-            .reserve_params(1, ParameterQueue::chunk_room(512));
+        s.render.reserve_params(1, ParameterQueue::chunk_room(512));
         assert!(
             s.drain_async_events(main_thread()).is_empty(),
             "nothing raised yet"

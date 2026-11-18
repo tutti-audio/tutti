@@ -7,7 +7,7 @@
 
 use crate::common::{Lcg, R, pt};
 use tutti_tempo::{TempoError, TempoMap, TempoPoint, Transition};
-use tutti_types::{Beat, Bpm, Frame, Seconds};
+use tutti_units::{Beat, Bpm, Frame, Seconds};
 
 /// 4 beats at 120 are 2.0 s, frame 96 000; a step reads back the tempo it was
 /// given, not `bpm / 60 * 60`.

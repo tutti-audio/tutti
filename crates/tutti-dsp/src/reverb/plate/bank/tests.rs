@@ -1,5 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
+use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
 use crate::reverb::network::Stage;

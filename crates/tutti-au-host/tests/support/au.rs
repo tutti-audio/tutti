@@ -26,7 +26,7 @@ use tutti_fixtures::main_thread;
 use tutti_plugin_types::{
     ChannelTable, Control, Loaded, MaxBlock, PluginError, Prepare, RenderMode, SampleRate,
 };
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 enum State {
     Loaded(AuLoaded),

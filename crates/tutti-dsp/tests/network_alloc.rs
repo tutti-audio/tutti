@@ -5,7 +5,7 @@
 //! so this binary counts allocations with its own global allocator, per thread.
 
 use tutti_fixtures::{ThreadCounting, allocations};
-use tutti_types::{Mix, SampleRate, Seconds};
+use tutti_units::{Mix, SampleRate, Seconds};
 
 #[global_allocator]
 static A: ThreadCounting = ThreadCounting;
@@ -52,7 +52,7 @@ fn freeverb_aims_and_renders_without_allocating() {
 fn the_fdn_aims_and_renders_without_allocating() {
     use tutti_buffers::{Planes, PlanesMut};
     use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay};
-    use tutti_types::{Db, Depth, Hz, StereoWidth};
+    use tutti_units::{Db, Depth, Hz, StereoWidth};
 
     let rate = SampleRate::SR_48K;
     let layout = FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap();

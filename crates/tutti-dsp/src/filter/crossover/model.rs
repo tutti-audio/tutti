@@ -8,7 +8,7 @@
 
 use core::f64::consts::PI;
 
-use tutti_types::{Db, Hz, SampleRate, Samples};
+use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use super::bands::{CrossoverError, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING, check_bands, validate};
 use super::coefficients::Tpt;

@@ -17,8 +17,8 @@ use support::rig::{Rig, timgm6mb};
 use tutti_fixtures::sf2::generator;
 use tutti_graph::Node;
 use tutti_soundfont::Settings;
-use tutti_types::Tail;
 use tutti_ump::CCNumber;
+use tutti_units::Tail;
 
 /// The level below which the render counts as silent: -80 dBFS.
 const THRESHOLD: f32 = 1e-4;

@@ -9,7 +9,8 @@
 //! set, and a diagonal one is the per-channel convolution.
 
 use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut, Sample};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 use super::Convolver;
 use crate::convert::convert_equal;

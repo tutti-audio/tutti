@@ -7,9 +7,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{FdnBank, FdnControls, FdnGlides, FdnLayout};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
-use tutti_types::{
-    BusTopology, Db, Depth, Hz, MaxBlock, Mix, SampleRate, Seconds, StereoWidth, Tail,
-};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 

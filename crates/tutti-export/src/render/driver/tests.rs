@@ -7,8 +7,8 @@ use tutti_graph::GraphBuilder;
 use tutti_tempo::TempoMap;
 use tutti_transport::{FrozenClock, OfflineTimeline, OfflineTimelineConfig};
 use tutti_types::ChannelLayout;
-use tutti_types::{Beat, Bpm, SampleRate};
 use tutti_ump::Ump;
+use tutti_units::{Beat, Bpm, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -219,7 +219,7 @@ fn the_clock_advances_exactly_once_per_frame_and_never_ahead() {
     impl tutti_graph::Node for BeatPorts {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(ChannelLayout::STEREO)
-                .with_tail(tutti_types::Tail::Unbounded)
+                .with_tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &tutti_graph::Prepare) {}
         fn process(

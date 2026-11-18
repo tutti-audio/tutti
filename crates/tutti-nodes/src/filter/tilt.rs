@@ -1,7 +1,8 @@
 //! [`TiltFilterNode`]: a first-order tilt equalizer, run as one state-variable section.
 
 use tutti_dsp::{Ring, Sos, SosError, Tilt};
-use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, Hz, SampleRate};
 
 use super::eq::sealed::Sealed;
 use super::eq::{EqControls, EqKernel};
@@ -128,8 +129,9 @@ mod tests {
     use tutti_graph::Cost;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::UnitParam;
-    use tutti_types::{MaxBlock, Samples, Tail};
+    use tutti_types::MaxBlock;
+    use tutti_units::UnitParam;
+    use tutti_units::{Samples, Tail};
 
     fn config(frequency: Hz, gain: Db) -> TiltFilterConfig {
         TiltFilterConfig::new(1u16, frequency, gain)

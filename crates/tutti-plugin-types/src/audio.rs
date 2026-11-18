@@ -1,7 +1,7 @@
 //! [`PluginAudio`]: one block's audio, in the width the plugin was activated at.
 
 use tutti_buffers::{BufferError, Float, InputOutput, Planes, PlanesMut};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// One block's input and output, in the sample width the plugin was activated
 /// at.

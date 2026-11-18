@@ -1,4 +1,5 @@
-use tutti_types::{BusTopology, ChannelIndex, Feedback, PhaseIncrement, Seconds};
+use tutti_types::{BusTopology, ChannelIndex};
+use tutti_units::{Feedback, PhaseIncrement, Seconds};
 
 use super::*;
 use crate::{MaxDelay, ModDelayLayout};

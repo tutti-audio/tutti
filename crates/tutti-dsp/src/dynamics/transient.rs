@@ -34,7 +34,7 @@
 //! times are the bank's build. The shaper has no latency and no tail: it only scales.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{Amplitude, Db, SampleRate, Seconds};
+use tutti_units::{Amplitude, Db, SampleRate, Seconds};
 
 use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use crate::finite::finite_or;

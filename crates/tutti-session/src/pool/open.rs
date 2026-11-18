@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use crate::{Clock, Session};
 

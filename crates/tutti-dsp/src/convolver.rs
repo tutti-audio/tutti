@@ -71,7 +71,7 @@ use std::sync::Arc;
 
 use rustfft::FftNum;
 use tutti_buffers::{Float, Mono, MonoMut, Sample};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::Complex;
 use crate::convert::convert_equal;

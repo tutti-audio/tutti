@@ -17,7 +17,8 @@ use tutti_plugin_types::MainThreadMarker;
 use vst3::Steinberg::Vst::{SpeakerArr, SpeakerArrangement};
 
 use tutti_plugin_types::{PointPool, RtMidiEvents};
-use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::SampleRate;
 
 use crate::error::{LoadStage, Result, Vst3Error};
 use crate::events::{OutputStream, Stager};

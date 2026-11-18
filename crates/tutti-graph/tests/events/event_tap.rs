@@ -29,8 +29,8 @@ use tutti_graph::{
     NodeKey, NodeParts, Offset, Op, OutPort, Prepare, Shape, Source, Status, TapAlign, TapEvent,
     TransportPosition, note_off_room,
 };
-use tutti_types::{Frame, Latency, Samples};
 use tutti_ump::{MidiChannel, U7, Ump};
+use tutti_units::{Frame, Latency, Samples};
 
 const MAX_BLOCK: usize = 512;
 

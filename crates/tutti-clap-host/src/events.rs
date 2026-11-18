@@ -37,7 +37,7 @@ use tutti_plugin_types::{
     per_note_tuning, plugin_note_id, push_sysex, sysex_assembler,
 };
 use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// The parameter edits the Controller can have queued to the Processor before
 /// the ring refuses one: one block holds as many, and the Processor reserves
@@ -2397,8 +2397,8 @@ mod tests {
 
     use tutti_graph::Offset;
     use tutti_plugin_types::{MIDI_STACK_CAPACITY, RT_MIDI_CAPACITY};
-    use tutti_types::Samples;
     use tutti_ump::{CCNumber, Sysex8StreamIds, System};
+    use tutti_units::Samples;
 
     /// The per-note bend range a plugin's emitted tuning is put at: the MPE
     /// default, ±48 semitones (RP-053).

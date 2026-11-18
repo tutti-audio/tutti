@@ -33,7 +33,7 @@
 //! ```rust,no_run
 //! use tutti_types::MaxBlock;
 //! use tutti_graph::{OutPort, Source};
-//! use tutti_types::{SampleRate, Samples};
+//! use tutti_units::{SampleRate, Samples};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{Editor, Prepare};
 //! use tutti_ump::{MidiChannel, U7};
@@ -208,8 +208,8 @@ use std::sync::Arc;
 use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::channel_voice;
 use tutti_sf2::{Preset, SoundFont};
-use tutti_types::{SampleRate, Seconds, Tail};
 use tutti_ump::{Attribute, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
+use tutti_units::{SampleRate, Seconds, Tail};
 
 use crate::player::{Heard, Plane, Planes, Player};
 use crate::render::Render;

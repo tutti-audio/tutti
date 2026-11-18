@@ -22,8 +22,8 @@ use tutti_plugin_types::{
     PluginError, PluginResult, PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport,
     Request, RescanScope, StateUse, WindowHandle, Wraps, taken,
 };
-use tutti_types::ParamId;
-use tutti_types::Samples;
+use tutti_units::ParamId;
+use tutti_units::Samples;
 
 use crate::bus::BusDirection;
 use crate::component::{AuType, component_info};

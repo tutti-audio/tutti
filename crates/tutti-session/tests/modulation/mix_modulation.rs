@@ -19,7 +19,8 @@ use tutti_session::{
     InPort, MixRef, ModRefusal, ModTarget, OutPort, ParamRef, PassError, Problem, Root, RouteSpec,
     Session, TargetName,
 };
-use tutti_types::{ChannelLayout, Depth, Mix, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Depth, Mix, UnitParam};
 
 const BLOCK: usize = 128;
 /// The constant source's level.

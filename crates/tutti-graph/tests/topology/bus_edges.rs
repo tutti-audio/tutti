@@ -22,9 +22,8 @@ use tutti_graph::{
     Lowering, NodeKey, Op, OutPort, Plan, Sink, Source, TransportPosition, Unforkable, ValidGraph,
     compile,
 };
-use tutti_types::{
-    Amplitude, BusTopology, ChannelLayout, ChannelTopology, SampleRate, Samples, Tail,
-};
+use tutti_types::{BusTopology, ChannelLayout, ChannelTopology};
+use tutti_units::{Amplitude, SampleRate, Samples, Tail};
 
 const BLOCK: usize = 64;
 

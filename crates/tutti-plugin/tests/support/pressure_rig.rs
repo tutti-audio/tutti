@@ -62,8 +62,8 @@ impl GraphUnit {
         g.pipe_input(key).pipe_output(key);
         let renderer = g
             .renderer(tutti_graph::Prepare::new(
-                tutti_types::SampleRate::of(SAMPLE_RATE),
-                tutti_types::MaxBlock::of(tutti_types::Samples(BLOCK)),
+                tutti_units::SampleRate::of(SAMPLE_RATE),
+                tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK)),
             ))
             .expect("a one-plugin graph compiles");
         Self {
@@ -161,7 +161,7 @@ fn load_units(
         let (ins, outs) = (probe.client.inputs(), probe.client.outputs());
         let mut unit = GraphUnit::new(
             probe.client.bind(
-                tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0))
+                tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0))
                     .expect("a tempo"),
             ),
             ins,

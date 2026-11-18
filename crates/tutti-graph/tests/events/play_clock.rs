@@ -21,7 +21,8 @@ use tutti_graph::{
     Prepare, Reference, Shape, Status, TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{Beat, Bpm, ChannelLayout, Frame, Latency, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, Bpm, Frame, Latency, Samples};
 
 const MAX: usize = 64;
 const LATENT: NodeKey = NodeKey(1);

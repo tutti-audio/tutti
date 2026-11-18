@@ -104,7 +104,7 @@
 //!     midi: &midi,
 //!     ..Default::default()
 //! };
-//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_types::Bpm::of(120.0)).with_playing(true);
+//! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_units::Bpm::of(120.0)).with_playing(true);
 //!
 //! let out = processor
 //!     .process(&mut buffer, &events, None, &transport)
@@ -126,7 +126,7 @@
 //! ```rust,no_run
 //! # use std::path::Path;
 //! # use tutti_plugin_types::{Control, Normalized, StateUse};
-//! # use tutti_types::ParamId;
+//! # use tutti_units::ParamId;
 //! # use tutti_vst3_host::{LoadOptions, Vst3Loaded};
 //! # fn ex() -> Result<(), Box<dyn std::error::Error>> {
 //! # let main = tutti_plugin_types::MainThreadMarker::new().expect("on the UI thread");

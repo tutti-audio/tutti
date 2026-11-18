@@ -29,9 +29,8 @@
 use tutti_graph::contract::Direct;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{CrossoverNode, LadderFilterNode, LadderType};
-use tutti_types::{
-    ChannelLayout, Hz, MaxBlock, Resonance, SampleRate, Samples, UnitAddr, UnitParam,
-};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{Hz, Resonance, SampleRate, Samples, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const FRAMES: usize = 64;

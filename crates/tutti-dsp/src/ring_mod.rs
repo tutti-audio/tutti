@@ -6,7 +6,7 @@
 //! `f1 + fc` and `f1 - fc` and nothing at `f1`. A dry/wet blend is the graph's, per node.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{Hz, SampleRate};
+use tutti_units::{Hz, SampleRate};
 
 use crate::{Oscillator, OscillatorWave};
 

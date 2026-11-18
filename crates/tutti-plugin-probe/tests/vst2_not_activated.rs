@@ -65,8 +65,8 @@ fn a_probe_does_not_activate() {
     reset(&path);
     let loaded = Vst2Loaded::load(main, &tutti_fixtures::detached_work(), &path).expect("loads");
     let prepare = tutti_plugin_types::Prepare::new(
-        tutti_types::SampleRate::SR_48K,
-        tutti_plugin_types::MaxBlock::new(tutti_types::Samples(64)).unwrap(),
+        tutti_units::SampleRate::SR_48K,
+        tutti_plugin_types::MaxBlock::new(tutti_units::Samples(64)).unwrap(),
     );
     let active = loaded.activate(main, prepare);
     assert!(active.is_ok(), "the control activation");

@@ -59,7 +59,8 @@ type Write<N> = Box<dyn Fn(&N)>;
 /// ```
 /// use tutti_graph::contract::IsolateRow;
 /// # use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-/// # use tutti_types::{Amplitude, ChannelLayout, Param, UnitParam};
+/// # use tutti_units::{Amplitude, UnitParam};
+/// # use tutti_types::{ChannelLayout, Param};
 /// # #[derive(Clone)]
 /// # struct Gain(Param<Amplitude>);
 /// # impl Node for Gain {
@@ -186,15 +187,15 @@ impl<N: ParamNode + Clone> IsolateRow<N> {
             // `drive_input`, not `drive`: the block's length is the `Env`'s, so
             // a generator with no inputs (an LFO) renders too.
             let env = crate::node::Env {
-                frame: tutti_types::Frame::new(done as u64),
+                frame: tutti_units::Frame::new(done as u64),
                 sample_rate: SAMPLE_RATE,
-                block_len: tutti_types::Samples(size),
+                block_len: tutti_units::Samples(size),
                 transport: crate::node::TransportPosition::default(),
                 changes: crate::node::TransportChanges::NONE,
                 play: crate::PlayClock {
                     start: crate::PlayReading {
                         epoch: 0,
-                        play: tutti_types::Frame::new(done as u64),
+                        play: tutti_units::Frame::new(done as u64),
                     },
                     next_epoch: 0,
                 },
@@ -243,7 +244,8 @@ fn first_difference(a: &[Vec<f32>], b: &[Vec<f32>]) -> Option<(usize, usize)> {
 mod tests {
     use super::*;
     use crate::{Cx, Io, Node, ParamSet, Prepare, Shape, Status};
-    use tutti_types::{Amplitude, ChannelLayout, Param, UnitParam};
+    use tutti_types::{ChannelLayout, Param};
+    use tutti_units::{Amplitude, UnitParam};
 
     /// A gain with two cells: `addressed` in its `ParamSet`, `trim` not.
     /// `detach_trim: false` is a `fork_fresh` that forgot the unaddressed

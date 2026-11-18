@@ -12,9 +12,8 @@ use tutti_types::ChannelLayout;
 
 use tutti_plugin::catalog::PluginRef;
 use tutti_session::Session;
-use tutti_types::{
-    Beat, BeatsPerBar, Bpm, MeterChange, MeterMap, NoteValue, SampleRate, TimeSignature,
-};
+use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
+use tutti_units::{Beat, Bpm, SampleRate};
 use tutti_vst2_test_plugin::ProcessCapture;
 
 const RATE: SampleRate = SampleRate::SR_48K;

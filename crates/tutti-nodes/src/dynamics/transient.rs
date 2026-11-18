@@ -3,7 +3,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, TransientBank, TransientControls};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, Db, MaxBlock, SampleRate, Seconds, Tail};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{Db, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -68,7 +69,7 @@ impl TransientShaperConfig {
 /// ([`TransientBank`] gives the closed form of a step). The gain is **linked**: one gain from
 /// the loudest channel, so the stereo image does not move.
 ///
-/// The two amounts are live [`Db`] cells, both [`UnitParam::GainDb`](tutti_types::UnitParam::GainDb): index 0 is the
+/// The two amounts are live [`Db`] cells, both [`UnitParam::GainDb`](tutti_units::UnitParam::GainDb): index 0 is the
 /// attack and index 1 the sustain, each read within [`TransientBank::MAX_AMOUNT`]. They are
 /// sampled on the stream grid (16 frames) and glide over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE).
 /// The two envelope times are the build's.

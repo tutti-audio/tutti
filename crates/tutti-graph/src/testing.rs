@@ -29,8 +29,9 @@ use crate::{
     Cx, Editor, Event, EventKind, Executor, Fade, Io, Node, Plan, Prepare, Reference, Shape,
     Shapes, Status, TransportChanges, TransportPosition, ValidGraph, compile,
 };
-use tutti_types::{ChannelLayout, Frame, Latency, SampleRate, Samples, Tail};
+use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
+use tutti_units::{Frame, Latency, SampleRate, Samples, Tail};
 
 pub const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -442,8 +443,8 @@ impl<F: Float> Node<F> for TestNode<F> {
                     let f = cx.env.frame_at(at).get();
                     if f.is_multiple_of(period) {
                         let ramp = crate::ParamRamp::new(
-                            tutti_types::ParamKey::<tutti_types::Amplitude>::VOLUME,
-                            tutti_types::Amplitude::new(driver_value(f, period)),
+                            tutti_units::ParamKey::<tutti_units::Amplitude>::VOLUME,
+                            tutti_units::Amplitude::new(driver_value(f, period)),
                             Samples(0),
                         );
                         let _ = io.event_out(0).push(Event::ramp(at, ramp));
@@ -456,8 +457,8 @@ impl<F: Float> Node<F> for TestNode<F> {
                     let f = cx.env.frame_at(at).get();
                     if f.is_multiple_of(period) {
                         let ramp = crate::ParamRamp::new(
-                            tutti_types::ParamKey::<tutti_types::Mix>::WET.at(u8::MAX),
-                            tutti_types::Mix::new(driver_value(f, period) * 2.0),
+                            tutti_units::ParamKey::<tutti_units::Mix>::WET.at(u8::MAX),
+                            tutti_units::Mix::new(driver_value(f, period) * 2.0),
                             Samples(0),
                         );
                         let _ = io.event_out(0).push(Event::ramp(at, ramp));
@@ -854,7 +855,7 @@ impl<F: Float> Pair<F> {
 
     /// Move edge `id`'s weight to `base` in both, as a host moving a fader:
     /// the editor's `set_edge_gain` (a store, no commit) and the reference's.
-    pub fn set_edge_gain(&mut self, id: crate::EdgeId, base: tutti_types::Amplitude) {
+    pub fn set_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Amplitude) {
         self.editor
             .set_edge_gain(id, base)
             .expect("the edge has a gain entry");
@@ -878,7 +879,7 @@ impl<F: Float> Pair<F> {
 
     /// Move `key`'s mix in both, as a host moving a send knob: the editor's
     /// `set_mix` (a store, no commit) and the reference's.
-    pub fn set_mix(&mut self, key: NodeKey, mix: tutti_types::Mix) {
+    pub fn set_mix(&mut self, key: NodeKey, mix: tutti_units::Mix) {
         if !self.editor.spec().topology.nodes.contains_key(&key) {
             let graph = self.graph.as_ref().expect("a graph was switched to");
             self.editor.spec_mut().topology = graph.topology().clone();
@@ -920,8 +921,8 @@ impl<F: Float> Pair<F> {
     pub fn block(&mut self, frames: usize, input: &[F]) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
         let transport = TransportPosition::new(
             true,
-            tutti_types::Bpm::of(120.0),
-            tutti_types::Beat(0.0),
+            tutti_units::Bpm::of(120.0),
+            tutti_units::Beat(0.0),
             None,
         );
         self.block_at(frames, input, &transport)

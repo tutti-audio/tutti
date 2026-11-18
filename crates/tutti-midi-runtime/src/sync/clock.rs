@@ -8,8 +8,8 @@
 //! demultiplexed the stream, call [`tick`](MidiClockDecoder::tick) /
 //! [`start_msg`](MidiClockDecoder::start_msg) etc. directly.
 
-use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{Message, System, U14, Ump};
+use tutti_units::{Beat, Bpm, Seconds};
 
 use super::period::PeriodFit;
 

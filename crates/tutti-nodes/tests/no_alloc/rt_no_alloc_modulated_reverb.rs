@@ -8,10 +8,11 @@ use tutti_nodes::{
     FreeverbControls, FreeverbNode, ModDelayControls, ModDelayNode, PlateReverbConfig,
     PlateReverbNode, Stagger, Sweep,
 };
-use tutti_types::UnitParam::{
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::PhaseIncrement;
+use tutti_units::UnitParam::{
     Cutoff, Damping, Decay, DelayTime, Depth, Diffusion, Feedback, Rate, RoomSize,
 };
-use tutti_types::{BusTopology, ChannelLayout, PhaseIncrement};
 
 use super::rt_no_alloc_dynamics::{Corners, addr, sweep};
 

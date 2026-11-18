@@ -25,11 +25,12 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
-use tutti_types::{
-    Amplitude, AtomicF32, Ballistics, Beat, Bpm, ChannelLayout, Depth, Frame, FrameClock, Hz,
-    ParamKey, SampleRate, Samples, Seconds, UnitParam,
-};
+use tutti_types::{AtomicF32, ChannelLayout, FrameClock};
 use tutti_ump::NoteVelocity;
+use tutti_units::{
+    Amplitude, Ballistics, Beat, Bpm, Depth, Frame, Hz, ParamKey, SampleRate, Samples, Seconds,
+    UnitParam,
+};
 
 const RATE: f64 = 48_000.0;
 const TEMPO: Bpm = Bpm::of(120.0);
@@ -223,7 +224,7 @@ impl Node for Tap {
             while let Some(&(_, s)) = events.get(k).filter(|e| e.0 == i) {
                 self.last = Some((s, base + i as u64));
                 let id = match s.addr() {
-                    tutti_types::ParamAddr::Id(id) => id,
+                    tutti_units::ParamAddr::Id(id) => id,
                     a => panic!("a source sends foreign segments, got {a:?}"),
                 };
                 out[1][i] = 1.0;

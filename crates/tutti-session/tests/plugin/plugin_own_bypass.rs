@@ -18,8 +18,9 @@ use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_plugin_types::Normalized;
 use tutti_session::{NodeMode, Session};
-use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Seconds};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::ParamId;
+use tutti_units::{SampleRate, Samples, Seconds};
 
 const BLOCK: usize = 512;
 

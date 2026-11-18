@@ -113,7 +113,7 @@ fn a_pair_past_the_outputs_is_refused() {
 /// and the handle says so.
 #[test]
 fn the_handle_counts_what_its_queue_dropped() {
-    use tutti_types::Frame;
+    use tutti_units::Frame;
     let mut session = crate::instrument_support::rig::offline_session();
     let AddedInstrument { handle, .. } = session
         .add_instrument(Dressed(ForkByClone(Five)))

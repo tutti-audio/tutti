@@ -6,7 +6,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{FreeverbBank, FreeverbControls, FreeverbGlides};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
-use tutti_types::{BusTopology, MaxBlock, Mix, SampleRate, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Mix, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 

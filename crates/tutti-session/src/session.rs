@@ -10,7 +10,8 @@ use tutti_graph::PrerollTable;
 use tutti_nodes::ClickSettings;
 use tutti_tempo::TempoMap;
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, TimedError, Transport};
-use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology, LoopRange};
+use tutti_units::{At, Beat, Bpm, SampleRate, Samples};
 
 use crate::RootDeclaration;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
@@ -289,9 +290,9 @@ pub enum SessionEvent {
     /// rate and is the host's to reopen.
     RateChanged {
         /// The rate the graph ran at.
-        from: tutti_types::SampleRate,
+        from: tutti_units::SampleRate,
         /// The rate it runs at now.
-        to: tutti_types::SampleRate,
+        to: tutti_units::SampleRate,
     },
     /// The stream of a real-time clock reported a fault: a device unplugged
     /// mid-session, a callback that panicked, a timer that fell behind. The
@@ -523,7 +524,8 @@ pub enum RootTopologyStatus {
 ///
 /// ```
 /// use tutti_types::MaxBlock;
-/// use tutti_types::{ChannelLayout, SampleRate, Samples};
+/// use tutti_units::{SampleRate, Samples};
+/// use tutti_types::ChannelLayout;
 /// use tutti_buffers::InterleavedMut;
 /// use tutti_graph::ForkByClone;
 /// use tutti_session::{OutPort, Root, Session};
@@ -720,7 +722,7 @@ impl Session<&'static str, Offline> {
     /// # Errors
     ///
     /// As [`SessionBuilder::build`](crate::SessionBuilder::build).
-    pub fn new(rate: tutti_types::SampleRate) -> crate::Result<Self> {
+    pub fn new(rate: tutti_units::SampleRate) -> crate::Result<Self> {
         Self::builder().sample_rate(rate).build()
     }
 }

@@ -58,8 +58,10 @@ use support::probe_au::{Misbehaviour, NOT_CALLED, last_host_pull};
 
 use tutti_au_host::{AuError, TransportInfo, TransportState};
 use tutti_plugin_types::LoopRegion;
-use tutti_types::{BarNumber, TimeSignature};
-use tutti_types::{Beat, Bpm, LoopRange, Samples, Seconds};
+use tutti_types::LoopRange;
+use tutti_types::TimeSignature;
+use tutti_units::BarNumber;
+use tutti_units::{Beat, Bpm, Samples, Seconds};
 
 /// Serializes component discovery / instantiate / dispose, exactly as
 /// `au_conformance.rs`'s lock of the same name does. AudioToolbox tolerates
@@ -74,7 +76,7 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
     AU_LOCK.lock_recover()
 }
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 
 /// A stopped transport at the tests' rate.
 fn transport() -> TransportInfo {

@@ -1,5 +1,5 @@
 use super::*;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 #[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
 use {
     crate::{FlacLevel, IntDepth},

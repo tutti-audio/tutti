@@ -1,7 +1,7 @@
 use crate::grid::{Cell, CellGrid};
 use crate::map::{Cursor, TempoMap};
 use crate::point::Transition;
-use tutti_types::{Beat, Bpm, Frame, SampleRate, Seconds};
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Seconds};
 
 /// A [`TempoMap`] read at one sample rate, with the lookup hint a reader that
 /// walks the map in order wants.

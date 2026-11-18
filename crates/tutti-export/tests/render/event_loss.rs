@@ -14,9 +14,10 @@ use tutti_export::{CancelToken, Control, Error, EventLossPolicy, Progress, Rende
 use tutti_graph::{Cx, Event, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
 use tutti_transport::FrozenClock;
-use tutti_types::Seconds;
-use tutti_types::{ChannelLayout, Hz, SampleRate};
+use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
+use tutti_units::Seconds;
+use tutti_units::{Hz, SampleRate};
 
 #[derive(Clone)]
 struct Burst;
@@ -144,7 +145,7 @@ fn a_render_that_lost_events_replaces_nothing() {
     assert_eq!(leftovers(), vec!["out.wav".to_string()], "no temporary");
 
     let normalize = tutti_export::Normalize::Peak {
-        target: tutti_types::Db(-1.0),
+        target: tutti_units::Db(-1.0),
     };
     let err = support::render_normalized_to_file(
         graph(),

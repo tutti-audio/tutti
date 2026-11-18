@@ -29,7 +29,8 @@ use tutti_sampler::{
     ByHand, Direction, DiskStreamer, DiskVoice, Loop, OpenError, PlaceError, Placement, Stream,
     StreamReader,
 };
-use tutti_types::{Beat, Bpm, ChannelLayout, ChannelTopology, SampleRate};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::{Beat, Bpm, SampleRate};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -252,7 +253,7 @@ fn a_stereo_file_is_unchanged() {
 #[test]
 fn a_fork_places_the_file_as_the_live_voice_does() {
     use tutti_graph::{ForkMode, IntoNode, Prepare};
-    use tutti_types::Samples;
+    use tutti_units::Samples;
     let (_dir, _streamer, reader) = stream(8, WAV_7_1);
     let voice = voice_of(reader);
     let forked = voice
@@ -472,7 +473,7 @@ fn fork(voice: &DiskVoice) -> Box<dyn tutti_graph::Node> {
     node.prepare(
         &tutti_graph::Prepare::new(
             SampleRate::of(SR),
-            tutti_types::MaxBlock::of(tutti_types::Samples(BLOCK)),
+            tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK)),
         )
         .with_render_mode(tutti_graph::RenderMode::Offline),
     );
@@ -545,7 +546,7 @@ fn a_fork_placed_read_is_allocation_free() {
                 &mut *direct.node,
                 &tutti_graph::Prepare::new(
                     SampleRate::of(SR),
-                    tutti_types::MaxBlock::of(tutti_types::Samples(BLOCK)),
+                    tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK)),
                 )
                 .with_render_mode(tutti_graph::RenderMode::Offline),
             );

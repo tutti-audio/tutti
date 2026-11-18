@@ -44,7 +44,8 @@ use std::time::Duration;
 
 use tutti_cpal::{DeviceId, DeviceSelector, SnapshotSource, TuttiDriver};
 use tutti_engine::{OutputSpec, Stopped, StreamDriver, StreamFaults, StreamLatency};
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples, Seconds};
+use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_units::{SampleRate, Samples, Seconds};
 
 use crate::{
     Clock, DeviceClock, DevicePolicy, DeviceWatch, Error, FollowEvent, RealTime, Result, Session,
@@ -1026,7 +1027,8 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use tutti_engine::{ManualStreamDriver, OutputSpec};
-    use tutti_types::{ChannelLayout, SampleRate};
+    use tutti_types::ChannelLayout;
+    use tutti_units::SampleRate;
 
     use crate::Session;
 

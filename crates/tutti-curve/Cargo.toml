@@ -18,7 +18,7 @@ workspace = true
 
 [dependencies]
 # `Beat`, the position of an automation point.
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
+tutti-units = { version = "0.0.1", path = "../tutti-units" }
 # `Law`'s `powf` and `expm1f` and the equal-power fade's `cosf` and `sinf` are
 # `libm`'s pure-Rust ones, so a value does not depend on the platform's C math
 # library.

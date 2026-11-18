@@ -21,7 +21,7 @@ pub use tutti_au_ffi::BusLayout as AuBusLayout;
 #[derive(Debug, Clone, Copy)]
 pub struct StreamConfig {
     /// Sample rate.
-    pub sample_rate: tutti_types::SampleRate,
+    pub sample_rate: tutti_units::SampleRate,
     /// Maximum frames the AU will be asked to render in a single `process()` call.
     pub block_size: u32,
     /// Channel layout (input + output buses).
@@ -31,7 +31,7 @@ pub struct StreamConfig {
 impl StreamConfig {
     /// Builds a config from explicit values.
     pub fn new(
-        sample_rate: tutti_types::SampleRate,
+        sample_rate: tutti_units::SampleRate,
         block_size: u32,
         channels: AuBusLayout,
     ) -> Self {
@@ -279,7 +279,7 @@ mod tests {
 
     fn config_at(sample_rate: f64) -> StreamConfig {
         StreamConfig::new(
-            tutti_types::SampleRate::of(sample_rate),
+            tutti_units::SampleRate::of(sample_rate),
             512,
             AuBusLayout {
                 inputs: ChannelLayout::STEREO,

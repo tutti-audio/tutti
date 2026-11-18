@@ -4,7 +4,8 @@
 use tutti_graph::NodeKey;
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_session::{ParamRef, RangeError, RouteError, RouteSpec, Session};
-use tutti_types::{Depth, Hz, MaxBlock, Mix, Q, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{Depth, Hz, Mix, Q, Samples};
 
 fn session() -> Session {
     Session::builder()
@@ -70,7 +71,7 @@ fn a_typed_range_declares_the_target_an_untyped_ref_names() {
     let mut m = s.mods_mut();
     m.range(lp.cutoff(), Hz(100.0)..Hz(4_000.0)).unwrap();
     let src = m.macro_(0.0);
-    let same = ParamRef::unit(lp.erase(), tutti_types::UnitParam::Cutoff);
+    let same = ParamRef::unit(lp.erase(), tutti_units::UnitParam::Cutoff);
     assert_eq!(ParamRef::from(lp.cutoff()), same);
     assert!(
         m.route(RouteSpec::new(src, same, Depth::of(0.5))).is_ok(),

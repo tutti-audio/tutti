@@ -96,8 +96,8 @@ use tutti_rt::{
     Counter, Overflow, PushError, RingReader, RingWriter, SeqReader, SeqWriter, Tally, TallyWriter,
     ring, tally,
 };
-use tutti_types::{At, Frame, Moment, SampleRate};
 use tutti_ump::Ump;
+use tutti_units::{At, Frame, Moment, SampleRate};
 
 use crate::cost::Cost;
 use crate::event::Event;

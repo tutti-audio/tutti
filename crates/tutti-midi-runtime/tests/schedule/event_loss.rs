@@ -16,8 +16,8 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
-use tutti_types::{Bpm, SampleRate, Samples};
 use tutti_ump::{MidiChannel, Ump};
+use tutti_units::{Bpm, SampleRate, Samples};
 
 /// `(note-ons, note-offs)` the sink received, and the keys it ends holding.
 #[derive(Default)]

@@ -18,7 +18,8 @@
 use tutti_graph::ParamSet;
 use tutti_nodes::{BusStripNode, FreeverbNode, ModDelayNode};
 use tutti_soundfont::SoundFontUnit;
-use tutti_types::{Amplitude, BusTopology, UnitParam};
+use tutti_types::BusTopology;
+use tutti_units::{Amplitude, UnitParam};
 
 use crate::instrument::AddedInstrument;
 use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session};

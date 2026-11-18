@@ -77,7 +77,8 @@ use decode::Seams;
 use handlers::Handles;
 use thread::Built;
 use tutti_rt::RingFloat;
-use tutti_types::{Mint, SampleRate};
+use tutti_types::Mint;
+use tutti_units::SampleRate;
 
 /// The disk-streaming engine: owns the streamer thread that reads files into
 /// per-stream rings for [`DiskVoice`](crate::DiskVoice)s to play.
@@ -103,11 +104,11 @@ use tutti_types::{Mint, SampleRate};
 /// Open a file and build the voice that plays it:
 ///
 /// ```no_run
-/// use tutti_types::Beat;
+/// use tutti_units::Beat;
 /// use tutti_sampler::{DiskStreamer, DiskVoice, Open, Placement, VoiceWindow};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let streamer = DiskStreamer::new(tutti_types::SampleRate::SR_48K, Default::default())?;
+/// let streamer = DiskStreamer::new(tutti_units::SampleRate::SR_48K, Default::default())?;
 ///
 /// // The streamer opens the file on its own thread; the reply is polled, and
 /// // a poll that is not ready hands the `Opening` back.
@@ -136,7 +137,7 @@ use tutti_types::{Mint, SampleRate};
 ///
 /// ```compile_fail
 /// # fn run() -> tutti_sampler::Result<()> {
-/// let mut streamer = tutti_sampler::DiskStreamer::new(tutti_types::SampleRate::SR_48K, Default::default())?;
+/// let mut streamer = tutti_sampler::DiskStreamer::new(tutti_units::SampleRate::SR_48K, Default::default())?;
 /// streamer.step_once(); // only a `DiskStreamer<ByHand>` steps
 /// # Ok(())
 /// # }
@@ -146,7 +147,7 @@ use tutti_types::{Mint, SampleRate};
 ///
 /// ```
 /// # fn run() -> tutti_sampler::Result<()> {
-/// let mut streamer = tutti_sampler::DiskStreamer::manual(tutti_types::SampleRate::SR_48K, Default::default())?;
+/// let mut streamer = tutti_sampler::DiskStreamer::manual(tutti_units::SampleRate::SR_48K, Default::default())?;
 /// let _ = streamer.step_once();
 /// # Ok(())
 /// # }
@@ -233,7 +234,7 @@ impl DiskStreamer<ByHand> {
     /// use tutti_sampler::{DiskStreamer, DiskStreamerConfig};
     ///
     /// # fn main() -> tutti_sampler::Result<()> {
-    /// let mut sampler = DiskStreamer::manual(tutti_types::SampleRate::SR_48K, DiskStreamerConfig::default())?;
+    /// let mut sampler = DiskStreamer::manual(tutti_units::SampleRate::SR_48K, DiskStreamerConfig::default())?;
     /// sampler.step_once();   // nothing queued: an idle cycle
     /// # Ok(())
     /// # }
@@ -500,7 +501,7 @@ mod tests {
     /// - a 44.1 kHz file streamed after it gets 44.1/48, not unity.
     #[test]
     fn a_rate_change_re_derives_every_streams_ratio() {
-        use tutti_types::{Beat, SrcRatio};
+        use tutti_units::{Beat, SrcRatio};
 
         let dir = tempfile::tempdir().unwrap();
         let (at_48, at_44) = (dir.path().join("48k.wav"), dir.path().join("44k.wav"));

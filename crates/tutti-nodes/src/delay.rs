@@ -12,7 +12,8 @@ use tutti_dsp::{
     InterpolationMode, MaxDelay,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, Feedback, MaxBlock, SampleRate, Seconds, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Feedback, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -50,7 +51,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///
 /// The ports are in this order: **time**, **feedback**, **cross-feedback**.
 ///
-/// - The **time** ([`DelayTime`](tutti_types::UnitParam::DelayTime), in seconds) is channel
+/// - The **time** ([`DelayTime`](tutti_units::UnitParam::DelayTime), in seconds) is channel
 ///   0's, and clamped into `0..=max_delay`. The other channels follow it, or hold a time of
 ///   their own that is a construction constant ([`ChannelTimes`](tutti_dsp::ChannelTimes)).
 ///   A time the graph feeds drives **every** channel through one shared value, per frame
@@ -256,7 +257,8 @@ mod tests {
     use tutti_dsp::{ChannelTimes, Routing};
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::{ChannelLayout, Gain, Latency, Samples, Tail, UnitParam};
+    use tutti_types::ChannelLayout;
+    use tutti_units::{Gain, Latency, Samples, Tail, UnitParam};
 
     /// A rate at which a time of `n / 1024` seconds is exactly `n` frames.
     const RATE: SampleRate = SampleRate::of(1_024.0);
@@ -587,7 +589,7 @@ mod tests {
     #[test]
     fn the_lane_constants_are_the_fast_rows_of_the_control_set() {
         use crate::{ControlRead, ControlSet};
-        use tutti_types::UnitAddr;
+        use tutti_units::UnitAddr;
         let set = DelaySet;
         let fast: Vec<UnitAddr> = (0..set.addrs().len())
             .filter(|&k| set.control(k).read == ControlRead::Fast)

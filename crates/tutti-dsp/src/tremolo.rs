@@ -14,7 +14,7 @@
 //! a negative depth sweeps the opposite way.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{Depth, Hz, Pan, SampleRate};
+use tutti_units::{Depth, Hz, Pan, SampleRate};
 
 use crate::{Oscillator, OscillatorWave, PanLaw, pan_gains};
 

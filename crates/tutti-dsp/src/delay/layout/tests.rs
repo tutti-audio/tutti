@@ -1,4 +1,5 @@
-use tutti_types::{Amplitude, BusTopology, Gain, SampleRate, Samples, Seconds};
+use tutti_types::BusTopology;
+use tutti_units::{Amplitude, Gain, SampleRate, Samples, Seconds};
 
 use super::*;
 use crate::MaxDelayError;

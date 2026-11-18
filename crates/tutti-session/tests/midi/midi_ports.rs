@@ -17,8 +17,8 @@ use tutti_session::{
     OutputOptions, Peer, PoolEvent, PoolState, PortCause, Presence, Resource, ResourceFact,
     Session, SessionEvent, midi_input, midi_output,
 };
-use tutti_types::{Beat, BeatDuration, SampleRate};
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, U7, Voice2};
+use tutti_units::{Beat, BeatDuration, SampleRate};
 
 const RATE: f64 = 48_000.0;
 

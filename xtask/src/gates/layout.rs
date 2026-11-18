@@ -29,7 +29,7 @@
 //! finds nothing, and with `encode-vorbis` it still does, so the check cannot pass
 //! by looking at nothing.
 //!
-//! A rule the layers already state is not stated twice: `tutti-types`,
+//! A rule the layers already state is not stated twice: `tutti-units`,
 //! `tutti-plugin-ipc-ffi` and every other layer-0 crate depend on no workspace
 //! crate because nothing sits below layer 0.
 
@@ -54,9 +54,10 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-coremidi-ffi",
         "tutti-winmm-ffi",
         "tutti-ump",
-        "tutti-types",
+        "tutti-units",
         "tutti-plugin-ipc-ffi",
     ],
+    &["tutti-types"],
     &[
         "tutti-midi-protocol",
         "tutti-midi-device",
@@ -108,39 +109,45 @@ pub(super) const LAYERS: &[&[&str]] = &[
 
 /// The crates whose normal and build dependencies on workspace crates are exactly these.
 const ONLY: &[(&str, &[&str])] = &[
-    ("tutti-midi-protocol", &["tutti-ump", "tutti-types"]),
-    ("tutti-midi-device", &["tutti-ump", "tutti-types"]),
-    // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`) and the
-    // `Sample` formats the audio-shaped structures are generic over.
-    ("tutti-rt", &["tutti-types", "tutti-buffers"]),
+    (
+        "tutti-midi-protocol",
+        &["tutti-ump", "tutti-types", "tutti-units"],
+    ),
+    ("tutti-midi-device", &["tutti-ump", "tutti-units"]),
+    // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`), the
+    // channel layout a position ring is written in and the `Sample` formats the
+    // audio-shaped structures are generic over.
+    ("tutti-rt", &["tutti-types", "tutti-units", "tutti-buffers"]),
     ("tutti-midi-network", &["tutti-ump", "tutti-midi-device"]),
-    ("tutti-metering", &["tutti-types"]),
+    ("tutti-metering", &["tutti-types", "tutti-units"]),
     // The encoders' worker threads (`spawn_named`), behind the `encode-flac` and
     // `encode-vorbis` features.
-    ("tutti-codec", &["tutti-types", "tutti-buffers", "tutti-rt"]),
-    ("tutti-tempo", &["tutti-types"]),
+    (
+        "tutti-codec",
+        &["tutti-types", "tutti-units", "tutti-buffers", "tutti-rt"],
+    ),
+    ("tutti-tempo", &["tutti-types", "tutti-units"]),
     (
         "tutti-voicing",
-        &["tutti-ump", "tutti-midi-protocol", "tutti-types"],
+        &["tutti-ump", "tutti-units", "tutti-midi-protocol"],
     ),
     (
         "tutti-transport",
         &[
             "tutti-types",
+            "tutti-units",
             "tutti-buffers",
             "tutti-rt",
             "tutti-graph",
             "tutti-tempo",
         ],
     ),
-    (
-        "tutti-plugin-db",
-        &["tutti-plugin-types", "tutti-types", "tutti-rt"],
-    ),
+    ("tutti-plugin-db", &["tutti-plugin-types", "tutti-rt"]),
     (
         "tutti-plugin-ipc",
         &[
             "tutti-types",
+            "tutti-units",
             "tutti-buffers",
             "tutti-rt",
             "tutti-ump",
@@ -156,6 +163,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-transport",
             "tutti-tempo",
             "tutti-types",
+            "tutti-units",
             "tutti-rt",
             "tutti-ump",
             "tutti-plugin-ipc-ffi",
@@ -172,6 +180,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-plugin-ipc-ffi",
             "tutti-plugin-types",
             "tutti-types",
+            "tutti-units",
             "tutti-rt",
             "tutti-ump",
             "tutti-graph",
@@ -187,30 +196,34 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-plugin-probe",
         &[
             "tutti-plugin-types",
-            "tutti-types",
             "tutti-graph",
             "tutti-ump",
+            "tutti-units",
             "tutti-clap-host",
             "tutti-vst3-host",
             "tutti-vst2-host",
             "tutti-au-host",
         ],
     ),
-    ("tutti-dsp", &["tutti-types", "tutti-buffers"]),
-    ("tutti-curve", &["tutti-types"]),
-    ("tutti-buffers", &["tutti-types"]),
+    (
+        "tutti-dsp",
+        &["tutti-types", "tutti-units", "tutti-buffers"],
+    ),
+    ("tutti-curve", &["tutti-units"]),
+    ("tutti-buffers", &["tutti-types", "tutti-units"]),
     (
         "tutti-modulation",
-        &["tutti-types", "tutti-curve", "tutti-ump"],
+        &["tutti-types", "tutti-units", "tutti-curve", "tutti-ump"],
     ),
     (
         "tutti-measure",
-        &["tutti-types", "tutti-buffers", "tutti-dsp"],
+        &["tutti-types", "tutti-units", "tutti-buffers", "tutti-dsp"],
     ),
     (
         "tutti-graph",
         &[
             "tutti-types",
+            "tutti-units",
             "tutti-buffers",
             "tutti-rt",
             "tutti-ump",
@@ -662,13 +675,13 @@ mod tests {
     fn base() -> Vec<(&'static str, &'static str, &'static str)> {
         vec![
             ("xtask", "xtask", "[dependencies]\n"),
-            ("crates/tutti-types", "tutti-types", ""),
+            ("crates/tutti-units", "tutti-units", ""),
             ("crates/tutti-ump", "tutti-ump", ""),
             ("crates/tutti-rt", "tutti-rt", ""),
             (
                 "crates/tutti-graph",
                 "tutti-graph",
-                "[dependencies]\ntutti-types.path = \"../tutti-types\"\n",
+                "[dependencies]\ntutti-units.path = \"../tutti-units\"\n",
             ),
             ("testing/tutti-fixtures", "tutti-fixtures", ""),
         ]
@@ -689,30 +702,30 @@ mod tests {
     fn a_layered_workspace_passes() {
         let r = run(&base());
         assert!(r.passed(), "{:?}", r.findings);
-        assert_eq!(r.out[0], "check-layout: ok (6 members, 49 ranked)");
+        assert_eq!(r.out[0], "check-layout: ok (6 members, 50 ranked)");
     }
 
     #[test]
     fn a_dependency_that_points_up_or_sideways_fails() {
         let r = with((
-            "crates/tutti-types",
-            "tutti-types",
+            "crates/tutti-units",
+            "tutti-units",
             "[dependencies]\ntutti-graph = { path = \"../tutti-graph\" }\n",
         ));
         assert!(r.findings.iter().any(|l| {
-            l.contains("tutti-types -> tutti-graph (normal) points up or sideways (layer 0 -> 3)")
+            l.contains("tutti-units -> tutti-graph (normal) points up or sideways (layer 0 -> 4)")
         }));
         // A dev-dependency may point anywhere, except where a crate is held to none.
         let r = with((
-            "crates/tutti-types",
-            "tutti-types",
+            "crates/tutti-units",
+            "tutti-units",
             "[dev-dependencies]\ntutti-graph = { path = \"../tutti-graph\" }\n",
         ));
         assert!(r.passed());
         let r = with((
             "crates/tutti-ump",
             "tutti-ump",
-            "[dev-dependencies]\ntutti-types = { path = \"../tutti-types\" }\n",
+            "[dev-dependencies]\ntutti-units = { path = \"../tutti-units\" }\n",
         ));
         assert!(r.findings[1].contains("tutti-ump may depend on no workspace crate"));
     }
@@ -773,19 +786,19 @@ mod tests {
             "[target.'cfg(unix)'.dependencies]\nbevy_ecs = \"0.19\"\n",
             "[dependencies.bevy_tasks]\nversion = \"0.19\"\n",
         ] {
-            let r = with(("crates/tutti-types", "tutti-types", body));
+            let r = with(("crates/tutti-units", "tutti-units", body));
             assert!(
                 r.findings
                     .iter()
-                    .any(|l| l.contains("tutti-types depends on bevy")
+                    .any(|l| l.contains("tutti-units depends on bevy")
                         && l.contains("no workspace crate depends on Bevy")),
                 "{body}: {:?}",
                 r.findings
             );
         }
         let r = with((
-            "crates/tutti-types",
-            "tutti-types",
+            "crates/tutti-units",
+            "tutti-units",
             "[dependencies]\nbevyish = \"1\"\nthiserror = \"2\"\n",
         ));
         assert!(r.passed(), "{:?}", r.findings);
@@ -833,7 +846,7 @@ mod tests {
         let r = with((
             "crates/tutti-graph",
             "tutti-graph",
-            "[dependencies]\ntutti-types.path = \"x\"\ntutti-rt = { path = \"x\" }\ntutti-curve = { path = \"x\" }\n",
+            "[dependencies]\ntutti-units.path = \"x\"\ntutti-rt = { path = \"x\" }\ntutti-curve = { path = \"x\" }\n",
         ));
         assert!(
             r.findings.iter().all(|l| !l.contains("may depend on")),
@@ -844,11 +857,11 @@ mod tests {
         v.push((
             "crates/tutti-metering",
             "tutti-metering",
-            "[dependencies]\ntutti-types = { path = \"x\" }\ntutti-ump = { path = \"x\" }\n",
+            "[dependencies]\ntutti-units = { path = \"x\" }\ntutti-ump = { path = \"x\" }\n",
         ));
         let r = run(&v);
         assert!(r.findings.iter().any(|l| l.contains(
-            "tutti-metering may depend on [\"tutti-types\"] only; it depends on {\"tutti-ump\"}"
+            "tutti-metering may depend on [\"tutti-types\", \"tutti-units\"] only; it depends on {\"tutti-ump\"}"
         )));
     }
 
@@ -857,16 +870,16 @@ mod tests {
         let r = with((
             "crates/tutti-rt",
             "tutti-rt",
-            "[dependencies]\ntutti-types = { path = \"x\" }\ntutti-buffers = { path = \"x\" }\n",
+            "[dependencies]\ntutti-units = { path = \"x\" }\ntutti-buffers = { path = \"x\" }\n",
         ));
         assert!(r.passed(), "{:?}", r.findings);
         let r = with((
             "crates/tutti-rt",
             "tutti-rt",
-            "[dependencies]\ntutti-types = { path = \"x\" }\ntutti-ump = { path = \"x\" }\n",
+            "[dependencies]\ntutti-units = { path = \"x\" }\ntutti-ump = { path = \"x\" }\n",
         ));
         assert!(r.findings.iter().any(|l| l.contains(
-            "tutti-rt may depend on [\"tutti-buffers\", \"tutti-types\"] only; it depends on {\"tutti-ump\"}"
+            "tutti-rt may depend on [\"tutti-buffers\", \"tutti-types\", \"tutti-units\"] only; it depends on {\"tutti-ump\"}"
         )));
     }
 

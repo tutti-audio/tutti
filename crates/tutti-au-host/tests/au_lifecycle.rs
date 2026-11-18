@@ -19,7 +19,7 @@ use tutti_au_host::component::{AuComponentRef, find_component};
 use tutti_au_host::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::{Load, MainWork, MaxBlock, Prepare, SampleRate};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 fn find_apple_delay() -> Option<AuComponentRef> {
     let desc = AudioComponentDescription {
@@ -35,14 +35,14 @@ fn find_apple_delay() -> Option<AuComponentRef> {
 #[test]
 fn test_new() {
     let comp = find_apple_delay().expect("AUDelay should be present");
-    let inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512);
+    let inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512);
     assert!(inst.is_ok());
 }
 
 #[test]
 fn test_initialize_uninitialize() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
 
     assert!(!inst.is_initialized());
     inst.initialize().unwrap();
@@ -54,14 +54,14 @@ fn test_initialize_uninitialize() {
 #[test]
 fn test_get_name() {
     let comp = find_apple_delay().unwrap();
-    let inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     assert!(!inst.get_name().unwrap().is_empty());
 }
 
 #[test]
 fn test_parameter_list() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
 
     let params = inst.get_parameter_list();
@@ -72,7 +72,7 @@ fn test_parameter_list() {
 #[test]
 fn test_get_set_parameter() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
 
     let params = inst.get_parameter_list();
@@ -86,7 +86,7 @@ fn test_get_set_parameter() {
 #[test]
 fn test_process_silence() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
 
     let input = vec![vec![0.0f32; 512]; 2];
@@ -110,7 +110,7 @@ fn test_process_silence() {
 #[test]
 fn test_process_audio() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
 
     let input: Vec<Vec<f32>> = (0..2)
@@ -146,7 +146,7 @@ fn test_process_audio() {
 #[test]
 fn test_latency() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
     let _ = inst.get_latency().unwrap();
 }
@@ -154,7 +154,7 @@ fn test_latency() {
 #[test]
 fn test_save_load_state() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
 
     let state = inst.get_state(main_thread()).unwrap();
@@ -170,7 +170,7 @@ fn test_save_load_state() {
 #[test]
 fn presets_and_bypass_work_before_initialize() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     assert!(!inst.is_initialized());
 
     // AUDelay ships no presets — the read fails and is absorbed. What is
@@ -196,7 +196,7 @@ fn presets_and_bypass_work_before_initialize() {
 #[test]
 fn a_preset_less_unit_reports_no_selection_rather_than_a_fabricated_preset() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
 
     assert!(inst.factory_presets().is_empty());
@@ -216,7 +216,7 @@ fn test_render_callback_installed_once() {
     // Per-instance counter — no process-global, so this is race-free under
     // cargo's parallel test runner.
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
 
     // Exactly one install after initialize — none per render block.
@@ -268,7 +268,7 @@ fn a_refused_initialize_leaves_the_instance_usable() {
         componentFlagsMask: 0,
     };
     let comp = find_component(&desc).expect("AUSoundIsolation ships with macOS");
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     let unit_before = inst.unit().clone();
 
     match inst.initialize() {
@@ -295,11 +295,11 @@ fn a_refused_initialize_leaves_the_instance_usable() {
 #[test]
 fn test_set_sample_rate() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
-    inst.set_sample_rate(tutti_types::SampleRate::SR_48K)
+    inst.set_sample_rate(tutti_units::SampleRate::SR_48K)
         .unwrap();
-    assert_eq!(inst.sample_rate(), tutti_types::SampleRate::SR_48K);
+    assert_eq!(inst.sample_rate(), tutti_units::SampleRate::SR_48K);
     assert!(inst.is_initialized());
 }
 
@@ -312,13 +312,13 @@ fn test_set_sample_rate() {
 #[test]
 fn set_sample_rate_ok_means_the_au_really_moved() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
 
     for rate in [
-        tutti_types::SampleRate::SR_48K,
-        tutti_types::SampleRate::SR_96K,
-        tutti_types::SampleRate::SR_44K1,
+        tutti_units::SampleRate::SR_48K,
+        tutti_units::SampleRate::SR_96K,
+        tutti_units::SampleRate::SR_44K1,
     ] {
         if inst.set_sample_rate(rate).is_err() {
             // A refusal is a legitimate outcome; what must never happen is
@@ -359,11 +359,11 @@ fn set_sample_rate_ok_means_the_au_really_moved() {
 #[test]
 fn an_unusual_rate_cannot_be_reported_as_accepted_unless_it_was() {
     let comp = find_apple_delay().unwrap();
-    let mut inst = Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).unwrap();
+    let mut inst = Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).unwrap();
     inst.initialize().unwrap();
 
     // A rate a stricter AU would refuse.
-    let absurd = tutti_types::SampleRate::of(1.0);
+    let absurd = tutti_units::SampleRate::of(1.0);
     match inst.set_sample_rate(absurd) {
         Err(_) => {
             // Rejected, as expected. The config must have been rolled back
@@ -396,14 +396,14 @@ mod halves {
         ParameterQueue, PluginAudio, PluginIo, ProcessContext, ProcessOutput, Processor, Request,
         taken,
     };
-    use tutti_types::ParamId;
-    use tutti_types::Samples;
+    use tutti_units::ParamId;
+    use tutti_units::Samples;
 
-    fn prepare(rate: tutti_types::SampleRate, block: usize) -> tutti_plugin_types::Prepare {
+    fn prepare(rate: tutti_units::SampleRate, block: usize) -> tutti_plugin_types::Prepare {
         tutti_plugin_types::Prepare::new(rate, MaxBlock::of(Samples(block)))
     }
 
-    fn active(rate: tutti_types::SampleRate, block: usize) -> (AuProcessor, AuController) {
+    fn active(rate: tutti_units::SampleRate, block: usize) -> (AuProcessor, AuController) {
         let comp = find_apple_delay().expect("AUDelay should be present");
         let loaded =
             AuLoaded::new(comp, rate, block as u32, &tutti_fixtures::detached_work()).unwrap();
@@ -417,7 +417,7 @@ mod halves {
     /// uninitialized (it can be activated again at another rate).
     #[test]
     fn a_deactivation_rejoins_the_instance_the_activation_split() {
-        let (processor, controller) = active(tutti_types::SampleRate::SR_44K1, 512);
+        let (processor, controller) = active(tutti_units::SampleRate::SR_44K1, 512);
         let unit = controller.unit().clone();
         let loaded = AuLoaded::deactivate(main_thread(), processor, controller)
             .unwrap_or_else(|s| panic!("AUDelay deactivates: {}", s.reason));
@@ -426,9 +426,9 @@ mod halves {
             "the rejoined unit is the one split"
         );
         let (p, c) = loaded
-            .activate(main_thread(), prepare(tutti_types::SampleRate::SR_48K, 256))
+            .activate(main_thread(), prepare(tutti_units::SampleRate::SR_48K, 256))
             .unwrap_or_else(|e| panic!("reactivates at another rate: {}", e.reason));
-        assert_eq!(c.sample_rate(), tutti_types::SampleRate::SR_48K);
+        assert_eq!(c.sample_rate(), tutti_units::SampleRate::SR_48K);
         assert_eq!(c.block_size(), 256);
         drop((p, c));
     }
@@ -437,8 +437,8 @@ mod halves {
     /// whole, both still initialized, and the reason says why.
     #[test]
     fn halves_of_two_activations_are_stuck_and_handed_back() {
-        let (p1, c1) = active(tutti_types::SampleRate::SR_44K1, 512);
-        let (p2, c2) = active(tutti_types::SampleRate::SR_44K1, 512);
+        let (p1, c1) = active(tutti_units::SampleRate::SR_44K1, 512);
+        let (p2, c2) = active(tutti_units::SampleRate::SR_44K1, 512);
         let stuck = match AuLoaded::deactivate(main_thread(), p1, c2) {
             Ok(_) => panic!("a pair from two activations was rejoined"),
             Err(stuck) => stuck,
@@ -459,7 +459,7 @@ mod halves {
     /// it back normalized.
     #[test]
     fn automation_through_plugin_io_is_denormalized_and_reads_back_normalized() {
-        let (mut processor, controller) = active(tutti_types::SampleRate::SR_44K1, 64);
+        let (mut processor, controller) = active(tutti_units::SampleRate::SR_44K1, 64);
         let main = main_thread();
         let target = Control::parameters(&controller, main)
             .into_iter()
@@ -513,7 +513,7 @@ mod halves {
     /// reads back as the same normalized value.
     #[test]
     fn a_controller_parameter_round_trips_normalized() {
-        let (_processor, mut controller) = active(tutti_types::SampleRate::SR_44K1, 512);
+        let (_processor, mut controller) = active(tutti_units::SampleRate::SR_44K1, 512);
         let main = main_thread();
         let id = Control::parameters(&controller, main)
             .into_iter()
@@ -531,7 +531,7 @@ mod halves {
     /// latency on request) comes out of `take_requests` once.
     #[test]
     fn a_raised_request_is_taken_once() {
-        let (_processor, mut controller) = active(tutti_types::SampleRate::SR_44K1, 512);
+        let (_processor, mut controller) = active(tutti_units::SampleRate::SR_44K1, 512);
         let main = main_thread();
         Request::LatencyChanged.raise(controller.requests());
         let mut out = Vec::new();
@@ -547,7 +547,7 @@ mod halves {
     /// wiring read at the same time.
     #[test]
     fn the_controller_latency_agrees_with_the_wiring() {
-        let (_processor, controller) = active(tutti_types::SampleRate::SR_44K1, 512);
+        let (_processor, controller) = active(tutti_units::SampleRate::SR_44K1, 512);
         let main = main_thread();
         assert_eq!(
             Controller::latency(&controller, main),
@@ -562,13 +562,13 @@ mod halves {
     /// Spec: au.prop.OfflineRender
     #[test]
     fn an_offline_activation_writes_the_render_mode_and_says_who_took_it() {
-        let offline = prepare(tutti_types::SampleRate::SR_44K1, 512)
+        let offline = prepare(tutti_units::SampleRate::SR_44K1, 512)
             .with_mode(tutti_plugin_types::RenderMode::Offline);
 
         let sampler = support::corpus::SAMPLER.require();
         let (p, c) = AuLoaded::new(
             sampler.component,
-            tutti_types::SampleRate::SR_44K1,
+            tutti_units::SampleRate::SR_44K1,
             512,
             &tutti_fixtures::detached_work(),
         )
@@ -585,7 +585,7 @@ mod halves {
         let comp = find_apple_delay().expect("AUDelay should be present");
         let (p, c) = AuLoaded::new(
             comp,
-            tutti_types::SampleRate::SR_44K1,
+            tutti_units::SampleRate::SR_44K1,
             512,
             &tutti_fixtures::detached_work(),
         )
@@ -606,7 +606,7 @@ mod tail {
     use super::*;
     use tutti_au_host::types::K_AUDIO_UNIT_TYPE_MUSIC_DEVICE;
     use tutti_plugin_types::{Control, PluginTail};
-    use tutti_types::Samples;
+    use tutti_units::Samples;
 
     fn wiring_tail(au: &Au) -> PluginTail {
         Control::wiring(&**au, main_thread()).tail
@@ -625,7 +625,7 @@ mod tail {
         // An effect answers the property, so it must not be `Unknown`.
         let comp = find_apple_delay().expect("AUDelay should exist");
         let mut inner =
-            Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).expect("Should create instance");
+            Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).expect("Should create instance");
         inner.initialize().expect("Should initialize");
         let tail = wiring_tail(&inner);
         assert_ne!(
@@ -645,7 +645,7 @@ mod tail {
         };
         let comp = find_component(&instrument).expect("DLSMusicDevice ships with macOS");
         let mut inner =
-            Au::new(comp, tutti_types::SampleRate::SR_44K1, 512).expect("Should create instance");
+            Au::new(comp, tutti_units::SampleRate::SR_44K1, 512).expect("Should create instance");
         inner.initialize().expect("Should initialize");
         inner
             .get_tail_time()
@@ -702,7 +702,7 @@ fn an_in_process_au_dropped_while_rendered_is_disposed_by_the_control_tick() {
         let input: Vec<&[f32]> = input.iter().map(|c| c.as_slice()).collect();
         let mut output = [&mut left[..], &mut right[..]];
         let mut block = tutti_buffers::InputOutput::new(
-            tutti_types::Samples(FRAMES),
+            tutti_units::Samples(FRAMES),
             tutti_buffers::Planes::new(&input).expect("equal planes"),
             tutti_buffers::PlanesMut::new(&mut output).expect("equal planes"),
         )

@@ -6,7 +6,7 @@ use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
 
 use super::*;
 use crate::ClockReading;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 const R48: SampleRate = SampleRate::SR_48K;
 

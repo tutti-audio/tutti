@@ -1187,7 +1187,7 @@ fn copy_origin(
 mod tests {
     use super::*;
     use crate::{DelaySpec, NodeKey, OutPort, Source};
-    use tutti_types::Samples;
+    use tutti_units::Samples;
 
     fn ring(channel: u16, from: Source, len: usize) -> DelaySpec {
         DelaySpec {

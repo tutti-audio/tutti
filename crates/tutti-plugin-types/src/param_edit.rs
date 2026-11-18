@@ -12,7 +12,7 @@
 //! change, or from the parameter, itself; nothing is made up here.
 
 use crate::Normalized;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// One parameter edit, in the order the plugin made it: the plugin takes hold
 /// of a parameter ([`Begin`](Self::Begin)), moves it

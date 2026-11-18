@@ -15,8 +15,8 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_midi_runtime::{SyncMessages, SyncOut, SyncOutControls};
-use tutti_types::{Beat, Bpm, SampleRate, Samples};
 use tutti_ump::{Message, MidiGroup, SysexStatus, System, U14, Ump};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 use tutti_fixtures::{EventRig, Seen, heard};
 

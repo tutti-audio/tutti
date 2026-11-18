@@ -27,8 +27,9 @@ use tutti_midi_runtime::{
     SendAt, TimedMidiEvent, compile_routes,
 };
 use tutti_tempo::TempoMap;
-use tutti_types::{Beat, BeatDuration, Frame, MeterMap, Mint, Samples};
+use tutti_types::{MeterMap, Mint};
 use tutti_ump::{MidiChannel, MidiGroup, Ump};
+use tutti_units::{Beat, BeatDuration, Frame, Samples};
 
 use crate::RouteDeclarer;
 use crate::graph::{Feeder, Graph};
@@ -72,7 +73,7 @@ pub(crate) const MIDI_INPUT_INLET_CAPACITY: tutti_graph::EventCapacity =
 /// not late. The spacing between events is kept; the
 /// whole is that much later than the OS delivered it.
 #[cfg(feature = "midi-hardware")]
-pub(crate) fn input_lead(block: Samples, rate: tutti_types::SampleRate) -> Duration {
+pub(crate) fn input_lead(block: Samples, rate: tutti_units::SampleRate) -> Duration {
     Duration::from_secs_f64(block.to_seconds(rate).get())
 }
 
@@ -91,7 +92,7 @@ pub(crate) fn arrival_clock(
         let reading = clock.read()?;
         Some((
             crate::os_clock::os_instant(reading.os_ns)?,
-            tutti_types::Moment::new(reading.frame, reading.rate),
+            tutti_units::Moment::new(reading.frame, reading.rate),
         ))
     })
 }
@@ -282,12 +283,12 @@ impl UmpOut {
     /// soon as possible", discarding the timing entirely.
     pub(crate) fn new(
         sink: Arc<dyn tutti_midi_runtime::MidiOut>,
-        sample_rate: tutti_types::SampleRate,
+        sample_rate: tutti_units::SampleRate,
     ) -> Self {
         Self::over(Sink::Host(sink), sample_rate)
     }
 
-    fn over(sink: Sink, sample_rate: tutti_types::SampleRate) -> Self {
+    fn over(sink: Sink, sample_rate: tutti_units::SampleRate) -> Self {
         let stream = tutti_midi_runtime::JrStream::new(sample_rate).with_clock(sample_rate);
         Self::with_stream(sink, stream)
     }
@@ -313,7 +314,7 @@ impl UmpOut {
 
     /// Moves the stamp stream to `rate`, the graph's after a re-prepare: JR
     /// time carries on from where it stood ([`JrStream::at_rate`](tutti_midi_runtime::JrStream::at_rate)).
-    pub(crate) fn set_rate(&mut self, rate: tutti_types::SampleRate) {
+    pub(crate) fn set_rate(&mut self, rate: tutti_units::SampleRate) {
         self.stream = self.stream.at_rate(rate);
     }
 
@@ -351,7 +352,7 @@ impl UmpOut {
     #[cfg(feature = "midi-hardware")]
     pub(crate) fn of_device(
         output: tutti_midi_hardware::OpenOutput,
-        sample_rate: tutti_types::SampleRate,
+        sample_rate: tutti_units::SampleRate,
     ) -> Self {
         Self::over(Sink::Device(Box::new(output)), sample_rate)
     }
@@ -2066,7 +2067,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tutti_fixtures::midi;
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     /// **A device's inlet holds at least a second of a saturated MIDI 1.0
     /// cable** (MIDI 1.0 Detailed Specification, Hardware: a byte every 320
@@ -2313,7 +2314,7 @@ mod tests {
             audio_output: Some(Duration::from_millis(30)),
             latency: OutputLatency::new(
                 Duration::from_millis(5),
-                tutti_midi_runtime::OutputOffset::new(tutti_types::Seconds(0.25)).unwrap(),
+                tutti_midi_runtime::OutputOffset::new(tutti_units::Seconds(0.25)).unwrap(),
             )
             .unwrap(),
         };

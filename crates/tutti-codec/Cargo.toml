@@ -45,6 +45,7 @@ thiserror = { workspace = true, features = ["std"] }
 # An unfinished file that cannot be removed is logged.
 tracing.workspace = true
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 # `spawn_named`: the encoders' worker threads, joined when the writer drops.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt", optional = true }

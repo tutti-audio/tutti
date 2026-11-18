@@ -27,7 +27,8 @@ use std::sync::Arc;
 use tutti_buffers::{Float, Fold, InterleavedMut, Planes, PlanesMut, Sample, interleave};
 use tutti_graph::{RtLogReaders, fold_to_width};
 use tutti_transport::RenderClock;
-use tutti_types::{ChannelLayout, ChannelTopology, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::Samples;
 
 /// What a target's channels are, for the fold from the graph's outputs or a
 /// tap's lanes: its width, and the speakers they feed when it states them.
@@ -142,7 +143,7 @@ impl<'a> GraphSource<'a> {
     pub(crate) fn new(
         editor: &'a mut tutti_graph::Editor,
         executor: &'a mut tutti_graph::Executor,
-        sample_rate: tutti_types::SampleRate,
+        sample_rate: tutti_units::SampleRate,
         clock: &'a dyn RenderClock,
         root: Option<ChannelTopology>,
         before: (u64, u64),
@@ -329,7 +330,7 @@ impl GraphSource<'_> {
 /// is made and checked identically.
 pub(crate) fn with_source<T>(
     graph: &mut RenderGraph,
-    sample_rate: tutti_types::SampleRate,
+    sample_rate: tutti_units::SampleRate,
     clock: &dyn RenderClock,
     f: impl FnOnce(&mut GraphSource<'_>) -> crate::Result<Outcome<T>>,
 ) -> crate::Result<(Outcome<T>, u64)> {

@@ -11,12 +11,12 @@ use tutti_curve::Law;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::{bend_to_signed_f32, velocity_to_unit_f32};
 use tutti_midi_protocol::{widen_bend, widen_value, widen_velocity};
-use tutti_types::{Amplitude, Hz, Resonance, Seconds, Spread};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
     PerNoteManagement, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
+use tutti_units::{Amplitude, Hz, Resonance, Seconds, Spread};
 
 /// A synth driven by hand the way a graph drives it
 /// (`tutti_graph::contract::drive_input`): what these tests queue with
@@ -80,18 +80,18 @@ impl Hand {
     /// through `Node::process`.
     fn drive(&mut self, frames: usize, mut queued: Vec<(usize, Ump)>) -> [Vec<f32>; 2] {
         queued.sort_by_key(|e| e.0);
-        let block = tutti_types::Samples(frames);
+        let block = tutti_units::Samples(frames);
         let (inside, past): (Vec<(usize, Ump)>, Vec<(usize, Ump)>) =
             queued.into_iter().partition(|e| e.0 < frames);
         let events: Vec<tutti_graph::Event> = inside
             .iter()
             .map(|&(index, ump)| {
-                let at = tutti_graph::Offset::of(tutti_types::Samples(index), block);
+                let at = tutti_graph::Offset::of(tutti_units::Samples(index), block);
                 tutti_graph::Event::midi(at, ump)
             })
             .collect();
         let env = tutti_graph::Env {
-            frame: tutti_types::Frame::new(0),
+            frame: tutti_units::Frame::new(0),
             sample_rate: self.synth.sample_rate,
             block_len: block,
             transport: tutti_graph::TransportPosition::default(),
@@ -286,7 +286,7 @@ fn test_unison_creates_subvoices() {
         oscillator: OscillatorType::Saw,
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
-            detune_cents: tutti_types::CentsSpan::of(15.0),
+            detune_cents: tutti_units::CentsSpan::of(15.0),
             stereo_spread: Spread(0.5),
             phase_randomize: false,
         }),
@@ -304,13 +304,13 @@ fn test_unison_creates_subvoices() {
 /// `synth`'s param `p` set through its `ParamSet`, as a host writes a
 /// knob (`AudioParam`, `write_param`) and as a control lane's knob is
 /// the same cell: `false` for a param the set lacks.
-fn set(synth: &PolySynth, p: tutti_types::UnitParam, value: f32) -> bool {
+fn set(synth: &PolySynth, p: tutti_units::UnitParam, value: f32) -> bool {
     tutti_graph::ParamNode::param_set(synth).set(p, value)
 }
 
 #[test]
 fn a_volume_write_moves_the_master_volume() {
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     let synth = synth(SynthConfig {
         polyphony: NonZeroUsize::new(2).unwrap(),
@@ -327,12 +327,12 @@ fn a_volume_write_moves_the_master_volume() {
 
 #[test]
 fn detune_is_addressable_with_unison_absent_without() {
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     let with_unison = synth(SynthConfig {
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
-            detune_cents: tutti_types::CentsSpan::of(10.0),
+            detune_cents: tutti_units::CentsSpan::of(10.0),
             stereo_spread: Spread(0.5),
             phase_randomize: false,
         }),
@@ -347,14 +347,14 @@ fn detune_is_addressable_with_unison_absent_without() {
 
 #[test]
 fn a_detune_write_recomputes_unison_on_process() {
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     let mut synth = synth(SynthConfig {
         polyphony: NonZeroUsize::new(2).unwrap(),
         oscillator: OscillatorType::Saw,
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
-            detune_cents: tutti_types::CentsSpan::of(0.0),
+            detune_cents: tutti_units::CentsSpan::of(0.0),
             stereo_spread: Spread(0.0),
             phase_randomize: false,
         }),
@@ -396,7 +396,7 @@ fn test_unison_stereo_output() {
         }, // Fast attack to get output quickly
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
-            detune_cents: tutti_types::CentsSpan::of(15.0),
+            detune_cents: tutti_units::CentsSpan::of(15.0),
             stereo_spread: Spread(1.0), // Full stereo spread
             phase_randomize: false,
         }),
@@ -461,13 +461,13 @@ fn test_no_unison_single_subvoice() {
 #[test]
 fn test_basic_dsp_chain() {
     use crate::bank::VoiceBank;
-    use tutti_types::Phase;
+    use tutti_units::Phase;
 
     let mut bank = VoiceBank::new(
         OscillatorType::Saw,
         &FilterType::None,
         &Adsr::new(Seconds(0.001), Seconds(0.1), Amplitude(0.8), Seconds(0.1)),
-        tutti_types::SampleRate::SR_44K1,
+        tutti_units::SampleRate::SR_44K1,
         1,
         crate::UnisonVoices::ONE,
     );
@@ -940,7 +940,7 @@ fn a_bend_lands_on_the_same_pitch_whether_the_note_was_already_sounding() {
     struck.tick(&[], &mut out);
     let struck_freq = struck.voices[0].sounding_freq();
 
-    let delta = tutti_types::Cents::from_pitch_ratio(held_freq.get() / struck_freq.get());
+    let delta = tutti_units::Cents::from_pitch_ratio(held_freq.get() / struck_freq.get());
     assert!(
         delta.get().abs() < 0.5,
         "same wheel position, two pitches: held {held_freq:?} vs struck {struck_freq:?} \
@@ -963,7 +963,7 @@ fn test_portamento_with_pitch_bend() {
         portamento: Some(PortamentoConfig {
             mode: PortamentoMode::Always,
             curve: Law::Linear,
-            time: crate::GlideTime::of(tutti_types::Seconds(0.05)), // 50ms glide
+            time: crate::GlideTime::of(tutti_units::Seconds(0.05)), // 50ms glide
             constant_time: true,
         }),
         ..Default::default()
@@ -1962,13 +1962,13 @@ fn a_long_block_renders_every_frame_like_short_blocks() {
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
             cutoff: Hz(3_000.0),
-            q: tutti_types::Q(1.0),
+            q: tutti_units::Q(1.0),
             mode: crate::SvfMode::Lowpass,
         },
         portamento: Some(PortamentoConfig {
             mode: PortamentoMode::Always,
             curve: Law::Linear,
-            time: crate::GlideTime::of(tutti_types::Seconds(0.004)),
+            time: crate::GlideTime::of(tutti_units::Seconds(0.004)),
             constant_time: true,
         }),
         ..Default::default()
@@ -2042,7 +2042,7 @@ fn process_and_tick_agree_through_a_glide() {
         portamento: Some(PortamentoConfig {
             mode: PortamentoMode::Always,
             curve: Law::Linear,
-            time: crate::GlideTime::of(tutti_types::Seconds(0.05)),
+            time: crate::GlideTime::of(tutti_units::Seconds(0.05)),
             constant_time: true,
         }),
         ..Default::default()
@@ -2104,7 +2104,7 @@ fn a_chord_gets_a_distinct_phase_stack_per_voice() {
         oscillator: OscillatorType::Saw,
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
-            detune_cents: tutti_types::CentsSpan::of(0.0),
+            detune_cents: tutti_units::CentsSpan::of(0.0),
             stereo_spread: Spread(0.0),
             phase_randomize: true,
         }),
@@ -2200,7 +2200,7 @@ fn reset_all_controllers_leaves_the_cutoff_alone() {
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
             cutoff: Hz(600.0),
-            q: tutti_types::Q(0.707),
+            q: tutti_units::Q(0.707),
             mode: crate::SvfMode::Lowpass,
         },
         ..Default::default()
@@ -2265,13 +2265,13 @@ fn a_fork_renders_the_volume_and_unison_it_was_taken_with() {
             oscillator: OscillatorType::Saw,
             unison: Some(UnisonConfig {
                 voice_count: UnisonVoices::of(3),
-                detune_cents: tutti_types::CentsSpan::of(15.0),
+                detune_cents: tutti_units::CentsSpan::of(15.0),
                 stereo_spread: Spread(0.5),
                 phase_randomize: false,
             }),
             ..Default::default()
         });
-        synth.set_volume(tutti_types::Amplitude(0.5));
+        synth.set_volume(tutti_units::Amplitude(0.5));
         synth.synth
     };
     let render = |fork: PolySynth| {
@@ -2282,9 +2282,9 @@ fn a_fork_renders_the_volume_and_unison_it_was_taken_with() {
         (l, r)
     };
     for (param, value) in [
-        (tutti_types::UnitParam::Volume, 0.9),
-        (tutti_types::UnitParam::Detune, 40.0),
-        (tutti_types::UnitParam::StereoSpread, 1.0),
+        (tutti_units::UnitParam::Volume, 0.9),
+        (tutti_units::UnitParam::Detune, 40.0),
+        (tutti_units::UnitParam::StereoSpread, 1.0),
     ] {
         let synth = live();
         let source = ParamFork::new(&synth);
@@ -2519,13 +2519,13 @@ fn mpe_synth() -> PolySynth {
 /// (A4 = 440 Hz) in semitones: the analytic figure of the per-note pitch
 /// (channel bend not removed: these tests leave the channel's wheel centred).
 trait SoundsAt {
-    fn per_note_bend(&self) -> tutti_types::Semitones;
+    fn per_note_bend(&self) -> tutti_units::Semitones;
 }
 
 impl SoundsAt for SynthVoice {
-    fn per_note_bend(&self) -> tutti_types::Semitones {
+    fn per_note_bend(&self) -> tutti_units::Semitones {
         let key = 440.0_f32 * 2.0_f32.powf((f32::from(self.note().get()) - 69.0) / 12.0);
-        tutti_types::Semitones(12.0 * (self.sounding_freq().get() / key).log2())
+        tutti_units::Semitones(12.0 * (self.sounding_freq().get() / key).log2())
     }
 }
 
@@ -3114,7 +3114,7 @@ fn a_per_note_pitch_survives_a_glide() {
         c.portamento = Some(PortamentoConfig {
             mode: PortamentoMode::Always,
             curve: Law::Linear,
-            time: crate::GlideTime::of(tutti_types::Seconds(0.05)),
+            time: crate::GlideTime::of(tutti_units::Seconds(0.05)),
             constant_time: true,
         });
     });
@@ -3329,7 +3329,7 @@ fn master_fine_tuning_is_a_hundred_over_8192_cents_a_step() {
             .collect::<Vec<_>>(),
     );
     s.tick(&[], &mut out);
-    let cents = tutti_types::Cents::from_pitch_ratio(s.voices[0].sounding_freq().get() / 440.0);
+    let cents = tutti_units::Cents::from_pitch_ratio(s.voices[0].sounding_freq().get() / 440.0);
     assert!((cents.get() + 100.0).abs() < 0.5, "{cents:?}");
 }
 
@@ -3397,7 +3397,7 @@ fn ev_tuning_program(channel: u8, program: u8) -> Ump {
 }
 
 fn cents_above(freq: Hz, reference: f32) -> f32 {
-    tutti_types::Cents::from_pitch_ratio(freq.get() / reference).get()
+    tutti_units::Cents::from_pitch_ratio(freq.get() / reference).get()
 }
 
 /// The synth's construction-time scale is its tuning program 0 of bank 0: with

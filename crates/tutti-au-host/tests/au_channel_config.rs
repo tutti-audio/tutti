@@ -59,7 +59,7 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
     AU_LOCK.lock_recover()
 }
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
 /// Build a config requesting `layout` on both sides.
@@ -503,19 +503,19 @@ fn block_size_and_sample_rate_do_not_clobber_each_other() {
     let mut au = DELAY.open(RATE, BLOCK);
 
     au.set_block_size(1024).expect("set block size");
-    au.set_sample_rate(tutti_types::SampleRate::SR_44K1)
+    au.set_sample_rate(tutti_units::SampleRate::SR_44K1)
         .expect("set sample rate");
     assert_eq!(
         au.block_size(),
         1024,
         "a sample-rate change must not reset the block size"
     );
-    assert_eq!(au.sample_rate(), tutti_types::SampleRate::SR_44K1);
+    assert_eq!(au.sample_rate(), tutti_units::SampleRate::SR_44K1);
 
     au.set_block_size(512).expect("set block size again");
     assert_eq!(
         au.sample_rate(),
-        tutti_types::SampleRate::SR_44K1,
+        tutti_units::SampleRate::SR_44K1,
         "a block-size change must not reset the sample rate"
     );
     assert_eq!(au.block_size(), 512);

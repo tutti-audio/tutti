@@ -12,8 +12,8 @@ use tutti_graph::{
     RtTarget, RtValue, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::SampleRate;
-use tutti_types::{ChannelLayout, Frame, Tail};
+use tutti_types::ChannelLayout;
+use tutti_units::{Frame, SampleRate, Tail};
 
 /// Sites are statics: coalescing compares the literal's address, which the
 /// compiler need not give two equal literals alike.

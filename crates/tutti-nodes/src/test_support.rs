@@ -3,7 +3,7 @@
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_graph::Node;
 use tutti_graph::contract::drive;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 pub(crate) use tutti_fixtures::noise;
 

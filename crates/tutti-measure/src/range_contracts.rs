@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use tutti_fixtures::{RangeContract, check_range_contract};
-use tutti_types::{Amplitude, Cents, Confidence, Db, Samples, Seconds};
+use tutti_units::{Amplitude, Cents, Confidence, Db, Samples, Seconds};
 
 use crate::{
     Alternatives, BandCount, BandsPerOctave, FiniteLevel, HarmonicDecay, Harmonics, NoteSpan,

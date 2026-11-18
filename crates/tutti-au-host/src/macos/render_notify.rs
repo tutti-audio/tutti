@@ -59,7 +59,7 @@ mod tests {
             &tutti_fixtures::detached_work(),
         )
         .unwrap();
-        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(tutti_types::Samples(512)));
+        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(512)));
         au.activate(tutti_fixtures::main_thread(), prepare)
             .unwrap_or_else(|e| panic!("AUDelay activates: {}", e.reason))
     }
@@ -70,7 +70,7 @@ mod tests {
         let ins: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
         let mut outs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut block = InputOutput::new(
-            tutti_types::Samples(512),
+            tutti_units::Samples(512),
             Planes::new(&ins).unwrap(),
             PlanesMut::new(&mut outs).unwrap(),
         )

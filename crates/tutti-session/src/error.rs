@@ -93,9 +93,9 @@ pub enum InletError {
     )]
     RateMismatch {
         /// The rate the producer fills the ring at.
-        producer: tutti_types::SampleRate,
+        producer: tutti_units::SampleRate,
         /// The graph's rate when the inlet was opened.
-        graph: tutti_types::SampleRate,
+        graph: tutti_units::SampleRate,
     },
 }
 
@@ -238,7 +238,7 @@ pub enum MidiError {
     /// A beat that is not finite (NaN or infinite) names no frame: a clip's
     /// start, or an event moved by it.
     #[error("a clip beat must be finite, not {0}")]
-    BeatNotFinite(tutti_types::Beat),
+    BeatNotFinite(tutti_units::Beat),
 
     /// `Midi::retarget_input` named a target with no live input.
     #[error("{0:?} has no live input")]

@@ -37,7 +37,7 @@
 use crate::types::TransportInfo;
 // Shared with the VST3 path so the two cannot drift apart.
 use tutti_plugin_types::{AutomationMode, SampleRate};
-use tutti_types::{Beat, Bpm};
+use tutti_units::{Beat, Bpm};
 
 /// The transport bits whose transition defines `TRANSPORT_CHANGED`.
 ///
@@ -208,7 +208,8 @@ pub(crate) fn advance_time_info(
 mod tests {
     use super::*;
     use tutti_plugin_types::LoopRegion;
-    use tutti_types::{Beat, Bpm, LoopRange};
+    use tutti_types::LoopRange;
+    use tutti_units::{Beat, Bpm};
     use vst::api::TimeInfoFlags as F;
 
     fn base() -> TransportInfo {

@@ -3,7 +3,8 @@
 //! send, because a panner never feeds the LFE.
 
 use tutti_graph::{GraphBuilder, NodeKey};
-use tutti_types::{Azimuth, Bed, Hz, Q, Speaker, UnitParam};
+use tutti_types::{Bed, Speaker};
+use tutti_units::{Azimuth, Hz, Q, UnitParam};
 
 use crate::{SvfFilterNode, SvfType, VbapError, VbapPannerNode};
 

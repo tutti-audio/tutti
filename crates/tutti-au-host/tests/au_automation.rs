@@ -20,9 +20,9 @@ use tutti_plugin_types::{
     Loaded, MaxBlock, ParamEdit, ParameterChanges, PluginAudio, PluginIo, Prepare, ProcessContext,
     ProcessOutput, Processor,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: usize = 512;
 
 fn delay_loaded() -> AuLoaded {
@@ -38,7 +38,7 @@ fn delay_loaded() -> AuLoaded {
 }
 
 fn activate(au: AuLoaded) -> (AuProcessor, AuController) {
-    let prepare = Prepare::new(RATE, MaxBlock::of(tutti_types::Samples(BLOCK as _)));
+    let prepare = Prepare::new(RATE, MaxBlock::of(tutti_units::Samples(BLOCK as _)));
     au.activate(tutti_fixtures::main_thread(), prepare)
         .unwrap_or_else(|e| panic!("AUDelay activates: {}", e.reason))
 }

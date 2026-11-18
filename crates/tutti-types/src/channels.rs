@@ -8,7 +8,7 @@
 //! `new` returning `Option`; a wider integer converts through a refusing
 //! `TryFrom`.
 
-use crate::Samples;
+use tutti_units::Samples;
 
 /// The most channels one bus, the root, a sampler voice or a speaker layout holds: sixteen,
 /// which is a 7.1.4 bed with room to spare and a third-order ambisonic signal exactly.
@@ -16,7 +16,7 @@ use crate::Samples;
 /// A width past it is refused where it is stated, never truncated.
 pub const MAX_CHANNELS: usize = 16;
 
-crate::ranged! {
+tutti_units::ranged! {
     /// The index of one channel of a layout, `0..u16::MAX`: any channel a [`ChannelLayout`]
     /// can have, the widest holding `u16::MAX` channels. The range is static; whether a
     /// channel is in a given layout is the layout's check, [`ChannelLayout::index`]. A bus is

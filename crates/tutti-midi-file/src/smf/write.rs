@@ -13,7 +13,7 @@ use tutti_ump::{Message, Midi1Bytes};
 use super::SmfDivision;
 use crate::TracksError;
 use crate::file::with_extra;
-use crate::file::{FileEvent, Meta, SmfFormat, Tick, Track};
+use crate::file::{FileEvent, Lead, Meta, SmfFormat, SysEx, Tick, Track};
 
 /// The widest value a variable-length quantity holds: 28 bits.
 const VLQ_MAX: u64 = 0x0FFF_FFFF;
@@ -96,9 +96,7 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
             0x59,
             with_extra(&[sharps.cast_unsigned(), u8::from(*minor)], extra),
         ),
-        Meta::SequenceNumber { number, extra } => (0x00, with_extra(&number.to_be_bytes(), extra)),
         Meta::ChannelPrefix { channel, extra } => (0x20, with_extra(&[channel.get()], extra)),
-        Meta::SmpteOffset { offset, extra } => (0x54, with_extra(&offset.to_wire(), extra)),
         Meta::SequencerSpecific { manufacturer, data } => {
             let id = manufacturer.sysex_bytes().map(tutti_ump::U7::get);
             let id_len = if manufacturer.is_extended() { 3 } else { 1 };
@@ -116,9 +114,7 @@ fn meta_data_len(meta: &Meta) -> usize {
         Meta::Tempo { extra, .. } => 3 + extra.len(),
         Meta::TimeSignature { extra, .. } => 4 + extra.len(),
         Meta::KeySignature { extra, .. } => 2 + extra.len(),
-        Meta::SequenceNumber { extra, .. } => 2 + extra.len(),
         Meta::ChannelPrefix { extra, .. } => 1 + extra.len(),
-        Meta::SmpteOffset { extra, .. } => 5 + extra.len(),
         Meta::SequencerSpecific { manufacturer, data } => {
             data.len() + if manufacturer.is_extended() { 3 } else { 1 }
         }
@@ -143,7 +139,18 @@ fn encode(event: &FileEvent) -> Option<Encoded> {
         FileEvent::Message(Message::Midi1(address, voice)) => {
             Some(Encoded::Channel(voice.bytes(address.channel)))
         }
-        FileEvent::SysEx(data) => Some(Encoded::Other(counted(&[0xF0], data))),
+        FileEvent::SysEx(SysEx::Complete(data)) => Some(Encoded::Other(counted(
+            &[0xF0],
+            &data
+                .iter()
+                .map(|b| b.get())
+                .chain([0xF7])
+                .collect::<Vec<u8>>(),
+        ))),
+        FileEvent::SysEx(SysEx::Start(data)) => Some(Encoded::Other(counted(
+            &[0xF0],
+            &data.iter().map(|b| b.get()).collect::<Vec<u8>>(),
+        ))),
         FileEvent::Escape(data) => Some(Encoded::Other(counted(&[0xF7], data))),
         FileEvent::Meta(meta) => {
             let (kind, data) = meta_parts(meta);
@@ -183,11 +190,16 @@ fn append((mut out, running, at): Fold, (tick, event): &(Tick, FileEvent)) -> Fo
 }
 
 /// A track's body: its events, then End of Track at its `end`.
-fn body(track: &Track) -> Vec<u8> {
-    let (out, _, at) = track
-        .events
+fn body(track: &Track, leads: &[Lead]) -> Vec<u8> {
+    // Each lead is a meta event at tick 0, so no running status survives it.
+    let opening = leads
         .iter()
-        .fold((Vec::new(), None, Tick(0)), append);
+        .flat_map(|lead| {
+            let (kind, data) = lead.wire();
+            std::iter::once(0).chain(counted(&[0xFF, kind], &data))
+        })
+        .collect();
+    let (out, _, at) = track.events.iter().fold((opening, None, Tick(0)), append);
     out.into_iter()
         .chain(delta(at, track.end))
         .chain([0xFF, 0x2F, 0x00])
@@ -215,10 +227,14 @@ fn chunk(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
 /// caller has checked the rest ([`MidiFile`](crate::MidiFile)'s constructor):
 /// events in order, a delta that fits the wire's 28 bits, only group-0 MIDI
 /// 1.0 messages, at most 65535 tracks.
-pub(crate) fn measure(tracks: &[Track]) -> Result<(), TracksError> {
-    for track in tracks {
+pub(crate) fn measure(tracks: &[Track], leads: &[Vec<Lead>]) -> Result<(), TracksError> {
+    for (track, track_leads) in tracks.iter().zip(leads) {
         let (mut at, mut running) = (Tick(0), None);
         let mut total = 0u64;
+        for lead in track_leads {
+            // The delta of 0, `FF`, the type, the length, the data.
+            total += 1 + counted_len(2, lead.wire().1.len())? as u64;
+        }
         for (tick, event) in &track.events {
             total += vlq_len(tick.0.saturating_sub(at.0)) as u64;
             at = *tick;
@@ -230,7 +246,16 @@ pub(crate) fn measure(tracks: &[Track]) -> Result<(), TracksError> {
                     running = status;
                     bytes.as_slice().len() - elided
                 }
-                FileEvent::SysEx(data) | FileEvent::Escape(data) => {
+                FileEvent::SysEx(SysEx::Complete(data)) => {
+                    running = None;
+                    // The `F7` the writer adds.
+                    counted_len(1, data.len() + 1)?
+                }
+                FileEvent::SysEx(SysEx::Start(data)) => {
+                    running = None;
+                    counted_len(1, data.len())?
+                }
+                FileEvent::Escape(data) => {
                     running = None;
                     counted_len(1, data.len())?
                 }
@@ -255,14 +280,24 @@ pub(crate) fn measure(tracks: &[Track]) -> Result<(), TracksError> {
 ///
 /// Each track ends with an End of Track at its `end`. A caller has checked the
 /// tracks with [`measure`] and the constructor's rules.
-pub(crate) fn write(format: SmfFormat, division: SmfDivision, tracks: &[Track]) -> Vec<u8> {
+pub(crate) fn write(
+    format: SmfFormat,
+    division: SmfDivision,
+    tracks: &[Track],
+    leads: &[Vec<Lead>],
+) -> Vec<u8> {
     let count = u16::try_from(tracks.len()).unwrap_or(u16::MAX);
     let header: Vec<u8> = [format.word(), count, division.word()]
         .into_iter()
         .flat_map(u16::to_be_bytes)
         .collect();
     std::iter::once(chunk(b"MThd", &header))
-        .chain(tracks.iter().map(|t| chunk(b"MTrk", &body(t))))
+        .chain(
+            tracks
+                .iter()
+                .zip(leads)
+                .map(|(t, l)| chunk(b"MTrk", &body(t, l))),
+        )
         .collect::<Vec<_>>()
         .concat()
 }

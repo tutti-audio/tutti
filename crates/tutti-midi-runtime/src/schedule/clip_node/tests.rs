@@ -1,8 +1,8 @@
 use super::*;
 
 use tutti_fixtures::midi;
-use tutti_types::Beat;
 use tutti_ump::{CCNumber, ControlValue, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7};
+use tutti_units::Beat;
 
 /// **A clip a block still held when `set` replaced it is freed by
 /// the next `reclaim`**, with no further publish.

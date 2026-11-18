@@ -13,8 +13,8 @@ use support::font::{Inst, Preset, font, one_preset};
 use support::rig::{Rig, timgm6mb};
 use tutti_fixtures::sf2::{generator, range};
 use tutti_graph::Node;
-use tutti_types::Tail;
 use tutti_ump::CCNumber;
+use tutti_units::Tail;
 
 /// A violin: a held key sustains, a released one rings out in about a second.
 fn violin() -> Rig {

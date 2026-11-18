@@ -17,7 +17,8 @@
 use std::io::Cursor;
 use tutti_buffers::Interleaved;
 use tutti_codec::{Encoder, Format, Spec};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 /// `frames` interleaved frames of `channels`: a 1024-step sawtooth offset per
 /// channel, plus a 15-bit hash scaled by 1/16, every term exact in `f32`.

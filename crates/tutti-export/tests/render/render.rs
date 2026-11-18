@@ -21,9 +21,10 @@ use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::{FrozenClock, RenderClock};
-use tutti_types::Seconds;
-use tutti_types::{Amplitude, ChannelTopology, Drive, Hz, SampleRate};
+use tutti_types::ChannelTopology;
 use tutti_types::{Bed, ChannelLayout};
+use tutti_units::Seconds;
+use tutti_units::{Amplitude, Drive, Hz, SampleRate};
 
 /// The rate [`config`] renders at.
 const RATE: SampleRate = SampleRate::SR_44K1;
@@ -152,7 +153,7 @@ fn the_clock_advances_by_exactly_the_frames_rendered() {
 
     struct CountingClock(AtomicUsize);
     impl RenderClock for CountingClock {
-        fn advance(&self, frames: tutti_types::Samples) {
+        fn advance(&self, frames: tutti_units::Samples) {
             self.0.fetch_add(frames.get(), Ordering::Relaxed);
         }
         // A stopped transport at beat 0: nothing in this graph reads it.
@@ -192,7 +193,7 @@ fn a_latency_trim_preserves_the_output_length() {
     let mut s = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
     let untrimmed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
-    s.render.latency = tutti_types::Samples(512);
+    s.render.latency = tutti_units::Samples(512);
     let trimmed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
     assert_eq!(
@@ -214,7 +215,7 @@ fn a_tail_lengthens_the_output_by_exactly_the_tail() {
     let mut s = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
     let untailed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
-    let tail = tutti_types::Samples(4096);
+    let tail = tutti_units::Samples(4096);
     s.render.tail = tail;
     let tailed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
@@ -246,7 +247,7 @@ fn a_convolver_reports_its_ir_ring_out() {
 
     assert_eq!(
         built(g, RATE).reported_tail().samples(),
-        Some(tutti_types::Samples(4095)),
+        Some(tutti_units::Samples(4095)),
     );
 }
 
@@ -272,7 +273,7 @@ fn cascaded_convolvers_sum_their_tails() {
     // 1023 + 2047, which is the ring-out of the 3071-sample cascaded response.
     assert_eq!(
         built(g, RATE).reported_tail().samples(),
-        Some(tutti_types::Samples(3070)),
+        Some(tutti_units::Samples(3070)),
     );
 }
 
@@ -290,7 +291,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
 
     impl Node for Unreporting {
         fn shape(&self) -> Shape {
-            Shape::through_unassigned(ChannelLayout::MONO).with_tail(tutti_types::Tail::Unknown)
+            Shape::through_unassigned(ChannelLayout::MONO).with_tail(tutti_units::Tail::Unknown)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -321,7 +322,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
     );
     assert_eq!(
         reported.known(),
-        tutti_types::Samples(4095),
+        tutti_units::Samples(4095),
         "but what the convolver reported is still available"
     );
 }
@@ -335,7 +336,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
 fn a_graph_of_stock_nodes_reports_a_spendable_tail() {
     let reported = dc(RATE).reported_tail();
     assert_eq!(reported.unknown_nodes(), 0);
-    assert_eq!(reported.samples(), Some(tutti_types::Samples(0)));
+    assert_eq!(reported.samples(), Some(tutti_units::Samples(0)));
 }
 
 /// A stereo integrator: `y[n] = y[n-1] + x[n]`, per channel.
@@ -348,13 +349,13 @@ fn a_graph_of_stock_nodes_reports_a_spendable_tail() {
 /// `resolve` spends exactly the caller's cap on a graph that never decays —
 /// needs a node that says so, and this one is honest about it.
 ///
-/// [`Tail::Unbounded`]: tutti_types::Tail::Unbounded
+/// [`Tail::Unbounded`]: tutti_units::Tail::Unbounded
 #[derive(Clone, Default)]
 struct Integrator([f32; 2]);
 
 impl Node for Integrator {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::STEREO).with_tail(tutti_types::Tail::Unbounded)
+        Shape::through_unassigned(ChannelLayout::STEREO).with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -387,7 +388,7 @@ fn resolving_an_unbounded_graph_spends_the_cap() {
         .pipe_output(rev);
 
     let reported = built(g, RATE).reported_tail();
-    let cap = tutti_types::Samples(384_000);
+    let cap = tutti_units::Samples(384_000);
     assert!(
         reported.is_unbounded(),
         "a unity-gain feedback loop never decays on its own"
@@ -413,8 +414,8 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
 
     let reported = built(g, RATE).reported_tail();
     assert_eq!(
-        reported.resolve(tutti_types::Samples(384_000)),
-        tutti_types::Samples(4095),
+        reported.resolve(tutti_units::Samples(384_000)),
+        tutti_units::Samples(4095),
         "the convolver's figure, not the cap"
     );
 }
@@ -432,7 +433,7 @@ fn a_stateless_node_reports_no_tail_rather_than_an_unknown_one() {
     let dist = tutti_nodes::DistortionNode::new(tutti_nodes::ShapeKind::Tanh, Drive::new(1.0));
     // A kernel node's tail is unknown until it has a rate.
     let dist = tutti_graph::contract::prepared(dist, RATE, 64);
-    assert_eq!(dist.shape().tail, tutti_types::Tail::None);
+    assert_eq!(dist.shape().tail, tutti_units::Tail::None);
 }
 
 /// `render_to_buffers` reports the rate its samples are actually at, and gives
@@ -456,7 +457,7 @@ fn buffers_report_their_own_shape() {
 fn a_caller_can_compose_normalization() {
     use tutti_buffers::Interleaved;
     use tutti_measure::{LoudnessConfig, measure_loudness};
-    use tutti_types::Db;
+    use tutti_units::Db;
 
     // Longer than R128's 400 ms gating block, or the meter reports nothing
     // passed the gate and there is no loudness to normalize toward.
@@ -549,7 +550,7 @@ fn normalized_audio_can_be_written_to_every_format() {
     s.render.duration_seconds = Seconds(1.0);
 
     let mut audio = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
-    audio.apply_gain(tutti_types::Db(-6.0));
+    audio.apply_gain(tutti_units::Db(-6.0));
 
     for (format, ext) in [
         (Format::Wav(Pcm::Int24), "wav"),
@@ -589,7 +590,7 @@ fn a_resample_reaches_every_format_not_just_wav() {
     let d = tempfile::tempdir().unwrap();
     let mut s = config(Format::Wav(Pcm::Int24), ChannelLayout::STEREO);
     s.render.duration_seconds = Seconds(1.0); // 44100 frames in, 48000 expected out
-    s.resample = Some(Resample::to(tutti_types::SampleRate::SR_48K));
+    s.resample = Some(Resample::to(tutti_units::SampleRate::SR_48K));
 
     // WAV is the control: it was already correct.
     let p = d.path().join("r.wav");
@@ -638,7 +639,7 @@ fn write_buffers_resamples_from_the_frames_own_rate() {
 
     // Render at 96k...
     let mut render_cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-    render_cfg.render.sample_rate = tutti_types::SampleRate::SR_96K;
+    render_cfg.render.sample_rate = tutti_units::SampleRate::SR_96K;
     render_cfg.render.duration_seconds = Seconds(1.0);
     let audio =
         render_to_buffers(dc(render_cfg.render.sample_rate), &render_cfg, &FrozenClock).unwrap();
@@ -647,7 +648,7 @@ fn write_buffers_resamples_from_the_frames_own_rate() {
     // ...then write with a config whose `render` half is left at its DEFAULT
     // 44100 — the case the doc tells a caller is fine to ignore.
     let mut write_cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-    write_cfg.resample = Some(Resample::to(tutti_types::SampleRate::SR_48K));
+    write_cfg.resample = Some(Resample::to(tutti_units::SampleRate::SR_48K));
     assert_eq!(
         write_cfg.render.sample_rate.get(),
         44_100.0,
@@ -685,7 +686,7 @@ fn file_peak(path: &std::path::Path) -> f32 {
 fn normalized_export_lifts_the_level_toward_the_target() {
     use crate::support::render_normalized_to_file;
     use tutti_export::Normalize;
-    use tutti_types::Db;
+    use tutti_units::Db;
 
     let d = tempfile::tempdir().unwrap();
     // Longer than R128's 400 ms gating block, or nothing passes the gate.
@@ -728,7 +729,7 @@ fn peak_normalization_lands_on_the_requested_dbtp() {
     use tutti_buffers::Interleaved;
     use tutti_export::Normalize;
     use tutti_measure::{LoudnessConfig, measure_loudness};
-    use tutti_types::Db;
+    use tutti_units::Db;
 
     let d = tempfile::tempdir().unwrap();
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
@@ -813,7 +814,7 @@ fn file_true_peak(path: &std::path::Path) -> f32 {
 fn a_sub_gating_block_render_cannot_be_loudness_normalized() {
     use crate::support::render_normalized_to_file;
     use tutti_export::{Normalize, Unmeasured};
-    use tutti_types::Db;
+    use tutti_units::Db;
 
     let d = tempfile::tempdir().unwrap();
     // 0.2 s — half the 400 ms gating block.
@@ -880,7 +881,7 @@ fn a_sub_gating_block_render_cannot_be_loudness_normalized() {
 fn surround_normalizes_rather_than_falling_back_to_peak() {
     use crate::support::render_normalized_to_file;
     use tutti_export::Normalize;
-    use tutti_types::Db;
+    use tutti_units::Db;
 
     let d = tempfile::tempdir().unwrap();
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::from(6u16));
@@ -977,7 +978,7 @@ fn find_from(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
 fn normalizing_silence_is_refused() {
     use crate::support::render_normalized_to_file;
     use tutti_export::{Normalize, Unmeasured};
-    use tutti_types::Db;
+    use tutti_units::Db;
 
     let silence = || {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
@@ -1024,7 +1025,7 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
     use tutti_buffers::Interleaved;
     use tutti_export::Normalize;
     use tutti_measure::{LoudnessConfig, measure_loudness};
-    use tutti_types::Db;
+    use tutti_units::Db;
 
     // Energy near Nyquist, with its true peak *between* samples, is what SRC
     // overshoots on; a DC constant barely moves and would hide the bug entirely.
@@ -1046,7 +1047,7 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
     let square = || {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
         let tone = Osc::sine(Hz(11025.0))
-            .with_phase(tutti_types::Phase(0.546))
+            .with_phase(tutti_units::Phase(0.546))
             .with_amplitude(Amplitude(0.98))
             .with_layout(ChannelLayout::STEREO);
         let id = g.add(tone);
@@ -1058,7 +1059,7 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
     let path = dir.path().join("resampled.wav");
 
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-    cfg.resample = Some(Resample::to(tutti_types::SampleRate::SR_48K));
+    cfg.resample = Some(Resample::to(tutti_units::SampleRate::SR_48K));
 
     render_normalized_to_file(
         square(),
@@ -1079,7 +1080,7 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
     let measured = measure_loudness(
         &meter,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
-        tutti_types::SampleRate::of(rate as f64),
+        tutti_units::SampleRate::of(rate as f64),
     )
     .expect("stereo at 48k is measurable");
 
@@ -1098,14 +1099,14 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
 fn an_unmeasurable_rate_fails_rather_than_writing_un_normalized_audio() {
     use crate::support::render_normalized_to_file;
     use tutti_export::Normalize;
-    use tutti_types::Db;
+    use tutti_units::Db;
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("unmeasurable.wav");
 
     // R128 accepts 16 Hz - 2.8 MHz; 4 MHz is outside it.
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-    cfg.render.sample_rate = tutti_types::SampleRate::of(4_000_000.0);
+    cfg.render.sample_rate = tutti_units::SampleRate::of(4_000_000.0);
     cfg.render.duration_seconds = Seconds(0.0005);
 
     let err = render_normalized_to_file(
@@ -1426,11 +1427,11 @@ struct Narrowing;
 impl Node for Narrowing {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_types::Tail::Finite(tutti_types::Samples(4_000)))
+            .with_tail(tutti_units::Tail::Finite(tutti_units::Samples(4_000)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        io.report_tail(tutti_types::Tail::Finite(tutti_types::Samples(100)));
+        io.report_tail(tutti_units::Tail::Finite(tutti_units::Samples(100)));
         let (ins, mut outs) = io.split();
         outs.get(0).copy_from_slice(ins.get(0));
         Status::Modified
@@ -1455,7 +1456,7 @@ fn export_spends_the_ceiling_of_a_node_that_narrows_its_tail() {
     let graph = built(g, RATE);
 
     let reported = graph.reported_tail();
-    assert_eq!(reported.samples(), Some(tutti_types::Samples(4_000)));
+    assert_eq!(reported.samples(), Some(tutti_units::Samples(4_000)));
 
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::MONO);
     cfg.render.tail = reported.samples().expect("finite");

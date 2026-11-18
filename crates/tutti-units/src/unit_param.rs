@@ -1,0 +1,1047 @@
+//! [`UnitParam`] — the stable, id-addressable vocabulary of every scalar a
+//! built-in tutti unit may expose.
+//!
+//! One uniform *name* per scalar, so a host addresses "cutoff" or "threshold"
+//! without knowing a node's concrete type. The alternative is bespoke typed
+//! setters (`set_frequency`, `set_q`, `set_mix`, …) reached by downcasting,
+//! which makes every generic host path a match on concrete node types.
+//!
+//! This module is the **pure vocabulary**: the enum, its `u16` conversions
+//! and the addresses built on it ([`UnitAddr`], [`ParamAddr`]), with no
+//! audio-engine dependency. A node maps each [`UnitAddr`] it exposes to one of
+//! its `f32` cells, which is how a host sets a param by address.
+
+use core::num::NonZeroU8;
+
+/// The full set of scalar parameters any built-in tutti unit may expose.
+///
+/// Discriminants are **stable**: they are the kind a `ParamSet` and a
+/// host's `AudioParam<U, P>` name a param by (with an index among params of
+/// the kind: [`UnitAddr`]), and may be persisted, so an existing value is
+/// never renumbered. New params are appended at the end. They fit a byte
+/// (`repr(u8)`): a [`UnitAddr`] packs its index above them in a `u16`.
+///
+/// ```
+/// use tutti_units::UnitParam;
+///
+/// let id = u16::from(UnitParam::Cutoff);
+/// assert_eq!(UnitParam::try_from(id), Ok(UnitParam::Cutoff));
+/// assert!(UnitParam::try_from(9_999).is_err());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum UnitParam {
+    /// Filter cutoff / centre frequency (Hz).
+    Cutoff = 0,
+    /// Filter resonance / Q.
+    Q = 1,
+    /// Filter / EQ gain (dB).
+    GainDb = 2,
+    /// Wet/dry mix (0..1).
+    Wet = 3,
+    /// Feedback amount (0..1).
+    Feedback = 4,
+    /// Delay time (beats or seconds — unit-defined).
+    DelayTime = 5,
+    /// Modulation rate (Hz): how fast an LFO cycles. An audio oscillator's
+    /// pitch is [`Frequency`](Self::Frequency).
+    Rate = 6,
+    /// Modulation depth (0..1).
+    Depth = 7,
+    /// Reverb room size (0..1).
+    RoomSize = 8,
+    /// Reverb damping (0..1).
+    Damping = 9,
+    /// Dynamics threshold (dB).
+    Threshold = 10,
+    /// Compressor ratio (≥1).
+    Ratio = 11,
+    /// Envelope attack (seconds).
+    Attack = 12,
+    /// Envelope release (seconds).
+    Release = 13,
+    /// Limiter ceiling (dB).
+    Ceiling = 14,
+    /// Drive / saturation amount.
+    Drive = 15,
+    /// Compressor make-up gain (dB).
+    ///
+    /// No engine node binds it: the compressor's make-up is its one gain
+    /// cell, addressed as [`GainDb`](Self::GainDb) (one cell, one address),
+    /// so a route or param on `Makeup` reaches nothing. Kept for a plugin
+    /// or host node that names the address itself.
+    Makeup = 16,
+    /// Synth / master volume (linear, 0..1).
+    Volume = 17,
+    /// Unison detune spread (cents).
+    Detune = 18,
+    /// Unison stereo spread (0..1).
+    StereoSpread = 19,
+    /// A panner's left/right position (`Pan`, `-1..1`): where a source is
+    /// placed by a pan law. A strip's balance of a pair it already has is
+    /// [`Balance`](Self::Balance).
+    ///
+    /// Distinct from [`StereoSpread`](Self::StereoSpread), which widens a source
+    /// about its centre; this moves the centre.
+    Pan = 20,
+    // 21 was `Mute`, deleted with the strip's mute (doc 013, "Bypass and mute
+    // are graph state"): a node-wide mute is `NodeMode::Muted`. The id is
+    // retired, not reused, and decodes as unknown.
+    /// Compressor knee width (dB, `>= 0`): the span about the threshold over
+    /// which the ratio eases in. `0` is a hard knee.
+    Knee = 22,
+    /// Bypass toggle: **`>= 0.5` is bypassed**, below is processing.
+    ///
+    /// The threshold encoding is forced, not chosen: a `ParamSet` cell carries
+    /// an `f32`, so a boolean has to ride one. Stated here because the decode
+    /// lives in each node that reads the cell, and a node that picked `!= 0.0`
+    /// instead would flip on a denormal.
+    ///
+    /// For a node's own per-part toggle (a multiband's per-band bypass, by
+    /// index). A node-wide bypass is `NodeMode::Bypassed`, the graph's.
+    Bypass = 23,
+    /// Solo toggle: **`>= 0.5` is soloed**, below is not. Encoded as
+    /// [`Bypass`](Self::Bypass) is.
+    Solo = 24,
+    /// Reverb decay: the RT60, the time the tail takes to fall 60 dB
+    /// (`Seconds`, `>= 0`).
+    ///
+    /// A reverb has up to three, told apart by the [`UnitAddr`] index:
+    /// **0 is the mid band** (the only one a single-decay reverb has), **1 the
+    /// low band** and **2 the high band**. The band edges are the node's
+    /// [`Cutoff`](Self::Cutoff) params. Index 0 is the plain id.
+    Decay = 25,
+    /// Reverb diffusion: how much the echo density builds up, as a position
+    /// on a `0..1` scale (`Mix`; `0` is sparse, `1` is smooth). Each reverb
+    /// maps it onto its own scale (allpass gain, stage count).
+    Diffusion = 26,
+    /// Reverb freeze: **`>= 0.5` holds the tail**, below lets it decay. Encoded
+    /// as [`Bypass`](Self::Bypass) is. A frozen reverb loses nothing round its loop
+    /// and takes no input, so its tail never ends.
+    Freeze = 27,
+    /// A source's bearing (`Azimuth`, degrees): 0 front, 90 left, -90 right.
+    /// A bearing wraps onto the circle, so a driven value past 180 is the
+    /// same bearing as its wrap, and a panner takes the short arc to it.
+    ///
+    /// A param port reads it wrapped to `-180..180`, so its per-frame value
+    /// steps by about 360 where a move crosses the seam although the bearing
+    /// moved a little: smooth it on the arc ([`UnitParam::arc`],
+    /// [`Azimuth::shortest_arc_to`]), never on the difference of two frames.
+    Azimuth = 28,
+    /// A source's height (`Elevation`, degrees): 0 ear level, positive up,
+    /// saturating at the poles (a height does not wrap).
+    Elevation = 29,
+    /// Panner diffusion (`Spread`, `0..1`): how many speakers a point source
+    /// is smeared across. Not [`Wet`](Self::Wet): it blends nothing.
+    Spread = 30,
+    /// Mid/side stereo width (`StereoWidth`, `0..`): 1 is the source as it
+    /// is, 0 mono, above 1 wider. Not [`StereoSpread`](Self::StereoSpread),
+    /// which spreads a synth's unison voices.
+    StereoWidth = 31,
+    /// Gate hold: how long the gate stays fully open after the key falls under the
+    /// threshold (`Seconds`, `>= 0`, whole frames).
+    Hold = 32,
+    /// Range: the gain of a closed gate (`Db`, `<= 0`): a floor, not a mute; or the most a
+    /// dynamic EQ band moves from flat (`Db`, `>= 0`).
+    Range = 33,
+    /// Delay cross-feedback: how much of each channel's delayed signal feeds the other
+    /// channels' lines (`Feedback`), beside its own `Feedback`.
+    CrossFeedback = 34,
+    /// An audio oscillator's frequency (Hz): the pitch it sounds. An LFO's
+    /// speed is [`Rate`](Self::Rate).
+    Frequency = 35,
+    /// A strip's stereo balance (`Balance`, `-1..1`): attenuates the side it
+    /// moves away from on a signal that is already a left/right pair. Not
+    /// [`Pan`](Self::Pan), which places a source by a pan law.
+    Balance = 36,
+    /// A quantizer's word length (`BitDepth`, `1..=32`): fractional values are
+    /// depths between two whole ones.
+    BitDepth = 37,
+    /// A sample-and-hold's frames per held sample (`HoldFactor`, `>= 1`), read
+    /// rounded to a whole number of frames. Not [`Hold`](Self::Hold), a gate's
+    /// time in seconds.
+    HoldFactor = 38,
+    /// A pitch interval in semitones (`Semitones`, signed, 12 to the octave): how far
+    /// an envelope filter's cutoff moves at a full-scale envelope. Not
+    /// [`Detune`](Self::Detune), a unison stack's spread in cents.
+    Semitones = 39,
+}
+
+/// The error converting a `u16` that is not a known [`UnitParam`]
+/// discriminant.
+///
+/// The scheme is forward-compatible: an unknown id simply does not map to a
+/// param, so callers treat this as "ignore" rather than a hard error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("unknown UnitParam id: {} (low byte {})", .0, .0 & 0xFF)]
+pub struct UnitParamOutOfRange(pub u16);
+
+impl TryFrom<u16> for UnitParam {
+    type Error = UnitParamOutOfRange;
+
+    /// Converts the stable `u16` discriminant back to a param; `Err` for an
+    /// unknown id.
+    fn try_from(id: u16) -> Result<Self, Self::Error> {
+        use UnitParam::*;
+        Ok(match id {
+            0 => Cutoff,
+            1 => Q,
+            2 => GainDb,
+            3 => Wet,
+            4 => Feedback,
+            5 => DelayTime,
+            6 => Rate,
+            7 => Depth,
+            8 => RoomSize,
+            9 => Damping,
+            10 => Threshold,
+            11 => Ratio,
+            12 => Attack,
+            13 => Release,
+            14 => Ceiling,
+            15 => Drive,
+            16 => Makeup,
+            17 => Volume,
+            18 => Detune,
+            19 => StereoSpread,
+            20 => Pan,
+            22 => Knee,
+            23 => Bypass,
+            24 => Solo,
+            25 => Decay,
+            26 => Diffusion,
+            27 => Freeze,
+            28 => Azimuth,
+            29 => Elevation,
+            30 => Spread,
+            31 => StereoWidth,
+            32 => Hold,
+            33 => Range,
+            34 => CrossFeedback,
+            35 => Frequency,
+            36 => Balance,
+            37 => BitDepth,
+            38 => HoldFactor,
+            39 => Semitones,
+            other => return Err(UnitParamOutOfRange(other)),
+        })
+    }
+}
+
+impl UnitParam {
+    /// Whether the param's value lives on a circle rather than a line:
+    /// only [`Azimuth`](Self::Azimuth) is. A circular param is wrapped, never
+    /// clamped, and a move between two of its values takes the short arc
+    /// ([`arc`](Self::arc)); the other params, [`Elevation`](Self::Elevation)
+    /// included, are a line.
+    #[inline]
+    #[must_use]
+    pub const fn is_circular(self) -> bool {
+        matches!(self, Self::Azimuth)
+    }
+
+    /// `value` as this param holds it: wrapped onto the circle
+    /// ([`Azimuth::wrap`]'s `-180..180`) for a circular param, `value`
+    /// itself for a line.
+    #[inline]
+    #[must_use]
+    pub fn wrap(self, value: f32) -> f32 {
+        if self.is_circular() {
+            Azimuth(value).wrap().0
+        } else {
+            value
+        }
+    }
+
+    /// The signed move from `from` to `to`: the short arc
+    /// ([`Azimuth::shortest_arc_to`]) for a circular param, `to - from` for
+    /// a line. `wrap(from + arc(from, to) * t)` is the value `t` of the way
+    /// along a move between them.
+    #[inline]
+    #[must_use]
+    pub fn arc(self, from: f32, to: f32) -> f32 {
+        if self.is_circular() {
+            Azimuth(from).shortest_arc_to(Azimuth(to)).0
+        } else {
+            to - from
+        }
+    }
+}
+
+impl From<UnitParam> for u16 {
+    #[inline]
+    fn from(p: UnitParam) -> u16 {
+        p as u16
+    }
+}
+
+/// The address of one built-in param of a node: a [`UnitParam`] kind and an
+/// `index` among the node's params of that kind.
+///
+/// A node with one param of a kind (a filter's cutoff) is at index 0, which
+/// is what [`From<UnitParam>`] gives, so a bare `UnitParam` is still an
+/// address wherever one is taken as `impl Into<UnitAddr>`. A node with
+/// several of a kind (a multiband compressor's threshold per band) numbers
+/// them from 0.
+///
+/// # Packed form
+///
+/// [`to_u16`](Self::to_u16) packs the address into the `u16` an
+/// `AudioParam<U, P>` and a persisted id carry: the **index in the high
+/// byte, the [`UnitParam`] discriminant in the low byte**. Index 0 is
+/// bit-identical to the plain discriminant, so a plain id decodes to index 0.
+///
+/// ```
+/// use tutti_units::{UnitAddr, UnitParam};
+///
+/// let band1 = UnitAddr::new(UnitParam::Threshold, 1);
+/// assert_eq!(band1.to_u16(), 0x0100 | 10);
+/// assert_eq!(UnitAddr::try_from(0x010A), Ok(band1));
+/// // Index 0 is the plain id.
+/// assert_eq!(u16::from(UnitAddr::from(UnitParam::Threshold)), 10);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UnitAddr {
+    /// The kind of param.
+    pub param: UnitParam,
+    /// Which of the node's params of that kind (0 for the first or only one).
+    pub index: u8,
+}
+
+// A shape holds a list of these per node; they stay two bytes.
+const _: () = assert!(core::mem::size_of::<UnitAddr>() == 2);
+
+impl UnitAddr {
+    /// `param` at `index`.
+    #[inline]
+    #[must_use]
+    pub const fn new(param: UnitParam, index: u8) -> Self {
+        Self { param, index }
+    }
+
+    /// `param` at index 0: what `UnitAddr::from(param)` is, as a `const`.
+    #[inline]
+    #[must_use]
+    pub const fn first(param: UnitParam) -> Self {
+        Self { param, index: 0 }
+    }
+
+    /// The packed `u16` (see the type docs): index in the high byte, the
+    /// discriminant in the low.
+    #[inline]
+    #[must_use]
+    pub const fn to_u16(self) -> u16 {
+        ((self.index as u16) << 8) | self.param as u16
+    }
+}
+
+impl From<UnitParam> for UnitAddr {
+    #[inline]
+    fn from(param: UnitParam) -> Self {
+        Self::first(param)
+    }
+}
+
+impl From<UnitAddr> for u16 {
+    #[inline]
+    fn from(a: UnitAddr) -> u16 {
+        a.to_u16()
+    }
+}
+
+impl TryFrom<u16> for UnitAddr {
+    type Error = UnitParamOutOfRange;
+
+    /// Unpacks a `u16`; `Err` (carrying it whole) if its low byte is not a
+    /// known [`UnitParam`] discriminant. Every index is accepted: whether a
+    /// node has that index is for its `ParamSet` to answer.
+    fn try_from(id: u16) -> Result<Self, Self::Error> {
+        let param = UnitParam::try_from(id & 0xFF).map_err(|_| UnitParamOutOfRange(id))?;
+        Ok(Self::new(param, (id >> 8) as u8))
+    }
+}
+
+impl PartialEq<UnitParam> for UnitAddr {
+    /// An address equals a bare param when it is that param at index 0.
+    fn eq(&self, other: &UnitParam) -> bool {
+        self.index == 0 && self.param == *other
+    }
+}
+
+impl PartialEq<UnitAddr> for UnitParam {
+    fn eq(&self, other: &UnitAddr) -> bool {
+        other == self
+    }
+}
+
+/// The address of a scalar parameter — either one from tutti's known
+/// [`UnitParam`] vocabulary, or a foreign param named by an opaque numeric id.
+///
+/// [`UnitParam`] is a *closed* set: the params tutti's own units define. A unit
+/// with params tutti does not model — a hosted plugin, a WASM unit, a scripted
+/// node — has an *open* space of its own numeric ids that no fixed enum can
+/// enumerate. `ParamAddr` unifies both so one API (e.g. a modulation
+/// target's `TargetKey`) addresses either: a native node answers on
+/// [`Unit`](ParamAddr::Unit) and [`Indexed`](ParamAddr::Indexed) and ignores
+/// [`Id`](ParamAddr::Id); a foreign unit does the reverse.
+///
+/// A native param is a [`UnitAddr`]: a kind and an index among the node's
+/// params of that kind. **The index-0 address is always
+/// [`Unit`](ParamAddr::Unit)**, and [`Indexed`](ParamAddr::Indexed) holds a
+/// non-zero index (a [`NonZeroU8`]), so one address has one value and `==`,
+/// `Ord` and `Hash` mean what they say. Build one from a [`UnitAddr`] with
+/// [`ParamAddr::unit`] or `From`, which pick the variant; match with
+/// [`as_unit`](Self::as_unit) to see a native address whole.
+///
+/// Deliberately not "plugin"-named — the [`Id`](ParamAddr::Id) arm is any
+/// externally-numbered param, not a plugin concept.
+///
+/// Ordered (every `Unit` before every `Indexed` before every `Id`, each in its
+/// own order) so a map can key on it: the modulation compiler's `TargetKey` is
+/// a node and one.
+///
+/// ```
+/// use tutti_units::{ParamAddr, ParamId, UnitAddr, UnitParam};
+///
+/// let band0 = ParamAddr::unit(UnitAddr::new(UnitParam::Threshold, 0));
+/// assert_eq!(band0, ParamAddr::Unit(UnitParam::Threshold));
+/// let band2 = ParamAddr::unit(UnitAddr::new(UnitParam::Threshold, 2));
+/// assert_eq!(band2.as_unit(), Some(UnitAddr::new(UnitParam::Threshold, 2)));
+/// assert_eq!(ParamAddr::Id(ParamId::new(7)).as_unit(), None);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ParamAddr {
+    /// A param from tutti's known vocabulary, at index 0.
+    Unit(UnitParam),
+    /// A param from tutti's known vocabulary at a non-zero index among the
+    /// node's params of that kind. Build it with [`ParamAddr::unit`], which
+    /// keeps index 0 in [`Unit`](Self::Unit).
+    Indexed(UnitParam, NonZeroU8),
+    /// A param addressed by an opaque numeric id, foreign to tutti's vocabulary.
+    Id(ParamId),
+}
+
+impl ParamAddr {
+    /// The native address `addr`, in its one form: [`Unit`](Self::Unit) at
+    /// index 0, [`Indexed`](Self::Indexed) otherwise.
+    #[must_use]
+    pub const fn unit(addr: UnitAddr) -> Self {
+        match NonZeroU8::new(addr.index) {
+            None => Self::Unit(addr.param),
+            Some(index) => Self::Indexed(addr.param, index),
+        }
+    }
+
+    /// The native address this names, or `None` for a foreign
+    /// [`Id`](Self::Id).
+    #[must_use]
+    pub const fn as_unit(self) -> Option<UnitAddr> {
+        match self {
+            Self::Unit(param) => Some(UnitAddr::first(param)),
+            Self::Indexed(param, index) => Some(UnitAddr::new(param, index.get())),
+            Self::Id(_) => None,
+        }
+    }
+}
+
+impl From<UnitParam> for ParamAddr {
+    #[inline]
+    fn from(p: UnitParam) -> Self {
+        ParamAddr::Unit(p)
+    }
+}
+
+impl From<UnitAddr> for ParamAddr {
+    #[inline]
+    fn from(a: UnitAddr) -> Self {
+        ParamAddr::unit(a)
+    }
+}
+
+/// A plugin-chosen parameter id: VST3 `ParamID`, CLAP `clap_id`, AU
+/// `AudioUnitParameterID`.
+///
+/// **Opaque.** The number is chosen by the plugin and is meaningful only
+/// against the instance that reported it — plenty of plugins derive it from a
+/// hash of the parameter name. It is not an index, not dense, not ordered, and
+/// two plugins may use the same number for unrelated parameters.
+///
+/// That is the whole reason this is a newtype rather than a `u32`: the type has
+/// no algebra, deliberately. There is no `Add`, no `From<usize>`, no `Step`, so
+/// `id + 1` and `for id in 0..n` do not compile. A `u32` in a struct field
+/// invites exactly those.
+///
+/// VST2's parameter has no id of its own, only a position in `[0, numParams)`,
+/// and that position is what its `ParamId` carries (`tutti-vst2-host` converts at
+/// its boundary). The type's algebra is still absent for it: a caller holding a
+/// `ParamId` does not know which format it came from, and must not rely on the
+/// position.
+///
+/// [`Ord`] is derived and is arbitrary-but-total, for map keys and binary
+/// search only (AU's parameter-bounds table sorts by it on the load path). A
+/// comparison between two ids carries no meaning about the parameters; do not
+/// read one as "earlier" or "lower".
+///
+/// Serializes as the bare `u32` it wraps — conversion happens where a format's
+/// number enters, via [`new`](Self::new) / [`get`](Self::get).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(transparent)
+)]
+pub struct ParamId(u32);
+
+impl ParamId {
+    /// Wraps a format-native parameter id.
+    ///
+    /// The absent algebra is the point, so it is pinned here rather than only
+    /// asserted in the type's docs — each of these is a way a `u32` field
+    /// invites treating an opaque id as a position:
+    ///
+    /// ```compile_fail
+    /// # use tutti_units::ParamId;
+    /// let id = ParamId::new(3);
+    /// let _ = id + ParamId::new(1);
+    /// ```
+    /// ```compile_fail
+    /// # use tutti_units::ParamId;
+    /// for _id in ParamId::new(0)..ParamId::new(4) {}
+    /// ```
+    /// ```compile_fail
+    /// # use tutti_units::ParamId;
+    /// let params = ["a", "b"];
+    /// let _ = params[ParamId::new(0)];
+    /// ```
+    /// ```compile_fail
+    /// # use tutti_units::ParamId;
+    /// // A count is not an id: no `From<usize>` to make enumerate() fit.
+    /// let _: ParamId = 0usize.into();
+    /// ```
+    ///
+    /// What *does* compile is the deliberate crossing at a format boundary:
+    ///
+    /// ```
+    /// # use tutti_units::ParamId;
+    /// let id = ParamId::new(0x4000_0001);
+    /// assert_eq!(id.get(), 0x4000_0001);
+    /// ```
+    #[must_use]
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    /// Returns the underlying number, for handing back to the format that
+    /// issued it.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl core::fmt::Display for ParamId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A [`UnitParam`] that knows the unit its value is in.
+///
+/// `UnitParam` alone is untyped: `Cutoff` and `GainDb` both carry an `f32`,
+/// and nothing stops a caller writing a decibel figure to a cutoff. A
+/// `ParamKey<U>` pins the unit, so a value travelling under a key — an
+/// automation ramp, for one — is built from a `U` and read
+/// back as a `U`, with the `f32` in between never exposed.
+///
+/// The keys exist only for parameters whose unit is not in doubt, as
+/// associated constants on the unit: `ParamKey::<Hz>::CUTOFF`,
+/// `ParamKey::<Db>::THRESHOLD`. There is deliberately **no key** yet for
+/// `DelayTime` ("beats or seconds — unit-defined"), `RoomSize` and `Damping`
+/// (bare `0..1` with no unit type of their own), `StereoSpread` (a synth's
+/// unison spread, which no unit type claims), `Pan` (no node holds a `Param<Pan>`
+/// yet), and `Bypass` (a switch, not a
+/// scalar). Each needs its unit decided first; until then they stay reachable
+/// through [`UnitParam`] and cannot be ramped by key.
+///
+/// ```compile_fail
+/// use tutti_units::{Db, ParamKey};
+/// let _ = ParamKey::<Db>::CUTOFF; // a cutoff is not in decibels
+/// ```
+pub struct ParamKey<U> {
+    addr: UnitAddr,
+    _unit: core::marker::PhantomData<fn() -> U>,
+}
+
+impl<U> ParamKey<U> {
+    const fn of(id: UnitParam) -> Self {
+        Self {
+            addr: UnitAddr::first(id),
+            _unit: core::marker::PhantomData,
+        }
+    }
+
+    /// The same kind of param at `index` among a node's params of that kind
+    /// (a multiband compressor's threshold of band `index`): the unit is
+    /// unchanged. Keys are built at index 0.
+    #[inline]
+    #[must_use]
+    pub const fn at(self, index: u8) -> Self {
+        Self {
+            addr: UnitAddr::new(self.addr.param, index),
+            _unit: core::marker::PhantomData,
+        }
+    }
+
+    /// Returns the untyped address (kind and index), for a channel that
+    /// carries it type-erased.
+    #[inline]
+    #[must_use]
+    pub const fn addr(self) -> UnitAddr {
+        self.addr
+    }
+}
+
+// Written out: the derives would demand `U: Clone`/`Eq`/…, and the float units
+// cannot be `Eq`. The key's identity is its address alone.
+impl<U> Clone for ParamKey<U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<U> Copy for ParamKey<U> {}
+impl<U> PartialEq for ParamKey<U> {
+    fn eq(&self, other: &Self) -> bool {
+        self.addr == other.addr
+    }
+}
+impl<U> Eq for ParamKey<U> {}
+impl<U> core::hash::Hash for ParamKey<U> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.addr.hash(state);
+    }
+}
+impl<U> core::fmt::Debug for ParamKey<U> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "ParamKey<{}>({:?})",
+            core::any::type_name::<U>(),
+            self.addr
+        )
+    }
+}
+
+impl<U> From<ParamKey<U>> for UnitAddr {
+    fn from(k: ParamKey<U>) -> Self {
+        k.addr
+    }
+}
+
+use super::units::{
+    Amplitude, Azimuth, Balance, BitDepth, CentsSpan, CompressionRatio, Db, Depth, Drive,
+    Elevation, Feedback, HoldFactor, Hz, Mix, Q, Seconds, Semitones, Spread, StereoWidth,
+};
+
+/// Defines the typed keys, and — from the same lines — the registry
+/// [`ParamKey::registry`] lists, so a test can check every key at once and a
+/// new key cannot be added without landing in it.
+macro_rules! param_keys {
+    ($($unit:ident { $($(#[$m:meta])* $name:ident = $id:ident;)+ })+) => {
+        $(impl ParamKey<$unit> {
+            $($(#[$m])* pub const $name: Self = Self::of(UnitParam::$id);)+
+        })+
+
+        /// Every keyed param, with the name of its unit type.
+        const KEYED: &[(UnitParam, &str)] = &[
+            $($((UnitParam::$id, stringify!($unit)),)+)+
+        ];
+    };
+}
+
+param_keys! {
+    Hz {
+        /// Filter cutoff / centre frequency.
+        CUTOFF = Cutoff;
+        /// Modulation rate.
+        RATE = Rate;
+        /// An audio oscillator's frequency.
+        FREQUENCY = Frequency;
+    }
+    Q {
+        /// Filter Q.
+        Q = Q;
+    }
+    Db {
+        /// Filter / EQ gain.
+        GAIN_DB = GainDb;
+        /// Dynamics threshold.
+        THRESHOLD = Threshold;
+        /// Limiter ceiling.
+        CEILING = Ceiling;
+        /// Compressor make-up gain. No engine node binds it (see
+        /// [`UnitParam::Makeup`]): the compressor's make-up is `GAIN_DB`.
+        MAKEUP = Makeup;
+    }
+    Mix {
+        /// Wet/dry mix.
+        WET = Wet;
+    }
+    Feedback {
+        /// Feedback amount.
+        FEEDBACK = Feedback;
+    }
+    Depth {
+        /// Modulation depth.
+        DEPTH = Depth;
+    }
+    CompressionRatio {
+        /// Compressor ratio.
+        RATIO = Ratio;
+    }
+    Seconds {
+        /// Envelope attack.
+        ATTACK = Attack;
+        /// Envelope release.
+        RELEASE = Release;
+    }
+    Drive {
+        /// Drive / saturation amount.
+        DRIVE = Drive;
+    }
+    Amplitude {
+        /// Synth / master volume (linear).
+        VOLUME = Volume;
+    }
+    CentsSpan {
+        /// Unison detune spread.
+        DETUNE = Detune;
+    }
+    Azimuth {
+        /// A source's bearing.
+        AZIMUTH = Azimuth;
+    }
+    Elevation {
+        /// A source's height.
+        ELEVATION = Elevation;
+    }
+    Spread {
+        /// Panner diffusion.
+        SPREAD = Spread;
+    }
+    StereoWidth {
+        /// Mid/side stereo width.
+        WIDTH = StereoWidth;
+    }
+    Balance {
+        /// A strip's stereo balance.
+        BALANCE = Balance;
+    }
+    BitDepth {
+        /// A quantizer's word length.
+        BIT_DEPTH = BitDepth;
+    }
+    HoldFactor {
+        /// A sample-and-hold's frames per held sample.
+        HOLD_FACTOR = HoldFactor;
+    }
+    Semitones {
+        /// A pitch interval in semitones.
+        SEMITONES = Semitones;
+    }
+}
+
+impl ParamKey<()> {
+    /// Returns every param that has a typed key, with the name of its unit.
+    pub fn registry() -> &'static [(UnitParam, &'static str)] {
+        KEYED
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each typed key names the param its unit belongs to — a key is only as
+    /// good as the pairing, and a swapped pair still compiles.
+    #[test]
+    fn typed_keys_name_their_params() {
+        use crate::units::{Db, Hz, Seconds};
+        assert_eq!(
+            ParamKey::<Hz>::CUTOFF.addr(),
+            UnitAddr::from(UnitParam::Cutoff)
+        );
+        assert_eq!(ParamKey::<Hz>::RATE.addr(), UnitAddr::from(UnitParam::Rate));
+        assert_eq!(
+            ParamKey::<Db>::THRESHOLD.addr(),
+            UnitAddr::from(UnitParam::Threshold)
+        );
+        assert_eq!(
+            ParamKey::<Db>::CEILING.addr(),
+            UnitAddr::from(UnitParam::Ceiling)
+        );
+        assert_eq!(
+            ParamKey::<Db>::GAIN_DB.addr(),
+            UnitAddr::from(UnitParam::GainDb)
+        );
+        assert_eq!(
+            ParamKey::<Db>::MAKEUP.addr(),
+            UnitAddr::from(UnitParam::Makeup)
+        );
+        assert_eq!(
+            ParamKey::<Seconds>::ATTACK.addr(),
+            UnitAddr::from(UnitParam::Attack)
+        );
+        assert_eq!(
+            ParamKey::<Seconds>::RELEASE.addr(),
+            UnitAddr::from(UnitParam::Release)
+        );
+        assert_eq!(
+            ParamKey::<Balance>::BALANCE.addr(),
+            UnitAddr::from(UnitParam::Balance)
+        );
+        assert_ne!(ParamKey::<Hz>::CUTOFF, ParamKey::<Hz>::RATE);
+    }
+
+    /// Every keyed param has exactly one key: no id appears twice (under the
+    /// same unit or under two), so a value can never be read back in a unit
+    /// it was not written in.
+    #[test]
+    fn every_keyed_param_has_one_unit() {
+        let reg = ParamKey::registry();
+        assert!(reg.len() >= 15, "the registry is the macro's full list");
+        let mut ids: Vec<u16> = reg.iter().map(|&(p, _)| u16::from(p)).collect();
+        ids.sort_unstable();
+        let before = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), before, "a UnitParam is keyed twice: {reg:?}");
+    }
+
+    /// Only the bearing is circular; the height and the other widths are a line.
+    #[test]
+    fn only_azimuth_is_circular() {
+        for id in (0..=36u16).filter(|&id| id != 21) {
+            let p = UnitParam::try_from(id).expect("known id");
+            assert_eq!(p.is_circular(), p == UnitParam::Azimuth, "{p:?}");
+        }
+    }
+
+    /// A circular param's arc from 170 to -170 is +20, through the seam, and
+    /// wraps a move's value onto `-180..180`; a line's is the plain difference.
+    #[test]
+    fn a_circular_params_arc_crosses_the_seam_and_a_lines_does_not() {
+        let az = UnitParam::Azimuth;
+        assert_eq!(az.arc(170.0, -170.0), 20.0);
+        assert_eq!(az.arc(-170.0, 170.0), -20.0);
+        assert_eq!(az.wrap(190.0), -170.0);
+        assert_eq!(
+            az.wrap(az.wrap(170.0) + az.arc(170.0, -170.0) * 0.5),
+            -180.0
+        );
+        let el = UnitParam::Elevation;
+        assert_eq!(el.arc(170.0, -170.0), -340.0);
+        assert_eq!(el.wrap(190.0), 190.0);
+    }
+
+    #[test]
+    fn u16_round_trips() {
+        // 21 is retired (it was `Mute`), the one gap.
+        for id in (0..=36u16).filter(|&id| id != 21) {
+            let p = UnitParam::try_from(id).expect("known id");
+            assert_eq!(u16::from(p), id);
+        }
+    }
+
+    /// The discriminants are **stable**: they are a param's address, so
+    /// renumbering one silently re-points every param set against the old
+    /// value. Pinning the two newest by name is what
+    /// [`u16_round_trips`](self::u16_round_trips) cannot do — that loop passes as
+    /// long as each id maps to *some* variant, including a swapped pair.
+    #[test]
+    fn appended_params_keep_their_ids() {
+        assert_eq!(u16::from(UnitParam::Pan), 20);
+        assert_eq!(UnitParam::try_from(20), Ok(UnitParam::Pan));
+        // 21 was `Mute` (deleted, doc 013): retired, so it decodes as nothing
+        // and nothing after it moved.
+        assert_eq!(UnitParam::try_from(21), Err(UnitParamOutOfRange(21)));
+        assert_eq!(u16::from(UnitParam::Knee), 22);
+        // The append must not have disturbed the tail of the existing set.
+        assert_eq!(u16::from(UnitParam::Volume), 17);
+        assert_eq!(u16::from(UnitParam::StereoSpread), 19);
+    }
+
+    /// The reverb kinds are appended after `Solo` and the next id is still
+    /// unknown, so an older build meets `Decay` as an unknown id to ignore.
+    #[test]
+    fn the_reverb_kinds_are_appended() {
+        assert_eq!(u16::from(UnitParam::Decay), 25);
+        assert_eq!(u16::from(UnitParam::Diffusion), 26);
+        assert_eq!(UnitParam::try_from(25), Ok(UnitParam::Decay));
+        assert_eq!(UnitParam::try_from(26), Ok(UnitParam::Diffusion));
+        assert_eq!(UnitParam::try_from(27), Ok(UnitParam::Freeze));
+        assert_eq!(UnitParam::try_from(28), Ok(UnitParam::Azimuth));
+        assert_eq!(UnitParam::try_from(40), Err(UnitParamOutOfRange(40)));
+        // Decay's three bands are indices of one kind.
+        for (index, packed) in [(0u8, 0x0019u16), (1, 0x0119), (2, 0x0219)] {
+            assert_eq!(UnitAddr::new(UnitParam::Decay, index).to_u16(), packed);
+        }
+    }
+
+    /// Every variant, with the id it has always had. The id is persisted
+    /// (and is `AudioParam`'s `P`), so this table is the compatibility
+    /// record: a renumbered or re-ordered variant fails here by name, which
+    /// `u16_round_trips` (any id maps to *some* variant) cannot say.
+    const PINNED: [(UnitParam, u16); 39] = [
+        (UnitParam::Cutoff, 0),
+        (UnitParam::Q, 1),
+        (UnitParam::GainDb, 2),
+        (UnitParam::Wet, 3),
+        (UnitParam::Feedback, 4),
+        (UnitParam::DelayTime, 5),
+        (UnitParam::Rate, 6),
+        (UnitParam::Depth, 7),
+        (UnitParam::RoomSize, 8),
+        (UnitParam::Damping, 9),
+        (UnitParam::Threshold, 10),
+        (UnitParam::Ratio, 11),
+        (UnitParam::Attack, 12),
+        (UnitParam::Release, 13),
+        (UnitParam::Ceiling, 14),
+        (UnitParam::Drive, 15),
+        (UnitParam::Makeup, 16),
+        (UnitParam::Volume, 17),
+        (UnitParam::Detune, 18),
+        (UnitParam::StereoSpread, 19),
+        (UnitParam::Pan, 20),
+        (UnitParam::Knee, 22),
+        (UnitParam::Bypass, 23),
+        (UnitParam::Solo, 24),
+        (UnitParam::Decay, 25),
+        (UnitParam::Diffusion, 26),
+        (UnitParam::Freeze, 27),
+        (UnitParam::Azimuth, 28),
+        (UnitParam::Elevation, 29),
+        (UnitParam::Spread, 30),
+        (UnitParam::StereoWidth, 31),
+        (UnitParam::Hold, 32),
+        (UnitParam::Range, 33),
+        (UnitParam::CrossFeedback, 34),
+        (UnitParam::Frequency, 35),
+        (UnitParam::Balance, 36),
+        (UnitParam::BitDepth, 37),
+        (UnitParam::HoldFactor, 38),
+        (UnitParam::Semitones, 39),
+    ];
+
+    /// **Index 0 is the plain id**, for every param: the packed form of
+    /// `UnitAddr::from(p)` is `p`'s `u16`, and that `u16` decodes to `p` at
+    /// index 0. This is the argument for persisted ids and `AudioParam<U, P>`.
+    #[test]
+    fn index_zero_is_the_plain_id_for_every_param() {
+        for (p, id) in PINNED {
+            assert_eq!(u16::from(p), id, "{p:?} was renumbered");
+            assert_eq!(UnitAddr::from(p).to_u16(), id);
+            assert_eq!(u16::from(UnitAddr::from(p)), id);
+            assert_eq!(UnitAddr::try_from(id), Ok(UnitAddr::new(p, 0)));
+        }
+    }
+
+    /// The index rides the high byte, the kind the low, for every param and
+    /// a spread of indices (and the extremes), and decoding inverts it.
+    #[test]
+    fn index_is_the_high_byte() {
+        for (p, id) in PINNED {
+            for index in [0u8, 1, 2, 7, 127, 255] {
+                let a = UnitAddr::new(p, index);
+                assert_eq!(a.to_u16(), (u16::from(index) << 8) | id, "{a:?}");
+                assert_eq!(UnitAddr::try_from(a.to_u16()), Ok(a));
+            }
+        }
+        assert_eq!(UnitAddr::new(UnitParam::Threshold, 1).to_u16(), 0x010A);
+        assert_eq!(UnitAddr::new(UnitParam::Bypass, 255).to_u16(), 0xFF17);
+    }
+
+    /// A packed id whose low byte is not a known kind is refused whatever its
+    /// index, and a bare `UnitParam` refuses an indexed id: `UnitParam::try_from`
+    /// stays the strict, index-free decode.
+    #[test]
+    fn unknown_kinds_and_indexed_ids_are_refused_by_the_right_decoder() {
+        assert_eq!(UnitAddr::try_from(0x0140), Err(UnitParamOutOfRange(0x0140)));
+        assert_eq!(UnitAddr::try_from(0x00FF), Err(UnitParamOutOfRange(0x00FF)));
+        // 9_999 is 0x270F: kind 15 at index 39, which is a known kind.
+        assert_eq!(
+            UnitAddr::try_from(9_999),
+            Ok(UnitAddr::new(UnitParam::Drive, 39))
+        );
+        assert_eq!(
+            UnitParam::try_from(0x010A),
+            Err(UnitParamOutOfRange(0x010A))
+        );
+    }
+
+    /// The error names the id whole and its low byte (the kind a `u16`
+    /// decode looks at).
+    #[test]
+    fn the_out_of_range_error_names_the_low_byte() {
+        let e = UnitAddr::try_from(0x0140).unwrap_err();
+        assert_eq!(e.to_string(), "unknown UnitParam id: 320 (low byte 64)");
+    }
+
+    /// An address is equal to a bare param only at index 0, in both
+    /// directions.
+    #[test]
+    fn an_address_equals_a_bare_param_only_at_index_zero() {
+        let t = UnitParam::Threshold;
+        assert!(UnitAddr::new(t, 0) == t);
+        assert!(t == UnitAddr::new(t, 0));
+        assert!(UnitAddr::new(t, 1) != t);
+        assert!(t != UnitAddr::new(t, 1));
+        assert!(UnitAddr::new(UnitParam::Ratio, 0) != t);
+    }
+
+    /// `ParamAddr` keeps one value per address: index 0 is `Unit`, a non-zero
+    /// index `Indexed`, and `as_unit` inverts both.
+    #[test]
+    fn param_addr_has_one_form_per_address() {
+        for (p, _) in PINNED {
+            let zero = UnitAddr::new(p, 0);
+            assert_eq!(ParamAddr::unit(zero), ParamAddr::Unit(p));
+            assert_eq!(ParamAddr::from(p), ParamAddr::unit(zero));
+            assert_eq!(ParamAddr::unit(zero).as_unit(), Some(zero));
+            let one = UnitAddr::new(p, 1);
+            let a = ParamAddr::unit(one);
+            assert!(matches!(a, ParamAddr::Indexed(q, i) if q == p && i.get() == 1));
+            assert_eq!(a.as_unit(), Some(one));
+            assert_ne!(a, ParamAddr::Unit(p));
+        }
+        assert_eq!(ParamAddr::Id(ParamId::new(3)).as_unit(), None);
+        // Native before foreign, and indices in order, so a map keys on it.
+        assert!(
+            ParamAddr::unit(UnitAddr::new(UnitParam::Bypass, 9)) < ParamAddr::Id(ParamId::new(0)),
+            "native before foreign"
+        );
+        assert!(
+            ParamAddr::Unit(UnitParam::Bypass)
+                < ParamAddr::unit(UnitAddr::new(UnitParam::Cutoff, 1))
+        );
+    }
+
+    /// A typed key moved to another index keeps its kind and unit, changes
+    /// its address, and compares unequal to the index-0 key.
+    #[test]
+    fn a_key_at_an_index_is_a_different_key() {
+        use crate::units::Db;
+        let t0 = ParamKey::<Db>::THRESHOLD;
+        let t2 = t0.at(2);
+        assert_eq!(t2.addr().param, UnitParam::Threshold);
+        assert_eq!(t2.addr(), UnitAddr::new(UnitParam::Threshold, 2));
+        assert_eq!(t0.addr(), UnitAddr::from(UnitParam::Threshold));
+        assert_ne!(t0, t2);
+        assert_eq!(t0.at(0), t0);
+        assert_eq!(UnitAddr::from(t2), t2.addr());
+    }
+
+    #[test]
+    fn unknown_id_is_err() {
+        assert_eq!(UnitParam::try_from(9999), Err(UnitParamOutOfRange(9999)));
+    }
+}

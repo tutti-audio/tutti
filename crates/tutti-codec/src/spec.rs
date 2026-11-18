@@ -3,7 +3,8 @@
 use crate::error::{Result, SpecError};
 use crate::format::Format;
 use std::num::NonZeroU32;
-use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::SampleRate;
 
 /// Everything an [`Encoder`](crate::Encoder) needs to start a file.
 ///
@@ -22,7 +23,8 @@ use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
 ///
 /// ```compile_fail,E0451
 /// # use tutti_codec::{Format, Pcm, Spec};
-/// # use tutti_types::{ChannelTopology, SampleRate};
+/// # use tutti_units::SampleRate;
+/// # use tutti_types::ChannelTopology;
 /// let _ = Spec {
 ///     format: Format::Wav(Pcm::Int16),
 ///     topology: tutti_types::Bed::Quad.topology(),

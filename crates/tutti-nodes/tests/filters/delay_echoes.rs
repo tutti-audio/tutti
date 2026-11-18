@@ -9,7 +9,8 @@ use tutti_buffers::Planes;
 use tutti_fixtures::signal::{impulse, sine};
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{DelayControls, DelayLayout, DelayNode, InterpolationMode, MaxDelay, Routing};
-use tutti_types::{Amplitude, BusTopology, Feedback, Hz, SampleRate, Samples, Seconds};
+use tutti_types::BusTopology;
+use tutti_units::{Amplitude, Feedback, Hz, SampleRate, Samples, Seconds};
 
 const SR: SampleRate = SampleRate::of(1_024.0);
 /// A second of line: every time here is a few frames of it.

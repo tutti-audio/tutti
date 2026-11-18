@@ -603,7 +603,7 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::mpsc::sync_channel;
     use std::time::{Duration, Instant};
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     fn session(builder: crate::SessionBuilder) -> crate::DetachedSession {
         builder.build_detached(SampleRate::SR_48K).unwrap()

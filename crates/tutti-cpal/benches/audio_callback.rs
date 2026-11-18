@@ -25,8 +25,9 @@ use tutti_graph::{NodeKey, TapAlign, TapId};
 use tutti_graph::{OutPort, Source};
 use tutti_nodes::testing::Osc;
 use tutti_transport::Transport;
-use tutti_types::SampleRate;
-use tutti_types::{ChannelLayout, Hz, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
+use tutti_units::{Hz, Samples};
 
 const SR: f64 = 48_000.0;
 

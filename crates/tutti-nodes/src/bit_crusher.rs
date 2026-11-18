@@ -3,7 +3,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{BitCrusher, BitCrusherControls, COEFF_INTERVAL};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{BitDepth, BusTopology, ChannelLayout, HoldFactor, MaxBlock, SampleRate, Tail};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{BitDepth, HoldFactor, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -160,7 +161,7 @@ mod tests {
     use crate::test_support::{drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::{Latency, UnitParam};
+    use tutti_units::{Latency, UnitParam};
 
     fn node(width: u16, bits: f32, hold: f32) -> BitCrusherNode {
         prepared(BitCrusherNode::from(

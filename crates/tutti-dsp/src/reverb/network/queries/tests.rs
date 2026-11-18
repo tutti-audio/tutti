@@ -1,4 +1,4 @@
-use tutti_types::{Amplitude, Gain, SampleRate, SampleSpan};
+use tutti_units::{Amplitude, Gain, SampleRate, SampleSpan};
 
 use super::super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Gains, Inline, Line, LineModulation,
@@ -134,12 +134,12 @@ fn a_one_pole_has_its_gain_at_dc_a_quarter_rate_and_nyquist() {
         low: Amplitude(0.9),
         mid: Amplitude(0.8),
         high: Amplitude(0.7),
-        crossover: [tutti_types::Hz(200.0), tutti_types::Hz(2000.0)],
+        crossover: [tutti_units::Hz(200.0), tutti_units::Hz(2000.0)],
     };
     assert_eq!(Band::ALL.map(|x| b.gain(x)), [0.9, 0.8, 0.7].map(Amplitude));
     let from = Absorption::from_rt60(
         [Seconds(2.0), Seconds(1.0), Seconds(0.5)],
-        [tutti_types::Hz(200.0), tutti_types::Hz(2000.0)],
+        [tutti_units::Hz(200.0), tutti_units::Hz(2000.0)],
         SampleSpan::of(4800.0),
         RATE,
     );
@@ -232,7 +232,7 @@ fn stability_follows_the_gains_and_the_matrix() {
         low: Amplitude(1.0),
         mid: Amplitude(0.9),
         high: Amplitude(0.9),
-        crossover: [tutti_types::Hz(200.0), tutti_types::Hz(2000.0)],
+        crossover: [tutti_units::Hz(200.0), tutti_units::Hz(2000.0)],
     };
     let n = network(&[Stage::Fdn(fdn(
         &[line(100.0, low_only), line(130.0, low_only)],
@@ -297,7 +297,7 @@ fn a_lossless_loop_is_marginally_stable_with_an_unbounded_tail() {
         low: Amplitude(1.0),
         mid: Amplitude(1.0),
         high: Amplitude(0.999),
-        crossover: [tutti_types::Hz(200.0), tutti_types::Hz(2000.0)],
+        crossover: [tutti_units::Hz(200.0), tutti_units::Hz(2000.0)],
     };
     let n = network(&[Stage::Fdn(fdn(
         &[line(100.0, almost), line(130.0, almost)],
@@ -459,7 +459,7 @@ fn a_capacity_measures_every_figure_of_its_network() {
             Line {
                 modulation: LineModulation {
                     depth: SampleSpan::of(2.0),
-                    rate: tutti_types::Hz(1.0),
+                    rate: tutti_units::Hz(1.0),
                 },
                 ..line(200.0, g)
             },

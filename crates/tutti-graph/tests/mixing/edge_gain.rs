@@ -21,7 +21,8 @@ use tutti_graph::{
     GraphInvalid, GraphSpec, InPort, Io, Node, NodeKey, Op, OutPort, Plan, Prepare, Renderer,
     Shape, Sink, Source, Status, Topology, TransportPosition, Unforkable, ValidGraph, compile,
 };
-use tutti_types::{Amplitude, ChannelLayout};
+use tutti_types::ChannelLayout;
+use tutti_units::Amplitude;
 
 const BLOCK: usize = 64;
 

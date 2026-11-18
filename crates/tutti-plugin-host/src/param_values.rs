@@ -34,7 +34,7 @@ use tutti_rt::LockExt;
 
 use crate::{Notice, PluginHandle, Subscription};
 use tutti_plugin_types::{Normalized, ParamRange, ParameterInfo};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// Edits the plugin reported or the host set, in order, waiting for
 /// [`PluginParamValues::drain_edits`].
@@ -329,7 +329,7 @@ mod tests {
         AnyThread, AutomationMode, AutomationModeError, Health, PluginFailure, RenderMode,
         TerminationReason,
     };
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     /// A backend listing `params` (address, value); a value of `None` is a
     /// parameter it lists but does not answer.
@@ -384,7 +384,7 @@ mod tests {
         fn crash_cause(&self) -> Option<PluginFailure> {
             None
         }
-        fn rate_refusal(&self) -> Option<(tutti_types::SampleRate, String)> {
+        fn rate_refusal(&self) -> Option<(tutti_units::SampleRate, String)> {
             None
         }
         fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
@@ -416,7 +416,7 @@ mod tests {
     /// declared parameter has a value.
     #[test]
     fn a_read_returns_the_descriptors_values_and_landing_it_makes_the_mirror_ready() {
-        use tutti_types::ParamId;
+        use tutti_units::ParamId;
         let opaque = ParamId::new(7);
         let index = ParamId::new(3);
         let silent = ParamId::new(9);
@@ -464,7 +464,7 @@ mod tests {
     #[test]
     fn a_reported_edit_waits_for_the_read_then_reaches_the_mirror() {
         use tutti_plugin_types::ParamEdit;
-        use tutti_types::ParamId;
+        use tutti_units::ParamId;
         let (plugin, sink) = handle(vec![(ParamId::new(1), Some(0.1))]);
         let (mut mirror, read) = PluginParamValues::start(&plugin);
 
@@ -499,7 +499,7 @@ mod tests {
     /// second read landing replaces the declarations and the values together.
     #[test]
     fn a_host_set_reads_back_and_a_landed_read_replaces_everything() {
-        use tutti_types::ParamId;
+        use tutti_units::ParamId;
         let id = ParamId::new(5);
         let (plugin, _) = handle(vec![(id, Some(0.2))]);
         let (mut mirror, read) = PluginParamValues::start(&plugin);

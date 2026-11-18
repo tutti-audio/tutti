@@ -12,9 +12,8 @@ fn detect_tells_the_two_midi_formats_apart() {
     assert_eq!(MidiFileKind::detect(&clip), Some(MidiFileKind::ClipFile));
 
     let smf = MidiFile::smf(
-        crate::SmfFormat::SingleTrack,
         crate::SmfDivision::per_quarter(480),
-        vec![crate::Track::default()],
+        crate::Layout::Format0(crate::LeadTrack::new(crate::Track::default())),
     )
     .unwrap()
     .to_bytes();

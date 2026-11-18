@@ -41,8 +41,8 @@ use tutti_fixtures::midi;
 use tutti_plugin_types::{
     BlockStatus, ChannelLayout, ChannelTable, ChunkCounters, MidiEventVec, SampleFormat,
 };
-use tutti_types::{SampleRate, Samples};
 use tutti_ump::MidiChannel;
+use tutti_units::{SampleRate, Samples};
 
 /// The bridge's editor loader: these peers never open an editor, and one that
 /// tried is refused (the suite loads no plugin format).
@@ -70,7 +70,7 @@ impl crate::Chunks for MidiEventVec {
     fn take(&mut self, _from: usize, _n: usize, _at: usize) {}
 
     fn payload(&mut self, _frames: usize) -> BlockPayload {
-        BlockPayload::new(tutti_types::SampleRate::SR_48K)
+        BlockPayload::new(tutti_units::SampleRate::SR_48K)
     }
 
     fn midi_out(&mut self, events: &MidiEventVec) {
@@ -1578,7 +1578,7 @@ impl crate::Chunks for StatusProbe {
     fn take(&mut self, _from: usize, _n: usize, _at: usize) {}
 
     fn payload(&mut self, _frames: usize) -> BlockPayload {
-        BlockPayload::new(tutti_types::SampleRate::SR_48K)
+        BlockPayload::new(tutti_units::SampleRate::SR_48K)
     }
 
     fn midi_out(&mut self, _events: &MidiEventVec) {}
@@ -1669,7 +1669,7 @@ impl crate::Chunks for LossProbe {
         };
         BlockPayload {
             midi: std::iter::repeat_n(note, self.midi).collect(),
-            ..BlockPayload::new(tutti_types::SampleRate::SR_48K)
+            ..BlockPayload::new(tutti_units::SampleRate::SR_48K)
         }
     }
 
@@ -1914,7 +1914,7 @@ fn two_stale_blocks(
             &mut tutti_plugin_types::ParameterChanges::new(),
             Default::default(),
             Default::default(),
-            tutti_plugin_types::TransportInfo::new(tutti_types::SampleRate::SR_48K),
+            tutti_plugin_types::TransportInfo::new(tutti_units::SampleRate::SR_48K),
             Default::default(),
         );
         assert!(submitted.block);

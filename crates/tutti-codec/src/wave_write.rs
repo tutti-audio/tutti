@@ -3,7 +3,7 @@
 use crate::{Encoder, Format, Result, Spec};
 use std::path::Path;
 use tutti_buffers::{InterleavedMut, Sample, Wave, interleave};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// Frames written to the encoder at a time by [`write_wave`].
 const WRITE_CHUNK: usize = 8192;
@@ -30,7 +30,7 @@ const WRITE_CHUNK: usize = 8192;
 /// # #[cfg(all(feature = "encode-wav", feature = "decode-wav"))] {
 /// use tutti_buffers::Mono;
 /// use tutti_codec::{Format, Pcm, read_wave, write_wave};
-/// use tutti_types::SampleRate;
+/// use tutti_units::SampleRate;
 /// use tutti_buffers::Wave;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {

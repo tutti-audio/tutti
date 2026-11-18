@@ -2,7 +2,7 @@ use super::*;
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, prepared};
 use tutti_types::MaxBlock;
-use tutti_types::UnitParam;
+use tutti_units::UnitParam;
 
 use tutti_dsp::SpeakerLayout;
 
@@ -359,7 +359,7 @@ fn a_non_finite_control_reads_as_unchanged() {
 #[test]
 fn the_inserted_params_move_the_running_node() {
     use tutti_graph::Solo;
-    use tutti_types::Samples;
+    use tutti_units::Samples;
 
     let mut solo = Solo::new(
         VbapPannerNode::stereo(),

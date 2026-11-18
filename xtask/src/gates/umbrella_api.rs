@@ -731,8 +731,8 @@ mod tests {
     const LIB: &str = "\
 pub use tutti_graph::{Node, Shape as NodeShape, make_node};
 pub mod types {
-    pub use tutti_types::Samples;
-    pub use tutti_types::value;
+    pub use tutti_units::Samples;
+    pub use tutti_units::value;
 }
 pub use tutti_nodes::SvfType;
 ";
@@ -869,17 +869,17 @@ pub use tutti_nodes::SvfType;
     #[test]
     fn a_module_exported_by_name_covers_the_paths_that_start_with_it() {
         let api = "pub struct tutti_graph::Node\n\
-                   pub fn tutti_graph::Node::a(&self) -> tutti_types::value::Unit\n\
-                   pub fn tutti_graph::Node::b(&self) -> tutti_types::value::units::Beat\n\
-                   pub fn tutti_graph::Node::c(&self) -> tutti_types::other::Unit\n\
-                   pub fn tutti_graph::Node::d(&self) -> tutti_types::other::value::Unit\n\
-                   pub fn tutti_graph::Node::e(&self) -> tutti_types::values::Unit\n";
+                   pub fn tutti_graph::Node::a(&self) -> tutti_units::value::Unit\n\
+                   pub fn tutti_graph::Node::b(&self) -> tutti_units::value::units::Beat\n\
+                   pub fn tutti_graph::Node::c(&self) -> tutti_units::other::Unit\n\
+                   pub fn tutti_graph::Node::d(&self) -> tutti_units::other::value::Unit\n\
+                   pub fn tutti_graph::Node::e(&self) -> tutti_units::values::Unit\n";
         assert_eq!(
             missing(api),
             [
-                "tutti_types::other::Unit <- tutti_graph::Node",
-                "tutti_types::other::value::Unit <- tutti_graph::Node",
-                "tutti_types::values::Unit <- tutti_graph::Node",
+                "tutti_units::other::Unit <- tutti_graph::Node",
+                "tutti_units::other::value::Unit <- tutti_graph::Node",
+                "tutti_units::values::Unit <- tutti_graph::Node",
             ]
         );
     }
@@ -958,50 +958,50 @@ pub use tutti_nodes::SvfType;
             (
                 "tutti_graph",
                 "pub struct tutti_graph::Node\n\
-                 pub fn tutti_graph::Node::a(&self, tutti_types::value::samples::Samples)\n",
+                 pub fn tutti_graph::Node::a(&self, tutti_units::value::samples::Samples)\n",
             ),
             (
-                "tutti_types",
-                "pub struct tutti_types::Samples(pub usize)\n",
+                "tutti_units",
+                "pub struct tutti_units::Samples(pub usize)\n",
             ),
         ];
-        let lib = "pub use tutti_graph::Node;\npub use tutti_types::Samples;\n";
+        let lib = "pub use tutti_graph::Node;\npub use tutti_units::Samples;\n";
         assert_eq!(analyze(&texts, lib).missing, none());
         let lib = "pub use tutti_graph::Node;\n";
         assert_eq!(
             analyze(&texts, lib).missing,
-            ["tutti_types::value::samples::Samples <- tutti_graph::Node"]
+            ["tutti_units::value::samples::Samples <- tutti_graph::Node"]
         );
     }
 
     #[test]
     fn a_private_path_is_not_aliased_when_the_name_is_exported_twice_or_the_path_is_published() {
         let graph = "pub struct tutti_graph::Node\n\
-                     pub fn tutti_graph::Node::a(&self, tutti_types::hidden::Samples)\n";
+                     pub fn tutti_graph::Node::a(&self, tutti_units::hidden::Samples)\n";
         let covered = |types: &'static str, lib: &str| {
-            analyze(&[("tutti_graph", graph), ("tutti_types", types)], lib).missing
+            analyze(&[("tutti_graph", graph), ("tutti_units", types)], lib).missing
         };
-        let one = "pub struct tutti_types::Samples(pub usize)\n";
-        let lib = "pub use tutti_graph::Node;\npub use tutti_types::Samples;\n";
+        let one = "pub struct tutti_units::Samples(pub usize)\n";
+        let lib = "pub use tutti_graph::Node;\npub use tutti_units::Samples;\n";
         assert_eq!(covered(one, lib), none());
         // Two exports of the name leave the private path unresolved.
-        let two = "pub struct tutti_types::Samples(pub usize)\n\
-                   pub struct tutti_types::other::Samples(pub usize)\n";
-        let lib2 = "pub use tutti_graph::Node;\npub use tutti_types::Samples;\n\
-                    pub use tutti_types::other::Samples as OtherSamples;\n";
+        let two = "pub struct tutti_units::Samples(pub usize)\n\
+                   pub struct tutti_units::other::Samples(pub usize)\n";
+        let lib2 = "pub use tutti_graph::Node;\npub use tutti_units::Samples;\n\
+                    pub use tutti_units::other::Samples as OtherSamples;\n";
         assert_eq!(
             covered(two, lib2),
-            ["tutti_types::hidden::Samples <- tutti_graph::Node"]
+            ["tutti_units::hidden::Samples <- tutti_graph::Node"]
         );
         // A path in a public module, or with its own `pub use`, is its own type.
         for own in [
-            "pub mod tutti_types::hidden\npub struct tutti_types::hidden::Samples(pub usize)\n",
-            "pub use tutti_types::hidden::Samples\n",
+            "pub mod tutti_units::hidden\npub struct tutti_units::hidden::Samples(pub usize)\n",
+            "pub use tutti_units::hidden::Samples\n",
         ] {
             let text: &'static str = Box::leak(format!("{one}{own}").into_boxed_str());
             assert_eq!(
                 covered(text, lib),
-                ["tutti_types::hidden::Samples <- tutti_graph::Node"],
+                ["tutti_units::hidden::Samples <- tutti_graph::Node"],
                 "{own}"
             );
         }
@@ -1092,16 +1092,16 @@ pub use tutti_nodes::SvfType;
 
     #[test]
     fn whole_and_glob_exports_name_no_item() {
-        let lib = "pub use tutti_graph as graph;\npub use tutti_types::value::*;\n\
+        let lib = "pub use tutti_graph as graph;\npub use tutti_units::value::*;\n\
                    pub use tutti_graph::Node;\n";
         assert_eq!(reexported_crates(lib), ["tutti_graph"]);
         let api = "pub struct tutti_graph::Node\n\
-                   pub fn tutti_graph::Node::a(&self) -> tutti_types::value::Unit\n\
+                   pub fn tutti_graph::Node::a(&self) -> tutti_units::value::Unit\n\
                    pub fn tutti_graph::Hidden::a(&self) -> tutti_graph::Cx\n";
         // The glob covers nothing, and the whole crate makes no export of its items.
         assert_eq!(
             run_in(lib, api).missing,
-            ["tutti_types::value::Unit <- tutti_graph::Node"]
+            ["tutti_units::value::Unit <- tutti_graph::Node"]
         );
     }
 
@@ -1135,7 +1135,7 @@ pub use tutti_nodes::SvfType;
             [
                 "tutti_graph".to_owned(),
                 "tutti_nodes".to_owned(),
-                "tutti_types".to_owned()
+                "tutti_units".to_owned()
             ]
         );
     }
@@ -1262,13 +1262,13 @@ pub use tutti_nodes::SvfType;
     fn a_re_export_with_one_candidate_is_covered_and_reported_as_a_decision() {
         let a = re_export(
             "pub use tutti_nodes::Amp\n\
-             pub fn tutti_nodes::LfoNode::f(&self, tutti_types::level::Amp, tutti_types::level::Other)\n",
+             pub fn tutti_nodes::LfoNode::f(&self, tutti_units::level::Amp, tutti_units::level::Other)\n",
         );
         assert_eq!(
             a.missing,
-            ["tutti_types::level::Other <- tutti_nodes::LfoNode"]
+            ["tutti_units::level::Other <- tutti_nodes::LfoNode"]
         );
-        assert_eq!(a.decisions, ["tutti_nodes::Amp -> tutti_types::level::Amp"]);
+        assert_eq!(a.decisions, ["tutti_nodes::Amp -> tutti_units::level::Amp"]);
         assert_eq!(a.ambiguous, none());
     }
 
@@ -1298,11 +1298,11 @@ pub use tutti_nodes::SvfType;
     fn a_leaf_named_from_two_crates_is_ambiguous() {
         let a = re_export(
             "pub use tutti_nodes::Amp\n\
-             pub fn tutti_nodes::LfoNode::f(&self, tutti_types::Amp, tutti_dsp::Amp)\n",
+             pub fn tutti_nodes::LfoNode::f(&self, tutti_units::Amp, tutti_dsp::Amp)\n",
         );
         assert_eq!(
             a.ambiguous,
-            ["tutti_nodes::Amp: ambiguous: tutti_dsp::Amp, tutti_types::Amp"]
+            ["tutti_nodes::Amp: ambiguous: tutti_dsp::Amp, tutti_units::Amp"]
         );
         assert_eq!(a.decisions, none());
     }
@@ -1323,13 +1323,13 @@ pub use tutti_nodes::SvfType;
         let lib = "pub use tutti_nodes::automation::{Curve, Law};\n";
         let nodes = "pub use tutti_nodes::automation::Curve\n\
                      pub use tutti_nodes::automation::Law\n\
-                     pub fn tutti_nodes::automation::Lane::f(&self, tutti_types::curve::Curve, tutti_types::curve::Law)\n";
+                     pub fn tutti_nodes::automation::Lane::f(&self, tutti_units::curve::Curve, tutti_units::curve::Law)\n";
         let a = analyze(&[("tutti_nodes", nodes)], lib);
         assert_eq!(
             a.decisions,
             [
-                "tutti_nodes::automation::Curve -> tutti_types::curve::Curve",
-                "tutti_nodes::automation::Law -> tutti_types::curve::Law"
+                "tutti_nodes::automation::Curve -> tutti_units::curve::Curve",
+                "tutti_nodes::automation::Law -> tutti_units::curve::Law"
             ]
         );
         assert_eq!(a.ambiguous, none());

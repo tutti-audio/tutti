@@ -3,8 +3,9 @@ use crate::testing::aim;
 use tutti_buffers::Planes;
 use tutti_dsp::HRTF_STEP;
 use tutti_graph::contract::{drive, prepared};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{ChannelLayout, UnitParam};
+use tutti_units::UnitParam;
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 const BLOCK: usize = 64;

@@ -6,7 +6,8 @@ use tutti_graph::{GraphBuilder, Prepare};
 use tutti_nodes::testing::{Const, vbap_mix};
 use tutti_nodes::{VbapError, VbapPannerNode};
 use tutti_types::MaxBlock;
-use tutti_types::{Azimuth, Bed, ChannelLayout, SampleRate, Samples};
+use tutti_types::{Bed, ChannelLayout};
+use tutti_units::{Azimuth, SampleRate, Samples};
 
 /// A panner per bearing (a DC `[1.0, 1.0]` source each), wired by
 /// [`vbap_mix`]. Renders 49 blocks of 256 frames, past the panners' ~0.05 s

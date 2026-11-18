@@ -79,7 +79,7 @@ use tutti_plugin_types::{
     BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
     SampleFormat, TransportChanges, TransportInfo, WireMidi,
 };
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 /// The FIFO and the ring in one wire format `T`, each row `ceiling` frames
 /// long.

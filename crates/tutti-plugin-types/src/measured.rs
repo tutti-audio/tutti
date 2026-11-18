@@ -7,7 +7,8 @@
 //! only consumer of the figures is [`Processing::ceiling`](crate::Processing),
 //! which a measurement can only raise.
 
-use tutti_types::{Db, MaxBlock, SampleRate, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{Db, SampleRate, Samples};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

@@ -21,7 +21,7 @@
 //! The delay has **no latency**: the echo is the effect, not processing delay.
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
-use tutti_types::{Feedback, Gain, SampleRate, SampleSpan, Samples, Seconds};
+use tutti_units::{Feedback, Gain, SampleRate, SampleSpan, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 use super::routing::Routing;

@@ -56,9 +56,10 @@ use tutti_nodes::testing::Osc;
 use tutti_nodes::{BusStripNode, EqBandNode, SvfFilterNode, SvfType};
 use tutti_transport::MotionEvent;
 use tutti_transport::Transport;
-use tutti_types::{Bpm, Samples};
-use tutti_types::{ChannelLayout, SampleRate};
-use tutti_types::{Db, Hz, Q};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
+use tutti_units::{Bpm, Samples};
+use tutti_units::{Db, Hz, Q};
 
 const SR: f64 = 48_000.0;
 
@@ -233,7 +234,7 @@ struct Sine {
 impl tutti_graph::Node for Sine {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_types::Tail::Unbounded)
+            .with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, p: &tutti_graph::Prepare) {
         self.dt = (1.0 / p.sample_rate().get()) as f32;
@@ -280,7 +281,7 @@ impl Lowpass {
 impl tutti_graph::Node for Lowpass {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::through_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_types::Tail::Unknown)
+            .with_tail(tutti_units::Tail::Unknown)
             .with_in_place()
     }
     fn prepare(&mut self, p: &tutti_graph::Prepare) {
@@ -320,7 +321,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
     use tutti_graph::{Edge, InPort, OutPort, Source};
     let (mut ed, exec) = tutti_graph::Editor::new(tutti_graph::Prepare::new(
         SampleRate::of(SR),
-        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
     ));
     let src: Box<dyn tutti_graph::Node> = if ours {
         tutti_graph::IntoNode::into_node(Osc::sine(Hz(440.0))).0

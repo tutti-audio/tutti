@@ -11,7 +11,7 @@ use tutti_measure::{
     TuningOffset, detect_chords, estimate_key,
 };
 use tutti_measure::{Chroma, Error, Framing, Result};
-use tutti_types::{Cents, SampleRate, Samples};
+use tutti_units::{Cents, SampleRate, Samples};
 
 const SR: f64 = 22_050.0;
 

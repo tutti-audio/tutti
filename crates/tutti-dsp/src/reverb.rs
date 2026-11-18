@@ -16,7 +16,7 @@ pub(crate) mod freeverb;
 pub(crate) mod network;
 pub(crate) mod plate;
 
-use tutti_types::{SampleRate, Seconds, Tail};
+use tutti_units::{SampleRate, Seconds, Tail};
 
 use crate::{Ring, Steps};
 

@@ -1,5 +1,5 @@
 use super::*;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// A hostile control reads as `Seconds::one_pole_coeff` defines its edges: a NaN, negative or
 /// zero time is instant (coefficient 1) and an infinite one holds (coefficient 0), at every

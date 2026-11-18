@@ -11,8 +11,8 @@ use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use std::ffi::CStr;
 
 use tutti_graph::Offset;
-use tutti_types::Samples;
 use tutti_ump::MidiChannel;
+use tutti_units::Samples;
 use tutti_vst3_host::{InputEvents, Library, ParameterChanges, TransportInfo};
 
 /// A block longer than any offset these tests place an event at.

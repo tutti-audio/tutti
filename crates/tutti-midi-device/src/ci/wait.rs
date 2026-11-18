@@ -16,7 +16,7 @@ use super::Ack;
 /// and [`PE_TIMEOUT`](crate::PE_TIMEOUT) (M2-103 §12.2, under 3 seconds).
 pub const PEER_REPLY_TIMEOUT: Duration = Duration::from_secs(3);
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// How long a Timeout Wait asks to keep a transaction open: 0 to 127 tenths of
     /// a second, 0 to 12.7 s (M2-101 Table 14, M2-103 §12.2.1).
     #[derive(Eq, Hash)]

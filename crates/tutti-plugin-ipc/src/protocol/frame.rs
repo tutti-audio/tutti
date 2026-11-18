@@ -156,6 +156,85 @@ pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> BridgeResult<T> {
     })
 }
 
+/// The frame buffers of one connection that may not allocate per frame: an
+/// inbound and an outbound body of a capacity fixed when it is built.
+///
+/// [`read`](Self::read) refuses a frame longer than the inbound capacity
+/// before reading its body (the length is the peer's to choose), and
+/// [`write`](Self::write) refuses a message that does not serialize into the
+/// outbound one. Neither grows a buffer or touches the heap, and the buffers
+/// are never trimmed: build one off the thread that reads and writes, and
+/// move it there. The wire is the same as [`read_frame`] and [`write_frame`].
+///
+/// ```
+/// use tutti_plugin_ipc::FrameBuf;
+///
+/// let mut buf = FrameBuf::new(16, 16);
+/// let mut wire = Vec::new();
+/// buf.write(&mut wire, &0x0102u16).unwrap();
+/// let back: u16 = buf.read(&mut wire.as_slice()).unwrap();
+/// assert_eq!(back, 0x0102);
+/// ```
+#[derive(Debug)]
+pub struct FrameBuf {
+    inbound: Box<[u8]>,
+    outbound: Box<[u8]>,
+}
+
+impl FrameBuf {
+    /// Buffers for inbound bodies of up to `inbound` bytes and outbound
+    /// bodies of up to `outbound`, each at most [`MAX_FRAME_BYTES`], the most
+    /// a frame may carry. Allocates: build it off the audio thread.
+    #[must_use]
+    pub fn new(inbound: usize, outbound: usize) -> Self {
+        Self {
+            inbound: vec![0; inbound.min(MAX_FRAME_BYTES)].into_boxed_slice(),
+            outbound: vec![0; outbound.min(MAX_FRAME_BYTES) + PREFIX_BYTES].into_boxed_slice(),
+        }
+    }
+
+    /// Blocks until one whole frame has been read, and decodes it.
+    ///
+    /// # Errors
+    ///
+    /// An I/O error on EOF or a short read; `FrameTooLarge` for an advertised
+    /// length over the inbound capacity (or [`MAX_FRAME_BYTES`]), before any
+    /// body is read; a codec error for a body that does not decode as exactly
+    /// one message.
+    pub fn read<R: Read, T: DeserializeOwned>(&mut self, r: &mut R) -> BridgeResult<T> {
+        let mut prefix = [0u8; PREFIX_BYTES];
+        r.read_exact(&mut prefix)?;
+        let len = decode_prefix(prefix)?;
+        if len > self.inbound.len() {
+            return Err(FrameTooLarge {
+                len,
+                limit: self.inbound.len(),
+            }
+            .into());
+        }
+        let body = &mut self.inbound[..len];
+        r.read_exact(body)?;
+        decode_body(body)
+    }
+
+    /// Serializes `msg` and writes it as one frame, in one write, then flushes.
+    ///
+    /// # Errors
+    ///
+    /// A serialization error when the message does not fit the outbound
+    /// capacity, with nothing written; an I/O error otherwise.
+    pub fn write<W: Write, T: Serialize>(&mut self, w: &mut W, msg: &T) -> BridgeResult<()> {
+        let (prefix, body) = self.outbound.split_at_mut(PREFIX_BYTES);
+        let len = postcard::to_slice(msg, body).map_err(codec)?.len();
+        prefix.copy_from_slice(&encode_prefix(len)?);
+        w.write_all(&self.outbound[..PREFIX_BYTES + len])?;
+        Ok(w.flush()?)
+    }
+}
+
+/// The bytes of a frame's length prefix.
+const PREFIX_BYTES: usize = 4;
+
 /// The two bounds `MAX_FRAME_BYTES` has to sit between, checked at compile time.
 ///
 /// A `const` block rather than a `#[test]`: both operands are constants, so
@@ -205,6 +284,41 @@ mod tests {
 
         let back: u16 = read_frame(&mut out.as_slice()).unwrap();
         assert_eq!(back, 0x0102);
+    }
+
+    /// **A `FrameBuf` speaks the wire `write_frame` and `read_frame` do**: the
+    /// bytes it writes are the bytes `write_frame` writes, and it reads what
+    /// `write_frame` wrote.
+    #[test]
+    fn a_frame_buf_writes_and_reads_the_same_wire_as_the_free_functions() {
+        let mut buf = FrameBuf::new(64, 64);
+        let (mut mine, mut theirs) = (Vec::new(), Vec::new());
+        buf.write(&mut mine, &(7u32, [1u8, 2, 3])).unwrap();
+        write_frame(&mut theirs, &(7u32, [1u8, 2, 3])).unwrap();
+        assert_eq!(mine, theirs);
+        let back: (u32, [u8; 3]) = buf.read(&mut theirs.as_slice()).unwrap();
+        assert_eq!(back, (7, [1, 2, 3]));
+    }
+
+    /// **A frame over the buffer's capacity is refused before its body is
+    /// read, and a message over the outbound capacity writes nothing**: the
+    /// buffers never grow.
+    #[test]
+    fn a_frame_buf_refuses_what_it_cannot_hold_and_never_grows() {
+        let mut buf = FrameBuf::new(4, 4);
+        // A prefix advertising 5 bytes, with no body behind it: the refusal
+        // comes before a read of the body would fail.
+        let mut wire: &[u8] = &5u32.to_be_bytes();
+        assert_eq!(
+            buf.read::<_, u8>(&mut wire).unwrap_err().to_string(),
+            BridgeError::from(FrameTooLarge { len: 5, limit: 4 }).to_string()
+        );
+        let mut sink = Vec::new();
+        assert!(buf.write(&mut sink, &[0u8; 8]).is_err());
+        assert!(sink.is_empty());
+        // What fits still goes through after a refusal.
+        buf.write(&mut sink, &1u8).unwrap();
+        assert_eq!(sink, [0, 0, 0, 1, 1]);
     }
 
     /// **A frame is exactly one message:** a body with bytes after the message

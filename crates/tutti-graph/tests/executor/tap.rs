@@ -14,7 +14,8 @@ use tutti_graph::{
     Node, NodeParts, Op, TapReader, TransportPosition,
 };
 use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId, TapSpec};
-use tutti_types::{Beat, Bpm, ChannelLayout, Frame, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, Bpm, Frame, Samples};
 
 /// A `Kind` whose fork is a fresh node of the same kind.
 struct Forkable(Kind);

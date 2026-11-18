@@ -21,8 +21,10 @@ use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
     Status,
 };
-use tutti_types::{AtomicF32, CompressionRatio, Db, Hz, Param, SampleRate};
-use tutti_types::{BusTopology, ChannelLayout, Seconds, Tail, UnitParam};
+use tutti_types::{AtomicF32, Param};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{CompressionRatio, Db, Hz, SampleRate};
+use tutti_units::{Seconds, Tail, UnitParam};
 
 use crate::filter::Splits;
 use crate::kernel::{Grid, first_non_finite, log_non_finite, slice_in, slice_out, walk_grid};
@@ -671,7 +673,7 @@ mod tests {
     use crate::test_support::{RATE, amplitude_at, mean, prepared, render_chunked, sine};
     use core::f64::consts::PI;
     use tutti_graph::contract::drive;
-    use tutti_types::UnitAddr;
+    use tutti_units::UnitAddr;
 
     const FS: f64 = 48_000.0;
     /// Whole periods of every 5 Hz-grid tone, and of 3 kHz (16 samples).
@@ -1301,7 +1303,7 @@ mod tests {
         let mut fork = forked.node;
         fork.prepare(&Prepare::new(
             RATE,
-            tutti_types::MaxBlock::of(tutti_types::Samples(1024)),
+            tutti_types::MaxBlock::of(tutti_units::Samples(1024)),
         ));
         let out = render_chunked(fork.as_mut(), &[vec![0.5f32; SETTLE]], 512);
         let reduction = (20.0 * libm::log10(0.5) + 20.0) * 0.75;
@@ -1328,7 +1330,7 @@ mod tests {
         let mut parts = n.into_parts();
         parts.node.prepare(&Prepare::new(
             RATE,
-            tutti_types::MaxBlock::of(tutti_types::Samples(1024)),
+            tutti_types::MaxBlock::of(tutti_units::Samples(1024)),
         ));
         render_chunked(parts.node.as_mut(), &[vec![0.5f32; SETTLE]], 512);
         let reduction = (20.0 * libm::log10(0.5) + 20.0) * 0.75;
@@ -1345,7 +1347,7 @@ mod tests {
         let n = MultibandCompressorNode::new(ChannelLayout::STEREO, 4).unwrap();
         let s = n.shape();
         assert_eq!((s.audio_in().count(), s.audio_out().count()), (2, 2));
-        assert_eq!(s.latency, tutti_types::Latency::default());
+        assert_eq!(s.latency, tutti_units::Latency::default());
         assert_eq!(s.tail, Tail::Unknown);
         assert_eq!(s.cost, Cost::Heavy);
         assert_eq!(s.params.len(), 4 * 6 + 3);

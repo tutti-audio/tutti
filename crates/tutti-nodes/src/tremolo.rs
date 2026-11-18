@@ -3,7 +3,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, OscillatorWave, Tremolo, TremoloControls};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, Depth, Hz, MaxBlock, SampleRate, Tail};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{Depth, Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -156,7 +157,7 @@ mod tests {
     use crate::test_support::{drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     fn node(width: u16, rate: f32, depth: f32) -> TremoloNode {
         prepared(TremoloNode::from(

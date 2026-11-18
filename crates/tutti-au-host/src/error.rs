@@ -121,7 +121,7 @@ pub enum AuError {
     /// it — the render is at the wrong rate (pitch/time drift) and PDC latency
     /// is computed against a rate that does not exist.
     ///
-    /// Rates are raw `f64` Hz, not `tutti_types::Hz`: these are the exact bytes
+    /// Rates are raw `f64` Hz, not `tutti_units::Hz`: these are the exact bytes
     /// read out of / written into the AudioToolbox `AudioStreamBasicDescription`
     /// at the C ABI boundary, and the diagnostic's whole job is to report what
     /// crossed that boundary verbatim.

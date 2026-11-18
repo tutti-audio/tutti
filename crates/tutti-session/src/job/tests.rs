@@ -2,7 +2,7 @@ use std::sync::mpsc::sync_channel;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use super::*;
 use crate::{DetachedSession, Session, SessionBuilder, Task};

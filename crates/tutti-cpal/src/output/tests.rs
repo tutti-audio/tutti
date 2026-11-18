@@ -4,7 +4,8 @@ use tutti_buffers::SampleFormat;
 use tutti_engine::{AudioCallbackState, Engine, ManualStreamDriver};
 use tutti_graph::{Editor, Prepare};
 use tutti_transport::Transport;
-use tutti_types::{MaxBlock, SampleRate, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{SampleRate, Samples};
 
 fn manual_spec() -> OutputSpec {
     OutputSpec::new(

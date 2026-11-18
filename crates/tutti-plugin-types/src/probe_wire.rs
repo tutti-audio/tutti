@@ -286,7 +286,7 @@ mod tests {
             ),
             (
                 TailVerdict::NeverSettles {
-                    level: tutti_types::Db(-60.0),
+                    level: tutti_units::Db(-60.0),
                 },
                 LatencyVerdict::NotChecked(NotChecked::Silent),
             ),

@@ -1,7 +1,7 @@
 //! The root-mean-square level of a block.
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::Amplitude;
+use tutti_units::Amplitude;
 
 /// The root-mean-square level of `x`: the square root of the mean of the
 /// squares, `sqrt(sum(x^2) / n)`. A full-scale sine reads `1/sqrt(2)` and a

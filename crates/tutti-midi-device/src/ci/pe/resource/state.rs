@@ -22,7 +22,7 @@ use super::kind::PeResource;
 use super::request::{RequestRefused, ResourceGet, ResourceSet, ResourceTarget};
 use super::store::{ResourceStore, StoreError};
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A time as Unix seconds: seconds since 1 January 1970 UTC, leap seconds not
     /// counted, as the `timestamp` of a state is (M2-111 §2.3). The
     /// largest value is the largest JSON integer the crate reads.
@@ -33,7 +33,7 @@ tutti_types::ranged! {
     |raw| raw <= 0x7FFF_FFFF_FFFF_FFFF
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The size of a state in bytes, the `size` of a StateList entry (M2-111 §2.3).
     #[derive(Eq, Hash, PartialOrd, Ord)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

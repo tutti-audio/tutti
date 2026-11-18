@@ -15,8 +15,9 @@
 use tutti_graph::{
     Chase, Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::UnitParam;
-use tutti_types::{Amplitude, BusTopology, CentsSpan, Spread};
+use tutti_types::BusTopology;
+use tutti_units::UnitParam;
+use tutti_units::{Amplitude, CentsSpan, Spread};
 use tutti_voicing::Voicing;
 
 use super::PolySynth;

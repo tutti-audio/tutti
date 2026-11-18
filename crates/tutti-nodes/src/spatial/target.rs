@@ -2,7 +2,7 @@
 //! [`AngleSmoother`] the binaural panner steps.
 
 use tutti_dsp::Smoother;
-use tutti_types::{Azimuth, Direction, Elevation, SampleRate, Samples, Seconds};
+use tutti_units::{Azimuth, Direction, Elevation, SampleRate, Samples, Seconds};
 
 /// The time constant of the position de-zipper, in audio time.
 const SMOOTH_TIME: Seconds = Seconds(0.05);

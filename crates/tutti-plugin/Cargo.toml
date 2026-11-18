@@ -43,6 +43,7 @@ tutti-plugin-host = { version = "0.0.1", path = "../tutti-plugin-host" }
 tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 # The engine's value vocabulary (`Samples`, `SampleRate`).
+tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
 
 # The graph, for a plugin node's own `ForkSource` (fork by state

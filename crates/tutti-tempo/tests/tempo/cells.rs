@@ -3,7 +3,7 @@
 use crate::common::{Lcg, R, pt};
 use std::collections::BTreeMap;
 use tutti_tempo::{Cell, CellGrid, TempoMap, Transition};
-use tutti_types::{Beat, Bpm, Frame};
+use tutti_units::{Beat, Bpm, Frame};
 
 /// A ramp, a step that falls between two frames (its beat is not a frame
 /// multiple of anything), a beat ramp, and a step 12.00003 beats in.
@@ -242,7 +242,7 @@ fn next_change_finds_the_next_point() {
     );
     assert_eq!(map.view(R).next_change(cuts[3]), Some(cuts[3]));
     assert_eq!(map.view(R).next_change(Frame::new(cuts[3].get() + 1)), None);
-    let constant = TempoMap::constant(tutti_types::Bpm::of(120.0)).unwrap();
+    let constant = TempoMap::constant(tutti_units::Bpm::of(120.0)).unwrap();
     assert_eq!(
         constant.view(R).next_change(Frame::new(0)),
         None,
@@ -344,7 +344,7 @@ fn a_step_cell_has_the_segments_exact_tempo() {
 fn cells_over_sub_frame_segments_stay_inside_the_map() {
     fn check(
         map: &TempoMap,
-        rate: tutti_types::SampleRate,
+        rate: tutti_units::SampleRate,
         grid: CellGrid,
         frames: u64,
         what: &str,
@@ -370,7 +370,7 @@ fn cells_over_sub_frame_segments_stay_inside_the_map() {
         }
         cells
     }
-    let r44 = tutti_types::SampleRate::SR_44K1;
+    let r44 = tutti_units::SampleRate::SR_44K1;
     // A 105 BPM beat ramp of 4.3e-6 beats (0.1 frame), then 351 BPM.
     let map = TempoMap::new([
         pt(0.0, 105.0, Transition::RampBeats { end: None }),

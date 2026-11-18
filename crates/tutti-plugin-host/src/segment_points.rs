@@ -52,10 +52,10 @@
 //! A re-prepare or a reset drops every segment in flight.
 
 use tutti_graph::ParamSegment;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use super::param_delivery::ParamDelivery;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// Segment slots the unit tests prepare: a figure past any they fill.
 #[cfg(test)]
@@ -231,7 +231,7 @@ mod tests {
     use tutti_graph::Exponent;
     use tutti_graph::Law;
     use tutti_plugin_types::ParameterChanges;
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     const A: ParamId = ParamId::new(7);
 

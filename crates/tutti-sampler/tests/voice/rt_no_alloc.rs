@@ -33,8 +33,9 @@ use tutti_sampler::{
     Direction, MemorySource, MemorySourceConfig, Playback, SlotId, Voice, VoiceNode, VoicePool,
     VoiceSource, VoiceWindow,
 };
-use tutti_types::{
-    Beat, BeatDuration, Bpm, Cents, ChannelLayout, PlaybackRate, SampleRate, Seconds, StretchFactor,
+use tutti_types::ChannelLayout;
+use tutti_units::{
+    Beat, BeatDuration, Bpm, Cents, PlaybackRate, SampleRate, Seconds, StretchFactor,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -482,7 +483,7 @@ fn wraps_without_allocating<N: Node>(node: N) {
         direct.set_block_len(len);
         direct.block();
         heard.extend_from_slice(direct.output().plane(0).samples());
-        clock.advance(tutti_types::Samples(len), Some(region));
+        clock.advance(tutti_units::Samples(len), Some(region));
         clock.beat() < before
     };
     for i in 0..64 {

@@ -140,7 +140,7 @@ mod tests {
             (3, 3)
         );
         assert_eq!(shape.cost, Cost::Light);
-        assert_eq!(shape.tail, tutti_types::Tail::None);
+        assert_eq!(shape.tail, tutti_units::Tail::None);
     }
 
     /// Only the named channels are negated: of four, channels 1 and 3.

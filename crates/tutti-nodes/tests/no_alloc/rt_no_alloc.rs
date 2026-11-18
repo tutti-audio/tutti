@@ -2,8 +2,8 @@
 //! process path. The panner tests are `spatial_rt_no_alloc.rs`.
 
 use tutti_buffers::{Mono, MonoMut};
-use tutti_types::Drive;
-use tutti_types::{SampleRate, Samples, Seconds};
+use tutti_units::Drive;
+use tutti_units::{SampleRate, Samples, Seconds};
 
 /// A node through `BlockRig`, silent inputs: 16 warm-up blocks (past
 /// the first FFT partition, so `process` takes the hot path), then 1 000
@@ -16,7 +16,7 @@ fn gate<N: tutti_graph::IntoNode>(node: N) {
 /// [`gate`] at a host block of `block` frames.
 fn gate_at<N: tutti_graph::IntoNode>(node: N, block: usize) {
     let (mut rig, _controls) =
-        tutti_graph::contract::BlockRig::new(node, tutti_types::SampleRate::SR_48K, block);
+        tutti_graph::contract::BlockRig::new(node, tutti_units::SampleRate::SR_48K, block);
     for _ in 0..16 {
         rig.block();
     }
@@ -123,7 +123,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
         .map(|c| {
             decay_ir(
                 1024,
-                tutti_types::Seconds::from_f32(0.2 + 0.05 * c as f32),
+                tutti_units::Seconds::from_f32(0.2 + 0.05 * c as f32),
                 SampleRate::SR_48K,
             )
         })
@@ -139,7 +139,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
 fn distortion_process_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
     use tutti_nodes::{DistortionNode, OversamplingFactor, ShapeKind};
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     let kinds = [
         ShapeKind::Tanh,
@@ -221,7 +221,7 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
 fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
     use tutti_nodes::{Antialiasing, DistortionNode, OversamplingFactor, ShapeKind};
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     let kinds = [
         ShapeKind::Tanh,

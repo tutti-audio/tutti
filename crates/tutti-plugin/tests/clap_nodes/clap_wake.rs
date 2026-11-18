@@ -25,7 +25,8 @@ use tutti_clap_host::ClapLoaded;
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, StatusMode, WOKEN_LEVEL};
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
 use tutti_plugin_types::Load;
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 /// How long a wake that never comes is waited for.
 const PATIENCE: Duration = Duration::from_secs(60);
@@ -77,7 +78,7 @@ fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin
     )
     .expect("the reference plugin loads in process");
     let node = client.bind(
-        tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     );
     let (mut renderer, _controls) = one_plugin_graph(node, 2);
 
@@ -126,7 +127,7 @@ fn served_a_request_while_parked_wakes_the_node() {
     let outputs = probe.client.outputs();
     let (mut renderer, controls) = one_plugin_graph(
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         outputs,
     );

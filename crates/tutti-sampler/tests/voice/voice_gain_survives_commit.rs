@@ -41,9 +41,10 @@ use tutti_graph::{
 use tutti_modulation::{Amount, Clock, ControlProgram, Law, Layer, LayerId, Polarity};
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceNodeHandle, VoiceSource};
-use tutti_types::{
-    Amplitude, Beat, BeatsPerCycle, Bpm, ChannelLayout, Depth, Frame, PhaseIncrement, SampleRate,
-    Samples, UnitParam,
+use tutti_types::ChannelLayout;
+use tutti_units::{
+    Amplitude, Beat, BeatsPerCycle, Bpm, Depth, Frame, PhaseIncrement, SampleRate, Samples,
+    UnitParam,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -350,7 +351,7 @@ fn a_voices_gain_port_reads_its_cell_as_its_base() {
     let node = VoiceNode::with_channels(voice, ChannelLayout::MONO);
     assert_eq!(
         node.shape().params.as_slice(),
-        &[tutti_types::UnitParam::Volume][..]
+        &[tutti_units::UnitParam::Volume][..]
     );
     assert_eq!(node.param_base(0), Some(0.25));
     assert_eq!(node.param_base(1), None);

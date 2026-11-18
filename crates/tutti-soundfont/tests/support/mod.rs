@@ -17,8 +17,8 @@ pub mod rig;
 use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
 use tutti_graph::{Event, Offset, Status};
 use tutti_soundfont::SoundFontUnit;
-use tutti_types::{SampleRate, Samples};
 use tutti_ump::Ump;
+use tutti_units::{SampleRate, Samples};
 
 /// The block length a [`Hand`] renders: 64 frames.
 pub const BLOCK: usize = 64;

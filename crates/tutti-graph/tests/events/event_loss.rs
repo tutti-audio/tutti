@@ -18,8 +18,8 @@ use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventIn, EventKind, EventLoss, EventOut, Executor, Io, Node,
     Prepare, Shape, Status, TransportPosition, note_off_room,
 };
-use tutti_types::{SampleRate, Samples};
 use tutti_ump::{MidiChannel, U7, Ump};
+use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 64;
 
@@ -476,7 +476,7 @@ impl Node for Latent {
     fn shape(&self) -> Shape {
         self.inner
             .shape()
-            .with_latency(tutti_types::Latency::new(Samples(self.latency)))
+            .with_latency(tutti_units::Latency::new(Samples(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -513,7 +513,7 @@ impl Node for Once {
 /// command, writer's frame 1: frames 0, 0, 0, 1), and the 2 cut are counted.
 #[test]
 fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
-    use tutti_types::{At, Frame};
+    use tutti_units::{At, Frame};
     for workers in std::iter::once(1).chain(common::WORKERS) {
         let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
@@ -852,7 +852,7 @@ impl Node for Trace {
 /// Both are non-decreasing in frame, serial and parallel.
 #[test]
 fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
-    use tutti_types::{At, Frame};
+    use tutti_units::{At, Frame};
     for workers in std::iter::once(1).chain(common::WORKERS) {
         let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);

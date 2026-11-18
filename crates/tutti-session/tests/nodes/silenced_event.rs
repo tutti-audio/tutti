@@ -10,7 +10,8 @@ use std::time::Duration;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_session::{OutPort, Root, Session, SessionEvent};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 const RATE: f64 = 48_000.0;
 

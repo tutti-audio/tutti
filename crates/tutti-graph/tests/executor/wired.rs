@@ -15,7 +15,8 @@ use tutti_graph::{
     FeedbackFrom, InPort, Io, Node, NodeKey, OutPort, Prepare, Rewired, Shape, Sink, Source,
     Status, TapAlign, TapId, TransportPosition, Unforkable, Wired, WiredMask,
 };
-use tutti_types::{BusTopology, ChannelLayout, Samples, Tail};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{Samples, Tail};
 
 const SRC: NodeKey = NodeKey(1);
 const PROBE: NodeKey = NodeKey(2);
@@ -283,7 +284,7 @@ fn a_hand_built_io_reads_every_port_wired() {
     let node = Probe {
         seen: Arc::clone(&seen),
     };
-    let rate = tutti_types::SampleRate::SR_48K;
+    let rate = tutti_units::SampleRate::SR_48K;
     let mut node = tutti_graph::contract::prepared(node, rate, 16);
     let block: &[f32] = &[0.0; 16];
     let planes = [block; 3];

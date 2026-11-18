@@ -46,8 +46,9 @@ use crate::ramp::LastGood;
 use tutti_graph::{
     Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::UnitParam;
-use tutti_types::{Amplitude, Balance, BusTopology, MAX_CHANNELS, Param, Tail};
+use tutti_types::{BusTopology, MAX_CHANNELS, Param};
+use tutti_units::UnitParam;
+use tutti_units::{Amplitude, Balance, Tail};
 
 // The params a [`BusStripNode`] lets the graph modulate, in port order.
 tutti_graph::declare_params!([] BusStripNode, n {
@@ -230,7 +231,7 @@ impl BusStripNode {
 
     /// Sets the fader position as a linear [`Amplitude`], unclamped.
     ///
-    /// Linear, not [`Db`](tutti_types::Db): `1.0` is unity, `0.0` silent, and
+    /// Linear, not [`Db`](tutti_units::Db): `1.0` is unity, `0.0` silent, and
     /// values above 1.0 amplify. Read once per block and ramped to across it.
     pub fn set_volume(&self, volume: impl Into<Amplitude>) {
         self.volume.store(volume.into());

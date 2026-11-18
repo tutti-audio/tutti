@@ -20,7 +20,7 @@ use tutti_plugin_types::{ContentScale, EditorCapabilities, WindowHandle};
 use tutti_plugin_types::{Editor, EditorWindow, Load, Origin, PluginFormat, Timeouts};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, ParamEdit};
 use tutti_rt::{LockExt, PackedAtomic, Tally, TallyWriter, tally};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// Gives the audio instance the editor instance's state when the user changed
 /// it: the half of the mirror that carries what the user changed in the editor

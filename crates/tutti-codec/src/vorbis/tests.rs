@@ -1,7 +1,8 @@
 use super::*;
 use std::io::{Cursor, SeekFrom};
 use std::sync::atomic::{AtomicBool, Ordering};
-use tutti_types::{ChannelTopology, SampleRate};
+use tutti_types::ChannelTopology;
+use tutti_units::SampleRate;
 
 /// A sink that says when its first write began and when it is dropped.
 struct Watched {

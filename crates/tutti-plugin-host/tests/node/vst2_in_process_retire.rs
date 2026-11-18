@@ -22,7 +22,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Prepare, TransportPosition, Unforkable};
 use tutti_graph::{OutPort, Source};
 use tutti_plugin_host::load_client;
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 64;

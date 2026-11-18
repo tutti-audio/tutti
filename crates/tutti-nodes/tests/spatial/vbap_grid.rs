@@ -7,7 +7,8 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::{Azimuth, Bed, Elevation, SampleRate, UnitParam};
+use tutti_types::Bed;
+use tutti_units::{Azimuth, Elevation, SampleRate, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const GRID: usize = 16;

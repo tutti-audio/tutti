@@ -25,7 +25,7 @@ use tutti_plugin_types::{
 use tutti_plugin_types::{MainThreadMarker, StateUse};
 #[cfg(doc)]
 use tutti_plugin_types::{PluginInvalidation, PluginRefresh, TransportRequest};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// How a [`PluginHandle`] reaches a plugin's main-thread [`Control`].
 ///
@@ -111,7 +111,7 @@ pub enum PluginStatus {
     /// plan does not change, and nothing needs reloading.
     RateRefused {
         /// The rate the plugin refused.
-        rate: tutti_types::SampleRate,
+        rate: tutti_units::SampleRate,
         /// The plugin's reason, formatted subprocess-side.
         reason: String,
     },
@@ -889,7 +889,7 @@ mod tests {
     use tutti_plugin_types::{
         EditorWindow, Normalized, ParameterInfo, Preset, PresetId, RenderMode,
     };
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     /// A test control that reaches presets. Doubles as proof the route is
     /// implementable from outside this crate's own backends: a `Control` that
@@ -1081,7 +1081,7 @@ mod tests {
             fn crash_cause(&self) -> Option<PluginFailure> {
                 None
             }
-            fn rate_refusal(&self) -> Option<(tutti_types::SampleRate, String)> {
+            fn rate_refusal(&self) -> Option<(tutti_units::SampleRate, String)> {
                 None
             }
             fn block_counts(&self) -> BlockCounts {

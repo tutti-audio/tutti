@@ -18,10 +18,10 @@
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{
-    self, AddedInstrument, FileEvent, Message, MidiChannel, MidiFile, MidiGroup,
+    self, AddedInstrument, FileEvent, Layout, LeadTrack, Message, MidiChannel, MidiFile, MidiGroup,
     MidiHardwareOptions, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
-    PitchBendSensitivity, SmfDivision, SmfFormat, TakePlacement, Tick, TicksPerQuarterNote,
-    Timebase, Track, U7, Voice1,
+    PitchBendSensitivity, SmfDivision, TakePlacement, Tick, TicksPerQuarterNote, Timebase, Track,
+    U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
 use tutti::{
@@ -88,7 +88,7 @@ fn file() -> Result<MidiFile, Box<dyn std::error::Error>> {
             ]
         })
         .collect();
-    let built = MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track])?;
+    let built = MidiFile::smf(SMF_DIVISION, Layout::Format0(LeadTrack::new(track)))?;
     Ok(MidiFile::from_bytes(&built.to_bytes())?)
 }
 

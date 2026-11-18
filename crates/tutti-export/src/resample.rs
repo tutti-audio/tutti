@@ -1,7 +1,7 @@
 //! Sample-rate conversion on the way out: [`Resample`].
 
 use crate::process::ChunkSize;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// Sample-rate conversion applied on the way out.
 #[derive(Debug, Clone, Copy, PartialEq)]

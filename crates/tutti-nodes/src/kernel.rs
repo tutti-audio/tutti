@@ -14,7 +14,8 @@ use tutti_graph::{
     BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, OutBus,
     ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
 };
-use tutti_types::{Latency, MaxBlock, SampleRate, Samples, Tail};
+use tutti_types::MaxBlock;
+use tutti_units::{Latency, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
@@ -707,7 +708,7 @@ mod tests {
     use tutti_dsp::{DelayControls, MaxDelay};
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Env, PlayClock, Status, TransportChanges, TransportPosition};
-    use tutti_types::{Frame, Seconds};
+    use tutti_units::{Frame, Seconds};
 
     use super::*;
     use crate::DelayNode;
@@ -746,7 +747,7 @@ mod tests {
             DelayNode::mono(
                 MaxDelay::of(Seconds(0.01)),
                 DelayControls {
-                    feedback: tutti_types::Feedback(0.5),
+                    feedback: tutti_units::Feedback(0.5),
                     ..DelayControls::DEFAULT
                 },
             ),
@@ -780,7 +781,8 @@ mod tests {
     fn a_bus_with_no_channels_renders_silence() {
         use tutti_graph::contract::Direct;
         use tutti_graph::{Bus, BusRole, Buses};
-        use tutti_types::{BusTopology, Db};
+        use tutti_types::BusTopology;
+        use tutti_units::Db;
 
         #[derive(Clone, Copy, Debug, PartialEq)]
         struct Gain {

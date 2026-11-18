@@ -12,7 +12,7 @@ use tutti_plugin_types::{
     PluginTail, Prepare, Refused, RestartRules, Samples, Stuck,
 };
 use tutti_rt::Publisher;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use super::ClapLoaded;
 use super::config::RangeTable;

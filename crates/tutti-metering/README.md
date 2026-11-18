@@ -2,7 +2,7 @@
 
 Measures how busy the audio thread is: how much of the time it has for each piece of audio it actually spends producing it.
 
-It is useful for showing a CPU load meter in an audio application. It depends only on `tutti-types` (units such as hertz and decibels), so it can be used on its own.
+It is useful for showing a CPU load meter in an audio application. It depends only on `tutti-units` (units such as hertz and decibels) and `tutti-types`, so it can be used on its own.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

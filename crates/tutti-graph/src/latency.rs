@@ -54,7 +54,8 @@
 //! ```
 //! use tutti_graph::{Edge, Feed, InPort, InputDelay, NodeSpec, OutPort, Source};
 //! use tutti_graph::delays;
-//! use tutti_types::{ChannelLayout, SampleRate, Samples};
+//! use tutti_units::{SampleRate, Samples};
+//! use tutti_types::ChannelLayout;
 //! use tutti_graph::{NodeKey, Topology};
 //!
 //! let (a, limiter, b, mixer) = (NodeKey(1), NodeKey(2), NodeKey(3), NodeKey(4));
@@ -82,13 +83,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use tutti_types::{SampleRate, Samples, Seconds};
+use tutti_units::{SampleRate, Samples, Seconds};
 
 /// The upper bound on any single node's reported latency: ten seconds.
 ///
 /// A duration, so the bound follows the graph's rate: [`delays`] and
 /// [`plan`] take the rate and convert it with
-/// [`Seconds::to_samples_ceil`](tutti_types::Seconds::to_samples_ceil)
+/// [`Seconds::to_samples_ceil`](tutti_units::Seconds::to_samples_ceil)
 /// (480 000 frames at 48 kHz, 960 000 at 96 kHz), and
 /// [`Editor::set_latency`](crate::Editor::set_latency) converts it at the
 /// editor's prepared rate.

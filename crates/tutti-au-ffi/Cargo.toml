@@ -35,7 +35,7 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # `WireMidi`: the values the AU surface is spoken in.
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 # `Bpm`, `Beat` on the host transport figures.
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 # `Midi1Parser`, which reads a plugin's MIDI 1.0 output.
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 

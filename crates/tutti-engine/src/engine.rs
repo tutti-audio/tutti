@@ -127,8 +127,10 @@ use tutti_transport::{
     AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionEvent, SCHEDULE_CAPACITY, Scheduled,
     TransportAudio, TransportCommand,
 };
-use tutti_types::{At, Frame, MAX_CHANNELS};
-use tutti_types::{ChannelLayout, SampleRate, Samples, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_types::MAX_CHANNELS;
+use tutti_units::{At, Frame};
+use tutti_units::{SampleRate, Samples, Seconds};
 
 /// The block capacity an engine sizes its fold scratch for unless given
 /// another ([`Engine::with_capacity`]): tutti-cpal's largest callback
@@ -1602,10 +1604,10 @@ mod tests {
     use tutti_transport::Timeline;
     use tutti_transport::{MotionEvent, Transport};
     use tutti_types::Bed;
-    use tutti_types::Bpm;
     use tutti_types::ChannelTopology;
     use tutti_types::MaxBlock;
     use tutti_types::Placement;
+    use tutti_units::Bpm;
 
     /// `GraphEngineError` is an `Error` a caller can box and move; the bound is
     /// checked where the function is written, so a non-`Send` field fails the build.
@@ -1862,7 +1864,8 @@ mod tests {
     #[test]
     fn a_locate_on_the_first_frame_is_taken_once_and_a_wrap_counted_once() {
         use tutti_transport::LoopEdit;
-        use tutti_types::{Beat, ChannelLayout, LoopRange};
+        use tutti_types::{ChannelLayout, LoopRange};
+        use tutti_units::Beat;
         let engine_for = |transport: &Transport| {
             let (mut ed, exec) = Editor::new(Prepare::new(
                 SampleRate::SR_48K,
@@ -1996,7 +1999,7 @@ mod tests {
     impl tutti_graph::Node for Ramp {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(tutti_types::ChannelLayout::from_count(self.0))
-                .with_tail(tutti_types::Tail::Unbounded)
+                .with_tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(
@@ -2610,7 +2613,7 @@ mod tests {
     fn the_monitor_fold_takes_the_levels() {
         use crate::Routing;
         use tutti_buffers::FoldLevels;
-        use tutti_types::Amplitude;
+        use tutti_units::Amplitude;
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) =
             Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
@@ -2644,7 +2647,7 @@ mod tests {
     #[test]
     fn an_output_gain_ramps_over_the_declick_and_swaps_no_fold() {
         use crate::{OutputLevels, OutputStrip};
-        use tutti_types::Amplitude;
+        use tutti_units::Amplitude;
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) =
             Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
@@ -2817,7 +2820,7 @@ mod tests {
     impl tutti_graph::Node for Dc {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-                .with_tail(tutti_types::Tail::Unbounded)
+                .with_tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(
@@ -3285,7 +3288,7 @@ mod tests {
     impl tutti_graph::Node for Count {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-                .with_tail(tutti_types::Tail::Unbounded)
+                .with_tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(
@@ -3309,8 +3312,8 @@ mod tests {
     impl tutti_graph::Node for Late {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-                .with_latency(tutti_types::Latency::new(Samples(16)))
-                .with_tail(tutti_types::Tail::Unbounded)
+                .with_latency(tutti_units::Latency::new(Samples(16)))
+                .with_tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(

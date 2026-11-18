@@ -71,7 +71,7 @@ impl<'a> ProcessOutputRef<'a> {
 /// # use tutti_graph::Offset;
 /// # use tutti_plugin_types::PluginAudio;
 /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
-/// # use tutti_types::{Bpm, SampleRate};
+/// # use tutti_units::{Bpm, SampleRate};
 /// # fn ex(plugin: &mut ClapProcessor, buffer: &mut PluginAudio<'_>)
 /// # -> tutti_clap_host::Result<()> {
 /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
@@ -147,7 +147,7 @@ impl ClapProcessor {
     /// # use tutti_graph::Offset;
     /// # use tutti_plugin_types::PluginAudio;
     /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
-    /// # use tutti_types::{Bpm, SampleRate};
+    /// # use tutti_units::{Bpm, SampleRate};
     /// # fn ex(active: &mut ClapProcessor, buffer: &mut PluginAudio<'_>)
     /// # -> tutti_clap_host::Result<()> {
     /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
@@ -567,7 +567,8 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
 mod tests {
     use super::*;
     use tutti_plugin_types::LoopRegion;
-    use tutti_types::{Beat, Bpm, LoopRange, SampleRate};
+    use tutti_types::LoopRange;
+    use tutti_units::{Beat, Bpm, SampleRate};
 
     fn base() -> TransportInfo {
         TransportInfo::new(SampleRate::SR_48K)
@@ -599,7 +600,7 @@ mod tests {
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
             0
         );
-        t.position.seconds = tutti_types::Seconds(f64::NAN);
+        t.position.seconds = tutti_units::Seconds(f64::NAN);
         assert_eq!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
             0
@@ -620,7 +621,7 @@ mod tests {
     /// nobody described is at the first bar.
     #[test]
     fn the_bar_at_song_position_zero_is_number_zero() {
-        use tutti_types::BarNumber;
+        use tutti_units::BarNumber;
         assert_eq!(build_clap_transport(&base()).bar_number, 0);
         let third = base().with_bar(Beat(8.0), BarNumber::new(3));
         assert_eq!(build_clap_transport(&third).bar_number, 2);
@@ -635,7 +636,7 @@ mod tests {
     /// no seconds for an active loop the seconds timeline is not claimed.
     #[test]
     fn an_active_loop_carries_its_seconds() {
-        use tutti_types::Seconds;
+        use tutti_units::Seconds;
         let looped = base()
             .with_beat(Beat(1.0))
             .with_seconds(Seconds(0.5))
@@ -666,7 +667,7 @@ mod tests {
     fn the_time_signature_flag_is_always_honest() {
         let mut t = base();
         t.position.beat = Beat(f64::NAN);
-        t.position.seconds = tutti_types::Seconds(f64::NAN);
+        t.position.seconds = tutti_units::Seconds(f64::NAN);
         assert_ne!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE,
             0

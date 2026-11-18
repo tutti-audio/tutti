@@ -48,7 +48,7 @@ use tutti_fixtures::signal::rms_f64;
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 use crate::support::render_to_file;
 use tutti_buffers::Wave;
@@ -60,7 +60,7 @@ use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_tempo::TempoMap;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_types::ChannelLayout;
-use tutti_types::{Beat, Bpm, Cents, SampleRate, StretchFactor};
+use tutti_units::{Beat, Bpm, Cents, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const BASE_HZ: f32 = 440.0;

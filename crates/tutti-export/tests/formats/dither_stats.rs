@@ -34,7 +34,7 @@ use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Const;
 use tutti_transport::FrozenClock;
 use tutti_types::ChannelLayout;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 const SR: f64 = 44_100.0;
 /// One LSB at 16-bit in the [-1, 1] float domain.
@@ -48,7 +48,7 @@ const LEVEL: f32 = 8_191.75 / 32_768.0;
 /// renders at (a graph prepared at another is refused, not re-rated).
 fn built(g: GraphBuilder) -> RenderGraph {
     let (editor, executor) = g
-        .build(RenderGraph::prepare(tutti_types::SampleRate::of(SR)))
+        .build(RenderGraph::prepare(tutti_units::SampleRate::of(SR)))
         .expect("builds");
     RenderGraph::assemble(editor, executor, Setup::new()).expect("built together")
 }
@@ -63,7 +63,7 @@ fn dc_graph(level: f32) -> RenderGraph {
 fn config(dither: Option<DitherShape>, bit_depth: Pcm) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
-            sample_rate: tutti_types::SampleRate::of(SR),
+            sample_rate: tutti_units::SampleRate::of(SR),
             duration_seconds: Seconds(0.5),
             ..Default::default()
         },

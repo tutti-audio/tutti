@@ -17,8 +17,9 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_rt::RtScope;
-use tutti_types::{At, ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
 use tutti_ump::{MidiChannel, U7};
+use tutti_units::{At, Samples};
 
 const NODE: NodeKey = NodeKey(1);
 
@@ -628,7 +629,7 @@ fn set_latency_cuts_a_fade() {
     assert!(ed.collect().is_empty());
     assert_eq!(ed.fades_in_flight(), 2, "one running, one waiting");
 
-    ed.set_latency(NODE, tutti_types::Latency::new(Samples(3)))
+    ed.set_latency(NODE, tutti_units::Latency::new(Samples(3)))
         .expect("sets");
     ed.commit().expect("commits");
     let out = dc(&mut exec, 64);

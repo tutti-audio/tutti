@@ -10,7 +10,7 @@
 //! that interval the glide has travelled.
 
 use tutti_curve::Law;
-use tutti_types::{Hz, SampleRate, Seconds, Semitones};
+use tutti_units::{Hz, SampleRate, Seconds, Semitones};
 
 /// When a new note glides from the previous pitch rather than jumping to its
 /// own.

@@ -201,6 +201,7 @@ fn mentions_platform(text: &str) -> bool {
 /// The session that owns a crate, by its directory under `crates/` or `testing/`.
 pub(super) fn owner(krate: &str) -> Option<&'static str> {
     const CORE_CRATES: &[&str] = &[
+        "tutti-units",
         "tutti-types",
         "tutti-rt",
         "tutti-graph",

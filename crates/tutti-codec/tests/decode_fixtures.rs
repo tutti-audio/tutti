@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use tutti_buffers::Wave;
 use tutti_buffers::{Interleaved, InterleavedMut, PlanesMut, Pull, Source, deinterleave};
 use tutti_codec::{FileIn, read_wave, read_wave_bytes, read_wave_metadata};
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// The frames one pull produced, `0` for any verdict (these loops read until
 /// the file stops, and each asserts a clean file reaches its end).

@@ -134,8 +134,9 @@ pub enum BridgeError {
     UnexpectedMessage {
         /// The variant name the host awaited.
         expected: &'static str,
-        /// The message that actually arrived, `Debug`-formatted.
-        got: String,
+        /// The message that actually arrived: `Debug`-formatted by a reader
+        /// that may allocate, a fixed name from one that may not.
+        got: std::borrow::Cow<'static, str>,
     },
 
     /// Host and subprocess speak different wire versions and refuse to proceed.

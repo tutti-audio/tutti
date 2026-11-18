@@ -45,7 +45,8 @@ use tutti_tempo::TempoMap;
 use tutti_transport::{
     MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
 };
-use tutti_types::{Beat, Bpm, ChannelLayout, Frame, FrameClock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, FrameClock};
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const TEMPO: Bpm = Bpm::of(90.0);

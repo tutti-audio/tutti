@@ -12,8 +12,9 @@ use tutti_tempo::TempoMap;
 use super::walk::TempoWalk;
 use atomic_float::AtomicF64;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tutti_types::FrameClock;
 use tutti_types::LoopRange;
-use tutti_types::{Beat, Bpm, FrameClock, SampleRate, Samples};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 /// Configuration for constructing an [`OfflineTimeline`].
 #[derive(Debug, Clone)]
@@ -54,7 +55,7 @@ impl Default for OfflineTimelineConfig {
 /// ```
 /// # use std::sync::Arc;
 /// # use tutti_tempo::TempoMap;
-/// # use tutti_types::{Beat, Bpm, SampleRate, Samples};
+/// # use tutti_units::{Beat, Bpm, SampleRate, Samples};
 /// # use tutti_transport::Timeline;
 /// # use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
 /// let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
@@ -325,7 +326,7 @@ impl super::Timeline for OfflineTimeline {
 impl super::OfflineClock for OfflineTimeline {}
 
 impl super::RenderClock for OfflineTimeline {
-    fn advance(&self, frames: tutti_types::Samples) {
+    fn advance(&self, frames: tutti_units::Samples) {
         OfflineTimeline::advance(self, frames);
     }
 

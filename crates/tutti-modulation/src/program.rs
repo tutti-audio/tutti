@@ -19,7 +19,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use tutti_curve::{Law, Piece};
-use tutti_types::{
+use tutti_units::{
     Beat, BeatsPerCycle, Depth, Frame, Hz, Phase, PhaseIncrement, SamplePosition, SampleRate,
     UnitParam,
 };
@@ -314,7 +314,7 @@ pub enum ProgramError {
 ///     Amount, Clock, ControlProgram, Law, Layer, LayerId, LfoShape, Polarity,
 ///     ProgramTime, Waveform,
 /// };
-/// use tutti_types::{Beat, BeatsPerCycle, Depth, PhaseIncrement, SamplePosition, SampleRate};
+/// use tutti_units::{Beat, BeatsPerCycle, Depth, PhaseIncrement, SamplePosition, SampleRate};
 ///
 /// // A bar-locked square, a quarter of the range deep, on a knob of 1000.
 /// let square = Layer {

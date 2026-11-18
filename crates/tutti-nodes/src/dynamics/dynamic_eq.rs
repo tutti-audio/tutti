@@ -4,9 +4,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{
-    BusTopology, ChannelLayout, CompressionRatio, Db, Hz, MaxBlock, Q, SampleRate, Seconds, Tail,
-};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -139,9 +138,9 @@ impl DynamicEqConfig {
 ///
 /// # Controls
 ///
-/// Threshold, knee, ratio, attack, release and range ([`UnitParam::Range`](tutti_types::UnitParam::Range),
-/// [`Db`]), then the band's centre ([`UnitParam::Cutoff`](tutti_types::UnitParam::Cutoff),
-/// [`Hz`]) and Q ([`UnitParam::Q`](tutti_types::UnitParam::Q), [`Q`]), are live
+/// Threshold, knee, ratio, attack, release and range ([`UnitParam::Range`](tutti_units::UnitParam::Range),
+/// [`Db`]), then the band's centre ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff),
+/// [`Hz`]) and Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`]), are live
 /// [`Params`](crate::Params) shared across clones. They are on the stream grid (16 frames from
 /// the last reset, [`Kernel::GRID`]), so the render does not depend on how the stream is cut
 /// into blocks; the curve and the times land whole and the bell glides to a new centre or Q.

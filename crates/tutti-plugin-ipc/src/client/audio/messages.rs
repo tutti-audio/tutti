@@ -11,7 +11,7 @@ use dpi::Size;
 use tutti_plugin_types::{
     BlockStatus, ContentScale, PluginFailure, ResyncKind, StateError, StateUse,
 };
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// Audio-thread bulk payload for one `Process` command. Heap-boxed and
 /// recycled between calls to avoid RT allocation.

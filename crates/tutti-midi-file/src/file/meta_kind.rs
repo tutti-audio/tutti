@@ -4,7 +4,7 @@
 
 use tutti_midi_protocol::{MtcRate, SmpteTimecode};
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// Microseconds per quarter note as a Set Tempo holds it: 24 bits,
     /// `0..=0xFF_FFFF` (SMF 1.0 section 3.3, `FF 51 03 tttttt`). Zero is no
     /// valid tempo and is kept so a file writes back as it was read.
@@ -25,7 +25,7 @@ impl MicrosPerQuarter {
     }
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The fractional frames of an SMPTE Offset, `0..=99`: the `ff` field is in
     /// 100ths of a frame (SMF 1.0 section 3.3, `FF 54 05 hr mn se fr ff`).
     #[derive(Eq, Hash, PartialOrd, Ord)]
@@ -103,7 +103,7 @@ const fn is_typed(kind: u8) -> bool {
     )
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The type byte of a [`Meta::Other`](crate::Meta::Other): any of `0..=127`
     /// that [`Meta`](crate::Meta) has no variant for. A typed kind (`00` to `09`,
     /// `20`, `2F`, `51`, `54`, `58`, `59`, `7F`) is refused, so an `Other` is

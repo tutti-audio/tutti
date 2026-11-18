@@ -12,7 +12,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Glide, LadderBank, LadderControls, LadderDesign, LadderModel, LadderType, Lanes};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, Drive, Hz, MaxBlock, Resonance, SampleRate, Tail};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
 
 use super::filter_bus;
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -35,7 +36,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// glides from the last solve to its value across the block, so it is the one
 /// control whose render depends on the block's length.
 ///
-/// **Resonance is `0.0..=1.0`, not a [`Q`](tutti_types::Q).** It scales the
+/// **Resonance is `0.0..=1.0`, not a [`Q`](tutti_units::Q).** It scales the
 /// ladder's feedback: `0.0` is no emphasis, and toward `1.0` the filter
 /// resonates hard at the cutoff and approaches self-oscillation. The feedback
 /// runs through a `tanh` saturator, so it grits rather than blowing up.
@@ -58,7 +59,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// cells once per block at the cost of one branch.
 ///
 /// The param is `UnitParam::Q` for consistency with the other filters, but
-/// it carries [`Resonance`] (`0.0..=1.0`), not a [`Q`](tutti_types::Q).
+/// it carries [`Resonance`] (`0.0..=1.0`), not a [`Q`](tutti_units::Q).
 ///
 /// # In a graph
 ///
@@ -228,8 +229,8 @@ mod tests {
     use tutti_dsp::Complex64;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::Tail;
-    use tutti_types::UnitParam;
+    use tutti_units::Tail;
+    use tutti_units::UnitParam;
 
     /// A fork starts from the values last set through the node's
     /// `ParamSet` and shares no cell with it.

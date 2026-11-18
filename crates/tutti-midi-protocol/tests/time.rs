@@ -1,8 +1,8 @@
 //! Song Position Pointer and timecode as values of time (M1 pp.30 and 53).
 
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode, song_position};
-use tutti_types::{Beat, Seconds};
 use tutti_ump::U14;
+use tutti_units::{Beat, Seconds};
 
 /// M1 p.30: a Song Position Pointer counts MIDI beats, each a sixteenth note,
 /// so a quarter note is 4 and beat 2.0 is 8; it rounds to the nearest.

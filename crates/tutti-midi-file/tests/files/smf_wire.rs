@@ -2,14 +2,14 @@
 //! and the writer's byte output, against bytes built from the SMF 1.0 spec
 //! (`support`, which shares no code with the crate).
 
-use crate::common::{metrical, note, track};
+use crate::common::{self, metrical, note, track};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
     SmfParseError, TextKind, Tick,
 };
-use tutti_types::Seconds;
 use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
+use tutti_units::Seconds;
 
 const TPQ: u16 = 96;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
@@ -84,16 +84,15 @@ fn a_quantity_reads_to_its_value() {
 #[test]
 fn a_quantity_writes_to_its_bytes() {
     for (value, bytes) in QUANTITIES {
-        let written = MidiFile::smf(
-            SmfFormat::SingleTrack,
+        let written = crate::common::format0(
             SMF_DIVISION,
-            vec![track(vec![(
+            track(vec![(
                 u64::from(value),
                 FileEvent::Meta(Meta::Text {
                     kind: TextKind::Text,
                     bytes: Box::default(),
                 }),
-            )])],
+            )]),
         )
         .unwrap()
         .to_bytes();
@@ -379,7 +378,7 @@ fn an_end_of_track_that_is_not_last_is_refused() {
 
 fn track_body(events: Vec<(u64, FileEvent)>) -> Vec<u8> {
     let track = track(events);
-    let bytes = MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track])
+    let bytes = crate::common::format0(SMF_DIVISION, track)
         .unwrap()
         .to_bytes();
     bytes.get(22..).unwrap().to_vec()
@@ -416,7 +415,8 @@ fn the_writer_restates_a_status_after_a_meta_event() {
 }
 
 /// SMF 1.0 sections 3.1 and 3.3: a SysEx event is `F0`, a length and the bytes
-/// (the closing `F7` among them), an escape is `F7`, a length and the bytes.
+/// (the closing `F7` among them, which the writer adds to a whole message), an
+/// escape is `F7`, a length and the bytes.
 /// Spec: smf/track-chunks#8, smf/track-chunks#10, smf/track-chunks#13, smf/track-chunks#14
 #[test]
 fn a_sysex_and_an_escape_are_written_as_their_spec_bytes() {
@@ -424,7 +424,7 @@ fn a_sysex_and_an_escape_are_written_as_their_spec_bytes() {
         track_body(vec![
             (
                 0,
-                FileEvent::SysEx(Box::new([0x7E, 0x7F, 0x09, 0x01, 0xF7]))
+                FileEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x09, 0x01]))
             ),
             (0, FileEvent::Escape(Box::new([1, 2, 3]))),
         ]),
@@ -454,16 +454,16 @@ fn a_length_of_128_or_more_is_a_multi_byte_quantity() {
     });
     assert_eq!(track_body(vec![(0, meta)]), want);
 
-    let mut data = vec![0x11; 300];
-    data[299] = 0xF7;
+    // 299 bytes and the `F7` the writer adds are 300 on the wire.
+    let data = vec![0x11; 299];
     let want: Vec<u8> = [
         &[0x00, 0xF0, 0x82, 0x2C][..],
         &data,
-        &[0x00, 0xFF, 0x2F, 0x00],
+        &[0xF7, 0x00, 0xFF, 0x2F, 0x00],
     ]
     .concat();
     assert_eq!(
-        track_body(vec![(0, FileEvent::SysEx(data.into_boxed_slice()))]),
+        track_body(vec![(0, FileEvent::SysEx(common::complete(&data)))]),
         want
     );
 }
@@ -482,14 +482,13 @@ fn a_written_file_reads_back_equal() {
         ),
         (0, note(0, 60)),
         (5, note(0, 62)),
-        (200, FileEvent::SysEx(Box::new([0x7E, 0x7F, 0xF7]))),
+        (200, FileEvent::SysEx(common::complete(&[0x7E, 0x7F]))),
         (200, FileEvent::Escape(Box::new([1, 2]))),
         (300, note(0, 64)),
         (0x0FFF_FFFF, note(0, 65)),
     ];
     let track = track(events);
-    let file = MidiFile::smf(
-        SmfFormat::Parallel,
+    let file = crate::common::format1(
         SMF_DIVISION,
         vec![track, crate::common::track(vec![(0, note(1, 60))])],
     )
@@ -598,14 +597,13 @@ fn a_format_0_header_with_two_tracks_is_refused_at_the_header() {
 }
 
 /// The text kinds are the meta types 01 to 09 (SMF 1.0 section 3.3): a read of
-/// each gives the kind, and a write the same bytes.
+/// each gives the kind, and a write the same bytes; the copyright notice (02)
+/// and the Track Name (03) are the track's fields.
 /// Spec: smf/copyright-notice#1, smf/text-event#2, smf/text-event#6, smf/track-chunks#24, smf/track-chunks#25
 #[test]
 fn every_text_meta_type_reads_and_writes_back() {
     for (meta_type, kind) in [
         (0x01, TextKind::Text),
-        (0x02, TextKind::Copyright),
-        (0x03, TextKind::TrackName),
         (0x04, TextKind::InstrumentName),
         (0x05, TextKind::Lyric),
         (0x06, TextKind::Marker),
@@ -620,6 +618,19 @@ fn every_text_meta_type_reads_and_writes_back() {
             FileEvent::Meta(Meta::text(kind, "x")),
             "{meta_type:#x}"
         );
+        assert_eq!(read.to_bytes(), bytes, "{meta_type:#x}");
+    }
+    for meta_type in [0x02, 0x03] {
+        let bytes = file(vec![RawEvent::new(0, vec![0xFF, meta_type, 1, b'x'])]);
+        let read = MidiFile::from_bytes(&bytes).unwrap();
+        let track = &read.tracks()[0];
+        assert_eq!(track.events(), [], "{meta_type:#x}");
+        let field = if meta_type == 0x02 {
+            read.copyright()
+        } else {
+            track.name_bytes()
+        };
+        assert_eq!(field, Some(&b"x"[..]), "{meta_type:#x}");
         assert_eq!(read.to_bytes(), bytes, "{meta_type:#x}");
     }
 }
@@ -650,10 +661,7 @@ fn each_track_chunk_length_is_the_length_of_its_body() {
     let busy = track(vec![
         (0, note(0, 60)),
         (0, note(0, 62)),
-        (
-            5,
-            FileEvent::SysEx([&[0x7E; 129][..], &[0xF7]].concat().into()),
-        ),
+        (5, FileEvent::SysEx(common::complete(&[0x7E; 129]))),
         (
             5,
             FileEvent::Meta(Meta::text(TextKind::Lyric, &"l".repeat(300))),
@@ -661,7 +669,7 @@ fn each_track_chunk_length_is_the_length_of_its_body() {
         (0x0FFF_FFFF, note(0, 64)),
     ]);
     let plain = track(vec![(0, note(1, 60))]);
-    let bytes = MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![busy, plain])
+    let bytes = crate::common::format1(SMF_DIVISION, vec![busy, plain])
         .unwrap()
         .to_bytes();
     // The header chunk is 14 bytes; each track chunk is a type, a length, a body.
@@ -796,7 +804,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
         read.tracks()[0].events(),
         [(
             Tick(0),
-            FileEvent::SysEx(Box::new([0x43, 0x12, 0x00, 0x07, 0xF7]))
+            FileEvent::SysEx(common::complete(&[0x43, 0x12, 0x00, 0x07]))
         )]
     );
     assert_eq!(read.to_bytes(), whole);
@@ -811,7 +819,10 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
     assert_eq!(
         read.tracks()[0].events(),
         [
-            (Tick(0), FileEvent::SysEx(Box::new([0x43, 0x12, 0x00]))),
+            (
+                Tick(0),
+                FileEvent::SysEx(common::start(&[0x43, 0x12, 0x00]))
+            ),
             (
                 Tick(200),
                 FileEvent::Escape(Box::new([0x43, 0x12, 0x00, 0x43, 0x12, 0x00]))

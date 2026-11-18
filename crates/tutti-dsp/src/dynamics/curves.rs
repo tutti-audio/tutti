@@ -3,7 +3,7 @@
 //! The gain-computation curves, shared by the compressor, the gate and the
 //! limiter, and the amplitude-to-decibel conversion that floors silence.
 
-use tutti_types::{Amplitude, CompressionRatio, Db};
+use tutti_units::{Amplitude, CompressionRatio, Db};
 
 /// Amplitude as decibels, floored: an amplitude of zero or below is `Db::FLOOR`
 /// (`-144`, about the 24-bit noise floor) rather than `-inf`.

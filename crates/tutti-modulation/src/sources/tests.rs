@@ -1,6 +1,6 @@
 use super::*;
 use crate::RateAnchor;
-use tutti_types::Amplitude;
+use tutti_units::Amplitude;
 
 /// The fields of an [`Source::Lfo`]: `(shape, seed, clock)`.
 fn lfo_parts(source: Source) -> (LfoShape, u64, Clock) {

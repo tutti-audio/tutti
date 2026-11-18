@@ -13,7 +13,7 @@ use tutti_plugin_types::{
     MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, PluginError, PluginResult,
     WindowHandle,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::instance::AuLoaded;
 

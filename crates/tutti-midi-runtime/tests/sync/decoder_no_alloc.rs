@@ -10,7 +10,7 @@
 //! update.
 
 use tutti_midi_runtime::MidiClockDecoder;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 fn us_per_tick(bpm: f64) -> Seconds {
     Seconds::new(
@@ -82,7 +82,7 @@ fn midi_clock_decoder_queries_are_allocation_free() {
 fn machine_control_sender_observe_is_allocation_free() {
     use tutti_midi_protocol::{MtcRate, Recipient};
     use tutti_midi_runtime::MachineControlSender;
-    use tutti_types::{Frame, SampleRate};
+    use tutti_units::{Frame, SampleRate};
 
     let rate = SampleRate::SR_48K;
     let mut sender = MachineControlSender::new(Recipient::AllCall, MtcRate::Fps25);

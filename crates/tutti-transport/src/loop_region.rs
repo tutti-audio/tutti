@@ -2,7 +2,7 @@
 //!
 //! The engine is the only writer. A control-side edit is a
 //! [`TransportCommand::Loop`](super::TransportCommand::Loop) scheduled at an
-//! [`At`](tutti_types::At), so the region changes whole, on a frame the
+//! [`At`](tutti_units::At), so the region changes whole, on a frame the
 //! engine picks, and the block's loop is never half of two edits. The engine
 //! keeps the region as plain fields; after each edit it publishes a copy
 //! through a [`SeqWriter`], which any thread reads as one write's value.
@@ -11,7 +11,8 @@
 //! construction, so the engine never holds an inverted pair.
 
 use tutti_rt::{SeqReader, SeqWriter};
-use tutti_types::{Beat, LoopRange};
+use tutti_types::LoopRange;
+use tutti_units::Beat;
 
 /// The loop region and whether looping is armed.
 ///

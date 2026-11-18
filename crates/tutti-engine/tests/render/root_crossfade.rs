@@ -11,7 +11,8 @@ use tutti_engine::Engine;
 use tutti_graph::{Edge, Editor, Fade, FadeLaw, ForkByClone, InPort, NodeKey, OutPort};
 use tutti_graph::{Pool, Prepare, Source, WorkerPool};
 use tutti_transport::Transport;
-use tutti_types::{ChannelLayout, Hz, MaxBlock, SampleRate, Samples, Seconds};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{Hz, SampleRate, Samples, Seconds};
 
 /// A pool that counts the jobs it runs, so a test knows blocks spread.
 struct Counting(WorkerPool, Arc<AtomicUsize>);

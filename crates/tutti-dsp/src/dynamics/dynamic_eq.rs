@@ -36,9 +36,8 @@
 //! Its tail is the bell's ring-out, which follows the Q.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{
-    Amplitude, ChannelLayout, CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds,
-};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds};
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction, compute_upward_gain_lift};
 use super::key_filter::KeyStage;

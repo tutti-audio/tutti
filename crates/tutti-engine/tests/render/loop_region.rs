@@ -22,7 +22,8 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_graph::{OutPort, Source};
 use tutti_transport::{LoopEdit, LoopRegion, Transport};
-use tutti_types::{At, Beat, ChannelLayout, Frame, LoopRange, SampleRate, Samples, Tail};
+use tutti_types::{ChannelLayout, LoopRange};
+use tutti_units::{At, Beat, Frame, SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;
 

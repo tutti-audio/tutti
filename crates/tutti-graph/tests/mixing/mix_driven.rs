@@ -26,7 +26,8 @@ use tutti_graph::{
     InPort, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, ParamPorts, ParamPortsError, ParamRange,
     Source, Topology, TransportPosition, ValidGraph, compile,
 };
-use tutti_types::{ChannelLayout, Mix, Tail, UnitAddr, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Mix, Tail, UnitAddr, UnitParam};
 
 const BLOCK: usize = 32;
 const PERIOD: u64 = 16;

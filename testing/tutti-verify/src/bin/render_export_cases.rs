@@ -26,10 +26,10 @@ use tutti_export::{
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
-use tutti_types::Amplitude;
 use tutti_types::ChannelLayout;
-use tutti_types::Hz;
-use tutti_types::{Samples, Seconds};
+use tutti_units::Amplitude;
+use tutti_units::Hz;
+use tutti_units::{Samples, Seconds};
 
 const SR: f64 = 48_000.0;
 const DUR: f64 = 1.0;
@@ -41,7 +41,7 @@ const TONE_HZ: f32 = 1_000.0;
 /// at (a graph prepared at another rate is refused, not re-rated).
 fn built(g: GraphBuilder) -> RenderGraph {
     let (editor, executor) = g
-        .build(RenderGraph::prepare(tutti_types::SampleRate::of(SR)))
+        .build(RenderGraph::prepare(tutti_units::SampleRate::of(SR)))
         .expect("builds");
     RenderGraph::assemble(editor, executor, Setup::new()).expect("built together")
 }
@@ -137,7 +137,7 @@ impl Case {
 }
 
 fn base(format: Format, channels: ChannelLayout) -> Case {
-    let rate = tutti_types::SampleRate::of(SR);
+    let rate = tutti_units::SampleRate::of(SR);
     Case {
         job: Job::new(rate, Seconds(DUR).to_samples(rate), Samples(0), Samples(0))
             .expect("a render"),
@@ -268,7 +268,7 @@ fn main() -> tutti_export::Result<()> {
         (22_050.0, "22k05"),
     ] {
         let mut cfg = base(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-        cfg.resample = Some(Resample::to(tutti_types::SampleRate::of(target)));
+        cfg.resample = Some(Resample::to(tutti_units::SampleRate::of(target)));
         write(format!("resample_{tag}.wav"), tone_graph(), &cfg)?;
     }
 
@@ -276,7 +276,7 @@ fn main() -> tutti_export::Result<()> {
     // Nyquist and must be attenuated, not folded down to ~4 kHz.
     {
         let mut cfg = base(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-        cfg.resample = Some(Resample::to(tutti_types::SampleRate::SR_22K05));
+        cfg.resample = Some(Resample::to(tutti_units::SampleRate::SR_22K05));
         write(
             "resample_alias_22k05.wav".into(),
             near_nyquist_graph(),
@@ -289,7 +289,7 @@ fn main() -> tutti_export::Result<()> {
     for (i, chunk) in tutti_export::ChunkSize::PRESETS.iter().enumerate() {
         let mut cfg = base(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
         cfg.resample = Some(Resample {
-            target_rate: tutti_types::SampleRate::SR_44K1,
+            target_rate: tutti_units::SampleRate::SR_44K1,
             chunk: *chunk,
         });
         write(format!("chunk_{i}.wav"), tone_graph(), &cfg)?;

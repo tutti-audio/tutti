@@ -137,7 +137,7 @@ impl PluginServer {
         drop(handshake);
 
         // Second connection: audio. Third: control.
-        let mut audio = listener.accept()?;
+        let mut audio = listener.accept_audio()?;
         audio.send(&BridgeMessage::Ready {
             protocol_version: PROTOCOL_VERSION,
         })?;
@@ -156,6 +156,7 @@ impl PluginServer {
         // once it has it back.
         self.session.drop_plugin(self.main);
         drop(render.stop());
+        self.session.report_final_losses();
         served
     }
 

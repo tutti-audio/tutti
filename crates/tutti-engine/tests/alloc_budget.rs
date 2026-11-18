@@ -42,8 +42,8 @@ use support::{Gain, Sine};
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Executor, ForkByClone, Prepare};
-use tutti_types::Hz;
-use tutti_types::{SampleRate, Samples};
+use tutti_units::Hz;
+use tutti_units::{SampleRate, Samples};
 
 static ALLOCS: AtomicUsize = AtomicUsize::new(0);
 static BYTES: AtomicUsize = AtomicUsize::new(0);

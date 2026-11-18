@@ -10,7 +10,8 @@ use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition};
 use tutti_nodes::{
     CrossoverNode, EqBandNode, LadderFilterNode, LadderType, SvfControls, SvfFilterNode, SvfType,
 };
-use tutti_types::{ChannelLayout, Db, Frame, Hz, Q, Resonance, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, Frame, Hz, Q, Resonance, SampleRate, Samples};
 
 const BLOCK: usize = 256;
 const BLOCKS: usize = 200;

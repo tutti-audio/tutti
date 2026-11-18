@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use tutti_buffers::{Float, Planes};
-use tutti_types::{Ballistics, Seconds};
+use tutti_units::{Ballistics, Seconds};
 
 /// The frames a pass over a block takes at a time: the levels of a stretch become its gains
 /// in a stack array.

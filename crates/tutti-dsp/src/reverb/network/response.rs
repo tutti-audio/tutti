@@ -12,7 +12,7 @@
 //! of band gains that would exceed 1 anywhere to peak at 0.9999; the model does not,
 //! and [`Absorption::peak`] is what shows a design never asks for it.
 
-use tutti_types::{Amplitude, Db, Gain, Hz, SampleRate};
+use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate};
 
 use super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage, energy,

@@ -615,7 +615,8 @@ impl Error for ForkError {
 /// use tutti_types::MaxBlock;
 /// use tutti_graph::{Editor, ForkByClone, ForkMode, ForkTarget, Prepare};
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
-/// # use tutti_types::{ChannelLayout, SampleRate, Samples};
+/// # use tutti_units::{SampleRate, Samples};
+/// # use tutti_types::ChannelLayout;
 /// # use tutti_graph::NodeKey;
 /// # #[derive(Clone)]
 /// # struct Silence;
@@ -695,7 +696,8 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 /// use tutti_types::MaxBlock;
 /// use tutti_graph::{Editor, ForkError, ForkMode, ForkTarget, Prepare, Unforkable};
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
-/// # use tutti_types::{ChannelLayout, SampleRate, Samples};
+/// # use tutti_units::{SampleRate, Samples};
+/// # use tutti_types::ChannelLayout;
 /// # use tutti_graph::NodeKey;
 /// # struct Silence;
 /// # impl Node for Silence {

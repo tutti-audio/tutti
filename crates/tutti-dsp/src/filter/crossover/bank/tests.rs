@@ -1,7 +1,8 @@
 use std::f64::consts::{PI, SQRT_2};
 
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{ChannelLayout, Hz, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::{Hz, SampleRate};
 
 use super::*;
 use crate::{Complex64, CrossoverControls, CrossoverModel, SOLVE_CEILING};

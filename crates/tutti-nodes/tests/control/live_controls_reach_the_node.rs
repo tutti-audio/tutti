@@ -28,8 +28,8 @@ use tutti_buffers::Planes;
 use tutti_graph::{Fade, FadeLaw, IntoNode, NodeMode, Prepare, Solo};
 use tutti_nodes::{EqBandNode, SvfType};
 use tutti_types::MaxBlock;
-use tutti_types::UnitParam;
-use tutti_types::{Db, Hz, Q, SampleRate, Samples};
+use tutti_units::UnitParam;
+use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

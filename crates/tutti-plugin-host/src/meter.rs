@@ -115,7 +115,8 @@ impl std::fmt::Debug for PluginMeter {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tutti_types::{Beat, MeterChange, MeterMap, TimeSignature};
+    use tutti_types::{MeterChange, MeterMap, TimeSignature};
+    use tutti_units::Beat;
 
     /// A project meter of `n`/4 from beat 0, for a block to recognise.
     fn meter_of(n: u32) -> ProjectMeter {

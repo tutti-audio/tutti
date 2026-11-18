@@ -28,8 +28,8 @@ use tutti_graph::UmpAt;
 
 use tutti_graph::Offset;
 use tutti_midi_device::TICK_HZ;
-use tutti_types::{Frame, SampleRate, Samples, Seconds};
 use tutti_ump::{Message, Ump, Utility};
+use tutti_units::{Frame, SampleRate, Samples, Seconds};
 
 /// Converts sample positions to 16-bit JR ticks at a fixed sample rate. Cheap,
 /// `Copy`, and stateless — the shared reference both `JrStamper` reasons in.

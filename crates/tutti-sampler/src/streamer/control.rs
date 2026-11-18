@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tutti_buffers::{Float, Wave};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// The streamer thread is gone, so a stream-control command was discarded.
 ///

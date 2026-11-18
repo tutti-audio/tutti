@@ -74,7 +74,8 @@ use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutPort, TapAlign
 use tutti_rt::LockExt;
 use tutti_tempo::TempoMap;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
-use tutti_types::{Beat, ChannelLayout, ChannelTopology, Frame, SampleRate, Samples, Seconds};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::{Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::Session;
 use crate::fork::PendingExport;
@@ -257,7 +258,7 @@ impl Master for BufferMaster {
 /// # use tutti_session::{Bounce, Range, Session};
 /// # use tutti_codec::{Format, Pcm};
 /// # use tutti_graph::NodeKey;
-/// # use tutti_types::Beat;
+/// # use tutti_units::Beat;
 /// # fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
 /// let done = session.bounce(
 ///     Bounce::project()
@@ -342,7 +343,7 @@ impl<N> Bounce<N, NoMaster> {
     /// ```compile_fail,E0599
     /// # use tutti_session::Bounce;
     /// # use tutti_export::Normalize;
-    /// # use tutti_types::Db;
+    /// # use tutti_units::Db;
     /// let _ = Bounce::<tutti_graph::NodeKey>::project()
     ///     .master_buffers()
     ///     .normalize(Normalize::Peak { target: Db(-1.0) });
@@ -838,7 +839,7 @@ impl<M: Master> Bounced<M> {
     /// # fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
     /// let done = session.bounce(
     ///     Bounce::project()
-    ///         .range(tutti_session::Range::Until(tutti_types::Beat(4.0)))
+    ///         .range(tutti_session::Range::Until(tutti_units::Beat(4.0)))
     ///         .master_buffers()
     ///         .stem_with(Stem::buffers(drums)),
     /// )?;
@@ -927,7 +928,7 @@ impl ExportClock {
     fn offline(&self) -> OfflineTransport {
         match &self.0 {
             Clock::Frozen => OfflineTransport::new(Arc::new(Stopped(Arc::new(
-                TempoMap::constant(tutti_types::Bpm::default()).expect("120 BPM is a map"),
+                TempoMap::constant(tutti_units::Bpm::default()).expect("120 BPM is a map"),
             )))),
             Clock::Timeline { timeline, .. } => timeline.clone(),
         }
@@ -952,8 +953,8 @@ struct Stopped(Arc<TempoMap>);
 impl tutti_transport::OfflineClock for Stopped {}
 
 impl tutti_transport::Timeline for Stopped {
-    fn beat(&self) -> tutti_types::Beat {
-        tutti_types::Beat(0.0)
+    fn beat(&self) -> tutti_units::Beat {
+        tutti_units::Beat(0.0)
     }
     fn tempo_map(&self) -> Arc<TempoMap> {
         Arc::clone(&self.0)
@@ -2044,7 +2045,7 @@ mod tests {
     use tutti_export::Stage;
     use tutti_graph::ForkByClone;
     use tutti_tempo::{TempoPoint, Transition};
-    use tutti_types::{Bpm, SampleRate};
+    use tutti_units::{Bpm, SampleRate};
 
     const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -2367,7 +2368,7 @@ mod tests {
     /// default), they are the 480 frames of programme alone.
     #[test]
     fn an_untrimmed_bounce_renders_the_latency_past_the_programme() {
-        use tutti_types::Db;
+        use tutti_units::Db;
         const DURATION: usize = 480;
         const LATENCY: usize = 240;
         let mut session = session();
@@ -2414,7 +2415,7 @@ mod tests {
     #[test]
     fn a_frozen_bounces_timeline_is_stopped_at_beat_zero() {
         let mut session = session();
-        let seen: Arc<Mutex<Option<(bool, tutti_types::Beat)>>> = Arc::default();
+        let seen: Arc<Mutex<Option<(bool, tutti_units::Beat)>>> = Arc::default();
         let into = Arc::clone(&seen);
         session
             .bounce(short().clock(ExportClock::frozen()).edit(Box::new(
@@ -2425,7 +2426,7 @@ mod tests {
             .expect("the bounce renders");
         let (rolling, beat) = seen.lock().unwrap().expect("the edit ran");
         assert!(!rolling, "a frozen bounce's timeline must not roll");
-        assert_eq!(beat, tutti_types::Beat(0.0));
+        assert_eq!(beat, tutti_units::Beat(0.0));
     }
 
     /// **The default clock is the project's tempo map from the range's first
@@ -2435,7 +2436,7 @@ mod tests {
     fn the_default_clock_starts_at_the_ranges_first_beat_on_the_projects_tempo() {
         let mut session = session();
         session.set_tempo(Bpm::of(90.0)).expect("not following");
-        let seen: Arc<Mutex<Option<(tutti_types::Beat, Bpm)>>> = Arc::default();
+        let seen: Arc<Mutex<Option<(tutti_units::Beat, Bpm)>>> = Arc::default();
         let into = Arc::clone(&seen);
         session
             .bounce(
