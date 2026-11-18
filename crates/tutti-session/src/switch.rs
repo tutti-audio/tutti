@@ -150,7 +150,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// graph, the card) is what the checks and the switch see.
     fn settle_runs(&mut self) -> Result<()> {
         self.refuse_waiting_runs()?;
-        while self.pool.has_due_run() {
+        while self.pool.entries.has_due_run() {
             self.pool_run_loaded();
         }
         self.refuse_waiting_runs()
@@ -166,7 +166,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     }
 
     fn refuse_waiting_runs(&self) -> Result<()> {
-        let keys = self.pool.waiting_runs();
+        let keys = self.pool.entries.waiting_runs();
         if keys.is_empty() {
             Ok(())
         } else {
@@ -280,7 +280,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
                 let (host, switch) = *failed;
                 self.running.host = Some(host);
                 let undone = self.back_to_the_timer(old);
-                self.carried_events.append(&mut unpolled);
+                self.reports.carry(&mut unpolled);
                 Err(ClockError::new(self, after_stop(switch, undone)))
             }
         }
@@ -299,7 +299,8 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
         if restored.is_err() {
             host.settle(&self.graph.prepared());
         }
-        self.faults_seen = host.stream().faults().count();
+        self.reports
+            .faults_restarted(host.stream().faults().count());
         self.running.host = Some(host);
         restored
     }
@@ -317,11 +318,11 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
             self.with_clock::<DeviceClock<F>>(DeviceHandle::vacant(audio_host));
         let input_latency = bind_inputs(&mut live, &driver);
         let device = Device::<F>::new(driver, chosen, input_latency);
-        live.faults_seen = device.faults().count();
+        live.reports.faults_restarted(device.faults().count());
         live.running.fill(device);
         let rate = live.device().graph_rate();
         note_rate_change(&mut events, previous, rate);
-        live.carried_events.append(&mut events);
+        live.reports.carry(&mut events);
         live
     }
 }
@@ -428,8 +429,9 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
                 let prepared = self.graph.prepared();
                 self.device_mut().driver.settle(&prepared);
             }
-            self.faults_seen = self.device().faults().count();
-            self.carried_events.append(&mut events);
+            self.reports
+                .faults_restarted(self.device().faults().count());
+            self.reports.carry(&mut events);
             return Err(ClockError::new(self, after_stop(switch, undone)));
         }
         #[cfg(feature = "capture")]
@@ -447,10 +449,12 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
         // with the card.
         events.append(&mut handle.events);
         system.running.host = Some(handle.into_device().driver.into_host());
-        system.faults_seen = system.running.host().stream().faults().count();
+        system
+            .reports
+            .faults_restarted(system.running.host().stream().faults().count());
         let now = system.graph.prepared().sample_rate();
         note_rate_change(&mut events, rate, now);
-        system.carried_events.append(&mut events);
+        system.reports.carry(&mut events);
         Ok(system)
     }
 }

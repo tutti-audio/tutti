@@ -24,9 +24,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     pub(crate) fn pool_start(&mut self, starts: Vec<Start<C::Float>>) {
         for Start { flight, load } in starts {
             match load.step {
-                Step::Ready(value) => self.pool.land(flight, Ok(value)),
-                Step::Session(open) => self.pool.open(Opening { flight, open }),
-                Step::Worker(work) => self.pool.enqueue(flight, work),
+                Step::Ready(value) => self.pool.entries.land(flight, Ok(value)),
+                Step::Session(open) => self.pool.entries.open(Opening { flight, open }),
+                Step::Worker(work) => self.pool.entries.enqueue(flight, work),
             }
         }
         self.pool_pump();
@@ -35,7 +35,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Starts queued worker stages while fewer than the configured number run.
     /// Each landing starts the next.
     pub(crate) fn pool_pump(&mut self) {
-        while let Some(Worker { flight, work, file }) = self.pool.next_worker() {
+        while let Some(Worker { flight, work, file }) = self.pool.entries.next_worker() {
             let defer = self.main_deferral();
             // A main stage the worker made drops its output on the main thread
             // wherever the stage itself is dropped: the jobs' channel, a session
@@ -76,29 +76,29 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// load was cancelled or superseded since its worker ended is not run: its
     /// worker output is dropped here, on `main`.
     pub(crate) fn pool_main_stages(&mut self, main: MainThreadMarker) {
-        for item in self.pool.take_main(main) {
-            if self.pool.live(item.flight) {
+        for item in self.pool.entries.take_main(main) {
+            if self.pool.entries.live(item.flight) {
                 let done = catch_unwind(AssertUnwindSafe(|| item.stage.run(main)))
                     .unwrap_or_else(|payload| Err(panicked(payload.as_ref())));
-                self.pool.land(item.flight, done);
+                self.pool.entries.land(item.flight, done);
             } else {
                 item.stage.discard(main);
-                self.pool.end_flight(item.flight);
+                self.pool.entries.end_flight(item.flight);
             }
         }
     }
 
     /// Runs the stages that wait on the session's own thread.
     fn pool_openings(&mut self) {
-        for Opening { flight, open } in self.pool.take_openings() {
-            if !self.pool.live(flight) {
-                self.pool.end_flight(flight);
+        for Opening { flight, open } in self.pool.entries.take_openings() {
+            if !self.pool.entries.live(flight) {
+                self.pool.entries.end_flight(flight);
                 continue;
             }
             let done: Result<Value, LoadError> =
                 catch_unwind(AssertUnwindSafe(|| open(&mut OpenCx::new(self))))
                     .unwrap_or_else(|payload| Err(panicked(payload.as_ref())));
-            self.pool.land(flight, done);
+            self.pool.entries.land(flight, done);
         }
     }
 
@@ -114,23 +114,23 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             self.pool_main_stages(main);
         }
         self.pool_openings();
-        self.pool.sweep();
+        self.pool.entries.sweep();
         // Before the waits settle: a swap the graph refuses fails the entry the
         // wait would otherwise report as loaded.
         #[cfg(feature = "plugin")]
         <C::Float as crate::format::Sealed>::swap_pooled_plugins(self);
-        self.pool.poll_waiters();
+        self.pool.entries.poll_waiters();
         // One at a time, each over the pool as the run before it left it. A run
         // asked during these waits for the next update; one that panics leaves
         // the rest waiting.
         self.pool_run_loaded();
-        self.pool.drain_events(out);
+        self.pool.entries.drain_events(out);
     }
 
     /// Runs the runs asked with `when_loaded` whose entry has loaded.
     pub(crate) fn pool_run_loaded(&mut self) {
-        let through = self.pool.last_when();
-        while let Some(then) = self.pool.next_loaded(through) {
+        let through = self.pool.entries.last_when();
+        while let Some(then) = self.pool.entries.next_loaded(through) {
             then(self);
         }
     }

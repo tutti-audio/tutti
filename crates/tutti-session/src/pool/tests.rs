@@ -183,7 +183,7 @@ fn handle<K: crate::AppKey, C: crate::Clock<Float = f32>>(
     session: &Session<K, C>,
     key: &'static str,
 ) -> Result<ProbeHandle, HandleError<&'static str>> {
-    session.pool.handle::<_, Probe>(&key)
+    session.pool.entries.handle::<_, Probe>(&key)
 }
 
 fn undeclare(session: &mut crate::DetachedSession) {
@@ -410,7 +410,11 @@ fn a_held_entry_is_released_at_its_last_holds_drop_not_before() {
     s.pool(entry("a", probe(1, &runs))).unwrap();
     spawned.run_all();
     let _ = events(&mut s);
-    let one = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
+    let one = s
+        .pool
+        .entries
+        .hold(&PoolKey::new(&"a"), HoldKind::Node)
+        .unwrap();
     let two = one.clone();
     undeclare(&mut s);
     assert_eq!(state(&s, "a").as_deref(), Some("held"));
@@ -431,7 +435,11 @@ fn declaring_a_held_key_with_its_identity_adopts_it_without_a_reload() {
     spawned.run_all();
     let _ = events(&mut s);
     let held = handle(&s, "a").unwrap();
-    let hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
+    let hold = s
+        .pool
+        .entries
+        .hold(&PoolKey::new(&"a"), HoldKind::Node)
+        .unwrap();
     undeclare(&mut s);
     assert_eq!(state(&s, "a").as_deref(), Some("held"));
     s.pool(entry("a", probe(1, &runs))).unwrap();
@@ -451,7 +459,11 @@ fn declaring_a_held_key_with_another_identity_reloads_it() {
     s.pool(entry("a", probe(1, &runs))).unwrap();
     spawned.run_all();
     let _ = events(&mut s);
-    let _hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
+    let _hold = s
+        .pool
+        .entries
+        .hold(&PoolKey::new(&"a"), HoldKind::Node)
+        .unwrap();
     undeclare(&mut s);
     s.pool(entry("a", probe(2, &runs))).unwrap();
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
@@ -501,11 +513,11 @@ fn a_handle_of_another_kind_or_an_undeclared_key_is_refused() {
     spawned.run_all();
     let _ = events(&mut s);
     assert!(matches!(
-        s.pool.handle::<_, Other>(&"a"),
+        s.pool.entries.handle::<_, Other>(&"a"),
         Err(HandleError::WrongKind("a"))
     ));
     assert!(matches!(
-        s.pool.handle::<_, Probe>(&"nope"),
+        s.pool.entries.handle::<_, Probe>(&"nope"),
         Err(HandleError::NotPooled("nope"))
     ));
 }
@@ -606,7 +618,11 @@ fn an_outcome_that_landed_while_held_is_reported_when_the_entry_is_adopted() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    let hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
+    let hold = s
+        .pool
+        .entries
+        .hold(&PoolKey::new(&"a"), HoldKind::Node)
+        .unwrap();
     undeclare(&mut s);
     spawned.run_all();
     assert!(events(&mut s).is_empty(), "held: nothing to report yet");
@@ -660,7 +676,11 @@ fn a_released_slots_queued_outcome_is_not_reported_for_the_key_declared_again() 
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    let hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
+    let hold = s
+        .pool
+        .entries
+        .hold(&PoolKey::new(&"a"), HoldKind::Node)
+        .unwrap();
     undeclare(&mut s);
     spawned.run_all();
     assert!(events(&mut s).is_empty());
@@ -962,23 +982,23 @@ fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
     s.pool(entry("a", probe(1, &runs))).unwrap();
     spawned.run_all();
     let _ = events(&mut s);
-    let (landing, _) = s.pool.landing_of::<Probe>(&key).expect("loaded");
+    let (landing, _) = s.pool.entries.landing_of::<Probe>(&key).expect("loaded");
     let refusal = || LoadError::Job(WorkerError::Dropped);
 
     // A new declaration is in flight: the refusal of the old landing is stale.
     s.pool(entry("a", probe(2, &runs))).unwrap();
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
-    assert!(!s.pool.refuse_landed(&key, landing, refusal()));
+    assert!(!s.pool.entries.refuse_landed(&key, landing, refusal()));
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"), "untouched");
     spawned.run_all();
     assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
 
     // The newer landing is refused by its own generation, and a refusal of
     // the old one (a second time over) still records nothing.
-    assert!(!s.pool.refuse_landed(&key, landing, refusal()));
-    let (newer, _) = s.pool.landing_of::<Probe>(&key).expect("loaded");
+    assert!(!s.pool.entries.refuse_landed(&key, landing, refusal()));
+    let (newer, _) = s.pool.entries.landing_of::<Probe>(&key).expect("loaded");
     assert_ne!(newer, landing);
-    assert!(s.pool.refuse_landed(&key, newer, refusal()));
+    assert!(s.pool.entries.refuse_landed(&key, newer, refusal()));
     assert_eq!(state(&s, "a").as_deref(), Some("failed"));
     assert!(handle(&s, "a").is_err(), "its value is gone");
     assert_eq!(events(&mut s).len(), 1, "one failure");
