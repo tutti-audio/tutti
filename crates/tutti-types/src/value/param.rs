@@ -4,7 +4,7 @@
 //! different units are distinct types at compile time, at zero runtime cost
 //! over a bare `Arc<AtomicF32>`. The atomic follows the unit's raw
 //! representation ([`ParamRaw`]): [`AtomicF32`] for an `f32` unit,
-//! [`AtomicF64`] for an `f64` one ([`Seconds`](super::Seconds)). `SampleRate`
+//! [`AtomicF64`] for an `f64` one ([`Seconds`](tutti_units::Seconds)). `SampleRate`
 //! is `f64`-backed and is not modulated at audio rate: construct it directly,
 //! don't wrap it in `Param`.
 //!
@@ -121,7 +121,7 @@ impl ParamRaw for f64 {
 /// What a host that addresses params by kind rather than by unit holds: the
 /// modulation path (control lanes, `ParamSet`) works in `f32` values, whatever
 /// the unit's own raw. An `f64` cell is **widened** on a write (exact) and
-/// **narrowed** on a read (`as f32`): the one place a [`Seconds`](super::Seconds)
+/// **narrowed** on a read (`as f32`): the one place a [`Seconds`](tutti_units::Seconds)
 /// param loses precision, and a control time an `f32` carries to well under a
 /// microsecond for any value a modulation lane produces. The node that owns
 /// the [`Param`] reads its own cell at full width.
@@ -203,8 +203,8 @@ impl From<Arc<AtomicF64>> for ParamCell {
 /// [`detach`](Self::detach) are for the control thread.
 ///
 /// The cell holds the unit's raw at its own width ([`ParamRaw`]): `f32` for
-/// most units, `f64` for [`Seconds`](super::Seconds).
-/// [`SampleRate`](super::SampleRate) is `f64`-backed too but is not modulated
+/// most units, `f64` for [`Seconds`](tutti_units::Seconds).
+/// [`SampleRate`](tutti_units::SampleRate) is `f64`-backed too but is not modulated
 /// at audio rate, so it is used directly rather than through a `Param`.
 ///
 /// # Examples
@@ -348,8 +348,8 @@ where
 /// (`Unit<Raw = f64>`), held inline: [`Param`]'s neighbour for a hot loop's own
 /// state, not a mode of it.
 ///
-/// The width is the reason it exists. [`ReadRate`](super::ReadRate) and
-/// [`SamplePosition`](super::SamplePosition) are `f64` because a disk voice adds
+/// The width is the reason it exists. [`ReadRate`](tutti_units::ReadRate) and
+/// [`SamplePosition`](tutti_units::SamplePosition) are `f64` because a disk voice adds
 /// the rate into its read position once per sample for the length of the file.
 /// A cell that stored the rate as `f32` and widened it on load would put that
 /// rounding back into the sum on every load, and the error does not average
@@ -361,7 +361,7 @@ where
 /// another thread reaches it through `&self` on whatever already shares its
 /// owner (a voice's `RtState`, a memory source). It is not what a node's
 /// control is: those are `Param`s, which a host addresses by `UnitAddr`. There
-/// is no `Default`: a default [`ReadRate`](super::ReadRate) is `0.0`, a stopped
+/// is no `Default`: a default [`ReadRate`](tutti_units::ReadRate) is `0.0`, a stopped
 /// voice, so the initial value is always named.
 ///
 /// [`load`](Self::load) and [`store`](Self::store) are audio-thread safe, with
