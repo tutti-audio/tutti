@@ -5,7 +5,6 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use tutti_graph::NodeKey;
-use tutti_graph::PrerollTable;
 use tutti_nodes::{ClickNode, ClickSettings};
 use tutti_transport::Transport;
 use tutti_types::MAX_CHANNELS;
@@ -245,7 +244,6 @@ pub(crate) struct Parts<F: Float> {
     transport: Transport,
     click: Option<NodeKey>,
     click_settings: Arc<ClickSettings>,
-    compensation: Arc<PrerollTable>,
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<crate::MidiNodes>,
     #[cfg(feature = "midi-hardware")]
@@ -452,7 +450,6 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
                 transport,
                 click: None,
                 click_settings: Arc::new(ClickSettings::new()),
-                compensation: Arc::default(),
                 #[cfg(feature = "midi")]
                 midi: None,
                 #[cfg(feature = "midi-hardware")]
@@ -971,7 +968,6 @@ impl<C: Clock> SessionBuilder<C> {
             transport,
             click: Some(click.erase()),
             click_settings,
-            compensation: Arc::default(),
             #[cfg(feature = "midi")]
             midi,
             #[cfg(feature = "midi-hardware")]
@@ -1004,7 +1000,6 @@ impl<C: Clock> SessionBuilder<C> {
             transport: crate::session::parts::TransportPart::new(
                 parts.transport.clone(),
                 parts.click,
-                Arc::clone(&parts.compensation),
             ),
             output: crate::session::parts::OutputPart::new(
                 self.opts.root.clone(),

@@ -4,8 +4,7 @@
 use crate::peer::ResourceIds;
 use crate::{AppKey, Clock, Pool, PoolConfig};
 
-/// The pool's entries and the ids its resources, and the session's other
-/// resources, are named by.
+/// The pool's entries, and the source of the ids that name the session's resources.
 #[derive(Debug)]
 pub(crate) struct PoolPart<K: AppKey, C: Clock> {
     /// What the app declared loaded ([`Session::pool`](crate::Session::pool)).
