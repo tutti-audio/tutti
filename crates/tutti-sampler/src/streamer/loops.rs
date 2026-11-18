@@ -436,7 +436,13 @@ impl Mapping {
     fn key(&self, s: u64) -> Key {
         if let Some(ring_loop) = self.active_loop() {
             let f = ring_loop.span.place_frame(s as usize);
-            return Key::Frame(f, ring_loop.span.fade_at(f).map(|(l, w)| (l, w.to_bits())));
+            return Key::Frame(
+                f,
+                ring_loop
+                    .span
+                    .fade_at::<f32>(f)
+                    .map(|(l, w)| (l, w.to_bits())),
+            );
         }
         let Some(len) = self.len.map(Samples::get) else {
             // Unknown length: forward reads the frame itself, a reversal has

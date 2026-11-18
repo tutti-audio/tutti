@@ -37,11 +37,17 @@ pub fn lerp<F: Float>(a: F, b: F, t: F) -> F {
 /// assert_eq!(cubic_hermite(0.0, 1.0, 2.0, 3.0, 0.5), 1.5);
 /// ```
 #[inline]
-pub fn cubic_hermite(y0: f32, y1: f32, y2: f32, y3: f32, t: f32) -> f32 {
+pub fn cubic_hermite<F: Float>(y0: F, y1: F, y2: F, y3: F, t: F) -> F {
+    let (half, two, two_and_half, one_and_half) = (
+        F::from_f64(0.5),
+        F::from_f64(2.0),
+        F::from_f64(2.5),
+        F::from_f64(1.5),
+    );
     let c0 = y1;
-    let c1 = 0.5 * (y2 - y0);
-    let c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
-    let c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
+    let c1 = half * (y2 - y0);
+    let c2 = y0 - two_and_half * y1 + two * y2 - half * y3;
+    let c3 = half * (y3 - y0) + one_and_half * (y1 - y2);
     ((c3 * t + c2) * t + c1) * t + c0
 }
 

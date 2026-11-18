@@ -355,8 +355,11 @@ impl RegionOut {
                 return false;
             }
             // Frames read before a fault are kept; the rest is silence.
-            let view = InterleavedMut::new(&mut *out, decoder.topology().width())
-                .expect("the ring is the file's width and `out` holds whole frames");
+            let Ok(view) = InterleavedMut::new(&mut *out, decoder.topology().width()) else {
+                // `out` is not whole frames of the file's width: nothing read.
+                out.fill(0.0);
+                return false;
+            };
             let got = decoder
                 .fill_sequential_interleaved(view)
                 .map_or(0, Samples::get);
@@ -375,10 +378,7 @@ impl RegionOut {
             return false;
         }
         match self.resident.as_deref() {
-            Some(wave) => {
-                super::io::wave_io::read_wave(wave, at, out, channels);
-                true
-            }
+            Some(wave) => super::io::wave_io::read_wave(wave, at, out, channels),
             None => {
                 out.fill(0.0);
                 false
@@ -401,13 +401,15 @@ impl RegionOut {
     /// Append frames at the window's end, returning how many frames
     /// landed: short where a slot the reader's block in flight may read would
     /// be written, or where the ring is full ahead of the reader
-    /// (`PosRing::push`). A trailing partial frame is ignored.
+    /// (`PosRing::push`). A trailing partial frame is ignored, and none land
+    /// for a view the ring refuses (it is built at the ring's own width).
     pub fn push_interleaved(&mut self, samples: &[f32]) -> Samples {
         let layout = self.writer.layout();
         let whole = Samples::from_interleaved_len(samples.len(), layout).interleaved_len(layout);
-        let frames = Interleaved::new(&samples[..whole], layout)
-            .expect("a whole number of frames of the ring's width");
-        self.writer.push(frames).expect("the ring's width")
+        let Ok(frames) = Interleaved::new(&samples[..whole], layout) else {
+            return Samples(0);
+        };
+        self.writer.push(frames).unwrap_or(Samples(0))
     }
 }
 
