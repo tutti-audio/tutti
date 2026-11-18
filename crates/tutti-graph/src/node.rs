@@ -121,8 +121,9 @@ pub struct Shape {
     /// the executor counts each event cut as it counts a full output port
     /// ([`Executor::dropped_event_count`](crate::Executor::dropped_event_count)),
     /// and per node ([`Editor::take_event_losses`](crate::Editor::take_event_losses)).
-    /// The cut falls on the same events on the serial and the parallel
-    /// executor. Each input's merge slot is sized `min(bound, what its edges
+    /// What the node is sent stays in frame order: note-offs first decides
+    /// which events survive the cut, not their order. The cut falls on the same
+    /// events on the serial and the parallel executor. Each input's merge slot is sized `min(bound, what its edges
     /// can send)` on the control side, and the cut over everything is made in
     /// buffers sized at a commit, so nothing allocates on the audio thread
     /// however the edges change.
@@ -550,22 +551,15 @@ impl Shape {
     /// ```
     /// use tutti_graph::Shape;
     /// use tutti_types::ChannelLayout;
+    /// use std::num::NonZeroU32;
     /// let arp = Shape::EMPTY
     ///     .with_events(1, 1)
-    ///     .with_event_capacity(16);
+    ///     .with_event_capacity(NonZeroU32::new(16).unwrap());
     /// assert_eq!(arp.event_capacity.map(|n| n.get()), Some(16));
     /// ```
-    ///
-    /// # Panics
-    ///
-    /// If `per_block` is zero: a port that can hold no event is not an
-    /// event port. (In a `const` context, at compile time.)
     #[must_use]
-    pub const fn with_event_capacity(mut self, per_block: u32) -> Self {
-        match NonZeroU32::new(per_block) {
-            Some(n) => self.event_capacity = Some(n),
-            None => panic!("an event capacity of zero: the port could hold no event"),
-        }
+    pub const fn with_event_capacity(mut self, per_block: NonZeroU32) -> Self {
+        self.event_capacity = Some(per_block);
         self
     }
 
@@ -575,22 +569,15 @@ impl Shape {
     ///
     /// ```
     /// use tutti_graph::Shape;
+    /// use std::num::NonZeroU32;
     /// let sink = Shape::EMPTY
     ///     .with_events(2, 0)
-    ///     .with_event_input_capacity(64);
+    ///     .with_event_input_capacity(NonZeroU32::new(64).unwrap());
     /// assert_eq!(sink.event_input_capacity.map(|n| n.get()), Some(64));
     /// ```
-    ///
-    /// # Panics
-    ///
-    /// If `per_block` is zero: an input that can take no event is not an
-    /// event input. (In a `const` context, at compile time.)
     #[must_use]
-    pub const fn with_event_input_capacity(mut self, per_block: u32) -> Self {
-        match NonZeroU32::new(per_block) {
-            Some(n) => self.event_input_capacity = Some(n),
-            None => panic!("an event input capacity of zero: the input could take no event"),
-        }
+    pub const fn with_event_input_capacity(mut self, per_block: NonZeroU32) -> Self {
+        self.event_input_capacity = Some(per_block);
         self
     }
 

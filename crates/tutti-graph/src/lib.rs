@@ -301,12 +301,15 @@
 //! use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 //! use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
 //!
+//! // A declared capacity is never zero: the type says so.
+//! const CAPACITY: std::num::NonZeroU32 = std::num::NonZeroU32::new(4).unwrap();
+//!
 //! #[derive(Clone)]
 //! struct Pulse;
 //!
 //! impl Node for Pulse {
 //!     fn shape(&self) -> Shape {
-//!         Shape::EMPTY.with_events(0, 1).with_event_capacity(4)
+//!         Shape::EMPTY.with_events(0, 1).with_event_capacity(CAPACITY)
 //!     }
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

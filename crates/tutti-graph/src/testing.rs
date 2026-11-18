@@ -18,6 +18,7 @@
 )]
 
 use std::collections::{BTreeMap, VecDeque};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_buffers::Float;
@@ -273,14 +274,14 @@ impl<F: Float> TestNode<F> {
                 .with_tail(Tail::None),
             Kind::Burst { cap, .. } => Shape::source_unassigned(ch(1))
                 .with_events(0, 1)
-                .with_event_capacity(cap),
+                .with_event_capacity(cap_of(cap)),
             Kind::Consumer { inputs } => Shape::source_unassigned(ch(1))
                 .with_events(inputs, 0)
                 .with_tail(Tail::Unbounded),
             Kind::BoundedConsumer { inputs, cap } => Shape::source_unassigned(ch(1))
                 .with_events(inputs, 0)
                 .with_tail(Tail::Unbounded)
-                .with_event_input_capacity(cap),
+                .with_event_input_capacity(cap_of(cap)),
             Kind::EventLag { latency } => Shape::EMPTY
                 .with_events(1, 1)
                 .with_latency(lat(latency))
@@ -309,6 +310,16 @@ impl<F: Float> TestNode<F> {
             .with_latency(lat(latency))
             .with_tail(tail),
         }
+    }
+}
+
+/// An event capacity of `n` (non-zero; a literal zero fails at compile time in
+/// a `const`, and at the call otherwise).
+#[allow(dead_code)]
+pub const fn cap_of(n: u32) -> NonZeroU32 {
+    match NonZeroU32::new(n) {
+        Some(n) => n,
+        None => panic!("a test event capacity of zero"),
     }
 }
 

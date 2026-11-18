@@ -1722,7 +1722,7 @@ mod tests {
         let mut t = Topology::default();
         let mut shapes = Shapes::new();
         let src = Shape::EMPTY.with_events(0, 1);
-        let declared = src.with_event_capacity(5);
+        let declared = src.with_event_capacity(crate::testing::cap_of(5));
         let sink = Shape::EMPTY.with_events(1, 0);
         for (k, s) in [(1, declared), (2, src), (3, sink)] {
             t.nodes
@@ -1844,7 +1844,8 @@ mod tests {
         .unwrap_err();
         assert!(in_place.0.contains("only the tail"), "{in_place}");
         let capacity = check(
-            Shape::source_unassigned(ChannelLayout::MONO).with_event_capacity(4),
+            Shape::source_unassigned(ChannelLayout::MONO)
+                .with_event_capacity(crate::testing::cap_of(4)),
             vec![(a, fade)],
         )
         .unwrap_err();

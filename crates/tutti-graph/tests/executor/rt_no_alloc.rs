@@ -597,7 +597,9 @@ struct Spray {
 
 impl Node for Spray {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(self.cap)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -823,7 +825,9 @@ struct RampEvery;
 
 impl Node for RampEvery {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(16)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1020,7 +1024,9 @@ struct SeamEvery;
 
 impl Node for SeamEvery {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(16)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -2172,7 +2178,7 @@ impl Node for Holder {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
-            .with_event_capacity(self.per_block.max(1) as u32)
+            .with_event_capacity(tutti_graph::testing::cap_of(self.per_block.max(1) as u32))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

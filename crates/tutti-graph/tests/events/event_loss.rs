@@ -50,7 +50,7 @@ impl Node for Writer {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, self.scripts.len() as u16)
-            .with_event_capacity(self.cap)
+            .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -262,7 +262,7 @@ impl Node for Recorder {
     fn shape(&self) -> Shape {
         let shape = Shape::EMPTY.with_events(1, 0);
         match self.bound {
-            Some(n) => shape.with_event_input_capacity(n),
+            Some(n) => shape.with_event_input_capacity(tutti_graph::testing::cap_of(n)),
             None => shape,
         }
     }
@@ -677,7 +677,7 @@ impl Node for Holder {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(1, 1)
-            .with_event_input_capacity(self.bound)
+            .with_event_input_capacity(tutti_graph::testing::cap_of(self.bound))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
@@ -698,7 +698,9 @@ struct Keys {
 
 impl Node for Keys {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(16)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -781,5 +783,126 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
             .collect();
         assert_eq!(got, vec![(4, 4), (4, 4), (2, 2)], "{workers}");
         assert_eq!(exec.dropped_event_count(), 0, "{workers}");
+    }
+}
+
+/// Writes the note-ons on frames 0 to 3 and the note-offs on frames 20 and 21
+/// of every block.
+struct EarlyOnsLateOffs;
+
+impl Node for EarlyOnsLateOffs {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(16))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+        for (frame, off) in [
+            (0, false),
+            (1, false),
+            (2, false),
+            (3, false),
+            (20, true),
+            (21, true),
+        ] {
+            let at = cx.env.offset(frame).expect("inside the block");
+            let words = if off {
+                note_off(60 + frame as u32)
+            } else {
+                note_on(60 + frame as u32)
+            };
+            let _ = io.event_out(0).push(Event::midi(at, Ump(words)));
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// Records `(frame, is note-off)` for each event it is sent, block by block,
+/// declaring a bound of 4.
+struct Trace {
+    blocks: Arc<Mutex<Vec<Vec<(u32, bool)>>>>,
+}
+
+impl Node for Trace {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY
+            .with_events(1, 0)
+            .with_event_input_capacity(tutti_graph::testing::cap_of(4))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
+        let seen = io
+            .events(0)
+            .iter()
+            .map(|e| (e.offset.index() as u32, e.is_note_off()));
+        self.blocks.lock().unwrap().push(seen.collect());
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// Note-offs decide which events survive the cut, not their order: what the
+/// node is sent stays in frame order. A bound of 4 meets note-ons on frames 0
+/// to 3 and note-offs on frames 20 and 21. The late note-offs survive, the
+/// two latest note-ons do not, and the node is sent frames 0, 1, 20, 21. In
+/// the next block a note-off scheduled onto frame 30 joins them in the joint
+/// cut, which keeps it too and cuts one more note-on: frames 0, 20, 21, 30.
+/// Both are non-decreasing in frame, serial and parallel.
+#[test]
+fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
+    use tutti_types::{At, Frame};
+    for workers in std::iter::once(1).chain(common::WORKERS) {
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let (mut ed, mut exec) = Editor::new(prep);
+        if workers > 1 {
+            exec.set_pool(Some(test_pool(workers)));
+        }
+        let blocks = Arc::default();
+        let input = EventIn {
+            node: NodeKey(100),
+            port: 0,
+        };
+        ed.insert(
+            NodeKey(100),
+            "trace",
+            tutti_graph::Unforkable(Trace {
+                blocks: Arc::clone(&blocks),
+            }),
+        );
+        ed.insert(
+            NodeKey(1),
+            "writer",
+            tutti_graph::Unforkable(EarlyOnsLateOffs),
+        );
+        ed.spec_mut().connect_events(
+            input,
+            EventEdge::Direct(EventOut {
+                node: NodeKey(1),
+                port: 0,
+            }),
+        );
+        ed.commit().expect("commits");
+        exec.apply_pending();
+        ed.collect();
+        ed.schedule(
+            At::Frame(Frame::new(BLOCK as u64 + 30)),
+            input,
+            EventKind::Midi(midi::m1_note_off(MidiChannel::FIRST, 90, U7::of(0))),
+        )
+        .expect("room");
+        let transport = TransportPosition::default();
+        exec.process(BLOCK, &transport, &[], &mut []);
+        exec.process(BLOCK, &transport, &[], &mut []);
+        let got = blocks.lock().unwrap().clone();
+        let early = vec![(0, false), (1, false), (20, true), (21, true)];
+        let joint = vec![(0, false), (20, true), (21, true), (30, true)];
+        assert_eq!(got, vec![early, joint], "{workers}");
+        for block in &got {
+            assert!(block.windows(2).all(|w| w[0].0 <= w[1].0), "{block:?}");
+        }
+        // Block 0 cuts 2 at the merge; block 1 cuts the same 2 there and 1 more at the node.
+        assert_eq!(exec.dropped_event_count(), 2 + 3, "{workers}");
     }
 }
