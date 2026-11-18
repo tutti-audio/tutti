@@ -13,8 +13,9 @@
 //! - **The wait for a child's end** ([`ExitWait`]): the host's wait for a server
 //!   process to end, which the OS wakes (a pidfd on Linux, a kqueue on macOS, the
 //!   process handle on Windows).
-//! - **The watch on a host** ([`watch_host`]): a thread the OS wakes when a
-//!   named process ends, which runs the caller's reply to that, and
+//! - **The watch on a host** ([`watch_host`], and [`watch_spawner`] on the host
+//!   that spawned this process, found by [`host_pid`] from [`HOST_PID_ENV`]): a
+//!   thread the OS wakes when a named process ends, which runs the caller's reply to that, and
 //!   [`terminate_process`], the end that runs no cleanup.
 //! - **The OS calls** (`wait_readable`, `wait_readable_either` and `poll_wait`
 //!   (the server's waits on its sockets, a doorbell's descriptor and the
@@ -41,7 +42,7 @@ mod os;
 mod os;
 mod wakeups;
 
-pub use exit::{ExitWait, watch_host};
+pub use exit::{ExitWait, HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
 pub use mapping::{MappingWriter, SharedMapping};
 pub use os::*;

@@ -2,7 +2,7 @@
 
 use crate::I24;
 use core::fmt::Debug;
-use tutti_units::{Real, Unit};
+use tutti_units::Real;
 
 mod sealed {
     /// The closed set of formats: only this crate adds one.
@@ -336,8 +336,9 @@ impl Sample for f64 {
 ///
 /// Its arithmetic is [`Real`]; a `Float` adds what a sample
 /// format needs: plain bytes ([`Pod`](bytemuck::Pod)), so a buffer of lines of
-/// it can be cast to a slice of it, and the crossings from a quantity
-/// ([`from_unit`](Self::from_unit)) and from a literal ([`lit`](Self::lit)).
+/// it can be cast to a slice of it. The crossings from a quantity
+/// ([`from_unit`](Real::from_unit)) and from a literal ([`lit`](Real::lit)) are
+/// `Real`'s.
 /// Widening is `From`/`Into` (a `Float` is `Into<f64>`), narrowing is `as`.
 ///
 /// ```
@@ -353,40 +354,6 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     /// pair.
     const MINUS_3_DB: Self;
 
-    /// A quantity as data of this width: the only spelling of quantity to
-    /// data, `F::from_unit(cutoff)`.
-    ///
-    /// It saturates. A finite quantity narrows to a finite value and an
-    /// infinite one to the nearest, both clamped to `-Self::MAX..=Self::MAX`;
-    /// a NaN stays NaN. A bare `as` would turn a finite `f64` past `f32::MAX`
-    /// into an infinity, which no node latches.
-    /// The cost is one compare-and-select, paid at control rate. `Raw = f64`
-    /// keeps counts and positions from crossing into data this way.
-    ///
-    /// ```
-    /// use tutti_buffers::Float;
-    /// use tutti_units::Hz;
-    ///
-    /// assert_eq!(f32::from_unit(Hz(440.0)), 440.0f32);
-    /// assert_eq!(f32::from_unit(Hz(1e300)), f32::MAX);
-    /// assert_eq!(f64::from_unit(Hz(440.0)), 440.0);
-    /// ```
-    #[must_use]
-    fn from_unit<U: Unit<Raw = f64>>(u: U) -> Self;
-
-    /// A numeric literal in a generic kernel: `F::lit(0.5)`. Only a literal
-    /// argument; any other value crosses with [`from_unit`](Self::from_unit) or
-    /// `From`.
-    ///
-    /// ```
-    /// use tutti_buffers::Float;
-    ///
-    /// assert_eq!(f32::lit(0.1), 0.1f32);
-    /// assert_eq!(f64::lit(0.1), 0.1);
-    /// ```
-    #[must_use]
-    fn lit(x: f64) -> Self;
-
     /// The value of an `f32`: exact for `f64` and for `f32`.
     #[must_use]
     fn from_f32(x: f32) -> Self;
@@ -397,19 +364,6 @@ pub trait Float: Real + Sample + bytemuck::Pod {
 
 impl Float for f32 {
     const MINUS_3_DB: Self = core::f32::consts::FRAC_1_SQRT_2;
-    #[inline]
-    fn from_unit<U: Unit<Raw = f64>>(u: U) -> Self {
-        let x = u.to_raw();
-        if x.is_nan() {
-            Self::NAN
-        } else {
-            x.clamp(-f64::from(Self::MAX), f64::from(Self::MAX)) as Self
-        }
-    }
-    #[inline]
-    fn lit(x: f64) -> Self {
-        x as Self
-    }
     #[inline]
     fn from_f32(x: f32) -> Self {
         x
@@ -423,19 +377,6 @@ impl Float for f32 {
 impl Float for f64 {
     const MINUS_3_DB: Self = core::f64::consts::FRAC_1_SQRT_2;
     #[inline]
-    fn from_unit<U: Unit<Raw = f64>>(u: U) -> Self {
-        let x = u.to_raw();
-        if x.is_nan() {
-            x
-        } else {
-            x.clamp(-Self::MAX, Self::MAX)
-        }
-    }
-    #[inline]
-    fn lit(x: f64) -> Self {
-        x
-    }
-    #[inline]
     fn from_f32(x: f32) -> Self {
         f64::from(x)
     }
@@ -448,41 +389,10 @@ impl Float for f64 {
 #[cfg(test)]
 mod tests {
     use super::Float;
-    use tutti_units::Hz;
-
-    #[test]
-    fn from_unit_saturates_a_finite_quantity_to_a_finite_f32() {
-        assert_eq!(f32::from_unit(Hz(1e300)), f32::MAX);
-        assert_eq!(f32::from_unit(Hz(-1e300)), -f32::MAX);
-        assert!(f32::from_unit(Hz(f64::NAN)).is_nan());
-        assert_eq!(f32::from_unit(Hz(440.0)), 440.0f32);
-    }
-
-    #[test]
-    fn from_unit_at_f64_is_the_raw_value_when_finite() {
-        for x in [0.1, 1e300, -1e-300, 48_000.0] {
-            assert_eq!(f64::from_unit(Hz(x)), x);
-        }
-    }
-
-    #[test]
-    fn from_unit_saturates_an_infinite_quantity_at_both_widths() {
-        assert_eq!(f32::from_unit(Hz(f64::INFINITY)), f32::MAX);
-        assert_eq!(f32::from_unit(Hz(f64::NEG_INFINITY)), -f32::MAX);
-        assert_eq!(f64::from_unit(Hz(f64::INFINITY)), f64::MAX);
-        assert_eq!(f64::from_unit(Hz(f64::NEG_INFINITY)), -f64::MAX);
-        assert!(f64::from_unit(Hz(f64::NAN)).is_nan());
-    }
 
     #[test]
     fn minus_3_db_is_one_over_root_two_at_both_widths() {
         assert_eq!(f32::MINUS_3_DB, core::f32::consts::FRAC_1_SQRT_2);
         assert_eq!(f64::MINUS_3_DB, core::f64::consts::FRAC_1_SQRT_2);
-    }
-
-    #[test]
-    fn lit_is_the_literal_at_the_width() {
-        assert_eq!(f32::lit(0.1), 0.1f32);
-        assert_eq!(f64::lit(0.1), 0.1);
     }
 }

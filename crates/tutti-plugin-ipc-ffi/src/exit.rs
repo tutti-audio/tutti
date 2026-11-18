@@ -42,7 +42,7 @@ mod platform {
 
 mod host_watch;
 
-pub use host_watch::watch_host;
+pub use host_watch::{HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};

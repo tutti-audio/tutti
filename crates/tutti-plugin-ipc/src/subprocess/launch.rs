@@ -204,16 +204,6 @@ pub(super) fn launch_with_state(
     }
 }
 
-/// Environment variable through which a host states its own PID to the server
-/// it spawns, which the server watches for the host's end.
-///
-/// A server cannot ask the kernel: a host that dies during the child's startup
-/// is reparented before the child's first instruction, so a `getppid()` sample
-/// in the server names the reaper (under `PR_SET_CHILD_SUBREAPER`: systemd user
-/// services, Docker `--init`, Flatpak, Snap) rather than the host. Stating it
-/// at spawn fixes the value before the server exists.
-pub const HOST_PID_ENV: &str = "TUTTI_PLUGIN_HOST_PID";
-
 fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Child> {
     let server_path = locator
         .resolve(Helper::Server)
@@ -221,7 +211,10 @@ fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Child
     tracing::debug!("spawning plugin-server: {}", server_path.display());
     Command::new(server_path)
         .arg(&config.socket_path)
-        .env(HOST_PID_ENV, std::process::id().to_string())
+        .env(
+            tutti_plugin_ipc_ffi::HOST_PID_ENV,
+            std::process::id().to_string(),
+        )
         .stderr(std::process::Stdio::inherit())
         .spawn()
         .map_err(BridgeError::Io)

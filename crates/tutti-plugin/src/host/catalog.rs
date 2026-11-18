@@ -421,7 +421,7 @@ impl Catalog {
     /// format, and [`FilesError::Scan`] as for [`scan`](Self::scan). A file the
     /// probe fails on is not an error of the call: the result's
     /// [`failures`](tutti_plugin_db::ScanResult::failures) name it and say why
-    /// ([`ProbeFailureKind`](tutti_plugin_db::ProbeFailureKind)), a missing
+    /// ([`ProbeError`](tutti_plugin_types::ProbeError)), a missing
     /// `plugin-probe` among them.
     pub fn register(&mut self, path: impl AsRef<Path>) -> std::result::Result<Scan, FilesError> {
         let path = path.as_ref();
@@ -689,8 +689,10 @@ impl Catalog {
     ///
     /// The probe renders each plugin at two configurations, up to
     /// [`DEFAULT_MEASURE_TIMEOUT`](crate::catalog::DEFAULT_MEASURE_TIMEOUT).
-    /// As in a measuring scan, a plugin that crashes, hangs or will not load while
-    /// being measured is **blacklisted**. Dropping the task kills the probe. A
+    /// As in a measuring scan, a plugin that crashes or hangs while being
+    /// measured is **blacklisted**; one that cannot be measured (it would not
+    /// activate, or has no audio output) has no measurement in its row. Dropping
+    /// the task kills the probe. A
     /// missing `plugin-probe` is a failure in the result, as for
     /// [`register`](Self::register).
     ///

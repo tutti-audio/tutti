@@ -1,4 +1,5 @@
-//! [`watch_host`]: a thread that runs a function when a named process ends.
+//! [`watch_host`]: a thread that runs a function when a named process ends, and
+//! [`watch_spawner`]: the same for the process that spawned this one.
 
 use std::time::Duration;
 
@@ -33,6 +34,80 @@ pub fn watch_host(host: u32, on_gone: impl FnOnce() + Send + 'static) -> std::io
             on_gone();
         })
         .map(drop)
+}
+
+/// The environment variable through which a host states its own PID to the
+/// process it spawns (a plugin server, a probe), which watches the host's end.
+///
+/// A child cannot just ask the kernel: a host that dies during the child's
+/// startup is reparented before the child's first instruction, so a `getppid()`
+/// sample names the reaper (under `PR_SET_CHILD_SUBREAPER`: systemd user
+/// services, Docker `--init`, Flatpak, Snap) rather than the host. Stating it at
+/// spawn fixes the value before the child exists, and [`host_pid`] weighs it
+/// against the parent.
+pub const HOST_PID_ENV: &str = "TUTTI_PLUGIN_HOST_PID";
+
+/// What a spawned process knows of the host that spawned it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Host {
+    /// The host runs: the process to watch. It is the parent, or, where a wrapper
+    /// stands between host and child (a shell script, `strace`, a sandbox), a
+    /// running process the host stated.
+    Running(u32),
+    /// The host stated its pid and no such process runs: it ended.
+    Gone,
+    /// No host is stated and no parent is known (a process started by hand, under
+    /// init).
+    Unknown,
+}
+
+/// The host of this process, from [`HOST_PID_ENV`] and the parent process.
+#[must_use]
+pub fn host_pid() -> Host {
+    host_given(
+        std::env::var(HOST_PID_ENV).ok().as_deref(),
+        crate::parent_process_id(),
+        crate::process_exists,
+    )
+}
+
+/// [`host_pid`] over its sources: the statement, the parent, and whether a pid
+/// runs. A statement that is no process id past init's counts as none, and a
+/// process with none watches its parent. A statement is the host while it names
+/// the parent or a process that runs: a wrapper between host and child makes the
+/// parent another process, and ending the child for that would end every child
+/// behind a wrapper. A pid the OS has since given to another process is watched
+/// as the host, so that child is left unwatched: bounded by the host's own
+/// deadline, never ended by mistake.
+fn host_given(stated: Option<&str>, parent: Option<u32>, exists: impl FnOnce(u32) -> bool) -> Host {
+    let stated = stated
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|&pid| pid > 1);
+    match (stated, parent) {
+        (Some(stated), Some(parent)) if stated == parent => Host::Running(parent),
+        (Some(stated), _) if exists(stated) => Host::Running(stated),
+        (Some(_), _) => Host::Gone,
+        (None, Some(parent)) => Host::Running(parent),
+        (None, None) => Host::Unknown,
+    }
+}
+
+/// [`watch_host`] on the host that spawned this process ([`host_pid`]): runs
+/// `on_gone` on a thread of its own when it ends, or at once if it already has.
+/// Returns `false`, watching nothing, when the host is unknown.
+///
+/// # Errors
+///
+/// The thread could not be started.
+pub fn watch_spawner(on_gone: impl FnOnce() + Send + 'static) -> std::io::Result<bool> {
+    match host_pid() {
+        Host::Running(host) => watch_host(host, on_gone).map(|()| true),
+        Host::Gone => std::thread::Builder::new()
+            .name("host-watch".into())
+            .spawn(on_gone)
+            .map(|_| true),
+        Host::Unknown => Ok(false),
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -81,5 +156,33 @@ mod tests {
         watch_host(pid, move || gone.send(()).expect("the test listens"))
             .expect("the watch starts");
         ended.recv_timeout(HANG_GUARD).expect("its end is learned");
+    }
+
+    /// **A stated host is the host while it runs, parent or not**: a wrapper
+    /// between host and child makes the parent another process, and only a stated
+    /// pid that no process holds is a host that ended. A statement that is no pid
+    /// counts as none.
+    #[test]
+    fn a_stated_host_is_the_host_while_it_runs() {
+        let runs = |_: u32| true;
+        let gone = |_: u32| false;
+        assert_eq!(
+            host_given(Some("4242"), Some(4242), gone),
+            Host::Running(4242)
+        );
+        // A wrapper: the parent is not the host, and the host runs.
+        assert_eq!(host_given(Some("4242"), Some(7), runs), Host::Running(4242));
+        assert_eq!(host_given(Some("4242"), None, runs), Host::Running(4242));
+        assert_eq!(host_given(Some("4242"), Some(7), gone), Host::Gone);
+        assert_eq!(host_given(Some("4242"), None, gone), Host::Gone);
+        assert_eq!(host_given(None, Some(7), gone), Host::Running(7));
+        assert_eq!(host_given(None, None, runs), Host::Unknown);
+        for unusable in ["", "x", "-5", "4294967296", "1", "0"] {
+            assert_eq!(
+                host_given(Some(unusable), Some(7), runs),
+                Host::Running(7),
+                "{unusable:?}"
+            );
+        }
     }
 }

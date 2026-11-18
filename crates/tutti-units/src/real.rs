@@ -1,5 +1,6 @@
 //! [`Real`]: the arithmetic of `f32` and `f64`.
 
+use crate::Quantity;
 use core::fmt::{Debug, Display};
 use core::iter::Sum;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Sub, SubAssign};
@@ -60,6 +61,37 @@ pub trait Real:
     /// Not a number.
     const NAN: Self;
 
+    /// A [`Quantity`] as data of this width: the only spelling of quantity to
+    /// data, `F::from_unit(cutoff)`.
+    ///
+    /// It saturates. A finite quantity narrows to a finite value and an
+    /// infinite one to the nearest, both clamped to `-Self::MAX..=Self::MAX`;
+    /// a NaN stays NaN. A bare `as` would turn a finite `f64` past `f32::MAX`
+    /// into an infinity, which no node latches.
+    /// The cost is one compare-and-select, paid at control rate. A `Quantity` is an `f64`
+    /// value, which keeps counts and positions from crossing into data this way.
+    ///
+    /// ```
+    /// use tutti_units::{Hz, Real};
+    ///
+    /// assert_eq!(f32::from_unit(Hz(440.0)), 440.0f32);
+    /// assert_eq!(f32::from_unit(Hz(1e300)), f32::MAX);
+    /// assert_eq!(f64::from_unit(Hz(440.0)), 440.0);
+    /// ```
+    #[must_use]
+    fn from_unit<Q: Quantity>(q: Q) -> Self;
+    /// A numeric literal in a generic kernel: `F::lit(0.5)`. Only a literal
+    /// argument; any other value crosses with [`from_unit`](Self::from_unit) or
+    /// `From`.
+    ///
+    /// ```
+    /// use tutti_units::Real;
+    ///
+    /// assert_eq!(f32::lit(0.1), 0.1f32);
+    /// assert_eq!(f64::lit(0.1), 0.1);
+    /// ```
+    #[must_use]
+    fn lit(x: f64) -> Self;
     /// The absolute value.
     #[must_use]
     fn abs(self) -> Self;
@@ -84,6 +116,10 @@ pub trait Real:
     /// `e` to the value.
     #[must_use]
     fn exp(self) -> Self;
+    /// `e` to the value, minus one: accurate near zero, where `exp(x) - 1`
+    /// cancels.
+    #[must_use]
+    fn exp_m1(self) -> Self;
     /// `2` to the value.
     #[must_use]
     fn exp2(self) -> Self;
@@ -149,7 +185,7 @@ macro_rules! real_impl {
     (
         $t:ident,
         $abs:ident, $floor:ident, $ceil:ident, $round:ident, $roundeven:ident, $atan:ident,
-        $sqrt:ident, $exp:ident, $exp2:ident,
+        $sqrt:ident, $exp:ident, $expm1:ident, $exp2:ident,
         $ln:ident, $log10:ident, $pow:ident, $sin:ident, $cos:ident, $tan:ident,
         $tanh:ident, $atan2:ident, $fma:ident, $min:ident, $max:ident, $copysign:ident
     ) => {
@@ -163,6 +199,24 @@ macro_rules! real_impl {
             const EPSILON: Self = $t::EPSILON;
             const INFINITY: Self = $t::INFINITY;
             const NAN: Self = $t::NAN;
+            #[inline]
+            fn from_unit<Q: Quantity>(q: Q) -> Self {
+                let x = q.value();
+                if x.is_nan() {
+                    Self::NAN
+                } else {
+                    let max = f64::from($t::MAX);
+                    x.clamp(-max, max) as $t
+                }
+            }
+            #[inline]
+            fn lit(x: f64) -> Self {
+                x as $t
+            }
+            #[inline]
+            fn exp_m1(self) -> Self {
+                libm::$expm1(self)
+            }
             #[inline]
             fn abs(self) -> Self {
                 libm::$abs(self)
@@ -281,17 +335,71 @@ mod sealed {
 }
 
 real_impl!(
-    f32, fabsf, floorf, ceilf, roundf, roundevenf, atanf, sqrtf, expf, exp2f, logf, log10f, powf,
-    sinf, cosf, tanf, tanhf, atan2f, fmaf, fminf, fmaxf, copysignf
+    f32, fabsf, floorf, ceilf, roundf, roundevenf, atanf, sqrtf, expf, expm1f, exp2f, logf, log10f,
+    powf, sinf, cosf, tanf, tanhf, atan2f, fmaf, fminf, fmaxf, copysignf
 );
 real_impl!(
-    f64, fabs, floor, ceil, round, roundeven, atan, sqrt, exp, exp2, log, log10, pow, sin, cos,
-    tan, tanh, atan2, fma, fmin, fmax, copysign
+    f64, fabs, floor, ceil, round, roundeven, atan, sqrt, exp, expm1, exp2, log, log10, pow, sin,
+    cos, tan, tanh, atan2, fma, fmin, fmax, copysign
 );
 
 #[cfg(test)]
 mod tests {
     use super::Real;
+    use crate::Hz;
+
+    #[test]
+    fn from_unit_saturates_a_finite_quantity_to_a_finite_f32() {
+        assert_eq!(f32::from_unit(Hz(1e300)), f32::MAX);
+        assert_eq!(f32::from_unit(Hz(-1e300)), -f32::MAX);
+        assert!(f32::from_unit(Hz(f64::NAN)).is_nan());
+        assert_eq!(f32::from_unit(Hz(440.0)), 440.0f32);
+    }
+
+    #[test]
+    fn from_unit_at_f64_is_the_raw_value_when_finite() {
+        for x in [0.1, 1e300, -1e-300, 48_000.0] {
+            assert_eq!(f64::from_unit(Hz(x)), x);
+        }
+    }
+
+    #[test]
+    fn from_unit_saturates_an_infinite_quantity_at_both_widths() {
+        assert_eq!(f32::from_unit(Hz(f64::INFINITY)), f32::MAX);
+        assert_eq!(f32::from_unit(Hz(f64::NEG_INFINITY)), -f32::MAX);
+        assert_eq!(f64::from_unit(Hz(f64::INFINITY)), f64::MAX);
+        assert_eq!(f64::from_unit(Hz(f64::NEG_INFINITY)), -f64::MAX);
+        assert!(f64::from_unit(Hz(f64::NAN)).is_nan());
+    }
+
+    #[test]
+    fn a_ranged_f64_and_a_unit_are_both_quantities() {
+        use crate::{Normalized, Quantity};
+        let n = Normalized::of(0.25);
+        assert_eq!(n.value(), n.get());
+        assert_eq!(Hz(440.0).value(), 440.0);
+        assert_eq!(f32::from_unit(n), 0.25_f32);
+    }
+
+    #[test]
+    fn lit_is_the_literal_at_the_width() {
+        assert_eq!(f32::lit(0.1), 0.1f32);
+        assert_eq!(f64::lit(0.1), 0.1);
+    }
+
+    #[test]
+    fn exp_m1_is_zero_at_zero_and_exact_near_zero() {
+        assert_eq!(<f32 as Real>::exp_m1(0.0), 0.0);
+        assert_eq!(<f64 as Real>::exp_m1(0.0), 0.0);
+        // e^x - 1 = x + x^2/2 + ..., so at 1e-10 the result is x + 5e-21 to within
+        // an ulp; `exp(x) - 1` is off by ~1e-16, a million ulps of the result.
+        let x = 1e-10_f64;
+        let exact = x + x * x / 2.0;
+        assert!((<f64 as Real>::exp_m1(x) - exact).abs() <= exact * f64::EPSILON);
+        assert!((<f64 as Real>::exp(x) - 1.0 - exact).abs() > exact * 1e-8);
+        let y = 1e-10_f32;
+        assert!((<f32 as Real>::exp_m1(y) - y).abs() <= y * f32::EPSILON);
+    }
 
     #[test]
     fn mantissa_digits_are_the_ieee_significand_widths() {

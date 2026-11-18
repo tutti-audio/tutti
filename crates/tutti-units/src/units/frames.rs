@@ -2,7 +2,10 @@
 
 use super::*;
 
+// `SampleSpan` is a `Unit` (below), which is already a `Quantity`, so it takes
+// the type and its error without the macro's own `Quantity` impl.
 crate::ranged! {
+    @items []
     /// A non-integer length in frames: a delay time, a delay line's length, an
     /// all-pass's delay.
     ///
