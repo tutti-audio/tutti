@@ -15,8 +15,8 @@ use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{ClockKind, MidiOut, SyncMessages};
 use tutti_session::{
-    FollowClock, FollowMachineControl, MidiError, MidiReport, Session, SessionEvent, TempoError,
-    midi_sink,
+    FollowClock, FollowMachineControl, MidiError, MidiReport, Session, SessionEvent, SetRefusal,
+    ValueErrorKind, midi_sink,
 };
 use tutti_transport::FadeOut;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, Ump};
@@ -300,10 +300,12 @@ fn machine_control_follows_beside_a_beat_clock_and_owns_no_tempo() {
         })
         .expect("follows the clock");
     follow(&mut s);
-    assert!(matches!(
-        s.set_tempo(tutti_units::Bpm::of(100.0)),
-        Err(TempoError::Following)
-    ));
+    assert_eq!(
+        crate::tempo::set_tempo(&s, tutti_units::Bpm::of(100.0))
+            .unwrap_err()
+            .kind,
+        ValueErrorKind::Refused(SetRefusal::Following)
+    );
     command(&fake, 5, &[0x02]);
     until_rolling(&mut s, true);
 }

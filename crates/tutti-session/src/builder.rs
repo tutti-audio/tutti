@@ -921,7 +921,7 @@ impl<C: Clock> SessionBuilder<C> {
         // each output.
         #[cfg(feature = "midi")]
         let midi = {
-            let meter = click_settings.project_meter();
+            let meter = transport.settings().project_meter().clone();
             let (sync, sync_controls) = graph.add(
                 tutti_midi_runtime::SyncOut::new(tutti_ump::MidiGroup::FIRST)
                     .meter(move || meter.reader()),
@@ -971,8 +971,10 @@ impl<C: Clock> SessionBuilder<C> {
         let (main_work, work) = tutti_plugin_types::MainWork::new();
         #[cfg(feature = "plugin")]
         let main_work = crate::session::SharedWork::new(main_work);
-        Ok(Session {
-            values: crate::value::ValueState::new(parts.graph.value_table()),
+        let table = parts.graph.value_table();
+        let click_settings = Arc::clone(&parts.click_settings);
+        let session = Session {
+            values: crate::value::ValueState::new(Arc::clone(&table)),
             #[cfg(feature = "plugin")]
             _early_work: crate::session::EarlyWork(main_work.clone()),
             running,
@@ -990,7 +992,6 @@ impl<C: Clock> SessionBuilder<C> {
             output_policy: crate::OutputPolicy::default(),
             output_policy_staged: false,
             click: parts.click,
-            click_settings: parts.click_settings,
             compensation: parts.compensation,
             latency: Samples(0),
             resumed: false,
@@ -1038,7 +1039,9 @@ impl<C: Clock> SessionBuilder<C> {
             #[cfg(feature = "plugin")]
             main_work,
             carried_events: Vec::new(),
-        })
+        };
+        session.provide_values(&table, click_settings);
+        Ok(session)
     }
 }
 

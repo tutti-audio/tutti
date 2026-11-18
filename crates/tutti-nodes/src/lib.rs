@@ -263,9 +263,7 @@ pub use tutti_units::{
 // deliberately outside this workspace.
 
 mod click;
-pub use click::{
-    ClickConfig, ClickNode, ClickSettings, ClickState, MetronomeMode, VolumeOutOfRange,
-};
+pub use click::{ClickConfig, ClickNode, ClickSettings, ClickState, MetronomeMode};
 
 mod lfo;
 // `LfoShape` and `Waveform` are re-exported from `tutti-modulation` through

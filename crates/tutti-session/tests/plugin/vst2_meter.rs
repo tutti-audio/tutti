@@ -55,11 +55,15 @@ fn an_in_process_vst2_plugin_is_given_the_project_meter() {
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("a detached session builds");
-    s.click_settings()
-        .set_meter(Arc::new(MeterMap::new([MeterChange::new(
-            Beat(0.0),
-            TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
-        )])));
+    s.set(
+        s.transport_handle()
+            .meter()
+            .to(MeterMap::new([MeterChange::new(
+                Beat(0.0),
+                TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
+            )])),
+    )
+    .unwrap();
     let main = tutti_fixtures::main_thread();
     let node = s
         .load_plugin_blocking(

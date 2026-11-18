@@ -31,7 +31,7 @@ use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_transport::{LoopEdit, Transport};
 use tutti_types::ChannelLayout;
-use tutti_units::{Amplitude, SampleRate};
+use tutti_units::SampleRate;
 
 /// A stereo source that reads the transport per frame from its `Env`, so
 /// the gated loop below exercises `transport_at` and the executor's change
@@ -483,7 +483,9 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(sample_rate));
     let settings = Arc::new(ClickSettings::new());
     settings.mode().set(MetronomeMode::Always);
-    settings.set_volume(Amplitude::new(1.0)).unwrap();
+    settings
+        .volume_cell()
+        .store(1.0, std::sync::atomic::Ordering::Release);
     let click = ClickNode::new(&transport, Arc::clone(&settings));
 
     let (mut ed, exec) = Editor::new(Prepare::new(

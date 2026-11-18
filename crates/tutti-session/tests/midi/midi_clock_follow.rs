@@ -13,7 +13,8 @@ use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_runtime::{ClockKind, MidiClockDecoder};
 use tutti_session::{
-    FollowClock, FollowTempo, MidiError, MidiReport, Session, SessionEvent, TempoError,
+    FollowClock, FollowTempo, MidiError, MidiReport, Session, SessionEvent, SetRefusal,
+    ValueErrorKind,
 };
 use tutti_transport::MotionEvent;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
@@ -319,7 +320,7 @@ fn mtc_quarter_frames_lock_and_play_from_their_position() {
 fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
     let (mut s, _fake) = rig();
     follow(&mut s, ClockKind::Mtc);
-    assert!(s.set_tempo(Bpm::of(100.0)).is_ok());
+    assert!(crate::tempo::set_tempo(&s, Bpm::of(100.0)).is_ok());
     let node = input(&s);
     s.midi()
         .follow_tempo(FollowTempo {
@@ -331,10 +332,12 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
     s.midi().unfollow_tempo().unwrap();
 
     follow(&mut s, ClockKind::BeatClock);
-    assert!(matches!(
-        s.set_tempo(Bpm::of(100.0)),
-        Err(TempoError::Following)
-    ));
+    assert_eq!(
+        crate::tempo::set_tempo(&s, Bpm::of(100.0))
+            .unwrap_err()
+            .kind,
+        ValueErrorKind::Refused(SetRefusal::Following)
+    );
     let taken = s.midi().follow_tempo(FollowTempo {
         input: node,
         group: G,
@@ -353,7 +356,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
             .iter()
             .any(|e| matches!(e, SessionEvent::Midi(MidiReport::ClockUnfollowed)))
     );
-    assert!(s.set_tempo(Bpm::of(100.0)).is_ok());
+    assert!(crate::tempo::set_tempo(&s, Bpm::of(100.0)).is_ok());
 }
 
 /// **A command the transport refuses is counted, and reported**: with the

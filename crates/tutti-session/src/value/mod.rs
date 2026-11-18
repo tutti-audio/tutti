@@ -28,6 +28,7 @@
 mod batch;
 mod error;
 mod param;
+mod slot;
 mod state;
 mod target;
 mod verbs;
@@ -35,6 +36,8 @@ mod verbs;
 pub use batch::{IntoAssign, IntoRead};
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
+pub use slot::{ClickTargets, ClickVolumeTarget, MeterTarget, SettingTarget, TempoTarget};
+pub(crate) use slot::{ClickVolumeSlot, MeterSlot, SettingSlot, SlotCell, SlotId, TempoSlot};
 pub use state::Knobs;
 pub(crate) use state::{ValueState, ValueTable};
 pub(crate) use target::target_builders;

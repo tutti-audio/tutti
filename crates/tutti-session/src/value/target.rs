@@ -11,6 +11,7 @@ use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Fail, Stageable};
 use super::error::SetRefusal;
+use super::slot::SlotId;
 use super::state::Params;
 
 /// The crate-private half of [`Target`]: how a target finds its cell, checks
@@ -74,6 +75,8 @@ pub enum TargetId {
     /// names declares it: a key of another node type than the one the node
     /// is now names no such param.
     Param(NodeKey, UnitAddr, TypeId),
+    /// One of the session's own values: its tempo, meter or click.
+    Slot(SlotId),
 }
 
 /// A target with its type erased, in the error of the call that named it.
@@ -99,11 +102,13 @@ impl<K> AnyTarget<K> {
         sealed::Sealed::id(target) == self.id
     }
 
-    /// The node the target is on.
+    /// The node the target is on, or `None` for one of the session's own
+    /// values (its tempo, meter or click).
     #[must_use]
-    pub fn node(&self) -> NodeKey {
+    pub fn node(&self) -> Option<NodeKey> {
         match self.id {
-            TargetId::Param(node, ..) => node,
+            TargetId::Param(node, ..) => Some(node),
+            TargetId::Slot(_) => None,
         }
     }
 }

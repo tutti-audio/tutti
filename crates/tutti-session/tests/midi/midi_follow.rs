@@ -10,7 +10,9 @@ use std::time::Instant;
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
-use tutti_session::{FollowTempo, MidiError, MidiReport, Session, SessionEvent, TempoError};
+use tutti_session::{
+    FollowTempo, MidiError, MidiReport, Session, SessionEvent, SetRefusal, ValueErrorKind,
+};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{Flex, Message, MidiGroup, Ump};
 use tutti_units::{Beat, Bpm, SampleRate};
@@ -255,7 +257,8 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
         .step_to(Beat(16.0), Bpm::of(90.0))
         .build()
         .unwrap();
-    s.set_tempo_map(ramp.clone()).expect("not following yet");
+    s.set(s.transport_handle().tempo().to(ramp.clone()))
+        .expect("not following yet");
     let _ = s.update();
     follow(&mut s, MidiGroup::FIRST, false);
     play(&s);
@@ -313,8 +316,8 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
 fn a_set_time_signature_lands_on_the_next_bar_line() {
     let (mut s, fake) = rig();
     let project_tempo = s.tempo_map();
-    let project_meter = s.click_settings().project_meter();
-    assert_eq!(project_meter.current().changes().len(), 1);
+    let project_meter = s.transport_handle().meter();
+    assert_eq!(s.get(project_meter).unwrap().changes().len(), 1);
     follow(&mut s, MidiGroup::FIRST, true);
     play(&s);
     blocks(&s, 4);
@@ -337,7 +340,7 @@ fn a_set_time_signature_lands_on_the_next_bar_line() {
     );
     assert_eq!(beat, Beat(4.0), "the next bar line of 4/4 after beat ~0.1");
     assert_eq!(
-        project_meter.current().changes(),
+        s.get(project_meter).unwrap().changes(),
         [
             MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
             MeterChange::new(Beat(4.0), TimeSignature::of(3, 4)),
@@ -349,14 +352,14 @@ fn a_set_time_signature_lands_on_the_next_bar_line() {
     );
 
     s.midi().unfollow_tempo().expect("was following");
-    assert_eq!(*project_meter.current(), MeterMap::default());
+    assert_eq!(*s.get(project_meter).unwrap(), MeterMap::default());
 }
 
 /// **The meter is followed only when asked.**
 #[test]
 fn the_meter_is_followed_only_when_asked() {
     let (mut s, fake) = rig();
-    let meter = s.click_settings().project_meter();
+    let meter = s.transport_handle().meter();
     follow(&mut s, MidiGroup::FIRST, false);
     play(&s);
     blocks(&s, 4);
@@ -369,7 +372,7 @@ fn the_meter_is_followed_only_when_asked() {
             .iter()
             .any(|e| matches!(e, MidiReport::MeterFollowed { .. }))
     );
-    assert_eq!(*meter.current(), MeterMap::default());
+    assert_eq!(*s.get(meter).unwrap(), MeterMap::default());
 }
 
 /// **A Group is a cable of its own**: following Group 1 takes its tempo and not
@@ -471,20 +474,20 @@ fn follow_refusals() {
 
 /// **While a live tempo is followed, the app's own tempo is refused**, so the
 /// map `unfollow_tempo` restores is the one in force when following began:
-/// `set_tempo` and `set_tempo_map` return `TempoError::Following` and publish
-/// nothing, and both work again after unfollowing.
+/// a write to the `tempo` target is refused with `SetRefusal::Following` and
+/// publishes nothing, and it works again after unfollowing.
 #[test]
 fn the_apps_tempo_is_refused_while_following() {
     let (mut s, _fake) = rig();
     let project = s.tempo_map();
     follow(&mut s, MidiGroup::FIRST, false);
-    assert_eq!(s.set_tempo(Bpm::of(90.0)), Err(TempoError::Following));
-    let map = TempoMap::constant(Bpm::of(90.0)).unwrap();
-    assert_eq!(s.set_tempo_map(map), Err(TempoError::Following));
+    let refused = crate::tempo::set_tempo(&s, Bpm::of(90.0)).unwrap_err();
+    assert_eq!(refused.kind, ValueErrorKind::Refused(SetRefusal::Following));
+    assert_eq!(refused.at, 0);
     assert!(
         Arc::ptr_eq(&s.tempo_map(), &project),
         "a refusal publishes nothing"
     );
     s.midi().unfollow_tempo().expect("was following");
-    assert_eq!(s.set_tempo(Bpm::of(90.0)), Ok(()));
+    assert_eq!(crate::tempo::set_tempo(&s, Bpm::of(90.0)), Ok(()));
 }

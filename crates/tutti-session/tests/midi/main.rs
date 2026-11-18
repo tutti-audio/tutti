@@ -10,6 +10,9 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 mod common;
 #[cfg(feature = "midi")]
 mod held_keys;
+#[cfg(feature = "midi")]
+#[path = "../support/tempo.rs"]
+mod tempo;
 // Clips, live inputs, routes and the outputs (`Session::midi`).
 #[cfg(feature = "midi")]
 mod midi;

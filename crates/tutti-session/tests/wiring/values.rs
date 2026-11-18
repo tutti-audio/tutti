@@ -226,7 +226,7 @@ fn a_removed_node_is_no_such_target_and_names_its_key() {
     ] {
         assert_eq!(e.kind, ValueErrorKind::NoSuchTarget);
         assert_eq!(e.at, 0);
-        assert_eq!(e.target.expect("it names the key").node(), lp.erase());
+        assert_eq!(e.target.expect("it names the key").node(), Some(lp.erase()));
     }
 }
 
@@ -426,7 +426,10 @@ fn a_key_of_a_swapped_out_node_type_is_no_such_target() {
     for key in [stale, bare] {
         let e = s.set(key.cutoff().to(Hz(5.0))).unwrap_err();
         assert_eq!(e.kind, ValueErrorKind::NoSuchTarget);
-        assert_eq!(e.target.expect("it names the key").node(), key.erase());
+        assert_eq!(
+            e.target.expect("it names the key").node(),
+            Some(key.erase())
+        );
         assert_eq!(
             s.get(key.cutoff()).unwrap_err().kind,
             ValueErrorKind::NoSuchTarget

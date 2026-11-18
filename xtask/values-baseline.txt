@@ -34,8 +34,6 @@ setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain  a plugin pa
 setter  crates/tutti-session/src/plugin_params.rs::Param::set_text  a plugin param's peer path (7a S6)
 setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode  a plugin's automation mode (7a S6)
 setter  crates/tutti-session/src/session.rs::Session::set_loop  a timed loop edit, a published value (7c)
-setter  crates/tutti-session/src/session.rs::Session::set_tempo  the tempo while the sync follower runs (7a S5)
-setter  crates/tutti-session/src/session.rs::Session::set_tempo_map  the tempo map, a published value (7a S5)
 set  crates/tutti-session/src/midi_hardware.rs::MidiPolicyHandle::set  a policy handle's write (7a S5)
 set  crates/tutti-session/src/plugin_params.rs::Param::set  a plugin param's peer path (7a S6)
 set  crates/tutti-session/src/plugin_params.rs::ParamGesture::set  a plugin param's gesture, until `Gesture` lands (7d)

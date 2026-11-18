@@ -41,7 +41,7 @@ use tutti_transport::{
     Transport, TransportCommand, render_graph,
 };
 use tutti_types::ChannelLayout;
-use tutti_units::{Amplitude, At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
+use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;
 
@@ -326,7 +326,9 @@ fn click_clicks_on_the_model_beats() {
     let transport = Transport::new(SampleRate::of(SR));
     let settings = Arc::new(ClickSettings::new());
     settings.mode().set(MetronomeMode::Always);
-    settings.set_volume(Amplitude::new(1.0)).unwrap();
+    settings
+        .volume_cell()
+        .store(1.0, std::sync::atomic::Ordering::Release);
     let click = ClickNode::new(&transport, settings);
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
     const CLICK: NodeKey = NodeKey(1);

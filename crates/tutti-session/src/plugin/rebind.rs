@@ -140,7 +140,7 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
                 };
                 let (bound, controls, commit) = rebuilt.into_parts();
                 if let Some(controls) = &controls {
-                    controls.set_meter(self.click_settings.project_meter());
+                    controls.set_meter(self.transport.settings().project_meter().clone());
                 }
                 match self.graph.replace_rebound(node, bound) {
                     Ok(()) => {
