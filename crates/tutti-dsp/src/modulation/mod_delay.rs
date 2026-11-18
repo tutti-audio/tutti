@@ -30,13 +30,12 @@
 //! `1 / (1 - g z^-d)`.
 //!
 //! The memory is the sweep's own [`MaxDelay`]: a line holds that long, and `base +
-//! depth_max` fits in it by [`Sweep::new`]. The state is the bank's float `F`; a view of
-//! another [`Float`] is converted at the edges.
+//! depth_max` fits in it by [`Sweep::new`]. The state is the bank's float `F`.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::{BusTopology, MAX_CHANNELS};
 use tutti_units::{
-    Feedback, Gain, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
+    Bipolar, Feedback, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};
@@ -308,11 +307,12 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     /// base), and [`position`](Self::position) floors the delay a frame reads at one frame (the
     /// feedback tap is read one before it), so a sweep that bottoms out flat-bottoms there
     /// whatever the chord between corners does. It is small beside the delay, so it is held
-    /// in the bank's float and the base stays the exact [`ReadPosition`] it is added to.
+    /// in the bank's float and the base stays the exact [`ReadPosition`] it is added to; the
+    /// product is solved in `f64` and crosses once.
     #[must_use]
-    pub fn swept(&self, lfo: Gain, depth: SampleSpan) -> F {
+    pub fn swept(&self, lfo: Bipolar, depth: SampleSpan) -> F {
         let room = self.cap.span().get() - self.base.span().get();
-        F::from_f64((lfo.get() * depth.get()).min(room))
+        F::from_design((lfo.get() * depth.get()).min(room))
     }
 
     /// The delay a read takes with the sweep `excursion` frames from the base (what
@@ -334,12 +334,12 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     /// past the bank's width, or past the narrower of the two views, is not touched. The
     /// feedback glide's values must stay below 1 ([`Feedback::MAX_STABLE`] is the bound
     /// [`design`](Self::design) holds them to). No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
         delays: &mut [Glide<F>],
         feedback: &mut Glide<F>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let run = self
@@ -365,8 +365,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
                 let step = u32::try_from(i).unwrap_or(u32::MAX);
                 let d = read_at(base, cap, delay.at(first.saturating_add(step)));
                 let g = feedback.at(fb_first.saturating_add(step));
-                let wet = delay_step(line, x.convert_to::<F>(), d, g, READ);
-                *y = wet.convert_to::<S>();
+                *y = delay_step(line, *x, d, g, READ);
             }
         }
         let taken = u32::try_from(frames).unwrap_or(u32::MAX);

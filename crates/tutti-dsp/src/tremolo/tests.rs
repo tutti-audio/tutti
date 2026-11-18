@@ -1,6 +1,8 @@
 use super::*;
+use crate::pan_gains;
 use crate::testing::noise;
 use core::f64::consts::TAU;
+use tutti_units::Pan;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// 100 Hz at 48 kHz: 480 frames a cycle, the trough of a sine at frame 360.
@@ -213,4 +215,37 @@ fn auto_pan_leaves_a_mono_view_untouched() {
         PlanesMut::from_vecs(&mut output).unwrap(),
     );
     assert!(output[0].iter().all(|&y| y == 7.0));
+}
+
+/// At `F = f64` the LFO, the gain and the pan law all run in `f64`: a tremolo's gain is the
+/// closed form `1 - (|d| - d u) / 2` and an auto-pan's pair is `pan_gains` at `d u`, each to
+/// 1e-12 (the `f64` phase is exact to 2^-53 cycles and the sine's argument rounds at 1e-15),
+/// where an `f32` LFO is off by 1e-7.
+#[test]
+fn an_f64_tremolo_and_auto_pan_are_their_closed_forms_in_f64() {
+    let (frames, d) = (960usize, 0.7f64);
+    let ones = vec![1.0f64; frames];
+    let mut t = tremolo(OscillatorWave::Sine, Hz(HZ), d);
+    let mut y = vec![0.0f64; frames];
+    t.process(
+        Planes::new(&[&ones[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+    );
+    for (n, &y) in y.iter().enumerate() {
+        assert!((y - sine_gain(d, n)).abs() < 1e-12, "tremolo frame {n}");
+    }
+    for law in [PanLaw::SquareRoot, PanLaw::Rp036] {
+        let mut p = auto_pan(law, d);
+        let (mut l, mut r) = (vec![0.0f64; frames], vec![0.0f64; frames]);
+        p.process(
+            Planes::new(&[&ones[..], &ones[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
+        );
+        for n in 0..frames {
+            let u = (TAU * HZ * n as f64 / RATE.get()).sin();
+            let (gl, gr) = pan_gains(Pan(d * u), law);
+            assert!((l[n] - gl.get()).abs() < 1e-12, "{law:?} left {n}");
+            assert!((r[n] - gr.get()).abs() < 1e-12, "{law:?} right {n}");
+        }
+    }
 }

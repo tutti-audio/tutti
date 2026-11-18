@@ -85,7 +85,7 @@ impl Polarity {
     /// Runs `input` into `output`: channel `c` negated where [`inverts`](Self::inverts),
     /// copied elsewhere. The channels rendered are the fewest of the two views' and the
     /// width's, and the frames the fewer of the two views'. No allocation.
-    pub fn process<S: Float>(&self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process<F: Float>(&self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input
             .channels()
