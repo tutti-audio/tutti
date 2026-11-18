@@ -1276,12 +1276,12 @@ fn analytic(from: f64, to: f64, shape: Law, position: f64, length: f64, j: u64) 
     let g = match shape {
         Law::Linear => t,
         Law::Hold => 0.0,
-        Law::PowerIn(p) => t.powf(f64::from(p.get())),
-        Law::PowerOut(p) => 1.0 - (1.0 - t).powf(f64::from(p.get())),
-        Law::PowerInOut(p) if t < 0.5 => (2.0 * t).powf(f64::from(p.get())) / 2.0,
-        Law::PowerInOut(p) => 1.0 - (2.0 - 2.0 * t).powf(f64::from(p.get())) / 2.0,
+        Law::PowerIn(p) => t.powf(p.get()),
+        Law::PowerOut(p) => 1.0 - (1.0 - t).powf(p.get()),
+        Law::PowerInOut(p) if t < 0.5 => (2.0 * t).powf(p.get()) / 2.0,
+        Law::PowerInOut(p) => 1.0 - (2.0 - 2.0 * t).powf(p.get()) / 2.0,
         Law::Exp(k) => {
-            let k = f64::from(k.get());
+            let k = k.get();
             ((k * t).exp() - 1.0) / (k.exp() - 1.0)
         }
         Law::Smootherstep => t * t * t * (t * (t * 6.0 - 15.0) + 10.0),

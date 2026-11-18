@@ -1,4 +1,4 @@
-use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Normalized, SampleRate, Samples, Seconds};
 
 use crate::Law;
 
@@ -55,8 +55,9 @@ impl FadeLaw {
     #[must_use]
     pub fn gains(self, k: usize, n: usize) -> (Amplitude, Amplitude) {
         debug_assert!(k < n, "frame {k} of a {n}-frame fade");
-        // `Law` is still `f32`; the curve PR makes it `f64`.
-        let s = f64::from(Law::Smootherstep.eval((k + 1) as f32 / (n + 1) as f32));
+        let s = Law::Smootherstep
+            .eval(Normalized::clamped((k + 1) as f64 / (n + 1) as f64))
+            .get();
         match self {
             Self::EqualAmplitude => (Amplitude(1.0 - s), Amplitude(s)),
             Self::EqualPower => {

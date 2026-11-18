@@ -110,7 +110,7 @@ use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
 use tutti_rt::with_no_denormals;
-use tutti_units::{Amplitude, At, Frame, Latency, Mix, Samples};
+use tutti_units::{Amplitude, At, Frame, Latency, Mix, Normalized, Samples};
 
 use crate::event::{Event, EventKind, EventWriter, SortedEvents};
 use crate::history::TransportHistory;
@@ -2030,7 +2030,7 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
             if into >= r.len {
                 r.target
             } else {
-                let t = into as f32 / r.len as f32;
+                let t = Normalized::clamped(into as f64 / r.len as f64);
                 tutti_curve::Piece::new(r.from, r.target, r.shape).value(None, t)
             }
         };

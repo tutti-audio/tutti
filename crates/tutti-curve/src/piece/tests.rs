@@ -1,21 +1,27 @@
 use super::*;
+use tutti_units::Normalized;
+
 use crate::Exponent;
+
+fn at(t: f64) -> Normalized {
+    Normalized::of(t)
+}
 
 /// `value` is `from + (to - from) * g(t)`, in either direction, and a hold
 /// keeps `from` until the end.
 #[test]
 fn value_scales_the_law_onto_the_endpoints() {
-    assert_eq!(Piece::new(2.0, 6.0, Law::Linear).value(None, 0.25), 3.0);
+    assert_eq!(Piece::new(2.0, 6.0, Law::Linear).value(None, at(0.25)), 3.0);
     assert_eq!(
-        Piece::new(2.0, 6.0, Law::PowerIn(Exponent::of(2.0))).value(None, 0.5),
+        Piece::new(2.0, 6.0, Law::PowerIn(Exponent::of(2.0))).value(None, at(0.5)),
         3.0
     );
     assert_eq!(
-        Piece::new(6.0, 2.0, Law::PowerIn(Exponent::of(2.0))).value(None, 0.5),
+        Piece::new(6.0, 2.0, Law::PowerIn(Exponent::of(2.0))).value(None, at(0.5)),
         5.0
     );
-    assert_eq!(Piece::new(2.0, 6.0, Law::Hold).value(None, 0.5), 2.0);
-    assert_eq!(Piece::new(2.0, 6.0, Law::Hold).value(None, 1.0), 6.0);
+    assert_eq!(Piece::new(2.0, 6.0, Law::Hold).value(None, at(0.5)), 2.0);
+    assert_eq!(Piece::new(2.0, 6.0, Law::Hold).value(None, at(1.0)), 6.0);
 }
 
 /// An azimuth piece from 170 to -170 turns through 180, not around through 0:
@@ -24,20 +30,22 @@ fn value_scales_the_law_onto_the_endpoints() {
 fn an_azimuth_piece_across_the_seam_passes_through_180_never_0() {
     let p = Piece::new(170.0, -170.0, Law::Linear);
     let az = UnitParam::Azimuth;
-    for t in [0.0f32, 0.125, 0.25, 0.5, 0.75, 0.875] {
-        let want = az.wrap(170.0 + 20.0 * t);
-        let got = p.value(Some(az), t);
+    for t in [0.0f64, 0.125, 0.25, 0.5, 0.75, 0.875] {
+        let want = az.wrap(170.0 + 20.0 * t as f32);
+        let got = p.value(Some(az), at(t));
+        // The endpoints and the result are `f32` words: the tolerance is a few `f32`
+        // ulps at 170.
         assert!((got - want).abs() < 1e-4, "t {t}: {got} vs {want}");
         assert!(got.abs() > 169.0, "t {t}: {got} is nowhere near 0");
     }
     assert_eq!(
-        p.value(Some(az), 0.5),
+        p.value(Some(az), at(0.5)),
         -180.0,
         "the midpoint is the seam itself"
     );
     let eased = Piece::new(170.0, -170.0, Law::PowerIn(Exponent::of(2.0)));
     let want = az.wrap(170.0 + 20.0 * 0.25);
-    assert!((eased.value(Some(az), 0.5) - want).abs() < 1e-4);
+    assert!((eased.value(Some(az), at(0.5)) - want).abs() < 1e-4);
 }
 
 /// A param that is a line interpolates as `value` does, across the same ends:
@@ -50,14 +58,14 @@ fn a_linear_param_piece_is_unchanged_by_the_circular_rule() {
         UnitParam::Spread,
         UnitParam::StereoWidth,
     ] {
-        for t in [0.0f32, 0.25, 0.5, 0.9] {
+        for t in [0.0f64, 0.25, 0.5, 0.9] {
             assert_eq!(
-                p.value(Some(param), t).to_bits(),
-                p.value(None, t).to_bits()
+                p.value(Some(param), at(t)).to_bits(),
+                p.value(None, at(t)).to_bits()
             );
         }
     }
-    assert_eq!(p.value(Some(UnitParam::Elevation), 0.5), 0.0);
+    assert_eq!(p.value(Some(UnitParam::Elevation), at(0.5)), 0.0);
 }
 
 /// An azimuth ramp lands exactly on its target on its last frame, and takes

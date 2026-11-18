@@ -43,7 +43,7 @@ use crate::NodeKey;
 use crate::fade::Fade;
 use crate::mode::NodeMix;
 use tutti_rt::{PackedAtomic, RtScope};
-use tutti_units::{ArcDegrees, Azimuth, ParamAddr, UnitAddr, UnitParam};
+use tutti_units::{ArcDegrees, Azimuth, Normalized, ParamAddr, UnitAddr, UnitParam};
 
 use crate::event::{Event, EventKind, segment_progress};
 use crate::spec::EventOut;
@@ -634,7 +634,7 @@ impl Ramp {
     /// The move's value at progress `t`: along the short arc for a circular
     /// param.
     #[inline]
-    fn at(&self, t: f32) -> f32 {
+    fn at(&self, t: Normalized) -> f32 {
         self.piece().value(self.param, t)
     }
 
@@ -666,7 +666,7 @@ impl Ramp {
                 } else {
                     // `done < len`, so `t` is in `(0, 1)`, where
                     // `Linear` evaluates to `t` itself.
-                    let t = self.done as f32 / self.len as f32;
+                    let t = Normalized::clamped(f64::from(self.done) / f64::from(self.len));
                     self.at(t)
                 };
             }

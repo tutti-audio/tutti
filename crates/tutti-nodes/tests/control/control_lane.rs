@@ -26,8 +26,8 @@ use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
 use tutti_types::{AtomicF32, ChannelLayout};
 use tutti_units::{
-    Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, ParamId, ParamKey, Phase, PhaseIncrement,
-    SampleRate, Samples, UnitParam,
+    Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, Normalized, ParamId, ParamKey, Phase,
+    PhaseIncrement, SampleRate, Samples, UnitParam,
 };
 
 const RATE: f64 = 48_000.0;
@@ -989,7 +989,7 @@ fn the_curves_with_no_bound_err_as_measured() {
                 LfoShape::Triangle => triangle(c),
                 _ => (std::f64::consts::TAU * c).sin(),
             };
-            let mag = f64::from(curve.eval(x.abs() as f32));
+            let mag = curve.eval(Normalized::clamped(x.abs())).get();
             let want = 1000.0 + 500.0 * mag * x.signum();
             err = err.max((f64::from(v) - want).abs() / 500.0);
         }

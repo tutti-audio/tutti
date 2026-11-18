@@ -23,9 +23,9 @@ fn equal_amplitude_is_the_smootherstep_at_every_frame() {
                 "{k}/{len}: ({out:?}, {inn:?})"
             );
             let want = smootherstep((k + 1) as f64 / (len + 1) as f64);
-            assert!((inn.get() - want).abs() < 5e-6, "{k}/{len}: {inn:?}");
+            assert!((inn.get() - want).abs() < 1e-14, "{k}/{len}: {inn:?}");
             assert!(
-                (out.get() - (1.0 - want)).abs() < 5e-6,
+                (out.get() - (1.0 - want)).abs() < 1e-14,
                 "{k}/{len}: {out:?}"
             );
         }
@@ -33,7 +33,7 @@ fn equal_amplitude_is_the_smootherstep_at_every_frame() {
 }
 
 /// At a position that is a dyadic fraction every step of the polynomial is
-/// exact in the `f32` law: `gains(0, 3)` is `x = 1/4`, `x³(6x² − 15x + 10) =
+/// exact in binary: `gains(0, 3)` is `x = 1/4`, `x³(6x² − 15x + 10) =
 /// 0.103515625`.
 #[test]
 fn equal_amplitude_is_the_smootherstep_exactly_at_dyadic_positions() {
@@ -58,10 +58,10 @@ fn equal_amplitude_sums_to_one_and_mirrors() {
         for k in 0..len {
             let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
             assert!((out.get() + inn.get() - 1.0).abs() <= 1e-14, "{k}/{len}");
-            // The `f32` law's smootherstep mirrors to its rounding.
+            // The smootherstep mirrors to its rounding.
             let (mirror_out, mirror_in) = FadeLaw::EqualAmplitude.gains(len - 1 - k, len);
-            assert!((out.get() - mirror_in.get()).abs() <= 5e-6, "{k}/{len}");
-            assert!((inn.get() - mirror_out.get()).abs() <= 5e-6, "{k}/{len}");
+            assert!((out.get() - mirror_in.get()).abs() <= 1e-14, "{k}/{len}");
+            assert!((inn.get() - mirror_out.get()).abs() <= 1e-14, "{k}/{len}");
         }
     }
 }
@@ -79,8 +79,14 @@ fn equal_power_is_the_cosine_sine_pair_of_the_smootherstep() {
             );
             let angle =
                 smootherstep((k + 1) as f64 / (len + 1) as f64) * std::f64::consts::FRAC_PI_2;
-            assert!((out.get() - angle.cos()).abs() < 5e-6, "{k}/{len}: {out:?}");
-            assert!((inn.get() - angle.sin()).abs() < 5e-6, "{k}/{len}: {inn:?}");
+            assert!(
+                (out.get() - angle.cos()).abs() < 1e-14,
+                "{k}/{len}: {out:?}"
+            );
+            assert!(
+                (inn.get() - angle.sin()).abs() < 1e-14,
+                "{k}/{len}: {inn:?}"
+            );
         }
     }
 }

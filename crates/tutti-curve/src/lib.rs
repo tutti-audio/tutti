@@ -21,9 +21,9 @@
 //!
 //! ```
 //! use tutti_curve::{Breakpoint, Exponent, Law, Piece, Trajectory};
-//! use tutti_units::{Beat, Hz};
+//! use tutti_units::{Beat, Hz, Normalized};
 //!
-//! assert_eq!(Piece::new(0.0, 8.0, Law::PowerIn(Exponent::of(2.0))).value(None, 0.5), 2.0);
+//! assert_eq!(Piece::new(0.0, 8.0, Law::PowerIn(Exponent::of(2.0))).value(None, Normalized::of(0.5)), 2.0);
 //!
 //! let mut lane = Trajectory::new();
 //! lane.add_breakpoint(Breakpoint::with_law(Beat(0.0), Hz(0.0), Law::PowerIn(Exponent::of(2.0))));
