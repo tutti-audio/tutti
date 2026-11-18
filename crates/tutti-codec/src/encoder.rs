@@ -10,7 +10,7 @@ use crate::writer::FormatWriter;
 use std::fs::File;
 use std::io::{BufWriter, Seek, Write};
 use std::path::Path;
-use tutti_buffers::Interleaved;
+use tutti_buffers::{Interleaved, Sample};
 use tutti_types::{ChannelLayout, Samples};
 
 /// Writes blocks of audio as one file of a [format](crate::Format): the
@@ -38,7 +38,7 @@ use tutti_types::{ChannelLayout, Samples};
 /// use std::io::Cursor;
 /// use tutti_codec::{Encoder, Format, Pcm, Spec};
 /// use tutti_types::{ChannelLayout, SampleRate};
-/// use tutti_buffers::Interleaved;
+/// use tutti_buffers::{Interleaved, Sample};
 ///
 /// let spec = Spec::of_width(Format::Wav(Pcm::Int16), ChannelLayout::STEREO, SampleRate::SR_48K);
 /// let mut encoder = Encoder::create(&spec, Cursor::new(Vec::new()))?;
@@ -146,7 +146,9 @@ impl<W: Write + Seek + Send + 'static> Encoder<W> {
         self
     }
 
-    /// Writes one block.
+    /// Writes one block of any [`Sample`] format; the file's width is
+    /// reached by the rule in [`Sample`], and a block already in it is written
+    /// as it is. A caller that dithers converts first.
     ///
     /// An empty block writes nothing.
     ///
@@ -160,7 +162,7 @@ impl<W: Write + Seek + Send + 'static> Encoder<W> {
     /// next `write` or `finish` instead.) After an error the file is not a complete take: [`finish`](Self::finish) still
     /// closes what was written for a caller that keeps it, and
     /// [`abort`](Self::abort) discards it.
-    pub fn write(&mut self, block: Interleaved<'_>) -> Result<()> {
+    pub fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         let written = self.write_block(block);
         if let Err(e) = &written {
             self.first_error.get_or_insert_with(|| e.clone());
@@ -168,7 +170,7 @@ impl<W: Write + Seek + Send + 'static> Encoder<W> {
         written
     }
 
-    fn write_block(&mut self, block: Interleaved<'_>) -> Result<()> {
+    fn write_block<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         if block.layout() != self.layout {
             return Err(Error::BlockWidth {
                 expected: self.layout,

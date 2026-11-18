@@ -19,12 +19,12 @@
 mod mask;
 
 use crate::error::{Error, Result};
-use crate::pcm::{Pcm, Sample};
+use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
 use mask::channel_mask;
 use std::io::{Seek, SeekFrom, Write};
-use tutti_buffers::Interleaved;
+use tutti_buffers::{I24, Interleaved, Sample};
 use tutti_types::ChannelLayout;
 
 const KSDATAFORMAT_SUBTYPE_PCM: [u8; 16] = [
@@ -66,7 +66,7 @@ impl Header {
         let channels = spec.layout().count();
         let sample_bytes = pcm.bits().div_ceil(8);
         let extensible = channels > 2 || pcm.bits() > 16;
-        let float = pcm == Pcm::Float32;
+        let float = matches!(pcm, Pcm::Float32 | Pcm::Float64);
         let bytes_per_sec = rate
             .wrapping_mul(u32::from(sample_bytes))
             .wrapping_mul(u32::from(channels));
@@ -197,16 +197,25 @@ impl<W: Write + Seek> Drop for WavWriter<W> {
 impl<W: Write + Seek> FormatWriter for WavWriter<W> {
     type Sink = W;
 
-    fn write(&mut self, block: Interleaved<'_>) -> Result<()> {
+    fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         let room = self.max_frames - self.frames;
         let fits = (block.frames().get() as u64).min(room) as usize;
         let samples = &block.samples()[..fits * block.channels()];
         self.bytes.clear();
         for &s in samples {
-            match self.pcm.quantize(s) {
-                Sample::I16(v) => self.bytes.extend_from_slice(&v.to_le_bytes()),
-                Sample::I24(v) => self.bytes.extend_from_slice(&v.to_le_bytes()[..3]),
-                Sample::F32(v) => self.bytes.extend_from_slice(&v.to_le_bytes()),
+            match self.pcm {
+                Pcm::Int16 => self
+                    .bytes
+                    .extend_from_slice(&s.convert_to::<i16>().to_le_bytes()),
+                Pcm::Int24 => self
+                    .bytes
+                    .extend_from_slice(&s.convert_to::<I24>().get().to_le_bytes()[..3]),
+                Pcm::Float32 => self
+                    .bytes
+                    .extend_from_slice(&s.convert_to::<f32>().to_le_bytes()),
+                Pcm::Float64 => self
+                    .bytes
+                    .extend_from_slice(&s.convert_to::<f64>().to_le_bytes()),
             }
         }
         if let Some(sink) = self.sink.as_mut() {

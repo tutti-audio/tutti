@@ -48,7 +48,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tutti_buffers::{Interleaved, InterleavedMut, Wave};
+use tutti_buffers::{BufferError, Interleaved, InterleavedMut, Wave};
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 
@@ -353,8 +353,19 @@ impl RegionOut {
                 return false;
             }
             // Frames read before a fault are kept; the rest is silence.
-            let view = InterleavedMut::new(&mut *out, decoder.topology().width())
-                .expect("the ring is the file's width and `out` holds whole frames");
+            let Ok(view) = InterleavedMut::new(&mut *out, decoder.topology().width()) else {
+                // `out` is not whole frames of the file's width: nothing read,
+                // and the refill's `false` faults the stream as a decode fault.
+                out.fill(0.0);
+                if !self.fault_logged {
+                    self.fault_logged = true;
+                    tracing::warn!(
+                        "read of {} refused: the buffer is not whole frames of the file's width",
+                        self.ring.file_path.display()
+                    );
+                }
+                return false;
+            };
             let got = decoder
                 .fill_sequential_interleaved(view)
                 .map_or(0, Samples::get);
@@ -373,10 +384,7 @@ impl RegionOut {
             return false;
         }
         match self.resident.as_deref() {
-            Some(wave) => {
-                super::io::wave_io::read_wave(wave, at, out, channels);
-                true
-            }
+            Some(wave) => super::io::wave_io::read_wave(wave, at, out, channels),
             None => {
                 out.fill(0.0);
                 false
@@ -404,12 +412,17 @@ impl RegionOut {
     /// landed: short where a slot the reader's block in flight may read would
     /// be written, or where the ring is full ahead of the reader
     /// (`PosRing::push`). A trailing partial frame is ignored.
-    pub fn push_interleaved(&mut self, samples: &[f32]) -> Samples {
+    ///
+    /// # Errors
+    ///
+    /// The ring's refusal of a view that is not its own width, which no
+    /// caller that built `samples` at the ring's width can meet; the refill
+    /// reports it as the stream's decode fault.
+    pub fn push_interleaved(&mut self, samples: &[f32]) -> Result<Samples, BufferError> {
         let layout = self.writer.layout();
         let whole = layout.interleaved_len(layout.from_interleaved_len(samples.len()));
-        let frames = Interleaved::new(&samples[..whole], layout)
-            .expect("a whole number of frames of the ring's width");
-        self.writer.push(frames).expect("the ring's width")
+        self.writer
+            .push(Interleaved::new(&samples[..whole], layout)?)
     }
 }
 
@@ -527,7 +540,10 @@ mod tests {
         assert_eq!(writer.channels(), ChannelLayout::from(6u16));
         let mut data = indexed(12, 6);
         data.extend_from_slice(&[99.0, 99.0, 99.0]);
-        assert_eq!(writer.push_interleaved(&data), Samples(12));
+        assert_eq!(
+            writer.push_interleaved(&data).expect("the ring\'s width"),
+            Samples(12)
+        );
         assert_eq!(ring.window(), (0, 12), "twelve whole frames");
         let claim = reader.claim(0, [(0, 12), (0, 0)]);
         for s in 0..12u64 {

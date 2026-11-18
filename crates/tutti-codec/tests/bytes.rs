@@ -1,16 +1,12 @@
-//! The bytes each encoder writes for a known input, pinned.
+//! The bytes each encoder writes, against the formats' own layouts.
 //!
-//! The input is analytic and exact in binary (a sawtooth plus a bounded
-//! integer hash, scaled by powers of two), so the quantized samples are fixed
-//! figures with no libm in them. The digests were taken from the encoders as
-//! they stood in `tutti-export` and the live WAV sink before this crate existed, so a
-//! change to a header field, a quantization, a FLAC level or the mask shows as a
-//! different digest.
-//!
-//! WAV and AIFF are integer and exact arithmetic and asserted everywhere. FLAC
-//! is not pinned: its bytes are the encoder library's choice (and call libm),
-//! so its suite holds what the format promises instead, that every level decodes
-//! back to the quantized input, and that the levels differ.
+//! A header field is read at its offset in the RIFF or AIFF layout and a few
+//! sample codes are checked at the values the conversion rule gives (`x * 2^(n-1)`,
+//! rounded half to even, clipped), so a change to a tag, a width, a block size,
+//! a GUID or a scale fails here with the field named. FLAC's bytes are the
+//! encoder library's choice, so its suite holds what the format promises
+//! instead: every level decodes back to the quantized input, and the levels
+//! differ.
 
 #![cfg(any(
     feature = "encode-wav",
@@ -22,12 +18,6 @@ use std::io::Cursor;
 use tutti_buffers::Interleaved;
 use tutti_codec::{Encoder, Format, Spec};
 use tutti_types::{ChannelLayout, SampleRate};
-
-fn fnv(bytes: &[u8]) -> u64 {
-    let mut h = tutti_fixtures::Fnv::new();
-    h.bytes(bytes.iter().copied());
-    h.finish()
-}
 
 /// `frames` interleaved frames of `channels`: a 1024-step sawtooth offset per
 /// channel, plus a 15-bit hash scaled by 1/16, every term exact in `f32`.
@@ -43,8 +33,8 @@ fn input(channels: usize, frames: usize) -> Vec<f32> {
 }
 
 /// The file `format` writes for `frames` frames of the input, as one block cut
-/// in two, and its length and digest.
-fn written(format: Format, channels: u16, frames: usize) -> (usize, u64) {
+/// in two.
+fn written(format: Format, channels: u16, frames: usize) -> Vec<u8> {
     let layout = ChannelLayout::from(channels);
     let spec = Spec::of_width(format, layout, SampleRate::SR_44K1);
     let samples = input(usize::from(channels), frames);
@@ -56,54 +46,257 @@ fn written(format: Format, channels: u16, frames: usize) -> (usize, u64) {
     encoder
         .write(Interleaved::new(&samples[cut..], layout).unwrap())
         .unwrap();
-    let bytes = encoder.finish().unwrap().into_inner();
-    (bytes.len(), fnv(&bytes))
+    encoder.finish().unwrap().into_inner()
+}
+
+/// The file `format` writes for exactly `samples`, at 44.1 kHz.
+#[cfg(any(feature = "encode-wav", feature = "encode-aiff"))]
+fn file_of<S: tutti_buffers::Sample>(format: Format, channels: u16, samples: &[S]) -> Vec<u8> {
+    let layout = ChannelLayout::from(channels);
+    let spec = Spec::of_width(format, layout, SampleRate::SR_44K1);
+    let mut encoder = Encoder::create(&spec, Cursor::new(Vec::new())).unwrap();
+    encoder
+        .write(Interleaved::new(samples, layout).unwrap())
+        .unwrap();
+    encoder.finish().unwrap().into_inner()
 }
 
 #[cfg(feature = "encode-wav")]
+fn u16_at(b: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes([b[at], b[at + 1]])
+}
+
+#[cfg(feature = "encode-wav")]
+fn u32_at(b: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
+}
+
+/// The `KSDATAFORMAT_SUBTYPE_PCM` and `..._IEEE_FLOAT` GUIDs: the format tag
+/// (1 and 3) then the fixed tail Microsoft's headers define.
+#[cfg(feature = "encode-wav")]
+fn subtype(tag: u8) -> [u8; 16] {
+    [
+        tag, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71,
+    ]
+}
+
+/// A 16-bit stereo WAV is the 44-byte `PCMWAVEFORMAT` header: tag 1, the rate,
+/// the byte rate, a block align of 4 and 16 bits; and its codes are the rule's.
+#[cfg(feature = "encode-wav")]
 #[test]
-fn wav_bytes_are_pinned() {
-    use tutti_codec::Pcm::{Float32, Int16, Int24};
-    for (pcm, channels, frames, len, digest) in [
-        (Int16, 1u16, 10_000usize, 20_044, 0x1ac2_fabb_cb1f_a287u64),
-        (Int16, 2, 10_000, 40_044, 0x4c52_8967_01b7_b147),
-        (Int16, 6, 10_000, 120_068, 0x9f63_259e_98cd_9126),
-        (Int24, 1, 10_000, 30_068, 0x3462_a020_93b3_4973),
-        (Int24, 2, 10_000, 60_068, 0xff9b_0e79_369c_9901),
-        (Int24, 6, 10_000, 180_068, 0xc7fa_7858_393a_60fd),
-        (Float32, 1, 10_000, 40_068, 0x87c0_d7ac_6bac_8c35),
-        (Float32, 2, 10_000, 80_068, 0x0fb0_dba7_323e_49c4),
-        (Float32, 6, 10_000, 240_068, 0xe287_6b34_1144_01a9),
-        (Int24, 2, 3, 86, 0x2d53_d3b0_cbeb_f59d),
-        (Int24, 2, 0, 68, 0x5e18_ef2a_1686_adfe),
-    ] {
+fn a_16_bit_wav_has_the_pcm_header_and_the_rules_codes() {
+    let bytes = file_of(
+        Format::Wav(tutti_codec::Pcm::Int16),
+        2,
+        &[0.5f32, -0.5, 1.0, -1.0],
+    );
+    assert_eq!(&bytes[..4], b"RIFF");
+    assert_eq!(u32_at(&bytes, 4), bytes.len() as u32 - 8, "RIFF size");
+    assert_eq!(&bytes[8..16], b"WAVEfmt ");
+    assert_eq!(u32_at(&bytes, 16), 16, "fmt size");
+    assert_eq!(u16_at(&bytes, 20), 1, "PCM");
+    assert_eq!(u16_at(&bytes, 22), 2, "channels");
+    assert_eq!(u32_at(&bytes, 24), 44_100, "rate");
+    assert_eq!(u32_at(&bytes, 28), 44_100 * 4, "byte rate");
+    assert_eq!(u16_at(&bytes, 32), 4, "block align");
+    assert_eq!(u16_at(&bytes, 34), 16, "bits");
+    assert_eq!(&bytes[36..40], b"data");
+    assert_eq!(u32_at(&bytes, 40), 8, "data size");
+    let codes: Vec<i16> = bytes[44..]
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|b| i16::from_le_bytes(*b))
+        .collect();
+    assert_eq!(codes, [16384, -16384, 32767, -32768]);
+}
+
+/// A 24-bit six-channel WAV is `WAVE_FORMAT_EXTENSIBLE`: tag 0xFFFE, 22 extra
+/// bytes, 24 valid bits, the 5.1 mask, the PCM sub-format and a block align of
+/// 18; codes are three bytes each.
+#[cfg(feature = "encode-wav")]
+#[test]
+fn a_24_bit_wav_is_extensible_with_three_byte_codes() {
+    let mut samples = vec![0.0f32; 6];
+    samples[0] = 0.5;
+    samples[1] = -1.0;
+    samples[2] = 1.0;
+    let bytes = file_of(Format::Wav(tutti_codec::Pcm::Int24), 6, &samples);
+    assert_eq!(u32_at(&bytes, 16), 40, "fmt size");
+    assert_eq!(u16_at(&bytes, 20), 0xFFFE, "extensible");
+    assert_eq!(u16_at(&bytes, 22), 6, "channels");
+    assert_eq!(u16_at(&bytes, 32), 18, "block align");
+    assert_eq!(u16_at(&bytes, 34), 24, "container bits");
+    assert_eq!(u16_at(&bytes, 36), 22, "extension size");
+    assert_eq!(u16_at(&bytes, 38), 24, "valid bits");
+    assert_eq!(u32_at(&bytes, 40), 0x60F, "5.1 channel mask");
+    assert_eq!(&bytes[44..60], &subtype(1), "PCM sub-format");
+    assert_eq!(&bytes[60..64], b"data");
+    assert_eq!(u32_at(&bytes, 64), 18, "data size");
+    let code = |at: usize| {
+        let b = &bytes[68 + 3 * at..71 + 3 * at];
+        i32::from_le_bytes([0, b[0], b[1], b[2]]) >> 8
+    };
+    assert_eq!(
+        [code(0), code(1), code(2)],
+        [4_194_304, -8_388_608, 8_388_607]
+    );
+}
+
+/// The float widths are extensible with the IEEE float sub-format, 32 and 64
+/// valid bits, block aligns of 8 and 16 for stereo, and every sample's bits.
+#[cfg(feature = "encode-wav")]
+#[test]
+fn the_float_wavs_carry_the_ieee_float_subtype_and_every_bit() {
+    use tutti_codec::Pcm;
+    let wide = [1.0 / 3.0f64, -1.0e-300, 1.5, -0.0];
+    for (pcm, bits, align) in [(Pcm::Float32, 32u16, 8u16), (Pcm::Float64, 64, 16)] {
+        let bytes = file_of(Format::Wav(pcm), 2, &wide);
+        assert_eq!(u16_at(&bytes, 20), 0xFFFE, "{pcm:?} extensible");
+        assert_eq!(u16_at(&bytes, 32), align, "{pcm:?} block align");
+        assert_eq!(u16_at(&bytes, 34), bits, "{pcm:?} bits");
+        assert_eq!(u16_at(&bytes, 38), bits, "{pcm:?} valid bits");
+        assert_eq!(&bytes[44..60], &subtype(3), "{pcm:?} IEEE float sub-format");
         assert_eq!(
-            written(Format::Wav(pcm), channels, frames),
-            (len, digest),
-            "WAV {pcm:?} {channels} channels {frames} frames"
+            u32_at(&bytes, 64) as usize,
+            wide.len() * usize::from(bits / 8)
         );
+        let data = &bytes[68..];
+        match pcm {
+            Pcm::Float32 => {
+                let got: Vec<u32> = data
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|b| u32::from_le_bytes(*b))
+                    .collect();
+                let want: Vec<u32> = wide.iter().map(|&x| (x as f32).to_bits()).collect();
+                assert_eq!(got, want);
+            }
+            _ => {
+                let got: Vec<u64> = data
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|b| u64::from_le_bytes(*b))
+                    .collect();
+                let want: Vec<u64> = wide.iter().map(|x| x.to_bits()).collect();
+                assert_eq!(got, want);
+            }
+        }
     }
 }
 
+/// An empty take is a header alone: 44 bytes at 16 bits and 68 at 24, with
+/// zero data and a RIFF size of the file less 8.
+#[cfg(feature = "encode-wav")]
+#[test]
+fn an_empty_wav_is_a_header_alone() {
+    for (pcm, len) in [
+        (tutti_codec::Pcm::Int16, 44usize),
+        (tutti_codec::Pcm::Int24, 68),
+    ] {
+        let bytes = written(Format::Wav(pcm), 2, 0);
+        assert_eq!(bytes.len(), len, "{pcm:?}");
+        assert_eq!(u32_at(&bytes, 4) as usize, len - 8, "{pcm:?} RIFF size");
+        assert_eq!(u32_at(&bytes, len - 4), 0, "{pcm:?} data size");
+    }
+}
+
+/// The big-endian bytes of the `SSND` chunk's samples: the chunk's 8-byte header
+/// and its offset and block size fields are skipped.
+#[cfg(feature = "encode-aiff")]
+fn ssnd_data(b: &[u8]) -> &[u8] {
+    let at = b
+        .windows(4)
+        .position(|w| w == b"SSND")
+        .expect("an SSND chunk");
+    &b[at + 16..]
+}
+
+/// A 16-bit stereo AIFF is `FORM` / `AIFF` with a `COMM` chunk of 18 bytes
+/// (channels, frames, bits and the rate as an 80-bit extended float: 44100 is
+/// exponent 0x400E, mantissa 0xAC44 followed by zeros), and its codes are
+/// big-endian and the rule's.
 #[cfg(feature = "encode-aiff")]
 #[test]
-fn aiff_bytes_are_pinned() {
-    use tutti_codec::Pcm::{Float32, Int16, Int24};
-    for (pcm, channels, frames, len, digest) in [
-        (Int16, 2u16, 10_000usize, 40_054, 0x12dc_55f4_ffc1_5e11u64),
-        (Int16, 6, 10_000, 120_054, 0x83a9_ef6b_cd2f_5558),
-        (Int24, 2, 10_000, 60_054, 0xddc5_828a_ba91_f4ed),
-        (Int24, 6, 10_000, 180_054, 0x20a1_212e_ae6e_64d4),
-        (Float32, 2, 10_000, 80_072, 0xebc3_d350_b7a6_59bc),
-        (Float32, 6, 10_000, 240_072, 0x4884_472c_cd7f_edde),
-        (Int24, 2, 3, 72, 0x7968_6240_21a1_9123),
-        (Int24, 2, 0, 38, 0x8d8a_467c_7cbd_6d91),
-    ] {
-        assert_eq!(
-            written(Format::Aiff(pcm), channels, frames),
-            (len, digest),
-            "AIFF {pcm:?} {channels} channels {frames} frames"
+fn a_16_bit_aiff_has_the_comm_chunk_and_the_rules_codes() {
+    let bytes = file_of(
+        Format::Aiff(tutti_codec::Pcm::Int16),
+        2,
+        &[0.5f32, -0.5, 1.0, -1.0],
+    );
+    assert_eq!(&bytes[..4], b"FORM");
+    assert_eq!(
+        u32::from_be_bytes(bytes[4..8].try_into().unwrap()) as usize,
+        bytes.len() - 8,
+        "FORM size"
+    );
+    assert_eq!(&bytes[8..12], b"AIFF");
+    assert_eq!(&bytes[12..16], b"COMM");
+    assert_eq!(
+        u32::from_be_bytes(bytes[16..20].try_into().unwrap()),
+        18,
+        "COMM size"
+    );
+    assert_eq!(u16::from_be_bytes([bytes[20], bytes[21]]), 2, "channels");
+    assert_eq!(
+        u32::from_be_bytes(bytes[22..26].try_into().unwrap()),
+        2,
+        "frames"
+    );
+    assert_eq!(u16::from_be_bytes([bytes[26], bytes[27]]), 16, "bits");
+    assert_eq!(
+        &bytes[28..38],
+        &[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0],
+        "44100 Hz as an 80-bit extended float"
+    );
+    let codes: Vec<i16> = ssnd_data(&bytes)
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|b| i16::from_be_bytes(*b))
+        .collect();
+    assert_eq!(codes, [16384, -16384, 32767, -32768]);
+}
+
+/// The float widths are AIFF-C (`FORM` / `AIFC`) naming `fl32` or `fl64`, with
+/// every sample's bits big-endian.
+#[cfg(feature = "encode-aiff")]
+#[test]
+fn the_float_aiffs_are_aifc_naming_their_compression() {
+    use tutti_codec::Pcm;
+    let wide = [1.0 / 3.0f64, -1.0e-300];
+    for (pcm, name) in [(Pcm::Float32, b"fl32"), (Pcm::Float64, b"fl64")] {
+        let bytes = file_of(Format::Aiff(pcm), 2, &wide);
+        assert_eq!(&bytes[8..12], b"AIFC", "{pcm:?}");
+        assert!(
+            bytes.windows(4).any(|w| w == name),
+            "{pcm:?} names {name:?}"
         );
+        let data = ssnd_data(&bytes);
+        match pcm {
+            Pcm::Float32 => {
+                let got: Vec<u32> = data[..8]
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|b| u32::from_be_bytes(*b))
+                    .collect();
+                let want: Vec<u32> = wide.iter().map(|&x| (x as f32).to_bits()).collect();
+                assert_eq!(got, want);
+            }
+            _ => {
+                let got: Vec<u64> = data[..16]
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|b| u64::from_be_bytes(*b))
+                    .collect();
+                let want: Vec<u64> = wide.iter().map(|x| x.to_bits()).collect();
+                assert_eq!(got, want);
+            }
+        }
     }
 }
 
@@ -133,7 +326,7 @@ fn decoded(format: Format, channels: u16, frames: usize) -> Vec<Vec<f32>> {
 
 /// FLAC is lossless: at every level and depth, the file decodes to exactly the
 /// samples the WAV writer of the same depth stores, which is the one
-/// quantization (and whose bytes are pinned above).
+/// quantization (its codes are checked above).
 #[cfg(all(feature = "encode-flac", feature = "encode-wav"))]
 #[test]
 fn flac_decodes_to_the_quantized_input_at_every_level() {

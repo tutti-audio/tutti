@@ -177,6 +177,10 @@ pub struct ProcessOutput {
     params_refused: usize,
     // MIDI events a chunked Processor accepted and could not send.
     midi_lost: usize,
+    // Audio entries the plugin refused this block.
+    entries_refused: usize,
+    // Input messages a Processor's host refused this block.
+    input_refused: usize,
     // Whether a chunk this call completed went without its parameter changes.
     params_unsent: bool,
     // What the plugin said of itself at the end of the block.
@@ -195,6 +199,8 @@ impl ProcessOutput {
         self.midi_dropped = 0;
         self.params_refused = 0;
         self.midi_lost = 0;
+        self.entries_refused = 0;
+        self.input_refused = 0;
         self.params_unsent = false;
         self.status = BlockStatus::Continue;
         self.param_changes.clear();
@@ -224,10 +230,11 @@ impl ProcessOutput {
         dropped
     }
 
-    /// Adds `n` to the events [`midi_dropped`](Self::midi_dropped) counts: MIDI a
-    /// Processor lost before it reached [`midi_events`](Self::midi_events) (an
-    /// output queue between the plugin and the block that had no room), so the
-    /// loss is reported with the rest.
+    /// Adds `n` to the events [`midi_dropped`](Self::midi_dropped) counts: the plugin's
+    /// MIDI out that a Processor lost before it reached [`midi_events`](Self::midi_events)
+    /// (an output queue between the plugin and the block that had no room), so the loss
+    /// is reported with the rest. Input a host refused is
+    /// [`count_input_refused`](Self::count_input_refused).
     pub fn count_midi_dropped(&mut self, n: usize) {
         self.midi_dropped += n;
     }
@@ -254,9 +261,9 @@ impl ProcessOutput {
         self.params_refused
     }
 
-    /// Adds `n` to the MIDI events a chunked Processor ([`Processor::chunk`](crate::Processor::chunk))
-    /// took in earlier calls and lost when it shipped their chunk: the chunk
-    /// could not be staged, or the peer refused it. For the graph node, which
+    /// Adds `n` to the node's MIDI events (UMP packets) that a chunked Processor
+    /// ([`Processor::chunk`](crate::Processor::chunk)) took in earlier calls and lost when it
+    /// shipped their chunk: the chunk could not be staged, or the peer refused it. For the graph node, which
     /// folds them into its dropped-MIDI counts and skips the rest of every
     /// SysEx open in them. Reset by [`clear`](Self::clear).
     pub fn count_midi_lost(&mut self, n: usize) {
@@ -267,6 +274,37 @@ impl ProcessOutput {
     /// since the last [`clear`](Self::clear).
     pub fn midi_lost(&self) -> usize {
         self.midi_lost
+    }
+
+    /// Adds `n` to the input messages a Processor's own host refused in this block, in the
+    /// host's unit (a message: a MIDI 1.0 message or a whole SysEx message, not a UMP
+    /// packet): a SysEx dropped whole, a message of a Group the format cannot hear, an
+    /// event past the host's room, an event handed to a plugin that refused the entry.
+    /// These are not the node's events and not a chunk that never reached the plugin
+    /// ([`count_midi_lost`](Self::count_midi_lost)): the node counts them apart and does not
+    /// cut the SysEx it has open. Reset by [`clear`](Self::clear).
+    pub fn count_input_refused(&mut self, n: usize) {
+        self.input_refused += n;
+    }
+
+    /// The messages counted by [`count_input_refused`](Self::count_input_refused) since the
+    /// last [`clear`](Self::clear).
+    pub fn input_refused(&self) -> usize {
+        self.input_refused
+    }
+
+    /// Adds `n` to the audio entries the plugin refused in this block: a format whose
+    /// plugin can refuse a render call (VST2's closed gate, a missing entry, pins grown past
+    /// the buffer) says how many pieces of the block rendered silence. The block still
+    /// returns `Ok`: its other pieces rendered. Reset by [`clear`](Self::clear).
+    pub fn count_entries_refused(&mut self, n: usize) {
+        self.entries_refused += n;
+    }
+
+    /// The audio entries counted by [`count_entries_refused`](Self::count_entries_refused)
+    /// since the last [`clear`](Self::clear).
+    pub fn entries_refused(&self) -> usize {
+        self.entries_refused
     }
 
     /// Says the chunk this call completed shipped without its parameter
@@ -356,11 +394,18 @@ mod tests {
         assert!(!out.params_unsent());
         out.count_midi_lost(2);
         out.count_midi_lost(3);
+        out.count_entries_refused(1);
+        out.count_entries_refused(2);
+        out.count_input_refused(4);
         out.set_params_unsent();
         assert_eq!(out.midi_lost(), 5);
+        assert_eq!(out.entries_refused(), 3);
+        assert_eq!(out.input_refused(), 4);
         assert!(out.params_unsent());
         out.clear();
         assert_eq!(out.midi_lost(), 0);
+        assert_eq!(out.entries_refused(), 0);
+        assert_eq!(out.input_refused(), 0);
         assert!(!out.params_unsent());
     }
 

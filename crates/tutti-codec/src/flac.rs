@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 use std::io::{Seek, SeekFrom, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use tutti_buffers::Interleaved;
+use tutti_buffers::{Interleaved, Sample};
 use tutti_rt::{ThreadHandle, spawn_named};
 
 /// Frames per FLAC block, every block but the last.
@@ -99,7 +99,7 @@ impl<W: Write + Seek> FlacWriter<W> {
 impl<W: Write + Seek> FormatWriter for FlacWriter<W> {
     type Sink = W;
 
-    fn write(&mut self, block: Interleaved<'_>) -> Result<()> {
+    fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         let mut samples = block.samples();
         while !samples.is_empty() {
             let take = (BLOCK_SIZE * self.channels - self.pcm.len()).min(samples.len());

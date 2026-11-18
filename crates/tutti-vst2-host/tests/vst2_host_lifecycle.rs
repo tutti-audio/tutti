@@ -586,6 +586,40 @@ fn editor_idle_reaches_an_open_editor() {
     assert_eq!(idles(), 3, "none once closed");
 }
 
+/// An editor that reports no size before or after opening is refused with a typed error
+/// and closed again, not returned as a 0 by 0 window.
+/// Spec: vst2.eff.EditGetRect
+#[test]
+fn an_editor_with_no_size_is_refused_and_closed() {
+    let _guard = lock_probe();
+    let mut instance = load_with_env(512, &[("TUTTI_VST2_PROBE_EDITOR", "1")]);
+    for symbol in [
+        &b"tutti_vst2_probe_set_editor_opens\0"[..],
+        b"tutti_vst2_probe_set_editor_has_no_size\0",
+    ] {
+        probe_call(symbol, |sym| {
+            // SAFETY: the probe exports these symbols with exactly this signature.
+            let f: extern "C" fn(bool) = unsafe { std::mem::transmute(*sym) };
+            f(true);
+        });
+    }
+    let parent = tutti_fixtures::StandInWindow.handle();
+    let error = instance
+        .loaded_mut()
+        .open_editor(main_thread(), parent, ContentScale::IDENTITY)
+        .expect_err("a 0 by 0 editor is refused");
+    let closes = probe_call(b"tutti_vst2_probe_editor_close_count\0", |sym| {
+        // SAFETY: the probe exports this symbol with exactly this signature.
+        let f: extern "C" fn() -> i32 = unsafe { std::mem::transmute(*sym) };
+        f()
+    });
+    assert_eq!(closes, 1, "the editor that opened is closed again");
+    assert!(
+        error.to_string().contains("0 by 0"),
+        "the error names the size: {error}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // effEditKeyDown / effEditKeyUp
 // ---------------------------------------------------------------------------
@@ -853,8 +887,7 @@ fn a_later_piece_sees_the_transport_advanced() {
     );
 }
 
-/// A bar line inside a later piece moves the bar start; a block with no
-/// transport does not advance the previous block's snapshot.
+/// A bar line inside a later piece moves the bar start.
 ///
 /// 4/4 at 120 BPM, 48 kHz: a 64-frame piece is 0.002667 quarters, so a block
 /// starting at 3.995 crosses the bar line at 4.0 in its third piece (start
@@ -873,9 +906,62 @@ fn a_bar_line_in_a_later_piece_moves_the_bar_start() {
     render_f32(&mut instance, 200, &[], Some(&transport), 0.0);
     let cap = read_capture();
     assert_eq!(cap.time_bar_start_pos, 4.0);
+}
 
-    // No transport on the next block: the snapshot stays the last piece's.
-    let before = cap.time_sample_pos;
-    render_f32(&mut instance, 200, &[], None, 0.0);
-    assert_eq!(read_capture().time_sample_pos, before);
+/// A later piece's `samplesToNextClock` is measured at the piece's own position, not the
+/// block's: `kVstClockValid` says the field holds the distance to the nearest MIDI clock
+/// (24 per quarter, signed), and a stale figure from the block's first frame breaks it.
+///
+/// 120 BPM at 48 kHz: a quarter is 24 000 frames and a clock 1 000. The block starts 100
+/// frames past a clock, and the last piece starts 192 frames later, 292 frames past it:
+/// the nearest clock is 292 frames behind.
+/// Spec: vst2.timeinfo.kVstClockValid
+#[test]
+fn a_later_piece_measures_its_clock_offset_at_its_own_position() {
+    const CLOCK_VALID: i32 = 1 << 15;
+    let _guard = lock_probe();
+    let mut instance = load(BLOCK);
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_playing(true)
+        .with_beat(tutti_types::Beat(4.0 + 100.0 / 24_000.0))
+        .with_position_samples(1_000)
+        .with_tempo(tutti_types::Bpm::of(120.0))
+        .with_time_signature(TimeSignature::default());
+
+    render_f32(&mut instance, 64, &[], Some(&transport), 0.0);
+    let first = read_capture();
+    assert_ne!(first.time_flags & CLOCK_VALID, 0);
+    assert_eq!(first.time_samples_to_next_clock, -100, "the block's own");
+
+    render_f32(&mut instance, 200, &[], Some(&transport), 0.0);
+    let last = read_capture();
+    assert_ne!(last.time_flags & CLOCK_VALID, 0);
+    assert_eq!(last.time_samples_to_next_clock, -292);
+}
+
+/// A block with no transport reports a stopped one: the plugin does not keep reading the
+/// rolling transport the host stopped sending, and the stop is an edge
+/// (`kVstTransportChanged`).
+/// Spec: vst2.timeinfo.kVstTransportPlaying, vst2.timeinfo.kVstTransportChanged
+#[test]
+fn a_block_with_no_transport_reports_a_stopped_one() {
+    const CHANGED: i32 = 1;
+    const PLAYING: i32 = 1 << 1;
+    let _guard = lock_probe();
+    let mut instance = load(BLOCK);
+    let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
+        .with_playing(true)
+        .with_beat(tutti_types::Beat(3.0))
+        .with_position_samples(1_000);
+    render_f32(&mut instance, 64, &[], Some(&transport), 0.0);
+    assert_ne!(read_capture().time_flags & PLAYING, 0);
+
+    render_f32(&mut instance, 64, &[], None, 0.0);
+    let cap = read_capture();
+    assert!(cap.time_info_present);
+    assert_eq!(cap.time_flags & PLAYING, 0, "stopped");
+    assert_ne!(cap.time_flags & CHANGED, 0, "the stop is an edge");
+
+    render_f32(&mut instance, 64, &[], None, 0.0);
+    assert_eq!(read_capture().time_flags & CHANGED, 0, "and only an edge");
 }

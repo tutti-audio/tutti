@@ -1360,3 +1360,26 @@ fn a_mono_wave_goes_to_the_centre_of_a_node_that_has_one() {
         }
     }
 }
+
+/// An `f64` source reads an `f64` wave frame by frame in its own format: each
+/// channel at its own position (left and right differ), a position between
+/// two frames of a line is the line (the cubic along a ramp), and the gain
+/// scales both.
+#[test]
+fn an_f64_source_reads_each_channel_in_f64() {
+    let mut wave = Wave::<f64>::new(2, SampleRate::SR_48K);
+    for i in 0..8 {
+        let frame = [i as f64, -2.0 * i as f64];
+        wave.append(tutti_buffers::Interleaved::new(&frame, wave.layout()).unwrap())
+            .unwrap();
+    }
+    let source = MemorySource::<f64>::new(Arc::new(wave)).expect("a stereo wave places");
+    let mut out = [0.0f64; 2];
+    source.sample_raw_into(SamplePosition(3.0), &mut out);
+    assert_eq!(out, [3.0, -6.0]);
+    source.sample_raw_into(SamplePosition(3.5), &mut out);
+    assert_eq!(out, [3.5, -7.0]);
+    source.set_gain(Amplitude(0.5));
+    source.sample_into(SamplePosition(3.0), &mut out);
+    assert_eq!(out, [1.5, -3.0]);
+}

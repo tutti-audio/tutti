@@ -118,11 +118,7 @@ fn an_independent_reader_recovers_the_samples_at_every_width() {
                     let got: Vec<i32> = reader.samples::<i32>().map(|s| s.unwrap()).collect();
                     let want: Vec<i32> = samples
                         .iter()
-                        .map(|&s| match pcm.quantize(s) {
-                            Sample::I16(v) => i32::from(v),
-                            Sample::I24(v) => v,
-                            Sample::F32(_) => unreachable!(),
-                        })
+                        .map(|&s| pcm.int_depth().expect("an integer width").quantize(s))
                         .collect();
                     assert_eq!(got, want, "{channels} {pcm:?}");
                 }

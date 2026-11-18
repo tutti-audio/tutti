@@ -5,17 +5,17 @@
 //! header is patched. It also owns the 80-bit IEEE 754 extended encoding of the
 //! sample-rate field, which is the part worth not writing by hand.
 //!
-//! `SampleFormat::{I16, I24, F32}` line up exactly with the three [`Pcm`]
-//! widths, so there is no conversion policy here beyond the PCM scaling every
-//! format shares.
+//! `SampleFormat::{I16, I24, F32, F64}` line up exactly with the four [`Pcm`]
+//! widths, so there is no conversion policy here beyond the rule in
+//! [`Sample`] every format shares.
 
 use crate::error::{Codec, Error, Result, SpecError};
-use crate::pcm::{Pcm, f32_to_i16, f32_to_i24};
+use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
 use aifc::{AifcWriteInfo, AifcWriter, FileFormat, SampleFormat};
 use std::io::{Seek, Write};
-use tutti_buffers::Interleaved;
+use tutti_buffers::{I24, Interleaved, Sample};
 
 /// Writes an AIFF (or AIFF-C) file through the [`FormatWriter`] contract.
 pub struct AiffWriter<W: Write + Seek> {
@@ -23,6 +23,8 @@ pub struct AiffWriter<W: Write + Seek> {
     pcm: Pcm,
     ints: Vec<i32>,
     shorts: Vec<i16>,
+    floats: Vec<f32>,
+    doubles: Vec<f64>,
 }
 
 impl<W: Write + Seek> std::fmt::Debug for AiffWriter<W> {
@@ -45,7 +47,7 @@ impl<W: Write + Seek> AiffWriter<W> {
             // so the container follows the width rather than the other way
             // round.
             file_format: match pcm {
-                Pcm::Float32 => FileFormat::Aifc,
+                Pcm::Float32 | Pcm::Float64 => FileFormat::Aifc,
                 _ => FileFormat::Aiff,
             },
             channels: i16::try_from(channels).map_err(|_| SpecError::TooManyChannels {
@@ -59,6 +61,7 @@ impl<W: Write + Seek> AiffWriter<W> {
                 Pcm::Int16 => SampleFormat::I16,
                 Pcm::Int24 => SampleFormat::I24,
                 Pcm::Float32 => SampleFormat::F32,
+                Pcm::Float64 => SampleFormat::F64,
             },
         };
         let writer = AifcWriter::new(sink, &info)
@@ -68,6 +71,8 @@ impl<W: Write + Seek> AiffWriter<W> {
             pcm,
             ints: Vec::new(),
             shorts: Vec::new(),
+            floats: Vec::new(),
+            doubles: Vec::new(),
         })
     }
 }
@@ -75,22 +80,35 @@ impl<W: Write + Seek> AiffWriter<W> {
 impl<W: Write + Seek> FormatWriter for AiffWriter<W> {
     type Sink = W;
 
-    fn write(&mut self, block: Interleaved<'_>) -> Result<()> {
+    fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         // `aifc` takes an interleaved sample run, which is the shape the block
         // already has.
         let buf = block.samples();
         match self.pcm {
             Pcm::Int16 => {
                 self.shorts.clear();
-                self.shorts.extend(buf.iter().map(|&s| f32_to_i16(s)));
+                self.shorts
+                    .extend(buf.iter().map(|&s| s.convert_to::<i16>()));
                 self.writer.write_samples_i16(&self.shorts)
             }
             Pcm::Int24 => {
                 self.ints.clear();
-                self.ints.extend(buf.iter().map(|&s| f32_to_i24(s)));
+                self.ints
+                    .extend(buf.iter().map(|&s| s.convert_to::<I24>().get()));
                 self.writer.write_samples_i24(&self.ints)
             }
-            Pcm::Float32 => self.writer.write_samples_f32(buf),
+            Pcm::Float32 => {
+                self.floats.clear();
+                self.floats
+                    .extend(buf.iter().map(|&s| s.convert_to::<f32>()));
+                self.writer.write_samples_f32(&self.floats)
+            }
+            Pcm::Float64 => {
+                self.doubles.clear();
+                self.doubles
+                    .extend(buf.iter().map(|&s| s.convert_to::<f64>()));
+                self.writer.write_samples_f64(&self.doubles)
+            }
         }
         .map_err(|e| Error::encoding(Codec::Aiff, format!("write failed: {e:?}")))
     }
