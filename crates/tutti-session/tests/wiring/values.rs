@@ -466,6 +466,20 @@ fn a_modify_may_call_another_session() {
     assert_eq!(seen.take().unwrap().unwrap(), Hz(200.0));
 }
 
+/// **An `f32` control reads back the bits it was given**, subnormals and the last mantissa
+/// bit included: a kernel node's controls are `f32` cells, and a quantity that is an `f32`
+/// figure passes through one whole.
+#[test]
+fn an_f32_control_round_trips_an_f32_figure_bit_for_bit() {
+    let mut s = detached();
+    let lp = filter(&mut s, 1_000.0);
+    for bits in [0x3f80_0001u32, 0x0000_0001, 0x7f7f_ffff, 0x1234_5678] {
+        let v = f64::from(f32::from_bits(bits));
+        s.set(lp.q().to(Q(v))).unwrap();
+        assert_eq!(s.get(lp.q()).unwrap().0.to_bits(), v.to_bits());
+    }
+}
+
 /// **An `f64` param reads back the bits it was given**, the last mantissa bit included.
 #[test]
 fn an_f64_param_round_trips_bit_for_bit() {
