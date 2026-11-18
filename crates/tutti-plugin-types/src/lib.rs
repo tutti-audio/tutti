@@ -299,9 +299,8 @@ pub use harmony::{
     NoteExpressionTextChanges, NoteExpressionTextValue, ScaleChanges, ScaleValue,
 };
 pub use lifecycle::{
-    EFFECT_CAPACITY, EVENT_INPUT_DENSITY, Effect, Event, FDS_PER_TICK, HostOp, MAX_STEP_EFFECTS,
-    Notice, Prepare, Reply, Request, RescanScope, RestartRules, Stage, State, TIMERS_PER_TICK,
-    TimerId, event_input_bound, standing, step,
+    EFFECT_CAPACITY, Effect, Event, FDS_PER_TICK, HostOp, MAX_STEP_EFFECTS, Notice, Prepare, Reply,
+    Request, RescanScope, RestartRules, Stage, State, TIMERS_PER_TICK, TimerId, standing, step,
 };
 pub use load_stage::LoadStage;
 pub use main_thread::{MainThreadMarker, MainWork, MainWorkHandle};

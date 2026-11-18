@@ -21,15 +21,12 @@
 //! reply to that effect continues it. A plan parked behind a recall that found
 //! the Processor lent runs once [`Event::Returned`] arrives.
 
-use std::num::NonZeroU32;
-
 use arrayvec::ArrayVec;
-use tutti_graph::EventDensity;
 use tutti_plugin_ipc_ffi::FdId;
 
 use crate::{
-    Layout, MIDI_STACK_BOUND, MaxBlock, PluginError, PluginTail, RenderMode, SampleFormat,
-    SampleRate, Samples, TransportRequest,
+    Layout, MaxBlock, PluginError, PluginTail, RenderMode, SampleFormat, SampleRate, Samples,
+    TransportRequest,
 };
 
 /// How many effects one [`step`] can emit.
@@ -64,19 +61,6 @@ const _: () = assert!(MAX_STEP_EFFECTS <= EFFECT_CAPACITY);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TimerId(pub u32);
 
-/// The most events per frame a plugin's event input is sized for: one, as the
-/// clip node writes at the most (`CLIP_EVENT_DENSITY`).
-pub const EVENT_INPUT_DENSITY: EventDensity = EventDensity::per_frame(1);
-
-/// The events per block a plugin node declares for its event input at
-/// `prepare`'s block: [`EVENT_INPUT_DENSITY`] over the block, at most
-/// [`MIDI_STACK_BOUND`], the most the node's own MIDI intake takes. A
-/// Processor's own room can hold it lower (`Processor::event_input`).
-#[must_use]
-pub fn event_input_bound(prepare: &tutti_graph::Prepare) -> NonZeroU32 {
-    EVENT_INPUT_DENSITY.capacity(prepare).min(MIDI_STACK_BOUND)
-}
-
 /// What `activate` needs, and what a change of any field costs: a deactivate
 /// and an activate.
 ///
@@ -99,7 +83,6 @@ pub struct Prepare {
     max_block: MaxBlock,
     format: SampleFormat,
     mode: RenderMode,
-    event_input: NonZeroU32,
 }
 
 impl Prepare {
@@ -112,7 +95,6 @@ impl Prepare {
             max_block,
             format: SampleFormat::default(),
             mode: RenderMode::default(),
-            event_input: EVENT_INPUT_DENSITY.capacity(&tutti_graph::Prepare::new(rate, max_block)),
         }
     }
 
@@ -147,15 +129,6 @@ impl Prepare {
     #[must_use]
     pub const fn max_block(&self) -> MaxBlock {
         self.max_block
-    }
-
-    /// The events per block the node's event input is declared for at this
-    /// block ([`event_input_bound`]): what a host sizes its input event
-    /// storage from. The Processor's own room is what it reports
-    /// (`Processor::event_input`).
-    #[must_use]
-    pub const fn event_input(&self) -> NonZeroU32 {
-        self.event_input
     }
 
     /// The sample width audio is exchanged in.

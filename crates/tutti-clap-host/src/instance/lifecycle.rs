@@ -17,12 +17,12 @@ use super::thread_pool::PoolCell;
 use crate::error::{ClapError, LoadStage, Result};
 use crate::events::{EDIT_CAPACITY, InputRooms, OutputRooms};
 use crate::types::{ParameterChanges, ParameterQueue, PluginInfo};
-use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_clap_ffi::ActivateError;
 use tutti_plugin_types::{
-    Control, PluginError, Prepare, Refused, Request, SampleFormat, negotiate, taken,
+    Control, MIDI_STACK_BOUND, PluginError, Prepare, Refused, Request, SampleFormat, negotiate,
+    taken,
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
@@ -156,7 +156,7 @@ impl ClapLoaded {
         let max_frames = max_block.get();
         let mut scratch = AudioScratch::new(
             prepare.format(),
-            input_rooms(&table, max_frames, prepare.event_input()),
+            input_rooms(&table, max_frames),
             output_rooms(&table, max_frames),
         );
         let port_channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
@@ -289,8 +289,8 @@ impl ClapLoaded {
 }
 
 /// The rooms of the input event list for a block of `max_frames`: the MIDI
-/// the node is declared to send ([`InputRooms::for_port`] of `event_input`,
-/// the activation's [`Prepare::event_input`]), the parameter points the
+/// the node is declared to send ([`InputRooms::for_port`] of
+/// [`MIDI_STACK_BOUND`], the node's own intake), the parameter points the
 /// host's chunk can arrive with (`ParameterChanges::point_budget` for the
 /// plugin's parameters with a room of `ParameterQueue::chunk_room`: the
 /// chunk's pooled points, and one more in every queue for the value a skipped
@@ -301,10 +301,10 @@ impl ClapLoaded {
 /// MIDI and the parameter points do not count. So a chunk the host's pool
 /// bounded reaches the plugin whole; past it (a set nothing bounded) the
 /// list's own overflow policy applies (`InputEventList::add_param_changes`).
-fn input_rooms(table: &RangeTable, max_frames: usize, event_input: NonZeroU32) -> InputRooms {
+fn input_rooms(table: &RangeTable, max_frames: usize) -> InputRooms {
     let param_points =
         ParameterChanges::point_budget(table.ranges.len(), ParameterQueue::chunk_room(max_frames));
-    InputRooms::for_port(event_input)
+    InputRooms::for_port(MIDI_STACK_BOUND)
         .param_points(param_points)
         .sources(
             EDIT_CAPACITY,
@@ -369,9 +369,6 @@ mod tests {
     use crate::ParamBounds;
     use tutti_midi_protocol::Narrower;
 
-    /// The declared event-input bound the tests size rooms from.
-    const EVENT_INPUT: NonZeroU32 = NonZeroU32::new(512).unwrap();
-
     /// **The input list built for a declared bound reports that bound as what
     /// it holds**: the Processor's `event_input`, which the node declares, is
     /// the list's MIDI room over `Narrower::MAX_MESSAGES`, at any block.
@@ -382,9 +379,13 @@ mod tests {
             claims: true,
         };
         for frames in [64usize, 4096] {
-            let rooms = input_rooms(&table, frames, EVENT_INPUT);
+            let rooms = input_rooms(&table, frames);
             let list = crate::InputEventList::new(rooms);
-            assert_eq!(list.event_input(), Some(EVENT_INPUT), "{frames} frames");
+            assert_eq!(
+                list.event_input(),
+                Some(MIDI_STACK_BOUND),
+                "{frames} frames"
+            );
         }
     }
 
@@ -408,7 +409,7 @@ mod tests {
                 };
                 let mut scratch = AudioScratch::new(
                     SampleFormat::Float32,
-                    input_rooms(&table, frames, EVENT_INPUT),
+                    input_rooms(&table, frames),
                     output_rooms(&table, frames),
                 );
                 reserve_output_queues(&mut scratch, &table, frames);
@@ -427,7 +428,7 @@ mod tests {
                 );
                 assert!(
                     scratch.input_events.events.capacity()
-                        >= EVENT_INPUT.get() as usize * Narrower::MAX_MESSAGES
+                        >= MIDI_STACK_BOUND.get() as usize * Narrower::MAX_MESSAGES
                             + input
                             + EDIT_CAPACITY
                 );
@@ -461,7 +462,7 @@ mod tests {
         };
         let mut scratch = AudioScratch::new(
             SampleFormat::Float32,
-            input_rooms(&table, FRAMES, EVENT_INPUT),
+            input_rooms(&table, FRAMES),
             output_rooms(&table, FRAMES),
         );
         let room = ParameterQueue::chunk_room(FRAMES);

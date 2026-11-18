@@ -146,12 +146,11 @@ pub struct InProcClient<F: Loaded> {
     /// announced since.
     prepared_mode: tutti_graph::RenderMode,
     /// The events per block the node declares it accepts on its event input
-    /// (`Shape::event_input_capacity`): [`event_input_bound`](tutti_plugin_types::event_input_bound) for the graph's
-    /// block, held to `event_room`.
+    /// (`Shape::event_input_capacity`): `MIDI_STACK_BOUND`, held to `event_room`.
     pub(super) event_input: std::num::NonZeroU32,
     /// The room of the last Processor this node saw (`Processor::event_input`),
     /// kept while the Processor is away (recalled for a restart or lent to the
-    /// realtime end), so the declared bound never rises to the density's alone.
+    /// realtime end), so the declared bound never rises to the intake's alone.
     pub(super) event_room: std::num::NonZeroU32,
     /// The parameter events on the event input, as changes only: a slot per
     /// parameter the plugin declared at load and no spares (`closed`: the
@@ -550,19 +549,16 @@ impl<F: Loaded> InProcClient<F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let (lost, event_input) = {
-            let instance = inner.lock();
-            (instance.lost_flag(), instance.event_input())
-        };
+        let lost = inner.lock().lost_flag();
         // The Processor's room: the one on offer, else the predecessor's, else
-        // the activation's own bound (a node built before its Processor
-        // reached it, with no predecessor).
+        // the node's own intake (a node built before its Processor reached it,
+        // with no predecessor).
         let event_room = rt
             .poll(Processor::stop)
             .map(|processor| processor.event_input())
             .or(event_room)
-            .unwrap_or(event_input);
-        let event_input = event_input.min(event_room);
+            .unwrap_or(tutti_plugin_types::MIDI_STACK_BOUND);
+        let event_input = event_room;
         let failed = tally();
         Self {
             inner,
@@ -724,15 +720,15 @@ impl<F: Loaded> InProcClient<F> {
         self.rt.held().is_none()
     }
 
-    /// The events per block the node declares for `p`'s block:
-    /// [`event_input_bound`](tutti_plugin_types::event_input_bound) of it, at
-    /// most the room of the Processor's input storage. The room is read from
-    /// the Processor when it is held here and kept across a recall.
-    pub(super) fn bound_for(&mut self, p: &tutti_graph::Prepare) -> std::num::NonZeroU32 {
+    /// The events per block the node declares: the node's own intake
+    /// (`MIDI_STACK_BOUND`), at most the room of the Processor's input storage.
+    /// The room is read from the Processor when it is held here and kept across
+    /// a recall.
+    pub(super) fn event_bound(&mut self) -> std::num::NonZeroU32 {
         if let Some(processor) = self.rt.held() {
             self.event_room = processor.event_input();
         }
-        tutti_plugin_types::event_input_bound(p).min(self.event_room)
+        tutti_plugin_types::MIDI_STACK_BOUND.min(self.event_room)
     }
 
     /// Tells the plugin the render mode `p` carries when it is not the mode

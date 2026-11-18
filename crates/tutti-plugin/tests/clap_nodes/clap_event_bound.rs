@@ -1,7 +1,6 @@
 //! **A CLAP node declares the event-input bound its list holds**, in process:
-//! the density's figure for the graph's block, at most the node's own MIDI
-//! intake (256 events) and the activation's input list (built for the same
-//! bound), so what the graph sends is what the list takes.
+//! the node's own MIDI intake (256 events), which is what the activation's
+//! input list is built for, at every block the graph is prepared for.
 
 #![cfg(feature = "clap")]
 

@@ -367,10 +367,9 @@ mod tests {
         (fake, rebinder, node, inner)
     }
 
-    /// **The node declares at most what its own MIDI intake takes**
-    /// (`MIDI_STACK_CAPACITY`, 256 events a block): the density's floor at a
-    /// 64-frame block, its 2048 at 2048 frames and its cap of 8192 at 1 << 20
-    /// all declare 256.
+    /// **The node declares what its own MIDI intake takes**
+    /// (`MIDI_STACK_CAPACITY`, 256 events a block), at every block: 64
+    /// frames, 2048 and 1 << 20 all declare 256.
     #[test]
     fn the_node_declares_no_more_than_its_midi_intake_takes() {
         let (_fake, _rebinder, node, _inner) = rig();
@@ -384,8 +383,8 @@ mod tests {
 
     /// **The node never declares more than its Processor's input storage
     /// takes**, whatever the graph's block: a Processor holding 100 events a
-    /// block bounds the node at 100 at blocks whose density gives 256 and
-    /// 2048; one holding more than the intake leaves the intake's 256.
+    /// block bounds the node at 100 at 64 and 2048 frames; one holding more
+    /// than the intake leaves the intake's 256.
     #[test]
     fn the_node_declares_no_more_than_its_processor_takes() {
         let (fake, _rebinder, node, _inner) = rig();
@@ -401,9 +400,8 @@ mod tests {
     }
 
     /// **A node with no Processor to read declares the room its predecessor
-    /// last saw**, not the density's alone: a successor built (a restart's) with
-    /// its Processor not yet lent is prepared at 2048 frames and declares 100
-    /// where the plain density would give 256.
+    /// last saw**, not the intake's alone: a successor built (a restart's) with
+    /// its Processor not yet lent declares 100 where the intake gives 256.
     #[test]
     fn a_node_without_its_processor_declares_the_last_room_it_saw() {
         let (fake, _rebinder, node, _inner) = rig();

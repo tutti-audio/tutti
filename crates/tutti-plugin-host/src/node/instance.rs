@@ -182,12 +182,6 @@ impl<F: Loaded> Instance<F> {
         (this, rt)
     }
 
-    /// The events per block the activation's input event storage holds
-    /// ([`Prepare::event_input`]).
-    pub(super) fn event_input(&self) -> std::num::NonZeroU32 {
-        self.prepare.event_input()
-    }
-
     /// Steps `event` and keeps what it told; the reason of a refused
     /// activation, if it was one.
     fn drive(&mut self, main: MainThreadMarker, event: Event) -> Option<String> {

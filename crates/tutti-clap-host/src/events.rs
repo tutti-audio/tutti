@@ -877,8 +877,8 @@ impl InputRooms {
     /// block the graph sends is refused.
     ///
     /// `event_input` is the bound the node is declared for
-    /// (`Shape::event_input_capacity`, `Prepare::event_input`, at most the
-    /// node's own intake of 256 events): the graph never sends more, a
+    /// (`Shape::event_input_capacity`, at most the node's own intake of 256
+    /// events, `MIDI_STACK_BOUND`): the graph never sends more, a
     /// note-off included, so no room is held past it. The cost at 256 is 1280
     /// MIDI events of 112 bytes (`size_of::<ClapEvent>()`), 143 360 bytes,
     /// and the sort's scratch for them (8 bytes an event) 10 240 more: about
