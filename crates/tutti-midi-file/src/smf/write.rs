@@ -12,6 +12,7 @@ use tutti_ump::{Message, Midi1Bytes};
 
 use super::SmfDivision;
 use crate::TracksError;
+use crate::file::with_extra;
 use crate::file::{FileEvent, Meta, SmfFormat, Tick, Track};
 
 /// The widest value a variable-length quantity holds: 28 bits.
@@ -68,7 +69,7 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
         Meta::Tempo {
             micros_per_quarter,
             extra,
-        } => (0x51, [&micros_per_quarter.to_wire()[..], extra].concat()),
+        } => (0x51, with_extra(&micros_per_quarter.to_wire(), extra)),
         Meta::TimeSignature {
             numerator,
             denominator_power,
@@ -77,16 +78,15 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
             extra,
         } => (
             0x58,
-            [
+            with_extra(
                 &[
                     *numerator,
                     *denominator_power,
                     *clocks_per_click,
                     *thirty_seconds_per_quarter,
-                ][..],
+                ],
                 extra,
-            ]
-            .concat(),
+            ),
         ),
         Meta::KeySignature {
             sharps,
@@ -94,22 +94,15 @@ fn meta_parts(meta: &Meta) -> (u8, Vec<u8>) {
             extra,
         } => (
             0x59,
-            [&[sharps.cast_unsigned(), u8::from(*minor)][..], extra].concat(),
+            with_extra(&[sharps.cast_unsigned(), u8::from(*minor)], extra),
         ),
-        Meta::SequenceNumber { number, extra } => {
-            (0x00, [&number.to_be_bytes()[..], extra].concat())
-        }
-        Meta::ChannelPrefix { channel, extra } => (0x20, [&[channel.get()][..], extra].concat()),
-        Meta::SmpteOffset { offset, extra } => (0x54, [&offset.to_wire()[..], extra].concat()),
+        Meta::SequenceNumber { number, extra } => (0x00, with_extra(&number.to_be_bytes(), extra)),
+        Meta::ChannelPrefix { channel, extra } => (0x20, with_extra(&[channel.get()], extra)),
+        Meta::SmpteOffset { offset, extra } => (0x54, with_extra(&offset.to_wire(), extra)),
         Meta::SequencerSpecific { manufacturer, data } => {
-            let id = manufacturer.get();
-            let [_, hi, lo] = manufacturer.sysex_bytes().map(tutti_ump::U7::get);
-            let lead: &[u8] = if manufacturer.is_extended() {
-                &[0, hi, lo]
-            } else {
-                &[id as u8]
-            };
-            (0x7F, [lead, data].concat())
+            let id = manufacturer.sysex_bytes().map(tutti_ump::U7::get);
+            let id_len = if manufacturer.is_extended() { 3 } else { 1 };
+            (0x7F, with_extra(&id[..id_len], data))
         }
         Meta::Other { kind, data } => (kind.get(), data.to_vec()),
         Meta::Malformed(malformed) => (malformed.kind(), malformed.data().to_vec()),

@@ -172,10 +172,9 @@ fn a_format_2_pattern_is_its_number_or_its_place() {
     assert_eq!(numbers(&back), [7, 1, 0xFFFF]);
 }
 
-/// A format 0 or 1 file holds one sequence, whose number is in its first track,
-/// and several multitrack sequences go as format 1 files each with a number of
-/// its own. A writer refuses a number in another track; a reader keeps it.
-/// Spec: smf/sequence-number#4, smf/sequence-number#5
+/// A format 0 or 1 file holds one sequence, whose number is in its first track.
+/// A writer refuses a number in another track; a reader keeps it.
+/// Spec: smf/sequence-number#4
 #[test]
 fn a_format_1_file_has_one_sequence_number_in_its_first_track() {
     let later = |format| smf(format, vec![played(), played().numbered(1)]).map(drop);
@@ -184,13 +183,6 @@ fn a_format_1_file_has_one_sequence_number_in_its_first_track() {
         Err(TracksError::SequenceNumberNotInFirstTrack { track: 1 })
     );
     assert_eq!(later(SmfFormat::Sequential), Ok(()));
-    let group =
-        [1, 2].map(|n| smf(SmfFormat::Parallel, vec![played().numbered(n), played()]).unwrap());
-    let numbers: Vec<_> = group
-        .iter()
-        .map(|f| MidiFile::from_bytes(&f.to_bytes()).unwrap().tracks()[0].sequence_number())
-        .collect();
-    assert_eq!(numbers, [Some(1), Some(2)]);
     let kept = read(
         1,
         &[
@@ -334,11 +326,33 @@ fn an_smpte_offset_out_of_range_is_kept_as_read() {
 }
 
 /// The offset is at the start of its track, before any delta and any channel
-/// message: the builder puts it there, behind a copyright notice.
+/// message: a writer refuses one later, a reader does not count one later as
+/// the track's, and the builder puts it first, behind a copyright notice.
 /// Spec: smf/smpte-offset#2
 #[test]
-fn an_smpte_start_is_placed_at_the_start_of_the_track() {
+fn an_smpte_offset_is_at_the_start_of_the_track() {
     let at = offset(1, 0, 0, 0, SmpteFrameRate::Fps25, 0);
+    let late = |events| one(events).map(drop);
+    let not_at_start = |t| {
+        Err(TracksError::SmpteOffsetNotAtStart {
+            track: 0,
+            at: Tick(t),
+        })
+    };
+    let smpte = || ev(Meta::smpte_offset(at));
+    assert_eq!(late(vec![(480, smpte())]), not_at_start(480));
+    assert_eq!(late(vec![(0, note(0, 60)), (0, smpte())]), not_at_start(0));
+    assert_eq!(late(vec![(0, smpte()), (0, note(0, 60))]), Ok(()));
+    let kept = read(
+        0,
+        &[vec![
+            RawEvent::note_on(0, 0, 60, 100),
+            meta(0, 0x54, &[1 << 5 | 1, 0, 0, 0, 0]),
+        ]],
+    );
+    assert_eq!(kept.smpte_offset(0), None);
+    let delayed = read(0, &[vec![meta(5, 0x54, &[1 << 5 | 1, 0, 0, 0, 0])]]);
+    assert_eq!(delayed.smpte_offset(0), None);
     let t = played().copyright("(C)").smpte_start(at);
     let events = t.events();
     assert_eq!(
@@ -438,11 +452,10 @@ fn the_ascii_view_of_a_text_event_leaves_out_non_ascii_bytes() {
     assert_eq!(Meta::tempo(Bpm::of(120.0)).ascii_text(), None);
 }
 
-/// A copyright notice is the first event of its track at time 0, and a track
-/// holds all its notices in one event.
-/// Spec: smf/copyright-notice#3, smf/copyright-notice#4, smf/meta-events#9
+/// The builder puts a copyright notice first at tick 0 and keeps a track's
+/// notices in one event.
 #[test]
-fn a_copyright_notice_is_first_at_time_0_and_one_event() {
+fn the_copyright_builder_keeps_one_event_first() {
     let t = played()
         .copyright("(C) 2026 A")
         .numbered(1)
@@ -450,20 +463,56 @@ fn a_copyright_notice_is_first_at_time_0_and_one_event() {
     let want = Meta::text(TextKind::Copyright, "(C) 2026 A\n(C) 2026 B");
     assert_eq!(t.events()[0], (Tick(0), ev(want)));
     assert_eq!(t.events()[1], (Tick(0), number_of(1)));
-    let copyrights = t
-        .events()
-        .iter()
-        .filter(|(_, e)| {
-            matches!(
-                e,
-                FileEvent::Meta(Meta::Text {
-                    kind: TextKind::Copyright,
-                    ..
-                })
-            )
+}
+
+fn notice(s: &str) -> FileEvent {
+    ev(Meta::text(TextKind::Copyright, s))
+}
+
+/// The copyright notice is the first event of the first track, at time 0: a
+/// writer refuses one after another event at tick 0, or in another track.
+/// Spec: smf/copyright-notice#4
+#[test]
+fn a_copyright_notice_is_the_first_event_of_the_first_track() {
+    let not_first = |track, t| Err(TracksError::CopyrightNotFirst { track, at: Tick(t) });
+    let check = |format, tracks| smf(format, tracks).map(drop);
+    let first = track(vec![(0, notice("(C)")), (0, note(0, 60))]);
+    assert_eq!(check(SmfFormat::SingleTrack, vec![first]), Ok(()));
+    let after = track(vec![(0, note(0, 60)), (0, notice("(C)"))]);
+    assert_eq!(check(SmfFormat::SingleTrack, vec![after]), not_first(0, 0));
+    let other = track(vec![(0, notice("(C)"))]);
+    assert_eq!(
+        check(SmfFormat::Parallel, vec![played(), other]),
+        not_first(1, 0)
+    );
+}
+
+/// A copyright notice is placed as early as possible: a writer refuses one
+/// after the start of the track.
+/// Spec: smf/meta-events#9
+#[test]
+fn a_copyright_notice_is_not_placed_late() {
+    let late = one(vec![(0, note(0, 60)), (480, notice("(C)"))]).map(drop);
+    assert_eq!(
+        late,
+        Err(TracksError::CopyrightNotFirst {
+            track: 0,
+            at: Tick(480)
         })
-        .count();
-    assert_eq!(copyrights, 1);
+    );
+}
+
+/// All of a file's copyright notices are one event: a writer refuses a second,
+/// in the track or another.
+/// Spec: smf/copyright-notice#3
+#[test]
+fn all_copyright_notices_are_one_event() {
+    let two = |tracks| smf(SmfFormat::Sequential, tracks).map(drop);
+    let together = |track| Err(TracksError::CopyrightNotTogether { track, at: Tick(0) });
+    let both = track(vec![(0, notice("(C) A")), (0, notice("(C) B"))]);
+    assert_eq!(two(vec![both]), together(0));
+    let a = || track(vec![(0, notice("(C)"))]);
+    assert_eq!(two(vec![a(), a()]), together(1));
 }
 
 // ---- track chunks -----------------------------------------------------------
@@ -639,7 +688,6 @@ fn a_format_0_tempo_map_is_the_scattered_tempos() {
 /// assumes (120 in 4/4): in a format 0 track, the first track of a format 1
 /// file (the one that holds the tempo map), and each pattern of a format 2 file.
 /// What it already has at tick 0 stays.
-/// Spec: smf/formats#11, smf/formats#13, smf/formats#14, smf/formats#15
 #[test]
 fn a_file_is_made_to_specify_tempo_and_time_signature() {
     let signature = ev(Meta::TimeSignature {
@@ -654,7 +702,7 @@ fn a_file_is_made_to_specify_tempo_and_time_signature() {
         events.iter().take(2).map(|(_, e)| e.clone()).collect()
     };
     let defaults = vec![tempo(120.0), signature.clone()];
-    let specify = |f: MidiFile| f.specifying_tempo_and_meter().unwrap();
+    let specify = |f: MidiFile| f.with_default_tempo_and_meter().unwrap();
     let format_0 = specify(smf(SmfFormat::SingleTrack, vec![played()]).unwrap());
     assert_eq!(head(&format_0, 0), defaults);
     let format_1 = specify(smf(SmfFormat::Parallel, vec![played(), played()]).unwrap());

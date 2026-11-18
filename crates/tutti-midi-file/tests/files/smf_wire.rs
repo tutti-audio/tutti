@@ -2,7 +2,7 @@
 //! and the writer's byte output, against bytes built from the SMF 1.0 spec
 //! (`support`, which shares no code with the crate).
 
-use crate::common::{metrical, note, sequences, track};
+use crate::common::{metrical, note, track};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
@@ -489,14 +489,14 @@ fn a_written_file_reads_back_equal() {
     ];
     let track = track(events);
     let file = MidiFile::smf(
-        SmfFormat::Sequential,
+        SmfFormat::Parallel,
         SMF_DIVISION,
-        vec![track.clone(), track],
+        vec![track, crate::common::track(vec![(0, note(1, 60))])],
     )
     .unwrap();
     let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
     assert_eq!(back.tracks(), file.tracks());
-    assert_eq!(sequences(&back).ticks_per_quarter(), DIVISION);
+    assert_eq!(metrical(&back).ticks_per_quarter(), DIVISION);
 }
 
 /// SMF 1.0 section 3.3: Set Tempo is `FF 51 03`, Time Signature `FF 58 04`, Key

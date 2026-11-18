@@ -150,3 +150,15 @@ impl MalformedMeta {
         &self.data
     }
 }
+
+/// The first `N` bytes of a meta event's data and the rest, which a program
+/// ignores (SMF 1.0 section 3.3): `None` when the data is shorter than `N`.
+pub(crate) fn split_extra<const N: usize>(data: &[u8]) -> Option<([u8; N], Box<[u8]>)> {
+    let (fixed, extra) = data.split_first_chunk::<N>()?;
+    Some((*fixed, extra.into()))
+}
+
+/// The data of a meta event: its `fixed` bytes, then the `extra` it was read with.
+pub(crate) fn with_extra(fixed: &[u8], extra: &[u8]) -> Vec<u8> {
+    [fixed, extra].concat()
+}

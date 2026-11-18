@@ -530,14 +530,14 @@ fn what_has_no_successor_is_reported_with_its_tick() {
     let events = vec![
         (0, meta(Meta::sequence_number(1))),
         (0, meta(Meta::channel_prefix(MidiChannel::of(3)))),
+        // SMPTE offset: Appendix B names a successor M2-104 lacks
+        (0, meta(Meta::smpte_offset(offset))),
         (5, other(0x21)), // port prefix
         (7, text(TextKind::Marker, "A")),
         (7, text(TextKind::CuePoint, "door")),
         (8, text(TextKind::InstrumentName, "piano")),
         (8, text(TextKind::ProgramName, "p")),
         (9, text(TextKind::DeviceName, "d")),
-        // SMPTE offset: Appendix B names a successor M2-104 lacks
-        (10, meta(Meta::smpte_offset(offset))),
         (
             11,
             meta(Meta::SequencerSpecific {
@@ -580,13 +580,13 @@ fn what_has_no_successor_is_reported_with_its_tick() {
         [
             (0, NoSuccessor),
             (0, ReplacedByAddressing),
+            (0, SuccessorUndefined),
             (5, ReplacedByAddressing),
             (7, NoSuccessor),
             (7, NoSuccessor),
             (8, NoSuccessor),
             (8, NoSuccessor),
             (9, NoSuccessor),
-            (10, SuccessorUndefined),
             (11, NoSuccessor),
             (12, NoSuccessor),
             (13, WholeNoteDenominator),
@@ -660,8 +660,8 @@ fn text_that_flex_cannot_carry_is_reported() {
         bytes: b"a\0b".to_vec().into(),
     });
     let smf = format0(vec![
-        (0, latin1),
         (0, nul),
+        (0, latin1),
         (0, text(TextKind::Text, "remark")),
     ]);
     let converted = metrical(&smf).to_clip().unwrap();
@@ -669,8 +669,8 @@ fn text_that_flex_cannot_carry_is_reported() {
     assert_eq!(
         reasons,
         [
+            DropReason::Text(TextError::Nul.into()),
             DropReason::TextNotUtf8,
-            DropReason::Text(TextError::Nul.into())
         ]
     );
     assert_eq!(
@@ -689,8 +689,8 @@ fn text_that_flex_cannot_carry_is_reported() {
 #[test]
 fn text_is_composed_to_nfc_without_a_byte_order_mark() {
     let smf = format0(vec![
-        (0, text(TextKind::Lyric, "cafe\u{301}")),
         (0, text(TextKind::Copyright, "\u{FEFF}me")),
+        (0, text(TextKind::Lyric, "cafe\u{301}")),
     ]);
     let converted = metrical(&smf).to_clip().unwrap();
     assert!(converted.dropped.is_empty());
@@ -698,14 +698,14 @@ fn text_is_composed_to_nfc_without_a_byte_order_mark() {
         flex_texts(&converted.clip),
         [
             (
-                FlexTextKind::Lyrics,
-                Form::Complete,
-                b"caf\xC3\xA9\0\0\0\0\0\0\0".to_vec()
-            ),
-            (
                 FlexTextKind::Copyright,
                 Form::Complete,
                 b"me\0\0\0\0\0\0\0\0\0\0".to_vec()
+            ),
+            (
+                FlexTextKind::Lyrics,
+                Form::Complete,
+                b"caf\xC3\xA9\0\0\0\0\0\0\0".to_vec()
             ),
         ]
     );
@@ -758,14 +758,14 @@ fn the_clip_round_trips_through_its_bytes() {
             track(vec![
                 (
                     0,
+                    text(TextKind::Copyright, "a rather long copyright notice"),
+                ),
+                (
+                    0,
                     meta(Meta::Tempo {
                         micros_per_quarter: MicrosPerQuarter::of(500_000),
                         extra: Box::default(),
                     }),
-                ),
-                (
-                    0,
-                    text(TextKind::Copyright, "a rather long copyright notice"),
                 ),
                 (0, note(0, 60)),
                 (480, note(0, 62)),
@@ -1170,11 +1170,11 @@ fn a_karaoke_hyphen_ends_no_syllable_in_the_clip() {
 #[test]
 fn a_lyric_that_cannot_be_a_message_is_reported() {
     let smf = format0(vec![
-        (0, text(TextKind::Lyric, "-")),
-        (1, text(TextKind::Lyric, "--")),
-        (2, text(TextKind::Lyric, &"x".repeat(383))),
-        (3, text(TextKind::Lyric, "a\0b")),
-        (4, text(TextKind::Copyright, &"x".repeat(385))),
+        (0, text(TextKind::Copyright, &"x".repeat(385))),
+        (1, text(TextKind::Lyric, "-")),
+        (2, text(TextKind::Lyric, "--")),
+        (3, text(TextKind::Lyric, &"x".repeat(383))),
+        (4, text(TextKind::Lyric, "a\0b")),
     ]);
     let reasons: Vec<DropReason> = metrical(&smf)
         .to_clip()
@@ -1186,11 +1186,11 @@ fn a_lyric_that_cannot_be_a_message_is_reported() {
     assert_eq!(
         reasons,
         [
+            DropReason::Text(TextError::TooLong.into()),
             DropReason::LyricWithoutSyllable,
             DropReason::LyricWithoutSyllable,
             DropReason::Text(TextError::TooLong.into()),
             DropReason::Text(TextError::Nul.into()),
-            DropReason::Text(TextError::TooLong.into()),
         ]
     );
 }

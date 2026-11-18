@@ -30,7 +30,7 @@ impl std::fmt::Display for TrackPart {
 /// broken. A `track` is an index into the list given.
 ///
 /// [`SysExNotEnded`](Self::SysExNotEnded) to
-/// [`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack) are the rules of
+/// [`CopyrightNotTogether`](Self::CopyrightNotTogether) are the rules of
 /// SMF 1.0 a writer keeps: [`MidiFile::smf`](crate::MidiFile::smf) refuses what
 /// breaks them, and a read keeps such a file as it is.
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -142,6 +142,34 @@ pub enum TracksError {
     /// track).
     #[error("track {track}: the tempo map at tick {} belongs in the first track", at.0)]
     TempoMapNotInFirstTrack {
+        /// The track.
+        track: usize,
+        /// The tick of the event.
+        at: Tick,
+    },
+    /// An SMPTE Offset after the start of its track (SMF 1.0 section 3.3: at
+    /// the beginning, before any nonzero delta-time and any transmittable MIDI
+    /// event).
+    #[error("track {track}: the SMPTE Offset at tick {} is not at the start", at.0)]
+    SmpteOffsetNotAtStart {
+        /// The track.
+        track: usize,
+        /// The tick of the event.
+        at: Tick,
+    },
+    /// A copyright notice that is not the first event of the first track at
+    /// tick 0 (SMF 1.0 section 3.3).
+    #[error("track {track}: the copyright notice at tick {} is not the first event of the first track", at.0)]
+    CopyrightNotFirst {
+        /// The track.
+        track: usize,
+        /// The tick of the event.
+        at: Tick,
+    },
+    /// A second copyright notice in a file (SMF 1.0 section 3.3: all of a
+    /// file's notices go together in one event).
+    #[error("track {track}: a second copyright notice at tick {}", at.0)]
+    CopyrightNotTogether {
         /// The track.
         track: usize,
         /// The tick of the event.

@@ -52,9 +52,10 @@ use winnow::combinator::{alt, dispatch, eof, fail, peek, repeat};
 use winnow::error::ContextError;
 use winnow::token::{literal, take};
 
-use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, Voice1, parse_exact};
+use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, Voice1, parse_exact};
 
 use super::{SmfDivision, SmfParts};
+use crate::file::split_extra;
 use crate::file::{
     FileEvent, MalformedMeta, Meta, MicrosPerQuarter, OtherMetaKind, SmfFormat, SmpteOffset,
     TextKind, Tick, Track,
@@ -261,35 +262,31 @@ fn meta_of(kind: u8, data: &[u8]) -> Item {
 /// does not define (a channel past 15, an SMPTE field out of its range, no
 /// manufacturer id).
 fn fixed_or_id_meta(kind: u8, data: &[u8]) -> Option<Meta> {
-    match (kind, data) {
-        (0x00, &[a, b, ref extra @ ..]) => Some(Meta::SequenceNumber {
+    match kind {
+        0x00 => split_extra(data).map(|([a, b], extra)| Meta::SequenceNumber {
             number: u16::from_be_bytes([a, b]),
-            extra: extra.into(),
+            extra,
         }),
-        (0x20, &[channel, ref extra @ ..]) => {
-            MidiChannel::new(channel).map(|channel| Meta::ChannelPrefix {
-                channel,
-                extra: extra.into(),
-            })
-        }
-        (0x54, &[hr, mn, se, fr, ff, ref extra @ ..]) => {
-            SmpteOffset::from_wire([hr, mn, se, fr, ff]).map(|offset| Meta::SmpteOffset {
-                offset,
-                extra: extra.into(),
-            })
-        }
-        (0x7F, &[0, a, b, ref rest @ ..]) => {
-            ManufacturerId::new(0x8000 | u16::from(a) << 8 | u16::from(b)).map(|manufacturer| {
+        0x20 => split_extra(data).and_then(|([channel], extra)| {
+            MidiChannel::new(channel).map(|channel| Meta::ChannelPrefix { channel, extra })
+        }),
+        0x54 => split_extra(data).and_then(|(wire, extra)| {
+            SmpteOffset::from_wire(wire).map(|offset| Meta::SmpteOffset { offset, extra })
+        }),
+        0x7F => {
+            // One id byte, or a `00` and two.
+            let id_len = if data.first() == Some(&0) { 3 } else { 1 };
+            let (id, rest) = data.split_at_checked(id_len)?;
+            let mut bytes = [0u8; 3];
+            bytes[..id_len].copy_from_slice(id);
+            let [Some(a), Some(b), Some(c)] = bytes.map(U7::new) else {
+                return None;
+            };
+            ManufacturerId::from_sysex_bytes([a, b, c]).map(|manufacturer| {
                 Meta::SequencerSpecific {
                     manufacturer,
                     data: rest.into(),
                 }
-            })
-        }
-        (0x7F, &[id, ref rest @ ..]) if id != 0 => {
-            ManufacturerId::new(u16::from(id)).map(|manufacturer| Meta::SequencerSpecific {
-                manufacturer,
-                data: rest.into(),
             })
         }
         _ => None,

@@ -29,7 +29,7 @@
 //!   ([`TracksError`]); a read keeps such a file, its Sequence Number and Track
 //!   Name counting only at the start. [`Track::numbered`],
 //!   [`Track::smpte_start`] and [`Track::copyright`] place their event where the
-//!   specification puts it, and [`MidiFile::specifying_tempo_and_meter`] adds the
+//!   specification puts it, and [`MidiFile::with_default_tempo_and_meter`] adds the
 //!   tempo and time signature a file without them is read with.
 //! - **Truncation is an error** ([`SmfParseError::ChunkCutOff`] and its siblings, with the position it was found at), not a shorter file.
 //! - **Format 2** keeps its sequences apart: [`MidiFile::timebase`] gives it
