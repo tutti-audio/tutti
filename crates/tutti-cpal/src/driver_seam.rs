@@ -186,7 +186,7 @@ impl<F: Float> StreamDriver<F> for CpalDriver {
 /// recording `delay`.
 type Render<F, T> = fn(&mut OutputBlock<F>, &mut [T], Option<Duration>);
 
-/// A device format that is a [`Sample`](tutti_buffers::Sample): converted by
+/// A device format that is a [`Sample`]: converted by
 /// its rule.
 fn native<F: Float, S: Sample>(
     block: &mut OutputBlock<F>,
