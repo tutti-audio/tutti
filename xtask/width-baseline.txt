@@ -90,7 +90,6 @@ crates/tutti-measure/src/vectorscope.rs  2  migrating: measure step 10
 crates/tutti-measure/src/xcorr.rs  3  migrating: measure step 10
 crates/tutti-metering/src/load.rs  8  migrating: foundation
 crates/tutti-midi-protocol/src/unit.rs  4  migrating: midi units
-crates/tutti-midi-runtime/src/ledger/graphs.rs  6  migrating: midi units
 crates/tutti-modulation/src/compile.rs  3  migrating: B2/B3
 crates/tutti-modulation/src/curve.rs  4  migrating: B2/B3
 crates/tutti-modulation/src/program.rs  9  migrating: B2/B3
@@ -121,15 +120,11 @@ crates/tutti-polysynth/src/unison.rs  1  migrating: dsp S7/instruments
 crates/tutti-sampler/src/lanes.rs  1  migrating: dsp S7/instruments
 crates/tutti-sampler/src/streamer/io/refill.rs  2  migrating: dsp S7/instruments
 crates/tutti-sampler/src/stretch/vocoder.rs  2  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/block_render.rs  4  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/disk_voice/live_loop.rs  7  migrating: dsp S7/instruments
 crates/tutti-sampler/src/voice/interp.rs  1  migrating: dsp S7/instruments
 crates/tutti-sampler/src/voice/live_read.rs  2  migrating: dsp S7/instruments
 crates/tutti-sampler/src/voice/loop_span.rs  2  migrating: dsp S7/instruments
 crates/tutti-sampler/src/voice/memory_source.rs  4  migrating: dsp S7/instruments
 crates/tutti-sampler/src/voice/node.rs  1  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/voice_pool.rs  17  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/wrap_fade.rs  12  migrating: dsp S7/instruments
 crates/tutti-session/src/bounce.rs  1  migrating: B2/B3
 crates/tutti-session/src/builder.rs  1  migrating: B2/B3
 crates/tutti-session/src/clock.rs  3  migrating: B2/B3
