@@ -100,9 +100,7 @@ fn random_kind(rng: &mut Rng) -> Kind {
             phase: rng.below(10),
         },
         16 => burst_kind(rng),
-        6 => Kind::Consumer {
-            inputs: 1 + rng.below(2) as u16,
-        },
+        6 => consumer_kind(rng),
         7 | 14 => Kind::EventLag {
             latency: rng.below(30) as usize,
         },
@@ -113,6 +111,20 @@ fn random_kind(rng: &mut Rng) -> Kind {
         _ => Kind::Thru {
             width: 1 + rng.below(2) as usize,
         },
+    }
+}
+
+/// An event sink, half the time declaring an input bound of a few events a
+/// block (`Shape::event_input_capacity`), so its merge drops what is past it.
+fn consumer_kind(rng: &mut Rng) -> Kind {
+    let inputs = 1 + rng.below(2) as u16;
+    if rng.chance(50) {
+        Kind::BoundedConsumer {
+            inputs,
+            cap: 1 + rng.below(4) as u32,
+        }
+    } else {
+        Kind::Consumer { inputs }
     }
 }
 
@@ -330,9 +342,7 @@ fn random_graph(seed: u64) -> Desc {
                 2 => Kind::EventLag {
                     latency: rng.below(30) as usize,
                 },
-                _ => Kind::Consumer {
-                    inputs: 1 + rng.below(2) as u16,
-                },
+                _ => consumer_kind(&mut rng),
             }
         } else {
             random_kind(&mut rng)
@@ -877,6 +887,7 @@ fn the_generator_covers_what_the_suite_claims() {
         (0, 0, 0, 0, 0, 0);
     let (mut wide, mut global_delays, mut bypass_in_place, mut multi_io) = (0, 0, 0, 0);
     let mut overflowing_wired = 0;
+    let mut bounded_merges = 0;
     for seed in 0..512u64 {
         let desc = random_graph(seed);
         let valid = desc.spec.validate().expect("valid");
@@ -929,7 +940,10 @@ fn the_generator_covers_what_the_suite_claims() {
                 tutti_graph::Op::EventDelay { .. } => event_delays += 1,
                 tutti_graph::Op::Capture { .. } => feedback += 1,
                 tutti_graph::Op::EventCapture { .. } => event_fb += 1,
-                tutti_graph::Op::EventMerge { .. } => merges += 1,
+                tutti_graph::Op::EventMerge { bound, .. } => {
+                    merges += 1;
+                    bounded_merges += usize::from(bound.is_some());
+                }
                 tutti_graph::Op::Node { in_place: m, .. } if m.0 != 0 => in_place += 1,
                 _ => {}
             }
@@ -950,6 +964,7 @@ fn the_generator_covers_what_the_suite_claims() {
             "wired ports past their declared capacity",
             overflowing_wired,
         ),
+        ("merges holding an input bound", bounded_merges),
     ];
     for (what, n) in all {
         eprintln!("{what}: {n}");
@@ -1939,6 +1954,7 @@ fn fits(a: &Kind, b: &Kind) -> bool {
         b.in_place,
     ) && a.event_resolution == b.event_resolution
         && a.event_capacity == b.event_capacity
+        && a.event_input_capacity == b.event_input_capacity
 }
 
 fn random_fade(rng: &mut Rng) -> tutti_graph::Fade {

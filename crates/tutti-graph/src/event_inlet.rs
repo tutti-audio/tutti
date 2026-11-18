@@ -332,6 +332,12 @@ impl EventCapacity {
         self.0.get()
     }
 
+    /// The count as a `NonZeroU32`, for a shape's declaration.
+    #[must_use]
+    pub(crate) const fn non_zero(self) -> NonZeroU32 {
+        self.0
+    }
+
     /// The count as a length, for sizing a ring.
     #[must_use]
     pub const fn slots(self) -> usize {
@@ -493,7 +499,7 @@ impl Node for EventInletNode {
         Shape::EMPTY
             .with_events(0, 1)
             // `pair` checked that it fits.
-            .with_event_capacity(self.capacity.get())
+            .with_event_capacity(self.capacity.non_zero())
             // Event-only: a ring drain, work per event, nothing per frame.
             .with_cost(Cost::Light)
     }

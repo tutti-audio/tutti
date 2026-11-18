@@ -217,7 +217,7 @@ impl Node for Signal {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
             .with_events(0, 1)
-            .with_event_capacity(256)
+            .with_event_capacity(tutti_graph::testing::cap_of(256))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -244,7 +244,9 @@ struct Hold {
 
 impl Node for Hold {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(4)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(4))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -326,7 +328,9 @@ impl Ramps {
 
 impl Node for Ramps {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(64)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(64))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1055,7 +1059,9 @@ struct OnFirstBlock {
 
 impl Node for OnFirstBlock {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(4)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(4))
     }
     fn prepare(&mut self, _: &Prepare) {
         self.pending = true;
@@ -1605,7 +1611,9 @@ struct SegmentThenRamp {
 
 impl Node for SegmentThenRamp {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(4)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(4))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

@@ -107,8 +107,13 @@ impl Held {
     /// offs, as many as its capacity takes, and forget those. Returns how
     /// many. Allocates nothing.
     pub(crate) fn drain_into(&mut self, events: &mut Vec<Event>) -> usize {
+        self.drain_upto(events, usize::MAX)
+    }
+
+    /// [`drain_into`](Self::drain_into) writing at most `max` events.
+    pub(crate) fn drain_upto(&mut self, events: &mut Vec<Event>, max: usize) -> usize {
         let start = events.len();
-        let room = |e: &Vec<Event>| e.len() < e.capacity();
+        let room = |e: &Vec<Event>| e.len() < e.capacity() && e.len() - start < max;
         for lane in Lane::all() {
             if !self.pedals.contains(lane) {
                 continue;
