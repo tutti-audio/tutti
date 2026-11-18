@@ -231,6 +231,8 @@ struct Shared {
     ring: AtomicUsize,
     /// Whether the fake says it is asleep over sound (`FakePlugin::sleep_over_sound`).
     sleeps_over_sound: AtomicBool,
+    /// The plugin processes 32-bit audio only ([`FakePlugin::only_32_bit`]).
+    only_32_bit: AtomicBool,
     /// Whether the fake has an editor (`FakePlugin::with_editor`).
     editor: AtomicBool,
     /// Whether the editor takes a new scale live (`FakePlugin::with_editor_scale`).
@@ -319,6 +321,7 @@ impl FakePlugin {
             state: Mutex::new(Vec::new()),
             ring: AtomicUsize::new(0),
             sleeps_over_sound: AtomicBool::new(false),
+            only_32_bit: AtomicBool::new(false),
             editor: AtomicBool::new(false),
             takes_scale: AtomicBool::new(false),
             resize_request: AtomicU64::new(0),
@@ -417,6 +420,12 @@ impl FakePlugin {
     /// otherwise. `0`, the default, is a silent fake that says nothing.
     pub fn ring_out(&self, frames: usize) {
         self.0.ring.store(frames, Ordering::Relaxed);
+    }
+
+    /// Makes the fake process 32-bit audio only, as a plugin that declares no
+    /// 64-bit support ([`Loaded::widths`]).
+    pub fn only_32_bit(&self) {
+        self.0.only_32_bit.store(true, Ordering::Relaxed);
     }
 
     /// Makes the fake say *sleep* every block, sounding or not: a plugin
@@ -801,7 +810,7 @@ impl Loaded for FakeLoaded {
     const RESTARTS: RestartRules = RestartRules::CLAP;
 
     fn widths(&self) -> Widths {
-        Widths::BOTH
+        Widths::new(!self.shared.only_32_bit.load(Ordering::Relaxed))
     }
 
     fn activate(

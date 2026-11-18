@@ -37,7 +37,7 @@ mod clap {
     use tutti_graph::{BusError, ForkByClone};
     use tutti_nodes::testing::Const;
     use tutti_session::ConnectError;
-    use tutti_session::{Key, PluginNode};
+    use tutti_session::{AnyPlugin, Key};
 
     fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
         // SAFETY: nextest runs each test in its own process, and every variable
@@ -45,7 +45,7 @@ mod clap {
         unsafe { std::env::set_var(key, value) };
     }
 
-    fn loaded(layout: Option<&str>) -> (Session, Key<PluginNode>) {
+    fn loaded(layout: Option<&str>) -> (Session, Key<AnyPlugin>) {
         // The plugin's file is probed before its variables are set.
         crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
         set_env("TUTTI_PLUGIN_SERVER", plugin_server());

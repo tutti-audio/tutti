@@ -20,8 +20,10 @@
 //! `assert_no_alloc` test in `tests/`).
 
 use crate::node_losses::LossCounts;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     Loaded, MainThreadMarker, MainWorkHandle, Origin, PluginDescriptor, PluginError,
@@ -50,7 +52,7 @@ use tutti_plugin_types::{
 use tutti_units::ParamId;
 
 /// A plugin running inside the host process, as a graph node, whatever its
-/// format `F`.
+/// format `L`, activated at the width of the graph `F` it joins.
 ///
 /// Created by [`load_client`](crate::load_client), or by
 /// `tutti-plugin`'s `Plugin::open` for a `.vst`/`.dll`/`.so`
@@ -67,14 +69,14 @@ use tutti_units::ParamId;
 /// A graph holding this node forks (`Editor::fork`, which an offline export
 /// takes) **by state transfer**: a second instance of the plugin, from the same
 /// library, restored from this one's saved state. See
-/// [`HostedNode::fork_instance`]. The client becomes a graph node by
+/// [`PluginNode::fork_instance`]. The client becomes a graph node by
 /// [`bind`](Self::bind)ing it to the project's tempo map.
-pub struct InProcClient<F: Loaded> {
+pub struct InProcClient<L: Loaded, F: Float = f32> {
     /// The plugin's control side. Control threads only: the audio thread
     /// renders through `rt`.
-    pub(super) inner: Arc<Mutex<Instance<F>>>,
+    pub(super) inner: Arc<Mutex<Instance<L>>>,
     /// The realtime end the plugin's Processor is lent to.
-    pub(super) rt: Rt<F::Processor>,
+    pub(super) rt: Rt<L::Processor>,
     /// Whether the plugin is lost, read with no lock ([`Instance::lost_latch`]).
     lost: Arc<Lost>,
     /// The plugin's latency and tail as the control side last read them
@@ -199,6 +201,10 @@ pub struct InProcClient<F: Loaded> {
     /// The MIDI-out of the pieces rendered so far in this block, on the
     /// block's frames.
     pub(super) out_events: MidiEventVec,
+    /// The sample width the Processor was activated at: `F`, which
+    /// [`Widths::negotiate`](tutti_plugin_types::Widths::negotiate) settled
+    /// at load.
+    width: PhantomData<fn() -> F>,
 }
 
 /// A node dropped while its realtime end holds the Processor and a recall is
@@ -217,7 +223,7 @@ pub struct InProcClient<F: Loaded> {
 /// lifecycle poisons, through which nothing else is published) has no
 /// controller left to stop under, so its node does not run `stop`: the Processor drops with the end, as the Processor of a lost plugin
 /// does when the session retires its node.
-impl<F: Loaded> Drop for InProcClient<F> {
+impl<L: Loaded, F: Float> Drop for InProcClient<L, F> {
     fn drop(&mut self) {
         if self.lost.is_lost() || self.rt.held().is_none() {
             return;
@@ -227,7 +233,7 @@ impl<F: Loaded> Drop for InProcClient<F> {
 }
 
 /// Omits `inner`: formatting must not wait on the control side's lock.
-impl<F: Loaded> std::fmt::Debug for InProcClient<F> {
+impl<L: Loaded, F: Float> std::fmt::Debug for InProcClient<L, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InProcClient")
             .field("descriptor", &self.descriptor)
@@ -431,29 +437,31 @@ impl TransportFeed {
 /// An in-process client bound to the project's tempo map
 /// ([`InProcClient::bind`]): the graph node. It owns the reader, lends
 /// the map once per block, read through a view at the block's rate. Only this type is a
-/// [`Node`](tutti_graph::Node) and an [`IntoNode`](tutti_graph::IntoNode);
+/// [`Node<F>`](tutti_graph::Node) and an [`IntoNode<F>`](tutti_graph::IntoNode), for the
+/// graph float `F` the plugin was activated at (a plugin that does not process
+/// `F` is a [`WidthError`](crate::WidthError) at load, never converted);
 /// the loaded client is neither. It derefs to the client for its control
 /// surface (`controls`, `set_meter`, ...).
-pub struct HostedNode<F: Loaded> {
-    pub(super) client: InProcClient<F>,
+pub struct PluginNode<L: Loaded, F: Float = f32> {
+    pub(super) client: InProcClient<L, F>,
     pub(super) tempo: TempoReader,
 }
 
-impl<F: Loaded> std::fmt::Debug for HostedNode<F> {
+impl<L: Loaded, F: Float> std::fmt::Debug for PluginNode<L, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostedNode").finish_non_exhaustive()
+        f.debug_struct("PluginNode").finish_non_exhaustive()
     }
 }
 
-impl<F: Loaded> std::ops::Deref for HostedNode<F> {
-    type Target = InProcClient<F>;
-    fn deref(&self) -> &InProcClient<F> {
+impl<L: Loaded, F: Float> std::ops::Deref for PluginNode<L, F> {
+    type Target = InProcClient<L, F>;
+    fn deref(&self) -> &InProcClient<L, F> {
         &self.client
     }
 }
 
-impl<F: Loaded> std::ops::DerefMut for HostedNode<F> {
-    fn deref_mut(&mut self) -> &mut InProcClient<F> {
+impl<L: Loaded, F: Float> std::ops::DerefMut for PluginNode<L, F> {
+    fn deref_mut(&mut self) -> &mut InProcClient<L, F> {
         &mut self.client
     }
 }
@@ -475,10 +483,10 @@ pub(super) fn queue_sample_rate(cell: &ParkedSampleRate, rate: SampleRate) {
 /// [`queue_sample_rate`] opens. The Processor is on the audio thread, so the
 /// change starts with a recall and finishes at a later pump, once the audio
 /// thread has handed it back.
-pub(super) fn drain_sample_rate<F: Loaded>(
+pub(super) fn drain_sample_rate<L: Loaded>(
     main: MainThreadMarker,
     cell: &ParkedSampleRate,
-    inner: &Mutex<Instance<F>>,
+    inner: &Mutex<Instance<L>>,
 ) -> bool {
     let Some(rate) = cell.take(Ordering::Relaxed) else {
         return false;
@@ -497,12 +505,12 @@ pub(super) struct Reload {
     pub(super) work: MainWorkHandle,
 }
 
-impl<F: Loaded> InProcClient<F> {
+impl<L: Loaded, F: Float> InProcClient<L, F> {
     /// A client over `inner`, which it locks once for the plugin's lost flag:
     /// a caller must not hold that lock.
     pub(super) fn new(
-        inner: Arc<Mutex<Instance<F>>>,
-        rt: Rt<F::Processor>,
+        inner: Arc<Mutex<Instance<L>>>,
+        rt: Rt<L::Processor>,
         descriptor: PluginDescriptor,
         reload: Option<Reload>,
         declared: Declared,
@@ -596,6 +604,7 @@ impl<F: Loaded> InProcClient<F> {
             chords: ChordChanges::default(),
             scales: ScaleChanges::default(),
             out_events: MidiEventVec::new(),
+            width: PhantomData,
         }
     }
 
@@ -607,8 +616,8 @@ impl<F: Loaded> InProcClient<F> {
     /// reader of its own; a host with no session builds one over a fixed map
     /// ([`TempoReader::fixed`]). A fork clones the reader. Control thread.
     #[must_use]
-    pub fn bind(self, tempo: TempoReader) -> HostedNode<F> {
-        HostedNode {
+    pub fn bind(self, tempo: TempoReader) -> PluginNode<L, F> {
+        PluginNode {
             client: self,
             tempo,
         }
@@ -648,7 +657,7 @@ impl<F: Loaded> InProcClient<F> {
     }
 }
 
-impl<F: Loaded> InProcClient<F> {
+impl<L: Loaded, F: Float> InProcClient<L, F> {
     /// The chunk in flight is dropped (a reset, a re-prepare): the walk of its
     /// transport ends, and the MIDI the Processor held for it is lost, counted
     /// now in the delivery's dropped MIDI and in the executor's at the next
@@ -856,15 +865,15 @@ pub(super) struct Inputs<'a> {
 ///
 /// On anything but [`Rendered::Ran`] `outputs` is untouched: the caller writes
 /// the silence.
-pub(super) fn render_with<P: Processor>(
+pub(super) fn render_with<P: Processor, S: Float>(
     processor: Option<&mut P>,
     losses: &LossCounts,
     params: &ParamDelivery,
     midi: &mut MidiEventVec,
     out: &mut ProcessOutput,
     with: Inputs<'_>,
-    inputs: &[&[f32]],
-    outputs: &mut [&mut [f32]],
+    inputs: &[&[S]],
+    outputs: &mut [&mut [S]],
     size: usize,
 ) -> Rendered {
     // Taken whether or not the plugin runs: a block with no Processor drops

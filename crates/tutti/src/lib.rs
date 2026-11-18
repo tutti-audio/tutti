@@ -183,10 +183,10 @@ pub use tutti_session::OutputLatencyTarget;
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
-    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginNode,
-    PluginParamError, PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed,
-    RestoreError, RestoreState, SaveState, TypedParam,
+    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
+    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginParamError,
+    PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed, RestoreError,
+    RestoreState, SaveState, TypedParam,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};

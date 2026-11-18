@@ -363,7 +363,7 @@ impl<'a> Param<'a> {
     /// parameter and a native one through one type.
     #[must_use]
     pub fn target(&self) -> crate::ParamRef {
-        crate::Key::<crate::PluginNode>::new(self.params.node).param(self.id())
+        crate::Key::<crate::AnyPlugin>::new(self.params.node).param(self.id())
     }
 
     /// The write policy every format answers

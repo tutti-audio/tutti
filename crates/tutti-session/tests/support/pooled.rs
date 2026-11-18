@@ -18,7 +18,7 @@ use tutti_plugin::catalog::{
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_rt::LockExt;
-use tutti_session::{Key, LoadError, PeerState, PluginNode, PoolEvent, Session, SessionEvent};
+use tutti_session::{AnyPlugin, Key, LoadError, PeerState, PoolEvent, Session, SessionEvent};
 
 /// A plugin to load: its ref, where it runs, and the state it starts from.
 #[derive(Clone, Debug)]
@@ -121,7 +121,7 @@ pub trait LoadPlugin {
         &mut self,
         main: MainThreadMarker,
         spec: Spec,
-    ) -> Result<Key<PluginNode>, LoadError> {
+    ) -> Result<Key<AnyPlugin>, LoadError> {
         self.load_plugin_keyed(main, spec).map(|(_, node)| node)
     }
 
@@ -135,7 +135,7 @@ pub trait LoadPlugin {
         &mut self,
         main: MainThreadMarker,
         spec: Spec,
-    ) -> Result<(u64, Key<PluginNode>), LoadError>;
+    ) -> Result<(u64, Key<AnyPlugin>), LoadError>;
 }
 
 static KEYS: AtomicU64 = AtomicU64::new(0);
@@ -175,7 +175,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadPlugin 
         &mut self,
         main: MainThreadMarker,
         spec: Spec,
-    ) -> Result<(u64, Key<PluginNode>), LoadError> {
+    ) -> Result<(u64, Key<AnyPlugin>), LoadError> {
         prime(&spec.plugin);
         let key = {
             let primed = PRIMED.lock_recover();
@@ -213,7 +213,7 @@ pub trait LoadEntry {
         id: &PluginId,
         hosting: Hosting,
         state: Option<PeerState>,
-    ) -> Result<Key<PluginNode>, LoadError> {
+    ) -> Result<Key<AnyPlugin>, LoadError> {
         let key = self.declare_entry(main, catalog, id, hosting, state);
         self.await_entry(main, key)
     }
@@ -238,7 +238,7 @@ pub trait LoadEntry {
         &mut self,
         main: MainThreadMarker,
         key: u64,
-    ) -> Result<Key<PluginNode>, LoadError>;
+    ) -> Result<Key<AnyPlugin>, LoadError>;
 }
 
 impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadEntry for Session<K, C> {
@@ -266,7 +266,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadEntry f
         &mut self,
         main: MainThreadMarker,
         key: u64,
-    ) -> Result<Key<PluginNode>, LoadError> {
+    ) -> Result<Key<AnyPlugin>, LoadError> {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             for event in self.update_on(main) {

@@ -13,7 +13,7 @@
 //!
 //! # What a fork is
 //!
-//! [`HostedNode::fork_instance`], which the fork source calls, on the
+//! [`PluginNode::fork_instance`], which the fork source calls, on the
 //! **main thread** (see "Threads" below):
 //!
 //! 1. **Read what the live node has delivered** per parameter (its parameter
@@ -96,14 +96,16 @@
 //! - **A fork of its own** through the graph: the node the fork source builds
 //!   is inserted bare, like every forked node.
 
+use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
+use tutti_buffers::Float;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use parking_lot::Mutex;
 use tutti_graph::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
 use tutti_plugin_types::{Control, Features, InProcess, Origin, RenderMode, StateUse};
 
-use super::client::{HostedNode, RateDelivery, TransportFeed};
+use super::client::{PluginNode, RateDelivery, TransportFeed};
 use super::instance::Instance;
 use super::loader::load_client_restoring;
 use crate::{DeliveryCounters, ForkState};
@@ -112,11 +114,11 @@ use tutti_plugin_types::StateError;
 
 /// An in-process node's [`ForkSource`]: everything a fork needs from the
 /// live node, and nothing that keeps the live plugin alive.
-pub(super) struct Fork<F: InProcess> {
+pub(super) struct Fork<L: InProcess, F: Float> {
     /// The live instance — asked for its state, nothing else. Weak: once every
     /// node and handle on it is gone, a fork answers
     /// [`PluginForkError::LiveGone`].
-    live: Weak<Mutex<Instance<F>>>,
+    live: Weak<Mutex<Instance<L>>>,
     /// Where the live instance came from: the file and the choice of plugin
     /// in it, which the second instance loads again.
     origin: Origin,
@@ -140,15 +142,18 @@ pub(super) struct Fork<F: InProcess> {
     /// The live node's parameter delivery: what it has delivered, read when
     /// it forks, before its state.
     delivery: Arc<DeliveryCounters>,
+    /// The width the live node renders at, which the second instance is
+    /// loaded for.
+    width: PhantomData<fn() -> F>,
 }
 
-impl<F: InProcess + 'static> Fork<F>
+impl<L: InProcess + 'static, F: Float> Fork<L, F>
 where
-    F::Processor: 'static,
+    L::Processor: 'static,
 {
     /// The source for `bound`, or `None` for a plugin with no origin to load
     /// again.
-    pub(super) fn of(bound: &HostedNode<F>) -> Option<Self> {
+    pub(super) fn of(bound: &PluginNode<L, F>) -> Option<Self> {
         let client = &bound.client;
         let reload = client.reload.as_ref()?;
         Some(Self {
@@ -161,6 +166,7 @@ where
             features: client.features,
             transport: client.transport.clone(),
             delivery: client.params.counters(),
+            width: PhantomData,
         })
     }
 
@@ -169,7 +175,7 @@ where
         &self,
         main: MainThreadMarker,
         mode: ForkMode,
-    ) -> Result<HostedNode<F>, PluginForkError> {
+    ) -> Result<PluginNode<L, F>, PluginForkError> {
         // First, so a plugin that cannot save costs no second instance. The
         // `Arc` is dropped straight after: the fork holds no strong reference.
         let live = self.live.upgrade().ok_or(PluginForkError::LiveGone)?;
@@ -197,7 +203,7 @@ where
 
         // The preset, then the state, on the fresh instance **before it is
         // activated**: a plugin may take its mode from the state at activation.
-        let mut restore = |loaded: &mut F| -> Result<(), StateError> {
+        let mut restore = |loaded: &mut L| -> Result<(), StateError> {
             snapshot.restore(
                 loaded,
                 |loaded, preset| Control::load_preset(loaded, main, preset),
@@ -208,8 +214,8 @@ where
             )
         };
         // From the stored `Origin`, not `Reopen::reopen`: an active `Lifecycle`
-        // holds a Controller, not the `&F` that `reopen` needs.
-        let (mut fork, handle, restored) = load_client_restoring::<F>(
+        // holds a Controller, not the `&L` that `reopen` needs.
+        let (mut fork, handle, restored) = load_client_restoring::<L, F>(
             main,
             &self.work,
             self.origin.path(),
@@ -219,7 +225,9 @@ where
         )
         .map_err(|source| PluginForkError::Load {
             path: self.origin.path().to_path_buf(),
-            source,
+            // The live plugin took this width, so the same plugin refusing it
+            // is a load that failed.
+            source: source.into_bridge(),
         })?;
         // The fork is driven through its node alone: no editor, no parameter
         // surface. Its instance stays alive in the node.
@@ -256,11 +264,11 @@ where
     }
 }
 
-impl<F: InProcess + 'static> ForkSource for Fork<F>
+impl<L: InProcess + 'static, F: Float> ForkSource<F> for Fork<L, F>
 where
-    F::Processor: 'static,
+    L::Processor: 'static,
 {
-    fn fork(&self, mode: ForkMode) -> Result<Forked, ForkCause> {
+    fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         // The gather runs on the main thread (below), which `current` confirms;
         // off it there is no way to load a second instance, so the fork is
         // refused rather than loaded where the format forbids it.
@@ -277,14 +285,14 @@ where
     /// `prepare` (which tells the plugin the fork's rate,
     /// `RateDelivery::InPrepare`) runs there too, on the main thread the
     /// gather is called on. Only rendering it leaves that thread.
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild, ForkCause> {
+    fn gather(&self, mode: ForkMode) -> Result<ForkBuild<F>, ForkCause> {
         self.fork(mode).map(ForkBuild::pinned)
     }
 }
 
-impl<F: InProcess + 'static> HostedNode<F>
+impl<L: InProcess + 'static, F: Float> PluginNode<L, F>
 where
-    F::Processor: 'static,
+    L::Processor: 'static,
 {
     /// Creates a second instance of this plugin carrying this one's saved
     /// state, ready to insert or drive.
@@ -323,7 +331,7 @@ where
         &self,
         main: MainThreadMarker,
         mode: ForkMode,
-    ) -> Result<HostedNode<F>, PluginForkError> {
+    ) -> Result<PluginNode<L, F>, PluginForkError> {
         Fork::of(self)
             .ok_or(PluginForkError::NoOrigin)?
             .instance(main, mode)

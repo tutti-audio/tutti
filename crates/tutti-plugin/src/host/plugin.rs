@@ -340,7 +340,8 @@ impl Plugin {
             &plugin.load(),
             sample_rate,
             restore.as_mut().map(|r| r as _),
-        )?;
+        )
+        .map_err(tutti_plugin_host::LoadClientError::into_bridge)?;
         let plugin = plugin.identified(&handle.descriptor().id);
         Ok((
             Self {
@@ -778,17 +779,17 @@ enum BoundPlaced {
     /// A node rebuilt over a served plugin's new buses, and the fork source of
     /// the node it replaces.
     ServedNode(
-        Box<tutti_plugin_host::HostedNode<tutti_plugin_ipc::Ipc>>,
+        Box<tutti_plugin_host::PluginNode<tutti_plugin_ipc::Ipc>>,
         Box<crate::host::node::fork::ServedFork>,
     ),
     #[cfg(feature = "vst2")]
-    Vst2(Box<tutti_plugin_host::HostedNode<tutti_vst2_host::Vst2Loaded>>),
+    Vst2(Box<tutti_plugin_host::PluginNode<tutti_vst2_host::Vst2Loaded>>),
     #[cfg(feature = "clap")]
-    Clap(Box<tutti_plugin_host::HostedNode<tutti_clap_host::ClapLoaded>>),
+    Clap(Box<tutti_plugin_host::PluginNode<tutti_clap_host::ClapLoaded>>),
     #[cfg(feature = "vst3")]
-    Vst3(Box<tutti_plugin_host::HostedNode<tutti_vst3_host::Vst3Loaded>>),
+    Vst3(Box<tutti_plugin_host::PluginNode<tutti_vst3_host::Vst3Loaded>>),
     #[cfg(all(feature = "au", target_os = "macos"))]
-    Au(Box<tutti_plugin_host::HostedNode<tutti_au_host::AuLoaded>>),
+    Au(Box<tutti_plugin_host::PluginNode<tutti_au_host::AuLoaded>>),
 }
 
 impl std::fmt::Debug for BoundPlugin {

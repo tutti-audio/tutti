@@ -619,11 +619,11 @@ the race. Every type below exists because the audit found the bug it prevents.
 | **`Timeline::segment_generation() -> u64`**, required; `FrameClock::generation` moves on at every segment restart (seek, tempo or rate change, loop wrap) and at a play start, published by the engine's clock before the beat | A playhead read as a bare beat, with no way to tell a jump that lands on the same beat from no jump | The sampler's seat running on through a seek to the beat it stood on, or a one-block transport loop, instead of re-seating (`interp.rs` `Seat`, both tiers) |
 | **The transport's one audio side**: `Transport::audio(rate) -> Result<TransportAudio, AudioTaken>`, taken once per transport (every clone shares the claim, which is the motion machine's home) and given back when it drops. It owns the motion machine, the playhead clock, the pending commands and the inputs a block reads; its methods (`gather`, `begin_block`, `fire`, `advance`, `publish_position`, `follow_rate`) are the block's steps, and the clock, the inputs, the pending list and the machine are crate-private | A "must not" in `Engine::new`'s docs, which nothing enforced; then two claims (`PlayheadClaimed`, `MotionHeld`) and four separately claimed pieces glued by call order in the engine | Two engines (two clocks) over one transport, both consuming every seek and both writing the playhead. Now `GraphEngineError::TransportHeld` at the second `Engine::new`. No drop order to keep (the claim is the machine's home), no hand-released credit (`ScheduleAudio::take` is the only way a command leaves the list), no way to read the inputs twice in a block or settle a fade late. (`EnvClock` never was a writer: it reads each block's `Env` and shares nothing.) The readout cells (`TransportSettings::beat`, `segment_generation`, `paused`, ...) are crate-private too (`E0616` outside), so the only store from outside is `TransportAudio::set_playhead` |
 | **One transport command queue**: `MotionFsm::try_send(event)` is `schedule(At::NextBlock, event)`; the untimed queue and `MotionAudio::drain` are gone | Two queues, the untimed one drained first | A stop sent with `schedule(At::NextBlock, ..)` and then a play sent with `try_send` ended stopped. Commands due on one frame now apply in send order across both calls. `try_send` still returns `QueueFull` with the event handed back, but it draws on the schedule's 64 credits, so commands waiting for a beat count against it |
-| **No `IntoNode` for a bare `Node`**: every insert says whether it forks — `ForkByClone(n)`, `Unforkable(n)`, or the node's own `IntoNode`; `IntoNode::into_parts` is required | The blanket `impl<N: Node> IntoNode for N` (and one for `Box<dyn Node>`): no controls, no fork source, nothing said | A finding of #38's review (an `EnvClock` inserted unforkable broke every export, found only when one ran), and the impl slot a node type needs for its own fork source (#51's `PluginNode` wrapper). Inserting a bare node is `E0277` |
+| **No `IntoNode` for a bare `Node`**: every insert says whether it forks — `ForkByClone(n)`, `Unforkable(n)`, or the node's own `IntoNode`; `IntoNode::into_parts` is required | The blanket `impl<N: Node> IntoNode for N` (and one for `Box<dyn Node>`): no controls, no fork source, nothing said | A finding of #38's review (an `EnvClock` inserted unforkable broke every export, found only when one ran), and the impl slot a node type needs for its own fork source (#51's `AnyPlugin` wrapper). Inserting a bare node is `E0277` |
 
 **Smart types 2: #51 and #48.**
 
-- **#51 (`feat/plugin-typestate`) dropped `PluginNode`.** It
+- **#51 (`feat/plugin-typestate`) dropped `AnyPlugin`.** It
   wrapped the plugin client only because the blanket `impl<N: Node>
   IntoNode for N` held the impl slot a `Node` type needs to hand the editor
   its own fork source. With the blanket gone, `PluginClient<Bound>` is the
@@ -5255,7 +5255,7 @@ vocoder retirement channel for voices the pool removes.
   (the state-transfer fork, #14/#38). An unbound plugin can be neither
   inserted nor boxed as a node, pinned by `compile_fail` doctests in
   `tutti-plugin`'s `host::node`. The bound client is itself the `Node` the
-  executor owns: it first sat in a private newtype (`PluginNode`), because
+  executor owns: it first sat in a private newtype (`AnyPlugin`), because
   `tutti-graph`'s blanket `impl<N: Node> IntoNode for N` would have been its
   `IntoNode`, with `Controls = ()` and no fork source. Smart types 2 (#53)
   removed the blanket impl, and the wrapper went with it.
@@ -7360,7 +7360,7 @@ yet, so no plan, op or render moves.
   silent destination channel having no pair. A `Mix` row's `scale` multiplies
   its terms' gains; a grouped term's gain goes to each of its sources. It is
   the fold to rounding only, as this section says of the lowering.
-- **Plugins.** `PluginNode::shape` declares the plugin's buses from
+- **Plugins.** `AnyPlugin::shape` declares the plugin's buses from
   `LoadedPlugin`'s `inputs`/`outputs`, one `PluginBus` each (width,
   placement, role), in bus order. The role is the format's: CLAP's
   `CLAP_AUDIO_PORT_IS_MAIN`, VST3's `busType` (`kMain`/`kAux`), the one bus

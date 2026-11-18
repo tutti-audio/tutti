@@ -1,5 +1,5 @@
 //! What a fork carries of the live plugin, and the order it restores in. The
-//! in-process fork (`HostedNode::fork_instance`) and the served one
+//! in-process fork (`PluginNode::fork_instance`) and the served one
 //! (`tutti-plugin`'s `PluginClient::fork_instance`) read and restore through
 //! this one type.
 

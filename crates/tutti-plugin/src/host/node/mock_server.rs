@@ -309,7 +309,7 @@ pub(super) fn tempo(beat: f64) -> TempoReader {
 pub(super) fn new_node(
     rig: Rig,
     tempo: TempoReader,
-) -> (Direct<tutti_plugin_host::HostedNode<Ipc>>, Record, Threads) {
+) -> (Direct<tutti_plugin_host::PluginNode<Ipc>>, Record, Threads) {
     let guard = Arc::new(ProcessGuard::for_test(BridgeConfig::at(
         tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
     )));
@@ -335,7 +335,7 @@ pub(super) fn new_node(
     let (processor, controller) = ipc
         .activate_anywhere(prepare)
         .unwrap_or_else(|_| panic!("the served plugin activates"));
-    let mut client = client_over::<Ipc>(
+    let mut client = client_over::<Ipc, f32>(
         processor,
         controller,
         prepare,
