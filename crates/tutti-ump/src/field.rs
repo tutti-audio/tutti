@@ -221,6 +221,16 @@ tutti_units::ranged! {
 impl FunctionBlockCount {
     /// The most blocks an Endpoint declares.
     pub const MAX: Self = Self(32);
+
+    /// The count of `blocks` blocks, or [`MAX`](Self::MAX) for more: an OS that
+    /// lists more than an Endpoint holds is read as one that lists them all.
+    #[must_use]
+    pub fn saturating(blocks: usize) -> Self {
+        u8::try_from(blocks)
+            .ok()
+            .and_then(Self::new)
+            .unwrap_or(Self::MAX)
+    }
 }
 
 tutti_units::ranged! {

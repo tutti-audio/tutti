@@ -1,6 +1,7 @@
 //! The bounded text of a UMP Stream: Endpoint Name, Product Instance Id and
 //! Function Block Name, held without allocating.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
@@ -70,29 +71,27 @@ impl<const N: usize> Name<N> {
         Self::parse(text).ok()
     }
 
-    /// The name, composed to NFC, or why the text is not one.
-    ///
-    /// # Errors
-    ///
-    /// [`NameError::Bom`] for a leading Byte Order Mark, [`NameError::Nul`] for
-    /// a NUL, [`NameError::TooLong`] when the composed text is longer than `N`
-    /// bytes.
-    fn parse(text: &str) -> Result<Self, NameError> {
+    /// The text composed to NFC when it is not already, with a leading Byte
+    /// Order Mark and a NUL refused.
+    fn composed(text: &str) -> Result<Cow<'_, str>, NameError> {
         if text.starts_with('\u{FEFF}') {
             return Err(NameError::Bom);
         }
         // Composed only when it is not NFC already, so the common name does not
         // allocate.
-        let composed;
-        let bytes = if is_nfc(text) {
-            text.as_bytes()
+        let text = if is_nfc(text) {
+            Cow::Borrowed(text)
         } else {
-            composed = text.nfc().collect::<String>();
-            composed.as_bytes()
+            Cow::Owned(text.nfc().collect())
         };
-        if bytes.contains(&0) {
+        if text.as_bytes().contains(&0) {
             return Err(NameError::Nul);
         }
+        Ok(text)
+    }
+
+    /// The name holding `bytes`, at most `N` of them.
+    fn held(bytes: &[u8]) -> Result<Self, NameError> {
         let too_long = NameError::TooLong { max: N };
         if bytes.len() > N {
             return Err(too_long);
@@ -103,6 +102,35 @@ impl<const N: usize> Name<N> {
             bytes: held,
             len: u8::try_from(bytes.len()).map_err(|_| too_long)?,
         })
+    }
+
+    /// The name, composed to NFC, or why the text is not one.
+    ///
+    /// # Errors
+    ///
+    /// [`NameError::Bom`] for a leading Byte Order Mark, [`NameError::Nul`] for
+    /// a NUL, [`NameError::TooLong`] when the composed text is longer than `N`
+    /// bytes.
+    fn parse(text: &str) -> Result<Self, NameError> {
+        Self::held(Self::composed(text)?.as_bytes())
+    }
+
+    /// The name for display: composed to NFC, and cut at the last character
+    /// boundary within `N` bytes when it is longer. The cut is lossy text for a
+    /// reader to show, never an identity: two longer names that share a prefix
+    /// share this name. A name a user typed or a peer sent goes through
+    /// [`FromStr`], which refuses a longer one.
+    ///
+    /// `None` for a leading Byte Order Mark or a NUL, which no name holds
+    /// ([`FromStr`] says which); never for length.
+    #[must_use]
+    pub fn truncated(text: &str) -> Option<Self> {
+        let text = Self::composed(text).ok()?;
+        let mut end = text.len().min(N);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        Self::held(&text.as_bytes()[..end]).ok()
     }
 
     /// A name read off the wire: UTF-8 bytes, read as [`FromStr`]

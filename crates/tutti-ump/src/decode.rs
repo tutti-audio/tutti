@@ -17,8 +17,8 @@
 //! SysEx 7 data), which is part of the byte being 7-bit, not a reserved bit.
 
 use crate::field::{
-    ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber,
-    SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
+    ChordType, DeltaTicks, FunctionBlockCount, FunctionBlockId, NoteNumber, SharpsFlats,
+    TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
@@ -585,32 +585,7 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
                 name: flag(w0, 1),
             },
         }),
-        0x11 if complete => Some(Stream::FunctionBlockInfo(FunctionBlockInfo {
-            active: flag(w0, 15),
-            id: Field::read(FunctionBlockId::new(byte(w0, 1) & 0x7f), byte(w0, 1) & 0x7f),
-            direction: match w0 & 0x3 {
-                0b01 => BlockDirection::Input,
-                0b10 => BlockDirection::Output,
-                0b11 => BlockDirection::Bidirectional,
-                n => BlockDirection::Reserved(Reserved::wire(n as u8)),
-            },
-            ui_hint: match (w0 >> 4) & 0x3 {
-                0 => UiHint::Unknown,
-                1 => UiHint::Receiver,
-                2 => UiHint::Sender,
-                _ => UiHint::Both,
-            },
-            midi1: match (w0 >> 2) & 0x3 {
-                0 => Midi1Port::No,
-                1 => Midi1Port::Unrestricted,
-                2 => Midi1Port::Restricted,
-                n => Midi1Port::Reserved(Reserved::wire(n as u8)),
-            },
-            first_group: Field::read(FirstGroup::new(byte(w[1], 3)), byte(w[1], 3)),
-            groups_spanned: Field::read(GroupSpan::new(byte(w[1], 2)), byte(w[1], 2)),
-            midi_ci_version: byte(w[1], 1),
-            max_sysex8_streams: byte(w[1], 0),
-        })),
+        0x11 if complete => Some(Stream::FunctionBlockInfo(function_block_info(w0, w[1]))),
         0x12 => Some(Stream::FunctionBlockName {
             block: Field::read(FunctionBlockId::new(byte(w0, 1)), byte(w0, 1)),
             form: form(w0, 26),
@@ -629,13 +604,29 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
     }
 }
 
-fn stream_config(w0: u32) -> StreamConfig {
-    StreamConfig {
-        protocol: match byte(w0, 1) {
-            0x01 => Protocol::Midi1,
-            0x02 => Protocol::Midi2,
-            n => Protocol::Reserved(Reserved::wire(n)),
+/// The Function Block Info Notification words `w0` and `w1` carry.
+pub(crate) fn function_block_info(w0: u32, w1: u32) -> FunctionBlockInfo {
+    FunctionBlockInfo {
+        active: flag(w0, 15),
+        id: Field::from_raw(byte(w0, 1) & 0x7f),
+        direction: BlockDirection::from_raw((w0 & 0x3) as u8),
+        ui_hint: match (w0 >> 4) & 0x3 {
+            0 => UiHint::Unknown,
+            1 => UiHint::Receiver,
+            2 => UiHint::Sender,
+            _ => UiHint::Both,
         },
+        midi1: Midi1Port::from_raw(((w0 >> 2) & 0x3) as u8),
+        first_group: Field::from_raw(byte(w1, 3)),
+        groups_spanned: Field::from_raw(byte(w1, 2)),
+        midi_ci_version: byte(w1, 1),
+        max_sysex8_streams: byte(w1, 0),
+    }
+}
+
+pub(crate) fn stream_config(w0: u32) -> StreamConfig {
+    StreamConfig {
+        protocol: Protocol::from_raw(byte(w0, 1)),
         rx_jr: flag(w0, 1),
         tx_jr: flag(w0, 0),
     }
