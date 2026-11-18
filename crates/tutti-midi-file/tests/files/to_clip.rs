@@ -8,7 +8,7 @@
 //! tests in `clip_model.rs`, and here it checks that the Flex and SysEx7
 //! packets the conversion makes survive them.
 
-use crate::common::{note, track};
+use crate::common::{metrical, note, track};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
     DropReason, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
@@ -79,7 +79,7 @@ fn a_set_tempo_is_ten_ns_units_per_quarter() {
         ),
         (0, note(0, 60)),
     ]);
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     assert_eq!(
         events_of(&clip)[0],
         (Tick(0), flex(Flex::SetTempo(50_000_000)))
@@ -92,7 +92,7 @@ fn a_set_tempo_is_ten_ns_units_per_quarter() {
             extra: Box::default(),
         }),
     )]);
-    let clip = slow.to_clip().unwrap().clip;
+    let clip = metrical(&slow).to_clip().unwrap().clip;
     assert_eq!(events_of(&clip)[0].1, flex(Flex::SetTempo(1_677_721_500)));
 }
 
@@ -123,7 +123,7 @@ fn a_time_signature_is_a_signature_and_a_metronome() {
             }),
         ),
     ]);
-    let events = smf.to_clip().unwrap().clip;
+    let events = metrical(&smf).to_clip().unwrap().clip;
     let [_, a, b] = events_of(&events) else {
         panic!("{:?}", events_of(&events));
     };
@@ -163,7 +163,7 @@ fn a_key_signature_is_the_sharps_and_the_tonic() {
                 extra: Box::default(),
             }),
         )]);
-        let clip = smf.to_clip().unwrap().clip;
+        let clip = metrical(&smf).to_clip().unwrap().clip;
         let key = events_of(&clip)
             .iter()
             .find_map(|(_, e)| match e {
@@ -210,7 +210,7 @@ fn copyright_and_lyrics_are_flex_text_over_several_packets() {
         (0, text(TextKind::Copyright, notice)),
         (10, text(TextKind::Lyric, "la")),
     ]);
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     let got = flex_texts(&clip);
     let mut padded = b"Someone Else".to_vec();
     padded.truncate(12);
@@ -259,7 +259,7 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
         ),
         (480, note(0, 60)),
     ]);
-    let bytes = smf.to_clip().unwrap().clip.to_bytes();
+    let bytes = metrical(&smf).to_clip().unwrap().clip.to_bytes();
     let words: Vec<u32> = bytes[8..]
         .as_chunks::<4>()
         .0
@@ -291,7 +291,7 @@ fn a_complete_sysex_is_sysex7_packets() {
         5,
         FileEvent::SysEx(vec![0x7E, 1, 2, 3, 4, 5, 6, 0xF7].into()),
     )]);
-    let converted = smf.to_clip().unwrap();
+    let converted = metrical(&smf).to_clip().unwrap();
     assert!(converted.dropped.is_empty());
     let packets: Vec<_> = events_of(&converted.clip)
         .iter()
@@ -314,7 +314,7 @@ fn a_sysex_that_is_not_one_complete_message_is_reported() {
     let divided = FileEvent::SysEx(vec![0x7E, 1, 2].into()); // no F7: continued by an F7 event
     let eight_bit = FileEvent::SysEx(vec![0x7E, 0x80, 0xF7].into());
     let smf = format0(vec![(0, divided.clone()), (1, eight_bit.clone())]);
-    let converted = smf.to_clip().unwrap();
+    let converted = metrical(&smf).to_clip().unwrap();
     let report: Vec<_> = converted
         .dropped
         .iter()
@@ -345,7 +345,7 @@ fn format_1_merges_by_tick_ties_in_track_order() {
         ],
     )
     .unwrap();
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     let notes: Vec<(u64, FileEvent)> = events_of(&clip)
         .iter()
         .filter(|(_, e)| matches!(e, FileEvent::Message(Message::Midi1(..))))
@@ -364,13 +364,22 @@ fn format_2_is_refused() {
         vec![track(vec![(0, note(0, 60))]), track(vec![(0, note(0, 61))])],
     )
     .unwrap();
-    assert!(matches!(smf.to_clip(), Err(ToClipError::Sequential)));
+    assert!(matches!(
+        metrical(&smf).to_clip(),
+        Err(ToClipError::Sequential)
+    ));
 }
 
 #[test]
 fn a_clip_is_not_converted_again() {
-    let clip = format0(vec![(0, note(0, 60))]).to_clip().unwrap().clip;
-    assert!(matches!(clip.to_clip(), Err(ToClipError::AlreadyClip)));
+    let clip = metrical(&format0(vec![(0, note(0, 60))]))
+        .to_clip()
+        .unwrap()
+        .clip;
+    assert!(matches!(
+        metrical(&clip).to_clip(),
+        Err(ToClipError::AlreadyClip)
+    ));
 }
 
 /// M2-116 sections 7.1.1 and 7.1.2: the first Set Tempo, then the first Set
@@ -405,7 +414,7 @@ fn the_first_tempo_and_signature_lead_the_clip() {
         ],
     )
     .unwrap();
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     let [sig, metronome] = signature_events(3, 2, 8, 24);
     let want = [
         flex(Flex::SetTempo(100_000_000)),
@@ -432,7 +441,7 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
             }),
         ),
     ]);
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     let [sig, metronome] = signature_events(4, 2, 8, 24);
     let got: Vec<_> = events_of(&clip)
         .iter()
@@ -462,7 +471,7 @@ fn a_tempo_at_tick_zero_is_not_defaulted() {
             extra: Box::default(),
         }),
     )]);
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     let tempos: Vec<_> = events_of(&clip)
         .iter()
         .filter_map(|(_, e)| match e {
@@ -490,8 +499,8 @@ fn the_division_and_the_end_carry_over() {
         ],
     )
     .unwrap();
-    let clip = smf.to_clip().unwrap().clip;
-    assert_eq!(clip.ticks_per_quarter().unwrap().get(), 96);
+    let clip = metrical(&smf).to_clip().unwrap().clip;
+    assert_eq!(metrical(&clip).ticks_per_quarter().get(), 96);
     assert_eq!(clip.tracks()[0].end(), Tick(400));
     assert!(clip.tracks()[0].header().is_empty());
 }
@@ -547,7 +556,7 @@ fn what_has_no_successor_is_reported_with_its_tick() {
         (15, other(0x30)), // unregistered
     ];
     let smf = format0(events.clone());
-    let converted = smf.to_clip().unwrap();
+    let converted = metrical(&smf).to_clip().unwrap();
     let reasons: Vec<(u64, DropReason)> = converted
         .dropped
         .iter()
@@ -606,7 +615,7 @@ fn the_first_track_names_the_sequence_and_the_others_are_reported() {
         ],
     )
     .unwrap();
-    let converted = smf.to_clip().unwrap();
+    let converted = metrical(&smf).to_clip().unwrap();
     assert_eq!(
         flex_texts(&converted.clip),
         [(
@@ -621,7 +630,7 @@ fn the_first_track_names_the_sequence_and_the_others_are_reported() {
     // Format 0: its one track's name is the sequence's.
     let zero = format0(vec![(0, text(TextKind::TrackName, "Solo"))]);
     assert_eq!(
-        flex_texts(&zero.to_clip().unwrap().clip)[0].0,
+        flex_texts(&metrical(&zero).to_clip().unwrap().clip)[0].0,
         FlexTextKind::CompositionName
     );
 }
@@ -643,7 +652,7 @@ fn text_that_flex_cannot_carry_is_reported() {
         (0, nul),
         (0, text(TextKind::Text, "remark")),
     ]);
-    let converted = smf.to_clip().unwrap();
+    let converted = metrical(&smf).to_clip().unwrap();
     let reasons: Vec<_> = converted.dropped.iter().map(|d| d.reason).collect();
     assert_eq!(
         reasons,
@@ -671,7 +680,7 @@ fn text_is_composed_to_nfc_without_a_byte_order_mark() {
         (0, text(TextKind::Lyric, "cafe\u{301}")),
         (0, text(TextKind::Copyright, "\u{FEFF}me")),
     ]);
-    let converted = smf.to_clip().unwrap();
+    let converted = metrical(&smf).to_clip().unwrap();
     assert!(converted.dropped.is_empty());
     assert_eq!(
         flex_texts(&converted.clip),
@@ -705,7 +714,7 @@ fn property_exchange_and_empty_text_are_reported() {
         (2, ci(0x70)), // Discovery: not PE
         (3, text(TextKind::Lyric, "")),
     ]);
-    let converted = smf.to_clip().unwrap();
+    let converted = metrical(&smf).to_clip().unwrap();
     let reasons: Vec<(u64, DropReason)> = converted
         .dropped
         .iter()
@@ -767,7 +776,7 @@ fn the_clip_round_trips_through_its_bytes() {
         ],
     )
     .unwrap();
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
 }
@@ -820,7 +829,7 @@ fn a_tempo_off_the_clock_grid_moves_to_the_nearest_position() {
         (60, tempo_event(200_000)),
         (70, note(0, 60)),
     ]);
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     assert_eq!(at_ticks(&done.clip, is_tempo), [0, 20, 40, 60]);
     let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
     assert_eq!(moves, [(29, 20), (30, 40)]);
@@ -837,7 +846,7 @@ fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
         vec![track(vec![(30, tempo_event(400_000)), (60, note(0, 60))])],
     )
     .unwrap();
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     assert_eq!(at_ticks(&clip, is_tempo), [0, 25]);
 }
 
@@ -853,7 +862,7 @@ fn a_tempo_does_not_move_past_the_end_of_the_clip() {
         vec![Track::new().push(Tick(90), tempo_event(400_000)).unwrap()],
     )
     .unwrap();
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     assert_eq!(at_ticks(&clip, is_tempo), [0, 88]);
 }
 
@@ -871,7 +880,7 @@ fn a_time_signature_off_a_bar_line_moves_to_the_nearest_bar_boundary() {
         (4160, signature_meta(2, 2)),
         (4400, note(0, 60)),
     ]);
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     assert_eq!(at_ticks(&done.clip, is_signature), [0, 1440, 4320]);
     let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
     assert_eq!(moves, [(1500, 1440), (4160, 4320)]);
@@ -883,7 +892,7 @@ fn a_time_signature_off_a_bar_line_moves_to_the_nearest_bar_boundary() {
 #[test]
 fn bars_before_the_first_time_signature_are_four_four() {
     let smf = format0(vec![(1000, signature_meta(3, 2)), (2000, note(0, 60))]);
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     // The default 4/4 at tick 0 leads, then the file's own at the next bar.
     assert_eq!(at_ticks(&done.clip, is_signature), [0, 1920]);
 }
@@ -897,7 +906,7 @@ fn events_on_their_grids_are_not_moved() {
         (1920, signature_meta(3, 2)),
         (1920 + 1440, tempo_event(300_000)),
     ]);
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     assert!(done.moved.is_empty());
     assert_eq!(at_ticks(&done.clip, is_tempo), [0, 960, 3360]);
 }
@@ -935,7 +944,7 @@ fn two_time_signatures_that_snap_to_one_bar_line_leave_the_later() {
             (400, note(0, 60)),
         ],
     );
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     let [sig, metronome] = signature_events(2, 2, 8, 24);
     // The default 4/4 at tick 0, then the later signature at 384.
     let got = flex_events(&done.clip, |e| {
@@ -973,7 +982,7 @@ fn two_tempos_that_snap_to_one_position_leave_the_later() {
         (28, tempo_event(300_000)),
         (60, note(0, 60)),
     ]);
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     assert_eq!(
         flex_events(&done.clip, is_tempo),
         [
@@ -998,7 +1007,7 @@ fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
         (480, tempo_event(0)),
         (960, note(0, 60)),
     ]);
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     assert_eq!(
         flex_events(&done.clip, is_tempo),
         [
@@ -1020,7 +1029,7 @@ fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
 #[test]
 fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, tempo_event(1_000_000)), (50, note(0, 60))]);
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
     assert_eq!(
@@ -1034,7 +1043,7 @@ fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
 #[test]
 fn a_signature_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, signature_meta(3, 2)), (50, note(0, 60))]);
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     let again = MidiFile::from_bytes(&clip.to_bytes()).unwrap();
     assert_eq!(again, clip);
     let [sig, _] = signature_events(3, 2, 8, 24);
@@ -1050,7 +1059,7 @@ fn a_signature_that_snaps_to_tick_zero_is_the_only_one_there() {
 fn ticks_at_the_largest_gap_stay_on_their_grids() {
     let at = 0x0FFF_FFFF - 3;
     let smf = format0(vec![(at, tempo_event(400_000)), (at, signature_meta(3, 2))]);
-    let clip = smf.to_clip().unwrap().clip;
+    let clip = metrical(&smf).to_clip().unwrap().clip;
     let tempo = flex_events(&clip, is_tempo).pop().unwrap().0;
     let signature = flex_events(&clip, is_signature).pop().unwrap().0;
     // 480 per quarter: tempo grid every 20 ticks, and bar lines of the
@@ -1077,7 +1086,7 @@ fn a_replacing_signature_counts_its_bars_from_the_one_before_the_replaced() {
             (400, note(0, 60)),
         ],
     );
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     let ticks = at_ticks(&done.clip, is_signature);
     assert_eq!(ticks, [0, 288]);
     let [three_four, _] = signature_events(3, 2, 8, 24);
@@ -1120,7 +1129,7 @@ fn lyrics_of_smf(lyrics: &[&str]) -> Vec<(u64, String)> {
         .zip(0u64..)
         .map(|(l, i)| (i * 10, text(TextKind::Lyric, l)))
         .collect();
-    lyrics_of(&format0(events).to_clip().unwrap().clip)
+    lyrics_of(&metrical(&format0(events)).to_clip().unwrap().clip)
 }
 
 fn lyric_texts(lyrics: &[&str]) -> Vec<String> {
@@ -1155,7 +1164,7 @@ fn a_lyric_that_cannot_be_a_message_is_reported() {
         (3, text(TextKind::Lyric, "a\0b")),
         (4, text(TextKind::Copyright, &"x".repeat(385))),
     ]);
-    let reasons: Vec<DropReason> = smf
+    let reasons: Vec<DropReason> = metrical(&smf)
         .to_clip()
         .unwrap()
         .dropped
@@ -1205,7 +1214,7 @@ fn a_lyric_whose_text_changes_is_listed_as_altered() {
         (30, text(TextKind::Lyric, "plain ")),
         (40, text(TextKind::Lyric, "-")),
     ]);
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     let altered: Vec<(u64, LyricChange)> =
         done.altered.iter().map(|a| (a.tick.0, a.change)).collect();
     assert_eq!(
@@ -1242,7 +1251,7 @@ fn a_lyric_of_only_a_break_with_no_syllable_before_is_reported() {
         (0, text(TextKind::Lyric, "/")),
         (5, text(TextKind::Lyric, "-")),
     ]);
-    let converted = smf.to_clip().unwrap();
+    let converted = metrical(&smf).to_clip().unwrap();
     let reasons: Vec<DropReason> = converted.dropped.iter().map(|d| d.reason).collect();
     assert_eq!(
         reasons,
@@ -1266,7 +1275,7 @@ fn a_lyric_keeps_the_tick_of_its_event() {
         (481, text(TextKind::Lyric, "/world")),
     ]);
     assert_eq!(
-        lyrics_of(&smf.to_clip().unwrap().clip),
+        lyrics_of(&metrical(&smf).to_clip().unwrap().clip),
         [
             (7, "Hel".to_owned()),
             (130, "lo ".to_owned()),
@@ -1291,7 +1300,7 @@ fn a_pickup_bar_has_its_own_signature_and_the_next_bar_a_new_one() {
         (480, signature_meta(4, 2)),
         (480, note(0, 62)),
     ]);
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     assert!(done.moved.is_empty());
     assert_eq!(at_ticks(&done.clip, is_signature), [0, 480]);
     let [pickup, _] = signature_events(1, 2, 8, 24);
@@ -1302,7 +1311,7 @@ fn a_pickup_bar_has_its_own_signature_and_the_next_bar_a_new_one() {
         .collect();
     assert_eq!(signatures, [pickup, bar]);
     // The pickup is one beat: the second bar begins a quarter note in.
-    assert_eq!(done.clip.beat_at(Tick(480)), Some(Beat(1.0)));
+    assert_eq!(metrical(&done.clip).beat_at(Tick(480)), Beat(1.0));
 }
 
 /// Without a signature for the pickup, a 4/4 bar is counted from the start of
@@ -1311,7 +1320,7 @@ fn a_pickup_bar_has_its_own_signature_and_the_next_bar_a_new_one() {
 #[test]
 fn a_signature_that_does_not_declare_the_pickup_is_off_the_bar_line() {
     let smf = format0(vec![(480, signature_meta(3, 2)), (480, note(0, 60))]);
-    let done = smf.to_clip().unwrap();
+    let done = metrical(&smf).to_clip().unwrap();
     let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
     assert_eq!(moves, [(480, 0)]);
 }

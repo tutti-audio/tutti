@@ -2,7 +2,7 @@
 //! laid out by hand from M2-116 (the structure rules are about *order*, which
 //! only a hand-built stream can get wrong on purpose).
 
-use crate::common::track;
+use crate::common::{metrical, track};
 
 use tutti_fixtures::midi;
 use tutti_midi_device::{
@@ -113,7 +113,7 @@ fn a_clip_reads_at_absolute_ticks() {
         MidiFileKind::detect(&file.to_bytes()),
         Some(MidiFileKind::ClipFile)
     );
-    assert_eq!(file.ticks_per_quarter(), Some(DIVISION));
+    assert_eq!(metrical(&file).ticks_per_quarter(), DIVISION);
     let events = &file.tracks()[0].events();
     assert_eq!(events.len(), 2, "structure is not an event");
     assert_eq!(events[0].0, Tick(0));
@@ -122,9 +122,9 @@ fn a_clip_reads_at_absolute_ticks() {
         events[0].1,
         FileEvent::Message(on(60, 0xABCD).decode().unwrap())
     );
-    assert_eq!(file.beat_at(events[1].0), Some(Beat(1.0)));
+    assert_eq!(metrical(&file).beat_at(events[1].0), Beat(1.0));
     // The clip's length is the delta before End of Clip.
-    assert_eq!(file.beat_at(file.end()), Some(Beat(2.0)));
+    assert_eq!(metrical(&file).beat_at(file.end()), Beat(2.0));
     // And a clip's notes keep all 16 bits.
     let notes: Vec<_> = file.tracks()[0].notes();
     assert_eq!(notes.len(), 1);
@@ -219,13 +219,16 @@ fn the_tempo_map_is_the_set_tempo_messages() {
     let close = |a: Seconds, b: f64| assert!((a.0 - b).abs() < 1e-9, "{a:?} vs {b}");
     close(file.seconds_at(Tick(4 * u64::from(q))), 2.0);
     close(file.seconds_at(Tick(8 * u64::from(q))), 6.0);
-    assert_eq!(file.tempo_map().unwrap().tempo_at(Beat(5.0)), Bpm::of(60.0));
+    assert_eq!(
+        metrical(&file).tempo_map().tempo_at(Beat(5.0)),
+        Bpm::of(60.0)
+    );
     // The messages are events, kept.
     assert_eq!(file.tracks()[0].events().len(), 2);
 
     let bare = MidiFile::from_bytes(&clip(&valid())).unwrap();
     assert_eq!(
-        bare.tempo_map().unwrap().constant_tempo(),
+        metrical(&bare).tempo_map().constant_tempo(),
         Some(Bpm::of(120.0))
     );
 }
@@ -284,7 +287,7 @@ fn a_dctpq_is_1_to_65535_and_zero_is_refused() {
     for ticks in [1, u16::MAX] {
         parts[1] = dctpq(ticks);
         let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
-        assert_eq!(file.ticks_per_quarter().unwrap().get(), ticks);
+        assert_eq!(metrical(&file).ticks_per_quarter().get(), ticks);
     }
 }
 
@@ -654,7 +657,7 @@ fn a_header_with_program_change_cc_and_sysex_round_trips() {
     );
     // Not on the sequence's timeline, not sounding at bar 1.
     assert_eq!(track.events().len(), 2);
-    assert_eq!(file.events().unwrap().count(), 2);
+    assert_eq!(metrical(&file).events().unwrap().count(), 2);
     assert_eq!(MidiFile::from_bytes(&file.to_bytes()).unwrap(), file);
 }
 
@@ -745,7 +748,7 @@ fn the_header_set_tempo_is_the_tempo_from_the_start_of_the_sequence() {
     ];
     parts.extend([dcs(q), set_tempo(50.0), dcs(q), on(60, 1), dcs(0), end()]);
     let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
-    let map = file.tempo_map().unwrap();
+    let map = metrical(&file).tempo_map();
     assert_eq!(map.tempo_at(Beat(0.5)), Bpm::of(100.0));
     assert_eq!(map.tempo_at(Beat(1.5)), Bpm::of(50.0));
     // One beat at 100 BPM (0.6 s) and one at 50 (1.2 s).

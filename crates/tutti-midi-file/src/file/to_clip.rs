@@ -1,4 +1,4 @@
-//! [`MidiFile::to_clip`]: a Standard MIDI File as a MIDI 2.0 Clip File.
+//! [`MetricalFile::to_clip`]: a Standard MIDI File as a MIDI 2.0 Clip File.
 //!
 //! M2-116 section 3.3: the SMF 1 Meta Events are replaced by new
 //! messages in the UMP Format, mostly Flex Data (message type D), and
@@ -17,7 +17,7 @@ use tutti_ump::{
 use unicode_normalization::UnicodeNormalization;
 
 use super::Container;
-use crate::{FileEvent, Meta, MicrosPerQuarter, MidiFile, TextKind, Tick, Track};
+use crate::{FileEvent, Meta, MetricalFile, MicrosPerQuarter, MidiFile, TextKind, Tick, Track};
 
 use lyrics::Lyrics;
 
@@ -33,11 +33,6 @@ pub enum ToClipError {
     /// clip to make of them.
     #[error("a format 2 file holds independent sequences; a clip is one")]
     Sequential,
-    /// The file is in SMPTE time: a Clip File's clockstamps count ticks of a
-    /// quarter note (M2-116 section 3.2.1, the DCTPQ), and a file of seconds
-    /// has no quarter to count them in.
-    #[error("a file in SMPTE time has no ticks per quarter note: a clip needs metrical time")]
-    Smpte,
     /// The file is a Clip File already.
     #[error("the file is a Clip File already")]
     AlreadyClip,
@@ -77,7 +72,7 @@ pub enum DropReason {
     /// is its padding, or one past the 384 bytes of a message.
     Text(SyllableError),
     /// A lyric with nothing but breaks and hyphens: it has no syllable, and
-    /// no syllable before it for the break to end (see [`MidiFile::to_clip`]).
+    /// no syllable before it for the break to end (see [`MetricalFile::to_clip`]).
     LyricWithoutSyllable,
     /// A Key Signature past 7 sharps or flats, which the Flex message does
     /// not hold.
@@ -100,7 +95,7 @@ pub enum DropReason {
     PropertyExchange,
     /// A Set Tempo or Time Signature that a later one of its kind replaced:
     /// a clip holds one of each at a position, and the later event wins
-    /// where both land on one (see [`MidiFile::to_clip`]).
+    /// where both land on one (see [`MetricalFile::to_clip`]).
     Superseded,
     /// A meta event of a typed kind whose data the kind does not define
     /// ([`Meta::Malformed`]): its value cannot be read.
@@ -172,7 +167,7 @@ pub struct Moved {
     pub event: FileEvent,
 }
 
-/// The result of [`MidiFile::to_clip`]: the clip and what it left out.
+/// The result of [`MetricalFile::to_clip`]: the clip and what it left out.
 ///
 /// A conversion that returned the clip alone would lose events without a word
 /// and one that failed on the first would make a file with one marker
@@ -444,7 +439,7 @@ enum Source {
     ),
 }
 
-impl MidiFile {
+impl MetricalFile<'_> {
     /// A Standard MIDI File of format 0 or 1 as a MIDI 2.0 Clip File
     /// (M2-116), its meta events replaced by the UMP messages of Appendix B,
     /// with the events that have no replacement beside it.
@@ -489,7 +484,7 @@ impl MidiFile {
     /// Nothing else is converted: [`DropReason`] lists what has no successor.
     ///
     /// Format 1's tracks merge into the clip's one sequence by tick, ties in
-    /// track order and then the track's own, as [`events`](Self::events) does.
+    /// track order and then the track's own, as [`events`](MetricalFile::events) does.
     /// Placement follows M2-116 sections 7.1.1 and 7.1.2: at tick 0 the Set
     /// Tempo messages come first and the Set Time Signature messages (each
     /// with its Set Metronome) next, then the rest; a file with no Set Tempo
@@ -529,24 +524,24 @@ impl MidiFile {
     /// # Errors
     ///
     /// [`ToClipError::Sequential`] for a format 2 file,
-    /// [`ToClipError::Smpte`] for a file in SMPTE time,
     /// [`ToClipError::AlreadyClip`] for a Clip File, [`ToClipError::TooLarge`]
     /// if the writer cannot hold the clip.
     #[must_use = "the Converted's `dropped` lists the events the clip lacks"]
-    pub fn to_clip(&self) -> Result<Converted, ToClipError> {
-        match self.container {
+    pub fn to_clip(self) -> Result<Converted, ToClipError> {
+        let Self {
+            file,
+            ticks_per_quarter: tpq,
+        } = self;
+        match file.container {
             Container::Smf(format, _) if !format.shares_timeline() => {
                 return Err(ToClipError::Sequential);
             }
             Container::Smf(..) => {}
             Container::Clip(_) => return Err(ToClipError::AlreadyClip),
         }
-        let Some(tpq) = self.ticks_per_quarter() else {
-            return Err(ToClipError::Smpte);
-        };
 
         // Track order, then the track's own: the stable sort by tick keeps it.
-        let mut all: Vec<(Tick, usize, &FileEvent)> = self
+        let mut all: Vec<(Tick, usize, &FileEvent)> = file
             .tracks()
             .iter()
             .enumerate()
@@ -554,7 +549,7 @@ impl MidiFile {
             .collect();
         all.sort_by_key(|&(tick, ..)| tick);
 
-        let end = self
+        let end = file
             .tracks()
             .iter()
             .map(|t| t.end)

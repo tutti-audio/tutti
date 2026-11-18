@@ -1,7 +1,7 @@
 //! The beat-to-tick inverse: `MidiFile::tick_at` and `Tick::from_beat` against
 //! the tick grid of the division (a tick is `1/ticks_per_quarter` of a quarter note).
 
-use crate::common::track;
+use crate::common::{metrical, track};
 use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Tick};
 use tutti_types::Beat;
 use tutti_ump::TicksPerQuarterNote;
@@ -25,7 +25,7 @@ fn tick_at_inverts_beat_at_for_every_tick_at_each_division() {
         let file = file(tpq);
         for t in (0..=40_000).chain([1 << 40, (1 << 52) + 1]) {
             assert_eq!(
-                file.tick_at(file.beat_at(Tick(t)).unwrap()),
+                metrical(&file).tick_at(metrical(&file).beat_at(Tick(t))),
                 Some(Tick(t)),
                 "tick {t} at {tpq}"
             );
@@ -35,9 +35,9 @@ fn tick_at_inverts_beat_at_for_every_tick_at_each_division() {
 
 #[test]
 fn whole_and_fractional_beats_land_on_their_analytic_ticks() {
-    assert_eq!(file(480).tick_at(Beat(1.5)), Some(Tick(720)));
-    assert_eq!(file(96).tick_at(Beat(4.0)), Some(Tick(384)));
-    assert_eq!(file(100).tick_at(Beat(0.25)), Some(Tick(25)));
+    assert_eq!(metrical(&file(480)).tick_at(Beat(1.5)), Some(Tick(720)));
+    assert_eq!(metrical(&file(96)).tick_at(Beat(4.0)), Some(Tick(384)));
+    assert_eq!(metrical(&file(100)).tick_at(Beat(0.25)), Some(Tick(25)));
     assert_eq!(Tick::from_beat(Beat(0.0), tpq(480)), Some(Tick(0)));
     assert_eq!(Tick::from_beat(Beat(-0.0), tpq(480)), Some(Tick(0)));
 }
@@ -77,9 +77,9 @@ fn a_beat_halfway_between_two_ticks_goes_to_the_later() {
 
 #[test]
 fn a_beat_before_zero_is_refused_even_within_half_a_tick() {
-    assert_eq!(file(480).tick_at(Beat(-1.0)), None);
-    assert_eq!(file(480).tick_at(Beat(-0.25 / 480.0)), None);
-    assert_eq!(file(480).tick_at(Beat(f64::NEG_INFINITY)), None);
+    assert_eq!(metrical(&file(480)).tick_at(Beat(-1.0)), None);
+    assert_eq!(metrical(&file(480)).tick_at(Beat(-0.25 / 480.0)), None);
+    assert_eq!(metrical(&file(480)).tick_at(Beat(f64::NEG_INFINITY)), None);
 }
 
 #[test]

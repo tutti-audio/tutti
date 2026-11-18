@@ -2,7 +2,7 @@
 //! and the writer's byte output, against bytes built from the SMF 1.0 spec
 //! (`support`, which shares no code with the crate).
 
-use crate::common::{note, track};
+use crate::common::{metrical, note, track};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
@@ -272,8 +272,8 @@ fn a_longer_header_is_read() {
     bytes.extend_from_slice(&4u32.to_be_bytes());
     bytes.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
     assert_eq!(
-        MidiFile::from_bytes(&bytes).unwrap().ticks_per_quarter(),
-        Some(DIVISION)
+        metrical(&MidiFile::from_bytes(&bytes).unwrap()).ticks_per_quarter(),
+        DIVISION
     );
 }
 
@@ -473,7 +473,7 @@ fn a_written_file_reads_back_equal() {
     .unwrap();
     let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
     assert_eq!(back.tracks(), file.tracks());
-    assert_eq!(back.ticks_per_quarter(), Some(DIVISION));
+    assert_eq!(metrical(&back).ticks_per_quarter(), DIVISION);
 }
 
 /// SMF 1.0 section 3.3: Set Tempo is `FF 51 03`, Time Signature `FF 58 04`, Key
@@ -515,7 +515,7 @@ fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
             "{kind:#04x} {data:?}"
         );
         assert_eq!(MidiFile::from_bytes(&written).unwrap(), read);
-        let converted = read.to_clip().unwrap();
+        let converted = metrical(&read).to_clip().unwrap();
         let reasons: Vec<DropReason> = converted.dropped.iter().map(|d| d.reason).collect();
         assert_eq!(reasons, [DropReason::MalformedMeta], "{kind:#04x} {data:?}");
     }

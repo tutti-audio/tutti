@@ -1,14 +1,15 @@
 //! An SMF's division word and format word (SMF 1.0 section 2.1): SMPTE time,
 //! a metrical division, and a format the specification leaves undefined.
 
+use crate::common::metrical;
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    FileEvent, FileTime, Meta, MicrosPerQuarter, MidiFile, OtherSmfFormat, ReadError, SmfDivision,
-    SmfFormat, SmfParseError, SmfTicksPerFrame, SmfTicksPerQuarter, Tick, TimelineError,
+    FileEvent, Meta, MicrosPerQuarter, MidiFile, OtherSmfFormat, ReadError, SmfDivision, SmfFormat,
+    SmfParseError, SmfTicksPerFrame, SmfTicksPerQuarter, Tick, Timebase, TimelineError,
 };
 use tutti_midi_protocol::MtcRate;
-use tutti_types::{Beat, Seconds};
+use tutti_types::Seconds;
 
 fn read(bytes: &[u8]) -> MidiFile {
     MidiFile::from_bytes(bytes).expect("reads")
@@ -149,23 +150,14 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
         ]],
     );
     let file = read(&bytes);
-    let at: Vec<FileTime> = file.events().unwrap().map(|(time, _)| time).collect();
-    assert_eq!(
-        at,
-        [
-            FileTime::Seconds(Seconds(0.0)),
-            FileTime::Seconds(Seconds(1.0)),
-            FileTime::Seconds(Seconds(2.5)),
-        ]
-    );
+    let smpte = file.timebase().smpte().expect("an SMPTE file");
+    let at: Vec<Seconds> = smpte.events().unwrap().map(|(time, _)| time).collect();
+    assert_eq!(at, [Seconds(0.0), Seconds(1.0), Seconds(2.5)]);
+    assert_eq!(smpte.fps(), MtcRate::Fps25);
+    assert_eq!(smpte.ticks_per_frame(), SmfTicksPerFrame::of(40));
     assert_eq!(file.seconds_at(file.end()), Seconds(2.5));
-    // A quarter-note grid does not exist.
-    assert_eq!(file.ticks_per_quarter(), None);
-    assert_eq!(file.beat_at(Tick(1_000)), None);
-    assert_eq!(file.tick_at(Beat(1.0)), None);
-    assert!(file.tempo_map().is_none());
-    assert!(file.tempo_map_of(0).is_none());
-    assert_eq!(file.timeline().unwrap_err(), TimelineError::Smpte);
+    // A quarter-note grid does not exist: no view of it, so no beat, tempo map or timeline.
+    assert!(file.timebase().metrical().is_none());
     // The Set Tempo is still an event and is written back.
     assert!(matches!(
         file.tracks()[0].events()[0].1,
@@ -199,12 +191,12 @@ fn a_format_3_file_reads_as_its_tracks_and_writes_back_exactly() {
     // Nothing says the tracks share a timeline, so they are kept apart as a
     // format 2 file's are.
     assert!(matches!(
-        file.events(),
+        metrical(&file).events().map(|_| ()),
         Err(TimelineError::NoCommonTimeline)
     ));
-    assert!(file.tempo_map_of(1).is_some());
+    assert!(metrical(&file).tempo_map_of(1).is_some());
     assert_eq!(
-        file.timeline().unwrap_err(),
+        metrical(&file).timeline().unwrap_err(),
         TimelineError::NoCommonTimeline
     );
 }
@@ -225,20 +217,18 @@ fn a_format_word_is_kept_whatever_it_is() {
 }
 
 /// An SMPTE file cannot be a Clip File, whose clockstamps are quarter-note
-/// ticks. Here: the ordinary note is in the file, and the conversion names why.
+/// ticks: it has no metrical view to convert from. The same events at a
+/// metrical division convert.
 #[test]
 fn a_file_in_smpte_time_has_no_clip() {
-    let file = read(&one_note(Division::Smpte {
+    let smpte = read(&one_note(Division::Smpte {
         fps: -25,
         ticks_per_frame: 40,
     }));
-    assert_eq!(
-        file.to_clip().unwrap_err(),
-        tutti_midi_file::ToClipError::Smpte
-    );
-    // The same events at a metrical division convert.
-    let metrical = read(&one_note(Division::Metrical(96)));
-    assert!(metrical.to_clip().is_ok());
+    assert!(matches!(smpte.timebase(), Timebase::Smpte(_)));
+    let file = read(&one_note(Division::Metrical(96)));
+    assert!(matches!(file.timebase(), Timebase::Metrical(_)));
+    assert!(metrical(&file).to_clip().is_ok());
 }
 
 /// SMF 1.0 section 2.1: 15 bits of ticks per quarter note, zero is none.

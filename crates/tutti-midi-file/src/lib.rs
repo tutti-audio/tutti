@@ -7,8 +7,9 @@
 //! A [`MidiFile`] is its container (an SMF's format 0, 1, 2 or above, or a Clip File),
 //! its division, its [`Track`]s and the `TempoMap` its tempo events declare. A
 //! track is `(Tick, FileEvent)` in order and where it ends. Ticks are integers,
-//! so a write is exact; [`MidiFile::events`] gives the merged timeline as
-//! [`Beat`](tutti_types::Beat)s, [`MidiFile::timeline`] the same as packets for a clip, and [`Track::notes`] pairs Note Ons with Note
+//! so a write is exact; [`MidiFile::timebase`] says what a tick counts, and the
+//! metrical view's [`MetricalFile::events`] gives the merged timeline as
+//! [`Beat`](tutti_types::Beat)s, [`MetricalFile::timeline`] the same as packets for a clip, and [`Track::notes`] pairs Note Ons with Note
 //! Offs.
 //!
 //! - **A [`FileEvent`]** is a `Message` (an SMF's channel message is MIDI 1.0 on
@@ -22,11 +23,11 @@
 //!   Timestamp messages, and the Utility messages M2-104 does not define.
 //! - **Truncation is an error** ([`SmfParseError::ChunkCutOff`] and its siblings, with the position it was found at), not a shorter file.
 //! - **Format 2** keeps its sequences apart: no merged `events()`, a tempo map
-//!   per track ([`MidiFile::tempo_map_of`]). So does a format above 2, which
+//!   per track ([`MetricalFile::tempo_map_of`]). So does a format above 2, which
 //!   the specification leaves undefined and a reader may still read as its
 //!   track chunks ([`SmfFormat::Other`]); the format word is written back
 //!   as read.
-//! - **Tempo** is `MidiFile::tempo_map()`, steps at the tick each Set Tempo (an
+//! - **Tempo** is [`MetricalFile::tempo_map`], steps at the tick each Set Tempo (an
 //!   SMF's meta event, a Clip File's Flex Data message) lands on; 120 BPM until
 //!   the first if none is at the start. `seconds_at` integrates it. The map is
 //!   derived from the events, so a Set Tempo stays an event of its track and a
@@ -43,17 +44,18 @@
 //!   not read is refused with [`ClipFileError::ProfileOn`].
 //! - **A clip's first bar starts at Start of Clip**, tick 0 of the sequence. A
 //!   pickup bar is a first bar with a Set Time Signature of its own length, and
-//!   the bar after it starts with a new one; [`MidiFile::to_clip`] keeps both on
+//!   the bar after it starts with a new one; [`MetricalFile::to_clip`] keeps both on
 //!   the bar line the pickup's signature makes. The first Set Tempo and Set Time
 //!   Signature at tick 0 are written under the Delta Clockstamp before Start of
 //!   Clip.
 //! - **SMPTE time is read.** A division with its top bit set
 //!   ([`SmfDivision::Smpte`]) counts ticks of `fps * ticks per frame` a second,
-//!   29.97 being 30000/1001: [`MidiFile::seconds_at`] and [`MidiFile::events`]
-//!   answer in seconds. It has no beat grid, so it has no tempo map or beats
-//!   and [`MidiFile::to_clip`] refuses it ([`ToClipError::Smpte`]).
+//!   29.97 being 30000/1001: [`MidiFile::seconds_at`] and [`SmpteFile::events`]
+//!   answer in seconds. It has no beat grid, so [`MidiFile::timebase`] gives it
+//!   a [`SmpteFile`] view with no tempo map, beats, timeline or clip: those are
+//!   the [`MetricalFile`]'s.
 //!
-//! - **To a Clip File.** [`MidiFile::to_clip`] converts a format 0 or 1 SMF: its meta
+//! - **To a Clip File.** [`MetricalFile::to_clip`] converts a format 0 or 1 SMF: its meta
 //!   events become the Flex Data messages of M2-116 Appendix B, and what has no UMP
 //!   form comes back in [`Converted::dropped`], never lost silently. A Set Tempo or Time
 //!   Signature off the grid a Clip File requires moves to the nearest position and is
@@ -87,10 +89,10 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! A clip plays a file's messages as they are: `file.timeline()` is a [`Timeline`]
+//! A clip plays a file's messages as they are: `file.timebase().metrical()`'s `timeline()` is a [`Timeline`]
 //! whose `packets` are `(Beat, Ump)` pairs (channel messages as their packets, SysEx
 //! as SysEx7 packets, a divided SysEx as a Start, Continues and an End each at its
-//! own event's beat, meta events left out: the tempo is [`MidiFile::tempo_map`]) and
+//! own event's beat, meta events left out: the tempo is [`MetricalFile::tempo_map`]) and
 //! whose `dropped` lists the SysEx and escape events no packet holds. A format 2
 //! file has no one timeline and is refused with `TimelineError::NoCommonTimeline`.
 //!
@@ -131,10 +133,10 @@ pub use config::{OutOfOrder, Refusal, TrackPart, TracksError};
 pub use error::{ReadError, WriteError};
 pub use fault::SmfParseError;
 pub use file::{
-    Altered, Converted, DropReason, Dropped, FileEvent, FileTime, LyricChange, MalformedMeta, Meta,
-    MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFile, Moved, OtherMetaKind,
+    Altered, Converted, DropReason, Dropped, FileEvent, LyricChange, MalformedMeta, Meta,
+    MetricalFile, MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFile, Moved, OtherMetaKind,
     OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, SmfFormat,
-    TextKind, Tick, Timeline, TimelineDrop, TimelineError, ToClipError, Track,
+    SmpteFile, TextKind, Tick, Timebase, Timeline, TimelineDrop, TimelineError, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use smf::{
