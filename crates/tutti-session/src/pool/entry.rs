@@ -2,6 +2,7 @@
 
 use std::any::{Any, TypeId};
 use std::fmt;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -75,15 +76,6 @@ pub trait PoolEntry<S: Float = f32>: Send + 'static {
     /// data kind is never lost.
     fn is_lost(_loaded: &Self::Loaded) -> bool {
         false
-    }
-
-    /// Another owner of `loaded`, for an entry declared with
-    /// [`Declared::shared`]: a kind whose value is an `Arc` (or another cheap
-    /// handle) returns a clone. The default is none, so a kind that does not
-    /// say how to share is not shared.
-    fn share(loaded: &Self::Loaded) -> Option<Self::Loaded> {
-        let _ = loaded;
-        None
     }
 
     /// What the pool does with a loaded value that only snapshots hold, past
@@ -507,16 +499,27 @@ impl<K, S: Float> fmt::Debug for PoolSet<K, S> {
 }
 
 /// One entry, declared under the pool key `K`: what a kind's builder
-/// (`audio_file(key, path)`) returns.
+/// (`audio_file(key, path)`) returns. `M` says whether it is one instance per
+/// key ([`Owned`]) or shares its load with the keys of the same identity
+/// ([`Sharing`]).
 #[must_use = "an entry is declared by passing it to Session::pool"]
 #[derive(Clone, Debug)]
-pub struct Declared<K, E> {
+pub struct Declared<K, E, M = Owned> {
     key: K,
     pub(crate) entry: E,
-    share: bool,
+    _mode: PhantomData<M>,
 }
 
-impl<K, E> Declared<K, E> {
+/// A [`Declared`] that is one instance per key: [`Declared::new`].
+#[derive(Clone, Copy, Debug)]
+pub struct Owned;
+
+/// A [`Declared`] that shares its load: [`Declared::shared`]. Its kind's loaded
+/// value is `Clone`, which [`Session::pool`](crate::Session::pool) checks.
+#[derive(Clone, Copy, Debug)]
+pub struct Sharing;
+
+impl<K, E, M> Declared<K, E, M> {
     /// The entry, for a kind's builder to set its options on.
     #[cfg(feature = "midi")]
     pub(crate) fn entry_mut(&mut self) -> &mut E {
@@ -524,43 +527,92 @@ impl<K, E> Declared<K, E> {
     }
 }
 
-impl<K, E> Declared<K, E> {
+impl<K, E> Declared<K, E, Owned> {
     /// `entry`, declared under `key`: one instance per key, even when another
     /// key is declared with the same identity.
     pub const fn new(key: K, entry: E) -> Self {
         Self {
             key,
             entry,
-            share: false,
+            _mode: PhantomData,
         }
     }
+}
 
+impl<K, E> Declared<K, E, Sharing> {
     /// `entry`, declared under `key` as a resource that shares: another key
     /// declared with the same kind and identity, and shared too, shares this
     /// one's load, and every handle reads the same loaded value (a
     /// [`Clone`] of it, an `Arc`). The data kinds (`audio_file` and
     /// `soundfont`) are declared this way; a kind with
     /// something live behind it (a plugin client, a capture) uses
-    /// [`new`](Self::new). A shared kind says how to clone its loaded value
-    /// ([`PoolEntry::share`]); one that does not is not shared.
+    /// [`new`](Declared::new).
     ///
     /// Every key's handle reads a clone of the loaded value, and the clones drop
     /// on whatever thread releases their key: a kind whose loaded value must
     /// drop on the main thread must not be shared.
+    ///
+    /// A kind whose loaded value is not `Clone` cannot be shared: declaring it
+    /// fails to build at the [`pool`](crate::Session::pool) call.
+    ///
+    /// ```
+    /// use tutti_session::{Declared, Life, Load, PoolEntry, Session};
+    ///
+    /// struct Kind;
+    /// impl PoolEntry for Kind {
+    ///     type Identity = ();
+    ///     type Loaded = u32;
+    ///     type Handle = ();
+    ///     fn identity(&self) {}
+    ///     fn load(&self) -> Load<u32> {
+    ///         Load::ready(0)
+    ///     }
+    ///     fn handle(_: &u32, _: &Life) {}
+    /// }
+    ///
+    /// fn declare(session: &mut Session) {
+    ///     session.pool(Declared::shared("a", Kind)).unwrap();
+    /// }
+    /// ```
+    ///
+    /// With a `Loaded` that is not `Clone` the same call is refused:
+    ///
+    /// ```compile_fail,E0277
+    /// use tutti_session::{Declared, Life, Load, PoolEntry, Session};
+    ///
+    /// struct NotClone;
+    /// struct Kind;
+    /// impl PoolEntry for Kind {
+    ///     type Identity = ();
+    ///     type Loaded = NotClone;
+    ///     type Handle = ();
+    ///     fn identity(&self) {}
+    ///     fn load(&self) -> Load<NotClone> {
+    ///         Load::ready(NotClone)
+    ///     }
+    ///     fn handle(_: &NotClone, _: &Life) {}
+    /// }
+    ///
+    /// fn declare(session: &mut Session) {
+    ///     session.pool(Declared::shared("a", Kind)).unwrap();
+    /// }
+    /// ```
     pub const fn shared(key: K, entry: E) -> Self {
         Self {
             key,
             entry,
-            share: true,
+            _mode: PhantomData,
         }
     }
 }
 
-fn clone_loaded<E: PoolEntry<S>, S: Float>(value: &Value) -> Option<Value> {
+fn clone_loaded<E: PoolEntry<S>, S: Float>(value: &Value) -> Option<Value>
+where
+    E::Loaded: Clone,
+{
     value
         .downcast_ref::<E::Loaded>()
-        .and_then(E::share)
-        .map(|loaded| Box::new(loaded) as Value)
+        .map(|loaded| Box::new(loaded.clone()) as Value)
 }
 
 /// `E`'s [`park`](PoolEntry::park) over an erased value: the value back when the
@@ -586,10 +638,28 @@ pub trait IntoPool<K, S: Float = f32> {
     fn into_pool(self, set: &mut PoolSet<K, S>);
 }
 
-impl<K, S: Float, E: PoolEntry<S>> IntoPool<K, S> for Declared<K, E> {
+impl<K, S: Float, E: PoolEntry<S>> IntoPool<K, S> for Declared<K, E, Owned> {
     fn into_pool(self, set: &mut PoolSet<K, S>) {
-        let Self { key, entry, share } = self;
-        set.items.push(Item {
+        let Self { key, entry, .. } = self;
+        set.items.push(Item::of(key, entry, None));
+    }
+}
+
+impl<K, S: Float, E: PoolEntry<S>> IntoPool<K, S> for Declared<K, E, Sharing>
+where
+    E::Loaded: Clone,
+{
+    fn into_pool(self, set: &mut PoolSet<K, S>) {
+        let Self { key, entry, .. } = self;
+        set.items
+            .push(Item::of(key, entry, Some(clone_loaded::<E, S>)));
+    }
+}
+
+impl<K, S: Float> Item<K, S> {
+    /// The item for `entry` under `key`, its kind and load erased.
+    fn of<E: PoolEntry<S>>(key: K, entry: E, share: Option<Cloner>) -> Self {
+        Self {
             key,
             kind: TypeId::of::<E>(),
             identity: Box::new(entry.identity()),
@@ -597,9 +667,9 @@ impl<K, S: Float, E: PoolEntry<S>> IntoPool<K, S> for Declared<K, E> {
             lost: lost::<E, S>,
             park: park::<E, S>,
             file: entry.file().map(Path::to_path_buf),
-            share: share.then_some(clone_loaded::<E, S>),
+            share,
             reload: Box::new(move || entry.load().erase()),
-        });
+        }
     }
 }
 

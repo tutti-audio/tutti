@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{Spawned, events, session, state};
-use crate::{Declared, Life, Load, LoadError, PoolEntry, PoolKey, RefreshReport};
+use crate::{Declared, Life, Load, LoadError, PoolEntry, PoolKey, RefreshReport, Sharing};
 
 /// A kind that reads a whole file: the loaded value is its bytes.
 struct Read {
@@ -41,13 +41,13 @@ impl PoolEntry for Read {
     fn handle(loaded: &Arc<Vec<u8>>, _: &Life) -> Arc<Vec<u8>> {
         Arc::clone(loaded)
     }
-
-    fn share(loaded: &Arc<Vec<u8>>) -> Option<Arc<Vec<u8>>> {
-        Some(Arc::clone(loaded))
-    }
 }
 
-fn read(key: &'static str, path: &Path, reads: &Arc<AtomicUsize>) -> Declared<&'static str, Read> {
+fn read(
+    key: &'static str,
+    path: &Path,
+    reads: &Arc<AtomicUsize>,
+) -> Declared<&'static str, Read, Sharing> {
     Declared::shared(
         key,
         Read {

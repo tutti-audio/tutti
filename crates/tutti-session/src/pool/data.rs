@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry};
+use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry, Sharing};
 
 /// A wave file: [`audio_file`]'s entry, decoded whole (resident) or probed for
 /// a disk stream ([`streamed`](Declared::streamed)).
@@ -95,7 +95,7 @@ impl AudioFile {
 /// as [`AudioEntry::Resident`]. Another key declared with the same path shares
 /// the one decode, and every handle is the same `Arc`.
 #[cfg(all(feature = "sampler", codec))]
-pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile> {
+pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile, Sharing> {
     Declared::shared(
         key,
         AudioFile {
@@ -106,7 +106,7 @@ pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile>
 }
 
 #[cfg(all(feature = "sampler", codec))]
-impl<K> Declared<K, AudioFile> {
+impl<K, M> Declared<K, AudioFile, M> {
     /// The file played from disk: its entry reads as [`AudioEntry::Streamed`]
     /// and fails with [`LoadError::NotStreamable`] for a file this build cannot
     /// stream. The tier is part of the identity: changing it reloads.
@@ -181,10 +181,6 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
     fn handle(loaded: &Self::Loaded, _: &Life) -> Self::Handle {
         loaded.clone()
     }
-
-    fn share(loaded: &Self::Loaded) -> Option<Self::Loaded> {
-        Some(loaded.clone())
-    }
 }
 
 #[cfg(all(feature = "sampler", codec))]
@@ -219,7 +215,7 @@ pub struct SoundFontFile {
 /// Declares the SoundFont at `path` under `key`. Another key declared with the
 /// same path shares the one parse, and every handle is the same `Arc`.
 #[cfg(feature = "soundfont")]
-pub fn soundfont<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, SoundFontFile> {
+pub fn soundfont<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, SoundFontFile, Sharing> {
     Declared::shared(key, SoundFontFile { path: path.into() })
 }
 
@@ -248,9 +244,5 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for SoundFontFile {
 
     fn handle(loaded: &Self::Loaded, _: &Life) -> Self::Handle {
         Arc::clone(loaded)
-    }
-
-    fn share(loaded: &Self::Loaded) -> Option<Self::Loaded> {
-        Some(Arc::clone(loaded))
     }
 }

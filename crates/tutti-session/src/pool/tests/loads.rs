@@ -165,10 +165,6 @@ impl PoolEntry for Stub {
         }
     }
 
-    fn share(loaded: &Arc<Made>) -> Option<Arc<Made>> {
-        Some(Arc::clone(loaded))
-    }
-
     fn is_lost(loaded: &Arc<Made>) -> bool {
         loaded.lost.load(Ordering::SeqCst)
     }

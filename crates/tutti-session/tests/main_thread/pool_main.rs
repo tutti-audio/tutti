@@ -140,10 +140,6 @@ impl PoolEntry for Dual {
     fn handle(loaded: &Arc<u32>, _: &Life) -> Arc<u32> {
         Arc::clone(loaded)
     }
-
-    fn share(loaded: &Arc<u32>) -> Option<Arc<u32>> {
-        Some(Arc::clone(loaded))
-    }
 }
 
 fn held_session() -> (DetachedSession, Arc<Mutex<Vec<Task>>>) {

@@ -78,7 +78,8 @@ pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use data::{SoundFontFile, soundfont};
 pub(crate) use entry::Staged;
 pub use entry::{
-    Declared, IntoPool, Life, Load, LoadError, Parking, PoolEntry, PoolSet, stranded_loads,
+    Declared, IntoPool, Life, Load, LoadError, Owned, Parking, PoolEntry, PoolSet, Sharing,
+    stranded_loads,
 };
 pub use job::{PoolJobError, PoolLoaded, RefreshPool};
 pub use key::PoolKey;
