@@ -15,6 +15,7 @@
 )]
 
 use common::spec_of;
+use tutti_buffers::Float;
 use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
@@ -31,7 +32,7 @@ use tutti_graph::{
 };
 use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_ump::Ump;
-use tutti_units::{Latency, Real, Samples, Tail};
+use tutti_units::{Latency, Samples, Tail};
 
 const BLOCK: usize = 64;
 /// The most a block here is: what every `Pair` is prepared for.

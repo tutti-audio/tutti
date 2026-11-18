@@ -834,7 +834,6 @@ mod tests {
     use tutti_graph::{Env, Offset, TransportChanges, TransportPosition};
     use tutti_music::LoopRange;
     use tutti_types::MAX_CHANNELS;
-    use tutti_units::Real;
     use tutti_units::{PlaybackRate, Seconds, SrcRatio};
 
     /// [`super::read_frame`] with the placement a reader of `out`'s width has.
@@ -1181,7 +1180,7 @@ mod tests {
 
     /// Narrowing goes through the engine's ITU-R BS.775 matrix, not a front-pair
     /// truncation: a centre-only 5.1 source must reach both stereo outputs at
-    /// −3 dB ([`MINUS_3_DB`](Real::MINUS_3_DB)), the ITU figure.
+    /// −3 dB ([`MINUS_3_DB`](Float::MINUS_3_DB)), the ITU figure.
     #[test]
     fn six_channel_wave_on_a_stereo_frame_folds_through_the_itu_matrix() {
         // 5.1 order: L R C LFE Ls Rs — centre only.
@@ -1194,7 +1193,11 @@ mod tests {
         let mut out = [0.0f32; 2];
         read_frame(&w, 4.0, &mut out);
 
-        assert_eq!(out, [<f32 as Real>::MINUS_3_DB; 2], "the ITU centre figure");
+        assert_eq!(
+            out,
+            [<f32 as Float>::MINUS_3_DB; 2],
+            "the ITU centre figure"
+        );
         assert!(
             out[0] > 0.5 && out[1] > 0.5,
             "centre was dropped — this is front-pair truncation, not a fold: {out:?}"
@@ -1333,7 +1336,10 @@ mod tests {
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
         let mut out = [9.0f32; 8];
         super::read_frame(&w, &place, SamplePosition(4.0), &mut out);
-        assert!((out[0] - <f32 as Real>::MINUS_3_DB).abs() < 1e-6, "{out:?}");
+        assert!(
+            (out[0] - <f32 as Float>::MINUS_3_DB).abs() < 1e-6,
+            "{out:?}"
+        );
         assert!(out[1..].iter().all(|&s| s.abs() < 1e-6), "{out:?}");
 
         let mut quad = Wave::new(4, SampleRate::SR_48K);
@@ -1349,7 +1355,7 @@ mod tests {
             SamplePosition(4.0),
             &mut out,
         );
-        let m = <f32 as Real>::MINUS_3_DB;
+        let m = <f32 as Float>::MINUS_3_DB;
         assert!((out[0] - (1.0 + m * 4.0)).abs() < 1e-5 && (out[1] - (2.0 + m * 8.0)).abs() < 1e-5);
     }
 

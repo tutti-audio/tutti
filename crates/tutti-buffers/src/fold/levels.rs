@@ -5,7 +5,7 @@ use core::marker::PhantomData;
 use super::{Fold, FoldError};
 use crate::Float;
 use tutti_types::ChannelTopology;
-use tutti_units::{Amplitude, Real};
+use tutti_units::Amplitude;
 
 /// The gains a fold applies where a speaker the destination lacks folds into
 /// the nearest ones.

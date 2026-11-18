@@ -7,11 +7,12 @@
 //! centre and the surrounds, the LFE left out), not another render.
 
 use crate::support::{EncodeConfig, ExportConfig, write_buffers};
+use tutti_buffers::Float;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{ConfigError, Error, Rendered};
 use tutti_types::ChannelLayout;
 use tutti_types::{ChannelTopology, Speaker};
-use tutti_units::{Real, SampleRate};
+use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const FRAMES: usize = 256;

@@ -4,13 +4,14 @@
 //! Every figure is analytic: a `Const` writes a known value per channel and the
 //! expected frame is written out from the ITU rules and the ramp's formula.
 
+use tutti_buffers::Float;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::{OutputMap, OutputStrip, RoutingError};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{OutPort, OutputPolicy, OutputPolicyError, Root, Session, SessionBuilder};
 use tutti_types::{Bed, ChannelLayout, MaxBlock};
-use tutti_units::{Amplitude, Real, SampleRate, Samples};
+use tutti_units::{Amplitude, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

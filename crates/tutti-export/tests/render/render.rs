@@ -24,7 +24,7 @@ use tutti_transport::{FrozenClock, RenderClock};
 use tutti_types::ChannelTopology;
 use tutti_types::{Bed, ChannelLayout};
 use tutti_units::Seconds;
-use tutti_units::{Amplitude, Drive, Hz, Real, SampleRate};
+use tutti_units::{Amplitude, Drive, Hz, SampleRate};
 
 /// The rate [`config`] renders at.
 const RATE: SampleRate = SampleRate::SR_44K1;
@@ -1386,7 +1386,7 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
     let swapped = ChannelTopology::assumed(ChannelLayout::from(6u16));
     assert!(swapped.index_of(Speaker::FrontLeft).is_some());
     let mut six = six_channels(swapped);
-    let m = <f32 as Real>::MINUS_3_DB;
+    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     let stereo = first_frame(&mut six, 2).unwrap();
     assert_eq!(stereo, [1.0 + m * 3.0 + m * 5.0, 2.0 + m * 3.0 + m * 6.0]);
     // The same six, the front pair declared the other way round.

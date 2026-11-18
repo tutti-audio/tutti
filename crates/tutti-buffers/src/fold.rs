@@ -322,7 +322,7 @@ impl<F: Float> Row<F> {
 ///   samples copied bit for bit.
 /// - **A speaker in both:** it goes straight across at gain 1.0.
 /// - **A speaker the destination lacks** folds into the nearest ones the
-///   destination has, at −3 dB ([`MINUS_3_DB`](tutti_units::Real::MINUS_3_DB)), by a fixed table:
+///   destination has, at −3 dB ([`MINUS_3_DB`](Float::MINUS_3_DB)), by a fixed table:
 ///   the centre into front left and right; a side or rear speaker into its
 ///   counterpart (side for rear and back) or else the front speaker on
 ///   its side; a top-back speaker into the back, else the side surround, else
@@ -368,7 +368,7 @@ impl<F: Float> Row<F> {
 ///   an identity).
 ///
 /// The matrix is **not normalised**: full scale on every 5.1 channel gives
-/// `1 + 2·`[`MINUS_3_DB`](tutti_units::Real::MINUS_3_DB)` = 2.414` per side. Headroom is
+/// `1 + 2·`[`MINUS_3_DB`](Float::MINUS_3_DB)` = 2.414` per side. Headroom is
 /// the caller's.
 ///
 /// # Summing order

@@ -1,11 +1,12 @@
 //! The fold's appliers over views: each writes the analytic figure of the
 //! pair, and each refuses a width or length mismatch before it writes.
 
+use tutti_buffers::Float;
 use tutti_buffers::{BufferError, Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, ChannelTopology};
-use tutti_units::{Real, Samples};
+use tutti_units::Samples;
 
-const M: f32 = <f32 as Real>::MINUS_3_DB;
+const M: f32 = <f32 as Float>::MINUS_3_DB;
 
 fn smpte(n: u16) -> ChannelTopology {
     ChannelTopology::assumed(ChannelLayout::from(n))

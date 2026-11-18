@@ -78,16 +78,16 @@ fn the_constants_are_the_analytic_values() {
 )]
 fn minus_3_db_is_one_over_root_two() {
     assert_eq!(
-        <f32 as Real>::MINUS_3_DB.to_bits(),
+        <f32 as Float>::MINUS_3_DB.to_bits(),
         core::f32::consts::FRAC_1_SQRT_2.to_bits()
     );
     assert_eq!(
-        <f64 as Real>::MINUS_3_DB.to_bits(),
+        <f64 as Float>::MINUS_3_DB.to_bits(),
         core::f64::consts::FRAC_1_SQRT_2.to_bits()
     );
-    assert!((<f32 as Real>::MINUS_3_DB - 0.7071).abs() < 1e-4);
-    assert!((<f64 as Real>::MINUS_3_DB.powi(2) - 0.5).abs() < 1e-15);
-    let db = 20.0 * <f64 as Real>::log10(<f64 as Real>::MINUS_3_DB);
+    assert!((<f32 as Float>::MINUS_3_DB - 0.7071).abs() < 1e-4);
+    assert!((<f64 as Float>::MINUS_3_DB.powi(2) - 0.5).abs() < 1e-15);
+    let db = 20.0 * <f64 as Real>::log10(<f64 as Float>::MINUS_3_DB);
     assert!((db + 3.0103).abs() < 1e-4, "{db}");
 }
 

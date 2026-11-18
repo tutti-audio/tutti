@@ -2,12 +2,11 @@
 //! (`fold_to_width`): by speaker where both ends have an order, by index
 //! where either has none, and never a guess.
 
-use tutti_buffers::FoldError;
+use tutti_buffers::{Float, FoldError};
 use tutti_graph::{RootError, fold_to_width};
 use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
-use tutti_units::Real;
 
-const M: f32 = <f32 as Real>::MINUS_3_DB;
+const M: f32 = <f32 as Float>::MINUS_3_DB;
 
 fn smpte(n: u16) -> ChannelTopology {
     ChannelTopology::assumed(ChannelLayout::from(n))

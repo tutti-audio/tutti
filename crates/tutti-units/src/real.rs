@@ -17,10 +17,10 @@ use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Sub, S
 ///
 /// assert_eq!(<f32 as Real>::sqrt(4.0), 2.0);
 /// assert_eq!(<f64 as Real>::exp(0.0), 1.0);
-/// assert_eq!(<f64 as Real>::MINUS_3_DB, core::f64::consts::FRAC_1_SQRT_2);
 /// ```
 pub trait Real:
-    Copy
+    sealed::Sealed
+    + Copy
     + Debug
     + Display
     + PartialEq
@@ -59,10 +59,6 @@ pub trait Real:
     const INFINITY: Self;
     /// Not a number.
     const NAN: Self;
-    /// The −3 dB amplitude, `1/√2 ≈ 0.7071`: the attenuation of the ITU-R
-    /// BS.775 / Dolby consumer downmix for a channel folded into the front
-    /// pair.
-    const MINUS_3_DB: Self;
 
     /// The absolute value.
     #[must_use]
@@ -167,7 +163,6 @@ macro_rules! real_impl {
             const EPSILON: Self = $t::EPSILON;
             const INFINITY: Self = $t::INFINITY;
             const NAN: Self = $t::NAN;
-            const MINUS_3_DB: Self = core::$t::consts::FRAC_1_SQRT_2;
             #[inline]
             fn abs(self) -> Self {
                 libm::$abs(self)
@@ -276,6 +271,13 @@ macro_rules! real_impl {
             }
         }
     };
+}
+
+mod sealed {
+    /// Closes [`Real`](super::Real) to `f32` and `f64`.
+    pub trait Sealed {}
+    impl Sealed for f32 {}
+    impl Sealed for f64 {}
 }
 
 real_impl!(

@@ -348,12 +348,18 @@ impl Sample for f64 {
 /// assert_eq!(<f32 as Float>::from_f32(0.5), 0.5);
 /// ```
 pub trait Float: Real + Sample + bytemuck::Pod {
+    /// The −3 dB amplitude, `1/√2 ≈ 0.7071`: the attenuation of the ITU-R
+    /// BS.775 / Dolby consumer downmix for a channel folded into the front
+    /// pair.
+    const MINUS_3_DB: Self;
+
     /// A quantity as data of this width: the only spelling of quantity to
     /// data, `F::from_unit(cutoff)`.
     ///
-    /// It saturates. A finite quantity narrows to a finite value, clamped to
-    /// `-Self::MAX..=Self::MAX`, and a NaN stays NaN; a bare `as` would turn
-    /// a finite `f64` past `f32::MAX` into an infinity, which no node latches.
+    /// It saturates. A finite quantity narrows to a finite value and an
+    /// infinite one to the nearest, both clamped to `-Self::MAX..=Self::MAX`;
+    /// a NaN stays NaN. A bare `as` would turn a finite `f64` past `f32::MAX`
+    /// into an infinity, which no node latches.
     /// The cost is one compare-and-select, paid at control rate. `Raw = f64`
     /// keeps counts and positions from crossing into data this way.
     ///
@@ -390,6 +396,7 @@ pub trait Float: Real + Sample + bytemuck::Pod {
 }
 
 impl Float for f32 {
+    const MINUS_3_DB: Self = core::f32::consts::FRAC_1_SQRT_2;
     #[inline]
     fn from_unit<U: Unit<Raw = f64>>(u: U) -> Self {
         let x = u.to_raw();
@@ -414,9 +421,15 @@ impl Float for f32 {
 }
 
 impl Float for f64 {
+    const MINUS_3_DB: Self = core::f64::consts::FRAC_1_SQRT_2;
     #[inline]
     fn from_unit<U: Unit<Raw = f64>>(u: U) -> Self {
-        u.to_raw()
+        let x = u.to_raw();
+        if x.is_nan() {
+            x
+        } else {
+            x.clamp(-Self::MAX, Self::MAX)
+        }
     }
     #[inline]
     fn lit(x: f64) -> Self {
@@ -446,10 +459,25 @@ mod tests {
     }
 
     #[test]
-    fn from_unit_at_f64_is_the_raw_value() {
+    fn from_unit_at_f64_is_the_raw_value_when_finite() {
         for x in [0.1, 1e300, -1e-300, 48_000.0] {
             assert_eq!(f64::from_unit(Hz(x)), x);
         }
+    }
+
+    #[test]
+    fn from_unit_saturates_an_infinite_quantity_at_both_widths() {
+        assert_eq!(f32::from_unit(Hz(f64::INFINITY)), f32::MAX);
+        assert_eq!(f32::from_unit(Hz(f64::NEG_INFINITY)), -f32::MAX);
+        assert_eq!(f64::from_unit(Hz(f64::INFINITY)), f64::MAX);
+        assert_eq!(f64::from_unit(Hz(f64::NEG_INFINITY)), -f64::MAX);
+        assert!(f64::from_unit(Hz(f64::NAN)).is_nan());
+    }
+
+    #[test]
+    fn minus_3_db_is_one_over_root_two_at_both_widths() {
+        assert_eq!(f32::MINUS_3_DB, core::f32::consts::FRAC_1_SQRT_2);
+        assert_eq!(f64::MINUS_3_DB, core::f64::consts::FRAC_1_SQRT_2);
     }
 
     #[test]
