@@ -123,16 +123,16 @@ fn play<M: Master>(
     s.graph().connect(synth, Root).unwrap();
 
     let file = MidiFile::read(midi)?; // an SMF or a Clip File
-    // A file timed in SMPTE frames has no beats, so no tempo map to adopt and
-    // no beat to end on: this example plays metrical files only.
+    // A file timed in SMPTE frames has no beats, and a format 2 file no one
+    // tempo map to adopt: this example plays files of one metrical timeline only.
     let Timebase::Metrical(metrical) = file.timebase() else {
-        return Err("a file timed in SMPTE frames has no beats to play on".into());
+        return Err("a file with no one beat timeline (SMPTE frames, or format 2 sequences) has nothing to play on".into());
     };
-    let (tempo_map, end) = (metrical.tempo_map(), metrical.beat_at(file.end()));
+    let (tempo_map, end) = (metrical.tempo_map(), metrical.beat_at(metrical.end()));
     // A file's tempo track is the file's data, not the project's: the project
     // adopts it on import, here, by an explicit call (a shared map, no copy).
     s.set_tempo_map(tempo_map.clone())?;
-    // Its messages on the file's timeline (a format 2 file has none), as the
+    // Its messages on the file's one timeline, as the
     // packets they are: the clip translates them when it is loaded.
     s.midi().play_file(synth, Beat(0.0), metrical)?;
     report(s.update());

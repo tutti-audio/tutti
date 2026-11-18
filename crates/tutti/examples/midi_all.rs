@@ -119,7 +119,10 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     // A clip from a file's timeline: the packets it holds at their beats.
     let file = file()?;
     let Timebase::Metrical(metrical) = file.timebase() else {
-        return Err("the file is timed in SMPTE frames, with no beats to play on".into());
+        return Err(
+            "the file has no one beat timeline (SMPTE frames, or format 2 sequences) to play on"
+                .into(),
+        );
     };
     s.midi().play_file(synth.node(), Beat(0.0), metrical)?;
 
