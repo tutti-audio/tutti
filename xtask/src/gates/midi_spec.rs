@@ -51,6 +51,11 @@
 //! [`Doc::dotted_top`] also takes a top-level heading written `1. Alpha`. A
 //! document with `implicit_levels` may open at `1.1`, with no heading `1`.
 //!
+//! [`SMF`] (Standard MIDI Files 1.0) has no numbered headings and no `pdftotext`
+//! layout: its sections are the named lines of [`Named`], read from the OCR text
+//! of the spec in The Complete MIDI 1.0 book, and its rows are
+//! `smf/<section>#<n>` under those names.
+//!
 //! The extraction never returns half a set: a message row whose Message Type
 //! has no size, two items with one id, or a configured table that is not
 //! found is an error.
@@ -85,6 +90,30 @@ pub(super) enum Tables {
     FileHeader { table: u32 },
     /// Keyword sentences only.
     None,
+    /// A document with no numbered headings: its sections are named lines.
+    Named(&'static Named),
+}
+
+/// A spec whose sections are lines of fixed text, read from an OCR text with
+/// no page breaks (Standard MIDI Files 1.0, in The Complete MIDI 1.0 book).
+/// The spec has no table of conformance words: `words` are the ones it uses
+/// to bind (`must`, `should`, `may`), `phrases` are read as another word
+/// before they are looked up (`not optional` binds as `must`) and `defs` mark
+/// a sentence that defines the format with no such word, which is a
+/// `required` row with the fact `def=1`.
+pub(super) struct Named {
+    /// `(heading text, section)` in document order. A line is the heading when
+    /// its tail is the text and what comes before is only hex bytes and field
+    /// names of a meta-event line (`FF 58 04 nn dd cc bb Time Signature`). The
+    /// first heading opens the spec and the first line after it that is
+    /// `end` closes it.
+    headings: &'static [(&'static str, &'static str)],
+    end: &'static str,
+    /// The page footer, with the page number before or after it.
+    footer: &'static str,
+    words: &'static spec_text::Words,
+    phrases: &'static [(&'static str, &'static str)],
+    defs: &'static [&'static str],
 }
 
 /// One spec document the extractor reads.
@@ -114,7 +143,7 @@ pub(super) struct Doc {
 /// The documents, one inventory file each.
 pub(super) const DOCS: &[Doc] = &[
     M2_101, M2_102, M2_103, M2_104, M2_115, M2_116, M2_105, M2_106, M2_107, M2_108, M2_109, M2_111,
-    M2_112, M2_117, M2_113, M2_118, M2_119, M2_120, M2_121, M2_122, M2_123, M2_125, M2_124,
+    M2_112, M2_117, M2_113, M2_118, M2_119, M2_120, M2_121, M2_122, M2_123, M2_125, M2_124, SMF,
 ];
 
 /// The header note of a document with its own Table 2 and no tables of rows.
@@ -463,6 +492,111 @@ pub(super) enum Rows {
 /// The Message Type of the Flex Data messages, whose status is a bank and a
 /// status.
 const FLEX_MT: u32 = 0xD;
+
+/// The Standard MIDI Files 1.0 reading of [`Named`].
+pub(super) const SMF_TEXT: Named = Named {
+    headings: &[
+        (
+            "Sequences, Tracks, Chunks: File Block Structure",
+            "structure",
+        ),
+        ("Conventions", "conventions"),
+        ("Files", "files"),
+        ("Chunks", "chunks"),
+        ("Header Chunks", "header-chunk"),
+        ("Formats 0, 1, and 2", "formats"),
+        ("Track Chunks", "track-chunks"),
+        ("Meta-Events", "meta-events"),
+        ("Sequence Number", "sequence-number"),
+        ("Text Event", "text-event"),
+        ("Copyright Notice", "copyright-notice"),
+        ("Sequence/Track Name", "track-name"),
+        ("Instrument Name", "instrument-name"),
+        ("Lyric", "lyric"),
+        ("Marker", "marker"),
+        ("Cue Point", "cue-point"),
+        ("MIDI Channel Prefix", "channel-prefix"),
+        ("End of Track", "end-of-track"),
+        (
+            "Set Tempo, in microseconds per MIDI quarter-note",
+            "set-tempo",
+        ),
+        ("SMPTE Offset", "smpte-offset"),
+        ("Time Signature", "time-signature"),
+        ("Key Signature", "key-signature"),
+        ("Sequencer-Specific Meta-Event", "sequencer-specific"),
+        ("Program Fragments and Example MIDI Files", "examples"),
+        ("Calculating Delta Times:", "delta-times"),
+    ],
+    end: "General MIDI System Level 1",
+    footer: "Standard MIDI Files 1.0",
+    words: &[
+        ("must", "required"),
+        ("shall", "required"),
+        ("required", "required"),
+        ("important", "required"),
+        ("vital", "required"),
+        ("should", "recommended"),
+        ("polite", "recommended"),
+        ("idea", "recommended"),
+        ("ideally", "recommended"),
+        ("may", "permitted"),
+        ("optional", "permitted"),
+        ("always", "required"),
+        ("never", "required"),
+        ("assumed", "required"),
+    ],
+    phrases: &[
+        ("not required", "may"),
+        ("not optional", "must"),
+        ("a/ways", "always"),
+        // A "should" inside a definition of what an event does not imply (the spec writes F0 as `FO`)
+        // binds nothing; the sentence defines the F7 event form.
+        ("imply that an FO should", "imply that an FO is to"),
+    ],
+    defs: &[
+        "stored",
+        "represented",
+        "represents",
+        "begins",
+        "followed",
+        "specifies",
+        "expressed",
+        "encoded",
+        "occupy",
+        "contains",
+        "cancel",
+        "expresses",
+        "indicates",
+        "designates",
+        "represent",
+        "correspond",
+        "refer",
+        "refers",
+        "representation",
+        "flats",
+        "has",
+        "number",
+        "reserved",
+        "omitted",
+        "imply",
+        "ascii",
+    ],
+};
+
+/// The Standard MIDI Files 1.0 document (RP-001, February 1996).
+pub(super) const SMF: Doc = Doc {
+    prefix: "smf",
+    label: "SMF 1.0",
+    title: "Standard MIDI Files 1.0 (RP-001, February 1996)",
+    file: "midi-smf.txt",
+    source: "complete_midi_96",
+    sides: "writer, reader or both",
+    note: "",
+    implicit_levels: false,
+    dotted_top: false,
+    tables: Tables::Named(&SMF_TEXT),
+};
 
 const WORDS: [(&str, &str); 3] = [
     ("shall", "required"),
@@ -902,26 +1036,181 @@ fn keyword_items(lines: &[Line], doc: &Doc) -> Vec<Item> {
     let mut count: BTreeMap<String, u32> = BTreeMap::new();
     let mut out = Vec::new();
     for unit in units(lines) {
-        for s in sentences(&unit.text) {
-            let Some((kind, negated)) = spec_text::keyword(s, &WORDS) else {
-                continue;
+        let parts: Vec<&str> = match doc.tables {
+            // Standard MIDI Files joins independent rules with `;`.
+            Tables::Named(_) => sentences(&unit.text)
+                .into_iter()
+                .flat_map(|s| s.split("; "))
+                .collect(),
+            _ => sentences(&unit.text),
+        };
+        for s in parts {
+            let (kind, negated, def) = match doc.tables {
+                Tables::Named(n) => match smf_kind(s, n) {
+                    Some(k) => k,
+                    None => continue,
+                },
+                _ => match spec_text::keyword(s, &WORDS) {
+                    Some((k, neg)) => (k, neg, false),
+                    None => continue,
+                },
             };
             let n = count.entry(unit.section.clone()).or_default();
             *n += 1;
+            let section = match doc.tables {
+                Tables::Named(_) => unit.section.clone(),
+                _ => unit.section.to_ascii_uppercase(),
+            };
+            let facts: Vec<&str> = [(negated, "neg=1"), (def, "def=1")]
+                .iter()
+                .filter(|(on, _)| *on)
+                .map(|(_, f)| *f)
+                .collect();
             out.push(Item {
                 id: format!("{}/{}#{n}", doc.prefix, unit.section),
                 kind,
-                section: format!("{} \u{a7}{}", doc.label, unit.section.to_ascii_uppercase()),
-                facts: if negated {
-                    "neg=1".to_owned()
-                } else {
-                    String::new()
-                },
+                section: format!("{} \u{a7}{section}", doc.label),
+                facts: facts.join(" "),
                 text: s.to_owned(),
             });
         }
     }
     out
+}
+
+/// `(kind, negated, def)` of a sentence of a [`Named`] spec, or `None` when
+/// it binds nothing.
+fn smf_kind(sentence: &str, named: &Named) -> Option<(&'static str, bool, bool)> {
+    let mut read = sentence.to_owned();
+    for (phrase, word) in named.phrases {
+        read = replace_ignoring_case(&read, phrase, word);
+    }
+    if let Some((kind, negated)) = spec_text::keyword(&read, named.words) {
+        return Some((kind, negated, false));
+    }
+    let defines = sentence
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .any(|w| named.defs.contains(&w.to_ascii_lowercase().as_str()));
+    defines.then_some(("required", false, true))
+}
+
+/// `text` with each ASCII-case-insensitive occurrence of `phrase` replaced.
+fn replace_ignoring_case(text: &str, phrase: &str, with: &str) -> String {
+    let (lower, phrase) = (text.to_ascii_lowercase(), phrase.to_ascii_lowercase());
+    let mut out = String::new();
+    let mut at = 0;
+    while let Some(found) = lower[at..].find(&phrase) {
+        out.push_str(&text[at..at + found]);
+        out.push_str(with);
+        at += found + phrase.len();
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
+/// Whether `line` is the heading `text`: its tail is the text and what comes
+/// before is a hex byte then meta-event field names (`nn`, `tttttt`, `len`).
+fn is_named_heading(line: &str, text: &str) -> bool {
+    let t = line.trim();
+    let Some(head) = t.strip_suffix(text) else {
+        return false;
+    };
+    let tokens: Vec<&str> = head.split_whitespace().collect();
+    head.is_empty()
+        || head.ends_with(' ')
+            && tokens.len() <= 8
+            && tokens[0].len() == 2
+            && tokens[0].bytes().all(|b| b.is_ascii_hexdigit())
+            && tokens.iter().all(|w| {
+                w.len() <= 2
+                    || matches!(*w, "len" | "text" | "data")
+                    || w.bytes().all(|b| Some(b) == w.bytes().next())
+            })
+}
+
+/// Whether `line` is a page footer of the spec (`Standard MIDI Files 1.0 5`).
+fn is_footer(line: &str, footer: &str) -> bool {
+    let t = line.trim();
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    t == footer
+        || t.strip_suffix(footer).is_some_and(|n| digits(n.trim_end()))
+        || t.strip_prefix(footer)
+            .is_some_and(|n| digits(n.trim_start()))
+}
+
+/// The classified lines of a [`Named`] spec: from its first heading to its
+/// `end` line, page footers dropped and a sentence a footer cut rejoined.
+fn named_lines(text: &str, named: &Named) -> Result<Vec<Line>, String> {
+    let all: Vec<&str> = text.lines().collect();
+    let first = named.headings[0].0;
+    let from = all
+        .iter()
+        .position(|l| l.trim() == first)
+        .ok_or_else(|| format!("no line `{first}` found: is this the spec text?"))?;
+    let to = all[from..]
+        .iter()
+        .position(|l| l.trim() == named.end)
+        .map(|n| n + from)
+        .ok_or_else(|| format!("no line `{}` closes the spec", named.end))?;
+    let body = &all[from..to];
+    let mut out = Vec::new();
+    let mut expected = 0;
+    let mut skip_to = 0;
+    for (i, l) in body.iter().enumerate() {
+        if i < skip_to {
+            continue;
+        }
+        if is_footer(l, named.footer) {
+            let next = body[i + 1..].iter().position(|n| !n.trim().is_empty());
+            let prev = out.iter().rev().find(|x| **x != Line::Blank);
+            let open = matches!(prev, Some(Line::Text(p))
+                if !p.trim_end().ends_with(['.', ':', '?', '!', '"', ')']));
+            let lower = next.is_some_and(|n| {
+                body[i + 1 + n]
+                    .trim_start()
+                    .starts_with(|c: char| c.is_lowercase())
+            });
+            if open && lower {
+                while out.last() == Some(&Line::Blank) {
+                    out.pop();
+                }
+                skip_to = i + 1 + next.unwrap_or(0);
+            }
+            continue;
+        }
+        if l.trim().is_empty() {
+            out.push(Line::Blank);
+            continue;
+        }
+        match named
+            .headings
+            .iter()
+            .position(|(h, _)| is_named_heading(l, h))
+        {
+            Some(k) => {
+                if k > expected {
+                    return Err(format!(
+                        "heading `{}` not found",
+                        named.headings[expected].0
+                    ));
+                }
+                if k < expected {
+                    let want = named.headings.get(expected).map_or("none", |h| h.0);
+                    return Err(format!(
+                        "heading `{}` is out of order or repeated: the spec's headings come once each, in order, and `{want}` was expected",
+                        named.headings[k].0
+                    ));
+                }
+                expected += 1;
+                out.push(Line::Heading(named.headings[k].1.to_owned()));
+            }
+            None => out.push(Line::Text((*l).to_owned())),
+        }
+    }
+    if let Some((text, _)) = named.headings.get(expected) {
+        return Err(format!("heading `{text}` not found"));
+    }
+    Ok(out)
 }
 
 /// Words that make a field description state that the field's value is taken
@@ -1167,14 +1456,17 @@ fn header_items(lines: &[Line], doc: &Doc, table: u32) -> Result<Vec<Item>, Stri
 /// Every item of the spec text: the keyword rows in document order, then the
 /// document's table rows.
 pub(super) fn extract(doc: &Doc, text: &str) -> Result<Vec<Item>, String> {
-    let lines = classify(&clean(text), doc)?;
+    let lines = match doc.tables {
+        Tables::Named(n) => named_lines(text, n)?,
+        _ => classify(&clean(text), doc)?,
+    };
     let mut out = keyword_items(&lines, doc);
     let cells = cell_items(&lines, doc, &out);
     out.extend(cells);
     out.extend(match doc.tables {
         Tables::Messages { mt_table, messages } => message_items(&lines, doc, mt_table, messages)?,
         Tables::FileHeader { table } => header_items(&lines, doc, table)?,
-        Tables::None => Vec::new(),
+        Tables::None | Tables::Named(_) => Vec::new(),
     });
     let mut seen = BTreeSet::new();
     for it in &out {
@@ -1639,5 +1931,158 @@ mod tests {
             extract(&M2_104, &text).unwrap(),
             extract(&M2_104, &text).unwrap()
         );
+    }
+
+    /// A made-up Standard MIDI Files text: the heading lines, a footer cutting a
+    /// sentence, a meta-event heading line with its bytes before it and the
+    /// closing line.
+    fn smf_text() -> String {
+        let mut text = String::from("Cover\n\n");
+        text.push_str(SMF_TEXT.headings[0].0);
+        text.push_str("\n\n");
+        for (heading, _) in &SMF_TEXT.headings[1..] {
+            let line = if *heading == "Time Signature" {
+                "FF 58 04 nn dd cc bb Time Signature"
+            } else {
+                heading
+            };
+            text.push_str(&format!("{line}\nPlain words.\n\n"));
+        }
+        text.push_str(
+            "Programs must ignore a chunk they\n\nStandard MIDI Files 1.0 5\n\nknow nothing of.\n",
+        );
+        text.push_str("It will be stored in four bytes.\n");
+        text.push_str(SMF_TEXT.end);
+        text.push_str("\nProgram must not appear.\n");
+        text
+    }
+
+    #[test]
+    fn a_named_spec_gives_rows_under_its_headings_and_rejoins_a_sentence_a_footer_cut() {
+        let items = extract(&SMF, &smf_text()).unwrap();
+        let rows: Vec<(&str, &str, &str)> = items
+            .iter()
+            .map(|i| (i.id.as_str(), i.kind, i.facts.as_str()))
+            .collect();
+        // The last heading's section holds the sentence the footer cut, whole,
+        // and the one after it that only defines; nothing after the closing
+        // line is read.
+        assert_eq!(
+            rows,
+            [
+                ("smf/delta-times#1", "required", ""),
+                ("smf/delta-times#2", "required", "def=1"),
+            ]
+        );
+        assert_eq!(
+            items[0].text,
+            "Programs must ignore a chunk they know nothing of."
+        );
+        assert_eq!(items[0].section, "SMF 1.0 \u{a7}delta-times");
+    }
+
+    #[test]
+    fn a_named_spec_with_a_heading_missing_is_an_error() {
+        let text = smf_text().replace("Key Signature", "Key Sig");
+        let err = extract(&SMF, &text).unwrap_err();
+        assert!(err.contains("`Key Signature` not found"), "{err}");
+    }
+
+    #[test]
+    fn a_meta_event_line_is_a_heading_and_a_sentence_line_is_not() {
+        let heading = |l: &str, h: &str| is_named_heading(l, h);
+        assert!(heading(
+            "FF 58 04 nn dd cc bb Time Signature",
+            "Time Signature"
+        ));
+        assert!(heading(
+            "51 03 tttttt Set Tempo, in microseconds per MIDI quarter-note",
+            "Set Tempo, in microseconds per MIDI quarter-note"
+        ));
+        assert!(heading("Chunks", "Chunks"));
+        assert!(!heading("Header Chunks", "Chunks"));
+        assert!(!heading("A Time Signature", "Time Signature"));
+    }
+
+    #[test]
+    fn a_named_spec_reads_not_required_as_may_and_not_optional_as_must() {
+        let kind = |s: &str| smf_kind(s, &SMF_TEXT);
+        assert_eq!(
+            kind("It is not required here."),
+            Some(("permitted", false, false))
+        );
+        assert_eq!(
+            kind("This event is not optional."),
+            Some(("required", false, false))
+        );
+        assert_eq!(kind("It must not move."), Some(("required", true, false)));
+        assert_eq!(
+            kind("Delta-times are a/ways present."),
+            Some(("required", false, false))
+        );
+        assert_eq!(
+            kind("The length is stored first."),
+            Some(("required", false, true))
+        );
+        assert_eq!(kind("A plain remark."), None);
+    }
+
+    #[test]
+    fn a_named_spec_reads_a_phrase_in_any_case_and_a_modal_with_always_as_the_modal() {
+        let kind = |s: &str| smf_kind(s, &SMF_TEXT);
+        assert_eq!(
+            kind("Not required here."),
+            Some(("permitted", false, false))
+        );
+        assert_eq!(kind("A/ways present."), Some(("required", false, false)));
+        assert_eq!(
+            kind("Tempo should always be stored first."),
+            Some(("recommended", false, false))
+        );
+        assert_eq!(
+            kind("It is important to honor the length."),
+            Some(("required", false, false))
+        );
+    }
+
+    #[test]
+    fn a_named_spec_splits_a_sentence_at_a_semicolon() {
+        let text = smf_text().replace(
+            "Programs must ignore a chunk they",
+            "A reader should skip it; a writer must not drop it. Programs must ignore a chunk they",
+        );
+        let items = extract(&SMF, &text).unwrap();
+        let kinds: Vec<_> = items
+            .iter()
+            .map(|i| (i.id.as_str(), i.kind, i.text.as_str()))
+            .collect();
+        assert_eq!(
+            kinds[0],
+            (
+                "smf/delta-times#1",
+                "recommended",
+                "A reader should skip it"
+            )
+        );
+        assert_eq!(
+            kinds[1],
+            (
+                "smf/delta-times#2",
+                "required",
+                "a writer must not drop it."
+            )
+        );
+    }
+
+    #[test]
+    fn a_named_spec_with_a_heading_repeated_or_out_of_order_is_an_error() {
+        let text = smf_text().replace("Marker\nPlain", "Lyric\nPlain");
+        let err = extract(&SMF, &text).unwrap_err();
+        assert!(err.contains("out of order or repeated"), "{err}");
+        let again = smf_text().replace(
+            "Plain words.\n\nSMPTE Offset",
+            "Plain words.\n\nLyric\nSMPTE Offset",
+        );
+        assert!(extract(&SMF, &again).unwrap_err().contains("`Lyric`"));
     }
 }
