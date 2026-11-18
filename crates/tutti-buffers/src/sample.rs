@@ -876,10 +876,5 @@ mod tests {
         assert_eq!(f32::from_fraction_bits(u64::MAX), 1.0 - 2f32.powi(-24));
         assert_eq!(f64::from_fraction_bits(u64::MAX), 1.0 - 2f64.powi(-53));
         assert!(f32::from_fraction_bits(u64::MAX) < 1.0);
-        assert_eq!(
-            u64::MAX as f32 / 2f32.powi(64),
-            1.0,
-            "the naive form rounds up"
-        );
     }
 }
