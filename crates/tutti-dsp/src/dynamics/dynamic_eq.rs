@@ -4,7 +4,7 @@
 //! **key** (the side-chain bus or the signal itself, as the caller hands the bank its
 //! [`KeySource`](super::KeySource)) through a band-pass at the same centre and Q, so it
 //! measures what the bell acts on. The detected level goes through a static curve of the
-//! compressor's kind (threshold, knee, ratio, [`compute_compressor_gain_reduction`]) into a
+//! compressor's kind (threshold, knee, ratio, [`compute_compressor_gain_reduction`](crate::compute_compressor_gain_reduction)) into a
 //! gain change in dB, held within the range, which an attack and a release smooth:
 //!
 //! - [`Downward`](DynamicMode::Downward): the band is cut by the reduction a compressor would

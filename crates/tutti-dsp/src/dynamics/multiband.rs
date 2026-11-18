@@ -128,7 +128,7 @@ impl BandReductions {
 }
 
 /// The width and band count of a [`MultibandBank`] that can be built: what
-/// [`BankShape::new`] returns, so [`MultibandBank::from_shape`] has nothing to refuse.
+/// [`BankShape::try_from`] makes, so [`MultibandBank::from_shape`] has nothing to refuse.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BankShape {
     width: ChannelLayout,
@@ -141,14 +141,29 @@ impl BankShape {
     /// The most bands.
     pub const MAX_BANDS: usize = 4;
 
-    /// Whether a bank of `bands` bands over `width` can be built, as the shape that says so.
-    ///
-    /// # Errors
-    ///
-    /// [`CrossoverError::Bands`] if `bands` is not 2 to 4, and
-    /// [`CrossoverError::Channels`] for no channels or more than the planes of a crossover
-    /// hold.
-    pub fn new(width: ChannelLayout, bands: usize) -> Result<Self, CrossoverError> {
+    /// The channels each band has.
+    #[must_use]
+    pub fn width(&self) -> ChannelLayout {
+        self.width
+    }
+
+    /// The bands, 2 to 4.
+    #[must_use]
+    pub fn bands(&self) -> usize {
+        self.bands
+    }
+}
+
+/// Whether a bank of `bands` bands over `width` can be built, as the shape that says so.
+///
+/// # Errors
+///
+/// [`CrossoverError::Bands`] if `bands` is not 2 to 4, and [`CrossoverError::Channels`] for no
+/// channels or more than the planes of a crossover hold.
+impl TryFrom<(ChannelLayout, usize)> for BankShape {
+    type Error = CrossoverError;
+
+    fn try_from((width, bands): (ChannelLayout, usize)) -> Result<Self, CrossoverError> {
         if !(Self::MIN_BANDS..=Self::MAX_BANDS).contains(&bands) {
             return Err(CrossoverError::Bands {
                 bands,
@@ -161,18 +176,6 @@ impl BankShape {
             return Err(CrossoverError::Channels { channels });
         }
         Ok(Self { width, bands })
-    }
-
-    /// The channels each band has.
-    #[must_use]
-    pub fn width(&self) -> ChannelLayout {
-        self.width
-    }
-
-    /// The bands, 2 to 4.
-    #[must_use]
-    pub fn bands(&self) -> usize {
-        self.bands
     }
 }
 
@@ -238,13 +241,13 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
     ///
     /// # Errors
     ///
-    /// As [`BankShape::new`].
+    /// As [`BankShape::try_from`].
     pub fn new(
         width: ChannelLayout,
         bands: usize,
         rate: SampleRate,
     ) -> Result<Self, CrossoverError> {
-        Ok(Self::from_shape(BankShape::new(width, bands)?, rate))
+        Ok(Self::from_shape(BankShape::try_from((width, bands))?, rate))
     }
 
     /// A multiband of a checked `shape` at `rate`: [`new`](Self::new) past its checks.
@@ -252,7 +255,7 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
     ///
     /// # Panics
     ///
-    /// Never for a shape [`BankShape::new`] made: the one `expect` is on the crossover
+    /// Never for a shape [`BankShape::try_from`] made: the one `expect` is on the crossover
     /// design's band count, which a shape keeps within 2 to 4.
     #[must_use]
     pub fn from_shape(shape: BankShape, rate: SampleRate) -> Self {

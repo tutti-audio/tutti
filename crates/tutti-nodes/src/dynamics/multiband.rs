@@ -326,7 +326,7 @@ impl<F: Float + Lanes + Lerp> MultibandCompressorNode<F> {
         // A bus that names no speaker (as the node's shape does): a width past one bus has
         // none.
         BusTopology::unassigned(layout).ok_or(CrossoverError::Channels { channels })?;
-        let shape = BankShape::new(layout, bands)?;
+        let shape = BankShape::try_from((layout, bands))?;
         let defaults = default_crossovers(bands);
         let crossover = CrossoverControls::ordered(defaults)?;
         Ok(Self {

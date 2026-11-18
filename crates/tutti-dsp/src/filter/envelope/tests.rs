@@ -1,5 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_units::{Amplitude, Hz, Q, SampleRate, Seconds, Semitones};
+use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones};
 
 use super::*;
 use crate::testing::amplitude_at;

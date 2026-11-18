@@ -446,7 +446,7 @@ fn an_f64_crossover_sums_to_the_all_pass_recursion_of_its_splits() {
         let bands = run(
             &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
             &model(splits),
-            &[x.clone()],
+            std::slice::from_ref(&x),
             &[n],
         );
         let got: Vec<f64> = (0..n).map(|i| bands.iter().map(|b| b[i]).sum()).collect();
