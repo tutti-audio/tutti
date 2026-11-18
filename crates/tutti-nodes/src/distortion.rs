@@ -812,7 +812,7 @@ mod tests {
             let mut k = DistortionKernel::<f64>::new(ShapeKind::Softsign, BusTopology::MONO);
             k.antialiasing = order;
             k.prepare(RATE, MaxBlock::of(Samples(len)));
-            drive_kernel(&mut k, &[(0, controls)], &[x.clone()]).remove(0)
+            drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x)).remove(0)
         };
         let want: Vec<f64> = x.iter().map(|x| h * x / (1.0 + (h * x).abs())).collect();
         assert_close_f64(&render(Antialiasing::Off), &want, 2.0f64.powi(-45));
