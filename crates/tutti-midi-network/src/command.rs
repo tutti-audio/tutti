@@ -84,13 +84,38 @@ impl Header {
 }
 
 /// The name and Product Instance Id an endpoint presents to its peer in an
-/// Invitation and in every reply to one (M2-124 sections 6.4 and 8).
+/// Invitation and in every reply to one, and a Host publishes in its TXT
+/// record (M2-124 sections 4.4, 6.4 and 8): neither is empty. A device that is
+/// both a Host and a Client, or a Host for each of its Endpoints, builds one
+/// per UMP Endpoint and hands it to every role that represents it (section 9).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EndpointIdentity {
+    name: EndpointName,
+    instance_id: ProductInstanceId,
+}
+
+impl EndpointIdentity {
+    /// The identity of an Endpoint called `name` whose Product Instance Id is
+    /// `instance_id`, or `None` when either is empty.
+    #[must_use]
+    pub fn new(name: EndpointName, instance_id: ProductInstanceId) -> Option<Self> {
+        if name.is_empty() || instance_id.as_str().is_empty() {
+            return None;
+        }
+        Some(Self { name, instance_id })
+    }
+
     /// The UMP Endpoint Name.
-    pub name: EndpointName,
+    #[must_use]
+    pub const fn name(&self) -> &EndpointName {
+        &self.name
+    }
+
     /// The Product Instance Id.
-    pub instance_id: ProductInstanceId,
+    #[must_use]
+    pub const fn instance_id(&self) -> &ProductInstanceId {
+        &self.instance_id
+    }
 }
 
 /// The authentication methods a Client can answer (M2-124 Table 11): a set of
@@ -669,15 +694,11 @@ fn trimmed(field: &[u8]) -> &[u8] {
 
 fn read_identity(name: &[u8], id: &[u8]) -> Result<EndpointIdentity, ParseError> {
     let (name, id) = (trimmed(name), trimmed(id));
-    if name.is_empty() || id.is_empty() {
-        return Err(ParseError::EmptyText);
-    }
     let name = std::str::from_utf8(name).map_err(ParseError::Utf8)?;
     let id = std::str::from_utf8(id).map_err(ParseError::Utf8)?;
-    Ok(EndpointIdentity {
-        name: name.parse().map_err(ParseError::Name)?,
-        instance_id: id.parse().map_err(ParseError::InstanceId)?,
-    })
+    let name = name.parse().map_err(ParseError::Name)?;
+    let id = id.parse().map_err(ParseError::InstanceId)?;
+    EndpointIdentity::new(name, id).ok_or(ParseError::EmptyText)
 }
 
 /// The advisory text of a Bye or a NAK. The text is for the user and changes
@@ -959,8 +980,8 @@ impl Command {
 /// Writes the name, then the Product Instance Id, each padded; returns the
 /// words of each.
 fn write_identity(out: &mut Vec<u8>, identity: &EndpointIdentity) -> (usize, usize) {
-    let name = push_padded(out, identity.name.as_bytes());
-    let id = push_padded(out, identity.instance_id.as_str().as_bytes());
+    let name = push_padded(out, identity.name().as_bytes());
+    let id = push_padded(out, identity.instance_id().as_str().as_bytes());
     (name, id)
 }
 

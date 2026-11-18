@@ -24,9 +24,9 @@
 //!     SessionConfig, SessionState,
 //! };
 //!
-//! let identity = |name: &str, id: &str| EndpointIdentity {
-//!     name: EndpointName::new(name).unwrap(),
-//!     instance_id: ProductInstanceId::new(id).unwrap(),
+//! let identity = |name: &str, id: &str| {
+//!     EndpointIdentity::new(EndpointName::new(name).unwrap(), ProductInstanceId::new(id).unwrap())
+//!         .unwrap()
 //! };
 //! let (host_addr, client_addr): (SocketAddr, SocketAddr) =
 //!     ("127.0.0.1:5673".parse().unwrap(), "127.0.0.1:50000".parse().unwrap());
@@ -90,7 +90,7 @@ pub use datagram::{
 };
 pub use discovery::{
     Advertisement, Browser, DiscoveryError, FoundHost, HostEvent, KEY_ENDPOINT_NAME,
-    KEY_PRODUCT_INSTANCE_ID, SERVICE_TYPE, instance_name, txt_properties,
+    KEY_PRODUCT_INSTANCE_ID, SERVICE_TYPE, identity_from_txt, instance_name, txt_properties,
 };
 pub use endpoint::{Client, Host, HostConfig, MAX_QUEUED_EVENTS, NetworkEndpoint};
 pub use event::{AuthFailure, EndedBy, Event, SendError, SessionState, Transmit};

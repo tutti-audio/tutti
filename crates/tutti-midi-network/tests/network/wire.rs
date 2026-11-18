@@ -1,10 +1,11 @@
 //! The wire format: byte layouts from the specification's tables and
 //! examples, the refusals, and sequence numbers.
 
+use tutti_midi_device::{EndpointName, ProductInstanceId};
 use tutti_midi_network::{
     AuthChallenge, AuthMethods, AuthState, Bye, ByeReason, ByeText, Command, DatagramBuilder,
-    Digest, Header, Invitation, Nak, NakReason, NakText, Nonce, ParseError, PingId,
-    RetransmitErrorReason, RetransmitRefusal, RetransmitRequest, SIGNATURE, SequenceNumber,
+    Digest, EndpointIdentity, Header, Invitation, Nak, NakReason, NakText, Nonce, ParseError,
+    PingId, RetransmitErrorReason, RetransmitRefusal, RetransmitRequest, SIGNATURE, SequenceNumber,
     SignatureError, UmpData, UmpDataError, UserAuthChallenge, UserAuthState, UserAuthentication,
     Username, parse,
 };
@@ -463,6 +464,29 @@ fn an_invitation_with_no_product_instance_id_is_refused() {
 fn an_invitation_with_an_all_zero_name_is_refused_as_empty() {
     let e = one(&[0x01, 0x02, 0x01, 0x00, 0, 0, 0, 0, b'i', 0, 0, 0]).unwrap_err();
     assert_eq!(e.error, ParseError::EmptyText);
+}
+
+/// An Invitation's Product Instance Id is never empty, and no Client builds one
+/// with an empty Id.
+/// Spec: m2-124/6.4#18
+#[test]
+fn an_invitation_with_an_all_zero_instance_id_is_refused_as_empty() {
+    let e = one(&[0x01, 0x02, 0x01, 0x00, b'n', 0, 0, 0, 0, 0, 0, 0]).unwrap_err();
+    assert_eq!(e.error, ParseError::EmptyText);
+    assert_eq!(
+        EndpointIdentity::new(
+            EndpointName::new("Laptop").unwrap(),
+            ProductInstanceId::new("").unwrap()
+        ),
+        None
+    );
+    assert_eq!(
+        EndpointIdentity::new(
+            EndpointName::new("").unwrap(),
+            ProductInstanceId::new("CLIENT-1").unwrap()
+        ),
+        None
+    );
 }
 
 #[test]

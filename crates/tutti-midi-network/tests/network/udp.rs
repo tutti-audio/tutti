@@ -3,8 +3,8 @@
 use std::time::{Duration, Instant};
 
 use tutti_midi_network::{
-    ByeReason, Client, Credentials, EndedBy, Event, Host, HostConfig, SessionConfig, SessionState,
-    UdpDriver,
+    ByeReason, Client, Credentials, EndedBy, EndpointIdentity, Event, Host, HostConfig,
+    SessionConfig, SessionState, UdpDriver,
 };
 
 use crate::sim::{identity, note_on};
@@ -108,4 +108,122 @@ fn a_session_runs_over_real_udp_sockets_from_invitation_to_bye() {
             )
     }));
     assert_eq!(client.endpoint().state(), SessionState::Idle);
+}
+
+fn established_count(events: &[(&'static str, Event)]) -> usize {
+    events
+        .iter()
+        .filter(|(_, ev)| matches!(ev, Event::Established { .. }))
+        .count()
+}
+
+/// A Client bound to its own socket.
+fn client_driver(identity: EndpointIdentity, host: std::net::SocketAddr) -> UdpDriver<Client> {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let client = Client::new(
+        identity,
+        Credentials::none(),
+        SessionConfig::default(),
+        host,
+        Instant::now(),
+    );
+    UdpDriver::new(socket, client)
+}
+
+/// A device that serves a Client and is a Client of another Host at once,
+/// each role on its own socket and both under one identity.
+/// Spec: m2-124/9#1, m2-124/9#4
+#[test]
+fn a_device_serves_a_client_and_is_a_client_of_another_host_on_two_ports() {
+    let device = identity("Workbench", "DEV-1");
+    let mut other_host = UdpDriver::bind(
+        "127.0.0.1:0",
+        Host::new(HostConfig::new(identity("Studio", "HOST-1"))),
+    )
+    .unwrap();
+    let mut device_host =
+        UdpDriver::bind("127.0.0.1:0", Host::new(HostConfig::new(device))).unwrap();
+    let mut device_client = client_driver(device, other_host.local_addr().unwrap());
+    let mut visitor = client_driver(
+        identity("Laptop", "CLIENT-1"),
+        device_host.local_addr().unwrap(),
+    );
+
+    assert_ne!(
+        device_host.local_addr().unwrap().port(),
+        device_client.local_addr().unwrap().port(),
+        "the Host and the Client of one device use their own ports"
+    );
+
+    device_client.endpoint_mut().connect(Instant::now());
+    visitor.endpoint_mut().connect(Instant::now());
+    let mut events = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline && established_count(&events) < 4 {
+        for driver in [&mut other_host, &mut device_host] {
+            driver.poll(Duration::from_millis(5)).unwrap();
+            while let Some(e) = driver.poll_event() {
+                events.push(("host", e));
+            }
+        }
+        for driver in [&mut device_client, &mut visitor] {
+            driver.poll(Duration::from_millis(5)).unwrap();
+            while let Some(e) = driver.poll_event() {
+                events.push(("client", e));
+            }
+        }
+    }
+    assert_eq!(established_count(&events), 4, "{events:?}");
+    assert_eq!(device_client.endpoint().state(), SessionState::Established);
+    assert_eq!(device_host.endpoint().session_count(), 1);
+    assert_eq!(other_host.endpoint().session_count(), 1);
+    // The device's Client told the other Host the identity its own Host has.
+    assert!(events.iter().any(|(who, ev)| {
+        *who == "host" && matches!(ev, Event::Established { remote, .. } if *remote == device)
+    }));
+}
+
+/// A device with two UMP Endpoints runs a Host for each, each with its own
+/// port and name and the Product Instance Id they share.
+/// Spec: m2-124/10#1, m2-124/10#2
+#[test]
+fn a_device_with_two_endpoints_runs_a_host_for_each_on_its_own_port_and_name() {
+    let (keys, synth) = (identity("Keys", "DEV-1"), identity("Synth", "DEV-1"));
+    let mut hosts: Vec<UdpDriver<Host>> = [keys, synth]
+        .into_iter()
+        .map(|id| UdpDriver::bind("127.0.0.1:0", Host::new(HostConfig::new(id))).unwrap())
+        .collect();
+    assert_ne!(
+        hosts[0].local_addr().unwrap().port(),
+        hosts[1].local_addr().unwrap().port()
+    );
+    let mut clients: Vec<UdpDriver<Client>> = hosts
+        .iter()
+        .map(|h| client_driver(identity("Laptop", "CLIENT-1"), h.local_addr().unwrap()))
+        .collect();
+    for c in &mut clients {
+        c.endpoint_mut().connect(Instant::now());
+    }
+    let mut events = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline && established_count(&events) < 4 {
+        for h in &mut hosts {
+            h.poll(Duration::from_millis(5)).unwrap();
+            while let Some(e) = h.poll_event() {
+                events.push(("host", e));
+            }
+        }
+        for c in &mut clients {
+            c.poll(Duration::from_millis(5)).unwrap();
+            while let Some(e) = c.poll_event() {
+                events.push(("client", e));
+            }
+        }
+    }
+    assert_eq!(established_count(&events), 4, "{events:?}");
+    // Each Client learned the name of the Endpoint behind the port it chose.
+    assert_eq!(clients[0].endpoint().remote(), Some(keys));
+    assert_eq!(clients[1].endpoint().remote(), Some(synth));
+    assert_eq!(hosts[0].endpoint().session_count(), 1);
+    assert_eq!(hosts[1].endpoint().session_count(), 1);
 }
