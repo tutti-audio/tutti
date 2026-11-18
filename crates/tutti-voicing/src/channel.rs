@@ -465,6 +465,7 @@ mod tests {
         for cc in 0..=127u8 {
             let expected = std::f32::consts::FRAC_PI_2 * f32::from(cc.saturating_sub(1)) / 126.0;
             let angle = std::f32::consts::FRAC_PI_4 * (pan_at(cc).get() + 1.0);
+            // `Pan` is `f32` state.
             assert!((angle - expected).abs() < 1e-5, "CC 10 = {cc}");
         }
     }
@@ -478,6 +479,7 @@ mod tests {
         // CC 5 = 20 is halfway from the curve's (8, 30) to its (32, 8) cent/msec.
         c.control(CCNumber::PORTAMENTO_TIME, U7::of(20));
         let expected = (30.0f64 * 8.0).sqrt();
+        // The glide rate and the cents it reads are `f32` state.
         assert!((f64::from(c.glide_rate()) - expected).abs() < 1e-4 * expected);
         let time = c.glide_time(NoteNumber::of(60), NoteNumber::of(72));
         assert!((time.0 - 1200.0 / expected / 1000.0).abs() < 1e-6);
@@ -508,6 +510,7 @@ mod tests {
         let mut c = ChannelState::new(Semitones(2.0));
         assert_eq!(c.modulation_range(), Cents(50.0));
         c.set_modulation_range(8u32 << 18);
+        // `Cents` is `f32` state.
         assert!((c.modulation_range().get() - 6.25).abs() < 1e-4);
         c.set_modulation_range(1 << 25);
         assert_eq!(c.modulation_range(), Cents(100.0));
@@ -525,6 +528,7 @@ mod tests {
             c.control(CCNumber::PORTAMENTO_TIME, U7::of(time));
             c.glide_rate()
         };
+        // The glide rate is `f32` state.
         assert!((rate(0) - 1000.0).abs() < 1e-2);
         assert!((rate(127) - 0.01).abs() < 1e-4);
         for t in 1..=127u8 {

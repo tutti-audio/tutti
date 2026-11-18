@@ -573,7 +573,8 @@ fn a_per_note_bend_is_tuned_over_its_channels_range() {
         }
         other => panic!("expected a tuning expression, got {other:?}"),
     };
-    let close = |got: f64, want: f64| (got - want).abs() < 1e-6;
+    // The bend travels as a 32-bit word, which a position on `0..=1` only approximates.
+    let close = |got: f64, want: f64| (got - want).abs() < 1e-9;
 
     let mut encoder = MidiEncoder::default();
     // A note sounds on each channel: a bend with no note is held, not sent.
@@ -727,9 +728,8 @@ fn a_sysex_fragment_does_not_convert_alone() {
 #[test]
 fn note_on_velocity_round_trips_at_full_width() {
     // A MIDI-2 note-on carrying a value not representable in 7 bits keeps
-    // its width through the f32 VST3 struct on the way back out (an f32 holds
-    // a 16-bit velocity to well under half a step), rather than collapsing to
-    // a 7-bit grid point.
+    // its width through the f32 VST3 struct on the way back out, rather than
+    // collapsing to a 7-bit grid point.
     let velocity_u16 = 0x9123; // not a multiple of the 7-bit step
     let event = (
         Offset::ZERO,

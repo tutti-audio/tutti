@@ -317,6 +317,7 @@ fn a_volume_write_moves_the_master_volume() {
         ..Default::default()
     });
     assert!(set(&synth, UnitParam::Volume, 0.6), "volume is addressable");
+    // `Amplitude` is `f32` state.
     assert!(
         (synth.volume().get() - 0.6).abs() < 1e-4,
         "the synth's master volume reflects the write"
@@ -365,6 +366,7 @@ fn a_detune_write_recomputes_unison_on_process() {
     // Index 0 is an edge sub-voice (position -1), so detune actually moves it
     // (the center voice at index 1 stays at unity by construction).
     let ratio_before = synth.unison.as_ref().unwrap().voice_params(0).freq_ratio;
+    // The unison frequency ratio is `f32` voice state.
     assert!((ratio_before - 1.0).abs() < 1e-4, "no detune yet");
 
     // Write the detune cell, then run a block: `sync_from_atomics` must
@@ -375,6 +377,7 @@ fn a_detune_write_recomputes_unison_on_process() {
     synth.tick(&[], &mut out);
 
     let ratio_after = synth.unison.as_ref().unwrap().voice_params(0).freq_ratio;
+    // A threshold for "moved" on the `f32` unison ratio, not a tolerance on a figure.
     assert!(
         (ratio_after - 1.0).abs() > 1e-4,
         "the detune write reached the unison voice params after a block \
@@ -2137,6 +2140,7 @@ fn a_chord_gets_a_distinct_phase_stack_per_voice() {
     );
     for stack in &phases {
         assert!(
+            // A threshold for "distinct" on `f32` voice phases, not a tolerance on a figure.
             stack.windows(2).all(|w| (w[0] - w[1]).abs() > 1e-4),
             "a stack's sub-voices share a phase: {stack:?}"
         );
@@ -2902,12 +2906,14 @@ fn channel_tuning_moves_the_channels_notes() {
             .sounding_freq()
             .get()
     };
+    // A voice's sounding frequency is `f32` state.
     assert!((freq(&s, 0) / 880.0 - 1.0).abs() < 1e-4, "{}", freq(&s, 0));
     assert!((freq(&s, 1) / 440.0 - 1.0).abs() < 1e-4);
     // Fine: 0x3000 is 50 cents up, on top.
     queue_midi(&mut s, &[registered(0, 1, 0x3000 << 18)]);
     s.tick(&[], &mut out);
     let expected = 880.0 * 2.0_f32.powf(0.5 / 12.0);
+    // A voice's sounding frequency is `f32` state.
     assert!(
         (freq(&s, 0) / expected - 1.0).abs() < 1e-4,
         "{}",
@@ -2972,6 +2978,7 @@ fn channel_pan_follows_rp_036() {
     );
     for hard_left in [0, 1] {
         let (l, r) = level(Some(hard_left));
+        // `l` and `r` are rendered `f32` samples; the bound is the leakage into the silent side.
         assert!(r < 1e-4 * l, "{hard_left}: {l} {r}");
         // RP-036's left gain is 1 at hard left against cos(Pi/4) at centre.
         assert!(
@@ -2980,6 +2987,7 @@ fn channel_pan_follows_rp_036() {
         );
     }
     let (l, r) = level(Some(127));
+    // Rendered `f32` samples, as above.
     assert!(l < 1e-4 * r, "{l} {r}");
     // CC 32: tan (Pi/2 * 31/126) is the right over the left.
     let (l, r) = level(Some(32));
@@ -3149,6 +3157,7 @@ fn a_per_note_pitch_survives_a_glide() {
         .unwrap()
         .sounding_freq()
         .get();
+    // A voice's sounding frequency is `f32` state.
     assert!(
         (f / key_freq(74) - 1.0).abs() < 1e-4,
         "{f} against {}",
@@ -3186,10 +3195,12 @@ fn a_legato_move_returns_the_voice_to_the_new_keys_own_pitch() {
             .sounding_freq()
             .get()
     };
+    // A voice's sounding frequency is `f32` state.
     assert!((freq(&s) / key_freq(70) - 1.0).abs() < 1e-4);
     queue_midi(&mut s, &[ev_note_on(1, 64, 100)]);
     s.tick(&[], &mut out);
     assert_eq!(s.active_voice_count(), 1, "one voice moved");
+    // A voice's sounding frequency is `f32` state.
     assert!((freq(&s) / key_freq(64) - 1.0).abs() < 1e-4, "{}", freq(&s));
     // A bend recomputes the pitch from the voice's note: the new key's, a
     // whole tone (the default range) up.
