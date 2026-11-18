@@ -9,11 +9,12 @@ use tutti_units::{Azimuth, Elevation};
 /// the delta (`n = 2m`) takes the kernel's centre: sinc and window are 1
 /// there, so it is `step · cutoff = 0.5 · 0.95 = 0.475`, the delta's DC
 /// sum of 1 at the kernel's peak. No libm call is involved but `cos(0)`,
-/// which is exact; the tolerance covers only the `f32` rounding.
+/// which is exact up to the Blackman window's coefficients, stored as `f32` (they sum to 1 within
+/// 3e-8, so a tap is off by under 1e-7).
 #[test]
 fn resampling_reads_a_responses_edge_taps() {
     const LEN: usize = 8;
-    let mut responses = vec![0.0f32; 2 * LEN];
+    let mut responses = vec![0.0f64; 2 * LEN];
     responses[0] = 1.0;
     responses[2 * LEN - 1] = 1.0;
     let out_len = 2 * LEN;
@@ -28,7 +29,7 @@ fn resampling_reads_a_responses_edge_taps() {
     let last = got[1][2 * (LEN - 1)];
     for (ear, tap) in [("left, first sample", first), ("right, last sample", last)] {
         assert!(
-            (tap - 0.475).abs() <= 1e-6,
+            (tap - 0.475).abs() <= 1e-7,
             "{ear}: the tap on the delta is {tap}, expected 0.475"
         );
     }
@@ -47,9 +48,9 @@ fn resampling_in_batches_matches_one_batch() {
     const LEN: usize = 8;
     const OUT_LEN: usize = 16;
     const RESPONSES: usize = 15;
-    let mut responses = vec![0.0f32; RESPONSES * LEN];
+    let mut responses = vec![0.0f64; RESPONSES * LEN];
     for r in 0..RESPONSES {
-        responses[r * LEN + r % LEN] = (r + 1) as f32;
+        responses[r * LEN + r % LEN] = (r + 1) as f64;
     }
     let run = |batch_samples: usize| {
         let mut got = Vec::new();
@@ -73,16 +74,16 @@ fn resampling_in_batches_matches_one_batch() {
     assert_eq!(small, whole, "batching changes no sample");
     for (r, response) in small.iter().enumerate() {
         let tap = response[2 * (r % LEN)];
-        let want = 0.475 * (r + 1) as f32;
+        let want = 0.475 * (r + 1) as f64;
         assert!(
-            (tap - want).abs() <= 1e-5 * want,
+            (tap - want).abs() <= 1e-7 * want,
             "response {r}: tap {tap}, expected {want}"
         );
     }
 }
 
 /// Resample one response of `len` taps from `from` to `to` Hz into `out_len`.
-fn resample_one(response: &[f32], from: u32, to: u32, out_len: usize) -> Vec<f32> {
+fn resample_one(response: &[f64], from: u32, to: u32, out_len: usize) -> Vec<f64> {
     let mut got = Vec::new();
     resample_into(response, response.len(), from, to, out_len, |_, r| {
         got = r.to_vec();
@@ -97,7 +98,7 @@ fn resample_one(response: &[f32], from: u32, to: u32, out_len: usize) -> Vec<f32
 #[test]
 fn a_constant_response_keeps_its_level_scaled_by_the_rate_ratio() {
     for (from, to, len, out_len, interior, want) in [
-        (8_000, 16_000, 200, 400, 100..300, 0.5f32),
+        (8_000, 16_000, 200, 400, 100..300, 0.5f64),
         (16_000, 8_000, 400, 200, 60..140, 2.0),
     ] {
         let got = resample_one(&vec![1.0; len], from, to, out_len);
@@ -120,7 +121,7 @@ fn a_constant_response_keeps_its_level_scaled_by_the_rate_ratio() {
 fn an_impulse_resamples_to_the_analytic_kernel() {
     const LEN: usize = 200;
     const M: usize = 100;
-    let mut response = vec![0.0f32; LEN];
+    let mut response = vec![0.0f64; LEN];
     response[M] = 1.0;
     let got = resample_one(&response, 8_000, 16_000, 400);
     let (step, cutoff) = (0.5f64, 0.95f64);
@@ -136,7 +137,7 @@ fn an_impulse_resamples_to_the_analytic_kernel() {
             0.42 + 0.5 * u.cos() + 0.08 * (2.0 * u).cos()
         };
         let want = step * cutoff * sinc * blackman;
-        assert!((f64::from(g) - want).abs() < 1e-6, "tap {n}: {g} vs {want}");
+        assert!((g - want).abs() < 1e-7, "tap {n}: {g} vs {want}");
     }
 }
 
@@ -191,10 +192,13 @@ fn an_octahedron_of_measurements_has_eight_outward_faces_and_keeps_its_responses
     }
     for v in 0..6 {
         let at = 2 * v * LEN;
-        assert_eq!(sphere.responses[at..at + LEN], [(v + 1) as f32; LEN]);
+        assert_eq!(
+            sphere.responses[at..at + LEN],
+            [f64::from(v as u8 + 1); LEN]
+        );
         assert_eq!(
             sphere.responses[at + LEN..at + 2 * LEN],
-            [-((v + 1) as f32); LEN]
+            [-f64::from(v as u8 + 1); LEN]
         );
     }
 }
@@ -205,9 +209,20 @@ fn bytes_round_trip_to_an_equal_sphere() {
     let bytes = sphere.to_bytes();
     assert_eq!(bytes[..4], *b"HRIR");
     let parsed = HrirSphere::from_bytes(&bytes).expect("a written sphere parses");
-    assert!(
-        parsed == sphere,
-        "the parsed sphere differs from the one written"
+    // The byte format's words are `f32`: what is parsed is what was built, rounded to a word.
+    let word = |x: &f64| f64::from(*x as f32);
+    assert_eq!(parsed.faces, sphere.faces);
+    assert_eq!(
+        parsed.positions,
+        sphere
+            .positions
+            .iter()
+            .map(|p| p.map(|x| word(&x)))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        parsed.responses,
+        sphere.responses.iter().map(word).collect::<Vec<_>>()
     );
     assert_eq!(parsed.to_bytes(), bytes);
 }

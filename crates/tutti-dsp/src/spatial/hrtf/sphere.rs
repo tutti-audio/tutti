@@ -10,17 +10,20 @@
 //! wound counter-clockwise seen from outside.
 
 use crate::FftFloat;
-use tutti_buffers::{Float, Mono, Sample};
+use tutti_buffers::{Mono, Sample};
 use tutti_units::{Direction, SampleRate};
 
 use crate::convert::convert_equal;
 use crate::{Complex, CosineWindow, RealFft, WindowedSinc};
 
+mod words;
+
 use super::hull::convex_hull;
 use super::{HrtfBinauralError, MAX_SPHERE_RATE, MIN_SPHERE_RATE, unit_vector};
+use words::Cursor;
 
 /// The range a vertex's distance from the origin must fall in. Closer, its
-/// direction does not survive normalization in `f32`.
+/// direction does not survive normalization in `f32`, the width the file stores it in.
 const MIN_DISTANCE: f64 = 1e-6;
 const MAX_DISTANCE: f64 = 1e6;
 
@@ -30,10 +33,10 @@ const DUPLICATE: f64 = 1e-12;
 
 /// The largest response sample magnitude accepted. A spectrum sums up to
 /// `fft_len` of them, so a sample near `f32::MAX` would overflow it.
-const MAX_SAMPLE: f32 = 1e6;
+const MAX_SAMPLE: f64 = 1e6;
 
 /// One measured direction and the two ears' impulse responses from it, in
-/// sample format `S`; the sphere keeps them as `f32`.
+/// sample format `S`; the sphere keeps them as `f64`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HrirMeasurement<'a, S: Sample = f32> {
     direction: Direction,
@@ -66,11 +69,11 @@ pub struct HrirSphere {
     rate: u32,
     /// Response length in frames at `rate`, the same for every vertex.
     len: usize,
-    positions: Vec<[f32; 3]>,
+    positions: Vec<[f64; 3]>,
     faces: Vec<[u32; 3]>,
     /// Per vertex `v`, its left response at `2v * len` and its right at
     /// `(2v + 1) * len`.
-    responses: Vec<f32>,
+    responses: Vec<f64>,
 }
 
 impl std::fmt::Debug for HrirSphere {
@@ -79,36 +82,6 @@ impl std::fmt::Debug for HrirSphere {
             .field("rate", &self.rate)
             .field("len", &self.len)
             .finish_non_exhaustive()
-    }
-}
-
-/// A little-endian cursor that reports a short read as an error, never a
-/// panic.
-struct Cursor<'a> {
-    bytes: &'a [u8],
-    at: usize,
-}
-
-impl Cursor<'_> {
-    fn word(&mut self) -> Result<[u8; 4], HrtfBinauralError> {
-        let word = self
-            .bytes
-            .get(self.at..self.at + 4)
-            .and_then(|w| <[u8; 4]>::try_from(w).ok())
-            .ok_or(HrtfBinauralError::Truncated {
-                needed: self.at + 4,
-                found: self.bytes.len(),
-            })?;
-        self.at += 4;
-        Ok(word)
-    }
-
-    fn u32(&mut self) -> Result<u32, HrtfBinauralError> {
-        self.word().map(u32::from_le_bytes)
-    }
-
-    fn f32(&mut self) -> Result<f32, HrtfBinauralError> {
-        self.word().map(f32::from_le_bytes)
     }
 }
 
@@ -166,12 +139,12 @@ impl HrirSphere {
             }
         }
         check_shape(rate, len)?;
-        let positions: Vec<[f32; 3]> = measurements
+        let positions: Vec<[f64; 3]> = measurements
             .iter()
             .map(|m| unit_vector(m.direction))
             .collect();
         // Every response is `len` long (checked above): the left ear's, then the right's.
-        let mut responses = vec![0.0f32; measurements.len() * 2 * len];
+        let mut responses = vec![0.0f64; measurements.len() * 2 * len];
         for (m, ears) in measurements.iter().zip(responses.chunks_exact_mut(2 * len)) {
             let (left, right) = ears.split_at_mut(len);
             convert_equal(m.left.samples(), left);
@@ -180,9 +153,8 @@ impl HrirSphere {
         // The check on the raw values comes first: a NaN direction would
         // poison the duplicate test and the hull.
         check_values(&positions, &responses, len)?;
-        let wide: Vec<[f64; 3]> = positions.iter().map(|p| p.map(f64::from)).collect();
-        for (second, p) in wide.iter().enumerate() {
-            let twin = wide[..second].iter().position(|q| {
+        for (second, p) in positions.iter().enumerate() {
+            let twin = positions[..second].iter().position(|q| {
                 let d = [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
                 d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < DUPLICATE
             });
@@ -190,7 +162,7 @@ impl HrirSphere {
                 return Err(HrtfBinauralError::Duplicate { first, second });
             }
         }
-        let faces = convex_hull(&wide).ok_or(HrtfBinauralError::NotEnclosing)?;
+        let faces = convex_hull(&positions).ok_or(HrtfBinauralError::NotEnclosing)?;
         every_vertex_on(&faces, positions.len())?;
         let sphere = Self {
             rate,
@@ -222,8 +194,8 @@ impl HrirSphere {
         }
         let responses = self.responses.chunks_exact(2 * self.len);
         for (position, response) in self.positions.iter().zip(responses) {
-            for value in position.iter().chain(response) {
-                bytes.extend_from_slice(&value.to_le_bytes());
+            for &value in position.iter().chain(response) {
+                words::put(&mut bytes, value);
             }
         }
         bytes
@@ -284,9 +256,9 @@ impl HrirSphere {
         let mut positions = Vec::with_capacity(vertices);
         let mut responses = Vec::with_capacity(vertices * len * 2);
         for _ in 0..vertices {
-            positions.push([cur.f32()?, cur.f32()?, cur.f32()?]);
+            positions.push([cur.float()?, cur.float()?, cur.float()?]);
             for _ in 0..2 * len {
-                responses.push(cur.f32()?);
+                responses.push(cur.float()?);
             }
         }
         let sphere = Self {
@@ -358,8 +330,8 @@ fn check_shape(rate: u32, len: usize) -> Result<(), HrtfBinauralError> {
 /// responses of bounded samples: `responses` is `2 * len` values per
 /// position.
 fn check_values(
-    positions: &[[f32; 3]],
-    responses: &[f32],
+    positions: &[[f64; 3]],
+    responses: &[f64],
     len: usize,
 ) -> Result<(), HrtfBinauralError> {
     for (vertex, (pos, response)) in positions
@@ -368,11 +340,7 @@ fn check_values(
         .enumerate()
     {
         // NaN fails both comparisons, so a non-finite value is refused too.
-        let distance = pos
-            .iter()
-            .map(|&c| f64::from(c).powi(2))
-            .sum::<f64>()
-            .sqrt();
+        let distance = pos.iter().map(|&c| c.powi(2)).sum::<f64>().sqrt();
         let placed = (MIN_DISTANCE..=MAX_DISTANCE).contains(&distance);
         let bounded = response.iter().all(|s| s.abs() <= MAX_SAMPLE);
         if !placed || !bounded {
@@ -393,7 +361,7 @@ pub(crate) fn max_response(rate: u32) -> usize {
 }
 
 /// The most response samples [`resample_into`] copies tap-major at once:
-/// 4 MB of `f32`, so its scratch stays bounded whatever the file's size.
+/// 8 MB of `f64`, so its scratch stays bounded whatever the file's size.
 const RESAMPLE_BATCH: usize = 1 << 20;
 
 /// Resamples every response in `responses` (back to back, `len` frames
@@ -420,25 +388,25 @@ const RESAMPLE_BATCH: usize = 1 << 20;
 /// zero), so the first and last few output taps of a response that has not
 /// decayed there carry the cut's ripple.
 fn resample_into(
-    responses: &[f32],
+    responses: &[f64],
     len: usize,
     from: u32,
     to: u32,
     out_len: usize,
-    emit: impl FnMut(usize, &[f32]),
+    emit: impl FnMut(usize, &[f64]),
 ) {
     resample_batched(responses, len, from, to, out_len, RESAMPLE_BATCH, emit);
 }
 
 /// [`resample_into`] with the batch size, in samples, a parameter.
 fn resample_batched(
-    responses: &[f32],
+    responses: &[f64],
     len: usize,
     from: u32,
     to: u32,
     out_len: usize,
     batch_samples: usize,
-    mut emit: impl FnMut(usize, &[f32]),
+    mut emit: impl FnMut(usize, &[f64]),
 ) {
     /// Kernel half-width, in zero crossings.
     const HALF_WIDTH: f64 = 32.0;
@@ -460,7 +428,7 @@ fn resample_batched(
         // Tap-major: tap `m` of every response in the batch at
         // `m * count..(m + 1) * count`.
         taps.clear();
-        taps.resize(chunk.len(), 0.0f32);
+        taps.resize(chunk.len(), 0.0f64);
         for (r, response) in chunk.chunks_exact(len).enumerate() {
             for (m, &s) in response.iter().enumerate() {
                 taps[m * count + r] = s;
@@ -468,7 +436,7 @@ fn resample_batched(
         }
         sums.resize(count, 0.0f64);
         out.clear();
-        out.resize(count * out_len, 0.0f32);
+        out.resize(count * out_len, 0.0f64);
         for n in 0..out_len {
             let t = n as f64 * step;
             let end = ((t + half).floor() as usize).saturating_add(1).min(len);
@@ -481,11 +449,11 @@ fn resample_batched(
                 .zip(&weights)
             {
                 for (sum, &s) in sums.iter_mut().zip(row) {
-                    *sum += f64::from(s) * w;
+                    *sum += s * w;
                 }
             }
             for (r, &sum) in sums.iter().enumerate() {
-                out[r * out_len + n] = (sum * step) as f32;
+                out[r * out_len + n] = sum * step;
             }
         }
         for (r, response) in out.chunks_exact(out_len).enumerate() {
@@ -499,14 +467,14 @@ fn resample_batched(
 #[derive(Debug)]
 struct Face {
     verts: [u32; 3],
-    inverse: [[f32; 3]; 3],
+    inverse: [[f64; 3]; 3],
 }
 
 impl Face {
     /// `None` for a face whose plane passes through the origin: no ray from
     /// the centre crosses it at a single point.
-    fn new(verts: [u32; 3], positions: &[[f32; 3]]) -> Option<Self> {
-        let [a, b, c] = verts.map(|v| positions[v as usize].map(f64::from));
+    fn new(verts: [u32; 3], positions: &[[f64; 3]]) -> Option<Self> {
+        let [a, b, c] = verts.map(|v| positions[v as usize]);
         // Columns a, b, c; the inverse is the adjugate over the determinant.
         let cross = |u: [f64; 3], v: [f64; 3]| {
             [
@@ -525,7 +493,7 @@ impl Face {
         if det.abs().partial_cmp(&(1e-9 * scale)) != Some(std::cmp::Ordering::Greater) {
             return None;
         }
-        let row = |r: [f64; 3]| r.map(|x| (x / det) as f32);
+        let row = |r: [f64; 3]| r.map(|x| x / det);
         Some(Self {
             verts,
             inverse: [row(bc), row(ca), row(ab)],
@@ -535,7 +503,7 @@ impl Face {
     /// The barycentric weights of the point where the ray along `dir` meets
     /// this face, or `None` if it misses.
     #[inline]
-    fn hit(&self, dir: [f32; 3]) -> Option<[f32; 3]> {
+    fn hit(&self, dir: [f64; 3]) -> Option<[f64; 3]> {
         // `dir = M · coeffs`: the coefficients of `dir` in the face's
         // vertices. The ray hits the face iff all three are non-negative,
         // and the hit point's barycentric weights are them normalized.
@@ -559,7 +527,7 @@ impl Face {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Weights {
     pub(crate) verts: [u32; 3],
-    pub(crate) w: [f32; 3],
+    pub(crate) w: [f64; 3],
 }
 
 /// The sphere prepared at one sample rate for the convolver: each vertex's
@@ -580,7 +548,7 @@ pub(crate) struct HrtfSet<F: FftFloat = f32> {
     /// each `FFT(response) / fft_len` (the inverse is unnormalized).
     spectra: Vec<Complex<F>>,
     /// Vertex directions, normalized, for the nearest-vertex fallback.
-    directions: Vec<[f32; 3]>,
+    directions: Vec<[f64; 3]>,
     faces: Vec<Face>,
 }
 
@@ -626,9 +594,9 @@ impl<F: FftFloat> HrtfSet<F> {
         let mut spectra = vec![zero; vertices * 2 * bins];
         let mut frame = vec![F::ZERO; fft_len];
         let mut scratch = vec![zero; scratch_len];
-        let norm = <F as Float>::from_f32(1.0 / fft_len as f32);
-        let mut transform = |r: usize, response: &[f32]| {
-            // The measured responses are `f32`; they enter the render's format here.
+        let norm = F::from_design(1.0 / fft_len as f64);
+        let mut transform = |r: usize, response: &[f64]| {
+            // The responses enter the render's format here.
             let (head, tail) = frame.split_at_mut(response.len());
             convert_equal(response, head);
             tail.fill(F::ZERO);
@@ -698,7 +666,7 @@ impl<F: FftFloat> HrtfSet<F> {
     /// vertex, or vertex 0 if no vertex compares. Allocation-free and
     /// lock-free; the scan is linear in the face count, which only a miss of
     /// the hint pays.
-    pub(crate) fn weights(&self, dir: [f32; 3], hint: &mut usize) -> Weights {
+    pub(crate) fn weights(&self, dir: [f64; 3], hint: &mut usize) -> Weights {
         if let Some(face) = self.faces.get(*hint)
             && let Some(w) = face.hit(dir)
         {
@@ -717,7 +685,7 @@ impl<F: FftFloat> HrtfSet<F> {
             }
         }
         let mut nearest = 0u32;
-        let mut best = f32::NEG_INFINITY;
+        let mut best = f64::NEG_INFINITY;
         for (v, d) in self.directions.iter().enumerate() {
             let dot = d[0] * dir[0] + d[1] * dir[1] + d[2] * dir[2];
             if dot > best {
