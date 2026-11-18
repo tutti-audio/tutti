@@ -213,6 +213,21 @@ fn property_name_limits() {
     ));
 }
 
+// §6.1: Property Names are case sensitive, so `Resource` is no `resource`, and
+// the two can stand side by side in one header.
+#[test]
+fn property_names_are_case_sensitive() {
+    assert!(matches!(
+        parse(r#"{"Resource":"A"}"#),
+        Err(PeHeaderError::FirstProperty)
+    ));
+    let got = request(r#"{"resource":"A","Resource":"B"}"#);
+    assert_eq!(got.resource.as_str(), "A");
+    assert_ne!(name("Resource"), name("resource"));
+    let upper = request(r#"{"resource":"A","Offset":5,"Limit":2}"#);
+    assert_eq!(upper.page, None);
+}
+
 // §7.5 Table 16: mediaType is a string of at most 75 characters.
 #[test]
 fn media_type_limits() {

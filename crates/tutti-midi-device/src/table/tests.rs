@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use proptest::prelude::*;
 
 use super::*;
+use crate::ProductInstanceId;
 
 fn handle(n: u64) -> EndpointId {
     EndpointId::from_raw(n)
@@ -159,7 +160,7 @@ fn a_product_id_is_shared_by_ports_of_one_device() {
     let mut table = DeviceTable::default();
     let port = |n| OsDevice {
         handle: handle(n),
-        identity: Identity::Product("sn-0042".into()),
+        identity: Identity::Product(ProductInstanceId::new("sn-0042").unwrap()),
         name: format!("Port {n}"),
         direction: PortDirection::Duplex,
     };
@@ -305,7 +306,7 @@ fn ordinals(candidates: &[DeviceInfo]) -> Vec<u32> {
 fn port(n: u64, unit: &str, name: &str, direction: PortDirection) -> OsDevice {
     OsDevice {
         handle: handle(n),
-        identity: Identity::Product(unit.into()),
+        identity: Identity::Product(ProductInstanceId::new(unit).unwrap()),
         name: name.into(),
         direction,
     }

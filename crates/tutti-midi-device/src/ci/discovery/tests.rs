@@ -40,6 +40,28 @@ fn discovery_round_trips() {
     assert_eq!(decoded(&bytes), msg);
 }
 
+// M2-101 Appendix D: the Special ID 0x7C is a one-byte Manufacturer ID that
+// Discovery carries as it carries any other.
+/// Spec: m2-101/d#1
+#[test]
+fn discovery_carries_the_special_manufacturer_id_7c() {
+    let msg = CiMessage::Discovery {
+        header: header(),
+        data: DiscoveryData {
+            function_block: None,
+            identity: DeviceIdentity {
+                manufacturer: ManufacturerId::MIDI2_NON_COMMERCIAL,
+                ..sample_discovery().identity
+            },
+            ..sample_discovery()
+        },
+    };
+    let bytes = msg.encode();
+    // The Manufacturer's three id bytes follow the preamble (13 bytes).
+    assert_eq!(bytes[13..16], [0x7C, 0x00, 0x00]);
+    assert_eq!(decoded(&bytes), msg);
+}
+
 #[test]
 fn discovery_and_reply_have_the_version_2_trailers() {
     // Table 6 appends 1 byte Output Path ID; Table 8 appends Output Path

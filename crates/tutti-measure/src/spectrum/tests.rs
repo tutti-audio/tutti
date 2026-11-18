@@ -555,8 +555,8 @@ fn a_sine_inside_a_band_reads_the_noise_bandwidth_excess() {
 #[test]
 fn the_hold_is_a_whole_number_of_frames_without_over_holding() {
     let cfg = config(1920, 480);
-    let frames = |hold: f32| {
-        plan(&cfg.peak_hold(SpectrumTime::new(Seconds::from_f32(hold)).unwrap()))
+    let frames = |hold: f64| {
+        plan(&cfg.peak_hold(SpectrumTime::new(Seconds(hold)).unwrap()))
             .peak_hold_frames()
             .get()
     };

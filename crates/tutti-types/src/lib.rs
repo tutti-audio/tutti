@@ -86,8 +86,7 @@ pub use mint::Mint;
 
 // Value vocabulary.
 pub use value::{
-    AtomicSampleRate, InvalidMaxBlock, MaxBlock, Param, Param64, ParamCell, ParamRaw,
-    ParkedSampleRate,
+    AtomicSampleRate, InvalidMaxBlock, MaxBlock, Param, Param64, ParamCell, ParkedSampleRate,
 };
 
 // Channel layout — how many channels.

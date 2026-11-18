@@ -292,7 +292,7 @@ fn a_lossless_loop_is_marginally_stable_with_an_unbounded_tail() {
     ))]);
     assert!(frozen.is_lossless() && frozen.is_stable());
     assert_eq!(frozen.tail(Db(-60.0)), Ring::Unbounded);
-    assert_eq!(frozen.rt60(Band::Mid).to_f32(), f32::INFINITY);
+    assert_eq!(frozen.rt60(Band::Mid).get(), f64::INFINITY);
     let almost = Absorption::Bands {
         low: Amplitude(1.0),
         mid: Amplitude(1.0),
@@ -326,7 +326,7 @@ fn the_densities_are_the_modes_per_hertz_and_the_echoes_per_second() {
         .push(Stage::Fdn(fdn(&ls, Matrix::Diagonal)))
         .unwrap();
     assert!((diag.modal_density().get() - 0.03).abs() < 1e-7);
-    let e = |n: &Network, t: f32| n.echo_density(Seconds::from_f32(t)).get();
+    let e = |n: &Network, t: f64| n.echo_density(Seconds(t)).get();
     assert_eq!(e(&diag, 0.005), 0.0);
     assert!((e(&diag, 0.0105) - 100.0).abs() < 1e-3);
     assert!((e(&diag, 0.0205) - 150.0).abs() < 1e-3);
@@ -515,7 +515,7 @@ fn a_one_pole_outside_the_unit_circle_is_not_stable() {
         }
         assert!(!stable(a), "damp {damp}");
         let f = fdn(&[line(100.0, a)], Matrix::Diagonal);
-        assert_eq!(f.rt60_bound(Band::Mid, RATE).to_f32(), f32::INFINITY);
+        assert_eq!(f.rt60_bound(Band::Mid, RATE).get(), f64::INFINITY);
         let n = network(&[Stage::Fdn(f)]);
         assert_eq!(n.tail(Db(-60.0)), Ring::Unbounded);
     }
@@ -611,10 +611,10 @@ fn the_orthogonality_tolerance_cannot_let_a_growing_loop_through() {
 #[test]
 fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
     let rate = SampleRate::of(1_000.0);
-    let lines = [(40.0f64, 3.0f32), (70.0, 1.0)].map(|(m, t)| {
+    let lines = [(40.0f64, 3.0f64), (70.0, 1.0)].map(|(m, t)| {
         line(
             m,
-            Absorption::Gain(loop_gain(SampleSpan::of(m), Seconds::from_f32(t), rate)),
+            Absorption::Gain(loop_gain(SampleSpan::of(m), Seconds(t), rate)),
         )
     });
     let mut mixed = Network::new(rate);
@@ -622,7 +622,7 @@ fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
         .stages
         .push(Stage::Fdn(fdn(&lines, Matrix::Hadamard)))
         .unwrap();
-    let estimate = mixed.rt60(Band::Mid).to_f32();
+    let estimate = mixed.rt60(Band::Mid).get();
     assert!((estimate - 1.32).abs() < 1e-3, "{estimate}");
     let bound = fdn(&lines, Matrix::Hadamard).rt60_bound(Band::Mid, rate);
     assert!((bound.get() - 3.0).abs() < 1e-3);
@@ -651,13 +651,13 @@ fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
             last_above = t;
         }
     }
-    let actual = last_above as f32 / 1_000.0;
+    let actual = last_above as f64 / 1_000.0;
     assert!(
         actual > estimate,
         "the estimate {estimate} s undercuts the {actual} s the state needs"
     );
     assert!(
-        actual <= tail.to_f32(),
+        actual <= tail.get(),
         "the tail {tail:?} must cover {actual} s"
     );
 

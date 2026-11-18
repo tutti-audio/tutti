@@ -51,7 +51,7 @@ pub use machine_control::*;
 
 use tutti_ump::{
     DeviceIdentity, Message, MidiGroup, Sysex7Packet, SysexAssembler, SysexMessage, SysexStatus,
-    SysexStep, U7, U14, Ump,
+    SysexStep, U7, U14, UNIVERSAL_NON_REAL_TIME, UNIVERSAL_REAL_TIME, Ump,
 };
 use tutti_units::Seconds;
 
@@ -263,7 +263,7 @@ impl MtcFullMessage {
     #[must_use]
     pub const fn payload(self) -> [u8; 8] {
         [
-            read::REAL_TIME,
+            UNIVERSAL_REAL_TIME,
             Recipient::AllCall.device_byte(),
             0x01,
             0x01,
@@ -429,7 +429,7 @@ pub enum Read {
 pub fn read(message: SysexMessage<'_>) -> Read {
     let payload = message.payload();
     match payload.first() {
-        Some(&(read::NON_REAL_TIME | read::REAL_TIME)) => match read::parse(payload) {
+        Some(&(UNIVERSAL_NON_REAL_TIME | UNIVERSAL_REAL_TIME)) => match read::parse(payload) {
             read::Parsed::Message(to, message) => Read::Universal(Addressed { to, message }),
             read::Parsed::BadChecksum {
                 to,

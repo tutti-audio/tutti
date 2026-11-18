@@ -200,13 +200,13 @@ m2-103/12.1.1#3 | initiator |  | required | M2-103 §12.1.1 | on that NAK for a 
 m2-103/12.1.1#4 | both |  | required | M2-103 §12.1.1 | both sides treat the Transaction as concluded, with no reply to the NAK |  |  |  | ee6f0283220040e7
 m2-103/12.1.2#1 | initiator |  | permitted | M2-103 §12.1.2 | an Initiator ends a running Transaction with NAK status 0x20 and status data 1 |  |  |  | 4cb3b40850bdce06
 m2-103/12.1.2#2 | responder |  | required | M2-103 §12.1.2 | on that NAK for a Get, the Responder stops sending chunks for the Request Id |  |  |  | 692adbb19d45666b
-m2-103/12.1.2#3 | responder |  | required | M2-103 §12.1.2 | on that NAK for a Set, the Responder stops expecting chunks for the Request Id |  |  |  | 933e3aedc22c2762
+m2-103/12.1.2#3 | responder |  | required | M2-103 §12.1.2 | on that NAK for a Set, the Responder stops expecting chunks for the Request Id; the spec text names the Initiator in this sentence, a typo for the Responder, which is the side that expects the chunks |  |  |  | 933e3aedc22c2762
 m2-103/12.1.2#4 | both |  | required | M2-103 §12.1.2 | both sides treat the Transaction as concluded, with no reply to the NAK |  |  |  | c2152aee3dba72ee
 m2-103/12.1.3#1 | both |  | recommended | M2-103 §12.1.3 | the Notify Terminate Inquiry message is not sent | neg=1 |  |  | 4c12c36205375e33
 m2-103/12.1.3#2 | both |  | required | M2-103 §12.1.3 | a receiver still terminates the running request on a Notify with status 144 |  |  |  | 3f1135903be227f4
 m2-103/12.1.3#3 | both |  | required | M2-103 §12.1.3 | all inquiries under that Request ID stop at once after a Notify that ends them |  |  |  | b15c4e77e89d305e
-m2-103/12.1.3#4 | both |  | permitted | M2-103 §12.1.3 | earlier revisions let either device end a request with Notify status 144, informative |  |  |  | de5930277d5b3833
-m2-103/12.1.3#5 | both |  | required | M2-103 §12.1.3 | all inquiries under that Request Id stop at once |  |  |  | b15c4e77e89d305e
+m2-103/12.1.3#4 | both |  | permitted | M2-103 §12.1.3 | earlier revisions let either device end a request with Notify status 144, informative |  | deprecated | M2-103 §12.1.3 Note: the definition of the previous revisions, which the paragraph above it supersedes | de5930277d5b3833
+m2-103/12.1.3#5 | both |  | required | M2-103 §12.1.3 | all inquiries under that Request Id stop at once, the Note's restatement of #3 for the previous definition |  | deprecated | M2-103 §12.1.3 Note: repeats the sentence of #3 under the previous revisions' definition | b15c4e77e89d305e
 m2-103/12.2#1 | responder |  | required | M2-103 §12.2 | a Responder replies to any inquiry within three seconds unless it asks for more time |  |  |  | 4b700e3636cd5cb6
 m2-103/12.2#2 | both |  | required | M2-103 §12.2 | the gap between chunks of one message is under three seconds |  |  |  | 5548977d24434980
 m2-103/12.2.1#1 | responder |  | recommended | M2-103 §12.2.1 | a Responder that cannot reply or send the next chunk in time sends ACK status 0x10 with the wait in its status data |  |  |  | a9d73058f0185357

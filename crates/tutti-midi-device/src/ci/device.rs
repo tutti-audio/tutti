@@ -8,11 +8,11 @@
 //! of one Group of the connection (a [`Decoded`] from
 //! [`CiMessage::decode`]), and sends every [`CiAction::Send`].
 //!
-//! tutti has no Function Block, so the device is one that is not associated with a
-//! Function Block (§5.6.2): it speaks with Device ID `0x7F` and answers Discovery
-//! with Function Block `0x7F`. A device with Function Blocks would owe a Function Block
-//! Info Change Alert (UMP) whenever its MUID changes (§3.3.1); this one has none to
-//! alert, and [`CiAction::MuidChanged`] is how the caller learns of the change.
+//! The device is not associated with a Function Block (§5.6.2): it speaks with
+//! Device ID `0x7F` and answers Discovery with Function Block `0x7F`. A device with
+//! Function Blocks owes a Function Block Info Change Alert (UMP) whenever its MUID
+//! changes (§3.3.1); this one has none to alert, and [`CiAction::MuidChanged`] is how
+//! the caller learns of the change.
 //!
 //! # The rules
 //!
@@ -46,10 +46,12 @@
 //!   starts over under a new MUID; its target a peer's discards that peer
 //!   ([`CiAction::Lost`]). It is never answered.
 //! - NAK (§5.3, §5.11, Appendix E): a message addressed to the device's MUID that it
-//!   cannot handle (one the codec could not read, which includes every kind it does
-//!   not model, Property Exchange among them) is answered with a NAK carrying Table 16's status. A message for
-//!   another MUID, one to the Broadcast MUID, an ACK and a NAK are never NAK'd.
-//! - Profile Configuration as Responder (§7, M2-102 §2.4 to §2.7): tutti has no Profiles, and
+//!   cannot handle (one the codec could not read, or a Property Exchange inquiry when
+//!   the device does not declare [`CiCategories::PROPERTY_EXCHANGE`]) is answered with a
+//!   NAK carrying Table 16's status. A device that declares it leaves those inquiries to
+//!   its Property Exchange Responder ([`CiDevice::refuse_property_exchange`] is the NAK for
+//!   the ones the Responder did not accept). A message for another MUID, one to the Broadcast MUID, an ACK and a NAK are never NAK'd.
+//! - Profile Configuration as Responder (§7, M2-102 §2.4 to §2.7): the device has no Profiles, and
 //!   its Discovery does not declare the category. A Profile Inquiry to the device is
 //!   still answered, optionally for a device that declares no Profile Configuration (§7.13): a Reply
 //!   on the address the Inquiry used, with both lists empty, so an Initiator that asked the
@@ -75,7 +77,7 @@
 //!   ([`CiAction::Updated`]); a NAK from it leaves it `None`. No retry and no timeout:
 //!   §5.7 and §5.8 give none, the id is a convenience (Appendix A.1.1), and a peer
 //!   that never answers is just one with no id.
-//! - Endpoint Inquiry as Responder (§5.8): tutti has no UMP Endpoint Product
+//! - Endpoint Inquiry as Responder (§5.8): the device has no UMP Endpoint Product
 //!   Instance Id to report, so it NAKs (§5.8: a device that cannot provide the
 //!   requested information replies with a NAK), status `0x00`.
 //!
@@ -90,9 +92,9 @@ use std::vec::Vec;
 use tutti_ump::{DeviceIdentity, U7};
 
 use super::{
-    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiInstanceId, CiMessage, Decoded, Destination,
-    DiscoveryData, EndpointInfo, EndpointStatus, MaxSysexSize, Muid, Nak, PeCiMessage,
-    PeMessageKind, ProcessFeatures, ProfileLists, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
+    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
+    EndpointInfo, EndpointStatus, MaxSysexSize, Muid, Nak, PeCiMessage, PeMessageKind,
+    ProcessFeatures, ProfileLists, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
 };
 use tutti_ump::FunctionBlockId;
 
@@ -130,7 +132,7 @@ pub enum CiAction {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CiPeer {
     data: DiscoveryData,
-    instance_id: Option<CiInstanceId>,
+    instance_id: Option<ProductInstanceId>,
     asked: bool,
 }
 
@@ -151,7 +153,7 @@ impl CiPeer {
     /// Its Endpoint's Product Instance Id, once an Endpoint Inquiry was answered.
     #[must_use]
     pub fn product_instance_id(&self) -> Option<&ProductInstanceId> {
-        self.instance_id.as_ref().map(CiInstanceId::get)
+        self.instance_id.as_ref()
     }
 }
 
@@ -410,7 +412,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             | CiMessage::ProfileAdded { .. }
             | CiMessage::ProfileRemoved { .. }
             | CiMessage::ProfileDetailsReply { .. }
-            | CiMessage::ProfileSpecificData { .. } => {}
+            | CiMessage::ProfileSpecificData(_) => {}
             // Never answered: a pair of devices would trade NAKs for ever.
             CiMessage::Ack { .. } => {}
         }

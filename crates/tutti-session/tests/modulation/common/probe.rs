@@ -15,7 +15,7 @@ use std::sync::atomic::Ordering;
 
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_session::SessionNode;
-use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_types::{AtomicF64, ChannelLayout};
 use tutti_units::{Drive, Hz, UnitParam};
 
 // A probe's kind is chosen when it is built; its type declares the ones the
@@ -38,23 +38,23 @@ impl tutti_session::HasParam<{ UnitParam::Drive as u16 }> for ProbeUnit {
 pub struct ProbeUnit {
     param: UnitParam,
     extra: Option<UnitParam>,
-    knob: Arc<AtomicF32>,
-    other: Arc<AtomicF32>,
+    knob: Arc<AtomicF64>,
+    other: Arc<AtomicF64>,
 }
 
 impl ProbeUnit {
     /// A cutoff probe at `knob`.
-    pub fn new(knob: f32) -> Self {
+    pub fn new(knob: f64) -> Self {
         Self::of(UnitParam::Cutoff, knob)
     }
 
     /// A probe of `param` at `knob`.
-    pub fn of(param: UnitParam, knob: f32) -> Self {
+    pub fn of(param: UnitParam, knob: f64) -> Self {
         Self {
             param,
             extra: None,
-            knob: Arc::new(AtomicF32::new(knob)),
-            other: Arc::new(AtomicF32::new(0.0)),
+            knob: Arc::new(AtomicF64::new(knob)),
+            other: Arc::new(AtomicF64::new(0.0)),
         }
     }
 
@@ -65,7 +65,7 @@ impl ProbeUnit {
     }
 
     /// The knob cell, shared with every clone.
-    pub fn knob(&self) -> Arc<AtomicF32> {
+    pub fn knob(&self) -> Arc<AtomicF64> {
         Arc::clone(&self.knob)
     }
 }
@@ -89,7 +89,7 @@ impl Node for ProbeUnit {
             }
             None => {
                 let k = self.knob.load(Ordering::Acquire);
-                io.output(0).fill(k);
+                io.output(0).fill(k as f32);
             }
         }
         Status::Modified
@@ -99,8 +99,8 @@ impl Node for ProbeUnit {
 
     fn param_base(&self, port: usize) -> Option<f64> {
         match port {
-            0 => Some(f64::from(self.knob.load(Ordering::Acquire))),
-            1 if self.extra.is_some() => Some(f64::from(self.other.load(Ordering::Acquire))),
+            0 => Some(self.knob.load(Ordering::Acquire)),
+            1 if self.extra.is_some() => Some(self.other.load(Ordering::Acquire)),
             _ => None,
         }
     }
@@ -119,8 +119,8 @@ impl ParamNode for ProbeUnit {
         Self {
             param: self.param,
             extra: self.extra,
-            knob: Arc::new(AtomicF32::new(self.knob.load(Ordering::Acquire))),
-            other: Arc::new(AtomicF32::new(self.other.load(Ordering::Acquire))),
+            knob: Arc::new(AtomicF64::new(self.knob.load(Ordering::Acquire))),
+            other: Arc::new(AtomicF64::new(self.other.load(Ordering::Acquire))),
         }
     }
 }
