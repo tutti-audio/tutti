@@ -5,7 +5,6 @@
 //! widths must agree, then the frame counts. A source and a destination of
 //! different formats convert sample by sample by the rule in [`Sample`].
 
-use crate::sample::clips;
 use crate::{BufferError, Interleaved, InterleavedMut, Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_types::{ChannelLayout, Samples};
 
@@ -69,8 +68,9 @@ pub fn convert_counting_clips<A: Sample, B: Sample>(
     same_shape(src.layout(), dst.layout(), src.frames(), dst.frames())?;
     let mut clipped = 0;
     for (d, &s) in dst.samples_mut().iter_mut().zip(src.samples()) {
-        clipped += usize::from(clips::<A, B>(s));
-        *d = s.convert_to();
+        let (v, clip) = s.convert_to_clipped();
+        *d = v;
+        clipped += usize::from(clip);
     }
     Ok(clipped)
 }
