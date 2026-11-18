@@ -635,8 +635,8 @@ fn a_chorus_depth_lane_past_its_range_is_held_at_the_sweeps_bound() {
         &ramp(FRAMES),
     );
     // Past the line's length the line holds the ramp alone. The tolerance is a frame: the
-    // sweep runs 2.5 frames of delay per frame at its steepest, and the f32 phase drifts
-    // by some 1e-5 of a cycle over the render; a depth past 40 ms misses by hundreds.
+    // sweep runs 2.5 frames of delay per frame at its steepest; a depth past 40 ms misses
+    // by hundreds.
     let mut most = f32::MIN;
     for n in (2_400..FRAMES).step_by(16) {
         // The LFO steps before the frame it sounds in: frame `n` sounds step `n + 1`.

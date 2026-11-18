@@ -285,9 +285,7 @@ unit! {
 impl PhaseIncrement {
     /// The step that completes `frequency` cycles per second at `sample_rate`.
     ///
-    /// At 20 Hz against 192 kHz the step is ~1.04e-4; it is kept in `f64`
-    /// because an `f32`-rounded step accumulates a drift that is audible over a
-    /// long note.
+    /// At 20 Hz against 192 kHz the step is ~1.04e-4.
     #[inline]
     pub fn per_sample(frequency: Hz, sample_rate: impl Into<SampleRate>) -> PhaseIncrement {
         PhaseIncrement(f64::from(frequency.0) / sample_rate.into().get())
