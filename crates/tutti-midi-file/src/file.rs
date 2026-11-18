@@ -24,9 +24,9 @@ use tutti_midi_protocol::{MtcRate, channel_voice, flex_tempo};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
-    Address, Flex, FlexAddress, FlexTextKind, Form, Message, MidiChannel, MidiGroup, NoteKeyEvent,
-    NoteNumber, NoteVelocity, Sysex7Packets, SysexPart, System, TicksPerQuarterNote, U7, Ump,
-    Unknown, Voice2,
+    Address, Flex, FlexAddress, FlexTextKind, Form, ManufacturerId, Message, MidiChannel,
+    MidiGroup, NoteKeyEvent, NoteNumber, NoteVelocity, Sysex7Packets, SysexPart, System,
+    TicksPerQuarterNote, U7, Ump, Unknown, Voice2,
 };
 
 use crate::MidiFileKind;
@@ -39,8 +39,9 @@ mod to_clip;
 
 pub use meta_kind::{
     MalformedMeta, MicrosPerQuarter, MicrosPerQuarterOutOfRange, OtherMetaKind,
-    OtherMetaKindOutOfRange,
+    OtherMetaKindOutOfRange, SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset,
 };
+pub(crate) use meta_kind::{split_extra, with_extra};
 pub use to_clip::{Altered, Converted, DropReason, Dropped, LyricChange, Moved, ToClipError};
 use tutti_ump::Voice1;
 
@@ -322,9 +323,45 @@ pub enum Meta {
         /// [`Tempo`](Self::Tempo).
         extra: Box<[u8]>,
     },
-    /// Any other meta event (sequence number `00`, channel prefix `20`, port
-    /// `21`, SMPTE offset `54`, sequencer specific `7F`, an unregistered
-    /// type): its type byte and its data.
+    /// `00`: Sequence Number, `FF 00 02 ssss`: the number of a sequence (in a
+    /// format 2 file, of each pattern). It starts its track: at tick 0, before
+    /// any channel message, SysEx or escape ([`Track::sequence_number`]).
+    SequenceNumber {
+        /// The 16-bit number.
+        number: u16,
+        /// The data past the two bytes this reads, as `extra` of
+        /// [`Tempo`](Self::Tempo).
+        extra: Box<[u8]>,
+    },
+    /// `20`: MIDI Channel Prefix, `FF 20 01 cc`: the channel of the SysEx and
+    /// meta events that follow, until the next channel message or prefix
+    /// ([`Track::events_with_channel`]).
+    ChannelPrefix {
+        /// The channel, `0..=15`.
+        channel: MidiChannel,
+        /// The data past the byte this reads, as `extra` of
+        /// [`Tempo`](Self::Tempo).
+        extra: Box<[u8]>,
+    },
+    /// `54`: SMPTE Offset, `FF 54 05 hr mn se fr ff`: the SMPTE time the track
+    /// starts at ([`SmpteOffset`]).
+    SmpteOffset {
+        /// The time, in the wire's range.
+        offset: SmpteOffset,
+        /// The data past the five bytes this reads, as `extra` of
+        /// [`Tempo`](Self::Tempo).
+        extra: Box<[u8]>,
+    },
+    /// `7F`: Sequencer-Specific, `FF 7F len data`: the data starts with a
+    /// manufacturer id of one byte or, after a `00`, of three.
+    SequencerSpecific {
+        /// The id the data starts with.
+        manufacturer: ManufacturerId,
+        /// The data after the id.
+        data: Box<[u8]>,
+    },
+    /// Any other meta event (port `21`, an unregistered type): its type byte
+    /// and its data.
     Other {
         /// The type byte: never one of the typed variants', so a write and a
         /// read give the same event.
@@ -375,6 +412,49 @@ impl Meta {
         Self::Text {
             kind,
             bytes: text.as_bytes().into(),
+        }
+    }
+
+    /// The ASCII characters of a text event: the bytes with the top bit clear.
+    /// SMF 1.0 section 3.3: text is printable ASCII for interchange, other
+    /// codes using the high bit are for programs on one computer, and a
+    /// program on a computer without non-ASCII characters ignores them. The
+    /// event keeps its bytes whatever this view leaves out. `None` for an event
+    /// that is not text.
+    pub fn ascii_text(&self) -> Option<String> {
+        match self {
+            Self::Text { bytes, .. } => Some(
+                bytes
+                    .iter()
+                    .filter(|b| b.is_ascii())
+                    .map(|&b| char::from(b))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// A Sequence Number event for `number`.
+    pub fn sequence_number(number: u16) -> Self {
+        Self::SequenceNumber {
+            number,
+            extra: Box::default(),
+        }
+    }
+
+    /// A MIDI Channel Prefix event for `channel`.
+    pub fn channel_prefix(channel: MidiChannel) -> Self {
+        Self::ChannelPrefix {
+            channel,
+            extra: Box::default(),
+        }
+    }
+
+    /// An SMPTE Offset event for `offset`.
+    pub fn smpte_offset(offset: SmpteOffset) -> Self {
+        Self::SmpteOffset {
+            offset,
+            extra: Box::default(),
         }
     }
 }
@@ -645,6 +725,123 @@ impl Track {
         self
     }
 
+    /// The track opens with a Sequence Number `number` (replacing the one it
+    /// has): at tick 0, before every event but a leading copyright notice,
+    /// where SMF 1.0 section 3.3 puts it.
+    #[must_use]
+    pub fn numbered(mut self, number: u16) -> Self {
+        self.events
+            .retain(|(_, e)| !matches!(e, FileEvent::Meta(Meta::SequenceNumber { .. })));
+        self.open_with(Meta::sequence_number(number));
+        self
+    }
+
+    /// The track starts at the SMPTE time `offset` (replacing the one it
+    /// has): its SMPTE Offset is placed at tick 0, before every event but a
+    /// leading copyright notice, where SMF 1.0 section 3.3 says it belongs.
+    #[must_use]
+    pub fn smpte_start(mut self, offset: SmpteOffset) -> Self {
+        self.events
+            .retain(|(_, e)| !matches!(e, FileEvent::Meta(Meta::SmpteOffset { .. })));
+        self.open_with(Meta::smpte_offset(offset));
+        self
+    }
+
+    /// A copyright notice, as the track's first event at tick 0 (SMF 1.0
+    /// section 3.3). The track holds one copyright event: a second notice is
+    /// appended to it on a new line.
+    #[must_use]
+    pub fn copyright(mut self, notice: &str) -> Self {
+        match self.events.first_mut() {
+            Some((
+                Tick(0),
+                FileEvent::Meta(Meta::Text {
+                    kind: TextKind::Copyright,
+                    bytes,
+                }),
+            )) => {
+                let mut joined = bytes.to_vec();
+                joined.push(b'\n');
+                joined.extend_from_slice(notice.as_bytes());
+                *bytes = joined.into();
+            }
+            _ => self
+                .events
+                .insert(0, (Tick(0), Meta::text(TextKind::Copyright, notice).into())),
+        }
+        self
+    }
+
+    /// Inserts `meta` at tick 0 after a leading copyright notice, which stays
+    /// the track's first event.
+    fn open_with(&mut self, meta: Meta) {
+        let after_copyright = matches!(
+            self.events.first(),
+            Some((
+                Tick(0),
+                FileEvent::Meta(Meta::Text {
+                    kind: TextKind::Copyright,
+                    ..
+                })
+            ))
+        );
+        self.events
+            .insert(usize::from(after_copyright), (Tick(0), meta.into()));
+    }
+
+    /// The meta events that start the track: those at tick 0 before any event
+    /// that is not a meta event. SMF 1.0 section 3.3 puts the Sequence Number
+    /// and the SMPTE Offset there.
+    fn leading_metas(&self) -> impl Iterator<Item = &Meta> {
+        self.events.iter().map_while(|(tick, e)| match e {
+            FileEvent::Meta(meta) if *tick == Tick(0) => Some(meta),
+            _ => None,
+        })
+    }
+
+    /// The track's Sequence Number: the event at the start of the track, at
+    /// tick 0 among meta events only (SMF 1.0 section 3.3). One placed later
+    /// does not number the sequence.
+    #[must_use]
+    pub fn sequence_number(&self) -> Option<u16> {
+        self.leading_metas().find_map(|m| match m {
+            Meta::SequenceNumber { number, .. } => Some(*number),
+            _ => None,
+        })
+    }
+
+    /// The sequence number of the track at `index` in its file: its own, or
+    /// the place it has in the file.
+    fn number_at(&self, index: usize) -> u16 {
+        self.sequence_number()
+            .unwrap_or_else(|| u16::try_from(index).unwrap_or(u16::MAX))
+    }
+
+    /// The events with the channel each belongs to (SMF 1.0 section 3.3, MIDI
+    /// Channel Prefix): a channel message its own, and a SysEx or meta event
+    /// the channel of the prefix before it, effective until the next channel
+    /// message or prefix; `None` with no prefix in effect. A prefix event
+    /// itself is `None`: it names the events that follow it.
+    pub fn events_with_channel(
+        &self,
+    ) -> impl Iterator<Item = (Tick, &FileEvent, Option<MidiChannel>)> {
+        let mut prefix = None;
+        self.events.iter().map(move |(tick, event)| {
+            let channel = match event {
+                FileEvent::Message(Message::Midi1(address, _)) => {
+                    prefix = None;
+                    Some(address.channel)
+                }
+                FileEvent::Meta(Meta::ChannelPrefix { channel, .. }) => {
+                    prefix = Some(*channel);
+                    None
+                }
+                _ => prefix,
+            };
+            (*tick, event, channel)
+        })
+    }
+
     /// A Set Profile On at the start of the Clip Configuration Header, after
     /// the ones already there (M2-116 section 6.2: data meant for a Profile is
     /// tagged with a Set Profile On, with that Profile Id, at the beginning of
@@ -699,13 +896,16 @@ impl Track {
         )
     }
 
-    /// The track's name: its first Track Name event, if it is UTF-8 text.
+    /// The track's name: its first Track Name event, if it is UTF-8 text. A
+    /// Track Name after time 0 is not the track's name (SMF 1.0 section 3.3:
+    /// it appears at time 0): the track's name is the first one at tick 0, and
+    /// one at a later tick is skipped.
     pub fn name(&self) -> Option<&str> {
-        self.events.iter().find_map(|(_, event)| match event {
+        self.events.iter().find_map(|(tick, event)| match event {
             FileEvent::Meta(Meta::Text {
                 kind: TextKind::TrackName,
                 bytes,
-            }) => std::str::from_utf8(bytes).ok(),
+            }) if *tick == Tick(0) => std::str::from_utf8(bytes).ok(),
             _ => None,
         })
     }
@@ -918,14 +1118,24 @@ impl MidiFile {
     /// events are further apart than the wire's 28-bit delta, a message is not
     /// a MIDI 1.0 channel message of the first Group, an event or the file is
     /// larger than the format's length fields hold (the error names which and
-    /// where), or the tempo events do not make a [`TempoMap`].
+    /// where), the tempo events do not make a [`TempoMap`], or the events break
+    /// a rule SMF 1.0 gives a writer: a SysEx message that does not end in `F7`
+    /// or has a channel message between its packets, a Sequence Number or
+    /// Track Name after time 0 (a Sequence Number or SMPTE Offset also after a
+    /// channel message, SysEx or escape, a Sequence Number also outside the
+    /// first track of a format 0 or 1 file), an SMPTE Offset, Set Tempo or Time
+    /// Signature outside the first track of a format 1 file, or a copyright
+    /// notice that is not the first event of the first track or is not the
+    /// file's only one. tutti's writer also refuses what the specification
+    /// only recommends: the format 1 tempo map outside the first track, and the
+    /// copyright placement.
     #[must_use = "an Err means no file was built"]
     pub fn smf(
         format: SmfFormat,
         division: SmfDivision,
         tracks: Vec<Track>,
     ) -> Result<Self, TracksError> {
-        Self::build(Container::Smf(format, division), tracks)
+        Self::build(Container::Smf(format, division), tracks, true)
     }
 
     /// A Clip File of division `ticks_per_quarter` over one sequence and its
@@ -960,10 +1170,17 @@ impl MidiFile {
                 return Err(TracksError::TextInterrupted { at });
             }
         }
-        Self::build(Container::Clip(ticks_per_quarter), vec![track])
+        Self::build(Container::Clip(ticks_per_quarter), vec![track], true)
     }
 
-    fn build(container: Container, tracks: Vec<Track>) -> Result<Self, TracksError> {
+    /// The file of `tracks`, held to the container's rules. `authoring` adds
+    /// the rules a writer keeps ([`check_smf`]): a read keeps a file that
+    /// breaks them.
+    fn build(
+        container: Container,
+        tracks: Vec<Track>,
+        authoring: bool,
+    ) -> Result<Self, TracksError> {
         if tracks.is_empty() {
             return Err(TracksError::NoTracks);
         }
@@ -994,7 +1211,12 @@ impl MidiFile {
             check_run(container, i, TrackPart::Events, &track.events, track.end)?;
         }
         match container {
-            Container::Smf(..) => smf::measure(&tracks)?,
+            Container::Smf(format, _) => {
+                if authoring {
+                    check_smf(format, &tracks)?;
+                }
+                smf::measure(&tracks)?;
+            }
             Container::Clip(_) => {
                 let track = &tracks[0];
                 if clip_file::restart_bytes(track.header_end.max(track.end).0) > u64::from(u32::MAX)
@@ -1041,6 +1263,7 @@ impl MidiFile {
                 Ok(Self::build(
                     Container::Smf(parts.format, parts.division),
                     parts.tracks,
+                    false,
                 )?)
             }
             Some(MidiFileKind::ClipFile) => {
@@ -1066,6 +1289,7 @@ impl MidiFile {
                 Ok(Self::build(
                     Container::Clip(clip.ticks_per_quarter),
                     vec![track],
+                    false,
                 )?)
             }
             None => Err(ReadError::UnknownFormat),
@@ -1214,6 +1438,81 @@ impl MidiFile {
     /// The tracks, as the file has them (a Clip File's is one).
     pub fn tracks(&self) -> &[Track] {
         &self.tracks
+    }
+
+    /// A copy of the file with the tempo and time signature SMF 1.0 section 2.2
+    /// asks every file to specify: a Set Tempo and a Time Signature at tick 0 of the
+    /// track that holds the tempo map (a format 0 file's track, a format 1
+    /// file's first track) or of each independent sequence (format 2 and
+    /// above), unless it has one there already. What it adds is what a reader
+    /// assumes without it, 120 beats a minute in 4/4, so the file plays as it
+    /// did. A Clip File is returned as it is: it has its own header.
+    ///
+    /// # Errors
+    ///
+    /// [`TracksError`] only at the format's limits: the added events push a
+    /// track chunk past 4 GB, which [`smf`](Self::smf) refuses as
+    /// [`TooLarge`](TracksError::TooLarge). The tempo map is the one the file
+    /// had.
+    pub fn with_default_tempo_and_meter(&self) -> Result<Self, TracksError> {
+        let Container::Smf(format, _) = self.container else {
+            return Ok(self.clone());
+        };
+        let mut tracks = self.tracks.clone();
+        let holders = if format.shares_timeline() {
+            1
+        } else {
+            tracks.len()
+        };
+        for track in tracks.iter_mut().take(holders) {
+            let has = |wanted: fn(&Meta) -> bool| {
+                track.events.iter().any(|(tick, event)| {
+                    *tick == Tick(0) && matches!(event, FileEvent::Meta(meta) if wanted(meta))
+                })
+            };
+            let signature = Meta::TimeSignature {
+                numerator: 4,
+                denominator_power: 2,
+                clocks_per_click: 24,
+                thirty_seconds_per_quarter: 8,
+                extra: Box::default(),
+            };
+            let missing = [
+                (!has(|m| matches!(m, Meta::Tempo { .. }))).then(|| Meta::tempo(Bpm::of(120.0))),
+                (!has(|m| matches!(m, Meta::TimeSignature { .. }))).then_some(signature),
+            ];
+            // After the meta events that open the track, so a copyright notice
+            // stays first and a Sequence Number before any channel message.
+            let lead = track
+                .events
+                .iter()
+                .take_while(|(tick, e)| *tick == Tick(0) && matches!(e, FileEvent::Meta(_)))
+                .count();
+            for (offset, meta) in missing.into_iter().flatten().enumerate() {
+                track.events.insert(lead + offset, (Tick(0), meta.into()));
+            }
+        }
+        Self::build(self.container, tracks, false)
+    }
+
+    /// The SMPTE time track `track` starts at: its SMPTE Offset, where that
+    /// has a meaning. In a format 1 file the offset is stored with the tempo
+    /// map and "has no meaning in any of the other tracks" (SMF 1.0 section
+    /// 3.3), so only the first track's counts. As the Sequence Number, it
+    /// counts at the start of its track only. `None` for no such track or
+    /// offset.
+    #[must_use]
+    pub fn smpte_offset(&self, track: usize) -> Option<SmpteOffset> {
+        if matches!(self.container, Container::Smf(SmfFormat::Parallel, _)) && track > 0 {
+            return None;
+        }
+        self.tracks
+            .get(track)?
+            .leading_metas()
+            .find_map(|m| match m {
+                Meta::SmpteOffset { offset, .. } => Some(*offset),
+                _ => None,
+            })
     }
 
     /// Where the tracks of a file of one timeline end: the longest track's end
@@ -1422,14 +1721,14 @@ impl<'a> MetricalSequences<'a> {
             file,
             ticks_per_quarter,
         } = self;
-        file.tracks
-            .iter()
-            .zip(&file.tempo_maps)
-            .map(move |(track, tempo_map)| MetricalSequence {
+        file.tracks.iter().zip(&file.tempo_maps).enumerate().map(
+            move |(index, (track, tempo_map))| MetricalSequence {
                 track,
                 tempo_map,
                 ticks_per_quarter,
-            })
+                number: track.number_at(index),
+            },
+        )
     }
 }
 
@@ -1440,9 +1739,21 @@ pub struct MetricalSequence<'a> {
     track: &'a Track,
     tempo_map: &'a Arc<TempoMap>,
     ticks_per_quarter: TicksPerQuarterNote,
+    number: u16,
 }
 
 impl<'a> MetricalSequence<'a> {
+    /// The sequence's number: its Sequence Number event's, or its place in
+    /// the file when it has none. The specification says the sequences'
+    /// locations in order are the default and names no base; tutti counts
+    /// from 0. An explicit number equal to another sequence's number or place
+    /// is not refused: the specification does not call numbers unique, and
+    /// each sequence reports its own.
+    #[must_use]
+    pub fn number(self) -> u16 {
+        self.number
+    }
+
     /// The sequence's track.
     #[must_use]
     pub fn track(self) -> &'a Track {
@@ -1565,11 +1876,15 @@ impl<'a> SmpteSequences<'a> {
             fps,
             ticks_per_frame,
         } = self;
-        file.tracks.iter().map(move |track| SmpteSequence {
-            track,
-            fps,
-            ticks_per_frame,
-        })
+        file.tracks
+            .iter()
+            .enumerate()
+            .map(move |(index, track)| SmpteSequence {
+                track,
+                fps,
+                ticks_per_frame,
+                number: track.number_at(index),
+            })
     }
 }
 
@@ -1579,9 +1894,16 @@ pub struct SmpteSequence<'a> {
     track: &'a Track,
     fps: MtcRate,
     ticks_per_frame: SmfTicksPerFrame,
+    number: u16,
 }
 
 impl<'a> SmpteSequence<'a> {
+    /// The sequence's number, as [`MetricalSequence::number`].
+    #[must_use]
+    pub fn number(self) -> u16 {
+        self.number
+    }
+
     /// The sequence's track.
     #[must_use]
     pub fn track(self) -> &'a Track {
@@ -1842,6 +2164,82 @@ fn check_run(
     }
     if end.0 - at.0 > max_gap {
         return Err(TracksError::EndTooFar { track, end });
+    }
+    Ok(())
+}
+
+/// The rules a writer holds an SMF's events to (SMF 1.0 sections 2.2, 3 and
+/// 3.3), that a reader keeps a file without: a System Exclusive message ends
+/// in `F7`, whole or in packets, with no channel message or other `F0` between
+/// its packets; a Sequence Number and a Track Name are at time 0, the Sequence
+/// Number before any channel message, SysEx or escape, and in the first track
+/// of a format 0 or 1 file; an SMPTE Offset is at the start of its track, like
+/// the Sequence Number, and in the first track of a format 1 file, as are the
+/// Set Tempo and Time Signature; a file holds one copyright notice, the first
+/// event of its first track at tick 0.
+fn check_smf(format: SmfFormat, tracks: &[Track]) -> Result<(), TracksError> {
+    let one_sequence = matches!(format, SmfFormat::SingleTrack | SmfFormat::Parallel);
+    let mut copyrights = 0;
+    for (track, body) in tracks.iter().enumerate() {
+        // The tick of the last packet of a SysEx message not yet ended by an `F7`.
+        let mut open: Option<Tick> = None;
+        // Only meta events, all at tick 0, so far.
+        let mut at_start = true;
+        for (index, &(at, ref event)) in body.events.iter().enumerate() {
+            match event {
+                FileEvent::SysEx(data) if open.is_none() => {
+                    open = (!ends_in_f7(data)).then_some(at);
+                }
+                FileEvent::Escape(data) if open.is_some() => {
+                    open = (!ends_in_f7(data)).then_some(at);
+                }
+                FileEvent::SysEx(_) | FileEvent::Message(_) if open.is_some() => {
+                    return Err(TracksError::SysExInterrupted { track, at });
+                }
+                FileEvent::Meta(Meta::SequenceNumber { .. }) => {
+                    if !(at_start && at == Tick(0)) {
+                        return Err(TracksError::SequenceNumberNotAtStart { track, at });
+                    }
+                    if one_sequence && track > 0 {
+                        return Err(TracksError::SequenceNumberNotInFirstTrack { track });
+                    }
+                }
+                FileEvent::Meta(Meta::Text {
+                    kind: TextKind::TrackName,
+                    ..
+                }) if at != Tick(0) => return Err(TracksError::TrackNameNotAtStart { track, at }),
+                FileEvent::Meta(Meta::SmpteOffset { .. }) => {
+                    if !(at_start && at == Tick(0)) {
+                        return Err(TracksError::SmpteOffsetNotAtStart { track, at });
+                    }
+                    if format == SmfFormat::Parallel && track > 0 {
+                        return Err(TracksError::SmpteOffsetNotInFirstTrack { track });
+                    }
+                }
+                FileEvent::Meta(Meta::Text {
+                    kind: TextKind::Copyright,
+                    ..
+                }) => {
+                    copyrights += 1;
+                    if copyrights > 1 {
+                        return Err(TracksError::CopyrightNotTogether { track, at });
+                    }
+                    if !(track == 0 && index == 0 && at == Tick(0)) {
+                        return Err(TracksError::CopyrightNotFirst { track, at });
+                    }
+                }
+                FileEvent::Meta(Meta::Tempo { .. } | Meta::TimeSignature { .. })
+                    if format == SmfFormat::Parallel && track > 0 =>
+                {
+                    return Err(TracksError::TempoMapNotInFirstTrack { track, at });
+                }
+                _ => {}
+            }
+            at_start &= at == Tick(0) && matches!(event, FileEvent::Meta(_));
+        }
+        if let Some(at) = open {
+            return Err(TracksError::SysExNotEnded { track, at });
+        }
     }
     Ok(())
 }

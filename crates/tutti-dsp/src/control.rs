@@ -3,27 +3,19 @@
 
 /// Samples between coefficient solves on a parameter that moves inside a block.
 ///
-/// A filter whose cutoff is swept (by a block ramp or an audio-rate param port)
-/// needs a `tan` per coefficient solve. Solving every sample is the dominant
-/// cost of a modulated SVF; solving every 16 samples and interpolating the
-/// coefficients linearly between solves costs a quarter of a 64-frame block's
-/// `tan`s. 16 samples is 0.33 ms at 48 kHz — far below the rate any musical
-/// sweep moves at, so the interpolation error is a small fraction of the change
-/// between two solves. Measured against the per-sample solve: 3e-5 worst on a
-/// 200 Hz → 8 kHz cutoff sweep in 85 ms (4.6e-4 at 64 samples; exactly 0 at
-/// 1), 3.5e-6 on a 2 Hz phaser. (Every bank solves on the stream's grid, not
-/// from a block's start: a control is in the render up to 16 frames
-/// after it was sampled, wherever the blocks fall.)
+/// A swept filter solves its coefficients (a `tan` each) on a grid of
+/// `COEFF_INTERVAL` frames of the stream, not from a block's start, and
+/// interpolates them linearly between solves; a control is therefore in the
+/// render up to `COEFF_INTERVAL` frames after it was sampled, wherever the blocks
+/// fall. 16 samples is 0.33 ms at 48 kHz.
 pub const COEFF_INTERVAL: usize = 16;
 
-/// Channels a recursive node renders together, sample-inner.
+/// Channels a recursive filter renders together, sample-inner.
 ///
-/// A recursive filter is latency-bound on one channel: each sample waits on
-/// the one before. Running a few channels' independent chains side by side
-/// fills that latency (instruction-level parallelism) while each still reads
-/// and writes its own planar slice. Measured on the f64 SVF at width 6, one
-/// block: all six as one group 0.49 µs, as 3 + 3 0.60 µs, one channel at a
-/// time 1.33 µs.
+/// A recursive filter is latency-bound on one channel: each sample waits on the
+/// one before. Running up to `LANES` channels' independent chains side by side
+/// fills that latency, while each channel still reads and writes its own planar
+/// slice.
 pub const LANES: usize = 8;
 
 /// How many of the `remaining` channels the next group takes: the groups are

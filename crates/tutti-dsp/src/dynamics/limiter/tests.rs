@@ -137,8 +137,7 @@ fn amplitude(db: f64) -> f64 {
 
 /// How many ulps (`f32::EPSILON`) over its ceiling a limiter's sample peak may land: the
 /// ceiling's amplitude, the curve's divide and the gain's product each round, so the bound
-/// is a few ulps, not an exact one. The node sweep (`tutti-nodes`, `rt_no_alloc_dynamics`)
-/// states the same four.
+/// is a few ulps, not an exact one.
 const CEILING_ULPS: f32 = 4.0;
 
 /// The most a sample may reach under a ceiling of `db`: the ceiling's amplitude plus
