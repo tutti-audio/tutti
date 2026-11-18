@@ -29,7 +29,7 @@ use tutti_graph::{
     Prepare, Shape, Source, Status, Topology, TransportPosition, Unforkable,
 };
 use tutti_types::ChannelLayout;
-use tutti_units::{Mix, Tail};
+use tutti_units::{Mix, Samples, Tail};
 
 const BLOCK: usize = 64;
 /// The most a block here is: what every `Pair` is prepared for.
@@ -446,7 +446,10 @@ fn a_fade_runs_against_the_weights_of_the_mix() {
         for (i, &y) in got.iter().enumerate() {
             let n = start + i as u64;
             let want = if i < FADE {
-                let g = FadeLaw::EqualAmplitude.gains(i, FADE).1.get() as f32;
+                let g = FadeLaw::EqualAmplitude
+                    .gains(Samples(i), Samples(FADE))
+                    .1
+                    .get() as f32;
                 let (wy, wx) = (0.0 + (M - 0.0) * g, 0.0 + ((1.0 - M) - 0.0) * g);
                 (3.0 * wave(n)) * wy + wave(n) * wx
             } else {
@@ -462,7 +465,10 @@ fn a_fade_runs_against_the_weights_of_the_mix() {
         for (i, &y) in got.iter().enumerate() {
             let n = start + i as u64;
             let want = if i < FADE {
-                let g = FadeLaw::EqualAmplitude.gains(i, FADE).1.get() as f32;
+                let g = FadeLaw::EqualAmplitude
+                    .gains(Samples(i), Samples(FADE))
+                    .1
+                    .get() as f32;
                 let (wy, wx) = (M + (0.0 - M) * g, (1.0 - M) + (1.0 - (1.0 - M)) * g);
                 (3.0 * wave(n)) * wy + wave(n) * wx
             } else {
@@ -496,7 +502,10 @@ fn a_mix_moving_during_a_fade_follows_frame_by_frame() {
         for (i, &y) in got.iter().enumerate() {
             let n = start + i as u64;
             let k = (n - fade_start) as usize;
-            let g = FadeLaw::EqualAmplitude.gains(k, FADE).1.get() as f32;
+            let g = FadeLaw::EqualAmplitude
+                .gains(Samples(k), Samples(FADE))
+                .1
+                .get() as f32;
             let m = ramp(0.5, 1.0, i, BLOCK);
             let (wy, wx) = (0.0 + (m - 0.0) * g, 0.0 + ((1.0 - m) - 0.0) * g);
             let want = (3.0 * wave(n)) * wy + wave(n) * wx;

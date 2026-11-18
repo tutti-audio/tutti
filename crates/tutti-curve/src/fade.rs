@@ -53,7 +53,8 @@ impl FadeLaw {
     /// In debug builds, if `k >= n`.
     #[inline]
     #[must_use]
-    pub fn gains(self, k: usize, n: usize) -> (Amplitude, Amplitude) {
+    pub fn gains(self, k: Samples, n: Samples) -> (Amplitude, Amplitude) {
+        let (k, n) = (k.get(), n.get());
         debug_assert!(k < n, "frame {k} of a {n}-frame fade");
         let s = Law::Smootherstep
             .eval(Normalized::clamped((k + 1) as f64 / (n + 1) as f64))
@@ -71,7 +72,7 @@ impl FadeLaw {
     /// `from * out + to * in`, and exactly `to` from frame `n` on.
     #[inline]
     #[must_use]
-    pub fn between(self, from: Amplitude, to: Amplitude, k: usize, n: usize) -> Amplitude {
+    pub fn between(self, from: Amplitude, to: Amplitude, k: Samples, n: Samples) -> Amplitude {
         if k >= n {
             return to;
         }

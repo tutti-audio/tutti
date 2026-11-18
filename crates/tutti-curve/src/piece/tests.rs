@@ -1,5 +1,5 @@
 use super::*;
-use tutti_units::Normalized;
+use tutti_units::{Normalized, Samples};
 
 use crate::Exponent;
 
@@ -75,7 +75,7 @@ fn an_azimuth_ramp_takes_the_short_arc_and_lands_on_its_target() {
     let az = UnitParam::Azimuth;
     let n = 4;
     let got: Vec<f32> = (0..n)
-        .map(|k| Piece::ramp_at(Some(az), 170.0, -170.0, k, n))
+        .map(|k| Piece::ramp_at(Some(az), 170.0, -170.0, Samples(k), Samples(n)))
         .collect();
     assert_eq!(got[3], -170.0);
     assert_eq!(got[1], -180.0);

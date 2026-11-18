@@ -57,7 +57,7 @@ use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, Piece};
 
 use tutti_types::{AtomicF32, ParamCell};
-use tutti_units::{Amplitude, UnitAddr, UnitParam};
+use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
 use crate::event::Event;
 use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
@@ -521,7 +521,7 @@ impl SumLane {
                 self.prev = Some(to);
             } else {
                 self.fade.k = k + frames;
-                self.prev = Some(fade_at(start, to, k + frames - 1, len));
+                self.prev = Some(fade_at(start, to, Samples(k + frames - 1), Samples(len)));
             }
             return w;
         }
@@ -551,7 +551,7 @@ pub(crate) struct Carried {
 /// `w` at fade frame `j` of a fade of `len` frames: `start` moved to `goal` along
 /// [`FadeLaw::EqualAmplitude`], and exactly `goal` from `len` on.
 #[inline(always)]
-pub(crate) fn fade_at(start: Amplitude, goal: Amplitude, j: usize, len: usize) -> Amplitude {
+pub(crate) fn fade_at(start: Amplitude, goal: Amplitude, j: Samples, len: Samples) -> Amplitude {
     FadeLaw::EqualAmplitude.between(start, goal, j, len)
 }
 
@@ -589,14 +589,16 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
             // The ramp is an `f32` piece: its ends narrow once per block.
             let (from, to) = (from.get() as f32, to.get() as f32);
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = F::ZERO + F::from_f32(Piece::ramp_at(None, from, to, i, frames)) * x;
+                *o = F::ZERO
+                    + F::from_f32(Piece::ramp_at(None, from, to, Samples(i), Samples(frames))) * x;
             }
         }
         (None, Weight::Ramp { from, to }) => {
             // The ramp is an `f32` piece: its ends narrow once per block.
             let (from, to) = (from.get() as f32, to.get() as f32);
             for (i, o) in out.iter_mut().enumerate() {
-                *o = F::ZERO + F::from_f32(Piece::ramp_at(None, from, to, i, frames)) * *o;
+                *o = F::ZERO
+                    + F::from_f32(Piece::ramp_at(None, from, to, Samples(i), Samples(frames))) * *o;
             }
         }
         (
@@ -609,7 +611,8 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
             },
         ) => {
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = F::ZERO + F::from_f64(fade_at(start, goal, k + i, len).get()) * x;
+                *o = F::ZERO
+                    + F::from_f64(fade_at(start, goal, Samples(k + i), Samples(len)).get()) * x;
             }
         }
         (
@@ -622,7 +625,8 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
             },
         ) => {
             for (i, o) in out.iter_mut().enumerate() {
-                *o = F::ZERO + F::from_f64(fade_at(start, goal, k + i, len).get()) * *o;
+                *o = F::ZERO
+                    + F::from_f64(fade_at(start, goal, Samples(k + i), Samples(len)).get()) * *o;
             }
         }
         (Some(a), Weight::Frames(w)) => {
@@ -659,7 +663,7 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_>) {
             // The ramp is an `f32` piece: its ends narrow once per block.
             let (from, to) = (from.get() as f32, to.get() as f32);
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += F::from_f32(Piece::ramp_at(None, from, to, i, frames)) * x;
+                *o += F::from_f32(Piece::ramp_at(None, from, to, Samples(i), Samples(frames))) * x;
             }
         }
         Weight::Fade {
@@ -669,7 +673,7 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_>) {
             len,
         } => {
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += F::from_f64(fade_at(start, goal, k + i, len).get()) * x;
+                *o += F::from_f64(fade_at(start, goal, Samples(k + i), Samples(len)).get()) * x;
             }
         }
         Weight::Frames(w) => {

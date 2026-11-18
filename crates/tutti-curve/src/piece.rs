@@ -1,4 +1,4 @@
-use tutti_units::{Normalized, UnitParam};
+use tutti_units::{Normalized, Samples, UnitParam};
 
 use crate::Law;
 
@@ -48,7 +48,8 @@ impl Piece {
     /// one-off move between two states is a [`FadeLaw`](crate::FadeLaw).
     #[inline]
     #[must_use]
-    pub fn ramp_at(param: Option<UnitParam>, from: f32, to: f32, k: usize, n: usize) -> f32 {
+    pub fn ramp_at(param: Option<UnitParam>, from: f32, to: f32, k: Samples, n: Samples) -> f32 {
+        let (k, n) = (k.get(), n.get());
         if k + 1 >= n {
             to
         } else {

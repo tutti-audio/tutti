@@ -93,7 +93,12 @@ impl Fade {
     fn weight<F: Float>(frames: usize, k: usize) -> F {
         F::from_f64(
             FadeLaw::EqualAmplitude
-                .between(Amplitude::SILENT, Amplitude::UNITY, k, frames)
+                .between(
+                    Amplitude::SILENT,
+                    Amplitude::UNITY,
+                    Samples(k),
+                    Samples(frames),
+                )
                 .get(),
         )
     }
@@ -618,7 +623,12 @@ impl<F: Float> State<F> {
         } else {
             F::from_f64(
                 FadeLaw::EqualAmplitude
-                    .between(Amplitude::UNITY, Amplitude::SILENT, declick - left, declick)
+                    .between(
+                        Amplitude::UNITY,
+                        Amplitude::SILENT,
+                        Samples(declick - left),
+                        Samples(declick),
+                    )
                     .get(),
             )
         };

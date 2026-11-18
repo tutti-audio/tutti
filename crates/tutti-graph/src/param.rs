@@ -43,7 +43,7 @@ use crate::NodeKey;
 use crate::fade::Fade;
 use crate::mode::NodeMix;
 use tutti_rt::{PackedAtomic, RtScope};
-use tutti_units::{ArcDegrees, Azimuth, Normalized, ParamAddr, UnitAddr, UnitParam};
+use tutti_units::{ArcDegrees, Azimuth, Normalized, ParamAddr, Samples, UnitAddr, UnitParam};
 
 use crate::event::{Event, EventKind, segment_progress};
 use crate::spec::EventOut;
@@ -1053,7 +1053,7 @@ impl ParamState {
                     events,
                     param,
                     out,
-                    |i| Piece::ramp_at(Some(param.param), from, b1, i, frames),
+                    |i| Piece::ramp_at(Some(param.param), from, b1, Samples(i), Samples(frames)),
                     &mut corners,
                 );
                 self.corner_count[k] = corners.len();
@@ -1072,7 +1072,7 @@ impl ParamState {
             }
             None => {
                 for (i, o) in out.iter_mut().enumerate() {
-                    *o = Piece::ramp_at(Some(param.param), from, b1, i, frames);
+                    *o = Piece::ramp_at(Some(param.param), from, b1, Samples(i), Samples(frames));
                 }
             }
         }
@@ -1083,7 +1083,7 @@ impl ParamState {
                 if j >= d {
                     break;
                 }
-                let (out, inn) = Fade::lane_gains(FadeLaw::EqualAmplitude, j, d);
+                let (out, inn) = Fade::lane_gains(FadeLaw::EqualAmplitude, Samples(j), Samples(d));
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.
