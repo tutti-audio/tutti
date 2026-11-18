@@ -47,6 +47,10 @@ mod sync {
 /// so a [`FaultLatch`] carries it in its one atomic word. `0` is the latch's
 /// "not raised"; every non-zero code is the cause's own, so a cause can pack a
 /// kind and a payload (an errno) into it.
+///
+/// **The law:** `from_code(c.code()) == Some(c)` for every `c`. A cause that
+/// breaks it reads back as no cause: [`FaultLatch::cause`] answers `None` and a
+/// drain answers [`Drained::Empty`] while the latch is raised, a hidden failure.
 pub trait Cause: Copy {
     /// The code this cause is stored as.
     fn code(self) -> NonZeroU32;
@@ -107,16 +111,21 @@ impl<C: Cause> FaultLatch<C> {
     /// Raises the latch for `cause`: the producer will push nothing more. Push
     /// every item first; what is pushed after the raise may be missed by a
     /// drain that saw it. The first cause stays: on a raised latch this
-    /// changes nothing. One compare-exchange; never waits.
+    /// changes nothing to the cause, and every raiser's pushes are published by
+    /// its own raise. One compare-exchange (and on a raised latch one
+    /// value-preserving RMW); never waits.
     pub fn raise(&self, cause: C) {
-        // `Release` on success pairs with the reader's `Acquire`; a failed
-        // exchange (already raised) publishes nothing.
-        let _ = self.raised.compare_exchange(
-            0,
-            cause.code().get(),
-            Ordering::Release,
-            Ordering::Relaxed,
-        );
+        // `Release` on success pairs with the reader's `Acquire`. A raise that
+        // finds the latch already raised keeps the first cause and still joins
+        // the word's modification order with a value-preserving `Release`
+        // RMW, so a reader whose load reads it sees this producer's pushes too.
+        if self
+            .raised
+            .compare_exchange(0, cause.code().get(), Ordering::Release, Ordering::Relaxed)
+            .is_err()
+        {
+            self.raised.fetch_or(0, Ordering::Release);
+        }
     }
 
     /// Lowers the latch, for a producer that starts again.
@@ -143,7 +152,12 @@ impl<C: Cause> FaultLatch<C> {
     ///
     /// See the module docs above for why the order is the whole point.
     pub fn drain<T>(&self, pop: impl FnOnce() -> Option<T>) -> Drained<T, C> {
-        let cause = self.cause();
+        let code = self.raised.load(Ordering::Acquire);
+        let cause = NonZeroU32::new(code).and_then(C::from_code);
+        debug_assert!(
+            code == 0 || cause.is_some(),
+            "a raised latch holds code {code:#x}, which its Cause does not read back"
+        );
         match pop() {
             Some(item) => Drained::Item(item),
             None => cause.map_or(Drained::Empty, Drained::Failed),
@@ -181,6 +195,19 @@ mod tests {
                 _ => None,
             }
         }
+    }
+
+    #[test]
+    fn the_example_cause_keeps_the_law() {
+        for c in [
+            Stop::Died,
+            Stop::WaitFailed(0),
+            Stop::WaitFailed(0x00FF_FFFF),
+            Stop::WaitFailed(32),
+        ] {
+            assert_eq!(Stop::from_code(c.code()), Some(c));
+        }
+        assert_eq!(<() as Cause>::from_code(().code()), Some(()));
     }
 
     #[test]
