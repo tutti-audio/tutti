@@ -17,14 +17,14 @@
 //! - its end value on the frame it arrives ([`ParamSegment::arrives_after`]),
 //!   after which it is dropped: the plugin holds the end value exactly.
 //!
-//! The grid is the play clock's, not the chunk's (design doc 014 §5.3), so
+//! The grid is the play clock's, not the chunk's, so
 //! what a plugin hears does not depend on the chunk except at the chunk's
 //! last frame. A control lane's pieces run from one grid frame (or corner)
 //! to the next, so a lane's segment never has a grid frame inside it: it
 //! reaches the plugin as its start, the chunk edge and nothing else. A
 //! shaped segment scheduled by hand is held at most 32 frames between
 //! points, as the lane's grid holds. The queue's room (`param_delivery::points_for`,
-//! `ceil(chunk / 32) + 1 + 256`, doc 014 §9 requirement 6) holds a lane's
+//! `ceil(chunk / 32) + 1 + 256`) holds a lane's
 //! grid, the chunk edge and 256 corners; past it grid points are dropped
 //! before corners, counted (`ParamDeliveryStats::grid_points_dropped`).
 //!
@@ -304,9 +304,8 @@ mod tests {
     /// last frame while it is in flight, and its end value exactly on the
     /// frame it arrives; nothing else, and nothing after.
     ///
-    /// Changed in doc 014 §12.2: the points between were every 8th chunk
-    /// frame (the automation node's stride), a grid that moved with the chunk; they are
-    /// now the play clock's 32-frame grid (doc 014 §5.3).
+    /// The points between are the play clock's 32-frame grid, which does not
+    /// move with the chunk.
     #[test]
     fn a_segment_sends_points_until_it_lands() {
         let seg = ParamSegment::foreign(

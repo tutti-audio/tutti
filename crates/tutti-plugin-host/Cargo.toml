@@ -28,7 +28,6 @@ tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
-tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 # The one OS look at a plugin's descriptors (`service_now`).
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
@@ -39,6 +38,8 @@ thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
 
 [dev-dependencies]
+# The UMP packets the tests build.
+tutti-ump = { path = "../tutti-ump", default-features = false }
 # The buffer views `render_graph` takes.
 tutti-buffers = { path = "../tutti-buffers" }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }

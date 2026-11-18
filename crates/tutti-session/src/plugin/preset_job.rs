@@ -15,7 +15,7 @@ use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PluginRefresh, PresetError, PresetId, PresetSupport};
 
 use super::state_job::NodeLookup;
-use super::{Notice, queue};
+use super::{PluginSignal, queue};
 use crate::job::job_kind;
 use crate::{HandleError, Job, ListedPreset, ResourceId, Session, WaitError, WorkerError};
 
@@ -159,7 +159,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 }
                 let loaded = load(&handle, main, &id, needs);
                 if loaded.is_ok() {
-                    queue(&notices, Notice::Refresh(PluginRefresh::ParamValues));
+                    queue(&notices, PluginSignal::Refresh(PluginRefresh::ParamValues));
                 }
                 loaded.map_err(PresetJobFailed::Preset)
             });

@@ -27,7 +27,7 @@ use tutti_types::ParkedSampleRate;
 use tutti_units::ParamId;
 use tutti_units::Samples;
 
-use super::client::{Declared, InProcClient, PluginNode, Reload};
+use super::client::{Declared, HostedNode, InProcClient, Reload};
 use super::control_backend::Reporting;
 use super::instance::Instance;
 use crate::{DeliveryCounters, PluginControls};
@@ -143,7 +143,7 @@ where
     /// [`NotRunning`](RebindError::NotRunning) for a plugin that is loaded or
     /// refused; [`Restarting`](RebindError::Restarting) while its own restart is
     /// under way.
-    pub fn prepare(&self) -> Result<(PluginNode<F>, Pending<F>), RebindError> {
+    pub fn prepare(&self) -> Result<(HostedNode<F>, Pending<F>), RebindError> {
         let instance = self.inner.lock();
         let layout = instance.layout().ok_or(RebindError::NoPorts)?;
         let mut declared = Declared::from_layout(layout)?;
@@ -289,7 +289,7 @@ pub enum Settlement {
     Lost,
 }
 
-impl<F: Loaded> PluginNode<F> {
+impl<F: Loaded> HostedNode<F> {
     /// The [`Rebinder`] for this node, binding its successors to the tempo
     /// reader the node was bound to. See [`InProcClient::rebinder`].
     #[must_use]
@@ -356,7 +356,7 @@ mod tests {
     fn rig() -> (
         FakePlugin,
         Rebinder<FakeLoaded>,
-        PluginNode<FakeLoaded>,
+        HostedNode<FakeLoaded>,
         Arc<Mutex<Instance<FakeLoaded>>>,
     ) {
         rig_with(false)
@@ -368,7 +368,7 @@ mod tests {
     ) -> (
         FakePlugin,
         Rebinder<FakeLoaded>,
-        PluginNode<FakeLoaded>,
+        HostedNode<FakeLoaded>,
         Arc<Mutex<Instance<FakeLoaded>>>,
     ) {
         rig_over(own_bypass, [])
@@ -380,7 +380,7 @@ mod tests {
     ) -> (
         FakePlugin,
         Rebinder<FakeLoaded>,
-        PluginNode<FakeLoaded>,
+        HostedNode<FakeLoaded>,
         Arc<Mutex<Instance<FakeLoaded>>>,
     ) {
         rig_over(false, parameters)
@@ -392,7 +392,7 @@ mod tests {
     ) -> (
         FakePlugin,
         Rebinder<FakeLoaded>,
-        PluginNode<FakeLoaded>,
+        HostedNode<FakeLoaded>,
         Arc<Mutex<Instance<FakeLoaded>>>,
     ) {
         let (fake, loaded) = FakePlugin::new();
@@ -426,7 +426,7 @@ mod tests {
     #[test]
     fn the_node_declares_no_more_than_its_midi_intake_takes() {
         let (_fake, _rebinder, node, _inner) = rig();
-        let bound = |node: &PluginNode<FakeLoaded>| node.shape().event_input_capacity;
+        let bound = |node: &HostedNode<FakeLoaded>| node.shape().event_input_capacity;
         assert_eq!(bound(&node).map(|n| n.get()), Some(256));
         let node = contract::prepared(node, SR, 2048);
         assert_eq!(bound(&node).map(|n| n.get()), Some(256));
@@ -442,7 +442,7 @@ mod tests {
     fn the_node_declares_no_more_than_its_processor_takes() {
         let (fake, _rebinder, node, _inner) = rig();
         fake.hold_events(100);
-        let bound = |node: &PluginNode<FakeLoaded>| node.shape().event_input_capacity;
+        let bound = |node: &HostedNode<FakeLoaded>| node.shape().event_input_capacity;
         let node = contract::prepared(node, SR, 2048);
         assert_eq!(bound(&node).map(|n| n.get()), Some(100));
         let node = contract::prepared(node, SR, 64);
@@ -478,7 +478,7 @@ mod tests {
 
     /// A node over the plugin's ports now, committed at once: the caller's
     /// swap that cannot fail.
-    fn rebind(rebinder: &Rebinder<FakeLoaded>) -> Result<PluginNode<FakeLoaded>, RebindError> {
+    fn rebind(rebinder: &Rebinder<FakeLoaded>) -> Result<HostedNode<FakeLoaded>, RebindError> {
         let (node, pending) = rebinder.prepare()?;
         pending.commit(main_thread());
         Ok(node)
@@ -496,12 +496,12 @@ mod tests {
     }
 
     /// One block with an impulse on both inputs: a sounding plugin answers it.
-    fn block(node: &mut PluginNode<FakeLoaded>, frame: u64) -> Driven {
+    fn block(node: &mut HostedNode<FakeLoaded>, frame: u64) -> Driven {
         block_with(node, frame, &[])
     }
 
     /// [`block`], with `events` on the node's event input.
-    fn block_with(node: &mut PluginNode<FakeLoaded>, frame: u64, events: &[Event]) -> Driven {
+    fn block_with(node: &mut HostedNode<FakeLoaded>, frame: u64, events: &[Event]) -> Driven {
         let mut x = vec![0.0f32; BLOCK];
         x[0] = 1.0;
         drive_input(
@@ -518,7 +518,7 @@ mod tests {
     /// back and gets the restarted one.
     fn change_ports(
         fake: &FakePlugin,
-        node: &mut PluginNode<FakeLoaded>,
+        node: &mut HostedNode<FakeLoaded>,
         inner: &Mutex<Instance<FakeLoaded>>,
         outputs: u16,
     ) {
@@ -542,7 +542,7 @@ mod tests {
     /// moved.
     fn settle(
         rebinder: &Rebinder<FakeLoaded>,
-        old: &mut PluginNode<FakeLoaded>,
+        old: &mut HostedNode<FakeLoaded>,
         inner: &Mutex<Instance<FakeLoaded>>,
         mut frame: u64,
     ) -> u64 {
@@ -780,7 +780,7 @@ mod tests {
     fn a_rebuilt_node_does_not_resend_the_value_the_replaced_node_delivered() {
         let (_fake, rebinder, mut first, inner) = rig_params([PARAM]);
         let sent =
-            |node: &PluginNode<FakeLoaded>| node.client.params.counters().snapshot().points_sent;
+            |node: &HostedNode<FakeLoaded>| node.client.params.counters().snapshot().points_sent;
         block_with(&mut first, 0, &ramp(0.5));
         assert_eq!(sent(&first), 1, "the first node delivers it");
 

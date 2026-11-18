@@ -95,7 +95,7 @@
 //! lifetime — it dies only when the last of either drops:
 //!
 //! - [`PluginClient`] — the client of a served plugin and its audio-graph
-//!   node (`tutti-plugin-host`'s generic `PluginNode` over the served hosting).
+//!   node (`tutti-plugin-host`'s generic `HostedNode` over the served hosting).
 //!   Loaded `Unbound`; `bind()` makes it a `PluginClient<Bound>`, which holds the
 //!   node and is what a graph inserts. `Plugin` does this for you when inserted directly.
 //! - [`PluginHandle`](tutti_plugin_host::PluginHandle) (`tutti-plugin-host`'s;

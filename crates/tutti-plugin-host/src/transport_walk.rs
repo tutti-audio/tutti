@@ -1,4 +1,4 @@
-//! The transport changes inside one chunk (doc 020, stage 5b).
+//! The transport changes inside one chunk.
 //!
 //! A chunk is the plugin node's FIFO batch, not the graph's block: it can span
 //! several calls, and hold a tempo-map point, a seek, a loop wrap or a start

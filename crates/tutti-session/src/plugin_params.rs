@@ -71,7 +71,7 @@ use std::marker::PhantomData;
 
 use tutti_graph::NodeKey;
 
-use tutti_plugin_host::{Notice, ParamReporter, PluginHandle};
+use tutti_plugin_host::{ParamReporter, PluginHandle, PluginSignal};
 use tutti_plugin_types::{
     AutomationMode, AutomationModeError, ParamEdit, ParamUnit, ParameterInfo, PlainUnit,
 };
@@ -79,7 +79,7 @@ use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
-use crate::plugin::{Gate, HostedPlugin, Notices, queue};
+use crate::plugin::{Gate, HostedPlugin, Signals, queue};
 
 /// The lane knobs of a plugin's driven parameters: where a set of one goes,
 /// whether the host made it or the plugin reported it. The modulation apply
@@ -523,7 +523,7 @@ pub struct ParamGesture {
     gate: Gate,
     driven: Driven,
     handle: PluginHandle,
-    notices: Notices,
+    notices: Signals,
     reporter: ParamReporter,
 }
 
@@ -558,7 +558,7 @@ impl ParamGesture {
         self.reporter.report(self.id, value);
         queue(
             &self.notices,
-            Notice::Param(ParamEdit::change(self.id, value)),
+            PluginSignal::Param(ParamEdit::change(self.id, value)),
         );
         Ok(())
     }
@@ -567,7 +567,7 @@ impl ParamGesture {
 impl Drop for ParamGesture {
     fn drop(&mut self) {
         if self.gate.holds(self.id) {
-            queue(&self.notices, Notice::Param(ParamEdit::End(self.id)));
+            queue(&self.notices, PluginSignal::Param(ParamEdit::End(self.id)));
         }
     }
 }
@@ -633,6 +633,6 @@ impl HostedPlugin {
     /// Queues an edit the host made as if the plugin had reported it, for the
     /// next `Phase::Plugins`'s event, in the order it was made.
     pub(crate) fn hear(&self, edit: ParamEdit) {
-        crate::plugin::queue(&self.notices, Notice::Param(edit));
+        crate::plugin::queue(&self.notices, PluginSignal::Param(edit));
     }
 }
