@@ -24,10 +24,6 @@ tutti-vst3-host = { path = "../../crates/tutti-vst3-host" }
 assert_no_alloc = { version = "1", default-features = false }
 tutti-shared-plugin = { path = "../tutti-shared-plugin" }
 
-# Needs `cargo build -p tutti-plugin-server --no-default-features --features
-# clap,vst3` and `cargo build -p tutti-plugin-probe` first: the server
-# cannot be a dependency (it depends on `tutti-plugin`), and a dependency's
-# binary is not built for a test.
 # `tests/probe.rs` applies a probe's `Delta` to a `PluginDb` to read the descriptor.
 tutti-plugin-host = { path = "../../crates/tutti-plugin-host", optional = true }
 tutti-plugin-db = { path = "../../crates/tutti-plugin-db", optional = true }
@@ -52,6 +48,10 @@ required-features = ["server"]
 [dev-dependencies]
 # `tests/server.rs` and `tests/probe.rs` (feature `server`) name it; the library
 # does not, and an optional dependency cannot be a dev-dependency.
+# Those tests need `cargo build -p tutti-plugin-server --no-default-features
+# --features clap,vst3` and `cargo build -p tutti-plugin-probe` first: the
+# server cannot be a dependency (it depends on `tutti-plugin`), and a
+# dependency's binary is not built for a test.
 tutti-plugin = { path = "../../crates/tutti-plugin", features = ["clap", "vst2", "vst3"] }
 # `tests/probe.rs` copies the plugin under the file name its `init` reads.
 tempfile = "3"
