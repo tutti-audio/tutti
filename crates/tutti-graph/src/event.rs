@@ -21,11 +21,11 @@ use std::num::NonZeroU32;
 use tutti_curve::{Curvature, Exponent, Law, Piece};
 use tutti_ump::Ump;
 use tutti_units::{
-    Normalized, ParamAddr, ParamId, ParamKey, Real, SamplePosition, Samples, UnitAddr, UnitParam,
+    Normalized, ParamAddr, ParamId, ParamKey, SamplePosition, Samples, UnitAddr, UnitParam,
 };
 
 use crate::declare::Scalar;
-use crate::param::CellValue;
+use crate::param::control_word;
 use crate::time::Offset;
 
 /// A ramp of one parameter from the value it has at the event's frame to a
@@ -85,7 +85,7 @@ pub struct ParamRamp {
 
 /// A unit's value as the `f32` word a param event carries (B3 widens it).
 fn word<U: Scalar>(value: U) -> f32 {
-    f32::from_unit(CellValue(value.to_cell()))
+    control_word(value.to_cell())
 }
 
 impl ParamRamp {

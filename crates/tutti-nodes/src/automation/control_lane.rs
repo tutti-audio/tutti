@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tutti_buffers::Float;
 use tutti_curve::Piece;
 use tutti_graph::{
-    CellValue, Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
-    Law, Node, NodeParts, Offset, ParamRange, ParamRangeReader, ParamSegment, PlayReading, Prepare,
-    Shape, Status, TransportPosition,
+    Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Law, Node,
+    NodeParts, Offset, ParamRange, ParamRangeReader, ParamSegment, PlayReading, Prepare, Shape,
+    Status, TransportPosition, control_word,
 };
 use tutti_modulation::{
     CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
@@ -17,8 +17,7 @@ use tutti_modulation::{
 use tutti_rt::{PackedAtomic, Publisher, Reader};
 use tutti_types::{AtomicF64, ParamCell};
 use tutti_units::{
-    Beat, Frame, Normalized, ParamAddr, ParamId, Real, SamplePosition, Samples, Tail, UnitAddr,
-    UnitParam,
+    Beat, Frame, Normalized, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
 };
 
 use crate::SOURCE_EVENT_CAPACITY;
@@ -26,11 +25,6 @@ use crate::SOURCE_EVENT_CAPACITY;
 /// How a lane builds a segment for its target: the typed key (or foreign
 /// id) bound in, so the lane itself is not generic.
 type MakeSegment = dyn Fn(f64, f64, Law) -> ParamSegment + Send + Sync;
-
-/// A lane value as the `f32` word a segment carries (B3 widens it).
-fn word(v: f64) -> f32 {
-    f32::from_unit(CellValue(v))
-}
 
 /// Where a lane reads its target's range.
 enum RangeSource {
@@ -395,7 +389,13 @@ impl ControlLaneNode {
             range.map_or(RangeSource::None, RangeSource::Port),
             Some(param.param),
             Arc::new(move |from, to, shape| {
-                ParamSegment::unit(param, word(from), word(to), Samples(0), shape)
+                ParamSegment::unit(
+                    param,
+                    control_word(from),
+                    control_word(to),
+                    Samples(0),
+                    shape,
+                )
             }),
             true,
         )
@@ -417,7 +417,7 @@ impl ControlLaneNode {
             RangeSource::Own(PackedAtomic::new(ParamRange::new(range.0, range.1))),
             None,
             Arc::new(move |from, to, shape| {
-                ParamSegment::foreign(id, word(from), word(to), Samples(0), shape)
+                ParamSegment::foreign(id, control_word(from), control_word(to), Samples(0), shape)
             }),
             false,
         )

@@ -34,14 +34,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tutti_graph::{CellValue, EventOut, NodeKey};
+use tutti_graph::{EventOut, NodeKey, control_word};
 use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
 };
 use tutti_nodes::automation::{Automatable, LaneControls, RecordMode, Recorder};
 use tutti_nodes::{Feed, ReconcileError};
-use tutti_units::{Depth, ParamAddr, ParamId, Real, UnitAddr, UnitParam};
+use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
 
 use crate::Edge;
 use crate::ModKeys;
@@ -1568,7 +1568,7 @@ impl Mods<'_> {
         range: std::ops::Range<T::Unit>,
     ) -> Result<(), RangeError> {
         // B2: a range's bounds are `f32` words.
-        let bound = |u: T::Unit| f32::from_unit(CellValue(u.to_cell()));
+        let bound = |u: T::Unit| control_word(u.to_cell());
         self.range_raw(target, bound(range.start), bound(range.end))
     }
 

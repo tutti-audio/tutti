@@ -44,7 +44,7 @@ use crate::mode::NodeMix;
 use tutti_buffers::Float;
 use tutti_rt::{PackedAtomic, RtScope};
 use tutti_units::{
-    ArcDegrees, Azimuth, Normalized, ParamAddr, Quantity, Samples, UnitAddr, UnitParam,
+    ArcDegrees, Azimuth, Normalized, ParamAddr, Quantity, Real, Samples, UnitAddr, UnitParam,
 };
 
 use crate::event::{Event, EventKind, segment_progress};
@@ -242,9 +242,17 @@ pub struct ParamIn {
 
 /// A param cell's value with its unit erased, as a quantity: what
 /// [`Node::param_base`](crate::Node::param_base) says, which crosses into a
-/// lane's data (or an event word) with `F::from_unit`.
+/// lane's data with `F::from_unit`. The crossing for a unit-erased cell value,
+/// inside this crate only.
 #[derive(Clone, Copy, Debug)]
-pub struct CellValue(pub f64);
+pub(crate) struct CellValue(pub(crate) f64);
+
+/// The `f32` word a param segment or range bound carries until they widen;
+/// removed with them.
+#[must_use]
+pub fn control_word(v: f64) -> f32 {
+    f32::from_unit(CellValue(v))
+}
 
 impl Quantity for CellValue {
     fn value(self) -> f64 {
