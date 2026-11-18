@@ -99,8 +99,7 @@ impl RampEvery {
             ),
             _ => ParamRamp::new(
                 tutti_units::ParamKey::<tutti_units::Q>::Q,
-                // `Q` is an `f32` unit: it narrows at its param write.
-                tutti_units::Q(v as f32),
+                tutti_units::Q(v),
                 Samples(20),
             ),
         }

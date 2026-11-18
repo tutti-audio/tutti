@@ -49,7 +49,7 @@ fn reduction(level: f64, threshold: f64, knee: f64, ratio: f64) -> f64 {
 /// The band's gain in dB at `level` dB: the cut of a downward band, the boost of an upward
 /// one (the reduction curve about the threshold, mirrored), held within `range`.
 fn band_gain(mode: DynamicMode, level: f64, c: &DynamicEqControls) -> f64 {
-    let (t, k, r) = (c.threshold.get(), c.knee.get(), f64::from(c.ratio.get()));
+    let (t, k, r) = (c.threshold.get(), c.knee.get(), c.ratio.get());
     let range = c.range.get();
     match mode {
         DynamicMode::Downward => -reduction(level, t, k, r).min(range),
@@ -71,7 +71,7 @@ fn bell_db(f: f64, f0: f64, q: f64, gain: f64) -> f64 {
     10.0 * (re * re + im * im).log10()
 }
 
-fn controls(threshold: f64, knee: f64, ratio: f32, range: f64, q: f32) -> DynamicEqControls {
+fn controls(threshold: f64, knee: f64, ratio: f64, range: f64, q: f64) -> DynamicEqControls {
     DynamicEqControls {
         threshold: Db(threshold),
         knee: Db(knee),
@@ -130,7 +130,7 @@ fn measured_gain(mode: DynamicMode, c: &DynamicEqControls, level_db: f64) -> (f6
 /// square (a sine's square, 1% of its mean at 8 periods: under 0.05 dB).
 #[test]
 fn a_downward_band_settles_on_the_static_curve_at_its_centre() {
-    for q in [1.0f32, 4.0] {
+    for q in [1.0f64, 4.0] {
         for (threshold, knee, ratio, range) in [
             (-24.0, 0.0, 4.0, 40.0),
             (-12.0, 0.0, 20.0, 6.0),
@@ -158,7 +158,7 @@ fn a_downward_band_settles_on_the_static_curve_at_its_centre() {
 /// held within the range. Same tolerance as the downward band.
 #[test]
 fn an_upward_band_settles_on_the_mirrored_static_curve_at_its_centre() {
-    for q in [1.0f32, 4.0] {
+    for q in [1.0f64, 4.0] {
         for (threshold, knee, ratio, range) in [
             (-30.0, 0.0, 4.0, 40.0),
             (-20.0, 0.0, 20.0, 6.0),
@@ -366,10 +366,10 @@ fn hostile_controls_and_keys_leave_the_output_finite() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         all.push(DynamicEqControls {
             center: Hz(bad),
-            q: Q(bad as f32),
+            q: Q(bad),
             threshold: Db(bad),
             knee: Db(bad),
-            ratio: CompressionRatio(bad as f32),
+            ratio: CompressionRatio(bad),
             range: Db(bad),
             ..base
         });

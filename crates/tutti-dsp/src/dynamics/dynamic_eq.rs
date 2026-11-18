@@ -163,8 +163,7 @@ impl<F: Float> Design<F> {
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
             range: Db(finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN.get())),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
-            // `Q` is an `f32` unit.
-            key_scale: F::ONE / <F as Float>::from_f32(q.get()),
+            key_scale: F::ONE / F::from_unit(q),
             mean: F::from_f64(tau.one_pole_coeff(rate)),
         }
     }
@@ -314,7 +313,7 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
         let db = level_db((<F as Float>::from_f32(2.0) * self.mean_square).sqrt());
         let (threshold, ratio, knee) = (
             F::from_f64(d.threshold.get()),
-            <F as Float>::from_f32(d.ratio.get()),
+            F::from_unit(d.ratio),
             F::from_f64(d.knee.get()),
         );
         let curve = match self.mode {

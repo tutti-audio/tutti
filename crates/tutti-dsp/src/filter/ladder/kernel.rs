@@ -75,7 +75,7 @@ impl LadderCoeffs {
         );
         LadderCoeffs {
             g: libm::tan(core::f64::consts::PI * fc / sample_rate.get()),
-            k: 4.0 * f64::from(resonance.get().clamp(0.0, 1.0)),
+            k: 4.0 * resonance.get().clamp(0.0, 1.0),
         }
     }
 }

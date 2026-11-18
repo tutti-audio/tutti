@@ -23,7 +23,7 @@ fn run_blocks(crusher: &mut BitCrusher<f64>, input: &[Vec<f64>], block: usize) -
     out
 }
 
-fn crusher(bits: f32, hold: f32) -> BitCrusher<f64> {
+fn crusher(bits: f32, hold: f64) -> BitCrusher<f64> {
     BitCrusher::<f64>::new(
         ChannelLayout::MONO,
         BitCrusherControls {
@@ -191,7 +191,7 @@ fn a_hold_of_one_holds_nothing() {
 fn each_value_is_held_for_n_frames() {
     let x = exact_input(300);
     for n in [2usize, 4, 5, 64] {
-        let out = run(&mut crusher(32.0, n as f32), std::slice::from_ref(&x));
+        let out = run(&mut crusher(32.0, n as f64), std::slice::from_ref(&x));
         for (k, &y) in out[0].iter().enumerate() {
             assert_eq!(y, x[(k / n) * n], "hold {n}, frame {k}");
         }
@@ -206,7 +206,7 @@ fn the_hold_counter_is_continuous_across_blocks() {
     for n in [4usize, 5, 9] {
         for block in [1usize, 7, 64] {
             let out = run_blocks(
-                &mut crusher(32.0, n as f32),
+                &mut crusher(32.0, n as f64),
                 std::slice::from_ref(&x),
                 block,
             );
@@ -250,14 +250,14 @@ fn the_hold_factor_is_read_rounded() {
         (3.5, 4),
         (64.0, 64),
         (0.2, 1),
-        (f32::NAN, 1),
-        (f32::INFINITY, usize::MAX),
-        (f32::MAX, f32::MAX as usize),
+        (f64::NAN, 1),
+        (f64::INFINITY, usize::MAX),
+        (f64::MAX, f64::MAX as usize),
     ] {
         assert_eq!(hold_frames(HoldFactor::new(factor)), frames, "{factor}");
     }
     let x = exact_input(60);
-    for (factor, n) in [(2.4f32, 2usize), (2.6, 3)] {
+    for (factor, n) in [(2.4f64, 2usize), (2.6, 3)] {
         let out = run(&mut crusher(32.0, factor), std::slice::from_ref(&x));
         for (k, &y) in out[0].iter().enumerate() {
             assert_eq!(y, x[(k / n) * n], "factor {factor}, frame {k}");

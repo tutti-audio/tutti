@@ -81,7 +81,7 @@ fn measured_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) ->
     let c = SvfCoefficients::<f64>::from(&SvfCoeffs::new(
         ty,
         Hz(fc),
-        Q(q as f32),
+        Q(q),
         Db(gain_db),
         SampleRate::of(rate),
     ));
@@ -194,7 +194,7 @@ fn test_svf_coeffs_bell_zero_gain_is_unity() {
 
 /// Cutoff and Q are not interchangeable, and the types are what say so.
 ///
-/// As adjacent `f32`s, `(freq, q)` and `(q, freq)` both compile and the
+/// As adjacent floats, `(freq, q)` and `(q, freq)` both compile and the
 /// second silently detunes the filter. Passing them as `Hz` and `Q` makes
 /// the transposition a type error — this pins the difference the swap would
 /// make, so the two are never quietly given one type again.

@@ -167,7 +167,7 @@ mod tests {
     use tutti_units::{Latency, UnitParam};
 
     // The node tests run `F = f32`, the session's audio format.
-    fn node(width: u16, bits: f32, hold: f32) -> BitCrusherNode<f32> {
+    fn node(width: u16, bits: f32, hold: f64) -> BitCrusherNode<f32> {
         prepared(BitCrusherNode::<f32>::from(
             BitCrusherConfig::new(width)
                 .bits(BitDepth::new(bits))

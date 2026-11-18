@@ -141,7 +141,7 @@ fn bench(c: &mut Criterion) {
         for ir_len in [128usize, 512] {
             g.throughput(Throughput::Elements(BLOCK as u64));
             let bytes = sphere_bytes(ir_len);
-            let node = HrtfBinauralNode::new(&bytes, SampleRate::of(f64::from(RATE)))
+            let node = HrtfBinauralNode::<f32>::new(&bytes, SampleRate::of(f64::from(RATE)))
                 .expect("the sphere parses");
             let params = node.param_set();
             aim(&params, Azimuth(20.0), Elevation(10.0));

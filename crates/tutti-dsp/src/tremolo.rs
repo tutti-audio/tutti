@@ -71,7 +71,9 @@ impl Lfo {
 
     /// The wave at the current phase, then the phase one frame on.
     fn next(&mut self, rate: Hz) -> f32 {
-        self.osc.step(rate, self.sample_rate).clamp(-1.0, 1.0)
+        self.osc
+            .step::<f32>(rate, self.sample_rate)
+            .clamp(-1.0, 1.0)
     }
 }
 

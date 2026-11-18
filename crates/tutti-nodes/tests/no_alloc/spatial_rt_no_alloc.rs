@@ -47,7 +47,7 @@ fn gate<N: IntoNode>(node: N, warm: usize) {
 
 #[test]
 fn vbap_panner_stereo_process_is_allocation_free() {
-    let node = VbapPannerNode::stereo();
+    let node = VbapPannerNode::<f32>::stereo();
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     // One warm-up block.
     gate(node, 1);
@@ -65,7 +65,7 @@ fn vbap_panner_stereo_process_is_allocation_free() {
 /// inside the solve that does.
 #[test]
 fn vbap_folded_rear_arc_is_allocation_free() {
-    let mut node = VbapPannerNode::stereo();
+    let mut node = VbapPannerNode::<f32>::stereo();
     // 200 degrees wraps to -160, well past the lateral axis: the fold fires and
     // mirrors it to -20. Plain VBAP would leave this bearing silent.
     aim(&node.param_set(), Azimuth::new(200.0), Elevation::new(0.0));
@@ -90,7 +90,7 @@ fn vbap_folded_rear_arc_is_allocation_free() {
 /// nothing per-round reaches the heap.
 #[test]
 fn vbap_elevation_retreat_is_allocation_free() {
-    let mut node = VbapPannerNode::quad();
+    let mut node = VbapPannerNode::<f32>::quad();
     // Straight up: a 2D ring cannot solve this, so the retreat runs.
     aim(&node.param_set(), Azimuth::new(0.0), Elevation::new(90.0));
     Node::reset(&mut node);
@@ -129,7 +129,7 @@ const BLOCKS: [usize; 4] = [1, 7, 33, 64];
 /// A panner whose `process` runs under `assert_no_alloc`. `Direct` rebuilds the
 /// node's `Shape` each block, which allocates and which an executor does not,
 /// so the window is the node's own `process`.
-struct Gated(VbapPannerNode);
+struct Gated(VbapPannerNode<f32>);
 
 impl Node for Gated {
     fn shape(&self) -> tutti_graph::Shape {
@@ -200,7 +200,7 @@ fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bo
         UnitParam::StereoWidth,
     ];
     for bed in Bed::ALL {
-        let Ok(node) = VbapPannerNode::new(bed) else {
+        let Ok(node) = VbapPannerNode::<f32>::new(bed) else {
             assert_eq!(bed, Bed::Mono);
             continue;
         };
@@ -347,7 +347,8 @@ fn hrtf_binaural_process_is_allocation_free() {
     use tutti_nodes::HrtfBinauralNode;
 
     let bytes = synthetic_hrir_sphere(48_000, 64);
-    let node = HrtfBinauralNode::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
+    let node =
+        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     // Three blocks: past the first step's latency, so the gate sees signal.
     // Nothing grows lazily, so nothing needs to warm before the window.
@@ -363,7 +364,8 @@ fn hrtf_binaural_moving_source_is_allocation_free() {
     use tutti_nodes::HrtfBinauralNode;
 
     let bytes = synthetic_hrir_sphere(48_000, 64);
-    let node = HrtfBinauralNode::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
+    let node =
+        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for c in rig.inputs_mut().iter_mut() {
         let c = c.into_samples_mut();
@@ -405,7 +407,7 @@ fn hrtf_binaural_nearest_vertex_fallback_is_allocation_free() {
         [0.0, 0.0, 1.0],
     ];
     let bytes = sphere_bytes(48_000, 64, &verts, &[[0, 1, 2]]);
-    let node = HrtfBinauralNode::new(&bytes, SampleRate::SR_48K).expect("the sphere parses");
+    let node = HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("the sphere parses");
     aim(&node.param_set(), Azimuth::new(180.0), Elevation::new(0.0));
     gate(node, 3);
 }
@@ -419,7 +421,7 @@ fn hrtf_binaural_same_rate_prepare_is_allocation_free() {
 
     let bytes = synthetic_hrir_sphere(48_000, 64);
     let mut node =
-        HrtfBinauralNode::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
+        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
     let prepare = Prepare::new(
         SampleRate::SR_48K,
         tutti_types::MaxBlock::of(tutti_units::Samples(256)),
@@ -439,7 +441,7 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
 
     let bytes = synthetic_hrir_sphere(48_000, 64);
     let mut node =
-        HrtfBinauralNode::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
+        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     node.prepare(&Prepare::new(
         SampleRate::SR_44K1,

@@ -434,19 +434,19 @@ impl PolySynth {
     }
 
     fn handle_cc(&mut self, cc_num: CCNumber, value: Normalized) {
-        // A voice's controls are `f32` DSP state: narrowed once here.
-        let value = value.get() as f32;
         match cc_num {
             CCNumber::RESONANCE => {
                 self.voices
                     .iter_mut()
-                    .for_each(|v| v.set_filter_resonance(value));
+                    .for_each(|v| v.set_filter_resonance(value.get()));
             }
             // CC74 (Brightness). Under MPE a member-channel CC74 is rewritten to a
             // native per-note controller at the input edge (routed per-voice via
             // the `AssignablePerNoteController` arm above), so a channel-wide CC74
             // reaching here is a plain global brightness/cutoff.
             CCNumber::BRIGHTNESS => {
+                // A voice's cutoff controller is `f32` DSP state: narrowed once here.
+                let value = value.get() as f32;
                 self.voices.iter_mut().for_each(|v| v.set_cc_cutoff(value));
             }
             _ => {}

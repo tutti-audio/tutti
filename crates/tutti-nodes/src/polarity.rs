@@ -1,6 +1,6 @@
 //! [`PolarityNode`]: a polarity flip of chosen channels, from a [`PolarityConfig`].
 
-use tutti_buffers::{Planes, PlanesMut};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{ChannelOutOfRange, Polarity};
 use tutti_graph::{Cost, Cx, ForkByClone, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status};
 use tutti_types::{ChannelIndex, ChannelLayout, MAX_CHANNELS};
@@ -90,20 +90,20 @@ impl TryFrom<PolarityConfig> for PolarityNode {
     }
 }
 
-impl Node for PolarityNode {
+impl<F: Float> Node<F> for PolarityNode {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(self.polarity.width()).with_cost(Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
 
-    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let width = usize::from(self.polarity.width().count());
         through_planes(
             &mut io,
             width,
             width,
-            |input: Planes<'_, f32>, output: PlanesMut<'_, '_, f32>| {
+            |input: Planes<'_, F>, output: PlanesMut<'_, '_, F>| {
                 self.polarity.process(input, output);
             },
         );
@@ -113,10 +113,10 @@ impl Node for PolarityNode {
     fn reset(&mut self) {}
 }
 
-impl IntoNode for PolarityNode {
+impl<F: Float> IntoNode<F> for PolarityNode {
     type Controls = ();
 
-    fn into_parts(self) -> NodeParts<()> {
+    fn into_parts(self) -> NodeParts<(), F> {
         ForkByClone(self).into_parts()
     }
 }
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn the_shape_is_the_width_in_and_out_and_light() {
         let n = node(PolarityConfig::new(3u16));
-        let shape = n.shape();
+        let shape = Node::<f32>::shape(&n);
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
             (3, 3)
@@ -173,5 +173,17 @@ mod tests {
             PolarityNode::try_from(PolarityConfig::new(17u16)).unwrap_err(),
             PolarityError::TooWide { width: 17 }
         );
+    }
+
+    /// In an `f64` graph the flip negates a 29-bit signal exactly.
+    #[test]
+    fn in_an_f64_graph_the_flip_negates_a_wide_signal_exactly() {
+        use crate::test_support::{RATE, render_f64};
+        let x = tutti_fixtures::signal::wide_signal(64);
+        let node = PolarityNode::try_from(PolarityConfig::new(2u16)).unwrap();
+        let out = render_f64(node, RATE, &[&x, &x], 64);
+        let want: Vec<f64> = x.iter().map(|v| -v).collect();
+        assert_eq!(out[0], want);
+        assert_eq!(out[1], want);
     }
 }

@@ -14,6 +14,8 @@
 //!   whose rate or response length would make preparing it unbounded; the
 //!   rate it is prepared at is held to a ceiling.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use tutti_buffers::Planes;
 use tutti_dsp::{HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE};
 use tutti_fixtures::Noise;
@@ -158,10 +160,10 @@ fn bearing_of(p: [f32; 3]) -> Direction {
     Direction::new(Azimuth(az), Elevation(el))
 }
 
-fn node(bytes: &[u8], rate: u32) -> HrtfBinauralNode {
+fn node(bytes: &[u8], rate: u32) -> HrtfBinauralNode<f32> {
     let rate = SampleRate::of(f64::from(rate));
     prepared(
-        HrtfBinauralNode::new(bytes, rate).expect("the sphere parses"),
+        HrtfBinauralNode::<f32>::new(bytes, rate).expect("the sphere parses"),
         rate,
         64,
     )
@@ -176,7 +178,7 @@ fn node(bytes: &[u8], rate: u32) -> HrtfBinauralNode {
 /// impulse early in its step would have its whole response rendered before
 /// it left even a short history.)
 fn ir_of(
-    node: &mut HrtfBinauralNode,
+    node: &mut HrtfBinauralNode<f32>,
     aim: Direction,
     rate: u32,
     len: usize,
@@ -556,7 +558,7 @@ fn the_spheres_rate_and_response_length_are_bounded() {
             r
         })
     };
-    let build = |bytes: &[u8]| HrtfBinauralNode::new(bytes, SampleRate::SR_48K);
+    let build = |bytes: &[u8]| HrtfBinauralNode::<f32>::new(bytes, SampleRate::SR_48K);
 
     for rate in [1, MIN_SPHERE_RATE - 1, MAX_SPHERE_RATE + 1] {
         assert!(
@@ -575,8 +577,9 @@ fn the_spheres_rate_and_response_length_are_bounded() {
         Some(HrtfBinauralError::ResponseTooLong { len, max: m }) if len == max + 1 && m == max
     ));
     let longest = sphere(MIN_SPHERE_RATE, max);
-    let mut node = HrtfBinauralNode::new(&longest, SampleRate::of(f64::from(MIN_SPHERE_RATE)))
-        .expect("the longest response allowed builds");
+    let mut node =
+        HrtfBinauralNode::<f32>::new(&longest, SampleRate::of(f64::from(MIN_SPHERE_RATE)))
+            .expect("the longest response allowed builds");
     let to = 2 * MIN_SPHERE_RATE;
     node.prepare(&Prepare::new(
         SampleRate::of(f64::from(to)),
@@ -608,11 +611,11 @@ fn the_prepared_rate_is_held_to_its_ceiling() {
     let at_ceiling = Tail::Finite(Samples(512 - 1));
 
     let mut node =
-        HrtfBinauralNode::new(&bytes, SampleRate::of(2.0 * f64::from(MAX_PREPARED_RATE)))
+        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::of(2.0 * f64::from(MAX_PREPARED_RATE)))
             .expect("builds");
     assert_eq!(node.shape().tail, at_ceiling, "built above the ceiling");
 
-    let mut node2 = HrtfBinauralNode::new(&bytes, SampleRate::of(1e10)).expect("builds");
+    let mut node2 = HrtfBinauralNode::<f32>::new(&bytes, SampleRate::of(1e10)).expect("builds");
     assert_eq!(node2.shape().tail, at_ceiling, "built at 1e10 Hz");
 
     node.prepare(&Prepare::new(
@@ -657,9 +660,9 @@ fn a_malformed_sphere_is_refused_at_construction() {
         r
     };
     let good = sphere_bytes(RATE, 8, &verts, &faces, delta);
-    assert!(HrtfBinauralNode::new(&good, SampleRate::SR_48K).is_ok());
+    assert!(HrtfBinauralNode::<f32>::new(&good, SampleRate::SR_48K).is_ok());
 
-    let build = |bytes: &[u8]| HrtfBinauralNode::new(bytes, SampleRate::SR_48K).err();
+    let build = |bytes: &[u8]| HrtfBinauralNode::<f32>::new(bytes, SampleRate::SR_48K).err();
 
     let mut bad_faces = faces.clone();
     bad_faces[3] = [0, 7, 12];
