@@ -5,13 +5,14 @@ use core::ops::{Add, Div, Mul, Sub};
 use tutti_units::Real;
 
 /// The arithmetic one frame of a filter recurrence runs in: one value (`f32`,
-/// `f64`) or several side by side (`wide::f32x8`, the polysynth's voice lanes).
+/// `f64`) or several side by side (`wide::f32x8` and `wide::f64x4`, the polysynth's voice
+/// lanes at each width).
 ///
 /// The SVF and ladder steps ([`svf_step`](crate::svf_step),
 /// [`ladder_step`](crate::ladder_step)) are written once over it, so a lane bank
 /// runs the same recurrence as a filter node rather than a copy of it.
 ///
-/// Sealed: the three types above are the set, so `wide` is not a version a
+/// Sealed: the four types above are the set, so `wide` is not a version a
 /// downstream crate can plug into.
 pub trait Lanes:
     sealed::Sealed
@@ -30,6 +31,7 @@ mod sealed {
     impl Sealed for f32 {}
     impl Sealed for f64 {}
     impl Sealed for wide::f32x8 {}
+    impl Sealed for wide::f64x4 {}
 }
 
 impl Lanes for f32 {
@@ -50,5 +52,12 @@ impl Lanes for wide::f32x8 {
     #[inline(always)]
     fn lit(x: f64) -> Self {
         wide::f32x8::splat(<f32 as Real>::from_design(x))
+    }
+}
+
+impl Lanes for wide::f64x4 {
+    #[inline(always)]
+    fn lit(x: f64) -> Self {
+        wide::f64x4::splat(x)
     }
 }

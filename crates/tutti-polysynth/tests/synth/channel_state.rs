@@ -45,7 +45,7 @@ fn config() -> SynthConfig {
 }
 
 fn hand(config: SynthConfig) -> Hand {
-    Hand::new(PolySynth::new(config))
+    Hand::new(PolySynth::<f32>::new(config))
 }
 
 fn on(channel: u8, note: u8) -> Ump {

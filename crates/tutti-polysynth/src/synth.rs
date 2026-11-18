@@ -9,7 +9,7 @@ use crate::{AllocationStrategy, PortamentoConfig, Tuning, UnisonConfig, VoiceMod
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_music::Adsr;
 use tutti_ump::MidiGroup;
-use tutti_units::{Depth, Hz, Q, Resonance, Semitones};
+use tutti_units::{Depth, Hz, Normalized, Q, Resonance, Semitones};
 
 /// The waveform every sub-voice of every voice generates.
 ///
@@ -32,10 +32,11 @@ pub enum OscillatorType {
     Square {
         /// Duty cycle as a fraction of the period. `0.5` is a true square
         /// (odd harmonics only); values either side thin the tone toward a
-        /// nasal pulse. Clamped to `0.0..=1.0` and fixed for the life of the
+        /// nasal pulse. The bank keeps it within `0.01..=0.99` (a pulse at 0 or 1 is
+        /// DC). Fixed for the life of the
         /// synth — it is baked into the voice bank at construction rather than
         /// read per sample.
-        pulse_width: f32,
+        pulse_width: Normalized,
     },
     /// Triangle — odd harmonics rolling off steeply, a mellow alternative to
     /// [`Square`](Self::Square).
