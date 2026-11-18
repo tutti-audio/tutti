@@ -218,7 +218,7 @@ fn bytes_round_trip_to_an_equal_sphere() {
 fn a_built_sphere_covers_every_direction_it_was_measured_in() {
     let directions = octahedron();
     let sphere = build(&directions, &responses(6)).expect("built");
-    let set = HrtfSet::build(&sphere, 48_000, 64);
+    let set = HrtfSet::<f32>::build(&sphere, 48_000, 64);
     let mut hint = 0;
     for (v, &d) in directions.iter().enumerate() {
         let w = set.weights(unit_vector(d), &mut hint);
