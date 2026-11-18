@@ -28,9 +28,7 @@ use tutti_ump::Ump;
 use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber, NoteVelocity};
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::{MpeChannels, MpeZoneSpan};
-#[cfg(feature = "midi-hardware")]
-use tutti_units::SampleRate;
-use tutti_units::{Beat, BeatDuration, Frame};
+use tutti_units::{Beat, BeatDuration, Frame, SampleRate};
 
 use tutti_fixtures::midi;
 use tutti_session::{
