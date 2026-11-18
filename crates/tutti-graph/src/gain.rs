@@ -60,7 +60,7 @@ use tutti_types::{AtomicF32, ParamCell};
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
 use crate::event::Event;
-use crate::lane::{control_in, fade_in, ramp_in};
+use crate::lane::{fade_in, ramp_in};
 use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
 use crate::spec::EventOut;
 
@@ -392,7 +392,7 @@ impl<F: Float> SumLane<F> {
     /// the driven state.
     pub(crate) fn weighted(cell: GainCell, driven: bool, max: usize, declick: usize) -> Self {
         Self {
-            target: control_in::<F>(cell.load().get()),
+            target: F::from_unit(cell.load()),
             want: cell.load_fade(),
             drive: driven.then(|| ParamState::lane(max, declick, cell.ranges())),
             cell: Some(cell),
@@ -461,7 +461,7 @@ impl<F: Float> SumLane<F> {
     #[inline]
     pub(crate) fn snapshot(&mut self) {
         if let Some(cell) = &self.cell {
-            self.target = control_in::<F>(cell.load().get());
+            self.target = F::from_unit(cell.load());
             self.want = cell.load_fade();
         }
     }

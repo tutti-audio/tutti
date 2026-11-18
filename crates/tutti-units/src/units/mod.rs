@@ -1,9 +1,9 @@
 //! Unit newtypes for DSP and transport parameters.
 //!
-//! Each newtype is `#[repr(transparent)]` around its raw float type (`f32` by
-//! default, `f64` for wide-range values like `Bpm`/`Beat`) — zero-cost at
-//! runtime, but distinct at compile time so `Hz` and `Seconds` cannot be
-//! swapped by accident. The [`Unit`] marker trait carries the raw type as an
+//! Each newtype is `#[repr(transparent)]` around its raw number (a float for a
+//! continuous quantity, an integer for a count) — zero-cost at runtime, but
+//! distinct at compile time so `Hz` and `Seconds` cannot be swapped by
+//! accident. The [`Unit`] marker trait carries the raw type as an
 //! associated type so a parameter cell can be generic over the unit.
 //!
 //! [`SampleRate`] is defined here too, the one type a rate is spelled with.
@@ -97,12 +97,10 @@ pub use transport::{
 
 /// Marker trait implemented by every unit newtype.
 ///
-/// `Raw` is the underlying float representation. Most units use `f32`;
-/// `SampleRate` uses `f64` because sample rates need a wider range and
-/// precision than `f32` comfortably provides.
+/// `Raw` is the underlying number: a float for a continuous quantity, an
+/// integer for a count.
 pub trait Unit: Copy + Clone + core::fmt::Debug + PartialEq {
-    /// The underlying float representation — `f32` for most units, `f64` where
-    /// the range or precision demands it.
+    /// The underlying number.
     type Raw: Copy;
     /// Wraps a raw float, asserting it is already in this unit's denomination.
     ///

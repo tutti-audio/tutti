@@ -290,8 +290,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
                         }
                     } else {
                         Playback {
-                            // A playback rate is an `f32`.
-                            speed: PlaybackRate::new_clamped(interval.to_pitch_ratio() as f32),
+                            speed: PlaybackRate::new_clamped(interval.to_pitch_ratio()),
                             ..play
                         }
                     }

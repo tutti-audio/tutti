@@ -161,7 +161,7 @@ pub fn estimate_key_from_mean(mean: &[f32; CLASSES], profile: KeyProfile) -> Res
     }
     let (r1, r2) = (scores[best], scores[second]);
     let confidence = if r2 < 1.0 {
-        Confidence::new_clamped(((r1 - r2) / (1.0 - r2)) as f32)
+        Confidence::new_clamped((r1 - r2) / (1.0 - r2))
     } else {
         Confidence::NONE
     };
