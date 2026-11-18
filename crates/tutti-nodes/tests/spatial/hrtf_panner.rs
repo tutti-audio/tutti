@@ -31,6 +31,8 @@
 //! latency after it. The node averages its stereo input; `[1, 1]` is the
 //! conventional impulse and recovers the encoded IR at unity gain.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use approx::assert_abs_diff_eq;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::peak as peak_value;
@@ -158,9 +160,9 @@ fn synthetic_itd_ild_sphere() -> Vec<u8> {
 
 const RATE: SampleRate = SampleRate::of(SAMPLE_RATE as f64);
 
-fn make_node() -> HrtfBinauralNode {
+fn make_node() -> HrtfBinauralNode<f32> {
     let bytes = synthetic_itd_ild_sphere();
-    let node = HrtfBinauralNode::new(&bytes, RATE).expect("synthetic sphere parses");
+    let node = HrtfBinauralNode::<f32>::new(&bytes, RATE).expect("synthetic sphere parses");
     prepared(node, RATE, 64)
 }
 
@@ -169,7 +171,7 @@ fn make_node() -> HrtfBinauralNode {
 /// latency after the impulse. Reuses `node` so a sweep does not rebuild the
 /// sphere on every step. Blocks of 64 frames, the hot path.
 fn ir_of(
-    node: &mut HrtfBinauralNode,
+    node: &mut HrtfBinauralNode<f32>,
     azimuth: Azimuth,
     elevation: Elevation,
     len: usize,
@@ -195,7 +197,7 @@ fn ir_of(
 }
 
 fn ir_at(
-    node: &mut HrtfBinauralNode,
+    node: &mut HrtfBinauralNode<f32>,
     azimuth: Azimuth,
     elevation: Elevation,
 ) -> (Vec<f32>, Vec<f32>) {

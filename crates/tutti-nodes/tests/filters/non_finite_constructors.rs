@@ -83,7 +83,7 @@ fn sweep() {
                     CompressorControls {
                         threshold: d(v(0, -12.0)),
                         ratio: tutti_units::CompressionRatio::new_clamped(if pos == 1 {
-                            b
+                            f64::from(b)
                         } else {
                             4.0
                         }),
@@ -180,7 +180,7 @@ fn sweep() {
             Box::new(EqBandNode::<f32>::new(
                 SvfType::Bell,
                 Hz(1000.0),
-                Q(b),
+                Q(f64::from(b)),
                 d(3.0),
             ))
         }));
@@ -199,7 +199,7 @@ fn sweep() {
             Box::new(SvfFilterNode::<f32>::new(
                 SvfType::LowPass,
                 Hz(1000.0),
-                Q(b),
+                Q(f64::from(b)),
             ))
         }));
         add(probe("svf gain", b, || {

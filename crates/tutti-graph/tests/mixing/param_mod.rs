@@ -191,8 +191,7 @@ impl Node for Probe {
 /// A step of `param` to `value` (a zero-length ramp) at `offset`.
 fn step(offset: tutti_graph::Offset, param: UnitParam, value: f64) -> Event {
     let ramp = match param {
-        // `Q` is an `f32` unit: it narrows at its param write.
-        UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(value as f32), Samples(0)),
+        UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(value), Samples(0)),
         _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(value), Samples(0)),
     };
     Event::ramp(offset, ramp)
@@ -348,7 +347,7 @@ impl Node for Ramps {
                 continue;
             }
             let ramp = match param {
-                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target as f32), Samples(len)),
+                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target), Samples(len)),
                 _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
             };
             let offset = io.offset((at - start) as usize).expect("inside");
@@ -2206,13 +2205,9 @@ fn gen_segment() -> impl Strategy<Value = (u64, ParamSegment)> {
         .prop_map(|(at, p, from, to, len, k, resumed)| {
             let shape = gen_shape(k);
             let seg = match PARAMS[p] {
-                UnitParam::Q => ParamSegment::new(
-                    ParamKey::<Q>::Q,
-                    Q(from as f32),
-                    Q(to as f32),
-                    Samples(len),
-                    shape,
-                ),
+                UnitParam::Q => {
+                    ParamSegment::new(ParamKey::<Q>::Q, Q(from), Q(to), Samples(len), shape)
+                }
                 _ => ParamSegment::new(
                     ParamKey::<Hz>::CUTOFF,
                     Hz(from),
@@ -2234,7 +2229,7 @@ fn gen_shaped_ramp() -> impl Strategy<Value = (u64, ParamRamp)> {
     (0u64..500, 0usize..2, -3.0f64..3.0, 0usize..60, any::<u8>()).prop_map(
         |(at, p, target, len, k)| {
             let ramp = match PARAMS[p] {
-                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target as f32), Samples(len)),
+                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target), Samples(len)),
                 _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
             };
             (at, ramp.with_shape(gen_shape(k)))

@@ -7,15 +7,16 @@ use tutti_graph::{Node, ParamNode};
 use tutti_nodes::{HrtfBinauralNode, VbapPannerNode};
 use tutti_units::SampleRate;
 
-fn hrtf() -> HrtfBinauralNode {
+fn hrtf() -> HrtfBinauralNode<f32> {
     let rate = SAMPLE_RATE.get() as u32;
     let bytes = synthetic_hrir_sphere(rate, 64);
-    HrtfBinauralNode::new(&bytes, SampleRate::from_hz(rate).unwrap()).expect("the sphere parses")
+    HrtfBinauralNode::<f32>::new(&bytes, SampleRate::from_hz(rate).unwrap())
+        .expect("the sphere parses")
 }
 
 #[test]
 fn vbap_forks_from_its_params() {
-    assert_param_fork(VbapPannerNode::atmos_7_1_4());
+    assert_param_fork(VbapPannerNode::<f32>::atmos_7_1_4());
 }
 
 #[test]
@@ -27,7 +28,7 @@ fn hrtf_forks_from_its_params() {
 /// so a host reaches the cell a lane rides on.
 #[test]
 fn a_panner_declares_every_param_it_reads() {
-    let vbap = VbapPannerNode::stereo();
+    let vbap = VbapPannerNode::<f32>::stereo();
     assert_eq!(vbap.shape().params.as_slice().len(), 4);
     for p in vbap.shape().params.as_slice() {
         assert!(

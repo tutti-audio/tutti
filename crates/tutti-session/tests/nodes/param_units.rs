@@ -93,7 +93,7 @@ units! {
         tutti_nodes::LfoNode { Depth => Depth, Rate => Hz }
         tutti_nodes::OscillatorNode { Frequency => Hz, Volume => Amplitude }
         tutti_nodes::FreeverbNode<f32> { RoomSize => Mix, Damping => Mix }
-        tutti_nodes::ConvolverNode { Volume => Amplitude }
+        tutti_nodes::ConvolverNode<f32> { Volume => Amplitude }
         tutti_nodes::PlateReverbNode<f32> {
             Decay => Seconds, Damping => Mix, DelayTime => Seconds, Cutoff => Hz, Depth => Depth,
             Diffusion => Mix
@@ -102,11 +102,11 @@ units! {
             Decay => Seconds, RoomSize => Mix, Diffusion => Mix, DelayTime => Seconds,
             Depth => Depth, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db, Freeze => bool
         }
-        tutti_nodes::VbapPannerNode {
+        tutti_nodes::VbapPannerNode<f32> {
             Azimuth => Azimuth, Elevation => Elevation, Spread => Spread,
             StereoWidth => StereoWidth
         }
-        tutti_nodes::HrtfBinauralNode { Azimuth => Azimuth, Elevation => Elevation, Wet => Mix }
+        tutti_nodes::HrtfBinauralNode<f32> { Azimuth => Azimuth, Elevation => Elevation, Wet => Mix }
     }
     the_synths_params_are_in_their_declared_unit #[cfg(feature = "synth")] {
         tutti_polysynth::PolySynth { Volume => Amplitude, Detune => tutti_units::CentsSpan, StereoSpread => Spread }

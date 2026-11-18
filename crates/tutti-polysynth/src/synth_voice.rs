@@ -78,7 +78,7 @@ pub(crate) struct SynthVoice {
     /// Normalized CC71 (Resonance) position, `0..1` with `0.0` inactive — a
     /// controller value, not a `Resonance`. Blends `base_filter_resonance`
     /// toward the 0.95 ceiling in `modulated_resonance`.
-    cc_resonance_value: f32,
+    cc_resonance_value: f64,
     filter_mod: FilterModConfig,
     lfo_phase: Phase,
     envelope_level: Amplitude,
@@ -534,7 +534,7 @@ impl SynthVoice {
 
     /// CC 74 and CC 71 positions. Observability for tests.
     #[cfg(test)]
-    pub(crate) fn sound_controllers(&self) -> (f32, f32) {
+    pub(crate) fn sound_controllers(&self) -> (f32, f64) {
         (self.cc_cutoff_value, self.cc_resonance_value)
     }
 
@@ -546,7 +546,7 @@ impl SynthVoice {
         self.cc_cutoff_value = value;
     }
 
-    pub(crate) fn set_filter_resonance(&mut self, value: f32) {
+    pub(crate) fn set_filter_resonance(&mut self, value: f64) {
         self.cc_resonance_value = value;
     }
 

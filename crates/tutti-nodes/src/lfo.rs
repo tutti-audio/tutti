@@ -234,7 +234,7 @@ tutti_graph::declare_params!([] LfoNode, n {
     Rate => Hz = matches!(n.clock, LfoClock::Free).then_some(&n.rate),
 });
 
-impl Node for LfoNode {
+impl<F: Float> Node<F> for LfoNode {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
             .with_cost(tutti_graph::Cost::Moderate)
@@ -246,7 +246,7 @@ impl Node for LfoNode {
         self.sample_rate = Some(p.sample_rate());
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         debug_assert_eq!(
             cx.arrival,
             Latency::ZERO,
@@ -263,7 +263,8 @@ impl Node for LfoNode {
             .frames();
         let depth_at = |i: usize| {
             depth_lane
-                .map(|l| l[i])
+                // `Depth` holds an `f32`, so a driven depth narrows to it.
+                .map(|l| l[i].to_f32())
                 .filter(|v| v.is_finite())
                 .map_or(depth_cell, |v| v.clamp(-1.0, 1.0))
         };
@@ -278,23 +279,24 @@ impl Node for LfoNode {
                 // `f32`-rounded step drifts the cycle index off the frame.
                 let out = io.output(0);
                 let Some(sample_rate) = self.sample_rate else {
-                    out[..size].fill(0.0);
+                    out[..size].fill(F::ZERO);
                     return Status::Modified;
                 };
                 let per_hz = 1.0 / sample_rate.get();
                 // The step is rebuilt only when the rate moves.
                 let mut step_of = (rate_cell, lfo_step(rate_cell, per_hz));
                 for (i, o) in out[..size].iter_mut().enumerate() {
-                    // A driven rate is an `f32` lane value, widened exactly.
                     let rate = rate_lane
-                        .map(|l| f64::from(l[i]))
+                        .map(|l| l[i].into())
                         .filter(|v| v.is_finite())
                         .unwrap_or(rate_cell);
                     if rate != step_of.0 {
                         step_of = (rate, lfo_step(rate, per_hz));
                     }
                     let cycles = self.cycle as f64 + f64::from_phase(self.phase);
-                    *o = self.evaluate(cycles, offset, depth_at(i));
+                    // `Waveform::raw_at` and `Depth` are `f32`: the sample widens exactly, until
+                    // the waveform and `Depth` are `f64`.
+                    *o = F::from_f32(self.evaluate(cycles, offset, depth_at(i)));
                     let next = self.phase.advance(step_of.1);
                     // A step above half a cycle is a step back (its two's complement), and
                     // a carry out of the add is a cycle completed, a borrow one undone.
@@ -310,7 +312,8 @@ impl Node for LfoNode {
                 let out = io.output(0);
                 cx.env.for_each_beat(|i, beat| {
                     let cycles = beat.cycles_in(beats_per_cycle);
-                    out[i] = self.evaluate(cycles, offset, depth_at(i));
+                    // As above: the `f32` wave widens exactly.
+                    out[i] = F::from_f32(self.evaluate(cycles, offset, depth_at(i)));
                 });
             }
         }
@@ -327,7 +330,7 @@ impl Node for LfoNode {
     }
 }
 
-impl ParamNode for LfoNode {
+impl<F: Float> ParamNode<F> for LfoNode {
     /// The depth, and the rate while free-running (a beat-synced node's span is
     /// its clock).
     fn param_set(&self) -> ParamSet {
@@ -341,17 +344,17 @@ impl ParamNode for LfoNode {
         let mut fork = self.clone();
         fork.rate.detach();
         fork.depth.detach();
-        Node::reset(&mut fork);
+        Node::<F>::reset(&mut fork);
         fork
     }
 }
 
 /// Inserted with its [`ParamSet`] as its controls and a fork that starts
 /// from the values last set through it ([`tutti_graph::param_parts`]).
-impl IntoNode for LfoNode {
+impl<F: Float> IntoNode<F> for LfoNode {
     type Controls = ParamSet;
 
-    fn into_parts(self) -> NodeParts<ParamSet> {
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
         tutti_graph::param_parts(self)
     }
 }
@@ -389,17 +392,20 @@ mod tests {
             .with_rate(Hz(2.0))
             .with_depth(Depth::of(0.25));
         assert_eq!(
-            free.shape().params.as_slice(),
+            Node::<f32>::shape(&free).params.as_slice(),
             &[UnitParam::Depth, UnitParam::Rate][..]
         );
-        assert_eq!(free.param_base(0), Some(0.25));
-        assert_eq!(free.param_base(1), Some(2.0));
+        assert_eq!(Node::<f32>::param_base(&free, 0), Some(0.25));
+        assert_eq!(Node::<f32>::param_base(&free, 1), Some(2.0));
         let synced = LfoNode::new(LfoShape::Sine)
             .with_beat_sync(BeatsPerCycle::of(4.0))
             .with_depth(Depth::of(0.5));
-        assert_eq!(synced.shape().params.as_slice(), &[UnitParam::Depth][..]);
-        assert_eq!(synced.param_base(0), Some(0.5));
-        assert_eq!(synced.param_base(1), None);
+        assert_eq!(
+            Node::<f32>::shape(&synced).params.as_slice(),
+            &[UnitParam::Depth][..]
+        );
+        assert_eq!(Node::<f32>::param_base(&synced, 0), Some(0.5));
+        assert_eq!(Node::<f32>::param_base(&synced, 1), None);
     }
 
     // The waveform math is `tutti-modulation`'s, and so are the tests that pin it.
@@ -467,13 +473,17 @@ mod tests {
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
         let free = LfoNode::new(LfoShape::Sine).with_rate(Hz(2.0));
         assert_eq!(
-            free.param_set().params().collect::<Vec<_>>(),
+            ParamNode::<f32>::param_set(&free)
+                .params()
+                .collect::<Vec<_>>(),
             [UnitParam::Depth, UnitParam::Rate]
         );
         assert_param_fork(free);
         let synced = LfoNode::new(LfoShape::Sine).with_beat_sync(BeatsPerCycle::of(4.0));
         assert_eq!(
-            synced.param_set().params().collect::<Vec<_>>(),
+            ParamNode::<f32>::param_set(&synced)
+                .params()
+                .collect::<Vec<_>>(),
             [UnitParam::Depth]
         );
         assert_param_fork(synced);
@@ -487,7 +497,7 @@ mod tests {
             LfoNode::new(LfoShape::Sine),
             LfoNode::new(LfoShape::Sine).with_beat_sync(BeatsPerCycle::of(1.0)),
         ] {
-            let shape = lfo.shape();
+            let shape = Node::<f32>::shape(&lfo);
             assert_eq!(shape.audio_in().count(), 0);
             assert_eq!(shape.audio_out().count(), 1);
             assert_eq!(shape.tail, Tail::None);
@@ -574,7 +584,7 @@ mod tests {
     fn test_lfo_reset() {
         let mut d = Direct::new(LfoNode::new(LfoShape::Sine), SampleRate::of(100.0), 50);
         d.block();
-        Node::reset(&mut *d.node);
+        Node::<f32>::reset(&mut *d.node);
         d.block();
         assert!(
             d.output().plane(0).samples()[0].abs() < 0.1,
@@ -638,7 +648,7 @@ mod tests {
         };
         d.block();
         check(d.output().plane(0).samples(), "original");
-        let mut f = Direct::new(d.node.fork_fresh(), rate, 4096);
+        let mut f = Direct::new(ParamNode::<f32>::fork_fresh(&*d.node), rate, 4096);
         f.block();
         check(f.output().plane(0).samples(), "fork");
     }
@@ -793,5 +803,19 @@ mod tests {
             assert!(out[100 * c + 10..=100 * c + 90].iter().all(|&v| v == held));
         }
         assert!(out[10] != out[110] && out[110] != out[210]);
+    }
+
+    /// In an `f64` graph a free-running sawtooth at `1/64` of the rate is the ramp `k / 32 - 1`
+    /// of its first cycle. The wave and the depth are `f32` (`Waveform::raw_at`, `Depth`), whose
+    /// values here are exact in `f32`, so this pins the node's plumbing in an `f64` graph.
+    #[test]
+    fn in_an_f64_graph_the_lfo_writes_its_wave_widened_exactly() {
+        use crate::test_support::{F64_TOLERANCE, RATE, render_f64};
+        let node = LfoNode::new(LfoShape::Sawtooth).with_rate(Hz(RATE.get() / 64.0));
+        let out = render_f64(node, RATE, &[], 64);
+        for (k, &got) in out[0].iter().enumerate().skip(1) {
+            let want = k as f64 / 32.0 - 1.0;
+            assert!((got - want).abs() <= F64_TOLERANCE, "frame {k}");
+        }
     }
 }

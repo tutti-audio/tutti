@@ -53,7 +53,7 @@ fn bench(c: &mut Criterion) {
             (Bed::Surround51, 6, 1024),
         ] {
             g.throughput(Throughput::Elements(block as u64));
-            let node = VbapPannerNode::new(bed).unwrap();
+            let node = VbapPannerNode::<f32>::new(bed).unwrap();
             let params = node.param_set();
             aim(&params, Azimuth(20.0), Elevation::LEVEL);
             let mut d = Direct::new(node, SampleRate::SR_48K, block);

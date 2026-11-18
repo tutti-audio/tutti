@@ -32,7 +32,7 @@ use tutti_buffers::Planes;
 use tutti_nodes::{SvfFilterNode, SvfType};
 
 const SR: f64 = 48_000.0;
-const Q: f32 = 0.707;
+const Q: f64 = 0.707;
 const CUTOFF: f64 = 1_000.0;
 
 /// Steady-state gain of `f` at `freq`, measured as an RMS ratio.
@@ -78,7 +78,7 @@ fn svf_gain_db(kind: SvfType, cutoff: f64, freq: f64) -> f64 {
 /// `a0 = 1 + alpha`, `a1 = -2*cos(w0)`, `a2 = 1 - alpha`.
 fn cookbook_gain_db(kind: SvfType, f0: f64, freq: f64) -> f64 {
     let w0 = std::f64::consts::TAU * f0 / SR;
-    let alpha = w0.sin() / (2.0 * Q as f64);
+    let alpha = w0.sin() / (2.0 * Q);
     let cs = w0.cos();
     let b = match kind {
         SvfType::LowPass => [(1.0 - cs) / 2.0, 1.0 - cs, (1.0 - cs) / 2.0],
@@ -168,7 +168,7 @@ fn svf_lowpass_and_highpass_are_minus_3_db_at_the_cutoff_for_butterworth_q() {
 /// (0 dB only at `Q = 1`).
 #[test]
 fn svf_bandpass_peak_at_the_cutoff_is_20_log10_q() {
-    let expected = 20.0 * (Q as f64).log10();
+    let expected = 20.0 * Q.log10();
     let g = svf_gain_db(SvfType::BandPass, CUTOFF, CUTOFF);
     assert!(
         (g - expected).abs() < 0.01,

@@ -16,7 +16,7 @@ const TYPES: [LadderType; 4] = [
     LadderType::HP24,
 ];
 
-fn design<F: Float + Lanes>(ty: LadderType, fc: f64, res: f32, drive: f64) -> LadderDesign<F> {
+fn design<F: Float + Lanes>(ty: LadderType, fc: f64, res: f64, drive: f64) -> LadderDesign<F> {
     let controls = LadderControls {
         ty,
         freq: Hz(fc),
@@ -63,7 +63,7 @@ fn impulse(amplitude: f64, frames: usize) -> Vec<f64> {
 
 /// The ladder held at `ty`, `fc`, `res` (unity drive): the impulse response of a mono `f64`
 /// bank in `f64` audio.
-fn held_response(ty: LadderType, fc: f64, res: f32, amplitude: f64, frames: usize) -> Vec<f64> {
+fn held_response(ty: LadderType, fc: f64, res: f64, amplitude: f64, frames: usize) -> Vec<f64> {
     let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
     let mut glide = Glide::landed(design(ty, fc, res, 1.0));
     run(
@@ -120,7 +120,7 @@ fn the_held_response_is_the_bilinear_image_of_the_continuous_ladder() {
     let amplitude = 1e-7;
     for ty in TYPES {
         for (fc, res) in [
-            (1_000.0f64, 0.0f32),
+            (1_000.0f64, 0.0f64),
             (1_000.0, 0.5),
             (1_000.0, 0.9),
             (4_000.0, 0.9),
@@ -131,7 +131,7 @@ fn the_held_response_is_the_bilinear_image_of_the_continuous_ladder() {
                 .map(|v| v / amplitude)
                 .collect();
             for hz in [50.0, 500.0, 975.0, 1_000.0, 2_000.0, 9_000.0, 20_000.0] {
-                let want = closed_form(ty, fc, f64::from(res), hz);
+                let want = closed_form(ty, fc, res, hz);
                 let got = dtft(&y, hz);
                 assert!(
                     (got - want).norm() < 1e-9 * want.norm().max(1.0),
@@ -209,9 +209,9 @@ fn the_ladder_self_oscillates_at_the_cutoff_at_k_four() {
 /// windows is `24000 ln|z|` to 1%.
 #[test]
 fn just_below_k_four_the_oscillation_decays_at_the_poles_modulus() {
-    for res in [0.99f32, 0.95] {
+    for res in [0.99f64, 0.95] {
         let y = held_response(LadderType::LP24, 1_000.0, res, 1e-4, 40_000);
-        let z = dominant_pole(1_000.0, f64::from(res));
+        let z = dominant_pole(1_000.0, res);
         assert!(z.norm() < 1.0);
         for start in [8_000, 32_000] {
             let residual = mode_residual(&y, start, 100, z);
@@ -238,7 +238,7 @@ fn just_below_k_four_the_oscillation_decays_at_the_poles_modulus() {
 /// the continuous poles reach the imaginary axis (`the_ladder_self_oscillates_at_the_cutoff_at_k_four`).
 #[test]
 fn the_resonance_ceiling_is_k_four() {
-    for res in [1.0f32, 1.5, 2.0, 1e30, f32::INFINITY] {
+    for res in [1.0f64, 1.5, 2.0, 1e30, f64::INFINITY] {
         assert_eq!(
             LadderCoeffs::new(Hz(1_000.0), Resonance(res), RATE).k,
             4.0,
@@ -269,7 +269,7 @@ fn the_output_is_bounded_by_the_saturator_and_the_stages_l1_norm() {
         .collect();
     for ty in TYPES {
         for fc in [1.0f64, 100.0, 12_000.0, 23_900.0] {
-            for (res, drive) in [(1.0f32, 1e3f64), (1.0, 1.0), (0.5, 1e6)] {
+            for (res, drive) in [(1.0f64, 1e3f64), (1.0, 1.0), (0.5, 1e6)] {
                 let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
                 let mut glide = Glide::landed(design(ty, fc, res, drive));
                 let y = run(&mut bank, &mut glide, std::slice::from_ref(&noise), &[64]).remove(0);
@@ -486,12 +486,7 @@ fn a_glides_midpoint_is_stable() {
     };
     fn reachable(next: &mut dyn FnMut(f64, f64) -> f64) -> LadderDesign<f64> {
         let ty = TYPES[next(0.0, 4.0) as usize % 4];
-        design(
-            ty,
-            next(20.0, 3_000.0),
-            next(0.0, 0.7) as f32,
-            next(0.1, 8.0),
-        )
+        design(ty, next(20.0, 3_000.0), next(0.0, 0.7), next(0.1, 8.0))
     }
     for _ in 0..200 {
         let (a, b) = (reachable(&mut next), reachable(&mut next));

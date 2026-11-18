@@ -29,7 +29,7 @@ fn settled_gain(depth: f64, amplitude: f64, q: f64) -> f64 {
         EnvelopeFilterNode::<f32>::from(
             EnvelopeFilterConfig::new(ChannelLayout::MONO, Hz(500.0), SvfType::LowPass)
                 .depth(Semitones(depth))
-                .q(Q(q as f32))
+                .q(Q(q))
                 .attack(Seconds(0.05))
                 .release(Seconds(0.05)),
         ),
@@ -103,7 +103,7 @@ fn the_attack_and_release_params_set_the_rise_and_the_fall() {
         EnvelopeFilterNode::<f32>::from(
             EnvelopeFilterConfig::new(ChannelLayout::MONO, Hz(base), SvfType::LowPass)
                 .depth(Semitones(depth))
-                .q(Q(q as f32)),
+                .q(Q(q)),
         ),
         SR,
         480,

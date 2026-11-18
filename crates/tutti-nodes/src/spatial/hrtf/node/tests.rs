@@ -11,7 +11,7 @@ const RATE: SampleRate = SampleRate::SR_44K1;
 const BLOCK: usize = 64;
 
 /// One block of one frame.
-fn tick(node: &mut HrtfBinauralNode, input: [f32; 2]) -> [f32; 2] {
+fn tick(node: &mut HrtfBinauralNode<f32>, input: [f32; 2]) -> [f32; 2] {
     let out = drive(
         node,
         RATE,
@@ -68,9 +68,9 @@ fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
     b
 }
 
-fn make_node() -> HrtfBinauralNode {
+fn make_node() -> HrtfBinauralNode<f32> {
     let bytes = synthetic_hrir_sphere(44_100, 64);
-    let node = HrtfBinauralNode::new(&bytes, RATE).expect("synthetic sphere should parse");
+    let node = HrtfBinauralNode::<f32>::new(&bytes, RATE).expect("synthetic sphere should parse");
     prepared(node, RATE, BLOCK)
 }
 
@@ -86,13 +86,13 @@ fn make_node() -> HrtfBinauralNode {
 #[test]
 fn a_non_finite_position_is_ignored_and_does_not_stick() {
     let mut node = make_node();
-    let block = |node: &mut HrtfBinauralNode| {
+    let block = |node: &mut HrtfBinauralNode<f32>| {
         let input: Vec<f32> = (0..BLOCK).map(|i| ((i as f32) * 0.05).sin()).collect();
         drive(node, RATE, Planes::new(&[&input, &input]).unwrap(), &[])
     };
     // 0.5 s: ten 50 ms time constants, so the aim settles to well
     // within the tolerance below.
-    let settle = |node: &mut HrtfBinauralNode| {
+    let settle = |node: &mut HrtfBinauralNode<f32>| {
         for _ in 0..(RATE.get() as usize / 2).div_ceil(BLOCK) {
             let out = block(node);
             assert!(out.iter().flatten().all(|s| s.is_finite()));
@@ -171,7 +171,7 @@ fn a_non_finite_position_is_ignored_and_does_not_stick() {
 
 #[test]
 fn rejects_garbage_bytes() {
-    let err = HrtfBinauralNode::new(&[0u8; 16], SampleRate::SR_44K1);
+    let err = HrtfBinauralNode::<f32>::new(&[0u8; 16], SampleRate::SR_44K1);
     assert!(err.is_err(), "non-HRIR bytes must fail to construct");
 }
 
@@ -199,7 +199,11 @@ fn produces_output_after_one_frame_of_latency() {
 /// Run `node` over `frames` frames with a unit impulse on both inputs at
 /// frame `at`, in 64-frame blocks (the hot path, not one frame at a
 /// time). Returns the (left, right) outputs.
-fn impulse_response(node: &mut HrtfBinauralNode, at: usize, frames: usize) -> (Vec<f32>, Vec<f32>) {
+fn impulse_response(
+    node: &mut HrtfBinauralNode<f32>,
+    at: usize,
+    frames: usize,
+) -> (Vec<f32>, Vec<f32>) {
     let (mut l, mut r) = (Vec::new(), Vec::new());
     let mut done = 0;
     while done < frames {
@@ -402,7 +406,7 @@ fn clone_shares_the_position_atomics() {
 #[test]
 fn a_prepare_above_the_ceiling_retunes_the_glide() {
     assert_eq!(HRTF_STEP, 128, "the rates below assume 128-sample steps");
-    let mut node = HrtfBinauralNode::new(
+    let mut node = HrtfBinauralNode::<f32>::new(
         &synthetic_hrir_sphere(48_000, 4),
         SampleRate::of(1_536_000.0),
     )
@@ -483,7 +487,7 @@ fn the_renderer_declares_its_params() {
 #[test]
 fn a_lane_drives_each_param_as_its_cell_would() {
     let input = [0.5f32; BLOCK];
-    let settle = |node: &mut HrtfBinauralNode, lane: Option<(usize, f32)>| {
+    let settle = |node: &mut HrtfBinauralNode<f32>, lane: Option<(usize, f32)>| {
         let held = lane.map(|(_, v)| [v; BLOCK]);
         let mut params: [Option<&[f32]>; 3] = [None; 3];
         if let Some((k, _)) = lane {
@@ -525,4 +529,16 @@ fn a_lane_drives_each_param_as_its_cell_would() {
             );
         }
     }
+}
+
+/// In an `f64` graph the panner is linear in its input to the rounding of `f64`.
+#[test]
+fn in_an_f64_graph_the_panner_is_linear_on_wide_signals() {
+    let bytes = synthetic_hrir_sphere(44_100, 64);
+    crate::test_support::assert_linear(
+        || HrtfBinauralNode::<f64>::new(&bytes, RATE).expect("synthetic sphere should parse"),
+        RATE,
+        2,
+        1_024,
+    );
 }

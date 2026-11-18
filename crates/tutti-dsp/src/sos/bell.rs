@@ -115,7 +115,7 @@ impl MatchedBell {
 
     /// The quality factor as a number above 0.
     fn checked_q(&self) -> Result<f64, SosError> {
-        let q = f64::from(self.q.get());
+        let q = self.q.get();
         if q.is_finite() && q > 0.0 {
             Ok(q)
         } else {

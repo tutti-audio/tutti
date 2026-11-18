@@ -85,7 +85,7 @@ impl SvfCoeffs {
     /// Computes SVF filter coefficients from parameters (pure function, no state).
     ///
     /// The three tuning parameters are three different units, and taking them as
-    /// [`Hz`] / [`Q`] / [`Db`] is what keeps them apart. As bare `f32`s they are
+    /// [`Hz`] / [`Q`] / [`Db`] is what keeps them apart. As bare floats they are
     /// adjacent and interchangeable — the call reads as a run of positional numbers,
     /// `(LowPass, 1000.0, 0.707, 0.0, 44100.0)`, where transposing any two compiles
     /// and detunes the filter.
@@ -106,7 +106,7 @@ impl SvfCoeffs {
                 .get(),
         );
         let g0 = libm::tan(core::f64::consts::PI * fc / sample_rate.get());
-        let q = (q as f64).max(0.01);
+        let q = q.max(0.01);
         // A gain past `MAX_GAIN` either way is that gain: `10^(dB / 40)`
         // underflows to 0 far out (`k = 1 / (Q * A)` is then infinite and the
         // set NaN), and overflows to infinity the other way. A NaN gain is

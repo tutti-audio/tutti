@@ -32,7 +32,7 @@ fn hz(freqs: &[f64]) -> CrossoverControls {
 fn band(
     threshold: f64,
     knee: f64,
-    ratio: f32,
+    ratio: f64,
     attack: f64,
     release: f64,
     makeup: f64,
@@ -300,7 +300,7 @@ fn a_tone_in_a_band_settles_on_that_bands_static_curve() {
             let out = run(&mut k, &[&x[SETTLE..]]).remove(0);
             let reading = k.take_reading();
 
-            let want = curve(level, f64::from(threshold as f32), f64::from(ratio), knee);
+            let want = curve(level, f64::from(threshold as f32), ratio, knee);
             let got = reading.band(b).unwrap().get();
             assert!(
                 (got - want).abs() < 2e-3,
