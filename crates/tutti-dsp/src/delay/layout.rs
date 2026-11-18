@@ -29,8 +29,8 @@ use crate::InterpolationMode;
 ///
 /// A plain number, frames of delay per frame, so no unit: a span of frames (`SampleSpan`) is
 /// not a rate, and none of the units covers a dimensionless slope. It is the `Rate` of a
-/// [`Steps::Rate`](crate::Steps::Rate), the glide's own `f32`.
-pub const DELAY_SLEW: f32 = 0.125;
+/// [`Steps::Rate`](crate::Steps::Rate), the glide's own `f64`.
+pub const DELAY_SLEW: f64 = 0.125;
 
 /// The most channels a delay has: a bus's.
 pub const MAX_DELAY_CHANNELS: usize = MAX_WIDTH;

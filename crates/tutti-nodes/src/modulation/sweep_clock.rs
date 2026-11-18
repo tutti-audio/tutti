@@ -11,9 +11,9 @@
 //! corner is the segment's end.
 
 use tutti_buffers::Float;
-use tutti_buffers::MAX_CHANNELS;
 use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp};
-use tutti_units::{Phase, PhaseIncrement, PhaseStep, RunningPhase};
+use tutti_buffers::MAX_CHANNELS;
+use tutti_units::{Bipolar, Phase, PhaseIncrement, PhaseStep, RunningPhase};
 
 /// The frames of a segment: a corner's glide takes this many steps.
 pub(crate) const SEGMENT: u32 = 16;
@@ -89,16 +89,16 @@ impl SweepClock {
     pub(crate) fn solve<T: Lerp>(
         &mut self,
         glides: &mut [Glide<T>],
-        mut corner: impl FnMut(f32, bool) -> T,
+        mut corner: impl FnMut(Bipolar, bool) -> T,
     ) {
         let start = self.phase;
         let mut end = start;
         for _ in 0..COEFF_INTERVAL {
             end = end.advance(self.inc);
         }
-        // The effect's corner values are `f32`: the sine narrows once per segment end.
+        // The LFO's sine is solved in `f64`; each effect crosses its corner value once.
         let sine = |offset: PhaseStep, p: RunningPhase| {
-            Phase(f64::from_phase(p.advance(offset))).sin() as f32
+            Bipolar::clamped(Phase(f64::from_phase(p.advance(offset))).sin())
         };
         for c in 0..glides.len() {
             if c > 0 && self.offsets[c] == self.offsets[c - 1] {

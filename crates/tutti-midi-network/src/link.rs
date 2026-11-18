@@ -134,8 +134,8 @@ impl Link {
             self.remember(cfg, command);
         }
         self.idle = Idle::Quiet {
-            next: now + cfg.idle_interval,
-            interval: cfg.idle_interval,
+            next: now + cfg.idle_interval.get(),
+            interval: cfg.idle_interval.get(),
             fec_left: cfg.fec.repeats(),
         };
     }
@@ -243,7 +243,7 @@ impl Link {
                 self.held.push(data);
                 self.gap.get_or_insert(Gap {
                     requests: 0,
-                    next_request: now + cfg.reorder_wait,
+                    next_request: now + cfg.reorder_wait.get(),
                 });
                 return;
             }
@@ -325,6 +325,7 @@ impl Link {
             let requests = gap.requests + 1;
             let wait = cfg
                 .reorder_wait
+                .get()
                 .saturating_mul(2u32.saturating_pow(u32::from(requests)))
                 .min(TIMER_MAX);
             self.gap = Some(Gap {

@@ -137,6 +137,10 @@ pub trait Real:
     /// cancels.
     #[must_use]
     fn exp_m1(self) -> Self;
+    /// The natural logarithm of one plus the value: accurate near zero, where
+    /// `ln(1 + x)` cancels.
+    #[must_use]
+    fn ln_1p(self) -> Self;
     /// `2` to the value.
     #[must_use]
     fn exp2(self) -> Self;
@@ -202,7 +206,7 @@ macro_rules! real_impl {
     (
         $t:ident,
         $abs:ident, $floor:ident, $ceil:ident, $round:ident, $roundeven:ident, $atan:ident,
-        $sqrt:ident, $exp:ident, $expm1:ident, $exp2:ident,
+        $sqrt:ident, $exp:ident, $expm1:ident, $log1p:ident, $exp2:ident,
         $ln:ident, $log10:ident, $pow:ident, $sin:ident, $cos:ident, $tan:ident,
         $tanh:ident, $atan2:ident, $fma:ident, $min:ident, $max:ident, $copysign:ident
     ) => {
@@ -236,6 +240,10 @@ macro_rules! real_impl {
             #[inline]
             fn exp_m1(self) -> Self {
                 libm::$expm1(self)
+            }
+            #[inline]
+            fn ln_1p(self) -> Self {
+                libm::$log1p(self)
             }
             #[inline]
             fn abs(self) -> Self {
@@ -355,12 +363,12 @@ mod sealed {
 }
 
 real_impl!(
-    f32, fabsf, floorf, ceilf, roundf, roundevenf, atanf, sqrtf, expf, expm1f, exp2f, logf, log10f,
-    powf, sinf, cosf, tanf, tanhf, atan2f, fmaf, fminf, fmaxf, copysignf
+    f32, fabsf, floorf, ceilf, roundf, roundevenf, atanf, sqrtf, expf, expm1f, log1pf, exp2f, logf,
+    log10f, powf, sinf, cosf, tanf, tanhf, atan2f, fmaf, fminf, fmaxf, copysignf
 );
 real_impl!(
-    f64, fabs, floor, ceil, round, roundeven, atan, sqrt, exp, expm1, exp2, log, log10, pow, sin,
-    cos, tan, tanh, atan2, fma, fmin, fmax, copysign
+    f64, fabs, floor, ceil, round, roundeven, atan, sqrt, exp, expm1, log1p, exp2, log, log10, pow,
+    sin, cos, tan, tanh, atan2, fma, fmin, fmax, copysign
 );
 
 #[cfg(test)]
@@ -433,6 +441,32 @@ mod tests {
         assert!((<f64 as Real>::exp(x) - 1.0 - exact).abs() > exact * 1e-8);
         let y = 1e-10_f32;
         assert!((<f32 as Real>::exp_m1(y) - y).abs() <= y * f32::EPSILON);
+    }
+
+    #[test]
+    fn ln_1p_is_zero_at_zero_and_exact_near_zero_at_both_widths() {
+        assert_eq!(<f32 as Real>::ln_1p(0.0), 0.0);
+        assert_eq!(<f64 as Real>::ln_1p(0.0), 0.0);
+        // ln(1 + x) = x - x^2/2 + ..., so at 1e-10 the result is x - 5e-21 to within an
+        // ulp; `ln(1 + x)` is off by ~1e-16, about 1e10 ulps of the result.
+        let x = 1e-10_f64;
+        let exact = x - x * x / 2.0;
+        assert!((<f64 as Real>::ln_1p(x) - exact).abs() <= exact * f64::EPSILON);
+        assert!((<f64 as Real>::ln(1.0 + x) - exact).abs() > exact * 1e-8);
+        // At f32, `1 + 1e-6` rounds to a multiple of 2^-23, so the naive form is off by
+        // up to 6% of the result.
+        let y = 1e-6_f32;
+        let exact = f64::from(y) - f64::from(y) * f64::from(y) / 2.0;
+        let got = f64::from(<f32 as Real>::ln_1p(y));
+        assert!((got - exact).abs() <= exact * f64::from(f32::EPSILON));
+        let naive = f64::from(<f32 as Real>::ln(1.0 + y));
+        assert!((naive - exact).abs() > exact * 1e-2);
+    }
+
+    #[test]
+    fn ln_1p_of_one_is_ln_two() {
+        assert!((<f64 as Real>::ln_1p(1.0) - core::f64::consts::LN_2).abs() <= f64::EPSILON);
+        assert!((<f32 as Real>::ln_1p(1.0) - core::f32::consts::LN_2).abs() <= f32::EPSILON);
     }
 
     #[test]

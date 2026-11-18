@@ -275,7 +275,7 @@ fn a_time_glide_is_bounded_by_the_slew_and_lands_exactly() {
         .map(|w| (w[1] - w[0]).abs())
         .fold(0.0, f64::max);
     assert!(
-        worst <= f64::from(DELAY_SLEW) + 2e-3,
+        worst <= DELAY_SLEW + 2e-3,
         "the delay moved {worst} frames in one"
     );
     assert!(
@@ -514,12 +514,11 @@ fn a_clone_keeps_the_capacity_and_the_echoes_in_flight() {
     assert_eq!(out.iter().position(|&s| s != 0.0), Some(1024 - 100));
 }
 
-/// The bank is generic over the sample format: an impulse of `f64` is heard at the delay
-/// in `f64`.
+/// An `f64` bank hears an impulse at the delay.
 #[test]
 fn an_f64_impulse_arrives_at_the_delay() {
-    let mut bank = DelayBank::<f32>::new(&mono(InterpolationMode::Linear), BINARY);
-    let mut glides = DelayGlides::landed(1);
+    let mut bank = DelayBank::<f64>::new(&mono(InterpolationMode::Linear), BINARY);
+    let mut glides = DelayGlides::<f64>::landed(1);
     bank.aim(&mut glides, &controls(20.0 / 1024.0, 0.0, 0.0));
     glides.settle();
     let mut x = vec![0.0f64; 64];

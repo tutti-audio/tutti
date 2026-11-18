@@ -113,7 +113,10 @@ const ONLY: &[(&str, &[&str])] = &[
     // channel layout a position ring is written in and the `Sample` formats the
     // audio-shaped structures are generic over.
     ("tutti-rt", &["tutti-units", "tutti-buffers"]),
-    ("tutti-midi-network", &["tutti-ump", "tutti-midi-device"]),
+    (
+        "tutti-midi-network",
+        &["tutti-ump", "tutti-midi-device", "tutti-units"],
+    ),
     ("tutti-metering", &["tutti-types", "tutti-units"]),
     // The encoders' worker threads (`spawn_named`), behind the `encode-flac` and
     // `encode-vorbis` features.

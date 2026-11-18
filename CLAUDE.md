@@ -48,6 +48,12 @@ std only. A rule the compiler already enforces is not a gate.
   CONTRIBUTING.md's checklist before it is queued; the review is recorded in its
   description. A reviewed PR with CI green and no open blocking finding is queued by its
   author.
+- **Stacked PRs:** a PR may sit on an open PR's branch when it needs that unmerged work
+  (three deep at most; each piece builds, passes and stays under the size limit against
+  its parent). Auto-merge is armed only once its base is main. Before queueing, merge
+  `origin/main` in, check `git diff origin/main...HEAD` shows only its own change, rerun
+  the gates and write baseline counts from the gate, never by picking a side. A parent
+  fix is made in the parent and merged up. Never delete a parent's branch by hand.
 
 ## Testing
 

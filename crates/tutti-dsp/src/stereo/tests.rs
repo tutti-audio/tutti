@@ -170,7 +170,7 @@ fn a_bad_width_is_refused_or_floored() {
 fn a_mono_view_is_not_widened() {
     let input = vec![vec![1.0f32; 4]];
     let mut out = vec![vec![7.0f32; 4]];
-    WidthBank::<f64>::new(SampleRate::SR_48K).process(
+    WidthBank::<f32>::new(SampleRate::SR_48K).process(
         Planes::from_vecs(&input).unwrap(),
         PlanesMut::from_vecs(&mut out).unwrap(),
     );

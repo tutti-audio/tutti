@@ -3,7 +3,7 @@ use tutti_buffers::{Planes, PlanesMut};
 use tutti_units::{Feedback, Hz, Real, SampleRate};
 
 use super::*;
-use crate::{Complex64, allpass_coeff};
+use crate::{Complex64, allpass_complement};
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -88,12 +88,17 @@ fn dft(h: &[f32], hz: f64, sr: f64) -> Complex64 {
         .sum()
 }
 
-/// The impulse response of a held chain of `stages` at coefficient `c` and feedback `g`,
-/// `len` frames long.
-fn held_response(stages: usize, c: f32, g: Feedback, len: usize) -> Vec<f32> {
+/// The complement `1 + c` of the coefficient `c` of a stage, the form a chain is given.
+fn complement(c: f64) -> f32 {
+    f32::from_design(1.0 + c)
+}
+
+/// The impulse response of a held chain of `stages` at the complement `a` of its coefficient
+/// and feedback `g`, `len` frames long.
+fn held_response(stages: usize, a: f32, g: Feedback, len: usize) -> Vec<f32> {
     run(
         stages,
-        &mut [Glide::landed(c)],
+        &mut [Glide::landed(a)],
         &mut Glide::landed(f32::from_unit(g)),
         &[impulse(len, 0)],
         64,
@@ -113,7 +118,7 @@ fn a_held_chain_is_flat_with_the_nth_power_of_a_stage_at_no_feedback() {
         let c = textbook_c(1_000.0, sr);
         let h = held_response(
             stages,
-            allpass_coeff(Hz(1_000.0), RATE),
+            allpass_complement(Hz(1_000.0), RATE),
             Feedback::NONE,
             8_192,
         );
@@ -139,7 +144,7 @@ fn a_held_chain_is_flat_with_the_nth_power_of_a_stage_at_no_feedback() {
 #[test]
 fn two_stages_invert_at_their_centre() {
     let sr = RATE.get();
-    let c = allpass_coeff(Hz(1_000.0), RATE);
+    let c = allpass_complement(Hz(1_000.0), RATE);
     let h = held_response(2, c, Feedback::NONE, 8_192);
     let g = dft(&h, 1_000.0, sr);
     assert!((g + 1.0).norm() < 1e-3, "H(f0) = {g}");
@@ -201,7 +206,7 @@ fn a_half_mix_of_the_chain_has_ceil_n_over_two_notches_where_the_phase_is_odd_pi
         }
         let h = held_response(
             stages,
-            allpass_coeff(Hz(700.0), RATE),
+            allpass_complement(Hz(700.0), RATE),
             Feedback::NONE,
             8_192,
         );
@@ -229,7 +234,7 @@ fn the_feedback_closes_the_loop_at_dc_and_nyquist_and_peaks_at_dc() {
         for q in [0.0, 0.5, 0.9, Feedback::MAX_STABLE.get()] {
             let g = Feedback(q);
             let len = if q > 0.95 { 262_144 } else { 16_384 };
-            let h = held_response(stages, allpass_coeff(Hz(900.0), RATE), g, len);
+            let h = held_response(stages, allpass_complement(Hz(900.0), RATE), g, len);
             let nyquist = if stages % 2 == 0 {
                 1.0 / (1.0 + q)
             } else {
@@ -295,7 +300,7 @@ fn the_feedback_response_is_the_closed_loop_of_the_stages() {
     let sr = RATE.get();
     let (stages, g) = (4usize, Feedback(0.8));
     let c = textbook_c(2_000.0, sr);
-    let h = held_response(stages, allpass_coeff(Hz(2_000.0), RATE), g, 16_384);
+    let h = held_response(stages, allpass_complement(Hz(2_000.0), RATE), g, 16_384);
     for hz in [0.0f64, 100.0, 1_500.0, 2_000.0, 5_000.0, 17_000.0, 24_000.0] {
         let got = dft(&h, hz, sr);
         let want = textbook(stages, c, g.get(), hz, sr);
@@ -314,7 +319,7 @@ fn feedback_rings_as_a_train_of_the_loop_length() {
         (5, Feedback(0.9)),
         (12, Feedback::MAX_STABLE),
     ] {
-        let y = held_response(stages, 0.0, g, 80);
+        let y = held_response(stages, complement(0.0), g, 80);
         for (i, &s) in y.iter().enumerate() {
             let want = if i >= stages && (i - stages) % (stages + 1) == 0 {
                 g.get()
@@ -335,15 +340,16 @@ fn feedback_rings_as_a_train_of_the_loop_length() {
 
 /// A coefficient glide is read at the step after the ones taken: an impulse at frame `n`
 /// of a fresh two-stage chain with no feedback comes out as the square of that frame's
-/// coefficient (`out = c (in - y1) + x1` with no history), which is the glide's step `n + 1`
+/// coefficient (`out = c (in - y1) + x1` with no history, the glide running on `1 + c`), which
+/// is the glide's step `n + 1`
 /// (`from + (to - from) (n + 1) / 16`, and `to` from the sixteenth step on), whatever the blocks.
 #[test]
 fn a_coefficient_glide_is_read_a_step_ahead_and_lands_exactly() {
     let (from, to) = (0.2f32, -0.5f32);
     for n in [0usize, 1, 7, 14, 15, 16, 17, 31] {
         for block in [1, 5, 64] {
-            let mut glide = Glide::landed(from);
-            glide.aim_in(to, 16);
+            let mut glide = Glide::landed(complement(f64::from(from)));
+            glide.aim_in(complement(f64::from(to)), 16);
             let y = run(
                 2,
                 &mut [glide],
@@ -373,7 +379,14 @@ fn a_feedback_glide_is_read_a_step_ahead_and_lands_exactly() {
     for (steps, want) in [(240u32, 0.2 + 0.6 * 4.0 / 240.0), (2, 0.8)] {
         let mut fb = Glide::landed(0.2f32);
         fb.aim_in(0.8, steps);
-        let y = run(2, &mut [Glide::landed(0.0)], &mut fb, &[impulse(8, 0)], 3).remove(0);
+        let y = run(
+            2,
+            &mut [Glide::landed(complement(0.0))],
+            &mut fb,
+            &[impulse(8, 0)],
+            3,
+        )
+        .remove(0);
         assert!(
             (f64::from(y[5]) - want).abs() < 1e-6,
             "{steps} steps: {}, want {want}",
@@ -403,8 +416,8 @@ fn a_silent_channel_stays_silent_and_each_channel_keeps_its_own_state() {
         x.clone(),
         noise(6),
     ];
-    let a = allpass_coeff(Hz(1_000.0), RATE);
-    let b = allpass_coeff(Hz(2_500.0), RATE);
+    let a = allpass_complement(Hz(1_000.0), RATE);
+    let b = allpass_complement(Hz(2_500.0), RATE);
     let mut coefficients = [a, b, a, a, a, a].map(Glide::landed);
     let out = run(6, &mut coefficients, &mut Glide::landed(0.99), &audio, 64);
     assert!(out[3].iter().all(|&s| s == 0.0), "no bleed into a silence");
@@ -417,7 +430,7 @@ fn a_silent_channel_stays_silent_and_each_channel_keeps_its_own_state() {
 /// Reset is silence: after a loud stretch and a reset, silence in is exactly silence out.
 #[test]
 fn reset_empties_the_chain() {
-    let c = allpass_coeff(Hz(1_000.0), RATE);
+    let c = allpass_complement(Hz(1_000.0), RATE);
     let mut chain = PhaserChain::new(Stages::of(6), ChannelLayout::clamped(2));
     let mut coefficients = [Glide::landed(c); 2];
     let mut fb = Glide::landed(0.9);
@@ -438,7 +451,7 @@ fn reset_empties_the_chain() {
 /// A clone is the chain with its history: it carries on where the original is.
 #[test]
 fn a_clone_continues_where_the_original_is() {
-    let c = allpass_coeff(Hz(1_000.0), RATE);
+    let c = allpass_complement(Hz(1_000.0), RATE);
     let mut chain = PhaserChain::new(Stages::of(4), ChannelLayout::clamped(1));
     let mut coefficients = [Glide::landed(c)];
     let mut fb = Glide::landed(0.5);
@@ -455,26 +468,6 @@ fn a_clone_continues_where_the_original_is() {
     let b = run_on(&mut copy, &mut coefficients, &mut fb, &silence, 64);
     assert_eq!(a, b);
     assert!(a[0].iter().any(|&s| s != 0.0));
-}
-
-/// The chain is generic over the sample format: an `f64` impulse gives the `f32` figure.
-#[test]
-fn an_f64_signal_runs_through_the_same_chain() {
-    let c = allpass_coeff(Hz(1_000.0), RATE);
-    let want = held_response(2, c, Feedback::NONE, 64);
-    let mut chain = PhaserChain::new(Stages::of(2), ChannelLayout::clamped(1));
-    let mut x = vec![0.0f64; 64];
-    x[0] = 1.0;
-    let mut y = vec![0.0f64; 64];
-    chain.process(
-        &mut [Glide::landed(c)],
-        &mut Glide::landed(0.0),
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-    );
-    for (got, want) in y.iter().zip(&want) {
-        assert!((*got - f64::from(*want)).abs() < 1e-6);
-    }
 }
 
 // ---- the checked constants --------------------------------------------------
@@ -540,15 +533,16 @@ fn a_sweep_range_of_a_transposed_pair_panics_where_it_is_a_constant() {
     let _ = SweepRange::of(Hz(4_000.0), Hz(200.0));
 }
 
-/// An `f64` chain keeps its state and its coefficient in `f64`: with the coefficient `a`
-/// held (a design in `f64`, which an `f32` cannot hold) three stages in cascade with feedback
-/// `g` are, per frame, `u[n] = x[n] + g y[n - 1]` through `s[n] = a u[n] + u[n - 1] - a s[n -
-/// 1]` three times, the stage's own difference equation computed in `f64`, to 2^-45.
+/// An `f64` chain keeps its state and its coefficient in `f64`: with the complement `a` held
+/// (a design in `f64`, which an `f32` cannot hold) and `c = a - 1`, three stages in cascade with
+/// feedback `g` are, per frame, `u[n] = x[n] + g y[n - 1]` through `s[n] = c (u[n] - s[n - 1])
+/// + u[n - 1]` three times, the stage's own difference equation computed in `f64`, to 2^-45.
 #[test]
 fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let (stages, len, g) = (3usize, 300usize, 0.5f64);
-    let a: f64 = allpass_coeff(Hz(1_000.0), RATE);
+    let a: f64 = allpass_complement(Hz(1_000.0), RATE);
+    let c = a - 1.0;
     assert_ne!(
         a,
         f64::from(a as f32),
@@ -561,7 +555,7 @@ fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
     for n in 0..len {
         let mut u = x[n] + g * last;
         for (x1, y1) in &mut state {
-            let s = a * u + *x1 - a * *y1;
+            let s = c * (u - *y1) + *x1;
             (*x1, *y1) = (u, s);
             u = s;
         }
@@ -579,4 +573,90 @@ fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
         PlanesMut::new(&mut [&mut y[..]]).unwrap(),
     );
     assert_close_f64(&y, &want, 2.0f64.powi(-45));
+}
+
+/// A held two-stage `f32` chain at its lowest sweeps, 20 Hz ([`SweepRange::FLOOR`]) and up to
+/// 40 Hz, at 192 kHz inverts a sine at the centre: a stage is a quarter turn there, so `H(f0)
+/// = -1`, and the steady state is `y = -x`. The centre is within `2 t` of -1 in the coefficient
+/// (`t = tan(pi f0 / 192000) = 3.3e-4` at 20 Hz, `a = 2 t / (1 + t)` = 6.5e-4), so an `f32`
+/// coefficient `c` rounds to `2^-25` of 6.5e-4, a relative 4.6e-5 of the pole offset at worst.
+/// The chain holds the complement `a`, designed in `f64`, and the stage `y1 + ((x1 - x) + a (x -
+/// y1))` adds its small terms first.
+///
+/// The bound is the roundoff noise: each stage's final sum rounds to within half an ulp of a
+/// value under 1, at most `2^-25` (the ulp of `[0.5, 1)` is `2^-24`). The bound takes the error
+/// uniform on `+-2^-24`, a full ulp either way, so it is conservative by a factor of 2, with
+/// deviation `sigma_r = 2^-24 / sqrt(3)`; the pole at `1 - a` carries that into the state with
+/// the gain `1 / (a (2 - a))` in variance, and the two stages add. The worst of `N = 19 200`
+/// frames is `1.5 sqrt(2 ln N)` deviations (`sqrt(2 ln N)` is the Gaussian maximum of `N`
+/// samples, and 1.5 covers the noise being coloured by the pole, whose samples are correlated
+/// and not Gaussian), plus `4 * 2^-24` for the coefficient and the input's
+/// own rounding. The old stored form `c`, swept over the same centres, is over twice the
+/// largest bound at its worst (measured 6.4e-5 against a bound of 9.2e-6; the chain's own worst
+/// is 2.3e-6).
+#[test]
+fn an_f32_chain_at_its_lowest_sweeps_at_192_khz_inverts_a_sine_at_the_centre() {
+    let rate = SampleRate::SR_192K;
+    let (settle, n) = (32_000, 19_200);
+    let (mut worst_new, mut worst_old, mut worst_bound) = (0.0f64, 0.0f64, 0.0f64);
+    for k in 0..12 {
+        let f0 = Hz(SweepRange::FLOOR.get() * (1.0 + f64::from(k) / 11.0));
+        let x: Vec<f32> = (0..settle + n)
+            .map(|i| {
+                f32::from_design(libm::sin(
+                    std::f64::consts::TAU * f0.get() * i as f64 / rate.get(),
+                ))
+            })
+            .collect();
+        let a: f32 = allpass_complement(f0, rate);
+        let y = run(
+            2,
+            &mut [Glide::landed(a)],
+            &mut Glide::landed(0.0),
+            std::slice::from_ref(&x),
+            512,
+        )
+        .remove(0);
+        let new = (settle..settle + n)
+            .map(|i| f64::from(y[i] + x[i]).abs())
+            .fold(0.0, f64::max);
+
+        let a64 = f64::from(a);
+        let sigma_r = 2f64.powi(-24) / 3f64.sqrt();
+        let sigma = (2.0 * sigma_r * sigma_r / (a64 * (2.0 - a64))).sqrt();
+        let bound = 1.5 * (2.0 * (n as f64).ln()).sqrt() * sigma + 4.0 * 2f64.powi(-24);
+        assert!(
+            new <= bound,
+            "{f0:?}: the chain's worst {new} over its bound {bound}"
+        );
+
+        // The textbook form: the coefficient `c = (t - 1) / (t + 1)` stored in `f32`, the stage
+        // `c (x - y1) + x1`.
+        let t = libm::tan(std::f64::consts::PI * f0.get() / rate.get());
+        let c = ((t - 1.0) / (t + 1.0)) as f32;
+        let mut state = [(0.0f32, 0.0f32); 2];
+        let old = x
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| {
+                let mut v = x;
+                for (x1, y1) in &mut state {
+                    let out = c * (v - *y1) + *x1;
+                    (*x1, *y1) = (v, out);
+                    v = out;
+                }
+                (i, f64::from(v + x).abs())
+            })
+            .filter(|&(i, _)| i >= settle)
+            .fold(0.0, |w, (_, e)| w.max(e));
+        (worst_new, worst_old, worst_bound) = (
+            worst_new.max(new),
+            worst_old.max(old),
+            worst_bound.max(bound),
+        );
+    }
+    assert!(
+        worst_old > 2.0 * worst_bound,
+        "the stored coefficient's worst error {worst_old} against the bound {worst_bound} (chain {worst_new})"
+    );
 }
