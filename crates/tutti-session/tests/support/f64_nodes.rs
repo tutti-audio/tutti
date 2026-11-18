@@ -35,6 +35,7 @@ impl<F: Float> Node<F> for Gain {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+        // A param cell holds an `f32` level.
         let gain = F::from_f64(f64::from(self.0.load().get()));
         let (ins, mut outs) = io.split();
         for (o, i) in outs.get(0).iter_mut().zip(ins.get(0)) {
