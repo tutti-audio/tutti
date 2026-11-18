@@ -38,7 +38,11 @@ use tutti_types::Seconds;
 
 const SR: f64 = 44_100.0;
 /// One LSB at 16-bit in the [-1, 1] float domain.
-const LSB16: f32 = 1.0 / 32_767.0;
+const LSB16: f32 = 1.0 / 32_768.0;
+/// The level of the 16-bit cases: 8191.75 integer steps, exact in `f32`. A
+/// quarter step below a code, so a half-step of dither crosses the rounding
+/// boundary and the noise is visible in the integers.
+const LEVEL: f32 = 8_191.75 / 32_768.0;
 
 /// `g`, built for an export at [`SR`] — the rate every config here
 /// renders at (a graph prepared at another is refused, not re-rated).
@@ -100,7 +104,7 @@ fn render_i16(dither: Option<DitherShape>, level: f32, path: &std::path::Path) -
 #[test]
 fn dither_off_leaves_a_constant_perfectly_flat() {
     let d = tempfile::tempdir().unwrap();
-    let samples = render_i16(None, 0.25, &d.path().join("off.wav"));
+    let samples = render_i16(None, LEVEL, &d.path().join("off.wav"));
 
     let first = samples[0];
     assert!(
@@ -115,7 +119,7 @@ fn dither_off_leaves_a_constant_perfectly_flat() {
     );
     assert_eq!(
         first,
-        IntDepth::Int16.quantize(0.25),
+        IntDepth::Int16.quantize(LEVEL),
         "undithered quantization must match the engine's canonical converter"
     );
 }
@@ -132,7 +136,7 @@ fn both_dither_modes_perturb_a_constant() {
         Some(DitherShape::Rectangular),
         Some(DitherShape::Triangular),
     ] {
-        let samples = render_i16(mode, 0.25, &d.path().join(format!("{mode:?}.wav")));
+        let samples = render_i16(mode, LEVEL, &d.path().join(format!("{mode:?}.wav")));
         let distinct = {
             let mut v = samples.clone();
             v.sort_unstable();
@@ -158,10 +162,14 @@ fn rectangular_and_triangular_are_not_the_same_mode() {
     let d = tempfile::tempdir().unwrap();
     let rect = render_i16(
         Some(DitherShape::Rectangular),
-        0.25,
+        LEVEL,
         &d.path().join("r.wav"),
     );
-    let tri = render_i16(Some(DitherShape::Triangular), 0.25, &d.path().join("t.wav"));
+    let tri = render_i16(
+        Some(DitherShape::Triangular),
+        LEVEL,
+        &d.path().join("t.wav"),
+    );
 
     assert_eq!(rect.len(), tri.len(), "same config, same length");
     assert!(
@@ -186,7 +194,7 @@ fn each_mode_spans_the_width_its_distribution_implies() {
         (Some(DitherShape::Rectangular), 2),
         (Some(DitherShape::Triangular), 3),
     ] {
-        let samples = render_i16(mode, 0.25, &d.path().join(format!("span_{mode:?}.wav")));
+        let samples = render_i16(mode, LEVEL, &d.path().join(format!("span_{mode:?}.wav")));
         let lo = *samples.iter().min().unwrap();
         let hi = *samples.iter().max().unwrap();
         let span = hi - lo + 1;
@@ -214,8 +222,8 @@ fn each_mode_spans_the_width_its_distribution_implies() {
 #[test]
 fn dither_does_not_bias_the_signal() {
     let d = tempfile::tempdir().unwrap();
-    let level = 0.25f32;
-    let exact = level * 32_767.0; // the unquantized target, in integer units
+    let level = LEVEL;
+    let exact = level * 32_768.0; // the unquantized target, in integer units
 
     for mode in [
         Some(DitherShape::Rectangular),
@@ -256,8 +264,8 @@ fn dither_does_not_bias_the_signal() {
 #[test]
 fn triangular_noise_carries_more_variance_than_rectangular() {
     let d = tempfile::tempdir().unwrap();
-    let level = 0.25f32;
-    let exact = (level * 32_767.0) as f64;
+    let level = LEVEL;
+    let exact = (level * 32_768.0) as f64;
 
     let variance = |samples: &[i32]| -> f64 {
         let n = samples.len() as f64;
@@ -355,7 +363,7 @@ fn noise_scales_with_the_target_bit_depth() {
         .map(|s| s.unwrap())
         .collect();
 
-    let exact = level * 8_388_607.0;
+    let exact = level * 8_388_608.0;
     let max_dev = samples
         .iter()
         .map(|&s| (s as f32 - exact).abs())
@@ -378,7 +386,7 @@ fn noise_scales_with_the_target_bit_depth() {
     // Sanity: the 16-bit LSB is 256x coarser, so the same noise expressed in
     // float terms must be far below it.
     assert!(
-        max_dev / 8_388_607.0 < LSB16,
+        max_dev / 8_388_608.0 < LSB16,
         "24-bit dither noise is as loud as a 16-bit LSB — wrong depth"
     );
 }

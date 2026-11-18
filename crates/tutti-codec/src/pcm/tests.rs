@@ -1,72 +1,62 @@
 use super::*;
 
-/// Each integer converter maps 0 to 0, the unit endpoints to the depth's
-/// full-scale code (`2^(bits-1) - 1`, symmetric: -full scale is not used), and
-/// clamps anything beyond them to the rail.
+/// Each depth maps 0 to 0, +1.0 to `MAX` (it clips), -1.0 to `MIN` (exact),
+/// and clips anything beyond them to the rail: the rule in `Sample`.
 #[test]
-fn integer_converters_clamp_to_the_rail_at_every_depth() {
-    let depths: [(&str, fn(f32) -> i32, i32); 2] = [
-        ("i16", |s| i32::from(f32_to_i16(s)), 32_767),
-        ("i24", f32_to_i24, 8_388_607),
-    ];
-    for (depth, convert, full) in depths {
-        assert_eq!(convert(0.0), 0, "{depth}");
-        assert_eq!(convert(1.0), full, "{depth}");
-        assert_eq!(convert(-1.0), -full, "{depth}");
-        assert_eq!(convert(1.5), full, "{depth}: above the rail");
-        assert_eq!(convert(-1.5), -full, "{depth}: below the rail");
+fn quantize_clips_to_the_rails_at_every_depth() {
+    for (depth, bits) in [(IntDepth::Int16, 16u32), (IntDepth::Int24, 24)] {
+        let max = (1i32 << (bits - 1)) - 1;
+        assert_eq!(depth.quantize(0.0f32), 0, "{depth:?}");
+        assert_eq!(depth.quantize(1.0f32), max, "{depth:?}");
+        assert_eq!(depth.quantize(-1.0f32), -max - 1, "{depth:?}");
+        assert_eq!(depth.quantize(1.5f32), max, "{depth:?}: above the rail");
+        assert_eq!(depth.quantize(-1.5f32), -max - 1, "{depth:?}: below");
+        assert_eq!(depth.quantize(f32::NAN), 0, "{depth:?}: NaN is silence");
     }
 }
 
-/// Rounding, not truncation: 0.7 x 32767 = 22936.9 is 22937. The endpoints
-/// agree under both, which is how a truncating converter survives unnoticed.
+/// Rounding half to even at the scale `2^(n-1)`: 0.7 x 32768 = 22937.6 is
+/// 22938, and the half-way 1.5 / 32768 is the even 2.
 #[test]
-fn quantization_rounds_to_nearest() {
-    assert_eq!(f32_to_i16(0.7), 22937);
-    assert_eq!(f32_to_i16(-0.7), -22937);
-    assert_eq!(Pcm::Int16.quantize(0.7), Sample::I16(22937));
+fn quantization_rounds_half_to_even() {
+    assert_eq!(IntDepth::Int16.quantize(0.7f64), 22938);
+    assert_eq!(IntDepth::Int16.quantize(-0.7f64), -22938);
+    assert_eq!(IntDepth::Int16.quantize(0.5 / 32768.0f64), 0);
+    assert_eq!(IntDepth::Int16.quantize(1.5 / 32768.0f64), 2);
 }
 
-/// `quantize` dispatches to the converters, at every width, endpoints
-/// included, since clamping is where a wrong arm shows up first.
+/// An integer in the depth's own format passes through unchanged.
 #[test]
-fn quantize_agrees_with_the_converters_at_every_width() {
-    for &s in &[0.0f32, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5] {
-        assert_eq!(Pcm::Int16.quantize(s), Sample::I16(f32_to_i16(s)), "{s}");
-        assert_eq!(Pcm::Int24.quantize(s), Sample::I24(f32_to_i24(s)), "{s}");
-        assert_eq!(Pcm::Float32.quantize(s), Sample::F32(s), "{s}");
-        assert_eq!(IntDepth::Int16.quantize(s), i32::from(f32_to_i16(s)), "{s}");
-        assert_eq!(IntDepth::Int24.quantize(s), f32_to_i24(s), "{s}");
+fn an_integer_of_the_depths_own_format_is_exact() {
+    for v in [i16::MIN, -1, 0, 1, i16::MAX] {
+        assert_eq!(IntDepth::Int16.quantize(v), i32::from(v));
     }
+    assert_eq!(IntDepth::Int24.quantize(I24::of(-8_388_608)), -8_388_608);
 }
 
-/// Each width produces its own variant, so a writer's `match` cannot write
-/// 16-bit samples into a 24-bit file. 0.5 is exact at every width, so any
-/// difference is the width's, not rounding's.
 #[test]
-fn each_width_is_distinguishable_at_the_call_site() {
-    assert_eq!(Pcm::Int16.quantize(0.5), Sample::I16(16384));
-    assert_eq!(Pcm::Int24.quantize(0.5), Sample::I24(4194304));
-    assert_eq!(Pcm::Float32.quantize(0.5), Sample::F32(0.5));
+fn each_width_names_its_bits_and_integer_depth() {
     assert_eq!(
-        [Pcm::Int16.bits(), Pcm::Int24.bits(), Pcm::Float32.bits()],
-        [16, 24, 32]
+        [
+            Pcm::Int16.bits(),
+            Pcm::Int24.bits(),
+            Pcm::Float32.bits(),
+            Pcm::Float64.bits()
+        ],
+        [16, 24, 32, 64]
     );
     assert_eq!(Pcm::Int16.int_depth(), Some(IntDepth::Int16));
     assert_eq!(Pcm::Int24.int_depth(), Some(IntDepth::Int24));
-    assert_eq!(
-        Pcm::Float32.int_depth(),
-        None,
-        "float is the one width that does not quantize"
-    );
+    assert_eq!(Pcm::Float32.int_depth(), None);
+    assert_eq!(Pcm::Float64.int_depth(), None);
     assert_eq!(Pcm::from(IntDepth::Int16), Pcm::Int16);
     assert_eq!(Pcm::from(IntDepth::Int24).bits(), IntDepth::Int24.bits());
 }
 
-/// One LSB is `2^-(bits - 1)`, derived from the width and not read back from
-/// the formula: 16 bit is 2^-15, 24 bit is 2^-23.
+/// One LSB is the format's step, `2^-(bits - 1)`: 16 bit is 2^-15, 24 bit is
+/// 2^-23.
 #[test]
-fn the_lsb_is_the_reciprocal_of_full_scale() {
+fn the_lsb_is_one_step_of_the_depth() {
     assert_eq!(IntDepth::Int16.lsb().0, 1.0 / 32768.0);
     assert_eq!(IntDepth::Int24.lsb().0, 1.0 / 8_388_608.0);
 }

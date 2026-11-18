@@ -11,7 +11,8 @@ use tutti_nodes::testing::Const;
 use tutti_session::{Bounce, DitherShape, Range, Root, Session};
 use tutti_types::{ChannelLayout, SampleRate, Seconds};
 
-const LEVEL: f32 = 0.3;
+/// 9830.1 steps of 16 bit: a tenth of a step off a code.
+const LEVEL: f32 = 9_830.1 / 32_768.0;
 
 /// The 16-bit samples of a bounce of a constant `LEVEL`, as `configure` sets
 /// its dither.
@@ -55,7 +56,7 @@ fn no_dither_writes_the_plain_quantization() {
 
 /// The mean squared distance of `samples` from the exact level, in steps.
 fn error_power(samples: &[i32]) -> f64 {
-    let exact = f64::from(LEVEL) * 32_767.0;
+    let exact = f64::from(LEVEL) * 32_768.0;
     samples
         .iter()
         .map(|&s| (f64::from(s) - exact).powi(2))

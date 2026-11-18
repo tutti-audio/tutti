@@ -45,7 +45,7 @@ use crate::writer::FormatWriter;
 use std::io::{Seek, Write};
 use std::num::{NonZeroU8, NonZeroU32};
 use std::sync::{Arc, Mutex, mpsc};
-use tutti_buffers::{Interleaved, PlanesMut, deinterleave};
+use tutti_buffers::{Interleaved, PlanesMut, Sample, deinterleave};
 use tutti_rt::{ThreadHandle, spawn_named};
 use tutti_types::{ChannelLayout, Speaker};
 use vorbis_rs::{VorbisBitrateManagementStrategy, VorbisEncoder, VorbisEncoderBuilder};
@@ -154,7 +154,7 @@ impl<W: Write + Seek + Send + 'static> FormatWriter for VorbisWriter<W> {
 
     /// A failure on the encoder thread reaches the first `write` after it, or
     /// `finish`; after it the thread discards blocks.
-    fn write(&mut self, block: Interleaved<'_>) -> Result<()> {
+    fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         if let Some(e) = self.take_failure() {
             return Err(e);
         }
@@ -167,7 +167,7 @@ impl<W: Write + Seek + Send + 'static> FormatWriter for VorbisWriter<W> {
         }
         let mut samples = self.spare.try_recv().unwrap_or_default();
         samples.clear();
-        samples.extend_from_slice(block.samples());
+        samples.extend(block.samples().iter().map(|&s| s.convert_to::<f32>()));
         match self.jobs.as_ref().map(|jobs| jobs.send(samples)) {
             Some(Ok(())) => Ok(()),
             _ => Err(self.take_failure().unwrap_or_else(stopped)),

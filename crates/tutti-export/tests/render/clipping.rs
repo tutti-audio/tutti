@@ -84,12 +84,12 @@ fn max_code(path: &std::path::Path) -> i64 {
         .unwrap()
 }
 
-/// A peak normalized to 0 dBTP at an integer depth, with dither, clips nothing
-/// and never reaches the saturating code: the target is pulled down to one LSB
-/// plus the dither amplitude below full scale (1, 1.5 or 2 LSB), so the crest
-/// plus its dither stays at or under `full - 1` (for one LSB of headroom with
-/// triangular dither, a crest plus noise reaches `full`). Every depth and
-/// dither. The target the gain lands the measured peak on is the clamped figure.
+/// A peak normalized to 0 dBTP at an integer depth, with dither, clips nothing:
+/// the target is pulled down to one LSB plus the dither amplitude below full
+/// scale (1, 1.5 or 2 LSB), so the crest plus its dither stays at or under the
+/// top code (the top code is a value, not a clip: `clipped_samples` is 0). Every
+/// depth and dither. The target the gain lands the measured peak on is the
+/// clamped figure.
 #[test]
 fn a_zero_dbtp_target_leaves_an_integer_format_its_headroom() {
     let dir = tempfile::tempdir().unwrap();
@@ -111,8 +111,8 @@ fn a_zero_dbtp_target_leaves_an_integer_format_its_headroom() {
             assert_eq!(written.clipped_samples, 0, "{pcm:?} {dither:?}");
             let full = (1i64 << (bits - 1)) - 1;
             assert!(
-                max_code(&path) < full,
-                "{pcm:?} {dither:?}: reached the saturating code"
+                max_code(&path) <= full,
+                "{pcm:?} {dither:?}: past the top code"
             );
             let want = (20.0 * (1.0 - lsbs / f64::from(1u32 << (bits - 1))).log10()) as f32;
             // The effective target is where the measured peak lands under the

@@ -36,8 +36,9 @@
 //!   signature or an error. `can_decode` and `decodable_extensions` say what this
 //!   build reads. Each `decode-*` feature (`decode-wav`, `decode-flac`,
 //!   `decode-mp3`, `decode-ogg`) pulls exactly one container.
-//! - `Pcm`, `IntDepth` and `Sample` are the sample widths and the one quantization
-//!   every container shares.
+//! - `Pcm` and `IntDepth` are the sample widths a file holds. An encoder takes a block
+//!   in any `tutti_buffers::Sample` format and converts it by that trait's rule, the
+//!   one conversion every container shares.
 //!
 //! ## What this crate does not own
 //!
@@ -95,7 +96,7 @@ pub use file_out::FileOut;
 #[cfg(feature = "encode-flac")]
 pub use flac::FlacWriter;
 pub use format::{FlacLevel, Format, Quality, QualityOutOfRange};
-pub use pcm::{IntDepth, Pcm, Sample};
+pub use pcm::{IntDepth, Pcm};
 pub use spec::Spec;
 #[cfg(feature = "encode-vorbis")]
 pub use vorbis::VorbisWriter;

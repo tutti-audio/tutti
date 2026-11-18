@@ -1,7 +1,7 @@
 //! The contract every format's writer keeps.
 
 use crate::error::Result;
-use tutti_buffers::Interleaved;
+use tutti_buffers::{Interleaved, Sample};
 
 /// A `FormatWriter` writes blocks of interleaved samples into its sink as one
 /// file of its format.
@@ -27,13 +27,15 @@ pub trait FormatWriter: Sized {
     /// The sink the file is written to, handed back by [`finish`](Self::finish).
     type Sink;
 
-    /// Writes one block. An empty block writes nothing.
+    /// Writes one block of any [`Sample`] format, converting each value to the
+    /// file's width by the rule in [`Sample`]; a block already in the file's
+    /// format is written as it is. An empty block writes nothing.
     ///
     /// # Errors
     ///
     /// The sink's failure, or the codec's refusal of the block. After an error
     /// the file is not a complete take.
-    fn write(&mut self, block: Interleaved<'_>) -> Result<()>;
+    fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()>;
 
     /// Closes the file: back-patches its sizes and flushes the sink, which is
     /// returned positioned at the end of the file.
