@@ -778,9 +778,11 @@ mod tests {
 
     /// An `f32` node holds its crossover in `f32`. A 4-band tree has 3 splits of 3 sections each
     /// (the shared first stage and the two second stages) and 3 all-passes (one per band split
-    /// off before a later split): 12 sections. Each rounds its state and its tap at most once a
-    /// frame, twice each at a half-ulp of `2^-24` of a value of at most 1, so the unit-magnitude
-    /// sum is within `12 * 4 * 2^-24` (2.9e-6) of 1.
+    /// off before a later split): 12 sections. Each rounds its state and its tap at most four
+    /// times a frame at a half-ulp of `2^-24` of a value of at most 1, and a section is a
+    /// recursive integrator whose state carries a rounding with a gain of up to `1 / g`, `g` the
+    /// prewarped integrator gain `tan(pi fc / fs)` of the lowest split (120 Hz): the
+    /// unit-magnitude sum is within `12 * 4 * 2^-24 / g` of 1.
     #[test]
     fn an_f32_node_sums_its_bands_within_the_rounding_of_its_sections() {
         let n = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, 4).unwrap();
@@ -788,7 +790,8 @@ mod tests {
         unity(&c);
         let mut n = prepared(n);
         let a = gain_at(&mut n, 185.0);
-        let bound = 12.0 * 4.0 * 2f64.powi(-24);
+        let g = (std::f64::consts::PI * 120.0 / FS).tan();
+        let bound = 12.0 * 4.0 * 2f64.powi(-24) / g;
         assert!((a - 1.0).abs() < bound, "{a}");
     }
 
