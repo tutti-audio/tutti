@@ -43,13 +43,17 @@ impl IntDepth {
     /// One least significant bit in the `[-1, 1]` float domain: the format's
     /// [`Sample::STEP`]. The size dither noise is scaled to before this depth
     /// quantizes.
+    ///
+    /// # Panics
+    ///
+    /// Never: both integer formats define a step.
     #[must_use]
     pub fn lsb(self) -> Amplitude {
         let step = match self {
             Self::Int16 => i16::STEP,
             Self::Int24 => I24::STEP,
         };
-        step.map_or(Amplitude::SILENT, |step| Amplitude(step as f32))
+        Amplitude::new(step.expect("an integer format has a step") as f32)
     }
 
     /// One sample as this depth's integer, by the rule in [`Sample`]: scaled
