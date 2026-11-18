@@ -57,9 +57,9 @@ use support::corpus::{
 use support::probe_au::{Misbehaviour, NOT_CALLED, last_host_pull};
 
 use tutti_au_host::{AuError, TransportInfo, TransportState};
+use tutti_music::LoopRange;
+use tutti_music::TimeSignature;
 use tutti_plugin_types::LoopRegion;
-use tutti_types::LoopRange;
-use tutti_types::TimeSignature;
 use tutti_units::BarNumber;
 use tutti_units::{Beat, Bpm, Samples, Seconds};
 

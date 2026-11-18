@@ -221,8 +221,8 @@ pub fn to_process_context(
 mod tests {
     use super::ProcessContextRequirements as need;
     use super::*;
+    use tutti_music::LoopRange;
     use tutti_plugin_types::{BeatsPerBar, LoopRegion, NoteValue, TimeSignature};
-    use tutti_types::LoopRange;
     use tutti_units::{Beat, Bpm, SampleRate};
     use vst3::Steinberg::Vst::ProcessContext_::StatesAndFlags_;
 

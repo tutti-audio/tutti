@@ -25,7 +25,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use tutti_curve::Law;
-use tutti_types::Adsr;
+use tutti_music::Adsr;
 use tutti_units::{
     Ballistics, Beat, BeatsPerCycle, Depth, ParamAddr, PhaseIncrement, PlayReading, SamplePosition,
     SampleRate, Samples, Seconds,

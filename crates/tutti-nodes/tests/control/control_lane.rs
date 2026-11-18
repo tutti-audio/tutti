@@ -22,8 +22,9 @@ use tutti_modulation::{
     Amount, Clock, ControlProgram, Curve, DepthBy, InputLayer, Layer, LayerId, LfoShape,
     PeriodPoint, Polarity, RateAnchor, SourceId, Waveform,
 };
+use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
-use tutti_types::{AtomicF32, ChannelLayout, FrameClock};
+use tutti_types::{AtomicF32, ChannelLayout};
 use tutti_units::{
     Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, ParamId, ParamKey, Phase, PhaseIncrement,
     SampleRate, Samples, UnitParam,

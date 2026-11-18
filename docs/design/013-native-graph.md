@@ -2557,7 +2557,7 @@ the default. Now a forked disk voice plays its file:
   reverse refill does. The butler's PDC preroll is not applied (the fork's
   graph compensates itself).
 - **Whole frames land exactly.** Two rules, both needed in general, either
-  enough for a clip placed on a beat: `tutti_types::snap_to_whole_frame`
+  enough for a clip placed on a beat: `tutti_music::snap_to_whole_frame`
   (next to `FRAME_TOLERANCE`, the same tolerance) lands a gate position
   within it of a whole frame on that frame — back through seconds, frame 128
   at 120 BPM / 48 kHz came out 127.99999999999 — and `tap_indices` reads a

@@ -16,8 +16,8 @@
 //! silence at the end to push the real tail out.
 
 use super::{FftResampler, ResampleError};
-use rustfft::FftNum;
-use tutti_buffers::{Float, Planes, PlanesMut};
+use crate::FftFloat;
+use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
@@ -172,7 +172,7 @@ const MAX_FLUSH_BLOCK: usize = 1 << 20;
 /// Owns its own input carry, so callers hand it whatever block size they
 /// have and it emits output whenever the converter has a chunk ready.
 #[derive(Debug)]
-pub struct StreamingResampler<F: Float + FftNum = f32> {
+pub struct StreamingResampler<F: FftFloat = f32> {
     inner: FftResampler<F>,
     ratio: f64,
     /// Input frames per channel, consumed up to `head`.
@@ -197,7 +197,7 @@ pub struct StreamingResampler<F: Float + FftNum = f32> {
     out_scratch: Vec<Vec<F>>,
 }
 
-impl<F: Float + FftNum> StreamingResampler<F> {
+impl<F: FftFloat> StreamingResampler<F> {
     /// Both rates are [`SampleRate`], which every caller already holds;
     /// the narrowing to the converter's integer rates happens once, here,
     /// at its boundary.

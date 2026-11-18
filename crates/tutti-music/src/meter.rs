@@ -10,7 +10,7 @@
 //!
 //! ```
 //! use tutti_units::BarNumber;
-//! use tutti_types::{BeatsPerBar, Meter, MeterChange, MeterMap, TimeSignature};
+//! use tutti_music::{BeatsPerBar, Meter, MeterChange, MeterMap, TimeSignature};
 //! use tutti_units::{Beat, BeatDuration};
 //!
 //! // 4/4 for two bars, then 7/8.

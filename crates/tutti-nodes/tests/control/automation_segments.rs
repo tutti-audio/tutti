@@ -29,8 +29,9 @@ use tutti_graph::{
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::ControlProgram;
 use tutti_modulation::Curve;
+use tutti_music::{FrameClock, LoopRange};
 use tutti_nodes::automation::ControlLaneNode;
-use tutti_types::{ChannelLayout, FrameClock, LoopRange};
+use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Hz, ParamKey, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;

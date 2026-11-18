@@ -144,7 +144,7 @@ impl PitchClass {
 ///
 /// ```
 /// use tutti_units::{Hz, Semitones};
-/// use tutti_types::{Note, PitchClass};
+/// use tutti_music::{Note, PitchClass};
 ///
 /// let a4 = Note::try_from(69u8).unwrap();
 /// assert_eq!(a4, Note::A4);

@@ -387,7 +387,7 @@ mod tests {
         let rate = SampleRate::SR_48K;
         let mut solo = Solo::new(node, Prepare::new(rate, MaxBlock::of(Samples(256))));
         solo.renderer_mut().set_transport_fn(move |frame| {
-            let mut clock = tutti_types::FrameClock::new(transport.beat(), transport.tempo, rate);
+            let mut clock = tutti_music::FrameClock::new(transport.beat(), transport.tempo, rate);
             if transport.playing {
                 clock.advance(Samples(frame.get() as usize), None);
             }

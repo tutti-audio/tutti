@@ -82,7 +82,7 @@ pub const FRAME_TOLERANCE: f64 = 1e-6;
 /// distance is frame 0 (Rust's saturating cast), so guard the tempo first.
 ///
 /// ```
-/// use tutti_types::first_frame_at_or_after;
+/// use tutti_music::first_frame_at_or_after;
 ///
 /// assert_eq!(first_frame_at_or_after(3.0), 3);
 /// assert_eq!(first_frame_at_or_after(3.000_000_000_1), 3); // an ulp late
@@ -161,7 +161,7 @@ pub fn snap_to_whole_frame(position: f64) -> f64 {
 ///
 /// ```
 /// use tutti_units::{Beat, Bpm, Frame, SampleRate};
-/// use tutti_types::TimelineSegment;
+/// use tutti_music::TimelineSegment;
 /// let seg = TimelineSegment::new(Frame::ZERO, Beat(0.0), Bpm::of(90.0), SampleRate::of(48_000.0));
 /// // Exact, not 2.999999999999891: no accumulation.
 /// assert_eq!(seg.beat_at(Frame::new(96_000)), Beat(3.0));

@@ -1644,7 +1644,7 @@ impl<M: Master> std::fmt::Debug for BounceRendered<M> {
 /// never a guess.
 fn chosen(
     range: Option<Range>,
-    looped: Option<tutti_types::LoopRange>,
+    looped: Option<tutti_music::LoopRange>,
 ) -> Result<Range, BounceConfigError> {
     range
         .or_else(|| looped.map(|_| Range::Loop))
@@ -1659,7 +1659,7 @@ fn chosen(
 /// length it has in playback.
 fn span(
     range: Range,
-    loop_range: Option<tutti_types::LoopRange>,
+    loop_range: Option<tutti_music::LoopRange>,
     map: &TempoMap,
     rate: SampleRate,
 ) -> Result<(Beat, Samples), BounceConfigError> {
@@ -2245,7 +2245,7 @@ mod tests {
             Err(BounceConfigError::EmptyRange)
         );
         assert_eq!(go(Range::Loop), Err(BounceConfigError::NoRange));
-        let looped = tutti_types::LoopRange::new(Beat(2.0), Beat(4.0));
+        let looped = tutti_music::LoopRange::new(Beat(2.0), Beat(4.0));
         assert_eq!(
             span(Range::Loop, looped, &map, RATE),
             Ok((Beat(2.0), Samples(48_000)))
@@ -2279,7 +2279,7 @@ mod tests {
     /// its end (two beats at 120 BPM and 48 kHz are 48 000 frames).
     #[test]
     fn the_range_is_named_then_the_loop() {
-        let looped = tutti_types::LoopRange::new(Beat(1.0), Beat(2.0));
+        let looped = tutti_music::LoopRange::new(Beat(1.0), Beat(2.0));
         let named = Range::Seconds(Seconds(0.0), Seconds(1.0));
         assert_eq!(chosen(Some(named), looped), Ok(named));
         assert_eq!(chosen(None, looped), Ok(Range::Loop));

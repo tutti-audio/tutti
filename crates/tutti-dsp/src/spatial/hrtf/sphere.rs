@@ -9,7 +9,7 @@
 //! +y up, +z behind), whose length does not matter; the faces are triangles
 //! wound counter-clockwise seen from outside.
 
-use rustfft::FftNum;
+use crate::FftFloat;
 use tutti_buffers::{Float, Mono, Sample};
 use tutti_units::{Direction, SampleRate};
 
@@ -566,7 +566,7 @@ pub(crate) struct Weights {
 /// two responses as spectra, the face table, and the FFT plans.
 /// Built on the control thread; shared, read-only, by every renderer at that
 /// rate.
-pub(crate) struct HrtfSet<F: Float + FftNum = f32> {
+pub(crate) struct HrtfSet<F: FftFloat = f32> {
     /// The rate the responses were resampled to.
     pub(crate) rate: u32,
     /// Response length in frames at `rate`.
@@ -584,7 +584,7 @@ pub(crate) struct HrtfSet<F: Float + FftNum = f32> {
     faces: Vec<Face>,
 }
 
-impl<F: Float + FftNum> std::fmt::Debug for HrtfSet<F> {
+impl<F: FftFloat> std::fmt::Debug for HrtfSet<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HrtfSet")
             .field("rate", &self.rate)
@@ -596,7 +596,7 @@ impl<F: Float + FftNum> std::fmt::Debug for HrtfSet<F> {
     }
 }
 
-impl<F: Float + FftNum> HrtfSet<F> {
+impl<F: FftFloat> HrtfSet<F> {
     /// Prepares `sphere` at `rate` for steps of `step` frames. Allocates,
     /// resamples and plans: control thread only.
     ///

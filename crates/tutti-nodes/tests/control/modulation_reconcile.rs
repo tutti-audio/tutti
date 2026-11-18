@@ -23,9 +23,10 @@ use tutti_modulation::{
     Adsr, Clock, Declarations, Law, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
     Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform,
 };
+use tutti_music::FrameClock;
 use tutti_nodes::testing::Through;
 use tutti_nodes::{Feed, ModHost, Modulation, ReconcileError, Target};
-use tutti_types::{AtomicF32, ChannelLayout, FrameClock};
+use tutti_types::{AtomicF32, ChannelLayout};
 use tutti_ump::{Message, Voice1};
 use tutti_units::{
     Amplitude, At, Beat, Bpm, Depth, Frame, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples,

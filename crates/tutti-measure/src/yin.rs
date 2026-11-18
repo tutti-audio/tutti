@@ -13,7 +13,7 @@
 //! `a_reused_detector_matches_fresh_ones` pins it.
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::Note;
+use tutti_music::Note;
 use tutti_units::{Cents, Confidence, Hz, SampleRate, Samples};
 
 use crate::chroma::FrequencyBand;

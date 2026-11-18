@@ -7,10 +7,11 @@ use std::time::Instant;
 
 use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
+use tutti_music::LoopRange;
 use tutti_nodes::ClickSettings;
 use tutti_tempo::TempoMap;
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, TimedError, Transport};
-use tutti_types::{ChannelLayout, ChannelTopology, LoopRange};
+use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{At, Beat, Bpm, SampleRate, Samples};
 
 use crate::RootDeclaration;

@@ -260,7 +260,7 @@ fn the_clock_advances_exactly_once_per_frame_and_never_ahead() {
 
     // After N frames the clock must have advanced by exactly N. A priming
     // advance shows up here as N+1 — the desync this test exists to catch.
-    let bps = tutti_types::beats_per_sample(Bpm::of(120.0), RATE);
+    let bps = tutti_music::beats_per_sample(Bpm::of(120.0), RATE);
     let expected = start_beat + (bps * 512.0).get();
     assert!(
         (timeline.beat().get() - expected).abs() < 1e-9,

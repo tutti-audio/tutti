@@ -14,8 +14,9 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
+use tutti_music::FrameClock;
 use tutti_nodes::automation::ControlLaneNode;
-use tutti_types::{AtomicF32, ChannelLayout, FrameClock, MaxBlock};
+use tutti_types::{AtomicF32, ChannelLayout, MaxBlock};
 use tutti_units::{ArcDegrees, Azimuth, Beat, Bpm, Depth, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;

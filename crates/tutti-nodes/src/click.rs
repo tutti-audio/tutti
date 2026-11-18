@@ -33,11 +33,11 @@ use tutti_graph::{
     Cx, Env, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
     Shape, Status, declare_params,
 };
+use tutti_music::{Meter, MeterMap};
 use tutti_rt::{Loan, Reader, Setting, setting_word};
 use tutti_transport::{ProjectMeter, Transport};
 use tutti_types::AtomicF32;
 use tutti_types::BusTopology;
-use tutti_types::{Meter, MeterMap};
 use tutti_units::Tail;
 use tutti_units::{Amplitude, Beat, Hz, Phase, PhaseIncrement, Samples, Seconds};
 
@@ -679,8 +679,8 @@ mod tests {
     use tutti_buffers::Planes;
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Offset, TransportChanges};
-    use tutti_types::FrameClock;
-    use tutti_types::{BeatsPerBar, MeterChange, NoteValue, TimeSignature};
+    use tutti_music::FrameClock;
+    use tutti_music::{BeatsPerBar, MeterChange, NoteValue, TimeSignature};
     use tutti_units::Bpm;
     use tutti_units::Frame;
     use tutti_units::SampleRate;
@@ -1141,7 +1141,7 @@ mod tests {
             node.last_click_onset = Some(Beat(0.0));
             node.click_pos = node.click_normal.len();
 
-            let bps = tutti_types::beats_per_sample(Bpm::of(BPM), SampleRate::of(RATE)).get();
+            let bps = tutti_music::beats_per_sample(Bpm::of(BPM), SampleRate::of(RATE)).get();
             let expected = ((ONSET - START) / bps).ceil() as usize;
             assert_ne!(
                 expected % len,

@@ -96,7 +96,7 @@ fn test_transport_loop_wrapping() {
         .schedule(
             tutti_units::At::NextBlock,
             tutti_transport::LoopEdit::over(
-                tutti_types::LoopRange::new(Beat::new(0.0), Beat::new(4.0)).expect("ordered"),
+                tutti_music::LoopRange::new(Beat::new(0.0), Beat::new(4.0)).expect("ordered"),
             ),
         )
         .expect("room");

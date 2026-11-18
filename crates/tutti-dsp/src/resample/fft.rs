@@ -22,13 +22,13 @@
 
 use super::{ResampleError, WindowedSinc};
 use crate::CosineWindow;
+use crate::FftFloat;
 use crate::fft::{Complex, RealFft};
-use rustfft::FftNum;
 use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut};
 
 /// One block's worth of resampling: the filter, the plans and the scratch.
 #[derive(Debug)]
-struct Unit<F: Float + FftNum> {
+struct Unit<F: FftFloat> {
     fft_size_in: usize,
     fft_size_out: usize,
     /// The low-pass, already transformed and scaled by `1 / (2 * fft_size_in)`,
@@ -73,7 +73,7 @@ fn sinc_filter<F: Float>(npoints: usize, f_cutoff: F) -> Vec<F> {
     taps
 }
 
-impl<F: Float + FftNum> Unit<F> {
+impl<F: FftFloat> Unit<F> {
     fn new(fft_size_in: usize, fft_size_out: usize) -> Self {
         // The filter is cut at the lower of the two Nyquists: the output's
         // when downsampling (anti-alias), the input's when upsampling
@@ -170,7 +170,7 @@ pub(super) const MAX_BLOCK: usize = 1 << 20;
 /// A resampler that takes a fixed number of input frames per call and returns
 /// a variable number of output frames (whole blocks of `fft_size_out`).
 #[derive(Debug)]
-pub struct FftResampler<F: Float + FftNum = f32> {
+pub struct FftResampler<F: FftFloat = f32> {
     channels: usize,
     chunk_size_in: usize,
     fft_size_in: usize,
@@ -181,7 +181,7 @@ pub struct FftResampler<F: Float + FftNum = f32> {
     unit: Unit<F>,
 }
 
-impl<F: Float + FftNum> FftResampler<F> {
+impl<F: FftFloat> FftResampler<F> {
     /// `chunk_size_in` input frames per call, split into about `sub_chunks`
     /// blocks (the real count is whatever makes a block a whole number of the
     /// rate pair's repeating unit).
