@@ -42,6 +42,15 @@
 /// assert_eq!(Five::masked(33).get(), 1);
 /// assert_eq!(Five::try_from(32), Err(FiveOutOfRange(32)));
 /// ```
+///
+/// A width as wide as the integer is refused at compile time:
+///
+/// ```compile_fail
+/// tutti_units::ranged! {
+///     /// A field as wide as its integer.
+///     Foo(u8), FooOutOfRange, bits 8
+/// }
+/// ```
 #[macro_export]
 macro_rules! ranged {
     (
@@ -59,6 +68,11 @@ macro_rules! ranged {
             $(#[$meta])*
             $name($inner), $err, concat!("within ", $width, " bits"),
             |raw| raw <= Self::MAX.0
+        );
+
+        const _: () = assert!(
+            $width < <$inner>::BITS,
+            "a bits field must be narrower than its integer"
         );
 
         impl $name {

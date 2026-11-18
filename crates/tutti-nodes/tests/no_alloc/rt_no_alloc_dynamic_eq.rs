@@ -9,7 +9,7 @@ use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, the centre and the threshold
 /// moved before each. Every input a square of eight frames a period, in the band of the
 /// centres the test visits.
-fn walk(node: DynamicEqNode) {
+fn walk(node: DynamicEqNode<f32>) {
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
         let ch = ch.into_samples_mut();
@@ -50,7 +50,7 @@ fn walk(node: DynamicEqNode) {
 
 #[test]
 fn dynamic_eq_stereo_process_is_allocation_free_with_the_band_moving() {
-    walk(DynamicEqNode::from(DynamicEqConfig::de_esser(
+    walk(DynamicEqNode::<f32>::from(DynamicEqConfig::de_esser(
         ChannelLayout::STEREO,
         Hz(6_000.0),
     )));
@@ -58,7 +58,7 @@ fn dynamic_eq_stereo_process_is_allocation_free_with_the_band_moving() {
 
 #[test]
 fn dynamic_eq_upward_side_chain_process_is_allocation_free() {
-    walk(DynamicEqNode::from(
+    walk(DynamicEqNode::<f32>::from(
         DynamicEqConfig::new(ChannelLayout::MONO, Hz(6_000.0), Q(1.5))
             .mode(DynamicMode::Upward)
             .ratio(CompressionRatio(3.0))

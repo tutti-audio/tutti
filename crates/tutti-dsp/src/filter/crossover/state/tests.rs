@@ -1,3 +1,5 @@
+use super::super::CrossoverCoefficients;
+use super::super::coefficients::Tpt;
 use super::*;
 use crate::CrossoverModel;
 use crate::testing::{amplitude_at, lock_in};
@@ -5,8 +7,8 @@ use tutti_fixtures::signal::sine;
 use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 
 /// One sample through `state` at `c`, in `f32`.
-fn tick(state: &mut CrossoverState, c: &CrossoverCoefficients, x: f32) -> [f32; MAX_BANDS] {
-    state.tick_f64(c, f64::from(x)).map(|y| y as f32)
+fn tick(state: &mut CrossoverState<f64>, c: &CrossoverCoefficients, x: f32) -> [f32; MAX_BANDS] {
+    state.tick(&c.narrowed(), f64::from(x)).map(|y| y as f32)
 }
 
 const RATE: f64 = 48_000.0;
@@ -43,7 +45,7 @@ fn sweep() -> Vec<f64> {
 fn bands_at(freqs: &[f64], hz: f64) -> (Vec<(f64, f64)>, f64) {
     let freqs: Vec<Hz> = freqs.iter().map(|&f| Hz(f)).collect();
     let model = CrossoverModel::new(&freqs, SampleRate::of(RATE)).unwrap();
-    let mut state = CrossoverState::default();
+    let mut state = CrossoverState::<f64>::default();
     let c = model.coefficients();
     let x = unit_sine(hz, RATE, SETTLE + WINDOW);
     let nb = model.bands();
@@ -197,7 +199,7 @@ fn full_scale(kind: usize, i: usize, rng: &mut u32) -> f32 {
     }
 }
 
-fn norm(s: &Section) -> f64 {
+fn norm(s: &Section<f64>) -> f64 {
     s.0[0].hypot(s.0[1])
 }
 
@@ -216,7 +218,7 @@ fn the_states_and_bands_stay_within_the_bound_under_a_switching_split() {
         let band_bound = section.tap.powi(2 * splits as i32);
         for period in [1usize, 16] {
             for kind in 0..3 {
-                let mut state = CrossoverState::default();
+                let mut state = CrossoverState::<f64>::default();
                 let mut rng = 7u32;
                 let (mut peak_state, mut peak_band) = (0.0f64, 0.0f64);
                 for i in 0..1_000_000usize {
@@ -225,7 +227,7 @@ fn the_states_and_bands_stay_within_the_bound_under_a_switching_split() {
                     } else {
                         &high
                     };
-                    let out = state.tick_f64(c, f64::from(full_scale(kind, i, &mut rng)));
+                    let out = state.tick(&c.narrowed(), f64::from(full_scale(kind, i, &mut rng)));
                     peak_band = out.iter().fold(peak_band, |p, &y| p.max(y.abs()));
                     for s in (state.first.iter())
                         .chain(&state.low)
@@ -252,10 +254,10 @@ fn the_states_and_bands_stay_within_the_bound_under_a_switching_split() {
 #[test]
 fn a_section_at_zero_input_never_gains_energy_under_a_switching_split() {
     let [low, high] = ends(1);
-    let mut state = CrossoverState::default();
+    let mut state = CrossoverState::<f64>::default();
     let mut rng = 3u32;
     for i in 0..2_000 {
-        state.tick_f64(&low, f64::from(full_scale(2, i, &mut rng)));
+        state.tick(&low.narrowed(), f64::from(full_scale(2, i, &mut rng)));
     }
     let mut energy = norm(&state.first[0]).powi(2);
     assert!(energy > 0.0);
@@ -271,7 +273,7 @@ fn a_section_at_zero_input_never_gains_energy_under_a_switching_split() {
             1 => &high,
             _ => &random,
         };
-        state.tick_f64(c, 0.0);
+        state.tick(&c.narrowed(), 0.0);
         let now = norm(&state.first[0]).powi(2);
         assert!(
             now <= energy * (1.0 + 1e-12),
@@ -289,7 +291,7 @@ fn a_section_at_zero_input_never_gains_energy_under_a_switching_split() {
 #[test]
 fn a_held_split_rings_out_by_the_time_its_matrix_gives() {
     let [low, high] = ends(1);
-    let mut state = CrossoverState::default();
+    let mut state = CrossoverState::<f64>::default();
     let mut rng = 11u32;
     for i in 0..4_000usize {
         let c = if (i / 16).is_multiple_of(2) {
@@ -297,7 +299,7 @@ fn a_held_split_rings_out_by_the_time_its_matrix_gives() {
         } else {
             &high
         };
-        state.tick_f64(c, f64::from(full_scale(2, i, &mut rng)));
+        state.tick(&c.narrowed(), f64::from(full_scale(2, i, &mut rng)));
     }
     let s0 = norm(&state.first[0]);
     assert!(s0 > 1e-3, "the switching leaves the section loud: {s0}");
@@ -345,7 +347,7 @@ fn a_held_split_rings_out_by_the_time_its_matrix_gives() {
         .unwrap()
         .coefficients();
     for _ in 0..n {
-        state.tick_f64(&held, 0.0);
+        state.tick(&held.narrowed(), 0.0);
     }
     assert!(
         norm(&state.first[0]) <= 1e-6,
@@ -374,7 +376,7 @@ fn the_energy_identities_of_the_docs_hold_at_every_gain() {
         let mut section = Section([next() * 4.0 - 2.0, next() * 4.0 - 2.0]);
         let x = next() * 2.0 - 1.0;
         let before = section.0;
-        let taps = section.tick(&tpt, x);
+        let taps = section.tick(&tpt.narrowed(), x);
         let after = section.0;
         let (bp, lp) = (taps.bp, taps.lp);
         let dv = v(after) - v(before);
@@ -449,9 +451,9 @@ fn a_held_section_peaks_at_its_l1_norm_and_no_higher() {
         let tpt = Tpt::new(g);
         let n = 4_000_000.min((40.0 / g.min(1.0)) as usize * 40);
         let h = impulse_taps(g, n);
-        let mut section = Section::default();
+        let mut section = Section::<f64>::default();
         for i in 0..200 {
-            let t = section.tick(&tpt, if i == 0 { 1.0 } else { 0.0 });
+            let t = section.tick(&tpt.narrowed(), if i == 0 { 1.0 } else { 0.0 });
             let got = [t.bp, t.lp, t.high_pass(), t.all_pass()];
             for (tap, want) in h.iter().enumerate() {
                 assert!((got[tap] - want[i]).abs() < 1e-12, "g {g} tap {tap} at {i}");
@@ -464,21 +466,21 @@ fn a_held_section_peaks_at_its_l1_norm_and_no_higher() {
                 "g {g}: the response is not over in {n} frames"
             );
             // The worst input: x[j] = sign h[m - j], read at the last frame m = n - 1.
-            let mut section = Section::default();
+            let mut section = Section::<f64>::default();
             let mut last = 0.0;
             for j in 0..n {
                 let x = if h[n - 1 - j] >= 0.0 { 1.0 } else { -1.0 };
-                let t = section.tick(&tpt, x);
+                let t = section.tick(&tpt.narrowed(), x);
                 last = [t.bp, t.lp, t.high_pass(), t.all_pass()][tap];
             }
             assert!(
                 (last - l1).abs() < 1e-9 * l1.max(1.0),
                 "g {g} tap {tap}: {last} against {l1}"
             );
-            let mut section = Section::default();
+            let mut section = Section::<f64>::default();
             let mut rng = 17u32;
             for i in 0..200_000 {
-                let t = section.tick(&tpt, f64::from(full_scale(2, i, &mut rng)));
+                let t = section.tick(&tpt.narrowed(), f64::from(full_scale(2, i, &mut rng)));
                 let y = [t.bp, t.lp, t.high_pass(), t.all_pass()][tap];
                 assert!(
                     y.abs() <= l1 * (1.0 + 1e-12),

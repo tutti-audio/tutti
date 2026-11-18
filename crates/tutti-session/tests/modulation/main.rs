@@ -4,6 +4,8 @@ mod common;
 
 // The session's modulation loop (`Session::mods`, `ModInput`).
 mod modulation;
+// A route onto a param on an `f64` session.
+mod f64_modulation;
 // A route onto an edge's gain (doc 013, "Edge gain", G2).
 mod edge_modulation;
 // A route onto the gain of an edge a narrower re-insert dropped.

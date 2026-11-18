@@ -29,7 +29,7 @@ fn curves_are_pinned() {
         (ShapeKind::SoftCrush, 0.25, 2.0, 0.25),
     ];
     for (kind, x, drive, want) in exact {
-        let got = kind.apply(x, Drive(drive));
+        let got = kind.apply::<f32>(x, Drive(drive));
         assert_eq!(
             got.to_bits(),
             f32::to_bits(want),
@@ -39,7 +39,7 @@ fn curves_are_pinned() {
 
     // Off the midpoint the S-curve is a rational: smooth9(1/4) is
     // 12826 / 262144 exactly, so at hardness 1 a quarter step lands there.
-    let quarter = ShapeKind::SoftCrush.apply(0.25, Drive(1.0));
+    let quarter = ShapeKind::SoftCrush.apply::<f32>(0.25, Drive(1.0));
     assert!((f64::from(quarter) - 12826.0 / 262144.0).abs() < 1e-7);
 
     let half_pi = std::f64::consts::FRAC_PI_2;
@@ -102,9 +102,12 @@ fn closed_f64(kind: ShapeKind, x: f64, d: f64) -> f64 {
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
+// The block tests below run an `F = f32` bank on `f32` views, the session's audio format, so
+// their tolerances are `f32`'s; the `f64` tests at the end run the bank at `F = f64`.
+
 /// A bank of `kind` landed on `drive`.
-fn landed(kind: ShapeKind, drive: f32) -> WaveshaperBank {
-    let mut bank = WaveshaperBank::new(kind, RATE);
+fn landed(kind: ShapeKind, drive: f32) -> WaveshaperBank<f32> {
+    let mut bank = WaveshaperBank::<f32>::new(kind, RATE);
     bank.aim(&WaveshaperControls {
         drive: Drive(drive),
     });
@@ -113,7 +116,11 @@ fn landed(kind: ShapeKind, drive: f32) -> WaveshaperBank {
 }
 
 /// `bank` over `channels` (each a plane), one block, with `lane` the drive per frame.
-fn run(bank: &mut WaveshaperBank, lane: Option<&[f32]>, channels: &[Vec<f32>]) -> Vec<Vec<f32>> {
+fn run(
+    bank: &mut WaveshaperBank<f32>,
+    lane: Option<&[f32]>,
+    channels: &[Vec<f32>],
+) -> Vec<Vec<f32>> {
     let refs: Vec<&[f32]> = channels.iter().map(Vec::as_slice).collect();
     let mut out = vec![vec![0.0f32; channels[0].len()]; channels.len()];
     let planes = Planes::new(&refs).unwrap();
@@ -291,8 +298,8 @@ fn the_drive_floors_hold_on_the_lane_and_the_glide() {
 // Antiderivative antialiasing.
 
 /// A bank of `kind` landed on `drive`, antialiased to `order`.
-fn antialiased(kind: ShapeKind, drive: f32, order: Antialiasing) -> WaveshaperBank {
-    let mut bank = WaveshaperBank::new(kind, RATE).antialiasing(order);
+fn antialiased(kind: ShapeKind, drive: f32, order: Antialiasing) -> WaveshaperBank<f32> {
+    let mut bank = WaveshaperBank::<f32>::new(kind, RATE).antialiasing(order);
     bank.aim(&WaveshaperControls {
         drive: Drive(drive),
     });
@@ -715,7 +722,7 @@ fn an_order_past_the_kinds_reads_as_its_highest() {
             _ => Antialiasing::FirstOrder,
         };
         assert_eq!(kind.max_antialiasing(), highest, "{kind:?}");
-        let bank = |order| WaveshaperBank::new(kind, RATE).antialiasing(order);
+        let bank = |order| WaveshaperBank::<f32>::new(kind, RATE).antialiasing(order);
         assert_eq!(
             bank(Antialiasing::SecondOrder).antialiasing_order(),
             highest
@@ -757,5 +764,91 @@ fn a_non_finite_input_is_heard_at_its_own_frame_only() {
                 assert_eq!(!y.is_finite(), i == 2, "{order:?} {bad}: frame {i}: {y}");
             }
         }
+    }
+}
+
+/// One block of `x` through an `f64` bank of `kind` landed on `drive`, at `order`.
+fn through_f64(kind: ShapeKind, drive: f32, order: Antialiasing, x: &[f64]) -> Vec<f64> {
+    let mut bank = WaveshaperBank::<f64>::new(kind, RATE).antialiasing(order);
+    bank.aim(&WaveshaperControls {
+        drive: Drive(drive),
+    });
+    bank.settle();
+    let mut out = vec![0.0f64; x.len()];
+    bank.process(
+        None,
+        Planes::new(&[x]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    out
+}
+
+/// An `f64` bank holds the drive and the signal in `f64`: on a 29-bit signal at a drive
+/// that is not an `f32` figure of the input's scale, each curve is its closed form in `f64`
+/// (`tanh h x`, `atan(pi h x / 2) 2 / pi`, `h x / (1 + |h x|)`, `clamp(h x)` and
+/// `round(h x) / h`), to 2^-45; an `f32` curve is off by about 1e-8.
+#[test]
+fn an_f64_bank_is_each_curve_in_f64() {
+    use std::f64::consts::PI;
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x = wide_signal(200);
+    let (drive, crush) = (1.7f32, 4096.0f32);
+    let h = f64::from(drive);
+    let closed: [(ShapeKind, f32, Box<dyn Fn(f64) -> f64>); 5] = [
+        (ShapeKind::Tanh, drive, Box::new(move |x| (h * x).tanh())),
+        (
+            ShapeKind::Atan,
+            drive,
+            Box::new(move |x| (PI / 2.0 * h * x).atan() * (2.0 / PI)),
+        ),
+        (
+            ShapeKind::Softsign,
+            drive,
+            Box::new(move |x| h * x / (1.0 + (h * x).abs())),
+        ),
+        (
+            ShapeKind::HardClip,
+            drive,
+            Box::new(move |x| (h * x).clamp(-1.0, 1.0)),
+        ),
+        (
+            ShapeKind::Crush,
+            crush,
+            Box::new(move |x| (f64::from(crush) * x).round() / f64::from(crush)),
+        ),
+    ];
+    for (kind, drive, f) in closed {
+        let want: Vec<f64> = x.iter().map(|&x| f(x)).collect();
+        let got = through_f64(kind, drive, Antialiasing::Off, &x);
+        assert_close_f64(&got, &want, 2.0f64.powi(-45));
+    }
+}
+
+/// First-order ADAA in `f64` is the divided difference of the antiderivative,
+/// `(F(x[n]) - F(x[n-1])) / (x[n] - x[n-1])`, with the history starting at 0: of `u^2 / 2`
+/// for a hard clip inside its linear region and of `ln cosh u` for `tanh`, on a 29-bit
+/// signal that alternates in sign so that no step is inside the threshold, to 2^-45.
+#[test]
+fn an_f64_first_order_adaa_is_the_divided_difference_of_the_antiderivative() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x: Vec<f64> = wide_signal(200)
+        .iter()
+        .enumerate()
+        .map(|(n, v)| if n % 2 == 0 { *v } else { -2.0 * v })
+        .collect();
+    type Antiderivative = fn(f64) -> f64;
+    let cases: [(ShapeKind, Antiderivative); 2] = [
+        (ShapeKind::HardClip, |u| u * u / 2.0),
+        (ShapeKind::Tanh, |u| u.cosh().ln()),
+    ];
+    for (kind, antiderivative) in cases {
+        let mut want = Vec::new();
+        let mut before = 0.0f64;
+        for &now in &x {
+            want.push((antiderivative(now) - antiderivative(before)) / (now - before));
+            before = now;
+        }
+        let got = through_f64(kind, 1.0, Antialiasing::FirstOrder, &x);
+        assert_close_f64(&got, &want, 2.0f64.powi(-45));
     }
 }

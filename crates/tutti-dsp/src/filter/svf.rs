@@ -4,7 +4,7 @@
 
 mod bank;
 mod kernel;
-mod model;
+pub(super) mod model;
 
 pub use bank::SvfBank;
 pub use kernel::{SvfCoefficients, SvfCoeffs, SvfType, svf_step};

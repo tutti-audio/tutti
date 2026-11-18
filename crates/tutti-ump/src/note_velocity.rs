@@ -1,5 +1,7 @@
 //! The velocity field of a MIDI 2.0 Note On or Note Off.
 
+use tutti_units::Normalized;
+
 /// The 16-bit velocity of a MIDI 2.0 Note On or Note Off (M2-104 section 7.4.2).
 ///
 /// This is the wire's 16-bit field, `0` to `0xFFFF`, and not a MIDI 1.0
@@ -48,6 +50,22 @@ impl NoteVelocity {
     #[must_use]
     pub const fn get(self) -> u16 {
         self.0
+    }
+
+    /// The velocity as a position on `0..=1`: `get() / 0xFFFF`.
+    #[inline]
+    #[must_use]
+    pub fn normalized(self) -> Normalized {
+        Normalized::clamped(f64::from(self.0) / f64::from(u16::MAX))
+    }
+
+    /// The velocity at position `n` of the 16-bit range: `round(n * 0xFFFF)`.
+    /// Inverse of [`normalized`](Self::normalized).
+    #[inline]
+    #[must_use]
+    pub fn from_normalized(n: Normalized) -> Self {
+        // `n` is on `0..=1`, so the rounded product fits the 16-bit wire field.
+        Self(libm::round(n.get() * f64::from(u16::MAX)) as u16)
     }
 }
 

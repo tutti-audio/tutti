@@ -1,8 +1,11 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_units::{Amplitude, Hz, Q, SampleRate, Seconds, Semitones};
+use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones};
 
 use super::*;
 use crate::testing::amplitude_at;
+
+// The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
+// the `f64` banks have their own tests below.
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const TONE: f64 = 1_000.0;
@@ -17,15 +20,15 @@ fn sine(hz: f64, amplitude: f64, frames: usize) -> Vec<f32> {
 }
 
 /// A bank of `ty` at `RATE` aimed at `controls`.
-fn bank(ty: SvfType, controls: &EnvelopeFilterControls) -> EnvelopeFilterBank {
-    let mut bank = EnvelopeFilterBank::new(ChannelLayout::MONO, ty, RATE);
+fn bank(ty: SvfType, controls: &EnvelopeFilterControls) -> EnvelopeFilterBank<f32> {
+    let mut bank = EnvelopeFilterBank::<f32>::new(ChannelLayout::MONO, ty, RATE);
     bank.aim(controls);
     bank.settle();
     bank
 }
 
 /// `x` through `bank` in calls of at most `block` frames.
-fn run(bank: &mut EnvelopeFilterBank, x: &[f32], block: usize) -> Vec<f32> {
+fn run(bank: &mut EnvelopeFilterBank<f32>, x: &[f32], block: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; x.len()];
     for (xs, ys) in x.chunks(block).zip(out.chunks_mut(block)) {
         bank.process(
@@ -152,17 +155,14 @@ fn the_controls_are_held_in_range() {
     );
     let y = run(&mut b, &sine(TONE, 0.5, 2_000), 128);
     assert!(y.iter().all(|s| s.is_finite()));
-    assert_eq!(
-        b.cutoff_at(Amplitude(1.0)),
-        EnvelopeFilterControls::DEFAULT.base
-    );
+    assert_eq!(b.cutoff_at(1.0), EnvelopeFilterControls::DEFAULT.base);
     // Ten octaves above 1 kHz is past the Nyquist: the cutoff stops just short of it.
     let wide = bank(SvfType::LowPass, &controls(1_000.0, 1.0e9, 0.707));
     assert_eq!(
-        wide.cutoff_at(Amplitude(1.0)),
+        wide.cutoff_at(1.0),
         RATE.nyquist_scaled(crate::filter::NYQUIST_MARGIN)
     );
-    assert_eq!(wide.cutoff_at(Amplitude::SILENT), Hz(1_000.0));
+    assert_eq!(wide.cutoff_at(0.0), Hz(1_000.0));
 }
 
 /// A tone over full scale reads as 1 in the envelope: `min(|x|, 1)` of a sine of amplitude 2
@@ -277,5 +277,28 @@ fn the_attack_and_the_release_are_told_apart() {
             (got_down - want_down).abs() < 2e-2 * want_down,
             "{ty:?} down: {got_down} vs {want_down}"
         );
+    }
+}
+
+/// At depth 0 the cutoff never moves, so an `f64` bank is a fixed state-variable filter at the
+/// base: on a signal of more than 24 bits its output is the RBJ cookbook biquad of the same
+/// response, run in `f64` direct form I from rest, frame for frame to 1e-12.
+#[test]
+fn an_f64_bank_at_depth_zero_is_the_cookbook_filter_at_its_base() {
+    use crate::filter::svf::model::tests::rbj;
+    use crate::testing::direct_form;
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x = wide_signal(4_800);
+    for ty in [SvfType::LowPass, SvfType::BandPass] {
+        let mut b = EnvelopeFilterBank::<f64>::new(ChannelLayout::MONO, ty, RATE);
+        b.aim(&controls(1_000.0, 0.0, 0.707));
+        b.settle();
+        let mut out = vec![0.0f64; x.len()];
+        b.process(
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+        );
+        let want = direct_form(&rbj(ty, 1_000.0, f64::from(0.707f32), 0.0, RATE.get()), &x);
+        assert_close_f64(&out, &want, 1e-12);
     }
 }

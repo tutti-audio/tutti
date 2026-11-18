@@ -1,9 +1,7 @@
-//! The transport changes inside a chunk (doc 020 stage 5b), through the
+//! The transport changes inside a chunk, through the
 //! node's own walk over a chunk: what the plugin is told for a chunk, and what
-//! is counted when it does not fit. They were the served node's
-//! (`tutti-plugin`'s old `graph_node`), driven through its chunk walk; the generic
-//! node walks a chunk the same way (`TransportWalk` `begin`, `scan` and
-//! `finish`), which `Rig::chunk` repeats.
+//! is counted when it does not fit. The node walks a chunk with
+//! `TransportWalk` `begin`, `scan` and `finish`, which `Rig::chunk` repeats.
 
 use std::sync::Arc;
 
@@ -243,9 +241,8 @@ fn a_ramp_ending_inside_a_chunk_splits_the_slope() {
     assert!((got[1].2 - (-120.0 / 96_000.0)).abs() < 1e-9, "{got:?}");
 }
 
-/// **A stretch with no point inside is told its slope** (5a zeroed it
-/// whenever the chunk held a point; a chunk in the middle of a ramp has
-/// the ramp's), and the engine's own cell edges (a tempo change every 128
+/// **A stretch with no point inside is told its slope** (a chunk in the
+/// middle of a ramp has the ramp's), and the engine's own cell edges (a tempo change every 128
 /// frames of a ramp, in `Env::changes`) are no entries.
 #[test]
 fn a_ramp_chunk_has_its_slope_and_its_cell_edges_are_no_entries() {

@@ -7,7 +7,8 @@ use tutti_types::{ChannelLayout, MAX_CHANNELS};
 use super::CrossoverCoefficients;
 use super::CrossoverState;
 use super::bands::MAX_BANDS;
-use crate::Glide;
+use super::coefficients::Narrowed;
+use crate::{Glide, Lanes};
 
 /// The state of a crossover per channel, every channel read through one glide of
 /// [`CrossoverCoefficients`]. The width is fixed when it is built.
@@ -18,22 +19,23 @@ use crate::Glide;
 /// moves linearly), so the bands are a Butterworth set at every frame, and the sections'
 /// words are bounded for any motion (see the state's docs).
 #[derive(Clone, Debug)]
-pub struct CrossoverBank {
-    state: Box<[CrossoverState]>,
+pub struct CrossoverBank<F: Float + Lanes> {
+    state: Box<[CrossoverState<F>]>,
 }
 
-impl CrossoverBank {
+impl<F: Float + Lanes> CrossoverBank<F> {
     /// A silent bank `width` channels wide. Allocates: build it on the control side.
     #[must_use]
     pub fn new(width: ChannelLayout) -> Self {
         Self {
-            state: vec![CrossoverState::default(); usize::from(width.count())].into_boxed_slice(),
+            state: vec![CrossoverState::<F>::default(); usize::from(width.count())]
+                .into_boxed_slice(),
         }
     }
 
     /// Back to silence. No allocation.
     pub fn reset(&mut self) {
-        self.state.fill(CrossoverState::default());
+        self.state.fill(CrossoverState::<F>::default());
     }
 
     /// Runs `input` into `output`, frame `i` at `coefficients.at(taken + 1 + i)`, then
@@ -67,19 +69,19 @@ impl CrossoverBank {
         let blended = coefficients.blended(frames);
         // The frames the glide blends read a set per frame: frame-outer, so it is solved once.
         for (i, step) in (0..blended).zip(coefficients.taken().saturating_add(1)..) {
-            let c = coefficients.at(step);
+            let c = coefficients.at(step).narrowed::<F>();
             for (ch, state) in self.state.iter_mut().enumerate().take(channels) {
-                let x = input.plane(ch).samples()[i].to_f64();
+                let x = input.plane(ch).samples()[i].convert_to::<F>();
                 put(state, &c, x, &mut planes[ch][..reached[ch]], i);
             }
         }
         // The rest runs at the target, channel-outer.
-        let c = coefficients.target();
+        let c = coefficients.target().narrowed::<F>();
         for (ch, state) in self.state.iter_mut().enumerate().take(channels) {
             let x = &input.plane(ch).samples()[..frames];
             let ys = &mut planes[ch][..reached[ch]];
             for (i, v) in x.iter().enumerate().skip(blended) {
-                put(state, &c, v.to_f64(), ys, i);
+                put(state, &c, v.convert_to::<F>(), ys, i);
             }
         }
         coefficients.advance(u32::try_from(frames).unwrap_or(u32::MAX));
@@ -88,16 +90,16 @@ impl CrossoverBank {
 
 /// Frame `i` of a channel's bands: `x` through `state` at `c`, into the planes it reaches.
 #[inline]
-fn put<S: Float>(
-    state: &mut CrossoverState,
-    c: &CrossoverCoefficients,
-    x: f64,
+fn put<S: Float, F: Float + Lanes>(
+    state: &mut CrossoverState<F>,
+    c: &Narrowed<F>,
+    x: F,
     ys: &mut [&mut [S]],
     i: usize,
 ) {
-    let split = state.tick_f64(c, x);
+    let split = state.tick(c, x);
     for (y, &band) in ys.iter_mut().zip(&split) {
-        y[i] = S::from_f64(band);
+        y[i] = band.convert_to::<S>();
     }
 }
 

@@ -16,15 +16,13 @@
 //! one slot per parameter, plus [`ParameterChanges::SPARE_QUEUES`] for addresses the list did
 //! not name (a plugin that grows a parameter later, or a list the server
 //! could not give). A chunk's [`ParameterChanges`] has room for a queue per
-//! slot, so every parameter can move in the same chunk; this replaces the 16
-//! queues a chunk held before, past which a parameter's points were dropped
-//! with nothing counted. The bridge's buffers are reserved with the same
+//! slot, so every parameter can move in the same chunk. The bridge's buffers are reserved with the same
 //! room (`PluginBridge::reserve_param_changes`).
 //!
 //! **Points.** Each queue has room for [`points_for`] the chunk: one point
 //! per 32 frames (a control lane's grid), one for the chunk's last frame,
 //! and 256 more (a lane's corners in one block):
-//! [`ParameterQueue::chunk_room`], design doc 014 §9 requirement 6. It is
+//! [`ParameterQueue::chunk_room`]. It is
 //! sized in [`prepare`](ParamDelivery::prepare) once the chunk length is
 //! known (`ParameterChanges::reserved_bridged`, here and in the bridge's
 //! buffers). That room is logical: each queue owns
@@ -99,8 +97,7 @@
 //!   plays (as a DAW's does). A value delivered between the read and the
 //!   save is in the state and is sent to the fork once more, harmlessly.
 //!
-//! Design doc 014 §9, requirement 4. An editor edit now also writes the
-//! lane's knob; whether that makes this record redundant is still open.
+//! An editor edit also writes the lane's knob.
 //!
 //! # Delivered late, never lost
 //!
@@ -138,8 +135,7 @@ const NO_MIRROR: u32 = u32::MAX;
 const UNPREPARED_POINTS: usize = 10;
 
 /// The points one parameter can carry in a chunk of `chunk` frames:
-/// [`ParameterQueue::chunk_room`] (`ceil(chunk / 32) + 1 + 256`, design doc
-/// 014 §9 requirement 6), which the format hosts reserve for too.
+/// [`ParameterQueue::chunk_room`] (`ceil(chunk / 32) + 1 + 256`), which the format hosts reserve for too.
 pub(crate) fn points_for(chunk: usize) -> usize {
     ParameterQueue::chunk_room(chunk)
 }
@@ -171,7 +167,7 @@ pub struct ParamDeliveryStats {
     pub points_merged: u64,
     /// Grid points (on a frame whose play count is a multiple of 32) dropped
     /// from a full queue, to make room for a corner or because the grid
-    /// point itself found no room (design doc 014 §9 requirement 6).
+    /// point itself found no room.
     pub grid_points_dropped: u64,
 }
 
@@ -317,9 +313,8 @@ impl Slot {
     }
 }
 
-/// Which points of each queue in the chunk being filled are grid points
-/// (design doc 014 §9 requirement 6), a bit a point, stored the way the
-/// chunk stores its points: each queue's own bits for its floor, and a
+/// Which points of each queue in the chunk being filled are grid points: a
+/// bit a point, stored the way the chunk stores its points: each queue's own bits for its floor, and a
 /// block's bits for a queue that took one of the pool's blocks. So the bits
 /// follow the points a chunk carries, as the points do, not the parameter
 /// count times the room: 16 bytes a queue (a floor word and its span) and
@@ -1196,8 +1191,8 @@ mod tests {
 
     /// **A parameter carries a point every 32 frames of its chunk, plus
     /// corners, with nothing allocated**: prepared for a 2048-frame chunk,
-    /// each of 200 parameters takes 321 points (2048 / 32 + 1 + 256, doc
-    /// 014 §9 requirement 6) in one chunk,
+    /// each of 200 parameters takes 321 points (2048 / 32 + 1 + 256) in one
+    /// chunk,
     /// chunk after chunk, inside the no-alloc gate. Past the budget the last
     /// point is replaced, so the queue never grows and the chunk ends on the
     /// latest value, and each replacement is counted.
@@ -1248,8 +1243,7 @@ mod tests {
         assert_eq!(counters.snapshot().points_merged, 3);
     }
 
-    /// **Past a queue's room, grid points go before corners** (doc 014 §9
-    /// requirement 6): a full queue drops a grid point offered to it, and a
+    /// **Past a queue's room, grid points go before corners**: a full queue drops a grid point offered to it, and a
     /// corner evicts the queue's earliest grid point, each counted; only a
     /// queue of corners has its last point replaced (merged).
     #[test]
@@ -1425,8 +1419,7 @@ mod tests {
 
     /// **More moving lanes than the pool has blocks: each parameter still
     /// ends the chunk on its latest value, grid points go before corners,
-    /// every drop is counted, and nothing allocates** (design doc 014 §9
-    /// requirement 6, past the pool). 300 lanes of a 600-parameter plugin
+    /// every drop is counted, and nothing allocates**, past the pool. 300 lanes of a 600-parameter plugin
     /// move in one 512-frame chunk, each with 16 grid points, 16 corners and
     /// the chunk's last frame (33 points, inside the room of 273). The
     /// first 256 to need a third point take the pool's 256 blocks and keep

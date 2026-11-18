@@ -126,7 +126,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&events);
     let _subscription = handle.subscribe(move |n| {
-        if let tutti_plugin_host::Notice::Invalidate(e) = n {
+        if let tutti_plugin_host::PluginSignal::Invalidate(e) = n {
             sink.lock().unwrap().push(e);
         }
     });

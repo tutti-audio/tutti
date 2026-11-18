@@ -1,7 +1,7 @@
 //! [`SweepClock`]: the LFO and the segments of the swept effects, one for the phaser and the
 //! chorus.
 //!
-//! **The LFO is state on the stream's clock.** Its phase is an `f32` [`Phase`] walked by the
+//! **The LFO is state on the stream's clock.** Its phase is a [`Phase`] walked by the
 //! rate's increment, counted from the last reset. The effect's per-channel value (an all-pass
 //! coefficient, a delay) is solved at the **corners** of a segment, every [`COEFF_INTERVAL`]
 //! frames of the stream: the segment's start and its end, and each channel's [`Glide`] runs

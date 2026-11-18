@@ -1,6 +1,7 @@
 //! [`SourceNode`]: the one node that sends a [`ControlSource`]'s legs to
 //! control lanes.
 
+use tutti_buffers::Float;
 use tutti_graph::{
     Cost, Cx, Event, EventKind, Io, Node, Offset, ParamSegment, Prepare, Shape, Status,
 };
@@ -27,7 +28,7 @@ pub trait SourcePorts: ControlSource {
 
     /// Frames `from..to` of its audio input, in order, before the stops on
     /// `to`. A source with no audio input reads nothing.
-    fn hear(&mut self, _io: &Io<'_>, _from: usize, _to: usize) {}
+    fn hear<F: Float>(&mut self, _io: &Io<'_, F>, _from: usize, _to: usize) {}
 }
 
 /// The leg last sent (or meant to be sent, when it was refused), and the
@@ -175,14 +176,14 @@ struct Out {
 }
 
 impl Out {
-    fn put(&mut self, io: &mut Io<'_>, i: usize, seg: ParamSegment) {
+    fn put<F: Float>(&mut self, io: &mut Io<'_, F>, i: usize, seg: ParamSegment) {
         if self.pending.is_some_and(|(p, _)| p != i) {
             self.flush(io);
         }
         self.pending = Some((i, seg));
     }
 
-    fn flush(&mut self, io: &mut Io<'_>) {
+    fn flush<F: Float>(&mut self, io: &mut Io<'_, F>) {
         if let Some((i, seg)) = self.pending.take() {
             let pushed = Offset::new(Samples(i), self.len)
                 .is_some_and(|at| io.event_out(0).push(Event::segment(at, seg)).is_ok());
@@ -192,7 +193,7 @@ impl Out {
 }
 
 impl<S: SourcePorts> SourceNode<S> {
-    fn send(&mut self, out: &mut Out, io: &mut Io<'_>, i: usize, seg: ParamSegment) {
+    fn send<F: Float>(&mut self, out: &mut Out, io: &mut Io<'_, F>, i: usize, seg: ParamSegment) {
         self.flight = Some(Flight {
             segment: seg,
             at: self.position + i as u64,
@@ -200,7 +201,13 @@ impl<S: SourcePorts> SourceNode<S> {
         out.put(io, i, seg);
     }
 
-    fn send_leg(&mut self, out: &mut Out, io: &mut Io<'_>, i: usize, leg: Option<Leg>) {
+    fn send_leg<F: Float>(
+        &mut self,
+        out: &mut Out,
+        io: &mut Io<'_, F>,
+        i: usize,
+        leg: Option<Leg>,
+    ) {
         if let Some(leg) = leg
             && !self.silent(&leg, self.position + i as u64)
         {
@@ -242,7 +249,7 @@ fn grid_points(cx: &Cx<'_>, walk: &PlayWalk, len: usize, prev: Option<u32>, stri
     n
 }
 
-impl<S: SourcePorts> Node for SourceNode<S> {
+impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
     /// Its audio input (if any) in, no audio out; a MIDI input if its source
     /// hears one, and one event output (the segments).
     fn shape(&self) -> Shape {
@@ -262,7 +269,7 @@ impl<S: SourcePorts> Node for SourceNode<S> {
         self.source.prepare(prepare.sample_rate());
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let len = io.frames();
         if len == 0 {
             return Status::Modified;

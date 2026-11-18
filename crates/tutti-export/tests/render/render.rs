@@ -430,7 +430,8 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
 fn a_stateless_node_reports_no_tail_rather_than_an_unknown_one() {
     use tutti_graph::Node;
 
-    let dist = tutti_nodes::DistortionNode::new(tutti_nodes::ShapeKind::Tanh, Drive::new(1.0));
+    let dist =
+        tutti_nodes::DistortionNode::<f32>::new(tutti_nodes::ShapeKind::Tanh, Drive::new(1.0));
     // A kernel node's tail is unknown until it has a rate.
     let dist = tutti_graph::contract::prepared(dist, RATE, 64);
     assert_eq!(dist.shape().tail, tutti_units::Tail::None);

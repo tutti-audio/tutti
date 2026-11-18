@@ -4,7 +4,7 @@
 use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::InletRing;
-use tutti_session::{InletError, OutPort, Root, Session};
+use tutti_session::{InletError, Offline, OutPort, Root, Session, SessionBuilder};
 use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
@@ -105,4 +105,34 @@ fn add_inlet_checks_the_rate_the_ring_carries() {
     let (ring, _writer) = InletRing::pair(ChannelLayout::STEREO, Samples(64), RATE);
     s.graph().add_inlet(ring).expect("the graph's rate");
     assert!(s.graph().is_edited(), "the node was added");
+}
+
+/// **An inlet of an `f64` session carries `FINE` exactly**: the producer
+/// pushes `f64` frames, the graph reads them as `f64`, and the render holds
+/// the figure `f32` rounds away.
+#[test]
+fn an_f64_inlet_carries_a_figure_f32_rounds_away() {
+    const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
+    assert_ne!(f64::from(FINE as f32), FINE, "f32 would round FINE away");
+    let mut s = SessionBuilder::<Offline<f64>>::default()
+        .sample_rate(RATE)
+        .build()
+        .expect("an f64 session builds");
+    let (key, mut producer) = s
+        .graph()
+        .open_inlet(ChannelLayout::MONO, Samples(256), RATE)
+        .expect("the producer runs at the graph's rate");
+    s.graph()
+        .set_sources_hard(Root::output(0), [OutPort::new(key, 0)])
+        .unwrap();
+    let _ = s.update();
+
+    producer.push_interleaved(Interleaved::new(&[FINE; 8], producer.layout()).unwrap());
+    let mut block = vec![0.0f64; 8 * 2];
+    s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+    assert!(
+        block.chunks(2).all(|frame| frame[0] == FINE),
+        "{:?}",
+        &block[..4]
+    );
 }

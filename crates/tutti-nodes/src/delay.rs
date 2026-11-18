@@ -256,6 +256,8 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
 
 #[cfg(test)]
 mod tests {
+    // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+    // format, so their tolerances are `f32`'s.
     use super::*;
     use crate::test_support::drive_kernel;
     use tutti_dsp::{ChannelTimes, Routing};

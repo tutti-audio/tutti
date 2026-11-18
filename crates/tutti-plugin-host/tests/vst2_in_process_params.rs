@@ -37,7 +37,7 @@ use tutti_plugin_host::PluginHandle;
 #[path = "support/param_reads.rs"]
 mod param_reads;
 use param_reads::ParamReads as _;
-use tutti_plugin_host::{PluginNode, load_client};
+use tutti_plugin_host::{HostedNode, load_client};
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_types::ChannelLayout;
 use tutti_units::Normalized;
@@ -91,7 +91,7 @@ impl Drop for ProbeEnv {
     }
 }
 
-fn load() -> (PluginNode<Vst2Loaded>, PluginHandle) {
+fn load() -> (HostedNode<Vst2Loaded>, PluginHandle) {
     let path = tutti_fixtures::vst2_probe();
     let (client, handle) = load_client::<Vst2Loaded>(
         main_thread(),
@@ -177,7 +177,7 @@ fn a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it() {
     let mut unit = Direct::new(client, SampleRate::of(SAMPLE_RATE), BLOCK);
     let p = 2;
 
-    let held = |unit: &mut Direct<PluginNode<Vst2Loaded>>, v: f32, blocks: usize| {
+    let held = |unit: &mut Direct<HostedNode<Vst2Loaded>>, v: f32, blocks: usize| {
         for _ in 0..blocks {
             unit.events(0, &[ramp(0, p, v), ramp(32, p, v)]);
             unit.block();
@@ -216,7 +216,7 @@ fn a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it() {
 /// 501. The graph is then forked offline (an export): the fork is loaded
 /// with the live state (param0 = 0.5) and its delivery is seeded with what
 /// the live node delivered (0.25), so the fork's fresh lane, which sends its
-/// 0.25 on its first block (doc 014 §10's fork requirement), is not passed
+/// 0.25 on its first block, is not passed
 /// on, and the export renders 501 too.
 fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let _lock = lock_probe();

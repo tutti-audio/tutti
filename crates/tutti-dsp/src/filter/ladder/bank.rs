@@ -148,9 +148,9 @@ fn group<F: Float + Lanes, S: Float, const N: usize>(
     macro_rules! frame {
         ($i:expr, $d:expr) => {
             for k in 0..N {
-                let x = F::from_f64(xs[k][$i].to_f64()) * $d.drive;
+                let x = xs[k][$i].convert_to::<F>() * $d.drive;
                 let y = ladder_step(&$d.coefficients, $d.ty, &mut st[k], x, Float::tanh);
-                ys[k][$i] = S::from_f64(y.to_f64());
+                ys[k][$i] = y.convert_to::<S>();
             }
         };
     }

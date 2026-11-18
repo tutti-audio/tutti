@@ -353,8 +353,7 @@ fn played_across(
 /// How the tempo moves over a stretch of `frames` frames that starts at
 /// `beat`, in BPM per sample (CLAP's `tempo_inc`: "tempo increment for each
 /// sample and until the next time info event"), for a plugin told the stretch
-/// by one transport event (doc 020 stage 5b: a stretch runs to the next event
-/// or the chunk's end).
+/// by one transport event (a stretch runs to the next event or the chunk's end).
 ///
 /// The map's slope, held inside the segment the stretch starts in
 /// ([`TempoView::tempo_slope`]): exact for a
@@ -1040,9 +1039,8 @@ mod tests {
     }
 
     /// A stretch is told the slope of the segment it starts in, and a map
-    /// point inside it does not zero it (stage 5a zeroed it; stage 5b splits
-    /// the chunk at the point, `transport_walk`, so the stretch before it has
-    /// a slope that is right). The slope is held to the segment's end: it is
+    /// point inside it does not zero it (`transport_walk` splits the chunk at
+    /// the point, so the stretch before it has a slope that is right). The slope is held to the segment's end: it is
     /// not the change of tempo from the stretch's start to the tempo one
     /// stretch later, which past a point reads the next segment. A chunk that
     /// *starts* on a point has the point's segment's slope.

@@ -5,6 +5,9 @@ use tutti_units::{Feedback, SampleRate, Seconds};
 use super::*;
 use crate::{ChannelTimes, GAIN_GLIDE, MaxDelay, Routing};
 
+// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// format, so their tolerances are `f32`'s.
+
 /// A rate at which a time of `n / 1024` seconds is exactly `n` frames, in `f64` and in the
 /// `f32` a control is held in.
 const BINARY: SampleRate = SampleRate::of(1024.0);
@@ -529,7 +532,7 @@ fn an_f64_impulse_arrives_at_the_delay() {
 }
 
 /// `x` (one slice per channel) through an `f64` bank of `layout` at `c`, in one block.
-fn run_f64(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<f64>> {
+fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut bank = DelayBank::<f64>::new(layout, BINARY);
     let mut glides = DelayGlides::<f64>::landed(1);
     bank.aim(&mut glides, c);
@@ -562,7 +565,7 @@ fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
             .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
             .collect()
     };
-    let y = run_f64(&mono, &controls(time, 0.0, 0.0), std::slice::from_ref(&x));
+    let y = run_wide(&mono, &controls(time, 0.0, 0.0), std::slice::from_ref(&x));
     assert_close_f64(&y[0], &delayed(&x), 0.0);
 
     let g = f64::from(0.6f32);
@@ -570,7 +573,7 @@ fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
     for n in 0..len {
         v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
     }
-    let y = run_f64(&mono, &controls(time, 0.6, 0.0), &[x]);
+    let y = run_wide(&mono, &controls(time, 0.6, 0.0), &[x]);
     assert_close_f64(&y[0], &delayed(&v), 2.0f64.powi(-45));
 }
 
@@ -594,7 +597,7 @@ fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
             .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
             .collect()
     };
-    let y = run_f64(
+    let y = run_wide(
         &stereo(),
         &controls(d as f64 / 1024.0, 0.3, 0.4),
         &[x, vec![0.0; len]],

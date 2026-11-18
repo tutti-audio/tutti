@@ -139,6 +139,15 @@ pub trait Control: EditorWindow {
     /// Processor, applied at the head of its next block
     /// ([`Edit`](crate::Edit)).
     ///
+    /// **The value is [`Normalized`], the shared seam's domain.** The four
+    /// formats disagree on what a parameter value is: VST3 and VST2 speak
+    /// normalized `0..=1`, AU and CLAP the plugin's plain units. Each format
+    /// converts at its own edge, so a plain value such as `20_000.0` for a
+    /// cutoff is not a valid write here; convert it first with
+    /// [`parameter_normalized`](Self::parameter_normalized), and read a
+    /// value back in the plugin's units with
+    /// [`parameter_plain`](Self::parameter_plain).
+    ///
     /// # Errors
     ///
     /// [`ParamWriteError`], with nothing written, for an id the plugin does

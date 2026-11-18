@@ -13,7 +13,7 @@
 //!
 //! # What a fork is
 //!
-//! [`PluginNode::fork_instance`], which the fork source calls, on the
+//! [`HostedNode::fork_instance`], which the fork source calls, on the
 //! **main thread** (see "Threads" below):
 //!
 //! 1. **Read what the live node has delivered** per parameter (its parameter
@@ -103,7 +103,7 @@ use parking_lot::Mutex;
 use tutti_graph::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
 use tutti_plugin_types::{Control, Features, InProcess, Origin, RenderMode, StateUse};
 
-use super::client::{PluginNode, RateDelivery, TransportFeed};
+use super::client::{HostedNode, RateDelivery, TransportFeed};
 use super::instance::Instance;
 use super::loader::load_client_restoring;
 use crate::DeliveryCounters;
@@ -148,7 +148,7 @@ where
 {
     /// The source for `bound`, or `None` for a plugin with no origin to load
     /// again.
-    pub(super) fn of(bound: &PluginNode<F>) -> Option<Self> {
+    pub(super) fn of(bound: &HostedNode<F>) -> Option<Self> {
         let client = &bound.client;
         let reload = client.reload.as_ref()?;
         Some(Self {
@@ -169,11 +169,11 @@ where
         &self,
         main: MainThreadMarker,
         mode: ForkMode,
-    ) -> Result<PluginNode<F>, PluginForkError> {
+    ) -> Result<HostedNode<F>, PluginForkError> {
         // First, so a plugin that cannot save costs no second instance. The
         // `Arc` is dropped straight after: the fork holds no strong reference.
         let live = self.live.upgrade().ok_or(PluginForkError::LiveGone)?;
-        // Before the state: see step 1.
+        // Read before the state, so every value it shows is in the state.
         let delivered = self.delivery.delivered();
         let (preset, state, live_mode) = {
             let mut instance = live.lock();
@@ -197,16 +197,15 @@ where
 
         // The preset, then the state, on the fresh instance **before it is
         // activated**: a plugin may take its mode from the state at activation.
-        let mut restore = |loaded: &mut F| -> Result<(), String> {
+        let mut restore = |loaded: &mut F| -> Result<(), StateError> {
             if let Some(preset) = &preset
                 && !Control::load_preset(loaded, main, preset)
             {
-                return Err(format!(
+                return Err(StateError::Rejected(format!(
                     "the live instance's preset {preset:?} is not in the fresh instance"
-                ));
+                )));
             }
-            Control::load_state(loaded, main, &state, StateUse::Duplicate)
-                .map_err(|e| e.to_string())
+            Control::load_state(loaded, main, &state, StateUse::Duplicate).map_err(StateError::from)
         };
         // From the stored `Origin`, not `Reopen::reopen`: an active `Lifecycle`
         // holds a Controller, not the `&F` that `reopen` needs.
@@ -219,7 +218,7 @@ where
             Some(&mut restore),
         )
         .map_err(|source| PluginForkError::Load {
-            path: Some(self.origin.path().to_path_buf()),
+            path: self.origin.path().to_path_buf(),
             source,
         })?;
         // The fork is driven through its node alone: no editor, no parameter
@@ -232,8 +231,8 @@ where
                 found: fork.descriptor.id.clone(),
             });
         }
-        if let Some(Err(reason)) = restored {
-            return Err(PluginForkError::LoadState(StateError::Rejected(reason)));
+        if let Some(Err(refused)) = restored {
+            return Err(PluginForkError::LoadState(refused));
         }
         let offline = match mode {
             ForkMode::Offline => true,
@@ -286,7 +285,7 @@ where
     }
 }
 
-impl<F: InProcess + 'static> PluginNode<F>
+impl<F: InProcess + 'static> HostedNode<F>
 where
     F::Processor: 'static,
 {
@@ -316,7 +315,9 @@ where
     ///
     /// # Errors
     ///
-    /// A [`PluginForkError`] naming the step that failed: the live instance is
+    /// A [`PluginForkError`] naming the step that failed: the node has no
+    /// origin to load again ([`PluginForkError::NoOrigin`], as a node built
+    /// by [`client_over`](crate::client_over) has), the live instance is
     /// gone or would not save its state, the second instance did not load (a
     /// plugin that cannot be instantiated twice), it is a different plugin,
     /// or it refused the preset or the state. A second instance that was
@@ -325,16 +326,9 @@ where
         &self,
         main: MainThreadMarker,
         mode: ForkMode,
-    ) -> Result<PluginNode<F>, PluginForkError> {
+    ) -> Result<HostedNode<F>, PluginForkError> {
         Fork::of(self)
-            .ok_or_else(|| PluginForkError::Load {
-                path: None,
-                source: tutti_plugin_types::BridgeError::LoadFailed {
-                    path: None,
-                    stage: tutti_plugin_types::LoadStage::Opening,
-                    reason: "this node has no origin to load again".into(),
-                },
-            })?
+            .ok_or(PluginForkError::NoOrigin)?
             .instance(main, mode)
     }
 }

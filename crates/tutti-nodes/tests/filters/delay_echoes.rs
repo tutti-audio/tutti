@@ -12,6 +12,9 @@ use tutti_nodes::{DelayControls, DelayLayout, DelayNode, InterpolationMode, MaxD
 use tutti_types::BusTopology;
 use tutti_units::{Amplitude, Feedback, Hz, SampleRate, Samples, Seconds};
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances
+// are `f32`'s.
+
 const SR: SampleRate = SampleRate::of(1_024.0);
 /// A second of line: every time here is a few frames of it.
 const MAX: MaxDelay = MaxDelay::of(Seconds(1.0));

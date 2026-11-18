@@ -397,7 +397,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     );
     check_io(
         "crossover (stereo, two bands)",
-        &|| CrossoverNode::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).expect("one split"),
+        &|| CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).expect("one split"),
         2,
         4,
         0,
@@ -405,7 +405,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     // Mono: band 0 is the input at DRY, band 1 silent (not a centre on both).
     let x = vec![noise(90, FRAMES)];
     let dry = rendered(
-        &|| CrossoverNode::new(ChannelLayout::MONO, &[Hz(1_000.0)]).expect("one split"),
+        &|| CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(1_000.0)]).expect("one split"),
         &x,
         Mix::DRY,
     );

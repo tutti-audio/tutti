@@ -24,9 +24,8 @@ use tutti_transport::{MeterSlot, MeterSlotReader, ProjectMeter};
 ///
 /// The cell is a [`Publisher`](tutti_rt::Publisher) of an `Option<Arc<_>>`,
 /// so the node only ever *borrows* the meter: an install or a clear during
-/// playback retires the old value for the control side to free. (An
-/// `ArcSwapOption` here turned the node's guard into the last strong count,
-/// and its drop freed the meter on the audio thread.)
+/// playback retires the old value for the control side to free, and the
+/// audio thread never holds the last strong count.
 #[derive(Clone, Default)]
 pub struct PluginMeter(MeterSlot);
 

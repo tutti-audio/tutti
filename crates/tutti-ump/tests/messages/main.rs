@@ -15,6 +15,7 @@ mod flex_setup;
 mod mono_mode;
 mod mpe_zone;
 mod no_alloc;
+mod normalized;
 mod note_id;
 mod note_key_event;
 mod note_velocity;

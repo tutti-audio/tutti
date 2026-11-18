@@ -73,12 +73,14 @@ impl BitCrusherConfig {
 ///
 /// `BitCrusherNode::from` panics past 16 channels, when the kernel's shape is built: a
 /// crusher is one bus.
-pub type BitCrusherNode = KernelNode<BitCrusherKernel>;
+///
+/// `F` is the state precision of the held values and the quantizer, `f64` by default.
+pub type BitCrusherNode<F = f64> = KernelNode<BitCrusherKernel<F>>;
 
-impl From<BitCrusherConfig> for BitCrusherNode {
+impl<F: Float> From<BitCrusherConfig> for BitCrusherNode<F> {
     fn from(config: BitCrusherConfig) -> Self {
         Self::with_kernel(
-            BitCrusherKernel::new(config.width, config.controls),
+            BitCrusherKernel::<F>::new(config.width, config.controls),
             BitCrusherSet,
             config.controls,
         )
@@ -102,21 +104,21 @@ control_set! {
 
 /// The crusher as a [`Kernel`]: a [`BitCrusher`].
 #[derive(Clone, Debug)]
-pub struct BitCrusherKernel {
+pub struct BitCrusherKernel<F: Float> {
     width: ChannelLayout,
-    crusher: BitCrusher,
+    crusher: BitCrusher<F>,
 }
 
-impl BitCrusherKernel {
+impl<F: Float> BitCrusherKernel<F> {
     fn new(width: ChannelLayout, controls: BitCrusherControls) -> Self {
         Self {
             width,
-            crusher: BitCrusher::new(width, controls),
+            crusher: BitCrusher::<F>::new(width, controls),
         }
     }
 }
 
-impl Kernel for BitCrusherKernel {
+impl<F: Float> Kernel for BitCrusherKernel<F> {
     type Set = BitCrusherSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -158,13 +160,14 @@ impl Kernel for BitCrusherKernel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{drive_block, prepared};
+    use crate::test_support::{RATE, drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Latency, UnitParam};
 
-    fn node(width: u16, bits: f32, hold: f32) -> BitCrusherNode {
-        prepared(BitCrusherNode::from(
+    // The node tests run `F = f32`, the session's audio format.
+    fn node(width: u16, bits: f32, hold: f32) -> BitCrusherNode<f32> {
+        prepared(BitCrusherNode::<f32>::from(
             BitCrusherConfig::new(width)
                 .bits(BitDepth::new(bits))
                 .hold(HoldFactor::new(hold)),
@@ -174,7 +177,7 @@ mod tests {
     /// A fork starts from the controls last set and shares no cell.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(BitCrusherNode::from(BitCrusherConfig::new(2u16)));
+        assert_param_fork(BitCrusherNode::<f32>::from(BitCrusherConfig::new(2u16)));
     }
 
     /// The shape is the width in and out, `Light`, no tail, declares the depth and the hold
@@ -194,14 +197,14 @@ mod tests {
             shape.params.as_slice(),
             &[UnitParam::BitDepth, UnitParam::HoldFactor][..]
         );
-        let d = BitCrusherNode::from(BitCrusherConfig::new(1u16));
+        let d = BitCrusherNode::<f32>::from(BitCrusherConfig::new(1u16));
         assert_eq!((d.param_base(0), d.param_base(1)), (Some(8.0), Some(1.0)));
     }
 
     /// An empty layout is mono.
     #[test]
     fn an_empty_layout_is_mono() {
-        let n = BitCrusherNode::from(BitCrusherConfig::new(0u16));
+        let n = BitCrusherNode::<f32>::from(BitCrusherConfig::new(0u16));
         assert_eq!(n.shape().audio_in().count(), 1);
     }
 
@@ -214,5 +217,25 @@ mod tests {
         assert!(n.param_set().set(UnitParam::HoldFactor, 2.0));
         let out = drive_block(&mut n, &[&[0.3, 0.9, 0.5, 0.1]]);
         assert_eq!(out[0], [0.25, 0.25, 0.5, 0.5]);
+    }
+
+    /// An `f64` block through a `BitCrusherKernel::<f64>` at 32 bits (`q = 2^31`) holding 2
+    /// frames is the input's frame `2 floor(k / 2)` exactly: a 29-bit signal, which `f32`
+    /// cannot hold, passes `round(x q) / q`.
+    #[test]
+    fn an_f64_kernel_at_thirty_two_bits_holds_a_twenty_nine_bit_signal_exactly() {
+        use crate::test_support::drive_kernel;
+        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+        let len = 100;
+        let x = wide_signal(len);
+        let want: Vec<f64> = (0..len).map(|k| x[2 * (k / 2)]).collect();
+        let controls = BitCrusherControls {
+            bits: BitDepth::MAX,
+            hold: HoldFactor::new(2.0),
+        };
+        let mut k = BitCrusherKernel::<f64>::new(ChannelLayout::MONO, controls);
+        k.prepare(RATE, MaxBlock::of(tutti_units::Samples(len)));
+        let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
+        assert_close_f64(&y, &want, 0.0);
     }
 }

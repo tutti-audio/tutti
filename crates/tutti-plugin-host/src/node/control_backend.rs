@@ -29,7 +29,6 @@
 //! next tick. Fire-and-forget writes post and do not wait.
 
 use std::sync::Arc;
-use std::sync::mpsc::RecvTimeoutError;
 use std::sync::mpsc::sync_channel;
 use std::time::{Duration, Instant};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
@@ -38,7 +37,7 @@ use tutti_types::ParkedSampleRate;
 use parking_lot::Mutex;
 
 use super::instance::{Changes, Instance, Lost};
-use super::off_main_wait::{OffMainWait, Wait};
+use super::off_main_wait::{OffMainWait, await_answer};
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
@@ -119,14 +118,8 @@ impl Reporting {
 /// (see the module docs, "Threads"). A collector that has never run
 /// ([`MainWorkHandle::is_pumped`]) is not waited for at all: the call answers
 /// "unavailable" at once, as a call with no main thread does, and a post is
-/// refused rather than queued without bound. Under `cfg(test)` it is shortened to one
-/// second so the test of the expiry does not stall the suite; the pumped tests
-/// answer in one tick. The decision is [`OffMainWait`]'s.
-const OFF_MAIN_DEADLINE: Duration = if cfg!(test) {
-    Duration::from_secs(1)
-} else {
-    Duration::from_secs(2)
-};
+/// refused rather than queued without bound. The decision is [`OffMainWait`]'s.
+const OFF_MAIN_DEADLINE: Duration = Duration::from_secs(2);
 
 impl<F> ControlBackend<F>
 where
@@ -152,17 +145,11 @@ where
         self.work.defer(move |main| {
             let _ = answer.send(work(main, &mut inner.lock()));
         });
-        let deadline = OffMainWait::new(OFF_MAIN_DEADLINE, Instant::now());
-        loop {
-            let Wait::For(left) = deadline.at(Instant::now()) else {
-                return None;
-            };
-            match wait.recv_timeout(left) {
-                Ok(answer) => return Some(answer),
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return None,
-            }
-        }
+        await_answer(
+            &wait,
+            OffMainWait::new(OFF_MAIN_DEADLINE, Instant::now()),
+            Instant::now,
+        )
     }
 
     /// `work` on the plugin now, when this is the main thread and the instance is
@@ -295,9 +282,7 @@ where
     }
 
     /// The plugin's own failure, forwarded rather than dropped, so the caller
-    /// can tell "the plugin has no state" from "asking it failed". The
-    /// in-process path cannot hit the transport's size limit, so `Rejected` is
-    /// the only failure the plugin can produce.
+    /// can tell "the plugin has no state" from "asking it failed".
     ///
     /// `effGetChunk` and its kin are main-thread calls, and the health snapshot
     /// runs this on the session's spawner: off the main thread it
@@ -308,10 +293,10 @@ where
             instance.control().map(|control| {
                 control
                     .save_state(main, state_use)
-                    .map_err(|e| e.to_string())
+                    .map_err(StateError::from)
             })
         }) {
-            Some(Some(state)) => state.map_err(StateError::Rejected),
+            Some(Some(state)) => state,
             Some(None) => Err(StateError::PluginCrashed),
             None => Err(StateError::Unavailable),
         }
@@ -411,8 +396,8 @@ where
 }
 
 /// The off-main-thread routing of the handle's methods (`on_main`), against the
-/// reference VST2 plugin. `OFF_MAIN_DEADLINE` is one second under `cfg(test)`
-/// (not injectable: the backend sits behind the handle's `Arc<dyn ..>`).
+/// reference VST2 plugin. The expiry rule is `off_main_wait`'s, tested there
+/// over constructed instants.
 #[cfg(test)]
 mod off_main_tests {
     use tutti_fixtures::main_thread;
@@ -502,26 +487,6 @@ mod off_main_tests {
         assert!(matches!(state, Err(StateError::Unavailable)), "{state:?}");
         assert_eq!(value, None);
         assert_eq!(collector.run(main_thread()), 0, "nothing was queued");
-    }
-
-    /// **A collector that runs but is not run again answers "unavailable"**,
-    /// for a save and for a read, once the off-main wait ends.
-    #[test]
-    fn a_stalled_main_thread_gets_the_unavailable_answer() {
-        let (collector, work) = MainWork::new();
-        let (_client, handle) = load(&work);
-        assert_eq!(collector.run(main_thread()), 0);
-        let id = ParamId::new(1);
-        let (state, value) = std::thread::spawn(move || {
-            (
-                handle.any_thread().save_state(StateUse::Project),
-                handle.any_thread().parameter_value(id),
-            )
-        })
-        .join()
-        .expect("the job returns");
-        assert!(matches!(state, Err(StateError::Unavailable)), "{state:?}");
-        assert_eq!(value, None);
     }
 
     /// **The parameter reads answer on the main thread**: the catalog lists

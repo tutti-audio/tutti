@@ -131,9 +131,9 @@ use tutti_rt::LockExt;
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::{AudioConfig, Hosting, Loadable, Plugin as HostPlugin, PluginRef};
 use tutti_plugin::error::StateError;
-use tutti_plugin_host::{Liveness, Verdict};
+use tutti_plugin_host::{Liveness, LivenessVerdict};
 use tutti_plugin_host::{
-    NodeControls, Notice, PluginControls, PluginHandle, PluginStatus, Subscription,
+    NodeControls, PluginControls, PluginHandle, PluginSignal, PluginStatus, Subscription,
 };
 use tutti_plugin_types::{
     BridgeError, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh, PluginTail,
@@ -586,16 +586,16 @@ pub(crate) fn event(node: NodeKey, change: PluginChange) -> SessionEvent {
 }
 
 /// What a plugin reported, waiting for the next `Phase::Plugins`.
-pub(crate) type Notices = Arc<Mutex<Vec<Notice>>>;
+pub(crate) type Signals = Arc<Mutex<Vec<PluginSignal>>>;
 
 /// Queues `notice` as if the plugin had reported it.
-pub(crate) fn queue(notices: &Notices, notice: Notice) {
+pub(crate) fn queue(notices: &Signals, notice: PluginSignal) {
     notices.lock_recover().push(notice);
 }
 
 /// A queue for what `handle` reports and the subscription that fills it.
-fn hear(handle: &PluginHandle) -> (Notices, Subscription) {
-    let notices = Notices::default();
+fn hear(handle: &PluginHandle) -> (Signals, Subscription) {
+    let notices = Signals::default();
     let queue = Arc::clone(&notices);
     let hearing = handle.subscribe(move |notice| queue.lock_recover().push(notice));
     (notices, hearing)
@@ -604,20 +604,24 @@ fn hear(handle: &PluginHandle) -> (Notices, Subscription) {
 /// What `notice` is as an event, if it is one: a latency the plugin reports
 /// is reported once, by the update that hands it to the graph; a rate refusal,
 /// a crash and a reload are the plugin's health.
-fn change_of(notice: Notice) -> Option<PluginChange> {
+fn change_of(notice: PluginSignal) -> Option<PluginChange> {
     Some(match notice {
-        Notice::Param(ParamEdit::Begin(id)) => PluginChange::GestureBegan { id },
-        Notice::Param(ParamEdit::End(id)) => PluginChange::GestureEnded { id },
-        Notice::Param(ParamEdit::Change { id, value, record }) => PluginChange::ParamChanged {
-            id,
-            value,
-            recorded: record,
-        },
-        Notice::Refresh(PluginRefresh::ParamValues) => PluginChange::ParamsRescanned,
-        Notice::Refresh(PluginRefresh::ParamTitles) => PluginChange::ParamTitlesChanged,
-        Notice::Invalidate(PluginInvalidation::Tail { tail }) => PluginChange::TailChanged { tail },
-        Notice::Invalidate(PluginInvalidation::Io) => PluginChange::IoChanged,
-        Notice::Invalidate(_) | _ => return None,
+        PluginSignal::Param(ParamEdit::Begin(id)) => PluginChange::GestureBegan { id },
+        PluginSignal::Param(ParamEdit::End(id)) => PluginChange::GestureEnded { id },
+        PluginSignal::Param(ParamEdit::Change { id, value, record }) => {
+            PluginChange::ParamChanged {
+                id,
+                value,
+                recorded: record,
+            }
+        }
+        PluginSignal::Refresh(PluginRefresh::ParamValues) => PluginChange::ParamsRescanned,
+        PluginSignal::Refresh(PluginRefresh::ParamTitles) => PluginChange::ParamTitlesChanged,
+        PluginSignal::Invalidate(PluginInvalidation::Tail { tail }) => {
+            PluginChange::TailChanged { tail }
+        }
+        PluginSignal::Invalidate(PluginInvalidation::Io) => PluginChange::IoChanged,
+        PluginSignal::Invalidate(_) | _ => return None,
     })
 }
 
@@ -793,7 +797,7 @@ pub(crate) struct HostedPlugin {
     snapshot_at: Option<Instant>,
     /// What the plugin reported since the last `Phase::Plugins`, heard on
     /// whichever thread the plugin reports from.
-    pub(crate) notices: Notices,
+    pub(crate) notices: Signals,
     /// The handle's subscription that fills `notices`; replaced with the handle.
     hearing: Subscription,
     /// What the plugin declares and the value of each parameter
@@ -1229,7 +1233,10 @@ impl HostedPlugin {
     /// plugin's own would arrive: a load the host made moves values the plugin
     /// may not report, and the next `Phase::Plugins` reads them again.
     pub(crate) fn refresh_values(&self) {
-        queue(&self.notices, Notice::Refresh(PluginRefresh::ParamValues));
+        queue(
+            &self.notices,
+            PluginSignal::Refresh(PluginRefresh::ParamValues),
+        );
     }
 
     /// Asks for the parameters to be read again (the plugin announced a
@@ -1250,7 +1257,7 @@ impl HostedPlugin {
 /// of process, is a `Key<PluginNode>`. It names the *kind* of node, as
 /// [`Key::erase`] names none; the view of the plugin is [`Plugin`].
 /// It is the session's name for a hosted plugin's node; the node itself is
-/// `tutti_plugin_host::PluginNode`, below the session.
+/// `tutti_plugin_host::HostedNode`, below the session.
 /// `key.param(id)` is a plugin parameter's
 /// `ParamRef` (see `Key::param`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2202,7 +2209,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             if heard.iter().any(|notice| {
                 matches!(
                     notice,
-                    Notice::Refresh(PluginRefresh::ParamValues | PluginRefresh::ParamTitles)
+                    PluginSignal::Refresh(PluginRefresh::ParamValues | PluginRefresh::ParamTitles)
                 )
             }) {
                 hosted.reread_params();
@@ -2225,9 +2232,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 continue;
             }
             match hosted.liveness.observe(cause.is_none(), now) {
-                Verdict::Healthy => hosted.status = PluginLiveness::Healthy,
-                Verdict::Failing { .. } => hosted.status = PluginLiveness::Failing,
-                Verdict::Dead => {
+                LivenessVerdict::Healthy => hosted.status = PluginLiveness::Healthy,
+                LivenessVerdict::Failing { .. } => hosted.status = PluginLiveness::Failing,
+                LivenessVerdict::Dead => {
                     // `Liveness` declares a death only on an unhealthy
                     // observation, and every unhealthy one carries the
                     // engine's latched cause.

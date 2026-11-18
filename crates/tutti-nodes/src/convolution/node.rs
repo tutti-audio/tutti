@@ -149,7 +149,7 @@ enum Engine {
     /// One convolver per channel; its length is the width.
     PerChannel(Vec<Convolver>),
     /// Every (input, output) path.
-    Matrix(Box<MatrixConvolver>),
+    Matrix(Box<MatrixConvolver<f32>>),
 }
 
 impl Engine {

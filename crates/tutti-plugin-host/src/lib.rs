@@ -8,7 +8,7 @@
 //! node's controls and meter, the transport it tells the plugin and the
 //! parameter changes it delivers, the host policy written once over a handle
 //! ([`Liveness`], [`PluginParamValues`], [`needs_announcement`]), and the
-//! in-process node ([`PluginNode`], [`load_client`]) over any
+//! in-process node ([`HostedNode`], [`load_client`]) over any
 //! [`InProcess`](tutti_plugin_types::InProcess) format.
 //!
 //! It names no format host, no wire and no server: the process edge is
@@ -36,14 +36,15 @@ mod wakeups;
 mod walk_tests;
 
 pub use control_handle::{MainThreadControl, PluginHandle, PluginStatus};
-pub use controls::{ForkedSources, NodeControls, PluginControls, PluginReports, lock_tail};
+pub use controls::{ForkedSources, NodeControls, PluginControls, PluginReports};
 pub use listeners::{
-    InvalidateSink, Listener, Notice, ParameterChangeSink, RefreshSink, Subscription, TransportSink,
+    InvalidateSink, Listener, ParameterChangeSink, PluginSignal, RefreshSink, Subscription,
+    TransportSink,
 };
-pub use liveness::{Liveness, Verdict};
+pub use liveness::{Liveness, LivenessVerdict};
 pub use meter::PluginMeter;
 pub use node::{
-    InProcClient, Pending, PluginNode, RebindError, Rebinder, Settlement, client_over, load_client,
+    HostedNode, InProcClient, Pending, RebindError, Rebinder, Settlement, client_over, load_client,
     load_client_restoring,
 };
 pub use node_losses::BlockLosses;

@@ -23,7 +23,8 @@ const RATE: f64 = 48_000.0;
 const LEN: usize = 4_800;
 const BLOCK: usize = 512;
 
-/// Frame `i` of the ramp file: exact in `f32`.
+/// Frame `i` of the ramp file: the file is `f32` PCM, so its frames are `f32`
+/// values and widen exactly into the `f64` render.
 fn value(i: usize) -> f32 {
     (i as f32 + 1.0) * 1e-5
 }

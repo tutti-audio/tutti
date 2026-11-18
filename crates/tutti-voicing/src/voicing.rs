@@ -56,7 +56,7 @@ use core::num::{NonZeroU16, NonZeroUsize};
 
 use tutti_midi_protocol::{
     GeneralMidi, Heard, KeyTable, Timing, TuningMessage, Universal, bend_to_signed_f32,
-    narrow_value, value_to_unit_f32,
+    narrow_value,
 };
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
@@ -796,8 +796,7 @@ impl Voicing {
                 }
             }
             Voice2::ChannelPressure(pressure) => {
-                let pressure = value_to_unit_f32(pressure);
-                self.channels[channel.index()].set_pressure(pressure);
+                self.channels[channel.index()].set_pressure(pressure.normalized());
             }
             Voice2::PitchBend(bend) => {
                 let position = bend_to_signed_f32(bend);
@@ -1718,6 +1717,7 @@ mod tests {
     use tutti_ump::NoteVelocity;
     use tutti_ump::PerNoteManagement;
     use tutti_ump::{Attribute, CCNumber, Pitch, RegisteredPerNoteController, U7, Voice1};
+    use tutti_units::Normalized;
 
     /// One voice per note, no group.
     struct One;
@@ -3387,7 +3387,7 @@ mod tests {
         let position = |cc: u8| f32::from(cc) * 128.0 / 16383.0;
         assert_eq!(ch.expression(), position(127));
         assert_eq!(ch.modulation(), 0.0);
-        assert_eq!(ch.pressure(), 0.0);
+        assert_eq!(ch.pressure(), Normalized::of(0.0));
         assert!(!ch.portamento());
         assert_eq!(ch.volume(), position(50));
         assert_eq!(ch.pan(), {
@@ -3401,7 +3401,7 @@ mod tests {
         let other = s.core.channel(MidiChannel::of(1));
         assert_eq!(other.modulation(), position(100));
         assert_eq!(other.expression(), position(30));
-        assert_eq!(other.pressure(), 1.0);
+        assert_eq!(other.pressure(), Normalized::of(1.0));
         assert!(other.portamento());
     }
 
@@ -3463,8 +3463,14 @@ mod tests {
     fn channel_pressure_is_per_channel() {
         let mut s = Sim::new(POLY);
         s.send(3, Voice2::ChannelPressure(ControlValue::new(1 << 31)), &One);
-        assert!((s.core.channel(MidiChannel::of(3)).pressure() - 0.5).abs() < 1e-3);
-        assert_eq!(s.core.channel(MidiChannel::of(0)).pressure(), 0.0);
+        assert_eq!(
+            s.core.channel(MidiChannel::of(3)).pressure().get(),
+            f64::from(1_u32 << 31) / f64::from(u32::MAX)
+        );
+        assert_eq!(
+            s.core.channel(MidiChannel::of(0)).pressure(),
+            Normalized::of(0.0)
+        );
     }
 
     // ---- random streams ------------------------------------------------

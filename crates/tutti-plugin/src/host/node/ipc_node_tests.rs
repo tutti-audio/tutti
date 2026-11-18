@@ -1,4 +1,4 @@
-//! `PluginNode<Ipc>`, the generic node over a served plugin, pinned on its own
+//! `HostedNode<Ipc>`, the generic node over a served plugin, pinned on its own
 //! against analytic figures: where a click comes
 //! out, and what the mock `plugin-server` is sent for each chunk, derived from
 //! the schedule and the chunk length alone, with no other node to compare to.

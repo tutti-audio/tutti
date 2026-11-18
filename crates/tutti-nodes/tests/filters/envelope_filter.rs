@@ -26,7 +26,7 @@ fn lowpass_magnitude(f: f64, fc: f64, q: f64) -> f64 {
 /// The settled gain of the node at `TONE` for a sine of `amplitude`.
 fn settled_gain(depth: f64, amplitude: f64, q: f64) -> f64 {
     let mut node = prepared(
-        EnvelopeFilterNode::from(
+        EnvelopeFilterNode::<f32>::from(
             EnvelopeFilterConfig::new(ChannelLayout::MONO, Hz(500.0), SvfType::LowPass)
                 .depth(Semitones(depth))
                 .q(Q(q as f32))
@@ -100,7 +100,7 @@ fn the_attack_and_release_params_set_the_rise_and_the_fall() {
     let (rise, fall) = (14_400, 9_600);
     let (base, depth, q) = (400.0, 36.0, 2.0);
     let mut node = prepared(
-        EnvelopeFilterNode::from(
+        EnvelopeFilterNode::<f32>::from(
             EnvelopeFilterConfig::new(ChannelLayout::MONO, Hz(base), SvfType::LowPass)
                 .depth(Semitones(depth))
                 .q(Q(q as f32)),

@@ -1,4 +1,4 @@
-//! [`Sealed`]: the steps of an update that only an `f32` session has.
+//! [`Sealed`]: the steps of an update that depend on the session's float format.
 //!
 //! A private module with a public trait, so [`SessionFloat`](crate::SessionFloat)
 //! names it and no other crate can implement it.
@@ -7,27 +7,14 @@
 use crate::DeviceClock;
 use crate::{AppKey, Clock, PhaseCx, Session, SessionEvent};
 
-/// A point in a phase where an `f32` session has work an `f64` one does not.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug)]
-pub enum Step {
-    /// Modulation applied.
-    Modulation,
-    /// The declarations re-applied after the commit.
-    Reapply,
-    /// The plugins served.
-    Plugins,
-}
-
-/// The steps of an update that depend on the session's float format being
-/// `f32`: the phases that serve modulation and plugins.
+/// The steps of an update that depend on the session's float format: the
+/// ones that serve plugins (`f32` at their FFI) and land a sampler stream.
 pub trait Sealed: tutti_rt::RingFloat {
-    /// The `f32`-only part of `step` of a phase: all of it on an `f32` session,
-    /// none on an `f64` one.
+    /// Serves the hosted plugins in `Phase::Plugins`: only an `f32` session
+    /// hosts plugins, so an `f64` one has nobody to serve.
     #[doc(hidden)]
-    fn host<K: AppKey, C: Clock<Float = Self>>(
+    fn serve_plugins<K: AppKey, C: Clock<Float = Self>>(
         session: &mut Session<K, C>,
-        step: Step,
         cx: PhaseCx<'_>,
         out: &mut Vec<SessionEvent>,
     );
@@ -63,13 +50,15 @@ pub trait Sealed: tutti_rt::RingFloat {
 }
 
 impl Sealed for f32 {
-    fn host<K: AppKey, C: Clock<Float = f32>>(
+    fn serve_plugins<K: AppKey, C: Clock<Float = f32>>(
         session: &mut Session<K, C>,
-        step: Step,
         cx: PhaseCx<'_>,
         out: &mut Vec<SessionEvent>,
     ) {
-        session.host_step(step, cx, out);
+        #[cfg(feature = "plugin")]
+        session.serve_plugins(cx, out);
+        #[cfg(not(feature = "plugin"))]
+        let _ = (session, cx, out);
     }
 
     #[cfg(feature = "plugin")]
@@ -103,9 +92,8 @@ impl Sealed for f32 {
 }
 
 impl Sealed for f64 {
-    fn host<K: AppKey, C: Clock<Float = f64>>(
+    fn serve_plugins<K: AppKey, C: Clock<Float = f64>>(
         _: &mut Session<K, C>,
-        _: Step,
         _: PhaseCx<'_>,
         _: &mut Vec<SessionEvent>,
     ) {

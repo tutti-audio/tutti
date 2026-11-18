@@ -13,6 +13,7 @@ use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 use super::Convolver;
+use crate::FftFloat;
 use crate::convert::convert_equal;
 
 /// Frames a call is cut into: the size of the scratch, fixed at construction.
@@ -41,27 +42,27 @@ pub enum MatrixConvolverError {
     },
 }
 
-/// A matrix of partitioned FFT convolutions.
+/// A matrix of partitioned FFT convolutions in the float `F`.
 ///
 /// Built once on the control side: every path's spectra, running state and the call
 /// scratch are sized at construction, and [`process`](Self::process) allocates nothing.
 /// The latency is the partition of the head level (the `block_size` given), the same on
 /// every path, and the tail is the longest response's.
 #[derive(Clone, Debug)]
-pub struct MatrixConvolver {
+pub struct MatrixConvolver<F: FftFloat> {
     inputs: ChannelLayout,
     outputs: ChannelLayout,
     /// The paths, input-major: path `(i, o)` is `paths[i * outputs + o]`.
-    paths: Vec<Convolver>,
-    /// Each input's frames of the call being rendered, in `f32`.
-    heard: Vec<[f32; CHUNK]>,
+    paths: Vec<Convolver<F>>,
+    /// Each input's frames of the call being rendered.
+    heard: Vec<[F; CHUNK]>,
     /// The sum of one output's paths.
-    sum: [f32; CHUNK],
+    sum: [F; CHUNK],
     /// One path's output.
-    path: [f32; CHUNK],
+    path: [F; CHUNK],
 }
 
-impl MatrixConvolver {
+impl<F: FftFloat> MatrixConvolver<F> {
     /// A matrix of `inputs` by `outputs` channels from `irs`, input-major: the response of
     /// the path from input `i` to output `o` is `irs[i * outputs + o]`. For a 2 by 2
     /// matrix that is `[LL, LR, RL, RR]`, with `out_L = in_L * LL + in_R * RL`.
@@ -114,14 +115,14 @@ impl MatrixConvolver {
     }
 
     /// The matrix over `paths`, input-major, of a shape the caller has checked.
-    fn assemble(inputs: ChannelLayout, outputs: ChannelLayout, paths: Vec<Convolver>) -> Self {
+    fn assemble(inputs: ChannelLayout, outputs: ChannelLayout, paths: Vec<Convolver<F>>) -> Self {
         Self {
-            heard: vec![[0.0; CHUNK]; usize::from(inputs.count())],
+            heard: vec![[F::ZERO; CHUNK]; usize::from(inputs.count())],
             inputs,
             outputs,
             paths,
-            sum: [0.0; CHUNK],
-            path: [0.0; CHUNK],
+            sum: [F::ZERO; CHUNK],
+            path: [F::ZERO; CHUNK],
         }
     }
 
@@ -178,18 +179,18 @@ impl MatrixConvolver {
             for (i, row) in self.heard.iter_mut().enumerate() {
                 match input.get_plane(i) {
                     Some(src) => convert_equal(&src.samples()[at..at + n], &mut row[..n]),
-                    None => row[..n].fill(0.0),
+                    None => row[..n].fill(F::ZERO),
                 }
             }
             for o in 0..cols {
-                self.sum[..n].fill(0.0);
+                self.sum[..n].fill(F::ZERO);
                 for i in 0..rows {
                     self.paths[i * cols + o].process_block(
                         Mono::new(&self.heard[i][..n]),
                         MonoMut::new(&mut self.path[..n]),
                     );
                     for (s, p) in self.sum[..n].iter_mut().zip(&self.path[..n]) {
-                        *s += p;
+                        *s += *p;
                     }
                 }
                 if let Some(mut plane) = output.get_plane_mut(o) {

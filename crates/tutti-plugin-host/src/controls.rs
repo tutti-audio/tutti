@@ -155,8 +155,8 @@ impl NodeControls {
     /// ([`MAX_TRANSPORT_CHANGES`](tutti_graph::MAX_TRANSPORT_CHANGES), the
     /// graph's own bound), since the plugin was bound: a map point, a seek, a
     /// loop wrap, a start or a stop past the eighth in one chunk. Each is
-    /// counted once; its transport waits for the next chunk's first frame
-    /// (doc 020 stage 5b), and VST3, VST2 and AU, which have no transport
+    /// counted once; its transport waits for the next chunk's first frame,
+    /// and VST3, VST2 and AU, which have no transport
     /// event inside a block, never count one. RT-safe: one relaxed load.
     pub fn dropped_transport_changes(&self) -> u64 {
         self.delivery.dropped_transport_changes()
@@ -462,9 +462,7 @@ impl PluginControls {
 
 /// Lock a tail cell. A poisoned lock still holds a whole `PluginTail` (a
 /// `Copy` value written in one assignment), so it is read through.
-///
-/// Public for `tutti-plugin`'s node of a served plugin, which drives the same piece.
-pub fn lock_tail(tail: &Mutex<PluginTail>) -> std::sync::MutexGuard<'_, PluginTail> {
+fn lock_tail(tail: &Mutex<PluginTail>) -> std::sync::MutexGuard<'_, PluginTail> {
     tail.lock_recover()
 }
 
