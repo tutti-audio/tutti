@@ -196,6 +196,7 @@ fn made(
 ) -> Result<Arc<Made>, HandleError<&'static str>> {
     session
         .pool
+        .entries
         .handle::<_, Stub>(&key)
         .map(|handle| handle.made)
 }
@@ -420,7 +421,7 @@ fn a_ready_load_lands_at_the_declaration_with_the_value_it_was_given() {
     assert!(spawned.take().is_empty(), "no stage runs anywhere");
     assert_eq!(state(&s, "a").as_deref(), Some("loaded"), "at once");
     assert!(Arc::ptr_eq(
-        &s.pool.handle::<_, Provided>(&"a").unwrap(),
+        &s.pool.entries.handle::<_, Provided>(&"a").unwrap(),
         &given
     ));
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
@@ -624,10 +625,10 @@ fn pool_loaded_lands_in_the_update_that_settles_the_last_entry_and_a_dropped_one
     .unwrap();
     let loaded = s.pool_loaded::<&'static str>();
     let dropped = s.pool_loaded::<&'static str>();
-    assert_eq!(s.pool.waiting(), 2);
+    assert_eq!(s.pool.entries.waiting(), 2);
     drop(dropped);
     let _ = s.update();
-    assert_eq!(s.pool.waiting(), 1, "a dropped handle's wait ended");
+    assert_eq!(s.pool.entries.waiting(), 1, "a dropped handle's wait ended");
     assert_ne!(loaded.status(), JobStatus::Done);
     spawned.run_all();
     let mut events = s.update();
@@ -636,7 +637,7 @@ fn pool_loaded_lands_in_the_update_that_settles_the_last_entry_and_a_dropped_one
         JobStatus::Done,
         "the update that landed both settled it"
     );
-    assert_eq!(s.pool.waiting(), 0);
+    assert_eq!(s.pool.entries.waiting(), 0);
     assert!(
         took(&mut events, &loaded)
             .expect("landed")
@@ -804,7 +805,7 @@ fn a_handles_presence_reads_lost_exactly_when_the_kind_says_lost_and_retry_follo
     s.pool(declare(&entry)).unwrap();
     spawned.run_all();
     let _ = events(&mut s);
-    let handle = s.pool.handle::<_, Stub>(&"a").unwrap();
+    let handle = s.pool.entries.handle::<_, Stub>(&"a").unwrap();
     assert_eq!(handle.presence(), Presence::Live);
     assert_eq!(s.retry(&"a"), Err(RetryError::NotFailed("a")));
     handle.made.lost.store(true, Ordering::SeqCst);

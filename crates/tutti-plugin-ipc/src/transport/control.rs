@@ -217,7 +217,7 @@ fn read_exact_by(
             {
                 // Nothing to sleep on under either wakeup, and that is a
                 // property rather than an oversight. `Timeout` means the kernel
-                // already blocked for the poll interval. `Peek` means the read
+                // already blocked for the poll interval. The peek (Windows) means the read
                 // only ran because bytes were waiting, so a would-block here is
                 // the peek and the read disagreeing — a race, not a state — and
                 // the next pass re-peeks and backs off there. Sleeping in

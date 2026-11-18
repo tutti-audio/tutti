@@ -39,7 +39,6 @@ use tutti_rt::LockExt;
 
 use tutti_midi_device::ResourceStore;
 
-use crate::HardwareMidiInputs;
 use crate::answer::Answer;
 use crate::backend;
 use crate::ci::{CiChange, CiPeerInfo, Heard, PeerId};
@@ -50,6 +49,7 @@ use crate::process::{ProcessChange, ReportAsk, ReportError, Reporter};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
+use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{
@@ -549,6 +549,14 @@ impl MidiSession {
         self.inputs
             .get(id)
             .is_some_and(|held| held.input.is_alive())
+    }
+
+    /// Why input `id` stopped delivering: `None` while it delivers and when it
+    /// is not open. An input with a fault is one
+    /// [`is_input_connected`](Self::is_input_connected) reads `false` for.
+    #[must_use]
+    pub fn input_fault(&self, id: &DeviceId) -> Option<InputFault> {
+        self.inputs.get(id).and_then(|held| held.input.fault())
     }
 
     /// Steps the UMP Stream negotiation and the MIDI-CI of every open input at

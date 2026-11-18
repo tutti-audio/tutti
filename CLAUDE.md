@@ -38,7 +38,9 @@ std only. A rule the compiler already enforces is not a gate.
   pkg-config`).
 - **Windows:** `cargo xtask check-windows` lints for MSVC from Linux; CI's `clippy
   (windows)` lints natively and also runs `tutti-winmm-ffi`'s and `tutti-midi-hardware`'s
-  tests there, `--features synth-tests` included (no other CI job runs tests on Windows).
+  tests there, `--features synth-tests` included, and `tutti-plugin-ipc-ffi`'s and
+  `tutti-plugin-ipc`'s `transport::` tests (the contract's `contract (windows)` job is not
+  required; no other job runs tests on Windows).
   The synth suites open the GS Wavetable Synth, which needs an audio endpoint: the job
   installs a virtual audio driver first (`.github/scripts/install-virtual-audio.ps1`).
   A vst3 SDK enum constant

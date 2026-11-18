@@ -16,17 +16,18 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
+use crate::InputFault;
 use tutti_rt::FaultLatch;
 
 /// Runs a driver callback's body so that a panic stops at the callback.
 #[derive(Clone, Debug)]
 pub(crate) struct Guard {
-    died: Arc<FaultLatch>,
+    died: Arc<FaultLatch<InputFault>>,
 }
 
 impl Guard {
     /// A guard that raises `died` when a body panics.
-    pub(crate) fn new(died: Arc<FaultLatch>) -> Self {
+    pub(crate) fn new(died: Arc<FaultLatch<InputFault>>) -> Self {
         Self { died }
     }
 
@@ -40,7 +41,7 @@ impl Guard {
         match catch_unwind(AssertUnwindSafe(body)) {
             Ok(result) => Some(result),
             Err(_) => {
-                self.died.raise(());
+                self.died.raise(InputFault::Panicked);
                 None
             }
         }
