@@ -40,6 +40,8 @@ use tutti_types::UnitParam;
 use tutti_types::{ParamCell, UnitAddr};
 
 use crate::fork::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
+use tutti_buffers::Float;
+
 use crate::node::{IntoNode, Node, NodeParts};
 
 /// One param: its address and the cell the node reads.
@@ -170,7 +172,7 @@ impl ParamSetBuilder {
 /// A graph node reads time from its block's [`Env`](crate::Env), so
 /// [`fork_fresh`](Self::fork_fresh) is the whole copy: the fork reads its
 /// render's `Env`.
-pub trait ParamNode: Node + Sized {
+pub trait ParamNode<F: Float = f32>: Node<F> + Sized {
     /// A [`ParamSet`] over this node's cells (every param a host may set by
     /// address). Control thread; may allocate.
     fn param_set(&self) -> ParamSet;
@@ -191,11 +193,11 @@ pub struct ParamFork<N> {
     params: ParamSet,
 }
 
-impl<N: ParamNode> ParamFork<N> {
+impl<N> ParamFork<N> {
     /// The source for `node`: a template clone that shares its cells.
-    pub fn new(node: &N) -> Self
+    pub fn new<F: Float>(node: &N) -> Self
     where
-        N: Clone,
+        N: ParamNode<F> + Clone,
     {
         Self {
             template: node.clone(),
@@ -212,20 +214,23 @@ impl<N: ParamNode> ParamFork<N> {
     /// The fork of the node as it stands, as a value: what
     /// [`ForkSource::fork`] boxes. Its params are at the values the shared
     /// cells hold now ([`ParamNode::fork_fresh`] copies them).
-    pub fn fork_node(&self) -> N {
+    pub fn fork_node<F: Float>(&self) -> N
+    where
+        N: ParamNode<F>,
+    {
         self.template.fork_fresh()
     }
 }
 
-impl<N: ParamNode> ForkSource for ParamFork<N> {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float, N: ParamNode<F>> ForkSource<F> for ParamFork<N> {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(self.fork_node())))
     }
 
     /// The cells are read here, at the gather: a param set after
     /// it does not reach the fork. The fork's cells are its own, so it can
     /// be prepared on any thread.
-    fn gather(&self, mode: ForkMode) -> Result<ForkBuild, ForkCause> {
+    fn gather(&self, mode: ForkMode) -> Result<ForkBuild<F>, ForkCause> {
         self.fork(mode).map(ForkBuild::ready)
     }
 }
@@ -246,7 +251,7 @@ impl<N: ParamNode> ForkSource for ParamFork<N> {
 /// `N: Clone` is the template: a clone that **shares** the node's cells (as
 /// `Param::clone` does), so a fork taken later reads the cells as they are
 /// then. A `Clone` that detached them would fork the values at insert.
-pub fn param_parts<N: ParamNode + Clone>(node: N) -> NodeParts<ParamSet> {
+pub fn param_parts<F: Float, N: ParamNode<F> + Clone>(node: N) -> NodeParts<ParamSet, F> {
     let fork = ParamFork::new(&node);
     NodeParts {
         node: Box::new(node),
@@ -287,10 +292,10 @@ pub fn param_parts<N: ParamNode + Clone>(node: N) -> NodeParts<ParamSet> {
 #[derive(Clone, Debug)]
 pub struct Params<N>(pub N);
 
-impl<N: ParamNode + Clone> IntoNode for Params<N> {
+impl<F: Float, N: ParamNode<F> + Clone> IntoNode<F> for Params<N> {
     type Controls = ParamSet;
 
-    fn into_parts(self) -> NodeParts<ParamSet> {
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
         param_parts(self.0)
     }
 
