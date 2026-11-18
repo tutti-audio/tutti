@@ -110,7 +110,7 @@ impl FdnControls {
         decay: [Seconds(2.0), Seconds(2.4), Seconds(1.2)],
         size: Mix(0.5),
         diffusion: Mix(0.8),
-        pre_delay: Seconds(0.0),
+        pre_delay: Seconds::ZERO,
         modulation: Depth::of(0.3),
         rate: Hz(0.5),
         width: StereoWidth::NATURAL,
@@ -250,7 +250,7 @@ impl FdnLayout {
         };
         let size = finite_or(c.size.get(), d.size.get()).clamp(0.0, 1.0);
         let diffusion = finite_or(c.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
-        let pre = finite_secs(c.pre_delay, Seconds(0.0)).clamp(Seconds(0.0), MAX_PRE_DELAY);
+        let pre = finite_secs(c.pre_delay, Seconds::ZERO).clamp(Seconds::ZERO, MAX_PRE_DELAY);
         let depth = finite_or(c.modulation.get(), 0.0).abs().min(1.0);
         let mod_rate = finite_or(c.rate.get(), d.rate.get()).clamp(RATES.0, RATES.1);
         let width = finite_or(c.width.get(), 1.0).clamp(0.0, MAX_WIDTH);

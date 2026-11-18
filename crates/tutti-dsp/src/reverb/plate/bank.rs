@@ -527,7 +527,7 @@ fn bandwidth_ring(cutoff: Hz, rate: SampleRate) -> Seconds {
     let pole = cutoff_pole(cutoff, rate);
     let floor = f64::from(TAIL_FLOOR.to_amplitude().get());
     if pole <= 0.0 {
-        return Seconds(0.0);
+        return Seconds::ZERO;
     }
     Seconds(libm::log(floor) / libm::log(pole) / rate.get())
 }
@@ -544,7 +544,7 @@ fn shape_of(network: &Network) -> Shape {
     let mut shape = Shape {
         input,
         halves: [[Samples(1); 4]; 2],
-        mod_rate: Hz(0.0),
+        mod_rate: Hz::ZERO,
         excursion: Samples::ZERO,
         pre: network.pre_delay,
     };

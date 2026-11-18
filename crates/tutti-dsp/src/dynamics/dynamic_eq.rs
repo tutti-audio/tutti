@@ -111,8 +111,8 @@ impl DynamicEqControls {
         threshold: Db::UNITY,
         knee: Db::UNITY,
         ratio: CompressionRatio::UNITY,
-        attack: Seconds(0.0),
-        release: Seconds(0.0),
+        attack: Seconds::ZERO,
+        release: Seconds::ZERO,
         range: Db(12.0),
     };
 }
@@ -151,7 +151,10 @@ impl Design {
     /// The design of `c` at `rate`, with `center` and `q` as the filters are given them.
     fn of(c: &DynamicEqControls, center: Hz, q: Q, rate: SampleRate) -> Self {
         let d = DynamicEqControls::DEFAULT;
-        let tau = Seconds(DETECTOR_PERIODS / f64::from(center.get())).min(DETECTOR_MAX);
+        // A centre is held in the SVF's range, so it has a period; none reads as the longest time.
+        let tau = center.period().map_or(DETECTOR_MAX, |period| {
+            (period * DETECTOR_PERIODS).min(DETECTOR_MAX)
+        });
         Self {
             threshold: Db(finite_or(c.threshold.get(), d.threshold.get())
                 .clamp(-MAX_THRESHOLD_DB, MAX_THRESHOLD_DB)),

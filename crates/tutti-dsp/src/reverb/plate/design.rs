@@ -200,7 +200,7 @@ impl PlateControls {
         decay: Seconds(1.8),
         damping: Mix(0.0005),
         bandwidth: Hz(20_000.0),
-        pre_delay: Seconds(0.0),
+        pre_delay: Seconds::ZERO,
         modulation: Depth::of(0.5),
         diffusion: Mix(1.0),
     };
@@ -239,9 +239,9 @@ impl PlateControls {
         let pre = if self.pre_delay.get().is_finite() {
             self.pre_delay
         } else {
-            Seconds(0.0)
+            Seconds::ZERO
         }
-        .clamp(Seconds(0.0), MAX_PRE_DELAY);
+        .clamp(Seconds::ZERO, MAX_PRE_DELAY);
         let depth = self.modulation.get().abs().min(1.0);
         let diffusion = finite_or(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
 
