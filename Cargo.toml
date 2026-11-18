@@ -78,7 +78,7 @@ members = [
 version = "0.0.1"
 edition = "2024"
 # The pinned toolchain's minor (`rust-toolchain.toml`); the two move together.
-rust-version = "1.99"
+rust-version = "1.100"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/tutti-audio/tutti"
 
@@ -145,7 +145,7 @@ objc2-core-midi = { version = "0.3", default-features = false, features = ["std"
 
 # Release codegen with line tables, for a sampling profiler:
 #   cargo build -p tutti-nodes --profile profiling --bench engine_render
-#   samply record target/profiling/deps/engine_render-<hash> --bench
+#   samply record target/profiling/build/tutti-nodes/<hash>/out/engine_render-<hash> --bench
 # Cargo reads `[profile]` only in the root manifest, so profiles live here.
 [profile.profiling]
 inherits = "release"

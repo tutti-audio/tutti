@@ -6,6 +6,9 @@ use tutti_units::Db;
 use super::*;
 use crate::testing::noise;
 
+// The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
+// the `f64` banks have their own tests below.
+
 fn controls(db: f32) -> BrickwallControls {
     BrickwallControls { ceiling: Db(db) }
 }
@@ -26,7 +29,7 @@ fn render_blocks(
     lane: Option<&[f32]>,
     block: usize,
 ) -> Vec<Vec<f32>> {
-    let mut bank = BrickwallBank::new();
+    let mut bank = BrickwallBank::<f32>::new();
     bank.aim(&controls);
     let mut out = vec![vec![0.0f32; x.len()]; 2];
     let mut start = 0;
@@ -233,7 +236,7 @@ fn the_output_never_passes_the_ceiling_for_a_square_an_impulse_train_or_a_burst(
 fn an_f64_view_is_clamped_like_the_f32_it_converts_to() {
     let x32 = noise(11, 512, 2.0);
     let x64: Vec<f64> = x32.iter().map(|&x| f64::from(x)).collect();
-    let mut bank = BrickwallBank::new();
+    let mut bank = BrickwallBank::<f32>::new();
     bank.aim(&controls(-6.0));
     let mut y64 = vec![0.0f64; x64.len()];
     bank.process(
@@ -245,4 +248,31 @@ fn an_f64_view_is_clamped_like_the_f32_it_converts_to() {
     for (i, (&y, &x)) in y64.iter().zip(&x32).enumerate() {
         assert_eq!(y, f64::from(definition(x, c)), "frame {i}");
     }
+}
+
+/// An `f64` clipper clamps in `f64`: over `-20 dB` a signal of more than 24 bits leaves at the
+/// closed form `10^(-20 / 20)` (a dB the f32 converter divides exactly) rounded to `f32`, as the control stores it (`Db` stores `f32`),
+/// and widened, to 1e-15, and under `0 dB` it comes
+/// out as it went in.
+#[test]
+fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x = wide_signal(64);
+    let render = |db: f32| -> Vec<f64> {
+        let mut bank = BrickwallBank::<f64>::new();
+        bank.aim(&controls(db));
+        let mut y = vec![0.0f64; x.len()];
+        bank.process(
+            BrickwallLanes::default(),
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        );
+        y
+    };
+    assert_close_f64(
+        &render(-20.0),
+        &vec![f64::from(10f64.powf(-20.0 / 20.0) as f32); x.len()],
+        1e-15,
+    );
+    assert_close_f64(&render(0.0), &x, 0.0);
 }

@@ -4,7 +4,11 @@ use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
 
 use super::*;
+use crate::compute_compressor_gain_reduction;
 use crate::testing::noise;
+
+// The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
+// the `f64` banks have their own tests below.
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// The rates the static and time-constant tests run at.
@@ -94,7 +98,7 @@ fn hostile() -> Vec<CompressorControls> {
 }
 
 /// A bank at `rate` at rest on `c`: aimed and landed, nothing gliding.
-fn runner_at(c: &CompressorControls, rate: SampleRate) -> CompressorBank {
+fn runner_at(c: &CompressorControls, rate: SampleRate) -> CompressorBank<f32> {
     let mut bank = CompressorBank::new(rate);
     bank.aim(c);
     bank.settle();
@@ -102,14 +106,14 @@ fn runner_at(c: &CompressorControls, rate: SampleRate) -> CompressorBank {
 }
 
 /// [`runner_at`] at 48 kHz.
-fn runner(c: &CompressorControls) -> CompressorBank {
+fn runner(c: &CompressorControls) -> CompressorBank<f32> {
     runner_at(c, RATE)
 }
 
 /// `audio` (one slice per channel) through `bank`, keyed by `key`, with `lane` as the
 /// threshold lane when given, in calls of at most `block` frames.
 fn run_in(
-    bank: &mut CompressorBank,
+    bank: &mut CompressorBank<f32>,
     audio: &[&[f32]],
     key: &[&[f32]],
     lane: Option<&[f32]>,
@@ -139,7 +143,7 @@ fn run_in(
 
 /// [`run_in`] in calls of [`CHUNK`] frames.
 fn run(
-    bank: &mut CompressorBank,
+    bank: &mut CompressorBank<f32>,
     audio: &[&[f32]],
     key: &[&[f32]],
     lane: Option<&[f32]>,
@@ -239,8 +243,8 @@ fn the_member_floors_what_cannot_be_run() {
     assert_eq!((m.knee, m.ratio), (Db::UNITY, CompressionRatio(1.0)));
     // A time under 0 is the follower of time 0: instant.
     assert_eq!(
-        Detector::of(&m).ballistics,
-        Follower::of(floored(Seconds::ZERO, Seconds::ZERO), RATE)
+        Detector::<f32>::of(&m).ballistics,
+        Follower::<f32>::of(floored(Seconds::ZERO, Seconds::ZERO), RATE)
     );
     let d = CompressorControls::DEFAULT;
     let bad = CompressorMember::designed(
@@ -668,8 +672,8 @@ fn a_keyed_follower_keeps_tracking_while_the_main_signal_is_silent() {
     );
 }
 
-/// A render over `f64` views is the `f32` render converted: the state is `f32`, the views are
-/// converted at the edges, and an `f32` input is exact in `f64`, so the two agree to the
+/// A render of an `f32` bank over `f64` views is its render of the `f32` views converted: the
+/// views are converted at the edges, and an `f32` input is exact in `f64`, so the two agree to the
 /// last bit (a tolerance of 0), with a threshold lane and a makeup glide in flight.
 #[test]
 fn an_f64_render_is_the_f32_render_converted() {
@@ -754,4 +758,75 @@ fn a_huge_knee_is_held_and_the_gain_returns_to_the_static_curve() {
             "knee {knee}: gain {got} vs {want}"
         );
     }
+}
+
+/// `audio` through an `f64` bank at 48 kHz aimed at `c` and landed, in one block, keyed by
+/// `key`.
+fn run_f64(c: &CompressorControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
+    let mut bank = CompressorBank::<f64>::new(RATE);
+    bank.aim(c);
+    bank.settle();
+    let mut out = vec![0.0f64; audio.len()];
+    bank.process(
+        CompressorLanes::default(),
+        Planes::new(&[key]).unwrap(),
+        Planes::new(&[audio]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    out
+}
+
+/// A key level `-12.04 dB` or so that no `f32` holds: the value `wide_signal` starts at,
+/// held for `len` frames.
+fn wide_constant(len: usize) -> Vec<f64> {
+    vec![tutti_fixtures::signal::wide_signal(1)[0]; len]
+}
+
+/// Under the threshold the reduction is exactly 0 and the gain `10^0` is 1: an `f64` signal
+/// of more than 24 bits comes out as it went in, whatever it is keyed by, so nothing in the
+/// path narrows it.
+#[test]
+fn an_f64_compressor_under_its_threshold_is_the_identity_at_0_db_makeup() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x = wide_signal(300);
+    let c = controls(0.0, 6.0, 4.0, 0.002, 0.05, 0.0);
+    assert_close_f64(&run_f64(&c, &x, &x), &x, 0.0);
+}
+
+/// At a constant key the reduction is the one-pole `y[n] = y[n-1] + c (target - y[n-1])`
+/// toward the curve's reduction, `c = 1 - exp(-1 / (tau rate))`, and the gain is
+/// `10^(-y[n] / 20)`: the closed form in `f64`, to 1e-12.
+#[test]
+fn an_f64_compressor_follows_the_one_pole_closed_form_in_f64() {
+    use tutti_fixtures::signal::assert_close_f64;
+    let (threshold, ratio, tau) = (-30.0, 4.0, 0.002);
+    let key = wide_constant(2_000);
+    let k = key[0];
+    let c = controls(threshold as f32, 0.0, ratio as f32, tau, 0.05, 0.0);
+    let target = (20.0 * k.log10() - threshold) * (1.0 - 1.0 / ratio);
+    let coeff = 1.0 - (-1.0 / (tau * RATE.get())).exp();
+    let mut reduction = 0.0f64;
+    let want: Vec<f64> = key
+        .iter()
+        .map(|&x| {
+            reduction += coeff * (target - reduction);
+            x * 10f64.powf(-reduction / 20.0)
+        })
+        .collect();
+    assert_close_f64(&run_f64(&c, &key, &key), &want, 1e-12);
+}
+
+/// With instant times the reduction is the curve's at once, so a constant key `L` dB over
+/// the threshold `T` comes out at `T + (L - T) / R` dB: the static curve of a hard knee, to
+/// 1e-12 dB.
+#[test]
+fn an_f64_compressor_above_its_threshold_lands_on_the_static_curve_in_f64() {
+    let (threshold, ratio) = (-30.0, 5.0);
+    let key = wide_constant(64);
+    let c = controls(threshold as f32, 0.0, ratio as f32, 0.0, 0.0, 0.0);
+    let level = 20.0 * key[0].log10();
+    let out = run_f64(&c, &key, &key);
+    let got = 20.0 * out[63].log10();
+    let want = threshold + (level - threshold) / ratio;
+    assert!((got - want).abs() < 1e-12, "{got} dB against {want} dB");
 }

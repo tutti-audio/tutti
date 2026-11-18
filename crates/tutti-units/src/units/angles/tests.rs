@@ -245,15 +245,15 @@ fn radians_wrap_signed_rather_than_saturating() {
 
     // A deviation of +3pi/2 is really -pi/2. Keeping the larger number
     // moves a partial the wrong way round the circle.
-    assert!((Radians(1.5 * pi).wrapped_signed().get() - (-0.5 * pi)).abs() < 1e-5);
-    assert!((Radians(-1.5 * pi).wrapped_signed().get() - (0.5 * pi)).abs() < 1e-5);
+    assert!((Radians(1.5 * pi).wrapped_signed().get() - (-0.5 * pi)).abs() < 1e-15);
+    assert!((Radians(-1.5 * pi).wrapped_signed().get() - (0.5 * pi)).abs() < 1e-15);
 
     // Already inside: unchanged.
     assert_eq!(Radians(0.0).wrapped_signed(), Radians(0.0));
 
     // Half-open at +pi, which folds to -pi — the same point on the circle,
     // and the same convention `Phase::wrapped` uses at the top of a cycle.
-    assert!((Radians(pi).wrapped_signed().get() - (-pi)).abs() < 1e-5);
+    assert_eq!(Radians(pi).wrapped_signed(), Radians(-pi));
 
     // Arithmetic, not iteration: a phase accumulated over minutes of audio
     // wraps in constant time. The `while` loop this replaced ran once per
@@ -271,12 +271,15 @@ fn turns_and_radians_convert_both_ways() {
 
     // A quarter turn is the sine peak — the check that the units line up
     // rather than being off by tau somewhere.
-    assert!((Phase(0.25).to_radians().sin() - 1.0).abs() < 1e-6);
-    assert!(Phase::START.to_radians().cos() - 1.0 < 1e-6);
+    assert_eq!(Phase(0.25).to_radians().sin(), 1.0);
+    assert_eq!(Phase::START.to_radians().cos(), 1.0);
 
     // Degrees reach radians too, so a panner converts once instead of
     // hand-multiplying by pi/180 at each trig call.
-    assert!((Radians::from(Azimuth(180.0)).0 - core::f64::consts::PI).abs() < 1e-6);
+    assert_eq!(
+        Radians::from(Azimuth(180.0)),
+        Radians(core::f64::consts::PI)
+    );
     assert_eq!(Radians::from(Elevation::LEVEL), Radians(0.0));
 }
 
@@ -293,18 +296,18 @@ fn phase_sin_is_sine_of_a_turn() {
     assert_eq!(Phase::START.sin(), 0.0);
     assert_eq!(Phase(0.25).sin(), 1.0);
     assert_eq!(Phase(0.75).sin(), -1.0);
-    assert!(Phase(0.5).sin().abs() < 1e-7);
-    assert!((Phase(1.0 / 12.0).sin() - 0.5).abs() < 1e-7);
+    assert!(Phase(0.5).sin().abs() < 1e-15);
+    assert!((Phase(1.0 / 12.0).sin() - 0.5).abs() < 1e-15);
 }
 
 /// The f64 sine of a phase and the f64 sine of its radians are one function
 /// to within f64 precision, over a whole turn.
 #[test]
-fn phase_sin_and_radians_sin_agree_within_a_millionth() {
+fn phase_sin_and_radians_sin_agree_to_f64_precision() {
     for i in 0..=1024u16 {
         let p = Phase(f64::from(i) / 1024.0);
         let (a, b) = (p.sin(), p.to_radians().sin());
-        assert!((a - b).abs() < 1e-6, "{p:?}: {a} vs {b}");
+        assert!((a - b).abs() < 1e-15, "{p:?}: {a} vs {b}");
     }
 }
 

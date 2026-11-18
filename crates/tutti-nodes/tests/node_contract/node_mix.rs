@@ -359,7 +359,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     check_io(
         "gate (stereo, keyed)",
         &|| {
-            GateNode::new(
+            GateNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 GateControls {
@@ -379,7 +379,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     check_io(
         "compressor (stereo, keyed)",
         &|| {
-            CompressorNode::new(
+            CompressorNode::<f32>::new(
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 CompressorControls {

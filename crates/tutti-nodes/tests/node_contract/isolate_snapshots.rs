@@ -42,7 +42,7 @@ use tutti_units::{
 #[test]
 fn compressor() {
     IsolateRow::new("CompressorNode (stereo)", || {
-        CompressorNode::new(
+        CompressorNode::<f32>::new(
             BusTopology::STEREO,
             KeySource::Sidechain,
             CompressorControls {
@@ -80,7 +80,7 @@ fn compressor() {
 #[test]
 fn gate() {
     IsolateRow::new("GateNode (stereo)", || {
-        GateNode::new(
+        GateNode::<f32>::new(
             BusTopology::STEREO,
             KeySource::Sidechain,
             GateControls {
@@ -114,7 +114,7 @@ fn gate() {
 #[test]
 fn limiter() {
     IsolateRow::new("LimiterNode (stereo)", || {
-        LimiterNode::stereo(LimiterControls {
+        LimiterNode::<f32>::stereo(LimiterControls {
             threshold: Db(-6.0),
             ceiling: Db(-3.0),
             ..LimiterControls::DEFAULT
@@ -135,7 +135,7 @@ fn limiter() {
 #[test]
 fn brickwall_limiter() {
     IsolateRow::new("BrickwallLimiterNode (stereo)", || {
-        BrickwallLimiterNode::new(Db(-3.0))
+        BrickwallLimiterNode::<f32>::new(Db(-3.0))
     })
     .control("ceiling", |l| {
         assert!(l.param_set().set(UnitParam::Ceiling, -9.0));

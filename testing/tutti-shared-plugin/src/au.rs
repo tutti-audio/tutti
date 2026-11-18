@@ -1521,7 +1521,7 @@ unsafe fn process_lists(
         }
         let read = (*input).mBuffers.as_ptr();
         let write = (*output).mBuffers.as_mut_ptr();
-        for c in 0..CHANNELS {
+        for (c, &channel) in f.input_ch[..CHANNELS].iter().enumerate() {
             let (src, dst) = (&*read.add(c), &*write.add(c));
             if src.mData.is_null()
                 || dst.mData.is_null()
@@ -1530,7 +1530,7 @@ unsafe fn process_lists(
             {
                 return ERR_PARAM;
             }
-            std::ptr::copy_nonoverlapping(src.mData.cast::<f32>(), f.input_ch[c], n);
+            std::ptr::copy_nonoverlapping(src.mData.cast::<f32>(), channel, n);
         }
         if let Some(h) = &f.host {
             ask_transport(&i.core, h);

@@ -3,7 +3,29 @@
 //! The gain-computation curves, shared by the compressor, the gate and the
 //! limiter, and the amplitude-to-decibel conversion that floors silence.
 
+use tutti_buffers::Float;
 use tutti_units::{Amplitude, CompressionRatio, Db};
+
+/// The decibels of a level at the working precision `F`, floored at [`Db::FLOOR`]: a level of
+/// zero or below is the floor. The maths is [`Db::from_amplitude`]'s, `20 log10` through `libm`,
+/// so an `f32` level gives that converter's bits. `Db` stores `f32`, so a per-sample level in
+/// `F` has no `Db` to go through; `Db`'s converters replace this pair when `Db` stores `f64`.
+#[inline]
+pub(crate) fn level_db<F: Float>(level: F) -> F {
+    if level <= F::ZERO {
+        F::from_f32(Db::FLOOR.get())
+    } else {
+        F::from_f32(20.0) * level.log10()
+    }
+}
+
+/// The amplitude ratio of `db` decibels at the working precision `F`, `10^(db / 20)` through
+/// `libm` as [`Db::to_amplitude`] has it: `-inf` is 0 and `+inf` is `+inf`. Replaced by `Db`'s
+/// converter when `Db` stores `f64`.
+#[inline]
+pub(crate) fn db_gain<F: Float>(db: F) -> F {
+    F::from_f32(10.0).powf(db / F::from_f32(20.0))
+}
 
 /// Amplitude as decibels, floored: an amplitude of zero or below is `Db::FLOOR`
 /// (`-144`, about the 24-bit noise floor) rather than `-inf`.
@@ -15,12 +37,7 @@ use tutti_units::{Amplitude, CompressionRatio, Db};
 /// branch and returns `Db::UNITY`.
 #[inline]
 pub fn amplitude_to_db(amp: impl Into<Amplitude>) -> Db {
-    let amp = amp.into();
-    if amp.get() <= 0.0 {
-        Db::FLOOR
-    } else {
-        Db::from_amplitude(amp)
-    }
+    Db(level_db(amp.into().get()))
 }
 
 /// Pure compressor gain reduction (hard/soft knee).
@@ -31,27 +48,35 @@ pub fn compute_compressor_gain_reduction(
     ratio: impl Into<CompressionRatio>,
     knee: impl Into<Db>,
 ) -> Db {
-    let input_db = input_db.into().get();
-    let threshold = threshold.into().get();
-    let ratio = ratio.into().get();
-    let knee = knee.into().get();
-    if knee <= 0.0 {
-        let over_db = (input_db - threshold).max(0.0);
-        Db(over_db * (1.0 - 1.0 / ratio))
+    Db(gain_reduction(
+        input_db.into().get(),
+        threshold.into().get(),
+        ratio.into().get(),
+        knee.into().get(),
+    ))
+}
+
+/// [`compute_compressor_gain_reduction`] over the bare floats at the working precision `F`,
+/// all in dB but the ratio.
+#[inline]
+pub(crate) fn gain_reduction<F: Float>(input_db: F, threshold: F, ratio: F, knee: F) -> F {
+    let slope = F::ONE - F::ONE / ratio;
+    if knee <= F::ZERO {
+        let over_db = (input_db - threshold).max(F::ZERO);
+        over_db * slope
     } else {
-        let half_knee = knee / 2.0;
+        let two = F::from_f32(2.0);
+        let half_knee = knee / two;
         let below = threshold - half_knee;
         let above = threshold + half_knee;
 
         if input_db <= below {
-            Db::UNITY
+            F::ZERO
         } else if input_db >= above {
-            let over_db = input_db - threshold;
-            Db(over_db * (1.0 - 1.0 / ratio))
+            (input_db - threshold) * slope
         } else {
             let x = input_db - below;
-            let slope = (1.0 - 1.0 / ratio) / (2.0 * knee);
-            Db(slope * x * x)
+            slope / (two * knee) * x * x
         }
     }
 }
@@ -76,9 +101,8 @@ pub(super) fn compute_upward_gain_lift(
 /// The gate's gain: `range` closed (`gate_level` 0) to 1 open (`gate_level` 1),
 /// from the open fraction (unitless, 0..1) and the range as an amplitude.
 #[inline]
-pub(crate) fn gate_gain_at(gate_level: f32, range: Amplitude) -> Amplitude {
-    let range = range.get();
-    Amplitude(range + gate_level * (1.0 - range))
+pub(crate) fn gate_gain_at<F: Float>(gate_level: F, range: F) -> F {
+    range + gate_level * (F::ONE - range)
 }
 
 /// Pure limiter gain computation: the transfer curve of [`LimiterCurve`] in
@@ -94,16 +118,23 @@ pub fn compute_limiter_gain(
     threshold: impl Into<Db>,
     ceiling: impl Into<Db>,
 ) -> Amplitude {
-    let peak_db = peak_db.into().get();
-    let threshold = threshold.into().get();
-    let ceiling = ceiling.into().get();
+    Amplitude(limiter_gain(
+        peak_db.into().get(),
+        threshold.into().get(),
+        ceiling.into().get(),
+    ))
+}
+
+/// [`compute_limiter_gain`] over the bare floats at the working precision `F`, all in dB.
+#[inline]
+pub(crate) fn limiter_gain<F: Float>(peak_db: F, threshold: F, ceiling: F) -> F {
     if peak_db > threshold {
         // The gain that puts the peak at the ceiling, taken as the difference of the two
         // levels: it does not lose the ceiling to cancellation when the threshold is far
         // below it.
-        Db(ceiling - peak_db).to_amplitude()
+        db_gain(ceiling - peak_db)
     } else {
-        Db(ceiling - threshold).to_amplitude()
+        db_gain(ceiling - threshold)
     }
 }
 
@@ -181,12 +212,37 @@ impl LimiterCurve {
     /// divisor is never zero.
     #[inline]
     pub fn gain(&self, peak: Amplitude) -> Amplitude {
-        let peak = peak.get();
-        Amplitude(if peak > self.threshold.get() {
-            self.over.get() / peak
+        Amplitude(self.widened::<f32>().gain(peak.get()))
+    }
+
+    /// This curve's figures widened to `F`, once, for a per-sample [`WideCurve::gain`].
+    pub(crate) fn widened<F: Float>(&self) -> WideCurve<F> {
+        WideCurve {
+            threshold: F::from_f32(self.threshold.get()),
+            over: F::from_f32(self.over.get()),
+            below: F::from_f32(self.below.get()),
+        }
+    }
+}
+
+/// A [`LimiterCurve`] widened to `F`: the figures as bare amplitudes, so a per-sample gain
+/// widens nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WideCurve<F> {
+    threshold: F,
+    over: F,
+    below: F,
+}
+
+impl<F: Float> WideCurve<F> {
+    /// The gain for a linked peak held in `F`, as [`LimiterCurve::gain`].
+    #[inline]
+    pub(crate) fn gain(&self, peak: F) -> F {
+        if peak > self.threshold {
+            self.over / peak
         } else {
-            self.below.get()
-        })
+            self.below
+        }
     }
 }
 

@@ -334,7 +334,7 @@ fn chorus_rate_write_moves_the_nodes_own_cell() {
 /// its set.
 #[test]
 fn compressor_makeup_is_addressed_as_gain_db() {
-    let node = CompressorNode::new(
+    let node = CompressorNode::<f32>::new(
         BusTopology::STEREO,
         KeySource::Sidechain,
         CompressorControls {
@@ -544,7 +544,7 @@ fn a_limiter_driven_below_its_release_floor_still_releases() {
     let mut input = tone(1.0, BURST);
     input.extend(tone(0.05, 36_000));
     let out = render_driven(
-        LimiterNode::mono(LimiterControls {
+        LimiterNode::<f32>::mono(LimiterControls {
             threshold: Db::new(-12.0),
             ceiling: Db::new(-12.0),
             ..LimiterControls::DEFAULT
@@ -635,8 +635,8 @@ fn a_chorus_depth_lane_past_its_range_is_held_at_the_sweeps_bound() {
         &ramp(FRAMES),
     );
     // Past the line's length the line holds the ramp alone. The tolerance is a frame: the
-    // sweep runs 2.5 frames of delay per frame at its steepest, and the f32 phase drifts
-    // by some 1e-5 of a cycle over the render; a depth past 40 ms misses by hundreds.
+    // sweep runs 2.5 frames of delay per frame at its steepest; a depth past 40 ms misses
+    // by hundreds.
     let mut most = f32::MIN;
     for n in (2_400..FRAMES).step_by(16) {
         // The LFO steps before the frame it sounds in: frame `n` sounds step `n + 1`.
