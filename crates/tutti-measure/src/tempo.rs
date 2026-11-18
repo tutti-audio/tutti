@@ -366,7 +366,7 @@ pub fn track_beats_from_novelty(
             }
             // A period under two frames cannot be tracked, and one longer than
             // the curve holds at most one beat.
-            let period = 60.0 * rate / bpm.get();
+            let period = lag_of(bpm, rate);
             if !(2.0..=novelty.len() as f64).contains(&period) {
                 return Err(Error::UntrackableTempo { bpm });
             }
@@ -374,7 +374,7 @@ pub fn track_beats_from_novelty(
         }
         None => estimate_tempo_from_novelty(cfg, novelty, sample_rate, hop, fft)?.bpm,
     };
-    let period = 60.0 * rate / bpm.get();
+    let period = lag_of(bpm, rate);
     let beats = beat::track(novelty, period, cfg.tightness.get())
         .into_iter()
         .map(|frame| Samples(frame * hop.get()))
@@ -382,12 +382,26 @@ pub fn track_beats_from_novelty(
     Ok(BeatGrid { beats, bpm })
 }
 
-/// Frames per second of a curve with one value per `hop`.
-fn frame_rate(sample_rate: SampleRate, hop: Samples) -> Result<f64> {
+/// Frames per second of a curve with one value per `hop`: the curve's own
+/// sampling rate, in the unit that holds an `f64` rate.
+fn frame_rate(sample_rate: SampleRate, hop: Samples) -> Result<SampleRate> {
     if hop.is_zero() {
         return Err(Error::ZeroHop);
     }
-    Ok(sample_rate.get() / hop.get() as f64)
+    // Positive and finite for a nonzero hop, short of an `f64` underflow, which
+    // a hop that large reports as a zero one.
+    SampleRate::new(sample_rate.get() / hop.get() as f64).ok_or(Error::ZeroHop)
+}
+
+/// The lag in frames of one beat at `bpm` on a curve at `rate`: `60 * rate / bpm`,
+/// in `f64` because a lag is a fractional frame count.
+fn lag_of(bpm: Bpm, rate: SampleRate) -> f64 {
+    60.0 * rate.get() / bpm.get()
+}
+
+/// The tempo of a lag of `lag` frames on a curve at `rate`: `60 * rate / lag`.
+fn bpm_of(lag: f64, rate: SampleRate) -> f64 {
+    60.0 * rate.get() / lag
 }
 
 /// The detection curve of `samples` at `rate` on the config's framing, with
@@ -436,14 +450,14 @@ struct Periodicity {
     first_lag: FrameCount,
     /// The last lag inside the tempo range, in novelty frames.
     last_lag: FrameCount,
-    frame_rate: f64,
+    frame_rate: SampleRate,
 }
 
 impl Periodicity {
     fn new(
         cfg: &TempoConfig,
         novelty: &[f32],
-        frame_rate: f64,
+        frame_rate: SampleRate,
         hop: Samples,
         fft: &mut FftScratch,
     ) -> Result<Self> {
@@ -451,10 +465,10 @@ impl Periodicity {
             return Err(Error::NonFiniteInput);
         }
         // Lag 1 has no neighbour below it for the refinement, so start at 2.
-        let first_lag = ((60.0 * frame_rate / cfg.max.get()).ceil() as usize).max(2);
+        let first_lag = (lag_of(cfg.max, frame_rate).ceil() as usize).max(2);
         // In floating point first: a slow tempo at a fast frame rate maps to a
         // lag that does not fit a `usize` after the arithmetic below.
-        let longest = (60.0 * frame_rate / cfg.min.get()).floor();
+        let longest = lag_of(cfg.min, frame_rate).floor();
         if longest < first_lag as f64 {
             return Err(Error::EmptyTempoRange {
                 min: cfg.min,
@@ -506,7 +520,7 @@ impl Periodicity {
 
     /// The tempo of lag `lag`, in BPM.
     fn bpm(&self, lag: f64) -> f64 {
-        60.0 * self.frame_rate / lag
+        bpm_of(lag, self.frame_rate)
     }
 
     /// The normalised autocorrelation at a lag in `first_lag - 1..=last_lag + 1`

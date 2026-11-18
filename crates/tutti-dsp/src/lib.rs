@@ -162,7 +162,7 @@
 //! - **Tremolo, auto-pan and ring modulation** (`tremolo.rs`, `ring_mod.rs`): [`Tremolo`] and
 //!   [`AutoPan`], an [`Oscillator`] scaling the level or placing it by [`pan_gains`];
 //!   [`RingModulator`], the input times a sine carrier.
-//! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`], [`Smoother`].
+//! - **Small kernels**: [`cubic_hermite`], [`rms`], [`ShapeKind`], [`Smoother`].
 //!
 //! ## Import paths
 //!
@@ -184,6 +184,7 @@ mod fir;
 mod follower;
 mod glide;
 mod interp;
+mod level;
 mod modulation;
 mod onepole;
 mod oscillator;
@@ -236,6 +237,7 @@ pub use filter::{
 pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
+pub use level::rms;
 pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_coeff, sweep_hz};
 pub use modulation::mod_delay::{

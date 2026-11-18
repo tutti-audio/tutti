@@ -15,7 +15,7 @@
 use core::ops::Range;
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Db, SampleRate, Samples, Seconds};
+use tutti_types::{Amplitude, Db, SampleRate, Samples, Seconds};
 
 use core::marker::PhantomData;
 
@@ -120,11 +120,11 @@ impl SilenceConfig {
     /// `strip_silence` calls so its own result needs no `Result`.
     fn bind<S: Sample>(&self, rate: SampleRate) -> SilenceMeter<S> {
         SilenceMeter {
-            floor: self.threshold.to_amplitude().get(),
-            min_silence: self.min_silence.to_samples(rate).max(Samples(1)).get(),
-            pre_pad: self.pre_pad.to_samples(rate).get(),
-            post_pad: self.post_pad.to_samples(rate).get(),
-            seen: 0,
+            floor: self.threshold.to_amplitude(),
+            min_silence: self.min_silence.to_samples(rate).max(Samples(1)),
+            pre_pad: self.pre_pad.to_samples(rate),
+            post_pad: self.post_pad.to_samples(rate),
+            seen: Samples::ZERO,
             open: None,
             closed: Vec::new(),
             sample: PhantomData,
@@ -151,12 +151,12 @@ impl<S: Sample> Measure<S> for SilenceConfig {
 #[derive(Debug, Clone)]
 pub struct SilenceMeter<S: Sample = f32> {
     /// The threshold as a linear magnitude.
-    floor: f32,
-    min_silence: usize,
-    pre_pad: usize,
-    post_pad: usize,
-    /// Samples consumed so far.
-    seen: usize,
+    floor: Amplitude,
+    min_silence: Samples,
+    pre_pad: Samples,
+    post_pad: Samples,
+    /// Frames consumed so far.
+    seen: Samples,
     /// The region being grown: first and last loud sample.
     open: Option<(usize, usize)>,
     /// Regions already cut off, as `(first loud, one past last loud)`.
@@ -168,26 +168,26 @@ impl<S: Sample> SilenceMeter<S> {
     fn scan(&mut self, samples: &[f32]) {
         for (offset, &sample) in samples.iter().enumerate() {
             // Below the floor, or NaN, is silence.
-            if sample.abs() < self.floor || sample.is_nan() {
+            if sample.abs() < self.floor.get() || sample.is_nan() {
                 continue;
             }
-            let at = self.seen + offset;
+            let at = self.seen.get() + offset;
             self.open = match self.open {
                 None => Some((at, at)),
                 // The gap is `at - last - 1` samples: split once it reaches the minimum.
-                Some((first, last)) if at - last > self.min_silence => {
+                Some((first, last)) if at - last > self.min_silence.get() => {
                     self.closed.push((first, last + 1));
                     Some((at, at))
                 }
                 Some((first, _)) => Some((first, at)),
             };
         }
-        self.seen += samples.len();
+        self.seen += Samples(samples.len());
     }
 
     /// Forgets everything fed. Equivalent to a fresh meter at the same rate.
     pub fn reset(&mut self) {
-        self.seen = 0;
+        self.seen = Samples::ZERO;
         self.open = None;
         self.closed.clear();
     }
@@ -209,8 +209,8 @@ impl<S: Sample> Meter for SilenceMeter<S> {
         let open = self.open.map(|(first, last)| (first, last + 1));
         let mut regions: Vec<Region> = Vec::new();
         for &(first, end) in self.closed.iter().chain(open.iter()) {
-            let start = Samples(first.saturating_sub(self.pre_pad));
-            let end = Samples(end.saturating_add(self.post_pad).min(self.seen));
+            let start = Samples(first).remaining_after(self.pre_pad);
+            let end = (Samples(end) + self.post_pad).min(self.seen);
             match regions.last_mut() {
                 Some(prev) if start <= prev.end => prev.end = prev.end.max(end),
                 _ => regions.push(Region { start, end }),

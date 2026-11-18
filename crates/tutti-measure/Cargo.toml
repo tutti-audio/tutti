@@ -60,8 +60,6 @@ serde = "1"
 serde_json = "1"
 # `benches/fft_analyses`.
 criterion.workspace = true
-# An independent YIN, as a second opinion on ours, for `tests/oracle_pitch.rs`.
-pitch-detection = "0.3"
 
 [[bench]]
 name = "fft_analyses"

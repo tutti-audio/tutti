@@ -68,7 +68,7 @@
 
 use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
-use tutti_dsp::FrameCount;
+use tutti_dsp::{FrameCount, rms};
 use tutti_types::{Amplitude, Cents, Db, Note, SampleRate, Samples, Seconds};
 
 use crate::convert::to_f32;
@@ -483,11 +483,7 @@ fn levels_at(cfg: &NotePlan, samples: &[f32]) -> Result<Vec<Amplitude>> {
     Ok((0..frames.get())
         .map(|i| {
             let start = i * cfg.hop.get();
-            let energy: f64 = samples[start..start + frame]
-                .iter()
-                .map(|&s| f64::from(s) * f64::from(s))
-                .sum();
-            Amplitude((energy / frame as f64).sqrt() as f32)
+            rms(Mono::new(&samples[start..start + frame]))
         })
         .collect())
 }
