@@ -55,9 +55,9 @@ fn quarter_rate_sine() -> RenderGraph {
 }
 
 /// `Written::clipped_samples` is the number of samples the quantizer clamped:
-/// every sample of a 1.2 DC (two channels, 4,800 frames) at 16 bit, none of a
-/// 1.0 (full scale is representable), and none for a format that does not
-/// quantize.
+/// every sample of a 1.2 DC (two channels, 4,800 frames) at 16 bit, and of a
+/// +1.0 (it rounds to 32768, past `MAX`), none of a -1.0 (that is `MIN`
+/// exactly), and none for a format that does not quantize.
 #[test]
 fn the_samples_the_quantizer_clamps_are_counted() {
     let dir = tempfile::tempdir().unwrap();
@@ -67,8 +67,11 @@ fn the_samples_the_quantizer_clamps_are_counted() {
     let over = render_to_file(dc(1.2), &config(Pcm::Int16, None), &FrozenClock, &path).unwrap();
     assert_eq!(over.clipped_samples, 2 * frames);
 
-    let at = render_to_file(dc(1.0), &config(Pcm::Int16, None), &FrozenClock, &path).unwrap();
-    assert_eq!(at.clipped_samples, 0, "full scale is not clipping");
+    let top = render_to_file(dc(1.0), &config(Pcm::Int16, None), &FrozenClock, &path).unwrap();
+    assert_eq!(top.clipped_samples, 2 * frames, "+1.0 is past MAX");
+
+    let bottom = render_to_file(dc(-1.0), &config(Pcm::Int16, None), &FrozenClock, &path).unwrap();
+    assert_eq!(bottom.clipped_samples, 0, "-1.0 is MIN exactly");
 
     let float = render_to_file(dc(1.2), &config(Pcm::Float32, None), &FrozenClock, &path).unwrap();
     assert_eq!(float.clipped_samples, 0, "a float file stores 1.2 as it is");
@@ -128,15 +131,19 @@ fn a_zero_dbtp_target_leaves_an_integer_format_its_headroom() {
     }
 }
 
-/// Non-finite samples are counted as clipped: a NaN is written as 0 and an
-/// infinity as full scale, and neither is the signal that was rendered.
+/// An infinity is written as full scale and counts as clipped; a NaN is
+/// written as 0 and does not.
 #[test]
-fn non_finite_samples_are_counted() {
+fn an_infinity_counts_as_clipped_and_a_nan_does_not() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("nan.wav");
-    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for (value, clipped) in [
+        (f32::NAN, 0),
+        (f32::INFINITY, 2 * 4_800),
+        (f32::NEG_INFINITY, 2 * 4_800),
+    ] {
         let written =
             render_to_file(dc(value), &config(Pcm::Int16, None), &FrozenClock, &path).unwrap();
-        assert_eq!(written.clipped_samples, 2 * 4_800, "{value}");
+        assert_eq!(written.clipped_samples, clipped, "{value}");
     }
 }
