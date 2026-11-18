@@ -147,6 +147,43 @@ impl std::fmt::Debug for MidiBackend {
     }
 }
 
+impl<F: Float> Options<F> {
+    /// These options at float `G`: every one carries over but the input
+    /// opener, which is typed to the float and so starts over.
+    fn with_float<G: Float>(self) -> Options<G> {
+        Options {
+            inputs: self.inputs,
+            outputs_floor: self.outputs_floor,
+            root: self.root,
+            device_topology: self.device_topology,
+            render_workers: self.render_workers,
+            #[cfg(feature = "device")]
+            host: self.host,
+            #[cfg(feature = "capture")]
+            input_opener: None,
+            render_worker_start: self.render_worker_start,
+            #[cfg(feature = "midi-hardware")]
+            midi_hardware: self.midi_hardware,
+            #[cfg(feature = "midi-hardware")]
+            midi_backend: self.midi_backend,
+            #[cfg(feature = "midi")]
+            mpe_mode: self.mpe_mode,
+            #[cfg(feature = "midi")]
+            midi_ports: self.midi_ports,
+            unresolved_warning: self.unresolved_warning,
+            #[cfg(feature = "plugin")]
+            snapshot_interval: self.snapshot_interval,
+            #[cfg(feature = "plugin")]
+            recovery: self.recovery,
+            #[cfg(feature = "plugin")]
+            hang: self.hang,
+            spawner: self.spawner,
+            pool: self.pool,
+            float: std::marker::PhantomData,
+        }
+    }
+}
+
 impl<F: Float> Default for Options<F> {
     fn default() -> Self {
         Self {
@@ -295,6 +332,34 @@ impl<C: Clock<Config = BlockConfig>> SessionBuilder<C> {
 }
 
 impl<F: SessionFloat> SessionBuilder<Offline<F>> {
+    /// The float format of the session's audio, `G` in place of `F`: every
+    /// option set so far carries over, but
+    /// [`input_opener`](Self::input_opener), which is typed to the float: set
+    /// it after this. Default `f32`.
+    ///
+    /// It is the one place the choice is made: [`system_clock`](Self::system_clock)
+    /// and [`device`](Self::device) carry the float, so
+    /// `.float::<f64>().device(..)` reaches every clock.
+    ///
+    /// ```
+    /// use tutti_session::Session;
+    /// use tutti_units::SampleRate;
+    ///
+    /// let session: tutti_session::OfflineSession<&str, f64> = Session::builder()
+    ///     .float::<f64>()
+    ///     .sample_rate(SampleRate::SR_44K1)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[must_use]
+    pub fn float<G: SessionFloat>(self) -> SessionBuilder<Offline<G>> {
+        SessionBuilder {
+            opts: self.opts.with_float(),
+            config: self.config,
+            dates: self.dates,
+        }
+    }
+
     /// Steps the blocks with an OS timer thread instead: no sound card, for an
     /// app that plays MIDI. The rate, the width and the block carry over, and
     /// every other option with them.

@@ -12,8 +12,8 @@ use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
 use tutti_session::{
-    InputConfig, InputOpener, Offline, OpenedInput, Punch, Root, SessionBuilder, SessionEvent,
-    TakeEvent, TakeTarget,
+    InputConfig, InputOpener, OpenedInput, Punch, Root, Session, SessionEvent, TakeEvent,
+    TakeTarget,
 };
 use tutti_types::ChannelLayout;
 use tutti_units::{Frame, SampleRate, Samples};
@@ -50,7 +50,8 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
     let writer: Writer = Writer::default();
     let (driver, stream): (_, ManualStream<f64>) = ManualStreamDriver::<f64>::new();
     let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::STEREO, SampleFormat::F64);
-    let mut session = SessionBuilder::<Offline<f64>>::default()
+    let mut session = Session::builder()
+        .float::<f64>()
         .input_opener(Opener(Arc::clone(&writer)))
         .device(Default::default())
         .build_device_on(spec, driver)

@@ -9,8 +9,7 @@ use tutti_fixtures::wait_until;
 use tutti_graph::ForkByClone;
 use tutti_sampler::Placement;
 use tutti_session::{
-    AudioEntry, Offline, OutPort, PoolState, Root, SamplerEvent, SessionBuilder, SessionEvent,
-    audio_file,
+    AudioEntry, OutPort, PoolState, Root, SamplerEvent, Session, SessionEvent, audio_file,
 };
 use tutti_types::ChannelLayout;
 use tutti_units::{Beat, SampleRate};
@@ -30,7 +29,8 @@ fn value(i: usize) -> f32 {
 }
 
 fn session() -> tutti_session::OfflineSession<&'static str, f64> {
-    SessionBuilder::<Offline<f64>>::default()
+    Session::builder()
+        .float::<f64>()
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("an f64 session builds")
