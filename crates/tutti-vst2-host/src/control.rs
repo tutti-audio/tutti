@@ -9,7 +9,7 @@ use tutti_plugin_types::{
     ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError, PluginResult, Preset,
     PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::error::Vst2Error;
 use crate::host::ParameterChange;

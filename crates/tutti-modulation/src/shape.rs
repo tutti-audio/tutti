@@ -8,7 +8,7 @@
 
 use tutti_curve::Law;
 
-use tutti_types::{Depth, Phase};
+use tutti_units::{Depth, Phase};
 
 // =========================================================================
 // Value vocabulary

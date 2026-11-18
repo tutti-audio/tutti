@@ -51,7 +51,7 @@ use clap_sys::fixedpoint::{CLAP_BEATTIME_FACTOR, clap_beattime};
 use clap_sys::host::clap_host;
 use clap_sys::version::CLAP_VERSION;
 use tutti_plugin_types::{TrackInfo, TrackKind, TransportRequest};
-use tutti_types::{Beat, BeatDuration};
+use tutti_units::{Beat, BeatDuration};
 
 use crate::guard::{lossy, or_abort};
 use crate::plugin::Plain;

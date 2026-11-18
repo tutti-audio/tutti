@@ -31,7 +31,8 @@
 use std::sync::Arc;
 
 use super::prefetch::RegionOut;
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 use crate::Loop;
 use crate::nonempty;
@@ -746,7 +747,7 @@ mod tests {
     use super::*;
     use tutti_buffers::Interleaved;
     use tutti_buffers::Wave;
-    use tutti_types::Seconds;
+    use tutti_units::Seconds;
 
     /// A looped position the audio thread cannot place (`floor() as usize`
     /// saturates for infinity and anything from 2^64 up) makes taps near
@@ -1098,7 +1099,7 @@ mod tests {
         writer.set_resident(Arc::clone(&wave));
         let mut held = vec![0.0f32; 10_000];
         writer.fill_with(&Mapping::plain(Samples::new(LEN)), 0, &mut held);
-        assert_eq!(writer.push_interleaved(&held), tutti_types::Samples(10_000));
+        assert_eq!(writer.push_interleaved(&held), tutti_units::Samples(10_000));
         let _ = reader.claim(0, [(0, 64), (0, 0)]);
         assert_eq!(writer.in_flight_end(), 64);
         (writer, reader, wave)

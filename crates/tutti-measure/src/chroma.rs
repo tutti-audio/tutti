@@ -53,7 +53,8 @@ use crate::level::SILENCE_FLOOR;
 use core::marker::PhantomData;
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Cents, Db, Hz, Note, SampleRate, Samples, Semitones};
+use tutti_types::Note;
+use tutti_units::{Cents, Db, Hz, SampleRate, Samples, Semitones};
 
 use crate::convert::{all_finite, for_blocks, to_f32};
 use crate::framing::{FrameCutter, Framing, check_nyquist};
@@ -62,7 +63,7 @@ use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
 use tutti_dsp::{BinCount, FrameCount, Grid};
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 /// The pitch classes in a chroma frame.
 pub(crate) const CLASSES: usize = 12;

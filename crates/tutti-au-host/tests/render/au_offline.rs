@@ -93,7 +93,7 @@ fn open_shared() -> Au {
     au
 }
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
 /// A property refusal, spelled as the exact status rather than a bare `is_err`.

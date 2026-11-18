@@ -9,7 +9,8 @@ use tutti_codec::{Format, IntDepth, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{Bounce, DitherShape, Range, Root, Session};
-use tutti_types::{ChannelLayout, SampleRate, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Seconds};
 
 const LEVEL: f32 = 0.3;
 

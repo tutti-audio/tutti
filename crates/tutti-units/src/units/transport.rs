@@ -16,7 +16,7 @@ use super::*;
 /// constructor.
 ///
 /// ```
-/// use tutti_types::Bpm;
+/// use tutti_units::Bpm;
 ///
 /// assert_eq!(Bpm::new(120.0).map(Bpm::get), Some(120.0));
 /// assert_eq!(Bpm::new(0.0), None);
@@ -99,7 +99,7 @@ impl Bpm {
     /// when `period` is zero, negative or not finite (no tempo has such a beat).
     ///
     /// ```
-    /// use tutti_types::{Bpm, Seconds};
+    /// use tutti_units::{Bpm, Seconds};
     /// assert_eq!(Bpm::from_beat_period(Seconds::new(0.5)), Some(Bpm::of(120.0)));
     /// ```
     #[inline]
@@ -114,7 +114,7 @@ impl Bpm {
     /// `from_beat_period` answers with `None`.
     ///
     /// ```
-    /// use tutti_types::{Bpm, Seconds};
+    /// use tutti_units::{Bpm, Seconds};
     /// assert_eq!(Bpm::of(120.0).beat_period(), Seconds::new(0.5));
     /// ```
     #[inline]
@@ -534,13 +534,13 @@ impl BeatDuration {
     ///
     /// For *duration* readouts — a clip length, a UI-facing time display. It is
     /// deliberately **not** the conversion the per-sample transport path uses:
-    /// `tutti_types::beats_per_sample` computes
+    /// the transport's `beats_per_sample` computes
     /// `(tempo / 60) / sample_rate`, the one spelling every reader placing a
     /// beat in a block divides by (the two groupings round differently, and
     /// readers must agree). Routing those sites through this method would
     /// silently re-associate the arithmetic. Two conversions, two call sites,
     /// on purpose. (No clock steps by either: a playhead is a frame count,
-    /// [`TimelineSegment`](crate::value::TimelineSegment).)
+    /// the transport's `TimelineSegment`.)
     #[inline]
     #[must_use]
     pub fn to_seconds(self, tempo: Bpm) -> Seconds {

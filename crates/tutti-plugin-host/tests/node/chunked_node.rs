@@ -31,9 +31,9 @@ use tutti_plugin_types::{
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
-use tutti_types::ParamId;
-use tutti_types::{Beat, Bpm, Frame, SampleRate};
 use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, U7, Voice2};
+use tutti_units::ParamId;
+use tutti_units::{Beat, Bpm, Frame, SampleRate};
 
 const SR: SampleRate = SampleRate::SR_48K;
 /// Quarter notes per frame at 120 BPM and 48 kHz.

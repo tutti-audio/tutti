@@ -12,7 +12,7 @@
 //! `N = (A − 7.95) / (2.285 · Δω) + 1`, rounded up to an odd length so the
 //! filter is type I (symmetric, a whole-sample delay of `(N − 1) / 2`).
 
-use tutti_types::{Db, Hz, SampleRate, Samples};
+use tutti_units::{Db, Hz, SampleRate, Samples};
 
 /// The longest filter [`FirDesign::design`] builds, in taps.
 const MAX_LEN: usize = 1 << 20;

@@ -13,7 +13,8 @@ use tutti_graph::{
 };
 use tutti_plugin_types::{Features, TransportChanges as WireChanges, TransportInfo};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_types::{Beat, Bpm, Frame, Latency, LoopRange, SampleRate, Samples};
+use tutti_types::LoopRange;
+use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
 use crate::{
     Call, DeliveryCounters, ParamDelivery, PluginMeter, Snapshot, TransportSource, TransportWalk,
@@ -254,7 +255,7 @@ fn a_ramp_chunk_has_its_slope_and_its_cell_edges_are_no_entries() {
     let t = |frames: f64, tempo: f64| {
         let b = rig
             .tempo
-            .beat_at_seconds(tutti_types::Seconds(0.8 + frames / RATE));
+            .beat_at_seconds(tutti_units::Seconds(0.8 + frames / RATE));
         rolling(tempo, b.get())
     };
     let env = block(

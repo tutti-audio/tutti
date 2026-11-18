@@ -18,6 +18,7 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # The unit vocabulary (Hz / Seconds / Samples / Amplitude / Confidence / …),
 # `ChannelLayout`, `Interleaved` and the downmix helpers. Nothing here needs
 # the engine runtime, so it and `tutti-buffers` are the only tutti edges.
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 
 # `RealFft` (`fft/real.rs`), the one real-input FFT of the convolver, the

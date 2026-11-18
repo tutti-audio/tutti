@@ -1,7 +1,7 @@
 //! The timer's schedule: when each block is due, and what to do at a given
 //! time. Pure: it reads no clock and sleeps no thread.
 
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// How many blocks late a wake-up may be before the schedule is given up and
 /// begun again: a block is owed back to back up to this lag, and past it the

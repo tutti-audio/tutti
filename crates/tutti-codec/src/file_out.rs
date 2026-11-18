@@ -6,7 +6,8 @@ use std::path::Path;
 
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Sink, SinkFailed};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 use crate::encoder::Encoder;
 use crate::error::Result;
@@ -60,7 +61,8 @@ use crate::spec::Spec;
 /// # #[cfg(feature = "encode-wav")] {
 /// use tutti_codec::{FileOut, Format, Pcm, Spec};
 /// use tutti_buffers::{Interleaved, Sink};
-/// use tutti_types::{ChannelLayout, SampleRate};
+/// use tutti_units::SampleRate;
+/// use tutti_types::ChannelLayout;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let dir = tempfile::tempdir()?;

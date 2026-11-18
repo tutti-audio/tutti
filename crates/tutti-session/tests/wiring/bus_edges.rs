@@ -11,7 +11,8 @@ use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
     Committed, ConnectError, Edge, EdgeGainError, InPort, OutPort, Root, Session, SessionEvent,
 };
-use tutti_types::{Amplitude, BusTopology, ChannelLayout, ChannelTopology};
+use tutti_types::{BusTopology, ChannelLayout, ChannelTopology};
+use tutti_units::Amplitude;
 
 const BLOCK: usize = 64;
 

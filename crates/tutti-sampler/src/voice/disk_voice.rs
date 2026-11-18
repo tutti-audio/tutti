@@ -21,10 +21,9 @@ use tutti_graph::{
     Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
     NodeParts, Prepare, RenderMode, Shape, Status, declick_frames,
 };
+use tutti_types::ChannelLayout;
 use tutti_types::MAX_CHANNELS;
-use tutti_types::{
-    Amplitude, ChannelLayout, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail,
-};
+use tutti_units::{Amplitude, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail};
 
 use super::clock::{BlockClock, Clock};
 use super::fault::FirstError;

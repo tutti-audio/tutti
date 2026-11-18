@@ -1,5 +1,4 @@
 use super::*;
-use crate::Param;
 
 // The omission ledger. What is deliberately *absent* is as load-bearing as
 // what is present: these must not compile, and are written here so a future
@@ -190,24 +189,6 @@ fn a_span_and_a_position_form_an_affine_pair() {
     assert_eq!(cursor, SamplePosition(12.5));
     cursor -= SampleSpan::of(0.5);
     assert_eq!(cursor, SamplePosition(12.0));
-}
-
-/// A driven delay time: the cell holds a span at full `f64` width, a write
-/// reads back exact, and a cell written out of range reads back saturated.
-#[test]
-fn a_span_is_a_param() {
-    let time = Param::new(SampleSpan::of(504.25));
-    let on_audio_thread = time.handle();
-    assert_eq!(on_audio_thread.load(), SampleSpan::of(504.25));
-    time.store(SampleSpan::of(48_000.5));
-    assert_eq!(on_audio_thread.load().get(), 48_000.5);
-
-    // The width-erased cell a modulation lane writes carries an `f32`.
-    let cell = time.cell();
-    cell.store(-3.0, core::sync::atomic::Ordering::Relaxed);
-    assert_eq!(time.load(), SampleSpan::ZERO);
-    cell.store(100.0, core::sync::atomic::Ordering::Relaxed);
-    assert_eq!(time.load(), SampleSpan::of(100.0));
 }
 
 #[test]

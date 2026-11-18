@@ -12,7 +12,8 @@ use tutti_nodes::{
     BrickwallLimiterNode, BusStripNode, DelayControls, DelayNode, EqBandNode, LimiterControls,
     LimiterNode, MaxDelay, SvfType,
 };
-use tutti_types::{AtomicF32, Db, Hz, ParamCell, Q, SampleRate, Samples, Seconds, UnitParam};
+use tutti_types::{AtomicF32, ParamCell};
+use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BAD: [f32; 3] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];

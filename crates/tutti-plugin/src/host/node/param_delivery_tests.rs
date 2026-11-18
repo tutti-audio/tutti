@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use tutti_plugin_host::{DeliveryCounters, ParamDelivery};
 use tutti_plugin_types::ParameterQueue;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 #[cfg(feature = "clap")]
 fn op(id: u32) -> ParamId {

@@ -4,7 +4,7 @@
 use tutti_buffers::{Float, Sample};
 
 use super::window::MonotonicMinDeque;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::DelayLine;
 

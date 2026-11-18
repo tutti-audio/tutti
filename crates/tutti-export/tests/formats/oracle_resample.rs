@@ -48,10 +48,10 @@ use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Osc;
 use tutti_transport::FrozenClock;
-use tutti_types::Amplitude;
 use tutti_types::ChannelLayout;
-use tutti_types::Hz;
-use tutti_types::Seconds;
+use tutti_units::Amplitude;
+use tutti_units::Hz;
+use tutti_units::Seconds;
 
 const IN_RATE: f64 = 48_000.0;
 const OUT_RATE: f64 = 44_100.0;
@@ -60,7 +60,7 @@ const OUT_RATE: f64 = 44_100.0;
 /// renders at (a graph prepared at another is refused, not re-rated).
 fn built(g: GraphBuilder) -> RenderGraph {
     let (editor, executor) = g
-        .build(RenderGraph::prepare(tutti_types::SampleRate::of(IN_RATE)))
+        .build(RenderGraph::prepare(tutti_units::SampleRate::of(IN_RATE)))
         .expect("builds");
     RenderGraph::assemble(editor, executor, Setup::new()).expect("built together")
 }
@@ -79,7 +79,7 @@ fn sine_graph(freq: f32) -> RenderGraph {
 fn config(freq_target: SampleRateTarget) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
-            sample_rate: tutti_types::SampleRate::of(IN_RATE),
+            sample_rate: tutti_units::SampleRate::of(IN_RATE),
             duration_seconds: Seconds(1.0),
             ..Default::default()
         },
@@ -90,7 +90,7 @@ fn config(freq_target: SampleRateTarget) -> ExportConfig {
         },
         dither: None,
         resample: match freq_target {
-            SampleRateTarget::Convert => Some(Resample::to(tutti_types::SampleRate::of(OUT_RATE))),
+            SampleRateTarget::Convert => Some(Resample::to(tutti_units::SampleRate::of(OUT_RATE))),
             SampleRateTarget::Passthrough => None,
         },
     }

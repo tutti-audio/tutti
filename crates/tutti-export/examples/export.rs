@@ -20,9 +20,9 @@ use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
-use tutti_types::Db;
-use tutti_types::{Amplitude, Hz, SampleRate, Samples, Seconds};
 use tutti_types::{Bed, ChannelLayout};
+use tutti_units::Db;
+use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds};
 
 /// The rate every render below runs at.
 const RATE: SampleRate = SampleRate::SR_48K;

@@ -11,7 +11,7 @@ use super::*;
 /// steps with, as `current + c * (target - current)`.
 ///
 /// ```
-/// use tutti_types::{Ballistics, SampleRate, Seconds};
+/// use tutti_units::{Ballistics, SampleRate, Seconds};
 ///
 /// let meter = Ballistics::new(Seconds(0.01), Seconds(0.1)).unwrap();
 /// let (attack, release) = meter.coeffs(SampleRate::of(48_000.0));

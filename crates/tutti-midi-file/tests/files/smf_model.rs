@@ -16,11 +16,11 @@ use tutti_midi_file::{
     FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
     ReadError, SmfDivision, SmfFormat, SmfParseError, TextKind, Tick, Track, TracksError,
 };
-use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
     Address, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, TicksPerQuarterNote, U7,
     U14, Voice1,
 };
+use tutti_units::{Beat, Bpm, Seconds};
 
 const TPQ: u16 = 480;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);

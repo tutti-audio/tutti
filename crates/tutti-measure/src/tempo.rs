@@ -30,7 +30,7 @@
 
 use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Bpm, Confidence, SampleRate, Samples, Seconds};
+use tutti_units::{Bpm, Confidence, SampleRate, Samples, Seconds};
 
 use crate::beat;
 use crate::convert::to_f32;
@@ -40,7 +40,7 @@ use crate::xcorr::cross_correlate;
 use crate::{Error, Result};
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 /// The default analysis window, in samples.
 const WINDOW: usize = 1024;
@@ -565,7 +565,7 @@ impl Periodicity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::Db;
+    use tutti_units::Db;
 
     const RATE: f64 = 44100.0;
 

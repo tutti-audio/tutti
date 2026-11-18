@@ -1,7 +1,8 @@
 //! [`BellFilterNode`]: a matched peaking equalizer, run as one state-variable section.
 
 use tutti_dsp::{MatchedBell, Ring, Sos, SosError};
-use tutti_types::{ChannelLayout, Db, Hz, Q, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::eq::sealed::Sealed;
 use super::eq::{EqControls, EqKernel};
@@ -143,8 +144,9 @@ mod tests {
     use tutti_graph::Cost;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::UnitParam;
-    use tutti_types::{MaxBlock, Samples, Tail};
+    use tutti_types::MaxBlock;
+    use tutti_units::UnitParam;
+    use tutti_units::{Samples, Tail};
 
     fn config(frequency: Hz, q: f32, gain: f32) -> BellFilterConfig {
         BellFilterConfig::new(1u16, frequency, Q(q), Db(gain))

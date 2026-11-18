@@ -14,9 +14,9 @@ use tutti_modulation::{
     CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
 };
 use tutti_rt::{PackedAtomic, Publisher, Reader};
-use tutti_types::{
-    AtomicF32, Beat, Frame, ParamAddr, ParamCell, ParamId, SamplePosition, Samples, Tail, UnitAddr,
-    UnitParam,
+use tutti_types::{AtomicF32, ParamCell};
+use tutti_units::{
+    Beat, Frame, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
 };
 
 use crate::SOURCE_EVENT_CAPACITY;
@@ -446,7 +446,7 @@ impl ControlLaneNode {
 
 /// The transport one frame on from `t`, as the executor's own history rolls
 /// it (`FrameClock` advanced, loop wrapped).
-fn roll_one(t: TransportPosition, rate: tutti_types::SampleRate) -> TransportPosition {
+fn roll_one(t: TransportPosition, rate: tutti_units::SampleRate) -> TransportPosition {
     if !t.playing || tutti_types::frames_per_beat(t.tempo, rate).is_none() {
         return t;
     }
@@ -1157,7 +1157,7 @@ mod tests {
         assert!(c.set_range(0.1, 0.9));
         assert_eq!(c.range(), (0.1, 0.9));
         let unranged = ControlLaneNode::for_unit(
-            tutti_types::UnitAddr::first(tutti_types::UnitParam::Cutoff),
+            tutti_units::UnitAddr::first(tutti_units::UnitParam::Cutoff),
             ControlProgram::default(),
             None,
             None,

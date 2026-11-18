@@ -20,7 +20,7 @@ crate::ranged! {
     /// parameter cell holds any float.
     ///
     /// ```
-    /// use tutti_types::{SamplePosition, SampleRate, SampleSpan, Seconds};
+    /// use tutti_units::{SamplePosition, SampleRate, SampleSpan, Seconds};
     ///
     /// let rate = SampleRate::of(48_000.0);
     /// let delay = SampleSpan::from_seconds(Seconds(0.25), rate).unwrap();

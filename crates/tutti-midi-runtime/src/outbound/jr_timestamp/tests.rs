@@ -2,8 +2,8 @@ use super::*;
 use crate::test_support::at;
 
 use tutti_fixtures::midi;
-use tutti_types::{Frame, Samples};
 use tutti_ump::{Message, MidiChannel, NoteKeyEvent, Utility};
+use tutti_units::{Frame, Samples};
 
 /// The sender-clock value if `ump` is a JR Clock (M2-104 section 7.2.2.1).
 fn jr_clock_value(ump: &Ump) -> Option<u16> {

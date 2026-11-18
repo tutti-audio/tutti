@@ -7,8 +7,9 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, EventKind, IntoNode, Io, Node, NodeKey, NodeParts, Prepare, Shape, Status};
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_session::{Session, SessionNode};
-use tutti_types::{Beat, BeatDuration, ChannelLayout};
+use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
+use tutti_units::{Beat, BeatDuration};
 
 /// The mezzo-forte default: MIDI 2.0's center velocity.
 pub const MF: u16 = 0x8000;

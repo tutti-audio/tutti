@@ -7,7 +7,8 @@ use tutti_buffers::Planes;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{TransientShaperConfig, TransientShaperNode};
-use tutti_types::{ChannelLayout, Db, SampleRate, Seconds, UnitAddr, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, SampleRate, Seconds, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const FAST: Seconds = Seconds(0.001);

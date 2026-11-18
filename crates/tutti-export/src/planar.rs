@@ -5,7 +5,8 @@ use crate::Result;
 use tutti_buffers::{
     BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, deinterleave, interleave,
 };
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// Deinterleaves `block` into `planes`, each sized to the block's frames (a
 /// plane grows only past its capacity).

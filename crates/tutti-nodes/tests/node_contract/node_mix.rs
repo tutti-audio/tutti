@@ -27,10 +27,8 @@ use tutti_nodes::{
     MaxDelay, ModDelayNode, PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, Stages,
 };
 use tutti_types::MaxBlock;
-use tutti_types::{
-    BusTopology, ChannelLayout, CompressionRatio, Db, Feedback, Hz, Mix, SampleRate, Samples,
-    Seconds,
-};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{CompressionRatio, Db, Feedback, Hz, Mix, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;

@@ -79,11 +79,11 @@ pub enum MidiReport {
     /// repeats the tempo already in force reports nothing.
     TempoFollowed {
         /// The tempo.
-        tempo: tutti_types::Bpm,
+        tempo: tutti_units::Bpm,
         /// The beat the step was placed at, for a host to draw it. A publish
         /// that lands late takes effect from the block that picks it up, so
         /// the change is heard after this beat.
-        beat: tutti_types::Beat,
+        beat: tutti_units::Beat,
     },
     /// A meter the session follows was published: a Set Time Signature of the
     /// followed Group, from the next bar line at or after the beat the transport
@@ -92,7 +92,7 @@ pub enum MidiReport {
         /// The time signature.
         signature: tutti_types::TimeSignature,
         /// The bar line it takes effect on.
-        beat: tutti_types::Beat,
+        beat: tutti_units::Beat,
     },
     /// The session stopped following ([`Midi::unfollow_tempo`](crate::Midi::unfollow_tempo)):
     /// the project's own tempo and meter are published again, from the next

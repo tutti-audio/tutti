@@ -1,7 +1,7 @@
 //! The tilt: a first-order shelf pivoting about a center, the low end down by half the gain
 //! and the high end up by half.
 
-use tutti_types::{Db, Hz, SampleRate, Seconds};
+use tutti_units::{Db, Hz, SampleRate, Seconds};
 
 use super::MAX_TAIL_FRAMES;
 use super::butterworth::{check_cutoff, check_gain};

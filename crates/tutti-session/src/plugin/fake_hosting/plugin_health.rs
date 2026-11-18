@@ -24,8 +24,8 @@ use tutti_plugin_host::Liveness;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::Normalized;
 use tutti_plugin_types::{BridgeError, ParameterInfo, PluginFailure};
-use tutti_types::ParamId;
-use tutti_types::SampleRate;
+use tutti_units::ParamId;
+use tutti_units::SampleRate;
 
 /// A backend whose liveness is whatever the test says it is.
 struct FakeBackend {
@@ -76,7 +76,7 @@ impl tutti_plugin_types::Health for FakeBackend {
     fn crash_cause(&self) -> Option<PluginFailure> {
         self.cause.clone()
     }
-    fn rate_refusal(&self) -> Option<(tutti_types::SampleRate, String)> {
+    fn rate_refusal(&self) -> Option<(tutti_units::SampleRate, String)> {
         None
     }
     fn block_counts(&self) -> tutti_plugin_types::BlockCounts {
@@ -354,7 +354,7 @@ fn a_plugins_refreshes_and_invalidations_arrive_in_the_stream() {
     refresh.fire(PluginRefresh::ParamValues);
     refresh.fire(PluginRefresh::ParamTitles);
     invalidate.fire(PluginInvalidation::Latency {
-        samples: tutti_types::Samples(64),
+        samples: tutti_units::Samples(64),
     });
     invalidate.fire(PluginInvalidation::Tail {
         tail: PluginTail::Unbounded,

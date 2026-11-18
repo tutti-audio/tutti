@@ -1,8 +1,8 @@
 //! Song Position Pointer from a beat (M1 p.30; M2-104 section 7.6): its 14-bit
 //! count of MIDI beats, each a sixteenth note.
 
-use tutti_types::Beat;
 use tutti_ump::U14;
+use tutti_units::Beat;
 
 /// MIDI beats in one quarter-note beat: a MIDI beat is a sixteenth note.
 const MIDI_BEATS_PER_BEAT: f64 = 4.0;
@@ -13,7 +13,7 @@ const MIDI_BEATS_PER_BEAT: f64 = 4.0;
 ///
 /// ```
 /// use tutti_midi_protocol::song_position;
-/// use tutti_types::Beat;
+/// use tutti_units::Beat;
 ///
 /// assert_eq!(song_position(Beat::new(2.0)).get(), 8);
 /// assert_eq!(song_position(Beat::new(-1.0)).get(), 0);

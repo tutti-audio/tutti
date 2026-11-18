@@ -46,7 +46,7 @@ use tutti_plugin_types::{
     OwnBypass, StateError, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{Normalized, ParameterInfo, PluginFailure, RenderMode, TerminationReason};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// Bundles the shared Mutex with the parameter-change sink so editor
 /// idle calls can drain plugin-internal automation events and notify
@@ -307,7 +307,7 @@ impl<F: InProcess> Health for ControlBackend<F> {
         None
     }
 
-    fn rate_refusal(&self) -> Option<(tutti_types::SampleRate, String)> {
+    fn rate_refusal(&self) -> Option<(tutti_units::SampleRate, String)> {
         None
     }
 
@@ -394,8 +394,8 @@ mod off_main_tests {
         AutomationMode, AutomationModeError, Load, MainWork, MainWorkHandle, Normalized,
         RenderMode, StateError, StateUse,
     };
-    use tutti_types::ParamId;
-    use tutti_types::SampleRate;
+    use tutti_units::ParamId;
+    use tutti_units::SampleRate;
     use tutti_vst2_host::Vst2Loaded;
 
     use crate::PluginHandle;

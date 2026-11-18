@@ -23,7 +23,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use tutti_types::{Frame, PlayReading, Samples};
+use tutti_units::{Frame, PlayReading, Samples};
 
 use crate::node::Env;
 use crate::time::Offset;
@@ -204,7 +204,7 @@ impl PlayReader {
 mod tests {
     use super::*;
     use crate::node::{TransportChanges, TransportPosition};
-    use tutti_types::{Beat, Bpm, SampleRate};
+    use tutti_units::{Beat, Bpm, SampleRate};
 
     fn t(playing: bool) -> TransportPosition {
         TransportPosition::new(playing, Bpm::of(120.0), Beat(0.0), None)

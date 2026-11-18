@@ -59,8 +59,9 @@ use tutti_plugin_types::{
     AutomationMode, MainThreadMarker, Request, RescanScope, WireMidi, sysex_packets,
 };
 use tutti_rt::{RequestWord, Tally, TallyWriter, tally};
-use tutti_types::{AtomicSampleRate, SampleRate};
+use tutti_types::AtomicSampleRate;
 use tutti_ump::MidiGroup;
+use tutti_units::SampleRate;
 use vst::api::{AutomationState, ProcessLevel, Supported};
 use vst::host::Host;
 

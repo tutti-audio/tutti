@@ -8,7 +8,7 @@ use super::Discard;
 use tutti_buffers::Mono;
 use tutti_fixtures::allocations;
 use tutti_measure::{ChromaConfig, Framing, Measure, Meter};
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 /// Construction builds the buffers and plans the FFT, so every push, the first
 /// included, and a `reset` allocate nothing.

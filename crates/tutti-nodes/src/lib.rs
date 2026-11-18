@@ -103,10 +103,10 @@
 //! ```rust
 //! # use tutti_buffers::Planes;
 //! use tutti_types::MaxBlock;
-//! use tutti_types::{Hz, Q, UnitParam};
+//! use tutti_units::{Hz, Q, UnitParam};
 //! use tutti_graph::{Prepare, Solo};
 //! use tutti_nodes::{SvfFilterNode, SvfType};
-//! use tutti_types::{SampleRate, Samples};
+//! use tutti_units::{SampleRate, Samples};
 //!
 //! // A lowpass alone in a graph, fed by the graph's input. The filter is a
 //! // graph node: inserted, it hands back its `ParamSet` — cutoff, Q and
@@ -207,7 +207,7 @@
 //!   is `tutti_buffers::Float` with [`Lanes`].
 //! - Crossover: [`CrossoverNode`], over `tutti_dsp::CrossoverBank`, a 2 to 6 band
 //!   Linkwitz-Riley 4th-order split (`f64` state, solved on the stream's 16-frame grid), each
-//!   crossover frequency an indexed [`Cutoff`](tutti_types::UnitParam::Cutoff) param, with
+//!   crossover frequency an indexed [`Cutoff`](tutti_units::UnitParam::Cutoff) param, with
 //!   [`CrossoverError`].
 //! - Delay: [`DelayNode`] over `tutti_dsp::DelayBank`, built to a [`DelayLayout`], with
 //!   [`InterpolationMode`] and [`MaxDelay`].
@@ -249,10 +249,11 @@ mod tail_clock;
 #[cfg(test)]
 mod test_support;
 
-pub use tutti_types::{
+pub use tutti_types::Param;
+pub use tutti_units::{
     Amplitude, ArcDegrees, Azimuth, BitDepth, Bpm, Cents, CentsSpan, CompressionRatio, Db, Depth,
-    Drive, Elevation, Feedback, HoldFactor, Hz, Mix, Param, Q, Resonance, SampleRate, Seconds,
-    Semitones, Spread, StereoWidth, Unit,
+    Drive, Elevation, Feedback, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Seconds, Semitones,
+    Spread, StereoWidth, Unit,
 };
 
 // The boundary this crate holds: pure DSP graph nodes plus the `ParamSet` /

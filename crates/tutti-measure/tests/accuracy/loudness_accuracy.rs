@@ -15,8 +15,8 @@
 
 use tutti_buffers::Interleaved;
 use tutti_measure::{LoudnessConfig, measure_loudness};
-use tutti_types::{Amplitude, Db, SampleRate};
 use tutti_types::{Bed, ChannelLayout};
+use tutti_units::{Amplitude, Db, SampleRate};
 
 /// Interleaved stereo sine, both channels identical.
 fn stereo_sine(rate: f64, freq: f64, secs: f64, amp: f64) -> Vec<f32> {

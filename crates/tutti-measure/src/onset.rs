@@ -17,7 +17,7 @@
 use core::marker::PhantomData;
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Amplitude, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
 use crate::convert::{for_blocks, to_f32};
 use crate::framing::{FrameCutter, Framing};
@@ -25,7 +25,7 @@ use crate::{Measure, Meter, Result};
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 ranged! {
     /// The multiplier on the adaptive threshold: finite and not negative.

@@ -1,7 +1,7 @@
 //! What the note-logic tests share: a one-voice patch and a step at a channel.
 
-use tutti_types::Amplitude;
 use tutti_ump::{Attribute, MidiChannel, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::Amplitude;
 use tutti_voicing::{Command, Patch, VoiceSpec, Voicing};
 
 pub struct One;

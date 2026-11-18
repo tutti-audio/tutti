@@ -3,7 +3,8 @@
 use crate::{BufferError, Interleaved, Mono, MonoMut, Planes, PlanesMut, Sample, deinterleave};
 use alloc::vec;
 use alloc::vec::Vec;
-use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples, Seconds};
+use tutti_types::{ChannelLayout, ChannelTopology, Placement};
+use tutti_units::{SampleRate, Samples, Seconds};
 
 /// Multichannel audio held in memory, one `Vec<S>` per channel.
 ///
@@ -22,7 +23,8 @@ use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples
 ///
 /// ```
 /// use tutti_buffers::{Interleaved, Wave};
-/// use tutti_types::{ChannelLayout, SampleRate, Samples};
+/// use tutti_units::{SampleRate, Samples};
+/// use tutti_types::ChannelLayout;
 ///
 /// let mut wave = Wave::<f32>::new(2, SampleRate::SR_48K);
 /// wave.append(Interleaved::new(&[0.5, -0.5, 0.25, -0.25], ChannelLayout::STEREO)?)?;

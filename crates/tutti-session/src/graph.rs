@@ -57,12 +57,13 @@ use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
     TapAlign, TapId,
 };
-#[cfg(feature = "plugin")]
-use tutti_types::Latency;
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
 use tutti_types::Mint;
-use tutti_types::{Amplitude, ChannelLayout, Mix, SampleRate, Seconds, UnitAddr};
-use tutti_types::{Samples, Tail};
+#[cfg(feature = "plugin")]
+use tutti_units::Latency;
+use tutti_units::{Amplitude, Mix, SampleRate, Seconds, UnitAddr};
+use tutti_units::{Samples, Tail};
 
 mod observe;
 #[cfg(feature = "testing")]
@@ -840,7 +841,7 @@ impl Graph {
     /// `losses()`: `lost`, `evicted`, `refused`, and `late` for what was found
     /// past). A producer
     /// has no rate to match: an event names a frame, or a
-    /// [`Moment`](tutti_types::Moment) that carries its rate, so there is
+    /// [`Moment`](tutti_units::Moment) that carries its rate, so there is
     /// nothing to refuse and nothing resampled.
     ///
     /// The fork is **silent**: an export of a graph that holds the inlet
@@ -3772,7 +3773,7 @@ struct ModHostOver<'a> {
 
 /// A plugin parameter's modulation target, by its node and parameter id.
 pub(crate) type PluginTargets =
-    BTreeMap<(NodeKey, tutti_types::ParamId), tutti_modulation::TargetKey>;
+    BTreeMap<(NodeKey, tutti_units::ParamId), tutti_modulation::TargetKey>;
 
 impl tutti_nodes::ModHost for ModHostOver<'_> {
     fn target(&self, target: tutti_modulation::TargetKey) -> Option<tutti_nodes::Target> {
@@ -3810,7 +3811,7 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
             // A plugin target waits for its mirror: a lane built without
             // a knob could not take one later.
             None => {
-                let tutti_types::ParamAddr::Id(id) = addr else {
+                let tutti_units::ParamAddr::Id(id) = addr else {
                     return None;
                 };
                 // A node the session hosts no plugin at has no mirror: its
@@ -3844,7 +3845,7 @@ mod tail_tests {
     use tutti_graph::ForkByClone;
     use tutti_nodes::testing::Const;
     use tutti_tempo::TempoMap;
-    use tutti_types::Bpm;
+    use tutti_units::Bpm;
 
     fn graph() -> Graph {
         graph_at(SampleRate::SR_48K)
@@ -3979,7 +3980,8 @@ mod root_fade_tests {
     use tutti_graph::{FadeLaw, ForkByClone, OutPort, RootId, Source};
     use tutti_nodes::testing::Const;
     use tutti_tempo::TempoMap;
-    use tutti_types::{Bed, Bpm};
+    use tutti_types::Bed;
+    use tutti_units::Bpm;
 
     fn graph() -> (Graph, NodeKey) {
         let map = TempoMap::constant(Bpm::of(120.0)).expect("a tempo");

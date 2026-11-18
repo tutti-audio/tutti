@@ -23,7 +23,7 @@
 //! The design is [`FdnLayout::design_into`]: the controls to a [`Network`], in place, since
 //! a network is too large to build on an audio thread. [`FdnBank`](crate::FdnBank) runs it.
 
-use tutti_types::{
+use tutti_units::{
     Amplitude, Db, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds, StereoWidth,
 };
 
@@ -75,7 +75,7 @@ const MAX_WET: Db = Db(24.0);
 /// The controls of a feedback delay network, in tutti units.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FdnControls {
-    /// The RT60 of the mid band (index 0 of [`UnitParam::Decay`](tutti_types::UnitParam)),
+    /// The RT60 of the mid band (index 0 of [`UnitParam::Decay`](tutti_units::UnitParam)),
     /// the low band (1) and the high band (2): `[mid, low, high]`.
     pub decay: [Seconds; 3],
     /// The room size, `0..1`: scales every line, from half to one and a half

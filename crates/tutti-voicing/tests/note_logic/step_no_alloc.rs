@@ -9,12 +9,12 @@ use tutti_midi_protocol::{
     Addressee, ChannelMask, GeneralMidi, Heard, KeyChange, KeyChanges, KeyTable, OctaveOffsets,
     Timing, TuningFrequency, TuningMessage, TuningName, Universal,
 };
-use tutti_types::{Amplitude, Semitones};
 use tutti_ump::{
     Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, PerNoteManagement,
     RegisteredPerNoteController, Rpn, U7, U14, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
+use tutti_units::{Amplitude, Semitones};
 use tutti_voicing::{
     Command, Mode, Order, Patch, PerNoteState, Rules, Steal, TuningCapacity, VoiceId, VoiceSpec,
     Voicing,

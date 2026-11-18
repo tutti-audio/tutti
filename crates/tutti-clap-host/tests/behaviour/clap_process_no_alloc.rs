@@ -22,7 +22,7 @@ use tutti_rt::LockExt;
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, TransportInfo};
 use tutti_graph::Offset;
 use tutti_plugin_types::PluginAudio;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::support::active::{Activate, Active, ActiveExt};
 use crate::support::main_thread;

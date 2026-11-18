@@ -13,11 +13,11 @@ use crate::support;
 use support::Hand;
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::SampleRate;
 use tutti_ump::{
     Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
     RegisteredPerNoteController, U7, U14, Ump, Voice1, Voice2,
 };
+use tutti_units::SampleRate;
 
 fn load_test_soundfont() -> Arc<SoundFont> {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");

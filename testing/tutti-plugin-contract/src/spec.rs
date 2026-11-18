@@ -6,8 +6,8 @@
 use tutti_plugin_types::{
     Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, Normalized, ParamSteps, Samples,
 };
-use tutti_types::ParamId;
 use tutti_ump::{MidiChannel, U7};
+use tutti_units::ParamId;
 
 /// A parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

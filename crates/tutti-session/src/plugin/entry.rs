@@ -36,7 +36,8 @@ use tutti_plugin::catalog::{
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle, PluginFailure};
 use tutti_rt::LockExt;
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 use super::{HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded, PluginNode};
 use crate::PluginPresets;

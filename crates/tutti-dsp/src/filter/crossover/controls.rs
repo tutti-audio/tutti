@@ -1,7 +1,7 @@
 //! [`CrossoverControls`]: the split frequencies of a Linkwitz-Riley crossover, and the checks
 //! that make a set one a crossover can run.
 
-use tutti_types::{Hz, SampleRate};
+use tutti_units::{Hz, SampleRate};
 
 use super::bands::{CrossoverError, MAX_SPLITS, validate, validate_order};
 

@@ -16,7 +16,7 @@
 //! comb of islands separated by silence.
 
 use tutti_buffers::{Mono, MonoMut, Sample};
-use tutti_types::{Amplitude, SampleRate, Samples};
+use tutti_units::{Amplitude, SampleRate, Samples};
 
 use crate::convert::to_f32;
 
@@ -592,10 +592,10 @@ mod tests {
 
     fn tone(len: usize, freq: f32, sample_rate: f32) -> Vec<f32> {
         tutti_fixtures::signal::sine(
-            tutti_types::Hz(freq),
-            tutti_types::Amplitude(0.5),
-            tutti_types::SampleRate::of(f64::from(sample_rate)),
-            tutti_types::Samples(len),
+            tutti_units::Hz(freq),
+            tutti_units::Amplitude(0.5),
+            tutti_units::SampleRate::of(f64::from(sample_rate)),
+            tutti_units::Samples(len),
         )
     }
 

@@ -1,8 +1,8 @@
 //! The amplitude curves of the drum map and drawbar organ Profiles, as
 //! functions from a 32-bit controller value to a gain.
 
-use tutti_types::{Amplitude, Db};
 use tutti_ump::ControlValue;
+use tutti_units::{Amplitude, Db};
 
 /// The value as a fraction of full scale, `0.0..=1.0`.
 fn fraction(value: ControlValue) -> f64 {

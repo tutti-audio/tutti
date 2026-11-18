@@ -158,7 +158,8 @@ pub(crate) fn build_vst2_time_info(
 mod tests {
     use super::*;
     use tutti_plugin_types::LoopRegion;
-    use tutti_types::{Beat, Bpm, LoopRange};
+    use tutti_types::LoopRange;
+    use tutti_units::{Beat, Bpm};
     use vst::api::TimeInfoFlags as F;
 
     fn base() -> TransportInfo {

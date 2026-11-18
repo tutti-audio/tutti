@@ -32,7 +32,7 @@ use tutti_vst2_host::Vst2Loaded;
 
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 use tutti_vst2_test_plugin::ProcessCapture;
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -133,7 +133,7 @@ fn load() -> Loaded {
 fn prepare_at(unit: &mut PluginNode<Vst2Loaded>, rate: SampleRate) {
     tutti_graph::Node::prepare(
         unit,
-        &tutti_graph::Prepare::new(rate, tutti_types::MaxBlock::of(tutti_types::Samples(BLOCK))),
+        &tutti_graph::Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK))),
     );
 }
 
@@ -150,7 +150,7 @@ fn drive_blocks(unit: &mut PluginNode<Vst2Loaded>, max: usize, frames: usize) {
     let rate = SampleRate::of(SAMPLE_RATE);
     Node::prepare(
         unit,
-        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_types::Samples(max))),
+        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(max))),
     );
     process_block(unit, frames);
 }
@@ -164,9 +164,9 @@ fn process_block(unit: &mut PluginNode<Vst2Loaded>, frames: usize) {
         .map(|_| &silence[..])
         .collect();
     let env = Env {
-        frame: tutti_types::Frame::new(0),
+        frame: tutti_units::Frame::new(0),
         sample_rate: rate,
-        block_len: tutti_types::Samples(frames),
+        block_len: tutti_units::Samples(frames),
         transport: TransportPosition::default(),
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,
@@ -416,7 +416,7 @@ fn the_output_is_what_the_plugin_wrote() {
     let rate = SampleRate::of(SAMPLE_RATE);
     Node::prepare(
         &mut loaded.unit,
-        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_types::Samples(BLOCK))),
+        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK))),
     );
     let channels = usize::from(Node::shape(&loaded.unit).audio_in().count());
     assert_eq!(channels, 2, "the probe's default layout is stereo");
@@ -433,9 +433,9 @@ fn the_output_is_what_the_plugin_wrote() {
             .collect();
         let inputs: Vec<&[f32]> = input.iter().map(|c| &c[..]).collect();
         let env = Env {
-            frame: tutti_types::Frame::new(0),
+            frame: tutti_units::Frame::new(0),
             sample_rate: rate,
-            block_len: tutti_types::Samples(frames),
+            block_len: tutti_units::Samples(frames),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
@@ -612,7 +612,7 @@ fn an_io_change_reaches_a_subscriber_and_the_shape() {
     assert!(
         seen.iter().any(|n| matches!(
             n,
-            PluginInvalidation::Latency { samples } if *samples == tutti_types::Samples(300)
+            PluginInvalidation::Latency { samples } if *samples == tutti_units::Samples(300)
         )),
         "{seen:?}"
     );

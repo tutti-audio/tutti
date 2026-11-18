@@ -26,9 +26,10 @@ use tutti_buffers::{Fold, FoldEnd, FoldError, MonoMut, Planes};
 use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
 use tutti_types::{
-    Beat, BeatDuration, Bpm, ChannelLayout, ChannelTopology, Frame, ReadRate, SamplePosition,
-    SampleRate, Samples, Speaker, TimelineSegment, first_frame_at_or_after, snap_to_whole_frame,
+    ChannelLayout, ChannelTopology, Speaker, TimelineSegment, first_frame_at_or_after,
+    snap_to_whole_frame,
 };
+use tutti_units::{Beat, BeatDuration, Bpm, Frame, ReadRate, SamplePosition, SampleRate, Samples};
 
 use super::clock::{BlockClock, Run, Wrap};
 use super::loop_span::LoopSpan;
@@ -72,7 +73,7 @@ use crate::PlaceError;
 /// forever.
 ///
 /// [`ReadRate`] is the product's own type, so `rate` can only be built through
-/// [`PlaybackRate::read_rate`](tutti_types::PlaybackRate::read_rate) — the one
+/// [`PlaybackRate::read_rate`](tutti_units::PlaybackRate::read_rate) — the one
 /// place the two factors compose. A caller holding a bare varispeed cannot pass
 /// it here by accident.
 ///
@@ -819,8 +820,9 @@ mod tests {
     use super::*;
     use tutti_buffers::Interleaved;
     use tutti_graph::{Env, Offset, TransportChanges, TransportPosition};
+    use tutti_types::LoopRange;
     use tutti_types::MAX_CHANNELS;
-    use tutti_types::{LoopRange, PlaybackRate, Seconds, SrcRatio};
+    use tutti_units::{PlaybackRate, Seconds, SrcRatio};
 
     /// [`super::read_frame`] with the placement a reader of `out`'s width has.
     fn read_frame(wave: &Arc<Wave>, position: f64, out: &mut [f32]) {

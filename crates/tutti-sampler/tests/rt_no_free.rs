@@ -23,7 +23,7 @@ use tutti_sampler::testing::settle;
 use tutti_sampler::{
     ByHand, DiskStreamer, DiskVoice, MemorySource, Placement, Playback, SlotId, Stream, VoicePool,
 };
-use tutti_types::{Beat, Bpm, SampleRate, Samples, StretchFactor};
+use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
 thread_local! {
     static WATCHING: Cell<bool> = const { Cell::new(false) };
@@ -138,7 +138,7 @@ fn write_wav(path: &std::path::Path) {
             [s, s]
         })
         .collect();
-    tutti_fixtures::signal::write_wav_f32(path, tutti_types::SampleRate::SR_48K, 2, &interleaved);
+    tutti_fixtures::signal::write_wav_f32(path, tutti_units::SampleRate::SR_48K, 2, &interleaved);
 }
 
 /// A hand-stepped streamer streaming a fresh file, and the stream's handle and

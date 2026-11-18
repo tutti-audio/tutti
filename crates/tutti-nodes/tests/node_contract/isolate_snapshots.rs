@@ -33,9 +33,10 @@ use tutti_nodes::{
     PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
     TiltFilterNode,
 };
-use tutti_types::{
-    Amplitude, BusTopology, ChannelLayout, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q,
-    Resonance, Seconds, Semitones, StereoWidth, UnitAddr, UnitParam,
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{
+    Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Seconds, Semitones,
+    StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]

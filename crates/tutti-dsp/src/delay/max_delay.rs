@@ -1,8 +1,8 @@
 //! [`MaxDelay`]: the longest delay a delay line is built to hold.
 
-use tutti_types::{SampleRate, Samples, Seconds};
+use tutti_units::{SampleRate, Samples, Seconds};
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The longest delay a delay's time control may ask for, and the size of the line a
     /// [`DelayBank`](crate::DelayBank) allocates.
     ///

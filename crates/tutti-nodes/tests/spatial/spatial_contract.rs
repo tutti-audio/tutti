@@ -16,9 +16,9 @@ use tutti_graph::contract::{Detect, Excite, Row, SAMPLE_RATE};
 use tutti_graph::contract_tests;
 use tutti_nodes::HrtfBinauralNode;
 use tutti_nodes::testing::aim;
-use tutti_types::Azimuth;
-use tutti_types::Elevation;
-use tutti_types::Samples;
+use tutti_units::Azimuth;
+use tutti_units::Elevation;
+use tutti_units::Samples;
 
 /// The panner's convolution step (`tutti_dsp::HRTF_STEP`).
 const LATENCY: usize = 128;

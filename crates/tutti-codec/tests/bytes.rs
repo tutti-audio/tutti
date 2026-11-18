@@ -21,7 +21,8 @@
 use std::io::Cursor;
 use tutti_buffers::Interleaved;
 use tutti_codec::{Encoder, Format, Spec};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 fn fnv(bytes: &[u8]) -> u64 {
     let mut h = tutti_fixtures::Fnv::new();

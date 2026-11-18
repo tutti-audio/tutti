@@ -3,7 +3,8 @@
 use crate::{Sample, bounds};
 use core::fmt;
 use core::ops::Range;
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// A borrowed run of one channel's samples.
 ///
@@ -13,7 +14,7 @@ use tutti_types::{ChannelLayout, Samples};
 ///
 /// ```
 /// use tutti_buffers::Mono;
-/// use tutti_types::Samples;
+/// use tutti_units::Samples;
 ///
 /// let data = [0.1f32, 0.2, 0.3, 0.4];
 /// let run = Mono::new(&data);

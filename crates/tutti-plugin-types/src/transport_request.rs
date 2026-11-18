@@ -6,7 +6,7 @@
 //! [`Control::take_requests`](crate::Control::take_requests) and then as a
 //! notice.
 
-use tutti_types::{Beat, BeatDuration};
+use tutti_units::{Beat, BeatDuration};
 
 /// One transport request from a plugin (CLAP `transport-control`).
 ///

@@ -14,7 +14,7 @@ use tutti_graph::{
     Edge, EdgeGain, EdgeId, Editor, Executor, Fade, FadeLaw, NodeKey, OutPort, Renderer, RootFade,
     Sink, Source, TransportPosition, Unforkable,
 };
-use tutti_types::{Amplitude, Latency, Samples};
+use tutti_units::{Amplitude, Latency, Samples};
 
 const OLD: f32 = 0.5;
 const NEW: f32 = 0.25;
@@ -594,7 +594,7 @@ fn a_carried_commit_that_changes_an_old_sources_latency_keeps_the_banks_alignmen
         ins: 0,
         outs: 1,
         latency,
-        tail: tutti_types::Tail::None,
+        tail: tutti_units::Tail::None,
     };
     let mut r = rig_with(
         &[

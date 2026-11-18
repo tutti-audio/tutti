@@ -3,7 +3,8 @@
 
 use tutti_buffers::InterleavedMut;
 use tutti_session::{BlockDates, Session};
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 fn session(dates: BlockDates, rate: f64) -> Session {
     Session::builder()

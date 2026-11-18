@@ -9,7 +9,7 @@ use tutti_midi_file::{
     SmfParseError, SmfTicksPerFrame, SmfTicksPerQuarter, Tick, Timebase, TimelineError,
 };
 use tutti_midi_protocol::MtcRate;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 fn read(bytes: &[u8]) -> MidiFile {
     MidiFile::from_bytes(bytes).expect("reads")

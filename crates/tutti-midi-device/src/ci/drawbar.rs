@@ -133,7 +133,7 @@ impl Drawbar {
     }
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A drawbar position, `0..=8`: 0 is Off or In, 8 is Full or Out (M2-121
     /// §5.1.2, Table 6).
     #[derive(Eq, Hash)]

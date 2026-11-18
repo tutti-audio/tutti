@@ -7,7 +7,7 @@
 //! The derived quantities (hop count, bin count, frame times) are computed from
 //! it, never stored beside it, so they cannot contradict it.
 
-use tutti_types::{Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Hz, SampleRate, Samples, Seconds};
 
 use crate::stft::error::{Result, StftError};
 use crate::stft::grid::{BinCount, BinIndex, FrameCount};

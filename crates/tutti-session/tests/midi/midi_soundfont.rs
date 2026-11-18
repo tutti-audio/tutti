@@ -28,8 +28,9 @@ use tutti_session::Stamp;
 use tutti_session::{EventInPort, MidiRouteRule, Session};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::{Beat, BeatDuration, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
 use tutti_ump::MidiChannel;
+use tutti_units::{Beat, BeatDuration, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

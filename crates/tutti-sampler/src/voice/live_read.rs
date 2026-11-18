@@ -54,7 +54,7 @@
 //! paused voice holds no refill back.
 
 use tutti_graph::FadeLaw;
-use tutti_types::{SamplePosition, Samples};
+use tutti_units::{SamplePosition, Samples};
 
 use crate::streamer::{Arrangement, Block, Cells, RingMap, RingReader, SharedReader};
 use tutti_types::MAX_CHANNELS;

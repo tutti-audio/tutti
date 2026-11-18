@@ -7,8 +7,8 @@ use std::sync::Arc;
 use tutti_graph::NodeKey;
 use tutti_plugin_host::{PluginControls, PluginHandle};
 use tutti_plugin_types::{Normalized, ParameterInfo, PluginFailure, PluginTail};
-use tutti_types::ParamId;
-use tutti_types::{SampleRate, Samples};
+use tutti_units::ParamId;
+use tutti_units::{SampleRate, Samples};
 
 use crate::plugin::HostedPlugin;
 use crate::{Clock, Key, PluginNode, Session};

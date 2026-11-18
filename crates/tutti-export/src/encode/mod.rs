@@ -26,7 +26,8 @@ use std::path::Path;
 use tutti_buffers::{Interleaved, InterleavedMut, Planes, Sink, SinkFailed};
 use tutti_codec::{Encoder, Finalized, Spec};
 use tutti_dsp::{DitherSink, StreamingResampler, needs_resampling, resampled_frames};
-use tutti_types::{Amplitude, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, SampleRate, Samples};
 
 /// The rate the file is written at: the resample target, else the rate it is
 /// rendered at.
@@ -280,7 +281,7 @@ impl Chain {
     /// Scales everything from here on by `gain` after the converter and
     /// before the dither (the gain of a normalize, measured at the file's
     /// rate).
-    pub(crate) fn set_gain(&mut self, gain: tutti_types::Db) {
+    pub(crate) fn set_gain(&mut self, gain: tutti_units::Db) {
         self.gain = Some(gain.to_amplitude());
     }
 

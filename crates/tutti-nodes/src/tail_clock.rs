@@ -9,7 +9,7 @@
 //! [`ConvolverNode`](crate::ConvolverNode).
 
 use tutti_graph::MAX_NODE_TAIL;
-use tutti_types::{SampleRate, Samples, Tail};
+use tutti_units::{SampleRate, Samples, Tail};
 
 /// A tail of this many frames never ends.
 pub(crate) const UNBOUNDED: u64 = u64::MAX;

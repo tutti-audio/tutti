@@ -6,7 +6,7 @@
 //! ways, in `f64` and through `libm` so a design does not depend on the
 //! platform's C math library.
 
-use tutti_types::{Amplitude, Db, SampleRate, SampleSpan, Seconds};
+use tutti_units::{Amplitude, Db, SampleRate, SampleSpan, Seconds};
 
 /// The loop gain that makes a loop of `delay` frames decay by 60 dB in `rt60`:
 /// `g = 10^(-3 d / (RT60 fs))`.

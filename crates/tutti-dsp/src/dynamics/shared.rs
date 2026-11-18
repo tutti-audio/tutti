@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use tutti_buffers::{Float, Planes};
-use tutti_types::{Ballistics, SampleRate, Seconds};
+use tutti_units::{Ballistics, SampleRate, Seconds};
 
 use crate::smoother::Smoother;
 

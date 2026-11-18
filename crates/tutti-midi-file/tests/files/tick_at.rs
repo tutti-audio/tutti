@@ -3,8 +3,8 @@
 
 use crate::common::{metrical, track};
 use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Tick};
-use tutti_types::Beat;
 use tutti_ump::TicksPerQuarterNote;
+use tutti_units::Beat;
 
 fn tpq(ticks: u16) -> TicksPerQuarterNote {
     TicksPerQuarterNote::of(ticks)

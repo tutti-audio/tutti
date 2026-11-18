@@ -9,7 +9,8 @@ use tutti_engine::{OutputMap, OutputStrip, RoutingError};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{OutPort, OutputPolicy, OutputPolicyError, Root, Session, SessionBuilder};
-use tutti_types::{Amplitude, Bed, ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{Bed, ChannelLayout, MaxBlock};
+use tutti_units::{Amplitude, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 

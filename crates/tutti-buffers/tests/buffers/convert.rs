@@ -4,7 +4,8 @@ use tutti_buffers::{
     BufferError, Interleaved, InterleavedMut, Mono, MonoMut, Planes, PlanesMut, convert,
     convert_mono, convert_planes, deinterleave, interleave,
 };
-use tutti_types::{ChannelLayout, LayoutError, Samples};
+use tutti_types::{ChannelLayout, LayoutError};
+use tutti_units::Samples;
 
 const ST: ChannelLayout = ChannelLayout::STEREO;
 

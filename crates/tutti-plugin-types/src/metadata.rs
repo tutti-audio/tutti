@@ -5,7 +5,7 @@
 //! plugin-load IPC reply, so it is serializable under the `serde` feature.
 
 use tutti_graph::BusRole;
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 use crate::Measured;
 
@@ -211,11 +211,11 @@ use tutti_graph::MAX_NODE_TAIL;
 
 /// How long a plugin keeps producing audio after its input goes silent.
 ///
-/// An alias of the engine-wide [`Tail`](tutti_types::Tail), so a hosted
+/// An alias of the engine-wide [`Tail`](tutti_units::Tail), so a hosted
 /// plugin's tail composes with any other node's. The format-specific decoding
 /// (AU's seconds, the `u32::MAX` sentinel CLAP and VST3 share) is documented on
 /// the constructor that performs it.
-pub use tutti_types::Tail as PluginTail;
+pub use tutti_units::Tail as PluginTail;
 
 /// How a plugin processes: the tail it claims, and what a probe measured of
 /// it ([`Measured`]). The one place the tail ceiling the graph parks a plugin
@@ -418,7 +418,8 @@ impl LoadedPlugin {
 mod tests {
     use super::*;
     use crate::{LatencyVerdict, PROBE_FLOOR, ProbeConfig, StateHash, TailVerdict, Verdict};
-    use tutti_types::{MaxBlock, SampleRate};
+    use tutti_types::MaxBlock;
+    use tutti_units::SampleRate;
 
     fn stereo() -> ChannelTopology {
         ChannelTopology::assumed(ChannelLayout::STEREO)
@@ -447,11 +448,11 @@ mod tests {
             tail: PluginTail::Finite(Samples(48_000)),
             features: Features::F64_AUDIO | Features::MIDI_IN,
             probed: Features::F64_AUDIO | Features::MIDI_IN | Features::EDITOR,
-            own_bypass: Some(OwnBypass::Parameter(tutti_types::ParamId::new(4))),
+            own_bypass: Some(OwnBypass::Parameter(tutti_units::ParamId::new(4))),
             assignments: vec![MidiAssignment {
                 channel: tutti_ump::MidiChannel::new(3),
                 source: crate::MidiSource::PitchBend,
-                param: tutti_types::ParamId::new(9),
+                param: tutti_units::ParamId::new(9),
             }],
         };
         let bytes = postcard::to_allocvec(&loaded).unwrap();

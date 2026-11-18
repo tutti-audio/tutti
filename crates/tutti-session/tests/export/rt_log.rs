@@ -5,7 +5,8 @@
 use tracing::Level;
 use tutti_graph::ForkByClone;
 use tutti_session::{Bounce, BounceLatency, ExportClock, OutPort, Range, Root, Session};
-use tutti_types::{ChannelLayout, SampleRate, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Seconds};
 
 #[path = "../support/rt_log.rs"]
 mod support;

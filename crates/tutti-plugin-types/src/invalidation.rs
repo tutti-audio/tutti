@@ -1,7 +1,7 @@
 //! What a plugin tells its host went stale: the wire's [`ResyncKind`] and the
 //! two consequences it maps to, [`PluginRefresh`] and [`PluginInvalidation`].
 
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use crate::{PluginFailure, PluginTail, Samples};
 

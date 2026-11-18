@@ -3,7 +3,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, RingModControls, RingModulator};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, Hz, MaxBlock, SampleRate, Tail};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -135,7 +136,7 @@ mod tests {
     use crate::test_support::prepared;
     use tutti_graph::Node;
     use tutti_graph::contract::assert_param_fork;
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     /// A fork starts from the controls last set and shares no cell.
     #[test]

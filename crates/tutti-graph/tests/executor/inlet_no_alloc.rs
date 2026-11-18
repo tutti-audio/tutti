@@ -11,7 +11,8 @@
 
 use tutti_graph::InletNode;
 use tutti_graph::contract::Direct;
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 /// Blocks with the ring full, then running dry (both branches of the pop).
 #[test]

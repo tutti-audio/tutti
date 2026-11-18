@@ -28,7 +28,8 @@ use tutti_graph::{
 };
 use tutti_rt::Reader;
 use tutti_transport::TempoReader;
-use tutti_types::{Amplitude, ChannelLayout, Param, SampleRate, Tail, UnitParam};
+use tutti_types::{ChannelLayout, Param};
+use tutti_units::{Amplitude, SampleRate, Tail, UnitParam};
 
 /// One [`Voice`] as a graph node in its own right: zero inputs, `channels`
 /// outputs.
@@ -514,7 +515,7 @@ mod tests {
     use super::*;
     use crate::{MemorySource, Playback, VoiceSource, VoiceWindow};
     use tutti_buffers::Mono;
-    use tutti_types::Beat;
+    use tutti_units::Beat;
 
     /// A steering the node held across the next `set_window` is freed by
     /// the next `reclaim`, with no further publish.
@@ -552,7 +553,7 @@ mod tests {
         ));
         let prepare = Prepare::new(
             SampleRate::SR_48K,
-            tutti_types::MaxBlock::of(tutti_types::Samples(64)),
+            tutti_types::MaxBlock::of(tutti_units::Samples(64)),
         );
         let free = |play: Playback| {
             let voice = Voice {
@@ -577,15 +578,15 @@ mod tests {
         };
         let (live, fork) = free(Playback::default());
         assert_eq!(live, Tail::Unbounded);
-        assert_eq!(fork, Tail::Finite(tutti_types::Samples(4_800)));
+        assert_eq!(fork, Tail::Finite(tutti_units::Samples(4_800)));
 
         let stretched = Playback {
-            stretch: tutti_types::StretchFactor::new(2.0),
+            stretch: tutti_units::StretchFactor::new(2.0),
             ..Playback::default()
         };
         assert_eq!(
             free(stretched).1,
-            Tail::Finite(tutti_types::Samples(9_600)),
+            Tail::Finite(tutti_units::Samples(9_600)),
             "a stretch of two plays twice as long"
         );
 

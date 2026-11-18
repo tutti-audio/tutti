@@ -645,7 +645,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     use tutti_plugin_types::{PluginTail, Samples};
 
@@ -1313,7 +1313,7 @@ mod tests {
             &tutti_fixtures::detached_work(),
             std::path::Path::new(crate::test_utils::vst3_probe_path()),
             &Load::new(),
-            tutti_types::SampleRate::of(SR),
+            tutti_units::SampleRate::of(SR),
             N,
             false,
             None,

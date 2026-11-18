@@ -32,7 +32,8 @@ use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
 use tutti_plugin_types::{Layout, LoadedPlugin, PluginBus};
 use tutti_tempo::TempoView;
 use tutti_transport::TempoReader;
-use tutti_types::{BusTopology, ChannelLayout, ParkedSampleRate, SampleRate, Samples};
+use tutti_types::{BusTopology, ChannelLayout, ParkedSampleRate};
+use tutti_units::{SampleRate, Samples};
 
 use super::instance::Instance;
 use crate::{BlockTransport, TransportSource, TransportWalk};
@@ -42,7 +43,7 @@ use tutti_plugin_types::{
     ChordChanges, ExpressiveContext, Features, MIDI_STACK_CAPACITY, MidiEventVec, ParameterChanges,
     PluginTooWide, ScaleChanges, TransportChange, TransportChanges, TransportInfo,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// A plugin running inside the host process, as a graph node, whatever its
 /// format `F`.
@@ -730,7 +731,7 @@ impl<F: Loaded> InProcClient<F> {
     /// `pending_sample_rate`), or, on a fork, dispatched here. What the
     /// node's `prepare` does with its rate. (The transport snapshot's rate is
     /// the block's own, from its `Env`.)
-    pub(super) fn set_rate(&mut self, sample_rate: tutti_types::SampleRate) {
+    pub(super) fn set_rate(&mut self, sample_rate: tutti_units::SampleRate) {
         let rate = sample_rate;
         let changed = rate != self.sample_rate;
         self.sample_rate = rate;
@@ -888,11 +889,10 @@ mod transport_tests {
     use tutti_graph::{Env, TransportChanges, TransportHistory, TransportPosition};
     use tutti_tempo::TempoMap;
     use tutti_transport::ProjectMeter;
-    use tutti_types::Latency;
     use tutti_types::TimeSignature;
-    use tutti_types::{
-        Beat, BeatsPerBar, Bpm, Frame, MeterChange, MeterMap, NoteValue, SampleRate,
-    };
+    use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue};
+    use tutti_units::Latency;
+    use tutti_units::{Beat, Bpm, Frame, SampleRate};
 
     /// A rolling block of 64 frames at 132 BPM from beat 4, at 48 kHz: 132,
     /// not the 120 the default snapshot carries, so a live read is told

@@ -11,7 +11,7 @@ use crate::{
     ParameterInfo, PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason,
     bypass_value, is_bypassed,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// What a loaded plugin answers from any thread, without a main-thread token.
 ///

@@ -28,7 +28,8 @@ use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterControls, LimiterNode};
 use tutti_sampler::{DiskVoice, MemorySource, Placement, StreamPhase, VoiceWindow};
 use tutti_session::{InPort, OutPort, Root, SamplerEvent, Session, SessionEvent};
-use tutti_types::{Beat, ChannelLayout, Db, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, Db, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 /// Beat 1 at 120 BPM and `RATE`.

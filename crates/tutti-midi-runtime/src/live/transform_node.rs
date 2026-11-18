@@ -43,7 +43,7 @@ use crate::schedule::CLIP_EVENT_DENSITY;
 ///
 /// ```
 /// use tutti_types::MaxBlock;
-/// use tutti_types::{SampleRate, Samples};
+/// use tutti_units::{SampleRate, Samples};
 /// use tutti_graph::{Editor, NodeKey, Prepare};
 /// use tutti_midi_protocol::MpeMode;
 /// use tutti_midi_runtime::MpeTransformNode;

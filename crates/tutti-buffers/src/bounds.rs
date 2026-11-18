@@ -2,7 +2,7 @@
 //! in frames.
 
 use core::ops::Range;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// The frame range as indices, or `None` unless `start <= end <= frames`.
 #[inline]

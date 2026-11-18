@@ -7,7 +7,7 @@
 use tutti_buffers::Float;
 
 use crate::{Complex64, Lanes, Lerp};
-use tutti_types::{Db, Hz, Q, SampleRate};
+use tutti_units::{Db, Hz, Q, SampleRate};
 
 /// Which response the state-variable filter presents.
 ///

@@ -16,7 +16,7 @@
 /// Test every type with `tutti_fixtures::check_range_contract`.
 ///
 /// ```
-/// tutti_types::ranged! {
+/// tutti_units::ranged! {
 ///     /// How many voices, `1..=8`.
 ///     Voices(u8), VoicesOutOfRange, "within 1..=8", |raw| raw >= 1 && raw <= 8
 /// }

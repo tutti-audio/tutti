@@ -13,7 +13,7 @@
 //! naive form folds back below Nyquist.
 
 use core::f64::consts::TAU;
-use tutti_types::{Hz, SampleRate};
+use tutti_units::{Hz, SampleRate};
 
 /// The shape an [`Oscillator`] reads its phase through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -85,7 +85,7 @@ fn near(phase: f64, edge: f64, dt: f64) -> Option<f64> {
 ///
 /// ```
 /// use tutti_dsp::{Oscillator, OscillatorWave};
-/// use tutti_types::{Hz, SampleRate};
+/// use tutti_units::{Hz, SampleRate};
 ///
 /// let mut osc = Oscillator::new(OscillatorWave::Sine);
 /// let rate = SampleRate::SR_48K;

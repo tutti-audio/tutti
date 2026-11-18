@@ -38,6 +38,7 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # The engine's unit newtypes: `Bpm`/`Beat` on `TransportState` and `Seconds` on
 # `get_tail_time`. `default-features = false` drops this crate's codec/midi
 # defaults, which the unit vocabulary does not need.
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # The queue the MIDI-output callback pushes into during a render. `ArrayQueue`

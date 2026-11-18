@@ -2,7 +2,7 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
-use tutti_types::{Amplitude, Cents, Db};
+use tutti_units::{Amplitude, Cents, Db};
 
 #[non_exhaustive]
 pub(crate) struct SoundFontMath {}

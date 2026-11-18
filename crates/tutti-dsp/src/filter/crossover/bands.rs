@@ -2,7 +2,7 @@
 //! [`CrossoverError`], the band count and the frequency checks, and the fit of a set
 //! under the rate.
 
-use tutti_types::{Hz, SampleRate};
+use tutti_units::{Hz, SampleRate};
 
 /// Most splits a crossover holds: one fewer than the most bands.
 pub const MAX_SPLITS: usize = 5;

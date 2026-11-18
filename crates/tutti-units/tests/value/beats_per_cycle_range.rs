@@ -3,7 +3,7 @@
 #![cfg(feature = "serde")]
 
 use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
-use tutti_types::{BeatsPerCycle, BeatsPerCycleOutOfRange};
+use tutti_units::{BeatsPerCycle, BeatsPerCycleOutOfRange};
 
 /// A cycle's span is finite and above zero beats, so a beat divided by it is
 /// always a cycle position.

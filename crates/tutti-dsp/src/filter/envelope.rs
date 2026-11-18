@@ -25,10 +25,11 @@
 //!
 //! The bank has no latency. It bounds no ring-out (a resonant filter rings for as long as its Q
 //! says, at the lowest cutoff the controls reach), so the node over it declares
-//! [`Tail::Unknown`](tutti_types::Tail::Unknown).
+//! [`Tail::Unknown`](tutti_units::Tail::Unknown).
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{Amplitude, ChannelLayout, Db, Hz, Q, SampleRate, Samples, Seconds, Semitones};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Samples, Seconds, Semitones};
 
 use super::SvfBank;
 use super::svf::{SvfCoefficients, SvfControls, SvfModel, SvfType};

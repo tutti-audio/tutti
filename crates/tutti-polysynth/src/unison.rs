@@ -8,7 +8,8 @@
 
 use std::num::NonZeroU32;
 use tutti_dsp::Xorshift32;
-use tutti_types::{Amplitude, CentsSpan, Pan, Param, Phase, Spread};
+use tutti_types::Param;
+use tutti_units::{Amplitude, CentsSpan, Pan, Phase, Spread};
 
 pub(crate) const MAX_UNISON_VOICES: usize = UnisonVoices::MAX as usize;
 

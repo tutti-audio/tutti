@@ -23,8 +23,9 @@ use tutti_session::{
     ModInput, ModKeys, ModRefusal, OutPort, PHASES, ParamRef, PhaseCx, Problem, Root, RouteError,
     RouteSpec, Session, SessionEvent, TargetName,
 };
-use tutti_types::{BeatsPerCycle, Depth, Hz, ParamAddr, UnitParam};
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{BeatsPerCycle, Depth, Hz, ParamAddr, UnitParam};
+use tutti_units::{SampleRate, Samples};
 
 use common::probe::{ProbeUnit, Pulse};
 
@@ -521,7 +522,7 @@ const LATE: usize = 100;
 impl tutti_graph::Node for Late {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_types::Latency::new(Samples(LATE)))
+            .with_latency(tutti_units::Latency::new(Samples(LATE)))
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(

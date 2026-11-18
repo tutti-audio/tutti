@@ -57,12 +57,12 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use tutti_midi_protocol::{PitchBendSensitivity, bend_to_signed_f32};
-use tutti_types::Semitones;
 use tutti_ump::BendValue;
 use tutti_ump::{
     Address, Attribute, MidiChannel, NoteId, NoteNumber, PerNoteManagement, Pitch,
     RegisteredPerNoteController, Rpn, Voice2,
 };
+use tutti_units::Semitones;
 
 const CHANNELS: usize = MidiChannel::COUNT as usize;
 const KEYS: usize = 128;

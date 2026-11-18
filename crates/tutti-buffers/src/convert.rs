@@ -6,7 +6,8 @@
 //! different formats convert sample by sample by the rule in [`Sample`].
 
 use crate::{BufferError, Interleaved, InterleavedMut, Mono, MonoMut, Planes, PlanesMut, Sample};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// Converts every sample of `src` into `dst`'s format by the rule in
 /// [`Sample`].

@@ -4,10 +4,10 @@ use crate::testing::MockTransport;
 use crate::testing::loop_frames;
 use tutti_buffers::Mono;
 use tutti_buffers::Planes;
-use tutti_types::Bpm;
 use tutti_types::MaxBlock;
-use tutti_types::UnitParam;
-use tutti_types::{Samples, Seconds};
+use tutti_units::Bpm;
+use tutti_units::UnitParam;
+use tutti_units::{Samples, Seconds};
 
 fn ramp_wave(len: usize, sample_rate: f64) -> Arc<Wave> {
     let samples: Vec<f32> = (0..len).map(|i| (i + 1) as f32).collect();
@@ -1266,7 +1266,7 @@ fn the_shape_declares_its_gain() {
     s.set_gain(Amplitude::new(0.25));
     assert_eq!(
         Node::shape(&s).params.as_slice(),
-        &[tutti_types::UnitParam::Volume][..]
+        &[tutti_units::UnitParam::Volume][..]
     );
     assert_eq!(Node::param_base(&s, 0), Some(0.25));
     assert_eq!(Node::param_base(&s, 1), None);

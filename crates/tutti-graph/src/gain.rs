@@ -56,7 +56,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, Piece};
 
-use tutti_types::{Amplitude, AtomicF32, ParamCell, UnitAddr, UnitParam};
+use tutti_types::{AtomicF32, ParamCell};
+use tutti_units::{Amplitude, UnitAddr, UnitParam};
 
 use crate::event::Event;
 use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};

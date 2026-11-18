@@ -27,7 +27,8 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::{MemorySource, Playback, SlotId, Voice, VoiceNode, VoicePool, VoiceSource};
-use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 

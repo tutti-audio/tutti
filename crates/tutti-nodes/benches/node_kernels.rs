@@ -30,9 +30,8 @@ use tutti_nodes::{
     GateNode, InterpolationMode, KeySource, LimiterControls, LimiterNode, Lookahead, MaxDelay,
     ShapeKind,
 };
-use tutti_types::{
-    BusTopology, ChannelLayout, CompressionRatio, Db, Drive, Feedback, SampleRate, Seconds,
-};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::{CompressionRatio, Db, Drive, Feedback, SampleRate, Seconds};
 
 const BLOCKS: [usize; 2] = [64, 1024];
 const SR: SampleRate = SampleRate::SR_48K;
@@ -88,7 +87,8 @@ fn run<N: Node>(
 /// figure is the op's.
 fn channel_sum(c: &mut Criterion) {
     use tutti_graph::{Editor, Prepare, Source, TransportPosition};
-    use tutti_types::{ChannelLayout, Samples};
+    use tutti_types::ChannelLayout;
+    use tutti_units::Samples;
 
     let mut g = c.benchmark_group("channel_sum");
     for (case, sources, width) in [("8x2", 8u16, 2u16), ("16x1", 16, 1), ("2x6", 2, 6)] {

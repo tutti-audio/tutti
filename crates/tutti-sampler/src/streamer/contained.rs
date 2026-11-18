@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use tutti_types::{Beat, Bpm, Samples};
+use tutti_units::{Beat, Bpm, Samples};
 
 use super::command::StreamId;
 use super::decode::Seams;
@@ -69,7 +69,7 @@ enum Driver {
 
 impl Driver {
     fn start(rate: f64, threaded: bool, seams: Seams) -> Self {
-        let rate = tutti_types::SampleRate::of(rate);
+        let rate = tutti_units::SampleRate::of(rate);
         let config = DiskStreamerConfig::default();
         if threaded {
             Self::Threaded(DiskStreamer::build(rate, config, seams).expect("the thread starts"))
@@ -409,7 +409,7 @@ fn a_refused_spawn_is_an_error() {
         ..Seams::default()
     };
     let built = DiskStreamer::build(
-        tutti_types::SampleRate::SR_48K,
+        tutti_units::SampleRate::SR_48K,
         DiskStreamerConfig::default(),
         seams,
     );
@@ -528,7 +528,7 @@ fn a_refused_decode_thread_fails_the_open() {
         ..Seams::default()
     };
     let mut sampler =
-        DiskStreamer::manual_with(tutti_types::SampleRate::SR_44K1, Default::default(), seams)
+        DiskStreamer::manual_with(tutti_units::SampleRate::SR_44K1, Default::default(), seams)
             .expect("builds");
     let dir = tempfile::tempdir().expect("a temp dir");
     let opening = sampler.open(&mp3(dir.path()), Placement::HEAD);
@@ -557,7 +557,7 @@ fn a_panicking_decode_fails_that_open_only() {
         ..Seams::default()
     };
     let mut sampler =
-        DiskStreamer::manual_with(tutti_types::SampleRate::SR_44K1, Default::default(), seams)
+        DiskStreamer::manual_with(tutti_units::SampleRate::SR_44K1, Default::default(), seams)
             .expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
     let answer = settle(&mut sampler, opening);

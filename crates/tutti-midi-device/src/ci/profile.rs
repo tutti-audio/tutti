@@ -226,7 +226,7 @@ impl ProfileId {
     }
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The number of Channels a Profile uses or is asked to use (§7.8, §7.10,
     /// §7.11): the Manager plus Member Channels, 14 bits.
     ///

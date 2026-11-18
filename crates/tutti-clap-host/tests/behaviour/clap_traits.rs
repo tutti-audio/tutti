@@ -21,7 +21,7 @@ use tutti_plugin_types::{
     PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, SampleFormat, SampleRate,
     Samples,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 static PROBE_LOCK: Mutex<()> = Mutex::new(());
 

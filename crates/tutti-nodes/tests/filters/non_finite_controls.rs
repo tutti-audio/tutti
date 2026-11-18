@@ -24,9 +24,10 @@ use tutti_nodes::{
     GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType, MaxDelay,
     ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterNode, SvfType,
 };
-use tutti_types::{
-    BusTopology, ChannelLayout, CompressionRatio, Db, Drive, Feedback, Hz, ParamCell, Q, Resonance,
-    SampleRate, Samples, Seconds, UnitParam,
+use tutti_types::{BusTopology, ChannelLayout, ParamCell};
+use tutti_units::{
+    CompressionRatio, Db, Drive, Feedback, Hz, Q, Resonance, SampleRate, Samples, Seconds,
+    UnitParam,
 };
 
 const BAD: [f32; 3] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];

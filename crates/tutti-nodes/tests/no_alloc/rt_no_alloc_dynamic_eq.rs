@@ -3,7 +3,8 @@
 
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{DynamicEqConfig, DynamicEqNode, DynamicMode, KeySource};
-use tutti_types::{ChannelLayout, CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
 
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, the centre and the threshold
 /// moved before each. Every input a square of eight frames a period, in the band of the

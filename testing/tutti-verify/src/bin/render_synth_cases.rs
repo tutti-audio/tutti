@@ -25,8 +25,8 @@ use tutti_midi_protocol::widen_velocity;
 use tutti_polysynth::{
     Adsr, FilterType, OscillatorType, PolySynth, SvfMode, SynthConfig, UnisonConfig,
 };
-use tutti_types::{Amplitude, CentsSpan, Hz, Q, Samples, Seconds, Spread};
 use tutti_ump::{MidiChannel, U7, Ump};
+use tutti_units::{Amplitude, CentsSpan, Hz, Q, Samples, Seconds, Spread};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -45,7 +45,7 @@ fn flat_envelope() -> Adsr {
 }
 
 fn render(cfg: SynthConfig, notes: &[u8]) -> (Vec<f32>, Vec<f32>) {
-    let rate = tutti_types::SampleRate::of(SR);
+    let rate = tutti_units::SampleRate::of(SR);
     // Driven as a graph drives it: `Node::process`, the notes on its event
     // input in the first block.
     let mut synth = Direct::new(PolySynth::new(cfg), rate, BLOCK);

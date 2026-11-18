@@ -1,6 +1,6 @@
 //! [`LevelFollower`]: an audio level, followed by a one-pole attack and release.
 
-use tutti_types::{Ballistics, Frame, SampleRate, Samples};
+use tutti_units::{Ballistics, Frame, SampleRate, Samples};
 
 use super::{CONTROL_GRID, ControlSource, Leg, PlayGrid};
 

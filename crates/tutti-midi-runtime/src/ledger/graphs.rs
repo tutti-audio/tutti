@@ -24,15 +24,16 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{Beat, Bpm, ChannelLayout, Latency, LoopRange, SampleRate, Samples};
+use tutti_types::{ChannelLayout, LoopRange};
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteId, NoteNumber, Ump};
+use tutti_units::{Beat, Bpm, Latency, SampleRate, Samples};
 
 /// The clip clock at 120 BPM and 48 kHz and the helpers that build on it.
 mod common {
     use tutti_fixtures::midi;
     use tutti_graph::{Editor, EventEdge, EventIn, EventOut, NodeKey, TransportPosition};
-    use tutti_types::{Beat, Bpm};
     use tutti_ump::{MidiChannel, Ump};
+    use tutti_units::{Beat, Bpm};
 
     use crate::TimedMidiEvent;
 

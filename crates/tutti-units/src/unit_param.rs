@@ -22,7 +22,7 @@ use core::num::NonZeroU8;
 /// (`repr(u8)`): a [`UnitAddr`] packs its index above them in a `u16`.
 ///
 /// ```
-/// use tutti_types::UnitParam;
+/// use tutti_units::UnitParam;
 ///
 /// let id = u16::from(UnitParam::Cutoff);
 /// assert_eq!(UnitParam::try_from(id), Ok(UnitParam::Cutoff));
@@ -292,7 +292,7 @@ impl From<UnitParam> for u16 {
 /// bit-identical to the plain discriminant, so a plain id decodes to index 0.
 ///
 /// ```
-/// use tutti_types::{UnitAddr, UnitParam};
+/// use tutti_units::{UnitAddr, UnitParam};
 ///
 /// let band1 = UnitAddr::new(UnitParam::Threshold, 1);
 /// assert_eq!(band1.to_u16(), 0x0100 | 10);
@@ -401,7 +401,7 @@ impl PartialEq<UnitAddr> for UnitParam {
 /// a node and one.
 ///
 /// ```
-/// use tutti_types::{ParamAddr, ParamId, UnitAddr, UnitParam};
+/// use tutti_units::{ParamAddr, ParamId, UnitAddr, UnitParam};
 ///
 /// let band0 = ParamAddr::unit(UnitAddr::new(UnitParam::Threshold, 0));
 /// assert_eq!(band0, ParamAddr::Unit(UnitParam::Threshold));
@@ -500,21 +500,21 @@ impl ParamId {
     /// invites treating an opaque id as a position:
     ///
     /// ```compile_fail
-    /// # use tutti_types::ParamId;
+    /// # use tutti_units::ParamId;
     /// let id = ParamId::new(3);
     /// let _ = id + ParamId::new(1);
     /// ```
     /// ```compile_fail
-    /// # use tutti_types::ParamId;
+    /// # use tutti_units::ParamId;
     /// for _id in ParamId::new(0)..ParamId::new(4) {}
     /// ```
     /// ```compile_fail
-    /// # use tutti_types::ParamId;
+    /// # use tutti_units::ParamId;
     /// let params = ["a", "b"];
     /// let _ = params[ParamId::new(0)];
     /// ```
     /// ```compile_fail
-    /// # use tutti_types::ParamId;
+    /// # use tutti_units::ParamId;
     /// // A count is not an id: no `From<usize>` to make enumerate() fit.
     /// let _: ParamId = 0usize.into();
     /// ```
@@ -522,7 +522,7 @@ impl ParamId {
     /// What *does* compile is the deliberate crossing at a format boundary:
     ///
     /// ```
-    /// # use tutti_types::ParamId;
+    /// # use tutti_units::ParamId;
     /// let id = ParamId::new(0x4000_0001);
     /// assert_eq!(id.get(), 0x4000_0001);
     /// ```
@@ -564,7 +564,7 @@ impl core::fmt::Display for ParamId {
 /// through [`UnitParam`] and cannot be ramped by key.
 ///
 /// ```compile_fail
-/// use tutti_types::{Db, ParamKey};
+/// use tutti_units::{Db, ParamKey};
 /// let _ = ParamKey::<Db>::CUTOFF; // a cutoff is not in decibels
 /// ```
 pub struct ParamKey<U> {
@@ -765,7 +765,7 @@ mod tests {
     /// good as the pairing, and a swapped pair still compiles.
     #[test]
     fn typed_keys_name_their_params() {
-        use super::super::units::{Db, Hz, Seconds};
+        use crate::units::{Db, Hz, Seconds};
         assert_eq!(
             ParamKey::<Hz>::CUTOFF.addr(),
             UnitAddr::from(UnitParam::Cutoff)
@@ -1029,7 +1029,7 @@ mod tests {
     /// its address, and compares unequal to the index-0 key.
     #[test]
     fn a_key_at_an_index_is_a_different_key() {
-        use super::super::units::Db;
+        use crate::units::Db;
         let t0 = ParamKey::<Db>::THRESHOLD;
         let t2 = t0.at(2);
         assert_eq!(t2.addr().param, UnitParam::Threshold);

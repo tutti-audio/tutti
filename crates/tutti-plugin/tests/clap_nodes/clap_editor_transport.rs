@@ -67,7 +67,7 @@ fn served_a_request_the_editor_instance_makes_reaches_subscribers_in_order() {
 fn in_process_a_request_the_plugin_makes_reaches_subscribers() {
     use tutti_clap_host::ClapLoaded;
     use tutti_plugin_types::Load;
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     let _lock = machine_lock();
     let probe = ClapProbe::open(

@@ -5,7 +5,7 @@
 //! arriving, and the MTC Full Message and the runtime's decoders read it rather
 //! than owning it.
 
-use tutti_types::{SampleRate, Seconds};
+use tutti_units::{SampleRate, Seconds};
 
 /// SMPTE frame rate for MTC/LTC.
 ///

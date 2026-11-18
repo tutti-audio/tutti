@@ -5,7 +5,7 @@
 use tutti_graph::contract::{SAMPLE_RATE, assert_param_fork};
 use tutti_graph::{Node, ParamNode};
 use tutti_nodes::{HrtfBinauralNode, VbapPannerNode};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 fn hrtf() -> HrtfBinauralNode {
     let rate = SAMPLE_RATE.get() as u32;

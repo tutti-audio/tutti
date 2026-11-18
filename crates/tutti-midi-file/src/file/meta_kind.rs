@@ -2,7 +2,7 @@
 //! 24-bit tempo, the type byte of an untyped meta event, and a meta event the
 //! reader could not type.
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// Microseconds per quarter note as a Set Tempo holds it: 24 bits,
     /// `0..=0xFF_FFFF` (SMF 1.0 section 3.3, `FF 51 03 tttttt`). Zero is no
     /// valid tempo and is kept so a file writes back as it was read.
@@ -30,7 +30,7 @@ const fn is_typed(kind: u8) -> bool {
     matches!(kind, 0x01..=0x09 | 0x2F | 0x51 | 0x58 | 0x59)
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The type byte of a [`Meta::Other`](crate::Meta::Other): any of `0..=127`
     /// that [`Meta`](crate::Meta) has no variant for. A typed kind (the text
     /// events `01` to `09`, `2F`, `51`, `58`, `59`) is refused, so an `Other` is

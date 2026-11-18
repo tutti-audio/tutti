@@ -26,7 +26,8 @@ use tutti_graph::{
     Prepare, Shape, Status, TransportPosition, param_parts,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::{ChannelLayout, Db, Param, Samples, UnitAddr, UnitParam};
+use tutti_types::{ChannelLayout, Param};
+use tutti_units::{Db, Samples, UnitAddr, UnitParam};
 
 /// `Threshold` of band 0 and of band 1: the same kind, two indices.
 const BAND0: UnitAddr = UnitAddr::new(UnitParam::Threshold, 0);

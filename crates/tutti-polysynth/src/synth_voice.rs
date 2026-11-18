@@ -24,10 +24,10 @@ use crate::unison::MAX_UNISON_VOICES;
 use crate::{FilterModConfig, FilterType, SynthConfig};
 use crate::{MpeVoiceState, UnisonEngine, UnisonVoiceParams, UnisonVoices};
 use tutti_dsp::{PanLaw, pan_gains};
-use tutti_types::{
+use tutti_ump::{MidiChannel, NoteNumber};
+use tutti_units::{
     Amplitude, Depth, Hz, Pan, Phase, PhaseIncrement, Resonance, SampleRate, Seconds, Semitones,
 };
-use tutti_ump::{MidiChannel, NoteNumber};
 use tutti_voicing::{ChannelState, DEFAULT_MODULATION_RANGE};
 
 /// A gate edge waiting for the next control step.
@@ -472,7 +472,7 @@ impl SynthVoice {
     fn modulated_cutoff(
         &mut self,
         frames: usize,
-        sample_rate: tutti_types::SampleRate,
+        sample_rate: tutti_units::SampleRate,
         channel: &ChannelState,
     ) -> Hz {
         let fm = &self.filter_mod;

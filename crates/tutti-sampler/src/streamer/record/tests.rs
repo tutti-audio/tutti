@@ -4,7 +4,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 use super::*;
 use crate::streamer::cache::LruCache;
@@ -232,7 +233,7 @@ fn a_direction_asks_for_a_live_stream_only() {
 /// ratio is the cell the stream's voice reads.
 #[test]
 fn a_rate_event_re_derives_each_streams_own_ratio() {
-    use tutti_types::SrcRatio;
+    use tutti_units::SrcRatio;
     let mut streams = Streams::new();
     let cells: Vec<_> = [44_100.0, 48_000.0]
         .into_iter()

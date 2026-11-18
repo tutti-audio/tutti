@@ -16,7 +16,8 @@ use tutti_graph::{
     ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, Prepare, Shape, Source, Status,
     TransportPosition, declare_params, param_parts,
 };
-use tutti_types::{Amplitude, ChannelLayout, Db, Hz, Param, Q, Samples, UnitAddr, UnitParam};
+use tutti_types::{ChannelLayout, Param};
+use tutti_units::{Amplitude, Db, Hz, Q, Samples, UnitAddr, UnitParam};
 
 #[derive(Clone)]
 struct Declared {

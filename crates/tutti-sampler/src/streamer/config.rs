@@ -1,6 +1,6 @@
 //! Streamer thread configuration.
 
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// Ring, cache and crossfade sizing for the streamer thread.
 ///

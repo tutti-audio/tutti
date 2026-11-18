@@ -17,8 +17,9 @@ use tutti_graph::{
     Shape, SilenceMask, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{Amplitude, ChannelLayout, Latency, Param, Samples, Tail};
+use tutti_types::{ChannelLayout, Param};
 use tutti_ump::{Message, Voice1};
+use tutti_units::{Amplitude, Latency, Samples, Tail};
 
 const SRC: NodeKey = NodeKey(1);
 const FX: NodeKey = NodeKey(2);
@@ -739,7 +740,7 @@ impl Node for OneShot {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        if let Some(at) = cx.env.offset_of(tutti_types::Frame::new(self.at)) {
+        if let Some(at) = cx.env.offset_of(tutti_units::Frame::new(self.at)) {
             let _ = io
                 .event_out(0)
                 .push(tutti_graph::Event::midi(at, Ump(self.words)));
@@ -863,7 +864,7 @@ fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-            if cx.env.frame == tutti_types::Frame::ZERO {
+            if cx.env.frame == tutti_units::Frame::ZERO {
                 for n in 0..30 {
                     io.event_out(0)
                         .push(tutti_graph::Event::midi(
@@ -1108,7 +1109,7 @@ fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
     assert_eq!(ed.in_flight(), 2, "a pending unit sends");
 
     // A latency set by hand sends.
-    ed.set_latency(SRC, tutti_types::Latency::new(Samples(3)))
+    ed.set_latency(SRC, tutti_units::Latency::new(Samples(3)))
         .expect("a node");
     ed.commit().expect("commits");
     assert_eq!(ed.in_flight(), 3, "a latency change sends");

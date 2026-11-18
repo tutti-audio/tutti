@@ -2,7 +2,7 @@ use super::*;
 use crate::test_sink::Full;
 use crate::{Error, SpecError};
 use std::io::Cursor;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// Every format this build writes, at 16 bits where it has a width, with the
 /// name its file would carry.

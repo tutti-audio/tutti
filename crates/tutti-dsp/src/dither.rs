@@ -9,7 +9,7 @@ pub(crate) mod sink;
 use crate::Xorshift32;
 use std::num::NonZeroU32;
 use tutti_buffers::{Float, InterleavedMut};
-use tutti_types::Amplitude;
+use tutti_units::Amplitude;
 
 /// The probability density of the noise a [`DitherNoise`] adds.
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]

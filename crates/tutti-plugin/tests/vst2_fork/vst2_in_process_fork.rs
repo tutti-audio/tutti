@@ -36,10 +36,9 @@ use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_plugin_types::Normalized;
 use tutti_plugin_types::PluginForkError;
-use tutti_types::ParamId;
-use tutti_types::{
-    Beat, BeatsPerBar, Bpm, MeterChange, MeterMap, NoteValue, SampleRate, Samples, TimeSignature,
-};
+use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
+use tutti_units::ParamId;
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 use tutti_vst2_test_plugin::ProcessCapture;
 
 const SAMPLE_RATE: f64 = 48_000.0;

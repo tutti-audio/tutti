@@ -4,7 +4,7 @@
 use crate::common::{R, pt};
 use assert_no_alloc::assert_no_alloc;
 use tutti_tempo::{CellGrid, TempoMap, Transition};
-use tutti_types::{Beat, Frame, Seconds};
+use tutti_units::{Beat, Frame, Seconds};
 
 #[test]
 fn queries_do_not_allocate() {

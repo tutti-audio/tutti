@@ -8,7 +8,7 @@ unit! {
     /// One count unit per thing counted, so a count of resyncs cannot be added
     /// to a count of frames ([`Samples`](crate::Samples)) or of any other
     /// thing. Like `Samples` it is an integer that is compared, not a
-    /// [`Unit`](crate::Unit): no `Param` holds it. A bare number becomes one
+    /// [`Unit`](crate::Unit): no parameter cell holds it. A bare number becomes one
     /// with [`new`](Self::new) and leaves with [`get`](Self::get); there is no
     /// `From` either way.
     pub struct Resyncs(u64): Display;

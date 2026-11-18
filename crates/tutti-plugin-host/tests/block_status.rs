@@ -26,8 +26,9 @@ use tutti_plugin_types::{
 };
 use tutti_tempo::TempoMap;
 use tutti_transport::TempoReader;
-use tutti_types::{Bpm, Frame, MaxBlock, SampleRate, Samples, Tail};
+use tutti_types::MaxBlock;
 use tutti_ump::{MidiChannel, U7};
+use tutti_units::{Bpm, Frame, SampleRate, Samples, Tail};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;

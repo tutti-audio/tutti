@@ -233,7 +233,7 @@ impl LruCache {
 mod tests {
     use super::*;
     use tutti_buffers::Mono;
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     fn make_wave(samples: usize) -> Arc<Wave> {
         let data = vec![0.0f32; samples];

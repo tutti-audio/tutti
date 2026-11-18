@@ -63,7 +63,7 @@
 use core::marker::PhantomData;
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Ballistics, Db, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Ballistics, Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::{all_finite, for_blocks};
@@ -74,7 +74,7 @@ use tutti_dsp::FftScratch;
 use tutti_dsp::FrameCount;
 use tutti_dsp::Smoother;
 use tutti_dsp::StftGeometry;
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 /// The smallest and largest window accepted.
 const MIN_WINDOW: usize = 64;
@@ -817,8 +817,8 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::{RngExt, SeedableRng};
     use std::f64::consts::TAU;
-    use tutti_types::SampleRate;
-    use tutti_types::Samples;
+    use tutti_units::SampleRate;
+    use tutti_units::Samples;
 
     const RATE: f64 = 48_000.0;
 

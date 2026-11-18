@@ -23,7 +23,7 @@ use tutti_plugin_types::{
     BridgeError, BridgeResult, Control, Editor, Load, LoadStage, MainThreadMarker, Normalized,
     ParamEdit, SampleFormat, SampleRate,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 fn through_server<F: Format>(path: PathBuf) {
     // SAFETY: set before any thread of this test reads it.

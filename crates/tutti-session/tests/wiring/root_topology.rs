@@ -10,7 +10,8 @@ use tutti_graph::{ForkByClone, RootError};
 use tutti_nodes::testing::Const;
 use tutti_session::{Committed, Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder};
 use tutti_types::MaxBlock;
-use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples, Speaker};
+use tutti_types::{ChannelLayout, ChannelTopology, Placement, Speaker};
+use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -259,8 +260,8 @@ fn an_export_is_placed_from_the_declaration() {
             .master_buffers()
             .channels(ChannelLayout::from(6u16))
             .range(Range::Seconds(
-                tutti_types::Seconds(0.0),
-                tutti_types::Seconds(0.01),
+                tutti_units::Seconds(0.0),
+                tutti_units::Seconds(0.01),
             ))
             .sample_rate(RATE)
             .clock(ExportClock::frozen())

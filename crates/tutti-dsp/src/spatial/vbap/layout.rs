@@ -1,6 +1,7 @@
 //! [`SpeakerLayout`]: the tuples of a speaker array and the gain solve.
 
-use tutti_types::{Azimuth, Bed, Direction, Elevation, MAX_CHANNELS, Spread};
+use tutti_types::{Bed, MAX_CHANNELS};
+use tutti_units::{Azimuth, Direction, Elevation, Spread};
 
 use super::error::SpeakerGeometryError;
 use super::math::{Mat2, Mat3, direction, inverse2, inverse3, mul2, mul3, wrapped_deg};

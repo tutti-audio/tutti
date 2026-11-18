@@ -5,7 +5,7 @@
 //! magnitudes a caller already holds. A silent spectrum has no shape: every
 //! feature reads zero rather than a division by nothing.
 
-use tutti_types::Hz;
+use tutti_units::Hz;
 
 use crate::transform::StftMagnitude;
 use tutti_dsp::{BinIndex, FrameIndex};
@@ -139,8 +139,8 @@ mod tests {
     use rand::{RngExt, SeedableRng, rngs::StdRng};
     use tutti_buffers::Mono;
     use tutti_dsp::FftScratch;
-    use tutti_types::SampleRate;
-    use tutti_types::Samples;
+    use tutti_units::SampleRate;
+    use tutti_units::Samples;
 
     const RATE: f64 = 48_000.0;
     const WINDOW: usize = 2048;
@@ -162,10 +162,10 @@ mod tests {
 
     fn sine(hz: f32, len: usize) -> Vec<f32> {
         tutti_fixtures::signal::sine(
-            tutti_types::Hz(hz),
-            tutti_types::Amplitude(1.0),
-            tutti_types::SampleRate::of(RATE),
-            tutti_types::Samples(len),
+            tutti_units::Hz(hz),
+            tutti_units::Amplitude(1.0),
+            tutti_units::SampleRate::of(RATE),
+            tutti_units::Samples(len),
         )
     }
 

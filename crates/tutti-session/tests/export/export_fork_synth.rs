@@ -25,8 +25,8 @@ use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_types::ChannelLayout;
-use tutti_types::{Amplitude, Beat, Bpm, SampleRate, Samples, Seconds, UnitParam};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
+use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples, Seconds, UnitParam};
 
 const RATE: f64 = 48_000.0;
 /// A beat at 90 BPM and 48 kHz, in frames.

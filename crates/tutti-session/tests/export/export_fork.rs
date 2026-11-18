@@ -35,7 +35,8 @@ use tutti_session::{
     OutPort, PreparedGraph, Range, Root, Session, Stem,
 };
 use tutti_types::ChannelLayout;
-use tutti_types::{Amplitude, Hz, Param, Q, SampleRate, Samples, Seconds, Tail};
+use tutti_types::Param;
+use tutti_units::{Amplitude, Hz, Q, SampleRate, Samples, Seconds, Tail};
 
 const RATE: f64 = 48_000.0;
 
@@ -252,7 +253,7 @@ const TAIL: usize = 300;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_types::Latency::new(Samples(LATE)))
+            .with_latency(tutti_units::Latency::new(Samples(LATE)))
             .with_tail(Tail::Finite(Samples(TAIL)))
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -502,9 +503,9 @@ fn the_prepare_hook_sees_the_callers_timeline() {
     let (mut session, node) = graph_with_one_node_on();
     // A deliberately un-default transport: neither 120 BPM nor beat 0.
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: tutti_types::Beat(16.0),
+        start_beat: tutti_units::Beat(16.0),
         tempo_map: Arc::new(
-            tutti_tempo::TempoMap::constant(tutti_types::Bpm::of(90.0)).expect("a tempo"),
+            tutti_tempo::TempoMap::constant(tutti_units::Bpm::of(90.0)).expect("a tempo"),
         ),
         sample_rate: SampleRate::SR_44K1,
         loop_range: None,
@@ -540,9 +541,9 @@ fn a_master_exports_prepare_hook_sees_the_callers_timeline() {
 
     let (mut session, _node) = graph_with_one_node_on();
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: tutti_types::Beat(4.0),
+        start_beat: tutti_units::Beat(4.0),
         tempo_map: Arc::new(
-            tutti_tempo::TempoMap::constant(tutti_types::Bpm::of(90.0)).expect("a tempo"),
+            tutti_tempo::TempoMap::constant(tutti_units::Bpm::of(90.0)).expect("a tempo"),
         ),
         sample_rate: SampleRate::SR_44K1,
         loop_range: None,

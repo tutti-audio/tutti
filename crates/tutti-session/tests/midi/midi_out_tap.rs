@@ -12,16 +12,17 @@ use crate::common::{MF, note};
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{EventCapacity, Losses, TapAlign, UmpAt};
 use tutti_midi_runtime::MidiOut;
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
 use tutti_ump::{MidiGroup, Ump};
+use tutti_units::SampleRate;
 
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
     Declared, EventInPort, EventOutPort, MidiSinkEntry, Peer, Presence, Resource, Session,
     SinkOptions, Stamping, midi_sink,
 };
-use tutti_types::{Beat, BeatDuration};
 use tutti_ump::{Message, System};
+use tutti_units::{Beat, BeatDuration};
 
 const RATE: f64 = 48_000.0;
 
@@ -131,7 +132,7 @@ fn a_full_tap_counts_what_it_drops() {
     render(&s, 1_100_000);
     let mut total = 0;
     let mut chunk = [tutti_graph::TapEvent {
-        frame: tutti_types::Frame::ZERO,
+        frame: tutti_units::Frame::ZERO,
         ump: Ump([0; 4]),
     }; 256];
     loop {
@@ -214,7 +215,7 @@ fn reopening_one_tap_leaves_the_others_fed() {
     let _ = s.update();
     render(&s, 4_096);
     let mut chunk = [tutti_graph::TapEvent {
-        frame: tutti_types::Frame::ZERO,
+        frame: tutti_units::Frame::ZERO,
         ump: Ump([0; 4]),
     }; 64];
     assert!(first.pop_into(&mut chunk) > 0, "the reopened tap is fed");

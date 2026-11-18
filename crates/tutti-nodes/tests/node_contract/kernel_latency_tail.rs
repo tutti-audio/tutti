@@ -8,9 +8,8 @@ use tutti_graph::contract::{Driven, assert_honest_tail, drive_input, prepared};
 use tutti_graph::{Buses, Node, ParamNode, Shape};
 use tutti_graph::{Env, PlayClock, Prepare, Solo, Status, TransportChanges, TransportPosition};
 use tutti_nodes::{ControlLanes, ControlSet, Kernel, KernelNode};
-use tutti_types::{
-    BusTopology, Frame, MaxBlock, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam,
-};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;

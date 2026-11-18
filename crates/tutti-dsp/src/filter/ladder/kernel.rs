@@ -15,7 +15,7 @@
 use tutti_buffers::Float;
 
 use crate::Lanes;
-use tutti_types::{Hz, Resonance, SampleRate};
+use tutti_units::{Hz, Resonance, SampleRate};
 
 /// Which tap of the four-stage ladder is taken as the output, and so what
 /// response and slope the filter presents.

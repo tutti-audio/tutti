@@ -28,8 +28,8 @@ use std::path::Path;
 
 use tutti_buffers::{Interleaved, Mono};
 use tutti_measure::{LoudnessConfig, PitchHop, YinConfig, measure_loudness, yin, yin_track};
-use tutti_types::SampleRate;
 use tutti_types::{Bed, ChannelLayout};
+use tutti_units::SampleRate;
 
 const SR: f64 = 48_000.0;
 
@@ -185,7 +185,7 @@ fn main() {
         &cfg,
         Mono::new(&sweep),
         SampleRate::of(SR),
-        PitchHop::new(tutti_types::Samples(frame)).expect("a hop of at least one sample"),
+        PitchHop::new(tutti_units::Samples(frame)).expect("a hop of at least one sample"),
     )
     .expect("track");
     for (i, est) in tracked.iter().enumerate() {

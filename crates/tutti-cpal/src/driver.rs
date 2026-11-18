@@ -73,7 +73,7 @@ impl TuttiDriver {
     /// This is the device's rate at [`new`](Self::new), then the
     /// rate of the last restart whose hook returned `Ok`. A plain
     /// [`restart`](Self::restart) compares the new device against it.
-    pub fn graph_rate(&self) -> tutti_types::SampleRate {
+    pub fn graph_rate(&self) -> tutti_units::SampleRate {
         self.host.graph_rate()
     }
 
@@ -321,7 +321,7 @@ impl<E: From<crate::Error>> Restart<E> {
 /// at `graph`, the rate the graph was built at, or the restart stops there
 /// with [`Error::RateChanged`](crate::Error::RateChanged).
 fn refuse_rate_change(
-    graph: tutti_types::SampleRate,
+    graph: tutti_units::SampleRate,
 ) -> impl FnOnce(&OutputSpec, &Stopped<'_>) -> Result<()> {
     move |spec, _| {
         if spec.sample_rate == graph {

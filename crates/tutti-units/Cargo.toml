@@ -1,0 +1,38 @@
+[package]
+name = "tutti-units"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Numbers with units for audio code: hertz, decibels, seconds, beats, tempo and sample counts, each its own type"
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["audio", "units", "real-time"]
+categories = ["multimedia::audio"]
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Enables `Serialize`/`Deserialize` on the unit newtypes and the values built
+# from them that a document or a wire carries (`Samples`, `Frame`, `Latency`,
+# `Tail`). A range-checked type reads back through its own check.
+serde = ["dep:serde"]
+
+[dependencies]
+# `Seconds::one_pole_coeff`'s exponential is `libm`'s pure-Rust `exp`, so the
+# coefficient does not depend on the platform's C math library.
+libm = "0.2.15"
+serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
+# The `Error` derive of the crate's error types, and of every `ranged!` type.
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The range-checked types' serde is tested against a real format.
+serde_json = "1"
+tutti-fixtures = { path = "../../testing/tutti-fixtures" }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

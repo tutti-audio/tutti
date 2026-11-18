@@ -158,7 +158,7 @@
 //!   triangle band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`): [`Polarity`], the channels a block
 //!   inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a glided
-//!   [`StereoWidth`](tutti_types::StereoWidth)).
+//!   [`StereoWidth`](tutti_units::StereoWidth)).
 //! - **Tremolo, auto-pan and ring modulation** (`tremolo.rs`, `ring_mod.rs`): [`Tremolo`] and
 //!   [`AutoPan`], an [`Oscillator`] scaling the level or placing it by [`pan_gains`];
 //!   [`RingModulator`], the input times a sine carrier.

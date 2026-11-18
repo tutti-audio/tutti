@@ -5,7 +5,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Glide, MAX_SECTIONS, Sos, SosBank, SosCoefficients, SosError};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, SampleRate};
+use tutti_types::BusTopology;
+use tutti_units::SampleRate;
 
 /// The steps the coefficients take to a new design: one grid period.
 pub(super) const GLIDE_STEPS: u32 = 16;

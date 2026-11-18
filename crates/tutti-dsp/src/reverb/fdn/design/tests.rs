@@ -1,4 +1,4 @@
-use tutti_types::{Gain, SampleSpan};
+use tutti_units::{Gain, SampleSpan};
 
 use super::*;
 use crate::reverb::network::{Band, Fdn, Matrix, Network, Stage};

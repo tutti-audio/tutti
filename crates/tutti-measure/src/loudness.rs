@@ -46,7 +46,8 @@ use core::marker::PhantomData;
 
 use ebur128::{Channel, EbuR128, Mode};
 use tutti_buffers::{Interleaved, Sample};
-use tutti_types::{ChannelLayout, ChannelTopology, Db, Direction, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::{Db, Direction, SampleRate, Samples};
 
 use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
 use crate::{Error, Measure, Meter, Result};
@@ -416,7 +417,7 @@ pub fn measure_true_peak<S: Sample>(
 /// [`Loudness::gain_to`], which subtracts it into a `NaN` — the same hazard the
 /// `-70` LUFS gate guards against.
 ///
-/// Not routed through [`tutti_types::Amplitude`], which is `f32`: converting first narrows
+/// Not routed through [`tutti_units::Amplitude`], which is `f32`: converting first narrows
 /// the input before the `log10`, defeating the reason this path is `f64`. The
 /// arithmetic is [`Db::from_amplitude_f64`]'s, narrowed once at this boundary.
 #[inline]
@@ -697,9 +698,8 @@ mod tests {
     use super::*;
     use crate::fold_uneven;
     use std::f32::consts::TAU;
-    use tutti_types::{
-        AmbisonicFormat, AmbisonicOrder, Amplitude, Azimuth, Bed, Elevation, Speaker,
-    };
+    use tutti_types::{AmbisonicFormat, AmbisonicOrder, Bed, Speaker};
+    use tutti_units::{Amplitude, Azimuth, Elevation};
 
     /// Pushes one chunk to a windowed meter and returns the reading it yields.
     fn read(state: &mut WindowedMeter, chunk: Interleaved<'_>) -> Result<WindowedReading> {
@@ -759,10 +759,10 @@ mod tests {
     fn sine(rate: f64, secs: f64, freq: f32, amp: f32) -> Vec<f32> {
         let n = (rate * secs) as usize;
         tutti_fixtures::signal::sine(
-            tutti_types::Hz(freq),
-            tutti_types::Amplitude(amp),
+            tutti_units::Hz(freq),
+            tutti_units::Amplitude(amp),
             SampleRate::of(rate),
-            tutti_types::Samples(n),
+            tutti_units::Samples(n),
         )
         .into_iter()
         .flat_map(|s| [s, s])
@@ -1241,10 +1241,10 @@ mod tests {
         let width = usize::from(bed.width().count());
         let rate = SampleRate::SR_48K;
         let tone = tutti_fixtures::signal::sine(
-            tutti_types::Hz(TONE_HZ),
+            tutti_units::Hz(TONE_HZ),
             Amplitude(TONE_AMP),
             rate,
-            tutti_types::Samples(2 * 48_000),
+            tutti_units::Samples(2 * 48_000),
         );
         let mut buf = vec![0.0f32; tone.len() * width];
         for (frame, v) in tone.iter().enumerate() {
@@ -1362,10 +1362,10 @@ mod tests {
         .unwrap();
         let c = Rated(LoudnessConfig::new(reordered), SampleRate::SR_48K);
         let tone = tutti_fixtures::signal::sine(
-            tutti_types::Hz(TONE_HZ),
+            tutti_units::Hz(TONE_HZ),
             Amplitude(TONE_AMP),
             SampleRate::SR_48K,
-            tutti_types::Samples(2 * 48_000),
+            tutti_units::Samples(2 * 48_000),
         );
         let read = |channel: usize| {
             let mut buf = vec![0.0f32; tone.len() * 6];
@@ -1422,10 +1422,10 @@ mod tests {
             SampleRate::SR_48K,
         );
         let tone = tutti_fixtures::signal::sine(
-            tutti_types::Hz(TONE_HZ),
+            tutti_units::Hz(TONE_HZ),
             Amplitude(TONE_AMP),
             SampleRate::SR_48K,
-            tutti_types::Samples(48_000),
+            tutti_units::Samples(48_000),
         );
         let momentary = |channel: usize| {
             let mut buf = vec![0.0f32; tone.len() * 6];

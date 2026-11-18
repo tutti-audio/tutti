@@ -21,12 +21,13 @@ use crossbeam_channel::bounded;
 use std::sync::{Arc, Mutex};
 use tutti_buffers::Wave;
 use tutti_graph::{IntoNode, Node, NodeParts, Prepare};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::SampleRate;
-use tutti_types::{Amplitude, Beat, Cents, ChannelLayout, Seconds, StretchFactor};
+use tutti_units::SampleRate;
+use tutti_units::{Amplitude, Beat, Cents, Seconds, StretchFactor};
 
 use crate::voice::memory_source::MemorySourceConfig;
-use tutti_types::{BeatDuration, Bpm, Samples};
+use tutti_units::{BeatDuration, Bpm, Samples};
 
 use crate::testing::MockTransport;
 
@@ -2223,8 +2224,8 @@ fn both_nodes_declare_their_width() {
         // A pool takes voices while it plays, so it promises no ceiling; a
         // node over a placed voice is the programme, which has no ring-out.
         for (what, shape, tail) in [
-            ("pool", unit.shape(), tutti_types::Tail::Unbounded),
-            ("voice node", vn.shape(), tutti_types::Tail::None),
+            ("pool", unit.shape(), tutti_units::Tail::Unbounded),
+            ("voice node", vn.shape(), tutti_units::Tail::None),
         ] {
             assert_eq!(shape.audio_out().count() as usize, w, "{what} at width {w}");
             assert_eq!(shape.audio_in().count(), 0, "{what}: no inputs");

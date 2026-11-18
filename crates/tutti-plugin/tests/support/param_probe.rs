@@ -19,7 +19,7 @@ use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
 use tutti_plugin::PluginClient;
 use tutti_plugin_host::PluginHandle;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::clap_probe::{ProbeEnv, load_probe};
 

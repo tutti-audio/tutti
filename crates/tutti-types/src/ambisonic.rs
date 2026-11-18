@@ -2,7 +2,7 @@
 
 use crate::{ChannelLayout, MAX_CHANNELS};
 
-crate::ranged! {
+tutti_units::ranged! {
     /// The order of an ambisonic signal, `0..=3`: zeroth order is one channel
     /// and third order is sixteen, the most a bus holds ([`MAX_CHANNELS`]).
     #[derive(Eq, Hash)]

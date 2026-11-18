@@ -15,7 +15,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, FadeLaw, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{InPort, MixError, NodeMode, OutPort, Root, Session};
-use tutti_types::{ChannelLayout, Mix, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{Mix, Seconds};
 
 const A: f32 = 0.25;
 const BLOCK: usize = 64;

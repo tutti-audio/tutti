@@ -7,20 +7,21 @@ use super::motion::MotionFsm;
 use super::settings::TransportSettings;
 use std::sync::atomic::Ordering;
 use tutti_tempo::TempoMap;
-use tutti_types::{AtomicSampleRate, Beat, SampleRate};
+use tutti_types::AtomicSampleRate;
+use tutti_units::{Beat, SampleRate};
 
 /// The two halves of a transport, held together.
 ///
 /// There is no facade here — the fields are public and carry their own APIs:
 ///
 /// ```
-/// # use tutti_types::{At, Bpm};
+/// # use tutti_units::{At, Bpm};
 /// # use tutti_transport::{LoopEdit, MotionEvent, Transport};
-/// # let transport = Transport::new(tutti_types::SampleRate::SR_48K);
+/// # let transport = Transport::new(tutti_units::SampleRate::SR_48K);
 /// transport.motion().try_send(MotionEvent::Play)?; // a request; may be refused
 /// transport.settings().set_tempo(Bpm::of(140.0));      // a value; cannot fail
 /// // Loop beats 0 to 4 from the next block; the engine owns the region.
-/// let range = tutti_types::LoopRange::new(tutti_types::Beat(0.0), tutti_types::Beat(4.0)).expect("ordered");
+/// let range = tutti_types::LoopRange::new(tutti_units::Beat(0.0), tutti_units::Beat(4.0)).expect("ordered");
 /// transport.motion().schedule(At::NextBlock, LoopEdit::over(range))?;
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
@@ -152,7 +153,7 @@ mod tests {
     use super::super::motion::MotionEvent;
     use super::super::motion::harness::Audio;
     use super::*;
-    use tutti_types::Bpm;
+    use tutti_units::Bpm;
 
     #[test]
     fn clone_shares_both_halves() {

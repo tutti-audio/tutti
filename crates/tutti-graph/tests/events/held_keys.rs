@@ -18,8 +18,9 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Topology};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, U7, Ump, Voice1};
+use tutti_units::Samples;
 
 type Words = [u32; 4];
 type Mail = Arc<Mutex<Vec<(u32, Words)>>>;
@@ -62,8 +63,8 @@ struct Lag;
 impl Node for Lag {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_types::Latency::new(Samples(LAG_FRAMES)))
-            .with_tail(tutti_types::Tail::Unknown)
+            .with_latency(tutti_units::Latency::new(Samples(LAG_FRAMES)))
+            .with_tail(tutti_units::Tail::Unknown)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {

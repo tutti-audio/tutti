@@ -383,8 +383,8 @@ mod tests {
     use std::sync::Arc;
     use tutti_fixtures::midi;
     use tutti_plugin_types::ResyncKind;
-    use tutti_types::SampleRate;
     use tutti_ump::MidiChannel;
+    use tutti_units::SampleRate;
 
     /// **A crash's drain counts the queued chunks' MIDI.**
     #[test]

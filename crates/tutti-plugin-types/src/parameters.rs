@@ -31,7 +31,7 @@
 use bitflags::bitflags;
 
 use crate::{ControlRole, ParamUnit, PlainUnit};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -315,7 +315,7 @@ bitflags! {
 ///
 /// ```
 /// use tutti_plugin_types::{ParamFlags, ParameterInfo};
-/// use tutti_types::ParamId;
+/// use tutti_units::ParamId;
 ///
 /// let cutoff = ParameterInfo::new(ParamId::new(7), "Cutoff")
 ///     .with_plain_range(20.0, 20_000.0, 1_000.0)
@@ -513,8 +513,8 @@ impl ParameterInfo {
     /// the declared plain range allow it.
     ///
     /// The scaling happens here, once: a percent is divided by 100 for a
-    /// [`Mix`](tutti_types::Mix), milliseconds by 1000 for
-    /// [`Seconds`](tutti_types::Seconds). `None` for a normalized-only
+    /// [`Mix`](tutti_units::Mix), milliseconds by 1000 for
+    /// [`Seconds`](tutti_units::Seconds). `None` for a normalized-only
     /// parameter, one with no declared [`measures`](Self::measures), a unit
     /// `U` does not read, or a `plain` that is not finite. Get `plain` from
     /// [`AnyThread::parameter_plain`](crate::AnyThread::parameter_plain) for a
@@ -522,8 +522,8 @@ impl ParameterInfo {
     ///
     /// ```
     /// use tutti_plugin_types::{ParamUnit, ParameterInfo};
-    /// use tutti_types::ParamId;
-    /// use tutti_types::{Mix, Seconds};
+    /// use tutti_units::ParamId;
+    /// use tutti_units::{Mix, Seconds};
     ///
     /// let wet = ParameterInfo::new(ParamId::new(1), "Wet")
     ///     .with_plain_range(0.0, 100.0, 50.0)

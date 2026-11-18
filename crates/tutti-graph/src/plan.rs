@@ -48,7 +48,7 @@ use std::num::NonZeroU32;
 
 use crate::NodeKey;
 use crate::{EdgeId, InPort, OutPort, Source};
-use tutti_types::{Latency, Samples, Tail, UnitAddr};
+use tutti_units::{Latency, Samples, Tail, UnitAddr};
 
 use crate::arena::Role;
 use crate::compile::VerifyError;
@@ -564,7 +564,7 @@ pub enum Op {
 pub struct ParamPortOp {
     /// Its index in the node's declared params
     /// ([`Shape::params`](crate::Shape::params)), or [`MIX_PORT`](Self::MIX_PORT):
-    /// the node's [`Mix`](tutti_types::Mix), which no node declares and the
+    /// the node's [`Mix`](tutti_units::Mix), which no node declares and the
     /// mode state runs (doc 013, "Bypass and mute are graph state", M4b).
     pub port: u16,
     /// The param.

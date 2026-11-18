@@ -206,7 +206,7 @@ mod tests {
         LatencyVerdict, MaxBlock, Measured, NotChecked, PROBE_FLOOR, PluginClass, PluginDescriptor,
         PluginFormat, ProbeConfig, StateHash, TailVerdict, Verdict,
     };
-    use tutti_types::{Db, SampleRate, Samples};
+    use tutti_units::{Db, SampleRate, Samples};
 
     fn row(name: &str) -> FileRow {
         let facts = FileFacts {

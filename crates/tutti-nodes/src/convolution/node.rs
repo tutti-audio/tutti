@@ -20,10 +20,11 @@ use tutti_graph::{
     Status,
 };
 use tutti_types::{
-    AmbisonicFormat, AmbisonicOrder, Amplitude, BusTopology, ChannelLayout, ChannelTopology,
-    MAX_CHANNELS, Param, Samples, UnitParam,
+    AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout, ChannelTopology, MAX_CHANNELS,
+    Param,
 };
-use tutti_types::{Latency, Tail};
+use tutti_units::{Amplitude, Samples, UnitParam};
+use tutti_units::{Latency, Tail};
 
 use super::IrLayout;
 use crate::kernel::{slice_in, slice_out};
@@ -908,8 +909,8 @@ mod tests {
     use std::sync::Arc;
     use tutti_fixtures::signal::{decay_ir, room_ir};
     use tutti_graph::contract::drive;
-    use tutti_types::SampleRate;
-    use tutti_types::Seconds;
+    use tutti_units::SampleRate;
+    use tutti_units::Seconds;
 
     /// A node has a channel: no IR, or a layout of none, is refused by name.
     #[test]
@@ -1234,7 +1235,7 @@ mod direct_sum {
     use super::*;
     use tutti_fixtures::signal::decay_ir;
     use tutti_graph::contract::{drive, prepared};
-    use tutti_types::{SampleRate, Seconds};
+    use tutti_units::{SampleRate, Seconds};
 
     const BLOCK: usize = 64;
     const FRAMES: usize = 1500;
@@ -1365,7 +1366,7 @@ mod direct_sum {
             .map(|c| {
                 decay_ir(
                     200 + 90 * c,
-                    tutti_types::Seconds::from_f32(0.2 + 0.05 * c as f32),
+                    tutti_units::Seconds::from_f32(0.2 + 0.05 * c as f32),
                     SampleRate::SR_48K,
                 )
             })

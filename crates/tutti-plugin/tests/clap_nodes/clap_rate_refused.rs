@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use tutti_graph::Prepare;
 use tutti_plugin_host::{PluginHandle, PluginStatus};
 use tutti_plugin_types::PluginInvalidation;
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 /// The rate the plugin is loaded at, and accepts.
 const LOAD_RATE: f64 = 48_000.0;
@@ -133,7 +133,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
 
     let mut unit = Rig::new(
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         LOAD_RATE,
         BLOCK,

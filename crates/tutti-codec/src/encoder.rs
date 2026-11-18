@@ -11,7 +11,8 @@ use std::fs::File;
 use std::io::{BufWriter, Seek, Write};
 use std::path::Path;
 use tutti_buffers::Interleaved;
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// Writes blocks of audio as one file of a [format](crate::Format): the
 /// [writer](crate::FormatWriter) of whichever format the [`Spec`] names,
@@ -37,7 +38,8 @@ use tutti_types::{ChannelLayout, Samples};
 /// # #[cfg(feature = "encode-wav")] {
 /// use std::io::Cursor;
 /// use tutti_codec::{Encoder, Format, Pcm, Spec};
-/// use tutti_types::{ChannelLayout, SampleRate};
+/// use tutti_units::SampleRate;
+/// use tutti_types::ChannelLayout;
 /// use tutti_buffers::Interleaved;
 ///
 /// let spec = Spec::of_width(Format::Wav(Pcm::Int16), ChannelLayout::STEREO, SampleRate::SR_48K);

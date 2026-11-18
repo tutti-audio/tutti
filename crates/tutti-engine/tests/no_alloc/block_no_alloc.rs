@@ -33,7 +33,7 @@ use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_transport::{MotionEvent, Transport};
 use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{Bpm, Hz, Q, SampleRate, Samples};
+use tutti_units::{Bpm, Hz, Q, SampleRate, Samples};
 const SAMPLE_RATE: f64 = 48_000.0;
 
 /// Build an engine + transport pair whose graph actually renders, rolling.

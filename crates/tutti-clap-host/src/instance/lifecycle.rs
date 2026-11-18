@@ -26,7 +26,8 @@ use tutti_plugin_types::{
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
-use tutti_types::{MaxBlock, ParamId};
+use tutti_types::MaxBlock;
+use tutti_units::ParamId;
 
 /// The UMPs one block's input note port holds at the most: a graph event
 /// port's largest capacity and the room behind it for note-offs

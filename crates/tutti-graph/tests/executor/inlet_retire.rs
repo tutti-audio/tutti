@@ -6,8 +6,9 @@
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Fade, FadeLaw, InletNode, Prepare, TapReader, TransportPosition};
 use tutti_graph::{OutPort, Source};
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const KEY: NodeKey = NodeKey(7);
 

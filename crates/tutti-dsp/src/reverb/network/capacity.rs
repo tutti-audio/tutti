@@ -1,7 +1,7 @@
 //! [`NetworkCapacity`]: the reverb's worst-case sizes, what a
 //! [`FdnLayout`](crate::FdnLayout) sizes its bank from.
 
-use tutti_types::{Db, SampleSpan, Samples};
+use tutti_units::{Db, SampleSpan, Samples};
 
 use super::{Network, Stage};
 use crate::{Ring, System};

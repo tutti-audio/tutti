@@ -62,7 +62,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::NodeKey;
 use crate::NodeMix;
 use crate::{Edge, EdgeId, FeedbackFrom, InPort, OutPort, Sink, Source};
-use tutti_types::{ChannelLayout, Latency, Samples, Tail};
+use tutti_types::ChannelLayout;
+use tutti_units::{Latency, Samples, Tail};
 
 use crate::node::{InPlaceMask, MAX_PORTS, Prepare, Resolution, Shape, Wired};
 use crate::param::ParamIn;
@@ -341,7 +342,7 @@ enum Pre {
 /// value it reads.
 struct PPort {
     port: u16,
-    param: tutti_types::UnitAddr,
+    param: tutti_units::UnitAddr,
     from: EventOut,
     value: u32,
 }

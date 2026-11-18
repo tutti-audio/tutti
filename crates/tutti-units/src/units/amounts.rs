@@ -230,7 +230,7 @@ crate::ranged! {
     /// [`Unit::from_raw`] is it too, since a cell holds any float.
     ///
     /// ```
-    /// use tutti_types::Depth;
+    /// use tutti_units::Depth;
     ///
     /// assert_eq!(Depth::new(0.25).map(Depth::get), Some(0.25));
     /// assert_eq!(Depth::new(1.5), None);
@@ -348,7 +348,7 @@ crate::ranged! {
     /// cell holds any float.
     ///
     /// ```
-    /// use tutti_types::Bipolar;
+    /// use tutti_units::Bipolar;
     ///
     /// assert_eq!(Bipolar::new(0.25).map(Bipolar::get), Some(0.25));
     /// assert_eq!(Bipolar::new(1.5), None);

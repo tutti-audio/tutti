@@ -14,7 +14,7 @@
 //! correlation on every call, through [`cross_correlate_shaped`].
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Confidence, SampleRate, Samples, Seconds};
+use tutti_units::{Confidence, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::to_f32;
@@ -282,7 +282,7 @@ mod tests {
     use super::*;
     use crate::cross_correlate;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
-    use tutti_types::Hz;
+    use tutti_units::Hz;
 
     fn noise(len: usize, seed: u64) -> Vec<f32> {
         let mut rng = StdRng::seed_from_u64(seed);

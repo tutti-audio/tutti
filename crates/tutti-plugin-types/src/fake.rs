@@ -29,7 +29,7 @@ use crate::{
     PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request,
     RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// One call the fake received.
 #[derive(Debug, Clone, Copy, PartialEq)]

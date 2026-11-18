@@ -24,7 +24,8 @@ use tutti_dsp::{
     SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_coeff,
 };
 use tutti_fixtures::signal::write_wav_f32;
-use tutti_types::{ChannelLayout, Db, Drive, Hz, Q, Resonance, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::{Db, Drive, Hz, Q, Resonance, SampleRate};
 
 const RATE: f64 = 48_000.0;
 /// Impulse-response length: long enough that every case below has rung out.

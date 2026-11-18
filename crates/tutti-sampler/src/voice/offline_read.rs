@@ -44,9 +44,9 @@ use super::fault::FirstError;
 #[cfg(codec)]
 use tutti_buffers::Source;
 use tutti_buffers::Wave;
-use tutti_types::SamplePosition;
+use tutti_units::SamplePosition;
 #[cfg(codec)]
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use super::Loop;
 use super::interp::{
@@ -539,7 +539,7 @@ impl Pages {
 mod tests {
     use super::*;
     use crate::testing::loop_frames;
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     const LEN: usize = 100_000;
 

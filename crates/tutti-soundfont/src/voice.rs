@@ -8,9 +8,9 @@ use tutti_dsp::{
 };
 use tutti_midi_protocol::value_to_unit_f32;
 use tutti_sf2::{SamplePool, Side};
-use tutti_types::{Db, Hz, Pan, Q, SampleRate, Semitones};
 use tutti_ump::ControlValue;
 use tutti_ump::{MidiChannel, NoteNumber, RegisteredPerNoteController};
+use tutti_units::{Db, Hz, Pan, Q, SampleRate, Semitones};
 use tutti_voicing::{ChannelState, Glide, NoteControl};
 
 /// The longest an exclusive class's quick release takes, in seconds, to fall
@@ -522,7 +522,7 @@ impl Voice {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::Amplitude;
+    use tutti_units::Amplitude;
 
     const RATE: SampleRate = SampleRate::SR_44K1;
     const CUTOFF: f32 = 500.0;

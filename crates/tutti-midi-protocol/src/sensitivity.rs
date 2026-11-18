@@ -1,7 +1,7 @@
 //! Per-note pitch-bend sensitivity as the MIDI 2.0 wire value.
 
-use tutti_types::Semitones;
 use tutti_ump::{Pitch, RegisteredData, U7};
+use tutti_units::Semitones;
 
 /// Per-note pitch bend range as the spec's 7.25 fixed-point semitone value
 /// (M2-104 §7.4.13, RPN #00/07, Sensitivity of Per-Note Pitch Bend): 7 integer

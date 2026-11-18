@@ -71,7 +71,7 @@ const SYSEX7_STATUS_START: u8 = 0x1;
 const SYSEX7_STATUS_CONTINUE: u8 = 0x2;
 const SYSEX7_STATUS_END: u8 = 0x3;
 
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
 /// Serializes AU instantiation across this file's tests.

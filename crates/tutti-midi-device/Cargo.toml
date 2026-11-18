@@ -23,7 +23,7 @@ bitflags = "2"
 getrandom = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 unicode-normalization = { workspace = true }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 winnow = { workspace = true }
 miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"] }

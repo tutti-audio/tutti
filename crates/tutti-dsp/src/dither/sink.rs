@@ -2,7 +2,8 @@
 //! export and a live recording share.
 
 use tutti_buffers::{Interleaved, InterleavedMut, Sink, SinkFailed};
-use tutti_types::{Amplitude, ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Samples};
 
 use crate::dither::{DitherNoise, DitherShape};
 
@@ -48,7 +49,8 @@ pub struct DitherSpec {
 /// ```
 /// use tutti_buffers::{Interleaved, Sink, SinkFailed};
 /// use tutti_dsp::{DitherShape, DitherSink, DitherSpec};
-/// use tutti_types::{Amplitude, ChannelLayout};
+/// use tutti_units::Amplitude;
+/// use tutti_types::ChannelLayout;
 ///
 /// struct Count(usize);
 /// impl Sink for Count {

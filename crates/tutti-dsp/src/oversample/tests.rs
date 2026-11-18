@@ -1,7 +1,8 @@
 use core::f64::consts::TAU;
 
 use tutti_buffers::{Float, Mono, MonoMut};
-use tutti_types::{Db, MaxBlock, SampleRate, Samples};
+use tutti_types::MaxBlock;
+use tutti_units::{Db, SampleRate, Samples};
 
 use super::*;
 use crate::testing::amplitude_at;

@@ -45,7 +45,7 @@
 use crate::support::au::Au;
 use tutti_au_host::BusDirection;
 use tutti_fixtures::main_thread;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 mod support;
 use support::probe_au::{
@@ -55,7 +55,7 @@ use support::probe_au::{
 
 /// Block size every test renders at.
 const BLOCK: u32 = 64;
-const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
+const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 
 /// Render one block of silence into freshly-zeroed buffers.
 ///

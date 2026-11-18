@@ -15,7 +15,7 @@ use std::sync::atomic::Ordering;
 
 use atomic_float::AtomicF64;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64};
-use tutti_types::{Beat, Bpm};
+use tutti_units::{Beat, Bpm};
 
 /// A tempo shared between threads: only a [`Bpm`] goes in, so the audio thread
 /// reads a valid tempo back whatever the writer did.

@@ -23,7 +23,8 @@
 //! gain only scales, so a silent signal is a silent output whatever the follower is doing).
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
-use tutti_types::{Amplitude, ChannelLayout, Db, Hz, Q, SampleRate, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{amplitude_to_db, gate_gain_at};
 use super::key_filter::{KeyFilter, KeyStage};

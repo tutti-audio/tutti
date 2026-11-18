@@ -1,7 +1,8 @@
 //! [`NoteAdsr`]: an ADSR driven by note-ons and note-offs.
 
-use tutti_types::{Adsr, Frame, SampleRate, Samples};
+use tutti_types::Adsr;
 use tutti_ump::{NoteKey, NoteKeyEvent, Ump};
+use tutti_units::{Frame, SampleRate, Samples};
 
 use super::{ControlSource, Leg, PlayGrid};
 

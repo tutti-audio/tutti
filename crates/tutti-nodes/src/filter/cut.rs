@@ -7,7 +7,8 @@ use tutti_dsp::{
     TAIL_FLOOR,
 };
 use tutti_graph::Shape;
-use tutti_types::{BusTopology, ChannelLayout, Hz, MaxBlock, SampleRate, Samples, Tail};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{Hz, SampleRate, Samples, Tail};
 
 use super::filter_bus;
 use super::glided::{GLIDE_STEPS, GlidedSos, filter_shape};
@@ -240,7 +241,7 @@ mod tests {
     use tutti_dsp::TAIL_FLOOR;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Cost, Node, ParamNode};
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     const LP: CutResponse = CutResponse::LowPass;
     const HP: CutResponse = CutResponse::HighPass;

@@ -44,7 +44,7 @@ use crate::latency::{ChannelFeed, Feed, LatencyGraph, PortFeed};
 use crate::spec::{EventIn, EventOut};
 use crate::tail::TailGraph;
 use tutti_types::ChannelLayout;
-use tutti_types::{Samples, Tail};
+use tutti_units::{Samples, Tail};
 
 /// A stable identity for a node, chosen by the **author** of the topology.
 ///
@@ -158,7 +158,7 @@ pub enum Source {
 /// a hang.
 ///
 /// Named `FeedbackFrom` rather than `Feedback` because
-/// [`tutti_types::Feedback`] is already the recirculation-coefficient unit; two
+/// [`tutti_units::Feedback`] is already the recirculation-coefficient unit; two
 /// types called `Feedback` in one crate is a collision, not a pun.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FeedbackFrom {

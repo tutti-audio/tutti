@@ -12,12 +12,12 @@ use tutti_midi_file::{
     ClipFileError, FileEvent, Meta, MidiFile, MidiFileKind, ReadError, SmfDivision, SmfFormat,
     Tick, Track, TracksError,
 };
-use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, DeltaTicks, Flex, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Stream,
     TicksPerQuarterNote, U7, Ump, Utility, Voice1,
 };
+use tutti_units::{Beat, Bpm, Seconds};
 
 const TPQ: u16 = 96;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);

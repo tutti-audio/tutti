@@ -5,7 +5,7 @@ use crate::LfoShape;
 use crate::shape::shape;
 use tutti_curve::Exponent;
 use tutti_curve::{Breakpoint, Trajectory};
-use tutti_types::{Amplitude, Frame, Hz, ParamId, UnitParam};
+use tutti_units::{Amplitude, Frame, Hz, ParamId, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 

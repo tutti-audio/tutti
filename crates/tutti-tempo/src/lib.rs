@@ -13,7 +13,7 @@
 //! that walks it frame by frame takes a [`TempoView`] ([`TempoMap::view`]): the
 //! map, the sample rate and a lookup hint, with the frame queries.
 //!
-//! Time is [`Seconds`](tutti_types::Seconds), an `f64`, so the map's figures
+//! Time is [`Seconds`](tutti_units::Seconds), an `f64`, so the map's figures
 //! stay exact over hours: a seconds value in this crate is seconds from beat 0.
 //!
 //! The first point sits at beat 0. Before it the map holds the first tempo, so
@@ -33,7 +33,7 @@
 //!
 //! ```
 //! use tutti_tempo::{TempoMap, TempoPoint};
-//! use tutti_types::{Beat, Bpm, Frame, SampleRate};
+//! use tutti_units::{Beat, Bpm, Frame, SampleRate};
 //!
 //! // 120 to 180 BPM over four beats, tempo linear in time, lasts 1.6 s.
 //! let map = TempoMap::new([

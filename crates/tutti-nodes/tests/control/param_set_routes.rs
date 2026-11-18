@@ -32,10 +32,11 @@ use tutti_nodes::{
     LimiterControls, LimiterNode, ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterNode,
     SvfType,
 };
-use tutti_types::{
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::UnitParam;
+use tutti_units::{
     BeatsPerCycle, Db, Depth, Hz, PhaseIncrement, Q, Resonance, SampleRate, Samples,
 };
-use tutti_types::{BusTopology, ChannelLayout, UnitParam};
 
 /// Writes `value` to `p` through `node`'s set, as a host does; `false` for
 /// a param the set lacks.
@@ -337,10 +338,10 @@ fn compressor_makeup_is_addressed_as_gain_db() {
         BusTopology::STEREO,
         KeySource::Sidechain,
         CompressorControls {
-            threshold: tutti_types::Db(-12.0),
-            ratio: tutti_types::CompressionRatio(4.0),
-            attack: tutti_types::Seconds(0.01),
-            release: tutti_types::Seconds(0.1),
+            threshold: tutti_units::Db(-12.0),
+            ratio: tutti_units::CompressionRatio(4.0),
+            attack: tutti_units::Seconds(0.01),
+            release: tutti_units::Seconds(0.1),
             ..CompressorControls::DEFAULT
         },
     );
@@ -687,7 +688,7 @@ fn a_chorus_rate_lane_below_its_range_is_held_at_the_floor() {
 #[test]
 fn an_lfo_reads_a_driven_depth_per_frame() {
     use tutti_graph::contract::ParamPulse;
-    use tutti_types::{Frame, UnitAddr};
+    use tutti_units::{Frame, UnitAddr};
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let lfo = LfoNode::new(LfoShape::Square)
         .with_rate(Hz(1.0))

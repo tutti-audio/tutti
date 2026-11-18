@@ -39,7 +39,7 @@ use tutti_clap_test_plugin::{
 };
 use tutti_plugin_types::{AutomationMode, Control, StateUse};
 use tutti_plugin_types::{Normalized, ParamFlags, ParamSteps, Request, RescanScope};
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// CLAP event type constants, pinned here rather than imported: these are the
 /// wire values the host puts on the FFI, so a failure names what the plugin

@@ -12,7 +12,8 @@ use tutti_dsp::{
     Stages, Stagger, StaggerError, Steps, SweepRange, allpass_coeff, sweep_hz,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, Depth, Feedback, Hz, MaxBlock, PhaseIncrement, SampleRate, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Depth, Feedback, Hz, PhaseIncrement, SampleRate, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -44,8 +45,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///
 /// # The controls
 ///
-/// The ports are in this order: **rate** ([`Rate`](tutti_types::UnitParam::Rate), [`Hz`]),
-/// **depth** ([`Depth`](tutti_types::UnitParam::Depth), unitless) and [`Feedback`]. All
+/// The ports are in this order: **rate** ([`Rate`](tutti_units::UnitParam::Rate), [`Hz`]),
+/// **depth** ([`Depth`](tutti_units::UnitParam::Depth), unitless) and [`Feedback`]. All
 /// three are read on the stream's 16-frame grid, so what is heard does not depend on how the
 /// stream is cut into blocks; a driven port is read at the grid's solve frame.
 ///
@@ -332,8 +333,9 @@ mod tests {
     use crate::test_support::drive_kernel;
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::Phase;
-    use tutti_types::{ChannelLayout, Latency, PhaseIncrement, Samples, Tail, UnitParam};
+    use tutti_types::ChannelLayout;
+    use tutti_units::Phase;
+    use tutti_units::{Latency, PhaseIncrement, Samples, Tail, UnitParam};
 
     const RATE: SampleRate = SampleRate::SR_48K;
 

@@ -51,11 +51,9 @@
 //!   piece 0 after it.
 
 use tutti_graph::{Offset, TransportPosition, UmpAt};
-use tutti_types::{
-    BarCount, Beat, BeatDuration, Bpm, Meter, MeterMap, Pass, PassEnd, SampleRate, Samples,
-    Seconds, TimeSignature, first_frame_at_or_after,
-};
+use tutti_types::{Meter, MeterMap, Pass, PassEnd, TimeSignature, first_frame_at_or_after};
 use tutti_ump::{Flex, Message, MidiGroup, System, U7, Ump};
+use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, Samples, Seconds};
 
 use tutti_midi_protocol::{
     MtcFullMessage, MtcRate, MtcTimeCode, SmpteTimecode, flex_tempo_field,

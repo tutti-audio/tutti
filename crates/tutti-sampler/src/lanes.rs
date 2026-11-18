@@ -28,7 +28,7 @@
 //! never enters.
 
 use tutti_types::MAX_CHANNELS;
-use tutti_types::SamplePosition;
+use tutti_units::SamplePosition;
 
 /// Frames of scratch a node holds before any `prepare` (its constructor's
 /// size, a few KiB), and the piece length of a source's unprepared stack
@@ -357,7 +357,7 @@ mod tests {
     fn every_voice_node_sizes_its_scratch_from_max_block() {
         use crate::voice::{MemorySource, Voice, VoiceNode, VoicePool, VoiceSource};
         use tutti_graph::{Node, Prepare};
-        use tutti_types::{Beat, SampleRate, Samples};
+        use tutti_units::{Beat, SampleRate, Samples};
 
         let mut wave = tutti_buffers::Wave::new(2, SampleRate::SR_48K);
         wave.append(Interleaved::new(&[0.0, 0.0], wave.layout()).unwrap())

@@ -19,10 +19,10 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 
 use tutti_curve::{Curvature, Exponent, Law, Piece};
-use tutti_types::{
+use tutti_ump::Ump;
+use tutti_units::{
     ParamAddr, ParamId, ParamKey, SamplePosition, Samples, Unit, UnitAddr, UnitParam,
 };
-use tutti_ump::Ump;
 
 use crate::time::Offset;
 
@@ -58,7 +58,7 @@ use crate::time::Offset;
 ///
 /// ```
 /// use tutti_graph::{Exponent, Law, ParamRamp};
-/// use tutti_types::{Db, Hz, ParamId, ParamKey, Samples};
+/// use tutti_units::{Db, Hz, ParamId, ParamKey, Samples};
 /// let r = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(800.0), Samples(64));
 /// assert_eq!(r.target(ParamKey::<Hz>::CUTOFF), Some(Hz(800.0)));
 /// assert_eq!(r.target(ParamKey::<Db>::THRESHOLD), None); // another param
@@ -252,7 +252,7 @@ impl ShapeTag {
 ///
 /// ```
 /// use tutti_graph::{Exponent, Law, ParamSegment};
-/// use tutti_types::{Hz, ParamKey, Samples};
+/// use tutti_units::{Hz, ParamKey, Samples};
 /// let s = ParamSegment::new(
 ///     ParamKey::<Hz>::CUTOFF,
 ///     Hz(200.0),
@@ -636,7 +636,7 @@ pub type UmpAt = (Offset, Ump);
 /// happens there.
 ///
 /// `offset` is an [`Offset`] — a position inside the block the event is
-/// delivered in, never an absolute [`Frame`](tutti_types::Frame) (see
+/// delivered in, never an absolute [`Frame`](tutti_units::Frame) (see
 /// [`Offset`]). Slices of events handed to a node are
 /// sorted by it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -945,7 +945,7 @@ pub const MAX_EVENT_PORT_CAPACITY: NonZeroU32 = NonZeroU32::new(8_192).unwrap();
 /// ```
 /// use tutti_types::MaxBlock;
 /// use tutti_graph::{EventDensity, Prepare};
-/// use tutti_types::{SampleRate, Samples};
+/// use tutti_units::{SampleRate, Samples};
 ///
 /// let one_per_frame = EventDensity::per_frame(1);
 /// let at = |block| one_per_frame.capacity(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(block))));
@@ -1405,7 +1405,7 @@ mod tests {
     /// when the foreign id equals the built-in's discriminant.
     #[test]
     fn foreign_and_builtin_ramps_are_distinct_addresses() {
-        use tutti_types::{Hz, ParamKey};
+        use tutti_units::{Hz, ParamKey};
         let foreign = ParamRamp::foreign(
             ParamId::new(ParamKey::<Hz>::CUTOFF.addr().to_u16() as u32),
             0.5,
@@ -1437,7 +1437,7 @@ mod tests {
     /// for each other, and its shape and timing read back as built.
     #[test]
     fn a_segment_reads_back_as_built() {
-        use tutti_types::{Hz, ParamKey};
+        use tutti_units::{Hz, ParamKey};
         let key = ParamKey::<Hz>::CUTOFF;
         let id = ParamId::new(u32::from(key.addr().to_u16()));
         let foreign =
@@ -1557,7 +1557,7 @@ mod tests {
     fn a_density_sizes_a_port_by_the_block() {
         let at = |density: EventDensity, block| {
             density.capacity(&crate::Prepare::new(
-                tutti_types::SampleRate::SR_48K,
+                tutti_units::SampleRate::SR_48K,
                 MaxBlock::of(Samples(block)),
             ))
         };

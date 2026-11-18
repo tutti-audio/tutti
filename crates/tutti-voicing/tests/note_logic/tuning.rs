@@ -10,9 +10,9 @@ use tutti_midi_protocol::{
     Addressee, ChannelMask, Heard, KeyChange, KeyChanges, KeyTable, OctaveOffsets, Timing,
     TuningFrequency, TuningMessage, TuningName, Universal,
 };
-use tutti_types::Seconds;
 use tutti_ump::ControlValue;
 use tutti_ump::{CCNumber, MidiChannel, NoteNumber, Rpn, U7, U14, Voice2};
+use tutti_units::Seconds;
 use tutti_voicing::{Command, NoSuchTuning, Rules, TuningCapacity, VoiceId, Voicing};
 
 fn on(core: &mut Voicing, channel: u8, key: u8) -> Vec<Command> {

@@ -15,10 +15,8 @@ use tutti_graph::{
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
 use tutti_nodes::automation::ControlLaneNode;
-use tutti_types::{
-    ArcDegrees, AtomicF32, Azimuth, Beat, Bpm, ChannelLayout, Depth, FrameClock, MaxBlock,
-    SampleRate, Samples, UnitParam,
-};
+use tutti_types::{AtomicF32, ChannelLayout, FrameClock, MaxBlock};
+use tutti_units::{ArcDegrees, Azimuth, Beat, Bpm, Depth, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;
 const TEMPO: Bpm = Bpm::of(120.0);
@@ -141,8 +139,8 @@ fn constant(depth: f32) -> Layer {
     Layer {
         id: LayerId(1),
         clock: Clock::Seconds {
-            rate: tutti_types::Hz(1.0),
-            phase: tutti_types::PhaseIncrement(0.0),
+            rate: tutti_units::Hz(1.0),
+            phase: tutti_units::PhaseIncrement(0.0),
             anchor: None,
         },
         wave: Waveform::Const(1.0),

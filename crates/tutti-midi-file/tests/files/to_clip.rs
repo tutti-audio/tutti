@@ -14,12 +14,12 @@ use tutti_midi_file::{
     DropReason, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
     SmfDivision, SmfFormat, TextKind, Tick, TimelineError, ToClipError, Track,
 };
-use tutti_types::{Beat, Seconds};
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, KeySignature, Letter,
     Message, Metronome, MidiGroup, SharpsFlats, Stream, SysexStatus, TextError, Utility,
     split_stream,
 };
+use tutti_units::{Beat, Seconds};
 
 const TPQ: u16 = 480;
 const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);

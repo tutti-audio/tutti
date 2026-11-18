@@ -44,11 +44,11 @@ use tutti_polysynth::{
     Adsr, FilterType, GlideTime, OscillatorType, PolySynth, PortamentoConfig, PortamentoMode,
     SvfMode, SynthConfig, UnisonConfig,
 };
-use tutti_types::{Amplitude, Hz, Q, Resonance, SampleRate, Samples, Seconds};
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
+use tutti_units::{Amplitude, Hz, Q, Resonance, SampleRate, Samples, Seconds};
 
 const SR: f64 = 48_000.0;
 /// The block every case renders: a constant here, not an axis (see the

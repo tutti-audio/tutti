@@ -9,7 +9,7 @@ use std::thread::{self, ThreadId};
 
 use tutti_plugin_types::MainWork;
 use tutti_session::{Declared, DetachedSession, Life, Load, PoolEntry, RetryError, Session, Task};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// What the worker hands the main stage: it says where it is dropped.
 struct Output {

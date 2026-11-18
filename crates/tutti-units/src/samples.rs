@@ -1,13 +1,13 @@
 //! [`Samples`] — a count of audio frames.
 //!
 //! An unassigned count, distinct from the float-backed *measure* units (`Hz`,
-//! `Seconds`, `Beat`, `SamplePosition`, …) in [`super::units`]. Those are
-//! continuous quantities you interpolate and feed to [`Param`](super::Param);
+//! `Seconds`, `Beat`, `SamplePosition`, …) in the `units` module. Those are
+//! continuous quantities you interpolate and automate;
 //! this is an integer you compare and add.
 //!
-//! Deliberately **not** implementing the [`Unit`](super::Unit) marker trait — a
+//! Deliberately **not** implementing the [`Unit`](crate::Unit) marker trait: a
 //! compensation delay is not an automatable DSP parameter and must not be
-//! reachable through [`Param`](super::Param). The practical difference shows up
+//! reachable as one. The practical difference shows up
 //! in the derives: `Eq + Ord + Hash`, which counts need for map keys and
 //! `max()`, and which the float units cannot have.
 //!
@@ -29,9 +29,8 @@ unit! {
     /// channels wide — which is how the plugin formats and `Seconds::to_samples`
     /// already use it. It is **never** a count of interleaved samples; that
     /// quantity is a slice length, reached only through
-    /// [`ChannelLayout::interleaved_len`](crate::ChannelLayout::interleaved_len)
-    /// and brought back only through
-    /// [`ChannelLayout::from_interleaved_len`](crate::ChannelLayout::from_interleaved_len).
+    /// `ChannelLayout::interleaved_len` and brought back only through
+    /// `ChannelLayout::from_interleaved_len`.
     ///
     /// Integer by construction. Distinct from `SamplePosition`, which is an `f64`
     /// *position* within a wave that may be fractional so interpolating readers can
@@ -209,7 +208,7 @@ mod tests {
 
     #[test]
     fn frames_convert_to_a_span_and_back() {
-        use super::super::units::{SampleRate, Seconds};
+        use crate::units::{SampleRate, Seconds};
         let rate = SampleRate::of(48_000.0);
         assert_eq!(Samples(48_000).to_seconds(rate), Seconds(1.0));
         assert_eq!(Samples(0).to_seconds(rate), Seconds(0.0));
@@ -225,7 +224,7 @@ mod tests {
     /// frames apart; both come back as the same count.
     #[test]
     fn a_long_frame_count_round_trips_through_seconds() {
-        use super::super::units::SampleRate;
+        use crate::units::SampleRate;
         let rate = SampleRate::of(48_000.0);
         for frames in [Samples((1 << 24) + 1), Samples(48_000 * 3600 + 1)] {
             assert_eq!(frames.to_seconds(rate).to_samples(rate), frames);

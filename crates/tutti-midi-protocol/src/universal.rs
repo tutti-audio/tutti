@@ -49,13 +49,13 @@ use alloc::vec;
 
 pub use machine_control::*;
 
-use tutti_types::Seconds;
 use tutti_ump::{
     DeviceIdentity, Message, MidiGroup, Sysex7Packet, SysexAssembler, SysexMessage, SysexStatus,
     SysexStep, U7, U14, Ump,
 };
+use tutti_units::Seconds;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A device's own Universal System Exclusive id: `00` to `7E`. `7F` is the
     /// all-call (M1 p.40), which every device answers and none has as its own, so
     /// [`new`](Self::new) refuses it; a message's header is a [`Recipient`].

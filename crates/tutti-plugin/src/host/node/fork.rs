@@ -126,7 +126,7 @@
 use std::sync::{Arc, Weak};
 
 use tutti_graph::{ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked};
-use tutti_types::{Latency, SampleRate};
+use tutti_units::{Latency, SampleRate};
 
 use super::{Bound, PluginClient, Unbound};
 use tutti_plugin_host::{ForkedSources, PluginControls};
@@ -284,7 +284,7 @@ struct Capture {
     /// live plugin holds unchanged (under an edit made in its editor, say)
     /// is not sent to the fork either, and the export renders what live
     /// playback plays.
-    delivered: Vec<(tutti_types::ParamId, f64)>,
+    delivered: Vec<(tutti_units::ParamId, f64)>,
     origin: IpcOrigin,
     /// The live instance's plugin id, which the fresh one must match.
     id: String,
@@ -457,7 +457,7 @@ mod tests {
     use std::time::Duration;
     use tutti_plugin_ipc::ServerWatch;
     use tutti_plugin_types::PluginTail;
-    use tutti_types::{SampleRate, Samples};
+    use tutti_units::{SampleRate, Samples};
 
     /// A fork's health reports a latency that moved after its graph was
     /// compiled — `Failed`, with `PluginRenderFault::LatencyChanged` naming

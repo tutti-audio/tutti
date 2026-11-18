@@ -13,9 +13,10 @@ use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
 use tutti_session::{EventInPort, LiveSession, Session, midi_sink};
-use tutti_types::{Beat, ChannelLayout, SampleRate, Seconds};
+use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::{Beat, SampleRate, Seconds};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 512;

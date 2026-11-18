@@ -9,10 +9,11 @@ use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::Elevation;
+use tutti_types::Bed;
 use tutti_types::MaxBlock;
-use tutti_types::SampleRate;
-use tutti_types::{Azimuth, Bed, UnitParam};
+use tutti_units::Elevation;
+use tutti_units::SampleRate;
+use tutti_units::{Azimuth, UnitParam};
 
 /// `node` alone in a graph (`BlockRig`) at 48 kHz in 64-frame blocks, fed a
 /// DC pair: `warm` blocks, then 1 000 under `assert_no_alloc`.
@@ -188,7 +189,8 @@ fn check_block(
 #[test]
 fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bounded() {
     use tutti_graph::Prepare;
-    use tutti_types::{MaxBlock, Samples, Speaker};
+    use tutti_types::{MaxBlock, Speaker};
+    use tutti_units::Samples;
 
     const FRAMES: usize = 64;
     let params = [
@@ -420,7 +422,7 @@ fn hrtf_binaural_same_rate_prepare_is_allocation_free() {
         HrtfBinauralNode::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
     let prepare = Prepare::new(
         SampleRate::SR_48K,
-        tutti_types::MaxBlock::of(tutti_types::Samples(256)),
+        tutti_types::MaxBlock::of(tutti_units::Samples(256)),
     );
     assert_no_alloc::assert_no_alloc(|| node.prepare(&prepare));
 }
@@ -433,7 +435,7 @@ fn hrtf_binaural_same_rate_prepare_is_allocation_free() {
 fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
     use tutti_graph::Prepare;
     use tutti_nodes::HrtfBinauralNode;
-    use tutti_types::{Samples, Tail};
+    use tutti_units::{Samples, Tail};
 
     let bytes = synthetic_hrir_sphere(48_000, 64);
     let mut node =

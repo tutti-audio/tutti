@@ -13,8 +13,9 @@ use tutti_plugin_types::{
     PluginError, PluginIo, PluginResult, Processor, RtMidiEvents,
 };
 use tutti_rt::{DrainBeat, RtVec, Tally, TallyWriter, tally};
-use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::ParamId;
+use tutti_units::{SampleRate, Samples};
 
 use crate::events::{InputEvents, OutputStream, Stager, drain_midi};
 use crate::types::{

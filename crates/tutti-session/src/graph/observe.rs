@@ -10,7 +10,7 @@ use tutti_graph::{
     CloseError, EventCapacity, EventTapId, EventTapReader, EventTapSource, MeterId, MeterReader,
     MeterSpec, MissingSource, NodeKey, TapAlign, TapId, TapReader,
 };
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use super::Graph;
 use crate::{EventTapPort, OutPort};

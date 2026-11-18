@@ -48,7 +48,7 @@ use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 use crate::support::render_to_file;
 use tutti_codec::{FlacLevel, Format, Pcm, Quality};
@@ -56,9 +56,9 @@ use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
-use tutti_types::Amplitude;
 use tutti_types::ChannelLayout;
-use tutti_types::Hz;
+use tutti_units::Amplitude;
+use tutti_units::Hz;
 
 const SR: f64 = 44_100.0;
 const DUR: f64 = 0.25;
@@ -67,7 +67,7 @@ const DUR: f64 = 0.25;
 /// renders at (a graph prepared at another is refused, not re-rated).
 fn built(g: GraphBuilder) -> RenderGraph {
     let (editor, executor) = g
-        .build(RenderGraph::prepare(tutti_types::SampleRate::of(SR)))
+        .build(RenderGraph::prepare(tutti_units::SampleRate::of(SR)))
         .expect("builds");
     RenderGraph::assemble(editor, executor, Setup::new()).expect("built together")
 }
@@ -107,7 +107,7 @@ fn flac_format(pcm: Pcm) -> Format {
 fn config(format: Format) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
-            sample_rate: tutti_types::SampleRate::of(SR),
+            sample_rate: tutti_units::SampleRate::of(SR),
             duration_seconds: Seconds(DUR),
             ..Default::default()
         },
@@ -478,9 +478,9 @@ fn a_flac_decodes_to_exactly_the_rendered_frames_with_a_valid_md5() {
             for frames in [1usize, 15, 63, 64, 4095, 4096, 4097, 3 * 4096 + 17] {
                 let cfg = |format| ExportConfig {
                     render: RenderConfig {
-                        sample_rate: tutti_types::SampleRate::of(SR),
+                        sample_rate: tutti_units::SampleRate::of(SR),
                         duration_seconds: Seconds(0.0),
-                        tail: tutti_types::Samples(frames),
+                        tail: tutti_units::Samples(frames),
                         ..Default::default()
                     },
                     encode: EncodeConfig {

@@ -7,7 +7,7 @@ use tutti_dsp::{FreeverbControls, SvfType};
 use tutti_graph::contract::prepared;
 use tutti_graph::{Node, ParamNode};
 use tutti_nodes::{FreeverbNode, SvfFilterNode};
-use tutti_types::{Hz, Q, SampleRate, UnitAddr, UnitParam};
+use tutti_units::{Hz, Q, SampleRate, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;

@@ -14,7 +14,8 @@
 //! `a_reused_detector_matches_fresh_ones` pins it.
 
 use tutti_buffers::{Mono, Sample};
-use tutti_types::{Cents, Confidence, Hz, Note, SampleRate, Samples};
+use tutti_types::Note;
+use tutti_units::{Cents, Confidence, Hz, SampleRate, Samples};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::to_f32;
@@ -23,7 +24,7 @@ use crate::notes::PitchHop;
 use crate::pitch::PitchDetector;
 use crate::{Error, Result};
 use tutti_dsp::FrameCount;
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 ranged! {
     /// YIN's absolute threshold on the cumulative mean difference: within
@@ -412,10 +413,10 @@ mod tests {
     fn sine(sample_rate: f64, freq: f32, seconds: f32) -> Vec<f32> {
         let n = (sample_rate as f32 * seconds) as usize;
         tutti_fixtures::signal::sine(
-            tutti_types::Hz(freq),
-            tutti_types::Amplitude(0.5),
-            tutti_types::SampleRate::of(sample_rate),
-            tutti_types::Samples(n),
+            tutti_units::Hz(freq),
+            tutti_units::Amplitude(0.5),
+            tutti_units::SampleRate::of(sample_rate),
+            tutti_units::Samples(n),
         )
     }
 

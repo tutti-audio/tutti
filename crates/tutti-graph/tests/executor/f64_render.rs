@@ -4,7 +4,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_graph::contract::{BlockRig, Direct, drive};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.
 const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;

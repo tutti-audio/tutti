@@ -37,8 +37,8 @@
 use std::time::{Duration, Instant};
 
 use tutti_graph::Offset;
-use tutti_types::{Frame, Seconds};
 use tutti_ump::{Join, Spans, Ump, spans_joined};
+use tutti_units::{Frame, Seconds};
 
 use crate::ClockMap;
 

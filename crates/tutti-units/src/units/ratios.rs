@@ -189,7 +189,7 @@ impl Cents {
 /// [`Unit::from_raw`] is it too, since a cell holds any float.
 ///
 /// ```
-/// use tutti_types::CentsSpan;
+/// use tutti_units::CentsSpan;
 ///
 /// assert_eq!(CentsSpan::new(12.0).map(CentsSpan::get), Some(12.0));
 /// assert_eq!(CentsSpan::new(-1.0), None);

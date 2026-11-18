@@ -37,10 +37,10 @@ use tutti_nodes::{
     LadderFilterNode, LadderType, LimiterControls, LimiterNode, Lookahead, MaxDelay, ModDelayNode,
     PhaserControls, PhaserNode, ShapeKind, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
 };
-use tutti_types::{
-    Amplitude, AtomicF32, BeatsPerCycle, BusTopology, ChannelLayout, CompressionRatio, Db, Depth,
-    Drive, Feedback, Hz, Mix, PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds, UnitAddr,
-    UnitParam,
+use tutti_types::{AtomicF32, BusTopology, ChannelLayout};
+use tutti_units::{
+    Amplitude, BeatsPerCycle, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix,
+    PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds, UnitAddr, UnitParam,
 };
 
 const FRAMES: usize = 24_000;

@@ -14,7 +14,8 @@ use tutti_graph::{
     Prepare, Shape, Sink, Source, Status, TapAlign, TapId, TapSpec, TransportPosition, Unforkable,
     Unwired,
 };
-use tutti_types::{Amplitude, BusTopology, ChannelLayout, Samples, Speaker, UnitAddr, UnitParam};
+use tutti_types::{BusTopology, ChannelLayout, Speaker};
+use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
 /// A node of a given shape that writes silence: the editor's view of it is
 /// its ports.

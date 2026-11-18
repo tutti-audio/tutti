@@ -28,7 +28,8 @@
 //! semantics of folding first.
 
 use tutti_buffers::{Interleaved, Mono, PlanesMut, Sample, deinterleave};
-use tutti_types::{Amplitude, ChannelIndex, ChannelLayout, Samples};
+use tutti_types::{ChannelIndex, ChannelLayout};
+use tutti_units::{Amplitude, Samples};
 
 use core::marker::PhantomData;
 
@@ -980,7 +981,8 @@ mod tests {
 
 #[cfg(all(test, feature = "serde"))]
 mod serde_tests {
-    use tutti_types::{Amplitude, ChannelLayout};
+    use tutti_types::ChannelLayout;
+    use tutti_units::Amplitude;
 
     use super::{PeakBlock, PeakBlocks};
 

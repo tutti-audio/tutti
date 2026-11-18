@@ -193,21 +193,6 @@ fn a_gain_reciprocal_undoes_it_and_refuses_zero() {
     assert_eq!(Gain(-4.0) * Gain(-4.0).recip().unwrap(), Gain::UNITY);
 }
 
-/// A tap, a routing weight: a driven, signed cell that reads back as written.
-#[test]
-fn a_gain_is_a_param() {
-    let tap = crate::Param::new(Gain(-0.5));
-    let on_audio_thread = tap.handle();
-    assert_eq!(on_audio_thread.load(), Gain(-0.5));
-    tap.store(Gain::INVERTING);
-    assert_eq!(on_audio_thread.load(), Gain::INVERTING);
-
-    // The width-erased cell a modulation lane writes keeps the sign.
-    tap.cell()
-        .store(0.75, core::sync::atomic::Ordering::Relaxed);
-    assert_eq!(tap.load(), Gain(0.75));
-}
-
 #[test]
 fn a_gain_has_no_range_so_a_cell_holds_any_float() {
     assert_eq!(<Gain as Unit>::from_raw(-3.0), Gain(-3.0));

@@ -50,10 +50,7 @@
 //!     compile, Clock, Law, Declarations, LfoShape, Polarity, ProgramTime, RouteDecl,
 //!     RouteKey, RouteTarget, Source, SourceKey, TargetDecl, TargetKey, Waveform,
 //! };
-//! use tutti_types::{
-//!     Beat, BeatsPerCycle, Depth, Frame, ParamAddr, PhaseIncrement, PlayReading, SamplePosition,
-//!     SampleRate, UnitParam,
-//! };
+//! use tutti_units::{Beat, BeatsPerCycle, Depth, Frame, ParamAddr, PhaseIncrement, PlayReading, SamplePosition, SampleRate, UnitParam};
 //!
 //! let cutoff = TargetKey::param(7, ParamAddr::Unit(UnitParam::Cutoff));
 //! let sources = [(

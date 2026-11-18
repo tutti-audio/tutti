@@ -5,7 +5,8 @@
 //! short buffer deserves better than a panic on the audio path.
 
 use tutti_dsp::FrameCount;
-use tutti_types::{Bpm, ChannelLayout, Db, Hz, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Bpm, Db, Hz, SampleRate, Samples};
 
 /// Everything that can go wrong constructing or feeding an analysis.
 ///

@@ -9,7 +9,8 @@ use tutti_dsp::DynamicMode;
 use tutti_graph::Node;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{DynamicEqConfig, DynamicEqNode, KeySource};
-use tutti_types::{ChannelLayout, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const FS: f64 = 48_000.0;

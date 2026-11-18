@@ -18,7 +18,7 @@ use tutti_sampler::{
     Placement, Playback, SlotId, Stream, VoiceNode, VoiceNodeHandle, VoicePool, VoiceSource,
     VoiceWindow,
 };
-use tutti_types::{Beat, Bpm, PlaybackRate, SampleRate, Samples};
+use tutti_units::{Beat, Bpm, PlaybackRate, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const RATE: SampleRate = SampleRate::of(SR);

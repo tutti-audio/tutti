@@ -58,7 +58,7 @@ use tutti_sampler::{
     ByHand, Direction, DiskStreamer, DiskStreamerConfig, MemorySource, Playback, SlotId,
     StepOutcome, Stream, Voice, VoiceNode, VoicePool, VoiceSource,
 };
-use tutti_types::{Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor};
+use tutti_units::{Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const BPM: f64 = 120.0;

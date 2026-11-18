@@ -24,7 +24,7 @@
 
 use core::f64::consts::PI;
 
-use tutti_types::{Db, Drive, Hz, Resonance, SampleRate, Samples};
+use tutti_units::{Db, Drive, Hz, Resonance, SampleRate, Samples};
 
 use super::{LadderCoeffs, LadderType};
 use crate::filter::biquad::decay_ring;
@@ -38,7 +38,7 @@ pub struct LadderControls {
     pub ty: LadderType,
     /// The cutoff.
     pub freq: Hz,
-    /// The feedback, `0..=1` (not a [`Q`](tutti_types::Q)).
+    /// The feedback, `0..=1` (not a [`Q`](tutti_units::Q)).
     pub res: Resonance,
     /// The gain into the saturator.
     pub drive: Drive,

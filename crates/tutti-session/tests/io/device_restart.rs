@@ -15,7 +15,8 @@ use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterControls, LimiterNode};
 use tutti_session::{Crossfade, Error, InPort, LiveSession, OutPort, Root, Session};
 use tutti_transport::MotionEvent;
-use tutti_types::{At, ChannelLayout, Db, Frame, Hz, MaxBlock, SampleRate, Samples, Seconds};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples, Seconds};
 
 const OLD: f64 = 44_100.0;
 const NEW: f64 = 48_000.0;

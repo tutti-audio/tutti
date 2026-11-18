@@ -19,14 +19,14 @@
 //! matter. The machine's scheduler adds spikes, so the maximum column is the
 //! minimum over the 21 passes of each pass's maximum; compare it, and the
 //! percentiles, only across interleaved runs.
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 fn main() {
     use std::hint::black_box;
     use std::time::Instant;
     use tutti_buffers::{Mono, MonoMut};
     use tutti_dsp::Convolver;
     use tutti_fixtures::signal::decay_ir;
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     println!(
         "{:>9} {:>6} {:>6} {:>9} {:>9} {:>9} {:>9} {:>9}",
@@ -74,7 +74,7 @@ fn main() {
         let len = (secs * 48_000.0) as usize;
         let ir = decay_ir(
             len,
-            tutti_types::Seconds::from_f32(secs.min(1.0)),
+            tutti_units::Seconds::from_f32(secs.min(1.0)),
             SampleRate::SR_48K,
         );
         for partition in [512usize] {
@@ -98,7 +98,7 @@ fn main() {
     ] {
         let ir = decay_ir(
             (secs * 48_000.0) as usize,
-            tutti_types::Seconds::from_f32(secs.min(1.0)),
+            tutti_units::Seconds::from_f32(secs.min(1.0)),
             SampleRate::SR_48K,
         );
         let (mean, p99, p999, max) = run(&ir, partition, &[64]);

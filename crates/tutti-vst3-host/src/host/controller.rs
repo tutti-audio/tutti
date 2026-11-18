@@ -13,7 +13,7 @@ use tutti_plugin_types::{
     ParamEdit, PluginError, PluginResult, PluginTail, Prepare, Processor, Refused, Request,
     RestartRules, SampleFormat, Samples, Stuck, Wraps,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::types::{ProcessMode, Vst3Sample};
 

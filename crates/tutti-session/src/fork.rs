@@ -19,7 +19,8 @@ use tutti_export::{Error, RenderGraph, RtLogSink, Setup};
 use tutti_graph::{
     CommitError, Editor, Executor, ForkError, ForkMode, ForkRemains, ForkTarget, PendingFork, Pool,
 };
-use tutti_types::{ChannelTopology, SampleRate};
+use tutti_types::ChannelTopology;
+use tutti_units::SampleRate;
 
 /// A fork's refusal as the export reports it: [`Error::NotForkable`] for
 /// the one a host acts on, [`Error::Fork`] for the rest.

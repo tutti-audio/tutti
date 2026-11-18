@@ -59,7 +59,7 @@ pub(crate) fn read_wave(wave: &Wave, at: usize, out: &mut [f32], channels: Chann
 mod tests {
     use super::*;
     use tutti_buffers::Interleaved;
-    use tutti_types::{SampleRate, Seconds};
+    use tutti_units::{SampleRate, Seconds};
 
     fn test_wave(samples: &[(f32, f32)]) -> Wave {
         let mut wave = Wave::new(2, SampleRate::SR_48K);

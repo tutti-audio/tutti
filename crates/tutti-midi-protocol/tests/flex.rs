@@ -4,8 +4,9 @@
 use tutti_midi_protocol::{
     flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire,
 };
-use tutti_types::{Bpm, TimeSignature};
+use tutti_types::TimeSignature;
 use tutti_ump::FlexTimeSignature as Wire;
+use tutti_units::Bpm;
 
 fn wire(numerator: u8, denominator: u8) -> Wire {
     Wire {

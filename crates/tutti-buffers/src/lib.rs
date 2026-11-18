@@ -21,7 +21,7 @@
 //!
 //! Construction checks once and returns a [`BufferError`] for a zero width, a
 //! length that is not whole frames or a ragged plane; nothing truncates. Every
-//! count is [`Samples`](tutti_types::Samples), in frames.
+//! count is [`Samples`](tutti_units::Samples), in frames.
 //!
 //! [`Source`] and [`Sink`] are the edges: a stream pulled into, or written from,
 //! an interleaved view of the implementor's format, on a clock the graph does

@@ -1,6 +1,6 @@
 use tutti_fixtures::{RangeContract, check_range_contract};
-use tutti_types::Pan;
 use tutti_ump::{CCNumber, MidiChannel, RegisteredPerNoteController, U7};
+use tutti_units::Pan;
 
 use super::super::testing::{channel, profile_table};
 use super::super::*;

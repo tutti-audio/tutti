@@ -24,8 +24,9 @@ use tutti_graph::{
     ParamSegment, Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::{At, Beat, Bpm, ChannelLayout, Frame, Latency, SampleRate, Samples, UnitParam};
+use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
+use tutti_units::{At, Beat, Bpm, Frame, Latency, SampleRate, Samples, UnitParam};
 
 const MAX_BLOCK: usize = 128;
 
@@ -61,7 +62,7 @@ struct ParamSink;
 impl Node for ParamSink {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_params(&[tutti_types::UnitParam::Cutoff, tutti_types::UnitParam::Q])
+            .with_params(&[tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -92,13 +93,13 @@ impl RampEvery {
     fn ramp(&self, v: f32) -> ParamRamp {
         match self.param {
             UnitParam::Cutoff => ParamRamp::new(
-                tutti_types::ParamKey::<tutti_types::Hz>::CUTOFF,
-                tutti_types::Hz(v),
+                tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
+                tutti_units::Hz(v),
                 Samples(20),
             ),
             _ => ParamRamp::new(
-                tutti_types::ParamKey::<tutti_types::Q>::Q,
-                tutti_types::Q(v),
+                tutti_units::ParamKey::<tutti_units::Q>::Q,
+                tutti_units::Q(v),
                 Samples(20),
             ),
         }
@@ -139,8 +140,8 @@ impl Node for RampEvery {
                         );
                         let seg = if k == 2 {
                             seg.resumed(
-                                tutti_types::SamplePosition(3.5),
-                                tutti_types::SamplePosition(41.25),
+                                tutti_units::SamplePosition(3.5),
+                                tutti_units::SamplePosition(41.25),
                             )
                         } else {
                             seg
@@ -313,11 +314,11 @@ fn build(ed: &mut Editor) {
     );
     let cut = ParamIn {
         node: NodeKey(30),
-        param: tutti_types::UnitParam::Cutoff.into(),
+        param: tutti_units::UnitParam::Cutoff.into(),
     };
     let q = ParamIn {
         node: NodeKey(30),
-        param: tutti_types::UnitParam::Q.into(),
+        param: tutti_units::UnitParam::Q.into(),
     };
     spec.connect_param(cut, ev_out(31));
     spec.connect_param(q, ev_out(32));
@@ -358,7 +359,7 @@ fn render(ed: &mut Editor, exec: &mut Executor, blocks: &[usize]) -> Vec<Vec<f32
 
 /// The param sink's two ports.
 fn sink_ports() -> [ParamIn; 2] {
-    [tutti_types::UnitParam::Cutoff, tutti_types::UnitParam::Q].map(|param| ParamIn {
+    [tutti_units::UnitParam::Cutoff, tutti_units::UnitParam::Q].map(|param| ParamIn {
         node: NodeKey(30),
         param: param.into(),
     })
@@ -793,7 +794,7 @@ fn the_executor_waits_by_its_pools_budget() {
 #[test]
 fn reporting_nodes_render_bit_identically_on_a_pool() {
     use common::{NO_REPORT, Pulse, Ringer};
-    use tutti_types::Tail;
+    use tutti_units::Tail;
     const RINGERS: [(usize, usize, Tail, u64); 3] = [
         (50, 300, Tail::Finite(Samples(1000)), 300),
         (9, 120, Tail::Finite(Samples(120)), 120),

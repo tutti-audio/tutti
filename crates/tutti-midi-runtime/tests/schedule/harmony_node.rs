@@ -17,7 +17,8 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_midi_runtime::{HarmonyControls, HarmonyNode, TimedHarmony};
-use tutti_types::{Beat, Bpm, LoopRange, SampleRate, Samples};
+use tutti_types::LoopRange;
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 

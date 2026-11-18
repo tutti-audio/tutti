@@ -4,7 +4,8 @@
 //! not a comparison with another implementation.
 
 use super::*;
-use tutti_types::{Azimuth, Bed, Direction, Elevation, Speaker, Spread};
+use tutti_types::{Bed, Speaker};
+use tutti_units::{Azimuth, Direction, Elevation, Spread};
 
 type Position = (f32, f32);
 

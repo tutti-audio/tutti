@@ -191,8 +191,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tutti_buffers::Float;
 
 use tutti_rt::{RingReader, RingWriter};
-use tutti_types::PlayReading;
-use tutti_types::{Frame, Samples, Tail};
+use tutti_units::PlayReading;
+use tutti_units::{Frame, Samples, Tail};
 
 use crate::NodeKey;
 use crate::command::CommandRx;
@@ -691,7 +691,8 @@ impl<F: Float> Executor<F> {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use tutti_types::{At, ChannelLayout, MaxBlock, SampleRate, Samples};
+    use tutti_types::{ChannelLayout, MaxBlock};
+    use tutti_units::{At, SampleRate, Samples};
 
     use super::*;
     use crate::event::EventKind;
@@ -843,7 +844,7 @@ mod tests {
         use crate::param::ParamState;
         use crate::spec::GraphSpec;
         use std::collections::BTreeMap;
-        use tutti_types::Mix;
+        use tutti_units::Mix;
 
         let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
         let (a, b, g) = (NodeKey(1), NodeKey(2), NodeKey(3));

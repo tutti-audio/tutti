@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use tutti_cpal::{DeviceId, DeviceListing};
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_session::{DeviceEvent, Session, SessionEvent};
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::SampleRate;
 
 /// **A blocked enumeration does not hold the update, and lands when it
 /// answers.** While the enumerator is blocked, updates go by and report

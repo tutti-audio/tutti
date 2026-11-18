@@ -5,7 +5,7 @@ use crate::node::{ConstantMask, Env, InPlaceMask, SilenceMask};
 use crate::{PlayClock, TransportChanges, TransportPosition};
 use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
-use tutti_types::{Frame, SampleRate};
+use tutti_units::{Frame, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -192,7 +192,7 @@ fn process_over(node: &mut InletNode, planes: usize, frames: usize, fill: f32) -
     };
     let cx = Cx {
         env: &env,
-        arrival: tutti_types::Latency::ZERO,
+        arrival: tutti_units::Latency::ZERO,
         history: crate::TransportHistory::none(),
     };
     let max = Prepare::new(RATE, MaxBlock::of(Samples(frames))).max_block();

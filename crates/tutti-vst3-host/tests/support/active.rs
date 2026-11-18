@@ -16,7 +16,7 @@ use tutti_plugin_types::{
     Control, MainThreadMarker, MaxBlock, Normalized, PluginError, Prepare, RenderMode,
     SampleFormat, SampleRate, Samples,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 use tutti_vst3_host::{
     InputEvents, Library, LoadOptions, ParameterChanges, ProcessFailed, ProcessMode,
     ProcessOutputRef, TransportInfo, Vst3Controller, Vst3Error, Vst3Loaded, Vst3Processor,

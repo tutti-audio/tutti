@@ -13,7 +13,8 @@ use tutti_buffers::{FiniteSource, InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, IntDepth, Pcm, Spec};
 use tutti_export::{EventLossPolicy, FileTarget, Rendered, write_buffers};
 use tutti_session::{DitherShape, DitherSink, DitherSpec, Recorder};
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const FRAMES: usize = 5_000;

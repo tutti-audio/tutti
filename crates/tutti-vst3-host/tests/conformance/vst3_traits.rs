@@ -16,7 +16,7 @@ use tutti_plugin_types::{
     PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, RenderMode, Request,
     RescanScope, SampleFormat, SampleRate, Samples,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 use tutti_vst3_host::host::conformance::plugin_restart_component;
 use tutti_vst3_host::{LoadOptions, ProcessorAny, Vst3Loaded};
 

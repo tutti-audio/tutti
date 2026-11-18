@@ -14,7 +14,8 @@ use tutti_graph::{
     Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
+use tutti_types::{ChannelLayout, MaxBlock};
+use tutti_units::{SampleRate, Samples, Tail};
 
 const NODE: NodeKey = NodeKey(1);
 const SRC: NodeKey = NodeKey(3);

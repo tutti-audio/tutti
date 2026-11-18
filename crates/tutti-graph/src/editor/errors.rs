@@ -1,6 +1,7 @@
 //! Why an editor call was refused.
 
-use tutti_types::{ChannelLayout, Latency, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Latency, Samples};
 
 use crate::compile::{CompileError, VerifyError};
 use crate::exec::QUEUE_CAPACITY;
@@ -51,7 +52,7 @@ pub enum CommitError {
     ///
     /// **Recovery:** it is usually a node replaced while bypassed or mixed. Set
     /// that node's mode to [`Active`](crate::NodeMode::Active)
-    /// ([`Editor::set_mode`](crate::Editor::set_mode)), its mix to [`Mix::WET`](tutti_types::Mix::WET) ([`Editor::set_mix`](crate::Editor::set_mix)),
+    /// ([`Editor::set_mode`](crate::Editor::set_mode)), its mix to [`Mix::WET`](tutti_units::Mix::WET) ([`Editor::set_mix`](crate::Editor::set_mix)),
     /// or take the lane off its mix, and commit again; or declare the node's
     /// buses so it has a pass.
     #[error("node {} is bypassed or mixed with no pass: {error}", .node.0)]

@@ -1,7 +1,8 @@
 //! [`Sweep`] and [`Stagger`]: the construction constants of a chorus or flanger, each
 //! checked where it is made.
 
-use tutti_types::{Feedback, MAX_CHANNELS, Phase, PhaseIncrement, Seconds};
+use tutti_types::MAX_CHANNELS;
+use tutti_units::{Feedback, Phase, PhaseIncrement, Seconds};
 
 use crate::MaxDelay;
 

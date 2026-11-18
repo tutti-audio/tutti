@@ -238,5 +238,5 @@ pub use tutti_plugin_types::{TransportInfo, WindowHandle};
 // `Seconds` from `get_tail_time`. Re-exported because a consumer that cannot
 // name a returned type cannot bind it — `tutti-plugin-server` depends on this
 // crate but not on `tutti-types`.
-pub use tutti_types::Samples;
-pub use tutti_types::Seconds;
+pub use tutti_units::Samples;
+pub use tutti_units::Seconds;

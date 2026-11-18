@@ -1,7 +1,7 @@
 //! What the delay and the reverbs share: a control that is not finite, and the length of a
 //! ring-out.
 
-use tutti_types::{Db, SampleRate, Seconds};
+use tutti_units::{Db, SampleRate, Seconds};
 
 /// `x` if it is finite, else `default`.
 pub(crate) fn finite_or(x: f32, default: f32) -> f32 {

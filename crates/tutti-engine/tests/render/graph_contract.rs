@@ -17,10 +17,11 @@ use tutti_graph::NodeKey;
 use tutti_graph::contract::{Latent, Pulse};
 use tutti_graph::{EventIn, EventKind, GraphBuilder, Prepare, Unforkable};
 use tutti_transport::{MotionEvent, Transport};
-use tutti_types::Latency;
+use tutti_types::ChannelLayout;
 use tutti_types::MaxBlock;
-use tutti_types::{At, Beat, ChannelLayout, Frame, SampleRate, Samples};
 use tutti_ump::MidiChannel;
+use tutti_units::Latency;
+use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 /// Frames per beat at the transport's default 120 BPM.

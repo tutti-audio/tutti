@@ -69,7 +69,8 @@
 use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Mono, Sample};
 use tutti_dsp::FrameCount;
-use tutti_types::{Amplitude, Cents, Db, Note, SampleRate, Samples, Seconds};
+use tutti_types::Note;
+use tutti_units::{Amplitude, Cents, Db, SampleRate, Samples, Seconds};
 
 use crate::convert::to_f32;
 use crate::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
@@ -77,7 +78,7 @@ use crate::silence::FiniteLevel;
 use crate::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
 use crate::{Error, Meter, Result};
 use tutti_dsp::FftScratch;
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 /// The longest YIN frame accepted. YIN allocates several buffers of about this
 /// size, so an absurd `min_freq` would otherwise ask for gigabytes.
@@ -846,7 +847,7 @@ mod tests {
     use crate::framing::Framing;
     use crate::yin::Pitch;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
-    use tutti_types::{Confidence, Hz};
+    use tutti_units::{Confidence, Hz};
 
     const RATE: f64 = 44100.0;
     const TAU: f64 = std::f64::consts::TAU;

@@ -54,7 +54,8 @@ use tutti_codec::{FileOut, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
 use tutti_tempo::TempoMap;
-use tutti_types::{At, Beat, ChannelLayout, Frame, SampleRate, Samples, Seconds};
+use tutti_types::ChannelLayout;
+use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::WorkerError;
 use crate::jobs::{Landings, Stream};
@@ -73,7 +74,7 @@ tutti_types::id! {
 ///
 /// ```
 /// use tutti_session::Punch;
-/// use tutti_types::{At, Beat};
+/// use tutti_units::{At, Beat};
 ///
 /// // Beat 16 to beat 48.
 /// let punch = Punch::at(Beat(16.0)).until(Beat(48.0)).unwrap();
@@ -1083,7 +1084,7 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::time::Instant;
-    use tutti_types::Bpm;
+    use tutti_units::Bpm;
 
     /// A sink that keeps what it is written.
     struct Keep(Arc<Mutex<Vec<f32>>>);

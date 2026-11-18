@@ -13,9 +13,9 @@
 //!
 //! # Addresses: a kind and an index
 //!
-//! A param's address is a [`UnitAddr`]: a [`UnitParam`](tutti_types::UnitParam) kind and an index among
+//! A param's address is a [`UnitAddr`]: a [`UnitParam`](tutti_units::UnitParam) kind and an index among
 //! the node's params of that kind. A node with one param of a kind adds it at
-//! index 0 (a bare [`UnitParam`](tutti_types::UnitParam) is that address); a
+//! index 0 (a bare [`UnitParam`](tutti_units::UnitParam) is that address); a
 //! node with several (a threshold per band) adds each at its own index, with
 //! the same [`ParamSetBuilder::param`]. Every method that takes an address
 //! takes `impl Into<UnitAddr>`, so `set.set(UnitParam::Cutoff, v)` stands for
@@ -35,9 +35,10 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use tutti_types::ParamCell;
+use tutti_units::UnitAddr;
 #[cfg(test)]
-use tutti_types::UnitParam;
-use tutti_types::{ParamCell, UnitAddr};
+use tutti_units::UnitParam;
 
 use crate::fork::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
 use crate::node::{IntoNode, Node, NodeParts};
@@ -97,7 +98,7 @@ impl ParamSet {
     /// thread only.
     ///
     /// A value through the set is an `f32` whatever the param's unit: a
-    /// [`Seconds`](tutti_types::Seconds) param's `f64` cell is widened on a
+    /// [`Seconds`](tutti_units::Seconds) param's `f64` cell is widened on a
     /// write and narrowed on a read ([`ParamCell`]), the modulation path's one
     /// narrowing.
     pub fn cell(&self, param: impl Into<UnitAddr>) -> Option<ParamCell> {
@@ -303,7 +304,8 @@ impl<N: ParamNode + Clone> IntoNode for Params<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::{Hz, Param, Q};
+    use tutti_types::Param;
+    use tutti_units::{Hz, Q};
 
     fn set() -> (Param<Hz>, Param<Q>, ParamSet) {
         let cutoff = Param::new(Hz(1000.0));

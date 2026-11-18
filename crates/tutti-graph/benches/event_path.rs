@@ -21,7 +21,7 @@ use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, Io, Node, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 1024;
 

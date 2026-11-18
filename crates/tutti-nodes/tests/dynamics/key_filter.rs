@@ -14,7 +14,8 @@ use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
 use tutti_nodes::{CompressorNode, GateNode, KeySource};
-use tutti_types::{BusTopology, CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
+use tutti_types::BusTopology;
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const FS: f64 = 48_000.0;

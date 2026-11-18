@@ -52,7 +52,8 @@
 //! ```rust
 //! use tutti_types::MaxBlock;
 //! use tutti_graph::{OutPort, Source};
-//! use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples, Tail};
+//! use tutti_units::{Beat, Bpm, SampleRate, Samples, Tail};
+//! use tutti_types::ChannelLayout;
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::NodeKey;
 //! use tutti_engine::Engine;

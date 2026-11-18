@@ -4,7 +4,8 @@
 use tutti_dsp::SvfType;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{EnvelopeFilterConfig, EnvelopeFilterNode};
-use tutti_types::{ChannelLayout, Hz, SampleRate, Semitones, UnitParam};
+use tutti_types::ChannelLayout;
+use tutti_units::{Hz, SampleRate, Semitones, UnitParam};
 
 fn feed(rig: &mut BlockRig) {
     for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {

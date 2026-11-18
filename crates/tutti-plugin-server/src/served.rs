@@ -28,7 +28,7 @@ use tutti_plugin_types::{
     ProcessWake, RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate, Samples, Seat,
     Stage, State, StateError, StateUse, TrackInfo,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 mod any;
 mod format;

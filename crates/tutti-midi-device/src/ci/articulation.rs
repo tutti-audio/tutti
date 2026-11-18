@@ -78,7 +78,7 @@ impl ArticulationLevel {
     }
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The number of Variations a Subclass has in a receiver, `0..=16`
     /// (M2-123 Tables 23 and 25); zero declares no sound for the Subclass.
     #[derive(Default, Eq, PartialOrd, Ord, Hash)]

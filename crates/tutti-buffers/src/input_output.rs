@@ -1,7 +1,7 @@
 //! [`InputOutput`]: one block's frame count, with input planes and output
 //! planes checked to hold it.
 
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use crate::{BufferError, Planes, PlanesMut, Sample};
 
@@ -17,7 +17,7 @@ use crate::{BufferError, Planes, PlanesMut, Sample};
 ///
 /// ```
 /// use tutti_buffers::{InputOutput, Planes, PlanesMut};
-/// use tutti_types::Samples;
+/// use tutti_units::Samples;
 ///
 /// let left = [0.5f32; 4];
 /// let input = [&left[..]];

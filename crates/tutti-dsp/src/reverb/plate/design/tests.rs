@@ -1,4 +1,4 @@
-use tutti_types::{Hz, Mix, SampleRate, Seconds};
+use tutti_units::{Hz, Mix, SampleRate, Seconds};
 
 use super::*;
 use crate::System;

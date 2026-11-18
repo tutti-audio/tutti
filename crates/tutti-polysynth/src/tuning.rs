@@ -8,8 +8,8 @@
 //! tuning offsets are what a voice is told, `tutti_voicing::Command::Start`).
 
 use tutti_midi_protocol::{KeyTable, TuningFrequency};
-use tutti_types::{Cents, Hz, Semitones};
 use tutti_ump::NoteNumber;
+use tutti_units::{Cents, Hz, Semitones};
 
 // A second copy of A440. `Note::A4_HZ` is the engine's canonical one but is
 // private to `tutti-types`, and widening its visibility is a bigger change

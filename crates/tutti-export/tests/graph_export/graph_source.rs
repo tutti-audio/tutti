@@ -27,7 +27,7 @@ use tutti_buffers::{Interleaved, Mono};
 use tutti_types::MaxBlock;
 
 use std::sync::Arc;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 use crate::support::{render_normalized_to_file, render_to_buffers, render_to_file};
 use tutti_codec::{Format, Pcm};
@@ -38,9 +38,9 @@ use tutti_nodes::testing::{Const, Osc, vbap_mix};
 use tutti_tempo::TempoMap;
 use tutti_transport::FrozenClock;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::{Amplitude, Azimuth, Beat, Bpm, Hz, SampleRate};
 use tutti_types::{Bed, ChannelLayout};
-use tutti_types::{Db, Samples};
+use tutti_units::{Amplitude, Azimuth, Beat, Bpm, Hz, SampleRate};
+use tutti_units::{Db, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -171,7 +171,7 @@ fn convolved() -> GraphBuilder {
         .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir())))
         .0;
     // Half the dry input, aligned by the latency, and half the wet: the graph's mix.
-    g.spec_mut().set_mix(conv, tutti_types::Mix::new(0.5));
+    g.spec_mut().set_mix(conv, tutti_units::Mix::new(0.5));
     g.connect(src, 0, conv, 0).pipe_output(conv);
     g
 }
@@ -644,7 +644,7 @@ struct BeatPorts;
 
 impl Node for BeatPorts {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::STEREO).with_tail(tutti_types::Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::STEREO).with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -697,7 +697,7 @@ fn placed_pool(cents: f32) -> tutti_sampler::VoicePool {
         SlotId(1),
         source,
         Playback {
-            pitch: tutti_types::Cents::new(cents),
+            pitch: tutti_units::Cents::new(cents),
             ..Default::default()
         },
     );

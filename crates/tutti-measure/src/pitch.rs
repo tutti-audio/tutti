@@ -42,7 +42,7 @@ impl PitchResult {
     }
 }
 
-use tutti_types::{Confidence, Hz};
+use tutti_units::{Confidence, Hz};
 
 use tutti_buffers::{Mono, MonoMut};
 use tutti_dsp::RealFft;
@@ -295,7 +295,7 @@ impl PitchDetector {
 mod tests {
     use super::*;
     use crate::yin::YinConfig;
-    use tutti_types::SampleRate;
+    use tutti_units::SampleRate;
 
     const SR: SampleRate = SampleRate::SR_48K;
     const N: usize = 4096;
@@ -303,9 +303,9 @@ mod tests {
     fn sine(freq: Hz, amp: f32) -> Vec<f32> {
         tutti_fixtures::signal::sine(
             freq,
-            tutti_types::Amplitude(amp),
+            tutti_units::Amplitude(amp),
             SR,
-            tutti_types::Samples(N),
+            tutti_units::Samples(N),
         )
     }
 

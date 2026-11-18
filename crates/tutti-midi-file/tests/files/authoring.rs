@@ -13,11 +13,11 @@ use tutti_midi_file::{
     FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, SmfFormat, TextKind,
     Tick, TimelineDrop, Track, TrackPart, TracksError,
 };
-use tutti_types::{Beat, Bpm};
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, SysexStatus,
     TicksPerQuarterNote, U7, Ump, Voice1, Voice2,
 };
+use tutti_units::{Beat, Bpm};
 
 const TPQ: u16 = 480;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);

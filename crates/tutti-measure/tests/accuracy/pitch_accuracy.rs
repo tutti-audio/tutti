@@ -20,7 +20,7 @@
 
 use tutti_buffers::Mono;
 use tutti_measure::{FrequencyBand, PitchEstimate, PitchHop, Result, YinConfig};
-use tutti_types::{Hz, SampleRate, Samples};
+use tutti_units::{Hz, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 

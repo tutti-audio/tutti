@@ -78,7 +78,7 @@ pub trait RenderClock: Send + Sync {
     /// count, so it is independent of the render's channel width.
     ///
     /// Call after the block has been processed, never before.
-    fn advance(&self, frames: tutti_types::Samples);
+    fn advance(&self, frames: tutti_units::Samples);
 
     /// The block about to be rendered as the graph takes it: the
     /// transport at the block's first frame, and the changes inside it. Read
@@ -148,7 +148,7 @@ pub fn render_graph<F: Float>(
     let mut done = 0;
     while done < frames {
         let (transport, changes, n) = clock.graph_piece(frames - done);
-        let piece = tutti_types::Samples(done)..tutti_types::Samples(done + n);
+        let piece = tutti_units::Samples(done)..tutti_units::Samples(done + n);
         // A graph with no inputs hands none.
         let ins = if inputs.channels() == 0 {
             Planes::default()
@@ -176,7 +176,7 @@ pub fn render_graph<F: Float>(
             &table_in[..ni],
             &mut table_out[..no],
         );
-        clock.advance(tutti_types::Samples(n));
+        clock.advance(tutti_units::Samples(n));
         done += n;
     }
 }
@@ -192,7 +192,7 @@ pub fn render_graph<F: Float>(
 pub struct FrozenClock;
 
 impl RenderClock for FrozenClock {
-    fn advance(&self, _frames: tutti_types::Samples) {}
+    fn advance(&self, _frames: tutti_units::Samples) {}
 
     /// Stopped at beat zero, every block: "this graph has no transport".
     fn graph_block(

@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use tutti_graph::NodeKey;
-use tutti_types::UnitAddr;
+use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Fail, Stageable};
 use super::error::SetRefusal;

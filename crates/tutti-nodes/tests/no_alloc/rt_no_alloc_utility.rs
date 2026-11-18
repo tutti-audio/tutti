@@ -6,7 +6,8 @@ use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
     MidSideConfig, MidSideNode, PolarityConfig, PolarityNode, StereoWidthConfig, StereoWidthNode,
 };
-use tutti_types::{ChannelIndex, ChannelLayout, SampleRate, UnitParam};
+use tutti_types::{ChannelIndex, ChannelLayout};
+use tutti_units::{SampleRate, UnitParam};
 
 /// `node` alone through `BlockRig`: an offset, asymmetric pair of channels, 16 warm-up
 /// blocks, then 2 000 blocks under `assert_no_alloc`, `between` run before each.

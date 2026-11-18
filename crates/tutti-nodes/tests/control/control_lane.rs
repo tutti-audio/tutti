@@ -23,9 +23,10 @@ use tutti_modulation::{
     PeriodPoint, Polarity, RateAnchor, SourceId, Waveform,
 };
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
-use tutti_types::{
-    AtomicF32, Beat, BeatsPerCycle, Bpm, ChannelLayout, Depth, Frame, FrameClock, Hz, ParamId,
-    ParamKey, Phase, PhaseIncrement, SampleRate, Samples, UnitParam,
+use tutti_types::{AtomicF32, ChannelLayout, FrameClock};
+use tutti_units::{
+    Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, ParamId, ParamKey, Phase, PhaseIncrement,
+    SampleRate, Samples, UnitParam,
 };
 
 const RATE: f64 = 48_000.0;

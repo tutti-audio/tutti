@@ -15,10 +15,11 @@ use tutti_graph::{
     param_parts,
 };
 use tutti_transport::TempoReader;
-use tutti_types::UnitParam;
-use tutti_types::{
-    Amplitude, Beat, BeatDuration, ChannelLayout, Param, Param64, PlaybackRate, ReadRate,
-    SamplePosition, SampleRate, Samples, SrcRatio, StretchFactor, Tail,
+use tutti_types::{ChannelLayout, Param, Param64};
+use tutti_units::UnitParam;
+use tutti_units::{
+    Amplitude, Beat, BeatDuration, PlaybackRate, ReadRate, SamplePosition, SampleRate, Samples,
+    SrcRatio, StretchFactor, Tail,
 };
 
 use super::clock::{BlockClock, Clock};
@@ -92,7 +93,7 @@ pub struct MemorySourceConfig {
     /// Varispeed. Bounded by [`PlaybackRate`]'s own constructor;
     /// [`PlaybackRate::UNITY`] is normal speed and the `Default`. Composes with
     /// the sample-rate conversion through
-    /// [`PlaybackRate::read_rate`](tutti_types::PlaybackRate::read_rate), never
+    /// [`PlaybackRate::read_rate`](tutti_units::PlaybackRate::read_rate), never
     /// by a bare multiply.
     pub speed: PlaybackRate,
     /// The loop; `None` plays once.
@@ -180,7 +181,7 @@ pub struct MemorySource {
 
     /// Varispeed — user intent, bounded by the type. Composes with
     /// [`src_ratio`](Self::src_ratio) through
-    /// [`PlaybackRate::read_rate`](tutti_types::PlaybackRate::read_rate); never
+    /// [`PlaybackRate::read_rate`](tutti_units::PlaybackRate::read_rate); never
     /// multiplied by a bare scalar.
     speed: PlaybackRate,
 
@@ -468,7 +469,7 @@ impl MemorySource {
     /// Length of the loaded wave in seconds at the *file's* own sample rate,
     /// which is not the session's unless [`src_ratio`](Self::src_ratio) is
     /// unity.
-    pub fn duration_seconds(&self) -> tutti_types::Seconds {
+    pub fn duration_seconds(&self) -> tutti_units::Seconds {
         self.wave.duration()
     }
 

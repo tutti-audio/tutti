@@ -13,7 +13,7 @@
 //! cell, and a NaN frame on the lane clamps at the aimed ceiling).
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
-use tutti_types::{Amplitude, Db};
+use tutti_units::{Amplitude, Db};
 
 /// The controls of a [`BrickwallBank`]: the ceiling.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -29,10 +29,9 @@
 //! only while `Event::midi` takes no `impl Into<Offset>` parameter and there is
 //! no `impl From<Frame> for Offset`.
 
-use tutti_types::Bpm;
-use tutti_types::{
-    At, FRAME_TOLERANCE, Frame, Latency, SampleRate, Samples, first_frame_at_or_after,
-};
+use tutti_types::{FRAME_TOLERANCE, first_frame_at_or_after};
+use tutti_units::Bpm;
+use tutti_units::{At, Frame, Latency, SampleRate, Samples};
 
 use crate::node::{Env, TransportChanges, TransportPosition};
 
@@ -57,7 +56,7 @@ use crate::node::{Env, TransportChanges, TransportPosition};
 /// ```
 /// use tutti_graph::{Env, Event, Offset};
 /// use tutti_ump::{Address, Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
-/// fn note_on_at(env: &Env, when: tutti_types::Frame) -> Option<Event> {
+/// fn note_on_at(env: &Env, when: tutti_units::Frame) -> Option<Event> {
 ///     let at: Offset = env.offset_of(when)?; // `None` outside this block
 ///     let note = Voice2::note_on(NoteNumber::of(60), NoteVelocity::CENTER);
 ///     let ump = Ump::from(Message::Midi2(Address::first(MidiChannel::FIRST), note));
@@ -88,7 +87,7 @@ impl Offset {
     ///
     /// ```
     /// use tutti_graph::Offset;
-    /// use tutti_types::Samples;
+    /// use tutti_units::Samples;
     /// const AT: Offset = Offset::of(Samples(37), Samples(128));
     /// assert_eq!(AT.get(), 37);
     /// ```
@@ -113,7 +112,7 @@ impl Offset {
     ///
     /// ```
     /// use tutti_graph::Offset;
-    /// use tutti_types::Samples;
+    /// use tutti_units::Samples;
     /// assert_eq!(Offset::clamped(37, Samples(128)).get(), 37);
     /// assert_eq!(Offset::clamped(500, Samples(128)).get(), 127);
     /// ```
@@ -484,7 +483,7 @@ impl Env {
     /// reaches before the block through the executor's
     /// [`TransportHistory`](crate::TransportHistory); there is no per-frame
     /// walk of that yet. Allocation-free.
-    pub fn for_each_beat(&self, mut f: impl FnMut(usize, tutti_types::Beat)) {
+    pub fn for_each_beat(&self, mut f: impl FnMut(usize, tutti_units::Beat)) {
         for (start, piece) in self.segments() {
             piece.for_each_piece_beat(start, &mut f);
         }
@@ -498,7 +497,7 @@ impl Env {
     /// piece on its transport's play state); `for_each_beat` is this over
     /// every piece. The piece's own changes are not read: a piece from
     /// `segments` has none.
-    pub fn for_each_piece_beat(&self, start: Offset, mut f: impl FnMut(usize, tutti_types::Beat)) {
+    pub fn for_each_piece_beat(&self, start: Offset, mut f: impl FnMut(usize, tutti_units::Beat)) {
         let t = self.transport;
         let from = start.index();
         let to = from + self.block_len.get();
@@ -679,7 +678,8 @@ impl Env {
 mod tests {
     use super::*;
     use crate::node::TransportPosition;
-    use tutti_types::{Beat, Bpm, Latency, LoopRange, SampleRate};
+    use tutti_types::LoopRange;
+    use tutti_units::{Beat, Bpm, Latency, SampleRate};
 
     /// `for_each_beat` hands every frame its beat: held while stopped,
     /// rolling from a start inside the block, and agreeing with

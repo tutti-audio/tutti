@@ -17,8 +17,8 @@ use tutti_graph::Offset;
 use tutti_midi_protocol::widen_velocity;
 use tutti_sf2::{Bank, SoundFont};
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::Samples;
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, U7};
+use tutti_units::Samples;
 
 /// Path to the committed test SoundFont.
 fn test_soundfont_path() -> PathBuf {
@@ -356,8 +356,8 @@ fn a_same_rate_reprepare_mid_stream_does_not_disturb_rendering() {
     tutti_graph::Node::prepare(
         &mut *interrupted,
         &tutti_graph::Prepare::new(
-            tutti_types::SampleRate::SR_44K1,
-            tutti_types::MaxBlock::of(tutti_types::Samples(128)),
+            tutti_units::SampleRate::SR_44K1,
+            tutti_types::MaxBlock::of(tutti_units::Samples(128)),
         ),
     );
     got.extend(render_process_blocks(

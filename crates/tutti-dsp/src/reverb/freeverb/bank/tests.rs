@@ -1,5 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{Db, Mix, Samples};
+use tutti_units::{Db, Mix, Samples};
 
 use super::*;
 use crate::TAIL_FLOOR;

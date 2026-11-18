@@ -46,7 +46,7 @@ use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, ParameterChan
 use tutti_clap_test_plugin::params_state::probe_params;
 use tutti_clap_test_plugin::{HOLE_NONE, ProcessCapture};
 use tutti_plugin_types::PluginAudio;
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 /// CLAP's `PARAM_VALUE` wire type, pinned rather than imported: it is the value
 /// the host puts on the FFI, so a failure names what the plugin actually saw.

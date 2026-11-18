@@ -1,6 +1,6 @@
 use super::*;
 
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// The plan of a job of one second at 48 kHz, trimming `latency` and keeping
 /// `tail`.

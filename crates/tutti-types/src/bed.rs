@@ -1,6 +1,7 @@
 //! [`Bed`]: the closed set of speaker layouts, positioned by ITU-R BS.2051.
 
-use crate::{Azimuth, ChannelLayout, ChannelTopology, Direction, Elevation, MAX_CHANNELS, Speaker};
+use crate::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Speaker};
+use tutti_units::{Azimuth, Direction, Elevation};
 
 /// A speaker layout of a known shape, in tutti's channel order.
 ///

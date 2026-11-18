@@ -33,7 +33,7 @@
 use core::cmp;
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{Gain, Mix, SampleRate, Seconds, Tail};
+use tutti_units::{Gain, Mix, SampleRate, Seconds, Tail};
 
 use super::design::FreeverbControls;
 use crate::delay::{ring_seconds, trips};

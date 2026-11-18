@@ -8,7 +8,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::BusStripNode;
 use tutti_session::{OutPort, Root, Session, SessionBuilder, ValueErrorKind};
-use tutti_types::{Balance, BusTopology, ChannelLayout, ChannelTopology, MaxBlock, Samples};
+use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_units::{Balance, Samples};
 
 /// Constant `values` on its output channels, declaring `out` as its bus.
 struct Src {

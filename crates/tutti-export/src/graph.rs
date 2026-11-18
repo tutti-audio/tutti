@@ -5,11 +5,12 @@
 //! resample, dither and encoders downstream see only frames.
 
 use std::sync::Arc;
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 use tutti_graph::GraphTail;
 use tutti_graph::{Editor, Executor, LogFilter, Pool, Prepare, RenderMode, RtLogReaders, RtRecord};
-use tutti_types::{ChannelTopology, MaxBlock, Samples};
+use tutti_types::{ChannelTopology, MaxBlock};
+use tutti_units::Samples;
 
 use crate::{ConfigError, Result};
 
@@ -144,7 +145,7 @@ impl Setup {
 ///
 /// ```
 /// use tutti_transport::FrozenClock;
-/// use tutti_types::{Hz, SampleRate, Samples, Seconds};
+/// use tutti_units::{Hz, SampleRate, Samples, Seconds};
 /// use tutti_export::{render_one, BufferTarget, Control, Job, Output, Produced, RenderGraph, Setup};
 /// use tutti_graph::GraphBuilder;
 /// use tutti_nodes::testing::Osc;
@@ -278,11 +279,12 @@ impl RenderGraph {
     /// would drag a graph into arithmetic that is otherwise pure:
     ///
     /// ```
-    /// # use tutti_types::{Hz, SampleRate};
+    /// # use tutti_units::{Hz, SampleRate};
     /// # use tutti_export::{Job, RenderGraph, Setup};
     /// # use tutti_graph::GraphBuilder;
     /// # use tutti_nodes::testing::Osc;
-    /// # use tutti_types::{ChannelLayout, Samples};
+    /// # use tutti_units::Samples;
+    /// # use tutti_types::ChannelLayout;
     /// # let rate = SampleRate::SR_48K;
     /// # let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     /// # let tone = g.add(Osc::sine(Hz(440.0)));
@@ -314,11 +316,12 @@ impl RenderGraph {
     /// the call site:
     ///
     /// ```
-    /// # use tutti_types::{Hz, SampleRate, Seconds};
+    /// # use tutti_units::{Hz, SampleRate, Seconds};
     /// # use tutti_export::{Job, RenderGraph, Setup};
     /// # use tutti_graph::GraphBuilder;
     /// # use tutti_nodes::testing::Osc;
-    /// # use tutti_types::{ChannelLayout, Samples};
+    /// # use tutti_units::Samples;
+    /// # use tutti_types::ChannelLayout;
     /// # let rate = SampleRate::SR_48K;
     /// # let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     /// # let tone = g.add(Osc::sine(Hz(440.0)));

@@ -16,7 +16,8 @@ use tutti_graph::{
     Renderer, Shape, Status, Unforkable, param_parts,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::{Amplitude, ChannelLayout, Param, Samples, Tail, UnitParam};
+use tutti_types::{ChannelLayout, Param};
+use tutti_units::{Amplitude, Samples, Tail, UnitParam};
 
 /// Output `c` is `base + c`, so which port feeds a channel reads straight off
 /// the render. Its `Clone` shares nothing, so it is inserted [`ForkByClone`].
@@ -925,7 +926,7 @@ struct Ramp {
 impl Node for Ramp {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_types::Tail::Unbounded)
+            .with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _p: &tutti_graph::Prepare) {}
     fn process(

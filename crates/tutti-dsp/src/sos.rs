@@ -12,7 +12,7 @@ mod bell;
 mod butterworth;
 mod tilt;
 
-use tutti_types::{Db, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::filter::{integrator_gains, section_l1};
 use crate::{Biquad, Complex64, Lti, Ring, SvfCoeffs, System, svf_step};

@@ -15,7 +15,7 @@
 //! [`MaxBlock`] the node was prepared with. A node therefore never clamps.
 
 use tutti_buffers::Float;
-use tutti_types::{Samples, Tail};
+use tutti_units::{Samples, Tail};
 
 use crate::bus::{InBus, OutBus, PortSpan};
 use crate::event::{EventWriter, SortedEvents, SubBlocks};

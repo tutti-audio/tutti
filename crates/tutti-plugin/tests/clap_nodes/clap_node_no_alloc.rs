@@ -16,7 +16,8 @@
 #![cfg(feature = "clap")]
 
 use tutti_nodes::automation::Exponent;
-use tutti_types::{Hz, MaxBlock};
+use tutti_types::MaxBlock;
+use tutti_units::Hz;
 
 use crate::clap_probe::{ProbeEnv, Rig, load_probe, render};
 use tutti_fixtures::machine_lock;
@@ -30,10 +31,10 @@ use tutti_modulation::{
     Amount, Clock, ControlProgram, Layer, LayerId, LfoShape, Polarity, Waveform,
 };
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Law, Trajectory};
-use tutti_types::{Beat, BeatsPerCycle, Bpm, Samples};
 use tutti_types::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
-use tutti_types::{Depth, ParamId, PhaseIncrement};
 use tutti_ump::{MidiChannel, U7};
+use tutti_units::{Beat, BeatsPerCycle, Bpm, Samples};
+use tutti_units::{Depth, ParamId, PhaseIncrement};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 
@@ -102,7 +103,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
     let program = ControlProgram::new(None, vec![lfo], vec![]).expect("a valid program");
     let lfo = ControlLaneNode::for_foreign(ParamId::new(77), program, Some(0.5), (0.0, 1.0));
     let prepare = tutti_graph::Prepare::new(
-        tutti_types::SampleRate::of(SAMPLE_RATE),
+        tutti_units::SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples(BLOCK)),
     )
     .with_quantum(MaxBlock::of(Samples(QUANTUM)));

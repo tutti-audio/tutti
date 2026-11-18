@@ -1,6 +1,7 @@
 //! [`Routing`]: which channel's delayed tap recirculates into which channel's line.
 
-use tutti_types::{Amplitude, BusTopology, Gain};
+use tutti_types::BusTopology;
+use tutti_units::{Amplitude, Gain};
 
 /// The widest routing: a bus's channel count.
 pub(crate) const MAX_WIDTH: usize = tutti_types::MAX_CHANNELS;
@@ -11,9 +12,9 @@ pub(crate) const MAX_WIDTH: usize = tutti_types::MAX_CHANNELS;
 ///
 /// A range-checked value: square on one bus, every
 /// weight finite and **every row's absolute sum at most 1**. With the self and cross
-/// feedback bounded as a pair ([`Feedback::stable_pair`](tutti_types::Feedback::stable_pair)),
+/// feedback bounded as a pair ([`Feedback::stable_pair`](tutti_units::Feedback::stable_pair)),
 /// that keeps each line's loop gain under
-/// [`Feedback::MAX_STABLE`](tutti_types::Feedback::MAX_STABLE) whatever the matrix says.
+/// [`Feedback::MAX_STABLE`](tutti_units::Feedback::MAX_STABLE) whatever the matrix says.
 /// [`new`](Self::new) refuses a row that sums past 1; [`normalized`](Self::normalized) is
 /// the named saturation, which scales it down. A weight that is not finite is refused by
 /// both: it would survive the scaling (`inf / inf` is NaN) and poison the loop it feeds

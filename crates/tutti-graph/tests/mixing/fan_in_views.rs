@@ -18,7 +18,8 @@ use tutti_graph::{
     Edge, Feed, FeedbackFrom, InPort, InputDelay, Node, NodeKey, NodeSpec, OutPort, OutputDelay,
     Reference, Source, Topology, TransportPosition, delays, graph_tail, latency_plan,
 };
-use tutti_types::{ChannelLayout, SampleRate, Samples, Tail};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples, Tail};
 
 const BLOCK: usize = 64;
 

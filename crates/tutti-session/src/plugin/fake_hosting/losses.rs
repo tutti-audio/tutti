@@ -11,8 +11,9 @@ use tutti_nodes::testing::Const;
 use tutti_plugin_host::{ParamDelivery, PluginControls, PluginHandle};
 use tutti_plugin_types::PluginTail;
 use tutti_plugin_types::fake::FakePlugin;
-use tutti_types::ParamId;
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::ParamId;
+use tutti_units::{SampleRate, Samples};
 
 use super::{Inert, host};
 use crate::{DetachedSession, Session};

@@ -2,7 +2,7 @@
 //! out from each law's closed form.
 
 use crate::Exponent;
-use tutti_types::{Beat, Bipolar, Hz};
+use tutti_units::{Beat, Bipolar, Hz};
 
 use super::{Breakpoint, Trajectory};
 use crate::Law;

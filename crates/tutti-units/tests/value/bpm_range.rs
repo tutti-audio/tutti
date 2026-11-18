@@ -3,7 +3,7 @@
 #![cfg(feature = "serde")]
 
 use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
-use tutti_types::{Bpm, BpmOutOfRange};
+use tutti_units::{Bpm, BpmOutOfRange};
 
 /// A tempo is finite and above zero, with no musical floor or ceiling.
 #[test]

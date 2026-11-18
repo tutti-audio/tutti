@@ -3,7 +3,7 @@
 #![cfg(feature = "serde")]
 
 use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
-use tutti_types::{SampleRate, SampleRateOutOfRange};
+use tutti_units::{SampleRate, SampleRateOutOfRange};
 
 /// A rate is finite and above zero, with no audible floor or ceiling: that is
 /// the whole rule, and every consumer that wants a narrower one states it.

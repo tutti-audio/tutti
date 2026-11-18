@@ -4,7 +4,8 @@
 use tutti_buffers::InterleavedMut;
 use tutti_session::Session;
 use tutti_tempo::{TempoMap, TempoPoint};
-use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate};
+use tutti_types::ChannelLayout;
+use tutti_units::{Beat, Bpm, SampleRate};
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 512;

@@ -7,7 +7,7 @@
 //! constructor then refuses what no render can be, so the code after it never
 //! re-checks.
 
-use tutti_types::{SampleRate, Samples};
+use tutti_units::{SampleRate, Samples};
 
 /// What a render does when the graph it renders dropped events
 /// ([`Job::event_loss`]).

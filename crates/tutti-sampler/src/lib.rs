@@ -52,7 +52,7 @@
 //! ```rust
 //! use tutti_types::MaxBlock;
 //! use std::sync::Arc;
-//! use tutti_types::{SampleRate, Samples};
+//! use tutti_units::{SampleRate, Samples};
 //! use tutti_graph::{Prepare, Solo};
 //! use tutti_buffers::Interleaved;
 //! use tutti_sampler::{MemorySource, Wave};

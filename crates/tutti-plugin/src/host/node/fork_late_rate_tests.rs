@@ -14,7 +14,8 @@ use tutti_buffers::Planes;
 use tutti_types::MaxBlock;
 
 use tutti_graph::{ForkMode, GraphBuilder, Prepare, Renderer};
-use tutti_types::{ChannelLayout, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{SampleRate, Samples};
 
 use crate::PluginClient;
 use tutti_fixtures::machine_lock;
@@ -77,7 +78,7 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
     let fork = live
         .fork_instance(
             ForkMode::Offline,
-            tutti_transport::TempoReader::constant(tutti_types::Bpm::of(120.0)).expect("a tempo"),
+            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
     let bridge = fork.bridge();

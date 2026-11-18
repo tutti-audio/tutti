@@ -3,7 +3,7 @@
 //! The gain-computation curves live here rather than in any one processor, so
 //! a compressor and a gate pin silence at the same floor.
 
-use tutti_types::{Amplitude, CompressionRatio, Db};
+use tutti_units::{Amplitude, CompressionRatio, Db};
 
 /// Amplitude as decibels, for the dynamics detectors.
 ///

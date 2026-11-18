@@ -1,7 +1,7 @@
 use super::*;
 use tutti_curve::Breakpoint;
 use tutti_curve::Exponent;
-use tutti_types::Mix;
+use tutti_units::Mix;
 
 fn trajectory() -> Trajectory<Mix> {
     let mut e = Trajectory::new();

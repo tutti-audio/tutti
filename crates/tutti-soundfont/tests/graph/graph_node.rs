@@ -18,8 +18,8 @@ use tutti_midi_protocol::widen_velocity;
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::{Beat, Bpm, SampleRate, Samples};
 use tutti_ump::{MidiChannel, U7};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const BLOCK: usize = 256;
 

@@ -14,7 +14,7 @@
 //! `Hz` or `Db` there would be two names for one behaviour.
 
 use crate::ParamRange;
-use tutti_types::{
+use tutti_units::{
     Amplitude, ArcDegrees, BeatDuration, Bpm, Cents, Db, Hz, Mix, Pan, PlaybackRate, Seconds,
     Semitones,
 };
@@ -290,7 +290,7 @@ impl PlainUnit for BeatDuration {
 mod tests {
     use super::*;
     use crate::ParameterInfo;
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     fn plain(min: f64, max: f64) -> ParamRange {
         ParamRange::Plain {

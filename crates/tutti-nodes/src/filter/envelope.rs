@@ -3,9 +3,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, SvfType};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{
-    BusTopology, ChannelLayout, Hz, MaxBlock, Q, SampleRate, Seconds, Semitones, Tail,
-};
+use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, Tail};
 
 use super::filter_bus;
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

@@ -29,8 +29,8 @@ use tutti_plugin_types::{
     ContentScale, Control, Controller, EditorWindow, KeyEvent, KeyUse, ModifierConvention,
     Normalized, ParamEdit, Request,
 };
-use tutti_types::ParamId;
 use tutti_ump::MidiChannel;
+use tutti_units::ParamId;
 use tutti_vst2_host::{Samples, TimeSignature, TransportInfo, Vst2Loaded, Vst2ProcessContext};
 use tutti_vst2_test_plugin::ProcessCapture;
 
@@ -835,9 +835,9 @@ fn a_later_piece_sees_the_transport_advanced() {
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_beat(tutti_types::Beat(4.0))
+        .with_beat(tutti_units::Beat(4.0))
         .with_position_samples(1_000)
-        .with_tempo(tutti_types::Bpm::of(120.0))
+        .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default());
     render_f32(&mut instance, 200, &[], Some(&transport), 0.0);
 
@@ -865,11 +865,11 @@ fn a_bar_line_in_a_later_piece_moves_the_bar_start() {
     let mut instance = load(BLOCK);
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_beat(tutti_types::Beat(3.995))
+        .with_beat(tutti_units::Beat(3.995))
         .with_position_samples(1_000)
-        .with_tempo(tutti_types::Bpm::of(120.0))
+        .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default())
-        .with_bar(tutti_types::Beat(0.0), Default::default());
+        .with_bar(tutti_units::Beat(0.0), Default::default());
     render_f32(&mut instance, 200, &[], Some(&transport), 0.0);
     let cap = read_capture();
     assert_eq!(cap.time_bar_start_pos, 4.0);

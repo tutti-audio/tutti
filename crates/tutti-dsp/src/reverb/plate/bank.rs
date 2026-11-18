@@ -24,7 +24,8 @@
 //! **Format.** The state is `f32`; a view of another [`Float`] is converted at the edges.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{Gain, Hz, MAX_CHANNELS, SampleRate, Seconds, Tail};
+use tutti_types::MAX_CHANNELS;
+use tutti_units::{Gain, Hz, SampleRate, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};
 use crate::reverb::network::{Absorption, Network, Stage};
@@ -256,7 +257,7 @@ impl PlateBank {
         let mut network = Box::new(Network::new(rate));
         let worst = PlateControls {
             pre_delay: crate::reverb::fdn::design::MAX_PRE_DELAY,
-            modulation: tutti_types::Depth::of(1.0),
+            modulation: tutti_units::Depth::of(1.0),
             ..PlateControls::DEFAULT
         };
         worst.design_into(rate, &mut network);
@@ -531,7 +532,7 @@ fn bandwidth_ring(cutoff: Hz, rate: SampleRate) -> Seconds {
 
 /// The lengths and fixed coefficients of the design in `network`.
 fn shape_of(network: &Network) -> Shape {
-    let frames = |s: tutti_types::SampleSpan| s.get() as usize;
+    let frames = |s: tutti_units::SampleSpan| s.get() as usize;
     let mut input = [1; 4];
     for (slot, stage) in input.iter_mut().zip(network.stages.iter()) {
         if let Stage::AllPass(a) = stage {

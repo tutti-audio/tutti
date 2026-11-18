@@ -12,7 +12,8 @@ use tutti_rt::LockExt;
 use tutti_session::{
     Error, InPort, LiveSession, OutPort, Root, Session, SessionEvent, SystemSession,
 };
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 480;
 

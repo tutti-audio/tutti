@@ -1,6 +1,6 @@
 //! [`Tail`] — how long a node keeps producing after its input stops.
 
-use crate::value::{SampleRate, Samples, Seconds};
+use crate::{SampleRate, Samples, Seconds};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -79,7 +79,7 @@ use serde::{Deserialize, Serialize};
 /// # Examples
 ///
 /// ```
-/// use tutti_types::{Samples, Tail};
+/// use tutti_units::{Samples, Tail};
 ///
 /// let delay = Tail::Finite(Samples(24_000));
 /// let reverb = Tail::Finite(Samples(96_000));

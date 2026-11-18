@@ -10,8 +10,8 @@
 //! nothing; an application binds it. [`DrumNoteMapLevel::enabled_on`] says
 //! whether a peer has the Profile enabled on a channel.
 
-use tutti_types::Pan;
 use tutti_ump::{CCNumber, MidiChannel, RegisteredPerNoteController, U7};
+use tutti_units::Pan;
 
 use super::{CiDeviceId, InquiryTarget, ProfileId, ProfileState, ProfileTable, StandardProfile};
 
@@ -57,7 +57,7 @@ impl DrumNoteMapLevel {
     }
 }
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// A Mutually Exclusive Set (M2-125 §4.1), numbered `1..=7` as Table 5
     /// numbers them: when any sound of a set starts, the other sounds of the
     /// same set are muted.

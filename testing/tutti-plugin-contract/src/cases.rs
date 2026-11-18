@@ -1023,8 +1023,8 @@ pub fn arrival_is_ordered_and_sized<F: Format>() {
 fn transport(playing: bool, tempo: f64, beat: f64) -> TransportInfo {
     TransportInfo::new(tutti_plugin_types::SampleRate::of(RATE))
         .with_playing(playing)
-        .with_tempo(tutti_types::Bpm::of(tempo))
-        .with_beat(tutti_types::Beat(beat))
+        .with_tempo(tutti_units::Bpm::of(tempo))
+        .with_beat(tutti_units::Beat(beat))
 }
 
 /// Each block's transport reaches the plugin at its first frame, as the host

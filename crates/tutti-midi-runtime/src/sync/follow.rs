@@ -116,8 +116,8 @@
 //!   no position until the pieces ascend again, when it locks afresh.
 
 use tutti_midi_protocol::{Addressed, Read, SmpteFrameRate, SmpteTimecode, Universal, read};
-use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{Message, SysexAssembler, SysexStep, System, Ump};
+use tutti_units::{Beat, Bpm, Seconds};
 
 use super::{ClockTransportState, MidiClockDecoder, MtcDecoder, MtcDirection};
 
@@ -207,7 +207,7 @@ pub enum ClockOffset {
 ///
 /// ```
 /// use tutti_midi_runtime::{ClockEvent, ClockFollower, ClockKind};
-/// use tutti_types::{Bpm, Seconds};
+/// use tutti_units::{Bpm, Seconds};
 /// use tutti_ump::{Message, MidiGroup, System, Ump};
 ///
 /// let mut follower = ClockFollower::new(ClockKind::BeatClock);

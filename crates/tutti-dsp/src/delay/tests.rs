@@ -109,7 +109,7 @@ fn the_two_readers_agree_on_a_whole_delay() {
 /// and -120 dB 19.93 (20); a loop gain of 0 never echoes.
 #[test]
 fn trips_count_the_echoes_to_the_floor_in_decibels() {
-    use tutti_types::Db;
+    use tutti_units::Db;
     assert_eq!(taps::trips(0.5, Db(-60.0)), 10.0);
     assert_eq!(taps::trips(0.5, Db(-90.0)), 15.0);
     assert_eq!(taps::trips(0.5, Db(-120.0)), 20.0);

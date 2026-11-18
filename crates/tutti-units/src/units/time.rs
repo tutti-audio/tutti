@@ -90,7 +90,7 @@ impl Seconds {
     /// `Seconds` from it and signs it by direction.
     ///
     /// ```
-    /// use tutti_types::{SampleRate, Seconds};
+    /// use tutti_units::{SampleRate, Seconds};
     /// assert_eq!(Seconds::new(-0.5).to_frame_offset(SampleRate::SR_48K), -24_000);
     /// ```
     #[inline]
@@ -388,85 +388,6 @@ impl From<SampleRate> for f64 {
     #[inline]
     fn from(rate: SampleRate) -> f64 {
         rate.0
-    }
-}
-
-/// A [`SampleRate`] another thread reads: one atomic word, the rate's bits.
-///
-/// Only a `SampleRate` is stored, so a load answers a `SampleRate` with no
-/// check and no fallback: the cell cannot hold a non-rate. `Relaxed` suffices
-/// where the rate only sizes something; the caller names the ordering it needs
-/// otherwise.
-#[derive(Debug)]
-pub struct AtomicSampleRate(core::sync::atomic::AtomicU64);
-
-impl AtomicSampleRate {
-    /// A cell holding `rate`.
-    #[must_use]
-    pub const fn new(rate: SampleRate) -> Self {
-        Self(core::sync::atomic::AtomicU64::new(rate.0.to_bits()))
-    }
-
-    /// The rate in the cell.
-    #[inline]
-    #[must_use]
-    pub fn load(&self, order: core::sync::atomic::Ordering) -> SampleRate {
-        // Only `new` and `store` write the cell, each from a `SampleRate`.
-        SampleRate(f64::from_bits(self.0.load(order)))
-    }
-
-    /// Replaces the rate in the cell.
-    #[inline]
-    pub fn store(&self, rate: SampleRate, order: core::sync::atomic::Ordering) {
-        self.0.store(rate.0.to_bits(), order);
-    }
-
-    /// Replaces the rate in the cell and answers the one it held.
-    #[inline]
-    pub fn swap(&self, rate: SampleRate, order: core::sync::atomic::Ordering) -> SampleRate {
-        SampleRate(f64::from_bits(self.0.swap(rate.0.to_bits(), order)))
-    }
-}
-
-/// A [`SampleRate`] one thread leaves for another to take: an
-/// [`AtomicSampleRate`] that can also be empty.
-///
-/// Empty is the bit pattern of `0.0`, which no `SampleRate` has, so a parked
-/// rate is never read as empty and the cell is one lock-free word. Parking over
-/// a rate nobody took replaces it: the taker only needs the latest.
-#[derive(Default)]
-pub struct ParkedSampleRate(core::sync::atomic::AtomicU64);
-
-impl core::fmt::Debug for ParkedSampleRate {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let bits = self.0.load(core::sync::atomic::Ordering::Relaxed);
-        let parked = (bits != 0).then(|| SampleRate(f64::from_bits(bits)));
-        f.debug_tuple("ParkedSampleRate").field(&parked).finish()
-    }
-}
-
-impl ParkedSampleRate {
-    /// A cell with nothing parked.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self(core::sync::atomic::AtomicU64::new(0))
-    }
-
-    /// Parks `rate`, replacing one that was not taken.
-    #[inline]
-    pub fn park(&self, rate: SampleRate, order: core::sync::atomic::Ordering) {
-        self.0.store(rate.0.to_bits(), order);
-    }
-
-    /// Takes the parked rate, leaving the cell empty; `None` when nothing is
-    /// parked.
-    #[inline]
-    pub fn take(&self, order: core::sync::atomic::Ordering) -> Option<SampleRate> {
-        match self.0.swap(0, order) {
-            0 => None,
-            // Only `park` writes a nonzero word, from a `SampleRate`.
-            bits => Some(SampleRate(f64::from_bits(bits))),
-        }
     }
 }
 

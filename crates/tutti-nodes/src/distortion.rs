@@ -6,9 +6,8 @@ use tutti_dsp::{
     ShapeKind, WaveshaperBank, WaveshaperControls,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{
-    BusTopology, ChannelLayout, Drive, MAX_CHANNELS, MaxBlock, SampleRate, Samples, Tail,
-};
+use tutti_types::{BusTopology, ChannelLayout, MAX_CHANNELS, MaxBlock};
+use tutti_units::{Drive, SampleRate, Samples, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
@@ -374,7 +373,7 @@ mod tests {
     };
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::UnitParam;
+    use tutti_units::UnitParam;
 
     const KINDS: [ShapeKind; 6] = [
         ShapeKind::Tanh,

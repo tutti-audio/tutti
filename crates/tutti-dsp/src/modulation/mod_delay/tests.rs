@@ -1,7 +1,6 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{
-    BusTopology, Feedback, Gain, Hz, PhaseIncrement, SampleRate, SampleSpan, Seconds,
-};
+use tutti_types::BusTopology;
+use tutti_units::{Feedback, Gain, Hz, PhaseIncrement, SampleRate, SampleSpan, Seconds};
 
 use super::*;
 use crate::{DELAY_SLEW, Steps};

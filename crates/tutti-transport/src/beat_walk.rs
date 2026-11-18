@@ -4,9 +4,10 @@
 #[cfg(test)]
 mod tests {
     use tutti_graph::{Env, TransportChanges, TransportPosition};
-    use tutti_types::Beat;
-    use tutti_types::Frame;
-    use tutti_types::{Bpm, FrameClock, SampleRate, Samples};
+    use tutti_types::FrameClock;
+    use tutti_units::Beat;
+    use tutti_units::Frame;
+    use tutti_units::{Bpm, SampleRate, Samples};
 
     const SR: SampleRate = SampleRate::SR_48K;
 

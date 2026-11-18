@@ -1,4 +1,4 @@
-use tutti_types::{SampleRate, Samples, Seconds};
+use tutti_units::{SampleRate, Samples, Seconds};
 
 use crate::Law;
 

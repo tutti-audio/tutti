@@ -1,114 +1,69 @@
 #![doc = include_str!("../README.md")]
-//! Typed quantities and shapes shared by every engine crate: unit newtypes and
-//! channel layouts.
+//! The shapes and cells shared by every engine crate: channel layouts, musical
+//! time, notes and the atomic parameter cell, over the unit newtypes of
+//! `tutti-units`.
 //!
 //! ## What this is
 //!
 //! The common definitions every other Tutti crate shares rather than duplicating.
-//! Use it directly when you need only the vocabulary (a crate that only needs
-//! `Beat`); otherwise reach it through the
-//! `tutti` umbrella, which re-exports it as `tutti::types`. What is in it:
+//! Use it directly when you need only the vocabulary; otherwise reach it through
+//! the `tutti` umbrella, which re-exports it as `tutti::types`. What is in it:
 //!
-//! - **`value`** — what a parameter *is* and how it is carried: the `Unit` marker
-//!   trait, the measurement newtypes (`Hz`, `Seconds`, `Db`, `Beat`, `Bpm`,
-//!   `Samples`, …), and the atomic `Param<U>` cell that holds one.
-//! - **Channels** — `ChannelLayout`, a `u16` channel count with named constants
+//! - **`value`**: what a parameter is and how it is carried: the atomic
+//!   `Param<U>` cell that holds a unit, `AtomicSampleRate`, `Note` and `Adsr`,
+//!   and the frame clock (`FrameClock`, `LoopRange`, `TimelineSegment`) that
+//!   places beats on frames.
+//! - **Channels**: `ChannelLayout`, a `u16` channel count with named constants
 //!   (`MONO`, `STEREO`, ...): the one answer to "how many channels?" that every
 //!   subsystem shares instead of a bare integer. `ChannelTopology` + `Speaker`
 //!   answer the *different* question of which speaker each channel feeds; distinct
 //!   questions, so distinct types.
-//! - **Ids** — `Mint`, a lock-free counter of unique non-zero numbers from 1, and
+//! - **Ids**: `Mint`, a lock-free counter of unique non-zero numbers from 1, and
 //!   `id!`, the macro that writes an id type minted from one.
-//! - **`meter`** — musical meter: `TimeSignature`, the `MeterMap` timeline of
+//! - **`meter`**: musical meter: `TimeSignature`, the `MeterMap` timeline of
 //!   changes, and the `Meter` trait that turns a `Beat` into a bar and beat. Pure
 //!   musical math, so it layers *over* a transport rather than living inside one.
 //!
-//! **The root is the API.** The common names are re-exported there, so
-//! `tutti_types::Bpm` and `tutti_types::Samples` resolve directly — import from the
-//! root. Two of the modules are
-//! public (`value`, `meter`), because each holds items the root does not
-//! re-export; the others (`bus`, `channels`, `topology`)
-//! are private and fully re-exported. The graph as a value (`Topology`), the
-//! latency pass and the tail fold are `tutti-graph`'s.
+//! The unit newtypes themselves (`Hz`, `Seconds`, `Db`, `Beat`, `Samples`, ...)
+//! and `ranged!` are `tutti-units`'; name that crate for them.
+//!
+//! **The root is the API.** Every name is re-exported there, so
+//! `tutti_types::ChannelLayout` resolves directly: import from the root, the
+//! modules are private. The graph as a value (`Topology`), the latency pass and
+//! the tail fold are `tutti-graph`'s.
 //!
 //! ## What this crate does not own
 //!
-//! Anything that renders, decodes, or opens a device. It is the **root leaf** —
-//! Engine-free, depending on no workspace crate (its outside
-//! dependencies are `atomic_float`, `libm` and `thiserror`, plus `serde`
-//! behind its feature), `no_std` with `alloc`, and `#![forbid(unsafe_code)]`. The lock-free and `unsafe`
+//! Anything that renders, decodes, or opens a device. It is engine-free: it names
+//! only `tutti-units` among the workspace crates (its outside dependencies are
+//! `atomic_float`, `libm` and `thiserror`, plus `serde` behind its feature),
+//! `no_std` with `alloc`, and `#![forbid(unsafe_code)]`. The lock-free and `unsafe`
 //! runtime primitives, the graph runtime, the engine, the device and the file
 //! codecs are other crates'. The exception is `Mint`, a bare atomic counter:
 //! it has no protocol to model, like `Param` and `AtomicSampleRate`, so it
-//! needs no loom model and sits with the vocabulary. One consequence makes the
-//! split load-bearing:
+//! needs no loom model and sits with the vocabulary.
 //!
-//! - Unit newtypes are **mandatory** across the engine, so their home has to be
-//!   reachable from everywhere. A crate that only needs `Beat` gets `Beat` and
-//!   nothing else.
-//!
-//! ## Example — the measurement vocabulary
-//!
-//! This crate depends on no other engine crate, so there is nothing to integrate
-//! with: what a consumer meets first is the units. Cross a family boundary with the
-//! **named converter**, never with arithmetic on the inner float.
+//! ## Example: a layout and a bar position
 //!
 //! ```rust
-//! use tutti_types::{Cents, Db, SampleRate, Samples, Seconds, Semitones};
+//! use tutti_types::{BeatsPerBar, ChannelLayout, Meter, TimeSignature};
+//! use tutti_units::{BarNumber, Beat};
 //!
-//! // dB → linear gain. `Db` is logarithmic, so this is a conversion, not a cast.
-//! let trim = Db(-6.0);
-//! assert!((trim.to_amplitude().get() - 0.501_187).abs() < 1e-5);
+//! assert_eq!(ChannelLayout::STEREO.count(), 2);
 //!
-//! // Cascaded gain stages ADD in dB — that operator is opted in because it
-//! // means something. Multiplication is NOT: scaling the dB value squares the
-//! // amplitude, so `trim * 2.0` would be a quarter of the signal, not half of
-//! // it. `Db` has no `Mul`; a factor of two lives in the amplitude domain.
-//! assert_eq!(trim + trim, Db(-12.0));
-//! let quartered = Db(-12.0).to_amplitude().get();
-//! let squared = trim.to_amplitude().get() * trim.to_amplitude().get();
-//! assert!((quartered - squared).abs() < 1e-6);
-//!
-//! // Seconds → frames. The rounding is IN THE NAME because allocating a delay
-//! // line and counting elapsed frames want different answers from one span.
-//! let rate = SampleRate::SR_48K;
-//! let block = Seconds(0.010_51); // 504.48 frames
-//! assert_eq!(block.to_samples_floor(rate), Samples(504)); // frames elapsed
-//! assert_eq!(block.to_samples_ceil(rate), Samples(505)); // frames to allocate
-//!
-//! // Pitch offsets convert too — `cents.get() / 100.0` would compile and return
-//! // `Cents`, a value wrong by 100x whose type claims it is fine.
-//! assert_eq!(Cents(1200.0).to_semitones(), Semitones(12.0));
+//! // In 4/4, beat 8.0 of the timeline opens the third bar.
+//! let pos = TimeSignature::of(4, 4).bar_at(Beat(8.0));
+//! assert_eq!(pos.bar, BarNumber(3));
+//! assert_eq!(pos.beat, BeatsPerBar::of(1));
 //! ```
-//!
-//! ## Units are labels
-//!
-//! A unit is a name on a float, not a validated value: `Pan(5.0)` builds. The
-//! range a type documents is what its `new_clamped` or wrap produces, and
-//! `new_clamped` passes NaN through (see the `units` module docs). The types that
-//! do validate are `SampleRate`, `Bpm`, `Depth`, `Bipolar`, `LoopRange`, `BeatsPerBar`,
-//! `NoteValue` and `MeterMap`.
-//! `SampleRate::new` (finite and above zero), `LoopRange::new`, `BeatsPerBar::new` and `NoteValue::new` return `None` for a
-//! raw they cannot hold (`BeatsPerBar::clamped` is the one named saturation);
-//! `MeterMap::new` repairs its list (drops non-finite beats, sorts, dedups).
-//!
-//! ## Operators are opt-in, and every omission is deliberate
-//!
-//! A unit gets exactly the algebra it has. `Db * 2.0`, `Beat + Beat` and
-//! `Azimuth: Ord` do not exist, because each would compile and mean the wrong
-//! thing (a squared amplitude, two positions added with no origin, an ordering
-//! on a circle). Each type's docs name what it omits and the named method that
-//! replaces it, so the answer to a missing operator is always a method, never an
-//! escape to raw `f32`.
 //!
 //! ## Features
 //!
 //! Off by default (`default = []`).
 //!
-//! - `serde` — `Serialize`/`Deserialize` on the wire- and document-carried types:
-//!   the unit newtypes, `Samples`, `Resyncs`, `Frame`, `Note`, `Latency`, `Tail`,
-//!   `ChannelLayout`, `ChannelTopology` and the meter vocabulary. Not `Param`,
-//!   `UnitParam` or `LoopRange`.
+//! - `serde`: `Serialize`/`Deserialize` on the wire- and document-carried types:
+//!   `Note`, `ChannelLayout`, `ChannelTopology` and the meter vocabulary, and
+//!   `tutti-units`' `serde` with them. Not `Param` or `LoopRange`.
 // Catches a doc comment attached to the wrong item (say, an `impl Debug` right
 // below a struct), which leaves the type undocumented in rustdoc while it looks
 // documented in the source. Nothing else catches that.
@@ -119,26 +74,12 @@
 
 extern crate alloc;
 
-// `value` is declared first and `#[macro_use]`d so `unit!`, the macro that
-// defines every quantity, is in scope for the modules below — `macro_rules!`
-// are textually scoped, so a module declared *before* the one defining them
-// cannot see them.
-//
-// The macro stays crate-private rather than `#[macro_export]`ed: a name as
-// generic as `unit!` would sit permanently at the root of a published crate,
-// un-renameable and un-feature-gateable.
-#[macro_use]
-mod value;
-
-// `ranged!` is `#[macro_export]`ed: it is the one way any crate writes a
-// range-checked type, used as `tutti_types::ranged!`.
-mod maths;
-mod ranged;
-
-// `id!` is `#[macro_export]`ed for the same reason: the one way any crate
-// writes an id, used as `tutti_types::id!`.
+// `id!` is `#[macro_export]`ed: the one way any crate writes an id, used as
+// `tutti_types::id!`.
 mod id;
 mod mint;
+
+mod value;
 
 // Private: everything public in these is re-exported at the root below, so the
 // module path would be a second name for a type that already has one.
@@ -160,16 +101,8 @@ pub use mint::Mint;
 
 // Value vocabulary.
 pub use value::{
-    Adsr, Amplitude, ArcDegrees, At, AtomicSampleRate, Azimuth, Balance, Ballistics, Beat,
-    BeatDuration, BeatsPerCycle, BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth,
-    Bpm, BpmOutOfRange, Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence,
-    Correlation, Db, Depth, DepthOutOfRange, Direction, Drive, Elevation, Feedback, Frame, Gain,
-    HoldFactor, Hz, InvalidMaxBlock, Latency, MaxBlock, Mix, Moment, NotOnMidiScale, Note,
-    NoteNumberOutOfRange, Pan, Param, Param64, ParamAddr, ParamCell, ParamId, ParamKey, ParamRaw,
-    ParkedSampleRate, Phase, PhaseIncrement, PitchClass, PlayReading, PlaybackRate, Q, Radians,
-    ReadRate, Resonance, Resyncs, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
-    SampleSpanOutOfRange, Samples, Seconds, Semitones, Spread, SrcRatio, StereoBalance,
-    StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+    Adsr, AtomicSampleRate, InvalidMaxBlock, MaxBlock, NotOnMidiScale, Note, NoteNumberOutOfRange,
+    Param, Param64, ParamCell, ParamRaw, ParkedSampleRate, PitchClass,
 };
 
 // The frame is the source of truth for time: the one frame↔beat conversion,
@@ -179,7 +112,6 @@ pub use value::{
     TimelineSegment, beats_per_sample, first_frame_at_or_after, frames_per_beat,
     snap_to_whole_frame,
 };
-
 // Channel layout — how many channels.
 pub use bus::{BusTooWide, BusTopology};
 pub use channels::{
@@ -197,7 +129,6 @@ pub use topology::{ChannelTopology, Placement, Speaker, Speakers, TopologyError}
 
 // Musical meter.
 pub use meter::{
-    BarCount, BarNumber, BarPosition, BeatsPerBar, InvalidBeatsPerBar, InvalidNoteValue,
-    MAX_BEATS_PER_BAR, MAX_NOTE_VALUE, MIN_NOTE_VALUE, Meter, MeterChange, MeterMap, NoteValue,
-    TimeSignature,
+    BarPosition, BeatsPerBar, InvalidBeatsPerBar, InvalidNoteValue, MAX_BEATS_PER_BAR,
+    MAX_NOTE_VALUE, MIN_NOTE_VALUE, Meter, MeterChange, MeterMap, NoteValue, TimeSignature,
 };

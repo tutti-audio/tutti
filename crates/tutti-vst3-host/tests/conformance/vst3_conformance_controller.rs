@@ -10,8 +10,8 @@ use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 use tutti_fixtures::main_thread;
 use tutti_graph::Offset;
-use tutti_types::Samples;
 use tutti_ump::{CCNumber, MidiChannel};
+use tutti_units::Samples;
 use tutti_vst3_host::{InputEvents, PrefetchSupport, TransportInfo};
 
 /// A block longer than any offset these tests place an event at.

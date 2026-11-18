@@ -19,7 +19,7 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoicePool, VoiceSource, Wave};
-use tutti_types::{Beat, Bpm, SampleRate, Samples, StretchFactor};
+use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const BPM: f64 = 120.0;

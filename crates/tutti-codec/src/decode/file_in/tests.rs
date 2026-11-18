@@ -4,7 +4,7 @@ use crate::{DecodeError, read_wave};
 use symphonia::core::errors::Error;
 use tutti_buffers::{Interleaved, Sample, Wave};
 use tutti_buffers::{InterleavedMut, Stop};
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 /// One pull of `src` into `buf`, viewed at the source's own width.
 fn pull_into<S: Source<Sample = f32>>(src: &mut S, buf: &mut [f32]) -> Pull {

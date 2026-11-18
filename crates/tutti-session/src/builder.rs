@@ -9,7 +9,8 @@ use tutti_graph::PrerollTable;
 use tutti_nodes::{ClickNode, ClickSettings};
 use tutti_transport::Transport;
 use tutti_types::MAX_CHANNELS;
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_units::{SampleRate, Samples};
 
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
 use crate::{Clock, Offline, OfflineSession, Result, Session, SystemClock};
@@ -43,7 +44,8 @@ use tutti_engine::BlockDates;
 /// set the same way on every clock.
 ///
 /// ```
-/// use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+/// use tutti_units::{SampleRate, Samples};
+/// use tutti_types::{ChannelLayout, MaxBlock};
 /// use tutti_session::{Session, Workers};
 ///
 /// let session = Session::builder()
@@ -320,7 +322,7 @@ impl SessionBuilder<Offline> {
     ///
     /// ```compile_fail
     /// use tutti_session::Session;
-    /// use tutti_types::SampleRate;
+    /// use tutti_units::SampleRate;
     ///
     /// // The device's rate is the session's: there is nothing to set.
     /// let _ = Session::builder()
@@ -1130,7 +1132,8 @@ pub fn root_width(project: ChannelLayout, device: ChannelLayout) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+    use tutti_types::{ChannelLayout, MaxBlock};
+    use tutti_units::{SampleRate, Samples};
 
     use super::LIVE_MAX_BLOCK;
     use crate::Session;

@@ -231,7 +231,7 @@ pub(crate) mod tests {
         PluginFailure, RenderMode, StateError, StateUse, TerminationReason, bypass_value,
         is_bypassed,
     };
-    use tutti_types::ParamId;
+    use tutti_units::ParamId;
 
     use tutti_graph::NodeMode;
 
@@ -315,7 +315,7 @@ pub(crate) mod tests {
         fn crash_cause(&self) -> Option<PluginFailure> {
             None
         }
-        fn rate_refusal(&self) -> Option<(tutti_types::SampleRate, String)> {
+        fn rate_refusal(&self) -> Option<(tutti_units::SampleRate, String)> {
             None
         }
         fn block_counts(&self) -> BlockCounts {

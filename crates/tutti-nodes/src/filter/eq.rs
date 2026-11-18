@@ -4,7 +4,8 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Ring, Sos, SosError, TAIL_FLOOR};
 use tutti_graph::Shape;
-use tutti_types::{BusTopology, Db, MaxBlock, SampleRate, Samples, Tail};
+use tutti_types::{BusTopology, MaxBlock};
+use tutti_units::{Db, SampleRate, Samples, Tail};
 
 use super::glided::{GLIDE_STEPS, GlidedSos, filter_shape};
 use crate::kernel::{ControlLanes, Kernel};

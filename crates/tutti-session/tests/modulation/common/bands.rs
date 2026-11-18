@@ -9,8 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use tutti_graph::{Cx, Io, Node, ParamInput, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::{AtomicF32, ChannelLayout, Db};
-use tutti_types::{UnitAddr, UnitParam};
+use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_units::Db;
+use tutti_units::{UnitAddr, UnitParam};
 
 /// `Threshold` of band 0 and of band 1.
 pub const BAND0: UnitAddr = UnitAddr::new(UnitParam::Threshold, 0);

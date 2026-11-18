@@ -22,7 +22,7 @@ use tutti_session::{
 };
 use tutti_session::{Bounced, BufferMaster, Master};
 use tutti_types::ChannelLayout;
-use tutti_types::{Db, SampleRate, Samples, Seconds};
+use tutti_units::{Db, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -95,7 +95,7 @@ const LATE: usize = 100;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_types::Latency::new(Samples(LATE)))
+            .with_latency(tutti_units::Latency::new(Samples(LATE)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -312,7 +312,7 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
         .bounce(
             base(0.25)
                 .master(&master, Format::Wav(Pcm::Int16))
-                .resample(Resample::to(tutti_types::SampleRate::SR_44K1))
+                .resample(Resample::to(tutti_units::SampleRate::SR_44K1))
                 .stem_with(Stem::new(node.erase(), &stem, float_wav())),
         )
         .expect("renders");

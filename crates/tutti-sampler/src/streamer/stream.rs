@@ -266,12 +266,12 @@ impl Stream {
             Arc::new(Cells::new()),
             Arc::new(StreamFile::new(
                 std::path::PathBuf::new(),
-                tutti_types::SampleRate::SR_48K,
+                tutti_units::SampleRate::SR_48K,
                 None,
             )),
             Publisher::new(RingControl::new(
                 super::loops::RingMap::plain(
-                    super::loops::Arrangement::plain(tutti_types::Samples::new(0)),
+                    super::loops::Arrangement::plain(tutti_units::Samples::new(0)),
                     0,
                 ),
                 None,

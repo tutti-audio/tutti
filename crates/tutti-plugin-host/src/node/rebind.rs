@@ -24,8 +24,9 @@ use parking_lot::Mutex;
 use tutti_plugin_types::{Features, Loaded, MainThreadMarker, PluginDescriptor, Successor};
 use tutti_rt::Tally;
 use tutti_transport::TempoReader;
-use tutti_types::ParamId;
-use tutti_types::{ParkedSampleRate, Samples};
+use tutti_types::ParkedSampleRate;
+use tutti_units::ParamId;
+use tutti_units::Samples;
 
 use super::client::{Declared, InProcClient, PluginNode, Reload};
 use super::instance::Instance;
@@ -59,7 +60,7 @@ pub struct Rebinder<F: Loaded> {
     descriptor: PluginDescriptor,
     reload: Option<Reload>,
     features: Features,
-    sample_rate: tutti_types::SampleRate,
+    sample_rate: tutti_units::SampleRate,
     pending_sample_rate: Arc<ParkedSampleRate>,
     unlent: Tally<u64>,
     parameters: Vec<ParamId>,
@@ -295,7 +296,8 @@ mod tests {
     use tutti_plugin_types::fake::{Call, FakeLoaded, FakePlugin};
     use tutti_plugin_types::{Control, Loaded, Prepare, Request};
     use tutti_tempo::TempoMap;
-    use tutti_types::{Bpm, Frame, MaxBlock, SampleRate, Samples};
+    use tutti_types::MaxBlock;
+    use tutti_units::{Bpm, Frame, SampleRate, Samples};
 
     use super::*;
     use crate::client_over;
@@ -336,7 +338,7 @@ mod tests {
         let mut wiring = loaded.wiring(main);
         if own_bypass {
             wiring.own_bypass = Some(tutti_plugin_types::OwnBypass::Parameter(
-                tutti_types::ParamId::new(4),
+                tutti_units::ParamId::new(4),
             ));
         }
         let descriptor = loaded.info().clone();

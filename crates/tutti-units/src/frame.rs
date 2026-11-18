@@ -51,26 +51,26 @@ unit! {
     /// Two positions do not add, and do not subtract with `-`:
     ///
     /// ```compile_fail
-    /// use tutti_types::Frame;
+    /// use tutti_units::Frame;
     /// let _ = Frame::new(10) + Frame::new(20);
     /// ```
     ///
     /// ```compile_fail
-    /// use tutti_types::Frame;
+    /// use tutti_units::Frame;
     /// let _ = Frame::new(20) - Frame::new(10);
     /// ```
     ///
     /// A bare integer is not a frame count either:
     ///
     /// ```compile_fail
-    /// use tutti_types::Frame;
+    /// use tutti_units::Frame;
     /// let _ = Frame::new(10) + 5u64;
     /// ```
     ///
     /// What does compile says what it means:
     ///
     /// ```
-    /// use tutti_types::{Frame, Samples};
+    /// use tutti_units::{Frame, Samples};
     /// let start = Frame::new(48_000);
     /// let later = start + Samples(512);
     /// assert_eq!(later.since(start), Some(Samples(512)));
@@ -103,7 +103,7 @@ impl Frame {
     /// holds a frame exactly up to 2^53, about 5 900 years at 48 kHz.
     ///
     /// ```
-    /// use tutti_types::Frame;
+    /// use tutti_units::Frame;
     /// assert_eq!(Frame::new(256).scaled(44_100.0 / 48_000.0), Frame::new(235));
     /// ```
     #[inline]
@@ -118,7 +118,7 @@ impl Frame {
     /// the frame this rounds it to.
     ///
     /// ```
-    /// use tutti_types::Frame;
+    /// use tutti_units::Frame;
     /// assert_eq!(Frame::nearest(2.5), Frame::new(3));
     /// assert_eq!(Frame::nearest(2.49), Frame::new(2));
     /// assert_eq!(Frame::nearest(-3.0), Frame::ZERO);
@@ -133,7 +133,7 @@ impl Frame {
     /// position at rate `from`: [`scaled`](Self::scaled) by `to / from`.
     ///
     /// ```
-    /// use tutti_types::{Frame, SampleRate};
+    /// use tutti_units::{Frame, SampleRate};
     /// let (cd, dat) = (SampleRate::of(44_100.0), SampleRate::of(48_000.0));
     /// assert_eq!(Frame::new(44_100).rescaled(cd, dat), Frame::new(48_000));
     /// // 7 frames at 44.1 kHz are 7.619 at 48 kHz: the nearest is 8.
@@ -143,20 +143,20 @@ impl Frame {
     /// ```
     #[inline]
     #[must_use]
-    pub fn rescaled(self, from: super::SampleRate, to: super::SampleRate) -> Frame {
+    pub fn rescaled(self, from: crate::SampleRate, to: crate::SampleRate) -> Frame {
         self.scaled(to.get() / from.get())
     }
 
     /// The time this frame is at, counted from frame 0 at `rate`.
     ///
     /// ```
-    /// use tutti_types::{Frame, SampleRate, Seconds};
+    /// use tutti_units::{Frame, SampleRate, Seconds};
     /// assert_eq!(Frame::new(24_000).to_seconds(SampleRate::of(48_000.0)), Seconds::new(0.5));
     /// ```
     #[inline]
     #[must_use]
-    pub fn to_seconds(self, rate: super::SampleRate) -> super::Seconds {
-        super::Seconds::new(self.0 as f64 / rate.get())
+    pub fn to_seconds(self, rate: crate::SampleRate) -> crate::Seconds {
+        crate::Seconds::new(self.0 as f64 / rate.get())
     }
 
     /// Returns how many frames `earlier` is before `self`, or `None` when it is not
@@ -211,7 +211,7 @@ impl AddAssign<Samples> for Frame {
 /// read at, so whoever resolves it can rescale it.
 ///
 /// ```
-/// use tutti_types::{Frame, Moment, SampleRate, Samples};
+/// use tutti_units::{Frame, Moment, SampleRate, Samples};
 /// let m = Moment::new(Frame::new(48_000), SampleRate::of(48_000.0));
 /// let later = m.after(Samples(480));
 /// assert_eq!((later.frame(), later.rate()), (Frame::new(48_480), SampleRate::of(48_000.0)));
@@ -219,14 +219,14 @@ impl AddAssign<Samples> for Frame {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Moment {
     frame: Frame,
-    rate: super::SampleRate,
+    rate: crate::SampleRate,
 }
 
 impl Moment {
     /// `frame`, counted at `rate`.
     #[inline]
     #[must_use]
-    pub const fn new(frame: Frame, rate: super::SampleRate) -> Self {
+    pub const fn new(frame: Frame, rate: crate::SampleRate) -> Self {
         Self { frame, rate }
     }
 
@@ -240,7 +240,7 @@ impl Moment {
     /// The rate the frame was counted at.
     #[inline]
     #[must_use]
-    pub const fn rate(self) -> super::SampleRate {
+    pub const fn rate(self) -> crate::SampleRate {
         self.rate
     }
 
@@ -314,7 +314,7 @@ mod tests {
     /// **A frame is its count over the rate**: 24 000 frames at 48 kHz is half a second.
     #[test]
     fn a_frame_is_the_time_its_count_names() {
-        let rate = super::super::SampleRate::of(48_000.0);
+        let rate = crate::SampleRate::of(48_000.0);
         assert_eq!(Frame::new(24_000).to_seconds(rate).get(), 0.5);
         assert_eq!(Frame::new(0).to_seconds(rate).get(), 0.0);
     }

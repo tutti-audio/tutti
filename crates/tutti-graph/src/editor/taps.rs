@@ -2,7 +2,7 @@
 //! out of the graph.
 
 use tutti_buffers::Float;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 use super::outlets::Closed;
 use super::{CloseError, CommitError, Editor, MAX_CHANNELS, MissingSource, TapOpened};

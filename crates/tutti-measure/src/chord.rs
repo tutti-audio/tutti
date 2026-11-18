@@ -55,9 +55,10 @@
 //!
 //! Where no chord is detected there is no span.
 
-use tutti_types::{PitchClass, Samples};
+use tutti_types::PitchClass;
+use tutti_units::Samples;
 
-use tutti_types::ranged;
+use tutti_units::ranged;
 
 use crate::chroma::{CLASSES, Chroma};
 use crate::framing::Framing;
@@ -336,7 +337,7 @@ mod tests {
     use super::*;
     use rand::{RngExt, SeedableRng, rngs::StdRng};
     use tutti_dsp::{BinCount, FrameCount};
-    use tutti_types::Cents;
+    use tutti_units::Cents;
 
     fn framing(window: usize, hop: usize) -> Framing {
         Framing::new(Samples(window), Samples(hop))

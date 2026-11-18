@@ -25,7 +25,7 @@
 //! `--profile-time` plus samply.
 
 use std::hint::black_box;
-use tutti_types::Seconds;
+use tutti_units::Seconds;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_codec::{Format, Pcm};
@@ -36,7 +36,8 @@ use tutti_export::{
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
-use tutti_types::{Amplitude, ChannelLayout, Db, Hz, SampleRate, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 

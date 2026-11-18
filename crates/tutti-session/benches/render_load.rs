@@ -128,11 +128,11 @@ use tutti_nodes::{BusStripNode, ConvolverNode, LimiterControls, LimiterNode};
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_session::{InPort, OutPort, Root, Session, Workers};
-use tutti_types::{
-    Amplitude, Beat, Cents, ChannelLayout, Db, Hz, MaxBlock, PlaybackRate, Resonance, SampleRate,
-    Samples, Seconds,
-};
+use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
+use tutti_units::{
+    Amplitude, Beat, Cents, Db, Hz, PlaybackRate, Resonance, SampleRate, Samples, Seconds,
+};
 
 const RATE: f64 = 48_000.0;
 const SYNTHS: usize = 8;

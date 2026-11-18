@@ -5,9 +5,9 @@ use tutti_ump::{Message, MidiChannel, MidiGroup, SysexStatus};
 use crate::events::event_text;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
-use tutti_types::Samples;
 use tutti_ump::Rpn;
 use tutti_ump::{ControlValue, Ump};
+use tutti_units::Samples;
 use tutti_vst3_ffi::EVENT_CAPACITY;
 
 fn registered(rpn: Rpn, value: ControlValue) -> Ump {

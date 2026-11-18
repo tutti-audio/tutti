@@ -2,8 +2,8 @@ use std::ops::RangeInclusive;
 
 use std::num::NonZeroU8;
 
-use tutti_types::{Cents, SampleRate, Samples};
 use tutti_ump::{NoteNumber, U7};
+use tutti_units::{Cents, SampleRate, Samples};
 
 use crate::error::Error;
 use crate::generator_range;

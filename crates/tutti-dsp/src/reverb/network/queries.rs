@@ -1,6 +1,6 @@
 //! The analytic queries of a [`Network`]: pure functions of the value.
 
-use tutti_types::{Amplitude, Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
+use tutti_units::{Amplitude, Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
 use crate::{Ring, System};
 

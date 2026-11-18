@@ -13,7 +13,7 @@ use tutti_fixtures::signal::bits;
 use tutti_graph::{IntoNode, NodeMode, Prepare, Solo, declick_frames};
 use tutti_nodes::{BusStripNode, EqBandNode, SvfType};
 use tutti_types::MaxBlock;
-use tutti_types::{Amplitude, Db, Hz, Q, SampleRate, Samples, UnitParam};
+use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const FRAMES: usize = 1024;

@@ -11,7 +11,7 @@ use tutti_plugin_types::{
     PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples,
     StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
 };
-use tutti_types::ParamId;
+use tutti_units::ParamId;
 
 use crate::error::Vst3Error;
 use crate::types::PluginInfo;

@@ -34,7 +34,8 @@ use std::sync::{Arc, Mutex, Weak};
 
 use tutti_graph::{TapReader, TapWriter};
 use tutti_rt::{LockExt, Overflow, PushError, RingReader, RingWriter, ring};
-use tutti_types::{ChannelLayout, Samples};
+use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 /// Opens that can be in flight at once. The install queue holds one more: a
 /// slot kept for a close, so closing a tap never fails for want of room while

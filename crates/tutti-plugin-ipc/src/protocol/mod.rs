@@ -212,7 +212,7 @@ pub use tutti_plugin_types::{
     PluginFormat, PluginTail, Preset, PresetId, RenderMode, Samples, ScaleChanges,
     TransportChanges, TransportInfo,
 };
-pub use tutti_types::ParamId;
+pub use tutti_units::ParamId;
 
 #[cfg(test)]
 mod tests {
@@ -222,8 +222,8 @@ mod tests {
     use tutti_plugin_types::{
         ChordValue, Load, NoteExpressionIntValue, NoteExpressionTextValue, ScaleValue, WireMidi,
     };
-    use tutti_types::SampleRate;
     use tutti_ump::{CCNumber, Message, MidiChannel, U7, Ump, Voice2};
+    use tutti_units::SampleRate;
 
     use tutti_fixtures::midi;
 
@@ -862,7 +862,7 @@ mod tests {
     fn a_new_transport_info_is_stopped_at_120_in_four_four() {
         let info = TransportInfo::new(SampleRate::SR_48K);
         assert_eq!(info.sample_rate, SampleRate::SR_48K);
-        assert_eq!(info.timing.tempo, tutti_types::Bpm::of(120.0));
+        assert_eq!(info.timing.tempo, tutti_units::Bpm::of(120.0));
         // 4/4 — the musical default, now expressed as the type's own default.
         assert_eq!(u32::from(info.timing.signature.beats_per_bar()), 4);
         assert_eq!(u32::from(info.timing.signature.note_value()), 4);

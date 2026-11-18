@@ -8,7 +8,7 @@
 //! frames it should write.
 
 use std::ops::Range;
-use tutti_types::Samples;
+use tutti_units::Samples;
 
 /// Per-block positioning handed from the driver to its gate.
 ///

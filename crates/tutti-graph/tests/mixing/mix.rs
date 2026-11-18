@@ -28,7 +28,8 @@ use tutti_graph::{
     GraphSpec, InPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, PassError,
     Prepare, Shape, Source, Status, Topology, TransportPosition, Unforkable,
 };
-use tutti_types::{ChannelLayout, Mix, Tail};
+use tutti_types::ChannelLayout;
+use tutti_units::{Mix, Tail};
 
 const BLOCK: usize = 64;
 /// The most a block here is: what every `Pair` is prepared for.

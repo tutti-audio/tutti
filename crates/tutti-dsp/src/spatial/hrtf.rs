@@ -30,7 +30,8 @@ use std::sync::Arc;
 
 use rustfft::FftNum;
 use tutti_buffers::{Float, Fold, Mono, MonoMut, Planes, StereoPlanes};
-use tutti_types::{ChannelLayout, ChannelTopology, Direction, Mix, Radians, SampleRate};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::{Direction, Mix, Radians, SampleRate};
 
 mod hull;
 mod sphere;

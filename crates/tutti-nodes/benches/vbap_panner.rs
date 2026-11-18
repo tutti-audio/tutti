@@ -24,7 +24,8 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::{Azimuth, Bed, Elevation, SampleRate};
+use tutti_types::Bed;
+use tutti_units::{Azimuth, Elevation, SampleRate};
 
 /// Warmup before measuring, in frames: two seconds at 48 kHz, 40 glide
 /// lengths, so a held source has landed.

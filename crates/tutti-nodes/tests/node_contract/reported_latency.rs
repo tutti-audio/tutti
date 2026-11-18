@@ -18,10 +18,11 @@ use tutti_nodes::{
     ChannelTimes, CrossoverNode, DelayControls, DelayLayout, DelayNode, InterpolationMode,
     MaxDelay, ModDelayNode, MultibandCompressorNode,
 };
-use tutti_types::Latency;
 use tutti_types::MaxBlock;
-use tutti_types::{BusTopology, ChannelLayout, Feedback, Hz, Mix, Seconds};
-use tutti_types::{SampleRate, Samples};
+use tutti_types::{BusTopology, ChannelLayout};
+use tutti_units::Latency;
+use tutti_units::{Feedback, Hz, Mix, Seconds};
+use tutti_units::{SampleRate, Samples};
 
 const SR: SampleRate = SampleRate::SR_48K;
 /// The block the impulse responses are rendered in.
@@ -265,8 +266,9 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     use tutti_graph::Source;
     use tutti_graph::{GraphBuilder, Prepare};
     use tutti_nodes::{LimiterControls, LimiterNode};
-    use tutti_types::Latency;
-    use tutti_types::{ChannelLayout, Db, Samples, Seconds};
+    use tutti_types::ChannelLayout;
+    use tutti_units::Latency;
+    use tutti_units::{Db, Samples, Seconds};
 
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (lim, _) = g.add_with_controls(LimiterNode::mono(LimiterControls {

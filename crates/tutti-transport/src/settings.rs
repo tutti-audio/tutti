@@ -18,7 +18,7 @@ use tutti_tempo::TempoMap;
 
 use atomic_float::AtomicF64;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64};
-use tutti_types::{Beat, Bpm};
+use tutti_units::{Beat, Bpm};
 
 /// Transport values shared between threads.
 ///
@@ -268,7 +268,7 @@ mod tests {
     /// seconds, so beat 4 at 48 kHz is `4 x 60 x 48 000 / bpm` frames.
     #[test]
     fn set_tempo_publishes_the_constant_map_of_that_tempo() {
-        let rate = tutti_types::SampleRate::SR_48K;
+        let rate = tutti_units::SampleRate::SR_48K;
         let s = TransportSettings::new();
         for bpm in [120.0, 90.0, 97.123_456_789_012_35, 120.587_389_506_707_47] {
             s.set_tempo(Bpm::of(bpm));

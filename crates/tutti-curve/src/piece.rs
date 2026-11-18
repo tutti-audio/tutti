@@ -1,4 +1,4 @@
-use tutti_types::UnitParam;
+use tutti_units::UnitParam;
 
 use crate::Law;
 

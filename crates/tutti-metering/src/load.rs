@@ -2,7 +2,8 @@
 
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use tutti_types::{AtomicF32, Seconds};
+use tutti_types::AtomicF32;
+use tutti_units::Seconds;
 
 /// The time constant of [`LoadReading::mean`]'s exponential smoothing: a
 /// step in the load is 63% through after this long, whatever the block size.

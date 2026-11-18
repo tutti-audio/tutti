@@ -9,7 +9,7 @@
 
 use core::f64::consts::PI;
 
-use tutti_types::{Db, Hz, Q, SampleRate, Samples, Seconds};
+use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds};
 
 use super::{SvfCoeffs, SvfType};
 use crate::Biquad;

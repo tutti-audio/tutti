@@ -10,7 +10,8 @@ use tutti_session::{
     ModTarget, PHASES, ParamRef, PhaseCx, Problem, RouteSpec, Session, SessionEvent, SourceName,
     TargetName,
 };
-use tutti_types::{Depth, Hz, MaxBlock, Samples, UnitParam};
+use tutti_types::MaxBlock;
+use tutti_units::{Depth, Hz, Samples, UnitParam};
 
 fn session() -> Session {
     Session::builder()
@@ -103,7 +104,7 @@ fn no_problems_while_the_declarations_apply() {
     let (lp, _) = s.graph().add(tutti_nodes::SvfFilterNode::<f32>::new(
         tutti_nodes::SvfType::LowPass,
         Hz(1_000.0),
-        tutti_types::Q(0.7),
+        tutti_units::Q(0.7),
     ));
     let mut m = s.mods_mut();
     m.range(lp.cutoff(), Hz(100.0)..Hz(4_000.0)).unwrap();

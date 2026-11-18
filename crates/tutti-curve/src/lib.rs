@@ -16,12 +16,12 @@
 //! a progress: the one formula every consumer evaluates.
 //!
 //! A [`Trajectory`] is the least a lane or a recorder needs of automation:
-//! breakpoints in [`Beat`](tutti_types::Beat), each with a value in the unit
+//! breakpoints in [`Beat`](tutti_units::Beat), each with a value in the unit
 //! the trajectory automates and the `Law` of the piece it starts, read at a beat.
 //!
 //! ```
 //! use tutti_curve::{Breakpoint, Exponent, Law, Piece, Trajectory};
-//! use tutti_types::{Beat, Hz};
+//! use tutti_units::{Beat, Hz};
 //!
 //! assert_eq!(Piece::new(0.0, 8.0, Law::PowerIn(Exponent::of(2.0))).value(None, 0.5), 2.0);
 //!

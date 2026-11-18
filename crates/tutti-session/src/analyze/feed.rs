@@ -5,7 +5,8 @@ use tutti_buffers::{
     Fold, FoldError, Interleaved, InterleavedMut, Mono, Planes, PlanesMut, StereoPlanes,
     deinterleave, interleave,
 };
-use tutti_types::{ChannelLayout, ChannelTopology, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_units::{SampleRate, Samples};
 
 use super::AnalyzeError;
 
@@ -104,7 +105,8 @@ pub trait AudioContext: sealed_context::Sealed {}
 pub(crate) use sealed_context::Sealed as Bind;
 
 mod sealed_context {
-    use tutti_types::{ChannelLayout, SampleRate};
+    use tutti_types::ChannelLayout;
+    use tutti_units::SampleRate;
 
     /// Builds the context from the audio; unnameable outside the crate.
     pub trait Sealed {

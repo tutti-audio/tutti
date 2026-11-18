@@ -19,7 +19,7 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{Helper, Load, Locator, PluginFormat};
-use tutti_types::SampleRate;
+use tutti_units::SampleRate;
 
 /// How long to wait between connect attempts.
 ///

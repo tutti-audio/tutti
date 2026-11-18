@@ -20,7 +20,7 @@ pub const SUB_ID2_PE_CAPABILITIES_REPLY: u8 = 0x31;
 /// still read (M2-103 §12).
 pub const SUB_ID2_PE_NOTIFY: u8 = 0x3F;
 
-tutti_types::ranged! {
+tutti_units::ranged! {
     /// The Number of Simultaneous Property Exchange Requests Supported: 1 to 127.
     ///
     /// The field is one 7-bit byte, so the count stops at 127 although there are 128

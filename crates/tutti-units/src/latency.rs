@@ -13,7 +13,7 @@
 //! latency is expected is a compile error:
 //!
 //! ```compile_fail
-//! use tutti_types::{Latency, Samples};
+//! use tutti_units::{Latency, Samples};
 //! fn declare(_: Latency) {}
 //! let echo_time = Samples(24_000);
 //! declare(echo_time); // a delay time is not a latency
@@ -43,7 +43,7 @@ use super::samples::Samples;
 /// # Examples
 ///
 /// ```
-/// use tutti_types::{Latency, Samples};
+/// use tutti_units::{Latency, Samples};
 ///
 /// let lookahead = Latency::new(Samples(128));
 /// let fft = Latency::new(Samples(64));

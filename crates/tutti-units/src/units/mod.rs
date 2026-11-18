@@ -4,7 +4,7 @@
 //! default, `f64` for wide-range values like `Bpm`/`Beat`) — zero-cost at
 //! runtime, but distinct at compile time so `Hz` and `Seconds` cannot be
 //! swapped by accident. The [`Unit`] marker trait carries the raw type as an
-//! associated type so [`Param`](super::Param) can be generic over the unit.
+//! associated type so a parameter cell can be generic over the unit.
 //!
 //! [`SampleRate`] is defined here too, the one type a rate is spelled with.
 //!
@@ -72,7 +72,7 @@ mod transport;
 
 // The frame-count vocabulary is integer-backed and lives next door in
 // `samples.rs`; the families name it through this import.
-use super::samples::Samples;
+use crate::samples::Samples;
 
 pub use amounts::{
     Balance, Bipolar, BipolarOutOfRange, BitDepth, Depth, DepthOutOfRange, Drive, Feedback, Mix,
@@ -86,7 +86,7 @@ pub use measures::{Confidence, Correlation, StereoBalance, Velocity};
 pub use ratios::{
     Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, HoldFactor, Q, Resonance, Semitones,
 };
-pub use time::{AtomicSampleRate, Hz, ParkedSampleRate, SampleRate, SampleRateOutOfRange, Seconds};
+pub use time::{Hz, SampleRate, SampleRateOutOfRange, Seconds};
 pub use transport::{
     Beat, BeatDuration, BeatsPerCycle, BeatsPerCycleOutOfRange, Bpm, BpmOutOfRange, PlaybackRate,
     ReadRate, SamplePosition, SrcRatio, StretchFactor,

@@ -374,7 +374,7 @@ impl Produced {
     ///
     /// ```
     /// # use tutti_export::{Produced, Rendered};
-    /// # use tutti_types::SampleRate;
+    /// # use tutti_units::SampleRate;
     /// let all = vec![Produced::Buffers(
     ///     Rendered::new(vec![vec![0.0; 4]], SampleRate::SR_48K, 0)?,
     /// )];
