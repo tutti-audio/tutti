@@ -310,10 +310,10 @@ pub mod types;
 
 pub use error::{LoadCause, LoadStage, Result, Vst3Error};
 pub use events::{
-    Chord, Data, Event, EventExt, EventHeader, EventKind, ExpressionInt, ExpressionText,
+    Chord, Data, Event, EventExt, EventHeader, EventKind, EventText, ExpressionInt, ExpressionText,
     ExpressionValue, InputEvents, K_DATA_TYPE_MIDI_SYSEX, LegacyCcOut, MidiEncoder, NoteOff,
     NoteOn, OutputStream, Payload, PolyPressure, Scale, Stager, TextRef, ToEvent, Utf16Chord,
-    Utf16Scale, Utf16Text, drain_midi, expression_type_from_id, expression_type_id,
+    Utf16Scale, Utf16Text, drain_midi, event_text, expression_type_from_id, expression_type_id,
 };
 pub use host::{
     ControllerMapping, FactoryFlags, FactoryInfo, Library, LoadOptions, ProcessFailed,

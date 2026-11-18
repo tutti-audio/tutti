@@ -506,10 +506,10 @@ impl Control for Vst3Loaded {
     /// active has no processor to hand them to.
     ///
     /// `beginEdit` and `endEdit` carry no value in VST3, and are reported
-    /// as the gesture's ends. They are also kept for
-    /// [`poll_plugin_notifications`](Vst3Loaded::poll_plugin_notifications),
-    /// as every other notification popped on the way is (dirty state, progress,
-    /// unit news). The processor's `outputParameterChanges` are not here: they
+    /// as the gesture's ends. Every other notification popped on the way (dirty
+    /// state, progress, unit news) is let go: a caller that wants them reads
+    /// [`poll_plugin_notifications`](Vst3Loaded::poll_plugin_notifications) and
+    /// not this. The processor's `outputParameterChanges` are not here: they
     /// are not an editor's, and the [`Vst3Controller`](crate::Vst3Controller)
     /// adds them on [`flush_edits`](Control::flush_edits).
     fn take_reported_edits(&mut self, _main: MainThreadMarker, out: &mut Vec<ParamEdit>) {
@@ -524,15 +524,11 @@ impl Control for Vst3Loaded {
                 }
                 PluginNotification::Edit(ParameterEditEvent::BeginEdit(id)) => {
                     out.push(ParamEdit::Begin(ParamId::new(id)));
-                    self.stashed
-                        .push(PluginNotification::Edit(ParameterEditEvent::BeginEdit(id)));
                 }
                 PluginNotification::Edit(ParameterEditEvent::EndEdit(id)) => {
                     out.push(ParamEdit::End(ParamId::new(id)));
-                    self.stashed
-                        .push(PluginNotification::Edit(ParameterEditEvent::EndEdit(id)));
                 }
-                other => self.stashed.push(other),
+                _ => {}
             }
         }
     }

@@ -11,8 +11,8 @@
 //! - **Capture (RT thread):** when armed, each incoming CC `(channel, cc)` is
 //!   pushed to a bounded, lock-free channel. Gated by an [`AtomicBool`] so the
 //!   normal (un-armed) case does literally nothing on the hot path. Bounded +
-//!   `try_send` keeps the push allocation-free; on overflow the CC is dropped
-//!   (learning only needs *a* recent CC, not all of them).
+//!   `try_send` keeps the push allocation-free; on overflow the CC just sent is
+//!   dropped, and counted (learning only needs *a* recent CC, not all of them).
 //! - **Forward (main thread):** [`Vst3Loaded::poll_plugin_notifications`](super::loaded::Vst3Loaded::poll_plugin_notifications) drains
 //!   the channel and makes the actual `onLiveMIDIControllerInput` COM call,
 //!   honouring the spec's threading contract.
@@ -26,11 +26,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::{Receiver, Sender, TrySendError};
+use tutti_rt::{Tally, TallyWriter, tally};
 use tutti_ump::MidiChannel;
 use tutti_vst3_ffi::MidiLearn;
 
 /// Bound on the in-flight CC capture channel. Learning only needs a recent CC,
-/// so a small ring is plenty; overflow drops the oldest-unread silently.
+/// so a small ring is plenty; a CC that finds it full is dropped (the unread ones
+/// stay) and counted.
 const CC_CHANNEL_CAPACITY: usize = 64;
 
 /// A captured live CC: `(channel, controller_number)`. Value is irrelevant for
@@ -47,6 +49,7 @@ type CapturedCc = (i16, i16);
 pub(super) struct MidiLearnProducer {
     armed: Arc<AtomicBool>,
     tx: Sender<CapturedCc>,
+    dropped: TallyWriter<u64>,
 }
 
 impl MidiLearnProducer {
@@ -59,7 +62,7 @@ impl MidiLearnProducer {
 
     /// Captures a single live CC `(channel, controller)` if armed. Allocation-free
     /// (`try_send` into a pre-sized bounded channel); drops the CC on a full or
-    /// disconnected channel rather than blocking the audio thread.
+    /// disconnected channel rather than blocking the audio thread, and counts it.
     ///
     /// `controller` is a VST3 `ControllerNumbers` index (0-127 plus the
     /// synthetic aftertouch/pitch-bend slots) — passed through verbatim; the
@@ -73,7 +76,8 @@ impl MidiLearnProducer {
             .tx
             .try_send((i16::from(channel.get()), controller as i16))
         {
-            Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
+            Ok(()) => {}
+            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => self.dropped.add(1),
         }
     }
 }
@@ -87,6 +91,7 @@ pub(super) struct MidiLearnConsumer {
     armed: Arc<AtomicBool>,
     tx: Sender<CapturedCc>,
     rx: Receiver<CapturedCc>,
+    dropped: Tally<u64>,
 }
 
 impl MidiLearnConsumer {
@@ -101,6 +106,7 @@ impl MidiLearnConsumer {
             armed: Arc::new(AtomicBool::new(false)),
             tx,
             rx,
+            dropped: tally(),
         }
     }
 
@@ -111,7 +117,13 @@ impl MidiLearnConsumer {
         MidiLearnProducer {
             armed: self.armed.clone(),
             tx: self.tx.clone(),
+            dropped: self.dropped.writer(),
         }
+    }
+
+    /// The CCs the capture dropped for a full channel, over the instance's life.
+    pub(super) fn dropped(&self) -> u64 {
+        self.dropped.get()
     }
     /// Arm or disarm MIDI learn. While armed, the RT path captures incoming
     /// CCs; [`forward_pending`](Self::forward_pending) then relays them to the
@@ -207,6 +219,11 @@ mod tests {
             "forwarded {forwarded} > cap"
         );
         assert!(forwarded > 0);
+        assert_eq!(
+            consumer.dropped(),
+            (CC_CHANNEL_CAPACITY * 4 - forwarded) as u64,
+            "every CC the channel could not hold is counted"
+        );
     }
 
     /// RT regression: armed capture into a warmed bounded channel is
