@@ -309,11 +309,10 @@ impl AudioSlab {
     }
 
     /// The sample type a caller names must be the width the slab was laid out
-    /// at: the layout's stride is in `sample_size()` bytes, so a wider type
-    /// would write past its channel and a narrower one would read the wrong
-    /// samples.
+    /// at: the layout's stride is in that width's bytes, so a wider type would
+    /// write past its channel and a narrower one would read the wrong samples.
     fn check_width<T: Float>(&self) -> Result<(), SlabAccessError> {
-        if std::mem::size_of::<T>() != self.layout.sample_size() {
+        if T::WIDTH != self.layout.format {
             return Err(SlabAccessError::SampleWidth);
         }
         Ok(())
@@ -345,7 +344,7 @@ impl AudioSlab {
             Direction::Input => SLAB_HEADER_BYTES,
             Direction::Output => SLAB_HEADER_BYTES + self.layout.input_ring_bytes(),
         };
-        let stride = self.layout.samples_per_channel * self.layout.sample_size();
+        let stride = self.layout.channel_bytes();
         Ok(base + (slot_for(seq) * channels + channel) * stride)
     }
 }
@@ -546,6 +545,30 @@ mod tests {
         let host = AudioSlab::create(n.clone(), l.clone()).unwrap();
         let server = AudioSlab::open(n, l).unwrap();
         (host, server)
+    }
+
+    /// **The size a slab is mapped at and the offsets it is addressed by agree.**
+    /// The last channel of the last slot of the output ring ends exactly at
+    /// the checked size, at either width: a stride the size and the addressing
+    /// computed differently would leave a gap or run past the mapping.
+    #[test]
+    fn the_last_channel_ends_at_the_checked_size() {
+        for width in [FloatWidth::F32, FloatWidth::F64] {
+            let l = layout(64, width);
+            let host = AudioSlab::create(name("last_channel"), l.clone()).unwrap();
+            let last_slot = (RING_SLOTS - 1) as u64;
+            let last_channel = l.output_channels() - 1;
+            let end = host
+                .slab()
+                .offset_of(Direction::Output, last_slot, last_channel)
+                .unwrap()
+                + l.channel_bytes();
+            assert_eq!(
+                Some(end),
+                l.checked_byte_size_with_header(SLAB_HEADER_BYTES),
+                "{width:?}"
+            );
+        }
     }
 
     /// **A peer cannot name a layout the render path cannot serve.** A

@@ -46,11 +46,6 @@ pub struct SlabLayout {
 }
 
 impl SlabLayout {
-    /// Returns the size of one sample in bytes, per [`format`](Self::format).
-    pub fn sample_size(&self) -> usize {
-        self.format.bytes()
-    }
-
     /// Total flat channels the input direction occupies (sum across input buses).
     pub fn input_channels(&self) -> usize {
         self.inputs.iter().map(|l| l.count() as usize).sum()
@@ -61,9 +56,28 @@ impl SlabLayout {
         self.outputs.iter().map(|l| l.count() as usize).sum()
     }
 
+    /// Bytes one channel of one slot occupies, or `None` when it does not fit
+    /// in `usize`. The one stride formula: the checked size and every offset
+    /// are built on it.
+    #[must_use]
+    pub(crate) fn checked_channel_bytes(&self) -> Option<usize> {
+        self.samples_per_channel.checked_mul(self.format.bytes())
+    }
+
+    /// Bytes one channel of one slot occupies.
+    ///
+    /// For a layout whose whole size [`checked_byte_size_with_header`] answered,
+    /// as every mapped slab's did: each figure below that size fits.
+    ///
+    /// [`checked_byte_size_with_header`]: Self::checked_byte_size_with_header
+    pub(crate) fn channel_bytes(&self) -> usize {
+        self.checked_channel_bytes()
+            .expect("a mapped layout's size was checked, so its channel stride fits")
+    }
+
     /// Bytes one direction's ring occupies: every slot, every channel.
     pub(crate) fn ring_bytes(&self, channels: usize) -> usize {
-        self.slots as usize * channels * self.samples_per_channel * self.sample_size()
+        self.slots as usize * channels * self.channel_bytes()
     }
 
     /// Returns the bytes the input ring occupies, across all slots and channels.
@@ -93,8 +107,7 @@ impl SlabLayout {
         let ring = |channels: usize| {
             (self.slots as usize)
                 .checked_mul(channels)?
-                .checked_mul(self.samples_per_channel)?
-                .checked_mul(self.sample_size())
+                .checked_mul(self.checked_channel_bytes()?)
         };
         header_bytes
             .checked_add(ring(channels(&self.inputs)?)?)?
@@ -186,7 +199,7 @@ mod tests {
         let mut l = layout(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO]);
         let f32_bytes = l.input_ring_bytes();
         l.format = FloatWidth::F64;
-        assert_eq!(l.sample_size(), 8);
+        assert_eq!(l.channel_bytes(), 64 * 8);
         assert_eq!(l.input_ring_bytes(), f32_bytes * 2);
         assert_eq!(l.input_channels(), 2, "format does not affect width");
     }
