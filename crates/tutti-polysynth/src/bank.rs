@@ -148,7 +148,7 @@ enum Osc {
 enum Filter {
     None,
     /// Simper SVF (`SvfFilterNode`'s topology). `q` and the output tap are
-    /// fixed for the synth, so `m` is uniform; only `a1..a3` vary per lane.
+    /// fixed for the synth, so `m` is uniform; only `d, a2, a3` vary per lane.
     Svf {
         ty: SvfType,
         q: Q,
@@ -193,7 +193,7 @@ pub(crate) struct VoiceBank {
     pink: Vec<[V; 3]>,
 
     // Filter: integrator state (SVF uses two, the ladder four) and the
-    // coefficients (SVF `a1..a3`; ladder `g1`, `k`), current and target.
+    // coefficients (SVF `d`, `a2`, `a3`; ladder `g1`, `k`), current and target.
     z: Vec<[V; 4]>,
     coef: Vec<[V; 3]>,
     coef_target: Vec<[V; 3]>,
@@ -437,7 +437,7 @@ impl VoiceBank {
             Filter::None => return,
             Filter::Svf { ty, q, .. } => {
                 let s = SvfCoeffs::new(ty, cutoff, q, Db(0.0), self.sample_rate);
-                [s.a1 as f32, s.a2 as f32, s.a3 as f32]
+                [s.d as f32, s.a2 as f32, s.a3 as f32]
             }
             Filter::Ladder => {
                 let l = LadderCoeffs::new(cutoff, resonance, self.sample_rate);
@@ -688,7 +688,7 @@ impl VoiceBank {
                     c[1] += c_step[1];
                     c[2] += c_step[2];
                     let coefficients = SvfCoefficients {
-                        a1: c[0],
+                        d: c[0],
                         a2: c[1],
                         a3: c[2],
                         m0: m[0],

@@ -3,31 +3,27 @@ use super::super::coefficients::Tpt;
 use super::*;
 use crate::CrossoverModel;
 use crate::testing::{amplitude_at, lock_in};
-use tutti_fixtures::signal::sine;
-use tutti_units::{Amplitude, Hz, SampleRate, Samples};
+use tutti_units::{Hz, SampleRate};
 
-/// One sample through `state` at `c`, in `f32`.
-fn tick(state: &mut CrossoverState<f64>, c: &CrossoverCoefficients, x: f32) -> [f32; MAX_BANDS] {
-    state.tick(&c.narrowed(), f64::from(x)).map(|y| y as f32)
+/// One sample through `state` at `c`.
+fn tick(state: &mut CrossoverState<f64>, c: &CrossoverCoefficients, x: f64) -> [f64; MAX_BANDS] {
+    state.tick(&c.narrowed(), x)
 }
 
 const RATE: f64 = 48_000.0;
 /// A whole number of periods of every tone on the 5 Hz grid.
 const WINDOW: usize = 9_600;
 const SETTLE: usize = 12_000;
-/// f32 rounding of the input, each band, and the sum: at most
-/// `(bands + 2)` half-ulps of the peak, each `2^-24`, which the lock-in
-/// only averages down.
-const TOL: f64 = 1e-6;
+/// The rounding of the input, each band, and the sum: at most `(bands + 2)` half-ulps of the
+/// peak, each `2^-53`, in sections whose error gain is a few hundred at most, which the
+/// lock-in only averages down.
+const TOL: f64 = 1e-12;
 
 /// A unit sine at `hz` (on the 5 Hz grid) at `rate`.
-fn unit_sine(hz: f64, rate: f64, len: usize) -> Vec<f32> {
-    sine(
-        Hz::new(hz),
-        Amplitude::new(1.0),
-        SampleRate::of(rate),
-        Samples(len),
-    )
+fn unit_sine(hz: f64, rate: f64, len: usize) -> Vec<f64> {
+    (0..len)
+        .map(|i| libm::sin(core::f64::consts::TAU * hz * i as f64 / rate))
+        .collect()
 }
 
 /// The 5 Hz-grid frequencies of a log sweep from 20 Hz to 16 kHz.
@@ -57,7 +53,7 @@ fn bands_at(freqs: &[f64], hz: f64) -> (Vec<(f64, f64)>, f64) {
             for (b, v) in bands.iter_mut().zip(out) {
                 b.push(v);
             }
-            sum.push(out[..nb].iter().sum::<f32>());
+            sum.push(out[..nb].iter().sum::<f64>());
         }
     }
     (
@@ -154,7 +150,7 @@ fn every_band_has_the_same_phase() {
                 let cross = (a.0 * b.1 - a.1 * b.0) / (mag(*a) * mag(*b));
                 let dot = (a.0 * b.0 + a.1 * b.1) / (mag(*a) * mag(*b));
                 assert!(
-                    cross.abs() < 2e-5 && dot > 0.0,
+                    cross.abs() < 2.0 * TOL / 0.1 && dot > 0.0,
                     "{freqs:?} at {hz}: {cross} {dot}"
                 );
                 compared += 1;
@@ -167,10 +163,9 @@ fn every_band_has_the_same_phase() {
     }
 }
 
-/// The gain of the highest split a crossover solves, `tan(pi SOLVE_CEILING)`, with 0.1% for
-/// the `f32` rounding of the cap's frequency.
+/// The gain of the highest split a crossover solves, `tan(pi SOLVE_CEILING)`.
 fn max_gain() -> f64 {
-    (core::f64::consts::PI * crate::SOLVE_CEILING).tan() * 1.001
+    (core::f64::consts::PI * crate::SOLVE_CEILING).tan()
 }
 
 /// The two ends of the range: a split at the floor (1 Hz, `g` of about 1e-4, a section
@@ -188,7 +183,7 @@ fn ends(splits: usize) -> [CrossoverCoefficients; 2] {
 
 /// The inputs a bound is held for, each full scale: a constant, an alternation at Nyquist and
 /// a seeded `+-1` sequence.
-fn full_scale(kind: usize, i: usize, rng: &mut u32) -> f32 {
+fn full_scale(kind: usize, i: usize, rng: &mut u32) -> f64 {
     match kind {
         0 => 1.0,
         1 => [1.0, -1.0][i % 2],
@@ -227,7 +222,7 @@ fn the_states_and_bands_stay_within_the_bound_under_a_switching_split() {
                     } else {
                         &high
                     };
-                    let out = state.tick(&c.narrowed(), f64::from(full_scale(kind, i, &mut rng)));
+                    let out = state.tick(&c.narrowed(), full_scale(kind, i, &mut rng));
                     peak_band = out.iter().fold(peak_band, |p, &y| p.max(y.abs()));
                     for s in (state.first.iter())
                         .chain(&state.low)
@@ -257,7 +252,7 @@ fn a_section_at_zero_input_never_gains_energy_under_a_switching_split() {
     let mut state = CrossoverState::<f64>::default();
     let mut rng = 3u32;
     for i in 0..2_000 {
-        state.tick(&low.narrowed(), f64::from(full_scale(2, i, &mut rng)));
+        state.tick(&low.narrowed(), full_scale(2, i, &mut rng));
     }
     let mut energy = norm(&state.first[0]).powi(2);
     assert!(energy > 0.0);
@@ -299,7 +294,7 @@ fn a_held_split_rings_out_by_the_time_its_matrix_gives() {
         } else {
             &high
         };
-        state.tick(&c.narrowed(), f64::from(full_scale(2, i, &mut rng)));
+        state.tick(&c.narrowed(), full_scale(2, i, &mut rng));
     }
     let s0 = norm(&state.first[0]);
     assert!(s0 > 1e-3, "the switching leaves the section loud: {s0}");
@@ -480,7 +475,7 @@ fn a_held_section_peaks_at_its_l1_norm_and_no_higher() {
             let mut section = Section::<f64>::default();
             let mut rng = 17u32;
             for i in 0..200_000 {
-                let t = section.tick(&tpt.narrowed(), f64::from(full_scale(2, i, &mut rng)));
+                let t = section.tick(&tpt.narrowed(), full_scale(2, i, &mut rng));
                 let y = [t.bp, t.lp, t.high_pass(), t.all_pass()][tap];
                 assert!(
                     y.abs() <= l1 * (1.0 + 1e-12),

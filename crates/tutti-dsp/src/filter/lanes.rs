@@ -2,6 +2,8 @@
 
 use core::ops::{Add, Div, Mul, Sub};
 
+use tutti_units::Real;
+
 /// The arithmetic one frame of a filter recurrence runs in: one value (`f32`,
 /// `f64`) or several side by side (`wide::f32x8`, the polysynth's voice lanes).
 ///
@@ -19,8 +21,8 @@ pub trait Lanes:
     + Mul<Output = Self>
     + Div<Output = Self>
 {
-    /// `x` in every lane (for a scalar, `x` widened or kept).
-    fn from_f32(x: f32) -> Self;
+    /// The numeric literal `x` in every lane: only a literal argument, as `Real::lit`.
+    fn lit(x: f64) -> Self;
 }
 
 mod sealed {
@@ -32,21 +34,21 @@ mod sealed {
 
 impl Lanes for f32 {
     #[inline(always)]
-    fn from_f32(x: f32) -> Self {
-        x
+    fn lit(x: f64) -> Self {
+        <f32 as Real>::from_design(x)
     }
 }
 
 impl Lanes for f64 {
     #[inline(always)]
-    fn from_f32(x: f32) -> Self {
-        f64::from(x)
+    fn lit(x: f64) -> Self {
+        x
     }
 }
 
 impl Lanes for wide::f32x8 {
     #[inline(always)]
-    fn from_f32(x: f32) -> Self {
-        wide::f32x8::splat(x)
+    fn lit(x: f64) -> Self {
+        wide::f32x8::splat(<f32 as Real>::from_design(x))
     }
 }

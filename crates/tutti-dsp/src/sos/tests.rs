@@ -331,3 +331,45 @@ fn the_norms_bound_the_response_and_an_unstable_cascade_is_unbounded() {
     );
     assert_eq!(hot.tail(TAIL_FLOOR), Ring::Unbounded);
 }
+
+/// A 5 Hz Butterworth high-pass at 192 kHz, the cascade's range extreme (an `SvfCoefficients`
+/// per section, so the SVF's case), run in `f32` through the bank.
+///
+/// At the cutoff `W = 1` and the second-order high-pass `H = -W^2 / (1 - W^2 + j sqrt 2 W)` is
+/// `j / sqrt 2`. Noise: the one section has the SVF's `k = sqrt 2`, `g = tan(pi fc / fs) =
+/// 8.2e-5`, so `tau = 1 / (g k) = 8 643` frames and the output's deviation has standard
+/// deviation `2^-24 / sqrt 12 * sqrt((k^2 + 1) tau) = 2.8e-6`. The test measures `N = 192 000`
+/// frames, whose expected maximum is `sqrt(2 ln N) = 4.9` standard deviations; the bound is 1.5
+/// times that, 7.4 of them, for the non-Gaussian rounding tails and the correlated state noise.
+#[test]
+fn a_five_hz_high_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
+    use crate::testing::{sine_fit, steady_deviation};
+    use tutti_buffers::{Planes, PlanesMut};
+    use tutti_types::ChannelLayout;
+    const FS: f64 = 192_000.0;
+    const FC: f64 = 5.0;
+    let whole = FS as usize;
+    let w = 2.0 * PI * FC / FS;
+    let sos = Butterworth::new(CutResponse::HighPass, ButterworthOrder::of(2))
+        .design(Hz(FC), SampleRate::of(FS))
+        .unwrap();
+    let mut glide = crate::Glide::landed(SosCoefficients::<f32>::new(&sos).unwrap());
+    let input: Vec<f32> = (0..2 * whole)
+        .map(|n| libm::sin(w * n as f64) as f32)
+        .collect();
+    let mut out = vec![0.0f32; input.len()];
+    SosBank::<f32>::new(ChannelLayout::MONO).process(
+        &mut glide,
+        Planes::new(&[&input[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    let y: Vec<f64> = out.iter().map(|&v| f64::from(v)).collect();
+    let h = Complex64::new(0.0, core::f64::consts::FRAC_1_SQRT_2);
+    let tau = 1.0 / (libm::tan(PI * FC / FS) * core::f64::consts::SQRT_2);
+    let sigma = 2f64.powi(-24) / 12f64.sqrt() * (3.0 * tau).sqrt();
+    let bound = 1.5 * (2.0 * (whole as f64).ln()).sqrt() * sigma;
+    let fit = sine_fit(&y, w, whole);
+    assert!((fit - h).norm() < bound, "the fit {fit} against {h}");
+    let worst = steady_deviation(&y, w, whole, h);
+    assert!(worst < bound, "deviation {worst:e} over {bound:e}");
+}

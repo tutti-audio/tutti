@@ -127,6 +127,7 @@ mod convert;
 mod convolver;
 mod dc_block;
 mod delay;
+mod design;
 mod dither;
 mod dynamics;
 mod fft;

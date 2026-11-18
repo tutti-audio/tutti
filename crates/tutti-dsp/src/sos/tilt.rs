@@ -1,11 +1,12 @@
 //! The tilt: a first-order shelf pivoting about a center, the low end down by half the gain
 //! and the high end up by half.
 
-use tutti_units::{Db, Hz, SampleRate, Seconds};
+use tutti_units::{Amplitude, Db, Hz, SampleRate, Seconds};
 
 use super::MAX_TAIL_FRAMES;
 use super::butterworth::{check_cutoff, check_gain, gain_root};
 use super::{Sos, SosError};
+use crate::design::prewarp;
 use crate::{Biquad, Ring};
 
 /// A tilt equalizer, described without a sample rate: the analog first-order shelf
@@ -59,7 +60,7 @@ impl Tilt {
         let fc = check_cutoff(center, rate)?;
         let db = check_gain(self.gain)?;
         let a = gain_root(db);
-        let g = libm::tan(core::f64::consts::PI * fc / rate.get());
+        let g = prewarp(fc, rate);
         // `s = (1 - z^-1) / (g (1 + z^-1))` into `(A s + 1) / (s + A)`.
         let d = 1.0 + a * g;
         into.rate = rate;
@@ -92,8 +93,8 @@ impl Tilt {
     pub fn ring_out(&self, center: Hz, rate: SampleRate, floor: Db) -> Result<Ring, SosError> {
         let fc = check_cutoff(center, rate)?;
         let a = gain_root(check_gain(self.gain)?);
-        let g = libm::tan(core::f64::consts::PI * fc / rate.get());
-        let eps = floor.to_amplitude().get();
+        let g = prewarp(fc, rate);
+        let eps = floor.to_amplitude();
         Ok(finite(tail_frames(a, g, eps), eps, rate))
     }
 
@@ -124,18 +125,19 @@ impl Tilt {
         let (lo, hi) = (check_cutoff(lowest, rate)?, check_cutoff(highest, rate)?);
         let (lo, hi) = (lo.min(hi), lo.max(hi));
         let a_max = gain_root(check_gain(Db(largest.get().abs()))?);
-        let g = |fc: f64| libm::tan(core::f64::consts::PI * fc / rate.get());
-        let eps = floor.to_amplitude().get();
+        let g = |fc: Hz| prewarp(fc, rate);
+        let eps = floor.to_amplitude();
         let nepers = |x: f64| libm::log((x + 1.0) / (x - 1.0).abs());
         let least = nepers(g(lo) / a_max).min(nepers(a_max * g(hi)));
-        let frames = 1.0 + libm::ceil(libm::log(a_max / eps).max(0.0) / least);
+        let frames = 1.0 + libm::ceil(libm::log(a_max / eps.get()).max(0.0) / least);
         Ok(finite(frames, eps, rate))
     }
 }
 
 /// The first frame from which the tail sum of the tilt of root gain `a` at `g = tan(pi fc /
 /// fs)` is at most `eps`.
-fn tail_frames(a: f64, g: f64, eps: f64) -> f64 {
+fn tail_frames(a: f64, g: f64, eps: Amplitude) -> f64 {
+    let eps = eps.get();
     let x = a * g;
     let r = (x - 1.0).abs() / (x + 1.0);
     let c = 2.0 * g * (1.0 - a * a).abs() / ((1.0 + x) * (1.0 + x));
@@ -152,8 +154,8 @@ fn tail_frames(a: f64, g: f64, eps: f64) -> f64 {
 
 /// `frames` as a ring-out, [`Ring::Unbounded`] past `2^24` frames or for a floor `eps` that is
 /// not a positive finite amplitude.
-fn finite(frames: f64, eps: f64, rate: SampleRate) -> Ring {
-    if eps.is_finite() && eps > 0.0 && frames <= MAX_TAIL_FRAMES as f64 {
+fn finite(frames: f64, eps: Amplitude, rate: SampleRate) -> Ring {
+    if eps.get().is_finite() && eps.get() > 0.0 && frames <= MAX_TAIL_FRAMES as f64 {
         Ring::Finite(Seconds::new(frames / rate.get()))
     } else {
         Ring::Unbounded

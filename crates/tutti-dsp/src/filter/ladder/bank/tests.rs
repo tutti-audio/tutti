@@ -28,22 +28,22 @@ fn design<F: Float + Lanes>(ty: LadderType, fc: f64, res: f64, drive: f64) -> La
 
 /// Runs `input` (one `Vec` per channel) through `bank` in blocks of the lengths in
 /// `blocks`, cycled, and returns the output per channel.
-fn run<F: Float + Lanes, S: Float>(
+fn run<F: Float + Lanes>(
     bank: &mut LadderBank<F>,
     glide: &mut Glide<LadderDesign<F>>,
-    input: &[Vec<S>],
+    input: &[Vec<F>],
     blocks: &[usize],
-) -> Vec<Vec<S>> {
+) -> Vec<Vec<F>> {
     let frames = input[0].len();
-    let mut out = vec![vec![S::ZERO; frames]; input.len()];
+    let mut out = vec![vec![F::ZERO; frames]; input.len()];
     let mut at = 0;
     for &len in blocks.iter().cycle() {
         if at >= frames {
             break;
         }
         let end = (at + len).min(frames);
-        let ins: Vec<&[S]> = input.iter().map(|c| &c[at..end]).collect();
-        let mut outs: Vec<&mut [S]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
+        let ins: Vec<&[F]> = input.iter().map(|c| &c[at..end]).collect();
+        let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
             glide,
             Planes::new(&ins).expect("equal planes"),
@@ -288,10 +288,10 @@ fn the_output_is_bounded_by_the_saturator_and_the_stages_l1_norm() {
 /// are cut.
 #[test]
 fn any_split_renders_the_frames_of_one_block() {
-    let input: Vec<Vec<f32>> = (0..3)
+    let input: Vec<Vec<f64>> = (0..3)
         .map(|c| {
             (0..997)
-                .map(|i| ((i * 7 + c * 13) % 101) as f32 / 50.0 - 1.0)
+                .map(|i| ((i * 7 + c * 13) % 101) as f64 / 50.0 - 1.0)
                 .collect()
         })
         .collect();
@@ -426,10 +426,10 @@ fn a_glide_changes_the_tap_at_once() {
 #[test]
 fn each_channel_is_its_own_filter() {
     for width in [1u16, 2, 5, 8, 9, 16] {
-        let input: Vec<Vec<f32>> = (0..width)
+        let input: Vec<Vec<f64>> = (0..width)
             .map(|c| {
                 (0..300)
-                    .map(|i| (((i + 1) * (c as usize + 3)) % 37) as f32 / 18.0 - 1.0)
+                    .map(|i| (((i + 1) * (c as usize + 3)) % 37) as f64 / 18.0 - 1.0)
                     .collect()
             })
             .collect();
@@ -453,15 +453,15 @@ fn each_channel_is_its_own_filter() {
 fn a_reset_bank_is_silent() {
     let mut bank = LadderBank::<f64>::new(ChannelLayout::STEREO);
     let mut glide = Glide::landed(design(LadderType::LP24, 300.0, 0.9, 1.0));
-    let noise: Vec<f32> = (0..512)
-        .map(|i| ((i * 31) % 17) as f32 / 8.0 - 1.0)
+    let noise: Vec<f64> = (0..512)
+        .map(|i| ((i * 31) % 17) as f64 / 8.0 - 1.0)
         .collect();
     run(&mut bank, &mut glide, &[noise.clone(), noise], &[512]);
     bank.reset();
     let out = run(
         &mut bank,
         &mut glide,
-        &[vec![0.0f32; 64], vec![0.0; 64]],
+        &[vec![0.0f64; 64], vec![0.0; 64]],
         &[64],
     );
     assert!(out.iter().flatten().all(|&s| s == 0.0));
@@ -501,4 +501,53 @@ fn a_glides_midpoint_is_stable() {
             "{a:?} -> {b:?}: first {first}, last {last}"
         );
     }
+}
+
+/// A 5 Hz low-pass at 192 kHz, the ladder's range extreme, run in `f32` at a small signal.
+///
+/// Probe: a sine of amplitude `A` at the cutoff, so `W = 1` and the zero-resonance 24 dB
+/// low-pass is `1 / (1 + j)^4 = -1/4` (each stage the bilinear image of `1 / (1 + s)`, prewarped
+/// at the cutoff). The saturator `tanh` takes the input first and cuts the fundamental by `A^2 /
+/// 4` of itself, `2.5e-7` at `A = 1e-3`, and rounding the stage gain `G = g / (1 + g)` to `f32`
+/// moves each stage's corner by at most `2^-24` of itself, `2e-7` of the gain at the corner.
+///
+/// Noise: a stage's state takes about three roundings a step, each uniform within `2^-24` of
+/// a value of at most `A`, `2^-24 A` together as a standard deviation. The state leaks at
+/// `2 G` a frame, so an injection's variance sums to at most `1 / (4 G)` frames of itself in
+/// its own stage and no more through the stages after it (each a low-pass of unit gain),
+/// `1 / G` over the four: the output's deviation has standard deviation at most `2^-24 A / sqrt
+/// G = 6.6e-6 A`. The test measures `N = 192 000` frames, whose expected maximum is `sqrt(2 ln N)
+/// = 4.9` standard deviations; the bound is 1.5 times that, 7.4 of them, for the non-Gaussian
+/// rounding tails and the correlated state noise.
+#[test]
+fn a_five_hz_low_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
+    use crate::testing::{sine_fit, steady_deviation};
+    const FS: f64 = 192_000.0;
+    const FC: f64 = 5.0;
+    const A: f64 = 1e-3;
+    let whole = FS as usize;
+    let controls = LadderControls {
+        ty: LadderType::LP24,
+        freq: Hz(FC),
+        res: Resonance(0.0),
+        drive: Drive::UNITY,
+    };
+    let w = 2.0 * PI * FC / FS;
+    let input: Vec<f32> = (0..2 * whole)
+        .map(|n| (A * libm::sin(w * n as f64)) as f32)
+        .collect();
+    let model = LadderModel::new(controls, SampleRate::of(FS));
+    let mut bank = LadderBank::<f32>::new(ChannelLayout::MONO);
+    let mut glide = Glide::landed(LadderDesign::<f32>::from(&model));
+    let y = run(&mut bank, &mut glide, &[input], &[2 * whole]).remove(0);
+    let y: Vec<f64> = y.iter().map(|&v| f64::from(v)).collect();
+
+    let h = Complex64::new(-0.25 * A, 0.0);
+    let stage_gain = libm::tan(PI * FC / FS);
+    let sigma = 2f64.powi(-24) * A / stage_gain.sqrt();
+    let bound = 1.5 * (2.0 * (whole as f64).ln()).sqrt() * sigma;
+    let fit = sine_fit(&y, w, whole);
+    assert!((fit - h).norm() < bound, "the fit {fit} against {h}");
+    let worst = steady_deviation(&y, w, whole, h);
+    assert!(worst < bound, "deviation {worst:e} over {bound:e}");
 }

@@ -81,9 +81,11 @@ impl Default for EnvelopeFilterControls {
 
 /// One filter per channel at one cutoff that follows the loudest channel's level.
 ///
+/// Its filter is an [`SvfBank`] whose cutoff moves, so its range extreme is the SVF's (a base of
+/// 5 Hz at 192 kHz); `SvfBank`'s f32 test at that extreme covers it.
+///
 /// Built on the control side for one response and one rate; the envelope and the filter run in
-/// `F`, the graph's float, and a view of another sample format is converted at the edges.
-/// Nothing it holds grows.
+/// `F`, the graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct EnvelopeFilterBank<F: Float + Lanes> {
     ty: SvfType,
@@ -163,7 +165,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
     /// ([`Semitones::to_pitch_ratio`]), held within 1 Hz and 0.998 of the Nyquist.
     #[must_use]
     pub(crate) fn cutoff_at(&self, env: F) -> Hz {
-        let ratio = (self.controls.depth * env.to_f64()).to_pitch_ratio();
+        let ratio = (self.controls.depth * env.into()).to_pitch_ratio();
         (self.controls.base * ratio).clamp(
             Hz(1.0),
             self.rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
@@ -190,7 +192,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
     /// the narrower of the two views is not touched, and the frames rendered are the fewer of
     /// the two views'. A NaN sample reads as quiet and an infinite one as full scale. No
     /// allocation.
-    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let mut levels = [F::ZERO; GRID.get()];
         let mut start = 0;

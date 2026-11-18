@@ -1,4 +1,5 @@
 use super::*;
+use crate::Complex64;
 use tutti_buffers::{Planes, PlanesMut};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -88,7 +89,7 @@ fn the_gain_is_the_closed_form_of_the_difference_equation() {
             let den = ((1.0 - r * c).powi(2) + (r * s).powi(2)).sqrt();
             let want = num / den;
             assert!(
-                (peak - want).abs() < 1e-6,
+                (peak - want).abs() < 1e-12,
                 "{f} Hz, corner {corner}: {peak} against {want}"
             );
         }
@@ -185,4 +186,110 @@ fn an_f64_blocker_is_the_difference_equation_in_f64() {
     }
     let y = run(&mut at(fc, RATE), &[x]).remove(0);
     assert_close_f64(&y, &want, 2.0f64.powi(-45));
+}
+
+/// A 1 Hz corner at 192 kHz, the blocker's range extreme, run in `f32`: the gain at the corner
+/// is `|1 - e^{-jw}| / |1 - R e^{-jw}|` for `w = 2 pi fc / fs` and the pole `R = exp(-w)`.
+///
+/// The blocker stores `c = 1 - R = 3.3e-5`, rounded to `f32` by at most `2^-24` of itself; at the
+/// corner `d ln |H| / d ln c = -1/2`, so the gain is off by at most `2^-25 = 3.0e-8`. Storing `R`
+/// instead rounds by up to `2^-25` absolute, `9.1e-4` of `c` and `4.6e-4` of the gain (computed
+/// below as `old`): the bound here is under a tenth of that.
+///
+/// Noise: the state `y` (below 1, so an ulp of `2^-24` at most `2^-23`) takes about three
+/// roundings a step, each uniform within half an ulp, standard deviation `2^-24 / sqrt 12 =
+/// 1.7e-8`, and leaks at `w` a frame, so they add as a random walk of `1 / (2 w) = 15 000`
+/// frames: the output deviates by `1.7e-8 * sqrt(3 * 15 000) = 3.6e-6`. The bound is the
+/// coefficient's `3.0e-8` and 7.4 of those, `2.7e-5`: the test measures `N = 192 000` frames,
+/// whose expected maximum is `sqrt(2 ln N) = 4.9` standard deviations, and 1.5 times that allows
+/// for the non-Gaussian rounding tails and the correlated state noise.
+#[test]
+fn a_one_hz_corner_at_192_khz_holds_its_gain_and_noise_in_f32() {
+    use crate::testing::{sine_fit, steady_deviation};
+    const FS: f64 = 192_000.0;
+    let rate = SampleRate::of(FS);
+    let whole = FS as usize;
+    // The gain at the corner `corner`, from the closed form with the pole `r`.
+    let closed = |corner: Hz, r: f64| {
+        let w = std::f64::consts::TAU * corner.get() / FS;
+        let z = Complex64::from_polar(1.0, -w);
+        (Complex64::new(1.0, 0.0) - z) / (Complex64::new(1.0, 0.0) - z * r)
+    };
+    let omega = |corner: Hz| std::f64::consts::TAU * corner.get() / FS;
+    let w = omega(MIN_DC_CORNER);
+    let sigma = 2f64.powi(-24) / 12f64.sqrt() * (3.0 / (2.0 * w)).sqrt();
+    let bound = 2f64.powi(-25) + 1.5 * (2.0 * (whole as f64).ln()).sqrt() * sigma;
+
+    // The blocker at the 1 Hz corner.
+    let h = closed(MIN_DC_CORNER, dc_pole(MIN_DC_CORNER, rate));
+    let input = |corner: Hz| -> Vec<f32> {
+        (0..4 * whole)
+            .map(|n| libm::sin(omega(corner) * n as f64) as f32)
+            .collect()
+    };
+    let x = input(MIN_DC_CORNER);
+    let mut blocker = DcBlocker::<f32>::new(ChannelLayout::MONO, rate);
+    blocker.aim(&DcBlockerControls {
+        corner: MIN_DC_CORNER,
+    });
+    blocker.settle();
+    let mut out = vec![0.0f32; x.len()];
+    blocker.process(
+        Planes::new(&[&x[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    let y: Vec<f64> = out.iter().map(|&v| f64::from(v)).collect();
+    // The sine's phase is `h`'s: the fit is `a sin + b cos` with `H = a + j b`.
+    let fit = sine_fit(&y, w, 3 * whole);
+    assert!(
+        (fit.norm() - h.norm()).abs() < bound,
+        "gain {fit} against {h}"
+    );
+    let worst = steady_deviation(&y, w, 3 * whole, h);
+    assert!(worst < bound, "deviation {worst:e} over {bound:e}");
+
+    // The old recursion `y = x - x1 + R y1` with `R` stored in `f32`. Rounding `R` moves the
+    // gain at the corner by up to `old = 4.6e-4`; the sweep of corners from 1 to 2 Hz finds the
+    // one where the rounding is worst, and there the stored pole's measured gain error is past
+    // three times the bound while the complement's is inside it.
+    let old = 0.5 * 2f64.powi(-25) / (1.0 - dc_pole(MIN_DC_CORNER, rate));
+    let worst_corner = (0..=100)
+        .map(|i| Hz(1.0 + f64::from(i) * 0.01))
+        .max_by(|&a, &b| {
+            let off = |c: Hz| {
+                let r = dc_pole(c, rate);
+                (closed(c, f64::from(r as f32)).norm() - closed(c, r).norm()).abs()
+            };
+            off(a).total_cmp(&off(b))
+        })
+        .unwrap();
+    let (r, w) = (dc_pole(worst_corner, rate), omega(worst_corner));
+    let (r32, h) = (r as f32, closed(worst_corner, r));
+    let x = input(worst_corner);
+    let (mut x1, mut y1) = (0.0f32, 0.0f32);
+    let stored: Vec<f64> = x
+        .iter()
+        .map(|&x| {
+            let out = x - x1 + r32 * y1;
+            (x1, y1) = (x, out);
+            f64::from(out)
+        })
+        .collect();
+    let stored_error = (sine_fit(&stored, w, 3 * whole).norm() - h.norm()).abs();
+    let mut blocker = DcBlocker::<f32>::new(ChannelLayout::MONO, rate);
+    blocker.aim(&DcBlockerControls {
+        corner: worst_corner,
+    });
+    blocker.settle();
+    blocker.process(
+        Planes::new(&[&x[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    let y: Vec<f64> = out.iter().map(|&v| f64::from(v)).collect();
+    let complement_error = (sine_fit(&y, w, 3 * whole).norm() - h.norm()).abs();
+    assert!(
+        stored_error > 3.0 * bound && stored_error <= old + bound,
+        "stored pole {stored_error:e}, bound {bound:e}, worst case {old:e}"
+    );
+    assert!(complement_error < bound, "complement {complement_error:e}");
 }

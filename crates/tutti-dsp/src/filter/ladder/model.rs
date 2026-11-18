@@ -123,8 +123,8 @@ impl LadderModel {
 
     /// The drive, a gain on the input.
     #[must_use]
-    pub fn drive(&self) -> f64 {
-        self.controls.drive.get()
+    pub fn drive(&self) -> Drive {
+        self.controls.drive
     }
 
     /// The coefficients the ladder is solved at.

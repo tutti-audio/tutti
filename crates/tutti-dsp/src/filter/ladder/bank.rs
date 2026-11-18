@@ -8,6 +8,7 @@ use tutti_units::Real;
 use super::kernel::{LadderCoefficients, ladder_step};
 use super::{LadderModel, LadderType};
 use crate::control::lane_group;
+use crate::design::along;
 use crate::{Glide, Lanes, Lerp};
 
 /// What a ladder's glide blends: the coefficients and the drive, with the tap taken as the
@@ -22,12 +23,11 @@ pub struct LadderDesign<F: Float + Lanes> {
 
 impl<F: Float + Lanes> From<&LadderModel> for LadderDesign<F> {
     /// The model's own coefficients and drive ([`LadderModel::new`] sanitises the controls
-    /// first), narrowed once to `F`. The drive is an `f64` made of an `f32`, so narrowing it
-    /// to `F` is exact.
+    /// first), narrowed once to `F`.
     fn from(model: &LadderModel) -> Self {
         Self {
             coefficients: LadderCoefficients::from(model.coeffs()),
-            drive: F::from_f64(model.drive()),
+            drive: F::from_unit(model.drive()),
             ty: model.ladder_type(),
         }
     }
@@ -38,7 +38,7 @@ impl<F: Float + Lanes> Lerp for LadderDesign<F> {
     /// set is only ever used for one sample and never stored.
     #[inline]
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
-        let t = F::from_f64(f64::from(k)) / F::from_f64(f64::from(n));
+        let t = along::<F>(k, n);
         Self {
             coefficients: self.coefficients.lerp(&to.coefficients, t),
             drive: crate::lerp(self.drive, to.drive, t),
@@ -47,7 +47,7 @@ impl<F: Float + Lanes> Lerp for LadderDesign<F> {
     }
 }
 
-/// The state of a ladder per channel: its four stage words in precision `F`, every channel
+/// The state of a ladder per channel: its four stage words in the float `F`, every channel
 /// read through one shared [`LadderDesign`].
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block of audio
@@ -80,11 +80,11 @@ impl<F: Float + Lanes> LadderBank<F> {
     /// width, or past the narrower of the two views, is not touched. Channels run in groups
     /// of up to eight, each group's planes taken once per block; while the glide moves, a
     /// group reads the design once per frame. No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
         design: &mut Glide<LadderDesign<F>>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = self
@@ -97,7 +97,7 @@ impl<F: Float + Lanes> LadderBank<F> {
             let n = lane_group(width - first);
             macro_rules! group {
                 ($n:literal) => {
-                    group::<F, S, $n>(
+                    group::<F, $n>(
                         design,
                         &mut self.state[first..first + $n],
                         first,
@@ -127,19 +127,19 @@ impl<F: Float + Lanes> LadderBank<F> {
 /// states in registers: the frames the glide blends at a design per frame, the rest at its
 /// target.
 #[inline]
-fn group<F: Float + Lanes, S: Float, const N: usize>(
+fn group<F: Float + Lanes, const N: usize>(
     glide: &Glide<LadderDesign<F>>,
     state: &mut [[F; 4]],
     first: usize,
-    input: &Planes<'_, S>,
-    output: &mut PlanesMut<'_, '_, S>,
+    input: &Planes<'_, F>,
+    output: &mut PlanesMut<'_, '_, F>,
     frames: usize,
 ) {
-    let xs: [&[S]; N] = core::array::from_fn(|k| &input.plane(first + k).samples()[..frames]);
+    let xs: [&[F]; N] = core::array::from_fn(|k| &input.plane(first + k).samples()[..frames]);
     let mut outs = output.iter_mut().skip(first);
     // The group is within the width the caller took from both views, so every one of
     // its `N` channels has a plane.
-    let ys: [&mut [S]; N] = core::array::from_fn(|_| {
+    let ys: [&mut [F]; N] = core::array::from_fn(|_| {
         let plane = outs
             .next()
             .expect("a group's channels are below the output's width");
@@ -149,9 +149,8 @@ fn group<F: Float + Lanes, S: Float, const N: usize>(
     macro_rules! frame {
         ($i:expr, $d:expr) => {
             for k in 0..N {
-                let x = xs[k][$i].convert_to::<F>() * $d.drive;
-                let y = ladder_step(&$d.coefficients, $d.ty, &mut st[k], x, Real::tanh);
-                ys[k][$i] = y.convert_to::<S>();
+                let x = xs[k][$i] * $d.drive;
+                ys[k][$i] = ladder_step(&$d.coefficients, $d.ty, &mut st[k], x, Real::tanh);
             }
         };
     }
