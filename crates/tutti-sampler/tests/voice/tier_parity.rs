@@ -165,7 +165,7 @@ fn write_test_wav(path: &Path, frames: usize) {
 /// For the varispeed cases, where the question is "what rate is the ring
 /// draining at" and any second partial only gives the peak somewhere else to
 /// land once it has been transposed.
-fn write_tone_wav(path: &Path, frames: usize, hz: f32) {
+fn write_tone_wav(path: &Path, frames: usize, hz: f64) {
     let spec = hound::WavSpec {
         channels: 2,
         sample_rate: SR as u32,
@@ -174,7 +174,7 @@ fn write_tone_wav(path: &Path, frames: usize, hz: f32) {
     };
     let mut w = hound::WavWriter::create(path, spec).expect("create tone wav");
     for i in 0..frames {
-        let s = (std::f32::consts::TAU * hz * i as f32 / SR as f32).sin() * 0.4;
+        let s = (((std::f64::consts::TAU * hz * i as f64 / SR).sin()) as f32) * 0.4;
         w.write_sample(s).unwrap();
         w.write_sample(s).unwrap();
     }

@@ -345,7 +345,7 @@ fn a_transport_seek_flushes_stretch_state() {
     let data: Vec<f32> = (0..LEN)
         .map(|i| {
             if i < LEN / 2 {
-                0.5 * (std::f32::consts::TAU * 3000.0 * i as f32 / SR as f32).sin()
+                0.5 * (((std::f64::consts::TAU * 3000.0 * i as f64 / SR).sin()) as f32)
             } else {
                 0.0
             }
@@ -442,7 +442,7 @@ fn a_transport_seek_flushes_a_standalone_voice_node() {
     let data: Vec<f32> = (0..LEN)
         .map(|i| {
             if i < LEN / 2 {
-                0.5 * (std::f32::consts::TAU * 3000.0 * i as f32 / SR as f32).sin()
+                0.5 * (((std::f64::consts::TAU * 3000.0 * i as f64 / SR).sin()) as f32)
             } else {
                 0.0
             }
@@ -511,7 +511,7 @@ fn continuous_playback_does_not_flush_a_standalone_voice_node() {
     const LEN: usize = 441_000;
 
     let data: Vec<f32> = (0..LEN)
-        .map(|i| 0.5 * (std::f32::consts::TAU * 3000.0 * i as f32 / SR as f32).sin())
+        .map(|i| 0.5 * (((std::f64::consts::TAU * 3000.0 * i as f64 / SR).sin()) as f32))
         .collect();
     let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
@@ -588,7 +588,7 @@ fn a_stretched_placed_voice_holds_its_pitch_across_blocks() {
         // 440 Hz, long enough that even the fastest consumption stays inside
         // the material for the whole render.
         let data: Vec<f32> = (0..(SR as usize * 4))
-            .map(|i| (std::f32::consts::TAU * 440.0 * i as f32 / SR as f32).sin())
+            .map(|i| ((std::f64::consts::TAU * 440.0 * i as f64 / SR).sin()) as f32)
             .collect();
         let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
@@ -717,7 +717,7 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
         // ran dry — the control assertion below checks the other direction.
         let flat: Vec<f32> = (0..8192)
             .flat_map(|i| {
-                let s = (std::f32::consts::TAU * 440.0 * i as f32 / 44_100.0).sin();
+                let s = ((std::f64::consts::TAU * 440.0 * i as f64 / 44_100.0).sin()) as f32;
                 [s, s]
             })
             .collect();
@@ -838,7 +838,7 @@ fn continuous_playback_does_not_flush_the_stretch_filter() {
     // Steady 3 kHz throughout: any dropout is the filter being reset, not the
     // material.
     let data: Vec<f32> = (0..LEN)
-        .map(|i| 0.5 * (std::f32::consts::TAU * 3000.0 * i as f32 / SR as f32).sin())
+        .map(|i| 0.5 * (((std::f64::consts::TAU * 3000.0 * i as f64 / SR).sin()) as f32))
         .collect();
     let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 

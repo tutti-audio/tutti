@@ -539,7 +539,7 @@ fn per_note_pitch_bend_becomes_tuning_expression() {
     assert_eq!(expr.typeId, 2, "VST3 `kTuningTypeID`");
     assert_eq!(expr.noteId, id, "the tuning is the sounding note's");
     assert_eq!(vst3.sample_offset(), 12);
-    assert!((expr.value - 0.5).abs() < 0.01, "center bend → 0.5");
+    assert_eq!(expr.value, 0.5, "center bend → 0.5");
     // It is NOT a MIDI channel-voice event.
     assert!(vst3.to_midi(&mut OutputStream::new()).is_none());
 }

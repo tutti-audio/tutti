@@ -193,7 +193,7 @@ impl Portamento {
                 self.config.time.get().get() * interval.max(MIN_INTERVAL_OCTAVES)
             };
 
-            // A fractional glide length feeding a reciprocal, not a frame count.
+            // The glide length in frames, fractional: progress is `done / length`.
             let glide_samples = glide_time * self.sample_rate.get();
             let length = if glide_samples > 0.0 {
                 glide_samples

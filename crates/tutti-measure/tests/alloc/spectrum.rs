@@ -29,7 +29,7 @@ fn a_spectrum_step_does_not_allocate() {
         .peak_decay(PeakDecay::of(Db(20.0)))
         .spectrogram(FrameCount(7));
     let signal: Vec<f32> = (0..48_000)
-        .map(|i| 0.4 * (std::f32::consts::TAU * 1234.5 * i as f32 / 48_000.0).sin())
+        .map(|i| 0.4 * (((std::f64::consts::TAU * 1234.5 * i as f64 / 48_000.0).sin()) as f32))
         .collect();
 
     for cfg in [plain, banded] {
@@ -64,7 +64,10 @@ fn a_spectrum_step_does_not_allocate() {
 fn an_integer_spectrum_step_does_not_allocate() {
     let cfg = SpectrumConfig::new().framing(Framing::new(Samples(1024), Samples(256)));
     let signal: Vec<i16> = (0..48_000)
-        .map(|i| ((std::f32::consts::TAU * 1234.5 * i as f32 / 48_000.0).sin() * 8_000.0) as i16)
+        .map(|i| {
+            ((((std::f64::consts::TAU * 1234.5 * i as f64 / 48_000.0).sin()) as f32) * 8_000.0)
+                as i16
+        })
         .collect();
     let mut state = cfg.measure(SampleRate::SR_48K).unwrap();
     let steps = allocations(|| {

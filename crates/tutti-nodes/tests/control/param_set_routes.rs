@@ -531,10 +531,10 @@ where
 /// instant rather than a freeze.
 #[test]
 fn a_limiter_driven_below_its_release_floor_still_releases() {
-    const SR: f32 = 48_000.0;
+    const SR: f64 = 48_000.0;
     let tone = |amp: f32, frames: usize| -> Vec<f32> {
         (0..frames)
-            .map(|i| amp * (std::f32::consts::TAU * 440.0 * i as f32 / SR).sin())
+            .map(|i| amp * (((std::f64::consts::TAU * 440.0 * i as f64 / SR).sin()) as f32))
             .collect()
     };
     // The burst's length, and the limiter's latency: its 5 ms lookahead is

@@ -11,7 +11,7 @@ use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn, SysexMessage,
     Ump, Voice1, Voice2, parse_exact,
 };
-use tutti_units::Normalized;
+use tutti_units::{Normalized, Semitones};
 use tutti_voicing::{LIVE_NOTES, NOTE_CONTROLS, NoteControl, NoteEvent, PerNoteState};
 
 use super::{
@@ -23,8 +23,8 @@ use tutti_ump::ControlValue;
 /// VST3's tuning expression for `semitones` from the note's key: `0.5 +
 /// semitones / 240` (`kTuningTypeID` spans -120 to +120 semitones over
 /// `[0, 1]`).
-fn tuning_expression(semitones: f64) -> f64 {
-    0.5 + semitones / TUNING_SPAN
+fn tuning_expression(semitones: Semitones) -> f64 {
+    0.5 + semitones.get() / TUNING_SPAN
 }
 
 /// The semitones `kTuningTypeID` spans, `-120` to `+120`, over `[0, 1]`.
@@ -32,8 +32,8 @@ const TUNING_SPAN: f64 = 240.0;
 
 /// The semitones from the note's key a VST3 tuning expression of `value` is:
 /// the inverse of [`tuning_expression`], `value` clamped onto `[0, 1]` first.
-fn tuning_semitones(value: f64) -> f64 {
-    (value.clamp(0.0, 1.0) - 0.5) * TUNING_SPAN
+fn tuning_semitones(value: f64) -> Semitones {
+    Semitones::new((value.clamp(0.0, 1.0) - 0.5) * TUNING_SPAN)
 }
 
 /// The most events one packet makes: a sensitivity change re-sends a bend for
@@ -407,7 +407,7 @@ fn control_event(
     match *control {
         NoteControl::Pitch(pitch) => expression(
             NoteExpressionType::Tuning,
-            tuning_expression(pitch.note_number() - f64::from(note.get())),
+            tuning_expression(Semitones::new(pitch.note_number() - f64::from(note.get()))),
         ),
         NoteControl::Pressure(value) => Some(pressure_event(
             offset,

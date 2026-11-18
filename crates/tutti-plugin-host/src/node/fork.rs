@@ -106,7 +106,7 @@ use tutti_plugin_types::{Control, Features, InProcess, Origin, RenderMode, State
 use super::client::{HostedNode, RateDelivery, TransportFeed};
 use super::instance::Instance;
 use super::loader::load_client_restoring;
-use crate::DeliveryCounters;
+use crate::{DeliveryCounters, ForkState};
 use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::StateError;
 
@@ -175,7 +175,7 @@ where
         let live = self.live.upgrade().ok_or(PluginForkError::LiveGone)?;
         // Read before the state, so every value it shows is in the state.
         let delivered = self.delivery.delivered();
-        let (preset, state, live_mode) = {
+        let snapshot = {
             let mut instance = live.lock();
             let live_mode = instance.render_mode();
             let control = instance
@@ -191,21 +191,21 @@ where
             let state = control
                 .save_state(main, StateUse::Duplicate)
                 .map_err(|e| PluginForkError::SaveState(e.into()))?;
-            (preset, state, live_mode)
+            ForkState::new(preset, state, live_mode)
         };
         drop(live);
 
         // The preset, then the state, on the fresh instance **before it is
         // activated**: a plugin may take its mode from the state at activation.
         let mut restore = |loaded: &mut F| -> Result<(), StateError> {
-            if let Some(preset) = &preset
-                && !Control::load_preset(loaded, main, preset)
-            {
-                return Err(StateError::Rejected(format!(
-                    "the live instance's preset {preset:?} is not in the fresh instance"
-                )));
-            }
-            Control::load_state(loaded, main, &state, StateUse::Duplicate).map_err(StateError::from)
+            snapshot.restore(
+                loaded,
+                |loaded, preset| Control::load_preset(loaded, main, preset),
+                |loaded, state| {
+                    Control::load_state(loaded, main, state, StateUse::Duplicate)
+                        .map_err(StateError::from)
+                },
+            )
         };
         // From the stored `Origin`, not `Reopen::reopen`: an active `Lifecycle`
         // holds a Controller, not the `&F` that `reopen` needs.
@@ -234,10 +234,7 @@ where
         if let Some(Err(refused)) = restored {
             return Err(PluginForkError::LoadState(refused));
         }
-        let offline = match mode {
-            ForkMode::Offline => true,
-            ForkMode::Live => live_mode.is_offline(),
-        };
+        let offline = snapshot.offline(mode);
         // A format that cannot take the mode live is reactivated in it. The
         // fork is in no executor yet, so its realtime end is here: the exchange
         // finishes in this call, and the fork's first block has a Processor

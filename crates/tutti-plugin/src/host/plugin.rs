@@ -140,8 +140,7 @@ impl Plugin {
     /// # Ok(()) }
     /// ```
     ///
-    /// `sample_rate` takes anything convertible to [`SampleRate`] — `f64` and
-    /// `u32` (which widens exactly), but deliberately not `f32`.
+    /// `sample_rate` is the rate the plugin is opened at.
     ///
     /// `plugin` names the plugin: its file, the format that opens it and which
     /// plugin of the file: a bundle that exports several opens the one its id
@@ -175,13 +174,11 @@ impl Plugin {
     ///
     /// [`BridgeError::NotOutOfProcess`]: tutti_plugin_types::BridgeError::NotOutOfProcess
     /// [`BridgeError::NotInProcess`]: tutti_plugin_types::BridgeError::NotInProcess
-    ///
-    /// [`AudioConfig`]: crate::BridgeConfig
     pub fn open(
         main: Option<MainThreadMarker>,
         work: &MainWorkHandle,
         plugin: &Loadable,
-        sample_rate: impl Into<SampleRate>,
+        sample_rate: SampleRate,
     ) -> BridgeResult<Self> {
         Self::open_with(main, work, &AudioConfig::default(), plugin, sample_rate)
     }
@@ -198,7 +195,7 @@ impl Plugin {
         work: &MainWorkHandle,
         audio: &AudioConfig,
         plugin: &Loadable,
-        sample_rate: impl Into<SampleRate>,
+        sample_rate: SampleRate,
     ) -> BridgeResult<Self> {
         Self::open_with_state(main, work, audio, plugin, sample_rate, None)
             .map(|(plugin, _)| plugin)
@@ -219,10 +216,9 @@ impl Plugin {
         work: &MainWorkHandle,
         audio: &AudioConfig,
         plugin: &Loadable,
-        sample_rate: impl Into<SampleRate>,
+        sample_rate: SampleRate,
         state: Option<&[u8]>,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
-        let sample_rate = sample_rate.into();
         if plugin.placement()? == Hosting::InProcess {
             // A served load asks the blacklist in `PluginClient::open`; a
             // session load has asked it once already, before it defers.

@@ -96,7 +96,9 @@ pub(super) struct OutputStaging {
     /// parameter-number and bank runs across blocks (one event bus is one
     /// Group of its state). Built with the activation, so a deactivation drops
     /// it; [`Vst3Processor::stop`] forgets the runs without sending them.
-    pub(super) emitted_stream: OutputStream,
+    ///
+    /// Boxed (8 KiB): an `AudioIO` moves by value through activation.
+    pub(super) emitted_stream: Box<OutputStream>,
     /// What `emitted_stream` had lost as of the last block, and what it lost in
     /// the block in hand (the change): the events the host reports as lost MIDI.
     pub(super) lost_told: u64,
@@ -160,7 +162,8 @@ pub(super) struct AudioIO {
     /// Sized to the per-direction channel total (main + sidechain/aux buses).
     pub(super) input: InputStaging,
     pub(super) output: OutputStaging,
-    pub(super) cc: CcRoute,
+    /// Boxed (5 KiB): an `AudioIO` moves by value through activation.
+    pub(super) cc: Box<CcRoute>,
     /// RT-side MIDI-learn CC capture, paired with the
     /// [`Vst3Loaded`](super::Vst3Loaded)'s consumer. Inert (a single
     /// relaxed atomic load) unless learn is armed.
@@ -201,7 +204,11 @@ pub struct Vst3Processor<T: Vst3Sample> {
     _format: std::marker::PhantomData<fn() -> T>,
     // The scratch is listed first so it drops before the rest.
     pub(super) audio: AudioIO,
-    seq: SeqScratch,
+    /// Boxed (6 KiB): a Processor moves by value through activation. A block
+    /// takes it out of the `Option` and puts it back, which moves a pointer and
+    /// allocates nothing; `None` only after a `process` that panicked, whose
+    /// blocks are then refused.
+    seq: Option<Box<SeqScratch>>,
     /// Sequencer-context texts cut at the room of one event's text since
     /// activation.
     seq_truncated: Tally<u64>,
@@ -220,7 +227,10 @@ pub struct Vst3Processor<T: Vst3Sample> {
     /// a rejoin carried over from the last activation before the first block.
     /// Holds the ring's room ([`EDIT_CAPACITY`]) and no more; a write past it is
     /// refused and counted in `edits_dropped`.
-    pending: RtVec<(ParamId, Normalized), EDIT_CAPACITY>,
+    ///
+    /// Boxed: at 4 KiB it would otherwise be copied by value with every move of the
+    /// Processor, and the debug frames of an activation add up.
+    pending: Box<RtVec<(ParamId, Normalized), EDIT_CAPACITY>>,
     /// Edits the block could not hold, writes carried into the activation past
     /// the ring's room, and writes to a read-only parameter, since activation.
     edits_dropped: u64,
@@ -275,7 +285,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             declared,
         } = parts;
         let seq_truncated = tally();
-        let mut pending = RtVec::new();
+        let mut pending = Box::new(RtVec::new());
         let refused = carried
             .into_iter()
             .filter(|&write| !pending.push(write))
@@ -283,7 +293,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         Self {
             _format: std::marker::PhantomData,
             audio,
-            seq: SeqScratch::default(),
+            seq: Some(Box::default()),
             seq_truncated_writer: seq_truncated.writer(),
             seq_truncated,
             audio_side,
@@ -493,7 +503,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
                     ParamWriteError::check_sorted(id, &self.declared).is_ok()
                 })?;
             }
-            for &(id, value) in &self.pending {
+            for &(id, value) in self.pending.iter() {
                 staging.prepend(id, value)?;
             }
             // The output list must be empty before the plugin appends to it.
@@ -622,7 +632,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         let Some(mut staging) = self.audio.input.param_changes.try_begin() else {
             return Ok(false);
         };
-        for &(id, value) in &self.pending {
+        for &(id, value) in self.pending.iter() {
             if staging.prepend(id, value).is_err() {
                 return Ok(false);
             }
@@ -965,7 +975,11 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // Refilled into `seq`, inline storage that never grows. An absent
         // stream leaves its buffer empty, which is what the plugin should see.
         let expressive = ctx.expressive.as_ref();
-        let mut seq = std::mem::take(&mut self.seq);
+        let Some(mut seq) = self.seq.take() else {
+            return Err(PluginError::Block(
+                "an earlier block panicked in the plugin's process",
+            ));
+        };
         fill_chords(
             expressive.and_then(|e| e.chords),
             &mut seq.chords,
@@ -996,7 +1010,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             }
             Err(_) => Err(PluginError::Block("the plugin's process returned an error")),
         };
-        self.seq = seq;
+        self.seq = Some(seq);
         result
     }
 }
@@ -1021,3 +1035,10 @@ fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_type
         }
     }
 }
+
+// A Processor moves by value through activation (`Staged`, `Lifecycle`, the
+// server's `Served`), and every debug frame on that path holds a copy. Its
+// large buffers are boxed, so it stays small; a new inline array that tips
+// this bound fails the build.
+const _: () = assert!(size_of::<ProcessorAny>() <= 4096);
+const _: () = assert!(size_of::<super::instance::Staged<f32>>() <= 4096);

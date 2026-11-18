@@ -228,19 +228,19 @@ impl<T: Vst3Sample> Staged<T> {
                     PointPool::default(),
                 ),
                 emitted_midi: RtMidiEvents::new(),
-                emitted_stream: OutputStream::new(),
+                emitted_stream: Box::new(OutputStream::new()),
                 lost_told: 0,
                 emitted_lost: 0,
                 emitted_param_changes,
             },
-            cc: CcRoute::following(
+            cc: Box::new(CcRoute::following(
                 loaded.midi_cc.reader(),
                 // Only a plugin with an `IMidiMapping` can publish a mapping
                 // later, so only it reserves the routing scratch.
                 loaded.plugin.has_midi_mapping(main),
                 chunk_queues,
                 chunk_room,
-            ),
+            )),
             midi_learn: loaded.midi_learn.producer(),
         };
 

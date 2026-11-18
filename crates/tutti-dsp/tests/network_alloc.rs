@@ -62,6 +62,7 @@ fn the_fdn_aims_and_renders_without_allocating() {
     let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
     for block in 0..200u32 {
         let k = (block % 7) as f32 / 6.0;
+        let k_hz = f64::from(block % 7) / 6.0;
         let c = FdnControls {
             decay: [
                 Seconds::from_f32(0.2 + 7.0 * k),
@@ -72,7 +73,7 @@ fn the_fdn_aims_and_renders_without_allocating() {
             diffusion: Mix(1.0 - k),
             pre_delay: Seconds::from_f32(0.05 * k),
             modulation: Depth::of(k),
-            rate: Hz(f64::from(0.1 + k)),
+            rate: Hz(0.1 + k_hz),
             width: StereoWidth(2.0 * k),
             wet: Db(-12.0 * f64::from(k)),
             freeze: block % 11 == 0,

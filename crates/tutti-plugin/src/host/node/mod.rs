@@ -209,7 +209,7 @@ pub struct PluginClient<S = Unbound> {
     /// guard), shared with `PluginClient::handle`.
     served: IpcController,
     /// Where this instance came from, so a fork can load another of it.
-    origin: Option<IpcOrigin>,
+    origin: IpcOrigin,
     /// The plugin this is, with the id it reports.
     plugin: PluginRef,
     /// On a **fork** only: whether it has failed while rendering
@@ -255,7 +255,7 @@ impl PluginClient<Unbound> {
         config: BridgeConfig,
         work: &MainWorkHandle,
         plugin: &Loadable,
-        sample_rate: impl Into<SampleRate>,
+        sample_rate: SampleRate,
     ) -> BridgeResult<Self> {
         Self::open(config, work, plugin, sample_rate, None).map(|(client, _)| client)
     }
@@ -274,7 +274,7 @@ impl PluginClient<Unbound> {
         config: BridgeConfig,
         work: &MainWorkHandle,
         plugin: &Loadable,
-        sample_rate: impl Into<SampleRate>,
+        sample_rate: SampleRate,
         state: Option<&[u8]>,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
         plugin.check()?;
@@ -294,7 +294,7 @@ impl PluginClient<Unbound> {
             plugin_path,
             format,
             plugin.load(),
-            sample_rate.into(),
+            sample_rate,
             state,
             tutti_plugin_types::StateUse::Project,
             Some(tutti_plugin_ipc::EditorLoader::new(
@@ -412,13 +412,13 @@ impl PluginClient<Unbound> {
             }
         };
 
-        let origin = ipc.origin().cloned();
+        let origin = ipc
+            .origin()
+            .cloned()
+            .ok_or_else(|| failed("the served plugin has no origin".into()))?;
         // The ref carries the id the plugin reports, so a state it saves and a
         // hand-inserted node name it as a scan would.
-        let plugin = origin
-            .as_ref()
-            .map(|o| PluginRef::loaded(&o.path, o.format, &descriptor.id))
-            .ok_or_else(|| failed("the served plugin has no origin".into()))?;
+        let plugin = PluginRef::loaded(&origin.path, origin.format, &descriptor.id);
         let format = ipc.format();
         let served = ipc.controller();
         // Report the FULL input width (main + sidechain/aux input buses) so a

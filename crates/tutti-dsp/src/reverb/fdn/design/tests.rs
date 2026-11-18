@@ -39,16 +39,23 @@ fn fdn_of(n: &Network) -> &Fdn {
 /// finite is the default, so the loop never gains.
 #[test]
 fn every_control_designs_a_stable_network() {
-    let nasty = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -3.0, 40.0, 0.0];
+    let nasty = [
+        (f32::NAN, f64::NAN),
+        (f32::INFINITY, f64::INFINITY),
+        (f32::NEG_INFINITY, f64::NEG_INFINITY),
+        (-3.0, -3.0),
+        (40.0, 40.0),
+        (0.0, 0.0),
+    ];
     for d in [FdnLayout::default(), freezable()] {
-        for &v in &nasty {
+        for &(v, hz) in &nasty {
             let c = FdnControls {
                 decay: [Seconds::from_f32(v); 3],
                 size: Mix(v),
                 diffusion: Mix(v),
                 pre_delay: Seconds::from_f32(v),
                 modulation: Depth::clamped(v),
-                rate: Hz(f64::from(v)),
+                rate: Hz(hz),
                 width: StereoWidth(v),
                 wet: Db(f64::from(v)),
                 freeze: v > 0.5,

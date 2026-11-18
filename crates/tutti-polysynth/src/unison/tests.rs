@@ -24,7 +24,7 @@ fn test_single_voice() {
     assert_eq!(unison.voice_count(), UnisonVoices::of(1));
 
     let params = unison.voice_params(0);
-    assert!((params.freq_ratio - 1.0).abs() < 0.001);
+    assert_eq!(params.freq_ratio, 1.0);
     assert!((params.pan.get() - 0.0).abs() < 0.001);
     assert!((params.amplitude.get() - 1.0).abs() < 0.001);
 }
@@ -43,7 +43,7 @@ fn test_detune_spread() {
 
     // Center voice should be at ratio 1.0
     let center = unison.voice_params(1);
-    assert!((center.freq_ratio - 1.0).abs() < 0.001);
+    assert_eq!(center.freq_ratio, 1.0);
 
     // First voice should be detuned down
     let low = unison.voice_params(0);
@@ -56,7 +56,8 @@ fn test_detune_spread() {
     // Symmetric detune
     let low_ratio = 1.0 / low.freq_ratio;
     let high_ratio = high.freq_ratio;
-    assert!((low_ratio - high_ratio).abs() < 0.001);
+    // `1 / 2^-x` and `2^x` round independently: a few ulps apart.
+    assert!((low_ratio - high_ratio).abs() < 1e-12);
 }
 
 #[test]
@@ -141,7 +142,7 @@ fn test_config_update() {
     assert_eq!(unison.voice_count(), UnisonVoices::of(5));
 
     unison.sync_from_atomics([Some(20.0), Some(0.5)]);
-    assert!((unison.config().detune_cents.get() - 20.0).abs() < 0.001);
+    assert_eq!(unison.config().detune_cents, CentsSpan::of(20.0));
     assert!((unison.config().stereo_spread.get() - 0.5).abs() < 0.001);
 }
 

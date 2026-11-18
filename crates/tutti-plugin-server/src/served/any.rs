@@ -141,3 +141,9 @@ served! {
     #[cfg(served_au)]
     Au(tutti_au_host::AuLoaded, PluginFormat::AudioUnit),
 }
+
+// One `AnyServed` is moved by value through the load path, and every debug
+// frame there holds a copy: it is as large as its largest format's `Served`.
+// The Processors box their buffers; a format that inlines a large one fails
+// the build.
+const _: () = assert!(size_of::<AnyServed>() <= 8192);

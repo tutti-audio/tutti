@@ -396,7 +396,7 @@ impl ClapProcessor {
             input_events,
             output_events,
             ..
-        } = &mut self.scratch;
+        } = &mut *self.scratch;
         let outcome = self.audio_side.process(ProcessCall {
             scratch: process,
             audio,
@@ -453,7 +453,7 @@ impl ClapProcessor {
             out_param_points_dropped,
             out_note_expressions,
             ..
-        } = &mut self.scratch;
+        } = &mut *self.scratch;
         // A note the plugin says has ended no longer answers per-note
         // controllers (its id is free for the plugin to reuse).
         for event in output_events.events() {

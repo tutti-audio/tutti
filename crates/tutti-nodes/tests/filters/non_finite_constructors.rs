@@ -16,6 +16,8 @@ const RATE: SampleRate = SampleRate::SR_48K;
 // A huge finite value (1e30) is left out on purpose: it is a valid number that
 // asks for an allocation no machine has (a delay line, a lookahead ring).
 const BAD: [f32; 5] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, -1e30];
+/// The same hostile values for the `f64` units.
+const BAD_HZ: [f64; 5] = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, -1e30];
 
 /// A compressor at -12 dB, 4:1, 10 ms and 100 ms, the knee and makeup at the default's.
 fn compressor_at_twelve() -> CompressorControls {
@@ -68,7 +70,7 @@ fn sweep() {
     let mut bad_cases = vec![];
     let d = |v: f32| Db(f64::from(v));
     let s = |v: f32| Seconds::from_f32(v);
-    for b in BAD {
+    for (b, bz) in BAD.into_iter().zip(BAD_HZ) {
         let mut add = |r: Option<String>| bad_cases.extend(r);
         for pos in 0..4 {
             let v = |i: usize, ok: f32| if i == pos { b } else { ok };
@@ -167,7 +169,7 @@ fn sweep() {
         add(probe("eq freq", b, || {
             Box::new(EqBandNode::<f64>::new(
                 SvfType::Bell,
-                Hz(f64::from(b)),
+                Hz(bz),
                 Q(1.0),
                 d(3.0),
             ))
@@ -189,11 +191,7 @@ fn sweep() {
             ))
         }));
         add(probe("svf freq", b, || {
-            Box::new(SvfFilterNode::<f64>::new(
-                SvfType::LowPass,
-                Hz(f64::from(b)),
-                Q(1.0),
-            ))
+            Box::new(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(bz), Q(1.0)))
         }));
         add(probe("svf q", b, || {
             Box::new(SvfFilterNode::<f64>::new(
@@ -216,21 +214,20 @@ fn sweep() {
         add(probe("ladder freq", b, || {
             Box::new(LadderFilterNode::<f64>::new(
                 tutti_nodes::LadderType::LP24,
-                Hz(f64::from(b)),
+                Hz(bz),
                 Resonance::new(0.5),
             ))
         }));
         add(probe("crossover", b, || {
             Box::new(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(f64::from(b))])
-                    .unwrap_or_else(|_| {
-                        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
-                    }),
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(bz)]).unwrap_or_else(|_| {
+                    CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
+                }),
             )
         }));
         add(probe("crossover2", b, || {
             Box::new(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(f64::from(b))])
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(bz)])
                     .unwrap_or_else(|_| {
                         CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
                     }),
