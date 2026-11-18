@@ -20,7 +20,47 @@ unit! {
     pub struct Seconds(pub f64): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
 }
 
+impl Hz {
+    /// No frequency: a rate of zero.
+    pub const ZERO: Hz = Hz(0.0);
+
+    /// The period of this frequency (`1 / f`), or `None` for a zero, a negative or a
+    /// non-finite frequency, which has none. The one route from a frequency to the time of
+    /// a cycle: [`Seconds::frequency`] is its inverse.
+    #[inline]
+    #[must_use]
+    pub fn period(self) -> Option<Seconds> {
+        let hz = f64::from(self.0);
+        if hz.is_finite() && hz > 0.0 {
+            Some(Seconds(1.0 / hz))
+        } else {
+            None
+        }
+    }
+}
+
 impl Seconds {
+    /// No time.
+    pub const ZERO: Seconds = Seconds(0.0);
+
+    /// The frequency this is the period of (`1 / t`), or `None` for a zero, a negative or a
+    /// non-finite time, and for a time whose frequency an `f32` cannot hold above 0 (one
+    /// that overflows or underflows). Computed in `f64` and narrowed once; [`Hz::period`] is
+    /// its inverse.
+    #[inline]
+    #[must_use]
+    pub fn frequency(self) -> Option<Hz> {
+        if !(self.0.is_finite() && self.0 > 0.0) {
+            return None;
+        }
+        let hz = (1.0 / self.0) as f32;
+        if hz.is_finite() && hz > 0.0 {
+            Some(Hz(hz))
+        } else {
+            None
+        }
+    }
+
     /// This time as an `f32`, for a kernel that runs in `f32`: the one place a
     /// control time narrows. A short time (a delay, an attack, a lookahead) is
     /// exact enough in `f32`; a position or a long span is not, so keep those

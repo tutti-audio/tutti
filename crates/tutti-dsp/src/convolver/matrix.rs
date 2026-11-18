@@ -9,7 +9,7 @@
 //! set, and a diagonal one is the per-channel convolution.
 
 use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut, Sample};
-use tutti_types::ChannelLayout;
+use tutti_types::{ChannelLayout, Samples};
 
 use super::Convolver;
 use crate::convert::convert_equal;
@@ -75,7 +75,7 @@ impl MatrixConvolver {
         inputs: ChannelLayout,
         outputs: ChannelLayout,
         irs: &[Mono<'_, S>],
-        block_size: usize,
+        block_size: Samples,
     ) -> Result<Self, MatrixConvolverError> {
         let (rows, cols) = (usize::from(inputs.count()), usize::from(outputs.count()));
         if rows == 0 || cols == 0 {
@@ -102,7 +102,7 @@ impl MatrixConvolver {
     /// A 2 by 2 matrix from `[LL, LR, RL, RR]` ([`new`](Self::new)'s order), which cannot
     /// be the wrong shape.
     #[must_use]
-    pub fn two_by_two<S: Sample>(irs: [Mono<'_, S>; 4], block_size: usize) -> Self {
+    pub fn two_by_two<S: Sample>(irs: [Mono<'_, S>; 4], block_size: Samples) -> Self {
         Self::assemble(
             ChannelLayout::STEREO,
             ChannelLayout::STEREO,
@@ -145,16 +145,16 @@ impl MatrixConvolver {
     }
 
     /// The longest response, in samples.
-    pub fn ir_length(&self) -> usize {
+    pub fn ir_length(&self) -> Samples {
         self.paths
             .iter()
             .map(Convolver::ir_length)
             .max()
-            .unwrap_or(0)
+            .unwrap_or(Samples::ZERO)
     }
 
     /// The latency in samples, one head partition on every path.
-    pub fn latency(&self) -> usize {
+    pub fn latency(&self) -> Samples {
         self.paths[0].latency()
     }
 

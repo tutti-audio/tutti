@@ -10,9 +10,32 @@ use super::*;
 ///   quantity it was. Build with `new`, read with `get` (generic code: the
 ///   `Unit` trait's `from_raw` / `to_raw`).
 ///
+/// - `Hz / Seconds`-style reciprocal operators (`1.0 / Hz`, `Seconds / Hz`): a frequency
+///   and a period are one quantity read two ways, and [`Hz::period`] /
+///   [`Seconds::frequency`] are the one route, with their `None` for a value that has no
+///   reciprocal.
+///
 /// The body is empty and this test cannot fail; see the note in `units/tests.rs`.
 #[test]
 fn omitted_conversions_are_documented() {}
+
+/// `period` and `frequency` are the one route between a frequency and its cycle's time: they
+/// are exact inverses at a power of two and refuse a value that has no period.
+#[test]
+fn a_frequency_and_its_period_are_one_route() {
+    assert_eq!(Hz(1000.0).period(), Some(Seconds(0.001)));
+    assert_eq!(Seconds(0.5).frequency(), Some(Hz(2.0)));
+    assert_eq!(Hz(256.0).period(), Some(Seconds(0.003_906_25)));
+    assert_eq!(Hz(256.0).period().unwrap().frequency(), Some(Hz(256.0)));
+    for bad in [0.0f32, -1.0, f32::NAN, f32::INFINITY] {
+        assert_eq!(Hz(bad).period(), None, "{bad}");
+    }
+    for bad in [0.0f64, -1.0, f64::NAN, f64::INFINITY, 1e-60, 1e300] {
+        assert_eq!(Seconds(bad).frequency(), None, "{bad}");
+    }
+    assert_eq!(Hz::ZERO, Hz(0.0));
+    assert_eq!(Seconds::ZERO, Seconds(0.0));
+}
 
 #[test]
 fn seconds_to_samples_names_its_rounding() {
