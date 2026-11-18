@@ -302,7 +302,37 @@ pub(crate) fn echo_set_parameter() -> bool {
     ECHO_SET_PARAMETER.load(Ordering::SeqCst)
 }
 
+/// How the probe answers `effSetSpeakerArrangement`.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrangementMode {
+    /// Take both arrangements and hold them.
+    Accept = 0,
+    /// Return 0 and keep the arrangements it held.
+    Refuse = 1,
+    /// Return 1 and keep the arrangements it held.
+    AcceptButKeep = 2,
+    /// Return 1, hold the arrangements, and answer 0 to `effGetSpeakerArrangement`.
+    AcceptUnreadable = 3,
+}
+
+static ARRANGEMENT_MODE: AtomicI32 = AtomicI32::new(ArrangementMode::Accept as i32);
 static KEY_CONSUMED: AtomicBool = AtomicBool::new(false);
+
+/// How the probe answers `effSetSpeakerArrangement`: an [`ArrangementMode`] as its number.
+#[unsafe(no_mangle)]
+pub extern "C" fn tutti_vst2_probe_set_arrangement_mode(mode: i32) {
+    ARRANGEMENT_MODE.store(mode, Ordering::SeqCst);
+}
+
+pub(crate) fn arrangement_mode() -> ArrangementMode {
+    match ARRANGEMENT_MODE.load(Ordering::SeqCst) {
+        1 => ArrangementMode::Refuse,
+        2 => ArrangementMode::AcceptButKeep,
+        3 => ArrangementMode::AcceptUnreadable,
+        _ => ArrangementMode::Accept,
+    }
+}
 
 /// Whether the probe's editor reports an editor key as used.
 #[unsafe(no_mangle)]
@@ -338,6 +368,7 @@ pub extern "C" fn tutti_vst2_probe_reset_switches() {
     EDITOR_OPENS.store(false, Ordering::SeqCst);
     EDITOR_HAS_NO_SIZE.store(false, Ordering::SeqCst);
     EDITOR_CLOSES.store(0, Ordering::SeqCst);
+    ARRANGEMENT_MODE.store(ArrangementMode::Accept as i32, Ordering::SeqCst);
     KEY_CONSUMED.store(false, Ordering::SeqCst);
     ACCEPT_STRING_TO_PARAMETER.store(false, Ordering::SeqCst);
     tutti_vst2_probe_reset_trace();

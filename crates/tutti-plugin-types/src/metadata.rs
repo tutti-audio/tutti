@@ -28,8 +28,9 @@ pub struct PluginBus {
     pub channels: ChannelLayout,
     /// Which speaker each channel feeds, when the loader could name every one.
     ///
-    /// `None` is "unknown": the plugin declined, the format has no way to say
-    /// (VST2), or the layout uses speakers this vocabulary does not yet name.
+    /// `None` is "unknown": the plugin declined, the host has not asked (VST2, until an
+    /// arrangement is negotiated), or the layout uses speakers this vocabulary does not
+    /// yet name.
     /// It is never "no speakers": a bus with no channels is `Some` of an empty
     /// topology. A topology whose width is not [`channels`](Self::channels)'
     /// cannot be acted on; [`placement`](Self::placement) filters it out.
