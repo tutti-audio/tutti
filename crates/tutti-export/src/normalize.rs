@@ -12,7 +12,7 @@
 //! A caller who holds planes and wants the reading for itself uses
 //! [`Normalize::gain_for_rendered`] and [`Rendered::apply_gain`](crate::Rendered::apply_gain).
 
-use tutti_buffers::{Interleaved, InterleavedMut, Planes, interleave};
+use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, interleave};
 use tutti_dsp::DitherShape;
 use tutti_measure::{
     Loudness, LoudnessConfig, LoudnessMeter, Measure, Meter as _, TruePeakConfig, TruePeakMeter,
@@ -165,9 +165,9 @@ impl Normalize {
     /// up from the floor (+47 dB for a LUFS target of -23, up to +99 dB for a
     /// peak one): writing a hiss at full scale, or the file un-normalized, and
     /// reporting success is silent — nothing in [`Written`] records it.
-    pub fn gain_for_rendered(
+    pub fn gain_for_rendered<F: Float>(
         &self,
-        rendered: &crate::Rendered,
+        rendered: &crate::Rendered<F>,
         topology: &ChannelTopology,
     ) -> Result<Db> {
         if topology.width() != rendered.layout() {
@@ -194,9 +194,9 @@ impl Normalize {
     /// # Errors
     ///
     /// As [`gain_for_rendered`](Self::gain_for_rendered).
-    fn measure(
+    fn measure<F: Float>(
         &self,
-        rendered: &crate::Rendered,
+        rendered: &crate::Rendered<F>,
         topology: &ChannelTopology,
         done: Samples,
         total: Samples,
@@ -495,7 +495,11 @@ impl Measurer {
     }
 
     /// Feeds the frames `span` of `planes`.
-    fn feed(&mut self, planes: &[Vec<f32>], span: std::ops::Range<usize>) -> crate::Result<()> {
+    fn feed<F: Float>(
+        &mut self,
+        planes: &[Vec<F>],
+        span: std::ops::Range<usize>,
+    ) -> crate::Result<()> {
         let layout = self.layout();
         // The scratch is taken out so the meter and the chunk borrow apart.
         let mut buf = std::mem::take(&mut self.scratch);
