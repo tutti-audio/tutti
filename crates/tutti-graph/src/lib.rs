@@ -235,7 +235,7 @@
 //!     Cx, GraphBuilder, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status,
 //!     declare_params,
 //! };
-//! use tutti_units::{Amplitude, SampleRate, Samples, UnitParam};
+//! use tutti_units::{Amplitude, Real, SampleRate, Samples, UnitParam};
 //! use tutti_types::{ChannelLayout, MaxBlock, Param};
 //!
 //! #[derive(Clone)]
@@ -257,12 +257,12 @@
 //!         let level = self
 //!             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
 //!             .last_frame()
-//!             .unwrap_or_else(|| self.level.load().get() as f32);
+//!             .unwrap_or_else(|| f32::from_unit(self.level.load()));
 //!         io.channel(0).map(|x| x * level);
 //!         Status::Modified
 //!     }
 //!     fn reset(&mut self) {}
-//!     fn param_base(&self, port: usize) -> Option<f32> {
+//!     fn param_base(&self, port: usize) -> Option<f64> {
 //!         self.declared_base(port)
 //!     }
 //! }
@@ -528,12 +528,22 @@
 //!
 //! # Precision
 //!
+//! A quantity has one width, and data is generic over the graph's float `F`.
 //! Every buffer between nodes is planar, in the sample format of the
 //! [`Executor<F>`](Executor) that runs them, and an executor sums fan-ins in
 //! that format. [`Editor::new`] and [`GraphBuilder::new`] build the `f32`
 //! graph; [`Editor::with_format`] and [`GraphBuilder::with_format`] build one
-//! in another format, whose nodes are `impl<F: Float> Node<F>` (a node that
-//! reads its [`ParamNode`] cells is `f32`).
+//! in another format.
+//!
+//! A node is `Node<F>` for any `F`: `impl<F: Float> Node<F>`. It reads a
+//! param as a `&[F]` lane ([`ParamInput::frames`]) or as a `Param<U>` cell,
+//! which holds the unit's own width and crosses
+//! into the node's data with `F::from_unit(cell.load())` once per block. Its
+//! state is `F`: there is no `f64` state inside an `f32` node. A cell, a
+//! [`Node::param_base`] and a [`ParamSet`] value are all the unit's width, so
+//! a param written through a [`ParamSet`] reaches the node at the width it was
+//! written in; the crossing to `F` is the node's. An `f32` graph and an `f64`
+//! graph never mix.
 //!
 //! A control value (a param's base, an edge weight, a mix, a fade's gain
 //! law) is a quantity; the graph renders it into a per-sample lane in `F`
@@ -541,12 +551,11 @@
 //! [`fade_in`]), so a param lane ([`ParamInput::frames`]), an edge weight's
 //! ramp, a mix and a crossfade all run in the graph's float. A meter
 //! accumulates a block's figures in `F` over chunks of at most 256 frames, each
-//! folded into `f64`, and reads them as `f64`. `f64` also belongs in
-//! time ([`Env::frame`] is a `u64`
-//! [`Frame`](tutti_units::Frame) and the transport position a `f64`
-//! [`Beat`](tutti_units::Beat)), and at the plugin boundary (a plugin that
-//! processes in double converts inside its node). [`Io`] exposes buffers
-//! through methods rather than fields.
+//! folded into `f64`, and reads them as `f64`. Quantities are `f64` too: time
+//! ([`Env::frame`] is a `u64` [`Frame`](tutti_units::Frame) and the transport
+//! position a `f64` [`Beat`](tutti_units::Beat)), and a param's value, as far
+//! as its unit goes; a plugin that processes in another width converts at its
+//! boundary. [`Io`] exposes buffers through methods rather than fields.
 //!
 //! # Testing
 //!
@@ -689,8 +698,8 @@ pub use node::{
 };
 pub use par::Pool;
 pub use param::{
-    MAX_PARAM_PORTS, ParamIn, ParamInput, ParamMod, ParamPorts, ParamPortsError, ParamRange,
-    ParamRangeReader, RangeView,
+    CellValue, MAX_PARAM_PORTS, ParamIn, ParamInput, ParamMod, ParamPorts, ParamPortsError,
+    ParamRange, ParamRangeReader, RangeView,
 };
 pub use pass::{Pass, PassError};
 pub use plan::{

@@ -54,8 +54,10 @@ impl Node for Bands {
 
     fn reset(&mut self) {}
 
-    fn param_base(&self, port: usize) -> Option<f32> {
-        self.knobs.get(port).map(|k| k.load(Ordering::Acquire))
+    fn param_base(&self, port: usize) -> Option<f64> {
+        self.knobs
+            .get(port)
+            .map(|k| f64::from(k.load(Ordering::Acquire)))
     }
 }
 

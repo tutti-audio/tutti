@@ -20,8 +20,8 @@ use core::fmt;
 
 use tutti_curve::{Law, Piece};
 use tutti_units::{
-    Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, Phase, PhaseIncrement, SamplePosition,
-    SampleRate, UnitParam,
+    Azimuth, Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, Phase, PhaseIncrement,
+    SamplePosition, SampleRate, UnitParam,
 };
 
 use crate::curve::{Curve, CurveSegment};
@@ -481,8 +481,8 @@ impl ControlProgram {
     /// knob.
     ///
     /// Pure and allocation-free. Offsets are summed in `f64` from `-0.0`, in
-    /// id order (layers, then inputs), and rounded to `f32` once, so a base
-    /// with no offsets passes through to the bit.
+    /// id order (layers, then inputs): the value is the sum at `f64`, so a
+    /// base with no offsets passes through to the bit.
     ///
     /// A circular `param` ([`UnitParam::is_circular`], `Azimuth`) moves along
     /// the short arc between an automation curve's breakpoints and takes its
@@ -492,11 +492,11 @@ impl ControlProgram {
     pub fn value_at(
         &self,
         param: Option<UnitParam>,
-        knob: Option<f32>,
+        knob: Option<f64>,
         at: &ProgramTime,
         span: f64,
         inputs: &[Option<f32>],
-    ) -> Option<f32> {
+    ) -> Option<f64> {
         self.evaluate(param, knob, at, span, inputs, Limit::At)
     }
 
@@ -507,28 +507,29 @@ impl ControlProgram {
     pub fn value_before(
         &self,
         param: Option<UnitParam>,
-        knob: Option<f32>,
+        knob: Option<f64>,
         at: &ProgramTime,
         span: f64,
         inputs: &[Option<f32>],
-    ) -> Option<f32> {
+    ) -> Option<f64> {
         self.evaluate(param, knob, at, span, inputs, Limit::Before)
     }
 
     fn evaluate(
         &self,
         param: Option<UnitParam>,
-        knob: Option<f32>,
+        knob: Option<f64>,
         at: &ProgramTime,
         span: f64,
         inputs: &[Option<f32>],
         limit: Limit,
-    ) -> Option<f32> {
+    ) -> Option<f64> {
         let circular = param.filter(|p| p.is_circular());
         let base = self
             .automation
             .as_ref()
             .and_then(|c| automation_at(c.as_ref(), at.beat.get(), limit, circular))
+            .map(f64::from)
             .filter(|v| v.is_finite())
             .or(knob)?;
         if !span.is_finite() {
@@ -545,8 +546,8 @@ impl ControlProgram {
                 acc += l.amount.offset(x, span);
             }
         }
-        let sum = (f64::from(base) + acc) as f32;
-        Some(circular.map_or(sum, |p| p.wrap(sum)))
+        let sum = base + acc;
+        Some(circular.map_or(sum, |_| Azimuth(sum).wrap().get()))
     }
 
     /// The next corner strictly after `at` on each clock: the earliest of

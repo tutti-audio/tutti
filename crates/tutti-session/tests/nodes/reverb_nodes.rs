@@ -76,7 +76,11 @@ fn the_plate_is_a_session_node_with_its_params_and_ceiling() {
     s.set(node.diffusion().to(Mix(0.25))).unwrap();
     assert_eq!(cells.get(UnitParam::Decay), Some(5.0));
     assert_eq!(cells.get(UnitParam::Diffusion), Some(0.25));
-    assert_eq!(cells.get(UnitParam::Damping), Some(0.0005), "untouched");
+    assert_eq!(
+        cells.get(UnitParam::Damping),
+        Some(f64::from(0.0005f32)),
+        "untouched"
+    );
     assert_eq!(cells.get(UnitParam::Freeze), None, "no freeze to write");
     let _ = s.update();
     let Tail::Finite(n) = s.graph_ref().node_tail(node).unwrap() else {

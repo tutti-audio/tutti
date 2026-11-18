@@ -152,9 +152,9 @@ fn the_ladder_corners_are_allocation_free_with_every_control_moving() {
                         rig.feed(1, Some(&lane(shape, 0.0, 1.0, 9.0)));
                         rig.feed(2, Some(&lane(shape, 0.0, 1e30, 1e30)));
                         let peak = walk(&mut rig, SR, 240, usize::from(width), |i| {
-                            set.set(UnitParam::Cutoff, CUTOFFS[i % CUTOFFS.len()]);
-                            set.set(UnitParam::Q, RESONANCES[i % RESONANCES.len()]);
-                            set.set(UnitParam::Drive, DRIVES[i % DRIVES.len()]);
+                            set.set(UnitParam::Cutoff, f64::from(CUTOFFS[i % CUTOFFS.len()]));
+                            set.set(UnitParam::Q, f64::from(RESONANCES[i % RESONANCES.len()]));
+                            set.set(UnitParam::Drive, f64::from(DRIVES[i % DRIVES.len()]));
                         });
                         let peak = peak.unwrap_or_else(|| {
                             panic!("{ty:?} width {width} lanes {shape}: not finite")
@@ -256,7 +256,10 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
                 rig.feed(1, Some(&lane(shape, 0.0, 1.0, 9.0)));
                 rig.feed(2, Some(&lane(shape, 0.0, 1e30, 1e30)));
                 let peak = walk(&mut rig, rate, 240, 2, |i| {
-                    set.set(UnitParam::Cutoff, hz(FRACTIONS[i % FRACTIONS.len()]));
+                    set.set(
+                        UnitParam::Cutoff,
+                        f64::from(hz(FRACTIONS[i % FRACTIONS.len()])),
+                    );
                     set.set(UnitParam::Q, if i % 2 == 0 { 1.0 } else { 0.0 });
                 });
                 let peak =
@@ -280,7 +283,10 @@ fn a_forked_ladder_and_crossover_are_allocation_free() {
     let mut rig = Direct::new(fork, SR, FRAMES);
     fill(&mut rig);
     let peak = walk(&mut rig, SR, 200, 1, |i| {
-        set.set(UnitParam::Cutoff, 100.0 + 50.0 * (i % 200) as f32);
+        set.set(
+            UnitParam::Cutoff,
+            f64::from(100.0 + 50.0 * (i % 200) as f32),
+        );
     });
     assert!(peak.is_some_and(|p| p <= 16.0 * 1.001), "{peak:?}");
     let crossover =
@@ -292,7 +298,7 @@ fn a_forked_ladder_and_crossover_are_allocation_free() {
     let peak = walk(&mut rig, SR, 200, 6, |i| {
         set.set(
             UnitAddr::new(UnitParam::Cutoff, 0),
-            100.0 + 5.0 * (i % 200) as f32,
+            f64::from(100.0 + 5.0 * (i % 200) as f32),
         );
     });
     assert!(peak.is_some(), "finite");
@@ -356,7 +362,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                 let peak = walk(&mut rig, SR, 240, outs, |i| {
                     for k in 0..bands - 1 {
                         let hz = SPLITS[(i + 3 * k) % SPLITS.len()];
-                        set.set(UnitAddr::new(UnitParam::Cutoff, k as u8), hz);
+                        set.set(UnitAddr::new(UnitParam::Cutoff, k as u8), f64::from(hz));
                     }
                 })
                 .unwrap_or_else(|| panic!("{bands} bands width {width} lanes {shape}: not finite"));
@@ -404,7 +410,11 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
                 cells.set(
                     UnitAddr::new(UnitParam::Cutoff, 0),
                     // A param word is an `f32`.
-                    if i % 2 == 0 { NAN } else { set[0] as f32 },
+                    if i % 2 == 0 {
+                        f64::from(NAN)
+                    } else {
+                        f64::from(set[0] as f32)
+                    },
                 );
             })
             .unwrap_or_else(|| panic!("{set:?} lanes {shape}: not finite"));

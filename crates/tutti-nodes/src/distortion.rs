@@ -503,7 +503,7 @@ mod tests {
         let mut n = hard_clip(1, 2.0);
         let x = vec![0.25f32; 64];
         for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            assert!(n.param_set().set(UnitParam::Drive, bad));
+            assert!(n.param_set().set(UnitParam::Drive, f64::from(bad)));
             let out = drive_block(&mut n, &[&x]);
             assert!(out[0].iter().all(|&y| y == 0.5), "written {bad}");
             let fed = vec![bad; 64];

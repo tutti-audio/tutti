@@ -186,9 +186,9 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     let set = node.param_set();
     gate(node, 0.5, 2_000, |i| {
         let t = (i % 50) as f32 / 50.0;
-        assert!(set.set(UnitParam::DelayTime, 0.005 + 0.03 * t));
-        assert!(set.set(UnitParam::Feedback, 0.2 + 0.5 * t));
-        assert!(set.set(UnitParam::CrossFeedback, 0.4 * (1.0 - t)));
+        assert!(set.set(UnitParam::DelayTime, f64::from(0.005 + 0.03 * t)));
+        assert!(set.set(UnitParam::Feedback, f64::from(0.2 + 0.5 * t)));
+        assert!(set.set(UnitParam::CrossFeedback, f64::from(0.4 * (1.0 - t))));
     });
     // A 6-wide chorus whose rate, depth and feedback all move every block: the depth and
     // feedback glides are in flight on every one, the rate lands whole at the grid.
@@ -196,9 +196,9 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     let c = chorus.param_set();
     gate(chorus, 0.5, 2_000, |i| {
         let t = (i % 50) as f32 / 50.0;
-        assert!(c.set(UnitParam::Depth, 0.002 + 0.01 * t));
-        assert!(c.set(UnitParam::Rate, 0.5 + 4.0 * t));
-        assert!(c.set(UnitParam::Feedback, 0.6 * t));
+        assert!(c.set(UnitParam::Depth, f64::from(0.002 + 0.01 * t)));
+        assert!(c.set(UnitParam::Rate, f64::from(0.5 + 4.0 * t)));
+        assert!(c.set(UnitParam::Feedback, f64::from(0.6 * t)));
     });
     // A 6-wide, 8-stage, staggered phaser whose rate, depth and feedback all move every
     // block, the glides in flight on every one.
@@ -213,9 +213,9 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     let p = phaser.param_set();
     gate(phaser, 0.5, 2_000, |i| {
         let t = (i % 50) as f32 / 50.0;
-        assert!(p.set(UnitParam::Rate, 0.5 + 4.0 * t));
-        assert!(p.set(UnitParam::Depth, t));
-        assert!(p.set(UnitParam::Feedback, 0.9 * t));
+        assert!(p.set(UnitParam::Rate, f64::from(0.5 + 4.0 * t)));
+        assert!(p.set(UnitParam::Depth, f64::from(t)));
+        assert!(p.set(UnitParam::Feedback, f64::from(0.9 * t)));
     });
 }
 
@@ -381,7 +381,7 @@ impl tutti_graph::Node for ParamProbe {
         tutti_graph::Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         (port == 0).then_some(0.0)
     }
 }
@@ -631,7 +631,7 @@ impl tutti_graph::Node for Probe8 {
         tutti_graph::Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         (port < PROBE8.len()).then_some(0.0)
     }
 }
@@ -804,7 +804,7 @@ fn lane_moves(
         }
     }
     for (k, c) in controls.iter().enumerate().skip(block % 7).step_by(7) {
-        c.set_knob(300.0 + ((k + block) % 13) as f32 * 20.0);
+        c.set_knob(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
     }
     if block % 15 == 14 {
         for k in (block % 9..200).step_by(9) {

@@ -63,7 +63,7 @@ impl Node for Declared {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         self.declared_base(port)
     }
 }

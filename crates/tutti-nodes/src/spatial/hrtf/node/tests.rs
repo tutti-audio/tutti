@@ -469,7 +469,7 @@ fn the_renderer_declares_its_params() {
     let bases: Vec<_> = (0..4).map(|k| node.param_base(k)).collect();
     assert_eq!(
         bases,
-        [Some(10.0), Some(20.0), Some(0.3), None],
+        [Some(10.0), Some(20.0), Some(f64::from(0.3f32)), None],
         "each port's base is its cell"
     );
 }
@@ -505,7 +505,7 @@ fn a_lane_drives_each_param_as_its_cell_would() {
         let at_default = settle(&mut default, None);
 
         let mut cell = make_node();
-        assert!(cell.param_set().set(param, value));
+        assert!(cell.param_set().set(param, f64::from(value)));
         Node::reset(&mut cell);
         let at_cell = settle(&mut cell, None);
         assert!(

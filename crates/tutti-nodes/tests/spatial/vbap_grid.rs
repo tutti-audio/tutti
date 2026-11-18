@@ -77,7 +77,9 @@ fn any_block_split_renders_the_same_bits() {
     for bed in [Bed::Stereo, Bed::Surround51, Bed::Surround714] {
         for width in [0.8f32, 0.0] {
             let mut reference = moving(bed);
-            reference.param_set().set(UnitParam::StereoWidth, width);
+            reference
+                .param_set()
+                .set(UnitParam::StereoWidth, f64::from(width));
             let want = bits(&render(&mut reference, &input, &[2_000]));
             for splits in [
                 &[1usize][..],
@@ -87,7 +89,8 @@ fn any_block_split_renders_the_same_bits() {
                 &[3, 29, 1, 64, 16, 15, 17],
             ] {
                 let mut node = moving(bed);
-                node.param_set().set(UnitParam::StereoWidth, width);
+                node.param_set()
+                    .set(UnitParam::StereoWidth, f64::from(width));
                 assert_eq!(
                     bits(&render(&mut node, &input, splits)),
                     want,

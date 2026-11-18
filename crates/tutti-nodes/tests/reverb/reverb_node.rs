@@ -424,8 +424,8 @@ fn a_non_finite_cell_write_is_ignored() {
     let set = hostile.node.param_set();
     for (i, chunk) in x.chunks(BLOCK).enumerate() {
         if i == 1 {
-            set.set(UnitParam::RoomSize, f32::NAN);
-            set.set(UnitParam::Damping, f32::INFINITY);
+            set.set(UnitParam::RoomSize, f64::NAN);
+            set.set(UnitParam::Damping, f64::INFINITY);
         }
         assert_eq!(
             hostile.block(chunk, &[]).audio,

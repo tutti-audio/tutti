@@ -108,8 +108,14 @@ fn the_attack_and_release_params_set_the_rise_and_the_fall() {
         SR,
         480,
     );
-    assert!(node.param_set().set(UnitParam::Attack, attack as f32));
-    assert!(node.param_set().set(UnitParam::Release, release as f32));
+    assert!(
+        node.param_set()
+            .set(UnitParam::Attack, f64::from(attack as f32))
+    );
+    assert!(
+        node.param_set()
+            .set(UnitParam::Release, f64::from(release as f32))
+    );
     let x: Vec<f32> = (0..rise + fall)
         .map(|n| {
             let level = if n < rise { high } else { low };

@@ -118,7 +118,7 @@ fn svf_filter_with_parameter_changes_is_allocation_free() {
         SvfFilterNode::<f64>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0)),
         move |params, _| {
             hz = if hz > 4_000.0 { 500.0 } else { hz + 1.0 };
-            params.set(tutti_units::UnitParam::Cutoff, hz);
+            params.set(tutti_units::UnitParam::Cutoff, f64::from(hz));
         },
     );
 }
@@ -139,8 +139,11 @@ fn ladder_with_moving_cutoff_and_drive_is_allocation_free() {
         ),
         move |params, i| {
             hz = if hz > 4_000.0 { 500.0 } else { hz + 7.0 };
-            params.set(tutti_units::UnitParam::Cutoff, hz);
-            params.set(tutti_units::UnitParam::Drive, 1.0 + (i % 7) as f32);
+            params.set(tutti_units::UnitParam::Cutoff, f64::from(hz));
+            params.set(
+                tutti_units::UnitParam::Drive,
+                f64::from(1.0 + (i % 7) as f32),
+            );
         },
     );
 }

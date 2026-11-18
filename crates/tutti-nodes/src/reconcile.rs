@@ -77,7 +77,7 @@ pub enum Target {
         /// Which of its event inputs takes parameter events.
         port: u16,
         /// The knob's first value.
-        knob: Option<f32>,
+        knob: Option<f64>,
     },
     /// The gain of a graph edge (`TargetKey::Edge`): the edge the host's key
     /// names. The lane drives it through
@@ -217,7 +217,7 @@ enum Bind {
     Foreign {
         to: EventIn,
         id: ParamId,
-        knob: Option<f32>,
+        knob: Option<f64>,
         generation: u32,
     },
     Edge {

@@ -305,7 +305,7 @@ fn test_unison_creates_subvoices() {
 /// knob (`AudioParam`, `write_param`) and as a control lane's knob is
 /// the same cell: `false` for a param the set lacks.
 fn set(synth: &PolySynth, p: tutti_units::UnitParam, value: f32) -> bool {
-    tutti_graph::ParamNode::param_set(synth).set(p, value)
+    tutti_graph::ParamNode::param_set(synth).set(p, f64::from(value))
 }
 
 #[test]

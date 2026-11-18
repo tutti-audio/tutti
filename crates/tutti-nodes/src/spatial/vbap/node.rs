@@ -456,7 +456,7 @@ impl Node for VbapPannerNode {
         self.pos = 0;
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

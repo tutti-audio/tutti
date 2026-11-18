@@ -638,7 +638,7 @@ impl<K: Kernel> Node for KernelNode<K> {
         self.clear();
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.params.base(k)
     }
 }

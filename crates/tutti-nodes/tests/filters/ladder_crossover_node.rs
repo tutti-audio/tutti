@@ -24,8 +24,8 @@ fn noise(seed: u32, frames: usize) -> Vec<f32> {
 trait Cutoff: Node + ParamNode + Clone + 'static {
     const NAME: &'static str;
     fn build() -> Self;
-    fn set_cutoff(&self, hz: f32) -> bool;
-    fn cutoff(&self) -> Option<f32>;
+    fn set_cutoff(&self, hz: f64) -> bool;
+    fn cutoff(&self) -> Option<f64>;
 }
 
 impl Cutoff for LadderFilterNode<f64> {
@@ -38,10 +38,10 @@ impl Cutoff for LadderFilterNode<f64> {
             Resonance(0.7),
         )
     }
-    fn set_cutoff(&self, hz: f32) -> bool {
+    fn set_cutoff(&self, hz: f64) -> bool {
         self.param_set().set(UnitParam::Cutoff, hz)
     }
-    fn cutoff(&self) -> Option<f32> {
+    fn cutoff(&self) -> Option<f64> {
         self.param_base(0)
     }
 }
@@ -51,11 +51,11 @@ impl Cutoff for CrossoverNode<f32> {
     fn build() -> Self {
         CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)]).unwrap()
     }
-    fn set_cutoff(&self, hz: f32) -> bool {
+    fn set_cutoff(&self, hz: f64) -> bool {
         self.param_set()
             .set(UnitAddr::new(UnitParam::Cutoff, 0), hz)
     }
-    fn cutoff(&self) -> Option<f32> {
+    fn cutoff(&self) -> Option<f64> {
         self.param_base(0)
     }
 }

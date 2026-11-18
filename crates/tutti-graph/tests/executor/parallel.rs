@@ -75,7 +75,7 @@ impl Node for ParamSink {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         [1.0, 2.0].get(port).copied()
     }
 }

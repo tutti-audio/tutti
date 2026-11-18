@@ -1470,7 +1470,7 @@ impl<F: Float> Node<F> for MemorySource<F> {
         self.rewind();
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

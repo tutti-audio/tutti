@@ -551,7 +551,11 @@ mod tests {
             Some(1000.0),
             "cutoff's base is its control"
         );
-        assert_eq!(f.param_base(1), Some(0.7), "Q's base is its control");
+        assert_eq!(
+            f.param_base(1),
+            Some(f64::from(0.7f32)),
+            "Q's base is its control"
+        );
         assert_eq!(f.param_base(2), Some(0.0), "gain's base is its control");
         assert_eq!(shape.tail, Tail::Unknown, "a resonant filter rings on");
     }
@@ -801,7 +805,7 @@ mod tests {
         f.param_set()
             .cell(UnitParam::Cutoff)
             .unwrap()
-            .store(f32::NAN, std::sync::atomic::Ordering::Release);
+            .store(f64::NAN, std::sync::atomic::Ordering::Release);
         let held = next(&mut f);
         assert!(held.iter().all(|s| s.is_finite()), "a NaN alone");
         assert!(f.param_set().set(UnitParam::Q, 3.0));

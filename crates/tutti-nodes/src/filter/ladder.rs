@@ -534,7 +534,7 @@ mod tests {
             (6, 6)
         );
         assert_eq!(f.param_base(0), Some(1000.0));
-        assert_eq!(f.param_base(1), Some(0.3));
+        assert_eq!(f.param_base(1), Some(f64::from(0.3f32)));
         assert_eq!(f.param_base(2), Some(1.0), "drive starts clean");
         assert_eq!(f.shape().tail, Tail::Unknown, "a resonant ladder rings on");
     }

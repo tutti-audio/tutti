@@ -160,11 +160,9 @@ fn an_inputs_offset_is_depth_times_span_times_x() {
     );
 }
 
-/// Layers sum in `f64` and round once: the offsets sum to
-/// 11 000 000.0149 and the knob is 0.5, so the `f64` sum rounds up to
-/// 11 000 001, where any intermediate `f32` rounding lands on the tie
-/// 11 000 000.5 and rounds to even, 11 000 000. Insertion order does not
-/// matter: `new` sorts by id.
+/// Layers sum in `f64` and the value is the sum, unrounded: the offsets sum to
+/// 11 000 000.0149 and the knob is 0.5, so the value is 11 000 000.5149, which
+/// an `f32` cannot hold. Insertion order does not matter: `new` sorts by id.
 #[test]
 fn layers_sum_in_id_order_in_f64() {
     let l = |id, d| layer(id, beats(4.0), LfoShape::Square, amount(d));
@@ -173,9 +171,10 @@ fn layers_sum_in_id_order_in_f64() {
     assert_eq!(a, b);
     let span = 1.0e7;
     let want =
-        (0.5f64 + f64::from(0.1f32) * span + f64::from(0.7f32) * span + f64::from(0.3f32) * span)
-            as f32;
-    assert_eq!(want, 11_000_001.0);
+        0.5f64 + f64::from(0.1f32) * span + f64::from(0.7f32) * span + f64::from(0.3f32) * span;
+    // An `f32` cannot hold the sum: it rounds to 11 000 000.5's neighbour.
+    assert_ne!(f64::from(want as f32), want);
+    assert_eq!(want, 11_000_000.514_901_161);
     assert_eq!(
         a.value_at(None, Some(0.5), &at_beat(1.0), span, &[]),
         Some(want)
@@ -200,8 +199,8 @@ fn phase_survives_a_depth_edit() {
     let b = program(vec![layer(1, clock, LfoShape::Sine, amount(0.6))]);
     for k in 0..50 {
         let t = at_play(f64::from(k) * 977.0, 5);
-        let va = f64::from(a.value_at(None, Some(0.0), &t, 10.0, &[]).unwrap());
-        let vb = f64::from(b.value_at(None, Some(0.0), &t, 10.0, &[]).unwrap());
+        let va = a.value_at(None, Some(0.0), &t, 10.0, &[]).unwrap();
+        let vb = b.value_at(None, Some(0.0), &t, 10.0, &[]).unwrap();
         let phase = 3.0 * f64::from(k) * 977.0 / SR + 0.125;
         let want = (phase * std::f64::consts::TAU).sin() * 3.0;
         assert!((va - want).abs() < 1e-5, "{k}: {va} vs {want}");
@@ -631,7 +630,7 @@ fn the_unit_depth_by_is_half_raw_plus_one_in_f64() {
         };
         let span = 1000.0;
         let off = Amount::offset(&amount(0.25), 1.0, span);
-        let want = (f64::from(100.0f32) + (-0.0 + off * ((f64::from(raw) + 1.0) * 0.5))) as f32;
+        let want = 100.0f64 + (-0.0 + off * ((f64::from(raw) + 1.0) * 0.5));
         let d = l.depth_by.clone().expect("scaled");
         assert_eq!(
             d.scale(raw).to_bits(),
@@ -728,7 +727,7 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
     let p = ControlProgram::from_curve(Arc::new(e));
     let az = UnitParam::Azimuth;
     for b in [0.5f64, 1.0, 1.9, 2.0, 2.1, 3.0, 3.5] {
-        let want = az.wrap((170.0 + 5.0 * b) as f32);
+        let want = Azimuth(170.0 + 5.0 * b).wrap().get();
         let got = p
             .value_at(Some(az), None, &at_beat(b), 360.0, &[])
             .expect("a value");
@@ -743,12 +742,9 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
         let line = p
             .value_at(Some(UnitParam::Elevation), None, &at_beat(b), 360.0, &[])
             .expect("a value");
-        assert!(
-            (f64::from(line) - (170.0 - 85.0 * b)).abs() < 1e-3,
-            "beat {b}: {line}"
-        );
+        assert!((line - (170.0 - 85.0 * b)).abs() < 1e-3, "beat {b}: {line}");
     }
-    // 170 and a constant layer of 0.1 of a 360 arc (36) is 206: -154.
+    // 170 and a constant layer of 0.1 of a 360 arc (36, to the depth's `f32`) is 206: -154.
     let l = layer(1, beats(4.0), LfoShape::Square, amount(0.1));
     let l = Layer {
         wave: Waveform::Const(1.0),
@@ -757,7 +753,7 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
     let q = program(vec![l]);
     assert_eq!(
         q.value_at(Some(az), Some(170.0), &at_beat(1.0), 360.0, &[]),
-        Some(-154.0)
+        Some(Azimuth(170.0 + f64::from(0.1f32) * 360.0).wrap().get())
     );
     assert_eq!(
         q.value_at(
@@ -767,7 +763,7 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
             360.0,
             &[]
         ),
-        Some(206.0),
+        Some(170.0 + f64::from(0.1f32) * 360.0),
         "a line's sum is not wrapped"
     );
 }

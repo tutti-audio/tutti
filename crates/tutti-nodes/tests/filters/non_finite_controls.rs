@@ -73,10 +73,10 @@ fn survives_node<N: Node>(name: &str, make: impl Fn() -> N, cells: impl Fn(&N) -
             let cs = cells(&node);
             let (cell, atomic, alt) = &cs[k];
             let before = atomic.load(Ordering::Acquire);
-            atomic.store(bad, Ordering::Release);
+            atomic.store(f64::from(bad), Ordering::Release);
             for (j, (_, other, other_alt)) in cs.iter().enumerate() {
                 if j != k {
-                    other.store(*other_alt, Ordering::Release);
+                    other.store(f64::from(*other_alt), Ordering::Release);
                 }
             }
             assert!(
@@ -89,7 +89,11 @@ fn survives_node<N: Node>(name: &str, make: impl Fn() -> N, cells: impl Fn(&N) -
                 "{name}: {cell} = {bad} reached the output through a rate change"
             );
             atomic.store(
-                if before.is_finite() { *alt } else { before },
+                if before.is_finite() {
+                    f64::from(*alt)
+                } else {
+                    before
+                },
                 Ordering::Release,
             );
             assert!(

@@ -74,7 +74,7 @@ fn gains(bed: Bed, azimuth: f64, elevation: f64, spread: f32) -> Vec<f32> {
     let mut node = prepared(VbapPannerNode::new(bed).unwrap(), RATE, 16);
     let params = node.param_set();
     params.set(UnitParam::StereoWidth, 0.0);
-    params.set(UnitParam::Spread, spread);
+    params.set(UnitParam::Spread, f64::from(spread));
     aim(&params, Azimuth(azimuth), Elevation(elevation));
     let ones = [1.0f32; 16];
     let out = drive(&mut node, RATE, Planes::new(&[&ones, &ones]).unwrap(), &[]);

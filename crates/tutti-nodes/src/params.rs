@@ -1,7 +1,7 @@
 //! One reader for the cells of every [`KernelNode`](crate::KernelNode).
 //!
 //! A kernel writes a [`ControlSet`]: its addresses, and the conversion between its
-//! `Controls` and the `f32`s the ports carry. [`Params`] is the one reader over it,
+//! `Controls` and the `f64` cells. [`Params`] is the one reader over it,
 //! with one rule for every control: the lane's value at
 //! the solve frame when a lane drives it, else a glide from the controls last
 //! designed to the cell's value, each read through [`LastGood`]. Sanitising
@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
 use tutti_dsp::{GAIN_GLIDE, Glide};
 use tutti_graph::{Io, ParamSetBuilder};
-use tutti_types::AtomicF32;
+use tutti_types::AtomicF64;
 use tutti_units::{SampleRate, UnitAddr};
 
 use crate::kernel::MAX_LANES;
@@ -27,7 +27,7 @@ use crate::ramp::LastGood;
 /// limiter's three fit with room.
 const MAX_CONTROLS: usize = 16;
 
-/// A kernel's controls as a list of `f32` cells.
+/// A kernel's controls as a list of `f64` cells.
 pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// The design's own `Controls`.
     type Controls: Copy + PartialEq + Send;
@@ -39,12 +39,12 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// The controls a non-finite cell falls back to.
     fn defaults(&self) -> Self::Controls;
 
-    /// `c` as one `f32` per address (`out.len() == addrs().len()`).
-    fn flatten(&self, c: &Self::Controls, out: &mut [f32]);
+    /// `c` as one `f64` per address (`out.len() == addrs().len()`).
+    fn flatten(&self, c: &Self::Controls, out: &mut [f64]);
 
-    /// The controls of one `f32` per address: the inverse of
+    /// The controls of one `f64` per address: the inverse of
     /// [`flatten`](Self::flatten).
-    fn assemble(&self, v: &[f32]) -> Self::Controls;
+    fn assemble(&self, v: &[f64]) -> Self::Controls;
 
     /// The controls that ring longest, given each one's lowest and highest value
     /// in the block. Only a design that parks asks; the default is the highest.
@@ -139,7 +139,7 @@ impl Control {
 
     /// Whether the control takes `v`.
     #[must_use]
-    pub(crate) fn accepts(self, v: f32) -> bool {
+    pub(crate) fn accepts(self, v: f64) -> bool {
         match self.valid {
             ControlValid::Finite => v.is_finite(),
             ControlValid::NotNan => !v.is_nan(),
@@ -175,7 +175,7 @@ pub trait HasControl<const P: u16> {
 pub trait HasControls<const P: u16>: HasControl<P> {}
 
 /// Writes a kernel's [`ControlSet`] from its `Controls` fields, once: the
-/// addresses, the conversion to the `f32`s the ports carry and back, and the
+/// addresses, the conversion to the `f64` cells and back, and the
 /// unit of each control ([`HasControl`]). The unit a row states is checked
 /// against the field's own type (`flatten` reads it as that unit), so a
 /// mismatch does not compile.
@@ -234,7 +234,7 @@ macro_rules! control_set {
                 ALL[k]
             }
 
-            fn flatten(&self, c: &$controls, out: &mut [f32]) {
+            fn flatten(&self, c: &$controls, out: &mut [f64]) {
                 let all = [$(
                     <$unit as tutti_graph::ParamUnit>::to_cell(c.$f $([$pi])?)
                 ),+];
@@ -242,7 +242,7 @@ macro_rules! control_set {
             }
 
             #[allow(unused_variables)]
-            fn assemble(&self, v: &[f32]) -> $controls {
+            fn assemble(&self, v: &[f64]) -> $controls {
                 let $s = self;
                 let mut c: $controls = $base;
                 let mut cells = v.iter().copied();
@@ -293,14 +293,14 @@ pub struct At {
 /// stood to the cell's value, over the frames from `start`.
 #[derive(Clone, Copy, Debug)]
 struct CellGlide {
-    glide: Glide<f32>,
+    glide: Glide<f64>,
     /// The stream frame of the glide's first frame, which reads step 1.
     start: u64,
 }
 
 impl CellGlide {
     /// Landed on `value` at stream frame `start`.
-    fn landed(value: f32, start: u64) -> Self {
+    fn landed(value: f64, start: u64) -> Self {
         Self {
             glide: Glide::landed(value),
             start,
@@ -308,7 +308,7 @@ impl CellGlide {
     }
 
     /// The control's value at stream frame `position`.
-    fn at(&self, position: u64) -> f32 {
+    fn at(&self, position: u64) -> f64 {
         let i = position.saturating_sub(self.start);
         self.glide
             .at(u32::try_from(i).map_or(u32::MAX, |i| i.saturating_add(1)))
@@ -319,10 +319,10 @@ impl CellGlide {
 #[derive(Clone, Debug)]
 pub struct Params<S: ControlSet> {
     set: S,
-    cells: Vec<Arc<AtomicF32>>,
+    cells: Vec<Arc<AtomicF64>>,
     /// The last finite value each control held: a non-finite write reads as
     /// unchanged, so it never reaches the design.
-    good: Vec<LastGood>,
+    good: Vec<LastGood<f64>>,
     /// How each control is read, from [`ControlSet::control`].
     controls: [Control; MAX_CONTROLS],
     /// The fast controls, by index, in the order of the lanes they fill.
@@ -349,7 +349,7 @@ impl<S: ControlSet> Params<S> {
     #[must_use]
     pub fn new(set: S, initial: &S::Controls) -> Self {
         let n = set.addrs().len();
-        let (mut value, mut fallback) = ([0.0; MAX_CONTROLS], [0.0; MAX_CONTROLS]);
+        let (mut value, mut fallback) = ([0.0f64; MAX_CONTROLS], [0.0f64; MAX_CONTROLS]);
         set.flatten(initial, &mut value[..n]);
         set.flatten(&set.defaults(), &mut fallback[..n]);
         let (mut cells, mut good) = (Vec::with_capacity(n), Vec::with_capacity(n));
@@ -367,7 +367,7 @@ impl<S: ControlSet> Params<S> {
             }
             let ok = controls[k].accepts(value[k]);
             let mut g = LastGood::new_if(value[k], fallback[k], ok);
-            cells.push(Arc::new(AtomicF32::new(g.read_if(value[k], ok))));
+            cells.push(Arc::new(AtomicF64::new(g.read_if(value[k], ok))));
             good.push(g);
         }
         Self {
@@ -433,22 +433,22 @@ impl<S: ControlSet> Params<S> {
 
     /// Each control's lowest and highest value in the block (the cell's where no
     /// lane drives it), or `None` when no lane does.
-    fn extremes(&self, io: &Io<'_>) -> Option<[[f32; MAX_CONTROLS]; 2]> {
+    fn extremes(&self, io: &Io<'_>) -> Option<[[f64; MAX_CONTROLS]; 2]> {
         let mut out = [[0.0; MAX_CONTROLS]; 2];
         let mut driven = false;
         for (k, cell) in self.cells.iter().enumerate() {
             let lane = io.param(k).frames();
             driven |= lane.is_some();
             let base = cell.load(Acquire);
-            let fold = |pick: fn(f32, f32) -> f32| {
+            let fold = |pick: fn(f64, f64) -> f64| {
                 lane.into_iter()
                     .flatten()
-                    .copied()
+                    .map(|&v| f64::from(v))
                     .filter(|v| v.is_finite())
                     .fold(base, pick)
             };
-            out[0][k] = fold(f32::min);
-            out[1][k] = fold(f32::max);
+            out[0][k] = fold(f64::min);
+            out[1][k] = fold(f64::max);
         }
         driven.then_some(out)
     }
@@ -474,7 +474,7 @@ impl<S: ControlSet> Params<S> {
 
     /// The controls the cells hold now, each read once.
     pub(crate) fn held(&self) -> S::Controls {
-        let mut values = [0.0; MAX_CONTROLS];
+        let mut values = [0.0f64; MAX_CONTROLS];
         for (v, cell) in values.iter_mut().zip(&self.cells) {
             *v = cell.load(Acquire);
         }
@@ -482,7 +482,7 @@ impl<S: ControlSet> Params<S> {
     }
 
     /// The base of the `k`th address ([`Node::param_base`](tutti_graph::Node::param_base)): its cell's value.
-    pub(crate) fn base(&self, k: usize) -> Option<f32> {
+    pub(crate) fn base(&self, k: usize) -> Option<f64> {
         self.cells.get(k).map(|c| c.load(Acquire))
     }
 
@@ -494,7 +494,7 @@ impl<S: ControlSet> Params<S> {
     /// [`ControlRead::Whole`] one is its cell.
     pub(crate) fn read(&mut self, io: &Io<'_>, at: At) -> S::Controls {
         let n = self.cells.len();
-        let mut value = [0.0; MAX_CONTROLS];
+        let mut value = [0.0f64; MAX_CONTROLS];
         for (k, v) in value[..n].iter_mut().enumerate() {
             let control = self.controls[k];
             let lane = match control.read {
@@ -503,7 +503,7 @@ impl<S: ControlSet> Params<S> {
             };
             *v = match (lane, control.read) {
                 (Some(lane), _) => {
-                    let x = lane[at.frame];
+                    let x = f64::from(lane[at.frame]);
                     self.good[k].read_if(x, control.accepts(x))
                 }
                 (None, ControlRead::Glide) => {
@@ -567,7 +567,7 @@ impl<S: ControlSet> Params<S> {
     /// Stops sharing the cells, keeping their values: a fork's own.
     pub(crate) fn detach(&mut self) {
         for cell in &mut self.cells {
-            *cell = Arc::new(AtomicF32::new(cell.load(Acquire)));
+            *cell = Arc::new(AtomicF64::new(cell.load(Acquire)));
         }
     }
 
@@ -583,7 +583,7 @@ mod tests {
 
     /// A glide of `n` frames from `from` to `to` begun at stream frame `start`, as
     /// [`Params::begin`] builds it.
-    fn aimed(from: f32, to: f32, n: u32, start: u64) -> CellGlide {
+    fn aimed(from: f64, to: f64, n: u32, start: u64) -> CellGlide {
         let mut glide = Glide::landed(from);
         glide.aim_in(to, n);
         CellGlide { glide, start }
@@ -593,14 +593,13 @@ mod tests {
     /// last frame is `to` to the bit, whatever the arithmetic rounds to.
     #[test]
     fn a_cell_glide_is_linear_and_lands_on_its_target_bits() {
-        for (from, to, n) in [(0.7f32, 0.2f32, 64u32), (3.3, 1.1, 17), (0.0, 1.0, 240)] {
+        for (from, to, n) in [(0.7f64, 0.2f64, 64u32), (3.3, 1.1, 17), (0.0, 1.0, 240)] {
             let g = aimed(from, to, n, 1_000);
             for i in 0..n - 1 {
-                let want = f64::from(from)
-                    + (f64::from(to) - f64::from(from)) * f64::from(i + 1) / f64::from(n);
-                let got = f64::from(g.at(1_000 + u64::from(i)));
+                let want = from + (to - from) * f64::from(i + 1) / f64::from(n);
+                let got = g.at(1_000 + u64::from(i));
                 assert!(
-                    (got - want).abs() < 1e-6,
+                    (got - want).abs() < 1e-12,
                     "{from} -> {to}: frame {i}: {got} vs {want}"
                 );
             }
@@ -630,10 +629,10 @@ mod tests {
         let first = aimed(0.0, 1.0, 100, 0);
         let before = first.at(39);
         let second = aimed(before, 0.25, 50, 40);
-        let step = (0.25 - f64::from(before)) / 50.0;
-        let got = f64::from(second.at(40));
-        assert!((got - (f64::from(before) + step)).abs() < 1e-6, "{got}");
-        assert_eq!(second.at(40 + 49).to_bits(), 0.25f32.to_bits());
+        let step = (0.25 - before) / 50.0;
+        let got = second.at(40);
+        assert!((got - (before + step)).abs() < 1e-12, "{got}");
+        assert_eq!(second.at(40 + 49).to_bits(), 0.25f64.to_bits());
     }
 
     /// A set of one glided control.
@@ -641,18 +640,18 @@ mod tests {
     struct One;
 
     impl ControlSet for One {
-        type Controls = f32;
+        type Controls = f64;
         fn addrs(&self) -> &'static [UnitAddr] {
             const ADDRS: [UnitAddr; 1] = [UnitAddr::first(tutti_units::UnitParam::Cutoff)];
             &ADDRS
         }
-        fn defaults(&self) -> f32 {
+        fn defaults(&self) -> f64 {
             0.0
         }
-        fn flatten(&self, c: &f32, out: &mut [f32]) {
+        fn flatten(&self, c: &f64, out: &mut [f64]) {
             out[0] = *c;
         }
-        fn assemble(&self, v: &[f32]) -> f32 {
+        fn assemble(&self, v: &[f64]) -> f64 {
             v[0]
         }
     }
@@ -667,7 +666,7 @@ mod tests {
 
     /// A cell at 0 written to 1 before frame [`FIRST`] and to 0.25 before [`SECOND`],
     /// read per frame through [`Params::begin`] in blocks of `block` frames.
-    fn stream(block: u64) -> Vec<f32> {
+    fn stream(block: u64) -> Vec<f64> {
         let mut params = Params::new(One, &0.0);
         params.retune(SampleRate::SR_48K, true);
         params.glide = N as usize;
@@ -698,8 +697,8 @@ mod tests {
         let got = stream(64);
         let line = |from: f64, to: f64, k: u64| from + (to - from) * k as f64 / N as f64;
         let near = |frame: u64, want: f64| {
-            let got = f64::from(got[frame as usize]);
-            assert!((got - want).abs() < 1e-6, "frame {frame}: {got} vs {want}");
+            let got = got[frame as usize];
+            assert!((got - want).abs() < 1e-12, "frame {frame}: {got} vs {want}");
         };
         near(FIRST - 1, 0.0);
         near(FIRST, line(0.0, 1.0, 1));
@@ -707,8 +706,8 @@ mod tests {
         let mid = line(0.0, 1.0, SECOND - FIRST);
         near(SECOND, line(mid, 0.25, 1));
         near(SECOND + 499, line(mid, 0.25, 500));
-        assert_eq!(got[(SECOND + N - 1) as usize].to_bits(), 0.25f32.to_bits());
-        assert_eq!(got[TOTAL as usize - 1].to_bits(), 0.25f32.to_bits());
+        assert_eq!(got[(SECOND + N - 1) as usize].to_bits(), 0.25f64.to_bits());
+        assert_eq!(got[TOTAL as usize - 1].to_bits(), 0.25f64.to_bits());
     }
 
     /// The same writes read in blocks of 1, 7 and 64 frames give the same value on every
@@ -722,5 +721,18 @@ mod tests {
                 assert_eq!(g.to_bits(), w.to_bits(), "block {block}, frame {f}");
             }
         }
+    }
+
+    /// A control cell holds an `f64` figure `f32` cannot: what a host writes is what
+    /// the controls hold and what `param_base` says, to the bit, with no narrowing
+    /// between.
+    #[test]
+    fn an_f64_control_round_trips_a_figure_f32_cannot_hold() {
+        const FINE: f64 = 1_000.000_000_1;
+        assert_ne!(f64::from(FINE as f32), FINE, "setup: f32 loses FINE");
+        let params = Params::new(One, &0.0);
+        params.cells[0].store(FINE, Relaxed);
+        assert_eq!(params.held().to_bits(), FINE.to_bits());
+        assert_eq!(params.base(0).map(f64::to_bits), Some(FINE.to_bits()));
     }
 }

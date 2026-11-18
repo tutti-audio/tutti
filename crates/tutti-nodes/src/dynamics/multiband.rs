@@ -592,7 +592,7 @@ impl<F: Float + Lanes + Lerp> Node for MultibandCompressorNode<F> {
         }
     }
 
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         self.declared_base(port)
     }
 }
@@ -714,7 +714,7 @@ mod tests {
         /// Writes `v` to `kind` at `index`; the node must have it.
         fn put(&self, kind: UnitParam, index: u8, v: f32) {
             assert!(
-                self.set.set(UnitAddr::new(kind, index), v),
+                self.set.set(UnitAddr::new(kind, index), f64::from(v)),
                 "{kind:?} {index}"
             );
         }
@@ -1405,10 +1405,10 @@ mod tests {
             let ports = n.shape().params;
             for (k, &addr) in ports.as_slice().iter().enumerate() {
                 let v = 100.0 + k as f32;
-                assert!(set.set(addr, v));
+                assert!(set.set(addr, f64::from(v)));
                 assert_eq!(
                     n.param_base(k),
-                    Some(v),
+                    Some(f64::from(v)),
                     "{bands} bands, port {k}: {addr:?}"
                 );
             }

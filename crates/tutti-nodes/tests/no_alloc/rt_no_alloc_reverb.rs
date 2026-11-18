@@ -136,7 +136,14 @@ fn the_fdn_corners_are_allocation_free_with_every_control_moving() {
         // One control moving between its ends, the rest at the default.
         for c in &all {
             gate(layout, 200, |set, i| {
-                assert!(set.set(c.addr, if i % 2 == 0 { c.lo } else { c.hi }));
+                assert!(set.set(
+                    c.addr,
+                    if i % 2 == 0 {
+                        f64::from(c.lo)
+                    } else {
+                        f64::from(c.hi)
+                    }
+                ));
             });
         }
         // Every control at once: to the low corner, to the high corner, and alternating.
@@ -148,7 +155,14 @@ fn the_fdn_corners_are_allocation_free_with_every_control_moving() {
                         1 => true,
                         _ => i % 2 == 1,
                     };
-                    assert!(set.set(c.addr, if high { c.hi } else { c.lo }));
+                    assert!(set.set(
+                        c.addr,
+                        if high {
+                            f64::from(c.hi)
+                        } else {
+                            f64::from(c.lo)
+                        }
+                    ));
                 }
             });
         }

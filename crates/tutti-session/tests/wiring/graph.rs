@@ -103,8 +103,8 @@ impl Node for Knob {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
-        (port == 0).then(|| self.drive.load().get())
+    fn param_base(&self, port: usize) -> Option<f64> {
+        (port == 0).then(|| f64::from(self.drive.load().get()))
     }
 }
 

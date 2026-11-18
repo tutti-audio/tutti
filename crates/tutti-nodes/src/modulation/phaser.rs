@@ -466,7 +466,7 @@ mod tests {
         let render = |cell: Option<f32>, lane: Option<f32>| {
             let node = PhaserNode::<f32>::mono(Stages::of(4), controls);
             if let Some(v) = cell {
-                assert!(node.param_set().set(UnitParam::Rate, v));
+                assert!(node.param_set().set(UnitParam::Rate, f64::from(v)));
             }
             let mut node = prepared(node, RATE, 64);
             let mut y = Vec::new();

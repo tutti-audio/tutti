@@ -454,7 +454,7 @@ impl Node for BusStripNode {
         self.ramp_from = None;
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }
@@ -520,7 +520,7 @@ mod tests {
     /// `ParamSet` — rather than by calling the setter, so the test covers the
     /// path `AudioParam<U, P>` uses. `false` if the strip refused it.
     fn set_param(strip: &BusStripNode, param: UnitParam, value: f32) -> bool {
-        strip.param_set().set(param, value)
+        strip.param_set().set(param, f64::from(value))
     }
 
     fn set_balance(strip: &BusStripNode, balance: f32) {

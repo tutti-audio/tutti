@@ -62,9 +62,8 @@ use tutti_units::{
 /// two writes a test makes together. The panner wraps the bearing and clamps
 /// the height when it reads them.
 pub fn aim(params: &ParamSet, azimuth: Azimuth, elevation: Elevation) {
-    // A `ParamSet` is addressed in the host's `f32`: the angles narrow here.
-    params.set(UnitParam::Azimuth, azimuth.get() as f32);
-    params.set(UnitParam::Elevation, elevation.get() as f32);
+    params.set(UnitParam::Azimuth, azimuth.get());
+    params.set(UnitParam::Elevation, elevation.get());
 }
 
 /// Each stimulus node is its own [`IntoNode`]: forkable by clone, as none

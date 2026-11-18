@@ -269,8 +269,7 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
         for curve in curves {
             for raw in [1.0f32, -1.0, 0.5, -0.5] {
                 let depth = Depth::of(-0.35);
-                let want =
-                    (0.0f64 + (-0.0 + f64::from(shape(raw, depth, polarity, curve)) * span)) as f32;
+                let want = 0.0f64 + (-0.0 + f64::from(shape(raw, depth, polarity, curve)) * span);
                 let r = |source, t| RouteDecl {
                     source: SourceKey(source),
                     to: RouteTarget::Param(t),
@@ -398,10 +397,7 @@ fn a_macro_move_changes_exactly_the_programs_it_reaches() {
     let at = time(0.0, 0.0, 1);
     assert_eq!(
         after.programs[&target(2)].value_at(None, Some(0.0), &at, 2.0, &[]),
-        Some(
-            (-0.0 + f64::from(shape(-0.75, Depth::of(0.2), Polarity::Bipolar, Law::Linear)) * 2.0)
-                as f32
-        ),
+        Some(-0.0 + f64::from(shape(-0.75, Depth::of(0.2), Polarity::Bipolar, Law::Linear)) * 2.0),
         "depth 0.2 of a span of 2, at the macro's −0.75"
     );
 }
@@ -452,10 +448,8 @@ fn a_rate_edit_anchors_continuously() {
     // The value through the lane's evaluation: no step at the anchor.
     let v = |play: f64| {
         let p = &after.programs[&target(1)];
-        f64::from(
-            p.value_at(None, Some(0.0), &time(0.0, play, 7), 1000.0, &[None])
-                .expect("a value"),
-        )
+        p.value_at(None, Some(0.0), &time(0.0, play, 7), 1000.0, &[None])
+            .expect("a value")
     };
     // 0.3 of a span of 1000 at 5 Hz: at most 300 · 2π · 5 / 48 000 a frame.
     let frame_slope = 300.0 * std::f64::consts::TAU * 5.0 / SR.get();

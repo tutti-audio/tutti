@@ -203,7 +203,7 @@ fn svf_channels_are_independent_mono_filters() {
         "svf automated",
         svf,
         Moves::cells(|set, k| {
-            assert!(set.set(UnitParam::Cutoff, 300.0 + 700.0 * (k % 5) as f32));
+            assert!(set.set(UnitParam::Cutoff, f64::from(300.0 + 700.0 * (k % 5) as f32)));
         }),
     );
 }
@@ -222,7 +222,7 @@ fn ladder_channels_are_independent_mono_filters() {
         "ladder drive automated",
         ladder,
         Moves::cells(|set, k| {
-            assert!(set.set(UnitParam::Drive, 1.0 + (k % 4) as f32));
+            assert!(set.set(UnitParam::Drive, f64::from(1.0 + (k % 4) as f32)));
         }),
     );
 }
@@ -242,7 +242,7 @@ fn delay_channels_are_independent_mono_delays() {
         "delay automated",
         delay,
         Moves::cells(|set, k| {
-            assert!(set.set(UnitParam::Feedback, 0.1 * (k % 8) as f32));
+            assert!(set.set(UnitParam::Feedback, f64::from(0.1 * (k % 8) as f32)));
         }),
     );
 }
@@ -265,8 +265,8 @@ fn chorus_channels_are_independent_mono_choruses() {
         "chorus automated",
         chorus,
         Moves::cells(|set, k| {
-            assert!(set.set(UnitParam::Rate, 0.5 + 0.5 * (k % 4) as f32));
-            assert!(set.set(UnitParam::Depth, 0.001 + 0.001 * (k % 3) as f32));
+            assert!(set.set(UnitParam::Rate, f64::from(0.5 + 0.5 * (k % 4) as f32)));
+            assert!(set.set(UnitParam::Depth, f64::from(0.001 + 0.001 * (k % 3) as f32)));
         }),
     );
 }
@@ -289,8 +289,8 @@ fn phaser_channels_are_independent_mono_phasers() {
         "phaser automated",
         phaser,
         Moves::cells(|set, k| {
-            assert!(set.set(UnitParam::Depth, 0.2 * (k % 5) as f32));
-            assert!(set.set(UnitParam::Feedback, 0.1 * (k % 6) as f32));
+            assert!(set.set(UnitParam::Depth, f64::from(0.2 * (k % 5) as f32)));
+            assert!(set.set(UnitParam::Feedback, f64::from(0.1 * (k % 6) as f32)));
         }),
     );
 }

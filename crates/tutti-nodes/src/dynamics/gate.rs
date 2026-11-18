@@ -672,7 +672,7 @@ mod tests {
     #[test]
     fn a_nan_write_keeps_the_last_threshold() {
         let mut node = prepared_at(gate(-20.0, 0.0, 0.0, 0.0), RATE_44K);
-        assert!(node.param_set().set(UnitParam::Threshold, f32::NAN));
+        assert!(node.param_set().set(UnitParam::Threshold, f64::NAN));
         let mut out = [0.0f32];
         for _ in 0..40 {
             tick(&mut node, &[1.0, 0.5], &mut out);

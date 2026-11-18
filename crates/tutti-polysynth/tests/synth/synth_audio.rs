@@ -430,7 +430,7 @@ fn master_volume_scales_the_output() {
 /// and a finite write after it lands.
 #[test]
 fn a_non_finite_master_volume_write_leaves_the_synth_at_its_volume() {
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut synth = Hand::new(PolySynth::new(config(OscillatorType::Sine)));
         synth.set_volume(tutti_units::Amplitude(0.5));
         synth.queue_midi(&[note_on(69, 100)]);
