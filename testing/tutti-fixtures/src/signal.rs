@@ -18,9 +18,8 @@ use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds};
 /// `len` samples of a sine: `amplitude * sin(2 pi * hz * i / rate)` for sample
 /// `i`, with phase 0 at sample 0 (the first sample is exactly `0.0`).
 ///
-/// The phase is computed in `f64` and the result narrowed once, so the figure
-/// does not drift with the length (an `f32` phase accumulates an error that
-/// grows with `i`).
+/// The phase is `step * i` in `f64` (no running sum) and the result narrowed once to
+/// the `f32` sample, so the figure carries no error that grows with `i`.
 pub fn sine(hz: Hz, amplitude: Amplitude, rate: SampleRate, len: Samples) -> Vec<f32> {
     let step = std::f64::consts::TAU * hz.get() / rate.get();
     let amp = amplitude.get();

@@ -194,7 +194,7 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
             steps: 0,
             delays: vec![Glide::landed(F::ONE); layout.width()].into_boxed_slice(),
             depth: Glide::landed(F::from_f64(d.depth.get())),
-            feedback: Glide::landed(F::from_f64(f64::from(d.feedback.get()))),
+            feedback: Glide::landed(F::from_f32(d.feedback.get())),
             clock: SweepClock::new(layout.offsets()),
             layout,
         }
@@ -277,10 +277,8 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         self.clock.set_inc(design.inc);
         self.depth
             .aim_by(F::from_f64(design.depth.get()), Steps::Rate(DELAY_SLEW));
-        self.feedback.aim_by(
-            F::from_f64(f64::from(design.feedback.get())),
-            Steps::Fixed(self.steps),
-        );
+        self.feedback
+            .aim_by(F::from_f32(design.feedback.get()), Steps::Fixed(self.steps));
         if first {
             self.depth.settle();
             self.feedback.settle();
@@ -320,6 +318,8 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
 
 #[cfg(test)]
 mod tests {
+    // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+    // format, so their tolerances are `f32`'s.
     use super::*;
     use crate::test_support::drive_kernel;
     use tutti_dsp::MaxDelay;

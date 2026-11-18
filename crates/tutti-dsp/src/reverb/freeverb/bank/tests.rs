@@ -550,7 +550,7 @@ fn the_render_schroeder_rt60_lies_between_the_shortest_and_longest_comb_t60() {
 }
 
 /// `x` through an `f64` bank in one call: `(left, right)`.
-fn run_f64(
+fn run_wide(
     bank: &mut FreeverbBank<f64>,
     glides: &mut FreeverbGlides<f64>,
     x: &[f64],
@@ -628,7 +628,7 @@ fn an_f64_freeverb_returns_the_fixed_gain_times_the_input_at_each_comb_length() 
     let mut bank = bank;
     bank.aim(&mut glides, &controls(0.5, 0.5));
     glides.settle();
-    let [left, _] = run_f64(&mut bank, &mut glides, &x);
+    let [left, _] = run_wide(&mut bank, &mut glides, &x);
     let mut want = vec![0.0f64; 1_300];
     for at in [1_116, 1_188, 1_277] {
         want[at] = x0 * g;
@@ -652,7 +652,7 @@ fn an_f64_freeverb_is_linear() {
         let mut bank = bank;
         bank.aim(&mut glides, &controls(0.7, 0.3));
         glides.settle();
-        run_f64(&mut bank, &mut glides, input)
+        run_wide(&mut bank, &mut glides, input)
     };
     let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
     for c in 0..2 {

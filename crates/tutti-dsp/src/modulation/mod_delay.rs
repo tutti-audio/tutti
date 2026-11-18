@@ -355,8 +355,8 @@ impl<F: Float + Lerp> ModDelayBank<F> {
                 let step = u32::try_from(i).unwrap_or(u32::MAX);
                 let d = delay.at(first.saturating_add(step)).max(F::ONE);
                 let g = feedback.at(fb_first.saturating_add(step));
-                let wet = delay_step(line, F::from_f64(x.to_f64()), d, g, READ);
-                *y = S::from_f64(wet.to_f64());
+                let wet = delay_step(line, x.convert_to::<F>(), d, g, READ);
+                *y = wet.convert_to::<S>();
             }
         }
         let taken = u32::try_from(frames).unwrap_or(u32::MAX);

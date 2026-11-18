@@ -631,7 +631,7 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) outputs_listed: bool,
     /// The capture inputs added ([`Session::add_input`]) and the host they open on.
     #[cfg(all(feature = "device", feature = "audio-io"))]
-    pub(crate) inputs: crate::input::Inputs,
+    pub(crate) inputs: crate::input::Inputs<C::Float>,
     /// How often a healthy plugin's state is captured.
     #[cfg(feature = "plugin")]
     pub(crate) snapshot_interval: std::time::Duration,

@@ -3,6 +3,9 @@ use tutti_units::{Ballistics, SampleRate, Seconds};
 use super::Follower;
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
 
+// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// format, so their tolerances are `f32`'s.
+
 const RATE: f64 = 48_000.0;
 
 const ATTACK: f64 = 0.01;

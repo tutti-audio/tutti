@@ -597,7 +597,7 @@ fn a_take_makes_a_clip_only_from_a_file() {
         )
         .expect("armed");
     rig.run_until(finished);
-    let from_file = recorded(&rig.events).clip();
+    let from_file = recorded(&rig.events).clip::<f32>();
     assert!(from_file.is_ok(), "{:?}", from_file.err());
 
     rig.events.clear();
@@ -628,7 +628,7 @@ fn a_take_makes_a_clip_only_from_a_file() {
         )
         .expect("armed");
     rig.run_until(finished);
-    let from_sink = recorded(&rig.events).clip();
+    let from_sink = recorded(&rig.events).clip::<f32>();
     assert!(
         matches!(
             from_sink,

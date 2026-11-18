@@ -131,9 +131,9 @@ fn run<F: Float + Lanes, S: Float>(
     state: &mut [[F; 2]; MAX_SECTIONS],
     x: S,
 ) -> S {
-    let mut v = F::from_f64(x.to_f64());
+    let mut v = x.convert_to::<F>();
     for (s, st) in set.sections[..set.len].iter().zip(state.iter_mut()) {
         v = svf_step(s, st, v);
     }
-    S::from_f64(v.to_f64())
+    v.convert_to::<S>()
 }

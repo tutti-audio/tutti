@@ -444,15 +444,15 @@ impl<F: Float + Lerp> PlateBank<F> {
             let t = F::from_f64(self.into.get() as f64 / Self::CHUNK as f64);
             let x: F = xs[..width]
                 .iter()
-                .map(|ch| F::from_f64(ch[i].to_f64()))
+                .map(|ch| ch[i].convert_to::<F>())
                 .sum::<F>()
                 * scale;
             let (l, r) = self.frame(x, t);
             if let Some(y) = left.as_deref_mut() {
-                y[i] = S::from_f64(l.to_f64());
+                y[i] = l.convert_to::<S>();
             }
             if let Some(y) = right.as_deref_mut() {
-                y[i] = S::from_f64(r.to_f64());
+                y[i] = r.convert_to::<S>();
             }
             self.into = (self.into + Samples(1)) % Samples(Self::CHUNK);
         }

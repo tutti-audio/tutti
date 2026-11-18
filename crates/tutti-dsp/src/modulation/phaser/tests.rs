@@ -5,6 +5,9 @@ use tutti_units::{Feedback, Hz, SampleRate};
 use super::*;
 use crate::{Complex64, allpass_coeff};
 
+// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// format, so their tolerances are `f32`'s.
+
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A chain of `stages` on `coefficients.len()` channels, run over `audio` (one slice per
