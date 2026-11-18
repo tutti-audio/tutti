@@ -116,7 +116,7 @@ fn pump(s: &mut Session) -> Vec<SessionEvent> {
 }
 
 /// Updates (no render: the session has no output) until `done`.
-fn settle_until<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn settle_until<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     what: &str,
     mut done: impl FnMut(&mut Session<K, C>) -> bool,
@@ -139,7 +139,7 @@ fn pump_until(s: &mut Session, what: &str, mut done: impl FnMut(&mut Session) ->
 }
 
 /// Updates until `done` finds what it waits for in an update's pool events.
-fn until<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn until<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     what: &str,
     mut done: impl FnMut(&&'static str, &PoolEvent) -> bool,
@@ -160,7 +160,7 @@ fn until<K: tutti_session::AppKey, C: tutti_session::Clock>(
 }
 
 /// The key's pool events of the first update that has any.
-fn until_all<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn until_all<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     what: &str,
     key: &'static str,
@@ -185,7 +185,7 @@ fn until_all<K: tutti_session::AppKey, C: tutti_session::Clock>(
     }
 }
 
-fn loaded<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn loaded<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     key: &'static str,
 ) {
@@ -753,7 +753,7 @@ fn with_node(catalog: &Catalog) -> (Session, tutti_session::Key<tutti_session::P
     with_node_in(session(true), catalog)
 }
 
-fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     mut s: Session<K, C>,
     catalog: &Catalog,
 ) -> (Session<K, C>, tutti_session::Key<tutti_session::PluginNode>) {
@@ -763,7 +763,7 @@ fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock>(
     (s, node)
 }
 
-fn pid_of<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn pid_of<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &Session<K, C>,
     node: tutti_session::Key<tutti_session::PluginNode>,
 ) -> Option<u32> {
@@ -871,7 +871,7 @@ fn a_later_identity_is_the_one_the_node_ends_on() {
 
 /// What a graph that re-prepares does to a swap: it waits, with the executor
 /// taken, until the audio side has run and an update has collected.
-fn repreparing<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn repreparing<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
 ) -> tutti_session::AudioSide {
     let side = s.graph().take_audio_side();

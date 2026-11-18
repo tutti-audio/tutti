@@ -86,7 +86,7 @@ fn session() -> Session {
 }
 
 /// Updates, on this (the main) thread, until the key's next pool event.
-fn next_event<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn next_event<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     key: &'static str,
 ) -> PoolEvent {

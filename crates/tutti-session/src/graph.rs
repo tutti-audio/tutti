@@ -36,8 +36,8 @@
 use std::any::Any;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
-#[cfg(feature = "testing")]
 use tutti_buffers::Float;
+#[cfg(feature = "testing")]
 use tutti_graph::TransportPosition;
 
 #[cfg(feature = "export")]

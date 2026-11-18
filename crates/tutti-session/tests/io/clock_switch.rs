@@ -38,7 +38,7 @@ fn system() -> SystemSession {
 }
 
 /// Wires a constant to both outputs and commits it.
-fn wire_constant<K: tutti_session::AppKey, C: tutti_session::Clock>(
+fn wire_constant<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     s: &mut Session<K, C>,
     level: f32,
 ) {
@@ -59,11 +59,11 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
-fn play<K: tutti_session::AppKey, C: tutti_session::Clock>(s: &Session<K, C>) {
+fn play<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(s: &Session<K, C>) {
     s.play().expect("room");
 }
 
-fn frame<K: tutti_session::AppKey, C: tutti_session::Clock>(s: &Session<K, C>) -> u64 {
+fn frame<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(s: &Session<K, C>) -> u64 {
     s.playhead().frame().get()
 }
 
