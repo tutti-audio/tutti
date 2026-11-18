@@ -337,6 +337,7 @@ pub extern "C" fn tutti_vst2_probe_reset_switches() {
     PRESET_TRACE_LEN.store(0, Ordering::SeqCst);
     EDITOR_OPENS.store(false, Ordering::SeqCst);
     EDITOR_HAS_NO_SIZE.store(false, Ordering::SeqCst);
+    EDITOR_CLOSES.store(0, Ordering::SeqCst);
     KEY_CONSUMED.store(false, Ordering::SeqCst);
     ACCEPT_STRING_TO_PARAMETER.store(false, Ordering::SeqCst);
     tutti_vst2_probe_reset_trace();
@@ -633,6 +634,18 @@ pub extern "C" fn tutti_vst2_probe_set_editor_opens(opens: bool) {
 
 pub(crate) fn editor_opens() -> bool {
     EDITOR_OPENS.load(Ordering::SeqCst)
+}
+
+static EDITOR_CLOSES: AtomicI32 = AtomicI32::new(0);
+
+/// How many times the probe's editor received `effEditClose` since the last reset.
+#[unsafe(no_mangle)]
+pub extern "C" fn tutti_vst2_probe_editor_close_count() -> i32 {
+    EDITOR_CLOSES.load(Ordering::SeqCst)
+}
+
+pub(crate) fn record_editor_close() {
+    EDITOR_CLOSES.fetch_add(1, Ordering::SeqCst);
 }
 
 static EDITOR_HAS_NO_SIZE: AtomicBool = AtomicBool::new(false);

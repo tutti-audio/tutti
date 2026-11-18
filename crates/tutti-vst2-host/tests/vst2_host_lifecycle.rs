@@ -608,6 +608,12 @@ fn an_editor_with_no_size_is_refused_and_closed() {
         .loaded_mut()
         .open_editor(main_thread(), parent, ContentScale::IDENTITY)
         .expect_err("a 0 by 0 editor is refused");
+    let closes = probe_call(b"tutti_vst2_probe_editor_close_count\0", |sym| {
+        // SAFETY: the probe exports this symbol with exactly this signature.
+        let f: extern "C" fn() -> i32 = unsafe { std::mem::transmute(*sym) };
+        f()
+    });
+    assert_eq!(closes, 1, "the editor that opened is closed again");
     assert!(
         error.to_string().contains("0 by 0"),
         "the error names the size: {error}"

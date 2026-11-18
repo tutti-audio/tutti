@@ -9,7 +9,8 @@
 //! `prepare`, a fork. A block with no Processor in hand (it was recalled for a
 //! rate change, or the plugin refused its rate) renders silence, counted by
 //! [`InProcClient::unlent_blocks`]; a block the Processor failed renders
-//! silence too, counted by [`InProcClient::failed_blocks`].
+//! silence too, counted by [`InProcClient::failed_blocks`]; an entry the plugin refused
+//! within a block that ran is counted by [`InProcClient::refused_entries`].
 //!
 //! A block is one [`Processor::process`]: the graph's channel slices as
 //! [`PluginAudio`](tutti_plugin_types::PluginAudio), the block's MIDI, parameter chunk and transport as a
@@ -134,6 +135,11 @@ pub struct InProcClient<F: Loaded> {
     pub(super) failed: Tally<u64>,
     /// The audio thread's writer of `failed`, minted in `new`.
     pub(super) failed_writer: TallyWriter<u64>,
+    /// Audio entries the plugin refused in blocks that otherwise ran
+    /// ([`ProcessOutput::entries_refused`]).
+    pub(super) refused: Tally<u64>,
+    /// The audio thread's writer of `refused`, minted in `new`.
+    pub(super) refused_writer: TallyWriter<u64>,
     /// Who tells the plugin the rate the node is prepared at.
     pub(super) rate_delivery: RateDelivery,
     /// A fork's rate could not be told to the plugin (its `prepare` ran off the
@@ -543,6 +549,7 @@ impl<F: Loaded> InProcClient<F> {
         segments.prepare(params.room());
         let lost = inner.lock().lost_flag();
         let failed = tally();
+        let refused = tally();
         Self {
             inner,
             rt,
@@ -565,6 +572,8 @@ impl<F: Loaded> InProcClient<F> {
             unlent,
             failed_writer: failed.writer(),
             failed,
+            refused_writer: refused.writer(),
+            refused,
             rate_delivery: RateDelivery::Parked,
             rate_refused: false,
             prepared_mode: tutti_graph::RenderMode::Realtime,
@@ -647,6 +656,17 @@ impl<F: Loaded> InProcClient<F> {
     /// Intended for diagnostics.
     pub fn failed_blocks(&self) -> u64 {
         self.failed.get()
+    }
+
+    /// Returns how many audio entries the plugin refused in blocks that
+    /// otherwise ran ([`ProcessOutput::entries_refused`]: a closed or dead
+    /// plugin, a missing entry, pins grown past the buffer), since
+    /// construction. Each is a block or a piece of one that rendered silence; the
+    /// block is not a failed one, and its MIDI loss is counted with the rest.
+    ///
+    /// Intended for diagnostics.
+    pub fn refused_entries(&self) -> u64 {
+        self.refused.get()
     }
 }
 

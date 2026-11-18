@@ -1269,12 +1269,14 @@ mod tests {
         assert!(host.dropped_midi_out().get() > 0);
     }
 
-    /// **Every `audioMaster` query the audio thread can reach allocates nothing.** A plugin
-    /// asks for the time, the rate, the block size, the process level, the host's name, its
-    /// latencies, its automation state and what it can do from inside `process`; each is
-    /// answered from fixed storage or a constant.
+    /// **Every other `audioMaster` callback the audio thread can reach allocates nothing.**
+    /// A plugin asks for the time, the rate, the block size, the process level, the host's
+    /// name, its latencies, its automation state and what it can do, and raises edits and
+    /// notices, from inside `process`; each is answered from fixed storage or a constant.
+    /// (`automate` and `process_plugin_events`, which fill queues, are covered by
+    /// `both_audio_thread_callbacks_are_allocation_free`.)
     #[test]
-    fn every_callback_the_audio_thread_reaches_is_allocation_free() {
+    fn every_query_and_notice_the_audio_thread_reaches_is_allocation_free() {
         let host = make_host(TransportWriter::new().reader(), SampleRate::SR_48K);
         let _scope = host.enter_process();
         assert_no_alloc::assert_no_alloc(|| {

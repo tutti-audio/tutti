@@ -319,6 +319,7 @@ where
                     // In the chunk the Processor holds until it ships it.
                     this.chunk_midi += piece_midi as u64;
                     this.params.refused(this.out.params_refused() as u64);
+                    this.refused_writer.add(this.out.entries_refused() as u64);
                     // What the Processor shipped in this call, and lost.
                     let reported = this.out.midi_lost() as u64;
                     if reported > 0 {
@@ -459,7 +460,8 @@ where
         if processed {
             // The writes the plugin refused, counted dropped.
             this.params.refused(this.out.params_refused() as u64);
-            // What a Processor says it lost (none that is not chunked does).
+            this.refused_writer.add(this.out.entries_refused() as u64);
+            // What a Processor says it lost (the input MIDI it could not hand on).
             let reported = this.out.midi_lost() as u64;
             if reported > 0 {
                 this.params.count_midi_dropped(reported);
@@ -860,8 +862,8 @@ mod owed_tests {
         assert_eq!(fresh.dropped_sysex().get(), 1, "the cut dump, whole");
         assert_eq!(
             controls.dropped_midi_in(),
-            (3 + cut.len() - 6) as u64,
-            "the unlent block's, and the cut dump's tail"
+            (3 + cut.len() - 6) as u64 + 1,
+            "the unlent block's, the cut dump's tail, and the dump the plugin's host dropped whole"
         );
     }
 
@@ -899,7 +901,11 @@ mod owed_tests {
 
         let processor = unit.node.rt.held().expect("lent");
         assert_eq!(processor.dropped_sysex().get(), 1, "the cut dump, whole");
-        assert_eq!(controls.dropped_midi_in(), (cut.len() - 3) as u64);
+        assert_eq!(
+            controls.dropped_midi_in(),
+            (cut.len() - 3) as u64 + 1,
+            "the skipped tail, and the dump the plugin's host dropped whole"
+        );
     }
 }
 

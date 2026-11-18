@@ -596,16 +596,17 @@ fn a_block_reports_the_midi_it_lost_once() {
     };
     let events = [at(0), at(1), at(2)];
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
-    assert_eq!(out.midi_dropped(), 2, "the two of other Groups");
+    assert_eq!(out.midi_lost(), 2, "the two of other Groups");
     let out = render_out(&mut processor, &ProcessContext::new());
-    assert_eq!(out.midi_dropped(), 0, "nothing new");
+    assert_eq!(out.midi_lost(), 0, "nothing new");
     drop(rejoin(processor, controller));
 }
 
-/// **A refused block reports the events the plugin never heard**: a closed plugin refuses
-/// every audio entry, so the block's MIDI is lost, and the refusals are counted.
+/// **A refused block reports the events the plugin never heard, and the refusal itself**:
+/// a closed plugin refuses every audio entry, so the block's MIDI is lost, and a block with
+/// no MIDI still counts its refused entries.
 #[test]
-fn a_refused_block_reports_its_midi_as_lost() {
+fn a_refused_block_reports_its_midi_and_its_refused_entries() {
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
     let events = [(
@@ -613,13 +614,68 @@ fn a_refused_block_reports_its_midi_as_lost() {
         midi::note_on(MidiChannel::FIRST, 60, 0x4000),
     )];
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
-    assert_eq!(out.midi_dropped(), 0, "a live plugin hears it");
-    assert_eq!(processor.entries_refused(), 0);
+    assert_eq!(out.midi_lost(), 0, "a live plugin hears it");
+    assert_eq!(out.entries_refused(), 0);
 
     drop(controller);
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
-    assert_eq!(out.midi_dropped(), 1, "a closed plugin hears nothing");
-    assert!(processor.entries_refused() > 0);
+    assert_eq!(out.midi_lost(), 1, "a closed plugin hears nothing");
+    assert!(out.entries_refused() > 0);
+    let out = render_out(&mut processor, &ProcessContext::new());
+    assert_eq!(out.midi_lost(), 0, "no MIDI, none lost");
+    assert!(out.entries_refused() > 0, "and the refusal still shows");
+}
+
+/// **A refused piece counts what staging handed it, once**: of a Group 1 note (dropped at
+/// staging and counted there), a SysEx message of several UMPs (one staged event) and a note,
+/// the refusal adds the two staged events; counting UMPs, or the Group 1 note again, would
+/// give more than three.
+#[test]
+fn a_refused_piece_counts_each_lost_event_once() {
+    let probe = Probe::acquire();
+    let (mut processor, controller) = probe.activate();
+    let at = |frame: usize, ump| (Offset::of(Samples(frame), Samples(BLOCK)), ump);
+    let body: Vec<u8> = (1..=20).collect();
+    let packets: Vec<_> = tutti_plugin_types::sysex_packets(MidiGroup::FIRST, &body)
+        .expect("a message")
+        .collect();
+    assert!(packets.len() >= 3, "fixture: several UMPs");
+    let group_one = Address::new(MidiGroup::new(1).expect("a group"), MidiChannel::FIRST);
+    let mut events = vec![at(1, midi::note_on(group_one, 60, 0x4000))];
+    events.extend(packets.into_iter().map(|ump| at(2, ump)));
+    events.push(at(3, midi::note_on(MidiChannel::FIRST, 61, 0x4000)));
+
+    drop(controller);
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(out.midi_lost(), 3, "the Group 1 note, the SysEx, the note");
+}
+
+/// **Losses counted between activations are reported by the next block**: a reset drops the
+/// SysEx open across it, and a rejoin and a new activation between that and the next block do
+/// not forget it.
+#[test]
+fn a_loss_between_activations_is_reported_once() {
+    let probe = Probe::acquire();
+    let (mut processor, controller) = probe.activate();
+    let body: Vec<u8> = (1..=20).collect();
+    let start = tutti_plugin_types::sysex_packets(MidiGroup::FIRST, &body)
+        .expect("a message")
+        .next()
+        .expect("a START");
+    let events = [(Offset::of(Samples(0), Samples(BLOCK)), start)];
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(out.midi_lost(), 0, "open across the block, not lost");
+
+    processor.reset();
+    let loaded = rejoin(processor, controller);
+    let (mut processor, controller) = loaded
+        .activate(main_thread(), prepare())
+        .expect("activates again");
+    let out = render_out(&mut processor, &ProcessContext::new());
+    assert_eq!(out.midi_lost(), 1, "the SysEx the reset dropped");
+    let out = render_out(&mut processor, &ProcessContext::new());
+    assert_eq!(out.midi_lost(), 0, "told once");
+    drop(rejoin(processor, controller));
 }
 
 /// **A restore is a host write inside a program bracket, and it raises a rescan**: the

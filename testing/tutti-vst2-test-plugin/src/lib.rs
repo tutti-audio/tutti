@@ -256,7 +256,9 @@ impl Editor for ProbeEditor {
         switches::editor_opens()
     }
 
-    fn close(&mut self) {}
+    fn close(&mut self) {
+        switches::record_editor_close();
+    }
 
     fn is_open(&mut self) -> bool {
         false
