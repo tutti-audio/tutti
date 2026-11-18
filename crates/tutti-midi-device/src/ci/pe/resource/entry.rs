@@ -28,9 +28,9 @@ pub enum EntryError {
     #[error("{0} is not a List Resource")]
     NotAList(String),
     /// A manufacturer-specific JSON Resource gives a schema with at least a
-    /// `title` (M2-103 §14.4).
-    #[error("the schema of {0} has no title")]
-    SchemaWithoutTitle(String),
+    /// `title` and a `type` (M2-103 §14.4).
+    #[error("the schema of {0} has no title or no type")]
+    SchemaIncomplete(String),
     /// Flow Control on Get needs `canGet`, and on Set needs `canSet`.
     #[error("{0} sets Flow Control for a transaction it does not take")]
     FlowControlWithoutTransaction(String),
@@ -382,8 +382,9 @@ impl ResourceEntryBuilder {
     /// refuse: [`EntryError::ListsItself`] for `ResourceList`;
     /// [`EntryError::NotOverridable`] for a value other than the default of a
     /// Resource a specification defines, and for a schema of one;
-    /// [`EntryError::SchemaWithoutTitle`] unless a manufacturer-specific
-    /// Resource gives a schema that is an object with a `title` string;
+    /// [`EntryError::SchemaIncomplete`] unless a manufacturer-specific
+    /// Resource gives a schema that is an object with a `title` string and a
+    /// `type` (a string or an array);
     /// [`EntryError::NotAList`] for pagination or Columns of a Resource that is
     /// no List Resource; [`EntryError::FlowControlWithoutTransaction`] for Flow
     /// Control on a transaction the Resource does not take;
@@ -395,7 +396,7 @@ impl ResourceEntryBuilder {
             return Err(EntryError::ListsItself);
         }
         if entry.schema.is_none() && matches!(entry.resource, PeResource::Custom(_)) {
-            return Err(EntryError::SchemaWithoutTitle(
+            return Err(EntryError::SchemaIncomplete(
                 entry.resource.as_str().to_owned(),
             ));
         }
@@ -432,7 +433,7 @@ impl ResourceEntry {
             EntryError::NotOverridable { property, .. } => property,
             EntryError::NotAList(_) if self.can_paginate => "canPaginate",
             EntryError::NotAList(_) => "columns",
-            EntryError::SchemaWithoutTitle(_) => "schema",
+            EntryError::SchemaIncomplete(_) => "schema",
             EntryError::FlowControlWithoutTransaction(_) if self.fc_on_get && !self.can_get => {
                 "fcOnGet"
             }
@@ -469,13 +470,11 @@ impl ResourceEntry {
             return Err(EntryError::NotAList(self.resource.as_str().to_owned()));
         }
         if let Some(schema) = &self.schema {
-            let titled = schema
-                .as_object()
-                .and_then(|o| o.get("title"))
-                .and_then(PeJson::as_str)
-                .is_some();
-            if !titled {
-                return Err(EntryError::SchemaWithoutTitle(
+            let member = |name| schema.as_object().and_then(|o| o.get(name));
+            let complete = member("title").and_then(PeJson::as_str).is_some()
+                && member("type").is_some_and(|t| t.as_str().is_some() || t.as_array().is_some());
+            if !complete {
+                return Err(EntryError::SchemaIncomplete(
                     self.resource.as_str().to_owned(),
                 ));
             }
@@ -519,7 +518,7 @@ fn entry_what(error: &EntryError) -> &'static str {
         EntryError::ListsItself => "entry: ResourceList does not list itself",
         EntryError::NotOverridable { .. } => "entry: a default that is not to be overridden",
         EntryError::NotAList(_) => "entry: a List Resource property of a Resource that is none",
-        EntryError::SchemaWithoutTitle(_) => "entry: a schema with a title",
+        EntryError::SchemaIncomplete(_) => "entry: a schema with a title and a type",
         EntryError::FlowControlWithoutTransaction(_) => "entry: Flow Control and its transaction",
         EntryError::Duplicate(_) => "entry: a list without repeats",
         EntryError::Empty(_) => "entry: a list that is not empty",

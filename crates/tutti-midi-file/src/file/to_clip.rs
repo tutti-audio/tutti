@@ -378,7 +378,7 @@ fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<FileEvent>), DropRe
         FileEvent::SysEx(SysEx::Start(_)) => Err(DropReason::SysexNotComplete),
         FileEvent::SysEx(SysEx::Complete(body)) => {
             let body: Vec<u8> = body.iter().map(|b| b.get()).collect();
-            if let [0x7E, _, 0x0D, 0x30..=0x3F, ..] = *body {
+            if tutti_midi_device::is_property_exchange(&body) {
                 return Err(DropReason::PropertyExchange);
             }
             let whole: Vec<u8> = std::iter::once(0xF0).chain(body).chain([0xF7]).collect();

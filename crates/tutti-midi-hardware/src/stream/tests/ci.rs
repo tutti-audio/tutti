@@ -866,7 +866,7 @@ fn closing_an_input_without_midi_ci_sends_nothing() {
 /// which speaks for a Function Block, never replaces the device's.
 #[test]
 fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
-    use tutti_midi_device::{CiInstanceId, EndpointInfo, ProductInstanceId};
+    use tutti_midi_device::{EndpointInfo, ProductInstanceId};
 
     let (mut wire, ours) = midi1_running();
     let mut data = peer_data();
@@ -890,7 +890,7 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
     assert_eq!(learned.identity(), Some(&identity()), "the device's own");
     assert_eq!(learned.instance_id(), None, "not asked yet");
 
-    let serial = CiInstanceId::new(ProductInstanceId::new("SN-9").unwrap()).unwrap();
+    let serial = ProductInstanceId::new("SN-9").unwrap();
     say(
         &wire,
         GROUP_0,
@@ -1304,18 +1304,23 @@ fn an_mpe_zone_sharing_channels_with_a_lower_one_is_reported_refused() {
 /// data of another Profile, or one that is not a notification, is not one.
 #[test]
 fn a_channel_response_notification_is_read_off_the_specific_data() {
-    use tutti_midi_device::{Destination, SpecificData};
+    use tutti_midi_device::{Destination, ProfileSpecific, SpecificData};
     use tutti_midi_protocol::ChannelResponse;
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![ProfileId::MPE], vec![], vec![]);
-    let data = |profile: ProfileId, bytes: &[u8]| CiMessage::ProfileSpecificData {
-        header: CiHeader {
-            device_id: channel(3),
-            ..CiHeader::new(peer())
-        },
-        to: Destination::Muid(ours),
-        profile,
-        data: SpecificData::new(bytes.to_vec()).unwrap(),
+    let data = |profile: ProfileId, bytes: &[u8]| {
+        CiMessage::ProfileSpecificData(
+            ProfileSpecific::new(
+                CiHeader {
+                    device_id: channel(3),
+                    ..CiHeader::new(peer())
+                },
+                Destination::Muid(ours),
+                profile,
+                SpecificData::new(bytes.to_vec()).unwrap(),
+            )
+            .unwrap(),
+        )
     };
     let mut read = Vec::new();
     for (ms, message) in [

@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use tutti_ump::{ManufacturerId, MidiChannel, U7};
+use tutti_ump::{ManufacturerId, MidiChannel, U7, U28};
 
 use super::super::testing::{DST, SRC, channel, decoded, header_on, preamble, to_dst, unread};
 use super::super::*;
@@ -448,6 +448,7 @@ fn a_details_reply_whose_length_runs_past_the_message_or_holds_a_non_data_byte_i
     assert_eq!(unread(&bytes).reason, UnreadReason::Malformed);
 }
 
+/// Spec: m2-101/7.12#1
 #[test]
 fn profile_specific_data_is_table_28_with_a_four_byte_length() {
     let data = SpecificData::new(vec![1, 2, 3]).unwrap();
@@ -455,12 +456,9 @@ fn profile_specific_data_is_table_28_with_a_four_byte_length() {
         (Destination::Muid(Muid::of(DST)), to_dst()),
         (Destination::Broadcast, BROADCAST),
     ] {
-        let message = CiMessage::ProfileSpecificData {
-            header: header_on(channel(15)),
-            to,
-            profile: vendor(),
-            data: data.clone(),
-        };
+        let message = CiMessage::ProfileSpecificData(
+            ProfileSpecific::new(header_on(channel(15)), to, vendor(), data.clone()).unwrap(),
+        );
         let mut want = preamble(0x0F, 0x2F, wire);
         want.extend([0x00, 0x21, 0x09, 5, 6]);
         want.extend([3, 0, 0, 0]);
@@ -470,14 +468,51 @@ fn profile_specific_data_is_table_28_with_a_four_byte_length() {
         assert_eq!(message.destination(), to);
     }
     // A length of 128 is `00 01 00 00`.
-    let long = CiMessage::ProfileSpecificData {
-        header: header_on(channel(0)),
-        to: Destination::Muid(Muid::of(DST)),
-        profile: piano(),
-        data: SpecificData::new(vec![9; 128]).unwrap(),
-    };
+    let long = CiMessage::ProfileSpecificData(
+        ProfileSpecific::new(
+            header_on(channel(0)),
+            Destination::Muid(Muid::of(DST)),
+            piano(),
+            SpecificData::new(vec![9; 128]).unwrap(),
+        )
+        .unwrap(),
+    );
     assert_eq!(&long.encode()[18..22], [0x00, 0x01, 0x00, 0x00]);
     assert_eq!(decoded(&long.encode()), long);
+}
+
+/// Spec: m2-101/7.12#2
+#[test]
+fn profile_specific_data_to_the_broadcast_muid_is_at_most_512_bytes_with_its_delimiters() {
+    let specific = |to, len| {
+        ProfileSpecific::new(
+            header_on(channel(0)),
+            to,
+            vendor(),
+            SpecificData::new(vec![5; len]).unwrap(),
+        )
+    };
+    let most = ProfileSpecific::BROADCAST_MAX_DATA;
+    let at_limit = CiMessage::ProfileSpecificData(specific(Destination::Broadcast, most).unwrap());
+    // F0 and F7 around the payload `encode` gives.
+    assert_eq!(at_limit.encode().len() + 2, 512);
+    assert_eq!(
+        specific(Destination::Broadcast, most + 1),
+        Err(BroadcastTooLarge { len: most + 1 })
+    );
+    // One device's buffer is the receiver's to have declared (§5.5.3): no cap here.
+    let to_one = specific(Destination::Muid(Muid::of(DST)), most + 1).unwrap();
+    assert_eq!(to_one.data().as_bytes().len(), most + 1);
+    // A message that arrives is read whatever its size.
+    let mut oversized = preamble(0x00, 0x2F, BROADCAST);
+    oversized.extend([0x00, 0x21, 0x09, 5, 6]);
+    oversized.extend(U28::of((most + 1) as u32).to_le7());
+    oversized.extend(vec![5; most + 1]);
+    let Decoded::Message(CiMessage::ProfileSpecificData(read)) = CiMessage::decode(&oversized)
+    else {
+        panic!("a Profile Specific Data message");
+    };
+    assert_eq!(read.data().as_bytes().len(), most + 1);
 }
 
 #[test]
@@ -712,15 +747,20 @@ fn any_message() -> impl Strategy<Value = CiMessage> {
             }
         ),
         (head(), any::<bool>(), any_profile(), any_data()).prop_map(
-            |(header, broadcast, profile, data)| CiMessage::ProfileSpecificData {
-                header,
-                to: if broadcast {
-                    Destination::Broadcast
-                } else {
-                    Destination::Muid(Muid::of(DST))
-                },
-                profile,
-                data: SpecificData::new(data).unwrap(),
+            |(header, broadcast, profile, data)| {
+                CiMessage::ProfileSpecificData(
+                    ProfileSpecific::new(
+                        header,
+                        if broadcast {
+                            Destination::Broadcast
+                        } else {
+                            Destination::Muid(Muid::of(DST))
+                        },
+                        profile,
+                        SpecificData::new(data).unwrap(),
+                    )
+                    .unwrap(),
+                )
             }
         ),
     ]

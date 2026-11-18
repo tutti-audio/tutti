@@ -445,8 +445,8 @@ pub enum Verdict {
     Undecided,
     /// The body is the device's.
     Sound,
-    /// The body is not correct. Mid-transfer the Responder sends Terminate Inquiry
-    /// and drops the rest; at the end it answers 400.
+    /// The body is not correct. Mid-transfer the Responder sends a Terminate Transaction
+    /// NAK (M2-103 §12.1.1) and drops the rest; at the end it answers 400.
     Refuse,
 }
 

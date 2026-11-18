@@ -576,7 +576,7 @@ pub enum PluginChange {
         why: GiveUp,
         /// The last state worth keeping, for a host that offers the user a
         /// manual reload: the state a reload withheld, else the last good one.
-        state: Option<PeerState>,
+        state: Option<Box<PeerState>>,
     },
 }
 
@@ -2063,7 +2063,13 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 link.gave_up(why.clone());
             }
             self.end_node(node);
-            out.push(event(node, PluginChange::GaveUp { why, state }));
+            out.push(event(
+                node,
+                PluginChange::GaveUp {
+                    why,
+                    state: state.map(Box::new),
+                },
+            ));
         }
     }
 

@@ -3,6 +3,8 @@
 
 use core::fmt;
 
+use crate::name::ProductInstanceId;
+
 /// The OS's handle to one endpoint, opaque and backend-owned.
 ///
 /// Not an index: ALSA's `(client, port)` pair and CoreMIDI's unique id differ in
@@ -37,7 +39,7 @@ impl EndpointId {
 pub enum Identity {
     /// The UMP Product Instance Id: the device's own, the same across restarts
     /// and across ports.
-    Product(String),
+    Product(ProductInstanceId),
     /// CoreMIDI's `MIDIUniqueID`, persistent across restarts.
     CoreMidi(i32),
     /// ALSA names only: a client number is a handle to the current connection,

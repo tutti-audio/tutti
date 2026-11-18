@@ -45,6 +45,7 @@ use tutti_ump::{
 
 use super::{ClipFileError, ParsedClip, property_exchange};
 use crate::ReadError;
+use tutti_midi_device::is_set_profile_on;
 
 /// Why a rule refused, carried as winnow context and mapped to
 /// [`ClipFileError`] once, in [`error_of`].
@@ -199,7 +200,7 @@ fn profile_on_status(message: &Message) -> Option<SysexStatus> {
         return None;
     };
     let first = matches!(packet.status(), SysexStatus::Complete | SysexStatus::Start);
-    (first && matches!(packet.data(), [0x7E, _, 0x0D, 0x22, ..])).then(|| packet.status())
+    (first && is_set_profile_on(packet.data())).then(|| packet.status())
 }
 
 fn sysex_part(status: SysexStatus) -> impl FnMut(&mut Input<'_>) -> Res<Ump> {

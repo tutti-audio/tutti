@@ -1,6 +1,8 @@
 //! `SysexMessage`: a borrowed, checked, complete MIDI 1.0 SysEx message.
 
-use tutti_ump::{SysexError, SysexMessage};
+use tutti_ump::{
+    IDENTITY_REQUEST, SysexError, SysexMessage, UNIVERSAL_NON_REAL_TIME, UNIVERSAL_REAL_TIME,
+};
 
 /// The least message is the two delimiters.
 #[test]
@@ -89,4 +91,16 @@ fn try_from_agrees_with_from_framed() {
         .unwrap_err()
         .to_string();
     assert!(why.contains("0xF0"), "{why}");
+}
+
+/// M1 p.34: the Universal System Exclusive ids are `7E` (Non-Real Time) and `7F`
+/// (Real Time), and M1 p.40's Identity Request to every device is
+/// `F0 7E 7F 06 01 F7`.
+#[test]
+fn the_universal_ids_and_the_identity_request_are_m1s() {
+    assert_eq!(UNIVERSAL_NON_REAL_TIME, 0x7E);
+    assert_eq!(UNIVERSAL_REAL_TIME, 0x7F);
+    let framed = [0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7];
+    let request = SysexMessage::from_framed(&framed).unwrap();
+    assert_eq!(request.payload(), IDENTITY_REQUEST);
 }

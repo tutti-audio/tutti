@@ -41,8 +41,21 @@ pub struct ManufacturerId(u16);
 pub struct NotManufacturerId(pub u16);
 
 impl ManufacturerId {
-    /// Non-Commercial / Research, No Public Release: `0x007D`.
+    /// Non-Commercial / Research, No Public Release: `0x007D` (M1). A product
+    /// that carries it is not released to the public.
     pub const NON_COMMERCIAL: Self = Self(0x007D);
+    /// The MIDI 2.0 non-commercial id: `0x007C` (M2-101 Appendix D).
+    ///
+    /// Unlike [`NON_COMMERCIAL`](Self::NON_COMMERCIAL) a product released to
+    /// the public may carry it, so long as the product earns no money, directly
+    /// or indirectly. It is for MIDI-CI Discovery and what that enables
+    /// (standard Profiles, standard Property Exchange Resources, Process
+    /// Inquiry), the Property Exchange DeviceInfo Resource and UMP Endpoint
+    /// Discovery only. It is not for a manufacturer-defined Profile, UMP System
+    /// Exclusive 8, a UMP Mixed Data Set or System Exclusive with custom data.
+    /// Those limits fall on the application: the id is a value like any other
+    /// here.
+    pub const MIDI2_NON_COMMERCIAL: Self = Self(0x007C);
     /// Universal System Exclusive, Non-Real Time: `0x007E`.
     pub const UNIVERSAL_NON_REAL_TIME: Self = Self(0x007E);
     /// Universal System Exclusive, Real Time: `0x007F`.
@@ -160,6 +173,7 @@ mod tests {
     fn a_one_byte_id_is_the_byte_in_the_low_half() {
         for (byte, word) in [
             (0x41, 0x0041),
+            (0x7C, 0x007C),
             (0x7D, 0x007D),
             (0x7E, 0x007E),
             (0x7F, 0x007F),
@@ -169,6 +183,7 @@ mod tests {
             assert!(!id.is_extended());
             assert_eq!(id.sysex_bytes(), bytes([byte, 0, 0]));
         }
+        assert_eq!(ManufacturerId::MIDI2_NON_COMMERCIAL.get(), 0x007C);
         assert_eq!(ManufacturerId::NON_COMMERCIAL.get(), 0x007D);
         assert_eq!(ManufacturerId::UNIVERSAL_NON_REAL_TIME.get(), 0x007E);
         assert_eq!(ManufacturerId::UNIVERSAL_REAL_TIME.get(), 0x007F);

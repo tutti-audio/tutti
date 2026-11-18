@@ -64,7 +64,7 @@ mod device {
         let mut table = DeviceTable::default();
         let Some(DeviceEvent::Added(info)) = table.apply(OsChange::Present(OsDevice {
             handle: EndpointId::from_raw(handle),
-            identity: Identity::Product(format!("os-{handle}")),
+            identity: Identity::Product(ProductInstanceId::new(&format!("os-{handle}")).unwrap()),
             name: name.into(),
             direction: PortDirection::Input,
         })) else {
