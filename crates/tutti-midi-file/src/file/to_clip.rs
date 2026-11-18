@@ -80,7 +80,7 @@ pub enum DropReason {
     /// A System Exclusive event that is not one complete message from `F0` to
     /// `F7`: the first packet of a divided message (its `F0` part has no `F7`).
     /// SysEx7 carries only the complete one.
-    SysexNotCompleteSevenBit,
+    SysexNotComplete,
     /// A MIDI-CI Property Exchange message (Universal System Exclusive
     /// `7E`, sub-ID#1 `0D`, sub-ID#2 `30` to `3F`, M2-101 section 8):
     /// Property Data for PE Resources is not included in a Clip File
@@ -375,15 +375,15 @@ fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<FileEvent>), DropRe
         // Already a UMP: a MIDI 1.0 channel message on the first Group.
         FileEvent::Message(_) | FileEvent::Unknown(_) => other(vec![ev.clone()]),
         // A divided message's first packet is not one complete message.
-        FileEvent::SysEx(SysEx::Start(_)) => Err(DropReason::SysexNotCompleteSevenBit),
+        FileEvent::SysEx(SysEx::Start(_)) => Err(DropReason::SysexNotComplete),
         FileEvent::SysEx(SysEx::Complete(body)) => {
             let body: Vec<u8> = body.iter().map(|b| b.get()).collect();
             if let [0x7E, _, 0x0D, 0x30..=0x3F, ..] = *body {
                 return Err(DropReason::PropertyExchange);
             }
             let whole: Vec<u8> = std::iter::once(0xF0).chain(body).chain([0xF7]).collect();
-            let message = SysexMessage::from_framed(&whole)
-                .map_err(|_| DropReason::SysexNotCompleteSevenBit)?;
+            let message =
+                SysexMessage::from_framed(&whole).map_err(|_| DropReason::SysexNotComplete)?;
             other(message.packets(MidiGroup::FIRST).map(event).collect())
         }
         FileEvent::Escape(_) => Err(DropReason::NoSuccessor),

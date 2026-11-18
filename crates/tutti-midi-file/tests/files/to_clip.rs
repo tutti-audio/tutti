@@ -338,11 +338,7 @@ fn a_sysex_that_is_not_one_complete_message_is_reported() {
     assert_eq!(
         report,
         [
-            (
-                0,
-                SmfPart::Event(divided),
-                DropReason::SysexNotCompleteSevenBit
-            ),
+            (0, SmfPart::Event(divided), DropReason::SysexNotComplete),
             (1, SmfPart::Event(rest), DropReason::NoSuccessor),
             (2, SmfPart::Event(eight_bit), DropReason::NoSuccessor),
         ]

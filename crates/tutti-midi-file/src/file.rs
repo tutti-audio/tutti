@@ -604,7 +604,9 @@ pub enum Normalized {
     },
     /// An `F0` event with a byte of 128 or more, which no [`SysEx`] holds: it
     /// became the [`Escape`](FileEvent::Escape) of the bytes it transmits, the
-    /// `F0`, its data and the `F7` it ends with if it has one.
+    /// `F0`, its data and the `F7` it ends with if it has one. A write keeps
+    /// the bytes transmitted but not the file's own: the event is written as
+    /// an `F7` escape whose data starts with the `F0`.
     SysExEscaped {
         /// The track.
         track: usize,
