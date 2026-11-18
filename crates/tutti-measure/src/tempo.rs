@@ -563,7 +563,7 @@ impl Periodicity {
                 bpm: Bpm::new(self.bpm(self.refined(lag)))
                     .unwrap_or(cfg.min)
                     .clamp(cfg.min, cfg.max),
-                strength: Confidence::new_clamped(self.at(lag)),
+                strength: Confidence::new_clamped(f64::from(self.at(lag))),
             }
         };
         let best = candidate(peaks[0]);

@@ -24,7 +24,7 @@ fn a_profile_names_its_own_key_with_full_confidence() {
                     est.key,
                     key_at(tonic + if mode == Mode::Minor { CLASSES } else { 0 })
                 );
-                assert!((est.confidence.get() - 1.0).abs() < 1e-6);
+                assert!((est.confidence.get() - 1.0).abs() < 1e-12);
                 assert_ne!(est.runner_up, est.key);
             }
         }
@@ -45,7 +45,7 @@ fn rotating_the_chroma_rotates_the_key() {
         assert_eq!(est.key.tonic.semitones_above_c() as usize, tonic);
         assert_eq!(est.key.mode, first.key.mode);
         assert_eq!(est.runner_up.mode, first.runner_up.mode);
-        assert!((est.confidence.get() - first.confidence.get()).abs() < 1e-6);
+        assert!((est.confidence.get() - first.confidence.get()).abs() < 1e-12);
     }
 }
 
@@ -79,7 +79,7 @@ fn the_confidence_is_the_documented_margin() {
     let want = (all[0].0 - all[1].0) / (1.0 - all[1].0);
     assert_eq!(est.key, key_at(all[0].1));
     assert_eq!(est.runner_up, key_at(all[1].1));
-    assert!((f64::from(est.confidence.get()) - want).abs() < 1e-6);
+    assert!((est.confidence.get() - want).abs() < 1e-12);
 }
 
 /// A diatonic scale is close to its relative minor, so its confidence is
