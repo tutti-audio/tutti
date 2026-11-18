@@ -66,8 +66,9 @@ pub(crate) struct PluginPart {
 impl PluginPart {
     /// The part for a session built with `options`, and the guard that runs
     /// the work already handed over when the session drops. The guard is
-    /// stored as `Session`'s first field: fields drop in order, so the
-    /// plugins close before the part's collector, which the guard's drop runs.
+    /// stored as `Session`'s first field. Fields drop in order, so it runs the
+    /// work already handed over before any plugin closes, and the part's
+    /// `main_work`, dropped last, runs what the closing plugins hand over.
     pub(crate) fn new(options: &PluginOptions) -> (Self, EarlyWork) {
         let (main_work, work) = MainWork::new();
         let main_work = SharedWork::new(main_work);
