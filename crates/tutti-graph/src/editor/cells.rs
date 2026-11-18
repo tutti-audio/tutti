@@ -93,7 +93,7 @@ impl RangeCells {
     /// declaring `declared`: the key's cells, kept for the same list (a
     /// crossfade keeps the running state, which reads them) and fresh for
     /// another, written from `spec`.
-    pub(super) fn state(
+    pub(super) fn state<F: Float>(
         &mut self,
         key: NodeKey,
         ports: usize,
@@ -101,7 +101,7 @@ impl RangeCells {
         declick: usize,
         declared: Option<ParamPorts>,
         spec: &GraphSpec,
-    ) -> ParamState {
+    ) -> ParamState<F> {
         if ports == 0 {
             self.0.remove(&key);
             return ParamState::default();

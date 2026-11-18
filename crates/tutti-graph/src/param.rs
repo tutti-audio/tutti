@@ -41,10 +41,11 @@ use std::sync::Arc;
 
 use crate::NodeKey;
 use crate::mode::NodeMix;
+use tutti_buffers::Float;
 use tutti_rt::{PackedAtomic, RtScope};
 use tutti_units::{ArcDegrees, Azimuth, ParamAddr, UnitAddr, UnitParam};
 
-use crate::event::{Event, EventKind, segment_progress};
+use crate::event::{Event, EventKind, frames_in, segment_progress};
 use crate::spec::EventOut;
 use tutti_curve::{FadeLaw, Law, Piece};
 
@@ -384,15 +385,31 @@ impl RangeView {
     /// of an arc, by the short way round.
     #[inline]
     #[must_use]
-    pub fn constrain(self, value: f32) -> f32 {
+    pub fn constrain<F: Float>(self, value: F) -> F {
         match self {
-            Self::Line { lo, hi } => value.clamp(lo, hi),
-            Self::Circle => UnitParam::Azimuth.wrap(value),
+            Self::Line { lo, hi } => value.clamp(F::from_f32(lo), F::from_f32(hi)),
+            Self::Circle => wrap_in(UnitParam::Azimuth, value),
             Self::Arc { centre, half } => {
-                // A lane value is an `f32`; the arc is in the unit's `f64` and
-                // the result narrows once.
-                let d = centre.shortest_arc_to(Azimuth(f64::from(value)));
-                centre.rotate_by(d.clamp(-half, half)).get() as f32
+                // The arc is in the unit's `f64`; the lane value widens to it
+                // and the result narrows once.
+                let d = centre.shortest_arc_to(Azimuth(value.to_f64()));
+                F::from_f64(centre.rotate_by(d.clamp(-half, half)).get())
+            }
+        }
+    }
+
+    /// [`constrain`](Self::constrain) over a lane: the line's bounds are
+    /// read into `F` once, not per value.
+    #[inline]
+    pub(crate) fn constrain_lane<F: Float>(self, lane: &mut [F]) {
+        if let Self::Line { lo, hi } = self {
+            let (lo, hi) = (F::from_f32(lo), F::from_f32(hi));
+            for v in lane {
+                *v = v.clamp(lo, hi);
+            }
+        } else {
+            for v in lane {
+                *v = self.constrain(*v);
             }
         }
     }
@@ -446,7 +463,7 @@ pub struct ParamMod {
 /// What a node reads for one of its params this block
 /// ([`Io::param`](crate::Io::param)).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ParamInput<'a> {
+pub enum ParamInput<'a, F: Float = f32> {
     /// Nothing modulates it: use the param's own control (the base), as the
     /// node would with no graph around it. The fast path.
     Base,
@@ -455,27 +472,27 @@ pub enum ParamInput<'a> {
     /// the seam (see the module docs).
     Frames {
         /// The value at each frame.
-        values: &'a [f32],
+        values: &'a [F],
         /// The block offsets where the delivered trajectory changes piece,
         /// ascending, at most one per frame (see [`corners`](Self::corners)).
         corners: &'a [u32],
     },
 }
 
-impl<'a> ParamInput<'a> {
+impl<'a, F: Float> ParamInput<'a, F> {
     /// The value on the block's **last** frame, when modulated: what a
     /// block-rate control reads, and where a block-rate cell's own ramp ends.
     /// `None`: nothing modulates it, read the cell.
     #[inline]
     #[must_use]
-    pub fn last_frame(self) -> Option<f32> {
+    pub fn last_frame(self) -> Option<F> {
         self.frames().and_then(|v| v.last().copied())
     }
 
     /// The per-frame values, when modulated.
     #[inline]
     #[must_use]
-    pub fn frames(self) -> Option<&'a [f32]> {
+    pub fn frames(self) -> Option<&'a [F]> {
         match self {
             Self::Base => None,
             Self::Frames { values, .. } => Some(values),
@@ -552,10 +569,10 @@ pub(crate) struct Curve {
 /// [`ParamRamp`](crate::ParamRamp) along its shape from the value it had, or
 /// a curve segment between its own endpoints.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct Ramp {
-    value: f32,
-    from: f32,
-    target: f32,
+pub(crate) struct Ramp<F: Float> {
+    value: F,
+    from: F,
+    target: F,
     /// A ramp's length, in frames.
     len: u32,
     /// A ramp's shape.
@@ -577,16 +594,21 @@ pub(crate) struct Ramp {
     param: Option<UnitParam>,
 }
 
-impl Ramp {
+impl<F: Float> Ramp<F> {
     /// Whether a segment of `piece` and `curve` on this frame continues the
     /// move in flight: the same piece, bit for bit, arriving on the same
     /// frame (or both at rest on it).
     fn continues(&self, piece: Piece, curve: Curve) -> bool {
-        let bits = |p: Piece| (p.from.to_bits(), p.to.to_bits(), p.law);
-        if !self.started || self.curve.is_none() || bits(self.piece()) != bits(piece) {
+        // A segment's endpoints are `f32` words, widened exactly to `F`.
+        let bits = |from: F, to: F, law: Law| (from.to_f64().to_bits(), to.to_f64().to_bits(), law);
+        if !self.started
+            || self.curve.is_none()
+            || bits(self.from, self.target, self.shape)
+                != bits(F::from_f32(piece.from), F::from_f32(piece.to), piece.law)
+        {
             return false;
         }
-        let arrive = crate::event::arrival(curve.position, curve.length);
+        let arrive = crate::event::arrival::<F>(curve.position, curve.length);
         if self.active {
             self.arrive.map(|a| a.checked_sub(self.done)) == arrive.map(Some)
         } else {
@@ -599,7 +621,7 @@ impl Ramp {
     /// same frame replaces the first, from the same value.
     fn start(&mut self, target: f32, len: usize, shape: Law) {
         self.from = self.value;
-        self.target = target;
+        self.target = F::from_f32(target);
         self.len = u32::try_from(len).unwrap_or(u32::MAX);
         self.shape = shape;
         self.done = 0;
@@ -613,28 +635,22 @@ impl Ramp {
     /// value it interrupts is not read. A second event on the same frame
     /// replaces it.
     fn start_segment(&mut self, piece: Piece, curve: Curve) {
-        self.from = piece.from;
-        self.target = piece.to;
+        self.from = F::from_f32(piece.from);
+        self.target = F::from_f32(piece.to);
         self.shape = piece.law;
         self.len = 0;
         self.done = 0;
         self.active = true;
         self.curve = Some(curve);
         self.started = true;
-        self.arrive = crate::event::arrival(curve.position, curve.length);
-    }
-
-    /// The move's endpoints and law: a ramp's or a segment's.
-    #[inline]
-    fn piece(&self) -> Piece {
-        Piece::new(self.from, self.target, self.shape)
+        self.arrive = crate::event::arrival::<F>(curve.position, curve.length);
     }
 
     /// The move's value at progress `t`: along the short arc for a circular
     /// param.
     #[inline]
-    fn at(&self, t: f32) -> f32 {
-        self.piece().value(self.param, t)
+    fn at(&self, t: F) -> F {
+        piece_in(self.param, self.from, self.target, self.shape, t)
     }
 
     /// The value at this frame, after any move started on it. A ramp: its
@@ -642,12 +658,12 @@ impl Ramp {
     /// its last step (a zero-length ramp reaches it on its first frame). A segment: its shape at its
     /// progress this frame, the target once it has arrived.
     #[inline]
-    fn step(&mut self) -> f32 {
+    fn step(&mut self) -> F {
         if self.active {
             if let Some(c) = self.curve {
                 // `segment_value`'s arithmetic, stepped: arrived, it holds
                 // the target as a finished ramp does.
-                match segment_progress(c.position, c.length, self.done) {
+                match segment_progress::<F>(c.position, c.length, self.done) {
                     Some(t) => {
                         self.value = self.at(t);
                     }
@@ -665,7 +681,7 @@ impl Ramp {
                 } else {
                     // `done < len`, so `t` is in `(0, 1)`, where
                     // `Linear` evaluates to `t` itself.
-                    let t = self.done as f32 / self.len as f32;
+                    let t = frames_in::<F>(self.done) / frames_in::<F>(self.len);
                     self.at(t)
                 };
             }
@@ -679,12 +695,12 @@ impl Ramp {
 /// `base(i)` on each frame before its first event ever. A first ramp starts
 /// from `base` at its own frame, whether or not a segment came before it
 /// on that frame.
-pub(crate) fn render_ramps(
-    ramp: &mut Ramp,
+pub(crate) fn render_ramps<F: Float>(
+    ramp: &mut Ramp<F>,
     events: &[Event],
     param: UnitAddr,
-    out: &mut [f32],
-    base: impl Fn(usize) -> f32,
+    out: &mut [F],
+    base: impl Fn(usize) -> F,
     corners: &mut Corners<'_>,
 ) {
     let want = ParamAddr::unit(param);
@@ -741,6 +757,71 @@ pub(crate) fn render_ramps(
         } else {
             base(i)
         };
+    }
+}
+
+/// `value` as `param` holds it: wrapped onto the circle for a circular param
+/// ([`UnitParam::wrap`]), in the unit's `f64` and narrowed once to `F`.
+#[inline]
+fn wrap_in<F: Float>(param: UnitParam, value: F) -> F {
+    if param.is_circular() {
+        F::from_f64(Azimuth(value.to_f64()).wrap().get())
+    } else {
+        value
+    }
+}
+
+/// The signed move from `from` to `to` for `param` ([`UnitParam::arc`]).
+#[inline]
+fn arc_in<F: Float>(param: UnitParam, from: F, to: F) -> F {
+    if param.is_circular() {
+        F::from_f64(
+            Azimuth(from.to_f64())
+                .shortest_arc_to(Azimuth(to.to_f64()))
+                .get(),
+        )
+    } else {
+        to - from
+    }
+}
+
+/// A law's value at progress `t`, in `F`. A line is exact in `F`; a shaped
+/// law is evaluated at its own `f32` width (its exponent and curvature words
+/// are `f32`).
+#[inline]
+fn law_in<F: Float>(law: Law, t: F) -> F {
+    match law {
+        Law::Linear => {
+            if t >= F::ZERO {
+                t.min(F::ONE)
+            } else {
+                F::ZERO
+            }
+        }
+        shaped => F::from_f32(shaped.eval(t.to_f32())),
+    }
+}
+
+/// [`Piece::value`] read in `F`: `from + (to - from) * g(t)`, a circular
+/// param along the short arc.
+#[inline]
+fn piece_in<F: Float>(param: Option<UnitParam>, from: F, to: F, law: Law, t: F) -> F {
+    let g = law_in(law, t);
+    match param {
+        Some(p) if p.is_circular() => wrap_in(p, from + arc_in(p, from, to) * g),
+        _ => from + (to - from) * g,
+    }
+}
+
+/// [`Piece::ramp_at`] read in `F`: frame `k` of an `n`-frame linear ramp,
+/// landing exactly on `to` on its last frame.
+#[inline]
+fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: usize, n: usize) -> F {
+    if k + 1 >= n {
+        to
+    } else {
+        let count = |i: usize| F::from_f64(i as f64);
+        piece_in(param, from, to, Law::Linear, count(k + 1) / count(n))
     }
 }
 
@@ -846,7 +927,7 @@ impl ParamRangeReader {
 /// One declared param port's running state, kept with its unit across
 /// blocks and plans.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct PortState {
+pub(crate) struct PortState<F: Float> {
     /// Whether the port has not run yet: its first block takes its source
     /// without a declick (see the module docs).
     fresh: bool,
@@ -855,27 +936,27 @@ pub(crate) struct PortState {
     /// Whether the last block delivered frames.
     modulated: bool,
     /// The last frame delivered.
-    last: f32,
+    last: F,
     /// The base at the end of the last block.
-    last_base: f32,
+    last_base: F,
     /// Where the declick fades from.
-    hold: f32,
+    hold: F,
     /// Frames of the declick done; the declick's length or more: none running.
     fade: usize,
     /// Its event source's ramp: the source's own, so it is reset when the
     /// source changes and kept otherwise.
-    ramp: Ramp,
+    ramp: Ramp<F>,
 }
 
-impl Default for PortState {
+impl<F: Float> Default for PortState<F> {
     fn default() -> Self {
         Self {
             fresh: true,
             source: None,
             modulated: false,
-            last: 0.0,
-            last_base: 0.0,
-            hold: 0.0,
+            last: F::ZERO,
+            last_base: F::ZERO,
+            hold: F::ZERO,
             fade: usize::MAX,
             ramp: Ramp::default(),
         }
@@ -885,10 +966,10 @@ impl Default for PortState {
 /// What a unit keeps for its declared param ports: their state and the
 /// buffer their per-frame values are written into. Built on the control side
 /// with the unit's commit, so the audio thread never allocates one.
-#[derive(Debug, Default)]
-pub(crate) struct ParamState {
-    ports: Vec<PortState>,
-    scratch: Vec<f32>,
+#[derive(Debug)]
+pub(crate) struct ParamState<F: Float> {
+    ports: Vec<PortState<F>>,
+    scratch: Vec<F>,
     /// Each port's corners this block, `max` slots a port: at most one a
     /// frame, so a port's slots never run out.
     corners: Vec<u32>,
@@ -909,7 +990,23 @@ pub(crate) struct ParamState {
     ranges: Option<Arc<ParamRanges>>,
 }
 
-impl ParamState {
+impl<F: Float> Default for ParamState<F> {
+    fn default() -> Self {
+        Self {
+            ports: Vec::new(),
+            scratch: Vec::new(),
+            corners: Vec::new(),
+            corner_count: [0; MAX_PARAM_PORTS],
+            max: 0,
+            declick: 0,
+            framed: [false; MAX_PARAM_PORTS],
+            busy: false,
+            ranges: None,
+        }
+    }
+}
+
+impl<F: Float> ParamState<F> {
     /// State for `ports` declared params at blocks of up to `max` frames,
     /// clamping to `ranges`. Allocates nothing when `ports` is 0.
     pub(crate) fn new(
@@ -923,7 +1020,7 @@ impl ParamState {
         }
         Self {
             ports: vec![PortState::default(); ports],
-            scratch: vec![0.0; ports * max],
+            scratch: vec![F::ZERO; ports * max],
             corners: vec![0; ports * max],
             corner_count: [0; MAX_PARAM_PORTS],
             max,
@@ -966,12 +1063,12 @@ impl ParamState {
     /// Port `k`'s values this block, after [`port`](Self::port): `None` when
     /// it reads its base.
     #[inline]
-    pub(crate) fn frames(&self, k: usize, frames: usize) -> Option<&[f32]> {
+    pub(crate) fn frames(&self, k: usize, frames: usize) -> Option<&[F]> {
         self.framed[k].then(|| &self.scratch[k * self.max..k * self.max + frames])
     }
 
     /// What each port reads this block, after [`port`](Self::port).
-    pub(crate) fn inputs(&self, frames: usize) -> [ParamInput<'_>; MAX_PARAM_PORTS] {
+    pub(crate) fn inputs(&self, frames: usize) -> [ParamInput<'_, F>; MAX_PARAM_PORTS] {
         let mut out = [ParamInput::Base; MAX_PARAM_PORTS];
         for (k, o) in out.iter_mut().enumerate().take(self.ports.len()) {
             if self.framed[k] {
@@ -1014,7 +1111,7 @@ impl ParamState {
         param: UnitAddr,
         frames: usize,
         m: Option<(EventOut, &[Event])>,
-        base: Option<f32>,
+        base: Option<F>,
     ) {
         let d = self.declick;
         let st = &mut self.ports[k];
@@ -1052,7 +1149,7 @@ impl ParamState {
                     events,
                     param,
                     out,
-                    |i| Piece::ramp_at(Some(param.param), from, b1, i, frames),
+                    |i| ramp_in(Some(param.param), from, b1, i, frames),
                     &mut corners,
                 );
                 self.corner_count[k] = corners.len();
@@ -1065,13 +1162,11 @@ impl ParamState {
                     .as_ref()
                     .map_or(ParamRange::UNBOUNDED, |r| r.load(k));
                 let view = range.view(Some(param.param));
-                for o in out.iter_mut() {
-                    *o = view.constrain(*o);
-                }
+                view.constrain_lane(out);
             }
             None => {
                 for (i, o) in out.iter_mut().enumerate() {
-                    *o = Piece::ramp_at(Some(param.param), from, b1, i, frames);
+                    *o = ramp_in(Some(param.param), from, b1, i, frames);
                 }
             }
         }
@@ -1082,13 +1177,16 @@ impl ParamState {
                 if j >= d {
                     break;
                 }
+                // The fade law's gains are `f32`.
                 let (out, inn) = FadeLaw::EqualAmplitude.gains(j, d);
+                let (out, inn) = (F::from_f32(out), F::from_f32(inn));
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.
-                    param
-                        .param
-                        .wrap(st.hold + param.param.arc(st.hold, *o) * inn)
+                    wrap_in(
+                        param.param,
+                        st.hold + arc_in(param.param, st.hold, *o) * inn,
+                    )
                 } else {
                     st.hold * out + *o * inn
                 };
@@ -1103,7 +1201,7 @@ impl ParamState {
     }
 }
 
-impl Drop for ParamState {
+impl<F: Float> Drop for ParamState<F> {
     /// A unit's param state is freed on the control side: a retired unit's
     /// comes back in its commit box (`Commit::spare_params`). One that
     /// allocated nothing (no declared params) may go anywhere.

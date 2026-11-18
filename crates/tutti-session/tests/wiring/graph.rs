@@ -91,7 +91,7 @@ impl Node for Knob {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         match self
-            .declared_param::<{ UnitParam::Drive as u16 }>(&io)
+            .declared_param::<{ UnitParam::Drive as u16 }, _>(&io)
             .frames()
         {
             Some(v) => {
@@ -103,8 +103,8 @@ impl Node for Knob {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
-        (port == 0).then(|| self.drive.load().get())
+    fn param_base(&self, port: usize) -> Option<f64> {
+        (port == 0).then(|| f64::from(self.drive.load().get()))
     }
 }
 

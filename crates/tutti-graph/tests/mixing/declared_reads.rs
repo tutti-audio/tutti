@@ -52,10 +52,10 @@ impl Node for Declared {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let cutoff = self.declared_param::<{ UnitParam::Cutoff as u16 }>(&io);
-        let q = self.declared_param::<{ UnitParam::Q as u16 }>(&io);
-        let band0 = self.declared_param_at::<{ UnitParam::Threshold as u16 }>(&io, 0);
-        let band1 = self.declared_param_at::<{ UnitParam::Threshold as u16 }>(&io, 1);
+        let cutoff = self.declared_param::<{ UnitParam::Cutoff as u16 }, _>(&io);
+        let q = self.declared_param::<{ UnitParam::Q as u16 }, _>(&io);
+        let band0 = self.declared_param_at::<{ UnitParam::Threshold as u16 }, _>(&io, 0);
+        let band1 = self.declared_param_at::<{ UnitParam::Threshold as u16 }, _>(&io, 1);
         show(io.output(0), cutoff, self.cutoff.load().0 as f32);
         show(io.output(1), q, self.q.load().0);
         show(io.output(2), band1, self.bands[1].load().0);
@@ -63,7 +63,7 @@ impl Node for Declared {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         self.declared_base(port)
     }
 }

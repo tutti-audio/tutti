@@ -117,9 +117,9 @@ pub(super) fn run_node_op<
             let ports = rec.ports(&plan.nodes.slots);
             node_op(u, head, st, ports, |call, node, st| {
                 match rec.ain.max(rec.aout) {
-                    0..=4 => call.run_audio::<4, F, A>(node, &mut *st.arena, borrows),
-                    5..=16 => call.run_audio::<16, F, A>(node, &mut *st.arena, borrows),
-                    _ => call.run_audio::<MAX_PORTS, F, A>(node, &mut *st.arena, borrows),
+                    0..=4 => call.run_audio::<4, A>(node, &mut *st.arena, borrows),
+                    5..=16 => call.run_audio::<16, A>(node, &mut *st.arena, borrows),
+                    _ => call.run_audio::<MAX_PORTS, A>(node, &mut *st.arena, borrows),
                 }
             });
         }
@@ -134,12 +134,12 @@ pub(super) fn run_node_op<
                 let dropped = &mut *st.dropped;
                 match (a, e) {
                     (0..=4, 0..=4) => {
-                        call.run::<4, 4, F, A, E>(node, arena, events, borrows, extra, dropped)
+                        call.run::<4, 4, A, E>(node, arena, events, borrows, extra, dropped)
                     }
                     (0..=16, 0..=4) => {
-                        call.run::<16, 4, F, A, E>(node, arena, events, borrows, extra, dropped)
+                        call.run::<16, 4, A, E>(node, arena, events, borrows, extra, dropped)
                     }
-                    _ => call.run::<MAX_PORTS, MAX_PORTS, F, A, E>(
+                    _ => call.run::<MAX_PORTS, MAX_PORTS, A, E>(
                         node, arena, events, borrows, extra, dropped,
                     ),
                 }
@@ -251,7 +251,7 @@ pub(super) fn fading_node_op<
             let extra = Extra { inject, overlay };
             let (arena, events) = (&mut *st.arena, &mut *st.events);
             let dropped = &mut *st.dropped;
-            call.run::<MAX_PORTS, MAX_PORTS, F, A, E>(node, arena, events, borrows, extra, dropped)
+            call.run::<MAX_PORTS, MAX_PORTS, A, E>(node, arena, events, borrows, extra, dropped)
         },
     );
 
@@ -366,7 +366,7 @@ pub(super) fn node_op<
     h: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
     ports: [&[u32]; 4],
-    call_node: impl FnOnce(&Call<'_, '_>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
+    call_node: impl FnOnce(&Call<'_, '_, F>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
 ) {
     node_op_with(u, h, st, ports, false, call_node);
 }
@@ -396,7 +396,7 @@ pub(super) fn run_params<
     // the same params (checked where it is asked for), so the two agree.
     let n = declared.len().min(params.port_count());
     for (k, &param) in declared.as_slice().iter().enumerate().take(n) {
-        let base = node.param_base(k);
+        let base = node.param_base(k).map(F::from_f64);
         match next.next_if(|p| p.port as usize == k) {
             Some(p) => {
                 let events = st.events.ev(p.slot);
@@ -421,7 +421,7 @@ pub(super) fn node_op_with<
     st: &mut OpState<'_, A, Fl, E>,
     [ain, aout, ein, eout]: [&[u32]; 4],
     params_done: bool,
-    call_node: impl FnOnce(&Call<'_, '_>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
+    call_node: impl FnOnce(&Call<'_, '_, F>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
 ) {
     let (rec, frames) = (h.rec, h.frames);
     let unit = rec.unit;
@@ -569,7 +569,7 @@ pub(super) fn node_op_with<
     // The table only for a unit whose step delivered frames this block;
     // every other node reads `Base` for every param (`Io::param`).
     let table;
-    let params: &[ParamInput<'_>] = if u.params.busy() {
+    let params: &[ParamInput<'_, F>] = if u.params.busy() {
         table = u.params.inputs(frames);
         &table[..u.params.port_count()]
     } else {
@@ -692,7 +692,7 @@ pub(super) struct Extra<'s> {
 }
 
 /// One node call's constants, shared by every borrow form.
-pub(super) struct Call<'p, 'e> {
+pub(super) struct Call<'p, 'e, F: Float> {
     env: &'e Env,
     history: &'e TransportHistory,
     max: MaxBlock,
@@ -709,17 +709,17 @@ pub(super) struct Call<'p, 'e> {
     /// block include scheduled commands.
     scheduled: &'p [(u16, u32, u32)],
     /// What each declared param reads this block.
-    params: &'p [ParamInput<'p>],
+    params: &'p [ParamInput<'p, F>],
     /// Where the node's [`Io::report_tail`] lands.
     reported: &'p Cell<Option<Tail>>,
     /// Where the node's [`Io::log`] lands.
     log: &'p LogSlots,
 }
 
-impl<'p> Call<'p, '_> {
+impl<'p, F: Float> Call<'p, '_, F> {
     /// Run an event-free node on buffers already borrowed.
     #[inline]
-    fn process<'a, F: Float>(
+    fn process<'a>(
         &self,
         node: &mut dyn Node<F>,
         ins: &'a [&'a [F]],
@@ -761,7 +761,7 @@ impl<'p> Call<'p, '_> {
     /// Borrow an event-free node's audio buffers by its presorted requests
     /// (`borrows` is the plan's whole list; the record names its run) and
     /// run it. `N` must hold the wider of its two sides.
-    fn run_audio<const N: usize, F: Float, A: AudioSlots<F>>(
+    fn run_audio<const N: usize, A: AudioSlots<F>>(
         &self,
         node: &mut dyn Node<F>,
         arena: &mut A,
@@ -784,7 +784,7 @@ impl<'p> Call<'p, '_> {
     /// wider audio side and `M` the wider event side. Returns the node's
     /// status, and charges the events its writers refused to `dropped`, by
     /// port.
-    fn run<const N: usize, const M: usize, F: Float, A: AudioSlots<F>, E: EventSlots + ?Sized>(
+    fn run<const N: usize, const M: usize, A: AudioSlots<F>, E: EventSlots + ?Sized>(
         &self,
         node: &mut dyn Node<F>,
         arena: &mut A,

@@ -654,7 +654,7 @@ pub(crate) struct ModeState<F: Float> {
     /// a plan first drives this unit's mix ([`drive_with`](Self::drive_with))
     /// and kept for the unit's life, so no commit frees one on the audio
     /// thread (an idle one costs `max_block` floats and no work).
-    drive: Option<ParamState>,
+    drive: Option<ParamState<f32>>,
     /// Whether this block's lane delivered frames: they replace the ramp.
     lane_on: bool,
     /// Whether the unit has run a block: a lane built for a unit that has is
@@ -719,7 +719,11 @@ impl<F: Float> ModeState<F> {
     /// which fades to the base and then idles. A `lane` the unit has no use
     /// for goes to `spare`, to be freed on the control side. Allocates
     /// nothing.
-    pub(crate) fn drive_with(&mut self, mut lane: ParamState, spare: &mut Vec<ParamState>) {
+    pub(crate) fn drive_with(
+        &mut self,
+        mut lane: ParamState<f32>,
+        spare: &mut Vec<ParamState<f32>>,
+    ) {
         if self.drive.is_some() {
             spare.push(lane);
             return;

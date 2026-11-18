@@ -223,7 +223,7 @@ impl<F: RingFloat> VoiceNode<F> {
     /// `driven` is the block's gain from the node's param port when a lane
     /// drives it (its last frame); `None` reads the cell.
     #[inline]
-    fn drain_commands(&mut self, driven: Option<f32>) {
+    fn drain_commands(&mut self, driven: Option<F>) {
         let published = *self.steering.lend();
         if published != self.applied {
             apply_steering(&mut self.slot.voice, &self.applied, &published);
@@ -233,7 +233,7 @@ impl<F: RingFloat> VoiceNode<F> {
         // scales by, the source's own cell what the disk tier's does.
         // A cell holding a NaN or an infinity (a host can write anything into
         // it) is the gain the voice already has.
-        let gain = driven.map_or_else(|| self.gain.load(), |v| Amplitude(v.max(0.0)));
+        let gain = driven.map_or_else(|| self.gain.load(), |v| Amplitude(v.max(F::ZERO).to_f32()));
         let gain = if gain.get().is_finite() {
             gain
         } else {
@@ -362,7 +362,7 @@ impl<F: RingFloat> Node<F> for VoiceNode<F> {
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         self.drain_commands(
-            self.declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
                 .last_frame(),
         );
         // Lent for the block and given back after it: the render borrows the
@@ -416,7 +416,7 @@ impl<F: RingFloat> Node<F> for VoiceNode<F> {
         self.clock.reset();
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

@@ -168,10 +168,10 @@ impl Node for OscillatorNode {
         };
         let size = io.frames();
         let frequency = self
-            .declared_param::<{ UnitParam::Frequency as u16 }>(&io)
+            .declared_param::<{ UnitParam::Frequency as u16 }, _>(&io)
             .frames();
         let level = self
-            .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .frames();
         let frequency_cell = self.frequency.load().get();
         let level_cell = self.level.load().get();
@@ -190,7 +190,7 @@ impl Node for OscillatorNode {
         self.wave.reset();
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

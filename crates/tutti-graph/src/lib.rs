@@ -255,14 +255,14 @@
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
 //!         let level = self
-//!             .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+//!             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
 //!             .last_frame()
 //!             .unwrap_or_else(|| self.level.load().get());
 //!         io.channel(0).map(|x| x * level);
 //!         Status::Modified
 //!     }
 //!     fn reset(&mut self) {}
-//!     fn param_base(&self, port: usize) -> Option<f32> {
+//!     fn param_base(&self, port: usize) -> Option<f64> {
 //!         self.declared_base(port)
 //!     }
 //! }

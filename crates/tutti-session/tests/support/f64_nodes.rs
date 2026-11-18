@@ -38,9 +38,10 @@ impl<F: Float> Node<F> for Gain {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let size = io.frames();
         let driven = self
-            .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .frames();
-        let cell = self.0.load().get();
+        // The param cell is an `f32` word, widened once per block.
+        let cell = F::from_f32(self.0.load().get());
         let (ins, mut outs) = io.split();
         for (n, (o, i)) in outs
             .get(0)
@@ -50,14 +51,13 @@ impl<F: Float> Node<F> for Gain {
             .take(size)
         {
             let gain = driven.map_or(cell, |lane| lane[n]);
-            // The param cell and a lane's frames are `f32` words; the product is in `F`.
-            *o = *i * F::from_f64(f64::from(gain));
+            *o = *i * gain;
         }
         Status::Modified
     }
     fn reset(&mut self) {}
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

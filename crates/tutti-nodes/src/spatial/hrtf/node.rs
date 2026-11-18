@@ -197,14 +197,14 @@ impl Node for HrtfBinauralNode {
         // renderer reads them here, once per block, a lane that drives one
         // overriding it at the block's last frame (`ParamInput::last_frame`).
         let target = self.placement([
-            self.declared_param::<{ UnitParam::Azimuth as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Azimuth as u16 }, _>(&io)
                 .last_frame(),
-            self.declared_param::<{ UnitParam::Elevation as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Elevation as u16 }, _>(&io)
                 .last_frame(),
         ]);
         // `Mix::new_clamped` passes a NaN through, so the blend is held too.
         let blend = Mix(self.good.blend.read(
-            self.declared_param::<{ UnitParam::Wet as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Wet as u16 }, _>(&io)
                 .last_frame()
                 .unwrap_or_else(|| self.blend.load().get()),
         ));
@@ -240,7 +240,7 @@ impl Node for HrtfBinauralNode {
         self.panner.reset_state(self.aim.current());
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

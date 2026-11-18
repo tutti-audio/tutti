@@ -148,7 +148,7 @@ impl<N: HasParams<P>, const P: u16> HasParams<P> for Params<N> {}
 pub trait Cells<U: ParamUnit> {
     /// The cell's value as an `f32`, or `None` where the node has no such
     /// param.
-    fn base(&self) -> Option<f32>;
+    fn base(&self) -> Option<f64>;
 
     /// The cell, shared. Clones the `Arc`: control thread.
     fn cell(&self) -> Option<ParamCell>;
@@ -159,8 +159,8 @@ where
     U: Scalar,
     Arc<<U::Raw as ParamRaw>::Atomic>: Into<ParamCell>,
 {
-    fn base(&self) -> Option<f32> {
-        Some(self.load().to_cell())
+    fn base(&self) -> Option<f64> {
+        Some(self.load().to_wide())
     }
 
     fn cell(&self) -> Option<ParamCell> {
@@ -169,8 +169,8 @@ where
 }
 
 impl Cells<bool> for &Arc<AtomicF32> {
-    fn base(&self) -> Option<f32> {
-        Some(self.load(Ordering::Acquire))
+    fn base(&self) -> Option<f64> {
+        Some(f64::from(self.load(Ordering::Acquire)))
     }
 
     fn cell(&self) -> Option<ParamCell> {
@@ -179,7 +179,7 @@ impl Cells<bool> for &Arc<AtomicF32> {
 }
 
 impl<U: ParamUnit, C: Cells<U>> Cells<U> for Option<C> {
-    fn base(&self) -> Option<f32> {
+    fn base(&self) -> Option<f64> {
         self.as_ref().and_then(Cells::base)
     }
 
@@ -193,7 +193,7 @@ impl<U: ParamUnit, C: Cells<U>> Cells<U> for Option<C> {
 pub struct Row<'a> {
     addr: UnitAddr,
     port: bool,
-    base: f32,
+    base: f64,
     cell: &'a dyn Fn() -> Option<ParamCell>,
 }
 
@@ -263,7 +263,7 @@ pub fn set(walk: impl FnOnce(Visit<'_>) -> bool) -> ParamSet {
 /// Port `k`'s cell value: what [`Node::param_base`](crate::Node::param_base)
 /// answers.
 #[doc(hidden)]
-pub fn base(walk: impl FnOnce(Visit<'_>) -> bool, k: usize) -> Option<f32> {
+pub fn base(walk: impl FnOnce(Visit<'_>) -> bool, k: usize) -> Option<f64> {
     let (mut next, mut found) = (0, None);
     walk(&mut |row| {
         if !row.port {
@@ -290,7 +290,7 @@ pub fn input<'a, F: Float>(
     io: &Io<'a, F>,
     p: u16,
     index: u8,
-) -> ParamInput<'a> {
+) -> ParamInput<'a, F> {
     let addr = UnitAddr::try_from(p | u16::from(index) << 8)
         .expect("`HasParam<P>` is declared only for a `UnitParam` kind");
     let (mut next, mut found) = (0, None);
@@ -453,7 +453,7 @@ pub fn input<'a, F: Float>(
 /// # Reading a driven param
 ///
 /// `process` reads a param through the declaration, never by a port index:
-/// `declared_param::<{ UnitParam::Cutoff as u16 }>(&io)` (`declared_param_at`
+/// `declared_param::<{ UnitParam::Cutoff as u16 }, _>(&io)` (`declared_param_at`
 /// with the group's `index` for a repeated kind) is the [`ParamInput`] of the
 /// port whose row names that kind, so reordering or inserting a row moves the
 /// read with it. A kind the node does not declare does not compile. It walks
@@ -483,7 +483,7 @@ pub fn input<'a, F: Float>(
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
 ///         let level = self
-///             .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+///             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
 ///             .last_frame()
 ///             .unwrap_or_else(|| self.level.load().get());
 ///         io.output(0).fill(level);
@@ -575,7 +575,7 @@ macro_rules! declare_params {
 
             /// Port `k`'s cell value.
             #[allow(dead_code)]
-            fn declared_base(&self, k: usize) -> Option<f32> {
+            fn declared_base(&self, k: usize) -> Option<f64> {
                 $crate::__private::base(|visit| self.declared_visit(visit), k)
             }
 
@@ -583,10 +583,10 @@ macro_rules! declare_params {
             /// `UnitParam` as `u16`), through the port its row declares.
             /// Does not compile for a kind the node does not declare.
             #[allow(dead_code)]
-            fn declared_param<'a, const P: u16>(
+            fn declared_param<'a, const P: u16, __LaneF: $crate::__private::Float>(
                 &self,
-                io: &$crate::Io<'a, impl $crate::__private::Float>,
-            ) -> $crate::ParamInput<'a>
+                io: &$crate::Io<'a, __LaneF>,
+            ) -> $crate::ParamInput<'a, __LaneF>
             where
                 Self: $crate::HasParam<P>,
             {
@@ -596,11 +596,11 @@ macro_rules! declare_params {
             /// [`declared_param`](Self::declared_param) for the group row
             /// `index` of kind `P` (a band's threshold).
             #[allow(dead_code)]
-            fn declared_param_at<'a, const P: u16>(
+            fn declared_param_at<'a, const P: u16, __LaneF: $crate::__private::Float>(
                 &self,
-                io: &$crate::Io<'a, impl $crate::__private::Float>,
+                io: &$crate::Io<'a, __LaneF>,
                 index: u8,
-            ) -> $crate::ParamInput<'a>
+            ) -> $crate::ParamInput<'a, __LaneF>
             where
                 Self: $crate::HasParams<P>,
             {

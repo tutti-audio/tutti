@@ -148,7 +148,7 @@ impl Node for Gated {
     fn reset(&mut self) {
         self.0.reset();
     }
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.0.param_base(k)
     }
 }

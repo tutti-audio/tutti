@@ -408,13 +408,13 @@ impl Node for VbapPannerNode {
             return Status::Modified;
         }
         let driven = [
-            self.declared_param::<{ UnitParam::Azimuth as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Azimuth as u16 }, _>(&io)
                 .frames(),
-            self.declared_param::<{ UnitParam::Elevation as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Elevation as u16 }, _>(&io)
                 .frames(),
-            self.declared_param::<{ UnitParam::Spread as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Spread as u16 }, _>(&io)
                 .frames(),
-            self.declared_param::<{ UnitParam::StereoWidth as u16 }>(&io)
+            self.declared_param::<{ UnitParam::StereoWidth as u16 }, _>(&io)
                 .frames(),
         ];
         let cells = (
@@ -456,7 +456,7 @@ impl Node for VbapPannerNode {
         self.pos = 0;
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

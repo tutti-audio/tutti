@@ -89,9 +89,9 @@ impl Node for PolySynth {
             return Status::Modified;
         }
         let driven = [
-            self.declared_param::<{ UnitParam::Detune as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Detune as u16 }, _>(&io)
                 .last_frame(),
-            self.declared_param::<{ UnitParam::StereoSpread as u16 }>(&io)
+            self.declared_param::<{ UnitParam::StereoSpread as u16 }, _>(&io)
                 .last_frame(),
         ];
         if let Some(unison) = &mut self.unison {
@@ -99,7 +99,7 @@ impl Node for PolySynth {
         }
         let blocks = io.sub_blocks(0);
         let volume = self
-            .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .last_frame()
             .map_or_else(
                 || {
@@ -143,7 +143,7 @@ impl Node for PolySynth {
         });
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

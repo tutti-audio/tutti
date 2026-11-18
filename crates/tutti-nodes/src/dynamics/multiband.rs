@@ -531,7 +531,7 @@ impl<F: Float + Lanes + Lerp> Node for MultibandCompressorNode<F> {
         };
         for (i, c) in lanes.cutoff.iter_mut().enumerate().take(nb - 1) {
             *c = self
-                .declared_param_at::<{ UnitParam::Cutoff as u16 }>(&io, i as u8)
+                .declared_param_at::<{ UnitParam::Cutoff as u16 }, _>(&io, i as u8)
                 .frames();
         }
         for (b, lane) in lanes.band[..nb].iter_mut().enumerate() {
@@ -539,17 +539,17 @@ impl<F: Float + Lanes + Lerp> Node for MultibandCompressorNode<F> {
             // In the order of `BAND_PARAMS`: `declared_param_at` takes its kind as a const
             // generic, which a loop over the array cannot supply.
             *lane = [
-                self.declared_param_at::<{ UnitParam::Threshold as u16 }>(&io, band)
+                self.declared_param_at::<{ UnitParam::Threshold as u16 }, _>(&io, band)
                     .frames(),
-                self.declared_param_at::<{ UnitParam::Knee as u16 }>(&io, band)
+                self.declared_param_at::<{ UnitParam::Knee as u16 }, _>(&io, band)
                     .frames(),
-                self.declared_param_at::<{ UnitParam::Ratio as u16 }>(&io, band)
+                self.declared_param_at::<{ UnitParam::Ratio as u16 }, _>(&io, band)
                     .frames(),
-                self.declared_param_at::<{ UnitParam::Attack as u16 }>(&io, band)
+                self.declared_param_at::<{ UnitParam::Attack as u16 }, _>(&io, band)
                     .frames(),
-                self.declared_param_at::<{ UnitParam::Release as u16 }>(&io, band)
+                self.declared_param_at::<{ UnitParam::Release as u16 }, _>(&io, band)
                     .frames(),
-                self.declared_param_at::<{ UnitParam::GainDb as u16 }>(&io, band)
+                self.declared_param_at::<{ UnitParam::GainDb as u16 }, _>(&io, band)
                     .frames(),
             ];
         }
@@ -588,7 +588,7 @@ impl<F: Float + Lanes + Lerp> Node for MultibandCompressorNode<F> {
         }
     }
 
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         self.declared_base(port)
     }
 }
@@ -1400,7 +1400,7 @@ mod tests {
                 assert!(set.set(addr, v));
                 assert_eq!(
                     n.param_base(k),
-                    Some(v),
+                    Some(f64::from(v)),
                     "{bands} bands, port {k}: {addr:?}"
                 );
             }

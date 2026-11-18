@@ -334,7 +334,7 @@ pub(crate) struct SumLane {
     prev: Option<Amplitude>,
     /// The param port's state, for a lane a source drives (or one still
     /// fading to its base after the source went): sized with the plan.
-    drive: Option<ParamState>,
+    drive: Option<ParamState<f32>>,
     /// The fade kind as this block's snapshot read it.
     want: EdgeFade,
     /// The declick fade's bookkeeping.
@@ -396,7 +396,7 @@ impl SumLane {
     /// running port); a new one is on its first block. A state this lane
     /// does not keep goes to `spare`, to be freed on the control side
     /// (`spare` has room: one for each lane that carries).
-    pub(crate) fn adopt(&mut self, carried: Carried, max: usize, spare: &mut Vec<ParamState>) {
+    pub(crate) fn adopt(&mut self, carried: Carried, max: usize, spare: &mut Vec<ParamState<f32>>) {
         let Carried { prev, drive, fade } = carried;
         self.prev = prev;
         self.fade = fade;
@@ -546,7 +546,7 @@ pub(crate) struct Carried {
     /// The weight the lane was last given.
     pub(crate) prev: Option<Amplitude>,
     /// Its driven state, if it had one.
-    pub(crate) drive: Option<ParamState>,
+    pub(crate) drive: Option<ParamState<f32>>,
     /// Its declick fade.
     pub(crate) fade: FadeState,
 }

@@ -126,11 +126,11 @@ pub(super) struct Staged<F: Float = f32> {
     pub(super) queued: Vec<u32>,
     /// The store index and the lane state of each unit whose mix a plan
     /// drives and that may have none.
-    pub(super) drives: Vec<(u32, ParamState)>,
+    pub(super) drives: Vec<(u32, ParamState<f32>)>,
     pub(super) spare_rings: Vec<Ring<F>>,
     /// Tables of owed closes merged away, to be freed on the control side.
     pub(super) spare_tables: Vec<Held>,
-    pub(super) spare_drives: Vec<ParamState>,
+    pub(super) spare_drives: Vec<ParamState<f32>>,
     /// The parallel state a pool set since this was staged left unused.
     pub(super) spare_par: Option<Par>,
     /// The executor's chase buffer from this plan on.
@@ -182,7 +182,7 @@ pub(crate) struct StageIn<'a> {
     /// held-key tables of those the plan keeps go back to them.
     pub(crate) resumed: bool,
     /// The lane state for the mix of the unit at a key.
-    pub(crate) mix_lane: &'a dyn Fn(NodeKey) -> Option<ParamState>,
+    pub(crate) mix_lane: &'a dyn Fn(NodeKey) -> Option<ParamState<f32>>,
 }
 
 /// What every step of staging reads.
@@ -1042,8 +1042,8 @@ fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> (Vec<SumLane>, Vec<Option<u32>
 fn drives<F: Float>(
     c: &Commit<F>,
     cx: &Cx<'_>,
-    mix_lane: &dyn Fn(NodeKey) -> Option<ParamState>,
-) -> Vec<(u32, ParamState)> {
+    mix_lane: &dyn Fn(NodeKey) -> Option<ParamState<f32>>,
+) -> Vec<(u32, ParamState<f32>)> {
     let driven_of = |p: &Plan, rec: &crate::plan::NodeRec| {
         p.param_ports[rec.params.range()]
             .last()

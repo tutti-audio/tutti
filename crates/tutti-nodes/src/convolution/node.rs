@@ -793,7 +793,7 @@ impl Node for ConvolverNode {
             .with_param_addrs(self.declared_ports().as_slice())
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 
@@ -831,7 +831,7 @@ impl Node for ConvolverNode {
             return Status::Silent;
         }
         let driven = self
-            .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .frames();
         let (inputs, mut outputs) = io.split();
         // Walk the block's silent runs: cut the output where a run stops sounding and restart

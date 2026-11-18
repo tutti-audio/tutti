@@ -435,9 +435,9 @@ impl Node for BusStripNode {
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let size = io.frames();
         let (volume, balance) = (
-            self.declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
                 .frames(),
-            self.declared_param::<{ UnitParam::Balance as u16 }>(&io)
+            self.declared_param::<{ UnitParam::Balance as u16 }, _>(&io)
                 .frames(),
         );
         let (inputs, mut outputs) = io.split();
@@ -451,7 +451,7 @@ impl Node for BusStripNode {
         self.ramp_from = None;
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

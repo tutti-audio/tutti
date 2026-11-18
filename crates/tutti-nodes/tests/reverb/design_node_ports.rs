@@ -46,7 +46,7 @@ fn a_design_nodes_ports_start_at_its_first_cell() {
     );
     assert_eq!(
         live.param_base(0),
-        Some(FreeverbControls::GENERAL_MIDI.room.get())
+        Some(f64::from(FreeverbControls::GENERAL_MIDI.room.get()))
     );
     assert!(live.param_set().get(UnitParam::Wet).is_none());
 

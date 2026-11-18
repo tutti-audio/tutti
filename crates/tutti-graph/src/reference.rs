@@ -132,28 +132,41 @@ use tutti_ump::{
 use tutti_units::PlayReading;
 
 /// One param port's state, as the reference keeps it.
-#[derive(Default)]
-struct RefParam {
+struct RefParam<F: Float> {
     /// The event source it last ran with.
     source: Option<EventOut>,
     modulated: bool,
-    last: f32,
-    last_base: f32,
-    hold: f32,
+    last: F,
+    last_base: F,
+    hold: F,
     /// Frames of the declick left to run.
     fading: usize,
     /// Its event source's ramp.
-    ramp: RefRamp,
+    ramp: RefRamp<F>,
     /// Frames this port has run, to place its ramps.
     clock: u64,
 }
 
+impl<F: Float> Default for RefParam<F> {
+    fn default() -> Self {
+        Self {
+            source: None,
+            modulated: false,
+            last: F::ZERO,
+            last_base: F::ZERO,
+            hold: F::ZERO,
+            fading: 0,
+            ramp: RefRamp::default(),
+            clock: 0,
+        }
+    }
+}
+
 /// The move an event source is on: where it started, where it goes, and
 /// how — evaluated from its start frame.
-#[derive(Default)]
-struct RefRamp {
-    from: f32,
-    target: f32,
+struct RefRamp<F: Float> {
+    from: F,
+    target: F,
     /// The absolute frame of its event.
     at: u64,
     /// A ramp's length, in frames.
@@ -164,13 +177,29 @@ struct RefRamp {
     /// `shape`.
     curve: Option<(f32, f32)>,
     /// Its value on the last frame evaluated.
-    value: f32,
+    value: F,
     /// Whether the source has sent an event yet: until it has, the port
     /// reads its base.
     started: bool,
     /// The absolute frame it arrives on and holds its end from (`None`: not
     /// within `u32::MAX` frames of its event).
     arrives: Option<u64>,
+}
+
+impl<F: Float> Default for RefRamp<F> {
+    fn default() -> Self {
+        Self {
+            from: F::ZERO,
+            target: F::ZERO,
+            at: 0,
+            len: 0,
+            shape: tutti_curve::Law::default(),
+            curve: None,
+            value: F::ZERO,
+            started: false,
+            arrives: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -234,7 +263,10 @@ pub struct Reference<F: Float = f32> {
     /// state.
     reset_time: bool,
     frame: Frame,
-    params: BTreeMap<ParamIn, RefParam>,
+    params: BTreeMap<ParamIn, RefParam<F>>,
+    /// The param-port state of each node's mix lane, which is `f32` as the
+    /// executor's mix lane is.
+    mix_ports: BTreeMap<NodeKey, RefParam<f32>>,
     /// Ranges moved by [`set_param_range`](Self::set_param_range) since the
     /// last graph: they override the graph's.
     ranges: BTreeMap<ParamIn, ParamRange>,
@@ -247,7 +279,7 @@ pub struct Reference<F: Float = f32> {
     gain_moves: BTreeMap<EdgeId, Amplitude>,
     /// The param-port state of each driven edge gain's lane, as
     /// `Reference::params` keeps a node's: one rule (`ref_port`).
-    gain_ports: BTreeMap<EdgeId, RefParam>,
+    gain_ports: BTreeMap<EdgeId, RefParam<f32>>,
     /// Edge gain ranges moved by [`set_edge_gain_range`](Self::set_edge_gain_range)
     /// since the last graph.
     gain_ranges: BTreeMap<EdgeId, ParamRange>,
@@ -374,6 +406,7 @@ impl<F: Float> Reference<F> {
             next_id: 0,
             cancelled: 0,
             params: BTreeMap::new(),
+            mix_ports: BTreeMap::new(),
             ranges: BTreeMap::new(),
             lane_prev: BTreeMap::new(),
             gain_moves: BTreeMap::new(),
@@ -493,6 +526,7 @@ impl<F: Float> Reference<F> {
         // Every unit comes back from a re-prepare as a fresh insert: its
         // params start over.
         self.params.clear();
+        self.mix_ports.clear();
         if let Some(graph) = self.graph.clone() {
             for (&at, e) in flat_edges(graph.topology()) {
                 if let crate::Edge::Feedback(f) = e {
@@ -738,10 +772,12 @@ impl<F: Float> Reference<F> {
                 // A new unit, or a swapped one: its params start over. (A
                 // crossfade keeps the key's, as the unit slot stays.)
                 self.params.retain(|at, _| at.node != key);
+                self.mix_ports.remove(&key);
             }
         }
         let units = &self.units;
         self.params.retain(|at, _| units.contains_key(&at.node));
+        self.mix_ports.retain(|k, _| units.contains_key(k));
         self.modes.retain(|k, _| t.nodes.contains_key(k));
         self.wanted.retain(|k, _| t.nodes.contains_key(k));
         self.wanted_mix.retain(|k, _| t.nodes.contains_key(k));
@@ -1434,7 +1470,7 @@ impl<F: Float> Reference<F> {
         }
 
         let param_values = self.run_params(key, graph, frames, events);
-        let param_table: Vec<ParamInput<'_>> = param_values
+        let param_table: Vec<ParamInput<'_, F>> = param_values
             .iter()
             .map(|v| match v {
                 Some((values, corners)) => ParamInput::Frames { values, corners },
@@ -1761,7 +1797,7 @@ impl<F: Float> Reference<F> {
         };
         let entry = graph.params().get(&at);
         let source = entry.and_then(|m| m.source);
-        if source.is_none() && !self.params.contains_key(&at) {
+        if source.is_none() && !self.mix_ports.contains_key(&key) {
             return None;
         }
         let range = self
@@ -1780,7 +1816,7 @@ impl<F: Float> Reference<F> {
             }
             None => Vec::new(),
         };
-        let st = self.params.entry(at).or_default();
+        let st = self.mix_ports.entry(key).or_default();
         ref_port(
             st,
             fresh,
@@ -1806,13 +1842,13 @@ impl<F: Float> Reference<F> {
         graph: &ValidGraph,
         frames: usize,
         events: &BTreeMap<EventOut, Vec<Event>>,
-    ) -> Vec<Option<(Vec<f32>, Vec<u32>)>> {
+    ) -> Vec<Option<(Vec<F>, Vec<u32>)>> {
         let unit = &self.units[&key].1;
         let declared = unit.shape().params;
         let mut out = Vec::new();
         for (k, &param) in declared.as_slice().iter().enumerate() {
             let at = ParamIn { node: key, param };
-            let Some(b1) = unit.param_base(k) else {
+            let Some(b1) = unit.param_base(k).map(F::from_f64) else {
                 self.params.remove(&at);
                 out.push(None);
                 continue;
@@ -1856,10 +1892,10 @@ impl<F: Float> Reference<F> {
 }
 
 /// What one param port (or edge gain lane) is given for a block.
-struct RefPortIn<'a> {
+struct RefPortIn<'a, F> {
     param: tutti_units::UnitAddr,
     /// The base at the end of the block.
-    b1: f32,
+    b1: F,
     range: ParamRange,
     source: Option<EventOut>,
     /// The source's events, through its PDC delay.
@@ -1873,7 +1909,11 @@ struct RefPortIn<'a> {
 /// docs: `Some` of its values when modulated or declicking, `None` when it
 /// reads its base. `fresh` is the port's first block. Shared by a node's
 /// param ports and an edge gain's lane, which are one rule.
-fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32>, Vec<u32>)> {
+fn ref_port<F: Float>(
+    st: &mut RefParam<F>,
+    fresh: bool,
+    p: RefPortIn<'_, F>,
+) -> Option<(Vec<F>, Vec<u32>)> {
     let RefPortIn {
         param,
         b1,
@@ -1905,17 +1945,17 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
         if i == frames - 1 {
             b1
         } else {
-            from + (b1 - from) * ((i + 1) as f32 / frames as f32)
+            from + (b1 - from) * (F::from_f64((i + 1) as f64) / F::from_f64(frames as f64))
         }
     };
     let (lo, hi) = if range.min <= range.max {
-        (range.min, range.max)
+        (F::from_f32(range.min), F::from_f32(range.max))
     } else {
-        (range.max, range.min)
+        (F::from_f32(range.max), F::from_f32(range.min))
     };
     // The event source's value at every frame, the base before its
     // first event; it replaces the base, clamped.
-    let mut vals = vec![0.0f32; frames];
+    let mut vals = vec![F::ZERO; frames];
     // The corners: a frame where the delivered trajectory changes piece
     // (`ParamInput::corners`), each once.
     let mut corners: Vec<u32> = Vec::new();
@@ -1947,7 +1987,7 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
                     let len = r.duration().get() as u64;
                     st.ramp = RefRamp {
                         from: cur,
-                        target: r.raw_target(),
+                        target: F::from_f32(r.raw_target()),
                         at: now,
                         len,
                         shape: r.shape(),
@@ -1972,24 +2012,24 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
                         base(i)
                     };
                     let arrives =
-                        crate::event::arrival(position, length).map(|j| now + u64::from(j));
+                        crate::event::arrival::<F>(position, length).map(|j| now + u64::from(j));
                     // The piece in flight, sent again: the same values and
                     // law, bit for bit, arriving on the same frame, or both
                     // already at rest on their end. No corner.
                     let old = &st.ramp;
-                    let bits = |f: f32, t: f32, l| (f.to_bits(), t.to_bits(), l);
+                    let bits = |f: F, t: F, l| (f.to_f64().to_bits(), t.to_f64().to_bits(), l);
                     let rested = old.started && matches!(old.arrives, Some(a) if a < now);
                     let continues = old.started
                         && old.curve.is_some()
                         && bits(old.from, old.target, old.shape)
-                            == bits(piece.from, piece.to, piece.law)
+                            == bits(F::from_f32(piece.from), F::from_f32(piece.to), piece.law)
                         && match old.arrives {
                             Some(a) if a < now => arrives == Some(now),
                             a => a == arrives,
                         };
                     st.ramp = RefRamp {
-                        from: piece.from,
-                        target: piece.to,
+                        from: F::from_f32(piece.from),
+                        target: F::from_f32(piece.to),
                         at: now,
                         len: 0,
                         shape: piece.law,
@@ -2020,15 +2060,17 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
         } else if let Some((position, length)) = r.curve {
             // Frames since its event, `0` on the event's own.
             let j = u32::try_from(now - r.at).unwrap_or(u32::MAX);
-            let piece = tutti_curve::Piece::new(r.from, r.target, r.shape);
-            crate::event::segment_value(None, piece, position, length, j)
+            match crate::event::segment_progress::<F>(position, length, j) {
+                Some(t) => ref_line(r.from, r.target, r.shape, t),
+                None => r.target,
+            }
         } else {
             let into = now - r.at + 1;
             if into >= r.len {
                 r.target
             } else {
-                let t = into as f32 / r.len as f32;
-                tutti_curve::Piece::new(r.from, r.target, r.shape).value(None, t)
+                let t = F::from_f64(into as f64) / F::from_f64(r.len as f64);
+                ref_line(r.from, r.target, r.shape, t)
             }
         };
         st.ramp.value = value;
@@ -2041,8 +2083,9 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
     for (i, v) in vals.iter_mut().enumerate() {
         if st.fading > 0 && i < st.fading {
             let j = decl - st.fading + i;
+            // The fade law's gains are `f32`.
             let (out, inn) = FadeLaw::EqualAmplitude.gains(j, decl);
-            *v = st.hold * out + *v * inn;
+            *v = st.hold * F::from_f32(out) + *v * F::from_f32(inn);
         }
     }
     st.fading = st.fading.saturating_sub(frames);
@@ -2052,8 +2095,18 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
     Some((vals, corners))
 }
 
+/// `from + (to - from) * law(t)` in `F`: a line is exact in `F`, a shaped law
+/// is read at its own `f32` width.
+fn ref_line<F: Float>(from: F, to: F, law: tutti_curve::Law, t: F) -> F {
+    let g = match law {
+        tutti_curve::Law::Linear => t.clamp(F::ZERO, F::ONE),
+        shaped => F::from_f32(shaped.eval(t.to_f32())),
+    };
+    from + (to - from) * g
+}
+
 /// The frame a started move arrives on.
-fn r_started_arrives(r: &RefRamp) -> Option<u64> {
+fn r_started_arrives<F: Float>(r: &RefRamp<F>) -> Option<u64> {
     r.started.then_some(r.arrives).flatten()
 }
 
