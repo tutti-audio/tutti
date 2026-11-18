@@ -48,7 +48,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tutti_buffers::Wave;
+use tutti_buffers::{Interleaved, Wave};
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 
@@ -349,7 +349,7 @@ impl RegionOut {
         let channels = self.ring.channels;
         #[cfg(codec)]
         if let Some(decoder) = self.decoder.as_mut() {
-            let ch = self.writer.stride();
+            let ch = usize::from(self.writer.layout().count());
             if decoder.cursor() != Samples(at) && decoder.seek(Samples(at)).is_err() {
                 out.fill(0.0);
                 return false;
@@ -390,7 +390,7 @@ impl RegionOut {
     /// reading the file. `false` when any read of the file failed (a decode
     /// fault: the frames before it are kept, the rest is silence).
     pub(crate) fn fill_with(&mut self, mapping: &Mapping, pos: u64, out: &mut [f32]) -> bool {
-        let ch = self.writer.stride();
+        let ch = usize::from(self.writer.layout().count());
         let mut read_ok = true;
         mapping.fill(pos, out, ch, &mut |at, run| {
             read_ok &= self.read_file(at, run);
@@ -403,7 +403,11 @@ impl RegionOut {
     /// be written, or where the ring is full ahead of the reader
     /// (`PosRing::push`). A trailing partial frame is ignored.
     pub fn push_interleaved(&mut self, samples: &[f32]) -> Samples {
-        Samples(self.writer.push(samples))
+        let layout = self.writer.layout();
+        let whole = Samples::from_interleaved_len(samples.len(), layout).interleaved_len(layout);
+        let frames = Interleaved::new(&samples[..whole], layout)
+            .expect("a whole number of frames of the ring's width");
+        self.writer.push(frames).expect("the ring's width")
     }
 }
 
@@ -451,13 +455,13 @@ impl RegionBuffer {
         fade_frames: Samples,
     ) -> (RegionOut, SharedReader, PosReader) {
         let channels = nonempty(topology.width());
-        let stride = channels.count() as usize;
         let frames = capacity.clamp(4096, MAX_POS_RING_FRAMES);
         let (mapping, arrangement) = match len {
             Some(len) => (Mapping::plain(len), Arrangement::plain(len)),
             None => (Mapping::unbounded(), Arrangement::unbounded()),
         };
-        let (writer, reader) = PosRing::new(frames, stride, HISTORY_FRAMES);
+        let (writer, reader) = PosRing::new(frames, channels, HISTORY_FRAMES)
+            .expect("`nonempty` gave a layout of at least one channel");
         let ring = Arc::new(Ring {
             region_id,
             file_path,

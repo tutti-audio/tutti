@@ -25,8 +25,6 @@ crates/tutti-export/src/render/outputs.rs::open_lanes  pending
 crates/tutti-export/src/spill.rs::SpillReplay::fill  pending
 crates/tutti-graph/src/arena.rs::Arena::leading_mut  pending
 crates/tutti-graph/src/tap.rs::TapReader::pop_into  pending
-crates/tutti-rt/src/pos_ring.rs::PosRing::new  pending
-crates/tutti-rt/src/pos_ring.rs::PosWriter::push  pending
 crates/tutti-sampler/src/streamer/io/wave_io.rs::read_wave  pending
 crates/tutti-sampler/src/streamer/loops.rs::RingLoop::blend_run  pending
 crates/tutti-sampler/src/streamer/loops.rs::apply_mapping  pending

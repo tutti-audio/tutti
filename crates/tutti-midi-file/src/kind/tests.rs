@@ -13,7 +13,7 @@ fn detect_tells_the_two_midi_formats_apart() {
 
     let smf = MidiFile::smf(
         crate::SmfFormat::SingleTrack,
-        crate::SmfDivision::of(480),
+        crate::SmfDivision::per_quarter(480),
         vec![crate::Track::default()],
     )
     .unwrap()
