@@ -115,7 +115,7 @@ use crate::arena::Arena;
 use crate::event::Event;
 use crate::held::Held;
 use crate::kernels::AudioRing;
-use crate::lane::{control_in, fade_gains, ramp_in};
+use crate::lane::{fade_gains, ramp_in};
 use crate::node::Shape;
 use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
 use crate::pass::Pass;
@@ -671,7 +671,8 @@ impl<F: Float> ModeState<F> {
     pub(crate) fn new(cell: ModeCell, shape: &Shape, max_block: usize, declick: usize) -> Self {
         let own_bypass = shape.own_bypass;
         let mode = Self::read(own_bypass, cell.load());
-        let mix = control_in::<F>(cell.load_mix().get());
+        // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
+        let mix = F::from_f64(f64::from(cell.load_mix().get()));
         let pass = Pass::<F>::of_or_nothing(shape);
         let main = pass.inputs();
         let folded = pass.folds().then(|| Arena::new(pass.outputs(), max_block));
@@ -771,7 +772,8 @@ impl<F: Float> ModeState<F> {
         // The mix advances every block, parked or silent or not, so a move
         // made while the node was out has arrived when it is heard.
         self.mix_from = self.mix_to;
-        self.mix_to = control_in::<F>(self.cell.load_mix().get());
+        // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
+        self.mix_to = F::from_f64(f64::from(self.cell.load_mix().get()));
         self.plain = self.inert
             || (self.seen == NodeMode::Active
                 && self.heading == NodeMode::Active

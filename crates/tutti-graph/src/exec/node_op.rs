@@ -15,7 +15,7 @@ use crate::event::PortCount;
 use crate::event::{Event, EventWriter, SortedEvents, merge_into};
 use crate::history::TransportHistory;
 use crate::io::Io;
-use crate::lane::{control_in, fade_gains};
+use crate::lane::fade_gains;
 use crate::loss::Dropped;
 use crate::node::{ConstantMask, Cx, Env, InPlaceMask, MAX_PORTS, Node, SilenceMask, Status};
 use crate::param::ParamInput;
@@ -397,7 +397,8 @@ pub(super) fn run_params<
     // the same params (checked where it is asked for), so the two agree.
     let n = declared.len().min(params.port_count());
     for (k, &param) in declared.as_slice().iter().enumerate().take(n) {
-        let base = node.param_base(k).map(control_in::<F>);
+        // `param_base` is the trait's raw `f32`; B gives it a unit.
+        let base = node.param_base(k).map(|b| F::from_f64(f64::from(b)));
         match next.next_if(|p| p.port as usize == k) {
             Some(p) => {
                 let events = st.events.ev(p.slot);

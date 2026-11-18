@@ -177,18 +177,27 @@ fn a_mute_and_a_dim_ramp_and_settle() {
     s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
     // Left ramps from unity to silence; right from unity to the dim.
     for k in 0..n {
-        // The ramp is `f64`; the `f32` samples take its gain narrowed.
+        // The ramp renders in `f32` as `from + (to - from) * (k + 1) / n`: one
+        // rounding each for the ratio, the product and the sum, plus the ends'
+        // narrowing, at most 4 ulp of the ramp's scale `max(|from|, |to|)` = 1
+        // (the left ramp cancels toward 0, so its scale is the end it left, not
+        // its value). The last frame is the target exactly.
         let t = (k + 1) as f64 / n as f64;
-        let (left, right) = if k + 1 >= n {
-            (0.0, 0.5)
+        let (left, right) = (1.0 + (0.0 - 1.0) * t, 1.0 + (0.5 - 1.0) * t);
+        if k + 1 >= n {
+            assert_eq!(out[2 * k], 0.0, "left, frame {k}");
+            assert_eq!(out[2 * k + 1], 0.5, "right, frame {k}");
         } else {
-            (
-                (1.0 + (0.0 - 1.0) * t) as f32,
-                (1.0 + (0.5 - 1.0) * t) as f32,
-            )
-        };
-        assert_eq!(out[2 * k], left, "left, frame {k}");
-        assert_eq!(out[2 * k + 1], right, "right, frame {k}");
+            let tolerance = 4.0 * f64::from(f32::EPSILON) * 1.0;
+            assert!(
+                (f64::from(out[2 * k]) - left).abs() <= tolerance,
+                "left, frame {k}"
+            );
+            assert!(
+                (f64::from(out[2 * k + 1]) - right).abs() <= tolerance,
+                "right, frame {k}"
+            );
+        }
     }
     assert_eq!(&out[2 * n..2 * n + 2], [0.0, 0.5]);
 }

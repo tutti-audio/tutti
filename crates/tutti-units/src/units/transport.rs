@@ -297,10 +297,10 @@ unit! {
     /// accepts an out-of-range speed the other rejects — same command,
     /// different audio. A newtype alone does not close that; the shared
     /// constructor does.
-    pub struct PlaybackRate(pub f32): Unit, Ordered, Bounded;
+    pub struct PlaybackRate(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive`: 2× plus 2× is not 4× — rates compose by multiplication.
-// NOT `Scalable`: scaling by a bare `f32` is how the three rate kinds got
+// NOT `Scalable`: scaling by a bare `f64` is how the three rate kinds got
 // multiplied together in the first place. Compose through `read_rate` instead,
 // which names both operands.
 impl PlaybackRate {
@@ -319,7 +319,7 @@ impl PlaybackRate {
     /// user input guards it first.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Self {
+    pub fn new_clamped(v: f64) -> Self {
         Self(v.clamp(Self::MIN.0, Self::MAX.0))
     }
 
@@ -330,7 +330,7 @@ impl PlaybackRate {
     #[inline]
     #[must_use]
     pub fn read_rate(self, src: SrcRatio) -> ReadRate {
-        ReadRate(self.0 as f64 * src.0)
+        ReadRate(self.0 * src.0)
     }
 }
 
@@ -398,7 +398,7 @@ unit! {
     /// 2.0 plays twice as long at unchanged pitch — time-stretching, not
     /// resampling. For the kind that couples pitch to duration,
     /// see [`PlaybackRate`].
-    pub struct StretchFactor(pub f32): Unit, Ordered, Bounded;
+    pub struct StretchFactor(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive` / `Scalable`: same reasoning as `PlaybackRate` —
 // stretch factors compose by multiplication, and a bare-scalar `*` invites
@@ -420,7 +420,7 @@ impl StretchFactor {
     /// first.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Self {
+    pub fn new_clamped(v: f64) -> Self {
         Self(v.clamp(Self::MIN.0, Self::MAX.0))
     }
 }

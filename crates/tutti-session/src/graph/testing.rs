@@ -5,9 +5,11 @@
 use std::sync::Arc;
 
 use tutti_buffers::{Float, InterleavedMut, PlanesMut};
+use tutti_units::Samples;
 
-use tutti_graph::{Compensation, Editor, Executor, NodeKey, Prepare, Topology, TransportPosition};
-use tutti_units::{Amplitude, Samples};
+use tutti_graph::{
+    Compensation, Editor, Executor, NodeKey, Prepare, Topology, TransportPosition, fade_gains,
+};
 
 use super::{Graph, render};
 
@@ -263,11 +265,11 @@ impl<F: Float> AudioSide<F> {
                             F::ZERO
                         };
                         let (go, gn) = if f.done.get() + i < f.fade.duration.get() {
-                            f.fade.law.gains(f.done + Samples(i), f.fade.duration)
+                            fade_gains::<F>(f.fade.law, f.done + Samples(i), f.fade.duration)
                         } else {
-                            (Amplitude::SILENT, Amplitude::UNITY)
+                            (F::ZERO, F::ONE)
                         };
-                        *x = was * F::from_f64(go.get()) + *x * F::from_f64(gn.get());
+                        *x = was * go + *x * gn;
                     }
                 }
             }

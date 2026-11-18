@@ -323,10 +323,10 @@ pub mod types {
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
         Drive, Elevation, Feedback, Gain, HoldFactor, Latency, Mix, Moment, NormalizedOutOfRange,
-        Pan, ParamAddr, ParamKey, PhaseIncrement, PlayReading, PlaybackRate, Radians, ReadRate,
-        Resonance, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Spread,
-        SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam,
-        UnitParamOutOfRange, Velocity,
+        Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, Radians,
+        ReadPosition, ReadRate, Resonance, RunningPhase, SamplePosition, SampleRateOutOfRange,
+        SampleSpan, SampleSpanOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
+        StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }

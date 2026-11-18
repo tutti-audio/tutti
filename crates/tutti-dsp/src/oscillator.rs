@@ -1,9 +1,9 @@
 //! The band-limited oscillator: a phase accumulator read through a sine, or
 //! through a saw, square or triangle corrected at its discontinuities.
 //!
-//! The phase `p` is held in cycles in `[0, 1)` in `f64`, so a long render does
-//! not drift. A sine is `sin(2πp)`, exact. The other three are the naive
-//! closed forms (`2p - 1`; `+1` then `-1`; `1 - 4|p - 1/2|`) with a polynomial
+//! The phase is a [`RunningPhase`], a `u64` count of `2^-64` cycles, so a long render does
+//! not drift and a 0.01 Hz rate is exact; `p` below is its top 53 bits in cycles, `[0, 1)`.
+//! A sine is `sin(2πp)`, exact. The other three are the naive closed forms (`2p - 1`; `+1` then `-1`; `1 - 4|p - 1/2|`) with a polynomial
 //! residual added within one sample of each discontinuity (Välimäki and
 //! Huovilainen, "Antialiasing Oscillators in Subtractive Synthesis", 2007):
 //! PolyBLEP at a jump of the signal (the saw's wrap, the square's two edges) and
@@ -13,7 +13,8 @@
 //! naive form folds back below Nyquist.
 
 use core::f64::consts::TAU;
-use tutti_units::{Hz, SampleRate};
+use tutti_buffers::Float;
+use tutti_units::{Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate};
 
 use crate::finite::finite_or;
 
@@ -98,15 +99,17 @@ fn near(phase: f64, edge: f64, dt: f64) -> Option<f64> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Oscillator {
     wave: OscillatorWave,
-    /// The position in the cycle, in `[0, 1)`.
-    phase: f64,
+    phase: RunningPhase,
 }
 
 impl Oscillator {
     /// An oscillator of `wave` at phase 0.
     #[must_use]
     pub const fn new(wave: OscillatorWave) -> Self {
-        Self { wave, phase: 0.0 }
+        Self {
+            wave,
+            phase: RunningPhase::START,
+        }
     }
 
     /// The wave it reads.
@@ -117,7 +120,7 @@ impl Oscillator {
 
     /// Returns the phase to 0.
     pub fn reset(&mut self) {
-        self.phase = 0.0;
+        self.phase = RunningPhase::START;
     }
 
     /// The sample at the current phase, then the phase advanced by one sample
@@ -127,7 +130,7 @@ impl Oscillator {
         // A non-finite frequency holds the phase.
         let f = finite_or(frequency.get(), 0.0);
         let dt = (f / rate.get()).clamp(0.0, 0.5);
-        let p = self.phase;
+        let p = f64::from_phase(self.phase);
         let y = match self.wave {
             OscillatorWave::Sine => libm::sin(TAU * p),
             OscillatorWave::Saw => {
@@ -161,8 +164,7 @@ impl Oscillator {
                 y
             }
         };
-        let next = p + dt;
-        self.phase = next - libm::floor(next);
+        self.phase = self.phase.advance(PhaseStep::from(PhaseIncrement(dt)));
         y as f32
     }
 }

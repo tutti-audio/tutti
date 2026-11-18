@@ -1,6 +1,8 @@
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::BusTopology;
-use tutti_units::{Feedback, Gain, Hz, PhaseIncrement, SampleRate, SampleSpan, Seconds};
+use tutti_units::{
+    Feedback, Gain, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Seconds,
+};
 
 use super::*;
 use crate::{DELAY_SLEW, Steps};
@@ -9,6 +11,11 @@ use crate::{DELAY_SLEW, Steps};
 // format, so their tolerances are `f32`'s.
 
 const RATE: SampleRate = SampleRate::SR_48K;
+
+/// `x` frames as a position.
+fn frames(x: f64) -> ReadPosition {
+    ReadPosition::from_span(SampleSpan::of(x))
+}
 
 fn bus(width: u16) -> BusTopology {
     BusTopology::assumed(width.into()).expect("a test width is one bus")
@@ -47,11 +54,6 @@ fn at_frames(frames: f64, rate: SampleRate) -> ModDelayBank<f32> {
     ModDelayBank::new(&layout, rate)
 }
 
-/// The delay at the sweep's centre, in frames, floored at the frame a read takes at least.
-fn centre(bank: &ModDelayBank<f32>) -> f32 {
-    bank.swept(Gain::SILENT, SampleSpan::ZERO).get().max(1.0) as f32
-}
-
 /// `audio` (one slice per channel) through `bank` in blocks of `block`, `delays` and
 /// `feedback` carried across them.
 fn run(
@@ -83,7 +85,7 @@ fn run(
 /// frames long.
 fn impulse_response(d: f64, g: f32, len: usize, rate: SampleRate) -> Vec<f32> {
     let mut bank = at_frames(d, rate);
-    let mut delays = [Glide::landed(centre(&bank))];
+    let mut delays = [Glide::landed(0.0f32)];
     let mut feedback = Glide::landed(g);
     let mut x = vec![0.0f32; len];
     x[0] = 1.0;
@@ -99,8 +101,8 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
     let reach = |bank: &ModDelayBank<f32>, depth: f64| {
         let d = bank.design(&controls(1.0, depth, 0.0)).depth;
         (
-            bank.swept(Gain(-1.0), d).get().max(1.0),
-            bank.swept(Gain(1.0), d).get(),
+            bank.position(bank.swept(Gain(-1.0), d)).span().get(),
+            bank.position(bank.swept(Gain(1.0), d)).span().get(),
         )
     };
     let chorus = ModDelayBank::new(&ModDelayLayout::chorus(bus(1)), RATE);
@@ -123,10 +125,10 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
     let least = real.design(&controls(1.0, 0.0, 0.0)).depth.get();
     assert!((least - 0.0001 * 48_000.0).abs() < 1e-9, "{least}");
     // The centre is the base, and the delay is held inside the line.
-    assert_eq!(centre(&chorus), 480.0);
+    assert_eq!(chorus.position(0.0), frames(480.0));
     assert_eq!(
-        chorus.swept(Gain(1.0), SampleSpan::of(1e9)).get(),
-        2_400.0,
+        chorus.position(chorus.swept(Gain(1.0), SampleSpan::of(1e9))),
+        frames(2_400.0),
         "no delay is past the line"
     );
 }
@@ -188,9 +190,8 @@ fn a_sweep_with_no_feedback_ignores_the_control_and_is_a_pure_delay() {
     let design = bank.design(&controls(0.4, 0.0, 0.9));
     assert_eq!(design.feedback, Feedback::NONE);
     // The centre is 2 ms, 96 frames.
-    let d = centre(&bank);
-    assert_eq!(d, 96.0);
-    let mut delays = [Glide::landed(d)];
+    assert_eq!(bank.position(0.0), frames(96.0));
+    let mut delays = [Glide::landed(0.0f32)];
     let mut feedback = Glide::landed(design.feedback.get());
     let mut x = vec![0.0f32; 400];
     x[0] = 1.0;
@@ -285,19 +286,19 @@ fn a_frozen_flanger_has_notches_at_odd_multiples_of_half_over_the_delay() {
 fn a_delay_glide_is_read_in_closed_form_at_the_step_after_those_taken() {
     let rate = SampleRate::SR_48K;
     let mut bank = at_frames(100.0, rate);
-    let mut delays = [Glide::landed(100.0f32)];
+    let mut delays = [Glide::landed(0.0f32)];
     let mut feedback = Glide::landed(0.0f32);
     let warm: Vec<f32> = (0..300).map(|n| n as f32).collect();
     run(&mut bank, &mut delays, &mut feedback, &[warm], 64);
-    delays[0].aim_in(200.0, 400);
+    delays[0].aim_in(100.0, 400);
     let glide = delays[0];
     let x: Vec<f32> = (300..720).map(|n| n as f32).collect();
     let y = run(&mut bank, &mut delays, &mut feedback, &[x], 77).remove(0);
     for (i, &got) in y.iter().enumerate() {
-        let want = (300 + i) as f32 - glide.at(i as u32 + 1);
+        let want = (300 + i) as f32 - (100.0 + glide.at(i as u32 + 1));
         assert!((got - want).abs() < 2e-3, "frame {i}: {got} vs {want}");
     }
-    assert_eq!(delays[0].now(), 200.0, "landed exactly");
+    assert_eq!(delays[0].now(), 100.0, "landed exactly");
 }
 
 /// Any split of the stream gives the bits of one call, with a delay glide and a feedback
@@ -315,9 +316,9 @@ fn any_block_size_gives_the_same_bits() {
         .collect();
     let render = |block: usize| {
         let mut bank = ModDelayBank::new(&layout, RATE);
-        let mut delays = [Glide::landed(480.0f32); 3];
+        let mut delays = [Glide::landed(0.0f32); 3];
         for (c, g) in delays.iter_mut().enumerate() {
-            g.aim_in(300.0 + 100.0 * c as f32, 700);
+            g.aim_in(-180.0 + 100.0 * c as f32, 700);
         }
         let mut feedback = Glide::landed(0.1f32);
         feedback.aim_in(0.8, 500);
@@ -344,7 +345,7 @@ fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
         .collect();
     let glides = || {
         (
-            [Glide::landed(48.0f32), Glide::landed(50.0)],
+            [Glide::landed(0.0f32), Glide::landed(2.0)],
             Glide::landed(0.7f32),
         )
     };
@@ -377,9 +378,9 @@ fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
 fn a_silent_channel_stays_silent() {
     let mut bank = ModDelayBank::new(&ModDelayLayout::chorus(bus(3)), RATE);
     let mut delays = [
-        Glide::landed(480.0f32),
-        Glide::landed(300.0),
-        Glide::landed(100.0),
+        Glide::landed(0.0f32),
+        Glide::landed(-180.0),
+        Glide::landed(-380.0),
     ];
     let mut feedback = Glide::landed(0.9f32);
     let noise: Vec<f32> = (0..2_000).map(|n| ((n * 37) % 23) as f32 - 11.0).collect();
@@ -406,8 +407,8 @@ fn an_f64_view_is_the_f32_render_converted() {
         })
         .collect();
     let glides = || {
-        let mut d = [Glide::landed(480.0f32), Glide::landed(480.0)];
-        d[0].aim_in(240.0, 300);
+        let mut d = [Glide::landed(0.0f32), Glide::landed(0.0)];
+        d[0].aim_in(-240.0, 300);
         let mut f = Glide::landed(0.3f32);
         f.aim_in(0.6, 200);
         (d, f)
@@ -466,9 +467,12 @@ fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
     let x = wide_signal(len);
     let run_with = |g: f64| {
         let mut bank = ModDelayBank::<f64>::new(&layout, rate);
-        let at = bank.swept(Gain::SILENT, SampleSpan::ZERO).get();
-        assert_eq!(at, d as f64, "the centre is the base");
-        let mut delays = [Glide::landed(at)];
+        assert_eq!(
+            bank.position(0.0),
+            frames(d as f64),
+            "the centre is the base"
+        );
+        let mut delays = [Glide::landed(0.0f64)];
         let mut feedback = Glide::landed(g);
         let mut y = vec![0.0f64; len];
         bank.process(

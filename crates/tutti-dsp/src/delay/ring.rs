@@ -1,6 +1,7 @@
 //! [`DelayRing`]: the one ring every delay in the crate stores its history in.
 
 use tutti_buffers::Float;
+use tutti_units::ReadPosition;
 
 /// A ring of `len` frames with a cursor: `put` writes the slot at the cursor, `advance` moves
 /// it to the next, and a read counts back from it.
@@ -79,12 +80,13 @@ impl<F: Float> DelayRing<F> {
     /// The frame `delay` slots before the cursor, linearly interpolated between the two whole
     /// slots around it: `delay` is at least 0 and its next whole slot is at most the length.
     ///
-    /// `delay` is a bare `F`: no unit covers a fractional frame count at the ring's precision.
+    /// The position's whole frames index the ring and its fraction, the top mantissa bits as
+    /// `F`, weights the blend, so a delay of 10 s at 192 kHz keeps a fraction to `F`'s own
+    /// resolution however many frames back it is.
     #[inline]
-    pub(crate) fn at(&self, delay: F) -> F {
-        let floor = delay.floor();
-        let whole = floor.to_f64() as usize;
-        let frac = delay - floor;
+    pub(crate) fn at(&self, delay: ReadPosition) -> F {
+        let (whole, frac) = F::split_position(delay);
+        let whole = whole.get();
         let a = self.back(whole);
         if frac == F::ZERO {
             return a;

@@ -105,7 +105,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::MAX_NODE_LATENCY;
 use crate::NodeKey;
-use crate::lane::{control_in, fade_gains};
+use crate::lane::fade_gains;
 use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
@@ -764,7 +764,8 @@ impl<F: Float> Reference<F> {
                     key,
                     RefMode::new(
                         spec_mode(key),
-                        control_in::<F>(spec_mix(key).get()),
+                        // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
+                        F::from_f64(f64::from(spec_mix(key).get())),
                         &shape,
                         t.nodes[&key].latency.get(),
                         declick_frames(self.prepare.sample_rate()).get(),
@@ -1490,9 +1491,10 @@ impl<F: Float> Reference<F> {
         if let Some(m) = &mut mode {
             let want = read_mode(&shape, self.wanted.get(&key).copied().unwrap_or_default());
             // The mix as the block starts: the previous block's is its start.
-            m.take_mix(control_in::<F>(
-                self.wanted_mix.get(&key).map_or(1.0, |m| m.get()),
-            ));
+            // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
+            m.take_mix(F::from_f64(f64::from(
+                self.wanted_mix.get(&key).copied().unwrap_or(Mix::WET).get(),
+            )));
             // Its lane, when a source drives it: the param port's rule over
             // the source's events, the base being the mix just taken. A unit
             // that has run is on a running port (a source connected now
@@ -1738,9 +1740,9 @@ impl<F: Float> Reference<F> {
         events: &BTreeMap<EventOut, Vec<Event>>,
     ) -> Option<RefWeight<F>> {
         let gain = graph.gains().get(&id)?;
-        // The weight reaches the lane through the edge's `f32` cell word, and
-        // the lane's float takes it once per block.
-        let to = control_in::<F>(targets[&id].get() as f32);
+        // The edge's cell word is `f32`, which the executor reads; the reference
+        // reads it alike until B widens the cell.
+        let to = F::from_unit(Amplitude::new(f64::from(targets[&id].get() as f32)));
         let ran = self.lane_prev.contains_key(&id);
         let evs: Vec<Event> = match gain.source {
             Some(from) => {

@@ -2,7 +2,7 @@
 
 use crate::I24;
 use core::fmt::Debug;
-use tutti_units::Real;
+use tutti_units::{ReadPosition, Real, RunningPhase, Samples};
 
 mod sealed {
     /// The closed set of formats: only this crate adds one.
@@ -385,6 +385,74 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     /// pair.
     const MINUS_3_DB: Self;
 
+    /// A running phase in cycles as data of this width, in `[0, 1)`: the top
+    /// [`MANTISSA_DIGITS`](Real::MANTISSA_DIGITS) bits of the position as an integer,
+    /// scaled by a power of two. The integer converts exactly and so does the
+    /// scaling, so the value is the position truncated to the float's own
+    /// resolution and is never rounded up to `1.0`.
+    ///
+    /// This is the one spelling of phase to data; a processor multiplies by
+    /// [`TAU`](Real::TAU) after it when its wave takes radians.
+    ///
+    /// ```
+    /// use tutti_buffers::Float;
+    /// use tutti_units::{PhaseStep, RunningPhase};
+    ///
+    /// let half = RunningPhase::START.advance(PhaseStep::from_count(1 << 63));
+    /// assert_eq!(f32::from_phase(half), 0.5);
+    /// assert_eq!(f64::from_phase(half), 0.5);
+    /// ```
+    #[must_use]
+    fn from_phase(p: RunningPhase) -> Self;
+
+    /// A read position as its whole frames and a fraction of this width in `[0, 1)`:
+    /// the top bits of the position's fraction (the width's mantissa, capped at the
+    /// fraction's own [`FRACTION_BITS`](ReadPosition::FRACTION_BITS)) as an integer,
+    /// scaled by a power of two. The integer converts exactly and so does the
+    /// scaling, so the fraction is the position's truncated to the float's own
+    /// resolution and is never rounded up to `1.0`, whatever the whole frames are.
+    ///
+    /// This is the one spelling of position to data; an interpolating read takes the
+    /// frames as the index and the fraction as the weight.
+    ///
+    /// ```
+    /// use tutti_buffers::Float;
+    /// use tutti_units::{ReadPosition, Samples};
+    ///
+    /// let p = ReadPosition::from_count((7_u64 << 32) | (1 << 31));
+    /// assert_eq!(f32::split_position(p), (Samples(7), 0.5));
+    /// assert_eq!(f64::split_position(p), (Samples(7), 0.5));
+    /// ```
+    #[must_use]
+    fn split_position(p: ReadPosition) -> (Samples, Self);
+
+    /// The position `by` frames on from `p`, `by` data of a modulation: the one
+    /// spelling of data to position. The offset is widened to `f64` (exact), scaled
+    /// to counts (exact) and rounded to the nearest `2^-32` frame, so the sum is
+    /// exact to the position's quantum, ties rounding away from zero. It saturates
+    /// at [`ReadPosition::START`] for an offset that reaches behind it and at
+    /// [`ReadPosition::MAX`] past the range; a NaN offset moves nothing.
+    ///
+    /// ```
+    /// use tutti_buffers::Float;
+    /// use tutti_units::ReadPosition;
+    ///
+    /// let p = ReadPosition::from_count(10_u64 << 32);
+    /// assert_eq!(f32::offset_position(p, 0.5).get(), (10_u64 << 32) + (1 << 31));
+    /// assert_eq!(f64::offset_position(p, -11.0), ReadPosition::START);
+    /// ```
+    #[must_use]
+    fn offset_position(p: ReadPosition, by: Self) -> ReadPosition {
+        let counts = Into::<f64>::into(by) * ReadPosition::COUNTS_PER_FRAME;
+        // `as` saturates at the `u64` range and maps NaN to 0.
+        let moved = libm::round(counts.abs()) as u64;
+        ReadPosition::from_count(if counts >= 0.0 {
+            p.get().saturating_add(moved)
+        } else {
+            p.get().saturating_sub(moved)
+        })
+    }
+
     /// The value of an `f32`: exact for `f64` and for `f32`.
     #[must_use]
     fn from_f32(x: f32) -> Self;
@@ -403,8 +471,30 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     fn by_width<T: OverFloat>(x: T::At<Self>) -> ByWidth<T>;
 }
 
+/// The phase and position crossings, written once for both widths. Each
+/// converts an integer of at most the width's mantissa bits and scales it by a
+/// power of two, so both `as` conversions and the product are exact.
+macro_rules! position_crossings {
+    ($t:ty) => {
+        #[inline]
+        fn from_phase(p: RunningPhase) -> Self {
+            let bits = <$t as Real>::MANTISSA_DIGITS;
+            let top = p.get() >> (u64::BITS - bits);
+            top as $t * (1.0 / (1_u64 << bits) as $t)
+        }
+        #[inline]
+        fn split_position(p: ReadPosition) -> (Samples, Self) {
+            let bits = <$t as Real>::MANTISSA_DIGITS.min(ReadPosition::FRACTION_BITS);
+            let fraction = (p.get() & ((1 << ReadPosition::FRACTION_BITS) - 1))
+                >> (ReadPosition::FRACTION_BITS - bits);
+            (p.frames(), fraction as $t * (1.0 / (1_u64 << bits) as $t))
+        }
+    };
+}
+
 impl Float for f32 {
     const MINUS_3_DB: Self = core::f32::consts::FRAC_1_SQRT_2;
+    position_crossings!(f32);
     #[inline]
     fn from_f32(x: f32) -> Self {
         x
@@ -421,6 +511,7 @@ impl Float for f32 {
 
 impl Float for f64 {
     const MINUS_3_DB: Self = core::f64::consts::FRAC_1_SQRT_2;
+    position_crossings!(f64);
     #[inline]
     fn from_f32(x: f32) -> Self {
         f64::from(x)
@@ -438,6 +529,9 @@ impl Float for f64 {
 #[cfg(test)]
 mod tests {
     use super::{ByWidth, Float, OverFloat};
+    use tutti_units::{
+        Hz, PhaseIncrement, PhaseStep, ReadPosition, RunningPhase, SampleRate, Samples,
+    };
 
     /// A value over `S` is the `f32` arm at `f32` and the `f64` arm at
     /// `f64`, and keeps its contents.
@@ -467,5 +561,194 @@ mod tests {
     fn minus_3_db_is_one_over_root_two_at_both_widths() {
         assert_eq!(f32::MINUS_3_DB, core::f32::consts::FRAC_1_SQRT_2);
         assert_eq!(f64::MINUS_3_DB, core::f64::consts::FRAC_1_SQRT_2);
+    }
+
+    fn at(count: u64) -> RunningPhase {
+        RunningPhase::START.advance(PhaseStep::from_count(count))
+    }
+
+    #[test]
+    fn the_crossing_is_the_top_24_bits_over_two_to_the_24_at_f32() {
+        for top in [0_u64, 1, 12_345, (1 << 23) + 1, (1 << 24) - 1] {
+            // Garbage below the top 24 bits must not change the value.
+            let low = (1_u64 << 40) - 1;
+            let v = f32::from_phase(at((top << 40) | low));
+            assert_eq!(f64::from(v), top as f64 / 16_777_216.0, "top {top}");
+        }
+    }
+
+    #[test]
+    fn the_crossing_is_the_top_53_bits_over_two_to_the_53_at_f64() {
+        for top in [0_u64, 1, 0x1f_ffff_ffff_ffff, (1 << 52) + 7] {
+            let v = f64::from_phase(at((top << 11) | 0x7ff));
+            assert_eq!(v, top as f64 / 9_007_199_254_740_992.0, "top {top}");
+        }
+    }
+
+    #[test]
+    fn the_crossing_stays_below_one_for_the_largest_position_at_both_widths() {
+        let last = at(u64::MAX);
+        assert!(f32::from_phase(last) < 1.0);
+        assert!(f64::from_phase(last) < 1.0);
+        assert_eq!(f32::from_phase(last), 1.0 - f32::EPSILON / 2.0);
+        assert_eq!(f64::from_phase(last), 1.0 - f64::EPSILON / 2.0);
+    }
+
+    #[test]
+    fn the_crossing_is_monotone_in_the_position() {
+        let mut prev32 = -1.0_f32;
+        let mut prev64 = -1.0_f64;
+        let mut counts: Vec<u64> = (0..4096_u64)
+            .map(|k| k.wrapping_mul(0x0040_1001_0020_0401))
+            .collect();
+        counts.sort_unstable();
+        for c in counts {
+            let (a, b) = (f32::from_phase(at(c)), f64::from_phase(at(c)));
+            assert!(a >= prev32 && b >= prev64, "count {c}");
+            (prev32, prev64) = (a, b);
+        }
+    }
+
+    /// The failure a float phase had: at 0.01 Hz and 192 kHz the step is 5.2e-8 cycles, and an
+    /// `f32` phase near 0.5 rounds each add to one ulp (6.0e-8), a rate 15% fast. The running
+    /// phase read through `f32` wraps on the period, ten times, each to within one sample.
+    #[test]
+    fn an_f32_read_phase_at_001_hz_and_192_khz_completes_three_periods_to_within_a_sample() {
+        let rate = SampleRate::new(192_000.0).unwrap();
+        let step = PhaseStep::from(PhaseIncrement::per_sample(Hz(0.01), rate));
+        let period = 19_200_000_u64;
+        let mut p = RunningPhase::START;
+        let mut wraps = 0_u32;
+        let mut last = 0.0_f32;
+        for n in 1..=3 * period {
+            p = p.advance(step);
+            let v = f32::from_phase(p);
+            if v < last {
+                wraps += 1;
+                // The wrap lands on a multiple of the period, to within one sample.
+                let k = n / period;
+                assert!(n.abs_diff(k * period) <= 1, "wrap at {n}");
+            }
+            last = v;
+        }
+        assert_eq!(wraps, 2);
+        assert!(f32::from_phase(p) < 1e-6 || f32::from_phase(p) > 1.0 - 1e-6);
+    }
+
+    fn position_at(count: u64) -> ReadPosition {
+        ReadPosition::from_count(count)
+    }
+
+    #[test]
+    fn the_split_is_the_whole_frames_and_the_top_24_fraction_bits_over_two_to_the_24_at_f32() {
+        for top in [0_u64, 1, 12_345, (1 << 23) + 1, (1 << 24) - 1] {
+            // Garbage below the top 24 fraction bits must not change the value.
+            let (whole, frac) = f32::split_position(position_at((7_u64 << 32) | (top << 8) | 0xff));
+            assert_eq!(whole, Samples(7));
+            assert_eq!(f64::from(frac), top as f64 / 16_777_216.0, "top {top}");
+        }
+    }
+
+    #[test]
+    fn the_split_is_the_whole_32_fraction_bits_over_two_to_the_32_at_f64() {
+        for low in [0_u64, 1, 0x8000_0000, 0xffff_ffff] {
+            let (whole, frac) = f64::split_position(position_at((1_900_800_u64 << 32) | low));
+            assert_eq!(whole, Samples(1_900_800));
+            assert_eq!(
+                frac,
+                low as f64 / ReadPosition::COUNTS_PER_FRAME,
+                "low {low}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_split_fraction_stays_below_one_for_the_largest_position_at_both_widths() {
+        let (whole, f32_frac) = f32::split_position(ReadPosition::MAX);
+        assert_eq!(whole, Samples(u32::MAX as usize));
+        assert!(f32_frac < 1.0);
+        assert!(f64::split_position(ReadPosition::MAX).1 < 1.0);
+    }
+
+    #[test]
+    fn an_offset_of_a_dyadic_frame_count_moves_exactly_that_many_quanta() {
+        let base = position_at(1_000_u64 << 32);
+        // 2^-3 and 3 * 2^-5 are exact in f32; 2^-32 is the quantum itself.
+        assert_eq!(
+            Float::offset_position(base, 0.125_f32).get(),
+            (1_000_u64 << 32) + (1 << 29)
+        );
+        assert_eq!(
+            Float::offset_position(base, -0.093_75_f32).get(),
+            (1_000_u64 << 32) - 3 * (1 << 27)
+        );
+        assert_eq!(
+            Float::offset_position(base, 2f64.powi(-32)).get(),
+            (1_000_u64 << 32) + 1
+        );
+        assert_eq!(
+            Float::offset_position(base, -(2f64.powi(-32))).get(),
+            (1_000_u64 << 32) - 1
+        );
+    }
+
+    #[test]
+    fn an_offset_rounds_to_the_nearest_quantum() {
+        let base = position_at(0x1234_u64 << 32);
+        // 0.4 and 0.6 of a quantum.
+        assert_eq!(Float::offset_position(base, 0.4 * 2f64.powi(-32)), base);
+        assert_eq!(
+            Float::offset_position(base, 0.6 * 2f64.powi(-32)).get(),
+            base.get() + 1
+        );
+    }
+
+    #[test]
+    fn an_offset_saturates_at_the_start_and_at_the_range() {
+        let base = position_at(5_u64 << 32);
+        assert_eq!(Float::offset_position(base, -6.0_f32), ReadPosition::START);
+        assert_eq!(
+            Float::offset_position(base, f32::NEG_INFINITY),
+            ReadPosition::START
+        );
+        assert_eq!(
+            Float::offset_position(base, 4.0e9_f32).get(),
+            base.get() + (4_000_000_000_u64 << 32)
+        );
+        assert_eq!(
+            Float::offset_position(ReadPosition::MAX, 1.0_f32),
+            ReadPosition::MAX
+        );
+        assert_eq!(
+            Float::offset_position(base, f32::INFINITY),
+            ReadPosition::MAX
+        );
+    }
+
+    #[test]
+    fn a_nan_offset_moves_nothing() {
+        let base = position_at(77);
+        assert_eq!(Float::offset_position(base, f32::NAN), base);
+    }
+
+    #[test]
+    fn an_offset_of_half_a_quantum_rounds_away_from_zero_in_both_directions() {
+        let base = position_at(1_000);
+        let half = 2f64.powi(-33);
+        assert_eq!(Float::offset_position(base, half).get(), 1_001);
+        assert_eq!(Float::offset_position(base, -half).get(), 999);
+        assert_eq!(
+            Float::offset_position(base, -1.5 * 2f64.powi(-32)).get(),
+            998
+        );
+    }
+
+    #[test]
+    fn a_negative_offset_moves_back_by_that_many_quanta() {
+        let base = position_at((10_u64 << 32) + 5);
+        assert_eq!(
+            Float::offset_position(base, -2.5_f32).get(),
+            (7_u64 << 32) + (1 << 31) + 5
+        );
     }
 }

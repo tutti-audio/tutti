@@ -177,7 +177,8 @@ pub struct ModDelayKernel<F: Float> {
     bank: Option<ModDelayBank<F>>,
     /// The glide length of the feedback: [`GAIN_GLIDE`] at the prepared rate.
     steps: u32,
-    /// Each channel's delay in frames across the segment in flight, from its start corner.
+    /// Each channel's excursion from the base delay, in frames, across the segment in flight,
+    /// from its start corner.
     delays: Box<[Glide<F>]>,
     /// The depth in frames of delay.
     depth: Glide<F>,
@@ -192,7 +193,7 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
         Self {
             bank: None,
             steps: 0,
-            delays: vec![Glide::landed(F::ONE); layout.width()].into_boxed_slice(),
+            delays: vec![Glide::landed(F::ZERO); layout.width()].into_boxed_slice(),
             depth: Glide::landed(F::from_f64(d.depth.get())),
             feedback: Glide::landed(F::from_f32(d.feedback.get())),
             clock: SweepClock::new(layout.offsets()),
@@ -212,7 +213,7 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
         let depth_end = span(self.depth.at(self.depth.taken().saturating_add(SEGMENT)));
         self.clock.solve(&mut self.delays, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
-            F::from_f64(bank.swept(Gain(f64::from(lfo)), depth).get())
+            bank.swept(Gain(f64::from(lfo)), depth)
         });
     }
 }
@@ -327,7 +328,7 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_types::{ChannelLayout, MaxBlock};
     use tutti_units::{Latency, Samples, UnitParam};
-    use tutti_units::{Phase, PhaseIncrement};
+    use tutti_units::{Phase, PhaseIncrement, RunningPhase};
 
     const RATE: SampleRate = SampleRate::SR_48K;
     const SR: f64 = 48_000.0;
@@ -803,9 +804,13 @@ mod tests {
         let c = controls(hz, depth, 0.0);
         let mut k = trajectory();
         drive_kernel(&mut k, &[(0, c)], &[vec![1.0; 1_003]]);
-        assert_ne!(k.clock.state().0, Phase::START, "the sweep was running");
+        assert_ne!(
+            k.clock.state().0,
+            RunningPhase::START,
+            "the sweep was running"
+        );
         k.prepare(RATE, MaxBlock::of(Samples(64)));
-        assert_eq!(k.clock.state(), (Phase::START, 0, false));
+        assert_eq!(k.clock.state(), (RunningPhase::START, 0, false));
         let len = 6_000;
         let trace = trace(&mut k, &[(0, c)], len);
         let exact = exact_delays(len, depth, hz, &[]);
