@@ -57,8 +57,7 @@ pub enum SessionEvent {
     CommitRefused(CommitError),
     /// A crossfade that waited out a re-prepare
     /// ([`Crossfade::Waiting`](crate::Crossfade::Waiting)) swapped its node
-    /// in: `controls` are the incoming node's `IntoNode::Controls`, boxed
-    /// (`()` for a plugin), its params already addressed.
+    /// in: `controls` are the incoming node's [`CrossfadeControls`].
     CrossfadeLanded {
         /// The node it swapped behind.
         node: NodeKey,
