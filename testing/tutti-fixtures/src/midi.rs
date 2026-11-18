@@ -16,6 +16,7 @@ use tutti_ump::{
     Midi1Port, MidiChannel, NoteNumber, NoteVelocity, Protocol, Rpn, Stream, U7, Ump, Voice1,
     Voice2,
 };
+use tutti_units::Semitones;
 
 /// A MIDI 2.0 Note On with no attribute.
 pub fn note_on(address: impl Into<Address>, n: u8, velocity: u16) -> Ump {
@@ -104,18 +105,18 @@ pub fn m1_cc(address: impl Into<Address>, controller: CCNumber, value: U7) -> Um
 /// follows each message of the RPN. It reads the Group's channels as one
 /// 16-channel space and ignores which Group a message is in.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BendRanges([f32; 16]);
+pub struct BendRanges([Semitones; 16]);
 
 impl Default for BendRanges {
     fn default() -> Self {
-        Self([48.0; 16])
+        Self([PitchBendSensitivity::MPE_MEMBER_DEFAULT.semitones(); 16])
     }
 }
 
 impl BendRanges {
     /// The range on `channel`, in semitones.
     #[must_use]
-    pub fn semitones(&self, channel: MidiChannel) -> f32 {
+    pub fn semitones(&self, channel: MidiChannel) -> Semitones {
         self.0[channel.index()]
     }
 
@@ -131,9 +132,7 @@ impl BendRanges {
             return false;
         }
         self.0[address.channel.index()] =
-            tutti_midi_protocol::PitchBendSensitivity::from_rpn_bits(value.get())
-                .semitones()
-                .get();
+            tutti_midi_protocol::PitchBendSensitivity::from_rpn_bits(value.get()).semitones();
         true
     }
 }

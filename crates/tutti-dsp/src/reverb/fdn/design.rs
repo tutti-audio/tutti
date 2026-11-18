@@ -64,7 +64,7 @@ pub const MAX_PRE_DELAY: Seconds = Seconds(0.5);
 /// The deepest modulation, in frames at 44.1 kHz, at a depth of 1.
 const MAX_MODULATION: SampleSpan = SampleSpan::of(8.0);
 /// The modulation rates a control may ask for.
-const RATES: (f32, f32) = (0.05, 5.0);
+const RATES: (Hz, Hz) = (Hz(0.05), Hz(5.0));
 /// The shortest RT60 a control may ask for, and the least a [`MaxDecay`] holds.
 pub const MIN_DECAY: Seconds = Seconds(0.05);
 /// The widest stereo image.
@@ -252,7 +252,7 @@ impl FdnLayout {
         let diffusion = finite_or(c.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
         let pre = finite_secs(c.pre_delay, Seconds::ZERO).clamp(Seconds::ZERO, MAX_PRE_DELAY);
         let depth = finite_or(c.modulation.get(), 0.0).abs().min(1.0);
-        let mod_rate = finite_or(c.rate.get(), d.rate.get()).clamp(RATES.0, RATES.1);
+        let mod_rate = Hz(finite_or(c.rate.get(), d.rate.get())).clamp(RATES.0, RATES.1);
         let width = finite_or(c.width.get(), 1.0).clamp(0.0, MAX_WIDTH);
         let wet = {
             let w = c.wet;
@@ -283,7 +283,7 @@ impl FdnLayout {
                 length,
                 modulation: LineModulation {
                     depth: depth_frames,
-                    rate: Hz(mod_rate),
+                    rate: mod_rate,
                 },
                 absorption: rescaled(Absorption::from_rt60(rt60, CROSSOVER, length, rate), rate),
                 diffuser: None,

@@ -74,7 +74,7 @@ impl TuningFrequency {
     /// 00 00`, is 69, A440 at master tuning's centre); `None` for no change.
     #[must_use]
     pub fn pitch(self) -> Option<Semitones> {
-        (!self.is_no_change()).then(|| Semitones(self.0 as f32 / FRACTION_STEPS as f32))
+        (!self.is_no_change()).then(|| Semitones(f64::from(self.0) / f64::from(FRACTION_STEPS)))
     }
 
     /// The word nearest `pitch` (semitones above note 0), saturating at note 0
@@ -82,7 +82,7 @@ impl TuningFrequency {
     /// [`NO_CHANGE`](Self::NO_CHANGE).
     #[must_use]
     pub fn nearest(pitch: Semitones) -> Self {
-        let steps = libm::round(f64::from(pitch.get()) * f64::from(FRACTION_STEPS));
+        let steps = libm::round(pitch.get() * f64::from(FRACTION_STEPS));
         if steps.is_nan() || steps <= 0.0 {
             Self(0)
         } else if steps >= f64::from(Self::TOP.0) {
@@ -295,10 +295,10 @@ impl OctaveOffsets {
     #[must_use]
     pub fn offset(&self, class: usize) -> Cents {
         match self {
-            Self::Cents(bytes) => Cents(f32::from(bytes[class % 12].get()) - 64.0),
-            Self::Fine(words) => {
-                Cents((f32::from(words[class % 12].get()) - 8192.0) * 200.0 / FRACTION_STEPS as f32)
-            }
+            Self::Cents(bytes) => Cents(f64::from(bytes[class % 12].get()) - 64.0),
+            Self::Fine(words) => Cents(
+                (f64::from(words[class % 12].get()) - 8192.0) * 200.0 / f64::from(FRACTION_STEPS),
+            ),
         }
     }
 }
@@ -411,7 +411,7 @@ mod tests {
             TuningFrequency::TOP
         );
         assert_eq!(TuningFrequency::nearest(Semitones(-3.0)).get(), 0);
-        assert_eq!(TuningFrequency::nearest(Semitones(f32::NAN)).get(), 0);
+        assert_eq!(TuningFrequency::nearest(Semitones(f64::NAN)).get(), 0);
         assert_eq!(
             TuningFrequency::nearest(Semitones(69.0)),
             TuningFrequency::equal(NoteNumber::of(69))

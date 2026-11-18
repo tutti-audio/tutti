@@ -18,8 +18,8 @@ fn track_of(cfg: &YinConfig, x: &[f32], hop: usize) -> Result<Vec<PitchEstimate>
     yin_track(cfg, Mono::new(x), SR, PitchHop::of(Samples(hop)))
 }
 
-fn sine(sample_rate: f64, freq: f32, seconds: f32) -> Vec<f32> {
-    let n = (sample_rate as f32 * seconds) as usize;
+fn sine(sample_rate: f64, freq: f64, seconds: f64) -> Vec<f32> {
+    let n = (sample_rate * seconds) as usize;
     tutti_fixtures::signal::sine(
         tutti_units::Hz(freq),
         tutti_units::Amplitude(0.5),
@@ -39,7 +39,7 @@ fn an_inverted_range_is_not_a_band() {
             max: Hz(50.0),
         })
     );
-    for (lo, hi) in [(50.0, 50.0), (-10.0, 2000.0), (f32::NAN, 2000.0)] {
+    for (lo, hi) in [(50.0, 50.0), (-10.0, 2000.0), (f64::NAN, 2000.0)] {
         assert!(FrequencyBand::new(Hz(lo), Hz(hi)).is_none(), "{lo} {hi}");
     }
 }
@@ -182,7 +182,7 @@ fn note_names_use_both_spellings() {
 
 #[test]
 fn median_filter_removes_a_lone_outlier() {
-    let voiced = |f: f32| {
+    let voiced = |f: f64| {
         PitchEstimate::Voiced(Pitch {
             frequency: Hz(f),
             confidence: Confidence(0.9),
@@ -211,7 +211,7 @@ fn median_filter_removes_a_lone_outlier() {
 fn tracks_frequencies_across_the_range() {
     let cfg = standard();
 
-    for freq in [100.0f32, 220.0, 440.0, 880.0, 1000.0] {
+    for freq in [100.0f64, 220.0, 440.0, 880.0, 1000.0] {
         let samples = sine(44100.0, freq, 0.1);
         let estimate = pitch_of(&cfg, &samples).unwrap();
         let pitch = estimate
@@ -256,7 +256,7 @@ fn reaches_the_ends_of_a_widened_range() {
 /// Jump penalization attenuates an octave error without deleting it.
 #[test]
 fn penalize_jumps_attenuates_implausible_leaps() {
-    let voiced = |f: f32, c: f32| {
+    let voiced = |f: f64, c: f32| {
         let (note, cents) = Note::nearest_to(Hz(f)).unwrap();
         PitchEstimate::Voiced(Pitch {
             frequency: Hz(f),

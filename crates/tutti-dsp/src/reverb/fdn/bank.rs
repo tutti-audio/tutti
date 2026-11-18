@@ -79,7 +79,7 @@ struct Target<F> {
     /// The lines in use.
     n: usize,
     rate: Hz,
-    crossover: [f32; 2],
+    crossover: [Hz; 2],
     pole: [f64; 2],
 
     len: Vec<F>,
@@ -100,7 +100,7 @@ impl<F: Float> Target<F> {
         Self {
             n: 0,
             rate: Hz(0.5),
-            crossover: [0.0; 2],
+            crossover: [Hz::ZERO; 2],
             pole: [0.0; 2],
             len: vec![F::ONE; lines],
             pre_len: F::ZERO,
@@ -131,7 +131,7 @@ pub struct FdnGlides<F: Float> {
     n: usize,
     rate: Hz,
     pole: [F; 2],
-    crossover: [f32; 2],
+    crossover: [Hz; 2],
 
     len: Vec<Glide<F>>,
     /// The length the gains are designed for, glided with them over the ramp: the gains in
@@ -309,7 +309,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         let cap = bounds.line.to_samples_ceil().get() + 4;
         let pre_cap = bounds.pre_delay.get() + 4;
         let mut target = Target::new(max_lines);
-        set_poles(&mut target, CROSSOVER.map(|f| f.get()), rate);
+        set_poles(&mut target, CROSSOVER, rate);
         let mut bank = Self {
             layout: *layout,
             rate,
@@ -440,7 +440,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         };
 
         if let Some(Absorption::Bands { crossover, .. }) = f.lines.first().map(|l| l.absorption) {
-            set_poles(t, [crossover[0].get(), crossover[1].get()], self.rate);
+            set_poles(t, crossover, self.rate);
         }
         let flat = F::from_f64(1.0 / (n as f64).sqrt());
         for j in 0..n {
@@ -511,8 +511,7 @@ impl<F: Float + Lerp> FdnBank<F> {
                 s.c_mod_next[j] = F::from_f64(depth * libm::sin(s.phase[j]));
             }
         }
-        let dphi =
-            std::f64::consts::TAU * f64::from(c.rate.get()) * Self::CHUNK as f64 / self.rate.get();
+        let dphi = std::f64::consts::TAU * c.rate.get() * Self::CHUNK as f64 / self.rate.get();
         for j in 0..n {
             s.phase[j] = (s.phase[j] + dphi) % std::f64::consts::TAU;
             s.c_len[j] = c.len[j].now();
@@ -665,13 +664,13 @@ impl<F: Float + Lerp> FdnBank<F> {
 }
 
 /// Sets the one-poles of `t` to the crossovers, in Hz, at `rate`, when they moved.
-fn set_poles<F>(t: &mut Target<F>, crossover: [f32; 2], rate: SampleRate) {
+fn set_poles<F>(t: &mut Target<F>, crossover: [Hz; 2], rate: SampleRate) {
     if crossover == t.crossover {
         return;
     }
     t.crossover = crossover;
     for (p, f) in t.pole.iter_mut().zip(crossover) {
-        *p = cutoff_pole(Hz(f), rate);
+        *p = cutoff_pole(f, rate);
     }
 }
 

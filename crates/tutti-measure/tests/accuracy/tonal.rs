@@ -221,7 +221,7 @@ fn a_detuned_scale_resolves_and_its_tuning_is_read() {
     for (partials, tolerance) in [(1, interpolation), (4, interpolation + 1.955)] {
         let x = melody(&C_MAJOR_SCALE, 0.5, partials, 30.0);
         let c = chroma(&x, &cfg, &mut FftScratch::new()).unwrap();
-        let tuning = f64::from(c.tuning().get());
+        let tuning = c.tuning().get();
         assert!((tuning - 30.0).abs() <= tolerance, "{partials}: {tuning}");
         let key = estimate_key(c.grid(), KeyProfile::Krumhansl).unwrap().key;
         assert_eq!(

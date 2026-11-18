@@ -155,7 +155,7 @@ impl SampleHeader {
     /// The pitch correction that should be applied to the sample on playback.
     #[must_use]
     pub fn pitch_correction(&self) -> Cents {
-        Cents(f32::from(self.pitch_correction))
+        Cents(f64::from(self.pitch_correction))
     }
 
     /// The link info: the index of the sample this one is linked with.

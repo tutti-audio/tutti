@@ -591,7 +591,7 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
             NodeKey(k + 1),
             "sine",
             ForkByClone(crate::support::Sine::new(tutti_units::Hz(
-                220.0 * (k + 1) as f32,
+                220.0 * (k + 1) as f64,
             ))),
         );
         ed.insert(

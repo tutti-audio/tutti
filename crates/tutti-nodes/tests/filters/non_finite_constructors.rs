@@ -165,7 +165,12 @@ fn sweep() {
             Box::new(BrickwallLimiterNode::<f32>::new(d(b)))
         }));
         add(probe("eq freq", b, || {
-            Box::new(EqBandNode::<f64>::new(SvfType::Bell, Hz(b), Q(1.0), d(3.0)))
+            Box::new(EqBandNode::<f64>::new(
+                SvfType::Bell,
+                Hz(f64::from(b)),
+                Q(1.0),
+                d(3.0),
+            ))
         }));
         add(probe("eq q", b, || {
             Box::new(EqBandNode::<f64>::new(
@@ -184,7 +189,11 @@ fn sweep() {
             ))
         }));
         add(probe("svf freq", b, || {
-            Box::new(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(b), Q(1.0)))
+            Box::new(SvfFilterNode::<f64>::new(
+                SvfType::LowPass,
+                Hz(f64::from(b)),
+                Q(1.0),
+            ))
         }));
         add(probe("svf q", b, || {
             Box::new(SvfFilterNode::<f64>::new(
@@ -207,20 +216,21 @@ fn sweep() {
         add(probe("ladder freq", b, || {
             Box::new(LadderFilterNode::<f64>::new(
                 tutti_nodes::LadderType::LP24,
-                Hz(b),
+                Hz(f64::from(b)),
                 Resonance::new(0.5),
             ))
         }));
         add(probe("crossover", b, || {
             Box::new(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(b)]).unwrap_or_else(|_| {
-                    CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
-                }),
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(f64::from(b))])
+                    .unwrap_or_else(|_| {
+                        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
+                    }),
             )
         }));
         add(probe("crossover2", b, || {
             Box::new(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(b)])
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(f64::from(b))])
                     .unwrap_or_else(|_| {
                         CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1000.0)]).unwrap()
                     }),

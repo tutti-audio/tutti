@@ -334,7 +334,7 @@ fn cutoff_of(node: u64) -> TargetKey {
     TargetKey::param(node, ParamAddr::Unit(UnitParam::Cutoff))
 }
 
-fn sine(rate: f32) -> ModSource {
+fn sine(rate: f64) -> ModSource {
     ModSource::Lfo {
         wave: Waveform::Shape {
             shape: LfoShape::Sine,

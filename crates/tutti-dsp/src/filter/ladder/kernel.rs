@@ -67,13 +67,11 @@ impl LadderCoeffs {
         sample_rate: impl Into<SampleRate>,
     ) -> LadderCoeffs {
         let (freq, resonance, sample_rate) = (freq.into(), resonance.into(), sample_rate.into());
-        let fc = f64::from(freq.get()).clamp(
+        let fc = freq.get().clamp(
             1.0,
-            f64::from(
-                sample_rate
-                    .nyquist_scaled(crate::filter::NYQUIST_MARGIN)
-                    .get(),
-            ),
+            sample_rate
+                .nyquist_scaled(crate::filter::NYQUIST_MARGIN)
+                .get(),
         );
         LadderCoeffs {
             g: libm::tan(core::f64::consts::PI * fc / sample_rate.get()),

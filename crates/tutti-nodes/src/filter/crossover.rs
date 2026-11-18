@@ -21,7 +21,7 @@ use crate::ramp::LastGood;
 #[derive(Clone, Debug)]
 pub(crate) struct Splits {
     cells: Vec<Param<Hz>>,
-    good: Vec<LastGood>,
+    good: Vec<LastGood<f64>>,
 }
 
 impl Splits {
@@ -61,10 +61,11 @@ impl Splits {
         rate: SampleRate,
         driven: impl Fn(usize) -> Option<f32>,
     ) -> [Hz; MAX_SPLITS] {
-        let mut targets = [Hz(0.0); MAX_SPLITS];
+        let mut targets = [Hz::ZERO; MAX_SPLITS];
         let n = self.cells.len();
         for (i, (t, good)) in targets.iter_mut().zip(&mut self.good).enumerate() {
-            *t = Hz(good.read(driven(i).unwrap_or_else(|| self.cells[i].load().get())));
+            // A driven value is an `f32` lane value, widened exactly.
+            *t = Hz(good.read(driven(i).map_or_else(|| self.cells[i].load().get(), f64::from)));
         }
         fit_to_rate(&mut targets[..n], rate);
         targets
@@ -410,7 +411,7 @@ mod tests {
             )
             .is_ok()
         );
-        assert!(CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(f32::NAN)]).is_err());
+        assert!(CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(f64::NAN)]).is_err());
         assert!(CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(9.0), Hz(3.0)]).is_err());
     }
 

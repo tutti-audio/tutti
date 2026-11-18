@@ -1420,7 +1420,7 @@ fn hand_mpe() -> Hand {
     })
 }
 
-fn note_freqs(synth: &PolySynth, note: u8) -> Vec<f32> {
+fn note_freqs(synth: &PolySynth, note: u8) -> Vec<f64> {
     synth
         .voices
         .iter()
@@ -1489,7 +1489,7 @@ fn a_pitch_after_a_detach_reaches_the_next_note_and_not_the_old_one() {
     queue_midi(&mut synth, &[ev_note_on(1, 0, 100)]);
     synth.tick(&[], &mut out);
     let mut freqs = note_freqs(&synth, 0);
-    freqs.sort_by(f32::total_cmp);
+    freqs.sort_by(f64::total_cmp);
     assert!(
         (freqs[0] - 261.63).abs() < 0.5 && (freqs[1] - 293.66).abs() < 0.5,
         "{freqs:?}"
@@ -2458,7 +2458,7 @@ fn midi1_and_midi2_controllers_reach_the_same_state() {
         // The synth keeps where the pitch stands: the wheel times the range.
         assert_eq!(
             synth.bends[MidiChannel::FIRST.index()],
-            synth.config.pitch_bend_range * expected,
+            synth.config.pitch_bend_range * f64::from(expected),
             "{message:?}"
         );
     }
@@ -2524,7 +2524,7 @@ trait SoundsAt {
 
 impl SoundsAt for SynthVoice {
     fn per_note_bend(&self) -> tutti_units::Semitones {
-        let key = 440.0_f32 * 2.0_f32.powf((f32::from(self.note().get()) - 69.0) / 12.0);
+        let key = 440.0_f64 * 2.0_f64.powf((f64::from(self.note().get()) - 69.0) / 12.0);
         tutti_units::Semitones(12.0 * (self.sounding_freq().get() / key).log2())
     }
 }
@@ -2849,8 +2849,8 @@ fn peaks(synth: &mut Hand, events: &[Ump]) -> (f32, f32) {
     (peak(&left), peak(&right))
 }
 
-fn key_freq(key: u8) -> f32 {
-    440.0 * 2.0_f32.powf((f32::from(key) - 69.0) / 12.0)
+fn key_freq(key: u8) -> f64 {
+    440.0 * 2.0_f64.powf((f64::from(key) - 69.0) / 12.0)
 }
 
 /// RP-015: Reset All Controllers sets Modulation (#1) to 0 per channel: a reset
@@ -2898,14 +2898,14 @@ fn channel_tuning_moves_the_channels_notes() {
             .sounding_freq()
             .get()
     };
-    assert!((freq(&s, 0) / 880.0 - 1.0).abs() < 1e-4, "{}", freq(&s, 0));
-    assert!((freq(&s, 1) / 440.0 - 1.0).abs() < 1e-4);
+    assert!((freq(&s, 0) / 880.0 - 1.0).abs() < 1e-12, "{}", freq(&s, 0));
+    assert!((freq(&s, 1) / 440.0 - 1.0).abs() < 1e-12);
     // Fine: 0x3000 is 50 cents up, on top.
     queue_midi(&mut s, &[registered(0, 1, 0x3000 << 18)]);
     s.tick(&[], &mut out);
-    let expected = 880.0 * 2.0_f32.powf(0.5 / 12.0);
+    let expected = 880.0 * 2.0_f64.powf(0.5 / 12.0);
     assert!(
-        (freq(&s, 0) / expected - 1.0).abs() < 1e-4,
+        (freq(&s, 0) / expected - 1.0).abs() < 1e-12,
         "{}",
         freq(&s, 0)
     );
@@ -3034,11 +3034,12 @@ fn a_portamento_control_glides_one_voice_at_the_rate_of_cc_5() {
             .sounding_freq()
             .get()
     };
-    assert!((after(0, 1000) / key_freq(64) - 1.0).abs() < 1e-3);
+    assert!((after(0, 1000) / key_freq(64) - 1.0).abs() < 1e-12);
     let slow = after(127, 44_100);
     // The 400 cents up from 60 take 40,000 ms: 10 cents in the first second.
-    let expected = key_freq(60) * 2.0_f32.powf(10.0 / 1200.0);
+    let expected = key_freq(60) * 2.0_f64.powf(10.0 / 1200.0);
     assert!(
+        // The glide curve is evaluated in `Law`'s `f32`.
         (slow / expected - 1.0).abs() < 5e-4,
         "{slow} against {expected}"
     );
@@ -3059,16 +3060,16 @@ fn a_portamento_control_glides_one_voice_at_the_rate_of_cc_5() {
     for _ in 0..1000 {
         s.tick(&[], &mut out);
     }
-    let mut freqs: Vec<f32> = s
+    let mut freqs: Vec<f64> = s
         .voices
         .iter()
         .filter(|v| v.is_active())
         .map(|v| v.sounding_freq().get())
         .collect();
-    freqs.sort_by(f32::total_cmp);
+    freqs.sort_by(f64::total_cmp);
     assert_eq!(freqs.len(), 2, "no new voice");
-    assert!((freqs[0] / key_freq(67) - 1.0).abs() < 1e-3, "{freqs:?}");
-    assert!((freqs[1] / key_freq(72) - 1.0).abs() < 1e-3, "{freqs:?}");
+    assert!((freqs[0] / key_freq(67) - 1.0).abs() < 1e-12, "{freqs:?}");
+    assert!((freqs[1] / key_freq(72) - 1.0).abs() < 1e-12, "{freqs:?}");
 }
 
 /// GM2 section 3.3.8: Portamento On at 64 to 127: a note glides from
@@ -3099,7 +3100,8 @@ fn portamento_on_glides_from_the_previous_key() {
         .unwrap()
         .sounding_freq()
         .get();
-    let expected = key_freq(60) * 2.0_f32.powf(10.0 / 1200.0);
+    let expected = key_freq(60) * 2.0_f64.powf(10.0 / 1200.0);
+    // The glide curve is evaluated in `Law`'s `f32`.
     assert!((f / expected - 1.0).abs() < 5e-4, "{f} against {expected}");
 }
 
@@ -3146,7 +3148,7 @@ fn a_per_note_pitch_survives_a_glide() {
         .sounding_freq()
         .get();
     assert!(
-        (f / key_freq(74) - 1.0).abs() < 1e-4,
+        (f / key_freq(74) - 1.0).abs() < 1e-12,
         "{f} against {}",
         key_freq(74)
     );
@@ -3182,16 +3184,24 @@ fn a_legato_move_returns_the_voice_to_the_new_keys_own_pitch() {
             .sounding_freq()
             .get()
     };
-    assert!((freq(&s) / key_freq(70) - 1.0).abs() < 1e-4);
+    assert!((freq(&s) / key_freq(70) - 1.0).abs() < 1e-12);
     queue_midi(&mut s, &[ev_note_on(1, 64, 100)]);
     s.tick(&[], &mut out);
     assert_eq!(s.active_voice_count(), 1, "one voice moved");
-    assert!((freq(&s) / key_freq(64) - 1.0).abs() < 1e-4, "{}", freq(&s));
+    assert!(
+        (freq(&s) / key_freq(64) - 1.0).abs() < 1e-12,
+        "{}",
+        freq(&s)
+    );
     // A bend recomputes the pitch from the voice's note: the new key's, a
     // whole tone (the default range) up.
     queue_midi(&mut s, &[ev_bend(1, 16383)]);
     s.tick(&[], &mut out);
-    assert!((freq(&s) / key_freq(66) - 1.0).abs() < 1e-3, "{}", freq(&s));
+    assert!(
+        (freq(&s) / key_freq(66) - 1.0).abs() < 1e-12,
+        "{}",
+        freq(&s)
+    );
 }
 
 // ---- Universal System Exclusive (MIDI L7b) ----
@@ -3396,7 +3406,7 @@ fn ev_tuning_program(channel: u8, program: u8) -> Ump {
     ))
 }
 
-fn cents_above(freq: Hz, reference: f32) -> f32 {
+fn cents_above(freq: Hz, reference: f64) -> f64 {
     tutti_units::Cents::from_pitch_ratio(freq.get() / reference).get()
 }
 
@@ -3430,7 +3440,7 @@ fn pitch_7_9_and_7_25_put_note_69_at_a440() {
     // then 69 and a half semitone.
     for (q7_9, want) in [
         (69 << 9, 440.0),
-        ((69 << 9) + 256, 440.0 * 2f32.powf(0.5 / 12.0)),
+        ((69 << 9) + 256, 440.0 * 2f64.powf(0.5 / 12.0)),
     ] {
         let mut s = steady(|_| {});
         queue_midi(

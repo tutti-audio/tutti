@@ -298,7 +298,7 @@ fn beats(per_cycle: f64) -> Clock {
     }
 }
 
-fn seconds(rate: f32) -> Clock {
+fn seconds(rate: f64) -> Clock {
     Clock::Seconds {
         rate: Hz(rate),
         phase: PhaseIncrement(0.0),
@@ -325,7 +325,7 @@ fn program(automation: Option<Arc<dyn Curve>>, layers: Vec<Layer>) -> ControlPro
 }
 
 /// A linear trajectory through `points` (beat, value).
-fn trajectory(points: &[(f64, f32)]) -> Trajectory<Hz> {
+fn trajectory(points: &[(f64, f64)]) -> Trajectory<Hz> {
     let mut e = Trajectory::new();
     for &(b, v) in points {
         e.add_breakpoint(Breakpoint::new(Beat(b), Hz(v)));
@@ -833,7 +833,7 @@ fn a_plugin_lane_sends_linear_grid_pieces() {
 /// 500 forever.
 #[test]
 fn a_publish_between_two_blocks_is_read_by_the_next_block() {
-    let flat = |v: f32| -> ControlProgram {
+    let flat = |v: f64| -> ControlProgram {
         let curve: Arc<dyn Curve> = Arc::new(trajectory(&[(0.0, v)]));
         program(Some(curve), vec![])
     };
@@ -1009,7 +1009,7 @@ fn the_curves_with_no_bound_err_as_measured() {
 #[test]
 fn the_lane_keeps_every_corner_within_its_capacity() {
     for (max, rate, cycles_per_frame, thinned) in [
-        (4096usize, 703.125f32, 15.0 / 1024.0, 0u64),
+        (4096usize, 703.125f64, 15.0 / 1024.0, 0u64),
         (16_384, 140.625, 3.0 / 1024.0, 2),
     ] {
         let (mut ed, mut exec) = probes(max, &[2], (0.0, 2000.0));

@@ -86,7 +86,7 @@ fn measure(label: &str, n: usize, modulated: bool, edit: bool) {
     for i in 0..UPDATES {
         if edit {
             s.mods_mut()
-                .range(filters[0].cutoff(), Hz(20.0)..Hz(20_000.0 + (i % 2) as f32))
+                .range(filters[0].cutoff(), Hz(20.0)..Hz(20_000.0 + (i % 2) as f64))
                 .unwrap();
         }
         let t = Instant::now();

@@ -148,7 +148,7 @@ pub const MAX_PLATE_DECAY: Seconds = Seconds(8.0);
 /// The lowest bandwidth a control reaches.
 pub(crate) const MIN_BANDWIDTH: Hz = Hz(10.0);
 /// The share of Nyquist the input bandwidth is held under.
-const BANDWIDTH_CEILING: f32 = 0.9;
+const BANDWIDTH_CEILING: f64 = 0.9;
 /// The largest damping pole: one short of a filter that never settles.
 const MAX_DAMPING: f32 = 0.999;
 
@@ -218,10 +218,7 @@ impl PlateControls {
     /// The bandwidth in force at `rate`: finite, within 10 Hz and 0.9 of Nyquist.
     pub(crate) fn bandwidth_at(&self, rate: SampleRate) -> Hz {
         let hz = finite_or(self.bandwidth.get(), Self::DEFAULT.bandwidth.get());
-        Hz(hz.clamp(
-            MIN_BANDWIDTH.get(),
-            rate.nyquist_scaled(BANDWIDTH_CEILING).get(),
-        ))
+        Hz(hz).clamp(MIN_BANDWIDTH, rate.nyquist_scaled(BANDWIDTH_CEILING))
     }
 
     /// Designs the controls into `out` in place, at `rate`: the network the bank runs (the

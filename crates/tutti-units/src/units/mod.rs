@@ -133,7 +133,7 @@ pub trait Unit: Copy + Clone + core::fmt::Debug + PartialEq {
 //     example: the silence floor is each caller's to pin, which leaves one
 //     answer here (`-inf`) and makes the `From` impl honest.
 //   - The target is a bare scalar. `Cents::to_pitch_ratio` and
-//     `Semitones::to_pitch_ratio` both land on `f32`; as `From` impls they
+//     `Semitones::to_pitch_ratio` both land on `f64`; as `From` impls they
 //     would be two different meanings of one target type.
 //
 // The impls beside the types delegate to the inherent methods rather than repeating the

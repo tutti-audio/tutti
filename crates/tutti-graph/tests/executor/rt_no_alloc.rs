@@ -843,7 +843,7 @@ impl Node for RampEvery {
                         o,
                         ParamRamp::new(
                             tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
-                            tutti_units::Hz((f % 5) as f32),
+                            tutti_units::Hz((f % 5) as f64),
                             Samples(20),
                         ),
                     ),
@@ -857,8 +857,8 @@ impl Node for RampEvery {
                         ][(f / 111) as usize % 4];
                         let seg = ParamSegment::new(
                             tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
-                            tutti_units::Hz((f % 3) as f32),
-                            tutti_units::Hz((f % 7) as f32),
+                            tutti_units::Hz((f % 3) as f64),
+                            tutti_units::Hz((f % 7) as f64),
                             Samples(50),
                             shape,
                         );

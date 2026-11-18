@@ -184,7 +184,7 @@ fn the_ladder_at_a_held_extreme_cutoff_is_allocation_free_and_bounded() {
             LadderType::HP12 => 9.0,
             _ => 81.0,
         } * 1.001;
-        for cutoff in [1.0e9f32, 23_900.0, 1.0] {
+        for cutoff in [1.0e9f64, 23_900.0, 1.0] {
             for shape in 0..SHAPES {
                 let node = LadderFilterNode::<f64>::with_channels(
                     ChannelLayout::STEREO,
@@ -343,7 +343,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
             }
             for shape in 0..=SHAPES {
                 let initial: Vec<Hz> = (0..bands - 1)
-                    .map(|i| Hz(150.0 * 3f32.powi(i as i32)))
+                    .map(|i| Hz(150.0 * 3f64.powi(i as i32)))
                     .collect();
                 let node = CrossoverNode::<f32>::new(ChannelLayout::from(width), &initial).unwrap();
                 let set = node.param_set();
@@ -380,7 +380,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
 fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
     use tutti_dsp::{CrossoverControls, CrossoverModel, Lti};
     for set in [
-        [1.0f32, 2.0],
+        [1.0f64, 2.0],
         [23_999.0, 24_000.0],
         [1.0e9, 2.0e9],
         [1.0, 1.0e9],
@@ -403,7 +403,8 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
                 // same clamp: the design does not move.
                 cells.set(
                     UnitAddr::new(UnitParam::Cutoff, 0),
-                    if i % 2 == 0 { NAN } else { set[0] },
+                    // A param word is an `f32`.
+                    if i % 2 == 0 { NAN } else { set[0] as f32 },
                 );
             })
             .unwrap_or_else(|| panic!("{set:?} lanes {shape}: not finite"));

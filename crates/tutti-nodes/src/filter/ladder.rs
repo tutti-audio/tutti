@@ -269,7 +269,7 @@ mod tests {
 
     /// Gain (dB) of a 0.01-amplitude sine at `f` through the node, projected
     /// on the last second of two.
-    fn gain_db(ty: LadderType, fc: f32, res: f32, f: f64) -> f64 {
+    fn gain_db(ty: LadderType, fc: f64, res: f32, f: f64) -> f64 {
         let mut node = prepared_at(
             LadderFilterNode::<f64>::new(ty, Hz::new(fc), Resonance::new(res)),
             RATE_44K,

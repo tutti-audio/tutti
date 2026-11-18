@@ -4,7 +4,7 @@ use core::f64::consts::TAU;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// 100 Hz at 48 kHz: 480 frames a cycle, the trough of a sine at frame 360.
-const HZ: f32 = 100.0;
+const HZ: f64 = 100.0;
 const PERIOD: usize = 480;
 
 fn run<P>(frames: usize, blocks: &[usize], channels: &[Vec<f32>], mut f: P) -> Vec<Vec<f32>>
@@ -32,7 +32,7 @@ where
 
 /// The tremolo gain `1 - (|d| - d u) / 2` of a sine wave at frame `n`.
 fn sine_gain(d: f64, n: usize) -> f64 {
-    let u = (TAU * f64::from(HZ) * n as f64 / RATE.get()).sin();
+    let u = (TAU * HZ * n as f64 / RATE.get()).sin();
     1.0 - (d.abs() - d * u) / 2.0
 }
 
@@ -167,7 +167,7 @@ fn auto_pan_places_by_pan_gains_at_the_lfo_position() {
             let mut p = auto_pan(law, d);
             let out = run(960, &[37, 200], &ones, |i, o| p.process(i, o));
             for (n, (&out_l, &out_r)) in out[0].iter().zip(&out[1]).enumerate() {
-                let u = (TAU * f64::from(HZ) * n as f64 / RATE.get()).sin();
+                let u = (TAU * HZ * n as f64 / RATE.get()).sin();
                 let (l, r) = pan_gains(Pan((f64::from(d) * u) as f32), law);
                 assert!((out_l - l.get()).abs() < 1e-5, "{law:?} {d} L {n}");
                 assert!((out_r - r.get()).abs() < 1e-5, "{law:?} {d} R {n}");

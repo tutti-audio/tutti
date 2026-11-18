@@ -171,13 +171,12 @@ impl Oversampling {
     ///
     /// The [`FirError`] of the half-band that cannot be designed: an attenuation that is not
     /// positive and finite or is past [`MAX_ATTENUATION`](crate::MAX_ATTENUATION), or a rate
-    /// whose transition width does not fit `f32`.
+    /// whose scaled rate overflows.
     pub fn plan(&self, rate: SampleRate) -> Result<OversamplingPlan, FirError> {
         let base = rate.get();
         let stages = self.factor.stages();
-        // A rate that overflows when scaled has a transition that overflows `f32`, which the
-        // design refuses with this error.
-        let overflow = FirError::NonPositiveTransition(Hz(f32::INFINITY));
+        // A rate that overflows when scaled is refused with this error.
+        let overflow = FirError::NonPositiveTransition(Hz(f64::INFINITY));
         let high = SampleRate::new(base * self.factor.get() as f64).ok_or(overflow)?;
         let passband = f64::from(self.passband.get());
         let mut taps = Vec::with_capacity(stages);
@@ -185,7 +184,7 @@ impl Oversampling {
             let transition =
                 base * (f64::from(1u32 << j) - passband).min(f64::from(1u32 << j) / 2.0);
             let stage_rate = SampleRate::new(base * f64::from(2u32 << j)).ok_or(overflow)?;
-            let fir = FirDesign::new(FirResponse::HalfBand, Hz(transition as f32))
+            let fir = FirDesign::new(FirResponse::HalfBand, Hz(transition))
                 .attenuation(self.attenuation)
                 .design(stage_rate)?;
             let delay = fir.delay().get();

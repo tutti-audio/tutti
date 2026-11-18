@@ -11,7 +11,7 @@ use tutti_dsp::StftGeometry;
 use super::vocoder::Vocoder;
 use super::{FftSize, MAX_BUFFER_SIZE};
 use std::sync::atomic::Ordering;
-use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_types::{AtomicF32, AtomicF64, ChannelLayout};
 use tutti_units::{Cents, ReadRate, SampleRate, StretchFactor};
 
 /// Real-time time-stretching and pitch-shifting unit.
@@ -70,7 +70,7 @@ pub struct Unit {
     pub(super) stretch_factor: AtomicF32,
     /// Written only through [`set_pitch_cents`](Self::set_pitch_cents), so it
     /// always holds a finite transposition within ±2400 cents.
-    pub(super) pitch_cents: AtomicF32,
+    pub(super) pitch_cents: AtomicF64,
     pub(super) enabled: bool,
     /// Fractional debt in the source-intake resampler: how much of the next
     /// source sample the unit still owes itself before it may consume one.
@@ -187,7 +187,7 @@ impl Unit {
             }),
             width,
             stretch_factor: AtomicF32::new(clamp_stretch(stretch_factor).get()),
-            pitch_cents: AtomicF32::new(clamp_pitch(pitch_cents).get()),
+            pitch_cents: AtomicF64::new(clamp_pitch(pitch_cents).get()),
             enabled,
             intake_debt: 0.0,
         }
@@ -341,8 +341,8 @@ impl Unit {
     /// Verified at the corners: pitch lands within 1 Hz of target at effective
     /// factors from 0.0625 to 16.0, i.e. across the whole clamp-free range.
     #[inline]
-    pub(super) fn effective_stretch(&self) -> f32 {
-        self.stretch_factor().get() * self.pitch_cents().to_pitch_ratio()
+    pub(super) fn effective_stretch(&self) -> f64 {
+        f64::from(self.stretch_factor().get()) * self.pitch_cents().to_pitch_ratio()
     }
 
     /// Fed samples this unit consumes per output sample:
@@ -378,7 +378,7 @@ impl Unit {
     /// keeps that from drifting — the same reason [`ReadRate`] is `f64`-backed.
     #[inline]
     pub(super) fn intake_rate(&self) -> f64 {
-        1.0 / self.effective_stretch() as f64
+        1.0 / self.effective_stretch()
     }
 
     /// The (analysis, synthesis) hop pair for the current effective stretch.
@@ -413,7 +413,7 @@ impl Unit {
             .vocoders
             .first()
             .map_or(1, |v| v.geometry.hop().get());
-        let analysis = ((synthesis as f32 / self.effective_stretch()).round() as usize).max(1);
+        let analysis = ((synthesis as f64 / self.effective_stretch()).round() as usize).max(1);
         (analysis, synthesis.max(1))
     }
 
@@ -453,7 +453,7 @@ impl Unit {
 /// bypasses rather than paying for an FFT.
 const STRETCH_EPSILON: f32 = 0.001;
 /// Half a cent — beneath the threshold of hearing.
-const PITCH_EPSILON_CENTS: f32 = 0.5;
+const PITCH_EPSILON_CENTS: f64 = 0.5;
 /// Two octaves down.
 pub(super) const MIN_PITCH: Cents = Cents(-2400.0);
 /// Two octaves up.

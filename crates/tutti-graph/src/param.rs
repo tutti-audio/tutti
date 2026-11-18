@@ -1177,7 +1177,7 @@ mod tests {
     /// frame; a zero-length one is a step on its frame.
     #[test]
     fn a_ramp_lands_on_its_last_frame() {
-        let ev = |at: usize, t: f32, len: usize| {
+        let ev = |at: usize, t: f64, len: usize| {
             Event::ramp(
                 Offset::of(Samples(at), Samples(16)),
                 ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(t), Samples(len)),
@@ -1262,7 +1262,7 @@ mod tests {
                 let frames = len + 4;
                 let events = [Event::ramp(
                     Offset::of(Samples(1), Samples(frames)),
-                    ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
+                    ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(f64::from(target)), Samples(len)),
                 )];
                 let mut r = Ramp::default();
                 let mut out = vec![0.0f32; frames];
@@ -1320,7 +1320,7 @@ mod tests {
         use crate::event::ParamSegment;
         let key = ParamKey::<Hz>::CUTOFF;
         let at = |i: usize| Offset::of(Samples(i), Samples(64));
-        let seg = |from: f32, to: f32, len: usize| {
+        let seg = |from: f64, to: f64, len: usize| {
             ParamSegment::new(key, Hz(from), Hz(to), Samples(len), Law::Linear)
         };
         let corners = |events: &[Event]| {

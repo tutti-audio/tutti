@@ -56,8 +56,8 @@ fn conversions_that_stay_named_and_why() {
 
     // Target is a bare scalar, and two different units convert into it —
     // as `From` impls these would be two meanings of one target type.
-    assert!((Cents(1200.0).to_pitch_ratio() - 2.0).abs() < 1e-6);
-    assert!((Semitones(12.0).to_pitch_ratio() - 2.0).abs() < 1e-6);
+    assert!(Cents(1200.0).to_pitch_ratio() == 2.0);
+    assert!(Semitones(12.0).to_pitch_ratio() == 2.0);
 
     // `ArcDegrees` has no radians conversion at all. `Azimuth` and
     // `Elevation` do (as `From`), so adding one here would look like

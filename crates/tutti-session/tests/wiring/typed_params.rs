@@ -132,7 +132,8 @@ impl Node for Mine {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        io.output(0).fill(self.cutoff.load().get());
+        // An output sample is an `f32`.
+        io.output(0).fill(self.cutoff.load().get() as f32);
         Status::Modified
     }
     fn reset(&mut self) {}

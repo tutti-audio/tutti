@@ -25,7 +25,7 @@ use tutti_sampler::VoiceWindow;
 
 use tutti_sampler::testing::loop_frames;
 
-use std::f32::consts::TAU;
+use std::f64::consts::TAU;
 use std::hint::black_box;
 use std::sync::Arc;
 
@@ -96,11 +96,11 @@ impl Rig {
     }
 }
 
-fn tone(freq: f32, frames: usize) -> Arc<Wave> {
+fn tone(freq: f64, frames: usize) -> Arc<Wave> {
     let mut w = Wave::new(1, SampleRate::of(SR));
     for i in 0..frames {
         w.append(
-            Interleaved::new(&[(TAU * freq * i as f32 / SR as f32).sin()], w.layout()).unwrap(),
+            Interleaved::new(&[(TAU * freq * i as f64 / SR).sin() as f32], w.layout()).unwrap(),
         )
         .unwrap();
     }
@@ -108,7 +108,7 @@ fn tone(freq: f32, frames: usize) -> Arc<Wave> {
 }
 
 /// A pool with `n` voices resident, each on its own slot and pitch.
-fn pool_with(n: usize, stretch: f32, cents: f32) -> Rig {
+fn pool_with(n: usize, stretch: f32, cents: f64) -> Rig {
     let (pool, handle) = VoicePool::new().with_handle();
     // Generous length: at a slow stretch the source is consumed much faster
     // than it is emitted, and a short wave would run dry mid-measurement and
@@ -184,7 +184,7 @@ fn bench_stretch(c: &mut Criterion) {
 fn bench_pitch(c: &mut Criterion) {
     let mut group = c.benchmark_group("voices/pitch");
     group.throughput(Throughput::Elements(BLOCK as u64));
-    for cents in [0.0f32, 700.0] {
+    for cents in [0.0f64, 700.0] {
         let mut pool = pool_with(8, 1.0, cents);
         group.bench_with_input(
             BenchmarkId::from_parameter(format!("{cents:.0}c")),
@@ -239,10 +239,10 @@ enum Built {
 
 /// The stereo tone every `pool64` voice reads, sample `i`.
 fn tone_frame(i: usize) -> [f32; 2] {
-    let t = i as f32 / SR as f32;
+    let t = i as f64 / SR;
     [
-        (TAU * 440.0 * t).sin() * 0.25,
-        (TAU * 660.0 * t).sin() * 0.25,
+        ((TAU * 440.0 * t).sin() * 0.25) as f32,
+        ((TAU * 660.0 * t).sin() * 0.25) as f32,
     ]
 }
 

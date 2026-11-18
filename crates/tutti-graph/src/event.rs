@@ -20,10 +20,9 @@ use std::num::NonZeroU32;
 
 use tutti_curve::{Curvature, Exponent, Law, Piece};
 use tutti_ump::Ump;
-use tutti_units::{
-    ParamAddr, ParamId, ParamKey, SamplePosition, Samples, Unit, UnitAddr, UnitParam,
-};
+use tutti_units::{ParamAddr, ParamId, ParamKey, SamplePosition, Samples, UnitAddr, UnitParam};
 
+use crate::declare::Scalar;
 use crate::time::Offset;
 
 /// A ramp of one parameter from the value it has at the event's frame to a
@@ -84,8 +83,9 @@ pub struct ParamRamp {
 impl ParamRamp {
     /// Ramp built-in parameter `key` linearly to `target` over `duration`
     /// (zero is a step).
-    pub fn new<U: Unit<Raw = f32>>(key: ParamKey<U>, target: U, duration: Samples) -> Self {
-        Self::packed(ParamAddr::unit(key.addr()), target.to_raw(), duration)
+    pub fn new<U: Scalar>(key: ParamKey<U>, target: U, duration: Samples) -> Self {
+        // The event carries `f32`: a wider unit narrows once here.
+        Self::packed(ParamAddr::unit(key.addr()), target.to_cell(), duration)
     }
 
     /// Ramp a foreign unit's parameter `id` linearly to the raw `target`
@@ -133,8 +133,8 @@ impl ParamRamp {
     }
 
     /// The target, in `key`'s unit, if this ramp is for `key`.
-    pub fn target<U: Unit<Raw = f32>>(&self, key: ParamKey<U>) -> Option<U> {
-        (self.addr == ParamAddr::unit(key.addr())).then(|| U::from_raw(self.target))
+    pub fn target<U: Scalar>(&self, key: ParamKey<U>) -> Option<U> {
+        (self.addr == ParamAddr::unit(key.addr())).then(|| U::from_cell(self.target))
     }
 
     /// The raw target, if this ramp is for foreign parameter `id`.
@@ -293,14 +293,9 @@ impl ParamSegment {
     /// `shape` over `duration` frames, in the ramp convention: the event's
     /// frame is one step in, and `to` lands on its last frame (a zero
     /// duration is a step to `to`).
-    pub fn new<U: Unit<Raw = f32>>(
-        key: ParamKey<U>,
-        from: U,
-        to: U,
-        duration: Samples,
-        shape: Law,
-    ) -> Self {
-        Self::unit(key.addr(), from.to_raw(), to.to_raw(), duration, shape)
+    pub fn new<U: Scalar>(key: ParamKey<U>, from: U, to: U, duration: Samples, shape: Law) -> Self {
+        // The event carries `f32`: a wider unit narrows once here.
+        Self::unit(key.addr(), from.to_cell(), to.to_cell(), duration, shape)
     }
 
     /// A segment of built-in parameter `param` (a [`UnitParam`],
@@ -383,15 +378,15 @@ impl ParamSegment {
     }
 
     /// The end value, in `key`'s unit, if this segment is for `key`.
-    pub fn target<U: Unit<Raw = f32>>(&self, key: ParamKey<U>) -> Option<U> {
+    pub fn target<U: Scalar>(&self, key: ParamKey<U>) -> Option<U> {
         self.is_for(ParamAddr::unit(key.addr()))
-            .then(|| U::from_raw(self.to))
+            .then(|| U::from_cell(self.to))
     }
 
     /// The start value, in `key`'s unit, if this segment is for `key`.
-    pub fn start<U: Unit<Raw = f32>>(&self, key: ParamKey<U>) -> Option<U> {
+    pub fn start<U: Scalar>(&self, key: ParamKey<U>) -> Option<U> {
         self.is_for(ParamAddr::unit(key.addr()))
-            .then(|| U::from_raw(self.from))
+            .then(|| U::from_cell(self.from))
     }
 
     /// The raw end value, if this segment is for foreign parameter `id`.

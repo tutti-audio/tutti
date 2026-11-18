@@ -94,7 +94,7 @@ impl RampEvery {
         match self.param {
             UnitParam::Cutoff => ParamRamp::new(
                 tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
-                tutti_units::Hz(v),
+                tutti_units::Hz(f64::from(v)),
                 Samples(20),
             ),
             _ => ParamRamp::new(

@@ -5,12 +5,12 @@ use tutti_buffers::Mono;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn model(freqs: &[f32]) -> CrossoverModel {
+fn model(freqs: &[f64]) -> CrossoverModel {
     let f: Vec<Hz> = freqs.iter().map(|&f| Hz(f)).collect();
     CrossoverModel::new(&f, RATE).unwrap()
 }
 
-fn at(m: &CrossoverModel, band: usize, f: f32) -> Complex64 {
+fn at(m: &CrossoverModel, band: usize, f: f64) -> Complex64 {
     let mut g = [Complex64::new(0.0, 0.0)];
     m.frequency_response(band, &[Hz(f)], &mut g);
     g[0]
@@ -23,7 +23,7 @@ fn at(m: &CrossoverModel, band: usize, f: f32) -> Complex64 {
 #[test]
 fn the_bands_are_6_db_down_at_the_crossover_and_sum_to_an_all_pass() {
     for freqs in [
-        vec![1_000.0f32],
+        vec![1_000.0f64],
         vec![200.0, 2_000.0],
         vec![100.0, 500.0, 2_500.0],
         vec![80.0, 300.0, 1_200.0, 4_000.0, 12_000.0],
@@ -47,7 +47,7 @@ fn the_bands_are_6_db_down_at_the_crossover_and_sum_to_an_all_pass() {
             // part, each a half, up to the other splits' all-passes.
             assert!((low - high).abs() < 0.1 * low.max(high) + 1e-3, "{freqs:?}");
         }
-        for f in [10.0f32, 90.0, 400.0, 1_500.0, 6_000.0, 20_000.0, 24_000.0] {
+        for f in [10.0f64, 90.0, 400.0, 1_500.0, 6_000.0, 20_000.0, 24_000.0] {
             let sum: Complex64 = (0..m.bands()).map(|b| at(&m, b, f)).sum();
             assert!(
                 (sum.norm() - 1.0).abs() < 1e-9,
@@ -79,11 +79,11 @@ fn two_bands_have_the_closed_form_anchors() {
 #[test]
 fn the_two_bands_are_the_prewarped_bilinear_image_of_the_lr4_prototypes() {
     let one = Complex64::new(1.0, 0.0);
-    for fc in [60.0f32, 1_000.0, 5_000.0, 18_000.0] {
+    for fc in [60.0f64, 1_000.0, 5_000.0, 18_000.0] {
         let m = model(&[fc]);
-        let g = (PI * f64::from(fc) / RATE.get()).tan();
-        for f in [20.0f32, 150.0, 700.0, 1_000.0, 4_000.0, 12_000.0, 23_900.0] {
-            let w = 2.0 * PI * f64::from(f) / RATE.get();
+        let g = (PI * fc / RATE.get()).tan();
+        for f in [20.0f64, 150.0, 700.0, 1_000.0, 4_000.0, 12_000.0, 23_900.0] {
+            let w = 2.0 * PI * f / RATE.get();
             let z = Complex64::from_polar(1.0, w);
             let s = (z - 1.0) / (z + 1.0) / g;
             let d = s * s + s * 2f64.sqrt() + one;
@@ -124,7 +124,7 @@ fn the_response_is_what_the_crossover_runs() {
         fft.forward(Mono::new(ir), &mut bins, &mut scratch);
         let (mut num, mut den) = (0.0f64, 0.0f64);
         for (i, b) in bins.iter().enumerate().step_by(5) {
-            let want = at(&m, band, (i as f64 * RATE.get() / N as f64) as f32);
+            let want = at(&m, band, i as f64 * RATE.get() / N as f64);
             let got = Complex64::new(f64::from(b.re), f64::from(b.im));
             num += (got - want).norm_sqr();
             den += want.norm_sqr();
@@ -198,7 +198,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     assert!(m.hinf_norm() <= m.l1_norm());
 }
 
-fn controls(low: f32, high: f32) -> CrossoverControls {
+fn controls(low: f64, high: f64) -> CrossoverControls {
     CrossoverControls {
         frequencies: [Hz(low), Hz(high), Hz::ZERO, Hz::ZERO, Hz::ZERO],
     }
@@ -210,11 +210,11 @@ fn controls(low: f32, high: f32) -> CrossoverControls {
 #[test]
 fn a_design_orders_and_caps_the_splits() {
     let mut m = CrossoverModel::designed(3, &controls(100.0, 1_000.0), RATE).unwrap();
-    for set in [[5_000.0, 4_000.0], [30_000.0, 25_000.0], [-1.0, f32::NAN]] {
+    for set in [[5_000.0, 4_000.0], [30_000.0, 25_000.0], [-1.0, f64::NAN]] {
         m.design_into(&controls(set[0], set[1]), RATE);
         let (a, b) = (m.frequency(0).unwrap().get(), m.frequency(1).unwrap().get());
         assert!(
-            1.0 <= a && a <= b && f64::from(b) <= SOLVE_CEILING * RATE.get(),
+            1.0 <= a && a <= b && b <= SOLVE_CEILING * RATE.get(),
             "{set:?}: {a} {b}"
         );
         assert_eq!(m.frequency(2), None);

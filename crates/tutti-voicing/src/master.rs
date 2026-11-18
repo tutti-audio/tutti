@@ -130,8 +130,8 @@ impl Master {
 
     /// The displacement from A440: the coarse and the fine tuning.
     pub(crate) fn tuning(&self) -> Semitones {
-        let fine = (f32::from(self.fine.get()) - f32::from(CENTRE_14)) / f32::from(CENTRE_14);
-        Semitones(f32::from(self.coarse.get()) - f32::from(CENTRE_7) + fine)
+        let fine = (f64::from(self.fine.get()) - f64::from(CENTRE_14)) / f64::from(CENTRE_14);
+        Semitones(f64::from(self.coarse.get()) - f64::from(CENTRE_7) + fine)
     }
 }
 

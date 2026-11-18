@@ -9,7 +9,7 @@ use crate::{Complex64, CrossoverControls, CrossoverModel, SOLVE_CEILING};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn model(freqs: &[f32]) -> CrossoverModel {
+fn model(freqs: &[f64]) -> CrossoverModel {
     let f: Vec<Hz> = freqs.iter().map(|&f| Hz(f)).collect();
     CrossoverModel::new(&f, RATE).unwrap()
 }
@@ -62,7 +62,7 @@ fn run<S: Float>(
 
 /// The unit impulse response of every band of a mono tree, in `f64` audio so the output is
 /// the state's, unrounded.
-fn impulse_response(freqs: &[f32], frames: usize) -> Vec<Vec<f64>> {
+fn impulse_response(freqs: &[f64], frames: usize) -> Vec<Vec<f64>> {
     let m = model(freqs);
     let mut x = vec![0.0f64; frames];
     x[0] = 1.0;
@@ -89,7 +89,7 @@ fn x(hz: f64, split: f64) -> f64 {
     (PI * hz / RATE.get()).tan() / (PI * split / RATE.get()).tan()
 }
 
-const SETS: [&[f32]; 4] = [
+const SETS: [&[f64]; 4] = [
     &[1_000.0],
     &[120.0, 2_500.0],
     &[120.0, 1_000.0, 6_000.0],
@@ -123,7 +123,7 @@ fn the_bands_sum_to_the_all_pass_of_the_splits() {
             let phase: f64 = freqs
                 .iter()
                 .map(|&fc| {
-                    let x = x(hz, f64::from(fc));
+                    let x = x(hz, fc);
                     -2.0 * (SQRT_2 * x).atan2(1.0 - x * x)
                 })
                 .sum();
@@ -147,17 +147,14 @@ fn the_bands_sum_to_the_all_pass_of_the_splits() {
 fn each_band_is_the_product_of_the_splits_sections() {
     for freqs in SETS {
         let bands = impulse_response(freqs, N);
-        let probes = PROBES
-            .iter()
-            .copied()
-            .chain(freqs.iter().map(|&f| f64::from(f)));
+        let probes = PROBES.iter().copied().chain(freqs.iter().copied());
         for hz in probes {
             for (b, y) in bands.iter().enumerate() {
                 let want: f64 = freqs
                     .iter()
                     .enumerate()
                     .map(|(j, &fc)| {
-                        let x4 = x(hz, f64::from(fc)).powi(4);
+                        let x4 = x(hz, fc).powi(4);
                         match j.cmp(&b) {
                             std::cmp::Ordering::Less => x4 / (1.0 + x4),
                             std::cmp::Ordering::Equal => 1.0 / (1.0 + x4),
@@ -411,7 +408,7 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
 #[test]
 fn the_bands_stay_within_the_models_bound() {
     use crate::Lti;
-    for set in [[20.0f32, 21.0], [23_000.0, 23_900.0], [100.0, 20_000.0]] {
+    for set in [[20.0f64, 21.0], [23_000.0, 23_900.0], [100.0, 20_000.0]] {
         let controls = CrossoverControls {
             frequencies: [Hz(set[0]), Hz(set[1]), Hz::ZERO, Hz::ZERO, Hz::ZERO],
         };
@@ -442,7 +439,7 @@ fn an_f64_crossover_sums_to_the_all_pass_recursion_of_its_splits() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let n = 4_800;
     let x = wide_signal(n);
-    for splits in [&[1_000.0f32][..], &[500.0, 4_000.0]] {
+    for splits in [&[1_000.0f64][..], &[500.0, 4_000.0]] {
         let bands = run(
             &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
             &model(splits),
@@ -450,9 +447,9 @@ fn an_f64_crossover_sums_to_the_all_pass_recursion_of_its_splits() {
             &[n],
         );
         let got: Vec<f64> = (0..n).map(|i| bands.iter().map(|b| b[i]).sum()).collect();
-        let want = splits.iter().fold(x.clone(), |y, &fc| {
-            butterworth_all_pass(&y, f64::from(fc), RATE.get())
-        });
+        let want = splits
+            .iter()
+            .fold(x.clone(), |y, &fc| butterworth_all_pass(&y, fc, RATE.get()));
         assert_close_f64(&got, &want, 1e-12);
     }
 }

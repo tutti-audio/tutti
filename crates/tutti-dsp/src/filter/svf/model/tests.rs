@@ -1,6 +1,6 @@
 use super::*;
 
-fn model(ty: SvfType, freq: f32, q: f32, gain: f32, rate: f64) -> SvfModel {
+fn model(ty: SvfType, freq: f64, q: f32, gain: f32, rate: f64) -> SvfModel {
     SvfModel::new(
         SvfControls {
             ty,
@@ -93,22 +93,22 @@ fn the_response_is_the_rbj_closed_form() {
     let rate = 48_000.0;
     for ty in TYPES {
         for (fc, q, gain) in [
-            (1_000.0f32, 0.707f32, 9.0f32),
+            (1_000.0f64, 0.707f32, 9.0f32),
             (250.0, 4.0, -12.0),
             (7_000.0, 1.3, 6.0),
         ] {
-            // The controls are `f32`: the closed form is read at the same figures.
-            let (fc, q, gain) = (f64::from(fc), f64::from(q), f64::from(gain));
+            // `q` and `gain` are `f32` control words: the closed form is read at the same figures.
+            let (q, gain) = (f64::from(q), f64::from(gain));
             let want = rbj(ty, fc, q, gain, rate);
-            let m = model(ty, fc as f32, q as f32, gain as f32, rate);
-            let mut freqs = vec![Hz::ZERO, Hz(fc as f32), Hz(24_000.0)];
+            let m = model(ty, fc, q as f32, gain as f32, rate);
+            let mut freqs = vec![Hz::ZERO, Hz(fc), Hz(24_000.0)];
             freqs.extend(
-                (0..40).map(|i| Hz(libm::exp(libm::log(10.0) + 7.0 * f64::from(i) / 39.0) as f32)),
+                (0..40).map(|i| Hz(libm::exp(libm::log(10.0) + 7.0 * f64::from(i) / 39.0))),
             );
             let mut got = vec![Complex64::new(0.0, 0.0); freqs.len()];
             m.frequency_response(0, &freqs, &mut got);
             for (f, g) in freqs.iter().zip(&got) {
-                let w = 2.0 * PI * f64::from(f.get()) / rate;
+                let w = 2.0 * PI * f.get() / rate;
                 let h = want.response(w);
                 let scale = h.norm().max(g.norm()).max(1e-12);
                 assert!(
@@ -163,19 +163,19 @@ fn the_svf_model_is_the_prewarped_bilinear_image_of_the_analog_prototype() {
     let rate = 48_000.0;
     for ty in TYPES {
         for (fc, q, gain) in [
-            (80.0f32, 0.3f32, 6.0f32),
+            (80.0f64, 0.3f32, 6.0f32),
             (1_000.0, 0.707, -9.0),
             (4_000.0, 12.0, 12.0),
             (20_000.0, 1.3, -6.0),
         ] {
-            let (fc, q, gain) = (f64::from(fc), f64::from(q), f64::from(gain));
-            let m = model(ty, fc as f32, q as f32, gain as f32, rate);
+            let m = model(ty, fc, q, gain, rate);
+            let (q, gain) = (f64::from(q), f64::from(gain));
             let g = (PI * fc / rate).tan();
-            let freqs: Vec<f32> = [
+            let freqs: Vec<f64> = [
                 20.0, 80.0, 300.0, 1_000.0, 4_000.0, 12_000.0, 20_000.0, 23_000.0, 23_900.0,
             ]
             .into_iter()
-            .chain([fc as f32])
+            .chain([fc])
             .collect();
             let mut got = vec![Complex64::new(0.0, 0.0); freqs.len()];
             m.frequency_response(
@@ -184,7 +184,7 @@ fn the_svf_model_is_the_prewarped_bilinear_image_of_the_analog_prototype() {
                 &mut got,
             );
             for (f, got) in freqs.iter().zip(&got) {
-                let w = 2.0 * PI * f64::from(*f) / rate;
+                let w = 2.0 * PI * *f / rate;
                 let z = Complex64::from_polar(1.0, w);
                 let s = (z - 1.0) / (z + 1.0) / g;
                 let want = prototype(ty, s, q, gain);
@@ -205,10 +205,10 @@ fn the_direct_form_is_the_same_response() {
     for ty in TYPES {
         let m = model(ty, 1_500.0, 2.5, 7.0, 44_100.0);
         let b = m.biquad();
-        for f in [30.0f32, 500.0, 1_500.0, 9_000.0, 20_000.0] {
+        for f in [30.0f64, 500.0, 1_500.0, 9_000.0, 20_000.0] {
             let mut g = [Complex64::new(0.0, 0.0)];
             m.frequency_response(0, &[Hz(f)], &mut g);
-            let h = b.response(2.0 * PI * f64::from(f) / 44_100.0);
+            let h = b.response(2.0 * PI * f / 44_100.0);
             assert!(
                 (g[0] - h).norm() <= 1e-9,
                 "{ty:?} at {f}: {} against {h}",
@@ -258,7 +258,7 @@ fn the_radius_is_the_slowest_root_of_the_denominator() {
 fn a_hostile_control_still_gives_a_stable_model() {
     let rate = SampleRate::SR_48K;
     for (f, q, g) in [
-        (f32::NAN, 1.0, 0.0),
+        (f64::NAN, 1.0, 0.0),
         (1_000.0, f32::NAN, 0.0),
         (1_000.0, f32::INFINITY, 6.0),
         (1.0, 1e30, 1e30),

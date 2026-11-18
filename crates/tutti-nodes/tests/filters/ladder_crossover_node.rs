@@ -269,7 +269,7 @@ fn dtft(y: &[f32], hz: f64) -> (f64, f64) {
 fn every_band_plane_of_a_wide_crossover_is_written() {
     let tan = |hz: f64| (core::f64::consts::PI * hz / SR.get()).tan();
     for (channels, splits) in [
-        (3u16, vec![100.0f32, 300.0, 1_000.0, 3_000.0, 9_000.0]),
+        (3u16, vec![100.0f64, 300.0, 1_000.0, 3_000.0, 9_000.0]),
         (8, vec![200.0, 2_000.0]),
     ] {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz(f)).collect();
@@ -292,7 +292,7 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
         assert!(usize::from(channels) * bands > 16);
         assert_eq!(out.len(), usize::from(channels) * bands);
         let mut probes: Vec<f64> = vec![20.0, 20_000.0];
-        probes.extend(splits.iter().map(|&f| f64::from(f)));
+        probes.extend(splits.iter().copied());
         for band in 0..bands {
             for c in 0..usize::from(channels) {
                 let plane = &out[band * usize::from(channels) + c];
@@ -301,7 +301,7 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
                         .iter()
                         .enumerate()
                         .map(|(j, &fc)| {
-                            let x4 = (tan(f) / tan(f64::from(fc))).powi(4);
+                            let x4 = (tan(f) / tan(fc)).powi(4);
                             match j.cmp(&band) {
                                 std::cmp::Ordering::Less => x4 / (1.0 + x4),
                                 std::cmp::Ordering::Equal => 1.0 / (1.0 + x4),
@@ -318,7 +318,7 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
                     );
                 }
                 // The band's own probe: the plane is not silent.
-                let own = f64::from(splits[band.min(splits.len() - 1)]);
+                let own = splits[band.min(splits.len() - 1)];
                 let (re, im) = dtft(plane, own);
                 assert!(re.hypot(im) > 0.2, "band {band} channel {c} is silent");
             }

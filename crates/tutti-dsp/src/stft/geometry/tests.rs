@@ -185,8 +185,7 @@ fn latency_is_exact() {
     assert_eq!(g.latency(), Seconds(2048.0 / 44_100.0));
 }
 
-/// 441 Hz at 44100 Hz on 1000 points is exactly bin 10, which an `f32` bin
-/// width (44.09999847) would put past it; the frequency of bin 10.5 is 463.05 Hz.
+/// 441 Hz at 44100 Hz on 1000 points is exactly bin 10; the frequency of bin 10.5 is 463.05 Hz.
 #[test]
 fn a_frequency_on_a_bin_boundary_is_a_whole_bin() {
     let g = StftGeometry::new(SampleRate::SR_44K1, Samples(1000), Samples(250)).unwrap();
@@ -198,16 +197,12 @@ fn a_frequency_on_a_bin_boundary_is_a_whole_bin() {
     assert_eq!(g.frequency_of(3.0), Hz(140.625));
 }
 
-/// An `f64` edge a hair above a bin boundary lands past it: 441.0000001 Hz at 44.1 kHz over
-/// 1000 points is bin 10.0000000023, whose ceiling is 11. The nearest `f32` to that edge is
-/// 441.0 exactly, which would give 10.
+/// An edge a hair above a bin boundary lands past it: 441.0000001 Hz at 44.1 kHz over
+/// 1000 points is bin 10.0000000023, whose ceiling is 11.
 #[test]
-fn an_f64_edge_just_past_a_boundary_keeps_its_side() {
+fn an_edge_just_past_a_boundary_keeps_its_side() {
     let g = StftGeometry::new(SampleRate::SR_44K1, Samples(1000), Samples(250)).unwrap();
-    let edge = 441.000_000_1;
-    assert_eq!(f64::from(edge as f32), 441.0);
-    assert_eq!(g.bin_of_f64(edge).ceil(), 11.0);
-    assert_eq!(g.bin_of_f64(441.0), g.bin_of(Hz(441.0)));
+    assert_eq!(g.bin_of(Hz(441.000_000_1)).ceil(), 11.0);
 }
 
 /// A frame advances `hop / rate` seconds: 480 / 48000 = 0.01 s.

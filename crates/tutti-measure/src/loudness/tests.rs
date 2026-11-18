@@ -59,7 +59,7 @@ fn silent_render_yields_a_finite_normalization_gain() {
 }
 
 /// Interleaved stereo sine at `amp`, `secs` long.
-fn sine(rate: f64, secs: f64, freq: f32, amp: f32) -> Vec<f32> {
+fn sine(rate: f64, secs: f64, freq: f64, amp: f32) -> Vec<f32> {
     let n = (rate * secs) as usize;
     tutti_fixtures::signal::sine(
         tutti_units::Hz(freq),
@@ -534,7 +534,7 @@ fn bad_settings_and_input_are_errors() {
 // `z = a^2 / 2 * k`, `k` the K-filter's power gain at its frequency, which
 // cancels against a reference channel of weight 1.0 at the same tone.
 
-const TONE_HZ: f32 = 1_000.0;
+const TONE_HZ: f64 = 1_000.0;
 const TONE_AMP: f32 = 0.1;
 
 /// Integrated loudness of `bed` with a tone of `TONE_AMP` on the `index`th

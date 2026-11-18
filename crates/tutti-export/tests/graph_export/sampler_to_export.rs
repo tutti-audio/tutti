@@ -46,7 +46,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 use tutti_buffers::Interleaved;
 use tutti_fixtures::signal::rms_f64;
 
-use std::f32::consts::TAU;
+use std::f64::consts::TAU;
 use std::sync::Arc;
 use tutti_units::Seconds;
 
@@ -63,7 +63,7 @@ use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Cents, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;
-const BASE_HZ: f32 = 440.0;
+const BASE_HZ: f64 = 440.0;
 const TEMPO: f64 = 120.0;
 /// Long enough for the stretch vocoder's analysis window to settle well before
 /// the measurement window opens, at every factor rendered here.
@@ -79,7 +79,7 @@ fn tone(frames: usize) -> Arc<Wave> {
     let mut w = Wave::new(1, SampleRate::of(SR));
     for i in 0..frames {
         w.append(
-            Interleaved::new(&[(TAU * BASE_HZ * i as f32 / SR as f32).sin()], w.layout()).unwrap(),
+            Interleaved::new(&[(TAU * BASE_HZ * i as f64 / SR).sin() as f32], w.layout()).unwrap(),
         )
         .unwrap();
     }
@@ -95,7 +95,7 @@ fn tone(frames: usize) -> Arc<Wave> {
 ///
 /// Prepared at `RenderGraph::prepare`'s `GRAPH_MAX_BLOCK`, what an export
 /// renders at: see the module docs.
-fn voice_graph(stretch: f32, cents: f32) -> (RenderGraph, Arc<OfflineTimeline>) {
+fn voice_graph(stretch: f32, cents: f64) -> (RenderGraph, Arc<OfflineTimeline>) {
     let transport = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         start_beat: Beat(0.0),
         tempo_map: Arc::new(TempoMap::constant(Bpm::of(TEMPO)).expect("a tempo")),
@@ -177,7 +177,7 @@ fn dominant_hz(x: &[f32]) -> f64 {
         .iter()
         .enumerate()
         .map(|(i, &s)| {
-            let w = 0.5 - 0.5 * (TAU as f64 * i as f64 / n as f64).cos();
+            let w = 0.5 - 0.5 * (TAU * i as f64 / n as f64).cos();
             s as f64 * w
         })
         .collect();
@@ -237,7 +237,7 @@ fn window(x: &[f32]) -> &[f32] {
 
 /// Render one case to a WAV and return the measured (frequency, RMS) of the left
 /// channel's settled window.
-fn render_and_measure(dir: &std::path::Path, name: &str, stretch: f32, cents: f32) -> (f64, f64) {
+fn render_and_measure(dir: &std::path::Path, name: &str, stretch: f32, cents: f64) -> (f64, f64) {
     let (graph, clock) = voice_graph(stretch, cents);
     let path = dir.join(format!("{name}.wav"));
     render_to_file(
@@ -266,7 +266,7 @@ fn a_dry_voice_exports_at_its_source_pitch() {
     let (hz, level) = render_and_measure(d.path(), "dry", 1.0, 0.0);
 
     assert!(
-        (hz - BASE_HZ as f64).abs() / BASE_HZ as f64 <= 0.02,
+        (hz - BASE_HZ).abs() / BASE_HZ <= 0.02,
         "an unprocessed voice must export at {BASE_HZ} Hz, measured {hz:.1} Hz. \
          If this fails, the export clock and the voice's timeline disagree and \
          every other case in this file is meaningless."
@@ -287,13 +287,13 @@ fn a_pitched_voice_exports_at_the_shifted_frequency() {
     let d = tempfile::tempdir().unwrap();
 
     for (name, cents, ratio) in [
-        ("up_octave", 1200.0f32, 2.0f64),
+        ("up_octave", 1200.0f64, 2.0f64),
         ("down_octave", -1200.0, 0.5),
         ("up_fifth", 700.0, SEMITONE.powi(7)),
         ("down_fourth", -500.0, SEMITONE.powi(-5)),
     ] {
         let (hz, level) = render_and_measure(d.path(), name, 1.0, cents);
-        let want = BASE_HZ as f64 * ratio;
+        let want = BASE_HZ * ratio;
         let err = (hz - want).abs() / want;
 
         assert!(
@@ -326,7 +326,7 @@ fn a_stretched_voice_exports_without_transposing() {
         ("stretch_double", 2.0),
     ] {
         let (hz, level) = render_and_measure(d.path(), name, factor, 0.0);
-        let err = (hz - BASE_HZ as f64).abs() / BASE_HZ as f64;
+        let err = (hz - BASE_HZ).abs() / BASE_HZ;
 
         assert!(
             err <= 0.02,
@@ -348,11 +348,11 @@ fn stretch_and_pitch_compose_independently_through_the_export() {
     let d = tempfile::tempdir().unwrap();
 
     for (name, stretch, cents, ratio) in [
-        ("stretch_double_up_octave", 2.0f32, 1200.0f32, 2.0f64),
+        ("stretch_double_up_octave", 2.0f32, 1200.0f64, 2.0f64),
         ("stretch_1p5_up_fifth", 1.5, 700.0, SEMITONE.powi(7)),
     ] {
         let (hz, level) = render_and_measure(d.path(), name, stretch, cents);
-        let want = BASE_HZ as f64 * ratio;
+        let want = BASE_HZ * ratio;
         let err = (hz - want).abs() / want;
 
         assert!(
@@ -394,7 +394,7 @@ fn a_sampler_render_survives_integer_quantization() {
 
     let w = window(&left);
     let hz = dominant_hz(w);
-    let want = BASE_HZ as f64 * 2.0;
+    let want = BASE_HZ * 2.0;
     assert!(
         (hz - want).abs() / want <= 0.02,
         "an octave-up voice must still measure ~{want:.1} Hz after 16-bit \

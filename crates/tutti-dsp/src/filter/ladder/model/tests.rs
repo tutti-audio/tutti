@@ -5,7 +5,7 @@ use tutti_buffers::{Float, Mono};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn model(ty: LadderType, fc: f32, res: f32) -> LadderModel {
+fn model(ty: LadderType, fc: f64, res: f32) -> LadderModel {
     LadderModel::new(
         LadderControls {
             ty,
@@ -21,7 +21,7 @@ fn coefficients(freq: Hz, res: Resonance) -> LadderCoefficients<f64> {
     LadderCoefficients::from(&LadderCoeffs::new(freq, res, RATE))
 }
 
-fn at(m: &LadderModel, f: f32) -> Complex64 {
+fn at(m: &LadderModel, f: f64) -> Complex64 {
     let mut g = [Complex64::new(0.0, 0.0)];
     m.frequency_response(0, &[Hz(f)], &mut g);
     g[0]
@@ -86,7 +86,7 @@ fn the_small_signal_response_is_the_models() {
             fft.forward(Mono::new(&ir), &mut bins, &mut scratch);
             let (mut num, mut den) = (0.0f64, 0.0f64);
             for (i, b) in bins.iter().enumerate().step_by(7) {
-                let want = at(&m, (i as f64 * RATE.get() / N as f64) as f32);
+                let want = at(&m, i as f64 * RATE.get() / N as f64);
                 let got = Complex64::new(f64::from(b.re), f64::from(b.im));
                 num += (got - want).norm_sqr();
                 den += want.norm_sqr();
@@ -222,18 +222,18 @@ fn a_full_resonance_is_unstable_at_small_signal() {
 #[test]
 fn the_lp24_model_is_the_prewarped_bilinear_image_of_the_continuous_ladder() {
     for (fc, res) in [
-        (1_000.0f32, 0.0f32),
+        (1_000.0f64, 0.0f32),
         (1_000.0, 0.5),
         (1_000.0, 0.9),
         (4_000.0, 0.9),
     ] {
         let m = model(LadderType::LP24, fc, res);
-        let g = (PI * f64::from(fc) / RATE.get()).tan();
+        let g = (PI * fc / RATE.get()).tan();
         let k = 4.0 * f64::from(res);
         for f in [
-            50.0f32, 500.0, 900.0, 975.0, 1_000.0, 2_000.0, 3_900.0, 9_000.0,
+            50.0f64, 500.0, 900.0, 975.0, 1_000.0, 2_000.0, 3_900.0, 9_000.0,
         ] {
-            let w = 2.0 * PI * f64::from(f) / RATE.get();
+            let w = 2.0 * PI * f / RATE.get();
             let zi = Complex64::from_polar(1.0, -w);
             let s_over_wc = (1.0 - zi) / (1.0 + zi) / g;
             let one = Complex64::new(1.0, 0.0);

@@ -192,7 +192,7 @@ impl Node for Probe {
 fn step(offset: tutti_graph::Offset, param: UnitParam, value: f32) -> Event {
     let ramp = match param {
         UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(value), Samples(0)),
-        _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(value), Samples(0)),
+        _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(f64::from(value)), Samples(0)),
     };
     Event::ramp(offset, ramp)
 }
@@ -342,7 +342,7 @@ impl Node for Ramps {
             }
             let ramp = match param {
                 UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target), Samples(len)),
-                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
+                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(f64::from(target)), Samples(len)),
             };
             let offset = io.offset((at - start) as usize).expect("inside");
             events.push(Event::ramp(offset, ramp));
@@ -1321,9 +1321,9 @@ fn a_segment_hits_its_analytic_values_per_frame() {
     let want = |f: u64| -> f64 {
         match f {
             0..100 => 0.0,
-            100..1300 => analytic(a.1.into(), a.2.into(), a.0, 1.0, a.3 as f64, f - 100),
-            1300..1700 => analytic(b.1.into(), b.2.into(), b.0, 1.0, b.3 as f64, f - 1300),
-            _ => analytic(c.1.into(), c.2.into(), c.0, c.3, c.4, f - 1700),
+            100..1300 => analytic(a.1, a.2, a.0, 1.0, a.3 as f64, f - 100),
+            1300..1700 => analytic(b.1, b.2, b.0, 1.0, b.3 as f64, f - 1300),
+            _ => analytic(c.1, c.2, c.0, c.3, c.4, f - 1700),
         }
     };
     for blocks in segment_schedules(2_000) {
@@ -1430,7 +1430,7 @@ fn a_shaped_ramp_hits_its_analytic_values_per_frame() {
     const TOL: f64 = 1e-5;
     let key = ParamKey::<Hz>::CUTOFF;
     let ramp = |target: f32, len: usize, shape| {
-        ParamRamp::new(key, Hz(target), Samples(len)).with_shape(shape)
+        ParamRamp::new(key, Hz(f64::from(target)), Samples(len)).with_shape(shape)
     };
     let shaped = vec![
         (100, ramp(1.0, 4, Law::PowerIn(Exponent::of(2.0)))),
@@ -2202,8 +2202,8 @@ fn gen_segment() -> impl Strategy<Value = (u64, ParamSegment)> {
                 }
                 _ => ParamSegment::new(
                     ParamKey::<Hz>::CUTOFF,
-                    Hz(from),
-                    Hz(to),
+                    Hz(f64::from(from)),
+                    Hz(f64::from(to)),
                     Samples(len),
                     shape,
                 ),
@@ -2222,7 +2222,7 @@ fn gen_shaped_ramp() -> impl Strategy<Value = (u64, ParamRamp)> {
         |(at, p, target, len, k)| {
             let ramp = match PARAMS[p] {
                 UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target), Samples(len)),
-                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
+                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(f64::from(target)), Samples(len)),
             };
             (at, ramp.with_shape(gen_shape(k)))
         },

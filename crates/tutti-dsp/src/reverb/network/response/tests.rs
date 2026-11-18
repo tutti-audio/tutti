@@ -55,7 +55,7 @@ fn network(stages: Vec<Stage>) -> Network {
 fn at(n: &Network, w: f64) -> Complex64 {
     let hz = w / std::f64::consts::TAU * RATE.get();
     let mut g = [ZERO];
-    n.frequency_response(0, &[Hz(hz as f32)], &mut g);
+    n.frequency_response(0, &[Hz(hz)], &mut g);
     g[0]
 }
 
@@ -446,7 +446,7 @@ fn taps_width_and_wet_follow_the_kernels_fold() {
     let w = 0.7;
     let (l, r) = (delay(w, 3.0) * 0.5, delay(w, 5.0) * -0.25);
     let both = |n: &Network| {
-        let hz = [Hz((w / std::f64::consts::TAU * RATE.get()) as f32)];
+        let hz = [Hz(w / std::f64::consts::TAU * RATE.get())];
         let (mut a, mut b) = ([ZERO], [ZERO]);
         n.frequency_response(0, &hz, &mut a);
         n.frequency_response(1, &hz, &mut b);

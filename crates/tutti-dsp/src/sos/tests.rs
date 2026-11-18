@@ -5,9 +5,9 @@ use crate::TAIL_FLOOR;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const ORDERS: [u8; 9] = [1, 2, 3, 4, 5, 7, 8, 12, 16];
-const FREQS: [f32; 8] = [30.0, 120.0, 400.0, 1000.0, 2500.0, 6000.0, 12000.0, 20000.0];
+const FREQS: [f64; 8] = [30.0, 120.0, 400.0, 1000.0, 2500.0, 6000.0, 12000.0, 20000.0];
 
-fn gain_at(sos: &Sos, f: f32) -> Complex64 {
+fn gain_at(sos: &Sos, f: f64) -> Complex64 {
     let mut h = [Complex64::new(0.0, 0.0)];
     sos.frequency_response(0, &[Hz(f)], &mut h);
     h[0]
@@ -30,13 +30,13 @@ fn butterworth_mag(response: CutResponse, order: u8, fc: f64, f: f64) -> f64 {
 fn the_butterworth_magnitude_is_the_analog_one_at_the_prewarped_frequency() {
     for response in [CutResponse::LowPass, CutResponse::HighPass] {
         for order in ORDERS {
-            for fc in [100.0f32, 1000.0, 8000.0] {
+            for fc in [100.0f64, 1000.0, 8000.0] {
                 let sos = Butterworth::new(response, ButterworthOrder::of(order))
                     .design(Hz(fc), RATE)
                     .unwrap();
                 assert_eq!(sos.sections().len(), usize::from(order).div_ceil(2));
                 for f in FREQS {
-                    let want = butterworth_mag(response, order, f64::from(fc), f64::from(f));
+                    let want = butterworth_mag(response, order, fc, f);
                     let got = gain_at(&sos, f).norm();
                     assert!(
                         (got - want).abs() <= 1e-8 * want + 1e-10,
@@ -101,8 +101,7 @@ fn linkwitz_riley_is_butterworth_squared() {
             .unwrap();
         assert_eq!(lr.sections().len(), 2 * bw.sections().len());
         for f in FREQS {
-            let want =
-                butterworth_mag(CutResponse::LowPass, order / 2, 1000.0, f64::from(f)).powi(2);
+            let want = butterworth_mag(CutResponse::LowPass, order / 2, 1000.0, f).powi(2);
             assert!((gain_at(&lr, f).norm() - want).abs() <= 1e-8 * want + 1e-10);
         }
         assert!(
@@ -138,7 +137,7 @@ fn the_linkwitz_riley_pair_sums_to_an_allpass() {
 /// A cutoff the rate refuses fails at the design, in both families.
 #[test]
 fn a_design_refuses_a_cutoff_the_rate_cannot_take() {
-    for cutoff in [0.0, -5.0, 24000.0, 30000.0, f32::NAN] {
+    for cutoff in [0.0, -5.0, 24000.0, 30000.0, f64::NAN] {
         let order = ButterworthOrder::of(4);
         let b = Butterworth::new(CutResponse::LowPass, order).design(Hz(cutoff), RATE);
         assert!(

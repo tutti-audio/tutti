@@ -79,7 +79,7 @@ const CHANNELS: usize = MidiChannel::COUNT as usize;
 /// per-note sensitivity (RPN 0/7), whose fraction is binary.
 fn bend_sensitivity(value: u32) -> Semitones {
     let data = RegisteredData::from_word(value);
-    Semitones(f32::from(data.msb().get()) + f32::from(data.lsb().get()) / 100.0)
+    Semitones(f64::from(data.msb().get()) + f64::from(data.lsb().get()) / 100.0)
 }
 
 /// What a pitch wheel spans after General MIDI System On: the default
@@ -1073,14 +1073,14 @@ impl Voicing {
             Rpn::CHANNEL_FINE_TUNING => {
                 // 14 bits centred at 0x2000, a semitone over the half range.
                 let fine = Semitones(
-                    f32::from(RegisteredData::from_word(value).fourteen().get()) / 8192.0 - 1.0,
+                    f64::from(RegisteredData::from_word(value).fourteen().get()) / 8192.0 - 1.0,
                 );
                 self.bend(channel, |b| b.fine = fine);
             }
             Rpn::CHANNEL_COARSE_TUNING => {
                 // The MSB, centred at 64, in semitones.
                 let coarse =
-                    Semitones(f32::from(RegisteredData::from_word(value).msb().get()) - 64.0);
+                    Semitones(f64::from(RegisteredData::from_word(value).msb().get()) - 64.0);
                 self.bend(channel, |b| b.coarse = coarse);
             }
             Rpn::MODULATION_DEPTH_RANGE => {
@@ -2671,7 +2671,7 @@ mod tests {
     fn bend(v: u32) -> Voice2 {
         Voice2::PitchBend(BendValue::new(v))
     }
-    fn retunes(c: &[Command]) -> Vec<(u8, f32)> {
+    fn retunes(c: &[Command]) -> Vec<(u8, f64)> {
         c.iter()
             .filter_map(|x| match x {
                 Command::Retune { channel, bend } => Some((channel.get(), bend.0)),
@@ -2713,7 +2713,7 @@ mod tests {
             value: ControlValue::new(semitones << 25 | cents << 18 | low),
         };
         for (semitones, cents, low, want) in [
-            (12, 50, 0, 12.5f32),
+            (12, 50, 0, 12.5f64),
             (12, 64, 0, 12.64),
             (2, 0, 0, 2.0),
             (0, 99, 0x3_FFFF, 0.99),
@@ -2721,7 +2721,7 @@ mod tests {
             let mut s = Sim::new(POLY);
             s.send(1, rpn(semitones, cents, low), &One);
             let up = s.send(1, bend(u32::MAX), &One);
-            assert!((retunes(&up)[0].1 - want).abs() < 1e-5, "{up:?} {want}");
+            assert!((retunes(&up)[0].1 - want).abs() < 1e-12, "{up:?} {want}");
             assert_eq!(
                 s.core.channel_pitch(MidiChannel::of(1)),
                 Semitones(retunes(&up)[0].1)
@@ -3717,7 +3717,7 @@ mod tests {
                     let chu = usize::from(ch);
                     let want = pos[chu] * range[chu];
                     assert!(
-                        (f64::from(got) - want).abs() < 1e-3,
+                        (got - want).abs() < 1e-3,
                         "stream {stream}: channel {ch} retuned to {got}, the model says {want}"
                     );
                 }

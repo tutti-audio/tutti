@@ -160,11 +160,10 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
     }
 
     /// The cutoff at the envelope `env` (0 to 1): the base moved by `depth * env`
-    /// ([`Semitones::to_pitch_ratio`]), held within 1 Hz and 0.998 of the Nyquist. `Semitones`
-    /// stores `f32`: the envelope narrows once, at the design.
+    /// ([`Semitones::to_pitch_ratio`]), held within 1 Hz and 0.998 of the Nyquist.
     #[must_use]
     pub(crate) fn cutoff_at(&self, env: F) -> Hz {
-        let ratio = (self.controls.depth * env.to_f32()).to_pitch_ratio();
+        let ratio = (self.controls.depth * env.to_f64()).to_pitch_ratio();
         (self.controls.base * ratio).clamp(
             Hz(1.0),
             self.rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),

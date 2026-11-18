@@ -623,7 +623,7 @@ mod tests {
 
     // ---- the kernel: segments, corners and the sweep ----------------------------------
 
-    fn controls(rate: f32, depth: f32, feedback: f32) -> PhaserControls {
+    fn controls(rate: f64, depth: f32, feedback: f32) -> PhaserControls {
         PhaserControls {
             rate: Hz(rate),
             depth: Depth::of(depth),
@@ -644,7 +644,7 @@ mod tests {
     /// `depth`, on `range` at `rate` Hz.
     fn exact_coefficient(
         range: SweepRange,
-        rate: f32,
+        rate: f64,
         depth: f32,
         offset: f64,
         steps: usize,
@@ -777,17 +777,17 @@ mod tests {
     }
 
     /// The rate is floored at 0.01 Hz: a rate of -3 Hz, of zero and of 0.005 Hz is the
-    /// 0.01 Hz sweep, whose LFO phase is the `f32` walk of `0.01 / sr` a frame (walked here
+    /// 0.01 Hz sweep, whose LFO phase is the walk of `0.01 / sr` a frame (walked here
     /// per frame, not read off the kernel), and a rate above the floor is not. 4801 frames
     /// solve the segments at 0, 16, .., 4800: 301 of 16 steps.
     #[test]
     fn a_rate_below_the_floor_is_the_floor() {
-        let walked = |hz: f32, steps: usize| {
+        let walked = |hz: f64, steps: usize| {
             let inc = PhaseIncrement::per_sample(Hz(hz), RATE);
             (0..steps).fold(Phase::START, |p, _| p.advance(inc))
         };
         for (rate, effective) in [
-            (-3.0f32, 0.01),
+            (-3.0f64, 0.01),
             (0.0, 0.01),
             (0.005, 0.01),
             (0.01, 0.01),
@@ -852,7 +852,7 @@ mod tests {
     #[test]
     fn a_rate_change_lands_at_its_grid_point_and_the_phase_stays_continuous() {
         let (slow, fast) = (controls(2.0, 1.0, 0.5), controls(9.0, 1.0, 0.5));
-        let inc = |hz: f32| PhaseIncrement::per_sample(Hz(hz), RATE);
+        let inc = |hz: f64| PhaseIncrement::per_sample(Hz(hz), RATE);
         let walk = |first: usize, second: usize| {
             let p = (0..first).fold(Phase::START, |p, _| p.advance(inc(2.0)));
             (0..second).fold(p, |p, _| p.advance(inc(9.0)))

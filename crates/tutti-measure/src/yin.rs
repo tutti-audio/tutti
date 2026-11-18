@@ -125,13 +125,13 @@ impl YinPlan {
     /// Shortest period the range can express: set by the *highest* frequency.
     #[inline]
     pub(crate) fn min_period(&self) -> Samples {
-        Samples((self.sample_rate.get() / self.max_freq.get() as f64) as usize)
+        Samples((self.sample_rate.get() / self.max_freq.get()) as usize)
     }
 
     /// Longest period: set by the *lowest* frequency.
     #[inline]
     pub(crate) fn max_period(&self) -> Samples {
-        Samples((self.sample_rate.get() / self.min_freq.get() as f64) as usize)
+        Samples((self.sample_rate.get() / self.min_freq.get()) as usize)
     }
 
     /// Minimum input length.
@@ -328,7 +328,7 @@ pub fn median_filter(pitches: &[PitchEstimate], window: FrameCount) -> Vec<Pitch
 
     let half = w / 2;
     // One sort buffer for the whole track, refilled per frame.
-    let mut freqs: Vec<f32> = Vec::with_capacity(2 * half + 1);
+    let mut freqs: Vec<f64> = Vec::with_capacity(2 * half + 1);
     (0..pitches.len())
         .map(|i| {
             if i < half || i + half >= pitches.len() {
@@ -336,9 +336,9 @@ pub fn median_filter(pitches: &[PitchEstimate], window: FrameCount) -> Vec<Pitch
             }
             freqs.clear();
             freqs.extend((i - half..=i + half).map(|j| pitches[j].frequency().get()));
-            freqs.sort_unstable_by(f32::total_cmp);
+            freqs.sort_unstable_by(f64::total_cmp);
             // An odd count, so the median is one of the frequencies.
-            let median = median_of_sorted(&freqs).unwrap_or_default() as f32;
+            let median = median_of_sorted(&freqs).unwrap_or_default();
 
             // Keep the neighbour whose frequency the median picked, so the
             // confidence and note travel with it.
@@ -366,22 +366,23 @@ pub fn penalize_jumps(pitches: &[PitchEstimate], jump_penalty: Confidence) -> Ve
 
     // A major third either way, and ln(1.26) as the scale for how far past it
     // a jump reaches.
-    const LOWER: f32 = 0.79;
-    const UPPER: f32 = 1.26;
-    const MAJOR_THIRD_LN: f32 = 0.23;
+    const LOWER: f64 = 0.79;
+    const UPPER: f64 = 1.26;
+    const MAJOR_THIRD_LN: f64 = 0.23;
 
     let mut result = pitches.to_vec();
     for i in 1..result.len() {
         let (Some(current), Some(previous)) = (result[i].pitch(), result[i - 1].pitch()) else {
             continue;
         };
-        let ratio = current.frequency.get() / previous.frequency.get();
+        let ratio = current.frequency / previous.frequency;
         if (LOWER..=UPPER).contains(&ratio) {
             continue;
         }
 
-        let cost = ((libm::logf(ratio).abs() / MAJOR_THIRD_LN) - 1.0).max(0.0);
-        let attenuation = libm::expf(-jump_penalty.get() * cost);
+        let cost = ((libm::log(ratio).abs() / MAJOR_THIRD_LN) - 1.0).max(0.0);
+        // The confidence is an `f32` reading; the attenuation narrows once.
+        let attenuation = libm::exp(-f64::from(jump_penalty.get()) * cost) as f32;
         if let PitchEstimate::Voiced(pitch) = &mut result[i] {
             pitch.confidence = Confidence::new_clamped(pitch.confidence.get() * attenuation);
         }
