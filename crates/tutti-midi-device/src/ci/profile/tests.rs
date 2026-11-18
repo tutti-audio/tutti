@@ -496,10 +496,7 @@ fn profile_specific_data_to_the_broadcast_muid_is_at_most_512_bytes_with_its_del
     let at_limit = CiMessage::ProfileSpecificData(specific(Destination::Broadcast, most).unwrap());
     // F0 and F7 around the payload `encode` gives.
     assert_eq!(at_limit.encode().len() + 2, 512);
-    assert_eq!(
-        specific(Destination::Broadcast, most + 1),
-        Err(BroadcastTooLarge { len: most + 1 })
-    );
+    assert_eq!(specific(Destination::Broadcast, most + 1), None);
     // One device's buffer is the receiver's to have declared (§5.5.3): no cap here.
     let to_one = specific(Destination::Muid(Muid::of(DST)), most + 1).unwrap();
     assert_eq!(to_one.data().as_bytes().len(), most + 1);

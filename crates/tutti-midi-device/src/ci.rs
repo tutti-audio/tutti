@@ -118,14 +118,13 @@ pub use process::{
 };
 pub use process_initiator::{ProcessAction, ProcessError, ProcessInitiator, ReportRequest};
 pub use profile::{
-    BroadcastTooLarge, ChannelsDetail, DetailsData, InquiryTarget, ListTooLong,
-    ManufacturerProfile, NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError,
-    ProfileId, ProfileList, ProfileLists, ProfileOnRequest, ProfileSpecific, ProfileState,
-    ProfileTarget, SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY,
-    SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED,
-    SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY,
-    SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData,
-    StandardProfile,
+    ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
+    NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError, ProfileId, ProfileList,
+    ProfileLists, ProfileOnRequest, ProfileSpecific, ProfileState, ProfileTarget,
+    SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY,
+    SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY,
+    SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
+    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
 };
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
 pub use status::{Ack, Nak};

@@ -476,42 +476,25 @@ pub struct ProfileSpecific {
     data: SpecificData,
 }
 
-/// A Profile Specific Data message to the Broadcast MUID that is larger than
-/// 512 bytes (§7.12).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[error(
-    "a Profile Specific Data message to the Broadcast MUID has at most {} data bytes, not {len}",
-    ProfileSpecific::BROADCAST_MAX_DATA
-)]
-pub struct BroadcastTooLarge {
-    /// The bytes of data given.
-    pub len: usize,
-}
-
 impl ProfileSpecific {
     /// The most bytes of data a message to the Broadcast MUID carries: 512 less
     /// the 24 that are not data (`F0`, the 13-byte preamble, the Profile Id, the
     /// 4-byte length and `F7`).
     pub const BROADCAST_MAX_DATA: usize = 512 - 24;
 
-    /// The message `header` and `profile` send `data` to `to`.
-    ///
-    /// # Errors
-    ///
-    /// [`BroadcastTooLarge`] for data over [`BROADCAST_MAX_DATA`](Self::BROADCAST_MAX_DATA)
-    /// bytes to the Broadcast MUID.
+    /// The message `header` and `profile` send `data` to `to`, or `None` for data
+    /// over [`BROADCAST_MAX_DATA`](Self::BROADCAST_MAX_DATA) bytes to the
+    /// Broadcast MUID.
     pub fn new(
         header: CiHeader,
         to: Destination,
         profile: ProfileId,
         data: SpecificData,
-    ) -> Result<Self, BroadcastTooLarge> {
+    ) -> Option<Self> {
         if to == Destination::Broadcast && data.as_bytes().len() > Self::BROADCAST_MAX_DATA {
-            return Err(BroadcastTooLarge {
-                len: data.as_bytes().len(),
-            });
+            return None;
         }
-        Ok(Self::read(header, to, profile, data))
+        Some(Self::read(header, to, profile, data))
     }
 
     /// The message as it was received, whatever its size.
