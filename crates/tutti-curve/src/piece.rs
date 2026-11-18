@@ -54,7 +54,7 @@ impl Piece {
             to
         } else {
             Self::new(from, to, Law::Linear)
-                .value(param, Normalized::clamped((k + 1) as f64 / n as f64))
+                .value(param, Normalized::progress(Samples(k + 1), Samples(n)))
         }
     }
 }

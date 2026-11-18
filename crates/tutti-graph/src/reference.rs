@@ -2030,7 +2030,10 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
             if into >= r.len {
                 r.target
             } else {
-                let t = Normalized::clamped(into as f64 / r.len as f64);
+                let t = Normalized::progress(
+                    Samples(usize::try_from(into).unwrap_or(usize::MAX)),
+                    Samples(usize::try_from(r.len).unwrap_or(usize::MAX)),
+                );
                 tutti_curve::Piece::new(r.from, r.target, r.shape).value(None, t)
             }
         };

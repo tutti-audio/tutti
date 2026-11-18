@@ -1,4 +1,5 @@
 use super::*;
+use crate::Normalized;
 
 /// What is deliberately *absent* is as load-bearing as what is present.
 /// These must not compile; the ledger is here so a future contributor does
@@ -299,7 +300,7 @@ fn twenty_db_is_ten_and_minus_six_db_is_a_half() {
 #[test]
 fn an_amplitude_lerp_is_its_ends_at_zero_and_one_and_the_mean_at_a_half() {
     let (a, b) = (Amplitude(0.25), Amplitude(1.75));
-    assert_eq!(a.lerp(b, 0.0), a);
-    assert_eq!(a.lerp(b, 1.0), b);
-    assert_eq!(a.lerp(b, 0.5), Amplitude(1.0));
+    assert_eq!(a.lerp(b, Normalized::of(0.0)), a);
+    assert_eq!(a.lerp(b, Normalized::of(1.0)), b);
+    assert_eq!(a.lerp(b, Normalized::of(0.5)), Amplitude(1.0));
 }

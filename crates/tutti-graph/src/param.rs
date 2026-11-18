@@ -666,7 +666,10 @@ impl Ramp {
                 } else {
                     // `done < len`, so `t` is in `(0, 1)`, where
                     // `Linear` evaluates to `t` itself.
-                    let t = Normalized::clamped(f64::from(self.done) / f64::from(self.len));
+                    let t = Normalized::progress(
+                        Samples(self.done as usize),
+                        Samples(self.len as usize),
+                    );
                     self.at(t)
                 };
             }
