@@ -378,8 +378,8 @@ mod tests {
         assert!((out[1] + 1.0).abs() < 1e-4);
     }
 
-    /// An `f64` kernel clamps at the `f64` amplitude of its ceiling: over `-13 dB` a signal of
-    /// more than 24 bits leaves at `10^(-13 / 20)` to 1e-7 (the ceiling is an `f32` `Amplitude`, widened).
+    /// An `f64` kernel clamps at the ceiling its control holds, widened (`Db` stores `f32`): over
+    /// `-13 dB` a signal of more than 24 bits leaves at it, to 1e-15.
     #[test]
     fn an_f64_kernel_clamps_a_wide_signal_at_the_f64_ceiling() {
         use tutti_fixtures::signal::{assert_close_f64, wide_signal};
@@ -390,6 +390,10 @@ mod tests {
             ceiling: Db::new(-13.0),
         };
         let y = drive_kernel(&mut k, &[(0, controls)], &[x]);
-        assert_close_f64(&y[0], &vec![10f64.powf(-13.0 / 20.0); 128], 1e-7);
+        assert_close_f64(
+            &y[0],
+            &vec![f64::from(Db::new(-13.0).to_amplitude().get()); 128],
+            1e-15,
+        );
     }
 }
