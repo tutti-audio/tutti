@@ -27,6 +27,8 @@ use tutti_modulation::Curve;
 use tutti_units::{Beat, BeatDuration, Unit};
 
 /// A unit a [`Recorder`] records: its raw float is a width a trajectory accepts.
+///
+/// The transitional width seam: deleted with the last `f32` unit, like `CurveRaw`.
 pub trait Automatable: Unit<Raw: CurveRaw> + Send + Sync {}
 
 impl<U: Unit<Raw: CurveRaw> + Send + Sync> Automatable for U {}
