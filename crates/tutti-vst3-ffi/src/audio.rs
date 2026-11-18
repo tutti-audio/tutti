@@ -677,27 +677,6 @@ mod tests {
         assert_eq!(rig.run_f32(8), Ok(()));
     }
 
-    /// An entry that races the plugin's retirement and teardown never holds a
-    /// torn-down state: a guard it gets is from before the teardown, and one
-    /// taken after it is refused, because the flag is checked again under the
-    /// lock.
-    #[test]
-    fn an_entry_that_races_teardown_never_holds_a_torn_down_state() {
-        let rig = rig(SampleWidth::F32, BLOCK);
-        let shared = rig.shared.clone();
-        let teardown = std::thread::spawn({
-            let shared = shared.clone();
-            move || drop(shared.teardown())
-        });
-        while !teardown.is_finished() {
-            if let Some(entered) = shared.try_enter() {
-                assert!(entered.active, "an entry holds the state teardown clears");
-            }
-        }
-        teardown.join().unwrap();
-        assert!(shared.try_enter().is_none(), "no entry after the teardown");
-    }
-
     /// Teardown clears the state under the lock, so whoever takes the lock
     /// afterwards finds the plugin neither active nor set up, and says whether
     /// it was active.

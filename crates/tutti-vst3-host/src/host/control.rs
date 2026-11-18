@@ -27,7 +27,10 @@ pub(crate) fn plugin_error(error: Vst3Error) -> PluginError {
     match error {
         Vst3Error::LoadFailed { stage, cause, .. } => PluginError::Load {
             stage,
-            reason: cause.to_string(),
+            reason: match std::error::Error::source(&cause) {
+                Some(source) => format!("{cause}: {source}"),
+                None => cause.to_string(),
+            },
         },
         Vst3Error::PluginError { stage, source } => PluginError::Load {
             stage,

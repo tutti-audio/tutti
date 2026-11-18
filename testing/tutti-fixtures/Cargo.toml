@@ -50,6 +50,9 @@ tutti-graph = { path = "../../crates/tutti-graph", optional = true }
 # invocation; its `links` key hands the bundle directory to `build.rs`.
 tutti-shared-plugin-vst3-cpp = { path = "../tutti-shared-plugin-vst3-cpp", optional = true }
 
+# `vst3-sdk`: the SDK structs `sdk_zeroed` builds.
+vst3 = { version = "0.3", optional = true }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # `au`: the shared plugin's Audio Unit, registered in this process.
 tutti-shared-plugin = { path = "../tutti-shared-plugin", optional = true }
@@ -64,6 +67,8 @@ au = ["plugin", "dep:tutti-shared-plugin", "dep:coreaudio-sys"]
 plugin = ["dep:tutti-plugin-types", "dep:raw-window-handle", "dep:tutti-transport"]
 # `vst3_cpp_module` and `bundle_of`: where the C++ twin is.
 vst3-cpp = ["plugin", "dep:tutti-shared-plugin-vst3-cpp"]
+# `sdk_zeroed`: an all-zero VST3 SDK record, for a test to fill in.
+vst3-sdk = ["dep:vst3"]
 
 [dev-dependencies]
 # The lock test's private directory.

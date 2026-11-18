@@ -77,11 +77,10 @@ fn block(stager: &mut Stager, packets: &[Ump]) -> Vec<Seen> {
         }
     ));
     let mut seen = Vec::new();
-    // SAFETY: all-zero bytes is a valid value of this plain-data SDK struct, and
-    // `getEvent` fills it.
+    // SAFETY: `getEvent` is called on a live list the test owns, with a valid out-parameter.
     unsafe {
         for i in 0..list.getEventCount() {
-            let mut e: Event = std::mem::zeroed();
+            let mut e: Event = tutti_fixtures::sdk_zeroed();
             assert_eq!(list.getEvent(i, &mut e), kResultOk);
             let bus = e.busIndex;
             seen.push(match e.r#type {

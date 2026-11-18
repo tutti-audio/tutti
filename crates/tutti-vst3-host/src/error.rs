@@ -14,16 +14,16 @@ use tutti_plugin_types::StateFrameError;
 pub type Result<T> = std::result::Result<T, Vst3Error>;
 
 /// Why a load failed before the plugin could be instantiated.
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum LoadCause {
     /// The path does not exist.
     #[error("Plugin file not found")]
     FileNotFound,
-    /// The module could not be opened or its factory resolved. The text is the
-    /// OS loader's or the module entry's own message, which has no structure.
-    #[error("{0}")]
-    Module(String),
+    /// The module could not be opened or its factory resolved; the source names the
+    /// step, the path and the OS loader's error.
+    #[error("the module could not be loaded")]
+    Module(#[source] tutti_vst3_ffi::LoadError),
     /// The factory exports no classes.
     #[error("VST3 factory contains no classes")]
     NoClasses,
@@ -60,7 +60,7 @@ pub enum Vst3Error {
     },
 
     /// A plugin call returned a non-OK `tresult` (`pluginterfaces/base/funknown.h`).
-    #[error("Plugin error at {stage}: {source}")]
+    #[error("Plugin error at {stage}")]
     PluginError {
         /// Which step the failing call belonged to.
         stage: LoadStage,

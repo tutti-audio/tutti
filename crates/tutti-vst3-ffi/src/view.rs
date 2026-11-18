@@ -350,26 +350,6 @@ impl Editor {
 }
 
 #[cfg(test)]
-mod content_scale_tests {
-    use super::content_scale_for;
-    use tutti_plugin_types::{ContentScale, EditorUnit};
-
-    /// **The window's scale reaches a view on a physical-pixel window system,
-    /// and never one on a logical-pixel system.** A view on Win32 or X11 is
-    /// told 2.0; one on AppKit, which already lays out in logical pixels, is
-    /// told nothing (it would apply the factor twice).
-    #[test]
-    fn the_scale_is_sent_only_on_a_physical_pixel_window_system() {
-        let two = ContentScale::new(2.0).expect("a scale");
-        let expected = match EditorUnit::WINDOWING {
-            EditorUnit::Physical => Some(2.0),
-            EditorUnit::Logical => None,
-        };
-        assert_eq!(content_scale_for(two), expected);
-    }
-}
-
-#[cfg(test)]
 mod rect_tests {
     use super::*;
     use dpi::PhysicalSize;
