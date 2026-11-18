@@ -36,8 +36,14 @@ mod verbs;
 pub use batch::{IntoAssign, IntoRead};
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
-pub use slot::{ClickTargets, ClickVolumeTarget, MeterTarget, SettingTarget, TempoTarget};
-pub(crate) use slot::{ClickVolumeSlot, MeterSlot, SettingSlot, SlotCell, SlotId, TempoSlot};
+#[cfg(feature = "midi-hardware")]
+pub use slot::MidiPolicyTarget;
+#[cfg(feature = "midi")]
+pub use slot::OutputLatencyTarget;
+pub(crate) use slot::{Cell, ClickVolumeSlot, MeterSlot, SettingSlot, SlotCell, SlotId, TempoSlot};
+pub use slot::{
+    ClickTargets, ClickVolumeTarget, MeterTarget, OutputPolicyTarget, SettingTarget, TempoTarget,
+};
 pub use state::Knobs;
 pub(crate) use state::{ValueState, ValueTable};
 pub(crate) use target::target_builders;

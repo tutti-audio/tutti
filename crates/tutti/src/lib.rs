@@ -175,6 +175,10 @@ pub use tutti_graph::NodeKey;
 pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
+#[cfg(all(feature = "session", feature = "midi-hardware"))]
+pub use tutti_session::MidiPolicyTarget;
+#[cfg(all(feature = "session", feature = "midi"))]
+pub use tutti_session::OutputLatencyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -189,8 +193,8 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
-    IntoRead, Knobs, MeterTarget, Modify, Moved, ParamTarget, ScalarTarget, SetRefusal,
-    SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    IntoRead, Knobs, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget, ScalarTarget,
+    SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -324,7 +328,7 @@ pub mod types {
         SampleSpan, SampleSpanOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
         StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
-    pub use tutti_units::{Phase, Real, Resyncs};
+    pub use tutti_units::{Phase, Quantity, Real, Resyncs};
 }
 
 /// The project's tempo (`tutti-tempo`): `TempoMap`, the points and builder it is
@@ -404,11 +408,10 @@ pub mod session {
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, EdgeGainError,
         Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputPolicyHandle, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError, Reclaimer,
-        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted,
-        Wire, root_width,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError,
+        Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError, Reclaimer, Reclaims,
+        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
+        RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_transport::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -784,8 +787,8 @@ pub mod midi {
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
         ChannelProfile, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy, MidiPolicyError,
-        MidiPolicyHandle, MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer,
-        ReportPeer, RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
+        MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer, ReportPeer,
+        RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
     };
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.

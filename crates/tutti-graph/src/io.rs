@@ -81,7 +81,7 @@ pub struct Io<'a, F: Float = f32> {
     events_out: &'a mut [EventWriter<'a>],
     /// Per declared param port, what it reads this block; a port past the
     /// end reads its base.
-    params: &'a [ParamInput<'a>],
+    params: &'a [ParamInput<'a, F>],
     /// Where [`count_lost`](Self::count_lost) adds; `None` where nothing
     /// counts (a hand-built `Io`).
     lost: Option<&'a std::cell::Cell<u32>>,
@@ -351,7 +351,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// These buffers, with `params` as the declared params' inputs (every
     /// port past `params`' end reads its base).
     #[inline]
-    pub(crate) fn with_params(mut self, params: &'a [ParamInput<'a>]) -> Self {
+    pub(crate) fn with_params(mut self, params: &'a [ParamInput<'a, F>]) -> Self {
         self.params = params;
         self
     }
@@ -687,7 +687,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// frame, base and modulation fused and clamped by the graph. A param
     /// nothing is connected to is always `Base`, never 0.
     #[inline]
-    pub fn param(&self, k: usize) -> ParamInput<'a> {
+    pub fn param(&self, k: usize) -> ParamInput<'a, F> {
         self.params.get(k).copied().unwrap_or(ParamInput::Base)
     }
 

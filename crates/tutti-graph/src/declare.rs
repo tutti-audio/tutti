@@ -290,7 +290,7 @@ pub fn input<'a, F: Float>(
     io: &Io<'a, F>,
     p: u16,
     index: u8,
-) -> ParamInput<'a> {
+) -> ParamInput<'a, F> {
     let addr = UnitAddr::try_from(p | u16::from(index) << 8)
         .expect("`HasParam<P>` is declared only for a `UnitParam` kind");
     let (mut next, mut found) = (0, None);
@@ -453,7 +453,7 @@ pub fn input<'a, F: Float>(
 /// # Reading a driven param
 ///
 /// `process` reads a param through the declaration, never by a port index:
-/// `declared_param::<{ UnitParam::Cutoff as u16 }>(&io)` (`declared_param_at`
+/// `declared_param::<{ UnitParam::Cutoff as u16 }, _>(&io)` (`declared_param_at`
 /// with the group's `index` for a repeated kind) is the [`ParamInput`] of the
 /// port whose row names that kind, so reordering or inserting a row moves the
 /// read with it. A kind the node does not declare does not compile. It walks
@@ -483,7 +483,7 @@ pub fn input<'a, F: Float>(
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
 ///         let level = self
-///             .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+///             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
 ///             .last_frame()
 ///             .unwrap_or_else(|| self.level.load().get() as f32);
 ///         io.output(0).fill(level);
@@ -583,10 +583,10 @@ macro_rules! declare_params {
             /// `UnitParam` as `u16`), through the port its row declares.
             /// Does not compile for a kind the node does not declare.
             #[allow(dead_code)]
-            fn declared_param<'a, const P: u16>(
+            fn declared_param<'a, const P: u16, __LaneF: $crate::__private::Float>(
                 &self,
-                io: &$crate::Io<'a, impl $crate::__private::Float>,
-            ) -> $crate::ParamInput<'a>
+                io: &$crate::Io<'a, __LaneF>,
+            ) -> $crate::ParamInput<'a, __LaneF>
             where
                 Self: $crate::HasParam<P>,
             {
@@ -596,11 +596,11 @@ macro_rules! declare_params {
             /// [`declared_param`](Self::declared_param) for the group row
             /// `index` of kind `P` (a band's threshold).
             #[allow(dead_code)]
-            fn declared_param_at<'a, const P: u16>(
+            fn declared_param_at<'a, const P: u16, __LaneF: $crate::__private::Float>(
                 &self,
-                io: &$crate::Io<'a, impl $crate::__private::Float>,
+                io: &$crate::Io<'a, __LaneF>,
                 index: u8,
-            ) -> $crate::ParamInput<'a>
+            ) -> $crate::ParamInput<'a, __LaneF>
             where
                 Self: $crate::HasParams<P>,
             {

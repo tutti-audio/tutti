@@ -8,7 +8,7 @@
 
 use tutti_curve::Law;
 
-use tutti_units::{Depth, Normalized, Phase};
+use tutti_units::{Depth, Phase};
 
 // =========================================================================
 // Value vocabulary
@@ -153,7 +153,7 @@ impl core::fmt::Display for LfoShape {
 /// magnitude; `Unipolar` remaps `[-1, 1] → [0, 1]` (the source only pushes one
 /// direction from base) then curves. `depth` scales the result.
 ///
-/// The curve is `curve.eval(u)` on the normalized `u`, so
+/// The curve is `curve.eval_in(u)` on the normalized `u`, computed in `f32`, so
 /// every [`Law`] shapes exactly as the editor draws it. Every law runs from 0
 /// at no input to 1 at full input, and none leaves `[0, 1]` on the way, so the
 /// offset never exceeds `depth`. `Hold` is 0 until the input is exactly full.
@@ -168,22 +168,15 @@ pub fn shape(x: f32, depth: Depth, polarity: Polarity, curve: Law) -> f32 {
     match polarity {
         // Bipolar: preserve sign, curve the magnitude, restore sign.
         Polarity::Bipolar => {
-            let mag = eval_lane(curve, x.abs());
+            let mag = curve.eval_in(x.abs());
             depth * mag * x.signum()
         }
         // Unipolar: remap [-1, 1] → [0, 1], then curve.
         Polarity::Unipolar => {
             let u = (x.clamp(-1.0, 1.0) + 1.0) * 0.5;
-            depth * eval_lane(curve, u)
+            depth * curve.eval_in(u)
         }
     }
-}
-
-/// The law at an `f32` lane sample `x` (pinned onto `0..=1`, a NaN is 0),
-/// narrowed once to the `f32` lane.
-#[inline]
-fn eval_lane(curve: Law, x: f32) -> f32 {
-    curve.eval(Normalized::clamped(f64::from(x))).get() as f32
 }
 
 #[cfg(test)]

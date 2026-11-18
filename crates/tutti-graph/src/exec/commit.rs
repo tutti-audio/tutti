@@ -125,7 +125,7 @@ pub(super) struct Incoming<F: Float = f32> {
     pub(super) node: NodeBox<F>,
     /// The crossfade it arrives with, over the unit at its key.
     pub(super) fade: Option<Box<Crossfade<F>>>,
-    pub(super) params: ParamState,
+    pub(super) params: ParamState<F>,
     pub(super) mode: ModeState<F>,
     /// The held-key tables of a unit placed now, sized for its shape.
     pub(super) keys: Keys,
@@ -166,7 +166,7 @@ pub(crate) struct Commit<F: Float = f32> {
     /// control side: a retired unit's, and one built for an incoming unit
     /// that crossfades in over one already at its key, which keeps its own
     /// (the port's modulation runs on across a replace).
-    pub(super) spare_params: Vec<ParamState>,
+    pub(super) spare_params: Vec<ParamState<F>>,
     /// Mode state the executor let go of (a retired unit's, an unused
     /// incoming one's), freed on the control side.
     pub(super) spare_modes: Vec<ModeState<F>>,
@@ -219,7 +219,7 @@ impl<F: Float> Commit<F> {
         plan: Arc<Plan>,
         delta: Delta,
         mut units: BTreeMap<NodeKey, Box<dyn Node<F>>>,
-        mut params: impl FnMut(NodeKey, usize, usize) -> ParamState,
+        mut params: impl FnMut(NodeKey, usize, usize) -> ParamState<F>,
         mut modes: impl FnMut(NodeKey) -> ModeState<F>,
         mut wakes: impl FnMut(NodeKey) -> Wake,
         opened: Opened<F>,

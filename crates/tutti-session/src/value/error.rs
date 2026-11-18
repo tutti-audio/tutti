@@ -46,7 +46,7 @@ pub enum ValueErrorKind {
 }
 
 /// Why a target refused a value ([`ValueErrorKind::Refused`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum SetRefusal {
     /// A float target was given a NaN or an infinity.
@@ -60,4 +60,11 @@ pub enum SetRefusal {
     /// write would be overwritten at the next message.
     #[error("a live tempo is followed")]
     Following,
+    /// The output policy has no place on the root and the device.
+    #[error(transparent)]
+    OutputPolicy(#[from] crate::OutputPolicyError),
+    /// The MIDI policy has no place on the session's MIDI layer.
+    #[cfg(feature = "midi-hardware")]
+    #[error(transparent)]
+    MidiPolicy(#[from] crate::MidiPolicyError),
 }

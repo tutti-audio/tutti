@@ -258,7 +258,7 @@ impl Node for LfoNode {
         // leave the phase NaN for good.
         let depth_cell = self.depth.load();
         let depth_lane = self
-            .declared_param::<{ UnitParam::Depth as u16 }>(&io)
+            .declared_param::<{ UnitParam::Depth as u16 }, _>(&io)
             .frames();
         let depth_at = |i: usize| {
             depth_lane
@@ -272,7 +272,7 @@ impl Node for LfoNode {
             LfoClock::Free => {
                 let rate_cell = self.rate.load().get();
                 let rate_lane = self
-                    .declared_param::<{ UnitParam::Rate as u16 }>(&io)
+                    .declared_param::<{ UnitParam::Rate as u16 }, _>(&io)
                     .frames();
                 // The step is accumulated in `f64` for as long as the node runs: an
                 // `f32`-rounded step drifts the cycle index off the frame.

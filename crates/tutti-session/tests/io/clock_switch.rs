@@ -382,7 +382,8 @@ fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
         map: OutputMap::channels([4, 5]).unwrap(),
         ..OutputPolicy::default()
     };
-    s.policy::<OutputPolicy>().set(policy.clone()).unwrap();
+    s.set(s.policy::<OutputPolicy>().to(policy.clone()))
+        .unwrap();
     play(&s);
     let before = wait_past(&mut s, 0);
 
@@ -401,7 +402,7 @@ fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
     assert!(!card.is_open(), "the card never opened");
     let mut s = err.into_session();
     assert_eq!(
-        s.policy::<OutputPolicy>().get().map,
+        s.get(s.policy::<OutputPolicy>()).unwrap().map,
         policy.map,
         "never reset to the identity"
     );
@@ -409,12 +410,15 @@ fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
 
     let mut fits = policy;
     fits.map = OutputMap::channels([2, 3]).unwrap();
-    s.policy::<OutputPolicy>().set(fits.clone()).unwrap();
+    s.set(s.policy::<OutputPolicy>().to(fits.clone())).unwrap();
     let (driver, _card) = ManualStreamDriver::new();
-    let mut live = s
+    let live = s
         .into_device_on(four, driver)
         .unwrap_or_else(|e| panic!("outputs 3 and 4 are there: {}", e.error()));
-    assert_eq!(live.policy::<OutputPolicy>().get().map, fits.map);
+    assert_eq!(
+        live.get(live.policy::<OutputPolicy>()).unwrap().map,
+        fits.map
+    );
     assert_eq!(live.output_device().unwrap().topology.width().count(), 4);
 }
 

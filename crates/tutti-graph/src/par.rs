@@ -291,7 +291,7 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) taps: &'b mut [Option<crate::tap::TapWriter<F>>],
     pub(crate) event_taps: &'b mut [Option<crate::event_tap::EventTapWriter>],
     pub(crate) meters: &'b mut [Option<crate::meter::MeterWriter>],
-    pub(crate) lanes: &'b mut [SumLane],
+    pub(crate) lanes: &'b mut [SumLane<F>],
     pub(crate) inject: &'b mut [Inject],
     pub(crate) has_inject: &'b mut [bool],
     pub(crate) has_due: &'b mut [bool],
@@ -328,7 +328,7 @@ struct Shared<'s, 'o, F: Float = f32> {
     /// Atomics only, one writer a lane by construction: shared, no claim.
     meters: SplitMut<'s, Option<crate::meter::MeterWriter>>,
     /// A weighted lane belongs to one op, which claims its run.
-    lanes: SplitMut<'s, SumLane>,
+    lanes: SplitMut<'s, SumLane<F>>,
     inject: SplitMut<'s, Inject>,
     inject_spans: &'s [Span],
     has_inject: SplitMut<'s, bool>,

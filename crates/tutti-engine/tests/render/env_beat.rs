@@ -298,11 +298,13 @@ fn the_env_walk_is_the_env_beat() {
 
 // ---- the metronome ---------------------------------------------------------
 
-/// Frames on which the click starts: silent, then sounding.
+/// Frames on which the click starts: two silent frames (or the start), then sounding.
+/// One zero frame is not silence: a click's sine reads an exact zero where its phase
+/// wraps to a whole cycle.
 fn onsets(stereo: &[f32]) -> Vec<usize> {
     let left: Vec<f32> = stereo.iter().step_by(2).copied().collect();
     (1..left.len())
-        .filter(|&f| left[f] != 0.0 && left[f - 1] == 0.0)
+        .filter(|&f| left[f] != 0.0 && left[f.saturating_sub(2)..f].iter().all(|&x| x == 0.0))
         .collect()
 }
 

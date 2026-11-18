@@ -86,11 +86,13 @@ fn render_click(frames: usize) -> Vec<f32> {
     run(&s, frames, 512, true)
 }
 
-/// Frames on which the left channel starts sounding.
+/// Frames on which the left channel starts sounding after two silent frames (or the
+/// start). One zero frame is not silence: a click's sine reads an exact zero where its
+/// phase wraps to a whole cycle.
 fn onsets(stereo: &[f32]) -> Vec<usize> {
     let left: Vec<f32> = stereo.iter().step_by(2).copied().collect();
     (1..left.len())
-        .filter(|&f| left[f] != 0.0 && left[f - 1] == 0.0)
+        .filter(|&f| left[f] != 0.0 && left[f.saturating_sub(2)..f].iter().all(|&x| x == 0.0))
         .chain((left.first().is_some_and(|&x| x != 0.0)).then_some(0))
         .collect()
 }

@@ -255,7 +255,7 @@
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
 //!         let level = self
-//!             .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+//!             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
 //!             .last_frame()
 //!             .unwrap_or_else(|| self.level.load().get() as f32);
 //!         io.channel(0).map(|x| x * level);
@@ -533,8 +533,15 @@
 //! that format. [`Editor::new`] and [`GraphBuilder::new`] build the `f32`
 //! graph; [`Editor::with_format`] and [`GraphBuilder::with_format`] build one
 //! in another format, whose nodes are `impl<F: Float> Node<F>` (a node that
-//! reads its [`ParamNode`] cells is `f32`). `f64` also belongs inside `f32`
-//! nodes (filter state, oscillator phase — a node converts at its edge), in
+//! reads its [`ParamNode`] cells is `f32`).
+//!
+//! A control value (a param's base, an edge weight, a mix, a fade's gain
+//! law) is a quantity; the graph renders it into a per-sample lane in `F`
+//! once per block or segment ([`control_in`], [`ramp_in`], [`fade_gains`],
+//! [`fade_in`]), so a param lane ([`ParamInput::frames`]), an edge weight's
+//! ramp, a mix and a crossfade all run in the graph's float. A meter
+//! accumulates a block's figures in `F` over chunks of at most 256 frames, each
+//! folded into `f64`, and reads them as `f64`. `f64` also belongs in
 //! time ([`Env::frame`] is a `u64`
 //! [`Frame`](tutti_units::Frame) and the transport position a `f64`
 //! [`Beat`](tutti_units::Beat)), and at the plugin boundary (a plugin that
@@ -601,6 +608,7 @@ mod inlet;
 mod instrument;
 mod io;
 mod kernels;
+mod lane;
 mod latency;
 mod loss;
 mod meter;
@@ -652,6 +660,7 @@ pub use fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
+pub use lane::{control_in, fade_gains, fade_in, ramp_in};
 pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.

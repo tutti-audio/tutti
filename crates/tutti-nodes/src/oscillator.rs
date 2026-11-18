@@ -168,10 +168,10 @@ impl Node for OscillatorNode {
         };
         let size = io.frames();
         let frequency = self
-            .declared_param::<{ UnitParam::Frequency as u16 }>(&io)
+            .declared_param::<{ UnitParam::Frequency as u16 }, _>(&io)
             .frames();
         let level = self
-            .declared_param::<{ UnitParam::Volume as u16 }>(&io)
+            .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .frames();
         let frequency_cell = self.frequency.load().get();
         // The output is an `f32` lane: the level narrows once per block and the product runs in `f32`.

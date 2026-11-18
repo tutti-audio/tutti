@@ -583,9 +583,7 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// Why `root_request` is not in force, if it is not.
     pub(crate) root_refusal: Option<tutti_graph::RootError>,
     /// Where the mix lands, as set ([`Session::policy`]).
-    pub(crate) output_policy: crate::OutputPolicy,
-    /// Whether `output_policy` was set and not yet applied.
-    pub(crate) output_policy_staged: bool,
+    pub(crate) output_policy: Arc<crate::value::Cell<crate::OutputPolicy>>,
     pub(crate) click: Option<NodeKey>,
     /// The per-channel pre-roll of the plan sent last, for sources outside
     /// the graph (a disk stream), republished with every plan.
@@ -610,7 +608,7 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
     /// Who the session is on the wire, as set ([`Session::policy`]).
     #[cfg(feature = "midi-hardware")]
-    pub(crate) midi_policy: crate::MidiPolicy,
+    pub(crate) midi_policy: Arc<crate::value::Cell<crate::MidiPolicy>>,
     #[cfg(feature = "sampler")]
     pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::Running, C::Float>>,
     /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
@@ -823,7 +821,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             #[cfg(feature = "plugin")]
             pooled_swaps,
             output_policy,
-            output_policy_staged,
             transport,
             load,
             heard,
@@ -889,7 +886,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 #[cfg(feature = "plugin")]
                 pooled_swaps,
                 output_policy,
-                output_policy_staged,
                 transport,
                 load,
                 heard,
@@ -978,6 +974,21 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             SlotId::ClickVolume,
             Arc::new(ClickVolumeSlot(Arc::clone(&click)))
                 as crate::value::SlotCell<tutti_units::Amplitude>,
+        );
+        table.provide(
+            SlotId::OutputPolicy,
+            Arc::clone(&self.output_policy) as crate::value::SlotCell<crate::OutputPolicy>,
+        );
+        #[cfg(feature = "midi-hardware")]
+        table.provide(
+            SlotId::MidiPolicy,
+            Arc::clone(&self.midi_policy) as crate::value::SlotCell<crate::MidiPolicy>,
+        );
+        #[cfg(feature = "midi")]
+        table.provide(
+            SlotId::OutputLatency,
+            self.midi_state.output_latency_cell()
+                as crate::value::SlotCell<tutti_midi_runtime::OutputLatency>,
         );
         table.provide(
             SlotId::ClickMode,

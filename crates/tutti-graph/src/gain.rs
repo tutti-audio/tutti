@@ -30,7 +30,7 @@
 //! read, not the last sample of its ramp), kept in the lane across commits
 //! that keep the edge. A lane's first block starts at its value, and a
 //! static weight (`w_prev == w_new`) skips the ramp. The ramp is a linear
-//! [`Piece`], and its last frame is exactly `w_new`. It is evaluated
+//! `Piece`, and its last frame is exactly `w_new`. It is evaluated
 //! per sample from that expression: no per-lane scratch is needed, so
 //! nothing allocates on the audio thread.
 //!
@@ -54,12 +54,13 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use tutti_buffers::Float;
-use tutti_curve::{FadeLaw, Piece};
+use tutti_curve::FadeLaw;
 
 use tutti_types::{AtomicF32, ParamCell};
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
 use crate::event::Event;
+use crate::lane::{control_in, fade_in, ramp_in};
 use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
 use crate::spec::EventOut;
 
@@ -285,18 +286,18 @@ impl GainCell {
 
 /// What one addend is multiplied by in one block.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Weight<'a> {
+pub(crate) enum Weight<'a, F: Float> {
     /// Exactly `1.0`, static: the plain add, no multiply.
     Unit,
     /// A static weight other than `1.0`: `w * a`, no ramp.
-    Static(Amplitude),
+    Static(F),
     /// Moving across the block from the weight the previous block was given
     /// to this one's.
     Ramp {
         /// The previous block's weight.
-        from: Amplitude,
+        from: F,
         /// This block's.
-        to: Amplitude,
+        to: F,
     },
     /// A declick fade (`EdgeFade`) under way: from `start` to `goal` over
     /// `len` frames, `k` of them done before this block. Frame `i` of the
@@ -305,9 +306,9 @@ pub(crate) enum Weight<'a> {
     /// on.
     Fade {
         /// The weight the fade left from.
-        start: Amplitude,
+        start: F,
         /// The weight it arrives at.
-        goal: Amplitude,
+        goal: F,
         /// Fade frames before this block.
         k: usize,
         /// The fade's length, [`DECLICK`](crate::DECLICK) in frames.
@@ -315,7 +316,7 @@ pub(crate) enum Weight<'a> {
     },
     /// A driven lane: the weight at each frame, already clamped to the
     /// lane's range (the param port's step).
-    Frames(&'a [f32]),
+    Frames(&'a [F]),
 }
 
 /// A weighted lane's state, kept in the executor by [`EdgeId`](crate::EdgeId)
@@ -325,45 +326,56 @@ pub(crate) enum Weight<'a> {
 /// result of a chain) has a lane with no cell: weight [`Weight::Unit`] and
 /// no state.
 #[derive(Debug)]
-pub(crate) struct SumLane {
+pub(crate) struct SumLane<F: Float> {
     /// The live controls; `None` for a plain addend.
     cell: Option<GainCell>,
     /// The base as this block's snapshot read it.
-    target: Amplitude,
+    target: F,
     /// The weight the previous block was given; `None` before the lane's
     /// first block (which has no ramp).
-    prev: Option<Amplitude>,
+    prev: Option<F>,
     /// The param port's state, for a lane a source drives (or one still
     /// fading to its base after the source went): sized with the plan.
-    drive: Option<ParamState>,
+    drive: Option<ParamState<F>>,
     /// The fade kind as this block's snapshot read it.
     want: EdgeFade,
     /// The declick fade's bookkeeping.
-    fade: FadeState,
+    fade: FadeState<F>,
     /// The declick's length in frames at the graph's rate.
     declick: usize,
 }
 
 /// A lane's declick fade across blocks, carried across a commit that keeps the
 /// edge.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct FadeState {
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FadeState<F: Float> {
     /// The kind the lane last acted on.
     seen: EdgeFade,
     /// Where the running fade left from; `None` when none runs.
-    start: Option<Amplitude>,
+    start: Option<F>,
     /// Frames of the running fade done.
     k: usize,
     /// A fade that ended, until the executor has told the editor.
     finished: Option<EdgeFade>,
 }
 
-impl SumLane {
+impl<F: Float> Default for FadeState<F> {
+    fn default() -> Self {
+        Self {
+            seen: EdgeFade::default(),
+            start: None,
+            k: 0,
+            finished: None,
+        }
+    }
+}
+
+impl<F: Float> SumLane<F> {
     /// An addend with no entry: weight `1.0`, no state.
     pub(crate) fn plain() -> Self {
         Self {
             cell: None,
-            target: Amplitude::UNITY,
+            target: F::ONE,
             prev: None,
             drive: None,
             want: EdgeFade::None,
@@ -380,7 +392,7 @@ impl SumLane {
     /// the driven state.
     pub(crate) fn weighted(cell: GainCell, driven: bool, max: usize, declick: usize) -> Self {
         Self {
-            target: cell.load(),
+            target: control_in::<F>(cell.load().get()),
             want: cell.load_fade(),
             drive: driven.then(|| ParamState::lane(max, declick, cell.ranges())),
             cell: Some(cell),
@@ -397,7 +409,12 @@ impl SumLane {
     /// running port); a new one is on its first block. A state this lane
     /// does not keep goes to `spare`, to be freed on the control side
     /// (`spare` has room: one for each lane that carries).
-    pub(crate) fn adopt(&mut self, carried: Carried, max: usize, spare: &mut Vec<ParamState>) {
+    pub(crate) fn adopt(
+        &mut self,
+        carried: Carried<F>,
+        max: usize,
+        spare: &mut Vec<ParamState<F>>,
+    ) {
         let Carried { prev, drive, fade } = carried;
         self.prev = prev;
         self.fade = fade;
@@ -419,7 +436,7 @@ impl SumLane {
     }
 
     /// What the lane holds for the next plan's lane of the same edge.
-    pub(crate) fn carry(&mut self) -> Carried {
+    pub(crate) fn carry(&mut self) -> Carried<F> {
         Carried {
             prev: self.prev,
             drive: self.drive.take(),
@@ -444,7 +461,7 @@ impl SumLane {
     #[inline]
     pub(crate) fn snapshot(&mut self) {
         if let Some(cell) = &self.cell {
-            self.target = cell.load();
+            self.target = control_in::<F>(cell.load().get());
             self.want = cell.load_fade();
         }
     }
@@ -463,23 +480,22 @@ impl SumLane {
         &'a mut self,
         frames: usize,
         source: Option<(EventOut, &[Event])>,
-    ) -> Weight<'a> {
+    ) -> Weight<'a, F> {
         if self.cell.is_none() {
             return Weight::Unit;
         }
         let want = self.want;
         // An `Out` lane's goal is silence whatever its base.
         let to = if want == EdgeFade::Out {
-            Amplitude::new(0.0)
+            F::ZERO
         } else {
             self.target
         };
         if let Some(drive) = &mut self.drive {
             drive.begin();
-            // The param port is an `f32` lane: the goal narrows once per block.
-            drive.port(0, EdgeGain::ADDR, frames, source, Some(to.get() as f32));
+            drive.port(0, EdgeGain::ADDR, frames, source, Some(to));
             if let Some(f) = drive.frames(0, frames) {
-                self.prev = f.last().map(|&last| Amplitude::new(f64::from(last)));
+                self.prev = f.last().copied();
                 // The port's frames are not scaled by a fade: it is over.
                 self.fade.start = None;
                 if want != self.fade.seen {
@@ -494,10 +510,10 @@ impl SumLane {
             self.fade.start = None;
             if want != EdgeFade::None {
                 let start = match want {
-                    EdgeFade::In => self.prev.unwrap_or(Amplitude::new(0.0)),
+                    EdgeFade::In => self.prev.unwrap_or(F::ZERO),
                     _ => self.prev.unwrap_or(self.target),
                 };
-                if start.get().to_bits() == to.get().to_bits() {
+                if start.to_f64().to_bits() == to.to_f64().to_bits() {
                     self.fade.finished = Some(want);
                     self.prev = Some(to);
                 } else {
@@ -521,15 +537,21 @@ impl SumLane {
                 self.prev = Some(to);
             } else {
                 self.fade.k = k + frames;
-                self.prev = Some(fade_at(start, to, Samples(k + frames - 1), Samples(len)));
+                self.prev = Some(fade_in(
+                    FadeLaw::EqualAmplitude,
+                    start,
+                    to,
+                    Samples(k + frames - 1),
+                    Samples(len),
+                ));
             }
             return w;
         }
         let from = self.prev.unwrap_or(to);
         self.prev = Some(to);
-        if from.get() != to.get() {
+        if from != to {
             Weight::Ramp { from, to }
-        } else if to.get() == 1.0 {
+        } else if to == F::ONE {
             Weight::Unit
         } else {
             Weight::Static(to)
@@ -538,21 +560,14 @@ impl SumLane {
 }
 
 /// What a lane hands the next plan's lane of the same edge.
-#[derive(Debug, Default)]
-pub(crate) struct Carried {
+#[derive(Debug)]
+pub(crate) struct Carried<F: Float> {
     /// The weight the lane was last given.
-    pub(crate) prev: Option<Amplitude>,
+    pub(crate) prev: Option<F>,
     /// Its driven state, if it had one.
-    pub(crate) drive: Option<ParamState>,
+    pub(crate) drive: Option<ParamState<F>>,
     /// Its declick fade.
-    pub(crate) fade: FadeState,
-}
-
-/// `w` at fade frame `j` of a fade of `len` frames: `start` moved to `goal` along
-/// [`FadeLaw::EqualAmplitude`], and exactly `goal` from `len` on.
-#[inline(always)]
-pub(crate) fn fade_at(start: Amplitude, goal: Amplitude, j: Samples, len: Samples) -> Amplitude {
-    FadeLaw::EqualAmplitude.between(start, goal, j, len)
+    pub(crate) fade: FadeState<F>,
 }
 
 /// The first live addend: `out = +F::ZERO + w * a`, or `out = +F::ZERO + w * out`
@@ -560,7 +575,7 @@ pub(crate) fn fade_at(start: Amplitude, goal: Amplitude, j: Samples, len: Sample
 ///
 /// The `+0.0 +` is the fold's start and turns a `-0.0` product into `+0.0`.
 #[inline]
-pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
+pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_, F>) {
     let frames = out.len();
     match (a, w) {
         (Some(a), Weight::Unit) => {
@@ -574,31 +589,23 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
             }
         }
         (Some(a), Weight::Static(w)) => {
-            let w = F::from_f64(w.get());
             for (o, &x) in out.iter_mut().zip(a) {
                 *o = F::ZERO + w * x;
             }
         }
         (None, Weight::Static(w)) => {
-            let w = F::from_f64(w.get());
             for o in out.iter_mut() {
                 *o = F::ZERO + w * *o;
             }
         }
         (Some(a), Weight::Ramp { from, to }) => {
-            // The ramp is an `f32` piece: its ends narrow once per block.
-            let (from, to) = (from.get() as f32, to.get() as f32);
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = F::ZERO
-                    + F::from_f32(Piece::ramp_at(None, from, to, Samples(i), Samples(frames))) * x;
+                *o = F::ZERO + ramp_in(None, from, to, Samples(i), Samples(frames)) * x;
             }
         }
         (None, Weight::Ramp { from, to }) => {
-            // The ramp is an `f32` piece: its ends narrow once per block.
-            let (from, to) = (from.get() as f32, to.get() as f32);
             for (i, o) in out.iter_mut().enumerate() {
-                *o = F::ZERO
-                    + F::from_f32(Piece::ramp_at(None, from, to, Samples(i), Samples(frames))) * *o;
+                *o = F::ZERO + ramp_in(None, from, to, Samples(i), Samples(frames)) * *o;
             }
         }
         (
@@ -612,7 +619,13 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
         ) => {
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
                 *o = F::ZERO
-                    + F::from_f64(fade_at(start, goal, Samples(k + i), Samples(len)).get()) * x;
+                    + fade_in(
+                        FadeLaw::EqualAmplitude,
+                        start,
+                        goal,
+                        Samples(k + i),
+                        Samples(len),
+                    ) * x;
             }
         }
         (
@@ -626,17 +639,23 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
         ) => {
             for (i, o) in out.iter_mut().enumerate() {
                 *o = F::ZERO
-                    + F::from_f64(fade_at(start, goal, Samples(k + i), Samples(len)).get()) * *o;
+                    + fade_in(
+                        FadeLaw::EqualAmplitude,
+                        start,
+                        goal,
+                        Samples(k + i),
+                        Samples(len),
+                    ) * *o;
             }
         }
         (Some(a), Weight::Frames(w)) => {
             for ((o, &x), &w) in out.iter_mut().zip(a).zip(w) {
-                *o = F::ZERO + F::from_f32(w) * x;
+                *o = F::ZERO + w * x;
             }
         }
         (None, Weight::Frames(w)) => {
             for (o, &w) in out.iter_mut().zip(w) {
-                *o = F::ZERO + F::from_f32(w) * *o;
+                *o = F::ZERO + w * *o;
             }
         }
     }
@@ -645,7 +664,7 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_>) {
 /// A later live addend: `out = out + w * a`, a multiply and an add, two
 /// roundings (Rust never contracts them into a fused multiply-add).
 #[inline]
-pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_>) {
+pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_, F>) {
     let frames = out.len();
     match w {
         Weight::Unit => {
@@ -654,16 +673,13 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_>) {
             }
         }
         Weight::Static(w) => {
-            let w = F::from_f64(w.get());
             for (o, &x) in out.iter_mut().zip(a) {
                 *o += w * x;
             }
         }
         Weight::Ramp { from, to } => {
-            // The ramp is an `f32` piece: its ends narrow once per block.
-            let (from, to) = (from.get() as f32, to.get() as f32);
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += F::from_f32(Piece::ramp_at(None, from, to, Samples(i), Samples(frames))) * x;
+                *o += ramp_in(None, from, to, Samples(i), Samples(frames)) * x;
             }
         }
         Weight::Fade {
@@ -673,12 +689,18 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_>) {
             len,
         } => {
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += F::from_f64(fade_at(start, goal, Samples(k + i), Samples(len)).get()) * x;
+                *o += fade_in(
+                    FadeLaw::EqualAmplitude,
+                    start,
+                    goal,
+                    Samples(k + i),
+                    Samples(len),
+                ) * x;
             }
         }
         Weight::Frames(w) => {
             for ((o, &x), &w) in out.iter_mut().zip(a).zip(w) {
-                *o += F::from_f32(w) * x;
+                *o += w * x;
             }
         }
     }
@@ -692,7 +714,7 @@ mod tests {
         Amplitude::new(f64::from(v))
     }
 
-    fn lane(base: f32) -> (GainCell, SumLane) {
+    fn lane(base: f32) -> (GainCell, SumLane<f32>) {
         let cell = GainCell::new(amp(base), EdgeGain::DEFAULT_RANGE);
         (cell.clone(), SumLane::weighted(cell, false, 8, 240))
     }
@@ -704,15 +726,9 @@ mod tests {
         let (cell, mut lane) = lane(0.5);
         lane.snapshot();
         cell.store(amp(2.0));
-        assert_eq!(lane.weight(8, None), Weight::Static(amp(0.5)));
+        assert_eq!(lane.weight(8, None), Weight::Static(0.5));
         lane.snapshot();
-        assert_eq!(
-            lane.weight(8, None),
-            Weight::Ramp {
-                from: amp(0.5),
-                to: amp(2.0)
-            }
-        );
+        assert_eq!(lane.weight(8, None), Weight::Ramp { from: 0.5, to: 2.0 });
     }
 
     /// First block: no ramp; unity is the plain add; a static weight is
@@ -721,16 +737,16 @@ mod tests {
     fn first_block_has_no_ramp_and_a_static_weight_skips_it() {
         let (cell, mut lane) = lane(0.25);
         lane.snapshot();
-        assert_eq!(lane.weight(8, None), Weight::Static(amp(0.25)));
+        assert_eq!(lane.weight(8, None), Weight::Static(0.25));
         lane.snapshot();
-        assert_eq!(lane.weight(8, None), Weight::Static(amp(0.25)));
+        assert_eq!(lane.weight(8, None), Weight::Static(0.25));
         cell.store(amp(1.0));
         lane.snapshot();
         assert_eq!(
             lane.weight(8, None),
             Weight::Ramp {
-                from: amp(0.25),
-                to: amp(1.0)
+                from: 0.25,
+                to: 1.0
             }
         );
         lane.snapshot();
@@ -739,7 +755,7 @@ mod tests {
 
     #[test]
     fn a_plain_lane_is_unity_and_keeps_no_state() {
-        let mut lane = SumLane::plain();
+        let mut lane = SumLane::<f32>::plain();
         lane.snapshot();
         assert_eq!(lane.weight(8, None), Weight::Unit);
         assert_eq!(lane.carry().prev, None);
@@ -759,14 +775,7 @@ mod tests {
         let frames = 8usize;
         let a = vec![1.0f32; frames];
         let mut out = vec![0.0f32; frames];
-        first(
-            &mut out,
-            Some(&a),
-            Weight::Ramp {
-                from: amp(0.0),
-                to: amp(1.0),
-            },
-        );
+        first(&mut out, Some(&a), Weight::Ramp { from: 0.0, to: 1.0 });
         for (i, &o) in out.iter().enumerate() {
             let want = 0.0 + (0.0 + (1.0f32 - 0.0) * ((i + 1) as f32 / frames as f32)) * 1.0;
             assert_eq!(o.to_bits(), want.to_bits(), "frame {i}");
