@@ -556,12 +556,6 @@ impl<F: Float + Lerp> FdnBank<F> {
     /// start, so a call that ends inside a chunk goes on in the next. A channel of `output`
     /// past the second is not touched; before the first [`aim`](Self::aim) the output is
     /// silent. No allocation.
-    #[expect(
-        clippy::needless_range_loop,
-        reason = "the per-line arrays (`c_len`, `c_out`, `pole`, `lines`) are indexed by one \
-                  line number with the loop's scratch `d`; an iterator over any one of them \
-                  would only hide the others"
-    )]
     pub fn process<S: Float>(
         &mut self,
         glides: &mut FdnGlides<F>,

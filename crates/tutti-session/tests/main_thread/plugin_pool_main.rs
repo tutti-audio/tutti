@@ -397,6 +397,8 @@ fn an_in_process_swap_waits_for_the_main_thread() {
 /// the outcome lands in an update, never at the call.
 fn restore_round_trip(hosting: Hosting) {
     const CUTOFF: tutti_units::ParamId = tutti_units::ParamId::new(101);
+    let mut env = tutti_fixtures::ScopedEnv::new();
+    env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let (catalog, _dir) = catalog();
     let mut s = session();
     s.pool(s.plugin_entry("verb", &id(), &catalog).hosting(hosting))
@@ -912,6 +914,7 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
     env.set("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
+    env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let (catalog, _dir) = catalog();
     let mut s = session();
     s.pool(

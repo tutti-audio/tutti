@@ -578,7 +578,7 @@ impl Plugin for ProbePlugin {
             for slot in cap.events.iter_mut() {
                 *slot = CapturedEvent::default();
             }
-            for i in 0..stored {
+            for (i, slot) in cap.events[..stored].iter_mut().enumerate() {
                 // SAFETY: `Events` is a flexible-array header — declared
                 // `[*mut Event; 2]`, but the host allocates `num_events`
                 // entries contiguously after it, so reading
@@ -601,7 +601,7 @@ impl Plugin for ProbePlugin {
                     captured.midi_data = midi.midi_data;
                     captured.flags = midi.flags;
                 }
-                cap.events[i] = captured;
+                *slot = captured;
             }
         });
     }

@@ -317,12 +317,11 @@ impl BusStripNode {
         let ramping = from != target;
         let (volume, balance) = (volume.map(|v| &v[..size]), balance.map(|p| &p[..size]));
 
-        for c in 0..self.channels() {
+        for (c, &side) in self.sides[..self.channels()].iter().enumerate() {
             // The one place a gain meets a sample. A sample is a signal
             // value, not a gain, so the unit comes off the gain here rather
             // than the sample being wrapped.
             let (x, y) = (&inputs.get(c)[..size], &mut outputs.get(c)[..size]);
-            let side = self.sides[c];
             let (start, end) = (from.on(side), target.on(side));
             // `(i + 1) / size`, not `(i + 1) * (1 / size)`: the division is
             // exact at the last frame (`size / size == 1`), so the ramp lands

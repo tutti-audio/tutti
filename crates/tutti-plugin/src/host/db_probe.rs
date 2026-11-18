@@ -198,14 +198,10 @@ mod tests {
     /// a fabrication.
     ///
     /// Driven through [`interpret_probe`] rather than by arranging for the probe
-    /// to be absent. An earlier version called `probe_plugin` and relied on the
-    /// binary not being built — but the search covers
-    /// `current_exe().parent().parent()`, which for a test binary in
-    /// `target/debug/deps/` is `target/debug/`, where the binary lands as soon as
-    /// anything in the workspace builds it. So it passed on a cold target dir and
-    /// failed on a warm one, having found a real binary that then reported
-    /// `LoadFailed` on the fake plugin. `TUTTI_PLUGIN_PROBE` is no lever either:
-    /// a nonexistent path there warns and falls through to the same search.
+    /// to be absent: the search covers the running binary's directories and
+    /// `PATH`, so whether it finds a built probe depends on the machine, and
+    /// `TUTTI_PLUGIN_PROBE` is no lever either, since a nonexistent path there
+    /// falls through to the same search.
     #[test]
     fn probe_without_a_probe_binary_falls_back_to_filename_metadata() {
         use tutti_plugin_types::BridgeError;

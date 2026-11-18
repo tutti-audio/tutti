@@ -5,7 +5,7 @@
 
 #![cfg(feature = "clap")]
 
-use tutti_plugin::catalog::{Catalog, CatalogConfig, PluginRef};
+use tutti_plugin::catalog::{Catalog, CatalogConfig, Locator, PluginRef};
 use tutti_plugin_db::{PluginDb, Scan, ScanPoll, ScanResult};
 
 /// Applies `task` as it arrives until it ends, and returns its result; the wait
@@ -92,7 +92,8 @@ fn catalog_with_one_plugin(dir: &tempfile::TempDir) -> (Catalog, std::path::Path
     std::fs::copy(tutti_fixtures::clap_probe(), &file).expect("drop a plugin in");
     let catalog = Catalog::new(
         PluginDb::new(),
-        CatalogConfig::new(dir.path(), vec![scanned_dir]),
+        CatalogConfig::new(dir.path(), vec![scanned_dir])
+            .probe_locator(Locator::at(tutti_fixtures::plugin_probe())),
         |_| Ok(()),
     );
     (catalog, file)
@@ -187,7 +188,6 @@ mod stand_in_probe {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
-    use tutti_plugin::catalog::Locator;
     use tutti_plugin_db::ProbeFailureKind;
 
     /// A catalog over one plugin file whose probe is the script `body`, which
@@ -350,7 +350,6 @@ mod stand_in_probe {
 /// under its name, and nothing is blacklisted.
 #[test]
 fn register_names_a_missing_probe_binary() {
-    use tutti_plugin::catalog::Locator;
     use tutti_plugin_db::ProbeFailureKind;
     let dir = tempfile::TempDir::new().expect("a scratch directory");
     let (catalog, file) = catalog_with_one_plugin(&dir);
@@ -412,7 +411,6 @@ fn a_measure_state_does_not_reach_the_next_measure() {
 /// does, and records nothing.
 #[test]
 fn measure_names_a_missing_probe_binary() {
-    use tutti_plugin::catalog::Locator;
     use tutti_plugin_db::ProbeFailureKind;
     let dir = tempfile::TempDir::new().expect("a scratch directory");
     let (_, file) = catalog_with_one_plugin(&dir);
@@ -436,7 +434,6 @@ mod links {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
-    use tutti_plugin::catalog::Locator;
 
     /// A probe that logs the arguments it was started with, then is the real one.
     fn logging_probe(dir: &Path) -> (Locator, PathBuf) {
