@@ -35,7 +35,7 @@ use crate::{DelayLine, Glide, InterpolationMode, Lerp, Steps, delay_step};
 /// The time glides at [`DELAY_SLEW`] frames of delay per frame; the channels past the
 /// first that hold a time of their own hold it whole.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DelayGlides<F: Float + Lerp> {
+pub struct DelayGlides<F: Float> {
     time: Glide<F>,
     own: [F; MAX_DELAY_CHANNELS],
     feedback: Glide<F>,
@@ -87,11 +87,11 @@ fn frames_of<F: Float>(secs: Seconds, max: Seconds, rate: SampleRate, cap: usize
 }
 
 /// The loop's feedback and cross-feedback bounded as a pair ([`Feedback::stable_pair`]), in
-/// the state float. A pair already inside the bound is returned as it is, in `F`; one outside
-/// it is scaled by `Feedback`'s own rule, whose unit is `f32` wide.
+/// the state float. A pair already inside `bound` (`Feedback::MAX_STABLE` in `F`; this mirrors
+/// `Feedback::stable_pair`'s own in-bound test) is returned as it is, in `F`; one outside it is
+/// scaled by `Feedback`'s rule, which narrows through `f32` until `Feedback` stores `f64`.
 #[inline(always)]
-fn stable_pair<F: Float>(fb: F, cross: F) -> (F, F) {
-    let bound = F::from_f32(Feedback::MAX_STABLE.get());
+fn stable_pair<F: Float>(fb: F, cross: F, bound: F) -> (F, F) {
     if fb >= F::ZERO && cross >= F::ZERO && fb + cross <= bound {
         return (fb, cross);
     }
@@ -235,6 +235,7 @@ impl<F: Float + Lerp> DelayBank<F> {
             plane.map_or_else(Default::default, |p| &mut p.into_samples_mut()[..frames])
         });
         let g = *glides;
+        let bound = F::from_f32(Feedback::MAX_STABLE.get());
         let (time, feedback) = (
             lanes.time.map(|l| l.samples()),
             lanes.feedback.map(|l| l.samples()),
@@ -261,7 +262,7 @@ impl<F: Float + Lerp> DelayBank<F> {
         if time.is_none() && feedback.is_none() && !moving {
             // Nothing moves and nothing is driven: every control is a constant of the loop,
             // the common case and the one worth keeping tight.
-            let (fb, cf) = stable_pair(g.feedback.target(), g.cross.target());
+            let (fb, cf) = stable_pair(g.feedback.target(), g.cross.target(), bound);
             let delay = g.time.target();
             self.run(
                 &xs[..width],
@@ -280,12 +281,12 @@ impl<F: Float + Lerp> DelayBank<F> {
                 let fb = feedback.and_then(|s| s.get(i)).map_or(glided, |x| {
                     let x = x.to_f64();
                     if x.is_finite() {
-                        F::from_f64(x).clamp(F::ZERO, F::from_f32(Feedback::MAX_STABLE.get()))
+                        F::from_f64(x).clamp(F::ZERO, bound)
                     } else {
-                        glided.clamp(F::ZERO, F::from_f32(Feedback::MAX_STABLE.get()))
+                        glided.clamp(F::ZERO, bound)
                     }
                 });
-                stable_pair(fb, at(&g.cross, i))
+                stable_pair(fb, at(&g.cross, i), bound)
             };
             let delay_at = |c: usize, i: usize| -> F {
                 match time.and_then(|s| s.get(i)).map(|x| x.to_f64()) {

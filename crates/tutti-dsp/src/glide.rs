@@ -49,7 +49,7 @@ pub enum Steps {
 /// segment of frames that starts at [`taken`](Self::taken) `= k` reads `at(k + 1)`,
 /// `at(k + 2)`, …, and [`advance`](Self::advance) moves `k` past it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Glide<T: Lerp> {
+pub struct Glide<T> {
     pub(crate) from: T,
     pub(crate) to: T,
     pub(crate) k: u32,

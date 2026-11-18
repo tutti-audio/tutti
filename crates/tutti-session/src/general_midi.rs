@@ -59,7 +59,7 @@ impl GeneralMidi {
         &mut self.instrument
     }
 
-    /// The chorus: the unit's chorus send in, the wet chorus out.
+    /// The chorus, an `f32` node: the unit's chorus send in, the wet chorus out.
     #[must_use]
     pub fn chorus(&self) -> Key<ModDelayNode<f32>> {
         self.chorus

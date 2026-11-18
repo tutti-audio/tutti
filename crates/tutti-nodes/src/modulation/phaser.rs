@@ -163,7 +163,7 @@ control_set! {
 /// The chain has **no latency**. Its tail is [`Tail::Unknown`]: the closed loop's ring-out has
 /// no closed form a tail could be cut at.
 #[derive(Clone, Debug)]
-pub struct PhaserKernel<F: Float + Lerp> {
+pub struct PhaserKernel<F: Float> {
     input: BusTopology,
     chain: PhaserChain<F>,
     range: SweepRange,
@@ -231,6 +231,7 @@ impl<F: Float + Lerp> PhaserKernel<F> {
         let (min, max, rate) = (self.min, self.max, self.rate);
         self.clock.solve(&mut self.coefficients, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
+            // The sweep depth is f32-quantised: `Depth` stores f32.
             let sweep = sweep_hz(min, max, lfo, Depth::clamped(depth.to_f32()));
             allpass_coeff(sweep, rate)
         });

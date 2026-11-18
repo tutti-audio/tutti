@@ -166,7 +166,7 @@ impl DelaySet {
 /// graph's bounce would have to render: the tail is [`Tail::Unknown`] and never narrowed, so
 /// the executor never skips it.
 #[derive(Clone, Debug)]
-pub struct DelayKernel<F: Float + Lerp> {
+pub struct DelayKernel<F: Float> {
     layout: DelayLayout,
     /// The lines, sized when the rate is known: `None` until [`prepare`](Kernel::prepare).
     bank: Option<DelayBank<F>>,

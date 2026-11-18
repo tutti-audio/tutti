@@ -171,7 +171,7 @@ control_set! {
 /// [`Tail::Unknown`] (a recirculating line), or, for a sweep that cannot recirculate, its
 /// longest delay.
 #[derive(Clone, Debug)]
-pub struct ModDelayKernel<F: Float + Lerp> {
+pub struct ModDelayKernel<F: Float> {
     layout: ModDelayLayout,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<ModDelayBank<F>>,
