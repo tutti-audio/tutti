@@ -3,13 +3,13 @@
 
 use crate::active::main_thread;
 use crate::transcript::select_tail;
+use tutti_buffers::InputOutput;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     BusRole, BypassWrite, Control, Controller, Loaded, OwnBypass, ParamFlags, ParamWriteError,
     ParameterChanges, PluginBus, PluginIo, PluginTail, Preset, PresetId, ProcessContext,
     ProcessOutput, Processor, Reopen, SampleFormat, Samples, TransportChange, TransportInfo,
-    channel_block,
 };
 use tutti_plugin_types::{ParamEdit, Request};
 use tutti_ump::{MidiChannel, MidiGroup};
@@ -1429,7 +1429,7 @@ pub fn process_does_not_allocate<F: Format>() {
     let mut outs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: channel_block(Samples(BLOCK), &refs, &mut outs).expect("equal channels"),
+        buffer: InputOutput::from_slices(Samples(BLOCK), &refs, &mut outs).expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

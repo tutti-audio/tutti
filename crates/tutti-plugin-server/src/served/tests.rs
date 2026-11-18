@@ -2,7 +2,7 @@
 
 use super::*;
 use tutti_buffers::{Float, InputOutput};
-use tutti_plugin_types::{PluginFormat, ProcessContext, ProcessOutput, Processor, channel_block};
+use tutti_plugin_types::{PluginFormat, PluginIo, ProcessContext, ProcessOutput, Processor};
 
 #[cfg(served_au)]
 mod au;
@@ -41,12 +41,24 @@ impl<F: ServerSide> Served<F> {
 /// A plugin loaded on a [`Hand::local`] renders in place: the Processor is
 /// this value's, as a test that calls the plugin needs it (production renders
 /// through [`crate::render::End`], which holds the Processor on its thread).
-impl<F: ServerSide> Rendering for Served<F> {
+impl<F: ServerSide> Render for Served<F> {
     fn features(&self) -> Features {
         self.wiring.features
     }
 
-    fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+    fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+        self.render_here(io)
+    }
+
+    fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+        self.render_here(io)
+    }
+}
+
+impl<F: ServerSide> Served<F> {
+    /// One block at either width, in place: silence when the plugin is not
+    /// running.
+    fn render_here<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         // A rate change the plugin refused left it deactivated: silence.
         let Some(processor) = self.lifecycle.processor() else {
             io.out.clear();
@@ -54,18 +66,6 @@ impl<F: ServerSide> Rendering for Served<F> {
             return Ok(());
         };
         processor.process(io)
-    }
-}
-
-impl<F: ServerSide> Served<F> {
-    /// Renders `buffer` in place, as the pipeline's [`Rendering`] does.
-    fn render_block<'a, S: Float>(
-        &mut self,
-        buffer: InputOutput<'a, 'a, 'a, S>,
-        ctx: &'a ProcessContext<'a>,
-        out: &'a mut ProcessOutput,
-    ) -> PluginResult<()> {
-        self.render(&mut PluginIo { buffer, ctx, out })
     }
 }
 

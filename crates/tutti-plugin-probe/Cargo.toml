@@ -34,6 +34,8 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", featur
 # The experiment's units and stimulus: counts and levels, a note, and where in a
 # block it sits.
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
+# `InputOutput`, the block view a measuring render is handed.
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # `watch_spawner` and `terminate_process`: the probe ends with its host.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
@@ -51,8 +53,6 @@ name = "tutti_plugin_probe"
 path = "src/lib.rs"
 
 [dev-dependencies]
-# `measure/tests.rs`: the sample width `Float` a test Processor is generic over.
-tutti-buffers = { path = "../tutti-buffers" }
 # `tests/vst2_not_activated.rs`: the reference VST2 plugin, found beside the test
 # binary, and `libloading` to read what it recorded.
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }

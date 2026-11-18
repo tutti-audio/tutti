@@ -18,10 +18,10 @@ use crate::support::active::{Activate, Active, ActiveExt};
 use crate::support::main_thread;
 
 use assert_no_alloc::assert_no_alloc;
+use tutti_buffers::InputOutput;
 use tutti_clap_host::{ClapError, ClapLoaded, ClapProcessContext, LoadOptions};
 use tutti_clap_test_plugin::{PORTS_64BIT_INPUTS, PORTS_64BIT_OUTPUTS, REPORTED_TAIL_SAMPLES};
 use tutti_plugin_types::PluginError;
-use tutti_plugin_types::channel_block;
 
 /// The channels the plugin's audio ports declare now, summed over one
 /// direction.
@@ -254,7 +254,7 @@ fn a_rate_change_rereads_the_port_layout() {
     let in_refs: Vec<&[f32]> = ins.iter().map(Vec::as_slice).collect();
     let mut outs = vec![vec![0.0f32; FRAMES]; 3];
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
-    let mut buffer = channel_block(
+    let mut buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(in_refs[0].len()),
         &in_refs,
         &mut out_refs,
@@ -273,7 +273,7 @@ fn process_f32_block(active: &mut Active<f32>, channels: usize) -> Result<(), Cl
     let in_refs: Vec<&[f32]> = ins.iter().map(Vec::as_slice).collect();
     let mut outs = vec![vec![0.0f32; FRAMES]; channels];
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
-    let mut buffer = channel_block(
+    let mut buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(in_refs[0].len()),
         &in_refs,
         &mut out_refs,

@@ -58,7 +58,7 @@ use crate::audio_pipeline::{
     AudioBlock, AudioPipeline, AudioScratch, BlockFault, Clock, ProcessExtras,
 };
 use crate::main_loop::Bell;
-use crate::served::{Render, Rendering};
+use crate::served::Render;
 use crate::ties::{Notify, Patience, Ties, ties};
 use crate::transport::Transport;
 
@@ -138,11 +138,22 @@ impl<P: Processor> End<P> {
     }
 }
 
-impl<P: Processor + 'static> Rendering for End<P> {
+impl<P: Processor + 'static> Render for End<P> {
     fn features(&self) -> Features {
         self.features
     }
 
+    fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+        self.render(io)
+    }
+
+    fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+        self.render(io)
+    }
+}
+
+impl<P: Processor + 'static> End<P> {
+    /// One block at either width: silence when no Processor is held.
     fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         // A Processor that is not here (recalled for a rate change, or
         // refused): the block is silence and the plugin is not touched.
@@ -1111,11 +1122,21 @@ mod tests {
         }
     }
 
-    impl Rendering for Faulty {
+    impl Render for Faulty {
         fn features(&self) -> Features {
             Features::empty()
         }
 
+        fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+            self.render(io)
+        }
+
+        fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+            self.render(io)
+        }
+    }
+
+    impl Faulty {
         fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
             let out = &mut *io.out;
             self.blocks += 1;

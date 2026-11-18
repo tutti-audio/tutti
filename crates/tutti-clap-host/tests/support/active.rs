@@ -15,7 +15,6 @@ use tutti_clap_host::{
 use tutti_fixtures::{Activation, Whole};
 use tutti_plugin_types::{
     MainThreadMarker, MaxBlock, PluginError, Prepare, SampleFormat, SampleRate, Samples,
-    channel_block,
 };
 
 /// A sample width a suite names with a type (`Active<f32>`): test-side sugar
@@ -224,7 +223,7 @@ pub fn drive_block(inst: &mut Active<f32>, frames: usize, ctx: &ClapProcessConte
     let in_r = vec![0.0f32; frames];
     let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
     let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-    let mut buffer = channel_block(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+    let mut buffer = InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
         .expect("equal channels");
     inst.process(&mut buffer, ctx).expect("process succeeds");
 }

@@ -16,7 +16,7 @@ use tutti_rt::{Counter, Tally};
 
 use vst::host::RenderHandle;
 
-use tutti_buffers::{Float, InputOutput};
+use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_plugin_types::{
     ParameterChanges, PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput,
     Processor, SampleFormat, SampleRate,
@@ -431,8 +431,8 @@ impl Vst2Processor {
     ///
     /// # Errors
     ///
-    /// [`PluginError::Block`] when the buffer is 32-bit for a plugin activated at
-    /// 64-bit. It does not allocate and does not enter the plugin.
+    /// [`PluginError::Block`] when the buffer is not the width the plugin was
+    /// activated at, in either direction. It does not allocate and does not enter the plugin.
     pub fn render<S: Float>(
         &mut self,
         buffer: &mut InputOutput<'_, '_, '_, S>,
@@ -446,10 +446,15 @@ impl Vst2Processor {
             transport,
             sample_rate,
         };
-        if S::FORMAT == tutti_buffers::SampleFormat::F32 && self.is_double_precision() {
-            return Err(PluginError::Block(
-                "the block's sample format is not the one the plugin was activated with",
-            ));
+        // The width is matched once per block against the activation's.
+        match (self.scratch.format(), buffer.by_width()) {
+            (SampleFormat::Float32, ByWidth::F32(_)) | (SampleFormat::Float64, ByWidth::F64(_)) => {
+            }
+            _ => {
+                return Err(PluginError::Block(
+                    "the block's sample format is not the one the plugin was activated with",
+                ));
+            }
         }
         let refused = self.apply_automation(ctx.param_changes);
         let emitted = self.process_planes(buffer, &host_ctx);

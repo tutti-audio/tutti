@@ -393,7 +393,7 @@ mod halves {
     use tutti_au_host::{AuController, AuLoaded, AuProcessor};
     use tutti_plugin_types::{
         Control, Controller, Loaded, MaxBlock, ParamFlags, ParameterChanges, ParameterQueue,
-        PluginIo, ProcessContext, ProcessOutput, Processor, Request, channel_block, taken,
+        PluginIo, ProcessContext, ProcessOutput, Processor, Request, taken,
     };
     use tutti_units::Normalized;
     use tutti_units::ParamId;
@@ -484,7 +484,7 @@ mod halves {
                 output.iter_mut().map(|v| v.as_mut_slice()).collect();
             let mut out = ProcessOutput::default();
             let mut io = PluginIo {
-                buffer: channel_block(
+                buffer: InputOutput::from_slices(
                     tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,

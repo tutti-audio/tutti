@@ -1291,10 +1291,10 @@ mod sanitize_tests {
         }
 
         fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
-            let ByWidth::F32(io) = io.by_width() else {
+            let ByWidth::F32(buffer) = io.buffer.by_width() else {
                 unreachable!("the graph is f32");
             };
-            io.buffer
+            buffer
                 .output()
                 .plane_mut(0)
                 .samples_mut()

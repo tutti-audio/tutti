@@ -11,7 +11,7 @@
 //! resulting `AudioOutput`.
 
 use crate::served::Render;
-use tutti_buffers::Float;
+use tutti_buffers::{Float, InputOutput};
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_ipc::{ProcessAudioData, SlabLayout, SlabWriter};
@@ -20,7 +20,7 @@ use tutti_plugin_types::{
     MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
     NoteExpressionTextChanges, ParameterChanges, PluginError, PluginIo, PluginResult,
     ProcessContext, ProcessOutput, SampleFormat, Samples, ScaleChanges, TransportChange,
-    TransportInfo, WireMidi, channel_block, sanitize, silence,
+    TransportInfo, WireMidi, sanitize, silence,
 };
 use tutti_rt::TallyWriter;
 use tutti_ump::Ump;
@@ -656,7 +656,7 @@ fn render_block<S: Float>(
     let in_refs: ChannelTable<&[S]> = inputs.iter().map(|chan| &chan[..size]).collect();
     let mut out_refs: ChannelTable<&mut [S]> =
         outputs.iter_mut().map(|chan| &mut chan[..size]).collect();
-    let buffer = channel_block(Samples(size), &in_refs, &mut out_refs)
+    let buffer = InputOutput::from_slices(Samples(size), &in_refs, &mut out_refs)
         .map_err(|_| BlockFault("the block's channels differ in length"))?;
     render(plugin, &mut PluginIo { buffer, ctx, out }).map_err(BlockFault::of)
 }
@@ -664,7 +664,6 @@ fn render_block<S: Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::served::Rendering;
     use tutti_units::ParamId;
 
     use tutti_plugin_types::{PluginTail, Samples};
@@ -748,11 +747,21 @@ mod tests {
         fill: f32,
     }
 
-    impl Rendering for NanPlugin {
+    impl Render for NanPlugin {
         fn features(&self) -> Features {
             self.meta.features
         }
 
+        fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+            self.render(io)
+        }
+
+        fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+            self.render(io)
+        }
+    }
+
+    impl NanPlugin {
         fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
             for mut c in io.buffer.output().iter_mut() {
                 c.samples_mut().fill(S::from_f32(self.fill));
@@ -768,11 +777,21 @@ mod tests {
         status: BlockStatus,
     }
 
-    impl Rendering for SaysPlugin {
+    impl Render for SaysPlugin {
         fn features(&self) -> Features {
             self.meta.features
         }
 
+        fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+            self.render(io)
+        }
+
+        fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+            self.render(io)
+        }
+    }
+
+    impl SaysPlugin {
         fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
             for mut chan in io.buffer.output().iter_mut() {
                 chan.samples_mut().fill(S::from_f32(self.fill));
@@ -835,11 +854,21 @@ mod tests {
         seen_inputs: std::cell::RefCell<Vec<f32>>,
     }
 
-    impl Rendering for EchoProbe {
+    impl Render for EchoProbe {
         fn features(&self) -> Features {
             self.meta.features
         }
 
+        fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+            self.render(io)
+        }
+
+        fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+            self.render(io)
+        }
+    }
+
+    impl EchoProbe {
         fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
             let mut seen = self.seen_inputs.borrow_mut();
             seen.clear();

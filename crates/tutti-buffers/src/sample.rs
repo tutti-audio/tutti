@@ -331,9 +331,21 @@ impl Sample for f64 {
         <Self as sealed::Sealed>::from_f64_clipped(x).0
     }
 }
+
 /// A type built over a float width: `At<S>` for each `S: Float`. The shape
 /// [`Float::by_width`] takes a value of, and what [`ByWidth`] holds one of at
 /// each width.
+///
+/// ```
+/// use tutti_buffers::{ByWidth, Float, OverFloat};
+///
+/// struct Words;
+/// impl OverFloat for Words {
+///     type At<S: Float> = Vec<S>;
+/// }
+///
+/// assert!(matches!(f32::by_width::<Words>(vec![0.5]), ByWidth::F32(_)));
+/// ```
 pub trait OverFloat {
     /// The type at width `S`.
     type At<S: Float>;
@@ -342,7 +354,8 @@ pub trait OverFloat {
 /// A value of `T::At<S>` for a `S` that is `f32` or `f64`, as the one it is.
 ///
 /// Made by [`Float::by_width`], and it carries no conversion: `F32` holds the
-/// `f32` value of the shape, `F64` the `f64` one.
+/// `f32` value of the shape, `F64` the `f64` one. The two arms are exhaustive:
+/// `Float` is closed (`Sample` is sealed), so a float width is one of them.
 pub enum ByWidth<T: OverFloat> {
     /// The value, at `f32`.
     F32(T::At<f32>),
@@ -466,7 +479,9 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     ///
     /// What a block does to pass through code written for one width (a plugin
     /// format's ABI) while it is generic over the graph's. `T` names the shape
-    /// of `x` ([`OverFloat`]); [`InputOutput::by_width`](crate::InputOutput::by_width) is the usual caller.
+    /// of `x` ([`OverFloat`]);
+    /// [`InputOutput::by_width`](crate::InputOutput::by_width) is the usual
+    /// caller.
     #[must_use]
     fn by_width<T: OverFloat>(x: T::At<Self>) -> ByWidth<T>;
 }

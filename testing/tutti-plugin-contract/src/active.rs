@@ -1,11 +1,11 @@
 //! One activation, both halves held together: [`Active`] is the shared
 //! `tutti_fixtures::Active`, and [`Render`] is what a case drives it with.
 
-use tutti_buffers::Float;
+use tutti_buffers::{Float, InputOutput};
 use tutti_fixtures::Whole;
 use tutti_plugin_types::{
     Loaded, MaxBlock, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor, SampleFormat,
-    SampleRate, Samples, channel_block,
+    SampleRate, Samples,
 };
 
 /// The default rate.
@@ -73,7 +73,8 @@ impl<L: Loaded> Render for Active<L> {
         let mut refs: Vec<&mut [S]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: channel_block(Samples(frames), &ins, &mut refs).expect("equal channels"),
+            buffer: InputOutput::from_slices(Samples(frames), &ins, &mut refs)
+                .expect("equal channels"),
             ctx,
             out: &mut out,
         };

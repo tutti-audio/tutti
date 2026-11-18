@@ -62,8 +62,9 @@ impl Processor for Fake {
     }
 
     fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
-        match io.by_width() {
-            ByWidth::F32(io) => self.render(io),
+        let PluginIo { buffer, ctx, .. } = io;
+        match buffer.by_width() {
+            ByWidth::F32(buffer) => self.render(buffer, ctx),
             ByWidth::F64(_) => unreachable!("the probe renders 32-bit"),
         }
     }
@@ -78,11 +79,14 @@ impl Processor for Fake {
 
 impl Fake {
     /// One 32-bit block.
-    fn render(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
-        let buf = &mut io.buffer;
+    fn render(
+        &mut self,
+        buf: &mut InputOutput<'_, '_, '_, f32>,
+        ctx: &ProcessContext<'_>,
+    ) -> PluginResult<()> {
         let frames = buf.frames().0;
         let (input, mut output) = buf.split();
-        let mut events = io.ctx.midi_events.iter().peekable();
+        let mut events = ctx.midi_events.iter().peekable();
         for i in 0..frames {
             while let Some((offset, ump)) = events.next_if(|(o, _)| o.index() == i) {
                 let _ = offset;

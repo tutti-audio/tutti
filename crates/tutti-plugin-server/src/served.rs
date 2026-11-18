@@ -18,7 +18,6 @@ use crate::ties::{Patience, Ties};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use tutti_buffers::Float;
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
     AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, Load,
@@ -46,13 +45,15 @@ mod tests;
 ///
 /// The pipeline's one door into a plugin, so its tests drive a stand-in that
 /// is not a plugin. Object-safe, so a render seat holds its plugin with the
-/// format erased; one method per width the shared memory carries, and an
-/// implementor writes the one [`Rendering`] it is blanket-implemented from.
+/// format erased; one method per width the shared memory carries. A plugin not
+/// running (a rate it refused left it deactivated) fills the block with
+/// silence. `io.out` is the caller's and reused: it is cleared before it is
+/// filled.
 pub(crate) trait Render {
     /// What the plugin can consume, as it reports now.
     fn features(&self) -> Features;
 
-    /// Renders one 32-bit block; [`Rendering::render`] at `f32`.
+    /// Renders one 32-bit block.
     ///
     /// # Errors
     ///
@@ -60,44 +61,12 @@ pub(crate) trait Render {
     /// the block.
     fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()>;
 
-    /// Renders one 64-bit block; [`Rendering::render`] at `f64`.
+    /// Renders one 64-bit block.
     ///
     /// # Errors
     ///
     /// As [`render_f32`](Self::render_f32).
     fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()>;
-}
-
-/// What a plugin does with a block at any width: renders it, or fills it with
-/// silence when the plugin is not running (a rate it refused left it
-/// deactivated).
-///
-/// `io.out` is the caller's and reused: it is cleared before it is filled.
-pub(crate) trait Rendering {
-    /// What the plugin can consume, as it reports now.
-    fn features(&self) -> Features;
-
-    /// Renders one block.
-    ///
-    /// # Errors
-    ///
-    /// [`PluginError::Process`] (or another variant) when the plugin failed
-    /// the block.
-    fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()>;
-}
-
-impl<T: Rendering> Render for T {
-    fn features(&self) -> Features {
-        Rendering::features(self)
-    }
-
-    fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
-        self.render(io)
-    }
-
-    fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
-        self.render(io)
-    }
 }
 
 /// What the session asks of the loaded plugin, with its format erased.

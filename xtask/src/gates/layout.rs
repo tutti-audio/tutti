@@ -193,12 +193,13 @@ const ONLY: &[(&str, &[&str])] = &[
         ],
     ),
     // The probe reads one file as a format host would: the hosts, the descriptor
-    // types and the experiment's units; and ends with the host that spawned it
+    // types, the block view it renders through and the experiment's units; and ends with the host that spawned it
     // (the process edge's watch on a host).
     // No hosting (`tutti-plugin-ipc`, `tutti-plugin-host`, `tutti-plugin`).
     (
         "tutti-plugin-probe",
         &[
+            "tutti-buffers",
             "tutti-plugin-types",
             "tutti-plugin-ipc-ffi",
             "tutti-graph",

@@ -39,10 +39,10 @@ use crate::support;
 use support::active::{Activate, Active, ActiveExt};
 use support::main_thread;
 
+use tutti_buffers::InputOutput;
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions};
 use tutti_clap_test_plugin::params_state::{GAIN_DB_MAX, GAIN_DB_MIN, GAIN_PARAM_ID};
 use tutti_plugin_types::ParameterChanges;
-use tutti_plugin_types::channel_block;
 use tutti_units::ParamId;
 
 const SAMPLE_RATE: f64 = 48_000.0;
@@ -182,7 +182,7 @@ fn drive(inst: &mut Active<f32>, params: &ParameterChanges) -> Vec<f32> {
     {
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer = channel_block(
+        let mut buffer = InputOutput::from_slices(
             tutti_plugin_types::Samples(in_refs[0].len()),
             &in_refs,
             &mut out_refs,

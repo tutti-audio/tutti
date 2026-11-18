@@ -12,7 +12,7 @@ use tutti_plugin_types::{
     ChannelTable, Edit, EditDrain, EditSink, ParamAccess, ParamWriteError, PluginError, PluginIo,
     PluginResult, Processor, RtMidiEvents,
 };
-use tutti_rt::{DrainBeat, RtVec, Tally, TallyWriter, tally};
+use tutti_rt::{DrainBeat, RtVec, TallyWriter, tally};
 use tutti_types::ChannelLayout;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -210,8 +210,7 @@ pub struct Vst3Processor<T: Vst3Sample> {
     seq: Option<Box<SeqScratch>>,
     /// Sequencer-context texts cut at the room of one event's text since
     /// activation.
-    seq_truncated: Tally<u64>,
-    seq_truncated_writer: TallyWriter<u64>,
+    seq_truncated: TallyWriter<u64>,
     audio_side: AudioSide,
     /// What `getProcessContextRequirements` answered at activation; `None` when
     /// the plugin does not implement the interface.
@@ -283,7 +282,6 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             carried,
             declared,
         } = parts;
-        let seq_truncated = tally();
         let mut pending = Box::new(RtVec::new());
         let refused = carried
             .into_iter()
@@ -293,8 +291,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             _format: std::marker::PhantomData,
             audio,
             seq: Some(Box::default()),
-            seq_truncated_writer: seq_truncated.writer(),
-            seq_truncated,
+            seq_truncated: tally().writer(),
             audio_side,
             context_requirements,
             drain,
@@ -980,17 +977,17 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         fill_chords(
             expressive.and_then(|e| e.chords),
             &mut seq.chords,
-            &self.seq_truncated_writer,
+            &self.seq_truncated,
         );
         fill_scales(
             expressive.and_then(|e| e.scales),
             &mut seq.scales,
-            &self.seq_truncated_writer,
+            &self.seq_truncated,
         );
         fill_expr_texts(
             expressive.and_then(|e| e.expr_texts),
             &mut seq.expr_texts,
-            &self.seq_truncated_writer,
+            &self.seq_truncated,
         );
         let events = InputEvents {
             midi: ctx.midi_events,

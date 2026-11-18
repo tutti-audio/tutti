@@ -18,7 +18,7 @@ use tutti_au_host::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
 use tutti_au_host::{AuController, AuLoaded, AuProcessor};
 use tutti_plugin_types::{
     Loaded, MaxBlock, ParamEdit, ParameterChanges, PluginIo, Prepare, ProcessContext,
-    ProcessOutput, Processor, channel_block,
+    ProcessOutput, Processor,
 };
 use tutti_units::ParamId;
 
@@ -52,7 +52,7 @@ fn render_block(processor: &mut AuProcessor, level: f32, changes: &ParameterChan
     let ctx = ProcessContext::new().params(changes);
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: channel_block(
+        buffer: InputOutput::from_slices(
             tutti_plugin_types::Samples(inputs[0].len()),
             &inputs,
             &mut outputs,

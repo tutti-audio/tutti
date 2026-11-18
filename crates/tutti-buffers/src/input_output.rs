@@ -63,12 +63,42 @@ impl core::fmt::Display for BlockSide {
     }
 }
 
+impl<'a, S: Sample> InputOutput<'a, 'a, 'a, S> {
+    /// The block of `frames` over tables of slices, one slice per channel. No
+    /// inputs is an empty `inputs`; no outputs an empty `outputs`, and the
+    /// block still has its `frames`.
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError`] when the channels of a direction differ in length, or a
+    /// direction with channels does not hold `frames`.
+    pub fn from_slices(
+        frames: Samples,
+        inputs: &'a [&'a [S]],
+        outputs: &'a mut [&'a mut [S]],
+    ) -> Result<Self, BufferError> {
+        let input = if inputs.is_empty() {
+            Planes::default()
+        } else {
+            Planes::new(inputs)?
+        };
+        let output = if outputs.is_empty() {
+            PlanesMut::default()
+        } else {
+            PlanesMut::new(outputs)?
+        };
+        Self::new(frames, input, output)
+    }
+}
+
 /// The shape of a borrowed [`InputOutput`] over a float width: what
 /// [`InputOutput::by_width`] holds at `f32` and at `f64`.
 #[derive(Debug)]
-pub struct AtMut<'x, 'i, 's, 'a>(core::marker::PhantomData<&'x mut InputOutput<'i, 's, 'a, f32>>);
+pub struct BlockMut<'x, 'i, 's, 'a>(
+    core::marker::PhantomData<&'x mut InputOutput<'i, 's, 'a, f32>>,
+);
 
-impl<'x, 'i, 's, 'a> OverFloat for AtMut<'x, 'i, 's, 'a> {
+impl<'x, 'i, 's, 'a> OverFloat for BlockMut<'x, 'i, 's, 'a> {
     type At<S: Float> = &'x mut InputOutput<'i, 's, 'a, S>;
 }
 
@@ -78,8 +108,8 @@ impl<'i, 's, 'a, S: Float> InputOutput<'i, 's, 'a, S> {
     /// plugin format's ABI) that takes the graph's. Nothing is converted or
     /// copied.
     #[must_use]
-    pub fn by_width(&mut self) -> ByWidth<AtMut<'_, 'i, 's, 'a>> {
-        S::by_width::<AtMut<'_, 'i, 's, 'a>>(self)
+    pub fn by_width(&mut self) -> ByWidth<BlockMut<'_, 'i, 's, 'a>> {
+        S::by_width::<BlockMut<'_, 'i, 's, 'a>>(self)
     }
 }
 

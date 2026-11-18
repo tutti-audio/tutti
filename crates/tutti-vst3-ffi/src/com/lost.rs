@@ -3,9 +3,10 @@
 
 use tutti_rt::{TallyWriter, tally};
 
-/// A loss count: the stored writer of one tally, minted off the audio thread. Counting is a `fetch_add`: no allocation, no
-/// lock, no wait, and it needs no borrow of the object it counts for, so a COM
-/// entry that finds its object in use still counts its refusal.
+/// A loss count: the stored writer of one tally, minted off the audio thread.
+/// Counting is a `fetch_add`: no allocation, no lock, no wait, and it needs no
+/// borrow of the object it counts for, so a COM entry that finds its object in
+/// use still counts its refusal.
 #[derive(Clone)]
 pub(crate) struct Lost {
     writer: TallyWriter<u64>,

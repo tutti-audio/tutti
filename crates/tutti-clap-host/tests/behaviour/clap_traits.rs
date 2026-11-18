@@ -6,6 +6,7 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use tutti_buffers::InputOutput;
 use tutti_rt::LockExt;
 
 use crate::support::main_thread;
@@ -18,7 +19,7 @@ use tutti_clap_test_plugin::{
 };
 use tutti_plugin_types::{
     Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare,
-    ProcessContext, ProcessOutput, Processor, SampleFormat, SampleRate, Samples, channel_block,
+    ProcessContext, ProcessOutput, Processor, SampleFormat, SampleRate, Samples,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -137,7 +138,7 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: channel_block(
+                buffer: InputOutput::from_slices(
                     tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
@@ -155,7 +156,7 @@ fn render(processor: &mut ClapProcessor, format: SampleFormat) -> Result<(), Plu
             let inputs = [input.as_slice(), input.as_slice()];
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: channel_block(
+                buffer: InputOutput::from_slices(
                     tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
@@ -637,7 +638,7 @@ fn an_errored_block_does_not_allocate() {
     let inputs = [input.as_slice(), input.as_slice()];
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: channel_block(
+        buffer: InputOutput::from_slices(
             tutti_plugin_types::Samples(inputs[0].len()),
             &inputs,
             &mut outputs,

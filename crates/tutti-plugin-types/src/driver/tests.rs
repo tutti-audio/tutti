@@ -7,13 +7,13 @@
 //! polls itself (`Rig::threaded`).
 
 use super::*;
-use crate::channel_block;
 use crate::fake::{Call, FakeLoaded, FakePlugin};
 use crate::{
     HostOp, MaxBlock, PluginError, PluginIo, PluginResult, PluginTail, ProcessContext,
     ProcessOutput, Processor, RenderMode, Request, RequestWord, SampleFormat, Samples, Stage,
     taken,
 };
+use tutti_buffers::InputOutput;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -96,7 +96,7 @@ impl Rig {
         let ctx = ProcessContext::new();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: channel_block(Samples(inputs[0].len()), &inputs, &mut outputs)
+            buffer: InputOutput::from_slices(Samples(inputs[0].len()), &inputs, &mut outputs)
                 .expect("equal lengths"),
             ctx: &ctx,
             out: &mut out,
@@ -497,7 +497,7 @@ fn the_processor_renders_without_allocating() {
     let processor = rig.lifecycle.processor().expect("held");
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: channel_block(Samples(inputs[0].len()), &inputs, &mut outputs)
+        buffer: InputOutput::from_slices(Samples(inputs[0].len()), &inputs, &mut outputs)
             .expect("equal lengths"),
         ctx: &ctx,
         out: &mut out,
