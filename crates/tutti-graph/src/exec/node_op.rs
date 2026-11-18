@@ -15,6 +15,7 @@ use crate::event::PortCount;
 use crate::event::{Event, EventWriter, SortedEvents, merge_into};
 use crate::history::TransportHistory;
 use crate::io::Io;
+use crate::lane::fade_gains;
 use crate::loss::Dropped;
 use crate::node::{ConstantMask, Cx, Env, InPlaceMask, MAX_PORTS, Node, SilenceMask, Status};
 use crate::param::ParamInput;
@@ -263,8 +264,8 @@ pub(super) fn fading_node_op<
         let y = st.arena.slot_mut(s, frames);
         let out = x.scratch.slot(c, frames);
         for (i, (y, &o)) in y[..n].iter_mut().zip(&out[..n]).enumerate() {
-            let (g_out, g_in) = x.law.gains(x.done + i, x.len);
-            *y = *y * F::from_f32(g_in) + o * F::from_f32(g_out);
+            let (g_out, g_in) = fade_gains::<F>(x.law, x.done + i, x.len);
+            *y = *y * g_in + o * g_out;
         }
         st.flags.set(s, 0);
     }

@@ -168,3 +168,123 @@ fn a_range_clamps_an_f64_lane_in_f64() {
     assert_eq!(out[at + len - 1], hi, "the last frame is held at the bound");
     assert_eq!(out[0], FINE, "before the ramp the base is inside the range");
 }
+
+/// A constant source in any float.
+#[derive(Clone)]
+struct Dc(f64);
+
+impl<F: Float> Node<F> for Dc {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+        io.output(0).fill(F::from_f64(self.0));
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// Doubles its input, in any float.
+#[derive(Clone)]
+struct Double;
+
+impl<F: Float> Node<F> for Double {
+    fn shape(&self) -> Shape {
+        Shape::through_unassigned(ChannelLayout::MONO)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+        let (ins, mut outs) = io.split();
+        for (o, &x) in outs.get(0).iter_mut().zip(ins.get(0)) {
+            *o = x + x;
+        }
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+fn block(exec: &mut Executor<f64>, ed: &mut Editor<f64>) -> Vec<f64> {
+    let mut out = vec![0.0f64; FRAMES];
+    exec.process(
+        FRAMES,
+        &TransportPosition::default(),
+        &[],
+        &mut [&mut out[..]],
+    );
+    ed.collect();
+    out
+}
+
+/// **An edge weight moved between blocks ramps in `f64`.** `FINE` through a
+/// weight that goes from 0.5 to 1.5 is `FINE * (0.5 + (k + 1) / n)` at frame
+/// `k` of the next block, to `f64` rounding.
+#[test]
+fn an_f64_edge_weight_ramps_in_f64() {
+    use tutti_graph::{Edge, EdgeGain, EdgeId, Sink};
+    use tutti_units::Amplitude;
+    let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
+    ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
+    let from = Source::Node(OutPort {
+        node: LANE,
+        port: 0,
+    });
+    ed.spec_mut().topology.set_outputs([from]);
+    let id = EdgeId {
+        sink: Sink::Output(0),
+        from: Edge::Direct(from),
+    };
+    ed.spec_mut()
+        .set_edge_gain(id, EdgeGain::new(Amplitude::new(0.5)));
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    let first = block(&mut exec, &mut ed);
+    assert_eq!(first[FRAMES - 1], FINE * 0.5, "a steady weight");
+    ed.set_edge_gain(id, Amplitude::new(1.5)).expect("an edge");
+    let second = block(&mut exec, &mut ed);
+    for (k, &v) in second.iter().enumerate() {
+        let want = FINE * (0.5 + (k + 1) as f64 / FRAMES as f64);
+        assert!(
+            (v - want).abs() <= 4.0 * f64::EPSILON * want,
+            "frame {k}: {v} vs {want}"
+        );
+    }
+}
+
+/// **A node's mix moved between blocks ramps in `f64`.** A doubler on `FINE`
+/// at mix `m` is `2 FINE m + FINE (1 - m)`; `m` ramps from 1 to 1/4.
+#[test]
+fn an_f64_mix_ramps_in_f64() {
+    use tutti_units::Mix;
+    let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
+    ed.insert(NodeKey(5), "dc", ForkByClone(Dc(FINE)));
+    ed.insert(LANE, "double", ForkByClone(Double));
+    ed.spec_mut().topology.connect(
+        tutti_graph::InPort {
+            node: LANE,
+            port: 0,
+        },
+        tutti_graph::Edge::Direct(Source::Node(OutPort {
+            node: NodeKey(5),
+            port: 0,
+        })),
+    );
+    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
+        node: LANE,
+        port: 0,
+    })]);
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    let first = block(&mut exec, &mut ed);
+    assert_eq!(first[FRAMES - 1], 2.0 * FINE, "wet");
+    ed.set_mix(LANE, Mix::new(0.25)).expect("a mix");
+    let second = block(&mut exec, &mut ed);
+    for (k, &v) in second.iter().enumerate() {
+        let m = 1.0 + (0.25 - 1.0) * ((k + 1) as f64 / FRAMES as f64);
+        let want = 2.0 * FINE * m + FINE * (1.0 - m);
+        assert!(
+            (v - want).abs() <= 8.0 * f64::EPSILON * want,
+            "frame {k}: {v} vs {want}"
+        );
+    }
+}

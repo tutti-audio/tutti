@@ -209,7 +209,7 @@ fn the_switch_starts_off_and_both_ends_see_it() {
     assert!(!on());
 }
 
-/// An `f64` block of 600 frames, metered through `for_f32`'s chunks of 256
+/// An `f64` block of 600 frames, metered
 /// (256, 256 and a short 88): its peak and root-mean-square are the analytic
 /// figures of the block.
 ///

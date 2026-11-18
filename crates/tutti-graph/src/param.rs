@@ -46,6 +46,7 @@ use tutti_rt::{PackedAtomic, RtScope};
 use tutti_units::{ArcDegrees, Azimuth, ParamAddr, UnitAddr, UnitParam};
 
 use crate::event::{Event, EventKind, frames_in, segment_progress};
+use crate::lane::{arc_in, fade_gains, piece_in, ramp_in, wrap_in};
 use crate::spec::EventOut;
 use tutti_curve::{FadeLaw, Law, Piece};
 
@@ -760,71 +761,6 @@ pub(crate) fn render_ramps<F: Float>(
     }
 }
 
-/// `value` as `param` holds it: wrapped onto the circle for a circular param
-/// ([`UnitParam::wrap`]), in the unit's `f64` and narrowed once to `F`.
-#[inline]
-fn wrap_in<F: Float>(param: UnitParam, value: F) -> F {
-    if param.is_circular() {
-        F::from_f64(Azimuth(value.to_f64()).wrap().get())
-    } else {
-        value
-    }
-}
-
-/// The signed move from `from` to `to` for `param` ([`UnitParam::arc`]).
-#[inline]
-fn arc_in<F: Float>(param: UnitParam, from: F, to: F) -> F {
-    if param.is_circular() {
-        F::from_f64(
-            Azimuth(from.to_f64())
-                .shortest_arc_to(Azimuth(to.to_f64()))
-                .get(),
-        )
-    } else {
-        to - from
-    }
-}
-
-/// A law's value at progress `t`, in `F`. A line is exact in `F`; a shaped
-/// law is evaluated at its own `f32` width (its exponent and curvature words
-/// are `f32`).
-#[inline]
-fn law_in<F: Float>(law: Law, t: F) -> F {
-    match law {
-        Law::Linear => {
-            if t >= F::ZERO {
-                t.min(F::ONE)
-            } else {
-                F::ZERO
-            }
-        }
-        shaped => F::from_f32(shaped.eval(t.to_f32())),
-    }
-}
-
-/// [`Piece::value`] read in `F`: `from + (to - from) * g(t)`, a circular
-/// param along the short arc.
-#[inline]
-fn piece_in<F: Float>(param: Option<UnitParam>, from: F, to: F, law: Law, t: F) -> F {
-    let g = law_in(law, t);
-    match param {
-        Some(p) if p.is_circular() => wrap_in(p, from + arc_in(p, from, to) * g),
-        _ => from + (to - from) * g,
-    }
-}
-
-/// [`Piece::ramp_at`] read in `F`: frame `k` of an `n`-frame linear ramp,
-/// landing exactly on `to` on its last frame.
-#[inline]
-fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: usize, n: usize) -> F {
-    if k + 1 >= n {
-        to
-    } else {
-        let count = |i: usize| F::from_f64(i as f64);
-        piece_in(param, from, to, Law::Linear, count(k + 1) / count(n))
-    }
-}
-
 /// The live range of each of one key's declared param ports: what the fused
 /// step clamps a modulated value to, read once per block.
 ///
@@ -1177,9 +1113,7 @@ impl<F: Float> ParamState<F> {
                 if j >= d {
                     break;
                 }
-                // The fade law's gains are `f32`.
-                let (out, inn) = FadeLaw::EqualAmplitude.gains(j, d);
-                let (out, inn) = (F::from_f32(out), F::from_f32(inn));
+                let (out, inn) = fade_gains::<F>(FadeLaw::EqualAmplitude, j, d);
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.

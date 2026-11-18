@@ -47,7 +47,7 @@ use tutti_rt::{ControlDrop, LevelReader, LevelSpan, LevelWriter, level_cell};
 use tutti_units::{Amplitude, Samples};
 
 use crate::exec::SILENT;
-use crate::slots::{AudioSlots, SlotFlags, for_f32};
+use crate::slots::{AudioSlots, SlotFlags};
 use tutti_buffers::Float;
 
 /// What one lane measured since it was last read.
@@ -87,26 +87,26 @@ struct Shared {
     enabled: AtomicBool,
 }
 
-/// One block's figures for one lane.
+/// One block's figures for one lane, in the graph's float.
 #[derive(Clone, Copy)]
-struct BlockStats {
-    peak: f32,
-    sum_sq: f32,
+struct BlockStats<F: Float> {
+    peak: F,
+    sum_sq: F,
 }
 
 /// Samples a pass folds at once. The partial sums are a fixed shape, so the
 /// result is the same on every executor and the loop vectorizes (a plain
-/// left-to-right `f32` sum cannot).
+/// left-to-right sum cannot).
 const WIDTH: usize = 8;
 
 /// Peak and sum of squares of `block`: `WIDTH` running figures per pass,
 /// combined in lane order at the end, then the tail in order. NaN is ignored
-/// by the peak (`f32::max`) and poisons the sum.
+/// by the peak (`Float::max`) and poisons the sum.
 #[inline]
-fn block_stats(block: &[f32]) -> BlockStats {
+fn block_stats<F: Float>(block: &[F]) -> BlockStats<F> {
     let (chunks, tail) = block.as_chunks::<WIDTH>();
-    let mut peak = [0.0f32; WIDTH];
-    let mut sum = [0.0f32; WIDTH];
+    let mut peak = [F::ZERO; WIDTH];
+    let mut sum = [F::ZERO; WIDTH];
     for chunk in chunks {
         for i in 0..WIDTH {
             peak[i] = peak[i].max(chunk[i].abs());
@@ -114,8 +114,8 @@ fn block_stats(block: &[f32]) -> BlockStats {
         }
     }
     let mut stats = BlockStats {
-        peak: peak.iter().fold(0.0, |a, &p| a.max(p)),
-        sum_sq: sum.iter().sum(),
+        peak: peak.iter().fold(F::ZERO, |a, &p| a.max(p)),
+        sum_sq: sum.iter().fold(F::ZERO, |a, &x| a + x),
     };
     for &s in tail {
         stats.peak = stats.peak.max(s.abs());
@@ -155,22 +155,14 @@ pub(crate) fn meter_op<F: Float, A: AudioSlots<F> + ?Sized, Fl: SlotFlags + ?Siz
     for (lane, &src) in meter.lanes.iter_mut().zip(srcs) {
         let stats = if flags.get(src) & SILENT != 0 {
             BlockStats {
-                peak: 0.0,
-                sum_sq: 0.0,
+                peak: F::ZERO,
+                sum_sq: F::ZERO,
             }
         } else {
-            let mut stats = BlockStats {
-                peak: 0.0,
-                sum_sq: 0.0,
-            };
-            for_f32(arena.slot(src, frames), |chunk| {
-                let part = block_stats(chunk);
-                stats.peak = stats.peak.max(part.peak);
-                stats.sum_sq += part.sum_sq;
-            });
-            stats
+            block_stats(arena.slot(src, frames))
         };
-        lane.fold(stats.peak, f64::from(stats.sum_sq), n);
+        // The level readings are `f32` amplitudes: the peak narrows once per block.
+        lane.fold(stats.peak.to_f32(), stats.sum_sq.to_f64(), n);
     }
 }
 

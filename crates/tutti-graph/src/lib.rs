@@ -601,6 +601,7 @@ mod inlet;
 mod instrument;
 mod io;
 mod kernels;
+mod lane;
 mod latency;
 mod loss;
 mod meter;

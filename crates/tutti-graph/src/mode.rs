@@ -106,7 +106,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use tutti_curve::{FadeLaw, Piece};
+use tutti_curve::FadeLaw;
 use tutti_types::{AtomicF32, ParamCell};
 use tutti_units::{Mix, UnitAddr, UnitParam};
 
@@ -115,6 +115,7 @@ use crate::arena::Arena;
 use crate::event::Event;
 use crate::held::Held;
 use crate::kernels::AudioRing;
+use crate::lane::{fade_gains, ramp_in};
 use crate::node::Shape;
 use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
 use crate::pass::Pass;
@@ -167,11 +168,11 @@ impl NodeMode {
     }
 
     /// The weights a steady mode holds, at mix `m` (only Active reads it).
-    fn weights(self, m: f32) -> Weights {
+    fn weights<F: Float>(self, m: F) -> Weights<F> {
         match self {
             Self::Active => Weights {
                 node: m,
-                input: 1.0 - m,
+                input: F::ONE - m,
             },
             Self::Bypassed => Weights::BYPASSED,
             Self::Muted => Weights::MUTED,
@@ -364,27 +365,27 @@ impl ModeCell {
 
 /// How much of the node's output and of the aligned input a node op writes.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Weights {
+pub(crate) struct Weights<F: Float> {
     /// The node's own output (`y`).
-    pub(crate) node: f32,
+    pub(crate) node: F,
     /// The aligned input (`x`).
-    pub(crate) input: f32,
+    pub(crate) input: F,
 }
 
-impl Weights {
+impl<F: Float> Weights<F> {
     pub(crate) const BYPASSED: Self = Self {
-        node: 0.0,
-        input: 1.0,
+        node: F::ZERO,
+        input: F::ONE,
     };
     pub(crate) const MUTED: Self = Self {
-        node: 0.0,
-        input: 0.0,
+        node: F::ZERO,
+        input: F::ZERO,
     };
 
     /// These weights moved `g` of the way to `to`. At `g` one of the two ends
     /// of a toggle from a steady mode this is exactly `1 - g` and `g` (the
     /// `gains` of [`FadeLaw`]): `1 + (0 - 1) * g` and `0 + (1 - 0) * g`.
-    fn toward(self, to: Self, g: f32) -> Self {
+    fn toward(self, to: Self, g: F) -> Self {
         Self {
             node: self.node + (to.node - self.node) * g,
             input: self.input + (to.input - self.input) * g,
@@ -395,8 +396,8 @@ impl Weights {
 /// A fade in progress: from the weights the unit had when it began, to its
 /// mode's, `k` frames of [`DECLICK`](crate::DECLICK) done.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Ramp {
-    from: Weights,
+pub(crate) struct Ramp<F: Float> {
+    from: Weights<F>,
     k: usize,
 }
 
@@ -404,18 +405,18 @@ pub(crate) struct Ramp {
 /// input alone, then the frames of `ramp`, then `steady`, all against the
 /// block's `mix`.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Segments {
+pub(crate) struct Segments<F: Float> {
     pub(crate) warm: usize,
-    pub(crate) ramp: Option<RampRun>,
+    pub(crate) ramp: Option<RampRun<F>>,
     pub(crate) steady: NodeMode,
-    pub(crate) mix: MixRun,
+    pub(crate) mix: MixRun<F>,
 }
 
 /// The part of a fade a block runs: from the weights the fade began at, toward
 /// the weights of `heading` at each frame's mix.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct RampRun {
-    from: Weights,
+pub(crate) struct RampRun<F: Float> {
+    from: Weights<F>,
     heading: NodeMode,
     /// The fade's frame the block's first ramp frame is.
     k: usize,
@@ -430,9 +431,9 @@ pub(crate) struct RampRun {
 /// values handed beside it: a `&[f32]` of `frames`, which every method that
 /// reads a frame takes as `lane`).
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct MixRun {
-    from: f32,
-    to: f32,
+pub(crate) struct MixRun<F: Float> {
+    from: F,
+    to: F,
     frames: usize,
     driven: bool,
 }
@@ -450,12 +451,12 @@ pub(crate) enum MixState {
     Moving,
 }
 
-impl MixRun {
+impl<F: Float> MixRun<F> {
     /// Whether the whole block is steady [`Mix::WET`]: nothing to blend.
     pub(crate) fn is_wet(&self) -> bool {
         !self.driven
-            && self.from.to_bits() == 1.0f32.to_bits()
-            && self.to.to_bits() == 1.0f32.to_bits()
+            && self.from.to_f64().to_bits() == 1.0f64.to_bits()
+            && self.to.to_f64().to_bits() == 1.0f64.to_bits()
     }
 
     /// Which of the four things a block's mix is.
@@ -464,7 +465,7 @@ impl MixRun {
             MixState::Wet
         } else if !self.is_static() {
             MixState::Moving
-        } else if self.to == 0.0 {
+        } else if self.to == F::ZERO {
             MixState::Dry
         } else {
             MixState::Between
@@ -474,30 +475,30 @@ impl MixRun {
     /// Whether the mix does not move across the block (a driven block moves
     /// at every frame, whatever its ends are).
     fn is_static(&self) -> bool {
-        !self.driven && self.from.to_bits() == self.to.to_bits()
+        !self.driven && self.from.to_f64().to_bits() == self.to.to_f64().to_bits()
     }
 
     /// The mix at frame `i` of the block; `lane` is the driving lane's values
     /// (read only when the block is driven).
     #[inline]
-    fn at(&self, i: usize, lane: &[f32]) -> f32 {
+    fn at(&self, i: usize, lane: &[F]) -> F {
         if self.driven {
             lane[i]
         } else if self.is_static() {
             self.to
         } else {
-            Piece::ramp_at(None, self.from, self.to, i, self.frames)
+            ramp_in(None, self.from, self.to, i, self.frames)
         }
     }
 
     /// The mix of the block's last frame (a ramp's last sample, which
     /// `from + (to - from) * 1.0` need not make exactly `to`).
-    fn last(&self, lane: &[f32]) -> f32 {
+    fn last(&self, lane: &[F]) -> F {
         self.at(self.frames - 1, lane)
     }
 }
 
-impl Segments {
+impl<F: Float> Segments<F> {
     /// Whether the whole block is one steady mode.
     pub(crate) fn is_steady(&self) -> bool {
         self.warm == 0 && self.ramp.is_none()
@@ -514,7 +515,7 @@ impl Segments {
     /// `Mix::WET` it leaves `out` alone and at `Mix::DRY` it copies `x`.
     /// `lane` is the driving lane's value at each frame of a driven block
     /// (empty otherwise).
-    pub(crate) fn blend<F: Float>(&self, out: &mut [F], x: Option<&[F]>, lane: &[f32]) {
+    pub(crate) fn blend(&self, out: &mut [F], x: Option<&[F]>, lane: &[F]) {
         let put = |out: &mut [F], range: std::ops::Range<usize>| match x {
             Some(x) => out[range.clone()].copy_from_slice(&x[range]),
             None => out[range].fill(F::ZERO),
@@ -527,9 +528,9 @@ impl Segments {
                 let i = at + j;
                 let to = r.heading.weights(self.mix.at(i, lane));
                 let w = r.from.toward(to, gain(r.k + j, r.declick));
-                let node_on = r.from.node != 0.0 || to.node != 0.0;
-                let input_on = input && (r.from.input != 0.0 || to.input != 0.0);
-                let (node, input) = (F::from_f32(w.node), F::from_f32(w.input));
+                let node_on = r.from.node != F::ZERO || to.node != F::ZERO;
+                let input_on = input && (r.from.input != F::ZERO || to.input != F::ZERO);
+                let (node, input) = (w.node, w.input);
                 out[i] = match (node_on, input_on) {
                     (true, true) => out[i] * node + x.map_or(F::ZERO, |x| x[i]) * input,
                     (true, false) => out[i] * node,
@@ -547,7 +548,7 @@ impl Segments {
     }
 
     /// The steady Active frames from `at` on, against the block's mix.
-    fn blend_active<F: Float>(&self, out: &mut [F], x: Option<&[F]>, at: usize, lane: &[f32]) {
+    fn blend_active(&self, out: &mut [F], x: Option<&[F]>, at: usize, lane: &[F]) {
         let m = self.mix;
         if m.is_wet() {
             return;
@@ -555,18 +556,16 @@ impl Segments {
         if m.is_static() {
             let w = m.to;
             match x {
-                _ if w == 1.0 => {}
-                Some(x) if w == 0.0 => out[at..].copy_from_slice(&x[at..]),
-                None if w == 0.0 => out[at..].fill(F::ZERO),
+                _ if w == F::ONE => {}
+                Some(x) if w == F::ZERO => out[at..].copy_from_slice(&x[at..]),
+                None if w == F::ZERO => out[at..].fill(F::ZERO),
                 Some(x) => {
-                    let wx = F::from_f32(1.0 - w);
-                    let w = F::from_f32(w);
+                    let wx = F::ONE - w;
                     for (o, &x) in out[at..].iter_mut().zip(&x[at..]) {
                         *o = *o * w + x * wx;
                     }
                 }
                 None => {
-                    let w = F::from_f32(w);
                     for o in &mut out[at..] {
                         *o *= w;
                     }
@@ -577,16 +576,16 @@ impl Segments {
         for i in at..out.len() {
             let w = m.at(i, lane);
             out[i] = match x {
-                Some(x) => out[i] * F::from_f32(w) + x[i] * F::from_f32(1.0 - w),
-                None => out[i] * F::from_f32(w),
+                Some(x) => out[i] * w + x[i] * (F::ONE - w),
+                None => out[i] * w,
             };
         }
     }
 }
 
 /// The incoming gain of frame `k` of the `declick`-frame fade.
-fn gain(k: usize, declick: usize) -> f32 {
-    FadeLaw::EqualAmplitude.gains(k, declick).1
+fn gain<F: Float>(k: usize, declick: usize) -> F {
+    fade_gains::<F>(FadeLaw::EqualAmplitude, k, declick).1
 }
 
 /// The aligned-input path of a latent node: one ring of its declared latency
@@ -621,13 +620,13 @@ pub(crate) struct ModeState<F: Float> {
     plain: bool,
     /// The mix the previous block was given, and this block's snapshot of
     /// the cell: the ends of this block's ramp.
-    mix_from: f32,
-    mix_to: f32,
+    mix_from: F,
+    mix_to: F,
     /// The mode the weights are heading for.
     heading: NodeMode,
     /// The weights as the last frame left them.
-    weights: Weights,
-    ramp: Option<Ramp>,
+    weights: Weights<F>,
+    ramp: Option<Ramp<F>>,
     /// Frames of the aligned input left to hear before the fade in.
     warm: usize,
     /// The node has not run since it was parked: un-bypassing resets it.
@@ -654,7 +653,7 @@ pub(crate) struct ModeState<F: Float> {
     /// a plan first drives this unit's mix ([`drive_with`](Self::drive_with))
     /// and kept for the unit's life, so no commit frees one on the audio
     /// thread (an idle one costs `max_block` floats and no work).
-    drive: Option<ParamState<f32>>,
+    drive: Option<ParamState<F>>,
     /// Whether this block's lane delivered frames: they replace the ramp.
     lane_on: bool,
     /// Whether the unit has run a block: a lane built for a unit that has is
@@ -672,7 +671,7 @@ impl<F: Float> ModeState<F> {
     pub(crate) fn new(cell: ModeCell, shape: &Shape, max_block: usize, declick: usize) -> Self {
         let own_bypass = shape.own_bypass;
         let mode = Self::read(own_bypass, cell.load());
-        let mix = cell.load_mix().get();
+        let mix = F::from_f32(cell.load_mix().get());
         let pass = Pass::<F>::of_or_nothing(shape);
         let main = pass.inputs();
         let folded = pass.folds().then(|| Arena::new(pass.outputs(), max_block));
@@ -719,11 +718,7 @@ impl<F: Float> ModeState<F> {
     /// which fades to the base and then idles. A `lane` the unit has no use
     /// for goes to `spare`, to be freed on the control side. Allocates
     /// nothing.
-    pub(crate) fn drive_with(
-        &mut self,
-        mut lane: ParamState<f32>,
-        spare: &mut Vec<ParamState<f32>>,
-    ) {
+    pub(crate) fn drive_with(&mut self, mut lane: ParamState<F>, spare: &mut Vec<ParamState<F>>) {
         if self.drive.is_some() {
             spare.push(lane);
             return;
@@ -757,7 +752,7 @@ impl<F: Float> ModeState<F> {
 
     /// The driving lane's value at each frame of this block: empty unless the
     /// lane delivered ([`drive_step`](Self::drive_step)).
-    pub(crate) fn lane(&self, frames: usize) -> &[f32] {
+    pub(crate) fn lane(&self, frames: usize) -> &[F] {
         self.drive
             .as_ref()
             .filter(|_| self.lane_on)
@@ -776,7 +771,7 @@ impl<F: Float> ModeState<F> {
         // The mix advances every block, parked or silent or not, so a move
         // made while the node was out has arrived when it is heard.
         self.mix_from = self.mix_to;
-        self.mix_to = self.cell.load_mix().get();
+        self.mix_to = F::from_f32(self.cell.load_mix().get());
         self.plain = self.inert
             || (self.seen == NodeMode::Active
                 && self.heading == NodeMode::Active
@@ -789,7 +784,7 @@ impl<F: Float> ModeState<F> {
     }
 
     /// The block's mix: the previous block's to this one's, across `frames`.
-    fn mix_run(&self, frames: usize) -> MixRun {
+    fn mix_run(&self, frames: usize) -> MixRun<F> {
         MixRun {
             from: self.mix_from,
             to: self.mix_to,
@@ -883,7 +878,7 @@ impl<F: Float> ModeState<F> {
             || self.heading == NodeMode::Bypassed
             || (self.heading == NodeMode::Active && !self.mix_run(0).is_wet())
             || self.ramp.is_some_and(|r| {
-                r.from.input != 0.0 || self.heading.weights(self.mix_to).input != 0.0
+                r.from.input != F::ZERO || self.heading.weights(self.mix_to).input != F::ZERO
             })
     }
 
@@ -994,11 +989,11 @@ impl<F: Float> ModeState<F> {
     }
 
     /// This block's segments, and advance the state past them.
-    pub(crate) fn step(&mut self, frames: usize) -> Segments {
+    pub(crate) fn step(&mut self, frames: usize) -> Segments<F> {
         let warm = self.warm.min(frames);
         self.warm -= warm;
         let mix = self.mix_run(frames);
-        let lane: &[f32] = self
+        let lane: &[F] = self
             .drive
             .as_ref()
             .filter(|_| self.lane_on)
@@ -1025,7 +1020,7 @@ impl<F: Float> ModeState<F> {
             });
             r.k += len;
             let to = self.heading.weights(mix.at(warm + len - 1, lane));
-            self.weights = r.from.toward(to, gain(r.k - 1, declick));
+            self.weights = r.from.toward(to, gain::<F>(r.k - 1, declick));
             if r.k == declick {
                 self.ramp = None;
             }
