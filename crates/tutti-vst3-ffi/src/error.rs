@@ -58,22 +58,6 @@ impl Vst3Error {
             c => Self::Other(c),
         }
     }
-
-    /// The raw `tresult` this stands for.
-    #[must_use]
-    pub fn code(self) -> tresult {
-        match self {
-            Self::False => kResultFalse,
-            Self::InvalidArgument => kInvalidArgument,
-            Self::NotImplemented => kNotImplemented,
-            Self::InternalError => kInternalError,
-            Self::NotInitialized => kNotInitialized,
-            Self::OutOfMemory => kOutOfMemory,
-            Self::NoInterface => kNoInterface,
-            Self::Busy => kInternalError,
-            Self::Other(code) => code,
-        }
-    }
 }
 
 /// `kResultOk` (and so `kResultTrue`) is success; any other code is the error
@@ -96,21 +80,20 @@ pub(crate) fn is_ok(code: tresult) -> bool {
 mod tests {
     use super::*;
 
-    /// Every named variant round-trips through its code, and an unnamed code
-    /// keeps its value.
+    /// Every SDK code names its variant, and an unnamed code keeps its value.
     #[test]
-    fn a_code_round_trips_through_its_name() {
-        for e in [
-            Vst3Error::False,
-            Vst3Error::InvalidArgument,
-            Vst3Error::NotImplemented,
-            Vst3Error::InternalError,
-            Vst3Error::NotInitialized,
-            Vst3Error::OutOfMemory,
-            Vst3Error::NoInterface,
-            Vst3Error::Other(12345),
+    fn a_code_names_its_variant() {
+        for (code, name) in [
+            (kResultFalse, Vst3Error::False),
+            (kInvalidArgument, Vst3Error::InvalidArgument),
+            (kNotImplemented, Vst3Error::NotImplemented),
+            (kInternalError, Vst3Error::InternalError),
+            (kNotInitialized, Vst3Error::NotInitialized),
+            (kOutOfMemory, Vst3Error::OutOfMemory),
+            (kNoInterface, Vst3Error::NoInterface),
+            (12345, Vst3Error::Other(12345)),
         ] {
-            assert_eq!(Vst3Error::from_code(e.code()), e);
+            assert_eq!(Vst3Error::from_code(code), name);
         }
     }
 

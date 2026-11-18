@@ -44,14 +44,14 @@ impl Vst3Loaded {
                 )),
                 EditorError::Attach(e) => Vst3Error::PluginError {
                     stage: LoadStage::Initialization,
-                    code: e.code(),
+                    source: e,
                 },
                 _ => Vst3Error::EditorError("Failed to open the plugin editor".to_string()),
             })?;
 
         Ok(size.unwrap_or_else(|| {
             let (width, height) = tutti_plugin_types::EditorUnit::DEFAULT_EXTENT;
-            tutti_vst3_ffi::rect_size(width, height)
+            tutti_plugin_types::EditorUnit::WINDOWING.size(width, height)
         }))
     }
 
@@ -65,12 +65,12 @@ impl Vst3Loaded {
 
     /// What the plugin has registered with this host's run loop, and how much
     /// the host has dispatched. Test-only observation seam behind the
-    /// `conformance` feature — see [`RunLoopActivity`](crate::RunLoopActivity).
+    /// `conformance` feature — see [`RunLoopActivity`](tutti_vst3_ffi::RunLoopActivity).
     ///
     /// All-zero off Linux, where the OS owns the run loop and plugins register
     /// nothing with the host, so callers need no `cfg` of their own.
     #[cfg(feature = "conformance")]
-    pub fn run_loop_activity(&self) -> crate::RunLoopActivity {
+    pub fn run_loop_activity(&self) -> tutti_vst3_ffi::RunLoopActivity {
         self.plugin.run_loop_activity()
     }
 
@@ -151,7 +151,7 @@ impl Vst3Loaded {
             .resize_editor(main, requested)
             .map_err(|e| Vst3Error::PluginError {
                 stage: LoadStage::Initialization,
-                code: e.code(),
+                source: e,
             })
     }
 }

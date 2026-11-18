@@ -89,23 +89,31 @@ mod view;
 pub use audio::{AudioSide, FlushIo, ProcessIo};
 pub use bus_buffers::{BoundBuses, BusBuffers};
 #[cfg(feature = "conformance")]
+#[doc(hidden)]
 pub use com::RunLoopActivity;
+#[cfg(feature = "conformance")]
+#[doc(hidden)]
+pub use com::SYSEX_OUT_ROOM;
 pub use com::{
     Busy, ComponentHandler, EVENT_CAPACITY, EventList, MIN_POINT_ROOM, NOTE_EXPRESSION_ROOM,
     NOTIFICATION_CAPACITY, PROGRESS_DESCRIPTION_CAPACITY, ParamStaging, ParameterChangesImpl,
     ParameterEditEvent, PluginNotification, ProgressDescription, ProgressEvent, ProgressKind,
-    RestartFlags, SYSEX_OUT_ROOM, Staged, Staging, UnitEvent,
+    RestartFlags, Staged, Staging, UnitEvent,
 };
 #[cfg(feature = "conformance")]
+#[doc(hidden)]
 pub use conformance::{Observer, clear_observer, set_observer};
 pub use error::Vst3Error;
 pub use module::{ClassInfo, CreateError, FactoryFlags, FactoryInfo, LoadError, Module};
 pub use plugin::{BusDirection, MediaType, MidiLearn, Plugin};
-pub use sdk::{SdkEnum, Zeroable, cid_to_string, guid_as_tuid, sdk_enum_i32, sdk_enum_u32, zeroed};
+pub use sdk::{cid_to_string, sdk_enum_i32, sdk_enum_u32};
 pub use types::*;
+pub use view::EditorError;
+/// The view functions the host-conformance tests drive against a stub view.
+#[cfg(feature = "conformance")]
+#[doc(hidden)]
 pub use view::{
-    EditorError, detach_view, platform_type_refused, rect_size, send_key_down, send_key_up,
-    send_wheel, set_view_focus,
+    detach_view, platform_type_refused, send_key_down, send_key_up, send_wheel, set_view_focus,
 };
 
 // Test-only global allocator for the allocation-free regression tests. Panics

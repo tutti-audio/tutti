@@ -123,7 +123,6 @@
 1 crates/tutti-vst3-host/src/events/legacy_cc.rs
 2 crates/tutti-vst3-host/src/host/control.rs
 1 crates/tutti-vst3-host/src/host/keys.rs
-1 crates/tutti-vst3-host/src/host/loaded/mod.rs
 1 crates/tutti-vst3-host/src/host/loaded/parameters.rs
 1 crates/tutti-vst3-host/src/host/midi_learn.rs
 3 crates/tutti-vst3-host/src/host/midi_mapping.rs

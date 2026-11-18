@@ -7,7 +7,7 @@ use tutti_plugin_types::{BusRole, MainThreadMarker, PluginBus, PluginBuses};
 impl Vst3Loaded {
     /// Reads the current processing latency directly from
     /// `IAudioProcessor::getLatencySamples`. Call this at load time and
-    /// whenever [`RestartOutcome::latency_changed`] is set to get the fresh
+    /// whenever [`RestartFlags::LATENCY_CHANGED`](tutti_vst3_ffi::RestartFlags::LATENCY_CHANGED) is set to get the fresh
     /// value for PDC.
     pub fn latency_samples(&self, _main: MainThreadMarker) -> u32 {
         self.plugin.latency_samples()
@@ -40,7 +40,7 @@ impl Vst3Loaded {
     pub fn set_audio_presentation_latency(
         &mut self,
         main: MainThreadMarker,
-        dir: crate::BusDirection,
+        dir: tutti_vst3_ffi::BusDirection,
         bus_index: i32,
         latency_samples: u32,
     ) -> bool {

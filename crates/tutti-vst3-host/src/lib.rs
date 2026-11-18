@@ -162,17 +162,20 @@
 //!
 //! // One drain, four kinds of news — not a poller per kind. Edits, progress and
 //! // unit news come to the closure in arrival order; `restartComponent` requests
-//! // are coalesced into the returned outcome, because acting on one means a
+//! // are coalesced into the returned `RestartFlags`, because acting on one means a
 //! // deactivate/reactivate cycle the loaded type cannot perform itself. Nothing is
 //! // collected for you, so the poll allocates nothing.
-//! use tutti_vst3_host::PluginNotification;
+//! use tutti_vst3_ffi::PluginNotification;
 //! let mut edits = 0;
 //! let restart = plugin.poll_plugin_notifications(main, |news| {
 //!     if let PluginNotification::Edit(_) = news {
 //!         edits += 1;
 //!     }
 //! });
-//! println!("{edits} param edits; latency changed: {}", restart.latency_changed);
+//! println!(
+//!     "{edits} param edits; latency changed: {}",
+//!     restart.contains(tutti_vst3_ffi::RestartFlags::LATENCY_CHANGED)
+//! );
 //! # Ok(()) }
 //! ```
 //!
@@ -256,7 +259,7 @@
 //! callbacks allocates, since plugins call some of them from their process thread:
 //! restart requests are two atomic words (the flags, and the core's requests), and
 //! the rest go on a bounded queue of inline values whose overflow is counted in
-//! `Vst3Loaded::dropped_notifications` and reported once by the next poll. A caller
+//! `Vst3Loaded::dropped_notifications` and reported by the next poll as a parameter-values restart. A caller
 //! on an audio thread that needs only the restarts reads them with
 //! `Vst3Loaded::take_requests` (or `take_restart`), and drops the rest with
 //! `Vst3Loaded::discard_notifications`.
@@ -317,9 +320,8 @@ pub use events::{
     Utf16Scale, Utf16Text, drain_midi, event_text, expression_type_from_id, expression_type_id,
 };
 pub use host::{
-    ControllerMapping, FactoryFlags, FactoryInfo, Library, LoadOptions, ProcessFailed,
-    ProcessorAny, RestartOutcome, Vst3Controller, Vst3Editor, Vst3Loaded, Vst3Processor, class_id,
-    descriptor_of,
+    ControllerMapping, Library, LoadOptions, ProcessFailed, ProcessorAny, Vst3Controller,
+    Vst3Editor, Vst3Loaded, Vst3Processor, class_id, descriptor_of,
 };
 pub use types::{
     BusInfo, BusType, ContentScale, EditorCapabilities, KeyswitchKind, NoteExpressionFlags,
@@ -329,15 +331,6 @@ pub use types::{
     TransportInfo, UnitId, Vst3KeyswitchInfo, Vst3NoteExpressionInfo, Vst3ParameterInfo,
     Vst3ProgramListInfo, Vst3Sample, Vst3UnitInfo, WindowHandle, WireMidi, to_process_context,
 };
-
-pub use tutti_vst3_ffi::{
-    BusDirection, MediaType, NOTIFICATION_CAPACITY, PROGRESS_DESCRIPTION_CAPACITY,
-    ParameterEditEvent, PluginNotification, ProgressDescription, ProgressEvent, ProgressKind,
-    RestartFlags, UnitEvent, Vst3Error as StatusError,
-};
-
-#[cfg(feature = "conformance")]
-pub use tutti_vst3_ffi::RunLoopActivity;
 
 // Test-only global allocator for RT-safety regression tests. Panics on
 // any heap allocation inside `assert_no_alloc::assert_no_alloc(..)` scopes.
