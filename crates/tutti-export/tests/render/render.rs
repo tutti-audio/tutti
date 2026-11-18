@@ -570,7 +570,7 @@ fn normalized_audio_can_be_written_to_every_format() {
     let rd = hound::WavReader::open(&p).unwrap();
     let peak = rd
         .into_samples::<i32>()
-        .map(|x| (x.unwrap() as f32 / 8_388_607.0).abs())
+        .map(|x| (x.unwrap() as f32 / 8_388_608.0).abs())
         .fold(0.0f32, f32::max);
     assert!(
         (peak - 0.25).abs() < 0.01,

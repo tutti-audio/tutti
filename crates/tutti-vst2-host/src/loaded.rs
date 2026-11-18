@@ -218,6 +218,21 @@ pub(crate) struct AudioSide {
     pub(crate) time_info: TransportWriter,
     /// Per-block MIDI plumbing (host→plugin staging, plugin→host drain).
     pub(crate) midi: MidiIo,
+    /// What blocks have reported of the plugin's losses, so each is reported once
+    /// across activations, including what was counted between them.
+    pub(crate) told: LossesTold,
+}
+
+/// The totals of the loss counters that `Vst2Processor::render` has put in a
+/// `ProcessOutput`.
+#[derive(Default)]
+pub(crate) struct LossesTold {
+    /// MIDI lost on the way in to the plugin.
+    pub(crate) midi_in: u64,
+    /// The plugin's MIDI out lost on the way out.
+    pub(crate) midi_out: u64,
+    /// Audio entries the plugin refused.
+    pub(crate) entries: u64,
 }
 
 impl std::fmt::Debug for Vst2Loaded {
@@ -485,6 +500,7 @@ impl Vst2Loaded {
             audio: Some(AudioSide {
                 time_info,
                 midi: MidiIo::new(midi_out_q, &midi_out_dropped),
+                told: LossesTold::default(),
             }),
             metadata,
             descriptor,

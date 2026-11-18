@@ -388,7 +388,7 @@ fn a_sampler_render_survives_integer_quantization() {
     let channels = reader.spec().channels as usize;
     let left: Vec<f32> = reader
         .into_samples::<i32>()
-        .map(|s| s.unwrap() as f32 / 32_767.0)
+        .map(|s| s.unwrap() as f32 / 32_768.0)
         .step_by(channels)
         .collect();
 

@@ -655,6 +655,34 @@ fn the_shape_declares_the_plugins_buses() {
     }
 }
 
+/// **A block whose plugin refuses its audio entry is counted though it carries no MIDI**:
+/// the plugin raises its input count past the buffer it was activated with (before the host
+/// restarts it), so every entry is refused, the block renders silence without failing, and
+/// the node's `refused_entries` says so.
+fn a_refused_block_with_no_midi_is_counted() {
+    let _guard = lock_probe();
+    let mut loaded = load();
+    drive_block(&mut loaded.unit);
+    assert_eq!(
+        loaded.unit.refused_entries(),
+        0,
+        "a live plugin refuses none"
+    );
+
+    probe_call(&loaded.path, b"tutti_vst2_probe_fire_io_changed\0", |sym| {
+        // SAFETY: the probe exports this symbol with exactly this signature.
+        let f: extern "C" fn(i32, i32) -> isize = unsafe { std::mem::transmute(*sym) };
+        f(0, 64)
+    });
+    process_block(&mut loaded.unit, BLOCK);
+    assert!(
+        loaded.unit.refused_entries() > 0,
+        "the plugin's refusal reaches the node"
+    );
+    assert_eq!(loaded.unit.failed_blocks(), 0, "the block did not fail");
+    drop(loaded.handle);
+}
+
 /// The cases run on the process's main thread (`harness = false`): the node's `prepare`
 /// and a fork tell the plugin at once only there.
 fn main() {
@@ -671,5 +699,6 @@ fn main() {
         a_block_past_the_announced_maximum_is_split_before_the_plugin,
         an_io_change_reaches_a_subscriber_and_the_shape,
         the_shape_declares_the_plugins_buses,
+        a_refused_block_with_no_midi_is_counted,
     ]);
 }

@@ -143,6 +143,9 @@ impl NodeControls {
     /// bridge thread drained its queue at a crash and exited: it was accepted,
     /// and nothing reads it again (and no message can splice past a dead
     /// server).
+    /// Counted in the node's events (UMP packets). What the plugin's own host
+    /// refuses after receiving them (a SysEx it drops whole, a message of a Group it
+    /// cannot hear) is in its own unit and is not here.
     /// RT-safe: two relaxed loads.
     pub fn dropped_midi_in(&self) -> u64 {
         self.delivery.dropped_midi_in()

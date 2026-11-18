@@ -37,6 +37,7 @@
 use crate::types::TransportInfo;
 // Shared with the VST3 path so the two cannot drift apart.
 use tutti_plugin_types::{AutomationMode, SampleRate};
+use tutti_units::{Beat, Bpm};
 
 /// The transport bits whose transition defines `TRANSPORT_CHANGED`.
 ///
@@ -152,6 +153,55 @@ pub(crate) fn build_vst2_time_info(
         flags: flags.bits(),
         ..Default::default()
     }
+}
+
+/// The snapshot for the next piece of a split block, `frames` after `t`: sample position,
+/// host time and (while rolling) the musical position move on, the bar start moves to the
+/// last bar line the position has passed, and `samplesToNextClock` is measured again at the
+/// new position (or `kVstClockValid` is cleared when it cannot be); `kVstTransportChanged`
+/// was an edge of the block's first piece and does not repeat.
+pub(crate) fn advance_time_info(
+    mut t: vst::api::TimeInfo,
+    frames: usize,
+    sample_rate: SampleRate,
+) -> vst::api::TimeInfo {
+    use vst::api::TimeInfoFlags as F;
+    let flags = F::from_bits_truncate(t.flags);
+    let secs = frames as f64 / sample_rate.get();
+    t.sample_pos += frames as f64;
+    if flags.contains(F::NANOSECONDS_VALID) {
+        t.nanoseconds += secs * 1e9;
+    }
+    if flags.contains(F::TRANSPORT_PLAYING)
+        && flags.contains(F::PPQ_POS_VALID)
+        && flags.contains(F::TEMPO_VALID)
+    {
+        t.ppq_pos += secs * t.tempo / 60.0;
+        if flags.contains(F::VST_CLOCK_VALID) {
+            // The nearest 24-ppq clock moves with the position.
+            let clock = Bpm::new(t.tempo).and_then(|tempo| {
+                TransportInfo::new(sample_rate)
+                    .with_tempo(tempo)
+                    .with_beat(Beat(t.ppq_pos))
+                    .samples_to_nearest_clock()
+            });
+            match clock {
+                Some(samples) => t.samples_to_next_clock = samples,
+                // No grid to measure on: the stale figure is not claimed.
+                None => t.flags &= !F::VST_CLOCK_VALID.bits(),
+            }
+        }
+        // A bar line inside the piece: the bar is `numerator` beats of
+        // `4 / denominator` quarters.
+        if flags.contains(F::BARS_VALID) && t.time_sig_denominator > 0 {
+            let bar = f64::from(t.time_sig_numerator) * 4.0 / f64::from(t.time_sig_denominator);
+            if bar > 0.0 && t.ppq_pos >= t.bar_start_pos + bar {
+                t.bar_start_pos += ((t.ppq_pos - t.bar_start_pos) / bar).floor() * bar;
+            }
+        }
+    }
+    t.flags &= !F::TRANSPORT_CHANGED.bits();
+    t
 }
 
 #[cfg(test)]
@@ -456,5 +506,31 @@ mod tests {
         assert_eq!(info.flags & F::VST_CLOCK_VALID.bits(), 0);
         assert_eq!(info.nanoseconds, 0.0);
         assert_eq!(info.samples_to_next_clock, 0);
+    }
+
+    /// A piece after the first measures `samplesToNextClock` at its own position: at 120 BPM
+    /// and 48 kHz a clock is 1 000 frames, so 292 frames past one the nearest is 292 behind
+    /// it. A snapshot with no usable tempo has no grid, and `kVstClockValid` is cleared
+    /// rather than the stale figure kept.
+    /// Spec: vst2.timeinfo.kVstClockValid
+    #[test]
+    fn advancing_measures_the_clock_again_or_stops_claiming_it() {
+        let flags =
+            (F::TRANSPORT_PLAYING | F::PPQ_POS_VALID | F::TEMPO_VALID | F::VST_CLOCK_VALID).bits();
+        let at = |tempo: f64| vst::api::TimeInfo {
+            sample_rate: 48_000.0,
+            ppq_pos: 4.0 + 100.0 / 24_000.0,
+            tempo,
+            samples_to_next_clock: -100,
+            flags,
+            ..Default::default()
+        };
+
+        let moved = advance_time_info(at(120.0), 192, SampleRate::SR_48K);
+        assert_eq!(moved.samples_to_next_clock, -292);
+        assert_ne!(moved.flags & F::VST_CLOCK_VALID.bits(), 0);
+
+        let unusable = advance_time_info(at(0.0), 192, SampleRate::SR_48K);
+        assert_eq!(unusable.flags & F::VST_CLOCK_VALID.bits(), 0);
     }
 }

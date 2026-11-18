@@ -23,8 +23,8 @@ use crate::output::FileTarget;
 use crate::render::{PlaneSource, REPLAY_BLOCK, RenderPlan, Replay};
 use crate::{Error, Written};
 use std::path::Path;
-use tutti_buffers::{Interleaved, InterleavedMut, Planes, Sink, SinkFailed};
-use tutti_codec::{Encoder, Finalized, Spec};
+use tutti_buffers::{I24, Interleaved, InterleavedMut, Planes, Sample, Sink, SinkFailed};
+use tutti_codec::{Encoder, Finalized, IntDepth, Spec};
 use tutti_dsp::{DitherSink, StreamingResampler, needs_resampling, resampled_frames};
 use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, SampleRate, Samples};
@@ -123,15 +123,15 @@ pub(crate) fn written(
     }
 }
 
-/// Samples of an integer-bound block the quantizer will not write as they are:
-/// those past full scale (`tutti-codec`'s converters clamp to `[-1, 1]`, so
-/// `1.0` itself is not clipped), and non-finite ones (a NaN becomes 0 and an
-/// infinity full scale).
-fn clipped_in(samples: &[f32]) -> u64 {
-    samples
-        .iter()
-        .filter(|s| !s.is_finite() || s.abs() > 1.0)
-        .count() as u64
+/// Samples of an integer-bound block that clip at `depth`: those whose rounded
+/// value lies past the integer's `MAX` or `MIN` (so `1.0` clips and `-1.0`
+/// does not), an infinity included. A NaN is not counted.
+fn clipped_in(depth: IntDepth, samples: &[f32]) -> u64 {
+    let clips = |s: &f32| match depth {
+        IntDepth::Int16 => s.convert_to_clipped::<i16>().1,
+        IntDepth::Int24 => s.convert_to_clipped::<I24>().1,
+    };
+    samples.iter().filter(|s| clips(s)).count() as u64
 }
 
 /// The encoder as the [`Sink`] the dither wraps, counting what reaches its
@@ -146,7 +146,7 @@ struct EncoderSink {
     /// resample and dither, so it is the one that knows what reaches the
     /// quantizer, and `tutti-codec` keeps its boundary (blocks in, a file
     /// out). Only an integer format counts.
-    counts_clipping: bool,
+    clip_depth: Option<IntDepth>,
     clipped: u64,
     /// Frames the encoder accepted, which is what the file holds.
     frames: Samples,
@@ -172,8 +172,8 @@ impl Sink for EncoderSink {
             )));
             return Err(SinkFailed);
         }
-        if self.counts_clipping {
-            self.clipped += clipped_in(block.samples());
+        if let Some(depth) = self.clip_depth {
+            self.clipped += clipped_in(depth, block.samples());
         }
         self.encoder.write(block).map_err(|e| {
             self.error = Some(Error::from(e));
@@ -264,7 +264,7 @@ impl Chain {
         let encoder = EncoderSink {
             encoder,
             layout,
-            counts_clipping: spec.format().int_depth().is_some(),
+            clip_depth: spec.format().int_depth(),
             clipped: 0,
             frames: Samples(0),
             error: None,

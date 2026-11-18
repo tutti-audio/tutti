@@ -10,7 +10,7 @@
 //! # Why the expected value is computed here, not imported
 //!
 //! Each case states its own expectation from the bit depth's own arithmetic
-//! (`1/32767`, `1/8388607`) rather than calling the engine's `pcm::f32_to_i16`.
+//! (`1/32768`, `1/8388608`) rather than calling the engine's converter.
 //! Importing the converter would make this a restatement of the implementation:
 //! it would agree with any scale the engine happened to use, including a wrong
 //! one. The whole point is a second opinion.
@@ -94,21 +94,20 @@ fn config(format: Format) -> ExportConfig {
 /// through; anything tighter would fail on correct code.
 fn lsb(bit_depth: Pcm) -> f32 {
     match bit_depth {
-        Pcm::Int16 => 1.0 / 32_767.0,
-        Pcm::Int24 => 1.0 / 8_388_607.0,
-        Pcm::Float32 => 1.0 / 8_388_607.0, // exact in practice; kept for the table
-                                           // No `_` arm: `Pcm` is deliberately not `#[non_exhaustive]`, so a
-                                           // fourth depth must fail to compile here rather than pick up a silent
-                                           // default. See the enum's docs in tutti-types::pcm.
+        Pcm::Int16 => 1.0 / 32_768.0,
+        Pcm::Int24 => 1.0 / 8_388_608.0,
+        // Exact in practice; kept for the table.
+        Pcm::Float32 | Pcm::Float64 => 1.0 / 8_388_608.0,
+        // No `_` arm: `Pcm` is deliberately not `#[non_exhaustive]`, so a
+        // fourth depth must fail to compile here rather than pick up a silent
+        // default. See the enum's docs in tutti-types::pcm.
     }
 }
 
 /// Read every sample of a WAV back as `f32` in `[-1, 1]`, whatever it was stored as.
 ///
-/// Normalizes integer samples by the same magnitude the engine scales *by*
-/// (32767 / 8388607), not by `1 << (bits-1)`. Those differ by one part in 32768,
-/// which is larger than the tolerance here — so picking the wrong one would make
-/// a correct encoder look broken.
+/// Normalizes integer samples by `2^(bits-1)`, the scale the float-to-integer
+/// rule in `Sample` multiplies by.
 fn read_wav(path: &std::path::Path) -> (hound::WavSpec, Vec<f32>) {
     let reader = hound::WavReader::open(path).expect("open wav");
     let spec = reader.spec();
@@ -119,8 +118,8 @@ fn read_wav(path: &std::path::Path) -> (hound::WavSpec, Vec<f32>) {
             .collect(),
         hound::SampleFormat::Int => {
             let scale = match spec.bits_per_sample {
-                16 => 32_767.0,
-                24 => 8_388_607.0,
+                16 => 32_768.0,
+                24 => 8_388_608.0,
                 b => panic!("unexpected int depth {b}"),
             };
             reader
@@ -232,9 +231,9 @@ fn out_of_range_input_clamps_to_the_rail() {
 /// both files decode, both have the right length, and the samples differ.
 ///
 /// Asserted between WAV and FLAC at a level chosen so rounding and truncation
-/// disagree: `0.3 * 32767 = 9830.1`, which rounds to 9830 and truncates to 9830
+/// disagree: `0.3 * 32768 = 9830.4`, which rounds to 9830 and truncates to 9830
 /// — equal — so the interesting levels are those with a fractional part above
-/// 0.5. `0.7 * 32767 = 22936.9` rounds to 22937 and truncates to 22936.
+/// 0.5. `0.7 * 32768 = 22937.6` rounds to 22938 and truncates to 22937.
 #[test]
 fn wav_and_flac_quantize_a_sample_identically() {
     let d = tempfile::tempdir().unwrap();
@@ -266,16 +265,16 @@ fn wav_and_flac_quantize_a_sample_identically() {
     //
     // This pair caught a real divergence: FLAC carried a private converter that
     // truncated (`as i32`) where the shared one rounds, so 0.7 encoded as
-    // 22936 in a FLAC and 22937 in a WAV from the same render.
+    // 22937 in a FLAC and 22938 in a WAV from the same render.
     let canonical = IntDepth::Int16.quantize(level);
-    let from_wav = (wav[0] * 32_767.0).round() as i32;
+    let from_wav = (wav[0] * 32_768.0).round() as i32;
     assert_eq!(
         from_wav, canonical,
         "WAV diverged from the engine's canonical quantizer"
     );
     assert_eq!(
-        canonical, 22_937,
-        "0.7 must round to 22937, not truncate to 22936"
+        canonical, 22_938,
+        "0.7 x 32768 = 22937.6 must round to 22938, not truncate to 22937"
     );
 }
 

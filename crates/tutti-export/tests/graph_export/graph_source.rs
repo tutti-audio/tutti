@@ -363,7 +363,7 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
 /// The dither case: triangular dither to 16 bits, on a DC level between two
 /// codes, so every sample is perturbed. The file is its planes dithered and
 /// written (`write_buffers`), byte for byte; its samples scatter around the
-/// level's code (8 192.05) within the dither's two codes and average onto it.
+/// level's code (8 192.3) within the dither's two codes and average onto it.
 #[test]
 fn a_dithered_export_writes_its_dithered_render() {
     let mut cfg = config(Pcm::Int16, ChannelLayout::STEREO);
@@ -382,8 +382,8 @@ fn a_dithered_export_writes_its_dithered_render() {
         .collect();
     // Not vacuous: the dither moved samples off the one code.
     assert!(s.iter().any(|&x| x != s[0]), "dither left the level flat");
-    // In the encoder's scale (`f32_to_i16`: full scale is `i16::MAX`).
-    let code = f64::from(level) * f64::from(i16::MAX);
+    // In the format's scale: `-1.0` is `i16::MIN`, so a step is 1/32768.
+    let code = f64::from(level) * -f64::from(i16::MIN);
     assert!(s.iter().all(|&x| (f64::from(x) - code).abs() <= 2.0));
     let mean = s.iter().map(|&x| f64::from(x)).sum::<f64>() / s.len() as f64;
     assert!(
