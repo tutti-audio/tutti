@@ -242,8 +242,8 @@ impl FdnGlides {
 /// absorption's one-poles, and the constants of the chunk being run.
 #[derive(Clone, Debug)]
 struct State {
-    lines: Vec<DelayRing>,
-    pre: DelayRing,
+    lines: Vec<DelayRing<f32>>,
+    pre: DelayRing<f32>,
     phase: Vec<f64>,
     /// One-pole states a line: `[L1 first, L1 second, L2 first, L2 second]`.
     pole: Vec<[f32; 4]>,

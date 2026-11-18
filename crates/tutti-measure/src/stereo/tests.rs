@@ -58,7 +58,7 @@ fn balance_follows_the_louder_channel() {
 #[test]
 fn standard_ballistics_are_ten_milliseconds_up_and_a_hundred_down() {
     let cfg = StereoSmoother::standard().cfg;
-    let want = 1.0 - (-1.0f32).exp();
+    let want = 1.0 - (-1.0f64).exp();
     assert!((cfg.coeff_over(true, Seconds(0.01)) - want).abs() < 1e-6);
     assert!((cfg.coeff_over(false, Seconds(0.1)) - want).abs() < 1e-6);
 }

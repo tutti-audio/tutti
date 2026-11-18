@@ -9,23 +9,26 @@
 //! end ([`HostEnd`]) sends blocks into from wherever a test wants.
 
 use std::collections::VecDeque;
-use std::sync::mpsc;
+use std::os::fd::OwnedFd;
+use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use tutti_clap_test_plugin::Site;
 use tutti_fixtures::main_thread;
-use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, ProcessAudioData};
+use tutti_plugin_ipc::{
+    AudioSlab, BridgeMessage, HostMessage, ProcessAudioData, read_frame, write_frame,
+};
 use tutti_plugin_types::{BridgeError, BridgeResult, ContentScale, Load, SampleFormat};
 
-use super::{Native, serve_every};
+use super::{Native, Stream, serve_every};
 
-#[cfg(unix)]
 mod fds;
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(not(target_os = "macos"))]
 mod x11;
+use crate::bell::Bell;
 use crate::render::{RenderSide, RenderThread};
 use crate::session::Session;
-use crate::transport::Transport;
+use crate::transport::{SocketTransport, Transport};
 
 /// One thing the scripted host does.
 #[allow(clippy::large_enum_variant)] // a test script, built once
@@ -85,7 +88,8 @@ impl Script {
 }
 
 impl Transport for Script {
-    fn wait_readable(&mut self, timeout: Duration) -> BridgeResult<bool> {
+    fn wait_readable(&mut self, timeout: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
+        let timeout = timeout.expect("the loop waits for a bounded time");
         if let Some(on_wait) = self.on_wait.as_mut() {
             on_wait();
         }
@@ -158,61 +162,27 @@ impl Script {
     }
 }
 
-/// The server's end of the audio connection, in memory.
-struct AudioEnd {
-    requests: mpsc::Receiver<HostMessage>,
-    replies: mpsc::Sender<BridgeMessage>,
-    peeked: Option<HostMessage>,
-}
-
-impl Transport for AudioEnd {
-    fn wait_readable(&mut self, timeout: Duration) -> BridgeResult<bool> {
-        if self.peeked.is_none() {
-            match self.requests.recv_timeout(timeout) {
-                Ok(msg) => self.peeked = Some(msg),
-                Err(mpsc::RecvTimeoutError::Timeout) => return Ok(false),
-                // `recv` reports the host gone.
-                Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(true),
-            }
-        }
-        Ok(true)
-    }
-
-    fn recv(&mut self) -> BridgeResult<HostMessage> {
-        match self.peeked.take() {
-            Some(msg) => Ok(msg),
-            None => self
-                .requests
-                .recv()
-                .map_err(|_| BridgeError::Io(std::io::ErrorKind::BrokenPipe.into())),
-        }
-    }
-
-    fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()> {
-        self.replies
-            .send(msg.clone())
-            .map_err(|_| BridgeError::Io(std::io::ErrorKind::BrokenPipe.into()))
-    }
-}
-
-/// The host's end of the audio connection.
+/// The host's end of the audio connection: a socket the server's end reads
+/// frames from, as the real host's does.
 struct HostEnd {
-    requests: mpsc::Sender<HostMessage>,
-    replies: mpsc::Receiver<BridgeMessage>,
+    stream: UnixStream,
 }
 
 impl HostEnd {
     /// Sends block `seq` of `frames` and waits up to `within` for its answer:
     /// `None` when none came.
     fn block(&self, seq: u64, frames: usize, within: Duration) -> Option<BridgeMessage> {
-        self.requests
-            .send(HostMessage::ProcessAudio(ProcessAudioData {
+        write_frame(
+            &mut &self.stream,
+            &HostMessage::ProcessAudio(ProcessAudioData {
                 seq,
                 num_samples: frames,
-                ..tutti_plugin_ipc::ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
-            }))
-            .ok()?;
-        self.replies.recv_timeout(within).ok()
+                ..ProcessAudioData::empty(tutti_plugin_types::SampleRate::SR_48K)
+            }),
+        )
+        .ok()?;
+        self.stream.set_read_timeout(Some(within)).ok()?;
+        read_frame(&mut &self.stream).ok()
     }
 }
 
@@ -220,7 +190,7 @@ impl HostEnd {
 struct Fixture {
     session: Session,
     side: Option<RenderSide>,
-    audio: Option<AudioEnd>,
+    audio: Option<SocketTransport>,
     host: Option<HostEnd>,
 }
 
@@ -248,7 +218,7 @@ fn load_message() -> HostMessage {
 
 /// A session with a slab, as the handshake leaves it.
 fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
-    let (mut session, side) = Session::new();
+    let (mut session, side) = Session::new().expect("bells");
     let layout = tutti_plugin_ipc::SlabLayout {
         samples_per_channel: 512,
         format: SampleFormat::Float32,
@@ -261,21 +231,15 @@ fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
     session
         .render
         .attach_slab(AudioSlab::open(shm, layout).expect("slab"));
-    let (requests, host_requests) = mpsc::channel();
-    let (replies, host_replies) = mpsc::channel();
+    let (host_end, server_end) = UnixStream::pair().expect("socket pair");
     (
         Fixture {
             session,
             side: Some(side),
-            audio: Some(AudioEnd {
-                requests: host_requests,
-                replies,
-                peeked: None,
-            }),
-            host: Some(HostEnd {
-                requests,
-                replies: host_replies,
-            }),
+            audio: Some(SocketTransport::audio(Stream::from(OwnedFd::from(
+                server_end,
+            )))),
+            host: Some(HostEnd { stream: host_end }),
         },
         creator,
     )
@@ -291,7 +255,7 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
     let main = main_thread();
     let render = RenderThread::spawn(
         fixture.side.take().expect("run once"),
-        Box::new(fixture.audio.take().expect("run once")),
+        Some(Box::new(fixture.audio.take().expect("run once"))),
     )
     .expect("the render thread");
     let result = serve_every(

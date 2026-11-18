@@ -87,7 +87,7 @@ impl Default for EnvelopeFilterControls {
 pub struct EnvelopeFilterBank<F: Float + Lanes = f64> {
     ty: SvfType,
     rate: SampleRate,
-    follower: Follower,
+    follower: Follower<f32>,
     /// The envelope, in `[0, 1]`: 0 until a level is heard.
     env: Amplitude,
     bank: SvfBank<F>,

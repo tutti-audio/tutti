@@ -13,7 +13,7 @@ use crate::DelayLine;
 pub(crate) struct LookaheadRing {
     /// One delay line per audio channel, read at the lookahead by the whole-frame reader;
     /// `lines.len()` == width. Built at construction, never resized in the RT path.
-    lines: Vec<DelayLine>,
+    lines: Vec<DelayLine<f32>>,
     lookahead: usize,
     min_deque: MonotonicMinDeque,
     sample_counter: u64,

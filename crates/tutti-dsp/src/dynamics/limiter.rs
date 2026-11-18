@@ -245,7 +245,7 @@ impl Design {
             threshold,
             ceiling,
             release: Seconds(release.get().max(LimiterControls::MIN_RELEASE.get()))
-                .one_pole_coeff(rate),
+                .one_pole_coeff(rate) as f32,
         }
     }
 }
