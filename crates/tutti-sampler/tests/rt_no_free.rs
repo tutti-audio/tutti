@@ -7,6 +7,7 @@
 //! while a thread-local flag is up, so the drain's frees are counted and
 //! nothing else's (the test harness's own threads included).
 
+use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
 
 use tutti_sampler::testing::loop_frames;
@@ -15,7 +16,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::testing::settle;
@@ -76,9 +77,9 @@ fn watch(f: impl FnOnce()) -> (usize, usize) {
 #[test]
 fn the_add_voice_drain_frees_nothing() {
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let wave = Arc::new(Wave::from_samples(
+    let wave = Arc::new(Wave::from_mono(
         SampleRate::SR_48K,
-        &vec![0.5f32; 48_000],
+        Mono::new(&vec![0.5f32; 48_000]),
     ));
     let (pool, handle) = VoicePool::new().with_handle();
     let mut rig = Direct::new(pool, SampleRate::SR_48K, 64);
@@ -287,7 +288,10 @@ fn a_removed_disk_voice_on_a_full_retirement_channel_frees_its_ring_in_the_callb
     let env = t.env(64, SampleRate::SR_48K);
     rig.block_in(&env);
 
-    let wave = Arc::new(Wave::from_samples(SampleRate::SR_48K, &vec![0.5f32; 480]));
+    let wave = Arc::new(Wave::from_mono(
+        SampleRate::SR_48K,
+        Mono::new(&vec![0.5f32; 480]),
+    ));
     let memory = || {
         MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave")

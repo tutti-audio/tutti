@@ -31,9 +31,10 @@
 //!    second; [`the_latest_placement_wins`] pins it.
 
 use std::sync::Arc;
+use tutti_buffers::Mono;
 use tutti_types::MaxBlock;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, ForkMode, ForkTarget, Prepare, TransportPosition, Unforkable};
 use tutti_graph::{OutPort, Source};
@@ -46,7 +47,10 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// A wave whose every frame is 1.0, so "is it inside its window" reads as
 /// audible-or-silent with no waveform to reason about.
 fn flat_wave(len: usize) -> Arc<Wave> {
-    Arc::new(Wave::from_samples(SampleRate::SR_48K, &vec![1.0; len]))
+    Arc::new(Wave::from_mono(
+        SampleRate::SR_48K,
+        Mono::new(&vec![1.0; len]),
+    ))
 }
 
 /// A voice placed on the transport at `[start, start + 1)`.

@@ -120,14 +120,14 @@ fn decoded(format: Format, channels: u16, frames: usize) -> Vec<Vec<f32>> {
         .write(Interleaved::new(&samples, layout).unwrap())
         .unwrap();
     encoder.finish().unwrap();
-    let wave = tutti_codec::Wave::read(&path).unwrap();
+    let wave = tutti_codec::read_wave::<f32>(&path).unwrap();
     assert_eq!(
         wave.channels(),
         usize::from(channels),
         "{format:?} channels"
     );
     (0..wave.channels())
-        .map(|c| wave.channel(c).to_vec())
+        .map(|c| wave.channel(c).samples().to_vec())
         .collect()
 }
 

@@ -16,6 +16,9 @@
 //!   [`StereoPlanes`], exactly two;
 //! - [`InputOutput`]: one block's frame count with its input and output planes.
 //!
+//! [`Wave`] is the owned counterpart: a resident planar buffer of one format that
+//! hands those views out and takes frames in.
+//!
 //! Construction checks once and returns a [`BufferError`] for a zero width, a
 //! length that is not whole frames or a ragged plane; nothing truncates. Every
 //! count is [`Samples`](tutti_types::Samples), in frames.
@@ -67,6 +70,7 @@ mod mono;
 mod planes;
 mod sample;
 mod stereo;
+mod wave;
 
 pub use convert::{convert, convert_mono, convert_planes, deinterleave, interleave};
 pub use edge::{FiniteSource, Pull, Sink, SinkFailed, Source, Stop};
@@ -79,6 +83,7 @@ pub use mono::{Mono, MonoMut};
 pub use planes::{PlaneIter, PlaneIterMut, Planes, PlanesMut};
 pub use sample::{Float, Sample, SampleFormat};
 pub use stereo::StereoPlanes;
+pub use wave::Wave;
 
 #[cfg(test)]
 mod error_bounds {

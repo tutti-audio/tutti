@@ -196,7 +196,7 @@ mod round_trip {
     }
 
     /// Encodes a sine of `level(c)` on file channel `c`, reads the Ogg back
-    /// with `Wave::read`, and asserts each decoded plane carries the level of
+    /// with `read_wave`, and asserts each decoded plane carries the level of
     /// the file channel for the speaker that plane is.
     #[test]
     fn each_channel_lands_on_its_own_plane() {
@@ -304,7 +304,7 @@ mod round_trip {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("case.ogg");
             std::fs::write(&path, bytes).unwrap();
-            let wave = crate::Wave::read(&path).unwrap();
+            let wave = crate::read_wave::<f32>(&path).unwrap();
             assert_eq!(wave.channels(), width, "{width}");
             for (plane, &speaker) in case.planes.iter().enumerate() {
                 // The file channel for this speaker; a rear and a side stand
@@ -318,7 +318,7 @@ mod round_trip {
                             .position(|&s| s.counterpart() == Some(speaker))
                     })
                     .unwrap();
-                let got = rms(wave.channel(plane));
+                let got = rms(wave.channel(plane).samples());
                 assert!(
                     (got / level(from) - 1.0).abs() < 0.25,
                     "{width} channels, plane {plane} ({speaker:?}): level {got}, file channel {from} has {}",

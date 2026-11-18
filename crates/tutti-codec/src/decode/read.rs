@@ -1,16 +1,22 @@
 //! Decoding a file into a [`Wave`], and reading its header without decoding.
 //!
-//! The entry points are [`Wave::read`], [`Wave::read_metadata`] and
-//! [`Wave::from_bytes`]. Decoded samples are held to the
+//! The entry points are [`read_wave`], [`read_wave_metadata`] and
+//! [`read_wave_bytes`]. Decoded samples are held to the
 //! generator of the committed fixtures by `tests/decode_fixtures.rs`.
 
+use std::any::Any;
 use std::fs::File;
 use std::path::Path;
+use tutti_buffers::{I24, Planes, Sample, SampleFormat, Wave};
 use tutti_types::{SampleRate, Samples};
 
-use symphonia::core::audio::AudioSpec;
+use symphonia::core::audio::sample::{SampleFormat as FileFormat, i24};
+use symphonia::core::audio::{AudioSpec, GenericAudioBufferRef};
 use symphonia::core::codecs::CodecParameters;
-use symphonia::core::codecs::audio::well_known::CODEC_ID_VORBIS;
+use symphonia::core::codecs::audio::well_known::{
+    CODEC_ID_PCM_ALAW, CODEC_ID_PCM_F32BE, CODEC_ID_PCM_F32LE, CODEC_ID_PCM_F64BE,
+    CODEC_ID_PCM_F64LE, CODEC_ID_PCM_MULAW, CODEC_ID_VORBIS,
+};
 use symphonia::core::codecs::audio::{
     AudioCodecParameters, AudioDecoder, AudioDecoderOptions, CODEC_ID_NULL_AUDIO,
 };
@@ -25,12 +31,11 @@ use super::error::convert;
 use super::placement::topology_of;
 use super::riff_guard;
 use crate::DecodeError;
-use crate::Wave;
 use tutti_types::{ChannelTopology, Placement};
 
 /// Container metadata read from an audio file without decoding any audio.
 ///
-/// Returned by [`Wave::read_metadata`]. The fields are the container's raw
+/// Returned by [`read_wave_metadata`]. The fields are the container's raw
 /// answers (the rate it states), and the topology it names, the one a full read would
 /// give the [`Wave`]. It carries a [`ChannelTopology`], which owns its list of
 /// speakers, so this is `Clone` and not `Copy`.
@@ -53,6 +58,37 @@ pub struct WaveMetadata {
     /// Whether the container stated [`topology`](Self::topology) or only a
     /// channel count it was assumed from.
     pub placement: Placement,
+    /// The format the file's samples are held in: what [`read_wave`] and
+    /// [`FileIn`](crate::FileIn) give back exactly, with no conversion, when
+    /// asked for it. A caller picks its sample type from this once, at open.
+    /// A lossy codec decodes to floats, so it is [`SampleFormat::F32`].
+    pub format: SampleFormat,
+}
+
+/// The format a track's decoded samples are held in: a float PCM codec's own
+/// width, an integer codec's smallest format holding its bits, a G.711
+/// companding codec's, which expands its 8 bits to 16-bit integers, and a lossy
+/// codec's, which has no integer to keep, `f32`.
+fn native_format(params: &AudioCodecParameters) -> SampleFormat {
+    let float = |wide: bool| {
+        if wide {
+            SampleFormat::F64
+        } else {
+            SampleFormat::F32
+        }
+    };
+    match (params.codec, params.sample_format, params.bits_per_sample) {
+        (CODEC_ID_PCM_F32LE | CODEC_ID_PCM_F32BE, ..) => float(false),
+        (CODEC_ID_PCM_F64LE | CODEC_ID_PCM_F64BE, ..) => float(true),
+        (CODEC_ID_PCM_ALAW | CODEC_ID_PCM_MULAW, ..) => SampleFormat::I16,
+        (_, Some(FileFormat::F32), _) => float(false),
+        (_, Some(FileFormat::F64), _) => float(true),
+        (_, _, Some(..=8)) => SampleFormat::I8,
+        (_, _, Some(9..=16)) => SampleFormat::I16,
+        (_, _, Some(17..=24)) => SampleFormat::I24,
+        (_, _, Some(_)) => SampleFormat::I32,
+        (_, _, None) => SampleFormat::F32,
+    }
 }
 
 impl WaveMetadata {
@@ -63,22 +99,24 @@ impl WaveMetadata {
     }
 }
 
-/// A decoder for one audio track, producing planar `f32` a packet at a time.
+/// A decoder for one audio track, producing planar `S` a packet at a time.
 ///
 /// Gapless trimming is off, so it hands back every frame its codec decodes,
 /// delay and padding included. A Vorbis stream's first packet after a reset
 /// only primes the codec's overlap: it decodes to no frames.
-pub(super) struct PacketDecoder {
+pub(super) struct PacketDecoder<S: Sample> {
     decoder: Box<dyn AudioDecoder>,
     /// Whether the codec's first packet after a reset decodes to no frames.
     primes: bool,
     /// Whether a packet has decoded since the last reset.
     primed: bool,
     /// The last packet's frames, one vector per channel.
-    planes: Vec<Vec<f32>>,
+    planes: Vec<Vec<S>>,
+    /// The last packet's frames as the decoder's 24-bit integers, for `S = I24`.
+    wide: Vec<Vec<i24>>,
 }
 
-impl PacketDecoder {
+impl<S: Sample> PacketDecoder<S> {
     /// A decoder for the track whose parameters are `params`.
     pub(super) fn new(params: &AudioCodecParameters) -> Result<Self, Error> {
         let decoder = symphonia::default::get_codecs()
@@ -88,6 +126,7 @@ impl PacketDecoder {
             primes: params.codec == CODEC_ID_VORBIS,
             primed: false,
             planes: Vec::new(),
+            wide: Vec::new(),
         })
     }
 
@@ -111,18 +150,54 @@ impl PacketDecoder {
             self.planes.clear();
             return Ok(0);
         }
-        decoded.copy_to_vecs_planar::<f32>(&mut self.planes);
+        lift(&decoded, &mut self.planes, &mut self.wide);
         Ok(decoded.frames())
     }
 
-    /// The frames of the last packet, one slice per channel.
-    pub(super) fn planes(&self) -> &[Vec<f32>] {
+    /// The frames of the last packet, one `Vec` per channel.
+    pub(super) fn planes(&self) -> &[Vec<S>] {
+        &self.planes
+    }
+
+    /// The last packet's planes, made `width` channels wide: a plane past it
+    /// is dropped and a missing one is silence.
+    pub(super) fn planes_of_width(&mut self, width: usize, frames: usize) -> &[Vec<S>] {
+        self.planes.truncate(width);
+        self.planes.resize_with(width, || vec![S::SILENCE; frames]);
         &self.planes
     }
 
     /// The format of the last decoded packet.
     pub(super) fn spec(&self) -> AudioSpec {
         self.decoder.last_decoded().spec().clone()
+    }
+}
+
+/// Copies `decoded` into `planes`, a `Vec<Vec<S>>` for a sample format `S`: the decoder converts from the codec's
+/// own format, which is no conversion when they agree. `wide` is the 24-bit
+/// staging for `S = I24`.
+fn lift(decoded: &GenericAudioBufferRef<'_>, planes: &mut dyn Any, wide: &mut Vec<Vec<i24>>) {
+    macro_rules! direct {
+        ($($t:ty),*) => {$(
+            if let Some(p) = planes.downcast_mut::<Vec<Vec<$t>>>() {
+                decoded.copy_to_vecs_planar::<$t>(p);
+                return;
+            }
+        )*};
+    }
+    direct!(i8, i16, i32, f32, f64);
+    // `Sample` is sealed to those five and `I24`.
+    let Some(out) = planes.downcast_mut::<Vec<Vec<I24>>>() else {
+        unreachable!("a Sample is i8, i16, I24, i32, f32 or f64")
+    };
+    decoded.copy_to_vecs_planar::<i24>(wide);
+    out.resize_with(wide.len(), Vec::new);
+    for (dst, src) in out.iter_mut().zip(wide.iter()) {
+        dst.clear();
+        dst.extend(
+            src.iter()
+                .map(|v| I24::new(v.0).expect("a decoder's 24-bit integer is within I24's range")),
+        );
     }
 }
 
@@ -144,7 +219,7 @@ pub(super) fn total_frames_of(track: &Track, params: &AudioCodecParameters) -> O
 /// Open `path` and probe its container, hinting the format from the extension.
 ///
 /// The head every path-based entry point shares; `FileIn::open` and
-/// [`Wave::read_metadata`] stop here, [`Wave::read`] decodes on from it.
+/// [`read_wave_metadata`] stop here, [`read_wave`] decodes on from it.
 pub(super) fn probe_path(path: &Path) -> Result<Box<dyn FormatReader>, Error> {
     let mut hint = Hint::new();
     if let Some(extension_str) = path.extension().and_then(|e| e.to_str()) {
@@ -196,93 +271,90 @@ pub(super) fn sample_rate_of(params: &AudioCodecParameters) -> Result<SampleRate
         .ok_or(DecodeError::NoSampleRate)
 }
 
-impl Wave {
-    /// Decodes the first audio track of the file at `path` into memory.
-    ///
-    /// Requires a decode feature (`decode-wav`, `decode-flac`, `decode-mp3` or
-    /// `decode-ogg`). Supported formats are whatever those enable; see
-    /// [`decodable_extensions`](crate::decodable_extensions). The wave keeps
-    /// the file's own sample rate and channel count; nothing is resampled. Its
-    /// [`topology`](Wave::topology) is what the container names, in the order
-    /// the samples are in: a mono file is the centre, a channel that names no
-    /// position is [`Speaker::Unassigned`](tutti_types::Speaker::Unassigned), and
-    /// a position the vocabulary has no name for is
-    /// [`Speaker::Unknown`](tutti_types::Speaker::Unknown). Reads and
-    /// decodes the whole file on the calling thread, so do not call it on the
-    /// audio thread.
-    ///
-    /// # Errors
-    ///
-    /// A [`DecodeError`] if the file cannot be opened, its container is not one
-    /// this build reads, it has no audio track, the track states no sample
-    /// rate ([`DecodeError::NoSampleRate`]), or a packet fails to decode.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use tutti_codec::Wave;
-    ///
-    /// let wave = Wave::read("kick.wav")?;
-    /// println!("{} channels, {} s", wave.channels(), wave.duration());
-    /// # Ok::<(), tutti_codec::DecodeError>(())
-    /// ```
-    pub fn read(path: impl AsRef<Path>) -> Result<Wave, DecodeError> {
-        decode(probe_path(path.as_ref()).map_err(convert)?)
-    }
+/// Decodes the first audio track of the file at `path` into memory, as `S`.
+///
+/// Requires a decode feature (`decode-wav`, `decode-flac`, `decode-mp3` or
+/// `decode-ogg`). Supported formats are whatever those enable; see
+/// [`decodable_extensions`](crate::decodable_extensions). The wave keeps
+/// the file's own sample rate and channel count; nothing is resampled. Its
+/// [`topology`](Wave::topology) is what the container names, in the order
+/// the samples are in: a mono file is the centre, a channel that names no
+/// position is [`Speaker::Unassigned`](tutti_types::Speaker::Unassigned), and
+/// a position the vocabulary has no name for is
+/// [`Speaker::Unknown`](tutti_types::Speaker::Unknown). Reads and
+/// decodes the whole file on the calling thread, so do not call it on the
+/// audio thread.
+///
+/// `S` is the format the samples arrive in. Asking for the file's own
+/// ([`WaveMetadata::format`]) keeps every sample exactly; another is
+/// converted by the decoder.
+///
+/// # Errors
+///
+/// A [`DecodeError`] if the file cannot be opened, its container is not one
+/// this build reads, it has no audio track, the track states no sample
+/// rate ([`DecodeError::NoSampleRate`]), or a packet fails to decode.
+///
+/// # Examples
+///
+/// ```no_run
+/// let wave = tutti_codec::read_wave::<f32>("kick.wav")?;
+/// println!("{} channels, {} s", wave.channels(), wave.duration());
+/// # Ok::<(), tutti_codec::DecodeError>(())
+/// ```
+pub fn read_wave<S: Sample>(path: impl AsRef<Path>) -> Result<Wave<S>, DecodeError> {
+    decode(probe_path(path.as_ref()).map_err(convert)?)
+}
 
-    /// Reads an audio file's frame count, sample rate and channel count
-    /// without decoding any audio.
-    ///
-    /// Works for every format [`Wave::read`] can read, and is fast enough for
-    /// duration and size decisions before a full load.
-    ///
-    /// # Errors
-    ///
-    /// A [`DecodeError`] if the file cannot be opened, its container is not one
-    /// this build reads, it has no audio track, or the track states no sample
-    /// rate ([`DecodeError::NoSampleRate`]).
-    pub fn read_metadata(path: impl AsRef<Path>) -> Result<WaveMetadata, DecodeError> {
-        let reader = probe_path(path.as_ref()).map_err(convert)?;
-        let (track, params) = first_audio_track(&*reader)?;
-        let (topology, placement) = topology_of(params.channels.as_ref());
-        Ok(WaveMetadata {
-            total_frames: total_frames_of(track, params),
-            sample_rate: sample_rate_of(params)?,
-            topology,
-            placement,
-        })
-    }
+/// Reads an audio file's frame count, sample rate, channel count and
+/// sample format without decoding any audio.
+///
+/// Works for every format [`read_wave`] can read, and is fast enough for
+/// duration and size decisions before a full load.
+///
+/// # Errors
+///
+/// A [`DecodeError`] if the file cannot be opened, its container is not one
+/// this build reads, it has no audio track, or the track states no sample
+/// rate ([`DecodeError::NoSampleRate`]).
+pub fn read_wave_metadata(path: impl AsRef<Path>) -> Result<WaveMetadata, DecodeError> {
+    let reader = probe_path(path.as_ref()).map_err(convert)?;
+    let (track, params) = first_audio_track(&*reader)?;
+    let (topology, placement) = topology_of(params.channels.as_ref());
+    Ok(WaveMetadata {
+        total_frames: total_frames_of(track, params),
+        sample_rate: sample_rate_of(params)?,
+        topology,
+        placement,
+        format: native_format(params),
+    })
+}
 
-    /// Decodes the first audio track of a complete file held in memory. There
-    /// is no extension hint, so the container is identified from the bytes
-    /// alone.
-    ///
-    /// # Errors
-    ///
-    /// As [`Wave::read`].
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<Wave, DecodeError> {
-        decode(probe_source(Box::new(std::io::Cursor::new(bytes)), &Hint::new()).map_err(convert)?)
-    }
+/// Decodes the first audio track of a complete file held in memory. There
+/// is no extension hint, so the container is identified from the bytes
+/// alone.
+///
+/// # Errors
+///
+/// As [`read_wave`].
+pub fn read_wave_bytes<S: Sample>(bytes: Vec<u8>) -> Result<Wave<S>, DecodeError> {
+    decode(probe_source(Box::new(std::io::Cursor::new(bytes)), &Hint::new()).map_err(convert)?)
 }
 
 /// Decode the first audio track of a probed container to its end.
-fn decode(mut reader: Box<dyn FormatReader>) -> Result<Wave, DecodeError> {
+fn decode<S: Sample>(mut reader: Box<dyn FormatReader>) -> Result<Wave<S>, DecodeError> {
     let (track, params) = first_audio_track(&*reader)?;
     let track_id = track.id;
 
     let total_frames = total_frames_of(track, params);
     let sample_rate = sample_rate_of(params)?;
-    let mut decoder = PacketDecoder::new(params).map_err(convert)?;
+    let mut decoder = PacketDecoder::<S>::new(params).map_err(convert)?;
     let (topology, placement) = topology_of(params.channels.as_ref());
 
     // Pre-allocate using the metadata frame count when available (WAV, FLAC).
-    let mut wave: Option<Wave> = total_frames.map(|total| {
+    let mut wave: Option<Wave<S>> = total_frames.map(|total| {
         let mut wave = Wave::with_placement(topology, placement, sample_rate);
-        let channels = wave.channels();
-        for ch in 0..channels {
-            wave.channel_vec_mut(ch)
-                .reserve_exact(reserved_frames(total, channels));
-        }
+        wave.reserve(Samples(reserved_frames(total, wave.channels())));
         wave
     });
 
@@ -312,12 +384,12 @@ fn decode(mut reader: Box<dyn FormatReader>) -> Result<Wave, DecodeError> {
             }
         };
 
-        // Batch-append all channels at once.
-        let old_len = wave_output.len();
-        for (ch, plane) in decoder.planes().iter().enumerate() {
-            wave_output.channel_vec_mut(ch).extend_from_slice(plane);
+        // A primed-over packet holds no frames and so no planes.
+        if buffer_len > 0 {
+            Planes::from_vecs(decoder.planes())
+                .and_then(|planes| wave_output.append_planes(planes))
+                .map_err(|e| DecodeError::Malformed(e.to_string().into()))?;
         }
-        wave_output.set_len(old_len + Samples(buffer_len));
     }
 }
 

@@ -192,8 +192,8 @@ fn open_stream(
     // Streamable, so both of these succeed — but they are still fallible calls
     // and are handled rather than unwrapped: the probe read the header a moment
     // ago, and a file can be replaced between the two reads.
-    let meta = tutti_codec::Wave::read_metadata(file_path).ok()?;
-    let decoder = tutti_codec::FileIn::open(file_path).ok()?;
+    let meta = tutti_codec::read_wave_metadata(file_path).ok()?;
+    let decoder = tutti_codec::FileIn::<f32>::open(file_path).ok()?;
     Some((meta, decoder))
 }
 
@@ -209,7 +209,7 @@ type Decoder = std::convert::Infallible;
 enum Source {
     #[cfg(codec)]
     Stream(tutti_codec::WaveMetadata, Box<tutti_codec::FileIn>),
-    Whole(Arc<tutti_codec::Wave>),
+    Whole(Arc<tutti_buffers::Wave>),
 }
 
 /// Where an open stands after its probe.

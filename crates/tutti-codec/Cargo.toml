@@ -30,7 +30,7 @@ encode-aiff = ["dep:aifc"]
 # decode-only build never reaches it.
 encode-vorbis = ["dep:vorbis_rs", "dep:tutti-rt"]
 # Each `decode-*` feature pulls exactly one symphonia container (and its codec)
-# for `Wave::read`, `Wave::read_metadata` and `FileIn`: a build lists exactly
+# for `read_wave`, `read_wave_metadata` and `FileIn`: a build lists exactly
 # what it can read. `decode-wav` needs `pcm`: WAV is only the container. AIFF
 # is not here: symphonia's `aiff` is not enabled by any feature.
 decode-wav = ["dep:symphonia", "symphonia/wav", "symphonia/pcm"]
@@ -58,7 +58,7 @@ flacenc = { version = "0.5", optional = true, default-features = false }
 # same crate as flacenc's own MD5 (flacenc 0.5 pins md-5 0.10).
 md-5 = { version = "0.11", optional = true }
 vorbis_rs = { version = "0.5", optional = true }
-# File decode for `Wave::read` / `FileIn`. No default features: each codec is a
+# File decode for `read_wave` / `FileIn`. No default features: each codec is a
 # `decode-*` feature above. Used by the `decode` module alone, and named in no
 # public signature.
 symphonia = { version = "0.6", optional = true, default-features = false }

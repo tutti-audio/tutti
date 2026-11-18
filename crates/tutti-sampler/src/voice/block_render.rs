@@ -19,6 +19,7 @@
 //! a jump, the lanes, `hermite_lanes`, `filter_lanes`, the gain and the mix.
 
 use crate::VoiceWindow;
+use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
 use crate::testing::loop_frames;
@@ -27,7 +28,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tutti_types::MaxBlock;
 
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::{
     Env, Node, Offset, Prepare, RenderMode, TransportChanges, TransportPosition, contract,
 };
@@ -58,7 +59,8 @@ fn wave(channels: usize, rate: f64) -> Arc<Wave> {
     let mut w = Wave::new(channels, SampleRate::of(rate));
     for i in 0..LEN {
         let frame: Vec<f32> = (0..channels).map(|c| sample(c % 2, i + 7 * c)).collect();
-        w.push_frame(&frame);
+        w.append(Interleaved::new(&frame, w.layout()).unwrap())
+            .unwrap();
     }
     Arc::new(w)
 }

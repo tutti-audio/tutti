@@ -12,11 +12,11 @@
 //! seek in it, given the codecs compiled into this build" — three conditions the
 //! streamer already applies internally when a stream is registered
 //! (`streamer::handlers::open_stream`). A host deriving the same verdict from
-//! `Wave::read_metadata` would be re-implementing a rule it cannot see, and the
+//! `read_wave_metadata` would be re-implementing a rule it cannot see, and the
 //! two would drift the moment the streamer's capabilities changed. Streamer and host
 //! read the same function — which is the point of it being public.
 //!
-//! This is not a decode: `Wave::read_metadata` reads the container head and
+//! This is not a decode: `read_wave_metadata` reads the container head and
 //! stops. Deciding *how much* of a file to keep resident is the caller's policy;
 //! this only reports what the file allows.
 
@@ -125,7 +125,7 @@ pub enum ProbeError {
 /// ```
 pub fn probe(path: impl AsRef<Path>) -> Result<SampleFacts, ProbeError> {
     let path = path.as_ref();
-    let meta = tutti_codec::Wave::read_metadata(path).map_err(|source| ProbeError::Unreadable {
+    let meta = tutti_codec::read_wave_metadata(path).map_err(|source| ProbeError::Unreadable {
         path: path.to_path_buf(),
         source,
     })?;
@@ -149,7 +149,7 @@ fn streamable(path: &Path, meta: &tutti_codec::WaveMetadata) -> bool {
         return false;
     }
     // 2. The incremental decoder must actually open.
-    let Ok(decoder) = tutti_codec::FileIn::open(path) else {
+    let Ok(decoder) = tutti_codec::FileIn::<f32>::open(path) else {
         return false;
     };
     // 3. Defensive, and inherited from `open_stream`: a decoder that reports

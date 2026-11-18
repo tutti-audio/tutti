@@ -20,6 +20,7 @@
 //! its buffers built once), each block under the `Env` of a transport that
 //! moves a block at a time, as a host's does (see [`Rig`]).
 
+use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
 use tutti_sampler::testing::loop_frames;
@@ -29,7 +30,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tutti_codec::Wave;
+use tutti_buffers::Wave;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
@@ -98,7 +99,10 @@ impl Rig {
 fn tone(freq: f32, frames: usize) -> Arc<Wave> {
     let mut w = Wave::new(1, SampleRate::of(SR));
     for i in 0..frames {
-        w.push_frame(&[(TAU * freq * i as f32 / SR as f32).sin()]);
+        w.append(
+            Interleaved::new(&[(TAU * freq * i as f32 / SR as f32).sin()], w.layout()).unwrap(),
+        )
+        .unwrap();
     }
     Arc::new(w)
 }
@@ -295,7 +299,8 @@ fn pool_knobs(
         Tier::Memory => {
             let mut wave = Wave::new(2, SampleRate::of(SR));
             for i in 0..frames {
-                wave.push_frame(&tone_frame(i));
+                wave.append(Interleaved::new(&tone_frame(i), wave.layout()).unwrap())
+                    .unwrap();
             }
             let wave = Arc::new(wave);
             (0..n)
@@ -471,7 +476,8 @@ impl Clips {
     fn new(n: usize, block: usize) -> Self {
         let mut wave = Wave::new(2, SampleRate::of(SR));
         for i in 0..(SR * FILE_SECS) as usize {
-            wave.push_frame(&tone_frame(i));
+            wave.append(Interleaved::new(&tone_frame(i), wave.layout()).unwrap())
+                .unwrap();
         }
         let wave = Arc::new(wave);
         let nodes = (0..n)
@@ -534,7 +540,8 @@ fn bench_sources(c: &mut Criterion) {
     group.throughput(Throughput::Elements(BLOCK as u64));
     let mut wave = Wave::new(2, SampleRate::of(SR));
     for i in 0..(SR * FILE_SECS) as usize {
-        wave.push_frame(&tone_frame(i));
+        wave.append(Interleaved::new(&tone_frame(i), wave.layout()).unwrap())
+            .unwrap();
     }
     let wave = Arc::new(wave);
     let mut nodes: Vec<Direct<MemorySource>> = (0..64)

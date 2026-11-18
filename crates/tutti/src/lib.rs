@@ -163,7 +163,7 @@ pub use tutti_sampler::Clip;
 
 // A decoded wave, and what a bounce writes.
 #[cfg(feature = "codec")]
-pub use tutti_codec::Wave;
+pub use tutti_buffers::Wave;
 #[cfg(feature = "codec")]
 pub use tutti_codec::{Format, Pcm};
 
@@ -478,17 +478,24 @@ pub mod session {
 #[cfg(feature = "codec")]
 pub mod codec {
     #[cfg(any(
-        feature = "decode-wav",
-        feature = "decode-flac",
-        feature = "decode-mp3",
-        feature = "decode-ogg"
+        feature = "encode-wav",
+        feature = "encode-flac",
+        feature = "encode-aiff",
+        feature = "encode-vorbis"
     ))]
-    pub use tutti_codec::WaveMetadata;
+    pub use tutti_codec::write_wave;
     pub use tutti_codec::{Codec, Error, Sample};
     pub use tutti_codec::{
         DecodeError, FlacLevel, IntDepth, Quality, QualityOutOfRange, Spec, SpecError, can_decode,
         decodable_extensions,
     };
+    #[cfg(any(
+        feature = "decode-wav",
+        feature = "decode-flac",
+        feature = "decode-mp3",
+        feature = "decode-ogg"
+    ))]
+    pub use tutti_codec::{WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata};
 }
 
 /// Sample playback (`tutti-sampler`): voices and their loops, the placement
