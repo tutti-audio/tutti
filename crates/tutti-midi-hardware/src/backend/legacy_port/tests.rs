@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 use super::anchor::Anchor;
 use super::bytes::{ByteIn, ByteOut, Wire};
 use super::poll;
-use super::ports::{PortInfo, Side, endpoint, endpoint_id, endpoints, locate, slot_of};
+use super::ports::{
+    PortInfo, Side, distinct_names, endpoint, endpoint_id, endpoints, locate, slot_of,
+};
 use super::schedule::{Next, Outbox, Schedule};
 use super::sender::{Mailbox, run};
 use crate::Devices;
@@ -27,6 +29,7 @@ fn named(name: &str, product: u16) -> WinMmDevice {
 fn info(name: &str) -> PortInfo {
     PortInfo {
         name: name.to_owned(),
+        product: name.to_owned(),
         device: named(name, 7),
     }
 }
@@ -87,10 +90,68 @@ fn ports_that_cannot_be_told_apart_are_numbered_in_list_order() {
     assert_eq!(slot_of(twins[2].id).occurrence, 0);
 }
 
+fn shown_as(pairs: &[(&str, &str)]) -> Vec<String> {
+    distinct_names(pairs)
+}
+
+#[test]
+fn ports_that_share_a_friendly_name_take_their_distinct_product_names() {
+    assert_eq!(
+        shown_as(&[
+            ("Pad (USB)", "Pad"),
+            ("Pad (USB)", "MIDIIN2 (Pad)"),
+            ("Pad (USB)", "MIDIIN3 (Pad)"),
+        ]),
+        ["Pad", "MIDIIN2 (Pad)", "MIDIIN3 (Pad)"]
+    );
+}
+
+#[test]
+fn ports_that_share_a_name_and_a_product_get_numbers_in_list_order() {
+    assert_eq!(
+        shown_as(&[("Twin", "Twin"), ("Twin", "Twin"), ("Twin", "Twin")]),
+        ["Twin", "Twin 2", "Twin 3"]
+    );
+}
+
+#[test]
+fn a_port_with_a_name_of_its_own_keeps_it_whatever_its_neighbours_are() {
+    assert_eq!(
+        shown_as(&[("Solo (USB)", "Solo"), ("Twin", "Twin"), ("Twin", "Twin")]),
+        ["Solo (USB)", "Twin", "Twin 2"]
+    );
+    assert_eq!(shown_as(&[("Solo (USB)", "Solo")]), ["Solo (USB)"]);
+}
+
+#[test]
+fn a_number_never_lands_on_a_name_another_port_has() {
+    assert_eq!(
+        shown_as(&[("A", "A"), ("A", "A"), ("A 2", "A 2")]),
+        ["A", "A 2", "A 2 2"]
+    );
+}
+
+#[test]
+fn naming_ports_apart_leaves_every_id_as_it_was() {
+    let twins = |product: &str| PortInfo {
+        product: product.to_owned(),
+        ..info("Twin")
+    };
+    let apart = endpoints(Side::Input, [twins("A"), twins("B")]);
+    let same = endpoints(Side::Input, [info("Twin"), info("Twin")]);
+    assert_ne!(apart[0].name, apart[1].name);
+    assert_eq!(
+        apart.iter().map(|e| e.id).collect::<Vec<_>>(),
+        same.iter().map(|e| e.id).collect::<Vec<_>>()
+    );
+    assert_eq!(same[1].name, "Twin 2");
+}
+
 #[test]
 fn an_interface_path_names_the_device_whatever_its_position_or_name() {
     let path = |name: &str| PortInfo {
         name: name.to_owned(),
+        product: name.to_owned(),
         device: WinMmDevice::Interface("\\\\?\\usb#vid_0001".to_owned()),
     };
     let slot = slot_of(endpoint_id(Side::Input, 0, &path("Keystep").device));

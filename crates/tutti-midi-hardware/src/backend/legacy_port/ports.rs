@@ -18,8 +18,12 @@ pub(in crate::backend) enum Side {
 /// What a driver reports of one port.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::backend) struct PortInfo {
-    /// The product name, as shown.
+    /// The name to show: the friendly name where the device has one, shared by
+    /// every port of a multi-port device.
     pub name: String,
+    /// The driver's product name for this port, which differs between a
+    /// device's ports where the friendly name does not.
+    pub product: String,
     /// What names the device: its interface path where the driver gives one.
     pub device: WinMmDevice,
 }
@@ -102,6 +106,42 @@ pub(in crate::backend) fn locate<P>(
         .map(|(port, _)| port)
 }
 
+/// The names to show for ports listed as `(shown, product)` in list order, each
+/// distinct from the rest.
+///
+/// A port whose shown name no other port has keeps it. Ports that share a shown
+/// name take their product names when those differ from each other; any name
+/// still taken by an earlier port gets a suffix, " 2", " 3", ... (the first
+/// number not taken), in list order. Display only: an id never reads a name.
+pub(in crate::backend) fn distinct_names(listed: &[(&str, &str)]) -> Vec<String> {
+    let shares = |shown: &str| listed.iter().filter(|(other, _)| *other == shown).count() > 1;
+    let products_differ = |shown: &str| {
+        let mut products: Vec<&str> = listed
+            .iter()
+            .filter(|(other, _)| *other == shown)
+            .map(|(_, product)| *product)
+            .collect();
+        products.sort_unstable();
+        products.windows(2).all(|pair| pair[0] != pair[1])
+    };
+    let mut names: Vec<String> = Vec::with_capacity(listed.len());
+    for (shown, product) in listed {
+        let wanted = if shares(shown) && products_differ(shown) {
+            product
+        } else {
+            shown
+        };
+        let mut name = (*wanted).to_owned();
+        let mut number = 2;
+        while names.contains(&name) {
+            name = format!("{wanted} {number}");
+            number += 1;
+        }
+        names.push(name);
+    }
+    names
+}
+
 /// The endpoint of the `occurrence`th port that `info` describes on `side`: a
 /// MIDI 1.0 port with no Function Blocks, named as the driver names it.
 pub(in crate::backend) fn endpoint(side: Side, occurrence: u32, info: PortInfo) -> OsEndpoint {
@@ -118,19 +158,26 @@ pub(in crate::backend) fn endpoint(side: Side, occurrence: u32, info: PortInfo) 
 }
 
 /// The endpoints of `side`'s ports, in list order, each numbered among the
-/// ports with the same digest.
+/// ports with the same digest, and named apart by [`distinct_names`].
 pub(in crate::backend) fn endpoints(
     side: Side,
     ports: impl IntoIterator<Item = PortInfo>,
 ) -> Vec<OsEndpoint> {
+    let ports: Vec<PortInfo> = ports.into_iter().collect();
+    let listed: Vec<(&str, &str)> = ports
+        .iter()
+        .map(|info| (info.name.as_str(), info.product.as_str()))
+        .collect();
+    let names = distinct_names(&listed);
     let mut seen: BTreeMap<u32, u32> = BTreeMap::new();
     ports
         .into_iter()
-        .map(|info| {
+        .zip(names)
+        .map(|(info, name)| {
             let count = seen.entry(fingerprint(&info.device)).or_insert(0);
             let occurrence = *count;
             *count += 1;
-            endpoint(side, occurrence, info)
+            endpoint(side, occurrence, PortInfo { name, ..info })
         })
         .collect()
 }

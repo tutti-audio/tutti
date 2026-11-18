@@ -96,6 +96,7 @@ fn shown<D: PortKind>() -> Vec<PortInfo> {
         .iter()
         .map(|port| PortInfo {
             name: port.name().to_owned(),
+            product: port.caps().name.clone(),
             device: device_of(port),
         })
         .collect()

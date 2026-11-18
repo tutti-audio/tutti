@@ -20,6 +20,12 @@
 //!   complete give a [`Leaked`] instead, which owns the slot and never frees it:
 //!   the OS may still reach the state, so dropping a `Leaked` leaks it.
 //!
+//! A callback that sees the driver close the port records it with
+//! [`Slot::note_driver_closed`]; the teardown reads [`Slot::driver_closed`] and
+//! then makes no call with the handle, which the OS has declared invalid. The
+//! mark is made while the callback is inside, so a teardown that follows a
+//! [`Closed`] always sees it.
+//!
 //! No callback that entered holds a reference the teardown could free, because
 //! the count is final (above) before the teardown starts, and the slot itself
 //! is an `Arc`, so a callback that outlives the owner leaves last and frees it.
@@ -54,6 +60,8 @@ pub(crate) struct Slot<S> {
     /// Callbacks inside; incremented under the registry lock.
     in_flight: AtomicUsize,
     closing: AtomicBool,
+    /// Set by a callback inside when the driver has closed the port.
+    driver_closed: AtomicBool,
 }
 
 impl<S> Slot<S> {
@@ -61,6 +69,20 @@ impl<S> Slot<S> {
     /// does not start now, and what the worker no longer feeds.
     pub(crate) fn closing(&self) -> bool {
         self.closing.load(Ordering::Acquire)
+    }
+
+    /// Records that the driver closed the port (`MIM_CLOSE`): the OS documents
+    /// the handle as no longer valid, so a teardown must not call the OS with
+    /// it. A callback calls this while it is [`Inside`], so the mark is made
+    /// before the count a [`Closed`] proves is 0.
+    pub(crate) fn note_driver_closed(&self) {
+        self.driver_closed.store(true, Ordering::Release);
+    }
+
+    /// Whether a callback has recorded the driver's close. Read by a teardown,
+    /// which runs after every callback has left, so it reads the final value.
+    pub(crate) fn driver_closed(&self) -> bool {
+        self.driver_closed.load(Ordering::Acquire)
     }
 }
 
@@ -108,6 +130,7 @@ impl<S> Registry<S> {
             state,
             in_flight: AtomicUsize::new(0),
             closing: AtomicBool::new(false),
+            driver_closed: AtomicBool::new(false),
         });
         self.slots().push((id, Arc::clone(&slot)));
         Owner {
@@ -415,6 +438,21 @@ mod tests {
     }
 
     #[test]
+    fn a_driver_close_noted_inside_a_callback_is_seen_by_the_teardown_and_not_before() {
+        let registry = Registry::new();
+        let owner = registry.open(());
+        let inside = registry.enter(owner.id()).expect("open");
+        assert!(!inside.driver_closed());
+        inside.note_driver_closed();
+        drop(inside);
+        let closed = owner.begin_close(BOUND).poll(Duration::ZERO).into_closed();
+        assert!(closed.driver_closed());
+
+        let fresh = registry.open(()).begin_close(BOUND);
+        assert!(!fresh.poll(Duration::ZERO).into_closed().driver_closed());
+    }
+
+    #[test]
     fn a_released_close_frees_the_state_once() {
         let drops = AtomicUsize::new(0);
         let registry = Registry::new();
@@ -583,6 +621,38 @@ mod loom_model {
     #[test]
     fn a_callback_racing_the_close_reads_before_the_teardown_or_finds_nothing() {
         run(&[0]);
+    }
+
+    /// A callback that marks the driver's close while inside is seen by the
+    /// teardown whenever it entered, and never half-seen.
+    #[test]
+    fn a_driver_close_marked_inside_a_callback_is_seen_by_the_teardown_that_follows_it() {
+        loom::model(|| {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let registry: Shared = Arc::new(Registry::new());
+            let owner = registry.open(Probe::new(&drops));
+            let id = owner.id();
+            let marker = {
+                let registry = Arc::clone(&registry);
+                thread::spawn(move || {
+                    let inside = registry.enter(id)?;
+                    inside.note_driver_closed();
+                    Some(())
+                })
+            };
+            let closed = wait(owner.begin_close(Duration::MAX));
+            let mut seen = false;
+            assert!(matches!(
+                closed.teardown(|state| {
+                    seen = state.driver_closed();
+                    state.teardown();
+                    true
+                }),
+                Outcome::Closed
+            ));
+            let entered = marker.join().expect("callback").is_some();
+            assert_eq!(seen, entered);
+        });
     }
 
     #[test]
