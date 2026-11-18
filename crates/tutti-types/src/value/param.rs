@@ -379,13 +379,13 @@ where
 /// assert_eq!(stretch_rate.load(), ReadRate::new(0.75));
 /// ```
 ///
-/// An `f32` unit is not a `Param64`:
+/// A count is not a `Param64`:
 ///
 /// ```compile_fail
-/// use tutti_units::Resonance;
+/// use tutti_units::Samples;
 /// use tutti_types::Param64;
-/// struct Filter {
-///     resonance: Param64<Resonance>, // `Param<Resonance>`
+/// struct Delay {
+///     length: Param64<Samples>, // a count is not a continuous quantity
 /// }
 /// ```
 pub struct Param64<U: Unit<Raw = f64>> {
