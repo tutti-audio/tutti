@@ -29,7 +29,7 @@ use tutti_types::{ChannelLayout, Db, Hz, SampleRate, Samples};
 
 use super::compressor::{CompressorBank, CompressorControls, CompressorLanes};
 use super::shared::{CHUNK, GAIN_GLIDE};
-use crate::convolver::convert_mono;
+use crate::convert::convert_equal;
 use crate::{
     COEFF_INTERVAL, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
     CrossoverModel, Glide, Steps,
@@ -370,7 +370,7 @@ impl MultibandBank {
         for (c, plane) in scratch.input.iter_mut().enumerate() {
             let dst = &mut plane[..n];
             match input.get_plane(c) {
-                Some(src) => convert_mono(&src.samples()[at.clone()], dst),
+                Some(src) => convert_equal(&src.samples()[at.clone()], dst),
                 None => dst.fill(0.0),
             }
         }
@@ -459,7 +459,7 @@ impl MultibandBank {
         }
         for c in 0..width.min(output.channels()) {
             let mut plane = output.plane_mut(c);
-            convert_mono(&scratch.sum[c][..n], &mut plane.samples_mut()[at.clone()]);
+            convert_equal(&scratch.sum[c][..n], &mut plane.samples_mut()[at.clone()]);
         }
     }
 }

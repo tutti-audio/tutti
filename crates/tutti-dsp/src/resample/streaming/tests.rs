@@ -619,9 +619,9 @@ fn the_passband_is_flat_to_the_band_edge() {
 #[test]
 fn rates_of_one_whole_hz_are_no_conversion() {
     let hz = |r: f64| SampleRate::of(r);
-    assert!(!rates_convert(hz(44_100.0), hz(44_100.2)));
-    assert!(rates_convert(hz(44_100.0), hz(48_000.0)));
-    assert!(rates_convert(hz(0.4), hz(0.4)));
+    assert!(!needs_resampling(hz(44_100.0), hz(44_100.2)));
+    assert!(needs_resampling(hz(44_100.0), hz(48_000.0)));
+    assert!(needs_resampling(hz(0.4), hz(0.4)));
     assert_eq!(
         resampled_frames(hz(44_100.0), hz(44_100.2), Samples(1_000_000)),
         Samples(1_000_000)

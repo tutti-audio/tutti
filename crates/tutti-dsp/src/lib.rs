@@ -170,6 +170,7 @@
 
 mod bit_crush;
 mod control;
+mod convert;
 mod convolver;
 mod dc_block;
 mod delay;
@@ -247,7 +248,7 @@ pub use oversample::{
 pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
 pub use resample::{
-    ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc, rates_convert,
+    ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc, needs_resampling,
     resampled_frames,
 };
 pub use reverb::fdn::bank::{FdnBank, FdnGlides};

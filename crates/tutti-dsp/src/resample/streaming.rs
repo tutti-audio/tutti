@@ -138,7 +138,7 @@ fn scaled(input: usize, ratio: f64) -> usize {
 /// the same header are one rate. A float comparison would turn on an ULP.
 /// A rate [`StreamingResampler::new`] refuses is not an identity either.
 #[must_use]
-pub fn rates_convert(source_rate: SampleRate, target_rate: SampleRate) -> bool {
+pub fn needs_resampling(source_rate: SampleRate, target_rate: SampleRate) -> bool {
     match (whole_hz(source_rate.get()), whole_hz(target_rate.get())) {
         (Ok(source), Ok(target)) => source != target,
         _ => true,
@@ -146,7 +146,7 @@ pub fn rates_convert(source_rate: SampleRate, target_rate: SampleRate) -> bool {
 }
 
 /// The frames a stream of `input` frames comes out as, flush included:
-/// `input` itself when [`rates_convert`] is `false`, else
+/// `input` itself when [`needs_resampling`] is `false`, else
 /// `round(input * target / source)`, which is what a stream fed `input`
 /// frames emits in all however it is blocked.
 #[must_use]
@@ -155,7 +155,7 @@ pub fn resampled_frames(
     target_rate: SampleRate,
     input: Samples,
 ) -> Samples {
-    if !rates_convert(source_rate, target_rate) {
+    if !needs_resampling(source_rate, target_rate) {
         return input;
     }
     Samples(scaled(input.get(), target_rate.get() / source_rate.get()))

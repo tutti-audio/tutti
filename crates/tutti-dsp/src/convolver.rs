@@ -70,10 +70,10 @@
 use std::sync::Arc;
 
 use rustfft::FftNum;
-use tutti_buffers::{Float, Interleaved, InterleavedMut, Mono, MonoMut, Sample, convert};
-use tutti_types::ChannelLayout;
+use tutti_buffers::{Float, Mono, MonoMut, Sample};
 
 use crate::Complex;
+use crate::convert::convert_equal;
 use crate::fft::StagedRealFft;
 
 /// Default FFT block size when the caller doesn't pick one. A power of two,
@@ -188,19 +188,6 @@ fn plan_levels(ir_len: usize, head: usize) -> Vec<Plan> {
         }
     }
     best.1.unwrap_or(uniform)
-}
-
-/// `dst = src` in `dst`'s format, through [`tutti_buffers::convert`] as one channel. Allocates
-/// nothing.
-///
-/// # Panics
-///
-/// If the two slices differ in length.
-pub(crate) fn convert_mono<A: Sample, B: Sample>(src: &[A], dst: &mut [B]) {
-    let one = ChannelLayout::MONO;
-    let (src, dst) = (Interleaved::new(src, one), InterleavedMut::new(dst, one));
-    let done = src.and_then(|s| dst.and_then(|d| convert(s, d)));
-    assert!(done.is_ok(), "BUG: a mono copy of equal lengths: {done:?}");
 }
 
 /// Zeroed complex spectrum of `bins` bins.
@@ -643,7 +630,7 @@ impl<F: Float + FftNum> Convolver<F> {
     pub fn new<S: Sample>(ir: Mono<'_, S>, block_size: usize) -> Self {
         let block_size = block_size.next_power_of_two().max(2);
         let mut converted = vec![F::ZERO; ir.samples().len()];
-        convert_mono(ir.samples(), &mut converted);
+        convert_equal(ir.samples(), &mut converted);
         Self::over(Arc::new(IrSpectra::new(&converted, block_size)))
     }
 

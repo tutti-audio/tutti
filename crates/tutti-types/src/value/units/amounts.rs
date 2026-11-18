@@ -23,7 +23,7 @@ unit! {
     /// A blend position between two signals, `0..1`: `0` is all of the first
     /// signal (the input, as it was before the node: the "dry" end), `1` all of
     /// the second (the node's output: the "wet" end). In between is
-    /// `first * (1 - mix) + second * mix` (`tutti_dsp::lerp`).
+    /// `first * (1 - mix) + second * mix`, a linear interpolation.
     ///
     /// What the graph holds per node is this blend of the node's output with
     /// its own input delayed by the node's declared latency

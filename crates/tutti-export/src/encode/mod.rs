@@ -25,7 +25,7 @@ use crate::{Error, Written};
 use std::path::Path;
 use tutti_buffers::{Interleaved, InterleavedMut, Planes, Sink, SinkFailed};
 use tutti_codec::{Encoder, Finalized, Spec};
-use tutti_dsp::{DitherSink, StreamingResampler, rates_convert, resampled_frames};
+use tutti_dsp::{DitherSink, StreamingResampler, needs_resampling, resampled_frames};
 use tutti_types::{Amplitude, ChannelLayout, SampleRate, Samples};
 
 /// The rate the file is written at: the resample target, else the rate it is
@@ -203,14 +203,14 @@ pub(crate) fn resampler_for(
     ch: usize,
 ) -> Result<Option<Resampler>> {
     // Whether to convert at all is the converter's to say
-    // (`tutti_dsp::rates_convert`), not a float comparison here.
+    // (`tutti_dsp::needs_resampling`), not a float comparison here.
     //
     // `source_rate` is the PARAMETER, not a rate of the target's.
     // Frames handed to `write_buffers` already exist and carry their own
     // rate, which may not be the one a config was rendered at; reading
     // it from a config resamples from a rate the samples were never at.
     Ok(match target.resample {
-        Some(r) if rates_convert(source_rate, r.target_rate) => Some((
+        Some(r) if needs_resampling(source_rate, r.target_rate) => Some((
             StreamingResampler::new(ch, source_rate, r.target_rate, r.chunk)?,
             vec![Vec::<f32>::new(); ch],
             vec![Vec::<f32>::new(); ch],
