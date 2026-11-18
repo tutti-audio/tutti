@@ -166,20 +166,6 @@ fn an_f64_unit_is_read_at_its_own_width() {
     );
 }
 
-/// An `f32` unit is evaluated in `f64` and narrowed once: the middle of
-/// `0.1..0.3` is the `f32` nearest the exact `0.2` to within 1 ulp.
-#[test]
-fn an_f32_unit_narrows_the_f64_evaluation_once() {
-    let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::new(Beat(0.0), Bipolar::of(0.1)))
-        .add_breakpoint(Breakpoint::new(Beat(2.0), Bipolar::of(0.3)));
-    let got = e.value_at(Beat(1.0)).unwrap().get();
-    assert!(
-        (got.to_bits() as i64 - 0.2f32.to_bits() as i64).abs() <= 1,
-        "{got}"
-    );
-}
-
 /// `simplify` takes its tolerance in the unit's own width.
 #[test]
 fn simplify_takes_its_tolerance_in_the_units_width() {

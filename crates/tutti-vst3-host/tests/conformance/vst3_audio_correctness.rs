@@ -1123,7 +1123,8 @@ fn note_expression_reaches_the_plugin_with_its_value() {
 #[test]
 fn a_per_note_pitch_bend_reaches_the_plugin_as_tuning() {
     use tutti_midi_protocol::PitchBendSensitivity;
-    use tutti_midi_protocol::signed_f32_to_bend;
+    use tutti_ump::BendValue;
+    use tutti_units::Bipolar;
     let _guard = plugin_guard();
     let mut inst = load_probe(512);
     set_mode(&mut inst, mode(5));
@@ -1135,7 +1136,11 @@ fn a_per_note_pitch_bend_reaches_the_plugin_as_tuning() {
     let quarter_bend = |frame: usize| {
         (
             at(frame),
-            midi::per_note_pitch_bend(MidiChannel::FIRST, 60, signed_f32_to_bend(0.25).get()),
+            midi::per_note_pitch_bend(
+                MidiChannel::FIRST,
+                60,
+                BendValue::from_bipolar(Bipolar::of(0.25)).get(),
+            ),
         )
     };
     let midi = [
