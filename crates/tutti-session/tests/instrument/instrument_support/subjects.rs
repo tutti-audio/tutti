@@ -85,7 +85,7 @@ impl Plugin {
         state: Option<Vec<u8>>,
     ) -> (
         tutti_session::Session,
-        tutti_session::Key<tutti_session::PluginNode>,
+        tutti_session::Key<tutti_session::AnyPlugin>,
     ) {
         // SAFETY: nextest runs every test in its own process and this runs
         // before the first server is spawned, on the test's own thread.
@@ -114,7 +114,7 @@ impl Plugin {
     /// The shared plugin, state in `Notes` mode.
     pub fn notes() -> (
         tutti_session::Session,
-        tutti_session::Key<tutti_session::PluginNode>,
+        tutti_session::Key<tutti_session::AnyPlugin>,
     ) {
         let real = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
         Self::load(
@@ -126,7 +126,7 @@ impl Plugin {
     /// The reference probe, which declares itself an effect.
     pub fn effect() -> (
         tutti_session::Session,
-        tutti_session::Key<tutti_session::PluginNode>,
+        tutti_session::Key<tutti_session::AnyPlugin>,
     ) {
         let real = tutti_fixtures::cdylib("tutti_clap_test_plugin", "tutti-clap-test-plugin");
         Self::load(tutti_fixtures::publish_with_extension(&real, "clap"), None)

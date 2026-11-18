@@ -2,7 +2,7 @@
 //! and the writer's byte output, against bytes built from the SMF 1.0 spec
 //! (`support`, which shares no code with the crate).
 
-use crate::common::{self, metrical, note, track};
+use crate::common::{self, metrical, note, track, unspecified, without_defaults};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
@@ -32,13 +32,12 @@ fn raw_track(body: &[u8]) -> Vec<u8> {
 
 fn ticks(bytes: &[u8]) -> Vec<u64> {
     let file = MidiFile::from_bytes(bytes).expect("reads");
-    file.tracks()[0].events().iter().map(|(t, _)| t.0).collect()
+    unspecified(&file, 0).iter().map(|(t, _)| t.0).collect()
 }
 
 fn voices(bytes: &[u8]) -> Vec<Voice1> {
     let file = MidiFile::from_bytes(bytes).expect("reads");
-    file.tracks()[0]
-        .events()
+    unspecified(&file, 0)
         .iter()
         .filter_map(|(_, e)| match e {
             FileEvent::Message(Message::Midi1(_, v)) => Some(*v),
@@ -96,6 +95,7 @@ fn a_quantity_writes_to_its_bytes() {
         )
         .unwrap()
         .to_bytes();
+        let written = without_defaults(&written);
         // 14-byte header, 8-byte track header, then the delta.
         assert_eq!(written.get(22..22 + bytes.len()), Some(bytes), "{value:#x}");
     }
@@ -381,7 +381,7 @@ fn track_body(events: Vec<(u64, FileEvent)>) -> Vec<u8> {
     let bytes = crate::common::format0(SMF_DIVISION, track)
         .unwrap()
         .to_bytes();
-    bytes.get(22..).unwrap().to_vec()
+    without_defaults(bytes.get(22..).unwrap())
 }
 
 /// Two notes of one status write the status once: `00 90 3C 64`, `00 3E 64`,
@@ -522,7 +522,7 @@ fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
         body.extend_from_slice(data);
         body.extend_from_slice(&[0x00, 0x90, 60, 100, 0x00, 0xFF, 0x2F, 0x00]);
         let read = MidiFile::from_bytes(&raw_track(&body)).expect("reads");
-        let events = &read.tracks()[0].events();
+        let events = &unspecified(&read, 0);
         // The note after it is read.
         assert_eq!(events.len(), 2, "{kind:#04x} {data:?}");
         let FileEvent::Meta(Meta::Malformed(malformed)) = &events[0].1 else {
@@ -614,24 +614,24 @@ fn every_text_meta_type_reads_and_writes_back() {
         let bytes = file(vec![RawEvent::new(0, vec![0xFF, meta_type, 1, b'x'])]);
         let read = MidiFile::from_bytes(&bytes).unwrap();
         assert_eq!(
-            read.tracks()[0].events()[0].1,
+            unspecified(&read, 0)[0].1,
             FileEvent::Meta(Meta::text(kind, "x")),
             "{meta_type:#x}"
         );
-        assert_eq!(read.to_bytes(), bytes, "{meta_type:#x}");
+        assert_eq!(without_defaults(&read.to_bytes()), bytes, "{meta_type:#x}");
     }
     for meta_type in [0x02, 0x03] {
         let bytes = file(vec![RawEvent::new(0, vec![0xFF, meta_type, 1, b'x'])]);
         let read = MidiFile::from_bytes(&bytes).unwrap();
         let track = &read.tracks()[0];
-        assert_eq!(track.events(), [], "{meta_type:#x}");
+        assert_eq!(unspecified(&read, 0), [], "{meta_type:#x}");
         let field = if meta_type == 0x02 {
             read.copyright()
         } else {
             track.name_bytes()
         };
         assert_eq!(field, Some(&b"x"[..]), "{meta_type:#x}");
-        assert_eq!(read.to_bytes(), bytes, "{meta_type:#x}");
+        assert_eq!(without_defaults(&read.to_bytes()), bytes, "{meta_type:#x}");
     }
 }
 
@@ -801,13 +801,13 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
     ]);
     let read = MidiFile::from_bytes(&whole).unwrap();
     assert_eq!(
-        read.tracks()[0].events(),
+        unspecified(&read, 0),
         [(
             Tick(0),
             FileEvent::SysEx(common::complete(&[0x43, 0x12, 0x00, 0x07]))
         )]
     );
-    assert_eq!(read.to_bytes(), whole);
+    assert_eq!(without_defaults(&read.to_bytes()), whole);
 
     let packets = raw_track(&[
         0x00, 0xF0, 0x03, 0x43, 0x12, 0x00, //
@@ -817,7 +817,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
     ]);
     let read = MidiFile::from_bytes(&packets).unwrap();
     assert_eq!(
-        read.tracks()[0].events(),
+        unspecified(&read, 0),
         [
             (
                 Tick(0),
@@ -833,7 +833,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
             ),
         ]
     );
-    assert_eq!(read.to_bytes(), packets);
+    assert_eq!(without_defaults(&read.to_bytes()), packets);
 }
 
 /// The spec's Time Signature example: 6/8 with a click every three eighth
@@ -848,7 +848,7 @@ fn the_spec_time_signature_example_is_six_eight_with_36_clocks_a_click() {
     ]);
     let read = MidiFile::from_bytes(&bytes).unwrap();
     assert_eq!(
-        read.tracks()[0].events()[0].1,
+        unspecified(&read, 0)[0].1,
         FileEvent::Meta(Meta::TimeSignature {
             numerator: 6,
             denominator_power: 3,
@@ -857,7 +857,7 @@ fn the_spec_time_signature_example_is_six_eight_with_36_clocks_a_click() {
             extra: Box::default(),
         })
     );
-    assert_eq!(read.to_bytes(), bytes);
+    assert_eq!(without_defaults(&read.to_bytes()), bytes);
 }
 
 /// The spec's Key Signature: `sf` is -7 flats to 7 sharps (negative in two's
@@ -882,7 +882,7 @@ fn a_key_signature_is_seven_flats_to_seven_sharps_and_a_mode() {
             ]);
             let read = MidiFile::from_bytes(&bytes).unwrap();
             assert_eq!(
-                read.tracks()[0].events()[0].1,
+                unspecified(&read, 0)[0].1,
                 FileEvent::Meta(Meta::KeySignature {
                     sharps,
                     minor,
@@ -890,7 +890,11 @@ fn a_key_signature_is_seven_flats_to_seven_sharps_and_a_mode() {
                 }),
                 "{sharps} {minor}"
             );
-            assert_eq!(read.to_bytes(), bytes, "{sharps} {minor}");
+            assert_eq!(
+                without_defaults(&read.to_bytes()),
+                bytes,
+                "{sharps} {minor}"
+            );
         }
     }
 }
@@ -927,11 +931,12 @@ fn meta_events_at_one_tick_read_in_the_order_the_file_has_them() {
             .map(|(_, e)| matches!(e, FileEvent::Meta(Meta::Tempo { .. })))
             .collect()
     };
-    assert_eq!(kinds(&first), [true, false]);
+    // The Time Signature the file is given joins them.
+    assert_eq!(kinds(&first), [true, false, false]);
     let tempo = RawEvent::tempo(0, 500_000);
     let text = RawEvent::new(0, vec![0xFF, 0x01, 1, b'x']);
     let second = MidiFile::from_bytes(&file(vec![text, tempo])).unwrap();
-    assert_eq!(kinds(&second), [false, true]);
+    assert_eq!(kinds(&second), [false, true, false]);
 }
 
 /// A text event may use character codes with the high bit set: the bytes read
@@ -942,11 +947,11 @@ fn text_bytes_with_the_high_bit_set_read_and_write_back_unchanged() {
     let bytes = file(vec![RawEvent::new(0, vec![0xFF, 0x01, 2, 0xE9, b'a'])]);
     let read = MidiFile::from_bytes(&bytes).unwrap();
     assert_eq!(
-        read.tracks()[0].events()[0].1,
+        unspecified(&read, 0)[0].1,
         FileEvent::Meta(Meta::Text {
             kind: TextKind::Text,
             bytes: Box::new([0xE9, b'a']),
         })
     );
-    assert_eq!(read.to_bytes(), bytes);
+    assert_eq!(without_defaults(&read.to_bytes()), bytes);
 }

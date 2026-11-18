@@ -1,7 +1,7 @@
 //! Phaser: a swept all-pass chain, of any width.
 //!
 //! [`PhaserChain`] is the algorithm (the all-pass chain and its feedback); this file holds
-//! the sweep (the LFO and the solve of the coefficients), the cells and how the graph reaches
+//! the sweep (the LFO and the solve of the complements), the cells and how the graph reaches
 //! them. The one modulation effect here with no delay line: it notches by phase
 //! cancellation, which is why its notches are fewer and unevenly spaced compared with a
 //! flanger's.
@@ -9,7 +9,7 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, GAIN_GLIDE, Glide, Lerp, MAX_PHASER_CHANNELS, MIN_RATE, PhaserChain,
-    PhaserControls, Stages, Stagger, StaggerError, Steps, SweepRange, allpass_coeff, sweep_hz,
+    PhaserControls, Stages, Stagger, StaggerError, Steps, SweepRange, allpass_complement, sweep_hz,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, MaxBlock};
@@ -142,7 +142,7 @@ control_set! {
 }
 
 /// The phaser as a [`Kernel`]: a [`PhaserChain`], the LFO that sweeps it and the solve of its
-/// coefficients.
+/// complements.
 ///
 /// **The LFO is state on the stream's clock.** Its phase is a `Phase` walked by the
 /// rate's increment, counted from the last reset (and so from every `prepare`: **a
@@ -175,7 +175,7 @@ pub struct PhaserKernel<F: Float> {
     /// The glide length of the depth and the feedback: [`GAIN_GLIDE`] at the prepared rate.
     steps: u32,
     /// The coefficient of each channel across the segment in flight, from its start corner.
-    coefficients: Box<[Glide<F>]>,
+    complements: Box<[Glide<F>]>,
     depth: Glide<F>,
     feedback: Glide<F>,
     /// The LFO and the segments.
@@ -215,7 +215,7 @@ impl<F: Float + Lerp> PhaserKernel<F> {
             max: range.max(),
             rate: SampleRate::SR_48K,
             steps: 0,
-            coefficients: vec![Glide::landed(F::ZERO); width].into_boxed_slice(),
+            complements: vec![Glide::landed(F::ONE); width].into_boxed_slice(),
             depth: Glide::landed(F::from_unit(d.depth)),
             feedback: Glide::landed(F::from_unit(d.feedback)),
             clock: SweepClock::new(offsets),
@@ -229,10 +229,10 @@ impl<F: Float + Lerp> PhaserKernel<F> {
         let depth_start = self.depth.now();
         let depth_end = self.depth.at(self.depth.taken().saturating_add(SEGMENT));
         let (min, max, rate) = (self.min, self.max, self.rate);
-        self.clock.solve(&mut self.coefficients, |lfo, end| {
+        self.clock.solve(&mut self.complements, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
             let sweep = sweep_hz(min, max, lfo, Depth::clamped(depth.into()));
-            allpass_coeff(sweep, rate)
+            allpass_complement(sweep, rate)
         });
     }
 }
@@ -313,7 +313,7 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
     ) {
         let frames = input.frames().get().min(output.frames().get());
         self.chain
-            .process(&mut self.coefficients, &mut self.feedback, input, output);
+            .process(&mut self.complements, &mut self.feedback, input, output);
         self.depth
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
         self.clock.advance(frames);
@@ -336,7 +336,8 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_types::ChannelLayout;
     use tutti_units::{
-        Latency, Phase, PhaseIncrement, PhaseStep, Real, RunningPhase, Samples, Tail, UnitParam,
+        Bipolar, Latency, Phase, PhaseIncrement, PhaseStep, Real, RunningPhase, Samples, Tail,
+        UnitParam,
     };
 
     const RATE: SampleRate = SampleRate::SR_48K;
@@ -640,10 +641,10 @@ mod tests {
         k
     }
 
-    /// The coefficient the sweep's definition gives for a channel offset by `offset` cycles,
-    /// `steps` steps of the LFO on (a `Phase` walked one frame at a time), at depth
-    /// `depth`, on `range` at `rate` Hz.
-    fn exact_coefficient(
+    /// The complement `1 + c` of the coefficient the sweep's definition gives for a channel
+    /// offset by `offset` cycles, `steps` steps of the LFO on (a `Phase` walked one frame at a
+    /// time), at depth `depth`, on `range` at `rate` Hz.
+    fn exact_complement(
         range: SweepRange,
         rate: f64,
         depth: f64,
@@ -655,9 +656,9 @@ mod tests {
         for _ in 0..steps {
             p = p.advance(inc);
         }
-        let lfo = (std::f64::consts::TAU * (p.get() + offset)).sin() as f32;
+        let lfo = Bipolar::clamped((std::f64::consts::TAU * (p.get() + offset)).sin());
         let hz = sweep_hz(range.min(), range.max(), lfo, Depth::clamped(depth));
-        allpass_coeff(hz, RATE)
+        allpass_complement(hz, RATE)
     }
 
     fn silence(width: usize, frames: usize) -> Vec<Vec<f32>> {
@@ -672,10 +673,10 @@ mod tests {
         let band = SweepRange::of(Hz(300.0), Hz(3_000.0));
         let mut k = kernel(1, 4, band, Stagger::NONE);
         k.retarget(&controls(5.0, 1.0, 0.5));
-        let start = exact_coefficient(band, 5.0, 1.0, 0.0, 0);
-        let end = exact_coefficient(band, 5.0, 1.0, 0.0, 16);
-        assert!((k.coefficients[0].now() - start).abs() < 1e-6, "the start");
-        assert!((k.coefficients[0].target() - end).abs() < 1e-6, "the end");
+        let start = exact_complement(band, 5.0, 1.0, 0.0, 0);
+        let end = exact_complement(band, 5.0, 1.0, 0.0, 16);
+        assert!((k.complements[0].now() - start).abs() < 1e-6, "the start");
+        assert!((k.complements[0].target() - end).abs() < 1e-6, "the end");
         assert_ne!(start, end, "the sweep moves");
     }
 
@@ -693,8 +694,8 @@ mod tests {
             let mut k = kernel(3, 4, band, stagger);
             k.retarget(&controls(1.0, 1.0, 0.5));
             for (ch, offset) in offsets.into_iter().enumerate() {
-                let want = exact_coefficient(band, 1.0, 1.0, offset, 0);
-                let got = k.coefficients[ch].now();
+                let want = exact_complement(band, 1.0, 1.0, offset, 0);
+                let got = k.complements[ch].now();
                 assert!(
                     (got - want).abs() < 1e-5,
                     "channel {ch}: {got} against {want}"
@@ -703,8 +704,9 @@ mod tests {
         }
     }
 
-    /// Between two corners the coefficient is the chord, read a step ahead: frame `16 k + j`
-    /// sounds `prev + (next - prev) (j + 1) / 16`. An impulse at frame `n` of a fresh chain
+    /// Between two corners the complement is the chord, read a step ahead: frame `16 k + j`
+    /// sounds `prev + (next - prev) (j + 1) / 16`, and the coefficient is that less 1. An
+    /// impulse at frame `n` of a fresh chain
     /// with no feedback comes out as that frame's coefficient once a stage (`out = c (in -
     /// y1) + x1` with no history), so through two stages as its square: the render shows it
     /// directly, on the stream's lattice from the first block.
@@ -718,9 +720,9 @@ mod tests {
             x[n] = 1.0;
             let y = drive_kernel(&mut k, &[(0, c)], &[x]).remove(0);
             let (j, base) = (n % 16, n - n % 16);
-            let prev = exact_coefficient(band, 5.0, 1.0, 0.0, base);
-            let next = exact_coefficient(band, 5.0, 1.0, 0.0, base + 16);
-            let chord = prev + (next - prev) * ((j + 1) as f32 / 16.0);
+            let prev = exact_complement(band, 5.0, 1.0, 0.0, base);
+            let next = exact_complement(band, 5.0, 1.0, 0.0, base + 16);
+            let chord = prev + (next - prev) * ((j + 1) as f32 / 16.0) - 1.0;
             assert!(
                 (y[n] - chord * chord).abs() < 1e-6,
                 "frame {n}: {} against the chord's square {}",
@@ -740,11 +742,11 @@ mod tests {
         let mut k = kernel(1, 4, band, Stagger::NONE);
         let moves = [(0, controls(5.0, 0.0, 0.5)), (16, controls(5.0, 1.0, 0.5))];
         drive_kernel(&mut k, &moves, &silence(1, 17));
-        let start = exact_coefficient(band, 5.0, 0.0, 0.0, 16);
-        let end = exact_coefficient(band, 5.0, 16.0 / 240.0, 0.0, 32);
+        let start = exact_complement(band, 5.0, 0.0, 0.0, 16);
+        let end = exact_complement(band, 5.0, 16.0 / 240.0, 0.0, 32);
         // The retarget at 16 solved the segment 16..32; the frame rendered since (frame 16)
         // took one step.
-        let g = k.coefficients[0];
+        let g = k.complements[0];
         assert!(
             (g.target() - end).abs() < 1e-6,
             "the end: {} against {end}",
@@ -981,14 +983,15 @@ mod tests {
     }
 
     /// An `f64` block through a `PhaserKernel::<f64>` at depth 0 (the sweep parked at the
-    /// range's bottom, so the coefficient `a` is the one design for 200 Hz) is, per frame, the
-    /// stage difference equation `s[n] = a u[n] + u[n - 1] - a s[n - 1]` twice in cascade on
+    /// range's bottom, so the complement `a = 1 + c` is the one design for 200 Hz) is, per frame,
+    /// the stage difference equation `s[n] = c (u[n] - s[n - 1]) + u[n - 1]` twice in cascade on
     /// `u[n] = x[n] + g y[n - 1]`, computed in `f64`, to 2^-45.
     #[test]
     fn an_f64_kernel_at_no_depth_is_the_all_pass_difference_equation_in_f64() {
         use tutti_fixtures::signal::{assert_close_f64, wide_signal};
         let (stages, len, g) = (2usize, 300usize, 0.5f64);
-        let a: f64 = allpass_coeff(SweepRange::DEFAULT.min(), RATE);
+        let a: f64 = allpass_complement(SweepRange::DEFAULT.min(), RATE);
+        let c = a - 1.0;
         assert_ne!(
             a,
             f64::from(a as f32),
@@ -1001,7 +1004,7 @@ mod tests {
         for n in 0..len {
             let mut u = x[n] + g * last;
             for (x1, y1) in &mut state {
-                let s = a * u + *x1 - a * *y1;
+                let s = c * (u - *y1) + *x1;
                 (*x1, *y1) = (u, s);
                 u = s;
             }

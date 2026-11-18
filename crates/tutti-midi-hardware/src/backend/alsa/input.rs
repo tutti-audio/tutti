@@ -206,13 +206,13 @@ pub(super) fn pump(
                 Ok(Wait::Ready) => continue,
                 Ok(Wait::Stopped) => return,
                 // The descriptor failed: the port is silent from here.
-                Ok(Wait::Broken) | Err(_) => return died.raise(),
+                Ok(Wait::Broken) | Err(_) => return died.raise(()),
             },
             Err(_) => {
                 // An overrun or a failing read: try again at once, a few times
                 // in a row at most (a level-triggered descriptor would spin).
                 if errors.failed() {
-                    return died.raise();
+                    return died.raise(());
                 }
                 continue;
             }

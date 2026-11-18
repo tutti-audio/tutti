@@ -6,7 +6,7 @@
 
 use crate::ramp::LastGood;
 use tutti_buffers::Float;
-use tutti_dsp::OscillatorWave;
+use tutti_dsp::{OscillatorStep, OscillatorWave};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_types::{ChannelLayout, Param};
 use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
@@ -177,16 +177,36 @@ impl<F: Float> Node<F> for OscillatorNode {
         let frequency_cell = self.frequency.load().get();
         let level_cell = self.level.load().get();
         let out = io.output(0);
+        // A frequency and a level that hold are read, and cross into `F`, once per block; a
+        // lane's value replaces them at each frame.
+        let mut step = OscillatorStep::<F>::new(
+            Hz(if frequency.is_none() {
+                self.good_frequency.read(frequency_cell)
+            } else {
+                0.0
+            }),
+            rate,
+        );
+        let mut gain = if level.is_none() {
+            F::from_unit(Amplitude(self.good_level.read(level_cell)))
+        } else {
+            F::ZERO
+        };
         for (i, o) in out[..size].iter_mut().enumerate() {
-            let f = self
-                .good_frequency
-                .read(frequency.map_or(frequency_cell, |l| l[i].into()));
-            let g = self
-                .good_level
-                .read(level.map_or(level_cell, |l| l[i].into()));
-            // The wave and the level multiply in `f64`; the sample narrows once.
-            let y: f64 = self.wave.step(Hz(f), rate);
-            *o = F::from_f64(y * g);
+            if let Some(lane) = frequency {
+                let f = self.good_frequency.read(lane[i].into());
+                step = OscillatorStep::new(Hz(f), rate);
+            }
+            if let Some(lane) = level {
+                // A finite lane value is the level in `F` as it is.
+                let good = self.good_level.read(lane[i].into());
+                gain = if lane[i].is_finite() {
+                    lane[i]
+                } else {
+                    F::from_unit(Amplitude(good))
+                };
+            }
+            *o = self.wave.step(step) * gain;
         }
         Status::Modified
     }

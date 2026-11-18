@@ -1,6 +1,6 @@
 use super::*;
+use crate::RealFft;
 use crate::filter::crossover::CrossoverState;
-use crate::{Complex32, RealFft};
 use tutti_buffers::Mono;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -102,7 +102,7 @@ fn the_two_bands_are_the_prewarped_bilinear_image_of_the_lr4_prototypes() {
 
 /// The model's response is the running crossover's: the `RealFft` of each
 /// band's impulse response through `CrossoverState::tick` against
-/// `frequency_response`, to 1e-5 of its norm, for three bands.
+/// `frequency_response`, to 1e-9 of its norm, for three bands.
 #[test]
 fn the_response_is_what_the_crossover_runs() {
     const N: usize = 1 << 15;
@@ -110,27 +110,27 @@ fn the_response_is_what_the_crossover_runs() {
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
     let mut xo = CrossoverState::<f64>::default();
     let c = m.coefficients();
-    let mut bands = vec![vec![0.0f32; N]; 3];
+    let mut bands = vec![vec![0.0f64; N]; 3];
     for n in 0..N {
         let out = tick(&mut xo, &c, if n == 0 { 1.0 } else { 0.0 });
         for (b, v) in bands.iter_mut().zip(out) {
             b[n] = v;
         }
     }
-    let fft = RealFft::new(N);
+    let fft = RealFft::<f64>::new(N);
     let mut scratch = fft.new_scratch();
     for (band, ir) in bands.iter().enumerate() {
-        let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
+        let mut bins = vec![Complex64::new(0.0, 0.0); fft.bins()];
         fft.forward(Mono::new(ir), &mut bins, &mut scratch);
         let (mut num, mut den) = (0.0f64, 0.0f64);
         for (i, b) in bins.iter().enumerate().step_by(5) {
             let want = at(&m, band, i as f64 * RATE.get() / N as f64);
-            let got = Complex64::new(f64::from(b.re), f64::from(b.im));
+            let got = *b;
             num += (got - want).norm_sqr();
             den += want.norm_sqr();
         }
         assert!(
-            (num / den).sqrt() < 1e-5,
+            (num / den).sqrt() < 1e-9,
             "band {band}: {}",
             (num / den).sqrt()
         );
@@ -158,13 +158,13 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
     let mut xo = CrossoverState::<f64>::default();
     let c = m.coefficients();
-    let ir: Vec<f32> = (0..N)
+    let ir: Vec<f64> = (0..N)
         .map(|n| tick(&mut xo, &c, if n == 0 { 1.0 } else { 0.0 })[0])
         .collect();
     let win = 256;
     let env: Vec<f64> = ir
         .chunks(win)
-        .map(|c| (c.iter().map(|&x| f64::from(x).powi(2)).sum::<f64>() / win as f64).sqrt())
+        .map(|c| (c.iter().map(|&x| x.powi(2)).sum::<f64>() / win as f64).sqrt())
         .collect();
     let peak = env.iter().copied().fold(0.0, f64::max);
     let last = env.iter().rposition(|&v| v >= peak * 1e-3).unwrap();
@@ -188,11 +188,9 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     let mut worst = 0.0f64;
     for _ in 0..(60 * 48_000) {
         state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        let x = (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+        let x = f64::from(state >> 8) / f64::from(1u32 << 24) * 2.0 - 1.0;
         let out = tick(&mut xo, &c, x);
-        worst = out[..3]
-            .iter()
-            .fold(worst, |m, &s| m.max(f64::from(s.abs())));
+        worst = out[..3].iter().fold(worst, |m, &s| m.max(s.abs()));
     }
     assert!(worst <= m.l1_norm(), "{worst} against {}", m.l1_norm());
     assert!(m.hinf_norm() <= m.l1_norm());
@@ -251,11 +249,11 @@ fn a_design_refuses_a_band_count_a_tree_does_not_have() {
     }
 }
 
-/// One sample through `state` at `c`, in `f32`.
+/// One sample through `state` at `c`.
 fn tick(
     state: &mut CrossoverState<f64>,
     c: &crate::CrossoverCoefficients,
-    x: f32,
-) -> [f32; CrossoverModel::MAX_BANDS] {
-    state.tick(&c.narrowed(), f64::from(x)).map(|y| y as f32)
+    x: f64,
+) -> [f64; CrossoverModel::MAX_BANDS] {
+    state.tick(&c.narrowed(), x)
 }

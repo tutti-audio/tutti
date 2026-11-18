@@ -59,7 +59,7 @@ fn load(
     main: tutti::plugin::MainThreadMarker,
     plugin: &Path,
     state: Option<Vec<u8>>,
-) -> Result<tutti::Key<tutti::PluginNode>, Box<dyn std::error::Error>> {
+) -> Result<tutti::Key<tutti::AnyPlugin>, Box<dyn std::error::Error>> {
     use tutti::plugin::catalog::{CatalogConfig, NO_SCAN_DIRS, PluginDb, PluginId, ScanPoll};
     let dir = tempfile::TempDir::new()?;
     let mut catalog = tutti::Catalog::new(

@@ -14,7 +14,7 @@
 //!
 //! One `Ipc` serves every format by path, as `PluginClient` does: the
 //! `plugin-server` loads whichever format the path names, and its AU loader is
-//! still its own. It gains `<F: OutOfProcess>` when
+//! still its own. It gains `<L: OutOfProcess>` when
 //! AU is served through the generic loader.
 //!
 //! # Threads

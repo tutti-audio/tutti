@@ -32,7 +32,7 @@ pub(super) fn moded_node_op<
     let source = plan.param_ports[rec.params.range()]
         .last()
         .filter(|p| p.is_mix())
-        .map(|p| (p.from, &st.events.ev(p.slot)[..]));
+        .map(|p| (p.from, &st.events.pev(p.slot)[..]));
     u.mode.drive_step(frames, source);
 
     let want = u.mode.seen();
@@ -149,9 +149,9 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     }
 
     for (port, &s) in eout.iter().enumerate() {
-        let events = st.events.ev_mut(s);
-        events.clear();
-        u.keys.close_port(port, events);
+        // A parked node writes no param events either.
+        st.events.slot_mut(s).clear();
+        u.keys.close_port(port, st.events.ev_mut(s));
     }
     u.keys.settle();
 

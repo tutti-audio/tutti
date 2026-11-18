@@ -61,10 +61,10 @@ fn levels(bits: BitDepth) -> f64 {
 /// depth keeps the same rule with a real `q`, so its steps are `j / q` for the integers
 /// `j` with `|j / q| <= 1`, and the ends `-1` and `1` too where `round(q) / q` is above 1.
 /// The clamp holds a value past `+-1` at the end level. NaN stays NaN, and an infinity is
-/// an end level. `q` is read in `f64` and narrowed to `F` once.
+/// an end level. `q` is solved in `f64` and crosses to `F` once.
 #[must_use]
 pub fn quantize<F: Float>(x: F, bits: BitDepth) -> F {
-    crush(x, F::from_f64(levels(bits)))
+    crush(x, F::from_design(levels(bits)))
 }
 
 /// [`quantize`] with `q` already read from the depth.
@@ -130,11 +130,11 @@ impl<F: Float> BitCrusher<F> {
     /// Runs `input` into `output`, every channel on the same capture frames. The channels
     /// rendered are the fewest of the two views' and the crusher's, the frames the fewer
     /// of the two views'. No allocation.
-    pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
+    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels()).min(self.held.len());
         let hold = hold_frames(self.controls.hold);
-        let q = F::from_f64(levels(self.controls.bits));
+        let q = F::from_design(levels(self.controls.bits));
         let start = self.since;
         let mut end = start;
         for (c, held) in self.held.iter_mut().enumerate().take(width) {
@@ -147,10 +147,10 @@ impl<F: Float> BitCrusher<F> {
                     since = 0;
                 }
                 if since == 0 {
-                    *held = x.convert_to::<F>();
+                    *held = x;
                 }
                 since += 1;
-                *y = crush(*held, q).convert_to::<S>();
+                *y = crush(*held, q);
             }
             end = since;
         }

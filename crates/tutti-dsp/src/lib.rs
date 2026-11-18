@@ -60,7 +60,7 @@
 //!   ([`ModDelayBank`] over a [`ModDelayLayout`]: its [`Sweep`] and [`Stagger`] checked, a
 //!   [`Glide`] per channel's delay, the LFO the caller's on the stream's clock); the phaser
 //!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Glide`] per channel's
-//!   coefficient, [`sweep_hz`] and [`allpass_coeff`] the pure pieces the sweep is solved
+//!   coefficient, [`sweep_hz`] and [`allpass_complement`] the pure pieces the sweep is solved
 //!   from).
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with analytic queries
 //!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
@@ -127,6 +127,7 @@ mod convert;
 mod convolver;
 mod dc_block;
 mod delay;
+mod design;
 mod dither;
 mod dynamics;
 mod fft;
@@ -192,7 +193,7 @@ pub use glide::{Glide, Lerp, Steps};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
 pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
-pub use modulation::allpass::{allpass_coeff, sweep_hz};
+pub use modulation::allpass::{allpass_complement, sweep_hz};
 pub use modulation::mod_delay::{
     MAX_MOD_DELAY_CHANNELS, MIN_RATE, ModDelayBank, ModDelayControls, ModDelayLayout, SweepDesign,
 };
@@ -201,7 +202,7 @@ pub use modulation::phaser::{
     SweepRangeError,
 };
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepError};
-pub use oscillator::{Oscillator, OscillatorWave};
+pub use oscillator::{Oscillator, OscillatorStep, OscillatorWave};
 pub use oversample::{
     Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
 };

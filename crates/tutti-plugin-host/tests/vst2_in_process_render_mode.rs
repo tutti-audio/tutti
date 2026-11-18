@@ -35,7 +35,7 @@ use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::RenderMode;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_host::{HostedNode, load_client};
+use tutti_plugin_host::{PluginNode, load_client};
 use tutti_units::SampleRate;
 use tutti_vst2_test_plugin::ProcessCapture;
 
@@ -111,7 +111,7 @@ fn read_capture(path: &PathBuf) -> ProcessCapture {
 }
 
 struct Loaded {
-    unit: HostedNode<Vst2Loaded>,
+    unit: PluginNode<Vst2Loaded>,
     handle: PluginHandle,
     path: PathBuf,
 }
@@ -119,7 +119,7 @@ struct Loaded {
 fn load() -> Loaded {
     let path = tutti_fixtures::vst2_probe().to_path_buf();
     reset_probe(&path);
-    let (unit, handle) = load_client::<Vst2Loaded>(
+    let (unit, handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         &path,
@@ -137,23 +137,23 @@ fn load() -> Loaded {
 /// Render one block through the node, prepared as a graph prepares it
 /// (`Node::prepare`, which sizes its scratch and parks its rate), then
 /// `Node::process` by hand (`tutti_graph::contract::drive_input`).
-fn drive_block(unit: &mut HostedNode<Vst2Loaded>) {
+fn drive_block(unit: &mut PluginNode<Vst2Loaded>) {
     drive_blocks(unit, BLOCK, BLOCK);
 }
 
 /// One block of `frames` through `unit` prepared for blocks of up to `max`.
-fn drive_blocks(unit: &mut HostedNode<Vst2Loaded>, max: usize, frames: usize) {
+fn drive_blocks(unit: &mut PluginNode<Vst2Loaded>, max: usize, frames: usize) {
     drive_blocks_at(unit, SAMPLE_RATE, max, frames);
 }
 
 /// [`drive_blocks`] at `hz`: the node is prepared at that rate.
-fn drive_blocks_at(unit: &mut HostedNode<Vst2Loaded>, hz: f64, max: usize, frames: usize) {
+fn drive_blocks_at(unit: &mut PluginNode<Vst2Loaded>, hz: f64, max: usize, frames: usize) {
     drive_blocks_in(unit, hz, max, frames, RenderMode::Realtime);
 }
 
 /// [`drive_blocks_at`] with the node prepared under `mode`.
 fn drive_blocks_in(
-    unit: &mut HostedNode<Vst2Loaded>,
+    unit: &mut PluginNode<Vst2Loaded>,
     hz: f64,
     max: usize,
     frames: usize,

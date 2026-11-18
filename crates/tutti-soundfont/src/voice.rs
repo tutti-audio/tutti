@@ -692,17 +692,19 @@ mod tests {
     /// `H(e^jw)` of the trapezoidal section with coefficients `c`, from its state
     /// space `s' = A s + B x`, `y = m0 x + m1 v1 + m2 v2` solved at `z = e^jw`:
     /// `ic1' = (2 a1 - 1) ic1 - 2 a2 ic2 + 2 a2 x`, `ic2' = 2 a2 ic1 + (1 - 2 a3)
-    /// ic2 + 2 a3 x`, `v1 = a1 ic1 + a2 (x - ic2)`, `v2 = ic2 + a2 ic1 + a3 (x - ic2)`.
+    /// ic2 + 2 a3 x`, `v1 = a1 ic1 + a2 (x - ic2)`, `v2 = ic2 + a2 ic1 + a3 (x - ic2)`, with
+    /// `a1 = 1 - d`.
     fn response(c: &SvfCoefficients<f64>, w: f64) -> f64 {
         let z = Complex64::from_polar(1.0, w);
         let one = Complex64::new(1.0, 0.0);
-        let (m00, m01) = (z - one * (2.0 * c.a1 - 1.0), one * (2.0 * c.a2));
+        let a1 = 1.0 - c.d;
+        let (m00, m01) = (z - one * (2.0 * a1 - 1.0), one * (2.0 * c.a2));
         let (m10, m11) = (one * (-2.0 * c.a2), z - one * (1.0 - 2.0 * c.a3));
         let (b0, b1) = (one * (2.0 * c.a2), one * (2.0 * c.a3));
         let det = m00 * m11 - m01 * m10;
         let s1 = (b0 * m11 - m01 * b1) / det;
         let s2 = (m00 * b1 - m10 * b0) / det;
-        let v1 = s1 * c.a1 + (one - s2) * c.a2;
+        let v1 = s1 * a1 + (one - s2) * c.a2;
         let v2 = s2 + s1 * c.a2 + (one - s2) * c.a3;
         (one * c.m0 + v1 * c.m1 + v2 * c.m2).norm()
     }
@@ -710,7 +712,7 @@ mod tests {
     /// The `f32` set widened exactly, to analyse what the voice runs.
     fn widened(c: &SvfCoefficients<f32>) -> SvfCoefficients<f64> {
         SvfCoefficients {
-            a1: f64::from(c.a1),
+            d: f64::from(c.d),
             a2: f64::from(c.a2),
             a3: f64::from(c.a3),
             m0: f64::from(c.m0),

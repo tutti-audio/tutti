@@ -4,15 +4,15 @@ use super::{BoundPlaced, BoundPlugin, Commit, PluginRebinder, Rebind, Rebuilt};
 
 /// An in-process format's rebinder, and the variant of [`BoundPlaced`] its
 /// nodes go in.
-struct InProcessRebind<F: tutti_plugin_types::InProcess> {
-    rebinder: tutti_plugin_host::Rebinder<F>,
-    wrap: fn(Box<tutti_plugin_host::HostedNode<F>>) -> BoundPlaced,
+struct InProcessRebind<L: tutti_plugin_types::InProcess> {
+    rebinder: tutti_plugin_host::Rebinder<L>,
+    wrap: fn(Box<tutti_plugin_host::PluginNode<L>>) -> BoundPlaced,
 }
 
-impl<F> Rebind for InProcessRebind<F>
+impl<L> Rebind for InProcessRebind<L>
 where
-    F: tutti_plugin_types::InProcess + 'static,
-    F::Processor: 'static,
+    L: tutti_plugin_types::InProcess + 'static,
+    L::Processor: 'static,
 {
     fn layout(&self) -> Option<tutti_plugin_types::Layout> {
         self.rebinder.layout()
@@ -37,13 +37,13 @@ where
 
 impl PluginRebinder {
     /// The rebinder of an in-process plugin, whose rebuilt nodes go in `wrap`.
-    pub(super) fn in_process<F>(
-        rebinder: tutti_plugin_host::Rebinder<F>,
-        wrap: fn(Box<tutti_plugin_host::HostedNode<F>>) -> BoundPlaced,
+    pub(super) fn in_process<L>(
+        rebinder: tutti_plugin_host::Rebinder<L>,
+        wrap: fn(Box<tutti_plugin_host::PluginNode<L>>) -> BoundPlaced,
     ) -> Self
     where
-        F: tutti_plugin_types::InProcess + 'static,
-        F::Processor: 'static,
+        L: tutti_plugin_types::InProcess + 'static,
+        L::Processor: 'static,
     {
         Self {
             inner: std::sync::Arc::new(std::sync::Mutex::new(InProcessRebind { rebinder, wrap })),

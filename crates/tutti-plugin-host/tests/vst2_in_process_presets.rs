@@ -61,7 +61,7 @@ fn load_handle(env: &[(&str, &str)]) -> PluginHandle {
         // SAFETY: as above.
         unsafe { std::env::set_var(k, v) };
     }
-    let (_client, handle) = load_client::<Vst2Loaded>(
+    let (_client, handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
         &path,

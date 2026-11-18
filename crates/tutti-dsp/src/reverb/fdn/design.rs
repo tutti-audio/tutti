@@ -171,17 +171,17 @@ impl FdnLayout {
 
 impl FdnLayout {
     /// What `NetworkCapacity::tail` is multiplied by for the rounding of the reflection
-    /// vector. Each entry of a unit `v` is rounded twice (stored as `f32`, then
+    /// vector. Each entry of a unit `v` is rounded twice (stored as `f32`, the narrowest width, then
     /// divided by the norm and rounded again), 2^-23 relative in all, so `|v|^2`
     /// is 1 to within `e = 2^-22` and `|A| = 1 + 2e` at most. `rt60_bound`
     /// applies that norm **every frame** (the step of its proof), where the decay
     /// is `3 / (RT60 fs)` decades a frame, so the bound reads a decay slower by
     /// `x = 2e / ln 10 * RT60 fs / 3` of itself, and the tail by `1 / (1 - x)`:
     /// 0.5% at 8 s and 44.1 kHz, 11% at 192 kHz.
-    fn rounding_margin(&self, rate: SampleRate) -> f32 {
+    fn rounding_margin(&self, rate: SampleRate) -> f64 {
         let e = 2.0 * f64::from(f32::EPSILON);
         let x = 2.0 * e / std::f64::consts::LN_10 * self.max_decay.get() * rate.get() / 3.0;
-        (1.0 / (1.0 - x.min(0.5))) as f32
+        1.0 / (1.0 - x.min(0.5))
     }
 }
 
@@ -366,9 +366,7 @@ impl FdnLayout {
         let mut b = NetworkCapacity::need(&network, TAIL_FLOOR);
         b.tail = match b.tail {
             _ if self.freezable => Ring::Unbounded,
-            Ring::Finite(t) => {
-                Ring::Finite(Seconds(t.get() * f64::from(self.rounding_margin(rate))))
-            }
+            Ring::Finite(t) => Ring::Finite(Seconds(t.get() * self.rounding_margin(rate))),
             other => other,
         };
         b

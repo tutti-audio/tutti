@@ -347,7 +347,8 @@ fn integral(f: &impl Fn(f64) -> f64, u: f64, n: usize) -> f64 {
 /// Second order is `2 (D(a, b) - D(b, c)) / (a - c)` with `D(p, q)` the mean of `F1` over the
 /// segment from `q` to `p`, and `F1` the integral of the closed-form curve `g` (here in input
 /// units): the `D` of every window of `x` by the midpoint rule over 800 cells, `F1` by
-/// `f1` (given), to `bound`.
+/// `f1` (given), to `bound`. The bank runs at `F = f64`, so the bound is the quadrature's own
+/// error.
 fn assert_second_order_is_quadrature(
     kind: ShapeKind,
     drive: f64,
@@ -355,12 +356,8 @@ fn assert_second_order_is_quadrature(
     f1: impl Fn(f64) -> f64,
     bound: f64,
 ) {
-    let y = run(
-        &mut antialiased(kind, drive, Antialiasing::SecondOrder),
-        None,
-        &[x.to_vec()],
-    )
-    .remove(0);
+    let wide: Vec<f64> = x.iter().map(|&v| f64::from(v)).collect();
+    let y = through_f64(kind, drive, Antialiasing::SecondOrder, &wide);
     let d = |p: f64, q: f64| mean(&f1, q, p, 800);
     for (i, w) in x.windows(3).enumerate() {
         let [c, b, a] = [w[0], w[1], w[2]].map(f64::from);
@@ -372,7 +369,7 @@ fn assert_second_order_is_quadrature(
         };
         let y = y[i + 2];
         assert!(
-            (f64::from(y) - want).abs() < bound,
+            (y - want).abs() < bound,
             "{kind:?} drive {drive} frame {}: {y} vs {want}",
             i + 2
         );
@@ -424,6 +421,235 @@ fn second_order_holds_at_large_u_on_a_slow_signal() {
         .map(|i| (1.0 + 5e-7 * f64::from(i)) as f32)
         .collect();
     assert_second_order_is_quadrature(kind, drive, &x, f1, 1e-6);
+}
+
+// The conditioned quotients at `F = f32`.
+//
+// The ADAA quotients are formed from differences that do not cancel (see `adaa.rs`), so at any
+// gap they are within a few `eps` of the closed form, not `eps / gap`. The oracle is the closed
+// form's antiderivative quotient in `f64`, where its own cancellation (`2^-29` of `f32`'s over
+// the gaps below) is negligible.
+
+/// `F1` of each kind's unit curve in `f64`, the integral of `g` from 0.
+fn closed_f1(kind: ShapeKind, u: f64) -> f64 {
+    match kind {
+        ShapeKind::Tanh => {
+            u.abs() + libm::log1p(libm::exp(-2.0 * u.abs())) - std::f64::consts::LN_2
+        }
+        ShapeKind::Atan => u * libm::atan(u) - 0.5 * libm::log1p(u * u),
+        ShapeKind::Softsign => u.abs() - libm::log1p(u.abs()),
+        ShapeKind::HardClip => {
+            if u.abs() <= 1.0 {
+                0.5 * u * u
+            } else {
+                u.abs() - 0.5
+            }
+        }
+        ShapeKind::Crush => {
+            let k = libm::round(u);
+            k * u - 0.5 * k * k
+        }
+        _ => unreachable!("the conditioned kinds"),
+    }
+}
+
+/// `F2` of `Softsign`'s and `HardClip`'s unit curve in `f64`, odd.
+fn closed_f2(kind: ShapeKind, u: f64) -> f64 {
+    let a = u.abs();
+    match kind {
+        ShapeKind::Softsign => (0.5 * a * a + a - (1.0 + a) * libm::log1p(a)).copysign(u),
+        _ => {
+            let m = if a <= 1.0 {
+                a * a * a / 6.0
+            } else {
+                1.0 / 6.0 + 0.5 * (a * a - a)
+            };
+            m.copysign(u)
+        }
+    }
+}
+
+/// The inputs the pairs below sit at, and the kinks of the hard clip among them.
+const GUARD_INPUTS: [f32; 7] = [0.3, -0.6, 0.97, -1.02, 2.0, -4.0, 8.0];
+
+/// The gaps of the sweeps, relative to the larger of 1 and the magnitudes: `1e-5` to 1.
+fn gaps() -> impl Iterator<Item = f64> {
+    (0..=10).map(|k| 10f64.powf(-5.0 + f64::from(k) * 0.5))
+}
+
+/// The first-order output for the pair `(b, a)` through a unit-drive `f32` bank of `kind`, and
+/// the closed-form mean of the curve over `[b, a]` in `f64`, with the `f32` inputs' values.
+fn first_order_pair(kind: ShapeKind, b: f32, a: f32) -> (f64, f64) {
+    let mut bank = antialiased(kind, 1.0, Antialiasing::FirstOrder);
+    let y = run(&mut bank, None, &[vec![b, a]]).remove(0)[1];
+    let pre = if kind == ShapeKind::Atan {
+        std::f64::consts::FRAC_PI_2
+    } else {
+        1.0
+    };
+    let post = if kind == ShapeKind::Atan {
+        2.0 / std::f64::consts::PI
+    } else {
+        1.0
+    };
+    let (ua, ub) = (f64::from(a) * pre, f64::from(b) * pre);
+    let want = post * (closed_f1(kind, ua) - closed_f1(kind, ub)) / (ua - ub);
+    (f64::from(y), want)
+}
+
+/// At `f32` the first-order quotient of every kind with a conditioned form is within `16 eps
+/// max(1, |x|)` of the closed-form mean at every gap from `1e-5` to 1 of the scale, and at the
+/// guard's own gap `eps^(1/3)` and below where a plain quotient is off by `eps / gap`. The
+/// quotient is the sum of at most four terms of magnitude at most 2 (the curve is bounded by
+/// 1.6, and a staircase's by `|x|`), each carrying at most two roundings and a library error of
+/// `eps` (the scale `max(1, |x|)` for the staircase). Measured at most `3.2 eps`.
+#[test]
+fn f32_first_order_is_within_a_few_epsilon_of_the_closed_form_at_every_gap() {
+    let eps = f64::from(f32::EPSILON);
+    for kind in [
+        ShapeKind::Tanh,
+        ShapeKind::Atan,
+        ShapeKind::Softsign,
+        ShapeKind::HardClip,
+        ShapeKind::Crush,
+    ] {
+        for x0 in GUARD_INPUTS {
+            let scale = f64::from(x0).abs().max(1.0);
+            for gap in gaps() {
+                let b = x0;
+                let a = (f64::from(x0) + gap * scale) as f32;
+                let (y, want) = first_order_pair(kind, b, a);
+                let bound = 16.0 * eps * scale;
+                assert!(
+                    (y - want).abs() <= bound,
+                    "{kind:?} x0 {x0} gap {gap}: {y} against {want}"
+                );
+            }
+        }
+    }
+}
+
+/// The plain `f32` quotient `(F1(a) - F1(b)) / (a - b)` of `Softsign`'s antiderivative, swept
+/// over the same gaps, is off by about `eps / gap`: at its worst more than ten times the
+/// conditioned form's bound `16 eps max(1, |x|)` (measured 3e-3 to 4e-1 against 2e-6 to 1.5e-5).
+#[test]
+fn a_plain_f32_quotient_at_a_small_gap_is_over_ten_times_the_conditioned_bound() {
+    let eps = f64::from(f32::EPSILON);
+    let f1 = |u: f32| u.abs() - u.abs().ln_1p();
+    for x0 in GUARD_INPUTS {
+        let scale = f64::from(x0).abs().max(1.0);
+        let worst = gaps()
+            .filter(|&gap| gap < 1e-3)
+            .map(|gap| {
+                let a = (f64::from(x0) + gap * scale) as f32;
+                let want = (closed_f1(ShapeKind::Softsign, f64::from(a))
+                    - closed_f1(ShapeKind::Softsign, f64::from(x0)))
+                    / (f64::from(a) - f64::from(x0));
+                (f64::from((f1(a) - f1(x0)) / (a - x0)) - want).abs()
+            })
+            .fold(0.0, f64::max);
+        assert!(
+            worst > 10.0 * 16.0 * eps * scale,
+            "x0 {x0}: the plain quotient's worst error {worst}"
+        );
+    }
+}
+
+/// The second-order output for the window `(c, b, a)` (newest `a`) through a unit-drive `f32`
+/// bank of `kind`, and the closed-form `2 (D(a, b) - D(b, c)) / (a - c)` in `f64`, `D(p, q)` the
+/// quotient of the closed-form second antiderivative.
+fn second_order_window(kind: ShapeKind, c: f32, b: f32, a: f32) -> (f64, f64) {
+    let mut bank = antialiased(kind, 1.0, Antialiasing::SecondOrder);
+    let y = run(&mut bank, None, &[vec![c, b, a]]).remove(0)[2];
+    let [fa, fb, fc] = [a, b, c].map(f64::from);
+    let d = |p: f64, q: f64| (closed_f2(kind, p) - closed_f2(kind, q)) / (p - q);
+    (f64::from(y), 2.0 * (d(fa, fb) - d(fb, fc)) / (fa - fc))
+}
+
+/// The windows of the second-order tests: three inputs `x0`, `x0 + s`, `x0 + 2.7 s` (unequal
+/// steps) for steps `s` from `2e-3` to `0.2` of the scale, the guard `(36 eps)^(1/3)` (0.016) among
+/// them.
+fn windows() -> impl Iterator<Item = (f32, f32, f32, f64)> {
+    GUARD_INPUTS.into_iter().flat_map(|x0| {
+        let scale = f64::from(x0).abs().max(1.0);
+        [2e-3, 4e-3, 1e-2, 3e-2, 0.2].into_iter().map(move |rel| {
+            let s = rel * scale;
+            let b = (f64::from(x0) + s) as f32;
+            let a = (f64::from(x0) + 2.7 * s) as f32;
+            (x0, b, a, scale)
+        })
+    })
+}
+
+/// At `f32` the hard clip's second-order quotient is exact in form, a sum of terms of one sign
+/// and the cubes' divided differences: within `16 eps max(1, |x|)` of the closed form at every
+/// window, those that straddle a kink among them (measured at most `2.5 eps`).
+#[test]
+fn f32_second_order_hard_clip_is_within_a_few_epsilon_of_the_closed_form() {
+    let eps = f64::from(f32::EPSILON);
+    for (c, b, a, scale) in windows() {
+        let (y, want) = second_order_window(ShapeKind::HardClip, c, b, a);
+        assert!(
+            (y - want).abs() <= 16.0 * eps * scale,
+            "window {c} {b} {a}: {y} against {want}"
+        );
+    }
+}
+
+/// At `f32` the `Softsign` second-order quotient, outside the guard `(36 eps)^(1/3)` (a span of
+/// `a - c` of the guard or more), is within `2 (e(a, b) + e(b, c)) / |a - c| + 3 eps |y|` of
+/// the closed form, where `e(p, q) = 8 eps (2 + max(|p|, |q|))` is the error of the mean of `F1`
+/// (four terms of magnitude at most `2 + |u|` with two roundings each): the nested quotient is
+/// `eps` over the span, not `eps` over its square. Inside the guard the limit, the curve at the
+/// mean of the three, is the closed form to the Taylor term `g'' sum((x - mean)^2) / 24` (`|g''|
+/// <= 2`) and the curve's own rounding of `3 eps`. Measured 1.7e-5 at most outside (before the
+/// conditioning, 3.1e-4).
+#[test]
+fn f32_second_order_softsign_holds_the_closed_form_to_its_derived_bound() {
+    let eps = f64::from(f32::EPSILON);
+    let guard = libm::cbrt(36.0 * eps);
+    for (c, b, a, scale) in windows() {
+        let (y, want) = second_order_window(ShapeKind::Softsign, c, b, a);
+        let [fa, fb, fc] = [a, b, c].map(f64::from);
+        let span = (fa - fc).abs();
+        let bound = if span < guard * scale {
+            let mean = (fa + fb + fc) / 3.0;
+            let spread: f64 = [fa, fb, fc].iter().map(|v| (v - mean) * (v - mean)).sum();
+            spread / 12.0 + 3.0 * eps
+        } else {
+            let e = |p: f64, q: f64| 8.0 * eps * (2.0 + p.abs().max(q.abs()));
+            2.0 * (e(fa, fb) + e(fb, fc)) / span + 3.0 * eps * want.abs()
+        };
+        assert!(
+            (y - want).abs() <= bound,
+            "window {c} {b} {a}: {y} against {want}, bound {bound}"
+        );
+    }
+}
+
+/// Inside the guard with unequal steps the limit is the curve at the mean of the three inputs,
+/// not at the midpoint of the outer two: for `a = -0.00648`, `b = -0.00678`, `c = -0.02502`
+/// the closed form is within the bound `sum((x - mean)^2) / 12 + 3 eps` of `g(mean)`, and the
+/// midpoint's value, off by `g' (m - mean)` (3e-3), is over 100 times that bound from it.
+#[test]
+fn the_f32_second_order_limit_with_unequal_steps_is_the_curve_at_the_mean_of_the_three() {
+    let eps = f64::from(f32::EPSILON);
+    let (c, b, a) = (-0.02502f32, -0.00678f32, -0.00648f32);
+    let (y, want) = second_order_window(ShapeKind::Softsign, c, b, a);
+    let [fa, fb, fc] = [a, b, c].map(f64::from);
+    let mean = (fa + fb + fc) / 3.0;
+    let spread: f64 = [fa, fb, fc].iter().map(|v| (v - mean) * (v - mean)).sum();
+    let bound = spread / 12.0 + 3.0 * eps;
+    assert!(
+        (y - want).abs() <= bound,
+        "{y} against {want}, bound {bound}"
+    );
+    let midpoint = 0.5 * (fa + fc);
+    let g = |u: f64| u / (1.0 + u.abs());
+    assert!(
+        (g(midpoint) - want).abs() > 100.0 * bound,
+        "the midpoint's limit is far from the closed form"
+    );
 }
 
 /// The orders compare as `Off < FirstOrder < SecondOrder`: a bank clamps a request to a kind's
@@ -747,18 +973,24 @@ fn the_history_is_per_channel_and_a_reset_clears_it() {
     assert_eq!(out[0][0], 0.25);
 }
 
-/// A non-finite input is heard at its own frame and no later: the history takes 0 for it.
+/// A NaN input is heard at its own frame and no later: the history takes 0 for it. An infinity
+/// is held to the argument bound, so it is the curve's end value, finite, and the frames after it
+/// are the NaN's (the history takes 0 for both).
 #[test]
 fn a_non_finite_input_is_heard_at_its_own_frame_only() {
     for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder] {
-        for bad in [f32::NAN, f32::INFINITY] {
+        let through = |bad: f32| {
             let mut bank = antialiased(ShapeKind::Softsign, 2.0, order);
             let x = [0.3, 0.3, bad, 0.3, 0.3, 0.3];
-            let y = run(&mut bank, None, &[x.to_vec()]).remove(0);
-            for (i, y) in y.iter().enumerate() {
-                assert_eq!(!y.is_finite(), i == 2, "{order:?} {bad}: frame {i}: {y}");
-            }
+            run(&mut bank, None, &[x.to_vec()]).remove(0)
+        };
+        let nan = through(f32::NAN);
+        for (i, y) in nan.iter().enumerate() {
+            assert_eq!(!y.is_finite(), i == 2, "{order:?} NaN: frame {i}: {y}");
         }
+        let inf = through(f32::INFINITY);
+        assert!(inf.iter().all(|y| y.is_finite()), "{order:?} inf: {inf:?}");
+        assert_eq!(inf[3..], nan[3..], "{order:?}");
     }
 }
 
@@ -845,5 +1077,25 @@ fn an_f64_first_order_adaa_is_the_divided_difference_of_the_antiderivative() {
         }
         let got = through_f64(kind, 1.0, Antialiasing::FirstOrder, &x);
         assert_close_f64(&got, &want, 2.0f64.powi(-45));
+    }
+}
+
+/// A huge input at `f32` is held to the argument bound, so the antiderivatives' squares are
+/// finite: an input of `1e30` (whose square overflows `f32`) at every order and kind gives a
+/// finite output, the curve's end value to within the first-order mean of the held segment.
+#[test]
+fn an_f32_input_of_1e30_gives_a_finite_output_at_every_order() {
+    for kind in KINDS {
+        for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder] {
+            for sign in [1.0f32, -1.0] {
+                let mut bank = antialiased(kind, 2.0, order);
+                let x = vec![0.3, 1e30 * sign, 1e30 * sign, 0.3, 1e30 * sign, 0.3];
+                let y = run(&mut bank, None, &[x]).remove(0);
+                assert!(
+                    y.iter().all(|y| y.is_finite()),
+                    "{kind:?} {order:?} {sign}: {y:?}"
+                );
+            }
+        }
     }
 }

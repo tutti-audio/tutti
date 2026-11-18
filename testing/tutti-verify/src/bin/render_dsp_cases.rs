@@ -21,7 +21,7 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, Glide, LadderBank, LadderControls,
     LadderDesign, LadderModel, LadderType, Lanes, PhaserChain, Stages, StreamingResampler, SvfBank,
-    SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_coeff,
+    SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_complement,
 };
 use tutti_fixtures::signal::write_wav_f32;
 use tutti_types::ChannelLayout;
@@ -31,28 +31,30 @@ const RATE: f64 = 48_000.0;
 /// Impulse-response length: long enough that every case below has rung out.
 const IR_FRAMES: usize = 1 << 16;
 
-/// Runs `input` (mono in) through `process`, a block of 512 frames at a time, into `outputs`
-/// planes.
-fn blocks(
+/// Runs `input` (mono in) through `process` in the float `F`, a block of 512 frames at a time,
+/// into `outputs` planes; the planes leave as `f32` for the WAV.
+fn blocks<F: Float>(
     input: &[f32],
     outputs: usize,
-    mut process: impl FnMut(Planes<'_, f32>, PlanesMut<'_, '_, f32>),
+    mut process: impl FnMut(Planes<'_, F>, PlanesMut<'_, '_, F>),
 ) -> Vec<Vec<f32>> {
-    let mut out = vec![vec![0.0f32; input.len()]; outputs];
+    let input: Vec<F> = input.iter().map(|&x| F::from_f32(x)).collect();
+    let mut out = vec![vec![F::ZERO; input.len()]; outputs];
     for start in (0..input.len()).step_by(512) {
         let end = (start + 512).min(input.len());
         let ins = [&input[start..end]];
-        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[start..end]).collect();
+        let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[start..end]).collect();
         process(
             Planes::new(&ins).expect("one plane"),
             PlanesMut::new(&mut outs).expect("equal planes"),
         );
     }
-    out
+    out.iter()
+        .map(|plane| plane.iter().map(|&y| y.to_f32()).collect())
+        .collect()
 }
 
-/// Runs an SVF in state precision `F`, held at `controls`, over `input` in blocks of
-/// 512 frames.
+/// Runs an SVF in the float `F`, held at `controls`, over `input` in blocks of 512 frames.
 fn run_svf<F: Float + Lanes>(
     controls: &SvfControls,
     rate: SampleRate,
@@ -60,18 +62,7 @@ fn run_svf<F: Float + Lanes>(
 ) -> Vec<Vec<f32>> {
     let mut bank = SvfBank::<F>::new(ChannelLayout::MONO);
     let mut coefficients = Glide::landed(SvfCoefficients::from(&SvfModel::new(*controls, rate)));
-    let mut out = vec![0.0f32; input.len()];
-    for start in (0..input.len()).step_by(512) {
-        let end = (start + 512).min(input.len());
-        let ins = [&input[start..end]];
-        let mut outs = [&mut out[start..end]];
-        bank.process(
-            &mut coefficients,
-            Planes::new(&ins).expect("one plane"),
-            PlanesMut::new(&mut outs).expect("one plane"),
-        );
-    }
-    vec![out]
+    blocks::<F>(input, 1, |x, y| bank.process(&mut coefficients, x, y))
 }
 
 fn impulse(amplitude: f32) -> Vec<f32> {
@@ -179,7 +170,7 @@ fn ladder(dir: &Path, cases: &mut Cases) {
             let name = format!("ladder_{label}_{freq}_{res}");
             let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
             let mut design = Glide::landed(LadderDesign::from(&LadderModel::new(c, rate)));
-            let out = blocks(&impulse(amplitude), 1, |x, y| {
+            let out = blocks::<f64>(&impulse(amplitude), 1, |x, y| {
                 bank.process(&mut design, x, y);
             });
             wav(dir, &name, RATE, &out);
@@ -207,7 +198,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
         let mut coefficients = Glide::landed(model.coefficients());
         // One channel per band, band 0 first.
-        let out = blocks(&impulse(1.0), model.bands(), |x, y| {
+        let out = blocks::<f64>(&impulse(1.0), model.bands(), |x, y| {
             bank.process(&mut coefficients, x, y);
         });
         wav(dir, name, RATE, &out);
@@ -218,7 +209,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
 fn phaser(dir: &Path, cases: &mut Cases) {
     for stages in [2usize, 4] {
         for fc in [300.0f64, 2_000.0, 10_000.0] {
-            let c = allpass_coeff(Hz(fc), SampleRate::of(RATE));
+            let c = allpass_complement(Hz(fc), SampleRate::of(RATE));
             let mut chain = PhaserChain::new(Stages::of(stages), ChannelLayout::MONO);
             let x = impulse(1.0);
             let mut y = vec![0.0f32; IR_FRAMES];

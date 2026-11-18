@@ -13,14 +13,15 @@ use tutti_units::{Db, Hz, SampleRate, Samples};
 use super::bands::{CrossoverError, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING, check_bands, validate};
 use super::coefficients::Tpt;
 use super::{CrossoverCoefficients, CrossoverControls};
+use crate::design::prewarp;
 use crate::filter::biquad::{decay_ring, section_l1};
 use crate::{Complex64, Lti, Ring, System};
 
 /// The sections' coefficients of the split at `hz` against `rate`, the frequency held under
 /// [`SOLVE_CEILING`] of the rate.
 fn solve_split(hz: Hz, rate: SampleRate) -> Tpt {
-    let hz = hz.get().min(SOLVE_CEILING * rate.get());
-    Tpt::new(libm::tan(PI * hz / rate.get()))
+    let hz = Hz(hz.get().min(SOLVE_CEILING * rate.get()));
+    Tpt::new(prewarp(hz, rate))
 }
 
 /// The design of a Linkwitz-Riley crossover: its sample rate, the frequencies its

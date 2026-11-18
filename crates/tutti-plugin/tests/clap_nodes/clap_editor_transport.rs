@@ -75,7 +75,7 @@ fn in_process_a_request_the_plugin_makes_reaches_subscribers() {
         tutti_fixtures::clap_probe(),
     );
     let main = main_thread();
-    let (_client, handle) = tutti_plugin_host::load_client::<ClapLoaded>(
+    let (_client, handle) = tutti_plugin_host::load_client::<ClapLoaded, f32>(
         main,
         &tutti_fixtures::detached_work(),
         tutti_fixtures::clap_probe(),

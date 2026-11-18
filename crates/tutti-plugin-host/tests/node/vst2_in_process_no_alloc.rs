@@ -20,7 +20,7 @@ use tutti_vst2_host::Vst2Loaded;
 
 use tutti_fixtures::midi;
 use tutti_graph::contract::Direct;
-use tutti_graph::{Event, Offset};
+use tutti_graph::{Event, Offset, ParamEvent};
 use tutti_midi_protocol::widen_velocity;
 use tutti_ump::{MidiChannel, U7, Ump};
 use tutti_units::{ParamId, SampleRate, Samples};
@@ -35,7 +35,7 @@ fn at_start(event: Ump) -> Event {
 #[test]
 fn process_steady_state_does_not_allocate() {
     let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
-    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded>(
+    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
         tutti_fixtures::vst2_probe(),
@@ -75,7 +75,7 @@ fn process_with_a_meter_does_not_allocate() {
     use tutti_units::Beat;
 
     let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
-    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded>(
+    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
         tutti_fixtures::vst2_probe(),
@@ -103,7 +103,7 @@ fn process_with_a_meter_does_not_allocate() {
 #[test]
 fn process_with_midi_does_not_allocate() {
     let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
-    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded>(
+    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
         tutti_fixtures::vst2_probe(),
@@ -166,7 +166,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     // SAFETY: the lock serializes the tests here, and nothing else in this
     // process touches the environment. The probe reads it in its constructor.
     unsafe { std::env::set_var("TUTTI_VST2_PROBE_PARAMS", PARAMS.to_string()) };
-    let loaded = tutti_plugin_host::load_client::<Vst2Loaded>(
+    let loaded = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
         tutti_fixtures::vst2_probe(),
@@ -180,18 +180,18 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     let mut unit = Direct::new(unit.bind(tutti_fixtures::tempo()), SampleRate::SR_48K, 64);
 
     // Sixteenths, a different one for every parameter, frame and block.
-    let value = |b: u32, k: u32, id: u32| ((b * 2 + k + id) % 16) as f32 / 16.0;
-    let mut events: Vec<Event> = Vec::with_capacity(2 * PARAMS as usize);
-    let mut block = |unit: &mut Direct<tutti_plugin_host::HostedNode<Vst2Loaded>>, b: u32| {
+    let value = |b: u32, k: u32, id: u32| f64::from((b * 2 + k + id) % 16) / 16.0;
+    let mut events: Vec<ParamEvent> = Vec::with_capacity(2 * PARAMS as usize);
+    let mut block = |unit: &mut Direct<tutti_plugin_host::PluginNode<Vst2Loaded>>, b: u32| {
         events.clear();
         for (k, frame) in [(0u32, 0usize), (1, 32)] {
             let at = Offset::of(Samples(frame), Samples(64));
             for id in 0..PARAMS {
                 let ramp = ParamRamp::foreign(ParamId::new(id), value(b, k, id), Samples(0));
-                events.push(Event::ramp(at, ramp));
+                events.push(ParamEvent::ramp(at, ramp));
             }
         }
-        unit.events(0, &events);
+        unit.param_events(0, &events);
         unit.block();
     };
     for b in 0..8 {
@@ -206,9 +206,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     for id in 0..PARAMS {
         assert_eq!(
             handle.parameter_value(ParamId::new((id as i32) as u32)),
-            Some(tutti_units::Normalized::clamped(f64::from(value(
-                71, 1, id
-            )))),
+            Some(tutti_units::Normalized::clamped(value(71, 1, id))),
             "parameter {id}"
         );
     }
@@ -225,7 +223,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
 #[test]
 fn an_idle_pump_does_not_allocate() {
     let _lock = PLUGIN_LOAD_LOCK.lock().unwrap();
-    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded>(
+    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
         tutti_fixtures::vst2_probe(),

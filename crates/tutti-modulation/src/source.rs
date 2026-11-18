@@ -73,7 +73,7 @@ pub struct Leg {
 impl Leg {
     /// A linear leg from `from` to `to` over `frames`.
     #[must_use]
-    pub const fn linear(from: f32, to: f32, frames: Samples) -> Self {
+    pub const fn linear(from: f64, to: f64, frames: Samples) -> Self {
         Self {
             piece: Piece::new(from, to, Law::Linear),
             frames,
@@ -82,7 +82,7 @@ impl Leg {
 
     /// A step to `value`, held.
     #[must_use]
-    pub const fn hold(value: f32) -> Self {
+    pub const fn hold(value: f64) -> Self {
         Self::linear(value, value, Samples(0))
     }
 }
@@ -129,7 +129,7 @@ pub trait ControlSource: Clone + Send + 'static {
 
     /// A MIDI message at play frame `t`, where the value already sent stands
     /// at `level`: the leg to send, if any.
-    fn heard(&mut self, _t: Frame, _level: f32, _ump: Ump) -> Option<Leg> {
+    fn heard(&mut self, _t: Frame, _level: f64, _ump: Ump) -> Option<Leg> {
         None
     }
 }

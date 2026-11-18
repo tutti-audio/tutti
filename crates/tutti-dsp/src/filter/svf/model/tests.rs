@@ -272,7 +272,7 @@ fn a_hostile_control_still_gives_a_stable_model() {
         );
         let c = m.coeffs();
         assert!(
-            [c.g, c.k, c.a1, c.a2, c.a3, c.m0, c.m1, c.m2]
+            [c.g, c.k, c.d, c.a2, c.a3, c.m0, c.m1, c.m2]
                 .iter()
                 .all(|v| v.is_finite())
         );

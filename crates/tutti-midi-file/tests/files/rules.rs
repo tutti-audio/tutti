@@ -5,7 +5,9 @@
 //! in a file that breaks them, and the tempo and time signature a file
 //! specifies. Each figure is a byte or a value written from the specification.
 
-use crate::common::{self, metrical, note, sequences, track};
+use crate::common::{
+    self, DEFAULTS, metrical, note, placed, sequences, track, unspecified, without_defaults,
+};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
@@ -104,9 +106,10 @@ fn played() -> Track {
     )
 }
 
-/// The body of the only track of `file`, from after its MTrk length.
+/// The body of the only track of `file`, from after its MTrk length, without
+/// the default tempo and time signature it is written with.
 fn body(file: &MidiFile) -> Vec<u8> {
-    file.to_bytes()[22..].to_vec()
+    without_defaults(&file.to_bytes()[22..])
 }
 
 fn offset(h: u8, m: u8, s: u8, f: u8, rate: SmpteFrameRate, ff: u8) -> SmpteOffset {
@@ -204,7 +207,7 @@ fn a_format_1_file_has_one_sequence_number_in_its_first_track() {
     let dropped = read(1, &tracks);
     assert_eq!(dropped.sequence_number(1), None);
     assert_eq!(
-        dropped.normalized(),
+        placed(&dropped),
         [changed(
             1,
             0,
@@ -214,7 +217,7 @@ fn a_format_1_file_has_one_sequence_number_in_its_first_track() {
     );
     let kept = read(2, &tracks);
     assert_eq!(kept.sequence_number(1), Some(3));
-    assert_eq!(kept.normalized(), []);
+    assert_eq!(placed(&kept), []);
 }
 
 // ---- MIDI Channel Prefix ----------------------------------------------------
@@ -375,13 +378,13 @@ fn an_smpte_offset_is_at_the_start_of_the_track() {
     );
     assert_eq!(after_a_note.smpte_offset(0), None);
     assert_eq!(
-        after_a_note.normalized(),
+        placed(&after_a_note),
         [changed(0, 0, Lead::SmpteOffset(at), Placement::Late)]
     );
     let after_a_delta = read(0, &[vec![meta(5, 0x54, &wire)]]);
     assert_eq!(after_a_delta.smpte_offset(0), None);
     assert_eq!(
-        after_a_delta.normalized(),
+        placed(&after_a_delta),
         [changed(0, 5, Lead::SmpteOffset(at), Placement::Late)]
     );
 }
@@ -417,7 +420,7 @@ fn a_format_1_smpte_offset_is_the_first_tracks() {
         (Some(at), None)
     );
     assert_eq!(
-        first.normalized(),
+        placed(&first),
         [changed(
             1,
             0,
@@ -430,7 +433,7 @@ fn a_format_1_smpte_offset_is_the_first_tracks() {
         (second.smpte_offset(0), second.smpte_offset(1)),
         (Some(at), Some(at))
     );
-    assert_eq!(second.normalized(), []);
+    assert_eq!(placed(&second), []);
 }
 
 // ---- Sequencer-Specific -----------------------------------------------------
@@ -542,7 +545,8 @@ fn a_track_opens_with_copyright_number_name_and_smpte_offset() {
             0x00,
         ]
     );
-    assert!(file.tracks()[0].events().is_empty());
+    // The four opening metas are fields: the events are the defaults alone.
+    assert_eq!(file.tracks()[0].events().len(), 2);
 }
 
 /// All of a file's copyright notices go together in one event, the first event
@@ -602,7 +606,12 @@ fn a_cloned_read_track_carries_no_opening_metas() {
     assert_eq!(read_file.copyright(), Some(&b"(C)"[..]));
     assert_eq!(read_file.sequence_number(1), Some(3));
     assert!(read_file.smpte_offset(1).is_some());
-    let mut cloned = read_file.tracks().to_vec();
+    let mut cloned: Vec<Track> = read_file
+        .tracks()
+        .iter()
+        .enumerate()
+        .map(|(i, _)| unspecified(&read_file, i).into_iter().collect())
+        .collect();
     let lead = LeadTrack::new(cloned.remove(0));
     let file = MidiFile::smf(
         DIVISION,
@@ -625,7 +634,7 @@ fn a_cloned_read_track_carries_no_opening_metas() {
         assert!(!bytes.windows(2).any(|w| w == wire), "{wire:02X?}");
     }
     let back = MidiFile::from_bytes(&bytes).unwrap();
-    assert_eq!(back.normalized(), []);
+    assert_eq!(placed(&back), []);
 }
 
 /// Each pattern of a format 2 file has its own SMPTE Offset, written in its own
@@ -695,7 +704,7 @@ fn a_track_chunk_always_has_an_event() {
     bytes.truncate(bytes.len() - 4);
     bytes[18..22].copy_from_slice(&0u32.to_be_bytes());
     let read = MidiFile::from_bytes(&bytes).unwrap();
-    assert!(read.tracks()[0].events().is_empty());
+    assert!(unspecified(&read, 0).is_empty());
     assert_eq!(read.tracks()[0].end(), Tick(0));
 }
 
@@ -783,9 +792,9 @@ fn a_late_opening_meta_is_dropped_and_listed() {
         (None, None, None)
     );
     assert_eq!(file.smpte_offset(0), None);
-    assert_eq!(t.events().len(), 1);
+    assert_eq!(unspecified(&file, 0).len(), 1);
     assert_eq!(
-        file.normalized(),
+        placed(&file),
         [
             changed(0, 0, Lead::SequenceNumber(4), Placement::Late),
             changed(0, 0, Lead::SmpteOffset(at), Placement::Late),
@@ -826,9 +835,9 @@ fn an_opening_meta_at_time_0_after_an_event_is_moved() {
         (t.name(), moved.copyright()),
         (Some("n"), Some(&b"(C)"[..]))
     );
-    assert_eq!(t.events().len(), 1);
+    assert_eq!(unspecified(&moved, 0).len(), 1);
     assert_eq!(
-        moved.normalized(),
+        placed(&moved),
         [
             changed(
                 0,
@@ -852,7 +861,7 @@ fn an_opening_meta_at_time_0_after_an_event_is_moved() {
         0,
         &[vec![meta(0, 0x03, b"n"), RawEvent::note_on(0, 0, 60, 100)]],
     );
-    assert_eq!(first.normalized(), []);
+    assert_eq!(placed(&first), []);
 }
 
 /// A track holds one of each: a second Sequence Number, Track Name, SMPTE
@@ -877,7 +886,7 @@ fn a_second_opening_meta_is_a_listed_duplicate() {
         (Some(1), Some("a"), Some(&b"(C) 1"[..]))
     );
     assert_eq!(
-        file.normalized(),
+        placed(&file),
         [
             changed(0, 0, Lead::SequenceNumber(2), Placement::Duplicate),
             changed(
@@ -914,7 +923,7 @@ fn bytes_past_a_sequence_number_or_an_smpte_offset_are_dropped_and_listed() {
     assert_eq!(file.smpte_offset(0), Some(at));
     let truncated = |lead, extra: &[u8]| changed(0, 0, lead, Placement::Truncated(extra.into()));
     assert_eq!(
-        file.normalized(),
+        placed(&file),
         [
             truncated(Lead::SequenceNumber(7), &[0xAA, 0xBB]),
             truncated(Lead::SmpteOffset(at), &[0xCC]),
@@ -932,7 +941,7 @@ fn bytes_past_a_sequence_number_or_an_smpte_offset_are_dropped_and_listed() {
         ]],
     );
     assert_eq!(
-        late.normalized(),
+        placed(&late),
         [
             truncated(Lead::SequenceNumber(7), &[0xAA]),
             changed(0, 0, Lead::SequenceNumber(7), Placement::Late),
@@ -959,9 +968,9 @@ fn a_dropped_late_event_does_not_move_the_end_of_a_track_with_no_end_of_track() 
     bytes[18..22].copy_from_slice(&length.to_be_bytes());
     let file = MidiFile::from_bytes(&bytes).unwrap();
     assert_eq!(file.tracks()[0].end(), Tick(100));
-    assert_eq!(file.tracks()[0].events().len(), 2);
+    assert_eq!(unspecified(&file, 0).len(), 2);
     assert_eq!(
-        file.normalized(),
+        placed(&file),
         [changed(
             0,
             100,
@@ -995,14 +1004,14 @@ fn an_f0_event_with_an_8_bit_byte_is_read_as_an_escape() {
             RawEvent::new(1, [0xF0, 3, 0x90, 5, 0xF7]),
         ]],
     );
-    let events: Vec<_> = file.tracks()[0].events().iter().map(|(_, e)| e).collect();
-    assert_eq!(events[0], &complete(&[1, 2]));
+    let events: Vec<_> = unspecified(&file, 0).into_iter().map(|(_, e)| e).collect();
+    assert_eq!(events[0], complete(&[1, 2]));
     assert_eq!(
         events[1],
-        &FileEvent::Escape(vec![0xF0, 0x90, 5, 0xF7].into())
+        FileEvent::Escape(vec![0xF0, 0x90, 5, 0xF7].into())
     );
     assert_eq!(
-        file.normalized(),
+        placed(&file),
         [
             Normalized::SysExEscaped {
                 track: 0,
@@ -1027,7 +1036,7 @@ fn a_copyright_notice_outside_the_first_track_is_dropped_and_listed() {
         let file = read(format, &tracks);
         assert_eq!(file.copyright(), Some(&b"(C)"[..]));
         assert_eq!(
-            file.normalized(),
+            placed(&file),
             [changed(
                 1,
                 0,
@@ -1050,8 +1059,8 @@ fn an_unended_divided_sysex_is_closed_and_listed() {
     };
     // Never ended.
     let file = read(0, &[vec![RawEvent::new(7, [0xF0, 2, 1, 2])]]);
-    assert_eq!(file.tracks()[0].events(), [(Tick(7), complete(&[1, 2]))]);
-    assert_eq!(file.normalized(), [closed(7)]);
+    assert_eq!(unspecified(&file, 0), [(Tick(7), complete(&[1, 2]))]);
+    assert_eq!(placed(&file), [closed(7)]);
     assert_eq!(body(&file)[..6], [7, 0xF0, 3, 1, 2, 0xF7]);
     // Interrupted by a channel message, and by another `F0`.
     let file = read(
@@ -1063,11 +1072,11 @@ fn an_unended_divided_sysex_is_closed_and_listed() {
             RawEvent::new(0, [0xF0, 2, 5, 0xF7]),
         ]],
     );
-    let events: Vec<_> = file.tracks()[0].events().iter().map(|(_, e)| e).collect();
-    assert_eq!(events[0], &complete(&[1, 2]));
-    assert_eq!(events[2], &complete(&[3, 4]));
-    assert_eq!(events[3], &complete(&[5]));
-    assert_eq!(file.normalized(), [closed(0), closed(3)]);
+    let events: Vec<_> = unspecified(&file, 0).into_iter().map(|(_, e)| e).collect();
+    assert_eq!(events[0], complete(&[1, 2]));
+    assert_eq!(events[2], complete(&[3, 4]));
+    assert_eq!(events[3], complete(&[5]));
+    assert_eq!(placed(&file), [closed(0), closed(3)]);
     let again = MidiFile::from_bytes(&file.to_bytes()).unwrap();
     assert_eq!((&again, again.normalized()), (&file, [].as_slice()));
     // Ended: the packets stay as the file has them.
@@ -1078,8 +1087,8 @@ fn an_unended_divided_sysex_is_closed_and_listed() {
             RawEvent::new(1, [0xF7, 2, 3, 0xF7]),
         ]],
     );
-    assert_eq!(ended.tracks()[0].events()[0].1, start(&[1, 2]));
-    assert_eq!(ended.normalized(), []);
+    assert_eq!(unspecified(&ended, 0)[0].1, start(&[1, 2]));
+    assert_eq!(placed(&ended), []);
 }
 
 // ---- formats ----------------------------------------------------------------
@@ -1149,38 +1158,175 @@ fn a_format_0_tempo_map_is_the_scattered_tempos() {
     );
 }
 
-/// A file that specifies none is given the tempo and time signature a reader
-/// assumes (120 in 4/4): in a format 0 track, the first track of a format 1
-/// file (the one that holds the tempo map), and each pattern of a format 2 file.
-/// What it already has at tick 0 stays.
+/// The body of each MTrk chunk of the file `bytes`.
+fn chunk_bodies(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut at = 14;
+    let mut bodies = Vec::new();
+    while at < bytes.len() {
+        assert_eq!(&bytes[at..at + 4], b"MTrk");
+        let len = u32::from_be_bytes(bytes[at + 4..at + 8].try_into().unwrap()) as usize;
+        bodies.push(bytes[at + 8..at + 8 + len].to_vec());
+        at += 8 + len;
+    }
+    bodies
+}
+
+/// A format 0 file with no tempo or time signature is written with the defaults
+/// at the start of its track, before the events it has.
+/// Spec: smf/formats#11, smf/formats#13
 #[test]
-fn a_file_is_made_to_specify_tempo_and_time_signature() {
-    let signature = ev(Meta::TimeSignature {
+fn a_format_0_file_is_written_with_tempo_and_time_signature_first() {
+    let bodies = chunk_bodies(&smf(Format::Zero, vec![played()]).unwrap().to_bytes());
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0][..15], DEFAULTS);
+    assert_eq!(bodies[0][15..19], [0x00, 0x90, 60, 100]);
+}
+
+/// A format 1 file's tempo and time signature are written at the start of its
+/// first track and in no other.
+/// Spec: smf/formats#11, smf/formats#14
+#[test]
+fn a_format_1_file_is_written_with_tempo_and_time_signature_in_the_first_track() {
+    let bodies = chunk_bodies(
+        &smf(Format::One, vec![played(), played()])
+            .unwrap()
+            .to_bytes(),
+    );
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0][..15], DEFAULTS);
+    assert_eq!(bodies[1][..4], [0x00, 0x90, 60, 100]);
+}
+
+/// Each pattern of a format 2 file is written with its own tempo and time
+/// signature at its start.
+/// Spec: smf/formats#11, smf/formats#15
+#[test]
+fn a_format_2_file_is_written_with_tempo_and_time_signature_in_each_pattern() {
+    let bodies = chunk_bodies(
+        &smf(Format::Two, vec![played(), played()])
+            .unwrap()
+            .to_bytes(),
+    );
+    assert_eq!(bodies.len(), 2);
+    for body in &bodies {
+        assert_eq!(body[..15], DEFAULTS);
+        assert_eq!(body[15..19], [0x00, 0x90, 60, 100]);
+    }
+}
+
+/// A tempo or time signature the track has at tick 0 stays, and only the
+/// missing one is added after it and after the lead's own events.
+/// Spec: smf/formats#11
+#[test]
+fn a_given_tempo_stays_and_the_missing_time_signature_joins_it() {
+    let given = Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)));
+    let bodies = chunk_bodies(&lead(LeadTrack::new(given).copyright("c")).to_bytes());
+    // The copyright first, then the 90 BPM (666 667 us), then the signature.
+    let mut expected = vec![
+        0x00, 0xFF, 0x02, 0x01, b'c', 0x00, 0xFF, 0x51, 0x03, 0x0A, 0x2C, 0x2B,
+    ];
+    expected.extend_from_slice(&DEFAULTS[7..]);
+    assert_eq!(bodies[0][..expected.len()], expected[..]);
+}
+
+/// A file read without a tempo or time signature is given the defaults at the
+/// start of the track that holds them, and each is listed; one that has both
+/// is not changed, and one with only a tempo is given only the signature.
+/// Spec: smf/formats#11, smf/formats#12
+#[test]
+fn a_read_file_without_tempo_and_time_signature_is_given_the_defaults() {
+    let note = |delta| vec![RawEvent::note_on(delta, 0, 60, 100)];
+    let head = |file: &MidiFile, track: usize| -> Vec<FileEvent> {
+        let events = file.tracks()[track].events();
+        events.iter().take(2).map(|(_, e)| e.clone()).collect()
+    };
+    let signature = FileEvent::Meta(Meta::TimeSignature {
         numerator: 4,
         denominator_power: 2,
         clocks_per_click: 24,
         thirty_seconds_per_quarter: 8,
         extra: Box::default(),
     });
-    let head = |file: &MidiFile, track: usize| -> Vec<FileEvent> {
-        let events = file.tracks()[track].events();
-        events.iter().take(2).map(|(_, e)| e.clone()).collect()
+    let defaults = vec![tempo(120.0), signature];
+    let both = |track: usize| {
+        [
+            Normalized::DefaultTempo { track },
+            Normalized::DefaultTimeSignature { track },
+        ]
     };
-    let defaults = vec![tempo(120.0), signature.clone()];
-    let specify = |f: MidiFile| f.with_default_tempo_and_meter().unwrap();
-    let format_0 = specify(smf(Format::Zero, vec![played()]).unwrap());
-    assert_eq!(head(&format_0, 0), defaults);
-    let format_1 = specify(smf(Format::One, vec![played(), played()]).unwrap());
-    assert_eq!(head(&format_1, 0), defaults);
-    assert_eq!(format_1.tracks()[1], played());
-    let format_2 = specify(smf(Format::Two, vec![played(), played()]).unwrap());
+
+    let zero = read(0, &[note(0)]);
+    assert_eq!(head(&zero, 0), defaults);
+    assert_eq!(zero.normalized(), both(0));
+
+    let one = read(1, &[note(0), note(0)]);
+    assert_eq!(head(&one, 0), defaults);
+    assert_eq!(one.tracks()[1].events().len(), 1);
+    assert_eq!(one.normalized(), both(0));
+
+    let two = read(2, &[note(0), note(0)]);
+    assert_eq!((head(&two, 0), head(&two, 1)), (defaults.clone(), defaults));
+    assert_eq!(two.normalized(), [both(0), both(1)].concat());
+
+    // A format above 2 is read as format 2: each track its own pattern.
+    let three = read(3, &[note(0), note(0)]);
+    assert_eq!(three.normalized(), [both(0), both(1)].concat());
+
+    let tempo_only = read(0, &[vec![RawEvent::tempo(0, 1_000_000)]]);
     assert_eq!(
-        (head(&format_2, 0), head(&format_2, 1)),
-        (defaults.clone(), defaults)
+        tempo_only.normalized(),
+        [Normalized::DefaultTimeSignature { track: 0 }]
     );
-    // A copyright notice and a tempo already there stay; the signature joins.
-    let has = LeadTrack::new(Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)))).copyright("c");
-    let kept = specify(lead(has));
-    assert_eq!(kept.copyright(), Some(&b"c"[..]));
-    assert_eq!(head(&kept, 0), [tempo(90.0), signature]);
+    let given = read(
+        0,
+        &[vec![
+            RawEvent::tempo(0, 500_000),
+            RawEvent::time_signature(0, 3, 2),
+        ]],
+    );
+    assert!(given.normalized().is_empty());
+}
+
+/// The tracks of a format 0 or 1 file share one timeline, so a tempo or time
+/// signature at tick 0 of any track is the file's: no default is added in the
+/// first track and none is reported. A format 2 pattern does not borrow one.
+/// Spec: smf/formats#11
+#[test]
+fn a_tempo_or_time_signature_in_any_track_of_a_shared_timeline_is_the_files() {
+    let note = || vec![RawEvent::note_on(0, 0, 60, 100)];
+    let tempo_here = || vec![RawEvent::tempo(0, 1_000_000)];
+    let meter_here = || vec![RawEvent::time_signature(0, 3, 2)];
+    let tempo_in_second = read(1, &[note(), tempo_here()]);
+    assert_eq!(
+        tempo_in_second.normalized(),
+        [Normalized::DefaultTimeSignature { track: 0 }]
+    );
+    assert!(
+        !tempo_in_second.tracks()[0]
+            .events()
+            .iter()
+            .any(|(_, e)| matches!(e, FileEvent::Meta(Meta::Tempo { .. })))
+    );
+    let meter_in_third = read(1, &[note(), note(), meter_here()]);
+    assert_eq!(
+        meter_in_third.normalized(),
+        [Normalized::DefaultTempo { track: 0 }]
+    );
+    assert!(
+        !meter_in_third.tracks()[0]
+            .events()
+            .iter()
+            .any(|(_, e)| matches!(e, FileEvent::Meta(Meta::TimeSignature { .. })))
+    );
+    let both = read(0, &[tempo_here().into_iter().chain(meter_here()).collect()]);
+    assert!(both.normalized().is_empty());
+    let pattern = read(2, &[note(), tempo_here()]);
+    assert_eq!(
+        pattern.normalized(),
+        [
+            Normalized::DefaultTempo { track: 0 },
+            Normalized::DefaultTimeSignature { track: 0 },
+            Normalized::DefaultTimeSignature { track: 1 },
+        ]
+    );
 }

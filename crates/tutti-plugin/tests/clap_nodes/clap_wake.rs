@@ -69,7 +69,7 @@ fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin
     // events to send), so the one that sleeps declares none.
     probe.set(ClapSwitch::NoteOutPorts, 0);
 
-    let (client, _handle) = tutti_plugin_host::load_client::<ClapLoaded>(
+    let (client, _handle) = tutti_plugin_host::load_client::<ClapLoaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         tutti_fixtures::clap_probe(),

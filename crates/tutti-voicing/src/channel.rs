@@ -15,10 +15,9 @@
 //! per-channel controller state, so it can be handed on whole (a SoundFont swap
 //! keeps what a performer set, and takes a new font).
 
-use tutti_midi_protocol::signed_f32_to_bend;
-use tutti_ump::ControlValue;
+use tutti_ump::{BendValue, ControlValue};
 use tutti_ump::{CCNumber, NoteNumber, RegisteredData, Rpn, U7, U14, Voice2};
-use tutti_units::{Cents, Normalized, Pan, Seconds, Semitones};
+use tutti_units::{Bipolar, Cents, Normalized, Pan, Seconds, Semitones};
 
 /// What a full Modulation Wheel spans until RPN 5 says otherwise: General MIDI
 /// 2 section 3.4.4, default 00H/40H (+/-50 cents) (MSB semitones, LSB
@@ -58,7 +57,7 @@ fn position(value: U14) -> f32 {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Bend {
     /// The wheel, `-1..=1`.
-    pub(crate) position: f32,
+    pub(crate) position: Bipolar,
     pub(crate) range: Semitones,
     /// Channel Coarse Tuning (RPN 2), whole semitones.
     pub(crate) coarse: Semitones,
@@ -68,8 +67,7 @@ pub(crate) struct Bend {
 
 impl Bend {
     pub(crate) fn semitones(self) -> Semitones {
-        // The wheel position is an `f32` reading; the range it scales is `Semitones`.
-        self.range * f64::from(self.position) + self.coarse + self.fine
+        self.range * self.position.get() + self.coarse + self.fine
     }
 }
 
@@ -121,7 +119,7 @@ impl ChannelState {
             pressure: Normalized::of(0.0),
             modulation_range: DEFAULT_MODULATION_RANGE,
             bend: Bend {
-                position: 0.0,
+                position: Bipolar::ZERO,
                 range: bend_range,
                 coarse: Semitones(0.0),
                 fine: Semitones(0.0),
@@ -237,7 +235,9 @@ impl ChannelState {
             )));
         }
         if self.bend.position != fresh.bend.position {
-            emit(Voice2::PitchBend(signed_f32_to_bend(self.bend.position)));
+            emit(Voice2::PitchBend(BendValue::from_bipolar(
+                self.bend.position,
+            )));
         }
         let registered = |rpn: Rpn, value: u32| Voice2::Registered {
             bank: rpn.bank(),

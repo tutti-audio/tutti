@@ -334,7 +334,10 @@ impl Unit for Depth {
     }
 }
 
+// `Bipolar` is a `Unit` (below), which is already a `Quantity`, so it takes the
+// type and its error without the macro's own `Quantity` impl.
 crate::ranged! {
+    @items []
     /// A signed amount, `-1..=1`: the value of a control with no target of its
     /// own, such as a macro's position.
     ///
@@ -344,7 +347,7 @@ crate::ranged! {
     /// (`-x` is the same amount the other way) and orders.
     ///
     /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
-    /// anything outside `-1..=1`, and so do `TryFrom<f32>` and serde.
+    /// anything outside `-1..=1`, and so do `TryFrom<f64>` and serde.
     /// [`of`](Self::of) is for a literal. [`clamped`](Self::clamped) is the one
     /// saturating constructor; [`Unit::from_raw`] is it too, since a parameter
     /// cell holds any float.
@@ -360,8 +363,8 @@ crate::ranged! {
     #[repr(transparent)]
     #[derive(Default)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "f32", into = "f32"))]
-    Bipolar(f32), BipolarOutOfRange, "within -1..=1",
+    #[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
+    Bipolar(f64), BipolarOutOfRange, "within -1..=1",
     |raw| raw >= -1.0 && raw <= 1.0
 }
 
@@ -379,7 +382,7 @@ impl Bipolar {
     /// `raw` constrained into `-1..=1`; NaN is [`ZERO`](Self::ZERO).
     #[inline]
     #[must_use]
-    pub const fn clamped(raw: f32) -> Bipolar {
+    pub const fn clamped(raw: f64) -> Bipolar {
         if raw.is_nan() {
             Bipolar::ZERO
         } else if raw < -1.0 {
@@ -409,7 +412,7 @@ impl Bipolar {
     ///
     /// # Panics
     ///
-    /// Panics if `lo > hi`, matching `f32::clamp`.
+    /// Panics if `lo > hi`, matching `f64::clamp`.
     #[inline]
     #[must_use]
     pub fn clamp(self, lo: Self, hi: Self) -> Self {
@@ -442,13 +445,13 @@ impl core::fmt::Display for Bipolar {
 /// `from_raw` saturates ([`Bipolar::clamped`]): a parameter cell holds any
 /// float, and a unit's `from_raw` cannot refuse.
 impl Unit for Bipolar {
-    type Raw = f32;
+    type Raw = f64;
     #[inline]
-    fn from_raw(v: f32) -> Self {
+    fn from_raw(v: f64) -> Self {
         Self::clamped(v)
     }
     #[inline]
-    fn to_raw(self) -> f32 {
+    fn to_raw(self) -> f64 {
         self.0
     }
 }

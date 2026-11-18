@@ -23,7 +23,11 @@ mod instance;
 mod loader;
 mod off_main_wait;
 mod rebind;
+mod width_error;
 
-pub use client::{HostedNode, InProcClient};
-pub use loader::{client_over, load_client, load_client_restoring};
+pub use client::{InProcClient, PluginNode};
+pub use loader::{
+    ClientOverError, LoadClientError, client_over, load_client, load_client_restoring,
+};
 pub use rebind::{Pending, RebindError, Rebinder, Settlement};
+pub use width_error::WidthError;

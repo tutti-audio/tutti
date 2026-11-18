@@ -11,6 +11,7 @@ use tutti_buffers::{Float, Fold, Mono, MonoMut};
 use tutti_types::MAX_CHANNELS;
 use tutti_units::{ArcDegrees, Azimuth, Elevation, Gain, Spread, StereoWidth};
 
+use crate::design::along;
 use crate::{Glide, Lerp};
 
 mod error;
@@ -22,7 +23,7 @@ pub use error::SpeakerGeometryError;
 pub use layout::SpeakerLayout;
 
 /// A width below this folds the stereo pair to mono and pans one source.
-const MONO_WIDTH: f64 = 0.001;
+const MONO_WIDTH: StereoWidth = StereoWidth(0.001);
 
 /// How far each virtual source sits from the bearing at width 1.
 const WIDTH_HALF_ANGLE: ArcDegrees = ArcDegrees(15.0);
@@ -30,7 +31,7 @@ const WIDTH_HALF_ANGLE: ArcDegrees = ArcDegrees(15.0);
 /// The width that puts the two virtual sources at the antipode of the bearing
 /// (an offset of half a turn). The solve saturates the width here by convention,
 /// so a huge one cannot overflow the offset.
-const MAX_WIDTH: f64 = 180.0 / WIDTH_HALF_ANGLE.get();
+const MAX_WIDTH: StereoWidth = StereoWidth(180.0 / WIDTH_HALF_ANGLE.get());
 
 /// One direction's speaker gains, as an end of a glide between two grid points.
 ///
@@ -95,13 +96,12 @@ impl VbapGains {
         let (from, to, n) = (&glide.from, &glide.to, glide.n);
         // The gain at step `k`, `Glide::at`'s rule (the target from the last step on)
         // for one speaker's pair: `at` would blend all of the set for each frame. The ends
-        // enter the render's format once per call and the blend runs in `F`.
-        let n_f = F::from_f64(f64::from(n));
+        // cross to `F` once per call and the blend runs in `F`.
         let blend = |from: F, to: F, k: u32| {
             if k >= n {
                 to
             } else {
-                crate::lerp(from, to, F::from_f64(f64::from(k)) / n_f)
+                crate::lerp(from, to, along::<F>(k, n))
             }
         };
         let steps = first..;
@@ -115,13 +115,13 @@ impl VbapGains {
                 m[0]
             };
             if g_from.get().to_bits() == g_to.get().to_bits() {
-                let g_to = F::from_f64(g_to.get());
+                let g_to = F::from_unit(g_to);
                 for ((o, &l), &r) in out.iter_mut().zip(left).zip(right) {
                     *o = mono(l, r) * g_to;
                 }
                 return;
             }
-            let (g_from, g_to) = (F::from_f64(g_from.get()), F::from_f64(g_to.get()));
+            let (g_from, g_to) = (F::from_unit(g_from), F::from_unit(g_to));
             for (((o, &l), &r), k) in out.iter_mut().zip(left).zip(right).zip(steps) {
                 *o = mono(l, r) * blend(g_from, g_to, k);
             }
@@ -131,15 +131,14 @@ impl VbapGains {
             if a_from.get().to_bits() == a_to.get().to_bits()
                 && b_from.get().to_bits() == b_to.get().to_bits()
             {
-                let (a_to, b_to) = (F::from_f64(a_to.get()), F::from_f64(b_to.get()));
+                let (a_to, b_to) = (F::from_unit(a_to), F::from_unit(b_to));
                 for ((o, &l), &r) in out.iter_mut().zip(left).zip(right) {
                     *o = l * a_to + r * b_to;
                 }
                 return;
             }
-            let widen = |g: Gain| F::from_f64(g.get());
-            let (a_from, a_to) = (widen(a_from), widen(a_to));
-            let (b_from, b_to) = (widen(b_from), widen(b_to));
+            let (a_from, a_to) = (F::from_unit(a_from), F::from_unit(a_to));
+            let (b_from, b_to) = (F::from_unit(b_from), F::from_unit(b_to));
             for (((o, &l), &r), k) in out.iter_mut().zip(left).zip(right).zip(steps) {
                 *o = l * blend(a_from, a_to, k) + r * blend(b_from, b_to, k);
             }
@@ -260,13 +259,11 @@ impl VbapKernel {
         width: StereoWidth,
         spread: Spread,
     ) -> VbapGains {
-        // Unwrapped once: the angle offset below scales the scalar.
-        let width = width.get();
         // A NaN reads as no width.
-        let width = if width.is_nan() {
-            0.0
+        let width = if width.get().is_nan() {
+            StereoWidth(0.0)
         } else {
-            width.clamp(0.0, MAX_WIDTH)
+            width.clamp(StereoWidth(0.0), MAX_WIDTH)
         };
         let count = self.layout.speaker_count();
         if width < MONO_WIDTH {
@@ -294,8 +291,8 @@ impl VbapKernel {
 /// full width the left source is at 185, which *is* -175, the same wraparound
 /// the node normalizes the target to, re-introduced here by adding to the
 /// already-wrapped value.
-fn virtual_sources(azimuth: Azimuth, width: f64) -> (Azimuth, Azimuth) {
-    let offset = WIDTH_HALF_ANGLE * width;
+fn virtual_sources(azimuth: Azimuth, width: StereoWidth) -> (Azimuth, Azimuth) {
+    let offset = WIDTH_HALF_ANGLE * width.get();
     (azimuth.rotate_by(offset), azimuth.rotate_by(-offset))
 }
 

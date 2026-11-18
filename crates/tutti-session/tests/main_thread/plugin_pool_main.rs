@@ -490,7 +490,7 @@ fn a_restore_job_applies_the_saved_state_to_a_served_plugin() {
 /// outputs on the root.
 struct Rebound {
     s: Session,
-    node: tutti_session::Key<tutti_session::PluginNode>,
+    node: tutti_session::Key<tutti_session::AnyPlugin>,
     a: tutti_session::Key<tutti_graph::ForkByClone<tutti_nodes::testing::Const>>,
     b: tutti_session::Key<tutti_graph::ForkByClone<tutti_nodes::testing::Const>>,
 }

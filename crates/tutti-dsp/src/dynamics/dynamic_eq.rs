@@ -37,13 +37,13 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::ChannelLayout;
-use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds};
 
 use super::curves::{gain_reduction, level_db, upward_gain_lift};
 use super::key_filter::KeyStage;
 use super::shared::{MAX_KNEE, floored};
 use crate::finite::finite_or;
-use crate::follower::Follower;
+use crate::follower::{Follower, Pole, Smoothed};
 use crate::{
     COEFF_INTERVAL, Glide, Lanes, Lerp, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel,
     SvfType,
@@ -60,7 +60,7 @@ const DETECTOR_MAX: Seconds = Seconds(0.025);
 const MAX_THRESHOLD: Db = Db(1.0e30);
 
 /// The loudest key sample the detector squares: 1e15 (300 dB), whose square is finite.
-const MAX_KEY: f32 = 1.0e15;
+const MAX_KEY: Amplitude = Amplitude(1.0e15);
 
 /// Which way a dynamic band moves from flat.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -127,27 +127,34 @@ impl Default for DynamicEqControls {
 /// The controls made runnable: the sanitised figures the detector and the curve read.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Design<F> {
-    threshold: Db,
-    knee: Db,
-    ratio: CompressionRatio,
-    range: Db,
+    /// The threshold, knee and range in dB and the ratio, crossed once.
+    threshold: F,
+    knee: F,
+    ratio: F,
+    range: F,
+    /// The loudest key the detector squares, crossed once.
+    max_key: F,
     ballistics: Follower<F>,
     /// What the key's level is multiplied by: the band-pass's peak gain `Q` divided out.
     key_scale: F,
-    /// The one-pole coefficient of the detector's mean square.
-    mean: F,
+    /// The one-pole of the detector's mean square.
+    mean: Pole<F>,
 }
 
 impl<F: Float> Design<F> {
-    const NEUTRAL: Self = Self {
-        threshold: Db::UNITY,
-        knee: Db::UNITY,
-        ratio: CompressionRatio::UNITY,
-        range: Db::UNITY,
-        ballistics: Follower::NEUTRAL,
-        key_scale: F::ONE,
-        mean: F::ONE,
-    };
+    /// The design of a band that does nothing, for a target to start from.
+    fn neutral() -> Self {
+        Self {
+            threshold: F::ZERO,
+            knee: F::ZERO,
+            ratio: F::ONE,
+            range: F::ZERO,
+            max_key: F::from_unit(MAX_KEY),
+            ballistics: Follower::NEUTRAL,
+            key_scale: F::ONE,
+            mean: Pole::INSTANT,
+        }
+    }
 
     /// The design of `c` at `rate`, with `center` and `q` as the filters are given them.
     fn of(c: &DynamicEqControls, center: Hz, q: Q, rate: SampleRate) -> Self {
@@ -157,14 +164,24 @@ impl<F: Float> Design<F> {
             (period * DETECTOR_PERIODS).min(DETECTOR_MAX)
         });
         Self {
-            threshold: Db(finite_or(c.threshold.get(), d.threshold.get()))
-                .clamp(-MAX_THRESHOLD, MAX_THRESHOLD),
-            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())),
-            ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
-            range: Db(finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN.get())),
+            threshold: F::from_unit(
+                Db(finite_or(c.threshold.get(), d.threshold.get()))
+                    .clamp(-MAX_THRESHOLD, MAX_THRESHOLD),
+            ),
+            knee: F::from_unit(Db(
+                finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())
+            )),
+            ratio: F::from_unit(CompressionRatio::new_clamped(finite_or(
+                c.ratio.get(),
+                d.ratio.get(),
+            ))),
+            range: F::from_unit(Db(
+                finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN.get())
+            )),
+            max_key: F::from_unit(MAX_KEY),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
             key_scale: F::ONE / F::from_unit(q),
-            mean: F::from_f64(tau.one_pole_coeff(rate)),
+            mean: Pole::of(tau, rate),
         }
     }
 }
@@ -174,9 +191,8 @@ const PERIOD: Samples = Samples(COEFF_INTERVAL);
 
 /// One EQ band of any width whose bell gain follows the level of its key in the band.
 ///
-/// Built on the control side for one rate; the state is `F`, the graph's float, in the detector
-/// and the bell, and a view of another sample format is converted at the edges. Nothing it holds
-/// grows.
+/// Built on the control side for one rate; the state, in the detector and the bell, and the
+/// views are `F`, the graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct DynamicEqBank<F: Float + Lanes> {
     mode: DynamicMode,
@@ -188,10 +204,10 @@ pub struct DynamicEqBank<F: Float + Lanes> {
     /// The detector's band-pass on the key.
     key: KeyStage<F>,
     /// The mean square of the key, in the detector's one-pole: a per-sample value in `F`.
-    mean_square: F,
+    mean_square: Smoothed<F>,
     /// The smoothed gain change's size in dB, not below 0; its sign is the mode's: a per-sample
-    /// level in `F`; becomes `Db` once that unit stores `f64`.
-    moved: F,
+    /// level in `F`.
+    moved: Smoothed<F>,
     bell: SvfBank<F>,
     coefficients: Glide<SvfCoefficients<F>>,
     /// The gain change the coefficients were last designed at, in dB, `None` after the band
@@ -209,13 +225,13 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
         let d = DynamicEqControls::DEFAULT;
         Self {
             mode,
-            design: Design::NEUTRAL,
+            design: Design::neutral(),
             center: d.center,
             q: d.q,
             rate,
             key: KeyStage::new(SvfType::BandPass, width, rate),
-            mean_square: F::ZERO,
-            moved: F::ZERO,
+            mean_square: Smoothed::ZERO,
+            moved: Smoothed::ZERO,
             bell: SvfBank::new(width),
             coefficients: Glide::landed(Self::bell(d.center, d.q, Db::UNITY, rate))
                 .by(COEFF_INTERVAL as u32),
@@ -242,9 +258,9 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
         self.signed()
     }
 
-    /// The gain change as a `Db`: the state widens once, here.
+    /// The gain change as a `Db`.
     fn signed(&self) -> Db {
-        let moved = Db(self.moved.to_f64());
+        let moved = Db(self.moved.value().into());
         match self.mode {
             DynamicMode::Downward => -moved,
             DynamicMode::Upward => moved,
@@ -253,8 +269,8 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
 
     /// Back to silence: flat, nothing measured, the filters' state cleared. No allocation.
     pub fn reset(&mut self) {
-        self.mean_square = F::ZERO;
-        self.moved = F::ZERO;
+        self.mean_square = Smoothed::ZERO;
+        self.moved = Smoothed::ZERO;
         self.phase = Samples::ZERO;
         self.bell.reset();
         self.key.reset();
@@ -303,25 +319,18 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
     }
 
     /// One frame of the detector: the key's `level` (an amplitude, the band-pass's peak gain
-    /// not yet divided out) through the mean square, the static curve and the follower. The
-    /// curve's controls widen to `F` here, exactly.
+    /// not yet divided out) through the mean square, the static curve and the follower.
     #[inline]
     fn frame(&mut self, level: F) {
         let d = &self.design;
-        let x = (level * d.key_scale).min(<F as Float>::from_f32(MAX_KEY));
-        self.mean_square += d.mean * (x * x - self.mean_square);
-        let db = level_db((<F as Float>::from_f32(2.0) * self.mean_square).sqrt());
-        let (threshold, ratio, knee) = (
-            F::from_f64(d.threshold.get()),
-            F::from_unit(d.ratio),
-            F::from_f64(d.knee.get()),
-        );
+        let x = (level * d.key_scale).min(d.max_key);
+        let mean = d.mean.step(&mut self.mean_square, x * x);
+        let db = level_db((<F as Lanes>::lit(2.0) * mean).sqrt());
         let curve = match self.mode {
-            DynamicMode::Downward => gain_reduction(db, threshold, ratio, knee),
-            DynamicMode::Upward => upward_gain_lift(db, threshold, ratio, knee),
+            DynamicMode::Downward => gain_reduction(db, d.threshold, d.ratio, d.knee),
+            DynamicMode::Upward => upward_gain_lift(db, d.threshold, d.ratio, d.knee),
         };
-        let range = F::from_f64(d.range.get());
-        self.moved = d.ballistics.follow_raw(self.moved, curve.min(range));
+        d.ballistics.follow_raw(&mut self.moved, curve.min(d.range));
     }
 
     /// Runs `input` into `output`, its band moved by the gain the loudest channel of `key`
@@ -334,11 +343,11 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
     /// bank's width, is not touched, and the frames rendered are the fewest of the three
     /// views'. A NaN key sample reads as quiet and an infinite one as the largest finite
     /// level. No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
-        key: Planes<'_, S>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        key: Planes<'_, F>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input
             .frames()

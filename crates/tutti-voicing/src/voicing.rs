@@ -55,14 +55,13 @@ use alloc::vec::Vec;
 use core::num::{NonZeroU16, NonZeroUsize};
 
 use tutti_midi_protocol::{
-    GeneralMidi, Heard, KeyTable, Timing, TuningMessage, Universal, bend_to_signed_f32,
-    narrow_value,
+    GeneralMidi, Heard, KeyTable, Timing, TuningMessage, Universal, narrow_value,
 };
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
     RegisteredData, Rpn, U7, Ump, Voice2,
 };
-use tutti_units::{Amplitude, Seconds, Semitones};
+use tutti_units::{Amplitude, Bipolar, Seconds, Semitones};
 
 use crate::channel::{Bend, ChannelState};
 use crate::master::{Master, MasterGain};
@@ -799,7 +798,7 @@ impl Voicing {
                 self.channels[channel.index()].set_pressure(pressure.normalized());
             }
             Voice2::PitchBend(bend) => {
-                let position = bend_to_signed_f32(bend);
+                let position = bend.bipolar();
                 self.bend(channel, |b| b.position = position);
             }
             // The channel's registered parameters: the pitch bend sensitivity
@@ -1653,7 +1652,7 @@ impl Voicing {
                     let b = n.holds.sostenuto_up().is_now();
                     a || b
                 });
-                self.bend(channel, |b| b.position = 0.0);
+                self.bend(channel, |b| b.position = Bipolar::ZERO);
             }
         }
     }
@@ -2838,8 +2837,8 @@ mod tests {
     fn a_bend_and_its_range_move_only_their_own_channel() {
         let mut s = Sim::new(POLY);
         s.send(0, bend(u32::MAX), &One);
-        let c = s.send(2, bend(0xC000_0000), &One);
-        assert_eq!(retunes(&c), [(2, 1.0)]);
+        let c = s.send(2, bend(0x4000_0000), &One);
+        assert_eq!(retunes(&c), [(2, -1.0)]);
         let c = s.send(0, rpn0(12.0), &One);
         assert_eq!(retunes(&c), [(0, 12.0)]);
         assert_eq!(retunes(&s.cc(1, 121, 0)), [(1, 0.0)]);

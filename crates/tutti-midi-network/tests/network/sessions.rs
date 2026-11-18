@@ -8,9 +8,9 @@ use tutti_midi_device::EntropyError;
 
 use tutti_midi_network::{
     Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Client, Command,
-    Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, Host, HostConfig, Invitation,
-    MAX_QUEUED_EVENTS, NakReason, NetworkEndpoint, Nonce, PingId, Requests, Retransmit,
-    RetransmitRequest, SendError, SequenceNumber, SessionConfig, SessionState, UmpData,
+    Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, Host, HostConfig, IdleInterval,
+    Invitation, MAX_QUEUED_EVENTS, NakReason, NetworkEndpoint, Nonce, PingId, Requests, Retransmit,
+    RetransmitRequest, SendError, SequenceNumber, SessionConfig, SessionState, Timer, UmpData,
     UserAuthChallenge, UserAuthState, Username,
 };
 
@@ -808,7 +808,7 @@ fn a_retransmit_request_the_sender_cannot_serve_reports_the_data_lost() {
     let mut sim = lossy_sim(
         no_fec()
             .with_retransmit(Retransmit::Buffer(std::num::NonZeroUsize::MIN))
-            .with_idle_interval(ms(300)),
+            .with_idle_interval(IdleInterval::of(ms(300))),
         vec![2, 3],
     );
     let notes: Vec<_> = (60..64).map(note_on).collect();
@@ -891,10 +891,10 @@ fn the_wait_between_retransmit_requests_stops_doubling_at_the_timer_ceiling() {
     let hour = Duration::from_secs(60 * 60);
     let mut host = HostConfig::new(identity("Studio", "HOST-1"));
     host.session = no_fec()
-        .with_reorder_wait(Duration::MAX)
+        .with_reorder_wait(Timer::of(hour))
         .with_requests(Requests::UpTo(std::num::NonZeroU8::MAX))
-        .with_ping_interval(hour)
-        .with_liveness_timeout(Duration::MAX);
+        .with_ping_interval(Timer::of(hour))
+        .with_liveness_timeout(Timer::of(hour));
     // Every retransmission is lost as well, so the gap stays open.
     let mut sim = lossy_sim_with(host, no_fec(), std::iter::once(2).chain(4..60).collect());
     for n in (60..63).map(note_on) {
@@ -1243,11 +1243,11 @@ fn zero_length_commands_slow_down_and_then_stop() {
 
 /// Spec: m2-124/7.2.1#2
 #[test]
-fn the_first_zero_length_command_comes_within_300_ms_whatever_is_configured() {
+fn the_first_zero_length_command_comes_within_300_ms_at_the_longest_idle_interval() {
     let mut sim = Sim::new(
         HostConfig::new(identity("Studio", "HOST-1")),
         Credentials::none(),
-        SessionConfig::default().with_idle_interval(Duration::from_secs(5)),
+        SessionConfig::default().with_idle_interval(IdleInterval::of(ms(300))),
     );
     sim.connect();
     sim.log.clear();

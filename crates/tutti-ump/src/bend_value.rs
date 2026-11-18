@@ -1,5 +1,7 @@
 //! The 32-bit pitch bend word of a MIDI 2.0 Pitch Bend or Per-Note Pitch Bend.
 
+use tutti_units::Bipolar;
+
 /// The 32-bit value of a MIDI 2.0 Pitch Bend or Per-Note Pitch Bend (M2-104
 /// sections 7.4.11 and 7.4.7), centred on [`CENTER`](Self::CENTER).
 ///
@@ -58,6 +60,44 @@ impl BendValue {
     #[must_use]
     pub const fn get(self) -> u32 {
         self.0
+    }
+
+    /// The bend as a position on `-1..=1`, centre-exact and piecewise.
+    ///
+    /// M2-104 section 7.4.13 gives "an equal range of pitch bend up" as down,
+    /// with `0x8000_0000..=0xFFFF_FFFF` the whole up range. With
+    /// `k = get() - 2^31`: below the centre the position is `k / 2^31`, from
+    /// the centre up it is `k / (2^31 - 1)`. So `0` is `-1.0`,
+    /// [`CENTER`](Self::CENTER) is `0.0` and `u32::MAX` is `+1.0`, each exact.
+    #[inline]
+    #[must_use]
+    pub fn bipolar(self) -> Bipolar {
+        let k = f64::from(self.0) - f64::from(Self::CENTER.0);
+        let span = if k < 0.0 {
+            f64::from(Self::CENTER.0)
+        } else {
+            f64::from(Self::MAX.0 - Self::CENTER.0)
+        };
+        // `k` is on `-2^31..=2^31 - 1` and `span` is its side's extent, so the
+        // quotient is on `-1..=1`.
+        Bipolar::clamped(k / span)
+    }
+
+    /// The bend at position `b`: `2^31 + round(b * 2^31)` below the centre and
+    /// `2^31 + round(b * (2^31 - 1))` from it up (M2-104 section 7.4.13, "an
+    /// equal range of pitch bend up"), rounding half away from zero. Inverse of
+    /// [`bipolar`](Self::bipolar); `+1.0` is `u32::MAX`.
+    #[inline]
+    #[must_use]
+    pub fn from_bipolar(b: Bipolar) -> Self {
+        let b = b.get();
+        let span = if b < 0.0 {
+            f64::from(Self::CENTER.0)
+        } else {
+            f64::from(Self::MAX.0 - Self::CENTER.0)
+        };
+        // The word is on `0..=u32::MAX`; the cast is the wire's 32-bit width.
+        Self((f64::from(Self::CENTER.0) + libm::round(b * span)) as u32)
     }
 }
 

@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 use super::anchor::Anchor;
 use super::bytes::{ByteIn, ByteOut, Wire};
 use super::poll;
-use super::ports::{PortInfo, Side, endpoint, endpoint_id, endpoints, locate, slot_of};
+use super::ports::{
+    Listed, PortInfo, Side, distinct_names, endpoint, endpoint_id, endpoints, locate, slot_of,
+};
 use super::schedule::{Next, Outbox, Schedule};
 use super::sender::{Mailbox, run};
 use crate::Devices;
@@ -27,6 +29,7 @@ fn named(name: &str, product: u16) -> WinMmDevice {
 fn info(name: &str) -> PortInfo {
     PortInfo {
         name: name.to_owned(),
+        driver_name: name.to_owned(),
         device: named(name, 7),
     }
 }
@@ -87,10 +90,125 @@ fn ports_that_cannot_be_told_apart_are_numbered_in_list_order() {
     assert_eq!(slot_of(twins[2].id).occurrence, 0);
 }
 
+fn names(pairs: &[(&str, &str)]) -> Vec<String> {
+    let listed: Vec<Listed<'_>> = pairs
+        .iter()
+        .map(|&(shown, driver_name)| Listed { shown, driver_name })
+        .collect();
+    distinct_names(&listed)
+}
+
+#[test]
+fn ports_that_share_a_friendly_name_take_their_distinct_driver_names() {
+    assert_eq!(
+        names(&[
+            ("Pad (USB)", "Pad"),
+            ("Pad (USB)", "MIDIIN2 (Pad)"),
+            ("Pad (USB)", "MIDIIN3 (Pad)"),
+        ]),
+        ["Pad", "MIDIIN2 (Pad)", "MIDIIN3 (Pad)"]
+    );
+}
+
+#[test]
+fn ports_that_share_a_name_and_a_driver_name_get_numbers_in_list_order() {
+    assert_eq!(
+        names(&[("Twin", "Twin"), ("Twin", "Twin"), ("Twin", "Twin")]),
+        ["Twin", "Twin 2", "Twin 3"]
+    );
+}
+
+#[test]
+fn only_the_ports_that_still_clash_are_numbered() {
+    // X twice clashes; Y is alone in the group.
+    assert_eq!(
+        names(&[("G", "X"), ("G", "X"), ("G", "Y")]),
+        ["G", "G 2", "Y"]
+    );
+}
+
+#[test]
+fn a_port_with_a_name_of_its_own_keeps_it_whatever_its_neighbours_are() {
+    assert_eq!(
+        names(&[("Solo (USB)", "Solo"), ("Twin", "Twin"), ("Twin", "Twin")]),
+        ["Solo (USB)", "Twin", "Twin 2"]
+    );
+    assert_eq!(names(&[("Solo (USB)", "Solo")]), ["Solo (USB)"]);
+}
+
+#[test]
+fn a_unique_name_is_kept_before_or_after_a_group_that_would_take_it() {
+    let group = [("USB MIDI", "USB MIDI"), ("USB MIDI", "X")];
+    let unique = ("X", "X");
+    assert_eq!(
+        names(&[group[0], group[1], unique]),
+        ["USB MIDI", "USB MIDI 2", "X"]
+    );
+    assert_eq!(
+        names(&[unique, group[0], group[1]]),
+        ["X", "USB MIDI", "USB MIDI 2"]
+    );
+}
+
+#[test]
+fn a_number_never_lands_on_a_name_another_port_has() {
+    for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
+        let all = [("A", "A"), ("A", "A"), ("A 2", "A 2")];
+        let listed: Vec<_> = order.iter().map(|&i| all[i]).collect();
+        let got = names(&listed);
+        let mut sorted = got.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 3, "{got:?}");
+        let at = order.iter().position(|&i| i == 2).unwrap();
+        assert_eq!(got[at], "A 2", "the unique name is kept: {got:?}");
+    }
+}
+
+#[test]
+fn two_groups_never_take_the_same_driver_name() {
+    let all = [("G1", "P"), ("G1", "Q"), ("G2", "P"), ("G2", "R")];
+    for turn in 0..all.len() {
+        let mut rotated = all;
+        rotated.rotate_left(turn);
+        let got = names(&rotated);
+        let mut sorted = got.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), all.len(), "{got:?}");
+    }
+}
+
+#[test]
+fn a_blank_driver_name_is_absent_and_the_shown_name_is_numbered() {
+    assert_eq!(
+        names(&[("Pad", ""), ("Pad", "  "), ("Pad", "\t")]),
+        ["Pad", "Pad 2", "Pad 3"]
+    );
+    assert_eq!(names(&[("Pad", ""), ("Pad", "Pad B")]), ["Pad", "Pad B"]);
+}
+
+#[test]
+fn naming_ports_apart_leaves_every_id_as_it_was() {
+    let twins = |driver_name: &str| PortInfo {
+        driver_name: driver_name.to_owned(),
+        ..info("Twin")
+    };
+    let apart = endpoints(Side::Input, [twins("A"), twins("B")]);
+    let same = endpoints(Side::Input, [info("Twin"), info("Twin")]);
+    assert_ne!(apart[0].name, apart[1].name);
+    assert_eq!(
+        apart.iter().map(|e| e.id).collect::<Vec<_>>(),
+        same.iter().map(|e| e.id).collect::<Vec<_>>()
+    );
+    assert_eq!(same[1].name, "Twin 2");
+}
+
 #[test]
 fn an_interface_path_names_the_device_whatever_its_position_or_name() {
     let path = |name: &str| PortInfo {
         name: name.to_owned(),
+        driver_name: name.to_owned(),
         device: WinMmDevice::Interface("\\\\?\\usb#vid_0001".to_owned()),
     };
     let slot = slot_of(endpoint_id(Side::Input, 0, &path("Keystep").device));

@@ -17,6 +17,7 @@ use crate::meter::MeterWriter;
 use crate::mode::ModeState;
 use crate::par::Par;
 use crate::param::ParamState;
+use crate::slots::EventSlot;
 use crate::tap::TapWriter;
 
 pub(crate) struct Unit<F: Float = f32> {
@@ -206,7 +207,7 @@ pub(super) struct State<F: Float = f32> {
     /// built with a load and two shifts per channel. The parallel executor
     /// runs on a shared atomic copy (`par.rs`).
     pub(super) flags: Vec<u8>,
-    pub(super) events: Vec<Vec<Event>>,
+    pub(super) events: Vec<EventSlot>,
     pub(super) rings: Vec<Option<Ring<F>>>,
     pub(super) audio_fb: Vec<Option<AudioRing<F>>>,
     pub(super) event_fb: Vec<Option<EventFifo>>,

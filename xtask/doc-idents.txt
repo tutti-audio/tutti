@@ -68,6 +68,7 @@
 1 crates/tutti-modulation/src/shape/tests.rs
 1 crates/tutti-nodes/src/strip.rs
 1 crates/tutti-plugin-host/src/control_handle.rs
+1 crates/tutti-plugin-host/src/node/width_error.rs
 1 crates/tutti-plugin-ipc/src/client/composite.rs
 1 crates/tutti-plugin-ipc/src/protocol/envelope.rs
 1 crates/tutti-plugin-ipc/src/protocol/frame.rs
@@ -96,7 +97,7 @@
 1 crates/tutti-session/src/builder.rs
 1 crates/tutti-session/src/fork.rs
 1 crates/tutti-session/src/plugin.rs
-1 crates/tutti-session/src/session.rs
+1 crates/tutti-session/src/session/root.rs
 1 crates/tutti-session/tests/midi/midi.rs
 1 crates/tutti-sf2/src/sample_header.rs
 1 crates/tutti-music/src/note.rs

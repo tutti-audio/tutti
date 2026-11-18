@@ -110,22 +110,15 @@ impl<F: Float + Lanes + Lerp> KeyStage<F> {
     /// unfiltered key's level there (a NaN as quiet, an infinity as the largest finite level),
     /// and the filter's state resets after the chunk, so a non-finite key is heard for at most
     /// one chunk. No allocation.
-    pub(super) fn levels<S: Float>(
-        &mut self,
-        key: &Planes<'_, S>,
-        frames: Range<usize>,
-        out: &mut [F],
-    ) {
+    pub(super) fn levels(&mut self, key: &Planes<'_, F>, frames: Range<usize>, out: &mut [F]) {
         out.fill(F::ZERO);
         let n = frames.len().min(CHUNK);
         let heard = key.slice(Samples(frames.start)..Samples(frames.start + n));
-        // The filter's output is a stream like its input, so it leaves in the stream's sample
-        // format `S`; its state is `F`.
-        let mut scratch = [[S::ZERO; CHUNK]; MAX_CHANNELS];
-        let mut views: [&mut [S]; MAX_CHANNELS] = scratch.each_mut().map(|p| &mut p[..n]);
         let width = heard.channels().min(MAX_CHANNELS);
+        let mut scratch = [[F::ZERO; CHUNK]; MAX_CHANNELS];
+        let mut outs: [&mut [F]; MAX_CHANNELS] = scratch.each_mut().map(|p| &mut p[..n]);
         // Every plane is `n` frames long and `width` is within `MAX_CHANNELS`.
-        let Ok(mut filtered) = PlanesMut::new(&mut views[..width]) else {
+        let Ok(mut filtered) = PlanesMut::new(&mut outs[..width]) else {
             debug_assert!(false, "the scratch planes are one length");
             return;
         };
@@ -134,12 +127,11 @@ impl<F: Float + Lanes + Lerp> KeyStage<F> {
         let mut non_finite = false;
         for (plane, raw) in filtered.iter().zip(heard.iter()) {
             for ((m, &y), &x) in out.iter_mut().zip(plane.samples()).zip(raw.samples()) {
-                let y = y.convert_to::<F>();
                 let l = if y.is_finite() {
                     level(y)
                 } else {
                     non_finite = true;
-                    level(x.convert_to::<F>())
+                    level(x)
                 };
                 *m = m.max(l);
             }

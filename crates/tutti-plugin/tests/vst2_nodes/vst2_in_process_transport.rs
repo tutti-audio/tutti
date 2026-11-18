@@ -29,7 +29,7 @@ use tutti_graph::{
 use tutti_music::LoopRange;
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_host::{HostedNode, load_client};
+use tutti_plugin_host::{PluginNode, load_client};
 use tutti_transport::ProjectMeter;
 use tutti_types::ChannelLayout;
 use tutti_units::Latency;
@@ -99,9 +99,9 @@ fn read_capture() -> ProcessCapture {
     cap
 }
 
-fn load() -> (HostedNode<Vst2Loaded>, PluginHandle) {
+fn load() -> (PluginNode<Vst2Loaded>, PluginHandle) {
     let path = tutti_fixtures::vst2_probe();
-    let (client, handle) = load_client::<Vst2Loaded>(
+    let (client, handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
         path,

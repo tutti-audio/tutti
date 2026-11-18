@@ -221,10 +221,10 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    AddPluginError, LoadPreset, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
-    PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PooledPlugin,
-    PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, RestoreState, SaveState,
-    StateJobError, StateJobFailed, StateRestore, StateView,
+    AddPluginError, AnyPlugin, LoadPreset, LoadedPlugin, Plugin, PluginCause, PluginChange,
+    PluginDeclaration, PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginPorts,
+    PooledPlugin, PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
+    SaveState, StateJobError, StateJobFailed, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
@@ -267,7 +267,9 @@ pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;
-pub use session::{AppKey, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
+pub use session::{
+    AppKey, CrossfadeControls, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent,
+};
 #[cfg(feature = "device")]
 pub use switch::ClockError;
 #[cfg(feature = "capture")]

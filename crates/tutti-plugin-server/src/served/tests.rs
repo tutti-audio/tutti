@@ -1,4 +1,4 @@
-//! `Served<F>` against each format's reference plugin.
+//! `Served<L>` against each format's reference plugin.
 
 use super::*;
 use tutti_buffers::{Float, FloatWidth};
@@ -11,7 +11,7 @@ mod clap;
 #[cfg(feature = "vst3")]
 mod vst3;
 
-impl<F: ServerSide> Served<F> {
+impl<L: ServerSide> Served<L> {
     /// The plugin a file's first, at `rate`, for blocks of up to `block`, with no
     /// state to restore: the shortest load a test needs.
     fn load_first(
@@ -41,7 +41,7 @@ impl<F: ServerSide> Served<F> {
 /// A plugin loaded on a [`Hand::local`] renders in place: the Processor is
 /// this value's, as a test that calls the plugin needs it (production renders
 /// through [`crate::render::End`], which holds the Processor on its thread).
-impl<F: ServerSide> Render for Served<F> {
+impl<L: ServerSide> Render for Served<L> {
     fn features(&self) -> Features {
         self.wiring.features
     }
@@ -55,7 +55,7 @@ impl<F: ServerSide> Render for Served<F> {
     }
 }
 
-impl<F: ServerSide> Served<F> {
+impl<L: ServerSide> Served<L> {
     /// One block at either width, in place: silence when the plugin is not
     /// running.
     fn render_here<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
@@ -69,7 +69,7 @@ impl<F: ServerSide> Served<F> {
     }
 }
 
-impl<F: ServerSide> Served<F> {
+impl<L: ServerSide> Served<L> {
     /// A parameter's value, which the plugin must have.
     fn normalized(&self, main: MainThreadMarker, id: ParamId) -> f64 {
         self.parameter(main, id)
