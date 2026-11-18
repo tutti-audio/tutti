@@ -1370,7 +1370,7 @@ fn notify(request: PeRequestId, status: PeStatus) -> Decoded {
 
 // M2-103 §12.1.3: a receiver terminates the request a Notify with status 144
 // names, whatever the transaction, and no NAK answers it.
-/// Spec: m2-103/12.1.3#3, m2-103/12.1.3#2, m2-103/12.1.3#5
+/// Spec: m2-103/12.1.3#3, m2-103/12.1.3#2
 #[test]
 fn a_notify_terminate_ends_a_get_and_a_set_by_request_id() {
     let (mut i, now) = ready(2);

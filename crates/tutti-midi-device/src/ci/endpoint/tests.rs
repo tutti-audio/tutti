@@ -1,8 +1,8 @@
 use super::super::*;
 use crate::ProductInstanceId;
 
-fn id(text: &str) -> CiInstanceId {
-    CiInstanceId::new(ProductInstanceId::new(text).unwrap()).unwrap()
+fn id(text: &str) -> ProductInstanceId {
+    ProductInstanceId::new(text).unwrap()
 }
 
 fn inquiry() -> CiMessage {
@@ -46,23 +46,24 @@ fn the_reply_is_table_11_byte_for_byte() {
     assert_eq!(SUB_ID2_ENDPOINT_REPLY, 0x73);
 }
 
+/// Spec: m2-101/5.8.3.1#5
 #[test]
-fn an_empty_and_a_sixteen_byte_id_round_trip() {
-    for text in ["", "0123456789abcdef"] {
+fn an_empty_and_a_forty_two_byte_id_round_trip() {
+    for text in ["", "0123456789abcdef", &"x".repeat(42)] {
         let bytes = reply(text).encode();
         assert_eq!(CiMessage::decode(&bytes), Decoded::Message(reply(text)));
     }
 }
 
+/// Spec: m2-101/5.8.3.1#5
 #[test]
-fn an_id_over_sixteen_bytes_is_not_a_ci_id_and_is_refused_on_the_wire() {
-    // §5.8.3.1: at most 16 bytes, where M2-104 allows 42.
-    let long = ProductInstanceId::new("0123456789abcdefg").unwrap();
-    assert_eq!(CiInstanceId::new(long), None);
+fn an_id_over_forty_two_bytes_is_refused_on_the_wire() {
+    let long = "x".repeat(43);
+    assert_eq!(ProductInstanceId::new(&long), None);
     let mut bytes = reply("").encode();
     bytes.truncate(bytes.len() - 2);
-    bytes.extend([17, 0]);
-    bytes.extend(*b"0123456789abcdefg");
+    bytes.extend([43, 0]);
+    bytes.extend(long.bytes());
     let Decoded::Unread(unread) = CiMessage::decode(&bytes) else {
         panic!("unread");
     };

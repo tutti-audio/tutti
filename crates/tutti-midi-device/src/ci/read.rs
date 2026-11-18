@@ -43,13 +43,15 @@ use winnow::combinator::{alt, cut_err, eof, seq};
 use winnow::error::ContextError;
 use winnow::token::{any, literal, take};
 
-use tutti_ump::{DeviceIdentity, FunctionBlockId, ManufacturerId, SoftwareRevision, U7, U14, U28};
+use tutti_ump::{
+    DeviceIdentity, FunctionBlockId, ManufacturerId, SoftwareRevision, U7, U14, U28,
+    UNIVERSAL_NON_REAL_TIME,
+};
 
 use super::{
-    CI_SUB_ID_1, CI_UNIVERSAL_SYSEX, CiCategories, CiDeviceId, DataControl, Destination,
-    DetailsData, DiscoveryData, InquiryTarget, MaxSysexSize, MessageText, Muid, ProcessFeatures,
-    ProfileChannels, ProfileId, ProfileList, ProfileLists, ProfileTarget, ReportScope,
-    SpecificData,
+    CI_SUB_ID_1, CiCategories, CiDeviceId, DataControl, Destination, DetailsData, DiscoveryData,
+    InquiryTarget, MaxSysexSize, MessageText, Muid, ProcessFeatures, ProfileChannels, ProfileId,
+    ProfileList, ProfileLists, ProfileTarget, ReportScope, SpecificData,
 };
 
 type Res<T> = winnow::ModalResult<T, ContextError>;
@@ -98,7 +100,7 @@ pub(super) fn preamble(bytes: &[u8]) -> Option<(Preamble, &[u8])> {
 
 fn preamble_fields(input: &mut &[u8]) -> Res<Preamble> {
     seq!(Preamble {
-        _: literal(CI_UNIVERSAL_SYSEX),
+        _: literal(UNIVERSAL_NON_REAL_TIME),
         device_id: any,
         _: literal(CI_SUB_ID_1),
         sub_id2: any,

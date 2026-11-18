@@ -10,7 +10,7 @@ use super::Ack;
 /// Inquiry waits this long for its answer; a Process Inquiry Capabilities for
 /// its reply; and a MIDI Message Report for its Reply and then for its End.
 ///
-/// The figure is tutti's choice. M2-101 gives no wait for Profile Configuration
+/// The figure is this crate's choice. M2-101 gives no wait for Profile Configuration
 /// or Process Inquiry; the waits it does state are kept apart:
 /// [`DISCOVERY_WINDOW`](crate::DISCOVERY_WINDOW) (§5.5.5, at least 3 seconds)
 /// and [`PE_TIMEOUT`](crate::PE_TIMEOUT) (M2-103 §12.2, under 3 seconds).
@@ -50,8 +50,8 @@ impl TimeoutWait {
         }
     }
 
-    /// Adds this wait to the time a transaction has left (M2-103 §12.2.1): a
-    /// deadline not yet passed ends at least the wait after the ACK.
+    /// Adds this wait to a transaction's deadline (M2-103 §12.2.1: the wait is
+    /// added to the current timeout period).
     pub(crate) fn extend(self, deadline: &mut Instant) {
         *deadline += self.duration();
     }

@@ -18,7 +18,7 @@
 
 use tutti_ump::{
     Articulation, ArticulationError, Classification, CustomClassification, MidiChannel,
-    NoteArticulation, U4, U7, Voice2,
+    NoteArticulation, U4, U7, U14, Voice2,
 };
 
 use super::{
@@ -228,7 +228,8 @@ impl TryFrom<&DetailsData> for ArticulationDetails {
                 got: bytes.len(),
             });
         }
-        let bits = u16::from(bytes[0]) | u16::from(bytes[1]) << 7;
+        // The bytes are 7-bit: `DetailsData::new` refused any other.
+        let bits = U14::from_halves(U7::masked(bytes[1]), U7::masked(bytes[0])).get();
         if bits & ArticulationFeatures::RESERVED != 0 {
             return Err(ArticulationDetailsError::ReservedFeatures(
                 bits & ArticulationFeatures::RESERVED,
@@ -287,8 +288,7 @@ impl ArticulationDetails {
     pub fn to_data(&self) -> DetailsData {
         let bits = self.features.bits();
         let mut out = Vec::with_capacity(Self::LEN);
-        out.push((bits & 0x7F) as u8);
-        out.push((bits >> 7) as u8);
+        out.extend(U14::masked(bits).to_le7());
         write_counts(&self.sounds, &mut out);
         data(out)
     }

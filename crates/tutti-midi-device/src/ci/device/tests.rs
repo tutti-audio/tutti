@@ -4,7 +4,9 @@ use super::super::{
     ProcessFeatures, ReportScope, SUB_ID2_MESSAGE_REPORT_INQUIRY,
     SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, SimultaneousRequests,
 };
-use super::super::{DetailsData, InquiryTarget, ProfileId, ProfileTarget, SpecificData};
+use super::super::{
+    DetailsData, InquiryTarget, ProfileId, ProfileSpecific, ProfileTarget, SpecificData,
+};
 use super::super::{Unread, UnreadReason};
 use super::*;
 use crate::PeStatus;
@@ -358,9 +360,7 @@ fn id_reply(from: u32, to: u32, text: &str) -> Decoded {
     Decoded::Message(CiMessage::EndpointReply {
         header: CiHeader::new(Muid::of(from)),
         to: Muid::of(to),
-        info: EndpointInfo::ProductInstanceId(
-            CiInstanceId::new(ProductInstanceId::new(text).unwrap()).unwrap(),
-        ),
+        info: EndpointInfo::ProductInstanceId(ProductInstanceId::new(text).unwrap()),
     })
 }
 
@@ -645,12 +645,15 @@ fn what_an_initiator_reads_is_not_answered_by_the_management_core() {
                 data: DetailsData::default(),
             }
         }),
-        Decoded::Message(CiMessage::ProfileSpecificData {
-            header: CiHeader::new(Muid::of(PEER)),
-            to: Destination::Muid(Muid::of(OURS)),
-            profile: piano(),
-            data: SpecificData::default(),
-        }),
+        Decoded::Message(CiMessage::ProfileSpecificData(
+            ProfileSpecific::new(
+                CiHeader::new(Muid::of(PEER)),
+                Destination::Muid(Muid::of(OURS)),
+                piano(),
+                SpecificData::default(),
+            )
+            .unwrap(),
+        )),
     ];
     for message in messages {
         assert!(device.on_message(&message, now).is_empty(), "{message:?}");

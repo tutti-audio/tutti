@@ -5,7 +5,7 @@
 
 use tutti_midi_device::{
     DeviceEvent, DeviceInfo, DeviceTable, EndpointId, Identity, OsChange, OsDevice, PortDirection,
-    Resolved, WinMmDevice,
+    ProductInstanceId, Resolved, WinMmDevice,
 };
 
 fn listed(identity: Identity, count: u64) -> (DeviceTable, Vec<DeviceInfo>) {
@@ -33,7 +33,7 @@ fn round_trip(info: &DeviceInfo) -> DeviceInfo {
 #[test]
 fn a_device_round_trips() {
     for identity in [
-        Identity::Product("abc".into()),
+        Identity::Product(ProductInstanceId::new("abc").unwrap()),
         Identity::CoreMidi(-7),
         Identity::alsa("Keystep", "MIDI 1"),
         Identity::winmm_input(WinMmDevice::Named {
@@ -70,7 +70,7 @@ fn the_document_names_each_identity_and_the_ordinal() {
             r#"{"identity":{"WinMmOutput":{"Interface":"p"}},"ordinal":1}"#,
         ),
         (
-            Identity::Product("abc".into()),
+            Identity::Product(ProductInstanceId::new("abc").unwrap()),
             r#"{"identity":{"Product":"abc"},"ordinal":1}"#,
         ),
         (
@@ -281,4 +281,14 @@ mod media_type {
             assert!(serde_json::from_str::<MediaType>(&json).is_err(), "{json}");
         }
     }
+}
+
+/// A Product Instance Id in a saved document is read as one: the 43rd byte and a
+/// byte outside printable ASCII are refused.
+#[test]
+fn a_saved_product_id_is_read_as_a_product_instance_id() {
+    let read = |text: &str| serde_json::from_str::<Identity>(&format!(r#"{{"Product":"{text}"}}"#));
+    assert!(read(&"a".repeat(42)).is_ok());
+    assert!(read(&"a".repeat(43)).is_err());
+    assert!(read("caf\u{e9}").is_err());
 }

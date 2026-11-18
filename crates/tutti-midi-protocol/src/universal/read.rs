@@ -36,7 +36,10 @@ use winnow::combinator::{alt, eof, fail, preceded, seq};
 use winnow::error::ContextError;
 use winnow::token::{any, literal};
 
-use tutti_ump::{DeviceIdentity, ManufacturerId, NoteNumber, SoftwareRevision, U7, U14};
+use tutti_ump::{
+    DeviceIdentity, ManufacturerId, NoteNumber, SoftwareRevision, U7, U14, UNIVERSAL_NON_REAL_TIME,
+    UNIVERSAL_REAL_TIME,
+};
 
 use super::{GeneralMidiMode, MtcFullMessage, Recipient, Universal, machine_control};
 use crate::tuning::{
@@ -45,11 +48,6 @@ use crate::tuning::{
 };
 
 type Res<T> = winnow::ModalResult<T, ContextError>;
-
-/// The SysEx id of a Universal Non-Real Time message (M1 p.34).
-pub(super) const NON_REAL_TIME: u8 = 0x7E;
-/// The SysEx id of a Universal Real Time message (M1 p.34).
-pub(super) const REAL_TIME: u8 = 0x7F;
 
 /// A 7-bit data byte as a [`U7`].
 fn u7(input: &mut &[u8]) -> Res<U7> {
@@ -372,12 +370,12 @@ fn addressed(input: &mut &[u8]) -> Res<(Recipient, Universal, Option<U7>)> {
     let plain = |message| (message, None);
     let tuned = |t: Tuned| (Universal::Tuning(t.message), t.checksum);
     let (message, checksum) = match class {
-        NON_REAL_TIME => alt((
+        UNIVERSAL_NON_REAL_TIME => alt((
             alt((general_information, general_midi)).map(plain),
             tuning(Timing::NonRealTime).map(tuned),
         ))
         .parse_next(input)?,
-        REAL_TIME => alt((
+        UNIVERSAL_REAL_TIME => alt((
             mtc_full.map(plain),
             machine_control(to).map(plain),
             device_control.map(plain),

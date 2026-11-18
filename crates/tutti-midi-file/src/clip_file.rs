@@ -45,7 +45,7 @@
 
 use std::vec::Vec;
 
-use tutti_midi_device::NotSetProfileOn;
+use tutti_midi_device::{NotSetProfileOn, is_property_exchange};
 use tutti_ump::{
     DeltaTicks, Flex, FlexTextKind, Form, Message, Stream, SysexStatus, TicksPerQuarterNote, Ump,
     Utility,
@@ -195,7 +195,7 @@ pub(crate) fn property_exchange(message: &Message) -> bool {
         return false;
     };
     matches!(packet.status(), SysexStatus::Complete | SysexStatus::Start)
-        && matches!(packet.data(), [0x7E, _, 0x0D, 0x30..=0x3F, ..])
+        && is_property_exchange(packet.data())
 }
 
 /// Serializes a clip: the leading Set Profile On packets (no DCS), the DCTPQ,

@@ -27,7 +27,7 @@ use std::vec::Vec;
 use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, U14, U28, Ump, first_non_seven_bit};
 
 use super::{
-    CI_VERSION, CiDeviceId, CiVersion, Destination, encode_preamble, read, sysex7_packets,
+    CI_VERSION, CiDeviceId, CiHeader, CiVersion, Destination, encode_preamble, read, sysex7_packets,
 };
 
 /// Profile Inquiry, Sub-ID#2 `0x20` (§7.2).
@@ -458,6 +458,84 @@ seven_bit_data!(
     SpecificData,
     U28
 );
+
+/// A Profile Specific Data message (§7.12, Table 28): the addressing, the
+/// Profile and the data the Profile's specification defines.
+///
+/// A message to the Broadcast MUID is at most 512 bytes, `F0` and `F7`
+/// included, so the buffers of every receiver on the connection hold it
+/// (§7.12; §3.3.3). The message has no chunking of its own (a Profile that
+/// defines one cuts its data into several messages), so [`new`](Self::new)
+/// refuses a larger one. A receiver reads the message whatever its size, as a
+/// sender's mistake is not a reason to drop data.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProfileSpecific {
+    header: CiHeader,
+    to: Destination,
+    profile: ProfileId,
+    data: SpecificData,
+}
+
+impl ProfileSpecific {
+    /// The most bytes of data a message to the Broadcast MUID carries: 512 less
+    /// the 24 that are not data (`F0`, the 13-byte preamble, the Profile Id, the
+    /// 4-byte length and `F7`).
+    pub const BROADCAST_MAX_DATA: usize = 512 - 24;
+
+    /// The message `header` and `profile` send `data` to `to`, or `None` for data
+    /// over [`BROADCAST_MAX_DATA`](Self::BROADCAST_MAX_DATA) bytes to the
+    /// Broadcast MUID.
+    pub fn new(
+        header: CiHeader,
+        to: Destination,
+        profile: ProfileId,
+        data: SpecificData,
+    ) -> Option<Self> {
+        if to == Destination::Broadcast && data.as_bytes().len() > Self::BROADCAST_MAX_DATA {
+            return None;
+        }
+        Some(Self::read(header, to, profile, data))
+    }
+
+    /// The message as it was received, whatever its size.
+    pub(super) fn read(
+        header: CiHeader,
+        to: Destination,
+        profile: ProfileId,
+        data: SpecificData,
+    ) -> Self {
+        Self {
+            header,
+            to,
+            profile,
+            data,
+        }
+    }
+
+    /// The addressing preamble; its Device ID is the address.
+    #[must_use]
+    pub fn header(&self) -> CiHeader {
+        self.header
+    }
+
+    /// To one device, or to all.
+    #[must_use]
+    pub fn to(&self) -> Destination {
+        self.to
+    }
+
+    /// The Profile.
+    #[must_use]
+    pub fn profile(&self) -> ProfileId {
+        self.profile
+    }
+
+    /// The data.
+    #[must_use]
+    pub fn data(&self) -> &SpecificData {
+        &self.data
+    }
+}
 
 /// The Registered Target Data `Number of MIDI Channels` (M2-102 §2.5.1, Table 8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
