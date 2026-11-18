@@ -56,7 +56,7 @@ use tutti_rt::{
 use crate::audio_pipeline::{
     AudioBlock, AudioPipeline, AudioScratch, BlockFault, Clock, ProcessExtras,
 };
-use crate::bell::Bell;
+use crate::main_loop::Bell;
 use crate::served::Render;
 use crate::ties::{Notify, Patience, Ties, ties};
 use crate::transport::Transport;
@@ -681,21 +681,11 @@ impl RenderSide {
         match msg {
             HostMessage::ProcessAudio(data) => {
                 let midi = &data.midi_events;
-                let extras = ProcessExtras {
-                    param_changes: &data.param_changes,
-                    note_expression: &data.note_expression,
-                    chords: &data.chords,
-                    scales: &data.scales,
-                    expr_texts: &data.expr_texts,
-                    expr_ints: &data.expr_ints,
-                    transport: &data.transport,
-                    transport_changes: &data.transport_changes,
-                };
                 self.handle_process(AudioBlock {
                     seq: data.seq,
                     num_samples: data.num_samples,
                     midi,
-                    extras: Some(extras),
+                    extras: ProcessExtras::of(&data),
                 })
                 .map(Some)
             }
@@ -817,7 +807,7 @@ impl RenderSide {
         };
 
         let reaches = seat.has_processor();
-        let mut output = pipeline.process(seat.as_mut(), slab, block)?;
+        let mut output = pipeline.process(seat.as_mut(), slab, block);
         if let Some(fault) = output.failure.take() {
             *failures += 1;
             // A plugin failing every block is logged on a doubling schedule,

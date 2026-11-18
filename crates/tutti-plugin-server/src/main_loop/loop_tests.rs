@@ -13,7 +13,7 @@ use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use tutti_clap_test_plugin::Site;
+use tutti_clap_test_plugin::{ClapSwitch, Site};
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::{
     AudioSlab, BridgeMessage, HostMessage, ProcessAudioData, read_frame, write_frame,
@@ -25,7 +25,7 @@ use super::{Native, Stream, serve_every};
 mod fds;
 #[cfg(not(target_os = "macos"))]
 mod x11;
-use crate::bell::Bell;
+use crate::main_loop::Bell;
 use crate::render::{RenderSide, RenderThread};
 use crate::session::Session;
 use crate::transport::{SocketTransport, Transport};
@@ -314,21 +314,10 @@ fn probe_visits(probe: &tutti_clap_test_plugin::ClapProbe) -> u64 {
     u64::from(probe.thread_capture().sites[Site::OnTimer as usize].visits)
 }
 
-/// Sets the period the plugin's next timer asks for; the default (0) again on
-/// drop.
-struct TimerPeriod;
-
-impl TimerPeriod {
-    fn of(millis: u32) -> Self {
-        crate::test_utils::clap().set(tutti_clap_test_plugin::ClapSwitch::TimerPeriod, millis);
-        Self
-    }
-}
-
-impl Drop for TimerPeriod {
-    fn drop(&mut self) {
-        crate::test_utils::clap().set(tutti_clap_test_plugin::ClapSwitch::TimerPeriod, 0);
-    }
+/// Sets the period the plugin's next timer asks for until the guard drops; the
+/// default (0) again then.
+fn timer_period(millis: u32) -> crate::test_utils::Restore {
+    crate::test_utils::clap_switch_until_drop(ClapSwitch::TimerPeriod, millis, 0)
 }
 
 /// **A timer is served at its deadline through the loop, not at its tick.** The
@@ -341,7 +330,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
     let _lock = crate::test_utils::plugin_load_lock();
     let probe = crate::test_utils::clap();
     probe.thread_reset();
-    let _period = TimerPeriod::of(50);
+    let _period = timer_period(50);
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_TIMER);
     let (mut session, _slab) = session("period");
@@ -428,21 +417,10 @@ fn an_editor_request_with_no_plugin_is_refused_not_ignored() {
     );
 }
 
-/// Makes every plugin timer take this long, as a slow editor paint does; none
-/// again on drop.
-struct SlowPaint;
-
-impl SlowPaint {
-    fn of(millis: u32) -> Self {
-        crate::test_utils::clap().set(tutti_clap_test_plugin::ClapSwitch::TimerStall, millis);
-        Self
-    }
-}
-
-impl Drop for SlowPaint {
-    fn drop(&mut self) {
-        crate::test_utils::clap().set(tutti_clap_test_plugin::ClapSwitch::TimerStall, 0);
-    }
+/// Makes every plugin timer take `millis`, as a slow editor paint does, until
+/// the guard drops; none again then.
+fn slow_paint(millis: u32) -> crate::test_utils::Restore {
+    crate::test_utils::clap_switch_until_drop(ClapSwitch::TimerStall, millis, 0)
 }
 
 /// **A slow editor paint on the main loop delays no block**. The plugin's
@@ -466,7 +444,7 @@ fn a_slow_paint_on_the_main_loop_delays_no_block() {
     probe.thread_reset();
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_TIMER);
-    let _paint = SlowPaint::of(PAINT_MS);
+    let _paint = slow_paint(PAINT_MS);
     let (mut session, _slab) = session("paint");
     let host = session.host();
     // The wait count each block was sent and answered within, when it was both.

@@ -1,5 +1,5 @@
-//! The bell where the main loop's wait has no descriptor to watch (Windows,
-//! and the fallback platforms): a flag. The loop's wait naps in slices of at
+//! The bell where the main loop's wait has no descriptor to watch (Windows): a
+//! flag. The loop's wait naps in slices of at
 //! most 1 ms and checks [`Bell::rung`] between them, so a ring ends the wait
 //! within a millisecond.
 

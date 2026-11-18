@@ -1,14 +1,13 @@
 //! The server's main-thread event loop.
 //!
-//! The main thread used to block in a socket read, so nothing ran on it while
-//! the host was quiet: no editor idle, no plugin timer. It now serves **one
-//! loop** with three sources, and **renders nothing**: the blocks are the
+//! The main thread serves **one loop** with three sources, and **renders
+//! nothing**: the blocks are the
 //! render thread's ([`crate::render`]), on a connection of their own, so
 //! whatever this loop spends (an editor's paint, a plugin's timer) delays no
 //! block.
 //!
-//! 1. **The control connection**, waited on with [`Transport::wait_readable`]
-//!    until the next tick is due. A readable socket ends the wait the instant a
+//! 1. **The control connection**, waited on ([`Native::wait`]) until the next
+//!    tick is due. A readable socket ends the wait the instant a
 //!    byte arrives: every request but the blocks, and the plugin's
 //!    unsolicited news in the other direction, rides here.
 //! 2. **An idle tick**, [`TICK_PERIOD`] (about 30 Hz): the open editor's idle
@@ -29,12 +28,9 @@
 //!    [`EditorWindow::wake`](tutti_plugin_types::EditorWindow) ([`Session::wake`]).
 //!    The other backends wait for timers alone: no plugin registers a
 //!    descriptor where its format has none.
-//! 3. **The window system's events**, where a platform needs them pumped. That
-//!    is the backend's `pump` ([`Native`]), and it is empty: the one platform that
-//!    needs it, a served AU on macOS (its main dispatch queue, which AUv3's
-//!    asynchronous load needs as well), has no safe wrapper in this repository
-//!    to call yet, and building one is that format's work. X11 needs nothing:
-//!    a plugin's editor runs its own connection.
+//! 3. **The bell** ([`Bell`]): a plugin that calls the host from a thread of its
+//!    own (its `request_process`, say) ends the wait, and what it raised leaves
+//!    at once, not on the next tick.
 //!
 //! The loop owns no state: what a message or a tick does is [`Session`]'s.
 
@@ -86,23 +82,45 @@ impl Ticker {
     }
 }
 
-// One backend per OS: what the loop waits with and what it pumps, behind one
-// shape (`Native::wait`, `wait_readable`, the platform's `Listener` and
-// `Stream`). These `mod` lines carry the only platform `cfg` of the server's
-// non-test code: a native loop (`MsgWaitForMultipleObjectsEx` with overlapped
+// One backend per OS, chosen here and nowhere else in the crate: what the loop
+// waits with, the bell it is woken by and the platform's `Listener` and
+// `Stream`. These attributes carry the only platform `cfg` of the server's
+// non-test code. A native loop (`MsgWaitForMultipleObjectsEx` with overlapped
 // pipe I/O on Windows, `CFRunLoop` with the socket as a source on macOS)
 // replaces one file and changes nothing in the loop below.
-#[cfg(unix)]
-#[path = "unix.rs"]
-mod sys;
-#[cfg(windows)]
-#[path = "windows.rs"]
-mod sys;
-#[cfg(not(any(unix, windows)))]
-#[path = "fallback.rs"]
+#[cfg_attr(unix, path = "unix.rs")]
+#[cfg_attr(not(unix), path = "windows.rs")]
 mod sys;
 
-pub(crate) use sys::{Listener, Native, Stream, wait_readable};
+pub(crate) use sys::{Bell, Listener, Native, Stream, wait_readable};
+
+impl Native {
+    /// Waits until `transport` has a frame to read (`Ok(true)`), the `bell`
+    /// rings or `timeout` passes (`Ok(false)`, `ready` empty), or, where the
+    /// platform can wait on them, a descriptor the plugin asked to have watched
+    /// (`wakeups`) is ready (into `ready`, `Ok(false)`).
+    ///
+    /// A transport that is not a socket (a test's script) has no stream to
+    /// wait on: its own wait stands, and no plugin descriptor is watched.
+    ///
+    /// # Errors
+    ///
+    /// The wait fails.
+    pub(crate) fn wait(
+        &mut self,
+        transport: &mut dyn Transport,
+        timeout: Duration,
+        wakeups: &Wakeups,
+        bell: &Bell,
+        ready: &mut Vec<Ready>,
+    ) -> BridgeResult<bool> {
+        ready.clear();
+        match transport.stream() {
+            Some(stream) => self.wait_on(stream, wakeups, timeout, bell, ready),
+            None => transport.wait_readable(Some(timeout), bell),
+        }
+    }
+}
 
 /// Serves `transport`, the host's control connection, until the host
 /// disconnects or asks for shutdown. `render` is the thread serving its audio
@@ -172,7 +190,7 @@ pub(crate) fn serve_every(
         let timeout = wakeups
             .until_due(now)
             .map_or(ticker.wait(now), |due| due.min(ticker.wait(now)));
-        let readable = backend.wait(transport, main, timeout, &wakeups, &bell, &mut ready)?;
+        let readable = backend.wait(transport, timeout, &wakeups, &bell, &mut ready)?;
         // The host process ended (the watch rang the bell to end the wait): the
         // session is over, as when the control connection ends.
         if host_gone.is_stopped() {

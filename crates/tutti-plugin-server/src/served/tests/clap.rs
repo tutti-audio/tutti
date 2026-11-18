@@ -15,8 +15,8 @@ use tutti_ump::MidiChannel;
 use tutti_clap_host::ClapLoaded as HostLoaded;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::widen_velocity;
+use tutti_plugin_types::ChannelLayout;
 use tutti_plugin_types::{EditorPresence, Features, PluginTail, RenderModeSupport, Request};
-use tutti_types::ChannelLayout;
 use tutti_ump::U7;
 
 type ClapInstance = Served<HostLoaded>;
@@ -1187,7 +1187,6 @@ fn test_reference_load() {
     let meta = instance.descriptor();
     assert!(!meta.name.is_empty());
     assert!(!meta.id.is_empty());
-    println!("Reference plugin loaded: {} ({})", meta.name, meta.id);
 }
 
 #[test]
@@ -1292,7 +1291,7 @@ fn test_reference_set_parameter_flush() {
         .expect("a declared, writable parameter");
 }
 
-// ── Group A: Plugin Lifecycle ──
+// ── Plugin Lifecycle ──
 
 #[test]
 fn test_clap_lifecycle_active_after_load() {
@@ -1346,7 +1345,27 @@ fn test_clap_lifecycle_processing_starts_on_process() {
     );
 }
 
-// ── Group B: Polling Methods ──
+/// **A lost plugin is not announced as a change of buses.** The wire has no
+/// message for a loss, and `PluginIoChanged` says the buses changed: the notice
+/// reaches the caller as a reason and puts nothing on the wire.
+#[test]
+fn a_lost_plugin_is_not_announced_as_a_change_of_buses() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let mut instance =
+        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
+            .expect("load");
+    instance.events.clear();
+    let reason = instance.absorb(
+        main_thread(),
+        Notice::Lost {
+            reason: PluginError::Block("a call into the plugin panicked"),
+        },
+    );
+    assert!(reason.is_some(), "the loss is the caller's to act on");
+    assert!(instance.events.is_empty(), "{:?}", instance.events);
+}
+
+// ── Polling Methods ──
 
 #[test]
 fn test_clap_take_initially_clear() {
@@ -1518,7 +1537,7 @@ fn a_render_mode_toggle_does_not_cycle_the_plugin() {
     assert!(instance.is_active());
 }
 
-// ── Group C: Parameter Get/Set Roundtrip ──
+// ── Parameter Get/Set Roundtrip ──
 
 /// **A parameter written to an active plugin also reaches the next block**
 /// as a `PARAM_VALUE` at its head, in the plugin's plain range.
@@ -1566,7 +1585,7 @@ fn test_clap_param_set_reaches_the_next_block() {
     );
 }
 
-// ── Group D: State Save/Load Roundtrip ──
+// ── State Save/Load Roundtrip ──
 
 #[test]
 fn test_clap_state_save_nonempty() {
@@ -1618,7 +1637,7 @@ fn test_clap_state_save_load_roundtrip() {
     );
 }
 
-// ── Group E: Audio/Note Port Enumeration ──
+// ── Audio/Note Port Enumeration ──
 
 #[test]
 fn test_clap_audio_port_enumeration() {
@@ -1667,7 +1686,7 @@ fn test_clap_note_port_enumeration() {
     }
 }
 
-// ── Group F: Latency/Tail Queries ──
+// ── Latency/Tail Queries ──
 
 #[test]
 fn test_clap_latency_and_tail() {
@@ -1681,7 +1700,7 @@ fn test_clap_latency_and_tail() {
     let _tail = instance.clap_loaded().tail_samples(main_thread());
 }
 
-// ── Group G: Processing with Param Automation, Expressions, Transport ──
+// ── Processing with Param Automation, Expressions, Transport ──
 
 #[test]
 fn test_clap_process_with_param_automation() {
@@ -1789,7 +1808,7 @@ fn test_clap_process_with_transport() {
     let _output = instance.render(buffer, &ctx, &mut out);
 }
 
-// ── Group I: Additional Coverage ──
+// ── Miscellaneous ──
 
 #[test]
 fn test_reference_state_save_load() {
@@ -1866,7 +1885,7 @@ fn test_reference_latency_tail() {
     let _tail = instance.clap_loaded().tail_samples(main_thread());
 }
 
-// ── Group J: GUI / Editor ──
+// ── GUI / Editor ──
 
 /// Editor presence is *answered*, not left unknown.
 ///
@@ -1892,7 +1911,7 @@ fn test_clap_has_gui() {
     );
 }
 
-// ── Group K: Render Mode ──
+// ── Render Mode ──
 
 /// **A CLAP plugin with `clap.render` takes the render mode live**, and says
 /// so in its features: the reference plugin implements the extension.
@@ -1930,7 +1949,7 @@ fn test_clap_has_hard_realtime_requirement() {
         .has_hard_realtime_requirement(main_thread());
 }
 
-// ── Group L: Voice Info ──
+// ── Voice Info ──
 
 #[test]
 fn test_clap_voice_info() {
@@ -1965,7 +1984,7 @@ fn test_reference_voice_info() {
     }
 }
 
-// ── Group M: Note Names ──
+// ── Note Names ──
 
 #[test]
 fn test_clap_note_names() {
@@ -1987,7 +2006,7 @@ fn test_clap_note_names() {
     }
 }
 
-// ── Group N: Sample Rate Cycling ──
+// ── Sample Rate Cycling ──
 
 #[test]
 fn test_clap_sample_rate_change() {
@@ -2054,7 +2073,7 @@ fn test_clap_sample_rate_cycle_multiple() {
     }
 }
 
-// ── Group O: State Context ──
+// ── State Context ──
 
 #[test]
 fn test_clap_state_context_support() {

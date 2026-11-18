@@ -10,7 +10,7 @@ use tutti_plugin_ipc::{
 };
 use tutti_plugin_types::{BridgeResult, MIDI_STACK_CAPACITY};
 
-use crate::bell::Bell;
+use crate::main_loop::Bell;
 use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
 
 /// The longest request the audio connection takes: whatever the protocol
@@ -63,9 +63,6 @@ pub(crate) trait Transport: Send {
     /// of the plugin's ([`crate::main_loop`]); `None` for a transport that is
     /// not one (an in-memory pair), which is waited on through
     /// [`wait_readable`](Self::wait_readable) alone.
-    // Only the unix backend polls it with the plugin's descriptors; elsewhere
-    // no plugin has any to add.
-    #[cfg_attr(not(unix), allow(dead_code))]
     fn stream(&self) -> Option<&PlatformStream> {
         None
     }
@@ -316,7 +313,7 @@ mod audio_frame_tests {
     /// **The audio connection accepts the largest request the host may send.**
     /// A block of 65536 frames with 256 queues each at the whole chunk room (the
     /// most the host's point pool lets 256 queues carry) encodes to more than
-    /// 4 MiB, a size an earlier fixed cap refused, and it is read through the
+    /// 4 MiB, past what a small fixed cap would hold, and it is read through the
     /// buffer the audio connection is built with.
     #[test]
     fn the_largest_legal_block_request_is_accepted() {

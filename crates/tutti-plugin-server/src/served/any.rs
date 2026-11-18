@@ -58,11 +58,11 @@ macro_rules! served {
                 state: Option<(&[u8], StateUse)>,
                 before_restore: &mut dyn FnMut(),
                 ties: Ties,
-            ) -> PluginResult<(Self, Option<String>, Box<dyn RenderEnd>)> {
+            ) -> PluginResult<(Self, Option<PluginError>, Box<dyn RenderEnd>)> {
                 if !path.exists() {
                     return Err(PluginError::Load {
                         stage: LoadStage::Scanning,
-                        reason: "Plugin not found".to_string(),
+                        reason: "the plugin file does not exist".to_string(),
                     });
                 }
                 match format {
@@ -90,7 +90,7 @@ macro_rules! served {
                         Err(PluginError::Load {
                             stage: LoadStage::Opening,
                             reason: format!(
-                                "Unsupported plugin format: {}. Supported: {}.",
+                                "unsupported plugin format {}; served: {}",
                                 format.extension_id(),
                                 served.join(", ")
                             ),
@@ -125,6 +125,6 @@ served! {
     Clap(tutti_clap_host::ClapLoaded, PluginFormat::Clap),
     #[cfg(feature = "vst3")]
     Vst3(tutti_vst3_host::Vst3Loaded, PluginFormat::Vst3),
-    #[cfg(all(feature = "au", target_os = "macos"))]
+    #[cfg(served_au)]
     Au(tutti_au_host::AuLoaded, PluginFormat::AudioUnit),
 }
