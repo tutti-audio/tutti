@@ -2,7 +2,7 @@
 //! laid out by hand from M2-116 (the structure rules are about *order*, which
 //! only a hand-built stream can get wrong on purpose).
 
-use crate::common::{metrical, track};
+use crate::common::{self, metrical, track};
 
 use tutti_fixtures::midi;
 use tutti_midi_device::{
@@ -398,7 +398,7 @@ fn no_prefix_of_a_valid_clip_is_accepted() {
 fn what_a_clip_cannot_hold_is_refused() {
     let one = |event| MidiFile::clip(DIVISION, track(vec![(0, event)]));
     assert!(matches!(
-        one(FileEvent::SysEx(vec![1].into())),
+        one(FileEvent::SysEx(common::complete(&[1]))),
         Err(TracksError::Refused { .. })
     ));
     assert!(matches!(
