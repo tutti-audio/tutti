@@ -22,9 +22,6 @@ testing = ["tutti-au-ffi/testing"]
 # The editor's sizes, which name their unit (`dpi::Size`).
 dpi.workspace = true
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
-# Every raw AudioToolbox, CoreAudio and CoreFoundation call; this crate forbids
-# `unsafe`.
-tutti-au-ffi = { version = "0.0.1", path = "../tutti-au-ffi" }
 # Structured errors (`AuError`), matching the sibling format hosts.
 thiserror = { workspace = true, features = ["std"] }
 # `Offset`: where an event sits in the block `send_midi` is given; `Ump`: the packet.
@@ -47,6 +44,9 @@ crossbeam-queue = { version = "0.3", default-features = false, features = ["allo
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coreaudio-sys = "0.2"
+# Every raw AudioToolbox, CoreAudio and CoreFoundation call; this crate forbids
+# `unsafe`.
+tutti-au-ffi = { version = "0.0.1", path = "../tutti-au-ffi" }
 
 [dev-dependencies]
 # The transport tests build meter and loop values.
@@ -54,7 +54,6 @@ tutti-music = { version = "0.0.1", path = "../tutti-music" }
 # The tests build SysEx and MIDI 1.0 fixtures with its helpers.
 # The tests that build their own raw calls beside the safe API.
 tutti-au-host = { path = ".", features = ["testing"] }
-tutti-au-ffi = { path = "../tutti-au-ffi", features = ["testing"] }
 # `mapping_contract!`: the laws `ParamBounds` is held to.
 tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
 tutti-graph = { path = "../tutti-graph" }
@@ -62,6 +61,8 @@ tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin", 
 assert_no_alloc = { version = "1", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
+# The raw calls the tests build beside the safe API.
+tutti-au-ffi = { path = "../tutti-au-ffi", features = ["testing"] }
 tutti-shared-plugin = { path = "../../testing/tutti-shared-plugin" }
 # The probe AU and a few tests build CoreFoundation objects of their own.
 core-foundation = "0.10"

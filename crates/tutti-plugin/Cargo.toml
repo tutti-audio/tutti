@@ -74,7 +74,6 @@ serde = { version = "1", features = ["derive"], optional = true }
 # AEffect), since VST2 fuses editor and processor.
 tutti-vst3-host = { version = "0.0.1", path = "../tutti-vst3-host", optional = true }
 tutti-clap-host = { version = "0.0.1", path = "../tutti-clap-host", optional = true }
-tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
 tutti-vst2-host = { version = "0.0.1", path = "../tutti-vst2-host", optional = true }
 
 # `spawn_named`: the catalog's background save and the probe's tests' threads.
@@ -82,6 +81,10 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 
 # The probe's private result directory (pure Rust; removed on drop, panic included).
 tempfile = "3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Audio Unit hosting (optional, macOS only): `au` enables nothing elsewhere.
+tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
 
 [dev-dependencies]
 tutti-midi-runtime = { path = "../tutti-midi-runtime" }
