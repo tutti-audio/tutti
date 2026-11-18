@@ -3,7 +3,7 @@
 
 use tutti_buffers::{Mono, MonoMut};
 use tutti_units::Drive;
-use tutti_units::{SampleRate, Seconds};
+use tutti_units::{SampleRate, Samples, Seconds};
 
 /// A node through `BlockRig`, silent inputs: 16 warm-up blocks (past
 /// the first FFT partition, so `process` takes the hot path), then 1 000
@@ -32,7 +32,7 @@ fn convolver_process_is_allocation_free() {
     use tutti_nodes::ConvolverNode;
 
     let ir = decay_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
-    gate(ConvolverNode::new(Mono::new(&ir), 512));
+    gate(ConvolverNode::new(Mono::new(&ir), Samples(512)));
 }
 #[test]
 fn dual_mono_convolver_process_is_allocation_free() {
@@ -41,7 +41,7 @@ fn dual_mono_convolver_process_is_allocation_free() {
 
     let ir_l = decay_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
     let ir_r = decay_ir(2048, Seconds::new(0.4), SampleRate::SR_48K);
-    gate(ConvolverNode::per_channel(&[Mono::new(&ir_l), Mono::new(&ir_r)], 512).unwrap());
+    gate(ConvolverNode::per_channel(&[Mono::new(&ir_l), Mono::new(&ir_r)], Samples(512)).unwrap());
 }
 
 /// The incremental accumulation runs in every block between two partition
@@ -54,7 +54,7 @@ fn convolver_mid_cycle_blocks_are_allocation_free() {
 
     let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
     for block in [37usize, 100, 128, 1000] {
-        gate_at(ConvolverNode::new(Mono::new(&ir), 256), block);
+        gate_at(ConvolverNode::new(Mono::new(&ir), Samples(256)), block);
     }
 }
 
@@ -67,7 +67,7 @@ fn convolver_ragged_calls_are_allocation_free() {
     use tutti_fixtures::signal::decay_ir;
 
     let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
-    let mut c = Convolver::new(Mono::new(&ir), 128);
+    let mut c = Convolver::new(Mono::new(&ir), Samples(128));
     let x: Vec<f32> = (0..513).map(|i| ((i as f32) * 0.31).sin()).collect();
     let mut y = vec![0.0f32; 513];
     let lens = [1usize, 7, 33, 100, 127, 128, 129, 255, 513, 64];
@@ -94,7 +94,7 @@ fn convolver_tail_levels_are_allocation_free() {
     use tutti_fixtures::signal::decay_ir;
 
     let ir = decay_ir(240_000, Seconds::new(1.0), SampleRate::SR_48K);
-    let mut c = Convolver::new(Mono::new(&ir), 512);
+    let mut c = Convolver::new(Mono::new(&ir), Samples(512));
     let x: Vec<f32> = (0..5000).map(|i| ((i as f32) * 0.31).sin()).collect();
     let mut y = vec![0.0f32; 5000];
     let lens = [1usize, 64, 64, 64, 333, 512, 700, 2049, 4999, 64, 127, 3];
@@ -129,7 +129,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
         })
         .collect();
     let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
-    gate(ConvolverNode::folded(&refs, 256).unwrap());
+    gate(ConvolverNode::folded(&refs, Samples(256)).unwrap());
 }
 
 /// Every curve of the shaper, plain and at every oversampling factor, unfed and with its drive

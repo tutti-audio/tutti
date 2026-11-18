@@ -558,7 +558,11 @@ fn an_offline_render_feeds_an_output_tap() {
 
     assert_eq!(tap.available(), Samples(64));
     let mut got = vec![f32::NAN; 64 * 2];
-    assert_eq!(tap.pop_into(&mut got), Samples(64));
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
+        Samples(64)
+    );
     assert!(
         got.as_chunks::<2>().0.iter().all(|f| *f == [0.5, 0.0]),
         "{got:?}"
@@ -591,7 +595,11 @@ fn an_output_tap_follows_a_rewired_output() {
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
 
     let mut got = vec![f32::NAN; 128 * 2];
-    assert_eq!(tap.pop_into(&mut got), Samples(128));
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
+        Samples(128)
+    );
     let left: Vec<f32> = got.iter().step_by(2).copied().collect();
     assert!(left[..64].iter().all(|&x| x == 0.5), "before: {left:?}");
     assert!(left[64..].iter().all(|&x| x == 0.25), "after: {left:?}");
@@ -652,7 +660,11 @@ fn a_detached_render_feeds_a_tap() {
         s.render_frame(&mut frame);
     }
     let mut got = [f32::NAN; 3];
-    assert_eq!(tap.pop_into(&mut got), Samples(3));
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
+        Samples(3)
+    );
     assert_eq!(got, [0.5; 3]);
 }
 
@@ -728,7 +740,10 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
         heard.extend(block.iter().step_by(2));
     }
     let mut got = vec![0.0f32; 6_400 * 2];
-    let n = tap.pop_into(&mut got).get();
+    let n = tap
+        .pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+        .unwrap()
+        .get();
     tapped.extend(got[..n * 2].iter().step_by(2));
     assert_eq!(tapped.len(), heard.len());
     let step = |x: &[f32], from: usize, to: usize| {
@@ -795,7 +810,12 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
         device.extend_from_slice(&block);
     }
     let mut tapped = vec![0.0f32; 6_400 * 2];
-    assert_eq!(heard.pop_into(&mut tapped), Samples(6_400));
+    assert_eq!(
+        heard
+            .pop_into(InterleavedMut::new(&mut tapped, heard.layout()).unwrap())
+            .unwrap(),
+        Samples(6_400)
+    );
     let bits = |x: &[f32]| x.iter().map(|s| s.to_bits()).collect::<Vec<_>>();
     assert_eq!(
         bits(&tapped),
@@ -803,7 +823,8 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
         "the tap is what the engine rendered"
     );
     let mut unfaded = vec![0.0f32; 6_400 * 2];
-    plan.pop_into(&mut unfaded);
+    plan.pop_into(InterleavedMut::new(&mut unfaded, plan.layout()).unwrap())
+        .unwrap();
     let step = |x: &[f32]| {
         x.iter()
             .step_by(2)

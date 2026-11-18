@@ -542,7 +542,7 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
     let (mut bank, mut glides) = landed(&l, RATE, &bands(1.0));
     bank.aim(&mut glides, &bands(0.0));
     let designed = [3.0, 1.5, 0.6];
-    let Steps::Fixed(ramp_chunks) = ramp(RATE.get()) else {
+    let Steps::Fixed(ramp_chunks) = ramp(RATE) else {
         panic!("a fixed ramp")
     };
     let ramp_chunks = ramp_chunks as usize;
@@ -679,7 +679,7 @@ fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
 fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
     let wanted = (0.020 * RATE.get() / FdnBank::CHUNK as f64).ceil() as u32;
     assert_eq!(wanted, 30);
-    assert_eq!(ramp(RATE.get()), Steps::Fixed(wanted));
+    assert_eq!(ramp(RATE), Steps::Fixed(wanted));
     let l = layout(8, false);
     let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
     bank.aim(&mut glides, &still(|c| c.wet = Db(-6.0206)));

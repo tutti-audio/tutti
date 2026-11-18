@@ -22,14 +22,16 @@
 //!   (a write puts them back where a long gap needs them), JR Clock and JR
 //!   Timestamp messages, and the Utility messages M2-104 does not define.
 //! - **Truncation is an error** ([`SmfParseError::ChunkCutOff`] and its siblings, with the position it was found at), not a shorter file.
-//! - **Format 2** keeps its sequences apart: no merged `events()`, a tempo map
-//!   per track ([`MetricalView::tempo_maps`]). So does a format above 2, which
+//! - **Format 2** keeps its sequences apart: [`MidiFile::timebase`] gives it
+//!   [`MetricalSequences`] (or [`SmpteSequences`]), whose sequences each have
+//!   their own tempo map and no merged `events()`, `timeline` or clip exist for
+//!   it. So does a format above 2, which
 //!   the specification leaves undefined and a reader may still read as its
 //!   track chunks ([`SmfFormat::Other`]); the format word is written back
 //!   as read.
 //! - **Tempo** is [`MetricalView::tempo_map`], steps at the tick each Set Tempo (an
 //!   SMF's meta event, a Clip File's Flex Data message) lands on; 120 BPM until
-//!   the first if none is at the start. `seconds_at` integrates it. The map is
+//!   the first if none is at the start. [`MetricalView::seconds_at`] integrates it. The map is
 //!   derived from the events, so a Set Tempo stays an event of its track and a
 //!   write gives it back exactly.
 //! - **A Clip File's structure is checked as M2-116 orders it.** The messages
@@ -50,9 +52,9 @@
 //!   Clip.
 //! - **SMPTE time is read.** A division with its top bit set
 //!   ([`SmfDivision::Smpte`]) counts ticks of `fps * ticks per frame` a second,
-//!   29.97 being 30000/1001: [`MidiFile::seconds_at`] and [`SmpteView::events`]
+//!   29.97 being 30000/1001: [`SmpteView::seconds_at`] and [`SmpteView::events`]
 //!   answer in seconds. It has no beat grid, so [`MidiFile::timebase`] gives it
-//!   a [`SmpteView`] view with no tempo map, beats, timeline or clip: those are
+//!   a [`SmpteView`] with no tempo map, beats, timeline or clip: those are
 //!   the [`MetricalView`]'s.
 //!
 //! - **To a Clip File.** [`MetricalView::to_clip`] converts a format 0 or 1 SMF: its meta
@@ -83,7 +85,7 @@
 //!
 //! let read = MidiFile::from_bytes(&file.to_bytes())?;
 //! assert_eq!(read, file);
-//! assert_eq!(read.seconds_at(Tick(8 * 480)), Seconds(6.0));
+//! assert_eq!(read.timebase().metrical().unwrap().seconds_at(Tick(8 * 480)), Seconds(6.0));
 //! let notes = read.tracks()[0].notes();
 //! assert_eq!((notes[0].start, notes[0].end), (Tick(0), Tick(1_440)));
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -94,7 +96,7 @@
 //! as SysEx7 packets, a divided SysEx as a Start, Continues and an End each at its
 //! own event's beat, meta events left out: the tempo is [`MetricalView::tempo_map`]) and
 //! whose `dropped` lists the SysEx and escape events no packet holds. A format 2
-//! file has no one timeline and is refused with `TimelineError::NoCommonTimeline`.
+//! file has no one timeline, so it has no [`MetricalView`] to ask.
 //!
 //! ### Tempo is the wire's
 //!
@@ -134,9 +136,10 @@ pub use error::{ReadError, WriteError};
 pub use fault::SmfParseError;
 pub use file::{
     Altered, Converted, DropReason, Dropped, FileEvent, LyricChange, MalformedMeta, Meta,
-    MetricalView, MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFile, Moved, OtherMetaKind,
-    OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, SmfFormat,
-    SmpteView, TextKind, Tick, Timebase, Timeline, TimelineDrop, TimelineError, ToClipError, Track,
+    MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
+    MicrosPerQuarterOutOfRange, MidiFile, Moved, OtherMetaKind, OtherMetaKindOutOfRange,
+    OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, SmfFormat, SmpteSequence, SmpteSequences,
+    SmpteView, TextKind, Tick, Timebase, Timeline, TimelineDrop, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use smf::{

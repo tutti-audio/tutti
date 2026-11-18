@@ -142,7 +142,7 @@ mod convolution {
     fn convolver_row() -> Row {
         Row::new(
             "ConvolverNode (256-frame block)",
-            move || Box::new(ConvolverNode::new(Mono::new(&[1.0]), 256)),
+            move || Box::new(ConvolverNode::new(Mono::new(&[1.0]), Samples(256))),
             impulse(0),
             Detect::Threshold(1e-3),
         )

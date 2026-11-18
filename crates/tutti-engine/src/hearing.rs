@@ -32,6 +32,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
+use tutti_buffers::Interleaved;
 use tutti_graph::{TapReader, TapWriter};
 use tutti_rt::{LockExt, Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_types::ChannelLayout;
@@ -261,15 +262,12 @@ impl Hearing {
         }
     }
 
-    /// Writes a chunk of the (faded) output, `channels` wide.
+    /// Writes a chunk of the (faded) output. A chunk of another width than
+    /// the tap's is counted lost (`TapWriter::push_interleaved`).
     #[inline]
-    pub(crate) fn write(&mut self, block: &[f32], channels: usize) {
+    pub(crate) fn write(&mut self, block: Interleaved<'_>) {
         if let Some(writer) = self.writer.as_mut() {
-            if writer.width() == channels {
-                writer.push_interleaved(block);
-            } else {
-                writer.skip(block.len() / channels.max(1));
-            }
+            writer.push_interleaved(block);
         }
     }
 }

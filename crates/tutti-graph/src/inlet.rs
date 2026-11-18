@@ -71,15 +71,17 @@ use crate::tap::{TapReader, TapWriter};
 /// cannot be given wrong.
 ///
 /// ```
+/// use tutti_buffers::Interleaved;
 /// use tutti_graph::InletRing;
 /// use tutti_units::{SampleRate, Samples};
 /// use tutti_types::ChannelLayout;
 ///
 /// let (ring, mut producer) =
 ///     InletRing::pair(ChannelLayout::STEREO, Samples(64), SampleRate::SR_48K);
-/// producer.push_interleaved(&[0.5, -0.5]);
+/// producer.push_interleaved(Interleaved::new(&[0.5, -0.5], ChannelLayout::STEREO)?);
 /// assert_eq!(ring.rate(), SampleRate::SR_48K);
 /// assert_eq!(ring.layout(), ChannelLayout::STEREO);
+/// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
 #[derive(Debug)]
 pub struct InletRing {
@@ -138,13 +140,16 @@ impl InletRing {
 /// # Examples
 ///
 /// ```
+/// use tutti_buffers::Interleaved;
 /// use tutti_graph::InletNode;
 /// use tutti_units::Samples;
 /// use tutti_types::ChannelLayout;
 ///
 /// let (node, mut producer) = InletNode::pair(ChannelLayout::STEREO, Samples(64));
-/// producer.push_interleaved(&[0.5, -0.5]); // one stereo frame, from any thread
+/// let frame = Interleaved::new(&[0.5, -0.5], ChannelLayout::STEREO)?;
+/// producer.push_interleaved(frame); // one stereo frame, from any thread
 /// assert_eq!(node.layout(), ChannelLayout::STEREO);
+/// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
 #[derive(Debug)]
 pub struct InletNode {
@@ -200,12 +205,11 @@ impl Node for InletNode {
             outputs.iter_mut().for_each(|plane| plane.fill(0.0));
             return Status::Modified;
         }
-        let frames = outputs.get(0).len();
         // The frames the ring holds, then silence for the rest.
-        let popped = self
-            .ring
-            .pop_planes(outputs.iter_mut(), Samples(frames))
-            .get();
+        let popped = outputs
+            .planes_mut()
+            .and_then(|planes| self.ring.pop_planes(planes))
+            .map_or(0, Samples::get);
         for plane in outputs.iter_mut() {
             plane[popped..].fill(0.0);
         }

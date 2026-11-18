@@ -12,7 +12,7 @@ use crate::common::{metrical, note, track};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
     DropReason, FileEvent, LyricChange, Meta, MicrosPerQuarter, MidiFile, OtherMetaKind,
-    SmfDivision, SmfFormat, TextKind, Tick, TimelineError, ToClipError, Track,
+    SmfDivision, SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, KeySignature, Letter,
@@ -357,20 +357,6 @@ fn format_1_merges_by_tick_ties_in_track_order() {
 }
 
 #[test]
-fn format_2_is_refused() {
-    let smf = MidiFile::smf(
-        SmfFormat::Sequential,
-        SMF_DIVISION,
-        vec![track(vec![(0, note(0, 60))]), track(vec![(0, note(0, 61))])],
-    )
-    .unwrap();
-    assert!(matches!(
-        metrical(&smf).to_clip(),
-        Err(ToClipError::Timeline(TimelineError::NoCommonTimeline))
-    ));
-}
-
-#[test]
 fn a_clip_is_not_converted_again() {
     let clip = metrical(&format0(vec![(0, note(0, 60))]))
         .to_clip()
@@ -459,7 +445,10 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
         ]
     );
     // Two beats at the default 120 bpm (1 s), then two at 240 bpm (0.5 s).
-    assert_eq!(clip.seconds_at(Tick(4 * u64::from(TPQ))), Seconds(1.5));
+    assert_eq!(
+        metrical(&clip).seconds_at(Tick(4 * u64::from(TPQ))),
+        Seconds(1.5)
+    );
 }
 
 #[test]

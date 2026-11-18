@@ -13,6 +13,7 @@
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};
+use tutti_buffers::{Interleaved, InterleavedMut};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::TapReader;
@@ -36,9 +37,15 @@ fn tap_lanes(c: &mut Criterion) {
             let mut spent = Duration::ZERO;
             for _ in 0..iters {
                 let start = Instant::now();
-                writer.push_interleaved(black_box(&block));
+                writer.push_interleaved(
+                    Interleaved::new(black_box(&block), writer.layout()).unwrap(),
+                );
                 spent += start.elapsed();
-                black_box(reader.pop_into(&mut out));
+                black_box(
+                    reader
+                        .pop_into(InterleavedMut::new(&mut out, reader.layout()).unwrap())
+                        .unwrap(),
+                );
             }
             spent
         });
@@ -49,9 +56,15 @@ fn tap_lanes(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let mut spent = Duration::ZERO;
             for _ in 0..iters {
-                writer.push_interleaved(&block);
+                writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
                 let start = Instant::now();
-                black_box(reader.pop_into(black_box(&mut out)));
+                black_box(
+                    reader
+                        .pop_into(
+                            InterleavedMut::new(black_box(&mut out), reader.layout()).unwrap(),
+                        )
+                        .unwrap(),
+                );
                 spent += start.elapsed();
             }
             spent
@@ -61,8 +74,12 @@ fn tap_lanes(c: &mut Criterion) {
     group.bench_function("round_trip_512x2", |b| {
         let (mut reader, mut writer) = TapReader::pair(WIDTH, capacity);
         b.iter(|| {
-            writer.push_interleaved(black_box(&block));
-            black_box(reader.pop_into(black_box(&mut out)));
+            writer.push_interleaved(Interleaved::new(black_box(&block), writer.layout()).unwrap());
+            black_box(
+                reader
+                    .pop_into(InterleavedMut::new(black_box(&mut out), reader.layout()).unwrap())
+                    .unwrap(),
+            );
         });
     });
     group.finish();

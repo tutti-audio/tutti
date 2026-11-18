@@ -934,7 +934,7 @@ fn mix_cases() -> Vec<MixCase> {
                     tutti_nodes::ConvolverNode::shared_ir(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                         Mono::new(&[0.0, 0.0, 1.0, -0.5]),
-                        64,
+                        Samples(64),
                     )
                     .unwrap(),
                 )

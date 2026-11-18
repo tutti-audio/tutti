@@ -84,7 +84,10 @@ impl Drop for Raise<'_> {
 fn drain(tap: &mut TapReader, into: &mut Vec<f32>) {
     let mut buf = vec![0.0f32; tap.width() * 4096];
     loop {
-        let n = tap.pop_into(&mut buf).get();
+        let n = tap
+            .pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+            .unwrap()
+            .get();
         if n == 0 {
             break;
         }
@@ -147,7 +150,8 @@ fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
         "exactly the next call's block"
     );
     let mut got = vec![0.0f32; 128];
-    tap.pop_into(&mut got);
+    tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+        .unwrap();
     assert_eq!(got, second);
     taps.close().unwrap();
     render(&engine, 64, 2, false);
@@ -180,7 +184,8 @@ fn drops_are_counted_and_a_wrong_width_is_lost_whole() {
     assert_eq!(tap.take_lost(), Samples(200));
     assert_eq!(tap.take_lost(), Samples(0), "reading clears");
     let mut got = vec![0.0f32; 200];
-    tap.pop_into(&mut got);
+    tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+        .unwrap();
     assert_eq!(got[..4], [1.0, 2.0, 2.0, 4.0], "the first frames were kept");
 
     // The device now hands a 6-wide block to a 2-wide tap.
@@ -221,7 +226,10 @@ fn channels_do_not_tear_under_a_concurrent_drain() {
             let mut got = Vec::new();
             let mut buf = vec![0.0f32; 6 * 5];
             loop {
-                let n = tap.pop_into(&mut buf).get();
+                let n = tap
+                    .pop_into(InterleavedMut::new(&mut buf, tap.layout()).unwrap())
+                    .unwrap()
+                    .get();
                 got.extend_from_slice(&buf[..n * 6]);
                 if n == 0 {
                     if done.load(std::sync::atomic::Ordering::Acquire) && tap.available().get() == 0

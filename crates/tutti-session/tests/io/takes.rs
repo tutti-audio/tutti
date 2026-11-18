@@ -112,7 +112,7 @@ impl Rig {
             .writer
             .as_mut()
             .expect("opened")
-            .push_interleaved(&ramp);
+            .push_interleaved(Interleaved::new(&ramp, ChannelLayout::STEREO).unwrap());
         self.pushed += frames;
         self.events.extend(self.session.update());
         // A callback's timestamp reports the playback delay each block.

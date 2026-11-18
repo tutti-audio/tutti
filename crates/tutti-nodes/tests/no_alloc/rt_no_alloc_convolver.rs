@@ -6,7 +6,7 @@ use tutti_buffers::Mono;
 use tutti_graph::contract::Direct;
 use tutti_nodes::ConvolverNode;
 use tutti_types::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MAX_CHANNELS};
-use tutti_units::{Amplitude, SampleRate};
+use tutti_units::{Amplitude, SampleRate, Samples};
 
 /// The largest host block the rig is prepared for.
 const MAX_BLOCK: usize = 128;
@@ -31,7 +31,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode)> {
         let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         all.push((
             format!("per channel x{width}"),
-            ConvolverNode::per_channel(&refs, 32).unwrap(),
+            ConvolverNode::per_channel(&refs, Samples(32)).unwrap(),
         ));
     }
     let four = irs(4);
@@ -42,7 +42,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode)> {
             Mono::new(&four[1]),
             Mono::new(&four[2]),
             Mono::new(&four[3]),
-            32,
+            Samples(32),
         ),
     ));
     // First order in, stereo out: the widths differ.
@@ -54,7 +54,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode)> {
             AmbisonicFormat::ambix(AmbisonicOrder::of(1)),
             ChannelTopology::from(Bed::Stereo),
             &views,
-            32,
+            Samples(32),
         )
         .unwrap(),
     ));
@@ -70,7 +70,8 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode)> {
         let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         all.push((
             format!("ambisonic order {order}"),
-            ConvolverNode::ambisonic(format, ChannelTopology::from(format), &views, 32).unwrap(),
+            ConvolverNode::ambisonic(format, ChannelTopology::from(format), &views, Samples(32))
+                .unwrap(),
         ));
     }
     all

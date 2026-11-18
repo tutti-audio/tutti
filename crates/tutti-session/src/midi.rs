@@ -1324,17 +1324,16 @@ impl Midi<'_> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NoTimeline`] for a format 2 file, which has no one
-    /// timeline; otherwise as [`play_clip`](Self::play_clip). A file in SMPTE
-    /// time has no beats and no [`MetricalView`](tutti_midi_file::MetricalView)
-    /// to pass.
+    /// As [`play_clip`](Self::play_clip). A file of independent sequences (format
+    /// 2) has no one timeline, and a file in SMPTE time has no beats: neither
+    /// has a [`MetricalView`](tutti_midi_file::MetricalView) to pass.
     pub fn play_file(
         &mut self,
         target: impl Into<NodeKey>,
         at: Beat,
         file: tutti_midi_file::MetricalView<'_>,
     ) -> Result<()> {
-        let timeline = file.timeline()?;
+        let timeline = file.timeline();
         if !timeline.dropped.is_empty() {
             tracing::warn!(
                 dropped = timeline.dropped.len(),

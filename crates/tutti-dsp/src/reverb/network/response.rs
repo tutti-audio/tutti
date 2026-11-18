@@ -17,6 +17,7 @@ use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate};
 use super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage, energy,
 };
+use crate::reverb::cutoff_pole;
 use crate::{Complex64, Lti};
 
 const ZERO: Complex64 = Complex64::new(0.0, 0.0);
@@ -35,7 +36,7 @@ fn delay(w: f64, d: f64) -> Complex64 {
 impl Absorption {
     /// The response `G(e^jw)` of one trip through the loop at angular frequency
     /// `w`. NaN for a one-pole that does not settle.
-    fn response(&self, w: f64, rate: f64) -> Complex64 {
+    fn response(&self, w: f64, rate: SampleRate) -> Complex64 {
         match *self {
             Absorption::Gain(g) => Complex64::new(f64::from(g.get()), 0.0),
             Absorption::OnePole { gain, damp } => {
@@ -59,7 +60,7 @@ impl Absorption {
                 // `L = ((1 - p) / (1 - p z^-1))^2`, as the kernel's two cascaded
                 // one-poles; `L1` at the lower crossover, `L2` at the upper.
                 let l = |fc: Hz| {
-                    let p = libm::exp(-std::f64::consts::TAU * f64::from(fc.get()) / rate);
+                    let p = cutoff_pole(fc, rate);
                     let one = (1.0 - p) / (ONE - delay(w, 1.0) * p);
                     one * one
                 };
@@ -77,7 +78,7 @@ impl Absorption {
         (0..=PEAK_POINTS)
             .map(|k| {
                 let w = std::f64::consts::PI * (f64::from(k) / f64::from(PEAK_POINTS)).powi(2);
-                self.response(w, rate.get()).norm()
+                self.response(w, rate).norm()
             })
             .fold(0.0, f64::max)
     }
@@ -89,7 +90,7 @@ impl Absorption {
     /// each pole `p`). Tighter than the `majorant` at `r = 1` when the bands
     /// rise with frequency, where the sum of the magnitudes of the three weights
     /// exceeds the peak.
-    fn sup(&self, rate: f64) -> f64 {
+    fn sup(&self, rate: SampleRate) -> f64 {
         let Absorption::Bands {
             low,
             mid,
@@ -105,7 +106,7 @@ impl Absorption {
             f64::from(mid.get()),
             f64::from(high.get()),
         );
-        let pole = |fc: Hz| libm::exp(-std::f64::consts::TAU * f64::from(fc.get()) / rate);
+        let pole = |fc: Hz| cutoff_pole(fc, rate);
         let (p1, p2) = (pole(crossover[0]), pole(crossover[1]));
         if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0)
             || ![p1, p2]
@@ -129,7 +130,7 @@ impl Absorption {
     /// `(0, 1]`: the l1 norm at `r = 1`, and a bound on `|G|` on the circle
     /// `|z| = r` (a delay of `D` frames there has magnitude `r^-D`). Infinite when
     /// a pole is not inside the circle, and for a gain that is not a loop gain.
-    fn majorant(&self, r: f64, rate: f64) -> f64 {
+    fn majorant(&self, r: f64, rate: SampleRate) -> f64 {
         match *self {
             Absorption::Gain(g) => nonnegative(f64::from(g.get())),
             Absorption::OnePole { gain, damp } => {
@@ -160,7 +161,7 @@ impl Absorption {
                 // `((1 - p) / (1 - p / r))^2` while `p < r`. The three terms'
                 // coefficients are weighted by their gains' magnitudes.
                 let sum = |fc: Hz| {
-                    let p = libm::exp(-std::f64::consts::TAU * f64::from(fc.get()) / rate);
+                    let p = cutoff_pole(fc, rate);
                     if p < r {
                         let x = (1.0 - p) / (1.0 - p / r);
                         x * x
@@ -247,7 +248,7 @@ impl AllPass {
 
 impl Line {
     /// One trip's response `G(e^jw) AP(e^jw) z^-m`: the diagonal of the loop `T`.
-    fn trip(&self, w: f64, rate: f64) -> Complex64 {
+    fn trip(&self, w: f64, rate: SampleRate) -> Complex64 {
         let mut t = self.absorption.response(w, rate) * delay(w, self.length.get());
         if let Some(d) = self.diffuser {
             t *= d.response(w);
@@ -414,7 +415,7 @@ impl Network {
     /// stages leave them: pre-delay, stages in series, then width and wet. `None`
     /// is a network whose response cannot be given.
     fn channels_at(&self, w: f64) -> [Complex64; MAX_CHANNELS] {
-        let rate = self.rate.get();
+        let rate = self.rate;
         let mut v = [ZERO; MAX_CHANNELS];
         v[0] = delay(w, self.pre_delay.get() as f64);
         let mut width = 1usize;
@@ -502,7 +503,7 @@ impl Network {
     /// The l1 norm (`at = Some(r)` is the radius, `1` for the l1 norm and
     /// `None` for the `hinf` figure) of the stages in series.
     fn series_gain(&self, norm: Norm) -> f64 {
-        let rate = self.rate.get();
+        let rate = self.rate;
         let mut gain = 1.0f64;
         for stage in self.stages.iter() {
             gain *= match stage {
@@ -560,7 +561,7 @@ impl Fdn {
     /// The factor one trip through line `i` multiplies a signal by on the circle
     /// `|z| = r`: the absorption's and the nested all-pass's majorants, and the
     /// delay's `r^-m`.
-    fn trip_gain(&self, line: &Line, r: f64, rate: f64) -> f64 {
+    fn trip_gain(&self, line: &Line, r: f64, rate: SampleRate) -> f64 {
         let mut g = if r == 1.0 {
             line.absorption.sup(rate)
         } else {
@@ -579,7 +580,7 @@ impl Fdn {
     /// bound `||(I - X)^-1|| <= 1 / (1 - ||X||)` for `X = A G D`, `||D|| = r^-m`
     /// of the longest line, and the unit modulus of a delay at `r = 1`. Infinity
     /// where `q >= 1`, and for a network the analysis does not accept.
-    fn resolvent_gain(&self, r: f64, rate: f64) -> f64 {
+    fn resolvent_gain(&self, r: f64, rate: SampleRate) -> f64 {
         let n = self.lines.len();
         if n == 0 {
             return 0.0;
@@ -622,7 +623,7 @@ impl Fdn {
     /// bound is loose (the true figure of a dense network is far under it) and is
     /// finite while `||A|| max_i |G_i| r^(-m_i)` can be brought under 1, that is
     /// while the slowest line's loop gain per frame is under `1 / ||A||`.
-    fn l1_gain(&self, rate: f64) -> f64 {
+    fn l1_gain(&self, rate: SampleRate) -> f64 {
         let n = self.lines.len();
         if n == 0 {
             return 0.0;
@@ -713,10 +714,10 @@ impl Lti for Network {
     /// fit its matrix. `freqs` are `f32` hertz, so a response read near a pole
     /// is only as sharp as the grid's own rounding.
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
-        let rate = self.rate.get();
+        let rate = self.rate;
         let width = self.width_after();
         for (g, f) in gain.iter_mut().zip(freqs) {
-            let w = std::f64::consts::TAU * f64::from(f.get()) / rate;
+            let w = std::f64::consts::TAU * f64::from(f.get()) / rate.get();
             *g = if output < width {
                 self.channels_at(w)[output]
             } else {

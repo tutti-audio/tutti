@@ -213,17 +213,18 @@ pub(crate) enum SpillReplay<'a> {
 
 impl Replay for SpillReplay<'_> {
     fn fill(&mut self, mut out: InterleavedMut<'_>) -> crate::Result<usize> {
-        let width = usize::from(out.layout().count());
+        let layout = out.layout();
         match self {
             Self::Memory { held, at } => {
-                let n = (held.len() - *at).min(out.frames().get() * width);
-                let n = n - n % width;
+                let left = layout.from_interleaved_len(held.len() - *at);
+                let frames = left.min(out.frames());
+                let n = layout.interleaved_len(frames);
                 out.samples_mut()[..n].copy_from_slice(&held[*at..*at + n]);
                 *at += n;
-                Ok(n / width)
+                Ok(frames.get())
             }
             Self::File { reader, bytes } => {
-                let want = out.frames().get() * width;
+                let want = layout.interleaved_len(out.frames());
                 bytes.resize(want * 4, 0);
                 let mut got = 0;
                 while got < bytes.len() {
@@ -232,15 +233,15 @@ impl Replay for SpillReplay<'_> {
                         n => got += n,
                     }
                 }
-                let samples = got / 4;
-                let samples = samples - samples % width;
+                let frames = layout.from_interleaved_len(got / 4);
+                let samples = layout.interleaved_len(frames);
                 for (dst, b) in out.samples_mut()[..samples]
                     .iter_mut()
                     .zip(bytes.as_chunks::<4>().0)
                 {
                     *dst = f32::from_le_bytes(*b);
                 }
-                Ok(samples / width)
+                Ok(frames.get())
             }
         }
     }

@@ -133,8 +133,8 @@ mod tests {
     use tutti_units::UnitParam;
     use tutti_units::{Samples, Tail};
 
-    fn config(frequency: Hz, gain: f32) -> TiltFilterConfig {
-        TiltFilterConfig::new(1u16, frequency, Db(gain))
+    fn config(frequency: Hz, gain: Db) -> TiltFilterConfig {
+        TiltFilterConfig::new(1u16, frequency, gain)
     }
 
     fn node(config: TiltFilterConfig) -> TiltFilterNode {
@@ -191,13 +191,13 @@ mod tests {
         for db in [-18.0f32, -6.0, 6.0, 18.0] {
             for f in [10, 34, 120, 240, 683, 2_400, 3_900].map(bin) {
                 let want = analog(f64::from(pivot.get()), f64::from(db), f64::from(f));
-                let got = gain_of(config(pivot, db), f);
+                let got = gain_of(config(pivot, Db(db)), f);
                 assert!(
                     (got - want).abs() < 1e-4 * want,
                     "gain {db} at {f}: {got} vs {want}"
                 );
             }
-            assert!((gain_of(config(pivot, db), pivot.get()) - 1.0).abs() < 1e-4);
+            assert!((gain_of(config(pivot, Db(db)), pivot.get()) - 1.0).abs() < 1e-4);
         }
     }
 
@@ -205,7 +205,7 @@ mod tests {
     /// however the host cuts its blocks, and settle on the design.
     #[test]
     fn a_glide_of_the_controls_stays_finite_and_settles_on_the_design() {
-        let make = || TiltFilterNode::from(config(Hz(200.0), 0.0));
+        let make = || TiltFilterNode::from(config(Hz(200.0), Db::UNITY));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
         let mut node = assert_cell_glides(
             make,
@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn controls_out_of_range_are_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f32, db: f32| render(&mut node(config(Hz(hz), db)), &input);
+        let at = |hz: f32, db: f32| render(&mut node(config(Hz(hz), Db(db))), &input);
         assert_eq!(at(1.0, 6.0), at(20.0, 6.0));
         assert_eq!(at(90_000.0, 6.0), at(RATE.nyquist_scaled(0.99).get(), 6.0));
         assert_eq!(at(500.0, 90.0), at(500.0, 24.0));

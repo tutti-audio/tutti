@@ -19,7 +19,7 @@
 //! matter. The machine's scheduler adds spikes, so the maximum column is the
 //! minimum over the 21 passes of each pass's maximum; compare it, and the
 //! percentiles, only across interleaved runs.
-use tutti_units::Seconds;
+use tutti_units::{Samples, Seconds};
 fn main() {
     use std::hint::black_box;
     use std::time::Instant;
@@ -33,7 +33,7 @@ fn main() {
         "partition", "ir (s)", "host", "mean (us)", "p99 (us)", "p99.9", "max (us)", "max/mean"
     );
     let run = |ir: &[f32], partition: usize, lens: &[usize]| {
-        let mut c = Convolver::new(Mono::new(ir), partition);
+        let mut c = Convolver::new(Mono::new(ir), Samples(partition));
         let longest = *lens.iter().max().unwrap_or(&1);
         let input: Vec<f32> = (0..longest)
             .map(|i| ((i * 7919) % 1000) as f32 * 2e-3 - 1.0)

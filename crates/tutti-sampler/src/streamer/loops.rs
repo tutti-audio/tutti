@@ -31,6 +31,7 @@
 use std::sync::Arc;
 
 use super::prefetch::RegionOut;
+use tutti_buffers::{Interleaved, InterleavedMut};
 use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
@@ -339,21 +340,23 @@ impl RingLoop {
 
     /// Blend the frames of a run that fall in the fade toward their lead-in,
     /// as `interp::read_looped_frame` blends a tap: `run` holds file frames
-    /// `from..`, `ch` wide.
-    fn blend_run(&self, from: usize, run: &mut [f32], ch: usize) {
+    /// `from..`.
+    fn blend_run(&self, from: usize, mut run: InterleavedMut<'_>) {
         let fade = self.span.fade();
         let fade_start = self.span.end() - fade;
-        let frames = run.len() / ch;
-        if fade == 0 || from + frames <= fade_start {
+        if fade == 0 || from + run.frames().get() <= fade_start {
             return;
         }
+        let Ok(lead_in) = Interleaved::new(&self.lead_in, run.layout()) else {
+            return;
+        };
         let first = fade_start.saturating_sub(from);
-        for (k, frame) in run.chunks_exact_mut(ch).enumerate().skip(first) {
+        for (k, frame) in run.iter_mut().enumerate().skip(first) {
             let Some((lead, weight)) = self.span.fade_at(from + k) else {
                 continue;
             };
-            let at = (lead + fade - self.span.resume()) * ch;
-            for (s, &l) in frame.iter_mut().zip(&self.lead_in[at..at + ch]) {
+            let lead = lead_in.frame(Samples(lead + fade - self.span.resume()));
+            for (s, &l) in frame.iter_mut().zip(lead) {
                 *s = tutti_dsp::lerp(*s, l, weight);
             }
         }
@@ -361,15 +364,19 @@ impl RingLoop {
 
     /// Fill `run` (file frames `at..`, all inside the loop's repeating part)
     /// from the resident body, when there is one.
-    fn body_run(&self, at: usize, run: &mut [f32], ch: usize) -> bool {
+    fn body_run(&self, at: usize, run: &mut InterleavedMut<'_>) -> bool {
         let Some(body) = self.body.as_ref() else {
             return false;
         };
         if at < self.span.resume() {
             return false;
         }
-        let from = (at - self.span.resume()) * ch;
-        run.copy_from_slice(&body[from..from + run.len()]);
+        let Ok(body) = Interleaved::new(body, run.layout()) else {
+            return false;
+        };
+        let from = Samples(at - self.span.resume());
+        let src = body.slice(from..from + run.frames());
+        run.samples_mut().copy_from_slice(src.samples());
         true
     }
 }
@@ -491,8 +498,9 @@ impl Mapping {
         None
     }
 
-    /// Fill `out` (flat interleaved, `ch` wide) with what straight positions
-    /// `pos..` hold, reading runs of file frames through `read(frame, run)`:
+    /// Fill `out` with what straight positions
+    /// `pos..` hold, reading runs of file frames through `read(frame, run)`
+    /// (`run` flat interleaved, `out`'s width):
     /// forward, the file (or on a loop the looped sequence, fade blended as it
     /// lands, and a short loop's wraps from its resident body); reversed, the
     /// file mirrored, frame order reversed within each run and channels kept.
@@ -501,45 +509,42 @@ impl Mapping {
     pub(crate) fn fill(
         &self,
         pos: u64,
-        out: &mut [f32],
-        ch: usize,
+        mut out: InterleavedMut<'_>,
         read: &mut dyn FnMut(usize, &mut [f32]),
     ) {
-        let frames = out.len() / ch;
-        let writable = self
-            .end()
-            .map_or(frames, |end| (end.saturating_sub(pos) as usize).min(frames));
-        out[writable * ch..].fill(0.0);
-        let out = &mut out[..writable * ch];
+        let frames = out.frames();
+        let writable = self.end().map_or(frames, |end| {
+            Samples((end.saturating_sub(pos) as usize).min(frames.get()))
+        });
+        out.slice_mut(writable..frames).samples_mut().fill(0.0);
+        let mut out = out.slice_mut(Samples::ZERO..writable);
         if self.reverse {
             // Positions `pos..pos + n` hold file frames `len - 1 - pos` down.
-            let Some(len) = self.len.map(Samples::get).filter(|_| writable > 0) else {
+            let Some(len) = self.len.map(Samples::get).filter(|_| !writable.is_zero()) else {
                 return;
             };
-            let first = len - pos as usize - writable;
-            read(first, out);
-            for i in 0..writable / 2 {
-                let (a, b) = (i * ch, (writable - 1 - i) * ch);
-                for c in 0..ch {
-                    out.swap(a + c, b + c);
-                }
+            let first = len - pos as usize - writable.get();
+            read(first, out.samples_mut());
+            let mut frames = out.iter_mut();
+            while let (Some(head), Some(tail)) = (frames.next(), frames.next_back()) {
+                head.swap_with_slice(tail);
             }
             return;
         }
         let Some(ring_loop) = self.active_loop() else {
-            read(pos as usize, out);
+            read(pos as usize, out.samples_mut());
             return;
         };
         let span = ring_loop.span;
         let mut done = 0;
-        while done < writable {
+        while done < writable.get() {
             let at = span.place_frame(pos as usize + done);
-            let run = (span.end() - at).min(writable - done);
-            let slice = &mut out[done * ch..(done + run) * ch];
-            if !ring_loop.body_run(at, slice, ch) {
-                read(at, slice);
+            let run = (span.end() - at).min(writable.get() - done);
+            let mut slice = out.slice_mut(Samples(done)..Samples(done + run));
+            if !ring_loop.body_run(at, &mut slice) {
+                read(at, slice.samples_mut());
             }
-            ring_loop.blend_run(at, slice, ch);
+            ring_loop.blend_run(at, slice);
             done += run;
         }
     }
@@ -650,28 +655,31 @@ pub(crate) fn apply_mapping(
         }
         let at = at.min(to).max(busy.min(to)).max(lo);
         let fade = at > parts;
-        let record = fade.then(|| {
-            let ch = writer.channels().count() as usize;
+        let record = fade.then(|| -> Option<FadeRecord> {
+            let layout = writer.channels();
             let start = at.saturating_sub(3);
             let frames =
                 (fade_frames.get() as f64 * rate.max(1.0)).ceil() as usize + GAP_COVER_FRAMES + 8;
-            let mut data = vec![0.0f32; frames * ch];
+            let mut data = vec![0.0f32; layout.interleaved_len(Samples(frames))];
             // The old content piecewise, as the reader would have heard it.
             let split = (content
                 .switch_at
                 .unwrap_or(0)
                 .clamp(start, start + frames as u64)
                 - start) as usize;
-            let (a, b) = data.split_at_mut(split * ch);
+            // `data` is whole frames of the ring's width, so the view is built.
+            let mut view = InterleavedMut::new(&mut data, layout).ok()?;
+            let (a, b) = view.split_at_mut(Samples(split));
             writer.fill_with(&content.before, start, a);
             writer.fill_with(&content.current, start + split as u64, b);
-            FadeRecord {
+            Some(FadeRecord {
                 start,
                 frames,
                 data: data.into(),
                 fade_frames,
-            }
+            })
         });
+        let record = record.flatten();
         #[cfg(test)]
         DURING_RECORD_READ.with(|hook| {
             if let Some(hook) = hook.borrow_mut().as_mut() {
@@ -820,10 +828,12 @@ mod tests {
     }
 
     fn fill(mapping: &Mapping, wave: &Wave, pos: u64, frames: usize, ch: usize) -> Vec<f32> {
-        let mut out = vec![0.0f32; frames * ch];
+        let layout = ChannelLayout::try_from(ch).expect("a test width is small");
+        let mut out = vec![0.0f32; layout.interleaved_len(Samples(frames))];
         let reads = std::cell::Cell::new(0);
         let mut read = reader(wave, ch, &reads);
-        mapping.fill(pos, &mut out, ch, &mut |at, run| {
+        let view = InterleavedMut::new(&mut out, layout).expect("whole frames");
+        mapping.fill(pos, view, &mut |at, run| {
             read(at, run);
         });
         out
@@ -907,10 +917,46 @@ mod tests {
         let reads = std::cell::Cell::new(0);
         let mut out = vec![0.0f32; 400];
         let mut read = reader(&wave, 1, &reads);
-        lead.fill(0, &mut out, 1, &mut |at, run| {
+        let view = InterleavedMut::new(&mut out, ChannelLayout::MONO).expect("whole frames");
+        lead.fill(0, view, &mut |at, run| {
             read(at, run);
         });
         assert_eq!(reads.get(), 1, "one read, for frames 0..9");
+    }
+
+    /// A fade blends each channel toward its own lead-in: in a stereo loop
+    /// `[5, 9)` fading 2, the blended frames 7 and 8 take the left from the
+    /// left lead-in and the right from the right one.
+    #[test]
+    fn a_stereo_fade_blends_each_channel_toward_its_own_lead_in() {
+        let wave = make_test_wave(
+            &(0..10)
+                .map(|i| (i as f32, 100.0 + i as f32))
+                .collect::<Vec<_>>(),
+        );
+        let reads = std::cell::Cell::new(0);
+        let mut read = reader(&wave, 2, &reads);
+        let (ring_loop, _) = RingLoop::capture(
+            crate::testing::loop_frames(5, 9, 2),
+            wave.len().get(),
+            2u16,
+            &mut read,
+        )
+        .expect("a loop");
+        let looped = Mapping {
+            reverse: false,
+            len: Some(wave.len()),
+            ring_loop: Some(ring_loop),
+        };
+        let blended = |tail: f32, lead: f32, k: f32| tail * (1.0 - k / 3.0) + lead * (k / 3.0);
+        let want = [
+            (6.0, 106.0),
+            (blended(7.0, 3.0, 1.0), blended(107.0, 103.0, 1.0)),
+            (blended(8.0, 4.0, 2.0), blended(108.0, 104.0, 2.0)),
+            (5.0, 105.0),
+        ];
+        let want: Vec<f32> = want.iter().flat_map(|&(l, r)| [l, r]).collect();
+        assert_eq!(fill(&looped, &wave, 6, 4, 2), want);
     }
 
     /// A six-channel loop wraps at its full FRAME length: frame 100 of a
@@ -1098,7 +1144,8 @@ mod tests {
         );
         writer.set_resident(Arc::clone(&wave));
         let mut held = vec![0.0f32; 10_000];
-        writer.fill_with(&Mapping::plain(Samples::new(LEN)), 0, &mut held);
+        let view = InterleavedMut::new(&mut held, ChannelLayout::MONO).expect("whole frames");
+        writer.fill_with(&Mapping::plain(Samples::new(LEN)), 0, view);
         assert_eq!(writer.push_interleaved(&held), tutti_units::Samples(10_000));
         let _ = reader.claim(0, [(0, 64), (0, 0)]);
         assert_eq!(writer.in_flight_end(), 64);

@@ -60,12 +60,12 @@ impl CompressorControls {
     /// A compressor that does nothing: threshold at 0 dB, a hard knee, no ratio, no
     /// times and no makeup. What a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
-        threshold: Db(0.0),
-        knee: Db(0.0),
+        threshold: Db::UNITY,
+        knee: Db::UNITY,
         ratio: CompressionRatio::UNITY,
-        attack: Seconds(0.0),
-        release: Seconds(0.0),
-        makeup: Db(0.0),
+        attack: Seconds::ZERO,
+        release: Seconds::ZERO,
+        makeup: Db::UNITY,
         key_cutoff: KeyFilter::DEFAULT_CUTOFF,
         key_q: KeyFilter::DEFAULT_Q,
     };
@@ -141,8 +141,8 @@ impl Detector {
 
     /// The figures of a compressor that does nothing, for a target to start from.
     const NEUTRAL: Self = Self {
-        threshold: Db(0.0),
-        knee: Db(0.0),
+        threshold: Db::UNITY,
+        knee: Db::UNITY,
         ratio: CompressionRatio::UNITY,
         ballistics: Follower::NEUTRAL,
     };
@@ -152,11 +152,11 @@ impl Detector {
     /// coefficient while it rises, the release while it falls) and the linear gain
     /// `-reduction + makeup`.
     #[inline]
-    fn frame(&self, reduction: &mut f32, level: f32, threshold: Db, makeup_db: f32) -> f32 {
+    fn frame(&self, reduction: &mut Db, level: f32, threshold: Db, makeup: Db) -> f32 {
         let input_db = amplitude_to_db(Amplitude::new(level));
         let target = compute_compressor_gain_reduction(input_db, threshold, self.ratio, self.knee);
-        *reduction = self.ballistics.follow(*reduction, target.get());
-        Db::new(-*reduction + makeup_db).to_amplitude().get()
+        *reduction = self.ballistics.follow(*reduction, target);
+        (-*reduction + makeup).to_amplitude().get()
     }
 }
 
@@ -183,10 +183,10 @@ pub struct CompressorBank {
     steps: u32,
     rate: SampleRate,
     /// The smoothed reduction, in dB and positive.
-    reduction: f32,
+    reduction: Db,
     /// The deepest reduction since the last [`take_deepest`](Self::take_deepest), in dB
     /// and positive.
-    deepest: f32,
+    deepest: Db,
     /// The filter on the key, if the bank has one.
     key: Option<KeyStage>,
 }
@@ -203,8 +203,8 @@ impl CompressorBank {
             makeup: Glide::landed(0.0),
             steps,
             rate,
-            reduction: 0.0,
-            deepest: 0.0,
+            reduction: Db::UNITY,
+            deepest: Db::UNITY,
             key: None,
         }
     }
@@ -224,8 +224,8 @@ impl CompressorBank {
     /// Back to silence: no reduction, nothing metered, and the makeup landed on its target.
     /// No allocation.
     pub fn reset(&mut self) {
-        self.reduction = 0.0;
-        self.deepest = 0.0;
+        self.reduction = Db::UNITY;
+        self.deepest = Db::UNITY;
         self.makeup.settle();
         if let Some(key) = &mut self.key {
             key.reset();
@@ -259,7 +259,7 @@ impl CompressorBank {
     /// [`reset`](Self::reset)), in dB and positive; [`Db::UNITY`] is none. A **measurement**,
     /// for a reduction meter. No allocation.
     pub fn take_deepest(&mut self) -> Db {
-        Db(core::mem::take(&mut self.deepest))
+        core::mem::replace(&mut self.deepest, Db::UNITY)
     }
 
     /// Runs `input` into `output`, scaled by one gain from the loudest channel of `key`.
@@ -312,7 +312,7 @@ impl CompressorBank {
                 } else {
                     self.makeup.target()
                 };
-                *g = d.frame(&mut self.reduction, *g, threshold, makeup);
+                *g = d.frame(&mut self.reduction, *g, threshold, Db(makeup));
                 self.deepest = self.deepest.max(self.reduction);
             }
             for c in 0..width {

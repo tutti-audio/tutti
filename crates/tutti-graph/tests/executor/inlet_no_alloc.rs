@@ -9,6 +9,7 @@
 //! Driven through `tutti_graph::contract::Direct`: the node's own
 //! `Node::process`, called by hand with buffers built once.
 
+use tutti_buffers::Interleaved;
 use tutti_graph::InletNode;
 use tutti_graph::contract::Direct;
 use tutti_types::ChannelLayout;
@@ -21,7 +22,7 @@ fn inlet_process_is_allocation_free() {
     let mut node = Direct::new(node, SampleRate::SR_48K, 64);
 
     for _ in 0..2048 {
-        prod.push_interleaved(&[0.2, 0.2]);
+        prod.push_interleaved(Interleaved::new(&[0.2, 0.2], prod.layout()).unwrap());
     }
     for _ in 0..8 {
         node.block();

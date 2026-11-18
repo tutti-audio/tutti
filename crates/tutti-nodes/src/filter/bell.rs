@@ -10,7 +10,7 @@ use super::{eq_center, eq_gain, filter_bus};
 use crate::kernel::KernelNode;
 
 /// The quality factors a bell takes: 0.1 to 30.
-const Q_RANGE: (f32, f32) = (0.1, 30.0);
+const Q_RANGE: (Q, Q) = (Q(0.1), Q(30.0));
 
 /// The controls of a [`BellFilterNode`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -108,7 +108,7 @@ impl Sealed for BellFilterControls {
     fn held(&self, rate: SampleRate) -> Self {
         Self {
             frequency: eq_center(self.frequency, rate),
-            q: Q(self.q.get().clamp(Q_RANGE.0, Q_RANGE.1)),
+            q: self.q.clamp(Q_RANGE.0, Q_RANGE.1),
             gain: eq_gain(self.gain),
         }
     }
@@ -148,8 +148,8 @@ mod tests {
     use tutti_units::UnitParam;
     use tutti_units::{Samples, Tail};
 
-    fn config(frequency: Hz, q: f32, gain: f32) -> BellFilterConfig {
-        BellFilterConfig::new(1u16, frequency, Q(q), Db(gain))
+    fn config(frequency: Hz, q: Q, gain: Db) -> BellFilterConfig {
+        BellFilterConfig::new(1u16, frequency, q, gain)
     }
 
     fn node(config: BellFilterConfig) -> BellFilterNode {
@@ -161,8 +161,8 @@ mod tests {
     }
 
     /// The design's magnitude at `f`, read from the section's coefficients.
-    fn designed(fc: Hz, q: f32, db: f32, f: f32) -> f64 {
-        let sos = MatchedBell::new(Q(q), Db(db)).design(fc, RATE).unwrap();
+    fn designed(fc: Hz, q: Q, db: Db, f: f32) -> f64 {
+        let sos = MatchedBell::new(q, db).design(fc, RATE).unwrap();
         sos.sections()[0]
             .response(2.0 * PI * f64::from(f) / RATE.get())
             .norm()
@@ -215,8 +215,8 @@ mod tests {
         let center = Hz(bin(171));
         for (q, db) in [(0.7, 12.0), (3.0, -9.0), (12.0, 18.0), (0.4, -18.0)] {
             for f in [34, 120, 171, 240, 683, 2_400, 3_900].map(bin) {
-                let want = designed(center, q, db, f);
-                let got = gain_of(config(center, q, db), f);
+                let want = designed(center, Q(q), Db(db), f);
+                let got = gain_of(config(center, Q(q), Db(db)), f);
                 assert!(
                     (got - want).abs() < 1e-4 * want,
                     "q {q} gain {db} at {f}: {got} vs {want}"
@@ -231,13 +231,13 @@ mod tests {
                     f64::from(db),
                     f64::from(f),
                 );
-                let got = gain_of(config(center, q, db), f);
+                let got = gain_of(config(center, Q(q), Db(db)), f);
                 assert!(
                     (got - want).abs() < 2e-3 * want,
                     "q {q} gain {db} at {f}: {got} vs analog {want}"
                 );
             }
-            let at = gain_of(config(center, q, db), center.get());
+            let at = gain_of(config(center, Q(q), Db(db)), center.get());
             let want = 10f64.powf(f64::from(db) / 20.0);
             assert!((at - want).abs() < 1e-4 * want, "q {q} gain {db}: {at}");
         }
@@ -247,7 +247,7 @@ mod tests {
     /// same however the host cuts its blocks, and settle on the design.
     #[test]
     fn a_glide_of_the_controls_stays_finite_and_settles_on_the_design() {
-        let make = || BellFilterNode::from(config(Hz(200.0), 1.0, 0.0));
+        let make = || BellFilterNode::from(config(Hz(200.0), Q(1.0), Db::UNITY));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
         let mut node = assert_cell_glides(
             make,
@@ -275,7 +275,7 @@ mod tests {
         assert!(node.param_set().set(UnitParam::Q, 2.0));
         assert!(node.param_set().set(UnitParam::GainDb, 12.0));
         let settled = render(&mut node, &generate_sine(bin(256), 48_000.0, 24_576));
-        let want = designed(Hz(4_000.0), 2.0, 12.0, bin(256));
+        let want = designed(Hz(4_000.0), Q(2.0), Db(12.0), bin(256));
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4 * want);
     }
 
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn controls_out_of_range_are_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f32, q: f32, db: f32| render(&mut node(config(Hz(hz), q, db)), &input);
+        let at = |hz: f32, q: f32, db: f32| render(&mut node(config(Hz(hz), Q(q), Db(db))), &input);
         assert_eq!(at(1.0, 1.0, 6.0), at(20.0, 1.0, 6.0));
         assert_eq!(
             at(90_000.0, 1.0, 6.0),

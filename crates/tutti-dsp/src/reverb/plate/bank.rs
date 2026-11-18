@@ -25,11 +25,11 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Gain, Hz, SampleRate, Seconds, Tail};
+use tutti_units::{Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};
 use crate::reverb::network::{Absorption, Network, Stage};
-use crate::reverb::{CHUNK, ramp, read, tail_of};
+use crate::reverb::{CHUNK, cutoff_pole, ramp, read, tail_of};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
 const PRE_STEP: f32 = 2.0; // frames a chunk the pre-delay moves
@@ -44,9 +44,9 @@ struct Line {
 }
 
 impl Line {
-    fn new(frames: usize) -> Self {
+    fn new(frames: Samples) -> Self {
         Self {
-            buf: vec![0.0; frames + SLACK],
+            buf: vec![0.0; frames.get() + SLACK],
             w: 0,
         }
     }
@@ -85,13 +85,13 @@ impl Line {
 #[derive(Clone, Debug)]
 struct Shape {
     /// The input diffusers' lengths, in frames.
-    input: [usize; 4],
+    input: [Samples; 4],
     /// Per half: the modulated lattice, delay 1, lattice 2 and delay 2.
-    halves: [[usize; 4]; 2],
+    halves: [[Samples; 4]; 2],
     mod_rate: Hz,
     /// The deepest excursion and the longest pre-delay the design can ask for.
-    excursion: usize,
-    pre: usize,
+    excursion: Samples,
+    pre: Samples,
 }
 
 /// A coefficient point: what a design asks for (the values [`PlateGlides`] glide to) and
@@ -229,7 +229,7 @@ pub struct PlateBank {
     /// How long it rings at its worst.
     ceiling: Tail,
     /// Frames of the current chunk already run: 0 at a chunk's start.
-    into: usize,
+    into: Samples,
     pre: Line,
     /// The bandwidth low-pass's output.
     bandwidth: f32,
@@ -262,8 +262,8 @@ impl PlateBank {
         };
         worst.design_into(rate, &mut network);
         let shape = shape_of(&network);
-        let half = |h: &[usize; 4]| Half {
-            modulated: Line::new(h[0] + shape.excursion + 1),
+        let half = |h: &[Samples; 4]| Half {
+            modulated: Line::new(h[0] + shape.excursion + Samples(1)),
             delay1: Line::new(h[1]),
             lattice2: Line::new(h[2]),
             delay2: Line::new(h[3]),
@@ -288,7 +288,7 @@ impl PlateBank {
                 },
                 rate,
             ),
-            into: 0,
+            into: Samples::ZERO,
             pre: Line::new(shape.pre),
             bandwidth: 0.0,
             input: shape.input.map(Line::new),
@@ -310,7 +310,7 @@ impl PlateBank {
     pub fn glides(&self) -> PlateGlides {
         let rest = Glide::landed(0.0);
         PlateGlides {
-            ramp: ramp(self.rate.get()),
+            ramp: ramp(self.rate),
             decay: rest,
             damping: rest,
             lattice2: rest,
@@ -345,7 +345,7 @@ impl PlateBank {
         let Ring::Finite(t) = self.network.tail(TAIL_FLOOR) else {
             return tail_of(Ring::Unbounded, self.rate);
         };
-        let pre = (self.network.pre_delay.get() as f32).clamp(0.0, self.shape.pre as f32);
+        let pre = (self.network.pre_delay.get() as f32).clamp(0.0, self.shape.pre.get() as f32);
         let behind = f64::from((glides.pre.now() - pre).max(0.0));
         let input = bandwidth_ring(controls.bandwidth_at(self.rate), self.rate);
         tail_of(
@@ -368,16 +368,15 @@ impl PlateBank {
         }
         self.phase = 0.0;
         self.fresh = true;
-        self.into = 0;
+        self.into = Samples::ZERO;
     }
 
     /// Aims `glides` at the design of `controls`. No allocation.
     pub fn aim(&mut self, glides: &mut PlateGlides, controls: &PlateControls) {
         self.design(controls);
         if let Some(mut t) = target_of(&self.network) {
-            let hz = f64::from(controls.bandwidth_at(self.rate).get());
-            t.bandwidth = libm::exp(-std::f64::consts::TAU * hz / self.rate.get()) as f32;
-            t.pre = t.pre.clamp(0.0, self.shape.pre as f32);
+            t.bandwidth = cutoff_pole(controls.bandwidth_at(self.rate), self.rate) as f32;
+            t.pre = t.pre.clamp(0.0, self.shape.pre.get() as f32);
             glides.aim(&t);
         }
     }
@@ -438,11 +437,11 @@ impl PlateBank {
         }
         let scale = 1.0 / width.max(1) as f32;
         for i in 0..frames {
-            if self.into == 0 {
+            if self.into == Samples::ZERO {
                 glides.step();
                 self.begin_chunk(glides);
             }
-            let t = self.into as f32 / Self::CHUNK as f32;
+            let t = self.into.get() as f32 / Self::CHUNK as f32;
             let x: f32 = xs[..width]
                 .iter()
                 .map(|ch| ch[i].convert_to::<f32>())
@@ -455,7 +454,7 @@ impl PlateBank {
             if let Some(y) = right.as_deref_mut() {
                 y[i] = r.convert_to::<S>();
             }
-            self.into = (self.into + 1) % Self::CHUNK;
+            self.into = (self.into + Samples(1)) % Samples(Self::CHUNK);
         }
     }
 
@@ -470,14 +469,18 @@ impl PlateBank {
         self.bandwidth += (1.0 - k.bandwidth) * (delayed - self.bandwidth);
         let mut u = self.bandwidth;
         for ((line, &n), &g) in self.input.iter_mut().zip(&self.shape.input).zip(&k.input) {
-            u = line.lattice(u, g, n as f32);
+            u = line.lattice(u, g, n.get() as f32);
             line.advance();
         }
 
         // Each half reads the other's last delay before either writes this frame.
-        let ends = [0, 1].map(|h| self.halves[h].delay2.read(self.shape.halves[h][3] as f32));
+        let ends = [0, 1].map(|h| {
+            self.halves[h]
+                .delay2
+                .read(self.shape.halves[h][3].get() as f32)
+        });
         for h in 0..2 {
-            let [d1, l1, d2, _] = self.shape.halves[h].map(|n| n as f32);
+            let [d1, l1, d2, _] = self.shape.halves[h].map(|n| n.get() as f32);
             let half = &mut self.halves[h];
             let input = u + k.decay * ends[1 - h];
             let sweep = crate::lerp(c.prev[h], c.next[h], t);
@@ -522,18 +525,18 @@ impl PlateBank {
 /// after `ln(floor) / ln(q)` frames. Added to the tank's ring: the tank hears the input that
 /// long after it stops.
 fn bandwidth_ring(cutoff: Hz, rate: SampleRate) -> Seconds {
-    let pole = libm::exp(-std::f64::consts::TAU * f64::from(cutoff.get()) / rate.get());
+    let pole = cutoff_pole(cutoff, rate);
     let floor = f64::from(TAIL_FLOOR.to_amplitude().get());
     if pole <= 0.0 {
-        return Seconds(0.0);
+        return Seconds::ZERO;
     }
     Seconds(libm::log(floor) / libm::log(pole) / rate.get())
 }
 
 /// The lengths and fixed coefficients of the design in `network`.
 fn shape_of(network: &Network) -> Shape {
-    let frames = |s: tutti_units::SampleSpan| s.get() as usize;
-    let mut input = [1; 4];
+    let frames = SampleSpan::to_samples_floor;
+    let mut input = [Samples(1); 4];
     for (slot, stage) in input.iter_mut().zip(network.stages.iter()) {
         if let Stage::AllPass(a) = stage {
             *slot = frames(a[0].delay);
@@ -541,10 +544,10 @@ fn shape_of(network: &Network) -> Shape {
     }
     let mut shape = Shape {
         input,
-        halves: [[1; 4]; 2],
-        mod_rate: Hz(0.0),
-        excursion: 0,
-        pre: network.pre_delay.get(),
+        halves: [[Samples(1); 4]; 2],
+        mod_rate: Hz::ZERO,
+        excursion: Samples::ZERO,
+        pre: network.pre_delay,
     };
     if let Some(Stage::Fdn(f)) = network.stages.iter().find(|s| matches!(s, Stage::Fdn(_))) {
         for (h, lines) in shape.halves.iter_mut().zip(f.lines.chunks(2)) {
@@ -558,9 +561,7 @@ fn shape_of(network: &Network) -> Shape {
                 frames(lines[1].length),
             ];
             shape.mod_rate = a.modulation.rate;
-            shape.excursion = shape
-                .excursion
-                .max(a.modulation.depth.get().ceil() as usize);
+            shape.excursion = shape.excursion.max(a.modulation.depth.to_samples_ceil());
         }
     }
     shape

@@ -31,7 +31,7 @@ use tutti_nodes::{
     ShapeKind,
 };
 use tutti_types::{BusTopology, ChannelLayout};
-use tutti_units::{CompressionRatio, Db, Drive, Feedback, SampleRate, Seconds};
+use tutti_units::{CompressionRatio, Db, Drive, Feedback, SampleRate, Samples, Seconds};
 
 const BLOCKS: [usize; 2] = [64, 1024];
 const SR: SampleRate = SampleRate::SR_48K;
@@ -441,7 +441,7 @@ fn convolver(c: &mut Criterion) {
         c,
         "convolver",
         "1",
-        || ConvolverNode::new(Mono::new(&ir), 64),
+        || ConvolverNode::new(Mono::new(&ir), Samples(64)),
         None,
     );
 }

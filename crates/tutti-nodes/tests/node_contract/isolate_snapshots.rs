@@ -35,8 +35,8 @@ use tutti_nodes::{
 };
 use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{
-    Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Seconds, Semitones,
-    StereoWidth, UnitAddr, UnitParam,
+    Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples, Seconds,
+    Semitones, StereoWidth, UnitAddr, UnitParam,
 };
 
 #[test]
@@ -499,7 +499,7 @@ fn convolver() {
         })
         .collect();
     IsolateRow::new("ConvolverNode (mono)", move || {
-        ConvolverNode::new(Mono::new(&ir), 64)
+        ConvolverNode::new(Mono::new(&ir), Samples(64))
     })
     .control("gain", |c| c.set_gain(Amplitude(0.3)))
     .check();

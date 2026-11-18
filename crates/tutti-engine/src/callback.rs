@@ -28,6 +28,7 @@ use std::time::Duration;
 use tutti_buffers::InterleavedMut;
 use tutti_rt::with_no_denormals;
 use tutti_types::ChannelLayout;
+use tutti_units::Samples;
 
 use crate::Engine;
 use crate::faults::StreamFaults;
@@ -153,7 +154,7 @@ impl OutputBlock {
             state,
             layout,
             channels,
-            buffer: vec![0.0f32; MAX_FRAMES * channels],
+            buffer: vec![0.0f32; layout.interleaved_len(Samples(MAX_FRAMES))],
             last_rendered_frames: 0,
             latency: Arc::new(StreamLatency::new()),
             faults: Arc::new(StreamFaults::new()),
@@ -298,14 +299,17 @@ impl OutputBlock {
         // Clamp so we never allocate. If a backend hands us a larger buffer we
         // process the head and write silence to the tail. The assertion that
         // this should not happen lives at the driver boundary, not here.
-        let frames = (data.len() / channels).min(MAX_FRAMES);
-        self.last_rendered_frames = frames;
+        let frames = self
+            .layout
+            .from_interleaved_len(data.len())
+            .min(Samples(MAX_FRAMES));
+        self.last_rendered_frames = frames.get();
 
-        let mix = &mut self.buffer[..frames * channels];
+        let mix = &mut self.buffer[..self.layout.interleaved_len(frames)];
         // Zero before rendering: the previous callback's contents are not
         // meaningful input for the graph.
         mix.fill(0.0);
-        // `frames * channels` samples of a `channels`-wide layout: whole frames
+        // `frames` frames of the device's layout: whole frames
         // of a width the device opened with, so the view is always built.
         let Ok(mut mix) = InterleavedMut::new(mix, self.layout) else {
             return;
@@ -317,7 +321,7 @@ impl OutputBlock {
         // Back to a flat slice for the device write.
         let mix = mix.as_interleaved().samples();
 
-        write_output(data, channels, mix, frames, convert, silence);
+        write_output(data, channels, mix, frames.get(), convert, silence);
     }
 }
 

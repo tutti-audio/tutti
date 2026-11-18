@@ -14,7 +14,7 @@
 //! [`frames`](Io::frames) long and that `frames` is at most the
 //! [`MaxBlock`] the node was prepared with. A node therefore never clamps.
 
-use tutti_buffers::Float;
+use tutti_buffers::{BufferError, Float, PlanesMut};
 use tutti_units::{Samples, Tail};
 
 use crate::bus::{InBus, OutBus, PortSpan};
@@ -765,6 +765,16 @@ impl<'s, 'a, F: Float> Outputs<'s, 'a, F> {
             self.len()
         );
         &mut self.slices[usize::from(self.main.first) + c][..]
+    }
+
+    /// The main output bus as writable planes.
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError`] if the bus has no channel or its channels differ in
+    /// length.
+    pub fn planes_mut(&mut self) -> Result<PlanesMut<'_, 'a, F>, BufferError> {
+        PlanesMut::new(&mut self.slices[self.main.range()])
     }
 
     /// Every main output channel.

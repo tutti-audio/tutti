@@ -150,7 +150,7 @@ impl FreeverbBank {
         FreeverbGlides {
             feedback: Glide::landed(START.feedback().get()),
             damp: Glide::landed(START.damping()),
-            ramp: ramp(self.rate.get()),
+            ramp: ramp(self.rate),
         }
     }
 

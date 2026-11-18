@@ -6,7 +6,7 @@ use core::f64::consts::TAU;
 use tutti_units::{Db, Hz, Q, SampleRate, Seconds};
 
 use super::MAX_TAIL_FRAMES;
-use super::butterworth::{check_cutoff, check_gain};
+use super::butterworth::{check_cutoff, check_gain, gain_root};
 use super::{Sos, SosError};
 use crate::{Biquad, Ring};
 
@@ -197,7 +197,7 @@ fn inverse(b: Biquad) -> Biquad {
 /// difference and `c0 c2 = -C2 / 4`; `c0` is the larger root, which puts the zeros inside
 /// the circle.
 fn matched(fc: f64, q: f64, db: f64, fs: f64) -> Biquad {
-    let a = libm::pow(10.0, db / 40.0);
+    let a = gain_root(db);
     let w0 = TAU * fc / fs;
     let zeta = 1.0 / (2.0 * a * q);
     let decay = libm::exp(-zeta * w0);
