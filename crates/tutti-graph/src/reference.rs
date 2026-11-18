@@ -1740,7 +1740,9 @@ impl<F: Float> Reference<F> {
         events: &BTreeMap<EventOut, Vec<Event>>,
     ) -> Option<RefWeight<F>> {
         let gain = graph.gains().get(&id)?;
-        let to = F::from_unit(targets[&id]);
+        // The edge's cell word is `f32`, which the executor reads; the reference
+        // reads it alike until B widens the cell.
+        let to = F::from_unit(Amplitude::new(f64::from(targets[&id].get() as f32)));
         let ran = self.lane_prev.contains_key(&id);
         let evs: Vec<Event> = match gain.source {
             Some(from) => {
