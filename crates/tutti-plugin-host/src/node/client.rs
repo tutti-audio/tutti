@@ -140,6 +140,10 @@ pub struct InProcClient<F: Loaded> {
     pub(super) refused: Tally<u64>,
     /// The audio thread's writer of `refused`, minted in `new`.
     pub(super) refused_writer: TallyWriter<u64>,
+    /// Input messages the plugin's host refused ([`ProcessOutput::input_refused`]).
+    pub(super) input_refused: Tally<u64>,
+    /// The audio thread's writer of `input_refused`, minted in `new`.
+    pub(super) input_refused_writer: TallyWriter<u64>,
     /// Who tells the plugin the rate the node is prepared at.
     pub(super) rate_delivery: RateDelivery,
     /// A fork's rate could not be told to the plugin (its `prepare` ran off the
@@ -550,6 +554,7 @@ impl<F: Loaded> InProcClient<F> {
         let lost = inner.lock().lost_flag();
         let failed = tally();
         let refused = tally();
+        let input_refused = tally();
         Self {
             inner,
             rt,
@@ -574,6 +579,8 @@ impl<F: Loaded> InProcClient<F> {
             failed,
             refused_writer: refused.writer(),
             refused,
+            input_refused_writer: input_refused.writer(),
+            input_refused,
             rate_delivery: RateDelivery::Parked,
             rate_refused: false,
             prepared_mode: tutti_graph::RenderMode::Realtime,
@@ -667,6 +674,16 @@ impl<F: Loaded> InProcClient<F> {
     /// Intended for diagnostics.
     pub fn refused_entries(&self) -> u64 {
         self.refused.get()
+    }
+
+    /// Returns how many input messages the plugin's host refused
+    /// ([`ProcessOutput::input_refused`]), since construction, in the host's unit: a MIDI
+    /// 1.0 message or a whole SysEx message, not the node's events. They are not in
+    /// [`dropped_midi_in`](crate::NodeControls::dropped_midi_in).
+    ///
+    /// Intended for diagnostics.
+    pub fn refused_inputs(&self) -> u64 {
+        self.input_refused.get()
     }
 }
 

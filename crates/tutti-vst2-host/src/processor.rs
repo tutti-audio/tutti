@@ -467,15 +467,15 @@ impl Vst2Processor {
         // `out`'s parameter points.
         out.emit_midi(emitted.iter().copied());
         out.count_params_refused(refused as usize);
-        // What was lost since the last block, each in its own counter. MIDI on the way in
-        // (staging's drops and the events of a refused piece) is lost; the plugin's output
-        // that found no room is dropped.
+        // What was lost since the last block, each in its own counter. Input the host refused
+        // (staging's drops and the events of a refused piece, in messages); the plugin's
+        // output that found no room is dropped.
         let midi_in = self.midi_in_lost_total();
         let midi_out = self.host.dropped_midi_out().get();
         let entries = self.refusals.total();
         let lost_in =
             midi_in.saturating_sub(self.told.midi_in) + std::mem::take(&mut self.refused_midi);
-        out.count_midi_lost(count_of(lost_in));
+        out.count_input_refused(count_of(lost_in));
         out.count_midi_dropped(count_of(midi_out.saturating_sub(self.told.midi_out)));
         out.count_entries_refused(count_of(entries.saturating_sub(self.told.entries)));
         self.told = LossesTold {

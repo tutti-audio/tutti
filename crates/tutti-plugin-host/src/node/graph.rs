@@ -320,6 +320,8 @@ where
                     this.chunk_midi += piece_midi as u64;
                     this.params.refused(this.out.params_refused() as u64);
                     this.refused_writer.add(this.out.entries_refused() as u64);
+                    this.input_refused_writer
+                        .add(this.out.input_refused() as u64);
                     // What the Processor shipped in this call, and lost.
                     let reported = this.out.midi_lost() as u64;
                     if reported > 0 {
@@ -461,7 +463,9 @@ where
             // The writes the plugin refused, counted dropped.
             this.params.refused(this.out.params_refused() as u64);
             this.refused_writer.add(this.out.entries_refused() as u64);
-            // What a Processor says it lost (the input MIDI it could not hand on).
+            this.input_refused_writer
+                .add(this.out.input_refused() as u64);
+            // What a Processor says it lost (none that is not chunked does).
             let reported = this.out.midi_lost() as u64;
             if reported > 0 {
                 this.params.count_midi_dropped(reported);
@@ -862,8 +866,8 @@ mod owed_tests {
         assert_eq!(fresh.dropped_sysex().get(), 1, "the cut dump, whole");
         assert_eq!(
             controls.dropped_midi_in(),
-            (3 + cut.len() - 6) as u64 + 1,
-            "the unlent block's, the cut dump's tail, and the dump the plugin's host dropped whole"
+            (3 + cut.len() - 6) as u64,
+            "the unlent block's, and the cut dump's tail"
         );
     }
 
@@ -901,10 +905,60 @@ mod owed_tests {
 
         let processor = unit.node.rt.held().expect("lent");
         assert_eq!(processor.dropped_sysex().get(), 1, "the cut dump, whole");
+        assert_eq!(controls.dropped_midi_in(), (cut.len() - 3) as u64);
+        assert_eq!(
+            unit.node.refused_inputs(),
+            1,
+            "the dump the plugin's host dropped whole, counted in its own unit"
+        );
+    }
+
+    /// **The plugin's host dropping a cut dump does not cut the next one.** A dump cut by a
+    /// reset is dropped whole by the plugin's host at the next dump's `START`; that drop is
+    /// the host's, counted in its own unit, and the node's open SysEx (the new dump, here
+    /// spanning two blocks) is not skipped for it: its `END` reaches the plugin, and no event
+    /// beyond the reset's tail counts as lost.
+    #[test]
+    fn a_host_drop_does_not_cut_the_next_dump() {
+        use tutti_graph::Node as _;
+        let (client, _handle) = load_client(
+            main_thread(),
+            tutti_fixtures::vst2_probe(),
+            SampleRate::SR_48K,
+        )
+        .unwrap_or_else(|e| panic!("in-process load of the probe: {e:?}"));
+        let controls = client.controls();
+        let mut unit = Direct::new(
+            client.bind(tutti_fixtures::tempo()),
+            SampleRate::SR_48K,
+            BLOCK,
+        );
+        let (cut, next) = dumps();
+        assert!(next.len() >= 2, "fixture: a START and an END");
+
+        unit.events(0, &cut[..3]);
+        unit.block();
+        unit.node.reset();
+        unit.events(0, &cut[3..]);
+        unit.block();
+        let lost = controls.dropped_midi_in();
+        assert_eq!(lost, (cut.len() - 3) as u64, "the reset's tail only");
+
+        unit.events(0, &next[..1]);
+        unit.block();
+        unit.events(0, &next[1..]);
+        unit.block();
+
         assert_eq!(
             controls.dropped_midi_in(),
-            (cut.len() - 3) as u64 + 1,
-            "the skipped tail, and the dump the plugin's host dropped whole"
+            lost,
+            "the new dump's END was not skipped for the host's drop"
+        );
+        assert_eq!(unit.node.refused_inputs(), 1, "the cut dump, whole");
+        assert_eq!(
+            unit.node.rt.held().expect("lent").dropped_sysex().get(),
+            1,
+            "the host's own count"
         );
     }
 }

@@ -596,9 +596,9 @@ fn a_block_reports_the_midi_it_lost_once() {
     };
     let events = [at(0), at(1), at(2)];
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
-    assert_eq!(out.midi_lost(), 2, "the two of other Groups");
+    assert_eq!(out.input_refused(), 2, "the two of other Groups");
     let out = render_out(&mut processor, &ProcessContext::new());
-    assert_eq!(out.midi_lost(), 0, "nothing new");
+    assert_eq!(out.input_refused(), 0, "nothing new");
     drop(rejoin(processor, controller));
 }
 
@@ -614,15 +614,15 @@ fn a_refused_block_reports_its_midi_and_its_refused_entries() {
         midi::note_on(MidiChannel::FIRST, 60, 0x4000),
     )];
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
-    assert_eq!(out.midi_lost(), 0, "a live plugin hears it");
+    assert_eq!(out.input_refused(), 0, "a live plugin hears it");
     assert_eq!(out.entries_refused(), 0);
 
     drop(controller);
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
-    assert_eq!(out.midi_lost(), 1, "a closed plugin hears nothing");
+    assert_eq!(out.input_refused(), 1, "a closed plugin hears nothing");
     assert!(out.entries_refused() > 0);
     let out = render_out(&mut processor, &ProcessContext::new());
-    assert_eq!(out.midi_lost(), 0, "no MIDI, none lost");
+    assert_eq!(out.input_refused(), 0, "no MIDI, none lost");
     assert!(out.entries_refused() > 0, "and the refusal still shows");
 }
 
@@ -647,7 +647,11 @@ fn a_refused_piece_counts_each_lost_event_once() {
 
     drop(controller);
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
-    assert_eq!(out.midi_lost(), 3, "the Group 1 note, the SysEx, the note");
+    assert_eq!(
+        out.input_refused(),
+        3,
+        "the Group 1 note, the SysEx, the note"
+    );
 }
 
 /// **Losses counted between activations are reported by the next block**: a reset drops the
@@ -664,7 +668,7 @@ fn a_loss_between_activations_is_reported_once() {
         .expect("a START");
     let events = [(Offset::of(Samples(0), Samples(BLOCK)), start)];
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
-    assert_eq!(out.midi_lost(), 0, "open across the block, not lost");
+    assert_eq!(out.input_refused(), 0, "open across the block, not lost");
 
     processor.reset();
     let loaded = rejoin(processor, controller);
@@ -672,9 +676,9 @@ fn a_loss_between_activations_is_reported_once() {
         .activate(main_thread(), prepare())
         .expect("activates again");
     let out = render_out(&mut processor, &ProcessContext::new());
-    assert_eq!(out.midi_lost(), 1, "the SysEx the reset dropped");
+    assert_eq!(out.input_refused(), 1, "the SysEx the reset dropped");
     let out = render_out(&mut processor, &ProcessContext::new());
-    assert_eq!(out.midi_lost(), 0, "told once");
+    assert_eq!(out.input_refused(), 0, "told once");
     drop(rejoin(processor, controller));
 }
 
