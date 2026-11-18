@@ -22,7 +22,9 @@
 //! - `as_f32`: `as f32`. Text cannot tell a float cast from an integer one, so the cast is
 //!   refused outright; an integer-to-float conversion goes through a named helper;
 //! - `lit`: a `::lit(` or `.lit(` call whose argument is not a numeric literal.
-//!   `F::lit(0.5)` is allowed; `f64::from` is lossless and is never refused;
+//!   `F::lit(0.5)` is allowed; `f64::from` is lossless and is never refused.
+//!   `F::from_unit(q)` and `F::from_design(x)` are the named crossings and are never
+//!   refused; review holds `from_design` to a kernel's design function;
 //! - `plain_node`: an `impl Node for X` or `impl Node<f32> for X` with no `F`, an f32-only
 //!   node (event-only nodes included);
 //! - `fn_twin`: a `pub fn` named `*_f32` or `*_f64`;
@@ -70,7 +72,7 @@ pub(super) const MIN_FILES: usize = 500;
 pub(super) const EDGES: &[(&str, &str)] = &[
     (
         "crates/tutti-units/src/real.rs",
-        "`Real::from_unit` and `Real::lit`: the quantity-to-data crossing",
+        "`Real::from_unit`, `Real::from_design` and `Real::lit`: the quantity-to-data crossing",
     ),
     (
         "crates/tutti-buffers/src/sample.rs",
@@ -744,6 +746,14 @@ mod tests {
             }
         }
         check(&Mem::with(&all), E, 0)
+    }
+
+    #[test]
+    fn the_named_crossings_are_no_site() {
+        assert!(
+            forms("fn d() { let g = F::from_design(k.tan()); let c = F::from_unit(hz); }")
+                .is_empty()
+        );
     }
 
     #[test]
