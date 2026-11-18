@@ -49,7 +49,10 @@ pub(crate) fn wide_signal(frames: usize) -> Vec<f64> {
 #[track_caller]
 pub(crate) fn assert_close_f64(got: &[f64], want: &[f64], tolerance: f64) {
     assert_eq!(got.len(), want.len(), "block lengths differ");
-    if let Some(i) = (0..got.len()).find(|&i| !((got[i] - want[i]).abs() <= tolerance)) {
+    if let Some(i) = (0..got.len()).find(|&i| {
+        let diff = (got[i] - want[i]).abs();
+        diff.is_nan() || diff > tolerance
+    }) {
         panic!(
             "frame {i}: got {} want {} (|diff| {:e} over tolerance {tolerance:e})",
             got[i],
