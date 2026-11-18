@@ -1,5 +1,10 @@
 use super::*;
 
+/// The position `frames` frames back, to the quantum.
+fn pos(frames: f64) -> ReadPosition {
+    ReadPosition::from_count((frames * ReadPosition::COUNTS_PER_FRAME).round() as u64)
+}
+
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
 
@@ -10,7 +15,7 @@ fn test_delay_line_basic() {
     dl.push_sample(0.0);
     dl.push_sample(0.0);
 
-    let val = dl.read_sample(2.0, InterpolationMode::None);
+    let val = dl.read_sample(pos(2.0), InterpolationMode::None);
     assert_eq!(val, 1.0);
 }
 
@@ -26,7 +31,7 @@ fn an_integer_read_delays_by_exactly_that_many_frames() {
             dl.push_sample(if frame == at { 1.0 } else { 0.0 });
             for d in 0..=MAX {
                 let want = if frame == at + d { 1.0 } else { 0.0 };
-                let got = dl.read_sample(d as f32, InterpolationMode::None);
+                let got = dl.read_sample(pos(d as f64), InterpolationMode::None);
                 assert_eq!(got, want, "impulse at {at}, frame {frame}, delay {d}");
             }
         }
@@ -40,7 +45,7 @@ fn test_delay_line_linear_interpolation() {
     dl.push_sample(1.0);
     dl.push_sample(0.0);
 
-    let val = dl.read_sample(1.5, InterpolationMode::Linear);
+    let val = dl.read_sample(pos(1.5), InterpolationMode::Linear);
     assert_eq!(val, 0.5);
 }
 
@@ -50,7 +55,7 @@ fn test_delay_line_cubic_interpolation() {
     for i in 0..5 {
         dl.push_sample(i as f32);
     }
-    let val = dl.read_sample(1.5, InterpolationMode::CubicHermite);
+    let val = dl.read_sample(pos(1.5), InterpolationMode::CubicHermite);
     // Between samples 3 and 2 (delay 1 = sample 3, delay 2 = sample 2)
     assert!(
         val > 2.0 && val < 4.0,
@@ -64,7 +69,7 @@ fn test_delay_line_reset() {
     dl.push_sample(1.0);
     dl.push_sample(1.0);
     dl.reset();
-    let val = dl.read_sample(1.0, InterpolationMode::None);
+    let val = dl.read_sample(pos(1.0), InterpolationMode::None);
     assert_eq!(val, 0.0, "after a reset the line reads silence");
 }
 
@@ -100,7 +105,11 @@ fn the_two_readers_agree_on_a_whole_delay() {
                 InterpolationMode::Linear,
                 InterpolationMode::CubicHermite,
             ] {
-                assert_eq!(line.read_sample(d as f32, mode), whole, "{mode:?} at {d}");
+                assert_eq!(
+                    line.read_sample(pos(d as f64), mode),
+                    whole,
+                    "{mode:?} at {d}"
+                );
             }
         }
         assert_eq!(line.read_whole(MAX + 5), line.read_whole(MAX));
@@ -137,7 +146,7 @@ fn an_f64_line_returns_a_wide_signal_d_frames_later_exactly() {
                 .iter()
                 .map(|&x| {
                     line.push_sample(x);
-                    line.read_sample(d as f64, mode)
+                    line.read_sample(pos(d as f64), mode)
                 })
                 .collect();
             let want: Vec<f64> = (0..signal.len())
@@ -158,7 +167,7 @@ fn an_f64_delay_step_without_feedback_returns_the_input_d_frames_later() {
     let mut line = DelayLine::<f64>::new(Samples(8));
     let got: Vec<f64> = signal
         .iter()
-        .map(|&x| delay_step(&mut line, x, D as f64, 0.0, InterpolationMode::Linear))
+        .map(|&x| delay_step(&mut line, x, pos(D as f64), 0.0, InterpolationMode::Linear))
         .collect();
     let want: Vec<f64> = (0..signal.len())
         .map(|i| if i >= D { signal[i - D] } else { 0.0 })
@@ -178,7 +187,7 @@ fn an_f64_delay_step_with_feedback_follows_the_closed_form_recursion() {
     let mut line = DelayLine::<f64>::new(Samples(8));
     let got: Vec<f64> = signal
         .iter()
-        .map(|&x| delay_step(&mut line, x, D as f64, FB, InterpolationMode::Linear))
+        .map(|&x| delay_step(&mut line, x, pos(D as f64), FB, InterpolationMode::Linear))
         .collect();
     let mut w = vec![0.0_f64; signal.len()];
     for n in 0..signal.len() {
@@ -191,7 +200,7 @@ fn an_f64_delay_step_with_feedback_follows_the_closed_form_recursion() {
 }
 
 /// A linear read at `100000.3` frames on a long `f64` line is the lerp of its two
-/// wide slots at the `f64` fraction, to `2^-45`.
+/// wide slots at the position's own fraction, to `2^-45`.
 #[test]
 fn an_f64_line_read_at_a_wide_position_is_the_lerp_of_the_wide_slots() {
     use tutti_fixtures::signal::wide_signal;
@@ -199,11 +208,11 @@ fn an_f64_line_read_at_a_wide_position_is_the_lerp_of_the_wide_slots() {
     let signal = wide_signal(N);
     let mut line = DelayLine::<f64>::new(Samples(N));
     signal.iter().for_each(|&x| line.push_sample(x));
-    let pos = 100_000.3_f64;
-    let frac = pos - 100_000.0;
+    let at = pos(100_000.3);
+    let frac = (at.get() & 0xffff_ffff) as f64 / ReadPosition::COUNTS_PER_FRAME;
     let (a, b) = (signal[N - 1 - 100_000], signal[N - 1 - 100_001]);
     let want = a + frac * (b - a);
-    let got = line.read_sample(pos, InterpolationMode::Linear);
+    let got = line.read_sample(at, InterpolationMode::Linear);
     assert!(
         (got - want).abs() <= 2f64.powi(-45),
         "got {got} want {want}"

@@ -127,7 +127,8 @@ pub use units::{
     BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth, Bpm, BpmOutOfRange, Cents,
     CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Db, Depth,
     DepthOutOfRange, Direction, Drive, Elevation, Feedback, Gain, HoldFactor, Hz, Mix, Pan, Phase,
-    PhaseIncrement, PlaybackRate, Q, Radians, ReadRate, Resonance, SamplePosition, SampleRate,
-    SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Seconds, Semitones, Spread, SrcRatio,
-    StereoBalance, StereoWidth, StretchFactor, Unit, Velocity,
+    PhaseIncrement, PhaseStep, PlaybackRate, Q, Radians, ReadPosition, ReadRate, Resonance,
+    RunningPhase, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
+    SampleSpanOutOfRange, Seconds, Semitones, Spread, SrcRatio, StereoBalance, StereoWidth,
+    StretchFactor, Unit, Velocity,
 };

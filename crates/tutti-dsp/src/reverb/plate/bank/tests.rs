@@ -245,7 +245,12 @@ fn a_lattice_has_the_direct_term_minus_g_and_unit_energy() {
         let mut ring = line(Samples(d));
         let y: Vec<f32> = (0..80 * d)
             .map(|n| {
-                let y = lattice(&mut ring, if n == 0 { 1.0 } else { 0.0 }, g, d as f32);
+                let y = lattice(
+                    &mut ring,
+                    if n == 0 { 1.0 } else { 0.0 },
+                    g,
+                    ReadPosition::from_frames(Samples(d)),
+                );
                 ring.advance();
                 y
             })
@@ -351,7 +356,7 @@ fn an_f64_lattice_is_the_all_pass_equation() {
     let got: Vec<f64> = x
         .iter()
         .map(|&x| {
-            let y = lattice(&mut ring, x, g, d as f64);
+            let y = lattice(&mut ring, x, g, ReadPosition::from_frames(Samples(d)));
             ring.advance();
             y
         })

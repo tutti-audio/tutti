@@ -18,7 +18,7 @@ pub(crate) use taps::{ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
 
 use tutti_buffers::Float;
-use tutti_units::Samples;
+use tutti_units::{ReadPosition, Samples};
 
 /// How a fractional delay position is turned into a sample.
 ///
@@ -93,41 +93,39 @@ impl<F: Float> DelayLine<F> {
         self.ring.push(sample);
     }
 
-    /// Reads the line `delay_samples` frames back from the newest write,
-    /// interpolating per `mode`.
+    /// Reads the line `delay` frames back from the newest write, interpolating per `mode`.
     ///
-    /// `delay_samples` is a **fractional frame count**, not seconds: the caller
-    /// converts ([`SampleSpan::from_seconds`](tutti_units::SampleSpan::from_seconds)),
-    /// because keeping the fraction is the whole point of an interpolated read.
-    /// `0.0` is the sample just pushed. It is a bare `F`, not a unit: no unit covers a
-    /// fractional frame count at the line's precision (`SampleSpan` is `f64`), and this is the
-    /// per-sample kernel read, which a caller lowers its span to once per block (or once per
-    /// frame for a driven delay).
+    /// `delay` is a [`ReadPosition`]: a fractional frame count held to `2^-32` frame at any
+    /// distance, built once per block from a time ([`ReadPosition::of`]) and moved per sample
+    /// by [`Float::offset_position`]. `0` is the sample just pushed. The
+    /// interpolator takes the position's whole frames as the index and its fraction as an
+    /// `F` weight ([`Float::split_position`]).
     ///
-    /// The delay is clamped to `0.0..=max_delay_samples`, so an over-long
+    /// The delay is clamped to `0..=max_delay_samples`, so an over-long
     /// request shortens silently rather than panicking. Does not allocate.
     #[inline]
-    pub fn read_sample(&self, delay_samples: F, mode: InterpolationMode) -> F {
+    pub fn read_sample(&self, delay: ReadPosition, mode: InterpolationMode) -> F {
         // Defensive only: a caller holds its delay inside the line, so this clamp is
         // reached by a caller that does not.
-        let delay = delay_samples.clamp(F::ZERO, F::from_f64(self.max_delay_samples as f64));
+        let delay = delay.min(ReadPosition::from_frames(Samples::new(
+            self.max_delay_samples,
+        )));
         match mode {
             InterpolationMode::None => {
-                let idx = delay.to_f64().round() as usize;
-                self.read_whole(idx)
+                // The nearest whole slot: half a frame on, truncated.
+                let half = ReadPosition::from_count(delay.get().saturating_add(1 << 31));
+                self.read_whole(half.frames().get())
             }
             InterpolationMode::Linear => {
-                let floor_f = delay.floor();
-                let floor = floor_f.to_f64() as usize;
-                let frac = delay - floor_f;
+                let (floor, frac) = F::split_position(delay);
+                let floor = floor.get();
                 let s0 = self.read_whole(floor);
                 let s1 = self.read_whole(floor + 1);
                 s0 + frac * (s1 - s0)
             }
             InterpolationMode::CubicHermite => {
-                let floor_f = delay.floor();
-                let floor = floor_f.to_f64() as usize;
-                let frac = delay - floor_f;
+                let (floor, frac) = F::split_position(delay);
+                let floor = floor.get();
                 let sm1 = self.read_whole(floor.saturating_sub(1));
                 let s0 = self.read_whole(floor);
                 let s1 = self.read_whole(floor + 1);
@@ -160,20 +158,19 @@ impl<F: Float> DelayLine<F> {
 /// One sample of one uncoupled channel: read the feedback tap, write the line,
 /// read the output tap (the wet sample).
 ///
-/// The delay `d` and the feedback `fb` are the raw `F` of a
-/// [`SampleSpan`](tutti_units::SampleSpan) of frames and a
+/// The delay `d` is a [`ReadPosition`] and the feedback `fb` the raw `F` of a
 /// [`Feedback`](tutti_units::Feedback): this is the per-frame read, called once per sample
-/// per channel, and its caller lowers its span to the position once per frame after the
-/// clamp that makes it a span (a delay glide's value is already an `F` of frames).
+/// per channel, and its caller holds the delay as a position and lowers the feedback once
+/// per frame after the clamp that makes it one.
 #[inline(always)]
 pub fn delay_step<F: Float>(
     line: &mut DelayLine<F>,
     x: F,
-    d: F,
+    d: ReadPosition,
     fb: F,
     interp: InterpolationMode,
 ) -> F {
-    let tap = line.read_sample((d.max(F::ONE) - F::ONE).max(F::ZERO), interp);
+    let tap = line.read_sample(d.saturating_sub(Samples::new(1)), interp);
     line.push_sample(x + tap * fb);
     line.read_sample(d, interp)
 }

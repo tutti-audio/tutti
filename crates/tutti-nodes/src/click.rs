@@ -40,7 +40,9 @@ use tutti_transport::{ProjectMeter, Transport};
 use tutti_types::AtomicF64;
 use tutti_types::BusTopology;
 use tutti_units::Tail;
-use tutti_units::{Amplitude, Beat, Hz, Phase, PhaseIncrement, Samples, Seconds};
+use tutti_units::{
+    Amplitude, Beat, Hz, Phase, PhaseIncrement, PhaseStep, RunningPhase, Samples, Seconds,
+};
 
 /// How far two beat onsets must differ to count as different beats.
 ///
@@ -334,9 +336,9 @@ impl ClickNode {
         };
         let (attack, hold_end) = (ATTACK.get(), HOLD_END.get());
         let release_len = CLICK_LEN.get() - hold_end;
-        let phase_inc = PhaseIncrement::per_sample(freq, sample_rate);
+        let phase_step = PhaseStep::from(PhaseIncrement::per_sample(freq, sample_rate));
 
-        let mut phase = Phase::START;
+        let mut phase = RunningPhase::START;
         (0..num_samples)
             .map(|i| {
                 let t = Samples(i).to_seconds(sample_rate).get();
@@ -348,8 +350,9 @@ impl ClickNode {
                     1.0 - (t - hold_end) / release_len
                 };
                 // The click is stored as `f32`: each sample narrows into it.
-                let sample = (phase.sin() * env * accent_volume.get()) as f32;
-                phase = phase.advance(phase_inc);
+                let sample =
+                    (Phase(f64::from_phase(phase)).sin() * env * accent_volume.get()) as f32;
+                phase = phase.advance(phase_step);
                 sample
             })
             .collect()

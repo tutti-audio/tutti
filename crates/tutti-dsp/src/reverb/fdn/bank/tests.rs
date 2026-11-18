@@ -1,5 +1,7 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
+use tutti_units::{
+    Db, Depth, Hz, Mix, ReadPosition, SampleRate, Samples, Seconds, StereoWidth, Tail,
+};
 
 use super::*;
 use crate::MaxDecay;
@@ -570,10 +572,10 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
             // the blend's, which is linear in the gain and not in its logarithm: a few percent off; after it, exact.
             let tol = if chunk < ramp_chunks { 0.15 } else { 1e-3 };
             for (g, t) in gains.iter().zip(designed) {
-                let rt60 = 60.0 * f64::from(now) / (RATE.get() * -20.0 * g.log10());
+                let rt60 = 60.0 * now.span().get() / (RATE.get() * -20.0 * g.log10());
                 assert!(
                     (rt60 - t).abs() < tol * t,
-                    "chunk {chunk}, line {j} at {now} of {to} frames: {rt60} s against {t}"
+                    "chunk {chunk}, line {j} at {now:?} of {to:?}: {rt60} s against {t}"
                 );
             }
             in_flight += usize::from(now != to);
@@ -631,10 +633,10 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
     let (a, b) = (still(|c| c.size = Mix(0.2)), still(|c| c.size = Mix(0.3)));
     let (mut bank, mut glides) = landed(&l, RATE, &a);
     let (from, to) = (
-        fdn_of(&design(&l, RATE, &a)).lines[3].length.get() as f32,
-        fdn_of(&design(&l, RATE, &b)).lines[3].length.get() as f32,
+        ReadPosition::from_span(fdn_of(&design(&l, RATE, &a)).lines[3].length),
+        ReadPosition::from_span(fdn_of(&design(&l, RATE, &b)).lines[3].length),
     );
-    let steps = ((to - from) / 0.5).ceil() as usize;
+    let steps = ((to.span().get() - from.span().get()) / 0.5).ceil() as usize;
     assert!(steps > 100, "a long way: {steps} chunks");
     bank.aim(&mut glides, &b);
     let mut last = from;
@@ -646,7 +648,8 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
             FdnBank::<f32>::CHUNK,
         );
         let now = glides.len[3].now();
-        assert!(now - last <= 0.5 + 1e-3, "chunk {chunk}: {last} to {now}");
+        let moved = now.span().get() - last.span().get();
+        assert!(moved <= 0.5 + 1e-3, "chunk {chunk}: moved {moved}");
         assert!(now > last);
         last = now;
         assert_eq!(
@@ -664,7 +667,7 @@ fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
     let l = layout(8, false);
     let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
     bank.aim(&mut glides, &still(|c| c.pre_delay = Seconds(0.1)));
-    let mut last = 0.0f32;
+    let mut last = ReadPosition::START;
     for chunk in 1..=2_400 {
         run(
             &mut bank,
@@ -673,9 +676,14 @@ fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
             FdnBank::<f32>::CHUNK,
         );
         let now = glides.pre_len.now();
-        assert!(now - last <= 2.0 + 1e-3, "chunk {chunk}: {last} to {now}");
+        let moved = now.span().get() - last.span().get();
+        assert!(moved <= 2.0 + 1e-3, "chunk {chunk}: moved {moved}");
         last = now;
-        assert_eq!(now == 4_800.0, chunk == 2_400, "chunk {chunk}: {now}");
+        assert_eq!(
+            now == ReadPosition::from_frames(Samples(4_800)),
+            chunk == 2_400,
+            "chunk {chunk}: {now:?}"
+        );
     }
 }
 
