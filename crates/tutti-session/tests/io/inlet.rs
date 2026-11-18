@@ -1,6 +1,7 @@
 //! `Graph::open_inlet`: audio a thread of your own pushes into the graph, the
 //! mirror of the tap.
 
+use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::InletRing;
 use tutti_session::{InletError, OutPort, Root, Session};
@@ -37,12 +38,18 @@ fn pushed_frames_reach_the_outputs_in_order() {
         .expect("the sources exist");
     let _ = s.update();
 
-    producer.push_interleaved(&[1.0, -1.0, 2.0, -2.0, 3.0, -3.0]);
+    producer.push_interleaved(
+        Interleaved::new(&[1.0, -1.0, 2.0, -2.0, 3.0, -3.0], producer.layout()).unwrap(),
+    );
     let mut block = vec![0.0f32; 8 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
 
     let mut got = vec![f32::NAN; 8 * 2];
-    assert_eq!(tap.pop_into(&mut got), Samples(8));
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
+        Samples(8)
+    );
     assert_eq!(
         got,
         [

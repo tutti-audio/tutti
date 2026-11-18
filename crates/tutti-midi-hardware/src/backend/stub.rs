@@ -5,7 +5,7 @@
 //! # It reports "unsupported", not "no devices"
 //!
 //! Enumeration returns an empty list — there genuinely are none — but *opening*
-//! returns [`Error::Unsupported`] rather than a not-found error. The distinction
+//! returns [`MidiHardwareError::Unsupported`] rather than a not-found error. The distinction
 //! matters to whoever renders it: "no MIDI devices" tells a Windows user to
 //! check their cables, when the truth is that this build has no MIDI backend at
 //! all. One is a hardware problem, the other is a build fact.
@@ -21,7 +21,7 @@ use crate::InputProducerHandle;
 use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, NoWatch, Watch};
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
 use tutti_midi_device::EndpointId;
 
@@ -58,11 +58,11 @@ impl MidiEndpoints for StubEndpoints {
         _id: EndpointId,
         _producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        Err(Error::Unsupported(REASON))
+        Err(MidiHardwareError::Unsupported(REASON))
     }
 
     fn open_output(&self, _id: EndpointId) -> Result<Box<dyn DeviceOut>> {
-        Err(Error::Unsupported(REASON))
+        Err(MidiHardwareError::Unsupported(REASON))
     }
 }
 
@@ -73,7 +73,7 @@ const VIRTUAL_REASON: &str = "no virtual MIDI endpoints on this platform (no MID
 pub(crate) fn open_virtual_source(
     _spec: &VirtualSpec,
 ) -> Result<(Box<dyn SourceBackend>, VirtualProtocol)> {
-    Err(Error::Unsupported(VIRTUAL_REASON))
+    Err(MidiHardwareError::Unsupported(VIRTUAL_REASON))
 }
 
 /// Refuses: there is no virtual destination to publish.
@@ -81,7 +81,7 @@ pub(crate) fn open_virtual_destination(
     _spec: &VirtualSpec,
     _producer: InputProducerHandle,
 ) -> Result<(Box<dyn InputConnection>, VirtualProtocol)> {
-    Err(Error::Unsupported(VIRTUAL_REASON))
+    Err(MidiHardwareError::Unsupported(VIRTUAL_REASON))
 }
 
 #[cfg(test)]

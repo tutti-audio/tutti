@@ -81,6 +81,11 @@ pub(super) fn check_gain(gain: Db) -> Result<f64, SosError> {
     }
 }
 
+/// The root of the amplitude gain of `db` decibels, `10^(db / 40)`: the `A` of a bell and a tilt.
+pub(super) fn gain_root(db: f64) -> f64 {
+    Db::to_amplitude_f64(db / 2.0)
+}
+
 /// A Butterworth filter, described without a sample rate: maximally flat in the passband,
 /// `|H|^2 = 1 / (1 + (tan(w/2) / g)^(2N))` for the order `N` and `g = tan(pi fc / fs)`
 /// (the analog `1 / (1 + (w / wc)^(2N))` at the prewarped frequency), `-3 dB` at the

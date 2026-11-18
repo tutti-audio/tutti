@@ -1,17 +1,16 @@
 //! FFT cross-correlation of two buffers.
 //!
-//! The same Wiener-Khinchin route the pitch detector takes for
-//! autocorrelation, for two signals: zero-pad both to a power of two that holds
-//! the whole linear result, multiply one spectrum by the conjugate of the
-//! other, transform back. Cost is `O(n log n)` rather than the `O(n * lags)` of
-//! the direct sum. A caller that wants a weighted variant (phase transform)
-//! reshapes the cross-spectrum through [`cross_correlate_shaped`].
+//! Both inputs are zero-padded to a power of two that holds the whole linear
+//! result and correlated by [`Correlator`], `O(n log n)` rather than the
+//! `O(n * lags)` of the direct sum. A caller that wants a weighted variant
+//! (phase transform) reshapes the cross-spectrum through [`cross_correlate_shaped`].
 
 use tutti_buffers::{Mono, MonoMut, Sample};
 use tutti_types::Samples;
 
 use crate::convert::to_f32;
 use tutti_dsp::Complex32;
+use tutti_dsp::Correlator;
 use tutti_dsp::FftScratch;
 
 /// The linear cross-correlation of two buffers, at every lag they overlap.
@@ -123,25 +122,14 @@ pub(crate) fn cross_correlate_shaped(
     let len = a.len() + b.len() - 1;
     // At least 2: a one-point real transform has no distinct Nyquist bin.
     let size = len.next_power_of_two().max(2);
-    let bins = size / 2 + 1;
-    let ones = vec![1.0f32; size];
-
-    let spectrum = |signal: &[f32], fft: &mut FftScratch| {
-        let mut padded = vec![0.0f32; size];
-        padded[..signal.len()].copy_from_slice(signal);
-        let mut out = vec![Complex32::default(); bins];
-        fft.forward(Mono::new(&padded), &ones, &mut out);
-        out
-    };
-    let mut cross = spectrum(a, fft);
-    let other = spectrum(b, fft);
-    for (x, y) in cross.iter_mut().zip(&other) {
-        *x *= y.conj();
-    }
-    shape(&mut cross);
-
     let mut circular = vec![0.0f32; size];
-    fft.inverse(&cross, MonoMut::new(&mut circular));
+    Correlator::new().correlate(
+        Mono::new(a),
+        Mono::new(b),
+        fft,
+        shape,
+        MonoMut::new(&mut circular),
+    );
 
     // Negative lags wrapped to the end of the circular result; lay them out in
     // front of the non-negative ones.

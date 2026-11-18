@@ -222,7 +222,7 @@ pub use dynamics::{
     MultibandLanes, MultibandSettings, PeakDetection, TransientBank, TransientControls,
     TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
-pub use fft::{Complex, Complex32, Complex64, FftScratch, RealFft};
+pub use fft::{Complex, Complex32, Complex64, Correlator, FftScratch, RealFft};
 pub use filter::{
     Biquad, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
     CrossoverModel, DirectForm1, EnvelopeFilterBank, EnvelopeFilterControls, LadderBank,
@@ -232,7 +232,7 @@ pub use filter::{
 };
 pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
 pub use glide::{Glide, Lerp, Steps};
-pub use interp::{cubic_hermite, lerp};
+pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_coeff, sweep_hz};
 pub use modulation::mod_delay::{

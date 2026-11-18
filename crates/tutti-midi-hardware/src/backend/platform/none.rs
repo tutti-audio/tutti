@@ -26,6 +26,6 @@ pub(crate) fn open_virtual_destination(
     super::stub::open_virtual_destination(spec, producer)
 }
 
-/// No platform call exists to fail, so [`Error::Os`](crate::Error::Os) is never
+/// No platform call exists to fail, so [`MidiHardwareError::Os`] is never
 /// made.
 pub(crate) type OsError = std::convert::Infallible;

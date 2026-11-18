@@ -54,16 +54,29 @@ impl<F: Float + FftNum> FftScratch<F> {
     /// parts of the DC bin (and, for an even `size`, the Nyquist bin) are
     /// exactly zero.
     pub fn forward(&mut self, input: Mono<'_, F>, window: &[F], out: &mut [Complex<F>]) {
-        let input = input.samples();
-        let size = input.len();
-        debug_assert_eq!(window.len(), size);
+        debug_assert_eq!(window.len(), input.samples().len());
+        self.real.clear();
+        self.real
+            .extend(input.samples().iter().zip(window).map(|(&s, &w)| s * w));
+        self.transform(out);
+    }
+
+    /// Real input → complex bins, `DC..=Nyquist`, with no window: the
+    /// transform of `input` itself, as a rectangular window of ones gives.
+    ///
+    /// `out` receives `size / 2 + 1` bins, as [`forward`](Self::forward) writes.
+    pub fn forward_unwindowed(&mut self, input: Mono<'_, F>, out: &mut [Complex<F>]) {
+        self.real.clear();
+        self.real.extend_from_slice(input.samples());
+        self.transform(out);
+    }
+
+    /// The forward transform of the `real` buffer into `out`.
+    fn transform(&mut self, out: &mut [Complex<F>]) {
+        let size = self.real.len();
         debug_assert_eq!(out.len(), size / 2 + 1);
 
         let fft = plan_for(&mut self.plan, size);
-        self.real.clear();
-        self.real
-            .extend(input.iter().zip(window).map(|(&s, &w)| s * w));
-
         let needed = fft.scratch_len();
         if self.scratch.len() < needed {
             self.scratch.resize(needed, Complex::new(F::ZERO, F::ZERO));

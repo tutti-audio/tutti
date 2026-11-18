@@ -34,7 +34,7 @@
 //! times are the bank's build. The shaper has no latency and no tail: it only scales.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{Db, SampleRate, Seconds};
+use tutti_types::{Amplitude, Db, SampleRate, Seconds};
 
 use super::shared::{CHUNK, Follower, GAIN_GLIDE, floored, key_levels};
 use crate::delay::finite_or;
@@ -54,17 +54,17 @@ pub struct TransientControls {
 impl TransientControls {
     /// No change: both amounts 0 dB.
     pub const DEFAULT: Self = Self {
-        attack: Db(0.0),
-        sustain: Db(0.0),
+        attack: Db::UNITY,
+        sustain: Db::UNITY,
     };
 
     /// These controls within range, a non-finite amount as the default's.
     fn designed(self) -> Amounts {
         let amount = |db: Db| {
-            finite_or(db.get(), 0.0).clamp(
+            Db(finite_or(db.get(), Db::UNITY.get()).clamp(
                 -TransientBank::MAX_AMOUNT.get(),
                 TransientBank::MAX_AMOUNT.get(),
-            )
+            ))
         };
         Amounts {
             attack: amount(self.attack),
@@ -82,8 +82,8 @@ impl Default for TransientControls {
 /// The two amounts in dB, as a pair a glide blends.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Amounts {
-    attack: f32,
-    sustain: f32,
+    attack: Db,
+    sustain: Db,
 }
 
 impl Lerp for Amounts {
@@ -91,8 +91,8 @@ impl Lerp for Amounts {
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
         let t = k as f32 / n as f32;
         Self {
-            attack: crate::lerp(self.attack, to.attack, t),
-            sustain: crate::lerp(self.sustain, to.sustain, t),
+            attack: Db(crate::lerp(self.attack.get(), to.attack.get(), t)),
+            sustain: Db(crate::lerp(self.sustain.get(), to.sustain.get(), t)),
         }
     }
 }
@@ -100,13 +100,13 @@ impl Lerp for Amounts {
 /// The gain in dB at the envelopes `fast` and `slow` (both at least 0 and finite) for the
 /// amounts `attack` and `sustain`: the closed form of the [module](self).
 #[inline]
-fn gain_db(fast: f32, slow: f32, attack: f32, sustain: f32) -> f32 {
+fn gain_db(fast: Amplitude, slow: Amplitude, attack: Db, sustain: Db) -> Db {
     if fast > slow {
-        attack * (1.0 - slow / fast)
+        Db(attack.get() * (1.0 - slow.get() / fast.get()))
     } else if slow > fast {
-        sustain * (1.0 - fast / slow)
+        Db(sustain.get() * (1.0 - fast.get() / slow.get()))
     } else {
-        0.0
+        Db::UNITY
     }
 }
 
@@ -120,7 +120,7 @@ pub struct TransientBank {
     fast: Follower,
     slow: Follower,
     /// The fast and the slow envelope, both at 0 until a level is heard.
-    envelopes: (f32, f32),
+    envelopes: (Amplitude, Amplitude),
     /// The amounts in dB, gliding over [`GAIN_GLIDE`].
     amounts: Glide<Amounts>,
     steps: u32,
@@ -139,7 +139,7 @@ impl TransientBank {
         Self {
             fast: follower(fast),
             slow: follower(slow),
-            envelopes: (0.0, 0.0),
+            envelopes: (Amplitude::SILENT, Amplitude::SILENT),
             amounts: Glide::landed(TransientControls::DEFAULT.designed()),
             steps,
         }
@@ -147,7 +147,7 @@ impl TransientBank {
 
     /// Back to silence: both envelopes at 0 and the amounts landed. No allocation.
     pub fn reset(&mut self) {
-        self.envelopes = (0.0, 0.0);
+        self.envelopes = (Amplitude::SILENT, Amplitude::SILENT);
         self.amounts.settle();
     }
 
@@ -191,10 +191,11 @@ impl TransientBank {
                 } else {
                     self.amounts.target()
                 };
-                let fast = self.fast.follow(self.envelopes.0, *g);
-                let slow = self.slow.follow(self.envelopes.1, *g);
+                let level = Amplitude::new(*g);
+                let fast = self.fast.follow(self.envelopes.0, level);
+                let slow = self.slow.follow(self.envelopes.1, level);
                 self.envelopes = (fast, slow);
-                *g = Db::new(gain_db(fast, slow, a.attack, a.sustain))
+                *g = gain_db(fast, slow, a.attack, a.sustain)
                     .to_amplitude()
                     .get();
             }

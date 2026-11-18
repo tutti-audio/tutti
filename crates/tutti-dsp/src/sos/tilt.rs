@@ -4,7 +4,7 @@
 use tutti_types::{Db, Hz, SampleRate, Seconds};
 
 use super::MAX_TAIL_FRAMES;
-use super::butterworth::{check_cutoff, check_gain};
+use super::butterworth::{check_cutoff, check_gain, gain_root};
 use super::{Sos, SosError};
 use crate::{Biquad, Ring};
 
@@ -58,7 +58,7 @@ impl Tilt {
     ) -> Result<(), SosError> {
         let fc = check_cutoff(center, rate)?;
         let db = check_gain(self.gain)?;
-        let a = libm::pow(10.0, db / 40.0);
+        let a = gain_root(db);
         let g = libm::tan(core::f64::consts::PI * fc / rate.get());
         // `s = (1 - z^-1) / (g (1 + z^-1))` into `(A s + 1) / (s + A)`.
         let d = 1.0 + a * g;
@@ -91,7 +91,7 @@ impl Tilt {
     /// As [`design`](Self::design).
     pub fn ring_out(&self, center: Hz, rate: SampleRate, floor: Db) -> Result<Ring, SosError> {
         let fc = check_cutoff(center, rate)?;
-        let a = libm::pow(10.0, check_gain(self.gain)? / 40.0);
+        let a = gain_root(check_gain(self.gain)?);
         let g = libm::tan(core::f64::consts::PI * fc / rate.get());
         let eps = f64::from(floor.to_amplitude().get());
         Ok(finite(tail_frames(a, g, eps), eps, rate))
@@ -123,7 +123,7 @@ impl Tilt {
     ) -> Result<Ring, SosError> {
         let (lo, hi) = (check_cutoff(lowest, rate)?, check_cutoff(highest, rate)?);
         let (lo, hi) = (lo.min(hi), lo.max(hi));
-        let a_max = libm::pow(10.0, check_gain(Db(largest.get().abs()))? / 40.0);
+        let a_max = gain_root(check_gain(Db(largest.get().abs()))?);
         let g = |fc: f64| libm::tan(core::f64::consts::PI * fc / rate.get());
         let eps = f64::from(floor.to_amplitude().get());
         let nepers = |x: f64| libm::log((x + 1.0) / (x - 1.0).abs());

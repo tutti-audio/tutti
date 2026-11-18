@@ -5,7 +5,7 @@
 //! tick grid and the SysEx event, M2-104 section 7.7 for SysEx7 packets), not
 //! read back from the code under test.
 
-use crate::common::metrical;
+use crate::common::{metrical, sequences};
 use std::sync::Arc;
 
 use tutti_midi_device::{ProfileId, ProfileOnRequest, ProfileTarget};
@@ -224,7 +224,7 @@ fn the_timeline_is_the_messages_at_their_beats_and_not_the_meta_events() {
             U7::of(80),
         );
     let f = file(vec![tempo_track, notes]);
-    let line: Vec<(Beat, Ump)> = metrical(&f).timeline().unwrap().packets;
+    let line: Vec<(Beat, Ump)> = metrical(&f).timeline().packets;
     let words = |ump: &Ump| ump.0[0];
     let got: Vec<(f64, u32)> = line.iter().map(|(b, u)| (b.get(), words(u))).collect();
     // M2-104 7.3: type 2, group 0, status, channel, note, velocity.
@@ -257,7 +257,7 @@ fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
         .push(Tick(960), FileEvent::SysEx(vec![0x90, 0xF7].into())) // 8-bit data
         .unwrap();
     let f = file(vec![track]);
-    let timeline = metrical(&f).timeline().unwrap();
+    let timeline = metrical(&f).timeline();
     assert_eq!(timeline.packets.len(), 2);
     assert!(timeline.packets.iter().all(|(b, _)| *b == Beat(2.0)));
     assert_eq!(
@@ -321,7 +321,7 @@ fn a_divided_sysex_is_a_start_continues_and_an_end_each_at_its_events_beat() {
         )
         .unwrap();
     let f = file(vec![track]);
-    let timeline = metrical(&f).timeline().unwrap();
+    let timeline = metrical(&f).timeline();
     assert!(timeline.dropped.is_empty());
     let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
     assert_eq!(
@@ -350,7 +350,7 @@ fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_i
         .unwrap()
         .push(Tick(20), FileEvent::Escape(vec![9, 0xF7].into()))
         .unwrap();
-    let timeline = metrical(&file(vec![track])).timeline().unwrap();
+    let timeline = metrical(&file(vec![track])).timeline();
     let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
     assert_eq!(
         sysex7(&timeline.packets),
@@ -386,7 +386,7 @@ fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
         .unwrap()
         .push(Tick(40), first.clone())
         .unwrap();
-    let timeline = metrical(&file(vec![track])).timeline().unwrap();
+    let timeline = metrical(&file(vec![track])).timeline();
     // The note is the only packet; the `F7` after it has no `F0` open.
     assert_eq!(timeline.packets.len(), 1);
     let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
@@ -404,7 +404,7 @@ fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
 /// A format 2 file has no one timeline; each of its sequences has its own, on
 /// its own division.
 #[test]
-fn a_format_2_file_has_no_timeline_but_each_track_has() {
+fn a_format_2_file_has_no_metrical_view_but_each_track_has_a_timeline() {
     let a = Track::new().note(
         Tick(480),
         Tick(960),
@@ -413,9 +413,9 @@ fn a_format_2_file_has_no_timeline_but_each_track_has() {
         U7::of(100),
     );
     let f = MidiFile::smf(SmfFormat::Sequential, SMF_DIVISION, vec![a, Track::new()]).unwrap();
-    assert!(metrical(&f).timeline().is_err());
+    assert!(f.timebase().metrical().is_none());
     let beats: Vec<Beat> = f.tracks()[0]
-        .timeline(metrical(&f).ticks_per_quarter())
+        .timeline(sequences(&f).ticks_per_quarter())
         .packets
         .into_iter()
         .map(|(b, _)| b)
@@ -435,7 +435,7 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
         .unwrap()
         .push(Tick(10), end.clone())
         .unwrap();
-    let timeline = metrical(&file(vec![track])).timeline().unwrap();
+    let timeline = metrical(&file(vec![track])).timeline();
     assert!(timeline.packets.is_empty());
     let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
     assert_eq!(
@@ -464,7 +464,7 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
         .to_bytes(),
     )
     .unwrap();
-    let timeline = metrical(&clip).timeline().unwrap();
+    let timeline = metrical(&clip).timeline();
     assert_eq!(timeline.packets.len(), 1);
     assert_eq!(timeline.dropped.len(), 1);
     assert_eq!(timeline.dropped[0].2, TimelineDrop::UnknownPacket);
@@ -487,14 +487,14 @@ fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
         .unwrap();
     assert!(!track.header().is_empty());
     let f = MidiFile::clip(DIVISION, track).unwrap();
-    let line: Vec<(Beat, Ump)> = metrical(&f).timeline().unwrap().packets;
+    let line: Vec<(Beat, Ump)> = metrical(&f).timeline().packets;
     assert_eq!(line, [(Beat(0.5), Ump::from(note))]);
 }
 
 // ---- the tempo map ---------------------------------------------------------
 
-/// The tempo map is shared, not copied: a clone of the file and the accessor
-/// for the one timeline's track hand out the one map.
+/// The tempo map is shared, not copied: a clone of the file hands out the
+/// one map.
 #[test]
 fn the_tempo_map_is_one_shared_value() {
     let f = file(vec![Track::new().meta(Tick(0), Meta::tempo(Bpm::of(75.0)))]);
@@ -502,10 +502,6 @@ fn the_tempo_map_is_one_shared_value() {
     assert!(Arc::ptr_eq(
         metrical(&f).tempo_map(),
         metrical(&again).tempo_map()
-    ));
-    assert!(Arc::ptr_eq(
-        metrical(&f).tempo_map(),
-        metrical(&f).tempo_maps().next().unwrap()
     ));
     assert_eq!(metrical(&f).tempo_map().tempo_at(Beat(0.0)), Bpm::of(75.0));
 }

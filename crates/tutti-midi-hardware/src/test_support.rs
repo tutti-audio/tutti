@@ -30,7 +30,7 @@ use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, MidiThread, NotFound, Result};
 use tutti_midi_device::{EndpointId, Identity, OsChange, PortDirection};
 use tutti_midi_runtime::{MidiOut, Taken};
 use tutti_rt::PushError;
@@ -89,7 +89,7 @@ type Delivery = (Report, Sender<()>);
 #[derive(Clone)]
 enum Report {
     Change(OsChange),
-    Fail(String),
+    Fail,
 }
 
 impl FakeDevices {
@@ -241,11 +241,11 @@ impl FakeCounters {
         devices.announce(id);
     }
 
-    /// Makes every running watch fail with `reason`, as a real one does when
+    /// Makes every running watch fail as if its descriptor broke, as a real one does when
     /// the OS call it blocks in fails: the list freezes and
     /// every subscriber's `DeviceEvents::failure` says why.
-    pub fn fail_watch(&self, reason: &str) {
-        self.devices().deliver(&Report::Fail(reason.to_string()));
+    pub fn fail_watch(&self) {
+        self.devices().deliver(&Report::Fail);
     }
 
     /// Makes every later output open fail (or succeed again), as an output
@@ -474,21 +474,25 @@ impl MidiEndpoints for FakeBackend {
         self.watchers.fetch_add(1, Ordering::SeqCst);
         let running = Running(Arc::clone(&self.watchers));
         let thread = std::thread::Builder::new()
-            .name("tutti-fake-watch".to_string())
+            .name(MidiThread::DeviceWatch.name().to_string())
             .spawn(move || {
                 let _running = running;
                 for (report, done) in incoming {
                     match report {
                         Report::Change(change) => sink.send(change),
-                        Report::Fail(why) => {
+                        Report::Fail => {
                             // Like a real watch that has died: nothing more.
-                            sink.fail(Error::port(why));
+                            sink.fail(MidiHardwareError::DescriptorBroken);
                             let _ = done.send(());
                             return;
                         }
                     }
                     let _ = done.send(());
                 }
+            })
+            .map_err(|source| MidiHardwareError::Spawn {
+                thread: MidiThread::DeviceWatch,
+                source,
             })?;
         Ok(Box::new(FakeWatch {
             devices: Arc::clone(&self.devices),
@@ -513,10 +517,10 @@ impl MidiEndpoints for FakeBackend {
         {
             let mut devices = self.devices();
             if devices.refuse_inputs {
-                return Err(Error::device("input in use"));
+                return Err(MidiHardwareError::InUse(id));
             }
             if !devices.inputs.iter().any(|e| e.id == id) {
-                return Err(Error::device("no such input"));
+                return Err(NotFound::Endpoint(id).into());
             }
             // A new connection has a reader of its own.
             devices.dead_inputs.retain(|dead| *dead != id);
@@ -533,10 +537,10 @@ impl MidiEndpoints for FakeBackend {
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         let devices = self.devices();
         if devices.refuse_outputs {
-            return Err(Error::device("output in use"));
+            return Err(MidiHardwareError::InUse(id));
         }
         if !devices.outputs.iter().any(|e| e.id == id) {
-            return Err(Error::device("no such output"));
+            return Err(NotFound::Endpoint(id).into());
         }
         drop(devices);
         Ok(Box::new(FakeSink {

@@ -6,6 +6,7 @@
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tutti_buffers::Interleaved;
 
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec, StreamLatency};
@@ -124,7 +125,11 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
     let wired = session.graph_ref().sources(Root::output(0)).unwrap();
     assert_eq!(wired.len(), 1, "monitored");
 
-    record.lock().unwrap().writers[0].push_interleaved(&[0.25, -0.25].repeat(16));
+    let block = [0.25, -0.25].repeat(16);
+    let mut rec = record.lock().unwrap();
+    let view = Interleaved::new(&block, ChannelLayout::STEREO).unwrap();
+    rec.writers[0].push_interleaved(view);
+    drop(rec);
     assert_eq!(first_frame(&mut session, &stream), [0.25, -0.25]);
 
     let (driver, new) = ManualStreamDriver::new();
@@ -146,14 +151,21 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
     assert_eq!(session.graph_ref().sources(Root::output(0)).unwrap(), wired);
     {
         let mut rec = record.lock().unwrap();
-        rec.writers[0].push_interleaved(&[0.9, 0.9].repeat(16));
-        rec.writers[1].push_interleaved(&[0.5, -0.5].repeat(16));
+        rec.writers[0].push_interleaved(
+            Interleaved::new(&[0.9, 0.9].repeat(16), ChannelLayout::STEREO).unwrap(),
+        );
+        rec.writers[1].push_interleaved(
+            Interleaved::new(&[0.5, -0.5].repeat(16), ChannelLayout::STEREO).unwrap(),
+        );
     }
     // The swap crossfades in over 10 ms; give it its blocks.
     let mut last = [0.0; 2];
     for _ in 0..64 {
         last = first_frame(&mut session, &new);
-        record.lock().unwrap().writers[1].push_interleaved(&[0.5, -0.5].repeat(16));
+        let block = [0.5, -0.5].repeat(16);
+        let mut rec = record.lock().unwrap();
+        let view = Interleaved::new(&block, ChannelLayout::STEREO).unwrap();
+        rec.writers[1].push_interleaved(view);
     }
     assert_eq!(
         last,

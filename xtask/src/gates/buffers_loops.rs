@@ -59,8 +59,9 @@ use std::collections::{BTreeMap, BTreeSet};
 /// The list of sites, `<key>  <reason>` per line.
 pub(crate) const LIST: &str = "xtask/buffers-loops.txt";
 
-/// The fewest rows a real run finds; fewer means the walk is broken.
-pub(super) const MIN_SITES: usize = 10;
+/// The fewest source files a real run reads; fewer means the walk is broken.
+/// It counts files, not sites: the list shrinks to zero as sites are fixed.
+pub(super) const MIN_FILES: usize = 500;
 
 const WIDTH_WORDS: [&str; 10] = [
     "width",
@@ -435,7 +436,7 @@ fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
     }
 }
 
-pub(super) fn check(tree: &dyn Tree, min_sites: usize) -> Report {
+pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
     let mut r = Report::default();
     let Some(text) = tree.read(LIST) else {
         r.fail(format!("check-buffers: FAIL: {LIST} is missing"));
@@ -453,6 +454,13 @@ pub(super) fn check(tree: &dyn Tree, min_sites: usize) -> Report {
         .into_iter()
         .filter_map(|p| tree.read(&p).map(|t| (p, t)))
         .collect();
+    if files.len() < min_files {
+        r.fail(format!(
+            "check-buffers: FAIL: {} source files read, at least {min_files} expected; the walk is broken",
+            files.len()
+        ));
+        return r;
+    }
     let reached = cfg_test_files(&files);
     let mut sites: BTreeMap<String, BTreeSet<&'static str>> = BTreeMap::new();
     for (path, text) in &files {
@@ -460,13 +468,6 @@ pub(super) fn check(tree: &dyn Tree, min_sites: usize) -> Report {
         for (k, shapes) in scan(path, text, whole) {
             sites.entry(k).or_default().extend(shapes);
         }
-    }
-    if sites.len() < min_sites {
-        r.fail(format!(
-            "check-buffers: FAIL: {} hand-loop sites found, at least {min_sites} expected; the walk is broken",
-            sites.len()
-        ));
-        return r;
     }
     let unlisted: Vec<_> = sites.keys().filter(|k| !rows.contains_key(*k)).collect();
     let stale: Vec<_> = rows.keys().filter(|k| !sites.contains_key(*k)).collect();
@@ -719,8 +720,8 @@ mod tests {
     }
 
     #[test]
-    fn a_walk_that_finds_too_few_sites_fails() {
-        let r = check(&Mem::with(&[(LIST, ""), (F, "fn f() {}\n")]), 1);
+    fn a_walk_that_reads_too_few_files_fails() {
+        let r = check(&Mem::with(&[(LIST, ""), (F, "fn f() {}\n")]), 2);
         assert!(r.findings[0].contains("the walk is broken"));
     }
 }

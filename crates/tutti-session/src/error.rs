@@ -191,10 +191,6 @@ pub enum MidiError {
     #[error("MIDI file: {0}")]
     Read(#[from] tutti_midi_file::ReadError),
 
-    /// A file has no one timeline to play ([`Midi::play_file`](crate::Midi::play_file)).
-    #[error(transparent)]
-    NoTimeline(#[from] tutti_midi_file::TimelineError),
-
     /// A session job did not finish ([`Midi::load_file`](crate::Midi::load_file)):
     /// its work panicked, or the spawner dropped it.
     #[error("MIDI load: {0}")]
@@ -431,7 +427,7 @@ pub enum Error {
     /// enumeration or the device watch failed.
     #[cfg(feature = "midi-hardware")]
     #[error("MIDI hardware: {0}")]
-    MidiHardware(tutti_midi_hardware::Error),
+    MidiHardware(tutti_midi_hardware::MidiHardwareError),
 
     /// [`Session::instrument`](crate::Session::instrument) (or
     /// `add_instrument`) was given a node that cannot be played as an

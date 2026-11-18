@@ -71,6 +71,7 @@ use std::sync::Arc;
 
 use rustfft::FftNum;
 use tutti_buffers::{Float, Mono, MonoMut, Sample};
+use tutti_types::Samples;
 
 use crate::Complex;
 use crate::convert::convert_equal;
@@ -78,7 +79,7 @@ use crate::fft::StagedRealFft;
 
 /// Default FFT block size when the caller doesn't pick one. A power of two,
 /// as every partition size here is.
-pub(crate) const DEFAULT_BLOCK_SIZE: usize = 512;
+pub(crate) const DEFAULT_BLOCK_SIZE: Samples = Samples(512);
 
 /// A tail level's partition is at most this many times the head's, and at
 /// most [`MAX_PARTITION`] frames: the larger it is, the more steps its
@@ -242,8 +243,8 @@ struct Level<F: Float + FftNum> {
 /// so any number of convolvers (a node's channels, a clone, a fork) share one
 /// behind an `Arc`.
 pub struct IrSpectra<F: Float + FftNum = f32> {
-    block_size: usize,
-    ir_len: usize,
+    block_size: Samples,
+    ir_len: Samples,
     levels: Vec<Level<F>>,
     /// Power-of-two lengths of the input ring (the newest `part` frames plus
     /// the first step's offset, of every level) and the output ring (the
@@ -266,19 +267,20 @@ impl<F: Float + FftNum> std::fmt::Debug for IrSpectra<F> {
 impl<F: Float + FftNum> IrSpectra<F> {
     /// Partition and transform `ir` at `block_size`, which must be a power
     /// of two. Allocates; control thread.
-    fn new(ir: &[F], block_size: usize) -> Self {
-        debug_assert!(block_size.is_power_of_two());
+    fn new(ir: &[F], block_size: Samples) -> Self {
+        debug_assert!(block_size.get().is_power_of_two());
         Self::from_plan(
             ir,
             block_size,
-            &plan_levels(ir.len(), block_size),
+            &plan_levels(ir.len(), block_size.get()),
             MAX_SUB_FFT,
         )
     }
 
     /// `ir` cut into the levels of `plan`, whose tail transforms are cut into
     /// sub-FFTs of at most `max_sub` points.
-    fn from_plan(ir: &[F], block_size: usize, plan: &[Plan], max_sub: usize) -> Self {
+    fn from_plan(ir: &[F], block_size: Samples, plan: &[Plan], max_sub: usize) -> Self {
+        let head = block_size.get();
         // A tail level's transforms (`2 * part` real points, `part` complex)
         // run in `part / max_sub` sub-FFTs and the passes around them; a
         // head's run whole, at its start.
@@ -302,7 +304,7 @@ impl<F: Float + FftNum> IrSpectra<F> {
             .iter()
             .map(|f| f.forward_steps() + f.inverse_steps())
             .sum();
-        let slot = (block_size / (tail_steps + 1)).max(1);
+        let slot = (head / (tail_steps + 1)).max(1);
         let mut taken = 0;
         let levels: Vec<Level<F>> = plan
             .iter()
@@ -323,7 +325,7 @@ impl<F: Float + FftNum> IrSpectra<F> {
                         spectrum
                     })
                     .collect();
-                let delay = l.start + block_size - l.part;
+                let delay = l.start + head - l.part;
                 let (forward_steps, steps) = (
                     fft.forward_steps(),
                     fft.forward_steps() + fft.inverse_steps(),
@@ -357,7 +359,7 @@ impl<F: Float + FftNum> IrSpectra<F> {
             (levels.iter().map(|l| l.delay + l.part).max().unwrap_or(0) + 1).next_power_of_two();
         Self {
             block_size,
-            ir_len: ir.len(),
+            ir_len: Samples(ir.len()),
             levels,
             input_ring,
             output_ring,
@@ -627,8 +629,8 @@ impl<F: Float + FftNum> Convolver<F> {
     /// `block_size` is rounded up to the next power of two; it is the head
     /// partition and the latency.
     #[must_use]
-    pub fn new<S: Sample>(ir: Mono<'_, S>, block_size: usize) -> Self {
-        let block_size = block_size.next_power_of_two().max(2);
+    pub fn new<S: Sample>(ir: Mono<'_, S>, block_size: Samples) -> Self {
+        let block_size = Samples(block_size.get().next_power_of_two().max(2));
         let mut converted = vec![F::ZERO; ir.samples().len()];
         convert_equal(ir.samples(), &mut converted);
         Self::over(Arc::new(IrSpectra::new(&converted, block_size)))
@@ -647,6 +649,7 @@ impl<F: Float + FftNum> Convolver<F> {
     #[cfg(test)]
     fn with_parts_split(ir: &[F], block_size: usize, parts: &[usize], max_sub: usize) -> Self {
         assert_eq!(parts[0], block_size);
+        let block_size = Samples(block_size);
         let plan = build_plan(ir.len(), parts);
         Self::over(Arc::new(IrSpectra::from_plan(
             ir, block_size, &plan, max_sub,
@@ -684,12 +687,12 @@ impl<F: Float + FftNum> Convolver<F> {
     }
 
     /// IR length in samples.
-    pub fn ir_length(&self) -> usize {
+    pub fn ir_length(&self) -> Samples {
         self.spectra.ir_len
     }
 
     /// Latency introduced by the partitioned FFT (== block size).
-    pub fn latency(&self) -> usize {
+    pub fn latency(&self) -> Samples {
         self.spectra.block_size
     }
 
