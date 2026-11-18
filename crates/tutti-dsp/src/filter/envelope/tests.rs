@@ -160,7 +160,7 @@ fn the_controls_are_held_in_range() {
     let wide = bank(SvfType::LowPass, &controls(1_000.0, 1.0e9, 0.707));
     assert_eq!(
         wide.cutoff_at(Amplitude(1.0)),
-        RATE.nyquist_scaled(super::super::NYQUIST_MARGIN)
+        RATE.nyquist_scaled(crate::filter::NYQUIST_MARGIN)
     );
     assert_eq!(wide.cutoff_at(Amplitude::SILENT), Hz(1_000.0));
 }

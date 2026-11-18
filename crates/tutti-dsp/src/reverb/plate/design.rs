@@ -147,6 +147,8 @@ const MODULATION_RATE: Hz = Hz(1.0);
 pub const MAX_PLATE_DECAY: Seconds = Seconds(8.0);
 /// The lowest bandwidth a control reaches.
 pub(crate) const MIN_BANDWIDTH: Hz = Hz(10.0);
+/// The share of Nyquist the input bandwidth is held under.
+const BANDWIDTH_CEILING: f32 = 0.9;
 /// The largest damping pole: one short of a filter that never settles.
 const MAX_DAMPING: f32 = 0.999;
 
@@ -179,7 +181,7 @@ pub struct PlateControls {
     /// `0.999`. The paper's own coefficient.
     pub damping: Mix,
     /// The input bandwidth: the cutoff of the one-pole low-pass the input goes through, from
-    /// 10 Hz up to 0.45 of the rate.
+    /// 10 Hz up to 0.9 of Nyquist.
     pub bandwidth: Hz,
     /// The delay before the first sound.
     pub pre_delay: Seconds,
@@ -213,10 +215,13 @@ impl Default for PlateControls {
 }
 
 impl PlateControls {
-    /// The bandwidth in force at `rate`: finite, within 10 Hz and 0.45 of the rate.
+    /// The bandwidth in force at `rate`: finite, within 10 Hz and 0.9 of Nyquist.
     pub(crate) fn bandwidth_at(&self, rate: SampleRate) -> Hz {
         let hz = finite_or(self.bandwidth.get(), Self::DEFAULT.bandwidth.get());
-        Hz(hz.clamp(MIN_BANDWIDTH.get(), rate.nyquist_scaled(0.9).get()))
+        Hz(hz.clamp(
+            MIN_BANDWIDTH.get(),
+            rate.nyquist_scaled(BANDWIDTH_CEILING).get(),
+        ))
     }
 
     /// Designs the controls into `out` in place, at `rate`: the network the bank runs (the

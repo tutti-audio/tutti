@@ -27,7 +27,8 @@ pub struct ChannelOutOfRange {
 /// use tutti_types::{ChannelIndex, ChannelLayout};
 ///
 /// let flips = Polarity::new(ChannelLayout::STEREO, [ChannelIndex::of(1)]).unwrap();
-/// assert_eq!((flips.inverts(ChannelIndex::of(0)), flips.inverts(ChannelIndex::of(1))), (false, true));
+/// let (first, second) = (ChannelIndex::of(0), ChannelIndex::of(1));
+/// assert_eq!((flips.inverts(first), flips.inverts(second)), (false, true));
 /// assert!(Polarity::new(ChannelLayout::STEREO, [ChannelIndex::of(2)]).is_err(), "no third channel");
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]

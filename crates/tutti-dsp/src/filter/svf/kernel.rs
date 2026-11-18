@@ -105,7 +105,7 @@ impl SvfCoeffs {
             1.0,
             f64::from(
                 sample_rate
-                    .nyquist_scaled(super::super::NYQUIST_MARGIN)
+                    .nyquist_scaled(crate::filter::NYQUIST_MARGIN)
                     .get(),
             ),
         );

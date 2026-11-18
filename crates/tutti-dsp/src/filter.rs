@@ -4,7 +4,7 @@
 
 /// The share of Nyquist a cutoff is held under, where `tan` of its warp is finite and the
 /// bilinear map is well conditioned.
-const NYQUIST_MARGIN: f32 = 0.998;
+pub(crate) const NYQUIST_MARGIN: f32 = 0.998;
 
 mod biquad;
 mod crossover;
