@@ -434,8 +434,8 @@ enum Source {
 }
 
 impl MetricalView<'_> {
-    /// A Standard MIDI File of format 0 or 1 (the only formats with one timeline) as a MIDI 2.0 Clip File
-    /// (M2-116), its meta events replaced by the UMP messages of Appendix B,
+    /// A Standard MIDI File of format 0 or 1 (the only formats with one
+    /// timeline) as a MIDI 2.0 Clip File (M2-116), its meta events replaced by the UMP messages of Appendix B,
     /// with the events that have no replacement beside it.
     ///
     /// The mapping, each row from M2-116 section 3.3 and Appendix B (fields

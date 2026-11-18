@@ -1216,9 +1216,10 @@ impl MidiFile {
         &self.tracks
     }
 
-    /// Where the file ends: its longest track's end (an SMF's End of Track, a
-    /// Clip File's End of Clip), at least where the last event lands.
-    pub fn end(&self) -> Tick {
+    /// Where the tracks of a file of one timeline end: the longest track's end
+    /// (an SMF's End of Track, a Clip File's End of Clip), at least where the
+    /// last event lands.
+    fn shared_end(&self) -> Tick {
         self.tracks.iter().map(|t| t.end).max().unwrap_or_default()
     }
 
@@ -1301,6 +1302,13 @@ impl<'a> MetricalView<'a> {
         Tick::from_beat(beat, self.ticks_per_quarter)
     }
 
+    /// Where the file ends: its longest track's end (an SMF's End of Track, a
+    /// Clip File's End of Clip), at least where the last event lands.
+    #[must_use]
+    pub fn end(self) -> Tick {
+        self.file.shared_end()
+    }
+
     /// The tempo map of the file's timeline, built from its Set Tempo events
     /// (an SMF's meta events across all tracks, a Clip File's Flex Data Set
     /// Tempo messages), steps at the tick each lands on. A file that sets none
@@ -1315,7 +1323,8 @@ impl<'a> MetricalView<'a> {
     /// It is shared: `file.tempo_map().clone()` is a reference count.
     #[must_use]
     pub fn tempo_map(self) -> &'a Arc<TempoMap> {
-        // A metrical file always has at least one tempo map.
+        // A file of one timeline always has exactly one tempo map (the
+        // constructor builds one for it).
         &self.file.tempo_maps[0]
     }
 
@@ -1323,7 +1332,7 @@ impl<'a> MetricalView<'a> {
     /// [`tempo_map`](Self::tempo_map): each stretch between two changes at
     /// its own tempo (a file's changes are all steps).
     ///
-    /// What an offline render of the file lasts is `seconds_at(file.end())`.
+    /// What an offline render of the file lasts is `seconds_at(view.end())`.
     #[must_use]
     pub fn seconds_at(self, tick: Tick) -> Seconds {
         self.tempo_map().seconds_at(self.beat_at(tick))
@@ -1440,6 +1449,12 @@ impl<'a> MetricalSequence<'a> {
         self.track
     }
 
+    /// Where the sequence ends: its track's end.
+    #[must_use]
+    pub fn end(self) -> Tick {
+        self.track.end
+    }
+
     /// The tempo map of this sequence, built from the Set Tempo events of its
     /// track alone (see [`MetricalView::tempo_map`] for the rule).
     ///
@@ -1493,6 +1508,13 @@ impl<'a> SmpteView<'a> {
     #[must_use]
     pub fn ticks_per_frame(self) -> SmfTicksPerFrame {
         self.ticks_per_frame
+    }
+
+    /// Where the file ends: its longest track's end, at least where the last
+    /// event lands.
+    #[must_use]
+    pub fn end(self) -> Tick {
+        self.file.shared_end()
     }
 
     /// Seconds from the start of the file to `tick`: the tick over the ticks
@@ -1564,6 +1586,12 @@ impl<'a> SmpteSequence<'a> {
     #[must_use]
     pub fn track(self) -> &'a Track {
         self.track
+    }
+
+    /// Where the sequence ends: its track's end.
+    #[must_use]
+    pub fn end(self) -> Tick {
+        self.track.end
     }
 
     /// Seconds from the start of the sequence to `tick` (as

@@ -12,7 +12,7 @@ pub fn midi_file_read(data: &[u8]) {
         Timebase::Metrical(metrical) => {
             let _ = metrical.events().count();
             let _ = metrical.timeline();
-            let _ = metrical.seconds_at(file.end());
+            let _ = metrical.seconds_at(metrical.end());
         }
         Timebase::Smpte(smpte) => {
             let _ = smpte.events().count();
@@ -20,7 +20,7 @@ pub fn midi_file_read(data: &[u8]) {
         Timebase::MetricalSequences(file) => {
             for sequence in file.sequences() {
                 let _ = sequence.events().count();
-                let _ = sequence.seconds_at(sequence.track().end());
+                let _ = sequence.seconds_at(sequence.end());
             }
         }
         Timebase::SmpteSequences(file) => {

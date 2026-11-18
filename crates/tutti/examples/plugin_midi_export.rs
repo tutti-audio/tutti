@@ -128,7 +128,7 @@ fn play<M: Master>(
     let Timebase::Metrical(metrical) = file.timebase() else {
         return Err("a file with no one beat timeline (SMPTE frames, or format 2 sequences) has nothing to play on".into());
     };
-    let (tempo_map, end) = (metrical.tempo_map(), metrical.beat_at(file.end()));
+    let (tempo_map, end) = (metrical.tempo_map(), metrical.beat_at(metrical.end()));
     // A file's tempo track is the file's data, not the project's: the project
     // adopts it on import, here, by an explicit call (a shared map, no copy).
     s.set_tempo_map(tempo_map.clone())?;

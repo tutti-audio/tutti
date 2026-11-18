@@ -124,7 +124,7 @@ fn a_clip_reads_at_absolute_ticks() {
     );
     assert_eq!(metrical(&file).beat_at(events[1].0), Beat(1.0));
     // The clip's length is the delta before End of Clip.
-    assert_eq!(metrical(&file).beat_at(file.end()), Beat(2.0));
+    assert_eq!(metrical(&file).beat_at(metrical(&file).end()), Beat(2.0));
     // And a clip's notes keep all 16 bits.
     let notes: Vec<_> = file.tracks()[0].notes();
     assert_eq!(notes.len(), 1);

@@ -171,7 +171,7 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
     assert_eq!(at, [Seconds(0.0), Seconds(1.0), Seconds(2.5)]);
     assert_eq!(smpte.fps(), MtcRate::Fps25);
     assert_eq!(smpte.ticks_per_frame(), SmfTicksPerFrame::of(40));
-    assert_eq!(smpte.seconds_at(file.end()), Seconds(2.5));
+    assert_eq!(smpte.seconds_at(smpte.end()), Seconds(2.5));
     // A quarter-note grid does not exist: no view of it, so no beat, tempo map or timeline.
     assert!(file.timebase().metrical().is_none());
     // The Set Tempo is still an event and is written back.

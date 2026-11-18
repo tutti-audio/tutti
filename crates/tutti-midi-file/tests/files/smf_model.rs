@@ -232,7 +232,7 @@ fn the_end_of_a_track_is_kept() {
 
     let file = read(&bytes);
     assert_eq!(file.tracks()[0].end(), Tick(4 * u64::from(BEAT)));
-    assert_eq!(metrical(&file).beat_at(file.end()), Beat(4.0));
+    assert_eq!(metrical(&file).beat_at(metrical(&file).end()), Beat(4.0));
     assert_eq!(read(&file.to_bytes()).tracks()[0].end(), Tick(1920));
 }
 
@@ -323,6 +323,36 @@ fn format_2_keeps_its_sequences_apart() {
     );
 }
 
+/// **A sequence's tempo neither leaks into nor depends on another's.**
+///
+/// Sequence 0 sets no tempo (120 BPM, 0.5 s a beat); sequence 1 is 120 BPM
+/// until beat 1 and 60 BPM after it (1 s a beat). Beat 3 is 1.5 s in sequence 0
+/// and 0.5 + 2 = 2.5 s in sequence 1.
+#[test]
+fn a_format_2_sequences_tempo_changes_stay_in_that_sequence() {
+    let file = read(&smf(
+        2,
+        &[
+            vec![RawEvent::note_on(0, 0, 60, 100)],
+            vec![
+                RawEvent::tempo(0, 500_000),
+                RawEvent::tempo(BEAT, 1_000_000),
+                RawEvent::note_on(0, 0, 62, 100),
+            ],
+        ],
+    ));
+    let sequences: Vec<_> = sequences(&file).sequences().collect();
+    let at = |beats: u64| Tick(beats * u64::from(BEAT));
+    assert_eq!(sequences[0].tempo_map().tempo_at(Beat(5.0)), Bpm::of(120.0));
+    assert_eq!(sequences[0].tempo_map().points().len(), 1);
+    assert_eq!(sequences[1].tempo_map().tempo_at(Beat(0.5)), Bpm::of(120.0));
+    assert_eq!(sequences[1].tempo_map().tempo_at(Beat(1.0)), Bpm::of(60.0));
+    assert_eq!(sequences[0].seconds_at(at(1)), Seconds(0.5));
+    assert_eq!(sequences[0].seconds_at(at(3)), Seconds(1.5));
+    assert_eq!(sequences[1].seconds_at(at(1)), Seconds(0.5));
+    assert_eq!(sequences[1].seconds_at(at(3)), Seconds(2.5));
+}
+
 /// Format 1: the tracks stay apart and named, and the merged view is sorted by
 /// tick with ties in track order.
 #[test]
@@ -380,7 +410,7 @@ fn the_tempo_map_follows_the_file() {
     close(metrical(&file).seconds_at(beats(1.0)), 0.5);
     close(metrical(&file).seconds_at(beats(4.0)), 2.0);
     close(metrical(&file).seconds_at(beats(5.5)), 3.5);
-    close(metrical(&file).seconds_at(file.end()), 6.0);
+    close(metrical(&file).seconds_at(metrical(&file).end()), 6.0);
     assert_eq!(
         metrical(&file).tempo_map().tempo_at(Beat(3.99)),
         Bpm::of(120.0)
