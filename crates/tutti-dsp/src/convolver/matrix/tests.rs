@@ -13,8 +13,9 @@ fn tap(delay: usize, gain: f32) -> Vec<f32> {
     ir
 }
 
-/// `x` through the matrix in calls of `lens` (cycled), `f32` views.
-fn render(m: &mut MatrixConvolver, x: &[Vec<f32>], lens: &[usize]) -> Vec<Vec<f32>> {
+/// `x` through the matrix in calls of `lens` (cycled), `f32` views: the session's audio format,
+/// so the tolerances of the tests that use it are `f32`'s.
+fn render(m: &mut MatrixConvolver<f32>, x: &[Vec<f32>], lens: &[usize]) -> Vec<Vec<f32>> {
     let frames = x[0].len();
     let mut out = vec![Vec::new(); usize::from(m.outputs().count())];
     let (mut at, mut k) = (0, 0);
@@ -79,7 +80,8 @@ fn each_output_is_the_sum_of_its_paths_by_definition() {
             })
             .collect();
         let x: Vec<Vec<f32>> = (0..ni).map(|c| noise(7 + u32::from(c), 900)).collect();
-        let mut m = MatrixConvolver::new(layout(ni), layout(no), &refs(&irs), Samples(32)).unwrap();
+        let mut m =
+            MatrixConvolver::<f32>::new(layout(ni), layout(no), &refs(&irs), Samples(32)).unwrap();
         let want = definition(&irs, &x, usize::from(no), m.latency().get());
         let got = render(&mut m, &x, &[64]);
         for (o, (g, w)) in got.iter().zip(&want).enumerate() {
@@ -99,7 +101,8 @@ fn each_output_is_the_sum_of_its_paths_by_definition() {
 #[test]
 fn an_impulse_on_an_input_is_each_outputs_path_response() {
     let irs = [tap(3, 0.5), tap(7, -0.25), tap(11, 0.75), tap(5, 0.125)];
-    let mut m = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(16)).unwrap();
+    let mut m =
+        MatrixConvolver::<f32>::new(layout(2), layout(2), &refs(&irs), Samples(16)).unwrap();
     let lat = m.latency().get();
     for j in 0..2 {
         m.reset();
@@ -125,7 +128,8 @@ fn both_inputs_together_are_the_sum_of_each_alone() {
     let silent = vec![0.0f32; 300];
     let run = |x: [&Vec<f32>; 2]| {
         let x = [x[0].clone(), x[1].clone()];
-        let mut m = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(16)).unwrap();
+        let mut m =
+            MatrixConvolver::<f32>::new(layout(2), layout(2), &refs(&irs), Samples(16)).unwrap();
         render(&mut m, &x, &[50])
     };
     let both = run([&a, &b]);
@@ -146,10 +150,12 @@ fn any_call_length_gives_the_same_bits() {
         .map(|p| noise(30 + p, 2500 + 100 * p as usize))
         .collect();
     let x: Vec<Vec<f32>> = (0..3).map(|c| noise(9 + c, 1500)).collect();
-    let mut whole = MatrixConvolver::new(layout(3), layout(2), &refs(&irs), Samples(32)).unwrap();
+    let mut whole =
+        MatrixConvolver::<f32>::new(layout(3), layout(2), &refs(&irs), Samples(32)).unwrap();
     let want = render(&mut whole, &x, &[1500]);
     for lens in [&[1usize][..], &[7, 61, 64, 65], &[31, 33], &[300, 5]] {
-        let mut m = MatrixConvolver::new(layout(3), layout(2), &refs(&irs), Samples(32)).unwrap();
+        let mut m =
+            MatrixConvolver::<f32>::new(layout(3), layout(2), &refs(&irs), Samples(32)).unwrap();
         let got = render(&mut m, &x, lens);
         assert!(
             got.iter()
@@ -167,7 +173,8 @@ fn any_call_length_gives_the_same_bits() {
 fn reset_and_fresh_equal_a_new_matrix() {
     let irs: Vec<Vec<f32>> = (0..4).map(|p| noise(60 + p, 700)).collect();
     let x: Vec<Vec<f32>> = (0..2).map(|c| noise(3 + c, 600)).collect();
-    let make = || MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
+    let make =
+        || MatrixConvolver::<f32>::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
     let want = render(&mut make(), &x, &[64]);
     let mut used = make();
     render(&mut used, &[noise(80, 500), noise(81, 500)], &[64]);
@@ -183,14 +190,16 @@ fn reset_and_fresh_equal_a_new_matrix() {
 fn f64_views_render_the_f32_result() {
     let irs: Vec<Vec<f32>> = (0..4).map(|p| noise(5 + p, 200)).collect();
     let x: Vec<Vec<f32>> = (0..2).map(|c| noise(2 + c, 400)).collect();
-    let mut m32 = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
+    let mut m32 =
+        MatrixConvolver::<f32>::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
     let want = render(&mut m32, &x, &[400]);
     let x64: Vec<Vec<f64>> = x
         .iter()
         .map(|c| c.iter().map(|&v| f64::from(v)).collect())
         .collect();
     let mut out = vec![vec![0.0f64; 400]; 2];
-    let mut m64 = MatrixConvolver::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
+    let mut m64 =
+        MatrixConvolver::<f32>::new(layout(2), layout(2), &refs(&irs), Samples(32)).unwrap();
     m64.process(
         Planes::from_vecs(&x64).unwrap(),
         PlanesMut::from_vecs(&mut out).unwrap(),
@@ -207,11 +216,11 @@ fn f64_views_render_the_f32_result() {
 fn a_bad_shape_is_refused_by_name() {
     let one = [1.0f32];
     assert_eq!(
-        MatrixConvolver::new::<f32>(ChannelLayout::EMPTY, layout(2), &[], Samples(16)).err(),
+        MatrixConvolver::<f32>::new::<f32>(ChannelLayout::EMPTY, layout(2), &[], Samples(16)).err(),
         Some(MatrixConvolverError::NoChannels)
     );
     assert_eq!(
-        MatrixConvolver::new(
+        MatrixConvolver::<f32>::new(
             layout(2),
             layout(3),
             &[Mono::new(&one), Mono::new(&one)],
@@ -225,4 +234,68 @@ fn a_bad_shape_is_refused_by_name() {
             got: 2
         })
     );
+}
+
+/// The matrix of `f64` unit-impulse responses is the identity at its latency, on every
+/// channel, to the `f64` FFT's rounding (about 1e-12): the signal needs more than 24 bits,
+/// so an `f32` engine misses by 1e-8.
+#[test]
+fn an_f64_matrix_of_unit_impulses_is_the_identity_at_its_latency() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (frames, unit, zero) = (400, [1.0f64], [0.0f64; 1]);
+    let irs = [
+        Mono::new(&unit),
+        Mono::new(&zero),
+        Mono::new(&zero),
+        Mono::new(&unit),
+    ];
+    let mut m = MatrixConvolver::<f64>::new(layout(2), layout(2), &irs, Samples(32)).unwrap();
+    let lat = m.latency().get();
+    let left = wide_signal(frames);
+    let right: Vec<f64> = left.iter().rev().map(|v| -v).collect();
+    let mut out = vec![vec![0.0f64; frames]; 2];
+    m.process(
+        Planes::from_vecs(&[left.clone(), right.clone()]).unwrap(),
+        PlanesMut::from_vecs(&mut out).unwrap(),
+    );
+    for (got, x) in out.iter().zip([&left, &right]) {
+        let mut want = vec![0.0f64; frames];
+        want[lat..].copy_from_slice(&x[..frames - lat]);
+        assert_close_f64(got, &want, 1e-12);
+    }
+}
+
+/// A delayed, scaled impulse is the input delayed by that many frames and scaled: with
+/// `LR = 0.5 z^-5` and `RL = 0.25 z^-9` between unit diagonals, `out_L[n] = x_L[n - lat] +
+/// 0.25 x_R[n - lat - 9]` and `out_R[n] = 0.5 x_L[n - lat - 5] + x_R[n - lat]`, in `f64` to
+/// 1e-12.
+#[test]
+fn an_f64_matrix_of_delayed_scaled_impulses_delays_and_scales() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    fn tap64(delay: usize, gain: f64) -> Vec<f64> {
+        let mut ir = vec![0.0; delay + 1];
+        ir[delay] = gain;
+        ir
+    }
+    let frames = 400;
+    let irs = [tap64(0, 1.0), tap64(5, 0.5), tap64(9, 0.25), tap64(0, 1.0)];
+    let monos: Vec<Mono<'_, f64>> = irs.iter().map(|ir| Mono::new(ir)).collect();
+    let mut m = MatrixConvolver::<f64>::new(layout(2), layout(2), &monos, Samples(32)).unwrap();
+    let lat = m.latency().get();
+    let left = wide_signal(frames);
+    let right: Vec<f64> = left.iter().rev().map(|v| v * 0.75).collect();
+    let mut out = vec![vec![0.0f64; frames]; 2];
+    m.process(
+        Planes::from_vecs(&[left.clone(), right.clone()]).unwrap(),
+        PlanesMut::from_vecs(&mut out).unwrap(),
+    );
+    let at = |x: &[f64], n: usize, delay: usize| n.checked_sub(lat + delay).map_or(0.0, |k| x[k]);
+    let want_l: Vec<f64> = (0..frames)
+        .map(|n| at(&left, n, 0) + 0.25 * at(&right, n, 9))
+        .collect();
+    let want_r: Vec<f64> = (0..frames)
+        .map(|n| 0.5 * at(&left, n, 5) + at(&right, n, 0))
+        .collect();
+    assert_close_f64(&out[0], &want_l, 1e-12);
+    assert_close_f64(&out[1], &want_r, 1e-12);
 }

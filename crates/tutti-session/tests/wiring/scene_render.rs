@@ -45,8 +45,8 @@ fn saw() -> ForkByClone<Osc> {
 fn low_pass(cutoff: f32) -> SvfFilterNode<f64> {
     SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(cutoff), Q(0.9))
 }
-fn shaper(drive: f32) -> DistortionNode {
-    DistortionNode::new(ShapeKind::Tanh, Drive::new(drive))
+fn shaper(drive: f32) -> DistortionNode<f32> {
+    DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(drive))
 }
 fn limiter() -> LimiterNode {
     LimiterNode::mono(LimiterControls {
@@ -64,7 +64,7 @@ struct Scene {
     session: DetachedSession,
     side: AudioSide,
     filter: NodeKey,
-    drive: Key<DistortionNode>,
+    drive: Key<DistortionNode<f32>>,
 }
 
 /// A saw through a low-pass and a waveshaper on the left channel, the same

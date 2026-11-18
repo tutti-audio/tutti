@@ -3,7 +3,7 @@ use tutti_buffers::{Planes, PlanesMut};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn run(blocker: &mut DcBlocker, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
+fn run(blocker: &mut DcBlocker<f64>, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut out = vec![vec![0.0; input[0].len()]; input.len()];
     blocker.process(
         Planes::from_vecs(input).unwrap(),
@@ -12,8 +12,8 @@ fn run(blocker: &mut DcBlocker, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
     out
 }
 
-fn at(corner: f32, rate: SampleRate) -> DcBlocker {
-    let mut b = DcBlocker::new(ChannelLayout::MONO, rate);
+fn at(corner: f32, rate: SampleRate) -> DcBlocker<f64> {
+    let mut b = DcBlocker::<f64>::new(ChannelLayout::MONO, rate);
     b.aim(&DcBlockerControls { corner: Hz(corner) });
     b.settle();
     b
@@ -47,7 +47,7 @@ fn the_corner_is_held_within_its_bounds() {
 /// equation from zero state), at each channel alone.
 #[test]
 fn a_constant_decays_as_the_pole_to_the_n() {
-    let mut b = DcBlocker::new(ChannelLayout::STEREO, RATE);
+    let mut b = DcBlocker::<f64>::new(ChannelLayout::STEREO, RATE);
     b.aim(&DcBlockerControls { corner: Hz(20.0) });
     b.settle();
     let r = b.pole();
@@ -104,7 +104,7 @@ fn the_tail_covers_the_worst_stopped_input_to_the_floor() {
     let floor = 10f64.powf(-3.0);
     for corner in [1.0f32, 10.0, 100.0] {
         let controls = DcBlockerControls { corner: Hz(corner) };
-        let n = DcBlocker::tail(&controls, RATE).get();
+        let n = DcBlocker::<f64>::tail(&controls, RATE).get();
         let settle = 20 * n;
         for hold in [1usize, 1000] {
             let mut x = vec![-1.0; settle];
@@ -163,4 +163,26 @@ fn reset_clears_the_state() {
     assert_ne!(run(&mut b, &[vec![0.0; 4]])[0][0], 0.0);
     b.reset();
     assert!(run(&mut b, &[vec![0.0; 4]])[0].iter().all(|&v| v == 0.0));
+}
+
+/// An `f64` blocker is the difference equation `y[n] = x[n] - x[n-1] + R y[n-1]` in `f64`
+/// at the pole `R = exp(-2 pi fc / fs)` computed here from the corner: the pole is not an
+/// `f32` value and the signal has more than 24 bits, so a state narrowed to `f32` misses
+/// it by far more than 2^-45.
+#[test]
+fn an_f64_blocker_is_the_difference_equation_in_f64() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (fc, len) = (10.0f64, 400usize);
+    let r = (-std::f64::consts::TAU * fc / RATE.get()).exp();
+    assert_ne!(r, f64::from(r as f32), "the pole needs more than f32 holds");
+    let x = wide_signal(len);
+    let mut want = vec![0.0f64; len];
+    let (mut x1, mut y1) = (0.0f64, 0.0f64);
+    for n in 0..len {
+        y1 = x[n] - x1 + r * y1;
+        x1 = x[n];
+        want[n] = y1;
+    }
+    let y = run(&mut at(fc as f32, RATE), &[x]).remove(0);
+    assert_close_f64(&y, &want, 2.0f64.powi(-45));
 }

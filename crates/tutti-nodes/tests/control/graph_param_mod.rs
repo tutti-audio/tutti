@@ -403,7 +403,7 @@ fn cases() -> Vec<Case> {
             name: "distortion drive",
             param: UnitParam::Drive,
             make: |w, v| {
-                let n = DistortionNode::with_channels(
+                let n = DistortionNode::<f32>::with_channels(
                     ChannelLayout::try_from(w).expect("a test width is small"),
                     ShapeKind::Tanh,
                     Drive::new(1.0),
@@ -988,7 +988,7 @@ fn each_fed_mix_is_the_one_the_graph_blends() {
 /// output of a modulated drive, from the unmodulated node.
 fn plain_distortion(d: f32) -> Vec<f32> {
     render(
-        parts_of(DistortionNode::with_channels(
+        parts_of(DistortionNode::<f32>::with_channels(
             1u16,
             ShapeKind::Tanh,
             Drive::new(d),
@@ -1005,7 +1005,7 @@ fn plain_distortion(d: f32) -> Vec<f32> {
 /// lose.
 #[test]
 fn an_authored_write_moves_the_base_under_modulation() {
-    let node = DistortionNode::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
     let tutti_types::ParamCell::F32(cell) = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
         .expect("a distortion has a drive")
@@ -1055,7 +1055,7 @@ fn an_authored_write_moves_the_base_under_modulation() {
 /// value past it clamps to the higher bound.
 #[test]
 fn a_crossed_range_is_survivable() {
-    let node = DistortionNode::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -1081,7 +1081,7 @@ fn a_crossed_range_is_survivable() {
 /// stateful node's state would survive), with no step reaching the output.
 #[test]
 fn an_unmodulated_param_adds_nothing_to_the_plan() {
-    let node = DistortionNode::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -1154,7 +1154,7 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
 /// so nothing fades in.
 #[test]
 fn a_fork_modulates_as_the_live_graph_does() {
-    let node = DistortionNode::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);

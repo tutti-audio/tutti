@@ -1,7 +1,7 @@
 use super::*;
 use tutti_buffers::{Planes, PlanesMut};
 
-fn run(crusher: &mut BitCrusher, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
+fn run(crusher: &mut BitCrusher<f64>, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut out = vec![vec![0.0; input[0].len()]; input.len()];
     crusher.process(
         Planes::from_vecs(input).unwrap(),
@@ -11,7 +11,7 @@ fn run(crusher: &mut BitCrusher, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
 }
 
 /// The whole stream through `crusher` in blocks of `block` frames.
-fn run_blocks(crusher: &mut BitCrusher, input: &[Vec<f64>], block: usize) -> Vec<Vec<f64>> {
+fn run_blocks(crusher: &mut BitCrusher<f64>, input: &[Vec<f64>], block: usize) -> Vec<Vec<f64>> {
     let mut out = vec![Vec::new(); input.len()];
     for start in (0..input[0].len()).step_by(block) {
         let end = (start + block).min(input[0].len());
@@ -23,8 +23,8 @@ fn run_blocks(crusher: &mut BitCrusher, input: &[Vec<f64>], block: usize) -> Vec
     out
 }
 
-fn crusher(bits: f32, hold: f32) -> BitCrusher {
-    BitCrusher::new(
+fn crusher(bits: f32, hold: f32) -> BitCrusher<f64> {
+    BitCrusher::<f64>::new(
         ChannelLayout::MONO,
         BitCrusherControls {
             bits: BitDepth::new(bits),
@@ -135,7 +135,7 @@ fn a_full_ramp_has_two_to_the_bits_plus_one_levels() {
 #[test]
 fn thirty_two_bits_is_the_identity_within_the_step() {
     let x: Vec<f32> = (0..4000).map(|i| (i as f32 * 0.37).sin() * 0.9).collect();
-    let mut c = BitCrusher::new(
+    let mut c = BitCrusher::<f32>::new(
         ChannelLayout::MONO,
         BitCrusherControls {
             bits: BitDepth::MAX,
@@ -222,7 +222,7 @@ fn the_hold_counter_is_continuous_across_blocks() {
 fn every_channel_holds_on_the_same_frames() {
     let left = exact_input(100);
     let right: Vec<f64> = left.iter().rev().copied().collect();
-    let mut c = BitCrusher::new(
+    let mut c = BitCrusher::<f64>::new(
         ChannelLayout::STEREO,
         BitCrusherControls {
             bits: BitDepth::MAX,
@@ -324,4 +324,55 @@ fn a_shorter_hold_and_a_reset_capture_at_once() {
     );
     c.reset();
     assert_eq!(run(&mut c, &[vec![0.75, 0.5]])[0], [0.75, 0.75]);
+}
+
+/// At 32 bits (`q = 2^31`) a 29-bit signal, which `f32` cannot hold, passes an `f64` crusher
+/// exactly: `x q` is an integer and `round(x q) / q` returns `x`.
+#[test]
+fn an_f64_crusher_at_thirty_two_bits_passes_a_twenty_nine_bit_signal_exactly() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let x = wide_signal(300);
+    assert!(
+        x.iter().any(|&v| v != f64::from(v as f32)),
+        "the signal needs more than f32 holds"
+    );
+    let y = run(&mut crusher(32.0, 1.0), std::slice::from_ref(&x)).remove(0);
+    assert_close_f64(&y, &x, 0.0);
+}
+
+/// Rounding in the float `F` is half to even, as the standard library's: ties, signed zero
+/// and the values at and past `1 / EPSILON` (already whole) agree in both widths.
+#[test]
+fn rounding_in_either_width_is_half_to_even() {
+    let probes = [
+        0.0,
+        -0.0,
+        0.5,
+        -0.5,
+        1.5,
+        -1.5,
+        2.5,
+        0.49999997,
+        0.5000001,
+        7.5,
+        8_388_607.5,
+        8_388_608.0,
+        8_388_609.0,
+        1e30,
+    ];
+    for x in probes {
+        let narrow = x as f32;
+        assert_eq!(
+            round_ties_even(narrow).to_bits(),
+            narrow.round_ties_even().to_bits(),
+            "{narrow} in f32"
+        );
+        assert_eq!(
+            round_ties_even::<f64>(x).to_bits(),
+            f64::round_ties_even(x).to_bits(),
+            "{x} in f64"
+        );
+    }
+    assert!(round_ties_even(f64::NAN).is_nan());
+    assert_eq!(round_ties_even(f64::INFINITY), f64::INFINITY);
 }

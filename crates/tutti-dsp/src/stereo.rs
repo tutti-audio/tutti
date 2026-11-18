@@ -8,7 +8,7 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{SampleRate, StereoWidth};
 
-use crate::{GAIN_GLIDE, Glide, Steps};
+use crate::{GAIN_GLIDE, Glide, Lerp, Steps};
 
 /// The direction of a mid/side conversion of a stereo pair.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -73,25 +73,26 @@ impl WidthControls {
     };
 }
 
-/// Stereo width of a left/right pair: the side scaled by a width that glides over
-/// [`GAIN_GLIDE`].
+/// Stereo width of a left/right pair in the float `F`: the side scaled by a width that glides
+/// over [`GAIN_GLIDE`].
 ///
 /// Frame `i` of a block reads the glide at step `taken + 1 + i`, then the block's steps
 /// are taken, so a write renders the same whatever the blocks. The pair is two channels:
 /// a view with fewer renders nothing.
 #[derive(Clone, Copy, Debug)]
-pub struct WidthBank {
-    width: Glide<f32>,
+pub struct WidthBank<F: Float> {
+    /// The width in force, narrowed to `F` once per aim.
+    width: Glide<F>,
     steps: u32,
 }
 
-impl WidthBank {
+impl<F: Float + Lerp> WidthBank<F> {
     /// A pair at unity width at `rate`, to be aimed.
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {
         let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
-            width: Glide::landed(StereoWidth::NATURAL.get()),
+            width: Glide::landed(F::from_f32(StereoWidth::NATURAL.get())),
             steps,
         }
     }
@@ -106,7 +107,8 @@ impl WidthBank {
     pub fn aim(&mut self, controls: &WidthControls) {
         let w = controls.width.get();
         if w.is_finite() {
-            self.width.aim_by(w.max(0.0), Steps::Fixed(self.steps));
+            self.width
+                .aim_by(F::from_f32(w.max(0.0)), Steps::Fixed(self.steps));
         }
     }
 
@@ -126,24 +128,25 @@ impl WidthBank {
             &mut left.samples_mut()[..frames],
             &mut right.samples_mut()[..frames],
         );
-        let half = S::from_f64(0.5);
+        let half = F::from_f32(0.5);
         let blended = self.width.blended(frames);
         let taken = self.width.taken();
-        let held = S::from_f64(f64::from(self.width.target()));
-        if blended == 0 && self.width.target() == StereoWidth::NATURAL.get() {
+        let held = self.width.target();
+        if blended == 0 && held == F::from_f32(StereoWidth::NATURAL.get()) {
             out_l.copy_from_slice(l);
             out_r.copy_from_slice(r);
         } else {
             for (i, (((&l, &r), o_l), o_r)) in l.iter().zip(r).zip(out_l).zip(out_r).enumerate() {
                 let w = if i < blended {
                     let step = taken.saturating_add(1).saturating_add(i as u32);
-                    S::from_f64(f64::from(self.width.at(step)))
+                    self.width.at(step)
                 } else {
                     held
                 };
+                let (l, r) = (F::from_f64(l.to_f64()), F::from_f64(r.to_f64()));
                 let (mid, side) = ((l + r) * half, (l - r) * half);
-                *o_l = mid + w * side;
-                *o_r = mid - w * side;
+                *o_l = S::from_f64((mid + w * side).to_f64());
+                *o_r = S::from_f64((mid - w * side).to_f64());
             }
         }
         self.width

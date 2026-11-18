@@ -10,11 +10,11 @@
 //! previous input to this one, which removes most of what the curve folds back past the Nyquist
 //! frequency. The bank then keeps each channel's last two inputs.
 
-use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_types::MAX_CHANNELS;
 use tutti_units::{Drive, SampleRate, Samples};
 
-use crate::{GAIN_GLIDE, Glide, OversamplingFactor, Steps};
+use crate::{GAIN_GLIDE, Glide, Lerp, OversamplingFactor, Steps};
 
 /// The frames a pass over a block takes at a time: the hardness of a stretch is held in a
 /// stack array.
@@ -76,7 +76,7 @@ macro_rules! with_kind {
 mod adaa;
 
 impl ShapeKind {
-    /// Shapes one sample: `x` through this curve at `drive`.
+    /// Shapes one sample: `x` through this curve at `drive`, in the float `F`.
     ///
     /// `drive` is input gain into the curve, floored at 0. For the two
     /// staircases it is instead the number of **levels per unit**, floored at 1
@@ -86,16 +86,16 @@ impl ShapeKind {
     /// output, and none keeps state between calls.
     #[inline]
     #[must_use]
-    pub fn apply(self, x: f32, drive: Drive) -> f32 {
-        self.curve(self.hardness(drive.get()), x)
+    pub fn apply<F: Float>(self, x: F, drive: Drive) -> F {
+        self.curve(self.hardness(F::from_f32(drive.get())), x)
     }
 
     /// The hardness the curve runs at for `drive`, floored the way the kind needs.
     #[inline(always)]
-    fn hardness(self, drive: f32) -> f32 {
-        let drive = drive.max(0.0);
+    fn hardness<F: Float>(self, drive: F) -> F {
+        let drive = drive.max(F::ZERO);
         match self {
-            Self::Crush | Self::SoftCrush => drive.max(1.0),
+            Self::Crush | Self::SoftCrush => drive.max(F::ONE),
             _ => drive,
         }
     }
@@ -105,18 +105,21 @@ impl ShapeKind {
     /// The operation order within each arm is fixed: the pinned values in the
     /// tests depend on it bit for bit.
     #[inline(always)]
-    fn curve(self, hardness: f32, x: f32) -> f32 {
-        use core::f32::consts::PI;
+    fn curve<F: Float>(self, hardness: F, x: F) -> F {
+        let (half, one) = (F::from_f32(0.5), F::ONE);
         match self {
-            Self::Tanh => libm::tanhf(x * hardness),
+            Self::Tanh => (x * hardness).tanh(),
             // Rescaled to saturate at ±1 while keeping unit slope at the origin.
-            Self::Atan => libm::atanf(x * (hardness * PI * 0.5)) * (2.0 / PI),
+            Self::Atan => {
+                // `atan2(y, 1)` is `atan(y)`.
+                (x * (hardness * F::PI * half)).atan2(one) * (F::from_f32(2.0) / F::PI)
+            }
             Self::Softsign => {
                 let y = x * hardness;
-                y / (1.0 + y.abs())
+                y / (one + y.abs())
             }
-            Self::HardClip => (x * hardness).clamp(-1.0, 1.0),
-            Self::Crush => (x * hardness).round() / hardness,
+            Self::HardClip => (x * hardness).clamp(-one, one),
+            Self::Crush => round_half_away(x * hardness) / hardness,
             Self::SoftCrush => {
                 let y = x * hardness;
                 let step = y.floor();
@@ -128,39 +131,45 @@ impl ShapeKind {
     /// `input` through the curve at one `hardness`, into `output`. The loop is compiled
     /// for the kind, so the curve inlines.
     #[inline(always)]
-    fn shape_held<S: Float>(self, hardness: f32, input: &[S], output: &mut [S]) {
+    fn shape_held<F: Float, S: Float>(self, hardness: F, input: &[S], output: &mut [S]) {
         with_kind!(self, |K| {
             for (o, x) in output.iter_mut().zip(input) {
-                *o = K.curve(hardness, x.convert_to::<f32>()).convert_to::<S>();
+                *o = S::from_f64(K.curve(hardness, F::from_f64(x.to_f64())).to_f64());
             }
         })
     }
 
     /// `input` through the curve at a hardness per frame, into `output`.
     #[inline(always)]
-    fn shape_each<S: Float>(self, hardness: &[f32], input: &[S], output: &mut [S]) {
+    fn shape_each<F: Float, S: Float>(self, hardness: &[F], input: &[S], output: &mut [S]) {
         with_kind!(self, |K| {
             for ((o, x), &h) in output.iter_mut().zip(input).zip(hardness) {
-                *o = K.curve(h, x.convert_to::<f32>()).convert_to::<S>();
+                *o = S::from_f64(K.curve(h, F::from_f64(x.to_f64())).to_f64());
             }
         })
     }
 }
 
+/// `x` rounded to the nearest whole number, halves away from zero, in the float `F`. NaN
+/// stays NaN and the sign of zero is kept.
+#[inline(always)]
+fn round_half_away<F: Float>(x: F) -> F {
+    let magnitude = x.abs();
+    let whole = magnitude.floor();
+    let up = if magnitude - whole >= F::from_f32(0.5) {
+        whole + F::ONE
+    } else {
+        whole
+    };
+    up * x.signum()
+}
+
 /// The ninth-order smoothstep: `0 → 0`, `1 → 1`, with the first four
 /// derivatives zero at both ends, so each [`ShapeKind::SoftCrush`] step is a
-/// smooth S rather than a jump. Generic over `f32` and `f64`, whose arithmetic it keeps
-/// separate: the coefficients are exact in both.
+/// smooth S rather than a jump. The coefficients are exact in both widths.
 #[inline]
-fn smooth9<T>(x: T) -> T
-where
-    T: Copy
-        + From<f32>
-        + core::ops::Add<Output = T>
-        + core::ops::Sub<Output = T>
-        + core::ops::Mul<Output = T>,
-{
-    let c = T::from;
+fn smooth9<F: Float>(x: F) -> F {
+    let c = F::from_f32;
     let x2 = x * x;
     ((((c(70.0) * x - c(315.0)) * x + c(540.0)) * x - c(420.0)) * x + c(126.0)) * x2 * x2 * x
 }
@@ -178,7 +187,8 @@ where
 /// limit `2 (F1(m) - D(m, x')) / (m - x')`, and `g(m)` where `|m - x'|` is under 1e-4 too.
 ///
 /// The history is the input before the drive, and the drive of the frame scales all of it, so a
-/// drive change makes no step. The state is `f64`. A non-finite input enters the history as 0,
+/// drive change makes no step. The quotients are formed in `f64`, where the cancellation of the
+/// antiderivatives is conditioned, and the history is kept in the bank's float. A non-finite input enters the history as 0,
 /// so the frame after it (the two after, at second order) reads its segment from 0.
 ///
 /// Each order delays the signal: half a frame at first order, a whole frame at second
@@ -242,25 +252,25 @@ impl WaveshaperControls {
     };
 }
 
-/// A waveshaper of any width: one curve ([`ShapeKind`]) at one drive shared by every
+/// A waveshaper of any width in the float `F`: one curve ([`ShapeKind`]) at one drive shared by every
 /// channel, each channel shaped alone. Memoryless unless [`antialiasing`](Self::antialiasing)
 /// is on, when each channel keeps its last two inputs. At most [`MAX_CHANNELS`] channels wide.
 ///
 /// Built on the control side for one rate; nothing it holds grows.
 #[derive(Clone, Copy, Debug)]
-pub struct WaveshaperBank {
+pub struct WaveshaperBank<F: Float> {
     kind: ShapeKind,
     /// The drive, gliding over [`GAIN_GLIDE`].
-    drive: Glide<f32>,
+    drive: Glide<F>,
     /// The steps a drive glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     /// The order the bank shapes with: the one asked for, within what the kind has.
     antialiasing: Antialiasing,
-    /// Each channel's last two inputs before the drive, newest first.
-    history: [[f64; 2]; MAX_CHANNELS],
+    /// Each channel's last two inputs before the drive, newest first: per-sample values in `F`.
+    history: [[F; 2]; MAX_CHANNELS],
 }
 
-impl WaveshaperBank {
+impl<F: Float + Lerp> WaveshaperBank<F> {
     /// A waveshaper of `kind` at `rate`, at unity drive, to be aimed.
     #[must_use]
     pub fn new(kind: ShapeKind, rate: SampleRate) -> Self {
@@ -269,10 +279,10 @@ impl WaveshaperBank {
         let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
             kind,
-            drive: Glide::landed(WaveshaperControls::DEFAULT.drive.get()),
+            drive: Glide::landed(F::from_f32(WaveshaperControls::DEFAULT.drive.get())),
             steps,
             antialiasing: Antialiasing::Off,
-            history: [[0.0; 2]; MAX_CHANNELS],
+            history: [[F::ZERO; 2]; MAX_CHANNELS],
         }
     }
 
@@ -294,7 +304,7 @@ impl WaveshaperBank {
     /// channel's history.
     pub fn reset(&mut self) {
         self.settle();
-        self.history = [[0.0; 2]; MAX_CHANNELS];
+        self.history = [[F::ZERO; 2]; MAX_CHANNELS];
     }
 
     /// Lands the drive on its target now: back to rest.
@@ -305,7 +315,7 @@ impl WaveshaperBank {
     /// Aims at `controls`: the drive glides over [`GAIN_GLIDE`]. No allocation.
     pub fn aim(&mut self, controls: &WaveshaperControls) {
         self.drive
-            .aim_by(controls.drive.get(), Steps::Fixed(self.steps));
+            .aim_by(F::from_f32(controls.drive.get()), Steps::Fixed(self.steps));
     }
 
     /// Runs `input` into `output`, each channel through the curve at the drive.
@@ -339,7 +349,7 @@ impl WaveshaperBank {
                 );
             }
         } else {
-            let mut hardness = [0.0f32; CHUNK];
+            let mut hardness = [F::ZERO; CHUNK];
             let mut start = 0;
             while start < frames {
                 let end = (start + CHUNK).min(frames);
@@ -347,7 +357,7 @@ impl WaveshaperBank {
                     let i = start + k;
                     let drive = lane
                         .and_then(|l| l.samples().get(i))
-                        .map(|x| x.convert_to::<f32>())
+                        .map(|x| F::from_f64(x.to_f64()))
                         .filter(|d| d.is_finite())
                         .unwrap_or_else(|| {
                             let step = taken.saturating_add(1).saturating_add(i as u32);

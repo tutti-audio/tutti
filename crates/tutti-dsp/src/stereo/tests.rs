@@ -108,7 +108,7 @@ fn a_mono_view_is_left_alone() {
 }
 
 fn widen(width: f32, settle: bool, l: &[f64], r: &[f64]) -> (Vec<f64>, Vec<f64>) {
-    let mut bank = WidthBank::new(SampleRate::SR_48K);
+    let mut bank = WidthBank::<f64>::new(SampleRate::SR_48K);
     bank.aim(&WidthControls {
         width: StereoWidth(width),
     });
@@ -151,7 +151,7 @@ fn the_width_glides_linearly_and_lands_exactly() {
     let (a, b) = widen(0.0, false, &l, &r);
     for i in 0..n {
         let want = 1.0 - (i + 1) as f64 / n as f64;
-        assert!((a[i] - want).abs() < 1e-6, "frame {i}: {}", a[i]);
+        assert!((a[i] - want).abs() < 1e-12, "frame {i}: {}", a[i]);
         assert_eq!(a[i], -b[i]);
     }
     assert!(a[n..].iter().all(|&y| y == 0.0));
@@ -170,9 +170,30 @@ fn a_bad_width_is_refused_or_floored() {
 fn a_mono_view_is_not_widened() {
     let input = vec![vec![1.0f32; 4]];
     let mut out = vec![vec![7.0f32; 4]];
-    WidthBank::new(SampleRate::SR_48K).process(
+    WidthBank::<f64>::new(SampleRate::SR_48K).process(
         Planes::from_vecs(&input).unwrap(),
         PlanesMut::from_vecs(&mut out).unwrap(),
     );
     assert_eq!(out[0], [7.0; 4]);
+}
+
+/// An `f64` bank at width 1 returns a 29-bit signal exactly, and at another width `w` (an
+/// `f32` control read exactly) is `M = (L + R) / 2` and `S = w (L - R) / 2` as `L' = M + S`,
+/// `R' = M - S` in `f64`, to 2^-45.
+#[test]
+fn an_f64_bank_is_the_identity_at_unity_and_the_mid_side_matrix_at_other_widths() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let l = wide_signal(200);
+    let r: Vec<f64> = l.iter().rev().map(|v| v * 0.75).collect();
+    let (a, b) = widen(1.0, true, &l, &r);
+    assert_close_f64(&a, &l, 0.0);
+    assert_close_f64(&b, &r, 0.0);
+    let w = f64::from(0.3f32);
+    let (a, b) = widen(0.3, true, &l, &r);
+    let mid: Vec<f64> = l.iter().zip(&r).map(|(l, r)| (l + r) / 2.0).collect();
+    let side: Vec<f64> = l.iter().zip(&r).map(|(l, r)| w * (l - r) / 2.0).collect();
+    let (want_l, want_r): (Vec<f64>, Vec<f64>) =
+        mid.iter().zip(&side).map(|(m, s)| (m + s, m - s)).unzip();
+    assert_close_f64(&a, &want_l, 2.0f64.powi(-45));
+    assert_close_f64(&b, &want_r, 2.0f64.powi(-45));
 }

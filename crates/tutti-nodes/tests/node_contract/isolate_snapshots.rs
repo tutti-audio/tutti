@@ -177,7 +177,7 @@ fn delay_line() {
 #[test]
 fn distortion() {
     IsolateRow::new("DistortionNode (stereo)", || {
-        DistortionNode::new(ShapeKind::Tanh, Drive(2.0))
+        DistortionNode::<f32>::new(ShapeKind::Tanh, Drive(2.0))
     })
     .control("drive", |d| {
         assert!(d.param_set().set(UnitParam::Drive, 8.0))
@@ -188,7 +188,7 @@ fn distortion() {
 #[test]
 fn bit_crusher() {
     IsolateRow::new("BitCrusherNode (stereo)", || {
-        BitCrusherNode::from(BitCrusherConfig::new(ChannelLayout::STEREO))
+        BitCrusherNode::<f32>::from(BitCrusherConfig::new(ChannelLayout::STEREO))
     })
     .control("bits", |b| {
         assert!(b.param_set().set(UnitParam::BitDepth, 3.0))
@@ -202,7 +202,7 @@ fn bit_crusher() {
 #[test]
 fn stereo_width() {
     IsolateRow::new("StereoWidthNode", || {
-        StereoWidthNode::from(StereoWidthConfig::new().width(StereoWidth(1.5)))
+        StereoWidthNode::<f32>::from(StereoWidthConfig::new().width(StereoWidth(1.5)))
     })
     .control("width", |w| {
         assert!(w.param_set().set(UnitParam::StereoWidth, 0.25))
@@ -227,7 +227,7 @@ fn tremolo() {
 #[test]
 fn dc_blocker() {
     IsolateRow::new("DcBlockerNode (stereo)", || {
-        DcBlockerNode::from(DcBlockerConfig::new(ChannelLayout::STEREO))
+        DcBlockerNode::<f32>::from(DcBlockerConfig::new(ChannelLayout::STEREO))
     })
     .control("corner", |d| {
         assert!(d.param_set().set(UnitParam::Cutoff, 80.0))

@@ -205,7 +205,8 @@ param_session_node!(
     tutti_nodes::GateNode,
     tutti_nodes::LimiterNode,
     tutti_nodes::BrickwallLimiterNode,
-    tutti_nodes::DistortionNode,
+    tutti_nodes::DistortionNode<f32>,
+    tutti_nodes::DistortionNode<f64>,
     tutti_nodes::BusStripNode,
     tutti_nodes::CrossoverNode,
 );

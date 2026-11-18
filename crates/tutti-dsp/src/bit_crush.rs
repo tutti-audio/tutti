@@ -54,6 +54,21 @@ fn levels(bits: BitDepth) -> f64 {
     }
 }
 
+/// `x` rounded to the nearest whole number, ties to even, in the float `F`: adding and
+/// removing `2^p` (`p` the width of `F`'s significand, `1 / EPSILON`) leaves an integer
+/// below it, and a value at or past it is already one. NaN stays NaN and the sign of zero is
+/// kept.
+#[inline(always)]
+fn round_ties_even<F: Float>(x: F) -> F {
+    let span = F::ONE / F::EPSILON;
+    let magnitude = x.abs();
+    if magnitude >= span {
+        x
+    } else {
+        ((magnitude + span) - span) * x.signum()
+    }
+}
+
 /// `x` quantized to `bits`: `clamp(round(x q) / q, -1, 1)` with `q = 2^(b-1)`.
 ///
 /// The rounding is half to even. A whole depth `b` has the steps `j / q` for the integers
@@ -61,15 +76,16 @@ fn levels(bits: BitDepth) -> f64 {
 /// depth keeps the same rule with a real `q`, so its steps are `j / q` for the integers
 /// `j` with `|j / q| <= 1`, and the ends `-1` and `1` too where `round(q) / q` is above 1.
 /// The clamp holds a value past `+-1` at the end level. NaN stays NaN, and an infinity is
-/// an end level.
+/// an end level. `q` is read in `f64` and narrowed to `F` once.
 #[must_use]
-pub fn quantize(x: f64, bits: BitDepth) -> f64 {
-    crush(x, levels(bits))
+pub fn quantize<F: Float>(x: F, bits: BitDepth) -> F {
+    crush(x, F::from_f64(levels(bits)))
 }
 
 /// [`quantize`] with `q` already read from the depth.
-fn crush(x: f64, q: f64) -> f64 {
-    ((x * q).round_ties_even() / q).clamp(-1.0, 1.0)
+#[inline(always)]
+fn crush<F: Float>(x: F, q: F) -> F {
+    (round_ties_even(x * q) / q).clamp(-F::ONE, F::ONE)
 }
 
 /// The controls of a [`BitCrusher`].
@@ -90,28 +106,28 @@ impl BitCrusherControls {
     };
 }
 
-/// A bit crusher of any width: one held value per channel, one frame count for all.
+/// A bit crusher of any width in the float `F`: one held value per channel, one frame count
+/// for all.
 ///
-/// The state is `f64` whatever the sample format. Built on the control side; nothing it
-/// holds grows. Its controls land whole.
+/// Built on the control side; nothing it holds grows. Its controls land whole.
 #[derive(Clone, Debug)]
-pub struct BitCrusher {
+pub struct BitCrusher<F: Float> {
     controls: BitCrusherControls,
     /// Frames since the last capture; the next frame captures when it is 0 or has reached
     /// the hold.
     since: usize,
-    /// The held input of each channel.
-    held: Vec<f64>,
+    /// The held input of each channel: a per-sample value in `F`.
+    held: Vec<F>,
 }
 
-impl BitCrusher {
+impl<F: Float> BitCrusher<F> {
     /// A crusher of `width` channels with `controls`, silent: its first frame captures.
     #[must_use]
     pub fn new(width: ChannelLayout, controls: BitCrusherControls) -> Self {
         Self {
             controls,
             since: 0,
-            held: vec![0.0; usize::from(width.count())],
+            held: vec![F::ZERO; usize::from(width.count())],
         }
     }
 
@@ -122,7 +138,7 @@ impl BitCrusher {
 
     /// Back to silence: the next frame captures.
     pub fn reset(&mut self) {
-        self.held.fill(0.0);
+        self.held.fill(F::ZERO);
         self.since = 0;
     }
 
@@ -132,7 +148,8 @@ impl BitCrusher {
     pub fn process<S: Float>(&mut self, input: Planes<'_, S>, mut output: PlanesMut<'_, '_, S>) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels()).min(self.held.len());
-        let (hold, q) = (hold_frames(self.controls.hold), levels(self.controls.bits));
+        let hold = hold_frames(self.controls.hold);
+        let q = F::from_f64(levels(self.controls.bits));
         let start = self.since;
         let mut end = start;
         for (c, held) in self.held.iter_mut().enumerate().take(width) {
@@ -145,10 +162,10 @@ impl BitCrusher {
                     since = 0;
                 }
                 if since == 0 {
-                    *held = x.to_f64();
+                    *held = F::from_f64(x.to_f64());
                 }
                 since += 1;
-                *y = S::from_f64(crush(*held, q));
+                *y = S::from_f64(crush(*held, q).to_f64());
             }
             end = since;
         }
