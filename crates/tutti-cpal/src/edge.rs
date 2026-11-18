@@ -4,6 +4,8 @@
 //! ([`BackendErrorKind`]) and its latency is a bare `Option<Duration>`. This
 //! module is where cpal's stream errors and callback timestamps are read into
 //! them, once, for the output driver and the capture stream alike.
+//! It also holds the offset-binary sample formats (`u8`, `u16`, `u32`), converted
+//! by the rule in `Sample` on the signed format of their width.
 //!
 //! cpal stamps each callback with two instants
 //! ([`OutputStreamTimestamp`](cpal::OutputStreamTimestamp): the callback and
