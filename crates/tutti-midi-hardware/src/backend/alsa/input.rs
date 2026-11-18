@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use super::poll::ErrorRun;
 use crate::InputProducerHandle;
 use crate::endpoints::InputConnection;
-use crate::error::Result;
+use crate::error::{MidiHardwareError, MidiThread, Result};
 use crate::guard::Guard;
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
@@ -93,9 +93,9 @@ pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> Ump
 ///
 /// # Errors
 ///
-/// [`Error::Os`](crate::Error::Os) if the sequencer cannot be opened, the
+/// [`MidiHardwareError::Os`] if the sequencer cannot be opened, the
 /// port created, or the subscription made, and
-/// [`Error::MidiDevice`](crate::Error::MidiDevice) if the pump thread cannot be
+/// [`MidiHardwareError::Spawn`] if the pump thread cannot be
 /// spawned. A source client that exits while the open reads its Endpoint record
 /// fails the open (`ENOENT`) rather than opening as a legacy port.
 pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn InputConnection>> {
@@ -147,25 +147,30 @@ pub(super) fn prepare(id: EndpointId) -> Result<(Client, QueueClock)> {
 ///
 /// # Errors
 ///
-/// [`Error::Os`](crate::Error::Os) if the client's descriptors cannot be
-/// polled, and [`Error::MidiDevice`](crate::Error::MidiDevice) if the stop pair
-/// or the pump thread cannot be made.
+/// [`MidiHardwareError::Os`] if the client's descriptors cannot be
+/// polled, [`MidiHardwareError::Io`] if the stop pair cannot be made, and
+/// [`MidiHardwareError::Spawn`] if the pump thread cannot start.
 pub(super) fn start(
     seq: Client,
     clock: QueueClock,
     producer: InputProducerHandle,
 ) -> Result<AlsaInput> {
-    let (stop_tx, stop_rx) = UnixStream::pair()
-        .map_err(|e| crate::error::Error::device_from("MIDI pump stop pair", e))?;
+    let (stop_tx, stop_rx) = UnixStream::pair().map_err(|source| MidiHardwareError::Io {
+        step: "make the MIDI pump's stop pair",
+        source,
+    })?;
     let seq = seq.into_poller(OwnedFd::from(stop_rx))?;
     let died = Arc::new(FaultLatch::new());
     let flag = Arc::clone(&died);
-    let thread = spawn_named("tutti-midi-in", None, move |_| {
+    let thread = spawn_named(MidiThread::MidiIn.name(), None, move |_| {
         // A panic in the pump ends it with the input held, so it is caught
         // and raises the latch, as an error does.
         Guard::new(Arc::clone(&flag)).run(|| pump(seq, clock, &flag, producer));
     })
-    .map_err(|e| crate::error::Error::device_from("spawn MIDI pump", e))?;
+    .map_err(|source| MidiHardwareError::Spawn {
+        thread: MidiThread::MidiIn,
+        source,
+    })?;
 
     Ok(AlsaInput {
         stop: Some(stop_tx),

@@ -854,16 +854,21 @@ fn a_dead_device_watch_is_reported_once() {
         events
             .iter()
             .filter_map(|e| match e {
-                SessionEvent::Midi(MidiReport::WatchFailed(why)) => Some(why.to_string()),
+                SessionEvent::Midi(MidiReport::WatchFailed(why)) => Some(why.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>()
     };
     assert!(failed(&s.update()).is_empty());
-    fake.fail_watch("the sequencer went away");
-    assert_eq!(
-        failed(&s.update()),
-        ["MIDI port error: the sequencer went away"]
+    fake.fail_watch();
+    let died = failed(&s.update());
+    assert!(
+        matches!(
+            died.as_slice(),
+            [tutti_midi_hardware::WatchFailure::Failed(e)]
+                if matches!(**e, tutti_midi_hardware::MidiHardwareError::DescriptorBroken)
+        ),
+        "{died:?}"
     );
     assert!(failed(&s.update()).is_empty(), "once");
 }

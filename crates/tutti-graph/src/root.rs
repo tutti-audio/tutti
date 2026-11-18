@@ -2,7 +2,7 @@
 //! topology, so how a root of known or bare channels reaches a device or a
 //! file of which only the width is known lives here, once.
 
-use tutti_buffers::{Fold, FoldEnd, FoldError, FoldLevels};
+use tutti_buffers::{Float, Fold, FoldEnd, FoldError, FoldLevels};
 use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 
 /// The generation of the graph root: each commit that changes the root's
@@ -122,7 +122,10 @@ pub enum RootError {
 /// # Errors
 ///
 /// As [`fold_to_topology`].
-pub fn fold_to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, FoldError> {
+pub fn fold_to_width<F: Float>(
+    src: &ChannelTopology,
+    dst: ChannelLayout,
+) -> Result<Fold<F>, FoldError> {
     fold_to_topology(src, &ChannelTopology::assumed(dst))
 }
 
@@ -147,7 +150,10 @@ pub fn fold_to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, 
 ///
 /// As [`Fold::between`] and [`Fold::by_index`], and [`FoldError::Unnamed`] as
 /// above.
-pub fn fold_to_topology(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Fold, FoldError> {
+pub fn fold_to_topology<F: Float>(
+    src: &ChannelTopology,
+    dst: &ChannelTopology,
+) -> Result<Fold<F>, FoldError> {
     fold_to_topology_with(src, dst, FoldLevels::default())
 }
 
@@ -158,11 +164,11 @@ pub fn fold_to_topology(src: &ChannelTopology, dst: &ChannelTopology) -> Result<
 /// # Errors
 ///
 /// As [`fold_to_topology`].
-pub fn fold_to_topology_with(
+pub fn fold_to_topology_with<F: Float>(
     src: &ChannelTopology,
     dst: &ChannelTopology,
     levels: FoldLevels,
-) -> Result<Fold, FoldError> {
+) -> Result<Fold<F>, FoldError> {
     if let Some(channel) = src
         .positions()
         .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))))

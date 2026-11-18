@@ -12,7 +12,7 @@ use tutti_rt::{Counter, CounterWriter, LockExt, counter};
 
 use crate::backend::by_message::{Refused, by_message};
 use crate::endpoints::DeviceOut;
-use crate::error::{Error, NotFound, Result};
+use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
     Blocking, Client, Packet, PortCaps, PortId, PortKind, QueueClock, UmpVersion,
@@ -121,7 +121,7 @@ impl MidiOut for AlsaOutput {
                 })?;
                 if free < needed {
                     return Err(Refused {
-                        error: Error::OutputPoolFull { free, needed },
+                        error: MidiHardwareError::OutputPoolFull { free, needed },
                         sent: 0,
                     });
                 }
@@ -148,7 +148,7 @@ impl DeviceOut for AlsaOutput {
 ///
 /// # Errors
 ///
-/// [`Error::Os`] if the sequencer cannot be opened, the
+/// [`MidiHardwareError::Os`] if the sequencer cannot be opened, the
 /// port created, or the subscription to `id` made.
 pub fn open(id: EndpointId) -> Result<Box<dyn DeviceOut>> {
     Ok(Box::new(connect(id)?))

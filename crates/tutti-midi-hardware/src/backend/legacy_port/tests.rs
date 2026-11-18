@@ -12,7 +12,7 @@ use crate::Devices;
 use crate::capability::{OsEndpoint, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, Result};
 use tutti_midi_device::{DeviceEvent, EndpointId, Identity, OsDevice, PortDirection, WinMmDevice};
 use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
 
@@ -565,10 +565,10 @@ impl MidiEndpoints for Polled {
         _: EndpointId,
         _: crate::InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        Err(Error::Unsupported("test"))
+        Err(MidiHardwareError::Unsupported("test"))
     }
     fn open_output(&self, _: EndpointId) -> Result<Box<dyn DeviceOut>> {
-        Err(Error::Unsupported("test"))
+        Err(MidiHardwareError::Unsupported("test"))
     }
 }
 

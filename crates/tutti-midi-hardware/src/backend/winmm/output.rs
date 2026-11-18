@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use super::super::legacy_port::bytes::{ByteOut, Wire};
 use super::super::legacy_port::sender::{Mailbox, run};
 use crate::endpoints::DeviceOut;
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_graph::Losses;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_rt::{CounterWriter, ThreadHandle, spawn_named};
@@ -126,20 +126,23 @@ fn thread(mut port: Port, mut wait: TimerWaiter, losses: CounterWriter<Losses>, 
 ///
 /// # Errors
 ///
-/// [`Error::Os`](crate::Error::Os) from the port's or the timer's creation, and
-/// [`Error::MidiDevice`] if the thread cannot be spawned.
+/// [`MidiHardwareError::Os`] from the port's or the timer's creation, and
+/// [`MidiHardwareError::Spawn`] if the thread cannot be spawned.
 pub(super) fn open(port: &OutputPort) -> Result<WinMmOutput> {
     let port = Port::open(port)?;
     let (wake, wait) = waitable_timer()?;
     let (mailbox, losses) = Mailbox::new();
     let shared = Arc::new(Shared { mailbox, wake });
-    let thread = spawn_named("tutti-midi-out", None, {
+    let thread = spawn_named(MidiThread::MidiOut.name(), None, {
         let shared = Arc::clone(&shared);
         move |_| {
             thread(port, wait, losses, &shared);
         }
     })
-    .map_err(|e| Error::device_from("spawn MIDI output thread", e))?;
+    .map_err(|source| MidiHardwareError::Spawn {
+        thread: MidiThread::MidiOut,
+        source,
+    })?;
     Ok(WinMmOutput {
         shared,
         thread: Some(thread),

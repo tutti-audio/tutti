@@ -91,13 +91,15 @@ fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
         MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
     // A name that matches nothing says what it searched, so a typo shows what
     // was there.
-    let Err(Error::NoDeviceNamed { name, searched }) = s.connect_input("nonexistent") else {
+    let Err(MidiHardwareError::NoDeviceNamed { name, searched }) = s.connect_input("nonexistent")
+    else {
         panic!("a name that matches no input is NoDeviceNamed");
     };
     assert_eq!(name, "nonexistent");
     assert_eq!(searched, ["IAC Bus 1", "Keystep Pro"], "the inputs, by id");
     // The output side searches the outputs.
-    let Err(Error::NoDeviceNamed { searched, .. }) = s.connect_output("nonexistent") else {
+    let Err(MidiHardwareError::NoDeviceNamed { searched, .. }) = s.connect_output("nonexistent")
+    else {
         panic!("a name that matches no output is NoDeviceNamed");
     };
     assert_eq!(searched, ["IAC Bus 1", "Synth A"], "the outputs, by id");
@@ -359,7 +361,7 @@ impl MidiEndpoints for LoggingBackend {
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         if self.refuse {
-            return Err(Error::device("refused"));
+            return Err(MidiHardwareError::Unsupported("refused"));
         }
         Ok(Box::new(LoggingConnection {
             log: Arc::clone(&self.log),
@@ -367,7 +369,7 @@ impl MidiEndpoints for LoggingBackend {
         }))
     }
     fn open_output(&self, _id: EndpointId) -> Result<Box<dyn DeviceOut>> {
-        Err(Error::device("no outputs"))
+        Err(MidiHardwareError::Unsupported("no outputs"))
     }
 }
 

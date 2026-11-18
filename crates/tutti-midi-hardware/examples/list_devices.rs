@@ -15,9 +15,9 @@
 
 use std::time::{Duration, Instant};
 
-use tutti_midi_hardware::{Devices, Error, RecvTimeoutError};
+use tutti_midi_hardware::{Devices, RecvTimeoutError};
 
-fn main() -> Result<(), Error> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let devices = Devices::open()?;
     let events = devices.subscribe();
 
@@ -52,7 +52,7 @@ fn main() -> Result<(), Error> {
         match events.recv_timeout(left) {
             Ok(event) => println!("  {event:?}"),
             Err(RecvTimeoutError::Timeout) => {}
-            Err(ended) => return Err(Error::port_from("the device watch ended", ended)),
+            Err(ended) => return Err(ended.into()),
         }
     }
     Ok(())
