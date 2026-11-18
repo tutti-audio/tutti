@@ -90,16 +90,17 @@ struct RampEvery {
 }
 
 impl RampEvery {
-    fn ramp(&self, v: f32) -> ParamRamp {
+    fn ramp(&self, v: f64) -> ParamRamp {
         match self.param {
             UnitParam::Cutoff => ParamRamp::new(
                 tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
-                tutti_units::Hz(f64::from(v)),
+                tutti_units::Hz(v),
                 Samples(20),
             ),
             _ => ParamRamp::new(
                 tutti_units::ParamKey::<tutti_units::Q>::Q,
-                tutti_units::Q(v),
+                // `Q` is an `f32` unit: it narrows at its param write.
+                tutti_units::Q(v as f32),
                 Samples(20),
             ),
         }
@@ -122,7 +123,7 @@ impl Node for RampEvery {
                 let o = io.offset(i).expect("inside");
                 let event = match (f / 37) % 3 {
                     // A linear ramp, from wherever the source is.
-                    0 => tutti_graph::Event::ramp(o, self.ramp((f % 5) as f32)),
+                    0 => tutti_graph::Event::ramp(o, self.ramp((f % 5) as f64)),
                     // A curve segment spanning the next event: interrupted.
                     k => {
                         let shape = [

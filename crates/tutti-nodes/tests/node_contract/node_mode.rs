@@ -34,7 +34,7 @@ fn set_mode<C>(solo: &mut Solo<C>, mode: NodeMode) {
 /// denormal beyond the declick, which a copy keeps and arithmetic would not.
 fn input() -> Vec<f32> {
     let mut x: Vec<f32> = (0..FRAMES)
-        .map(|i| (std::f32::consts::TAU * 1_000.0 * i as f32 / 48_000.0).sin())
+        .map(|i| ((std::f64::consts::TAU * 1_000.0 * i as f64 / 48_000.0).sin()) as f32)
         .collect();
     x[declick_frames(RATE).get() + 10] = -0.0;
     x[declick_frames(RATE).get() + 11] = f32::from_bits(1);
