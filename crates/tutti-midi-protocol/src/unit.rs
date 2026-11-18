@@ -1,55 +1,19 @@
-//! A native UMP integer as the unit float a DSP node wants, and back.
+//! A native UMP pitch bend as the signed unit float a DSP node wants, and back.
 //!
-//! These map a native UMP integer to the `[0.0, 1.0]` / `[-1.0, 1.0]` range a
-//! DSP node wants. They are a lossy convenience for the audio edge, not part of
-//! the MIDI 1.0 to 2.0 resolution path (`widen` and the `narrow_*` family):
-//! `value_to_unit_f32` loses low bits through f32's 24-bit mantissa. Consumers
-//! call these at their own boundary, not through a shared decode layer.
-//!
-//! **Where the types stop**: these return a bare
-//! `f32`, and the reason is that the number has no meaning of its own. A
-//! normalized `[0, 1]` controller value is a velocity, a pressure, a
-//! controller position or a plugin's normalized parameter, depending on who
-//! reads it, and a bend in `[-1, 1]` is a position on a range the receiver
-//! owns (`PitchBendSensitivity` is that range). No `tutti_units` unit covers
-//! these ranges without lending a meaning that is not the packet's (`Mix` is a
-//! position among a node's own settings, `Depth` a modulation amount,
-//! `Amplitude` a gain), so each caller wraps the value in the unit it means at
-//! its own seam. The inverses take the same bare `f32`, as the plugin formats
-//! carry it, and clamp.
+//! A bend in `[-1.0, 1.0]` is a position on a range the receiver owns
+//! (`PitchBendSensitivity` is that range), so these return a bare `f32` and the
+//! caller wraps it in the unit it means at its own seam. The inverse takes the
+//! same bare `f32`, as the plugin formats carry it, and clamps. They are a
+//! convenience for the audio edge, not part of the MIDI 1.0 to 2.0 resolution
+//! path (`widen` and the `narrow_*` family). The velocity and controller
+//! scalings are `NoteVelocity::normalized` and `ControlValue::normalized`.
 
-use tutti_ump::{BendValue, ControlValue, NoteVelocity};
-
-/// A MIDI 2.0 velocity → `[0.0, 1.0]`.
-#[inline]
-pub fn velocity_to_unit_f32(v: NoteVelocity) -> f32 {
-    f32::from(v.get()) / f32::from(u16::MAX)
-}
-
-/// A MIDI 2.0 controller value → `[0.0, 1.0]`.
-#[inline]
-pub fn value_to_unit_f32(v: ControlValue) -> f32 {
-    (v.get() as f64 / u32::MAX as f64) as f32
-}
+use tutti_ump::BendValue;
 
 /// A MIDI 2.0 pitch bend (centre [`BendValue::CENTER`]) → `[-1.0, 1.0]`.
 #[inline]
 pub fn bend_to_signed_f32(v: BendValue) -> f32 {
     ((v.get() as f64 - 0x8000_0000_u32 as f64) / 0x8000_0000_u32 as f64) as f32
-}
-
-/// `[0.0, 1.0]` → a MIDI 2.0 velocity. Inverse of [`velocity_to_unit_f32`];
-/// clamps.
-#[inline]
-pub fn unit_f32_to_velocity(v: f32) -> NoteVelocity {
-    NoteVelocity::new(libm::round(v.clamp(0.0, 1.0) as f64 * u16::MAX as f64) as u16)
-}
-
-/// `[0.0, 1.0]` → a MIDI 2.0 controller value. Inverse of
-/// [`value_to_unit_f32`]; clamps.
-#[inline]
-pub fn unit_f32_to_value(v: f32) -> ControlValue {
-    ControlValue::new(libm::round(v.clamp(0.0, 1.0) as f64 * u32::MAX as f64) as u32)
 }
 
 /// `[-1.0, 1.0]` → a MIDI 2.0 pitch bend. Inverse of [`bend_to_signed_f32`];
