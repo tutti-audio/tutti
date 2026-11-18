@@ -2,10 +2,16 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
+use tutti_units::{Amplitude, Seconds};
+
 use crate::envelope_stage::EnvelopeStage;
 use crate::render::Render;
 use crate::soundfont_math::SoundFontMath;
 
+/// The volume envelope (SF2 2.04 section 8.1.2, generators 33 to 38) read once a chunk.
+/// Every stage is a closed form of the time elapsed, in `f64`: the fall of a decay or a
+/// release is `exp(slope * t)` from where the stage began, so a release of the longest
+/// time at the highest rate reaches its level exactly at any width the voice mixes in.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub(crate) struct VolumeEnvelope {
@@ -15,83 +21,87 @@ pub(crate) struct VolumeEnvelope {
     decay_slope: f64,
     release_slope: f64,
 
-    attack_start_time: f64,
-    hold_start_time: f64,
-    decay_start_time: f64,
-    release_start_time: f64,
+    attack_start_time: Seconds,
+    hold_start_time: Seconds,
+    decay_start_time: Seconds,
+    release_start_time: Seconds,
 
-    sustain_level: f32,
-    release_level: f32,
+    sustain_level: Amplitude,
+    release_level: Amplitude,
 
     processed_sample_count: usize,
     stage: EnvelopeStage,
-    value: f32,
+    value: Amplitude,
 }
 
 impl VolumeEnvelope {
     pub(crate) fn new(settings: &Render) -> Self {
         Self {
             sample_rate: settings.hz(),
-            attack_slope: 0_f64,
-            decay_slope: 0_f64,
-            release_slope: 0_f64,
-            attack_start_time: 0_f64,
-            hold_start_time: 0_f64,
-            decay_start_time: 0_f64,
-            release_start_time: 0_f64,
-            sustain_level: 0_f32,
-            release_level: 0_f32,
+            attack_slope: 0.0,
+            decay_slope: 0.0,
+            release_slope: 0.0,
+            attack_start_time: Seconds(0.0),
+            hold_start_time: Seconds(0.0),
+            decay_start_time: Seconds(0.0),
+            release_start_time: Seconds(0.0),
+            sustain_level: Amplitude::SILENT,
+            release_level: Amplitude::SILENT,
             processed_sample_count: 0,
             stage: EnvelopeStage::Delay,
-            value: 0_f32,
+            value: Amplitude::SILENT,
         }
     }
 
     pub(crate) fn start(
         &mut self,
-        delay: f32,
-        attack: f32,
-        hold: f32,
-        decay: f32,
-        sustain: f32,
-        release: f32,
+        delay: Seconds,
+        attack: Seconds,
+        hold: Seconds,
+        decay: Seconds,
+        sustain: Amplitude,
+        release: Seconds,
     ) {
-        self.attack_slope = 1_f64 / attack as f64;
-        self.decay_slope = -SoundFontMath::HUNDRED_DB_NEPERS / decay as f64;
-        self.release_slope = -SoundFontMath::HUNDRED_DB_NEPERS / release as f64;
+        self.attack_slope = 1.0 / attack.get();
+        self.decay_slope = -SoundFontMath::HUNDRED_DB_NEPERS / decay.get();
+        self.release_slope = -SoundFontMath::HUNDRED_DB_NEPERS / release.get();
 
-        self.attack_start_time = delay as f64;
-        self.hold_start_time = self.attack_start_time + attack as f64;
-        self.decay_start_time = self.hold_start_time + hold as f64;
-        self.release_start_time = 0_f64;
+        self.attack_start_time = delay;
+        self.hold_start_time = self.attack_start_time + attack;
+        self.decay_start_time = self.hold_start_time + hold;
+        self.release_start_time = Seconds(0.0);
 
-        self.sustain_level = SoundFontMath::clamp(sustain, 0_f32, 1_f32);
-        self.release_level = 0_f32;
+        self.sustain_level = sustain.clamp(Amplitude::SILENT, Amplitude::UNITY);
+        self.release_level = Amplitude::SILENT;
 
         self.processed_sample_count = 0;
         self.stage = EnvelopeStage::Delay;
-        self.value = 0_f32;
+        self.value = Amplitude::SILENT;
 
         self.process(0);
     }
 
+    fn elapsed(&self) -> Seconds {
+        Seconds(self.processed_sample_count as f64 / f64::from(self.sample_rate))
+    }
+
     pub(crate) fn release(&mut self) {
         self.stage = EnvelopeStage::Release;
-        self.release_start_time = self.processed_sample_count as f64 / self.sample_rate as f64;
+        self.release_start_time = self.elapsed();
         self.release_level = self.value;
     }
 
-    /// Releases within `seconds` at the longest: the release already running,
+    /// Releases within `time` at the longest: the release already running,
     /// or the one to come, is made at least as steep as one that falls 100 dB
     /// in that time (the definition of a release time, generator 38).
     /// Called on a voice that is releasing, it continues from the level it
     /// has and never slows the fall.
-    pub(crate) fn release_within(&mut self, seconds: f32) {
+    pub(crate) fn release_within(&mut self, time: Seconds) {
         self.release_slope = self
             .release_slope
-            .min(-SoundFontMath::HUNDRED_DB_NEPERS / seconds as f64);
+            .min(-SoundFontMath::HUNDRED_DB_NEPERS / time.get());
         if self.stage == EnvelopeStage::Release {
-            self.release_start_time = self.processed_sample_count as f64 / self.sample_rate as f64;
+            self.release_start_time = self.elapsed();
             self.release_level = self.value;
         }
     }
@@ -99,7 +109,7 @@ impl VolumeEnvelope {
     pub(crate) fn process(&mut self, sample_count: usize) -> bool {
         self.processed_sample_count += sample_count;
 
-        let current_time = self.processed_sample_count as f64 / self.sample_rate as f64;
+        let current_time = self.elapsed();
 
         while self.stage <= EnvelopeStage::Hold {
             let end_time = match self.stage {
@@ -117,37 +127,37 @@ impl VolumeEnvelope {
 
         match self.stage {
             EnvelopeStage::Delay => {
-                self.value = 0_f32;
+                self.value = Amplitude::SILENT;
                 true
             }
             EnvelopeStage::Attack => {
-                self.value = (self.attack_slope * (current_time - self.attack_start_time)) as f32;
+                self.value =
+                    Amplitude(self.attack_slope * (current_time - self.attack_start_time).get());
                 true
             }
             EnvelopeStage::Hold => {
-                self.value = 1_f32;
+                self.value = Amplitude::UNITY;
                 true
             }
             EnvelopeStage::Decay => {
-                self.value = SoundFontMath::max(
-                    SoundFontMath::exp_cutoff(
-                        self.decay_slope * (current_time - self.decay_start_time),
-                    ) as f32,
-                    self.sustain_level,
-                );
+                self.value = Amplitude(SoundFontMath::exp_cutoff(
+                    self.decay_slope * (current_time - self.decay_start_time).get(),
+                ))
+                .max(self.sustain_level);
                 self.value > SoundFontMath::NON_AUDIBLE
             }
             EnvelopeStage::Release => {
-                self.value = (self.release_level as f64
+                self.value = self.release_level
                     * SoundFontMath::exp_cutoff(
-                        self.release_slope * (current_time - self.release_start_time),
-                    )) as f32;
+                        self.release_slope * (current_time - self.release_start_time).get(),
+                    );
                 self.value > SoundFontMath::NON_AUDIBLE
             }
         }
     }
 
-    pub(crate) fn value(&self) -> f32 {
+    /// The level at the last chunk.
+    pub(crate) fn value(&self) -> Amplitude {
         self.value
     }
 }
@@ -156,24 +166,42 @@ impl VolumeEnvelope {
 /// release (generator 38) times are the time to fall 100 dB, at a constant dB
 /// per time unit. So half the time on, the level is 50 dB down from where the
 /// phase began, whatever that level was.
+///
+/// The envelope is a closed form of the time elapsed in `f64`, and every time
+/// here is a whole number of frames, so the fall is the figure to the rounding
+/// of `exp` and `log10`: `1e-12` dB.
 #[cfg(test)]
 mod tests {
-    use tutti_units::SampleRate;
+    use tutti_units::{Amplitude, Db, SampleRate, Seconds};
 
     use super::VolumeEnvelope;
     use crate::render::Render;
 
     const RATE: f64 = 48_000.0;
+    /// The tolerance of a fall in decibels: a few units of `2^-52` on a level
+    /// that is a time's `exp`, then a `log10` and a scale of 20.
+    const DB: f64 = 1e-12;
 
-    fn envelope(decay: f32, sustain: f32, release: f32) -> VolumeEnvelope {
+    fn envelope(decay: f64, sustain: Amplitude, release: f64) -> VolumeEnvelope {
         let mut envelope = VolumeEnvelope::new(&Render::new(SampleRate::of(RATE)));
         // No delay, a 1 ms attack, no hold.
-        envelope.start(0.0, 0.001, 0.0, decay, sustain, release);
+        envelope.start(
+            Seconds(0.0),
+            Seconds(0.001),
+            Seconds(0.0),
+            Seconds(decay),
+            sustain,
+            Seconds(release),
+        );
         envelope
     }
 
-    fn db(level: f32) -> f64 {
-        tutti_units::Db::from_amplitude(tutti_units::Amplitude::new(f64::from(level))).get()
+    fn db(level: Amplitude) -> f64 {
+        Db::from_amplitude(level).get()
+    }
+
+    fn frames(seconds: f64) -> usize {
+        (seconds * RATE).round() as usize
     }
 
     /// Release: from the level at key-off, `fraction` of the release time on is
@@ -183,22 +211,20 @@ mod tests {
     fn a_release_falls_100_db_in_its_time() {
         // Key-off from full level, and from the sustain at -6 dB: the fall is
         // the same 100 dB a release time, from wherever it starts.
-        for (sustain_db, fractions) in [(0.0_f32, [0.1, 0.3, 0.5]), (6.0, [0.1, 0.3, 0.5])] {
-            let sustain = tutti_units::Db::new(f64::from(-sustain_db))
-                .to_amplitude()
-                .get() as f32;
+        for sustain_db in [0.0, 6.0] {
+            let sustain = Db::new(-sustain_db).to_amplitude();
             let mut envelope = envelope(1.0, sustain, 2.0);
-            envelope.process(RATE as usize / 2);
+            envelope.process(frames(0.5));
             let before = db(envelope.value());
             envelope.release();
-            let mut elapsed = 0.0_f32;
-            for fraction in fractions {
-                let to = fraction * 2.0;
-                envelope.process(((to - elapsed) * RATE as f32) as usize);
+            let mut elapsed = 0;
+            for fraction in [0.1, 0.3, 0.5] {
+                let to = frames(fraction * 2.0);
+                envelope.process(to - elapsed);
                 elapsed = to;
                 let fell = before - db(envelope.value());
                 assert!(
-                    (fell - f64::from(100.0 * fraction)).abs() < 0.2,
+                    (fell - 100.0 * fraction).abs() < DB,
                     "{fraction} of the release is {fell} dB down, not {}",
                     100.0 * fraction
                 );
@@ -211,15 +237,14 @@ mod tests {
     /// Spec: sf2.synth.env.decay-time, sf2.synth.env.decay-linear, sf2.gen.decayVolEnv
     #[test]
     fn a_decay_falls_100_db_in_its_time() {
-        let mut envelope = envelope(2.0, 0.0, 1.0);
-        let attack = (0.001 * RATE) as usize;
-        envelope.process(attack);
-        for fraction in [0.1_f32, 0.3, 0.5] {
+        let mut envelope = envelope(2.0, Amplitude::SILENT, 1.0);
+        envelope.process(frames(0.001));
+        for fraction in [0.1, 0.3, 0.5] {
             let mut again = envelope.clone();
-            again.process((fraction * 2.0 * RATE as f32) as usize);
+            again.process(frames(fraction * 2.0));
             let fell = -db(again.value());
             assert!(
-                (fell - f64::from(100.0 * fraction)).abs() < 0.2,
+                (fell - 100.0 * fraction).abs() < DB,
                 "{fraction} of the decay is {fell} dB down"
             );
         }
@@ -230,11 +255,11 @@ mod tests {
     /// Spec: sf2.gen.exclusiveClass
     #[test]
     fn a_quick_release_falls_100_db_in_its_time() {
-        let mut envelope = envelope(10.0, 1.0, 5.0);
-        envelope.process(RATE as usize / 100);
-        envelope.release_within(0.01);
+        let mut envelope = envelope(10.0, Amplitude::UNITY, 5.0);
+        envelope.process(frames(0.01));
+        envelope.release_within(Seconds(0.01));
         envelope.release();
-        envelope.process(RATE as usize / 200);
-        assert!((-db(envelope.value()) - 50.0).abs() < 0.2);
+        envelope.process(frames(0.005));
+        assert!((-db(envelope.value()) - 50.0).abs() < DB);
     }
 }

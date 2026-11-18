@@ -67,7 +67,7 @@ impl Voices {
     /// search.
     pub(crate) fn level(&self, id: VoiceId) -> Option<Amplitude> {
         let i = self.active.binary_search_by_key(&id, |s| s.id).ok()?;
-        Some(Amplitude(f64::from(self.active[i].voice.level())))
+        Some(self.active[i].voice.level())
     }
 
     /// Carries out what the core said, in order. A command that names a voice

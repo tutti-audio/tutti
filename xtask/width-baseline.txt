@@ -74,15 +74,9 @@ crates/tutti-session/src/general_midi.rs  2  migrating: dsp S7/instruments
 crates/tutti-session/src/modulation.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin/lost.rs  1  migrating: plugins step 7
-crates/tutti-soundfont/src/lfo.rs  3  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/modulation_envelope.rs  3  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/node.rs  1  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/oscillator.rs  10  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/player.rs  5  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/region_ex.rs  1  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/region_pair.rs  21  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/soundfont_math.rs  6  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/voice.rs  23  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/volume_envelope.rs  3  migrating: dsp S7/instruments
+crates/tutti-soundfont/src/voice.rs  5  migrating: dsp S7/instruments
 crates/tutti-types/src/lib.rs  1  migrating: foundation
 crates/tutti-voicing/src/channel.rs  3  migrating: foundation
