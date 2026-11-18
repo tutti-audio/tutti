@@ -22,6 +22,7 @@
 //! The lanes are published to the node with [`Publisher`]
 //! ([`HarmonyControls::set`]); the node reads them once per block.
 
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
@@ -138,7 +139,7 @@ pub struct HarmonyNode {
     /// only what differs.
     sent: Sent,
     /// The declared event capacity, from the block the node was prepared for.
-    capacity: u32,
+    capacity: NonZeroU32,
 }
 
 impl std::fmt::Debug for HarmonyNode {

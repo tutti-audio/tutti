@@ -18,6 +18,9 @@ use crate::live::order::BLANK;
 /// executor.
 pub const MIDI_OUT_EVENT_CAPACITY: usize = 1024;
 
+const MIDI_OUT_PORT_CAPACITY: std::num::NonZeroU32 =
+    std::num::NonZeroU32::new(MIDI_OUT_EVENT_CAPACITY as u32).unwrap();
+
 /// One event input passed through to one event output. See the module docs.
 ///
 /// ```
@@ -57,7 +60,7 @@ impl Node for MidiOutNode {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(1, 1)
-            .with_event_capacity(MIDI_OUT_EVENT_CAPACITY as u32)
+            .with_event_capacity(MIDI_OUT_PORT_CAPACITY)
             // Event-only: a copy per event, nothing per frame.
             .with_cost(tutti_graph::Cost::Light)
     }

@@ -360,7 +360,7 @@ impl ControlLaneNode {
             native,
             walk: fresh_walk(),
             seen: fresh_seen(),
-            scratch: Vec::with_capacity(SOURCE_EVENT_CAPACITY as usize),
+            scratch: Vec::with_capacity(SOURCE_EVENT_CAPACITY.get() as usize),
         }
     }
 
@@ -581,7 +581,7 @@ impl Block<'_> {
 
     /// Sends `seg` at frame `p`.
     fn send(&self, out: &mut Vec<Event>, p: usize, seg: ParamSegment) -> Result<(), Overflow> {
-        if out.len() >= SOURCE_EVENT_CAPACITY as usize {
+        if out.len() >= SOURCE_EVENT_CAPACITY.get() as usize {
             return Err(Overflow::Full);
         }
         if let Some(at) = Offset::new(Samples(p), self.cx.env.block_len) {
@@ -945,7 +945,7 @@ impl Node for ControlLaneNode {
     }
 
     fn prepare(&mut self, _: &Prepare) {
-        self.scratch.reserve(SOURCE_EVENT_CAPACITY as usize);
+        self.scratch.reserve(SOURCE_EVENT_CAPACITY.get() as usize);
     }
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

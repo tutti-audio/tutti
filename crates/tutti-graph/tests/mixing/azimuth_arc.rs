@@ -60,7 +60,9 @@ struct Sender(Vec<(u64, ParamSegment)>);
 
 impl Node for Sender {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(16)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(tutti_graph::testing::cap_of(16))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

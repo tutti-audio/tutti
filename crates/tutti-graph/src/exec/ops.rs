@@ -9,6 +9,7 @@ use crate::gain::{self, SumLane, Weight};
 use crate::kernels::{AudioRing, EventFifo};
 use crate::node::MAX_PORTS;
 use crate::plan::GainPortOp;
+use crate::plan::InputBound;
 use crate::slots::{AudioSlots, EventSlots, SlotFlags, borrow_events, event_pair};
 use tutti_buffers::Float;
 
@@ -171,11 +172,14 @@ pub(crate) fn event_delay_op<E: EventSlots + ?Sized>(
 }
 
 /// [`Op::EventMerge`](crate::Op::EventMerge) of the slots `list` into `dst`. Returns the events it
-/// dropped, which is none: the slot holds all its inputs
-/// (`event_slot_capacity`). Counted anyway, in case it ever does.
+/// dropped: none unless `bound` (the node's `Shape::event_input_capacity`) is
+/// below what the sources hold, since the slot holds all its inputs
+/// (`event_slot_capacity`) otherwise. The count is the caller's to charge
+/// (`Dropped::charge_merge`).
 pub(crate) fn event_merge_op<E: EventSlots + ?Sized>(
     list: &[u32],
     dst: u32,
+    bound: Option<InputBound>,
     events: &mut E,
 ) -> u64 {
     let mut reqs = [(0u32, Role::Read(0)); MAX_PORTS + 1];
@@ -193,7 +197,8 @@ pub(crate) fn event_merge_op<E: EventSlots + ?Sized>(
     );
     let output = output.expect("dst borrowed");
     output.clear();
-    let room = output.capacity();
+    let room = bound.map_or(usize::MAX, |b| b.capacity.get() as usize);
+    let room = output.capacity().min(room);
     merge_into(&ins[..list.len()], output, room) as u64
 }
 

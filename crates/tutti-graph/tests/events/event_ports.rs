@@ -52,7 +52,7 @@ impl Node for Burst {
     fn shape(&self) -> Shape {
         let s = Shape::EMPTY.with_events(0, self.ports);
         match self.cap {
-            Some(c) => s.with_event_capacity(c),
+            Some(c) => s.with_event_capacity(tutti_graph::testing::cap_of(c)),
             None => s,
         }
     }
@@ -631,7 +631,9 @@ struct CappedRelay;
 
 impl Node for CappedRelay {
     fn shape(&self) -> Shape {
-        Relay.shape().with_event_capacity(8)
+        Relay
+            .shape()
+            .with_event_capacity(tutti_graph::testing::cap_of(8))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
