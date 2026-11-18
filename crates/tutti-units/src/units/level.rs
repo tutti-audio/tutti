@@ -108,6 +108,16 @@ impl From<Db> for Amplitude {
     }
 }
 
+impl Amplitude {
+    /// The straight line from `self` to `to` at `t`, with `t` in `0..=1`:
+    /// `self` at 0, `to` at 1. A gain ramp is linear in amplitude.
+    #[inline]
+    #[must_use]
+    pub fn lerp(self, to: Amplitude, t: f64) -> Amplitude {
+        Amplitude(self.0 + (to.0 - self.0) * t)
+    }
+}
+
 unit! {
     /// A signed linear gain: the multiplier on a signal, which may invert it.
     ///

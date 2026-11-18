@@ -8,6 +8,7 @@ use super::*;
 /// - `Db / Db` — a quotient of logarithms is not a quantity.
 /// - `Amplitude + Amplitude` — cascading gains multiply; summing is what
 ///   the *signals* do, not their gains.
+///   A ramp between two amplitudes is [`Amplitude::lerp`].
 /// - `Gain * f64`, `f64 * Gain`, `Gain / f64` — `Amplitude` is `Scalable`, so
 ///   the same `x * 0.5` would read as scaling the gain there and as applying
 ///   it here. `Gain::apply` applies a gain to a sample; compose with
@@ -293,4 +294,12 @@ fn twenty_db_is_ten_and_minus_six_db_is_a_half() {
     assert_eq!(Db(20.0).to_amplitude().get(), 10.0);
     assert!((Db(-6.020_599_913_279_624).to_amplitude().get() - 0.5).abs() < 1e-12);
     assert_eq!(Db(0.0).to_amplitude().get(), 1.0);
+}
+
+#[test]
+fn an_amplitude_lerp_is_its_ends_at_zero_and_one_and_the_mean_at_a_half() {
+    let (a, b) = (Amplitude(0.25), Amplitude(1.75));
+    assert_eq!(a.lerp(b, 0.0), a);
+    assert_eq!(a.lerp(b, 1.0), b);
+    assert_eq!(a.lerp(b, 0.5), Amplitude(1.0));
 }

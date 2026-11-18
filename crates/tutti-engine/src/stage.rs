@@ -56,7 +56,9 @@ impl OutputStage {
     ) {
         for (c, ramp) in self.ramps.iter_mut().enumerate().take(out_ch) {
             let to = targets.gain(c);
-            if to != ramp.to {
+            // Bit equality: a NaN target equals itself here, so it does not
+            // restart the ramp every block, and `-0.0` stays apart from `0.0`.
+            if to.get().to_bits() != ramp.to.get().to_bits() {
                 *ramp = Ramp {
                     from: ramp.now,
                     to,
@@ -79,11 +81,8 @@ impl OutputStage {
                 ramp.now = if ramp.done + 1 >= ramp.frames {
                     ramp.to
                 } else {
-                    Amplitude(
-                        ramp.from.get()
-                            + (ramp.to.get() - ramp.from.get())
-                                * ((ramp.done + 1) as f64 / ramp.frames as f64),
-                    )
+                    ramp.from
+                        .lerp(ramp.to, (ramp.done + 1) as f64 / ramp.frames as f64)
                 };
                 if ramp.done < ramp.frames {
                     ramp.done += 1;
@@ -137,5 +136,22 @@ mod tests {
         let line = |k: usize| 1.0 + (0.5 - 1.0) * ((k + 1) as f32 / 20.0);
         assert_eq!(first[0], line(0));
         assert_eq!(rest[0], line(10));
+    }
+
+    /// A NaN target is the same target on the next block: the ramp to it runs
+    /// its length once and is not restarted every block.
+    #[test]
+    fn a_nan_target_does_not_restart_its_ramp_every_block() {
+        let mut stage = OutputStage::new();
+        let to_nan = targets(f64::NAN);
+        let mut a = [1.0f32; 4];
+        stage.apply(&mut a, 1, &to_nan, 8);
+        assert_eq!(stage.ramps[0].done, 4);
+        let mut b = [1.0f32; 4];
+        stage.apply(&mut b, 1, &to_nan, 8);
+        assert_eq!(
+            stage.ramps[0].done, 8,
+            "the second block continued the ramp"
+        );
     }
 }
