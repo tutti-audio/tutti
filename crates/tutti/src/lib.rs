@@ -682,8 +682,8 @@ pub mod midi {
         MidiFileKind, Moved, OtherMetaKind, OtherMetaKindOutOfRange, OtherSmfFormat,
         OtherSmfFormatOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfTicksPerFrame,
         SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange,
-        SmpteSequence, SmpteSequences, SmpteView, TextKind, Timebase, Timeline, TimelineDrop,
-        WriteOptions,
+        SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence,
+        SmpteSequences, SmpteView, TextKind, Timebase, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
@@ -704,7 +704,7 @@ pub mod midi {
     pub use tutti_midi_protocol::{
         ChannelResponse, KeyTable, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
         MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId, PitchBendSensitivity, Recipient,
-        SmpteFrameRate, SysexDeviceId, TuningFrequency, UnknownFrameRate,
+        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TuningFrequency, UnknownFrameRate,
     };
     pub use tutti_midi_runtime::{
         ClockKind, ClockOffset, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,

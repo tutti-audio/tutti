@@ -414,9 +414,13 @@ fn convert(
                 other(text(kind, bytes)?)
             }
             Meta::Malformed(_) => Err(DropReason::MalformedMeta),
+            Meta::ChannelPrefix { .. } => Err(DropReason::ReplacedByAddressing),
+            Meta::SmpteOffset { .. } => Err(DropReason::SuccessorUndefined),
+            Meta::SequenceNumber { .. } | Meta::SequencerSpecific { .. } => {
+                Err(DropReason::NoSuccessor)
+            }
             Meta::Other { kind, .. } => Err(match kind.get() {
-                0x20 | 0x21 => DropReason::ReplacedByAddressing,
-                0x54 => DropReason::SuccessorUndefined,
+                0x21 => DropReason::ReplacedByAddressing,
                 _ => DropReason::NoSuccessor,
             }),
         },

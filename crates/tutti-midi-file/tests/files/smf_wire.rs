@@ -454,7 +454,8 @@ fn a_length_of_128_or_more_is_a_multi_byte_quantity() {
     });
     assert_eq!(track_body(vec![(0, meta)]), want);
 
-    let data = vec![0x11; 300];
+    let mut data = vec![0x11; 300];
+    data[299] = 0xF7;
     let want: Vec<u8> = [
         &[0x00, 0xF0, 0x82, 0x2C][..],
         &data,
@@ -481,7 +482,7 @@ fn a_written_file_reads_back_equal() {
         ),
         (0, note(0, 60)),
         (5, note(0, 62)),
-        (200, FileEvent::SysEx(Box::new([0x7E, 0x7F]))),
+        (200, FileEvent::SysEx(Box::new([0x7E, 0x7F, 0xF7]))),
         (200, FileEvent::Escape(Box::new([1, 2]))),
         (300, note(0, 64)),
         (0x0FFF_FFFF, note(0, 65)),
@@ -490,7 +491,7 @@ fn a_written_file_reads_back_equal() {
     let file = MidiFile::smf(
         SmfFormat::Parallel,
         SMF_DIVISION,
-        vec![track.clone(), track],
+        vec![track, crate::common::track(vec![(0, note(1, 60))])],
     )
     .unwrap();
     let back = MidiFile::from_bytes(&file.to_bytes()).unwrap();
@@ -649,7 +650,10 @@ fn each_track_chunk_length_is_the_length_of_its_body() {
     let busy = track(vec![
         (0, note(0, 60)),
         (0, note(0, 62)),
-        (5, FileEvent::SysEx(vec![0x7E; 130].into())),
+        (
+            5,
+            FileEvent::SysEx([&[0x7E; 129][..], &[0xF7]].concat().into()),
+        ),
         (
             5,
             FileEvent::Meta(Meta::text(TextKind::Lyric, &"l".repeat(300))),

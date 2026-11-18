@@ -6,6 +6,7 @@
 //! read back from the code under test.
 
 use crate::common::{metrical, sequences};
+use crate::support::{Division, RawEvent, build_smf};
 use std::sync::Arc;
 
 use tutti_midi_device::{ProfileId, ProfileOnRequest, ProfileTarget};
@@ -243,20 +244,24 @@ fn the_timeline_is_the_messages_at_their_beats_and_not_the_meta_events() {
 /// the first Group, all at the event's beat: ten payload bytes are a Start of six
 /// and an End of four. A divided message that is not ended (`F0` with no
 /// closing `F7`) and one with a byte of 128 or more are listed as dropped.
+/// Spec: smf/track-chunks#19
 #[test]
 fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
-    let mut sysex = vec![0xF0];
-    sysex.extend(1..=10u8);
-    sysex.push(0xF7);
-    let track = Track::new()
-        .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
-        .push(Tick(960), FileEvent::SysEx(sysex[1..].into()))
-        .unwrap()
-        .push(Tick(960), FileEvent::SysEx(vec![1, 2, 3].into())) // divided: no F7
-        .unwrap()
-        .push(Tick(960), FileEvent::SysEx(vec![0x90, 0xF7].into())) // 8-bit data
-        .unwrap();
-    let f = file(vec![track]);
+    // A reader keeps an unended `F0` and a writer would refuse it.
+    let mut whole = vec![0xF0, 11];
+    whole.extend(1..=10u8);
+    whole.push(0xF7);
+    let f = MidiFile::from_bytes(&build_smf(
+        0,
+        Division::Metrical(TPQ),
+        &[vec![
+            RawEvent::tempo(0, 500_000),
+            RawEvent::new(960, whole),
+            RawEvent::new(0, [0xF0, 3, 1, 2, 3]), // divided: no F7
+            RawEvent::new(0, [0xF0, 2, 0x90, 0xF7]), // 8-bit data
+        ]],
+    ))
+    .unwrap();
     let timeline = metrical(&f).timeline();
     assert_eq!(timeline.packets.len(), 2);
     assert!(timeline.packets.iter().all(|(b, _)| *b == Beat(2.0)));
@@ -367,28 +372,26 @@ fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_i
 /// arbitrary bytes, which no SysEx7 packet holds, and it is reported; a divided
 /// message with a transmittable event between its parts, or never ended, is
 /// reported whole and its parts send nothing.
-/// Spec: smf/track-chunks#21
+/// Spec: smf/track-chunks#20, smf/track-chunks#21
 #[test]
 fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
-    let note = Message::midi1(
-        MidiChannel::FIRST,
-        Voice1::note_on(NoteNumber::of(60), U7::of(100)),
-    );
     let escape = FileEvent::Escape(vec![0xF3, 0x01].into());
     let first = FileEvent::SysEx(vec![1, 2].into());
     let second = FileEvent::Escape(vec![3, 0xF7].into());
-    let track = Track::new()
-        .push(Tick(0), escape.clone())
-        .unwrap()
-        .push(Tick(10), first.clone())
-        .unwrap()
-        .push(Tick(20), note)
-        .unwrap()
-        .push(Tick(30), second.clone())
-        .unwrap()
-        .push(Tick(40), first.clone())
-        .unwrap();
-    let timeline = metrical(&file(vec![track])).timeline();
+    // A reader keeps messages a writer would refuse.
+    let f = MidiFile::from_bytes(&build_smf(
+        0,
+        Division::Metrical(TPQ),
+        &[vec![
+            RawEvent::new(0, [0xF7, 2, 0xF3, 0x01]),
+            RawEvent::new(10, [0xF0, 2, 1, 2]),
+            RawEvent::note_on(10, 0, 60, 100),
+            RawEvent::new(10, [0xF7, 2, 3, 0xF7]),
+            RawEvent::new(10, [0xF0, 2, 1, 2]),
+        ]],
+    ))
+    .unwrap();
+    let timeline = metrical(&f).timeline();
     // The note is the only packet; the `F7` after it has no `F0` open.
     assert_eq!(timeline.packets.len(), 1);
     let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
