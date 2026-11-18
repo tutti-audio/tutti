@@ -116,7 +116,7 @@ fn an_smpte_tick_is_a_fixed_fraction_of_a_second() {
             fps,
             ticks_per_frame,
         }));
-        assert_eq!(smpte(&file).seconds_at(Tick(0)), Seconds(0.0));
+        assert_eq!(smpte(&file).seconds_at(Tick(0)), Seconds::ZERO);
         assert_eq!(
             smpte(&file).seconds_at(Tick(ticks_per_second)),
             Seconds(1.0)
@@ -165,6 +165,7 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
         },
         &[vec![
             RawEvent::tempo(0, 1_000_000),
+            RawEvent::time_signature(0, 4, 2),
             RawEvent::note_on(1_000, 0, 60, 100),
             RawEvent::note_off(1_500, 0, 60, 0),
         ]],
@@ -174,7 +175,11 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
         panic!("an SMPTE file");
     };
     let at: Vec<Seconds> = smpte.events().map(|(time, _)| time).collect();
-    assert_eq!(at, [Seconds(0.0), Seconds(1.0), Seconds(2.5)]);
+    // The tempo, the Time Signature and the two notes.
+    assert_eq!(
+        at,
+        [Seconds::ZERO, Seconds::ZERO, Seconds(1.0), Seconds(2.5)]
+    );
     assert_eq!(smpte.fps(), MtcRate::Fps25);
     assert_eq!(smpte.ticks_per_frame(), SmfTicksPerFrame::of(40));
     assert_eq!(smpte.seconds_at(smpte.end()), Seconds(2.5));
@@ -218,7 +223,14 @@ fn a_format_2_file_in_smpte_time_has_sequences() {
         .sequences()
         .map(|s| s.events().map(|(time, _)| time).collect())
         .collect();
-    assert_eq!(at, [[Seconds(1.0)], [Seconds(0.5)]]);
+    // Each sequence starts with the tempo and Time Signature it is given.
+    assert_eq!(
+        at,
+        [
+            [Seconds::ZERO, Seconds::ZERO, Seconds(1.0)],
+            [Seconds::ZERO, Seconds::ZERO, Seconds(0.5)]
+        ]
+    );
 }
 
 /// SMF 1.0 section 2.1: "A program encountering an unknown format ID may still
@@ -231,15 +243,23 @@ fn a_format_3_file_reads_as_its_tracks_and_writes_back_exactly() {
         3,
         Division::Metrical(96),
         &[
-            vec![RawEvent::note_on(0, 0, 60, 100)],
-            vec![RawEvent::note_on(48, 1, 62, 90)],
+            vec![
+                RawEvent::tempo(0, 500_000),
+                RawEvent::time_signature(0, 4, 2),
+                RawEvent::note_on(0, 0, 60, 100),
+            ],
+            vec![
+                RawEvent::tempo(0, 500_000),
+                RawEvent::time_signature(0, 4, 2),
+                RawEvent::note_on(48, 1, 62, 90),
+            ],
         ],
     );
     assert_eq!(&bytes[8..10], [0x00, 0x03]);
     let file = read(&bytes);
     assert_eq!(file.format(), Some(SmfFormat::Other(OtherSmfFormat::of(3))));
     assert_eq!(file.tracks().len(), 2);
-    assert_eq!(file.tracks()[1].events()[0].0, Tick(48));
+    assert_eq!(file.tracks()[1].events()[2].0, Tick(48));
     assert_eq!(file.to_bytes(), bytes);
     // Nothing says the tracks share a timeline, so they are kept apart as a
     // format 2 file's are: one sequence a track, no one-timeline view.

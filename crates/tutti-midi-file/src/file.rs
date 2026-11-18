@@ -603,6 +603,19 @@ pub enum Normalized {
         /// What was done.
         placement: Placement,
     },
+    /// The track held the tempo map or a timeline of its own and had no Set
+    /// Tempo at tick 0 (SMF 1.0 section 2.2: a file specifies its tempo): the
+    /// reader's 120 beats a minute was inserted as the track's tempo.
+    DefaultTempo {
+        /// The track.
+        track: usize,
+    },
+    /// The track had no Time Signature at tick 0: 4/4 was inserted, with the
+    /// 24 clocks a click and 8 32nd notes to the quarter of section 3.3's example.
+    DefaultTimeSignature {
+        /// The track.
+        track: usize,
+    },
     /// An `F0` event with a byte of 128 or more, which no [`SysEx`] holds: it
     /// became the [`Escape`](FileEvent::Escape) of the bytes it transmits, the
     /// `F0`, its data and the `F7` it ends with if it has one. A write keeps
@@ -624,6 +637,19 @@ pub enum Normalized {
         /// The tick of the message's first packet.
         at: Tick,
     },
+}
+
+impl Normalized {
+    /// The track the change was made in.
+    fn track(&self) -> usize {
+        match self {
+            Self::Lead { track, .. }
+            | Self::DefaultTempo { track }
+            | Self::DefaultTimeSignature { track }
+            | Self::SysExEscaped { track, .. }
+            | Self::SysExClosed { track, .. } => *track,
+        }
+    }
 }
 
 /// The opening metas of a track other than its name: what a [`Pattern`] or the
@@ -1389,6 +1415,17 @@ impl MidiFile {
     /// outside the first track. The placement of the Sequence Number, SMPTE
     /// Offset and copyright notice is the [`Layout`]'s. A file of format 3 or
     /// above cannot be authored, only written back as it was read.
+    ///
+    /// The file specifies its tempo and time signature (SMF 1.0 section 2.2:
+    /// without them a reader assumes 120 beats a minute in 4/4): a Set Tempo
+    /// and a Time Signature that no track of a format 0 or 1 file (they share
+    /// one timeline) or that a format 2 pattern does not have at tick 0 are
+    /// added at tick 0 of the first track or of the pattern, after the meta
+    /// events that open it, as 120 BPM and 4/4 with 24 clocks a click and 8
+    /// 32nd notes to the quarter. [`tracks`](Self::tracks) holds them. A file
+    /// in SMPTE time gets them too, where they are inert. A format above 2
+    /// cannot be authored; a read treats it as format 2, each track its own
+    /// pattern, as SMF 1.0 section 2.1 lets a reader.
     #[must_use = "an Err means no file was built"]
     pub fn smf(division: SmfDivision, layout: Layout) -> Result<Self, TracksError> {
         let (format, tracks, openings, copyright) = layout.into_parts();
@@ -1483,11 +1520,14 @@ impl MidiFile {
             }
             check_run(container, i, TrackPart::Events, &track.events, track.end)?;
         }
+        let mut tracks = tracks;
+        let mut defaulted = Vec::new();
         match container {
             Container::Smf(format, _) => {
                 if authoring {
                     check_smf(format, &tracks)?;
                 }
+                defaulted = specify_tempo_and_meter(format, &mut tracks);
                 smf::measure(&tracks, &leads(&tracks, &openings, copyright.as_deref()))?;
             }
             Container::Clip(_) => {
@@ -1515,7 +1555,7 @@ impl MidiFile {
             openings,
             copyright,
             tempo_maps,
-            normalized: Vec::new(),
+            normalized: if authoring { Vec::new() } else { defaulted },
         })
     }
 
@@ -1543,7 +1583,10 @@ impl MidiFile {
                     parts.copyright,
                     false,
                 )?;
+                let defaulted = std::mem::take(&mut file.normalized);
                 file.normalized = parts.normalized;
+                file.normalized.extend(defaulted);
+                file.normalized.sort_by_key(Normalized::track);
                 Ok(file)
             }
             Some(MidiFileKind::ClipFile) => {
@@ -1727,69 +1770,6 @@ impl MidiFile {
         &self.tracks
     }
 
-    /// A copy of the file with the tempo and time signature SMF 1.0 section 2.2
-    /// asks every file to specify: a Set Tempo and a Time Signature at tick 0 of the
-    /// track that holds the tempo map (a format 0 file's track, a format 1
-    /// file's first track) or of each independent sequence (format 2 and
-    /// above), unless it has one there already. What it adds is what a reader
-    /// assumes without it, 120 beats a minute in 4/4, so the file plays as it
-    /// did. A Clip File is returned as it is: it has its own header.
-    ///
-    /// # Errors
-    ///
-    /// [`TracksError`] only at the format's limits: the added events push a
-    /// track chunk past 4 GB, which [`smf`](Self::smf) refuses as
-    /// [`TooLarge`](TracksError::TooLarge). The tempo map is the one the file
-    /// had.
-    pub fn with_default_tempo_and_meter(&self) -> Result<Self, TracksError> {
-        let Container::Smf(format, _) = self.container else {
-            return Ok(self.clone());
-        };
-        let mut tracks = self.tracks.clone();
-        let holders = if format.shares_timeline() {
-            1
-        } else {
-            tracks.len()
-        };
-        for track in tracks.iter_mut().take(holders) {
-            let has = |wanted: fn(&Meta) -> bool| {
-                track.events.iter().any(|(tick, event)| {
-                    *tick == Tick(0) && matches!(event, FileEvent::Meta(meta) if wanted(meta))
-                })
-            };
-            let signature = Meta::TimeSignature {
-                numerator: 4,
-                denominator_power: 2,
-                clocks_per_click: 24,
-                thirty_seconds_per_quarter: 8,
-                extra: Box::default(),
-            };
-            let missing = [
-                (!has(|m| matches!(m, Meta::Tempo { .. }))).then(|| Meta::tempo(Bpm::of(120.0))),
-                (!has(|m| matches!(m, Meta::TimeSignature { .. }))).then_some(signature),
-            ];
-            // After the meta events that open the track, so a copyright notice
-            // stays first and a Sequence Number before any channel message.
-            let lead = track
-                .events
-                .iter()
-                .take_while(|(tick, e)| *tick == Tick(0) && matches!(e, FileEvent::Meta(_)))
-                .count();
-            for (offset, meta) in missing.into_iter().flatten().enumerate() {
-                track.events.insert(lead + offset, (Tick(0), meta.into()));
-            }
-        }
-        let mut file = Self::build(
-            self.container,
-            tracks,
-            self.openings.clone(),
-            self.copyright.clone(),
-            false,
-        )?;
-        file.normalized.clone_from(&self.normalized);
-        Ok(file)
-    }
-
     /// The [`Lead`]s of each track, as the writer puts them first.
     pub(crate) fn leads(&self) -> Vec<Vec<Lead>> {
         leads(&self.tracks, &self.openings, self.copyright.as_deref())
@@ -1814,7 +1794,14 @@ impl MidiFile {
     /// MIDI events in between the packets of a multi-packet system exclusive
     /// message". None says what a program does with a file that breaks them,
     /// so a reader accepts the file, makes it writable, and records each change
-    /// here.
+    /// here. Section 2.2 asks every file to specify its tempo and time
+    /// signature ("All MIDI Files should specify tempo and time signature. If
+    /// they don't, the time signature is assumed to be 4/4, and the tempo 120
+    /// beats per minute"), so a read adds the ones that no track of a format 0 or
+    /// 1 file, or that a format 2 pattern (or a track of a format above 2),
+    /// lacks at tick 0 ([`Normalized::DefaultTempo`],
+    /// [`Normalized::DefaultTimeSignature`]), in an SMPTE division too, where
+    /// they are inert.
     #[must_use]
     pub fn normalized(&self) -> &[Normalized] {
         &self.normalized
@@ -2531,6 +2518,74 @@ fn check_smf(format: SmfFormat, tracks: &[Track]) -> Result<(), TracksError> {
     Ok(())
 }
 
+/// Gives each timeline the Set Tempo and Time Signature SMF 1.0 section 2.2 asks
+/// every file to specify, at tick 0 of the timeline's first track after the
+/// meta events that open it, unless a track of the timeline has one there
+/// already. A timeline is all the tracks of a format 0 or 1 file, which share
+/// one, and each track of any other format (a format above 2 is read as format
+/// 2, each track its own pattern, as section 2.1 lets a reader do). What it
+/// adds is what a reader assumes without them (120 beats a minute in 4/4, the
+/// Time Signature example's 24 clocks a click and 8 32nd notes to the
+/// quarter), so the file plays as it did. In an SMPTE division they are as
+/// inert as any other tempo. Returns what it added.
+fn specify_tempo_and_meter(format: SmfFormat, tracks: &mut [Track]) -> Vec<Normalized> {
+    let timelines: Vec<std::ops::Range<usize>> = if format.shares_timeline() {
+        std::iter::once(0..tracks.len()).collect()
+    } else {
+        (0..tracks.len()).map(|i| i..i + 1).collect()
+    };
+    let mut added = Vec::new();
+    for timeline in timelines {
+        let first = timeline.start;
+        let has = |wanted: fn(&Meta) -> bool| {
+            tracks[timeline.clone()].iter().any(|track| {
+                track.events.iter().any(|(tick, event)| {
+                    *tick == Tick(0) && matches!(event, FileEvent::Meta(meta) if wanted(meta))
+                })
+            })
+        };
+        let tempo = !has(|m| matches!(m, Meta::Tempo { .. }));
+        let meter = !has(|m| matches!(m, Meta::TimeSignature { .. }));
+        // After the meta events that open the track, so a Sequence Number
+        // or a track-opening text stays first.
+        let track = &mut tracks[first];
+        let lead = track
+            .events
+            .iter()
+            .take_while(|(tick, e)| *tick == Tick(0) && matches!(e, FileEvent::Meta(_)))
+            .count();
+        let missing = [
+            tempo.then(|| Meta::tempo(DEFAULT_TEMPO)),
+            meter.then(default_time_signature),
+        ];
+        for (offset, meta) in missing.into_iter().flatten().enumerate() {
+            track.events.insert(lead + offset, (Tick(0), meta.into()));
+        }
+        if tempo {
+            added.push(Normalized::DefaultTempo { track: first });
+        }
+        if meter {
+            added.push(Normalized::DefaultTimeSignature { track: first });
+        }
+    }
+    added
+}
+
+/// The tempo SMF 1.0 section 2.2 assumes when a file gives none.
+const DEFAULT_TEMPO: Bpm = Bpm::of(120.0);
+
+/// The time signature SMF 1.0 section 2.2 assumes when a file gives none, 4/4,
+/// with the clocks and 32nd notes of section 3.3's example (`FF 58 04 04 02 18 08`).
+fn default_time_signature() -> Meta {
+    Meta::TimeSignature {
+        numerator: 4,
+        denominator_power: 2,
+        clocks_per_click: 24,
+        thirty_seconds_per_quarter: 8,
+        extra: Box::default(),
+    }
+}
+
 /// Where a Flex Data message is interrupted (M2-104 section 7.5.2: within a
 /// Group, only Continue packets of the message and System Real Time messages
 /// go between its Start and End): the tick of the first message of a Group
@@ -2603,8 +2658,9 @@ fn tempo_map(
     ticks_per_quarter: TicksPerQuarterNote,
     tracks: &[Track],
 ) -> Result<Arc<TempoMap>, tutti_tempo::TempoError> {
-    // The MIDI default, which a file that sets none at its start plays at.
-    let default = Bpm::of(120.0);
+    // The default, which a timeline with no valid Set Tempo at its start plays
+    // at: a Clip File with none, or a Set Tempo of zero.
+    let default = DEFAULT_TEMPO;
     let mut changes: Vec<(Tick, Bpm)> = Vec::new();
     for track in tracks {
         // A Clip File's header Set Tempo counts from the start of the
