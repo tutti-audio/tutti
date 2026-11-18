@@ -59,12 +59,12 @@ impl CompressorControls {
     /// A compressor that does nothing: threshold at 0 dB, a hard knee, no ratio, no
     /// times and no makeup. What a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
-        threshold: Db(0.0),
-        knee: Db(0.0),
+        threshold: Db::UNITY,
+        knee: Db::UNITY,
         ratio: CompressionRatio::UNITY,
         attack: Seconds(0.0),
         release: Seconds(0.0),
-        makeup: Db(0.0),
+        makeup: Db::UNITY,
         key_cutoff: KeyFilter::DEFAULT_CUTOFF,
         key_q: KeyFilter::DEFAULT_Q,
     };
@@ -140,8 +140,8 @@ impl Detector {
 
     /// The figures of a compressor that does nothing, for a target to start from.
     const NEUTRAL: Self = Self {
-        threshold: Db(0.0),
-        knee: Db(0.0),
+        threshold: Db::UNITY,
+        knee: Db::UNITY,
         ratio: CompressionRatio::UNITY,
         ballistics: Follower::NEUTRAL,
     };

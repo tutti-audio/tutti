@@ -66,7 +66,7 @@ impl GateControls {
         attack: Seconds(0.0),
         hold: Seconds(0.0),
         release: Seconds(0.0),
-        range: Db(0.0),
+        range: Db::UNITY,
         key_cutoff: KeyFilter::DEFAULT_CUTOFF,
         key_q: KeyFilter::DEFAULT_Q,
     };

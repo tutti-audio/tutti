@@ -17,6 +17,7 @@ use tutti_types::{Amplitude, Db, Gain, Hz, SampleRate};
 use super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage, energy,
 };
+use crate::reverb::cutoff_pole_at;
 use crate::{Complex64, Lti};
 
 const ZERO: Complex64 = Complex64::new(0.0, 0.0);
@@ -59,7 +60,7 @@ impl Absorption {
                 // `L = ((1 - p) / (1 - p z^-1))^2`, as the kernel's two cascaded
                 // one-poles; `L1` at the lower crossover, `L2` at the upper.
                 let l = |fc: Hz| {
-                    let p = libm::exp(-std::f64::consts::TAU * f64::from(fc.get()) / rate);
+                    let p = cutoff_pole_at(fc, rate);
                     let one = (1.0 - p) / (ONE - delay(w, 1.0) * p);
                     one * one
                 };
@@ -105,7 +106,7 @@ impl Absorption {
             f64::from(mid.get()),
             f64::from(high.get()),
         );
-        let pole = |fc: Hz| libm::exp(-std::f64::consts::TAU * f64::from(fc.get()) / rate);
+        let pole = |fc: Hz| cutoff_pole_at(fc, rate);
         let (p1, p2) = (pole(crossover[0]), pole(crossover[1]));
         if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0)
             || ![p1, p2]
@@ -160,7 +161,7 @@ impl Absorption {
                 // `((1 - p) / (1 - p / r))^2` while `p < r`. The three terms'
                 // coefficients are weighted by their gains' magnitudes.
                 let sum = |fc: Hz| {
-                    let p = libm::exp(-std::f64::consts::TAU * f64::from(fc.get()) / rate);
+                    let p = cutoff_pole_at(fc, rate);
                     if p < r {
                         let x = (1.0 - p) / (1.0 - p / r);
                         x * x

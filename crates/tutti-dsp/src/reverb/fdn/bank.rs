@@ -53,11 +53,11 @@
 //! **Format.** The state is `f32`; a view of another [`Float`] is converted at the edges.
 
 use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_types::{MAX_CHANNELS, SampleRate, Seconds, Tail};
+use tutti_types::{Hz, MAX_CHANNELS, SampleRate, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
-use crate::reverb::{CHUNK, ramp, read, tail_of};
+use crate::reverb::{CHUNK, cutoff_pole_at, ramp, read, tail_of};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
 /// How far a line's length moves in a chunk, in frames.
@@ -665,7 +665,7 @@ fn set_poles(t: &mut Target, crossover: [f32; 2], rate: f64) {
     }
     t.crossover = crossover;
     for (p, f) in t.pole.iter_mut().zip(crossover) {
-        *p = libm::exp(-std::f64::consts::TAU * f64::from(f) / rate) as f32;
+        *p = cutoff_pole_at(Hz(f), rate) as f32;
     }
 }
 
