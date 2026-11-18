@@ -208,14 +208,6 @@ impl FunctionBlockBuilder {
         self
     }
 
-    /// The block's UI hint as read off the wire: a hint the direction rules
-    /// out is kept as [`UiHint::Unknown`], so a block a peer or an OS
-    /// describes is never refused for it.
-    pub const fn wire_ui_hint(self, hint: UiHint) -> Self {
-        let hint = wire_ui_hint(self.block.direction, hint);
-        self.ui_hint(hint)
-    }
-
     /// Whether the block is a MIDI 1.0 port (default: [`Midi1Port::No`]).
     /// [`build`](Self::build) refuses the reserved `0x03` and a port over more
     /// than one Group.

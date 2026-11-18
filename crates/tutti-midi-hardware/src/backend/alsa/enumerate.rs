@@ -1,13 +1,8 @@
 //! Walking the sequencer's clients and ports.
 
-use crate::block::RawBlock;
-use crate::capability::{OsEndpoint, UmpCapability};
-use tutti_alsa_ffi::{
-    BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Client, PROTO_MIDI2, PortCaps, PortEntry, UmpBlock,
-    UmpEndpoint,
-};
-use tutti_midi_device::{FunctionBlock, Identity};
-use tutti_ump::Protocol;
+use crate::capability::{OsEndpoint, UmpCapability, blocks_of};
+use tutti_alsa_ffi::{Client, PortCaps, PortEntry, UmpEndpoint};
+use tutti_midi_device::Identity;
 
 /// Which direction an endpoint is being listed for.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -140,38 +135,13 @@ pub(super) fn capability_of(ump: Option<&UmpEndpoint>) -> UmpCapability {
     let Some(endpoint) = ump else {
         return UmpCapability::midi1();
     };
-    let protocol = if endpoint.protocol & PROTO_MIDI2 != 0 {
-        Protocol::Midi2
-    } else {
-        Protocol::Midi1
-    };
     UmpCapability {
-        protocol,
-        blocks: endpoint.blocks.iter().filter_map(block_of).collect(),
+        protocol: endpoint.protocol,
+        blocks: blocks_of(
+            endpoint
+                .blocks
+                .iter()
+                .map(|block| (block.info, block.name.as_deref())),
+        ),
     }
-}
-
-/// The Function Block a sequencer block is; `None` for one the UMP spec cannot
-/// hold (a number above 31, Groups past 16, a reserved direction).
-fn block_of(block: &UmpBlock) -> Option<FunctionBlock> {
-    let midi1 = if block.flags & BLOCK_IS_MIDI1 == 0 {
-        0
-    } else if block.flags & BLOCK_IS_LOWSPEED != 0 {
-        2
-    } else {
-        1
-    };
-    RawBlock {
-        id: block.id,
-        active: block.active,
-        direction: block.direction,
-        first_group: block.first_group,
-        groups: block.num_groups,
-        midi1,
-        ui_hint: block.ui_hint,
-        midi_ci_version: block.midi_ci_version,
-        sysex8_streams: block.sysex8_streams,
-        name: block.name.as_deref(),
-    }
-    .function_block()
 }

@@ -9,8 +9,7 @@ use std::time::{Duration, Instant};
 use super::listener::Listener;
 
 use tutti_alsa_ffi::{
-    Blocking, Client, Event, PROTO_MIDI1, PROTO_MIDI2, Packet, PortCaps, PortEntry, PortId,
-    PortKind, Read, UmpVersion,
+    Blocking, Client, Event, Packet, PortCaps, PortEntry, PortId, PortKind, Read, UmpVersion,
 };
 use tutti_fixtures::midi::{
     m1_cc, m1_note_on, note_on, per_note_pitch_bend, program_change, registered,
@@ -23,7 +22,7 @@ use tutti_midi_hardware::{
 use tutti_midi_runtime::InputInlets;
 use tutti_ump::{
     Bank, BlockDirection, CCNumber, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel,
-    Rpn, U7, UiHint, Ump, Utility, Voice1,
+    Protocol, Rpn, U7, UiHint, Ump, Utility, Voice1,
 };
 
 const PATIENCE: Duration = Duration::from_secs(30);
@@ -183,17 +182,14 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
             .expect("listed")
             .ump
             .expect("a UMP Endpoint record");
-        assert_eq!(record.protocol, PROTO_MIDI2);
-        assert_eq!(record.protocol_caps, PROTO_MIDI2);
+        assert_eq!(record.protocol, Protocol::Midi2);
+        assert!(record.offered.midi2 && !record.offered.midi1);
+        assert_eq!(record.offered.version, tutti_midi_device::UMP_VERSION);
+        assert!(record.offered.static_function_blocks);
         let [got] = record.blocks.as_slice() else {
             panic!("one block, got {:?}", record.blocks);
         };
-        assert_eq!(got.id, 1);
-        assert!(got.active);
-        assert_eq!(got.direction, tutti_alsa_ffi::DIR_BIDIRECTION);
-        assert_eq!((got.first_group, got.num_groups), (4, 2));
-        assert_eq!(got.ui_hint, 1);
-        assert_eq!((got.midi_ci_version, got.sysex8_streams), (2, 3));
+        assert_eq!(got.info, block().info());
         assert_eq!(got.name.as_deref(), Some("Pads"));
     }
 }
@@ -216,7 +212,10 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
 
     let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("listed");
-    assert_eq!(found.ump.as_ref().map(|e| e.protocol), Some(PROTO_MIDI1));
+    assert_eq!(
+        found.ump.as_ref().map(|e| e.protocol),
+        Some(Protocol::Midi1)
+    );
     peer.connect_to(port, found.address).expect("subscribes");
     let note = m1_note_on(MidiChannel::of(2), 60, U7::of(0x40));
     peer.send_to_subscribers(port, Packet::new(note.words()).unwrap())

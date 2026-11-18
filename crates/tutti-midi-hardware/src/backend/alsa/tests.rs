@@ -9,8 +9,12 @@ use crate::{Devices, HardwareMidiInputs};
 use tutti_alsa_ffi::Client;
 use tutti_alsa_ffi::{Address, Event, PortCaps, PortId, PortKind};
 use tutti_graph::Losses;
-use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, Identity};
+use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, Identity, UMP_VERSION};
 use tutti_midi_runtime::DeviceWriters;
+use tutti_ump::{
+    BlockDirection, EndpointInfoNotification, Field, FirstGroup, FunctionBlockCount,
+    FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan, Midi1Port, Protocol, UiHint,
+};
 
 /// Long enough to be a failure, not a race: the announce arrives at once.
 const PATIENCE: Duration = Duration::from_secs(20);
@@ -716,10 +720,7 @@ fn a_legacy_source_arrives_as_midi1_ump_not_converted_by_the_kernel() {
 /// type 4 packet arrives as sent, not narrowed.
 #[test]
 fn a_midi2_endpoint_arrives_as_midi2_ump() {
-    let mut pumped = Pumped::over(
-        plug_ump(&unique("two-in"), tutti_alsa_ffi::PROTO_MIDI2),
-        Duration::ZERO,
-    );
+    let mut pumped = Pumped::over(plug_ump(&unique("two-in"), Protocol::Midi2), Duration::ZERO);
     // Note On, group 0, channel 0, note 60, velocity 0xC000, no attribute.
     let note_on = [0x4090_3C00, 0xC000_0000];
     pumped
@@ -740,25 +741,25 @@ fn a_midi2_endpoint_arrives_as_midi2_ump() {
 /// negotiates up and the kernel would narrow what it then sends natively.
 #[test]
 fn only_a_source_that_cannot_speak_midi2_is_opened_as_midi1() {
-    use tutti_alsa_ffi::{PROTO_MIDI1, PROTO_MIDI2, UmpEndpoint, UmpVersion};
-    let record = |protocol, protocol_caps| UmpEndpoint {
+    use tutti_alsa_ffi::{UmpEndpoint, UmpVersion};
+    let record = |protocol, midi1, midi2| UmpEndpoint {
         protocol,
-        protocol_caps,
+        offered: offered(midi1, midi2),
         name: None,
         blocks: Vec::new(),
     };
     let version = super::input::version_for;
     assert_eq!(version(None), UmpVersion::Midi1);
     assert_eq!(
-        version(Some(&record(PROTO_MIDI1, PROTO_MIDI1))),
+        version(Some(&record(Protocol::Midi1, true, false))),
         UmpVersion::Midi1
     );
     assert_eq!(
-        version(Some(&record(PROTO_MIDI1, PROTO_MIDI1 | PROTO_MIDI2))),
+        version(Some(&record(Protocol::Midi1, true, true))),
         UmpVersion::Midi2
     );
     assert_eq!(
-        version(Some(&record(PROTO_MIDI2, PROTO_MIDI1 | PROTO_MIDI2))),
+        version(Some(&record(Protocol::Midi2, true, true))),
         UmpVersion::Midi2
     );
 }
@@ -1073,26 +1074,42 @@ fn a_destination_that_fills_inside_a_message_has_the_lost_tail_counted() {
     assert_eq!(output.losses(), Losses::lost(1));
 }
 
+/// An Endpoint Info Notification offering the protocols given, and no JR
+/// Timestamps.
+fn offered(midi1: bool, midi2: bool) -> EndpointInfoNotification {
+    EndpointInfoNotification {
+        version: UMP_VERSION,
+        static_function_blocks: false,
+        function_blocks: FunctionBlocks::Count(FunctionBlockCount::of(1)),
+        midi2,
+        midi1,
+        rx_jr: false,
+        tx_jr: false,
+    }
+}
+
 /// A device named `name` that publishes a UMP Endpoint in `protocol` with a
 /// block of two Groups, as a kernel UMP client does for a USB device.
-fn plug_ump(name: &str, protocol: u32) -> Virtual {
+fn plug_ump(name: &str, protocol: Protocol) -> Virtual {
     let device = plug(name);
     device
         .0
         .publish_ump_endpoint(&tutti_alsa_ffi::UmpEndpoint {
             protocol,
-            protocol_caps: tutti_alsa_ffi::PROTO_MIDI1 | tutti_alsa_ffi::PROTO_MIDI2,
+            offered: offered(true, true),
             name: Some("Endpoint".into()),
             blocks: vec![tutti_alsa_ffi::UmpBlock {
-                id: 0,
-                active: true,
-                flags: 0,
-                direction: tutti_alsa_ffi::DIR_BIDIRECTION,
-                first_group: 2,
-                num_groups: 2,
-                midi_ci_version: 0,
-                sysex8_streams: 0,
-                ui_hint: 3,
+                info: FunctionBlockInfo {
+                    active: true,
+                    id: Field::Value(FunctionBlockId::of(0)),
+                    direction: BlockDirection::Bidirectional,
+                    ui_hint: UiHint::Both,
+                    midi1: Midi1Port::No,
+                    first_group: Field::Value(FirstGroup::of(2)),
+                    groups_spanned: Field::Value(GroupSpan::of(2)),
+                    midi_ci_version: 0,
+                    max_sysex8_streams: 0,
+                },
                 name: Some("Keys".into()),
             }],
         })
@@ -1120,11 +1137,10 @@ fn capability_of(devices: &Watched, name: &str) -> crate::UmpCapability {
 /// record is MIDI 1.0 with none.
 #[test]
 fn a_clients_protocol_and_blocks_are_read_from_its_ump_endpoint() {
-    use tutti_ump::Protocol;
     let devices = Watched::open();
     let (two, one, legacy) = (unique("two"), unique("one"), unique("legacy"));
-    let _two = plug_ump(&two, tutti_alsa_ffi::PROTO_MIDI2);
-    let _one = plug_ump(&one, tutti_alsa_ffi::PROTO_MIDI1);
+    let _two = plug_ump(&two, Protocol::Midi2);
+    let _one = plug_ump(&one, Protocol::Midi1);
     let _legacy = plug(&legacy);
 
     let cap = capability_of(&devices, &two);
@@ -1160,7 +1176,7 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
     use tutti_ump::{Message, Protocol};
 
     let name = unique("negotiated");
-    let device = plug_ump(&name, tutti_alsa_ffi::PROTO_MIDI1);
+    let device = plug_ump(&name, Protocol::Midi1);
     let stop = std::sync::Arc::new(AtomicBool::new(false));
     let inlets =
         tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
