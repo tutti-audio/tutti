@@ -64,17 +64,17 @@ fn unity(freqs: &[f64]) -> MultibandSettings {
 /// threshold lane `lanes[b]` where given.
 fn run_in<F: Float + Lanes + Lerp>(
     k: &mut MultibandBank<F>,
-    audio: &[&[f32]],
-    lanes: [Option<&[f32]>; MAX_BANDS],
+    audio: &[&[F]],
+    lanes: [Option<&[F]>; MAX_BANDS],
     chunk: usize,
-) -> Vec<Vec<f32>> {
+) -> Vec<Vec<F>> {
     let n = audio[0].len();
-    let mut out = vec![vec![0.0f32; n]; audio.len()];
+    let mut out = vec![vec![F::ZERO; n]; audio.len()];
     let mut at = 0;
     while at < n {
         let end = (at + chunk).min(n);
-        let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
-        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
+        let a: Vec<&[F]> = audio.iter().map(|c| &c[at..end]).collect();
+        let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         let mut driven = MultibandLanes::default();
         for (slot, lane) in driven.thresholds.iter_mut().zip(lanes) {
             *slot = lane.map(|l| Mono::new(&l[at..end]));
@@ -89,12 +89,12 @@ fn run_in<F: Float + Lanes + Lerp>(
     out
 }
 
-fn run<F: Float + Lanes + Lerp>(k: &mut MultibandBank<F>, audio: &[&[f32]]) -> Vec<Vec<f32>> {
+fn run<F: Float + Lanes + Lerp>(k: &mut MultibandBank<F>, audio: &[&[F]]) -> Vec<Vec<F>> {
     run_in(k, audio, [None; MAX_BANDS], 256)
 }
 
-fn mean(x: &[f32]) -> f64 {
-    x.iter().map(|&v| f64::from(v)).sum::<f64>() / x.len() as f64
+fn mean<F: Float>(x: &[F]) -> f64 {
+    x.iter().map(|&v| -> f64 { v.into() }).sum::<f64>() / x.len() as f64
 }
 
 fn tone(freq: f64, amplitude: f32, len: usize) -> Vec<f32> {
@@ -369,13 +369,11 @@ fn a_bypassed_band_passes_unprocessed() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.001, 6.0);
     set.bands[0].bypass = true;
-    // An `f64` state: the `f32` views are converted at the edges, so the bypassed DC is the
-    // input to the output's rounding.
     let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 3, RATE).unwrap();
     k.aim(&set);
-    let x = vec![0.5f32; SETTLE + 9_600];
+    let x = vec![0.5f64; SETTLE + 9_600];
     let out = run(&mut k, &[&x]);
-    assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < 1e-6);
+    assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < 1e-12);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     set.bands[0].bypass = false;
     k.aim(&set);
@@ -383,7 +381,7 @@ fn a_bypassed_band_passes_unprocessed() {
     // Over -30 dB at 8:1 the 0.5 DC is reduced by `(30 - 6.02) * 7/8`, with the makeup.
     let want = 0.5 * linear(6.0 - hard(db(0.5), -30.0, 8.0));
     assert!(
-        (mean(&out[0][SETTLE..]) - want).abs() < 1e-5,
+        (mean(&out[0][SETTLE..]) - want).abs() < 1e-9,
         "{}",
         mean(&out[0][SETTLE..])
     );
@@ -594,7 +592,7 @@ fn a_band_reads_its_own_threshold_lane() {
     run_in(&mut k, &[&x], [Some(&nan), None, None, None], 256);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     // The same lane in f64 over f64 audio.
-    let mut k = bank(1, 3);
+    let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 3, RATE).unwrap();
     k.aim(&set);
     let (x64, low64) = (vec![0.5f64; len], vec![-30.0f64; len]);
     let mut out = vec![0.0f64; len];

@@ -168,10 +168,10 @@ fn the_bank_holds_the_figures_of_its_definition() {
     let m = Design::<f32>::of(&controls(-12.0, -3.0, 0.0002), RATE);
     assert_eq!(
         m.release,
-        Seconds(0.001).one_pole_coeff(RATE) as f32,
+        Pole::Closes(Seconds(0.001).one_pole_coeff(RATE) as f32),
         "a release under 1 ms reads as 1 ms"
     );
-    assert_eq!((m.threshold, m.ceiling), (Db(-12.0), Db(-3.0)));
+    assert_eq!((m.threshold, m.ceiling), (-12.0, -3.0));
 
     let d = LimiterControls::DEFAULT;
     let m = Design::<f32>::of(
@@ -185,9 +185,9 @@ fn the_bank_holds_the_figures_of_its_definition() {
     assert_eq!(
         (m.threshold, m.ceiling, m.release),
         (
-            d.threshold,
-            d.ceiling,
-            d.release.one_pole_coeff(RATE) as f32
+            d.threshold.get() as f32,
+            d.ceiling.get() as f32,
+            Pole::Closes(d.release.one_pole_coeff(RATE) as f32)
         )
     );
     for inf in [f64::INFINITY, f64::NEG_INFINITY] {
@@ -198,7 +198,9 @@ fn the_bank_holds_the_figures_of_its_definition() {
             },
             RATE,
         );
-        assert_eq!(m.ceiling, Db(inf), "`+-inf` are ceilings");
+        // An infinity crosses into the float as its largest finite value, still beyond any level.
+        let end = if inf > 0.0 { f32::MAX } else { -f32::MAX };
+        assert_eq!(m.ceiling, end, "`+-inf` are ceilings");
         let m = Design::<f32>::of(
             &LimiterControls {
                 threshold: Db(inf),
@@ -206,7 +208,7 @@ fn the_bank_holds_the_figures_of_its_definition() {
             },
             RATE,
         );
-        assert_eq!(m.threshold, Db(inf), "`+-inf` are thresholds");
+        assert_eq!(m.threshold, end, "`+-inf` are thresholds");
     }
 }
 
@@ -1058,4 +1060,57 @@ fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
     let y = run_f64(&controls(threshold, ceiling, release), &x);
     // The closed form is `f64` throughout, so the tolerance is rounding, not `f32`'s.
     assert_close_f64(&y[switch + L..], &want, 1e-12);
+}
+
+/// A limiter released over 300 s at 192 kHz (a coefficient of `1.7e-8`, under half an ulp of an
+/// envelope near 1) still recovers in f32: one loud frame sets the envelope to its instant
+/// gain `g0 = 10^(-0.3 / 20)` (peak 1 over the -6 dB threshold), and the quiet frames after it
+/// let it rise toward the drive `gt = 10^(5.7 / 20)` as `gt - (gt - g0) a^m`, `a = 1 - c` with
+/// `c` the f32 coefficient. The output a lookahead later is `0.01 * envelope`, the oldest gain of
+/// a rising window. Over a quarter of a time constant it holds that to the sum of: `2^-24 (gt -
+/// g0)` stationary in the envelope (the product's rounding over `c`), half an ulp carried in its
+/// value (`2^-24` in `[1, 2)`), the figures `g0` and `gt` rounded into f32 (`1 + 2` times `2^-24`
+/// at most) and the output's own rounding (`2 * 2^-24`), under `8 * 2^-24`. The plain recurrence
+/// `e + c (gt - e)`, computed here, stays frozen at `g0`.
+#[test]
+fn an_f32_three_hundred_second_release_at_192_khz_still_recovers_along_the_closed_form() {
+    const CHUNK_FRAMES: usize = 1 << 16;
+    let (rate, tau) = (SampleRate::SR_192K, 300.0);
+    let c = f64::from(Seconds(tau).one_pole_coeff(rate) as f32);
+    let g0 = 10f64.powf(-0.3 / 20.0);
+    let gt = 10f64.powf(5.7 / 20.0);
+    let mut plain = g0 as f32;
+    for _ in 0..1_000 {
+        plain += c as f32 * (gt as f32 - plain);
+    }
+    assert_eq!(plain, g0 as f32, "the plain recurrence moved");
+    let mut bank = runner_at(&controls(-6.0, -0.3, tau), rate);
+    let lookahead = bank.latency().get();
+    let quiet = 0.01f32;
+    let n = (0.25 * tau * rate.get()) as usize;
+    let probes = [n / 4, n / 2, n - 1];
+    let (mut seen, mut worst) = (0, 0.0f64);
+    while seen < lookahead + n {
+        let m = CHUNK_FRAMES.min(lookahead + n - seen);
+        let mut x = vec![quiet; m];
+        if seen == 0 {
+            x[0] = 1.0;
+        }
+        let out = run_mono(&mut bank, &x);
+        for &p in &probes {
+            let k = lookahead + p;
+            if (seen..seen + m).contains(&k) {
+                let want = gt - (gt - g0) * (-c).ln_1p().exp().powi(p as i32);
+                let got = f64::from(out[k - seen]) / f64::from(quiet);
+                worst = worst.max((got - want).abs());
+                assert!(want - g0 > 0.01, "the envelope has risen by the probe");
+            }
+        }
+        seen += m;
+    }
+    let bound = 8.0 * 2f64.powi(-24);
+    assert!(
+        worst <= bound,
+        "{worst} off the closed form, bound {bound:e}"
+    );
 }

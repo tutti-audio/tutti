@@ -30,7 +30,7 @@ use super::curves::{db_gain, gate_gain_at, level_db};
 use super::key_filter::{KeyFilter, KeyStage};
 use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use crate::finite::finite_or;
-use crate::follower::Follower;
+use crate::follower::{Follower, Smoothed};
 use crate::{Glide, Lanes, Lerp, Steps};
 
 /// The controls of a [`GateBank`].
@@ -79,9 +79,8 @@ impl Default for GateControls {
     }
 }
 
-/// The figures the detector runs on at the working precision `F`, which land whole: the
-/// comparison, the times as one-pole coefficients at the rate, the hold in frames and the
-/// closed gain.
+/// The figures the detector runs on in the bank's float `F`, which land whole: the comparison,
+/// the times as one-pole poles at the rate, the hold in frames and the closed gain.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Design<F> {
     /// The threshold as a linear level: the detector compares in the linear domain, so no
@@ -90,8 +89,7 @@ struct Design<F> {
     /// Whether a silent key (pinned at [`Db::FLOOR`]) is at or above the threshold. Only
     /// a threshold at or under the floor opens on silence.
     silence_opens: bool,
-    /// The one-pole coefficients: the attack while the gate opens, the release while it
-    /// closes.
+    /// The one-pole poles: the attack while the gate opens, the release while it closes.
     ballistics: Follower<F>,
     /// `floor(hold * rate)`.
     hold_samples: usize,
@@ -128,21 +126,21 @@ fn opens<F: Float>(level: F, threshold: F, silence_opens: bool) -> bool {
     level >= threshold || (level <= F::ZERO && silence_opens)
 }
 
-/// The per-frame lane a gate reads beside its audio, in the audio's sample format, `None`
-/// where nothing drives it. A lane is at least as long as the frames a call renders; a frame
-/// past its end is not driven.
+/// The per-frame lane a gate reads beside its audio, in the bank's float, `None` where nothing
+/// drives it. A lane is at least as long as the frames a call renders; a frame past its end is
+/// not driven.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct GateLanes<'a, S: Float = f32> {
+pub struct GateLanes<'a, F: Float> {
     /// The threshold in dB. A frame that is not finite is the aimed threshold.
-    pub threshold: Option<Mono<'a, S>>,
+    pub threshold: Option<Mono<'a, F>>,
 }
 
 /// A noise gate of any width: one open/closed decision from the loudest key channel, one
 /// gain applied to every channel, with the follower and the hold that smooth it and the
 /// range that glides.
 ///
-/// Built on the control side for one rate; the state is `F`, the graph's float, and a view of
-/// another sample format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state, the views and the lane are `F`, the
+/// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct GateBank<F: Float + Lanes> {
     design: Design<F>,
@@ -151,9 +149,8 @@ pub struct GateBank<F: Float + Lanes> {
     /// The steps a range glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     rate: SampleRate,
-    /// The smoothed open fraction, 0 closed to 1 open: a per-sample level in `F`; becomes
-    /// `Amplitude` once that unit stores `f64`.
-    follower: F,
+    /// The smoothed open fraction, 0 closed to 1 open: a per-sample level in `F`.
+    follower: Smoothed<F>,
     /// The frames of hold left.
     hold_counter: usize,
     /// The filter on the key, if the bank has one.
@@ -169,11 +166,11 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
         let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         let design = Design::of(&GateControls::DEFAULT, rate);
         Self {
-            range: Glide::landed(F::from_f64(design.range.get())),
+            range: Glide::landed(F::from_unit(design.range)),
             design,
             steps,
             rate,
-            follower: F::ZERO,
+            follower: Smoothed::ZERO,
             hold_counter: 0,
             key: None,
         }
@@ -194,7 +191,7 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
     /// Back to silence: the gate closed and no hold left, and the range landed on its
     /// target. No allocation.
     pub fn reset(&mut self) {
-        self.follower = F::ZERO;
+        self.follower = Smoothed::ZERO;
         self.hold_counter = 0;
         self.range.settle();
         if let Some(key) = &mut self.key {
@@ -223,10 +220,8 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
                 Q(finite_or(controls.key_q.get(), d.key_q.get())),
             );
         }
-        self.range.aim_by(
-            F::from_f64(self.design.range.get()),
-            Steps::Fixed(self.steps),
-        );
+        self.range
+            .aim_by(F::from_unit(self.design.range), Steps::Fixed(self.steps));
     }
 
     /// Runs `input` into `output`, scaled by one gain decided from the loudest channel of
@@ -239,12 +234,12 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
     /// are the fewest of the three views'. A NaN key sample reads as quiet and an infinite one
     /// as the largest finite level. Frame `i` reads the range at the glide's step
     /// `taken + 1 + i`, then the block's steps are taken. No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
-        lanes: GateLanes<'_, S>,
-        key: Planes<'_, S>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        lanes: GateLanes<'_, F>,
+        key: Planes<'_, F>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input
             .frames()
@@ -253,7 +248,7 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
             .min(key.frames().get());
         let width = input.channels().min(output.channels());
         let d = self.design;
-        let threshold = F::from_f64(d.threshold.get());
+        let threshold = F::from_unit(d.threshold);
         let blended = self.range.blended(frames);
         let taken = self.range.taken();
         let held = db_gain(self.range.target());
@@ -274,7 +269,7 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
                 let open = match lanes
                     .threshold
                     .and_then(|l| l.samples().get(i))
-                    .map(|x| x.convert_to::<F>())
+                    .copied()
                     .filter(|t| t.is_finite())
                 {
                     Some(t) => level_db(level) >= t,
@@ -282,11 +277,11 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
                 };
                 if open {
                     self.hold_counter = d.hold_samples;
-                    self.follower = d.ballistics.follow_raw(self.follower, F::ONE);
+                    d.ballistics.follow_raw(&mut self.follower, F::ONE);
                 } else if self.hold_counter > 0 {
                     self.hold_counter -= 1;
                 } else {
-                    self.follower = d.ballistics.follow_raw(self.follower, F::ZERO);
+                    d.ballistics.follow_raw(&mut self.follower, F::ZERO);
                 }
                 let range = if i < blended {
                     db_gain(
@@ -296,14 +291,14 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
                 } else {
                     held
                 };
-                *g = gate_gain_at(self.follower, range);
+                *g = gate_gain_at(self.follower.value(), range);
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
-                for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<F>() * g).convert_to::<S>();
+                for ((y, &x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
+                    *y = x * g;
                 }
             }
             start = end;

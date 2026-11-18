@@ -141,19 +141,19 @@ fn the_stereo_spread_wraps_instead_of_leaving_the_canonical_range() {
     // Near the rear seam at full width, one source crosses 180 and wraps to
     // the other side: vbap never sees 185 degrees, outside the -180..180
     // range every other path maintains.
-    let (a, b) = virtual_sources(Azimuth(170.0), 1.0);
+    let (a, b) = virtual_sources(Azimuth(170.0), StereoWidth(1.0));
     assert_eq!(a, Azimuth(-175.0));
     assert_eq!(b, Azimuth(155.0));
 
     // The mirrored case, crossing the other way.
-    let (a, b) = virtual_sources(Azimuth(-170.0), 1.0);
+    let (a, b) = virtual_sources(Azimuth(-170.0), StereoWidth(1.0));
     assert_eq!(a, Azimuth(-155.0));
     assert_eq!(b, Azimuth(175.0));
 
     // Both stay in range for every bearing and width.
     for deg in -180..=180 {
         for w in [0.0, 0.25, 0.5, 1.0] {
-            let (a, b) = virtual_sources(Azimuth(f64::from(deg)), w);
+            let (a, b) = virtual_sources(Azimuth(f64::from(deg)), StereoWidth(w));
             assert!(a.get() >= -180.0 && a.get() <= 180.0, "a={a:?}");
             assert!(b.get() >= -180.0 && b.get() <= 180.0, "b={b:?}");
         }
@@ -164,12 +164,12 @@ fn the_stereo_spread_wraps_instead_of_leaving_the_canonical_range() {
 fn the_spread_is_symmetric_about_the_bearing_away_from_the_seam() {
     // Front and centre: no wrapping involved, so the two sources should
     // straddle the bearing by exactly the offset.
-    let (a, b) = virtual_sources(Azimuth::FRONT, 1.0);
+    let (a, b) = virtual_sources(Azimuth::FRONT, StereoWidth(1.0));
     assert_eq!(a, Azimuth(15.0));
     assert_eq!(b, Azimuth(-15.0));
 
     // Width scales the offset; zero width collapses both onto the bearing.
-    let (a, b) = virtual_sources(Azimuth(30.0), 0.0);
+    let (a, b) = virtual_sources(Azimuth(30.0), StereoWidth(0.0));
     assert_eq!(a, Azimuth(30.0));
     assert_eq!(b, Azimuth(30.0));
 }
@@ -204,7 +204,7 @@ fn a_huge_width_saturates_instead_of_overflowing() {
             Spread::POINT,
         )
     };
-    let saturated = solve(MAX_WIDTH);
+    let saturated = solve(MAX_WIDTH.get());
     for width in [13.0, 1e6, 3e37, f64::MAX] {
         let got = solve(width);
         for s in 0..11 {

@@ -30,7 +30,6 @@ use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use super::compressor::{CompressorBank, CompressorControls, CompressorLanes};
 use super::shared::{CHUNK, GAIN_GLIDE};
-use crate::convert::convert_equal;
 use crate::{
     COEFF_INTERVAL, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
     CrossoverModel, Glide, Lanes, Lerp, Steps,
@@ -93,13 +92,13 @@ impl Default for MultibandSettings {
     }
 }
 
-/// The per-frame lanes a multiband reads beside its audio, in the audio's sample format,
-/// `None` where nothing drives them. A lane is at least as long as the frames a call
-/// renders; a frame past its end is not driven.
+/// The per-frame lanes a multiband reads beside its audio, in the bank's float, `None` where
+/// nothing drives them. A lane is at least as long as the frames a call renders; a frame past
+/// its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct MultibandLanes<'a, S: Float = f32> {
+pub struct MultibandLanes<'a, F: Float> {
     /// Band `b`'s threshold in dB. A frame that is not finite is the aimed threshold.
-    pub thresholds: [Option<Mono<'a, S>>; MAX_BANDS],
+    pub thresholds: [Option<Mono<'a, F>>; MAX_BANDS],
 }
 
 /// Each band's largest reduction since the last read, in dB and positive: a
@@ -207,8 +206,8 @@ impl<F: Float> Scratch<F> {
 /// A multiband compressor of `bands` bands over a fixed width: the crossover, a
 /// [`CompressorBank`] a band, and the weights that bypass and solo.
 ///
-/// Built on the control side for one rate; the state is `F`, the graph's float, and a view of
-/// another sample format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state, the views and the lanes are `F`, the
+/// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct MultibandBank<F: Float + Lanes + Lerp> {
     width: usize,
@@ -347,11 +346,11 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
     /// and the frames rendered are the fewer of the two views'. Frame `i` reads the
     /// weights at the glide's step `taken + 1 + i`, then the block's steps are taken. No
     /// allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
-        lanes: MultibandLanes<'_, S>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        lanes: MultibandLanes<'_, F>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let mut start = 0;
@@ -363,11 +362,11 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
     }
 
     /// Runs frames `at` of the views, at most [`CHUNK`] of them.
-    fn chunk<S: Float>(
+    fn chunk(
         &mut self,
-        lanes: &MultibandLanes<'_, S>,
-        input: &Planes<'_, S>,
-        output: &mut PlanesMut<'_, '_, S>,
+        lanes: &MultibandLanes<'_, F>,
+        input: &Planes<'_, F>,
+        output: &mut PlanesMut<'_, '_, F>,
         at: Range<usize>,
     ) {
         let n = at.len();
@@ -376,7 +375,7 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
         for (c, plane) in scratch.input.iter_mut().enumerate() {
             let dst = &mut plane[..n];
             match input.get_plane(c) {
-                Some(src) => convert_equal(&src.samples()[at.clone()], dst),
+                Some(src) => dst.copy_from_slice(&src.samples()[at.clone()]),
                 None => dst.fill(F::ZERO),
             }
         }
@@ -410,12 +409,12 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
                     return;
                 };
                 let band = band.slice(frames.clone());
-                // The lane in `F`, a frame past its end not finite, so not driven.
+                // A frame past the lane's end is not finite, so not driven.
                 let threshold = lanes.thresholds[b].map(|l| {
                     let all = l.samples();
                     let driven = &all[at.start.min(all.len())..at.end.min(all.len())];
                     for (i, t) in lane[..n].iter_mut().enumerate() {
-                        *t = driven.get(i).map_or(F::NAN, |x| x.convert_to::<F>());
+                        *t = driven.get(i).copied().unwrap_or(F::NAN);
                     }
                     Mono::new(&lane[..n])
                 });
@@ -468,7 +467,7 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
             .enumerate()
         {
             let mut plane = output.plane_mut(c);
-            convert_equal(&sum[..n], &mut plane.samples_mut()[at.clone()]);
+            plane.samples_mut()[at.clone()].copy_from_slice(&sum[..n]);
         }
     }
 }

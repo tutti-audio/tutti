@@ -35,7 +35,7 @@ use super::SvfBank;
 use super::svf::{SvfCoefficients, SvfControls, SvfModel, SvfType};
 use crate::dynamics::{floored, key_levels};
 use crate::finite::finite_or;
-use crate::follower::Follower;
+use crate::follower::{Follower, Smoothed};
 use crate::{COEFF_INTERVAL, Glide, Lanes, Lerp};
 
 /// The frames between designs: the grid period.
@@ -91,9 +91,8 @@ pub struct EnvelopeFilterBank<F: Float + Lanes> {
     ty: SvfType,
     rate: SampleRate,
     follower: Follower<F>,
-    /// The envelope, in `[0, 1]`: 0 until a level is heard. A per-sample level in `F`; becomes
-    /// `Amplitude` once that unit stores `f64`.
-    env: F,
+    /// The envelope, in `[0, 1]`: 0 until a level is heard. A per-sample level in `F`.
+    env: Smoothed<F>,
     bank: SvfBank<F>,
     coefficients: Glide<SvfCoefficients<F>>,
     controls: EnvelopeFilterControls,
@@ -111,7 +110,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
             ty,
             rate,
             follower: Follower::of(floored(controls.attack, controls.release), rate),
-            env: F::ZERO,
+            env: Smoothed::ZERO,
             bank: SvfBank::new(width),
             coefficients: Glide::landed(SvfCoefficients::from(&SvfModel::new(
                 SvfControls::DEFAULT,
@@ -129,7 +128,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
     /// Back to silence: the envelope at 0, the filter cleared, the cutoff landed at the
     /// design for an envelope of 0, and the grid counted from here. No allocation.
     pub fn reset(&mut self) {
-        self.env = F::ZERO;
+        self.env = Smoothed::ZERO;
         self.bank.reset();
         self.phase = Samples::ZERO;
         self.coefficients.aim(self.design(F::ZERO));
@@ -138,7 +137,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
 
     /// Lands the cutoff on its design for the current envelope now.
     pub fn settle(&mut self) {
-        self.coefficients.aim(self.design(self.env));
+        self.coefficients.aim(self.design(self.env.value()));
         self.coefficients.settle();
     }
 
@@ -198,7 +197,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
         let mut start = 0;
         while start < frames {
             if self.phase == Samples::ZERO {
-                let design = self.design(self.env);
+                let design = self.design(self.env.value());
                 self.coefficients.aim(design);
             }
             let n = (frames - start).min(GRID.get() - self.phase.get());
@@ -206,7 +205,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
             let levels = &mut levels[..n];
             key_levels(&input, start..end, levels);
             for l in levels.iter() {
-                self.env = self.follower.follow_raw(self.env, l.min(F::ONE));
+                self.follower.follow_raw(&mut self.env, l.min(F::ONE));
             }
             let range = Samples(start)..Samples(end);
             self.bank.process(

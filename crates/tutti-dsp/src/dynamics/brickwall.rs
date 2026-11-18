@@ -13,7 +13,7 @@
 //! cell, and a NaN frame on the lane clamps at the aimed ceiling).
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_units::{Amplitude, Db};
+use tutti_units::Db;
 
 use super::curves::db_gain;
 
@@ -50,13 +50,13 @@ fn clip<F: Float>(x: F, ceiling: F) -> F {
     x.clamp(-ceiling, ceiling)
 }
 
-/// The per-frame lane a brickwall reads beside its audio, in the audio's sample format,
-/// `None` where nothing drives it. A lane is at least as long as the frames a call renders;
-/// a frame past its end is not driven.
+/// The per-frame lane a brickwall reads beside its audio, in the bank's float, `None` where
+/// nothing drives it. A lane is at least as long as the frames a call renders; a frame past
+/// its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct BrickwallLanes<'a, S: Float = f32> {
+pub struct BrickwallLanes<'a, F: Float> {
     /// The ceiling in dB. A frame that is NaN clamps at the aimed ceiling.
-    pub ceiling: Option<Mono<'a, S>>,
+    pub ceiling: Option<Mono<'a, F>>,
 }
 
 /// A brickwall at one ceiling, every channel clamped to it: `y = clamp(x, -c, c)`,
@@ -65,24 +65,28 @@ pub struct BrickwallLanes<'a, S: Float = f32> {
 /// how the input is cut into blocks.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BrickwallBank<F: Float> {
-    ceiling: Amplitude,
-    /// The precision the clamp runs in.
-    precision: core::marker::PhantomData<F>,
+    /// The aimed ceiling as an amplitude.
+    ceiling: F,
 }
 
 impl<F: Float> BrickwallBank<F> {
     /// A clipper at the full scale, 0 dB.
     #[must_use]
     pub const fn new() -> Self {
-        Self {
-            ceiling: Amplitude::UNITY,
-            precision: core::marker::PhantomData,
-        }
+        Self { ceiling: F::ONE }
     }
 
-    /// Aims at `controls`: a NaN ceiling is the default's, 0 dB.
+    /// Aims at `controls`: a NaN ceiling is the default's, 0 dB. A ceiling whose amplitude is
+    /// past the float's largest finite value (about 770 dB at `f32`) passes everything, an
+    /// infinity included, as `+inf` dB does.
     pub fn aim(&mut self, controls: &BrickwallControls) {
-        self.ceiling = Amplitude(amplitude::<f64>(controls.ceiling.get()).unwrap_or(1.0));
+        let ceiling = amplitude::<f64>(controls.ceiling.get()).unwrap_or(1.0);
+        // A ceiling past the float's range passes everything, as `+inf` dB does.
+        self.ceiling = if ceiling > F::MAX.into() {
+            F::INFINITY
+        } else {
+            F::from_design(ceiling)
+        };
     }
 
     /// Runs `input` into `output`, every frame clamped at the ceiling: its own on a driven
@@ -90,27 +94,24 @@ impl<F: Float> BrickwallBank<F> {
     ///
     /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the narrower of
     /// the two views is not touched. No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &self,
-        lanes: BrickwallLanes<'_, S>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        lanes: BrickwallLanes<'_, F>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
-        let base = F::from_f64(self.ceiling.get());
+        let base = self.ceiling;
         match lanes.ceiling {
-            // Each frame's ceiling is converted once, for every channel.
+            // Each frame's ceiling is found once, for every channel.
             Some(lane) => {
                 let lane = lane.samples();
                 for i in 0..frames {
-                    let ceiling = lane
-                        .get(i)
-                        .and_then(|x| amplitude(x.convert_to::<F>()))
-                        .unwrap_or(base);
+                    let ceiling = lane.get(i).and_then(|&x| amplitude(x)).unwrap_or(base);
                     for c in 0..width {
-                        let x = input.plane(c).samples()[i].convert_to::<F>();
-                        output.plane_mut(c).samples_mut()[i] = clip(x, ceiling).convert_to::<S>();
+                        let x = input.plane(c).samples()[i];
+                        output.plane_mut(c).samples_mut()[i] = clip(x, ceiling);
                     }
                 }
             }
@@ -119,8 +120,8 @@ impl<F: Float> BrickwallBank<F> {
                     let xs = &input.plane(c).samples()[..frames];
                     let mut plane = output.plane_mut(c);
                     let ys = &mut plane.samples_mut()[..frames];
-                    for (y, x) in ys.iter_mut().zip(xs) {
-                        *y = clip(x.convert_to::<F>(), base).convert_to::<S>();
+                    for (y, &x) in ys.iter_mut().zip(xs) {
+                        *y = clip(x, base);
                     }
                 }
             }

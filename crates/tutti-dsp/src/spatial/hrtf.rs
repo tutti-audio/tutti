@@ -29,8 +29,9 @@
 use std::sync::Arc;
 
 use crate::FftFloat;
+use crate::design::along;
+use tutti_buffers::{Fold, Mono, MonoMut, Planes, StereoPlanes};
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_buffers::{Float, Fold, Mono, MonoMut, Planes, StereoPlanes};
 use tutti_units::{Direction, Mix, Radians, SampleRate};
 
 mod hull;
@@ -397,7 +398,6 @@ impl<F: FftFloat> HrtfBinaural<F> {
         );
 
         let crossfade = next != self.current;
-        let step = <F as Float>::from_f32(1.0 / HRTF_STEP as f32);
         let wet = [&mut self.wet_left, &mut self.wet_right];
         for (ear, wet) in wet.into_iter().enumerate() {
             blend_into(
@@ -424,7 +424,7 @@ impl<F: FftFloat> HrtfBinaural<F> {
                 for (i, ((w, &y), &z)) in wet.iter_mut().zip(new).zip(old).enumerate() {
                     // Reaches the new filter on the step's last frame, so the
                     // next step continues from it.
-                    let t = <F as Float>::from_f32((i + 1) as f32) * step;
+                    let t = along::<F>(i as u32 + 1, HRTF_STEP as u32);
                     *w = crate::lerp(z, y, t);
                 }
             } else {
@@ -452,7 +452,7 @@ fn blend_into<F: FftFloat>(
         let (left, right) = set.spectrum(v);
         if ear == 0 { left } else { right }
     });
-    let [wa, wb, wc] = weights.w.map(<F as Float>::from_f32);
+    let [wa, wb, wc] = weights.w.map(F::from_design);
     let filters = a.iter().zip(b).zip(c);
     for ((p, &x), ((&a, &b), &c)) in product.iter_mut().zip(input).zip(filters) {
         *p = x * (a * wa + b * wb + c * wc);
@@ -466,13 +466,12 @@ fn blend_into<F: FftFloat>(
 /// Convention (matching the rest of `spatial`): azimuth 0 = front, +90 = left;
 /// elevation 0 = ear level, +90 = up.
 #[inline]
-fn unit_vector(aim: Direction) -> [f32; 3] {
+fn unit_vector(aim: Direction) -> [f64; 3] {
     let az = Radians::from(aim.azimuth);
     let el = Radians::from(aim.elevation);
     let cos_el = el.cos();
-    // +90° azimuth (left) → -x; front (0°) → -z. The sphere's vertices are
-    // `f32` (its stored format), so the vector narrows once per aim.
-    [-az.sin() * cos_el, el.sin(), -az.cos() * cos_el].map(|c| c as f32)
+    // +90° azimuth (left) → -x; front (0°) → -z.
+    [-az.sin() * cos_el, el.sin(), -az.cos() * cos_el]
 }
 
 #[cfg(test)]
