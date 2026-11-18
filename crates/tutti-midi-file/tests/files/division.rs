@@ -38,6 +38,7 @@ fn division_bytes(bytes: &[u8]) -> [u8; 2] {
 /// specification's own words: 25 frames a second at 40 a frame is the
 /// millisecond file (`E7 28`), and 30 frames at bit resolution (80) is `E250`.
 /// -29 is 30 drop frame, 29.97.
+/// Spec: smf/header-chunk#10, smf/header-chunk#11, smf/header-chunk#13, smf/header-chunk#14, smf/header-chunk#15, smf/header-chunk#16, smf/header-chunk#17
 #[test]
 fn a_division_word_with_its_top_bit_set_is_a_frame_rate_and_ticks_per_frame() {
     for (word, fps, ticks_per_frame) in [
@@ -65,6 +66,7 @@ fn a_division_word_with_its_top_bit_set_is_a_frame_rate_and_ticks_per_frame() {
 }
 
 /// A metrical word keeps its 15 bits and writes back as it was.
+/// Spec: smf/header-chunk#10, smf/header-chunk#11, smf/header-chunk#12
 #[test]
 fn a_division_word_with_its_top_bit_clear_is_ticks_per_quarter() {
     for tpq in [1u16, 96, 480, 0x7FFF] {
@@ -76,6 +78,7 @@ fn a_division_word_with_its_top_bit_clear_is_ticks_per_quarter() {
 
 /// A frame rate that is none of -24, -25, -29 and -30, and a resolution of zero,
 /// are not divisions.
+/// Spec: smf/header-chunk#14
 #[test]
 fn a_division_with_a_foreign_frame_rate_or_no_resolution_is_refused() {
     for (fps, ticks_per_frame, cause) in [
@@ -103,6 +106,7 @@ fn a_division_with_a_foreign_frame_rate_or_no_resolution_is_refused() {
 /// A tick of an SMPTE file is `1 / (frames per second * ticks per frame)`
 /// seconds. 25 x 40 is 1000 ticks a second (the specification's millisecond
 /// file); 24 x 4 is 96; 30 x 80 is 2400.
+/// Spec: smf/header-chunk#13
 #[test]
 fn an_smpte_tick_is_a_fixed_fraction_of_a_second() {
     for (fps, ticks_per_frame, ticks_per_second) in
@@ -137,6 +141,7 @@ fn an_smpte_tick_is_a_fixed_fraction_of_a_second() {
 /// -29 is 29.97 frames a second, exactly 30000/1001: 30000 frames last 1001
 /// seconds, so at 4 ticks a frame 120000 ticks are 1001 s, where 30 fps would
 /// say 1000.
+/// Spec: smf/header-chunk#14
 #[test]
 fn the_drop_frame_rate_is_30000_over_1001() {
     let file = read(&one_note(Division::Smpte {
@@ -149,6 +154,7 @@ fn the_drop_frame_rate_is_30000_over_1001() {
 
 /// The events of an SMPTE file are at seconds, and a Set Tempo moves none of
 /// them: the file has no quarter note to apply a tempo to.
+/// Spec: smf/header-chunk#13
 #[test]
 fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
     let bytes = build_smf(
@@ -188,6 +194,7 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
 /// A format 2 file in SMPTE time keeps its sequences apart as a metrical one's
 /// are: it has sequences, each read in seconds on its own, and no
 /// one-timeline view.
+/// Spec: smf/header-chunk#7
 #[test]
 fn a_format_2_file_in_smpte_time_has_sequences() {
     let bytes = build_smf(
@@ -217,6 +224,7 @@ fn a_format_2_file_in_smpte_time_has_sequences() {
 /// SMF 1.0 section 2.1: "A program encountering an unknown format ID may still
 /// read other MTrk chunks it finds". A format 3 file is read as its tracks,
 /// keeps its format word and is written back byte for byte.
+/// Spec: smf/formats#16
 #[test]
 fn a_format_3_file_reads_as_its_tracks_and_writes_back_exactly() {
     let bytes = build_smf(
@@ -270,6 +278,7 @@ fn a_file_in_smpte_time_has_no_clip() {
 }
 
 /// SMF 1.0 section 2.1: 15 bits of ticks per quarter note, zero is none.
+/// Spec: smf/header-chunk#12
 #[test]
 fn an_smf_ticks_per_quarter_is_1_to_32767() {
     check_range_contract(&RangeContract {
@@ -282,6 +291,7 @@ fn an_smf_ticks_per_quarter_is_1_to_32767() {
 }
 
 /// The low byte of an SMPTE division: 1 to 255, zero is none.
+/// Spec: smf/header-chunk#16
 #[test]
 fn an_smf_ticks_per_frame_is_1_to_255() {
     check_range_contract(&RangeContract {

@@ -1,0 +1,168 @@
+# Standard MIDI Files 1.0 (RP-001, February 1996) inventory. The spec text is not in
+# the repo: `TUTTI_MIDI_SPECS=<dir> cargo xtask conformance-inventory midi`
+# regenerates the id, kind, section and facts columns from the OCR text of the
+# spec in The Complete MIDI 1.0 (1996) book, a `complete_midi_96*.txt` in that directory;
+# the other columns are written by hand, in our own words. `cargo xtask
+# check-conformance` holds the generated columns to the text when
+# `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids, section
+# names, keyword kinds and functional facts only.
+#
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite | digest
+# digest is the FNV-1a 64 of the row's sentence, whitespace normalised: the hand
+# columns follow it when a revision shifts the numbers. side `changed` is a row
+# whose sentence changed under hand columns: reread it and rewrite them.
+#
+# Ids:
+#   smf/<section>#<n>              the nth sentence under the named section (the
+#                                 headings of the spec: header-chunk, track-chunks,
+#                                 set-tempo, ..) that binds. The spec has no
+#                                 table of conformance words: must, shall, always,
+#                                 never, required and assumed give required,
+#                                 should (and polite, idea) recommended, may and
+#                                 optional permitted; `not required` reads as may
+#                                 and `not optional` as must; the negated forms
+#                                 keep the kind and carry the fact neg=1. A
+#                                 sentence with none of them that states how the
+#                                 format stores something (stored, represented,
+#                                 begins, followed, ..) is required with the fact
+#                                 def=1.
+# side: writer, reader or both (todo marks a row not yet read).
+smf/conventions#1 | both |  | required | SMF 1.0 §conventions | some numbers in the file are variable-length quantities | def=1 |  |  | 7dd0afe543e9c45b
+smf/conventions#2 | both |  | required | SMF 1.0 §conventions | a quantity is 7 bits per byte, most significant group first | def=1 |  |  | 6461f56890122bdb
+smf/conventions#3 | both |  | required | SMF 1.0 §conventions | every byte of a quantity but the last has bit 7 set, the last has it clear | def=1 |  |  | 7aa293a4e73fb9d0
+smf/conventions#4 | both |  | required | SMF 1.0 §conventions | a value from 0 to 127 is exactly one byte | def=1 |  |  | 2af24bea0d7f8f69
+smf/conventions#5 | both |  | required | SMF 1.0 §conventions | introduces the table of quantity examples (read with the table row) | def=1 |  |  | 50a2aae93924a752
+smf/conventions#6 | both |  | required | SMF 1.0 §conventions | the spec table of quantities and their bytes, all twelve rows | def=1 |  |  | 8e99a34358d3a251
+smf/conventions#7 | both |  | required | SMF 1.0 §conventions | the largest quantity is 0FFFFFFF: a quantity fits four bytes, 28 bits |  |  |  | 7225e6b9bfc8dc08
+smf/files#1 | both |  | required | SMF 1.0 §files | Macintosh storage of the byte stream (data fork, file type, Clipboard) | def=1 | other-side | SMF 1.0 Files: "On the Macintosh, this byte stream is stored in the data fork of a file" names Macintosh file-system storage, not the byte stream this format defines | b090762fccf130bd
+smf/files#2 | both |  | required | SMF 1.0 §files | other computers use their own naming and storage conventions, defined as required |  | other-side | SMF 1.0 Files: "naming or storage conventions for those computers will be defined as required" defers to conventions the spec does not give | 77093b9fa60993ff
+smf/chunks#1 | both |  | required | SMF 1.0 §chunks | a chunk has a 4-character type and a 32-bit length counting the chunk body | def=1 |  |  | 4cbee89bf0b8241b
+smf/chunks#2 | reader |  | permitted | SMF 1.0 §chunks | the chunk structure lets a reader ignore a chunk type it does not know |  |  |  | e4695754f0655aa8
+smf/chunks#3 | reader |  | recommended | SMF 1.0 §chunks | a program expects chunks of an unknown type and treats them as absent |  |  |  | 80cd11a9f1da0fa0
+smf/chunks#4 | both |  | required | SMF 1.0 §chunks | a chunk begins with a 4-character ASCII type | def=1 |  |  | 9766c0dee7977173
+smf/chunks#5 | both |  | required | SMF 1.0 §chunks | the length follows the type as 32 bits, most significant byte first | def=1 |  |  | ac7ac6b71f6e4ad5
+smf/chunks#6 | both |  | required | SMF 1.0 §chunks | the length counts the data after the 8 bytes of type and length | def=1 |  |  | 3432c4dfbc9444f0
+smf/chunks#7 | both |  | required | SMF 1.0 §chunks | a chunk of length 6 takes 14 bytes in the file | def=1 |  |  | 4ac19c2bcb670575
+smf/chunks#8 | both |  | required | SMF 1.0 §chunks | the file has no nested chunks and chunks need no even-length padding | def=1 |  |  | a1c99fa45f2d9643
+smf/chunks#9 | both |  | permitted | SMF 1.0 §chunks | a track chunk may carry up to 16 MIDI channels |  |  |  | 53ae953958f62514
+smf/chunks#10 | both |  | permitted | SMF 1.0 §chunks | multiple tracks, outputs, patterns, sequences and songs are all several track chunks |  | other-side | SMF 1.0 Chunks: "may all be implemented using several track chunks" says what the chunk structure can express, a statement of purpose with no behaviour of its own | de6aac8b67982bb5
+smf/chunks#11 | both |  | required | SMF 1.0 §chunks | a file starts with a header chunk and has one or more track chunks after it |  |  |  | 36ce2e3a6c58e889
+smf/header-chunk#1 | both |  | required | SMF 1.0 §header-chunk | the header chunk opens the file with its basic information | def=1 |  |  | 9532af5ce8127bdc
+smf/header-chunk#2 | both |  | required | SMF 1.0 §header-chunk | the header chunk is the type MThd with a 32-bit length of 6 | def=1 |  |  | a4d3315c63318f37
+smf/header-chunk#3 | both |  | required | SMF 1.0 §header-chunk | the header data is three 16-bit words, most significant byte first | def=1 |  |  | 1d4116b046cdb752
+smf/header-chunk#4 | both |  | required | SMF 1.0 §header-chunk | the first word is the format, the overall organisation of the file | def=1 |  |  | 8649158561735389
+smf/header-chunk#5 | both |  | required | SMF 1.0 §header-chunk | format 0 is a single multi-channel track | def=1 |  |  | 72f0096837ef69ec
+smf/header-chunk#6 | both |  | required | SMF 1.0 §header-chunk | format 1 is simultaneous tracks of one sequence | def=1 |  |  | 49ac0c356deadc61
+smf/header-chunk#7 | both |  | required | SMF 1.0 §header-chunk | format 2 is sequentially independent single-track patterns | def=1 |  |  | 24a065920c4c8522
+smf/header-chunk#8 | both |  | required | SMF 1.0 §header-chunk | the next word is the number of track chunks in the file | def=1 |  |  | 1c03a93d5e7181c5
+smf/header-chunk#9 | both |  | required | SMF 1.0 §header-chunk | a format 0 file has exactly one track chunk |  |  |  | b5d0eff6c538c428
+smf/header-chunk#10 | both |  | required | SMF 1.0 §header-chunk | the third word, the division, says what the delta-times mean | def=1 |  |  | 5d3e84cdddb69470
+smf/header-chunk#11 | both |  | required | SMF 1.0 §header-chunk | the division is either metrical or time-code based | def=1 |  |  | a5992ddd39a419bd
+smf/header-chunk#12 | both |  | required | SMF 1.0 §header-chunk | bit 15 clear: bits 14-0 are delta ticks to the quarter note | def=1 |  |  | 901120f9005c1e4a
+smf/header-chunk#13 | both |  | required | SMF 1.0 §header-chunk | bit 15 set: delta-times are subdivisions of a second consistent with SMPTE | def=1 |  |  | 9e4f96e2bda974d7
+smf/header-chunk#14 | both |  | required | SMF 1.0 §header-chunk | bits 14-8 are -24, -25, -29 or -30 (-29 is 30 drop frame) frames a second | def=1 |  |  | 360ecdd71d3ee91b
+smf/header-chunk#15 | both |  | required | SMF 1.0 §header-chunk | the negative frame rate is stored in two's complement | def=1 |  |  | cdb16356484a577f
+smf/header-chunk#16 | both |  | permitted | SMF 1.0 §header-chunk | the low byte is the resolution within a frame, stored positive; 4, 8, 10, 80 and 100 are typical |  |  |  | 7e8ca9e4e5d64e62
+smf/header-chunk#17 | both |  | required | SMF 1.0 §header-chunk | 30 frames at bit resolution (80) is the division word E250 | def=1 |  |  | 4c58cf3dd3ee937c
+smf/formats#1 | both |  | required | SMF 1.0 §formats | a format 0 file is a header chunk and one track chunk | def=1 |  |  | 8ac7cdfd2680532f
+smf/formats#2 | both |  | required | SMF 1.0 §formats | format 0 is the most interchangeable representation | def=1 | other-side | SMF 1.0 Formats 0, 1, and 2: "It is the most interchangeable representation of data" is a remark about the format, not a requirement on a file or a program | 2b7e1f7e0d15dd98
+smf/formats#3 | both |  | required | SMF 1.0 §formats | a format 1 or 2 file is a header chunk and one or more track chunks | def=1 |  |  | 7f0d3aea722703bc
+smf/formats#4 | both |  | recommended | SMF 1.0 §formats | a program with simultaneous tracks saves and reads format 1 |  |  |  | 7f622dc161c959c4
+smf/formats#5 | both |  | recommended | SMF 1.0 §formats | a program with independent patterns saves and reads format 2 |  |  |  | 8ff871a2228c2128
+smf/formats#6 | both |  | permitted | SMF 1.0 §formats | a computer with a SMPTE synchronizer creates tempo maps and may carry time signatures with them |  | other-side | SMF 1.0 Formats 0, 1, and 2: the sentence describes a computer and SMPTE synchronizer system and where tempo maps are "generally created", not a rule on a file | 0943bec2393b3991
+smf/formats#7 | writer |  | required | SMF 1.0 §formats | tempo information is stored in the first MTrk chunk |  |  |  | 77ec162a00d2bfc5
+smf/formats#8 | both |  | required | SMF 1.0 §formats | a format 0 tempo map is read past the events between; a format 1 tempo map is the first track |  |  |  | 6a3eeab4e04a4cb1
+smf/formats#9 | writer |  | recommended | SMF 1.0 §formats | offering to write a format 0 file of only the tempo |  | other-side | SMF 1.0 Formats 0, 1, and 2: "It is polite to a tempo map reader to offer your user the ability to make a format 0 file with just the tempo" is advice on a program's user interface | 60ed0e4a68741768
+smf/formats#10 | writer |  | recommended | SMF 1.0 §formats | a file specifies tempo and time signature |  |  |  | 9ee9550ca332961f
+smf/formats#11 | reader |  | required | SMF 1.0 §formats | with no tempo and time signature, 4/4 and 120 beats a minute are assumed |  |  |  | 8a82da1b44c36149
+smf/formats#12 | writer |  | recommended | SMF 1.0 §formats | in format 0 the tempo and time signature come at the start of the track |  |  |  | 8b49b9488e5cdc1b
+smf/formats#13 | writer |  | recommended | SMF 1.0 §formats | in format 1 the tempo and time signature are in the first track |  |  |  | 82dce28867bb1e34
+smf/formats#14 | writer |  | recommended | SMF 1.0 §formats | in format 2 each pattern has an initial time signature and tempo |  |  |  | 4b231499e99ac224
+smf/formats#15 | both |  | permitted | SMF 1.0 §formats | other format IDs may be defined later |  | other-side | SMF 1.0 Formats 0, 1, and 2: "We may decide to define other format IDs" is the spec authors' statement of intent, a rule on no file or program | 98bd1290e67062d9
+smf/formats#16 | reader |  | permitted | SMF 1.0 §formats | a program meeting an unknown format ID may read its MTrk chunks as format 1 or 2 |  |  |  | f76f283db8087663
+smf/formats#17 | reader |  | permitted | SMF 1.0 §formats | the header length is read and honoured even when longer than 6 |  |  |  | adee17cec6327fb4
+smf/track-chunks#1 | both |  | required | SMF 1.0 §track-chunks | track chunks, type MTrk, hold the song data | def=1 |  |  | 76fdad734fd9ef37
+smf/track-chunks#2 | both |  | required | SMF 1.0 §track-chunks | a track chunk is a type, a length and one or more MTrk events |  |  |  | 0d35242810335918
+smf/track-chunks#3 | both |  | required | SMF 1.0 §track-chunks | a delta-time is stored as a variable-length quantity | def=1 |  |  | 97d99763c7279985
+smf/track-chunks#4 | both |  | required | SMF 1.0 §track-chunks | a delta-time is the time before the event that follows it | def=1 |  |  | 2a5e5ad6c1ae449f
+smf/track-chunks#5 | writer |  | required | SMF 1.0 §track-chunks | a delta-time is always present, zero when simultaneous |  |  |  | e611fca53ff1a708
+smf/track-chunks#6 | both |  | permitted | SMF 1.0 §track-chunks | running status: a channel message with the previous status may omit it |  |  |  | 73d23bfae997253d
+smf/track-chunks#7 | reader |  | required | SMF 1.0 §track-chunks | the first event of a track chunk states its status |  |  |  | 1472638ecfad53d1
+smf/track-chunks#8 | both |  | required | SMF 1.0 §track-chunks | a complete sysex message is F0, a length, then the bytes after the F0 | def=1 |  |  | eacea7ef5983f7a8
+smf/track-chunks#9 | both |  | required | SMF 1.0 §track-chunks | the sysex length is a variable-length quantity | def=1 |  |  | 08d6d13cc34ed440
+smf/track-chunks#10 | both |  | required | SMF 1.0 §track-chunks | the sysex length counts the bytes after it, not the F0 or itself | def=1 |  |  | 104c9dc2640bd57b
+smf/track-chunks#11 | both |  | required | SMF 1.0 §track-chunks | example: F0 43 12 00 07 F7 is stored as F0 05 43 12 00 07 F7 | def=1 |  |  | 4efccf2b2c7577ef
+smf/track-chunks#12 | writer |  | required | SMF 1.0 §track-chunks | a sysex event includes the final F7 |  |  |  | 346a01cb8496d6d6
+smf/track-chunks#13 | both |  | recommended | SMF 1.0 §track-chunks | the F7 event form sends bytes without implying an F0 |  |  |  | 87b90c7b5e55753e
+smf/track-chunks#14 | both |  | permitted | SMF 1.0 §track-chunks | the F7 event may escape bytes otherwise illegal (realtime, song pointer, MTC) |  |  |  | 69edbb71aa28abc2
+smf/track-chunks#15 | both |  | permitted | SMF 1.0 §track-chunks | F0 and F7 events may split one sysex message into timed packets |  |  |  | 876ff80eea939f90
+smf/track-chunks#16 | both |  | recommended | SMF 1.0 §track-chunks | an F0 event is the first packet of a series, F7 events the rest |  |  |  | fcac6f89c7a6f283
+smf/track-chunks#17 | both |  | required | SMF 1.0 §track-chunks | a sysex message ends with F7 even if the device sent none |  |  |  | c37e47ffb3e05e60
+smf/track-chunks#18 | both |  | required | SMF 1.0 §track-chunks | a sysex in one F0 event ends with F7 |  |  |  | fe039354c2ec733c
+smf/track-chunks#19 | both |  | required | SMF 1.0 §track-chunks | the last packet of a split sysex ends with F7 |  |  |  | 1b25df81604386cf
+smf/track-chunks#20 | both |  | required | SMF 1.0 §track-chunks | no transmittable event comes between the packets of one sysex message | neg=1 |  |  | 1f4035e0ad60037c
+smf/track-chunks#21 | both |  | required | SMF 1.0 §track-chunks | example: a split sysex of F0 43 12 00, 200 ticks, 43 12 00 43 12 00, 100 ticks, 43 12 00 F7 is an F0 event and two F7 events | def=1 |  |  | 142652c6127e7010
+smf/track-chunks#22 | reader |  | recommended | SMF 1.0 §track-chunks | an F7 event with no open F0 event is an escape |  |  |  | 44d248f6b089656f
+smf/track-chunks#23 | both |  | required | SMF 1.0 §track-chunks | a meta-event is non-MIDI information with the FF type length bytes syntax | def=1 |  |  | 184b9d92b4e2ae42
+smf/track-chunks#24 | both |  | required | SMF 1.0 §track-chunks | a meta-event is FF, a type byte below 128, a VLQ length and the data |  |  |  | f45b7989dc895e51
+smf/track-chunks#25 | reader |  | required | SMF 1.0 §track-chunks | a program ignores a meta-event type it does not know |  |  |  | 7b4e7bfa628540d7
+smf/track-chunks#26 | reader |  | required | SMF 1.0 §track-chunks | a program always uses the length of a meta-event it knows, even one longer than expected |  |  |  | b79b03688a13a4de
+smf/track-chunks#27 | reader |  | required | SMF 1.0 §track-chunks | a program ignores what is past what it knows of a longer meta-event |  |  |  | 06391e7cd21ae288
+smf/track-chunks#28 | writer |  | required | SMF 1.0 §track-chunks | a program adds nothing of its own to the end of a meta-event | neg=1 |  |  | 8819225f77ac4230
+smf/track-chunks#29 | both |  | required | SMF 1.0 §track-chunks | a sysex or meta event cancels running status | def=1 |  |  | a145e1aad362126b
+smf/track-chunks#30 | both |  | permitted | SMF 1.0 §track-chunks | running status does not apply to sysex and meta events | neg=1 |  |  | b4a98fd053e47d22
+smf/meta-events#1 | both |  | permitted | SMF 1.0 §meta-events | a program need not support every meta-event |  | other-side | SMF 1.0 Meta-Events: "It is not required for every program to support every meta-event" permits a program to omit support; a program that keeps unknown meta-events (see track-chunks#24) breaks nothing | 21f4022384533591
+smf/meta-events#2 | both |  | required | SMF 1.0 §meta-events | FF, the type and fixed lengths are written in hexadecimal in the syntax lines | def=1 | other-side | SMF 1.0 Meta-Events: the sentence explains the notation of the syntax descriptions below it, not a rule on a file | 22a9e68501ba0d5e
+smf/meta-events#3 | both |  | required | SMF 1.0 §meta-events | two lower-case letters in a syntax line stand for an 8-bit value | def=1 | other-side | SMF 1.0 Meta-Events: "A notation such as dd or se" explains the spec's own notation | b70d5187dd5b35e5
+smf/meta-events#4 | both |  | required | SMF 1.0 §meta-events | four identical letters in a syntax line stand for a 16-bit value, most significant byte first | def=1 | other-side | SMF 1.0 Meta-Events: "Four identical lower-case letters such as wwww" explains the spec's own notation | 53ad01d70369b119
+smf/meta-events#5 | both |  | required | SMF 1.0 §meta-events | six identical letters in a syntax line stand for a 24-bit value, most significant byte first | def=1 | other-side | SMF 1.0 Meta-Events: "Six identical lower-case letters such as tttttt" explains the spec's own notation | 1d88434c90432484
+smf/meta-events#6 | both |  | required | SMF 1.0 §meta-events | len in a syntax line is the VLQ count of the data bytes that follow | def=1 | other-side | SMF 1.0 Meta-Events: "The notation len refers to the length portion" explains the spec's own notation | 9f1eff455794061d
+smf/meta-events#7 | both |  | required | SMF 1.0 §meta-events | text and data in a syntax line are the bytes the length counted | def=1 | other-side | SMF 1.0 Meta-Events: "The notations text and data refer to however many bytes" explains the spec's own notation | b6ea23317c19a34b
+smf/meta-events#8 | reader |  | permitted | SMF 1.0 §meta-events | meta-events at one time may occur in any order |  |  |  | 16dace0845ad62a0
+smf/meta-events#9 | writer |  | recommended | SMF 1.0 §meta-events | a copyright event is placed as early as possible |  |  |  | ba6c6e97518ae598
+smf/meta-events#10 | both |  | required | SMF 1.0 §meta-events | a Sequence Number and a Sequence/Track Name, if present, are at time 0 |  |  |  | 94f438049ac26353
+smf/meta-events#11 | both |  | required | SMF 1.0 §meta-events | an End of Track event is the last event of the track |  |  |  | 3c871eb342e18248
+smf/sequence-number#1 | both |  | required | SMF 1.0 §sequence-number | the optional Sequence Number FF 00 02 is first in a track, before any delta and any MIDI event |  |  |  | a638f9ff2e57817a
+smf/sequence-number#2 | both |  | required | SMF 1.0 §sequence-number | in format 2 the sequence number identifies each pattern for the Cue message | def=1 |  |  | 63b3c03907b7fdd4
+smf/sequence-number#3 | both |  | required | SMF 1.0 §sequence-number | omitted sequence numbers default to the patterns' order in the file | def=1 |  |  | fafec1143d9f8642
+smf/sequence-number#4 | writer |  | recommended | SMF 1.0 §sequence-number | in format 0 or 1 the sequence number is in the first track |  |  |  | 363852e614e37538
+smf/sequence-number#5 | writer |  | required | SMF 1.0 §sequence-number | several multitrack sequences go as a group of format 1 files with different numbers |  | other-side | SMF 1.0 Sequence Number: "If transfer of several multitrack sequences is required, this must be done as a group of format 1 files" binds a program that transfers several sequences, not a file or one file's reader | 01726a53aba5f658
+smf/text-event#1 | writer |  | recommended | SMF 1.0 §text-event | a text event at the start of a track names it and describes its orchestration |  | other-side | SMF 1.0 Text Event: "It is a good idea to put a text event right at the beginning of a track" is advice on what a person puts in a file; the content is free text | 8d99d619b73eae93
+smf/text-event#2 | both |  | permitted | SMF 1.0 §text-event | text events may occur at other times, as lyrics or cue descriptions |  |  |  | 51e3b7bc7e957f47
+smf/text-event#3 | writer |  | recommended | SMF 1.0 §text-event | event text should be printable ASCII for interchange |  | other-side | SMF 1.0 Text Event: "The text in this event should be printable ASCII characters" is on the text a person writes; the format keeps the bytes it is given | 12004192c7e7bf6d
+smf/text-event#4 | both |  | permitted | SMF 1.0 §text-event | text with the high bit set may be used between programs on one computer |  |  |  | 051b25850656b694
+smf/text-event#5 | reader |  | recommended | SMF 1.0 §text-event | a computer without non-ASCII support ignores those characters |  | other-side | SMF 1.0 Text Event: "Programs on a computer which does not support non-ASCII characters" binds programs on such a computer; this reader keeps every byte | 88d10e6c28fea9ec
+smf/text-event#6 | both |  | required | SMF 1.0 §text-event | meta types 01-0F are text events, each meeting the text-event rules | def=1 |  |  | d06c0f8925ca4fdf
+smf/copyright-notice#1 | both |  | required | SMF 1.0 §copyright-notice | meta type 02 is the copyright notice, printable ASCII text | def=1 |  |  | 3d785e0b07c2b18d
+smf/copyright-notice#2 | writer |  | recommended | SMF 1.0 §copyright-notice | the copyright notice carries (C), the year and the owner |  | other-side | SMF 1.0 Copyright Notice: "The notice should contain the characters (C), the year of the copyright, and the owner" is on what a person writes in the text | dc7d874af7b3d0ab
+smf/copyright-notice#3 | writer |  | recommended | SMF 1.0 §copyright-notice | all copyright notices of one file go together in one event |  |  |  | f79ef01e99e7fb1d
+smf/copyright-notice#4 | writer |  | recommended | SMF 1.0 §copyright-notice | the copyright event is the first event of the first track, at time 0 |  |  |  | aa57b3de00a84d00
+smf/instrument-name#1 | both |  | permitted | SMF 1.0 §instrument-name | an Instrument Name may go with the MIDI Prefix event to say its channel |  |  |  | 2bf142efcf659414
+smf/lyric#1 | both |  | required | SMF 1.0 §lyric | each syllable is generally its own lyric event at the syllable's time | def=1 | other-side | SMF 1.0 Lyric: "Generally, each syllable will be a separate lyric event" is how a program writing lyrics usually divides them | da663ac5cd7eadb7
+smf/channel-prefix#1 | both |  | permitted | SMF 1.0 §channel-prefix | MIDI Channel Prefix FF 20 01 cc associates a channel with the events that follow |  |  |  | 6c4dd009a2f18cbb
+smf/channel-prefix#2 | both |  | required | SMF 1.0 §channel-prefix | the prefix channel holds until the next channel event or prefix | def=1 |  |  | 75cbab653175aa8b
+smf/channel-prefix#3 | both |  | permitted | SMF 1.0 §channel-prefix | the prefix may let several tracks share a format 0 file |  |  |  | d45ea09f9367d1d1
+smf/end-of-track#1 | writer |  | required | SMF 1.0 §end-of-track | every track ends with an End of Track event |  |  |  | adc2fc524bf0c6d0
+smf/end-of-track#2 | both |  | permitted | SMF 1.0 §end-of-track | End of Track gives the track an exact length |  |  |  | 57e334229f1f8e06
+smf/set-tempo#1 | both |  | required | SMF 1.0 §set-tempo | Set Tempo FF 51 03 tttttt is microseconds per quarter note, 24 bits | def=1 |  |  | fe8c2b43b9695a9b
+smf/set-tempo#2 | writer |  | recommended | SMF 1.0 §set-tempo | tempo events ideally sit where MIDI clocks would be |  | other-side | SMF 1.0 Set Tempo: "Ideally, these events should only occur where MIDI clocks would be located" is a convention for what a person puts in a file, to suit other synchronization devices | cd23ec5f4636464f
+smf/smpte-offset#1 | both |  | required | SMF 1.0 §smpte-offset | SMPTE Offset FF 54 05 is the SMPTE time at which the track starts | def=1 |  |  | e4abfbe1e33f2c02
+smf/smpte-offset#2 | writer |  | recommended | SMF 1.0 §smpte-offset | the SMPTE Offset is at the start of a track, before any delta and any MIDI event |  |  |  | 4cb3be50f6674851
+smf/smpte-offset#3 | both |  | required | SMF 1.0 §smpte-offset | the SMPTE Offset hour is encoded as in MIDI Time Code |  |  |  | 5b779b6578e82aaa
+smf/smpte-offset#4 | both |  | required | SMF 1.0 §smpte-offset | in format 1 the SMPTE Offset is stored with the tempo map and means nothing in other tracks |  |  |  | 9af698a3d8fccc77
+smf/smpte-offset#5 | both |  | required | SMF 1.0 §smpte-offset | the SMPTE Offset fr field is fractional frames in 100ths of a frame | def=1 |  |  | bc6d8ffde9fabdac
+smf/time-signature#1 | both |  | required | SMF 1.0 §time-signature | Time Signature FF 58 04 nn dd cc bb: nn and dd are the notated numerator and denominator | def=1 |  |  | 2dbdb35fe3a58df1
+smf/time-signature#2 | both |  | required | SMF 1.0 §time-signature | the denominator dd is a negative power of two: 2 a quarter, 3 an eighth | def=1 |  |  | 419361fe4306d72c
+smf/time-signature#3 | both |  | required | SMF 1.0 §time-signature | cc is the number of MIDI clocks in a metronome click | def=1 |  |  | bc51e6dfad1c3946
+smf/time-signature#4 | both |  | required | SMF 1.0 §time-signature | bb is the number of notated 32nd notes in a MIDI quarter note (24 clocks) | def=1 |  |  | 465a076e2d8facd5
+smf/key-signature#1 | both |  | required | SMF 1.0 §key-signature | Key Signature FF 59 02 sf mi: sf is -7 flats to 7 sharps, mi is 0 major or 1 minor | def=1 |  |  | 9083bc8a7338a745
+smf/sequencer-specific#1 | both |  | permitted | SMF 1.0 §sequencer-specific | Sequencer-Specific FF 7F starts with a one-byte or (after 00) three-byte manufacturer ID |  |  |  | e6152221333bf783
+smf/sequencer-specific#2 | writer |  | recommended | SMF 1.0 §sequencer-specific | a manufacturer publishes what it defines with a sequencer-specific event |  | other-side | SMF 1.0 Sequencer-Specific Meta-Event: "manufacturers who define something using this meta-event should publish it" binds a manufacturer, not a file or a program reading one | 407629e924d0074c
+smf/sequencer-specific#3 | writer |  | recommended | SMF 1.0 §sequencer-specific | a sequencer may use the SMF as its only file format; others stick to standard features |  | other-side | SMF 1.0 Sequencer-Specific Meta-Event: the sentence is advice to sequencer authors on which format to use | 12012210d8eb570f
+smf/examples#1 | both |  | required | SMF 1.0 §examples | the worked example's MIDI stream is broken down event by event | def=1 |  |  | 721ff5dad9630f26
+smf/examples#2 | both |  | required | SMF 1.0 §examples | the format 0 example file: header chunk, then a track chunk with running status | def=1 |  |  | e876dd7b923347f7
+smf/examples#3 | both |  | required | SMF 1.0 §examples | the format 1 example holds the same music as four tracks | def=1 |  |  | 4489c6d0da87b386
+smf/examples#4 | both |  | required | SMF 1.0 §examples | the format 1 example's tempo and time signature track | def=1 |  |  | af67a67252e292dd
+smf/delta-times#1 | reader |  | required | SMF 1.0 §delta-times | with no Set Tempo, 120 beats a minute is assumed |  |  |  | 9316dc59d1ae66f1
+smf/delta-times#2 | both |  | required | SMF 1.0 §delta-times | tempo is microseconds per quarter note: 500000 is 120 beats a minute | def=1 |  |  | 067f92ac6591b8bd
+smf/delta-times#3 | reader |  | required | SMF 1.0 §delta-times | time in ms is ticks times tempo over division, over 1000 | def=1 |  |  | 31f3f048047fddd1
