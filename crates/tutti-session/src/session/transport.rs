@@ -40,7 +40,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// its own timeline and never moves this one.
     #[must_use]
     pub fn playhead(&self) -> Playhead {
-        self.transport_handle.playhead()
+        self.transport.handle.playhead()
     }
 
     /// The playhead's beat now, extrapolated from the last block by
@@ -65,7 +65,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`TimedError::Full`] when the transport's command queue is full; the
     /// event is handed back in it.
     pub fn play(&self) -> Result<(), TimedError<MotionEvent>> {
-        self.transport_handle.play()
+        self.transport.handle.play()
     }
 
     /// Stops the transport where it stands, at the next block, after the
@@ -75,7 +75,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
     pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionEvent>> {
-        self.transport_handle.stop(fade)
+        self.transport.handle.stop(fade)
     }
 
     /// Jumps to `beat` at the next block, keeping whatever the transport was
@@ -85,7 +85,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
     pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionEvent>> {
-        self.transport_handle.locate(beat)
+        self.transport.handle.locate(beat)
     }
 
     /// Sends a motion `event` to take effect at `at`; see
@@ -101,14 +101,14 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         at: impl Into<At>,
         event: MotionEvent,
     ) -> Result<(), TimedError<MotionEvent>> {
-        self.transport_handle.schedule(at, event)
+        self.transport.handle.schedule(at, event)
     }
 
     /// A [`TransportHandle`](crate::TransportHandle) on this session's transport: `Send`, so another
     /// thread drives play, stop, locate and schedule.
     #[must_use]
     pub fn transport_handle(&self) -> crate::TransportHandle {
-        self.transport_handle.clone()
+        self.transport.handle.clone()
     }
 
     /// Sends what a followed MIDI clock asked of the transport, each command at
@@ -174,18 +174,18 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`PrerollTable::preroll`], `None` past the table's end. No audio
     /// thread reads it, so it is a plain lock, not a published cell.
     pub fn compensation(&self) -> &Arc<PrerollTable> {
-        &self.compensation
+        self.graph.compensation()
     }
 
     /// The total latency of the plan sent last: what a DAW displays.
     pub fn latency(&self) -> Samples {
-        self.latency
+        self.graph.latency()
     }
 
     /// The metronome's node (unwired: the host declares where it lands),
     /// when the builder inserted one.
     pub fn click_node(&self) -> Option<NodeKey> {
-        self.click
+        self.transport.click
     }
 
     /// The metronome's targets: its level and when it sounds, written with

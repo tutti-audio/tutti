@@ -16,7 +16,7 @@ use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Fail, IntoAssign, IntoRead, Readable, Stageable};
 use super::error::{ValueError, ValueErrorKind};
-use super::slot::{self, SlotCell, SlotId};
+use super::slot::{self, NodeSlots, SlotCell, SlotId};
 use super::target::AnyTarget;
 use crate::AppKey;
 
@@ -145,10 +145,35 @@ impl ValueTable {
             .insert(id, slot::erase(slot));
     }
 
-    /// Forgets `node`'s params: its targets are gone.
+    /// Registers the values of a node, from its [`NodeSlots`]. Control
+    /// thread.
+    pub(crate) fn provide_node(&self, slots: NodeSlots) {
+        self.params.lock_recover().slots.extend(slots.0);
+    }
+
+    /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the
+    /// session's own wiring (a clip `Midi` plays).
+    #[cfg(feature = "midi")]
+    pub(crate) fn write<A: Stageable>(&self, assign: A) -> Result<(), ValueErrorKind> {
+        let held = self.enter().ok_or(ValueErrorKind::Reentrant)?;
+        let mut batch = Batch::new(held.params());
+        assign.stage(&mut batch).map_err(|fail| fail.kind)?;
+        batch.land();
+        Ok(())
+    }
+
+    /// Forgets `node`'s params and slots: its targets are gone.
     pub(crate) fn retire(&self, node: NodeKey) {
-        let gone = self.params.lock_recover().nodes.remove(&node);
-        drop(gone);
+        let (gone, slots) = {
+            let mut params = self.params.lock_recover();
+            let gone = params.nodes.remove(&node);
+            let slots: Vec<_> = params
+                .slots
+                .extract_if(.., |id, _| id.node() == Some(node))
+                .collect();
+            (gone, slots)
+        };
+        drop((gone, slots));
     }
 
     /// `addr`'s cell on `node`, whatever its type, for the graph's own use.
@@ -274,5 +299,25 @@ impl<K: AppKey> Clone for Knobs<K> {
 impl<K: AppKey> fmt::Debug for Knobs<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Knobs").finish_non_exhaustive()
+    }
+}
+
+#[cfg(all(test, feature = "midi"))]
+mod tests {
+    use super::*;
+
+    /// **A write from a thread that holds the value lock is `Reentrant`**,
+    /// the whole call's error, and changes nothing: what `Midi::play_clip`
+    /// meets if it is ever reached from inside a `modify`.
+    #[test]
+    fn a_write_under_the_value_lock_is_reentrant() {
+        let table = ValueTable::new();
+        let target = crate::Key::<tutti_midi_runtime::MidiClipNode>::new(NodeKey(1)).events();
+        let held = table.enter().expect("the lock is free");
+        let refused = table.write(target.to(tutti_midi_runtime::ClipEvents::default()));
+        assert!(matches!(refused, Err(ValueErrorKind::Reentrant)));
+        drop(held);
+        let absent = table.write(target.to(tutti_midi_runtime::ClipEvents::default()));
+        assert!(matches!(absent, Err(ValueErrorKind::NoSuchTarget)));
     }
 }

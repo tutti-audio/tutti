@@ -91,9 +91,12 @@ impl Iterator for MmcSegments<'_> {
         } else {
             MmcSegmentPlace::Later
         };
-        let remaining = u8::try_from(self.left).expect("at most 63 segments follow");
-        let bytes = MmcSegmentBytes::new(now).expect("a segment's bytes are seven-bit and short");
-        Some(MmcSegment::new(place, remaining, bytes).expect("at most 63 segments follow"))
+        // `new` checked the string: at most 63 segments follow and every
+        // segment's bytes are seven-bit and short, so each step is `Some`; a
+        // string that were not would end the iterator here.
+        let remaining = u8::try_from(self.left).ok()?;
+        let bytes = MmcSegmentBytes::new(now)?;
+        MmcSegment::new(place, remaining, bytes)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

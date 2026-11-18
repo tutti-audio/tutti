@@ -1,7 +1,7 @@
 //! `narrow` and `midi1`: a message at MIDI 1.0.
 //!
 //! The expected bytes are written out from M2-104 Appendix D and M2-115, or
-//! follow from `widen` and the figures `tests/narrow.rs` pins.
+//! follow from `widen` and the figures `narrow.rs` pins.
 
 use tutti_fixtures::midi;
 use tutti_midi_protocol::{NoMidi1Form, midi1, narrow, widen};

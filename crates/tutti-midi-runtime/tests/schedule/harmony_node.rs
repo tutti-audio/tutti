@@ -16,7 +16,7 @@ use tutti_graph::{
     Status, TransportPosition,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_midi_runtime::{HarmonyControls, HarmonyNode, TimedHarmony};
+use tutti_midi_runtime::{HarmonyChanges, HarmonyControls, HarmonyNode, TimedHarmony};
 use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -46,6 +46,11 @@ impl Node for Sink {
         Status::Modified
     }
     fn reset(&mut self) {}
+}
+
+/// Replaces the lanes `controls` publishes with `changes`.
+fn publish(controls: &HarmonyControls, changes: impl IntoIterator<Item = TimedHarmony>) {
+    controls.set(changes.into_iter().collect::<HarmonyChanges>());
 }
 
 fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, Seen) {
@@ -242,10 +247,10 @@ fn replaced_lanes_restate_and_the_same_lanes_do_not() {
     let (_ed, mut exec, controls, seen) = rig(HarmonyNode::new(lanes()), 512);
     block(&mut exec, 512, rolling(0));
     // The same changes, beat order kept (at one beat, order is meaning).
-    controls.set(lanes());
+    publish(&controls, lanes());
     block(&mut exec, 512, rolling(512));
     assert_eq!(seen.lock().unwrap().len(), 2, "the same lanes: nothing new");
-    controls.set([at(0, G)]);
+    publish(&controls, [at(0, G)]);
     block(&mut exec, 512, rolling(1_024));
     assert_eq!(seen.lock().unwrap()[2..], [(1_024, G)]);
     assert_eq!(controls.len(), 1);
@@ -260,8 +265,8 @@ fn a_restate_follows_a_publish_and_only_a_publish() {
     block(&mut exec, 512, rolling(512));
     block(&mut exec, 512, rolling(1_024));
     assert_eq!(seen.lock().unwrap().len(), 2, "no publish, no restate");
-    controls.set([at(0, G)]);
-    controls.set([at(0, F_OVER_A)]);
+    publish(&controls, [at(0, G)]);
+    publish(&controls, [at(0, F_OVER_A)]);
     block(&mut exec, 512, rolling(1_536));
     block(&mut exec, 512, rolling(2_048));
     assert_eq!(seen.lock().unwrap()[2..], [(1_536, F_OVER_A)]);
@@ -276,7 +281,7 @@ fn a_fork_sends_the_lanes_as_they_stood() {
     let (_fork, mut fork_exec) = live
         .fork(ForkTarget::Master, ForkMode::Live, prepare)
         .expect("forks");
-    controls.set([at(0, G)]);
+    publish(&controls, [at(0, G)]);
     block(&mut fork_exec, 512, rolling(0));
     assert_eq!(seen.lock().unwrap()[..], [(0, C), (0, C_MAJOR)]);
 }

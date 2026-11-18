@@ -1,12 +1,13 @@
 //! The stateful MIDI 2.0 to MIDI 1.0 translation of M2-104 Appendix D.2: the
 //! [`Narrower`] an output edge runs.
 
-use crate::mode::avoid;
 use crate::scale;
-use crate::{ExtremeValues, PerNoteTranslation, TranslationMode, midi1};
+use crate::{ExtremeValues, PerNoteTranslation, TranslationMode, midi1, narrow_with};
 use alloc::boxed::Box;
 use members::Members;
-use tutti_ump::{Address, CCNumber, ControlValue, Message, Midi1Bytes, U7, Ump, Voice1, Voice2};
+use tutti_ump::{
+    Address, CCNumber, ControlValue, Message, Midi1Bytes, U7, U14, Ump, Voice1, Voice2,
+};
 
 mod members;
 
@@ -23,9 +24,8 @@ mod members;
 ///   Registered Controller of index 0 to 31 (any bank) is a fixed-point number
 ///   or a pair of fields, widened by zero-extension (M2-115 section 4.1:
 ///   Zero-Extension Scaling for every Registered Controller whose index is
-///   0 to 31), and narrows **with rounding** (section 4.4: fixed-point values
-///   are rounded when downscaled: add half the
-///   scaled range, shift, clamp to 14 bits). Every other controller was scaled
+///   0 to 31), and narrows **with rounding** (section 4.4, `narrow_rounded`).
+///   Every other controller was scaled
 ///   Min-Center-Max and narrows by the plain right shift of section 3.4
 ///   (`narrow_value`), which returns the value it was widened from.
 /// - **Null Function is not sent after a run.** D.2.3 gives four messages, not
@@ -45,7 +45,7 @@ mod members;
 /// as MPE on a zone's member channels (D.2.8, [`PerNoteTranslation`]). In the MPE
 /// mode a Note On takes the member idle longest, or steals the oldest note's
 /// when all play; a per-note message for a note that does not sound sends
-/// nothing, and every message that is not per-note goes on the zone's Manager Channel.  A MIDI 1.0 message passes unchanged.
+/// nothing, and every message that is not per-note goes on the zone's Manager Channel. A MIDI 1.0 message passes unchanged.
 ///
 /// It holds no state of the receiver: a message's MIDI 1.0 sequence is the
 /// same whatever went before. It allocates nothing after construction and holds
@@ -171,7 +171,7 @@ impl Narrower {
             PerNoteTranslation::Dropped => address,
         };
         let plain = |out: &mut dyn FnMut(Midi1Bytes)| {
-            if let Ok(voice) = extremes.narrow(voice) {
+            if let Ok(voice) = narrow_with(extremes, voice) {
                 out(voice.bytes(address.channel));
             }
         };
@@ -181,7 +181,7 @@ impl Narrower {
         match voice {
             Voice2::Registered { bank, index, value } => {
                 let data = if scale::zero_extended(index) {
-                    narrow_rounded(value.get())
+                    narrow_rounded(value)
                 } else {
                     narrow_data(extremes, value)
                 };
@@ -218,32 +218,29 @@ impl Narrower {
 fn run(
     (msb_select, msb): (CCNumber, U7),
     (lsb_select, lsb): (CCNumber, U7),
-    data: u16,
+    data: U14,
     cc: &mut impl FnMut(CCNumber, U7),
 ) {
     cc(msb_select, msb);
     cc(lsb_select, lsb);
-    cc(CCNumber::DATA_ENTRY, U7::masked((data >> 7) as u8));
-    cc(CCNumber::DATA_ENTRY_LSB, U7::masked((data & 0x7F) as u8));
+    cc(CCNumber::DATA_ENTRY, data.msb());
+    cc(CCNumber::DATA_ENTRY_LSB, data.lsb());
 }
 
 /// The top 14 bits of a 32-bit controller word: the data of a Registered or
 /// Assignable Controller that M2-115 scales Min-Center-Max, narrowed by a right
 /// shift (as [`narrow_bend`](crate::narrow_bend) does a bend).
-fn narrow_data(extremes: ExtremeValues, value: ControlValue) -> u16 {
-    let data = u32::from((value.get() >> 18) as u16);
-    match extremes {
-        ExtremeValues::Scaled => data as u16,
-        ExtremeValues::Avoided => avoid(data, value.get(), 32, 14) as u16,
-    }
+fn narrow_data(extremes: ExtremeValues, value: ControlValue) -> U14 {
+    extremes.fourteen(U14::masked((value.get() >> 18) as u16), value.get())
 }
 
 /// A 32-bit value as 14 bits, rounded (M2-115 section 4.4.1,
-/// `scaleDownRounding(value, 32, 14)`): add half the scaled range, shift,
-/// clamp to the 14-bit maximum.
-fn narrow_rounded(value: u32) -> u16 {
+/// `scaleDownRounding(value, 32, 14)`): fixed-point values are rounded when
+/// downscaled, by adding half the scaled range, shifting, and clamping to the
+/// 14-bit maximum.
+fn narrow_rounded(value: ControlValue) -> U14 {
     const SCALE_BITS: u32 = 32 - 14;
-    let shifted = (u64::from(value) + (1 << (SCALE_BITS - 1))) >> SCALE_BITS;
+    let shifted = (u64::from(value.get()) + (1 << (SCALE_BITS - 1))) >> SCALE_BITS;
     // `min` keeps 14 bits.
-    shifted.min(0x3FFF) as u16
+    U14::masked(shifted.min(0x3FFF) as u16)
 }

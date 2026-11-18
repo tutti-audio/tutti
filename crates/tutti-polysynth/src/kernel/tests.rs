@@ -1,16 +1,49 @@
 use super::*;
+use wide::{f32x8, f64x4, u32x4, u32x8};
 
-#[test]
-fn sine_matches_libm_over_a_cycle() {
+/// The `f32` lanes: the aliasing measurements and the width-specific tolerances run here.
+type V = f32x8;
+
+/// `sine` over a cycle against libm, at the lane width `L`, within `tolerance`.
+fn sine_against_libm<L: Lane>(tolerance: f64) {
     for i in 0..4096 {
-        let p = i as f32 / 4096.0;
-        let got = sine(V::splat(p)).to_array()[0];
-        let want = (core::f64::consts::TAU * f64::from(p)).sin() as f32;
+        let p = f64::from(i) / 4096.0;
+        let got: f64 = sine(L::splat(L::Scalar::from_design(p))).as_slice()[0].into();
+        // The reference folds the phase to the quarter wave first (`sin(pi - a) = sin a`,
+        // exact in `f64` for these phases), so its own argument stays under `pi/2` and
+        // rounds by under `1.7e-16`, where `2π·p` itself would round by `6e-16`.
+        let x = p - 0.5;
+        let x = if x > 0.25 {
+            0.5 - x
+        } else if x < -0.25 {
+            -0.5 - x
+        } else {
+            x
+        };
+        let want = -(core::f64::consts::TAU * x).sin();
         assert!(
-            (got - want).abs() < 2e-6,
+            (got - want).abs() < tolerance,
             "sin(2π·{p}) = {got}, libm {want}"
         );
     }
+}
+
+/// The single-precision polynomial stops at the 11th power: its error is the
+/// first omitted term, `(π/2)^13 / 13! ≈ 5.7e-8`, plus the rounding of the evaluation
+/// (a few ulp at unity, `1.2e-7` each); the bound is `2e-6`.
+#[test]
+fn sine_at_f32_matches_libm_within_the_polynomial_and_rounding_error() {
+    sine_against_libm::<f32x8>(2e-6);
+}
+
+/// The double-precision polynomial runs to the 21st power, whose first omitted term is
+/// `(π/2)^23 / 23! ≈ 1.2e-18`. The measured worst error is 2.2e-16, the rounding of the
+/// evaluation (2 ulp of `f64` at unity, `1.1e-16` each); the bound is `2.5e-16`. A
+/// 19th-order polynomial adds its omitted term, `2.6e-16`, at the quarter-wave phases
+/// the sweep includes, and fails it.
+#[test]
+fn sine_at_f64_matches_libm_to_a_few_ulp() {
+    sine_against_libm::<f64x4>(2.5e-16);
 }
 
 #[test]
@@ -29,22 +62,43 @@ fn tanh_is_close_to_libm_and_never_overshoots() {
     assert!(worst < 3e-4, "worst tanh error {worst}");
 }
 
-#[test]
-fn white_noise_is_in_range_and_centred() {
-    let mut state = u32x8::new(core::array::from_fn(|k| 0x9E37_79B9 ^ (k as u32 + 1)));
-    let (mut sum, mut n) = (0.0f64, 0usize);
+/// White noise on `-1..1` is uniform: mean 0 and variance 1/3. The mean of `n` samples
+/// has standard deviation `sqrt(1/3 / n)`; the bound is five of them.
+fn white_noise_is_uniform_and_centred<L: Lane>(mut state: L::Rng) {
+    let (mut sum, mut sum_sq, mut n) = (0.0f64, 0.0f64, 0usize);
     for _ in 0..10_000 {
-        for s in white(&mut state).to_array() {
+        for &s in L::white(&mut state).as_slice() {
+            let s: f64 = s.into();
             assert!((-1.0..1.0).contains(&s), "white sample {s} out of range");
-            sum += f64::from(s);
+            sum += s;
+            sum_sq += s * s;
             n += 1;
         }
     }
+    let n = n as f64;
+    let bound = 5.0 * (1.0 / 3.0 / n).sqrt();
+    assert!((sum / n).abs() < bound, "white noise mean {}", sum / n);
+    // The variance of `n` squares of a uniform is `4/45 / n`: five standard deviations.
+    let var_bound = 5.0 * (4.0 / 45.0 / n).sqrt();
     assert!(
-        (sum / n as f64).abs() < 0.01,
-        "white noise mean {}",
-        sum / n as f64
+        (sum_sq / n - 1.0 / 3.0).abs() < var_bound,
+        "white noise power {}",
+        sum_sq / n
     );
+}
+
+#[test]
+fn white_noise_at_f32_is_in_range_uniform_and_centred() {
+    white_noise_is_uniform_and_centred::<f32x8>(u32x8::new(core::array::from_fn(|k| {
+        0x9E37_79B9 ^ (k as u32 + 1)
+    })));
+}
+
+#[test]
+fn white_noise_at_f64_is_in_range_uniform_and_centred() {
+    white_noise_is_uniform_and_centred::<f64x4>(u32x4::new(core::array::from_fn(|k| {
+        0x9E37_79B9 ^ (k as u32 + 1)
+    })));
 }
 
 /// Every lane of the eight-lane generator steps as the scalar generator does
@@ -58,12 +112,33 @@ fn each_noise_lane_is_the_scalar_xorshift32() {
     let mut scalar =
         seeds.map(|s| tutti_dsp::Xorshift32::new(core::num::NonZeroU32::new(s).unwrap()));
     for _ in 0..64 {
-        let out = white(&mut state).to_array();
+        let out = V::white(&mut state).to_array();
         for (k, g) in scalar.iter_mut().enumerate() {
             let word = g.next_u32();
             assert_eq!(state.to_array()[k], word, "lane {k} state");
             let mantissa = f32::from_bits((word >> 9) | 0x3F80_0000);
             assert_eq!(out[k], 2.0 * mantissa - 3.0, "lane {k} output");
+        }
+    }
+}
+
+/// The same at `f64`: the output is the word's top 31 bits over `2^30`, less 1.
+#[test]
+fn each_f64_noise_lane_is_the_scalar_xorshift32() {
+    let seeds: [u32; 4] = core::array::from_fn(|k| 0x9E37_79B9 ^ (k as u32 + 1));
+    let mut state = u32x4::new(seeds);
+    let mut scalar =
+        seeds.map(|s| tutti_dsp::Xorshift32::new(core::num::NonZeroU32::new(s).unwrap()));
+    for _ in 0..64 {
+        let out = f64x4::white(&mut state).to_array();
+        for (k, g) in scalar.iter_mut().enumerate() {
+            let word = g.next_u32();
+            assert_eq!(state.to_array()[k], word, "lane {k} state");
+            assert_eq!(
+                out[k],
+                f64::from(word >> 1) / f64::from(1_u32 << 30) - 1.0,
+                "lane {k} output"
+            );
         }
     }
 }
