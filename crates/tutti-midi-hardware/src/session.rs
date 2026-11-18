@@ -45,7 +45,7 @@ use crate::backend;
 use crate::ci::{CiChange, CiPeerInfo, Heard, PeerId};
 use crate::devices::{Devices, OpenInput, OpenOutput};
 use crate::endpoints::MidiEndpoints;
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, Result};
 use crate::process::{ProcessChange, ReportAsk, ReportError, Reporter};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
@@ -228,7 +228,7 @@ impl DeviceQuery {
                     .find(|d| d.name.to_lowercase().contains(&needle))
                 {
                     Some(found) => Ok(found.id.clone()),
-                    None => Err(Error::NoDeviceNamed {
+                    None => Err(MidiHardwareError::NoDeviceNamed {
                         name: name.clone(),
                         searched: list.into_iter().map(|d| d.name).collect(),
                     }),
@@ -380,10 +380,10 @@ impl MidiSession {
     ///
     /// # Errors
     ///
-    /// [`Error::NoDeviceNamed`] when a name matches no input (listing the
+    /// [`MidiHardwareError::NoDeviceNamed`] when a name matches no input (listing the
     /// inputs it searched; an absent device is an error, never a silent
-    /// no-op). [`Error::NotFound`] when an id names no present device — the
-    /// shape a stale id takes after a hot-plug — and [`Error::WrongDirection`]
+    /// no-op). [`MidiHardwareError::NotFound`] when an id names no present device — the
+    /// shape a stale id takes after a hot-plug — and [`MidiHardwareError::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
     pub fn connect_input(&mut self, device: impl Into<DeviceQuery>) -> Result<Connected> {
@@ -528,9 +528,9 @@ impl MidiSession {
     ///
     /// # Errors
     ///
-    /// [`Error::NoDeviceNamed`] when a name matches no output,
-    /// [`Error::NotFound`] when an id names no present device,
-    /// [`Error::WrongDirection`] when it is not an output, plus whatever the
+    /// [`MidiHardwareError::NoDeviceNamed`] when a name matches no output,
+    /// [`MidiHardwareError::NotFound`] when an id names no present device,
+    /// [`MidiHardwareError::WrongDirection`] when it is not an output, plus whatever the
     /// backend raises while opening.
     pub fn connect_output(&self, device: impl Into<DeviceQuery>) -> Result<OpenOutput> {
         let id = device.into().pick(self.outputs())?;

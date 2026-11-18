@@ -15,7 +15,7 @@ fn opening_reports_unsupported_rather_than_not_found() {
     let b = StubEndpoints::new();
     assert!(matches!(
         b.open_output(EndpointId::from_raw(0)),
-        Err(Error::Unsupported(_))
+        Err(MidiHardwareError::Unsupported(_))
     ));
 }
 
@@ -40,7 +40,7 @@ fn virtual_endpoints_report_unsupported() {
     let spec = VirtualSpec::new(tutti_midi_device::EndpointName::new("tutti-stub").unwrap());
     assert!(matches!(
         open_virtual_source(&spec),
-        Err(Error::Unsupported(_))
+        Err(MidiHardwareError::Unsupported(_))
     ));
     let inlets = tutti_midi_runtime::InputInlets::new(
         tutti_graph::EventCapacity::of(8),
@@ -50,6 +50,6 @@ fn virtual_endpoints_report_unsupported() {
     let producer = ports.open_input_port("virtual").0;
     assert!(matches!(
         open_virtual_destination(&spec, producer),
-        Err(Error::Unsupported(_))
+        Err(MidiHardwareError::Unsupported(_))
     ));
 }

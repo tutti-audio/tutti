@@ -12,7 +12,7 @@
 use tracing::debug;
 use tutti_coremidi_ffi::{Protocol, UmpSource};
 
-use crate::error::{Error, Result};
+use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
 
 /// CoreMIDI's protocol for the spec's.
@@ -48,11 +48,11 @@ impl UmpVirtualSource {
     ///
     /// # Errors
     ///
-    /// [`Error::VirtualBlocksUnsupported`] when `spec` declares blocks,
-    /// and [`Error::Os`] if CoreMIDI refuses the client or the endpoint.
+    /// [`MidiHardwareError::VirtualBlocksUnsupported`] when `spec` declares blocks,
+    /// and [`MidiHardwareError::Os`] if CoreMIDI refuses the client or the endpoint.
     pub(crate) fn open(spec: &VirtualSpec) -> Result<Self> {
         if !spec.function_blocks().is_empty() {
-            return Err(Error::VirtualBlocksUnsupported);
+            return Err(MidiHardwareError::VirtualBlocksUnsupported);
         }
         Self::new(spec.name().as_str(), spec.protocol())
     }
@@ -78,7 +78,7 @@ impl SourceBackend for UmpVirtualSource {
     ///
     /// # Errors
     ///
-    /// [`Error::Os`] when the message will not fit the event list, or when
+    /// [`MidiHardwareError::Os`] when the message will not fit the event list, or when
     /// `MIDIReceivedEventList` returns a non-zero `OSStatus`.
     fn send(&self, words: &[u32]) -> Result<()> {
         Ok(self.source.send(words)?)
