@@ -1949,7 +1949,7 @@ fn ref_port<F: Float>(
         if i == frames - 1 {
             b1
         } else {
-            from + (b1 - from) * (F::from_f64((i + 1) as f64) / F::from_f64(frames as f64))
+            from + (b1 - from) * progress_in::<F>(i + 1, frames)
         }
     };
     let (lo, hi) = if range.min <= range.max {
@@ -2099,6 +2099,11 @@ fn ref_port<F: Float>(
     st.last_base = b1;
     st.modulated = true;
     Some((vals, corners))
+}
+
+/// `k / n` as the progress a lane's ramp reads, narrowed once to `F`.
+fn progress_in<F: Float>(k: usize, n: usize) -> F {
+    F::from_f64(Normalized::progress(Samples(k), Samples(n)).get())
 }
 
 /// `from + (to - from) * law(t)` in `F`: the law is read in `f64` and narrows
@@ -2283,7 +2288,7 @@ impl<F: Float> RefMode<F> {
                 if i + 1 == frames {
                     to
                 } else {
-                    from + (to - from) * (F::from_f64((i + 1) as f64) / F::from_f64(frames as f64))
+                    from + (to - from) * progress_in::<F>(i + 1, frames)
                 }
             }
         };
@@ -2920,9 +2925,7 @@ fn sum_addends<F: Float>(mut addends: Vec<RefAddend<F>>, frames: usize) -> Vec<F
                             let w = if i + 1 == frames {
                                 *to
                             } else {
-                                *from
-                                    + (*to - *from)
-                                        * (F::from_f64((i + 1) as f64) / F::from_f64(frames as f64))
+                                *from + (*to - *from) * progress_in::<F>(i + 1, frames)
                             };
                             *x + w * *y
                         }
