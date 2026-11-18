@@ -131,7 +131,7 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
 
     let denominator = (sum_ll * sum_rr).sqrt();
     let correlation = if denominator > 1e-20 {
-        Correlation::new_clamped((sum_lr / denominator) as f32)
+        Correlation::new_clamped(sum_lr / denominator)
     } else {
         Correlation::UNCORRELATED
     };
@@ -139,8 +139,7 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
     let (level_l, level_r) = (rms(sum_ll), rms(sum_rr));
     let total = level_l.get() + level_r.get();
     let balance = if total > 1e-20 {
-        // `StereoBalance` is an `f32` unit: the ratio narrows once.
-        StereoBalance::new_clamped(((level_r.get() - level_l.get()) / total) as f32)
+        StereoBalance::new_clamped((level_r.get() - level_l.get()) / total)
     } else {
         StereoBalance::CENTER
     };
@@ -213,8 +212,7 @@ impl StereoSmoother {
     /// smoothed correlation afterwards, so the two cannot disagree.
     pub fn push(&mut self, instant: StereoReading, dt: Seconds) -> StereoReading {
         let cfg = self.cfg;
-        let smooth =
-            |old: f32, new: f32| Smoother::toward(old, new, cfg.coeff_over(new > old, dt) as f32);
+        let smooth = |old: f64, new: f64| Smoother::toward(old, new, cfg.coeff_over(new > old, dt));
         let smooth_level = |old: Amplitude, new: Amplitude| {
             Amplitude(Smoother::toward(
                 old.get(),

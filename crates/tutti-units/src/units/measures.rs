@@ -22,7 +22,7 @@ unit! {
     /// [`Amplitude`] either: a confidence is never multiplied onto a signal,
     /// and giving it a gain's algebra would license `sample * confidence`,
     /// silently turning an uncertain pitch estimate into a volume dip.
-    pub struct Confidence(pub f32): Unit, Ordered, Bounded, Scalable;
+    pub struct Confidence(pub f64): Unit, Ordered, Bounded, Scalable;
 }
 // Scalable because the smoothers genuinely attenuate it: a Viterbi track
 // penalizes a jump by multiplying the confidence by a decay factor.
@@ -39,7 +39,7 @@ impl Confidence {
     /// Constrain into `0..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Confidence {
+    pub fn new_clamped(v: f64) -> Confidence {
         Confidence(v).clamp(Self::NONE, Self::CERTAIN)
     }
 
@@ -68,7 +68,7 @@ unit! {
     /// The negative half is the whole point — `-1` is the mono-compatibility
     /// failure a correlation meter exists to catch, and it is not "less" than
     /// `+1` in any audible sense; it is the opposite fault.
-    pub struct Correlation(pub f32): Unit, Ordered, Bounded, Signed;
+    pub struct Correlation(pub f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable`: the value is a normalized inner product, so rescaling
 // denormalizes it and the result no longer means "coherence".
@@ -86,7 +86,7 @@ impl Correlation {
     /// Constrain into `-1..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Correlation {
+    pub fn new_clamped(v: f64) -> Correlation {
         Correlation(v).clamp(Self::INVERTED, Self::MONO)
     }
 
@@ -107,7 +107,7 @@ impl Correlation {
     #[inline]
     #[must_use]
     pub fn to_stereo_width(self) -> StereoWidth {
-        StereoWidth(1.0 - f64::from(self.0))
+        StereoWidth(1.0 - self.0)
     }
 }
 
@@ -119,7 +119,7 @@ unit! {
     /// A reading, not a [`Pan`]: it is measured from a signal, not set on a
     /// processor. Feeding a meter's balance back as a pan position is a
     /// crossing a caller spells out, `Pan(balance.get())`.
-    pub struct StereoBalance(pub f32): Unit, Ordered, Bounded, Signed;
+    pub struct StereoBalance(pub f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable`: a ratio of measured energy rescaled is no longer that ratio.
 // NOT `Additive`: two balances do not sum into a third.
@@ -135,7 +135,7 @@ impl StereoBalance {
     /// Constrain into `-1..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> StereoBalance {
+    pub fn new_clamped(v: f64) -> StereoBalance {
         StereoBalance(v).clamp(Self::LEFT, Self::RIGHT)
     }
 }
@@ -158,7 +158,7 @@ unit! {
     /// **Not a [`Mix`]**: nothing is being blended, and a crossfade
     /// position (a linear interpolation's `t`) is meaningless here. **Not a [`Depth`]**: that
     /// is bipolar, and there is no such thing as negative velocity.
-    pub struct Velocity(pub f32): Unit, Ordered, Bounded;
+    pub struct Velocity(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable`: `velocity * 0.5` reads as "half as loud", which is
 // exactly the amplitude confusion this type exists to prevent — the mapping
@@ -178,19 +178,19 @@ impl Velocity {
     /// Constrain into `0..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Velocity {
+    pub fn new_clamped(v: f64) -> Velocity {
         Velocity(v).clamp(Self::SILENT, Self::MAX)
     }
 
     /// Scale a whole performance's dynamics, staying in range.
     ///
-    /// The named replacement for the omitted `Mul<f32>`: this is the one
+    /// The named replacement for the omitted `Mul<f64>`: this is the one
     /// operation that is genuinely a rescale (a "soften the take" edit), and
     /// naming it keeps the *loudness* reading — which is the instrument's job,
     /// not arithmetic's — from being spelled the same way.
     #[inline]
     #[must_use]
-    pub fn scaled(self, factor: f32) -> Velocity {
+    pub fn scaled(self, factor: f64) -> Velocity {
         Velocity::new_clamped(self.0 * factor)
     }
 }
