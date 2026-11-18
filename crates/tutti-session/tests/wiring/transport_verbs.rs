@@ -2,10 +2,11 @@
 //! the one timed form, `schedule`.
 
 use tutti_buffers::InterleavedMut;
+use tutti_music::LoopRange;
 use tutti_session::Session;
 use tutti_transport::TimedError;
 use tutti_transport::{FadeOut, MotionEvent};
-use tutti_types::{ChannelLayout, LoopRange, MaxBlock};
+use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 fn offline() -> Session {

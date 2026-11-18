@@ -503,7 +503,7 @@ impl std::fmt::Debug for PluginControls {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::MeterMap;
+    use tutti_music::MeterMap;
 
     fn controls() -> PluginControls {
         PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_44K1).0

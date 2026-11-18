@@ -1863,8 +1863,9 @@ mod tests {
     /// Analytic figures: 120 BPM at 48 kHz is 1/24 000 beat a frame.
     #[test]
     fn a_locate_on_the_first_frame_is_taken_once_and_a_wrap_counted_once() {
+        use tutti_music::LoopRange;
         use tutti_transport::LoopEdit;
-        use tutti_types::{ChannelLayout, LoopRange};
+        use tutti_types::ChannelLayout;
         use tutti_units::Beat;
         let engine_for = |transport: &Transport| {
             let (mut ed, exec) = Editor::new(Prepare::new(

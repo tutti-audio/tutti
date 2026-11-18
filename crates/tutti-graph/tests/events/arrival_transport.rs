@@ -27,7 +27,8 @@ use tutti_graph::{
     TransportChanges, TransportHistory, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, LoopRange};
+use tutti_music::LoopRange;
+use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
 const MAX: usize = 64;

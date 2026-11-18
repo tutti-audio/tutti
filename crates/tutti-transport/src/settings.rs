@@ -277,7 +277,7 @@ mod tests {
             let frames = 4.0 * 60.0 * 48_000.0 / bpm;
             assert_eq!(
                 map.view(rate).frame_at_or_after(Beat(4.0)).get(),
-                tutti_types::first_frame_at_or_after(frames) as u64,
+                tutti_music::first_frame_at_or_after(frames) as u64,
                 "beat 4 at {bpm}"
             );
         }

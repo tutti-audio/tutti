@@ -21,7 +21,7 @@ serde = ["dep:serde", "tutti-ump/serde"]
 
 [dependencies]
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
+tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 serde = { version = "1", optional = true, default-features = false, features = ["derive", "alloc"] }
 # Pure-Rust `round` and `floor`, which `core` lacks.

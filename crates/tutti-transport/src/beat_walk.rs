@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod tests {
     use tutti_graph::{Env, TransportChanges, TransportPosition};
-    use tutti_types::FrameClock;
+    use tutti_music::FrameClock;
     use tutti_units::Beat;
     use tutti_units::Frame;
     use tutti_units::{Bpm, SampleRate, Samples};
@@ -13,7 +13,7 @@ mod tests {
 
     /// The beats a block of `len` frames starting on `host`'s frame gets, in
     /// `f64`.
-    fn walked(host: &FrameClock, len: usize, looping: Option<tutti_types::LoopRange>) -> Vec<Beat> {
+    fn walked(host: &FrameClock, len: usize, looping: Option<tutti_music::LoopRange>) -> Vec<Beat> {
         let env = Env {
             frame: Frame::new(0),
             sample_rate: SR,
@@ -37,7 +37,7 @@ mod tests {
             (133.3, None),
             (
                 97.0,
-                tutti_types::LoopRange::new(Beat::new(1_000.0), Beat::new(1_000.004)),
+                tutti_music::LoopRange::new(Beat::new(1_000.0), Beat::new(1_000.004)),
             ),
         ] {
             let mut host = FrameClock::new(Beat(0.25), Bpm::of(tempo), SR);

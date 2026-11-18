@@ -16,7 +16,7 @@ use tutti_graph::{
     Editor, Executor, IntoNode, Offset, TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_midi_runtime::{MidiClipControls, MidiClipNode, TimedMidiEvent};
-use tutti_types::LoopRange;
+use tutti_music::LoopRange;
 use tutti_ump::Ump;
 use tutti_ump::{Address, ControlValue, NoteNumber, RegisteredPerNoteController, parse_exact};
 use tutti_ump::{CCNumber, Message, MidiChannel, MidiGroup, Rpn, U7, Voice2};
@@ -542,7 +542,7 @@ fn a_tempo_change_inside_a_block_re_times_the_passes() {
 /// crossed.
 #[test]
 fn every_pass_lands_where_the_hosts_clock_reaches_it() {
-    use tutti_types::{FRAME_TOLERANCE, FrameClock, LoopRange as Region};
+    use tutti_music::{FRAME_TOLERANCE, FrameClock, LoopRange as Region};
     const TEMPO: f64 = 97.0;
     let (start, end) = (Beat(3.0), Beat(3.00126));
     let fpb = RATE * 60.0 / TEMPO;
@@ -623,8 +623,8 @@ fn sub_frame_loop(start: Beat, end: Beat) -> Option<Vec<(u64, Ump)>> {
         let clip = MidiClipNode::new([TimedMidiEvent::new(start, on(60)).unwrap()]);
         let (_ed, mut exec, _c, seen) = rig(clip, 64);
         let mut clock =
-            tutti_types::FrameClock::new(start, tutti_units::Bpm::of(120.0), SampleRate::of(RATE));
-        let region = tutti_types::LoopRange::new(start, end).unwrap();
+            tutti_music::FrameClock::new(start, tutti_units::Bpm::of(120.0), SampleRate::of(RATE));
+        let region = tutti_music::LoopRange::new(start, end).unwrap();
         for _ in 0..4 {
             exec.process(
                 64,

@@ -21,8 +21,8 @@ use tutti_types::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, WorkerPool};
 use tutti_graph::{OutPort, Source};
+use tutti_music::{FrameClock, LoopRange};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, Wave};
-use tutti_types::{FrameClock, LoopRange};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -97,7 +97,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
 fn render(exec: &mut Executor) -> Vec<Vec<u32>> {
     let channels = 2 * READS as usize;
     let mut all = vec![Vec::new(); channels];
-    let region = tutti_types::LoopRange::new(Beat::new(LOOP.0), Beat::new(LOOP.1)).expect("a loop");
+    let region = tutti_music::LoopRange::new(Beat::new(LOOP.0), Beat::new(LOOP.1)).expect("a loop");
     let mut clock = FrameClock::new(Beat(0.0), Bpm::of(120.0), SampleRate::of(SR));
     let mut wraps = 0;
     for i in 0..600 {

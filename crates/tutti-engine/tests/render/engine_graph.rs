@@ -38,10 +38,11 @@ use tutti_graph::{
     Unforkable,
 };
 use tutti_graph::{OutPort, Source};
+use tutti_music::LoopRange;
 use tutti_transport::{
     FadeOut, LoopEdit, MotionEvent, Then, Timeline, Transport, TransportCommand,
 };
-use tutti_types::{ChannelLayout, LoopRange};
+use tutti_types::ChannelLayout;
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 

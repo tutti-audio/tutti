@@ -1,6 +1,6 @@
 //! [`NoteAdsr`]: an ADSR driven by note-ons and note-offs.
 
-use tutti_types::Adsr;
+use tutti_music::Adsr;
 use tutti_ump::{NoteKey, NoteKeyEvent, Ump};
 use tutti_units::{Frame, SampleRate, Samples};
 

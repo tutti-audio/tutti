@@ -23,9 +23,10 @@ use tutti_modulation::{
     Adsr, Amount, ControlProgram, InputLayer, Law, LayerId, Polarity, SignalKind, SignalSource,
     SourceId,
 };
+use tutti_music::FrameClock;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
-use tutti_types::{AtomicF32, ChannelLayout, FrameClock};
+use tutti_types::{AtomicF32, ChannelLayout};
 use tutti_ump::NoteVelocity;
 use tutti_units::{
     Amplitude, Ballistics, Beat, Bpm, Depth, Frame, Hz, ParamKey, SampleRate, Samples, Seconds,

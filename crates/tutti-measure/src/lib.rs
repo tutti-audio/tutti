@@ -398,4 +398,4 @@ pub use yin::{
 
 /// Notes and pitch classes, re-exported from the engine vocabulary: a
 /// [`Pitch`] names one, and callers should not need a second import to read it.
-pub use tutti_types::{Note, PitchClass};
+pub use tutti_music::{Note, PitchClass};

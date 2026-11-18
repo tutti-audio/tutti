@@ -19,7 +19,7 @@ default = []
 # ParameterChanges, EditorCapabilities, WindowHandle). Required
 # by the plugin IPC protocol (postcard); host crates that don't need IPC
 # don't pay for the serde dep.
-serde = ["dep:serde", "arrayvec/serde", "bitflags/serde", "dpi/serde", "keyboard-types/serde", "rgb/serde", "tutti-types/serde", "tutti-units/serde", "tutti-graph/serde", "tutti-ump/serde"]
+serde = ["dep:serde", "arrayvec/serde", "bitflags/serde", "dpi/serde", "keyboard-types/serde", "rgb/serde", "tutti-types/serde", "tutti-music/serde", "tutti-units/serde", "tutti-graph/serde", "tutti-ump/serde"]
 
 # The probe's result file (`ProbeOutcome`, `write_result`, `read_result`): the
 # wire between `tutti-plugin-probe` and the host that spawned it.
@@ -44,6 +44,7 @@ bitflags = "2"
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 # The engine's unit vocabulary (`Samples`, `Tail`).
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
+tutti-music = { version = "0.0.1", path = "../tutti-music" }
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
 # The block views (`InputOutput`, `Planes`, `PlanesMut`) and the sample width (`Float`).
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }

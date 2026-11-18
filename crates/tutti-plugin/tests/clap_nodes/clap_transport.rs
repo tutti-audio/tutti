@@ -24,7 +24,7 @@ use tutti_fixtures::machine_lock;
 use tutti_types::MaxBlock;
 
 use tutti_graph::{Env, ForkMode, Offset, TransportChanges, TransportPosition};
-use tutti_types::LoopRange;
+use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
