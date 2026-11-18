@@ -11,6 +11,9 @@
 //! Pure functions over a novelty slice; the public entry points are in
 //! [`crate::tempo`].
 
+use tutti_buffers::Mono;
+use tutti_dsp::rms;
+
 use crate::sequence::{local_maxima, median};
 
 /// The standard deviation of the smoothing kernel as a fraction of the period.
@@ -172,8 +175,7 @@ fn trim(beats: &mut Vec<usize>, local: &[f32]) {
                 .sum()
         })
         .collect();
-    let rms = (smooth.iter().map(|s| s * s).sum::<f32>() / smooth.len() as f32).sqrt();
-    let cut = TRIM_FRACTION * rms;
+    let cut = TRIM_FRACTION * rms(Mono::new(&smooth)).get();
     let first = smooth.iter().position(|&s| s >= cut);
     let last = smooth.iter().rposition(|&s| s >= cut);
     match (first, last) {
