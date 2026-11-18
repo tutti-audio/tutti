@@ -481,12 +481,14 @@ impl LogLane {
 /// One lane and its reader, for a driver that renders blocks by hand: the
 /// slots a block's `Io` writes into, flushed after the block through the
 /// executor's own path.
+#[cfg(feature = "contract")]
 pub(crate) struct LogCapture {
     lane: LogLane,
     reader: RtLogReader,
     filter: LogFilter,
 }
 
+#[cfg(feature = "contract")]
 impl LogCapture {
     /// A capture that keeps what `filter` lets in.
     pub(crate) fn new(filter: LogFilter) -> Self {
