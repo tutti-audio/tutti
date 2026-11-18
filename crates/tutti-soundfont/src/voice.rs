@@ -62,8 +62,7 @@ fn low_pass_model(cutoff: f32, resonance: f32, rate: SampleRate) -> Option<SvfMo
     let controls = SvfControls {
         ty: SvfType::LowPass,
         freq: cutoff,
-        // `Q` stores an `f32`: the design's `f64` ratio crosses to it here.
-        q: Q(q as f32),
+        q: Q(q),
         gain: Db::UNITY,
     };
     Some(SvfModel::new(controls, rate))

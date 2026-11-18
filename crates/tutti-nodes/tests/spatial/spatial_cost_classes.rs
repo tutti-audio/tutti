@@ -46,8 +46,8 @@ impl<N: Node> Node for Undeclared<N> {
 }
 
 /// A stereo panner aimed by `k`.
-fn panner(k: u64) -> VbapPannerNode {
-    let node = VbapPannerNode::stereo();
+fn panner(k: u64) -> VbapPannerNode<f32> {
+    let node = VbapPannerNode::<f32>::stereo();
     aim(
         &node.param_set(),
         Azimuth(-30.0 + 4.0 * k as f64),
@@ -139,9 +139,9 @@ fn render(exec: &mut Executor) -> Vec<Vec<f32>> {
 #[test]
 fn a_panner_is_moderate() {
     for node in [
-        VbapPannerNode::stereo(),
-        VbapPannerNode::quad(),
-        VbapPannerNode::surround_5_1(),
+        VbapPannerNode::<f32>::stereo(),
+        VbapPannerNode::<f32>::quad(),
+        VbapPannerNode::<f32>::surround_5_1(),
     ] {
         assert_eq!(node.shape().cost, Cost::Moderate);
     }

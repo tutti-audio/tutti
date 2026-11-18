@@ -2,6 +2,8 @@
 //! reset: the render does not depend on where the blocks fall, a reset node
 //! renders what a fresh one does.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use tutti_buffers::Planes;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
@@ -29,7 +31,11 @@ fn noise(frames: usize, mut state: u32) -> [Vec<f32>; 2] {
 
 /// `input` through `node` in blocks of the given lengths (cycled), one `Vec`
 /// per output channel.
-fn render(node: &mut VbapPannerNode, input: &[Vec<f32>; 2], splits: &[usize]) -> Vec<Vec<f32>> {
+fn render(
+    node: &mut VbapPannerNode<f32>,
+    input: &[Vec<f32>; 2],
+    splits: &[usize],
+) -> Vec<Vec<f32>> {
     let mut out = vec![Vec::new(); node.channels().count() as usize];
     let (mut at, mut i) = (0, 0);
     while at < input[0].len() {
@@ -58,8 +64,8 @@ fn bits(channels: &[Vec<f32>]) -> Vec<Vec<u32>> {
 
 /// A panner of `bed`, seated by one grid segment at front-centre, then moved:
 /// the gains glide for the whole render.
-fn moving(bed: Bed) -> VbapPannerNode {
-    let mut node = prepared(VbapPannerNode::new(bed).unwrap(), RATE, 2_048);
+fn moving(bed: Bed) -> VbapPannerNode<f32> {
+    let mut node = prepared(VbapPannerNode::<f32>::new(bed).unwrap(), RATE, 2_048);
     let params = node.param_set();
     params.set(UnitParam::Spread, 0.2);
     let seat = noise(GRID, 1);
@@ -114,7 +120,7 @@ fn a_reset_node_renders_what_a_fresh_one_does() {
     render(&mut cut, &noise(37, 3), &[37]);
     tutti_graph::Node::reset(&mut cut);
 
-    let mut fresh = prepared(VbapPannerNode::surround_5_1(), RATE, 64);
+    let mut fresh = prepared(VbapPannerNode::<f32>::surround_5_1(), RATE, 64);
     let params = fresh.param_set();
     params.set(UnitParam::Spread, 0.2);
     aim(&params, Azimuth(-120.0), Elevation(20.0));
@@ -128,7 +134,7 @@ fn a_reset_node_renders_what_a_fresh_one_does() {
 /// two branches along the next 16 frames in even steps, instead of stepping.
 #[test]
 fn a_width_crossing_the_fold_threshold_crossfades_in_even_steps() {
-    let mut node = prepared(VbapPannerNode::stereo(), RATE, 64);
+    let mut node = prepared(VbapPannerNode::<f32>::stereo(), RATE, 64);
     let params = node.param_set();
     aim(&params, Azimuth(-15.0), Elevation::LEVEL);
     params.set(UnitParam::StereoWidth, 1.0);

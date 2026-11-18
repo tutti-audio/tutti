@@ -1,6 +1,6 @@
 //! [`MidSideNode`]: a stereo pair converted to mid/side or back.
 
-use tutti_buffers::{Planes, PlanesMut};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::MidSide;
 use tutti_graph::{Cost, Cx, ForkByClone, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status};
 use tutti_types::BusTopology;
@@ -52,19 +52,19 @@ impl From<MidSideConfig> for MidSideNode {
     }
 }
 
-impl Node for MidSideNode {
+impl<F: Float> Node<F> for MidSideNode {
     fn shape(&self) -> Shape {
         Shape::through(BusTopology::STEREO).with_cost(Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
 
-    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         through_planes(
             &mut io,
             2,
             2,
-            |input: Planes<'_, f32>, output: PlanesMut<'_, '_, f32>| {
+            |input: Planes<'_, F>, output: PlanesMut<'_, '_, F>| {
                 self.direction.process(input, output);
             },
         );
@@ -74,10 +74,10 @@ impl Node for MidSideNode {
     fn reset(&mut self) {}
 }
 
-impl IntoNode for MidSideNode {
+impl<F: Float> IntoNode<F> for MidSideNode {
     type Controls = ();
 
-    fn into_parts(self) -> NodeParts<()> {
+    fn into_parts(self) -> NodeParts<(), F> {
         ForkByClone(self).into_parts()
     }
 }
@@ -102,11 +102,36 @@ mod tests {
     /// The shape is stereo in and out, `Light`.
     #[test]
     fn the_shape_is_stereo_and_light() {
-        let shape = MidSideNode::from(MidSideConfig::encode()).shape();
+        let shape = Node::<f32>::shape(&MidSideNode::from(MidSideConfig::encode()));
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
             (2, 2)
         );
         assert_eq!(shape.cost, Cost::Light);
+    }
+
+    /// In an `f64` graph the encoder is `(l + r) / 2` and `(l - r) / 2` on 29-bit signals, to
+    /// `2^-45`.
+    #[test]
+    fn in_an_f64_graph_the_encoder_is_the_half_sum_and_half_difference_of_wide_signals() {
+        use crate::test_support::{F64_TOLERANCE, RATE, render_f64};
+        let l = tutti_fixtures::signal::wide_signal(64);
+        let r: Vec<f64> = l.iter().rev().map(|v| v - 0.3).collect();
+        let out = render_f64(
+            MidSideNode::from(MidSideConfig::encode()),
+            RATE,
+            &[&l, &r],
+            64,
+        );
+        for n in 0..64 {
+            assert!(
+                (out[0][n] - (l[n] + r[n]) / 2.0).abs() <= F64_TOLERANCE,
+                "mid {n}"
+            );
+            assert!(
+                (out[1][n] - (l[n] - r[n]) / 2.0).abs() <= F64_TOLERANCE,
+                "side {n}"
+            );
+        }
     }
 }

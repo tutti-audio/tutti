@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::Float;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, Shape,
     Status,
@@ -69,7 +70,7 @@ use super::Curve;
 ///
 /// // No inputs, one output (the curve's value).
 /// let lane = AutomationLaneNode::new(trajectory);
-/// let mut solo = Solo::new(lane, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+/// let mut solo = Solo::<_, f32>::new(lane, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
 /// solo.renderer_mut()
 ///     .set_transport(TransportPosition::new(false, Bpm::of(120.0), Beat(2.0), None));
 /// let out = solo.render(1);
@@ -127,7 +128,7 @@ impl AutomationLaneNode {
     }
 }
 
-impl Node for AutomationLaneNode {
+impl<F: Float> Node<F> for AutomationLaneNode {
     /// One audio output.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
@@ -139,7 +140,7 @@ impl Node for AutomationLaneNode {
     /// `Env`.
     fn prepare(&mut self, _: &Prepare) {}
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         debug_assert_eq!(
             cx.arrival,
             Latency::ZERO,
@@ -147,11 +148,13 @@ impl Node for AutomationLaneNode {
         );
         let out = io.output(0);
         let curve = &*self.curve;
-        cx.env
-            .for_each_beat(|i, beat| out[i] = curve.value_at(beat).unwrap_or(0.0));
-        if let Some(&last) = out.last() {
-            self.last_value = last;
-        }
+        let mut last = self.last_value;
+        // A curve's value is an `f32`, written in the graph's float.
+        cx.env.for_each_beat(|i, beat| {
+            last = curve.value_at(beat).unwrap_or(0.0);
+            out[i] = F::from_f32(last);
+        });
+        self.last_value = last;
         Status::Modified
     }
 
@@ -164,17 +167,17 @@ impl Node for AutomationLaneNode {
 /// as inserted.
 struct LaneFork(AutomationLaneNode);
 
-impl ForkSource for LaneFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float> ForkSource<F> for LaneFork {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(self.0.fork_fresh())))
     }
 }
 
 /// Inserted with no controls and a fork that freezes a live curve.
-impl IntoNode for AutomationLaneNode {
+impl<F: Float> IntoNode<F> for AutomationLaneNode {
     type Controls = ();
 
-    fn into_parts(self) -> NodeParts<()> {
+    fn into_parts(self) -> NodeParts<(), F> {
         let fork = LaneFork(self.clone());
         NodeParts {
             node: Box::new(self),
@@ -228,7 +231,7 @@ mod tests {
 
     #[test]
     fn declares_no_inputs_and_one_output() {
-        let shape = AutomationLaneNode::new(ramp_trajectory()).shape();
+        let shape = Node::<f32>::shape(&AutomationLaneNode::new(ramp_trajectory()));
         assert_eq!(shape.audio_in().count(), 0);
         assert_eq!(shape.audio_out().count(), 1);
         assert_eq!(
@@ -289,7 +292,7 @@ mod tests {
         d.block();
         assert!((d.node.last_value - 0.5).abs() < 0.01);
 
-        Node::reset(&mut *d.node);
+        Node::<f32>::reset(&mut *d.node);
         assert_eq!(d.node.last_value, 0.0);
     }
 
@@ -392,5 +395,14 @@ mod tests {
         cell.store(0.75, Ordering::Release);
         assert_eq!(render(fork, stopped_at(1.0), 1)[0], 0.25);
         assert_eq!(render(lane, stopped_at(1.0), 1)[0], 0.75);
+    }
+
+    /// In an `f64` graph the lane writes the curve's `f32` value as it is, widened and not
+    /// rounded again.
+    #[test]
+    fn in_an_f64_graph_the_lane_writes_its_f32_curve_value_widened_exactly() {
+        use crate::test_support::{RATE, render_f64};
+        let out = render_f64(AutomationLaneNode::new(Fixed(0.1)), RATE, &[], 32);
+        assert!(out[0].iter().all(|&v| v == f64::from(0.1f32)));
     }
 }

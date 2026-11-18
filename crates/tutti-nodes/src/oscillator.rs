@@ -5,6 +5,7 @@
 //! `tutti_dsp::Oscillator`.
 
 use crate::ramp::LastGood;
+use tutti_buffers::Float;
 use tutti_dsp::OscillatorWave;
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_types::{ChannelLayout, Param};
@@ -57,7 +58,7 @@ pub struct OscillatorNode {
     /// The last finite frequency read from the cell or the port.
     good_frequency: LastGood<f64>,
     /// The last finite level read from the cell or the port.
-    good_level: LastGood<f32>,
+    good_level: LastGood<f64>,
 }
 
 // The params an [`OscillatorNode`] lets the graph modulate, in port order.
@@ -74,7 +75,7 @@ impl OscillatorNode {
             level: Param::new(Amplitude::UNITY),
             rate: None,
             good_frequency: LastGood::new(frequency.get(), 0.0),
-            good_level: LastGood::new(Amplitude::UNITY.get() as f32, 1.0),
+            good_level: LastGood::new(Amplitude::UNITY.get(), 1.0),
         }
     }
 
@@ -148,7 +149,7 @@ impl Clone for OscillatorNode {
     }
 }
 
-impl Node for OscillatorNode {
+impl<F: Float> Node<F> for OscillatorNode {
     /// No inputs, one output, no latency, no ring-out; arithmetic and one
     /// `sin` a frame, `Light`.
     fn shape(&self) -> Shape {
@@ -162,7 +163,7 @@ impl Node for OscillatorNode {
         self.rate = Some(prepare.sample_rate());
     }
 
-    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let Some(rate) = self.rate else {
             return Status::Silent;
         };
@@ -174,15 +175,18 @@ impl Node for OscillatorNode {
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .frames();
         let frequency_cell = self.frequency.load().get();
-        // The output is an `f32` lane: the level narrows once per block and the product runs in `f32`.
-        let level_cell = self.level.load().get() as f32;
+        let level_cell = self.level.load().get();
         let out = io.output(0);
         for (i, o) in out[..size].iter_mut().enumerate() {
             let f = self
                 .good_frequency
-                .read(frequency.map_or(frequency_cell, |l| f64::from(l[i])));
-            let g = self.good_level.read(level.map_or(level_cell, |l| l[i]));
-            *o = self.wave.step(Hz(f), rate) * g;
+                .read(frequency.map_or(frequency_cell, |l| l[i].into()));
+            let g = self
+                .good_level
+                .read(level.map_or(level_cell, |l| l[i].into()));
+            // The wave and the level multiply in `f64`; the sample narrows once.
+            let y: f64 = self.wave.step(Hz(f), rate);
+            *o = F::from_f64(y * g);
         }
         Status::Modified
     }
@@ -196,7 +200,7 @@ impl Node for OscillatorNode {
     }
 }
 
-impl ParamNode for OscillatorNode {
+impl<F: Float> ParamNode<F> for OscillatorNode {
     /// The frequency and the level.
     fn param_set(&self) -> ParamSet {
         self.declared_set()
@@ -207,17 +211,17 @@ impl ParamNode for OscillatorNode {
         let mut fork = self.clone();
         fork.frequency.detach();
         fork.level.detach();
-        Node::reset(&mut fork);
+        Node::<F>::reset(&mut fork);
         fork
     }
 }
 
 /// Inserted with its [`ParamSet`] as its controls and a fork from the values
 /// last set through it ([`tutti_graph::param_parts`]).
-impl IntoNode for OscillatorNode {
+impl<F: Float> IntoNode<F> for OscillatorNode {
     type Controls = ParamSet;
 
-    fn into_parts(self) -> NodeParts<ParamSet> {
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
         tutti_graph::param_parts(self)
     }
 }
@@ -243,15 +247,15 @@ mod tests {
     #[test]
     fn the_shape_is_a_mono_source_declaring_frequency_then_level() {
         let node = OscillatorNode::sine(Hz(440.0)).with_level(Amplitude(0.25));
-        let shape = node.shape();
+        let shape = Node::<f32>::shape(&node);
         assert_eq!(shape.audio_in().count(), 0);
         assert_eq!(shape.audio_out().count(), 1);
         assert_eq!(
             shape.params.as_slice(),
             &[UnitParam::Frequency, UnitParam::Volume][..]
         );
-        assert_eq!(node.param_base(0), Some(440.0));
-        assert_eq!(node.param_base(1), Some(0.25));
+        assert_eq!(Node::<f32>::param_base(&node, 0), Some(440.0));
+        assert_eq!(Node::<f32>::param_base(&node, 1), Some(0.25));
     }
 
     #[test]
@@ -355,7 +359,7 @@ mod tests {
     fn an_unprepared_node_renders_silence() {
         let mut node = OscillatorNode::sine(Hz(440.0));
         let ones = [1.0f32; 32];
-        let out = drive(&mut node, RATE, Planes::default(), &[None, Some(&ones)]);
+        let out = drive::<f32>(&mut node, RATE, Planes::default(), &[None, Some(&ones)]);
         assert!(out[0].iter().all(|&v| v == 0.0));
     }
 
@@ -364,7 +368,7 @@ mod tests {
         let mut d = Direct::new(OscillatorNode::triangle(Hz(300.0)), RATE, 64);
         d.block();
         let first = d.output().plane(0).samples().to_vec();
-        d.node.reset();
+        Node::<f32>::reset(&mut *d.node);
         d.block();
         assert_eq!(d.output().plane(0).samples(), &first[..]);
     }
@@ -382,5 +386,26 @@ mod tests {
         // cycles of 2 kHz.
         let exact = libm::sin(2.0 * core::f64::consts::PI * 2_000.0 * 12.0 / 48_000.0);
         assert!((f64::from(out[12]) - exact).abs() < 1e-6);
+    }
+
+    /// In an `f64` graph a saw at `1/64` of the rate at the level `1/3` (which an `f32` cannot
+    /// hold) is the ramp `(k / 32 - 1) / 3` of its cycle away from the frames its
+    /// band-limiting touches, to `2^-45`: a level or a product narrowed to `f32` is off by
+    /// about `2^-25`.
+    #[test]
+    fn in_an_f64_graph_the_saw_is_the_exact_ramp_of_its_cycle() {
+        use crate::test_support::{F64_TOLERANCE, render_f64};
+        let level = 1.0 / 3.0;
+        let node = OscillatorNode::saw(Hz(RATE.get() / 64.0)).with_level(Amplitude(level));
+        let out = render_f64(node, RATE, &[], 128);
+        for k in 2..62 {
+            let want = level * (k as f64 / 32.0 - 1.0);
+            assert!((out[0][k] - want).abs() <= F64_TOLERANCE, "frame {k}");
+            assert!(
+                (out[0][64 + k] - want).abs() <= F64_TOLERANCE,
+                "frame {}",
+                64 + k
+            );
+        }
     }
 }

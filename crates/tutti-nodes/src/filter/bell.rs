@@ -225,7 +225,7 @@ mod tests {
             // The matched points against the analog bell itself: DC (bin 1), the center and
             // Nyquist (bin 4095), where the render is the analog magnitude.
             for f in [bin(1), center.get(), bin(4_095)] {
-                let want = analog(center.get(), f64::from(q), db, f);
+                let want = analog(center.get(), q, db, f);
                 let got = gain_of(config(center, Q(q), Db(db)), f);
                 assert!(
                     (got - want).abs() < 2e-3 * want,
@@ -278,13 +278,16 @@ mod tests {
     #[test]
     fn controls_out_of_range_are_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f64, q: f32, db: f64| render(&mut node(config(Hz(hz), Q(q), Db(db))), &input);
+        let at = |hz: f64, q: f64, db: f64| render(&mut node(config(Hz(hz), Q(q), Db(db))), &input);
         assert_eq!(at(1.0, 1.0, 6.0), at(20.0, 1.0, 6.0));
         assert_eq!(
             at(90_000.0, 1.0, 6.0),
             at(RATE.nyquist_scaled(0.99).get(), 1.0, 6.0)
         );
-        assert_eq!(at(500.0, 0.0, 6.0), at(500.0, 0.1, 6.0));
+        // The lower bound 0.1 is not an `f32`, which the control carries until the control
+        // cells are `f64`, so two figures below it are compared: this pins that the floor
+        // clamps, not that it is 0.1. The upper bound 30 is exact in both.
+        assert_eq!(at(500.0, 0.0, 6.0), at(500.0, 0.05, 6.0));
         assert_eq!(at(500.0, 900.0, 6.0), at(500.0, 30.0, 6.0));
         assert_eq!(at(500.0, 1.0, 90.0), at(500.0, 1.0, 24.0));
         assert_ne!(at(500.0, 1.0, 6.0), at(500.0, 1.0, -6.0));
@@ -302,7 +305,7 @@ mod tests {
         };
         assert_eq!(kernel.tail(), Tail::Unbounded);
         for fc in [20.0f64, 90.0, 700.0, 4_000.0, 15_000.0, 22_000.0] {
-            for q in [0.1f32, 0.7, 4.0, 30.0] {
+            for q in [0.1f64, 0.7, 4.0, 30.0] {
                 for db in [-24.0f64, -6.0, 6.0, 24.0] {
                     let controls = BellFilterControls {
                         frequency: Hz(fc),

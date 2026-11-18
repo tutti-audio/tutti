@@ -110,7 +110,7 @@ impl Cases {
 
 fn svf(dir: &Path, cases: &mut Cases) {
     let rate = SampleRate::of(RATE);
-    let settings: [(SvfType, &str, f64, f32, Db); 24] = [
+    let settings: [(SvfType, &str, f64, f64, Db); 24] = [
         (SvfType::LowPass, "lowpass", 200.0, 0.707, Db::UNITY),
         (SvfType::LowPass, "lowpass", 1_000.0, 2.0, Db::UNITY),
         (SvfType::LowPass, "lowpass", 8_000.0, 0.5, Db::UNITY),
@@ -164,7 +164,7 @@ fn ladder(dir: &Path, cases: &mut Cases) {
     let amplitude = 1e-4f32;
     for (ty, label) in [(LadderType::LP24, "lp24")] {
         for (freq, res) in [
-            (500.0f64, 0.0f32),
+            (500.0f64, 0.0f64),
             (500.0, 0.3),
             (4_000.0, 0.0),
             (4_000.0, 0.5),

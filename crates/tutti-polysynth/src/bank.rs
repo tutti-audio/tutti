@@ -52,7 +52,7 @@ pub(crate) const CONTROL_BLOCK: usize = 16;
 /// Below these deltas a cutoff/resonance change does not recompute the filter
 /// coefficients — the same guard `SvfFilterNode`/`LadderFilterNode` use.
 const FREQ_EPS: f64 = 0.01;
-const RES_EPS: f32 = 0.0001;
+const RES_EPS: f64 = 0.0001;
 
 /// Where a lane's amplitude envelope is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,7 +198,7 @@ pub(crate) struct VoiceBank {
     coef: Vec<[V; 3]>,
     coef_target: Vec<[V; 3]>,
     cutoff_seen: Vec<Hz>,
-    res_seen: Vec<f32>,
+    res_seen: Vec<Resonance>,
 
     // Amplitude envelope.
     env: Vec<V>,
@@ -345,7 +345,7 @@ impl VoiceBank {
         // NaN never compares within epsilon, so the first `set_filter` always
         // computes coefficients.
         self.cutoff_seen = vec![Hz(f64::NAN); lanes];
-        self.res_seen = vec![f32::NAN; lanes];
+        self.res_seen = vec![Resonance(f64::NAN); lanes];
         self.env = vec![zero; groups];
         self.env_slope = vec![zero; groups];
         self.env_target = vec![zero; groups];
@@ -375,7 +375,7 @@ impl VoiceBank {
         // The SVF's output mix depends on the tap and `Q`, not the rate, so
         // only the per-lane coefficients need recomputing.
         self.cutoff_seen.fill(Hz(f64::NAN));
-        self.res_seen.fill(f32::NAN);
+        self.res_seen.fill(Resonance(f64::NAN));
     }
 
     /// Zero every lane's state: silence, idle envelopes, cleared filters.
@@ -402,7 +402,7 @@ impl VoiceBank {
         self.gain.fill([zero; 2]);
         self.gain_target.fill([zero; 2]);
         self.cutoff_seen.fill(Hz(f64::NAN));
-        self.res_seen.fill(f32::NAN);
+        self.res_seen.fill(Resonance(f64::NAN));
         self.stage.fill(EnvStage::Idle);
         self.live.fill(false);
     }
@@ -428,9 +428,8 @@ impl VoiceBank {
         cutoff: Hz,
         resonance: Resonance,
     ) {
-        let r = resonance.get();
         let unchanged = (cutoff.get() - self.cutoff_seen[first].get()).abs() <= FREQ_EPS
-            && (r - self.res_seen[first]).abs() <= RES_EPS;
+            && (resonance.get() - self.res_seen[first].get()).abs() <= RES_EPS;
         if unchanged {
             return;
         }
@@ -447,7 +446,7 @@ impl VoiceBank {
         };
         for lane in first..first + lanes {
             self.cutoff_seen[lane] = cutoff;
-            self.res_seen[lane] = r;
+            self.res_seen[lane] = resonance;
             let (g, k) = split(lane);
             for (i, c) in coef.into_iter().enumerate() {
                 self.coef_target[g][i].as_mut_array()[k] = c;

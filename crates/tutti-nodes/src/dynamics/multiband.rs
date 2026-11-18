@@ -158,10 +158,7 @@ impl Band {
             good: [
                 LastGood::new(DEFAULT_THRESHOLD.get(), 0.0),
                 LastGood::fixed(0.0),
-                LastGood::new(
-                    f64::from(DEFAULT_RATIO.get()),
-                    f64::from(CompressionRatio::UNITY.get()),
-                ),
+                LastGood::new(DEFAULT_RATIO.get(), CompressionRatio::UNITY.get()),
                 LastGood::new(DEFAULT_ATTACK.get(), 0.0),
                 LastGood::new(DEFAULT_RELEASE.get(), 0.0),
                 LastGood::fixed(0.0),
@@ -190,12 +187,11 @@ impl Band {
     /// graph drives on the band's ports (the threshold is read per frame by the
     /// bank, so its cell is the base it falls back to). A non-finite value reads as
     /// the last finite one.
-    fn read(&mut self, lanes: &[Option<&[f32]>; PER_BAND], at: usize) -> BandSettings {
-        let driven = |k: usize| lanes[k].map(|lane| f64::from(lane[at]));
+    fn read<F: Float>(&mut self, lanes: &[Option<&[F]>; PER_BAND], at: usize) -> BandSettings {
+        let driven = |k: usize| lanes[k].map(|lane| lane[at].into());
         let mut take = |k: usize, cell: f64| self.good[k].read(driven(k).unwrap_or(cell));
         let knee = take(KNEE, self.knee.load().get());
-        // `CompressionRatio` is an `f32` unit.
-        let ratio = take(RATIO, f64::from(self.ratio.load().get()));
+        let ratio = take(RATIO, self.ratio.load().get());
         let attack = take(ATTACK, self.attack.load().get());
         let release = take(RELEASE, self.release.load().get());
         let makeup = take(MAKEUP, self.makeup.load().get());
@@ -205,7 +201,7 @@ impl Band {
             compressor: CompressorControls {
                 threshold: Db(threshold),
                 knee: Db(knee),
-                ratio: CompressionRatio(ratio as f32),
+                ratio: CompressionRatio(ratio),
                 attack: Seconds(attack),
                 release: Seconds(release),
                 makeup: Db(makeup),
@@ -220,9 +216,9 @@ impl Band {
 
 /// What the graph drives on the node's param ports for a block, by band and param, and
 /// by crossover: `None` for a port nothing drives.
-struct PortLanes<'a> {
-    band: [[Option<&'a [f32]>; PER_BAND]; BankShape::MAX_BANDS],
-    cutoff: [Option<&'a [f32]>; MAX_CROSSOVERS],
+struct PortLanes<'a, F: Float> {
+    band: [[Option<&'a [F]>; PER_BAND]; BankShape::MAX_BANDS],
+    cutoff: [Option<&'a [F]>; MAX_CROSSOVERS],
 }
 
 /// A multiband compressor: a Linkwitz-Riley crossover splits the input into 2 to 4 bands,
@@ -274,9 +270,9 @@ struct PortLanes<'a> {
 /// the last block. A band is left out of it only for a whole 64-frame chunk of the block on
 /// which it is bypassed (see [`BandReductions`](tutti_dsp::BandReductions)).
 ///
-/// `F` is the state precision of the crossover, the detectors and the gains, `f64` by default:
-/// an `f64` graph runs them in `f64`, and the audio is converted at the edges.
-pub struct MultibandCompressorNode<F: Float + Lanes + Lerp = f64> {
+/// `F` is the float of the graph it runs in, and of the crossover, the detectors and the
+/// gains.
+pub struct MultibandCompressorNode<F: Float + Lanes + Lerp> {
     rig: Rig,
     /// What [`prepare`](Node::prepare) builds from the rate it is given: `None` until the
     /// node is prepared.
@@ -377,11 +373,18 @@ impl Rig {
     }
 
     /// The settings at frame `at` of the block, at `rate`.
-    fn read(&mut self, rate: SampleRate, lanes: &PortLanes<'_>, at: usize) -> MultibandSettings {
+    fn read<F: Float>(
+        &mut self,
+        rate: SampleRate,
+        lanes: &PortLanes<'_, F>,
+        at: usize,
+    ) -> MultibandSettings {
         let nb = self.bands.len();
         // `read` fits every entry to the rate, so only a set that is out of order or not
         // above 0 is refused, and the last good one stands.
-        let targets = self.splits.read(rate, |i| lanes.cutoff[i].map(|l| l[at]));
+        let targets = self
+            .splits
+            .read(rate, |i| lanes.cutoff[i].map(|l| l[at].into()));
         if let Ok(set) = CrossoverControls::new(&targets[..nb - 1], rate) {
             self.crossover = set;
         }
@@ -425,9 +428,9 @@ impl<F: Float + Lanes + Lerp> Tuned<F> {
     /// them.
     fn render(
         &mut self,
-        input: &[&[f32]],
-        output: &mut [&mut [f32]],
-        lanes: &PortLanes<'_>,
+        input: &[&[F]],
+        output: &mut [&mut [F]],
+        lanes: &PortLanes<'_, F>,
         frames: Range<usize>,
     ) {
         if frames.is_empty() {
@@ -455,9 +458,9 @@ impl<F: Float + Lanes + Lerp> Tuned<F> {
     fn render_steps(
         &mut self,
         rig: &mut Rig,
-        input: &[&[f32]],
-        output: &mut [&mut [f32]],
-        lanes: &PortLanes<'_>,
+        input: &[&[F]],
+        output: &mut [&mut [F]],
+        lanes: &PortLanes<'_, F>,
         position: u64,
     ) {
         let rate = self.rate;
@@ -499,7 +502,7 @@ tutti_graph::declare_params!([F: Float + Lanes + Lerp] MultibandCompressorNode<F
     },
 });
 
-impl<F: Float + Lanes + Lerp> Node for MultibandCompressorNode<F> {
+impl<F: Float + Lanes + Lerp> Node<F> for MultibandCompressorNode<F> {
     /// `channels` in, `channels` out; zero latency; a param port for each
     /// band parameter and each crossover (see the type's docs).
     ///
@@ -518,7 +521,7 @@ impl<F: Float + Lanes + Lerp> Node for MultibandCompressorNode<F> {
         self.rig.clear_meters();
     }
 
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let n = io.frames();
         if n == 0 {
             return Status::Modified;
@@ -622,7 +625,7 @@ impl<F: Float + Lanes + Lerp> Clone for MultibandCompressorNode<F> {
     }
 }
 
-impl<F: Float + Lanes + Lerp> ParamNode for MultibandCompressorNode<F> {
+impl<F: Float + Lanes + Lerp> ParamNode<F> for MultibandCompressorNode<F> {
     /// Every param declared, the bands' then the crossovers'.
     fn param_set(&self) -> ParamSet {
         self.declared_set()
@@ -643,10 +646,10 @@ impl<F: Float + Lanes + Lerp> ParamNode for MultibandCompressorNode<F> {
 
 /// Inserted with its [`MultibandControls`] as its controls; a fork starts
 /// from the values last set through its params.
-impl<F: Float + Lanes + Lerp> IntoNode for MultibandCompressorNode<F> {
+impl<F: Float + Lanes + Lerp> IntoNode<F> for MultibandCompressorNode<F> {
     type Controls = MultibandControls;
 
-    fn into_parts(self) -> NodeParts<MultibandControls> {
+    fn into_parts(self) -> NodeParts<MultibandControls, F> {
         let reductions = self
             .rig
             .bands
@@ -672,17 +675,19 @@ impl<F: Float + Lanes + Lerp> IntoNode for MultibandCompressorNode<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{RATE, amplitude_at, mean, prepared, render_chunked, sine};
+    use crate::test_support::{
+        RATE, amplitude_at, mean, prepared, render_chunked, render_f64, sine, wide_sine,
+    };
     use core::f64::consts::PI;
-    use tutti_graph::contract::drive;
+    use tutti_graph::contract::{Direct, drive};
     use tutti_units::UnitAddr;
 
     const FS: f64 = 48_000.0;
     /// Whole periods of every 5 Hz-grid tone, and of 3 kHz (16 samples).
     const WINDOW: usize = 9_600;
     const SETTLE: usize = 24_000;
-    // The nodes under test are `f64` (the default state) over `f32` audio, so a tolerance is the
-    // `f32` output's rounding; one `f32` node has its own test below.
+    // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+    // format, so their tolerances are `f32`'s.
 
     /// Frames a 5 ms glide takes at 48 kHz.
     const GLIDE: usize = 240;
@@ -755,8 +760,8 @@ mod tests {
         }
     }
 
-    fn node(bands: usize) -> (MultibandCompressorNode<f64>, Ctl) {
-        let n = MultibandCompressorNode::<f64>::new(ChannelLayout::MONO, bands).unwrap();
+    fn node(bands: usize) -> (MultibandCompressorNode<f32>, Ctl) {
+        let n = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, bands).unwrap();
         let c = Ctl::new(&n);
         (n, c)
     }
@@ -774,7 +779,7 @@ mod tests {
     }
 
     /// A unit sine through `node`, steady-state amplitude at `hz`.
-    fn gain_at<F: Float + Lanes + Lerp>(node: &mut MultibandCompressorNode<F>, hz: f64) -> f64 {
+    fn gain_at(node: &mut MultibandCompressorNode<f32>, hz: f64) -> f64 {
         let x = sine(hz, FS, SETTLE + WINDOW);
         let out = render_chunked(node, &[x], 512);
         amplitude_at(&out[0][SETTLE..], hz, FS)
@@ -800,19 +805,25 @@ mod tests {
     }
 
     /// Unity-ratio, zero-makeup bands reproduce the crossover's sum, which is
-    /// allpass: unit magnitude at every frequency, for 2, 3 and 4 bands.
+    /// allpass: unit magnitude at every frequency, for 2, 3 and 4 bands, in an `f64` graph to
+    /// the rounding of the sections: a 4-band tree is at most 12 sections, each rounding its
+    /// state and its tap at most four times a frame at a half-ulp of `2^-53` of a value of at
+    /// most 1, with the state's gain of up to `1 / g`, `g` the prewarped integrator gain of
+    /// the lowest split (120 Hz).
     #[test]
     fn unity_ratio_reproduces_the_allpass_sum() {
+        let g = (PI * 120.0 / FS).tan();
+        let bound = 12.0 * 4.0 * 2f64.powi(-53) / g;
         for bands in 2..=4 {
-            let (n, c) = node(bands);
-            unity(&c);
-            let mut n = prepared(n);
             for i in 0..16 {
                 let hz =
                     (20.0 * (16_000.0f64 / 20.0).powf(f64::from(i) / 15.0) / 5.0).round() * 5.0;
-                n.reset();
-                let a = gain_at(&mut n, hz);
-                assert!((a - 1.0).abs() < TOL, "{bands} bands at {hz} Hz: {a}");
+                let n = MultibandCompressorNode::<f64>::new(ChannelLayout::MONO, bands).unwrap();
+                unity(&Ctl::new(&n));
+                let x = wide_sine(hz, FS, SETTLE + WINDOW);
+                let out = render_f64(n, RATE, &[&x], x.len());
+                let a = amplitude_at(&out[0][SETTLE..], hz, FS);
+                assert!((a - 1.0).abs() < bound, "{bands} bands at {hz} Hz: {a}");
             }
         }
     }
@@ -914,10 +925,13 @@ mod tests {
     }
 
     /// A bypassed band passes unreduced and without makeup; releasing the
-    /// bypass compresses again.
+    /// bypass compresses again. In an `f64` graph the bypassed sum is the input to the
+    /// rounding of the sections, and the compressed level is the curve's value to the rounding
+    /// of the gain.
     #[test]
     fn bypass_passes_the_band_unprocessed() {
-        let (n, c) = node(4);
+        let n = MultibandCompressorNode::<f64>::new(ChannelLayout::MONO, 4).unwrap();
+        let c = Ctl::new(&n);
         let b0 = c.band(0);
         b0.set_threshold(-30.0);
         b0.set_ratio(8.0);
@@ -925,20 +939,23 @@ mod tests {
         b0.set_attack(0.001);
         b0.set_release(0.001);
         b0.set_bypass(true);
-        let mut n = prepared(n);
-        let x = vec![0.5f32; SETTLE + WINDOW];
-        let out = render_chunked(&mut n, std::slice::from_ref(&x), 512);
-        assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < TOL);
-        assert_eq!(n.gain_reduction_db(0), Db::UNITY);
+        let mut d = Direct::<_, f64>::with_format(n, RATE, SETTLE + WINDOW);
+        d.inputs_mut().plane_mut(0).samples_mut().fill(0.5);
+        d.block();
+        let g = (PI * 120.0 / FS).tan();
+        let rounding = 12.0 * 4.0 * 2f64.powi(-53) / g;
+        assert!((mean(&d.output().plane(0).samples()[SETTLE..]) - 0.5).abs() < rounding);
+        assert_eq!(d.node.gain_reduction_db(0), Db::UNITY);
         b0.set_bypass(false);
-        let out = render_chunked(&mut n, &[x], 512);
+        d.block();
+        let out = [d.output().plane(0).samples().to_vec()];
         // Over -30 dB at 8:1 the 0.5 DC (-6.02 dB) is reduced by
         // `(30 - 6.02) * 7/8`, and the 6 dB makeup rides on it.
         let reduction = (30.0 + 20.0 * libm::log10(0.5)) * 7.0 / 8.0;
         let want = 0.5 * libm::pow(10.0, (6.0 - reduction) / 20.0);
         let dc = mean(&out[0][SETTLE..]);
-        assert!((dc - want).abs() < 5e-6 * want, "{dc} vs {want}");
-        let meter = n.gain_reduction_db(0).get();
+        assert!((dc - want).abs() < rounding * want, "{dc} vs {want}");
+        let meter = d.node.gain_reduction_db(0).get();
         assert!((meter - reduction).abs() < 1e-3, "{meter} vs {reduction}");
     }
 
@@ -1256,7 +1273,7 @@ mod tests {
             let (n, c) = node(3);
             let mut n = prepared(n);
             let x = sine(440.0, FS, 2_048);
-            let finite = |n: &mut MultibandCompressorNode<f64>| {
+            let finite = |n: &mut MultibandCompressorNode<f32>| {
                 render_chunked(n, std::slice::from_ref(&x), 512)[0]
                     .iter()
                     .all(|s| s.is_finite())
@@ -1561,7 +1578,7 @@ mod tests {
         let mut n = prepared(n);
         // 120 Hz is 400 samples a period: 4000 frames is ten of them.
         let x = sine(120.0, FS, 4_000);
-        let amp = |n: &mut MultibandCompressorNode<f64>| {
+        let amp = |n: &mut MultibandCompressorNode<f32>| {
             render_chunked(n, std::slice::from_ref(&x), 500);
             amplitude_at(
                 &render_chunked(n, std::slice::from_ref(&x), 500)[0],

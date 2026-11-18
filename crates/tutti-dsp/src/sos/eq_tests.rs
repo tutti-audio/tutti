@@ -35,7 +35,7 @@ fn cookbook_bell(fc: f64, q: f64, db: f64) -> Biquad {
     }
 }
 
-fn bell(fc: f64, q: f32, db: f64) -> Biquad {
+fn bell(fc: f64, q: f64, db: f64) -> Biquad {
     MatchedBell::new(Q(q), Db(db))
         .design(Hz(fc), RATE)
         .unwrap()
@@ -47,7 +47,7 @@ fn to_db(m: f64) -> f64 {
 }
 
 const CENTERS: [f64; 7] = [60.0, 250.0, 1000.0, 5000.0, 12000.0, 19200.0, 22000.0];
-const QS: [f32; 5] = [0.3, 0.707, 2.0, 8.0, 25.0];
+const QS: [f64; 5] = [0.3, 0.707, 2.0, 8.0, 25.0];
 const GAINS: [f64; 6] = [-24.0, -12.0, -3.0, 3.0, 12.0, 24.0];
 
 /// The squared analog tilt `(A^2 x^2 + 1) / (x^2 + A^2)` for `A = 10^(db / 40)`, at the
@@ -75,7 +75,7 @@ fn the_matched_bell_equals_the_analog_magnitude_at_dc_the_center_and_nyquist() {
         for q in QS {
             for db in GAINS {
                 let b = bell(fc, q, db);
-                let (fc, q, db) = (fc, f64::from(q), db);
+                let (fc, q, db) = (fc, q, db);
                 let at = |f: f64| to_db(magnitude(&b, f)) - analog_bell_db(fc, q, db, f);
                 let tag = format!("fc {fc} q {q} gain {db}");
                 assert!(at(0.0).abs() < 1e-9, "{tag} DC: {}", at(0.0));
@@ -120,7 +120,7 @@ fn the_matched_bell_stays_within_a_stated_bound_of_the_analog_one_to_0_9_nyquist
     for (fc, bound) in BOUNDS {
         for q in QS {
             for db in GAINS {
-                let worst = worst_deviation(&bell(fc, q, db), fc, q.into(), db);
+                let worst = worst_deviation(&bell(fc, q, db), fc, q, db);
                 assert!(
                     worst <= bound,
                     "fc {fc} q {q} gain {db}: {worst} dB > {bound}"
@@ -139,7 +139,7 @@ fn the_bilinear_bell_leaves_every_bound_the_matched_bell_holds() {
             .iter()
             .flat_map(|q| GAINS.iter().map(move |db| (*q, *db)))
             .map(|(q, db)| {
-                let (fc, q, db) = (fc, f64::from(q), db);
+                let (fc, q, db) = (fc, q, db);
                 worst_deviation(&cookbook_bell(fc, q, db), fc, q, db)
             })
             .fold(0.0, f64::max);
@@ -226,7 +226,7 @@ fn the_designs_refuse_what_the_rate_or_the_range_cannot_take() {
             "tilt {center}"
         );
     }
-    for q in [0.0f32, -1.0, f32::NAN, f32::INFINITY] {
+    for q in [0.0f64, -1.0, f64::NAN, f64::INFINITY] {
         let err = MatchedBell::new(Q(q), Db(6.0)).design(Hz(1000.0), RATE);
         assert!(
             matches!(err, Err(SosError::QOutOfRange { .. })),
@@ -375,7 +375,7 @@ fn frames(ring: Ring) -> usize {
 fn the_bell_ring_out_brings_the_tail_sum_under_the_floor() {
     const LEN: usize = 1 << 21;
     for fc in [90.0f64, 700.0, 4_000.0, 15_000.0] {
-        for q in [0.1f32, 0.7, 4.0, 30.0] {
+        for q in [0.1f64, 0.7, 4.0, 30.0] {
             for db in [-24.0f64, -6.0, 6.0, 24.0] {
                 let reported = frames(
                     MatchedBell::new(Q(q), Db(db))
@@ -438,7 +438,7 @@ fn the_tilt_ceiling_covers_every_tilt_in_its_ranges() {
 /// `reported`.
 #[test]
 fn a_stopped_sustained_sine_at_a_narrow_boost_rings_under_the_floor_within_the_tail() {
-    let (fc, q, db) = (20.0f64, 30.0f32, 24.0f64);
+    let (fc, q, db) = (20.0f64, 30.0f64, 24.0f64);
     let b = bell(fc, q, db);
     let reported = frames(
         MatchedBell::new(Q(q), Db(db))

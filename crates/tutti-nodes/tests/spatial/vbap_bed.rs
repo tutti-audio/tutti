@@ -71,7 +71,7 @@ fn channel_of_speaker(bed: Bed) -> Vec<usize> {
 /// The panner over `bed` with its width at zero (one gain vector), aimed and
 /// seated, rendering a block of DC: the gains, one per channel.
 fn gains(bed: Bed, azimuth: f64, elevation: f64, spread: f32) -> Vec<f32> {
-    let mut node = prepared(VbapPannerNode::new(bed).unwrap(), RATE, 16);
+    let mut node = prepared(VbapPannerNode::<f32>::new(bed).unwrap(), RATE, 16);
     let params = node.param_set();
     params.set(UnitParam::StereoWidth, 0.0);
     params.set(UnitParam::Spread, f64::from(spread));

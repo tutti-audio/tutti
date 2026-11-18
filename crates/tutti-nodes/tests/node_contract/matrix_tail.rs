@@ -129,7 +129,7 @@ fn tap(delay: usize, gain: f32) -> Vec<f32> {
 /// - the graph's render is the node's bit for bit, so the graph never skipped it while a path
 ///   still rings;
 /// - the node was called for the blocks up to the end of the ring (and so skipped after it).
-fn assert_parks_at_the_tail(node: ConvolverNode, latency: usize, tail: usize) {
+fn assert_parks_at_the_tail(node: ConvolverNode<f32>, latency: usize, tail: usize) {
     let shape = node.shape();
     let (ins, outs) = (shape.audio_in(), shape.audio_out());
     let n_in = usize::from(ins.count());
@@ -194,7 +194,7 @@ fn assert_parks_at_the_tail(node: ConvolverNode, latency: usize, tail: usize) {
 #[test]
 fn a_true_stereo_node_parks_after_its_longest_path() {
     let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
-    let node = ConvolverNode::true_stereo(
+    let node = ConvolverNode::<f32>::true_stereo(
         Mono::new(&irs[0]),
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
@@ -219,7 +219,8 @@ fn an_ambisonic_node_parks_after_its_longest_path() {
         .collect();
     let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
     let node =
-        ConvolverNode::ambisonic(foa, ChannelTopology::from(foa), &views, Samples(64)).unwrap();
+        ConvolverNode::<f32>::ambisonic(foa, ChannelTopology::from(foa), &views, Samples(64))
+            .unwrap();
     assert_parks_at_the_tail(node, 64, 300);
 }
 
@@ -236,9 +237,13 @@ fn an_ambisonic_to_stereo_node_parks_after_its_longest_path() {
         })
         .collect();
     let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
-    let node =
-        ConvolverNode::ambisonic(foa, ChannelTopology::from(Bed::Stereo), &views, Samples(64))
-            .unwrap();
+    let node = ConvolverNode::<f32>::ambisonic(
+        foa,
+        ChannelTopology::from(Bed::Stereo),
+        &views,
+        Samples(64),
+    )
+    .unwrap();
     assert_parks_at_the_tail(node, 64, 250);
 }
 
@@ -250,7 +255,7 @@ fn an_ambisonic_to_stereo_node_parks_after_its_longest_path() {
 #[test]
 fn the_node_says_silent_from_the_first_block_past_its_tail() {
     let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
-    let node = ConvolverNode::true_stereo(
+    let node = ConvolverNode::<f32>::true_stereo(
         Mono::new(&irs[0]),
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
@@ -283,7 +288,7 @@ fn the_node_says_silent_from_the_first_block_past_its_tail() {
 #[test]
 fn a_node_that_never_says_silent_is_never_skipped() {
     let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
-    let node = ConvolverNode::true_stereo(
+    let node = ConvolverNode::<f32>::true_stereo(
         Mono::new(&irs[0]),
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
@@ -378,7 +383,7 @@ fn lane() -> Vec<f32> {
 /// 1500, where `gain` moves to 0.25 (the node is parked by then), and `lane` driven on the gain
 /// port if given. A block the node answers `Silent` to is zeros, as the graph would leave it.
 fn direct(
-    node: ConvolverNode,
+    node: ConvolverNode<f32>,
     gain: &Param<Amplitude>,
     input: &[Vec<f32>],
     block: usize,
@@ -413,12 +418,12 @@ fn bits_equal(a: &[f32], b: &[f32]) -> bool {
 }
 
 /// The kinds of two-channel node the resume tests run: each at a tail of 200 and latency 64.
-type Make = fn() -> ConvolverNode;
+type Make = fn() -> ConvolverNode<f32>;
 
 fn kinds() -> Vec<(&'static str, Make)> {
-    fn true_stereo() -> ConvolverNode {
+    fn true_stereo() -> ConvolverNode<f32> {
         let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
-        ConvolverNode::true_stereo(
+        ConvolverNode::<f32>::true_stereo(
             Mono::new(&irs[0]),
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
@@ -426,15 +431,15 @@ fn kinds() -> Vec<(&'static str, Make)> {
             Samples(64),
         )
     }
-    fn dual_mono() -> ConvolverNode {
-        ConvolverNode::per_channel(
+    fn dual_mono() -> ConvolverNode<f32> {
+        ConvolverNode::<f32>::per_channel(
             &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
             Samples(64),
         )
         .unwrap()
     }
-    fn folded() -> ConvolverNode {
-        ConvolverNode::folded(
+    fn folded() -> ConvolverNode<f32> {
+        ConvolverNode::<f32>::folded(
             &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
             Samples(64),
         )
@@ -531,7 +536,7 @@ fn a_burst_after_a_parked_gap_is_a_fresh_nodes_at_any_block_size() {
 }
 
 /// `node` over `input` in one block, as a fresh node renders it.
-fn direct_once(node: ConvolverNode, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
+fn direct_once(node: ConvolverNode<f32>, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
     let mut node = prepared(node, SR, 512);
     let ins: Vec<&[f32]> = input.iter().map(|c| &c[..]).collect();
     drive(&mut node, SR, Planes::new(&ins).unwrap(), &[])
@@ -611,7 +616,7 @@ fn a_gap_of_exactly_the_tail_restarts_the_engine_and_one_less_does_not() {
         out
     };
     let node = || {
-        ConvolverNode::true_stereo(
+        ConvolverNode::<f32>::true_stereo(
             Mono::new(&irs[0]),
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
@@ -680,7 +685,7 @@ fn a_gap_of_exactly_the_tail_restarts_the_engine_and_one_less_does_not() {
 }
 
 /// `node` called on every block of `block` frames over `input`, gain at unity.
-fn direct_plain(node: ConvolverNode, input: &[Vec<f32>], block: usize) -> Vec<Vec<f32>> {
+fn direct_plain(node: ConvolverNode<f32>, input: &[Vec<f32>], block: usize) -> Vec<Vec<f32>> {
     let mut node = prepared(node, SR, block.max(128));
     let mut out: Vec<Vec<f32>> = vec![Vec::new(); usize::from(node.outputs().count())];
     let mut at = 0;

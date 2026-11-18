@@ -270,7 +270,7 @@ mod tests {
 
     /// Gain (dB) of a 0.01-amplitude sine at `f` through the node, projected
     /// on the last second of two.
-    fn gain_db(ty: LadderType, fc: f64, res: f32, f: f64) -> f64 {
+    fn gain_db(ty: LadderType, fc: f64, res: f64, f: f64) -> f64 {
         let node = LadderFilterNode::<f64>::new(ty, Hz::new(fc), Resonance::new(res));
         let n = 44100;
         let amp = 0.01;
@@ -619,7 +619,7 @@ mod tests {
                 ChannelLayout::STEREO,
                 LadderType::LP24,
                 Hz::new(1_000.0),
-                Resonance::new(RES as f32),
+                Resonance::new(RES),
             )
         };
         let change = |n: &LadderFilterNode<f32>| {
