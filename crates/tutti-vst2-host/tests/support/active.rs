@@ -10,32 +10,17 @@ use std::path::Path;
 use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_fixtures::{Whole, main_thread};
 
-use tutti_plugin_types::{
-    ChannelTable, MaxBlock, PluginError, Prepare, SampleFormat, SampleRate, Samples,
-};
+use tutti_buffers::FloatWidth;
+use tutti_plugin_types::{ChannelTable, MaxBlock, PluginError, Prepare, SampleRate, Samples};
 use tutti_vst2_host::{MidiEventVec, Vst2Error, Vst2Loaded, Vst2ProcessContext, Vst2Processor};
 
 /// The two halves of one activation.
 pub type Active = tutti_fixtures::Active<Whole<Vst2Loaded>>;
 
 /// The `Prepare` a rate, block size and width stand for, in realtime mode.
-pub fn prepare_for(rate: f64, frames: usize, double: bool) -> Prepare {
+pub fn prepare_for(rate: f64, frames: usize, width: FloatWidth) -> Prepare {
     let block = MaxBlock::new(Samples(frames)).expect("a block of at least one frame");
-    Prepare::new(SampleRate::of(rate), block).with_format(if double {
-        SampleFormat::Float64
-    } else {
-        SampleFormat::Float32
-    })
-}
-
-/// The width a plugin is told it will be processed at.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Precision {
-    /// 32-bit float.
-    #[default]
-    Single,
-    /// 64-bit float, for a plugin that declared it can.
-    Double,
+    Prepare::new(SampleRate::of(rate), block).with_format(width)
 }
 
 /// A load or an activation that did not take.
@@ -53,19 +38,16 @@ pub enum LoadError {
 pub trait ActiveExt: Sized {
     /// Loads and activates at 32-bit, in realtime mode.
     fn load(path: impl AsRef<Path>, rate: f64, frames: usize) -> Result<Self, LoadError> {
-        Self::load_with(path, prepare_for(rate, frames, false))
+        Self::load_with(path, prepare_for(rate, frames, FloatWidth::F32))
     }
-    /// Loads and activates at `precision`.
-    fn load_with_precision(
+    /// Loads and activates at `width`.
+    fn load_at_width(
         path: impl AsRef<Path>,
         rate: f64,
         frames: usize,
-        precision: Precision,
+        width: FloatWidth,
     ) -> Result<Self, LoadError> {
-        Self::load_with(
-            path,
-            prepare_for(rate, frames, precision == Precision::Double),
-        )
+        Self::load_with(path, prepare_for(rate, frames, width))
     }
     /// Loads and activates at `prepare`.
     fn load_with(path: impl AsRef<Path>, prepare: Prepare) -> Result<Self, LoadError>;

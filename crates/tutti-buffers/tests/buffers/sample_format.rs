@@ -69,3 +69,32 @@ fn the_variants_are_distinct() {
         }
     }
 }
+
+/// A float width and its sample format are the same width: the round trip holds
+/// for both arms, `Float::WIDTH` agrees with `Sample::FORMAT`, and the bytes are
+/// the type's size.
+#[test]
+fn a_float_width_round_trips_through_its_sample_format() {
+    use tutti_buffers::{Float, FloatWidth};
+    for width in [FloatWidth::F32, FloatWidth::F64] {
+        assert_eq!(FloatWidth::try_from(SampleFormat::from(width)), Ok(width));
+    }
+    assert_eq!(SampleFormat::from(<f32 as Float>::WIDTH), f32::FORMAT);
+    assert_eq!(SampleFormat::from(<f64 as Float>::WIDTH), f64::FORMAT);
+    assert_eq!(FloatWidth::F32.bytes(), 4);
+    assert_eq!(FloatWidth::F64.bytes(), 8);
+}
+
+/// An integer format is refused, and the error names it.
+#[test]
+fn an_integer_format_is_no_float_width() {
+    use tutti_buffers::{FloatWidth, NotAFloat};
+    for format in [
+        SampleFormat::I8,
+        SampleFormat::I16,
+        SampleFormat::I24,
+        SampleFormat::I32,
+    ] {
+        assert_eq!(FloatWidth::try_from(format), Err(NotAFloat(format)));
+    }
+}

@@ -11,6 +11,7 @@
 //! resulting `AudioOutput`.
 
 use crate::served::Render;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, InputOutput};
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
@@ -19,8 +20,8 @@ use tutti_plugin_types::{
     BlockStatus, ChannelTable, ChordChanges, ExpressiveContext, Features, MAX_BLOCK_CHANNELS,
     MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
     NoteExpressionTextChanges, ParameterChanges, PluginError, PluginIo, PluginResult,
-    ProcessContext, ProcessOutput, SampleFormat, Samples, ScaleChanges, TransportChange,
-    TransportInfo, WireMidi, sanitize, silence,
+    ProcessContext, ProcessOutput, Samples, ScaleChanges, TransportChange, TransportInfo, WireMidi,
+    sanitize, silence,
 };
 use tutti_rt::TallyWriter;
 use tutti_ump::Ump;
@@ -30,15 +31,15 @@ use tutti_ump::Ump;
 /// Fixed at plugin load, so the audio path reads it without synchronisation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Clock {
-    /// The format negotiated at load — `Float64` only when the host asked for it
+    /// The format negotiated at load — `F64` only when the host asked for it
     /// *and* the plugin advertised `F64_AUDIO`. Selects the scratch variant.
-    pub format: SampleFormat,
+    pub format: FloatWidth,
 }
 
 impl Default for Clock {
     fn default() -> Self {
         Self {
-            format: SampleFormat::Float32,
+            format: FloatWidth::F32,
         }
     }
 }
@@ -79,24 +80,24 @@ pub(crate) enum AudioScratch {
 impl AudioScratch {
     /// No channels: what a pipeline holds until a slab is attached.
     /// Allocates nothing.
-    pub(crate) fn empty(format: SampleFormat) -> Self {
+    pub(crate) fn empty(format: FloatWidth) -> Self {
         Self::new(format, 0, Samples(0))
     }
 
     /// Scratch in `format` for `channels` channels of `frames` frames each, in
     /// both directions. Allocates: control side.
-    pub(crate) fn new(format: SampleFormat, channels: usize, frames: Samples) -> Self {
+    pub(crate) fn new(format: FloatWidth, channels: usize, frames: Samples) -> Self {
         fn shaped<T: Default + Clone>(channels: usize, frames: Samples) -> Channels<T> {
             (0..channels)
                 .map(|_| vec![T::default(); frames.0].into_boxed_slice())
                 .collect()
         }
         match format {
-            SampleFormat::Float32 => Self::F32 {
+            FloatWidth::F64 => Self::F64 {
                 input: shaped(channels, frames),
                 output: shaped(channels, frames),
             },
-            SampleFormat::Float64 => Self::F64 {
+            FloatWidth::F32 => Self::F32 {
                 input: shaped(channels, frames),
                 output: shaped(channels, frames),
             },
@@ -105,7 +106,7 @@ impl AudioScratch {
 
     /// Scratch in `format` for the blocks `layout`'s slab holds: its widest
     /// direction, at its per-channel room. Allocates: control side.
-    pub(crate) fn for_layout(format: SampleFormat, layout: &SlabLayout) -> Self {
+    pub(crate) fn for_layout(format: FloatWidth, layout: &SlabLayout) -> Self {
         Self::new(
             format,
             layout.input_channels().max(layout.output_channels()),
@@ -283,7 +284,7 @@ impl AudioPipeline {
     /// plugin fails into `failed_blocks`. Control side.
     pub(crate) fn new(failed_blocks: TallyWriter<u64>) -> Self {
         Self {
-            scratch: Box::new(AudioScratch::empty(SampleFormat::Float32)),
+            scratch: Box::new(AudioScratch::empty(FloatWidth::F32)),
             plugin_output: Box::default(),
             status: BlockStatus::Continue,
             failed_blocks,
@@ -670,7 +671,7 @@ mod tests {
 
     /// A pipeline whose scratch is sized for `shm`'s layout in `format`, as the
     /// control side sizes the render thread's.
-    fn pipeline_for(shm: &SlabWriter, format: SampleFormat) -> AudioPipeline {
+    fn pipeline_for(shm: &SlabWriter, format: FloatWidth) -> AudioPipeline {
         let mut pipeline = AudioPipeline::new(tutti_rt::tally().writer());
         let _ =
             pipeline.install_scratch(Box::new(AudioScratch::for_layout(format, shm.layout_ref())));
@@ -683,11 +684,11 @@ mod tests {
     fn scratch_is_the_slabs_widest_direction_at_its_room_in_its_format() {
         let layout = SlabLayout::new(
             512,
-            SampleFormat::Float64,
+            FloatWidth::F64,
             vec![ChannelLayout::STEREO],
             vec![ChannelLayout::STEREO, ChannelLayout::MONO],
         );
-        let scratch = AudioScratch::for_layout(SampleFormat::Float64, &layout);
+        let scratch = AudioScratch::for_layout(FloatWidth::F64, &layout);
         let AudioScratch::F64 { input, output } = &scratch else {
             panic!("the format is f64");
         };
@@ -696,7 +697,7 @@ mod tests {
         assert!(scratch.fits(3, Samples(512)));
         assert!(!scratch.fits(4, Samples(512)), "one channel too wide");
         assert!(!scratch.fits(3, Samples(513)), "one frame too long");
-        assert!(AudioScratch::empty(SampleFormat::Float32).fits(0, Samples::ZERO));
+        assert!(AudioScratch::empty(FloatWidth::F32).fits(0, Samples::ZERO));
     }
 
     /// **A block the scratch cannot hold is refused, never sized for**: the
@@ -707,7 +708,7 @@ mod tests {
         const N: usize = 64;
         let layout = test_layout(
             N,
-            SampleFormat::Float32,
+            FloatWidth::F32,
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
@@ -807,7 +808,7 @@ mod tests {
         const N: usize = 64;
         let layout = test_layout(
             N,
-            SampleFormat::Float32,
+            FloatWidth::F32,
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
@@ -815,7 +816,7 @@ mod tests {
         let _guard =
             AudioSlab::create(format!("{name}_{}", std::process::id()), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(format!("{name}_{}", std::process::id()), layout).unwrap();
-        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = SaysPlugin {
             meta: meta(&[2], &[2]),
             fill,
@@ -889,9 +890,9 @@ mod tests {
         }
     }
 
+    use tutti_buffers::FloatWidth as SF;
     use tutti_plugin_ipc::{AudioSlab, RING_SLOTS};
     use tutti_plugin_types::PluginBus;
-    use tutti_plugin_types::SampleFormat as SF;
 
     /// A slab layout with real bus lists in both directions.
     ///
@@ -955,7 +956,7 @@ mod tests {
         // stereo main + mono sidechain in, stereo out.
         let layout = test_layout(
             N,
-            SF::Float32,
+            SF::F32,
             &[ChannelLayout::STEREO, ChannelLayout::MONO],
             &[ChannelLayout::STEREO],
         );
@@ -972,7 +973,7 @@ mod tests {
         }
         host.publish(SEQ);
 
-        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = EchoProbe {
             meta: meta(&[2, 1], &[2]),
             seen_inputs: std::cell::RefCell::new(Vec::new()),
@@ -1045,7 +1046,7 @@ mod tests {
 
         let layout = test_layout(
             N,
-            SF::Float32,
+            SF::F32,
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
@@ -1060,7 +1061,7 @@ mod tests {
             shm.write::<f32>(STALE_SEQ, ch, &[0.5f32; N]).unwrap();
         }
 
-        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = EchoProbe {
             meta: meta(&[CH], &[CH]),
             seen_inputs: std::cell::RefCell::new(Vec::new()),
@@ -1091,7 +1092,7 @@ mod tests {
         const N: usize = 64;
         let layout = test_layout(
             N,
-            SampleFormat::Float32,
+            FloatWidth::F32,
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
@@ -1099,7 +1100,7 @@ mod tests {
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = NanPlugin {
             meta: meta(&[CH], &[CH]),
             fill,
@@ -1143,7 +1144,7 @@ mod tests {
         const N: usize = 128;
         let layout = test_layout(
             N,
-            SampleFormat::Float32,
+            FloatWidth::F32,
             &[ChannelLayout::STEREO],
             &[ChannelLayout::STEREO],
         );
@@ -1151,7 +1152,7 @@ mod tests {
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = NanPlugin {
             meta: meta(&[2], &[2]),
             fill: 0.25,
@@ -1182,7 +1183,7 @@ mod tests {
     /// it proves nothing about a loader's per-block conversions. See
     /// [`process_through_the_real_vst3_loader_is_alloc_free`], which drives the
     /// same gate through a real plugin.
-    fn assert_alloc_free_at(format: SampleFormat) {
+    fn assert_alloc_free_at(format: FloatWidth) {
         const CH: usize = 2;
         const N: usize = 128;
         let layout = test_layout(
@@ -1232,13 +1233,13 @@ mod tests {
 
     #[test]
     fn process_is_alloc_free() {
-        assert_alloc_free_at(SampleFormat::Float32);
+        assert_alloc_free_at(FloatWidth::F32);
     }
 
     /// The `Float64` scratch path builds its tables without allocating either.
     #[test]
     fn process_is_alloc_free_at_float64() {
-        assert_alloc_free_at(SampleFormat::Float64);
+        assert_alloc_free_at(FloatWidth::F64);
     }
 
     /// RT-safety regression for the multi-bus split: the per-direction channel
@@ -1250,7 +1251,7 @@ mod tests {
         // stereo main in + mono sidechain in + stereo out → 5 flat channels.
         let layout = test_layout(
             N,
-            SampleFormat::Float32,
+            FloatWidth::F32,
             &[ChannelLayout::STEREO, ChannelLayout::MONO],
             &[ChannelLayout::STEREO],
         );
@@ -1258,7 +1259,7 @@ mod tests {
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let mut plugin = NanPlugin {
             meta: meta(&[2, 1], &[2]),
             fill: 0.25,
@@ -1341,7 +1342,7 @@ mod tests {
             &Load::new(),
             tutti_units::SampleRate::of(SR),
             N,
-            false,
+            FloatWidth::F32,
             None,
             &mut || {},
             tutti_plugin_types::Hand::local(),
@@ -1354,7 +1355,7 @@ mod tests {
         let loaded = plugin.loaded().clone();
         let layout = test_layout(
             N,
-            SampleFormat::Float32,
+            FloatWidth::F32,
             &loaded.input_widths(),
             &loaded.output_widths(),
         );
@@ -1363,7 +1364,7 @@ mod tests {
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, FloatWidth::F32);
         let block = || AudioBlock {
             seq: SEQ,
             num_samples: N,

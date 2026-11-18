@@ -27,7 +27,7 @@ use crate::{
     EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, ParamEdit, ParamFlags,
     ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult, PluginTail,
     Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
-    SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
+    SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edits,
 };
 use tutti_buffers::Float;
 use tutti_units::Normalized;
@@ -799,6 +799,10 @@ impl Loaded for FakeLoaded {
     type Controller = FakeController;
 
     const RESTARTS: RestartRules = RestartRules::CLAP;
+
+    fn widths(&self) -> Widths {
+        Widths::BOTH
+    }
 
     fn activate(
         self,

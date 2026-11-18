@@ -2,7 +2,7 @@
 
 use super::*;
 use tutti_au_host::AuLoaded;
-use tutti_buffers::InputOutput;
+use tutti_buffers::{FloatWidth, InputOutput};
 
 impl Served<AuLoaded> {
     /// `load_first` for the plugin `load` chooses, in
@@ -21,7 +21,7 @@ impl Served<AuLoaded> {
             load,
             SampleRate::of(rate),
             block,
-            false,
+            FloatWidth::F32,
             None,
             &mut || {},
             Hand::local(),

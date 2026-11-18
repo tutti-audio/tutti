@@ -13,31 +13,13 @@ use tutti_clap_host::{
     ClapController, ClapLoaded, ClapProcessContext, ClapProcessor, instance::ProcessOutputRef,
 };
 use tutti_fixtures::{Activation, Whole};
-use tutti_plugin_types::{
-    MainThreadMarker, MaxBlock, PluginError, Prepare, SampleFormat, SampleRate, Samples,
-};
-
-/// A sample width a suite names with a type (`Active<f32>`): test-side sugar
-/// for the processor's runtime `SampleFormat`. The host has no sample type
-/// parameter; this only picks the format value.
-pub trait Width: Float {
-    /// The format an activation at this width negotiates.
-    const PLUGIN_FORMAT: SampleFormat;
-}
-
-impl Width for f32 {
-    const PLUGIN_FORMAT: SampleFormat = SampleFormat::Float32;
-}
-
-impl Width for f64 {
-    const PLUGIN_FORMAT: SampleFormat = SampleFormat::Float64;
-}
+use tutti_plugin_types::{MainThreadMarker, MaxBlock, PluginError, Prepare, SampleRate, Samples};
 
 /// CLAP's activation at the width `T`.
 #[derive(Debug)]
 pub struct Clap<T>(PhantomData<fn() -> T>);
 
-impl<T: Width> Activation for Clap<T> {
+impl<T: Float> Activation for Clap<T> {
     type Loaded = ClapLoaded;
     type Processor = ClapProcessor;
     type Controller = ClapController;
@@ -62,15 +44,15 @@ impl<T: Width> Activation for Clap<T> {
 /// The two halves of one activation, at the width `T`.
 pub type Active<T> = tutti_fixtures::Active<Clap<T>>;
 
-fn prepare_for<T: Width>(rate: f64, frames: u32) -> Prepare {
+fn prepare_for<T: Float>(rate: f64, frames: u32) -> Prepare {
     let block = MaxBlock::new(Samples(frames as usize)).expect("a block of at least one frame");
-    Prepare::new(SampleRate::of(rate), block).with_format(T::PLUGIN_FORMAT)
+    Prepare::new(SampleRate::of(rate), block).with_format(T::WIDTH)
 }
 
 /// Activation at a rate and block size, on a loaded plugin.
 pub trait Activate {
     /// Activates as `T`; a refusal hands the plugin back with the reason.
-    fn activate_at<T: Width>(
+    fn activate_at<T: Float>(
         self,
         rate: f64,
         frames: u32,
@@ -78,7 +60,7 @@ pub trait Activate {
 }
 
 impl Activate for ClapLoaded {
-    fn activate_at<T: Width>(
+    fn activate_at<T: Float>(
         self,
         rate: f64,
         frames: u32,
@@ -90,7 +72,7 @@ impl Activate for ClapLoaded {
 
 /// What a suite calls on an [`Active`] besides the Controller: a block through
 /// the Processor at the width `T`, its counters, and the loaded plugin.
-pub trait ActiveExt<T: Width> {
+pub trait ActiveExt<T: Float> {
     /// One block through the Processor.
     fn process(
         &mut self,
@@ -137,7 +119,7 @@ pub trait ActiveExt<T: Width> {
     fn loaded_mut(&mut self) -> &mut ClapLoaded;
 }
 
-impl<T: Width> ActiveExt<T> for Active<T> {
+impl<T: Float> ActiveExt<T> for Active<T> {
     fn process(
         &mut self,
         buffer: &mut InputOutput<'_, T>,

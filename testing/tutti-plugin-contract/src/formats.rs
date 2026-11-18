@@ -168,6 +168,13 @@ impl Format for Au {
             },
         ),
         (
+            "widths_report_the_declared_precision",
+            Gap {
+                why: "an AUv2 unit has no 64-bit render: it reports 32-bit only",
+                fails_with: "declares 64-bit audio",
+            },
+        ),
+        (
             "f64_carries_same_audio",
             Gap {
                 why: "an AUv2 unit has no 64-bit render: the host narrows an f64 block to f32 \

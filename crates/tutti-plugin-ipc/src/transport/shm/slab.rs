@@ -64,9 +64,10 @@
 //! means "these are block `seq`'s samples", and torn audio cannot leak out.
 //!
 
-use crate::protocol::{BusChannels, ChannelLayout, SampleFormat, SlabLayout};
+use crate::protocol::{BusChannels, ChannelLayout, SlabLayout};
 use std::sync::Arc;
 use tutti_buffers::Float;
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MAX_BLOCK_CHANNELS;
 use tutti_plugin_types::{BridgeError, BridgeResult, SlabAccessError, SlabLayoutError};
 
@@ -308,11 +309,10 @@ impl AudioSlab {
     }
 
     /// The sample type a caller names must be the width the slab was laid out
-    /// at: the layout's stride is in `sample_size()` bytes, so a wider type
-    /// would write past its channel and a narrower one would read the wrong
-    /// samples.
+    /// at: the layout's stride is in that width's bytes, so a wider type would
+    /// write past its channel and a narrower one would read the wrong samples.
     fn check_width<T: Float>(&self) -> Result<(), SlabAccessError> {
-        if std::mem::size_of::<T>() != self.layout.sample_size() {
+        if T::WIDTH != self.layout.format {
             return Err(SlabAccessError::SampleWidth);
         }
         Ok(())
@@ -344,7 +344,7 @@ impl AudioSlab {
             Direction::Input => SLAB_HEADER_BYTES,
             Direction::Output => SLAB_HEADER_BYTES + self.layout.input_ring_bytes(),
         };
-        let stride = self.layout.samples_per_channel * self.layout.sample_size();
+        let stride = self.layout.channel_bytes();
         Ok(base + (slot_for(seq) * channels + channel) * stride)
     }
 }
@@ -442,7 +442,7 @@ impl SlabLayout {
     #[must_use]
     pub fn new(
         samples_per_channel: usize,
-        format: SampleFormat,
+        format: FloatWidth,
         inputs: BusChannels,
         outputs: BusChannels,
     ) -> Self {
@@ -506,14 +506,15 @@ fn check_layout(layout: &SlabLayout) -> Result<usize, SlabLayoutError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{ChannelLayout, SampleFormat};
+    use crate::protocol::ChannelLayout;
+    use tutti_buffers::FloatWidth;
 
     /// A real two-bus-per-direction layout. Deliberately *asymmetric* (3 in, 2
     /// out): built at base 0 with equal widths, an offset error that swapped the
     /// directions or dropped the slot term still produces matching bytes. With
     /// different widths and a non-zero output base, those mistakes cannot
     /// round-trip.
-    fn layout(samples: usize, format: SampleFormat) -> SlabLayout {
+    fn layout(samples: usize, format: FloatWidth) -> SlabLayout {
         SlabLayout {
             samples_per_channel: samples,
             format,
@@ -523,7 +524,7 @@ mod tests {
         }
     }
 
-    fn stereo_layout(samples: usize, format: SampleFormat) -> SlabLayout {
+    fn stereo_layout(samples: usize, format: FloatWidth) -> SlabLayout {
         SlabLayout {
             samples_per_channel: samples,
             format,
@@ -546,6 +547,30 @@ mod tests {
         (host, server)
     }
 
+    /// **The size a slab is mapped at and the offsets it is addressed by agree.**
+    /// The last channel of the last slot of the output ring ends exactly at
+    /// the checked size, at either width: a stride the size and the addressing
+    /// computed differently would leave a gap or run past the mapping.
+    #[test]
+    fn the_last_channel_ends_at_the_checked_size() {
+        for width in [FloatWidth::F32, FloatWidth::F64] {
+            let l = layout(64, width);
+            let host = AudioSlab::create(name("last_channel"), l.clone()).unwrap();
+            let last_slot = (RING_SLOTS - 1) as u64;
+            let last_channel = l.output_channels() - 1;
+            let end = host
+                .slab()
+                .offset_of(Direction::Output, last_slot, last_channel)
+                .unwrap()
+                + l.channel_bytes();
+            assert_eq!(
+                Some(end),
+                l.checked_byte_size_with_header(SLAB_HEADER_BYTES),
+                "{width:?}"
+            );
+        }
+    }
+
     /// **A peer cannot name a layout the render path cannot serve.** A
     /// direction past `MAX_BLOCK_CHANNELS` channels or buses, and a size that
     /// overflows `usize`, are refused by name at `create` and at `open`; the
@@ -554,15 +579,15 @@ mod tests {
     fn a_layout_past_the_served_width_or_size_is_refused_by_name() {
         let wide = |count: usize| SlabLayout {
             inputs: vec![ChannelLayout::clamped(count)],
-            ..layout(64, SampleFormat::Float32)
+            ..layout(64, FloatWidth::F32)
         };
         let many = |count: usize| SlabLayout {
             outputs: vec![ChannelLayout::MONO; count],
-            ..layout(64, SampleFormat::Float32)
+            ..layout(64, FloatWidth::F32)
         };
         let huge = SlabLayout {
             samples_per_channel: usize::MAX / 8,
-            ..layout(64, SampleFormat::Float32)
+            ..layout(64, FloatWidth::F32)
         };
         let max = MAX_BLOCK_CHANNELS;
         assert!(check_layout(&wide(max)).is_ok(), "the widest layout serves");
@@ -599,12 +624,12 @@ mod tests {
     /// both ways and touches nothing.
     #[test]
     fn a_sample_type_of_the_wrong_width_is_refused() {
-        let (mut host, _server) = pair("width32", layout(32, SampleFormat::Float32));
+        let (mut host, _server) = pair("width32", layout(32, FloatWidth::F32));
         assert!(host.write(1, 0, &[0.5f64; 32]).is_err());
         assert!(host.read_input_into(1, 0, &mut [0.0f64; 32]).is_err());
         assert!(host.write(1, 0, &[0.5f32; 32]).is_ok());
 
-        let (_host, mut wide) = pair("width64", layout(32, SampleFormat::Float64));
+        let (_host, mut wide) = pair("width64", layout(32, FloatWidth::F64));
         assert!(wide.write(1, 0, &[0.5f32; 32]).is_err());
         assert!(wide.read_output_into(1, 0, &mut [0.0f32; 32]).is_err());
         assert!(wide.write(1, 0, &[0.5f64; 32]).is_ok());
@@ -612,7 +637,7 @@ mod tests {
 
     #[test]
     fn roundtrip_f32() {
-        let (mut host, server) = pair("f32", layout(128, SampleFormat::Float32));
+        let (mut host, server) = pair("f32", layout(128, FloatWidth::F32));
 
         let data: Vec<f32> = (0..128).map(|i| i as f32 * 0.1).collect();
         host.write(1, 0, &data).unwrap();
@@ -627,7 +652,7 @@ mod tests {
 
     #[test]
     fn roundtrip_f64() {
-        let (host, mut server) = pair("f64", layout(64, SampleFormat::Float64));
+        let (host, mut server) = pair("f64", layout(64, FloatWidth::F64));
         let data: Vec<f64> = (0..64).map(|i| (i as f64).sin()).collect();
         server.write(1, 0, &data).unwrap();
         server.publish(1);
@@ -646,7 +671,7 @@ mod tests {
     /// aliased regions, the published "output" would be the input.
     #[test]
     fn the_output_region_never_aliases_the_input_region() {
-        let (mut host, mut server) = pair("alias", stereo_layout(64, SampleFormat::Float32));
+        let (mut host, mut server) = pair("alias", stereo_layout(64, FloatWidth::F32));
 
         let input: Vec<f32> = (0..64).map(|i| i as f32 + 1.0).collect();
         for ch in 0..2 {
@@ -673,7 +698,7 @@ mod tests {
     /// wrong block's.
     #[test]
     fn a_stale_slot_is_detectable_and_never_read() {
-        let (host, mut server) = pair("stale", stereo_layout(64, SampleFormat::Float32));
+        let (host, mut server) = pair("stale", stereo_layout(64, FloatWidth::F32));
 
         let old: Vec<f32> = (0..64).map(|i| i as f32 + 1.0).collect();
         server.write(1, 0, &old).unwrap();
@@ -701,7 +726,7 @@ mod tests {
     /// the recheck, through `read_region_then`'s seam.
     #[test]
     fn a_slot_republished_during_the_copy_is_discarded() {
-        let (host, mut server) = pair("torn", stereo_layout(64, SampleFormat::Float32));
+        let (host, mut server) = pair("torn", stereo_layout(64, FloatWidth::F32));
         server.write(1, 0, &[1.0f32; 64]).unwrap();
         server.publish(1);
         assert_eq!(slot_for(3), slot_for(1));
@@ -723,7 +748,7 @@ mod tests {
     /// when the copy began.
     #[test]
     fn a_block_published_during_the_copy_is_not_read() {
-        let (host, mut server) = pair("late", stereo_layout(64, SampleFormat::Float32));
+        let (host, mut server) = pair("late", stereo_layout(64, FloatWidth::F32));
         server.write(1, 0, &[1.0f32; 64]).unwrap();
         server.publish(1);
         assert_eq!(slot_for(3), slot_for(1));
@@ -742,7 +767,7 @@ mod tests {
     /// while the next is written.
     #[test]
     fn consecutive_blocks_do_not_share_a_slot() {
-        let (host, mut server) = pair("ring", stereo_layout(64, SampleFormat::Float32));
+        let (host, mut server) = pair("ring", stereo_layout(64, FloatWidth::F32));
 
         let a = vec![1.0f32; 64];
         let b = vec![2.0f32; 64];
@@ -767,7 +792,7 @@ mod tests {
     /// channel/slot transposition alike.
     #[test]
     fn every_region_is_distinct() {
-        let l = layout(16, SampleFormat::Float32);
+        let l = layout(16, FloatWidth::F32);
         let (mut host, mut server) = pair("distinct", l.clone());
 
         // Stamp each region with a unique constant, and publish each block in
@@ -814,7 +839,7 @@ mod tests {
     /// host overwrite the plugin's answer.
     #[test]
     fn create_writes_inputs_and_open_writes_outputs() {
-        let (mut host, mut server) = pair("dirs", stereo_layout(8, SampleFormat::Float32));
+        let (mut host, mut server) = pair("dirs", stereo_layout(8, FloatWidth::F32));
         host.write(1, 0, &[1.0f32; 8]).unwrap();
         host.publish(1);
         server.write(1, 0, &[2.0f32; 8]).unwrap();
@@ -829,7 +854,7 @@ mod tests {
 
     #[test]
     fn channel_out_of_bounds() {
-        let (mut host, mut server) = pair("oob", layout(64, SampleFormat::Float32));
+        let (mut host, mut server) = pair("oob", layout(64, FloatWidth::F32));
         let data = vec![0.0f32; 64];
         // 3 input channels, 2 output channels — the asymmetry matters: an index
         // valid for one direction may not be valid for the other.
@@ -842,7 +867,7 @@ mod tests {
 
     #[test]
     fn data_exceeds_capacity() {
-        let (mut host, _server) = pair("exceed", stereo_layout(32, SampleFormat::Float32));
+        let (mut host, _server) = pair("exceed", stereo_layout(32, FloatWidth::F32));
         let data = vec![0.0f32; 64];
         assert!(host.write(1, 0, &data).is_err());
     }
@@ -851,7 +876,7 @@ mod tests {
     /// It must now be rejected outright rather than reinterpreted.
     #[test]
     fn an_empty_bus_list_is_refused() {
-        let mut l = stereo_layout(64, SampleFormat::Float32);
+        let mut l = stereo_layout(64, FloatWidth::F32);
         l.inputs = Vec::new();
         assert!(AudioSlab::create(name("empty"), l).is_err());
     }
@@ -860,7 +885,7 @@ mod tests {
     /// rather than silently indexing the wrong slot.
     #[test]
     fn a_foreign_ring_depth_is_refused() {
-        let mut l = stereo_layout(64, SampleFormat::Float32);
+        let mut l = stereo_layout(64, FloatWidth::F32);
         l.slots = RING_SLOTS as u32 + 1;
         assert!(AudioSlab::create(name("depth"), l).is_err());
     }
@@ -872,7 +897,7 @@ mod tests {
     fn a_layout_too_large_to_address_is_refused() {
         // 2 slots x 2 channels x 2^62 frames: each ring's byte count wraps to
         // exactly 0, so a wrapping size would map just the header.
-        let l = stereo_layout(1 << (usize::BITS - 2), SampleFormat::Float32);
+        let l = stereo_layout(1 << (usize::BITS - 2), FloatWidth::F32);
         let create = AudioSlab::create(name("huge"), l.clone()).expect_err("must not map");
         assert!(format!("{create}").contains("overflows"), "got: {create}");
         let open = AudioSlab::open(name("huge_open"), l).expect_err("must not map");
@@ -885,7 +910,7 @@ mod tests {
     #[test]
     fn create_refuses_a_name_that_exists() {
         let n = name("exists");
-        let l = stereo_layout(8, SampleFormat::Float32);
+        let l = stereo_layout(8, FloatWidth::F32);
         let mut first = AudioSlab::create(n.clone(), l.clone()).unwrap();
         first.write(1, 0, &[3.0f32; 8]).unwrap();
         first.publish(1);
@@ -903,11 +928,11 @@ mod tests {
     /// out of bounds.
     #[test]
     fn opening_with_an_oversized_layout_is_refused() {
-        let small = stereo_layout(64, SampleFormat::Float32);
+        let small = stereo_layout(64, FloatWidth::F32);
         let n = name("short");
         let _owner = AudioSlab::create(n.clone(), small).unwrap();
 
-        let big = stereo_layout(256, SampleFormat::Float32);
+        let big = stereo_layout(256, FloatWidth::F32);
         let err = AudioSlab::open(n, big).expect_err("an oversized layout must not open");
         assert!(format!("{err}").contains("bytes"), "got: {err}");
     }
@@ -928,7 +953,7 @@ mod tests {
     fn raw_bytes_land_where_the_layout_says_they_should() {
         const SAMPLES: usize = 8;
         // 3 in / 2 out, so a swapped direction or channel count cannot alias.
-        let l = layout(SAMPLES, SampleFormat::Float32);
+        let l = layout(SAMPLES, FloatWidth::F32);
         let in_channels = l.input_channels();
         let out_channels = l.output_channels();
         assert_eq!(

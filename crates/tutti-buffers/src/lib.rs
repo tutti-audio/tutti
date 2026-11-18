@@ -84,7 +84,7 @@ pub use input_output::{BlockMut, BlockSide, InputOutput};
 pub use interleaved::{Frames, FramesMut, Interleaved, InterleavedMut};
 pub use mono::{Mono, MonoMut};
 pub use planes::{PlaneIter, PlaneIterMut, Planes, PlanesMut};
-pub use sample::{ByWidth, Float, OverFloat, Sample, SampleFormat};
+pub use sample::{ByWidth, Float, FloatWidth, NotAFloat, OverFloat, Sample, SampleFormat};
 pub use stereo::StereoPlanes;
 pub use wave::Wave;
 

@@ -82,6 +82,7 @@ macro_rules! contract {
             reopen_is_a_fresh_instance,
             corrupt_state_leaves_plugin_usable,
             halves_of_two_activations_are_stuck,
+            widths_report_the_declared_precision,
             f64_carries_same_audio,
             overflowing_log_fails_the_oracle,
             process_does_not_allocate);

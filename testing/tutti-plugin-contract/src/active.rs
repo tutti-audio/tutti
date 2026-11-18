@@ -1,11 +1,12 @@
 //! One activation, both halves held together: [`Active`] is the shared
 //! `tutti_fixtures::Active`, and [`Render`] is what a case drives it with.
 
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, InputOutput};
 use tutti_fixtures::Whole;
 use tutti_plugin_types::{
-    Loaded, MaxBlock, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor, SampleFormat,
-    SampleRate, Samples,
+    Loaded, MaxBlock, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor, SampleRate,
+    Samples,
 };
 
 /// The default rate.
@@ -22,7 +23,7 @@ const UNWRITTEN: f64 = 9.0;
 ///
 /// Panics when `block` is zero.
 #[must_use]
-pub fn prepare(rate: f64, block: usize, format: SampleFormat) -> Prepare {
+pub fn prepare(rate: f64, block: usize, format: FloatWidth) -> Prepare {
     let block = MaxBlock::new(Samples(block)).expect("a case renders at least one frame");
     Prepare::new(SampleRate::of(rate), block).with_format(format)
 }

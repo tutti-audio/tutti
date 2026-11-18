@@ -6,14 +6,13 @@ use super::Reaped;
 use crate::ProcessGuard;
 use crate::config::BridgeConfig;
 use crate::error::unexpected_message;
-use crate::protocol::{
-    BridgeMessage, HostMessage, LoadedPlugin, PluginDescriptor, SampleFormat, StagedState,
-};
+use crate::protocol::{BridgeMessage, HostMessage, LoadedPlugin, PluginDescriptor, StagedState};
 use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
 use std::path::Path;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
+use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
@@ -39,7 +38,7 @@ pub struct LaunchedServer {
     /// Engine-wiring data from instantiation (bus widths, latency, f64).
     pub loaded: LoadedPlugin,
     /// The sample format the blocks travel in.
-    pub format: SampleFormat,
+    pub format: FloatWidth,
     /// The shared-memory slab the server mapped, as the writer of its inputs:
     /// the one in this process (`SlabWriter`). Readers share
     /// [`SlabWriter::slab`].
@@ -324,7 +323,7 @@ fn load_plugin(
 ) -> BridgeResult<(
     Box<PluginDescriptor>,
     LoadedPlugin,
-    SampleFormat,
+    FloatWidth,
     Option<String>,
 )> {
     ipc::send(
@@ -411,7 +410,7 @@ fn stage_state(
 /// choice below can only be checked by launching a real plugin.
 fn slab_layout_for(
     loaded: &LoadedPlugin,
-    format: SampleFormat,
+    format: FloatWidth,
     max_buffer_size: usize,
 ) -> SlabLayout {
     // Sized to the largest chunk the node ships (`MAX_CHUNK`: one device
@@ -436,7 +435,7 @@ fn setup_shm(
     stream: &mut ControlStream,
     config: &BridgeConfig,
     loaded: &LoadedPlugin,
-    format: SampleFormat,
+    format: FloatWidth,
     shm_name: String,
 ) -> BridgeResult<SlabWriter> {
     let layout = slab_layout_for(loaded, format, config.max_buffer_size);
@@ -471,7 +470,7 @@ fn setup_shm(
 pub(crate) fn swap_slab(
     bridge: &crate::PluginBridge,
     loaded: &LoadedPlugin,
-    format: SampleFormat,
+    format: FloatWidth,
     ceiling: usize,
     held: &SlabLayout,
     unsure: bool,
@@ -927,7 +926,7 @@ mod tests {
     fn stereo_one_bus_each_direction_gets_disjoint_regions() {
         let layout = slab_layout_for(
             &loaded(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO]),
-            SampleFormat::Float32,
+            FloatWidth::F32,
             DEFAULT_MAX_BUFFER,
         );
 
@@ -953,7 +952,7 @@ mod tests {
                 &[ChannelLayout::STEREO, ChannelLayout::MONO],
                 &[ChannelLayout::STEREO],
             ),
-            SampleFormat::Float32,
+            FloatWidth::F32,
             DEFAULT_MAX_BUFFER,
         );
 
@@ -969,7 +968,7 @@ mod tests {
     fn a_direction_with_no_buses_is_one_bus_of_no_channels() {
         let layout = slab_layout_for(
             &loaded(&[], &[ChannelLayout::STEREO]),
-            SampleFormat::Float32,
+            FloatWidth::F32,
             DEFAULT_MAX_BUFFER,
         );
         assert_eq!(layout.inputs, vec![ChannelLayout::EMPTY]);
@@ -992,7 +991,7 @@ mod tests {
             ),
         ];
         for (i, l) in cases.iter().enumerate() {
-            let layout = slab_layout_for(l, SampleFormat::Float32, DEFAULT_MAX_BUFFER);
+            let layout = slab_layout_for(l, FloatWidth::F32, DEFAULT_MAX_BUFFER);
             assert!(!layout.inputs.is_empty(), "case {i}: empty input buses");
             assert!(!layout.outputs.is_empty(), "case {i}: empty output buses");
             assert_eq!(layout.slots as usize, RING_SLOTS, "case {i}");
@@ -1006,7 +1005,7 @@ mod tests {
     #[test]
     fn slab_is_sized_to_the_largest_chunk_not_the_configured_maximum() {
         let l = loaded(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO]);
-        let layout = slab_layout_for(&l, SampleFormat::Float32, DEFAULT_MAX_BUFFER);
+        let layout = slab_layout_for(&l, FloatWidth::F32, DEFAULT_MAX_BUFFER);
         assert_eq!(layout.samples_per_channel, MAX_CHUNK);
         const { assert!(MAX_CHUNK < DEFAULT_MAX_BUFFER) };
     }
@@ -1016,7 +1015,7 @@ mod tests {
     #[test]
     fn a_smaller_configured_buffer_wins() {
         let l = loaded(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO]);
-        let layout = slab_layout_for(&l, SampleFormat::Float32, 32);
+        let layout = slab_layout_for(&l, FloatWidth::F32, 32);
         assert_eq!(layout.samples_per_channel, 32);
     }
 
@@ -1025,8 +1024,8 @@ mod tests {
     #[test]
     fn f64_doubles_the_byte_size_only() {
         let l = loaded(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO]);
-        let f32_layout = slab_layout_for(&l, SampleFormat::Float32, DEFAULT_MAX_BUFFER);
-        let f64_layout = slab_layout_for(&l, SampleFormat::Float64, DEFAULT_MAX_BUFFER);
+        let f32_layout = slab_layout_for(&l, FloatWidth::F32, DEFAULT_MAX_BUFFER);
+        let f64_layout = slab_layout_for(&l, FloatWidth::F64, DEFAULT_MAX_BUFFER);
 
         assert_eq!(f64_layout.inputs, f32_layout.inputs);
         assert_eq!(

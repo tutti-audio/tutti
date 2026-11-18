@@ -118,7 +118,7 @@ fn clap_plugin() -> &'static str {
 fn test_clap_metadata() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
-    let instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, false)
+    let instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load CLAP plugin");
     let meta = instance.descriptor();
     assert!(!meta.name.is_empty(), "Plugin name should not be empty");
@@ -147,12 +147,12 @@ fn a_plugin_without_the_tail_extension_has_an_unknown_tail() {
     let path = Path::new(clap_plugin());
     {
         let _without = crate::test_utils::clap_probe_without_tail();
-        let instance =
-            ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        let instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
+            .expect("load");
         assert_eq!(instance.loaded().tail, PluginTail::Unknown);
     }
     let instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     assert_eq!(
         instance.loaded().tail,
         PluginTail::Finite(Samples(
@@ -184,7 +184,7 @@ fn the_buses_are_those_the_plugin_has_at_activation() {
         opened,
         SampleRate::SR_44K1,
         512,
-        false,
+        FloatWidth::F32,
         None,
         &mut || {},
         Hand::local(),
@@ -215,7 +215,7 @@ fn a_ports_role_is_its_main_flag_and_an_instrument_has_no_input_bus() {
         tutti_clap_test_plugin::PortLayoutMode::AsymmetricAux as u32,
     );
     let instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     let loaded = instance.loaded();
     assert_eq!(roles(&loaded.inputs), [BusRole::Main, BusRole::Aux]);
     assert_eq!(roles(&loaded.outputs), [BusRole::Main, BusRole::Aux]);
@@ -225,7 +225,7 @@ fn a_ports_role_is_its_main_flag_and_an_instrument_has_no_input_bus() {
         tutti_clap_test_plugin::PortLayoutMode::Instrument as u32,
     );
     let instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     let loaded = instance.loaded();
     assert!(loaded.inputs.is_empty(), "{:?}", loaded.inputs);
     assert_eq!(roles(&loaded.outputs), [BusRole::Main]);
@@ -256,7 +256,7 @@ fn a_plugin_that_drops_its_64_bit_flags_after_open_loads_as_32_bit() {
         opened,
         SampleRate::SR_44K1,
         512,
-        true,
+        FloatWidth::F64,
         None,
         &mut || {},
         Hand::local(),
@@ -276,7 +276,7 @@ fn a_rate_change_that_changes_the_layout_raises_io_changed() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     assert_eq!(instance.loaded().inputs.len(), 1, "fixture: one input bus");
     assert!(!instance.take_io_changed(), "nothing changed at load");
 
@@ -325,9 +325,14 @@ fn a_rate_change_that_changes_the_layout_raises_io_changed() {
 #[test]
 fn setting_the_current_sample_rate_does_not_cycle_the_plugin() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     crate::test_utils::clap_probe_reset_activation_count();
 
     instance
@@ -352,7 +357,7 @@ fn a_rate_change_that_keeps_the_layout_does_not_raise_io_changed() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     instance
         .set_sample_rate(main_thread(), SampleRate::of(48000.0))
         .expect("accepted");
@@ -371,7 +376,7 @@ fn a_deactivated_instance_renders_silence_and_tells_the_host() {
         tutti_clap_test_plugin::PORTS_64BIT_INPUTS | tutti_clap_test_plugin::PORTS_64BIT_OUTPUTS;
     let _flagged = crate::test_utils::clap_probe_ports_64bit(both);
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, true).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F64).expect("load");
     assert!(
         instance.loaded().features.contains(Features::F64_AUDIO),
         "fixture"
@@ -423,7 +428,7 @@ fn a_ports_rescan_the_plugin_asks_for_is_served() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     assert_eq!(instance.loaded().inputs.len(), 1, "fixture: one input bus");
     crate::test_utils::clap_probe_reset_activation_count();
 
@@ -468,7 +473,7 @@ fn a_served_ports_rescan_is_polled_as_io_changed() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     let _layout = crate::test_utils::clap_probe_port_layout(
         tutti_clap_test_plugin::PortLayoutMode::AsymmetricAux as u32,
     );
@@ -499,7 +504,7 @@ fn the_buses_are_announced_when_they_change_and_not_otherwise() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
     let mut plugin =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     // What the host is sent for a rescan after the plugin switches to `mode`.
     let rescan = |plugin: &mut ClapInstance, mode| {
         let _layout = crate::test_utils::clap_probe_port_layout(mode as u32);
@@ -568,7 +573,7 @@ fn a_rescan_that_changes_nothing_is_silent() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     crate::test_utils::clap_probe_reset_activation_count();
 
     let _asked = crate::test_utils::clap_probe_request_ports_rescan(RESCAN_LIST_AND_CHANNELS);
@@ -600,7 +605,7 @@ fn a_restart_the_plugin_asks_for_is_served() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     crate::test_utils::clap_probe_reset_activation_count();
 
     let _asked = crate::test_utils::clap_probe_request_restart();
@@ -632,7 +637,7 @@ fn a_rescan_that_leaves_the_instance_unable_to_run_tells_the_host() {
         tutti_clap_test_plugin::PORTS_64BIT_INPUTS | tutti_clap_test_plugin::PORTS_64BIT_OUTPUTS;
     let _flagged = crate::test_utils::clap_probe_ports_64bit(both);
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, true).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F64).expect("load");
     assert!(
         instance.loaded().features.contains(Features::F64_AUDIO),
         "fixture"
@@ -652,9 +657,14 @@ fn a_rescan_that_leaves_the_instance_unable_to_run_tells_the_host() {
 /// Loads the reference plugin and takes it past one block, so it has asked
 /// for a callback (`request_callback` from `process`).
 fn loaded_and_called_back() -> ClapInstance {
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     process_blocks(&mut instance, 1);
     instance
 }
@@ -668,9 +678,14 @@ fn loaded_and_called_back() -> ClapInstance {
 fn a_callback_the_plugin_asks_for_is_served() {
     let _lock = crate::test_utils::plugin_load_lock();
     crate::test_utils::clap_probe_thread_reset();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     // `on_main_thread` runs this one; it registers a timer.
     let _cmd =
         crate::test_utils::clap_probe_thread_command(tutti_clap_test_plugin::CMD_REGISTER_TIMER);
@@ -737,9 +752,14 @@ fn a_timer_the_plugin_registers_is_ticked() {
 #[test]
 fn a_latency_that_depends_on_the_rate_is_reread_after_a_rate_change() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     let before = instance.loaded().latency_samples;
     assert_eq!(instance.take_changes().latency, None);
 
@@ -758,9 +778,14 @@ fn a_latency_that_depends_on_the_rate_is_reread_after_a_rate_change() {
 #[test]
 fn a_restart_reports_the_latency_after_it() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     let before = instance.loaded().latency_samples;
     let _longer = crate::test_utils::clap_probe_latency_at_activation(7);
     let _asked = crate::test_utils::clap_probe_request_restart();
@@ -778,9 +803,14 @@ fn a_restart_reports_the_latency_after_it() {
 #[test]
 fn latency_changed_on_an_active_plugin_restarts_it() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     let before = instance.loaded().latency_samples;
     crate::test_utils::clap_probe_reset_activation_count();
     let _longer = crate::test_utils::clap_probe_latency_at_activation(5);
@@ -799,9 +829,14 @@ fn latency_changed_on_an_active_plugin_restarts_it() {
 fn a_latency_changed_inside_activate_is_not_restarted_for() {
     let _lock = crate::test_utils::plugin_load_lock();
     let _announces = crate::test_utils::clap_probe_latency_changed_in_activate();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     crate::test_utils::clap_probe_reset_activation_count();
 
     instance.service_requests();
@@ -870,7 +905,7 @@ fn an_all_rescan_restarts_the_plugin_and_reports_the_list() {
 fn test_clap_parameter_list() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
-    let instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, false)
+    let instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load CLAP plugin");
 
     let params = instance.parameters(main_thread());
@@ -906,7 +941,7 @@ fn test_clap_parameter_list() {
 fn clap_lists_nothing_and_still_reports_a_load_capability() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
-    let mut instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, false)
+    let mut instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load CLAP plugin");
 
     assert!(
@@ -938,7 +973,7 @@ fn clap_lists_nothing_and_still_reports_a_load_capability() {
 fn clap_refuses_an_id_that_is_not_a_path() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
-    let mut instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, false)
+    let mut instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load CLAP plugin");
 
     // And the whole path still refuses, which is what a caller sees.
@@ -949,7 +984,7 @@ fn clap_refuses_an_id_that_is_not_a_path() {
 fn test_clap_get_parameter() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
-    let instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, false)
+    let instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load CLAP plugin");
 
     let params = instance.parameters(main_thread());
@@ -1016,9 +1051,14 @@ fn process_blocks(instance: &mut ClapInstance, blocks: usize) {
 fn a_thread_pool_plugin_has_its_requests_served_here() {
     let _lock = crate::test_utils::plugin_load_lock();
     set_thread_pool_tasks(8);
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load CLAP plugin");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load CLAP plugin");
     process_blocks(&mut instance, 4);
     set_thread_pool_tasks(0);
     let cap = thread_pool_capture();
@@ -1048,9 +1088,14 @@ fn the_server_pool_takes_half_the_cores_up_to_four() {
 fn a_plugin_without_a_thread_pool_builds_no_pool() {
     let _lock = crate::test_utils::plugin_load_lock();
     set_thread_pool_tasks(0);
-    let _instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load CLAP plugin");
+    let _instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load CLAP plugin");
     assert!(THREAD_POOL.get().is_none());
 }
 
@@ -1058,7 +1103,7 @@ fn a_plugin_without_a_thread_pool_builds_no_pool() {
 fn test_clap_process_f32_silence() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
-    let mut instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, false)
+    let mut instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load CLAP plugin");
 
     let num_samples = 512;
@@ -1097,7 +1142,7 @@ fn test_clap_process_f32_silence() {
 fn test_clap_process_f32_with_note() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
-    let mut instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, false)
+    let mut instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load CLAP plugin");
     crate::test_utils::set_clap_probe_render_mode(crate::test_utils::CLAP_PROBE_RENDER_TAG_ONLY);
 
@@ -1196,8 +1241,13 @@ fn test_clap_process_f32_with_note() {
 #[test]
 fn test_reference_load() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false);
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    );
     assert!(
         instance.is_ok(),
         "Failed to load the reference plugin: {:?}",
@@ -1213,9 +1263,14 @@ fn test_reference_load() {
 #[test]
 fn test_reference_port_flags() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load the reference plugin");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load the reference plugin");
 
     let port_info = instance
         .clap_loaded()
@@ -1229,9 +1284,14 @@ fn test_reference_port_flags() {
 #[test]
 fn test_reference_process_f32_silence() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load the reference plugin");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load the reference plugin");
 
     let num_samples = 512;
     let input_data = vec![vec![0.0f32; num_samples]; 2];
@@ -1260,9 +1320,14 @@ fn test_reference_process_f32_silence() {
 #[test]
 fn test_reference_process_f32_with_note() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load the reference plugin");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load the reference plugin");
 
     let num_samples = 512;
     let note_on = [(
@@ -1307,9 +1372,14 @@ fn test_reference_process_f32_with_note() {
 #[test]
 fn test_reference_set_parameter_flush() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load the reference plugin");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load the reference plugin");
 
     let params = instance.parameters(main_thread());
     assert!(!params.is_empty(), "Need at least one parameter");
@@ -1325,9 +1395,14 @@ fn test_reference_set_parameter_flush() {
 #[test]
 fn test_clap_lifecycle_active_after_load() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
     // `load()` activates the plugin: the lifecycle is `Active`, which holds
     // a Controller, so the "active after load" guarantee is in the type.
     assert!(
@@ -1339,9 +1414,14 @@ fn test_clap_lifecycle_active_after_load() {
 #[test]
 fn test_clap_lifecycle_processing_starts_on_process() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // A freshly-activated instance has not started processing yet — that
     // happens lazily on the first `process` call (the type guarantees it is
@@ -1384,9 +1464,14 @@ fn test_clap_lifecycle_processing_starts_on_process() {
 #[test]
 fn a_lost_plugin_is_not_announced_as_a_change_of_buses() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     instance.events.clear();
     let reason = instance.absorb(
         main_thread(),
@@ -1403,9 +1488,14 @@ fn a_lost_plugin_is_not_announced_as_a_change_of_buses() {
 #[test]
 fn test_clap_take_initially_clear() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // Nothing is pending on a fresh instance.
     assert!(instance.pending_requests().is_empty());
@@ -1418,9 +1508,14 @@ fn test_clap_take_initially_clear() {
 #[test]
 fn test_clap_requests_are_taken_once() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     for request in [
         Request::Restart,
@@ -1442,9 +1537,14 @@ fn test_clap_requests_are_taken_once() {
 #[test]
 fn test_clap_take_flags() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let state = instance.clap_loaded().host_state();
     state.state_dirty.store(true, Ordering::Release);
@@ -1463,9 +1563,14 @@ fn test_clap_take_flags() {
 #[test]
 fn test_clap_param_write_is_settled_for_a_state_save() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
     let params = instance.parameters(main_thread());
     let param_id = params[0].id();
     let original = instance.normalized(main_thread(), param_id);
@@ -1506,7 +1611,13 @@ fn a_requires_process_parameter_is_not_flushed_while_processing() {
 fn a_load_with_no_block_is_refused() {
     let _lock = crate::test_utils::plugin_load_lock();
     crate::test_utils::clap_probe_reset_activation_count();
-    match ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44_100.0, 0, false) {
+    match ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44_100.0,
+        0,
+        FloatWidth::F32,
+    ) {
         Err(PluginError::Load {
             stage: LoadStage::Activation,
             reason,
@@ -1524,9 +1635,14 @@ fn a_load_with_no_block_is_refused() {
 #[test]
 fn a_refused_rate_is_rolled_back_and_the_plugin_keeps_running() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     crate::test_utils::clap_probe_reset_activation_count();
 
     let refusal = crate::test_utils::clap_probe_refuse_rate(96000.0);
@@ -1554,9 +1670,14 @@ fn a_refused_rate_is_rolled_back_and_the_plugin_keeps_running() {
 #[test]
 fn a_render_mode_toggle_does_not_cycle_the_plugin() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("load");
     crate::test_utils::clap_probe_reset_activation_count();
 
     instance.set_render_mode(main_thread(), RenderMode::Offline);
@@ -1577,9 +1698,14 @@ fn a_render_mode_toggle_does_not_cycle_the_plugin() {
 #[test]
 fn test_clap_param_set_reaches_the_next_block() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let params = instance.parameters(main_thread());
     assert!(!params.is_empty(), "Need at least one parameter");
@@ -1623,9 +1749,14 @@ fn test_clap_param_set_reaches_the_next_block() {
 #[test]
 fn test_clap_state_save_nonempty() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let state = instance
         .save_state(main_thread(), StateUse::Project)
@@ -1636,9 +1767,14 @@ fn test_clap_state_save_nonempty() {
 #[test]
 fn test_clap_state_save_load_roundtrip() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let params = instance.parameters(main_thread());
     assert!(!params.is_empty(), "Need at least one parameter");
@@ -1675,9 +1811,14 @@ fn test_clap_state_save_load_roundtrip() {
 #[test]
 fn test_clap_audio_port_enumeration() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let output_count = instance
         .clap_loaded()
@@ -1700,9 +1841,14 @@ fn test_clap_audio_port_enumeration() {
 #[test]
 fn test_clap_note_port_enumeration() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let input_count = instance.clap_loaded().note_port_count(main_thread(), true);
     assert!(
@@ -1724,9 +1870,14 @@ fn test_clap_note_port_enumeration() {
 #[test]
 fn test_clap_latency_and_tail() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // Just verify no crash — values depend on plugin
     let _latency = instance.clap_loaded().latency_samples(main_thread());
@@ -1738,9 +1889,14 @@ fn test_clap_latency_and_tail() {
 #[test]
 fn test_clap_process_with_param_automation() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let params = instance.parameters(main_thread());
     assert!(!params.is_empty());
@@ -1776,9 +1932,14 @@ fn test_clap_process_with_param_automation() {
 #[test]
 fn test_clap_process_with_note_expression() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let note_on = [(
         tutti_graph::Offset::ZERO,
@@ -1821,9 +1982,14 @@ fn test_clap_process_with_note_expression() {
 #[test]
 fn test_clap_process_with_transport() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
@@ -1858,9 +2024,14 @@ fn test_clap_process_with_transport() {
 #[test]
 fn test_reference_state_save_load() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load the reference plugin");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load the reference plugin");
 
     let params = instance.parameters(main_thread());
     assert!(!params.is_empty());
@@ -1896,9 +2067,14 @@ fn test_reference_state_save_load() {
 #[test]
 fn test_reference_audio_ports() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load the reference plugin");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load the reference plugin");
 
     let output_count = instance
         .clap_loaded()
@@ -1922,9 +2098,14 @@ fn test_reference_audio_ports() {
 #[test]
 fn test_reference_latency_tail() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load the reference plugin");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load the reference plugin");
 
     let _latency = instance.clap_loaded().latency_samples(main_thread());
     let _tail = instance.clap_loaded().tail_samples(main_thread());
@@ -1945,9 +2126,14 @@ fn test_reference_latency_tail() {
 #[test]
 fn test_clap_has_gui() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
     assert_eq!(
         instance.descriptor().editor,
         EditorPresence::Absent,
@@ -1963,9 +2149,14 @@ fn test_clap_has_gui() {
 #[test]
 fn a_plugin_with_the_render_extension_takes_the_mode_live() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
     let loaded = instance.loaded_mut_unwrapped();
     assert_eq!(
         loaded.render_mode_support(main_thread()),
@@ -1984,9 +2175,14 @@ fn a_plugin_with_the_render_extension_takes_the_mode_live() {
 #[test]
 fn test_clap_has_hard_realtime_requirement() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // Most synths don't have hard RT requirements
     let _has_rt = instance
@@ -1999,9 +2195,14 @@ fn test_clap_has_hard_realtime_requirement() {
 #[test]
 fn test_clap_voice_info() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // Voice info is optional.
     if let Some(info) = instance.clap_loaded().voice_info(main_thread()) {
@@ -2013,9 +2214,14 @@ fn test_clap_voice_info() {
 #[test]
 fn test_reference_voice_info() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load the reference plugin");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load the reference plugin");
 
     if let Some(info) = instance.clap_loaded().voice_info(main_thread()) {
         assert!(
@@ -2034,9 +2240,14 @@ fn test_reference_voice_info() {
 #[test]
 fn test_clap_note_names() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     let count = instance.clap_loaded().note_name_count(main_thread());
     // Iterate whatever's there — may be 0 for synths without custom note names
@@ -2056,9 +2267,14 @@ fn test_clap_note_names() {
 #[test]
 fn test_clap_sample_rate_change() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // Change sample rate — this deactivates, updates, and requires reactivation
     instance
@@ -2092,9 +2308,14 @@ fn test_clap_sample_rate_change() {
 #[test]
 fn test_clap_sample_rate_cycle_multiple() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // Cycle through several sample rates
     for &rate in &[48000.0, 96000.0, 44100.0, 22050.0] {
@@ -2131,9 +2352,14 @@ fn test_clap_sample_rate_cycle_multiple() {
 #[test]
 fn test_clap_state_context_support() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // Just query — may or may not be supported
     let _supports = instance.clap_loaded().supports_state_context();
@@ -2142,9 +2368,14 @@ fn test_clap_state_context_support() {
 #[test]
 fn test_clap_state_context_save_load() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // Save with ForProject context (falls back to regular save if unsupported)
     let saved = instance
@@ -2167,9 +2398,14 @@ fn test_clap_state_context_save_load() {
 #[test]
 fn test_clap_state_context_for_duplicate() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut instance =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("Failed to load");
+    let mut instance = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("Failed to load");
 
     // ForDuplicate context — used when duplicating a plugin instance
     let saved = instance
@@ -2201,7 +2437,7 @@ fn a_tail_change_without_the_extension_is_an_unknown_tail() {
             Path::new(crate::test_utils::clap_probe_path()),
             44100.0,
             512,
-            false,
+            FloatWidth::F32,
         )
         .expect("failed to load the CLAP test plugin")
     };
@@ -2234,9 +2470,14 @@ fn a_tail_change_without_the_extension_is_an_unknown_tail() {
 #[test]
 fn a_clap_tail_change_reaches_the_event_list() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let mut plugin =
-        ClapInstance::load_first(main_thread(), Path::new(clap_plugin()), 44100.0, 512, false)
-            .expect("failed to load the CLAP test plugin");
+    let mut plugin = ClapInstance::load_first(
+        main_thread(),
+        Path::new(clap_plugin()),
+        44100.0,
+        512,
+        FloatWidth::F32,
+    )
+    .expect("failed to load the CLAP test plugin");
 
     // Nothing pending: the drain must be empty, or the assertions below
     // would pass on a stuck flag rather than on the one raised here.
@@ -2285,7 +2526,7 @@ fn a_transport_request_is_sent_to_the_host_in_the_order_made() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     let probe = crate::test_utils::clap();
     probe.hostext_reset();
     instance.events.clear();
@@ -2330,7 +2571,7 @@ fn the_track_the_host_sends_reaches_the_served_plugin() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(clap_plugin());
     let mut instance =
-        ClapInstance::load_first(main_thread(), path, 44100.0, 512, false).expect("load");
+        ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     let probe = crate::test_utils::clap();
     probe.hostext_reset();
 

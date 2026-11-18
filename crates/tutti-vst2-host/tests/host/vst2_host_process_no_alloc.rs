@@ -18,6 +18,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
+use tutti_buffers::FloatWidth;
 use tutti_fixtures::main_thread;
 use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
@@ -68,11 +69,11 @@ fn load_probe_inner(declares_f64: bool) -> (Active, PathBuf) {
     }
     // Told 64-bit when the probe declares it: this file gates the native f64 path.
     let precision = if declares_f64 {
-        active::Precision::Double
+        FloatWidth::F64
     } else {
-        active::Precision::Single
+        FloatWidth::F32
     };
-    let instance = Active::load_with_precision(&path, SAMPLE_RATE, BLOCK, precision)
+    let instance = Active::load_at_width(&path, SAMPLE_RATE, BLOCK, precision)
         .unwrap_or_else(|e| panic!("host failed to load reference plugin at {path:?}: {e:?}"));
     // The AEffect is built; clearing keeps the variable from outliving this load.
     // SAFETY: as above.
@@ -354,8 +355,11 @@ fn a_rejoin_suspends_once_and_an_activation_resumes_once() {
         1,
         "a load does not resume"
     );
-    let inst = Active::activate(loaded, active::prepare_for(96_000.0, BLOCK, false))
-        .expect("the probe activates");
+    let inst = Active::activate(
+        loaded,
+        active::prepare_for(96_000.0, BLOCK, FloatWidth::F32),
+    )
+    .expect("the probe activates");
     let cap = read_capture(&path);
     assert_eq!(cap.resume_count, 2);
     assert_eq!(
@@ -379,8 +383,11 @@ fn a_prepare_with_no_block_cannot_be_built() {
 
     assert!(MaxBlock::new(Samples(0)).is_none(), "no frames is no block");
 
-    let inst = Active::activate(loaded, active::prepare_for(SAMPLE_RATE, BLOCK, false))
-        .expect("the same plugin activates at a valid rate");
+    let inst = Active::activate(
+        loaded,
+        active::prepare_for(SAMPLE_RATE, BLOCK, FloatWidth::F32),
+    )
+    .expect("the same plugin activates at a valid rate");
     assert_eq!(read_capture(&path).resume_count, 1);
     assert!(inst.loaded().is_active());
 }

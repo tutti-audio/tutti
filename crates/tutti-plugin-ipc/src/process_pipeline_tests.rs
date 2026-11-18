@@ -36,11 +36,10 @@ use crate::unique_socket_path;
 use crate::{AudioSlab, Chunks, FATES, RING_SLOTS, SlabWriter};
 use crate::{BridgeMessage, HostMessage, PROTOCOL_VERSION, SlabLayout};
 use std::sync::Arc;
+use tutti_buffers::FloatWidth;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_fixtures::midi;
-use tutti_plugin_types::{
-    BlockStatus, ChannelLayout, ChannelTable, ChunkCounters, MidiEventVec, SampleFormat,
-};
+use tutti_plugin_types::{BlockStatus, ChannelLayout, ChannelTable, ChunkCounters, MidiEventVec};
 use tutti_ump::MidiChannel;
 use tutti_units::{SampleRate, Samples};
 
@@ -192,7 +191,7 @@ fn try_send_bridge_msg(
 fn stereo_layout() -> SlabLayout {
     SlabLayout {
         samples_per_channel: BATCH_SIZE,
-        format: SampleFormat::Float32,
+        format: FloatWidth::F32,
         slots: RING_SLOTS as u32,
         inputs: vec![ChannelLayout::STEREO],
         outputs: vec![ChannelLayout::STEREO],
@@ -397,7 +396,7 @@ fn a_sidechain_port_reaches_the_plugin() {
     };
     let (bridge, _thread, _server, slab) = bridge_with_server(layout, None, |out| [2, 0][out]);
     let host_slab = Arc::clone(slab.slab());
-    let mut batcher = Batcher::new(3, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(3, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
     let main = vec![1.0f32; BATCH_SIZE];
     let side = vec![5.0f32; BATCH_SIZE];
     let mut out = Planar::new();
@@ -455,7 +454,7 @@ fn drive_blocks_with_gap(blocks: usize, gap: std::time::Duration) -> Vec<Vec<Vec
         "both directions must have their own region"
     );
     let host_slab = Arc::clone(slab.slab());
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
 
     let mut midi_out = MidiEventVec::new();
     let mut input = Planar::new();
@@ -709,7 +708,7 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
 
     let (bridge, mut bridge_thread, slab) = bridge_with_no_server();
     let host_slab = Arc::clone(slab.slab());
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
 
     // The premise, asserted rather than assumed: if the ring depth changes and
     // these stop sharing a slot, the decoy lands somewhere harmless and the
@@ -875,7 +874,7 @@ fn a_stalled_but_live_server_does_not_allocate_on_the_audio_thread() {
     // Never released: the server holds every reply while the blocks are driven.
     let (_permits, stall) = stalled();
     let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_stall(stall);
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
 
     let mut input = Planar::new();
     let mut output = Planar::new();
@@ -911,7 +910,7 @@ fn the_chunk_counters_report_misses_and_answers() {
     let counters = Arc::new(ChunkCounters::default());
     let answered_in = Arc::clone(slab.slab());
     counters.attach(move |seq| answered_in.has_output(seq));
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
 
     let mut input = Planar::new();
@@ -960,7 +959,7 @@ fn a_chunk_published_after_its_miss_is_counted_late() {
     let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_stall(stall);
     let counters = Arc::new(ChunkCounters::default());
     let host_slab = Arc::clone(slab.slab());
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
     let input = Planar::new();
     let mut output = Planar::new();
@@ -991,7 +990,7 @@ fn a_chunk_never_published_is_missed_and_never_late() {
     let (_permits, stall) = stalled();
     let (bridge, mut bridge_thread, _server, slab) = bridge_with_server_stall(stall);
     let counters = Arc::new(ChunkCounters::default());
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
     let input = Planar::new();
     let mut output = Planar::new();
@@ -1044,7 +1043,7 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     );
     let counters = counters_on(&bridge);
     let host_slab = Arc::clone(slab.slab());
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
     let input = Planar::new();
     let mut output = Planar::new();
@@ -1094,7 +1093,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
     let (bridge, mut bridge_thread, _server, slab) =
         bridge_with_server_mode(stereo_layout(), None, |out| out, true, None);
     let counters = counters_on(&bridge);
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab)
         .with_counters(Arc::clone(&counters));
     let input = Planar::new();
     let mut output = Planar::new();
@@ -1121,7 +1120,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
 #[test]
 fn silence_on_a_missing_reply_does_not_allocate() {
     let (bridge, mut bridge_thread, slab) = bridge_with_no_server();
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
 
     let mut input = Planar::new();
     let mut output = Planar::new();
@@ -1172,7 +1171,7 @@ fn silence_on_a_missing_reply_does_not_allocate() {
 #[test]
 fn silence_on_a_crashed_bridge_does_not_allocate() {
     let (bridge, mut bridge_thread, slab) = bridge_with_no_server();
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
 
     let mut input = Planar::new();
     let mut output = Planar::new();
@@ -1249,7 +1248,7 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
     let (permits, stall) = stalled();
     let (bridge, _bridge_thread, _server, slab) = bridge_with_server_stall(stall);
     let host_slab = Arc::clone(slab.slab());
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
 
     let mut input = Planar::new();
     let mut output = Planar::new();
@@ -1325,7 +1324,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     let (permits, stall) = stalled();
     let (bridge, _bridge_thread, _server, slab) = bridge_with_first_block_stalled(stall);
     let host_slab = Arc::clone(slab.slab());
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
 
     let mut input = Planar::new();
     let mut output = Planar::new();
@@ -1605,7 +1604,7 @@ fn a_blocks_status_reaches_the_host_with_its_chunk() {
     // test is about.
     let (bridge, _thread, _server, slab) =
         stamped_server(None, true, SampleRate::new(4_000.0).unwrap());
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
     let silence = vec![0.0f32; BATCH_SIZE];
     let mut out = Planar::new();
     let mut host = StatusProbe::default();
@@ -1695,7 +1694,7 @@ impl crate::Chunks for LossProbe {
 fn an_unstaged_chunk_reports_its_midi_lost() {
     let _lock = machine_lock();
     let (bridge, _thread, _server, slab) = bridge_with_doubling_server();
-    let mut batcher = Batcher::new(3, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(3, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
     let silence = vec![0.0f32; BATCH_SIZE];
     let mut out = Planar::new();
     let mut host = LossProbe {
@@ -1740,7 +1739,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
     )
     .unwrap();
     wait_for(&bridge, "never crashed", || bridge.is_crashed());
-    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab);
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
     let input = Planar::new();
     let mut out = Planar::new();
     let mut host = LossProbe {
