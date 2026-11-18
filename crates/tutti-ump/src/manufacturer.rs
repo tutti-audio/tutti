@@ -57,9 +57,9 @@ impl ManufacturerId {
     /// here.
     pub const MIDI2_NON_COMMERCIAL: Self = Self(0x007C);
     /// Universal System Exclusive, Non-Real Time: `0x007E`.
-    pub const UNIVERSAL_NON_REAL_TIME: Self = Self(0x007E);
+    pub const UNIVERSAL_NON_REAL_TIME: Self = Self(crate::UNIVERSAL_NON_REAL_TIME as u16);
     /// Universal System Exclusive, Real Time: `0x007F`.
-    pub const UNIVERSAL_REAL_TIME: Self = Self(0x007F);
+    pub const UNIVERSAL_REAL_TIME: Self = Self(crate::UNIVERSAL_REAL_TIME as u16);
 
     /// The id of the word `raw`, or `None` if it is neither form or is one of
     /// the two reserved zero ids.

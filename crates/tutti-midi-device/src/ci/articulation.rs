@@ -228,6 +228,7 @@ impl TryFrom<&DetailsData> for ArticulationDetails {
                 got: bytes.len(),
             });
         }
+        // The bytes are 7-bit: `DetailsData::new` refused any other.
         let bits = U14::from_halves(U7::masked(bytes[1]), U7::masked(bytes[0])).get();
         if bits & ArticulationFeatures::RESERVED != 0 {
             return Err(ArticulationDetailsError::ReservedFeatures(

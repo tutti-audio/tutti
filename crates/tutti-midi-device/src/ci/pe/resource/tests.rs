@@ -1141,6 +1141,25 @@ fn a_received_entry_is_taken_where_a_built_one_is_refused() {
         ResourceEntry::builder(custom("X-NoSchema")).build(),
         Err(EntryError::SchemaIncomplete(_))
     ));
+    // A schema is the sender's to complete, and a standard Resource's entry in
+    // M2-107's example carries one.
+    assert!(from_json(r#"{"resource":"X-A","schema":{"title":"A"}}"#).is_ok());
+    assert!(
+        from_json(r#"{"resource":"ProgramList","schema":{"type":"array","title":"Program List"}}"#)
+            .is_ok()
+    );
+    assert!(matches!(
+        ResourceEntry::builder(custom("X-A"))
+            .schema(json(r#"{"title":"A"}"#))
+            .build(),
+        Err(EntryError::SchemaIncomplete(_))
+    ));
+    assert!(matches!(
+        ResourceEntry::builder(PeResource::ProgramList)
+            .schema(json(r#"{"type":"array","title":"Program List"}"#))
+            .build(),
+        Err(EntryError::NotOverridable { .. })
+    ));
     assert!(from_json(r#"{"resource":"ResourceList"}"#).is_ok());
     assert_eq!(
         ResourceEntry::builder(PeResource::ResourceList).build(),

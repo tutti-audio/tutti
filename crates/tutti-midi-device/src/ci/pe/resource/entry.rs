@@ -401,12 +401,13 @@ impl ResourceEntryBuilder {
             ));
         }
         entry.checked()?;
+        entry.schema_authored()?;
         Ok(entry)
     }
 
-    /// As [`build`](Self::build), for an entry a peer sent: a manufacturer-specific
-    /// Resource without a schema is taken as it is, and a refusal names the
-    /// property it is of.
+    /// As [`build`](Self::build), for an entry a peer sent: the schema rules bind
+    /// the sender, so any schema is taken (a manufacturer-specific Resource
+    /// without one too), and a refusal names the property it is of.
     pub(super) fn build_received(self) -> Result<ResourceEntry, (EntryError, &'static str)> {
         match self.0.checked() {
             Ok(()) => Ok(self.0),
@@ -452,6 +453,28 @@ impl ResourceEntry {
         }
     }
 
+    /// What an author of an entry owes its schema (M2-103 §14.3, §14.4): none on a
+    /// Resource a specification defines, and on any other at least a `title` and
+    /// a `type`. A received entry takes whatever schema its peer sent.
+    fn schema_authored(&self) -> Result<(), EntryError> {
+        let Some(schema) = &self.schema else {
+            return Ok(());
+        };
+        if !self.resource.is_overridable() {
+            return Err(self.refuse_override("schema"));
+        }
+        let member = |name| schema.as_object().and_then(|o| o.get(name));
+        let complete = member("title").and_then(PeJson::as_str).is_some()
+            && member("type").is_some_and(|t| t.as_str().is_some() || t.as_array().is_some());
+        if complete {
+            Ok(())
+        } else {
+            Err(EntryError::SchemaIncomplete(
+                self.resource.as_str().to_owned(),
+            ))
+        }
+    }
+
     fn checked(&self) -> Result<(), EntryError> {
         let d = self.resource.defaults();
         if !self.resource.is_overridable() {
@@ -460,7 +483,6 @@ impl ResourceEntry {
                 ("canSet", self.can_set != d.can_set),
                 ("requireResId", self.require_res_id != d.require_res_id),
                 ("canPaginate", self.can_paginate != d.can_paginate),
-                ("schema", self.schema.is_some()),
             ];
             if let Some((property, _)) = differs.into_iter().find(|(_, differs)| *differs) {
                 return Err(self.refuse_override(property));
@@ -468,16 +490,6 @@ impl ResourceEntry {
         }
         if (self.can_paginate || !self.columns.is_empty()) && !self.resource.is_list() {
             return Err(EntryError::NotAList(self.resource.as_str().to_owned()));
-        }
-        if let Some(schema) = &self.schema {
-            let member = |name| schema.as_object().and_then(|o| o.get(name));
-            let complete = member("title").and_then(PeJson::as_str).is_some()
-                && member("type").is_some_and(|t| t.as_str().is_some() || t.as_array().is_some());
-            if !complete {
-                return Err(EntryError::SchemaIncomplete(
-                    self.resource.as_str().to_owned(),
-                ));
-            }
         }
         if (self.fc_on_get && !self.can_get) || (self.fc_on_set && self.can_set == CanSet::None) {
             return Err(EntryError::FlowControlWithoutTransaction(
