@@ -49,9 +49,9 @@ impl RingModConfig {
 /// # Panics
 ///
 /// `RingModNode::from` panics past 16 channels, where the node's shape is built: a ring modulator is one bus.
-pub type RingModNode = KernelNode<RingModKernel>;
+pub type RingModNode<F> = KernelNode<RingModKernel<F>>;
 
-impl From<RingModConfig> for RingModNode {
+impl<F: Float> From<RingModConfig> for RingModNode<F> {
     fn from(config: RingModConfig) -> Self {
         Self::with_kernel(
             RingModKernel::new(config.width),
@@ -77,22 +77,25 @@ control_set! {
 
 /// The ring modulator as a [`Kernel`]: a [`RingModulator`] at the prepared rate.
 #[derive(Clone, Debug)]
-pub struct RingModKernel {
+pub struct RingModKernel<F: Float> {
     width: ChannelLayout,
     modulator: RingModulator,
+    float: core::marker::PhantomData<fn() -> F>,
 }
 
-impl RingModKernel {
+impl<F: Float> RingModKernel<F> {
     /// A modulator at a placeholder rate: an unprepared node renders nothing.
     fn new(width: ChannelLayout) -> Self {
         Self {
             width,
             modulator: RingModulator::new(SampleRate::SR_48K),
+            float: core::marker::PhantomData,
         }
     }
 }
 
-impl Kernel for RingModKernel {
+impl<F: Float> Kernel for RingModKernel<F> {
+    type Float = F;
     type Set = RingModSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -116,11 +119,11 @@ impl Kernel for RingModKernel {
         self.modulator.aim(controls);
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.modulator.process(input, output);
     }
@@ -163,7 +166,7 @@ mod tests {
     /// An empty layout is taken as mono.
     #[test]
     fn an_empty_layout_is_mono() {
-        let n = RingModNode::from(RingModConfig::new(ChannelLayout::EMPTY));
+        let n = RingModNode::<f32>::from(RingModConfig::new(ChannelLayout::EMPTY));
         assert_eq!(n.shape().audio_in().count(), 1);
     }
 }

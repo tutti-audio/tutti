@@ -32,11 +32,11 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// room. The node narrows it each block to what the controls in force ring, and once the
 /// input has been silent for that long it cuts the room off and parks ([`KernelNode`]).
 ///
-/// `F` is the state precision of the combs and all-passes, `f64` by default; the lines hold
+/// `F` is the float of the graph it runs in, and of the combs and all-passes; the lines hold
 /// Freeverb's tunings scaled to the rate (about 24,000 frames a channel at 44.1 kHz in all), so
-/// `FreeverbNode::<f32>` halves the memory. The General MIDI send is an `f32` node in the
-/// session.
-pub type FreeverbNode<F = f64> = KernelNode<FreeverbKernel<F>>;
+/// an `f32` graph halves the memory of an `f64` one. The General MIDI send is an `f32` node in
+/// the session.
+pub type FreeverbNode<F> = KernelNode<FreeverbKernel<F>>;
 
 impl<F: Float + Lerp> FreeverbNode<F> {
     /// A reverb whose room size and damping are cells, starting at `controls`. It has no rate
@@ -103,7 +103,7 @@ struct Running<F: Float> {
 /// Freeverb as a [`Kernel`]: a [`FreeverbBank`] sized at the prepared rate and the glides its
 /// controls are aimed through.
 ///
-/// The bank's state is `F`; a block of another sample format is converted at the edges.
+/// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
 pub struct FreeverbKernel<F: Float> {
     /// The one room of a send that has no cells: its tail is this room's exactly.
@@ -127,6 +127,7 @@ impl<F: Float + Lerp> FreeverbKernel<F> {
 }
 
 impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
+    type Float = F;
     type Set = FreeverbSet;
 
     /// A cell that moves reaches the render at a chunk's start, wherever the blocks fall.
@@ -167,11 +168,11 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(r) = &mut self.running {
             r.bank.process(&mut r.glides, input, output);

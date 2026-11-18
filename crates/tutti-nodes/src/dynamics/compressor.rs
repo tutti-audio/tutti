@@ -72,10 +72,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// the values last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares
 /// it at the device rate before its first block.
 ///
-/// `F` is the state precision of the detector, the gain and the key filter, `f64` by default:
-/// an `f64` graph runs them in `f64`, and a view of the other sample format is converted at
-/// the edges.
-pub type CompressorNode<F = f64> = KernelNode<CompressorKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the detector, the gain and the key filter.
+pub type CompressorNode<F> = KernelNode<CompressorKernel<F>>;
 
 impl<F: Float + Lanes + Lerp> CompressorNode<F> {
     /// A compressor on the bus `input`, its detector on `key`, running at `controls`.
@@ -223,6 +221,7 @@ impl<F: Float + Lanes + Lerp> CompressorKernel<F> {
 }
 
 impl<F: Float + Lanes + Lerp> Kernel for CompressorKernel<F> {
+    type Float = F;
     type Set = CompressorSet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -262,21 +261,21 @@ impl<F: Float + Lanes + Lerp> Kernel for CompressorKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        lanes: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.render_keyed(input, input, lanes, output);
     }
 
-    fn render_keyed<S: Float>(
+    fn render_keyed(
         &mut self,
-        input: Planes<'_, S>,
-        key: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        key: Planes<'_, F>,
+        lanes: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         let lanes = CompressorLanes {
             threshold: lanes.get(CompressorSet::THRESHOLD_LANE),

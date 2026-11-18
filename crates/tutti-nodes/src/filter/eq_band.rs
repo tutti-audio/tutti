@@ -20,9 +20,9 @@ use tutti_dsp::{Lanes, SvfControls, SvfType};
 /// (`Graph::set_mode`), the graph's for every node: a crossfade of
 /// [`DECLICK`](tutti_graph::DECLICK), bit-exact once it is over.
 ///
-/// `F` is the internal state precision; defaults to `f64`.
+/// `F` is the float of the graph it runs in.
 #[derive(Clone, Debug)]
-pub struct EqBandNode<F: Float + Lanes = f64> {
+pub struct EqBandNode<F: Float + Lanes> {
     svf: SvfFilterNode<F>,
 }
 
@@ -54,7 +54,7 @@ impl<F: Float + Lanes> EqBandNode<F> {
     }
 }
 
-impl<F: Float + Lanes> Node for EqBandNode<F> {
+impl<F: Float + Lanes> Node<F> for EqBandNode<F> {
     /// Mono in and out. Unlike the bare filter it declares no modulatable
     /// params: a band is set, not swept.
     /// Its tail is the inner filter's: [`Tail::Unknown`](tutti_units::Tail::Unknown).
@@ -68,16 +68,16 @@ impl<F: Float + Lanes> Node for EqBandNode<F> {
         self.svf.prepare(p);
     }
 
-    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, io: Io<'_, F>) -> Status {
         self.svf.process(cx, io)
     }
 
     fn reset(&mut self) {
-        Node::reset(&mut self.svf);
+        Node::<F>::reset(&mut self.svf);
     }
 }
 
-impl<F: Float + Lanes> ParamNode for EqBandNode<F> {
+impl<F: Float + Lanes> ParamNode<F> for EqBandNode<F> {
     /// The inner filter's: cutoff, Q and gain.
     fn param_set(&self) -> ParamSet {
         self.svf.param_set()
@@ -100,10 +100,10 @@ where
 
 /// Inserted as the inner filter is: its [`ParamSet`] as its controls, and a
 /// fork from the values last set through it.
-impl<F: Float + Lanes> IntoNode for EqBandNode<F> {
+impl<F: Float + Lanes> IntoNode<F> for EqBandNode<F> {
     type Controls = ParamSet;
 
-    fn into_parts(self) -> NodeParts<ParamSet> {
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
         tutti_graph::param_parts(self)
     }
 }
@@ -117,7 +117,7 @@ mod tests {
     use tutti_units::SampleRate;
 
     /// `eq`, prepared at 44.1 kHz, over `input` in one block.
-    fn render<F: Float + Lanes>(eq: EqBandNode<F>, input: &[f32]) -> Vec<f32> {
+    fn render(eq: EqBandNode<f32>, input: &[f32]) -> Vec<f32> {
         let rate = SampleRate::SR_44K1;
         let mut eq = prepared(eq, rate, input.len());
         drive(&mut eq, rate, Planes::new(&[input]).unwrap(), &[]).remove(0)
@@ -127,7 +127,7 @@ mod tests {
     /// authored values and shares none of them.
     #[test]
     fn a_fork_severs_the_inner_filters_cells() {
-        assert_param_fork(EqBandNode::<f64>::new(
+        assert_param_fork(EqBandNode::<f32>::new(
             SvfType::Bell,
             Hz::new(1000.0),
             Q::new(1.0),
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn the_band_rings_on_as_its_filter_does() {
         let band =
-            EqBandNode::<f64>::new(SvfType::Bell, Hz::new(1000.0), Q::new(8.0), Db::new(12.0));
+            EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1000.0), Q::new(8.0), Db::new(12.0));
         assert_eq!(band.shape().tail, tutti_units::Tail::Unknown);
     }
 
@@ -160,7 +160,7 @@ mod tests {
     fn test_eq_band_bell_boost() {
         let sine = generate_sine(1000.0, 44100.0, 4096);
         let out = render(
-            EqBandNode::<f64>::new(SvfType::Bell, Hz::new(1000.0), Q::new(1.0), Db::new(12.0)),
+            EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1000.0), Q::new(1.0), Db::new(12.0)),
             &sine,
         );
         let rms_in = rms(&sine[512..]);
@@ -175,7 +175,7 @@ mod tests {
     fn test_eq_band_filter_type_change() {
         let high = generate_sine(5000.0, 44100.0, 2048);
         let out_lp = render(
-            EqBandNode::<f64>::new(
+            EqBandNode::<f32>::new(
                 SvfType::LowPass,
                 Hz::new(500.0),
                 Q::new(0.707),
@@ -184,7 +184,7 @@ mod tests {
             &high,
         );
         let out_hp = render(
-            EqBandNode::<f64>::new(
+            EqBandNode::<f32>::new(
                 SvfType::HighPass,
                 Hz::new(500.0),
                 Q::new(0.707),
@@ -197,6 +197,21 @@ mod tests {
         assert!(
             rms_hp > rms_lp * 2.0,
             "HP should pass more high freq than LP: lp={rms_lp}, hp={rms_hp}"
+        );
+    }
+
+    /// In an `f64` graph a low-pass band's steady response to a 29-bit constant is the constant
+    /// (unity at DC) to `2^-45`.
+    #[test]
+    fn in_an_f64_graph_a_low_pass_band_passes_a_wide_constant_at_unity() {
+        use crate::test_support::{F64_TOLERANCE, RATE, render_f64};
+        const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
+        let x = vec![DC; 4_096];
+        let node = EqBandNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.707), Db(0.0));
+        let settled = render_f64(node, RATE, &[&x], 4_096)[0][4_095];
+        assert!(
+            (settled - DC).abs() <= F64_TOLERANCE,
+            "{settled} against {DC}"
         );
     }
 }

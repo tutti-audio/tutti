@@ -45,8 +45,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// distortion control rather than a level one: above unity it adds harmonics
 /// and compresses. `1.0` is clean.
 ///
-/// `F` is the internal state precision, defaulting to `f64` for accuracy at low
-/// cutoffs.
+/// `F` is the float of the graph it runs in, and of the stages and the coefficients.
 ///
 /// # Modulated params
 ///
@@ -70,7 +69,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// rings on after its input stops, so it is never skipped on a silent block and
 /// never parks. The graph prepares it at the device rate before its first block.
 /// Rendering allocates nothing.
-pub type LadderFilterNode<F = f64> = KernelNode<LadderKernel<F>>;
+pub type LadderFilterNode<F> = KernelNode<LadderKernel<F>>;
 
 impl<F: Float + Lanes> LadderFilterNode<F> {
     /// A mono ladder filter (1 in, 1 out) of `ladder_type` at `frequency`
@@ -117,7 +116,7 @@ impl<F: Float + Lanes> LadderFilterNode<F> {
 /// next grid point. The glide is a ramp (a control moving to a target), not a fade.
 const GLIDE_STEPS: u32 = 16;
 
-/// The ladder as a [`Kernel`]: a [`LadderBank`] in state precision `F` and the glide of the
+/// The ladder as a [`Kernel`]: a [`LadderBank`] in the float `F` and the glide of the
 /// design (coefficients and drive) every channel shares.
 #[derive(Clone, Debug)]
 pub struct LadderKernel<F: Float + Lanes> {
@@ -150,6 +149,7 @@ impl<F: Float + Lanes> LadderKernel<F> {
 }
 
 impl<F: Float + Lanes> Kernel for LadderKernel<F> {
+    type Float = F;
     type Set = LadderSet;
 
     // A design arrives at the next grid point: the glide is one grid period long.
@@ -183,11 +183,11 @@ impl<F: Float + Lanes> Kernel for LadderKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.bank.process(&mut self.design, input, output);
     }
@@ -223,9 +223,10 @@ control_set! {
 
 #[cfg(test)]
 mod tests {
+    // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use super::*;
     use crate::filter::test_utils::{generate_sine, process_mono, rms};
-    use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
+    use crate::test_support::{RATE_44K, prepared_at, render_f64, tick, tick_fed};
     use tutti_dsp::Complex64;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
@@ -236,7 +237,7 @@ mod tests {
     /// `ParamSet` and shares no cell with it.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(LadderFilterNode::<f64>::with_channels(
+        assert_param_fork(LadderFilterNode::<f32>::with_channels(
             ChannelLayout::STEREO,
             LadderType::LP24,
             Hz::new(800.0),
@@ -247,7 +248,7 @@ mod tests {
     #[test]
     fn test_ladder_lp24_attenuates_high_freq() {
         let mut filter = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(500.0), Resonance::new(0.0)),
+            LadderFilterNode::<f32>::new(LadderType::LP24, Hz::new(500.0), Resonance::new(0.0)),
             RATE_44K,
         );
 
@@ -270,21 +271,18 @@ mod tests {
     /// Gain (dB) of a 0.01-amplitude sine at `f` through the node, projected
     /// on the last second of two.
     fn gain_db(ty: LadderType, fc: f64, res: f64, f: f64) -> f64 {
-        let mut node = prepared_at(
-            LadderFilterNode::<f64>::new(ty, Hz::new(fc), Resonance::new(res)),
-            RATE_44K,
-        );
+        let node = LadderFilterNode::<f64>::new(ty, Hz::new(fc), Resonance::new(res));
         let n = 44100;
         let amp = 0.01;
-        let x: Vec<f32> = (0..2 * n)
-            .map(|i| (amp * (2.0 * core::f64::consts::PI * f * i as f64 / 44100.0).sin()) as f32)
+        let x: Vec<f64> = (0..2 * n)
+            .map(|i| amp * (2.0 * core::f64::consts::PI * f * i as f64 / 44100.0).sin())
             .collect();
-        let y = process_mono(&mut node, &x);
+        let y = render_f64(node, SampleRate::SR_44K1, &[&x], 2 * n).remove(0);
         let (mut re, mut im) = (0.0f64, 0.0f64);
         for (i, &yi) in y.iter().enumerate().skip(n) {
             let ph = 2.0 * core::f64::consts::PI * f * i as f64 / 44100.0;
-            re += f64::from(yi) * ph.sin();
-            im += f64::from(yi) * ph.cos();
+            re += yi * ph.sin();
+            im += yi * ph.cos();
         }
         20.0 * (2.0 * (re * re + im * im).sqrt() / n as f64 / amp).log10()
     }
@@ -314,7 +312,7 @@ mod tests {
     #[test]
     fn test_ladder_hp24_attenuates_low_freq() {
         let mut filter = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::HP24, Hz::new(2000.0), Resonance::new(0.0)),
+            LadderFilterNode::<f32>::new(LadderType::HP24, Hz::new(2000.0), Resonance::new(0.0)),
             RATE_44K,
         );
 
@@ -337,12 +335,12 @@ mod tests {
     #[test]
     fn test_ladder_resonance_boosts_cutoff() {
         let mut no_res = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.0)),
+            LadderFilterNode::<f32>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.0)),
             RATE_44K,
         );
 
         let mut with_res = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.8)),
+            LadderFilterNode::<f32>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.8)),
             RATE_44K,
         );
 
@@ -363,12 +361,12 @@ mod tests {
     #[test]
     fn test_ladder_drive_adds_saturation() {
         let mut clean = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(5000.0), Resonance::new(0.0)),
+            LadderFilterNode::<f32>::new(LadderType::LP24, Hz::new(5000.0), Resonance::new(0.0)),
             RATE_44K,
         );
 
         let mut driven = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(5000.0), Resonance::new(0.0)),
+            LadderFilterNode::<f32>::new(LadderType::LP24, Hz::new(5000.0), Resonance::new(0.0)),
             RATE_44K,
         );
         assert!(driven.param_set().set(UnitParam::Drive, 10.0));
@@ -390,7 +388,7 @@ mod tests {
     #[test]
     fn test_ladder_reset() {
         let mut filter = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.5)),
+            LadderFilterNode::<f32>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.5)),
             RATE_44K,
         );
 
@@ -410,12 +408,12 @@ mod tests {
     #[test]
     fn test_ladder_lp12_less_steep_than_lp24() {
         let mut lp12 = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::LP12, Hz::new(1000.0), Resonance::new(0.0)),
+            LadderFilterNode::<f32>::new(LadderType::LP12, Hz::new(1000.0), Resonance::new(0.0)),
             RATE_44K,
         );
 
         let mut lp24 = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.0)),
+            LadderFilterNode::<f32>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.0)),
             RATE_44K,
         );
 
@@ -436,7 +434,7 @@ mod tests {
     #[test]
     fn test_ladder_f32_state_agrees_with_f64_for_mid_cutoff() {
         let mut ladder_f64 = prepared_at(
-            LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.3)),
+            LadderFilterNode::<f32>::new(LadderType::LP24, Hz::new(1000.0), Resonance::new(0.3)),
             RATE_44K,
         );
         let mut ladder_f32 = prepared_at(
@@ -481,7 +479,7 @@ mod tests {
     #[test]
     fn ladder_with_channels_reports_arity_and_is_independent() {
         let mut wide = prepared_at(
-            LadderFilterNode::<f64>::with_channels(
+            LadderFilterNode::<f32>::with_channels(
                 6u16,
                 LadderType::LP24,
                 Hz::new(1000.0),
@@ -519,7 +517,7 @@ mod tests {
     /// reports `Tail::Unknown`.
     #[test]
     fn the_shape_declares_cutoff_q_then_drive() {
-        let f = LadderFilterNode::<f64>::with_channels(
+        let f = LadderFilterNode::<f32>::with_channels(
             6u16,
             LadderType::LP24,
             Hz::new(1000.0),
@@ -546,7 +544,7 @@ mod tests {
             .collect();
         let run = |cutoff: f32| -> f32 {
             let mut f = prepared_at(
-                LadderFilterNode::<f64>::with_channels(
+                LadderFilterNode::<f32>::with_channels(
                     ChannelLayout::STEREO,
                     LadderType::LP24,
                     Hz::new(200.0),
@@ -573,7 +571,7 @@ mod tests {
         let signal = generate_sine(440.0, 44100.0, 1024);
 
         let mut plain = prepared_at(
-            LadderFilterNode::<f64>::with_channels(
+            LadderFilterNode::<f32>::with_channels(
                 ChannelLayout::STEREO,
                 LadderType::LP24,
                 Hz::new(1000.0),
@@ -584,7 +582,7 @@ mod tests {
         let (plain_l, _) = process_stereo_ladder(&mut plain, &signal, &signal, [None; 3]);
 
         let mut modn = prepared_at(
-            LadderFilterNode::<f64>::with_channels(
+            LadderFilterNode::<f32>::with_channels(
                 ChannelLayout::STEREO,
                 LadderType::LP24,
                 Hz::new(1000.0),
@@ -617,14 +615,14 @@ mod tests {
         const HZ: f64 = 1_500.0;
         const RES: f64 = 0.4;
         let make = || {
-            LadderFilterNode::<f64>::with_channels(
+            LadderFilterNode::<f32>::with_channels(
                 ChannelLayout::STEREO,
                 LadderType::LP24,
                 Hz::new(1_000.0),
                 Resonance::new(RES),
             )
         };
-        let change = |n: &LadderFilterNode<f64>| {
+        let change = |n: &LadderFilterNode<f32>| {
             assert!(n.param_set().set(UnitParam::Cutoff, 1_400.0));
         };
         // 1e-3 keeps the saturator linear (`tanh x = x - x^3/3`: 3e-7 of the signal).
@@ -694,14 +692,14 @@ mod tests {
     fn a_drive_written_between_blocks_glides_on_the_stream() {
         // A high-pass tap, so the saturator's input reaches the output unfiltered.
         let make = || {
-            LadderFilterNode::<f64>::with_channels(
+            LadderFilterNode::<f32>::with_channels(
                 ChannelLayout::STEREO,
                 LadderType::HP24,
                 Hz::new(500.0),
                 Resonance::new(0.4),
             )
         };
-        let change = |n: &LadderFilterNode<f64>| {
+        let change = |n: &LadderFilterNode<f32>| {
             assert!(n.param_set().set(UnitParam::Drive, 9.0));
         };
         let (low, blocks) = block_levels(make, change, 6_000.0, 0.1);
@@ -726,8 +724,8 @@ mod tests {
     /// the RMS of the last 64 frames of 256 before a write (`low`), and of each 64-frame
     /// block of the 512 frames after it. The render is also the same at every block length.
     fn block_levels(
-        make: impl Fn() -> LadderFilterNode<f64>,
-        change: impl Fn(&LadderFilterNode<f64>),
+        make: impl Fn() -> LadderFilterNode<f32>,
+        change: impl Fn(&LadderFilterNode<f32>),
         hz: f64,
         amplitude: f32,
     ) -> (f32, Vec<f32>) {
@@ -751,7 +749,7 @@ mod tests {
         use crate::test_support::{drive_block, noise, prepared};
         let inputs: Vec<Vec<f32>> = (0..6).map(|c| noise(c + 20, 64)).collect();
         let refs: Vec<&[f32]> = inputs.iter().map(|v| &v[..]).collect();
-        let mut wide = prepared(LadderFilterNode::<f64>::with_channels(
+        let mut wide = prepared(LadderFilterNode::<f32>::with_channels(
             6u16,
             LadderType::HP12,
             Hz::new(800.0),
@@ -759,7 +757,7 @@ mod tests {
         ));
         let out = drive_block(&mut wide, &refs);
         for (c, input) in inputs.iter().enumerate() {
-            let mut mono = prepared(LadderFilterNode::<f64>::new(
+            let mut mono = prepared(LadderFilterNode::<f32>::new(
                 LadderType::HP12,
                 Hz::new(800.0),
                 Resonance::new(0.7),

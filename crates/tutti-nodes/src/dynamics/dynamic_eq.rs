@@ -149,9 +149,8 @@ impl DynamicEqConfig {
 ///
 /// The tail is unknown: a bell rings for as long as its Q says.
 ///
-/// `F` is the state precision of the detector and the bell, `f64` by default: an `f64` graph
-/// runs them in `f64`, and a view of the other sample format is converted at the edges.
-pub type DynamicEqNode<F = f64> = KernelNode<DynamicEqKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the detector and the bell.
+pub type DynamicEqNode<F> = KernelNode<DynamicEqKernel<F>>;
 
 impl<F: Float + Lanes + Lerp> From<DynamicEqConfig> for DynamicEqNode<F> {
     /// # Panics
@@ -215,6 +214,7 @@ impl<F: Float + Lanes + Lerp> DynamicEqKernel<F> {
 }
 
 impl<F: Float + Lanes + Lerp> Kernel for DynamicEqKernel<F> {
+    type Float = F;
     type Set = DynamicEqSet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -254,21 +254,21 @@ impl<F: Float + Lanes + Lerp> Kernel for DynamicEqKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        lanes: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        lanes: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.render_keyed(input, input, lanes, output);
     }
 
-    fn render_keyed<S: Float>(
+    fn render_keyed(
         &mut self,
-        input: Planes<'_, S>,
-        key: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        key: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(bank) = &mut self.bank {
             bank.process(key, input, output);
@@ -309,7 +309,7 @@ mod tests {
         let mut y = vec![0.0f64; x.len()];
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::<f64>::NONE,
+            ControlLanes::NONE,
             PlanesMut::new(&mut [&mut y[..]]).unwrap(),
         );
         assert_eq!(y, x);

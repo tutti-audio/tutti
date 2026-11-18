@@ -153,8 +153,18 @@ impl std::fmt::Debug for Reclaimer {
 /// declaration (`tutti_graph::declare_params!`, or its control set's), from
 /// which its [`Key`](crate::Key)'s param methods come.
 macro_rules! param_session_node {
-    ($($ty:ty),* $(,)?) => {$(
-        impl SessionNode for $ty {
+    // A node of a float, one per width a graph has.
+    (floats: $($ty:ident),* $(,)?) => {$(
+        param_session_node!(@impl f32, tutti_nodes::$ty<f32>);
+        param_session_node!(@impl f64, tutti_nodes::$ty<f64>);
+    )*};
+    // A node of the session's default float only.
+    (f32 => $($ty:ty),* $(,)?) => {$(
+        param_session_node!(@impl f32, $ty);
+    )*};
+    // A node of no float of its own, in a graph of any.
+    (any: $($ty:ty),* $(,)?) => {$(
+        impl<F: Float> SessionNode<F> for $ty {
             fn params(controls: &ParamSet) -> Option<ParamSet> {
                 Some(controls.clone())
             }
@@ -165,6 +175,18 @@ macro_rules! param_session_node {
             }
         }
     )*};
+    (@impl $float:ident, $ty:ty) => {
+        impl SessionNode<$float> for $ty {
+            fn params(controls: &ParamSet) -> Option<ParamSet> {
+                Some(controls.clone())
+            }
+
+            // A `ParamSet` publishes through `Param` atomics, no cell.
+            fn reclaimer(_: &ParamSet) -> Reclaims {
+                Reclaims::Nothing
+            }
+        }
+    };
 }
 
 /// A node forkable by a clone taken at insert: no controls, no params.
@@ -195,26 +217,27 @@ impl<F: Float, N: ParamNode<F> + Clone + Send + 'static> SessionNode<F> for Para
 }
 
 param_session_node!(
-    tutti_nodes::SvfFilterNode<f32>,
-    tutti_nodes::SvfFilterNode<f64>,
-    tutti_nodes::EqBandNode<f32>,
-    tutti_nodes::EqBandNode<f64>,
-    tutti_nodes::LadderFilterNode<f32>,
-    tutti_nodes::LadderFilterNode<f64>,
-    tutti_nodes::CompressorNode<f32>,
-    tutti_nodes::CompressorNode<f64>,
-    tutti_nodes::GateNode<f32>,
-    tutti_nodes::GateNode<f64>,
-    tutti_nodes::LimiterNode<f32>,
-    tutti_nodes::LimiterNode<f64>,
-    tutti_nodes::BrickwallLimiterNode<f32>,
-    tutti_nodes::BrickwallLimiterNode<f64>,
-    tutti_nodes::DistortionNode<f32>,
-    tutti_nodes::DistortionNode<f64>,
-    tutti_nodes::BusStripNode,
-    tutti_nodes::CrossoverNode<f32>,
-    tutti_nodes::CrossoverNode<f64>,
+    floats: SvfFilterNode,
+    EqBandNode,
+    LadderFilterNode,
+    CompressorNode,
+    GateNode,
+    LimiterNode,
+    BrickwallLimiterNode,
+    DistortionNode,
+    CrossoverNode,
 );
+
+/// The bus strip: its params by address, in the session's default float.
+impl SessionNode for tutti_nodes::BusStripNode {
+    fn params(controls: &ParamSet) -> Option<ParamSet> {
+        Some(controls.clone())
+    }
+
+    fn reclaimer(_: &ParamSet) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// The multiband compressor: its params by address, its band meters beside
 /// them in its controls.
@@ -237,23 +260,21 @@ impl SessionNode for tutti_nodes::MultibandCompressorNode<f64> {
         Reclaims::Nothing
     }
 }
+
 // The delay, modulation, LFO and oscillator nodes, and the three reverbs (wet only: their
 // blend is the graph's mix), and the convolution reverb (its wet gain, `Volume`).
 param_session_node!(
-    tutti_nodes::DelayNode<f32>,
-    tutti_nodes::DelayNode<f64>,
-    tutti_nodes::ModDelayNode<f32>,
-    tutti_nodes::ModDelayNode<f64>,
-    tutti_nodes::PhaserNode<f32>,
-    tutti_nodes::PhaserNode<f64>,
+    floats: DelayNode,
+    ModDelayNode,
+    PhaserNode,
+    FreeverbNode,
+    FdnNode,
+    PlateReverbNode,
+);
+param_session_node!(
+    f32 =>
     tutti_nodes::LfoNode,
     tutti_nodes::OscillatorNode,
-    tutti_nodes::FreeverbNode<f32>,
-    tutti_nodes::FreeverbNode<f64>,
-    tutti_nodes::FdnNode<f32>,
-    tutti_nodes::FdnNode<f64>,
-    tutti_nodes::PlateReverbNode<f32>,
-    tutti_nodes::PlateReverbNode<f64>,
     tutti_nodes::ConvolverNode,
 );
 
@@ -345,13 +366,13 @@ impl SessionNode for tutti_soundfont::SoundFontUnit {
 
 // The two panners: bearing and height, and the VBAP spread and width or the
 // HRTF blend, as a `ParamSet`.
-param_session_node!(tutti_nodes::VbapPannerNode, tutti_nodes::HrtfBinauralNode);
+param_session_node!(f32 => tutti_nodes::VbapPannerNode, tutti_nodes::HrtfBinauralNode);
 
 // The synth as a graph node: one MIDI event input, and its live params
 // (master volume, unison detune and spread) as a `ParamSet`, so a param
 // write reaches it and a fork of it starts from what was set.
 #[cfg(feature = "synth")]
-param_session_node!(tutti_polysynth::PolySynth);
+param_session_node!(f32 => tutti_polysynth::PolySynth);
 
 /// A voice as a graph node: its params (the gain) addressed by its set, so a
 /// param write reaches the cell the node reads and a fork starts from the

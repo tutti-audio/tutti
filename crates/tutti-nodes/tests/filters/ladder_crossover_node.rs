@@ -3,6 +3,8 @@
 //! tail declares. Every figure is the node's own definition (reset is silence, a grid of 16
 //! frames counted from the last reset, an unknown tail is never parked), not another render's.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition};
@@ -28,10 +30,10 @@ trait Cutoff: Node + ParamNode + Clone + 'static {
     fn cutoff(&self) -> Option<f32>;
 }
 
-impl Cutoff for LadderFilterNode<f64> {
+impl Cutoff for LadderFilterNode<f32> {
     const NAME: &'static str = "ladder";
     fn build() -> Self {
-        LadderFilterNode::<f64>::with_channels(
+        LadderFilterNode::<f32>::with_channels(
             ChannelLayout::STEREO,
             LadderType::LP24,
             Hz(900.0),
@@ -102,7 +104,7 @@ fn check_a_reset_node_renders_as_a_fresh_one<N: Cutoff>() {
 /// grid counts from the reset).
 #[test]
 fn a_reset_node_renders_as_a_fresh_one() {
-    check_a_reset_node_renders_as_a_fresh_one::<LadderFilterNode<f64>>();
+    check_a_reset_node_renders_as_a_fresh_one::<LadderFilterNode<f32>>();
     check_a_reset_node_renders_as_a_fresh_one::<CrossoverNode<f32>>();
 }
 
@@ -157,7 +159,7 @@ fn check_a_move_between_grid_points_starts_at_the_next_one<N: Cutoff>() {
 /// and the 16 from 48 are not.
 #[test]
 fn a_move_between_grid_points_starts_at_the_next_one() {
-    check_a_move_between_grid_points_starts_at_the_next_one::<LadderFilterNode<f64>>();
+    check_a_move_between_grid_points_starts_at_the_next_one::<LadderFilterNode<f32>>();
     check_a_move_between_grid_points_starts_at_the_next_one::<CrossoverNode<f32>>();
 }
 
@@ -180,7 +182,7 @@ fn check_a_clone_starts_silent_and_shares_the_cells<N: Cutoff>() {
 /// clone.
 #[test]
 fn a_clone_starts_silent_and_shares_the_cells() {
-    check_a_clone_starts_silent_and_shares_the_cells::<LadderFilterNode<f64>>();
+    check_a_clone_starts_silent_and_shares_the_cells::<LadderFilterNode<f32>>();
     check_a_clone_starts_silent_and_shares_the_cells::<CrossoverNode<f32>>();
 }
 
@@ -203,7 +205,7 @@ fn check_a_fork_starts_silent_and_shares_nothing<N: Cutoff>() {
 /// A fork starts from the values last set and silent, and shares no cell.
 #[test]
 fn a_fork_starts_silent_and_shares_nothing() {
-    check_a_fork_starts_silent_and_shares_nothing::<LadderFilterNode<f64>>();
+    check_a_fork_starts_silent_and_shares_nothing::<LadderFilterNode<f32>>();
     check_a_fork_starts_silent_and_shares_nothing::<CrossoverNode<f32>>();
 }
 
@@ -234,7 +236,7 @@ fn an_unknown_tail_is_never_narrowed_cut_or_parked() {
         ring
     };
     let mut resonant = prepared(
-        LadderFilterNode::<f64>::with_channels(
+        LadderFilterNode::<f32>::with_channels(
             ChannelLayout::STEREO,
             LadderType::LP24,
             Hz(1_000.0),

@@ -9,6 +9,8 @@
 //! ragged block pattern. The check is bit for bit: the channels share a
 //! coefficient table and a block's ramps, and nothing may mix them.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode, ParamSet};
@@ -132,12 +134,12 @@ fn assert_width_generic<N: Node + ParamNode + 'static>(
     }
 }
 
-fn svf(layout: ChannelLayout) -> SvfFilterNode<f64> {
-    SvfFilterNode::<f64>::with_channels(layout, SvfType::LowPass, Hz::new(1_000.0), Q::new(0.9))
+fn svf(layout: ChannelLayout) -> SvfFilterNode<f32> {
+    SvfFilterNode::<f32>::with_channels(layout, SvfType::LowPass, Hz::new(1_000.0), Q::new(0.9))
 }
 
-fn ladder(layout: ChannelLayout) -> LadderFilterNode<f64> {
-    LadderFilterNode::<f64>::with_channels(
+fn ladder(layout: ChannelLayout) -> LadderFilterNode<f32> {
+    LadderFilterNode::<f32>::with_channels(
         layout,
         LadderType::LP24,
         Hz::new(900.0),
