@@ -369,7 +369,7 @@ fn hrtf_binaural_moving_source_is_allocation_free() {
         let c = c.into_samples_mut();
         c.fill(0.5);
     }
-    let mut bearing = 0.0f32;
+    let mut bearing = 0.0f64;
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..1_000 {
             bearing = if bearing > 170.0 {

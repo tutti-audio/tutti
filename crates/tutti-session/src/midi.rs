@@ -16,6 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
+use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 
 use std::sync::Arc;
@@ -811,11 +812,11 @@ impl MidiState {
     /// handles asked of the MIDI-CI peers, steps the UMP Stream negotiations and
     /// the MIDI-CI of the open inputs. Whether the graph was edited.
     #[cfg(feature = "midi-hardware")]
-    pub(crate) fn midi_input_phase(
+    pub(crate) fn midi_input_phase<F: Float>(
         &mut self,
         io: Option<&mut tutti_midi_hardware::MidiSession>,
         nodes: Option<&MidiNodes>,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
@@ -846,7 +847,11 @@ impl MidiState {
 
     /// Compiles the session's own route rules onto every input port's ingest
     /// node.
-    pub(crate) fn compile_session_feeds(&mut self, graph: &mut Graph, layout: MidiInputPorts) {
+    pub(crate) fn compile_session_feeds<F: Float>(
+        &mut self,
+        graph: &mut Graph<F>,
+        layout: MidiInputPorts,
+    ) {
         let inputs = self.input_nodes();
         let rules = std::mem::take(&mut self.rules);
         let fallback = self.fallback;
@@ -890,10 +895,10 @@ impl MidiState {
     /// publishes the tempo it fit and reports its lock into `out`. What it asks
     /// of the transport, in order, for the caller to send; and whether the graph
     /// was edited, which the caller commits.
-    pub(crate) fn clock_phase(
+    pub(crate) fn clock_phase<F: Float>(
         &mut self,
         cx: &FollowCx<'_>,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         out: &mut Vec<crate::SessionEvent>,
     ) -> (Vec<Placed>, bool) {
         let Some(clock) = self.clock.as_mut() else {
@@ -914,10 +919,10 @@ impl MidiState {
     /// tap, reports what it did not act on into `out`. What it asks of the
     /// transport, in order, for the caller to send; and whether the graph was
     /// edited, which the caller commits.
-    pub(crate) fn machine_phase(
+    pub(crate) fn machine_phase<F: Float>(
         &mut self,
         cx: &FollowCx<'_>,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         out: &mut Vec<crate::SessionEvent>,
     ) -> (Vec<Placed>, bool) {
         let Some(machine) = self.machine.as_mut() else {
@@ -943,10 +948,10 @@ impl MidiState {
     /// heard (the project's tempo map and meter, overlaid at the next block
     /// start; see `midi_follow`). Whether the graph was edited, which the
     /// caller commits.
-    pub(crate) fn follow_phase(
+    pub(crate) fn follow_phase<F: Float>(
         &mut self,
         cx: &FollowCx<'_>,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         out: &mut Vec<crate::SessionEvent>,
     ) -> bool {
         out.extend(self.follow_events.drain(..).map(Into::into));
@@ -972,7 +977,7 @@ impl MidiState {
     /// readers and reopens those taps (and no other: a caller's own are the
     /// caller's). Whether any reopened; the graph is then edited and the next
     /// commit compiles the new taps.
-    pub(crate) fn follow_rate(&mut self, graph: &mut Graph, now: Instant) -> bool {
+    pub(crate) fn follow_rate<F: Float>(&mut self, graph: &mut Graph<F>, now: Instant) -> bool {
         let timing = self.output_timing(now);
         let sinks = self.sinks.reopen(graph, timing.as_ref());
         let ports = self.ports.reopen(graph, timing.as_ref());
@@ -981,7 +986,7 @@ impl MidiState {
 
     /// `Phase::MidiOut`: drains every output's tap to its device or sink.
     /// Whether the graph was edited.
-    pub(crate) fn midi_out_phase(&mut self, graph: &mut Graph, now: Instant) -> bool {
+    pub(crate) fn midi_out_phase<F: Float>(&mut self, graph: &mut Graph<F>, now: Instant) -> bool {
         // A graph re-rated outside the device hook (`Graph::set_sample_rate`)
         // is followed here, before this update's events are read.
         let mut edited = self.follow_rate(graph, now);
@@ -1028,8 +1033,8 @@ pub(crate) fn drain_events(
 /// may name a target it has not made yet or has removed, so this is the one
 /// place a missing target is skipped, not refused. A sink fed
 /// before and not now is unwired. `routed` holds the sinks the last compile fed.
-fn compile_feeds<'r, T: Copy + Ord + 'r>(
-    graph: &mut Graph,
+fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
+    graph: &mut Graph<F>,
     routed: &mut BTreeSet<NodeKey>,
     layout: MidiInputPorts,
     inputs: &[NodeKey],
@@ -1082,8 +1087,8 @@ tutti_types::id! {
 /// input's routes and the outputs. [`Session::midi`](crate::Session::midi)
 /// hands it out; what it edits goes out with the next update's commit.
 #[derive(Debug)]
-pub struct Midi<'a> {
-    pub(crate) graph: &'a mut Graph,
+pub struct Midi<'a, F: Float = f32> {
+    pub(crate) graph: &'a mut Graph<F>,
     pub(crate) state: &'a mut MidiState,
     pub(crate) nodes: Option<&'a MidiNodes>,
     pub(crate) jobs: &'a mut crate::jobs::Jobs,
@@ -1096,9 +1101,9 @@ pub struct Midi<'a> {
     pub(crate) io: Option<&'a mut tutti_midi_hardware::MidiSession>,
 }
 
-impl<'a> Midi<'a> {
+impl<'a, F: Float> Midi<'a, F> {
     /// The same view, borrowed for a shorter time.
-    pub(crate) fn reborrow(&mut self) -> Midi<'_> {
+    pub(crate) fn reborrow(&mut self) -> Midi<'_, F> {
         Midi {
             graph: &mut *self.graph,
             state: &mut *self.state,
@@ -1112,7 +1117,7 @@ impl<'a> Midi<'a> {
     }
 }
 
-impl Midi<'_> {
+impl<F: Float> Midi<'_, F> {
     fn next_load(&self) -> MidiLoad {
         MidiLoad::mint(&self.state.loads)
     }

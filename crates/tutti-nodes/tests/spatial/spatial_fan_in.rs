@@ -13,7 +13,7 @@ use tutti_units::{Azimuth, SampleRate, Samples};
 /// [`vbap_mix`]. Renders 49 blocks of 256 frames, past the panners' ~0.05 s
 /// position smoother, and returns each output channel's energy over the last
 /// block.
-fn settled_energy(bed: Bed, bearings: &[f32]) -> Vec<f32> {
+fn settled_energy(bed: Bed, bearings: &[f64]) -> Vec<f32> {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, bed.width());
     let sources: Vec<_> = bearings
         .iter()

@@ -7,6 +7,7 @@
 //! the copy, a reader dropped first is closed by the `Reclaim` phase, and the
 //! taps are opened again at the graph's new rate.
 
+use tutti_buffers::InterleavedMut;
 use tutti_graph::{
     Cx, Event, EventCapacity, Io, MissingSource, Node, Op, Prepare, Shape, Status, TapAlign,
     TapEvent, Unforkable,
@@ -50,7 +51,7 @@ fn session() -> (DetachedSession, EventOutPort) {
 fn frames(n: usize, s: &mut DetachedSession) {
     let mut out = [0.0f32];
     for _ in 0..n {
-        s.render_frame(&mut out);
+        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     }
 }
 

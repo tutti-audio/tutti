@@ -12,6 +12,8 @@ use tutti_graph::{
 };
 use tutti_units::Samples;
 
+use tutti_buffers::Float;
+
 use super::Graph;
 use crate::{EventTapPort, OutPort};
 
@@ -36,9 +38,9 @@ pub enum RootReader {
 /// plan that ran it is retired.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum Reopened {
+pub enum Reopened<F: Float = f32> {
     /// A tap on the root, as wide as the root.
-    Tap(TapReader),
+    Tap(TapReader<F>),
     /// The master meter, measuring the root as wide as it is. It is on.
     Meter(MeterReader),
 }
@@ -51,8 +53,8 @@ pub struct NotReopened(pub RootReader);
 
 /// A reopened reader the graph holds, and whether its event was sent.
 #[derive(Debug)]
-pub(super) struct Held {
-    reader: Reopened,
+pub(super) struct Held<F: Float> {
+    reader: Reopened<F>,
     topology: tutti_types::ChannelTopology,
     announced: bool,
 }
@@ -65,18 +67,18 @@ pub(super) struct Held {
 /// the graph does not own, so it is
 /// [`Session::open_heard_tap`](crate::Session::open_heard_tap).
 #[derive(Debug)]
-pub struct Taps<'g> {
-    pub(super) graph: &'g mut Graph,
+pub struct Taps<'g, F: Float = f32> {
+    pub(super) graph: &'g mut Graph<F>,
 }
 
 /// The level meters of a [`Graph`]: per-channel peak and energy readers on its
 /// outputs or on any node's ports. Made by [`Graph::meters`].
 #[derive(Debug)]
-pub struct Meters<'g> {
-    pub(super) graph: &'g mut Graph,
+pub struct Meters<'g, F: Float = f32> {
+    pub(super) graph: &'g mut Graph<F>,
 }
 
-impl Taps<'_> {
+impl<F: Float> Taps<'_, F> {
     /// Copies `sources`, one lane each, out of the graph into a ring the
     /// returned reader drains: a tap on any ports, at any width. The tap is
     /// compiled by the next commit and fed by every block that renders after
@@ -129,7 +131,7 @@ impl Taps<'_> {
         sources: &[OutPort],
         align: TapAlign,
         capacity: Samples,
-    ) -> Result<TapReader, MissingSource> {
+    ) -> Result<TapReader<F>, MissingSource> {
         let sources = self.graph.raw_sources(sources)?;
         let id = TapId::mint(&self.graph.ids);
         let reader = self.graph.editor.open_tap(id, sources, align, capacity)?;
@@ -174,7 +176,7 @@ impl Taps<'_> {
     ///
     /// [`MissingSource`] for the first output source that is not in the graph
     /// now.
-    pub fn open_output(&mut self, capacity: Samples) -> Result<TapReader, MissingSource> {
+    pub fn open_output(&mut self, capacity: Samples) -> Result<TapReader<F>, MissingSource> {
         let id = TapId::mint(&self.graph.ids);
         let width = self.graph.outputs();
         let reader = self.graph.editor.open_output_tap(id, width, capacity)?;
@@ -333,7 +335,7 @@ impl Taps<'_> {
     }
 }
 
-impl Meters<'_> {
+impl<F: Float> Meters<'_, F> {
     /// Declares a level meter on `sources`, one channel each, any node
     /// ports, and returns its reader, **off** until
     /// [`enable`](MeterReader::enable). The meter is compiled by the next
@@ -415,7 +417,7 @@ impl Meters<'_> {
     }
 }
 
-impl<'g> Meters<'g> {
+impl<'g, F: Float> Meters<'g, F> {
     /// The master meter: the level of each global output channel, before
     /// the engine's fold and declick. Declared and **on** when the graph is
     /// built, so a host that reads it needs to ask for nothing; it follows
@@ -442,7 +444,7 @@ impl<'g> Meters<'g> {
     }
 }
 
-impl Graph {
+impl<F: Float> Graph<F> {
     /// Opens again each reader of the root whose width is not the root's now.
     /// A tap is reopened when its own width differs from the root's, whatever
     /// moved the root; the master meter follows the root's width as it widens,
@@ -495,7 +497,12 @@ impl Graph {
     /// Holds `reader` under `id` to be claimed, in place of one held for `id`
     /// and not claimed: that one is dropped, and the editor ended it when this
     /// one replaced it.
-    fn hold(&mut self, id: RootReader, reader: Reopened, topology: &tutti_types::ChannelTopology) {
+    fn hold(
+        &mut self,
+        id: RootReader,
+        reader: Reopened<F>,
+        topology: &tutti_types::ChannelTopology,
+    ) {
         self.reopened.insert(
             id,
             Held {
@@ -525,7 +532,7 @@ impl Graph {
     /// # Errors
     ///
     /// [`NotReopened`] when none is held under `id`.
-    pub fn take_reopened(&mut self, id: RootReader) -> Result<Reopened, NotReopened> {
+    pub fn take_reopened(&mut self, id: RootReader) -> Result<Reopened<F>, NotReopened> {
         self.reopened
             .remove(&id)
             .map(|held| held.reader)

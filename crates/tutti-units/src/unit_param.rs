@@ -247,7 +247,9 @@ impl UnitParam {
     #[must_use]
     pub fn wrap(self, value: f32) -> f32 {
         if self.is_circular() {
-            Azimuth(value).wrap().0
+            // A lane value is an `f32`; the wrap runs in the unit's `f64` and
+            // narrows once per call.
+            Azimuth(f64::from(value)).wrap().0 as f32
         } else {
             value
         }
@@ -261,7 +263,9 @@ impl UnitParam {
     #[must_use]
     pub fn arc(self, from: f32, to: f32) -> f32 {
         if self.is_circular() {
-            Azimuth(from).shortest_arc_to(Azimuth(to)).0
+            Azimuth(f64::from(from))
+                .shortest_arc_to(Azimuth(f64::from(to)))
+                .0 as f32
         } else {
             to - from
         }

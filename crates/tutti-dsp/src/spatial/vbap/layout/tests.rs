@@ -7,7 +7,7 @@ use super::*;
 use tutti_types::{Bed, Speaker};
 use tutti_units::{Azimuth, Direction, Elevation, Spread};
 
-type Position = (f32, f32);
+type Position = (f64, f64);
 
 const STEREO: [Position; 2] = [(30.0, 0.0), (-30.0, 0.0)];
 const QUAD: [Position; 4] = [(45.0, 0.0), (-45.0, 0.0), (135.0, 0.0), (-135.0, 0.0)];
@@ -75,7 +75,10 @@ fn tuples_of(layout: &SpeakerLayout) -> Vec<Vec<u16>> {
 /// degrees.
 fn raw(layout: &SpeakerLayout, azimuth: f64, elevation: f64) -> Vec<f64> {
     let mut gains = vec![0.0; layout.speaker_count()];
-    layout.tuple_gains(azimuth, elevation, &mut gains);
+    layout.tuple_gains(
+        Direction::new(Azimuth(azimuth), Elevation(elevation)),
+        &mut gains,
+    );
     gains
 }
 
@@ -86,10 +89,6 @@ fn degrees(v: [f64; 3]) -> (f64, f64) {
         v[0].atan2(v[1]).to_degrees(),
         (v[2] / length).asin().to_degrees(),
     )
-}
-
-fn direction(azimuth: f32, elevation: f32) -> [f64; 3] {
-    super::super::math::direction(f64::from(azimuth), f64::from(elevation))
 }
 
 /// The directions each layout covers with tuples: the whole circle for a
@@ -201,8 +200,8 @@ fn the_corrected_gains_are_unit_power_everywhere() {
             for az in (0..360).step_by(15) {
                 for el in (-90..=90).step_by(30) {
                     layout.gains_into(
-                        Azimuth(az as f32),
-                        Elevation(el as f32),
+                        Azimuth(f64::from(az)),
+                        Elevation(f64::from(el)),
                         Spread::new_clamped(spread),
                         &mut gains,
                     );
@@ -229,7 +228,7 @@ fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
     let centre = core::f32::consts::FRAC_1_SQRT_2;
     // (azimuth, left, right)
     for (az, left, right) in [
-        (0.0f32, centre, centre),
+        (0.0f64, centre, centre),
         (15.0, 0.939_071, 0.343_724),
         (30.0, 1.0, 0.0),
         (45.0, 1.0, 0.0),
@@ -258,7 +257,7 @@ fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
 #[test]
 fn a_surrounding_layout_does_not_fold_its_rear_arc() {
     let layout = SpeakerLayout::from_bed(Bed::Quad).unwrap();
-    let at = |az: f32| {
+    let at = |az: f64| {
         let mut g = [0.0f32; 4];
         layout.gains_into(Azimuth(az), Elevation(0.0), Spread::POINT, &mut g);
         g
@@ -289,12 +288,7 @@ fn gains_are_not_negative() {
                     assert!(g >= 0.0, "{name} at ({a}, {e}): {g}");
                 }
                 let mut all = vec![0.0; layout.speaker_count()];
-                layout.gains_into(
-                    Azimuth(a as f32),
-                    Elevation(e as f32),
-                    Spread::POINT,
-                    &mut all,
-                );
+                layout.gains_into(Azimuth(a), Elevation(e), Spread::POINT, &mut all);
                 assert!(all.iter().all(|g| *g >= 0.0), "{name} at ({a}, {e})");
             }
         }
@@ -402,7 +396,10 @@ fn a_shared_edge_has_the_same_gains_on_both_sides() {
     assert!(shared.len() >= 10, "only {} shared edges", shared.len());
     for &&((i, j), _) in &shared {
         let (pi, pj) = (ATMOS[usize::from(i)], ATMOS[usize::from(j)]);
-        let (a, b) = (direction(pi.0, pi.1), direction(pj.0, pj.1));
+        let (a, b) = (
+            super::super::math::direction(Direction::new(Azimuth(pi.0), Elevation(pi.1))),
+            super::super::math::direction(Direction::new(Azimuth(pj.0), Elevation(pj.1))),
+        );
         let mid = [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
         let normal = super::super::math::cross(a, b);
         let along = super::super::math::cross(normal, mid);
@@ -476,7 +473,7 @@ fn a_layout_that_cannot_be_tiled_is_refused() {
         SpeakerGeometryError::NoValidTuples
     );
     assert_eq!(
-        make(&[(f32::NAN, 0.0), (30.0, 0.0)]),
+        make(&[(f64::NAN, 0.0), (30.0, 0.0)]),
         SpeakerGeometryError::NonFinitePosition
     );
     let many = vec![(0.0, 0.0); MAX_CHANNELS + 1];
@@ -536,7 +533,7 @@ fn a_bed_pans_to_each_of_its_speakers_at_unity() {
 #[test]
 fn a_non_finite_direction_gives_silence_without_panicking() {
     for (_, layout, _) in presets() {
-        for (az, el) in [(f32::NAN, 0.0), (0.0, f32::NAN), (f32::NAN, f32::NAN)] {
+        for (az, el) in [(f64::NAN, 0.0), (0.0, f64::NAN), (f64::NAN, f64::NAN)] {
             for spread in [0.0, 0.5] {
                 let mut gains = vec![1.0f32; layout.speaker_count()];
                 layout.gains_into(

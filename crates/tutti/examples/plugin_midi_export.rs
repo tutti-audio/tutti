@@ -113,7 +113,7 @@ fn play<M: Master>(
     state: Option<Vec<u8>>,
     midi: &Path,
     master: impl FnOnce(Bounce) -> Bounce<NodeKey, M>,
-) -> Result<M::Result, Box<dyn std::error::Error>> {
+) -> Result<M::Result<f32>, Box<dyn std::error::Error>> {
     let mut s = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples(512)))

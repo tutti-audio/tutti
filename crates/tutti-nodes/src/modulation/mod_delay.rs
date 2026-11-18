@@ -477,7 +477,7 @@ mod tests {
                     inc = PhaseIncrement::per_sample(Hz(hz), RATE);
                 }
                 phase = phase.advance(inc);
-                let turns = f64::from(phase.get());
+                let turns = phase.get();
                 BASE + f64::from(depth) * SR * (std::f64::consts::TAU * turns).sin()
             })
             .collect()
@@ -640,8 +640,11 @@ mod tests {
             let c = controls(hz, f64::from(depth), 0.0);
             let trace = trace(&mut trajectory(), &[(0, c)], len);
             let rise = trace[at] - BASE;
+            // The LFO steps before the frame it sounds in: frame `at` sounds the
+            // phase `at + 1` steps on.
+            let sounded = (at + 1) as f64;
             let figure =
-                f64::from(depth) * SR * (std::f64::consts::TAU * effective * at as f64 / SR).sin();
+                f64::from(depth) * SR * (std::f64::consts::TAU * effective * sounded / SR).sin();
             assert!(
                 (rise - figure).abs() < 0.05,
                 "rate {hz} rose {rise}, the {effective} Hz sweep {figure}"
@@ -728,7 +731,7 @@ mod tests {
         let (base, amp) = (0.01 * SR, 0.005 * SR);
         for (n, _) in ramp.iter().enumerate() {
             phase = phase.advance(inc);
-            let turns = f64::from(phase.get());
+            let turns = phase.get();
             if n < 600 || !(n + 1).is_multiple_of(COEFF_INTERVAL) {
                 continue;
             }

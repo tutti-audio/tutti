@@ -71,7 +71,7 @@ fn bench(c: &mut Criterion) {
                         } else {
                             bearing + 7.0
                         };
-                        aim(&params, Azimuth(bearing), Elevation::LEVEL);
+                        aim(&params, Azimuth(f64::from(bearing)), Elevation::LEVEL);
                     }
                     d.block();
                     black_box(d.output().plane(0).samples()[block - 1]);

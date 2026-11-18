@@ -758,13 +758,13 @@ fn weighs_141(label: Channel) -> bool {
 /// azimuth range moves one of these rows.
 #[test]
 fn table_4_edges_are_closed_on_azimuth_and_open_on_elevation() {
-    let at = |azimuth: f32, elevation: f32| {
+    let at = |azimuth: f64, elevation: f64| {
         weighs_141(label_at(Direction::new(
             Azimuth(azimuth),
             Elevation(elevation),
         )))
     };
-    for sign in [1.0f32, -1.0] {
+    for sign in [1.0f64, -1.0] {
         assert!(at(sign * 60.0, 0.0), "60 is inside");
         assert!(at(sign * 120.0, 0.0), "120 is inside");
         assert!(!at(sign * 59.9, 0.0), "59.9 is outside");

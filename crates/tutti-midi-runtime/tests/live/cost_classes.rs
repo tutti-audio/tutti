@@ -168,17 +168,23 @@ fn sent(outs: &mut [common::Sink], seen: &[Seen]) -> Vec<Vec<(u64, [u32; 4])>> {
 /// Every MIDI node is `Light`.
 #[test]
 fn every_midi_node_is_light() {
-    assert_eq!(clip(0).shape().cost, Cost::Light);
-    assert_eq!(HarmonyNode::new([]).shape().cost, Cost::Light);
+    assert_eq!(tutti_graph::Node::<f32>::shape(&clip(0)).cost, Cost::Light);
     assert_eq!(
-        SyncOut::new(tutti_ump::MidiGroup::FIRST).shape().cost,
+        tutti_graph::Node::<f32>::shape(&HarmonyNode::new([])).cost,
         Cost::Light
     );
     assert_eq!(
-        EventInletNode::pair(EventCapacity::of(8)).0.shape().cost,
+        tutti_graph::Node::<f32>::shape(&SyncOut::new(tutti_ump::MidiGroup::FIRST)).cost,
         Cost::Light
     );
-    assert_eq!(MidiIngestNode::new().shape().cost, Cost::Light);
+    assert_eq!(
+        tutti_graph::Node::<f32>::shape(&EventInletNode::pair(EventCapacity::of(8)).0).cost,
+        Cost::Light
+    );
+    assert_eq!(
+        tutti_graph::Node::<f32>::shape(&MidiIngestNode::new()).cost,
+        Cost::Light
+    );
 }
 
 /// Sixteen light clip → out lanes beside two heavy ones: the light lanes

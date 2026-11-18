@@ -162,7 +162,7 @@ fn render(exec: &mut Executor) -> Vec<Vec<f32>> {
 #[cfg_attr(miri, ignore = "spawns a worker pool")]
 fn moderate_clicks_pack_and_render_bit_identically() {
     assert_eq!(
-        click(&Transport::new(SampleRate::of(SR))).shape().cost,
+        Node::<f32>::shape(&click(&Transport::new(SampleRate::of(SR)))).cost,
         Cost::Moderate
     );
     let declared = graph(4, true);

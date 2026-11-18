@@ -14,6 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::Interleaved;
+use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::Root;
 
 use tutti_export::Produced;
@@ -396,14 +397,14 @@ fn live_disk_playback_is_untouched_while_its_voice_exports() {
     let mut session = session();
     let (node, _) = session.graph().add(disk_voice(reader, 0.0));
     session.graph().connect(node, Root).unwrap();
-    session.render_frame(&mut [0.0, 0.0]);
+    session.render_frame(InterleavedMut::one_frame(&mut [0.0, 0.0]).unwrap());
     let mut live = session.graph().take_audio_side();
 
     let (settled, done) = (AtomicBool::new(false), AtomicBool::new(false));
     let (heard, rendered) = std::thread::scope(|s| {
         let device = s.spawn(|| {
             let mut heard = Vec::new();
-            let mut block = vec![Vec::new(), Vec::new()];
+            let mut block = vec![vec![0.0; BLOCK]; 2];
             let mut after = 0;
             while after < 8 {
                 let _ = streamer.step_until_settled(64);
@@ -413,7 +414,7 @@ fn live_disk_playback_is_untouched_while_its_voice_exports() {
                     live_clock.beat(),
                     None,
                 ));
-                live.render(BLOCK, BLOCK, &mut block);
+                live.render(BLOCK, PlanesMut::from_vecs(&mut block).unwrap());
                 live_clock.advance(Samples(BLOCK));
                 heard.extend_from_slice(&block[0]);
                 assert!(heard.len() < len, "the live side ran out of file first");

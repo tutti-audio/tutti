@@ -7,7 +7,7 @@
 //! this crate. The trajectory's impl is here too, so `tutti-curve` stays free of
 //! the trait.
 
-use tutti_curve::{Law, Trajectory};
+use tutti_curve::{CurveRaw, Law, Trajectory};
 use tutti_units::{Beat, Unit};
 
 /// The piece of a [`Curve`] a beat falls in, between two breakpoints: what a
@@ -89,11 +89,16 @@ pub trait Curve: Send + Sync {
     }
 }
 
-/// A trajectory of any `f32` unit reads at its raw value: the lane that
-/// consumes a `Curve` knows its target's unit.
-impl<U: Unit<Raw = f32> + Send + Sync> Curve for Trajectory<U> {
+/// A unit's value as the lane's `f32`.
+fn lane<U: Unit<Raw: CurveRaw>>(value: U) -> f32 {
+    value.to_raw().widen() as f32
+}
+
+/// A trajectory of any unit reads at its raw value, narrowed to the lane's
+/// `f32`: the lane that consumes a `Curve` knows its target's unit.
+impl<U: Unit<Raw: CurveRaw> + Send + Sync> Curve for Trajectory<U> {
     fn value_at(&self, beat: Beat) -> Option<f32> {
-        Trajectory::value_at(self, beat).map(U::to_raw)
+        Trajectory::value_at(self, beat).map(lane)
     }
 
     /// The trajectory's breakpoints, each breakpoint's `curve` the law of the piece it
@@ -107,8 +112,10 @@ impl<U: Unit<Raw = f32> + Send + Sync> Curve for Trajectory<U> {
             return None;
         }
         let inside = |v: U| {
-            self.range()
-                .is_none_or(|(min, max)| v.to_raw() >= min.to_raw() && v.to_raw() <= max.to_raw())
+            self.range().is_none_or(|(min, max)| {
+                let v = v.to_raw().widen();
+                v >= min.to_raw().widen() && v <= max.to_raw().widen()
+            })
         };
         // The first point after `beat`: the piece is the one before it.
         let next = points.partition_point(|p| p.time <= beat);
@@ -116,7 +123,7 @@ impl<U: Unit<Raw = f32> + Send + Sync> Curve for Trajectory<U> {
         // clamped as `value_at` clamps it.
         let hold = |until: Option<Beat>| {
             self.value_at(beat).map(|value| CurveSegment::Hold {
-                value: value.to_raw(),
+                value: lane(value),
                 until,
             })
         };
@@ -133,8 +140,8 @@ impl<U: Unit<Raw = f32> + Send + Sync> Curve for Trajectory<U> {
         Some(CurveSegment::Move {
             start: p.time,
             end: q.time,
-            from: p.value.to_raw(),
-            to: q.value.to_raw(),
+            from: lane(p.value),
+            to: lane(q.value),
             shape: p.law,
         })
     }

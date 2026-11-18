@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tutti_buffers::FoldError;
+use tutti_buffers::{Float, FoldError};
 use tutti_codec::Format;
 use tutti_dsp::DitherShape;
 use tutti_graph::TapReader;
@@ -293,7 +293,7 @@ impl Placement {
 /// The audio an output reads.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum Feed {
+pub enum Feed<F: Float = f32> {
     /// The graph's outputs (the declared root, or the engine's order for the
     /// width), folded onto the target's layout.
     Master,
@@ -309,7 +309,7 @@ pub enum Feed {
     /// [`Error::TapOverrun`](crate::Error::TapOverrun).
     Tap {
         /// The tap's reader: the render is its one consumer.
-        reader: TapReader,
+        reader: TapReader<F>,
         /// What its lanes are.
         lanes: Placement,
     },
@@ -318,12 +318,12 @@ pub enum Feed {
 /// One thing a render writes: the [`Feed`] it reads and the [`Target`] it
 /// becomes.
 #[derive(Debug)]
-pub struct Output {
-    feed: Feed,
+pub struct Output<F: Float = f32> {
+    feed: Feed<F>,
     target: Target,
 }
 
-impl Output {
+impl<F: Float> Output<F> {
     /// The graph's outputs, into `target`.
     #[must_use]
     pub fn master(target: impl Into<Target>) -> Self {
@@ -335,7 +335,7 @@ impl Output {
 
     /// What `reader` taps, placed as `lanes`, into `target`.
     #[must_use]
-    pub fn tap(reader: TapReader, lanes: Placement, target: impl Into<Target>) -> Self {
+    pub fn tap(reader: TapReader<F>, lanes: Placement, target: impl Into<Target>) -> Self {
         Self {
             feed: Feed::Tap { reader, lanes },
             target: target.into(),
@@ -344,7 +344,7 @@ impl Output {
 
     /// What this output reads.
     #[must_use]
-    pub fn feed(&self) -> &Feed {
+    pub fn feed(&self) -> &Feed<F> {
         &self.feed
     }
 
@@ -354,7 +354,7 @@ impl Output {
         &self.target
     }
 
-    pub(crate) fn into_parts(self) -> (Feed, Target) {
+    pub(crate) fn into_parts(self) -> (Feed<F>, Target) {
         (self.feed, self.target)
     }
 }
@@ -362,14 +362,14 @@ impl Output {
 /// What one [`Output`] produced, in the order the outputs were given.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum Produced {
+pub enum Produced<F: Float = f32> {
     /// From a [`Target::File`].
     File(Written),
     /// From a [`Target::Buffers`].
-    Buffers(Rendered),
+    Buffers(Rendered<F>),
 }
 
-impl Produced {
+impl<F: Float> Produced<F> {
     /// The file, or `None` for planes.
     ///
     /// ```
@@ -393,7 +393,7 @@ impl Produced {
 
     /// The planes, or `None` for a file.
     #[must_use]
-    pub fn buffers(&self) -> Option<&Rendered> {
+    pub fn buffers(&self) -> Option<&Rendered<F>> {
         match self {
             Self::Buffers(rendered) => Some(rendered),
             Self::File(_) => None,
@@ -411,7 +411,7 @@ impl Produced {
 
     /// The planes, owned, or `None` for a file.
     #[must_use]
-    pub fn into_buffers(self) -> Option<Rendered> {
+    pub fn into_buffers(self) -> Option<Rendered<F>> {
         match self {
             Self::Buffers(rendered) => Some(rendered),
             Self::File(_) => None,

@@ -44,11 +44,7 @@ fn tick(node: &mut VbapPannerNode, input: [f32; 2], out: &mut [f32]) {
 fn spread_reaches_the_stereo_width_path() {
     let mut node = VbapPannerNode::surround_5_1();
     node.param_set().set(UnitParam::StereoWidth, 1.0); // the width>0 branch
-    aim(
-        &node.param_set(),
-        Azimuth::new(0.0f32),
-        Elevation::new(0.0f32),
-    );
+    aim(&node.param_set(), Azimuth::new(0.0), Elevation::new(0.0));
 
     let mut out = vec![0.0f32; node.channels().count() as usize];
 

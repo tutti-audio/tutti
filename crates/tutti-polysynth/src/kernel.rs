@@ -10,6 +10,7 @@
 //! them: a naive saw at 4 kHz folds most of its energy back below Nyquist as
 //! inharmonic partials.
 
+use tutti_units::PhaseIncrement;
 use wide::{f32x8, u32x8};
 
 /// Eight voice lanes of `f32`.
@@ -24,7 +25,7 @@ pub(crate) const LANES: usize = 8;
 /// of a discontinuity. Past half a cycle per sample those two regions overlap
 /// and the correction double-counts, so a pitch above Nyquist is clamped just
 /// below it rather than rendered as garbage.
-pub(crate) const MAX_INCREMENT: f32 = 0.49;
+pub(crate) const MAX_INCREMENT: PhaseIncrement = PhaseIncrement(0.49);
 
 /// `sin(2π·p)` for a phase `p` in turns, `0.0..1.0`.
 ///

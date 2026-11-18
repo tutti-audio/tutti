@@ -18,7 +18,8 @@
 // methods it gives. `Affine(Dur)` is the only one that takes an argument.
 
 macro_rules! unit {
-    // Float quantities.
+    // Float quantities. Every continuous unit becomes `f64`; the `f32` arm is
+    // deleted with the last `f32` unit.
     (
         $(#[$m:meta])* $v:vis struct $name:ident($fv:vis f32): $($abilities:tt)*
     ) => {

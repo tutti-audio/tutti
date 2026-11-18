@@ -804,7 +804,7 @@ fn anchored(clock: Clock, old: Option<&Clock>, now: PlayReading, rate: SampleRat
         return clock;
     };
     let live = old_anchor.filter(|a| a.epoch == now.epoch);
-    let jump = f64::from(p.get()) - f64::from(old_phase.get());
+    let jump = (p - old_phase).get();
     let shifted = |a: RateAnchor| RateAnchor {
         phase: a.phase + jump,
         ..a

@@ -95,7 +95,7 @@ impl Vocoder {
         // frame's actual hop is one multiply on a table read that already
         // happens.
         let phase_per_sample = (0..bins)
-            .map(|k| Radians(Radians::TAU.get() * k as f32 / size as f32))
+            .map(|k| Radians::TAU * k as f64 / size as f64)
             .collect();
 
         Self {
@@ -209,15 +209,17 @@ impl Vocoder {
         self.fft.forward(&self.fft_buffer, &mut self.spectrum);
 
         // 3. Per-bin phase advance, re-accumulated at the synthesis rate.
-        let hop_ratio = synthesis_hop as f32 / analysis_hop as f32;
+        let hop_ratio = synthesis_hop as f64 / analysis_hop as f64;
         for k in 0..bins {
             let magnitude = self.spectrum[k].norm();
-            let phase = Radians(self.spectrum[k].arg());
+            // The spectrum is `f32`: its phase widens into the unit, and the
+            // accumulated phase narrows once per bin on the way back.
+            let phase = Radians(f64::from(self.spectrum[k].arg()));
 
             // Deviation of the observed advance from the expected one, wrapped
             // into [-π, π) — the unwrapping step that recovers the bin's true
             // instantaneous frequency rather than its aliased one.
-            let expected = Radians(self.phase_per_sample[k].get() * analysis_hop as f32);
+            let expected = self.phase_per_sample[k] * analysis_hop as f64;
 
             if self.primed {
                 let deviation = wrap_phase(phase - self.last_phase[k] - expected);
@@ -233,7 +235,8 @@ impl Vocoder {
             }
             self.last_phase[k] = phase;
 
-            self.spectrum[k] = Complex32::from_polar(magnitude, self.phase_accumulator[k].get());
+            self.spectrum[k] =
+                Complex32::from_polar(magnitude, self.phase_accumulator[k].get() as f32);
         }
 
         self.primed = true;

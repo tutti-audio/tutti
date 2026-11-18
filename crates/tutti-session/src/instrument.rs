@@ -81,7 +81,9 @@ pub enum NotInstrument {
 
 /// Opens an event inlet in `graph`: its node, and the keys that fill it on
 /// the Group an instrument plays.
-pub(crate) fn open_keys(graph: &mut Graph) -> (Key<EventInletNode>, MidiKeys) {
+pub(crate) fn open_keys<F: tutti_buffers::Float>(
+    graph: &mut Graph<F>,
+) -> (Key<EventInletNode>, MidiKeys) {
     let (node, writer) = graph.open_event_inlet(LIVE_INLET_CAPACITY);
     (node, MidiKeys::new(writer, MidiGroup::FIRST))
 }
@@ -208,7 +210,8 @@ where
     }
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
+/// `f32` because the instruments (`PolySynth`, the SoundFont unit) are `Node<f32>` only.
+impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Adds `instrument` to the graph, makes it playable and wires its strip
     /// to the master, so a note sent through its keys is heard. It holds no MPE
     /// zones: classic MPE reaches it already rewritten as per-note messages, by the
