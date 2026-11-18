@@ -514,7 +514,8 @@ impl SynthVoice {
 
         // Slide modulates the cutoff around its center.
         if let Some(slide) = self.mpe.effective_slide() {
-            cutoff *= two_octave_factor(slide.get() - SLIDE_CENTER.get());
+            // The cutoff is `f32`: the offset narrows once.
+            cutoff *= two_octave_factor((slide.get() - SLIDE_CENTER.get()) as f32);
         }
 
         Hz(cutoff)

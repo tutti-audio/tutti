@@ -9,14 +9,14 @@ use std::num::NonZeroUsize;
 use tutti_buffers::Planes;
 use tutti_curve::Law;
 use tutti_fixtures::midi;
-use tutti_midi_protocol::{bend_to_signed_f32, velocity_to_unit_f32};
+use tutti_midi_protocol::bend_to_signed_f32;
 use tutti_midi_protocol::{widen_bend, widen_value, widen_velocity};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
     PerNoteManagement, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
-use tutti_units::{Amplitude, Hz, Resonance, Seconds, Spread};
+use tutti_units::{Amplitude, Hz, Normalized, Resonance, Seconds, Spread};
 
 /// A synth driven by hand the way a graph drives it
 /// (`tutti_graph::contract::drive_input`): what these tests queue with
@@ -1634,19 +1634,18 @@ fn test_midi2_registered_per_note_controller_brightness_sets_only_addressed_slid
             .unwrap()
             .mpe_state()
             .slide
-            .get()
     };
-    assert!(
-        (slide(&synth, 60) - 1.0).abs() < 0.01,
-        "note 60 slide should be full, got {}",
-        slide(&synth, 60)
+    assert_eq!(
+        slide(&synth, 60),
+        Normalized::of(1.0),
+        "note 60 slide should be full"
     );
     // The unaddressed voice must keep its neutral default (center = no timbre
     // shift), not be dragged along with note 60.
-    assert!(
-        (slide(&synth, 64) - crate::mpe::SLIDE_CENTER.get()).abs() < 0.01,
-        "note 64 (unaddressed) slide must stay at center, got {}",
-        slide(&synth, 64)
+    assert_eq!(
+        slide(&synth, 64),
+        crate::mpe::SLIDE_CENTER,
+        "note 64 (unaddressed) slide must stay at center"
     );
 }
 
@@ -1753,12 +1752,14 @@ fn test_mpe_per_voice_pressure() {
         .find(|v| v.is_active() && v.channel() == MidiChannel::of(2))
         .unwrap();
 
-    assert!(
-        (voice_ch1.mpe_state().pressure.get() - 1.0).abs() < 0.01,
+    assert_eq!(
+        voice_ch1.mpe_state().pressure,
+        Normalized::of(1.0),
         "the addressed note should have full pressure"
     );
-    assert!(
-        voice_ch2.mpe_state().pressure.get().abs() < 0.01,
+    assert_eq!(
+        voice_ch2.mpe_state().pressure,
+        Normalized::of(0.0),
         "the other note should have no pressure"
     );
 }
@@ -1806,8 +1807,9 @@ fn test_mpe_per_voice_slide() {
         .iter()
         .find(|v| v.is_active() && v.channel() == MidiChannel::of(1))
         .unwrap();
-    assert!(
-        (voice.mpe_state().slide.get() - 1.0).abs() < 0.01,
+    assert_eq!(
+        voice.mpe_state().slide,
+        Normalized::of(1.0),
         "the addressed note should have full slide"
     );
 }
@@ -1941,8 +1943,9 @@ fn test_mpe_note_on_resets_expression() {
         .iter()
         .find(|v| v.is_active() && v.channel() == MidiChannel::of(1))
         .unwrap();
-    assert!(
-        voice.mpe_state().pressure.get().abs() < 0.01,
+    assert_eq!(
+        voice.mpe_state().pressure,
+        Normalized::of(0.0),
         "New note should have reset MPE pressure"
     );
 }
@@ -2366,7 +2369,7 @@ fn a_midi1_and_a_midi2_note_on_claim_the_same_voice() {
         assert_eq!(slot.channel(), MidiChannel::of(3), "{message:?}");
         assert_eq!(
             slot.velocity(),
-            velocity_to_unit_f32(NoteVelocity::new(wide)),
+            NoteVelocity::new(wide).normalized(),
             "{message:?} sounds at the widened velocity"
         );
     }
@@ -2653,7 +2656,8 @@ fn midi1_values_scale_to_exact_figures() {
             velocity: U7::of(100),
         },
     )));
-    for (value, expected) in [(0, 0.0), (64, 0.5), (127, 1.0)] {
+    // M2-115 section 3 widens 0, 64 and 127 to the minimum, centre and maximum words.
+    for (value, word) in [(0, 0), (64, 0x8000_0000_u32), (127, u32::MAX)] {
         synth.apply_midi(ump(Message::Midi1(
             address(1),
             Voice1::ControlChange {
@@ -2678,7 +2682,7 @@ fn midi1_values_scale_to_exact_figures() {
         )));
         assert_eq!(
             voice_of(&synth, 60).mpe_state().pressure.get(),
-            expected,
+            f64::from(word) / f64::from(u32::MAX),
             "pressure = {value}"
         );
     }

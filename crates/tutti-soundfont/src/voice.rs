@@ -6,7 +6,6 @@ use tutti_buffers::{Mono, MonoMut};
 use tutti_dsp::{
     Biquad, DirectForm1, PanLaw, SOLVE_CEILING, SvfControls, SvfModel, SvfType, pan_gains,
 };
-use tutti_midi_protocol::value_to_unit_f32;
 use tutti_sf2::{SamplePool, Side};
 use tutti_ump::ControlValue;
 use tutti_ump::{MidiChannel, NoteNumber, RegisteredPerNoteController};
@@ -355,11 +354,13 @@ impl Voice {
         match control {
             NoteControl::Pitch(pitch) => self.note.pitch = Some(pitch.note_number()),
             NoteControl::Registered(RegisteredPerNoteController::Volume, value) => {
-                self.note.volume = value_to_unit_f32(ControlValue::new(value));
+                // The voice's gains are `f32` DSP state: narrowed once here.
+                self.note.volume = ControlValue::new(value).normalized().get() as f32;
             }
             NoteControl::Registered(RegisteredPerNoteController::Pan, value) => {
+                // The pan is `f32` DSP state: narrowed once here.
                 self.note.pan =
-                    Some(100_f32 * value_to_unit_f32(ControlValue::new(value)) - 50_f32);
+                    Some((100.0 * ControlValue::new(value).normalized().get() - 50.0) as f32);
             }
             NoteControl::Pressure(_)
             | NoteControl::Registered(..)

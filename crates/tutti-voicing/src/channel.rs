@@ -15,10 +15,10 @@
 //! per-channel controller state, so it can be handed on whole (a SoundFont swap
 //! keeps what a performer set, and takes a new font).
 
-use tutti_midi_protocol::{signed_f32_to_bend, unit_f32_to_value};
+use tutti_midi_protocol::signed_f32_to_bend;
 use tutti_ump::ControlValue;
 use tutti_ump::{CCNumber, NoteNumber, RegisteredData, Rpn, U7, U14, Voice2};
-use tutti_units::{Cents, Pan, Seconds, Semitones};
+use tutti_units::{Cents, Normalized, Pan, Seconds, Semitones};
 
 /// What a full Modulation Wheel spans until RPN 5 says otherwise: General MIDI
 /// 2 section 3.4.4, default 00H/40H (+/-50 cents) (MSB semitones, LSB
@@ -79,8 +79,8 @@ pub struct ChannelState {
     volume: U14,
     pan: U14,
     expression: U14,
-    /// Channel Pressure, `0.0..=1.0`.
-    pressure: f32,
+    /// Channel Pressure.
+    pressure: Normalized,
     modulation_range: Cents,
     pub(crate) bend: Bend,
     /// Portamento On/Off (CC 65).
@@ -117,7 +117,7 @@ impl ChannelState {
             volume: with_msb(U7::of(100)),
             pan: with_msb(U7::of(64)),
             expression: with_msb(U7::of(127)),
-            pressure: 0.0,
+            pressure: Normalized::of(0.0),
             modulation_range: DEFAULT_MODULATION_RANGE,
             bend: Bend {
                 position: 0.0,
@@ -147,7 +147,7 @@ impl ChannelState {
     pub(crate) fn reset_controllers(&mut self) {
         self.modulation = U14::of(0);
         self.expression = with_msb(U7::of(127));
-        self.pressure = 0.0;
+        self.pressure = Normalized::of(0.0);
         self.portamento = false;
     }
 
@@ -172,9 +172,9 @@ impl ChannelState {
         }
     }
 
-    /// Channel Pressure, `0.0..=1.0`.
-    pub(crate) fn set_pressure(&mut self, pressure: f32) {
-        self.pressure = pressure.clamp(0.0, 1.0);
+    /// Channel Pressure.
+    pub(crate) fn set_pressure(&mut self, pressure: Normalized) {
+        self.pressure = pressure;
     }
 
     /// The Modulation Depth Range (RPN 5, CA-026) from its data word, MSB
@@ -231,7 +231,9 @@ impl ChannelState {
             emit(cc(CCNumber::PORTAMENTO_CONTROL, key.get()));
         }
         if self.pressure != fresh.pressure {
-            emit(Voice2::ChannelPressure(unit_f32_to_value(self.pressure)));
+            emit(Voice2::ChannelPressure(ControlValue::from_normalized(
+                self.pressure,
+            )));
         }
         if self.bend.position != fresh.bend.position {
             emit(Voice2::PitchBend(signed_f32_to_bend(self.bend.position)));
@@ -350,9 +352,9 @@ impl ChannelState {
         position(self.expression)
     }
 
-    /// Channel Pressure, `0.0..=1.0`.
+    /// Channel Pressure.
     #[must_use]
-    pub fn pressure(&self) -> f32 {
+    pub fn pressure(&self) -> Normalized {
         self.pressure
     }
 
