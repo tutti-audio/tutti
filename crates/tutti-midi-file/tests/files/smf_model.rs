@@ -7,7 +7,7 @@
 //! differ, so equality is on the model and on the independent decoder's
 //! reading of the bytes, never on the bytes.
 
-use crate::common::{self, metrical, sequences, track};
+use crate::common::{self, metrical, sequences, track, unspecified};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 
@@ -117,7 +117,14 @@ fn every_event_kind_survives_a_read_and_a_write() {
         let tracks = if format == 0 {
             vec![everything()]
         } else {
-            vec![everything(), vec![RawEvent::note_on(0, 1, 70, 80)]]
+            vec![
+                everything(),
+                vec![
+                    RawEvent::tempo(0, 500_000),
+                    RawEvent::time_signature(0, 4, 2),
+                    RawEvent::note_on(0, 1, 70, 80),
+                ],
+            ]
         };
         let bytes = smf(format, &tracks);
         let file = read(&bytes);
@@ -257,7 +264,10 @@ fn a_sysex_between_notes_does_not_shift_the_beat_grid() {
             RawEvent::note_on(BEAT, 0, 62, 100),
         ]],
     ));
-    let ticks: Vec<u64> = file.tracks()[0].events().iter().map(|(t, _)| t.0).collect();
+    let ticks: Vec<u64> = unspecified(&file.tracks()[0])
+        .iter()
+        .map(|(t, _)| t.0)
+        .collect();
     assert_eq!(ticks, [0, 240, 480, 960]);
     assert_eq!(metrical(&file).beat_at(Tick(960)), Beat(2.0));
 }
@@ -324,7 +334,8 @@ fn format_2_keeps_its_sequences_apart() {
             vec![RawEvent::note_on(0, 0, 62, 100)],
         ],
     ));
-    assert_eq!(metrical(&parallel).events().count(), 3);
+    // The three events and the Time Signature the file is given.
+    assert_eq!(metrical(&parallel).events().count(), 4);
     assert!(parallel.timebase().metrical().is_some());
     assert_eq!(
         metrical(&parallel).tempo_map().tempo_at(Beat(0.0)),
@@ -801,7 +812,7 @@ fn a_velocity_zero_note_on_closes_the_note() {
 #[test]
 fn a_velocity_zero_note_on_stays_a_note_on_in_the_file() {
     let file = read(&smf(0, &[vec![RawEvent::note_on(0, 0, 60, 0)]]));
-    assert_eq!(file.tracks()[0].events()[0].1, on(0, 60, 0));
+    assert_eq!(unspecified(&file.tracks()[0])[0].1, on(0, 60, 0));
     assert_eq!(read(&file.to_bytes()), file);
 }
 
@@ -829,9 +840,11 @@ fn the_writer_frames_a_file_as_the_spec_bytes() {
         [
             // MThd, length 6, format 1, two tracks, 480 ticks per quarter.
             0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 2, 0x01, 0xE0, //
-            // MTrk, length 11: Set Tempo 666 667 us (90 BPM), End of Track.
-            0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 11, //
+            // MTrk, length 19: Set Tempo 666 667 us (90 BPM), the default Time
+            // Signature, End of Track.
+            0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 19, //
             0x00, 0xFF, 0x51, 0x03, 0x0A, 0x2C, 0x2B, //
+            0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08, //
             0x00, 0xFF, 0x2F, 0x00, //
             // MTrk, length 13: Note On, Note Off at delta 1920, End of Track.
             0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 13, //
