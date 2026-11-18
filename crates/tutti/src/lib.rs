@@ -226,7 +226,7 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 pub mod nodes {
     pub use tutti_dsp::{
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, Fdn, FirSummary,
-        Full, Gains, HrtfBinauralError, Inline, Lanes, Line, LineModulation, LookaheadError,
+        Full, Gains, HrtfBinauralError, Inline, Lanes, Lerp, Line, LineModulation, LookaheadError,
         Matrix, MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap,
         ResampleError, Ring, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };

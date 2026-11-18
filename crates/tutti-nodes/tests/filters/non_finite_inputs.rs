@@ -61,8 +61,8 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
     }
     let longest = MaxDelay::of(MaxDelay::CAP);
     for mut node in [
-        DelayNode::mono(longest, DelayControls::DEFAULT),
-        DelayNode::stereo(longest, DelayControls::DEFAULT),
+        DelayNode::<f32>::mono(longest, DelayControls::DEFAULT),
+        DelayNode::<f32>::stereo(longest, DelayControls::DEFAULT),
     ] {
         node.prepare(&Prepare::new(RATE, MaxBlock::of(Samples(64))));
         assert!(renders_finite(&mut node, 4));
@@ -72,7 +72,7 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
 /// A NaN initial delay time is read as zero, whatever the maximum.
 #[test]
 fn a_delay_with_a_nan_initial_time_starts_at_zero() {
-    let node = DelayNode::mono(
+    let node = DelayNode::<f32>::mono(
         MaxDelay::of(Seconds(0.1)),
         DelayControls {
             time: Seconds(f64::NAN),

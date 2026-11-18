@@ -20,39 +20,40 @@
 //!
 //! The delay has **no latency**: the echo is the effect, not processing delay.
 
-use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Feedback, Gain, SampleRate, SampleSpan, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 use super::routing::Routing;
 use crate::finite::finite_or;
-use crate::{DelayLine, Glide, InterpolationMode, Steps, delay_step};
+use crate::{DelayLine, Glide, InterpolationMode, Lerp, Steps, delay_step};
 
 /// What a delay reads while it runs: the delay in frames, and the two feedbacks, each
-/// aimed by [`DelayBank::aim`] and stepped by [`DelayBank::process`].
+/// aimed by [`DelayBank::aim`] and stepped by [`DelayBank::process`], held in the bank's
+/// float `F`.
 ///
 /// The time glides at [`DELAY_SLEW`] frames of delay per frame; the channels past the
 /// first that hold a time of their own hold it whole.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DelayGlides {
-    time: Glide<f32>,
-    own: [f32; MAX_DELAY_CHANNELS],
-    feedback: Glide<f32>,
-    cross: Glide<f32>,
+pub struct DelayGlides<F: Float + Lerp> {
+    time: Glide<F>,
+    own: [F; MAX_DELAY_CHANNELS],
+    feedback: Glide<F>,
+    cross: Glide<F>,
     /// The steps a feedback glide takes.
     steps: u32,
 }
 
-impl DelayGlides {
+impl<F: Float + Lerp> DelayGlides<F> {
     /// A delay at rest on no delay and no feedback, whose feedbacks take `gain_steps`
     /// steps to a new value.
     #[must_use]
     pub fn landed(gain_steps: u32) -> Self {
         Self {
-            time: Glide::landed(0.0),
-            own: [0.0; MAX_DELAY_CHANNELS],
-            feedback: Glide::landed(0.0),
-            cross: Glide::landed(0.0),
+            time: Glide::landed(F::ZERO),
+            own: [F::ZERO; MAX_DELAY_CHANNELS],
+            feedback: Glide::landed(F::ZERO),
+            cross: Glide::landed(F::ZERO),
             steps: gain_steps,
         }
     }
@@ -73,17 +74,29 @@ impl DelayGlides {
 }
 
 /// `secs` as a delay in frames: clamped into `0..=max` and into the line of `cap`
-/// frames. The delay kernel reads an `f32` position per frame, so the span narrows here,
-/// once per frame, after the clamp.
+/// frames, designed in `f64` and narrowed to the line's float once, after the clamp.
 #[inline(always)]
-fn frames_of(secs: f32, max: Seconds, rate: SampleRate, cap: usize) -> f32 {
-    let secs = Seconds::from_f32(secs.clamp(0.0, max.to_f32()));
+fn frames_of<F: Float>(secs: Seconds, max: Seconds, rate: SampleRate, cap: usize) -> F {
+    let secs = Seconds(secs.get().clamp(0.0, max.get()));
     // The clamp leaves `0..=max` (finite), so a span exists; a NaN time, which
     // the callers never pass, is no delay.
     let Some(span) = SampleSpan::from_seconds(secs, rate) else {
-        return 0.0;
+        return F::ZERO;
     };
-    span.min(SampleSpan::from_samples(Samples::new(cap))).get() as f32
+    F::from_f64(span.min(SampleSpan::from_samples(Samples::new(cap))).get())
+}
+
+/// The loop's feedback and cross-feedback bounded as a pair ([`Feedback::stable_pair`]), in
+/// the state float. A pair already inside the bound is returned as it is, in `F`; one outside
+/// it is scaled by `Feedback`'s own rule, whose unit is `f32` wide.
+#[inline(always)]
+fn stable_pair<F: Float>(fb: F, cross: F) -> (F, F) {
+    let bound = F::from_f32(Feedback::MAX_STABLE.get());
+    if fb >= F::ZERO && cross >= F::ZERO && fb + cross <= bound {
+        return (fb, cross);
+    }
+    let (fb, cross) = Feedback::stable_pair(fb.to_f32(), cross.to_f32());
+    (F::from_f32(fb.get()), F::from_f32(cross.get()))
 }
 
 /// The per-frame lanes a delay reads beside its audio, in the audio's sample format, each
@@ -98,16 +111,17 @@ pub struct DelayLanes<'a, S: Float = f32> {
 }
 
 /// A feedback delay of any width: a [`DelayLine`] per channel, and the loop that
-/// recirculates them.
+/// recirculates them, all in the state float `F`.
 ///
 /// Built on the control side for one rate, where it allocates the lines; a clone keeps
-/// their size, and [`reset`](Self::reset) zeroes them without allocating.
+/// their size, and [`reset`](Self::reset) zeroes them without allocating. A view of
+/// another [`Float`] is converted at the edges.
 #[derive(Clone, Debug)]
-pub struct DelayBank {
-    lines: Box<[DelayLine<f32>]>,
+pub struct DelayBank<F: Float> {
+    lines: Box<[DelayLine<F>]>,
     /// Each channel's feedback tap of the frame, read before any line is written (the
     /// coupled loop's).
-    taps: Box<[f32]>,
+    taps: Box<[F]>,
     interpolation: InterpolationMode,
     routing: Routing,
     linked: bool,
@@ -120,7 +134,7 @@ pub struct DelayBank {
     own: [Seconds; MAX_DELAY_CHANNELS],
 }
 
-impl DelayBank {
+impl<F: Float + Lerp> DelayBank<F> {
     /// A silent delay of `layout` at `rate`: a line per channel of `ceil(max_delay *
     /// rate)` frames. Allocates: build it on the control side.
     #[must_use]
@@ -133,7 +147,7 @@ impl DelayBank {
         }
         Self {
             lines: (0..width).map(|_| DelayLine::new(cap)).collect(),
-            taps: vec![0.0; width].into_boxed_slice(),
+            taps: vec![F::ZERO; width].into_boxed_slice(),
             interpolation: layout.interpolation(),
             routing: *layout.routing(),
             linked: layout.times().is_linked(),
@@ -149,34 +163,39 @@ impl DelayBank {
         for line in &mut self.lines {
             line.reset();
         }
-        self.taps.fill(0.0);
+        self.taps.fill(F::ZERO);
     }
 
     /// `secs` as a delay in frames: clamped into `0..=max_delay` and into the line. A time
     /// that is not finite is no delay.
-    fn frames(&self, secs: f32) -> f32 {
-        frames_of(finite_or(secs, 0.0), self.max, self.rate, self.cap)
+    fn frames(&self, secs: Seconds) -> F {
+        frames_of(
+            Seconds(finite_or(secs.get(), 0.0)),
+            self.max,
+            self.rate,
+            self.cap,
+        )
     }
 
     /// Aims `glides` at `controls`: a time past the longest reads as the longest and one that
     /// is not finite as none, and a feedback that is not finite as none (the pair is
     /// bounded where it is read, [`Feedback::stable_pair`]). No allocation.
-    pub fn aim(&self, glides: &mut DelayGlides, controls: &DelayControls) {
-        let first = self.frames(controls.time.to_f32());
+    pub fn aim(&self, glides: &mut DelayGlides<F>, controls: &DelayControls) {
+        let first = self.frames(controls.time);
         glides.time.aim_by(first, Steps::Rate(DELAY_SLEW));
         for (c, own) in glides.own.iter_mut().enumerate() {
             *own = if c == 0 || self.linked {
                 first
             } else {
-                self.frames(self.own[c].to_f32())
+                self.frames(self.own[c])
             };
         }
         let steps = Steps::Fixed(glides.steps);
-        let fb = finite_or(controls.feedback.get(), 0.0);
+        let fb = F::from_f64(f64::from(finite_or(controls.feedback.get(), 0.0)));
         let cross = if self.routing.is_none() {
-            0.0
+            F::ZERO
         } else {
-            finite_or(controls.cross_feedback.get(), 0.0)
+            F::from_f64(f64::from(finite_or(controls.cross_feedback.get(), 0.0)))
         };
         glides.feedback.aim_by(fb, steps);
         glides.cross.aim_by(cross, steps);
@@ -192,7 +211,7 @@ impl DelayBank {
     /// No allocation.
     pub fn process<S: Float>(
         &mut self,
-        glides: &mut DelayGlides,
+        glides: &mut DelayGlides<F>,
         lanes: DelayLanes<'_, S>,
         input: Planes<'_, S>,
         mut output: PlanesMut<'_, '_, S>,
@@ -221,12 +240,12 @@ impl DelayBank {
             lanes.feedback.map(|l| l.samples()),
         );
         let cf = g.cross.now();
-        let coupled = !self.routing.is_none() && (cf != 0.0 || g.cross.target() != 0.0);
+        let coupled = !self.routing.is_none() && (cf != F::ZERO || g.cross.target() != F::ZERO);
         let moving = g.time.blended(frames) > 0
             || g.feedback.blended(frames) > 0
             || g.cross.blended(frames) > 0;
         // The glided value at frame `i` of the block: the step after the ones taken.
-        let at = |glide: &Glide<f32>, i: usize| {
+        let at = |glide: &Glide<F>, i: usize| {
             let k = glide
                 .taken()
                 .saturating_add(1)
@@ -235,15 +254,14 @@ impl DelayBank {
         };
         let linked = self.linked;
         let (rate, max, cap) = (self.rate, self.max, self.cap);
-        let lane_frames = |secs: f32| frames_of(secs, max, rate, cap);
-        let base = |c: usize, delay: f32| {
+        let lane_frames = |secs: f64| frames_of::<F>(Seconds(secs), max, rate, cap);
+        let base = |c: usize, delay: F| {
             if c == 0 || linked { delay } else { g.own[c] }
         };
         if time.is_none() && feedback.is_none() && !moving {
             // Nothing moves and nothing is driven: every control is a constant of the loop,
             // the common case and the one worth keeping tight.
-            let (fb, cf) = Feedback::stable_pair(g.feedback.target(), g.cross.target());
-            let (fb, cf) = (fb.get(), cf.get());
+            let (fb, cf) = stable_pair(g.feedback.target(), g.cross.target());
             let delay = g.time.target();
             self.run(
                 &xs[..width],
@@ -257,16 +275,20 @@ impl DelayBank {
             // A feedback lane is clamped, and a frame that is not finite is the glided
             // feedback; self- and cross-feedback feed the same loop, so they are bounded as
             // a pair whatever drives them.
-            let gain = |i: usize| -> (f32, f32) {
+            let gain = |i: usize| -> (F, F) {
                 let glided = at(&g.feedback, i);
                 let fb = feedback.and_then(|s| s.get(i)).map_or(glided, |x| {
-                    Feedback::new_clamped(finite_or(x.convert_to::<f32>(), glided)).get()
+                    let x = x.to_f64();
+                    if x.is_finite() {
+                        F::from_f64(x).clamp(F::ZERO, F::from_f32(Feedback::MAX_STABLE.get()))
+                    } else {
+                        glided.clamp(F::ZERO, F::from_f32(Feedback::MAX_STABLE.get()))
+                    }
                 });
-                let (fb, cf) = Feedback::stable_pair(fb, at(&g.cross, i));
-                (fb.get(), cf.get())
+                stable_pair(fb, at(&g.cross, i))
             };
-            let delay_at = |c: usize, i: usize| -> f32 {
-                match time.and_then(|s| s.get(i)).map(|x| x.convert_to::<f32>()) {
+            let delay_at = |c: usize, i: usize| -> F {
+                match time.and_then(|s| s.get(i)).map(|x| x.to_f64()) {
                     Some(s) if s.is_finite() => lane_frames(s),
                     _ => base(c, at(&g.time, i)),
                 }
@@ -292,8 +314,8 @@ impl DelayBank {
         ys: &mut [&mut [S]],
         frames: usize,
         coupled: bool,
-        gain: impl Fn(usize) -> (f32, f32),
-        delay_at: impl Fn(usize, usize) -> f32,
+        gain: impl Fn(usize) -> (F, F),
+        delay_at: impl Fn(usize, usize) -> F,
     ) {
         let interp = self.interpolation;
         let width = xs.len();
@@ -302,8 +324,8 @@ impl DelayBank {
             for (c, line) in self.lines.iter_mut().enumerate().take(width) {
                 for (i, (y, x)) in ys[c][..frames].iter_mut().zip(xs[c]).enumerate() {
                     let (fb, _) = gain(i);
-                    let out = delay_step(line, x.convert_to::<f32>(), delay_at(c, i), fb, interp);
-                    *y = out.convert_to::<S>();
+                    let out = delay_step(line, F::from_f64(x.to_f64()), delay_at(c, i), fb, interp);
+                    *y = S::from_f64(out.to_f64());
                 }
             }
             return;
@@ -314,20 +336,20 @@ impl DelayBank {
             let (fb, cf) = gain(i);
             for (c, line) in self.lines.iter().enumerate().take(width) {
                 let d = delay_at(c, i);
-                self.taps[c] = line.read_sample((d.max(1.0) - 1.0).max(0.0), interp);
+                self.taps[c] = line.read_sample((d.max(F::ONE) - F::ONE).max(F::ZERO), interp);
             }
             for (c, line) in self.lines.iter_mut().enumerate().take(width) {
-                let mut acc = xs[c][i].convert_to::<f32>() + self.taps[c] * fb;
+                let mut acc = F::from_f64(xs[c][i].to_f64()) + self.taps[c] * fb;
                 for j in 0..width {
                     let w = self.routing.weight(c, j);
                     if w != Gain::SILENT {
-                        acc += w.apply(cf) * self.taps[j];
+                        acc += F::from_f64(f64::from(w.get())) * cf * self.taps[j];
                     }
                 }
                 line.push_sample(acc);
             }
             for (c, line) in self.lines.iter().enumerate().take(width) {
-                ys[c][i] = line.read_sample(delay_at(c, i), interp).convert_to::<S>();
+                ys[c][i] = S::from_f64(line.read_sample(delay_at(c, i), interp).to_f64());
             }
         }
     }

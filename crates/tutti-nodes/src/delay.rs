@@ -9,7 +9,7 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, DelayBank, DelayControls, DelayGlides, DelayLanes, DelayLayout, GAIN_GLIDE,
-    InterpolationMode, MaxDelay,
+    InterpolationMode, Lerp, MaxDelay,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, MaxBlock};
@@ -72,9 +72,12 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// lines (`ceil(max_delay * rate)` frames each), before its first block; a re-prepare
 /// empties them. Its tail is [`Tail::Unknown`]: a recirculating
 /// line rings for as long as its feedback says, so the executor never skips it.
-pub type DelayNode = KernelNode<DelayKernel>;
+///
+/// `F` is the state precision of the lines and the glides, `f64` by default; a line holds
+/// `ceil(max_delay * rate)` frames of it, so `DelayNode::<f32>` halves the memory.
+pub type DelayNode<F = f64> = KernelNode<DelayKernel<F>>;
 
-impl DelayNode {
+impl<F: Float + Lerp> DelayNode<F> {
     /// A delay on the bus `input`, as wide as it, holding up to `max_delay`, reading with
     /// `interpolation` and running at `controls`.
     ///
@@ -163,16 +166,16 @@ impl DelaySet {
 /// graph's bounce would have to render: the tail is [`Tail::Unknown`] and never narrowed, so
 /// the executor never skips it.
 #[derive(Clone, Debug)]
-pub struct DelayKernel {
+pub struct DelayKernel<F: Float + Lerp> {
     layout: DelayLayout,
     /// The lines, sized when the rate is known: `None` until [`prepare`](Kernel::prepare).
-    bank: Option<DelayBank>,
-    glides: DelayGlides,
+    bank: Option<DelayBank<F>>,
+    glides: DelayGlides<F>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl DelayKernel {
+impl<F: Float + Lerp> DelayKernel<F> {
     /// A delay built to `layout`. It has no lines until `prepare` gives it a rate.
     fn new(layout: DelayLayout) -> Self {
         Self {
@@ -184,7 +187,7 @@ impl DelayKernel {
     }
 }
 
-impl Kernel for DelayKernel {
+impl<F: Float + Lerp> Kernel for DelayKernel<F> {
     type Set = DelaySet;
 
     /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
@@ -254,6 +257,7 @@ impl Kernel for DelayKernel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::drive_kernel;
     use tutti_dsp::{ChannelTimes, Routing};
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
@@ -284,7 +288,7 @@ mod tests {
     /// `node` prepared at [`RATE`], over `inputs` (one `Vec` per channel) frame by frame,
     /// `params[k]` on param port `k` when `Some` (so a change lands whole on its frame).
     fn frames_of(
-        mut node: DelayNode,
+        mut node: DelayNode<f32>,
         inputs: &[Vec<f32>],
         params: &[Option<&[f32]>],
     ) -> Vec<Vec<f32>> {
@@ -321,7 +325,7 @@ mod tests {
     /// cell with it, and the set has the three controls in the layout's order.
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
-        let node = DelayNode::stereo(MAX, controls(0.05, 0.4, 0.2));
+        let node = DelayNode::<f32>::stereo(MAX, controls(0.05, 0.4, 0.2));
         assert_eq!(
             node.param_set().params().collect::<Vec<_>>(),
             [
@@ -339,7 +343,7 @@ mod tests {
     /// delay) and a tail that is unknown, since a feedback loop rings as long as it says.
     #[test]
     fn the_shape_declares_the_three_controls_and_no_latency() {
-        let d = DelayNode::stereo(MAX, controls(0.01, 0.5, 0.25));
+        let d = DelayNode::<f32>::stereo(MAX, controls(0.01, 0.5, 0.25));
         let shape = d.shape();
         assert_eq!(
             shape.params.as_slice(),
@@ -363,7 +367,7 @@ mod tests {
         assert_eq!(d.param_base(1), Some(0.5));
         assert_eq!(d.param_base(2), Some(0.25));
         assert_eq!(d.param_base(3), None, "no fourth param");
-        let wide = DelayNode::new(
+        let wide = DelayNode::<f32>::new(
             bus(6),
             MAX,
             InterpolationMode::Linear,
@@ -376,14 +380,14 @@ mod tests {
             ),
             (6, 6)
         );
-        let mono = DelayNode::mono(MAX, controls(0.01, 0.3, 0.0));
+        let mono = DelayNode::<f32>::mono(MAX, controls(0.01, 0.3, 0.0));
         assert_eq!(mono.shape().audio_in().count(), 1);
     }
 
     /// A zero delay without feedback passes the input through.
     #[test]
     fn a_zero_delay_passes_the_input_through() {
-        let node = DelayNode::mono(MAX, controls(0.0, 0.0, 0.0));
+        let node = DelayNode::<f32>::mono(MAX, controls(0.0, 0.0, 0.0));
         let out = frames_of(node, &[vec![0.5]], &[]);
         assert_eq!(out[0][0], 0.5);
     }
@@ -395,7 +399,7 @@ mod tests {
         let layout = DelayLayout::new(BusTopology::STEREO, MAX, InterpolationMode::Linear)
             .with_times(ChannelTimes::each(&[Seconds(frames(10.0))]).unwrap())
             .unwrap();
-        let node = DelayNode::from_layout(layout, controls(frames(5.0), 0.0, 0.0));
+        let node = DelayNode::<f32>::from_layout(layout, controls(frames(5.0), 0.0, 0.0));
         let out = frames_of(node, &impulses(2, 12, &[0, 1]), &[]);
         let heard = |c: &[f32]| c.iter().position(|&s| s != 0.0);
         assert_eq!((heard(&out[0]), heard(&out[1])), (Some(5), Some(10)));
@@ -407,7 +411,7 @@ mod tests {
     fn the_stereo_cross_feedback_reaches_the_other_channel() {
         let x = impulses(2, 41, &[0]);
         let out = frames_of(
-            DelayNode::stereo(MAX, controls(frames(10.0), 0.0, 0.5)),
+            DelayNode::<f32>::stereo(MAX, controls(frames(10.0), 0.0, 0.5)),
             &x,
             &[],
         );
@@ -416,7 +420,7 @@ mod tests {
             "the right hears the left's echo a period on, scaled"
         );
         let out = frames_of(
-            DelayNode::stereo(MAX, controls(frames(10.0), 0.0, 0.0)),
+            DelayNode::<f32>::stereo(MAX, controls(frames(10.0), 0.0, 0.0)),
             &x,
             &[],
         );
@@ -427,7 +431,7 @@ mod tests {
     /// cross-feedback (which has nowhere to go with no routing) is inert.
     #[test]
     fn wide_delay_channels_are_independent_without_a_routing() {
-        let node = DelayNode::new(
+        let node = DelayNode::<f32>::new(
             bus(6),
             MAX,
             InterpolationMode::Linear,
@@ -447,7 +451,7 @@ mod tests {
         let (d, g, len) = (16usize, 0.5f32, 16 * 8 + 3);
         let time = vec![frames(d as f64) as f32; len];
         let feedback = vec![g; len];
-        let node = DelayNode::mono(MAX, controls(0.0, 0.0, 0.0));
+        let node = DelayNode::<f32>::mono(MAX, controls(0.0, 0.0, 0.0));
         let out = frames_of(
             node,
             &impulses(1, len, &[0]),
@@ -467,7 +471,7 @@ mod tests {
     #[test]
     fn a_fed_feedback_drives_the_tail() {
         let run = |fb: f32| -> f32 {
-            let node = DelayNode::stereo(MAX, controls(frames(10.0), 0.0, 0.0));
+            let node = DelayNode::<f32>::stereo(MAX, controls(frames(10.0), 0.0, 0.0));
             let lane = vec![fb; 200];
             let out = frames_of(node, &impulses(2, 200, &[0, 1]), &[None, Some(&lane)]);
             out[0][50..].iter().map(|s| s * s).sum()
@@ -484,7 +488,7 @@ mod tests {
         let layout = DelayLayout::new(b, MAX, InterpolationMode::Linear)
             .with_routing(Routing::ring(b))
             .unwrap();
-        let node = DelayNode::from_layout(layout, controls(frames(10.0), 0.0, 0.8));
+        let node = DelayNode::<f32>::from_layout(layout, controls(frames(10.0), 0.0, 0.8));
         let out = frames_of(node, &impulses(6, 26, &[0]), &[]);
         let energy: Vec<f32> = out
             .iter()
@@ -502,7 +506,7 @@ mod tests {
         let layout = DelayLayout::new(b, MaxDelay::of(Seconds(0.1)), InterpolationMode::Linear)
             .with_routing(Routing::normalized(b, &[Gain::UNITY; 16]).unwrap())
             .unwrap();
-        let node = DelayNode::from_layout(layout, controls(0.002, 0.99, 0.99));
+        let node = DelayNode::<f32>::from_layout(layout, controls(0.002, 0.99, 0.99));
         let out = frames_of(node, &impulses(4, 8_001, &[0, 1, 2, 3]), &[]);
         let peak = out
             .iter()
@@ -519,7 +523,7 @@ mod tests {
     #[test]
     fn a_time_past_the_line_is_the_longest() {
         let rate = SampleRate::SR_44K1;
-        let node = DelayNode::mono(MaxDelay::of(Seconds(0.1)), controls(5.0, 0.0, 0.0));
+        let node = DelayNode::<f32>::mono(MaxDelay::of(Seconds(0.1)), controls(5.0, 0.0, 0.0));
         let mut node = prepared(node, rate, 4_800);
         let x = impulses(1, 4_800, &[0]);
         let out = drive(&mut node, rate, Planes::new(&[&x[0]]).unwrap(), &[]);
@@ -531,7 +535,7 @@ mod tests {
     #[test]
     fn a_re_prepare_empties_the_lines() {
         let mut node = prepared(
-            DelayNode::mono(MAX, controls(frames(50.0), 0.9, 0.0)),
+            DelayNode::<f32>::mono(MAX, controls(frames(50.0), 0.9, 0.0)),
             RATE,
             64,
         );
@@ -556,7 +560,7 @@ mod tests {
             .collect();
         let render = |block: usize, driven: bool| -> Vec<f32> {
             let mut node = prepared(
-                DelayNode::stereo(MAX, controls(frames(100.0), 0.3, 0.0)),
+                DelayNode::<f32>::stereo(MAX, controls(frames(100.0), 0.3, 0.0)),
                 RATE,
                 1_024,
             );
@@ -616,12 +620,12 @@ mod tests {
             .collect();
         let make = || {
             prepared(
-                DelayNode::stereo(MAX, controls(frames(20.0), 0.7, 0.4)),
+                DelayNode::<f32>::stereo(MAX, controls(frames(20.0), 0.7, 0.4)),
                 RATE,
                 64,
             )
         };
-        let blocks = |node: &mut DelayNode, from: usize| -> Vec<Vec<f32>> {
+        let blocks = |node: &mut DelayNode<f32>, from: usize| -> Vec<Vec<f32>> {
             let mut out = vec![Vec::new(), Vec::new()];
             for chunk in x[from..].chunks(37) {
                 for (o, y) in out.iter_mut().zip(drive(
@@ -648,7 +652,7 @@ mod tests {
     #[test]
     fn a_feedback_written_after_a_reset_lands_whole() {
         let mut node = prepared(
-            DelayNode::mono(MAX, controls(frames(1.0), 0.0, 0.0)),
+            DelayNode::<f32>::mono(MAX, controls(frames(1.0), 0.0, 0.0)),
             RATE,
             64,
         );
@@ -675,7 +679,7 @@ mod tests {
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let render = |at: usize| -> Vec<f32> {
-            let node = DelayNode::stereo(MAX, controls(frames(10.0), 0.3, 0.0));
+            let node = DelayNode::<f32>::stereo(MAX, controls(frames(10.0), 0.3, 0.0));
             let set = node.param_set();
             let mut node = prepared(node, RATE, 2_048);
             let mut out = Vec::new();
@@ -699,11 +703,38 @@ mod tests {
     #[test]
     fn the_tail_is_unknown_and_honest() {
         let mut node = prepared(
-            DelayNode::stereo(MAX, controls(frames(10.0), 0.5, 0.3)),
+            DelayNode::<f32>::stereo(MAX, controls(frames(10.0), 0.5, 0.3)),
             RATE,
             64,
         );
         assert_eq!(node.shape().tail, Tail::Unknown);
         assert_honest_tail(&mut node, RATE);
+    }
+
+    /// An `f64` block through a `DelayKernel::<f64>` at a whole delay `d` is the loop
+    /// `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]` of the wide signal (`g` the `f32`
+    /// the control holds, widened), to 2^-45: any step that narrows to `f32` is off by 1e-8.
+    #[test]
+    fn an_f64_kernel_runs_the_delay_loop_in_f64() {
+        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+        let (d, len) = (16usize, 200usize);
+        let x = wide_signal(len);
+        let g = f64::from(0.6f32);
+        let mut v = vec![0.0f64; len];
+        for n in 0..len {
+            v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
+        }
+        let want: Vec<f64> = (0..len)
+            .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
+            .collect();
+        let mut k = DelayKernel::<f64>::new(DelayLayout::new(
+            BusTopology::MONO,
+            MAX,
+            InterpolationMode::Linear,
+        ));
+        k.prepare(RATE, MaxBlock::of(Samples(len)));
+        let moves = [(0, controls(frames(d as f64), 0.6, 0.0))];
+        let y = drive_kernel(&mut k, &moves, &[x]).remove(0);
+        assert_close_f64(&y, &want, 2.0f64.powi(-45));
     }
 }
