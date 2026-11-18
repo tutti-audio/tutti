@@ -6,7 +6,6 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use proptest::prelude::*;
-use tutti_midi_device::{EndpointName, ProductInstanceId};
 use tutti_midi_network::{
     Admission, AuthChallenge, AuthMethods, AuthState, Bye, ByeReason, ByeText, Client, Command,
     Credentials, DatagramBuilder, Digest, EndpointIdentity, Header, Host, HostConfig, Invitation,
@@ -16,11 +15,10 @@ use tutti_midi_network::{
 };
 use tutti_ump::Ump;
 
+use crate::sim::identity;
+
 fn identity_strategy() -> impl Strategy<Value = EndpointIdentity> {
-    ("[A-Za-z0-9 ]{1,40}", "[A-Za-z0-9-]{1,40}").prop_map(|(name, id)| EndpointIdentity {
-        name: EndpointName::new(&name).unwrap(),
-        instance_id: ProductInstanceId::new(&id).unwrap(),
-    })
+    ("[A-Za-z0-9 ]{1,40}", "[A-Za-z0-9-]{1,40}").prop_map(|(name, id)| identity(&name, &id))
 }
 
 fn nonce_strategy() -> impl Strategy<Value = Nonce> {
@@ -253,10 +251,7 @@ proptest! {
         steps in proptest::collection::vec((0u8..3, datagram(), 0u64..3_000), 1..40),
         admission in 0u8..4,
     ) {
-        let identity = EndpointIdentity {
-            name: EndpointName::new("Studio").unwrap(),
-            instance_id: ProductInstanceId::new("HOST-1").unwrap(),
-        };
+        let identity = identity("Studio", "HOST-1");
         let mut config = HostConfig::new(identity);
         config.admission = match admission {
             0 => Admission::Open,
@@ -281,10 +276,7 @@ proptest! {
         steps in proptest::collection::vec((datagram(), 0u64..3_000), 1..40),
         secret in any::<bool>(),
     ) {
-        let identity = EndpointIdentity {
-            name: EndpointName::new("Laptop").unwrap(),
-            instance_id: ProductInstanceId::new("CLIENT-1").unwrap(),
-        };
+        let identity = identity("Laptop", "CLIENT-1");
         let credentials = if secret {
             Credentials::none().with_secret("1234")
         } else {

@@ -3,14 +3,6 @@
 use std::num::{NonZeroU8, NonZeroUsize};
 use std::time::Duration;
 
-/// The longest the first Zero Length UMP Data Command may follow the last
-/// UMP Data Command that carried data (M2-124 section 7.2.1).
-const IDLE_INTERVAL_MAX: Duration = Duration::from_millis(300);
-/// The range M2-124 section 6.2 recommends for the delay between a repeated
-/// command's repeats.
-const REPEAT_INTERVAL_MIN: Duration = Duration::from_millis(300);
-const REPEAT_INTERVAL_MAX: Duration = Duration::from_secs(2);
-
 /// The shortest a timer is set: no interval or timeout is zero, so no endpoint
 /// asks its driver for the clock in a loop.
 const TIMER_MIN: Duration = Duration::from_millis(1);
@@ -18,6 +10,28 @@ const TIMER_MIN: Duration = Duration::from_millis(1);
 /// panics; an hour is far past any session timer and far inside every
 /// platform's range.
 pub(crate) const TIMER_MAX: Duration = Duration::from_secs(60 * 60);
+/// The longest the first Zero Length UMP Data Command may follow the last
+/// UMP Data Command that carried data (M2-124 section 7.2.1).
+const IDLE_INTERVAL_MAX: Duration = Duration::from_millis(300);
+
+tutti_units::ranged! {
+    /// A session timer: a wait, an interval or a timeout, from 1 ms to 1 h.
+    ///
+    /// The bounds are this crate's, not the specification's (M2-124 section 6.13 and the
+    /// other timers give no bound): no timer is zero, so no endpoint asks its driver
+    /// for the clock in a loop, and none is past an hour, so an `Instant` plus
+    /// a timer never overflows.
+    Timer(Duration), TimerOutOfRange, "within 1 ms..=1 h",
+    |raw| raw.as_nanos() >= TIMER_MIN.as_nanos() && raw.as_nanos() <= TIMER_MAX.as_nanos()
+}
+
+tutti_units::ranged! {
+    /// The interval of the Zero Length UMP Data Commands that declare an idle
+    /// period, from 1 ms to the 300 ms M2-124 section 7.2.1 requires of the
+    /// first.
+    IdleInterval(Duration), IdleIntervalOutOfRange, "within 1 ms..=300 ms",
+    |raw| raw.as_nanos() >= TIMER_MIN.as_nanos() && raw.as_nanos() <= IDLE_INTERVAL_MAX.as_nanos()
+}
 
 const BUFFER_DEFAULT: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 const REQUESTS_DEFAULT: NonZeroU8 = NonZeroU8::new(5).unwrap();
@@ -81,18 +95,18 @@ impl Requests {
 /// [`Default`] is a conservative choice for a local network: two forward
 /// error correction repeats, a 256-command retransmit buffer, a Ping after
 /// two silent seconds and a Session lost after six.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SessionConfig {
     pub(crate) fec: Fec,
     pub(crate) retransmit: Retransmit,
-    pub(crate) idle_interval: Duration,
-    pub(crate) reorder_wait: Duration,
+    pub(crate) idle_interval: IdleInterval,
+    pub(crate) reorder_wait: Timer,
     pub(crate) requests: Requests,
-    pub(crate) ping_interval: Duration,
-    pub(crate) liveness_timeout: Duration,
-    pub(crate) repeat_interval: Duration,
-    pub(crate) command_timeout: Duration,
-    pub(crate) pending_timeout: Duration,
+    pub(crate) ping_interval: Timer,
+    pub(crate) liveness_timeout: Timer,
+    pub(crate) repeat_interval: Timer,
+    pub(crate) command_timeout: Timer,
+    pub(crate) pending_timeout: Timer,
 }
 
 impl Default for SessionConfig {
@@ -100,14 +114,14 @@ impl Default for SessionConfig {
         Self {
             fec: Fec::Repeats(NonZeroU8::MIN.saturating_add(1)),
             retransmit: Retransmit::Buffer(BUFFER_DEFAULT),
-            idle_interval: Duration::from_millis(10),
-            reorder_wait: Duration::from_millis(10),
+            idle_interval: IdleInterval::of(Duration::from_millis(10)),
+            reorder_wait: Timer::of(Duration::from_millis(10)),
             requests: Requests::UpTo(REQUESTS_DEFAULT),
-            ping_interval: Duration::from_secs(2),
-            liveness_timeout: Duration::from_secs(6),
-            repeat_interval: Duration::from_millis(500),
-            command_timeout: Duration::from_secs(5),
-            pending_timeout: Duration::from_secs(60),
+            ping_interval: Timer::of(Duration::from_secs(2)),
+            liveness_timeout: Timer::of(Duration::from_secs(6)),
+            repeat_interval: Timer::of(Duration::from_millis(500)),
+            command_timeout: Timer::of(Duration::from_secs(5)),
+            pending_timeout: Timer::of(Duration::from_secs(60)),
         }
     }
 }
@@ -131,20 +145,19 @@ impl SessionConfig {
     }
 
     /// How long after sending data the first Zero Length UMP Data Command
-    /// follows, and the interval of the next few. Held to at most 300 ms,
-    /// which the specification requires of the first.
+    /// follows, and the interval of the next few.
     #[must_use]
-    pub fn with_idle_interval(mut self, interval: Duration) -> Self {
-        self.idle_interval = interval.clamp(TIMER_MIN, IDLE_INTERVAL_MAX);
+    pub const fn with_idle_interval(mut self, interval: IdleInterval) -> Self {
+        self.idle_interval = interval;
         self
     }
 
     /// How long a missing sequence number is waited for before a Retransmit
     /// Request asks for it (the specification suggests 10 ms), which lets
-    /// an out-of-order command arrive first. Saturates to 1 ms..1 h.
+    /// an out-of-order command arrive first.
     #[must_use]
-    pub fn with_reorder_wait(mut self, wait: Duration) -> Self {
-        self.reorder_wait = wait.clamp(TIMER_MIN, TIMER_MAX);
+    pub const fn with_reorder_wait(mut self, wait: Timer) -> Self {
+        self.reorder_wait = wait;
         self
     }
 
@@ -157,43 +170,44 @@ impl SessionConfig {
         self
     }
 
-    /// How long a peer is silent before a Ping is sent. Saturates to 1 ms..1 h.
+    /// How long a peer is silent before a Ping is sent.
     #[must_use]
-    pub fn with_ping_interval(mut self, interval: Duration) -> Self {
-        self.ping_interval = interval.clamp(TIMER_MIN, TIMER_MAX);
+    pub const fn with_ping_interval(mut self, interval: Timer) -> Self {
+        self.ping_interval = interval;
         self
     }
 
     /// How long a peer is silent before the Session is ended with a Bye for
-    /// timeout. Saturates to 1 ms..1 h.
+    /// timeout.
     #[must_use]
-    pub fn with_liveness_timeout(mut self, timeout: Duration) -> Self {
-        self.liveness_timeout = timeout.clamp(TIMER_MIN, TIMER_MAX);
+    pub const fn with_liveness_timeout(mut self, timeout: Timer) -> Self {
+        self.liveness_timeout = timeout;
         self
     }
 
-    /// The delay between the repeats of an Invitation, Session Reset or Bye,
-    /// held to the 300 ms to 2 s M2-124 section 6.2 recommends.
+    /// The delay between the repeats of an Invitation, Session Reset or Bye.
+    /// M2-124 section 6.2 says "A delay between 300ms and 2 seconds is
+    /// recommended"; the default is 500 ms.
     #[must_use]
-    pub fn with_repeat_interval(mut self, interval: Duration) -> Self {
-        self.repeat_interval = interval.clamp(REPEAT_INTERVAL_MIN, REPEAT_INTERVAL_MAX);
+    pub const fn with_repeat_interval(mut self, interval: Timer) -> Self {
+        self.repeat_interval = interval;
         self
     }
 
     /// How long a repeated command is repeated before the endpoint gives up
-    /// and ends the Session with a Bye. Saturates to 1 ms..1 h.
+    /// and ends the Session with a Bye.
     #[must_use]
-    pub fn with_command_timeout(mut self, timeout: Duration) -> Self {
-        self.command_timeout = timeout.clamp(TIMER_MIN, TIMER_MAX);
+    pub const fn with_command_timeout(mut self, timeout: Timer) -> Self {
+        self.command_timeout = timeout;
         self
     }
 
     /// How long a Client waits for an Invitation Reply: Accepted after the
     /// Host said it was Pending (a user may be deciding), and how long a Host
-    /// holds a challenge or a confirmation open. Saturates to 1 ms..1 h.
+    /// holds a challenge or a confirmation open.
     #[must_use]
-    pub fn with_pending_timeout(mut self, timeout: Duration) -> Self {
-        self.pending_timeout = timeout.clamp(TIMER_MIN, TIMER_MAX);
+    pub const fn with_pending_timeout(mut self, timeout: Timer) -> Self {
+        self.pending_timeout = timeout;
         self
     }
 }
@@ -201,48 +215,69 @@ impl SessionConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_fixtures::{RangeContract, check_range_contract};
 
-    const HOUR: Duration = Duration::from_secs(60 * 60);
+    const MS: fn(u64) -> Duration = Duration::from_millis;
 
-    /// Every duration option, set to `value`, as the fields it lands in.
-    fn all_set(value: Duration) -> [Duration; 5] {
-        let config = SessionConfig::default()
-            .with_reorder_wait(value)
-            .with_ping_interval(value)
-            .with_liveness_timeout(value)
-            .with_command_timeout(value)
-            .with_pending_timeout(value);
-        [
-            config.reorder_wait,
-            config.ping_interval,
-            config.liveness_timeout,
-            config.command_timeout,
-            config.pending_timeout,
-        ]
+    #[test]
+    fn a_timer_takes_one_millisecond_to_one_hour_and_refuses_the_rest() {
+        check_range_contract(&RangeContract {
+            new: Timer::new,
+            get: Timer::get,
+            of: Some(Timer::of),
+            valid: &[MS(1), MS(250), TIMER_MAX],
+            invalid: &[
+                Duration::ZERO,
+                MS(1) - Duration::from_nanos(1),
+                TIMER_MAX + Duration::from_nanos(1),
+                Duration::MAX,
+            ],
+        });
+    }
+
+    /// Spec: m2-124/7.2.1#2
+    #[test]
+    fn an_idle_interval_takes_up_to_the_300_ms_the_first_zero_length_command_must_meet() {
+        check_range_contract(&RangeContract {
+            new: IdleInterval::new,
+            get: IdleInterval::get,
+            of: Some(IdleInterval::of),
+            valid: &[MS(1), MS(10), MS(300)],
+            invalid: &[Duration::ZERO, MS(301), Duration::from_secs(5)],
+        });
     }
 
     #[test]
-    fn no_timer_is_zero_so_no_endpoint_asks_for_the_clock_in_a_loop() {
-        assert_eq!(all_set(Duration::ZERO), [Duration::from_millis(1); 5]);
+    fn a_repeat_interval_outside_the_recommended_300_ms_to_2_s_is_accepted_and_kept() {
+        for value in [MS(100), Duration::from_secs(5)] {
+            let config = SessionConfig::default().with_repeat_interval(Timer::of(value));
+            assert_eq!(config.repeat_interval.get(), value);
+        }
+    }
+
+    #[test]
+    fn an_option_keeps_the_value_it_is_given() {
         let config = SessionConfig::default()
-            .with_idle_interval(Duration::ZERO)
-            .with_repeat_interval(Duration::ZERO);
-        assert_eq!(config.idle_interval, Duration::from_millis(1));
-        assert_eq!(config.repeat_interval, REPEAT_INTERVAL_MIN);
+            .with_idle_interval(IdleInterval::of(MS(300)))
+            .with_reorder_wait(Timer::of(MS(1)))
+            .with_ping_interval(Timer::of(MS(250)))
+            .with_liveness_timeout(Timer::of(TIMER_MAX))
+            .with_repeat_interval(Timer::of(MS(300)))
+            .with_command_timeout(Timer::of(MS(7)))
+            .with_pending_timeout(Timer::of(MS(9)));
+        assert_eq!(config.idle_interval.get(), MS(300));
+        assert_eq!(config.reorder_wait.get(), MS(1));
+        assert_eq!(config.ping_interval.get(), MS(250));
+        assert_eq!(config.liveness_timeout.get(), TIMER_MAX);
+        assert_eq!(config.repeat_interval.get(), MS(300));
+        assert_eq!(config.command_timeout.get(), MS(7));
+        assert_eq!(config.pending_timeout.get(), MS(9));
     }
 
     #[test]
     fn no_timer_is_past_an_hour_so_no_instant_overflows() {
-        assert_eq!(all_set(Duration::MAX), [HOUR; 5]);
-        let config = SessionConfig::default().with_repeat_interval(Duration::MAX);
-        assert_eq!(config.repeat_interval, REPEAT_INTERVAL_MAX);
         let now = std::time::Instant::now();
         assert!(now.checked_add(TIMER_MAX).is_some());
-    }
-
-    #[test]
-    fn a_timer_inside_the_range_is_kept() {
-        let value = Duration::from_millis(250);
-        assert_eq!(all_set(value), [value; 5]);
+        assert!(Timer::new(TIMER_MAX + Duration::from_nanos(1)).is_none());
     }
 }
