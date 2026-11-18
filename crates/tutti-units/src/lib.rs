@@ -100,6 +100,7 @@ mod units;
 mod maths;
 mod normalized;
 mod ranged;
+mod real;
 
 mod bars;
 mod frame;
@@ -115,6 +116,7 @@ pub use frame::{At, Frame, Moment};
 pub use latency::Latency;
 pub use normalized::{Normalized, NormalizedOutOfRange};
 pub use play::PlayReading;
+pub use real::Real;
 pub use resyncs::Resyncs;
 pub use samples::Samples;
 pub use tail::Tail;

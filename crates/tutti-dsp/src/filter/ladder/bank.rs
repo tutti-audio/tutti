@@ -3,6 +3,7 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::ChannelLayout;
+use tutti_units::Real;
 
 use super::kernel::{LadderCoefficients, ladder_step};
 use super::{LadderModel, LadderType};
@@ -149,7 +150,7 @@ fn group<F: Float + Lanes, S: Float, const N: usize>(
         ($i:expr, $d:expr) => {
             for k in 0..N {
                 let x = xs[k][$i].convert_to::<F>() * $d.drive;
-                let y = ladder_step(&$d.coefficients, $d.ty, &mut st[k], x, Float::tanh);
+                let y = ladder_step(&$d.coefficients, $d.ty, &mut st[k], x, Real::tanh);
                 ys[k][$i] = y.convert_to::<S>();
             }
         };

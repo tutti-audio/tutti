@@ -2137,7 +2137,7 @@ mod tests {
             "a root never published has no fold"
         );
 
-        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+        let m = <f32 as Float>::MINUS_3_DB;
         let run = |root: usize, device: usize, frame: &[f32]| {
             let mut out = vec![9.0f32; device];
             folds
@@ -2271,7 +2271,7 @@ mod tests {
             Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
         rewire(&mut ed, 6);
         let _ = first_frame(&engine, 2);
-        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+        let m = <f32 as Float>::MINUS_3_DB;
         let folded = [61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0];
         assert_eq!(first_frame(&engine, 2), folded);
         let control = engine.output_control();
@@ -2587,7 +2587,7 @@ mod tests {
         rewire(&mut ed, 6);
         let _ = first_frame(&engine, 6);
         let control = engine.output_control();
-        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+        let m = <f32 as Float>::MINUS_3_DB;
         assert_eq!(
             first_frame(&engine, 6),
             [61.0, 62.0, 63.0, 64.0, 65.0, 66.0],

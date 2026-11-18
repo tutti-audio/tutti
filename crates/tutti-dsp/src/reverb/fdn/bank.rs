@@ -538,12 +538,12 @@ impl<F: Float + Lerp> FdnBank<F> {
         // A straight line between two unit vectors is shorter than either, and
         // `I - 2 v v^T` of a short `v` is a contraction: bring it back to length.
         let len = s.c_v[..n].iter().map(|&x| x * x).sum::<F>().sqrt();
-        if len > F::from_f32(1.0e-6) {
+        if len > F::lit(1.0e-6) {
             let k = c.v_len.now() / len;
             s.c_v[..n].iter_mut().for_each(|x| *x *= k);
         }
         s.c_mix = F::from_f32(f32::from(u8::from(
-            c.mix.target() > F::from_f32(0.5) || c.mix.moving(),
+            c.mix.target() > F::lit(0.5) || c.mix.moving(),
         )));
         s.c_wet = c.wet.now();
         s.c_width = c.width.now();
@@ -583,7 +583,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         }
         let scale = F::from_f64(1.0 / width.max(1) as f64);
         let p = glides.pole.map(|x| F::ONE - x);
-        let (two, half) = (F::ONE + F::ONE, F::from_f64(0.5));
+        let (two, half) = (F::ONE + F::ONE, F::lit(0.5));
         let mut d = [F::ZERO; 16];
         for i in 0..frames {
             if self.into == 0 {

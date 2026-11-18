@@ -15,7 +15,7 @@ pub(crate) fn level_db<F: Float>(level: F) -> F {
     if level <= F::ZERO {
         F::from_f64(Db::FLOOR.get())
     } else {
-        F::from_f64(20.0) * level.log10()
+        F::lit(20.0) * level.log10()
     }
 }
 
@@ -23,7 +23,7 @@ pub(crate) fn level_db<F: Float>(level: F) -> F {
 /// [`Db::to_amplitude`] has it at `f64`: `-inf` is 0 and `+inf` is `+inf`.
 #[inline]
 pub(crate) fn db_gain<F: Float>(db: F) -> F {
-    F::from_f64(10.0).powf(db / F::from_f64(20.0))
+    F::lit(10.0).powf(db / F::lit(20.0))
 }
 
 /// Amplitude as decibels, floored: an amplitude of zero or below is `Db::FLOOR`
@@ -70,7 +70,7 @@ pub(crate) fn gain_reduction<F: Float>(input_db: F, threshold: F, ratio: F, knee
         let over_db = (input_db - threshold).max(F::ZERO);
         over_db * slope
     } else {
-        let two = F::from_f32(2.0);
+        let two = F::lit(2.0);
         let half_knee = knee / two;
         let below = threshold - half_knee;
         let above = threshold + half_knee;
@@ -94,7 +94,7 @@ pub(crate) fn gain_reduction<F: Float>(input_db: F, threshold: F, ratio: F, knee
 /// ratio of 1 lifts nothing and the lift is continuous at the knee's edges.
 #[inline]
 pub(super) fn upward_gain_lift<F: Float>(input_db: F, threshold: F, ratio: F, knee: F) -> F {
-    let mirrored = F::from_f32(2.0) * threshold - input_db;
+    let mirrored = F::lit(2.0) * threshold - input_db;
     gain_reduction(mirrored, threshold, ratio, knee)
 }
 

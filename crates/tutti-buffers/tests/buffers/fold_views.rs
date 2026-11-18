@@ -1,9 +1,8 @@
 //! The fold's appliers over views: each writes the analytic figure of the
 //! pair, and each refuses a width or length mismatch before it writes.
 
-use tutti_buffers::{
-    BufferError, Float, Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut,
-};
+use tutti_buffers::Float;
+use tutti_buffers::{BufferError, Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::Samples;
 

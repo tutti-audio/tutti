@@ -81,14 +81,14 @@ impl Scale {
     fn over_sn3d(self, n: u16) -> f64 {
         let maxn = || {
             let (num, den) = MAXN_SQUARED[usize::from(n)];
-            (f64::from(num) / f64::from(den)).sqrt()
+            <f64 as tutti_units::Real>::sqrt(f64::from(num) / f64::from(den))
         };
         match self {
             Self::Sn3d => 1.0,
-            Self::N3d => f64::from(2 * degree(n) + 1).sqrt(),
+            Self::N3d => <f64 as tutti_units::Real>::sqrt(f64::from(2 * degree(n) + 1)),
             Self::MaxN => maxn(),
             // FuMa is MaxN with W at -3 dB.
-            Self::FuMa if n == 0 => maxn() * 0.5f64.sqrt(),
+            Self::FuMa if n == 0 => maxn() * <f64 as tutti_units::Real>::sqrt(0.5),
             Self::FuMa => maxn(),
         }
     }

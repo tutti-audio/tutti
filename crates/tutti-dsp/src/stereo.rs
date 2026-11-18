@@ -43,7 +43,7 @@ impl MidSide {
             &mut first.samples_mut()[..frames],
             &mut second.samples_mut()[..frames],
         );
-        let half = S::from_f64(0.5);
+        let half = S::lit(0.5);
         for (((&a, &b), o0), o1) in a.iter().zip(b).zip(first).zip(second) {
             match self {
                 Self::Encode => {
@@ -128,7 +128,7 @@ impl<F: Float + Lerp> WidthBank<F> {
             &mut left.samples_mut()[..frames],
             &mut right.samples_mut()[..frames],
         );
-        let half = F::from_f32(0.5);
+        let half = F::lit(0.5);
         let blended = self.width.blended(frames);
         let taken = self.width.taken();
         let held = self.width.target();
