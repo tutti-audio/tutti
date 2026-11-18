@@ -11,7 +11,7 @@
 //!
 //! | | |
 //! |---|---|
-//! | `ports`, `Port`, `InputPort`, `OutputPort` | the ports winmm lists now, each owning its list position privately, with what the driver reports of it, the device interface path that names it across a replug, and its friendly name |
+//! | `ports`, `Port`, `InputPort`, `OutputPort` | the ports winmm lists now, each owning its list position privately, with what the driver reports of it, the device interface path that names it across a replug, and its friendly name (which the ports of one multi-port device share, so the backend above tells them apart by the driver's name) |
 //! | `MidiIn` | an open input, opened from an `InputPort`: short messages and SysEx buffers delivered to a closure on the driver's thread, each with winmm's millisecond stamp; closing it returns every buffer first |
 //! | `MidiOut` | an open output, opened from an `OutputPort`: a short message, or a SysEx sent whole |
 //! | `waitable_timer`, `TimerWaker`, `TimerWaiter` | a high-resolution waitable timer and a wake signal: the one waiter's wait ends at a time or when any clone of the waker wakes it |
