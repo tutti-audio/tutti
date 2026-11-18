@@ -20,7 +20,7 @@ impl DevicePart {
         self.listing = Some(OutputListing::new(listing));
     }
 
-    /// Whether [`mark_listed`](Self::start_once) already started one.
+    /// Whether a listing was started once ([`mark_listed`](Self::mark_listed)).
     pub(crate) fn listed(&self) -> bool {
         self.listed
     }
