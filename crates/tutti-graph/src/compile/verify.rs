@@ -104,7 +104,7 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
             )
             .collect(),
         Op::EventDelay { src, dst, .. } => vec![e(src, false), e(dst, true)],
-        Op::EventMerge { srcs, dst } => plan.event_list[srcs.range()]
+        Op::EventMerge { srcs, dst, .. } => plan.event_list[srcs.range()]
             .iter()
             .map(|&s| e(s, false))
             .chain([e(dst, true)])
@@ -904,12 +904,12 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 };
                 plan.event_tap_fifo(from, d.len, block)
             }
-            Op::EventMerge { srcs, .. } => {
+            Op::EventMerge { srcs, bound, .. } => {
                 let mut need = EventSlotCapacity::NONE;
                 for &s in &plan.event_list[srcs.range()] {
                     need = need.plus(read_need(s, &op_need)?);
                 }
-                need
+                need.bounded(bound.map(|b| b.capacity))
             }
             _ => EventSlotCapacity::NONE,
         };
@@ -991,6 +991,7 @@ pub fn verify_fades(prev: Option<&Plan>, plan: &Plan, delta: &Delta) -> Result<(
             && was.in_place == now.in_place
             && was.event_resolution == now.event_resolution
             && was.event_capacity == now.event_capacity
+            && was.event_input_capacity == now.event_input_capacity
             && was.params == now.params;
         if !same {
             return Err(VerifyError(format!(
@@ -1721,7 +1722,7 @@ mod tests {
         let mut t = Topology::default();
         let mut shapes = Shapes::new();
         let src = Shape::EMPTY.with_events(0, 1);
-        let declared = src.with_event_capacity(5);
+        let declared = src.with_event_capacity(crate::testing::cap_of(5));
         let sink = Shape::EMPTY.with_events(1, 0);
         for (k, s) in [(1, declared), (2, src), (3, sink)] {
             t.nodes
@@ -1843,7 +1844,8 @@ mod tests {
         .unwrap_err();
         assert!(in_place.0.contains("only the tail"), "{in_place}");
         let capacity = check(
-            Shape::source_unassigned(ChannelLayout::MONO).with_event_capacity(4),
+            Shape::source_unassigned(ChannelLayout::MONO)
+                .with_event_capacity(crate::testing::cap_of(4)),
             vec![(a, fade)],
         )
         .unwrap_err();

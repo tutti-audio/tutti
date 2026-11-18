@@ -16,6 +16,7 @@
 //! that decode is `tutti-ump`'s.
 
 use std::cell::Cell;
+use std::num::NonZeroU32;
 
 use tutti_curve::{Curvature, Exponent, Law, Piece};
 use tutti_types::{
@@ -917,7 +918,7 @@ pub const fn note_off_room(cap: usize) -> usize {
 /// The fewest events per block [`EventDensity::capacity`] sizes a port for: a
 /// burst at one instant (a chord's note-ons, a controller sweep) is not
 /// spread over the block, so a short block still needs room for it.
-pub const MIN_EVENT_PORT_CAPACITY: u32 = 256;
+pub const MIN_EVENT_PORT_CAPACITY: NonZeroU32 = NonZeroU32::new(256).unwrap();
 
 /// The most events per block [`EventDensity::capacity`] sizes a port for: one
 /// per frame of the engine's default largest block
@@ -926,7 +927,7 @@ pub const MIN_EVENT_PORT_CAPACITY: u32 = 256;
 /// note-off room, and a PDC delay on it holds up to `3.75 ×` that again
 /// (about 2.5 MB: see `EventSlotCapacity::fifo`). Past the cap a port still
 /// refuses and counts, it does not grow.
-pub const MAX_EVENT_PORT_CAPACITY: u32 = 8_192;
+pub const MAX_EVENT_PORT_CAPACITY: NonZeroU32 = NonZeroU32::new(8_192).unwrap();
 
 /// How many events a source writes per frame at the most, for sizing its
 /// event port: a port of a block of `n` frames then holds `n × density`,
@@ -948,9 +949,9 @@ pub const MAX_EVENT_PORT_CAPACITY: u32 = 8_192;
 ///
 /// let one_per_frame = EventDensity::per_frame(1);
 /// let at = |block| one_per_frame.capacity(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(block))));
-/// assert_eq!(at(64), 256); // the floor
-/// assert_eq!(at(1024), 1024);
-/// assert_eq!(at(1 << 20), 8_192); // the cap
+/// assert_eq!(at(64).get(), 256); // the floor
+/// assert_eq!(at(1024).get(), 1024);
+/// assert_eq!(at(1 << 20).get(), 8_192); // the cap
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EventDensity {
@@ -975,16 +976,18 @@ impl EventDensity {
     /// The declared capacity for a port of a block of `prepare`'s
     /// [`max_block`](crate::Prepare::max_block).
     #[must_use]
-    pub fn capacity(self, prepare: &crate::Prepare) -> u32 {
+    pub fn capacity(self, prepare: &crate::Prepare) -> NonZeroU32 {
         let frames = prepare.max_block().get() as u64;
         let events = (frames * u64::from(self.per_kiloframe)).div_ceil(1024);
-        events
+        let events: u32 = events
             .clamp(
-                u64::from(MIN_EVENT_PORT_CAPACITY),
-                u64::from(MAX_EVENT_PORT_CAPACITY),
+                u64::from(MIN_EVENT_PORT_CAPACITY.get()),
+                u64::from(MAX_EVENT_PORT_CAPACITY.get()),
             )
             .try_into()
-            .unwrap_or(MAX_EVENT_PORT_CAPACITY)
+            .unwrap_or(MAX_EVENT_PORT_CAPACITY.get());
+        // The floor is `MIN_EVENT_PORT_CAPACITY`, so this is never zero.
+        NonZeroU32::new(events).unwrap_or(MIN_EVENT_PORT_CAPACITY)
     }
 }
 
@@ -1151,12 +1154,25 @@ impl<'a> EventWriter<'a> {
 ///
 /// When the sources hold more than `cap`, the note-offs keep their room: the
 /// others are cut (the later ones first) so that every note-off lands, up to
-/// `cap`. Order is that of the merge either way. When they fit, which is the
-/// case by construction (a merge's slot holds all its sources), nothing but
-/// the sum of the sources' lengths is looked at.
+/// `cap`. Order is that of the merge either way. A merge slot holds all its
+/// sources unless the merge is a node's input under its declared bound
+/// (`Shape::event_input_capacity`), which is the one merge that cuts; the
+/// caller charges the returned count.
 pub(crate) fn merge_into(sources: &[&[Event]], out: &mut Vec<Event>, cap: usize) -> u32 {
-    let total: usize = sources.iter().map(|s| s.len()).sum();
     let room = cap.saturating_sub(out.len());
+    merge_walk(sources, room, |_, e| out.push(e))
+}
+
+/// Walks `sources` (each sorted by offset) in `(offset, source index)` order
+/// and calls `keep(source index, event)` for each of the first `room` that
+/// land, with the note-off rule of [`merge_into`]. Returns how many it
+/// dropped. At most [`crate::MAX_PORTS`] `* 2` sources.
+pub(crate) fn merge_walk(
+    sources: &[&[Event]],
+    room: usize,
+    mut keep: impl FnMut(usize, Event),
+) -> u32 {
+    let total: usize = sources.iter().map(|s| s.len()).sum();
     // How many events that are not note-offs may land: all of them while all
     // fit, else what the note-offs leave of the room.
     let mut others = usize::MAX;
@@ -1167,9 +1183,9 @@ pub(crate) fn merge_into(sources: &[&[Event]], out: &mut Vec<Event>, cap: usize)
             .sum();
         others = room.saturating_sub(offs);
     }
-    let mut heads = [0usize; crate::MAX_PORTS];
+    let mut heads = [0usize; 2 * crate::MAX_PORTS];
     let heads = &mut heads[..sources.len()];
-    let mut dropped = 0u32;
+    let (mut kept, mut dropped) = (0usize, 0u32);
     loop {
         let mut best: Option<(Offset, usize)> = None;
         for (i, src) in sources.iter().enumerate() {
@@ -1183,16 +1199,18 @@ pub(crate) fn merge_into(sources: &[&[Event]], out: &mut Vec<Event>, cap: usize)
         let Some((_, i)) = best else { break };
         let e = sources[i][heads[i]];
         heads[i] += 1;
-        let fits = out.len() < cap;
-        if e.is_note_off() {
-            if fits {
-                out.push(e);
-            } else {
-                dropped += 1;
+        let fits = kept < room;
+        let lands = if e.is_note_off() {
+            fits
+        } else {
+            fits && others > 0
+        };
+        if lands {
+            if !e.is_note_off() {
+                others = others.saturating_sub(1);
             }
-        } else if fits && others > 0 {
-            others = others.saturating_sub(1);
-            out.push(e);
+            kept += 1;
+            keep(i, e);
         } else {
             dropped += 1;
         }
@@ -1545,12 +1563,12 @@ mod tests {
         };
         let frame = EventDensity::per_frame(1);
         assert_eq!(at(frame, 1), MIN_EVENT_PORT_CAPACITY);
-        assert_eq!(at(frame, 512), 512);
-        assert_eq!(at(frame, 8192), 8192);
+        assert_eq!(at(frame, 512).get(), 512);
+        assert_eq!(at(frame, 8192).get(), 8192);
         assert_eq!(at(frame, 1 << 20), MAX_EVENT_PORT_CAPACITY);
         // A quarter per frame, rounded up: 1000 frames hold 250.
         let quarter = EventDensity::per_kiloframe(256);
-        assert_eq!(at(quarter, 4096), 1024);
+        assert_eq!(at(quarter, 4096).get(), 1024);
         assert_eq!(at(quarter, 1001), MIN_EVENT_PORT_CAPACITY);
         assert_eq!(
             at(EventDensity::per_kiloframe(1), 4097),

@@ -73,6 +73,7 @@
 
 use tutti_graph::{Losses, UmpAt};
 
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use tutti_graph::{
     Cx, Event, EventDensity, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
@@ -103,6 +104,10 @@ pub const MIDI_INPUT_PORTS: usize = CHANNELLESS_PORT + 1;
 /// The fewest events a [`MidiIngestNode`] translates in one block, and each port's
 /// declared event capacity at the shortest blocks.
 pub const MIDI_INPUT_EVENT_CAPACITY: usize = 512;
+
+/// [`MIDI_INPUT_EVENT_CAPACITY`] as a declared port capacity.
+pub(super) const MIDI_INPUT_PORT_CAPACITY: NonZeroU32 =
+    NonZeroU32::new(MIDI_INPUT_EVENT_CAPACITY as u32).unwrap();
 
 /// The events per frame a [`MidiIngestNode`] is sized for: one in eight
 /// (6,000 a second at 48 kHz, where a 16-channel MPE controller sending a
@@ -278,7 +283,7 @@ pub struct MidiIngestNode {
     dropped_reader: Counter<Losses>,
     /// The events a block translates and each port holds, from the block the
     /// node was prepared for.
-    capacity: usize,
+    capacity: NonZeroU32,
 }
 
 /// The MPE Profile zones of each of a device's Groups.
@@ -463,7 +468,7 @@ impl MidiIngestNode {
             ports: MidiInputPorts::FIRST_GROUP,
             dropped,
             dropped_reader,
-            capacity: MIDI_INPUT_EVENT_CAPACITY,
+            capacity: MIDI_INPUT_PORT_CAPACITY,
         }
     }
 
@@ -586,7 +591,7 @@ impl Node for MidiIngestNode {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(1, self.ports.count() as u16)
-            .with_event_capacity(self.capacity as u32)
+            .with_event_capacity(self.capacity)
             // Event-only: a translation per event, nothing per frame.
             .with_cost(tutti_graph::Cost::Light)
     }
@@ -595,10 +600,11 @@ impl Node for MidiIngestNode {
         // The limit is frames of this rate; a watch counted at another is
         // dropped, and the device's next Active Sensing starts it again.
         self.device.sensing = ActiveSensing::at_rate(p.sample_rate());
-        let capacity = (MIDI_INPUT_DENSITY.capacity(p) as usize).max(MIDI_INPUT_EVENT_CAPACITY);
+        let capacity = MIDI_INPUT_DENSITY.capacity(p).max(MIDI_INPUT_PORT_CAPACITY);
         if capacity != self.capacity {
             self.capacity = capacity;
-            self.out = vec![BLANK; tutti_graph::note_off_room(capacity)].into_boxed_slice();
+            self.out =
+                vec![BLANK; tutti_graph::note_off_room(capacity.get() as usize)].into_boxed_slice();
         }
     }
 
@@ -614,7 +620,7 @@ impl Node for MidiIngestNode {
         // A note-off may use the room past the capacity (the port's own
         // `note_off_room`), so a block full of other messages (a bend range
         // fanned out over a zone) cannot keep it out.
-        let mut staging = Staging::new(&mut self.out, self.capacity);
+        let mut staging = Staging::new(&mut self.out, self.capacity.get() as usize);
         // A host-set mode's ranges, at frame 0, ahead of the block's events
         // (the sort below is stable): the receiver's, not the device's.
         if reset {

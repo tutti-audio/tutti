@@ -1,4 +1,4 @@
-use tutti_midi_file::MidiFile;
+use tutti_midi_file::{MidiFile, Timebase};
 
 /// Reads `data` as a Standard MIDI File or a MIDI 2.0 Clip File (by its magic).
 ///
@@ -8,8 +8,15 @@ pub fn midi_file_read(data: &[u8]) {
     let Ok(file) = MidiFile::from_bytes(data) else {
         return;
     };
-    let _ = file.events();
-    let _ = file.timeline();
+    match file.timebase() {
+        Timebase::Metrical(metrical) => {
+            let _ = metrical.events().map(Iterator::count);
+            let _ = metrical.timeline();
+        }
+        Timebase::Smpte(smpte) => {
+            let _ = smpte.events().map(Iterator::count);
+        }
+    }
     for track in file.tracks() {
         let _ = track.notes();
     }

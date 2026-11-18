@@ -33,7 +33,9 @@ struct Source {
 
 impl Node for Source {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1).with_event_capacity(self.cap)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(std::num::NonZeroU32::new(self.cap).expect("a capacity"))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

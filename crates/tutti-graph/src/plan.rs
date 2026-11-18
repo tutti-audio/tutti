@@ -242,6 +242,15 @@ pub struct FeedbackSpec {
     pub slot: u32,
 }
 
+/// A node's declared event-input bound, as its merge holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputBound {
+    /// The most events the merged input keeps ([`Shape::event_input_capacity`]).
+    pub capacity: NonZeroU32,
+    /// The plan unit whose input it is: what is cut is charged to it.
+    pub unit: u32,
+}
+
 /// How many events one event slot holds per block, in the two currencies a
 /// plan knows: events that ports **declared**
 /// ([`Shape::event_capacity`]), and ports that declared nothing, each worth
@@ -321,6 +330,21 @@ impl EventSlotCapacity {
         caps.into_iter().fold(Self::NONE, |acc, cap| {
             acc.plus(Self::fifo(cap, len, max_block))
         })
+    }
+
+    /// This slot's room under an input bound: a slot that cannot hold more
+    /// than `bound` stays as it is; any other holds `bound`. (A slot that
+    /// may hold ports that declared nothing is priced at the executor's
+    /// default, which the compiler does not know, so it holds `bound`.)
+    #[must_use]
+    pub(crate) fn bounded(self, bound: Option<NonZeroU32>) -> Self {
+        match bound {
+            Some(n) if self.defaults != 0 || self.declared > n.get() => Self {
+                declared: n.get(),
+                defaults: 0,
+            },
+            _ => self,
+        }
     }
 
     /// Room for both: a merge of the two.
@@ -456,6 +480,10 @@ pub enum Op {
         srcs: Span,
         /// Event slot written.
         dst: u32,
+        /// The node's [`Shape::event_input_capacity`] when `dst` is its
+        /// input: the merge keeps at most this many events and charges what
+        /// it cuts to the node.
+        bound: Option<InputBound>,
     },
     /// Run a unit.
     Node {
@@ -1205,6 +1233,15 @@ impl Plan {
         self.unit(port.node)
             .filter(|u| port.port < u.shape.event_out)
             .and_then(|u| u.shape.event_capacity)
+    }
+
+    /// What the node of event input `port` declared it accepts per block
+    /// ([`Shape::event_input_capacity`]): `None` for unbounded, or for an input
+    /// this plan does not have.
+    pub fn event_input_capacity(&self, port: EventIn) -> Option<NonZeroU32> {
+        self.unit(port.node)
+            .filter(|u| port.port < u.shape.event_in)
+            .and_then(|u| u.shape.event_input_capacity)
     }
 
     /// The declared capacity of each output port that writes what an event
