@@ -46,7 +46,7 @@
 mod vbap_mix;
 pub use vbap_mix::{bass_send, vbap_mix};
 
-use tutti_buffers::Sample;
+use tutti_buffers::{Float, Sample};
 use tutti_dsp::OscillatorWave;
 
 use tutti_graph::{
@@ -54,7 +54,8 @@ use tutti_graph::{
 };
 use tutti_types::ChannelLayout;
 use tutti_units::{
-    Amplitude, Azimuth, Elevation, Hz, Phase, PhaseIncrement, SampleRate, UnitParam,
+    Amplitude, Azimuth, Elevation, Hz, Phase, PhaseIncrement, PhaseStep, RunningPhase, SampleRate,
+    UnitParam,
 };
 
 /// Aims a panner at `azimuth` and `elevation` through its [`ParamSet`]: the
@@ -165,8 +166,8 @@ fn naive(wave: OscillatorWave, phase: Phase) -> f64 {
 /// A fixed-frequency oscillator: no inputs, the same signal on every channel
 /// of its layout.
 ///
-/// The phase starts at [`Phase::START`] unless [`with_phase`](Self::with_phase)
-/// says otherwise, and is accumulated in `f64`, so a long render does not
+/// The phase starts at [`RunningPhase::START`] unless [`with_phase`](Self::with_phase)
+/// says otherwise, and is a [`RunningPhase`], so a long render does not
 /// drift. The start phase is deterministic: a stimulus a test measures should
 /// start where the test says.
 ///
@@ -180,9 +181,9 @@ pub struct Osc {
     layout: ChannelLayout,
     sample_rate: SampleRate,
     /// Where the cycle starts, and where `reset` returns it.
-    start: Phase,
-    /// Position in the cycle, advanced by one increment per sample.
-    phase: Phase,
+    start: RunningPhase,
+    /// Position in the cycle, advanced by one step per sample.
+    phase: RunningPhase,
 }
 
 impl Osc {
@@ -195,8 +196,8 @@ impl Osc {
             amplitude: Amplitude::UNITY,
             layout: ChannelLayout::MONO,
             sample_rate: SampleRate::DEFAULT,
-            start: Phase::START,
-            phase: Phase::START,
+            start: RunningPhase::START,
+            phase: RunningPhase::START,
         }
     }
 
@@ -231,13 +232,11 @@ impl Osc {
     /// a test gets a true peak that falls *between* samples.
     ///
     /// `phase` is in turns and is wrapped into `[0, 1)` here, so `1.25` and
-    /// `-0.75` both start a quarter-cycle in. `Phase` is a bare `pub` newtype,
-    /// so an unwrapped value is constructible, and the closed forms in
-    /// naive closed forms assume `0..1` — a saw started at `1.25` would emit `1.5`,
-    /// off the end of its range, until the first wrap.
+    /// `-0.75` both start a quarter-cycle in. `Phase` is a bare `pub` newtype, so an
+    /// unwrapped value is constructible, and the naive closed forms assume `0..1`.
     #[must_use]
     pub fn with_phase(mut self, phase: Phase) -> Self {
-        self.start = Phase::wrapped(phase.get());
+        self.start = RunningPhase::at(phase);
         self.phase = self.start;
         self
     }
@@ -252,10 +251,13 @@ impl Osc {
     /// The next sample, advancing the phase.
     #[inline]
     fn next(&mut self) -> f32 {
-        let y = naive(self.waveform, self.phase) * self.amplitude.get();
+        let y = naive(self.waveform, Phase(f64::from_phase(self.phase))) * self.amplitude.get();
         self.phase = self
             .phase
-            .advance(PhaseIncrement::per_sample(self.frequency, self.sample_rate));
+            .advance(PhaseStep::from(PhaseIncrement::per_sample(
+                self.frequency,
+                self.sample_rate,
+            )));
         y as f32
     }
 }

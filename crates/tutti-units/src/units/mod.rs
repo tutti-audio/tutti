@@ -78,9 +78,12 @@ pub use amounts::{
     Balance, Bipolar, BipolarOutOfRange, BitDepth, Depth, DepthOutOfRange, Drive, Feedback, Mix,
     Pan, Spread, StereoWidth,
 };
-pub use angles::{ArcDegrees, Azimuth, Direction, Elevation, Phase, PhaseIncrement, Radians};
+pub use angles::{
+    ArcDegrees, Azimuth, Direction, Elevation, Phase, PhaseIncrement, PhaseStep, Radians,
+    RunningPhase,
+};
 pub use ballistics::Ballistics;
-pub use frames::{SampleSpan, SampleSpanOutOfRange};
+pub use frames::{ReadPosition, SampleSpan, SampleSpanOutOfRange};
 pub use level::{Amplitude, Db, Gain};
 pub use measures::{Confidence, Correlation, StereoBalance, Velocity};
 pub use ratios::{

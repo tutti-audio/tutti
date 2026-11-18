@@ -1,11 +1,14 @@
 //! Why a probe failed, typed: what the probe wrote when it refused a plugin
-//! ([`ProbeRefusal`]) and the host's whole account of a probe that gave no
+//! ([`ProbeRefusal`]), what it wrote for a plugin it could not measure
+//! ([`MeasureFailure`]), and the host's whole account of a probe that gave no
 //! descriptor ([`ProbeError`]).
 
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tutti_types::MaxBlock;
+use tutti_units::SampleRate;
 
 use crate::{LoadStage, PluginFormat, ProbeDeath, ResultError};
 
@@ -46,6 +49,16 @@ pub enum ProbeRefusal {
     /// A loader refused the file with no phase to name. The text is the loader's.
     #[error("the file would not load: {0}")]
     Describe(String),
+    /// `--plugin` names a plugin the file does not hold.
+    #[error("the file holds no plugin {0:?}")]
+    UnknownPlugin(String),
+    /// A state is given with no plugin named, and the file holds several: it would
+    /// go to one of them by position, which no caller asked for.
+    #[error("a state with no plugin named, and the file holds {count} plugins")]
+    AmbiguousPlugin {
+        /// How many plugins the file holds.
+        count: usize,
+    },
     /// The probe's command line is wrong: it loaded nothing.
     #[error("the probe's command line is wrong")]
     Usage,
@@ -55,6 +68,87 @@ pub enum ProbeRefusal {
     /// The file loaded and holds no plugin.
     #[error("the file holds no plugin")]
     Empty,
+}
+
+/// Why a plugin the probe described has no measurement. Each is a fact about
+/// that plugin at one configuration; the other plugins of the file are
+/// unaffected. The texts are the plugin host's.
+#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum MeasureFailure {
+    /// The plugin would not load for a render.
+    #[error("the plugin would not load for a render: {reason}")]
+    Load {
+        /// The loader's reason.
+        reason: String,
+    },
+    /// The plugin refused the state it was asked to be measured in.
+    #[error("the plugin refused the state: {reason}")]
+    StateRefused {
+        /// The plugin's reason.
+        reason: String,
+    },
+    /// The plugin would not say what state it is in, so the figure has no state
+    /// to be recorded against.
+    #[error("the plugin would not save its state: {reason}")]
+    SaveState {
+        /// The plugin's reason.
+        reason: String,
+    },
+    /// The plugin has no audio output.
+    #[error("the plugin has no audio output")]
+    NoAudioOutput,
+    /// The plugin would not activate.
+    #[error("activating at {rate} Hz with blocks of {block:?} failed: {reason}")]
+    Activate {
+        /// The rate asked for.
+        rate: SampleRate,
+        /// The block asked for.
+        block: MaxBlock,
+        /// The plugin's reason.
+        reason: String,
+    },
+    /// A block failed to render.
+    #[error("a block at {rate} Hz with blocks of {block:?} failed: {reason}")]
+    Render {
+        /// The rate rendered at.
+        rate: SampleRate,
+        /// The block rendered at.
+        block: MaxBlock,
+        /// The plugin's reason.
+        reason: String,
+    },
+    /// The plugin would not deactivate.
+    #[error("deactivating at {rate} Hz with blocks of {block:?} failed: {reason}")]
+    Deactivate {
+        /// The rate it was activated at.
+        rate: SampleRate,
+        /// The block it was activated at.
+        block: MaxBlock,
+        /// The plugin's reason.
+        reason: String,
+    },
+    /// The probe's run budget was spent before this plugin's turn: it was not
+    /// loaded, activated or rendered.
+    #[error("the probe's run budget was spent before this plugin's turn")]
+    BudgetSpent,
+    /// The render ran past its deadline: a plugin slower than the budget allows.
+    #[error("rendering at {rate} Hz with blocks of {block:?} passed its deadline")]
+    TimedOut {
+        /// The rate rendered at.
+        rate: SampleRate,
+        /// The block rendered at.
+        block: MaxBlock,
+    },
+}
+
+/// A plugin of the file the probe described and could not measure, and why.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Unmeasured {
+    /// The plugin's descriptor id.
+    pub plugin: String,
+    /// Why it has no measurement.
+    pub failure: MeasureFailure,
 }
 
 /// A probe that gave no descriptor, as the host that ran it tells it: what the

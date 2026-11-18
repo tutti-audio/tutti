@@ -1,8 +1,8 @@
 //! [`SweepClock`]: the LFO and the segments of the swept effects, one for the phaser and the
 //! chorus.
 //!
-//! **The LFO is state on the stream's clock.** Its phase is a [`Phase`] walked by the
-//! rate's increment, counted from the last reset. The effect's per-channel value (an all-pass
+//! **The LFO is state on the stream's clock.** Its phase is a [`RunningPhase`] walked by the
+//! rate's step, counted from the last reset. The effect's per-channel value (an all-pass
 //! coefficient, a delay) is solved at the **corners** of a segment, every [`COEFF_INTERVAL`]
 //! frames of the stream: the segment's start and its end, and each channel's [`Glide`] runs
 //! between them, so the cut of the blocks does not move the render. A channel whose offset
@@ -13,7 +13,7 @@
 use tutti_buffers::Float;
 use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Phase, PhaseIncrement};
+use tutti_units::{Phase, PhaseIncrement, PhaseStep, RunningPhase};
 
 /// The frames of a segment: a corner's glide takes this many steps.
 pub(crate) const SEGMENT: u32 = 16;
@@ -23,10 +23,10 @@ const _: () = assert!(COEFF_INTERVAL == SEGMENT as usize);
 #[derive(Clone, Debug)]
 pub(crate) struct SweepClock {
     /// Each channel's LFO phase offset (channel 0's is zero), wrapped.
-    offsets: [PhaseIncrement; MAX_CHANNELS],
-    inc: PhaseIncrement,
+    offsets: [PhaseStep; MAX_CHANNELS],
+    inc: PhaseStep,
     /// The LFO's phase at the end of the segment in flight, where the corners last solved.
-    phase: Phase,
+    phase: RunningPhase,
     /// Frames since the segment began, in `0..COEFF_INTERVAL`: counted from the last reset,
     /// so where the segments fall does not depend on how the stream is cut.
     pos: usize,
@@ -40,9 +40,9 @@ pub(crate) struct SweepClock {
 impl SweepClock {
     pub(crate) fn new(offsets: [PhaseIncrement; MAX_CHANNELS]) -> Self {
         Self {
-            offsets,
-            inc: PhaseIncrement(0.0),
-            phase: Phase::START,
+            offsets: offsets.map(PhaseStep::from),
+            inc: PhaseStep::ZERO,
+            phase: RunningPhase::START,
             pos: 0,
             primed: false,
             landed: false,
@@ -51,7 +51,7 @@ impl SweepClock {
 
     /// The LFO back at its start, no segment solved.
     pub(crate) fn reset(&mut self) {
-        self.phase = Phase::START;
+        self.phase = RunningPhase::START;
         self.pos = 0;
         self.primed = false;
     }
@@ -63,7 +63,7 @@ impl SweepClock {
 
     /// The LFO's step per frame, for the next segment.
     pub(crate) fn set_inc(&mut self, inc: PhaseIncrement) {
-        self.inc = inc;
+        self.inc = PhaseStep::from(inc);
     }
 
     /// Whether this is the first design since the clock was unlanded: it lands at once.
@@ -86,10 +86,10 @@ impl SweepClock {
     /// one's end (or the LFO's start after a reset), its end corner the sweep
     /// [`COEFF_INTERVAL`] frames on at the LFO's step. `corner(lfo, end)` is the effect's value
     /// with the LFO at `lfo` (a sine, `-1..=1`) at the segment's start (`end` false) or end.
-    pub(crate) fn solve<F: Float + Lerp>(
+    pub(crate) fn solve<T: Lerp>(
         &mut self,
-        glides: &mut [Glide<F>],
-        mut corner: impl FnMut(f32, bool) -> F,
+        glides: &mut [Glide<T>],
+        mut corner: impl FnMut(f32, bool) -> T,
     ) {
         let start = self.phase;
         let mut end = start;
@@ -97,7 +97,9 @@ impl SweepClock {
             end = end.advance(self.inc);
         }
         // The effect's corner values are `f32`: the sine narrows once per segment end.
-        let sine = |offset: PhaseIncrement, p: Phase| p.offset_by(offset).sin() as f32;
+        let sine = |offset: PhaseStep, p: RunningPhase| {
+            Phase(f64::from_phase(p.advance(offset))).sin() as f32
+        };
         for c in 0..glides.len() {
             if c > 0 && self.offsets[c] == self.offsets[c - 1] {
                 glides[c] = glides[c - 1];
@@ -117,7 +119,7 @@ impl SweepClock {
     }
 
     #[cfg(test)]
-    pub(crate) fn state(&self) -> (Phase, usize, bool) {
+    pub(crate) fn state(&self) -> (RunningPhase, usize, bool) {
         (self.phase, self.pos, self.primed)
     }
 }

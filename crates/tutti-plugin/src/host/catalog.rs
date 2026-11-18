@@ -51,7 +51,7 @@
 //! without waiting for the probe's deadline. Nothing here runs on or reaches
 //! the audio thread.
 
-use crate::host::db_probe::{Probing, probe_fn};
+use crate::host::db_probe::{ProbeState, Probing, probe_fn};
 use crate::host::loadable::{Loadable, Resolved};
 use crate::host::plugin_ref::PluginRef;
 use std::collections::HashSet;
@@ -682,17 +682,19 @@ impl Catalog {
     /// [`try_apply`](Self::try_apply) applies its change.
     ///
     /// `state` is a file of the bytes the plugin's own `save_state` wrote: the
-    /// plugin is put in that state before it is measured, so the figure is of that
-    /// patch (for a file of one plugin; the row records a hash of it). It belongs
-    /// to this call alone: another `measure` without one measures its plugin as
-    /// it loads.
+    /// plugin `plugin` names is put in that state before it is measured, so the
+    /// figure is of that patch (the row records a hash of it). A ref that names no
+    /// plugin ([`PluginRef::file`]) is for a file of one plugin: with several, the
+    /// probe refuses the state ([`ProbeRefusal::AmbiguousPlugin`](tutti_plugin_types::ProbeRefusal::AmbiguousPlugin)).
+    /// The file's other plugins are measured as they load. It belongs to this call alone: another
+    /// `measure` without one measures its plugin as it loads.
     ///
     /// The probe renders each plugin at two configurations, up to
     /// [`DEFAULT_MEASURE_TIMEOUT`](crate::catalog::DEFAULT_MEASURE_TIMEOUT).
     /// As in a measuring scan, a plugin that crashes or hangs while being
     /// measured is **blacklisted**; one that cannot be measured (it would not
-    /// activate, or has no audio output) has no measurement in its row. Dropping
-    /// the task kills the probe. A
+    /// activate, has no audio output, or is too slow to render) is logged and its
+    /// row has no measurement. Dropping the task kills the probe. A
     /// missing `plugin-probe` is a failure in the result, as for
     /// [`register`](Self::register).
     ///
@@ -707,7 +709,10 @@ impl Catalog {
     ) -> std::result::Result<Scan, FilesError> {
         let probing = Probing {
             measure: true,
-            state: state.map(Path::to_path_buf),
+            state: state.map(|file| ProbeState {
+                file: file.to_path_buf(),
+                plugin: plugin.id().map(str::to_owned),
+            }),
             fallback: false,
         };
         self.spawn_file(probing, plugin.path(), plugin.format())

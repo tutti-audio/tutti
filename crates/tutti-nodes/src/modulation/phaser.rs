@@ -335,8 +335,9 @@ mod tests {
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
     use tutti_types::ChannelLayout;
-    use tutti_units::Phase;
-    use tutti_units::{Latency, PhaseIncrement, Samples, Tail, UnitParam};
+    use tutti_units::{
+        Latency, Phase, PhaseIncrement, PhaseStep, RunningPhase, Samples, Tail, UnitParam,
+    };
 
     const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -783,8 +784,8 @@ mod tests {
     #[test]
     fn a_rate_below_the_floor_is_the_floor() {
         let walked = |hz: f64, steps: usize| {
-            let inc = PhaseIncrement::per_sample(Hz(hz), RATE);
-            (0..steps).fold(Phase::START, |p, _| p.advance(inc))
+            let step = PhaseStep::from(PhaseIncrement::per_sample(Hz(hz), RATE));
+            (0..steps).fold(RunningPhase::START, |p, _| p.advance(step))
         };
         for (rate, effective) in [
             (-3.0f64, 0.01),
@@ -852,9 +853,9 @@ mod tests {
     #[test]
     fn a_rate_change_lands_at_its_grid_point_and_the_phase_stays_continuous() {
         let (slow, fast) = (controls(2.0, 1.0, 0.5), controls(9.0, 1.0, 0.5));
-        let inc = |hz: f64| PhaseIncrement::per_sample(Hz(hz), RATE);
+        let inc = |hz: f64| PhaseStep::from(PhaseIncrement::per_sample(Hz(hz), RATE));
         let walk = |first: usize, second: usize| {
-            let p = (0..first).fold(Phase::START, |p, _| p.advance(inc(2.0)));
+            let p = (0..first).fold(RunningPhase::START, |p, _| p.advance(inc(2.0)));
             (0..second).fold(p, |p, _| p.advance(inc(9.0)))
         };
         let after = |at: usize| {
@@ -883,9 +884,13 @@ mod tests {
         );
         let loud = vec![vec![1.0f32; 1_000]; 2];
         drive_kernel(&mut k, &[(0, controls(3.0, 1.0, 0.7))], &loud);
-        assert_ne!(k.clock.state().0, Phase::START, "the sweep was running");
+        assert_ne!(
+            k.clock.state().0,
+            RunningPhase::START,
+            "the sweep was running"
+        );
         k.prepare(RATE, MaxBlock::of(Samples(64)));
-        assert_eq!(k.clock.state(), (Phase::START, 0, false));
+        assert_eq!(k.clock.state(), (RunningPhase::START, 0, false));
         let y = drive_kernel(&mut k, &[(0, controls(3.0, 1.0, 0.7))], &silence(2, 200));
         assert!(y.iter().flatten().all(|&s| s == 0.0));
     }

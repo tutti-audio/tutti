@@ -1,14 +1,20 @@
-//! `plugin-probe <path> <result-file> [--as <format>] [--measure [--state <file>]]`:
-//! load a plugin file just far enough to read the descriptor of every plugin it holds, write the outcome to the result file and exit.
+//! `plugin-probe <path> <result-file> [--as <format>] [--measure [--state <file>
+//! [--plugin <id>]] [--budget <seconds>]]`: load a plugin file just far enough to read the descriptor of
+//! every plugin it holds, write the outcome to the result file and exit.
 //!
 //! With `--measure` the probe then activates each plugin and renders it: the
 //! tail and latency it reports against what it makes of an impulse
 //! (`tutti_plugin_probe::measure`). The figures are in each
-//! descriptor's `measured`. A plugin that crashes or hangs while rendering is a
-//! probe that crashed or hung, to the host that spawned it. `--state <file>`
-//! puts the plugin in the state the file holds (what the plugin's own
-//! `save_state` wrote) before it is measured, so the figure is of that patch:
-//! the record carries a hash of it.
+//! descriptor's `measured`; a plugin that could not be measured is named in the
+//! result with why. A plugin that crashes or hangs while rendering is a probe that
+//! crashed or hung, to the host that spawned it. `--state <file>` puts one plugin
+//! in the state the file holds (what the plugin's own `save_state` wrote) before it
+//! is measured, so the figure is of that patch: the record carries a hash of it.
+//! The plugin is the one `--plugin` names by descriptor id, else the file's only
+//! plugin (a state with no plugin named for a file of several is refused); the
+//! others are measured as they load. `--budget` bounds the whole run: each
+//! plugin's renders get what the budget leaves, so a slow plugin times out its own
+//! rows before the host that spawned the probe gives up on all of it.
 //!
 //! `--as <format>` (`clap`, `vst3`, `vst2`, `au`) names the format the path is read
 //! as, for a file whose own extension does not (a link `Foo.clap` to `libfoo.so`).
@@ -36,13 +42,49 @@
 use std::ffi::OsStr;
 use std::path::Path;
 use std::process::ExitCode;
-use tutti_plugin_probe::{describe, describe_measured};
+use std::time::{Duration, Instant};
+use tutti_plugin_probe::{StateFor, describe, describe_measured};
 use tutti_plugin_types::{
-    MainThreadMarker, PluginFormat, ProbeExit, ProbeOutcome, ProbeRefusal, write_result,
+    Deadline, MainThreadMarker, PluginFormat, ProbeExit, ProbeOutcome, ProbeRefusal, write_result,
 };
 
 const USAGE: &str = "usage: plugin-probe <plugin-path> <result-file> [--as <format>] \
-                     [--measure [--state <file>]]";
+                     [--measure [--state <file> [--plugin <id>]] [--budget <seconds>]]";
+
+/// What the command line asks of the measuring step.
+#[derive(Default)]
+struct Measuring<'a> {
+    /// `--state`: the file of the state, and `--plugin`: whose it is.
+    state: Option<(&'a OsStr, Option<&'a str>)>,
+    /// `--budget`: how long the whole run may take.
+    budget: Option<Duration>,
+}
+
+/// The measuring flags after `--measure`: `--state <file>`, `--plugin <id>` (with
+/// `--state`) and `--budget <seconds>`, each once and in any order.
+fn measuring(flags: &[std::ffi::OsString]) -> Option<Measuring<'_>> {
+    let (mut state, mut plugin, mut budget) = (None, None, None);
+    let mut flags = flags.iter();
+    while let Some(flag) = flags.next() {
+        let value = flags.next()?;
+        match flag.to_str()? {
+            "--state" if state.is_none() => state = Some(value.as_os_str()),
+            "--plugin" if plugin.is_none() => plugin = Some(value.to_str()?),
+            "--budget" if budget.is_none() => {
+                budget = Some(Duration::from_secs(value.to_str()?.parse().ok()?));
+            }
+            _ => return None,
+        }
+    }
+    Some(Measuring {
+        state: match (state, plugin) {
+            (Some(file), plugin) => Some((file, plugin)),
+            (None, None) => None,
+            (None, Some(_)) => return None,
+        },
+        budget,
+    })
+}
 
 fn main() -> ExitCode {
     watch_host();
@@ -63,13 +105,27 @@ fn main() -> ExitCode {
     if format.is_some() {
         rest.drain(..2);
     }
-    let (measure, state_file) = match rest.as_slice() {
-        [] => (false, None),
-        [m] if m == "--measure" => (true, None),
-        [m, s, file] if m == "--measure" && s == "--state" => (true, Some(file)),
-        _ => return usage(&result),
+    let measuring = match rest.split_first() {
+        None => None,
+        Some((m, flags)) if m == "--measure" => match measuring(flags) {
+            Some(measuring) => Some(measuring),
+            None => return usage(&result),
+        },
+        Some(_) => return usage(&result),
     };
-    let state = match state_file.map(std::fs::read).transpose() {
+    // The deadline of the whole run, from here: the plugins of a file share it.
+    let run = measuring
+        .as_ref()
+        .and_then(|m| m.budget)
+        .map_or(Deadline::never(), |budget| {
+            Deadline::after(Instant::now(), budget)
+        });
+    let state = match measuring
+        .as_ref()
+        .and_then(|m| m.state)
+        .map(|(file, plugin)| std::fs::read(file).map(|bytes| (bytes, plugin)))
+        .transpose()
+    {
         Ok(state) => state,
         // A bad `--state` is the caller's, not a plugin's: a result, not a crash.
         Err(e) => {
@@ -84,14 +140,21 @@ fn main() -> ExitCode {
         return finish(&result, ProbeOutcome::Failed(ProbeRefusal::NotMainThread));
     };
     let path = Path::new(&path);
-    let described = if measure {
-        describe_measured(main, path, format, state.as_deref())
+    let described = if measuring.is_some() {
+        let state = state.as_ref().map(|(bytes, plugin)| StateFor {
+            plugin: *plugin,
+            bytes,
+        });
+        describe_measured(main, path, format, state, run)
     } else {
-        describe(main, path, format)
+        describe(main, path, format).map(|plugins| (plugins, Vec::new()))
     };
     let outcome = match described {
-        Ok(plugins) if plugins.is_empty() => ProbeOutcome::Failed(ProbeRefusal::Empty),
-        Ok(plugins) => ProbeOutcome::Described(plugins),
+        Ok((plugins, _)) if plugins.is_empty() => ProbeOutcome::Failed(ProbeRefusal::Empty),
+        Ok((plugins, unmeasured)) => ProbeOutcome::Described {
+            plugins,
+            unmeasured,
+        },
         Err(refusal) => ProbeOutcome::Failed(refusal),
     };
     finish(&result, outcome)

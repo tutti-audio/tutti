@@ -56,7 +56,7 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Amplitude, Hz, SampleRate, Seconds, Tail};
+use tutti_units::{Amplitude, Hz, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
 use crate::delay::DelayRing;
@@ -65,6 +65,8 @@ use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
 use crate::reverb::{CHUNK, ramp, tail_of};
 use crate::{Glide, Lerp, Ring, Steps, System, TAIL_FLOOR};
 
+/// The shortest a line reads at: one frame.
+const ONE_FRAME: ReadPosition = ReadPosition::from_frames(Samples::new(1));
 /// How far a line's length moves in a chunk, in frames.
 const LENGTH_STEP: f32 = 0.5;
 /// How far the pre-delay moves in a chunk, in frames.
@@ -82,8 +84,8 @@ struct Target<F> {
     crossover: [Hz; 2],
     pole: [f64; 2],
 
-    len: Vec<F>,
-    pre_len: F,
+    len: Vec<ReadPosition>,
+    pre_len: ReadPosition,
     depth: F,
     gain: Vec<[F; 3]>,
     v: Vec<F>,
@@ -102,8 +104,8 @@ impl<F: Float> Target<F> {
             rate: Hz(0.5),
             crossover: [Hz::ZERO; 2],
             pole: [0.0; 2],
-            len: vec![F::ONE; lines],
-            pre_len: F::ZERO,
+            len: vec![ONE_FRAME; lines],
+            pre_len: ReadPosition::START,
             depth: F::ZERO,
             gain: vec![[F::ZERO; 3]; lines],
             v: vec![F::ZERO; lines],
@@ -133,11 +135,11 @@ pub struct FdnGlides<F: Float> {
     pole: [F; 2],
     crossover: [Hz; 2],
 
-    len: Vec<Glide<F>>,
+    len: Vec<Glide<ReadPosition>>,
     /// The length the gains are designed for, glided with them over the ramp: the gains in
     /// flight are a blend of two designs, each for its own length.
-    design_len: Vec<Glide<F>>,
-    pre_len: Glide<F>,
+    design_len: Vec<Glide<ReadPosition>>,
+    pre_len: Glide<ReadPosition>,
     depth: Glide<F>,
     gain: Vec<[Glide<F>; 3]>,
     v: Vec<Glide<F>>,
@@ -164,9 +166,9 @@ impl<F: Float + Lerp> FdnGlides<F> {
             rate: Hz(0.5),
             pole: t.pole.map(F::from_f64),
             crossover: t.crossover,
-            len: vec![Glide::landed(F::ONE); lines],
-            design_len: vec![Glide::landed(F::ONE); lines],
-            pre_len: rest,
+            len: vec![Glide::landed(ONE_FRAME); lines],
+            design_len: vec![Glide::landed(ONE_FRAME); lines],
+            pre_len: Glide::landed(ReadPosition::START),
             depth: rest,
             gain: vec![[rest; 3]; lines],
             v: vec![rest; lines],
@@ -180,15 +182,13 @@ impl<F: Float + Lerp> FdnGlides<F> {
     }
 
     fn glides(&mut self) -> impl Iterator<Item = &mut Glide<F>> {
-        self.len
+        self.gain
             .iter_mut()
-            .chain(&mut self.design_len)
-            .chain(self.gain.iter_mut().flatten())
+            .flatten()
             .chain(&mut self.v)
             .chain(&mut self.input)
             .chain(self.out.iter_mut().flatten())
             .chain([
-                &mut self.pre_len,
                 &mut self.depth,
                 &mut self.v_len,
                 &mut self.mix,
@@ -200,11 +200,21 @@ impl<F: Float + Lerp> FdnGlides<F> {
     /// Lands on the targets now.
     pub fn settle(&mut self) {
         self.glides().for_each(Glide::settle);
+        self.lengths().for_each(Glide::settle);
     }
 
     /// Takes one step of every glide.
     fn step(&mut self) {
         self.glides().for_each(|g| g.advance(1));
+        self.lengths().for_each(|g| g.advance(1));
+    }
+
+    /// The glides of a length: the lines', the gains' design lengths and the pre-delay.
+    fn lengths(&mut self) -> impl Iterator<Item = &mut Glide<ReadPosition>> {
+        self.len
+            .iter_mut()
+            .chain(&mut self.design_len)
+            .chain([&mut self.pre_len])
     }
 
     /// Aims every glide at the target's value with its own rate: a length by
@@ -217,8 +227,8 @@ impl<F: Float + Lerp> FdnGlides<F> {
         self.crossover = t.crossover;
         self.pole = t.pole.map(F::from_f64);
         for j in 0..n {
-            self.len[j].aim_by(t.len[j], Steps::Rate(LENGTH_STEP));
-            self.design_len[j].aim_by(t.len[j], ramp);
+            self.len[j].aim_position(t.len[j], Steps::Rate(LENGTH_STEP));
+            self.design_len[j].aim_position(t.len[j], ramp);
             for (s, &g) in self.gain[j].iter_mut().zip(&t.gain[j]) {
                 s.aim_by(g, ramp);
             }
@@ -234,7 +244,7 @@ impl<F: Float + Lerp> FdnGlides<F> {
         self.mix.aim_by(t.mix, ramp);
         self.depth.aim_by(t.depth, ramp);
         self.rate = t.rate;
-        self.pre_len.aim_by(t.pre_len, Steps::Rate(PRE_STEP));
+        self.pre_len.aim_position(t.pre_len, Steps::Rate(PRE_STEP));
         self.wet.aim_by(t.wet, ramp);
         self.width.aim_by(t.width, ramp);
     }
@@ -254,7 +264,7 @@ struct State<F> {
     fresh: bool,
 
     // The chunk's constants.
-    c_len: Vec<F>,
+    c_len: Vec<ReadPosition>,
     c_mod_prev: Vec<F>,
     c_mod_next: Vec<F>,
     c_gain: Vec<[F; 3]>,
@@ -265,7 +275,7 @@ struct State<F> {
     c_out: Vec<[F; 2]>,
     c_wet: F,
     c_width: F,
-    c_pre: F,
+    c_pre: ReadPosition,
 }
 
 /// A feedback delay network of any layout: its lines, its pre-delay and what a chunk
@@ -324,7 +334,7 @@ impl<F: Float + Lerp> FdnBank<F> {
                 phase: vec![0.0; max_lines],
                 pole: vec![[F::ZERO; 4]; max_lines],
                 fresh: true,
-                c_len: vec![F::ONE; max_lines],
+                c_len: vec![ONE_FRAME; max_lines],
                 c_mod_prev: vec![F::ZERO; max_lines],
                 c_mod_next: vec![F::ZERO; max_lines],
                 c_gain: vec![[F::ZERO; 3]; max_lines],
@@ -334,7 +344,7 @@ impl<F: Float + Lerp> FdnBank<F> {
                 c_out: vec![[F::ZERO; 2]; max_lines],
                 c_wet: F::ZERO,
                 c_width: F::ZERO,
-                c_pre: F::ZERO,
+                c_pre: ReadPosition::START,
             },
             designed: None,
             network: Box::new(Network::new(rate)),
@@ -382,9 +392,9 @@ impl<F: Float + Lerp> FdnBank<F> {
         let Ring::Finite(t) = self.network.tail(TAIL_FLOOR) else {
             return tail_of(Ring::Unbounded, self.rate);
         };
-        let pre = (self.network.pre_delay.get() as f64).clamp(0.0, (self.pre_cap - 4) as f64);
-        let behind = (glides.pre_len.now().to_f64() - pre).max(0.0);
-        let seconds = t.get() + behind / self.rate.get();
+        let pre = self.network.pre_delay.min(Samples::new(self.pre_cap - 4));
+        let behind = glides.pre_len.now().saturating_sub(pre);
+        let seconds = t.get() + behind.span().to_seconds(self.rate).get();
         tail_of(Ring::Finite(Seconds(seconds)), self.rate)
     }
 
@@ -428,7 +438,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         }
         let t = &mut self.target;
         t.n = n;
-        let max_len = (self.cap - 4) as f64;
+        let max_len = SampleSpan::from_samples(Samples::new(self.cap - 4));
         // A coefficient of the network is a unit, or zero when it is not finite. Each narrows
         // to `F` once, here.
         let unit = |x: f64| {
@@ -445,7 +455,10 @@ impl<F: Float + Lerp> FdnBank<F> {
         let flat = F::from_f64(1.0 / (n as f64).sqrt());
         for j in 0..n {
             let line = &f.lines[j];
-            t.len[j] = F::from_f64(line.length.get().clamp(1.0, max_len));
+            t.len[j] = ReadPosition::from_span(
+                line.length
+                    .clamp(SampleSpan::from_samples(Samples::new(1)), max_len),
+            );
             t.gain[j] = absorption_gains(line.absorption, t.pole).map(|g| F::from_f64(g.get()));
             // A diagonal network is `m = 0`; its `v` is a unit vector (line 0)
             // like the rest, so a ramp to a mixing matrix moves between unit
@@ -483,8 +496,8 @@ impl<F: Float + Lerp> FdnBank<F> {
         } else {
             0.5
         });
-        let pre = self.network.pre_delay.get() as f64;
-        t.pre_len = F::from_f64(pre.clamp(0.0, (self.pre_cap - 4) as f64));
+        t.pre_len = ReadPosition::from_frames(self.network.pre_delay)
+            .min(ReadPosition::from_frames(Samples::new(self.pre_cap - 4)));
         let wet = self.network.wet.to_amplitude().get();
         t.wet = if wet.is_finite() {
             F::from_f64(wet)
@@ -528,7 +541,8 @@ impl<F: Float + Lerp> FdnBank<F> {
             let [low, mid, high] = if now == designed {
                 gains
             } else {
-                gains.map(|g| g.powf(now / designed))
+                let ratio = F::from_f64(now.span().get() / designed.span().get());
+                gains.map(|g| g.powf(ratio))
             };
             s.c_gain[j] = [high, mid - high, low - mid];
             s.c_v[j] = c.v[j].now();
@@ -604,8 +618,11 @@ impl<F: Float + Lerp> FdnBank<F> {
 
             let (mut out_l, mut out_r) = (F::ZERO, F::ZERO);
             for j in 0..n {
-                let delay =
-                    (s.c_len[j] + crate::lerp(s.c_mod_prev[j], s.c_mod_next[j], t)).max(F::ONE);
+                let delay = F::offset_position(
+                    s.c_len[j],
+                    crate::lerp(s.c_mod_prev[j], s.c_mod_next[j], t),
+                )
+                .max(ONE_FRAME);
                 d[j] = s.lines[j].at(delay);
                 out_l += s.c_out[j][0] * d[j];
                 out_r += s.c_out[j][1] * d[j];
@@ -651,7 +668,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         let s = &self.state;
         (0..glides.n)
             .map(|j| {
-                let len = glides.len[j].now().to_f64() as usize;
+                let len = glides.len[j].now().frames().get();
                 (1..=len)
                     .map(|i| {
                         let x = s.lines[j].back(i);

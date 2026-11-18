@@ -7,10 +7,10 @@
 //! long base delay, a flanger at a short one), a [`Stagger`] how the channels' sweeps are
 //! offset, and the controls are three: the LFO's rate, the sweep's depth and the feedback.
 //!
-//! The bank is the kernel: it runs a block through delays that are [`Glide`]s, one per
-//! channel, and a feedback glide. **The LFO is the caller's**, on the stream's clock: it
-//! solves the corners of a segment (each channel's delay at the segment's start and at its
-//! end, [`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames on, [`swept`](ModDelayBank::swept))
+//! The bank is the kernel: it runs a block through sweep excursions that are [`Glide`]s, one
+//! per channel, around its base delay (a [`ReadPosition`], so a long base keeps its fraction),
+//! and a feedback glide. **The LFO is the caller's**, on the stream's clock: it solves the
+//! corners of a segment (each channel's excursion at the segment's start and at its end, [`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames on, [`swept`](ModDelayBank::swept))
 //! and aims each channel's glide across it, so the cut of the blocks does not move the
 //! render. The chord of a sine over a step of `h` radians misses it by at most `h^2 / 8`,
 //! which at 5 Hz and 48 kHz is 1.4e-5 of the depth (0.03 samples against the deepest chorus,
@@ -36,7 +36,7 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::{BusTopology, MAX_CHANNELS};
 use tutti_units::{
-    Feedback, Gain, Hz, PhaseIncrement, SamplePosition, SampleRate, SampleSpan, Samples, Seconds,
+    Feedback, Gain, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};
@@ -233,9 +233,9 @@ pub struct ModDelayBank<F: Float> {
     sweep: Sweep,
     rate: SampleRate,
     /// The line's capacity in frames: no delay is past it.
-    cap: SampleSpan,
+    cap: ReadPosition,
     /// The centre delay, inside the line.
-    base: SampleSpan,
+    base: ReadPosition,
 }
 
 impl<F: Float + Lerp> ModDelayBank<F> {
@@ -244,15 +244,13 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     #[must_use]
     pub fn new(layout: &ModDelayLayout, rate: SampleRate) -> Self {
         let cap = layout.max_delay().frames(rate);
-        let cap_span = SampleSpan::from_samples(cap);
-        let base = SampleSpan::from_seconds(layout.sweep.base(), rate)
-            .unwrap_or(SampleSpan::ZERO)
-            .min(cap_span);
+        let cap_position = ReadPosition::from_frames(cap);
+        let base = ReadPosition::of(layout.sweep.base(), rate).min(cap_position);
         Self {
             lines: (0..layout.width()).map(|_| DelayLine::new(cap)).collect(),
             sweep: layout.sweep,
             rate,
-            cap: cap_span,
+            cap: cap_position,
             base,
         }
     }
@@ -266,7 +264,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     /// The line's longest delay at the prepared rate.
     #[must_use]
     pub fn max_delay(&self) -> Samples {
-        self.cap.to_samples_floor()
+        self.cap.frames()
     }
 
     /// Back to silence. No allocation.
@@ -293,7 +291,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
             .clamp(self.sweep.depth_min().get(), self.sweep.depth_max().get());
         let depth = SampleSpan::from_seconds(Seconds(depth), self.rate)
             .unwrap_or(SampleSpan::ZERO)
-            .min(self.cap);
+            .min(SampleSpan::from_samples(self.cap.frames()));
         let feedback = finite_or(controls.feedback.get(), d.feedback.get())
             .max(0.0)
             .min(self.sweep.feedback_max().get());
@@ -304,21 +302,32 @@ impl<F: Float + Lerp> ModDelayBank<F> {
         }
     }
 
-    /// Where the read lands with the LFO at `lfo` (in `-1..=1`) and the sweep `depth` frames
-    /// deep: the centre `base + lfo * depth` frames behind the newest write, held inside the
-    /// line. A position, not a delay: it can fall behind the write (a depth past the base),
-    /// and [`process`](Self::process) floors the delay a frame reads at one frame (the
+    /// How far the read is from the base with the LFO at `lfo` (in `-1..=1`) and the sweep
+    /// `depth` frames deep: `lfo * depth` frames, held so that the read stays inside the line.
+    /// An excursion, not a delay: it can reach behind the newest write (a depth past the
+    /// base), and [`position`](Self::position) floors the delay a frame reads at one frame (the
     /// feedback tap is read one before it), so a sweep that bottoms out flat-bottoms there
-    /// whatever the chord between corners does.
+    /// whatever the chord between corners does. It is small beside the delay, so it is held
+    /// in the bank's float and the base stays the exact [`ReadPosition`] it is added to.
     #[must_use]
-    pub fn swept(&self, lfo: Gain, depth: SampleSpan) -> SamplePosition {
-        let at = self.base.get() + lfo.get() * depth.get();
-        SamplePosition(at.min(self.cap.get()))
+    pub fn swept(&self, lfo: Gain, depth: SampleSpan) -> F {
+        let room = self.cap.span().get() - self.base.span().get();
+        F::from_f64((lfo.get() * depth.get()).min(room))
     }
 
-    /// Runs `input` into `output`, frame `i` at `delays[c].at(taken + 1 + i)` for channel `c`
-    /// and `feedback.at(taken + 1 + i)`, then takes the block's steps from the glides. Each
-    /// delay is in frames, floored at one frame where it is read.
+    /// The delay a read takes with the sweep `excursion` frames from the base (what
+    /// [`swept`](Self::swept) gives, glided between corners): the base moved by it exactly
+    /// ([`Float::offset_position`]), held between one frame and the line's length.
+    #[inline]
+    #[must_use]
+    pub fn position(&self, excursion: F) -> ReadPosition {
+        read_at(self.base, self.cap, excursion)
+    }
+
+    /// Runs `input` into `output`, frame `i` at the excursion `delays[c].at(taken + 1 + i)` for
+    /// channel `c` ([`position`](Self::position) of it) and `feedback.at(taken + 1 + i)`, then
+    /// takes the block's steps from the glides. Each delay is floored at one frame where it is
+    /// read.
     ///
     /// Each channel is [`delay_step`] at its delay: the line's own tap scaled by the feedback
     /// added to the input. Channel `c` of `input` feeds channel `c` of `output`; a channel
@@ -340,6 +349,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
             .min(output.channels())
             .min(delays.len());
         let fb_first = feedback.taken().saturating_add(1);
+        let (base, cap) = (self.base, self.cap);
         for (c, ((line, delay), out)) in self
             .lines
             .iter_mut()
@@ -353,7 +363,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
             let ys = &mut out.into_samples_mut()[..frames];
             for (i, (y, x)) in ys.iter_mut().zip(xs).enumerate() {
                 let step = u32::try_from(i).unwrap_or(u32::MAX);
-                let d = delay.at(first.saturating_add(step)).max(F::ONE);
+                let d = read_at(base, cap, delay.at(first.saturating_add(step)));
                 let g = feedback.at(fb_first.saturating_add(step));
                 let wet = delay_step(line, x.convert_to::<F>(), d, g, READ);
                 *y = wet.convert_to::<S>();
@@ -365,6 +375,14 @@ impl<F: Float + Lerp> ModDelayBank<F> {
         }
         feedback.advance(taken);
     }
+}
+
+/// The delay of a read `excursion` frames from `base`, held between one frame and `cap`.
+#[inline(always)]
+fn read_at<F: Float>(base: ReadPosition, cap: ReadPosition, excursion: F) -> ReadPosition {
+    F::offset_position(base, excursion)
+        .max(ReadPosition::from_frames(Samples::new(1)))
+        .min(cap)
 }
 
 #[cfg(test)]

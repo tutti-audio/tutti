@@ -21,6 +21,15 @@ impl Deadline {
         Self(None)
     }
 
+    /// The earlier of this deadline and `other`: a wait bounded by both.
+    #[must_use]
+    pub fn sooner(self, other: Self) -> Self {
+        match (self.0, other.0) {
+            (Some(a), Some(b)) => Self(Some(a.min(b))),
+            (a, b) => Self(a.or(b)),
+        }
+    }
+
     /// Whether the time is up at `now`: at the deadline itself, and after.
     #[must_use]
     pub fn passed(self, now: Instant) -> bool {
@@ -46,5 +55,23 @@ mod tests {
         let far = start + Duration::from_secs(1 << 30);
         assert!(!Deadline::after(start, Duration::MAX).passed(far));
         assert!(!Deadline::never().passed(far));
+    }
+
+    /// `sooner` is the earlier deadline, and `never` is the later of any.
+    #[test]
+    fn the_sooner_of_two_deadlines_is_the_earlier() {
+        let start = Instant::now();
+        let (near, far) = (
+            Deadline::after(start, Duration::from_secs(1)),
+            Deadline::after(start, Duration::from_secs(9)),
+        );
+        assert_eq!(near.sooner(far), near);
+        assert_eq!(far.sooner(near), near);
+        assert_eq!(Deadline::never().sooner(far), far);
+        assert_eq!(far.sooner(Deadline::never()), far);
+        assert_eq!(
+            Deadline::never().sooner(Deadline::never()),
+            Deadline::never()
+        );
     }
 }
