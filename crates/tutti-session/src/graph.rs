@@ -71,6 +71,7 @@ use tutti_units::{Amplitude, Mix, SampleRate, Seconds, UnitAddr};
 use tutti_units::{Samples, Tail};
 
 mod observe;
+mod phases;
 #[cfg(feature = "testing")]
 mod testing;
 
@@ -397,6 +398,9 @@ pub struct Graph<F: Float = f32> {
     /// publisher is the session's `TransportSettings`, whose `Reclaim` sweep
     /// already covers the cell.
     pub(crate) tempo: tutti_transport::TempoReader,
+    /// A re-prepare resumed in the update's collect: its plan's figures are
+    /// published at the commit.
+    resumed: bool,
 }
 
 /// The wiring a re-insert at one key dropped, in the session's port types.
@@ -559,6 +563,7 @@ impl<F: Float> Graph<F> {
             #[cfg(feature = "plugin")]
             graveyard: crate::plugin::Graveyard::default(),
             tempo,
+            resumed: false,
         }
     }
 

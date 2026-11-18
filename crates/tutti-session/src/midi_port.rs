@@ -743,7 +743,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.handle::<P, MidiInputEntry>(key)
+        self.pool.entries.handle::<P, MidiInputEntry>(key)
     }
 
     /// The output port of the `midi_output` entry under `key`.
@@ -755,7 +755,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.handle::<P, MidiOutputEntry>(key)
+        self.pool.entries.handle::<P, MidiOutputEntry>(key)
     }
 }
 

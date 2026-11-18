@@ -1,0 +1,119 @@
+//! [`OutputPart`]: where the mix lands: the root asked for, the policy, and what the engine
+//! exposes of its output (the load meter and the heard tap).
+
+#![cfg_attr(
+    not(feature = "device"),
+    expect(dead_code, reason = "a device restart (feature `device`) is the user")
+)]
+
+use std::sync::Arc;
+
+use tutti_buffers::Float;
+use tutti_engine::HeardTaps;
+use tutti_graph::RootError;
+use tutti_metering::LoadMeter;
+use tutti_types::{ChannelLayout, ChannelTopology};
+
+use crate::OutputPolicy;
+use crate::graph::Graph;
+use crate::value::Cell;
+
+/// The root topology asked for, the output policy in force, and the engine's
+/// output-side readings.
+#[derive(Debug)]
+pub(crate) struct OutputPart<F: Float> {
+    /// The root topology last asked for
+    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
+    /// applied or not.
+    pub(crate) root_request: Option<ChannelTopology>,
+    /// Why `root_request` is not in force, if it is not.
+    pub(crate) root_refusal: Option<RootError>,
+    /// Where the mix lands, as set ([`Session::policy`](crate::Session::policy)).
+    pub(crate) policy: Arc<Cell<OutputPolicy>>,
+    /// The engine's tap after the fader and the device width it was built
+    /// for; `None` detached.
+    pub(crate) heard: Option<(HeardTaps<F>, ChannelLayout)>,
+    /// The engine's load meter, offline or on a device; `None` detached.
+    pub(crate) load: Option<LoadMeter>,
+}
+
+impl<F: Float> OutputPart<F> {
+    pub(crate) fn new(
+        root_request: Option<ChannelTopology>,
+        policy: Arc<Cell<OutputPolicy>>,
+    ) -> Self {
+        Self {
+            root_request,
+            root_refusal: None,
+            policy,
+            heard: None,
+            load: None,
+        }
+    }
+
+    /// Takes the refusal of a declaration that waited and could not be
+    /// applied into `root_refusal`, where a device restart re-attempts it.
+    pub(crate) fn sync_refusal(&mut self, graph: &mut Graph<F>) {
+        if let Some(e) = graph.take_apply_refusal() {
+            self.root_refusal = Some(e);
+        }
+    }
+
+    /// Declares `root` on `graph` unless the same request is already in force.
+    ///
+    /// # Errors
+    ///
+    /// The graph's refusal, which is kept as `root_refusal`.
+    pub(crate) fn declare(
+        &mut self,
+        graph: &mut Graph<F>,
+        root: Option<ChannelTopology>,
+    ) -> Result<(), RootError> {
+        self.sync_refusal(graph);
+        // The same request again, in force, is nothing to do.
+        if root == self.root_request && self.root_refusal.is_none() {
+            return Ok(());
+        }
+        self.root_request = root.clone();
+        match graph.declare_root(root, false) {
+            Ok(()) => self.root_refusal = None,
+            Err(e) => {
+                self.root_refusal = Some(e);
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    /// A declaration a device refused is asked again, hard, of the device the
+    /// graph is now placed on. Whether it is in force now, so the caller commits.
+    pub(crate) fn reattempt(&mut self, graph: &mut Graph<F>) -> bool {
+        if self.root_refusal.is_none() {
+            return false;
+        }
+        match graph.declare_root(self.root_request.clone(), true) {
+            Ok(()) => {
+                self.root_refusal = None;
+                true
+            }
+            Err(e) => {
+                self.root_refusal = Some(e);
+                false
+            }
+        }
+    }
+
+    /// The device width the heard tap opens at, after a device change.
+    pub(crate) fn set_device_width(&mut self, width: ChannelLayout) {
+        if let Some((_, layout)) = &mut self.heard {
+            *layout = width;
+        }
+    }
+
+    /// Frees what the audio thread let go of in the heard tap.
+    pub(crate) fn reclaim(&self) {
+        if let Some((taps, _)) = &self.heard {
+            taps.reclaim();
+        }
+    }
+}

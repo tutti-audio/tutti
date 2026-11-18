@@ -326,7 +326,8 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
                 // A custom driver (`restart_on`) names no device: unknown.
                 let name = selector.and_then(|s| self.device().opened_id(s));
                 // The restart cleared the fault record; its count restarts.
-                self.faults_seen = self.device().faults().count();
+                self.reports
+                    .faults_restarted(self.device().faults().count());
                 let restarted = DeviceRestarted {
                     previous_rate,
                     rate: self.device().graph_rate(),
@@ -889,7 +890,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // A map names the root's own channels, so a device swap does not widen
         // a root that has one; without it a wider device widens an undeclared
         // root by the build's rule.
-        let policy = self.output_policy.current();
+        let policy = self.output.policy.current();
         let mapped = policy.map.targets().is_some();
         let root = self.graph.root_topology().cloned().unwrap_or_else(|| {
             let width = if mapped {
@@ -968,14 +969,8 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         }
         // A declaration a device refused is asked again of this one: if it
         // places, it is in force, committed and settled below with the rest.
-        if self.root_refusal.is_some() {
-            match self.graph.declare_root(self.root_request.clone(), true) {
-                Ok(()) => {
-                    self.root_refusal = None;
-                    self.commit();
-                }
-                Err(e) => self.root_refusal = Some(e),
-            }
+        if self.output.reattempt(&mut self.graph) {
+            self.commit();
         }
         // A wider device widens the root, by the build's rule; a narrower one
         // keeps it, and the engine folds. Committed and settled here too, so
@@ -983,7 +978,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // edit flag set, and the next update retries.
         // A declared root keeps the width it declared: the device is no floor
         // under it.
-        let mapped = self.output_policy.current().map.targets().is_some();
+        let mapped = self.output.policy.current().map.targets().is_some();
         let width = crate::root_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels);
         if self.graph.root_topology().is_none() && !mapped && width > self.graph.outputs() {
             // Undeclared, so it cannot be refused.
@@ -1016,9 +1011,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // The heard tap opens at the device's width from here on; one open
         // across this change keeps counting its blocks lost (see
         // `Session::open_heard_tap`).
-        if let Some((_, layout)) = &mut self.heard {
-            *layout = spec.channels;
-        }
+        self.output.set_device_width(spec.channels);
         Ok(())
     }
 }

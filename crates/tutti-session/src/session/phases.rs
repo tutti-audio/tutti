@@ -2,18 +2,14 @@
 //! a phase reads besides the session, and `Session::update` and `run_phase` run them,
 //! reporting what they found as [`SessionEvent`]s.
 
-use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Instant;
 
-use tutti_engine::StreamFaultKind;
-use tutti_graph::NodeKey;
 use tutti_modulation::Declarations;
 use tutti_rt::MainThreadMarker;
 
 use crate::clock::sealed::Running;
 use crate::format::Sealed;
-use crate::graph::Retried;
 use crate::{AppKey, Clock, Committed, Session, SessionEvent};
 
 /// One step of [`Session::update`]. [`PHASES`] is their order.
@@ -201,18 +197,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // Before the collect, as a frame's spawns run before its
                 // commit: a crossfade lands on the update that first finds
                 // the re-prepare resumed.
-                for retried in self.graph.retry_crossfades() {
-                    out.push(match retried {
-                        Retried::Landed { node, id, controls } => SessionEvent::CrossfadeLanded {
-                            node,
-                            id,
-                            controls: crate::CrossfadeControls::new(controls),
-                        },
-                        Retried::Failed { node, id, refused } => {
-                            SessionEvent::CrossfadeFailed { node, id, refused }
-                        }
-                    });
-                }
+                self.graph.report_crossfades(out);
                 // What an export left behind (a render's fork, an edit
                 // that never ran) drops here, on the main thread.
                 #[cfg(feature = "export")]
@@ -220,8 +205,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     self.bounce.drop_leftovers();
                     self.bounce.watch_stall(cx.now);
                 }
-                let repreparing = self.graph.is_repreparing();
-                self.graph.collect();
+                // A re-prepare resumed in this collect sent the resumed plan, whose
+                // shapes are new (a lookahead is a time, so a rate change moves
+                // latencies): its figures are published at the commit.
+                self.graph.collect_noting_resume();
                 self.sync_root_refusal();
                 // Closes a plugin that was dropped off its own thread (a pool thread at an
                 // export's end, say): it handed the close to this session's collector, which
@@ -230,37 +217,19 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 if let Some(main) = cx.main {
                     self.main_work.run(main);
                 }
-                self.report_event_losses(out);
-                self.report_silenced(out);
+                self.graph.report_event_losses(out);
+                self.reports.silenced(self.output.load.as_ref(), out);
                 // Last: the landings this update's own stages queued.
                 self.jobs.report_landed(out);
-                // A re-prepare resumed in that collect: it sent the resumed
-                // plan, whose shapes are new (a lookahead is a time, so a
-                // rate change moves latencies).
-                self.resumed |= repreparing && !self.graph.is_repreparing();
             }
             Phase::Commit => {
                 self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
-                out.extend(
-                    self.graph
-                        .announce_reopened()
-                        .into_iter()
-                        .map(|(id, topology)| SessionEvent::RootReaderReopened { id, topology }),
-                );
-                for u in self.graph.take_unwired() {
-                    out.push(SessionEvent::Unwired {
-                        node: u.node,
-                        edges: u.edges,
-                        event_edges: u.event_edges,
-                        bus_edges: u.bus_edges,
-                    });
-                }
-                self.report_rewired(out);
-                if !sent && self.resumed {
+                self.graph.report_commit(out);
+                self.graph.report_rewired(out);
+                if self.graph.take_resumed() && !sent {
                     self.publish_sent();
                 }
-                self.resumed = false;
             }
             Phase::Modulation => self
                 .mods
@@ -272,7 +241,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     self.commit_reporting(out);
                 }
                 self.mods.resync(&mut self.graph);
-                self.report_rewired(out);
+                self.graph.report_rewired(out);
             }
             Phase::MidiOut => {
                 #[cfg(feature = "midi")]
@@ -330,7 +299,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                         out.push(crate::MidiReport::ClockCommandsRefused(refused).into());
                     }
                 }
-                out.append(&mut self.carried_events);
+                self.reports.drain_carried(out);
                 let lost = self.fault_poll(out);
                 #[cfg(feature = "device")]
                 self.listing_poll(cx.now, out);
@@ -343,9 +312,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.graph.reap_taps();
                 self.graph.reap_event_taps();
                 self.graph.reap_meters();
-                if let Some((taps, _)) = &self.heard {
-                    taps.reclaim();
-                }
+                self.output.reclaim();
                 self.reclaim();
                 self.graph.drain_rt_log();
                 // What the main thread owns of the retired and the open.
@@ -356,61 +323,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 }
             }
         }
-    }
-
-    /// The blocks the engine silenced since the last update, as one
-    /// [`SessionEvent::BlocksSilenced`]. The meter's count is cumulative
-    /// (and zeroed by a reset), so the rise is read against the last
-    /// reading; a reset restarts from the new count.
-    fn report_silenced(&mut self, out: &mut Vec<SessionEvent>) {
-        let Some(load) = &self.load else { return };
-        let now = load.peek().silenced;
-        let rise = now.saturating_sub(self.silenced_seen);
-        self.silenced_seen = now;
-        if rise > 0 {
-            out.push(SessionEvent::BlocksSilenced(rise));
-        }
-    }
-
-    /// The events the graph's ports lost since the last update, as
-    /// [`SessionEvent::EventsDropped`], one per port.
-    fn report_event_losses(&mut self, out: &mut Vec<SessionEvent>) {
-        let mut sums: BTreeMap<(NodeKey, Option<u16>), (u64, u64)> = BTreeMap::new();
-        for loss in self.graph.take_event_losses() {
-            let sum = sums.entry((loss.node, loss.port)).or_default();
-            sum.0 += u64::from(loss.count);
-            sum.1 += u64::from(loss.recovered);
-        }
-        out.extend(
-            sums.into_iter()
-                .filter(|(_, (count, recovered))| *count > 0 || *recovered > 0)
-                .map(
-                    |((node, port), (count, recovered))| SessionEvent::EventsDropped {
-                        node,
-                        port,
-                        count,
-                        recovered,
-                    },
-                ),
-        );
-        let elsewhere = self.graph.take_unreported_event_losses();
-        if elsewhere > 0 {
-            out.push(SessionEvent::EventsDroppedElsewhere(elsewhere));
-        }
-    }
-
-    /// Pushes the nodes the commits since the last report rewired.
-    fn report_rewired(&mut self, out: &mut Vec<SessionEvent>) {
-        out.extend(
-            self.graph
-                .take_rewired()
-                .into_iter()
-                .map(|r| SessionEvent::Rewired {
-                    node: r.node,
-                    was: r.was,
-                    now: r.now,
-                }),
-        );
     }
 
     /// Commits every edit since the last commit, now, and on `Sent`
@@ -443,39 +355,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// pre-roll to [`compensation`](Self::compensation), the total to
     /// [`latency`](Self::latency). Nothing before the first plan.
     pub(crate) fn publish_sent(&mut self) {
-        if let Some(sent) = self.graph.sent_compensation() {
-            self.latency = sent.total();
-            self.compensation.set(sent.channels());
-        }
+        self.transport.publish(self.graph.sent_compensation());
     }
 
     /// Reports the newest fault the stream raised since the last poll, if the
     /// clock has a stream. Whether the stream was lost: its device left.
-    ///
-    /// The message is *taken* from the record: a fault is reported once, by
-    /// its own kind, and a later fault that only bumps the count (an overrun
-    /// the record keeps no message for beside a latched panic) is not read as
-    /// the old message again.
     pub(crate) fn fault_poll(&mut self, out: &mut Vec<SessionEvent>) -> bool {
-        let Some(stream) = Running::stream(&self.running) else {
-            return false;
-        };
-        let faults = stream.faults();
-        let count = faults.count();
-        if count == self.faults_seen {
-            return false;
-        }
-        // A take that lags (a record mid-write) retries on the next poll; an
-        // empty one (a counted fault whose text was lost) is seen.
-        let Ok(taken) = faults.take_last() else {
-            return false;
-        };
-        self.faults_seen = count;
-        let Some(fault) = taken else {
-            return false;
-        };
-        let lost = fault.kind == StreamFaultKind::Disconnected;
-        out.push(SessionEvent::Fault(fault));
-        lost
+        self.reports.faults(Running::stream(&self.running), out)
     }
 }
