@@ -3,12 +3,10 @@
 //! A private module with a public trait, so [`SessionFloat`](crate::SessionFloat)
 //! names it and no other crate can implement it.
 
-#[cfg(feature = "device")]
-use crate::DeviceClock;
 use crate::{AppKey, Clock, PhaseCx, Session, SessionEvent};
 
 /// The steps of an update that depend on the session's float format: the
-/// ones that serve plugins (`f32` at their FFI) and land a sampler stream.
+/// ones that serve and land the hosted plugins, which are `f32` at their FFI.
 pub trait Sealed: tutti_rt::RingFloat {
     /// Serves the hosted plugins in `Phase::Plugins`: only an `f32` session
     /// hosts plugins, so an `f64` one has nobody to serve.
@@ -39,14 +37,6 @@ pub trait Sealed: tutti_rt::RingFloat {
     /// hosts plugins, so an `f64` one has nobody to tell.
     #[doc(hidden)]
     fn announce_render_mode<K: AppKey, C: Clock<Float = Self>>(session: &mut Session<K, C>);
-
-    /// Reopens the capture inputs after a device restart: the inputs are
-    /// `f32` streams, so an `f32` session has them and an `f64` one has none.
-    #[doc(hidden)]
-    #[cfg(feature = "device")]
-    fn reopen_inputs<K: AppKey>(session: &mut Session<K, DeviceClock<Self>>)
-    where
-        Self: crate::SessionFloat;
 }
 
 impl Sealed for f32 {
@@ -81,14 +71,6 @@ impl Sealed for f32 {
         #[cfg(not(feature = "plugin"))]
         let _ = session;
     }
-
-    #[cfg(feature = "device")]
-    fn reopen_inputs<K: AppKey>(session: &mut Session<K, DeviceClock<f32>>) {
-        #[cfg(feature = "audio-io")]
-        session.reopen_inputs();
-        #[cfg(not(feature = "audio-io"))]
-        let _ = session;
-    }
 }
 
 impl Sealed for f64 {
@@ -111,7 +93,4 @@ impl Sealed for f64 {
     fn swap_pooled_plugins<K: AppKey, C: Clock<Float = f64>>(_: &mut Session<K, C>) {}
 
     fn announce_render_mode<K: AppKey, C: Clock<Float = f64>>(_: &mut Session<K, C>) {}
-
-    #[cfg(feature = "device")]
-    fn reopen_inputs<K: AppKey>(_: &mut Session<K, DeviceClock<f64>>) {}
 }

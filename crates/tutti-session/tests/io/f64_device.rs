@@ -10,7 +10,7 @@ use tutti_types::{ChannelLayout, Param};
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 #[path = "../support/f64_nodes.rs"]
-mod f64_nodes;
+pub(super) mod f64_nodes;
 use f64_nodes::{Dc, FINE, Gain};
 
 /// **The device callback of an `f64` session hands the stream `0.75 * FINE`
@@ -41,4 +41,56 @@ fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
         .render_block(Samples(64))
         .expect("the stream is open");
     assert!(block.iter().all(|&x| x == 0.75 * FINE), "{:?}", &block[..3]);
+}
+
+/// **An `f64` device session moves onto the timer and keeps rendering `FINE`
+/// exactly**: the switch carries the graph, the transport and the stream host
+/// in the session's own float, and the heard tap reads the constant `f32`
+/// rounds away.
+#[test]
+fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
+    use std::time::Duration;
+    use tutti_buffers::InterleavedMut;
+
+    assert_ne!(f64::from(FINE as f32), FINE);
+    let (driver, stream) = ManualStreamDriver::<f64>::new();
+    let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::MONO, SampleFormat::F64);
+    let mut live = SessionBuilder::<Offline<f64>>::default()
+        .outputs_floor(ChannelLayout::MONO)
+        .device(Default::default())
+        .build_device_on(spec, driver)
+        .expect("an f64 device session builds with no device");
+    let (dc, _) = live.graph().add(ForkByClone(Dc(FINE)));
+    live.graph()
+        .connect(dc.out(0), Root::output(0))
+        .unwrap()
+        .hard();
+    let _ = live.update();
+    stream.render_block(Samples(64)).expect("open");
+    let mut system = live
+        .into_system_clock()
+        .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+    assert!(
+        stream.render_block(Samples(64)).is_none(),
+        "the card's stream stopped"
+    );
+    system.play().expect("queued");
+    let guard = Duration::from_secs(10);
+    let mut tap = None;
+    tutti_fixtures::wait_until("the audio side never took the graph", guard, || {
+        let _ = system.update();
+        tap = system.open_heard_tap(Samples(2_048)).unwrap().reader();
+        tap.is_some()
+    });
+    let mut tap = tap.expect("opened");
+    let mut heard = vec![0.0f64; 512];
+    tutti_fixtures::wait_until("FINE never reached the tap", guard, || {
+        let _ = system.update();
+        let frames = tap
+            .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
+            .unwrap()
+            .0;
+        frames > 0 && heard[..frames].iter().all(|&x| x == FINE)
+    });
+    assert_eq!(system.faults().count(), 0);
 }

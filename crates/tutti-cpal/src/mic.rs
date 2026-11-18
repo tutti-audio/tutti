@@ -46,8 +46,7 @@ use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, StreamTrait};
 
-use tutti_buffers::Fold;
-use tutti_buffers::{Interleaved, InterleavedMut, Pull, Source};
+use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_graph::{InletRing, TapReader, TapWriter};
 use tutti_rt::Drained;
@@ -101,14 +100,17 @@ struct StreamHandle(
 /// behind, the callback drops the newest frames rather than block. Capture
 /// stops when this value is dropped.
 ///
+/// `F` is the graph's float: the callback decodes each device sample into it by
+/// the rule in `Sample`, so an `i32` device keeps its bits in an `f64` graph.
+///
 /// Its [`layout`](Source::layout) is the number of inputs selected, and its
 /// [`topology`](Self::topology) says they feed no speaker.
 ///
 /// [`open_with_monitor`](Self::open_with_monitor) also returns the reader of a
 /// second, shallow (about 10 ms) ring fed from the same callback, for an inlet
 /// that makes the mic heard live through the graph while it is recorded.
-pub struct MicIn {
-    tap: TapReader,
+pub struct MicIn<F: Float = f32> {
+    tap: TapReader<F>,
     sample_rate: SampleRate,
     /// How many inputs the device has.
     device_inputs: ChannelLayout,
@@ -121,7 +123,7 @@ pub struct MicIn {
     _stream: StreamHandle,
 }
 
-impl std::fmt::Debug for MicIn {
+impl<F: Float> std::fmt::Debug for MicIn<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MicIn")
             .field("sample_rate", &self.sample_rate)
@@ -187,7 +189,7 @@ impl Default for MicConfig {
     }
 }
 
-impl MicIn {
+impl<F: Float> MicIn<F> {
     /// Opens the input device `config` names at the graph's sample rate and
     /// starts capturing its inputs. Returns once the stream is live.
     ///
@@ -230,11 +232,11 @@ impl MicIn {
     pub fn open_with_monitor(
         config: &MicConfig,
         graph_rate: SampleRate,
-    ) -> Result<(Self, InletRing)> {
+    ) -> Result<(Self, InletRing<F>)> {
         Self::open_inner(config, graph_rate, true).map(Self::with_ring)
     }
 
-    fn with_ring((source, ring): (Self, Option<InletRing>)) -> (Self, InletRing) {
+    fn with_ring((source, ring): (Self, Option<InletRing<F>>)) -> (Self, InletRing<F>) {
         (source, ring.expect("a monitor was asked for"))
     }
 
@@ -242,7 +244,7 @@ impl MicIn {
         mic: &MicConfig,
         graph_rate: SampleRate,
         monitor: bool,
-    ) -> Result<(Self, Option<InletRing>)> {
+    ) -> Result<(Self, Option<InletRing<F>>)> {
         let host = DeviceHost::open(mic.host)?;
         let device = host.device(Direction::Input, &mic.device)?;
         let inputs = mic.inputs.as_deref();
@@ -316,7 +318,7 @@ impl MicIn {
                     capture,
                     cb_faults,
                     cb_latency,
-                    edge::from_native::<i8>,
+                    edge::from_native::<i8, F>,
                 )?,
                 cpal::SampleFormat::I16 => build_input(
                     d,
@@ -324,7 +326,7 @@ impl MicIn {
                     capture,
                     cb_faults,
                     cb_latency,
-                    edge::from_native::<i16>,
+                    edge::from_native::<i16, F>,
                 )?,
                 cpal::SampleFormat::I32 => build_input(
                     d,
@@ -332,7 +334,7 @@ impl MicIn {
                     capture,
                     cb_faults,
                     cb_latency,
-                    edge::from_native::<i32>,
+                    edge::from_native::<i32, F>,
                 )?,
                 cpal::SampleFormat::U8 => build_input(
                     d,
@@ -340,7 +342,7 @@ impl MicIn {
                     capture,
                     cb_faults,
                     cb_latency,
-                    edge::from_offset::<u8>,
+                    edge::from_offset::<u8, F>,
                 )?,
                 cpal::SampleFormat::U16 => build_input(
                     d,
@@ -348,7 +350,7 @@ impl MicIn {
                     capture,
                     cb_faults,
                     cb_latency,
-                    edge::from_offset::<u16>,
+                    edge::from_offset::<u16, F>,
                 )?,
                 cpal::SampleFormat::U32 => build_input(
                     d,
@@ -356,7 +358,7 @@ impl MicIn {
                     capture,
                     cb_faults,
                     cb_latency,
-                    edge::from_offset::<u32>,
+                    edge::from_offset::<u32, F>,
                 )?,
                 cpal::SampleFormat::F32 => build_input(
                     d,
@@ -364,7 +366,7 @@ impl MicIn {
                     capture,
                     cb_faults,
                     cb_latency,
-                    edge::from_native::<f32>,
+                    edge::from_native::<f32, F>,
                 )?,
                 cpal::SampleFormat::F64 => build_input(
                     d,
@@ -372,7 +374,7 @@ impl MicIn {
                     capture,
                     cb_faults,
                     cb_latency,
-                    edge::from_native::<f64>,
+                    edge::from_native::<f64, F>,
                 )?,
                 // Checked above, before the thread is spawned.
                 _ => unreachable!("sample format checked before spawn"),
@@ -464,8 +466,8 @@ impl MicIn {
     }
 }
 
-impl Source for MicIn {
-    type Sample = f32;
+impl<F: Float> Source for MicIn<F> {
+    type Sample = F;
 
     /// One channel a selected input (two for [`MicIn::open`]), whatever the
     /// device's own width is.
@@ -485,7 +487,7 @@ impl Source for MicIn {
     /// backend error may be transient and does not fail the source) **and** the
     /// ring is empty. The fault flag is read before the ring, so frames the
     /// callback pushed before the fault are never hidden behind it.
-    fn pull(&mut self, mut out: InterleavedMut<'_, f32>) -> Pull {
+    fn pull(&mut self, mut out: InterleavedMut<'_, F>) -> Pull {
         if out.layout() != self.tap.layout() {
             return Pull::Failed;
         }
@@ -513,27 +515,32 @@ impl Source for MicIn {
 ///
 /// Built on the control side, so everything the callback touches is allocated
 /// before the stream runs: it only reads, folds and pushes.
-struct Capture {
+struct Capture<F: Float> {
     /// The selection: destination channel `i` is device input `inputs[i]`.
-    select: Fold,
-    /// A chunk of device frames as `f32`, [`CHUNK_FRAMES`] of them.
-    device: Vec<f32>,
+    select: Fold<F>,
+    /// A chunk of device frames in the graph's float, [`CHUNK_FRAMES`] of them.
+    device: Vec<F>,
     /// A chunk of selected frames, [`CHUNK_FRAMES`] of them.
-    chunk: Vec<f32>,
+    chunk: Vec<F>,
     /// The recording ring's writer.
-    rec: TapWriter,
+    rec: TapWriter<F>,
     /// The monitor ring's writer, when monitoring.
-    mon: Option<TapWriter>,
+    mon: Option<TapWriter<F>>,
 }
 
-impl Capture {
-    fn new(select: Fold, device: ChannelLayout, rec: TapWriter, mon: Option<TapWriter>) -> Self {
+impl<F: Float> Capture<F> {
+    fn new(
+        select: Fold<F>,
+        device: ChannelLayout,
+        rec: TapWriter<F>,
+        mon: Option<TapWriter<F>>,
+    ) -> Self {
         let frames = Samples(CHUNK_FRAMES);
         let selected = select.dst_layout();
         Self {
             select,
-            device: vec![0.0; device.interleaved_len(frames)],
-            chunk: vec![0.0; selected.interleaved_len(frames)],
+            device: vec![F::ZERO; device.interleaved_len(frames)],
+            chunk: vec![F::ZERO; selected.interleaved_len(frames)],
             rec,
             mon,
         }
@@ -543,7 +550,7 @@ impl Capture {
     /// result to the rings, a chunk of frames at a time. A full ring refuses
     /// whole frames and counts them lost (the writer does); neither ring can
     /// stall the other or the caller. Allocation-free.
-    fn block<T: Copy>(&mut self, data: &[T], convert: fn(T) -> f32) {
+    fn block<T: Copy>(&mut self, data: &[T], convert: fn(T) -> F) {
         let device = self.select.src_layout();
         let selected = self.select.dst_layout();
         let whole = device.interleaved_len(device.from_interleaved_len(data.len()));
@@ -590,17 +597,17 @@ impl Capture {
 /// # Why the scratch is allocated before the stream runs
 ///
 /// `data: &[T]` is generic over [`cpal::SizedSample`], so the samples must be
-/// converted to `f32` (by the rule in `Sample`, through the signed format of an offset-binary one) before the selection can see them — a per-frame convert
+/// converted to the graph's float (by the rule in `Sample`, through the signed format of an offset-binary one) before the selection can see them — a per-frame convert
 /// is unavoidable. **This is the RT input callback, so it must not allocate**:
 /// the device frame and the chunk are `Vec`s sized once in [`Capture::new`] to
 /// the device's width and the selection's, and never grown.
-fn build_input<T: cpal::SizedSample + 'static>(
+fn build_input<T: cpal::SizedSample + 'static, F: Float>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    mut capture: Capture,
+    mut capture: Capture<F>,
     faults: Arc<StreamFaults>,
     latency: Arc<StreamLatency>,
-    convert: fn(T) -> f32,
+    convert: fn(T) -> F,
 ) -> Result<cpal::Stream> {
     let delivering = Arc::clone(&faults);
     // Set by a panic in `capture.block`, whose state may be torn: the capture
@@ -644,7 +651,7 @@ fn build_input<T: cpal::SizedSample + 'static>(
 ///
 /// The rules, in order:
 /// 1. a supported range whose `[min, max]` contains `graph_rate` — preferring
-///    `F32`, the format the callback converts from most cheaply;
+///    `F32`, the float format, which needs no integer scaling;
 /// 2. otherwise the device's own default, if it happens to match;
 /// 3. otherwise [`Error::SampleRateMismatch`], naming both rates.
 pub(crate) fn choose_input_config(
@@ -661,8 +668,8 @@ pub(crate) fn choose_input_config(
             continue;
         }
         let candidate = range.with_sample_rate(wanted);
-        // Prefer F32: `build_input` converts every other format per sample,
-        // and this is the one that is already the graph's type.
+        // Prefer F32: `build_input` scales every integer format per sample,
+        // and this one is already a float.
         if candidate.sample_format() == cpal::SampleFormat::F32 {
             return Ok(candidate);
         }
