@@ -37,7 +37,6 @@ mod table;
 mod thread_pool;
 
 pub use audio::{ClapProcessContext, ProcessOutput, ProcessOutputRef};
-pub use control::descriptor_of;
 pub use controller::ClapController;
 pub use editor_instance::ClapEditor;
 pub use load::LoadOptions;

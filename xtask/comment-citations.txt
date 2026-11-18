@@ -68,7 +68,6 @@
 2 crates/tutti-plugin-ipc/src/client/audio/payload_pool.rs
 1 crates/tutti-plugin-ipc/src/protocol/wire.rs
 1 crates/tutti-plugin-ipc/src/subprocess/launch.rs
-1 crates/tutti-plugin-probe/src/measure.rs
 1 crates/tutti-plugin/src/host/node/real_stall_tests.rs
 4 crates/tutti-plugin/tests/clap_nodes/clap_automation.rs
 2 crates/tutti-plugin/tests/clap_nodes/clap_fork.rs

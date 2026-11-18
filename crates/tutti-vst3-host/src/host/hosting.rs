@@ -5,10 +5,11 @@ use std::path::Path;
 
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{
-    InProcess, Load, MainThreadMarker, MainWorkHandle, Origin, OutOfProcess, PluginResult,
+    Describe, EditorPresence, InProcess, Load, MainThreadMarker, MainWorkHandle, Origin,
+    OutOfProcess, PluginDescriptor, PluginResult,
 };
 
-use super::control::plugin_error;
+use super::control::{descriptor_of, plugin_error};
 use super::editor_instance::Vst3Editor;
 use super::loaded::{LoadOptions, Vst3Loaded};
 
@@ -33,6 +34,20 @@ impl InProcess for Vst3Loaded {
 
     fn main_work(&self) -> &MainWorkHandle {
         &self.work
+    }
+}
+
+impl Describe for Vst3Loaded {
+    /// The factory's audio classes that can be created, read without
+    /// initializing one: an editor is a property of an instance, so each is
+    /// [`EditorPresence::Unknown`].
+    fn describe(_main: MainThreadMarker, path: &Path) -> PluginResult<Vec<PluginDescriptor>> {
+        let module = native_module_path(path, ModuleKind::Vst3)?;
+        let infos = Vst3Loaded::probe_all(&module).map_err(plugin_error)?;
+        Ok(infos
+            .iter()
+            .map(|info| descriptor_of(info, EditorPresence::Unknown))
+            .collect())
     }
 }
 

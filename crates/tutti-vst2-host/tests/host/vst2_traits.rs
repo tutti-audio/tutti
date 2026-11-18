@@ -15,8 +15,8 @@ use tutti_buffers::FloatWidth;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_plugin_types::{
-    AutomationMode, Control, Controller, EditorWindow, Event, Hand, HostOp, Lifecycle, Loaded,
-    MaxBlock, Notice, ParameterChanges, PluginError, PluginIo, Prepare, ProcessContext,
+    AutomationMode, Control, Controller, Describe, EditorWindow, Event, Hand, HostOp, Lifecycle,
+    Loaded, MaxBlock, Notice, ParameterChanges, PluginError, PluginIo, Prepare, ProcessContext,
     ProcessOutput, Processor, RenderMode, SampleRate, Samples, Stage,
 };
 use tutti_ump::{Address, MidiChannel, MidiGroup};
@@ -264,6 +264,30 @@ fn activation_splits_the_plugin_and_renders_through_the_trait() {
     assert!(out[1].iter().all(|&v| v == 101.0), "{:?}", &out[1][..4]);
     assert_eq!(capture().entry, ProcessEntry::Replacing);
     drop(rejoin(processor, controller));
+}
+
+/// **Describing a plugin does not activate it**: nothing is resumed, so a catalog scan
+/// leaves the plugin's audio state alone. The control is a real activation, which the
+/// capture sees, so a capture that never saw anything cannot pass.
+#[test]
+fn describing_a_plugin_does_not_resume_it() {
+    let probe = Probe::acquire();
+    let (processor, controller) = probe.activate();
+    assert_eq!(capture().resume_count, 1, "the capture sees an activation");
+    drop(rejoin(processor, controller));
+
+    call("tutti_vst2_probe_reset_capture");
+    let plugins =
+        Vst2Loaded::describe(main_thread(), tutti_fixtures::vst2_probe()).expect("describes");
+    let [descriptor] = plugins.as_slice() else {
+        panic!("a plugin that is no shell is one plugin: {plugins:?}");
+    };
+    assert_eq!(descriptor.name, "Tutti VST2 Probe");
+    assert_eq!(
+        capture().resume_count,
+        0,
+        "a description resumed the plugin"
+    );
 }
 
 /// **A 64-bit activation tells the plugin so and enters `processReplacingF64`;

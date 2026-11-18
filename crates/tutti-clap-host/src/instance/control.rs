@@ -70,7 +70,7 @@ fn editor_bits(embeddable: bool, floating: bool) -> EditorBits {
 
 /// The catalog descriptor from CLAP factory info, carrying its feature tags
 /// verbatim as the native class.
-pub fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> PluginDescriptor {
+pub(super) fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> PluginDescriptor {
     PluginDescriptor {
         id: info.id.clone(),
         name: info.name.clone(),

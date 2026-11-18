@@ -19,8 +19,8 @@ use tutti_plugin_ipc_ffi::Ready;
 
 use crate::{
     AutomationMode, ContentScale, EditorCapabilities, EditorError, KeyEvent, KeyUse, Loaded,
-    MainThreadMarker, MainWorkHandle, ParamEdit, PluginError, PluginResult, Request, Wakeups,
-    WindowHandle,
+    MainThreadMarker, MainWorkHandle, ParamEdit, PluginDescriptor, PluginError, PluginResult,
+    Request, Wakeups, WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -129,6 +129,30 @@ pub trait InProcess: Loaded {
     /// The collector this instance hands a close to from a drop off the main
     /// thread: what [`Reopen`] gives the instance it loads.
     fn main_work(&self) -> &MainWorkHandle;
+}
+
+/// The format can list the plugins a file holds without hosting any of them.
+///
+/// The listing is the catalog's: identity, class and an editor flag, read as far
+/// as the format allows. A CLAP factory gives each plugin it lists, a VST3 factory
+/// each audio class it can create, an AU bundle each unit it declares and the
+/// system has registered, a VST2 shell each sub-plugin. VST2 has no listing short
+/// of a load (the plugin's init runs, it is not resumed), so its listing loads.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot list the plugins of a file",
+    note = "implement `Describe` only if the file can be read without activating a plugin"
+)]
+pub trait Describe: Loaded {
+    /// The descriptor of every plugin in the file at `path`, in the file's own
+    /// order. `main` is the caller's proof that it is on the main thread, which a
+    /// format that loads to describe needs and the others ignore.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Load`] at the stage the format's loader refused the file
+    /// (a path that is no file or bundle for the format included), or another
+    /// [`PluginError`] for a refusal with no stage.
+    fn describe(main: MainThreadMarker, path: &Path) -> PluginResult<Vec<PluginDescriptor>>;
 }
 
 /// The format can be served from another process, with its editor elsewhere.
