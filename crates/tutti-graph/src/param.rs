@@ -43,7 +43,7 @@ use crate::NodeKey;
 use crate::mode::NodeMix;
 use tutti_buffers::Float;
 use tutti_rt::{PackedAtomic, RtScope};
-use tutti_units::{ArcDegrees, Azimuth, ParamAddr, UnitAddr, UnitParam};
+use tutti_units::{ArcDegrees, Azimuth, ParamAddr, Samples, UnitAddr, UnitParam};
 
 use crate::event::{Event, EventKind, frames_in, segment_progress};
 use crate::lane::{arc_in, fade_gains, piece_in, ramp_in, wrap_in};
@@ -1085,7 +1085,7 @@ impl<F: Float> ParamState<F> {
                     events,
                     param,
                     out,
-                    |i| ramp_in(Some(param.param), from, b1, i, frames),
+                    |i| ramp_in(Some(param.param), from, b1, Samples(i), Samples(frames)),
                     &mut corners,
                 );
                 self.corner_count[k] = corners.len();
@@ -1102,7 +1102,7 @@ impl<F: Float> ParamState<F> {
             }
             None => {
                 for (i, o) in out.iter_mut().enumerate() {
-                    *o = ramp_in(Some(param.param), from, b1, i, frames);
+                    *o = ramp_in(Some(param.param), from, b1, Samples(i), Samples(frames));
                 }
             }
         }
@@ -1113,7 +1113,7 @@ impl<F: Float> ParamState<F> {
                 if j >= d {
                     break;
                 }
-                let (out, inn) = fade_gains::<F>(FadeLaw::EqualAmplitude, j, d);
+                let (out, inn) = fade_gains::<F>(FadeLaw::EqualAmplitude, Samples(j), Samples(d));
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.

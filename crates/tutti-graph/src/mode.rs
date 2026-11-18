@@ -108,7 +108,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use tutti_curve::FadeLaw;
 use tutti_types::{AtomicF32, ParamCell};
-use tutti_units::{Mix, UnitAddr, UnitParam};
+use tutti_units::{Mix, Samples, UnitAddr, UnitParam};
 
 use crate::NodeKey;
 use crate::arena::Arena;
@@ -487,7 +487,7 @@ impl<F: Float> MixRun<F> {
         } else if self.is_static() {
             self.to
         } else {
-            ramp_in(None, self.from, self.to, i, self.frames)
+            ramp_in(None, self.from, self.to, Samples(i), Samples(self.frames))
         }
     }
 
@@ -585,7 +585,7 @@ impl<F: Float> Segments<F> {
 
 /// The incoming gain of frame `k` of the `declick`-frame fade.
 fn gain<F: Float>(k: usize, declick: usize) -> F {
-    fade_gains::<F>(FadeLaw::EqualAmplitude, k, declick).1
+    fade_gains::<F>(FadeLaw::EqualAmplitude, Samples(k), Samples(declick)).1
 }
 
 /// The aligned-input path of a latent node: one ring of its declared latency

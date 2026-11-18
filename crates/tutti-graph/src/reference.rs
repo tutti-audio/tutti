@@ -1656,7 +1656,7 @@ impl<F: Float> Reference<F> {
                 if k >= f.len {
                     break;
                 }
-                let (g_out, g_in) = fade_gains::<F>(f.law, k, f.len);
+                let (g_out, g_in) = fade_gains::<F>(f.law, Samples(k), Samples(f.len));
                 for (o, x) in outs.iter_mut().zip(&old) {
                     o[i] = o[i] * g_in + x[i] * g_out;
                 }
@@ -2087,7 +2087,7 @@ fn ref_port<F: Float>(
     for (i, v) in vals.iter_mut().enumerate() {
         if st.fading > 0 && i < st.fading {
             let j = decl - st.fading + i;
-            let (out, inn) = fade_gains::<F>(FadeLaw::EqualAmplitude, j, decl);
+            let (out, inn) = fade_gains::<F>(FadeLaw::EqualAmplitude, Samples(j), Samples(decl));
             *v = st.hold * out + *v * inn;
         }
     }
@@ -2303,7 +2303,8 @@ impl<F: Float> RefMode<F> {
                         moving: lane.is_some() || from != to,
                     };
                 };
-                let g = fade_gains::<F>(FadeLaw::EqualAmplitude, k, self.declick).1;
+                let g =
+                    fade_gains::<F>(FadeLaw::EqualAmplitude, Samples(k), Samples(self.declick)).1;
                 let wy = begin.0 + (target.0 - begin.0) * g;
                 let wx = begin.1 + (target.1 - begin.1) * g;
                 (self.y, self.x) = (wy, wx);

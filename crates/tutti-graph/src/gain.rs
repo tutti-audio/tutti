@@ -57,7 +57,7 @@ use tutti_buffers::Float;
 use tutti_curve::FadeLaw;
 
 use tutti_types::{AtomicF32, ParamCell};
-use tutti_units::{Amplitude, UnitAddr, UnitParam};
+use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
 use crate::event::Event;
 use crate::lane::{control_in, fade_in, ramp_in};
@@ -541,8 +541,8 @@ impl<F: Float> SumLane<F> {
                     FadeLaw::EqualAmplitude,
                     start,
                     to,
-                    k + frames - 1,
-                    len,
+                    Samples(k + frames - 1),
+                    Samples(len),
                 ));
             }
             return w;
@@ -600,12 +600,12 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_, F>) 
         }
         (Some(a), Weight::Ramp { from, to }) => {
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = F::ZERO + ramp_in(None, from, to, i, frames) * x;
+                *o = F::ZERO + ramp_in(None, from, to, Samples(i), Samples(frames)) * x;
             }
         }
         (None, Weight::Ramp { from, to }) => {
             for (i, o) in out.iter_mut().enumerate() {
-                *o = F::ZERO + ramp_in(None, from, to, i, frames) * *o;
+                *o = F::ZERO + ramp_in(None, from, to, Samples(i), Samples(frames)) * *o;
             }
         }
         (
@@ -618,7 +618,14 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_, F>) 
             },
         ) => {
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = F::ZERO + fade_in(FadeLaw::EqualAmplitude, start, goal, k + i, len) * x;
+                *o = F::ZERO
+                    + fade_in(
+                        FadeLaw::EqualAmplitude,
+                        start,
+                        goal,
+                        Samples(k + i),
+                        Samples(len),
+                    ) * x;
             }
         }
         (
@@ -631,7 +638,14 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_, F>) 
             },
         ) => {
             for (i, o) in out.iter_mut().enumerate() {
-                *o = F::ZERO + fade_in(FadeLaw::EqualAmplitude, start, goal, k + i, len) * *o;
+                *o = F::ZERO
+                    + fade_in(
+                        FadeLaw::EqualAmplitude,
+                        start,
+                        goal,
+                        Samples(k + i),
+                        Samples(len),
+                    ) * *o;
             }
         }
         (Some(a), Weight::Frames(w)) => {
@@ -665,7 +679,7 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_, F>) {
         }
         Weight::Ramp { from, to } => {
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += ramp_in(None, from, to, i, frames) * x;
+                *o += ramp_in(None, from, to, Samples(i), Samples(frames)) * x;
             }
         }
         Weight::Fade {
@@ -675,7 +689,13 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_, F>) {
             len,
         } => {
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += fade_in(FadeLaw::EqualAmplitude, start, goal, k + i, len) * x;
+                *o += fade_in(
+                    FadeLaw::EqualAmplitude,
+                    start,
+                    goal,
+                    Samples(k + i),
+                    Samples(len),
+                ) * x;
             }
         }
         Weight::Frames(w) => {

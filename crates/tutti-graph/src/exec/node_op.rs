@@ -22,6 +22,7 @@ use crate::param::ParamInput;
 use crate::plan::{Direct, Form, NodeRec, Plan};
 use crate::rtlog::{LogSink, LogSlots};
 use crate::slots::{AudioSlots, EventSlots, SlotFlags};
+use tutti_units::Samples;
 
 /// [`Op::Node`](crate::Op::Node): run `u` for `h.rec`: the plain op for a unit whose mode asks
 /// nothing of it, else the one that applies its mode. Returns whether a
@@ -264,7 +265,7 @@ pub(super) fn fading_node_op<
         let y = st.arena.slot_mut(s, frames);
         let out = x.scratch.slot(c, frames);
         for (i, (y, &o)) in y[..n].iter_mut().zip(&out[..n]).enumerate() {
-            let (g_out, g_in) = fade_gains::<F>(x.law, x.done + i, x.len);
+            let (g_out, g_in) = fade_gains::<F>(x.law, Samples(x.done + i), Samples(x.len));
             *y = *y * g_in + o * g_out;
         }
         st.flags.set(s, 0);

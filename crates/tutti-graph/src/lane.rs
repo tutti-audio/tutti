@@ -3,7 +3,7 @@
 
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, Law};
-use tutti_units::{Azimuth, UnitParam};
+use tutti_units::{Azimuth, Samples, UnitParam};
 
 /// `value` as `param` holds it: wrapped onto the circle for a circular param
 /// ([`UnitParam::wrap`]), in the unit's `f64` and narrowed once to `F`.
@@ -60,8 +60,11 @@ pub(crate) fn piece_in<F: Float>(param: Option<UnitParam>, from: F, to: F, law: 
 
 /// `Piece::ramp_at` read in `F`: frame `k` of an `n`-frame linear ramp,
 /// landing exactly on `to` on its last frame.
+///
+/// The graph's quantity to lane crossing (a control ramp rendered in `F`).
 #[inline]
-pub fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: usize, n: usize) -> F {
+pub fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: Samples, n: Samples) -> F {
+    let (k, n) = (k.get(), n.get());
     if k + 1 >= n {
         to
     } else {
@@ -73,16 +76,20 @@ pub fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: usize, n: 
 /// `(out, in)`: the gains of frame `j` of a `len`-frame fade, in `F`. The law
 /// is the curve crate's and its gains are `Amplitude`s; they narrow once here,
 /// where the fade is rendered into a lane.
+///
+/// The graph's quantity to lane crossing (a fade law rendered in `F`).
 #[inline]
-pub fn fade_gains<F: Float>(law: FadeLaw, j: usize, len: usize) -> (F, F) {
-    let (out, inn) = law.gains(j, len);
+pub fn fade_gains<F: Float>(law: FadeLaw, j: Samples, len: Samples) -> (F, F) {
+    let (out, inn) = law.gains(j.get(), len.get());
     (F::from_f64(out.get()), F::from_f64(inn.get()))
 }
 
 /// `start` moved to `goal` at frame `j` of a `len`-frame fade of `law`, and
 /// exactly `goal` from `len` on.
+///
+/// The graph's quantity to lane crossing (a fade between two weights in `F`).
 #[inline]
-pub fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: usize, len: usize) -> F {
+pub fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: Samples, len: Samples) -> F {
     if j >= len {
         return goal;
     }
@@ -93,6 +100,9 @@ pub fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: usize, len: usize) 
 /// A control value (a param cell's, an edge weight's, a mix's) as the lane's
 /// float: the one place a node-side control is read into a lane. It widens
 /// exactly and narrows once.
+///
+/// Foundation's `F::from_unit` replaces this once it lands; nothing new builds
+/// on it.
 #[inline]
 pub fn control_in<F: Float>(value: impl Into<f64>) -> F {
     F::from_f64(value.into())
