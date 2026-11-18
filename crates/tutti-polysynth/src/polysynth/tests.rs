@@ -17,6 +17,9 @@ use tutti_ump::{
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::{Amplitude, Hz, Normalized, Resonance, Seconds, Spread};
 
+/// The synth at `f32`, the width these tests run at unless they name another.
+type PolySynth = super::PolySynth<f32>;
+
 /// A synth driven by hand the way a graph drives it
 /// (`tutti_graph::contract::drive_input`): what these tests queue with
 /// [`queue_midi`] is the next block's event input. It derefs to the synth.
@@ -464,7 +467,7 @@ fn test_basic_dsp_chain() {
     use crate::bank::VoiceBank;
     use tutti_units::Phase;
 
-    let mut bank = VoiceBank::new(
+    let mut bank = VoiceBank::<f32>::new(
         OscillatorType::Saw,
         &FilterType::None,
         &Adsr::new(Seconds(0.001), Seconds(0.1), Amplitude(0.8), Seconds(0.1)),
@@ -2710,7 +2713,11 @@ fn reset_all_controllers_keeps_the_sound_controllers() {
     let mut out = [0.0f32; 2];
     s.tick(&[], &mut out);
     let (cutoff, resonance) = s.voices[0].sound_controllers();
-    assert_eq!((cutoff, resonance), (0.0, 1.0), "the controllers were set");
+    assert_eq!(
+        (cutoff, resonance),
+        (Normalized::of(0.0), Normalized::of(1.0)),
+        "the controllers were set"
+    );
     let wheel = |s: &PolySynth| s.allocator.channel_state(MidiChannel::of(0)).modulation();
     assert!(wheel(&s) > 0.5);
 

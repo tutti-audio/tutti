@@ -1,5 +1,8 @@
+use crate::SynthConfig;
 use crate::UnisonVoices;
-use crate::{PolySynth, SynthConfig};
+
+/// The synth at `f32`, the width these tests run at.
+type PolySynth = crate::PolySynth<f32>;
 
 /// **The ports and their bases.** A synth declares its volume, and with
 /// a unison engine its detune and spread too ,
