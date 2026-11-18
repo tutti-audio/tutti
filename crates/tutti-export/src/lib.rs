@@ -175,9 +175,14 @@
 //! crate), and a `Format` variant exists only with its feature.
 //!
 //! Resampling (`tutti_dsp::StreamingResampler`, an FFT resampler on
-//! `tutti_dsp::RealFft`) and dither (`tutti_dsp::DitherNoise`) are algorithms
-//! in `tutti-dsp`; this crate calls them. Resampling is unconditional: it is not
-//! a codec, so it is not gated.
+//! `tutti_dsp::RealFft`) and the dither noise (`tutti_dsp::DitherNoise`) are
+//! algorithms in `tutti-dsp`; this crate calls them. Resampling is
+//! unconditional: it is not a codec, so it is not gated.
+//!
+//! A render is written from any `Float` (`Rendered<F>`, `f32` by default). A float
+//! file takes it as it is; an integer file goes through one stage that adds the
+//! dither noise, converts by the rule in `tutti_buffers::Sample` and counts the
+//! values that clipped (`Written::clipped_samples`).
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -220,6 +225,7 @@ pub(crate) mod render;
 pub use process::ChunkSize;
 
 use std::path::PathBuf;
+use tutti_buffers::Float;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
 use tutti_types::{ChannelLayout, Db, Samples};
@@ -241,14 +247,15 @@ pub struct Written {
     /// nonzero only under [`EventLossPolicy::Allow`] (under `Fail` the render
     /// is an error instead).
     pub dropped_events: u64,
-    /// Samples the quantizer clipped: those past full scale (after any gain,
-    /// resample and dither) written to an integer format, which the encoder
-    /// clamps to it, **and non-finite ones** (a NaN is written as 0, an
-    /// infinity as full scale). `0` for a format that does not quantize (`Pcm::Float32`,
-    /// and Ogg Vorbis, whose encoder takes the float stream). A normalizing
-    /// export keeps its target and ceiling one LSB plus the dither amplitude
-    /// below full scale for an integer format, so this stays `0` unless the
-    /// programme itself was past full scale.
+    /// Values the conversion to an integer format clipped (after any gain,
+    /// resample and dither): those whose rounded value lies past the integer
+    /// format's `MAX` or `MIN`, held there by the rule in
+    /// [`Sample`](tutti_buffers::Sample); an infinity is counted. A NaN is
+    /// written as 0 and is not counted. `0` for a format that does not quantize (`Pcm::Float32`,
+    /// `Pcm::Float64`, and Ogg Vorbis, whose encoder takes the float stream). A
+    /// normalizing export keeps its target and ceiling one LSB plus the dither
+    /// amplitude below full scale for an integer format, so this stays `0`
+    /// unless the programme itself was past full scale.
     pub clipped_samples: u64,
     /// The gain a normalizing output applied ([`FileTarget::normalize`]);
     /// `None` for the others, so `None` means the file is as rendered. Chosen
@@ -423,8 +430,8 @@ fn the_one(mut produced: Vec<Produced>) -> Produced {
 /// dropped to make it fit); [`Error::EventsDropped`] under
 /// [`EventLossPolicy::Fail`]; [`Error::Resample`] or [`Error::Encode`] from the
 /// resample and encode stages.
-pub fn write_buffers(
-    rendered: &Rendered,
+pub fn write_buffers<F: Float>(
+    rendered: &Rendered<F>,
     target: &FileTarget,
     on_event_loss: EventLossPolicy,
 ) -> Result<Written> {
