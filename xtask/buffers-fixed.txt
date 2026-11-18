@@ -3,6 +3,7 @@
 # Audio in a public API is generic over `tutti_buffers::Sample` (or `Float`). One
 # `<key>  <reason>` row per site that is not; the gate fails on a site with no row, a
 # row with no site and an unknown reason, so the list only shrinks as sites migrate.
+# An `f32` in a public signature is `cargo xtask check-width`'s, with its own baseline.
 #
 # key     `<file>::<item>` for a free item, `<file>::<Owner>::<fn>` for a method (the
 #         impl's type or the trait), `<file>::<Type>.<member>` for a field or enum
@@ -10,23 +11,6 @@
 # reason  ffi          C ABI, IPC or wire; a comment at the site says why.
 #         pending      not judged yet.
 #         not-audio: <why>   the item is not audio (a spectrum, a curve, a reading).
-#         spec-f32: <why>    a spec fixes f32 (control values, param lanes).
-#
-# Fixed f32 on audio stays only as one of those kinds; a free-text `measured:` is refused.
-crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::window_coefficients  not-audio: a window's weights
-crates/tutti-dsp/src/stft/window.rs::CosineWindow::new  not-audio: a window's weights
-crates/tutti-dsp/src/stft/window.rs::Window::coefficients  not-audio: a window's weights
-crates/tutti-graph/src/contract.rs::Detect.Exact  pending
-crates/tutti-measure/src/features.rs::spectral_centroid  not-audio: a magnitude spectrum
-crates/tutti-measure/src/features.rs::spectral_flatness  not-audio: a magnitude spectrum
-crates/tutti-measure/src/features.rs::spectral_rolloff  not-audio: a magnitude spectrum
-crates/tutti-measure/src/onset.rs::complex_domain_deviation  not-audio: the previous frame's magnitude spectrum
-crates/tutti-measure/src/onset.rs::spectral_flux  not-audio: the previous frame's magnitude spectrum
-crates/tutti-measure/src/tempo.rs::estimate_tempo_from_novelty  not-audio: a novelty curve of readings
-crates/tutti-measure/src/tempo.rs::track_beats_from_novelty  not-audio: a novelty curve of readings
-crates/tutti-measure/src/xcorr.rs::CrossCorrelation::values  not-audio: the correlation at each lag
-crates/tutti-nodes/src/params.rs::ControlSet::assemble  spec-f32: control cells are f32 by spec, one AtomicF32 per control, not audio
-crates/tutti-nodes/src/params.rs::ControlSet::flatten  spec-f32: control cells are f32 by spec, one AtomicF32 per control, not audio
 crates/tutti-plugin-types/src/contract.rs::check  not-audio: a normalized parameter position, not audio
 crates/tutti-plugin-types/src/contract.rs::positions  not-audio: a normalized parameter position, not audio
 crates/tutti-plugin-types/src/contract.rs::round_trip  not-audio: a normalized parameter position, not audio

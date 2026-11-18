@@ -110,6 +110,7 @@ jobs:
       - run: cargo xtask check-comments
       - run: cargo xtask check-alloc-binaries
       - run: cargo xtask check-buffers
+      - run: cargo xtask check-width
       - run: cargo xtask check-building
       - run: cargo xtask check-values
       - run: cargo xtask check-units-bare
