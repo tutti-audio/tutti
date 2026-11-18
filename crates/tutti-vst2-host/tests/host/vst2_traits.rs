@@ -18,7 +18,7 @@ use tutti_plugin_types::{
     ProcessContext, ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate, Samples, Stage,
 };
 use tutti_types::ParamId;
-use tutti_ump::MidiChannel;
+use tutti_ump::{Address, MidiChannel, MidiGroup};
 use tutti_vst2_host::{Vst2Controller, Vst2Loaded, Vst2Processor};
 use tutti_vst2_test_plugin::{ProcessCapture, ProcessEntry};
 
@@ -200,6 +200,45 @@ fn render_f32(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> Vec<Ve
     };
     processor.process(&mut io).expect("the block renders");
     vec![left.to_vec(), right.to_vec()]
+}
+
+/// The probe's record of the program opcodes it received, in order: [`preset_event`]s.
+fn preset_trace() -> Vec<i32> {
+    let packed = with_symbol("tutti_vst2_probe_preset_trace", |p| {
+        // SAFETY: the probe exports this symbol with exactly this signature.
+        let f: extern "C" fn() -> i32 = unsafe { std::mem::transmute(p) };
+        f()
+    });
+    let len = with_symbol("tutti_vst2_probe_preset_trace_len", |p| {
+        // SAFETY: the probe exports this symbol with exactly this signature.
+        let f: extern "C" fn() -> i32 = unsafe { std::mem::transmute(p) };
+        f()
+    });
+    (0..len).map(|i| (packed >> (i * 2)) & 0b11).collect()
+}
+
+/// The program opcodes `preset_trace` records. Mirrored from the probe.
+mod preset_event {
+    pub const BEGIN: i32 = 1;
+    pub const CHANGE: i32 = 2;
+    pub const END: i32 = 3;
+}
+
+/// What one silent stereo block reports in its [`ProcessOutput`].
+fn render_out(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> ProcessOutput {
+    let input = [0.0f32; BLOCK];
+    let mut left = [0.0f32; BLOCK];
+    let mut right = [0.0f32; BLOCK];
+    let inputs = [input.as_slice(), input.as_slice()];
+    let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
+    let mut out = ProcessOutput::default();
+    let mut io = PluginIo {
+        buffer: PluginAudio::new(Samples(BLOCK), &inputs, &mut outputs).expect("equal channels"),
+        ctx,
+        out: &mut out,
+    };
+    processor.process(&mut io).expect("the block renders");
+    out
 }
 
 fn rejoin(processor: Vst2Processor, controller: Vst2Controller) -> Vst2Loaded {
@@ -535,6 +574,178 @@ fn a_processor_that_outlives_its_controller_renders_silence_and_destroys_nothing
         .expect("the drop did not panic");
     assert_eq!(close_count(), 1, "the audio thread closed nothing more");
     assert_eq!(trace(), [], "and called nothing in it");
+}
+
+/// **A block reports the MIDI it lost, once**: a message of a Group other than 0 reaches
+/// VST2's one input nowhere (M2-104 2.1.2), and the block's `ProcessOutput` counts it, the next
+/// block reporting only what is new.
+#[test]
+fn a_block_reports_the_midi_it_lost_once() {
+    let probe = Probe::acquire();
+    let (mut processor, controller) = probe.activate();
+    let at = |group: u8| {
+        (
+            Offset::of(Samples(3), Samples(BLOCK)),
+            midi::note_on(
+                Address::new(MidiGroup::new(group).expect("a group"), MidiChannel::FIRST),
+                60,
+                0x4000,
+            ),
+        )
+    };
+    let events = [at(0), at(1), at(2)];
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(out.input_refused(), 2, "the two of other Groups");
+    let out = render_out(&mut processor, &ProcessContext::new());
+    assert_eq!(out.input_refused(), 0, "nothing new");
+    drop(rejoin(processor, controller));
+}
+
+/// **A refused block reports the events the plugin never heard, and the refusal itself**:
+/// a closed plugin refuses every audio entry, so the block's MIDI is lost, and a block with
+/// no MIDI still counts its refused entries.
+#[test]
+fn a_refused_block_reports_its_midi_and_its_refused_entries() {
+    let probe = Probe::acquire();
+    let (mut processor, controller) = probe.activate();
+    let events = [(
+        Offset::of(Samples(3), Samples(BLOCK)),
+        midi::note_on(MidiChannel::FIRST, 60, 0x4000),
+    )];
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(out.input_refused(), 0, "a live plugin hears it");
+    assert_eq!(out.entries_refused(), 0);
+
+    drop(controller);
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(out.input_refused(), 1, "a closed plugin hears nothing");
+    assert!(out.entries_refused() > 0);
+    let out = render_out(&mut processor, &ProcessContext::new());
+    assert_eq!(out.input_refused(), 0, "no MIDI, none lost");
+    assert!(out.entries_refused() > 0, "and the refusal still shows");
+}
+
+/// **A refused piece counts what staging handed it, once**: of a Group 1 note (dropped at
+/// staging and counted there), a SysEx message of several UMPs (one staged event) and a note,
+/// the refusal adds the two staged events; counting UMPs, or the Group 1 note again, would
+/// give more than three.
+#[test]
+fn a_refused_piece_counts_each_lost_event_once() {
+    let probe = Probe::acquire();
+    let (mut processor, controller) = probe.activate();
+    let at = |frame: usize, ump| (Offset::of(Samples(frame), Samples(BLOCK)), ump);
+    let body: Vec<u8> = (1..=20).collect();
+    let packets: Vec<_> = tutti_plugin_types::sysex_packets(MidiGroup::FIRST, &body)
+        .expect("a message")
+        .collect();
+    assert!(packets.len() >= 3, "fixture: several UMPs");
+    let group_one = Address::new(MidiGroup::new(1).expect("a group"), MidiChannel::FIRST);
+    let mut events = vec![at(1, midi::note_on(group_one, 60, 0x4000))];
+    events.extend(packets.into_iter().map(|ump| at(2, ump)));
+    events.push(at(3, midi::note_on(MidiChannel::FIRST, 61, 0x4000)));
+
+    drop(controller);
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(
+        out.input_refused(),
+        3,
+        "the Group 1 note, the SysEx, the note"
+    );
+}
+
+/// **Losses counted between activations are reported by the next block**: a reset drops the
+/// SysEx open across it, and a rejoin and a new activation between that and the next block do
+/// not forget it.
+#[test]
+fn a_loss_between_activations_is_reported_once() {
+    let probe = Probe::acquire();
+    let (mut processor, controller) = probe.activate();
+    let body: Vec<u8> = (1..=20).collect();
+    let start = tutti_plugin_types::sysex_packets(MidiGroup::FIRST, &body)
+        .expect("a message")
+        .next()
+        .expect("a START");
+    let events = [(Offset::of(Samples(0), Samples(BLOCK)), start)];
+    let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
+    assert_eq!(out.input_refused(), 0, "open across the block, not lost");
+
+    processor.reset();
+    let loaded = rejoin(processor, controller);
+    let (mut processor, controller) = loaded
+        .activate(main_thread(), prepare())
+        .expect("activates again");
+    let out = render_out(&mut processor, &ProcessContext::new());
+    assert_eq!(out.input_refused(), 1, "the SysEx the reset dropped");
+    let out = render_out(&mut processor, &ProcessContext::new());
+    assert_eq!(out.input_refused(), 0, "told once");
+    drop(rejoin(processor, controller));
+}
+
+/// **A snapshot's values are host writes, and its program is selected in a bracket**: the
+/// plugin's `audioMasterAutomate` echo of each value is not reported as its own edit, and
+/// the program is selected between `effBeginSetProgram` and `effEndSetProgram`.
+#[test]
+fn a_snapshots_values_are_host_writes_and_its_program_is_bracketed() {
+    let probe = Probe::acquire();
+    let mut loaded = probe.load();
+    let state = parameter_state(1, &[0.25, 0.75]);
+    set_flag("tutti_vst2_probe_set_echo_set_parameter", true);
+    Control::load_state(
+        &mut loaded,
+        main_thread(),
+        &state,
+        tutti_plugin_types::StateUse::Project,
+    )
+    .expect("restores");
+    set_flag("tutti_vst2_probe_set_echo_set_parameter", false);
+
+    assert_eq!(
+        preset_trace(),
+        [preset_event::BEGIN, preset_event::CHANGE, preset_event::END]
+    );
+    assert_eq!(
+        Control::parameter(&loaded, main_thread(), ParamId::new(1)),
+        Some(Normalized::of(0.75))
+    );
+    let mut edits = Vec::new();
+    loaded.take_reported_edits(main_thread(), &mut edits);
+    assert_eq!(edits, Vec::new(), "the echo is the host's own write");
+}
+
+/// **A saved value off `0..=1` refuses the whole restore**: NaN is not a value to clamp,
+/// and no earlier value of the snapshot is written either.
+#[test]
+fn a_saved_value_that_is_not_a_normalized_one_refuses_the_restore() {
+    let probe = Probe::acquire();
+    let mut loaded = probe.load();
+    let before = Control::parameter(&loaded, main_thread(), ParamId::new(0));
+    for bad in [f32::NAN, f32::INFINITY, -0.5, 1.5] {
+        let state = parameter_state(0, &[0.9, bad]);
+        let error = Control::load_state(
+            &mut loaded,
+            main_thread(),
+            &state,
+            tutti_plugin_types::StateUse::Project,
+        )
+        .expect_err("refused");
+        assert!(matches!(error, PluginError::State(_)), "{error:?}");
+        assert_eq!(
+            Control::parameter(&loaded, main_thread(), ParamId::new(0)),
+            before,
+            "{bad}: nothing was written"
+        );
+    }
+}
+
+/// A `PRM\x01` state of `program` and `values`.
+fn parameter_state(program: i32, values: &[f32]) -> Vec<u8> {
+    let mut state = b"PRM\x01".to_vec();
+    state.extend_from_slice(&program.to_le_bytes());
+    state.extend_from_slice(&(values.len() as i32).to_le_bytes());
+    for value in values {
+        state.extend_from_slice(&value.to_le_bytes());
+    }
+    state
 }
 
 /// **No duplicate stop or suspend**, whichever way the plugin goes: a stop is

@@ -31,7 +31,8 @@ impl Vst2Loaded {
     /// # Errors
     ///
     /// Returns [`Vst2Error::NoEditor`] or [`Vst2Error::EditorOpenFailed`] if the plugin has no editor or
-    /// refuses to open it.
+    /// refuses to open it, and [`Vst2Error::NoEditorSize`] if it opened but reports no
+    /// positive size before or after opening (the editor is closed again).
     ///
     /// # Panics
     ///
@@ -66,11 +67,18 @@ impl Vst2Loaded {
             return Err(Vst2Error::EditorOpenFailed);
         }
 
-        let (w, h) = if pre.0 > 0 && pre.1 > 0 {
+        let (width, height) = if pre.0 > 0 && pre.1 > 0 {
             pre
         } else {
             self.instance.editor_size(main)
         };
-        Ok(rect_size(w as u32, h as u32))
+        match (u32::try_from(width), u32::try_from(height)) {
+            (Ok(w), Ok(h)) if w > 0 && h > 0 => Ok(rect_size(w, h)),
+            _ => {
+                // The window is not left open for a host that has no size to give it.
+                self.instance.close_editor(main);
+                Err(Vst2Error::NoEditorSize { width, height })
+            }
+        }
     }
 }
