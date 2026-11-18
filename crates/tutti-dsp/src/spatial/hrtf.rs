@@ -342,7 +342,7 @@ impl<F: FftFloat> HrtfBinaural<F> {
         let input = (input.left(), input.right());
         let (output, output_right) = output;
         let output = (output.into_samples_mut(), output_right.into_samples_mut());
-        let mix = <F as Float>::from_f32(blend.get());
+        let mix = F::from_unit(blend);
         let frames = output.0.len();
         let start = self.history.len() - HRTF_STEP;
         let mut done = 0;

@@ -107,7 +107,7 @@ impl Correlation {
     #[inline]
     #[must_use]
     pub fn to_stereo_width(self) -> StereoWidth {
-        StereoWidth(1.0 - self.0)
+        StereoWidth(1.0 - f64::from(self.0))
     }
 }
 

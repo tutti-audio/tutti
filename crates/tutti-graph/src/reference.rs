@@ -764,8 +764,7 @@ impl<F: Float> Reference<F> {
                     key,
                     RefMode::new(
                         spec_mode(key),
-                        // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
-                        F::from_f64(f64::from(spec_mix(key).get())),
+                        F::from_unit(spec_mix(key)),
                         &shape,
                         t.nodes[&key].latency.get(),
                         declick_frames(self.prepare.sample_rate()).get(),
@@ -1491,10 +1490,9 @@ impl<F: Float> Reference<F> {
         if let Some(m) = &mut mode {
             let want = read_mode(&shape, self.wanted.get(&key).copied().unwrap_or_default());
             // The mix as the block starts: the previous block's is its start.
-            // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
-            m.take_mix(F::from_f64(f64::from(
-                self.wanted_mix.get(&key).copied().unwrap_or(Mix::WET).get(),
-            )));
+            m.take_mix(F::from_unit(
+                self.wanted_mix.get(&key).copied().unwrap_or(Mix::WET),
+            ));
             // Its lane, when a source drives it: the param port's rule over
             // the source's events, the base being the mix just taken. A unit
             // that has run is on a running port (a source connected now

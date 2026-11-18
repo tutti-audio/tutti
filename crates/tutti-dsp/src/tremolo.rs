@@ -185,7 +185,7 @@ impl AutoPan {
         );
         let AutoPanControls { rate, depth } = self.controls;
         for (((&l, &r), o_l), o_r) in l.iter().zip(r).zip(out_l).zip(out_r) {
-            let pan = Pan(depth.get() * self.lfo.next(rate));
+            let pan = Pan(f64::from(depth.get() * self.lfo.next(rate)));
             let (gl, gr) = pan_gains(pan, self.law);
             *o_l = l * S::from_f64(gl.get());
             *o_r = r * S::from_f64(gr.get());

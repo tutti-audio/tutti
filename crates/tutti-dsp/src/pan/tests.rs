@@ -1,6 +1,6 @@
 use super::*;
 
-fn gains(pan: f32, law: PanLaw) -> (f64, f64) {
+fn gains(pan: f64, law: PanLaw) -> (f64, f64) {
     let (l, r) = pan_gains(Pan(pan), law);
     (l.get(), r.get())
 }

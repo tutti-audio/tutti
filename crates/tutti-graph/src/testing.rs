@@ -59,8 +59,8 @@ pub const EVENT_CAPACITY: usize = 16_384;
 
 /// What a [`Kind::GainDriver`] steps its gain to at frame `f`: a figure
 /// that changes at every step and is exact in `f32`.
-pub fn driver_value(f: u64, period: u64) -> f32 {
-    ((f / period) % 7) as f32 * 0.25 - 0.5
+pub fn driver_value(f: u64, period: u64) -> f64 {
+    ((f / period) % 7) as f64 * 0.25 - 0.5
 }
 
 pub fn prepare(max_block: usize) -> Prepare {

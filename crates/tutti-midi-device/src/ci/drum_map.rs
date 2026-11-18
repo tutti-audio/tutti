@@ -216,7 +216,7 @@ impl DrumInstrument {
     /// The recommended (optional) pan position (M2-125 §4.1, Table 5).
     #[must_use]
     pub fn recommended_pan(self) -> Pan {
-        Pan::new(f32::from(PANS[self.index()]) / 100.0)
+        Pan::new(f64::from(PANS[self.index()]) / 100.0)
     }
 
     /// The bit that declares a sound on this Note Number in the Profile

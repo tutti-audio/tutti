@@ -94,7 +94,7 @@ fn the_strip_holds_off_non_finite_volume_and_balance() {
         ("balance", |n, v| {
             n.balance()
                 .expect("a stereo strip balances")
-                .store(Balance(v));
+                .store(Balance(f64::from(v)));
         }),
     ];
     for (name, write) in cells {

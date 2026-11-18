@@ -111,10 +111,11 @@ fn blend(y: f32, x_hat: f32, m: f32) -> f32 {
 }
 
 /// What the driver's steps say at frame `n`, `shift` frames late: its last
-/// step (doubled: `-1.0` to `2.0`, off the blend on both sides).
+/// step (doubled: `-1.0` to `2.0`, off the blend on both sides), as the `f32`
+/// graph's weight.
 fn stepped(n: usize, shift: usize) -> Option<f32> {
     let f = n.checked_sub(shift)? as u64;
-    Some(driver_value(f - f % PERIOD, PERIOD) * 2.0)
+    Some((driver_value(f - f % PERIOD, PERIOD) * 2.0) as f32)
 }
 
 /// Node 1 is the driver, node 2 the node under test (fed by global input 0,
@@ -321,7 +322,7 @@ fn a_range_moved_between_blocks_clamps_from_the_next() {
 /// base: the node is the static blend (and, once the base is WET, plain again).
 #[test]
 fn a_source_that_goes_is_declicked_to_the_base() {
-    let base = 0.75f32;
+    let base = 0.75f64;
     let mut rig = Rig::new(plain(), 0, None);
     // One step only (frame 0): a period past the run.
     rig.kinds.insert(
@@ -340,7 +341,7 @@ fn a_source_that_goes_is_declicked_to_the_base() {
     for (n, &g) in got.iter().enumerate() {
         assert_eq!(
             g.to_bits(),
-            blend(3.0 * x[n], x[n], held).to_bits(),
+            blend(3.0 * x[n], x[n], held as f32).to_bits(),
             "held, frame {n}"
         );
     }
@@ -351,9 +352,9 @@ fn a_source_that_goes_is_declicked_to_the_base() {
     for (j, &g) in got.iter().enumerate() {
         let m = if j < d {
             let (out, inn) = common::smooth_gains(j, d);
-            (f64::from(held) * out + f64::from(base) * inn) as f32
+            (held * out + base * inn) as f32
         } else {
-            base
+            base as f32
         };
         let want = blend(3.0 * x[j], x[j], m);
         assert!((g - want).abs() < 1e-5, "frame {j}: {g}, want {want}");
@@ -381,7 +382,7 @@ fn a_driven_lane_survives_a_commit_that_keeps_its_node() {
         let (a, r) = pair.block(BLOCK, &input);
         assert_eq!(bits(&a), bits(&r));
         for n in 0..BLOCK {
-            let want = blend(3.0 * input[n], input[n], held);
+            let want = blend(3.0 * input[n], input[n], held as f32);
             assert_eq!(
                 a[0][n].to_bits(),
                 want.to_bits(),

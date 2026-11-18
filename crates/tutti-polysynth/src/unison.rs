@@ -212,9 +212,9 @@ impl UnisonEngine {
             || self.detune.load(),
             |lane| CentsSpan::clamped(f64::from(lane)),
         );
-        let spread = Spread::new_clamped(spread.unwrap_or_else(|| self.spread.load().get()));
+        let spread = Spread::new_clamped(spread.map_or_else(|| self.spread.load().get(), f64::from));
         let changed = detune != self.config.detune_cents
-            || (spread.get() - self.config.stereo_spread.get()).abs() > f32::EPSILON;
+            || (spread.get() - self.config.stereo_spread.get()).abs() > f64::EPSILON;
         if changed {
             self.config.detune_cents = detune;
             self.config.stereo_spread = spread;
@@ -234,13 +234,13 @@ impl UnisonEngine {
             let position = if count == 1 {
                 0.0
             } else {
-                (i as f32 / (count - 1) as f32) * 2.0 - 1.0
+                (i as f64 / (count - 1) as f64) * 2.0 - 1.0
             };
 
             // `Semitones * f64` is opted in, so spreading the detune across the
             // voice's position stays in the unit, and the exponent conversion
             // happens once at the end.
-            let freq_ratio = (detune_semitones * f64::from(position)).to_pitch_ratio();
+            let freq_ratio = (detune_semitones * position).to_pitch_ratio();
             let pan = Pan(position * self.config.stereo_spread.get());
 
             // The phase offset is kept: it is the last `randomize_phases`

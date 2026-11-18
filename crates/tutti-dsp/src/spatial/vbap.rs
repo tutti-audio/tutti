@@ -22,7 +22,7 @@ pub use error::SpeakerGeometryError;
 pub use layout::SpeakerLayout;
 
 /// A width below this folds the stereo pair to mono and pans one source.
-const MONO_WIDTH: f32 = 0.001;
+const MONO_WIDTH: f64 = 0.001;
 
 /// How far each virtual source sits from the bearing at width 1.
 const WIDTH_HALF_ANGLE: ArcDegrees = ArcDegrees(15.0);
@@ -30,7 +30,7 @@ const WIDTH_HALF_ANGLE: ArcDegrees = ArcDegrees(15.0);
 /// The width that puts the two virtual sources at the antipode of the bearing
 /// (an offset of half a turn). The solve saturates the width here by convention,
 /// so a huge one cannot overflow the offset.
-const MAX_WIDTH: f32 = (180.0 / WIDTH_HALF_ANGLE.get()) as f32;
+const MAX_WIDTH: f64 = 180.0 / WIDTH_HALF_ANGLE.get();
 
 /// One direction's speaker gains, as an end of a glide between two grid points.
 ///
@@ -239,8 +239,8 @@ impl VbapKernel {
         let key = [
             azimuth.get().to_bits(),
             elevation.get().to_bits(),
-            u64::from(width.get().to_bits()),
-            u64::from(spread.get().to_bits()),
+            width.get().to_bits(),
+            spread.get().to_bits(),
         ];
         if let Some((solved_for, gains)) = self.last_solve
             && solved_for == key
@@ -294,8 +294,8 @@ impl VbapKernel {
 /// full width the left source is at 185, which *is* -175, the same wraparound
 /// the node normalizes the target to, re-introduced here by adding to the
 /// already-wrapped value.
-fn virtual_sources(azimuth: Azimuth, width: f32) -> (Azimuth, Azimuth) {
-    let offset = WIDTH_HALF_ANGLE * f64::from(width);
+fn virtual_sources(azimuth: Azimuth, width: f64) -> (Azimuth, Azimuth) {
+    let offset = WIDTH_HALF_ANGLE * width;
     (azimuth.rotate_by(offset), azimuth.rotate_by(-offset))
 }
 

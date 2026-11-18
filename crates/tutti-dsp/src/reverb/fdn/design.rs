@@ -66,7 +66,7 @@ const RATES: (Hz, Hz) = (Hz(0.05), Hz(5.0));
 /// The shortest RT60 a control may ask for, and the least a [`MaxDecay`] holds.
 pub const MIN_DECAY: Seconds = Seconds(0.05);
 /// The widest stereo image.
-const MAX_WIDTH: f32 = 2.0;
+const MAX_WIDTH: f64 = 2.0;
 /// The wet gain at or below which the network is silent.
 const SILENT_WET: Db = Db(-120.0);
 /// The loudest wet gain.
@@ -263,7 +263,7 @@ impl FdnLayout {
         };
 
         let n = self.lines;
-        let scale = (0.5 + size) * (rate.get() / 44_100.0) as f32;
+        let scale = (0.5 + size) * (rate.get() / 44_100.0);
         let depth_frames = if freeze {
             SampleSpan::ZERO
         } else {
@@ -273,9 +273,8 @@ impl FdnLayout {
         };
         let mut lines: Inline<Line, MAX_LINES> = Inline::new();
         for &base in &LENGTHS[..n] {
-            // The lengths are whole frames: the `f32` product rounds to one.
-            let length =
-                SampleSpan::clamped(f64::from((base.get() as f32 * scale).round().max(1.0)));
+            // The lengths are whole frames: the product rounds to one.
+            let length = SampleSpan::clamped((base.get() * scale).round().max(1.0));
             let _ = lines.push(Line {
                 length,
                 modulation: LineModulation {
@@ -294,7 +293,7 @@ impl FdnLayout {
             let mut norm = 0.0f64;
             for (i, x) in v.as_mut_slice().iter_mut().enumerate() {
                 let axis = if i == 0 { 1.0 } else { 0.0 };
-                let y = crate::lerp(axis, flat, f64::from(diffusion));
+                let y = crate::lerp(axis, flat, diffusion);
                 *x = Gain::new(y);
                 norm += y * y;
             }

@@ -37,7 +37,7 @@ unit! {
     /// It is also a position on a `0..1` scale among a node's own settings,
     /// not only between dry and wet (a reverb's diffusion or size, which each
     /// algorithm maps onto its scale).
-    pub struct Mix(pub f32): Unit, Ordered, Bounded;
+    pub struct Mix(pub f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable` / `Additive`: see the type doc. Two blends
 // summing to 1.4 is off the end of the crossfade.
@@ -55,7 +55,7 @@ impl Mix {
     /// Constrain into `0..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Mix {
+    pub fn new_clamped(v: f64) -> Mix {
         Mix(v).clamp(Self::DRY, Self::WET)
     }
 }
@@ -73,7 +73,7 @@ unit! {
     /// balance control on a stereo pair is [`Balance`].
     /// Distinct from [`Depth`]: a pan position and a modulation amount are
     /// different quantities that happen to share a range.
-    pub struct Pan(pub f32): Unit, Ordered, Bounded, Signed;
+    pub struct Pan(pub f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable`: half of a pan position is not a pan position — the
 // same argument `Mix` makes. Moving a source is `Azimuth::lerp_shortest`'s
@@ -91,7 +91,7 @@ impl Pan {
     /// Constrain into `-1..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Pan {
+    pub fn new_clamped(v: f64) -> Pan {
         Pan(v).clamp(Self::LEFT, Self::RIGHT)
     }
 }
@@ -106,7 +106,7 @@ unit! {
     /// side, and it holds no power constant. A [`Pan`] places a source with a
     /// panner's law, and [`StereoBalance`] is the engine's measured balance, a
     /// reading; there is no conversion between the three.
-    pub struct Balance(pub f32): Unit, Ordered, Bounded, Signed;
+    pub struct Balance(pub f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable` / `Additive`: a position on a segment, as `Pan` is; half a
 // balance is not a balance, and two do not sum.
@@ -122,7 +122,7 @@ impl Balance {
     /// Constrain into `-1..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Balance {
+    pub fn new_clamped(v: f64) -> Balance {
         Balance(v).clamp(Self::LEFT, Self::RIGHT)
     }
 
@@ -134,8 +134,7 @@ impl Balance {
     #[inline]
     #[must_use]
     pub fn gains(self) -> (Amplitude, Amplitude) {
-        // A balance is not yet `f64`; its position widens exactly into the `f64` amplitudes.
-        let b = f64::from(self.0.clamp(-1.0, 1.0));
+        let b = self.0.clamp(-1.0, 1.0);
         (Amplitude((1.0 - b).min(1.0)), Amplitude((1.0 + b).min(1.0)))
     }
 }
@@ -477,7 +476,7 @@ unit! {
     /// Not a [`Mix`] — it blends no pair of signals; it is a geometric
     /// property of the panning solution, and the VBAP panner consumes it as
     /// such. Sharing `Mix`'s range is not sharing its meaning.
-    pub struct Spread(pub f32): Unit, Ordered, Bounded;
+    pub struct Spread(pub f64): Unit, Ordered, Bounded;
 }
 
 impl Spread {
@@ -489,7 +488,7 @@ impl Spread {
     /// Constrain into `0..=1`.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> Spread {
+    pub fn new_clamped(v: f64) -> Spread {
         Spread(v).clamp(Self::POINT, Self::DIFFUSE)
     }
 }
@@ -502,7 +501,7 @@ unit! {
     /// component against the mid, so it reshapes the stereo image rather than
     /// making the signal louder. Typing it as a gain would invite it into
     /// signal multiplications where it does not belong.
-    pub struct StereoWidth(pub f32): Unit, Ordered, Bounded;
+    pub struct StereoWidth(pub f64): Unit, Ordered, Bounded;
 }
 
 impl StereoWidth {
@@ -515,7 +514,7 @@ impl StereoWidth {
     /// the source is a legitimate effect. NaN stays NaN.
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f32) -> StereoWidth {
+    pub fn new_clamped(v: f64) -> StereoWidth {
         StereoWidth(if v < 0.0 { 0.0 } else { v })
     }
 }

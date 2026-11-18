@@ -150,7 +150,7 @@ mod tests {
     use tutti_units::UnitParam;
 
     // The node tests run `F = f32`, the session's audio format.
-    fn node(width: f32) -> StereoWidthNode<f32> {
+    fn node(width: f64) -> StereoWidthNode<f32> {
         prepared(StereoWidthNode::<f32>::from(
             StereoWidthConfig::new().width(StereoWidth(width)),
         ))
@@ -219,7 +219,7 @@ mod tests {
         let len = 100;
         let l = wide_signal(len);
         let r: Vec<f64> = l.iter().rev().map(|v| v * 0.75).collect();
-        let run = |w: f32| {
+        let run = |w: f64| {
             let mut k = StereoWidthKernel::<f64>::new();
             k.prepare(RATE, MaxBlock::of(Samples(len)));
             let controls = WidthControls {

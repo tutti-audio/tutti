@@ -8,7 +8,7 @@ use crate::TAIL_FLOOR;
 // format, so their tolerances are `f32`'s.
 const RATE: SampleRate = SampleRate::SR_44K1;
 
-fn controls(room: f32, damp: f32) -> FreeverbControls {
+fn controls(room: f64, damp: f64) -> FreeverbControls {
     FreeverbControls {
         room: Mix(room),
         damp: Mix(damp),

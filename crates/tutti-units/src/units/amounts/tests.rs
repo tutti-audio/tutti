@@ -195,7 +195,7 @@ fn pan_saturates_and_orders() {
     assert_eq!(-Pan::LEFT, Pan::RIGHT);
 }
 
-fn balance_at(b: f32) -> (f64, f64) {
+fn balance_at(b: f64) -> (f64, f64) {
     let (l, r) = Balance(b).gains();
     (l.get(), r.get())
 }
@@ -218,14 +218,14 @@ fn balance_attenuates_the_far_side_linearly_and_keeps_centre_at_unity() {
 fn balance_outside_its_range_holds_the_end_and_nan_reads_unity() {
     assert_eq!(balance_at(3.0), (0.0, 1.0));
     assert_eq!(balance_at(-3.0), (1.0, 0.0));
-    assert_eq!(balance_at(f32::INFINITY), (0.0, 1.0));
-    assert_eq!(balance_at(f32::NAN), (1.0, 1.0));
+    assert_eq!(balance_at(f64::INFINITY), (0.0, 1.0));
+    assert_eq!(balance_at(f64::NAN), (1.0, 1.0));
 }
 
 #[test]
 fn balance_never_boosts_and_the_far_side_falls_monotonically() {
     for i in 0..=40 {
-        let b = -1.0 + i as f32 * 0.05;
+        let b = -1.0 + f64::from(i) * 0.05;
         let (l, r) = balance_at(b);
         assert!(
             (0.0..=1.0).contains(&l) && (0.0..=1.0).contains(&r),
@@ -234,7 +234,7 @@ fn balance_never_boosts_and_the_far_side_falls_monotonically() {
         assert!(l == 1.0 || r == 1.0, "{b}: the near side is unity");
     }
     for i in 1..=20 {
-        let b = i as f32 * 0.05;
+        let b = f64::from(i) * 0.05;
         assert!(
             balance_at(b).0 < balance_at(b - 0.05).0,
             "left falls as b rises past centre"

@@ -165,7 +165,7 @@ fn render(
 #[derive(Clone, Copy)]
 enum MixIs {
     /// Set to `v` before the unit is placed (steady from the first block).
-    Set(f32),
+    Set(f64),
     /// Driven to `v` by a control lane on the mix's port.
     Fed(f32),
 }
@@ -954,9 +954,9 @@ fn mix_cases() -> Vec<MixCase> {
 fn each_fed_mix_is_the_one_the_graph_blends() {
     for w in [1usize, 2, 6] {
         for case in mix_cases() {
-            let at = |v: f32| {
+            let at = |v: f64| {
                 (
-                    render_mix((case.make)(w), MixIs::Fed(v)),
+                    render_mix((case.make)(w), MixIs::Fed(v as f32)),
                     render_mix((case.make)(w), MixIs::Set(v)),
                 )
             };

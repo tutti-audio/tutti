@@ -150,7 +150,7 @@ pub(crate) const MIN_BANDWIDTH: Hz = Hz(10.0);
 /// The share of Nyquist the input bandwidth is held under.
 const BANDWIDTH_CEILING: f64 = 0.9;
 /// The largest damping pole: one short of a filter that never settles.
-const MAX_DAMPING: f32 = 0.999;
+const MAX_DAMPING: f64 = 0.999;
 
 const _: () = assert!(MAX_STAGES >= 5 && MAX_LINES >= 4 && MAX_DENSE >= 16);
 

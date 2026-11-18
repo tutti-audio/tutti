@@ -40,7 +40,7 @@ impl Absorption {
         match *self {
             Absorption::Gain(g) => Complex64::new(g.get(), 0.0),
             Absorption::OnePole { gain, damp } => {
-                let d = f64::from(damp);
+                let d = damp;
                 if !(d.is_finite() && d.abs() < 1.0) {
                     return Complex64::new(f64::NAN, f64::NAN);
                 }
@@ -126,7 +126,7 @@ impl Absorption {
         match *self {
             Absorption::Gain(g) => nonnegative(g.get()),
             Absorption::OnePole { gain, damp } => {
-                let d = f64::from(damp);
+                let d = damp;
                 let g = gain.get();
                 if !(d.is_finite() && g.is_finite() && g >= 0.0 && d.abs() < r) {
                     return f64::INFINITY;

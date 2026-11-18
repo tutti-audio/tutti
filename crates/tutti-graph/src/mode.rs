@@ -107,7 +107,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use tutti_curve::FadeLaw;
-use tutti_types::{AtomicF32, ParamCell};
+use tutti_types::{AtomicF64, ParamCell};
 use tutti_units::{Mix, Samples, UnitAddr, UnitParam};
 
 use crate::NodeKey;
@@ -288,13 +288,13 @@ pub enum MixError {
 
 /// A unit's mode and mix, shared between the editor (the one writer) and the
 /// unit (the executor reads each once per block). An `AtomicU8` and the
-/// mix's raw `f32` (`Mix` is not `Pod`; the cell converts at its edge): a
+/// mix's raw `f64` (`Mix` is not `Pod`; the cell converts at its edge): a
 /// mode and a mix are controls, not rewires. **The mix cell is the mix's one
 /// writer's**: [`Editor::set_mix`](crate::Editor::set_mix) stores into it.
 #[derive(Clone, Debug)]
 pub(crate) struct ModeCell {
     mode: Arc<AtomicU8>,
-    mix: Arc<AtomicF32>,
+    mix: Arc<AtomicF64>,
     /// The range a driven mix is clamped to: the param port's own cell over
     /// the one address [`NodeMix::ADDR`], so the lane's step clamps to it as a
     /// port does and a control lane reads it through the same
@@ -309,7 +309,7 @@ impl ModeCell {
         range.store(NodeMix::ADDR, NodeMix::DEFAULT_RANGE);
         Self {
             mode: Arc::new(AtomicU8::new(mode.to_bits())),
-            mix: Arc::new(AtomicF32::new(mix.get())),
+            mix: Arc::new(AtomicF64::new(mix.get())),
             range,
         }
     }
@@ -671,8 +671,7 @@ impl<F: Float> ModeState<F> {
     pub(crate) fn new(cell: ModeCell, shape: &Shape, max_block: usize, declick: usize) -> Self {
         let own_bypass = shape.own_bypass;
         let mode = Self::read(own_bypass, cell.load());
-        // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
-        let mix = F::from_f64(f64::from(cell.load_mix().get()));
+        let mix = F::from_unit(cell.load_mix());
         let pass = Pass::<F>::of_or_nothing(shape);
         let main = pass.inputs();
         let folded = pass.folds().then(|| Arena::new(pass.outputs(), max_block));
@@ -772,8 +771,7 @@ impl<F: Float> ModeState<F> {
         // The mix advances every block, parked or silent or not, so a move
         // made while the node was out has arrived when it is heard.
         self.mix_from = self.mix_to;
-        // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
-        self.mix_to = F::from_f64(f64::from(self.cell.load_mix().get()));
+        self.mix_to = F::from_unit(self.cell.load_mix());
         self.plain = self.inert
             || (self.seen == NodeMode::Active
                 && self.heading == NodeMode::Active
@@ -1048,7 +1046,7 @@ mod tests {
     }
 
     /// A unit of `shape` at `mix`, steady Active, after the block's snapshot.
-    fn at(shape: &Shape, mix: f32) -> (ModeCell, ModeState<f32>) {
+    fn at(shape: &Shape, mix: f64) -> (ModeCell, ModeState<f32>) {
         let cell = ModeCell::new(NodeMode::Active, Mix::new(mix));
         let mut state = ModeState::new(cell.clone(), shape, 64, DECLICK_FRAMES);
         state.snapshot();

@@ -2,7 +2,7 @@ use tutti_units::{Feedback, Mix};
 
 use super::*;
 
-fn controls(room: f32, damp: f32) -> FreeverbControls {
+fn controls(room: f64, damp: f64) -> FreeverbControls {
     FreeverbControls {
         room: Mix(room),
         damp: Mix(damp),

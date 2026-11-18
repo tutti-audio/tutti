@@ -92,21 +92,21 @@ fn every_new_clamped_passes_nan_and_saturates_infinity() {
             );
         };
     }
-    check!(Mix, 0.0, 1.0);
+    check!(Mix, 0.0, 1.0, f64);
     check!(Feedback, 0.0, 0.99);
-    check!(Spread, 0.0, 1.0);
+    check!(Spread, 0.0, 1.0, f64);
     check!(Resonance, 0.0, 1.0);
     check!(Confidence, 0.0, 1.0);
     check!(Correlation, -1.0, 1.0);
-    check!(Pan, -1.0, 1.0);
-    check!(Balance, -1.0, 1.0);
+    check!(Pan, -1.0, 1.0, f64);
+    check!(Balance, -1.0, 1.0, f64);
     check!(StereoBalance, -1.0, 1.0);
     check!(Velocity, 0.0, 1.0);
     check!(Elevation, -90.0, 90.0, f64);
     check!(PlaybackRate, 0.25, 4.0, f64);
     check!(StretchFactor, 0.25, 4.0, f64);
     // The unbounded side stays infinite.
-    check!(StereoWidth, 0.0, f32::INFINITY);
+    check!(StereoWidth, 0.0, f64::INFINITY, f64);
     check!(CompressionRatio, 1.0, f32::INFINITY);
     check!(Q, f32::MIN_POSITIVE, f32::INFINITY);
     check!(BitDepth, 1.0, 32.0);
@@ -117,7 +117,7 @@ fn every_new_clamped_passes_nan_and_saturates_infinity() {
     assert_eq!(Q::new_clamped(0.7), Q(0.7));
     assert_eq!(
         StereoWidth::new_clamped(-0.0).get().to_bits(),
-        (-0.0f32).to_bits()
+        (-0.0f64).to_bits()
     );
 }
 

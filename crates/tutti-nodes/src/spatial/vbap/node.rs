@@ -36,8 +36,8 @@ tutti_graph::declare_params!([] VbapPannerNode, n {
 struct Held {
     azimuth: LastGood<f64>,
     elevation: LastGood<f64>,
-    spread: LastGood,
-    width: LastGood,
+    spread: LastGood<f64>,
+    width: LastGood<f64>,
 }
 
 /// The grid points a glide of [`GLIDE`] takes at `rate`: its length in frames,
@@ -286,8 +286,8 @@ impl VbapPannerNode {
             .good
             .elevation
             .read(lane(1).map_or(cells.1.get(), f64::from));
-        let spread = Spread::new_clamped(self.good.spread.read(lane(2).unwrap_or(cells.2.get())));
-        let width = StereoWidth(self.good.width.read(lane(3).unwrap_or(cells.3.get())));
+        let spread = Spread::new_clamped(self.good.spread.read(lane(2).map_or(cells.2.get(), f64::from)));
+        let width = StereoWidth(self.good.width.read(lane(3).map_or(cells.3.get(), f64::from)));
         let whole = !self.seated;
         steer(
             &mut self.aim_azimuth,

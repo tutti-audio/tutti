@@ -189,9 +189,10 @@ fn render_both(rig: &Rig, blocks: usize) -> Vec<f32> {
 
 /// The weight a driver of this `latency` offset gives frame `n`: the step of
 /// the last multiple of `PERIOD` it has sent by then (`shift` frames late).
+/// A quarter step, exact in the edge gain's `f32` cell word.
 fn stepped(n: usize, shift: usize) -> Option<f32> {
     let f = n.checked_sub(shift)? as u64;
-    Some(driver_value(f - f % PERIOD, PERIOD))
+    Some(driver_value(f - f % PERIOD, PERIOD) as f32)
 }
 
 fn delay_of(plan: &tutti_graph::Plan, key: tutti_graph::DelayKey) -> Option<usize> {
@@ -266,7 +267,7 @@ fn a_source_that_goes_is_declicked_to_the_base() {
     );
     let id = rig.drive(1, 2);
     rig.spec.gains.get_mut(&id).expect("entry").base = amp(base);
-    let held = driver_value(0, 1 << 20);
+    let held = driver_value(0, 1 << 20) as f32;
 
     let mut pair = Pair::new(BLOCK);
     pair.switch(&rig.graph(), &rig.kinds);
@@ -303,7 +304,7 @@ fn a_driven_lane_survives_a_commit_that_keeps_its_edge() {
         },
     );
     rig.drive(1, 2);
-    let held = driver_value(0, 1 << 20);
+    let held = driver_value(0, 1 << 20) as f32;
     let mut pair = Pair::new(BLOCK);
     pair.switch(&rig.graph(), &rig.kinds);
     for round in 0..3 {
