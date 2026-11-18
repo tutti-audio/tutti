@@ -46,7 +46,7 @@ macro_rules! served_control {
             /// declare or declares read-only, and writes nothing. The client-side
             /// check, which names the error, is [`Control::set_parameter`].
             ///
-            /// Stays `Normalized` to the wire, which narrows it to an `f32`.
+            /// Stays `Normalized` to the wire, which carries its `f64`.
             /// The server's decode refuses a value outside 0..=1 (NaN
             /// included): the wire is a foreign boundary and the peer is
             /// another process.
