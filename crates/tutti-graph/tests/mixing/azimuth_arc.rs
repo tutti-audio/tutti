@@ -148,8 +148,11 @@ fn an_azimuth_segment_from_170_to_minus_170_turns_through_180_not_0() {
     for (j, &v) in az.iter().enumerate().take(99) {
         // `position` 1: frame j is `(1 + j) / 100` of the way.
         let t = (1 + j) as f64 / 100.0;
-        let want = Azimuth((170.0 + 20.0 * t) as f32).wrap().get();
-        assert!((v - want).abs() < 1e-3, "frame {j}: {v} against {want}");
+        let want = Azimuth(170.0 + 20.0 * t).wrap().get();
+        assert!(
+            (f64::from(v) - want).abs() < 1e-3,
+            "frame {j}: {v} against {want}"
+        );
         assert!(v.abs() >= 169.0, "frame {j}: {v} went the long way");
     }
     assert_eq!(az[49], -180.0, "the midpoint is the seam");
@@ -167,8 +170,11 @@ fn an_azimuth_segment_applies_its_shape_to_the_arc() {
         let t = (1 + j) as f64 / 100.0;
         let g = t * t * t * (t * (6.0 * t - 15.0) + 10.0);
         // The short arc from -160 to 160 is -40.
-        let want = Azimuth((-160.0 - 40.0 * g) as f32).wrap().get();
-        assert!((v - want).abs() < 1e-3, "frame {j}: {v} against {want}");
+        let want = Azimuth(-160.0 - 40.0 * g).wrap().get();
+        assert!(
+            (f64::from(v) - want).abs() < 1e-3,
+            "frame {j}: {v} against {want}"
+        );
     }
 }
 

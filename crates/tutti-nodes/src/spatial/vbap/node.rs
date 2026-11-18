@@ -34,8 +34,8 @@ tutti_graph::declare_params!([] VbapPannerNode, n {
 /// The last finite value each control cell held.
 #[derive(Clone, Copy, Debug)]
 struct Held {
-    azimuth: LastGood,
-    elevation: LastGood,
+    azimuth: LastGood<f64>,
+    elevation: LastGood<f64>,
     spread: LastGood,
     width: LastGood,
 }
@@ -268,14 +268,26 @@ impl VbapPannerNode {
     /// [`glide_steps`] grid points. A lane is already a signal, so a driven
     /// coordinate is the lane's value at the grid point, wrapped for a bearing,
     /// and the gains chord to the next grid point from there.
-    fn grid_point(&mut self, at: usize, driven: &[Option<&[f32]>; 4], cells: [f32; 4]) {
-        // A lane shorter than the block reads as the cell.
+    fn grid_point(
+        &mut self,
+        at: usize,
+        driven: &[Option<&[f32]>; 4],
+        cells: (Azimuth, Elevation, Spread, StereoWidth),
+    ) {
+        // A lane shorter than the block reads as the cell. A lane is the
+        // graph's `f32`; the angles are `f64`, so a driven coordinate widens
+        // here, once per grid point.
         let lane = |k: usize| driven[k].and_then(|lane| lane.get(at)).copied();
-        let read = |k: usize| lane(k).unwrap_or(cells[k]);
-        let azimuth = self.good.azimuth.read(read(0));
-        let elevation = self.good.elevation.read(read(1));
-        let spread = Spread::new_clamped(self.good.spread.read(read(2)));
-        let width = StereoWidth(self.good.width.read(read(3)));
+        let azimuth = self
+            .good
+            .azimuth
+            .read(lane(0).map_or(cells.0.get(), f64::from));
+        let elevation = self
+            .good
+            .elevation
+            .read(lane(1).map_or(cells.1.get(), f64::from));
+        let spread = Spread::new_clamped(self.good.spread.read(lane(2).unwrap_or(cells.2.get())));
+        let width = StereoWidth(self.good.width.read(lane(3).unwrap_or(cells.3.get())));
         let whole = !self.seated;
         steer(
             &mut self.aim_azimuth,
@@ -405,12 +417,12 @@ impl Node for VbapPannerNode {
             self.declared_param::<{ UnitParam::StereoWidth as u16 }>(&io)
                 .frames(),
         ];
-        let cells = [
-            self.azimuth.load().get(),
-            self.elevation.load().get(),
-            self.spread.load().get(),
-            self.width.load().get(),
-        ];
+        let cells = (
+            self.azimuth.load(),
+            self.elevation.load(),
+            self.spread.load(),
+            self.width.load(),
+        );
         let (inputs, mut outputs) = io.split();
         let (left, right) = (&inputs.get(0)[..size], &inputs.get(1)[..size]);
         let mut at = 0;

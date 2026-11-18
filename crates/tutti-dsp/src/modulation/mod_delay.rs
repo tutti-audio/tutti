@@ -158,27 +158,27 @@ impl ModDelayLayout {
     /// `c - 1`. Sweeping the channels out of step is what makes it feel wide.
     #[must_use]
     pub fn chorus(input: BusTopology) -> Self {
-        Self::preset(input, Sweep::CHORUS, 0.25)
+        Self::preset(input, Sweep::CHORUS, PhaseIncrement(0.25))
     }
 
     /// A flanger: [`Sweep::FLANGER`], channels a half cycle apart.
     #[must_use]
     pub fn flanger(input: BusTopology) -> Self {
-        Self::preset(input, Sweep::FLANGER, 0.5)
+        Self::preset(input, Sweep::FLANGER, PhaseIncrement(0.5))
     }
 
     /// The General MIDI chorus: [`Sweep::GENERAL_MIDI_CHORUS`], channels a quarter cycle
     /// apart, no feedback.
     #[must_use]
     pub fn general_midi_chorus(input: BusTopology) -> Self {
-        Self::preset(input, Sweep::GENERAL_MIDI_CHORUS, 0.25)
+        Self::preset(input, Sweep::GENERAL_MIDI_CHORUS, PhaseIncrement(0.25))
     }
 
-    fn preset(input: BusTopology, sweep: Sweep, step: f32) -> Self {
+    fn preset(input: BusTopology, sweep: Sweep, step: PhaseIncrement) -> Self {
         Self {
             input,
             sweep,
-            stagger: Stagger::of_step(PhaseIncrement(step)),
+            stagger: Stagger::of_step(step),
         }
     }
 

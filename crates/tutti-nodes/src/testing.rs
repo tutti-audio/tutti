@@ -46,7 +46,6 @@
 mod vbap_mix;
 pub use vbap_mix::{bass_send, vbap_mix};
 
-use std::f64::consts::TAU;
 use tutti_buffers::Sample;
 use tutti_dsp::OscillatorWave;
 
@@ -54,14 +53,17 @@ use tutti_graph::{
     Cx, ForkByClone, IntoNode, Io, Node, NodeParts, ParamSet, Prepare, Shape, Status,
 };
 use tutti_types::ChannelLayout;
-use tutti_units::{Amplitude, Azimuth, Elevation, Hz, Phase, SampleRate, UnitParam};
+use tutti_units::{
+    Amplitude, Azimuth, Elevation, Hz, Phase, PhaseIncrement, SampleRate, UnitParam,
+};
 
 /// Aims a panner at `azimuth` and `elevation` through its [`ParamSet`]: the
 /// two writes a test makes together. The panner wraps the bearing and clamps
 /// the height when it reads them.
 pub fn aim(params: &ParamSet, azimuth: Azimuth, elevation: Elevation) {
-    params.set(UnitParam::Azimuth, azimuth.get());
-    params.set(UnitParam::Elevation, elevation.get());
+    // A `ParamSet` is addressed in the host's `f32`: the angles narrow here.
+    params.set(UnitParam::Azimuth, azimuth.get() as f32);
+    params.set(UnitParam::Elevation, elevation.get() as f32);
 }
 
 /// Each stimulus node is its own [`IntoNode`]: forkable by clone, as none
@@ -144,18 +146,19 @@ impl Node for Const {
 /// The naive closed form of `wave` at `phase` in cycles, `0..1`: no
 /// band-limiting, so a test reads the exact shape.
 #[inline]
-fn naive(wave: OscillatorWave, phase: f64) -> f64 {
+fn naive(wave: OscillatorWave, phase: Phase) -> f64 {
+    let turns = phase.get();
     match wave {
-        OscillatorWave::Sine => (phase * TAU).sin(),
-        OscillatorWave::Saw => 2.0 * phase - 1.0,
+        OscillatorWave::Sine => phase.sin(),
+        OscillatorWave::Saw => 2.0 * turns - 1.0,
         OscillatorWave::Square => {
-            if phase < 0.5 {
+            if turns < 0.5 {
                 1.0
             } else {
                 -1.0
             }
         }
-        OscillatorWave::Triangle => 1.0 - 4.0 * (phase - 0.5).abs(),
+        OscillatorWave::Triangle => 1.0 - 4.0 * (turns - 0.5).abs(),
     }
 }
 
@@ -178,10 +181,8 @@ pub struct Osc {
     sample_rate: SampleRate,
     /// Where the cycle starts, and where `reset` returns it.
     start: Phase,
-    /// Position in the cycle, `0..1`. `f64` rather than [`Phase`] because it
-    /// integrates an increment every sample, and `Phase` is `f32`: over a
-    /// minute at 48 kHz the `f32` sum drifts audibly.
-    phase: f64,
+    /// Position in the cycle, advanced by one increment per sample.
+    phase: Phase,
 }
 
 impl Osc {
@@ -195,7 +196,7 @@ impl Osc {
             layout: ChannelLayout::MONO,
             sample_rate: SampleRate::DEFAULT,
             start: Phase::START,
-            phase: 0.0,
+            phase: Phase::START,
         }
     }
 
@@ -237,7 +238,7 @@ impl Osc {
     #[must_use]
     pub fn with_phase(mut self, phase: Phase) -> Self {
         self.start = Phase::wrapped(phase.get());
-        self.phase = f64::from(self.start.get());
+        self.phase = self.start;
         self
     }
 
@@ -252,8 +253,9 @@ impl Osc {
     #[inline]
     fn next(&mut self) -> f32 {
         let y = naive(self.waveform, self.phase) * f64::from(self.amplitude.get());
-        self.phase += f64::from(self.frequency.get()) / self.sample_rate.get();
-        self.phase -= self.phase.floor();
+        self.phase = self
+            .phase
+            .advance(PhaseIncrement::per_sample(self.frequency, self.sample_rate));
         y as f32
     }
 }
@@ -280,7 +282,7 @@ impl Node for Osc {
     }
 
     fn reset(&mut self) {
-        self.phase = f64::from(self.start.get());
+        self.phase = self.start;
     }
 }
 
@@ -401,6 +403,7 @@ impl Node for Sink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f64::consts::TAU;
     use tutti_buffers::Planes;
     use tutti_graph::Solo;
     use tutti_types::MaxBlock;
@@ -529,7 +532,7 @@ mod tests {
     #[test]
     fn with_phase_wraps_into_one_cycle_and_reset_restores_it() {
         let quarter = 2.0 * 0.25 - 1.0; // the saw's value at 0.25 turns
-        for start in [0.25f32, 1.25, -0.75, 3.25] {
+        for start in [0.25f64, 1.25, -0.75, 3.25] {
             let mut osc = Osc::saw(Hz(1_000.0)).with_phase(Phase(start));
             osc.prepare(&Prepare::new(SampleRate::SR_8K, MaxBlock::of(Samples(64))));
             let first = osc.next();
@@ -539,7 +542,7 @@ mod tests {
             let again = osc.next();
             assert!((again - quarter).abs() < 1e-6, "reset {start}: {again}");
         }
-        // The f32 edge: a tiny negative is just under a whole cycle, not at 1.0.
+        // A tiny negative is just under a whole cycle, not at 1.0.
         let mut edge = Osc::saw(Hz(1_000.0)).with_phase(Phase(-1e-9));
         assert!((edge.next() - 1.0).abs() < 1e-6);
     }

@@ -514,7 +514,7 @@ fn a_drawn_wave_follows_its_points() {
     let want = 0.5 + 0.4 * (2.0f64 / 3.0).sqrt();
     let kinked = w.next_corner(0.6, true, true).expect("a crossing");
     assert!((kinked - want).abs() < 1e-6, "{kinked} vs {want}");
-    assert_eq!(w.next_corner(0.6, true, false), Some(0.9f32.into()));
+    assert_eq!(w.next_corner(0.6, true, false), Some(0.9));
 }
 
 /// `new` refuses past the lane's fixed state, duplicate ids and a bad
@@ -698,7 +698,7 @@ fn new_refuses_a_nan() {
         depth_by: Some(DepthBy {
             clock: Clock::Seconds {
                 rate: Hz(1.0),
-                phase: PhaseIncrement(f32::NAN),
+                phase: PhaseIncrement(f64::NAN),
                 anchor: None,
             },
             wave: Waveform::Const(0.0),

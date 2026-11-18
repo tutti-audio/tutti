@@ -273,7 +273,8 @@ impl UnisonEngine {
         let count = usize::from(self.config.voice_count.get());
 
         for i in 0..count {
-            self.voices[i].phase_offset = Phase::new(Xorshift32::to_unit(self.rng.next_u32()));
+            self.voices[i].phase_offset =
+                Phase::new(f64::from(Xorshift32::to_unit(self.rng.next_u32())));
         }
         self.all_params()
     }

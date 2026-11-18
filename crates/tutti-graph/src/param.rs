@@ -300,9 +300,11 @@ impl ParamRange {
     #[must_use]
     pub fn arc(centre: Azimuth, half_span: ArcDegrees) -> Self {
         let half = half_span.get().abs();
+        // The bounds are the port's erased `f32` pair: the unit's `f64`
+        // narrows once, here.
         Self {
-            min: centre.get() - half,
-            max: centre.get() + half,
+            min: (centre.get() - half) as f32,
+            max: (centre.get() + half) as f32,
         }
     }
 
@@ -327,8 +329,8 @@ impl ParamRange {
             return RangeView::Circle;
         }
         RangeView::Arc {
-            centre: ((f64::from(lo) + f64::from(hi)) * 0.5) as f32,
-            half: half as f32,
+            centre: Azimuth((f64::from(lo) + f64::from(hi)) * 0.5),
+            half: ArcDegrees(half),
         }
     }
 
@@ -357,10 +359,10 @@ pub enum RangeView {
     Circle,
     /// An arc of the circle: values are wrapped, then held to the arc.
     Arc {
-        /// The arc's middle, in degrees (not wrapped).
-        centre: f32,
-        /// Its half-span, in `0..180` (0 included: a single bearing).
-        half: f32,
+        /// The arc's middle (not wrapped).
+        centre: Azimuth,
+        /// Its half-span, in `0..180` degrees (0 included: a single bearing).
+        half: ArcDegrees,
     },
 }
 
@@ -373,7 +375,7 @@ impl RangeView {
         match self {
             Self::Line { lo, hi } => f64::from(hi) - f64::from(lo),
             Self::Circle => 360.0,
-            Self::Arc { half, .. } => f64::from(half) * 2.0,
+            Self::Arc { half, .. } => (half * 2.0).get(),
         }
     }
 
@@ -385,10 +387,12 @@ impl RangeView {
     pub fn constrain(self, value: f32) -> f32 {
         match self {
             Self::Line { lo, hi } => value.clamp(lo, hi),
-            Self::Circle => Azimuth(value).wrap().get(),
+            Self::Circle => UnitParam::Azimuth.wrap(value),
             Self::Arc { centre, half } => {
-                let d = Azimuth(value - centre).wrap().get();
-                Azimuth(centre + d.clamp(-half, half)).wrap().get()
+                // A lane value is an `f32`; the arc is in the unit's `f64` and
+                // the result narrows once.
+                let d = centre.shortest_arc_to(Azimuth(f64::from(value)));
+                centre.rotate_by(d.clamp(-half, half)).get() as f32
             }
         }
     }
@@ -400,7 +404,10 @@ impl RangeView {
         match self {
             Self::Line { lo, hi } => (lo..=hi).contains(&value),
             Self::Circle => value.is_finite(),
-            Self::Arc { centre, half } => Azimuth(value - centre).wrap().get().abs() <= half,
+            Self::Arc { centre, half } => {
+                let d = centre.shortest_arc_to(Azimuth(f64::from(value)));
+                d >= -half && d <= half
+            }
         }
     }
 }

@@ -1,19 +1,18 @@
 use super::*;
 
-fn aim(azimuth: f32, elevation: f32) -> Direction {
+fn aim(azimuth: f64, elevation: f64) -> Direction {
     Direction::new(Azimuth(azimuth), Elevation(elevation))
 }
 
 /// A smoother that moves the whole way in one step, so the *path* is
 /// visible without waiting out an exponential ramp.
-fn with_coeff(coeff: f32) -> AngleSmoother {
+fn with_coeff(coeff: f64) -> AngleSmoother {
     let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples(1));
-    s.azimuth.set_coeff(coeff);
-    s.elevation.set_coeff(coeff);
+    s.coeff = coeff;
     s
 }
 
-fn seeded(azimuth: f32, coeff: f32) -> AngleSmoother {
+fn seeded(azimuth: f64, coeff: f64) -> AngleSmoother {
     let mut s = with_coeff(coeff);
     s.reset_to_target(aim(azimuth, 0.0));
     s

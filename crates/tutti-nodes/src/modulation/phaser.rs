@@ -649,7 +649,7 @@ mod tests {
         for _ in 0..steps {
             p = p.advance(inc);
         }
-        let lfo = (std::f64::consts::TAU * (f64::from(p.get()) + offset)).sin() as f32;
+        let lfo = (std::f64::consts::TAU * (p.get() + offset)).sin() as f32;
         let hz = sweep_hz(range.min(), range.max(), lfo, Depth::clamped(depth));
         allpass_coeff(hz, RATE)
     }

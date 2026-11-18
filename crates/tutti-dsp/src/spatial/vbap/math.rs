@@ -6,6 +6,8 @@
 //! every platform: nothing here is fused or reassociated, and the only
 //! transcendental is `libm`'s.
 
+use tutti_units::{Direction, Radians};
+
 /// A direction or a column of a matrix.
 pub(super) type Vec3 = [f64; 3];
 
@@ -15,25 +17,19 @@ pub(super) type Mat3 = [Vec3; 3];
 /// A 2x2 matrix as its columns.
 pub(super) type Mat2 = [[f64; 2]; 2];
 
-pub(super) const DEG: f64 = core::f64::consts::PI / 180.0;
-
 /// A determinant smaller than this has no inverse: the columns are, to that
 /// figure, dependent.
 const DETERMINANT_FLOOR: f64 = 1e-10;
 
-/// A bearing in degrees wrapped into `-180..180` (`Azimuth::wrap` is `f32`).
-pub(super) fn wrapped_deg(deg: f64) -> f64 {
-    deg - 360.0 * ((deg + 180.0) / 360.0).floor()
-}
-
-/// The unit vector of a bearing and height in degrees: 0 degrees bearing is
-/// `+y` (front), 90 is `+x` (left), height is `+z`.
-///
-/// The types stop here: this is the trigonometry, in `f64` degrees.
-pub(super) fn direction(azimuth_deg: f64, elevation_deg: f64) -> Vec3 {
-    let (azi_sin, azi_cos) = libm::sincos(azimuth_deg * DEG);
-    let (ele_sin, ele_cos) = libm::sincos(elevation_deg * DEG);
-    [ele_cos * azi_sin, ele_cos * azi_cos, ele_sin]
+/// The unit vector of a direction: 0 degrees bearing is `+y` (front), 90 is
+/// `+x` (left), height is `+z`.
+pub(super) fn direction(aim: Direction) -> Vec3 {
+    let (azimuth, elevation) = (Radians::from(aim.azimuth), Radians::from(aim.elevation));
+    [
+        elevation.cos() * azimuth.sin(),
+        elevation.cos() * azimuth.cos(),
+        elevation.sin(),
+    ]
 }
 
 pub(super) fn dot(a: Vec3, b: Vec3) -> f64 {
