@@ -435,7 +435,7 @@ fn restore_round_trip(hosting: Hosting) {
             .params()
             .get(CUTOFF)
             .unwrap()
-            .set(tutti_plugin_types::Normalized::of(v))
+            .set(tutti_units::Normalized::of(v))
             .unwrap();
     };
 

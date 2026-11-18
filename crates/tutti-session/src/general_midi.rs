@@ -41,7 +41,7 @@ use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session};
 #[derive(Debug)]
 pub struct GeneralMidi {
     instrument: InstrumentHandle<SoundFontUnit>,
-    chorus: Key<ModDelayNode>,
+    chorus: Key<ModDelayNode<f32>>,
     reverb: Key<FreeverbNode>,
     strip: Key<BusStripNode>,
     strip_params: ParamSet,
@@ -59,9 +59,9 @@ impl GeneralMidi {
         &mut self.instrument
     }
 
-    /// The chorus: the unit's chorus send in, the wet chorus out.
+    /// The chorus, an `f32` node: the unit's chorus send in, the wet chorus out.
     #[must_use]
-    pub fn chorus(&self) -> Key<ModDelayNode> {
+    pub fn chorus(&self) -> Key<ModDelayNode<f32>> {
         self.chorus
     }
 
@@ -132,7 +132,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         } = self.add_instrument_unwired(unit)?;
         let unit = instrument.node().erase();
         let graph = self.graph();
-        let (chorus, _) = graph.add(ModDelayNode::general_midi_chorus(BusTopology::STEREO));
+        let (chorus, _) = graph.add(ModDelayNode::<f32>::general_midi_chorus(
+            BusTopology::STEREO,
+        ));
         let (reverb, _) = graph.add(FreeverbNode::general_midi());
         let (strip, strip_params) = graph.add(BusStripNode::stereo());
         // The unit's outputs: dry L/R, chorus send L/R, reverb send.

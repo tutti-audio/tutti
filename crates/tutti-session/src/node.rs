@@ -224,9 +224,12 @@ impl SessionNode for tutti_nodes::MultibandCompressorNode {
 // The delay, modulation, LFO and oscillator nodes, and the three reverbs (wet only: their
 // blend is the graph's mix), and the convolution reverb (its wet gain, `Volume`).
 param_session_node!(
-    tutti_nodes::DelayNode,
-    tutti_nodes::ModDelayNode,
-    tutti_nodes::PhaserNode,
+    tutti_nodes::DelayNode<f32>,
+    tutti_nodes::DelayNode<f64>,
+    tutti_nodes::ModDelayNode<f32>,
+    tutti_nodes::ModDelayNode<f64>,
+    tutti_nodes::PhaserNode<f32>,
+    tutti_nodes::PhaserNode<f64>,
     tutti_nodes::LfoNode,
     tutti_nodes::OscillatorNode,
     tutti_nodes::FreeverbNode,

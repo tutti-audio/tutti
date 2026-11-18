@@ -13,7 +13,8 @@
 
 use tutti_rt::{Overflow, PushError, RequestBit, RequestWord, RingReader, RingWriter, ring};
 
-use crate::{Normalized, ParamEdit, Request, RescanScope};
+use crate::{ParamEdit, Request, RescanScope};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 const RESTART: RequestBit = RequestBit::of(0);

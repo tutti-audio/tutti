@@ -34,7 +34,7 @@
 //! ```compile_fail
 //! # use tutti_session::Session;
 //! # use tutti_graph::NodeKey;
-//! # use tutti_plugin_types::{Normalized};
+//! # use tutti_units::Normalized;
 //! # use tutti_units::ParamId;
 //! # fn rescan(session: &mut Session, node: NodeKey) {
 //! let level = session.plugin_view(node).unwrap().params().get(ParamId::new(0)).unwrap();
@@ -73,9 +73,10 @@ use tutti_graph::NodeKey;
 
 use tutti_plugin_host::{Notice, ParamReporter, PluginHandle};
 use tutti_plugin_types::{
-    AutomationMode, AutomationModeError, Normalized, ParamEdit, ParamUnit, ParameterInfo, PlainUnit,
+    AutomationMode, AutomationModeError, ParamEdit, ParamUnit, ParameterInfo, PlainUnit,
 };
 use tutti_rt::LockExt;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use crate::plugin::{Gate, HostedPlugin, Notices, queue};

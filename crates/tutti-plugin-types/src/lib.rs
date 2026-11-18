@@ -97,7 +97,7 @@
 //! maximum rather than as bad input. Normalize before constructing:
 //!
 //! ```rust
-//! use tutti_plugin_types::Normalized;
+//! use tutti_units::Normalized;
 //!
 //! // A plain 20 kHz cutoff, handed to the normalized seam.
 //! assert_eq!(Normalized::clamped(20_000.0).get(), 1.0);
@@ -338,8 +338,7 @@ pub use param_edit::ParamEdit;
 pub use param_mapping::{LinearRange, ParamMapping};
 pub use param_unit::{ParamUnit, PlainUnit};
 pub use parameters::{
-    InvalidNormalized, Normalized, ParamAccess, ParamFlags, ParamRange, ParamSteps,
-    ParamWriteError, ParameterInfo,
+    ParamAccess, ParamFlags, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
 };
 pub use pipeline::{BlockCounts, ChunkCounters, MAX_CHUNK};
 pub use presets::{Preset, PresetId, PresetSupport};

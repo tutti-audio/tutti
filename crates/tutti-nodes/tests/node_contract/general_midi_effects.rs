@@ -1,5 +1,5 @@
 //! The two effect nodes behind a SoundFont unit's sends: the General MIDI
-//! chorus (`ModDelayNode::general_midi_chorus`) and `FreeverbNode`. Every
+//! chorus (`ModDelayNode::<f32>::general_midi_chorus`) and `FreeverbNode`. Every
 //! figure is from the definition of the effect (a wet-only line is a delayed
 //! copy, a reverb's tail covers its ring-out), not from another render.
 
@@ -37,8 +37,8 @@ fn impulse_response<N: Node>(node: N, frames: usize) -> Vec<Vec<f32>> {
     out
 }
 
-fn chorus() -> ModDelayNode {
-    ModDelayNode::general_midi_chorus(BusTopology::STEREO)
+fn chorus() -> ModDelayNode<f32> {
+    ModDelayNode::<f32>::general_midi_chorus(BusTopology::STEREO)
 }
 
 fn last_nonzero(channel: &[f32]) -> Option<usize> {
@@ -122,8 +122,8 @@ fn the_general_midi_chorus_declares_its_delay_as_its_tail() {
 #[test]
 fn a_recirculating_chorus_keeps_an_unknown_tail() {
     for node in [
-        ModDelayNode::chorus(BusTopology::STEREO),
-        ModDelayNode::flanger(BusTopology::STEREO),
+        ModDelayNode::<f32>::chorus(BusTopology::STEREO),
+        ModDelayNode::<f32>::flanger(BusTopology::STEREO),
     ] {
         assert_eq!(prepared(node, SR, BLOCK).shape().tail, Tail::Unknown);
     }

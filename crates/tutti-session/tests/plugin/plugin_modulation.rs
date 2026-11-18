@@ -23,12 +23,12 @@ use tutti_graph::NodeKey;
 use tutti_modulation::Lfo;
 use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
-use tutti_plugin_types::Normalized;
 use tutti_session::{
     Crossfade, DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec,
     Session, SessionEvent,
 };
 use tutti_types::ChannelLayout;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Depth, Hz, SampleRate, Seconds};
 

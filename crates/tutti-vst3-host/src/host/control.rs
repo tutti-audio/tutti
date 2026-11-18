@@ -6,11 +6,12 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, Normalized, OwnBypass, ParamAccess, ParamEdit,
-    ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError,
-    PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples,
-    StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
+    KeyUse, LoadedPlugin, ModifierConvention, OwnBypass, ParamAccess, ParamEdit, ParamMapping,
+    ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginResult,
+    PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples, StateUse,
+    Vst3SubCategories, WindowHandle, bypass_parameter,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use crate::error::Vst3Error;

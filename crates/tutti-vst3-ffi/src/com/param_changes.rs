@@ -27,8 +27,9 @@ use vst3::{Class, ComWrapper};
 
 use super::param_queue::ParamValueQueueImpl;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_plugin_types::{Normalized, PointPool};
+use tutti_plugin_types::PointPool;
 use tutti_plugin_types::{ParameterChanges, ParameterPoint};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use tutti_rt::{AudioThreadCell, BorrowGuard};
