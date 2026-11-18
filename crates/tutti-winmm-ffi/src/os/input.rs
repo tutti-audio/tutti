@@ -360,7 +360,7 @@ impl Drop for MidiIn {
 impl MidiIn {
     /// Resets and closes the port, once no callback is inside.
     fn teardown(&self, closed: &Slot<Shared>) -> bool {
-        // `Closed::teardown` never runs this after a driver `MIM_CLOSE`: the
+        // `Closed::teardown` skips this closure after a driver `MIM_CLOSE`: the
         // handle is then invalid (Microsoft's `MIM_CLOSE` page) and the state is
         // leaked.
         // SAFETY: `handle` is the open input. A reset stops recording and

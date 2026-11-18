@@ -166,6 +166,20 @@ fn a_number_never_lands_on_a_name_another_port_has() {
 }
 
 #[test]
+fn two_groups_never_take_the_same_driver_name() {
+    let all = [("G1", "P"), ("G1", "Q"), ("G2", "P"), ("G2", "R")];
+    for turn in 0..all.len() {
+        let mut rotated = all;
+        rotated.rotate_left(turn);
+        let got = names(&rotated);
+        let mut sorted = got.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), all.len(), "{got:?}");
+    }
+}
+
+#[test]
 fn a_blank_driver_name_is_absent_and_the_shown_name_is_numbered() {
     assert_eq!(
         names(&[("Pad", ""), ("Pad", "  "), ("Pad", "\t")]),

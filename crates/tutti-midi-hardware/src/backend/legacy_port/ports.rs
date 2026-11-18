@@ -128,7 +128,7 @@ impl<'a> Listed<'a> {
 /// 1. A shown name that only one port has is that port's, whatever the order:
 ///    it is reserved before any other port is named.
 /// 2. A port whose shown name is shared takes its driver name (trimmed) when it
-///    is not blank, no other port of its group has the same one, and it is not
+///    is not blank, no other port (of any group) has the same one, and it is not
 ///    another port's shown name.
 /// 3. The remaining ports of a group take the shown name, then " 2", " 3", ...
 ///    (the first not yet taken), in list order.
@@ -147,16 +147,15 @@ pub(in crate::backend) fn distinct_names(listed: &[Listed<'_>]) -> Vec<String> {
         let Some(name) = l.name() else {
             continue;
         };
-        let alone_in_group = listed
+        let alone = listed
             .iter()
-            .filter(|other| other.shown == l.shown)
             .filter(|other| other.name() == Some(name))
             .count()
             == 1;
         let another_ports_shown = listed
             .iter()
             .any(|other| other.shown != l.shown && other.shown == name);
-        if alone_in_group && !another_ports_shown {
+        if alone && !another_ports_shown {
             names[at] = Some(name.to_owned());
         }
     }
