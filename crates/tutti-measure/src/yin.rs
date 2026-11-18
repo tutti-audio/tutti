@@ -19,9 +19,10 @@ use tutti_units::{Cents, Confidence, Hz, SampleRate, Samples};
 
 use crate::chroma::FrequencyBand;
 use crate::convert::to_f32;
-use crate::framing::check_nyquist;
+use crate::framing::{Framing, check_nyquist};
 use crate::notes::PitchHop;
 use crate::pitch::PitchDetector;
+use crate::sequence::median_of_sorted;
 use crate::{Error, Result};
 use tutti_dsp::FrameCount;
 use tutti_units::ranged;
@@ -286,8 +287,8 @@ pub(crate) fn yin_track_at(
     // One detector for the whole track: `detect` carries nothing between
     // calls, so reusing it is both sound and cheaper than replanning per frame.
     let mut detector = plan.detector();
-    let frames = (samples.len() - frame.get()) / hop.get() + 1;
-    Ok((0..frames)
+    let frames = Framing::new(frame, hop).frames_for(Samples(samples.len()));
+    Ok((0..frames.get())
         .map(|i| {
             let start = i * hop.get();
             estimate(&mut detector, &samples[start..start + frame.get()])
@@ -336,8 +337,9 @@ pub fn median_filter(pitches: &[PitchEstimate], window: FrameCount) -> Vec<Pitch
             }
             freqs.clear();
             freqs.extend((i - half..=i + half).map(|j| pitches[j].frequency().get()));
-            freqs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
-            let median = freqs[freqs.len() / 2];
+            freqs.sort_unstable_by(f32::total_cmp);
+            // An odd count, so the median is one of the frequencies.
+            let median = median_of_sorted(&freqs).unwrap_or_default() as f32;
 
             // Keep the neighbour whose frequency the median picked, so the
             // confidence and note travel with it.

@@ -17,6 +17,8 @@
 //! for `[Vec<f32>; CH]` — one deinterleaved audio channel per plane, a 1-D
 //! time series per channel rather than a 2-D matrix.
 
+use tutti_units::Samples;
+
 use crate::stft::error::{Result, StftError};
 
 macro_rules! grid_newtype {
@@ -68,6 +70,21 @@ grid_newtype!(
 );
 
 impl FrameCount {
+    /// How many whole frames of `window` samples, one every `hop`, fit over
+    /// `len` samples: none for a signal shorter than the window,
+    /// otherwise `(len - window) / hop + 1`. A zero window or hop fits none.
+    #[inline]
+    #[must_use]
+    pub fn fitting(len: Samples, window: Samples, hop: Samples) -> Self {
+        if hop.is_zero() || window.is_zero() {
+            return Self(0);
+        }
+        match len.checked_sub(window) {
+            Some(spare) => Self(spare.get() / hop.get() + 1),
+            None => Self(0),
+        }
+    }
+
     /// Every frame index this count covers.
     #[inline]
     pub fn indices(self) -> impl Iterator<Item = FrameIndex> {

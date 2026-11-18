@@ -255,11 +255,7 @@ impl StftGeometry {
     /// How many whole frames fit over `len` samples.
     #[inline]
     pub fn frames_for(self, len: impl Into<Samples>) -> FrameCount {
-        let len = len.into().get();
-        if len < self.window.get() {
-            return FrameCount(0);
-        }
-        FrameCount((len - self.window.get()) / self.hop.get() + 1)
+        FrameCount::fitting(len.into(), self.window, self.hop)
     }
 
     /// How many samples resynthesizing `frames` frames produces.

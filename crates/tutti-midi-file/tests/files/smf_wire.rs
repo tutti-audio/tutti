@@ -6,9 +6,10 @@ use crate::common::{metrical, note, track};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
-    SmfParseError, TextKind,
+    SmfParseError, TextKind, Tick,
 };
 use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
+use tutti_units::Seconds;
 
 const TPQ: u16 = 96;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
@@ -48,21 +49,26 @@ fn voices(bytes: &[u8]) -> Vec<Voice1> {
 
 // ---- variable-length quantities (SMF 1.0 section 1.1) ----------------------
 
-/// The spec's table of quantities and their bytes: 0 is `00`, `7F` is `7F`,
-/// `80` is `81 00`, `0FFFFFFF` is `FF FF FF 7F`.
-const QUANTITIES: [(u32, &[u8]); 8] = [
+/// The spec's table of quantities and their bytes, every row: 0 is `00`, `7F`
+/// is `7F`, `80` is `81 00`, `0FFFFFFF` is `FF FF FF 7F`.
+const QUANTITIES: [(u32, &[u8]); 12] = [
     (0x0000_0000, &[0x00]),
+    (0x0000_0040, &[0x40]),
     (0x0000_007F, &[0x7F]),
     (0x0000_0080, &[0x81, 0x00]),
+    (0x0000_2000, &[0xC0, 0x00]),
     (0x0000_3FFF, &[0xFF, 0x7F]),
     (0x0000_4000, &[0x81, 0x80, 0x00]),
+    (0x0010_0000, &[0xC0, 0x80, 0x00]),
     (0x001F_FFFF, &[0xFF, 0xFF, 0x7F]),
     (0x0020_0000, &[0x81, 0x80, 0x80, 0x00]),
+    (0x0800_0000, &[0xC0, 0x80, 0x80, 0x00]),
     (0x0FFF_FFFF, &[0xFF, 0xFF, 0xFF, 0x7F]),
 ];
 
 /// A delta of each quantity reads to its value, spelled by the spec's bytes
 /// and not by the support encoder.
+/// Spec: smf/conventions#1, smf/conventions#2, smf/conventions#3, smf/conventions#4, smf/conventions#5, smf/conventions#6, smf/track-chunks#3
 #[test]
 fn a_quantity_reads_to_its_value() {
     for (value, bytes) in QUANTITIES {
@@ -74,6 +80,7 @@ fn a_quantity_reads_to_its_value() {
 
 /// A delta of each quantity is written as the spec's bytes: the shortest
 /// spelling, no leading zero groups.
+/// Spec: smf/conventions#1, smf/conventions#2, smf/conventions#3, smf/conventions#4, smf/conventions#5, smf/conventions#6, smf/track-chunks#3
 #[test]
 fn a_quantity_writes_to_its_bytes() {
     for (value, bytes) in QUANTITIES {
@@ -97,6 +104,7 @@ fn a_quantity_writes_to_its_bytes() {
 
 /// A quantity over four bytes is not a quantity: refused, as a parse error
 /// and not a panic or a wrapped value.
+/// Spec: smf/conventions#7
 #[test]
 fn a_five_byte_quantity_is_refused() {
     let body = [0x81, 0x80, 0x80, 0x80, 0x00, 0x90, 0x3C, 0x40];
@@ -118,6 +126,7 @@ fn a_five_byte_quantity_is_refused() {
 // ---- running status (SMF 1.0 section 3) ------------------------------------
 
 /// A channel event without its status byte repeats the last one's.
+/// Spec: smf/track-chunks#4, smf/track-chunks#6
 #[test]
 fn running_status_repeats_the_last_channel_status() {
     let bytes = file(vec![
@@ -139,6 +148,7 @@ fn running_status_repeats_the_last_channel_status() {
 /// A meta event cancels running status: a data byte after one has none.
 /// (The bytes are chosen so that if the status were `FF`, they would read as
 /// a valid meta event: type `3E`, length 0.)
+/// Spec: smf/track-chunks#30, smf/track-chunks#31
 #[test]
 fn a_meta_event_cancels_running_status() {
     let bytes = file(vec![
@@ -159,6 +169,7 @@ fn a_meta_event_cancels_running_status() {
 /// A sysex event cancels running status the same way (under a surviving
 /// `F0` status the byte `00` would be a valid empty sysex). The sysex is six
 /// bytes with its `F7`, so the refused event starts at byte 32.
+/// Spec: smf/track-chunks#30, smf/track-chunks#31
 #[test]
 fn a_sysex_cancels_running_status() {
     let bytes = file(vec![
@@ -177,6 +188,7 @@ fn a_sysex_cancels_running_status() {
 }
 
 /// A first event with no status and none running is malformed.
+/// Spec: smf/track-chunks#7
 #[test]
 fn a_first_event_needs_a_status() {
     assert!(matches!(
@@ -234,6 +246,7 @@ fn a_high_data_byte_is_malformed() {
 // ---- framing ---------------------------------------------------------------
 
 /// A chunk of an unknown type between tracks is skipped (section 2).
+/// Spec: smf/chunks#2, smf/chunks#3, smf/chunks#8
 #[test]
 fn an_alien_chunk_is_skipped() {
     let mut bytes = file(vec![RawEvent::note_on(0, 0, 60, 100)]);
@@ -244,6 +257,7 @@ fn an_alien_chunk_is_skipped() {
 }
 
 /// A track chunk past the count the header declares disagrees with it.
+/// Spec: smf/header-chunk#9
 #[test]
 fn more_tracks_than_declared_is_malformed() {
     let two = build_smf(1, Division::Metrical(TPQ), &[vec![], vec![]]);
@@ -262,6 +276,7 @@ fn more_tracks_than_declared_is_malformed() {
 }
 
 /// A header chunk longer than six bytes is read for its first six.
+/// Spec: smf/formats#18, smf/header-chunk#2, smf/header-chunk#3
 #[test]
 fn a_longer_header_is_read() {
     let mut bytes = Vec::new();
@@ -282,6 +297,7 @@ fn a_longer_header_is_read() {
 /// SMF 1.0 section 3.3: a meta event may be bigger than a program expects, and
 /// the program ignores what is past what it knows. A Set Tempo, a Time Signature and a Key Signature with extra data
 /// are read as themselves, from the bytes they define.
+/// Spec: smf/time-signature#1, smf/track-chunks#27, smf/track-chunks#28
 #[test]
 fn a_meta_event_longer_than_defined_is_read_for_what_it_defines() {
     let bytes = raw_track(&[
@@ -325,6 +341,7 @@ fn a_meta_event_longer_than_defined_is_read_for_what_it_defines() {
 /// The file model is lossless: the bytes past what a program knows are written
 /// back (SMF 1.0 section 3.3: a program adds nothing of its own to a meta event,
 /// and so must not drop what is there).
+/// Spec: smf/track-chunks#29
 #[test]
 fn a_longer_meta_event_is_written_back_as_it_was() {
     let bytes = raw_track(&[
@@ -340,6 +357,7 @@ fn a_longer_meta_event_is_written_back_as_it_was() {
 /// SMF 1.0 section 3.3: an end-of-track event is the last event in the
 /// track. One with events after it is refused, not read as the track's
 /// end (which would drop what follows).
+/// Spec: smf/meta-events#11
 #[test]
 fn an_end_of_track_that_is_not_last_is_refused() {
     let bytes = raw_track(&[
@@ -369,6 +387,7 @@ fn track_body(events: Vec<(u64, FileEvent)>) -> Vec<u8> {
 
 /// Two notes of one status write the status once: `00 90 3C 64`, `00 3E 64`,
 /// then End of Track.
+/// Spec: smf/track-chunks#5, smf/track-chunks#6
 #[test]
 fn the_writer_elides_a_repeated_status() {
     assert_eq!(
@@ -378,6 +397,7 @@ fn the_writer_elides_a_repeated_status() {
 }
 
 /// After a meta event the status is stated again.
+/// Spec: smf/track-chunks#30, smf/track-chunks#31
 #[test]
 fn the_writer_restates_a_status_after_a_meta_event() {
     let meta = FileEvent::Meta(Meta::Text {
@@ -397,6 +417,7 @@ fn the_writer_restates_a_status_after_a_meta_event() {
 
 /// SMF 1.0 sections 3.1 and 3.3: a SysEx event is `F0`, a length and the bytes
 /// (the closing `F7` among them), an escape is `F7`, a length and the bytes.
+/// Spec: smf/track-chunks#8, smf/track-chunks#10, smf/track-chunks#13, smf/track-chunks#14
 #[test]
 fn a_sysex_and_an_escape_are_written_as_their_spec_bytes() {
     assert_eq!(
@@ -417,6 +438,7 @@ fn a_sysex_and_an_escape_are_written_as_their_spec_bytes() {
 
 /// SMF 1.0 section 1.1: a length of 128 or more is a variable-length quantity
 /// of two bytes or more (200 is `81 48`, 300 is `82 2C`).
+/// Spec: smf/track-chunks#9, smf/track-chunks#24, smf/track-chunks#25
 #[test]
 fn a_length_of_128_or_more_is_a_multi_byte_quantity() {
     let text = vec![b'a'; 200];
@@ -483,6 +505,7 @@ fn a_written_file_reads_back_equal() {
 /// writes back byte for byte, reads back the same, and `to_clip` drops it.
 /// A meta type byte of 0x80 or more is no type (section 3.3: below 128): the
 /// reader keeps it the same way.
+/// Spec: smf/track-chunks#25
 #[test]
 fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
     let cases: [(u8, &[u8]); 7] = [
@@ -541,6 +564,7 @@ fn a_second_header_chunk_is_refused_where_it_starts() {
 }
 
 /// A header chunk of four bytes has no division.
+/// Spec: smf/header-chunk#2, smf/header-chunk#3
 #[test]
 fn a_header_shorter_than_six_bytes_is_refused() {
     let mut bytes = Vec::new();
@@ -558,6 +582,7 @@ fn a_header_shorter_than_six_bytes_is_refused() {
 }
 
 /// A format 0 file is one track (SMF 1.0 section 2.1).
+/// Spec: smf/formats#1, smf/header-chunk#6, smf/header-chunk#10
 #[test]
 fn a_format_0_header_with_two_tracks_is_refused_at_the_header() {
     let two = build_smf(0, Division::Metrical(TPQ), &[vec![], vec![]]);
@@ -573,6 +598,7 @@ fn a_format_0_header_with_two_tracks_is_refused_at_the_header() {
 
 /// The text kinds are the meta types 01 to 09 (SMF 1.0 section 3.3): a read of
 /// each gives the kind, and a write the same bytes.
+/// Spec: smf/copyright-notice#1, smf/text-event#2, smf/text-event#6, smf/track-chunks#24, smf/track-chunks#25
 #[test]
 fn every_text_meta_type_reads_and_writes_back() {
     for (meta_type, kind) in [
@@ -599,6 +625,7 @@ fn every_text_meta_type_reads_and_writes_back() {
 
 /// The header's format word is 0, 1 or 2 (SMF 1.0 section 2.1): a read of each
 /// writes the word back.
+/// Spec: smf/header-chunk#5
 #[test]
 fn every_format_word_reads_and_writes_back() {
     for word in 0u16..=2 {
@@ -616,6 +643,7 @@ fn every_format_word_reads_and_writes_back() {
 /// SMF 1.0 section 2.3: a track chunk's length is the bytes of its body. For
 /// tracks with running status, a sysex and a long meta event, each length
 /// field equals the body that follows.
+/// Spec: smf/chunks#1, smf/chunks#5, smf/chunks#6, smf/end-of-track#1
 #[test]
 fn each_track_chunk_length_is_the_length_of_its_body() {
     let busy = track(vec![
@@ -644,4 +672,266 @@ fn each_track_chunk_length_is_the_length_of_its_body() {
         chunks += 1;
     }
     assert_eq!((chunks, at), (2, bytes.len()));
+}
+
+// ---- the specification's own examples (SMF 1.0 sections 1.1, 3.1, 3.3, 4) ---
+
+/// The spec's format 0 example file: 96 ticks per quarter, 4/4 and 500000
+/// microseconds per quarter, three Program Changes and four notes, with
+/// running status and a two-byte delta.
+const EXAMPLE_FORMAT_0: [u8; 14 + 8 + 59] = [
+    0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0, 0x60, //
+    0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 0x3B, //
+    0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08, //
+    0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, //
+    0x00, 0xC0, 0x05, //
+    0x00, 0xC1, 0x2E, //
+    0x00, 0xC2, 0x46, //
+    0x00, 0x92, 0x30, 0x60, //
+    0x00, 0x3C, 0x60, //
+    0x60, 0x91, 0x43, 0x40, //
+    0x60, 0x90, 0x4C, 0x20, //
+    0x81, 0x40, 0x82, 0x30, 0x40, //
+    0x00, 0x3C, 0x40, //
+    0x00, 0x81, 0x43, 0x40, //
+    0x00, 0x80, 0x4C, 0x40, //
+    0x00, 0xFF, 0x2F, 0x00,
+];
+
+/// The spec's format 1 example: the same music as four tracks, a tempo and
+/// time signature track and three of notes.
+const EXAMPLE_FORMAT_1: [u8; 14 + 28 + 24 + 23 + 29] = [
+    0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 4, 0, 0x60, //
+    0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 0x14, //
+    0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08, //
+    0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, //
+    0x83, 0x00, 0xFF, 0x2F, 0x00, //
+    0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 0x10, //
+    0x00, 0xC0, 0x05, //
+    0x81, 0x40, 0x90, 0x4C, 0x20, //
+    0x81, 0x40, 0x4C, 0x00, //
+    0x00, 0xFF, 0x2F, 0x00, //
+    0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 0x0F, //
+    0x00, 0xC1, 0x2E, //
+    0x60, 0x91, 0x43, 0x40, //
+    0x82, 0x20, 0x43, 0x00, //
+    0x00, 0xFF, 0x2F, 0x00, //
+    0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, 0x15, //
+    0x00, 0xC2, 0x46, //
+    0x00, 0x92, 0x30, 0x60, //
+    0x00, 0x3C, 0x60, //
+    0x83, 0x00, 0x30, 0x00, //
+    0x00, 0x3C, 0x00, //
+    0x00, 0xFF, 0x2F, 0x00,
+];
+
+fn tempo_500000() -> FileEvent {
+    FileEvent::Meta(Meta::Tempo {
+        micros_per_quarter: MicrosPerQuarter::of(500_000),
+        extra: Box::default(),
+    })
+}
+
+fn four_four() -> FileEvent {
+    FileEvent::Meta(Meta::TimeSignature {
+        numerator: 4,
+        denominator_power: 2,
+        clocks_per_click: 24,
+        thirty_seconds_per_quarter: 8,
+        extra: Box::default(),
+    })
+}
+
+/// The spec's format 0 example reads as its header, time signature and tempo,
+/// the delta-times its bytes give (`81 40` is 192 ticks), and writes back as
+/// the same bytes: the running status the example uses is the writer's too.
+/// Spec: smf/examples#1, smf/examples#2
+#[test]
+fn the_spec_format_0_example_reads_as_its_figures_and_writes_back_byte_for_byte() {
+    let file = MidiFile::from_bytes(&EXAMPLE_FORMAT_0).unwrap();
+    assert_eq!(file.format(), Some(SmfFormat::SingleTrack));
+    assert_eq!(file.division(), Some(SMF_DIVISION));
+    assert_eq!(file.tracks().len(), 1);
+    let events = file.tracks()[0].events();
+    assert_eq!(events[0], (Tick(0), four_four()));
+    assert_eq!(events[1], (Tick(0), tempo_500000()));
+    let at: Vec<u64> = events.iter().map(|(t, _)| t.0).collect();
+    assert_eq!(at, [0, 0, 0, 0, 0, 0, 0, 96, 192, 384, 384, 384, 384]);
+    assert_eq!(file.to_bytes(), EXAMPLE_FORMAT_0);
+}
+
+/// The spec's format 1 example reads as four tracks, the first holding the
+/// time signature and tempo and ending at tick 384 (`83 00`), and writes back
+/// as the same bytes.
+/// Spec: smf/examples#3, smf/examples#4
+#[test]
+fn the_spec_format_1_example_reads_as_four_tracks_and_writes_back_byte_for_byte() {
+    let file = MidiFile::from_bytes(&EXAMPLE_FORMAT_1).unwrap();
+    assert_eq!(file.format(), Some(SmfFormat::Parallel));
+    assert_eq!(file.tracks().len(), 4);
+    let tempo_track = &file.tracks()[0];
+    assert_eq!(tempo_track.events()[0], (Tick(0), four_four()));
+    assert_eq!(tempo_track.events()[1], (Tick(0), tempo_500000()));
+    assert_eq!(tempo_track.end(), Tick(384));
+    assert_eq!(file.to_bytes(), EXAMPLE_FORMAT_1);
+}
+
+/// The spec's SysEx examples: the transmitted message `F0 43 12 00 07 F7` is
+/// stored as `F0 05 43 12 00 07 F7`, and `F0 43 12 00`, 200 ticks (`81 48`),
+/// `43 12 00 43 12 00`, 100 ticks (`64`), `43 12 00 F7` are an `F0` event and
+/// two `F7` events.
+/// Spec: smf/track-chunks#8, smf/track-chunks#10, smf/track-chunks#11, smf/track-chunks#13, smf/track-chunks#14, smf/track-chunks#15, smf/track-chunks#16, smf/track-chunks#17, smf/track-chunks#22, smf/track-chunks#23
+#[test]
+fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
+    let whole = raw_track(&[
+        0x00, 0xF0, 0x05, 0x43, 0x12, 0x00, 0x07, 0xF7, //
+        0x00, 0xFF, 0x2F, 0x00,
+    ]);
+    let read = MidiFile::from_bytes(&whole).unwrap();
+    assert_eq!(
+        read.tracks()[0].events(),
+        [(
+            Tick(0),
+            FileEvent::SysEx(Box::new([0x43, 0x12, 0x00, 0x07, 0xF7]))
+        )]
+    );
+    assert_eq!(read.to_bytes(), whole);
+
+    let packets = raw_track(&[
+        0x00, 0xF0, 0x03, 0x43, 0x12, 0x00, //
+        0x81, 0x48, 0xF7, 0x06, 0x43, 0x12, 0x00, 0x43, 0x12, 0x00, //
+        0x64, 0xF7, 0x04, 0x43, 0x12, 0x00, 0xF7, //
+        0x00, 0xFF, 0x2F, 0x00,
+    ]);
+    let read = MidiFile::from_bytes(&packets).unwrap();
+    assert_eq!(
+        read.tracks()[0].events(),
+        [
+            (Tick(0), FileEvent::SysEx(Box::new([0x43, 0x12, 0x00]))),
+            (
+                Tick(200),
+                FileEvent::Escape(Box::new([0x43, 0x12, 0x00, 0x43, 0x12, 0x00]))
+            ),
+            (
+                Tick(300),
+                FileEvent::Escape(Box::new([0x43, 0x12, 0x00, 0xF7]))
+            ),
+        ]
+    );
+    assert_eq!(read.to_bytes(), packets);
+}
+
+/// The spec's Time Signature example: 6/8 with a click every three eighth
+/// notes and eight 32nd notes to the MIDI quarter is `FF 58 04 06 03 24 08`
+/// (the denominator is a power of two: 3 is an eighth, the click 36 clocks).
+/// Spec: smf/time-signature#1, smf/time-signature#2, smf/time-signature#3, smf/time-signature#4
+#[test]
+fn the_spec_time_signature_example_is_six_eight_with_36_clocks_a_click() {
+    let bytes = raw_track(&[
+        0x00, 0xFF, 0x58, 0x04, 0x06, 0x03, 0x24, 0x08, //
+        0x00, 0xFF, 0x2F, 0x00,
+    ]);
+    let read = MidiFile::from_bytes(&bytes).unwrap();
+    assert_eq!(
+        read.tracks()[0].events()[0].1,
+        FileEvent::Meta(Meta::TimeSignature {
+            numerator: 6,
+            denominator_power: 3,
+            clocks_per_click: 0x24,
+            thirty_seconds_per_quarter: 8,
+            extra: Box::default(),
+        })
+    );
+    assert_eq!(read.to_bytes(), bytes);
+}
+
+/// The spec's Key Signature: `sf` is -7 flats to 7 sharps (negative in two's
+/// complement) and `mi` is 0 for major, 1 for minor; `FF 59 02 sf mi` reads
+/// as that key and writes back.
+/// Spec: smf/key-signature#1
+#[test]
+fn a_key_signature_is_seven_flats_to_seven_sharps_and_a_mode() {
+    for sharps in -7i8..=7 {
+        for minor in [false, true] {
+            let bytes = raw_track(&[
+                0x00,
+                0xFF,
+                0x59,
+                0x02,
+                sharps.to_be_bytes()[0],
+                u8::from(minor),
+                0x00,
+                0xFF,
+                0x2F,
+                0x00,
+            ]);
+            let read = MidiFile::from_bytes(&bytes).unwrap();
+            assert_eq!(
+                read.tracks()[0].events()[0].1,
+                FileEvent::Meta(Meta::KeySignature {
+                    sharps,
+                    minor,
+                    extra: Box::default(),
+                }),
+                "{sharps} {minor}"
+            );
+            assert_eq!(read.to_bytes(), bytes, "{sharps} {minor}");
+        }
+    }
+}
+
+/// The spec's delta-time example: at 96 ticks to the quarter and 500000
+/// microseconds to the quarter, 6144 ticks are 32000 milliseconds.
+/// Spec: smf/delta-times#2, smf/delta-times#3
+#[test]
+fn the_spec_delta_time_example_6144_ticks_at_96_and_500000_is_32_seconds() {
+    let bytes = build_smf(
+        0,
+        Division::Metrical(TPQ),
+        &[vec![
+            RawEvent::tempo(0, 500_000),
+            RawEvent::note_on(6144, 0, 60, 100),
+        ]],
+    );
+    let file = MidiFile::from_bytes(&bytes).unwrap();
+    assert_eq!(metrical(&file).seconds_at(Tick(6144)), Seconds(32.0));
+}
+
+/// Meta events at one tick may come in any order: a Set Tempo then a text and
+/// a text then a Set Tempo both read, in the order the file has them.
+/// Spec: smf/meta-events#8
+#[test]
+fn meta_events_at_one_tick_read_in_the_order_the_file_has_them() {
+    let tempo = RawEvent::tempo(0, 500_000);
+    let text = RawEvent::new(0, vec![0xFF, 0x01, 1, b'x']);
+    let first = MidiFile::from_bytes(&file(vec![tempo, text])).unwrap();
+    let kinds = |f: &MidiFile| -> Vec<bool> {
+        f.tracks()[0]
+            .events()
+            .iter()
+            .map(|(_, e)| matches!(e, FileEvent::Meta(Meta::Tempo { .. })))
+            .collect()
+    };
+    assert_eq!(kinds(&first), [true, false]);
+    let tempo = RawEvent::tempo(0, 500_000);
+    let text = RawEvent::new(0, vec![0xFF, 0x01, 1, b'x']);
+    let second = MidiFile::from_bytes(&file(vec![text, tempo])).unwrap();
+    assert_eq!(kinds(&second), [false, true]);
+}
+
+/// A text event may use character codes with the high bit set: the bytes read
+/// as they are and write back unchanged.
+/// Spec: smf/text-event#4
+#[test]
+fn text_bytes_with_the_high_bit_set_read_and_write_back_unchanged() {
+    let bytes = file(vec![RawEvent::new(0, vec![0xFF, 0x01, 2, 0xE9, b'a'])]);
+    let read = MidiFile::from_bytes(&bytes).unwrap();
+    assert_eq!(
+        read.tracks()[0].events()[0].1,
+        FileEvent::Meta(Meta::Text {
+            kind: TextKind::Text,
+            bytes: Box::new([0xE9, b'a']),
+        })
+    );
+    assert_eq!(read.to_bytes(), bytes);
 }

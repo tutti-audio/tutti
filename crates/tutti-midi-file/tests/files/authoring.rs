@@ -305,6 +305,7 @@ fn sysex7(packets: &[(Beat, Ump)]) -> Vec<(Beat, SysexStatus, Vec<u8>)> {
 /// `43 12 00 43 12 00`, then `43 12 00 F7`. Each part is a SysEx7 packet of its
 /// own at its own beat (M2-104 section 7.7: Start, Continue, End), and the
 /// message's `F0` and `F7` are not in the packets.
+/// Spec: smf/track-chunks#15, smf/track-chunks#16, smf/track-chunks#17
 #[test]
 fn a_divided_sysex_is_a_start_continues_and_an_end_each_at_its_events_beat() {
     let track = Track::new()
@@ -366,6 +367,7 @@ fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_i
 /// arbitrary bytes, which no SysEx7 packet holds, and it is reported; a divided
 /// message with a transmittable event between its parts, or never ended, is
 /// reported whole and its parts send nothing.
+/// Spec: smf/track-chunks#21
 #[test]
 fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
     let note = Message::midi1(

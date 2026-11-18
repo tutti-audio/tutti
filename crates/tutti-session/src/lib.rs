@@ -275,7 +275,7 @@ pub use transport_handle::TransportHandle;
 #[cfg(any(feature = "record", feature = "export"))]
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
-pub use tutti_dsp::{DitherSink, DitherSpec};
+pub use tutti_dsp::DitherSink;
 pub use tutti_engine::{BlockDates, HeardOpen, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{

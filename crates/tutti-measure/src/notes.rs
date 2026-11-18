@@ -73,7 +73,9 @@ use tutti_types::Note;
 use tutti_units::{Amplitude, Cents, Db, SampleRate, Samples, Seconds};
 
 use crate::convert::to_f32;
+use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
 use crate::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
+use crate::sequence::{median, median_of_sorted};
 use crate::silence::FiniteLevel;
 use crate::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
 use crate::{Error, Meter, Result};
@@ -86,14 +88,10 @@ const MAX_FRAME: usize = 1 << 18;
 
 /// The most frames one call analyses, bounding the track, level, voicing and
 /// run tables (about 60 bytes a frame between them, so about 250 MB here).
-const MAX_FRAMES: usize = 1 << 22;
-
-/// The most hops in one YIN frame. Frame levels sum a whole frame per hop, so
-/// this bounds the cost of a tiny hop.
-const MAX_OVERLAP: usize = 64;
+const MAX_FRAMES: FrameCount = FrameCount(1 << 22);
 
 /// The most frames in one smoothing span, bounding the median's cost.
-const MAX_SMOOTHING_FRAMES: usize = 1024;
+const MAX_SMOOTHING_FRAMES: FrameCount = FrameCount(1024);
 
 ranged! {
     /// A time setting of a note analysis: within `0..=60` seconds.
@@ -287,24 +285,16 @@ impl NotePlan {
         self.yin.buffer_size()
     }
 
+    /// The YIN frame and the pitch hop as a [`Framing`].
+    fn framing(&self) -> Framing {
+        Framing::new(self.frame(), self.hop)
+    }
+
     /// Whether the hop suits the YIN frame: not wider than it, and no more
-    /// than [`MAX_OVERLAP`] hops across it.
+    /// than `MAX_OVERLAP` hops across it.
     fn check_hop(&self) -> Result<()> {
-        let frame = self.frame().get();
-        if self.hop.get() > frame {
-            return Err(Error::HopWiderThanWindow {
-                hop: self.hop,
-                window: Samples(frame),
-            });
-        }
-        if frame.div_ceil(self.hop.get()) > MAX_OVERLAP {
-            return Err(Error::TooManyOverlaps {
-                window: Samples(frame),
-                hop: self.hop,
-                max: MAX_OVERLAP,
-            });
-        }
-        Ok(())
+        check_hop_within(self.frame(), self.hop)?;
+        check_overlap(self.frame(), self.hop)
     }
 
     /// The most frames of dropout bridged: the hold in hops, capped one under
@@ -312,22 +302,22 @@ impl NotePlan {
     /// from the last voiced start (at most the note's end) to the next note's
     /// first voiced start (not before its attack) are unvoiced between, so a
     /// rest `R >= W` leaves at least `ceil(W / hop) - 1`.
-    fn bridge_frames(&self) -> usize {
+    fn bridge_frames(&self) -> FrameCount {
         let hold = self.hold.get() / self.hop.get();
         let rest = (self.frame().get() / 2)
             .div_ceil(self.hop.get())
             .saturating_sub(1);
-        hold.min(rest.saturating_sub(1))
+        FrameCount(hold.min(rest.saturating_sub(1)))
     }
 
     /// Frames in the smoothing span, at least one.
-    fn smoothing_frames(&self) -> usize {
-        self.smoothing.get().div_ceil(self.hop.get()).max(1)
+    fn smoothing_frames(&self) -> FrameCount {
+        FrameCount(self.smoothing.get().div_ceil(self.hop.get()).max(1))
     }
 
     /// Where an onset's attack is, from the position it reports.
     fn attack(&self, position: Samples) -> Samples {
-        Samples(position.get() + onset_lag(self.onset.geometry()))
+        position + onset_lag(self.onset.geometry())
     }
 }
 
@@ -457,12 +447,7 @@ pub fn transcribe<S: Sample>(
     if peak < SILENCE_FLOOR.to_amplitude().get() {
         return Err(Error::NoSignal);
     }
-    if too_many_frames(samples.len(), frame.get(), cfg.hop.get()) {
-        return Err(Error::TooManyFrames {
-            frames: FrameCount((samples.len() - frame.get()) / cfg.hop.get() + 1),
-            max: FrameCount(MAX_FRAMES),
-        });
-    }
+    check_frame_count(cfg.framing().frames_for(Samples(samples.len())), MAX_FRAMES)?;
 
     let track = yin_track_at(&cfg.yin, samples, cfg.hop)?;
     let levels = levels_at(cfg, samples)?;
@@ -472,12 +457,6 @@ pub fn transcribe<S: Sample>(
         .map(|o| cfg.attack(o.position))
         .collect();
     segment(cfg, &track, &levels, &onsets)
-}
-
-/// Whether `len` samples at `frame` and `hop` make more than [`MAX_FRAMES`]
-/// frames. `len >= frame`.
-fn too_many_frames(len: usize, frame: usize, hop: usize) -> bool {
-    (len - frame) / hop >= MAX_FRAMES
 }
 
 /// The RMS of every pitch frame of `samples`: frame `i` covers
@@ -501,11 +480,8 @@ pub fn frame_levels<S: Sample>(
 fn levels_at(cfg: &NotePlan, samples: &[f32]) -> Result<Vec<Amplitude>> {
     cfg.check_hop()?;
     let frame = cfg.frame().get();
-    if samples.len() < frame {
-        return Ok(Vec::new());
-    }
-    let frames = (samples.len() - frame) / cfg.hop.get() + 1;
-    Ok((0..frames)
+    let frames = cfg.framing().frames_for(Samples(samples.len()));
+    Ok((0..frames.get())
         .map(|i| {
             let start = i * cfg.hop.get();
             let energy: f64 = samples[start..start + frame]
@@ -558,16 +534,11 @@ fn segment(
             track: track.len(),
         });
     }
-    if track.len() > MAX_FRAMES {
-        return Err(Error::TooManyFrames {
-            frames: FrameCount(track.len()),
-            max: FrameCount(MAX_FRAMES),
-        });
-    }
+    check_frame_count(FrameCount(track.len()), MAX_FRAMES)?;
     if cfg.smoothing_frames() > MAX_SMOOTHING_FRAMES {
         return Err(Error::SmoothingTooLong {
-            frames: FrameCount(cfg.smoothing_frames()),
-            max: FrameCount(MAX_SMOOTHING_FRAMES),
+            frames: cfg.smoothing_frames(),
+            max: MAX_SMOOTHING_FRAMES,
         });
     }
     let frames = voiced_frames(track, levels, cfg.floor.to_amplitude())?;
@@ -644,11 +615,11 @@ fn voiced_frames(
 
 /// The voiced frame indices of each run: frames joined across at most
 /// `bridge` unvoiced ones.
-fn runs(frames: &[Option<Voiced>], bridge: usize) -> Vec<Vec<usize>> {
+fn runs(frames: &[Option<Voiced>], bridge: FrameCount) -> Vec<Vec<usize>> {
     let mut out: Vec<Vec<usize>> = Vec::new();
     for (i, _) in frames.iter().enumerate().filter(|(_, f)| f.is_some()) {
         match out.last_mut() {
-            Some(run) if i - run[run.len() - 1] - 1 <= bridge => run.push(i),
+            Some(run) if i - run[run.len() - 1] - 1 <= bridge.get() => run.push(i),
             _ => out.push(vec![i]),
         }
     }
@@ -674,7 +645,7 @@ fn split_run(
     onsets: &[(usize, usize)],
 ) -> Vec<Piece> {
     let hop = cfg.hop.get();
-    let span = cfg.smoothing_frames();
+    let span = cfg.smoothing_frames().get();
 
     // An onset at `t` (first whole frame `k`) splits before the first voiced
     // frame at or after `k`, provided something voiced precedes it.
@@ -739,6 +710,7 @@ fn split_run(
 /// Both windows slide, held sorted, so each step is a binary search and a
 /// shift of at most `span` values rather than a sort.
 fn pitch_changes(cents: &[f32], span: usize, split: f32) -> Vec<usize> {
+    let middle = |sorted: &[f32]| median_of_sorted(sorted).unwrap_or_default() as f32;
     let n = cents.len();
     let mut changes = Vec::new();
     if n < 2 * span {
@@ -753,7 +725,7 @@ fn pitch_changes(cents: &[f32], span: usize, split: f32) -> Vec<usize> {
     let mut after = sorted(&cents[span..2 * span]);
     let mut stretch: Option<(usize, usize)> = None;
     for pos in span..=n - span {
-        if (median_of_sorted(&after) - median_of_sorted(&before)).abs() > split {
+        if (middle(&after) - middle(&before)).abs() > split {
             stretch = Some(stretch.map_or((pos, pos), |(first, _)| (first, pos)));
         } else if let Some((first, last)) = stretch.take() {
             changes.push((first + last) / 2);
@@ -779,23 +751,6 @@ fn replace_sorted(v: &mut Vec<f32>, old: f32, new: f32) {
     v.insert(at, new);
 }
 
-/// The median of sorted values; the mean of the middle two for an even count.
-fn median_of_sorted(v: &[f32]) -> f32 {
-    let mid = v.len() / 2;
-    if v.len() % 2 == 1 {
-        v[mid]
-    } else {
-        (v[mid - 1] + v[mid]) / 2.0
-    }
-}
-
-/// The median; the mean of the middle two for an even count.
-fn median(values: &[f32]) -> f32 {
-    let mut v = values.to_vec();
-    v.sort_unstable_by(f32::total_cmp);
-    median_of_sorted(&v)
-}
-
 /// The note of one piece, or `None` when its span is empty.
 fn build_note(
     cfg: &NotePlan,
@@ -819,7 +774,7 @@ fn build_note(
 
     let voiced = |f: usize| frames[f].expect("a run holds voiced frames");
     let cents: Vec<f32> = mine.iter().map(|&f| voiced(f).cents.get()).collect();
-    let pitch = Cents(median(&cents));
+    let pitch = Cents(median(&cents)? as f32);
     let (note, bend) = Note::nearest_to(Note::A4.frequency() * pitch.to_pitch_ratio())?;
 
     // The loudest frame wholly inside the note; one that straddles a neighbour
@@ -1214,7 +1169,7 @@ mod tests {
     #[test]
     fn a_fast_slide_splits_and_a_slow_one_does_not() {
         let c = cfg().min_length(NoteSpan::of(Seconds(0.0)));
-        assert_eq!(c.smoothing_frames(), 10);
+        assert_eq!(c.smoothing_frames(), FrameCount(10));
         let slide = |per_frame: f32| {
             let t: Vec<Option<f32>> = (0..60)
                 .map(|i| Some(440.0 * (per_frame * i as f32 / 1200.0).exp2()))
@@ -1261,8 +1216,8 @@ mod tests {
             let mut want = Vec::new();
             let mut stretch: Option<(usize, usize)> = None;
             for pos in span..=cents.len() - span {
-                let diff =
-                    (median(&cents[pos..pos + span]) - median(&cents[pos - span..pos])).abs();
+                let med = |w: &[f32]| median(w).unwrap() as f32;
+                let diff = (med(&cents[pos..pos + span]) - med(&cents[pos - span..pos])).abs();
                 if diff > 40.0 {
                     stretch = Some(stretch.map_or((pos, pos), |(f, _)| (f, pos)));
                 } else if let Some((f, l)) = stretch.take() {
@@ -1441,7 +1396,7 @@ mod tests {
     #[test]
     fn dropouts_are_bridged_and_rests_are_not() {
         let c = cfg();
-        let bridge = c.bridge_frames();
+        let bridge = c.bridge_frames().get();
         assert_eq!(bridge, 3);
         let with_gap = |gap: usize| {
             let mut t = vec![Some(440.0); 40];
@@ -1526,7 +1481,7 @@ mod tests {
 
         let mut octave = vec![Some(440.0); 40];
         octave[20] = Some(880.0);
-        for blip in 1..c.smoothing_frames() / 2 {
+        for blip in 1..c.smoothing_frames().get() / 2 {
             octave[20..20 + blip].fill(Some(880.0));
             let notes = notes_from_track(&c, &track(&octave), &loud(40), &[]).unwrap();
             assert_eq!(notes.len(), 1, "{blip}: {notes:?}");
@@ -1663,26 +1618,34 @@ mod tests {
         );
         assert!(c.frame().get() < 64, "{:?}", c.frame());
         let c = c.hop(PitchHop::of(Samples(1)));
-        let x = vec![0.1f32; MAX_FRAMES + c.frame().get() + 1];
+        let x = vec![0.1f32; MAX_FRAMES.get() + c.frame().get() + 1];
         assert_eq!(
             transcribe(&c, &x, &mut FftScratch::new()),
             Err(Error::TooManyFrames {
-                frames: FrameCount(MAX_FRAMES + 2),
-                max: FrameCount(MAX_FRAMES)
+                frames: FrameCount(MAX_FRAMES.get() + 2),
+                max: MAX_FRAMES
             })
         );
     }
 
-    /// Exactly `MAX_FRAMES` frames are accepted and one more is not, for any
-    /// hop, including a length that leaves a partial hop.
+    /// Exactly `MAX_FRAMES` frames are accepted and one more is not, for a length
+    /// that leaves a partial hop: `frame + (MAX_FRAMES - 1) * hop` is the last
+    /// length with `MAX_FRAMES` frames, `hop - 1` samples more still is.
     #[test]
-    fn the_frame_limit_is_exact() {
-        for (frame, hop) in [(17, 1), (1764, 220), (1764, 27)] {
-            let at_limit = frame + (MAX_FRAMES - 1) * hop;
-            assert!(!too_many_frames(at_limit, frame, hop));
-            assert!(!too_many_frames(at_limit + hop - 1, frame, hop));
-            assert!(too_many_frames(at_limit + hop, frame, hop));
-        }
+    fn the_frame_limit_is_exact_with_a_partial_hop() {
+        let c = Case::new(
+            super::NoteConfig::new().pitch(YinConfig::new().band(band(5000.0, 10000.0))),
+            SampleRate::of(RATE),
+        );
+        let hop = 2;
+        let c = c.hop(PitchHop::of(Samples(hop)));
+        let frame = c.frame().get();
+        let last_ok = frame + (MAX_FRAMES.get() - 1) * hop;
+        let check =
+            |len: usize| check_frame_count(c.framing().frames_for(Samples(len)), MAX_FRAMES);
+        assert!(check(last_ok).is_ok());
+        assert!(check(last_ok + hop - 1).is_ok());
+        assert!(check(last_ok + hop).is_err());
     }
 
     /// A note that runs to the end of the buffer ends at its last whole

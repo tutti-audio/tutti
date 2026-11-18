@@ -4,8 +4,8 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
 
-use tutti_buffers::Interleaved;
-use tutti_buffers::{Sink, SinkFailed};
+use std::marker::PhantomData;
+use tutti_buffers::{Interleaved, Sample, Sink, SinkFailed};
 use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
@@ -14,16 +14,19 @@ use crate::error::Result;
 use crate::spec::Spec;
 
 /// A file sink: the [`Sink`] a recording writes into, as a file of any
-/// [`Format`](crate::Format) this build can write.
+/// [`Format`](crate::Format) this build can write, taking blocks of any
+/// [`Sample`] format `S` (`f32` by default) and converting them to the file's
+/// width by the rule in [`Sample`]. For a file of an integer width, open it as
+/// that integer and put a `tutti_dsp::DitherSink` in front to dither.
 ///
 /// The write edge, the mirror of `FileIn` (with a `decode-*` feature): `FileIn` is the
 /// codec's [`Source`](tutti_buffers::Source) and this is its
 /// [`Sink`]. It is an [`Encoder`] behind that contract, the same writer
 /// an export bounces through, so a recorded and an exported file agree
 /// sample-for-sample and byte-for-byte for a [`Spec`]. One difference is
-/// deliberate: an export dithers before quantizing and a live capture does
-/// not, because noise shaping is a decision a capture path should not make
-/// silently.
+/// deliberate: a live capture does not dither unless it is wrapped in a
+/// `DitherSink`, because noise shaping is a decision a capture path should not
+/// make silently.
 ///
 /// It writes incrementally through a buffered file writer, so a take of any
 /// length is never held in memory. Frames are whole: a trailing part of a
@@ -67,7 +70,7 @@ use crate::spec::Spec;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let dir = tempfile::tempdir()?;
 /// let spec = Spec::of_width(Format::Wav(Pcm::Int24), ChannelLayout::STEREO, SampleRate::SR_48K);
-/// let mut out = FileOut::create(&spec, dir.path().join("tone.wav"))?;
+/// let mut out = FileOut::<f32>::create(&spec, dir.path().join("tone.wav"))?;
 /// let frames = [0.5, -0.5, 0.25, -0.25]; // two stereo frames
 /// out.write(Interleaved::new(&frames, ChannelLayout::STEREO)?).expect("the write lands");
 /// out.finalize()?;
@@ -75,16 +78,18 @@ use crate::spec::Spec;
 /// # }
 /// # }
 /// ```
-pub struct FileOut {
+pub struct FileOut<S: Sample = f32> {
     encoder: Encoder<BufWriter<File>>,
     spec: Spec,
     /// The first write failure, kept until [`finalize`](Sink::finalize)
     /// can report it. Keeping the *first* is what makes the report meaningful:
     /// later failures are usually the same cause repeated.
     first_error: Option<std::io::Error>,
+    /// The format of the blocks it is written.
+    format: PhantomData<fn(S)>,
 }
 
-impl std::fmt::Debug for FileOut {
+impl<S: Sample> std::fmt::Debug for FileOut<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FileOut")
             .field("layout", &self.spec.layout())
@@ -95,7 +100,7 @@ impl std::fmt::Debug for FileOut {
     }
 }
 
-impl FileOut {
+impl<S: Sample> FileOut<S> {
     /// Creates (or truncates) the file at `path` and writes the header of
     /// `spec`.
     ///
@@ -110,6 +115,7 @@ impl FileOut {
             encoder: Encoder::create(spec, sink)?,
             spec: spec.clone(),
             first_error: None,
+            format: PhantomData,
         })
     }
 
@@ -143,8 +149,8 @@ impl FileOut {
     }
 }
 
-impl Sink for FileOut {
-    type Sample = f32;
+impl<S: Sample> Sink for FileOut<S> {
+    type Sample = S;
     type Error = std::io::Error;
 
     fn layout(&self) -> ChannelLayout {
@@ -159,7 +165,7 @@ impl Sink for FileOut {
     /// [`SinkFailed`], and the detail of the first is reported once, from
     /// [`finalize`](Sink::finalize). Swallowing it would leave a disk-full
     /// mid-take looking like a complete recording.
-    fn write(&mut self, frames: Interleaved<'_, f32>) -> std::result::Result<(), SinkFailed> {
+    fn write(&mut self, frames: Interleaved<'_, S>) -> std::result::Result<(), SinkFailed> {
         if self.first_error.is_some() {
             return Err(SinkFailed); // already failed; the file is being abandoned
         }
