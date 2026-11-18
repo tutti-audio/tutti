@@ -34,6 +34,8 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", featur
 # The experiment's units and stimulus: counts and levels, a note, and where in a
 # block it sits.
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
+# `InputOutput`, the block view a measuring render is handed.
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # `watch_spawner` and `terminate_process`: the probe ends with its host.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }

@@ -22,7 +22,7 @@ use tutti_types::MaxBlock;
 use tutti_types::{BusTopology, ChannelLayout};
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
-    Ballistics, BeatsPerCycle, Feedback, Hz, PhaseIncrement, SampleRate, Seconds, UnitParam,
+    Ballistics, BeatsPerCycle, Feedback, Hz, PhaseIncrement, Real, SampleRate, Seconds, UnitParam,
 };
 
 /// A node through `BlockRig`: its inputs an alternating signal of
@@ -95,7 +95,7 @@ fn beat_synced_lfo_process_is_allocation_free() {
 
 /// A delay at `time` seconds and `feedback`, `cross` cross-fed, `width` wide, holding up to
 /// two seconds.
-fn delay(width: u16, time: f64, feedback: f32, cross: f32) -> DelayNode<f32> {
+fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
     DelayNode::<f32>::new(
         BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus"),
         MaxDelay::of(Seconds::new(2.0)),
@@ -647,7 +647,7 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
     };
     use tutti_nodes::automation::{Breakpoint, Exponent, Trajectory};
     use tutti_units::{Beat, BeatsPerCycle, Depth, Hz, Phase, PhaseIncrement};
-    let depth = 0.05 + 0.01 * ((k as u32 + generation) % 7) as f32;
+    let depth = 0.05 + 0.01 * f64::from((k as u32 + generation) % 7);
     let amount = Amount {
         depth: Depth::of(depth),
         polarity: Polarity::Bipolar,
@@ -1338,7 +1338,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         }
     }
     let at = |p| TargetKey::param(1, ParamAddr::Unit(p));
-    let route = |s: u64, p, depth: f32| RouteDecl {
+    let route = |s: u64, p, depth: f64| RouteDecl {
         source: SourceKey(s),
         to: RouteTarget::Param(at(p)),
         depth: Depth::of(depth),
@@ -1529,14 +1529,14 @@ const INPUT: f32 = 0.5;
 /// loop's worst-case gain is `1.25 g`, which exceeds 1: the 1.25 is a steady-state guard
 /// the sweep must stay under, not a proof of it.
 fn loop_bound() -> f32 {
-    INPUT * 1.25 / (1.0 - Feedback::MAX_STABLE.get())
+    INPUT * 1.25 / (1.0 - f32::from_unit(Feedback::MAX_STABLE))
 }
 
 /// A guard on the phaser's output, `INPUT / (1 - g)`: the peak gain of the frozen chain
 /// (its `H-infinity`, at DC). Under a swept coefficient the chain is time-varying and this
 /// is a guard the sweep must stay under, not a proof of it.
 fn phaser_bound() -> f32 {
-    INPUT / (1.0 - Feedback::MAX_STABLE.get())
+    INPUT / (1.0 - f32::from_unit(Feedback::MAX_STABLE))
 }
 
 /// A lane of 64 frames cycling through `values`.

@@ -54,7 +54,7 @@ fn seconds(rate: f64) -> Clock {
     }
 }
 
-fn route(source: u64, to: RouteTarget, depth: f32) -> RouteDecl {
+fn route(source: u64, to: RouteTarget, depth: f64) -> RouteDecl {
     RouteDecl {
         source: SourceKey(source),
         to,

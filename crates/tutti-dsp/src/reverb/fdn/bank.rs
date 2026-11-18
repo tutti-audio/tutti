@@ -506,7 +506,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         };
         let width = self.network.width.get();
         t.width = if width.is_finite() {
-            F::from_f32(width.clamp(0.0, 4.0))
+            F::from_f64(width.clamp(0.0, 4.0))
         } else {
             F::ONE
         };

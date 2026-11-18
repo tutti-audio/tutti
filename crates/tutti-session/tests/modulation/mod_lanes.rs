@@ -1018,7 +1018,7 @@ fn lfo_scene(
     s: &mut DetachedSession,
     side: &mut AudioSide,
     rate: f64,
-    depth: f32,
+    depth: f64,
 ) -> (ParamRef, ModRouteId) {
     let (filter, _) = s.graph().add(ProbeUnit::new(500.0));
     master(s, &[filter.erase()]);

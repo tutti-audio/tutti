@@ -216,8 +216,8 @@ impl<F: Float + Lerp> PhaserKernel<F> {
             rate: SampleRate::SR_48K,
             steps: 0,
             coefficients: vec![Glide::landed(F::ZERO); width].into_boxed_slice(),
-            depth: Glide::landed(F::from_f32(d.depth.get())),
-            feedback: Glide::landed(F::from_f32(d.feedback.get())),
+            depth: Glide::landed(F::from_unit(d.depth)),
+            feedback: Glide::landed(F::from_unit(d.feedback)),
             clock: SweepClock::new(offsets),
         })
     }
@@ -231,8 +231,7 @@ impl<F: Float + Lerp> PhaserKernel<F> {
         let (min, max, rate) = (self.min, self.max, self.rate);
         self.clock.solve(&mut self.coefficients, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
-            // The sweep depth is f32-quantised: `Depth` stores f32.
-            let sweep = sweep_hz(min, max, lfo, Depth::clamped(depth.to_f32()));
+            let sweep = sweep_hz(min, max, lfo, Depth::clamped(depth.into()));
             allpass_coeff(sweep, rate)
         });
     }
@@ -293,10 +292,10 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
             Hz(controls.rate.get().max(MIN_RATE.get())),
             self.rate,
         ));
-        let feedback = Feedback::new_clamped(controls.feedback.get()).get();
+        let feedback = Feedback::new_clamped(controls.feedback.get());
         let steps = Steps::Fixed(self.steps);
-        self.depth.aim_by(F::from_f32(controls.depth.get()), steps);
-        self.feedback.aim_by(F::from_f32(feedback), steps);
+        self.depth.aim_by(F::from_unit(controls.depth), steps);
+        self.feedback.aim_by(F::from_unit(feedback), steps);
         if self.clock.lands() {
             self.depth.settle();
             self.feedback.settle();
@@ -337,7 +336,7 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_types::ChannelLayout;
     use tutti_units::{
-        Latency, Phase, PhaseIncrement, PhaseStep, RunningPhase, Samples, Tail, UnitParam,
+        Latency, Phase, PhaseIncrement, PhaseStep, Real, RunningPhase, Samples, Tail, UnitParam,
     };
 
     const RATE: SampleRate = SampleRate::SR_48K;
@@ -599,7 +598,7 @@ mod tests {
     /// response is under 1e-3 well before that at these centres).
     #[test]
     fn feedback_keeps_the_chain_ringing() {
-        let ring = |fb: f32| {
+        let ring = |fb: f64| {
             let node = PhaserNode::<f32>::mono(
                 Stages::of(6),
                 PhaserControls {
@@ -625,7 +624,7 @@ mod tests {
 
     // ---- the kernel: segments, corners and the sweep ----------------------------------
 
-    fn controls(rate: f64, depth: f32, feedback: f32) -> PhaserControls {
+    fn controls(rate: f64, depth: f64, feedback: f64) -> PhaserControls {
         PhaserControls {
             rate: Hz(rate),
             depth: Depth::of(depth),
@@ -647,7 +646,7 @@ mod tests {
     fn exact_coefficient(
         range: SweepRange,
         rate: f64,
-        depth: f32,
+        depth: f64,
         offset: f64,
         steps: usize,
     ) -> f32 {
@@ -811,14 +810,14 @@ mod tests {
     fn a_feedback_is_clamped_into_the_stable_range() {
         let mut k = kernel(1, 4, SweepRange::DEFAULT, Stagger::NONE);
         k.retarget(&controls(1.0, 0.5, 5.0));
-        assert_eq!(k.feedback.target(), Feedback::MAX_STABLE.get());
+        assert_eq!(k.feedback.target(), f32::from_unit(Feedback::MAX_STABLE));
         k.retarget(&controls(1.0, 0.5, -0.5));
         assert_eq!(k.feedback.target(), 0.0);
         // The depth is as typed: the whole range, and inverted, the bottom and below.
         k.retarget(&controls(1.0, 1.0, 0.5));
-        assert_eq!(k.depth.target(), Depth::FULL.get());
+        assert_eq!(k.depth.target(), f32::from_unit(Depth::FULL));
         k.retarget(&controls(1.0, -1.0, 0.5));
-        assert_eq!(k.depth.target(), Depth::INVERTED.get());
+        assert_eq!(k.depth.target(), f32::from_unit(Depth::INVERTED));
     }
 
     /// The sweep's top is held at 0.90 of Nyquist at the rate, and the authored top is kept:

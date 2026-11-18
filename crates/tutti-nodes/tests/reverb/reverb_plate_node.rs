@@ -222,7 +222,7 @@ fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
             if moved && i * block == 1_024 {
                 assert!(set.set(UnitParam::Decay, 5.0));
                 assert!(set.set(UnitParam::Damping, 0.6));
-                assert!(set.set(UnitParam::Diffusion, f64::from(Mix(0.2).get())));
+                assert!(set.set(UnitParam::Diffusion, Mix(0.2).get()));
             }
             for (o, y) in out.iter_mut().zip(drive(
                 &mut n,

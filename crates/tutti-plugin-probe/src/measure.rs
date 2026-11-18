@@ -30,13 +30,14 @@
 
 use std::path::Path;
 use std::time::{Duration, Instant};
+use tutti_buffers::InputOutput;
 
 use tutti_graph::{MAX_NODE_TAIL, Offset, UmpAt};
 use tutti_plugin_types::{
     Controller, Deadline, InProcess, LatencyVerdict, Load, MainThreadMarker, MaxBlock,
-    MeasureFailure, Measured, NotChecked, PROBE_FLOOR, PluginAudio, PluginDescriptor, PluginError,
-    PluginIo, PluginTail, Prepare, ProbeConfig, ProcessContext, ProcessOutput, Processor,
-    StateHash, TailVerdict, Verdict,
+    MeasureFailure, Measured, NotChecked, PROBE_FLOOR, PluginDescriptor, PluginError, PluginIo,
+    PluginTail, Prepare, ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash,
+    TailVerdict, Verdict,
 };
 use tutti_ump::{
     Address, Attribute, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2,
@@ -141,7 +142,8 @@ impl<'p, P: Processor> Render<'p, P> {
         let mut outs: Vec<&mut [f32]> = self.outs.iter_mut().map(Vec::as_mut_slice).collect();
         let ctx = ProcessContext::new().midi(events);
         let mut io = PluginIo {
-            buffer: PluginAudio::new(Samples(self.block), &ins, &mut outs).expect("equal channels"),
+            buffer: InputOutput::from_slices(Samples(self.block), &ins, &mut outs)
+                .expect("equal channels"),
             ctx: &ctx,
             out: &mut self.out,
         };

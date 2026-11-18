@@ -19,8 +19,8 @@ use std::sync::Arc;
 use tutti_buffers::{Float, Planes};
 use tutti_plugin_types::{BlockStatus, MIDI_STACK_BOUND, MidiIntake};
 use tutti_plugin_types::{
-    ChordValue, ParameterChanges, PluginAudio, PluginIo, PluginResult, ProcessContext,
-    ProcessOutput, Processor, SampleRate, Samples, ScaleValue, TransportInfo, WireMidi,
+    ChordValue, ParameterChanges, PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor,
+    SampleRate, Samples, ScaleValue, TransportInfo, WireMidi,
 };
 
 use super::Link;
@@ -69,7 +69,7 @@ impl IpcProcessor {
 }
 
 impl Processor for IpcProcessor {
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         let mut piece = Piece {
             ctx: io.ctx,
             out: &mut *io.out,
@@ -80,16 +80,9 @@ impl Processor for IpcProcessor {
             over: 0,
             said: BlockStatus::Continue,
         };
-        let carries = match &mut io.buffer {
-            PluginAudio::F32(buffer) => {
-                self.batcher.process(&self.link.bridge, buffer, &mut piece);
-                carries_input(piece.ctx, buffer.split().0)
-            }
-            PluginAudio::F64(buffer) => {
-                self.batcher.process(&self.link.bridge, buffer, &mut piece);
-                carries_input(piece.ctx, buffer.split().0)
-            }
-        };
+        self.batcher
+            .process(&self.link.bridge, &mut io.buffer, &mut piece);
+        let carries = carries_input(piece.ctx, io.buffer.split().0);
         let over = piece.over;
         let said = piece.said;
         // **A sleep is applied only to a piece that gave the plugin nothing.**

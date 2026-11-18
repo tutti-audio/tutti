@@ -77,16 +77,11 @@ impl LadderControls {
     /// A cutoff, resonance or drive out of range is the coefficients' to clamp.
     fn sanitized(self) -> Self {
         let finite = |v: f64, d: f64| if v.is_finite() { v } else { d };
-        let drive = if self.drive.get().is_finite() {
-            self.drive.get()
-        } else {
-            Self::DEFAULT.drive.get()
-        };
         Self {
             ty: self.ty,
             freq: Hz(finite(self.freq.get(), Self::DEFAULT.freq.get())),
             res: Resonance(finite(self.res.get(), Self::DEFAULT.res.get())),
-            drive: Drive(drive.max(0.0)),
+            drive: Drive(finite(self.drive.get(), Self::DEFAULT.drive.get()).max(0.0)),
         }
     }
 }
@@ -126,10 +121,10 @@ impl LadderModel {
         self.controls.ty
     }
 
-    /// The drive, a gain on the input, as the `f32` it was set from.
+    /// The drive, a gain on the input.
     #[must_use]
     pub fn drive(&self) -> f64 {
-        f64::from(self.controls.drive.get())
+        self.controls.drive.get()
     }
 
     /// The coefficients the ladder is solved at.
@@ -154,7 +149,7 @@ impl LadderModel {
     fn at(&self, zi: Complex64) -> Complex64 {
         let l = self.stage(zi);
         let l2 = l * l;
-        let u = f64::from(self.controls.drive.get()) / (1.0 + self.coeffs.k * l2 * l2);
+        let u = self.controls.drive.get() / (1.0 + self.coeffs.k * l2 * l2);
         let one_minus = 1.0 - l;
         u * match self.controls.ty {
             LadderType::LP12 => l2,

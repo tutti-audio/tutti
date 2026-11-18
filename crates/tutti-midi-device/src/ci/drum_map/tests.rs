@@ -101,7 +101,7 @@ fn each_instrument_matches_its_row_of_table_5() {
         );
         assert_eq!(
             instrument.recommended_pan(),
-            Pan::new(f32::from(pan) / 100.0),
+            Pan::new(f64::from(pan) / 100.0),
             "{name}"
         );
         assert_eq!(

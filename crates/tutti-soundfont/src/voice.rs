@@ -513,8 +513,14 @@ impl Voice {
 
         // RP-036's pan, in the percent the zone's pan adds to: the channel's or the
         // note's, plus the zone's, over the 50 that is hard right.
-        let pan = self.note.pan.unwrap_or_else(|| 50_f32 * state.pan().get());
-        let (left, right) = pan_gains(Pan((pan + self.instrument_pan) / 50_f32), PanLaw::Rp036);
+        let pan = self
+            .note
+            .pan
+            .map_or_else(|| 50.0 * state.pan().get(), f64::from);
+        let (left, right) = pan_gains(
+            Pan((pan + f64::from(self.instrument_pan)) / 50.0),
+            PanLaw::Rp036,
+        );
         // The voice's mix gains are `f32`: the pan gains narrow into them.
         self.current_mix_gain_left = mix_gain * left.get() as f32;
         self.current_mix_gain_right = mix_gain * right.get() as f32;

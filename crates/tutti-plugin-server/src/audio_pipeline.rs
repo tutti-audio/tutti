@@ -18,9 +18,9 @@ use tutti_plugin_ipc::{ProcessAudioData, SlabLayout, SlabWriter};
 use tutti_plugin_types::{
     BlockStatus, ChannelTable, ChordChanges, ExpressiveContext, Features, MAX_BLOCK_CHANNELS,
     MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
-    NoteExpressionTextChanges, ParameterChanges, PluginAudio, PluginError, ProcessContext,
-    ProcessOutput, SampleFormat, Samples, ScaleChanges, TransportChange, TransportInfo, WireMidi,
-    sanitize, silence,
+    NoteExpressionTextChanges, ParameterChanges, PluginError, PluginIo, PluginResult,
+    ProcessContext, ProcessOutput, SampleFormat, Samples, ScaleChanges, TransportChange,
+    TransportInfo, WireMidi, sanitize, silence,
 };
 use tutti_rt::TallyWriter;
 use tutti_ump::Ump;
@@ -496,6 +496,7 @@ impl AudioPipeline {
                         num_samples,
                         &ctx,
                         plugin_output,
+                        |plugin, io| plugin.render_f32(io),
                     );
                     if let Err(error) = processed {
                         failed_blocks.add(1);
@@ -533,6 +534,7 @@ impl AudioPipeline {
                         num_samples,
                         &ctx,
                         plugin_output,
+                        |plugin, io| plugin.render_f64(io),
                     );
                     if let Err(error) = processed {
                         failed_blocks.add(1);
@@ -648,17 +650,15 @@ fn render_block<S: Float>(
     size: usize,
     ctx: &ProcessContext<'_>,
     out: &mut ProcessOutput,
-) -> Result<(), BlockFault>
-where
-    for<'a> PluginAudio<'a>: From<InputOutput<'a, 'a, 'a, S>>,
-{
+    render: impl FnOnce(&mut dyn Render, &mut PluginIo<'_, S>) -> PluginResult<()>,
+) -> Result<(), BlockFault> {
     // At most `MAX_BLOCK_CHANNELS`: the caller's slices are the slab's widths.
     let in_refs: ChannelTable<&[S]> = inputs.iter().map(|chan| &chan[..size]).collect();
     let mut out_refs: ChannelTable<&mut [S]> =
         outputs.iter_mut().map(|chan| &mut chan[..size]).collect();
-    let buffer = PluginAudio::new(Samples(size), &in_refs, &mut out_refs)
+    let buffer = InputOutput::from_slices(Samples(size), &in_refs, &mut out_refs)
         .map_err(|_| BlockFault("the block's channels differ in length"))?;
-    plugin.render(buffer, ctx, out).map_err(BlockFault::of)
+    render(plugin, &mut PluginIo { buffer, ctx, out }).map_err(BlockFault::of)
 }
 
 #[cfg(test)]
@@ -752,23 +752,19 @@ mod tests {
             self.meta.features
         }
 
-        fn render<'a>(
-            &mut self,
-            buffer: PluginAudio<'a>,
-            _ctx: &'a ProcessContext<'a>,
-            _out: &'a mut ProcessOutput,
-        ) -> PluginResult<()> {
-            match buffer {
-                PluginAudio::F32(mut b) => {
-                    for mut c in b.output().iter_mut() {
-                        c.samples_mut().fill(self.fill);
-                    }
-                }
-                PluginAudio::F64(mut b) => {
-                    for mut c in b.output().iter_mut() {
-                        c.samples_mut().fill(f64::from(self.fill));
-                    }
-                }
+        fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+            self.render(io)
+        }
+
+        fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+            self.render(io)
+        }
+    }
+
+    impl NanPlugin {
+        fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+            for mut c in io.buffer.output().iter_mut() {
+                c.samples_mut().fill(S::from_f32(self.fill));
             }
             Ok(())
         }
@@ -786,18 +782,21 @@ mod tests {
             self.meta.features
         }
 
-        fn render<'a>(
-            &mut self,
-            buffer: PluginAudio<'a>,
-            _ctx: &'a ProcessContext<'a>,
-            out: &'a mut ProcessOutput,
-        ) -> PluginResult<()> {
-            if let PluginAudio::F32(mut b) = buffer {
-                for mut chan in b.output().iter_mut() {
-                    chan.samples_mut().fill(self.fill);
-                }
+        fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+            self.render(io)
+        }
+
+        fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+            self.render(io)
+        }
+    }
+
+    impl SaysPlugin {
+        fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+            for mut chan in io.buffer.output().iter_mut() {
+                chan.samples_mut().fill(S::from_f32(self.fill));
             }
-            out.set_status(self.status);
+            io.out.set_status(self.status);
             Ok(())
         }
     }
@@ -860,28 +859,31 @@ mod tests {
             self.meta.features
         }
 
-        fn render<'a>(
-            &mut self,
-            buffer: PluginAudio<'a>,
-            _ctx: &'a ProcessContext<'a>,
-            _out: &'a mut ProcessOutput,
-        ) -> PluginResult<()> {
-            if let PluginAudio::F32(mut b) = buffer {
-                let mut seen = self.seen_inputs.borrow_mut();
-                seen.clear();
-                let (input, mut output) = b.split();
-                for chan in input.iter() {
-                    seen.push(chan.samples().first().copied().unwrap_or(0.0));
-                }
-                // Echo input[c] -> output[c] for the channels both directions
-                // share, so the test can read outputs back from the slab.
-                for (c, mut out) in output.iter_mut().enumerate() {
-                    let v = input
-                        .get_plane(c)
-                        .and_then(|i| i.samples().first().copied())
-                        .unwrap_or(0.0);
-                    out.samples_mut().fill(v);
-                }
+        fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+            self.render(io)
+        }
+
+        fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+            self.render(io)
+        }
+    }
+
+    impl EchoProbe {
+        fn render<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
+            let mut seen = self.seen_inputs.borrow_mut();
+            seen.clear();
+            let (input, mut output) = io.buffer.split();
+            for chan in input.iter() {
+                seen.push(chan.samples().first().map_or(0.0, |s| s.to_f32()));
+            }
+            // Echo input[c] -> output[c] for the channels both directions
+            // share, so the test can read outputs back from the slab.
+            for (c, mut out) in output.iter_mut().enumerate() {
+                let v = input
+                    .get_plane(c)
+                    .and_then(|i| i.samples().first().copied())
+                    .unwrap_or(S::ZERO);
+                out.samples_mut().fill(v);
             }
             Ok(())
         }

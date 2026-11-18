@@ -32,7 +32,7 @@
 //! the edges. The damping is designed in `f64` and narrowed to `F` once.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_units::{Gain, Mix, SampleRate, Seconds, Tail};
+use tutti_units::{Feedback, Gain, Mix, SampleRate, Seconds, Tail};
 
 use super::design::FreeverbControls;
 use crate::delay::{DelayRing, ring_seconds, trips};
@@ -136,10 +136,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             rate,
             into: 0,
         };
-        bank.set_combs(
-            F::from_f32(START.feedback().get()),
-            F::from_f64(START.damping()),
-        );
+        bank.set_combs(F::from_unit(START.feedback()), F::from_f64(START.damping()));
         for apf in bank.all_passes.iter_mut().flatten() {
             apf.feedback = F::from_f64(ALLPASS_FEEDBACK.get());
         }
@@ -151,7 +148,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     #[must_use]
     pub fn glides(&self) -> FreeverbGlides<F> {
         FreeverbGlides {
-            feedback: Glide::landed(F::from_f32(START.feedback().get())),
+            feedback: Glide::landed(F::from_unit(START.feedback())),
             damp: Glide::landed(F::from_f64(START.damping())),
             ramp: ramp(self.rate),
         }
@@ -171,10 +168,9 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// Aims `glides` at the comb loop gain and damping of `controls`, each moving in 20 ms.
     /// No allocation.
     pub fn aim(&self, glides: &mut FreeverbGlides<F>, controls: &FreeverbControls) {
-        // The loop gain is an `f32` unit; the damping is designed in `f64`.
         glides
             .feedback
-            .aim_by(F::from_f32(controls.feedback().get()), glides.ramp);
+            .aim_by(F::from_unit(controls.feedback()), glides.ramp);
         glides
             .damp
             .aim_by(F::from_f64(controls.damping()), glides.ramp);
@@ -208,16 +204,16 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// followed by the damping: damping only shortens it.
     #[must_use]
     pub fn tail_of(&self, controls: &FreeverbControls) -> Tail {
-        self.ring(controls.feedback().get())
+        self.ring(controls.feedback())
     }
 
-    fn ring(&self, loop_gain: f32) -> Tail {
+    fn ring(&self, loop_gain: Feedback) -> Tail {
         let longest = self.combs[1]
             .iter()
             .map(|c| c.buffer.len())
             .max()
             .unwrap_or(0);
-        let comb = ring_seconds(longest, trips(f64::from(loop_gain), TAIL_FLOOR), self.rate);
+        let comb = ring_seconds(longest, trips(loop_gain.get(), TAIL_FLOOR), self.rate);
         let chain = self.all_passes[1]
             .iter()
             .map(|a| a.buffer.len())

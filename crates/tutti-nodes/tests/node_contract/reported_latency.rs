@@ -131,7 +131,7 @@ fn delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
         MaxDelay::of(Seconds::new(1.0_f64)),
         DelayControls {
             time: Seconds::new(0.5_f64),
-            feedback: Feedback::new(0.0_f32),
+            feedback: Feedback::new(0.0_f64),
             ..DelayControls::DEFAULT
         },
     );
@@ -143,7 +143,7 @@ fn delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
     );
 
     let echo = 24_000; // 0.5 s at 48 kHz
-    let out = mixed_impulse_response(node, echo + 16, Mix::new(0.5_f32));
+    let out = mixed_impulse_response(node, echo + 16, Mix::new(0.5_f64));
     assert_eq!(
         onsets(&out[0]),
         vec![0, echo],
@@ -177,7 +177,7 @@ fn stereo_delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
         "a musical delay is not latency"
     );
 
-    let out = mixed_impulse_response(node, 24_016, Mix::new(0.5_f32));
+    let out = mixed_impulse_response(node, 24_016, Mix::new(0.5_f64));
     assert_eq!(
         onsets(&out[0]),
         vec![0, 12_000],
@@ -202,7 +202,7 @@ fn chorus_and_flanger_report_zero_latency_and_their_dry_path_is_immediate() {
             Latency::ZERO,
             "{name}: base delay is not latency"
         );
-        let out = mixed_impulse_response(node, 256, Mix::new(0.5_f32));
+        let out = mixed_impulse_response(node, 256, Mix::new(0.5_f64));
         for (c, ch) in out.iter().enumerate() {
             assert!(
                 (ch[0] - 0.5).abs() < 1e-6,
@@ -229,12 +229,12 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
         MaxDelay::of(Seconds::new(1.0_f64)),
         DelayControls {
             time: Seconds::new(0.5_f64),
-            feedback: Feedback::new(0.3_f32),
+            feedback: Feedback::new(0.3_f64),
             ..DelayControls::DEFAULT
         },
     );
     let (echo, _) = g.add_with_controls(echo);
-    g.spec_mut().set_mix(echo, Mix::new(0.5_f32));
+    g.spec_mut().set_mix(echo, Mix::new(0.5_f64));
     let (chorus, _) = g.add_with_controls(ModDelayNode::<f32>::chorus(BusTopology::STEREO));
     let dry = g.add(Through::mono());
     g.connect_input(0, echo, 0)
@@ -312,7 +312,7 @@ mod convolver {
     /// delayed by the declared latency) and wet land on the same frame.
     #[test]
     fn convolver_dry_and_wet_leave_together_at_the_reported_latency() {
-        for mix in [0.0_f32, 0.5, 1.0] {
+        for mix in [0.0_f64, 0.5, 1.0] {
             let node = ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples(256));
 
             let latency = node.latency_samples().0;
@@ -376,7 +376,7 @@ mod convolver {
             }),
         ];
         for (name, build) in builds {
-            for mix in [0.0_f32, 0.5, 1.0] {
+            for mix in [0.0_f64, 0.5, 1.0] {
                 let node = build();
                 let latency = node.latency_samples().0;
                 assert_eq!(
@@ -434,7 +434,7 @@ mod convolver {
             MaxDelay::of(Seconds::new(1.0_f64)),
             DelayControls {
                 time: Seconds::new(0.5_f64),
-                feedback: Feedback::new(0.0_f32),
+                feedback: Feedback::new(0.0_f64),
                 ..DelayControls::DEFAULT
             },
         ));
@@ -442,7 +442,7 @@ mod convolver {
             MaxDelay::of(Seconds::new(1.0_f64)),
             DelayControls {
                 time: Seconds::new(0.5_f64),
-                feedback: Feedback::new(0.0_f32),
+                feedback: Feedback::new(0.0_f64),
                 ..DelayControls::DEFAULT
             },
         ));

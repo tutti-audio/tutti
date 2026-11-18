@@ -265,7 +265,7 @@ fn drive_volume(
     ed: &mut tutti_graph::Editor,
     at: ParamIn,
     knob: tutti_types::ParamCell,
-    depth: f32,
+    depth: f64,
 ) {
     ed.set_param_range(at, ParamRange::new(0.0, 1.0))
         .expect("the node is placed");

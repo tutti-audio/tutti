@@ -21,7 +21,7 @@ use tutti_session::{
 use tutti_types::ChannelLayout;
 use tutti_types::MAX_CHANNELS;
 use tutti_types::Param;
-use tutti_units::{Drive, Hz, SampleRate, Samples, Seconds};
+use tutti_units::{Drive, Hz, Real, SampleRate, Samples, Seconds};
 use tutti_units::{Latency, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -65,13 +65,13 @@ struct Knob {
 }
 
 impl Knob {
-    const BUILT_WITH: f32 = 1.0;
+    const BUILT_WITH: f64 = 1.0;
 
     fn new() -> Self {
         Self::at(Self::BUILT_WITH)
     }
 
-    fn at(drive: f32) -> Self {
+    fn at(drive: f64) -> Self {
         Self {
             drive: Param::new(Drive(drive)),
             _token: None,
@@ -98,13 +98,13 @@ impl Node for Knob {
                 let v: Vec<f32> = v.to_vec();
                 io.output(0).copy_from_slice(&v);
             }
-            None => io.output(0).fill(self.drive.load().get()),
+            None => io.output(0).fill(f32::from_unit(self.drive.load())),
         }
         Status::Modified
     }
     fn reset(&mut self) {}
     fn param_base(&self, port: usize) -> Option<f64> {
-        (port == 0).then(|| f64::from(self.drive.load().get()))
+        (port == 0).then(|| self.drive.load().get())
     }
 }
 
@@ -466,7 +466,7 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     assert!(s.update().is_empty());
     let mut out = [0.0f32];
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
-    assert_eq!(out[0], Knob::BUILT_WITH, "the knob plays");
+    assert_eq!(f64::from(out[0]), Knob::BUILT_WITH, "the knob plays");
 
     // The rate changes on the running graph: the first half is sent, and
     // the executor has not run it yet.

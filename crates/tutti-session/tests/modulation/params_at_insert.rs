@@ -83,7 +83,7 @@ fn add_addresses_a_hosts_param_node() {
 #[test]
 fn add_addresses_an_engine_node() {
     let mut s = session();
-    let node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(BASE));
+    let node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(f64::from(BASE)));
     let tutti_types::ParamCell::F64(cell) = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
         .expect("a distortion has a drive")

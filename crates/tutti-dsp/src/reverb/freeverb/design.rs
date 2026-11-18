@@ -33,7 +33,7 @@ impl FreeverbControls {
     /// `f64` for the bank to narrow once.
     #[must_use]
     pub(crate) fn damping(&self) -> f64 {
-        f64::from(position(self.damp, Self::GENERAL_MIDI.damp)) * 0.4
+        position(self.damp, Self::GENERAL_MIDI.damp) * 0.4
     }
 }
 
@@ -44,7 +44,7 @@ impl Default for FreeverbControls {
 }
 
 /// `mix` clamped into `0..=1`, or `default` when it is not finite.
-fn position(mix: Mix, default: Mix) -> f32 {
+fn position(mix: Mix, default: Mix) -> f64 {
     let v = mix.get();
     if v.is_finite() {
         v.clamp(0.0, 1.0)

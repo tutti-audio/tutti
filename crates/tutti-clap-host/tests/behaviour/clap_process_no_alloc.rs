@@ -19,9 +19,9 @@ use std::sync::Mutex;
 use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
+use tutti_buffers::InputOutput;
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, TransportInfo};
 use tutti_graph::Offset;
-use tutti_plugin_types::PluginAudio;
 use tutti_units::Samples;
 
 use crate::support::active::{Activate, Active, ActiveExt};
@@ -203,8 +203,9 @@ fn drive(
     for _ in 0..iters {
         let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
         let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
-            .expect("equal channels");
+        let mut buffer =
+            InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                .expect("equal channels");
         last = inst.process(&mut buffer, ctx).map(|_| ());
     }
     last
@@ -287,8 +288,9 @@ fn process_with_midi_does_not_allocate() {
             };
             let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
             let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-            let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
-                .expect("equal channels");
+            let mut buffer =
+                InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                    .expect("equal channels");
             inst.process(&mut buffer, &ctx).expect("process");
         }
     });
@@ -488,7 +490,7 @@ fn alternating_continue_sleep_does_not_allocate() {
 /// `Processor::process` path, not the raw status the tests above read.
 #[test]
 fn the_plugins_status_becomes_the_blocks_status() {
-    use tutti_plugin_types::{BlockStatus, PluginAudio, ProcessContext, ProcessOutput};
+    use tutti_plugin_types::{BlockStatus, ProcessContext, ProcessOutput};
     let _lock = PROBE_LOCK.lock_recover();
     reset_probe();
     let mut inst = load_probe();
@@ -506,8 +508,9 @@ fn the_plugins_status_becomes_the_blocks_status() {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
         let mut out = ProcessOutput::default();
-        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
-            .expect("equal channels");
+        let mut buffer =
+            InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                .expect("equal channels");
         inst.processor()
             .render(&mut buffer, &ctx, &mut out)
             .expect("render");
@@ -610,8 +613,9 @@ fn plugin_error_status_does_not_allocate() {
         for _ in 0..128 {
             let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
             let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-            let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
-                .expect("equal channels");
+            let mut buffer =
+                InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                    .expect("equal channels");
             // The error is expected; what must not happen is an allocation
             // while producing it.
             let _ = inst.process(&mut buffer, &ctx);
@@ -656,7 +660,7 @@ fn oversized_block_rejection_does_not_allocate() {
     {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-        let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(OVERSIZE), ins, outs)
+        let mut buffer = InputOutput::from_slices(tutti_plugin_types::Samples(OVERSIZE), ins, outs)
             .expect("equal channels");
         let err = inst
             .process(&mut buffer, &ctx)
@@ -677,8 +681,9 @@ fn oversized_block_rejection_does_not_allocate() {
         for _ in 0..128 {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
             let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-            let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
-                .expect("equal channels");
+            let mut buffer =
+                InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                    .expect("equal channels");
             let _ = inst.process(&mut buffer, &ctx);
         }
     });
@@ -749,7 +754,7 @@ fn drive_and_read_output(
     };
     let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
     let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+    let mut buffer = InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
         .expect("equal channels");
     let out = inst.process(&mut buffer, &ctx).expect("process");
     let queues = out
@@ -1201,7 +1206,7 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
         let ins: Vec<&[f32]> = ins_storage.iter().map(|v| v.as_slice()).collect();
         let mut outs: Vec<&mut [f32]> = outs_storage.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut buffer =
-            PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
+            InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
                 .expect("equal channels");
         inst.process(&mut buffer, &ctx).expect("warm-up process");
     }
@@ -1211,8 +1216,9 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
     let ins: Vec<&[f32]> = ins_storage.iter().map(|v| v.as_slice()).collect();
     let mut outs: Vec<&mut [f32]> = outs_storage.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
-        .expect("equal channels");
+    let mut buffer =
+        InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
+            .expect("equal channels");
 
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..iters {

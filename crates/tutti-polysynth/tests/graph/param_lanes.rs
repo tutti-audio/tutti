@@ -47,7 +47,7 @@ fn synth(unison: bool, detune: f64) -> PolySynth {
 }
 
 /// A lane over `span` adding a constant `depth` of it.
-fn constant(depth: f32) -> ControlProgram {
+fn constant(depth: f64) -> ControlProgram {
     let layer = Layer {
         id: LayerId(1),
         clock: Clock::Beats {
@@ -71,7 +71,7 @@ fn constant(depth: f32) -> ControlProgram {
 struct Drive {
     param: UnitParam,
     range: ParamRange,
-    depth: f32,
+    depth: f64,
 }
 
 /// Renders `synth` playing a note at frame 0, both channels, with `drive`'s

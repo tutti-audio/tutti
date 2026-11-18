@@ -8,7 +8,7 @@
 //! load-time wiring snapshot), [`ParameterInfo`] with its [`ParamId`] /
 //! [`ParamRange`] / [`ParamFlags`] parts, [`ProcessContext`] and [`ProcessOutput`],
 //! [`TransportInfo`], [`ParameterChanges`] automation queues, note expression and
-//! harmony changes, [`PluginAudio`], one block's audio in either width, editor vocabulary
+//! harmony changes, editor vocabulary
 //! ([`WindowHandle`], [`EditorUnit`], [`EditorCapabilities`]), presets, and the
 //! [`Features`] capability bitset.
 //!
@@ -150,7 +150,6 @@
 //! [`ProcessOutput`]: crate::ProcessOutput
 //! [`TransportInfo`]: crate::TransportInfo
 //! [`ParameterChanges`]: crate::ParameterChanges
-//! [`PluginAudio`]: crate::PluginAudio
 //! [`WindowHandle`]: crate::WindowHandle
 //! [`EditorUnit`]: crate::EditorUnit
 //! [`EditorCapabilities`]: crate::EditorCapabilities
@@ -172,7 +171,6 @@
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
 mod any_thread;
-mod audio;
 mod automation;
 mod automation_mode;
 mod bridge_error;
@@ -262,7 +260,6 @@ pub use tutti_music::{BeatsPerBar, NoteValue, TimeSignature};
 pub use tutti_units::{BarNumber, Seconds};
 
 pub use any_thread::{AnyThread, Health};
-pub use audio::PluginAudio;
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
 pub use bridge_error::{BridgeError, BridgeResult, PluginForkError};

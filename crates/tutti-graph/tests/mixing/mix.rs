@@ -82,14 +82,17 @@ fn latent() -> Kind {
     }
 }
 
-/// `y * m + x̂ * (1 - m)`: the exact expression the executor writes.
+/// `y * m + x̂ * (1 - m)`: the exact expression the executor writes, with `m` the
+/// mix narrowed to the `f32` graph's float.
 fn blend(y: f32, x_hat: f32, m: f32) -> f32 {
     y * m + x_hat * (1.0 - m)
 }
 
 /// `m[i]` of a block of `frames` that moves the mix from `from` to `to`: the
-/// doc's ramp.
-fn ramp(from: f32, to: f32, i: usize, frames: usize) -> f32 {
+/// doc's ramp, run in the `f32` graph's float: the mixes narrow once, as the
+/// executor narrows them at the block's start.
+fn ramp(from: f64, to: f64, i: usize, frames: usize) -> f32 {
+    let (from, to) = (from as f32, to as f32);
     from + (to - from) * ((i + 1) as f32 / frames as f32)
 }
 
@@ -333,12 +336,12 @@ impl Node for Counter {
 fn a_mix_between_the_ends_blends_the_output_with_the_aligned_input() {
     for workers in WORKERS {
         for blocks in [vec![BLOCK; 24], vec![100; 16], vec![7; 220]] {
-            for m in [0.25f32, 0.5, 0.875] {
+            for m in [0.25f64, 0.5, 0.875] {
                 let mut rig = Rig::new(workers, &latent(), Some(Mix::new(m)), None);
                 let got = rig.run(&blocks, &wave);
                 for (n, &y) in got.iter().enumerate() {
                     let x_hat = if n >= L { wave((n - L) as u64) } else { 0.0 };
-                    let want = blend(3.0 * wave(n as u64), x_hat, m);
+                    let want = blend(3.0 * wave(n as u64), x_hat, m as f32);
                     assert_eq!(y.to_bits(), want.to_bits(), "frame {n}, mix {m}");
                 }
             }
@@ -368,13 +371,13 @@ fn the_first_block_has_no_ramp_and_a_plain_node_blends_with_its_input() {
 fn a_move_ramps_over_one_block_per_the_formula() {
     for workers in WORKERS {
         let mut rig = Rig::new(workers, &plain(), Some(Mix::new(0.75)), None);
-        let m_at = |rig: &mut Rig, frames: usize, from: f32, to: f32| {
+        let m_at = |rig: &mut Rig, frames: usize, from: f64, to: f64| {
             let start = rig.frame;
             let got = rig.run(&[frames], &wave);
             for (i, &y) in got.iter().enumerate() {
                 let n = start + i as u64;
                 let m = if from == to {
-                    to
+                    to as f32
                 } else {
                     ramp(from, to, i, frames)
                 };
@@ -410,7 +413,7 @@ fn a_move_ramps_over_one_block_per_the_formula() {
 #[test]
 fn the_mode_wins_over_the_mix() {
     for workers in WORKERS {
-        for m in [0.0f32, 0.3, 0.5, 1.0] {
+        for m in [0.0f64, 0.3, 0.5, 1.0] {
             let mut rig = Rig::new(
                 workers,
                 &latent(),
@@ -436,7 +439,9 @@ fn the_mode_wins_over_the_mix() {
 /// Bypassed, fades from `(m, 1 - m)` to `(0, 1)`.
 #[test]
 fn a_fade_runs_against_the_weights_of_the_mix() {
-    const M: f32 = 0.25;
+    const M: f64 = 0.25;
+    // The oracle runs in the `f32` graph's float.
+    let m = M as f32;
     for workers in WORKERS {
         let mut rig = Rig::new(workers, &plain(), Some(Mix::new(M)), Some(NodeMode::Muted));
         rig.frames(BLOCK, &wave);
@@ -450,10 +455,10 @@ fn a_fade_runs_against_the_weights_of_the_mix() {
                     .gains(Samples(i), Samples(FADE))
                     .1
                     .get() as f32;
-                let (wy, wx) = (0.0 + (M - 0.0) * g, 0.0 + ((1.0 - M) - 0.0) * g);
+                let (wy, wx) = (0.0 + (m - 0.0) * g, 0.0 + ((1.0 - m) - 0.0) * g);
                 (3.0 * wave(n)) * wy + wave(n) * wx
             } else {
-                blend(3.0 * wave(n), wave(n), M)
+                blend(3.0 * wave(n), wave(n), m)
             };
             assert_eq!(y.to_bits(), want.to_bits(), "frame {n} (toggle + {i})");
         }
@@ -469,7 +474,7 @@ fn a_fade_runs_against_the_weights_of_the_mix() {
                     .gains(Samples(i), Samples(FADE))
                     .1
                     .get() as f32;
-                let (wy, wx) = (M + (0.0 - M) * g, (1.0 - M) + (1.0 - (1.0 - M)) * g);
+                let (wy, wx) = (m + (0.0 - m) * g, (1.0 - m) + (1.0 - (1.0 - m)) * g);
                 (3.0 * wave(n)) * wy + wave(n) * wx
             } else {
                 wave(n)
@@ -692,7 +697,7 @@ fn mixes_name_nodes_and_stay_in_range() {
         ed.set_mix(key(7), Mix::DRY),
         Err(MixError::NoSuchNode { node: key(7) })
     );
-    for bad in [f32::NAN, -0.01, 1.5, f32::INFINITY] {
+    for bad in [f64::NAN, -0.01, 1.5, f64::INFINITY] {
         assert_eq!(ed.set_mix(key(1), Mix::new(bad)), Err(MixError::OutOfRange));
     }
     assert_eq!(ed.mix(key(1)), Mix::new(0.5), "a refusal changes nothing");

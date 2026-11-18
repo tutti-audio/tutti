@@ -1713,7 +1713,7 @@ fn moving_mixes_are_allocation_free_on(workers: usize) {
     let input: Vec<f32> = (0..256).map(|i| ((i % 19) as f32 - 9.0) * 0.1).collect();
     let mut out = vec![0.0f32; 256];
     let lens = [64usize, 100, 256, 7];
-    let mixes = [1.0f32, 0.0, 0.5, 0.25, 1.0, 0.75, 0.0, 1.0];
+    let mixes = [1.0f64, 0.0, 0.5, 0.25, 1.0, 0.75, 0.0, 1.0];
     let mut heard = false;
     for block in 0..120usize {
         for k in 1..=9u64 {
@@ -1792,7 +1792,7 @@ fn driven_mixes_are_allocation_free_on(workers: usize) {
     let input: Vec<f32> = (0..256).map(|i| ((i % 19) as f32 - 9.0) * 0.1).collect();
     let mut out = vec![0.0f32; 256];
     let lens = [64usize, 100, 256, 7];
-    let mixes = [1.0f32, 0.0, 0.5, 0.25, 1.0, 0.75, 0.0, 1.0];
+    let mixes = [1.0f64, 0.0, 0.5, 0.25, 1.0, 0.75, 0.0, 1.0];
     let ranges = [(0.0f32, 1.0f32), (0.25, 0.75), (-2.0, 2.0)];
     let mut heard = false;
     for block in 0..120usize {

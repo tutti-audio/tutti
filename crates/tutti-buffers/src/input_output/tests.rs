@@ -153,3 +153,25 @@ fn split_writes_the_output_from_the_input() {
     }
     assert_eq!(out, [0.5, -1.0, 2.0]);
 }
+
+/// A block with no output channel still has the frames it was made with: a
+/// processor with no audio output sees the block's length.
+#[test]
+fn from_slices_with_no_output_channel_keeps_the_frames() {
+    let mut none: [&mut [f32]; 0] = [];
+    let io = InputOutput::from_slices(Samples(96), &[], &mut none).expect("no channels");
+    assert_eq!(io.frames(), Samples(96));
+}
+
+/// Channels of unequal length, and a direction that does not hold the frames,
+/// are refused, never trimmed.
+#[test]
+fn from_slices_refuses_ragged_channels_and_short_directions() {
+    let (long, short) = ([0.0f32; 4], [0.0f32; 3]);
+    let ragged = [&long[..], &short[..]];
+    let mut none: [&mut [f32]; 0] = [];
+    assert!(InputOutput::from_slices(Samples(4), &ragged, &mut none).is_err());
+    let mut l = [0.0f32; 4];
+    let mut outputs = [&mut l[..]];
+    assert!(InputOutput::from_slices(Samples(8), &[], &mut outputs).is_err());
+}

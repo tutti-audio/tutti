@@ -14,9 +14,10 @@ use clap_sys::events::{
 use clap_sys::fixedpoint::{CLAP_BEATTIME_FACTOR, CLAP_SECTIME_FACTOR};
 use clap_sys::process::{CLAP_PROCESS_SLEEP, CLAP_PROCESS_TAIL, clap_process_status};
 use std::sync::atomic::Ordering;
+use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
-use tutti_plugin_types::PluginAudio;
+use tutti_plugin_types::SampleFormat;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
 
@@ -69,10 +70,10 @@ impl<'a> ProcessOutputRef<'a> {
 /// # use tutti_fixtures::midi;
 /// # use tutti_ump::{MidiChannel, NoteVelocity};
 /// # use tutti_graph::Offset;
-/// # use tutti_plugin_types::PluginAudio;
+/// # use tutti_buffers::InputOutput;
 /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
 /// # use tutti_units::{Bpm, SampleRate};
-/// # fn ex(plugin: &mut ClapProcessor, buffer: &mut PluginAudio<'_>)
+/// # fn ex(plugin: &mut ClapProcessor, buffer: &mut InputOutput<'_, '_, '_, f32>)
 /// # -> tutti_clap_host::Result<()> {
 /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
 /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
@@ -112,7 +113,7 @@ impl ClapProcessor {
     /// Processes one block of audio through the plugin.
     ///
     /// The sample format is a value fixed at activation
-    /// ([`format`](Self::format)): the block's [`PluginAudio`] must be the
+    /// ([`format`](Self::format)): the block's samples must be the
     /// same width, matched once per block, and a block of the other width is
     /// refused ([`ClapError::FormatMismatch`]) before the plugin is called. (The
     /// 64-bit support check happened once in `Loaded::activate`.)
@@ -145,10 +146,10 @@ impl ClapProcessor {
     /// # use tutti_fixtures::midi;
     /// # use tutti_ump::{MidiChannel, NoteVelocity};
     /// # use tutti_graph::Offset;
-    /// # use tutti_plugin_types::PluginAudio;
+    /// # use tutti_buffers::InputOutput;
     /// # use tutti_clap_host::{ClapProcessor, ClapProcessContext, TransportInfo};
     /// # use tutti_units::{Bpm, SampleRate};
-    /// # fn ex(active: &mut ClapProcessor, buffer: &mut PluginAudio<'_>)
+    /// # fn ex(active: &mut ClapProcessor, buffer: &mut InputOutput<'_, '_, '_, f32>)
     /// # -> tutti_clap_host::Result<()> {
     /// let transport = TransportInfo::new(SampleRate::SR_48K).with_tempo(Bpm::of(120.0));
     /// let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
@@ -159,15 +160,15 @@ impl ClapProcessor {
     /// })?;
     /// # Ok(()) }
     /// ```
-    pub fn process(
+    pub fn process<S: Float>(
         &mut self,
-        buffer: &mut PluginAudio<'_>,
+        buffer: &mut InputOutput<'_, '_, '_, S>,
         ctx: &ClapProcessContext<'_>,
     ) -> Result<ProcessOutputRef<'_>> {
         let empty_params = ParameterChanges::new();
         let params = ctx.params.unwrap_or(&empty_params);
-        match buffer {
-            PluginAudio::F32(io) => {
+        match (self.format(), buffer.by_width()) {
+            (SampleFormat::Float32, ByWidth::F32(io)) => {
                 let frames = io.frames();
                 let (inputs, outputs) = io.split();
                 self.process_impl(
@@ -180,7 +181,7 @@ impl ClapProcessor {
                     ctx.transport_changes,
                 )
             }
-            PluginAudio::F64(io) => {
+            (SampleFormat::Float64, ByWidth::F64(io)) => {
                 let frames = io.frames();
                 let (inputs, outputs) = io.split();
                 self.process_impl(
@@ -193,6 +194,7 @@ impl ClapProcessor {
                     ctx.transport_changes,
                 )
             }
+            _ => Err(ClapError::FormatMismatch),
         }
     }
 

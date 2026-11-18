@@ -288,7 +288,7 @@ impl Decl {
         SourceKey(k)
     }
 
-    fn route(&mut self, k: u64, source: SourceKey, to: TargetKey, depth: f32) -> RouteKey {
+    fn route(&mut self, k: u64, source: SourceKey, to: TargetKey, depth: f64) -> RouteKey {
         self.routes.push((
             RouteKey(k),
             RouteDecl {
@@ -321,7 +321,7 @@ impl Decl {
         self.sources.retain(|(s, _)| *s != k);
     }
 
-    fn set_depth(&mut self, k: RouteKey, depth: f32) {
+    fn set_depth(&mut self, k: RouteKey, depth: f64) {
         for (r, d) in &mut self.routes {
             if *r == k {
                 d.depth = Depth::of(depth);

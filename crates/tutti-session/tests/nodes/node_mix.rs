@@ -170,7 +170,7 @@ fn a_missing_node_and_a_bad_mix_are_refused() {
     assert_eq!(r.s.graph_ref().mix(stranger).unwrap_err().node(), stranger);
 
     r.s.graph().set_mix(r.halve, Mix::new(0.5)).unwrap();
-    for bad in [f32::NAN, -0.5, 1.5] {
+    for bad in [f64::NAN, -0.5, 1.5] {
         assert_eq!(
             r.s.graph().set_mix(r.halve, Mix::new(bad)),
             Err(MixError::OutOfRange)

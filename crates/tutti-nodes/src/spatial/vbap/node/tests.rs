@@ -334,8 +334,8 @@ fn a_non_finite_control_reads_as_unchanged() {
             match which {
                 0 => node.azimuth.store(Azimuth(value)),
                 1 => node.elevation.store(Elevation(value)),
-                2 => node.spread.store(Spread(value as f32)),
-                _ => node.width.store(StereoWidth(value as f32)),
+                2 => node.spread.store(Spread(value)),
+                _ => node.width.store(StereoWidth(value)),
             }
             // Everything else moves in the same block.
             if which != 0 {

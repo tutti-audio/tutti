@@ -48,16 +48,16 @@ fn every_control_designs_a_stable_network() {
         (0.0, 0.0),
     ];
     for d in [FdnLayout::default(), freezable()] {
-        for &(v, hz) in &nasty {
+        for &(v, x) in &nasty {
             let c = FdnControls {
                 decay: [Seconds::from_f32(v); 3],
-                size: Mix(v),
-                diffusion: Mix(v),
+                size: Mix(x),
+                diffusion: Mix(x),
                 pre_delay: Seconds::from_f32(v),
-                modulation: Depth::clamped(v),
-                rate: Hz(hz),
-                width: StereoWidth(v),
-                wet: Db(f64::from(v)),
+                modulation: Depth::clamped(x),
+                rate: Hz(x),
+                width: StereoWidth(x),
+                wet: Db(x),
                 freeze: v > 0.5,
             };
             let n = design_of(&d, &c);
@@ -200,7 +200,7 @@ fn the_capacity_dominates_where_rounding_matters() {
         let c = FdnControls {
             decay: [d.max_decay; 3],
             size: Mix(1.0),
-            diffusion: Mix(k as f32 / 100.0),
+            diffusion: Mix(f64::from(k) / 100.0),
             pre_delay: MAX_PRE_DELAY,
             modulation: Depth::of(1.0),
             ..FdnControls::DEFAULT
