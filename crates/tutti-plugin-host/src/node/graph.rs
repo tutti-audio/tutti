@@ -58,8 +58,8 @@ impl<L: Loaded + 'static, F: Float> Node<F> for PluginNode<L, F>
 where
     L::Processor: 'static,
 {
-    /// The plugin's channels, one event input (MIDI and parameter events,
-    /// which a param ramp or segment scheduled to it reaches),
+    /// The plugin's channels, one event input (MIDI and parameter events; a
+    /// param ramp or segment scheduled to the node arrives here),
     /// and a MIDI event output for a plugin that declared MIDI out; its
     /// latency and tail as the control side last read them. The plugin reports its tail apart from
     /// its latency, so the tail excludes latency as [`Shape::tail`] asks.

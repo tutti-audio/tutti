@@ -122,7 +122,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
 /// The probe's output (channel 0, its tag scaled by its gain), `blocks`
 /// blocks of an export of a graph with the probe at [`PLUGIN`] fed by
 /// `feeder` (inserted at key 1, its event output on the plugin's event
-/// input) when there is one, the `schedule` commands sent to the fork
+/// input) when there is one, and with the `schedule` commands sent to the fork
 /// before it renders. Also the delay through the plugin:
 /// output frame `f + delay` plays input frame `f`. That is the pipeline's chunk, which
 /// an offline fork sets to its `MaxBlock` ([`BLOCK`]); the probe's own
