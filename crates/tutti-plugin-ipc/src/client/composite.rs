@@ -967,9 +967,7 @@ impl PluginBridge {
             return self.remote(|remote| remote.set_editor_size(main, requested));
         }
         let mut guard = self.gui.lock().map_err(|_| EditorError::Busy)?;
-        let gui = guard
-            .as_mut()
-            .ok_or_else(|| EditorError::PluginError("editor not open".into()))?;
+        let gui = guard.as_mut().ok_or(EditorError::NotOpen)?;
         gui.set_editor_size(main, requested)
             .map_err(|e| EditorError::PluginError(e.to_string()))
     }
@@ -990,9 +988,7 @@ impl PluginBridge {
             return self.remote(|remote| remote.set_editor_scale(main, scale));
         }
         let mut guard = self.gui.lock().map_err(|_| EditorError::Busy)?;
-        let gui = guard
-            .as_mut()
-            .ok_or_else(|| EditorError::PluginError("editor not open".into()))?;
+        let gui = guard.as_mut().ok_or(EditorError::NotOpen)?;
         gui.set_editor_scale(main, scale).map_err(|e| match e {
             PluginError::Editor(typed) => typed,
             other => EditorError::PluginError(other.to_string()),

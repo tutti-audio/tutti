@@ -227,7 +227,3 @@ impl ServerSide for tutti_vst3_host::Vst3Loaded {
         }
     }
 }
-
-/// AU differs from the default in nothing.
-#[cfg(served_au)]
-impl ServerSide for tutti_au_host::AuLoaded {}

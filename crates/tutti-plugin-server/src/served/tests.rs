@@ -35,32 +35,6 @@ impl<F: ServerSide> Served<F> {
         )
         .map(|(served, _)| served)
     }
-
-    /// [`load_first`](Self::load_first) for the plugin `load` chooses, in
-    /// 32-bit.
-    #[cfg_attr(not(served_au), allow(dead_code))]
-    fn load_with(
-        main: MainThreadMarker,
-        path: &Path,
-        load: &Load,
-        rate: f64,
-        block: usize,
-    ) -> PluginResult<Self> {
-        Self::load(
-            main,
-            &tutti_fixtures::detached_work(),
-            path,
-            load,
-            SampleRate::of(rate),
-            block,
-            false,
-            None,
-            &mut || {},
-            Hand::local(),
-            crate::ties::ties().expect("bells").0,
-        )
-        .map(|(served, _)| served)
-    }
 }
 
 /// A plugin loaded on a [`Hand::local`] renders in place: the Processor is
@@ -86,6 +60,16 @@ impl<F: ServerSide> Render for Served<F> {
         };
         buffer.process(processor, ctx, out)
     }
+}
+
+/// Leaves the loaded CLAP plugin as a panic in a call into it does
+/// (`Lifecycle::guarded` replaces the plugin with `Poisoned`).
+#[cfg(feature = "clap")]
+pub(crate) fn lose(plugin: &mut AnyServed) {
+    let AnyServed::Clap(served) = plugin else {
+        panic!("a CLAP plugin");
+    };
+    served.lifecycle = Lifecycle::Poisoned;
 }
 
 impl<F: ServerSide> Served<F> {

@@ -386,6 +386,48 @@ fn a_message_after_silence_is_answered() {
     );
 }
 
+/// **A lost plugin ends the server with an error, and the host hears it as a
+/// crash.** The plugin is left as a panic in a call into it leaves it; with no
+/// message to read and nothing else to wake the loop, the loop returns the
+/// plugin's loss rather than wait for the host (the clean shutdown a quiet
+/// host gets).
+#[test]
+fn a_lost_plugin_ends_the_server_abnormally() {
+    let _lock = crate::test_utils::plugin_load_lock();
+    let (mut fixture, _slab) = session("lost");
+    let main = main_thread();
+    assert!(matches!(
+        fixture.session.handle(main, load_message()).expect("load"),
+        crate::session::Reaction::Reply(BridgeMessage::PluginLoaded { .. })
+    ));
+    crate::served::tests::lose(fixture.session.plugin.as_mut().expect("loaded"));
+    let render = RenderThread::spawn(
+        fixture.side.take().expect("run once"),
+        Some(Box::new(fixture.audio.take().expect("run once"))),
+    )
+    .expect("the render thread");
+    let mut script = Script::new([]);
+    let result = serve_every(
+        &mut fixture.session,
+        &mut script,
+        &mut Native::default(),
+        main,
+        &render,
+        TICK,
+    );
+    fixture.session.drop_plugin(main);
+    drop(render.stop());
+    assert!(
+        matches!(
+            result,
+            Err(BridgeError::State(
+                tutti_plugin_types::StateError::PluginCrashed
+            ))
+        ),
+        "{result:?}"
+    );
+}
+
 /// **With nothing loaded, an editor request is answered, never dropped**: the
 /// host blocks on the open and the resize.
 #[test]

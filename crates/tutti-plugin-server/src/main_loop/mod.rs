@@ -38,7 +38,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tutti_plugin_ipc_ffi::Ready;
-use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, Wakeups};
+use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, StateError, Wakeups};
 
 use crate::render::RenderThread;
 use crate::session::{Reaction, Session};
@@ -147,6 +147,21 @@ pub(crate) fn serve(
     )
 }
 
+/// A lost plugin ends the server abnormally, not through the clean shutdown:
+/// the host reads the exit as a crash and recovers the plugin. What the last
+/// pass queued has been sent by the time this is called.
+///
+/// # Errors
+///
+/// [`StateError::PluginCrashed`], when the plugin is lost.
+fn ensure_not_lost(session: &Session) -> BridgeResult<()> {
+    if session.plugin_lost() {
+        tracing::error!("plugin-server: the plugin is lost; the server exits");
+        return Err(BridgeError::State(StateError::PluginCrashed));
+    }
+    Ok(())
+}
+
 /// [`serve`] with a tick every `period`.
 pub(crate) fn serve_every(
     session: &mut Session,
@@ -164,6 +179,7 @@ pub(crate) fn serve_every(
     let mut wakeups = Wakeups::new();
     let mut ready: Vec<Ready> = Vec::new();
     loop {
+        ensure_not_lost(session)?;
         // An audio connection that ends is the host leaving, which the control
         // connection says too; one that was misused is a peer to stop serving.
         if let Some(error) = render.ended()
@@ -181,6 +197,8 @@ pub(crate) fn serve_every(
                 transport.send(&event)?;
             }
         }
+        // A tick that lost the plugin ends the server before it waits.
+        ensure_not_lost(session)?;
         // The plugin's own event sources are waited on here, with the socket
         // and the tick: its descriptors, and its earliest timer bounds the
         // wait. Read after the tick and the last message, which change them.

@@ -30,13 +30,15 @@ use tutti_plugin_types::{
 use tutti_units::ParamId;
 
 mod any;
+#[cfg(served_au)]
+mod au;
 mod format;
 
 pub(crate) use any::AnyServed;
 pub(crate) use format::ServerSide;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// What the plugin was asked to render with: the block's audio, in the width
 /// the plugin was activated at.
@@ -92,6 +94,9 @@ pub(crate) trait ServedPlugin {
     /// returns what the host should be told. Between blocks, on the thread
     /// that loaded the plugin.
     fn poll(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage>;
+    /// Whether the plugin is lost: a call into it panicked, and nothing of it
+    /// runs any more.
+    fn is_lost(&self) -> bool;
     /// Brings the Processor home from the render thread and deactivates the
     /// plugin, so it can be dropped. `false` when the Processor did not come
     /// (a render thread stuck inside the plugin): dropping the plugin then
@@ -533,8 +538,9 @@ impl<F: ServerSide> Served<F> {
             }
             Notice::Lost { reason } => {
                 // The wire has no "lost" message, and the buses are not what
-                // changed: the host is told nothing here, and finds the plugin
-                // gone from the refused blocks and the failed requests.
+                // changed: nothing is sent here. The loop ends the server on
+                // `is_lost` (see `main_loop::serve_every`), so the host sees its
+                // process exit as a crash.
                 tracing::error!("plugin lost: {reason}");
                 return Some(reason);
             }
@@ -707,6 +713,10 @@ impl<F: ServerSide> ServedPlugin for Served<F> {
             self.events.push(BridgeMessage::ProcessRequested);
         }
         std::mem::take(&mut self.events)
+    }
+
+    fn is_lost(&self) -> bool {
+        self.lifecycle.is_poisoned()
     }
 
     fn quiesce(&mut self, main: MainThreadMarker) -> bool {

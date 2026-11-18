@@ -84,7 +84,7 @@ impl Reaction {
 pub(crate) struct Session {
     /// The hosted plugin, or `None` before a load and after an unload. Every
     /// handler that needs one refuses explicitly rather than going silent.
-    plugin: Option<AnyServed>,
+    pub(crate) plugin: Option<AnyServed>,
     /// What the plugin's drops off the main thread hand over: run on every tick and
     /// after an unload.
     work: MainWork,
@@ -427,7 +427,7 @@ impl Session {
                 // The wire's result carries the reason as text.
                 let result = self
                     .open_editor(main, parent, scale)
-                    .map_err(|e| e.to_string());
+                    .map_err(|e| editor_wire_text(&e));
                 Ok(BridgeMessage::EditorOpened { result }.into())
             }
             M::CloseEditor => {
@@ -435,7 +435,9 @@ impl Session {
                 Ok(Reaction::None)
             }
             M::SetEditorSize { size } => {
-                let result = self.set_editor_size(main, size).map_err(|e| e.to_string());
+                let result = self
+                    .set_editor_size(main, size)
+                    .map_err(|e| editor_wire_text(&e));
                 Ok(BridgeMessage::EditorSized { result }.into())
             }
 
@@ -465,6 +467,11 @@ impl Session {
             }
             M::Shutdown => Ok(Reaction::Shutdown),
         }
+    }
+
+    /// Whether the loaded plugin is lost (a call into it panicked).
+    pub(crate) fn plugin_lost(&self) -> bool {
+        self.plugin.as_ref().is_some_and(|p| p.plugin().is_lost())
     }
 
     /// Whether a plugin is loaded.
@@ -909,6 +916,15 @@ impl Session {
             Err(e) => Some(format!("failed to load state: {e}")),
         };
         BridgeMessage::StateLoaded { error }.into()
+    }
+}
+
+/// An editor call's failure as the text the wire carries: an editor error says
+/// itself, not through the "plugin editor error" of the error that wraps it.
+fn editor_wire_text(e: &PluginError) -> String {
+    match e {
+        PluginError::Editor(editor) => editor.to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -1534,6 +1550,41 @@ mod tests {
             s.handle(main_thread(), HostMessage::Shutdown).unwrap(),
             Reaction::Shutdown
         ));
+    }
+
+    /// **An editor error reaches the wire as its own text**, without the
+    /// "plugin editor error" prefix of the error that wraps it.
+    #[test]
+    fn an_editor_error_is_flattened_to_its_own_text() {
+        assert_eq!(
+            editor_wire_text(&PluginError::Editor(EditorError::NotOpen)),
+            "the editor is not open"
+        );
+        assert_eq!(
+            editor_wire_text(&PluginError::Other("no".into())),
+            "plugin error: no"
+        );
+    }
+
+    /// A window number that means nothing in this process (an AppKit view's
+    /// pointer) is refused as such: only macOS has one.
+    #[cfg(all(target_os = "macos", feature = "clap"))]
+    mod foreign_window {
+        use super::*;
+
+        /// **A host window this process cannot embed into is a foreign
+        /// window**, named by the number the host sent.
+        #[test]
+        fn a_window_number_that_means_nothing_here_is_refused_as_foreign() {
+            let _lock = crate::test_utils::plugin_load_lock();
+            let (mut s, _shm) = load_clap("foreign_window", SampleFormat::Float32);
+            let raw = 0x40_0001;
+            let scale = tutti_plugin_types::ContentScale::IDENTITY;
+            assert!(matches!(
+                s.open_editor(main_thread(), Some(raw), scale),
+                Err(PluginError::Editor(EditorError::ForeignWindow(got))) if got == raw
+            ));
+        }
     }
 
     /// **An editor request the session cannot serve names its cause as an

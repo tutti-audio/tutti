@@ -413,6 +413,10 @@ pub enum EditorError {
     /// (an AppKit view's pointer, say): only where a window number means the
     /// same in both processes can an editor embed across them
     /// ([`WindowHandle::embeds_across_processes`]).
+    ///
+    /// The number is raw because it is the wire's handle, not a
+    /// [`WindowHandle`]: it is exactly what [`WindowHandle::from_remote`]
+    /// refused to rebuild.
     #[error("the host's window {0:#x} cannot be embedded into by this process")]
     ForeignWindow(u64),
 

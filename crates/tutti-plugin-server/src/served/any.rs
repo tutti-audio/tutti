@@ -125,6 +125,8 @@ served! {
     Clap(tutti_clap_host::ClapLoaded, PluginFormat::Clap),
     #[cfg(feature = "vst3")]
     Vst3(tutti_vst3_host::Vst3Loaded, PluginFormat::Vst3),
+    // A row of the macro's input cannot sit in a module; `served_au` is the one
+    // spelling of "AU is served here" (`build.rs`), and `served/au.rs` is its module.
     #[cfg(served_au)]
     Au(tutti_au_host::AuLoaded, PluginFormat::AudioUnit),
 }
