@@ -5,7 +5,7 @@ use std::cell::Cell;
 use tutti_buffers::Float;
 
 use tutti_types::MaxBlock;
-use tutti_units::Tail;
+use tutti_units::{Samples, Tail};
 
 use super::state::{Inject, Unit};
 use super::tail_elapsed;
@@ -263,7 +263,7 @@ pub(super) fn fading_node_op<
         let y = st.arena.slot_mut(s, frames);
         let out = x.scratch.slot(c, frames);
         for (i, (y, &o)) in y[..n].iter_mut().zip(&out[..n]).enumerate() {
-            let (g_out, g_in) = x.law.gains(x.done + i, x.len);
+            let (g_out, g_in) = x.law.gains(Samples(x.done + i), Samples(x.len));
             *y = *y * F::from_f64(g_in.get()) + o * F::from_f64(g_out.get());
         }
         st.flags.set(s, 0);
