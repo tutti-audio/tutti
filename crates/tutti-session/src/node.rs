@@ -232,9 +232,12 @@ param_session_node!(
     tutti_nodes::PhaserNode<f64>,
     tutti_nodes::LfoNode,
     tutti_nodes::OscillatorNode,
-    tutti_nodes::FreeverbNode,
-    tutti_nodes::FdnNode,
-    tutti_nodes::PlateReverbNode,
+    tutti_nodes::FreeverbNode<f32>,
+    tutti_nodes::FreeverbNode<f64>,
+    tutti_nodes::FdnNode<f32>,
+    tutti_nodes::FdnNode<f64>,
+    tutti_nodes::PlateReverbNode<f32>,
+    tutti_nodes::PlateReverbNode<f64>,
     tutti_nodes::ConvolverNode,
 );
 

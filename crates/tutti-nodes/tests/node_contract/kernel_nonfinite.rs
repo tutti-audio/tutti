@@ -186,21 +186,21 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "fdn",
-            Box::new(FdnNode::live(
+            Box::new(FdnNode::<f32>::live(
                 FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, false).unwrap(),
                 FdnControls::DEFAULT,
             )),
         ),
         (
             "freeverb",
-            Box::new(FreeverbNode::live(FreeverbControls {
+            Box::new(FreeverbNode::<f32>::live(FreeverbControls {
                 room: Mix(0.9),
                 damp: Mix(0.2),
             })),
         ),
         (
             "plate",
-            Box::new(PlateReverbNode::from(PlateReverbConfig::new())),
+            Box::new(PlateReverbNode::<f32>::from(PlateReverbConfig::new())),
         ),
         // The LFO and the carrier are state of the clock, not of the input: a NaN sample is
         // heard at its own frame and nowhere else.

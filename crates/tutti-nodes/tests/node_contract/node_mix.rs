@@ -271,28 +271,28 @@ fn the_chorus_flanger_and_phaser_are_blended_by_the_graph() {
 fn the_reverbs_are_blended_by_the_graph() {
     check_io(
         "freeverb (General MIDI room)",
-        &FreeverbNode::general_midi,
+        &FreeverbNode::<f32>::general_midi,
         1,
         2,
         0,
     );
     check_io(
         "freeverb (live)",
-        &|| FreeverbNode::live(FreeverbControls::GENERAL_MIDI),
+        &|| FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI),
         1,
         2,
         0,
     );
     check_io(
         "fdn",
-        &|| FdnNode::live(FdnLayout::default(), FdnControls::DEFAULT),
+        &|| FdnNode::<f32>::live(FdnLayout::default(), FdnControls::DEFAULT),
         1,
         2,
         0,
     );
     check_io(
         "plate",
-        &|| PlateReverbNode::from(PlateReverbConfig::new()),
+        &|| PlateReverbNode::<f32>::from(PlateReverbConfig::new()),
         2,
         2,
         0,
