@@ -3201,13 +3201,12 @@ fn a_legato_move_returns_the_voice_to_the_new_keys_own_pitch() {
         "{}",
         freq(&s)
     );
-    // A bend recomputes the pitch from the voice's note: the new key's, up by
-    // the top wire word (`1 - 2^-31` of a whole tone, the default range).
+    // A bend recomputes the pitch from the voice's note: the new key's, a
+    // whole tone (the default range) up.
     queue_midi(&mut s, &[ev_bend(1, 16383)]);
     s.tick(&[], &mut out);
-    let top = 1.0 - 1.0 / 2_147_483_648.0;
     assert!(
-        (freq(&s) / (key_freq(64) * 2.0_f64.powf(2.0 * top / 12.0)) - 1.0).abs() < 1e-12,
+        (freq(&s) / key_freq(66) - 1.0).abs() < 1e-12,
         "{}",
         freq(&s)
     );

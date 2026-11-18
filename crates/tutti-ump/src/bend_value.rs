@@ -62,28 +62,42 @@ impl BendValue {
         self.0
     }
 
-    /// The bend as a position on `-1..=1`: `(get() - 2^31) / 2^31`.
+    /// The bend as a position on `-1..=1`, centre-exact and piecewise.
     ///
-    /// [`CENTER`](Self::CENTER) is `0.0`, `0` is `-1.0` and `u32::MAX` is
-    /// `1 - 2^-31`. The value is exact in `f64`.
+    /// M2-104 section 7.4.13 gives "an equal range of pitch bend up" as down,
+    /// with `0x8000_0000..=0xFFFF_FFFF` the whole up range. With
+    /// `k = get() - 2^31`: below the centre the position is `k / 2^31`, from
+    /// the centre up it is `k / (2^31 - 1)`. So `0` is `-1.0`,
+    /// [`CENTER`](Self::CENTER) is `0.0` and `u32::MAX` is `+1.0`, each exact.
     #[inline]
     #[must_use]
     pub fn bipolar(self) -> Bipolar {
-        let scale = f64::from(Self::CENTER.0);
-        // The word is on `0..=u32::MAX`, so the quotient is on `-1..1`.
-        Bipolar::clamped((f64::from(self.0) - scale) / scale)
+        let k = f64::from(self.0) - f64::from(Self::CENTER.0);
+        let span = if k < 0.0 {
+            f64::from(Self::CENTER.0)
+        } else {
+            f64::from(Self::MAX.0 - Self::CENTER.0)
+        };
+        // `k` is on `-2^31..=2^31 - 1` and `span` is its side's extent, so the
+        // quotient is on `-1..=1`.
+        Bipolar::clamped(k / span)
     }
 
-    /// The bend at position `b` of the 32-bit range: `round(2^31 + b * 2^31)`,
-    /// saturating at `u32::MAX`, so `+1.0` is `u32::MAX`. Inverse of
-    /// [`bipolar`](Self::bipolar).
+    /// The bend at position `b`: `2^31 + round(b * 2^31)` below the centre and
+    /// `2^31 + round(b * (2^31 - 1))` from it up (M2-104 section 7.4.13, "an
+    /// equal range of pitch bend up"), rounding half away from zero. Inverse of
+    /// [`bipolar`](Self::bipolar); `+1.0` is `u32::MAX`.
     #[inline]
     #[must_use]
     pub fn from_bipolar(b: Bipolar) -> Self {
-        let scale = f64::from(Self::CENTER.0);
-        // The rounded word is on `0..=2^32`; the cast saturates at the wire's
-        // 32-bit maximum.
-        Self(libm::round(scale + b.get() * scale) as u32)
+        let b = b.get();
+        let span = if b < 0.0 {
+            f64::from(Self::CENTER.0)
+        } else {
+            f64::from(Self::MAX.0 - Self::CENTER.0)
+        };
+        // The word is on `0..=u32::MAX`; the cast is the wire's 32-bit width.
+        Self((f64::from(Self::CENTER.0) + libm::round(b * span)) as u32)
     }
 }
 
