@@ -39,7 +39,6 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `get_tail_time`. `default-features = false` drops this crate's codec/midi
 # defaults, which the unit vocabulary does not need.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # The queue the MIDI-output callback pushes into during a render. `ArrayQueue`
@@ -50,6 +49,8 @@ crossbeam-queue = { version = "0.3", default-features = false, features = ["allo
 coreaudio-sys = "0.2"
 
 [dev-dependencies]
+# The transport tests build meter and loop values.
+tutti-music = { version = "0.0.1", path = "../tutti-music" }
 # The tests build SysEx and MIDI 1.0 fixtures with its helpers.
 # The tests that build their own raw calls beside the safe API.
 tutti-au-host = { path = ".", features = ["testing"] }
