@@ -124,8 +124,7 @@ impl ValueTable {
             .filter_map(|addr| {
                 Some((
                     addr,
-                    set.cell(addr)?
-                        .load_wide(std::sync::atomic::Ordering::Acquire),
+                    set.cell(addr)?.load(std::sync::atomic::Ordering::Acquire),
                 ))
             })
             .collect();

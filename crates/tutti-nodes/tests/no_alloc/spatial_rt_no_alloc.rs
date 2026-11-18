@@ -148,7 +148,7 @@ impl Node for Gated {
     fn reset(&mut self) {
         self.0.reset();
     }
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.0.param_base(k)
     }
 }
@@ -237,7 +237,7 @@ fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bo
                     rig.feed(k, Some(&lane));
                 } else {
                     rig.feed(k, None);
-                    controls.set(param, pick(k));
+                    controls.set(param, f64::from(pick(k)));
                 }
             }
             let len = BLOCKS[step % BLOCKS.len()];
@@ -260,7 +260,7 @@ fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bo
         // The fork, moved by cells, under the same window.
         for step in 0..200usize {
             for (k, &param) in params.iter().enumerate() {
-                fork_controls.set(param, HOSTILE[(step + k * 5) % HOSTILE.len()]);
+                fork_controls.set(param, f64::from(HOSTILE[(step + k * 5) % HOSTILE.len()]));
             }
             let len = BLOCKS[step % BLOCKS.len()];
             forked.set_block_len(len);

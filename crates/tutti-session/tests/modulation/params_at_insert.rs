@@ -12,15 +12,14 @@
 
 use crate::common;
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use tutti_graph::FadeLaw;
 use tutti_graph::NodeKey;
 use tutti_nodes::{DistortionNode, ShapeKind};
 use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session};
-use tutti_types::AtomicF32;
 use tutti_types::ChannelLayout;
+use tutti_types::ParamCell;
 use tutti_units::{Depth, Drive, Seconds, UnitParam};
 
 use common::probe::ProbeUnit;
@@ -57,14 +56,15 @@ fn settle(s: &mut Session) {
 }
 
 /// The knob of `node`'s drive lane, `None` with no lane or no knob.
-fn knob(s: &Session, node: NodeKey) -> Option<f32> {
+fn knob(s: &Session, node: NodeKey) -> Option<f64> {
     s.mod_state()
         .lane(ParamRef::unit(node, UnitParam::Drive).key())
         .and_then(|(_, lane)| lane.knob())
 }
 
 /// The lane's knob reads `cell`: what it holds, and a write into it.
-fn assert_knob_is(s: &Session, node: NodeKey, cell: &Arc<AtomicF32>) {
+fn assert_knob_is(s: &Session, node: NodeKey, cell: impl Into<ParamCell>) {
+    let cell = cell.into();
     assert_eq!(knob(s, node), Some(cell.load(Ordering::Acquire)));
     cell.store(7.5, Ordering::Release);
     assert_eq!(knob(s, node), Some(7.5), "the knob is the node's cell");
@@ -77,22 +77,22 @@ fn add_addresses_a_hosts_param_node() {
     let cell = unit.knob();
     let (node, _) = s.graph().add(unit);
     modulate_drive(&mut s, node.erase());
-    assert_knob_is(&s, node.erase(), &cell);
+    assert_knob_is(&s, node.erase(), cell);
 }
 
 #[test]
 fn add_addresses_an_engine_node() {
     let mut s = session();
     let node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(f64::from(BASE)));
-    let tutti_types::ParamCell::F32(cell) = tutti_graph::ParamNode::param_set(&node)
+    let tutti_types::ParamCell::F64(cell) = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
         .expect("a distortion has a drive")
     else {
-        unreachable!("the drive is an f32 cell")
+        unreachable!("a kernel node's controls are f64 cells")
     };
     let (key, _) = s.graph().add(node);
     modulate_drive(&mut s, key.erase());
-    assert_knob_is(&s, key.erase(), &cell);
+    assert_knob_is(&s, key.erase(), cell);
 }
 
 /// After a crossfade the lane's knob is the **incoming** node's cell: a
@@ -107,7 +107,11 @@ fn a_crossfade_hands_the_lane_the_incoming_nodes_cell() {
         .set_sources(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
     modulate_drive(&mut s, node.erase());
-    assert_eq!(knob(&s, node.erase()), Some(BASE), "precondition: the lane");
+    assert_eq!(
+        knob(&s, node.erase()),
+        Some(f64::from(BASE)),
+        "precondition: the lane"
+    );
 
     let incoming = ProbeUnit::of(UnitParam::Drive, 3.0);
     let new = incoming.knob();
@@ -117,5 +121,5 @@ fn a_crossfade_hands_the_lane_the_incoming_nodes_cell() {
     settle(&mut s);
     old.store(9.0, Ordering::Release);
     assert_eq!(knob(&s, node.erase()), Some(3.0), "not the outgoing cell");
-    assert_knob_is(&s, node.erase(), &new);
+    assert_knob_is(&s, node.erase(), new);
 }

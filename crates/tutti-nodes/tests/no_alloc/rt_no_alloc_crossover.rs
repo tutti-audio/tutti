@@ -61,8 +61,8 @@ fn crossover_node_with_a_moving_frequency_is_allocation_free() {
     let mut hz = 200.0f32;
     gate(node, move |controls, _| {
         hz = if hz > 2_000.0 { 200.0 } else { hz + 3.0 };
-        assert!(controls.set(UnitAddr::new(UnitParam::Cutoff, 0), hz));
-        assert!(controls.set(UnitAddr::new(UnitParam::Cutoff, 1), 3_000.0 + hz));
+        assert!(controls.set(UnitAddr::new(UnitParam::Cutoff, 0), f64::from(hz)));
+        assert!(controls.set(UnitAddr::new(UnitParam::Cutoff, 1), f64::from(3_000.0 + hz)));
     });
 }
 
@@ -90,7 +90,10 @@ fn multiband_compressor_with_moving_params_is_allocation_free() {
         let set = controls.params();
         hz = if hz > 400.0 { 120.0 } else { hz + 1.0 };
         for (c, scale) in [1.0, 4.0, 40.0].into_iter().enumerate() {
-            assert!(set.set(UnitAddr::new(UnitParam::Cutoff, c as u8), hz * scale));
+            assert!(set.set(
+                UnitAddr::new(UnitParam::Cutoff, c as u8),
+                f64::from(hz * scale)
+            ));
         }
         for b in 0..4u8 {
             let k = i + usize::from(b);
@@ -103,10 +106,10 @@ fn multiband_compressor_with_moving_params_is_allocation_free() {
                 (k % 5) as f32,
             ];
             for (kind, v) in BAND_PARAMS.into_iter().zip(values) {
-                assert!(set.set(UnitAddr::new(kind, b), v));
+                assert!(set.set(UnitAddr::new(kind, b), f64::from(v)));
             }
-            assert!(set.set(UnitAddr::new(UnitParam::Bypass, b), f32::from(k % 7 == 0)));
-            assert!(set.set(UnitAddr::new(UnitParam::Solo, b), f32::from(k % 13 == 0)));
+            assert!(set.set(UnitAddr::new(UnitParam::Bypass, b), f64::from(k % 7 == 0)));
+            assert!(set.set(UnitAddr::new(UnitParam::Solo, b), f64::from(k % 13 == 0)));
         }
     });
 }

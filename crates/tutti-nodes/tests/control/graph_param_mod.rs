@@ -39,7 +39,7 @@ use tutti_nodes::{
     LadderFilterNode, LadderType, LimiterControls, LimiterNode, Lookahead, MaxDelay, ModDelayNode,
     PhaserControls, PhaserNode, ShapeKind, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
 };
-use tutti_types::{AtomicF32, BusTopology, ChannelLayout};
+use tutti_types::{AtomicF32, BusTopology, ChannelLayout, ParamCell};
 use tutti_units::{
     Amplitude, BeatsPerCycle, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix,
     PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds, UnitAddr, UnitParam,
@@ -108,7 +108,7 @@ fn konst(depth: f64) -> Layer {
 /// an engine drives a param port. Layers scale by the port's range, so a
 /// lane with any is built on the port's range cell (the port's node must
 /// have been committed); one without sends its knob, unranged.
-fn drive(ed: &mut Editor, at: ParamIn, knob: Arc<AtomicF32>, layers: Vec<Layer>) {
+fn drive(ed: &mut Editor, at: ParamIn, knob: impl Into<ParamCell>, layers: Vec<Layer>) {
     let range = (!layers.is_empty()).then(|| ed.param_range_cell(at).expect("committed"));
     let program = ControlProgram::new(None, layers, vec![]).expect("a valid program");
     let lane = ControlLaneNode::for_unit(at.param, program, Some(knob.into()), range);
@@ -309,7 +309,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = svf(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Cutoff, v));
+                    assert!(n.param_set().set(UnitParam::Cutoff, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -323,7 +323,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = svf(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Q, v));
+                    assert!(n.param_set().set(UnitParam::Q, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -337,7 +337,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = ladder(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Cutoff, v));
+                    assert!(n.param_set().set(UnitParam::Cutoff, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -351,7 +351,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = ladder(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Q, v));
+                    assert!(n.param_set().set(UnitParam::Q, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -365,7 +365,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = ladder(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Drive, v));
+                    assert!(n.param_set().set(UnitParam::Drive, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -379,7 +379,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = delay(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Feedback, v));
+                    assert!(n.param_set().set(UnitParam::Feedback, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -393,7 +393,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = delay(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::DelayTime, v));
+                    assert!(n.param_set().set(UnitParam::DelayTime, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -411,7 +411,7 @@ fn cases() -> Vec<Case> {
                     Drive::new(1.0),
                 );
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Drive, v));
+                    assert!(n.param_set().set(UnitParam::Drive, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -425,7 +425,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = comp(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Threshold, v));
+                    assert!(n.param_set().set(UnitParam::Threshold, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -439,7 +439,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = gate(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Threshold, v));
+                    assert!(n.param_set().set(UnitParam::Threshold, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -454,7 +454,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = lim(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Ceiling, v));
+                    assert!(n.param_set().set(UnitParam::Ceiling, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -468,7 +468,7 @@ fn cases() -> Vec<Case> {
             make: |w, v| {
                 let n = lim(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Threshold, v));
+                    assert!(n.param_set().set(UnitParam::Threshold, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -523,7 +523,7 @@ fn cases() -> Vec<Case> {
                         .expect("a test width fits a bus"),
                 );
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Balance, v));
+                    assert!(n.param_set().set(UnitParam::Balance, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -592,7 +592,7 @@ fn block_rate_cases() -> Vec<Case> {
                     Q::new(0.707),
                 );
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::GainDb, v));
+                    assert!(n.param_set().set(UnitParam::GainDb, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -606,7 +606,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = comp(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Ratio, v));
+                    assert!(n.param_set().set(UnitParam::Ratio, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -620,7 +620,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = comp(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Attack, v));
+                    assert!(n.param_set().set(UnitParam::Attack, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -634,7 +634,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = comp(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Release, v));
+                    assert!(n.param_set().set(UnitParam::Release, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -648,7 +648,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = comp(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::GainDb, v));
+                    assert!(n.param_set().set(UnitParam::GainDb, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -662,7 +662,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = gate(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Attack, v));
+                    assert!(n.param_set().set(UnitParam::Attack, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -676,7 +676,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = gate(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Release, v));
+                    assert!(n.param_set().set(UnitParam::Release, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -703,7 +703,7 @@ fn block_rate_cases() -> Vec<Case> {
                     },
                 );
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Release, v));
+                    assert!(n.param_set().set(UnitParam::Release, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -717,7 +717,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = chorus(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Rate, v));
+                    assert!(n.param_set().set(UnitParam::Rate, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -731,7 +731,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = chorus(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Depth, v));
+                    assert!(n.param_set().set(UnitParam::Depth, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -745,7 +745,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = chorus(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Feedback, v));
+                    assert!(n.param_set().set(UnitParam::Feedback, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -764,7 +764,7 @@ fn block_rate_cases() -> Vec<Case> {
                     .expect("at most one bus wide"),
                 );
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Depth, v));
+                    assert!(n.param_set().set(UnitParam::Depth, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -778,7 +778,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = phaser(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Rate, v));
+                    assert!(n.param_set().set(UnitParam::Rate, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -792,7 +792,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = phaser(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Depth, v));
+                    assert!(n.param_set().set(UnitParam::Depth, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -806,7 +806,7 @@ fn block_rate_cases() -> Vec<Case> {
             make: |w, v| {
                 let n = phaser(w);
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Feedback, v));
+                    assert!(n.param_set().set(UnitParam::Feedback, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -1008,11 +1008,11 @@ fn plain_distortion(d: f64) -> Vec<f32> {
 #[test]
 fn an_authored_write_moves_the_base_under_modulation() {
     let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
-    let tutti_types::ParamCell::F32(cell) = tutti_graph::ParamNode::param_set(&node)
+    let tutti_types::ParamCell::F64(cell) = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
         .expect("a distortion has a drive")
     else {
-        unreachable!("the drive is an f32 cell")
+        unreachable!("a kernel node's controls are f64 cells")
     };
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);

@@ -52,9 +52,9 @@ impl ControlSet for NoParams {
 
     fn defaults(&self) {}
 
-    fn flatten(&self, _: &(), _: &mut [f32]) {}
+    fn flatten(&self, _: &(), _: &mut [f64]) {}
 
-    fn assemble(&self, _: &[f32]) {}
+    fn assemble(&self, _: &[f64]) {}
 }
 
 impl Kernel for Echo {

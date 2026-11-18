@@ -101,7 +101,7 @@ impl Driven {
         self.knobs
             .lock_recover()
             .get(&id)
-            .is_some_and(|lane| lane.set_knob(value.get() as f32))
+            .is_some_and(|lane| lane.set_knob(value.get()))
     }
 
     /// Replaces the driven parameters with `knobs`; nothing is touched while
@@ -120,7 +120,7 @@ impl Driven {
     pub(crate) fn report_knobs(&self, mirror: &tutti_plugin_host::PluginParamValues) {
         for (&id, lane) in self.knobs.lock_recover().iter() {
             if let Some(knob) = lane.knob() {
-                mirror.report(id, Normalized::clamped(f64::from(knob)));
+                mirror.report(id, Normalized::clamped(knob));
             }
         }
     }

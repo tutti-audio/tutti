@@ -22,7 +22,7 @@ fn bit_crusher_process_is_allocation_free_with_the_controls_moving() {
     let hold = |i: usize| 1.0 + (i % 5) as f32 * 1.3;
     for i in 0..16 {
         controls.set(UnitParam::BitDepth, bits(i));
-        controls.set(UnitParam::HoldFactor, hold(i));
+        controls.set(UnitParam::HoldFactor, f64::from(hold(i)));
         rig.block();
     }
     assert!(
@@ -36,7 +36,7 @@ fn bit_crusher_process_is_allocation_free_with_the_controls_moving() {
     assert_no_alloc::assert_no_alloc(|| {
         for i in 0..2_000 {
             controls.set(UnitParam::BitDepth, bits(i));
-            controls.set(UnitParam::HoldFactor, hold(i));
+            controls.set(UnitParam::HoldFactor, f64::from(hold(i)));
             rig.block();
         }
     });

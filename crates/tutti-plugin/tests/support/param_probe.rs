@@ -33,7 +33,12 @@ pub fn extra(i: usize) -> ParamId {
 /// its knob on its first block and whenever the knob moves
 /// (`LaneControls::set_knob`), and again on `LaneControls::resync`.
 pub fn knob(id: ParamId, value: f32) -> ControlLaneNode {
-    ControlLaneNode::for_foreign(id, ControlProgram::default(), Some(value), (0.0, 1.0))
+    ControlLaneNode::for_foreign(
+        id,
+        ControlProgram::default(),
+        Some(f64::from(value)),
+        (0.0, 1.0),
+    )
 }
 
 /// The CLAP probe with `params` extra parameters, loaded through a real

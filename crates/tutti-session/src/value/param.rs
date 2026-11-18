@@ -124,25 +124,19 @@ impl<U: ParamUnit> sealed::Land for ParamTarget<U> {
 
     fn resolve(self, params: &Params) -> Option<(ParamCell, U)> {
         let cell = params.cell(self.node, self.addr, self.owner)?;
-        let base = U::from_wide(cell.load_wide(Ordering::Acquire));
+        let base = U::from_cell(cell.load(Ordering::Acquire));
         Some((cell, base))
     }
 
-    fn check(cell: &ParamCell, value: &U) -> Result<(), SetRefusal> {
-        let wide = value.to_wide();
-        if !wide.is_finite() {
+    fn check(_: &ParamCell, value: &U) -> Result<(), SetRefusal> {
+        if !value.to_cell().is_finite() {
             return Err(SetRefusal::NotFinite);
-        }
-        // An `f32` cell holds what an `f32` does: a finite figure that rounds
-        // to infinity there is not stored.
-        if matches!(cell, ParamCell::F32(_)) && !(wide as f32).is_finite() {
-            return Err(SetRefusal::OutOfRange);
         }
         Ok(())
     }
 
     fn land(cell: &ParamCell, value: &U) {
-        cell.store_wide(value.to_wide(), Ordering::Release);
+        cell.store(value.to_cell(), Ordering::Release);
     }
 }
 
@@ -168,7 +162,7 @@ impl<U: ParamUnit> Describe for Info<ParamTarget<U>> {
             .seed(target.node, target.addr, target.owner)
             .map(|seed| TargetInfo {
                 param: target.addr,
-                default: U::from_wide(seed),
+                default: U::from_cell(seed),
             })
             .ok_or((id, ValueErrorKind::NoSuchTarget))
     }

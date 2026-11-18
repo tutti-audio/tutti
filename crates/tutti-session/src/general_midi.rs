@@ -82,7 +82,7 @@ impl GeneralMidi {
     /// both effects. A store into the strip's cell, read once per block.
     pub fn set_gain(&self, gain: Amplitude) {
         // The param cell is an `f32` word: the gain narrows once.
-        self.strip_params.set(UnitParam::Volume, gain.get() as f32);
+        self.strip_params.set(UnitParam::Volume, gain.get());
     }
 
     /// Takes the whole setup out of the graph: the unit with its queue and

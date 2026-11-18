@@ -291,7 +291,7 @@ mod tests {
         let mut bw = prepared_at(BrickwallLimiterNode::<f32>::new(Db::new(-6.0)), RATE_44K);
         let set = bw.param_set();
         let mut out = [0.0f32; 2];
-        assert!(set.set(UnitParam::Ceiling, f32::NAN));
+        assert!(set.set(UnitParam::Ceiling, f64::NAN));
         tick(&mut bw, &[1.0, -1.0], &mut out);
         let held = sample_gain(Db::new(-6.0));
         assert_eq!(out, [held, -held]);
@@ -309,7 +309,7 @@ mod tests {
         );
         tick(&mut born_nan, &[2.0, -2.0], &mut out);
         assert_eq!(out, [1.0, -1.0], "a NaN-built brickwall clamps at 0 dB");
-        assert!(born_nan.param_set().set(UnitParam::Ceiling, f32::NAN));
+        assert!(born_nan.param_set().set(UnitParam::Ceiling, f64::NAN));
         tick(&mut born_nan, &[2.0, -2.0], &mut out);
         assert_eq!(out, [1.0, -1.0], "a NaN write keeps the ceiling");
     }
