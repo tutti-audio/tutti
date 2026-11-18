@@ -20,6 +20,32 @@ impl Imp {
         Some(Self { handle })
     }
 
+    /// A watch on the process `pid` of any parent. `None` when it has ended
+    /// already or cannot be opened.
+    pub(super) fn of_pid(pid: u32) -> Option<Self> {
+        use std::os::windows::io::FromRawHandle;
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+
+        // SAFETY: `OpenProcess` takes only scalars; a non-null handle it
+        // returns is owned here and closed by the `OwnedHandle`.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        (!handle.is_null()).then(|| Self {
+            // SAFETY: the handle is open, non-null and owned by no one else.
+            handle: unsafe { OwnedHandle::from_raw_handle(handle) },
+        })
+    }
+
+    /// Blocks until the process has ended: `true`. `false` when the wait
+    /// itself failed.
+    pub(super) fn wait_ended(&self) -> bool {
+        use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+        use windows_sys::Win32::System::Threading::INFINITE;
+
+        // SAFETY: `handle` is an open process handle owned by `self` for the
+        // whole call, and the wait takes no pointer.
+        unsafe { WaitForSingleObject(self.handle.as_raw_handle(), INFINITE) == WAIT_OBJECT_0 }
+    }
+
     pub(super) fn wait(&self, timeout: Duration) -> bool {
         let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX - 1);
         // SAFETY: `handle` is an open process handle owned by `self` for the

@@ -17,8 +17,8 @@
 //! - **The Processor** travels through `tutti_rt`'s handoff: the main thread lends it at an
 //!   activation and recalls it before a
 //!   deactivation, and this thread trades it at its next poll (between blocks,
-//!   and every [`RENDER_WAIT`] while the host is quiet, so a recall is never
-//!   left waiting for a block).
+//!   and when the main thread rings the thread's wake, so a recall is never
+//!   left waiting for a block: [`crate::ties`]).
 //! - **Commands** ([`ToRender`]) travel one way, main to render, through a
 //!   `tutti_rt` ring: the slab with the scratch sized for it, the plugin's
 //!   parameter output, the figures a block reads ([`RenderConfig`]) and the seat the Processor
@@ -38,9 +38,9 @@
 //! command the main thread pushed before it answered the host is in effect for
 //! every block the host sends after that answer.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tutti_rt::{StopToken, ThreadHandle};
+use tutti_rt::{LockExt, StopToken, ThreadHandle};
 
 use std::borrow::Cow;
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabLayout, SlabWriter};
@@ -56,13 +56,10 @@ use tutti_rt::{
 use crate::audio_pipeline::{
     AudioBlock, AudioPipeline, AudioScratch, BlockFault, Clock, ProcessExtras,
 };
+use crate::bell::Bell;
 use crate::served::Render;
+use crate::ties::{Notify, Patience, Ties, ties};
 use crate::transport::Transport;
-
-/// How long the render thread waits for a request before it looks at its
-/// commands and its seat again: the longest a recall of the Processor waits
-/// for a host that sends no blocks. A block's request ends the wait at once.
-pub(crate) const RENDER_WAIT: Duration = Duration::from_millis(5);
 
 /// How many commands may be queued to the render thread. A load is a handful;
 /// the queue is sized so the handshake, which runs before the thread does,
@@ -115,8 +112,9 @@ impl RenderConfig {
 /// Processor, which the session's type-erased plugin does not).
 pub(crate) trait RenderEnd: Render + Send {
     /// Between blocks: trades with the main thread (takes a Processor lent to
-    /// it, returns one that was recalled).
-    fn poll(&mut self);
+    /// it, returns one that was recalled). Whether the Processor's presence
+    /// changed.
+    fn poll(&mut self) -> bool;
     /// Forgets the plugin's signal history, between blocks. A plugin whose
     /// Processor is not here has nothing to forget.
     fn reset(&mut self);
@@ -163,8 +161,10 @@ impl<P: Processor + 'static> Render for End<P> {
 }
 
 impl<P: Processor + 'static> RenderEnd for End<P> {
-    fn poll(&mut self) {
+    fn poll(&mut self) -> bool {
+        let before = self.rt.held().is_some();
         let _ = self.rt.poll(Processor::stop);
+        before != self.rt.held().is_some()
     }
 
     fn reset(&mut self) {
@@ -288,6 +288,7 @@ struct LossWriters {
 
 /// The main thread's end of the render thread's queues.
 pub(crate) struct RenderLink {
+    ties: Ties,
     to: RingWriter<ToRender>,
     back: RingReader<Back>,
     losses: LossReaders,
@@ -306,6 +307,11 @@ pub(crate) struct RenderLink {
 }
 
 impl RenderLink {
+    /// What wakes the render thread and what it wakes.
+    pub(crate) fn ties(&self) -> &Ties {
+        &self.ties
+    }
+
     /// Attaches `slab`: the render thread takes it with scratch sized to its
     /// layout, in the format blocks are rendered in.
     pub(crate) fn attach_slab(&mut self, slab: SlabWriter) {
@@ -397,16 +403,21 @@ impl RenderLink {
         );
     }
 
-    /// Queues `command`, waiting a little for room if the queue is full.
-    /// A command the render thread does not take within [`SEND_PATIENCE`] is
-    /// dropped and logged: the render thread has stopped.
+    /// Queues `command` and wakes the render thread, waiting for it to make
+    /// room if the queue is full. A command the render thread does not take
+    /// within [`SEND_PATIENCE`] is dropped and logged: the render thread has
+    /// stopped.
     pub(crate) fn send(&mut self, command: ToRender) {
         self.reap();
         let mut command = command;
-        let giving_up = Instant::now() + SEND_PATIENCE;
+        let patience = Patience::new(Instant::now(), SEND_PATIENCE);
         loop {
+            let seen = self.ties.settle.seen();
             match self.to.push(command) {
-                Ok(()) => return,
+                Ok(()) => {
+                    self.ties.wake.ring();
+                    return;
+                }
                 Err(Returned {
                     error: PushError::Disconnected,
                     ..
@@ -416,11 +427,12 @@ impl RenderLink {
                 }
                 Err(Returned { value, .. }) => command = value,
             }
-            if Instant::now() >= giving_up {
+            if patience.left(Instant::now()).is_none() {
                 tracing::error!("plugin-server: the render thread takes no commands");
                 return;
             }
-            std::thread::sleep(Duration::from_micros(200));
+            // Room is made when the render thread takes a command.
+            self.ties.settle.wait_past(seen, patience);
         }
     }
 
@@ -460,16 +472,18 @@ impl RenderLink {
     /// for the next block to do it. `false` when no block reached the plugin
     /// in that time (the host is quiet).
     pub(crate) fn wait_applied(&mut self, id: u64, within: Duration) -> bool {
-        let giving_up = Instant::now() + within;
+        let patience = Patience::new(Instant::now(), within);
         loop {
+            let seen = self.ties.settle.seen();
             self.reap();
             if self.barrier_acked >= id {
                 return true;
             }
-            if Instant::now() >= giving_up {
+            if patience.left(Instant::now()).is_none() {
                 return false;
             }
-            std::thread::sleep(Duration::from_micros(200));
+            // The acknowledgement is handed back by the render thread.
+            self.ties.settle.wait_past(seen, patience);
         }
     }
 }
@@ -484,6 +498,10 @@ pub(crate) struct RenderSide {
     seat: Option<Box<dyn RenderEnd>>,
     /// The barrier the next block that reaches the plugin acknowledges.
     barrier: Option<u64>,
+    /// What ends the thread's wait: rung by the main thread.
+    wake: Bell,
+    /// How the thread tells the main thread it has made progress.
+    notify: Notify,
     losses: LossWriters,
     /// Blocks the plugin has failed: the cause of the first, and of each
     /// that makes a power of two, goes home ([`Back::Failure`]).
@@ -493,7 +511,12 @@ pub(crate) struct RenderSide {
 /// A session's two halves: the control side the main thread drives, and the
 /// render side, which a thread runs ([`RenderThread::spawn`]) once the host's
 /// audio connection is there.
-pub(crate) fn link() -> (RenderLink, RenderSide) {
+///
+/// # Errors
+///
+/// The OS refused a bell.
+pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
+    let (ties, render_ties) = ties()?;
     let (to, commands) = ring::<ToRender>(COMMANDS, Overflow::Refuse);
     let (back_tx, back) = ring::<Back>(COMMANDS, Overflow::Refuse);
     let config = RenderConfig::new();
@@ -505,8 +528,9 @@ pub(crate) fn link() -> (RenderLink, RenderSide) {
         back_refused: back_refused.writer(),
     };
     let pipeline = AudioPipeline::new(failed_blocks.writer());
-    (
+    Ok((
         RenderLink {
+            ties,
             to,
             back,
             losses: LossReaders {
@@ -530,10 +554,12 @@ pub(crate) fn link() -> (RenderLink, RenderSide) {
             config,
             seat: None,
             barrier: None,
+            wake: render_ties.wake,
+            notify: render_ties.notify,
             losses: writers,
             failures: 0,
         },
-    )
+    ))
 }
 
 impl RenderSide {
@@ -541,7 +567,9 @@ impl RenderSide {
     /// command carries finished values, and what a swap replaces goes back to
     /// the main thread.
     pub(crate) fn drain(&mut self) {
+        let mut took = false;
         while let Some(command) = self.commands.pop() {
+            took = true;
             match command {
                 ToRender::Slab { slab, scratch } => {
                     let old_scratch = self.pipeline.install_scratch(scratch);
@@ -583,6 +611,10 @@ impl RenderSide {
                 }
             }
         }
+        if took {
+            // Room in the queue, for a main thread that waits for it.
+            self.notify.bump();
+        }
     }
 
     /// Hands something back to the main thread. A full queue, or one whose
@@ -593,35 +625,38 @@ impl RenderSide {
         if self.back.push(back).is_err() {
             self.losses.back_refused.add(1);
         }
+        self.notify.bump();
     }
 
     /// Between blocks: trades the Processor with the main thread.
     pub(crate) fn poll_seat(&mut self) {
-        if let Some(seat) = self.seat.as_mut() {
-            seat.poll();
+        if let Some(seat) = self.seat.as_mut()
+            && seat.poll()
+        {
+            // A Processor came or went: the main thread may be waiting for it.
+            self.notify.bump();
         }
     }
 
     /// One pass of the thread: applies the commands, trades the Processor,
-    /// waits up to `wait` for a request on `io` and serves it. With no `io`
-    /// (the host's audio connection has gone) it only waits.
+    /// waits for a request on `io` or for the main thread's wake, and serves
+    /// the request. With no `io` (the host's audio connection has gone) it
+    /// waits for the wake alone.
     ///
     /// # Errors
     ///
     /// The transport fails (the host went away, or sent a frame that does not
     /// decode), or the host sent a message that is not the audio connection's.
-    pub(crate) fn step(
-        &mut self,
-        io: Option<&mut Box<dyn Transport>>,
-        wait: Duration,
-    ) -> BridgeResult<()> {
+    pub(crate) fn step(&mut self, io: Option<&mut Box<dyn Transport>>) -> BridgeResult<()> {
         self.drain();
         self.poll_seat();
         let Some(io) = io else {
-            std::thread::sleep(wait);
+            self.wake.wait(None)?;
             return Ok(());
         };
-        if !io.wait_readable(wait)? {
+        let readable = io.wait_readable(None, &self.wake)?;
+        self.wake.clear();
+        if !readable {
             return Ok(());
         }
         let msg = io.recv()?;
@@ -825,33 +860,73 @@ impl RenderSide {
     }
 }
 
+/// A render thread that could not start, with the side it was to run.
+pub(crate) struct SpawnFailed {
+    /// Why it could not start.
+    pub(crate) error: std::io::Error,
+    /// The render side, still whole.
+    pub(crate) side: RenderSide,
+}
+
+impl std::fmt::Debug for SpawnFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpawnFailed")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The thread that renders: owns the [`RenderSide`] and the host's audio
 /// connection until it is stopped.
 pub(crate) struct RenderThread {
     handle: Option<ThreadHandle<RenderSide>>,
+    /// Rung to end the thread's wait when it is stopped.
+    wake: Bell,
     /// Why the audio connection ended, if it did: the thread then only trades
     /// the Processor, until it is stopped.
     ended: Arc<OnceLock<Arc<BridgeError>>>,
 }
 
 impl RenderThread {
-    /// Starts the thread over `audio`, the host's audio connection.
+    /// Starts the thread over `audio`, the host's audio connection, or over
+    /// none: a thread that only trades the Processor until it is stopped.
     ///
     /// The thread asks the OS for the highest priority it grants
     /// ([`crate::server::request_audio_priority`]): it is the one that renders.
-    pub(crate) fn spawn(side: RenderSide, audio: Box<dyn Transport>) -> std::io::Result<Self> {
+    ///
+    /// # Errors
+    ///
+    /// The thread could not start: the render side comes back with the error,
+    /// for whoever still has a Processor to bring home through it.
+    pub(crate) fn spawn(
+        side: RenderSide,
+        audio: Option<Box<dyn Transport>>,
+    ) -> Result<Self, Box<SpawnFailed>> {
         let ended = Arc::new(OnceLock::new());
-        let handle = tutti_rt::spawn_named("plugin-render", None, {
-            let ended = Arc::clone(&ended);
+        let wake = side.wake.clone();
+        let slot = Arc::new(Mutex::new(Some(side)));
+        let spawned = tutti_rt::spawn_named("plugin-render", None, {
+            let (ended, slot) = (Arc::clone(&ended), Arc::clone(&slot));
             move |stop: &StopToken| {
+                let side = slot.lock_recover().take().expect("the side is taken once");
                 crate::server::request_audio_priority("the render thread");
                 run(side, audio, stop, &ended)
             }
-        })?;
-        Ok(Self {
-            handle: Some(handle),
-            ended,
-        })
+        });
+        match spawned {
+            Ok(handle) => Ok(Self {
+                handle: Some(handle),
+                wake,
+                ended,
+            }),
+            Err(error) => Err(Box::new(SpawnFailed {
+                error,
+                side: slot
+                    .lock_recover()
+                    .take()
+                    .expect("a thread that did not start took nothing"),
+            })),
+        }
     }
 
     /// Why the audio connection ended, once it has.
@@ -868,13 +943,19 @@ impl RenderThread {
     pub(crate) fn stop(mut self) -> RenderSide {
         let handle = self.handle.take().expect("stopped once");
         handle.token().stop();
+        self.wake.ring();
         handle.join().expect("the render thread does not panic")
     }
 }
 
 impl Drop for RenderThread {
     fn drop(&mut self) {
-        // The handle's drop stops the thread and joins it.
+        // The handle's drop stops the thread and joins it: the wake ends the
+        // wait the join would otherwise sit through.
+        if let Some(handle) = self.handle.as_ref() {
+            handle.token().stop();
+            self.wake.ring();
+        }
         drop(self.handle.take());
     }
 }
@@ -883,13 +964,12 @@ impl Drop for RenderThread {
 /// trading the Processor until `stop`.
 fn run(
     mut side: RenderSide,
-    audio: Box<dyn Transport>,
+    mut audio: Option<Box<dyn Transport>>,
     stop: &StopToken,
     ended: &OnceLock<Arc<BridgeError>>,
 ) -> RenderSide {
-    let mut audio = Some(audio);
     while !stop.is_stopped() {
-        if let Err(error) = side.step(audio.as_mut(), RENDER_WAIT) {
+        if let Err(error) = side.step(audio.as_mut()) {
             // The connection is gone; the Processor may still be recalled, so
             // the thread keeps trading it until the main thread has it back.
             audio = None;
@@ -932,7 +1012,7 @@ mod tests {
     /// command carries, and the values the render side replaces go back to it.
     #[test]
     fn a_drain_that_replaces_the_slab_refits_the_params_and_changes_format_never_allocates() {
-        let (mut link, mut side) = link();
+        let (mut link, mut side) = link().expect("bells");
         let (_first_host, first) = slab("drain_first", 256);
         link.attach_slab(first);
         link.reserve_params(4, 64);
@@ -950,13 +1030,47 @@ mod tests {
         assert_eq!(link.losses(), Losses::default());
     }
 
+    /// The tests that need a socket pair: a unix local socket is a descriptor.
+    #[cfg(unix)]
+    mod woken {
+        use super::*;
+        use crate::main_loop::Stream;
+        use crate::transport::SocketTransport;
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::UnixStream;
+
+        /// **A command wakes a render thread that waits on a quiet connection**:
+        /// with no block and no timer to end its wait, the thread takes the slab the
+        /// main thread queued, and says so. The wait for that outlasts the test
+        /// harness's limit, so a thread no command wakes fails.
+        #[test]
+        fn a_command_wakes_a_render_thread_that_waits_on_a_quiet_connection() {
+            let (mut link, side) = link().expect("bells");
+            let (_host_end, server_end) = UnixStream::pair().expect("socket pair");
+            let audio = SocketTransport::audio(Stream::from(OwnedFd::from(server_end)));
+            let thread = RenderThread::spawn(side, Some(Box::new(audio))).expect("the thread");
+
+            let (_slab_host, slab) = slab("wake", 256);
+            let settle = link.ties().settle.clone();
+            let seen = settle.seen();
+            link.attach_slab(slab);
+            settle.wait_past(
+                seen,
+                Patience::new(Instant::now(), Duration::from_secs(600)),
+            );
+
+            let side = thread.stop();
+            assert!(side.has_slab(), "the command was taken while no block came");
+        }
+    }
+
     /// **A parameter list that grows after load gets its output reserved
     /// again, at the load's room; one that shrinks keeps it.** An output
     /// reserved for 4 parameters at a room of 10, fitted to 8, holds 8 queues;
     /// fitted to 2, it still does.
     #[test]
     fn a_grown_parameter_list_is_reserved_again_at_the_loads_room() {
-        let (mut link, mut side) = link();
+        let (mut link, mut side) = link().expect("bells");
         link.reserve_params(4, 10);
         side.drain();
         assert_eq!(side.pipeline().param_queues(), 4);
@@ -1045,7 +1159,9 @@ mod tests {
     }
 
     impl RenderEnd for Faulty {
-        fn poll(&mut self) {}
+        fn poll(&mut self) -> bool {
+            false
+        }
         fn reset(&mut self) {}
         fn set_features(&mut self, _: Features) {}
         fn has_processor(&mut self) -> bool {
@@ -1060,7 +1176,7 @@ mod tests {
     /// A render side with a stereo slab and `plugin` seated, and the host's
     /// end of the slab.
     fn seated(name: &str, plugin: Faulty) -> (RenderLink, RenderSide, impl Sized) {
-        let (mut link, mut side) = link();
+        let (mut link, mut side) = link().expect("bells");
         let (host, writer) = slab(name, FRAMES);
         link.attach_slab(writer);
         link.send(ToRender::Config(RenderConfig {
@@ -1163,7 +1279,7 @@ mod tests {
                 side.handle(block(8)).expect("answered");
             });
             // No plugin at all.
-            let (link_none, mut none) = super::link();
+            let (link_none, mut none) = super::link().expect("bells");
             on_render_thread(&mut || {
                 none.handle(block(1)).expect("answered");
             });
@@ -1325,7 +1441,7 @@ mod tests {
             self.frames.read(&mut self.request.as_slice())
         }
 
-        fn wait_readable(&mut self, _: Duration) -> BridgeResult<bool> {
+        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
             Ok(true)
         }
 
@@ -1383,7 +1499,7 @@ mod tests {
         let barrier = link.barrier();
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..STEPS {
-                side.step(Some(&mut io), Duration::ZERO).unwrap();
+                side.step(Some(&mut io)).unwrap();
             }
         });
         assert!(

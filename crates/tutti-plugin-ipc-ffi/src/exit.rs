@@ -26,11 +26,23 @@ mod platform {
             None
         }
 
+        pub(super) fn of_pid(_pid: u32) -> Option<Self> {
+            None
+        }
+
+        pub(super) fn wait_ended(&self) -> bool {
+            match *self {}
+        }
+
         pub(super) fn wait(&self, _timeout: std::time::Duration) -> bool {
             match *self {}
         }
     }
 }
+
+mod host_watch;
+
+pub use host_watch::watch_host;
 
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -13,12 +13,16 @@
 //! - **The wait for a child's end** ([`ExitWait`]): the host's wait for a server
 //!   process to end, which the OS wakes (a pidfd on Linux, a kqueue on macOS, the
 //!   process handle on Windows).
-//! - **The OS calls** (`wait_readable` and `poll_wait` (the server's wait on its
-//!   socket and the descriptors a plugin asked to have watched, and an
-//!   in-process host's zero-timeout look at the same) on unix, `process_exists`,
-//!   and `parent_process_id`, `terminate_process` and `pipe_bytes_available` on
-//!   Windows): the server's wait for its host, its check that the host still
-//!   runs and its end without detach, and the host's peek at a named pipe.
+//! - **The watch on a host** ([`watch_host`]): a thread the OS wakes when a
+//!   named process ends, which runs the caller's reply to that, and
+//!   [`terminate_process`], the end that runs no cleanup.
+//! - **The OS calls** (`wait_readable`, `wait_readable_either` and `poll_wait`
+//!   (the server's waits on its sockets, a doorbell's descriptor and the
+//!   descriptors a plugin asked to have watched, and an in-process host's
+//!   zero-timeout look at the same) on unix, `process_exists`,
+//!   `parent_process_id`, `terminate_process` and, on Windows,
+//!   `pipe_bytes_available`): the server's check that the host still runs and
+//!   its end without cleanup, and the host's peek at a named pipe.
 //!
 //! - **The vocabulary of a wait on descriptors** ([`FdId`], [`Interest`],
 //!   [`Watch`], [`Ready`]): the typed values `poll_wait` and `poll_now` take and
@@ -37,7 +41,7 @@ mod os;
 mod os;
 mod wakeups;
 
-pub use exit::ExitWait;
+pub use exit::{ExitWait, watch_host};
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
 pub use mapping::{MappingWriter, SharedMapping};
 pub use os::*;
