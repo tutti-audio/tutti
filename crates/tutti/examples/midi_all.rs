@@ -20,8 +20,8 @@
 use tutti::midi::{
     self, AddedInstrument, FileEvent, Message, MidiChannel, MidiFile, MidiGroup,
     MidiHardwareOptions, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
-    PitchBendSensitivity, SmfDivision, SmfFormat, TakePlacement, Tick, TicksPerQuarterNote, Track,
-    U7, Voice1,
+    PitchBendSensitivity, SmfDivision, SmfFormat, TakePlacement, Tick, TicksPerQuarterNote,
+    Timebase, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
 use tutti::{
@@ -118,7 +118,10 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
 
     // A clip from a file's timeline: the packets it holds at their beats.
     let file = file()?;
-    s.midi().play_file(synth.node(), Beat(0.0), &file)?;
+    let Timebase::Metrical(metrical) = file.timebase() else {
+        return Err("the file is timed in SMPTE frames, with no beats to play on".into());
+    };
+    s.midi().play_file(synth.node(), Beat(0.0), metrical)?;
 
     // Live notes, through the handle's keys: a MIDI 2.0 note with its
     // 16-bit velocity, and a decoded `Message`, which `push` takes as it takes
