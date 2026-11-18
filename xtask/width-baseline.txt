@@ -43,7 +43,7 @@ crates/tutti-dsp/src/glide.rs  5  migrating: R1/S7
 crates/tutti-dsp/src/level.rs  1  migrating: R1/S7
 crates/tutti-dsp/src/modulation/allpass.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/modulation/mod_delay.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/oscillator.rs  2  migrating: R1/S7
+crates/tutti-dsp/src/oscillator.rs  1  migrating: R1/S7
 crates/tutti-dsp/src/oversample.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/resample/fft.rs  10  migrating: R1/S7
 crates/tutti-dsp/src/reverb/fdn/bank.rs  15  migrating: R1/S7
@@ -51,7 +51,6 @@ crates/tutti-dsp/src/reverb/fdn/design.rs  3  migrating: R1/S7
 crates/tutti-dsp/src/reverb/freeverb/bank.rs  9  migrating: R1/S7
 crates/tutti-dsp/src/reverb/network.rs  2  migrating: R1/S7
 crates/tutti-dsp/src/reverb/plate/bank.rs  14  migrating: R1/S7
-crates/tutti-dsp/src/ring_mod.rs  1  migrating: R1/S7
 crates/tutti-dsp/src/smoother.rs  6  migrating: R1/S7
 crates/tutti-dsp/src/spatial/hrtf.rs  6  migrating: R1/S7
 crates/tutti-dsp/src/spatial/hrtf/sphere.rs  4  migrating: R1/S7
@@ -105,19 +104,14 @@ crates/tutti-modulation/src/sources.rs  2  migrating: B2/B3
 crates/tutti-nodes/src/automation/control_lane.rs  8  migrating: B2/B3
 crates/tutti-nodes/src/automation/lane.rs  2  migrating: R1/S7
 crates/tutti-nodes/src/click.rs  3  migrating: R1/S7
-crates/tutti-nodes/src/convolution/node.rs  5  migrating: R1/S7
-crates/tutti-nodes/src/dynamics/multiband.rs  9  migrating: R1/S7
-crates/tutti-nodes/src/lfo.rs  1  migrating: R1/S7
-crates/tutti-nodes/src/mid_side.rs  1  migrating: R1/S7
+crates/tutti-nodes/src/dynamics/multiband.rs  8  migrating: B2/B3
+crates/tutti-nodes/src/lfo.rs  3  migrating: R1/S7
 crates/tutti-nodes/src/modulation/mod_delay.rs  5  migrating: R1/S7
 crates/tutti-nodes/src/modulation/phaser.rs  5  migrating: R1/S7
 crates/tutti-nodes/src/modulation/sweep_clock.rs  1  migrating: B2/B3
-crates/tutti-nodes/src/oscillator.rs  3  migrating: R1/S7
+crates/tutti-nodes/src/oscillator.rs  1  migrating: R1/S7
 crates/tutti-nodes/src/params.rs  8  migrating: B2/B3
-crates/tutti-nodes/src/polarity.rs  1  migrating: R1/S7
 crates/tutti-nodes/src/reconcile.rs  1  migrating: B2/B3
-crates/tutti-nodes/src/spatial/hrtf/node.rs  1  migrating: R1/S7
-crates/tutti-nodes/src/spatial/vbap/node.rs  1  migrating: R1/S7
 crates/tutti-nodes/src/strip.rs  7  migrating: R1/S7
 crates/tutti-plugin-host/src/node/graph.rs  1  migrating: plugins step 7
 crates/tutti-plugin-probe/src/measure.rs  2  migrating: plugins step 7
