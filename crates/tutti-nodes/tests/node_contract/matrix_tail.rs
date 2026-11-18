@@ -594,7 +594,7 @@ fn a_burst_after_a_parked_gap_is_a_fresh_nodes_with_a_driven_gain() {
 fn a_gap_of_exactly_the_tail_restarts_the_engine_and_one_less_does_not() {
     let irs = [tap(40, 0.5), tap(90, -0.25), tap(10, 0.75), tap(200, 0.125)];
     let engine = |input: &[Vec<f32>]| -> Vec<Vec<f32>> {
-        let mut m = MatrixConvolver::two_by_two(
+        let mut m = MatrixConvolver::<f32>::two_by_two(
             [
                 Mono::new(&irs[0][..]),
                 Mono::new(&irs[1][..]),

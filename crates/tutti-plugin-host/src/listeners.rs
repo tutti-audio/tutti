@@ -75,11 +75,11 @@ impl std::fmt::Debug for Subscription {
     }
 }
 
-/// What a plugin reported, through whichever of the three listeners heard it
+/// What a plugin reported, through whichever of the four listeners heard it
 /// ([`PluginHandle::subscribe`](crate::PluginHandle::subscribe)).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub enum Notice {
+pub enum PluginSignal {
     /// The plugin edited one of its own parameters.
     Param(ParamEdit),
     /// A cached view of the plugin is stale (re-read it).

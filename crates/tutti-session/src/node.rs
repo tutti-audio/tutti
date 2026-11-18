@@ -209,14 +209,26 @@ param_session_node!(
     tutti_nodes::LimiterNode<f64>,
     tutti_nodes::BrickwallLimiterNode<f32>,
     tutti_nodes::BrickwallLimiterNode<f64>,
-    tutti_nodes::DistortionNode,
+    tutti_nodes::DistortionNode<f32>,
+    tutti_nodes::DistortionNode<f64>,
     tutti_nodes::BusStripNode,
-    tutti_nodes::CrossoverNode,
+    tutti_nodes::CrossoverNode<f32>,
+    tutti_nodes::CrossoverNode<f64>,
 );
 
 /// The multiband compressor: its params by address, its band meters beside
 /// them in its controls.
-impl SessionNode for tutti_nodes::MultibandCompressorNode {
+impl SessionNode for tutti_nodes::MultibandCompressorNode<f32> {
+    fn params(controls: &tutti_nodes::MultibandControls) -> Option<ParamSet> {
+        Some(controls.params().clone())
+    }
+
+    fn reclaimer(_: &tutti_nodes::MultibandControls) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
+
+impl SessionNode for tutti_nodes::MultibandCompressorNode<f64> {
     fn params(controls: &tutti_nodes::MultibandControls) -> Option<ParamSet> {
         Some(controls.params().clone())
     }

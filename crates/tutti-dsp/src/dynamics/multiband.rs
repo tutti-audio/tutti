@@ -33,11 +33,11 @@ use super::shared::{CHUNK, GAIN_GLIDE};
 use crate::convert::convert_equal;
 use crate::{
     COEFF_INTERVAL, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
-    CrossoverModel, Glide, Steps,
+    CrossoverModel, Glide, Lanes, Lerp, Steps,
 };
 
 /// The most bands.
-const MAX_BANDS: usize = 4;
+const MAX_BANDS: usize = BankShape::MAX_BANDS;
 
 /// The controls of one band.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -128,7 +128,13 @@ impl BandReductions {
 }
 
 /// The width and band count of a [`MultibandBank`] that can be built: what
-/// [`MultibandBank::check`] returns, so [`MultibandBank::from_shape`] has nothing to refuse.
+/// [`BankShape::try_from`] makes (from `(width, bands)`), so [`MultibandBank::from_shape`] has
+/// nothing to refuse. The check does not depend on the bank's float.
+///
+/// # Errors
+///
+/// `BankShape::try_from((width, bands))` is [`CrossoverError::Bands`] if `bands` is not 2 to 4,
+/// and [`CrossoverError::Channels`] for no channels or more than the planes of a crossover hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BankShape {
     width: ChannelLayout,
@@ -136,6 +142,11 @@ pub struct BankShape {
 }
 
 impl BankShape {
+    /// The fewest bands.
+    pub const MIN_BANDS: usize = 2;
+    /// The most bands.
+    pub const MAX_BANDS: usize = 4;
+
     /// The channels each band has.
     #[must_use]
     pub fn width(&self) -> ChannelLayout {
@@ -149,22 +160,41 @@ impl BankShape {
     }
 }
 
-/// The planes a chunk of [`CHUNK`] frames passes through, sized when the bank is built.
-#[derive(Clone, Debug)]
-struct Scratch {
-    /// The input, as `f32`, a plane per channel.
-    input: Vec<Vec<f32>>,
-    /// The crossover's bands, band-major: plane `band * width + channel`.
-    bands: Vec<Vec<f32>>,
-    /// One band, compressed.
-    squeezed: Vec<Vec<f32>>,
-    /// The bands summed.
-    sum: Vec<Vec<f32>>,
+impl TryFrom<(ChannelLayout, usize)> for BankShape {
+    type Error = CrossoverError;
+
+    fn try_from((width, bands): (ChannelLayout, usize)) -> Result<Self, CrossoverError> {
+        if !(Self::MIN_BANDS..=Self::MAX_BANDS).contains(&bands) {
+            return Err(CrossoverError::Bands {
+                bands,
+                min: Self::MIN_BANDS,
+                max: Self::MAX_BANDS,
+            });
+        }
+        let channels = usize::from(width.count());
+        if channels == 0 || ChannelLayout::try_from(channels * bands).is_err() {
+            return Err(CrossoverError::Channels { channels });
+        }
+        Ok(Self { width, bands })
+    }
 }
 
-impl Scratch {
+/// The planes a chunk of [`CHUNK`] frames passes through, sized when the bank is built.
+#[derive(Clone, Debug)]
+struct Scratch<F> {
+    /// The input, in `F`, a plane per channel.
+    input: Vec<Vec<F>>,
+    /// The crossover's bands, band-major: plane `band * width + channel`.
+    bands: Vec<Vec<F>>,
+    /// One band, compressed.
+    squeezed: Vec<Vec<F>>,
+    /// The bands summed.
+    sum: Vec<Vec<F>>,
+}
+
+impl<F: Float> Scratch<F> {
     fn new(width: usize, bands: usize) -> Self {
-        let planes = |n: usize| vec![vec![0.0f32; CHUNK]; n];
+        let planes = |n: usize| vec![vec![F::ZERO; CHUNK]; n];
         Self {
             input: planes(width),
             bands: planes(width * bands),
@@ -177,50 +207,47 @@ impl Scratch {
 /// A multiband compressor of `bands` bands over a fixed width: the crossover, a
 /// [`CompressorBank`] a band, and the weights that bypass and solo.
 ///
-/// Built on the control side for one rate; the state is `f32`, and a view of another sample
-/// format is converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state is `F`, the graph's float, and a view of
+/// another sample format is converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct MultibandBank {
+pub struct MultibandBank<F: Float + Lanes + Lerp> {
     width: usize,
     bands: usize,
     rate: SampleRate,
-    crossover: CrossoverBank,
+    crossover: CrossoverBank<F>,
     /// The model the controls design, in place.
     model: CrossoverModel,
     /// The coefficients in flight over one grid period.
     coefficients: Glide<CrossoverCoefficients>,
-    compressors: [CompressorBank<f32>; MAX_BANDS],
-    /// 1 while the band is bypassed, else 0, gliding over [`GAIN_GLIDE`].
-    bypass: [Glide<f32>; MAX_BANDS],
-    /// 1 while the band is heard, else 0, gliding over [`GAIN_GLIDE`].
-    audible: [Glide<f32>; MAX_BANDS],
+    compressors: [CompressorBank<F>; MAX_BANDS],
+    /// 1 while the band is bypassed, else 0, gliding over [`GAIN_GLIDE`]: a per-sample weight
+    /// in `F`.
+    bypass: [Glide<F>; MAX_BANDS],
+    /// 1 while the band is heard, else 0, gliding over [`GAIN_GLIDE`]: a per-sample weight in
+    /// `F`.
+    audible: [Glide<F>; MAX_BANDS],
     /// The steps a weight glide takes: [`GAIN_GLIDE`] at the rate.
     steps: u32,
     /// Whether the first aim since the last reset has landed.
     landed: bool,
     /// Each band's deepest reduction since the last reading, in dB.
     deepest: [Db; MAX_BANDS],
-    scratch: Scratch,
+    scratch: Scratch<F>,
 }
 
-impl MultibandBank {
-    /// The fewest bands.
-    pub const MIN_BANDS: usize = 2;
-    /// The most bands.
-    pub const MAX_BANDS: usize = MAX_BANDS;
-
+impl<F: Float + Lanes + Lerp> MultibandBank<F> {
     /// A multiband of `bands` bands over `width` at `rate`, splitting and summing until it
     /// is aimed. Allocates: build it on the control side.
     ///
     /// # Errors
     ///
-    /// As [`check`](Self::check).
+    /// As [`BankShape::try_from`].
     pub fn new(
         width: ChannelLayout,
         bands: usize,
         rate: SampleRate,
     ) -> Result<Self, CrossoverError> {
-        Ok(Self::from_shape(Self::check(width, bands)?, rate))
+        Ok(Self::from_shape(BankShape::try_from((width, bands))?, rate))
     }
 
     /// A multiband of a checked `shape` at `rate`: [`new`](Self::new) past its checks.
@@ -228,7 +255,7 @@ impl MultibandBank {
     ///
     /// # Panics
     ///
-    /// Never for a shape [`check`](Self::check) made: the one `expect` is on the crossover
+    /// Never for a shape [`BankShape::try_from`] made: the one `expect` is on the crossover
     /// design's band count, which a shape keeps within 2 to 4.
     #[must_use]
     pub fn from_shape(shape: BankShape, rate: SampleRate) -> Self {
@@ -247,35 +274,13 @@ impl MultibandBank {
             coefficients: Glide::landed(model.coefficients()).by(COEFF_INTERVAL as u32),
             model,
             compressors: core::array::from_fn(|_| CompressorBank::new(rate)),
-            bypass: [Glide::landed(0.0); MAX_BANDS],
-            audible: [Glide::landed(1.0); MAX_BANDS],
+            bypass: [Glide::landed(F::ZERO); MAX_BANDS],
+            audible: [Glide::landed(F::ONE); MAX_BANDS],
             steps,
             landed: false,
             deepest: [Db::UNITY; MAX_BANDS],
             scratch: Scratch::new(channels, bands),
         }
-    }
-
-    /// Whether a bank of `bands` bands over `width` can be built, as the shape that says so.
-    ///
-    /// # Errors
-    ///
-    /// [`CrossoverError::Bands`] if `bands` is not 2 to 4, and
-    /// [`CrossoverError::Channels`] for no channels or more than the planes of a crossover
-    /// hold.
-    pub fn check(width: ChannelLayout, bands: usize) -> Result<BankShape, CrossoverError> {
-        if !(Self::MIN_BANDS..=Self::MAX_BANDS).contains(&bands) {
-            return Err(CrossoverError::Bands {
-                bands,
-                min: Self::MIN_BANDS,
-                max: Self::MAX_BANDS,
-            });
-        }
-        let channels = usize::from(width.count());
-        if channels == 0 || ChannelLayout::try_from(channels * bands).is_err() {
-            return Err(CrossoverError::Channels { channels });
-        }
-        Ok(BankShape { width, bands })
     }
 
     /// How many bands it makes.
@@ -293,8 +298,8 @@ impl MultibandBank {
             .design_into(&CrossoverControls::octaves(self.rate), self.rate);
         self.coefficients = Glide::landed(self.model.coefficients()).by(COEFF_INTERVAL as u32);
         self.compressors = core::array::from_fn(|_| CompressorBank::new(self.rate));
-        self.bypass = [Glide::landed(0.0); MAX_BANDS];
-        self.audible = [Glide::landed(1.0); MAX_BANDS];
+        self.bypass = [Glide::landed(F::ZERO); MAX_BANDS];
+        self.audible = [Glide::landed(F::ONE); MAX_BANDS];
         self.deepest = [Db::UNITY; MAX_BANDS];
         self.landed = false;
     }
@@ -312,8 +317,8 @@ impl MultibandBank {
         let steps = Steps::Fixed(self.steps);
         for (b, band) in bands.iter().enumerate() {
             self.compressors[b].aim(&band.compressor);
-            self.bypass[b].aim_by(f32::from(band.bypass), steps);
-            self.audible[b].aim_by(f32::from(!any_solo || band.solo), steps);
+            self.bypass[b].aim_by(flag(band.bypass), steps);
+            self.audible[b].aim_by(flag(!any_solo || band.solo), steps);
         }
         if !self.landed {
             self.coefficients.settle();
@@ -372,11 +377,11 @@ impl MultibandBank {
             let dst = &mut plane[..n];
             match input.get_plane(c) {
                 Some(src) => convert_equal(&src.samples()[at.clone()], dst),
-                None => dst.fill(0.0),
+                None => dst.fill(F::ZERO),
             }
         }
         for plane in &mut scratch.sum {
-            plane[..n].fill(0.0);
+            plane[..n].fill(F::ZERO);
         }
         let frames = Samples(0)..Samples(n);
         {
@@ -392,9 +397,9 @@ impl MultibandBank {
                 split.slice_mut(frames.clone()),
             );
         }
-        let mut by = [0.0f32; CHUNK];
-        let mut au = [0.0f32; CHUNK];
-        let mut lane = [0.0f32; CHUNK];
+        let mut by = [F::ZERO; CHUNK];
+        let mut au = [F::ZERO; CHUNK];
+        let mut lane = [F::ZERO; CHUNK];
         // The bands are `width` planes each, band-major.
         for (b, band_planes) in scratch.bands.chunks(width).take(self.bands).enumerate() {
             {
@@ -405,12 +410,12 @@ impl MultibandBank {
                     return;
                 };
                 let band = band.slice(frames.clone());
-                // The lane in `f32`, a frame past its end not finite, so not driven.
+                // The lane in `F`, a frame past its end not finite, so not driven.
                 let threshold = lanes.thresholds[b].map(|l| {
                     let all = l.samples();
                     let driven = &all[at.start.min(all.len())..at.end.min(all.len())];
                     for (i, t) in lane[..n].iter_mut().enumerate() {
-                        *t = driven.get(i).map_or(f32::NAN, |x| x.convert_to::<f32>());
+                        *t = driven.get(i).map_or(F::NAN, |x| x.convert_to::<F>());
                     }
                     Mono::new(&lane[..n])
                 });
@@ -424,7 +429,7 @@ impl MultibandBank {
             // The meter counts a band unless the whole chunk is bypassed.
             let deepest = self.compressors[b].take_deepest();
             let bypass = &self.bypass[b];
-            if bypass.blended(n) != 0 || bypass.target() < 1.0 {
+            if bypass.blended(n) != 0 || bypass.target() < F::ONE {
                 self.deepest[b] = self.deepest[b].max(deepest);
             }
             weights(bypass, &mut by[..n]);
@@ -437,19 +442,19 @@ impl MultibandBank {
                 let (x, y) = (&x[..n], &y[..n]);
                 for (i, s) in sum[..n].iter_mut().enumerate() {
                     let (w, a) = (by[i], au[i]);
-                    if a == 0.0 {
+                    if a == F::ZERO {
                         continue;
                     }
                     // The blend toward the unreduced band, makeup included, as the bypass
                     // takes hold; at either end it is exactly one of the two.
-                    let v = if w == 0.0 {
+                    let v = if w == F::ZERO {
                         y[i]
-                    } else if w == 1.0 {
+                    } else if w == F::ONE {
                         x[i]
                     } else {
                         crate::lerp(y[i], x[i], w)
                     };
-                    *s += if a == 1.0 { v } else { v * a };
+                    *s += if a == F::ONE { v } else { v * a };
                 }
             }
         }
@@ -468,10 +473,15 @@ impl MultibandBank {
     }
 }
 
+/// A flag as a weight: 1 if set, else 0.
+fn flag<F: Float>(on: bool) -> F {
+    if on { F::ONE } else { F::ZERO }
+}
+
 /// The weight of `glide` at each of the next frames: its blend while it moves, then its
 /// target.
 #[inline]
-fn weights(glide: &Glide<f32>, out: &mut [f32]) {
+fn weights<F: Float + Lerp>(glide: &Glide<F>, out: &mut [F]) {
     let blended = glide.blended(out.len());
     let taken = glide.taken();
     for (i, w) in out.iter_mut().enumerate() {

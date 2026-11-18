@@ -12,9 +12,8 @@
 //! ([`BlockLosses::failed`](crate::BlockLosses::failed)). The handle's control surface is the plugin's
 //! [`Control`](tutti_plugin_types::Control).
 //!
-//! Nothing here names a format: VST2 is routed through it by
-//! `tutti-plugin`'s `Plugin::open` (feature `vst2`), and
-//! [`load_client`] takes any other `InProcess` format the caller names.
+//! Nothing here names a format: [`load_client`] takes any `InProcess` format the
+//! caller names.
 
 mod client;
 mod control_backend;
@@ -25,6 +24,6 @@ mod loader;
 mod off_main_wait;
 mod rebind;
 
-pub use client::{InProcClient, PluginNode};
+pub use client::{HostedNode, InProcClient};
 pub use loader::{client_over, load_client, load_client_restoring};
 pub use rebind::{Pending, RebindError, Rebinder, Settlement};

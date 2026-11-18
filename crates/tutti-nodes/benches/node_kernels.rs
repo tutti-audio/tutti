@@ -146,14 +146,14 @@ fn distortion(c: &mut Criterion) {
         c,
         "distortion",
         "tanh_2",
-        || DistortionNode::new(ShapeKind::Tanh, Drive::new(2.0)),
+        || DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(2.0)),
         None,
     );
     run(
         c,
         "distortion",
         "softsign_2",
-        || DistortionNode::new(ShapeKind::Softsign, Drive::new(2.0)),
+        || DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(2.0)),
         None,
     );
     for (case, kind) in [
@@ -165,7 +165,7 @@ fn distortion(c: &mut Criterion) {
             c,
             "distortion",
             case,
-            || DistortionNode::new(kind, Drive::new(2.0)),
+            || DistortionNode::<f32>::new(kind, Drive::new(2.0)),
             None,
         );
     }
@@ -173,14 +173,14 @@ fn distortion(c: &mut Criterion) {
         c,
         "distortion",
         "hardclip_6",
-        || DistortionNode::with_channels(6u16, ShapeKind::HardClip, Drive::new(2.0)),
+        || DistortionNode::<f32>::with_channels(6u16, ShapeKind::HardClip, Drive::new(2.0)),
         None,
     );
     run(
         c,
         "distortion",
         "softsign_2_fed",
-        || DistortionNode::new(ShapeKind::Softsign, Drive::new(2.0)),
+        || DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(2.0)),
         Some(drive_sweep),
     );
 }

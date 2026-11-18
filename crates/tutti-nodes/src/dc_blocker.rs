@@ -1,7 +1,7 @@
 //! [`DcBlockerNode`]: a first-order high-pass that removes a constant offset.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
+use tutti_dsp::{COEFF_INTERVAL, DcBlocker, DcBlockerControls, Lerp, MIN_DC_CORNER};
 use tutti_graph::{Cost, Shape};
 use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{Hz, SampleRate, Tail};
@@ -48,19 +48,21 @@ impl DcBlockerConfig {
 /// built with one reads as the default.
 ///
 /// The tail is finite: the frames for a stopped input to fall under the tail floor,
-/// falling as `R^n` ([`DcBlocker::tail`]), narrowed per block to the corner in force. No
+/// falling as `R^n` ([`DcBlockerControls::tail`]), narrowed per block to the corner in force. No
 /// latency. A [`KernelNode`], so a non-finite sample is heard in at most one block. Made
 /// from a [`DcBlockerConfig`] (`DcBlockerNode::from`).
 ///
 /// # Panics
 ///
 /// `DcBlockerNode::from` panics past 16 channels: a blocker is one bus.
-pub type DcBlockerNode = KernelNode<DcBlockerKernel>;
+///
+/// `F` is the state precision of the recursion and the pole, `f64` by default.
+pub type DcBlockerNode<F = f64> = KernelNode<DcBlockerKernel<F>>;
 
-impl From<DcBlockerConfig> for DcBlockerNode {
+impl<F: Float + Lerp> From<DcBlockerConfig> for DcBlockerNode<F> {
     fn from(config: DcBlockerConfig) -> Self {
         Self::with_kernel(
-            DcBlockerKernel::new(config.width),
+            DcBlockerKernel::<F>::new(config.width),
             DcBlockerSet,
             config.controls,
         )
@@ -83,28 +85,28 @@ control_set! {
 
 /// The blocker as a [`Kernel`]: a [`DcBlocker`] at the prepared rate.
 #[derive(Clone, Debug)]
-pub struct DcBlockerKernel {
+pub struct DcBlockerKernel<F: Float> {
     width: ChannelLayout,
     rate: SampleRate,
-    blocker: DcBlocker,
+    blocker: DcBlocker<F>,
     /// Whether the first retarget after `prepare` has landed.
     landed: bool,
 }
 
-impl DcBlockerKernel {
+impl<F: Float + Lerp> DcBlockerKernel<F> {
     /// A blocker of `width` at a placeholder rate: an unprepared node renders nothing.
     fn new(width: ChannelLayout) -> Self {
         let rate = SampleRate::SR_48K;
         Self {
             width,
             rate,
-            blocker: DcBlocker::new(width, rate),
+            blocker: DcBlocker::<F>::new(width, rate),
             landed: false,
         }
     }
 }
 
-impl Kernel for DcBlockerKernel {
+impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
     type Set = DcBlockerSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -118,7 +120,7 @@ impl Kernel for DcBlockerKernel {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        self.blocker = DcBlocker::new(self.width, rate);
+        self.blocker = DcBlocker::<F>::new(self.width, rate);
         self.landed = false;
     }
 
@@ -149,16 +151,16 @@ impl Kernel for DcBlockerKernel {
 
     /// The ring-out at the lowest corner: the longest over every control.
     fn tail(&self) -> Tail {
-        Tail::Finite(DcBlocker::tail(
-            &DcBlockerControls {
+        Tail::Finite(
+            DcBlockerControls {
                 corner: MIN_DC_CORNER,
-            },
-            self.rate,
-        ))
+            }
+            .tail(self.rate),
+        )
     }
 
     fn tail_of(&mut self, controls: &DcBlockerControls) -> Tail {
-        Tail::Finite(DcBlocker::tail(controls, self.rate))
+        Tail::Finite(controls.tail(self.rate))
     }
 }
 
@@ -170,8 +172,9 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
-    fn node(width: u16, corner: f64) -> DcBlockerNode {
-        prepared(DcBlockerNode::from(
+    // The node tests run `F = f32`, the session's audio format: their tolerances are `f32`'s.
+    fn node(width: u16, corner: f64) -> DcBlockerNode<f32> {
+        prepared(DcBlockerNode::<f32>::from(
             DcBlockerConfig::new(width).corner(Hz(corner)),
         ))
     }
@@ -179,7 +182,7 @@ mod tests {
     /// A fork starts from the corner last set and shares no cell.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(DcBlockerNode::from(DcBlockerConfig::new(2u16)));
+        assert_param_fork(DcBlockerNode::<f32>::from(DcBlockerConfig::new(2u16)));
     }
 
     /// The shape is the width in and out, `Light`, declares the corner as `Cutoff` and has
@@ -195,7 +198,7 @@ mod tests {
         assert_eq!(shape.cost, Cost::Light);
         assert_eq!(shape.params.as_slice(), &[UnitParam::Cutoff][..]);
         assert!(matches!(shape.tail, Tail::Finite(_)));
-        let d = DcBlockerNode::from(DcBlockerConfig::new(1u16));
+        let d = DcBlockerNode::<f32>::from(DcBlockerConfig::new(1u16));
         assert_eq!(d.param_base(0), Some(10.0));
     }
 
@@ -209,5 +212,28 @@ mod tests {
         let r = (-std::f64::consts::TAU * 100.0 / RATE.get()).exp();
         assert!((f64::from(out[0][511]) - r.powi(511)).abs() < 1e-6);
         assert!(out[0][511] < 0.01, "10 Hz would leave 0.5");
+    }
+
+    /// An `f64` block through a `DcBlockerKernel::<f64>` at the default corner is
+    /// `y[n] = x[n] - x[n-1] + R y[n-1]` in `f64`, `R = exp(-2 pi fc / fs)` worked here, to
+    /// 2^-45.
+    #[test]
+    fn an_f64_kernel_is_the_difference_equation_in_f64() {
+        use crate::test_support::drive_kernel;
+        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+        let len = 300;
+        let r = (-std::f64::consts::TAU * 10.0 / RATE.get()).exp();
+        let x = wide_signal(len);
+        let mut want = vec![0.0f64; len];
+        let (mut x1, mut y1) = (0.0f64, 0.0f64);
+        for n in 0..len {
+            y1 = x[n] - x1 + r * y1;
+            x1 = x[n];
+            want[n] = y1;
+        }
+        let mut k = DcBlockerKernel::<f64>::new(ChannelLayout::MONO);
+        k.prepare(RATE, MaxBlock::of(tutti_units::Samples(len)));
+        let y = drive_kernel(&mut k, &[(0, DcBlockerControls::DEFAULT)], &[x]).remove(0);
+        assert_close_f64(&y, &want, 2.0f64.powi(-45));
     }
 }

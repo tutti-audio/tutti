@@ -177,7 +177,7 @@ fn delay_line() {
 #[test]
 fn distortion() {
     IsolateRow::new("DistortionNode (stereo)", || {
-        DistortionNode::new(ShapeKind::Tanh, Drive(2.0))
+        DistortionNode::<f32>::new(ShapeKind::Tanh, Drive(2.0))
     })
     .control("drive", |d| {
         assert!(d.param_set().set(UnitParam::Drive, 8.0))
@@ -188,7 +188,7 @@ fn distortion() {
 #[test]
 fn bit_crusher() {
     IsolateRow::new("BitCrusherNode (stereo)", || {
-        BitCrusherNode::from(BitCrusherConfig::new(ChannelLayout::STEREO))
+        BitCrusherNode::<f32>::from(BitCrusherConfig::new(ChannelLayout::STEREO))
     })
     .control("bits", |b| {
         assert!(b.param_set().set(UnitParam::BitDepth, 3.0))
@@ -202,7 +202,7 @@ fn bit_crusher() {
 #[test]
 fn stereo_width() {
     IsolateRow::new("StereoWidthNode", || {
-        StereoWidthNode::from(StereoWidthConfig::new().width(StereoWidth(1.5)))
+        StereoWidthNode::<f32>::from(StereoWidthConfig::new().width(StereoWidth(1.5)))
     })
     .control("width", |w| {
         assert!(w.param_set().set(UnitParam::StereoWidth, 0.25))
@@ -227,7 +227,7 @@ fn tremolo() {
 #[test]
 fn dc_blocker() {
     IsolateRow::new("DcBlockerNode (stereo)", || {
-        DcBlockerNode::from(DcBlockerConfig::new(ChannelLayout::STEREO))
+        DcBlockerNode::<f32>::from(DcBlockerConfig::new(ChannelLayout::STEREO))
     })
     .control("corner", |d| {
         assert!(d.param_set().set(UnitParam::Cutoff, 80.0))
@@ -268,8 +268,8 @@ fn tilt_filter() {
 
 #[test]
 fn dynamic_eq() {
-    IsolateRow::new("DynamicEqNode (stereo, side-chain)", || {
-        DynamicEqNode::from(
+    IsolateRow::new("DynamicEqNode<f32> (stereo, side-chain)", || {
+        DynamicEqNode::<f32>::from(
             DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).key(KeySource::Sidechain),
         )
     })
@@ -299,8 +299,8 @@ fn cut_filter() {
 
 #[test]
 fn envelope_filter() {
-    IsolateRow::new("EnvelopeFilterNode (stereo)", || {
-        EnvelopeFilterNode::from(
+    IsolateRow::new("EnvelopeFilterNode<f32> (stereo)", || {
+        EnvelopeFilterNode::<f32>::from(
             EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz(500.0), SvfType::LowPass)
                 .depth(Semitones(24.0)),
         )
@@ -317,8 +317,8 @@ fn envelope_filter() {
 
 #[test]
 fn transient_shaper() {
-    IsolateRow::new("TransientShaperNode (stereo)", || {
-        TransientShaperNode::from(
+    IsolateRow::new("TransientShaperNode<f32> (stereo)", || {
+        TransientShaperNode::<f32>::from(
             TransientShaperConfig::new(ChannelLayout::STEREO)
                 .attack(Db(6.0))
                 .sustain(Db(-3.0)),

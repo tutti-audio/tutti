@@ -32,7 +32,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
-use crate::{Notice, PluginHandle, Subscription};
+use crate::{PluginHandle, PluginSignal, Subscription};
 use tutti_plugin_types::{ParamRange, ParameterInfo};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -168,7 +168,7 @@ impl PluginParamValues {
         let queue = Arc::clone(&edits);
         // The mirror follows the changes; a gesture's ends carry no value.
         let subscription = handle.subscribe(move |notice| {
-            if let Notice::Param(edit) = notice
+            if let PluginSignal::Param(edit) = notice
                 && let Some(value) = edit.value()
             {
                 queue.lock_recover().push((edit.id(), value));

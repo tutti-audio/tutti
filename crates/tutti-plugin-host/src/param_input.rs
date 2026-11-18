@@ -34,7 +34,7 @@ use super::segment_points::SegmentPoints;
 ///   this walk emits on the frames between events and up to the end of the
 ///   piece. A point is a grid point when the play clock at its frame
 ///   (`cx.play_at`) is a multiple of 32: past a queue's room grid points go
-///   first (design doc 014 §9 requirement 6).
+///   first.
 /// - Any other event (MIDI, harmony) goes to `other` with its chunk frame.
 ///
 /// The classification is by frame alone: a lane's corner (a breakpoint, a
@@ -68,7 +68,7 @@ pub fn take(
     let base = cx.env.frame.get();
     let abs = |i: usize| base + i as u64;
     // Whether absolute frame `f` (in this call) is a play-grid frame: its
-    // play clock count a multiple of 32 (design doc 014 §5.3).
+    // play clock count a multiple of 32.
     let grid = |f: u64| {
         usize::try_from(f - base)
             .ok()

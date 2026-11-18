@@ -22,9 +22,10 @@
 //! the most that branch adds: a decay that falls to nothing under a slow envelope still
 //! holding level tends to `sustain`. An amount of 0 dB in both is the identity.
 //!
-//! A steady level is left alone to the slow follower's `f32` stall: the follower stops moving
-//! when `c * (L - s)` is under half an ulp of `s`, which leaves `|L - s| / L` near `6e-8 / c`
-//! for the one-pole coefficient `c` (about 2e-3 dB at 24 dB and a 30 ms slow time, rate 48 kHz).
+//! A steady level is left alone to the slow follower's stall: the follower stops moving when
+//! `c * (L - s)` is under half an ulp of `s`, which leaves `|L - s| / L` near `eps / (2 c)` for
+//! the one-pole coefficient `c` and the float's epsilon `eps` (`f32`: about 2e-3 dB at 24 dB and
+//! a 30 ms slow time, rate 48 kHz; `f64` is 2^29 times finer).
 //!
 //! After a step from silence to a constant level, `f_n = L (1 - af^n)` and `s_n = L (1 - as^n)`
 //! with `a = exp(-1 / (tau * rate))`, so the gain at frame `n` is
@@ -33,9 +34,10 @@
 //! The amounts glide over [`GAIN_GLIDE`], as a compressor's makeup does; the
 //! times are the bank's build. The shaper has no latency and no tail: it only scales.
 
-use tutti_buffers::{Float, Planes, PlanesMut, Sample};
-use tutti_units::{Amplitude, Db, SampleRate, Seconds};
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_units::{Db, SampleRate, Seconds};
 
+use super::curves::db_gain;
 use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use crate::finite::finite_or;
 use crate::follower::Follower;
@@ -45,7 +47,7 @@ use crate::{Glide, Lerp};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TransientControls {
     /// The most the gain adds while the fast envelope is above the slow one (the attack of a
-    /// note). Read within [`TransientBank::MAX_AMOUNT`] either way; a non-finite amount is 0.
+    /// note). Read within [`TransientControls::MAX_AMOUNT`] either way; a non-finite amount is 0.
     pub attack: Db,
     /// The most the gain adds while the fast envelope is below the slow one (the decay and
     /// the room). Read as `attack` is.
@@ -53,6 +55,9 @@ pub struct TransientControls {
 }
 
 impl TransientControls {
+    /// The most either amount reaches, either way: 24 dB.
+    pub const MAX_AMOUNT: Db = Db(24.0);
+
     /// No change: both amounts 0 dB.
     pub const DEFAULT: Self = Self {
         attack: Db::UNITY,
@@ -63,8 +68,8 @@ impl TransientControls {
     fn designed(self) -> Amounts {
         let amount = |db: Db| {
             Db(finite_or(db.get(), Db::UNITY.get()).clamp(
-                -TransientBank::MAX_AMOUNT.get(),
-                TransientBank::MAX_AMOUNT.get(),
+                -TransientControls::MAX_AMOUNT.get(),
+                TransientControls::MAX_AMOUNT.get(),
             ))
         };
         Amounts {
@@ -98,38 +103,37 @@ impl Lerp for Amounts {
 }
 
 /// The gain in dB at the envelopes `fast` and `slow` (both at least 0 and finite) for the
-/// amounts `attack` and `sustain`: the closed form of the [module](self).
+/// amounts `attack` and `sustain`, per-sample values in `F`: the closed form of the
+/// [module](self).
 #[inline]
-fn gain_db(fast: Amplitude, slow: Amplitude, attack: Db, sustain: Db) -> Db {
+fn gain_db<F: Float>(fast: F, slow: F, attack: F, sustain: F) -> F {
     if fast > slow {
-        Db(attack.get() * (1.0 - slow.get() / fast.get()))
+        attack * (F::ONE - slow / fast)
     } else if slow > fast {
-        Db(sustain.get() * (1.0 - fast.get() / slow.get()))
+        sustain * (F::ONE - fast / slow)
     } else {
-        Db::UNITY
+        F::ZERO
     }
 }
 
 /// A transient shaper of any width: one gain from the loudest channel's fast and slow
 /// envelopes, applied to every channel.
 ///
-/// Built on the control side for one rate; the state is `f64` and a view's samples are
-/// converted at the edges. Nothing it holds grows.
+/// Built on the control side for one rate; the state is `F`, the graph's float, and a view of
+/// another sample format is converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct TransientBank {
-    fast: Follower<f64>,
-    slow: Follower<f64>,
-    /// The fast and the slow envelope, both at 0 until a level is heard.
-    envelopes: (Amplitude, Amplitude),
+pub struct TransientBank<F: Float + Lerp> {
+    fast: Follower<F>,
+    slow: Follower<F>,
+    /// The fast and the slow envelope, both at 0 until a level is heard: per-sample levels in
+    /// `F`; they become `Amplitude` once that unit stores `f64`.
+    envelopes: (F, F),
     /// The amounts in dB, gliding over [`GAIN_GLIDE`].
     amounts: Glide<Amounts>,
     steps: u32,
 }
 
-impl TransientBank {
-    /// The most either amount reaches, either way: 24 dB.
-    pub const MAX_AMOUNT: Db = Db(24.0);
-
+impl<F: Float + Lerp> TransientBank<F> {
     /// A shaper at `rate` whose fast envelope has the time constant `fast` and whose slow one
     /// has `slow`, at no change. The times are floored at 0 (instant); a NaN one reads as 0.
     #[must_use]
@@ -139,7 +143,7 @@ impl TransientBank {
         Self {
             fast: follower(fast),
             slow: follower(slow),
-            envelopes: (Amplitude::SILENT, Amplitude::SILENT),
+            envelopes: (F::ZERO, F::ZERO),
             amounts: Glide::landed(TransientControls::DEFAULT.designed()),
             steps,
         }
@@ -147,7 +151,7 @@ impl TransientBank {
 
     /// Back to silence: both envelopes at 0 and the amounts landed. No allocation.
     pub fn reset(&mut self) {
-        self.envelopes = (Amplitude::SILENT, Amplitude::SILENT);
+        self.envelopes = (F::ZERO, F::ZERO);
         self.amounts.settle();
     }
 
@@ -176,7 +180,7 @@ impl TransientBank {
         let width = input.channels().min(output.channels());
         let blended = self.amounts.blended(frames);
         let taken = self.amounts.taken();
-        let mut gains = [0.0f64; CHUNK];
+        let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;
         while start < frames {
             let n = (frames - start).min(CHUNK);
@@ -191,20 +195,23 @@ impl TransientBank {
                 } else {
                     self.amounts.target()
                 };
-                let level = Amplitude(*g);
-                let fast = self.fast.follow(self.envelopes.0, level);
-                let slow = self.slow.follow(self.envelopes.1, level);
+                let fast = self.fast.follow_raw(self.envelopes.0, *g);
+                let slow = self.slow.follow_raw(self.envelopes.1, *g);
                 self.envelopes = (fast, slow);
-                *g = gain_db(fast, slow, a.attack, a.sustain)
-                    .to_amplitude()
-                    .get();
+                // The amounts widen to `F` here, exactly.
+                *g = db_gain(gain_db(
+                    fast,
+                    slow,
+                    F::from_f64(a.attack.get()),
+                    F::from_f64(a.sustain.get()),
+                ));
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];
                 let mut plane = output.plane_mut(c);
                 let ys = &mut plane.samples_mut()[start..end];
                 for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
-                    *y = (x.convert_to::<f64>() * g).convert_to::<S>();
+                    *y = (x.convert_to::<F>() * g).convert_to::<S>();
                 }
             }
             start = end;

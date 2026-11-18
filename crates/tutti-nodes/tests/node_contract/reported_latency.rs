@@ -105,13 +105,13 @@ fn onsets(ch: &[f32]) -> Vec<usize> {
 /// the summed output answers well above zero.
 #[test]
 fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
-    let xo = CrossoverNode::new(ChannelLayout::MONO, &[Hz(300.0), Hz(3_000.0)]).unwrap();
+    let xo = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(300.0), Hz(3_000.0)]).unwrap();
     assert_eq!(declared(&xo), Latency::ZERO);
     for (b, band) in impulse_response(xo, 64).iter().enumerate() {
         assert!(band[0] > 0.0, "band {b} is silent at frame 0");
     }
 
-    let mb = MultibandCompressorNode::new(ChannelLayout::MONO, 4).unwrap();
+    let mb = MultibandCompressorNode::<f32>::new(ChannelLayout::MONO, 4).unwrap();
     assert_eq!(declared(&mb), Latency::ZERO);
     let out = impulse_response(mb, 64);
     assert_eq!(onsets(&out[0]).first(), Some(&0));

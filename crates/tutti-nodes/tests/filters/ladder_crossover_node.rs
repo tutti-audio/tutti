@@ -46,10 +46,10 @@ impl Cutoff for LadderFilterNode<f64> {
     }
 }
 
-impl Cutoff for CrossoverNode {
+impl Cutoff for CrossoverNode<f32> {
     const NAME: &'static str = "crossover";
     fn build() -> Self {
-        CrossoverNode::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)]).unwrap()
+        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)]).unwrap()
     }
     fn set_cutoff(&self, hz: f32) -> bool {
         self.param_set()
@@ -103,7 +103,7 @@ fn check_a_reset_node_renders_as_a_fresh_one<N: Cutoff>() {
 #[test]
 fn a_reset_node_renders_as_a_fresh_one() {
     check_a_reset_node_renders_as_a_fresh_one::<LadderFilterNode<f64>>();
-    check_a_reset_node_renders_as_a_fresh_one::<CrossoverNode>();
+    check_a_reset_node_renders_as_a_fresh_one::<CrossoverNode<f32>>();
 }
 
 /// A reset node is a fresh one whatever moved before it: after audio rendered at one design, a
@@ -158,7 +158,7 @@ fn check_a_move_between_grid_points_starts_at_the_next_one<N: Cutoff>() {
 #[test]
 fn a_move_between_grid_points_starts_at_the_next_one() {
     check_a_move_between_grid_points_starts_at_the_next_one::<LadderFilterNode<f64>>();
-    check_a_move_between_grid_points_starts_at_the_next_one::<CrossoverNode>();
+    check_a_move_between_grid_points_starts_at_the_next_one::<CrossoverNode<f32>>();
 }
 
 fn check_a_clone_starts_silent_and_shares_the_cells<N: Cutoff>() {
@@ -181,7 +181,7 @@ fn check_a_clone_starts_silent_and_shares_the_cells<N: Cutoff>() {
 #[test]
 fn a_clone_starts_silent_and_shares_the_cells() {
     check_a_clone_starts_silent_and_shares_the_cells::<LadderFilterNode<f64>>();
-    check_a_clone_starts_silent_and_shares_the_cells::<CrossoverNode>();
+    check_a_clone_starts_silent_and_shares_the_cells::<CrossoverNode<f32>>();
 }
 
 fn check_a_fork_starts_silent_and_shares_nothing<N: Cutoff>() {
@@ -204,7 +204,7 @@ fn check_a_fork_starts_silent_and_shares_nothing<N: Cutoff>() {
 #[test]
 fn a_fork_starts_silent_and_shares_nothing() {
     check_a_fork_starts_silent_and_shares_nothing::<LadderFilterNode<f64>>();
-    check_a_fork_starts_silent_and_shares_nothing::<CrossoverNode>();
+    check_a_fork_starts_silent_and_shares_nothing::<CrossoverNode<f32>>();
 }
 
 /// The two nodes declare an unknown tail, and the node holds to it: after one impulse and 4 000
@@ -274,7 +274,7 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
     ] {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz(f)).collect();
         let bands = splits.len() + 1;
-        let node = CrossoverNode::new(ChannelLayout::from(channels), &hz).unwrap();
+        let node = CrossoverNode::<f32>::new(ChannelLayout::from(channels), &hz).unwrap();
         assert_eq!(
             usize::from(node.shape().audio_out().count()),
             usize::from(channels) * bands

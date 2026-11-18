@@ -225,7 +225,7 @@ fn a_plugin_fork_that_cannot_be_built_is_a_named_failure() {
             assert!(
                 matches!(
                     cause.downcast_ref::<PluginForkError>(),
-                    Some(PluginForkError::Load { path, .. }) if path.as_deref() == Some(own.as_path())
+                    Some(PluginForkError::Load { path, .. }) if *path == own
                 ),
                 "{cause:?}"
             );

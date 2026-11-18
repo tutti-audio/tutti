@@ -24,9 +24,9 @@ use tutti_rt::Rt;
 
 use super::rebind::{RebindError, Settlement};
 
-use tutti_plugin_types::LoadStage;
 use tutti_plugin_types::ParamEdit;
 use tutti_plugin_types::PluginTail;
+use tutti_plugin_types::{LoadStage, StateError};
 
 /// What the plugin changed about itself since the last
 /// [`Instance::pump`]: each field is a re-read the core did after the
@@ -173,8 +173,8 @@ impl<F: InProcess> Instance<F> {
         load: &Load,
         sample_rate: SampleRate,
         block_size: usize,
-        restore: Option<&mut dyn FnMut(&mut F) -> Result<(), String>>,
-    ) -> Result<(Self, Rt<F::Processor>, Option<Result<(), String>>), (LoadStage, String)> {
+        restore: Option<&mut dyn FnMut(&mut F) -> Result<(), StateError>>,
+    ) -> Result<(Self, Rt<F::Processor>, Option<Result<(), StateError>>), (LoadStage, String)> {
         let mut loaded = F::load_in_process(main, work, path, load).map_err(|e| match e {
             PluginError::Load { stage, reason } => (stage, reason),
             other => (LoadStage::Opening, other.to_string()),

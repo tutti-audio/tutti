@@ -15,8 +15,8 @@ const FAST: Seconds = Seconds(0.001);
 const SLOW: Seconds = Seconds(0.02);
 const LEVEL: f64 = 0.5;
 
-fn node(width: ChannelLayout) -> TransientShaperNode {
-    TransientShaperNode::from(TransientShaperConfig::new(width).fast(FAST).slow(SLOW))
+fn node(width: ChannelLayout) -> TransientShaperNode<f32> {
+    TransientShaperNode::<f32>::from(TransientShaperConfig::new(width).fast(FAST).slow(SLOW))
 }
 
 fn pole(tau: Seconds) -> f64 {
@@ -24,7 +24,7 @@ fn pole(tau: Seconds) -> f64 {
 }
 
 /// `x` through `node` in blocks of 100 frames.
-fn run(node: &mut TransientShaperNode, x: &[f32]) -> Vec<f32> {
+fn run(node: &mut TransientShaperNode<f32>, x: &[f32]) -> Vec<f32> {
     x.chunks(100)
         .flat_map(|b| drive(node, SR, Planes::new(&[b]).unwrap(), &[]).remove(0))
         .collect()
@@ -76,7 +76,7 @@ fn zero_amounts_pass_a_stereo_signal_bit_for_bit() {
 fn a_step_onset_follows_the_attack_branch() {
     let attack = 9.0;
     let mut n = prepared(
-        TransientShaperNode::from(
+        TransientShaperNode::<f32>::from(
             TransientShaperConfig::new(ChannelLayout::MONO)
                 .attack(Db(attack))
                 .fast(FAST)

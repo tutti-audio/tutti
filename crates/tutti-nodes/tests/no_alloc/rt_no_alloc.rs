@@ -161,10 +161,9 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
         let mut unfed: Vec<Vec<f32>> = Vec::new();
         for fed in [false, true] {
             let node = match factor {
-                None => DistortionNode::with_channels(3u16, kind, Drive::new(2.0)),
-                Some(f) => {
-                    DistortionNode::with_channels(3u16, kind, Drive::new(2.0)).oversampling(f)
-                }
+                None => DistortionNode::<f32>::with_channels(3u16, kind, Drive::new(2.0)),
+                Some(f) => DistortionNode::<f32>::with_channels(3u16, kind, Drive::new(2.0))
+                    .oversampling(f),
             };
             let mut node = Direct::new(node, SampleRate::SR_48K, 64);
             assert_eq!(
@@ -236,7 +235,7 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
         for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder] {
             for oversampled in [false, true] {
                 for fed in [false, true] {
-                    let node = DistortionNode::with_channels(3u16, kind, Drive::new(2.0))
+                    let node = DistortionNode::<f32>::with_channels(3u16, kind, Drive::new(2.0))
                         .antialiasing(order);
                     let node = if oversampled {
                         node.oversampling(OversamplingFactor::X4)

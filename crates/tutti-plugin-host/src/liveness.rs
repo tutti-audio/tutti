@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 /// What a host believes about a plugin after an observation
 /// ([`Liveness::observe`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verdict {
+pub enum LivenessVerdict {
     /// Answering normally.
     Healthy,
     /// Unhealthy for `consecutive` observations in a row, but not yet for
@@ -96,13 +96,13 @@ impl Liveness {
     /// window after the first of them. A healthy observation resets the
     /// count and the window. A `now` earlier than the run's start counts as
     /// no time passed.
-    pub fn observe(&mut self, healthy: bool, now: Instant) -> Verdict {
+    pub fn observe(&mut self, healthy: bool, now: Instant) -> LivenessVerdict {
         if self.dead {
-            return Verdict::Dead;
+            return LivenessVerdict::Dead;
         }
         if healthy {
             self.failing = None;
-            return Verdict::Healthy;
+            return LivenessVerdict::Healthy;
         }
         let (consecutive, since) = match self.failing {
             Some((n, since)) => (n.saturating_add(1), since),
@@ -111,18 +111,18 @@ impl Liveness {
         if consecutive >= Self::DEATHS && now.saturating_duration_since(since) >= self.window {
             self.failing = None;
             self.dead = true;
-            return Verdict::Dead;
+            return LivenessVerdict::Dead;
         }
         self.failing = Some((consecutive, since));
-        Verdict::Failing { consecutive }
+        LivenessVerdict::Failing { consecutive }
     }
 
     /// The verdict of the last observation (`Healthy` before any).
-    pub fn verdict(&self) -> Verdict {
+    pub fn verdict(&self) -> LivenessVerdict {
         match (self.dead, self.failing) {
-            (true, _) => Verdict::Dead,
-            (false, Some((consecutive, _))) => Verdict::Failing { consecutive },
-            (false, None) => Verdict::Healthy,
+            (true, _) => LivenessVerdict::Dead,
+            (false, Some((consecutive, _))) => LivenessVerdict::Failing { consecutive },
+            (false, None) => LivenessVerdict::Healthy,
         }
     }
 }
@@ -145,13 +145,16 @@ mod tests {
     fn the_third_unhealthy_observation_spanning_the_window_is_dead() {
         let t0 = Instant::now();
         let mut l = Liveness::new();
-        assert_eq!(l.observe(false, t0), Verdict::Failing { consecutive: 1 });
+        assert_eq!(
+            l.observe(false, t0),
+            LivenessVerdict::Failing { consecutive: 1 }
+        );
         assert_eq!(
             l.observe(false, t0 + 25 * MS),
-            Verdict::Failing { consecutive: 2 }
+            LivenessVerdict::Failing { consecutive: 2 }
         );
-        assert_eq!(l.observe(false, t0 + 50 * MS), Verdict::Dead);
-        assert_eq!(l.verdict(), Verdict::Dead);
+        assert_eq!(l.observe(false, t0 + 50 * MS), LivenessVerdict::Dead);
+        assert_eq!(l.verdict(), LivenessVerdict::Dead);
     }
 
     /// Three unhealthy observations a microsecond apart are not a death: the
@@ -165,13 +168,13 @@ mod tests {
         for n in 1..=3u8 {
             assert_eq!(
                 l.observe(false, t0 + us * u32::from(n - 1)),
-                Verdict::Failing { consecutive: n },
+                LivenessVerdict::Failing { consecutive: n },
                 "observation {n} is inside the window"
             );
         }
         assert_eq!(
             l.observe(false, t0 + Liveness::DEFAULT_WINDOW),
-            Verdict::Dead
+            LivenessVerdict::Dead
         );
     }
 
@@ -184,7 +187,7 @@ mod tests {
         l.observe(false, t0);
         assert_eq!(
             l.observe(false, t0 + Duration::from_secs(1)),
-            Verdict::Failing { consecutive: 2 }
+            LivenessVerdict::Failing { consecutive: 2 }
         );
     }
 
@@ -197,23 +200,23 @@ mod tests {
         let mut l = Liveness::new();
         l.observe(false, t0);
         l.observe(false, t0 + MS);
-        assert_eq!(l.observe(true, t0 + 2 * MS), Verdict::Healthy);
-        assert_eq!(l.verdict(), Verdict::Healthy);
+        assert_eq!(l.observe(true, t0 + 2 * MS), LivenessVerdict::Healthy);
+        assert_eq!(l.verdict(), LivenessVerdict::Healthy);
 
         assert_eq!(
             l.observe(false, t0 + 48 * MS),
-            Verdict::Failing { consecutive: 1 }
+            LivenessVerdict::Failing { consecutive: 1 }
         );
         assert_eq!(
             l.observe(false, t0 + 49 * MS),
-            Verdict::Failing { consecutive: 2 }
+            LivenessVerdict::Failing { consecutive: 2 }
         );
         assert_eq!(
             l.observe(false, t0 + 50 * MS),
-            Verdict::Failing { consecutive: 3 },
+            LivenessVerdict::Failing { consecutive: 3 },
             "the window counts from this run's first observation, 2 ms ago"
         );
-        assert_eq!(l.observe(false, t0 + 98 * MS), Verdict::Dead);
+        assert_eq!(l.observe(false, t0 + 98 * MS), LivenessVerdict::Dead);
     }
 
     /// A death is latched: a healthy observation after it does not revive the
@@ -225,8 +228,8 @@ mod tests {
         for _ in 0..Liveness::DEATHS {
             l.observe(false, t0);
         }
-        assert_eq!(l.verdict(), Verdict::Dead);
-        assert_eq!(l.observe(true, t0 + MS), Verdict::Dead);
+        assert_eq!(l.verdict(), LivenessVerdict::Dead);
+        assert_eq!(l.observe(true, t0 + MS), LivenessVerdict::Dead);
     }
 
     /// A plugin observed healthy is never written off, however long.
@@ -237,7 +240,7 @@ mod tests {
         for s in 0..10 {
             assert_eq!(
                 l.observe(true, t0 + Duration::from_secs(s)),
-                Verdict::Healthy
+                LivenessVerdict::Healthy
             );
         }
     }

@@ -73,11 +73,11 @@ fn bell_db(f: f64, f0: f64, q: f64, gain: f64) -> f64 {
     10.0 * (re * re + im * im).log10()
 }
 
-fn de_esser() -> DynamicEqNode {
-    DynamicEqNode::from(DynamicEqConfig::de_esser(ChannelLayout::MONO, Hz(6_000.0)))
+fn de_esser() -> DynamicEqNode<f32> {
+    DynamicEqNode::<f32>::from(DynamicEqConfig::de_esser(ChannelLayout::MONO, Hz(6_000.0)))
 }
 
-fn render(node: DynamicEqNode, inputs: &[&[f32]]) -> Vec<f32> {
+fn render(node: DynamicEqNode<f32>, inputs: &[&[f32]]) -> Vec<f32> {
     let mut node = prepared(node, SR, inputs[0].len());
     drive(&mut node, SR, Planes::new(inputs).unwrap(), &[]).remove(0)
 }
@@ -145,7 +145,7 @@ fn an_upward_band_boosts_a_quiet_band_by_the_mirrored_curve() {
         .release(Seconds(0.02));
     for level in [-50.0, -36.0, -26.0, -20.0, -10.0] {
         let x = tone(1_000.0, amplitude(level), RUN);
-        let y = render(DynamicEqNode::from(config), &[&x]);
+        let y = render(DynamicEqNode::<f32>::from(config), &[&x]);
         let got = db(component(&y, 1_000.0) / component(&x, 1_000.0));
         let want = reduction(2.0 * -20.0 - level, -20.0, 0.0, 3.0).min(9.0);
         assert!(
@@ -164,7 +164,7 @@ fn a_side_chain_key_sets_the_cut_of_the_signal() {
         .ratio(CompressionRatio(4.0))
         .range(Db(20.0))
         .key(KeySource::Sidechain);
-    let node = DynamicEqNode::from(config);
+    let node = DynamicEqNode::<f32>::from(config);
     assert_eq!(node.shape().audio_in().count(), 2, "a signal and a key");
     let x = tone(1_000.0, 0.05, RUN);
     let key = tone(1_000.0, amplitude(-6.0), RUN);
@@ -183,7 +183,7 @@ fn an_unwired_side_chain_leaves_a_downward_band_flat() {
         .key(KeySource::Sidechain);
     let x = tone(1_000.0, 0.5, RUN);
     let silence = vec![0.0f32; RUN];
-    let y = render(DynamicEqNode::from(config), &[&x, &silence]);
+    let y = render(DynamicEqNode::<f32>::from(config), &[&x, &silence]);
     assert!(db(component(&y, 1_000.0) / component(&x, 1_000.0)).abs() < 0.01);
 }
 
@@ -198,7 +198,7 @@ fn an_unwired_side_chain_gives_an_upward_band_its_full_range() {
         .key(KeySource::Sidechain);
     let x = tone(1_000.0, 0.1, RUN);
     let silence = vec![0.0f32; RUN];
-    let y = render(DynamicEqNode::from(config), &[&x, &silence]);
+    let y = render(DynamicEqNode::<f32>::from(config), &[&x, &silence]);
     let got = db(component(&y, 1_000.0) / component(&x, 1_000.0));
     assert!((got - 9.0).abs() < 0.1, "{got} dB against the range's 9");
 }

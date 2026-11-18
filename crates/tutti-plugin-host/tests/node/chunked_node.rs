@@ -18,10 +18,11 @@ use tutti_types::MaxBlock;
 use tutti_fixtures::main_thread;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
-    Env, Event, Harmony, Node, Offset, ParamRamp, PlayClock, TransportChanges, TransportPosition,
+    Env, Event, Harmony, LogFilter, Node, Offset, ParamRamp, PlayClock, RtLevel, RtTarget,
+    TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::widen_velocity;
-use tutti_plugin_host::{InProcClient, NodeControls, PluginNode, load_client};
+use tutti_plugin_host::{HostedNode, InProcClient, NodeControls, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
     EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
@@ -40,6 +41,8 @@ const SR: SampleRate = SampleRate::SR_48K;
 /// Quarter notes per frame at 120 BPM and 48 kHz.
 const BEATS_PER_FRAME: f64 = 2.0 / 48_000.0;
 const PARAM: ParamId = ParamId::new(7);
+/// The reason the rig's plugin gives for a block it fails.
+const FAILURE: &str = "scripted failure";
 
 /// What one `process` call was handed.
 #[derive(Debug, Clone, PartialEq)]
@@ -345,7 +348,7 @@ impl Processor for RecProcessor {
 
     fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
         if self.rig.fail.load(Ordering::Relaxed) {
-            return Err(PluginError::Block("scripted failure"));
+            return Err(PluginError::Block(FAILURE));
         }
         let emitted = self.rig.emit.load(Ordering::Relaxed);
         io.out
@@ -441,7 +444,7 @@ fn tempo(to_90: Option<f64>) -> TempoReader {
 }
 
 /// The node over `rig`, prepared for blocks of up to `block`.
-fn node(rig: &Arc<Rig>, block: usize, map: TempoReader) -> (Direct<PluginNode<Rec>>, NodeControls) {
+fn node(rig: &Arc<Rig>, block: usize, map: TempoReader) -> (Direct<HostedNode<Rec>>, NodeControls) {
     ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
     let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec>(
         main_thread(),
@@ -457,7 +460,7 @@ fn node(rig: &Arc<Rig>, block: usize, map: TempoReader) -> (Direct<PluginNode<Re
 
 /// The block of `len` frames starting at global frame `frame`, rolling at
 /// 120 BPM from beat 4 at frame 0.
-fn run_block(unit: &mut Direct<PluginNode<Rec>>, frame: u64, len: usize) {
+fn run_block(unit: &mut Direct<HostedNode<Rec>>, frame: u64, len: usize) {
     run_block_at(
         unit,
         frame,
@@ -470,12 +473,12 @@ fn run_block(unit: &mut Direct<PluginNode<Rec>>, frame: u64, len: usize) {
 /// The block of `len` frames at global frame `frame`, with the transport's own
 /// tempo and playhead given: a test with a tempo step needs a playhead that
 /// follows the map, or the block after the step is a seek.
-fn run_block_at(unit: &mut Direct<PluginNode<Rec>>, frame: u64, len: usize, bpm: Bpm, beat: Beat) {
+fn run_block_at(unit: &mut Direct<HostedNode<Rec>>, frame: u64, len: usize, bpm: Bpm, beat: Beat) {
     run_block_with(unit, frame, len, true, bpm, beat);
 }
 
 fn run_block_with(
-    unit: &mut Direct<PluginNode<Rec>>,
+    unit: &mut Direct<HostedNode<Rec>>,
     frame: u64,
     len: usize,
     playing: bool,
@@ -794,6 +797,80 @@ fn a_failed_block_is_counted_in_the_nodes_controls() {
     assert_eq!(controls.dropped_midi_in(), 1, "the failed block's MIDI");
 }
 
+/// **A failed block's cause reaches the plugin log**, whole block and chunked
+/// alike: the Processor fails with `PluginError::Block(FAILURE)`, and the
+/// driver's log holds one warning on the plugin target whose message is that
+/// reason. A block that does not fail adds nothing. A chunked block of two
+/// 64-frame pieces that both fail counts two failures but logs **one record**:
+/// the node reports the cause once per block.
+#[test]
+fn a_failed_blocks_cause_reaches_the_plugin_log() {
+    for (chunk, failed) in [(None, 1), (Some(64), 2)] {
+        let rig = Rig::new(chunk, Features::TRANSPORT);
+        let (unit, controls) = node(&rig, 128, tempo(None));
+        let mut unit = unit.log(LogFilter::new(None, Some(RtLevel::Warn)));
+        rig.fail.store(true, Ordering::Relaxed);
+        run_block(&mut unit, 0, 128);
+        assert_eq!(controls.block_losses().failed, failed, "chunk {chunk:?}");
+        let [record] = unit.logged() else {
+            panic!("chunk {chunk:?}: one record, got {:?}", unit.logged());
+        };
+        assert_eq!(record.message(), FAILURE, "chunk {chunk:?}");
+        assert_eq!(record.target(), RtTarget::Plugin, "chunk {chunk:?}");
+        assert_eq!(record.level(), RtLevel::Warn, "chunk {chunk:?}");
+        rig.fail.store(false, Ordering::Relaxed);
+        run_block(&mut unit, 128, 128);
+        assert_eq!(
+            unit.logged().len(),
+            1,
+            "chunk {chunk:?}: a clean block logs nothing"
+        );
+        assert_eq!(unit.log_lost(), 0, "chunk {chunk:?}");
+    }
+}
+
+/// **A node over a plugin the host activated itself (`client_over`) has no
+/// origin to load again**, so its fork is `NoOrigin`, not a load of a made-up
+/// path.
+#[test]
+fn a_node_built_over_an_activated_plugin_has_no_origin_to_fork_from() {
+    let rig = Rig::new(None, Features::TRANSPORT);
+    ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
+    let main = main_thread();
+    let loaded = Rec::load_in_process(
+        main,
+        &tutti_fixtures::detached_work(),
+        Path::new("rec"),
+        &Load::new(),
+    )
+    .expect("loads");
+    let wiring = loaded.wiring(main);
+    let descriptor = loaded.info().clone();
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples(64)).expect("a block"));
+    let Ok((processor, controller)) = loaded.activate(main, prepare) else {
+        panic!("the recording plugin activates");
+    };
+    let client = tutti_plugin_host::client_over::<Rec>(
+        processor,
+        controller,
+        prepare,
+        descriptor,
+        &wiring,
+        [],
+        0,
+        None,
+    )
+    .expect("narrow");
+    let node = client.bind(tempo(None));
+    let err = node
+        .fork_instance(main, tutti_graph::ForkMode::Live)
+        .expect_err("no origin, no fork");
+    assert!(
+        matches!(err, tutti_plugin_types::PluginForkError::NoOrigin),
+        "{err:?}"
+    );
+}
+
 /// **A block the plugin writes a NaN in is counted once** in the node's
 /// `block_losses().nonfinite`, per piece on a chunked node (two 64-frame
 /// pieces make two), and the NaN does not reach the output.
@@ -822,7 +899,7 @@ fn a_block_with_a_non_finite_sample_is_counted_in_the_nodes_controls() {
 #[test]
 fn a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause() {
     use std::sync::atomic::AtomicU32;
-    use tutti_plugin_host::{Notice, PluginStatus};
+    use tutti_plugin_host::{PluginSignal, PluginStatus};
     use tutti_plugin_types::{PluginFailure, PluginInvalidation};
 
     let rig = Rig::new(None, Features::TRANSPORT);
@@ -840,7 +917,7 @@ fn a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause() {
     let _hearing = handle.subscribe(move |notice| {
         if matches!(
             notice,
-            Notice::Invalidate(PluginInvalidation::Crashed {
+            PluginSignal::Invalidate(PluginInvalidation::Crashed {
                 cause: PluginFailure::Panicked { .. }
             })
         ) {
@@ -943,7 +1020,7 @@ fn the_chunked_audio_path_does_not_allocate() {
     Arc::get_mut(&mut rig).expect("unshared").record = false;
     let (mut unit, _) = node(&rig, 100, tempo(Some(4.0 + 79.5 * BEATS_PER_FRAME)));
     let mut frame = 0;
-    let mut one = |unit: &mut Direct<PluginNode<Rec>>| {
+    let mut one = |unit: &mut Direct<HostedNode<Rec>>| {
         unit.events(
             0,
             &[

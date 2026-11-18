@@ -4,14 +4,17 @@ use tutti_units::{Db, SampleRate, Seconds};
 use super::*;
 use crate::testing::noise;
 
+// The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
+// the `f64` banks have their own tests below.
+
 const RATE: SampleRate = SampleRate::SR_48K;
 const FAST: Seconds = Seconds(0.001);
 const SLOW: Seconds = Seconds(0.02);
 const LEVEL: f64 = 0.5;
 
 /// A shaper at `RATE` at rest on the amounts `attack` and `sustain` dB.
-fn shaper(attack: f64, sustain: f64) -> TransientBank {
-    let mut bank = TransientBank::new(RATE, FAST, SLOW);
+fn shaper(attack: f64, sustain: f64) -> TransientBank<f32> {
+    let mut bank = TransientBank::<f32>::new(RATE, FAST, SLOW);
     bank.aim(&TransientControls {
         attack: Db(attack),
         sustain: Db(sustain),
@@ -21,7 +24,7 @@ fn shaper(attack: f64, sustain: f64) -> TransientBank {
 }
 
 /// `audio` (one slice per channel) through `bank` in calls of at most `block` frames.
-fn run(bank: &mut TransientBank, audio: &[&[f32]], block: usize) -> Vec<Vec<f32>> {
+fn run(bank: &mut TransientBank<f32>, audio: &[&[f32]], block: usize) -> Vec<Vec<f32>> {
     let n = audio[0].len();
     let mut out = vec![vec![0.0f32; n]; audio.len()];
     let mut at = 0;
@@ -265,4 +268,23 @@ fn the_render_does_not_depend_on_where_blocks_fall() {
     for block in [1, 7, 64, 480] {
         assert_eq!(reference, render(block), "blocks of {block}");
     }
+}
+
+/// At 0 dB attack and 0 dB sustain the gain is `10^0 = 1` on both branches, so an `f64`
+/// shaper returns a signal of more than 24 bits unchanged, rising (the fast envelope above the
+/// slow) and falling (below it): nothing in the path narrows it.
+#[test]
+fn an_f64_shaper_at_zero_amounts_is_the_identity() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let rising = wide_signal(2_000);
+    let x: Vec<f64> = rising.iter().chain(rising.iter().rev()).copied().collect();
+    let mut bank = TransientBank::<f64>::new(RATE, FAST, SLOW);
+    bank.aim(&TransientControls::DEFAULT);
+    bank.settle();
+    let mut out = vec![0.0f64; x.len()];
+    bank.process(
+        Planes::new(&[&x[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    assert_close_f64(&out, &x, 0.0);
 }

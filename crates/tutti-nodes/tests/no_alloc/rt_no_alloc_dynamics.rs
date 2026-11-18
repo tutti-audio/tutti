@@ -995,7 +995,10 @@ fn the_multiband_corners_are_allocation_free_and_finite() {
         for width in [1u16, 2, 6] {
             for corners in [&MOVING, &HOSTILE, &CLAMPED, &HUGE_KNEE] {
                 sweep(
-                    || MultibandCompressorNode::new(ChannelLayout::from(width), bands).unwrap(),
+                    || {
+                        MultibandCompressorNode::<f32>::new(ChannelLayout::from(width), bands)
+                            .unwrap()
+                    },
                     corners,
                     1.5,
                     None,
