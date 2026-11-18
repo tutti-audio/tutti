@@ -1,4 +1,4 @@
-use tutti_units::{Normalized, Real, Unit};
+use tutti_units::{Normalized, Real};
 
 use crate::{Curvature, Exponent};
 
@@ -107,10 +107,10 @@ impl Law {
                     one
                 }
             }
-            Self::PowerIn(p) => pow(t, param(p.get())),
-            Self::PowerOut(p) => one - pow(one - t, param(p.get())),
+            Self::PowerIn(p) => pow(t, R::from_unit(p)),
+            Self::PowerOut(p) => one - pow(one - t, R::from_unit(p)),
             Self::PowerInOut(p) => {
-                let p: R = param(p.get());
+                let p: R = R::from_unit(p);
                 let two = R::lit(2.0);
                 let half = R::lit(0.5);
                 // `2^(p-1) · t^p` is `(2t)^p / 2`, which keeps the integer
@@ -123,7 +123,7 @@ impl Law {
             }
             Self::Smootherstep => t * t * t * (t * (t * R::lit(6.0) - R::lit(15.0)) + R::lit(10.0)),
             Self::Exp(k) => {
-                let k: R = param(k.get());
+                let k: R = R::from_unit(k);
                 // `expm1` is accurate down to the smallest `k`; only 0 is `0 / 0`.
                 if k == zero {
                     t
@@ -134,30 +134,6 @@ impl Law {
         };
         if g.is_nan() { zero } else { g.clamp(zero, one) }
     }
-}
-
-/// A checked law parameter (an `Exponent` or `Curvature` raw) as a quantity, so it
-/// crosses into the lane's float with `R::from_unit`, saturating like any
-/// quantity. `from_raw` is the identity: the value was checked when the
-/// `Exponent` or `Curvature` was built.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Shape(f64);
-
-impl Unit for Shape {
-    type Raw = f64;
-    #[inline]
-    fn from_raw(v: f64) -> Self {
-        Self(v)
-    }
-    #[inline]
-    fn to_raw(self) -> f64 {
-        self.0
-    }
-}
-
-#[inline]
-fn param<R: Real>(raw: f64) -> R {
-    R::from_unit(Shape(raw))
 }
 
 /// `x^p` for `x` in `[0, 1]`: the integer exponents up to 5 and the square

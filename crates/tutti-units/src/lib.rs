@@ -121,6 +121,7 @@ pub use resyncs::Resyncs;
 pub use samples::Samples;
 pub use tail::Tail;
 pub use unit_param::{ParamAddr, ParamId, ParamKey, UnitAddr, UnitParam, UnitParamOutOfRange};
+pub use units::Quantity;
 pub use units::{
     Amplitude, ArcDegrees, Azimuth, Balance, Ballistics, Beat, BeatDuration, BeatsPerCycle,
     BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth, Bpm, BpmOutOfRange, Cents,

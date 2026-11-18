@@ -358,3 +358,12 @@ fn an_f32_lane_is_within_8_ulps_of_the_f64_law() {
         }
     }
 }
+
+#[test]
+fn a_law_parameter_crosses_into_the_lane_float_as_its_value() {
+    use tutti_units::Real;
+    assert_eq!(f32::from_unit(Curvature::of(-64.0)), -64.0_f32);
+    assert_eq!(f32::from_unit(Curvature::of(2.5)), 2.5_f32);
+    assert_eq!(f32::from_unit(Exponent::of(0.5)), 0.5_f32);
+    assert_eq!(f64::from_unit(Exponent::of(7.3)), 7.3_f64);
+}

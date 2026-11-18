@@ -1,6 +1,6 @@
 //! [`Real`]: the arithmetic of `f32` and `f64`.
 
-use crate::Unit;
+use crate::Quantity;
 use core::fmt::{Debug, Display};
 use core::iter::Sum;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Sub, SubAssign};
@@ -61,15 +61,15 @@ pub trait Real:
     /// Not a number.
     const NAN: Self;
 
-    /// A quantity as data of this width: the only spelling of quantity to
+    /// A [`Quantity`] as data of this width: the only spelling of quantity to
     /// data, `F::from_unit(cutoff)`.
     ///
     /// It saturates. A finite quantity narrows to a finite value and an
     /// infinite one to the nearest, both clamped to `-Self::MAX..=Self::MAX`;
     /// a NaN stays NaN. A bare `as` would turn a finite `f64` past `f32::MAX`
     /// into an infinity, which no node latches.
-    /// The cost is one compare-and-select, paid at control rate. `Raw = f64`
-    /// keeps counts and positions from crossing into data this way.
+    /// The cost is one compare-and-select, paid at control rate. A `Quantity` is an `f64`
+    /// value, which keeps counts and positions from crossing into data this way.
     ///
     /// ```
     /// use tutti_units::{Hz, Real};
@@ -79,7 +79,7 @@ pub trait Real:
     /// assert_eq!(f64::from_unit(Hz(440.0)), 440.0);
     /// ```
     #[must_use]
-    fn from_unit<U: Unit<Raw = f64>>(u: U) -> Self;
+    fn from_unit<Q: Quantity>(q: Q) -> Self;
     /// A numeric literal in a generic kernel: `F::lit(0.5)`. Only a literal
     /// argument; any other value crosses with [`from_unit`](Self::from_unit) or
     /// `From`.
@@ -200,8 +200,8 @@ macro_rules! real_impl {
             const INFINITY: Self = $t::INFINITY;
             const NAN: Self = $t::NAN;
             #[inline]
-            fn from_unit<U: Unit<Raw = f64>>(u: U) -> Self {
-                let x = u.to_raw();
+            fn from_unit<Q: Quantity>(q: Q) -> Self {
+                let x = q.value();
                 if x.is_nan() {
                     Self::NAN
                 } else {
@@ -370,6 +370,15 @@ mod tests {
         assert_eq!(f64::from_unit(Hz(f64::INFINITY)), f64::MAX);
         assert_eq!(f64::from_unit(Hz(f64::NEG_INFINITY)), -f64::MAX);
         assert!(f64::from_unit(Hz(f64::NAN)).is_nan());
+    }
+
+    #[test]
+    fn a_ranged_f64_and_a_unit_are_both_quantities() {
+        use crate::{Normalized, Quantity};
+        let n = Normalized::of(0.25);
+        assert_eq!(n.value(), n.get());
+        assert_eq!(Hz(440.0).value(), 440.0);
+        assert_eq!(f32::from_unit(n), 0.25_f32);
     }
 
     #[test]
