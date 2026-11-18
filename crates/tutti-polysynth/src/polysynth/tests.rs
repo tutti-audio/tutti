@@ -2970,7 +2970,10 @@ fn channel_pan_follows_rp_036() {
     );
     for hard_left in [0, 1] {
         let (l, r) = level(Some(hard_left));
-        assert_eq!(r, 0.0, "{hard_left}: the dead side is silent, the live one {l}");
+        assert_eq!(
+            r, 0.0,
+            "{hard_left}: the dead side is silent, the live one {l}"
+        );
         // RP-036's left gain is 1 at hard left against cos(Pi/4) at centre.
         assert!(
             (l / default_l - std::f32::consts::SQRT_2).abs() < 0.01,
