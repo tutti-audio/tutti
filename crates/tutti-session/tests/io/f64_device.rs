@@ -49,7 +49,7 @@ fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
 /// rounds away.
 #[test]
 fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use tutti_buffers::InterleavedMut;
 
     assert_ne!(f64::from(FINE as f32), FINE);
@@ -75,31 +75,22 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
         "the card's stream stopped"
     );
     system.play().expect("queued");
-    let limit = Instant::now() + Duration::from_secs(10);
-    let mut tap = loop {
+    let guard = Duration::from_secs(10);
+    let mut tap = None;
+    tutti_fixtures::wait_until("the audio side never took the graph", guard, || {
         let _ = system.update();
-        if let Some(tap) = system.open_heard_tap(Samples(2_048)).unwrap().reader() {
-            break tap;
-        }
-        assert!(
-            Instant::now() < limit,
-            "the audio side never took the graph"
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    };
+        tap = system.open_heard_tap(Samples(2_048)).unwrap().reader();
+        tap.is_some()
+    });
+    let mut tap = tap.expect("opened");
     let mut heard = vec![0.0f64; 512];
-    let limit = Instant::now() + Duration::from_secs(10);
-    loop {
+    tutti_fixtures::wait_until("FINE never reached the tap", guard, || {
         let _ = system.update();
         let frames = tap
             .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
             .unwrap()
             .0;
-        if frames > 0 && heard[..frames].iter().all(|&x| x == FINE) {
-            break;
-        }
-        assert!(Instant::now() < limit, "FINE never reached the tap");
-        std::thread::sleep(Duration::from_millis(2));
-    }
+        frames > 0 && heard[..frames].iter().all(|&x| x == FINE)
+    });
     assert_eq!(system.faults().count(), 0);
 }

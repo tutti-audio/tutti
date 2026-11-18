@@ -101,8 +101,7 @@ pub trait Clock: sealed::Sealed + Sized + 'static {
     type Running: sealed::Running;
     /// The float format the session's audio is rendered in: the graph's
     /// [`Node<Self::Float>`](tutti_graph::Node)s and the blocks of
-    /// [`Session::render`](crate::Session::render). `f32` for every clock
-    /// that drives a stream; [`Offline`] and [`Detached`] carry their own.
+    /// [`Session::render`](crate::Session::render): the clock's own `F`.
     type Float: SessionFloat;
 }
 
