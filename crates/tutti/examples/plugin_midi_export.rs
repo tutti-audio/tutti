@@ -205,11 +205,6 @@ fn reference(
     main: tutti::plugin::MainThreadMarker,
     dir: &Path,
 ) -> Result<Written, Box<dyn std::error::Error>> {
-    // SAFETY: set before the first server is spawned, on the only thread
-    // that reads the environment.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", support::plugin_server()) };
-    // SAFETY: as above.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe()) };
     let midi = dir.join("phrase.mid");
     phrase(&midi)?;
     let (plugin, state) = notes_plugin();
@@ -222,7 +217,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     let written = match args.as_slice() {
         [plugin, midi, out] => play_to_file(main, plugin, None, midi, out)?,
-        [] => reference(main, &std::env::temp_dir())?,
+        [] => {
+            // SAFETY: set before the first server or probe is spawned, while
+            // `main` is the only thread.
+            unsafe {
+                std::env::set_var("TUTTI_PLUGIN_SERVER", support::plugin_server());
+                std::env::set_var("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe());
+            }
+            reference(main, &std::env::temp_dir())?
+        }
         _ => return Err("usage: plugin_midi_export [PLUGIN MIDI OUT]".into()),
     };
     println!("wrote {} ({} bytes)", written.path.display(), written.bytes);
@@ -244,6 +247,9 @@ mod tests {
     fn the_example_plays() {
         let dir = std::env::temp_dir().join(format!("tutti-5-2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        let mut env = tutti_fixtures::ScopedEnv::new();
+        env.set("TUTTI_PLUGIN_SERVER", super::support::plugin_server());
+        env.set("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe());
         let written =
             super::reference(tutti_fixtures::main_thread(), &dir).expect("the example runs");
         let frames = 6 * 48_000 + u64::from(tutti_shared_plugin::core::TAIL);
@@ -272,11 +278,9 @@ mod tests {
     fn the_notes_land_on_the_frames_of_the_files_tempo_map() {
         let dir = std::env::temp_dir().join(format!("tutti-5-2-notes-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        // SAFETY: set before the first server is spawned, on the only thread
-        // that reads the environment.
-        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", super::support::plugin_server()) };
-        // SAFETY: as above.
-        unsafe { std::env::set_var("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe()) };
+        let mut env = tutti_fixtures::ScopedEnv::new();
+        env.set("TUTTI_PLUGIN_SERVER", super::support::plugin_server());
+        env.set("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe());
         let midi = dir.join("phrase.mid");
         super::phrase(&midi).unwrap();
         let (plugin, state) = super::notes_plugin();
