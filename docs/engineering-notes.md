@@ -811,8 +811,8 @@ compensation), with the same feature gates. The tests that remain only in
 
 Two things followed from leaving the workspace. A workspace run no longer turns
 on `tutti-session`'s `device` and `record` (it was bevy-tutti's feature edge
-that did), so the dark-features job names `device` (and the ported suites' own
-`sampler` and `vst2`). The adapter's checks 3 and 5 are
+that did), so the dark-features job, which turns on every feature of
+`tutti-session`, is where those suites run. The adapter's checks 3 and 5 are
 `scripts/parked/check-bevy-tutti.sh`, which nothing runs while it is parked, and
 `cargo xtask check-layout` lets `crates/bevy-tutti` be a non-member only if it is
 its own `[workspace]` root. Un-parking is one migration PR: restore the member, the
