@@ -379,11 +379,12 @@ fn drain_with_errors(channels: &Channels) {
 mod tests {
     use super::*;
     use crate::client::audio::messages::{ProcessPayload, UNSOLICITED_PARAMS};
-    use crate::protocol::{Normalized, ParamId};
+    use crate::protocol::ParamId;
     use std::sync::Arc;
     use tutti_fixtures::midi;
     use tutti_plugin_types::ResyncKind;
     use tutti_ump::MidiChannel;
+    use tutti_units::Normalized;
     use tutti_units::SampleRate;
 
     /// **A crash's drain counts the queued chunks' MIDI.**

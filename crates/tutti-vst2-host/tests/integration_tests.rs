@@ -18,8 +18,9 @@ use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
 use tutti_graph::Offset;
-use tutti_plugin_types::{ContentScale, Control, EditorWindow, Normalized};
+use tutti_plugin_types::{ContentScale, Control, EditorWindow};
 use tutti_ump::MidiChannel;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_vst2_host::{Samples, TimeSignature, TransportInfo, Vst2ProcessContext};
 

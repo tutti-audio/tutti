@@ -11,11 +11,13 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::Float;
 use tutti_engine::{
     AudioCallbackState, OutputSpec, OutputStream, StartError, Stopped, StreamDriver, StreamHost,
 };
 
 use crate::Result;
+use crate::driver_seam::CpalDriver;
 use crate::host::{DeviceHost, DeviceSelector};
 use crate::output::{AudioEngine, Opened};
 
@@ -29,15 +31,15 @@ use crate::output::{AudioEngine, Opened};
 /// driver on one thread.
 ///
 /// See the [crate-level example](crate) for building one.
-pub struct TuttiDriver {
-    host: StreamHost,
+pub struct TuttiDriver<F: Float = f32> {
+    host: StreamHost<F>,
     target: Option<(DeviceHost, DeviceSelector)>,
     opened: Opened,
 }
 
 // Hand-rolled: the host holds the RT-side graph handles and is not `Debug`
 // in full. Forwards it, which carries the configuration a host logs.
-impl std::fmt::Debug for TuttiDriver {
+impl<F: Float> std::fmt::Debug for TuttiDriver<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TuttiDriver")
             .field("host", &self.host)
@@ -45,7 +47,10 @@ impl std::fmt::Debug for TuttiDriver {
     }
 }
 
-impl TuttiDriver {
+impl<F: Float> TuttiDriver<F>
+where
+    CpalDriver: StreamDriver<F, Error = crate::Error>,
+{
     /// Creates a driver from an opened device and the state its callback will
     /// read. Does not start or stop anything.
     ///
@@ -55,7 +60,7 @@ impl TuttiDriver {
     /// restart relies on that: its hook reaches the engine from the control
     /// side ([`Stopped::apply_pending`]) because the stream it stopped was the
     /// only renderer.
-    pub fn new(audio_engine: AudioEngine, callback_state: Arc<AudioCallbackState>) -> Self {
+    pub fn new(audio_engine: AudioEngine, callback_state: Arc<AudioCallbackState<F>>) -> Self {
         let AudioEngine {
             stream,
             target,
@@ -124,7 +129,7 @@ impl TuttiDriver {
     pub fn restart_with<E: From<crate::Error>>(
         &mut self,
         device: impl Into<DeviceSelector>,
-        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
     ) -> core::result::Result<(), E> {
         self.host.stop();
         if let Some((_, current)) = &mut self.target {
@@ -164,11 +169,11 @@ impl TuttiDriver {
     ///
     /// The hook's error (the stream left stopped), or what the driver's
     /// `open` reports.
-    pub fn switch<D: StreamDriver, E: From<crate::Error>>(
+    pub fn switch<D: StreamDriver<F>, E: From<crate::Error>>(
         &mut self,
         spec: OutputSpec,
         driver: D,
-        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
     ) -> core::result::Result<(), E>
     where
         D::Error: Into<crate::Error>,
@@ -185,14 +190,14 @@ impl TuttiDriver {
 
     /// The one start [`AudioEngine::start_resolved`] and `start_on` make:
     /// `driver` takes the host's stream.
-    pub(crate) fn take_over<D: StreamDriver, E: From<crate::Error>>(
-        mut host: StreamHost,
+    pub(crate) fn take_over<D: StreamDriver<F>, E: From<crate::Error>>(
+        mut host: StreamHost<F>,
         spec: OutputSpec,
         driver: D,
-        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
         target: Option<(DeviceHost, DeviceSelector)>,
         opened: Opened,
-    ) -> core::result::Result<Self, (StreamHost, E)>
+    ) -> core::result::Result<Self, (StreamHost<F>, E)>
     where
         D::Error: Into<crate::Error>,
     {
@@ -219,11 +224,11 @@ impl TuttiDriver {
     ///
     /// # Errors
     /// The hook's error, or what the driver's `open` reports, as `E`.
-    pub fn move_to<D: StreamDriver, E: From<StartError<D::Error>>>(
+    pub fn move_to<D: StreamDriver<F>, E: From<StartError<D::Error>>>(
         &mut self,
         spec: OutputSpec,
         driver: D,
-        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> core::result::Result<(), E>,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
     ) -> core::result::Result<(), E> {
         self.host.restart_with(|| Ok((spec, driver)), rerate)
     }
@@ -236,7 +241,7 @@ impl TuttiDriver {
     /// The stream host, taken out of the driver: the device is no longer this
     /// driver's, and the stream is as it was left.
     #[must_use]
-    pub fn into_host(self) -> StreamHost {
+    pub fn into_host(self) -> StreamHost<F> {
         self.host
     }
 
@@ -276,7 +281,7 @@ impl TuttiDriver {
     ///
     /// # Errors
     /// As [`AudioEngine::start_with`].
-    pub fn start_with<D: StreamDriver>(&mut self, driver: D) -> Result<()>
+    pub fn start_with<D: StreamDriver<F>>(&mut self, driver: D) -> Result<()>
     where
         D::Error: Into<crate::Error>,
     {
@@ -320,9 +325,9 @@ impl<E: From<crate::Error>> Restart<E> {
 /// The hook a plain [`TuttiDriver::restart`] runs: the new device must run
 /// at `graph`, the rate the graph was built at, or the restart stops there
 /// with [`Error::RateChanged`](crate::Error::RateChanged).
-fn refuse_rate_change(
+fn refuse_rate_change<F: Float>(
     graph: tutti_units::SampleRate,
-) -> impl FnOnce(&OutputSpec, &Stopped<'_>) -> Result<()> {
+) -> impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> Result<()> {
     move |spec, _| {
         if spec.sample_rate == graph {
             Ok(())

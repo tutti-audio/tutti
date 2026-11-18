@@ -26,7 +26,7 @@ mod thread;
 
 use crate::ServerWatch;
 use crate::protocol::{
-    ChordChanges, MidiEventVec, Normalized, NoteExpressionChanges, NoteExpressionIntChanges,
+    ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
     NoteExpressionTextChanges, ParamId, ParameterChanges, ParameterInfo, Preset, PresetId,
     ScaleChanges, SlabLayout, TransportChanges, TransportInfo,
 };
@@ -35,6 +35,7 @@ use tutti_plugin_types::{
     BlockStatus, BridgeResult, ContentScale, Delivered, EditorError, PluginFailure, StateError,
     StateUse,
 };
+use tutti_units::Normalized;
 use tutti_units::SampleRate;
 
 /// VST3 sequencer-context inputs for one process block, bundled to keep

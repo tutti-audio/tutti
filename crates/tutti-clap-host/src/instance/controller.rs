@@ -8,10 +8,11 @@ use std::sync::atomic::AtomicU64;
 use tutti_plugin_types::MainThreadMarker;
 
 use tutti_plugin_types::{
-    Control, Controller, EditDrain, EditQueue, EditSink, Loaded, Normalized, PluginError,
-    PluginTail, Prepare, Refused, RestartRules, Samples, Stuck,
+    Control, Controller, EditDrain, EditQueue, EditSink, Loaded, PluginError, PluginTail, Prepare,
+    Refused, RestartRules, Samples, Stuck,
 };
 use tutti_rt::Publisher;
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use super::ClapLoaded;

@@ -1,6 +1,7 @@
 //! Parameter automation primitives passed into a plugin's process call.
 
-use crate::{Normalized, PointBuf, PointPool};
+use crate::{PointBuf, PointPool};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 /// One automation breakpoint: the value at a specific sample offset within
@@ -834,7 +835,7 @@ mod serde_tests {
                     (0..13).map(|k| {
                         postcard::to_allocvec(&ParameterPoint {
                             sample_offset: k * 4 + id % 4,
-                            value: crate::Normalized::of(0.25),
+                            value: tutti_units::Normalized::of(0.25),
                         })
                         .expect("serialize")
                     }),

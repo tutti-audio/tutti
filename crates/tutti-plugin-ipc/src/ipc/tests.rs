@@ -1122,7 +1122,8 @@ fn param(id: u32, read_only: bool) -> ParameterInfo {
 /// `GetParameterList` between them.
 #[test]
 fn a_served_write_is_checked_against_one_ask() {
-    use tutti_plugin_types::{Normalized, ParamWriteError};
+    use tutti_plugin_types::ParamWriteError;
+    use tutti_units::Normalized;
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
     *server.parameters.lock().unwrap() = vec![param(3, false), param(4, true)];
@@ -1152,7 +1153,8 @@ fn a_served_write_is_checked_against_one_ask() {
 /// read-only.
 #[test]
 fn a_resync_with_a_changed_list_flips_the_answer() {
-    use tutti_plugin_types::{Normalized, ParamWriteError, ResyncKind};
+    use tutti_plugin_types::{ParamWriteError, ResyncKind};
+    use tutti_units::Normalized;
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
     *server.parameters.lock().unwrap() = vec![param(3, false)];
@@ -1195,7 +1197,8 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
 fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
-    use tutti_plugin_types::{Normalized, ParamWriteError};
+    use tutti_plugin_types::ParamWriteError;
+    use tutti_units::Normalized;
     let _machine = machine_lock();
     let sets = |got: &[HostMessage]| {
         got.iter()
@@ -1268,7 +1271,8 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
 /// write is still answered from the cache.
 #[test]
 fn a_values_resync_keeps_the_declared_list() {
-    use tutti_plugin_types::{Normalized, ResyncKind};
+    use tutti_plugin_types::ResyncKind;
+    use tutti_units::Normalized;
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
     *server.parameters.lock().unwrap() = vec![param(3, false)];
@@ -1295,7 +1299,8 @@ fn a_values_resync_keeps_the_declared_list() {
 /// cannot be checked is never `Ok`, and the cache is forgotten.
 #[test]
 fn a_lost_plugin_refuses_the_write() {
-    use tutti_plugin_types::{Normalized, ParamWriteError, PluginFailure};
+    use tutti_plugin_types::{ParamWriteError, PluginFailure};
+    use tutti_units::Normalized;
     let _machine = machine_lock();
     let (mut ipc, _server) = mock();
     let main = main_thread();

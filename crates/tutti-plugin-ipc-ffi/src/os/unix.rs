@@ -39,6 +39,41 @@ pub fn wait_readable(fd: BorrowedFd<'_>, timeout: Option<Duration>) -> std::io::
     Ok(rustix::event::poll(&mut polls, timespec(timeout).as_ref())? > 0)
 }
 
+/// Which of the two descriptors [`wait_readable_either`] waited on are
+/// readable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Readable {
+    /// The first descriptor is readable (or hung up: the read reports it).
+    pub first: bool,
+    /// The second descriptor is readable (or hung up).
+    pub second: bool,
+}
+
+/// Waits up to `timeout` (`None`: for ever) for either of two descriptors to
+/// become readable, in one `poll(2)` that allocates nothing: the wait of a
+/// thread that serves a connection and is woken by a doorbell's descriptor.
+/// Both `false` on a timeout.
+///
+/// # Errors
+///
+/// The OS error of `poll`, [`Interrupted`](std::io::ErrorKind::Interrupted)
+/// included: a signal during the wait is the caller's to retry.
+pub fn wait_readable_either(
+    first: BorrowedFd<'_>,
+    second: BorrowedFd<'_>,
+    timeout: Option<Duration>,
+) -> std::io::Result<Readable> {
+    let mut polls = [
+        PollFd::from_borrowed_fd(first, PollFlags::IN),
+        PollFd::from_borrowed_fd(second, PollFlags::IN),
+    ];
+    rustix::event::poll(&mut polls, timespec(timeout).as_ref())?;
+    Ok(Readable {
+        first: !polls[0].revents().is_empty(),
+        second: !polls[1].revents().is_empty(),
+    })
+}
+
 /// Waits on one descriptor of the caller's own and any number of others a
 /// plugin asked to have watched, in one `poll(2)`.
 ///
@@ -138,6 +173,21 @@ pub fn process_exists(pid: u32) -> bool {
     !matches!(rustix::process::test_kill_process(pid), Err(Errno::SRCH))
 }
 
+/// Ends this process at once with `SIGKILL`, without running a plugin
+/// library's exit handlers or any other thread's cleanup, for a server whose
+/// host is gone: a plain `exit` would run every loaded library's destructors
+/// while other threads are mid-call. Aborts if the OS refuses.
+pub fn terminate_process() -> ! {
+    let _ = rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::KILL);
+    std::process::abort()
+}
+
+/// This process's parent PID, `None` once reparented to init (a PID of 1).
+#[must_use]
+pub fn parent_process_id() -> Option<u32> {
+    Some(std::os::unix::process::parent_id()).filter(|&pid| pid > 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +201,39 @@ mod tests {
         assert!(!process_exists(i32::MAX as u32));
         assert!(!process_exists(u32::MAX));
         assert!(!process_exists(0));
+    }
+
+    /// **Either descriptor ends the wait and is the one reported.**
+    #[test]
+    fn wait_readable_either_reports_the_descriptor_that_is_readable() {
+        use std::io::Write;
+        use std::os::fd::AsFd;
+        let (first, mut first_writer) = std::io::pipe().unwrap();
+        let (second, mut second_writer) = std::io::pipe().unwrap();
+        let wait = |timeout| wait_readable_either(first.as_fd(), second.as_fd(), timeout).unwrap();
+        assert_eq!(
+            wait(Some(Duration::ZERO)),
+            Readable {
+                first: false,
+                second: false
+            }
+        );
+        second_writer.write_all(b"x").unwrap();
+        assert_eq!(
+            wait(None),
+            Readable {
+                first: false,
+                second: true
+            }
+        );
+        first_writer.write_all(b"x").unwrap();
+        assert_eq!(
+            wait(None),
+            Readable {
+                first: true,
+                second: true
+            }
+        );
     }
 
     /// A pipe's read end is not readable until something is written to it.

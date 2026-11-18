@@ -1,6 +1,7 @@
 //! One VST3 parameter's [`ParamMapping`]: the plugin's own conversion.
 
-use tutti_plugin_types::{MainThreadMarker, Normalized, ParamMapping};
+use tutti_plugin_types::{MainThreadMarker, ParamMapping};
+use tutti_units::Normalized;
 use tutti_vst3_ffi::Plugin;
 
 /// The controller's `normalizedParamToPlain` and `plainParamToNormalized` for

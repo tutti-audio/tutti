@@ -2,14 +2,7 @@
 //! (unix: CLAP's `posix-fd-support`). One `cfg` on this module's declaration
 //! holds the test and its helpers.
 
-use std::os::fd::OwnedFd;
-use std::os::unix::net::UnixStream;
-
-use tutti_plugin_ipc::{read_frame, write_frame};
-
 use super::*;
-use crate::main_loop::Stream;
-use crate::transport::SocketTransport;
 
 /// How long the loop idles between ticks here: the tick that serves the
 /// plugin's callback request, which registers the descriptor.
@@ -62,7 +55,7 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
     let main = main_thread();
     let render = RenderThread::spawn(
         fixture.side.take().expect("run once"),
-        Box::new(fixture.audio.take().expect("run once")),
+        Some(Box::new(fixture.audio.take().expect("run once"))),
     )
     .expect("the render thread");
     let result = serve_every(

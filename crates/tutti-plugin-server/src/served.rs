@@ -14,20 +14,20 @@
 //! What the plugin tells the host between blocks is [`Served::poll`]'s answer:
 //! each [`Notice`] of the core as the [`BridgeMessage`] that carries it.
 
+use crate::ties::{Patience, Ties};
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
     AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, Load,
-    LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Normalized, Notice,
-    OutOfProcess, ParamEdit, ParamWriteError, ParameterInfo, PluginAudio, PluginDescriptor,
-    PluginError, PluginResult, Prepare, Preset, PresetId, ProcessContext, ProcessOutput,
-    ProcessWake, RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate, Samples, Seat,
-    Stage, State, StateError, StateUse, TrackInfo,
+    LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
+    ParamEdit, ParamWriteError, ParameterInfo, PluginAudio, PluginDescriptor, PluginError,
+    PluginResult, Prepare, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
+    RenderMode, RenderModeSupport, Request, SampleFormat, SampleRate, Samples, Seat, Stage, State,
+    StateError, StateUse, TrackInfo,
 };
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 mod any;
@@ -211,18 +211,16 @@ pub(crate) struct Served<F: OutOfProcess> {
     events: Vec<BridgeMessage>,
     /// A refusal was told since the last [`finish_refusals`](Self::finish_refusals).
     refused: bool,
-    /// Set by the plugin's request to be processed again (any thread), taken
-    /// by `poll`, which tells the host.
-    process_requested: Arc<AtomicBool>,
+    /// What wakes the render thread, and what it wakes. Its bell is rung by
+    /// the plugin's request to be processed again (any thread), and taken by
+    /// `poll`, which tells the host.
+    ties: Ties,
 }
 
 /// How long a plan that waits for the Processor to come home from the render
 /// thread is given: the render thread returns it at its next poll (a few
 /// milliseconds), so this is a render thread that is stuck inside the plugin.
 const HOME_PATIENCE: Duration = Duration::from_secs(3);
-
-/// How often a wait for the Processor looks again.
-const HOME_STEP: Duration = Duration::from_micros(500);
 
 /// A Processor that is still on the render thread when the plugin is dropped
 /// must not outlive the Controller that destroys the plugin, so the plugin is
@@ -286,6 +284,7 @@ impl<F: ServerSide> Served<F> {
         state: Option<(&[u8], StateUse)>,
         before_restore: &mut dyn FnMut(),
         hand: Hand<F::Processor>,
+        ties: Ties,
     ) -> PluginResult<(Self, Option<String>)> {
         Self::activate(
             main,
@@ -296,6 +295,7 @@ impl<F: ServerSide> Served<F> {
             state,
             before_restore,
             hand,
+            ties,
         )
     }
 
@@ -328,6 +328,7 @@ impl<F: ServerSide> Served<F> {
         state: Option<(&[u8], StateUse)>,
         before_restore: &mut dyn FnMut(),
         hand: Hand<F::Processor>,
+        ties: Ties,
     ) -> PluginResult<(Self, Option<String>)> {
         let activation_failed = |reason: String| {
             load_failed(LoadStage::Activation, format!("activate failed: {reason}"))
@@ -351,16 +352,13 @@ impl<F: ServerSide> Served<F> {
             edits: Vec::new(),
             events: Vec::new(),
             refused: false,
-            process_requested: Arc::new(AtomicBool::new(false)),
+            ties,
         };
         // The wake outlives every activation: the plugin's host state is the
         // loaded plugin's.
         if let Some(control) = this.lifecycle.control() {
-            let requested = Arc::clone(&this.process_requested);
-            control.bind_wake(ProcessWake::new(move || {
-                requested.store(true, Ordering::Release);
-                crate::bell::bell().ring();
-            }));
+            let bell = this.ties.bell.clone();
+            control.bind_wake(ProcessWake::new(move || bell.ring()));
         }
         // Before the activation: see above.
         let state_error = state.and_then(|(data, state_use)| {
@@ -410,6 +408,9 @@ impl<F: ServerSide> Served<F> {
         self.state = self
             .lifecycle
             .drive(state, event, &mut self.hand, main, |n| told.push(n));
+        // The Processor may have been lent or recalled: the render thread
+        // trades it at its next wake.
+        self.ties.wake.ring();
         let mut refusal = None;
         for notice in told {
             if let Some(reason) = self.absorb(main, notice) {
@@ -421,22 +422,28 @@ impl<F: ServerSide> Served<F> {
 
     /// [`drive`](Self::drive), then, while the plan is parked for the Processor
     /// to come home from the render thread, ticks until it has: the render
-    /// thread returns it at its next poll. Bounded: a render thread stuck
+    /// thread returns it at its next wake and says so ([`Settle`](crate::ties::Settle)),
+    /// which ends this wait. Bounded by [`HOME_PATIENCE`]: a render thread stuck
     /// inside the plugin leaves the plan parked and the refusal says so.
     fn drive_settled(&mut self, main: MainThreadMarker, event: Event) -> Option<PluginError> {
         let mut refusal = self.drive(main, event);
-        let giving_up = Instant::now() + HOME_PATIENCE;
+        let patience = Patience::new(Instant::now(), HOME_PATIENCE);
         while self.state.is_parked() {
-            if Instant::now() >= giving_up {
+            if patience.left(Instant::now()).is_none() {
                 return refusal.or_else(|| {
                     Some(PluginError::Other(
                         "the render thread did not hand the processor back".to_string(),
                     ))
                 });
             }
-            std::thread::sleep(HOME_STEP);
+            // Read before the tick that collects: a return after it moves the
+            // count past this and ends the wait at once.
+            let seen = self.ties.settle.seen();
             let ticked = self.drive(main, Event::Tick);
             refusal = refusal.or(ticked);
+            if self.state.is_parked() {
+                self.ties.settle.wait_past(seen, patience);
+            }
         }
         refusal
     }
@@ -458,14 +465,18 @@ impl<F: ServerSide> Served<F> {
             return false;
         }
         self.lifecycle.apply(Effect::Recall, &mut self.hand, main);
-        let giving_up = Instant::now() + HOME_PATIENCE;
+        self.ties.wake.ring();
+        let patience = Patience::new(Instant::now(), HOME_PATIENCE);
         while self.lifecycle.processor().is_none() {
-            if Instant::now() >= giving_up {
+            if patience.left(Instant::now()).is_none() {
                 return false;
             }
-            std::thread::sleep(HOME_STEP);
+            let seen = self.ties.settle.seen();
             // A tick collects what the render thread returned.
             self.drive(main, Event::Tick);
+            if self.lifecycle.processor().is_none() {
+                self.ties.settle.wait_past(seen, patience);
+            }
         }
         true
     }
@@ -719,7 +730,7 @@ impl<F: ServerSide> ServedPlugin for Served<F> {
     fn poll(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage> {
         self.serve(main);
         self.forward_edits(main);
-        if self.process_requested.swap(false, Ordering::Acquire) {
+        if self.ties.bell.take() {
             self.events.push(BridgeMessage::ProcessRequested);
         }
         std::mem::take(&mut self.events)

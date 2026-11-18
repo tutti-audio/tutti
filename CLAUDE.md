@@ -279,9 +279,9 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 **Layering.** Normal and build dependencies point strictly down this list
 (dev-dependencies may go anywhere); `cargo xtask check-layout` holds it:
 
-0. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-ump`, `tutti-units`,
+0. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-units`,
    `tutti-plugin-ipc-ffi`
-1. `tutti-types`, `tutti-music`
+1. `tutti-types`, `tutti-music`, `tutti-ump`
 2. `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`, `tutti-buffers`
 3. `tutti-rt`
 4. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,

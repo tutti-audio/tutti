@@ -18,6 +18,7 @@ use tutti_plugin_types::{
 
 use super::{Served, ServedPlugin};
 use crate::render::{End, RenderEnd};
+use crate::ties::Ties;
 
 macro_rules! served {
     ($($(#[$cfg:meta])* $name:ident($loaded:ty, $format:path)),* $(,)?) => {
@@ -56,6 +57,7 @@ macro_rules! served {
                 prefer_f64: bool,
                 state: Option<(&[u8], StateUse)>,
                 before_restore: &mut dyn FnMut(),
+                ties: Ties,
             ) -> PluginResult<(Self, Option<String>, Box<dyn RenderEnd>)> {
                 if !path.exists() {
                     return Err(PluginError::Load {
@@ -77,6 +79,7 @@ macro_rules! served {
                             state,
                             before_restore,
                             hand,
+                            ties,
                         )?;
                         let end = End::new(rt, plugin.loaded().features);
                         Ok((Self::$name(plugin), state_error, Box::new(end)))

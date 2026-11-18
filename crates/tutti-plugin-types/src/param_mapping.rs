@@ -1,6 +1,6 @@
 //! One parameter's map between its normalized position and its plain value.
 
-use crate::Normalized;
+use tutti_units::Normalized;
 
 /// One parameter's map between its normalized position and its plain value, as
 /// its format defines it.

@@ -10,6 +10,7 @@ use std::time::Instant;
 use crate::audio_pipeline::Clock;
 use crate::render::{RenderConfig, RenderLink, RenderSide, ToRender, link};
 use crate::served::AnyServed;
+use crate::ties::Ties;
 use dpi::Size;
 use tutti_plugin_ipc::state_chunk::{self, Reassembler};
 use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, StagedState};
@@ -83,7 +84,7 @@ impl Reaction {
 pub(crate) struct Session {
     /// The hosted plugin, or `None` before a load and after an unload. Every
     /// handler that needs one refuses explicitly rather than going silent.
-    pub(crate) plugin: Option<AnyServed>,
+    plugin: Option<AnyServed>,
     /// What the plugin's drops off the main thread hand over: run on every tick and
     /// after an unload.
     work: MainWork,
@@ -149,8 +150,12 @@ impl Session {
     /// [`Clock`] that the first load overwrites; and the render side that
     /// serves its blocks, which a thread runs once the host's audio connection
     /// is there ([`RenderThread::spawn`](crate::render::RenderThread::spawn)).
-    pub(crate) fn new() -> (Self, RenderSide) {
-        let (render, side) = link();
+    ///
+    /// # Errors
+    ///
+    /// The OS refused a bell.
+    pub(crate) fn new() -> std::io::Result<(Self, RenderSide)> {
+        let (render, side) = link()?;
         let published = RenderConfig::new();
         let (work, work_handle) = MainWork::new();
         let session = Self {
@@ -170,7 +175,7 @@ impl Session {
             editor_closed_unasked: false,
             write_pending: false,
         };
-        (session, side)
+        Ok((session, side))
     }
 
     /// Tells the render thread what its blocks read, if that changed since it
@@ -438,14 +443,34 @@ impl Session {
             }
 
             M::SetupSharedMemory { shm_name, layout } => {
-                let slab = AudioSlab::open(shm_name, layout)?;
-                // The scratch is sized here, to the most a block may carry; the
-                // render thread refuses any block longer.
-                self.render.attach_slab(slab);
-                Ok(BridgeMessage::SharedMemoryReady.into())
+                // A slab this side cannot open is the host's to hear of: a reply,
+                // not the end of the session.
+                match AudioSlab::open(shm_name, layout) {
+                    Ok(slab) => {
+                        // The scratch is sized here, to the most a block may
+                        // carry; the render thread refuses any block longer.
+                        self.render.attach_slab(slab);
+                        Ok(BridgeMessage::SharedMemoryReady.into())
+                    }
+                    Err(e) => Ok(BridgeMessage::Error {
+                        message: e.to_string(),
+                    }
+                    .into()),
+                }
             }
             M::Shutdown => Ok(Reaction::Shutdown),
         }
+    }
+
+    /// Whether a plugin is loaded.
+    pub(crate) fn has_plugin(&self) -> bool {
+        self.plugin.is_some()
+    }
+
+    /// What wakes the render thread and what it wakes, and the bell a plugin
+    /// rings to make the main loop run.
+    pub(crate) fn ties(&self) -> &Ties {
+        self.render.ties()
     }
 
     /// Drain async events from the loaded plugin, mapping each into a
@@ -453,6 +478,8 @@ impl Session {
     /// main thread's loop after every message dispatch and on every tick.
     pub(crate) fn drain_async_events(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage> {
         let Some(plugin) = self.plugin.as_mut() else {
+            // A plugin rang as it was unloaded: nothing is left to tell.
+            self.render.ties().bell.take();
             return Vec::new();
         };
         let events = plugin.plugin_mut().poll(main);
@@ -685,6 +712,7 @@ impl Session {
             prefer_f64,
             staged.as_deref().zip(declared.map(|d| d.state_use)),
             &mut restoring,
+            self.render.ties().clone(),
         ) {
             Ok(loaded) => loaded,
             Err(e) => return Ok(load_failure(&e).into()),
@@ -914,11 +942,12 @@ mod tests {
 
     impl Rig {
         fn new() -> Self {
-            let (session, side) = Session::new();
+            let (session, side) = Session::new().expect("bells");
             let side = Arc::new(Mutex::new(side));
             let stop = Arc::new(AtomicBool::new(false));
             let stepper = std::thread::spawn({
                 let (side, stop) = (Arc::clone(&side), Arc::clone(&stop));
+                let wake = session.ties().wake.clone();
                 move || {
                     while !stop.load(Ordering::Acquire) {
                         {
@@ -926,8 +955,9 @@ mod tests {
                             side.drain();
                             side.poll_seat();
                         }
-                        // The ring has no doorbell, so the stepper polls it.
-                        std::thread::yield_now();
+                        // As the render thread waits: for what the session
+                        // rings it for.
+                        wake.wait(None).expect("a wait");
                     }
                 }
             });
@@ -984,6 +1014,7 @@ mod tests {
             // does at its end.
             self.session.drop_plugin(main_thread());
             self.stop.store(true, Ordering::Release);
+            self.session.ties().wake.ring();
             if let Some(stepper) = self.stepper.take() {
                 let _ = stepper.join();
             }
@@ -997,7 +1028,8 @@ mod tests {
     #[cfg(feature = "clap")]
     use tutti_plugin_types::Features;
     use tutti_plugin_types::LoadStage;
-    use tutti_plugin_types::{MidiEventVec, Normalized, NoteExpressionChanges, ParameterChanges};
+    use tutti_plugin_types::{MidiEventVec, NoteExpressionChanges, ParameterChanges};
+    use tutti_units::Normalized;
     use tutti_units::ParamId;
 
     fn assert_none(r: Reaction) {
@@ -1064,7 +1096,7 @@ mod tests {
     /// reports whether any block was silent.
     #[cfg(feature = "clap")]
     fn save_during_playback(name: &str, write: bool) -> SteadySave {
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         // The first blocks warm the render side up and are dropped from the
         // result; the save waits until this many more have rendered, so blocks
@@ -1095,10 +1127,9 @@ mod tests {
 
         let side = Arc::clone(&s.side);
         let stop = Arc::new(AtomicBool::new(false));
-        let rendered = Arc::new(AtomicUsize::new(0));
+        let (rendered_one, rendered_blocks) = std::sync::mpsc::channel::<()>();
         let player = std::thread::spawn({
             let stop = Arc::clone(&stop);
-            let rendered = Arc::clone(&rendered);
             move || {
                 let mut blocks = Vec::new();
                 let mut seq = 0u64;
@@ -1133,24 +1164,31 @@ mod tests {
                         0.0
                     };
                     blocks.push((started, peak));
-                    rendered.fetch_add(1, Ordering::Release);
-                    // The ring has no doorbell, so the player polls it.
+                    let _ = rendered_one.send(());
+                    // Lets the test's thread take the side's lock between blocks.
                     std::thread::yield_now();
                 }
                 blocks
             }
         });
-        // Waits until the player has rendered `count` blocks in all; the
-        // deadline only guards a hang.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        // Each block the player renders is a message. `played` is how many have
+        // rendered by now, and `rendered_to` waits for `count` in all; its limit
+        // only guards a hang.
+        let rendered = std::cell::Cell::new(0usize);
+        let played = || {
+            while rendered_blocks.try_recv().is_ok() {
+                rendered.set(rendered.get() + 1);
+            }
+            rendered.get()
+        };
         let rendered_to = |count: usize| {
-            while rendered.load(Ordering::Acquire) < count {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "the player rendered {} of {count} blocks",
-                    rendered.load(Ordering::Acquire)
-                );
-                std::thread::yield_now();
+            while rendered.get() < count {
+                rendered_blocks
+                    .recv_timeout(std::time::Duration::from_secs(30))
+                    .unwrap_or_else(|_| {
+                        panic!("the player rendered {} of {count} blocks", rendered.get())
+                    });
+                rendered.set(rendered.get() + 1);
             }
         };
         rendered_to(WARM_UP + SETTLED);
@@ -1171,10 +1209,10 @@ mod tests {
         // Snapshots come round after round in a session, with blocks between
         // them; each one must leave the blocks alone.
         for _ in 0..10 {
-            rendered_to(rendered.load(Ordering::Acquire) + BETWEEN_SAVES);
+            rendered_to(played() + BETWEEN_SAVES);
             save_state_bytes(&mut s);
         }
-        rendered_to(rendered.load(Ordering::Acquire) + AFTER_SAVES);
+        rendered_to(played() + AFTER_SAVES);
         stop.store(true, Ordering::Release);
         let blocks: Vec<_> = player.join().unwrap().into_iter().skip(WARM_UP).collect();
         SteadySave {
@@ -1444,6 +1482,68 @@ mod tests {
         assert_none(r);
         assert!(s.plugin.is_none());
         assert!(!s.side().has_slab());
+    }
+
+    /// **A plugin's request to be processed, made on a thread of its own, rings
+    /// the session's bell once and reaches the host once.** The bell is the one
+    /// record of the request: it rings from the plugin's thread, and the pass
+    /// that tells the host takes it.
+    #[test]
+    #[cfg(feature = "clap")]
+    fn a_process_request_from_a_plugin_thread_rings_the_bell_and_tells_the_host_once() {
+        let _lock = crate::test_utils::plugin_load_lock();
+        let (mut s, _shm) = load_clap("process_requested", SampleFormat::Float32);
+        let main = main_thread();
+        assert!(!s.ties().bell.rung(), "nothing asked yet");
+        assert!(
+            std::thread::spawn(|| crate::test_utils::clap().request_process_now())
+                .join()
+                .expect("the plugin's thread"),
+            "the plugin made the request"
+        );
+        assert!(s.ties().bell.rung(), "the request rang the bell");
+        let told = |events: &[BridgeMessage]| {
+            events
+                .iter()
+                .filter(|e| matches!(e, BridgeMessage::ProcessRequested))
+                .count()
+        };
+        assert_eq!(told(&s.drain_async_events(main)), 1);
+        assert!(!s.ties().bell.rung(), "telling the host took the ring");
+        assert_eq!(told(&s.drain_async_events(main)), 0, "once");
+    }
+
+    /// **A slab the server cannot open is answered with an error, and the
+    /// session goes on**: the host asked for shared memory that does not exist,
+    /// and hears that. The error used to end the server, which the host saw as
+    /// its crash.
+    #[test]
+    fn a_slab_that_cannot_be_opened_is_answered_and_the_session_goes_on() {
+        let mut s = Rig::new();
+        let layout = tutti_plugin_ipc::SlabLayout::new(
+            256,
+            SampleFormat::Float32,
+            vec![tutti_plugin_types::ChannelLayout::STEREO],
+            vec![tutti_plugin_types::ChannelLayout::STEREO],
+        );
+        let reply = s
+            .handle(
+                main_thread(),
+                HostMessage::SetupSharedMemory {
+                    shm_name: format!("tutti_no_such_slab_{}", std::process::id()),
+                    layout,
+                },
+            )
+            .expect("a refused slab is a reply, not a failure of the session");
+        assert!(
+            matches!(reply, Reaction::Reply(BridgeMessage::Error { .. })),
+            "the host hears the refusal"
+        );
+        assert!(!s.side().has_slab(), "nothing was attached");
+        assert!(matches!(
+            s.handle(main_thread(), HostMessage::Shutdown).unwrap(),
+            Reaction::Shutdown
+        ));
     }
 
     #[test]
@@ -2904,6 +3004,7 @@ mod tests {
             None,
             &mut || {},
             tutti_plugin_types::Hand::local(),
+            crate::ties::ties().expect("bells").0,
         )
         .expect("the vendored VST3 probe loads");
         let vst3: &dyn crate::served::ServedPlugin = &vst3;

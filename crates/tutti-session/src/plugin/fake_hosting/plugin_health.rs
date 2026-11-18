@@ -22,8 +22,8 @@ use tutti_graph::NodeKey;
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::Liveness;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::Normalized;
 use tutti_plugin_types::{BridgeError, ParameterInfo, PluginFailure};
+use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
 

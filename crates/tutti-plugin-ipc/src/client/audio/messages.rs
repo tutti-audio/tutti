@@ -3,7 +3,7 @@
 
 use super::ask::Reply;
 use crate::protocol::{
-    ChordChanges, MidiEventVec, Normalized, NoteExpressionChanges, NoteExpressionIntChanges,
+    ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
     NoteExpressionTextChanges, ParamEdit, ParamId, ParameterChanges, ParameterInfo, PluginTail,
     Preset, PresetId, Samples, ScaleChanges, TransportChanges, TransportInfo,
 };
@@ -11,6 +11,7 @@ use dpi::Size;
 use tutti_plugin_types::{
     BlockStatus, ContentScale, PluginFailure, ResyncKind, StateError, StateUse,
 };
+use tutti_units::Normalized;
 use tutti_units::SampleRate;
 
 /// Audio-thread bulk payload for one `Process` command. Heap-boxed and

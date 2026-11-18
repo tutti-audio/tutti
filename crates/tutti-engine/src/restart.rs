@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::Float;
 use tutti_units::SampleRate;
 
 use crate::callback::AudioCallbackState;
@@ -18,11 +19,11 @@ use crate::stream::{OutputSpec, OutputStream, StartError, StreamDriver};
 /// the hook, so what it reaches of the audio thread's state is reached only
 /// while no callback can run.
 #[derive(Debug)]
-pub struct Stopped<'a> {
-    state: &'a AudioCallbackState,
+pub struct Stopped<'a, F: Float = f32> {
+    state: &'a AudioCallbackState<F>,
 }
 
-impl Stopped<'_> {
+impl<F: Float> Stopped<'_, F> {
     /// Installs every commit the graph's editor has sent, moving the engine's
     /// clock to a re-prepare's rate
     /// ([`Engine::apply_pending`](crate::Engine::apply_pending)). Returns
@@ -51,9 +52,9 @@ impl Stopped<'_> {
 /// [`AudioCallbackState`] its callback renders. Reads (spec, running state,
 /// faults) go through [`stream`](Self::stream). Every method runs on the
 /// control thread and there is no internal lock.
-pub struct StreamHost {
+pub struct StreamHost<F: Float = f32> {
     stream: OutputStream,
-    callback_state: Arc<AudioCallbackState>,
+    callback_state: Arc<AudioCallbackState<F>>,
     /// The rate the graph runs at: the stream's at build, then only what a
     /// restart hook returned `Ok` for. Kept apart from the spec, which a
     /// restart resolves to the new device's config before its hook runs;
@@ -64,7 +65,7 @@ pub struct StreamHost {
 
 // Hand-rolled: `AudioCallbackState` holds the RT-side graph handles and is not
 // `Debug`. Forwards the stream, which carries the configuration a host logs.
-impl std::fmt::Debug for StreamHost {
+impl<F: Float> std::fmt::Debug for StreamHost<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamHost")
             .field("stream", &self.stream)
@@ -72,7 +73,7 @@ impl std::fmt::Debug for StreamHost {
     }
 }
 
-impl StreamHost {
+impl<F: Float> StreamHost<F> {
     /// Creates a host from a stream and the state its callback will read. Does
     /// not start or stop anything.
     ///
@@ -82,7 +83,7 @@ impl StreamHost {
     /// relies on that: its hook reaches the engine from the control side
     /// ([`Stopped::apply_pending`]) because the stream it stopped was the only
     /// renderer.
-    pub fn new(stream: OutputStream, callback_state: Arc<AudioCallbackState>) -> Self {
+    pub fn new(stream: OutputStream, callback_state: Arc<AudioCallbackState<F>>) -> Self {
         Self {
             graph_rate: stream.sample_rate(),
             stream,
@@ -125,7 +126,10 @@ impl StreamHost {
     ///
     /// # Errors
     /// As [`OutputStream::start_with`].
-    pub fn start_with<D: StreamDriver>(&mut self, driver: D) -> Result<(), StartError<D::Error>> {
+    pub fn start_with<D: StreamDriver<F>>(
+        &mut self,
+        driver: D,
+    ) -> Result<(), StartError<D::Error>> {
         self.stream.stop();
         self.stream
             .start_with(Arc::clone(&self.callback_state), driver)
@@ -156,10 +160,10 @@ impl StreamHost {
     /// # Errors
     /// What `resolve` or the hook report, or what the driver's
     /// [`open`](StreamDriver::open) reports (as `E`).
-    pub fn restart_with<D: StreamDriver, E: From<StartError<D::Error>>>(
+    pub fn restart_with<D: StreamDriver<F>, E: From<StartError<D::Error>>>(
         &mut self,
         resolve: impl FnOnce() -> Result<(OutputSpec, D), E>,
-        rerate: impl FnOnce(&OutputSpec, &Stopped<'_>) -> Result<(), E>,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> Result<(), E>,
     ) -> Result<(), E> {
         self.stream.stop();
         let old = self.stream.spec().clone();

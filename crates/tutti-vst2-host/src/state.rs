@@ -26,7 +26,8 @@
 //! does with a program chunk it is handed while another program is current; setting the
 //! program first is the only order the opcodes' wording allows.
 
-use tutti_plugin_types::{MainThreadMarker, Normalized, StateFrame};
+use tutti_plugin_types::{MainThreadMarker, StateFrame};
+use tutti_units::Normalized;
 
 use crate::error::{Result, Vst2Error};
 use crate::host::host_write;

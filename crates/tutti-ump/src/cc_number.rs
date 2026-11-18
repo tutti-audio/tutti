@@ -5,19 +5,19 @@
 //! [`U7`](crate::U7) (MIDI 1.0). The index is 7 bits in both protocols
 //! (M2-104 §7.4.6), so the range is `0..=127`.
 
-use crate::OutOfRange;
-
-/// One of the 128 MIDI Control Change controllers.
-///
-/// Always in `0..=127`: [`new`](Self::new) refuses a larger number, and
-/// [`masked`](Self::masked) is the one constructor that masks.
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-// Serialized as the bare number, and read back through `TryFrom<u8>`, so a
-// document cannot carry a value the type refuses.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
-pub struct CCNumber(u8);
+tutti_units::ranged! {
+    /// One of the 128 MIDI Control Change controllers.
+    ///
+    /// Always in `0..=MAX`: [`new`](Self::new) refuses a larger number, and
+    /// [`masked`](Self::masked) is the one constructor that masks. Serialized
+    /// as the bare number, read back through `TryFrom<u8>`, so a document
+    /// cannot carry a value the type refuses.
+    #[repr(transparent)]
+    #[derive(Default, Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    CCNumber(u8), CCNumberOutOfRange, bits 7
+}
 
 impl CCNumber {
     /// The first controller number. Also [`BANK_SELECT`](Self::BANK_SELECT).
@@ -123,49 +123,6 @@ impl CCNumber {
     /// CC 101.
     pub const RPN_MSB: CCNumber = CCNumber(101);
 
-    /// The controller, or `None` when `raw` is above 127.
-    ///
-    /// ```
-    /// use tutti_ump::CCNumber;
-    ///
-    /// assert_eq!(CCNumber::new(74), Some(CCNumber::BRIGHTNESS));
-    /// assert_eq!(CCNumber::new(128), None);
-    /// ```
-    #[inline]
-    #[must_use]
-    pub const fn new(raw: u8) -> Option<CCNumber> {
-        if raw < Self::COUNT {
-            Some(CCNumber(raw))
-        } else {
-            None
-        }
-    }
-
-    /// The controller for a literal or a constant.
-    /// For a value that arrives from outside, use [`new`](Self::new).
-    ///
-    /// # Panics
-    ///
-    /// When `raw` is above 127; in a `const` that is a compile error.
-    #[inline]
-    #[must_use]
-    #[track_caller]
-    pub const fn of(raw: u8) -> CCNumber {
-        match Self::new(raw) {
-            Some(controller) => controller,
-            None => panic!("a controller is 0 to 127"),
-        }
-    }
-
-    /// The low seven bits of `raw`: the one place that masks. Use it where the
-    /// bits are known to be a controller field, as the decoder does; a value
-    /// from outside the wire is checked with [`new`](Self::new).
-    #[inline]
-    #[must_use]
-    pub const fn masked(raw: u8) -> CCNumber {
-        CCNumber(raw & 0x7F)
-    }
-
     /// The controller that carries the low 7 bits of this one's 14-bit value:
     /// controllers 0 to 31 are the MSBs and 32 to 63 their LSBs, 32 apart (MIDI
     /// 1.0 Control Change table). `None` for any other controller, an LSB
@@ -205,34 +162,6 @@ impl CCNumber {
     pub const fn is_ignored_in_midi2(self) -> bool {
         matches!(self.0, 0 | 6 | 32 | 38 | 98..=101)
     }
-
-    /// Returns the raw 0-based controller number, for a UMP constructor or a
-    /// wire byte.
-    #[inline]
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
-    }
-}
-
-impl TryFrom<u8> for CCNumber {
-    type Error = OutOfRange;
-
-    #[inline]
-    fn try_from(raw: u8) -> Result<Self, OutOfRange> {
-        Self::new(raw).ok_or(OutOfRange {
-            what: "controller number",
-            value: u32::from(raw),
-            max: u32::from(Self::LAST.0),
-        })
-    }
-}
-
-impl From<CCNumber> for u8 {
-    #[inline]
-    fn from(n: CCNumber) -> u8 {
-        n.0
-    }
 }
 
 // Deliberately no infallible `From<u8> for CCNumber`, for the same reason `MidiChannel`
@@ -243,48 +172,6 @@ impl From<CCNumber> for u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn try_from_agrees_with_new() {
-        for raw in 0..=255u8 {
-            assert_eq!(CCNumber::try_from(raw).ok(), CCNumber::new(raw));
-        }
-        assert_eq!(
-            CCNumber::try_from(128),
-            Err(OutOfRange {
-                what: "controller number",
-                value: 128,
-                max: 127
-            })
-        );
-    }
-
-    #[test]
-    fn a_cc_number_out_of_range_is_refused() {
-        for raw in 0..=255u8 {
-            match CCNumber::new(raw) {
-                Some(controller) => {
-                    assert!(raw < 128);
-                    assert_eq!(controller.get(), raw);
-                    assert_eq!(CCNumber::of(raw), controller);
-                }
-                None => assert!(raw >= 128),
-            }
-        }
-    }
-
-    #[test]
-    fn masking_is_only_through_masked() {
-        assert_eq!(CCNumber::masked(128).get(), 0);
-        assert_eq!(CCNumber::masked(255).get(), 127);
-        assert_eq!(CCNumber::masked(74), CCNumber::BRIGHTNESS);
-    }
-
-    #[test]
-    #[should_panic(expected = "a controller is 0 to 127")]
-    fn of_panics_out_of_range() {
-        let _ = CCNumber::of(128);
-    }
 
     /// The named roster against the MIDI 1.0 Control Change table. A wrong
     /// number here is silent at runtime — the synth just responds to the wrong

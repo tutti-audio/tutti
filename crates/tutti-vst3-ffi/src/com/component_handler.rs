@@ -38,8 +38,9 @@ use crate::guard::Out;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use tutti_plugin_types::ffi_guard;
 
-use tutti_plugin_types::{Normalized, Request, RescanScope};
+use tutti_plugin_types::{Request, RescanScope};
 use tutti_rt::RequestWord;
+use tutti_units::Normalized;
 
 use arrayvec::ArrayString;
 use crossbeam_queue::ArrayQueue;

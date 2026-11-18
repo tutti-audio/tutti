@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::MidiEventVec;
-use super::Normalized;
 use super::ParamId;
 use super::SampleFormat;
 use super::Samples;
@@ -21,6 +20,7 @@ use super::{
 };
 use dpi::Size;
 use tutti_plugin_types::{BlockStatus, ContentScale, Load, StateUse};
+use tutti_units::Normalized;
 use tutti_units::SampleRate;
 
 /// Wire-deserialization fallback for [`HostMessage::LoadPlugin::block_size`]
@@ -202,7 +202,7 @@ pub enum HostMessage {
         param_id: crate::protocol::ParamId,
         /// The value to render, normalized.
         #[serde(with = "super::wire::normalized")]
-        value: crate::protocol::Normalized,
+        value: tutti_units::Normalized,
     },
     /// Ask the plugin to parse `text` into a value.
     ///
@@ -243,7 +243,7 @@ pub enum HostMessage {
         param_id: crate::protocol::ParamId,
         /// The value to convert, normalized.
         #[serde(with = "super::wire::normalized")]
-        value: crate::protocol::Normalized,
+        value: tutti_units::Normalized,
     },
     /// Ask the plugin's format for the normalized value a plain one stands for
     /// (`Control::parameter_normalized`). Answered by

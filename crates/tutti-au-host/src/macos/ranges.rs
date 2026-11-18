@@ -10,7 +10,8 @@
 //! once, when the plugin loads, and again when it says its parameter list moved.
 
 use tutti_au_ffi::Unit;
-use tutti_plugin_types::{LinearRange, Normalized, ParamMapping};
+use tutti_plugin_types::{LinearRange, ParamMapping};
+use tutti_units::Normalized;
 
 use std::sync::Arc;
 

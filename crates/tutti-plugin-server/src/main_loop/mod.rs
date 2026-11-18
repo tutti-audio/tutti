@@ -87,12 +87,11 @@ impl Ticker {
 }
 
 // One backend per OS: what the loop waits with and what it pumps, behind one
-// shape (`Native::wait`, `wait_readable`, `wait_for_connection`,
-// `record_parent_pid`, the platform's `Listener` and `Stream`). These `mod` lines
-// carry the only platform `cfg` of the server's non-test code: a native loop
-// (`MsgWaitForMultipleObjectsEx` with overlapped pipe I/O on Windows, `CFRunLoop`
-// with the socket as a source on macOS) replaces one file and changes nothing
-// in the loop below.
+// shape (`Native::wait`, `wait_readable`, the platform's `Listener` and
+// `Stream`). These `mod` lines carry the only platform `cfg` of the server's
+// non-test code: a native loop (`MsgWaitForMultipleObjectsEx` with overlapped
+// pipe I/O on Windows, `CFRunLoop` with the socket as a source on macOS)
+// replaces one file and changes nothing in the loop below.
 #[cfg(unix)]
 #[path = "unix.rs"]
 mod sys;
@@ -103,35 +102,7 @@ mod sys;
 #[path = "fallback.rs"]
 mod sys;
 
-pub(crate) use sys::{
-    Listener, Native, Stream, record_parent_pid, wait_for_connection, wait_readable,
-};
-
-/// Environment variable through which the host states its own PID at spawn,
-/// before this process exists: neither platform can recover it afterwards (a
-/// host that dies during its child's startup is reparented first). Duplicated
-/// in `tutti-plugin-ipc`'s launch rather than shared: it is the wire between
-/// the two, as the socket-path argument is.
-// Read by the Unix and Windows backends; the fallback has no host to name.
-#[allow(dead_code)]
-const HOST_PID_ENV: &str = "TUTTI_PLUGIN_HOST_PID";
-
-/// What keeps watching the host while the `accept` after
-/// [`wait_for_connection`] blocks, ended by dropping it when the accept
-/// returns. A platform whose wait is the check itself (Unix polls the
-/// listener) returns [`Watching::nothing`].
-#[derive(Debug, Default)]
-pub(crate) struct Watching {
-    /// Held for its drop, which stops the watch and joins it.
-    _watch: Option<tutti_rt::ThreadHandle<()>>,
-}
-
-impl Watching {
-    /// No watch outlives the wait.
-    pub(crate) fn nothing() -> Self {
-        Self { _watch: None }
-    }
-}
+pub(crate) use sys::{Listener, Native, Stream, wait_readable};
 
 /// Serves `transport`, the host's control connection, until the host
 /// disconnects or asks for shutdown. `render` is the thread serving its audio
@@ -167,6 +138,8 @@ pub(crate) fn serve_every(
     render: &RenderThread,
     period: Duration,
 ) -> BridgeResult<()> {
+    let bell = session.ties().bell.clone();
+    let host_gone = session.ties().host_gone.clone();
     let mut ticker = Ticker::new(Instant::now(), period);
     // What the plugin wants waited on, and what the wait found ready: reused,
     // so a steady watch set allocates nothing.
@@ -199,10 +172,15 @@ pub(crate) fn serve_every(
         let timeout = wakeups
             .until_due(now)
             .map_or(ticker.wait(now), |due| due.min(ticker.wait(now)));
-        let readable = backend.wait(transport, main, timeout, &wakeups, &mut ready)?;
+        let readable = backend.wait(transport, main, timeout, &wakeups, &bell, &mut ready)?;
+        // The host process ended (the watch rang the bell to end the wait): the
+        // session is over, as when the control connection ends.
+        if host_gone.is_stopped() {
+            return Ok(());
+        }
         // A plugin called the host from a thread of its own (its `request_process`,
         // say) and rang the bell: what it raised leaves now, not on the tick.
-        if crate::bell::bell().take() {
+        if bell.rung() {
             for event in session.drain_async_events(main) {
                 transport.send(&event)?;
             }
@@ -269,5 +247,5 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "clap"))]
+#[cfg(all(test, unix, feature = "clap"))]
 mod loop_tests;
