@@ -29,6 +29,7 @@ use super::status::StatusCell;
 use super::stream::{Stream, StreamerPort};
 use crate::PlaceError;
 use crate::voice::interp::Place;
+use tutti_rt::RingFloat;
 
 /// Where in the file a stream's reader starts, in file frames.
 ///
@@ -115,24 +116,24 @@ pub enum OpenError {
 /// What the streamer answers an open with: everything the audio side's
 /// [`StreamReader`] is built from but the registered control reader, which the
 /// control thread registers ([`Opening::poll`]).
-pub(crate) struct Opened {
+pub(crate) struct Opened<F: RingFloat = f32> {
     pub(crate) id: StreamId,
-    pub(crate) ring: SharedReader,
-    pub(crate) pos: PosReader,
+    pub(crate) ring: SharedReader<F>,
+    pub(crate) pos: PosReader<F>,
     pub(crate) cells: Arc<Cells>,
     /// What the stream's handle reads of it ([`Stream::status`]).
     pub(crate) status: Arc<StatusCell>,
     /// What the stream plays, immutable.
-    pub(crate) file: Arc<StreamFile>,
+    pub(crate) file: Arc<StreamFile<F>>,
     /// The ring's control cell, which the handle reads the applied loop from.
-    pub(crate) control: Publisher<RingControl>,
-    pub(crate) place: Place,
+    pub(crate) control: Publisher<RingControl<F>>,
+    pub(crate) place: Place<F>,
     pub(crate) width: ChannelLayout,
     /// What the reader rings when its ring wants the streamer.
     pub(crate) bell: Arc<Bell>,
 }
 
-impl std::fmt::Debug for Opened {
+impl<F: RingFloat> std::fmt::Debug for Opened<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Opened")
             .field("id", &self.id)
@@ -168,19 +169,19 @@ impl std::fmt::Debug for Opened {
 /// opened.
 #[derive(Debug)]
 #[must_use = "an open nobody polls is abandoned"]
-pub struct Opening {
+pub struct Opening<F: RingFloat = f32> {
     id: StreamId,
-    reply: Receiver<Result<Opened, OpenError>>,
+    reply: Receiver<Result<Opened<F>, OpenError>>,
     /// The streamer's command queue, which the stream it answers with sends
     /// on.
-    port: StreamerPort,
+    port: StreamerPort<F>,
 }
 
-impl Opening {
+impl<F: RingFloat> Opening<F> {
     pub(crate) fn new(
         id: StreamId,
-        reply: Receiver<Result<Opened, OpenError>>,
-        port: StreamerPort,
+        reply: Receiver<Result<Opened<F>, OpenError>>,
+        port: StreamerPort<F>,
     ) -> Self {
         Self { id, reply, port }
     }
@@ -194,7 +195,7 @@ impl Opening {
     ///
     /// `Ready` registers the reader's control cell before it returns (that
     /// allocates, so it is here and not on the audio thread).
-    pub fn poll(self) -> Open {
+    pub fn poll(self) -> Open<F> {
         match self.reply.try_recv() {
             Ok(Ok(opened)) => self.ready(opened),
             Ok(Err(error)) => Open::Failed(error),
@@ -215,7 +216,7 @@ impl Opening {
     ///
     /// The open's own failure, as the streamer answered it;
     /// [`OpenError::StreamerGone`] when the streamer exits first.
-    pub fn wait(self) -> Result<(Stream, StreamReader), OpenError> {
+    pub fn wait(self) -> Result<(Stream<F>, StreamReader<F>), OpenError> {
         match self.reply.recv() {
             Ok(Ok(opened)) => {
                 let Open::Ready(stream, reader) = self.ready(opened) else {
@@ -228,7 +229,7 @@ impl Opening {
         }
     }
 
-    fn ready(self, opened: Opened) -> Open {
+    fn ready(self, opened: Opened<F>) -> Open<F> {
         Open::Ready(
             Stream::new(
                 opened.id,
@@ -246,12 +247,12 @@ impl Opening {
 /// An open's answer.
 #[derive(Debug)]
 #[must_use = "a dropped `Pending` abandons the open; a dropped `Stream` closes it"]
-pub enum Open {
+pub enum Open<F: RingFloat = f32> {
     /// Not answered yet: poll the `Opening` again.
-    Pending(Opening),
+    Pending(Opening<F>),
     /// The stream is open: the handle is the control thread's, and the reader
     /// is the voice's, by value. Dropping the [`Stream`] ends the stream.
-    Ready(Stream, StreamReader),
+    Ready(Stream<F>, StreamReader<F>),
     /// The stream did not open, and will not.
     Failed(OpenError),
 }
@@ -278,21 +279,21 @@ pub enum Open {
 /// let _again = &reader;
 /// # }
 /// ```
-pub struct StreamReader {
+pub struct StreamReader<F: RingFloat = f32> {
     id: StreamId,
-    pub(crate) ring: SharedReader,
+    pub(crate) ring: SharedReader<F>,
     /// The position reader and the control's reader, registered together on
     /// the control side ([`Opening::poll`]): registering allocates.
-    pub(crate) reader: RingReader,
+    pub(crate) reader: RingReader<F>,
     pub(crate) cells: Arc<Cells>,
     /// What a fork of the voice plays, and whether its stream is still served.
-    pub(crate) file: Arc<StreamFile>,
+    pub(crate) file: Arc<StreamFile<F>>,
     pub(crate) status: Arc<StatusCell>,
-    pub(crate) place: Place,
+    pub(crate) place: Place<F>,
     pub(crate) width: ChannelLayout,
 }
 
-impl std::fmt::Debug for StreamReader {
+impl<F: RingFloat> std::fmt::Debug for StreamReader<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamReader")
             .field("id", &self.id)
@@ -301,8 +302,8 @@ impl std::fmt::Debug for StreamReader {
     }
 }
 
-impl StreamReader {
-    fn new(opened: Opened) -> Self {
+impl<F: RingFloat> StreamReader<F> {
+    fn new(opened: Opened<F>) -> Self {
         Self {
             id: opened.id,
             reader: RingReader::new(opened.pos, opened.ring.control_reader())
@@ -320,7 +321,7 @@ impl StreamReader {
     /// and lend its control, for one block that plays at `play`: the
     /// [`Block`] reads the ring through both. Audio thread; wait-free.
     #[inline]
-    pub fn block(&mut self, play: Samples, reads: [Range<Samples>; 2]) -> Block<'_> {
+    pub fn block(&mut self, play: Samples, reads: [Range<Samples>; 2]) -> Block<'_, F> {
         self.reader.block(play, reads)
     }
 
@@ -335,7 +336,7 @@ impl StreamReader {
     }
 
     /// The file the stream plays: what a fork of the voice reads.
-    pub fn file(&self) -> &StreamFile {
+    pub fn file(&self) -> &StreamFile<F> {
         &self.file
     }
 

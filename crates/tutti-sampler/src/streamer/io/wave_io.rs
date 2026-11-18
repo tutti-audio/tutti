@@ -6,7 +6,7 @@
 //! business: the refill cuts its reads at the loop's end and places each run
 //! (`loops::Mapping::fill`), so a read always runs the file straight on.
 //!
-//! Both ends speak flat interleaved `&[f32]` at a runtime width, with every
+//! Both ends speak flat interleaved `&[F]` at a runtime width, with every
 //! count denominated in frames. The sink end is
 //! [`RegionOut::push_interleaved`](crate::streamer::prefetch::RegionOut::push_interleaved).
 

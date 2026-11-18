@@ -59,6 +59,7 @@ use super::command::StreamId;
 use super::loops::{Arrangement, Content, Mapping, RingControl, RingMap};
 use crate::Loop;
 use crate::nonempty;
+use tutti_rt::RingFloat;
 
 /// Frames a ring keeps behind where its reader plays: the taps a position
 /// reads behind itself, and a little slack.
@@ -66,7 +67,7 @@ pub(crate) const HISTORY_FRAMES: u64 = 4;
 
 /// A region's ring, shared by the streamer's writer and the audio thread's
 /// reader.
-pub(crate) struct Ring {
+pub(crate) struct Ring<F: RingFloat = f32> {
     region_id: StreamId,
     file_path: PathBuf,
     channels: ChannelLayout,
@@ -77,7 +78,7 @@ pub(crate) struct Ring {
     topology: ChannelTopology,
     /// Glances at the window and where the reader plays (the writer's
     /// `watch`): no sample is read through it.
-    core: Arc<PosRing>,
+    core: Arc<PosRing<F>>,
     /// Output frames a reader's crossfade lasts: the config's seek crossfade,
     /// fixed when the ring is placed.
     fade_frames: Samples,
@@ -85,14 +86,14 @@ pub(crate) struct Ring {
     /// applied loop, in one value, lent through the reader the voice registers
     /// ([`control_reader`](Self::control_reader)). The streamer is its only
     /// publisher.
-    control: Publisher<RingControl>,
+    control: Publisher<RingControl<F>>,
     /// Readers registered through [`control_reader`](Self::control_reader)
     /// (tests).
     #[cfg(test)]
     registered: std::sync::atomic::AtomicUsize,
 }
 
-impl std::fmt::Debug for Ring {
+impl<F: RingFloat> std::fmt::Debug for Ring<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Ring")
             .field("region_id", &self.region_id)
@@ -101,7 +102,7 @@ impl std::fmt::Debug for Ring {
     }
 }
 
-impl Ring {
+impl<F: RingFloat> Ring<F> {
     pub(crate) fn region_id(&self) -> StreamId {
         self.region_id
     }
@@ -132,7 +133,7 @@ impl Ring {
     /// A reader of the ring's control, registered for the voice that reads
     /// this ring: it lends once per block, never per sample, never parked
     /// across blocks. Control thread: registering may allocate.
-    pub(crate) fn control_reader(&self) -> Reader<RingControl> {
+    pub(crate) fn control_reader(&self) -> Reader<RingControl<F>> {
         #[cfg(test)]
         self.registered
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -148,7 +149,7 @@ impl Ring {
 
     /// The ring's control cell, for the stream's handle to read the applied
     /// loop from. Control side.
-    pub(crate) fn control_cell(&self) -> Publisher<RingControl> {
+    pub(crate) fn control_cell(&self) -> Publisher<RingControl<F>> {
         self.control.clone()
     }
 
@@ -156,7 +157,7 @@ impl Ring {
     /// the voice reads (the loop as applied, the direction). Control thread: it
     /// takes the cell's lock and holds an owning `Arc`, which frees wherever it
     /// drops last.
-    pub(crate) fn applied(&self) -> Arc<RingControl> {
+    pub(crate) fn applied(&self) -> Arc<RingControl<F>> {
         self.control.current()
     }
 
@@ -174,7 +175,7 @@ impl Ring {
 
     /// Streamer: publish how to read the slots, with the direction that map
     /// implies and the loop as last applied.
-    pub(crate) fn publish_map(&self, map: RingMap) {
+    pub(crate) fn publish_map(&self, map: RingMap<F>) {
         let loop_ = self.control.current().loop_;
         self.control.publish(RingControl::new(map, loop_));
     }
@@ -213,51 +214,51 @@ impl Ring {
 }
 
 /// The audio thread's handle on a region's ring.
-pub(crate) type SharedReader = Arc<Ring>;
+pub(crate) type SharedReader<F = f32> = Arc<Ring<F>>;
 
 /// The streamer's end of a region's ring: the writer, its source (a disk
 /// decoder, or the file resident whole) and what it holds (`loops::Content`).
 /// Streamer-thread-local.
-pub(crate) struct RegionOut {
-    ring: Arc<Ring>,
+pub(crate) struct RegionOut<F: RingFloat = f32> {
+    ring: Arc<Ring<F>>,
     /// The ring's one writer.
-    writer: PosWriter,
-    content: Content,
+    writer: PosWriter<F>,
+    content: Content<F>,
     /// Incremental disk decoder for real streaming. `None` means this region
     /// reads the file resident whole (`resident`).
     #[cfg(codec)]
-    decoder: Option<FileIn>,
+    decoder: Option<FileIn<F>>,
     /// Whether the decoder's current fault has been logged, so a stream that
     /// keeps reading past it logs once.
     #[cfg(codec)]
     fault_logged: bool,
     /// The file decoded whole, for a format that cannot seek. Held here, not
     /// only in the LRU cache, so a file too large to cache still streams.
-    resident: Option<Arc<Wave>>,
+    resident: Option<Arc<Wave<F>>>,
     /// Test seam: runs where the stream reads its file, and may block or
     /// panic (a decode that panics).
     #[cfg(test)]
     read_hook: Option<super::decode::ReadHook>,
 }
 
-impl RegionOut {
+impl<F: RingFloat> RegionOut<F> {
     /// The shared ring.
-    pub(crate) fn ring(&self) -> &Arc<Ring> {
+    pub(crate) fn ring(&self) -> &Arc<Ring<F>> {
         &self.ring
     }
 
     /// What the ring holds.
-    pub(crate) fn content(&self) -> &Content {
+    pub(crate) fn content(&self) -> &Content<F> {
         &self.content
     }
 
-    pub(crate) fn set_content(&mut self, content: Content) {
+    pub(crate) fn set_content(&mut self, content: Content<F>) {
         self.content = content;
     }
 
     /// Install an incremental disk decoder.
     #[cfg(codec)]
-    pub(crate) fn set_decoder(&mut self, decoder: FileIn) {
+    pub(crate) fn set_decoder(&mut self, decoder: FileIn<F>) {
         self.decoder = Some(decoder);
     }
 
@@ -268,7 +269,7 @@ impl RegionOut {
     }
 
     /// Hold the file resident whole (a format that cannot seek).
-    pub(crate) fn set_resident(&mut self, wave: Arc<Wave>) {
+    pub(crate) fn set_resident(&mut self, wave: Arc<Wave<F>>) {
         self.resident = Some(wave);
     }
 
@@ -339,7 +340,7 @@ impl RegionOut {
     /// decoder or the resident file; zero past the end. `false` when the
     /// file could not be read there: a decode fault is logged once and the
     /// frames read before it are kept.
-    pub(crate) fn read_file(&mut self, at: usize, out: &mut [f32]) -> bool {
+    pub(crate) fn read_file(&mut self, at: usize, out: &mut [F]) -> bool {
         #[cfg(test)]
         if let Some(hook) = &self.read_hook {
             hook(self.ring.region_id, at);
@@ -349,14 +350,14 @@ impl RegionOut {
         if let Some(decoder) = self.decoder.as_mut() {
             let ch = usize::from(self.writer.layout().count());
             if decoder.cursor() != Samples(at) && decoder.seek(Samples(at)).is_err() {
-                out.fill(0.0);
+                out.fill(F::ZERO);
                 return false;
             }
             // Frames read before a fault are kept; the rest is silence.
             let Ok(view) = InterleavedMut::new(&mut *out, decoder.topology().width()) else {
                 // `out` is not whole frames of the file's width: nothing read,
                 // and the refill's `false` faults the stream as a decode fault.
-                out.fill(0.0);
+                out.fill(F::ZERO);
                 if !self.fault_logged {
                     self.fault_logged = true;
                     tracing::warn!(
@@ -369,7 +370,7 @@ impl RegionOut {
             let got = decoder
                 .fill_sequential_interleaved(view)
                 .map_or(0, Samples::get);
-            out[got * ch..].fill(0.0);
+            out[got * ch..].fill(F::ZERO);
             let Some(fault) = decoder.error() else {
                 self.fault_logged = false;
                 return true;
@@ -386,7 +387,7 @@ impl RegionOut {
         match self.resident.as_deref() {
             Some(wave) => super::io::wave_io::read_wave(wave, at, out, channels),
             None => {
-                out.fill(0.0);
+                out.fill(F::ZERO);
                 false
             }
         }
@@ -397,9 +398,9 @@ impl RegionOut {
     /// fault: the frames before it are kept, the rest is silence).
     pub(crate) fn fill_with(
         &mut self,
-        mapping: &Mapping,
+        mapping: &Mapping<F>,
         pos: u64,
-        out: InterleavedMut<'_>,
+        out: InterleavedMut<'_, F>,
     ) -> bool {
         let mut read_ok = true;
         mapping.fill(pos, out, &mut |at, run| {
@@ -418,7 +419,7 @@ impl RegionOut {
     /// The ring's refusal of a view that is not its own width, which no
     /// caller that built `samples` at the ring's width can meet; the refill
     /// reports it as the stream's decode fault.
-    pub fn push_interleaved(&mut self, samples: &[f32]) -> Result<Samples, BufferError> {
+    pub fn push_interleaved(&mut self, samples: &[F]) -> Result<Samples, BufferError> {
         let layout = self.writer.layout();
         let whole = layout.interleaved_len(layout.from_interleaved_len(samples.len()));
         self.writer
@@ -435,25 +436,25 @@ impl RegionBuffer {
     /// [`MAX_POS_RING_FRAMES`]), holding nothing, read as an unlooped forward
     /// stream of a file of unknown length. Returns the writer, the ring and the ring's one position reader.
     #[cfg(test)]
-    pub(crate) fn with_capacity(
+    pub(crate) fn with_capacity<F: RingFloat>(
         region_id: StreamId,
         file_path: PathBuf,
         capacity: usize,
         channels: impl Into<ChannelLayout>,
-    ) -> (RegionOut, SharedReader, PosReader) {
+    ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
         Self::with_fade(region_id, file_path, capacity, channels, Samples::new(0))
     }
 
     /// [`with_capacity`](Self::with_capacity), whose readers crossfade over
     /// `fade_frames` output frames at a jump.
     #[cfg(test)]
-    pub(crate) fn with_fade(
+    pub(crate) fn with_fade<F: RingFloat>(
         region_id: StreamId,
         file_path: PathBuf,
         capacity: usize,
         channels: impl Into<ChannelLayout>,
         fade_frames: Samples,
-    ) -> (RegionOut, SharedReader, PosReader) {
+    ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
         let layout = nonempty(channels.into());
         let topology = ChannelTopology::assumed(layout);
         Self::for_file(region_id, file_path, capacity, topology, None, fade_frames)
@@ -461,14 +462,14 @@ impl RegionBuffer {
 
     /// `RegionBuffer::with_capacity` for a file `len` long (`None`: not known), whose
     /// readers crossfade over `fade_frames` output frames at a jump.
-    pub(crate) fn for_file(
+    pub(crate) fn for_file<F: RingFloat>(
         region_id: StreamId,
         file_path: PathBuf,
         capacity: usize,
         topology: ChannelTopology,
         len: Option<Samples>,
         fade_frames: Samples,
-    ) -> (RegionOut, SharedReader, PosReader) {
+    ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
         let channels = nonempty(topology.width());
         let frames = capacity.clamp(4096, MAX_POS_RING_FRAMES);
         let (mapping, arrangement) = match len {
@@ -506,7 +507,7 @@ impl RegionBuffer {
 
     /// Point a fresh ring at `start`: the reader there and the window from
     /// just behind it (the taps a position reads one frame back).
-    pub(crate) fn place(writer: &mut RegionOut, start: u64) {
+    pub(crate) fn place<F: RingFloat>(writer: &mut RegionOut<F>, start: u64) {
         writer.reset(start.saturating_sub(HISTORY_FRAMES));
         writer.set_play(start);
     }

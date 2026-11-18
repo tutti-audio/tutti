@@ -29,6 +29,7 @@ use super::prefetch::RegionOut;
 use super::status::{Served, StatusCell, StreamFault};
 use crate::Loop;
 use crate::voice::Direction;
+use tutti_rt::RingFloat;
 use tutti_types::{SampleRate, Samples, SrcRatio};
 
 /// Where a stream is in its life. A closed stream has no record, so there is
@@ -47,10 +48,10 @@ pub(super) enum Phase {
 /// One open stream: everything the streamer holds for it.
 ///
 /// Dropping it ends the stream (module docs).
-pub(super) struct Record {
+pub(super) struct Record<F: RingFloat = f32> {
     phase: Phase,
     /// The ring's writer, the decoder and the resident wave.
-    pub(super) out: RegionOut,
+    pub(super) out: RegionOut<F>,
     /// The stream's scalar cells, shared with its voice: the streamer reads
     /// speed and stretch from them to size a fill, and writes the conversion
     /// ratio.
@@ -74,9 +75,9 @@ pub(super) struct Record {
     dead: bool,
 }
 
-impl Record {
+impl<F: RingFloat> Record<F> {
     pub(super) fn new(
-        out: RegionOut,
+        out: RegionOut<F>,
         cells: Arc<Cells>,
         file_rate: SampleRate,
         file_frames: Samples,
@@ -172,7 +173,7 @@ impl Record {
 /// `Faulted(StreamerGone)` (a fault already there stays). This is also how a
 /// panic that escapes the per-stream containment tells every stream: it drops
 /// the whole table.
-impl Drop for Record {
+impl<F: RingFloat> Drop for Record<F> {
     fn drop(&mut self) {
         self.status.fault(StreamFault::StreamerGone);
         self.status.close();
@@ -180,9 +181,9 @@ impl Drop for Record {
 }
 
 /// A command as the pure step sees it: data, with the file work already done.
-pub(super) enum Cmd {
+pub(super) enum Cmd<F: RingFloat = f32> {
     /// A stream the driver has built, in [`Phase::Opening`].
-    Open(Box<Record>),
+    Open(Box<Record<F>>),
     /// The open's reader reached its caller: the stream is [`Phase::Live`].
     Opened(StreamId),
     /// End the stream.
@@ -215,13 +216,13 @@ pub(super) enum Effect {
 /// `&mut Record` (`par_iter_mut` needs `Send`, not `Sync`), a session has tens
 /// of streams, and a command finds its stream by a scan of ids that are
 /// minted once and never reused.
-pub(super) struct Streams {
-    records: Vec<Record>,
+pub(super) struct Streams<F: RingFloat = f32> {
+    records: Vec<Record<F>>,
     /// What the last step asked of the driver.
     effects: Vec<Effect>,
 }
 
-impl Streams {
+impl<F: RingFloat> Streams<F> {
     pub(super) fn new() -> Self {
         Self {
             records: Vec::new(),
@@ -242,19 +243,19 @@ impl Streams {
         self.records.iter().position(|r| r.id() == id)
     }
 
-    pub(super) fn get(&self, id: StreamId) -> Option<&Record> {
+    pub(super) fn get(&self, id: StreamId) -> Option<&Record<F>> {
         self.records.iter().find(|r| r.id() == id)
     }
 
-    pub(super) fn get_mut(&mut self, id: StreamId) -> Option<&mut Record> {
+    pub(super) fn get_mut(&mut self, id: StreamId) -> Option<&mut Record<F>> {
         self.records.iter_mut().find(|r| r.id() == id)
     }
 
-    pub(super) fn records(&self) -> &[Record] {
+    pub(super) fn records(&self) -> &[Record<F>] {
         &self.records
     }
 
-    pub(super) fn records_mut(&mut self) -> &mut [Record] {
+    pub(super) fn records_mut(&mut self) -> &mut [Record<F>] {
         &mut self.records
     }
 
@@ -277,7 +278,7 @@ impl Streams {
 /// A command for a stream the table does not hold changes nothing and asks
 /// for nothing: commands race the streams they name, and an id is minted once
 /// and never reused, so a late command cannot reach another stream.
-pub(super) fn step(streams: &mut Streams, cmd: Cmd) -> &[Effect] {
+pub(super) fn step<F: RingFloat>(streams: &mut Streams<F>, cmd: Cmd<F>) -> &[Effect] {
     streams.effects.clear();
     match cmd {
         Cmd::Open(record) => {

@@ -29,6 +29,7 @@ use super::step::StepOutcome;
 use super::step::StreamerCycle;
 use crate::Error;
 use crossbeam_channel::Receiver;
+use tutti_rt::RingFloat;
 
 /// A streamer that is built and drives nothing yet: its queue, its shared
 /// handles and the state a driver will own.
@@ -36,12 +37,12 @@ use crossbeam_channel::Receiver;
 /// Consumed by [`start`](Self::start) (a thread) or `by_hand` (the caller).
 /// Dropping it drops the queue's one receiver, so a sender is told the
 /// streamer is gone.
-pub(super) struct Built {
+pub(super) struct Built<F: RingFloat = f32> {
     /// The command queue's sending end, cloned for every sender.
-    tx: StreamerSender,
+    tx: StreamerSender<F>,
     /// Its receiving end, until a driver takes it.
-    rx: Receiver<StreamerCommand>,
-    shared: Handles,
+    rx: Receiver<StreamerCommand<F>>,
+    shared: Handles<F>,
     /// The wait end of the bell's doorbell, for the thread that runs the loop.
     sleeper: Sleeper,
     config: BufferConfig,
@@ -49,7 +50,7 @@ pub(super) struct Built {
     backstop: Duration,
 }
 
-impl Built {
+impl<F: RingFloat> Built<F> {
     /// Build the queue and the shared handles without spawning anything.
     ///
     /// `channel_capacity` bounds the command queue in messages (at least
@@ -92,12 +93,12 @@ impl Built {
     /// Valid before a driver exists: commands sent then simply queue until it
     /// drains them. Control threads only: a send waits while the queue is
     /// full.
-    pub(super) fn command_sender(&self) -> StreamerSender {
+    pub(super) fn command_sender(&self) -> StreamerSender<F> {
         self.tx.clone()
     }
 
     /// The shared handles, for the control side's own reads.
-    pub(super) fn shared(&self) -> Handles {
+    pub(super) fn shared(&self) -> Handles<F> {
         self.shared.clone()
     }
 
@@ -156,7 +157,7 @@ impl Built {
 
     /// The caller drives: its cycle is stepped by `ByHand::step_once`.
     #[cfg(any(test, feature = "testing"))]
-    pub(super) fn by_hand(self) -> ByHand {
+    pub(super) fn by_hand(self) -> ByHand<F> {
         ByHand {
             rx: Some(self.rx),
             cycle: StreamerCycle::new(self.config, self.tx),
@@ -214,21 +215,21 @@ impl Drop for Running {
 /// There is no thread to race, so a test can say "after this many cycles the
 /// ring holds audio"; it is the same `StreamerCycle::step` the thread runs.
 #[cfg(any(test, feature = "testing"))]
-pub struct ByHand {
-    rx: Option<Receiver<StreamerCommand>>,
-    cycle: StreamerCycle,
-    shared: Handles,
+pub struct ByHand<F: RingFloat = f32> {
+    rx: Option<Receiver<StreamerCommand<F>>>,
+    cycle: StreamerCycle<F>,
+    shared: Handles<F>,
 }
 
 #[cfg(any(test, feature = "testing"))]
-impl std::fmt::Debug for ByHand {
+impl<F: RingFloat> std::fmt::Debug for ByHand<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ByHand").finish_non_exhaustive()
     }
 }
 
 #[cfg(any(test, feature = "testing"))]
-impl ByHand {
+impl<F: RingFloat> ByHand<F> {
     /// One cycle on the calling thread: drain every queued command, then apply
     /// directions and refills. Returns once that work is done, reporting what
     /// the loop *would* have done next.
