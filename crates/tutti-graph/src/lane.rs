@@ -47,7 +47,7 @@ pub(crate) fn law_in<F: Float>(law: Law, t: F) -> F {
     }
 }
 
-/// [`Piece::value`] read in `F`: `from + (to - from) * g(t)`, a circular
+/// `Piece::value` read in `F`: `from + (to - from) * g(t)`, a circular
 /// param along the short arc.
 #[inline]
 pub(crate) fn piece_in<F: Float>(param: Option<UnitParam>, from: F, to: F, law: Law, t: F) -> F {
@@ -58,7 +58,7 @@ pub(crate) fn piece_in<F: Float>(param: Option<UnitParam>, from: F, to: F, law: 
     }
 }
 
-/// [`Piece::ramp_at`] read in `F`: frame `k` of an `n`-frame linear ramp,
+/// `Piece::ramp_at` read in `F`: frame `k` of an `n`-frame linear ramp,
 /// landing exactly on `to` on its last frame.
 #[inline]
 pub(crate) fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: usize, n: usize) -> F {

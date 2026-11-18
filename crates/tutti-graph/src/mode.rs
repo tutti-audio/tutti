@@ -426,7 +426,7 @@ pub(crate) struct RampRun<F: Float> {
 }
 
 /// A block's mix: the previous block's to this one's, across `frames`
-/// ([`Piece::ramp_at`], as an edge's gain ramps), or, when a control lane drives it
+/// (`lane::ramp_in`, as an edge's gain ramps), or, when a control lane drives it
 /// and delivers this block, the lane's value at each frame (`driven`, the
 /// values handed beside it: a `&[f32]` of `frames`, which every method that
 /// reads a frame takes as `lane`).

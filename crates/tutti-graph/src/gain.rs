@@ -30,7 +30,7 @@
 //! read, not the last sample of its ramp), kept in the lane across commits
 //! that keep the edge. A lane's first block starts at its value, and a
 //! static weight (`w_prev == w_new`) skips the ramp. The ramp is a linear
-//! [`Piece`], and its last frame is exactly `w_new`. It is evaluated
+//! `Piece`, and its last frame is exactly `w_new`. It is evaluated
 //! per sample from that expression: no per-lane scratch is needed, so
 //! nothing allocates on the audio thread.
 //!
