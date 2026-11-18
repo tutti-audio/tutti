@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tutti_graph::{EventOut, NodeKey, control_word};
+use tutti_graph::{EventOut, NodeKey};
 use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
@@ -412,7 +412,7 @@ impl ModRefusal {
 /// in, and the compile refuses the pair as
 /// `CompileError::DuplicateTarget`, the one refusal path.
 pub fn declare_targets(
-    ranges: impl IntoIterator<Item = (TargetKey, f32, f32)>,
+    ranges: impl IntoIterator<Item = (TargetKey, f64, f64)>,
     automation: impl IntoIterator<Item = (TargetKey, Option<Arc<dyn Curve>>)>,
 ) -> Vec<(TargetKey, TargetDecl)> {
     let mut targets: BTreeMap<TargetKey, Vec<TargetDecl>> = BTreeMap::new();
@@ -444,8 +444,8 @@ pub fn declare_targets(
 
 fn unclamped(automation: Option<Arc<dyn Curve>>) -> TargetDecl {
     TargetDecl {
-        min: f32::NEG_INFINITY,
-        max: f32::INFINITY,
+        min: f64::NEG_INFINITY,
+        max: f64::INFINITY,
         automation,
     }
 }
@@ -881,7 +881,7 @@ pub(crate) struct OwnMods {
     minted: tutti_types::Mint,
     sources: BTreeMap<SourceKey, OwnSource>,
     routes: BTreeMap<RouteKey, OwnRoute>,
-    ranges: BTreeMap<TargetKey, (f32, f32)>,
+    ranges: BTreeMap<TargetKey, (f64, f64)>,
     automation: BTreeMap<TargetKey, OwnAutomation>,
     /// The key the reconciler is given for each edge a target names (an
     /// edge has no node bits to be its key): minted on first use, kept for
@@ -1299,7 +1299,7 @@ impl ModsView<'_> {
 
     /// `target`'s range, if one is declared.
     #[must_use]
-    pub fn range_of(&self, target: impl Into<ModTarget>) -> Option<std::ops::RangeInclusive<f32>> {
+    pub fn range_of(&self, target: impl Into<ModTarget>) -> Option<std::ops::RangeInclusive<f64>> {
         let key = self.own.peek_key(target.into())?;
         self.own.ranges.get(&key).map(|&(min, max)| min..=max)
     }
@@ -1567,9 +1567,7 @@ impl Mods<'_> {
         target: T,
         range: std::ops::Range<T::Unit>,
     ) -> Result<(), RangeError> {
-        // B2: a range's bounds are `f32` words.
-        let bound = |u: T::Unit| control_word(u.to_cell());
-        self.range_raw(target, bound(range.start), bound(range.end))
+        self.range_raw(target, range.start.to_cell(), range.end.to_cell())
     }
 
     /// [`range`](Self::range) for a target whose unit is not tutti's: a
@@ -1583,8 +1581,8 @@ impl Mods<'_> {
     pub fn range_raw(
         &mut self,
         target: impl Into<ModTarget>,
-        min: f32,
-        max: f32,
+        min: f64,
+        max: f64,
     ) -> Result<(), RangeError> {
         if min.is_nan() || max.is_nan() {
             return Err(RangeError::NotANumber { min, max });

@@ -14,7 +14,7 @@ use tutti_curve::declick_frames;
 use super::{BusLanes, mix_range_of, range_of};
 use crate::gain::{EdgeGain, GainCell};
 use crate::mode::{ModeCell, ModeState, NodeMode};
-use crate::param::{ParamIn, ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
+use crate::param::{ParamIn, ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState};
 use crate::plan::Plan;
 use crate::spec::GraphSpec;
 use crate::{EdgeId, NodeKey};
@@ -47,6 +47,12 @@ impl LiveCells {
         self.ranges.sync(spec);
     }
 
+    /// Frees the ranges the audio thread has let go of, in every cell kind;
+    /// how many are still held by a block. Control side.
+    pub(super) fn reclaim(&self) -> usize {
+        self.ranges.reclaim() + self.gains.reclaim() + self.modes.reclaim()
+    }
+
     /// Drops the cells of every key `plan` does not place, and writes each
     /// kept unit's mix range from `spec`.
     pub(super) fn keep_placed(&mut self, plan: &Plan, spec: &GraphSpec) {
@@ -69,11 +75,13 @@ impl RangeCells {
         }
     }
 
-    /// A read-only view of `at`'s cell.
-    pub(super) fn reader(&self, at: ParamIn) -> Option<ParamRangeReader> {
-        self.0
-            .get(&at.node)
-            .and_then(|cells| cells.reader(at.param))
+    /// A read-only handle on `at`'s cell.
+    pub(super) fn cell(&self, at: ParamIn) -> Option<ParamRangeCell> {
+        self.0.get(&at.node).and_then(|cells| cells.cell(at.param))
+    }
+
+    fn reclaim(&self) -> usize {
+        self.0.values().map(|cells| cells.reclaim()).sum()
     }
 
     /// The keys with cells.
@@ -119,7 +127,7 @@ impl RangeCells {
         for &param in list.as_slice() {
             cells.store(param, range_of(spec, ParamIn { node: key, param }));
         }
-        ParamState::new(ports, max, declick, Some(Arc::clone(cells)))
+        ParamState::new(ports, max, declick, cells.readers())
     }
 }
 
@@ -131,6 +139,10 @@ impl GainCells {
     /// Lane `id`'s cell, once a plan with its entry was sent.
     pub(super) fn get(&self, id: EdgeId) -> Option<&GainCell> {
         self.0.get(&id)
+    }
+
+    fn reclaim(&self) -> usize {
+        self.0.values().map(GainCell::reclaim).sum()
     }
 
     fn sync(&self, spec: &GraphSpec, committed: Option<&GraphSpec>) {
@@ -186,6 +198,10 @@ impl ModeCells {
     /// `key`'s cell, once a plan placing it was sent.
     pub(super) fn get(&self, key: NodeKey) -> Option<&ModeCell> {
         self.0.get(&key)
+    }
+
+    fn reclaim(&self) -> usize {
+        self.0.values().map(ModeCell::reclaim).sum()
     }
 
     fn sync(&self, spec: &GraphSpec, committed: Option<&GraphSpec>) {

@@ -17,7 +17,7 @@ use tutti_buffers::Float;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, EdgeGain, EdgeId, Editor, EventEdge, EventIn, EventKind, EventOut, ForkByClone,
-    NodeMix, ParamIn, ParamRange, ParamRangeReader, PassError, ScheduleError, Sink,
+    NodeMix, ParamIn, ParamRange, ParamRangeCell, PassError, ScheduleError, Sink,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_modulation::{
@@ -225,7 +225,7 @@ enum Bind {
         /// The edge's live gain cell.
         knob: ParamCell,
         /// The edge's live range cell: a new entry has a new one.
-        range: ParamRangeReader,
+        range: ParamRangeCell,
     },
     Mix {
         /// The node's mix port.
@@ -234,7 +234,7 @@ enum Bind {
         /// a new one.
         knob: ParamCell,
         /// Its live range cell.
-        range: ParamRangeReader,
+        range: ParamRangeCell,
     },
 }
 
@@ -318,7 +318,7 @@ struct Lane {
     /// The program last published to it.
     program: ControlProgram,
     /// The range last stored, as bits.
-    range: (u32, u32),
+    range: (u64, u64),
 }
 
 /// A signal source's node as built.
@@ -990,7 +990,7 @@ impl Modulation {
             *commit = true;
         }
 
-        let targets: BTreeMap<TargetKey, (f32, f32)> = decl
+        let targets: BTreeMap<TargetKey, (f64, f64)> = decl
             .targets
             .iter()
             .map(|(k, d)| (*k, (d.min, d.max)))
@@ -1518,8 +1518,8 @@ fn store_range<F: Float>(
     editor: &mut Editor<F>,
     bind: &Bind,
     controls: &LaneControls,
-    min: f32,
-    max: f32,
+    min: f64,
+    max: f64,
 ) {
     match bind {
         Bind::Native { at, .. } | Bind::Mix { at, .. } => {

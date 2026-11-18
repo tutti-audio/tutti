@@ -153,7 +153,7 @@ fn out(node: u64, port: u16) -> Source {
 
 /// An editor with a probe at each of `probes` (cutoff ranged `range`), its
 /// outputs the probes' in order; committed, so the range cells exist.
-fn probes(max: usize, probes: &[u64], range: (f32, f32)) -> (Editor, Executor) {
+fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
         MaxBlock::of(Samples(max)),
@@ -409,14 +409,14 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
     // A clamped ramp, native and plugin.
     const BOUND: f32 = 5.0625;
     let ramp = || -> Arc<dyn Curve> { Arc::new(trajectory(&[(0.0, 0.0), (1.0, 10.0)])) };
-    let (mut ed, mut exec) = probes(128, &[2], (0.0, BOUND));
+    let (mut ed, mut exec) = probes(128, &[2], (0.0, f64::from(BOUND)));
     let lane = native(&ed, 2, program(Some(ramp()), vec![]), Some(0.0));
     wire(&mut ed, 1, lane, 2);
     let plugin = ControlLaneNode::for_foreign(
         ParamId::new(9),
         program(Some(ramp()), vec![]),
         None,
-        (0.0, BOUND),
+        (0.0, f64::from(BOUND)),
     );
     wire_sink(&mut ed, 3, plugin, 4);
     ed.commit().expect("commits");

@@ -182,7 +182,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
         .iter()
         .fold((f32::MAX, f32::MIN), |(a, b), &v| (a.min(v), b.max(v)));
     assert!(
-        (lo..=hi).contains(&min) && (lo..=hi).contains(&max),
+        (lo..=hi).contains(&f64::from(min)) && (lo..=hi).contains(&f64::from(max)),
         "{min}..{max}"
     );
     assert!(

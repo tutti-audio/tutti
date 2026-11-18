@@ -166,10 +166,7 @@ fn an_f64_lane_ramps_in_f64() {
 #[test]
 fn a_range_clamps_an_f64_lane_in_f64() {
     let (at, len, target, hi) = (4, 3, 3.0, 2.0);
-    let out = render(
-        Ramp { at, target, len },
-        Some(ParamRange::new(0.0, hi as f32)),
-    );
+    let out = render(Ramp { at, target, len }, Some(ParamRange::new(0.0, hi)));
     for k in 1..=len {
         let (got, want) = (out[at + k - 1], analytic(target, len, k).min(hi));
         assert!(
@@ -180,6 +177,90 @@ fn a_range_clamps_an_f64_lane_in_f64() {
     }
     assert_eq!(out[at + len - 1], hi, "the last frame is held at the bound");
     assert_eq!(out[0], BASE, "before the ramp the base is inside the range");
+}
+
+/// **A range bound past `f32` clamps exactly in `f64`.** The upper bound is
+/// `2 + 2^-40`: `f32` rounds it to `2`, so a clamp through an `f32` word would
+/// hold the ramp at `2`. The ramp to 3 is held at the exact bound, and so is
+/// the lower bound `-(2 + 2^-40)` of a ramp down.
+#[test]
+fn a_range_bound_f32_cannot_hold_clamps_exactly() {
+    let hi = 2.0 + 1.0 / 1_099_511_627_776.0;
+    assert_ne!(f64::from(hi as f32), hi, "f32 loses the bound");
+    let (at, len) = (4, 3);
+    let up = render(
+        Ramp {
+            at,
+            target: 3.0,
+            len,
+        },
+        Some(ParamRange::new(0.0, hi)),
+    );
+    assert_eq!(up[at + len - 1], hi, "held at the exact upper bound");
+    assert!(up[at + len - 1] > 2.0, "past the bound f32 would hold");
+    let down = render(
+        Ramp {
+            at,
+            target: -3.0,
+            len,
+        },
+        Some(ParamRange::new(-hi, 1.0)),
+    );
+    assert_eq!(down[at + len - 1], -hi, "held at the exact lower bound");
+}
+
+/// **A range moved between blocks is the next block's, whole.** The ramp
+/// holds its target (3) in every block; the clamp each block reads is the
+/// bound published before it, both ends from one publish, and a move that
+/// widens releases the value to the ramp's target again.
+#[test]
+fn a_range_change_lands_on_the_next_block() {
+    let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
+    ed.insert(LANE, "lane", Params(Lane(Param::new(Hz(BASE)))));
+    ed.insert(
+        SRC,
+        "ramp",
+        ForkByClone(Ramp {
+            at: 0,
+            target: 3.0,
+            len: 1,
+        }),
+    );
+    let at = ParamIn {
+        node: LANE,
+        param: UnitParam::Cutoff.into(),
+    };
+    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
+        node: LANE,
+        port: 0,
+    })]);
+    ed.spec_mut()
+        .connect_param(at, EventOut { node: SRC, port: 0 });
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    let mut block = |ed: &mut Editor<f64>| {
+        let mut out = vec![0.0f64; FRAMES];
+        exec.process(
+            FRAMES,
+            &TransportPosition::default(),
+            &[],
+            &mut [&mut out[..]],
+        );
+        ed.collect();
+        out
+    };
+    let last = |out: &[f64]| out[FRAMES - 1];
+    assert_eq!(last(&block(&mut ed)), 3.0, "unbounded: the ramp's target");
+    for (lo, hi) in [(0.0, 2.0), (-1.0, 1.5), (0.0, 2.5), (0.5, 4.0)] {
+        ed.set_param_range(at, ParamRange::new(lo, hi))
+            .expect("a range");
+        assert_eq!(
+            last(&block(&mut ed)),
+            3.0_f64.clamp(lo, hi),
+            "{lo}..{hi} lands on the next block"
+        );
+        assert_eq!(ed.reclaim(), 0, "no block holds a retired range");
+    }
 }
 
 /// A constant source in any float.
