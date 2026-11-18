@@ -81,7 +81,7 @@ pub struct InProcClient<F: Loaded> {
     /// locked or not.
     pub(super) figures: Arc<Figures>,
     /// Where a pump of the instance delivers what it finds, for a node whose
-    /// plugin has a handle to hear it; the successor a [`Rebinder`] builds
+    /// plugin has a handle to hear it; the successor a [`Rebinder`](super::Rebinder) builds
     /// delivers through the same. `None` for a served plugin, whose own
     /// listener reports it.
     pub(super) reporting: Option<Reporting>,
@@ -483,7 +483,7 @@ pub(super) fn drain_sample_rate<F: Loaded>(
         return false;
     };
     // A refusal is kept in the instance and reported by the control side's next
-    // pump (`take_rate_report`), so the result is not read here.
+    // pump (`Instance::take_reports`), so the result is not read here.
     let _ = inner.lock().set_sample_rate(main, rate, None);
     true
 }
@@ -765,7 +765,7 @@ impl<F: Loaded> InProcClient<F> {
                 .lock()
                 .set_sample_rate(main, rate, Some(&mut self.rt));
             // A refusal renders silence (no Processor is lent) and is reported
-            // through the handle (`take_rate_report`).
+            // through the handle (`PluginInvalidation::RateRefused`).
             self.rate_refused = outcome.is_err();
             if let Err(reason) = outcome {
                 tracing::error!("a plugin refused its rate: {reason}");

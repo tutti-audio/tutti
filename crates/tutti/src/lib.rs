@@ -612,7 +612,7 @@ pub mod plugin {
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
         Mtime, PluginEntry, ProbeFailure, ProbeFailureKind, RowChange, ScanError, ScanProgress,
     };
-    pub use tutti_plugin_host::RebindError;
+    pub use tutti_plugin_host::{BlockLosses, RebindError};
     pub use tutti_plugin_ipc::RandomSourceError;
     pub use tutti_plugin_types::PresetSupport;
     pub use tutti_plugin_types::bundle::ModuleKind;
