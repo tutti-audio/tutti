@@ -989,7 +989,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         let running = stopped.apply_pending();
         debug_assert!(running, "the re-prepare resumed inside the hook");
         // The figures the first block runs at, published before it.
-        self.publish_sent();
+        self.graph.publish_sent();
         // The hardware inlets place an arrival a block after it came, a
         // block of this device's callback; the clock map follows the rate
         // from the engine's own readings.
