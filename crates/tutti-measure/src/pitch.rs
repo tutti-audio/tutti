@@ -115,7 +115,7 @@ impl PitchDetector {
         let frequency = Hz(self.cfg.sample_rate().get() / refined_period);
         // Clamped rather than wrapped raw: `Confidence` is a 0..=1 reading, and
         // this is the one place the aperiodicity inversion could leave the range.
-        let confidence = Confidence::new_clamped(1.0 - aperiodicity);
+        let confidence = Confidence::new_clamped(f64::from(1.0 - aperiodicity));
 
         PitchResult {
             frequency,
@@ -206,7 +206,7 @@ impl PitchDetector {
         let mut tau = min_period;
 
         while tau < max_period {
-            if self.cumulative_mean[tau] < self.cfg.threshold.get() {
+            if f64::from(self.cumulative_mean[tau]) < self.cfg.threshold.get() {
                 // Walk to the local minimum
                 while tau + 1 < max_period
                     && self.cumulative_mean[tau + 1] < self.cumulative_mean[tau]

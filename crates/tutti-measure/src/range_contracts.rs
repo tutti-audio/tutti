@@ -347,7 +347,7 @@ fn yin_threshold_keeps_the_range_checked_shape() {
             Confidence(0.0),
             Confidence(0.009),
             Confidence(0.51),
-            Confidence(f32::NAN),
+            Confidence(f64::NAN),
         ],
     });
 }

@@ -22,11 +22,11 @@ fn identical_channels_are_mono() {
     let signal = tone(1000, 1.0);
     let reading = correlate(pair(&signal, &signal));
 
-    assert!((reading.correlation.get() - 1.0).abs() < 1e-4);
+    assert!((reading.correlation.get() - 1.0).abs() < 1e-12);
     assert!(reading.is_mono());
     assert!(!reading.has_phase_issues());
     assert_eq!(reading.width(), StereoWidth::MONO);
-    assert!(reading.levels.side.get() < 1e-4, "no side content");
+    assert_eq!(reading.levels.side.get(), 0.0, "no side content");
 }
 
 #[test]
@@ -35,9 +35,9 @@ fn inverted_channels_cancel() {
     let inverted: Vec<f32> = signal.iter().map(|s| -s).collect();
     let reading = correlate(pair(&signal, &inverted));
 
-    assert!((reading.correlation.get() + 1.0).abs() < 1e-4);
+    assert!((reading.correlation.get() + 1.0).abs() < 1e-12);
     assert!(reading.has_phase_issues());
-    assert!(reading.levels.mid.get() < 1e-4, "mid cancels to silence");
+    assert_eq!(reading.levels.mid.get(), 0.0, "mid cancels to silence");
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn attack_and_release_have_distinct_effects() {
 #[test]
 fn a_zero_time_is_instant() {
     let mut smoother = smoother(Seconds(0.0), Seconds(0.0));
-    let reading = |correlation: f32| StereoReading {
+    let reading = |correlation: f64| StereoReading {
         correlation: Correlation::new_clamped(correlation),
         ..StereoReading::default()
     };
