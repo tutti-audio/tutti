@@ -108,7 +108,7 @@ crates/tutti-nodes/src/modulation/mod_delay.rs  3  migrating: R1/S7
 crates/tutti-nodes/src/modulation/sweep_clock.rs  1  migrating: B2/B3
 crates/tutti-nodes/src/oscillator.rs  1  migrating: R1/S7
 crates/tutti-nodes/src/strip.rs  7  migrating: R1/S7
-crates/tutti-plugin-host/src/node/loader.rs  1  migrating: plugins step 7 (WidthError carries the plugin at f32)
+crates/tutti-plugin-host/src/node/loader.rs  1  spec: f32 is the audio width every plugin format processes (CLAP, VST3, VST2, AU)
 crates/tutti-plugin-host/src/param_delivery.rs  3  migrating: plugins step 7
 crates/tutti-plugin-probe/src/measure.rs  2  migrating: plugins step 7
 crates/tutti-polysynth/src/bank.rs  17  migrating: dsp S7/instruments
