@@ -47,6 +47,8 @@ use crate::Edge;
 use crate::ModKeys;
 use crate::ParamUnit;
 use crate::RangeError;
+use tutti_buffers::Float;
+
 use crate::graph::Graph;
 
 /// How long a modulation target may stay unresolved before it is logged:
@@ -1082,9 +1084,9 @@ impl ModSession {
 
     /// Applies the declarations: the host's, or with `None` the session's
     /// own. Returns whether the apply asks for a commit.
-    fn apply(
+    fn apply<F: Float>(
         &mut self,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         host: Option<crate::ModInput<'_>>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
@@ -1139,9 +1141,9 @@ impl ModSession {
 
     /// `Phase::Modulation`: closes the session's own takes that are done,
     /// then applies.
-    pub(crate) fn modulation_phase(
+    pub(crate) fn modulation_phase<F: Float>(
         &mut self,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         host: Option<crate::ModInput<'_>>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
@@ -1157,9 +1159,9 @@ impl ModSession {
     /// `Phase::AfterCommit`'s re-apply: while a target is unresolved and
     /// the graph is otherwise clean (the update's own commit went out),
     /// applies again. Returns whether that asks for a commit.
-    pub(crate) fn reapply(
+    pub(crate) fn reapply<F: Float>(
         &mut self,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         host: Option<crate::ModInput<'_>>,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
@@ -1174,7 +1176,7 @@ impl ModSession {
 
     /// `Phase::AfterCommit`'s resyncs: sent on an update that owes them and
     /// has nothing left to commit.
-    pub(crate) fn resync(&mut self, graph: &mut Graph) {
+    pub(crate) fn resync<F: Float>(&mut self, graph: &mut Graph<F>) {
         if self.state.modulation.resyncs_owed() > 0 && !graph.is_edited() {
             graph.send_mod_resyncs(&mut self.state.modulation);
         }
