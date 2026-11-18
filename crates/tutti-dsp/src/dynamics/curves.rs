@@ -6,20 +6,20 @@
 use tutti_buffers::Float;
 use tutti_units::{Amplitude, CompressionRatio, Db};
 
-/// The decibels of a level at the working precision `F`, floored at [`Db::FLOOR`]: a level of
-/// zero or below is the floor. The maths is [`Db::from_amplitude`]'s, `20 log10`, in `F`: a unit
-/// is `f64`, not generic over `F`, so a per-sample level in `F` is computed here and
-/// [`amplitude_to_db`] at `f64` gives the same bits.
+/// The decibels of a level in `F`, floored at [`Db::FLOOR`]: a level of zero or below is the
+/// floor. The maths is [`Db::from_amplitude`]'s, `20 log10`, in `F`: a unit is `f64`, not
+/// generic over `F`, so a per-sample level in `F` is computed here and [`amplitude_to_db`] at
+/// `f64` gives the same bits.
 #[inline]
 pub(crate) fn level_db<F: Float>(level: F) -> F {
     if level <= F::ZERO {
-        F::from_f64(Db::FLOOR.get())
+        F::from_unit(Db::FLOOR)
     } else {
         F::lit(20.0) * level.log10()
     }
 }
 
-/// The amplitude ratio of `db` decibels at the working precision `F`, `10^(db / 20)` in `F` as
+/// The amplitude ratio of `db` decibels in `F`, `10^(db / 20)` in `F` as
 /// [`Db::to_amplitude`] has it at `f64`: `-inf` is 0 and `+inf` is `+inf`.
 #[inline]
 pub(crate) fn db_gain<F: Float>(db: F) -> F {
@@ -60,8 +60,8 @@ pub fn compute_compressor_gain_reduction(
     ))
 }
 
-/// [`compute_compressor_gain_reduction`] over the bare floats at the working precision `F`,
-/// all in dB but the ratio.
+/// [`compute_compressor_gain_reduction`] over per-sample values in `F`, all in dB but the
+/// ratio.
 #[inline]
 pub(crate) fn gain_reduction<F: Float>(input_db: F, threshold: F, ratio: F, knee: F) -> F {
     let slope = F::ONE - F::ONE / ratio;
@@ -85,8 +85,8 @@ pub(crate) fn gain_reduction<F: Float>(input_db: F, threshold: F, ratio: F, knee
     }
 }
 
-/// The upward counterpart of [`gain_reduction`], over the bare floats at the working precision
-/// `F`: the lift, in dB and `>= 0`, a level under the threshold is given.
+/// The upward counterpart of [`gain_reduction`], over per-sample values in `F`: the lift, in dB
+/// and `>= 0`, a level under the threshold is given.
 ///
 /// It is the reduction curve mirrored about the threshold: a level `x` dB under it, through
 /// the same knee and ratio, is lifted by what a level `x` dB over it is reduced by, so a
@@ -124,7 +124,7 @@ pub fn compute_limiter_gain(
     ))
 }
 
-/// [`compute_limiter_gain`] over the bare floats at the working precision `F`, all in dB.
+/// [`compute_limiter_gain`] over per-sample values in `F`, all in dB.
 #[inline]
 pub(crate) fn limiter_gain<F: Float>(peak_db: F, threshold: F, ceiling: F) -> F {
     if peak_db > threshold {
@@ -167,7 +167,8 @@ pub(crate) fn limiter_gain<F: Float>(peak_db: F, threshold: F, ceiling: F) -> F 
 /// a curve whose ceiling is under 1e37 (740 dB) and no more than about 770 dB over its
 /// threshold (`f32::MAX` times the threshold's amplitude): a threshold at or above -144 dB
 /// keeps any ceiling up to about +626 dB. The limits are `f32`'s because `f32` is the narrowest
-/// width a bank runs in: the curve is `f64`, and its gains narrow to the bank's float.
+/// float a bank runs in: the curve is designed in `f64`, and its gains cross once into the
+/// bank's float.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LimiterCurve {
     /// The threshold as an amplitude.
@@ -217,29 +218,29 @@ impl LimiterCurve {
     /// divisor is never zero.
     #[inline]
     pub fn gain(&self, peak: Amplitude) -> Amplitude {
-        Amplitude(self.widened::<f64>().gain(peak.get()))
+        Amplitude(self.in_float::<f64>().gain(peak.get()))
     }
 
-    /// This curve's figures widened to `F`, once, for a per-sample [`WideCurve::gain`].
-    pub(crate) fn widened<F: Float>(&self) -> WideCurve<F> {
-        WideCurve {
-            threshold: F::from_f64(self.threshold.get()),
-            over: F::from_f64(self.over.get()),
-            below: F::from_f64(self.below.get()),
+    /// This curve's figures in `F`, crossed once, for a per-sample [`FloatCurve::gain`].
+    pub(crate) fn in_float<F: Float>(&self) -> FloatCurve<F> {
+        FloatCurve {
+            threshold: F::from_unit(self.threshold),
+            over: F::from_unit(self.over),
+            below: F::from_unit(self.below),
         }
     }
 }
 
-/// A [`LimiterCurve`] widened to `F`: the figures as bare amplitudes, so a per-sample gain
-/// widens nothing.
+/// A [`LimiterCurve`] in `F`: the figures as bare amplitudes, so a per-sample gain crosses
+/// nothing.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct WideCurve<F> {
+pub(crate) struct FloatCurve<F> {
     threshold: F,
     over: F,
     below: F,
 }
 
-impl<F: Float> WideCurve<F> {
+impl<F: Float> FloatCurve<F> {
     /// The gain for a linked peak held in `F`, as [`LimiterCurve::gain`].
     #[inline]
     pub(crate) fn gain(&self, peak: F) -> F {

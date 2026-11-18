@@ -50,17 +50,27 @@
 //! anywhere (a mid band that rings longer than both its neighbours, by a lot)
 //! is scaled to peak at 0.9999 at most, so the loop cannot grow.
 //!
-//! **Format.** The state is the bank's float `F`; a view of another [`Float`] is converted at
-//! the edges. The loop gains and the poles are designed in `f64` and narrowed to `F` once per
-//! design.
+//! **Format.** The state and the views are the bank's float `F`. The loop gains and the
+//! one-poles are designed in `f64` and cross to `F` once per design ([`FdnBank::aim`]). A pole
+//! is within `1 - p` of 1 at a low crossover (`p` of 200 Hz at 192 kHz is 6.5e-3), so a one-pole
+//! stores its complement `c = 1 - p`, solved with `expm1`, and runs `q += c (x - q)`. A loop
+//! gain is not stored as a complement: a line's gain is `g = 10^(-3 L / (fs T))` for its own
+//! length `L`, and the shortest line (size 0, 11.7 ms or 2244 frames at 192 kHz) at 60 s has `1 - g
+//! = 1.35e-3`, which `F`'s rounding of `g` (3e-8) moves by 2.2e-5 of itself: the decay time moves by
+//! that share (a 1 ms line would move it by 2.6e-4, the bound). A loop gain multiplies a line's
+//! sample, so the product rounds by about `u` a trip whatever the form: a complement buys nothing
+//! there.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Amplitude, Hz, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail};
+use tutti_units::{
+    Amplitude, Gain, Hz, Quantity, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail,
+};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
 use crate::delay::DelayRing;
-use crate::onepole::cutoff_pole;
+use crate::design::along;
+use crate::onepole::{cutoff_complement, cutoff_pole};
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
 use crate::reverb::{CHUNK, ramp, tail_of};
 use crate::{Glide, Lerp, Ring, Steps, System, TAIL_FLOOR};
@@ -82,7 +92,10 @@ struct Target<F> {
     n: usize,
     rate: Hz,
     crossover: [Hz; 2],
+    /// The crossovers' one-poles `exp(-2 pi fc / fs)`, for the response the gains are scaled by.
     pole: [f64; 2],
+    /// The one-poles' complements `1 - pole`, the coefficients their updates run on.
+    complement: [F; 2],
 
     len: Vec<ReadPosition>,
     pre_len: ReadPosition,
@@ -104,6 +117,7 @@ impl<F: Float> Target<F> {
             rate: Hz(0.5),
             crossover: [Hz::ZERO; 2],
             pole: [0.0; 2],
+            complement: [F::ONE; 2],
             len: vec![ONE_FRAME; lines],
             pre_len: ReadPosition::START,
             depth: F::ZERO,
@@ -132,7 +146,8 @@ pub struct FdnGlides<F: Float> {
     /// The lines in use: 0 until the first aim, and the bank is silent.
     n: usize,
     rate: Hz,
-    pole: [F; 2],
+    /// The absorption one-poles' complements `1 - pole`.
+    complement: [F; 2],
     crossover: [Hz; 2],
 
     len: Vec<Glide<ReadPosition>>,
@@ -164,7 +179,7 @@ impl<F: Float + Lerp> FdnGlides<F> {
             ramp,
             n: 0,
             rate: Hz(0.5),
-            pole: t.pole.map(F::from_f64),
+            complement: t.complement,
             crossover: t.crossover,
             len: vec![Glide::landed(ONE_FRAME); lines],
             design_len: vec![Glide::landed(ONE_FRAME); lines],
@@ -225,7 +240,7 @@ impl<F: Float + Lerp> FdnGlides<F> {
         let n = t.n;
         self.n = n;
         self.crossover = t.crossover;
-        self.pole = t.pole.map(F::from_f64);
+        self.complement = t.complement;
         for j in 0..n {
             self.len[j].aim_position(t.len[j], Steps::Rate(LENGTH_STEP));
             self.design_len[j].aim_position(t.len[j], ramp);
@@ -439,57 +454,63 @@ impl<F: Float + Lerp> FdnBank<F> {
         let t = &mut self.target;
         t.n = n;
         let max_len = SampleSpan::from_samples(Samples::new(self.cap - 4));
-        // A coefficient of the network is a unit, or zero when it is not finite. Each narrows
-        // to `F` once, here.
-        let unit = |x: f64| {
-            if x.is_finite() {
-                F::from_f64(x)
+        // A coefficient of the network is a unit, or zero when it is not finite. Each crosses to
+        // `F` once, here.
+        fn figure<F: Float>(q: impl Quantity) -> F {
+            if q.value().is_finite() {
+                F::from_unit(q)
             } else {
                 F::ZERO
             }
-        };
+        }
 
         if let Some(Absorption::Bands { crossover, .. }) = f.lines.first().map(|l| l.absorption) {
             set_poles(t, crossover, self.rate);
         }
-        let flat = F::from_f64(1.0 / (n as f64).sqrt());
+        let flat = F::from_design(1.0 / (n as f64).sqrt());
         for j in 0..n {
             let line = &f.lines[j];
             t.len[j] = ReadPosition::from_span(
                 line.length
                     .clamp(SampleSpan::from_samples(Samples::new(1)), max_len),
             );
-            t.gain[j] = absorption_gains(line.absorption, t.pole).map(|g| F::from_f64(g.get()));
+            t.gain[j] = absorption_gains(line.absorption, t.pole).map(figure::<F>);
             // A diagonal network is `m = 0`; its `v` is a unit vector (line 0)
             // like the rest, so a ramp to a mixing matrix moves between unit
             // vectors and `v_len` stays 1.
             t.v[j] = match &f.matrix {
-                Matrix::Diagonal => F::from_f32(f32::from(u8::from(j == 0))),
+                Matrix::Diagonal if j == 0 => F::ONE,
+                Matrix::Diagonal => F::ZERO,
                 Matrix::Householder => flat,
-                Matrix::Reflection(v) if v.len() == n => unit(v[j].get()),
+                Matrix::Reflection(v) if v.len() == n => figure(v[j]),
                 _ => F::ZERO,
             };
-            t.input[j] = unit(f.input.get(j).map_or(0.0, |g| g.get()));
+            t.input[j] = figure(f.input.get(j).copied().unwrap_or(Gain::SILENT));
             let row = |r: usize| {
-                unit(
+                figure(
                     f.output
                         .rows
                         .get(r)
                         .or_else(|| f.output.rows.first())
                         .and_then(|row| row.get(j))
-                        .map_or(0.0, |g| g.get()),
+                        .copied()
+                        .unwrap_or(Gain::SILENT),
                 )
             };
             t.out[j] = [row(0), row(1)];
         }
         t.v_len = t.v[..n].iter().map(|&v| v * v).sum::<F>().sqrt();
-        t.mix = F::from_f32(f32::from(u8::from(!matches!(f.matrix, Matrix::Diagonal))));
+        t.mix = if matches!(f.matrix, Matrix::Diagonal) {
+            F::ZERO
+        } else {
+            F::ONE
+        };
         for j in n..self.max_lines {
             t.input[j] = F::ZERO;
             t.out[j] = [F::ZERO; 2];
         }
         let m = f.lines[0].modulation;
-        t.depth = F::from_f64(m.depth.get().min((self.cap as f64) * 0.25));
+        t.depth = F::from_design(m.depth.get().min((self.cap as f64) * 0.25));
         let hz = m.rate.get();
         t.rate = Hz(if hz.is_finite() {
             hz.clamp(0.0, 20.0)
@@ -498,15 +519,10 @@ impl<F: Float + Lerp> FdnBank<F> {
         });
         t.pre_len = ReadPosition::from_frames(self.network.pre_delay)
             .min(ReadPosition::from_frames(Samples::new(self.pre_cap - 4)));
-        let wet = self.network.wet.to_amplitude().get();
-        t.wet = if wet.is_finite() {
-            F::from_f64(wet)
-        } else {
-            F::ZERO
-        };
+        t.wet = figure(self.network.wet.to_amplitude());
         let width = self.network.width.get();
         t.width = if width.is_finite() {
-            F::from_f64(width.clamp(0.0, 4.0))
+            F::from_design(width.clamp(0.0, 4.0))
         } else {
             F::ONE
         };
@@ -517,11 +533,11 @@ impl<F: Float + Lerp> FdnBank<F> {
     fn begin_chunk(&mut self, c: &FdnGlides<F>) {
         let s = &mut self.state;
         let n = c.n;
-        let depth = c.depth.now().to_f64();
+        let depth: f64 = c.depth.now().into();
         if s.fresh {
             s.fresh = false;
             for j in 0..self.max_lines {
-                s.c_mod_next[j] = F::from_f64(depth * libm::sin(s.phase[j]));
+                s.c_mod_next[j] = F::from_design(depth * libm::sin(s.phase[j]));
             }
         }
         let dphi = std::f64::consts::TAU * c.rate.get() * Self::CHUNK as f64 / self.rate.get();
@@ -529,20 +545,21 @@ impl<F: Float + Lerp> FdnBank<F> {
             s.phase[j] = (s.phase[j] + dphi) % std::f64::consts::TAU;
             s.c_len[j] = c.len[j].now();
             s.c_mod_prev[j] = s.c_mod_next[j];
-            s.c_mod_next[j] = F::from_f64(depth * libm::sin(s.phase[j]));
+            s.c_mod_next[j] = F::from_design(depth * libm::sin(s.phase[j]));
             // The gains are designed for a length `L`: a loop of `L` frames loses 60 dB in `T`
             // seconds at `g = 10^(-3 L / (fs T))` a trip. The same `T` at the `L'` frames the
             // line is now takes `g^(L' / L)`, since `(g^(L'/L))^(fs T / L') = g^(fs T / L)`: each
             // band's gain is raised to `L' / L` while the length is in flight, and a landed line
             // runs the designed gains as they are. `L` is the design length the gains glide
-            // with (the gain in flight is a blend of two designs), so the ramp is continuous.
+            // with (the gain in flight is a blend of two designs), so the ramp is continuous. The
+            // power is taken in `f64` and each band crosses once.
             let gains = c.gain[j].map(|g| g.now());
             let (now, designed) = (c.len[j].now(), c.design_len[j].now());
             let [low, mid, high] = if now == designed {
                 gains
             } else {
-                let ratio = F::from_f64(now.span().get() / designed.span().get());
-                gains.map(|g| g.powf(ratio))
+                let ratio = now.span().get() / designed.span().get();
+                gains.map(|g| F::from_design(libm::pow(g.into(), ratio)))
             };
             s.c_gain[j] = [high, mid - high, low - mid];
             s.c_v[j] = c.v[j].now();
@@ -556,9 +573,11 @@ impl<F: Float + Lerp> FdnBank<F> {
             let k = c.v_len.now() / len;
             s.c_v[..n].iter_mut().for_each(|x| *x *= k);
         }
-        s.c_mix = F::from_f32(f32::from(u8::from(
-            c.mix.target() > F::lit(0.5) || c.mix.moving(),
-        )));
+        s.c_mix = if c.mix.target() > F::lit(0.5) || c.mix.moving() {
+            F::ONE
+        } else {
+            F::ZERO
+        };
         s.c_wet = c.wet.now();
         s.c_width = c.width.now();
         s.c_pre = c.pre_len.now();
@@ -569,15 +588,15 @@ impl<F: Float + Lerp> FdnBank<F> {
     /// start, so a call that ends inside a chunk goes on in the next. A channel of `output`
     /// past the second is not touched; before the first [`aim`](Self::aim) the output is
     /// silent. No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
         glides: &mut FdnGlides<F>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels();
-        let xs: [&[S]; MAX_CHANNELS] = core::array::from_fn(|c| {
+        let xs: [&[F]; MAX_CHANNELS] = core::array::from_fn(|c| {
             if c < width {
                 &input.plane(c).samples()[..frames]
             } else {
@@ -591,12 +610,12 @@ impl<F: Float + Lerp> FdnBank<F> {
         let n = glides.n;
         if n == 0 {
             for y in left.iter_mut().chain(right.iter_mut()) {
-                y.fill(S::SILENCE);
+                y.fill(F::ZERO);
             }
             return;
         }
-        let scale = F::from_f64(1.0 / width.max(1) as f64);
-        let p = glides.pole.map(|x| F::ONE - x);
+        let scale = F::from_design(1.0 / width.max(1) as f64);
+        let p = glides.complement;
         let (two, half) = (F::ONE + F::ONE, F::lit(0.5));
         let mut d = [F::ZERO; 16];
         for i in 0..frames {
@@ -605,12 +624,8 @@ impl<F: Float + Lerp> FdnBank<F> {
                 self.begin_chunk(glides);
             }
             let s = &mut self.state;
-            let t = F::from_f64(self.into as f64 / Self::CHUNK as f64);
-            let x: F = xs[..width]
-                .iter()
-                .map(|ch| ch[i].convert_to::<F>())
-                .sum::<F>()
-                * scale;
+            let t = along::<F>(self.into as u32, Self::CHUNK as u32);
+            let x: F = xs[..width].iter().map(|ch| ch[i]).sum::<F>() * scale;
 
             s.pre.put(x);
             let xd = s.pre.at(s.c_pre);
@@ -651,10 +666,10 @@ impl<F: Float + Lerp> FdnBank<F> {
             let (mid, side) = ((out_l + out_r) * half, (out_l - out_r) * half);
             let wet = s.c_wet;
             if let Some(y) = left.as_deref_mut() {
-                y[i] = ((mid + s.c_width * side) * wet).convert_to::<S>();
+                y[i] = (mid + s.c_width * side) * wet;
             }
             if let Some(y) = right.as_deref_mut() {
-                y[i] = ((mid - s.c_width * side) * wet).convert_to::<S>();
+                y[i] = (mid - s.c_width * side) * wet;
             }
             self.into = (self.into + 1) % Self::CHUNK;
         }
@@ -681,13 +696,14 @@ impl<F: Float + Lerp> FdnBank<F> {
 }
 
 /// Sets the one-poles of `t` to the crossovers, in Hz, at `rate`, when they moved.
-fn set_poles<F>(t: &mut Target<F>, crossover: [Hz; 2], rate: SampleRate) {
+fn set_poles<F: Float>(t: &mut Target<F>, crossover: [Hz; 2], rate: SampleRate) {
     if crossover == t.crossover {
         return;
     }
     t.crossover = crossover;
-    for (p, f) in t.pole.iter_mut().zip(crossover) {
+    for ((p, c), f) in t.pole.iter_mut().zip(&mut t.complement).zip(crossover) {
         *p = cutoff_pole(f, rate);
+        *c = F::from_design(cutoff_complement(f, rate));
     }
 }
 

@@ -14,11 +14,11 @@ pub(super) const CHUNK: usize = 64;
 /// stream, so the de-zipper does not depend on the block.
 pub const GAIN_GLIDE: Seconds = Seconds(0.005);
 
-/// The level an infinite sample is held to: `f32::MAX` (770 dB), a deliberate f32-range limit
-/// applied at both widths, so the level's dB, and the gain over it, stay finite.
+/// The level an infinite sample is held to: `f32::MAX` (770 dB) at both widths, so the level's
+/// dB, and the gain over it, stay finite at the narrowest float.
 #[inline]
 pub(super) fn held<F: Float>() -> F {
-    F::from_f32(f32::MAX)
+    F::lit(3.402_823_466_385_288_6e38)
 }
 
 /// `x`'s magnitude as a level: a NaN reads as quiet (0) and an infinity as [`held`], so a
@@ -32,15 +32,11 @@ pub(super) fn level<F: Float>(x: F) -> F {
 /// The key's level at each frame of `frames`: the loudest channel of `key`, into `out`
 /// (as long as `frames`): per-sample levels in `F`.
 #[inline]
-pub(crate) fn key_levels<S: Float, F: Float>(
-    key: &Planes<'_, S>,
-    frames: Range<usize>,
-    out: &mut [F],
-) {
+pub(crate) fn key_levels<F: Float>(key: &Planes<'_, F>, frames: Range<usize>, out: &mut [F]) {
     out.fill(F::ZERO);
     for plane in key.iter() {
-        for (m, x) in out.iter_mut().zip(&plane.samples()[frames.clone()]) {
-            *m = m.max(level(x.convert_to::<F>()));
+        for (m, &x) in out.iter_mut().zip(&plane.samples()[frames.clone()]) {
+            *m = m.max(level(x));
         }
     }
 }

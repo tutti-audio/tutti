@@ -28,8 +28,12 @@
 //! its controls move, on a grid of its own. They move in 20 ms of whole chunks, landing
 //! exactly (a size or a damping that jumped would click).
 //!
-//! **Format.** The state is the bank's float `F`; a view of another [`Float`] is converted at
-//! the edges. The damping is designed in `f64` and narrowed to `F` once.
+//! **Format.** The state and the views are the bank's float `F`. The feedback and the damping
+//! cross to `F` once per aim, from the design in `f64`. Neither is stored as a complement: the
+//! damping pole is at most 0.4 (its complement is at least 0.6), and the comb loop gain is at
+//! most 0.98, so `1 - g` is at least 0.02 and `F`'s rounding of `g` (3e-8 in `f32`) moves it, and
+//! the RT60 with it, by 1.5e-6 of itself; a loop gain multiplies a line's sample, which rounds by
+//! about `u` a trip whatever the form.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Feedback, Gain, Mix, SampleRate, Seconds, Tail};
@@ -60,6 +64,14 @@ fn scale_tuning(rate: SampleRate, tuning: usize) -> usize {
 
 /// The comb loop gain and damping Freeverb starts at: the General MIDI figures.
 const START: FreeverbControls = FreeverbControls::GENERAL_MIDI;
+
+/// The comb loop gain and damping of `controls`, each crossed to `F`.
+fn design<F: Float>(controls: &FreeverbControls) -> (F, F) {
+    (
+        F::from_unit(controls.feedback()),
+        F::from_design(controls.damping()),
+    )
+}
 
 /// What a Freeverb reads while it runs: the comb feedback and the damping, each aimed by
 /// [`FreeverbBank::aim`] and stepped once a chunk by [`FreeverbBank::process`].
@@ -101,6 +113,8 @@ pub struct FreeverbBank<F: Float> {
     rate: SampleRate,
     /// Frames of the current chunk already run: 0 at a chunk's start.
     into: usize,
+    /// [`FIXED_GAIN`](Self::FIXED_GAIN), crossed once.
+    gain: F,
 }
 
 impl<F: Float + Lerp> FreeverbBank<F> {
@@ -135,10 +149,12 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             all_passes: [al, ar],
             rate,
             into: 0,
+            gain: F::from_unit(Self::FIXED_GAIN),
         };
-        bank.set_combs(F::from_unit(START.feedback()), F::from_f64(START.damping()));
+        let (feedback, damp) = design(&START);
+        bank.set_combs(feedback, damp);
         for apf in bank.all_passes.iter_mut().flatten() {
-            apf.feedback = F::from_f64(ALLPASS_FEEDBACK.get());
+            apf.feedback = F::from_unit(ALLPASS_FEEDBACK);
         }
         bank
     }
@@ -147,9 +163,10 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// [`aim`](Self::aim) is the caller's to land.
     #[must_use]
     pub fn glides(&self) -> FreeverbGlides<F> {
+        let (feedback, damp) = design(&START);
         FreeverbGlides {
-            feedback: Glide::landed(F::from_unit(START.feedback())),
-            damp: Glide::landed(F::from_f64(START.damping())),
+            feedback: Glide::landed(feedback),
+            damp: Glide::landed(damp),
             ramp: ramp(self.rate),
         }
     }
@@ -168,12 +185,9 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// Aims `glides` at the comb loop gain and damping of `controls`, each moving in 20 ms.
     /// No allocation.
     pub fn aim(&self, glides: &mut FreeverbGlides<F>, controls: &FreeverbControls) {
-        glides
-            .feedback
-            .aim_by(F::from_unit(controls.feedback()), glides.ramp);
-        glides
-            .damp
-            .aim_by(F::from_f64(controls.damping()), glides.ramp);
+        let (feedback, damp) = design(controls);
+        glides.feedback.aim_by(feedback, glides.ramp);
+        glides.damp.aim_by(damp, glides.ramp);
     }
 
     /// Sets every comb's loop gain and damping. The damping's complement is `1 - damp`.
@@ -228,15 +242,15 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// past the second is not touched, and a view with one plane is its left alone. Each
     /// chunk's glide step is taken at its first frame ([`CHUNK`](Self::CHUNK)). No
     /// allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
         glides: &mut FreeverbGlides<F>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels();
-        let scale = F::from_f64(1.0 / width.max(1) as f64);
+        let scale = F::from_design(1.0 / width.max(1) as f64);
         let mut planes = output.iter_mut();
         let mut left = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
         let mut right = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
@@ -252,7 +266,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             for c in 0..width {
                 let plane = &input.plane(c).samples()[at..at + run];
                 for (slot, v) in x.iter_mut().zip(plane) {
-                    *slot += v.convert_to::<F>();
+                    *slot += *v;
                 }
             }
             for slot in &mut x[..run] {
@@ -260,14 +274,10 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             }
             self.run(&x[..run], &mut l[..run], &mut r[..run]);
             if let Some(y) = left.as_deref_mut() {
-                for (y, &v) in y[at..at + run].iter_mut().zip(&l[..run]) {
-                    *y = v.convert_to::<S>();
-                }
+                y[at..at + run].copy_from_slice(&l[..run]);
             }
             if let Some(y) = right.as_deref_mut() {
-                for (y, &v) in y[at..at + run].iter_mut().zip(&r[..run]) {
-                    *y = v.convert_to::<S>();
-                }
+                y[at..at + run].copy_from_slice(&r[..run]);
             }
             self.into = (self.into + run) % CHUNK;
             at += run;
@@ -277,14 +287,13 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// One run of a chunk: `input` scaled by [`FIXED_GAIN`](Self::FIXED_GAIN) through each channel's combs and
     /// all-passes into `left` and `right`, which are overwritten.
     fn run(&mut self, input: &[F], left: &mut [F], right: &mut [F]) {
-        let gain = F::from_f64(Self::FIXED_GAIN.get());
         for (out, (combs, all_passes)) in [left, right]
             .into_iter()
             .zip(self.combs.iter_mut().zip(self.all_passes.iter_mut()))
         {
             out.fill(F::ZERO);
             for cf in combs {
-                cf.process(input, gain, out);
+                cf.process(input, self.gain, out);
             }
             for apf in all_passes {
                 apf.process(out);
