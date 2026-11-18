@@ -20,6 +20,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
+use tutti_buffers::Float;
 use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING, MicConfig, MicIn};
 use tutti_engine::StreamLatency;
 use tutti_graph::{DECLICK, FadeLaw, InletNode, InletRing};
@@ -150,29 +151,50 @@ impl InputConfig {
 /// An input the session opened ([`Session::add_input`]): the name of its
 /// inlet node.
 ///
-/// It is a plain value. The input lives as long as the session, which owns the
+/// `F` is the session's float. It is a plain value. The input lives as long as the session, which owns the
 /// capture stream and reopens it after a restart; remove the node
 /// ([`Session::remove`]) to end it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Input {
-    node: Key<InletNode>,
+pub struct Input<F: Float = f32> {
+    node: Key<InletNode<F>>,
 }
 
-impl Input {
+impl<F: Float> Clone for Input<F> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<F: Float> Copy for Input<F> {}
+
+impl<F: Float> std::fmt::Debug for Input<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Input").field("node", &self.node).finish()
+    }
+}
+
+impl<F: Float> PartialEq for Input<F> {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node
+    }
+}
+
+impl<F: Float> Eq for Input<F> {}
+
+impl<F: Float> Input<F> {
     /// The inlet node the input feeds the graph through: wire it like any
     /// node, to monitor the device through effects. It is the same node across
     /// restarts.
     #[must_use]
-    pub fn node(&self) -> Key<InletNode> {
+    pub fn node(&self) -> Key<InletNode<F>> {
         self.node
     }
 }
 
 /// What an [`InputOpener`] opened: the ring into the graph, and the capture
 /// stream's owner, dropped to close it.
-pub struct OpenedInput {
+pub struct OpenedInput<F: Float = f32> {
     /// The ring the capture callback fills, with the rate it fills it at.
-    pub ring: InletRing,
+    pub ring: InletRing<F>,
     /// Whatever keeps the capture stream running; dropping it stops capture.
     pub keep: Box<dyn Any + Send>,
     /// The fixed lead of the ring, in frames at the ring's rate: how long a
@@ -184,7 +206,7 @@ pub struct OpenedInput {
     pub lead: Samples,
 }
 
-impl std::fmt::Debug for OpenedInput {
+impl<F: Float> std::fmt::Debug for OpenedInput<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpenedInput")
             .field("ring", &self.ring)
@@ -194,22 +216,22 @@ impl std::fmt::Debug for OpenedInput {
 
 /// Where a session's inputs come from: the sound card's capture streams
 /// ([`MicIn`]), or, behind `testing`, a test's own.
-pub trait InputOpener: std::fmt::Debug + Send {
+pub trait InputOpener<F: Float = f32>: std::fmt::Debug + Send {
     /// Opens an input as `config` describes it, at the graph's `rate`.
     ///
     /// # Errors
     ///
     /// Whatever the capture device refuses.
-    fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput>;
+    fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput<F>>;
 }
 
 /// The sound card's capture streams.
 #[derive(Debug)]
 struct Capture;
 
-impl InputOpener for Capture {
-    fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput> {
-        let (mic, ring) = MicIn::open_with_monitor(config, rate)?;
+impl<F: Float> InputOpener<F> for Capture {
+    fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput<F>> {
+        let (mic, ring) = MicIn::<F>::open_with_monitor(config, rate)?;
         Ok(OpenedInput {
             ring,
             keep: Box::new(mic),
@@ -220,8 +242,8 @@ impl InputOpener for Capture {
 }
 
 /// One input the session holds: what to reopen, and the stream while it runs.
-pub(crate) struct Held {
-    pub(crate) node: Key<InletNode>,
+pub(crate) struct Held<F: Float> {
+    pub(crate) node: Key<InletNode<F>>,
     pub(crate) config: InputConfig,
     /// The lead of the ring the opener gave last.
     pub(crate) lead: Samples,
@@ -229,13 +251,13 @@ pub(crate) struct Held {
 }
 
 /// The session's inputs, and what opens them.
-pub(crate) struct Inputs {
+pub(crate) struct Inputs<F: Float> {
     host: AudioHost,
     /// Where every input's capture callback reports its delay, which the
     /// [`Device`](crate::Device) reads.
     latency: Arc<StreamLatency>,
-    opener: Box<dyn InputOpener>,
-    held: Vec<Held>,
+    opener: Box<dyn InputOpener<F>>,
+    held: Vec<Held<F>>,
     /// Where the output stream's callback reports its delay, once the session
     /// has a device ([`Device::latency`](crate::Device::latency)'s `output`).
     output_latency: Option<Arc<StreamLatency>>,
@@ -243,7 +265,7 @@ pub(crate) struct Inputs {
     takes: Mint,
 }
 
-impl std::fmt::Debug for Inputs {
+impl<F: Float> std::fmt::Debug for Inputs<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inputs")
             .field("host", &self.host)
@@ -252,8 +274,8 @@ impl std::fmt::Debug for Inputs {
     }
 }
 
-impl Inputs {
-    pub(crate) fn new(host: AudioHost, opener: Option<Box<dyn InputOpener>>) -> Self {
+impl<F: Float> Inputs<F> {
+    pub(crate) fn new(host: AudioHost, opener: Option<Box<dyn InputOpener<F>>>) -> Self {
         Self {
             host,
             latency: Arc::new(StreamLatency::new()),
@@ -270,7 +292,7 @@ impl Inputs {
     }
 
     /// The input whose inlet node is `node`.
-    pub(crate) fn held(&self, node: Key<InletNode>) -> Option<&Held> {
+    pub(crate) fn held(&self, node: Key<InletNode<F>>) -> Option<&Held<F>> {
         self.held.iter().find(|h| h.node == node)
     }
 
@@ -283,7 +305,7 @@ impl Inputs {
 
     /// Closes every input: the capture streams drop and no restart reopens
     /// them. The inputs closed, in the order they were added.
-    pub(crate) fn close_all(&mut self) -> Vec<Input> {
+    pub(crate) fn close_all(&mut self) -> Vec<Input<F>> {
         std::mem::take(&mut self.held)
             .into_iter()
             .map(|held| Input { node: held.node })
@@ -316,7 +338,7 @@ impl Inputs {
     }
 }
 
-impl<K: crate::AppKey> Session<K, crate::DeviceClock> {
+impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, crate::DeviceClock<F>> {
     /// Opens a capture input on the session's host and puts it in the graph:
     /// the capture stream ([`tutti_cpal::MicIn`]) and the inlet node that copies
     /// it in ([`Graph::add_inlet`](crate::Graph::add_inlet)), in one call. Wire
@@ -333,7 +355,7 @@ impl<K: crate::AppKey> Session<K, crate::DeviceClock> {
     /// [`Error::Device`] when the host or the device cannot be opened, cannot
     /// run at the graph's rate, or has not the inputs asked for;
     /// [`Error::Inlet`] when the stream's rate is not the graph's.
-    pub fn add_input(&mut self, config: InputConfig) -> Result<Input> {
+    pub fn add_input(&mut self, config: InputConfig) -> Result<Input<F>> {
         let rate = self.graph.prepared().sample_rate();
         let opened = self.inputs.opener.open(&self.inputs.mic(&config), rate)?;
         let node = self.graph.add_inlet(opened.ring)?;
@@ -362,7 +384,7 @@ impl<K: crate::AppKey> Session<K, crate::DeviceClock> {
                 self.running
                     .events
                     .push(SessionEvent::Device(DeviceEvent::InputReopenFailed {
-                        input: Input { node: input.node },
+                        input: input.node.erase(),
                         error,
                     }));
                 true
@@ -371,7 +393,7 @@ impl<K: crate::AppKey> Session<K, crate::DeviceClock> {
         self.inputs.held = held;
     }
 
-    fn reopen(&mut self, input: &mut Held, rate: SampleRate) -> Result<()> {
+    fn reopen(&mut self, input: &mut Held<F>, rate: SampleRate) -> Result<()> {
         input.keep = None;
         let opened = self
             .inputs

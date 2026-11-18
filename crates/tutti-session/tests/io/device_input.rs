@@ -204,7 +204,7 @@ fn an_input_that_cannot_be_reopened_is_reported_with_its_error() {
             _ => None,
         })
         .unwrap_or_else(|| panic!("no InputReopenFailed in {events:?}"));
-    assert_eq!(failed.0.node(), input.node());
+    assert_eq!(*failed.0, input.node().erase());
     assert!(
         matches!(failed.1, Error::Device(tutti_cpal::Error::InvalidDevice(why)) if why == "unplugged"),
         "{:?}",
@@ -359,7 +359,11 @@ fn a_switch_to_the_timer_ends_every_capture_and_reports_each_once() {
             _ => None,
         })
         .collect();
-    assert_eq!(closed, [first, second], "{events:?}");
+    assert_eq!(
+        closed,
+        [first.node().erase(), second.node().erase()],
+        "{events:?}"
+    );
     let again = system.update();
     assert!(
         !again

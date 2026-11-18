@@ -79,7 +79,7 @@ fn a_per_note_bend_range_outlives_its_block() {
                 ..
             },
         ] => {
-            assert!((e.value - (0.5 + 6.0 / 240.0)).abs() < 1e-6, "{}", e.value);
+            assert_eq!(e.value, 0.5 + 6.0 / 240.0);
         }
         other => panic!("expected one tuning expression, got {other:?}"),
     });
@@ -156,8 +156,8 @@ fn vst3_and_clap_bend_one_stream_by_the_same_semitones() {
         assert_eq!(vst3_st.len(), want.len());
         assert_eq!(clap_st.len(), want.len());
         for ((v, c), w) in vst3_st.iter().zip(&clap_st).zip(want) {
-            assert!((v - w).abs() < 1e-4, "VST3 {v} st, want {w}");
-            assert!((c - w).abs() < 1e-4, "CLAP {c} st, want {w}");
+            assert!((v - w).abs() < 1e-12, "VST3 {v} st, want {w}");
+            assert!((c - w).abs() < 1e-12, "CLAP {c} st, want {w}");
         }
     }
 }

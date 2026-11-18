@@ -37,8 +37,8 @@ use tutti_plugin_types::{
     per_note_tuning, plugin_note_id, push_sysex, sysex_assembler,
 };
 use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
-use tutti_units::Normalized;
 use tutti_units::ParamId;
+use tutti_units::{Normalized, Semitones};
 
 /// The parameter edits the Controller can have queued to the Processor before
 /// the ring refuses one: one block holds as many, and the Processor reserves
@@ -724,7 +724,7 @@ impl ClapEvent {
         };
 
         let voice = match expression_type {
-            NoteExpressionType::Tuning => per_note_tuning(note, e.value)?,
+            NoteExpressionType::Tuning => per_note_tuning(note, Semitones::new(e.value))?,
             // VOLUME arrives as a CLAP gain (`0 < x <= 4`), not a unit
             // fraction: converted before the unit encoding, or a plugin's
             // unity 1.0 and its +12 dB 4.0 both saturate to MIDI full scale
@@ -3976,11 +3976,7 @@ mod tests {
                 assert_eq!(e.channel, 3);
                 assert_eq!(e.key, 60);
                 let expected = 0.5 * MPE_BEND_RANGE;
-                assert!(
-                    (e.value - expected).abs() < 0.1,
-                    "tuning {} vs {expected}",
-                    e.value
-                );
+                assert_eq!(e.value, expected);
             }
             _ => panic!("expected NoteExpression(Tuning)"),
         }
