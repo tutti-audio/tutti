@@ -15,6 +15,11 @@ mod sealed {
         /// The format's value for an integer already within its range. A float
         /// format never reaches this.
         fn from_int(x: i32) -> Self;
+        /// The format's value for a nominal-unit `f64`, and whether the rule
+        /// clipped it: the one place a float becomes this format.
+        fn from_f64_clipped(x: f64) -> (Self, bool)
+        where
+            Self: Sized;
     }
 }
 
@@ -113,9 +118,30 @@ pub trait Sample:
     #[inline]
     #[must_use]
     fn convert_to<T: Sample>(self) -> T {
+        self.convert_to_clipped().0
+    }
+
+    /// Converts to another format as [`convert_to`](Self::convert_to) does,
+    /// and says whether the value was clipped: past an integer target's `MAX`
+    /// or `MIN` before the clamp. A float target never clips, and NaN, which
+    /// reads as `0`, is not a clip.
+    ///
+    /// ```
+    /// use tutti_buffers::Sample;
+    ///
+    /// assert_eq!(1.0f32.convert_to_clipped::<i16>(), (i16::MAX, true));
+    /// assert_eq!((-1.0f32).convert_to_clipped::<i16>(), (i16::MIN, false));
+    /// assert_eq!(i16::MAX.convert_to_clipped::<i8>(), (i8::MAX, true));
+    /// ```
+    #[inline]
+    #[must_use]
+    fn convert_to_clipped<T: Sample>(self) -> (T, bool) {
         match (Self::INT_BITS, self.to_int(), T::INT_BITS) {
-            (Some(from), Some(x), Some(to)) => T::from_int(rescale(x, from, to)),
-            _ => T::from_f64(self.to_f64()),
+            (Some(from), Some(x), Some(to)) => {
+                let (v, clipped) = rescale_clipped(x, from, to);
+                (T::from_int(v), clipped)
+            }
+            _ => T::from_f64_clipped(self.to_f64()),
         }
     }
 }
@@ -132,50 +158,33 @@ const fn step(bits: u32) -> f64 {
     1.0 / scale(bits)
 }
 
-/// Whether `x`, converted to the `bits`-bit integer format, lands outside its
-/// range and is clipped to it: the rounded scaled value past `MAX` or `MIN`.
-/// NaN reads as `0` and is not a clip.
-#[inline]
-fn clips_into_int(x: f64, bits: u32) -> bool {
-    if x.is_nan() {
-        return false;
-    }
-    let s = scale(bits);
-    let v = libm::rint(x * s);
-    v > s - 1.0 || v < -s
-}
-
-/// Whether converting `x` to `T` clips it: only an integer target clips, and
-/// the source's nominal value decides (exact for an integer source).
-#[inline]
-pub(crate) fn clips<A: Sample, T: Sample>(x: A) -> bool {
-    T::INT_BITS.is_some_and(|bits| clips_into_int(x.to_f64(), bits))
-}
-
 /// Float to an `n`-bit integer: scale, round half to even, clip. NaN is `0`.
+/// The flag says the rounded value lay past `MAX` or `MIN` and was clipped;
+/// NaN is not a clip.
 #[inline]
-fn float_to_int(x: f64, bits: u32) -> i32 {
+fn float_to_int_clipped(x: f64, bits: u32) -> (i32, bool) {
     if x.is_nan() {
-        return 0;
+        return (0, false);
     }
     let s = scale(bits);
     let v = libm::rint(x * s);
-    if v >= s - 1.0 {
-        (s - 1.0) as i32
-    } else if v <= -s {
-        (-s) as i32
+    if v > s - 1.0 {
+        ((s - 1.0) as i32, true)
+    } else if v < -s {
+        ((-s) as i32, true)
     } else {
-        v as i32
+        (v as i32, false)
     }
 }
 
 /// An `n`-bit integer to `m` bits: the exact integer form of scaling by
-/// `2^(m-n)`, rounding half to even and clipping to the `m`-bit range.
+/// `2^(m-n)`, rounding half to even and clipping to the `m`-bit range. The
+/// flag says the rounded value lay outside that range and was clipped.
 #[inline]
-fn rescale(x: i32, from: u32, to: u32) -> i32 {
+fn rescale_clipped(x: i32, from: u32, to: u32) -> (i32, bool) {
     let x = i64::from(x);
     if to >= from {
-        return (x << (to - from)) as i32;
+        return ((x << (to - from)) as i32, false);
     }
     let d = from - to;
     let floor = x >> d;
@@ -184,7 +193,7 @@ fn rescale(x: i32, from: u32, to: u32) -> i32 {
     let up = rem > half || (rem == half && floor & 1 == 1);
     let q = floor + i64::from(up);
     let max = (1i64 << (to - 1)) - 1;
-    q.clamp(-max - 1, max) as i32
+    (q.clamp(-max - 1, max) as i32, q > max || q < -max - 1)
 }
 
 macro_rules! int_sample {
@@ -199,6 +208,11 @@ macro_rules! int_sample {
             fn from_int(x: i32) -> Self {
                 x as $t
             }
+            #[inline]
+            fn from_f64_clipped(x: f64) -> (Self, bool) {
+                let (v, clipped) = float_to_int_clipped(x, $bits);
+                (v as $t, clipped)
+            }
         }
         impl Sample for $t {
             const SILENCE: Self = 0;
@@ -212,7 +226,7 @@ macro_rules! int_sample {
             }
             #[inline]
             fn from_f64(x: f64) -> Self {
-                float_to_int(x, $bits) as $t
+                <Self as sealed::Sealed>::from_f64_clipped(x).0
             }
         }
     };
@@ -232,6 +246,11 @@ impl sealed::Sealed for I24 {
     fn from_int(x: i32) -> Self {
         I24::of(x)
     }
+    #[inline]
+    fn from_f64_clipped(x: f64) -> (Self, bool) {
+        let (v, clipped) = float_to_int_clipped(x, 24);
+        (I24::of(v), clipped)
+    }
 }
 
 impl Sample for I24 {
@@ -246,7 +265,7 @@ impl Sample for I24 {
     }
     #[inline]
     fn from_f64(x: f64) -> Self {
-        I24::of(float_to_int(x, 24))
+        <Self as sealed::Sealed>::from_f64_clipped(x).0
     }
 }
 
@@ -259,6 +278,10 @@ impl sealed::Sealed for f32 {
     #[inline]
     fn from_int(_: i32) -> Self {
         0.0
+    }
+    #[inline]
+    fn from_f64_clipped(x: f64) -> (Self, bool) {
+        (x as f32, false)
     }
 }
 
@@ -274,7 +297,7 @@ impl Sample for f32 {
     }
     #[inline]
     fn from_f64(x: f64) -> Self {
-        x as f32
+        <Self as sealed::Sealed>::from_f64_clipped(x).0
     }
 }
 
@@ -287,6 +310,10 @@ impl sealed::Sealed for f64 {
     #[inline]
     fn from_int(_: i32) -> Self {
         0.0
+    }
+    #[inline]
+    fn from_f64_clipped(x: f64) -> (Self, bool) {
+        (x, false)
     }
 }
 
@@ -302,7 +329,7 @@ impl Sample for f64 {
     }
     #[inline]
     fn from_f64(x: f64) -> Self {
-        x
+        <Self as sealed::Sealed>::from_f64_clipped(x).0
     }
 }
 
