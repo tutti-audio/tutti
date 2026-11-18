@@ -2449,7 +2449,7 @@ const LANE_KEYS: u64 = 1_000_000;
 const LANE_LATENCIES: [usize; 4] = [0, 16, 40, 150];
 
 /// The ranges a driven lane is clamped to.
-const LANE_RANGES: [(f32, f32); 4] = [(-8.0, 8.0), (-1.0, 1.0), (0.0, 0.5), (0.5, -0.25)];
+const LANE_RANGES: [(f64, f64); 4] = [(-8.0, 8.0), (-1.0, 1.0), (0.0, 0.5), (0.5, -0.25)];
 
 /// Adds lane nodes (once) and, for about half the entries, a source among
 /// them (or none: a source that goes, declicked) and a range, from `rng`: a

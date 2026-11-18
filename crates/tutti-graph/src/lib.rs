@@ -699,7 +699,7 @@ pub use node::{
 pub use par::Pool;
 pub use param::{
     MAX_PARAM_PORTS, ParamIn, ParamInput, ParamMod, ParamPorts, ParamPortsError, ParamRange,
-    ParamRangeReader, RangeView, control_word,
+    ParamRangeCell, ParamRangeReader, RangeView, control_word,
 };
 pub use pass::{Pass, PassError};
 pub use plan::{

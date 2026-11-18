@@ -39,7 +39,7 @@ fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
         Err(RangeError::NotANumber { .. })
     ));
     assert!(matches!(
-        m.range_raw(lp.cutoff(), 1.0, f32::NAN),
+        m.range_raw(lp.cutoff(), 1.0, f64::NAN),
         Err(RangeError::NotANumber { .. })
     ));
     let src = m.macro_(0.0);
@@ -85,4 +85,21 @@ fn a_typed_range_declares_the_target_an_untyped_ref_names() {
         m.range(mix, Mix(1.0)..Mix(0.0)),
         Err(RangeError::MinAboveMax { .. })
     ));
+}
+
+/// **A typed range keeps its bounds at the unit's width.** `Hz` is `f64`; a
+/// bound `f32` rounds to another figure is declared and read back as given.
+#[test]
+fn a_typed_range_keeps_bounds_f32_cannot_hold() {
+    let (lo, hi) = (100.0 + 1.0 / 1_048_576.0, 4_000.0 + 1.0 / 1_048_576.0);
+    assert_ne!(f64::from(lo as f32), lo, "f32 loses the lower bound");
+    assert_ne!(f64::from(hi as f32), hi, "f32 loses the upper bound");
+    let mut s = session();
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
+        SvfType::LowPass,
+        Hz(1_000.0),
+        Q(0.7),
+    ));
+    s.mods_mut().range(lp.cutoff(), Hz(lo)..Hz(hi)).unwrap();
+    assert_eq!(s.mods().range_of(lp.cutoff()), Some(lo..=hi));
 }

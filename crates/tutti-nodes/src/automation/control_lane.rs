@@ -8,13 +8,13 @@ use tutti_buffers::Float;
 use tutti_curve::Piece;
 use tutti_graph::{
     Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Law, Node,
-    NodeParts, Offset, ParamRange, ParamRangeReader, ParamSegment, PlayReading, Prepare, Shape,
-    Status, TransportPosition, control_word,
+    NodeParts, Offset, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment, PlayReading,
+    Prepare, Shape, Status, TransportPosition, control_word,
 };
 use tutti_modulation::{
     CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
 };
-use tutti_rt::{PackedAtomic, Publisher, Reader};
+use tutti_rt::{Publisher, Reader};
 use tutti_types::{AtomicF64, ParamCell};
 use tutti_units::{
     Beat, Frame, Normalized, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
@@ -26,22 +26,52 @@ use crate::SOURCE_EVENT_CAPACITY;
 /// id) bound in, so the lane itself is not generic.
 type MakeSegment = dyn Fn(f64, f64, Law) -> ParamSegment + Send + Sync;
 
-/// Where a lane reads its target's range.
+/// Where a lane's target range lives, for the control side: what its
+/// controls read and a fork copies.
 enum RangeSource {
     /// A native port's own cell (`Editor::param_range_cell`): the port
     /// clamps, the lane reads the span.
-    Port(ParamRangeReader),
+    Port(ParamRangeCell),
     /// The lane's own cell (a plugin parameter): the span, and the clamp.
-    Own(PackedAtomic<ParamRange>),
+    Own(Publisher<ParamRange>),
     /// None: an unranged target takes no modulation.
     None,
 }
 
 impl RangeSource {
-    fn load(&self) -> ParamRange {
+    /// The range now. Control side: it locks.
+    fn current(&self) -> ParamRange {
         match self {
-            Self::Port(r) => r.load(),
-            Self::Own(c) => c.load(),
+            Self::Port(c) => c.current(),
+            Self::Own(p) => *p.current(),
+            Self::None => ParamRange::UNBOUNDED,
+        }
+    }
+
+    /// The reader the lane's node lends once per block, registered here.
+    /// Control side: allocates.
+    fn reader(&self) -> RangeReader {
+        match self {
+            Self::Port(c) => RangeReader::Cell(c.reader()),
+            Self::Own(p) => RangeReader::Own(p.reader()),
+            Self::None => RangeReader::None,
+        }
+    }
+}
+
+/// A lane node's reading of its [`RangeSource`]: lent once per block.
+enum RangeReader {
+    Cell(ParamRangeReader),
+    Own(Reader<ParamRange>),
+    None,
+}
+
+impl RangeReader {
+    #[inline]
+    fn load(&mut self) -> ParamRange {
+        match self {
+            Self::Cell(r) => r.load(),
+            Self::Own(r) => *r.lend(),
             Self::None => ParamRange::UNBOUNDED,
         }
     }
@@ -172,10 +202,10 @@ impl LaneControls {
     /// Sets a plugin lane's range: the span its offsets scale by and the
     /// clamp, from the next block. `false` for a native lane, whose range is
     /// its port's (`Editor::set_param_range`), and for an unranged one.
-    pub(crate) fn set_range(&self, min: f32, max: f32) -> bool {
+    pub(crate) fn set_range(&self, min: f64, max: f64) -> bool {
         match &self.0.range {
             RangeSource::Own(c) => {
-                c.store(ParamRange::new(min, max));
+                c.publish(ParamRange::new(min, max));
                 true
             }
             _ => false,
@@ -183,8 +213,8 @@ impl LaneControls {
     }
 
     /// The range the lane reads, `(min, max)`; unbounded when it has none.
-    pub fn range(&self) -> (f32, f32) {
-        let r = self.0.range.load();
+    pub fn range(&self) -> (f64, f64) {
+        let r = self.0.range.current();
         (r.min, r.max)
     }
 
@@ -245,7 +275,7 @@ struct Seen {
     /// before its first block, so that block counts as a change.
     seq: Option<u64>,
     knob: Option<u64>,
-    range: (u32, u32),
+    range: (u64, u64),
     /// The frame after the last block, the transport and play clock at its
     /// last frame: how a seek between blocks is told from a roll.
     end: Option<(Frame, TransportPosition, PlayReading)>,
@@ -301,6 +331,9 @@ pub struct ControlLaneNode {
     /// A reader of `shared.program`, registered when the node is built (a
     /// fork builds a node over a new cell, and registers there).
     program: Reader<ControlProgram>,
+    /// A reader of the target's range, registered with the node and lent
+    /// once per block.
+    range: RangeReader,
     make: Arc<MakeSegment>,
     /// A native port (exact mode allowed; the port clamps).
     native: bool,
@@ -356,6 +389,7 @@ impl ControlLaneNode {
         };
         Self {
             program: shared.program.reader(),
+            range: shared.range.reader(),
             shared: Arc::new(shared),
             make,
             native,
@@ -380,7 +414,7 @@ impl ControlLaneNode {
         param: impl Into<UnitAddr>,
         program: ControlProgram,
         knob: Option<ParamCell>,
-        range: Option<ParamRangeReader>,
+        range: Option<ParamRangeCell>,
     ) -> Self {
         let param: UnitAddr = param.into();
         Self::build(
@@ -409,12 +443,12 @@ impl ControlLaneNode {
         id: ParamId,
         program: ControlProgram,
         knob: Option<f64>,
-        range: (f32, f32),
+        range: (f64, f64),
     ) -> Self {
         Self::build(
             Arc::new(program),
             knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
-            RangeSource::Own(PackedAtomic::new(ParamRange::new(range.0, range.1))),
+            RangeSource::Own(Publisher::new(ParamRange::new(range.0, range.1))),
             None,
             Arc::new(move |from, to, shape| {
                 ParamSegment::foreign(id, control_word(from), control_word(to), Samples(0), shape)
@@ -446,7 +480,7 @@ impl ControlLaneNode {
         let knob = s.knob.as_ref().map(ParamCell::detached);
         let range = match &s.range {
             RangeSource::None => RangeSource::None,
-            r => RangeSource::Own(PackedAtomic::new(r.load())),
+            r => RangeSource::Own(Publisher::new(r.current())),
         };
         Self::build(program, knob, range, s.unit, Arc::clone(make), native)
     }
@@ -525,7 +559,7 @@ struct Block<'b> {
     cx: &'b Cx<'b>,
     program: &'b ControlProgram,
     knob: Option<f64>,
-    range: (f32, f32),
+    range: (f64, f64),
     span: f64,
     unit: Option<UnitParam>,
     native: bool,
@@ -769,7 +803,6 @@ impl Block<'_> {
             let cross = [lo, hi]
                 .into_iter()
                 .filter(|x| x.is_finite())
-                .map(f64::from)
                 .filter(|&x| (a - x) * (b - x) < 0.0)
                 .map(|x| ((x - a) / (b - a), x))
                 .min_by(|p, q| p.0.total_cmp(&q.0));
@@ -806,8 +839,7 @@ impl Block<'_> {
         if self.native || lo.is_nan() || hi.is_nan() || lo > hi {
             v
         } else {
-            // B2: the range bounds are `f32` words.
-            v.clamp(f64::from(lo), f64::from(hi))
+            v.clamp(lo, hi)
         }
     }
 
@@ -971,7 +1003,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             .as_ref()
             .map(|k| k.load(Ordering::Acquire))
             .filter(|k| k.is_finite());
-        let live = s.range.load();
+        let live = self.range.load();
         let range = (live.min, live.max);
         let span = live.view(s.unit).span();
         let span = if span.is_finite() && span >= 0.0 {

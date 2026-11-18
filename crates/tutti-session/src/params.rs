@@ -33,17 +33,17 @@ pub enum RangeError {
     #[error("a range needs numbers, not NaN: {min}..{max}")]
     NotANumber {
         /// The lower bound given.
-        min: f32,
+        min: f64,
         /// The upper bound given.
-        max: f32,
+        max: f64,
     },
     /// The lower bound is above the upper: `min > max`.
     #[error("the range is backwards: min {min} is above max {max}")]
     MinAboveMax {
         /// The lower bound given.
-        min: f32,
+        min: f64,
         /// The upper bound given.
-        max: f32,
+        max: f64,
     },
 }
 
