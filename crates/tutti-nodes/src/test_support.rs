@@ -1,6 +1,6 @@
 //! Rendering helpers shared by the width-generic nodes' unit tests.
 
-use tutti_buffers::{Planes, PlanesMut};
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_graph::Node;
 use tutti_graph::contract::drive;
 use tutti_units::SampleRate;
@@ -175,13 +175,13 @@ pub(crate) fn mean(x: &[f32]) -> f64 {
 }
 
 /// Renders `input` (one `Vec` per channel) through `k` in one call.
-pub(crate) fn render_kernel<K: Kernel>(k: &mut K, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
-    let ins: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
-    let mut out = vec![vec![0.0f32; input[0].len()]; input.len()];
-    let mut outs: Vec<&mut [f32]> = out.iter_mut().map(Vec::as_mut_slice).collect();
+pub(crate) fn render_kernel<K: Kernel, S: Float>(k: &mut K, input: &[Vec<S>]) -> Vec<Vec<S>> {
+    let ins: Vec<&[S]> = input.iter().map(Vec::as_slice).collect();
+    let mut out = vec![vec![S::ZERO; input[0].len()]; input.len()];
+    let mut outs: Vec<&mut [S]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     k.render(
         Planes::new(&ins).unwrap(),
-        ControlLanes::<f32>::NONE,
+        ControlLanes::<S>::NONE,
         PlanesMut::new(&mut outs).unwrap(),
     );
     out
@@ -191,11 +191,11 @@ pub(crate) fn render_kernel<K: Kernel>(k: &mut K, input: &[Vec<f32>]) -> Vec<Vec
 /// the frames of `input`: a retarget at every grid point and at every frame of `moves` (a
 /// control that moved), each at the controls in force there (`moves` is `(frame, controls)`
 /// in order, the first at frame 0), the frames between rendered together.
-pub(crate) fn drive_kernel<K: Kernel>(
+pub(crate) fn drive_kernel<K: Kernel, S: Float>(
     k: &mut K,
     moves: &[(usize, <K::Set as ControlSet>::Controls)],
-    input: &[Vec<f32>],
-) -> Vec<Vec<f32>> {
+    input: &[Vec<S>],
+) -> Vec<Vec<S>> {
     let frames = input[0].len();
     let mut stops: Vec<usize> = (0..frames).step_by(K::GRID).collect();
     stops.extend(moves.iter().map(|m| m.0).filter(|&f| f < frames));
@@ -206,7 +206,7 @@ pub(crate) fn drive_kernel<K: Kernel>(
     for w in stops.windows(2) {
         let at = moves.iter().rev().find(|m| m.0 <= w[0]).unwrap().1;
         k.retarget(&at);
-        let piece: Vec<Vec<f32>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
+        let piece: Vec<Vec<S>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
         for (o, y) in out.iter_mut().zip(render_kernel(k, &piece)) {
             o.extend(y);
         }

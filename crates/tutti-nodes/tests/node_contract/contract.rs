@@ -84,7 +84,7 @@ fn delay_line_row() -> Row {
     Row::new(
         "DelayNode (zero delay)",
         || {
-            Box::new(DelayNode::mono(
+            Box::new(DelayNode::<f32>::mono(
                 MaxDelay::of(Seconds::new(1.0_f64)),
                 DelayControls {
                     time: Seconds::new(0.0_f64),

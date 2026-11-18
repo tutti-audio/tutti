@@ -164,7 +164,7 @@ impl<F: Float> DelayLine<F> {
 /// [`SampleSpan`](tutti_units::SampleSpan) of frames and a
 /// [`Feedback`](tutti_units::Feedback): this is the per-frame read, called once per sample
 /// per channel, and its caller lowers its span to the position once per frame after the
-/// clamp that makes it a span (a delay glide's value is already an `f32` of frames).
+/// clamp that makes it a span (a delay glide's value is already an `F` of frames).
 #[inline(always)]
 pub fn delay_step<F: Float>(
     line: &mut DelayLine<F>,
