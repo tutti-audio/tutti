@@ -204,8 +204,9 @@ impl<F: Float> OutputBlock<F> {
     /// [`render_with`](Self::render_with), first recording the delay the
     /// callback's timestamp reports between now and when this block plays
     /// (`None`: the backend gave none, which clears the reading). A stream
-    /// driver calls this with what its backend stamped; wait-free like
-    /// `render_with`.
+    /// driver whose buffer is not a [`Sample`] format (offset-binary unsigned)
+    /// calls this with what its backend stamped; wait-free like `render_with`.
+    /// A [`Sample`] format goes through [`render_delayed`](Self::render_delayed).
     #[inline]
     pub fn render_delayed_with<T: Copy>(
         &mut self,
@@ -215,6 +216,16 @@ impl<F: Float> OutputBlock<F> {
     ) {
         self.latency.record(delay);
         self.render_with(data, convert);
+    }
+
+    /// [`render`](Self::render), first recording the delay the callback's
+    /// timestamp reports between now and when this block plays (`None`: the
+    /// backend gave none, which clears the reading). A stream driver calls this
+    /// with what its backend stamped; wait-free like `render`.
+    #[inline]
+    pub fn render_delayed<S: Sample>(&mut self, data: &mut [S], delay: Option<Duration>) {
+        self.latency.record(delay);
+        self.render(data);
     }
 
     /// [`render_with`](Self::render_with) into a device buffer of a
@@ -230,7 +241,10 @@ impl<F: Float> OutputBlock<F> {
     /// Render one block and write it to `data`, each sample made from the
     /// rendered sample by `convert` (the driver's sample format).
     ///
-    /// This is the entire output callback. A device driver calls it with
+    /// This is the entire output callback for a buffer that is not a
+    /// [`Sample`] format (the offset-binary unsigned ones, which no `Sample`
+    /// is); a [`Sample`] format goes through [`render`](Self::render), the one
+    /// conversion rule. A device driver calls it with
     /// whatever buffer the backend handed over; a manual driver calls it with a
     /// buffer of the caller's choosing. `convert` is the driver's one
     /// conversion from the graph's format to its device's type; it runs
@@ -345,11 +359,15 @@ impl<F: Float> OutputBlock<F> {
 #[inline]
 fn write_converted<F: Float, S: Sample>(mix: Interleaved<'_, F>, data: &mut [S]) {
     let (head, tail) = data.split_at_mut(mix.samples().len());
-    let converted = InterleavedMut::new(head, mix.layout()).and_then(|dst| convert(mix, dst));
+    let converted = InterleavedMut::new(&mut *head, mix.layout()).and_then(|dst| convert(mix, dst));
     debug_assert!(
         converted.is_ok(),
         "the head is whole frames of the mix's layout: {converted:?}"
     );
+    if converted.is_err() {
+        // Unreachable by construction; silent, never stale audio.
+        head.fill(S::SILENCE);
+    }
     tail.fill(S::SILENCE);
 }
 

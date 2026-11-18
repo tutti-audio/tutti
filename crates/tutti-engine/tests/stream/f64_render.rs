@@ -3,7 +3,7 @@
 
 use crate::fixtures::{SAMPLE_RATE, spec};
 use std::sync::Arc;
-use tutti_buffers::{Float, SampleFormat};
+use tutti_buffers::{Float, Sample, SampleFormat};
 use tutti_engine::{AudioCallbackState, Engine, ManualStreamDriver, OutputBlock, OutputStream};
 use tutti_graph::{
     Cx, Editor, ForkByClone, Io, Node, NodeKey, OutPort, Prepare, Shape, Source, Status,
@@ -108,13 +108,13 @@ fn an_f64_block_converts_to_the_device_format_by_the_sample_rule() {
 }
 
 /// **A driver's own conversion maps each rendered `f64` and silences what the
-/// graph did not render.** An offset-binary `u16` device: `0.5` is
-/// `32768 + 0.5 * 2^15`, and the samples of a callback that is not whole
+/// graph did not render.** An offset-binary `u16` device, the `Sample` rule on
+/// `i16` with the sign bit flipped: `0.5` is `32768 + 2^14`, and the samples of a callback that is not whole
 /// frames past the last frame are the format's silence (mid-scale).
 #[test]
 fn a_driver_conversion_maps_the_rendered_samples_and_silences_a_partial_frame() {
     let mut block = OutputBlock::new(dc_state(0.5, 2), ChannelLayout::STEREO);
-    let offset_binary = |x: f64| (32768.0 + x * 32768.0) as u16;
+    let offset_binary = |x: f64| (x.convert_to::<i16>() as u16) ^ 0x8000;
     let mut out = [0u16; 7];
     block.render_with(&mut out, offset_binary);
     assert_eq!(out[..6], [49152; 6], "three frames of 0.5");
