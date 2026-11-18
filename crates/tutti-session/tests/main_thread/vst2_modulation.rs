@@ -60,7 +60,7 @@ fn update(s: &mut DetachedSession, now: Instant) -> Vec<SessionEvent> {
 }
 
 /// Updates until `target` has a lane, and its knob.
-fn knob_of(s: &mut DetachedSession, target: ParamRef) -> f32 {
+fn knob_of(s: &mut DetachedSession, target: ParamRef) -> f64 {
     let deadline = Instant::now() + Duration::from_secs(10);
     let now = Instant::now();
     loop {

@@ -22,7 +22,7 @@ use tutti_types::MaxBlock;
 use tutti_types::{BusTopology, ChannelLayout};
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
-    Ballistics, BeatsPerCycle, Feedback, Hz, PhaseIncrement, SampleRate, Seconds, UnitParam,
+    Ballistics, BeatsPerCycle, Feedback, Hz, PhaseIncrement, Real, SampleRate, Seconds, UnitParam,
 };
 
 /// A node through `BlockRig`: its inputs an alternating signal of
@@ -95,7 +95,7 @@ fn beat_synced_lfo_process_is_allocation_free() {
 
 /// A delay at `time` seconds and `feedback`, `cross` cross-fed, `width` wide, holding up to
 /// two seconds.
-fn delay(width: u16, time: f64, feedback: f32, cross: f32) -> DelayNode<f32> {
+fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
     DelayNode::<f32>::new(
         BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus"),
         MaxDelay::of(Seconds::new(2.0)),
@@ -186,9 +186,9 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     let set = node.param_set();
     gate(node, 0.5, 2_000, |i| {
         let t = (i % 50) as f32 / 50.0;
-        assert!(set.set(UnitParam::DelayTime, 0.005 + 0.03 * t));
-        assert!(set.set(UnitParam::Feedback, 0.2 + 0.5 * t));
-        assert!(set.set(UnitParam::CrossFeedback, 0.4 * (1.0 - t)));
+        assert!(set.set(UnitParam::DelayTime, f64::from(0.005 + 0.03 * t)));
+        assert!(set.set(UnitParam::Feedback, f64::from(0.2 + 0.5 * t)));
+        assert!(set.set(UnitParam::CrossFeedback, f64::from(0.4 * (1.0 - t))));
     });
     // A 6-wide chorus whose rate, depth and feedback all move every block: the depth and
     // feedback glides are in flight on every one, the rate lands whole at the grid.
@@ -196,9 +196,9 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     let c = chorus.param_set();
     gate(chorus, 0.5, 2_000, |i| {
         let t = (i % 50) as f32 / 50.0;
-        assert!(c.set(UnitParam::Depth, 0.002 + 0.01 * t));
-        assert!(c.set(UnitParam::Rate, 0.5 + 4.0 * t));
-        assert!(c.set(UnitParam::Feedback, 0.6 * t));
+        assert!(c.set(UnitParam::Depth, f64::from(0.002 + 0.01 * t)));
+        assert!(c.set(UnitParam::Rate, f64::from(0.5 + 4.0 * t)));
+        assert!(c.set(UnitParam::Feedback, f64::from(0.6 * t)));
     });
     // A 6-wide, 8-stage, staggered phaser whose rate, depth and feedback all move every
     // block, the glides in flight on every one.
@@ -213,9 +213,9 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     let p = phaser.param_set();
     gate(phaser, 0.5, 2_000, |i| {
         let t = (i % 50) as f32 / 50.0;
-        assert!(p.set(UnitParam::Rate, 0.5 + 4.0 * t));
-        assert!(p.set(UnitParam::Depth, t));
-        assert!(p.set(UnitParam::Feedback, 0.9 * t));
+        assert!(p.set(UnitParam::Rate, f64::from(0.5 + 4.0 * t)));
+        assert!(p.set(UnitParam::Depth, f64::from(t)));
+        assert!(p.set(UnitParam::Feedback, f64::from(0.9 * t)));
     });
 }
 
@@ -381,7 +381,7 @@ impl tutti_graph::Node for ParamProbe {
         tutti_graph::Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         (port == 0).then_some(0.0)
     }
 }
@@ -631,7 +631,7 @@ impl tutti_graph::Node for Probe8 {
         tutti_graph::Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         (port < PROBE8.len()).then_some(0.0)
     }
 }
@@ -647,7 +647,7 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
     };
     use tutti_nodes::automation::{Breakpoint, Exponent, Trajectory};
     use tutti_units::{Beat, BeatsPerCycle, Depth, Hz, Phase, PhaseIncrement};
-    let depth = 0.05 + 0.01 * ((k as u32 + generation) % 7) as f32;
+    let depth = 0.05 + 0.01 * f64::from((k as u32 + generation) % 7);
     let amount = Amount {
         depth: Depth::of(depth),
         polarity: Polarity::Bipolar,
@@ -804,7 +804,7 @@ fn lane_moves(
         }
     }
     for (k, c) in controls.iter().enumerate().skip(block % 7).step_by(7) {
-        c.set_knob(300.0 + ((k + block) % 13) as f32 * 20.0);
+        c.set_knob(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
     }
     if block % 15 == 14 {
         for k in (block % 9..200).step_by(9) {
@@ -1338,7 +1338,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         }
     }
     let at = |p| TargetKey::param(1, ParamAddr::Unit(p));
-    let route = |s: u64, p, depth: f32| RouteDecl {
+    let route = |s: u64, p, depth: f64| RouteDecl {
         source: SourceKey(s),
         to: RouteTarget::Param(at(p)),
         depth: Depth::of(depth),
@@ -1529,14 +1529,14 @@ const INPUT: f32 = 0.5;
 /// loop's worst-case gain is `1.25 g`, which exceeds 1: the 1.25 is a steady-state guard
 /// the sweep must stay under, not a proof of it.
 fn loop_bound() -> f32 {
-    INPUT * 1.25 / (1.0 - Feedback::MAX_STABLE.get())
+    INPUT * 1.25 / (1.0 - f32::from_unit(Feedback::MAX_STABLE))
 }
 
 /// A guard on the phaser's output, `INPUT / (1 - g)`: the peak gain of the frozen chain
 /// (its `H-infinity`, at DC). Under a swept coefficient the chain is time-varying and this
 /// is a guard the sweep must stay under, not a proof of it.
 fn phaser_bound() -> f32 {
-    INPUT / (1.0 - Feedback::MAX_STABLE.get())
+    INPUT / (1.0 - f32::from_unit(Feedback::MAX_STABLE))
 }
 
 /// A lane of 64 frames cycling through `values`.

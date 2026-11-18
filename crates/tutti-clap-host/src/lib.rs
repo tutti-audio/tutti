@@ -23,9 +23,9 @@
 //!
 //! The other types you will meet first:
 //!
-//! - `PluginAudio` (`tutti-plugin-types`): the per-block audio, `F32` or `F64`, a
-//!   [`process`][`ClapProcessor::process`] call reads and writes; its width is the
-//!   processor's. Each width holds an `InputOutput` (`tutti-buffers`).
+//! - `InputOutput<S>` (`tutti-buffers`): the per-block audio a
+//!   [`process`][`ClapProcessor::process`] call reads and writes; its width `S` is
+//!   the processor's.
 //! - [`ClapProcessContext`]: per-block MIDI, parameter changes and transport.
 //! - [`PluginInfo`]: the descriptor (id, name, vendor, features) read at load.
 //! - [`ClapError`]: the error type, with [`LoadStage`] for load failures.
@@ -59,7 +59,7 @@
 //! use tutti_ump::{MidiChannel, NoteVelocity};
 //! use tutti_buffers::{InputOutput, Planes, PlanesMut};
 //! use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions, TransportInfo};
-//! use tutti_plugin_types::{Loaded, MaxBlock, PluginAudio, Prepare, SampleRate, Samples};
+//! use tutti_plugin_types::{Loaded, MaxBlock, Prepare, SampleRate, Samples};
 //!
 //! // `ClapLoaded` is the GUI / parameter / state stage. The rate and the block
 //! // length are not load parameters: they are the activation's.
@@ -78,7 +78,7 @@
 //! let inputs: [&[f32]; 2] = [&silence, &silence];
 //! let (mut left, mut right) = (vec![0.0f32; 512], vec![0.0f32; 512]);
 //! let mut outputs: [&mut [f32]; 2] = [&mut left, &mut right];
-//! let buffer = InputOutput::new(
+//! let mut buffer = InputOutput::new(
 //!     Samples(512),
 //!     Planes::new(&inputs).expect("two equal planes"),
 //!     PlanesMut::new(&mut outputs).expect("two equal planes"),
@@ -87,7 +87,7 @@
 //!
 //! let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).with_tempo(tutti_units::Bpm::of(120.0)).with_playing(true);
 //! let midi = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 16384))];
-//! processor.process(&mut PluginAudio::F32(buffer), &ClapProcessContext {
+//! processor.process(&mut buffer, &ClapProcessContext {
 //!     midi: &midi,
 //!     transport: Some(&transport),
 //!     ..Default::default()

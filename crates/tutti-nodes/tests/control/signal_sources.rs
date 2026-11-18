@@ -267,7 +267,7 @@ impl Node for Probe {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         (port == 0).then_some(0.0)
     }
 }
@@ -339,7 +339,7 @@ fn lane_to_probe(
     ed: &mut Editor,
     from: u64,
     source: u32,
-    depth: f32,
+    depth: f64,
     knob: f32,
     lane: u64,
     probe: u64,

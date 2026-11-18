@@ -3,7 +3,7 @@
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, Params};
-use tutti_session::{Offline, Root, Session, SessionBuilder, Workers};
+use tutti_session::{Offline, Root, Session, Workers};
 use tutti_types::{ChannelLayout, MaxBlock, Param};
 use tutti_units::{Amplitude, Samples};
 
@@ -14,7 +14,8 @@ use f64_nodes::{Dc, FINE, Gain};
 const BLOCK: usize = 64;
 
 fn session(workers: Workers) -> Session<&'static str, Offline<f64>> {
-    SessionBuilder::<Offline<f64>>::default()
+    Session::builder()
+        .float::<f64>()
         .outputs(ChannelLayout::MONO)
         .outputs_floor(ChannelLayout::MONO)
         .max_block(MaxBlock::of(Samples(BLOCK)))

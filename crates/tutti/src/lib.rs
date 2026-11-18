@@ -293,12 +293,13 @@ pub mod nodes {
 /// `Sink`, `Pull`), channel folds and the range errors.
 pub mod types {
     pub use tutti_buffers::{
-        BlockSide, Frames, FramesMut, InputOutput, Mono, MonoMut, PlaneIter, PlaneIterMut, Planes,
-        PlanesMut,
+        BlockMut, BlockSide, ByWidth, Frames, FramesMut, InputOutput, Mono, MonoMut, PlaneIter,
+        PlaneIterMut, Planes, PlanesMut,
     };
     pub use tutti_buffers::{
         BufferError, FiniteSource, Float, Fold, FoldEnd, FoldError, FoldLevel, FoldLevels,
-        FoldSpec, Pull, Sample, SampleFormat, Sink, SinkFailed, Source, StereoPlanes, Stop,
+        FoldSpec, OverFloat, Pull, Sample, SampleFormat, Sink, SinkFailed, Source, StereoPlanes,
+        Stop,
     };
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_music::{

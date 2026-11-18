@@ -52,9 +52,8 @@ pub enum SetRefusal {
     /// A float target was given a NaN or an infinity.
     #[error("the value is not a finite number")]
     NotFinite,
-    /// A finite value the target's cell cannot hold: a `Seconds` figure past
-    /// what an `f32` cell stores.
-    #[error("the value does not fit the param's cell")]
+    /// A finite value outside the range the target takes.
+    #[error("the value is outside the target's range")]
     OutOfRange,
     /// The session follows a live tempo, which owns the tempo map: an app's
     /// write would be overwritten at the next message.

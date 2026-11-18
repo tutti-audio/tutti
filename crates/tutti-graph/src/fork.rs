@@ -182,7 +182,7 @@ impl<F: Float> Node<F> for PinnedUnit<F> {
     fn poll_parked(&mut self) {
         self.get_mut().poll_parked();
     }
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         self.get().param_base(port)
     }
 }

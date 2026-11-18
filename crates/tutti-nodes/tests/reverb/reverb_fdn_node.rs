@@ -336,7 +336,7 @@ fn a_non_finite_write_is_ignored() {
     for (i, chunk) in noise(4, 8_192).chunks(BLOCK).enumerate() {
         if i == 3 {
             for addr in set.params().collect::<Vec<_>>() {
-                set.set(addr, f32::NAN);
+                set.set(addr, f64::NAN);
             }
         }
         assert_eq!(

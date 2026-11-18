@@ -7,12 +7,13 @@
 
 use crate::probe::probe_path;
 use std::sync::{Mutex, MutexGuard};
+use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
 use tutti_rt::LockExt;
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_plugin_types::{
-    Control, Controller, Loaded, MaxBlock, PluginAudio, PluginError, PluginIo, PluginTail, Prepare,
+    Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare,
     ProcessContext, ProcessOutput, Processor, RenderMode, Request, RescanScope, SampleFormat,
     SampleRate, Samples,
 };
@@ -118,7 +119,7 @@ fn render(
             let [a, b, c] = &mut o;
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: PluginAudio::new(
+                buffer: InputOutput::from_slices(
                     tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
@@ -137,7 +138,7 @@ fn render(
             let [a, b, c] = &mut o;
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
-                buffer: PluginAudio::new(
+                buffer: InputOutput::from_slices(
                     tutti_plugin_types::Samples(inputs[0].len()),
                     &inputs,
                     &mut outputs,
@@ -418,7 +419,7 @@ impl Block {
         let mut channels = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
         let ctx = ProcessContext::new();
         let mut io = PluginIo {
-            buffer: PluginAudio::new(
+            buffer: InputOutput::from_slices(
                 tutti_plugin_types::Samples(inputs[0].len()),
                 &inputs,
                 &mut channels,

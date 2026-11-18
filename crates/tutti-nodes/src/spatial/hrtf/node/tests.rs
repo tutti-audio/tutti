@@ -291,7 +291,7 @@ fn pdc_compensates_the_other_path_by_the_binaural_latency() {
 #[test]
 fn dry_and_wet_leave_together_at_every_blend() {
     use tutti_dsp::{HRTF_LATENCY as LATENCY, HRTF_STEP as STEP};
-    for blend in [0.0_f32, 0.5, 1.0] {
+    for blend in [0.0_f64, 0.5, 1.0] {
         let mut node = make_node();
         aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
         node.blend.store(Mix(blend));
@@ -316,7 +316,7 @@ fn a_nan_blend_holds_the_last_one() {
     aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
     node.blend.store(Mix(0.5));
     let (l0, _) = impulse_response(&mut node, 0, 4 * tutti_dsp::HRTF_STEP);
-    node.blend.store(Mix(f32::NAN));
+    node.blend.store(Mix(f64::NAN));
     let (l, r) = impulse_response(&mut node, 0, 4 * tutti_dsp::HRTF_STEP);
     assert!(
         l.iter().chain(&r).all(|s| s.is_finite()),
@@ -509,7 +509,7 @@ fn a_lane_drives_each_param_as_its_cell_would() {
         let at_default = settle(&mut default, None);
 
         let mut cell = make_node();
-        assert!(cell.param_set().set(param, value));
+        assert!(cell.param_set().set(param, f64::from(value)));
         Node::reset(&mut cell);
         let at_cell = settle(&mut cell, None);
         assert!(

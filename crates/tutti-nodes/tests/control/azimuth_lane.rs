@@ -46,7 +46,7 @@ impl Node for Probe {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, _: usize) -> Option<f32> {
+    fn param_base(&self, _: usize) -> Option<f64> {
         Some(0.0)
     }
 }
@@ -136,7 +136,7 @@ fn roll(
 }
 
 /// A constant layer of `depth` of the range's span, positive.
-fn constant(depth: f32) -> Layer {
+fn constant(depth: f64) -> Layer {
     Layer {
         id: LayerId(1),
         clock: Clock::Seconds {

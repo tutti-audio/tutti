@@ -1,7 +1,8 @@
 //! `Served<F>` against each format's reference plugin.
 
 use super::*;
-use tutti_plugin_types::PluginFormat;
+use tutti_buffers::Float;
+use tutti_plugin_types::{PluginFormat, PluginIo, ProcessContext, Processor};
 
 #[cfg(served_au)]
 mod au;
@@ -45,20 +46,26 @@ impl<F: ServerSide> Render for Served<F> {
         self.wiring.features
     }
 
-    fn render<'a>(
-        &mut self,
-        buffer: PluginAudio<'a>,
-        ctx: &'a ProcessContext<'a>,
-        out: &'a mut ProcessOutput,
-    ) -> PluginResult<()> {
+    fn render_f32(&mut self, io: &mut PluginIo<'_, f32>) -> PluginResult<()> {
+        self.render_here(io)
+    }
+
+    fn render_f64(&mut self, io: &mut PluginIo<'_, f64>) -> PluginResult<()> {
+        self.render_here(io)
+    }
+}
+
+impl<F: ServerSide> Served<F> {
+    /// One block at either width, in place: silence when the plugin is not
+    /// running.
+    fn render_here<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         // A rate change the plugin refused left it deactivated: silence.
         let Some(processor) = self.lifecycle.processor() else {
-            out.clear();
-            let mut buffer = buffer;
-            buffer.clear_outputs();
+            io.out.clear();
+            io.buffer.output().silence();
             return Ok(());
         };
-        buffer.process(processor, ctx, out)
+        processor.process(io)
     }
 }
 

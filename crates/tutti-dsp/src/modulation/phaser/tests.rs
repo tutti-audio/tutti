@@ -1,6 +1,6 @@
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::ChannelLayout;
-use tutti_units::{Feedback, Hz, SampleRate};
+use tutti_units::{Feedback, Hz, Real, SampleRate};
 
 use super::*;
 use crate::{Complex64, allpass_coeff};
@@ -90,11 +90,11 @@ fn dft(h: &[f32], hz: f64, sr: f64) -> Complex64 {
 
 /// The impulse response of a held chain of `stages` at coefficient `c` and feedback `g`,
 /// `len` frames long.
-fn held_response(stages: usize, c: f32, g: f32, len: usize) -> Vec<f32> {
+fn held_response(stages: usize, c: f32, g: Feedback, len: usize) -> Vec<f32> {
     run(
         stages,
         &mut [Glide::landed(c)],
-        &mut Glide::landed(g),
+        &mut Glide::landed(f32::from_unit(g)),
         &[impulse(len, 0)],
         64,
     )
@@ -111,7 +111,12 @@ fn a_held_chain_is_flat_with_the_nth_power_of_a_stage_at_no_feedback() {
     let sr = RATE.get();
     for stages in [2usize, 3, 4, 7, 12] {
         let c = textbook_c(1_000.0, sr);
-        let h = held_response(stages, allpass_coeff(Hz(1_000.0), RATE), 0.0, 8_192);
+        let h = held_response(
+            stages,
+            allpass_coeff(Hz(1_000.0), RATE),
+            Feedback::NONE,
+            8_192,
+        );
         for hz in [30.0f64, 250.0, 1_000.0, 3_000.0, 11_000.0, 23_000.0] {
             let got = dft(&h, hz, sr);
             let want = textbook(stages, c, 0.0, hz, sr);
@@ -135,7 +140,7 @@ fn a_held_chain_is_flat_with_the_nth_power_of_a_stage_at_no_feedback() {
 fn two_stages_invert_at_their_centre() {
     let sr = RATE.get();
     let c = allpass_coeff(Hz(1_000.0), RATE);
-    let h = held_response(2, c, 0.0, 8_192);
+    let h = held_response(2, c, Feedback::NONE, 8_192);
     let g = dft(&h, 1_000.0, sr);
     assert!((g + 1.0).norm() < 1e-3, "H(f0) = {g}");
     let x: Vec<f32> = (0..6_000)
@@ -194,7 +199,12 @@ fn a_half_mix_of_the_chain_has_ceil_n_over_two_notches_where_the_phase_is_odd_pi
             let last = *notches.last().unwrap();
             assert!((last - sr / 2.0).abs() < 1e-3, "{stages}: Nyquist, {last}");
         }
-        let h = held_response(stages, allpass_coeff(Hz(700.0), RATE), 0.0, 8_192);
+        let h = held_response(
+            stages,
+            allpass_coeff(Hz(700.0), RATE),
+            Feedback::NONE,
+            8_192,
+        );
         for hz in notches {
             let mix = (dft(&h, hz, sr) + 1.0) * 0.5;
             assert!(
@@ -216,9 +226,9 @@ fn a_half_mix_of_the_chain_has_ceil_n_over_two_notches_where_the_phase_is_odd_pi
 fn the_feedback_closes_the_loop_at_dc_and_nyquist_and_peaks_at_dc() {
     let sr = RATE.get();
     for stages in [2usize, 3, 6, 7] {
-        for g in [0.0f32, 0.5, 0.9, Feedback::MAX_STABLE.get()] {
-            let q = f64::from(g);
-            let len = if g > 0.95 { 262_144 } else { 16_384 };
+        for q in [0.0, 0.5, 0.9, Feedback::MAX_STABLE.get()] {
+            let g = Feedback(q);
+            let len = if q > 0.95 { 262_144 } else { 16_384 };
             let h = held_response(stages, allpass_coeff(Hz(900.0), RATE), g, len);
             let nyquist = if stages % 2 == 0 {
                 1.0 / (1.0 + q)
@@ -261,11 +271,11 @@ fn the_feedback_closes_the_loop_at_dc_and_nyquist_and_peaks_at_dc() {
 #[test]
 fn the_loop_decays_at_the_greatest_stable_feedback_with_the_time_constant_its_delay_gives() {
     const WINDOW: usize = 4_096;
-    let g = Feedback::MAX_STABLE.get();
+    let g = Feedback::MAX_STABLE;
     let stages = 12usize;
     for c in [0.9f32, -0.9] {
         let tau = f64::from((1.0 + c.abs()) / (1.0 - c.abs()));
-        let time_constant = (1.0 + stages as f64 * tau) / (1.0 - f64::from(g));
+        let time_constant = (1.0 + stages as f64 * tau) / (1.0 - g.get());
         let len = (6.0 * time_constant) as usize + 2 * WINDOW;
         let h = held_response(stages, c, g, len);
         let peak = |w: &[f32]| w.iter().fold(0.0f32, |m, x| m.max(x.abs()));
@@ -283,12 +293,12 @@ fn the_loop_decays_at_the_greatest_stable_feedback_with_the_time_constant_its_de
 #[test]
 fn the_feedback_response_is_the_closed_loop_of_the_stages() {
     let sr = RATE.get();
-    let (stages, g) = (4usize, 0.8f32);
+    let (stages, g) = (4usize, Feedback(0.8));
     let c = textbook_c(2_000.0, sr);
     let h = held_response(stages, allpass_coeff(Hz(2_000.0), RATE), g, 16_384);
     for hz in [0.0f64, 100.0, 1_500.0, 2_000.0, 5_000.0, 17_000.0, 24_000.0] {
         let got = dft(&h, hz, sr);
-        let want = textbook(stages, c, f64::from(g), hz, sr);
+        let want = textbook(stages, c, g.get(), hz, sr);
         assert!((got - want).norm() < 2e-3, "{hz} Hz: {got}, want {want}");
     }
 }
@@ -299,15 +309,24 @@ fn the_feedback_response_is_the_closed_loop_of_the_stages() {
 /// `g`, inside the circle for the greatest stable feedback and decaying as `g^k`).
 #[test]
 fn feedback_rings_as_a_train_of_the_loop_length() {
-    for (stages, g) in [(2usize, 0.6f32), (5, 0.9), (12, Feedback::MAX_STABLE.get())] {
+    for (stages, g) in [
+        (2usize, Feedback(0.6)),
+        (5, Feedback(0.9)),
+        (12, Feedback::MAX_STABLE),
+    ] {
         let y = held_response(stages, 0.0, g, 80);
         for (i, &s) in y.iter().enumerate() {
             let want = if i >= stages && (i - stages) % (stages + 1) == 0 {
-                g.powi(i32::try_from((i - stages) / (stages + 1)).unwrap())
+                g.get()
+                    .powi(i32::try_from((i - stages) / (stages + 1)).unwrap())
             } else {
                 0.0
             };
-            assert!((s - want).abs() < 1e-6, "{stages} stages, frame {i}: {s}");
+            // The samples are `f32`, which sets the tolerance.
+            assert!(
+                (f64::from(s) - want).abs() < 1e-6,
+                "{stages} stages, frame {i}: {s}"
+            );
         }
     }
 }
@@ -442,7 +461,7 @@ fn a_clone_continues_where_the_original_is() {
 #[test]
 fn an_f64_signal_runs_through_the_same_chain() {
     let c = allpass_coeff(Hz(1_000.0), RATE);
-    let want = held_response(2, c, 0.0, 64);
+    let want = held_response(2, c, Feedback::NONE, 64);
     let mut chain = PhaserChain::new(Stages::of(2), ChannelLayout::clamped(1));
     let mut x = vec![0.0f64; 64];
     x[0] = 1.0;

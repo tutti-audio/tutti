@@ -4,7 +4,7 @@
 use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::InletRing;
-use tutti_session::{InletError, Offline, OutPort, Root, Session, SessionBuilder};
+use tutti_session::{InletError, OutPort, Root, Session};
 use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
@@ -114,7 +114,8 @@ fn add_inlet_checks_the_rate_the_ring_carries() {
 fn an_f64_inlet_carries_a_figure_f32_rounds_away() {
     const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
     assert_ne!(f64::from(FINE as f32), FINE, "f32 would round FINE away");
-    let mut s = SessionBuilder::<Offline<f64>>::default()
+    let mut s = Session::builder()
+        .float::<f64>()
         .sample_rate(RATE)
         .build()
         .expect("an f64 session builds");

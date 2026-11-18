@@ -36,8 +36,8 @@ tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, n {
 struct Held {
     azimuth: LastGood<f64>,
     elevation: LastGood<f64>,
-    spread: LastGood,
-    width: LastGood,
+    spread: LastGood<f64>,
+    width: LastGood<f64>,
 }
 
 /// The grid points a glide of [`GLIDE`] takes at `rate`: its length in frames,
@@ -289,12 +289,12 @@ impl<F: Float> VbapPannerNode<F> {
         let spread = Spread::new_clamped(
             self.good
                 .spread
-                .read(lane(2).map_or(cells.2.get(), F::to_f32)),
+                .read(lane(2).map_or(cells.2.get(), Into::into)),
         );
         let width = StereoWidth(
             self.good
                 .width
-                .read(lane(3).map_or(cells.3.get(), F::to_f32)),
+                .read(lane(3).map_or(cells.3.get(), Into::into)),
         );
         let whole = !self.seated;
         steer(
@@ -464,7 +464,7 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
         self.pos = 0;
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }

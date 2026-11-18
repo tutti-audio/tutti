@@ -15,12 +15,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_rt::LockExt;
 
+use tutti_buffers::InputOutput;
 use tutti_clap_ffi::GraphPool;
 use tutti_clap_host::{ClapLoaded, ClapProcessContext, LoadOptions};
 use tutti_clap_test_plugin::ThreadPoolCapture;
 use tutti_graph::Pool;
 use tutti_graph::WorkerPool;
-use tutti_plugin_types::PluginAudio;
 
 use crate::support::active::{Activate, Active, ActiveExt};
 use crate::support::main_thread;
@@ -103,7 +103,7 @@ fn block(inst: &mut Active<f32>) {
     let (mut outl, mut outr) = ([0.0f32; FRAMES], [0.0f32; FRAMES]);
     let outs: &mut [&mut [f32]] = &mut [&mut outl[..], &mut outr[..]];
     let ins: &[&[f32]] = &[&inl[..], &inr[..]];
-    let mut buffer = PluginAudio::new(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+    let mut buffer = InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
         .expect("equal channels");
     inst.process(&mut buffer, &ClapProcessContext::default())
         .expect("block processes");

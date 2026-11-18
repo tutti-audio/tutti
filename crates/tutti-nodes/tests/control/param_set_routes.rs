@@ -40,7 +40,7 @@ use tutti_units::{
 
 /// Writes `value` to `p` through `node`'s set, as a host does; `false` for
 /// a param the set lacks.
-fn set<N: ParamNode>(node: &N, p: UnitParam, value: f32) -> bool {
+fn set<N: ParamNode>(node: &N, p: UnitParam, value: f64) -> bool {
     node.param_set().set(p, value)
 }
 
@@ -108,7 +108,7 @@ impl Node for Probe {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, _: usize) -> Option<f32> {
+    fn param_base(&self, _: usize) -> Option<f64> {
         Some(0.0)
     }
 }
@@ -205,7 +205,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
 /// constant `depth` of the rate port's 0..10 Hz span.
 fn render_chorus(
     node: ModDelayNode<f32>,
-    lane: Option<f32>,
+    lane: Option<f64>,
     input: &[f32],
 ) -> (Vec<Vec<f32>>, ParamSet) {
     let mut g = GraphBuilder::new(ChannelLayout::STEREO, ChannelLayout::STEREO);
@@ -368,7 +368,7 @@ fn convolver_addresses_nothing() {
 /// `LfoNode` at depth 0.25, with a control lane on `param` (knob: the LFO's
 /// own cell) adding a constant `depth` of `range`, and the cell's value
 /// after the render.
-fn render_lfo(param: UnitParam, range: ParamRange, depth: f32) -> (Vec<f32>, f32) {
+fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64) {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let lfo = LfoNode::new(LfoShape::Sine)
         .with_rate(Hz(1.0))
@@ -467,7 +467,7 @@ fn render_driven<N>(
     node: N,
     param: UnitParam,
     range: ParamRange,
-    depth: f32,
+    depth: f64,
     input: &[f32],
 ) -> Vec<f32>
 where
@@ -625,7 +625,7 @@ fn a_chorus_depth_lane_past_its_range_is_held_at_the_sweeps_bound() {
     let sr = 48_000.0_f64;
     let n = dry_chorus(BusTopology::MONO);
     // 10 Hz, so the sweep turns twice in the render.
-    assert!(set(&n, UnitParam::Rate, RATE as f32));
+    assert!(set(&n, UnitParam::Rate, f64::from(RATE as f32)));
     // Knob 5 ms plus 0.495 of a 1 s range: 0.5 s.
     let out = render_driven(
         n,

@@ -59,7 +59,7 @@ impl Node for Probe {
         Status::Modified
     }
     fn reset(&mut self) {}
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         (port == 0).then_some(0.0)
     }
 }
@@ -283,7 +283,7 @@ fn ragged(total: usize, max: usize) -> Vec<usize> {
 
 // ------------------------------------------------------------- programs --
 
-fn amount(depth: f32) -> Amount {
+fn amount(depth: f64) -> Amount {
     Amount {
         depth: Depth::of(depth),
         polarity: Polarity::Bipolar,
@@ -1100,7 +1100,7 @@ fn feed_into(ed: &mut Editor, feed: u64, lane: u64) {
 #[test]
 fn a_republished_program_reads_a_new_source() {
     let (mut ed, mut exec) = probes(128, &[2], (0.0, 96.0));
-    let input = |src: u32, depth: f32| InputLayer {
+    let input = |src: u32, depth: f64| InputLayer {
         id: LayerId(u64::from(src)),
         source: SourceId(src),
         amount: amount(depth),

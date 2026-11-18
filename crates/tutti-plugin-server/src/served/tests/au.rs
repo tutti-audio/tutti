@@ -2,6 +2,7 @@
 
 use super::*;
 use tutti_au_host::AuLoaded;
+use tutti_buffers::InputOutput;
 
 impl Served<AuLoaded> {
     /// `load_first` for the plugin `load` chooses, in
@@ -230,8 +231,7 @@ fn an_au_latency_poll_refreshes_the_cached_wiring() {
 }
 
 use tutti_plugin_types::{
-    Features, ParamFlags, ParameterChanges, ParameterQueue, PluginAudio, TimeSignature,
-    TransportInfo,
+    Features, ParamFlags, ParameterChanges, ParameterQueue, TimeSignature, TransportInfo,
 };
 
 const SAMPLE_RATE: SampleRate = SampleRate::SR_44K1;
@@ -262,7 +262,7 @@ fn run(
     let mut output = vec![vec![0.0f32; frames]; 2];
     let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
     let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
-    let buffer = PluginAudio::new(
+    let buffer = InputOutput::from_slices(
         tutti_plugin_types::Samples(inputs[0].len()),
         &inputs,
         &mut outputs,
@@ -272,7 +272,11 @@ fn run(
     ctx.transport = transport;
     ctx.param_changes = changes;
     let mut out = ProcessOutput::default();
-    au.render(buffer, &ctx, &mut out)
+    au.render_f32(&mut PluginIo {
+        buffer,
+        ctx: &ctx,
+        out: &mut out,
+    })
 }
 
 #[test]

@@ -16,10 +16,10 @@ use tutti_rt::{Counter, Tally};
 
 use vst::host::RenderHandle;
 
-use tutti_buffers::{Float, InputOutput};
+use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_plugin_types::{
-    ParameterChanges, PluginAudio, PluginError, PluginIo, PluginResult, ProcessContext,
-    ProcessOutput, Processor, SampleFormat, SampleRate,
+    ParameterChanges, PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput,
+    Processor, SampleFormat, SampleRate,
 };
 use tutti_units::Normalized;
 
@@ -277,7 +277,7 @@ impl Vst2Processor {
     /// Real-time safe: no allocation or locking on this path.
     pub fn process_planes<S: Float>(
         &mut self,
-        io: &mut InputOutput<'_, '_, '_, S>,
+        io: &mut InputOutput<'_, S>,
         ctx: &Vst2ProcessContext,
     ) -> &MidiEventVec {
         self.midi.out.clear();
@@ -431,37 +431,33 @@ impl Vst2Processor {
     ///
     /// # Errors
     ///
-    /// [`PluginError::Block`] when the buffer is 32-bit for a plugin activated at
-    /// 64-bit. It does not allocate and does not enter the plugin.
-    pub fn render(
+    /// [`PluginError::Block`] when the buffer is not the width the plugin was
+    /// activated at, in either direction. It does not allocate and does not enter the plugin.
+    pub fn render<S: Float>(
         &mut self,
-        buffer: &mut PluginAudio<'_>,
+        buffer: &mut InputOutput<'_, S>,
         ctx: &ProcessContext<'_>,
         out: &mut ProcessOutput,
     ) -> PluginResult<()> {
         let transport = ctx.transport;
-        let refused;
         let sample_rate = self.sample_rate;
         let host_ctx = Vst2ProcessContext {
             midi: ctx.midi_events,
             transport,
             sample_rate,
         };
-        let emitted = match buffer {
-            PluginAudio::F32(io) => {
-                if self.is_double_precision() {
-                    return Err(PluginError::Block(
-                        "the block's sample format is not the one the plugin was activated with",
-                    ));
-                }
-                refused = self.apply_automation(ctx.param_changes);
-                self.process_planes(io, &host_ctx)
+        // The width is matched once per block against the activation's.
+        match (self.scratch.format(), buffer.by_width()) {
+            (SampleFormat::Float32, ByWidth::F32(_)) | (SampleFormat::Float64, ByWidth::F64(_)) => {
             }
-            PluginAudio::F64(io) => {
-                refused = self.apply_automation(ctx.param_changes);
-                self.process_planes(io, &host_ctx)
+            _ => {
+                return Err(PluginError::Block(
+                    "the block's sample format is not the one the plugin was activated with",
+                ));
             }
-        };
+        }
+        let refused = self.apply_automation(ctx.param_changes);
+        let emitted = self.process_planes(buffer, &host_ctx);
         // `out` arrives cleared, with its capacity intact: past its cap the MIDI
         // is dropped and counted. VST2 reports parameter changes through
         // `audioMasterAutomate`, not a per-block list, so there is nothing for
@@ -499,7 +495,7 @@ impl Processor for Vst2Processor {
         tutti_plugin_types::MIDI_STACK_BOUND
     }
 
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)
     }

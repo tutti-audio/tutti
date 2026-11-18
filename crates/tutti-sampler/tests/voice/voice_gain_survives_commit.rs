@@ -160,7 +160,7 @@ fn a_non_finite_gain_write_leaves_the_voice_at_its_gain() {
         let mut s = solo_voice();
         assert!(s.controls().params().set(UnitParam::Volume, 0.25));
         assert!(all_at(&block(&mut s), 0.25));
-        s.controls().params().set(UnitParam::Volume, bad);
+        s.controls().params().set(UnitParam::Volume, f64::from(bad));
         let held = block(&mut s);
         assert!(all_at(&held, 0.25), "gain = {bad}: got {:?}", &held[..4]);
         s.controls().params().set(UnitParam::Volume, 0.5);
@@ -265,7 +265,7 @@ fn drive_volume(
     ed: &mut tutti_graph::Editor,
     at: ParamIn,
     knob: tutti_types::ParamCell,
-    depth: f32,
+    depth: f64,
 ) {
     ed.set_param_range(at, ParamRange::new(0.0, 1.0))
         .expect("the node is placed");

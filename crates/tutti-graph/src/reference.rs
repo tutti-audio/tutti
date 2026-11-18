@@ -120,7 +120,7 @@ use crate::node::{
     ConstantMask, Cx, Env, InPlaceMask, Node, Prepare, SilenceMask, Status, TransportChanges,
     TransportPosition,
 };
-use crate::param::{ParamIn, ParamInput, ParamRange};
+use crate::param::{CellValue, ParamIn, ParamInput, ParamRange};
 use crate::plan::DelayKey;
 use crate::play::PlayClock;
 use crate::spec::{EventEdge, EventIn, EventOut, ValidGraph};
@@ -764,8 +764,7 @@ impl<F: Float> Reference<F> {
                     key,
                     RefMode::new(
                         spec_mode(key),
-                        // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
-                        F::from_f64(f64::from(spec_mix(key).get())),
+                        F::from_unit(spec_mix(key)),
                         &shape,
                         t.nodes[&key].latency.get(),
                         declick_frames(self.prepare.sample_rate()).get(),
@@ -1491,10 +1490,9 @@ impl<F: Float> Reference<F> {
         if let Some(m) = &mut mode {
             let want = read_mode(&shape, self.wanted.get(&key).copied().unwrap_or_default());
             // The mix as the block starts: the previous block's is its start.
-            // `Mix` is an `f32` unit until B; B replaces this with `F::from_unit`.
-            m.take_mix(F::from_f64(f64::from(
-                self.wanted_mix.get(&key).copied().unwrap_or(Mix::WET).get(),
-            )));
+            m.take_mix(F::from_unit(
+                self.wanted_mix.get(&key).copied().unwrap_or(Mix::WET),
+            ));
             // Its lane, when a source drives it: the param port's rule over
             // the source's events, the base being the mix just taken. A unit
             // that has run is on a running port (a source connected now
@@ -1740,9 +1738,7 @@ impl<F: Float> Reference<F> {
         events: &BTreeMap<EventOut, Vec<Event>>,
     ) -> Option<RefWeight<F>> {
         let gain = graph.gains().get(&id)?;
-        // The edge's cell word is `f32`, which the executor reads; the reference
-        // reads it alike until B widens the cell.
-        let to = F::from_unit(Amplitude::new(f64::from(targets[&id].get() as f32)));
+        let to = F::from_unit(targets[&id]);
         let ran = self.lane_prev.contains_key(&id);
         let evs: Vec<Event> = match gain.source {
             Some(from) => {
@@ -1854,7 +1850,7 @@ impl<F: Float> Reference<F> {
         let mut out = Vec::new();
         for (k, &param) in declared.as_slice().iter().enumerate() {
             let at = ParamIn { node: key, param };
-            let Some(b1) = unit.param_base(k).map(F::from_f32) else {
+            let Some(b1) = unit.param_base(k).map(|b| F::from_unit(CellValue(b))) else {
                 self.params.remove(&at);
                 out.push(None);
                 continue;

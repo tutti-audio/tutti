@@ -79,6 +79,16 @@ impl InputOpener for Capture {
     }
 }
 
+/// The test's capture captures at one width and refuses the other, as a capture device
+/// refuses a format it cannot give.
+impl InputOpener<f64> for Capture {
+    fn open(&mut self, _: &MicConfig, _: SampleRate) -> tutti_cpal::Result<OpenedInput<f64>> {
+        Err(tutti_cpal::Error::InvalidConfig(
+            "this capture serves one sample width only".into(),
+        ))
+    }
+}
+
 /// A live session at 48 kHz whose inputs open through the test's capture.
 fn live(record: &Arc<Mutex<Record>>) -> (LiveSession, ManualStream) {
     let (driver, stream) = ManualStreamDriver::new();
@@ -372,4 +382,36 @@ fn a_switch_to_the_timer_ends_every_capture_and_reports_each_once() {
         "reported once"
     );
     assert!(system.graph_ref().contains(first.node()), "the node stays");
+}
+
+/// **A capture that serves one width refuses a session of the other at the call
+/// that opens the input.** An `f32` capture on an `f64` device session: the
+/// build succeeds and `add_input` returns the capture's own refusal, with no
+/// writer handed out.
+#[test]
+fn a_capture_refusing_the_sessions_width_fails_the_add_input_call() {
+    let record = Arc::new(Mutex::new(Record::default()));
+    let (driver, _stream): (_, ManualStream<f64>) = ManualStreamDriver::<f64>::new();
+    let spec = OutputSpec::new(
+        SampleRate::SR_48K,
+        ChannelLayout::STEREO,
+        tutti_buffers::SampleFormat::F64,
+    );
+    let mut session = Session::builder()
+        .float::<f64>()
+        .input_opener(Capture(Arc::clone(&record)))
+        .device(Default::default())
+        .build_device_on(spec, driver)
+        .expect("builds with no device");
+
+    let refused = session.add_input(InputConfig::default());
+
+    assert!(
+        matches!(
+            refused,
+            Err(Error::Device(tutti_cpal::Error::InvalidConfig(_)))
+        ),
+        "{refused:?}"
+    );
+    assert!(record.lock().unwrap().writers.is_empty());
 }

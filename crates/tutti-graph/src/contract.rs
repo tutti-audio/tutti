@@ -1285,7 +1285,7 @@ impl Node for ParamEcho {
 
     fn reset(&mut self) {}
 
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         (port == 0).then_some(0.0)
     }
 }
@@ -1536,7 +1536,7 @@ impl Node for Recorder {
         self.inner.reset();
     }
 
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         self.inner.param_base(port)
     }
 }
@@ -1991,7 +1991,9 @@ pub fn assert_param_fork<N: ParamNode + Clone>(node: N) {
     assert!(!params.is_empty(), "a ParamNode with no params");
     // A distinct value per param, away from anything a constructor picks, and
     // inside every range-checked unit's range (a `Depth` holds `-1..=1`).
-    let set = |i: usize| 0.37 + i as f32 * 0.11;
+    // Each is an `f32` figure, which an `f32` unit's cell holds whole.
+    let set = |i: usize| f64::from(0.37f32 + i as f32 * 0.11);
+    let moved = |i: usize| f64::from(0.37f32 + i as f32 * 0.11 + 7.0);
     for (i, &p) in params.iter().enumerate() {
         live.set(p, set(i));
     }
@@ -2005,7 +2007,7 @@ pub fn assert_param_fork<N: ParamNode + Clone>(node: N) {
         );
     }
     for (i, &p) in params.iter().enumerate() {
-        live.set(p, set(i) + 7.0);
+        live.set(p, moved(i));
         assert_eq!(
             fresh.get(p),
             Some(set(i)),
@@ -2014,7 +2016,7 @@ pub fn assert_param_fork<N: ParamNode + Clone>(node: N) {
         fresh.set(p, -1.0);
         assert_eq!(
             live.get(p),
-            Some(set(i) + 7.0),
+            Some(moved(i)),
             "{p:?}: a write to the fork reached the live node"
         );
     }

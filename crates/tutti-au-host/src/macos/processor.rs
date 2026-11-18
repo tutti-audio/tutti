@@ -19,8 +19,8 @@ use tutti_au_ffi::{
 use tutti_buffers::{Float, InputOutput};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    MIDI_STACK_CAPACITY, ParamMapping, ParamWriteError, PlayheadWatch, PluginAudio, PluginError,
-    PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
+    MIDI_STACK_CAPACITY, ParamMapping, ParamWriteError, PlayheadWatch, PluginError, PluginIo,
+    PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
 };
 use tutti_rt::Reader;
 use tutti_ump::SysexAssembler;
@@ -597,7 +597,7 @@ impl AuProcessor {
     /// # Errors
     /// [`AuError::BlockTooLarge`] if the block exceeds the configured block
     /// size, or [`AuError::RenderFailed`] if `AudioUnitRender` fails.
-    pub fn render_planes<S: Float>(&mut self, io: &mut InputOutput<'_, '_, '_, S>) -> Result<()> {
+    pub fn render_planes<S: Float>(&mut self, io: &mut InputOutput<'_, S>) -> Result<()> {
         // A block too long for a `u32` saturates, which no block size admits: it is refused
         // like any other oversize block, before anything is staged.
         let frames = u32::try_from(io.frames().0).unwrap_or(u32::MAX);
@@ -673,13 +673,13 @@ impl AuProcessor {
 
     /// One block, with the buffers, the context and the output taken apart.
     /// [`Processor::process`] is this with a [`PluginIo`]; a caller whose channel
-    /// tables have distinct lifetimes, as `PluginAudio` allows, calls this one.
+    /// tables have distinct lifetimes, as an `InputOutput` allows, calls this one.
     ///
     /// # Errors
     /// [`PluginError::Block`] when the AU failed the block.
-    pub fn render(
+    pub fn render<S: Float>(
         &mut self,
-        buffer: &mut PluginAudio<'_>,
+        buffer: &mut InputOutput<'_, S>,
         ctx: &ProcessContext<'_>,
         out: &mut ProcessOutput,
     ) -> PluginResult<()> {
@@ -745,10 +745,7 @@ impl AuProcessor {
             self.send_midi(ctx.midi_events);
         }
 
-        let rendered = match buffer {
-            PluginAudio::F32(io) => self.render_planes(io),
-            PluginAudio::F64(io) => self.render_planes(io),
-        };
+        let rendered = self.render_planes(buffer);
         // The scheduled events do not reach the unit's listeners (the plugin's
         // editor among them): only `AUParameterSet` and
         // `AUParameterListenerNotify` do (`AudioUnitUtilities.h`), and both
@@ -806,7 +803,7 @@ impl Processor for AuProcessor {
         tutti_plugin_types::MIDI_STACK_BOUND
     }
 
-    fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+    fn process<S: Float>(&mut self, io: &mut PluginIo<'_, S>) -> PluginResult<()> {
         let PluginIo { buffer, ctx, out } = io;
         self.render(buffer, ctx, out)
     }
@@ -874,14 +871,12 @@ mod tests {
         let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
         let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut out = ProcessOutput::default();
-        let mut buffer = PluginAudio::F32(
-            InputOutput::new(
-                tutti_plugin_types::Samples(inputs[0].len()),
-                Planes::new(&inputs).expect("two planes"),
-                PlanesMut::new(&mut outputs).expect("two planes"),
-            )
-            .expect("equal lengths"),
-        );
+        let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(inputs[0].len()),
+            Planes::new(&inputs).expect("two planes"),
+            PlanesMut::new(&mut outputs).expect("two planes"),
+        )
+        .expect("equal lengths");
         processor.render(&mut buffer, &ctx, &mut out).unwrap();
 
         assert_eq!(processor.param_points_dropped(), 2);
@@ -911,14 +906,12 @@ mod tests {
         let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
         let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut out = ProcessOutput::default();
-        let mut buffer = PluginAudio::F32(
-            InputOutput::new(
-                tutti_plugin_types::Samples(inputs[0].len()),
-                Planes::new(&inputs).expect("two planes"),
-                PlanesMut::new(&mut outputs).expect("two planes"),
-            )
-            .expect("equal lengths"),
-        );
+        let mut buffer = InputOutput::new(
+            tutti_plugin_types::Samples(inputs[0].len()),
+            Planes::new(&inputs).expect("two planes"),
+            PlanesMut::new(&mut outputs).expect("two planes"),
+        )
+        .expect("equal lengths");
         processor.render(&mut buffer, &ctx, &mut out).unwrap();
 
         let stage = processor.stage.borrow();

@@ -47,7 +47,7 @@ fn synth(unison: bool, detune: f64) -> PolySynth {
 }
 
 /// A lane over `span` adding a constant `depth` of it.
-fn constant(depth: f32) -> ControlProgram {
+fn constant(depth: f64) -> ControlProgram {
     let layer = Layer {
         id: LayerId(1),
         clock: Clock::Beats {
@@ -71,7 +71,7 @@ fn constant(depth: f32) -> ControlProgram {
 struct Drive {
     param: UnitParam,
     range: ParamRange,
-    depth: f32,
+    depth: f64,
 }
 
 /// Renders `synth` playing a note at frame 0, both channels, with `drive`'s
@@ -83,7 +83,7 @@ fn render(synth: PolySynth, drive: Option<Drive>) -> [Vec<f32>; 2] {
 
 /// [`render`], and the driven param's knob as the synth's `ParamSet` holds it
 /// after the render (`None` without a lane).
-fn render_with_knob(synth: PolySynth, drive: Option<Drive>) -> ([Vec<f32>; 2], Option<f32>) {
+fn render_with_knob(synth: PolySynth, drive: Option<Drive>) -> ([Vec<f32>; 2], Option<f64>) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
         MaxBlock::of(Samples(BLOCK)),

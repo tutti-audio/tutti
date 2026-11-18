@@ -75,10 +75,10 @@ fn survives_node<N: Node>(name: &str, make: impl Fn() -> N, cells: impl Fn(&N) -
             let cs = cells(&node);
             let (cell, atomic, alt) = &cs[k];
             let before = atomic.load(Ordering::Acquire);
-            atomic.store(bad, Ordering::Release);
+            atomic.store(f64::from(bad), Ordering::Release);
             for (j, (_, other, other_alt)) in cs.iter().enumerate() {
                 if j != k {
-                    other.store(*other_alt, Ordering::Release);
+                    other.store(f64::from(*other_alt), Ordering::Release);
                 }
             }
             assert!(
@@ -91,7 +91,11 @@ fn survives_node<N: Node>(name: &str, make: impl Fn() -> N, cells: impl Fn(&N) -
                 "{name}: {cell} = {bad} reached the output through a rate change"
             );
             atomic.store(
-                if before.is_finite() { *alt } else { before },
+                if before.is_finite() {
+                    f64::from(*alt)
+                } else {
+                    before
+                },
                 Ordering::Release,
             );
             assert!(
@@ -358,7 +362,7 @@ fn the_distortion_holds_off_non_finite_controls() {
 fn a_distortion_built_with_a_non_finite_drive_renders_finite() {
     use tutti_nodes::{DistortionNode, ShapeKind};
     for bad in BAD {
-        let mut node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(bad));
+        let mut node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(f64::from(bad)));
         node.prepare(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
         assert!(
             render_node_finite(&mut node, SampleRate::SR_48K, 4, 1),

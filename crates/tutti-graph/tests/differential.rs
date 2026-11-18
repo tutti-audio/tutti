@@ -2707,7 +2707,7 @@ fn pick_mix(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_units::Mix)> {
         4 => 0.5,
         5 => 0.25,
         6 => 0.875,
-        _ => rng.below(1000) as f32 / 999.0,
+        _ => rng.below(1000) as f64 / 999.0,
     };
     Some((key, tutti_units::Mix::new(mix)))
 }

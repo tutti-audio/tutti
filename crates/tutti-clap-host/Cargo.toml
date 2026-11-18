@@ -35,13 +35,13 @@ tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 # (`ClapLoaded::set_thread_pool`). No cycle: `tutti-graph` names only
 # `tutti-types`.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
+# The sample width `Float` and the block view `InputOutput` a block is processed in.
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 
 [dev-dependencies]
 # The README's editor example takes any `raw-window-handle` window.
 raw-window-handle = "0.6"
 tutti-clap-ffi = { path = "../tutti-clap-ffi", features = ["testing"] }
-# The sample width and block views the suites name (`Float`, `InputOutput`, `Planes`).
-tutti-buffers = { path = "../tutti-buffers" }
 # `mapping_contract!`: the laws `ParamBounds` is held to.
 tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
 # The integration tests re-open the reference plugin's library themselves (the

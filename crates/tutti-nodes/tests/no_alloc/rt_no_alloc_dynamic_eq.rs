@@ -28,7 +28,7 @@ fn walk(node: DynamicEqNode<f32>) {
     let threshold = |i: usize| -30.0 + (i % 7) as f32;
     for i in 0..16 {
         controls.set(UnitParam::Cutoff, centre(i));
-        controls.set(UnitParam::Threshold, threshold(i));
+        controls.set(UnitParam::Threshold, f64::from(threshold(i)));
         rig.block();
     }
     assert!(
@@ -42,7 +42,7 @@ fn walk(node: DynamicEqNode<f32>) {
     assert_no_alloc::assert_no_alloc(|| {
         for i in 0..2_000 {
             controls.set(UnitParam::Cutoff, centre(i));
-            controls.set(UnitParam::Threshold, threshold(i));
+            controls.set(UnitParam::Threshold, f64::from(threshold(i)));
             rig.block();
         }
     });

@@ -763,8 +763,8 @@ mod tests {
             RATE_44K,
         );
         let set = lim.param_set();
-        assert!(set.set(UnitParam::Ceiling, f32::NAN));
-        assert!(set.set(UnitParam::Threshold, f32::NAN));
+        assert!(set.set(UnitParam::Ceiling, f64::NAN));
+        assert!(set.set(UnitParam::Threshold, f64::NAN));
         let limit = sample_gain(Db(-6.0));
         let mut out = [0.0f32; 2];
         // 5 ms is 220 frames: 6 000 is 27 time constants, the envelope has settled.

@@ -382,7 +382,7 @@ impl BusStripNode {
         if side == Side::Mid {
             return fader.get() as f32;
         }
-        let balance = balance.map_or(Balance::CENTER, |b| Balance(b[i]));
+        let balance = balance.map_or(Balance::CENTER, |b| Balance(f64::from(b[i])));
         let (l, r) = balance.gains();
         ((if side == Side::Right { r } else { l }) * fader.get()).get() as f32
     }
@@ -454,7 +454,7 @@ impl Node for BusStripNode {
         self.ramp_from = None;
     }
 
-    fn param_base(&self, k: usize) -> Option<f32> {
+    fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
     }
 }
@@ -520,11 +520,12 @@ mod tests {
     /// `ParamSet` — rather than by calling the setter, so the test covers the
     /// path `AudioParam<U, P>` uses. `false` if the strip refused it.
     fn set_param(strip: &BusStripNode, param: UnitParam, value: f32) -> bool {
-        strip.param_set().set(param, value)
+        strip.param_set().set(param, f64::from(value))
     }
 
-    fn set_balance(strip: &BusStripNode, balance: f32) {
-        assert!(set_param(strip, UnitParam::Balance, balance));
+    fn set_balance(strip: &BusStripNode, balance: f64) {
+        // The param word is `f32`.
+        assert!(set_param(strip, UnitParam::Balance, balance as f32));
     }
 
     fn tick2(strip: &mut BusStripNode, l: f32, r: f32) -> (f32, f32) {
@@ -929,7 +930,7 @@ mod tests {
 
     /// One frame of ones through a strip on `topology` at `balance` and
     /// `volume`, read back by the speaker each channel feeds.
-    fn gain_by_speaker(topology: BusTopology, balance: f32, volume: f64) -> Vec<(Speaker, f32)> {
+    fn gain_by_speaker(topology: BusTopology, balance: f64, volume: f64) -> Vec<(Speaker, f32)> {
         let mut s = BusStripNode::new(topology);
         s.set_volume(Amplitude(volume));
         set_balance(&s, balance);
@@ -957,7 +958,7 @@ mod tests {
     /// times the fader, exactly, at the ends, the middle and between.
     #[test]
     fn a_stereo_strip_is_input_times_balance_law_times_volume() {
-        for balance in [-1.0f32, -0.5, 0.0, 0.5, 1.0] {
+        for balance in [-1.0f64, -0.5, 0.0, 0.5, 1.0] {
             let (gl, gr) = Balance(balance).gains();
             let volume = 0.5f64;
             let mut s = BusStripNode::stereo();

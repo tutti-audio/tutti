@@ -96,7 +96,7 @@ fn the_strip_holds_off_non_finite_volume_and_balance() {
         ("balance", |n, v| {
             n.balance()
                 .expect("a stereo strip balances")
-                .store(Balance(v));
+                .store(Balance(f64::from(v)));
         }),
     ];
     for (name, write) in cells {
@@ -137,14 +137,21 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
                 node.prepare(&Prepare::new(RATE, MaxBlock::of(Samples(64))));
                 assert!(renders_finite(&mut *node, 2), "{name}");
                 for (j, (_, cell, alt)) in cells.iter().enumerate() {
-                    cell.store(if j == k { bad } else { *alt }, Ordering::Release);
+                    cell.store(
+                        if j == k {
+                            f64::from(bad)
+                        } else {
+                            f64::from(*alt)
+                        },
+                        Ordering::Release,
+                    );
                 }
                 assert!(
                     renders_finite(&mut *node, 6),
                     "{name}: {} = {bad} reached the output",
                     cells[k].0
                 );
-                cells[k].1.store(cells[k].2, Ordering::Release);
+                cells[k].1.store(f64::from(cells[k].2), Ordering::Release);
                 assert!(
                     renders_finite(&mut *node, 6),
                     "{name}: {} = {bad} left the state non-finite",

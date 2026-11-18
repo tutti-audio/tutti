@@ -10,8 +10,8 @@
 //!   find a node again.
 //! - **Nothing clones a running unit**: the executor owns it, and a recompile
 //!   keeps it by key.
-//! - **`f32` only.** Every buffer is planar `f32` (see the crate docs on
-//!   precision).
+//! - **One float.** Every buffer is planar in the graph's `F` (see the crate
+//!   docs on precision).
 //! - **Whole blocks.** A node gets whatever block the executor was prepared
 //!   for, up to [`Prepare::max_block`], whole — sub-chunking at event offsets
 //!   is the node's job, which keeps an out-of-process plugin's declared
@@ -1554,7 +1554,7 @@ pub trait Node<F: Float = f32>: Send + 'static {
     /// whatever the graph connects — rather than riding on a base of 0,
     /// which would silence it. Audio thread:
     /// must not allocate, lock or block.
-    fn param_base(&self, port: usize) -> Option<f32> {
+    fn param_base(&self, port: usize) -> Option<f64> {
         let _ = port;
         None
     }

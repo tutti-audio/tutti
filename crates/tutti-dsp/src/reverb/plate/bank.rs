@@ -583,9 +583,8 @@ fn target_of<F: Float>(network: &Network) -> Option<Coeffs<F>> {
         return None;
     };
     Some(Coeffs {
-        // The network's pole is an `f32` figure: it narrows through it.
         decay: F::from_f64(gain.get()),
-        damping: F::from_f32(damp),
+        damping: F::from_f64(damp),
         lattice2: F::from_f64(b.diffuser?.gain.get()),
         lattice1: F::from_f64(a.diffuser?.gain.get()),
         input,

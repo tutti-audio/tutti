@@ -81,7 +81,7 @@ impl ParamSet {
     /// Sets `param` to `value`: the cell the node reads on its next block,
     /// and a fork taken after this starts from. `false` if the node has no
     /// such param; nothing is written then.
-    pub fn set(&self, param: impl Into<UnitAddr>, value: f32) -> bool {
+    pub fn set(&self, param: impl Into<UnitAddr>, value: f64) -> bool {
         let Some(slot) = self.slot(param.into()) else {
             return false;
         };
@@ -90,7 +90,7 @@ impl ParamSet {
     }
 
     /// `param`'s live value: what the node reads on its next block.
-    pub fn get(&self, param: impl Into<UnitAddr>) -> Option<f32> {
+    pub fn get(&self, param: impl Into<UnitAddr>) -> Option<f64> {
         self.slot(param.into())
             .map(|s| s.live.load(Ordering::Acquire))
     }
@@ -99,10 +99,9 @@ impl ParamSet {
     /// modulation lane, whose knob it is). Clones the `Arc`: control
     /// thread only.
     ///
-    /// A value through the set is an `f32` whatever the param's unit: a
-    /// [`Seconds`](tutti_units::Seconds) param's `f64` cell is widened on a
-    /// write and narrowed on a read ([`ParamCell`]), the modulation path's one
-    /// narrowing.
+    /// A value through the set is an `f64` whatever the param's unit: an
+    /// `f32` unit's cell is widened exactly on a read and rounds to its own
+    /// width on a write ([`ParamCell`]).
     pub fn cell(&self, param: impl Into<UnitAddr>) -> Option<ParamCell> {
         self.slot(param.into()).map(|s| s.live.clone())
     }

@@ -87,7 +87,7 @@ fn the_general_midi_chorus_cannot_recirculate() {
 fn a_raw_write_cannot_make_the_general_midi_chorus_recirculate() {
     for raw in [-0.9f32, 5.0] {
         let node = chorus();
-        assert!(node.param_set().set(UnitParam::Feedback, raw));
+        assert!(node.param_set().set(UnitParam::Feedback, f64::from(raw)));
         let out = impulse_response(node, 2_000);
         for channel in &out {
             let sounding = channel.iter().filter(|&&s| s != 0.0).count();
