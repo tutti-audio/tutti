@@ -241,25 +241,21 @@ impl SessionNode for tutti_nodes::BusStripNode {
 
 /// The multiband compressor: its params by address, its band meters beside
 /// them in its controls.
-impl SessionNode for tutti_nodes::MultibandCompressorNode<f32> {
-    fn params(controls: &tutti_nodes::MultibandControls) -> Option<ParamSet> {
-        Some(controls.params().clone())
-    }
+macro_rules! multiband_session_node {
+    ($($float:ty),*) => {$(
+        impl SessionNode<$float> for tutti_nodes::MultibandCompressorNode<$float> {
+            fn params(controls: &tutti_nodes::MultibandControls) -> Option<ParamSet> {
+                Some(controls.params().clone())
+            }
 
-    fn reclaimer(_: &tutti_nodes::MultibandControls) -> Reclaims {
-        Reclaims::Nothing
-    }
+            fn reclaimer(_: &tutti_nodes::MultibandControls) -> Reclaims {
+                Reclaims::Nothing
+            }
+        }
+    )*};
 }
 
-impl SessionNode for tutti_nodes::MultibandCompressorNode<f64> {
-    fn params(controls: &tutti_nodes::MultibandControls) -> Option<ParamSet> {
-        Some(controls.params().clone())
-    }
-
-    fn reclaimer(_: &tutti_nodes::MultibandControls) -> Reclaims {
-        Reclaims::Nothing
-    }
-}
+multiband_session_node!(f32, f64);
 
 // The delay, modulation, LFO and oscillator nodes, and the three reverbs (wet only: their
 // blend is the graph's mix), and the convolution reverb (its wet gain, `Volume`).
@@ -270,13 +266,9 @@ param_session_node!(
     FreeverbNode,
     FdnNode,
     PlateReverbNode,
+    ConvolverNode,
 );
-param_session_node!(
-    f32 =>
-    tutti_nodes::LfoNode,
-    tutti_nodes::OscillatorNode,
-    tutti_nodes::ConvolverNode,
-);
+param_session_node!(any: tutti_nodes::LfoNode, tutti_nodes::OscillatorNode);
 
 /// An audio inlet as a graph node: no controls (the writer is the producer's),
 /// no params. Its fork is refused ([`Graph::open_inlet`](crate::Graph::open_inlet)).
@@ -314,7 +306,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::SyncOut {
 
 /// An automation lane as a graph node: no controls, the beat read from its
 /// block's `Env`.
-impl SessionNode for tutti_nodes::automation::AutomationLaneNode {
+impl<F: Float> SessionNode<F> for tutti_nodes::automation::AutomationLaneNode {
     fn reclaimer(_: &()) -> Reclaims {
         Reclaims::Nothing
     }
@@ -366,7 +358,7 @@ impl SessionNode for tutti_soundfont::SoundFontUnit {
 
 // The two panners: bearing and height, and the VBAP spread and width or the
 // HRTF blend, as a `ParamSet`.
-param_session_node!(f32 => tutti_nodes::VbapPannerNode, tutti_nodes::HrtfBinauralNode);
+param_session_node!(floats: VbapPannerNode, HrtfBinauralNode);
 
 // The synth as a graph node: one MIDI event input, and its live params
 // (master volume, unison detune and spread) as a `ParamSet`, so a param
