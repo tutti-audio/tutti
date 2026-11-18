@@ -482,7 +482,7 @@ mod tests {
         };
         let mut w = hound::WavWriter::create(path, spec).unwrap();
         for i in 0..(f64::from(rate) * seconds) as usize {
-            let s = (std::f32::consts::TAU * 440.0 * i as f32 / rate as f32).sin() * 0.4;
+            let s = (((std::f64::consts::TAU * 440.0 * i as f64 / rate as f64).sin()) as f32) * 0.4;
             w.write_sample(s).unwrap();
             w.write_sample(s).unwrap();
         }

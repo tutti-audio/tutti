@@ -239,12 +239,15 @@ fn a_drive_lane_step_is_in_the_render_within_one_segment() {
 #[test]
 fn an_svf_cutoff_step_lands_on_the_grid_point_after_it() {
     const STEP: usize = 40;
-    let (old, new) = (500.0f32, 5_000.0f32);
-    let step: Vec<f32> = (0..64).map(|i| if i < STEP { old } else { new }).collect();
+    let (old, new) = (500.0f64, 5_000.0f64);
+    // The lane carries `f32` words.
+    let step: Vec<f32> = (0..64)
+        .map(|i| (if i < STEP { old } else { new }) as f32)
+        .collect();
     let response = |at: usize| -> f32 {
         let mut x = vec![0.0f32; 64];
         x[at] = 1.0;
-        let node = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(f64::from(old)), Q::new(0.707));
+        let node = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(old), Q::new(0.707));
         let out = render(node, 64, &[x], &[Some(step.clone()), None, None], |_| {});
         out[0][at]
     };
@@ -257,27 +260,23 @@ fn an_svf_cutoff_step_lands_on_the_grid_point_after_it() {
         };
         SvfCoefficients::<f64>::from(&SvfModel::new(controls, RATE)).a3 as f32
     };
-    assert_ne!(
-        a3(f64::from(old)),
-        a3(f64::from(new)),
-        "the two sets must be told apart"
-    );
+    assert_ne!(a3(old), a3(new), "the two sets must be told apart");
     assert_eq!(
         response(47).to_bits(),
-        a3(f64::from(old)).to_bits(),
+        a3(old).to_bits(),
         "frame 47 is on the old set"
     );
     assert_eq!(
         response(63).to_bits(),
-        a3(f64::from(new)).to_bits(),
+        a3(new).to_bits(),
         "frame 63 is on the new set"
     );
     let mid = response(55);
     assert!(
-        a3(f64::from(old)) < mid && mid < a3(f64::from(new)),
+        a3(old) < mid && mid < a3(new),
         "frame 55 is under way: {mid}, between {} and {}",
-        a3(f64::from(old)),
-        a3(f64::from(new))
+        a3(old),
+        a3(new)
     );
 }
 
@@ -318,14 +317,17 @@ fn held_cells_render_alike_at_every_block_length() {
 #[test]
 fn a_lane_step_is_in_the_render_within_one_segment() {
     const STEP: usize = 40;
-    let (old, new) = (400.0f32, 4_000.0f32);
-    let lane: Vec<f32> = (0..64).map(|i| if i < STEP { old } else { new }).collect();
-    let response = |cutoff: Option<f32>, at: usize| -> f64 {
+    let (old, new) = (400.0f64, 4_000.0f64);
+    // The lane carries `f32` words.
+    let lane: Vec<f32> = (0..64)
+        .map(|i| (if i < STEP { old } else { new }) as f32)
+        .collect();
+    let response = |cutoff: Option<f64>, at: usize| -> f64 {
         let mut x = vec![0.0f32; 64];
         x[at] = 1.0;
-        let held = cutoff.map(|c| vec![c; 64]);
+        let held = cutoff.map(|c| vec![c as f32; 64]);
         let lanes = [Some(held.unwrap_or_else(|| lane.clone())), None, None];
-        let node = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(f64::from(old)), Q(0.707));
+        let node = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(old), Q(0.707));
         let out = render(node, 64, &[x], &lanes, |_| {});
         f64::from(out[0][at])
     };
@@ -385,14 +387,17 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
 #[test]
 fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_glides() {
     const STEP: usize = 40;
-    let (old, new) = (400.0f32, 4_000.0f32);
-    let lane: Vec<f32> = (0..64).map(|i| if i < STEP { old } else { new }).collect();
-    let response = |cutoff: Option<f32>, at: usize| -> f64 {
+    let (old, new) = (400.0f64, 4_000.0f64);
+    // The lane carries `f32` words.
+    let lane: Vec<f32> = (0..64)
+        .map(|i| (if i < STEP { old } else { new }) as f32)
+        .collect();
+    let response = |cutoff: Option<f64>, at: usize| -> f64 {
         let mut x = vec![0.0f32; 64];
         x[at] = 1.0;
-        let held = cutoff.map(|c| vec![c; 64]);
+        let held = cutoff.map(|c| vec![c as f32; 64]);
         let lanes = [Some(held.unwrap_or_else(|| lane.clone()))];
-        let node = CrossoverNode::new(ChannelLayout::MONO, &[Hz(f64::from(old))]).unwrap();
+        let node = CrossoverNode::new(ChannelLayout::MONO, &[Hz(old)]).unwrap();
         let out = render(node, 64, &[x], &lanes, |_| {});
         f64::from(out[0][at])
     };
@@ -409,7 +414,7 @@ fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_glides() {
         at_new,
         "frame 63 is on the new set, exactly"
     );
-    let g = |hz: f32| (core::f64::consts::PI * f64::from(hz) / RATE.get()).tan();
+    let g = |hz: f64| (core::f64::consts::PI * hz / RATE.get()).tan();
     for at in [48usize, 49, 55, 62] {
         let step = (at - 47) as f64 / 16.0;
         let g = g(old) + (g(new) - g(old)) * step;

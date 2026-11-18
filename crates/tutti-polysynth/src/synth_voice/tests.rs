@@ -52,9 +52,9 @@ fn an_lfo_sweeps_the_cutoff_by_half_its_depth_at_the_crest() {
 #[test]
 fn the_cutoff_control_moves_two_octaves_per_unit() {
     assert_eq!(two_octave_factor(0.0), 1.0);
-    assert!((two_octave_factor(0.5) - 2.0).abs() < 1e-6);
-    assert!((two_octave_factor(-0.5) - 0.5).abs() < 1e-6);
-    assert!((two_octave_factor(1.0) - 4.0).abs() < 1e-5);
+    assert_eq!(two_octave_factor(0.5), 2.0);
+    assert_eq!(two_octave_factor(-0.5), 0.5);
+    assert_eq!(two_octave_factor(1.0), 4.0);
 }
 
 /// **A channel's pan is RP-036's gains times `sqrt(2)`**: the centre is exactly `(1, 1)`, hard
