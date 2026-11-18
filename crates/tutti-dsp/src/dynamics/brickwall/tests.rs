@@ -241,26 +241,6 @@ fn the_output_never_passes_the_ceiling_for_a_square_an_impulse_train_or_a_burst(
     }
 }
 
-/// The input is converted at the edges: the clamp over `f64` views is the clamp of the
-/// `f32` the bank runs in.
-#[test]
-fn an_f64_view_is_clamped_like_the_f32_it_converts_to() {
-    let x32 = noise(11, 512, 2.0);
-    let x64: Vec<f64> = x32.iter().map(|&x| f64::from(x)).collect();
-    let mut bank = BrickwallBank::<f32>::new();
-    bank.aim(&controls(-6.0));
-    let mut y64 = vec![0.0f64; x64.len()];
-    bank.process(
-        BrickwallLanes::default(),
-        Planes::new(&[&x64[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y64[..]]).unwrap(),
-    );
-    let c = ceiling_of(-6.0);
-    for (i, (&y, &x)) in y64.iter().zip(&x32).enumerate() {
-        assert_eq!(y, f64::from(definition(x, c)), "frame {i}");
-    }
-}
-
 /// An `f64` clipper clamps in `f64`: over `-20 dB` a signal of more than 24 bits leaves at the
 /// closed form `10^(-20 / 20)`, to 1e-15, and under `0 dB` it comes out as it went in.
 #[test]
@@ -284,4 +264,20 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
         1e-15,
     );
     assert_close_f64(&render(0.0), &x, 0.0);
+}
+
+/// A ceiling whose amplitude is past `f32`'s largest finite value (800 dB is `1e40`) passes
+/// everything, an infinity included, as `+inf` dB does: it is not clamped to `f32::MAX`.
+#[test]
+fn an_f32_ceiling_of_800_db_passes_an_infinity_unchanged() {
+    let x = [1.0e30f32, -3.0, 0.0, f32::INFINITY, f32::NEG_INFINITY];
+    let mut bank = BrickwallBank::<f32>::new();
+    bank.aim(&controls(800.0));
+    let mut y = [0.0f32; 5];
+    bank.process(
+        BrickwallLanes::default(),
+        Planes::new(&[&x[..]]).unwrap(),
+        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+    );
+    assert_eq!(y, x);
 }

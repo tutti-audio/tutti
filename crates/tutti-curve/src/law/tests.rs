@@ -237,18 +237,17 @@ fn every_law_meets_its_closed_form() {
 }
 
 /// `Linear` returns its progress bit for bit, so a linear [`Piece`] is
-/// `from + (to - from) * t` with `t` narrowed once to the `f32` endpoint
-/// words: the narrowing test of the `f32` boundary.
+/// `from + (to - from) * t` in `f64`, with no narrowing on the way.
 #[test]
-fn a_linear_piece_narrows_the_law_once_to_the_f32_words() {
+fn a_linear_piece_is_the_line_through_its_endpoints_in_f64() {
     for n in [1u32, 3, 7, 64, 97, 128, 1000] {
         for i in 0..n {
             let t = at(f64::from(i + 1) / f64::from(n));
             assert_eq!(Law::Linear.eval(t), t);
-            let (from, to) = (0.3f32, -7.9f32);
+            let (from, to) = (0.3f64, -7.9f64);
             assert_eq!(
                 Piece::new(from, to, Law::Linear).value(None, t).to_bits(),
-                (from + (to - from) * (t.get() as f32)).to_bits()
+                (from + (to - from) * t.get()).to_bits()
             );
         }
     }

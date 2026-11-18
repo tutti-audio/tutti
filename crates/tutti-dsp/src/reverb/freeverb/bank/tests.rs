@@ -4,7 +4,7 @@ use tutti_units::{Db, Mix, Real, Samples};
 use super::*;
 use crate::TAIL_FLOOR;
 
-// The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
+// The tests pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
 const RATE: SampleRate = SampleRate::SR_44K1;
 
@@ -411,10 +411,10 @@ fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
     );
 }
 
-/// A view of `f64` is the `f32` render converted, to the last bit, with the room moving;
-/// an input of two channels is their average; a view of one output plane has the left only.
+/// An input of two channels is their average, so the same signal twice is itself; a view of
+/// one output plane has the left only.
 #[test]
-fn views_of_any_format_and_width_are_the_f32_render() {
+fn two_input_channels_are_averaged_and_one_output_plane_is_the_left() {
     let x: Vec<f32> = (0..2_000)
         .map(|n| ((n * 7) % 19) as f32 / 9.0 - 1.0)
         .collect();
@@ -425,19 +425,6 @@ fn views_of_any_format_and_width_are_the_f32_render() {
     };
     let (mut bank, mut glides) = setup();
     let want = run(&mut bank, &mut glides, &x, 128);
-    let (mut bank, mut glides) = setup();
-    let wide: Vec<f64> = x.iter().map(|&s| f64::from(s)).collect();
-    let (mut l, mut r) = (vec![0.0f64; x.len()], vec![0.0f64; x.len()]);
-    let ins = [wide.as_slice()];
-    let mut outs: [&mut [f64]; 2] = [&mut l, &mut r];
-    bank.process(
-        &mut glides,
-        Planes::new(&ins).unwrap(),
-        PlanesMut::new(&mut outs).unwrap(),
-    );
-    for (g, w) in l.iter().zip(&want.0).chain(r.iter().zip(&want.1)) {
-        assert_eq!(*g, f64::from(*w));
-    }
     // Two channels are averaged: the same signal twice is itself.
     let (mut bank, mut glides) = setup();
     let twice = [x.as_slice(), x.as_slice()];
