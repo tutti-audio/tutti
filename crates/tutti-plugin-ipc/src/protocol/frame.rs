@@ -183,12 +183,13 @@ pub struct FrameBuf {
 
 impl FrameBuf {
     /// Buffers for inbound bodies of up to `inbound` bytes and outbound
-    /// bodies of up to `outbound`. Allocates: build it off the audio thread.
+    /// bodies of up to `outbound`, each at most [`MAX_FRAME_BYTES`], the most
+    /// a frame may carry. Allocates: build it off the audio thread.
     #[must_use]
     pub fn new(inbound: usize, outbound: usize) -> Self {
         Self {
-            inbound: vec![0; inbound].into_boxed_slice(),
-            outbound: vec![0; outbound + PREFIX_BYTES].into_boxed_slice(),
+            inbound: vec![0; inbound.min(MAX_FRAME_BYTES)].into_boxed_slice(),
+            outbound: vec![0; outbound.min(MAX_FRAME_BYTES) + PREFIX_BYTES].into_boxed_slice(),
         }
     }
 

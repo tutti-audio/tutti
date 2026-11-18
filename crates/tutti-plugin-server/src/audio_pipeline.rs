@@ -19,7 +19,7 @@ use tutti_plugin_types::{
     BlockStatus, BridgeResult, ChannelTable, ChordChanges, ExpressiveContext, Features,
     MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges,
     NoteExpressionIntChanges, NoteExpressionTextChanges, ParameterChanges, PluginAudio,
-    PluginError, PluginResult, ProcessContext, ProcessOutput, SampleFormat, Samples, ScaleChanges,
+    PluginError, ProcessContext, ProcessOutput, SampleFormat, Samples, ScaleChanges,
     TransportChange, TransportInfo, WireMidi, sanitize, silence,
 };
 use tutti_rt::TallyWriter;
@@ -200,9 +200,43 @@ pub(crate) struct AudioOutput {
     /// The block's audio was not published: its input slot was recycled, or an
     /// output channel was not written. The host reads it as silence.
     pub refused: bool,
-    /// Why the plugin failed the block, when it did: the caller hands it to
-    /// the control side, which logs and frees it.
-    pub failure: Option<PluginError>,
+    /// Why the plugin failed the block, when it did: a value with no drop
+    /// glue, which the caller hands to the control side to log.
+    pub failure: Option<BlockFault>,
+}
+
+/// Why a block failed, as a constant: nothing the render thread holds of a
+/// failure owns memory, so neither keeping it nor losing it frees anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BlockFault(pub &'static str);
+
+impl BlockFault {
+    /// The fault `error` stands for: a block failure keeps its constant
+    /// reason, any other variant is named by its kind.
+    ///
+    /// The format hosts' Processors fail a block with [`PluginError::Block`]
+    /// alone, which owns nothing. A variant that owns heap memory is a
+    /// Processor breaking that contract; it is not dropped here (this thread
+    /// frees nothing), and leaks instead.
+    #[allow(
+        clippy::mem_forget,
+        reason = "a free is not allowed on the render thread"
+    )]
+    pub(crate) fn of(error: PluginError) -> Self {
+        let fault = Self(match &error {
+            PluginError::Block(reason) => reason,
+            PluginError::Load { .. } => "the plugin failed the block: a load error",
+            PluginError::State(_) | PluginError::StateFailed(_) => {
+                "the plugin failed the block: a state error"
+            }
+            PluginError::Process(_) => "the plugin failed the block: a process error",
+            PluginError::Editor(_) => "the plugin failed the block: an editor error",
+            PluginError::Bridge(_) => "the plugin failed the block: a bridge error",
+            PluginError::Other(_) => "the plugin failed the block",
+        });
+        std::mem::forget(error);
+        fault
+    }
 }
 
 /// Driver for one audio block. Holds scratch across calls so the audio
@@ -604,7 +638,7 @@ fn render_block<S: Float>(
     size: usize,
     ctx: &ProcessContext<'_>,
     out: &mut ProcessOutput,
-) -> PluginResult<()>
+) -> Result<(), BlockFault>
 where
     for<'a> PluginAudio<'a>: From<InputOutput<'a, 'a, 'a, S>>,
 {
@@ -613,8 +647,8 @@ where
     let mut out_refs: ChannelTable<&mut [S]> =
         outputs.iter_mut().map(|chan| &mut chan[..size]).collect();
     let buffer = PluginAudio::new(Samples(size), &in_refs, &mut out_refs)
-        .map_err(|_| PluginError::Block("the block's channels differ in length"))?;
-    plugin.render(buffer, ctx, out)
+        .map_err(|_| BlockFault("the block's channels differ in length"))?;
+    plugin.render(buffer, ctx, out).map_err(BlockFault::of)
 }
 
 #[cfg(test)]

@@ -10,18 +10,22 @@
 //! anyone to serve.
 
 use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-use tutti_plugin_ipc::{BridgeMessage, FrameBuf, HostMessage, read_frame, write_frame};
+use tutti_plugin_ipc::{
+    BridgeMessage, FrameBuf, HostMessage, MAX_FRAME_BYTES, read_frame, write_frame,
+};
 use tutti_plugin_types::{BridgeResult, MIDI_STACK_CAPACITY};
 
 use crate::main_loop::{
     Listener as PlatformListener, Stream as PlatformStream, wait_for_connection,
 };
 
-/// The longest request the audio connection takes, in bytes: the most a block
-/// carries (its automation at the host's whole point budget is about a
-/// megabyte on the wire), with room to spare. A longer one is refused with
-/// `FrameTooLarge` before it is read.
-const AUDIO_REQUEST_BYTES: usize = 4 * 1024 * 1024;
+/// The longest request the audio connection takes: whatever the protocol
+/// allows ([`MAX_FRAME_BYTES`]). A block's request carries automation at the
+/// host's point budget for the activated block and queue count, which is
+/// megabytes at a large block, so the buffer holds the protocol's whole bound
+/// rather than a guess. The memory is zeroed pages the OS maps on first touch:
+/// a connection that never carries a large block never makes them resident.
+const AUDIO_REQUEST_BYTES: usize = MAX_FRAME_BYTES;
 
 /// The longest reply the audio connection sends, in bytes: a block's reply
 /// with its MIDI at the cap, each event at the most its varints take.
@@ -269,5 +273,59 @@ mod wait_tests {
         drop(host);
         assert!(transport.wait_readable(Duration::from_secs(10)).unwrap());
         assert!(transport.recv().is_err());
+    }
+}
+
+#[cfg(test)]
+mod audio_frame_tests {
+    use super::*;
+    use tutti_plugin_ipc::ProcessAudioData;
+    use tutti_plugin_types::{ParameterChanges, ParameterQueue, SampleRate};
+    use tutti_types::ParamId;
+
+    /// **The audio connection accepts the largest request the host may send.**
+    /// A block of 65536 frames with 256 queues each at the whole chunk room (the
+    /// most the host's point pool lets 256 queues carry) encodes to more than
+    /// 4 MiB, a size an earlier fixed cap refused, and it is read through the
+    /// buffer the audio connection is built with.
+    #[test]
+    fn the_largest_legal_block_request_is_accepted() {
+        const QUEUES: u32 = 256;
+        const FRAMES: usize = 65536;
+        let room = ParameterQueue::chunk_room(FRAMES);
+        let mut changes = ParameterChanges::reserved(QUEUES as usize, room);
+        for queue in 0..QUEUES {
+            for point in 0..room {
+                changes.add_change(
+                    ParamId::new(0xF000_0000 + queue),
+                    i32::try_from(point * 28).unwrap(),
+                    point as f64 / room as f64,
+                );
+            }
+        }
+        let block = HostMessage::ProcessAudio(ProcessAudioData {
+            seq: 1,
+            num_samples: FRAMES,
+            param_changes: changes,
+            ..ProcessAudioData::empty(SampleRate::SR_48K)
+        });
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &block).unwrap();
+        assert!(
+            wire.len() > 4 * 1024 * 1024,
+            "the case is past the old cap, {} bytes",
+            wire.len()
+        );
+        let mut frames = FrameBuf::new(AUDIO_REQUEST_BYTES, AUDIO_REPLY_BYTES);
+        let HostMessage::ProcessAudio(back) = frames.read(&mut wire.as_slice()).unwrap() else {
+            panic!("a block");
+        };
+        let points: usize = back
+            .param_changes
+            .queues
+            .iter()
+            .map(ParameterQueue::len)
+            .sum();
+        assert_eq!(points, QUEUES as usize * room);
     }
 }

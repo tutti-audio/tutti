@@ -156,6 +156,7 @@ impl PluginServer {
         // once it has it back.
         self.session.drop_plugin(self.main);
         drop(render.stop());
+        self.session.report_final_losses();
         served
     }
 

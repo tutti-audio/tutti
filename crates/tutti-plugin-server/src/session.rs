@@ -536,6 +536,11 @@ impl Session {
         told
     }
 
+    /// Reports what the render thread lost in the session, once it has stopped.
+    pub(crate) fn report_final_losses(&mut self) {
+        self.render.report_final_losses();
+    }
+
     /// Opens the plugin's editor on the served instance itself: embedded in
     /// `parent` (the host's window, as a number that means the same here), or
     /// the plugin's own window for `None`. The editor's size when embedded.
