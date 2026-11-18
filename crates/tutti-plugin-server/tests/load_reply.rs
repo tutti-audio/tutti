@@ -87,13 +87,13 @@ fn fixtures() -> (PathBuf, PathBuf) {
 
 /// A `plugin-server` process and its handshake connection, past `Ready`.
 fn start_server() -> (Server, Stream) {
-    let (server, stream, _) = start_server_for(std::process::id());
+    let (server, stream, _) = start_server_for_this_process();
     (server, stream)
 }
 
-/// [`start_server`] for a server that takes the process `host` for its host,
-/// and the socket it serves.
-fn start_server_for(host: u32) -> (Server, Stream, PathBuf) {
+/// [`start_server`], and the socket it serves. The server is this process's
+/// child and takes this process for its host.
+fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
     // The default config makes a fresh socket path that fits a socket address.
     let socket = tutti_plugin_ipc::BridgeConfig::at(
         tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
@@ -103,7 +103,10 @@ fn start_server_for(host: u32) -> (Server, Stream, PathBuf) {
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_plugin-server"))
             .arg(&socket)
-            .env(tutti_plugin_ipc::HOST_PID_ENV, host.to_string())
+            .env(
+                tutti_plugin_ipc_ffi::HOST_PID_ENV,
+                std::process::id().to_string(),
+            )
             .stdout(Stdio::piped())
             .spawn()
             .expect("spawn plugin-server"),
@@ -243,36 +246,81 @@ fn a_handshake_frame_that_does_not_decode_ends_the_server() {
 
 /// **A host that ends once the session is running shuts the server down as an
 /// end of the control connection does, and the plugin is released.** This test
-/// process keeps all three connections open, so no end of stream says the host
-/// is gone: only the watch on the host process does. The server must leave by
-/// its own exit (status 0, not a signal), which only a teardown that ran
-/// reaches, and without the log of a plugin it had to leak.
+/// process keeps the connections open, so no end of stream says the host is gone:
+/// only the watch on the host process does. The host is a shell that states its
+/// pid and spawns the server. When it ends, the server's own teardown closes its
+/// sockets (the stream ends) and, once the plugin has gone home and the render
+/// thread has stopped, logs that its teardown is done, which an end by `SIGKILL`
+/// cannot do; the log carries no plugin it had to leak.
 #[test]
 fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
+    use std::io::BufRead as _;
+
     let (_not_a_plugin, good) = fixtures();
-    let mut host = Command::new("sleep")
-        .arg("600")
-        .spawn()
-        .expect("spawn the stand-in host");
-    let (mut server, mut handshake, socket) = start_server_for(host.id());
+    let socket = tutti_plugin_ipc::BridgeConfig::at(
+        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+    )
+    .socket_path;
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let log = dir.path().join("server.log");
+    // The shell is the host until its input closes: it states its own pid, prints
+    // the server's, and waits.
+    let script = format!(
+        "RUST_LOG=info {env}=$$ {exe:?} {socket:?} >{log:?} 2>&1 & echo $!; read _",
+        env = tutti_plugin_ipc_ffi::HOST_PID_ENV,
+        exe = env!("CARGO_BIN_EXE_plugin-server"),
+    );
+    let mut host = Server(
+        Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn the host shell"),
+    );
+    let mut line = String::new();
+    std::io::BufReader::new(host.0.stdout.take().expect("piped"))
+        .read_line(&mut line)
+        .expect("the shell prints the server's pid");
+    let server: u32 = line.trim().parse().expect("the server's pid");
+
+    let mut handshake = connect(&socket, &mut host);
+    assert!(matches!(
+        read_frame::<_, BridgeMessage>(&mut handshake),
+        Ok(BridgeMessage::Ready { .. })
+    ));
     assert!(matches!(
         load(&mut handshake, &good, PluginFormat::Clap),
         BridgeMessage::PluginLoaded { .. }
     ));
     drop(handshake);
-    let mut audio = connect(&socket, &mut server);
-    let mut control = connect(&socket, &mut server);
+    let mut audio = connect(&socket, &mut host);
+    let mut control = connect(&socket, &mut host);
     for stream in [&mut audio, &mut control] {
         assert!(matches!(
             read_frame::<_, BridgeMessage>(stream),
             Ok(BridgeMessage::Ready { .. })
         ));
     }
+    let (ended, server_ended) = std::sync::mpsc::channel();
+    tutti_plugin_ipc_ffi::watch_host(server, move || ended.send(()).expect("listening"))
+        .expect("the watch starts");
 
-    host.kill().expect("the host ends");
-    host.wait().expect("reaped");
-    let (status, printed) = ended(&mut server);
-    assert_eq!(status.code(), Some(0), "{status:?}: {printed}");
+    drop(host.0.stdin.take());
+    host.0.wait().expect("the host ends");
+    // The server's teardown closes its end of the control connection.
+    assert!(
+        read_frame::<_, BridgeMessage>(&mut control).is_err(),
+        "the server answered after its host ended"
+    );
+    server_ended.recv().expect("the server ends");
+
+    let printed = std::fs::read_to_string(&log).expect("the server's log");
+    assert!(
+        printed.contains("the control phase ended cleanly and its teardown is done"),
+        "no clean teardown in the log: {printed}"
+    );
     assert!(
         !printed.contains("leaking the plugin"),
         "the plugin was leaked: {printed}"

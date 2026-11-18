@@ -184,6 +184,7 @@ mod classification;
 #[cfg(feature = "contract")]
 pub mod contract;
 mod control_role;
+mod deadline;
 mod descriptor;
 mod driver;
 mod editor;
@@ -216,6 +217,10 @@ mod parameters;
 mod pipeline;
 mod points;
 mod presets;
+#[cfg(feature = "probe-wire")]
+mod probe_exit;
+#[cfg(feature = "probe-wire")]
+mod probe_failure;
 #[cfg(feature = "probe-wire")]
 mod probe_wire;
 mod process;
@@ -294,6 +299,7 @@ pub use transport_request::TransportRequest;
 pub use version::{EmptyVersionText, PluginVersion, VersionText};
 // Exported as `PluginResult` only: the bare name `Result` shadows std's under a
 // glob import.
+pub use deadline::Deadline;
 pub use error::{Delivered, PluginError, PresetError, Result as PluginResult, StateError};
 pub use features::{FeatureReport, Features};
 pub use harmony::{
@@ -342,6 +348,10 @@ pub use parameters::{
 };
 pub use pipeline::{BlockCounts, ChunkCounters, MAX_CHUNK};
 pub use presets::{Preset, PresetId, PresetSupport};
+#[cfg(feature = "probe-wire")]
+pub use probe_exit::{ProbeDeath, ProbeExit};
+#[cfg(feature = "probe-wire")]
+pub use probe_failure::{ProbeError, ProbeRefusal};
 #[cfg(feature = "probe-wire")]
 pub use probe_wire::{ProbeOutcome, read_result, write_result};
 pub use process::{BlockStatus, ExpressiveContext, ProcessContext, ProcessOutput};

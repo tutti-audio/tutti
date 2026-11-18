@@ -188,7 +188,7 @@ mod stand_in_probe {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
-    use tutti_plugin_db::ProbeFailureKind;
+    use tutti_plugin_types::{ProbeDeath, ProbeError};
 
     /// A catalog over one plugin file whose probe is the script `body`, which
     /// gets the pid file's path as `$PID_FILE` replaced in the text. Returns the
@@ -310,7 +310,7 @@ mod stand_in_probe {
     #[test]
     fn registering_a_plugin_that_crashes_its_probe_blacklists_it() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
-        let (mut catalog, file, _) = catalog_probed_by(&dir, "exit 3", None);
+        let (mut catalog, file, _) = catalog_probed_by(&dir, "kill -SEGV $$", None);
 
         let task = catalog.register(&file).expect("a plugin file");
         let result = finish(&mut catalog, task);
@@ -320,7 +320,10 @@ mod stand_in_probe {
             panic!("one failure: {:?}", result.failures);
         };
         assert_eq!(failed.path, tutti_plugin_db::canonical_path(&file));
-        assert_eq!(failed.failure.kind, ProbeFailureKind::Crashed);
+        assert_eq!(
+            failed.failure.error,
+            ProbeError::Died(ProbeDeath::Signal(11))
+        );
         assert!(catalog.is_blacklisted(&file));
     }
 
@@ -340,7 +343,11 @@ mod stand_in_probe {
         let [failed] = result.failures.as_slice() else {
             panic!("one failure: {:?}", result.failures);
         };
-        assert_eq!(failed.failure.kind, ProbeFailureKind::TimedOut);
+        assert!(
+            matches!(failed.failure.error, ProbeError::TimedOut { .. }),
+            "{:?}",
+            failed.failure
+        );
         assert!(catalog.is_blacklisted(&file));
     }
 }
@@ -350,7 +357,7 @@ mod stand_in_probe {
 /// under its name, and nothing is blacklisted.
 #[test]
 fn register_names_a_missing_probe_binary() {
-    use tutti_plugin_db::ProbeFailureKind;
+    use tutti_plugin_types::ProbeError;
     let dir = tempfile::TempDir::new().expect("a scratch directory");
     let (catalog, file) = catalog_with_one_plugin(&dir);
     let config = CatalogConfig::new(dir.path(), tutti_plugin::catalog::NO_SCAN_DIRS)
@@ -364,7 +371,7 @@ fn register_names_a_missing_probe_binary() {
     let [failed] = result.failures.as_slice() else {
         panic!("one failure: {:?}", result.failures);
     };
-    assert_eq!(failed.failure.kind, ProbeFailureKind::ProbeNotFound);
+    assert_eq!(failed.failure.error, ProbeError::ProbeNotFound);
     assert_eq!(
         (result.new, result.failed, result.newly_blacklisted),
         (0, 1, 0)
@@ -378,7 +385,7 @@ fn register_names_a_missing_probe_binary() {
 /// second plugin the first's bytes.
 #[test]
 fn a_measure_state_does_not_reach_the_next_measure() {
-    use tutti_plugin_db::ProbeFailureKind;
+    use tutti_plugin_types::{ProbeError, ProbeRefusal};
     let dir = tempfile::TempDir::new().expect("a scratch directory");
     let (mut catalog, a) = catalog_with_one_plugin(&dir);
     let b = dir.path().join("plugins").join("Other.clap");
@@ -393,8 +400,19 @@ fn a_measure_state_does_not_reach_the_next_measure() {
     let [failed] = first.failures.as_slice() else {
         panic!("one failure: {:?}", first.failures);
     };
-    assert_eq!(failed.failure.kind, ProbeFailureKind::LoadFailed);
-    assert!(failed.failure.reason.contains("refused the state"));
+    assert!(
+        matches!(
+            failed.failure.error,
+            ProbeError::Refused(ProbeRefusal::StateRefused { .. })
+        ),
+        "{:?}",
+        failed.failure
+    );
+    assert!(failed.failure.reason().contains("refused the state"));
+    assert!(
+        !catalog.is_blacklisted(&a),
+        "a state the plugin refused says nothing about the plugin"
+    );
 
     let second = catalog
         .measure(&PluginRef::file(&b).expect("a clap file"), None)
@@ -411,7 +429,7 @@ fn a_measure_state_does_not_reach_the_next_measure() {
 /// does, and records nothing.
 #[test]
 fn measure_names_a_missing_probe_binary() {
-    use tutti_plugin_db::ProbeFailureKind;
+    use tutti_plugin_types::ProbeError;
     let dir = tempfile::TempDir::new().expect("a scratch directory");
     let (_, file) = catalog_with_one_plugin(&dir);
     let config = CatalogConfig::new(dir.path(), tutti_plugin::catalog::NO_SCAN_DIRS)
@@ -425,7 +443,7 @@ fn measure_names_a_missing_probe_binary() {
     let [failed] = result.failures.as_slice() else {
         panic!("one failure: {:?}", result.failures);
     };
-    assert_eq!(failed.failure.kind, ProbeFailureKind::ProbeNotFound);
+    assert_eq!(failed.failure.error, ProbeError::ProbeNotFound);
     assert!(catalog.db().is_empty());
 }
 

@@ -61,7 +61,7 @@ pub use protocol::{
     STATE_CHUNK_BYTES, SlabLayout, StagedState,
 };
 pub use server_watch::ServerWatch;
-pub use subprocess::{HOST_PID_ENV, LaunchedServer, Reaped, launch};
+pub use subprocess::{LaunchedServer, Reaped, launch};
 pub use transport::control::socket_name;
 pub use transport::shm::{AudioSlab, RING_SLOTS, SlabWriter};
 // Splitting and reassembling plugin state across frames: both ends must chunk
