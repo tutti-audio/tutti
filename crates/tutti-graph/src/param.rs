@@ -904,7 +904,9 @@ impl ParamRangeCell {
 /// A param port's live range as the audio thread reads it: a [`Reader`] on
 /// the port's cell, registered on the control side
 /// ([`ParamRangeCell::reader`]) and kept by the node that clamps. It lends
-/// once per block and never keeps the loan across blocks.
+/// once per block and never keeps the loan across blocks. It keeps its cell
+/// alive, so it is dropped where its node is: on the control side, when a
+/// commit hands the retired unit back.
 #[derive(Debug)]
 pub struct ParamRangeReader(Reader<ParamRange>);
 
