@@ -650,7 +650,7 @@ fn render_block<S: Float>(
     out: &mut ProcessOutput,
 ) -> Result<(), BlockFault>
 where
-    for<'a> PluginAudio<'a>: From<InputOutput<'a, 'a, 'a, S>>,
+    for<'a> PluginAudio<'a>: From<InputOutput<'a, S>>,
 {
     // At most `MAX_BLOCK_CHANNELS`: the caller's slices are the slab's widths.
     let in_refs: ChannelTable<&[S]> = inputs.iter().map(|chan| &chan[..size]).collect();

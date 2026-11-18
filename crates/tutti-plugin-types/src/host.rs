@@ -903,7 +903,7 @@ pub fn process_block<P: Processor, S: Float>(
     out: &mut ProcessOutput,
 ) -> PluginResult<()>
 where
-    for<'a> PluginAudio<'a>: From<InputOutput<'a, 'a, 'a, S>>,
+    for<'a> PluginAudio<'a>: From<InputOutput<'a, S>>,
 {
     let mut table: ChannelTable<&mut [S]> = outputs.iter_mut().map(|o| &mut **o).collect();
     let audio = PluginAudio::new(frames, inputs, &mut table)

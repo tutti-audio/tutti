@@ -597,7 +597,7 @@ impl AuProcessor {
     /// # Errors
     /// [`AuError::BlockTooLarge`] if the block exceeds the configured block
     /// size, or [`AuError::RenderFailed`] if `AudioUnitRender` fails.
-    pub fn render_planes<S: Float>(&mut self, io: &mut InputOutput<'_, '_, '_, S>) -> Result<()> {
+    pub fn render_planes<S: Float>(&mut self, io: &mut InputOutput<'_, S>) -> Result<()> {
         // A block too long for a `u32` saturates, which no block size admits: it is refused
         // like any other oversize block, before anything is staged.
         let frames = u32::try_from(io.frames().0).unwrap_or(u32::MAX);

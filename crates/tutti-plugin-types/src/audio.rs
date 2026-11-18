@@ -16,19 +16,19 @@ use tutti_units::Samples;
 #[derive(Debug)]
 pub enum PluginAudio<'a> {
     /// A 32-bit block, the width every format negotiates.
-    F32(InputOutput<'a, 'a, 'a, f32>),
+    F32(InputOutput<'a, f32>),
     /// A 64-bit block, for a plugin that negotiated a 64-bit bus.
-    F64(InputOutput<'a, 'a, 'a, f64>),
+    F64(InputOutput<'a, f64>),
 }
 
-impl<'a> From<InputOutput<'a, 'a, 'a, f32>> for PluginAudio<'a> {
-    fn from(io: InputOutput<'a, 'a, 'a, f32>) -> Self {
+impl<'a> From<InputOutput<'a, f32>> for PluginAudio<'a> {
+    fn from(io: InputOutput<'a, f32>) -> Self {
         Self::F32(io)
     }
 }
 
-impl<'a> From<InputOutput<'a, 'a, 'a, f64>> for PluginAudio<'a> {
-    fn from(io: InputOutput<'a, 'a, 'a, f64>) -> Self {
+impl<'a> From<InputOutput<'a, f64>> for PluginAudio<'a> {
+    fn from(io: InputOutput<'a, f64>) -> Self {
         Self::F64(io)
     }
 }
@@ -48,7 +48,7 @@ impl<'a> PluginAudio<'a> {
         outputs: &'a mut [&'a mut [S]],
     ) -> Result<Self, BufferError>
     where
-        Self: From<InputOutput<'a, 'a, 'a, S>>,
+        Self: From<InputOutput<'a, S>>,
     {
         let input = if inputs.is_empty() {
             Planes::default()

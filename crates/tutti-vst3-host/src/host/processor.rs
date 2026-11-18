@@ -424,7 +424,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// activation, so the steady-state path does not allocate.
     pub fn process(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, T>,
+        buffer: &mut InputOutput<'_, T>,
         events: &InputEvents,
         param_changes: Option<&ParameterChanges>,
         transport: &TransportInfo,
@@ -958,7 +958,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// and copies what the plugin emitted into `out`.
     fn process_shared(
         &mut self,
-        buffer: &mut InputOutput<'_, '_, '_, T>,
+        buffer: &mut InputOutput<'_, T>,
         ctx: &tutti_plugin_types::ProcessContext<'_>,
         out: &mut tutti_plugin_types::ProcessOutput,
     ) -> PluginResult<()> {

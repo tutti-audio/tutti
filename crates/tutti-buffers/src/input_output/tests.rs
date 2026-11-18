@@ -153,3 +153,35 @@ fn split_writes_the_output_from_the_input() {
     }
     assert_eq!(out, [0.5, -1.0, 2.0]);
 }
+
+/// A node-style function over `&mut InputOutput<'_, S>`: it writes through
+/// `output()` twice, each reborrow ending before the next.
+fn write_twice<S: Sample>(io: &mut InputOutput<'_, S>, first: S, second: S) {
+    for mut plane in io.output().iter_mut() {
+        plane.samples_mut().fill(first);
+    }
+    let mut out = io.output();
+    out.slice_mut(Samples(2)..Samples(4))
+        .iter_mut()
+        .for_each(|mut plane| plane.samples_mut().fill(second));
+}
+
+/// A block over a per-block local table takes `&mut InputOutput<'_, S>`, and
+/// two successive reborrows of its output both land in the audio.
+#[test]
+fn a_block_over_a_local_table_is_writable_twice_through_one_lifetime() {
+    let src = [0.0f32; 4];
+    let input = [&src[..]];
+    let (mut l, mut r) = ([0.0f32; 4], [0.0f32; 4]);
+    {
+        let mut output = [&mut l[..], &mut r[..]];
+        let mut io = InputOutput::new(
+            Samples(4),
+            Planes::new(&input).expect("one plane"),
+            PlanesMut::new(&mut output).expect("two planes"),
+        )
+        .expect("equal frame counts");
+        write_twice(&mut io, 1.0, 2.0);
+    }
+    assert_eq!((l, r), ([1.0, 1.0, 2.0, 2.0], [1.0, 1.0, 2.0, 2.0]));
+}

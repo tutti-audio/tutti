@@ -277,7 +277,7 @@ impl Vst2Processor {
     /// Real-time safe: no allocation or locking on this path.
     pub fn process_planes<S: Float>(
         &mut self,
-        io: &mut InputOutput<'_, '_, '_, S>,
+        io: &mut InputOutput<'_, S>,
         ctx: &Vst2ProcessContext,
     ) -> &MidiEventVec {
         self.midi.out.clear();

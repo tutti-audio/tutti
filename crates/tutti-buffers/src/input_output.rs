@@ -39,10 +39,10 @@ use crate::{BufferError, Planes, PlanesMut, Sample};
 /// assert_eq!(block.frames(), Samples(4));
 /// ```
 #[derive(Debug)]
-pub struct InputOutput<'i, 's, 'a, S: Sample = f32> {
+pub struct InputOutput<'a, S: Sample = f32> {
     frames: Samples,
-    input: Planes<'i, S>,
-    output: PlanesMut<'s, 'a, S>,
+    input: Planes<'a, S>,
+    output: PlanesMut<'a, 'a, S>,
 }
 
 /// Which view of a block a [`BufferError::BlockLengthMismatch`] names.
@@ -63,7 +63,7 @@ impl core::fmt::Display for BlockSide {
     }
 }
 
-impl<'i, 's, 'a, S: Sample> InputOutput<'i, 's, 'a, S> {
+impl<'a, S: Sample> InputOutput<'a, S> {
     /// The block of `frames` frames over `input` and `output`.
     ///
     /// # Errors
@@ -72,8 +72,8 @@ impl<'i, 's, 'a, S: Sample> InputOutput<'i, 's, 'a, S> {
     /// frame count other than `frames`; the input is checked first.
     pub fn new(
         frames: Samples,
-        input: Planes<'i, S>,
-        output: PlanesMut<'s, 'a, S>,
+        input: Planes<'a, S>,
+        output: PlanesMut<'a, 'a, S>,
     ) -> Result<Self, BufferError> {
         let check = |side, channels, found| {
             if channels > 0 && found != frames {
@@ -103,7 +103,7 @@ impl<'i, 's, 'a, S: Sample> InputOutput<'i, 's, 'a, S> {
 
     /// The input planes; empty for a processor with no input.
     #[must_use]
-    pub const fn input(&self) -> Planes<'i, S> {
+    pub const fn input(&self) -> Planes<'a, S> {
         self.input
     }
 
@@ -117,13 +117,13 @@ impl<'i, 's, 'a, S: Sample> InputOutput<'i, 's, 'a, S> {
     /// The input and the output at once, for a processor that reads one while
     /// it writes the other.
     #[must_use]
-    pub fn split(&mut self) -> (Planes<'i, S>, PlanesMut<'_, 'a, S>) {
+    pub fn split(&mut self) -> (Planes<'a, S>, PlanesMut<'_, 'a, S>) {
         (self.input, self.output.reborrow())
     }
 
     /// The frame count, the input and the output, taken apart.
     #[must_use]
-    pub fn into_parts(self) -> (Samples, Planes<'i, S>, PlanesMut<'s, 'a, S>) {
+    pub fn into_parts(self) -> (Samples, Planes<'a, S>, PlanesMut<'a, 'a, S>) {
         (self.frames, self.input, self.output)
     }
 }
