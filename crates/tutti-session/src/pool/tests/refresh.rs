@@ -24,7 +24,7 @@ impl PoolEntry for Read {
         self.path.clone()
     }
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<Arc<Vec<u8>>, S> {
+    fn load(&self) -> Load<Arc<Vec<u8>>> {
         let (path, reads) = (self.path.clone(), Arc::clone(&self.reads));
         Load::on_worker(move || {
             reads.fetch_add(1, Ordering::SeqCst);
@@ -40,6 +40,10 @@ impl PoolEntry for Read {
 
     fn handle(loaded: &Arc<Vec<u8>>, _: &Life) -> Arc<Vec<u8>> {
         Arc::clone(loaded)
+    }
+
+    fn share(loaded: &Arc<Vec<u8>>) -> Option<Arc<Vec<u8>>> {
+        Some(Arc::clone(loaded))
     }
 }
 
@@ -227,7 +231,7 @@ impl PoolEntry for Unstamped {
         self.path.clone()
     }
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<u8, S> {
+    fn load(&self) -> Load<u8> {
         Load::ready(0)
     }
 

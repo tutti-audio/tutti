@@ -94,7 +94,7 @@ impl<K> Declared<K, MidiSinkEntry> {
     }
 }
 
-impl PoolEntry for MidiSinkEntry {
+impl<S: tutti_buffers::Float> PoolEntry<S> for MidiSinkEntry {
     /// The sink's address, and the options.
     type Identity = (usize, SinkOptions);
     type Loaded = SinkLoaded;
@@ -104,7 +104,7 @@ impl PoolEntry for MidiSinkEntry {
         (Arc::as_ptr(&self.sink).addr(), self.options)
     }
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<SinkLoaded, S> {
+    fn load(&self) -> Load<SinkLoaded, S> {
         let sink = Arc::clone(&self.sink);
         let options = self.options;
         Load::on_session(move |cx| {

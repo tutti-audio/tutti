@@ -27,7 +27,7 @@ impl PoolEntry for Device {
         self.version
     }
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<u32, S> {
+    fn load(&self) -> Load<u32> {
         let (version, loads) = (self.version, Arc::clone(&self.loads));
         Load::on_worker(move || {
             loads.fetch_add(1, Ordering::SeqCst);
@@ -58,7 +58,7 @@ impl PoolEntry for Shared {
         0
     }
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<u32, S> {
+    fn load(&self) -> Load<u32> {
         let loads = Arc::clone(&self.loads);
         Load::on_worker(move || {
             loads.fetch_add(1, Ordering::SeqCst);

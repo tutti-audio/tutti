@@ -112,7 +112,7 @@ impl PoolEntry for Probe {
         self.version
     }
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<u32, S> {
+    fn load(&self) -> Load<u32> {
         let (version, initial, fail, runs) = (
             self.version,
             self.initial,
@@ -179,7 +179,7 @@ fn state<K: crate::AppKey, C: crate::Clock<Float = f32>>(
     })
 }
 
-fn handle<K: crate::AppKey, C: crate::Clock>(
+fn handle<K: crate::AppKey, C: crate::Clock<Float = f32>>(
     session: &Session<K, C>,
     key: &'static str,
 ) -> Result<ProbeHandle, HandleError<&'static str>> {
@@ -490,7 +490,7 @@ fn a_handle_of_another_kind_or_an_undeclared_key_is_refused() {
         type Loaded = ();
         type Handle = ();
         fn identity(&self) {}
-        fn load<S: tutti_buffers::Float>(&self) -> Load<(), S> {
+        fn load(&self) -> Load<()> {
             Load::on_worker(|| Ok(()))
         }
         fn handle((): &(), _: &Life) {}
@@ -537,7 +537,7 @@ impl PoolEntry for Twin {
         self.0
     }
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<u32, S> {
+    fn load(&self) -> Load<u32> {
         let version = self.0;
         Load::on_worker(move || Ok(version))
     }

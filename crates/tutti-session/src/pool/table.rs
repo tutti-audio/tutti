@@ -1243,7 +1243,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
-        E: PoolEntry,
+        E: PoolEntry<C::Float>,
     {
         let (loaded, life) = self.loaded_with_life::<K, E>(key)?;
         Ok(E::handle(loaded, life))
@@ -1254,7 +1254,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     pub(crate) fn loaded<K, E>(&self, key: &K) -> Result<&E::Loaded, HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
-        E: PoolEntry,
+        E: PoolEntry<C::Float>,
     {
         self.loaded_with_life::<K, E>(key).map(|(loaded, _)| loaded)
     }
@@ -1264,7 +1264,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     fn loaded_with_life<K, E>(&self, key: &K) -> Result<(&E::Loaded, &Life), HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
-        E: PoolEntry,
+        E: PoolEntry<C::Float>,
     {
         let slot = self
             .slots
@@ -1287,7 +1287,10 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     /// `E`'s loaded value under `key` and the generation of the landing that
     /// made it, wherever the entry stands in the app's set (declared or held).
     #[cfg(feature = "plugin")]
-    pub(crate) fn landing_of<E: PoolEntry>(&self, key: &PoolKey) -> Option<(u64, &E::Loaded)> {
+    pub(crate) fn landing_of<E: PoolEntry<C::Float>>(
+        &self,
+        key: &PoolKey,
+    ) -> Option<(u64, &E::Loaded)> {
         let slot = self
             .slots
             .get(key)

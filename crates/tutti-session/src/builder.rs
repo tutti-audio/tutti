@@ -1009,6 +1009,8 @@ impl<C: Clock> SessionBuilder<C> {
             disk_streamer,
             #[cfg(feature = "sampler")]
             sampler_opens: tutti_types::Mint::new(),
+            #[cfg(feature = "sampler")]
+            sampler_streams: Default::default(),
             faults_seen: 0,
             #[cfg(feature = "device")]
             output_listing: None,

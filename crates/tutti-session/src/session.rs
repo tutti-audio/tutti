@@ -618,6 +618,9 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
     #[cfg(feature = "sampler")]
     pub(crate) sampler_opens: tutti_types::Mint,
+    /// What the opens landed, until the host takes it ([`Session::take_stream`]).
+    #[cfg(feature = "sampler")]
+    pub(crate) sampler_streams: crate::sampler::OpenedStreams<C::Float>,
     /// The count of the stream's faults the last poll saw.
     pub(crate) faults_seen: u64,
     /// The one-shot listing of the output devices, until it answers.
@@ -868,6 +871,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             disk_streamer,
             #[cfg(feature = "sampler")]
             sampler_opens,
+            #[cfg(feature = "sampler")]
+            sampler_streams,
             faults_seen,
             #[cfg(feature = "device")]
             output_listing,
@@ -933,6 +938,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 disk_streamer,
                 #[cfg(feature = "sampler")]
                 sampler_opens,
+                #[cfg(feature = "sampler")]
+                sampler_streams,
                 faults_seen,
                 #[cfg(feature = "device")]
                 output_listing,

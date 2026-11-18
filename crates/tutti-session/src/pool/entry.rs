@@ -36,7 +36,7 @@ pub(crate) type Value = Box<dyn Any + Send>;
 /// A peer handle keeps the entry's [`Life`] and reads
 /// [`Presence::Closed`] through [`Life::presence`] once the entry is
 /// released.
-pub trait PoolEntry: Send + 'static {
+pub trait PoolEntry<S: Float = f32>: Send + 'static {
     /// What loads the entry: equal identities under one key are one entry.
     type Identity: Eq + fmt::Debug + Send + 'static;
     /// What the load makes and the session holds.
@@ -48,7 +48,7 @@ pub trait PoolEntry: Send + 'static {
     fn identity(&self) -> Self::Identity;
 
     /// The job that loads the entry, described and not started.
-    fn load<S: Float>(&self) -> Load<Self::Loaded, S>;
+    fn load(&self) -> Load<Self::Loaded, S>;
 
     /// The file the load reads, for a kind whose value comes from one.
     ///
@@ -75,6 +75,15 @@ pub trait PoolEntry: Send + 'static {
     /// data kind is never lost.
     fn is_lost(_loaded: &Self::Loaded) -> bool {
         false
+    }
+
+    /// Another owner of `loaded`, for an entry declared with
+    /// [`Declared::shared`]: a kind whose value is an `Arc` (or another cheap
+    /// handle) returns a clone. The default is none, so a kind that does not
+    /// say how to share is not shared.
+    fn share(loaded: &Self::Loaded) -> Option<Self::Loaded> {
+        let _ = loaded;
+        None
     }
 
     /// What the pool does with a loaded value that only snapshots hold, past
@@ -504,7 +513,7 @@ impl<K, S: Float> fmt::Debug for PoolSet<K, S> {
 pub struct Declared<K, E> {
     key: K,
     pub(crate) entry: E,
-    share: Option<Cloner>,
+    share: bool,
 }
 
 impl<K, E> Declared<K, E> {
@@ -515,14 +524,14 @@ impl<K, E> Declared<K, E> {
     }
 }
 
-impl<K, E: PoolEntry> Declared<K, E> {
+impl<K, E> Declared<K, E> {
     /// `entry`, declared under `key`: one instance per key, even when another
     /// key is declared with the same identity.
     pub const fn new(key: K, entry: E) -> Self {
         Self {
             key,
             entry,
-            share: None,
+            share: false,
         }
     }
 
@@ -532,35 +541,31 @@ impl<K, E: PoolEntry> Declared<K, E> {
     /// [`Clone`] of it, an `Arc`). The data kinds (`audio_file` and
     /// `soundfont`) are declared this way; a kind with
     /// something live behind it (a plugin client, a capture) uses
-    /// [`new`](Self::new).
+    /// [`new`](Self::new). A shared kind says how to clone its loaded value
+    /// ([`PoolEntry::share`]); one that does not is not shared.
     ///
     /// Every key's handle reads a clone of the loaded value, and the clones drop
     /// on whatever thread releases their key: a kind whose loaded value must
     /// drop on the main thread must not be shared.
-    pub const fn shared(key: K, entry: E) -> Self
-    where
-        E::Loaded: Clone,
-    {
+    pub const fn shared(key: K, entry: E) -> Self {
         Self {
             key,
             entry,
-            share: Some(clone_loaded::<E>),
+            share: true,
         }
     }
 }
 
-fn clone_loaded<E: PoolEntry>(value: &Value) -> Option<Value>
-where
-    E::Loaded: Clone,
-{
+fn clone_loaded<E: PoolEntry<S>, S: Float>(value: &Value) -> Option<Value> {
     value
         .downcast_ref::<E::Loaded>()
-        .map(|loaded| Box::new(loaded.clone()) as Value)
+        .and_then(E::share)
+        .map(|loaded| Box::new(loaded) as Value)
 }
 
 /// `E`'s [`park`](PoolEntry::park) over an erased value: the value back when the
 /// kind keeps it.
-fn park<E: PoolEntry>(value: Value) -> Option<Value> {
+fn park<E: PoolEntry<S>, S: Float>(value: Value) -> Option<Value> {
     match value.downcast::<E::Loaded>() {
         Ok(loaded) => match E::park(*loaded) {
             Parking::Keep(loaded) => Some(Box::new(loaded) as Value),
@@ -570,7 +575,7 @@ fn park<E: PoolEntry>(value: Value) -> Option<Value> {
     }
 }
 
-fn lost<E: PoolEntry>(value: &Value) -> bool {
+fn lost<E: PoolEntry<S>, S: Float>(value: &Value) -> bool {
     value.downcast_ref::<E::Loaded>().is_some_and(E::is_lost)
 }
 
@@ -581,19 +586,19 @@ pub trait IntoPool<K, S: Float = f32> {
     fn into_pool(self, set: &mut PoolSet<K, S>);
 }
 
-impl<K, S: Float, E: PoolEntry> IntoPool<K, S> for Declared<K, E> {
+impl<K, S: Float, E: PoolEntry<S>> IntoPool<K, S> for Declared<K, E> {
     fn into_pool(self, set: &mut PoolSet<K, S>) {
         let Self { key, entry, share } = self;
         set.items.push(Item {
             key,
             kind: TypeId::of::<E>(),
             identity: Box::new(entry.identity()),
-            load: entry.load::<S>().erase(),
-            lost: lost::<E>,
-            park: park::<E>,
+            load: entry.load().erase(),
+            lost: lost::<E, S>,
+            park: park::<E, S>,
             file: entry.file().map(Path::to_path_buf),
-            share,
-            reload: Box::new(move || entry.load::<S>().erase()),
+            share: share.then_some(clone_loaded::<E, S>),
+            reload: Box::new(move || entry.load().erase()),
         });
     }
 }

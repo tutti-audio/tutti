@@ -48,16 +48,6 @@ pub trait Sealed: tutti_rt::RingFloat {
     #[cfg(feature = "plugin")]
     fn swap_pooled_plugins<K: AppKey, C: Clock<Float = Self>>(session: &mut Session<K, C>);
 
-    /// The event that lands an opened stream: [`Opened`](crate::SamplerEvent::Opened)
-    /// for an `f32` session, [`OpenedF64`](crate::SamplerEvent::OpenedF64) for an `f64` one.
-    #[doc(hidden)]
-    #[cfg(feature = "sampler")]
-    fn opened(
-        id: crate::SamplerLoad,
-        stream: tutti_sampler::Stream<Self>,
-        reader: tutti_sampler::StreamReader<Self>,
-    ) -> crate::SamplerEvent;
-
     /// Announces the render mode to the hosted plugins: only an `f32` session
     /// hosts plugins, so an `f64` one has nobody to tell.
     #[doc(hidden)]
@@ -96,15 +86,6 @@ impl Sealed for f32 {
         session.swap_pooled_plugins();
     }
 
-    #[cfg(feature = "sampler")]
-    fn opened(
-        id: crate::SamplerLoad,
-        stream: tutti_sampler::Stream<f32>,
-        reader: tutti_sampler::StreamReader<f32>,
-    ) -> crate::SamplerEvent {
-        crate::SamplerEvent::Opened { id, stream, reader }
-    }
-
     fn announce_render_mode<K: AppKey, C: Clock<Float = f32>>(session: &mut Session<K, C>) {
         #[cfg(feature = "plugin")]
         session.render_mode_phase();
@@ -140,15 +121,6 @@ impl Sealed for f64 {
 
     #[cfg(feature = "plugin")]
     fn swap_pooled_plugins<K: AppKey, C: Clock<Float = f64>>(_: &mut Session<K, C>) {}
-
-    #[cfg(feature = "sampler")]
-    fn opened(
-        id: crate::SamplerLoad,
-        stream: tutti_sampler::Stream<f64>,
-        reader: tutti_sampler::StreamReader<f64>,
-    ) -> crate::SamplerEvent {
-        crate::SamplerEvent::OpenedF64 { id, stream, reader }
-    }
 
     fn announce_render_mode<K: AppKey, C: Clock<Float = f64>>(_: &mut Session<K, C>) {}
 

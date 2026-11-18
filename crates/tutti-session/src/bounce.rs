@@ -2087,7 +2087,7 @@ mod tests {
             type Loaded = ();
             type Handle = ();
             fn identity(&self) {}
-            fn load<S: tutti_buffers::Float>(&self) -> Load<(), S> {
+            fn load(&self) -> Load<()> {
                 Load::on_worker(|| Ok(()))
             }
             fn handle(_: &(), _: &Life) {}

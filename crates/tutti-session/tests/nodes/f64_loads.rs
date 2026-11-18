@@ -1,6 +1,6 @@
 //! An `f64` session serves the pool and the spawner: an `audio_file` entry
-//! loads, and a disk stream opens, lands as `OpenedF64` and its clip renders
-//! into `f64` frames beside a figure `f32` cannot hold.
+//! loads its resident wave in `f64`, and a disk stream opens, lands and its
+//! clip renders into `f64` frames beside a figure `f32` cannot hold.
 
 use std::time::Duration;
 
@@ -58,13 +58,40 @@ fn until<T>(
     found.expect("the wait ended on it")
 }
 
-/// **A pool `audio_file` entry loads on an `f64` session**, with the file's
-/// frames.
+/// Frame `i` of the `f64` ramp file: `FINE` scaled, so no frame is an `f32`.
+fn fine_value(i: usize) -> f64 {
+    FINE * (i as f64 + 1.0) * 1e-5
+}
+
+/// A mono Float64 WAV of `LEN` frames of [`fine_value`].
+fn write_f64_ramp(path: &std::path::Path) {
+    let data: Vec<u8> = (0..LEN).flat_map(|i| fine_value(i).to_le_bytes()).collect();
+    let mut file = Vec::new();
+    file.extend(b"RIFF");
+    file.extend((36 + data.len() as u32).to_le_bytes());
+    file.extend(b"WAVEfmt ");
+    file.extend(16u32.to_le_bytes());
+    file.extend(3u16.to_le_bytes()); // IEEE float
+    file.extend(1u16.to_le_bytes());
+    file.extend((RATE as u32).to_le_bytes());
+    file.extend((RATE as u32 * 8).to_le_bytes());
+    file.extend(8u16.to_le_bytes());
+    file.extend(64u16.to_le_bytes());
+    file.extend(b"data");
+    file.extend((data.len() as u32).to_le_bytes());
+    file.extend(data);
+    std::fs::write(path, file).expect("the file writes");
+}
+
+/// **A pool `audio_file` entry of a Float64 file holds its frames as `f64` on
+/// an `f64` session, and a `Clip<f64>` over the pooled wave plays them
+/// exactly.** No frame survives a trip through `f32`.
 #[test]
-fn a_pool_entry_loads_on_an_f64_session() {
+fn a_pooled_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
+    assert_ne!(f64::from(fine_value(7) as f32), fine_value(7));
     let dir = tempfile::tempdir().expect("a temp dir");
-    let path = dir.path().join("ramp.wav");
-    write_ramp(&path);
+    let path = dir.path().join("ramp64.wav");
+    write_f64_ramp(&path);
     let mut s = session();
     s.pool(audio_file("ramp", &path)).expect("a declaration");
     until(&mut s, "the entry", |s, _| {
@@ -74,7 +101,25 @@ fn a_pool_entry_loads_on_an_f64_session() {
         panic!("a resident entry");
     };
     assert_eq!(wave.len().get(), LEN);
-    assert_eq!(wave.at(0, 7), value(7));
+    assert_eq!(wave.at(0, 7), fine_value(7));
+
+    let clip = tutti_sampler::Clip::<f64>::new(wave).expect("a placeable wave");
+    let (key, _handle) = s.graph().add(clip.at(Beat(0.0)));
+    s.graph()
+        .set_sources(Root::output(0), [OutPort::new(key, 0)])
+        .expect("the clip into the root");
+    let _ = s.update();
+    s.play().expect("room");
+    let mut heard = Vec::new();
+    let mut block = vec![0.0f64; BLOCK * 2];
+    while heard.len() < 3_000 {
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+        heard.extend(block.chunks(2).map(|frame| frame[0]));
+    }
+    let first = heard.iter().position(|&x| x != 0.0).expect("sound");
+    for k in 1_100..2_000 {
+        assert_eq!(heard[first + k], fine_value(k), "file frame {k}");
+    }
 }
 
 /// **A disk stream opened on an `f64` session lands as `OpenedF64`, and its
@@ -87,14 +132,13 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
     write_ramp(&path);
     let mut s = session();
     s.open_stream(&path, Placement::HEAD).expect("a streamer");
-    let (stream, reader) = until(&mut s, "the open", |_, events| {
+    let id = until(&mut s, "the open", |_, events| {
         events.into_iter().find_map(|event| match event {
-            SessionEvent::Sampler(SamplerEvent::OpenedF64 { stream, reader, .. }) => {
-                Some((stream, reader))
-            }
+            SessionEvent::Sampler(SamplerEvent::Opened { id }) => Some(id),
             _ => None,
         })
     });
+    let (stream, reader) = s.take_stream(id).expect("the landed stream");
     let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
     let (key, handle) = s
         .graph()

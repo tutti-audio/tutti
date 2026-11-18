@@ -467,7 +467,7 @@ pub fn midi_input<K>(key: K, saved: DeviceInfo) -> Declared<K, MidiInputEntry> {
     Declared::new(key, MidiInputEntry { saved })
 }
 
-impl PoolEntry for MidiInputEntry {
+impl<S: tutti_buffers::Float> PoolEntry<S> for MidiInputEntry {
     type Identity = DeviceInfo;
     type Loaded = InputLoaded;
     type Handle = MidiInput;
@@ -476,7 +476,7 @@ impl PoolEntry for MidiInputEntry {
         self.saved.clone()
     }
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<InputLoaded, S> {
+    fn load(&self) -> Load<InputLoaded, S> {
         let saved = self.saved.clone();
         Load::on_session(move |cx| {
             let id = cx.mint_resource_id();
@@ -524,7 +524,7 @@ impl<K> Declared<K, MidiOutputEntry> {
     }
 }
 
-impl PoolEntry for MidiOutputEntry {
+impl<S: tutti_buffers::Float> PoolEntry<S> for MidiOutputEntry {
     type Identity = (DeviceInfo, OutputOptions);
     type Loaded = OutputLoaded;
     type Handle = MidiOutput;
@@ -533,7 +533,7 @@ impl PoolEntry for MidiOutputEntry {
         (self.saved.clone(), self.options.clone())
     }
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<OutputLoaded, S> {
+    fn load(&self) -> Load<OutputLoaded, S> {
         let saved = self.saved.clone();
         let options = self.options.clone();
         Load::on_session(move |cx| {

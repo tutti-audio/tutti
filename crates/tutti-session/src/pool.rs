@@ -267,7 +267,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`HandleError::NotPooled`] when the key is not declared (never, or
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
-    pub fn audio<P>(&self, key: &P) -> Result<AudioEntry, HandleError<P>>
+    pub fn audio<P>(&self, key: &P) -> Result<AudioEntry<C::Float>, HandleError<P>>
     where
         P: crate::AppKey,
     {

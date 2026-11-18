@@ -36,7 +36,7 @@ impl PoolEntry for InProcess {
 
     fn identity(&self) {}
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<(), S> {
+    fn load(&self) -> Load<()> {
         let (dropped_on, dropped) = (Arc::clone(&self.dropped_on), Arc::clone(&self.dropped));
         Load::on_worker_then_main(
             move || {
@@ -118,7 +118,7 @@ impl PoolEntry for Dual {
 
     fn identity(&self) {}
 
-    fn load<S: tutti_buffers::Float>(&self) -> Load<Arc<u32>, S> {
+    fn load(&self) -> Load<Arc<u32>> {
         let fail = Arc::clone(&self.fail);
         let made = move || {
             if fail.load(Ordering::SeqCst) {
@@ -139,6 +139,10 @@ impl PoolEntry for Dual {
 
     fn handle(loaded: &Arc<u32>, _: &Life) -> Arc<u32> {
         Arc::clone(loaded)
+    }
+
+    fn share(loaded: &Arc<u32>) -> Option<Arc<u32>> {
+        Some(Arc::clone(loaded))
     }
 }
 
