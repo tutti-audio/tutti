@@ -11,4 +11,4 @@ pub mod atomic_rate;
 pub mod param;
 
 pub use atomic_rate::{AtomicSampleRate, ParkedSampleRate};
-pub use param::{Param, Param64, ParamCell, ParamRaw};
+pub use param::{Param, Param64, ParamCell};

@@ -204,7 +204,7 @@ mod tests {
     use tutti_buffers::MaxBlock;
     use tutti_curve::{Breakpoint, Trajectory};
     use tutti_graph::{Solo, TransportPosition};
-    use tutti_types::AtomicF32;
+    use tutti_types::AtomicF64;
     use tutti_units::{Bpm, Hz, SampleRate, Samples};
 
     fn ramp_trajectory() -> Trajectory<Hz> {
@@ -366,7 +366,7 @@ mod tests {
     }
 
     /// A curve that reads state written after it was built, and freezes it.
-    struct Live(Arc<AtomicF32>);
+    struct Live(Arc<AtomicF64>);
 
     struct Fixed(f64);
 
@@ -378,11 +378,11 @@ mod tests {
 
     impl Curve for Live {
         fn value_at(&self, _: Beat) -> Option<f64> {
-            Some(f64::from(self.0.load(Ordering::Acquire)))
+            Some(self.0.load(Ordering::Acquire))
         }
 
         fn frozen(&self) -> Option<Arc<dyn Curve>> {
-            Some(Arc::new(Fixed(f64::from(self.0.load(Ordering::Acquire)))))
+            Some(Arc::new(Fixed(self.0.load(Ordering::Acquire))))
         }
     }
 
@@ -390,7 +390,7 @@ mod tests {
     /// after the fork does not reach it.
     #[test]
     fn a_fork_freezes_a_live_curve() {
-        let cell = Arc::new(AtomicF32::new(0.25));
+        let cell = Arc::new(AtomicF64::new(0.25));
         let lane = AutomationLaneNode::new(Live(Arc::clone(&cell)));
         let fork = lane.fork_fresh();
         cell.store(0.75, Ordering::Release);

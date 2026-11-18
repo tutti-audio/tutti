@@ -24,7 +24,7 @@ use tutti_units::{Depth, Drive, Seconds, UnitParam};
 
 use common::probe::ProbeUnit;
 
-const BASE: f32 = 5.0;
+const BASE: f64 = 5.0;
 
 fn session() -> Session {
     Session::builder()
@@ -83,13 +83,10 @@ fn add_addresses_a_hosts_param_node() {
 #[test]
 fn add_addresses_an_engine_node() {
     let mut s = session();
-    let node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(f64::from(BASE)));
+    let node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(BASE));
     let tutti_types::ParamCell::F64(cell) = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
-        .expect("a distortion has a drive")
-    else {
-        unreachable!("a kernel node's controls are f64 cells")
-    };
+        .expect("a distortion has a drive");
     let (key, _) = s.graph().add(node);
     modulate_drive(&mut s, key.erase());
     assert_knob_is(&s, key.erase(), cell);
@@ -107,11 +104,7 @@ fn a_crossfade_hands_the_lane_the_incoming_nodes_cell() {
         .set_sources(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
     modulate_drive(&mut s, node.erase());
-    assert_eq!(
-        knob(&s, node.erase()),
-        Some(f64::from(BASE)),
-        "precondition: the lane"
-    );
+    assert_eq!(knob(&s, node.erase()), Some(BASE), "precondition: the lane");
 
     let incoming = ProbeUnit::of(UnitParam::Drive, 3.0);
     let new = incoming.knob();

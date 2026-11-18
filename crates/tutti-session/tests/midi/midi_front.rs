@@ -413,7 +413,7 @@ fn a_route_rule_keyed_by_the_apps_id_round_trips_and_refuses_a_bad_channel() {
 #[cfg(feature = "midi-hardware")]
 mod hardware {
     use super::*;
-    use tutti_midi_device::{EndpointId, Identity, PortDirection};
+    use tutti_midi_device::{EndpointId, Identity, PortDirection, ProductInstanceId};
     use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
     use tutti_session::{
         LoadError, MidiPortError, Peer, PoolState, PortCause, Presence, midi_input, midi_output,
@@ -432,7 +432,7 @@ mod hardware {
     /// A device the OS names by a unit, so its saved identity is exact.
     fn unit(raw: u64, name: &str, unit: &str) -> tutti_midi_hardware::OsEndpoint {
         let mut e = endpoint(raw, name);
-        e.identity = Identity::Product(unit.into());
+        e.identity = Identity::Product(ProductInstanceId::new(unit).unwrap());
         e
     }
 

@@ -25,7 +25,7 @@ use tutti_modulation::{
 };
 use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
-use tutti_types::AtomicF32;
+use tutti_types::AtomicF64;
 use tutti_units::{
     Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, Normalized, ParamId, ParamKey, Phase,
     PhaseIncrement, SampleRate, Samples, UnitParam,
@@ -175,11 +175,11 @@ fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
 
 /// A native lane for `probe`'s cutoff: knob `knob` (its own cell, as a
 /// node's `Param` cell would be), the port's own range cell.
-fn native(ed: &Editor, probe: u64, program: ControlProgram, knob: Option<f32>) -> ControlLaneNode {
+fn native(ed: &Editor, probe: u64, program: ControlProgram, knob: Option<f64>) -> ControlLaneNode {
     ControlLaneNode::for_unit(
         ParamKey::<Hz>::CUTOFF.addr(),
         program,
-        knob.map(|k| Arc::new(AtomicF32::new(k)).into()),
+        knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
         Some(ed.param_range_cell(cutoff(probe)).expect("committed")),
     )
 }

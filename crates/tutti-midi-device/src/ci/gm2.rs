@@ -11,7 +11,7 @@
 //! The sound set, the controllers and the Mode messages are the General MIDI 2
 //! specification's, which both Profiles adopt unchanged (M2-118 §3.1, M2-119
 //! §3); a General MIDI 2 synthesizer is a device's side of the Profile, and
-//! tutti has none here. The original GM System On and Off messages are read by
+//! this crate has none. The original GM System On and Off messages are read by
 //! `tutti_midi_protocol`'s universal messages; a device that turns General MIDI
 //! on or off by them reports the change with Profile Enabled or Disabled
 //! (M2-118 §3.2.1), which is the device's side.

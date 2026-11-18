@@ -238,8 +238,8 @@ pub mod nodes {
     };
     pub use tutti_nodes::automation::Recorder as AutomationRecorder;
     pub use tutti_nodes::automation::{
-        Automatable, AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls,
-        LiveAutomationLane, RecordMode, RecordingConfig, Trajectory,
+        AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls, LiveAutomationLane,
+        RecordMode, RecordingConfig, Trajectory,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
@@ -316,7 +316,7 @@ pub mod types {
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
         Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
     };
-    pub use tutti_types::{AtomicSampleRate, Mint, Param, Param64, ParamCell, ParamRaw};
+    pub use tutti_types::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,

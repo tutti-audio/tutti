@@ -1,6 +1,6 @@
 //! A non-finite control value never reaches a recursive node's state.
 //!
-//! Every control cell here is a raw `Arc<AtomicF32>` a host can write
+//! Every control cell here is a raw `Arc<AtomicF64>` a host can write
 //! anything into. A NaN or ±∞ that reached a filter integrator, a delay line,
 //! an LFO phase or an envelope follower would stay there for good — every later
 //! sample is computed from it — so the nodes read a non-finite value as

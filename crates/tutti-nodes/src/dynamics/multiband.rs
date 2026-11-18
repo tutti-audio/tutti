@@ -22,7 +22,7 @@ use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
     Status,
 };
-use tutti_types::{AtomicF32, Param};
+use tutti_types::{AtomicF64, Param};
 use tutti_units::{CompressionRatio, Db, Hz, SampleRate};
 use tutti_units::{Seconds, Tail, UnitParam};
 
@@ -82,7 +82,7 @@ const MAKEUP: usize = 5;
 /// A toggle cell's value: `>= 0.5` is on (so a NaN is off), as
 /// [`UnitParam::Bypass`] encodes it.
 #[inline]
-fn is_on(cell: &AtomicF32) -> bool {
+fn is_on(cell: &AtomicF64) -> bool {
     cell.load(core::sync::atomic::Ordering::Acquire) >= 0.5
 }
 
@@ -133,9 +133,9 @@ struct Band {
     release: Param<Seconds>,
     makeup: Param<Db>,
     /// `>= 0.5` bypasses the band ([`UnitParam::Bypass`]).
-    bypass: Arc<AtomicF32>,
+    bypass: Arc<AtomicF64>,
     /// `>= 0.5` solos the band ([`UnitParam::Solo`]).
-    solo: Arc<AtomicF32>,
+    solo: Arc<AtomicF64>,
     reduction: Param<Db>,
     /// Last finite threshold, knee, ratio, makeup, attack and release. Every one of
     /// them reaches the envelope follower, a recursive state that a single NaN or ±∞
@@ -152,8 +152,8 @@ impl Band {
             attack: Param::new(DEFAULT_ATTACK),
             release: Param::new(DEFAULT_RELEASE),
             makeup: Param::new(Db(0.0)),
-            bypass: Arc::new(AtomicF32::new(0.0)),
-            solo: Arc::new(AtomicF32::new(0.0)),
+            bypass: Arc::new(AtomicF64::new(0.0)),
+            solo: Arc::new(AtomicF64::new(0.0)),
             reduction: Param::new(Db::UNITY),
             good: [
                 LastGood::new(DEFAULT_THRESHOLD.get(), 0.0),
@@ -174,10 +174,10 @@ impl Band {
         self.attack.detach();
         self.release.detach();
         self.makeup.detach();
-        self.bypass = Arc::new(AtomicF32::new(
+        self.bypass = Arc::new(AtomicF64::new(
             self.bypass.load(core::sync::atomic::Ordering::Acquire),
         ));
-        self.solo = Arc::new(AtomicF32::new(
+        self.solo = Arc::new(AtomicF64::new(
             self.solo.load(core::sync::atomic::Ordering::Acquire),
         ));
         self.reduction = Param::new(Db::UNITY);

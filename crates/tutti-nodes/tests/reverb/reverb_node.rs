@@ -19,7 +19,7 @@ use tutti_graph::{
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{FdnNode, FreeverbNode};
-use tutti_types::AtomicF32;
+use tutti_types::AtomicF64;
 use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances
@@ -491,7 +491,7 @@ fn a_fork_starts_silent_with_the_values_set() {
 /// reads the port at the block's last frame, designs, and retargets its realization.
 #[test]
 fn a_lane_driving_the_room_changes_how_long_it_rings() {
-    let ring = |room: f32| -> f64 {
+    let ring = |room: f64| -> f64 {
         let node = FreeverbNode::<f32>::live(gm());
         let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
         let (n, _) = g.add_with_controls(node);
@@ -508,7 +508,7 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
         let lane = ControlLaneNode::for_unit(
             UnitParam::RoomSize,
             program,
-            Some(Arc::new(AtomicF32::new(room)).into()),
+            Some(Arc::new(AtomicF64::new(room)).into()),
             None,
         );
         let key = tutti_graph::NodeKey(9_000);

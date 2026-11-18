@@ -24,7 +24,9 @@
 
 use std::vec::Vec;
 
-use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, Ump};
+use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, UNIVERSAL_NON_REAL_TIME, Ump};
+
+use crate::name::ProductInstanceId;
 
 mod articulation;
 mod curve;
@@ -70,7 +72,7 @@ pub use drum_map::{
     BitmapPosition, DrumControl, DrumFeatures, DrumInstrument, DrumNoteMapLevel, DrumSounds,
     MutuallyExclusiveSet, NotAMutuallyExclusiveSet,
 };
-pub use endpoint::{CiInstanceId, EndpointInfo, EndpointStatus};
+pub use endpoint::{EndpointInfo, EndpointStatus};
 pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
 pub use initiator::{
     Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable, Request,
@@ -118,11 +120,11 @@ pub use process_initiator::{ProcessAction, ProcessError, ProcessInitiator, Repor
 pub use profile::{
     ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
     NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError, ProfileId, ProfileList,
-    ProfileLists, ProfileOnRequest, ProfileState, ProfileTarget, SUB_ID2_PROFILE_ADDED,
-    SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED,
-    SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED,
-    SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF,
-    SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
+    ProfileLists, ProfileOnRequest, ProfileSpecific, ProfileState, ProfileTarget,
+    SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY,
+    SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY,
+    SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
+    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
 };
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
 pub use status::{Ack, Nak};
@@ -130,11 +132,45 @@ pub use text::MessageText;
 pub use two_state::{SwitchMeaning, TwoState};
 pub use wait::{NotATimeoutWait, PEER_REPLY_TIMEOUT, TimeoutWait};
 
-/// Universal SysEx non-real-time id, the first byte of every CI message: `0x7E`.
-pub const CI_UNIVERSAL_SYSEX: u8 = 0x7E;
-
 /// Sub-ID#1 identifying a MIDI-CI message (M2-101 §5.2.1).
 pub const CI_SUB_ID_1: u8 = 0x0D;
+
+/// Whether the SysEx7 `payload` (the bytes after `F0`, or the data of the
+/// first packet of a message) begins a Property Exchange message: Universal
+/// Non-Real Time, any Device ID, Sub-ID#1 `0D`, and a Sub-ID#2 in the Property
+/// Exchange range `30` to `3F` (M2-101 Appendix E). It reads only that
+/// preamble, so it answers for the first packet of a divided message and for
+/// a message of a Version this codec does not decode.
+#[must_use]
+pub fn is_property_exchange(payload: &[u8]) -> bool {
+    matches!(
+        payload,
+        [
+            UNIVERSAL_NON_REAL_TIME,
+            _,
+            CI_SUB_ID_1,
+            SUB_ID2_PE_CAPABILITIES_INQUIRY..=SUB_ID2_PE_NOTIFY,
+            ..
+        ]
+    )
+}
+
+/// Whether the SysEx7 `payload` begins a Set Profile On message: Universal
+/// Non-Real Time, any Device ID, Sub-ID#1 `0D`, Sub-ID#2 `22` (M2-101 Appendix E).
+/// Like [`is_property_exchange`] it reads only the preamble.
+#[must_use]
+pub fn is_set_profile_on(payload: &[u8]) -> bool {
+    matches!(
+        payload,
+        [
+            UNIVERSAL_NON_REAL_TIME,
+            _,
+            CI_SUB_ID_1,
+            SUB_ID2_SET_PROFILE_ON,
+            ..
+        ]
+    )
+}
 
 /// The MIDI-CI Message Format Version this codec speaks: **0x02** (MIDI-CI v1.2).
 ///
@@ -372,7 +408,7 @@ fn encode_preamble(
     out: &mut impl Extend<u8>,
 ) {
     out.extend([
-        CI_UNIVERSAL_SYSEX,
+        UNIVERSAL_NON_REAL_TIME,
         device_id.get(),
         CI_SUB_ID_1,
         sub_id2,
@@ -624,16 +660,7 @@ pub enum CiMessage {
     },
     /// Profile Specific Data (§7.12): data the Profile's specification defines.
     /// To one device or, when the Profile says so, to the Broadcast MUID.
-    ProfileSpecificData {
-        /// Addressing preamble; its Device ID is the address.
-        header: CiHeader,
-        /// To one device or to all.
-        to: Destination,
-        /// The Profile.
-        profile: ProfileId,
-        /// The data.
-        data: SpecificData,
-    },
+    ProfileSpecificData(ProfileSpecific),
 }
 
 impl CiMessage {
@@ -682,8 +709,8 @@ impl CiMessage {
             | CiMessage::ProfileRemoved { header, .. }
             | CiMessage::ProfileDetailsInquiry { header, .. }
             | CiMessage::ProfileDetailsReply { header, .. }
-            | CiMessage::PropertyExchange { header, .. }
-            | CiMessage::ProfileSpecificData { header, .. } => *header,
+            | CiMessage::PropertyExchange { header, .. } => *header,
+            CiMessage::ProfileSpecificData(specific) => specific.header(),
         }
     }
 
@@ -699,7 +726,7 @@ impl CiMessage {
             | CiMessage::ProfileDisabled { .. }
             | CiMessage::ProfileAdded { .. }
             | CiMessage::ProfileRemoved { .. } => Destination::Broadcast,
-            CiMessage::ProfileSpecificData { to, .. } => *to,
+            CiMessage::ProfileSpecificData(specific) => specific.to(),
             CiMessage::DiscoveryReply { to, .. }
             | CiMessage::EndpointInquiry { to, .. }
             | CiMessage::EndpointReply { to, .. }
@@ -833,7 +860,8 @@ impl CiMessage {
                 out.extend(data.as_bytes().iter().copied());
             }
             CiMessage::PropertyExchange { message, .. } => message.encode_body(out),
-            CiMessage::ProfileSpecificData { profile, data, .. } => {
+            CiMessage::ProfileSpecificData(specific) => {
+                let (profile, data) = (specific.profile(), specific.data());
                 out.extend(profile.to_bytes());
                 // Table 28: a 4-byte length of the Profile Specific Data that follows, LSB first.
                 out.extend(data.wire_len().to_le7());
@@ -926,13 +954,12 @@ impl CiMessage {
             (SUB_ID2_ENDPOINT_REPLY, Some(to)) => match read::endpoint_reply_body(body) {
                 None => None,
                 Some((raw, data)) => match EndpointStatus::new(raw) {
-                    Some(EndpointStatus::ProductInstanceId) => {
-                        CiInstanceId::from_bytes(data).map(|id| CiMessage::EndpointReply {
+                    Some(EndpointStatus::ProductInstanceId) => ProductInstanceId::from_bytes(data)
+                        .map(|id| CiMessage::EndpointReply {
                             header,
                             to,
                             info: EndpointInfo::ProductInstanceId(id),
-                        })
-                    }
+                        }),
                     None => return unread(UnreadReason::ReservedStatus),
                 },
             },
@@ -1034,12 +1061,12 @@ impl CiMessage {
             }
             (SUB_ID2_PROFILE_SPECIFIC_DATA, _) => {
                 read::specific_data_body(body).map(|(profile, data)| {
-                    CiMessage::ProfileSpecificData {
+                    CiMessage::ProfileSpecificData(ProfileSpecific::read(
                         header,
-                        to: destination,
+                        destination,
                         profile,
                         data,
-                    }
+                    ))
                 })
             }
             (0x30 | 0x31 | 0x34..=0x39 | 0x3F, Some(to)) => {

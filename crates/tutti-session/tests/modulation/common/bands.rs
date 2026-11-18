@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, Io, Node, ParamInput, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::AtomicF32;
+use tutti_types::AtomicF64;
 use tutti_units::Db;
 use tutti_units::{UnitAddr, UnitParam};
 
@@ -21,14 +21,14 @@ pub const BAND1: UnitAddr = UnitAddr::new(UnitParam::Threshold, 1);
 /// Two thresholds, as above. `Clone` shares the cells.
 #[derive(Clone)]
 pub struct Bands {
-    knobs: [Arc<AtomicF32>; 2],
+    knobs: [Arc<AtomicF64>; 2],
 }
 
 impl Bands {
     /// Band 0 at `t0`, band 1 at `t1`.
-    pub fn new(t0: f32, t1: f32) -> Self {
+    pub fn new(t0: f64, t1: f64) -> Self {
         Self {
-            knobs: [Arc::new(AtomicF32::new(t0)), Arc::new(AtomicF32::new(t1))],
+            knobs: [Arc::new(AtomicF64::new(t0)), Arc::new(AtomicF64::new(t1))],
         }
     }
 }
@@ -46,7 +46,7 @@ impl Node for Bands {
                 ParamInput::Frames { values: v, .. } => io.output(k).copy_from_slice(v),
                 ParamInput::Base => {
                     let base = knob.load(Ordering::Acquire);
-                    io.output(k).fill(base);
+                    io.output(k).fill(base as f32);
                 }
             }
         }
@@ -56,9 +56,7 @@ impl Node for Bands {
     fn reset(&mut self) {}
 
     fn param_base(&self, port: usize) -> Option<f64> {
-        self.knobs
-            .get(port)
-            .map(|k| f64::from(k.load(Ordering::Acquire)))
+        self.knobs.get(port).map(|k| k.load(Ordering::Acquire))
     }
 }
 

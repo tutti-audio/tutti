@@ -1223,7 +1223,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
         "{why}"
     );
     assert_eq!(
-        state.as_ref().map(PeerState::bytes),
+        state.as_deref().map(PeerState::bytes),
         Some(kept.as_slice()),
         "the user's last state goes out with the event"
     );

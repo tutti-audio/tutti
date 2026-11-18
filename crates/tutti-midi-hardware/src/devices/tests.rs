@@ -6,7 +6,7 @@ use crate::HardwareMidiInputs;
 use crate::capability::OsEndpoint;
 use crate::devices::reporter::{Reporter, os_devices};
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
-use tutti_midi_device::Identity;
+use tutti_midi_device::{Identity, ProductInstanceId};
 use tutti_midi_runtime::DeviceWriters;
 
 /// Long enough to be a failure, not a race: a wake returns at once.
@@ -322,7 +322,7 @@ fn a_saved_device_resolves_through_devices() {
     let (devices, events, fake) = fake();
     let port = |raw, name: &str, direction| {
         let mut e = endpoint(raw, name);
-        e.identity = Identity::Product("unit-1".into());
+        e.identity = Identity::Product(ProductInstanceId::new("unit-1").unwrap());
         fake.plug(e, direction);
     };
     port(1, "Pad In", PortDirection::Input);
@@ -344,7 +344,7 @@ fn a_saved_device_resolves_through_devices() {
         Resolved::Ambiguous(vec![by_name("Pad In")])
     );
     let mut again = endpoint(7, "Pad Out");
-    again.identity = Identity::Product("unit-1".into());
+    again.identity = Identity::Product(ProductInstanceId::new("unit-1").unwrap());
     fake.plug(again, PortDirection::Output);
     assert_eq!(
         devices.resolve(&pad_out),

@@ -63,4 +63,4 @@ pub use atomic_float::{AtomicF32, AtomicF64};
 pub use mint::Mint;
 
 // Value vocabulary.
-pub use value::{AtomicSampleRate, Param, Param64, ParamCell, ParamRaw, ParkedSampleRate};
+pub use value::{AtomicSampleRate, Param, Param64, ParamCell, ParkedSampleRate};
