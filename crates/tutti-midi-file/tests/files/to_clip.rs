@@ -538,6 +538,7 @@ fn what_has_no_successor_is_reported_with_its_tick() {
         (8, text(TextKind::InstrumentName, "piano")),
         (8, text(TextKind::ProgramName, "p")),
         (9, text(TextKind::DeviceName, "d")),
+        (10, text(TextKind::Marker, "late")),
         (
             11,
             meta(Meta::SequencerSpecific {
@@ -587,6 +588,7 @@ fn what_has_no_successor_is_reported_with_its_tick() {
             (8, NoSuccessor),
             (8, NoSuccessor),
             (9, NoSuccessor),
+            (10, NoSuccessor),
             (11, NoSuccessor),
             (12, NoSuccessor),
             (13, WholeNoteDenominator),
@@ -596,8 +598,8 @@ fn what_has_no_successor_is_reported_with_its_tick() {
         ]
     );
     // The report holds the event itself.
-    assert_eq!(converted.dropped[10].event, escape);
-    assert_eq!(converted.dropped[11].event, whole_note);
+    assert_eq!(converted.dropped[11].event, escape);
+    assert_eq!(converted.dropped[12].event, whole_note);
     // The dropped signature was at tick 13, so the clip's only one is the
     // default 4/4 at tick 0 (the file declared none at its start).
     let signatures: Vec<_> = events_of(&converted.clip)

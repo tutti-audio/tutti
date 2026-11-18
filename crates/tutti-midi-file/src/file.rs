@@ -1121,10 +1121,14 @@ impl MidiFile {
     /// where), the tempo events do not make a [`TempoMap`], or the events break
     /// a rule SMF 1.0 gives a writer: a SysEx message that does not end in `F7`
     /// or has a channel message between its packets, a Sequence Number or
-    /// Track Name after time 0 (a Sequence Number also after a channel message,
-    /// SysEx or escape, or outside the first track of a format 0 or 1 file), an
-    /// SMPTE Offset, Set Tempo or Time Signature outside the first track of a
-    /// format 1 file.
+    /// Track Name after time 0 (a Sequence Number or SMPTE Offset also after a
+    /// channel message, SysEx or escape, a Sequence Number also outside the
+    /// first track of a format 0 or 1 file), an SMPTE Offset, Set Tempo or Time
+    /// Signature outside the first track of a format 1 file, or a copyright
+    /// notice that is not the first event of the first track or is not the
+    /// file's only one. tutti's writer also refuses what the specification
+    /// only recommends: the format 1 tempo map outside the first track, and the
+    /// copyright placement.
     #[must_use = "an Err means no file was built"]
     pub fn smf(
         format: SmfFormat,

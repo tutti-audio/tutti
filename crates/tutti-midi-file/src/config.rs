@@ -32,7 +32,12 @@ impl std::fmt::Display for TrackPart {
 /// [`SysExNotEnded`](Self::SysExNotEnded) to
 /// [`CopyrightNotTogether`](Self::CopyrightNotTogether) are the rules of
 /// SMF 1.0 a writer keeps: [`MidiFile::smf`](crate::MidiFile::smf) refuses what
-/// breaks them, and a read keeps such a file as it is.
+/// breaks them, and a read keeps such a file as it is. tutti's writer also
+/// refuses what the specification only recommends: the format 1 tempo map
+/// outside the first track
+/// ([`TempoMapNotInFirstTrack`](Self::TempoMapNotInFirstTrack)), and the
+/// copyright placement ([`CopyrightNotFirst`](Self::CopyrightNotFirst),
+/// [`CopyrightNotTogether`](Self::CopyrightNotTogether)).
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TracksError {

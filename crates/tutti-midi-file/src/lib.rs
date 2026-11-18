@@ -24,10 +24,14 @@
 //!   Timestamp messages, and the Utility messages M2-104 does not define.
 //! - **A writer keeps SMF 1.0's placement rules, a reader keeps the file.**
 //!   [`MidiFile::smf`] refuses a SysEx message that does not end in `F7`, a
-//!   Sequence Number or Track Name after time 0, and a format 1 file whose tempo
-//!   map, SMPTE Offset or Sequence Number is not in its first track
-//!   ([`TracksError`]); a read keeps such a file, its Sequence Number and Track
-//!   Name counting only at the start. [`Track::numbered`],
+//!   Sequence Number, SMPTE Offset or Track Name after the start of its track,
+//!   a copyright notice that is not the first event of the first track (or a
+//!   second one), and a format 1 file whose tempo map, SMPTE Offset or Sequence
+//!   Number is not in its first track ([`TracksError`]); a read keeps such a
+//!   file, its Sequence Number, SMPTE Offset and Track Name counting only at
+//!   the start. tutti's writer also refuses what the specification only
+//!   recommends: the format 1 tempo map outside the first track, and the
+//!   copyright placement. [`Track::numbered`],
 //!   [`Track::smpte_start`] and [`Track::copyright`] place their event where the
 //!   specification puts it, and [`MidiFile::with_default_tempo_and_meter`] adds the
 //!   tempo and time signature a file without them is read with.
