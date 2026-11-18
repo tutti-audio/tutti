@@ -360,10 +360,10 @@ impl Node for Integrator {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let (ins, mut outs) = io.split();
-        for c in 0..2 {
+        for (c, sum) in self.0[..2].iter_mut().enumerate() {
             for (y, &x) in outs.get(c).iter_mut().zip(ins.get(c)) {
-                self.0[c] += x;
-                *y = self.0[c];
+                *sum += x;
+                *y = *sum;
             }
         }
         Status::Modified

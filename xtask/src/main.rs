@@ -437,27 +437,47 @@ fn spawn_failed(c: &Cmd, e: &std::io::Error) -> u8 {
     1
 }
 
-/// The shell's `dir/prefix*suffix`: the sorted matches, or the pattern itself
-/// when nothing matches (as `sh` leaves it).
+/// The shell's glob over `/`-separated components, each a name or one
+/// `prefix*suffix`: the sorted matches, or the pattern itself when nothing
+/// matches (as `sh` leaves it).
 fn expand(arg: &str, root: &Path) -> Vec<String> {
-    let Some((dir, file)) = arg.rsplit_once('/') else {
+    if !arg.contains('*') {
         return vec![arg.to_owned()];
-    };
-    let Some((prefix, suffix)) = file.split_once('*') else {
-        return vec![arg.to_owned()];
-    };
-    let mut hits: Vec<String> = std::fs::read_dir(PathBuf::from(root).join(dir))
+    }
+    let mut paths = vec![String::new()];
+    for part in arg.split('/') {
+        paths = paths
+            .iter()
+            .flat_map(|at| {
+                let join = |n: &str| {
+                    if at.is_empty() {
+                        n.to_owned()
+                    } else {
+                        format!("{at}/{n}")
+                    }
+                };
+                let Some((prefix, suffix)) = part.split_once('*') else {
+                    return vec![join(part)];
+                };
+                std::fs::read_dir(root.join(at))
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .filter(|n| {
+                        n.len() >= prefix.len() + suffix.len()
+                            && n.starts_with(prefix)
+                            && n.ends_with(suffix)
+                            && !(n.starts_with('.') && !prefix.starts_with('.'))
+                    })
+                    .map(|n| join(&n))
+                    .collect()
+            })
+            .collect();
+    }
+    let mut hits: Vec<String> = paths
         .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| {
-            n.len() >= prefix.len() + suffix.len()
-                && n.starts_with(prefix)
-                && n.ends_with(suffix)
-                && !(n.starts_with('.') && !prefix.starts_with('.'))
-        })
-        .map(|n| format!("{dir}/{n}"))
+        .filter(|p| root.join(p).exists())
         .collect();
     hits.sort();
     if hits.is_empty() {
@@ -519,5 +539,27 @@ mod tests {
     fn a_glob_without_matches_stays_literal() {
         let dir = std::env::temp_dir().join("xtask-glob-test-none");
         assert_eq!(expand("deps/engine-*", &dir), ["deps/engine-*"]);
+    }
+
+    /// A `*` matches within one component at any depth, so a bench under its
+    /// package's build directories is found whatever the hash.
+    #[test]
+    fn a_glob_matches_in_every_component() {
+        let dir = std::env::temp_dir().join(format!("xtask-glob-test-deep-{}", std::process::id()));
+        for f in [
+            "build/p/a1/out/eng-1f",
+            "build/p/b2/out/eng-2e",
+            "build/p/b2/out/other-3d",
+            "build/q/c3/out/eng-4c",
+        ] {
+            let path = dir.join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"").unwrap();
+        }
+        assert_eq!(
+            expand("build/p/*/out/eng-*", &dir),
+            ["build/p/a1/out/eng-1f", "build/p/b2/out/eng-2e"]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

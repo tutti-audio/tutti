@@ -143,28 +143,46 @@ macro_rules! bounded {
 
 bits!(
     /// A 4-bit value: an MDS id, a chord degree.
-    U4, u8, "u8", 4
+    U4,
+    u8,
+    "u8",
+    4
 );
 bits!(
     /// A 7-bit data byte (`0..=127`): a velocity, a pressure, a program, a
     /// controller value, a SysEx byte.
-    U7, u8, "u8", 7
+    U7,
+    u8,
+    "u8",
+    7
 );
 bits!(
     /// A 14-bit value (`0..=16383`): a MIDI 1.0 pitch bend, a song position.
-    U14, u16, "u16", 14
+    U14,
+    u16,
+    "u16",
+    14
 );
 bits!(
     /// A 28-bit value (`0..=0x0FFF_FFFF`): a MIDI-CI MUID, a 28-bit size.
-    U28, u32, "u32", 28
+    U28,
+    u32,
+    "u32",
+    28
 );
 bits!(
     /// A MIDI note number on the wire (`0..=127`), not a musical pitch.
-    NoteNumber, u8, "u8", 7
+    NoteNumber,
+    u8,
+    "u8",
+    7
 );
 bits!(
     /// A Delta Clockstamp: ticks since the previous event (20 bits).
-    DeltaTicks, u32, "u32", 20
+    DeltaTicks,
+    u32,
+    "u32",
+    20
 );
 
 impl U14 {
@@ -324,33 +342,48 @@ bounded!(
     /// A Function Block number (`0..=31`). A reserved number read from the
     /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
     /// this type.
-    FunctionBlockId, u8, 0, 31
+    FunctionBlockId,
+    u8,
+    0,
+    31
 );
 bounded_conversions!(FunctionBlockId, u8, 31);
 bounded!(
     /// A Group number as a Function Block declares its first Group (`0..=15`).
     /// A reserved number read from the wire is a
     /// [`Field::Reserved`](crate::Field::Reserved).
-    FirstGroup, u8, 0, 15
+    FirstGroup,
+    u8,
+    0,
+    15
 );
 bounded_conversions!(FirstGroup, u8, 15);
 bounded!(
     /// How many Groups a Function Block spans (`1..=16`). A reserved count read
     /// from the wire is a [`Field::Reserved`](crate::Field::Reserved).
-    GroupSpan, u8, 1, 16
+    GroupSpan,
+    u8,
+    1,
+    16
 );
 bounded_conversions!(GroupSpan, u8, 16);
 bounded!(
     /// How many channels an MPE Profile zone has, its Manager Channel and one
     /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
-    MpeChannels, u8, 2, 16
+    MpeChannels,
+    u8,
+    2,
+    16
 );
 bounded_conversions!(MpeChannels, u8, 16);
 bounded!(
     /// A chord type, `0x00..=0x1B` (Table 14). A reserved type read from the
     /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
     /// this type.
-    ChordType, u8, 0, 0x1B
+    ChordType,
+    u8,
+    0,
+    0x1B
 );
 bounded_conversions!(ChordType, u8, 0x1B);
 
@@ -359,7 +392,10 @@ bounded!(
     /// (`0..=32`, M2-104 §7.1.2). A reserved count (`33..=127`) read from the
     /// wire is a [`FunctionBlocks::Reserved`](crate::FunctionBlocks::Reserved),
     /// not a value of this type.
-    FunctionBlockCount, u8, 0, 32
+    FunctionBlockCount,
+    u8,
+    0,
+    32
 );
 bounded_conversions!(FunctionBlockCount, u8, 32);
 
@@ -373,7 +409,10 @@ bounded!(
     /// §7.2.3.1); `0` is reserved. A zero read from the wire is a
     /// [`Utility::ReservedTicksPerQuarterNote`](crate::Utility::ReservedTicksPerQuarterNote),
     /// not a value of this type.
-    TicksPerQuarterNote, u16, 1, 65535
+    TicksPerQuarterNote,
+    u16,
+    1,
+    65535
 );
 bounded_conversions!(TicksPerQuarterNote, u16, u16::MAX);
 
@@ -389,7 +428,10 @@ bounded!(
     /// receiver has one channel each, up to Channel 16. The MIDI 2.0 Protocol
     /// carries it in the top 7 bits of the Control Change's 32-bit value
     /// (M2-104 §7.4.6.1).
-    MonoChannels, u8, 0, 16
+    MonoChannels,
+    u8,
+    0,
+    16
 );
 bounded_conversions!(MonoChannels, u8, 16);
 
@@ -428,7 +470,10 @@ impl MonoChannels {
 
 bounded!(
     /// Sharps (positive) or flats (negative) in a key signature, `-7..=7`.
-    SharpsFlats, i8, -7, 7
+    SharpsFlats,
+    i8,
+    -7,
+    7
 );
 
 /// A number that is not a count of sharps or flats: outside `-7..=7`.

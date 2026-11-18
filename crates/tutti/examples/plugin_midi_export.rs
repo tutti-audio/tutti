@@ -208,6 +208,8 @@ fn reference(
     // SAFETY: set before the first server is spawned, on the only thread
     // that reads the environment.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", support::plugin_server()) };
+    // SAFETY: as above.
+    unsafe { std::env::set_var("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe()) };
     let midi = dir.join("phrase.mid");
     phrase(&midi)?;
     let (plugin, state) = notes_plugin();
@@ -273,6 +275,8 @@ mod tests {
         // SAFETY: set before the first server is spawned, on the only thread
         // that reads the environment.
         unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", super::support::plugin_server()) };
+        // SAFETY: as above.
+        unsafe { std::env::set_var("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe()) };
         let midi = dir.join("phrase.mid");
         super::phrase(&midi).unwrap();
         let (plugin, state) = super::notes_plugin();

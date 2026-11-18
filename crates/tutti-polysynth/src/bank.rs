@@ -499,11 +499,11 @@ impl VoiceBank {
     pub(crate) fn start(&mut self, lane: usize, phase: Phase) {
         let (g, k) = split(lane);
         self.phase[g].as_mut_array()[k] = phase.get();
-        for i in 0..4 {
-            self.z[g][i].as_mut_array()[k] = 0.0;
+        for z in &mut self.z[g][..4] {
+            z.as_mut_array()[k] = 0.0;
         }
-        for i in 0..3 {
-            self.pink[g][i].as_mut_array()[k] = 0.0;
+        for pink in &mut self.pink[g][..3] {
+            pink.as_mut_array()[k] = 0.0;
         }
     }
 

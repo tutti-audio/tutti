@@ -251,8 +251,8 @@ impl UnisonEngine {
             };
         }
 
-        for i in count..MAX_UNISON_VOICES {
-            self.voices[i] = UnisonVoiceParams::default();
+        for voice in &mut self.voices[count..MAX_UNISON_VOICES] {
+            *voice = UnisonVoiceParams::default();
         }
     }
 

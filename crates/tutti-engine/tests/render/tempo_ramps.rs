@@ -242,8 +242,8 @@ fn the_ramp_stays_within_the_grid_bound_of_the_exact_integral() {
     let seen = live(&down(), 0.0, &[512], 130_000);
     let bound = chord_bound();
     let mut worst = 0.0f64;
-    for f in 0..128_000usize {
-        let off = seen.beats[f] - beat_at(f as f64 / SR);
+    for (f, &beat) in seen.beats[..128_000].iter().enumerate() {
+        let off = beat - beat_at(f as f64 / SR);
         worst = worst.max(off.abs());
         assert!(off.abs() <= bound + 1e-12, "frame {f}: {off} beats off");
         if (f as u64).is_multiple_of(GRID) {
