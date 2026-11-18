@@ -8,6 +8,8 @@
 //! `new` returning `Option`; a wider integer converts through a refusing
 //! `TryFrom`.
 
+use crate::Samples;
+
 /// The most channels one bus, the root, a sampler voice or a speaker layout holds: sixteen,
 /// which is a 7.1.4 bed with room to spare and a third-order ambisonic signal exactly.
 ///
@@ -127,6 +129,46 @@ impl ChannelLayout {
         self.0
     }
 
+    /// Returns how many **samples** `frames` occupy in a flat interleaved
+    /// buffer this layout wide: `frames × channels`.
+    ///
+    /// The one sanctioned way from a frame count to a slice length.
+    ///
+    /// Returns a bare `usize` on purpose: the result indexes a `&[f32]`, and a
+    /// slice has no other unit. It is the *only* place on the
+    /// `Source` / `Sink` edge
+    /// where a count leaves [`Samples`], so a stride mistake has one site to live
+    /// in rather than one per caller.
+    ///
+    /// Saturating, like `Samples`' `Mul` impl: an overflowing length can only come
+    /// from a corrupt count, and slicing with `usize::MAX` panics at the slice
+    /// rather than wrapping to a short, plausible-looking window.
+    #[inline]
+    #[must_use]
+    pub const fn interleaved_len(self, frames: Samples) -> usize {
+        frames.0.saturating_mul(self.0 as usize)
+    }
+
+    /// Returns how many **whole frames** a flat interleaved buffer of `len`
+    /// samples holds at this layout's width: `len / channels`, the inverse of
+    /// [`interleaved_len`](Self::interleaved_len).
+    ///
+    /// A trailing partial frame is **not** counted: a short frame is not a
+    /// frame, and writing one desynchronises the interleave for everything
+    /// after it.
+    ///
+    /// A zero-width layout holds no frames, so [`EMPTY`](Self::EMPTY) gives
+    /// [`Samples::ZERO`] rather than a divide-by-zero panic. That is the answer
+    /// a pump over an empty bus wants: nothing to move.
+    #[inline]
+    #[must_use]
+    pub const fn from_interleaved_len(self, len: usize) -> Samples {
+        match self.0 {
+            0 => Samples::ZERO,
+            ch => Samples(len / ch as usize),
+        }
+    }
+
     /// Returns whether this layout carries exactly one channel.
     ///
     /// The canonical "is there a second channel to read?" test, for the very
@@ -223,6 +265,34 @@ count_try_from!(u32, usize);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Frames <-> interleaved length, checked at six channels, where confusing
+    /// the two is a 6x error rather than a 2x one that can hide in a round
+    /// number.
+    #[test]
+    fn interleaved_len_is_frames_times_width() {
+        let six = ChannelLayout::from(6u16);
+        assert_eq!(six.interleaved_len(Samples(10)), 60);
+        assert_eq!(six.from_interleaved_len(60), Samples(10));
+        assert_eq!(ChannelLayout::STEREO.interleaved_len(Samples(3)), 6);
+
+        // A trailing partial frame is not a frame.
+        assert_eq!(six.from_interleaved_len(65), Samples(10));
+        assert_eq!(ChannelLayout::STEREO.from_interleaved_len(7), Samples(3));
+        // Round trip from the frame side is exact.
+        for n in [0usize, 1, 7, 512] {
+            let f = Samples(n);
+            assert_eq!(six.from_interleaved_len(six.interleaved_len(f)), f);
+        }
+    }
+
+    /// A zero-width buffer holds no frames, and says so rather than dividing
+    /// by zero.
+    #[test]
+    fn an_empty_layout_holds_no_frames() {
+        assert_eq!(ChannelLayout::EMPTY.from_interleaved_len(64), Samples::ZERO);
+        assert_eq!(ChannelLayout::EMPTY.interleaved_len(Samples(64)), 0);
+    }
 
     /// Every count has exactly one representation, so equal counts are always
     /// equal values — including for the widths that have names, and whichever

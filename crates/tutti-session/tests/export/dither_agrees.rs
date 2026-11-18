@@ -44,7 +44,7 @@ impl Source for Take {
     }
     fn pull(&mut self, mut out: InterleavedMut<'_>) -> Pull {
         let out = out.samples_mut();
-        let room = Samples::from_interleaved_len(out.len(), ChannelLayout::STEREO).get();
+        let room = ChannelLayout::STEREO.from_interleaved_len(out.len()).get();
         let n = (FRAMES - self.pos).min(room);
         if n == 0 {
             return Pull::Ended;
