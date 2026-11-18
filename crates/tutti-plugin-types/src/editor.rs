@@ -409,6 +409,29 @@ pub enum EditorError {
         got: String,
     },
 
+    /// The host's parent window is a number that means nothing in this process
+    /// (an AppKit view's pointer, say): only where a window number means the
+    /// same in both processes can an editor embed across them
+    /// ([`WindowHandle::embeds_across_processes`]).
+    ///
+    /// The number is raw because it is the wire's handle, not a
+    /// [`WindowHandle`]: it is exactly what [`WindowHandle::from_remote`]
+    /// refused to rebuild.
+    #[error("the host's window {0:#x} cannot be embedded into by this process")]
+    ForeignWindow(u64),
+
+    /// An editor was asked for with no plugin loaded.
+    #[error("no plugin is loaded")]
+    NoPlugin,
+
+    /// An editor was asked for while one is open.
+    #[error("an editor is already open")]
+    AlreadyOpen,
+
+    /// An editor was asked to change with none open.
+    #[error("the editor is not open")]
+    NotOpen,
+
     /// The plugin itself refused or failed to open its editor, carrying
     /// whatever it reported.
     #[error("plugin failed to open editor: {0}")]

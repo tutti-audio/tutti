@@ -838,7 +838,7 @@ mod tests {
     ///
     /// The reference CLAP plugin's cdylib, loaded as VST3, is a real library the
     /// VST3 host refuses. The failure this test excludes is the server's refusal
-    /// of a format it does not serve (`Unsupported plugin format`), which
+    /// of a format it does not serve (`unsupported plugin format`), which
     /// answers before any format's loader runs.
     ///
     /// Needs `cargo build -p tutti-plugin-server` first (`CLAUDE.md`).
@@ -874,7 +874,7 @@ mod tests {
         match err {
             BridgeError::LoadFailed { reason, .. } => {
                 assert!(
-                    !reason.contains("Unsupported plugin format"),
+                    !reason.contains("unsupported plugin format"),
                     "reason: {reason}"
                 );
                 assert!(!reason.is_empty(), "the reply names a reason");

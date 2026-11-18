@@ -36,38 +36,32 @@
 //! and returns when the host disconnects or asks for shutdown.
 //!
 //! ```rust,no_run
-//! use tutti_plugin_server::{BridgeConfig, PluginServer};
+//! use tutti_plugin_server::PluginServer;
 //!
-//! // `max_buffer_size` is in frames and sizes the shared-memory slab, so a later
-//! // block may not exceed it. The other fields keep their defaults.
-//! let config = BridgeConfig::at(std::env::args().nth(1).expect("socket path").into());
+//! let socket = std::env::args().nth(1).expect("socket path");
 //!
-//! PluginServer::new(config)
-//!     .expect("record parent pid")
+//! PluginServer::new(socket.into())
+//!     .expect("on the process's main thread")
 //!     .run()
 //!     .expect("session");
 //! ```
 //!
-//! The server's path is the one the host chose (`BridgeConfig::at`):
-//! `unique_socket_path` derives a unique path per call, which could never meet
-//! the host that spawned this process.
-//!
-//! [`BridgeConfig`] is re-exported from
-//! `tutti-plugin-ipc`, and `BridgeError` is `tutti-plugin-types`'; the wire protocol
-//! and its version are defined in `tutti-plugin-ipc`. A load carries which plugin
-//! of a file that exports several to load (`LoadPlugin::load`).
+//! The path is the one the host chose: a path this process derived itself could
+//! never meet the host that spawned it. `BridgeError` is `tutti-plugin-types`';
+//! the wire protocol and its version are defined in `tutti-plugin-ipc`. A load
+//! carries which plugin of a file that exports several to load
+//! (`LoadPlugin::load`).
 //!
 //! ## How a session runs
 //!
-//! The host connects twice. The first connection is the handshake: plugin load,
-//! format negotiation and shared-memory setup. The second carries per-block audio
-//! traffic for the rest of the session; the server raises that thread to realtime
-//! priority (best effort; failure is logged) and sends plugin events to the host
-//! after each block. Each connection opens with a `Ready` message carrying the
-//! protocol version, and the host refuses a version it does not know.
-//!
-//! Values crossing this boundary are plain numbers (a raw `f64` sample rate, for
-//! example), as they are at the plugin formats' C ABIs.
+//! The host connects three times. The first connection is the handshake: plugin
+//! load, format negotiation and shared-memory setup. The second carries per-block
+//! audio traffic for the rest of the session, served by a render thread that asks
+//! the OS for the highest priority it grants (not real time; a refusal is logged)
+//! and sends plugin events to the host after each block. The third is the
+//! control connection, served by the main thread's event loop. Each connection
+//! opens with a `Ready` message carrying the protocol version, and the host
+//! refuses a version it does not know.
 //!
 //! If the host dies, at any point of the session, the server notices on its own
 //! and exits: from [`PluginServer::new`] on, a thread the OS wakes when the host
@@ -81,9 +75,8 @@
 //! | `vst3` | VST3 plugins, through `tutti-vst3-host` |
 //! | `clap` | CLAP plugins, through `tutti-clap-host` |
 //! | `au` | Audio Unit plugins, through `tutti-au-host` (macOS only; elsewhere it compiles to no AU support) |
-//! | `all` | All three formats |
 //!
-//! All four formats are on by default.
+//! All three are on by default.
 //!
 //! ## Related crates
 //!
@@ -98,24 +91,15 @@
 //!
 //! [`PluginServer`]: crate::PluginServer
 //! [`PluginServer::run`]: crate::PluginServer::run
-//! [`BridgeConfig`]: crate::BridgeConfig
 //! [`tutti_plugin_ipc`]: tutti_plugin_ipc
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod audio_pipeline;
-mod bell;
 mod main_loop;
 mod render;
 // With no format served the table is an uninhabited enum and nothing above it
 // runs.
-#[cfg_attr(
-    not(any(
-        feature = "clap",
-        feature = "vst3",
-        all(feature = "au", target_os = "macos")
-    )),
-    allow(dead_code)
-)]
+#[cfg_attr(not(served), allow(dead_code))]
 mod served;
 mod server;
 mod session;
@@ -123,7 +107,6 @@ mod ties;
 mod transport;
 
 pub use server::PluginServer;
-pub use tutti_plugin_ipc::BridgeConfig;
 
 // Test-only global allocator for the audio-pipeline RT-safety regression
 // test (`audio_pipeline::tests::process_is_alloc_free`). Active only in the
@@ -135,7 +118,7 @@ static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::Al
 /// Plugin-loading tests across the crate serialize on this lock: format
 /// modules keep process globals of their own, and plugins' `main` may too.
 ///
-/// Gated on a format feature as well as `test`: every consumer is a format's
+/// Gated on a served format as well as `test`: every consumer is a format's
 /// test, so a test build with no format on compiles this module with nothing
 /// to serialize.
 ///
@@ -143,14 +126,7 @@ static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::Al
 /// gated to the *specific* format it serves — a `clap`-only build has no VST3
 /// bundle — and the `env!` constants especially, since those read build-script
 /// variables that only exist once that format has built its reference plugin.
-#[cfg(all(
-    test,
-    any(
-        all(feature = "au", target_os = "macos"),
-        feature = "clap",
-        feature = "vst3"
-    )
-))]
+#[cfg(all(test, served))]
 pub(crate) mod test_utils {
     // Every import here belongs to the probe-path helpers, which are gated to
     // the format whose reference plugin they find.
@@ -159,11 +135,6 @@ pub(crate) mod test_utils {
     use std::path::Path;
     #[cfg(any(feature = "clap", feature = "vst3"))]
     use std::sync::OnceLock;
-    #[cfg(any(
-        all(feature = "au", target_os = "macos"),
-        feature = "clap",
-        feature = "vst3"
-    ))]
     use std::sync::{Mutex, MutexGuard};
     #[cfg(feature = "clap")]
     use tutti_clap_test_plugin::{ClapProbe, ClapSwitch};
@@ -186,15 +157,6 @@ pub(crate) mod test_utils {
     /// Taken by every test that loads a real plugin — CLAP, VST3 and, on macOS,
     /// AU. A plugin's entry point may touch process globals, so loads are kept
     /// one at a time in tests.
-    ///
-    /// AU is gated on the target as well as the feature, matching the module's
-    /// own `cfg`: the AU tests are `all(feature = "au", target_os = "macos")`,
-    /// so an `au`-only build on macOS must still find this lock.
-    #[cfg(any(
-        all(feature = "au", target_os = "macos"),
-        feature = "clap",
-        feature = "vst3"
-    ))]
     pub static PLUGIN_LOAD_LOCK: Mutex<()> = Mutex::new(());
 
     /// The reference VST3 bundle's parent directory, forwarded from
@@ -316,13 +278,64 @@ pub(crate) mod test_utils {
         clap().set(ClapSwitch::RenderMode, mode);
     }
 
+    /// What a [`Restore`] puts back.
+    #[cfg(feature = "clap")]
+    enum Reset {
+        /// A switch, to its default.
+        Switch(ClapSwitch, u32),
+        /// The plugin's pending thread command.
+        ThreadCommand,
+        /// The plugin's pending params command.
+        ParamCommand,
+        /// The plugin's refusal of an activation rate.
+        ActivateRefusal,
+    }
+
+    /// The one guard of this module: puts the reference plugin back to its
+    /// default when it drops. Every helper below that changes the plugin until
+    /// the returned guard drops returns this.
+    #[cfg(feature = "clap")]
+    #[must_use = "the plugin goes back to its default when the guard drops"]
+    pub struct Restore(Reset);
+
+    #[cfg(feature = "clap")]
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            match self.0 {
+                Reset::Switch(switch, default) => clap().set(switch, default),
+                Reset::ThreadCommand => {
+                    clap().thread_command(tutti_clap_test_plugin::CMD_NONE);
+                }
+                Reset::ParamCommand => {
+                    clap().param_command(tutti_clap_test_plugin::PARAM_CMD_NONE);
+                }
+                Reset::ActivateRefusal => clap().set_activate_refusal(u64::MAX),
+            }
+        }
+    }
+
+    /// Sets `switch` to `value` until the returned guard drops, which sets it
+    /// to `default`.
+    ///
+    /// Reaches the plugin through its already-loaded `dlopen` handle rather
+    /// than the `rlib`: the running instance's statics are the ones in the
+    /// *dynamic library*, and a value stored through the rlib's copy would be a
+    /// different static the plugin never reads.
+    #[cfg(feature = "clap")]
+    pub fn clap_switch_until_drop(switch: ClapSwitch, value: u32, default: u32) -> Restore {
+        clap().set(switch, value);
+        Restore(Reset::Switch(switch, default))
+    }
+
     /// [`set_clap_probe_render_mode`] until the returned guard drops, which
     /// puts the plugin back to `Inert`.
     #[cfg(feature = "clap")]
-    #[must_use = "the plugin goes back to `Inert` when the guard drops"]
-    pub fn clap_probe_render_mode(mode: u32) -> ClapProbeRenderMode {
-        set_clap_probe_render_mode(mode);
-        ClapProbeRenderMode
+    pub fn clap_probe_render_mode(mode: u32) -> Restore {
+        clap_switch_until_drop(
+            ClapSwitch::RenderMode,
+            mode,
+            tutti_clap_test_plugin::RenderMode::Inert as u32,
+        )
     }
 
     /// Select the reference plugin's `process` status
@@ -330,145 +343,50 @@ pub(crate) mod test_utils {
     /// which restores `Continue`. `Error` makes every block fail inside the
     /// plugin, a failure of the plugin's own and not of the block's shape.
     #[cfg(feature = "clap")]
-    #[must_use = "the plugin goes back to `Continue` when the guard drops"]
-    pub fn clap_probe_status_mode(mode: tutti_clap_test_plugin::StatusMode) -> ClapProbeStatusMode {
-        clap().set(ClapSwitch::StatusMode, mode as u32);
-        ClapProbeStatusMode
-    }
-
-    /// Restores the reference plugin's `Continue` status on drop; see
-    /// [`clap_probe_status_mode`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbeStatusMode;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbeStatusMode {
-        fn drop(&mut self) {
-            clap().set(
-                ClapSwitch::StatusMode,
-                tutti_clap_test_plugin::StatusMode::Continue as u32,
-            );
-        }
-    }
-
-    /// Restores the reference plugin's `Inert` render mode on drop; see
-    /// [`clap_probe_render_mode`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbeRenderMode;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbeRenderMode {
-        fn drop(&mut self) {
-            set_clap_probe_render_mode(tutti_clap_test_plugin::RenderMode::Inert as u32);
-        }
+    pub fn clap_probe_status_mode(mode: tutti_clap_test_plugin::StatusMode) -> Restore {
+        clap_switch_until_drop(
+            ClapSwitch::StatusMode,
+            mode as u32,
+            tutti_clap_test_plugin::StatusMode::Continue as u32,
+        )
     }
 
     /// Select the reference plugin's audio-port layout
     /// (`tutti_clap_test_plugin::PortLayoutMode`) until the returned guard
     /// drops, which restores `SymmetricStereo`. Call before loading: the host
     /// reads the layout once, at load.
-    ///
-    /// Reached through the `dlopen` handle for the same reason as
-    /// [`set_clap_probe_render_mode`].
     #[cfg(feature = "clap")]
-    #[must_use = "the plugin goes back to `SymmetricStereo` when the guard drops"]
-    pub fn clap_probe_port_layout(mode: u32) -> ClapProbePortLayout {
-        set_clap_probe_port_layout(mode);
-        ClapProbePortLayout
-    }
-
-    /// Restores the reference plugin's `SymmetricStereo` layout on drop; see
-    /// [`clap_probe_port_layout`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbePortLayout;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbePortLayout {
-        fn drop(&mut self) {
-            set_clap_probe_port_layout(
-                tutti_clap_test_plugin::PortLayoutMode::SymmetricStereo as u32,
-            );
-        }
-    }
-
-    #[cfg(feature = "clap")]
-    fn set_clap_probe_port_layout(mode: u32) {
-        clap().set(ClapSwitch::PortLayout, mode);
+    pub fn clap_probe_port_layout(mode: u32) -> Restore {
+        clap_switch_until_drop(
+            ClapSwitch::PortLayout,
+            mode,
+            tutti_clap_test_plugin::PortLayoutMode::SymmetricStereo as u32,
+        )
     }
 
     /// Make the reference plugin's ports on the sides in `mask` advertise
     /// `CLAP_AUDIO_PORT_SUPPORTS_64BITS` (`tutti_clap_test_plugin::PORTS_64BIT_*`)
     /// until the returned guard drops, which restores the f32-only default.
     /// Call before loading: the host reads the port flags once, at load.
-    ///
-    /// Reached through the `dlopen` handle for the same reason as
-    /// [`set_clap_probe_render_mode`].
     #[cfg(feature = "clap")]
-    #[must_use = "the plugin goes back to f32-only when the guard drops"]
-    pub fn clap_probe_ports_64bit(mask: u32) -> ClapProbePorts64 {
-        set_clap_probe_ports_64bit(mask);
-        ClapProbePorts64
-    }
-
-    /// Restores the reference plugin's f32-only ports on drop; see
-    /// [`clap_probe_ports_64bit`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbePorts64;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbePorts64 {
-        fn drop(&mut self) {
-            set_clap_probe_ports_64bit(0);
-        }
-    }
-
-    #[cfg(feature = "clap")]
-    fn set_clap_probe_ports_64bit(mask: u32) {
-        clap().set(ClapSwitch::Ports64Bit, mask);
+    pub fn clap_probe_ports_64bit(mask: u32) -> Restore {
+        clap_switch_until_drop(ClapSwitch::Ports64Bit, mask, 0)
     }
 
     /// Make the reference plugin call `audio-ports.rescan(flags)` at its next
     /// `on_main_thread` (see `tutti_test_plugin_request_ports_rescan`) until
     /// the returned guard drops, which clears a call not yet made.
     #[cfg(feature = "clap")]
-    #[must_use = "a call not yet made is cleared when the guard drops"]
-    pub fn clap_probe_request_ports_rescan(flags: u32) -> ClapProbePortsRescan {
-        clap().set(ClapSwitch::RequestPortsRescan, flags);
-        ClapProbePortsRescan
-    }
-
-    /// Clears a pending `audio-ports.rescan` call on drop; see
-    /// [`clap_probe_request_ports_rescan`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbePortsRescan;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbePortsRescan {
-        fn drop(&mut self) {
-            clap().set(ClapSwitch::RequestPortsRescan, 0);
-        }
+    pub fn clap_probe_request_ports_rescan(flags: u32) -> Restore {
+        clap_switch_until_drop(ClapSwitch::RequestPortsRescan, flags, 0)
     }
 
     /// Make the reference plugin call `host.request_restart()` from its next
     /// `process`, until the returned guard drops (which clears a call not yet
     /// made).
     #[cfg(feature = "clap")]
-    #[must_use = "a call not yet made is cleared when the guard drops"]
-    pub fn clap_probe_request_restart() -> ClapProbeRestart {
-        clap().thread_command(tutti_clap_test_plugin::CMD_REQUEST_RESTART);
-        ClapProbeRestart
-    }
-
-    /// Clears a pending `request_restart` on drop; see
-    /// [`clap_probe_request_restart`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbeRestart;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbeRestart {
-        fn drop(&mut self) {
-            clap().thread_command(tutti_clap_test_plugin::CMD_NONE);
-        }
+    pub fn clap_probe_request_restart() -> Restore {
+        clap_probe_thread_command(tutti_clap_test_plugin::CMD_REQUEST_RESTART)
     }
 
     /// Make the reference plugin run `cmd` (`tutti_clap_test_plugin::CMD_*`)
@@ -476,73 +394,33 @@ pub(crate) mod test_utils {
     /// clears one not yet run: `on_main_thread` for the timer commands,
     /// `process` for the restart ones.
     #[cfg(feature = "clap")]
-    #[must_use = "a command not yet run is cleared when the guard drops"]
-    pub fn clap_probe_thread_command(cmd: u32) -> ClapProbeRestart {
+    pub fn clap_probe_thread_command(cmd: u32) -> Restore {
         clap().thread_command(cmd);
-        ClapProbeRestart
+        Restore(Reset::ThreadCommand)
     }
 
     /// Make the reference plugin call `host.params.rescan` as
     /// `tutti_clap_test_plugin::PARAM_CMD_*` says at its next `on_main_thread`,
     /// until the returned guard drops, which clears one not yet made.
     #[cfg(feature = "clap")]
-    #[must_use = "a call not yet made is cleared when the guard drops"]
-    pub fn clap_probe_param_command(cmd: u32) -> ClapProbeParamCommand {
+    pub fn clap_probe_param_command(cmd: u32) -> Restore {
         clap().param_command(cmd);
-        ClapProbeParamCommand
-    }
-
-    /// Clears a pending params command on drop; see [`clap_probe_param_command`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbeParamCommand;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbeParamCommand {
-        fn drop(&mut self) {
-            clap().param_command(tutti_clap_test_plugin::PARAM_CMD_NONE);
-        }
+        Restore(Reset::ParamCommand)
     }
 
     /// Make the reference plugin's latency `extra` frames longer from its next
     /// activation on (see `tutti_test_plugin_set_latency_at_activation`), until
     /// the returned guard drops. The plugin does not call `changed()`.
     #[cfg(feature = "clap")]
-    #[must_use = "the latency goes back when the guard drops"]
-    pub fn clap_probe_latency_at_activation(extra: u32) -> ClapProbeLatency {
-        clap().set(ClapSwitch::LatencyAtActivation, extra);
-        ClapProbeLatency
-    }
-
-    /// Restores the reference plugin's latency on drop; see
-    /// [`clap_probe_latency_at_activation`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbeLatency;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbeLatency {
-        fn drop(&mut self) {
-            clap().set(ClapSwitch::LatencyAtActivation, 0);
-        }
+    pub fn clap_probe_latency_at_activation(extra: u32) -> Restore {
+        clap_switch_until_drop(ClapSwitch::LatencyAtActivation, extra, 0)
     }
 
     /// Make the reference plugin call `latency.changed()` from inside every
     /// `activate`, until the returned guard drops.
     #[cfg(feature = "clap")]
-    #[must_use = "the plugin goes back to silence when the guard drops"]
-    pub fn clap_probe_latency_changed_in_activate() -> ClapProbeChangedInActivate {
-        clap().set(ClapSwitch::LatencyChangedInActivate, 1);
-        ClapProbeChangedInActivate
-    }
-
-    /// Stops the announcement on drop; see [`clap_probe_latency_changed_in_activate`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbeChangedInActivate;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbeChangedInActivate {
-        fn drop(&mut self) {
-            clap().set(ClapSwitch::LatencyChangedInActivate, 0);
-        }
+    pub fn clap_probe_latency_changed_in_activate() -> Restore {
+        clap_switch_until_drop(ClapSwitch::LatencyChangedInActivate, 1, 0)
     }
 
     /// What the reference plugin recorded of its threading and timer calls
@@ -575,26 +453,9 @@ pub(crate) mod test_utils {
     /// Make the reference plugin's `activate` refuse `rate` until the returned
     /// guard drops, which lifts the refusal.
     #[cfg(feature = "clap")]
-    #[must_use = "the refusal is lifted when the guard drops"]
-    pub fn clap_probe_refuse_rate(rate: f64) -> ClapProbeRefusal {
-        set_clap_probe_activate_refusal(rate.to_bits());
-        ClapProbeRefusal
-    }
-
-    /// Lifts the refusal on drop; see [`clap_probe_refuse_rate`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbeRefusal;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbeRefusal {
-        fn drop(&mut self) {
-            set_clap_probe_activate_refusal(u64::MAX);
-        }
-    }
-
-    #[cfg(feature = "clap")]
-    fn set_clap_probe_activate_refusal(rate_bits: u64) {
-        clap().set_activate_refusal(rate_bits);
+    pub fn clap_probe_refuse_rate(rate: f64) -> Restore {
+        clap().set_activate_refusal(rate.to_bits());
+        Restore(Reset::ActivateRefusal)
     }
 
     /// The rate of the reference plugin's most recent accepted `activate`
@@ -608,22 +469,8 @@ pub(crate) mod test_utils {
     /// drops, which restores it. Call before loading: the host asks for the
     /// plugin's extensions once, at load.
     #[cfg(feature = "clap")]
-    #[must_use = "the plugin offers clap.tail again when the guard drops"]
-    pub fn clap_probe_without_tail() -> ClapProbeWithoutTail {
-        clap().set(ClapSwitch::TailExtension, 0);
-        ClapProbeWithoutTail
-    }
-
-    /// Restores the reference plugin's `clap.tail` on drop; see
-    /// [`clap_probe_without_tail`].
-    #[cfg(feature = "clap")]
-    pub struct ClapProbeWithoutTail;
-
-    #[cfg(feature = "clap")]
-    impl Drop for ClapProbeWithoutTail {
-        fn drop(&mut self) {
-            clap().set(ClapSwitch::TailExtension, 1);
-        }
+    pub fn clap_probe_without_tail() -> Restore {
+        clap_switch_until_drop(ClapSwitch::TailExtension, 0, 1)
     }
 
     /// Absolute path to `tutti-clap-test-plugin`, the reference CLAP cdylib the
@@ -654,11 +501,6 @@ pub(crate) mod test_utils {
     /// turning one real failure into dozens of misleading cascade failures.
     /// The guarded data is `()`, so there's no invariant a poisoned lock
     /// could violate; recovering is safe and keeps failures isolated.
-    #[cfg(any(
-        all(feature = "au", target_os = "macos"),
-        feature = "clap",
-        feature = "vst3"
-    ))]
     pub fn plugin_load_lock() -> MutexGuard<'static, ()> {
         PLUGIN_LOAD_LOCK.lock_recover()
     }

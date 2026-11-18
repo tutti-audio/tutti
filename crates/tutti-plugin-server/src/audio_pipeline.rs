@@ -14,13 +14,13 @@ use crate::served::Render;
 use tutti_buffers::{Float, InputOutput};
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_plugin_ipc::{SlabLayout, SlabWriter};
+use tutti_plugin_ipc::{ProcessAudioData, SlabLayout, SlabWriter};
 use tutti_plugin_types::{
-    BlockStatus, BridgeResult, ChannelTable, ChordChanges, ExpressiveContext, Features,
-    MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges,
-    NoteExpressionIntChanges, NoteExpressionTextChanges, ParameterChanges, PluginAudio,
-    PluginError, ProcessContext, ProcessOutput, SampleFormat, Samples, ScaleChanges,
-    TransportChange, TransportInfo, WireMidi, sanitize, silence,
+    BlockStatus, ChannelTable, ChordChanges, ExpressiveContext, Features, MAX_BLOCK_CHANNELS,
+    MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
+    NoteExpressionTextChanges, ParameterChanges, PluginAudio, PluginError, ProcessContext,
+    ProcessOutput, SampleFormat, Samples, ScaleChanges, TransportChange, TransportInfo, WireMidi,
+    sanitize, silence,
 };
 use tutti_rt::TallyWriter;
 use tutti_ump::Ump;
@@ -129,7 +129,7 @@ impl AudioScratch {
     }
 }
 
-/// Per-block ancillary data that only the full-fidelity path carries.
+/// Per-block ancillary data a block carries besides its audio and MIDI.
 ///
 /// Every field but `param_changes` is forwarded to the plugin **only if it
 /// advertised the matching `Features` flag** — the engine hands a plugin what it
@@ -160,8 +160,23 @@ pub(crate) struct ProcessExtras<'a> {
     pub transport_changes: &'a [TransportChange],
 }
 
-/// One inbound block: which block it is, how many samples, MIDI, and (optional)
-/// extras.
+impl<'a> ProcessExtras<'a> {
+    /// The extras `data`, a block's request, carries.
+    pub(crate) fn of(data: &'a ProcessAudioData) -> Self {
+        Self {
+            param_changes: &data.param_changes,
+            note_expression: &data.note_expression,
+            chords: &data.chords,
+            scales: &data.scales,
+            expr_texts: &data.expr_texts,
+            expr_ints: &data.expr_ints,
+            transport: &data.transport,
+            transport_changes: &data.transport_changes,
+        }
+    }
+}
+
+/// One inbound block: which block it is, how many samples, MIDI, and the extras.
 pub(crate) struct AudioBlock<'a> {
     /// Which block this is. **Not opaque to the server**: it selects the slab
     /// ring slot to read the inputs from and to publish the outputs into, so the
@@ -176,9 +191,8 @@ pub(crate) struct AudioBlock<'a> {
     /// Raw wire offsets: they become `Offset`s of this block's `num_samples`
     /// where the plugin's context is built ([`block_midi`]).
     pub midi: &'a [WireMidi],
-    /// The full-fidelity extras, or `None` when the host sent the compact
-    /// audio-only message shape.
-    pub extras: Option<ProcessExtras<'a>>,
+    /// The block's automation, note expression and transport.
+    pub extras: ProcessExtras<'a>,
 }
 
 /// One processed block's result. The plugin's audio output is written back into
@@ -349,20 +363,16 @@ impl AudioPipeline {
     /// zeroed per sample rather than dropping the block, because a plugin
     /// emitting one NaN would otherwise poison the whole downstream graph.
     ///
-    /// # Errors
-    ///
-    /// Never fails on the plugin's account: a block the plugin's `process`
-    /// fails is counted, leaves its
-    /// MIDI empty and publishes nothing, so the host reads it as silence, and
-    /// the server goes on to the next block. (An error out of here ends the
-    /// server loop, which a licence hiccup or a refused preset load must not.)
-    /// A slab read or write failure is absorbed into the silence path above.
+    /// A block the plugin's `process` fails is counted, leaves its MIDI empty and
+    /// publishes nothing, so the host reads it as silence and the server goes on
+    /// to the next block. A slab read or write failure is absorbed into the
+    /// silence path above.
     pub(crate) fn process(
         &mut self,
         plugin: &mut dyn Render,
         shm: &mut SlabWriter,
         block: AudioBlock<'_>,
-    ) -> BridgeResult<AudioOutput> {
+    ) -> AudioOutput {
         let num_samples = block.num_samples;
         let seq = block.seq;
         // Per-direction widths. Each direction has its own slab region, so there
@@ -387,11 +397,11 @@ impl AudioPipeline {
             // A block the scratch cannot hold reads silence; the render side
             // checks this before it gets here (`RenderSide::block_fits`).
             self.plugin_output.clear();
-            return Ok(AudioOutput {
+            return AudioOutput {
                 latency_us: 0,
                 refused: true,
                 failure: None,
-            });
+            };
         }
 
         // Flush denormals to zero for the duration of this block. A plugin
@@ -416,24 +426,23 @@ impl AudioPipeline {
             let mut timed = [(Offset::ZERO, Ump([0; 4])); MIDI_STACK_CAPACITY];
             let timed_len = block_midi(block.midi, num_samples, &mut timed);
             let mut ctx = ProcessContext::new().midi(&timed[..timed_len]);
-            if let Some(ref ex) = block.extras {
-                ctx = ctx.params(ex.param_changes);
-                if features.contains(Features::NOTE_EXPRESSION) {
-                    ctx = ctx.note_expression(ex.note_expression);
-                }
-                if features.contains(Features::TRANSPORT) {
-                    ctx = ctx
-                        .transport(ex.transport)
-                        .transport_changes(ex.transport_changes);
-                }
-                if features.contains(Features::SEQUENCER_CONTEXT) {
-                    ctx = ctx.expressive(ExpressiveContext {
-                        chords: Some(ex.chords),
-                        scales: Some(ex.scales),
-                        expr_texts: Some(ex.expr_texts),
-                        expr_ints: Some(ex.expr_ints),
-                    });
-                }
+            let ex = &block.extras;
+            ctx = ctx.params(ex.param_changes);
+            if features.contains(Features::NOTE_EXPRESSION) {
+                ctx = ctx.note_expression(ex.note_expression);
+            }
+            if features.contains(Features::TRANSPORT) {
+                ctx = ctx
+                    .transport(ex.transport)
+                    .transport_changes(ex.transport_changes);
+            }
+            if features.contains(Features::SEQUENCER_CONTEXT) {
+                ctx = ctx.expressive(ExpressiveContext {
+                    chords: Some(ex.chords),
+                    scales: Some(ex.scales),
+                    expr_texts: Some(ex.expr_texts),
+                    expr_ints: Some(ex.expr_ints),
+                });
             }
 
             // The widths are the slab's, and a slab is only made from a layout
@@ -595,11 +604,11 @@ impl AudioPipeline {
             // tick, so a `getState` or an editor reads them. `note_expression`
             // is still dropped (no host consumer yet). Audio was written back
             // into the slab above.
-            Ok(AudioOutput {
+            AudioOutput {
                 latency_us: start.elapsed().as_micros() as u64,
                 refused: !published,
                 failure,
-            })
+            }
         })
     }
 }
@@ -714,14 +723,19 @@ mod tests {
             seq: 1,
             num_samples: N,
             midi: &[],
-            extras: None,
+            extras: ProcessExtras::of(&QUIET),
         };
-        let out = pipeline.process(&mut plugin, &mut shm, block).unwrap();
+        let out = pipeline.process(&mut plugin, &mut shm, block);
         assert!(out.refused, "an empty scratch holds no block");
         assert!(!pipeline.fits(2, Samples(N)));
     }
 
     use tutti_plugin_ipc::SlabLayout;
+
+    /// The request of a block with no MIDI, automation, expression or transport:
+    /// what the blocks below carry as their extras.
+    static QUIET: std::sync::LazyLock<ProcessAudioData> =
+        std::sync::LazyLock::new(|| ProcessAudioData::empty(tutti_units::SampleRate::SR_48K));
     use tutti_plugin_types::{ChannelLayout, LoadedPlugin, PluginResult};
 
     /// A stand-in plugin whose `render` fills every output sample with a
@@ -812,9 +826,9 @@ mod tests {
             seq: 1,
             num_samples: N,
             midi: &[],
-            extras: None,
+            extras: ProcessExtras::of(&QUIET),
         };
-        pipeline.process(&mut plugin, &mut shm, block).unwrap();
+        pipeline.process(&mut plugin, &mut shm, block);
         pipeline.status()
     }
 
@@ -961,18 +975,16 @@ mod tests {
             meta: meta(&[2, 1], &[2]),
             seen_inputs: std::cell::RefCell::new(Vec::new()),
         };
-        pipeline
-            .process(
-                &mut plugin,
-                &mut shm,
-                AudioBlock {
-                    seq: SEQ,
-                    num_samples: N,
-                    midi: &[],
-                    extras: None,
-                },
-            )
-            .unwrap();
+        pipeline.process(
+            &mut plugin,
+            &mut shm,
+            AudioBlock {
+                seq: SEQ,
+                num_samples: N,
+                midi: &[],
+                extras: ProcessExtras::of(&QUIET),
+            },
+        );
 
         // The plugin saw all three input channels in flat bus order, including
         // the mono sidechain (bus 1).
@@ -1051,18 +1063,16 @@ mod tests {
             meta: meta(&[CH], &[CH]),
             seen_inputs: std::cell::RefCell::new(Vec::new()),
         };
-        pipeline
-            .process(
-                &mut plugin,
-                &mut shm,
-                AudioBlock {
-                    seq: STALE_SEQ,
-                    num_samples: N,
-                    midi: &[],
-                    extras: None,
-                },
-            )
-            .unwrap();
+        pipeline.process(
+            &mut plugin,
+            &mut shm,
+            AudioBlock {
+                seq: STALE_SEQ,
+                num_samples: N,
+                midi: &[],
+                extras: ProcessExtras::of(&QUIET),
+            },
+        );
 
         assert!(
             !shm.has_output(STALE_SEQ),
@@ -1096,9 +1106,9 @@ mod tests {
             seq: SEQ,
             num_samples: N,
             midi: &[],
-            extras: None,
+            extras: ProcessExtras::of(&QUIET),
         };
-        pipeline.process(&mut plugin, &mut shm, block).unwrap();
+        pipeline.process(&mut plugin, &mut shm, block);
 
         for ch in 0..CH {
             let mut out = vec![1.0f32; N];
@@ -1146,18 +1156,16 @@ mod tests {
         };
         assert_no_alloc::assert_no_alloc(|| {
             for frames in [N, 64, N, 1, 100] {
-                pipeline
-                    .process(
-                        &mut plugin,
-                        &mut shm,
-                        AudioBlock {
-                            seq: SEQ,
-                            num_samples: frames,
-                            midi: &[],
-                            extras: None,
-                        },
-                    )
-                    .unwrap();
+                pipeline.process(
+                    &mut plugin,
+                    &mut shm,
+                    AudioBlock {
+                        seq: SEQ,
+                        num_samples: frames,
+                        midi: &[],
+                        extras: ProcessExtras::of(&QUIET),
+                    },
+                );
             }
         });
     }
@@ -1193,33 +1201,29 @@ mod tests {
         };
 
         // Warm up: first call allocates the scratch buffers.
-        pipeline
-            .process(
-                &mut plugin,
-                &mut shm,
-                AudioBlock {
-                    seq: SEQ,
-                    num_samples: N,
-                    midi: &[],
-                    extras: None,
-                },
-            )
-            .unwrap();
+        pipeline.process(
+            &mut plugin,
+            &mut shm,
+            AudioBlock {
+                seq: SEQ,
+                num_samples: N,
+                midi: &[],
+                extras: ProcessExtras::of(&QUIET),
+            },
+        );
 
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..256 {
-                pipeline
-                    .process(
-                        &mut plugin,
-                        &mut shm,
-                        AudioBlock {
-                            seq: SEQ,
-                            num_samples: N,
-                            midi: &[],
-                            extras: None,
-                        },
-                    )
-                    .unwrap();
+                pipeline.process(
+                    &mut plugin,
+                    &mut shm,
+                    AudioBlock {
+                        seq: SEQ,
+                        num_samples: N,
+                        midi: &[],
+                        extras: ProcessExtras::of(&QUIET),
+                    },
+                );
             }
         });
     }
@@ -1259,33 +1263,29 @@ mod tests {
         };
 
         // Warm up: first call sizes the scratch buffers.
-        pipeline
-            .process(
-                &mut plugin,
-                &mut shm,
-                AudioBlock {
-                    seq: SEQ,
-                    num_samples: N,
-                    midi: &[],
-                    extras: None,
-                },
-            )
-            .unwrap();
+        pipeline.process(
+            &mut plugin,
+            &mut shm,
+            AudioBlock {
+                seq: SEQ,
+                num_samples: N,
+                midi: &[],
+                extras: ProcessExtras::of(&QUIET),
+            },
+        );
 
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..256 {
-                pipeline
-                    .process(
-                        &mut plugin,
-                        &mut shm,
-                        AudioBlock {
-                            seq: SEQ,
-                            num_samples: N,
-                            midi: &[],
-                            extras: None,
-                        },
-                    )
-                    .unwrap();
+                pipeline.process(
+                    &mut plugin,
+                    &mut shm,
+                    AudioBlock {
+                        seq: SEQ,
+                        num_samples: N,
+                        midi: &[],
+                        extras: ProcessExtras::of(&QUIET),
+                    },
+                );
             }
         });
     }
@@ -1366,18 +1366,18 @@ mod tests {
             seq: SEQ,
             num_samples: N,
             midi: &[],
-            extras: None,
+            extras: ProcessExtras::of(&QUIET),
         };
 
         // Warm up outside the gate: the first block sizes the pipeline scratch,
         // and the plugin's own pooled buffers reach their steady capacity.
         for _ in 0..4 {
-            pipeline.process(&mut plugin, &mut shm, block()).unwrap();
+            pipeline.process(&mut plugin, &mut shm, block());
         }
 
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..256 {
-                pipeline.process(&mut plugin, &mut shm, block()).unwrap();
+                pipeline.process(&mut plugin, &mut shm, block());
             }
         });
     }
@@ -1442,8 +1442,6 @@ mod tests {
         };
 
         // Reserved as `Session::handle_load` reserves the pipeline's output.
-        // (Reworded with `PointBuf`: the output grew to its steady storage
-        // during the warm-up before; it is now reserved up front.)
         let mut out = ProcessOutput::default();
         out.reserve_params(PARAMS, POINTS);
         // Warm up outside the gate: this is where the buffers reach their
