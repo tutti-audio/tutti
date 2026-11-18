@@ -59,13 +59,12 @@ impl Splits {
     pub(crate) fn read(
         &mut self,
         rate: SampleRate,
-        driven: impl Fn(usize) -> Option<f32>,
+        driven: impl Fn(usize) -> Option<f64>,
     ) -> [Hz; MAX_SPLITS] {
         let mut targets = [Hz::ZERO; MAX_SPLITS];
         let n = self.cells.len();
         for (i, (t, good)) in targets.iter_mut().zip(&mut self.good).enumerate() {
-            // A driven value is an `f32` lane value, widened exactly.
-            *t = Hz(good.read(driven(i).map_or_else(|| self.cells[i].load().get(), f64::from)));
+            *t = Hz(good.read(driven(i).unwrap_or_else(|| self.cells[i].load().get())));
         }
         fit_to_rate(&mut targets[..n], rate);
         targets

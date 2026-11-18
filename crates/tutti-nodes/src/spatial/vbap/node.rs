@@ -1,5 +1,5 @@
 use super::error::Result;
-use tutti_buffers::{Fold, Mono, MonoMut};
+use tutti_buffers::{Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_types::{Bed, ChannelLayout, ChannelTopology, Param};
@@ -24,7 +24,7 @@ const GRID: usize = COEFF_INTERVAL;
 const GLIDE: Seconds = Seconds(0.05);
 
 // The params a [`VbapPannerNode`] lets the graph modulate, in port order.
-tutti_graph::declare_params!([] VbapPannerNode, n {
+tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, n {
     Azimuth => Azimuth = &n.azimuth,
     Elevation => Elevation = &n.elevation,
     Spread => Spread = &n.spread,
@@ -135,7 +135,7 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// template reads the placement as it is when the fork is taken) and copies
 /// its glides. A fork detaches the cells and resets the copy.
 #[derive(Clone, Debug)]
-pub struct VbapPannerNode {
+pub struct VbapPannerNode<F: Float> {
     kernel: VbapKernel,
     layout: ChannelLayout,
     /// Bearing, wrapped onto the circle when read.
@@ -157,7 +157,7 @@ pub struct VbapPannerNode {
     speaker_of_channel: Vec<Option<usize>>,
     /// The stereo input folded to mono, for the mono-fold branch. Built at
     /// construction.
-    fold: Fold,
+    fold: Fold<F>,
     /// The last finite azimuth, elevation, spread and width the cells held, so
     /// a non-finite write reads as unchanged instead of reaching the solve.
     good: Held,
@@ -179,7 +179,7 @@ pub struct VbapPannerNode {
     seated: bool,
 }
 
-impl VbapPannerNode {
+impl<F: Float> VbapPannerNode<F> {
     /// Creates a panner over `bed`: stereo in, the bed's channels out, in the
     /// bed's order ([`Bed::topology`]), each placed speaker at its
     /// [`Bed::direction`] and the LFE, if the bed has one, silent.
@@ -271,23 +271,31 @@ impl VbapPannerNode {
     fn grid_point(
         &mut self,
         at: usize,
-        driven: &[Option<&[f32]>; 4],
+        driven: &[Option<&[F]>; 4],
         cells: (Azimuth, Elevation, Spread, StereoWidth),
     ) {
-        // A lane shorter than the block reads as the cell. A lane is the
-        // graph's `f32`; the angles are `f64`, so a driven coordinate widens
-        // here, once per grid point.
+        // A lane shorter than the block reads as the cell. A lane is the graph's `F`; the
+        // angles are `f64`, so a driven coordinate widens here, once per grid point, and
+        // `Spread` and `StereoWidth` hold an `f32`.
         let lane = |k: usize| driven[k].and_then(|lane| lane.get(at)).copied();
         let azimuth = self
             .good
             .azimuth
-            .read(lane(0).map_or(cells.0.get(), f64::from));
+            .read(lane(0).map_or(cells.0.get(), Into::into));
         let elevation = self
             .good
             .elevation
-            .read(lane(1).map_or(cells.1.get(), f64::from));
-        let spread = Spread::new_clamped(self.good.spread.read(lane(2).unwrap_or(cells.2.get())));
-        let width = StereoWidth(self.good.width.read(lane(3).unwrap_or(cells.3.get())));
+            .read(lane(1).map_or(cells.1.get(), Into::into));
+        let spread = Spread::new_clamped(
+            self.good
+                .spread
+                .read(lane(2).map_or(cells.2.get(), F::to_f32)),
+        );
+        let width = StereoWidth(
+            self.good
+                .width
+                .read(lane(3).map_or(cells.3.get(), F::to_f32)),
+        );
         let whole = !self.seated;
         steer(
             &mut self.aim_azimuth,
@@ -324,7 +332,7 @@ fn steer<T: Lerp>(glide: &mut Glide<T>, target: T, whole: bool, steps: u32) {
 }
 
 /// The fold of the stereo input to the mono the single-source branch pans.
-fn stereo_to_mono() -> Fold {
+fn stereo_to_mono<F: Float>() -> Fold<F> {
     Fold::between(
         &ChannelTopology::assumed(ChannelLayout::STEREO),
         &ChannelTopology::assumed(ChannelLayout::MONO),
@@ -371,7 +379,7 @@ fn speaker_of_channel(bed: Bed) -> Vec<Option<usize>> {
 /// `Tail::None` node on a silent block, and a skipped block would not step the
 /// grid, so a source moved during silence would resume from a stalled glide
 /// instead of the settled bearing.
-impl Node for VbapPannerNode {
+impl<F: Float> Node<F> for VbapPannerNode<F> {
     fn shape(&self) -> Shape {
         // A stereo pair in and the bed's speakers out, so the graph's mix and
         // bypass fold the dry pair onto the bed by speaker.
@@ -402,7 +410,7 @@ impl Node for VbapPannerNode {
     /// Each output channel is rendered over its own planar slice, reading the
     /// speaker that feeds it (LFE: none, so silence). The panner never feeds
     /// LFE; the caller feeds it a separate low-passed send.
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let size = io.frames();
         if size == 0 {
             return Status::Modified;
@@ -461,7 +469,7 @@ impl Node for VbapPannerNode {
     }
 }
 
-impl ParamNode for VbapPannerNode {
+impl<F: Float> ParamNode<F> for VbapPannerNode<F> {
     /// The bearing, height, spread and width.
     fn param_set(&self) -> ParamSet {
         self.declared_set()
@@ -475,17 +483,17 @@ impl ParamNode for VbapPannerNode {
         fork.elevation.detach();
         fork.spread.detach();
         fork.width.detach();
-        Node::reset(&mut fork);
+        Node::<F>::reset(&mut fork);
         fork
     }
 }
 
 /// Inserted with its [`ParamSet`] as its controls and a fork from the values
 /// last set through it ([`tutti_graph::param_parts`]).
-impl IntoNode for VbapPannerNode {
+impl<F: Float> IntoNode<F> for VbapPannerNode<F> {
     type Controls = ParamSet;
 
-    fn into_parts(self) -> NodeParts<ParamSet> {
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
         tutti_graph::param_parts(self)
     }
 }

@@ -70,7 +70,7 @@ impl RingModulator {
             let mut plane = output.plane_mut(c);
             let y = &mut plane.samples_mut()[..frames];
             for (y, &x) in y.iter_mut().zip(x) {
-                *y = x * S::from_f32(carrier.step(frequency, self.rate));
+                *y = x * carrier.step::<S>(frequency, self.rate);
             }
             end = carrier;
         }
