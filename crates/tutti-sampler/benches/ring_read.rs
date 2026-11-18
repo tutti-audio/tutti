@@ -17,7 +17,9 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::Interleaved;
 use tutti_rt::{PosReader, PosRing, PosWriter};
+use tutti_types::{ChannelLayout, Samples};
 
 /// Frames per block.
 const BLOCK: usize = 64;
@@ -44,10 +46,16 @@ fn voices(n: usize, frames: usize) -> Vec<Voice> {
     let data: Vec<f32> = (0..frames * 2).map(|i| (i as f32 * 1e-3).sin()).collect();
     (0..n)
         .map(|v| {
-            let (mut writer, reader) = PosRing::new(frames, 2, 4);
+            let (mut writer, reader) =
+                PosRing::<f32>::new(frames, ChannelLayout::STEREO, 4).expect("stereo");
             writer.reset(from);
             writer.set_play(from + 4);
-            assert_eq!(writer.push(&data), frames, "the ring fills whole");
+            let view = Interleaved::new(&data, ChannelLayout::STEREO).expect("whole frames");
+            assert_eq!(
+                writer.push(view),
+                Ok(Samples(frames)),
+                "the ring fills whole"
+            );
             Voice {
                 _writer: writer,
                 reader,
