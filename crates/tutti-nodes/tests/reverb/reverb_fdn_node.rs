@@ -35,21 +35,21 @@ fn freezable() -> FdnLayout {
     FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap()
 }
 
-fn live(layout: FdnLayout, c: FdnControls) -> FdnNode {
-    FdnNode::live(layout, c)
+fn live(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
+    FdnNode::<f32>::live(layout, c)
 }
 
-fn node(layout: FdnLayout, c: FdnControls) -> FdnNode {
+fn node(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
     prepared(live(layout, c), SR, BLOCK)
 }
 
 struct Rig {
-    node: FdnNode,
+    node: FdnNode<f32>,
     frame: u64,
 }
 
 impl Rig {
-    fn new(node: FdnNode) -> Self {
+    fn new(node: FdnNode<f32>) -> Self {
         Self { node, frame: 0 }
     }
 
@@ -350,7 +350,7 @@ fn a_non_finite_write_is_ignored() {
 /// controls, and the FDN is stereo out.
 #[test]
 fn a_live_node_has_its_layouts_params() {
-    let f = FreeverbNode::live(FreeverbControls::GENERAL_MIDI);
+    let f = FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI);
     assert_eq!(f.param_set().params().count(), 2, "the room, the damping");
     let n = live(freezable(), FdnControls::DEFAULT);
     assert_eq!(n.param_set().params().count(), 11);

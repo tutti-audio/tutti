@@ -23,7 +23,7 @@ const LEN: usize = 6_000;
 /// The wet output of a depth-0 phaser of `stages` stages parked at `F0`, over a
 /// sine of `hz`, in ragged blocks.
 fn wet(stages: usize, hz: f32) -> Vec<f32> {
-    let node = PhaserNode::new(
+    let node = PhaserNode::<f32>::new(
         BusTopology::MONO,
         Stages::of(stages),
         SweepRange::of(Hz::new(F0), Hz::new(2_000.0)),

@@ -139,7 +139,7 @@ pub(crate) struct Emit {
 #[cfg(feature = "export")]
 impl Emit {
     /// The kinds of the nodes `live` holds.
-    pub(crate) fn of(live: &tutti_graph::Editor) -> Self {
+    pub(crate) fn of<F: tutti_buffers::Float>(live: &tutti_graph::Editor<F>) -> Self {
         let kinds = live
             .spec()
             .topology

@@ -97,16 +97,16 @@ impl FileChannels<'_> {
 /// [`render_graph`](tutti_transport::render_graph), which reads the clock's
 /// snapshot before the block and advances it after (`OfflineTimeline` cuts a
 /// block at its tempo steps through `graph_piece`).
-pub(crate) struct GraphSource<'a> {
-    editor: &'a mut tutti_graph::Editor,
-    executor: &'a mut tutti_graph::Executor,
+pub(crate) struct GraphSource<'a, F: Float> {
+    editor: &'a mut tutti_graph::Editor<F>,
+    executor: &'a mut tutti_graph::Executor<F>,
     clock: &'a dyn RenderClock,
     /// Silence for every global input the graph declares: an export renders
     /// with nothing plugged in.
-    silence: Vec<f32>,
+    silence: Vec<F>,
     global_inputs: usize,
     /// One plane per global output, `max_block` long.
-    planes: Vec<Vec<f32>>,
+    planes: Vec<Vec<F>>,
     /// The root's channels: the first of `planes`.
     outputs: usize,
     /// What the graph's output channels are, when it declared it.
@@ -133,7 +133,7 @@ fn drain_rt_log(rt_log: Option<&(RtLogReaders, Arc<dyn RtLogSink>)>) {
     }
 }
 
-impl<'a> GraphSource<'a> {
+impl<'a, F: Float> GraphSource<'a, F> {
     /// Refuses a pair it cannot render as configured rather than rendering
     /// something else: an executor prepared at a rate other than the
     /// render's. (The pairing is `RenderGraph::assemble`'s check.) An executor's units are prepared for one rate
@@ -141,8 +141,8 @@ impl<'a> GraphSource<'a> {
     /// the session's fork are for; re-rating them here would be preparing
     /// them on the render thread.
     pub(crate) fn new(
-        editor: &'a mut tutti_graph::Editor,
-        executor: &'a mut tutti_graph::Executor,
+        editor: &'a mut tutti_graph::Editor<F>,
+        executor: &'a mut tutti_graph::Executor<F>,
         sample_rate: tutti_units::SampleRate,
         clock: &'a dyn RenderClock,
         root: Option<ChannelTopology>,
@@ -185,14 +185,14 @@ impl<'a> GraphSource<'a> {
                 )
             },
         );
-        let planes = vec![vec![0.0f32; max_block]; rendered];
+        let planes = vec![vec![F::ZERO; max_block]; rendered];
         // The gate is open from the first block.
         drain_rt_log(rt_log.as_ref());
         Ok(Self {
             editor,
             executor,
             clock,
-            silence: vec![0.0; max_block],
+            silence: vec![F::ZERO; max_block],
             global_inputs,
             planes,
             outputs,
@@ -205,7 +205,7 @@ impl<'a> GraphSource<'a> {
     }
 }
 
-impl GraphSource<'_> {
+impl<F: Float> GraphSource<'_, F> {
     /// The executor's `(dropped, recovered)` event counts now.
     fn counts(&self) -> (u64, u64) {
         (
@@ -226,7 +226,7 @@ impl GraphSource<'_> {
 
     /// The planes of the block last rendered: one per global output, the first
     /// frames of each valid.
-    pub(crate) fn planes(&self) -> &[Vec<f32>] {
+    pub(crate) fn planes(&self) -> &[Vec<F>] {
         &self.planes[..self.outputs]
     }
 
@@ -261,10 +261,10 @@ impl GraphSource<'_> {
         // list of borrows cannot live beside the buffers it borrows. Two
         // short `Vec`s per `max_block` frames, on an offline worker — the
         // executor's own walk inside `render_graph` stays allocation-free.
-        let inputs: Vec<&[f32]> = (0..self.global_inputs)
+        let inputs: Vec<&[F]> = (0..self.global_inputs)
             .map(|_| &self.silence[..block_size])
             .collect();
-        let mut outputs: Vec<&mut [f32]> = self
+        let mut outputs: Vec<&mut [F]> = self
             .planes
             .iter_mut()
             .map(|p| &mut p[..block_size])
@@ -328,11 +328,11 @@ impl GraphSource<'_> {
 ///
 /// The one place a [`RenderGraph`] becomes a [`GraphSource`], so every render
 /// is made and checked identically.
-pub(crate) fn with_source<T>(
-    graph: &mut RenderGraph,
+pub(crate) fn with_source<F: Float, T>(
+    graph: &mut RenderGraph<F>,
     sample_rate: tutti_units::SampleRate,
     clock: &dyn RenderClock,
-    f: impl FnOnce(&mut GraphSource<'_>) -> crate::Result<Outcome<T>>,
+    f: impl FnOnce(&mut GraphSource<'_, F>) -> crate::Result<Outcome<T>>,
 ) -> crate::Result<(Outcome<T>, u64)> {
     let root = graph.root_topology().cloned();
     let settled = graph.settled();
@@ -487,16 +487,16 @@ pub(crate) const REPLAY_BLOCK: usize = 64;
 /// [`Error::EventsDropped`](crate::Error::EventsDropped) counting what had
 /// been lost by then: a render that is going to fail does not spend the rest
 /// of its length first.
-pub(crate) fn drive<F>(
-    src: &mut GraphSource<'_>,
+pub(crate) fn drive<F: Float, C>(
+    src: &mut GraphSource<'_, F>,
     plan: &crate::render::RenderPlan,
     stage: Stage,
     control: &mut Control<'_>,
     on_loss: crate::EventLossPolicy,
-    mut consume: F,
+    mut consume: C,
 ) -> crate::Result<Outcome<()>>
 where
-    F: FnMut(&GraphSource<'_>, usize, Range<usize>) -> crate::Result<()>,
+    C: FnMut(&GraphSource<'_, F>, usize, Range<usize>) -> crate::Result<()>,
 {
     let max_block = src.max_block().max(1);
     let mut kept = Samples(0);

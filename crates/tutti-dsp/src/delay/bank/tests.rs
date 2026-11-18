@@ -42,8 +42,8 @@ fn stereo_apart(right: f64) -> DelayLayout {
 
 /// A bank and its glides, as a kernel holds them.
 struct Rig {
-    bank: DelayBank,
-    glides: DelayGlides,
+    bank: DelayBank<f32>,
+    glides: DelayGlides<f32>,
 }
 
 impl Rig {
@@ -510,7 +510,7 @@ fn a_clone_keeps_the_capacity_and_the_echoes_in_flight() {
 /// in `f64`.
 #[test]
 fn an_f64_impulse_arrives_at_the_delay() {
-    let mut bank = DelayBank::new(&mono(InterpolationMode::Linear), BINARY);
+    let mut bank = DelayBank::<f32>::new(&mono(InterpolationMode::Linear), BINARY);
     let mut glides = DelayGlides::landed(1);
     bank.aim(&mut glides, &controls(20.0 / 1024.0, 0.0, 0.0));
     glides.settle();
@@ -526,4 +526,79 @@ fn an_f64_impulse_arrives_at_the_delay() {
         PlanesMut::new(&mut outs).unwrap(),
     );
     assert_eq!(y.iter().position(|&s| s != 0.0), Some(20));
+}
+
+/// `x` (one slice per channel) through an `f64` bank of `layout` at `c`, in one block.
+fn run_f64(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let mut bank = DelayBank::<f64>::new(layout, BINARY);
+    let mut glides = DelayGlides::<f64>::landed(1);
+    bank.aim(&mut glides, c);
+    glides.settle();
+    let ins: Vec<&[f64]> = x.iter().map(Vec::as_slice).collect();
+    let mut out = vec![vec![0.0f64; x[0].len()]; x.len()];
+    let mut outs: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
+    bank.process(
+        &mut glides,
+        DelayLanes::default(),
+        Planes::new(&ins).unwrap(),
+        PlanesMut::new(&mut outs).unwrap(),
+    );
+    out
+}
+
+/// An `f64` bank keeps its state in `f64`: at a whole delay `d` with no feedback a signal
+/// of more than 24 significant bits returns `d` frames later exactly, and with feedback `g`
+/// it is the loop `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]` (`g` the `f32` the
+/// control holds, widened), to 2^-45; an `f32` state is off by 1e-8.
+#[test]
+fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (d, len) = (16usize, 200usize);
+    let x = wide_signal(len);
+    let mono = mono(InterpolationMode::Linear);
+    let time = d as f64 / 1024.0;
+    let delayed = |v: &[f64]| -> Vec<f64> {
+        (0..len)
+            .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
+            .collect()
+    };
+    let y = run_f64(&mono, &controls(time, 0.0, 0.0), std::slice::from_ref(&x));
+    assert_close_f64(&y[0], &delayed(&x), 0.0);
+
+    let g = f64::from(0.6f32);
+    let mut v = vec![0.0f64; len];
+    for n in 0..len {
+        v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
+    }
+    let y = run_f64(&mono, &controls(time, 0.6, 0.0), &[x]);
+    assert_close_f64(&y[0], &delayed(&v), 2.0f64.powi(-45));
+}
+
+/// The cross-fed loop of an `f64` bank is the two-channel recursion `v0[n] = x[n] + g v0[n -
+/// d] + c v1[n - d]`, `v1[n] = g v1[n - d] + c v0[n - d]` of the swap routing, to 2^-45.
+#[test]
+fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
+    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    let (d, len) = (8usize, 120usize);
+    let x = wide_signal(len);
+    let (g, c) = (f64::from(0.3f32), f64::from(0.4f32));
+    let (mut v0, mut v1) = (vec![0.0f64; len], vec![0.0f64; len]);
+    for n in 0..len {
+        let past = |v: &[f64]| n.checked_sub(d).map_or(0.0, |k| v[k]);
+        let (p0, p1) = (past(&v0), past(&v1));
+        v0[n] = x[n] + g * p0 + c * p1;
+        v1[n] = g * p1 + c * p0;
+    }
+    let delayed = |v: &[f64]| -> Vec<f64> {
+        (0..len)
+            .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
+            .collect()
+    };
+    let y = run_f64(
+        &stereo(),
+        &controls(d as f64 / 1024.0, 0.3, 0.4),
+        &[x, vec![0.0; len]],
+    );
+    assert_close_f64(&y[0], &delayed(&v0), 2.0f64.powi(-45));
+    assert_close_f64(&y[1], &delayed(&v1), 2.0f64.powi(-45));
 }

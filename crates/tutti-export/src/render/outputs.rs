@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use tutti_buffers::{Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
+use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
 use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
@@ -36,46 +36,46 @@ use crate::{ConfigError, Error, Job, RenderGraph, Rendered, Result, Unmeasured};
 
 /// A tap an output reads: the reader, and the planes one block of its lanes
 /// is drained into.
-struct TapFeed {
-    reader: TapReader,
-    planes: Vec<Vec<f32>>,
+struct TapFeed<F: Float> {
+    reader: TapReader<F>,
+    planes: Vec<Vec<F>>,
 }
 
 /// A file that waits for its gain: what the graph rendered for it, and what
 /// decides the gain.
-struct Waiting {
+struct Waiting<F: Float> {
     target: FileTarget,
-    spill: Spill,
+    spill: Spill<F>,
     spec: NormalizeSpec,
 }
 
 /// Where a lane's gated frames go.
-enum Sink {
+enum Sink<F: FftFloat> {
     /// Straight into the file's chain as the blocks arrive.
-    Stream { chain: Box<Chain<f32>> },
+    Stream { chain: Box<Chain<F>> },
     /// Into a spill, to be measured and written once the render is over.
     Spill {
-        chain: Box<Chain<f32>>,
-        waiting: Box<Waiting>,
+        chain: Box<Chain<F>>,
+        waiting: Box<Waiting<F>>,
     },
     /// Onto planes in memory.
-    Buffers { planes: Vec<Vec<f32>> },
+    Buffers { planes: Vec<Vec<F>> },
 }
 
 /// One output of the pass.
-struct Lane {
+struct Lane<F: FftFloat> {
     /// The path of a file output.
     path: Option<PathBuf>,
     /// The feed's channels onto the target's.
-    fold: Fold,
+    fold: Fold<F>,
     /// Set for a tap feed; the graph's planes otherwise.
-    tap: Option<TapFeed>,
+    tap: Option<TapFeed<F>>,
     layout: ChannelLayout,
     /// Whether the target stated its channels' topology.
     placement: tutti_types::Placement,
     /// The interleaved frames of one block's window, at the target's layout.
-    scratch: Vec<f32>,
-    sink: Sink,
+    scratch: Vec<F>,
+    sink: Sink<F>,
 }
 
 /// Renders `graph` once into every output of `outputs`.
@@ -84,14 +84,14 @@ struct Lane {
 /// normalizing outputs may keep before they move to files
 /// ([`SPILL_MEMORY_BYTES`](crate::spill::SPILL_MEMORY_BYTES) in production; the
 /// tests of the spill pass a small one).
-pub(crate) fn render_outputs(
-    graph: &mut RenderGraph,
+pub(crate) fn render_outputs<F: FftFloat>(
+    graph: &mut RenderGraph<F>,
     job: &Job,
     clock: &dyn RenderClock,
-    outputs: Vec<Output>,
+    outputs: Vec<Output<F>>,
     control: &mut Control<'_>,
     spill_budget: usize,
-) -> Result<Outcome<Vec<Produced>>> {
+) -> Result<Outcome<Vec<Produced<F>>>> {
     check_outputs(&outputs)?;
     control.weigh(Weights::of(outputs.iter().map(Output::target)));
     let plan = RenderPlan::of(job);
@@ -115,7 +115,7 @@ pub(crate) fn render_outputs(
             |src, n, window| {
                 let graph_planes = src.planes();
                 for (i, lane) in lanes.iter_mut().enumerate() {
-                    let planes: &[Vec<f32>] = match &mut lane.tap {
+                    let planes: &[Vec<F>] = match &mut lane.tap {
                         Some(tap) => {
                             drain_tap(i, tap, n)?;
                             &tap.planes
@@ -163,7 +163,7 @@ pub(crate) fn render_outputs(
 /// What the outputs are refused for before any of them is opened: no outputs, a
 /// zero width, a tap that is not as wide as its placement, a gain taken from an
 /// output that does not measure, and two files with one path.
-fn check_outputs(outputs: &[Output]) -> Result<()> {
+fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
     if outputs.is_empty() {
         return Err(Error::NoOutputs);
     }
@@ -226,14 +226,14 @@ fn check_outputs(outputs: &[Output]) -> Result<()> {
 
 /// Opens every output: its fold, its file (refused before it is touched when
 /// the format cannot hold the render) or its planes.
-fn open_lanes(
-    outputs: Vec<Output>,
+fn open_lanes<F: FftFloat>(
+    outputs: Vec<Output<F>>,
     job: &Job,
     plan: &RenderPlan,
     graph_outputs: usize,
     root: Option<&ChannelTopology>,
     max_block: usize,
-) -> Result<Vec<Lane>> {
+) -> Result<Vec<Lane<F>>> {
     let mut lanes = Vec::with_capacity(outputs.len());
     for (i, output) in outputs.into_iter().enumerate() {
         let (feed, target) = output.into_parts();
@@ -260,7 +260,7 @@ fn open_lanes(
                         },
                         other => other,
                     })?;
-                let planes = vec![vec![0.0; max_block]; reader.width()];
+                let planes = vec![vec![F::ZERO; max_block]; reader.width()];
                 (fold, Some(TapFeed { reader, planes }))
             }
         };
@@ -296,7 +296,7 @@ fn open_lanes(
             tap,
             layout,
             placement,
-            scratch: vec![0.0; layout.interleaved_len(Samples(max_block))],
+            scratch: vec![F::ZERO; layout.interleaved_len(Samples(max_block))],
             sink,
         });
     }
@@ -309,13 +309,13 @@ fn open_lanes(
 /// typo) is a plain `Err` here where `with_capacity` would abort the process.
 /// (`vec![Vec::with_capacity(n); ch]` would clone ONE empty Vec `ch` times,
 /// and a clone does not carry capacity.)
-fn reserve_planes(plan: &RenderPlan, layout: ChannelLayout) -> Result<Vec<Vec<f32>>> {
+fn reserve_planes<F: Float>(plan: &RenderPlan, layout: ChannelLayout) -> Result<Vec<Vec<F>>> {
     let too_large = || Error::RenderTooLarge {
         frames: plan.output_length,
         channels: layout,
     };
     let ch = usize::from(layout.count());
-    let mut planes: Vec<Vec<f32>> = Vec::new();
+    let mut planes: Vec<Vec<F>> = Vec::new();
     planes.try_reserve_exact(ch).map_err(|_| too_large())?;
     for _ in 0..ch {
         let mut plane = Vec::new();
@@ -329,7 +329,7 @@ fn reserve_planes(plan: &RenderPlan, layout: ChannelLayout) -> Result<Vec<Vec<f3
 
 /// Drains the `n` frames the block just rendered from a tap's rings into its
 /// planes, every block, whether or not the gate keeps them.
-fn drain_tap(output: usize, tap: &mut TapFeed, n: usize) -> Result<()> {
+fn drain_tap<F: Float>(output: usize, tap: &mut TapFeed<F>, n: usize) -> Result<()> {
     let mut planes = PlanesMut::from_vecs(&mut tap.planes)?;
     let got = tap
         .reader
@@ -353,12 +353,12 @@ struct Chosen {
 }
 
 /// The stages after the render: measure, write, finalize, commit.
-fn finish(
-    mut lanes: Vec<Lane>,
+fn finish<F: FftFloat>(
+    mut lanes: Vec<Lane<F>>,
     job: &Job,
     lost: u64,
     control: &mut Control<'_>,
-) -> Result<Outcome<Vec<Produced>>> {
+) -> Result<Outcome<Vec<Produced<F>>>> {
     let rate = job.rate();
     let mut chosen: Vec<Option<Chosen>> = vec![None; lanes.len()];
     let waiting: Vec<usize> = (0..lanes.len())
@@ -456,8 +456,8 @@ fn finish(
     }
 
     // Finalizing.
-    let mut produced: Vec<Option<Produced>> = Vec::with_capacity(lanes.len());
-    let mut files: Vec<PendingFile<f32>> = Vec::new();
+    let mut produced: Vec<Option<Produced<F>>> = Vec::with_capacity(lanes.len());
+    let mut files: Vec<PendingFile<F>> = Vec::new();
     let placements: Vec<tutti_types::Placement> = lanes.iter().map(|l| l.placement).collect();
     for (i, lane) in lanes.into_iter().enumerate() {
         match lane.sink {
@@ -495,7 +495,7 @@ fn finish(
     ))
 }
 
-fn waiting_of(lane: &Lane) -> &Waiting {
+fn waiting_of<F: FftFloat>(lane: &Lane<F>) -> &Waiting<F> {
     match &lane.sink {
         Sink::Spill { waiting, .. } => waiting,
         _ => unreachable!("listed as waiting"),
@@ -509,8 +509,8 @@ fn waiting_of(lane: &Lane) -> &Waiting {
 /// The converter is the one the write pass uses, so what is measured is what
 /// is written; the reading is refused when it is not a measurement of the
 /// programme.
-fn measure(
-    waiting: &Waiting,
+fn measure<F: FftFloat>(
+    waiting: &Waiting<F>,
     output: usize,
     layout: ChannelLayout,
     rate: SampleRate,
@@ -529,11 +529,11 @@ fn measure(
     let mut measurer = Measurer::new(out_rate, &waiting.target.effective_topology(), normalize)
         .map_err(unmeasurable)?;
     let ch = usize::from(layout.count());
-    let mut resampler: Option<Resampler<f32>> = resampler_for(&waiting.target, rate, ch)?;
-    let mut staging: Vec<f32> = Vec::new();
+    let mut resampler: Option<Resampler<F>> = resampler_for(&waiting.target, rate, ch)?;
+    let mut staging: Vec<F> = Vec::new();
     let mut replay = waiting.spill.replay()?;
     let chunk = chunk_frames(rate).get();
-    let mut block = vec![0.0f32; layout.interleaved_len(Samples(chunk))];
+    let mut block = vec![F::ZERO; layout.interleaved_len(Samples(chunk))];
     let mut block = InterleavedMut::new(&mut block, layout)?;
     loop {
         if control.is_cancelled() {
@@ -550,7 +550,7 @@ fn measure(
                 rs.push(Planes::from_vecs(planes)?, out)?;
                 feed_planes(&mut measurer, out, &mut staging, layout)?;
             }
-            None => measurer.feed_interleaved(frames),
+            None => measurer.feed_interleaved(frames)?,
         }
         done = Samples(done.get() + n);
         control.advance(Stage::Measuring, done, total);
@@ -567,14 +567,14 @@ fn measure(
 }
 
 /// Interleaves what the converter produced into the meter, and clears it.
-fn feed_planes(
+fn feed_planes<F: Float>(
     measurer: &mut Measurer,
-    out: &mut [Vec<f32>],
-    staging: &mut Vec<f32>,
+    out: &mut [Vec<F>],
+    staging: &mut Vec<F>,
     layout: ChannelLayout,
 ) -> Result<()> {
     crate::planar::join(out, staging, layout)?;
-    measurer.feed_interleaved(Interleaved::new(staging, layout)?);
+    measurer.feed_interleaved(Interleaved::new(staging, layout)?)?;
     for p in out.iter_mut() {
         p.clear();
     }

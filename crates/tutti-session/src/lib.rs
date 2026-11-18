@@ -75,6 +75,7 @@ mod editor;
 mod error;
 #[cfg(feature = "export")]
 mod fork;
+mod format;
 #[cfg(feature = "soundfont")]
 mod general_midi;
 mod graph;
@@ -150,7 +151,9 @@ pub use bounce::{
 pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
 #[cfg(feature = "device")]
 pub use clock::DeviceClock;
-pub use clock::{Clock, Offline, OfflineSession, RealTime, SystemClock, SystemSession};
+pub use clock::{
+    Clock, Offline, OfflineSession, RealTime, SessionFloat, SystemClock, SystemSession,
+};
 #[cfg(feature = "testing")]
 pub use clock::{Detached, DetachedSession};
 #[cfg(feature = "device")]

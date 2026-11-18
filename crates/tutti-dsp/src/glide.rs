@@ -1,6 +1,8 @@
 //! [`Glide`]: a linear approach to a target in a number of steps, read in closed form;
 //! [`Lerp`], the blend a glided value defines; [`Steps`], how many steps a glide takes.
 
+use tutti_buffers::Float;
+
 /// A value that can be blended toward another.
 ///
 /// A glide assumes the space is affine: a blend of two values is a value the reader can
@@ -17,6 +19,13 @@ impl Lerp for f32 {
     #[inline]
     fn lerp(&self, to: &f32, k: u32, n: u32) -> f32 {
         crate::lerp(*self, *to, k as f32 / n as f32)
+    }
+}
+
+impl Lerp for f64 {
+    #[inline]
+    fn lerp(&self, to: &f64, k: u32, n: u32) -> f64 {
+        crate::lerp(*self, *to, f64::from(k) / f64::from(n))
     }
 }
 
@@ -40,7 +49,7 @@ pub enum Steps {
 /// segment of frames that starts at [`taken`](Self::taken) `= k` reads `at(k + 1)`,
 /// `at(k + 2)`, …, and [`advance`](Self::advance) moves `k` past it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Glide<T: Lerp> {
+pub struct Glide<T> {
     pub(crate) from: T,
     pub(crate) to: T,
     pub(crate) k: u32,
@@ -153,16 +162,18 @@ impl<T: Lerp> Glide<T> {
     }
 }
 
-impl Glide<f32> {
+impl<F: Float + Lerp> Glide<F> {
     /// Aims at `to` in `steps`. A target already aimed at leaves the glide as it is (a
     /// value sent again every block does not stretch it).
-    pub fn aim_by(&mut self, to: f32, steps: Steps) {
+    pub fn aim_by(&mut self, to: F, steps: Steps) {
         if to == self.to {
             return;
         }
         let n = match steps {
             Steps::Fixed(n) => n,
-            Steps::Rate(rate) => ((to - self.now()).abs() / rate).ceil() as u32,
+            Steps::Rate(rate) => ((to - self.now()).abs() / F::from_f32(rate))
+                .ceil()
+                .to_f64() as u32,
         };
         self.aim_in(to, n);
     }

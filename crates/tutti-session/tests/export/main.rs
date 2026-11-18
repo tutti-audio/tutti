@@ -17,6 +17,8 @@ mod export_cancel;
 // and where a fork is built and dropped.
 #[cfg(feature = "export")]
 mod export_fork;
+#[cfg(feature = "export")]
+mod f64_export;
 // What a bounce's nodes log on the audio thread, as `tracing` events.
 #[cfg(feature = "export")]
 mod rt_log;

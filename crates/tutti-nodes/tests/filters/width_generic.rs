@@ -145,8 +145,8 @@ fn ladder(layout: ChannelLayout) -> LadderFilterNode<f64> {
     )
 }
 
-fn delay(layout: ChannelLayout) -> DelayNode {
-    DelayNode::new(
+fn delay(layout: ChannelLayout) -> DelayNode<f32> {
+    DelayNode::<f32>::new(
         BusTopology::assumed(layout).expect("a test width is one bus"),
         MaxDelay::of(Seconds::new(0.5)),
         InterpolationMode::CubicHermite,
@@ -158,7 +158,7 @@ fn delay(layout: ChannelLayout) -> DelayNode {
     )
 }
 
-fn chorus(layout: ChannelLayout) -> ModDelayNode {
+fn chorus(layout: ChannelLayout) -> ModDelayNode<f32> {
     // No stagger: one phase for every channel, as the mono node has.
     let zeros = vec![PhaseIncrement(0.0); usize::from(layout.count())];
     let controls = ModDelayControls {
@@ -166,7 +166,7 @@ fn chorus(layout: ChannelLayout) -> ModDelayNode {
         depth: Seconds::new(0.004),
         feedback: Feedback::new(0.3),
     };
-    ModDelayNode::new(
+    ModDelayNode::<f32>::new(
         BusTopology::assumed(layout).expect("a test width is one bus"),
         Sweep::CHORUS,
         Stagger::each(&zeros).expect("zero offsets"),
@@ -175,8 +175,8 @@ fn chorus(layout: ChannelLayout) -> ModDelayNode {
     .expect("one offset for each channel")
 }
 
-fn phaser(layout: ChannelLayout) -> PhaserNode {
-    PhaserNode::new(
+fn phaser(layout: ChannelLayout) -> PhaserNode<f32> {
+    PhaserNode::<f32>::new(
         BusTopology::assumed(layout).expect("a test width is one bus"),
         Stages::of(6),
         SweepRange::DEFAULT,

@@ -17,6 +17,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
+use tutti_buffers::Float;
 use tutti_graph::{BusRef, BusSource, NodeKey};
 use tutti_units::Amplitude;
 
@@ -483,7 +484,7 @@ impl Edge {
     /// Once the graph has committed the edge's weight this reads its live
     /// cell, which is also the knob of a modulation route onto the edge.
     #[must_use]
-    pub fn gain(self, graph: &Graph) -> Option<Amplitude> {
+    pub fn gain<F: Float>(self, graph: &Graph<F>) -> Option<Amplitude> {
         graph.edge_gain_of(self)
     }
 
@@ -507,7 +508,11 @@ impl Edge {
     /// [`EdgeGainError::NoSuchEdge`] when the edge is not in the graph,
     /// [`EdgeGainError::BusLane`] when it is a lane of a bus edge, and
     /// [`EdgeGainError::NotFinite`]; the graph is unchanged.
-    pub fn set_gain(self, graph: &mut Graph, gain: Amplitude) -> Result<(), EdgeGainError> {
+    pub fn set_gain<F: Float>(
+        self,
+        graph: &mut Graph<F>,
+        gain: Amplitude,
+    ) -> Result<(), EdgeGainError> {
         graph.set_edge_gain_of(self, gain)
     }
 
@@ -516,7 +521,7 @@ impl Edge {
     /// edited when it did. A modulation route onto the edge makes the gain
     /// again (at unity) the next time the declarations apply: remove the route
     /// first.
-    pub fn clear_gain(self, graph: &mut Graph) -> bool {
+    pub fn clear_gain<F: Float>(self, graph: &mut Graph<F>) -> bool {
         graph.clear_edge_gain_of(self)
     }
 }
@@ -529,20 +534,25 @@ pub trait Wire: Sealed {
     #[doc(hidden)]
     type In: Copy;
     #[doc(hidden)]
-    fn connect(
-        graph: &mut Graph,
+    fn connect<F: Float>(
+        graph: &mut Graph<F>,
         from: Self::Out,
         to: Self::In,
     ) -> Result<Vec<(Edge, bool)>, ConnectError>;
     #[doc(hidden)]
-    fn disconnect(
-        graph: &mut Graph,
+    fn disconnect<F: Float>(
+        graph: &mut Graph<F>,
         from: Self::Out,
         to: Self::In,
         hard: bool,
     ) -> Result<bool, ConnectError>;
     #[doc(hidden)]
-    fn harden(graph: &mut Graph, from: Self::Out, to: Self::In, edges: &[(Edge, bool)]);
+    fn harden<F: Float>(
+        graph: &mut Graph<F>,
+        from: Self::Out,
+        to: Self::In,
+        edges: &[(Edge, bool)],
+    );
 }
 
 /// One channel to one channel: an [`OutPort`] into an [`InPort`], and an edge
@@ -626,16 +636,16 @@ impl Sealed for EventInPort {}
 impl Wire for Channel {
     type Out = OutPort;
     type In = InPort;
-    fn connect(
-        graph: &mut Graph,
+    fn connect<F: Float>(
+        graph: &mut Graph<F>,
         from: OutPort,
         to: InPort,
     ) -> Result<Vec<(Edge, bool)>, ConnectError> {
         let added = graph.add_edge(from, to)?;
         Ok(vec![(Edge::new(from, to), added)])
     }
-    fn disconnect(
-        graph: &mut Graph,
+    fn disconnect<F: Float>(
+        graph: &mut Graph<F>,
         from: OutPort,
         to: InPort,
         hard: bool,
@@ -643,7 +653,7 @@ impl Wire for Channel {
         graph.check_wire(from, to)?;
         Ok(graph.remove_edge(from, to, hard))
     }
-    fn harden(graph: &mut Graph, _: OutPort, _: InPort, edges: &[(Edge, bool)]) {
+    fn harden<F: Float>(graph: &mut Graph<F>, _: OutPort, _: InPort, edges: &[(Edge, bool)]) {
         for (edge, _) in edges {
             graph.harden_edge(*edge);
         }
@@ -653,8 +663,8 @@ impl Wire for Channel {
 impl Wire for MainBus {
     type Out = NodeKey;
     type In = MainSink;
-    fn connect(
-        graph: &mut Graph,
+    fn connect<F: Float>(
+        graph: &mut Graph<F>,
         from: NodeKey,
         to: MainSink,
     ) -> Result<Vec<(Edge, bool)>, ConnectError> {
@@ -666,8 +676,8 @@ impl Wire for MainBus {
         }
         Ok(edges)
     }
-    fn disconnect(
-        graph: &mut Graph,
+    fn disconnect<F: Float>(
+        graph: &mut Graph<F>,
         from: NodeKey,
         to: MainSink,
         hard: bool,
@@ -685,7 +695,7 @@ impl Wire for MainBus {
         }
         Ok(removed)
     }
-    fn harden(graph: &mut Graph, _: NodeKey, _: MainSink, edges: &[(Edge, bool)]) {
+    fn harden<F: Float>(graph: &mut Graph<F>, _: NodeKey, _: MainSink, edges: &[(Edge, bool)]) {
         for (edge, _) in edges {
             graph.harden_edge(*edge);
         }
@@ -695,16 +705,16 @@ impl Wire for MainBus {
 impl Wire for Bus {
     type Out = BusSource;
     type In = BusSink;
-    fn connect(
-        graph: &mut Graph,
+    fn connect<F: Float>(
+        graph: &mut Graph<F>,
         from: BusSource,
         to: BusSink,
     ) -> Result<Vec<(Edge, bool)>, ConnectError> {
         graph.add_bus_edge(from, to)?;
         Ok(Vec::new())
     }
-    fn disconnect(
-        graph: &mut Graph,
+    fn disconnect<F: Float>(
+        graph: &mut Graph<F>,
         from: BusSource,
         to: BusSink,
         hard: bool,
@@ -712,7 +722,7 @@ impl Wire for Bus {
         graph.check_bus_nodes(from, to)?;
         Ok(graph.remove_bus_edge(from, to, hard))
     }
-    fn harden(graph: &mut Graph, from: BusSource, to: BusSink, _: &[(Edge, bool)]) {
+    fn harden<F: Float>(graph: &mut Graph<F>, from: BusSource, to: BusSink, _: &[(Edge, bool)]) {
         graph.harden_bus_edge(from, to);
     }
 }
@@ -720,16 +730,16 @@ impl Wire for Bus {
 impl Wire for Event {
     type Out = EventOutPort;
     type In = EventInPort;
-    fn connect(
-        graph: &mut Graph,
+    fn connect<F: Float>(
+        graph: &mut Graph<F>,
         from: EventOutPort,
         to: EventInPort,
     ) -> Result<Vec<(Edge, bool)>, ConnectError> {
         graph.add_event_edge(from, to)?;
         Ok(Vec::new())
     }
-    fn disconnect(
-        graph: &mut Graph,
+    fn disconnect<F: Float>(
+        graph: &mut Graph<F>,
         from: EventOutPort,
         to: EventInPort,
         _hard: bool,
@@ -737,7 +747,7 @@ impl Wire for Event {
         graph.check_event_wire(from, to)?;
         Ok(graph.remove_event_edge(from, to))
     }
-    fn harden(_: &mut Graph, _: EventOutPort, _: EventInPort, _: &[(Edge, bool)]) {}
+    fn harden<F: Float>(_: &mut Graph<F>, _: EventOutPort, _: EventInPort, _: &[(Edge, bool)]) {}
 }
 
 impl Outlet for EventOutPort {
@@ -761,33 +771,33 @@ pub trait Fanin: Sealed + Copy {
     /// What feeds it.
     type Source: Copy;
     #[doc(hidden)]
-    fn sources(self, graph: &Graph) -> Result<Vec<Self::Source>, ConnectError>;
+    fn sources<F: Float>(self, graph: &Graph<F>) -> Result<Vec<Self::Source>, ConnectError>;
     #[doc(hidden)]
-    fn set_sources(
+    fn set_sources<F: Float>(
         self,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         from: Vec<Self::Source>,
         hard: bool,
     ) -> Result<(), ConnectError>;
     #[doc(hidden)]
-    fn disconnect_all(self, graph: &mut Graph) -> Result<bool, ConnectError>;
+    fn disconnect_all<F: Float>(self, graph: &mut Graph<F>) -> Result<bool, ConnectError>;
 }
 
 impl Fanin for InPort {
     type Source = OutPort;
-    fn sources(self, graph: &Graph) -> Result<Vec<OutPort>, ConnectError> {
+    fn sources<F: Float>(self, graph: &Graph<F>) -> Result<Vec<OutPort>, ConnectError> {
         graph.check_in(self)?;
         Ok(graph.channel_sources(self))
     }
-    fn set_sources(
+    fn set_sources<F: Float>(
         self,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         from: Vec<OutPort>,
         hard: bool,
     ) -> Result<(), ConnectError> {
         graph.set_channel_sources(self, from, hard)
     }
-    fn disconnect_all(self, graph: &mut Graph) -> Result<bool, ConnectError> {
+    fn disconnect_all<F: Float>(self, graph: &mut Graph<F>) -> Result<bool, ConnectError> {
         graph.check_in(self)?;
         Ok(graph.disconnect_all_channels(self))
     }
@@ -795,19 +805,19 @@ impl Fanin for InPort {
 
 impl Fanin for EventInPort {
     type Source = EventOutPort;
-    fn sources(self, graph: &Graph) -> Result<Vec<EventOutPort>, ConnectError> {
+    fn sources<F: Float>(self, graph: &Graph<F>) -> Result<Vec<EventOutPort>, ConnectError> {
         graph.check_event_in(self)?;
         Ok(graph.event_sources_of(self))
     }
-    fn set_sources(
+    fn set_sources<F: Float>(
         self,
-        graph: &mut Graph,
+        graph: &mut Graph<F>,
         from: Vec<EventOutPort>,
         _hard: bool,
     ) -> Result<(), ConnectError> {
         graph.set_event_sources_of(self, &from)
     }
-    fn disconnect_all(self, graph: &mut Graph) -> Result<bool, ConnectError> {
+    fn disconnect_all<F: Float>(self, graph: &mut Graph<F>) -> Result<bool, ConnectError> {
         graph.check_event_in(self)?;
         Ok(graph.disconnect_all_events(self))
     }
@@ -876,11 +886,11 @@ impl Inlet<Bus> for Root {
 /// Dropping it keeps the declaration as made, which crossfades the old root
 /// into the new over [`DECLICK`](tutti_graph::DECLICK).
 #[derive(Debug)]
-pub struct RootDeclaration<'g> {
-    pub(crate) graph: &'g mut Graph,
+pub struct RootDeclaration<'g, F: Float = f32> {
+    pub(crate) graph: &'g mut Graph<F>,
 }
 
-impl RootDeclaration<'_> {
+impl<F: Float> RootDeclaration<'_, F> {
     /// Takes the new root at one block, a cut: no old root is rendered beside
     /// it. The default is a crossfade over [`DECLICK`](tutti_graph::DECLICK)
     /// (5 ms), so a change of layout never steps the sound; `hard` is for a
@@ -900,15 +910,15 @@ impl RootDeclaration<'_> {
 /// [`edges`](Self::edges) to keep a handle (a modulation target, a later
 /// gain).
 #[derive(Debug)]
-pub struct Connection<'g, W: Wire> {
-    graph: &'g mut Graph,
+pub struct Connection<'g, W: Wire, F: Float = f32> {
+    graph: &'g mut Graph<F>,
     edges: Vec<(Edge, bool)>,
     ends: (W::Out, W::In),
 }
 
-impl<'g, W: Wire> Connection<'g, W> {
+impl<'g, W: Wire, F: Float> Connection<'g, W, F> {
     pub(crate) fn new(
-        graph: &'g mut Graph,
+        graph: &'g mut Graph<F>,
         edges: Vec<(Edge, bool)>,
         from: W::Out,
         to: W::In,
@@ -939,7 +949,7 @@ impl<'g, W: Wire> Connection<'g, W> {
     }
 }
 
-impl<W: Weighted> Connection<'_, W> {
+impl<W: Weighted, F: Float> Connection<'_, W, F> {
     /// Weights every edge of the connection by `gain` (the edge gain of doc
     /// 013, "Edge gain"): the edges enter the sum at `gain` rather than
     /// unity. An edge the graph already held only has its gain set.

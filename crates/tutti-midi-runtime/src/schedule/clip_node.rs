@@ -59,6 +59,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
+use tutti_buffers::Float;
 use tutti_rt::LockExt;
 
 use tutti_graph::{
@@ -558,7 +559,7 @@ impl Visit<ClipEvent> for Playing<'_, '_, '_> {
     }
 }
 
-impl Node for MidiClipNode {
+impl<F: Float> Node<F> for MidiClipNode {
     /// No audio, one MIDI event output of [`CLIP_EVENT_DENSITY`] per frame of
     /// the block it was prepared for.
     fn shape(&self) -> Shape {
@@ -575,7 +576,7 @@ impl Node for MidiClipNode {
         self.capacity = CLIP_EVENT_DENSITY.capacity(p);
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let clip = self.clip.lend();
         let Some(first) = cx.env.offset(0) else {
             return Status::Modified;
@@ -604,10 +605,10 @@ impl Node for MidiClipNode {
     }
 }
 
-impl IntoNode for MidiClipNode {
+impl<F: Float> IntoNode<F> for MidiClipNode {
     type Controls = MidiClipControls;
 
-    fn into_parts(self) -> NodeParts<MidiClipControls> {
+    fn into_parts(self) -> NodeParts<MidiClipControls, F> {
         let controls = MidiClipControls {
             shared: Arc::clone(&self.shared),
         };
@@ -629,8 +630,8 @@ struct ClipFork {
     shared: Arc<Shared>,
 }
 
-impl ForkSource for ClipFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float> ForkSource<F> for ClipFork {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         let clip = self.shared.current();
         let shared = Arc::new(Shared {
             cell: Publisher::from_arc(Arc::clone(&clip)),

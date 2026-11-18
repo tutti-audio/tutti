@@ -8,7 +8,6 @@
 //! (PLAY `02`, STOP `01`, LOCATE target `44 06 01 hr mn sc fr sf`).
 //! At 120 BPM and 48 kHz a beat is 24 000 frames and a second is two beats.
 
-use tutti_graph::Node as _;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
     Editor, EventKind, Executor, NodeKey, Offset, TransportChanges, TransportPosition,
@@ -507,7 +506,7 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
     assert!(!drive(&mut d, rolling(Beat(1.0))).is_empty());
     let run_on = drive(&mut d, rolling(beat(1.0, 64)));
     assert!(!continues(&run_on), "a run-on is no play edge");
-    assert_no_alloc::assert_no_alloc(|| d.node.reset());
+    assert_no_alloc::assert_no_alloc(|| tutti_graph::Node::<f32>::reset(&mut *d.node));
     let after = drive(&mut d, rolling(Beat(1.0 + 2.0 * step)));
     assert!(continues(&after), "a reset clock sees a play edge mid-song");
     assert!(!after.is_empty(), "the messages set are still set");
@@ -528,7 +527,7 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
         64,
     );
     assert!(drive(&mut reset, stopped(Beat(0.0))).is_empty());
-    assert_no_alloc::assert_no_alloc(|| reset.node.reset());
+    assert_no_alloc::assert_no_alloc(|| tutti_graph::Node::<f32>::reset(&mut *reset.node));
     assert!(
         drive(&mut reset, rolling(Beat(0.0))).is_empty(),
         "the look after a reset is a first"

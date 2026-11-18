@@ -71,7 +71,11 @@ fn controls(freezable: bool) -> Vec<Control> {
 /// blocks, then `blocks` under `assert_no_alloc`, `between(i)` run before each (the cells
 /// move). The output of every block is finite and under [`BOUND`].
 fn gate(layout: FdnLayout, blocks: usize, between: impl FnMut(&ParamSet, usize)) {
-    gate_of(FdnNode::live(layout, FdnControls::DEFAULT), blocks, between);
+    gate_of(
+        FdnNode::<f32>::live(layout, FdnControls::DEFAULT),
+        blocks,
+        between,
+    );
 }
 
 /// [`gate`] for any node whose controls are a `ParamSet`.
@@ -153,13 +157,17 @@ fn the_fdn_corners_are_allocation_free_with_every_control_moving() {
 
 /// A node of `layout` at `controls` through `Direct`, which feeds its ports and reads its
 /// status, on an alternating input of `amplitude`.
-fn direct(layout: FdnLayout, controls: FdnControls, amplitude: f32) -> Direct<FdnNode> {
-    let mut rig = Direct::new(FdnNode::live(layout, controls), SampleRate::SR_48K, 64);
+fn direct(layout: FdnLayout, controls: FdnControls, amplitude: f32) -> Direct<FdnNode<f32>> {
+    let mut rig = Direct::new(
+        FdnNode::<f32>::live(layout, controls),
+        SampleRate::SR_48K,
+        64,
+    );
     set_input(&mut rig, amplitude);
     rig
 }
 
-fn set_input(rig: &mut Direct<FdnNode>, amplitude: f32) {
+fn set_input(rig: &mut Direct<FdnNode<f32>>, amplitude: f32) {
     for c in rig.inputs_mut().iter_mut() {
         let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
@@ -169,7 +177,7 @@ fn set_input(rig: &mut Direct<FdnNode>, amplitude: f32) {
 }
 
 /// The peak and finiteness of the two output channels of the block `rig` last rendered.
-fn level(rig: &Direct<FdnNode>) -> (f32, bool) {
+fn level(rig: &Direct<FdnNode<f32>>) -> (f32, bool) {
     let mut peak = 0.0f32;
     let mut finite = true;
     for c in 0..2 {
@@ -313,7 +321,7 @@ fn the_plate_node_process_is_allocation_free_with_every_control_moving() {
         (UnitParam::Diffusion, 0.0, 1.0),
     ];
     gate_of(
-        PlateReverbNode::from(PlateReverbConfig::new()),
+        PlateReverbNode::<f32>::from(PlateReverbConfig::new()),
         1_000,
         |set, i| {
             for &(param, lo, hi) in &ends {
@@ -329,18 +337,18 @@ fn the_plate_node_process_is_allocation_free_with_every_control_moving() {
 #[test]
 fn the_plate_parks_wakes_and_renders_non_finite_input_without_allocating() {
     let mut rig = Direct::new(
-        PlateReverbNode::from(PlateReverbConfig::new().decay(Seconds(0.1))),
+        PlateReverbNode::<f32>::from(PlateReverbConfig::new().decay(Seconds(0.1))),
         SampleRate::SR_48K,
         64,
     );
-    let set_input = |rig: &mut Direct<PlateReverbNode>, amplitude: f32| {
+    let set_input = |rig: &mut Direct<PlateReverbNode<f32>>, amplitude: f32| {
         for c in rig.inputs_mut().iter_mut() {
             for (i, x) in c.into_samples_mut().iter_mut().enumerate() {
                 *x = if i % 2 == 0 { amplitude } else { -amplitude };
             }
         }
     };
-    let peak = |rig: &Direct<PlateReverbNode>| {
+    let peak = |rig: &Direct<PlateReverbNode<f32>>| {
         (0..2).fold(0.0f32, |m, c| {
             rig.output()
                 .plane(c)

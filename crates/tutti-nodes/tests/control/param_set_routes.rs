@@ -204,7 +204,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
 /// whose knob is the chorus's own rate cell and whose one layer is a
 /// constant `depth` of the rate port's 0..10 Hz span.
 fn render_chorus(
-    node: ModDelayNode,
+    node: ModDelayNode<f32>,
     lane: Option<f32>,
     input: &[f32],
 ) -> (Vec<Vec<f32>>, ParamSet) {
@@ -273,8 +273,8 @@ fn delay_at(out: &[f32], n: usize) -> f32 {
 
 /// A chorus on the bus `input` with no feedback, so its output is the input delayed by
 /// the sweep alone.
-fn dry_chorus(input: BusTopology) -> ModDelayNode {
-    let n = ModDelayNode::chorus(input);
+fn dry_chorus(input: BusTopology) -> ModDelayNode<f32> {
+    let n = ModDelayNode::<f32>::chorus(input);
     assert!(set(&n, UnitParam::Feedback, 0.0));
     n
 }
@@ -317,7 +317,7 @@ fn a_lane_modulates_a_chorus_rate_around_its_own_cell() {
 
 #[test]
 fn chorus_rate_write_moves_the_nodes_own_cell() {
-    let node = ModDelayNode::chorus(BusTopology::STEREO);
+    let node = ModDelayNode::<f32>::chorus(BusTopology::STEREO);
     let cell = node.param_set().cell(UnitParam::Rate).expect("addressed");
     let base = cell.load(Ordering::Acquire);
     assert!(
@@ -598,7 +598,7 @@ fn a_phaser_driven_past_its_depth_range_stays_stable() {
         // Knob 0.5 plus `depth` of the 16-wide range: 8.5 (held at the
         // range's 8) and -7.5.
         let out = render_driven(
-            PhaserNode::mono(Stages::of(4), PhaserControls::DEFAULT),
+            PhaserNode::<f32>::mono(Stages::of(4), PhaserControls::DEFAULT),
             UnitParam::Depth,
             ParamRange::new(-8.0, 8.0),
             depth,

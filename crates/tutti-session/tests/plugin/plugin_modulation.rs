@@ -12,6 +12,7 @@
 use crate::param_reads::ParamReads as _;
 use crate::pooled::{LandOn as _, LoadPlugin, Spec};
 use crate::support;
+use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::Root;
 use tutti_session::{PluginChange, PluginEvent};
 
@@ -127,7 +128,7 @@ impl Drive {
         let mut heard = false;
         for _ in 0..CHUNK {
             let mut out = [0.0f32; 2];
-            s.render_frame(&mut out);
+            s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
             heard |= out.iter().any(|&x| x != 0.0);
         }
         std::thread::sleep(Duration::from_millis(5));
@@ -626,7 +627,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     let missed_before = diagnostics_of(&s, node.into()).missed_chunks();
     let mut side = s.graph().take_audio_side();
     let mut live = [Vec::new(), Vec::new()];
-    let mut out = vec![Vec::new(), Vec::new()];
+    let mut out = vec![vec![0.0; BLOCK]; 2];
     for b in 0..BLOCKS {
         let beat = (b * BLOCK) as f64 * 2.0 / RATE.get();
         side.set_transport(tutti_graph::TransportPosition::new(
@@ -643,7 +644,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
             );
             std::thread::sleep(Duration::from_millis(1));
         }
-        side.render(BLOCK, BLOCK, &mut out);
+        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         assert_eq!(
             diagnostics_of(&s, node.into()).missed_chunks(),
             missed_before,
