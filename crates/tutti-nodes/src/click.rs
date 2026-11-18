@@ -84,6 +84,20 @@ impl core::fmt::Display for MetronomeMode {
     }
 }
 
+tutti_units::ranged! {
+    /// The click's level: a linear [`Amplitude`] (not dB) within `0.0..=1.0`.
+    ///
+    /// [`new`](Self::new) refuses NaN, infinity and anything outside the range,
+    /// and never clamps.
+    ClickLevel(Amplitude), ClickLevelError, "a click level, finite and within 0.0..=1.0",
+    |raw| raw.get() >= 0.0 && raw.get() <= 1.0
+}
+
+impl ClickLevel {
+    /// Half level, a click's default.
+    pub const HALF: ClickLevel = ClickLevel(Amplitude(0.5));
+}
+
 /// Click-specific settings (volume, mode).
 ///
 /// Transport state (beat, playing, recording) comes from the node's block
@@ -110,7 +124,7 @@ declare_params!([] ClickSettings, settings ClickConfig {
 impl From<ClickConfig> for ClickSettings {
     fn from(config: ClickConfig) -> Self {
         Self {
-            volume: AtomicF32::new(0.5),
+            volume: AtomicF32::new(ClickLevel::HALF.get().get()),
             mode: Setting::new(config.mode),
         }
     }
@@ -123,16 +137,15 @@ impl ClickSettings {
         ClickConfig::new().into()
     }
 
-    /// The cell the click level is stored in, `0.0..=1.0` in linear
-    /// [`Amplitude`] (not dB). The session's click volume target checks the
-    /// range before it stores, so the cell holds a level within it.
-    pub fn volume_cell(&self) -> &AtomicF32 {
-        &self.volume
+    /// Stores the click level; the audio thread reads it at the next block.
+    pub fn store_volume(&self, level: ClickLevel) {
+        self.volume.store(level.get().get(), Ordering::Release);
     }
 
-    /// The click level, always within `0.0..=1.0`.
-    pub fn volume(&self) -> Amplitude {
-        Amplitude(self.volume.load(Ordering::Acquire))
+    /// The click level.
+    pub fn volume(&self) -> ClickLevel {
+        // Only `store_volume` and `new` write the cell, with a `ClickLevel`.
+        ClickLevel(Amplitude(self.volume.load(Ordering::Acquire)))
     }
 
     /// A fresh cell holding this one's volume and mode now, sharing no cell
@@ -492,7 +505,7 @@ impl ClickNode {
     fn render<F: Float>(&mut self, env: &Env, left: &mut [F], right: &mut [F]) {
         let mode = self.settings.mode().get();
         let in_preroll = self.preroll.load(Ordering::Acquire);
-        let volume = self.settings.volume();
+        let volume = self.settings.volume().get();
         self.forget_latch();
         for (start, piece) in env.segments() {
             if !Self::should_play(mode, &piece.transport, in_preroll) {
@@ -675,6 +688,29 @@ mod tests {
         }
     }
 
+    /// `ClickLevel` keeps the range-checked shape: `new` refuses and never
+    /// clamps, both ends are taken.
+    #[test]
+    fn a_click_level_keeps_the_range_checked_shape() {
+        use tutti_fixtures::{RangeContract, check_range_contract};
+        check_range_contract(&RangeContract {
+            new: ClickLevel::new,
+            get: ClickLevel::get,
+            of: Some(ClickLevel::of),
+            valid: &[
+                Amplitude::new(0.0),
+                Amplitude::new(0.5),
+                Amplitude::new(1.0),
+            ],
+            invalid: &[
+                Amplitude::new(-0.001),
+                Amplitude::new(1.001),
+                Amplitude::new(f32::NAN),
+                Amplitude::new(f32::INFINITY),
+            ],
+        });
+    }
+
     const SR: f64 = 44_100.0;
 
     /// The session state a block is rendered under: playing and recording.
@@ -744,8 +780,8 @@ mod tests {
 
     /// Stores a click level, as the session's volume target does after it
     /// has checked the range.
-    fn set_volume(settings: &ClickSettings, level: f32) {
-        settings.volume_cell().store(level, Ordering::Release);
+    fn set_volume(settings: &ClickSettings, level: Amplitude) {
+        settings.store_volume(ClickLevel::of(level));
     }
 
     /// Whether any of `n` one-frame blocks at `beat` sounds.
@@ -770,7 +806,7 @@ mod tests {
     fn test_click_node_plays_on_beat() {
         let (_, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, 1.0);
+        set_volume(&settings, Amplitude(1.0));
 
         assert!(
             sounds_within(&mut node, ROLLING, 0.0, 100),
@@ -786,7 +822,7 @@ mod tests {
     fn test_click_plays_after_loop_wrap() {
         let (_, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, 1.0);
+        set_volume(&settings, Amplitude(1.0));
 
         let _ = frame(&mut node, ROLLING, 7.0);
         assert_eq!(node.last_click_onset, Some(Beat(7.0)));
@@ -943,7 +979,7 @@ mod tests {
     fn a_mid_beat_meter_change_clicks_its_downbeat() {
         let (transport, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, 1.0);
+        set_volume(&settings, Amplitude(1.0));
         transport
             .settings()
             .project_meter()
@@ -1030,7 +1066,7 @@ mod tests {
     fn a_block_matches_its_frames_one_by_one() {
         let (_, settings, mut block_node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, 1.0);
+        set_volume(&settings, Amplitude(1.0));
 
         // 44.1 kHz at 120 BPM is 1/22050 beat per frame, so starting 20 frames
         // before beat 2 puts that onset at frame 20 of the block.
@@ -1088,7 +1124,7 @@ mod tests {
             let transport = Transport::new(SampleRate::of(RATE));
             let settings = Arc::new(ClickSettings::new());
             settings.mode().set(MetronomeMode::Always);
-            set_volume(&settings, 1.0);
+            set_volume(&settings, Amplitude(1.0));
             let mut node = prepared(
                 ClickNode::new(&transport, settings),
                 tutti_units::SampleRate::of(RATE),
@@ -1151,7 +1187,7 @@ mod tests {
     fn a_start_or_stop_inside_a_block_gates_on_its_frame() {
         let (_, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, 1.0);
+        set_volume(&settings, Amplitude(1.0));
 
         // Rolling on beat 3 (its click sounding), stopped at frame 30.
         let mut changes = TransportChanges::NONE;
@@ -1180,7 +1216,7 @@ mod tests {
     fn test_preroll_only_mode() {
         let (transport, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::PrerollOnly);
-        set_volume(&settings, 1.0);
+        set_volume(&settings, Amplitude(1.0));
 
         // Should be silent when not in preroll
         let output = frame(&mut node, ROLLING, 0.0);
@@ -1199,7 +1235,7 @@ mod tests {
     fn test_recording_only_mode() {
         let (transport, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::RecordingOnly);
-        set_volume(&settings, 1.0);
+        set_volume(&settings, Amplitude(1.0));
         let recording = Deck {
             playing: true,
             recording: true,
@@ -1235,7 +1271,7 @@ mod tests {
     fn a_fork_snapshots_settings_and_the_count_in() {
         type Move = fn(&Transport, &ClickSettings);
         let moves: [(&str, Move); 4] = [
-            ("volume", |_, s| set_volume(s, 1.0)),
+            ("volume", |_, s| set_volume(s, Amplitude(1.0))),
             ("mode", |_, s| s.mode().set(MetronomeMode::Off)),
             ("meter", |t, _| {
                 t.settings()
@@ -1250,7 +1286,7 @@ mod tests {
         let fresh = || {
             let transport = Transport::new(SampleRate::SR_48K);
             let settings = Arc::new(ClickSettings::new());
-            set_volume(&settings, 0.5);
+            set_volume(&settings, Amplitude(0.5));
             // Recording-only, so the count-in gates it (the render records).
             settings.mode().set(MetronomeMode::RecordingOnly);
             let node = ClickNode::new(&transport, Arc::clone(&settings));

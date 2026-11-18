@@ -12,11 +12,9 @@ use tutti_tempo::TempoMap;
 use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, Bpm, SampleRate};
 
-const RATE: f64 = 48_000.0;
-
 fn offline() -> Session {
     Session::builder()
-        .sample_rate(SampleRate::of(RATE))
+        .sample_rate(SampleRate::SR_48K)
         .build()
         .expect("builds")
 }

@@ -36,7 +36,7 @@ struct NodeParams {
 pub struct Params {
     nodes: BTreeMap<NodeKey, NodeParams>,
     /// The session's own values, by what they are: each a
-    /// [`SlotCell`](super::slot::SlotCell) of its value type.
+    /// [`SlotCell`] of its value type.
     pub(super) slots: BTreeMap<SlotId, slot::Erased>,
 }
 

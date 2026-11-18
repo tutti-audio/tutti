@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use tutti_music::MeterMap;
-use tutti_nodes::{ClickSettings, MetronomeMode};
+use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{Setting, SettingWord};
 use tutti_tempo::TempoMap;
 use tutti_transport::{ProjectMeter, TransportSettings};
@@ -255,22 +255,20 @@ pub(crate) struct ClickVolumeSlot(pub Arc<ClickSettings>);
 
 impl Slot<Amplitude> for ClickVolumeSlot {
     fn load(&self) -> Amplitude {
-        self.0.volume()
+        self.0.volume().get()
     }
 
     fn check(&self, value: &Amplitude) -> Result<(), SetRefusal> {
-        let level = value.get();
-        if !level.is_finite() {
-            return Err(SetRefusal::NotFinite);
+        match ClickLevel::new(*value) {
+            Some(_) => Ok(()),
+            None if !value.get().is_finite() => Err(SetRefusal::NotFinite),
+            None => Err(SetRefusal::OutOfRange),
         }
-        if !(0.0..=1.0).contains(&level) {
-            return Err(SetRefusal::OutOfRange);
-        }
-        Ok(())
     }
 
     fn store(&self, value: &Amplitude) {
-        self.0.volume_cell().store(value.get(), Ordering::Release);
+        let level = ClickLevel::new(*value).expect("`check` accepted the level");
+        self.0.store_volume(level);
     }
 }
 

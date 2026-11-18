@@ -6,7 +6,6 @@
 //!
 
 use crate::pooled::{LoadPlugin, Spec};
-use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_session::Root;
 use tutti_types::ChannelLayout;
