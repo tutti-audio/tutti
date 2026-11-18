@@ -25,8 +25,10 @@ mod sealed {
 /// The storage formats a [`Sample`] can be, as a value: what an encoder, a
 /// device or a file header dispatches on at run time.
 ///
-/// [`Sample::FORMAT`] names an implementor's variant.
+/// [`Sample::FORMAT`] names an implementor's variant. With the `serde` feature
+/// it is the variant's name on a wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum SampleFormat {
     /// Signed 8-bit integer.

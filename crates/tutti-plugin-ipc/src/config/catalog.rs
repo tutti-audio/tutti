@@ -17,9 +17,9 @@
 //! on OS conventions or app names.
 
 use super::bridge::{BridgeConfig, RandomSourceError};
-use crate::protocol::SampleFormat;
 use std::path::PathBuf;
 use std::time::Duration;
+use tutti_buffers::SampleFormat;
 use tutti_plugin_types::{Locator, Timeouts};
 
 /// Where the scanner keeps its crash sentinel and which directories to scan.
@@ -139,7 +139,7 @@ pub struct AudioConfig {
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
-            format: SampleFormat::Float32,
+            format: SampleFormat::F32,
             buffer_size: 8192,
             timeouts: Timeouts::default(),
         }

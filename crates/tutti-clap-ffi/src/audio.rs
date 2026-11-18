@@ -10,8 +10,8 @@ use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::events::clap_event_transport;
 use clap_sys::process::{CLAP_PROCESS_CONTINUE, CLAP_PROCESS_ERROR, clap_process};
 
+use tutti_buffers::SampleFormat;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_plugin_types::SampleFormat;
 
 use crate::events::{EventSink, EventSource, with_input, with_output};
 use crate::plugin::{Core, PortLayout};
@@ -280,8 +280,8 @@ impl PortScratch {
     pub fn new(format: SampleFormat) -> Self {
         Self {
             pool: match format {
-                SampleFormat::Float32 => Pool::F32(Typed::<f32>::new()),
-                SampleFormat::Float64 => Pool::F64(Typed::<f64>::new()),
+                SampleFormat::F64 => Pool::F64(Typed::<f64>::new()),
+                _ => Pool::F32(Typed::<f32>::new()),
             },
         }
     }
@@ -290,8 +290,8 @@ impl PortScratch {
     #[must_use]
     pub fn format(&self) -> SampleFormat {
         match self.pool {
-            Pool::F32(_) => SampleFormat::Float32,
-            Pool::F64(_) => SampleFormat::Float64,
+            Pool::F32(_) => SampleFormat::F32,
+            Pool::F64(_) => SampleFormat::F64,
         }
     }
 
@@ -327,8 +327,8 @@ pub enum Planar<'a, 'b> {
 impl Planar<'_, '_> {
     fn format(&self) -> SampleFormat {
         match self {
-            Self::F32 { .. } => SampleFormat::Float32,
-            Self::F64 { .. } => SampleFormat::Float64,
+            Self::F32 { .. } => SampleFormat::F32,
+            Self::F64 { .. } => SampleFormat::F64,
         }
     }
 

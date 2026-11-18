@@ -225,7 +225,6 @@ mod process;
 mod process_wake;
 mod render_mode;
 mod requests;
-mod sample_format;
 mod state_frame;
 mod state_use;
 mod sysex;
@@ -235,6 +234,7 @@ mod transport;
 mod transport_request;
 mod version;
 mod wakeups;
+mod widths;
 mod wire_error;
 
 // Test-only global allocator for the no-alloc gates: panics on any heap
@@ -353,11 +353,11 @@ pub use probe_failure::{MeasureFailure, ProbeError, ProbeRefusal, Unmeasured};
 pub use probe_wire::{ProbeOutcome, read_result, write_result};
 pub use process::{BlockStatus, ExpressiveContext, ProcessContext, ProcessOutput};
 pub use render_mode::RenderModeSupport;
-pub use sample_format::{SampleFormat, negotiate};
 pub use sysex::{SYSEX_MESSAGE_CAPACITY, push_sysex, sysex_assembler, sysex_packets};
 pub use transport::{
     BarInfo, LoopRegion, MusicalTiming, PlayheadWatch, TransportChange, TransportChanges,
     TransportFlags, TransportInfo, TransportPosition,
 };
+pub use widths::Widths;
 // The session's render mode, which a plugin's `Prepare` carries and `Control::set_render_mode` takes.
 pub use tutti_graph::RenderMode;

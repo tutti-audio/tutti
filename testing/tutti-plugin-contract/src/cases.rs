@@ -4,12 +4,13 @@
 use crate::active::main_thread;
 use crate::transcript::select_tail;
 use tutti_buffers::InputOutput;
+use tutti_buffers::SampleFormat;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     BusRole, BypassWrite, Control, Controller, Loaded, OwnBypass, ParamFlags, ParamWriteError,
     ParameterChanges, PluginBus, PluginIo, PluginTail, Preset, PresetId, ProcessContext,
-    ProcessOutput, Processor, Reopen, SampleFormat, Samples, TransportChange, TransportInfo,
+    ProcessOutput, Processor, Reopen, Samples, TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, Request};
 use tutti_ump::{MidiChannel, MidiGroup};
@@ -34,12 +35,12 @@ fn write<C: Control + ?Sized>(c: &mut C, param: Param, value: f64) {
 }
 
 fn activate<L: Loaded>(loaded: L, block: usize) -> Active<L> {
-    Active::activate(loaded, prepare(RATE, block, SampleFormat::Float32))
+    Active::activate(loaded, prepare(RATE, block, SampleFormat::F32))
         .unwrap_or_else(|(_, why)| panic!("activation refused: {why:?}"))
 }
 
 fn active_in<F: Format>(mode: Mode) -> Active<F::L> {
-    active_with::<F>(mode, BLOCK, SampleFormat::Float32)
+    active_with::<F>(mode, BLOCK, SampleFormat::F32)
 }
 
 fn active_with<F: Format>(mode: Mode, block: usize, format: SampleFormat) -> Active<F::L> {
@@ -107,7 +108,7 @@ pub fn routing_tag_oracle<F: Format>() {
 pub fn reconfigure_keeps_rendering<F: Format>() {
     let mut a = active_in::<F>(Mode::Tag);
     a.silent(BLOCK);
-    a.reconfigure(prepare(44_100.0, 128, SampleFormat::Float32))
+    a.reconfigure(prepare(44_100.0, 128, SampleFormat::F32))
         .expect("the reference plugin takes 44.1k");
     let out = a.render(&silence(128), 128, &ProcessContext::new());
     assert!(out[0].iter().all(|&v| v == spec::tag(0)));
@@ -168,7 +169,7 @@ pub fn latency_reported<F: Format>() {
 ///
 /// Panics when an assertion of the case fails.
 pub fn latency_applied<F: Format>() {
-    let mut a = active_with::<F>(Mode::Delay, 128, SampleFormat::Float32);
+    let mut a = active_with::<F>(Mode::Delay, 128, SampleFormat::F32);
     let frames = 100;
     let mut impulse = vec![0.0f32; frames];
     impulse[0] = 1.0;
@@ -198,7 +199,7 @@ pub fn latency_applied<F: Format>() {
 ///
 /// Spec: clap.plugin.reset, vst3.IAudioProcessor.setProcessing, vst2.eff.StopProcess, au.select.AudioUnitReset
 pub fn reset_clears_the_delay_line<F: Format>() {
-    let mut a = active_with::<F>(Mode::Delay, 128, SampleFormat::Float32);
+    let mut a = active_with::<F>(Mode::Delay, 128, SampleFormat::F32);
     let frames = 100;
     let mut impulse = vec![0.0f32; frames];
     impulse[0] = 1.0;
@@ -1350,7 +1351,7 @@ pub fn corrupt_state_leaves_plugin_usable<F: Format>() {
 ///
 /// Panics when an assertion of the case fails.
 pub fn halves_of_two_activations_are_stuck<F: Format>() {
-    let p = prepare(RATE, BLOCK, SampleFormat::Float32);
+    let p = prepare(RATE, BLOCK, SampleFormat::F32);
     let (pa, ca) = F::load()
         .activate(main_thread(), p)
         .map_err(|r| r.reason)
@@ -1364,13 +1365,40 @@ pub fn halves_of_two_activations_are_stuck<F: Format>() {
     drop((stuck, pb, ca));
 }
 
+/// A plugin that declares 64-bit processing reports both widths before
+/// activation, a 64-bit request settles on 64-bit, a 32-bit request is never
+/// raised, and the activation at the settled width renders.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
+pub fn widths_report_the_declared_precision<F: Format>() {
+    let loaded = F::load();
+    let widths = loaded.widths();
+    assert!(
+        widths.accepts(SampleFormat::F64),
+        "the shared plugin declares 64-bit audio: widths {widths:?}"
+    );
+    assert!(
+        widths.accepts(SampleFormat::F32),
+        "every plugin takes 32-bit"
+    );
+    let settled = widths.negotiate(SampleFormat::F64);
+    assert_eq!(settled, SampleFormat::F64);
+    assert_eq!(widths.negotiate(SampleFormat::F32), SampleFormat::F32);
+    let mut a = Active::activate(loaded, prepare(RATE, BLOCK, settled))
+        .unwrap_or_else(|(_, why)| panic!("activation at {settled:?} refused: {why:?}"));
+    let ins = [vec![0.0f64; BLOCK], vec![0.0f64; BLOCK]];
+    a.render(&ins, BLOCK, &ProcessContext::new());
+}
+
 /// 64-bit audio carries the same arithmetic, at 64 bits: 0.1 is not exact in 32.
 ///
 /// # Panics
 ///
 /// Panics when an assertion of the case fails.
 pub fn f64_carries_same_audio<F: Format>() {
-    let mut a = active_with::<F>(Mode::Tag, BLOCK, SampleFormat::Float64);
+    let mut a = active_with::<F>(Mode::Tag, BLOCK, SampleFormat::F64);
     let ins = [vec![0.1f64; BLOCK], vec![0.2f64; BLOCK]];
     let out = a.render(&ins, BLOCK, &ProcessContext::new());
     assert!(

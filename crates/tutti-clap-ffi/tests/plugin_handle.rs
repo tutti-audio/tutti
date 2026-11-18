@@ -18,6 +18,7 @@ use tutti_rt::LockExt;
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, clap_event_header, clap_event_param_value,
 };
+use tutti_buffers::SampleFormat;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_clap_ffi::{
     ActivateError, Bundle, CallError, EventRef, EventSink, EventSource, Host, HostCallbacks,
@@ -25,7 +26,6 @@ use tutti_clap_ffi::{
     TaskPool, ThreadRoles, header_size,
 };
 use tutti_clap_test_plugin::{PLUGIN_ID, REPORTED_LATENCY_SAMPLES, probe_tag};
-use tutti_plugin_types::SampleFormat;
 use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
@@ -285,7 +285,7 @@ fn a_block_runs_the_plugin_through_the_bound_channels() {
         )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
-    let mut scratch = PortScratch::new(SampleFormat::Float32);
+    let mut scratch = PortScratch::new(SampleFormat::F32);
     scratch.resize_for(&[2], &[2], 512);
 
     let mut left = vec![0.0f32; FRAMES];
@@ -312,7 +312,7 @@ fn a_short_channel_is_refused_without_calling_the_plugin() {
         )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
-    let mut scratch = PortScratch::new(SampleFormat::Float32);
+    let mut scratch = PortScratch::new(SampleFormat::F32);
     scratch.resize_for(&[2], &[2], 512);
 
     let mut left = vec![0.0f32; FRAMES / 2];
@@ -406,7 +406,7 @@ fn a_retired_audio_half_calls_nothing() {
         )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
-    let mut scratch = PortScratch::new(SampleFormat::Float32);
+    let mut scratch = PortScratch::new(SampleFormat::F32);
     scratch.resize_for(&[2], &[2], 512);
     let mut left = vec![0.0f32; FRAMES];
     let mut right = vec![0.0f32; FRAMES];
@@ -441,7 +441,7 @@ fn a_mismatched_block_is_refused_before_the_retired_check() {
     let mut side = plugin.audio_side().unwrap();
     drop(plugin);
     assert!(side.is_retired());
-    let mut scratch = PortScratch::new(SampleFormat::Float32);
+    let mut scratch = PortScratch::new(SampleFormat::F32);
     scratch.resize_for(&[2], &[2], 512);
     let mut left = vec![0.0f64; FRAMES];
     let mut right = vec![0.0f64; FRAMES];
@@ -482,7 +482,7 @@ fn a_deactivated_plugins_audio_half_is_retired() {
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
     plugin.deactivate(main_thread());
-    let mut scratch = PortScratch::new(SampleFormat::Float32);
+    let mut scratch = PortScratch::new(SampleFormat::F32);
     scratch.resize_for(&[2], &[2], 512);
     let mut left = vec![0.0f32; FRAMES];
     let mut right = vec![0.0f32; FRAMES];
@@ -509,7 +509,7 @@ fn deactivating_a_processing_plugin_stops_it_and_a_drop_tears_it_down() {
             )
             .expect("activates");
         let mut side = plugin.audio_side().unwrap();
-        let mut scratch = PortScratch::new(SampleFormat::Float32);
+        let mut scratch = PortScratch::new(SampleFormat::F32);
         scratch.resize_for(&[2], &[2], 512);
         let mut left = vec![0.0f32; FRAMES];
         let mut right = vec![0.0f32; FRAMES];
@@ -583,7 +583,7 @@ fn start(plugin: &mut Plugin, max_frames: u32) -> (tutti_clap_ffi::AudioSide, Po
             MaxBlock::new(Samples(max_frames as usize)).expect("a block"),
         )
         .expect("activates");
-    let mut scratch = PortScratch::new(SampleFormat::Float32);
+    let mut scratch = PortScratch::new(SampleFormat::F32);
     scratch.resize_for(&[2], &[2], max_frames as usize);
     (plugin.audio_side().unwrap(), scratch)
 }
@@ -826,9 +826,9 @@ fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
 
-    let mut wide = PortScratch::new(SampleFormat::Float64);
+    let mut wide = PortScratch::new(SampleFormat::F64);
     wide.resize_for(&[2], &[2], 512);
-    assert_eq!(wide.format(), SampleFormat::Float64);
+    assert_eq!(wide.format(), SampleFormat::F64);
     let mut left = vec![0.0f64; FRAMES];
     let mut right = vec![0.0f64; FRAMES];
     let mut outputs: Vec<&mut [f64]> = vec![&mut left, &mut right];
@@ -875,7 +875,7 @@ fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
     assert_eq!(out32[0][0], 0.0, "the plugin wrote nothing");
 
     // The same call at the other width through a 32-bit scratch.
-    let mut narrow = PortScratch::new(SampleFormat::Float32);
+    let mut narrow = PortScratch::new(SampleFormat::F32);
     narrow.resize_for(&[2], &[2], 512);
     call(
         &mut narrow,

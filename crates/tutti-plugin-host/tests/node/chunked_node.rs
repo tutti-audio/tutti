@@ -29,7 +29,7 @@ use tutti_plugin_types::{
     EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
     MainWorkHandle, Origin, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo,
     PluginResult, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused,
-    RenderModeSupport, RestartRules, Samples, Speaker, Stuck, WindowHandle,
+    RenderModeSupport, RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
@@ -269,6 +269,10 @@ impl Loaded for Rec {
     type Processor = RecProcessor;
     type Controller = RecController;
     const RESTARTS: RestartRules = RestartRules::CLAP;
+
+    fn widths(&self) -> Widths {
+        Widths::BOTH
+    }
 
     fn activate(
         self,

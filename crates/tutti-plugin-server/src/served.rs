@@ -18,13 +18,14 @@ use crate::ties::{Patience, Ties};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use tutti_buffers::SampleFormat;
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
     AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, Load,
     LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
     ParamEdit, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginIo,
     PluginResult, Prepare, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request,
-    SampleFormat, SampleRate, Samples, Seat, Stage, State, StateError, StateUse, TrackInfo,
+    SampleRate, Samples, Seat, Stage, State, StateError, StateUse, TrackInfo,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -83,9 +84,9 @@ pub(crate) trait ServedPlugin {
     /// never the request alone.
     fn negotiated(&self, prefer_f64: bool) -> SampleFormat {
         if prefer_f64 && self.loaded().features.contains(Features::F64_AUDIO) {
-            SampleFormat::Float64
+            SampleFormat::F64
         } else {
-            SampleFormat::Float32
+            SampleFormat::F32
         }
     }
     /// The plugin's control surface, which is also its editor's window calls
@@ -381,7 +382,7 @@ impl<F: ServerSide> Served<F> {
         let mut refusal = this.drive(
             main,
             Event::Op(HostOp::Activate(if prefer_f64 {
-                prepare.with_format(SampleFormat::Float64)
+                prepare.with_format(SampleFormat::F64)
             } else {
                 prepare
             })),

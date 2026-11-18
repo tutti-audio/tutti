@@ -22,11 +22,11 @@
 //! the Processor lent runs once [`Event::Returned`] arrives.
 
 use arrayvec::ArrayVec;
+use tutti_buffers::SampleFormat;
 use tutti_plugin_ipc_ffi::FdId;
 
 use crate::{
-    Layout, MaxBlock, PluginError, PluginTail, RenderMode, SampleFormat, SampleRate, Samples,
-    TransportRequest,
+    Layout, MaxBlock, PluginError, PluginTail, RenderMode, SampleRate, Samples, TransportRequest,
 };
 
 /// How many effects one [`step`] can emit.
@@ -93,7 +93,7 @@ impl Prepare {
         Self {
             rate,
             max_block,
-            format: SampleFormat::default(),
+            format: SampleFormat::F32,
             mode: RenderMode::default(),
         }
     }

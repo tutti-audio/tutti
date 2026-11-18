@@ -10,9 +10,8 @@ use std::path::Path;
 use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_fixtures::{Whole, main_thread};
 
-use tutti_plugin_types::{
-    ChannelTable, MaxBlock, PluginError, Prepare, SampleFormat, SampleRate, Samples,
-};
+use tutti_buffers::SampleFormat;
+use tutti_plugin_types::{ChannelTable, MaxBlock, PluginError, Prepare, SampleRate, Samples};
 use tutti_vst2_host::{MidiEventVec, Vst2Error, Vst2Loaded, Vst2ProcessContext, Vst2Processor};
 
 /// The two halves of one activation.
@@ -22,9 +21,9 @@ pub type Active = tutti_fixtures::Active<Whole<Vst2Loaded>>;
 pub fn prepare_for(rate: f64, frames: usize, double: bool) -> Prepare {
     let block = MaxBlock::new(Samples(frames)).expect("a block of at least one frame");
     Prepare::new(SampleRate::of(rate), block).with_format(if double {
-        SampleFormat::Float64
+        SampleFormat::F64
     } else {
-        SampleFormat::Float32
+        SampleFormat::F32
     })
 }
 

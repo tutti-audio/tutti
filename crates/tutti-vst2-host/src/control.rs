@@ -75,7 +75,7 @@ impl Vst2Loaded {
         let info = self.metadata();
         let mut features = Features::empty();
         // Backed by the render path: with this bit set, an `F64` buffer reaches
-        // `processReplacingF64` (an activation at `Float64` tells the plugin
+        // `processReplacingF64` (an activation at `F64` tells the plugin
         // `effSetProcessPrecision(64)`) rather than being narrowed.
         features.set(Features::F64_AUDIO, info.supports_f64);
         features.set(Features::MIDI_IN, info.receives_midi);

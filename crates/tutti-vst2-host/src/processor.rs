@@ -16,10 +16,11 @@ use tutti_rt::{Counter, Tally};
 
 use vst::host::RenderHandle;
 
+use tutti_buffers::SampleFormat;
 use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_plugin_types::{
     ParameterChanges, PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput,
-    Processor, SampleFormat, SampleRate,
+    Processor, SampleRate,
 };
 use tutti_units::Normalized;
 
@@ -199,7 +200,7 @@ impl Vst2Processor {
     /// makes [`process_planes`](Self::process_planes) enter `processReplacingF64`.
     #[must_use]
     pub fn is_double_precision(&self) -> bool {
-        self.scratch.format() == SampleFormat::Float64
+        self.scratch.format() == SampleFormat::F64
     }
 
     /// Returns how many plugin-emitted MIDI events were **dropped** since the
@@ -252,7 +253,7 @@ impl Vst2Processor {
     /// transport and sample rate. A zero-length block returns immediately
     /// without entering the plugin.
     ///
-    /// A plugin told 64-bit at activation (`Prepare::format` of `Float64` and
+    /// A plugin told 64-bit at activation (`Prepare::format` of `F64` and
     /// `effFlagsCanDoubleReplacing`) is entered through `processReplacingF64`, so
     /// the samples never pass through f32; one told 32 is entered through
     /// `processReplacing`, and a 64-bit block for it is converted to f32 at the
@@ -260,7 +261,7 @@ impl Vst2Processor {
     /// is silence (what the vendor's `process_f64` returns on a null
     /// `processReplacingF64`), which would turn an f64 master chain into a mute
     /// for every plugin that only speaks f32. Callers wanting to avoid the
-    /// narrowing read `metadata().supports_f64` and activate at `Float32`.
+    /// narrowing read `metadata().supports_f64` and activate at `F32`.
     ///
     /// A block longer than the maximum the plugin was told
     /// ([`Prepare::max_block`](tutti_plugin_types::Prepare::max_block)) is
@@ -448,8 +449,7 @@ impl Vst2Processor {
         };
         // The width is matched once per block against the activation's.
         match (self.scratch.format(), buffer.by_width()) {
-            (SampleFormat::Float32, ByWidth::F32(_)) | (SampleFormat::Float64, ByWidth::F64(_)) => {
-            }
+            (SampleFormat::F32, ByWidth::F32(_)) | (SampleFormat::F64, ByWidth::F64(_)) => {}
             _ => {
                 return Err(PluginError::Block(
                     "the block's sample format is not the one the plugin was activated with",

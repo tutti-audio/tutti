@@ -81,9 +81,9 @@ fn prep(n: u8) -> Prepare {
     });
     Prepare::new(rate, MaxBlock::of(Samples(64 << (n % 3))))
         .with_format(if n.is_multiple_of(5) {
-            SampleFormat::Float64
+            SampleFormat::F64
         } else {
-            SampleFormat::Float32
+            SampleFormat::F32
         })
         .with_mode(if n.is_multiple_of(7) {
             RenderMode::Offline
@@ -1623,7 +1623,7 @@ fn a_prepare_carries_a_rate_and_a_block() {
         let prepare = Prepare::new(SampleRate::of(rate), block);
         assert_eq!(prepare.rate(), SampleRate::of(rate));
         assert_eq!(prepare.max_block(), block);
-        assert_eq!(prepare.format(), SampleFormat::Float32);
+        assert_eq!(prepare.format(), SampleFormat::F32);
         assert_eq!(prepare.mode(), RenderMode::Realtime);
     }
     assert_eq!(

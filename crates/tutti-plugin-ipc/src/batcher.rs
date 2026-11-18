@@ -74,10 +74,11 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
+use tutti_buffers::SampleFormat;
 use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_plugin_types::{
     BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
-    SampleFormat, TransportChanges, TransportInfo, WireMidi,
+    TransportChanges, TransportInfo, WireMidi,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -196,8 +197,8 @@ enum Wire {
 impl Wire {
     fn new(format: SampleFormat, inputs: usize, outputs: usize, ceiling: usize) -> Self {
         match format {
-            SampleFormat::Float32 => Self::F32(Rows::new(inputs, outputs, ceiling)),
-            SampleFormat::Float64 => Self::F64(Rows::new(inputs, outputs, ceiling)),
+            SampleFormat::F64 => Self::F64(Rows::new(inputs, outputs, ceiling)),
+            _ => Self::F32(Rows::new(inputs, outputs, ceiling)),
         }
     }
 
@@ -820,7 +821,7 @@ mod tests {
     /// ways: these tests stage nothing, but a batcher cannot exist without the
     /// writer its chunks go through.
     fn slab(samples: usize) -> SlabWriter {
-        slab_of(samples, SampleFormat::Float32)
+        slab_of(samples, SampleFormat::F32)
     }
 
     /// [`slab`] with the wire's format `format`.
@@ -880,7 +881,7 @@ mod tests {
         }
         server.publish(1);
         // Three output rows over a two-channel slab.
-        let mut b = Batcher::new(2, 3, SampleFormat::Float32, MAX_CHUNK, writer);
+        let mut b = Batcher::new(2, 3, SampleFormat::F32, MAX_CHUNK, writer);
         b.chunk = 8;
         // The refusal is a `Copy` error: nothing is allocated on the audio
         // thread to report it.
@@ -913,7 +914,7 @@ mod tests {
     #[test]
     fn a_64_bit_block_through_a_64_bit_wire_is_bit_exact() {
         assert_ne!(FINE as f32 as f64, FINE, "the value must not fit in f32");
-        let mut writer = slab_of(MAX_CHUNK, SampleFormat::Float64);
+        let mut writer = slab_of(MAX_CHUNK, SampleFormat::F64);
         let mut server = AudioSlab::open(writer.name().to_owned(), writer.layout()).unwrap();
         let mut rows = Rows::<f64>::new(2, 2, MAX_CHUNK);
 
@@ -975,7 +976,7 @@ mod tests {
     /// rather than whatever the output slot happens to contain.
     #[test]
     fn a_fresh_batcher_expects_nothing() {
-        let b = Batcher::new(2, 2, SampleFormat::Float32, MAX_CHUNK, slab(MAX_CHUNK));
+        let b = Batcher::new(2, 2, SampleFormat::F32, MAX_CHUNK, slab(MAX_CHUNK));
         assert_eq!(b.expect_seq, None);
         assert_eq!(b.next_seq, 1, "0 means 'never published' in the slab");
     }
@@ -987,7 +988,7 @@ mod tests {
     #[test]
     fn a_full_unanswered_list_counts_the_oldest() {
         let counters = Arc::new(ChunkCounters::default());
-        let mut b = Batcher::new(2, 2, SampleFormat::Float32, MAX_CHUNK, slab(MAX_CHUNK))
+        let mut b = Batcher::new(2, 2, SampleFormat::F32, MAX_CHUNK, slab(MAX_CHUNK))
             .with_counters(Arc::clone(&counters));
         for seq in 1..=FATES as u64 {
             b.remember_unanswered(seq);
@@ -1006,7 +1007,7 @@ mod tests {
     /// fragment of pre-seek audio.
     #[test]
     fn reset_drops_the_in_flight_block_without_rewinding() {
-        let mut b = Batcher::new(2, 2, SampleFormat::Float32, MAX_CHUNK, slab(MAX_CHUNK));
+        let mut b = Batcher::new(2, 2, SampleFormat::F32, MAX_CHUNK, slab(MAX_CHUNK));
         b.next_seq = 100;
         b.expect_seq = Some(99);
 
@@ -1038,7 +1039,7 @@ mod tests {
     /// would have been pinning the artifact.
     #[test]
     fn no_post_seek_sequence_can_collide_with_a_pre_seek_one() {
-        let mut b = Batcher::new(2, 2, SampleFormat::Float32, MAX_CHUNK, slab(MAX_CHUNK));
+        let mut b = Batcher::new(2, 2, SampleFormat::F32, MAX_CHUNK, slab(MAX_CHUNK));
 
         let mut pre_seek = Vec::new();
         for _ in 0..5 {
@@ -1078,7 +1079,7 @@ mod tests {
     /// `MaxBlock`, capped by the slab's ceiling either way.
     #[test]
     fn the_pipeline_chunk_is_the_device_quantum_else_the_max_block() {
-        let mut b = Batcher::new(2, 2, SampleFormat::Float32, MAX_CHUNK, slab(MAX_CHUNK));
+        let mut b = Batcher::new(2, 2, SampleFormat::F32, MAX_CHUNK, slab(MAX_CHUNK));
         b.prepare(Samples(1024), Some(Samples(480)));
         assert_eq!(Samples(b.chunk()), Samples(480));
         b.prepare(Samples(64), Some(Samples(2048)));
@@ -1092,7 +1093,7 @@ mod tests {
         b.prepare(Samples(32), None);
         assert_eq!(Samples(b.chunk()), Samples(32));
 
-        let mut small_slab = Batcher::new(2, 2, SampleFormat::Float32, 16, slab(16));
+        let mut small_slab = Batcher::new(2, 2, SampleFormat::F32, 16, slab(16));
         small_slab.prepare(Samples(1024), None);
         assert_eq!(Samples(small_slab.chunk()), Samples(16));
     }
@@ -1102,7 +1103,7 @@ mod tests {
     /// new one — without advancing the sequence, as for a seek.
     #[test]
     fn prepare_drops_the_chunk_in_flight() {
-        let mut b = Batcher::new(2, 2, SampleFormat::Float32, MAX_CHUNK, slab(MAX_CHUNK));
+        let mut b = Batcher::new(2, 2, SampleFormat::F32, MAX_CHUNK, slab(MAX_CHUNK));
         b.next_seq = 7;
         b.expect_seq = Some(6);
         b.prepare(Samples(128), None);

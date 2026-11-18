@@ -44,11 +44,12 @@ use tutti_rt::{LockExt, StopToken, ThreadHandle};
 
 use std::borrow::Cow;
 use tutti_buffers::Float;
+use tutti_buffers::SampleFormat;
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabLayout, SlabWriter};
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
     BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginIo, PluginResult,
-    ProcessOutput, Processor, SampleFormat,
+    ProcessOutput, Processor,
 };
 use tutti_rt::{
     Overflow, PushError, Returned, RingReader, RingWriter, Rt, Tally, TallyWriter, ring, tally,
@@ -993,7 +994,7 @@ mod tests {
     fn slab(name: &str, samples: usize) -> (impl Sized, SlabWriter) {
         let layout = SlabLayout::new(
             samples,
-            SampleFormat::Float32,
+            SampleFormat::F32,
             vec![ChannelLayout::STEREO],
             vec![ChannelLayout::STEREO],
         );
@@ -1017,7 +1018,7 @@ mod tests {
         let (_second_host, second) = slab("drain_second", 4096);
         link.attach_slab(second);
         link.fit_params(300);
-        link.set_format(SampleFormat::Float64);
+        link.set_format(SampleFormat::F64);
         assert_no_alloc::assert_no_alloc(|| side.drain());
         assert!(side.has_slab());
 

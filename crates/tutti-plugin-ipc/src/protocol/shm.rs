@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::BusChannels;
-use super::SampleFormat;
+use tutti_buffers::SampleFormat;
 
 /// Shared-memory slab descriptor: the shape both processes must agree on before
 /// either maps a byte.
@@ -49,8 +49,8 @@ impl SlabLayout {
     /// Returns the size of one sample in bytes, per [`format`](Self::format).
     pub fn sample_size(&self) -> usize {
         match self.format {
-            SampleFormat::Float32 => std::mem::size_of::<f32>(),
-            SampleFormat::Float64 => std::mem::size_of::<f64>(),
+            SampleFormat::F64 => std::mem::size_of::<f64>(),
+            _ => std::mem::size_of::<f32>(),
         }
     }
 
@@ -114,7 +114,7 @@ mod tests {
     fn layout(inputs: &[ChannelLayout], outputs: &[ChannelLayout]) -> SlabLayout {
         SlabLayout {
             samples_per_channel: 64,
-            format: SampleFormat::Float32,
+            format: SampleFormat::F32,
             // Derived, not a literal: every other construction site uses
             // `RING_SLOTS`, and a helper that hardcodes the depth would keep
             // passing if the ring ever grew.
@@ -188,7 +188,7 @@ mod tests {
     fn f64_doubles_the_region() {
         let mut l = layout(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO]);
         let f32_bytes = l.input_ring_bytes();
-        l.format = SampleFormat::Float64;
+        l.format = SampleFormat::F64;
         assert_eq!(l.sample_size(), 8);
         assert_eq!(l.input_ring_bytes(), f32_bytes * 2);
         assert_eq!(l.input_channels(), 2, "format does not affect width");

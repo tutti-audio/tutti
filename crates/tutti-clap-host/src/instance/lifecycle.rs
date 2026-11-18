@@ -19,10 +19,10 @@ use crate::events::{EDIT_CAPACITY, InputRooms, OutputRooms};
 use crate::types::{ParameterChanges, ParameterQueue, PluginInfo};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tutti_buffers::SampleFormat;
 use tutti_clap_ffi::ActivateError;
 use tutti_plugin_types::{
-    Control, MIDI_STACK_BOUND, PluginError, Prepare, Refused, Request, SampleFormat, negotiate,
-    taken,
+    Control, Loaded, MIDI_STACK_BOUND, PluginError, Prepare, Refused, Request, taken,
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
@@ -71,7 +71,7 @@ impl ClapLoaded {
 
     /// The format an activation runs at when `requested` is asked of this
     /// plugin: 64-bit only when asked for and every port advertises it, else
-    /// 32-bit (`tutti_plugin_types::negotiate`). The audio ports are read
+    /// 32-bit ([`Widths::negotiate`](tutti_plugin_types::Widths::negotiate)). The audio ports are read
     /// again first, so the answer is the plugin's capability now, not as of
     /// load. A caller that wants the fallback negotiates here and puts the
     /// result in [`Prepare::format`]; [`Loaded::activate`] reads the ports once
@@ -91,7 +91,7 @@ impl ClapLoaded {
         requested: SampleFormat,
     ) -> crate::Result<SampleFormat> {
         self.rescan_audio_ports(main)?;
-        Ok(negotiate(requested, self.audio.supports_f64))
+        Ok(self.widths().negotiate(requested))
     }
 
     /// Activates the plugin at the sample format `prepare` names, splitting it
@@ -122,7 +122,7 @@ impl ClapLoaded {
         main: MainThreadMarker,
         prepare: Prepare,
     ) -> std::result::Result<(ClapProcessor, ClapController), Refused<Self>> {
-        let wide = prepare.format() == SampleFormat::Float64;
+        let wide = prepare.format() == SampleFormat::F64;
         let refuse = |plugin: Self, error: ClapError| Refused {
             plugin: Some(plugin),
             reason: plugin_error(error),
@@ -409,7 +409,7 @@ mod tests {
                     claims: true,
                 };
                 let mut scratch = AudioScratch::new(
-                    SampleFormat::Float32,
+                    SampleFormat::F32,
                     input_rooms(&table, frames),
                     output_rooms(&table, frames),
                 );
@@ -462,7 +462,7 @@ mod tests {
             claims: true,
         };
         let mut scratch = AudioScratch::new(
-            SampleFormat::Float32,
+            SampleFormat::F32,
             input_rooms(&table, FRAMES),
             output_rooms(&table, FRAMES),
         );

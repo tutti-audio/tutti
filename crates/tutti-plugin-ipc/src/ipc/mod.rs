@@ -50,12 +50,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tutti_rt::LockExt;
 
+use tutti_buffers::SampleFormat;
 use tutti_plugin_types::{
     BridgeError, BridgeResult, ChunkCounters, Controller, Load, LoadStage, Loaded, LoadedPlugin,
     MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
     PluginDescriptor, PluginError, PluginFormat, PluginResult, PluginTail, Prepare, PresetId,
-    ProcessWake, Refused, Reopen, Request, RestartRules, ResyncKind, SampleFormat, SampleRate,
-    Samples, StateError, StateUse, Stuck,
+    ProcessWake, Refused, Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples,
+    StateError, StateUse, Stuck, Widths,
 };
 use tutti_types::AtomicSampleRate;
 use tutti_units::ParamId;
@@ -902,6 +903,11 @@ impl Loaded for Ipc {
         latency: false,
     };
 
+    /// The width the load settled on: the server's reply names it and not the
+    /// plugin's capability, so a load that asked for 32-bit reports 32-bit.
+    fn widths(&self) -> Widths {
+        Widths::new(self.link.format == SampleFormat::F64)
+    }
     /// Builds the pipeline for `prepare`'s block and the Processor over it.
     /// The server is told no rate here: it was launched at one, and a node
     /// that follows another tells it through [`Processor::retune`](tutti_plugin_types::Processor::retune).

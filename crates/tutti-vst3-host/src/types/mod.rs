@@ -18,7 +18,7 @@ pub use tutti_vst3_ffi::{
 pub use tutti_plugin_types::{
     ContentScale, EditorCapabilities, NoteExpressionIntValue, NoteExpressionType,
     NoteExpressionValue, ParameterChanges, ParameterPoint, ParameterQueue, PluginVersion,
-    SampleFormat, TransportInfo, WindowHandle, WireMidi,
+    TransportInfo, WindowHandle, WireMidi,
 };
 
 /// A parameter's own `[min, max]`, as the plugin's controller maps the
@@ -241,8 +241,6 @@ impl PluginInfo {
 /// and the constants below must agree with the buffers the FFI crate binds for
 /// each; `Float` is sealed to those two.
 pub trait Vst3Sample: tutti_buffers::Float {
-    /// The format of this sample type: not named `FORMAT`, which `Float` already uses.
-    const PLUGIN_FORMAT: SampleFormat;
     /// The width of this sample type.
     const WIDTH: SampleWidth;
     /// The `symbolicSampleSize` the plugin is told: `kSample32` or `kSample64`.
@@ -264,7 +262,6 @@ pub trait Vst3Sample: tutti_buffers::Float {
 }
 
 impl Vst3Sample for f32 {
-    const PLUGIN_FORMAT: SampleFormat = SampleFormat::Float32;
     const WIDTH: SampleWidth = SampleWidth::F32;
     const VST3_SYMBOLIC_SIZE: i32 = K_SAMPLE_32_INT;
 
@@ -284,7 +281,6 @@ impl Vst3Sample for f32 {
 }
 
 impl Vst3Sample for f64 {
-    const PLUGIN_FORMAT: SampleFormat = SampleFormat::Float64;
     const WIDTH: SampleWidth = SampleWidth::F64;
     const VST3_SYMBOLIC_SIZE: i32 = K_SAMPLE_64_INT;
 

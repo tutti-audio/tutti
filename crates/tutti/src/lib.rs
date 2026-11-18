@@ -635,9 +635,9 @@ pub mod plugin {
         ClapFeature, ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper,
         InvalidContentScale, KeyEvent, KeyUse, LatencyVerdict, Load, Locator, Measured, NotChecked,
         ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainUnit, PluginClass,
-        PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig, SampleFormat,
-        StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category,
-        Vst3PlugType, Vst3SubCategories,
+        PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig, StateError,
+        StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType,
+        Vst3SubCategories,
     };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
     pub use tutti_plugin_types::{

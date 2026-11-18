@@ -13,12 +13,13 @@ use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
+use tutti_buffers::SampleFormat;
 use tutti_clap_test_plugin::{ClapSwitch, Site};
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::{
     AudioSlab, BridgeMessage, HostMessage, ProcessAudioData, read_frame, write_frame,
 };
-use tutti_plugin_types::{BridgeError, BridgeResult, ContentScale, Load, SampleFormat};
+use tutti_plugin_types::{BridgeError, BridgeResult, ContentScale, Load};
 
 use super::{Native, Stream, serve_every};
 
@@ -210,7 +211,7 @@ fn load_message() -> HostMessage {
         load: Load::new(),
         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         block_size: 512,
-        preferred_format: SampleFormat::Float32,
+        preferred_format: SampleFormat::F32,
         shm_name: String::new(),
         state: None,
     }
@@ -221,7 +222,7 @@ fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
     let (mut session, side) = Session::new().expect("bells");
     let layout = tutti_plugin_ipc::SlabLayout {
         samples_per_channel: 512,
-        format: SampleFormat::Float32,
+        format: SampleFormat::F32,
         slots: tutti_plugin_ipc::RING_SLOTS as u32,
         inputs: vec![tutti_plugin_types::ChannelLayout::STEREO],
         outputs: vec![tutti_plugin_types::ChannelLayout::STEREO],

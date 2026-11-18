@@ -1,11 +1,12 @@
 //! One activation, both halves held together: [`Active`] is the shared
 //! `tutti_fixtures::Active`, and [`Render`] is what a case drives it with.
 
+use tutti_buffers::SampleFormat;
 use tutti_buffers::{Float, InputOutput};
 use tutti_fixtures::Whole;
 use tutti_plugin_types::{
-    Loaded, MaxBlock, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor, SampleFormat,
-    SampleRate, Samples,
+    Loaded, MaxBlock, PluginIo, Prepare, ProcessContext, ProcessOutput, Processor, SampleRate,
+    Samples,
 };
 
 /// The default rate.

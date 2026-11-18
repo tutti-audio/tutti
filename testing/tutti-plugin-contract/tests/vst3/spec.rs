@@ -8,6 +8,7 @@
 //! The plugins' side of each is the spec in `tutti-shared-plugin`'s `core`
 //! module, "VST3 controllers and flushes".
 
+use tutti_buffers::SampleFormat;
 use tutti_fixtures::main_thread;
 use tutti_fixtures::midi;
 use tutti_graph::{Offset, UmpAt};
@@ -16,7 +17,7 @@ use tutti_plugin_contract::spec::{Mode, Param};
 use tutti_plugin_contract::{
     Active, BLOCK, Format, Kind, RATE, Render, Vst3, Vst3Cpp, prepare, select, set_mode, transcript,
 };
-use tutti_plugin_types::{Control, ProcessContext, Processor, SampleFormat, Samples};
+use tutti_plugin_types::{Control, ProcessContext, Processor, Samples};
 use tutti_ump::{CCNumber, MidiChannel, U7};
 use tutti_units::Normalized;
 use tutti_vst3_host::{Vst3Loaded, Vst3Processor};
@@ -24,7 +25,7 @@ use tutti_vst3_host::{Vst3Loaded, Vst3Processor};
 fn active<F: Format<L = Vst3Loaded>>() -> Active<Vst3Loaded> {
     let mut loaded = F::load();
     set_mode::<F, _>(&mut loaded, Mode::Tag);
-    Active::activate(loaded, prepare(RATE, BLOCK, SampleFormat::Float32))
+    Active::activate(loaded, prepare(RATE, BLOCK, SampleFormat::F32))
         .unwrap_or_else(|(_, why)| panic!("activation refused: {why:?}"))
 }
 

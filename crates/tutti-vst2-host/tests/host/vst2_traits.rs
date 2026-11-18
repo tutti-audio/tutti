@@ -11,12 +11,13 @@ use tutti_fixtures::main_thread;
 use tutti_rt::LockExt;
 
 use assert_no_alloc::assert_no_alloc;
+use tutti_buffers::SampleFormat;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_plugin_types::{
     AutomationMode, Control, Controller, EditorWindow, Event, Hand, HostOp, Lifecycle, Loaded,
     MaxBlock, Notice, ParameterChanges, PluginError, PluginIo, Prepare, ProcessContext,
-    ProcessOutput, Processor, RenderMode, SampleFormat, SampleRate, Samples, Stage,
+    ProcessOutput, Processor, RenderMode, SampleRate, Samples, Stage,
 };
 use tutti_ump::{Address, MidiChannel, MidiGroup};
 use tutti_units::Normalized;
@@ -272,7 +273,7 @@ fn activation_splits_the_plugin_and_renders_through_the_trait() {
 fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     let probe = Probe::acquire();
     probe.declaring_f64();
-    let wanted = prepare().with_format(SampleFormat::Float64);
+    let wanted = prepare().with_format(SampleFormat::F64);
     let (mut processor, controller) = probe
         .load()
         .activate(main_thread(), wanted)

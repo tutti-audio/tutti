@@ -1,10 +1,10 @@
 //! Host-local configuration for a plugin bridge. Not wire data —
 //! controls how *this* process connects to and manages a plugin-server.
 
-use crate::protocol::SampleFormat;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
+use tutti_buffers::SampleFormat;
 use tutti_plugin_types::{BridgeError, Timeouts};
 
 /// The operating system's random source could not be read, so no name that
@@ -137,7 +137,7 @@ pub struct BridgeConfig {
     /// How long each wait on the subprocess runs before erroring.
     pub timeouts: Timeouts,
     /// Sample format to request; the subprocess replies with what it negotiated.
-    #[serde(default)]
+    #[serde(default = "crate::protocol::default_format")]
     pub preferred_format: SampleFormat,
 }
 
@@ -156,7 +156,7 @@ impl BridgeConfig {
             shm_prefix: "tutti_audio_".to_string(),
             max_buffer_size: 8192,
             timeouts: Timeouts::default(),
-            preferred_format: SampleFormat::Float32,
+            preferred_format: SampleFormat::F32,
         }
     }
 }
