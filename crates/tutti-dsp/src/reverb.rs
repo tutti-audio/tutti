@@ -33,21 +33,6 @@ pub(crate) fn ramp(rate: SampleRate) -> Steps {
     Steps::Fixed(u32::try_from(chunks).unwrap_or(u32::MAX).max(1))
 }
 
-/// `buf[(w - delay) mod cap]` interpolated linearly to a fractional `delay` of at least 0:
-/// `w` is the slot of the current frame, so delay 0 is the frame just written.
-#[inline]
-pub(crate) fn read(buf: &[f32], w: usize, delay: f32) -> f32 {
-    let cap = buf.len();
-    let whole = delay as usize;
-    let frac = delay - whole as f32;
-    let a = buf[(w + cap - whole) % cap];
-    if frac == 0.0 {
-        return a;
-    }
-    let b = buf[(w + cap - whole - 1) % cap];
-    crate::lerp(a, b, frac)
-}
-
 /// The tail a ring is, in whole frames at `rate`: unbounded when it never ends or is not a
 /// finite time.
 pub(crate) fn tail_of(ring: Ring, rate: SampleRate) -> Tail {
