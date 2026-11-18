@@ -211,7 +211,7 @@ pub use main_thread::MainThreadMarker;
 pub use packed_atomic::PackedAtomic;
 pub use pos_ring::{
     MAX_POS_RING_FRAMES, MAX_POS_RING_POSITION, PosClaim, PosFrame, PosReader, PosRing, PosWriter,
-    RingSample, RingWindow,
+    RingFloat, RingSample, RingWindow,
 };
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;

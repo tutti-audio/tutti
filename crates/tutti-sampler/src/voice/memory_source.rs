@@ -23,7 +23,7 @@ use tutti_types::{
 
 use super::clock::{BlockClock, Clock};
 use super::interp::{
-    Gate, Place, hermite_lanes, place, place_tail, read_looped_frame, split_position, tap,
+    Gate, Place, hermite_lanes, mirrored, place, place_tail, read_looped_frame, split_position, tap,
 };
 use super::loop_span::{Loop, LoopSpan};
 use super::slot::Piece;
@@ -680,7 +680,7 @@ impl<F: Float> MemorySource<F> {
                     out.fill(F::ZERO);
                     return;
                 }
-                self.sample_raw_into(SamplePosition((len - 1.0 - pos.get()).max(0.0)), out);
+                self.sample_raw_into(mirrored(self.wave.len(), pos), out);
             }
             Direction::Forward => match LoopSpan::from_setting(self.loop_, self.wave.len().get()) {
                 Some(span) => {
@@ -863,7 +863,7 @@ impl<F: Float> MemorySource<F> {
                 // `read_placed_into`.
                 let p = match (direction, &span) {
                     (Direction::Reverse, _) if p >= flen => return None,
-                    (Direction::Reverse, _) => (flen - 1.0 - p).max(0.0),
+                    (Direction::Reverse, _) => mirrored(Samples::new(len), SamplePosition(p)).get(),
                     (Direction::Forward, Some(span)) => span.place(p).0,
                     (Direction::Forward, None) => p,
                 };

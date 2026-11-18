@@ -18,6 +18,7 @@ use tutti_rt::Sleeper;
 
 use super::handlers::Handles;
 use super::step::{StepOutcome, StreamerCycle};
+use tutti_rt::RingFloat;
 
 /// How long the streamer sleeps at most when nothing rings it.
 ///
@@ -37,10 +38,10 @@ pub(super) const BACKSTOP: Duration = Duration::from_millis(50);
 /// is lost: whatever rings after the cycle began (a command pushed, a flag set)
 /// is read by the sleep's own check after it arms the doorbell, so the sleep
 /// returns at once.
-pub(super) fn streamer_loop(
-    queue: &Receiver<StreamerCommand>,
-    shared: Handles,
-    mut cycle: StreamerCycle,
+pub(super) fn streamer_loop<F: RingFloat>(
+    queue: &Receiver<StreamerCommand<F>>,
+    shared: Handles<F>,
+    mut cycle: StreamerCycle<F>,
     mut sleeper: Sleeper,
     backstop: Duration,
 ) {
@@ -62,10 +63,10 @@ pub(super) fn streamer_loop(
     }
 }
 
-fn sleep(
+fn sleep<F: RingFloat>(
     bell: &Bell,
     sleeper: &mut Sleeper,
-    queue: &Receiver<StreamerCommand>,
+    queue: &Receiver<StreamerCommand<F>>,
     backstop: Duration,
 ) {
     bell.sleep(sleeper, || !queue.is_empty(), backstop);
