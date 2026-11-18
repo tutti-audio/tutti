@@ -1,7 +1,7 @@
 use tutti_units::{Amplitude, Ballistics, SampleRate, Seconds};
 
 use super::Follower;
-use crate::testing::{assert_close_f64, wide_signal};
+use tutti_fixtures::signal::{assert_close_f64, wide_signal};
 
 const RATE: f64 = 48_000.0;
 
@@ -61,12 +61,16 @@ fn an_f64_neutral_follower_holds_a_wide_state_exactly() {
     assert_close_f64(&got, &held, 0.0);
 }
 
-/// The same steps in `f32` are `attack * target` and `state * (1 - release)` to `f32` rounding.
+/// The same steps in `f32` are `attack * target` exactly and `state * (1 - release)` to `f32`
+/// rounding (`1 - release` rounds before the product).
 #[test]
 fn the_f32_follower_takes_the_same_one_step_values() {
     let (follower, attack, release) = follower::<f32>();
     let up = follower.follow(Amplitude(0.0), Amplitude(0.5)).get();
     assert_eq!(up, attack * 0.5);
     let down = follower.follow(Amplitude(0.5), Amplitude(0.0)).get();
-    assert!((down - 0.5 * (1.0 - release)).abs() < 1e-7, "{down}");
+    assert!(
+        (down - 0.5 * (1.0 - release)).abs() <= 0.5 * 2f32.powi(-24),
+        "{down}"
+    );
 }

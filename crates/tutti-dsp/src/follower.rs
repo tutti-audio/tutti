@@ -31,7 +31,7 @@ impl<F: Float> Follower<F> {
         }
     }
 
-    /// One step of `state` toward `target`, in any unit over `F`, at the attack's coefficient while the target is
+    /// One step of `state` toward `target`, for any unit whose raw is `F`, at the attack's coefficient while the target is
     /// above `state` and at the release's otherwise.
     #[inline]
     pub(crate) fn follow<U: Unit<Raw = F>>(&self, state: U, target: U) -> U {

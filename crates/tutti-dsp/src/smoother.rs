@@ -3,7 +3,8 @@
 
 use tutti_buffers::Float;
 
-/// A one-pole smoother over an `f32` quantity: each step closes the fraction
+/// A one-pole smoother over an `f32` quantity (the [`toward`](Self::toward) step is over any
+/// [`Float`]): each step closes the fraction
 /// `coeff` of the gap to the target (`1` is instant, `0` holds).
 ///
 /// The coefficient comes in already derived, from the time constant and the

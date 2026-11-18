@@ -43,8 +43,8 @@ pub enum InterpolationMode {
     CubicHermite,
 }
 
-/// A fractional-delay ring buffer: push a sample per frame, read back at any
-/// real-valued delay.
+/// A fractional-delay ring buffer over frames of the float `F` (`f32` or `f64`): push a
+/// sample per frame, read back at any real-valued delay.
 ///
 /// One ring, two readers. [`read_sample`] reads a fractional delay, interpolated
 /// ([`InterpolationMode`]): the core of a modulated delay. [`read_whole`] reads a whole
@@ -99,32 +99,35 @@ impl<F: Float> DelayLine<F> {
     /// `delay_samples` is a **fractional frame count**, not seconds: the caller
     /// converts ([`SampleSpan::from_seconds`](tutti_units::SampleSpan::from_seconds)),
     /// because keeping the fraction is the whole point of an interpolated read.
-    /// `0.0` is the sample just pushed. It is a bare `f32` because this is the
-    /// per-sample kernel read: a caller lowers its span to the raw once per block
-    /// (or once per frame for a driven delay) and reads at it.
+    /// `0.0` is the sample just pushed. It is a bare `F`, not a unit: no unit covers a
+    /// fractional frame count at the line's precision (`SampleSpan` is `f64`), and this is the
+    /// per-sample kernel read, which a caller lowers its span to once per block (or once per
+    /// frame for a driven delay).
     ///
     /// The delay is clamped to `0.0..=max_delay_samples`, so an over-long
     /// request shortens silently rather than panicking. Does not allocate.
     #[inline]
-    pub fn read_sample(&self, delay_samples: f32, mode: InterpolationMode) -> F {
+    pub fn read_sample(&self, delay_samples: F, mode: InterpolationMode) -> F {
         // Defensive only: a caller holds its delay inside the line, so this clamp is
         // reached by a caller that does not.
-        let delay = delay_samples.clamp(0.0, self.max_delay_samples as f32);
+        let delay = delay_samples.clamp(F::ZERO, F::from_f64(self.max_delay_samples as f64));
         match mode {
             InterpolationMode::None => {
-                let idx = delay.round() as usize;
+                let idx = delay.to_f64().round() as usize;
                 self.read_whole(idx)
             }
             InterpolationMode::Linear => {
-                let floor = delay.floor() as usize;
-                let frac = F::from_f32(delay - floor as f32);
+                let floor_f = delay.floor();
+                let floor = floor_f.to_f64() as usize;
+                let frac = delay - floor_f;
                 let s0 = self.read_whole(floor);
                 let s1 = self.read_whole(floor + 1);
                 s0 + frac * (s1 - s0)
             }
             InterpolationMode::CubicHermite => {
-                let floor = delay.floor() as usize;
-                let frac = F::from_f32(delay - floor as f32);
+                let floor_f = delay.floor();
+                let floor = floor_f.to_f64() as usize;
+                let frac = delay - floor_f;
                 let sm1 = self.read_whole(floor.saturating_sub(1));
                 let s0 = self.read_whole(floor);
                 let s1 = self.read_whole(floor + 1);
@@ -157,7 +160,7 @@ impl<F: Float> DelayLine<F> {
 /// One sample of one uncoupled channel: read the feedback tap, write the line,
 /// read the output tap (the wet sample).
 ///
-/// The delay `d` and the feedback `fb` are the raw `f32` of a
+/// The delay `d` and the feedback `fb` are the raw `F` of a
 /// [`SampleSpan`](tutti_units::SampleSpan) of frames and a
 /// [`Feedback`](tutti_units::Feedback): this is the per-frame read, called once per sample
 /// per channel, and its caller lowers its span to the position once per frame after the
@@ -166,12 +169,12 @@ impl<F: Float> DelayLine<F> {
 pub fn delay_step<F: Float>(
     line: &mut DelayLine<F>,
     x: F,
-    d: f32,
-    fb: f32,
+    d: F,
+    fb: F,
     interp: InterpolationMode,
 ) -> F {
-    let tap = line.read_sample((d.max(1.0) - 1.0).max(0.0), interp);
-    line.push_sample(x + tap * F::from_f32(fb));
+    let tap = line.read_sample((d.max(F::ONE) - F::ONE).max(F::ZERO), interp);
+    line.push_sample(x + tap * fb);
     line.read_sample(d, interp)
 }
 

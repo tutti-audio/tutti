@@ -78,15 +78,18 @@ impl<F: Float> DelayRing<F> {
 
     /// The frame `delay` slots before the cursor, linearly interpolated between the two whole
     /// slots around it: `delay` is at least 0 and its next whole slot is at most the length.
+    ///
+    /// `delay` is a bare `F`: no unit covers a fractional frame count at the ring's precision.
     #[inline]
-    pub(crate) fn at(&self, delay: f32) -> F {
-        let whole = delay as usize;
-        let frac = delay - whole as f32;
+    pub(crate) fn at(&self, delay: F) -> F {
+        let floor = delay.floor();
+        let whole = floor.to_f64() as usize;
+        let frac = delay - floor;
         let a = self.back(whole);
-        if frac == 0.0 {
+        if frac == F::ZERO {
             return a;
         }
-        crate::lerp(a, self.back(whole + 1), F::from_f32(frac))
+        crate::lerp(a, self.back(whole + 1), frac)
     }
 }
 
