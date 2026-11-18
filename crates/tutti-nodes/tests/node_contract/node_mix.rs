@@ -211,7 +211,7 @@ fn the_delay_is_blended_by_the_graph() {
             )
             .with_times(ChannelTimes::each(&[Seconds(0.021)]).unwrap())
             .unwrap();
-            DelayNode::from_layout(
+            DelayNode::<f32>::from_layout(
                 layout,
                 DelayControls {
                     time: Seconds(0.013),
@@ -226,7 +226,7 @@ fn the_delay_is_blended_by_the_graph() {
     check(
         "delay (mono)",
         &|| {
-            DelayNode::mono(
+            DelayNode::<f32>::mono(
                 MaxDelay::of(Seconds(0.1)),
                 DelayControls {
                     time: Seconds(0.01),
@@ -244,19 +244,19 @@ fn the_delay_is_blended_by_the_graph() {
 fn the_chorus_flanger_and_phaser_are_blended_by_the_graph() {
     check(
         "chorus (stereo)",
-        &|| ModDelayNode::chorus(BusTopology::STEREO),
+        &|| ModDelayNode::<f32>::chorus(BusTopology::STEREO),
         2,
         0,
     );
     check(
         "flanger (mono)",
-        &|| ModDelayNode::flanger(BusTopology::MONO),
+        &|| ModDelayNode::<f32>::flanger(BusTopology::MONO),
         1,
         0,
     );
     check(
         "phaser (stereo, 4 stages)",
-        &|| PhaserNode::stereo(Stages::of(4), PhaserControls::DEFAULT),
+        &|| PhaserNode::<f32>::stereo(Stages::of(4), PhaserControls::DEFAULT),
         2,
         0,
     );
@@ -306,7 +306,7 @@ fn the_reverbs_are_blended_by_the_graph() {
 #[test]
 fn a_mix_move_on_a_delay_ramps_across_the_block() {
     let make = || {
-        DelayNode::new(
+        DelayNode::<f32>::new(
             BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus"),
             MaxDelay::of(Seconds(0.1)),
             InterpolationMode::Linear,

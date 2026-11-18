@@ -127,7 +127,7 @@ fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
 /// that 0 is true.
 #[test]
 fn delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
-    let node = DelayNode::mono(
+    let node = DelayNode::<f32>::mono(
         MaxDelay::of(Seconds::new(1.0_f64)),
         DelayControls {
             time: Seconds::new(0.5_f64),
@@ -163,7 +163,7 @@ fn stereo_delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
     )
     .with_times(ChannelTimes::each(&[Seconds::new(0.5_f64)]).unwrap())
     .unwrap();
-    let node = DelayNode::from_layout(
+    let node = DelayNode::<f32>::from_layout(
         layout,
         DelayControls {
             time: Seconds::new(0.25_f64),
@@ -194,8 +194,8 @@ fn stereo_delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
 #[test]
 fn chorus_and_flanger_report_zero_latency_and_their_dry_path_is_immediate() {
     for (name, node) in [
-        ("chorus", ModDelayNode::chorus(BusTopology::STEREO)),
-        ("flanger", ModDelayNode::flanger(BusTopology::STEREO)),
+        ("chorus", ModDelayNode::<f32>::chorus(BusTopology::STEREO)),
+        ("flanger", ModDelayNode::<f32>::flanger(BusTopology::STEREO)),
     ] {
         assert_eq!(
             declared(&node),
@@ -225,7 +225,7 @@ fn chorus_and_flanger_report_zero_latency_and_their_dry_path_is_immediate() {
 #[test]
 fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::from_count(3));
-    let echo = DelayNode::mono(
+    let echo = DelayNode::<f32>::mono(
         MaxDelay::of(Seconds::new(1.0_f64)),
         DelayControls {
             time: Seconds::new(0.5_f64),
@@ -235,7 +235,7 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
     );
     let (echo, _) = g.add_with_controls(echo);
     g.spec_mut().set_mix(echo, Mix::new(0.5_f32));
-    let (chorus, _) = g.add_with_controls(ModDelayNode::chorus(BusTopology::STEREO));
+    let (chorus, _) = g.add_with_controls(ModDelayNode::<f32>::chorus(BusTopology::STEREO));
     let dry = g.add(Through::mono());
     g.connect_input(0, echo, 0)
         .connect_input(0, chorus, 0)
@@ -422,7 +422,7 @@ mod convolver {
         let latency = conv.latency_samples();
         let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::from_count(3));
         let (conv, _) = g.add_with_controls(conv);
-        let (echo_a, _) = g.add_with_controls(DelayNode::mono(
+        let (echo_a, _) = g.add_with_controls(DelayNode::<f32>::mono(
             MaxDelay::of(Seconds::new(1.0_f64)),
             DelayControls {
                 time: Seconds::new(0.5_f64),
@@ -430,7 +430,7 @@ mod convolver {
                 ..DelayControls::DEFAULT
             },
         ));
-        let (echo_b, _) = g.add_with_controls(DelayNode::mono(
+        let (echo_b, _) = g.add_with_controls(DelayNode::<f32>::mono(
             MaxDelay::of(Seconds::new(1.0_f64)),
             DelayControls {
                 time: Seconds::new(0.5_f64),
