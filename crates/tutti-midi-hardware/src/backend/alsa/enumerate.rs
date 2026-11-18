@@ -1,8 +1,8 @@
 //! Walking the sequencer's clients and ports.
 
-use crate::capability::{OsEndpoint, UmpCapability, blocks_of};
+use crate::capability::{OsEndpoint, from_os, legacy};
 use tutti_alsa_ffi::{Client, PortCaps, PortEntry, UmpEndpoint};
-use tutti_midi_device::Identity;
+use tutti_midi_device::{Endpoint, Identity};
 
 /// Which direction an endpoint is being listed for.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -125,23 +125,22 @@ fn endpoint_of(port: PortEntry) -> OsEndpoint {
 ///
 /// A client with a UMP Endpoint record speaks the protocol the record says it
 /// has in use (the kernel runs the USB discovery and keeps the outcome there),
-/// and declares the blocks it lists. One with no record is legacy, a MIDI 1.0
-/// source: MIDI 1.0, with no blocks. The distinction
-/// is real and worth recording: a per-note controller sent to a legacy
-/// port is dropped in translation, not carried. Having a block is not
-/// having the MIDI 2.0 Protocol: an Endpoint that offers both and is in MIDI
-/// 1.0 reads as MIDI 1.0.
-pub(super) fn capability_of(ump: Option<&UmpEndpoint>) -> UmpCapability {
+/// supports the protocols it offers, and declares the blocks it lists. One with
+/// no record is legacy, a MIDI 1.0 source: MIDI 1.0, with no blocks. The
+/// distinction is real and worth recording: a per-note controller sent to a
+/// legacy port is dropped in translation, not carried. Having a block is not
+/// having the MIDI 2.0 Protocol: an Endpoint that offers both and is in MIDI 1.0
+/// reads as MIDI 1.0.
+pub(super) fn capability_of(ump: Option<&UmpEndpoint>) -> Endpoint {
     let Some(endpoint) = ump else {
-        return UmpCapability::midi1();
+        return legacy();
     };
-    UmpCapability {
-        protocol: endpoint.protocol,
-        blocks: blocks_of(
-            endpoint
-                .blocks
-                .iter()
-                .map(|block| (block.info, block.name.as_deref())),
-        ),
-    }
+    from_os(
+        endpoint.protocol,
+        Some(&endpoint.offered),
+        endpoint
+            .blocks
+            .iter()
+            .map(|block| (block.info, block.name.as_deref())),
+    )
 }

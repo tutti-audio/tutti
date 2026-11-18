@@ -9,7 +9,7 @@ use crate::{Devices, HardwareMidiInputs};
 use tutti_alsa_ffi::Client;
 use tutti_alsa_ffi::{Address, Event, PortCaps, PortId, PortKind};
 use tutti_graph::Losses;
-use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, Identity, UMP_VERSION};
+use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, Endpoint, Identity, UMP_VERSION};
 use tutti_midi_runtime::DeviceWriters;
 use tutti_ump::{
     BlockDirection, EndpointInfoNotification, Field, FirstGroup, FunctionBlockCount,
@@ -1118,7 +1118,7 @@ fn plug_ump(name: &str, protocol: Protocol) -> Virtual {
 }
 
 /// The capability of the device named `name`, once it is listed.
-fn capability_of(devices: &Watched, name: &str) -> crate::UmpCapability {
+fn capability_of(devices: &Watched, name: &str) -> Endpoint {
     let want = format!("{name}: port");
     let deadline = Instant::now() + PATIENCE;
     loop {
@@ -1144,9 +1144,10 @@ fn a_clients_protocol_and_blocks_are_read_from_its_ump_endpoint() {
     let _legacy = plug(&legacy);
 
     let cap = capability_of(&devices, &two);
-    assert_eq!(cap.protocol, Protocol::Midi2);
-    let [block] = cap.blocks.as_slice() else {
-        panic!("blocks: {:?}", cap.blocks);
+    assert_eq!(cap.active().protocol, Protocol::Midi2);
+    let blocks: Vec<_> = cap.function_blocks().collect();
+    let [block] = blocks[..] else {
+        panic!("blocks: {blocks:?}");
     };
     assert_eq!(block.first_group().get(), 2);
     assert_eq!(block.groups().get(), 2);
@@ -1154,12 +1155,12 @@ fn a_clients_protocol_and_blocks_are_read_from_its_ump_endpoint() {
     assert_eq!(block.name().map(|n| n.as_str()), Some("Keys"));
 
     let cap = capability_of(&devices, &one);
-    assert_eq!(cap.protocol, Protocol::Midi1);
-    assert_eq!(cap.blocks.len(), 1);
+    assert_eq!(cap.active().protocol, Protocol::Midi1);
+    assert_eq!(cap.function_blocks().count(), 1);
 
     let cap = capability_of(&devices, &legacy);
-    assert_eq!(cap.protocol, Protocol::Midi1);
-    assert!(cap.blocks.is_empty());
+    assert_eq!(cap.active().protocol, Protocol::Midi1);
+    assert_eq!(cap.function_blocks().count(), 0);
 }
 
 /// A UMP Stream conversation over the real sequencer, both ways: a device

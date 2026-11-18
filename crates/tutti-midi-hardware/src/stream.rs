@@ -90,7 +90,7 @@ use tutti_ump::{
 };
 
 use crate::answer::Answer;
-use crate::capability::UmpCapability;
+use crate::capability::{described, is_ump_endpoint};
 use crate::ci::{
     Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
 };
@@ -230,19 +230,12 @@ impl DeviceStream {
     pub const fn config(&self) -> StreamConfig {
         self.endpoint.active()
     }
-
-    /// The Endpoint as a [`UmpCapability`]: the protocol in use and the blocks
-    /// it declares.
-    #[must_use]
-    pub fn capability(&self) -> UmpCapability {
-        UmpCapability::of(&self.endpoint)
-    }
 }
 
 /// One device's negotiation: its [`Connection`], while one runs, and the output
 /// it sends on. Control side.
 pub(crate) struct Negotiation {
-    os: UmpCapability,
+    os: Endpoint,
     out: Option<OpenOutput>,
     run: Run,
     inquire: Inquire,
@@ -429,14 +422,14 @@ impl Negotiation {
     /// other is [`Basis::Described`] at once.
     pub(crate) fn new(
         device: DeviceId,
-        os: UmpCapability,
+        os: Endpoint,
         out: Option<OpenOutput>,
         timing: InputTiming,
         ci_refused: CounterWriter<Losses>,
         store: Arc<Mutex<ResourceStore>>,
     ) -> Self {
-        let asks = os.is_ump_endpoint() && out.is_some();
-        let inquire = if !os.is_ump_endpoint() && out.is_some() {
+        let asks = is_ump_endpoint(&os) && out.is_some();
+        let inquire = if !is_ump_endpoint(&os) && out.is_some() {
             Inquire::Idle
         } else {
             Inquire::No
@@ -446,7 +439,7 @@ impl Negotiation {
         } else {
             Run::Done {
                 stream: Box::new(DeviceStream {
-                    endpoint: os.endpoint(),
+                    endpoint: described(&os),
                     basis: Basis::Described,
                 }),
                 listening: None,
@@ -631,7 +624,7 @@ impl Negotiation {
     /// later request of the session's cannot undo a grant.
     fn answer(&mut self, heard: &Heard<'_>, presented: Option<Presented>) -> Option<DeviceStream> {
         let announce = self.rebuild(presented);
-        let (Some(answering), true) = (&mut self.answering, self.os.is_ump_endpoint()) else {
+        let (Some(answering), true) = (&mut self.answering, is_ump_endpoint(&self.os)) else {
             return None;
         };
         let mut replies: Vec<Ump> = Vec::new();
@@ -851,7 +844,7 @@ impl Negotiation {
             ),
             Ending::Midi1Fallback => (
                 DeviceStream {
-                    endpoint: self.os.endpoint(),
+                    endpoint: described(&self.os),
                     basis: Basis::Unanswered,
                 },
                 None,
