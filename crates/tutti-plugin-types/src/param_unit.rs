@@ -179,13 +179,6 @@ pub trait PlainUnit: Copy {
     fn to_plain(self, unit: ParamUnit) -> f64;
 }
 
-// A `f32` unit narrows once here, at the edge: a plain figure is the
-// plugin's `f64`, and every control unit below is an `f32` cell.
-#[allow(clippy::cast_possible_truncation)]
-fn narrow(v: f64) -> f32 {
-    v as f32
-}
-
 /// `PlainUnit` for a unit read from exactly one [`ParamUnit`]: the plain
 /// figure is the unit's own width and passes whole.
 macro_rules! one_to_one {
@@ -238,11 +231,10 @@ impl PlainUnit for Mix {
     /// A percentage as a position on `0..=1`; a negative percentage is not one.
     fn from_plain(unit: ParamUnit, plain: f64) -> Option<Self> {
         let fraction = plain / 100.0;
-        (unit == ParamUnit::Percent && (0.0..=1.0).contains(&fraction))
-            .then(|| Self::new(narrow(fraction)))
+        (unit == ParamUnit::Percent && (0.0..=1.0).contains(&fraction)).then(|| Self::new(fraction))
     }
     fn to_plain(self, _unit: ParamUnit) -> f64 {
-        f64::from(self.get()) * 100.0
+        self.get() * 100.0
     }
 }
 
@@ -251,10 +243,10 @@ impl PlainUnit for Pan {
         unit == ParamUnit::Pan
     }
     fn from_plain(unit: ParamUnit, plain: f64) -> Option<Self> {
-        (unit == ParamUnit::Pan && (-1.0..=1.0).contains(&plain)).then(|| Self::new(narrow(plain)))
+        (unit == ParamUnit::Pan && (-1.0..=1.0).contains(&plain)).then(|| Self::new(plain))
     }
     fn to_plain(self, _unit: ParamUnit) -> f64 {
-        f64::from(self.get())
+        self.get()
     }
 }
 

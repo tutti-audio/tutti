@@ -192,7 +192,7 @@ fn a_one_pole_adds_its_group_delay_at_dc_to_the_loop() {
     assert_eq!(pole(0.5).peak_delay(), SampleSpan::of(1.0));
     assert_eq!(pole(-0.5).peak_delay(), SampleSpan::of(1.0));
     assert!((pole(0.9).peak_delay().get() - 9.0).abs() < 1e-5);
-    for none in [pole(1.5), pole(f32::NAN), Absorption::Gain(g)] {
+    for none in [pole(1.5), pole(f64::NAN), Absorption::Gain(g)] {
         assert_eq!(none.peak_delay(), SampleSpan::ZERO);
     }
     assert_eq!(
@@ -480,7 +480,7 @@ fn a_capacity_measures_every_figure_of_its_network() {
     );
 }
 
-fn one_pole(gain: f64, damp: f32) -> Absorption {
+fn one_pole(gain: f64, damp: f64) -> Absorption {
     Absorption::OnePole {
         gain: Amplitude(gain),
         damp,
@@ -505,9 +505,9 @@ fn a_one_pole_outside_the_unit_circle_is_not_stable() {
         -2.0,
         1.0,
         -1.0,
-        f32::NAN,
-        f32::INFINITY,
-        f32::NEG_INFINITY,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
     ] {
         let a = one_pole(0.9, damp);
         for band in Band::ALL {

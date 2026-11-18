@@ -196,7 +196,7 @@ fn a_bearing_glide_takes_the_short_arc_and_a_height_glide_a_line() {
 #[test]
 fn a_huge_width_saturates_instead_of_overflowing() {
     let layout = SpeakerLayout::from_bed(tutti_types::Bed::Surround714).unwrap();
-    let solve = |width: f32| {
+    let solve = |width: f64| {
         VbapKernel::new(layout.clone()).gains(
             Azimuth(30.0),
             Elevation(10.0),
@@ -205,7 +205,7 @@ fn a_huge_width_saturates_instead_of_overflowing() {
         )
     };
     let saturated = solve(MAX_WIDTH);
-    for width in [13.0, 1e6, 3e37, f32::MAX] {
+    for width in [13.0, 1e6, 3e37, f64::MAX] {
         let got = solve(width);
         for s in 0..11 {
             let (a, b) = got.pair(s);

@@ -87,7 +87,7 @@ impl ShapeKind {
     #[inline]
     #[must_use]
     pub fn apply<F: Float>(self, x: F, drive: Drive) -> F {
-        self.curve(self.hardness(F::from_f32(drive.get())), x)
+        self.curve(self.hardness(F::from_unit(drive)), x)
     }
 
     /// The hardness the curve runs at for `drive`, floored the way the kind needs.
@@ -263,7 +263,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
             kind,
-            drive: Glide::landed(F::from_f32(WaveshaperControls::DEFAULT.drive.get())),
+            drive: Glide::landed(F::from_unit(WaveshaperControls::DEFAULT.drive)),
             steps,
             antialiasing: Antialiasing::Off,
             history: [[F::ZERO; 2]; MAX_CHANNELS],
@@ -299,7 +299,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
     /// Aims at `controls`: the drive glides over [`GAIN_GLIDE`]. No allocation.
     pub fn aim(&mut self, controls: &WaveshaperControls) {
         self.drive
-            .aim_by(F::from_f32(controls.drive.get()), Steps::Fixed(self.steps));
+            .aim_by(F::from_unit(controls.drive), Steps::Fixed(self.steps));
     }
 
     /// Runs `input` into `output`, each channel through the curve at the drive.

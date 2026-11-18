@@ -50,7 +50,7 @@ fn levels(bits: BitDepth) -> f64 {
     if b.fract() == 0.0 {
         f64::from(1u32 << (b as u32 - 1))
     } else {
-        f64::from(b - 1.0).exp2()
+        (b - 1.0).exp2()
     }
 }
 

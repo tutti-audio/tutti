@@ -88,7 +88,7 @@ fn delay_line_row() -> Row {
                 MaxDelay::of(Seconds::new(1.0_f64)),
                 DelayControls {
                     time: Seconds::new(0.0_f64),
-                    feedback: Feedback::new(0.0_f32),
+                    feedback: Feedback::new(0.0_f64),
                     ..DelayControls::DEFAULT
                 },
             ))

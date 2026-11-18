@@ -107,8 +107,7 @@ impl Correlation {
     #[inline]
     #[must_use]
     pub fn to_stereo_width(self) -> StereoWidth {
-        // `StereoWidth` stores `f32` until its family is `f64`; the width narrows here.
-        StereoWidth((1.0 - self.0) as f32)
+        StereoWidth(1.0 - self.0)
     }
 }
 

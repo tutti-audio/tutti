@@ -2,7 +2,7 @@ use tutti_units::{Feedback, Mix};
 
 use super::*;
 
-fn controls(room: f32, damp: f32) -> FreeverbControls {
+fn controls(room: f64, damp: f64) -> FreeverbControls {
     FreeverbControls {
         room: Mix(room),
         damp: Mix(damp),
@@ -16,10 +16,10 @@ fn controls(room: f32, damp: f32) -> FreeverbControls {
 fn the_scalings_are_freeverbs() {
     let gm = FreeverbControls::GENERAL_MIDI;
     assert_eq!(gm, FreeverbControls::default());
-    assert!((gm.feedback().get() - 0.84).abs() < 1e-6);
+    assert!((gm.feedback().get() - 0.84).abs() < 1e-15);
     assert!((gm.damping() - 0.2).abs() < 1e-15);
-    assert!((controls(0.0, 0.0).feedback().get() - 0.7).abs() < 1e-6);
-    assert!((controls(1.0, 1.0).feedback().get() - 0.98).abs() < 1e-6);
+    assert!((controls(0.0, 0.0).feedback().get() - 0.7).abs() < 1e-15);
+    assert!((controls(1.0, 1.0).feedback().get() - 0.98).abs() < 1e-15);
     assert_eq!(controls(0.0, 0.0).damping(), 0.0);
     assert!((controls(1.0, 1.0).damping() - 0.4).abs() < 1e-15);
 }
@@ -29,28 +29,28 @@ fn the_scalings_are_freeverbs() {
 #[test]
 fn a_hostile_control_is_made_safe() {
     let gm = FreeverbControls::GENERAL_MIDI;
-    assert_eq!(controls(f32::NAN, f32::INFINITY).feedback(), gm.feedback());
-    assert_eq!(controls(f32::NAN, f32::NAN).damping(), gm.damping());
+    assert_eq!(controls(f64::NAN, f64::INFINITY).feedback(), gm.feedback());
+    assert_eq!(controls(f64::NAN, f64::NAN).damping(), gm.damping());
     assert_eq!(
         controls(9.0, -2.0).feedback(),
         controls(1.0, 0.0).feedback()
     );
     assert_eq!(controls(9.0, -2.0).damping(), 0.0);
     assert_eq!(
-        controls(f32::INFINITY, 0.0).feedback(),
+        controls(f64::INFINITY, 0.0).feedback(),
         gm.feedback(),
         "not a number: General MIDI"
     );
     for room in [
-        -1e30f32,
+        -1e30f64,
         -1.0,
         0.0,
         0.3,
         1.0,
         5.0,
         1e30,
-        f32::NAN,
-        f32::INFINITY,
+        f64::NAN,
+        f64::INFINITY,
     ] {
         let g = controls(room, 0.5).feedback();
         assert!(

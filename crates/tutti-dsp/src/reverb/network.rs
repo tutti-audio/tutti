@@ -383,7 +383,7 @@ pub enum Absorption {
         /// The gain at DC.
         gain: Amplitude,
         /// The pole.
-        damp: f32,
+        damp: f64,
     },
     /// A gain per band.
     Bands {
@@ -415,7 +415,7 @@ impl Absorption {
                 if !(damp.is_finite() && damp.abs() < 1.0) {
                     return Amplitude(f64::INFINITY);
                 }
-                let d = f64::from(damp);
+                let d = damp;
                 let response = match band {
                     Band::Low => 1.0,
                     Band::Mid => (1.0 - d).abs() / libm::sqrt(1.0 + d * d),
@@ -439,7 +439,7 @@ impl Absorption {
     pub fn peak_delay(&self) -> SampleSpan {
         match *self {
             Absorption::OnePole { damp, .. } if damp.is_finite() && damp.abs() < 1.0 => {
-                let p = f64::from(damp.abs());
+                let p = damp.abs();
                 SampleSpan::clamped(p / (1.0 - p))
             }
             _ => SampleSpan::ZERO,

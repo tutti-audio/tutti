@@ -14,10 +14,10 @@ use tutti_units::{Depth, Hz, SampleRate};
 #[inline]
 #[must_use]
 pub fn sweep_hz(min: Hz, max: Hz, lfo: f32, depth: Depth) -> Hz {
-    // The oscillator's value and the depth are `f32` lane values; the sweep is in `Hz`'s `f64`.
+    // The oscillator's value is an `f32` lane value; the sweep is in `Hz`'s `f64`.
     let lfo = f64::from(lfo) * 0.5 + 0.5;
     let (min, max) = (min.get(), max.get());
-    Hz::new(min + (max - min) * lfo * f64::from(depth.get()))
+    Hz::new(min + (max - min) * lfo * depth.get())
 }
 
 /// The lowest frequency an all-pass stage is tuned to (see [`allpass_coeff`]).
