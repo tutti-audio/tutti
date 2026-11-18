@@ -1,5 +1,5 @@
 use super::error::Result;
-use tutti_buffers::Fold;
+use tutti_buffers::{Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_types::UnitParam;
@@ -429,9 +429,9 @@ impl Node for VbapPannerNode {
                     first,
                     self.speaker_of_channel[ch],
                     &self.fold,
-                    &left[at..end],
-                    &right[at..end],
-                    &mut out[at..end],
+                    Mono::new(&left[at..end]),
+                    Mono::new(&right[at..end]),
+                    MonoMut::new(&mut out[at..end]),
                 );
             }
             self.pos = (self.pos + end - at) % GRID;

@@ -291,7 +291,9 @@ fn resample(dir: &Path, cases: &mut Cases) {
                 &mut vec![Vec::<f32>::new()],
             );
             for block in input.chunks(4_096) {
-                rs.push(&[block.to_vec()], out).expect("push");
+                let planes = [block.to_vec()];
+                rs.push(Planes::from_vecs(&planes).expect("planes"), out)
+                    .expect("push");
             }
             rs.finish(out).expect("finish");
             let name = format!("resample_{from}_{to}_{label}");

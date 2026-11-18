@@ -544,7 +544,7 @@ fn measure(
         match resampler.as_mut() {
             Some((rs, planes, out)) => {
                 crate::planar::split(frames, planes)?;
-                rs.push(planes, out)?;
+                rs.push(Planes::from_vecs(planes)?, out)?;
                 feed_planes(&mut measurer, out, &mut staging, layout)?;
             }
             None => measurer.feed_interleaved(frames),

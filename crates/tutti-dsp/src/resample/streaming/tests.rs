@@ -21,12 +21,14 @@ fn resample_blocked(
     .unwrap();
     let mut out = vec![Vec::new(); planes.len()];
     match block {
-        None => r.push(planes, &mut out).unwrap(),
+        None => r
+            .push(Planes::from_vecs(planes).unwrap(), &mut out)
+            .unwrap(),
         Some(len) => {
             for start in (0..n).step_by(len) {
                 let end = (start + len).min(n);
                 let part: Vec<Vec<f32>> = planes.iter().map(|p| p[start..end].to_vec()).collect();
-                r.push(&part, &mut out).unwrap();
+                r.push(Planes::from_vecs(&part).unwrap(), &mut out).unwrap();
             }
         }
     }
@@ -48,7 +50,7 @@ fn the_length_is_the_rounded_ratio_however_the_input_is_blocked() {
                 let planes: Vec<Vec<f32>> = (0..2).map(|_| vec![0.1f32; n]).collect();
                 let want = (n as f64 * f64::from(to) / f64::from(from)).round() as usize;
                 assert_eq!(
-                    StreamingResampler::output_frames(
+                    resampled_frames(
                         SampleRate::from_hz(from).unwrap(),
                         SampleRate::from_hz(to).unwrap(),
                         Samples(n)
@@ -135,7 +137,8 @@ fn the_carry_stays_under_one_chunk_between_pushes() {
         let mut out = vec![Vec::new(); 2];
         let block = vec![vec![0.25f32; 37]; 2];
         for i in 0..2_000 {
-            r.push(&block, &mut out).unwrap();
+            r.push(Planes::from_vecs(&block).unwrap(), &mut out)
+                .unwrap();
             let (backlog, head, need) = r.backlog();
             assert_eq!(
                 head, 0,
@@ -161,7 +164,8 @@ fn resample(planes: &[Vec<f32>], from: u32, to: u32, chunk: ChunkSize) -> Vec<Ve
     )
     .unwrap();
     let mut out = vec![Vec::new(); planes.len()];
-    r.push(planes, &mut out).unwrap();
+    r.push(Planes::from_vecs(planes).unwrap(), &mut out)
+        .unwrap();
     r.finish(&mut out).unwrap();
     out
 }
@@ -340,6 +344,34 @@ fn dc_passes_with_unit_gain() {
     }
 }
 
+/// In `f64` the length is the rounded ratio and DC has unit gain once the filter has settled.
+#[test]
+fn an_f64_stream_has_the_rounded_length_and_unit_dc_gain() {
+    for (from, to) in [(44_100u32, 48_000u32), (48_000, 44_100)] {
+        let n = from as usize / 2;
+        let mut r = StreamingResampler::<f64>::new(
+            1,
+            SampleRate::from_hz(from).unwrap(),
+            SampleRate::from_hz(to).unwrap(),
+            ChunkSize::N1024,
+        )
+        .unwrap();
+        let input = vec![vec![0.5f64; n]];
+        let mut out = vec![Vec::new()];
+        r.push(Planes::from_vecs(&input).unwrap(), &mut out)
+            .unwrap();
+        r.finish(&mut out).unwrap();
+        let x = &out[0];
+        assert_eq!(
+            x.len(),
+            (n as f64 * f64::from(to) / f64::from(from)).round() as usize
+        );
+        let mid = &x[x.len() / 4..3 * x.len() / 4];
+        let worst = mid.iter().map(|s| (s - 0.5).abs()).fold(0.0f64, f64::max);
+        assert!(worst < 1e-9, "{from}->{to}: DC off by {worst}");
+    }
+}
+
 /// Content above the new Nyquist is attenuated, not folded down. Tones of
 /// 0.5 amplitude at 48 kHz, converted to 44.1 kHz (Nyquist 22.05 kHz),
 /// would alias to `44.1 kHz - f`; the output holds under -120 dB re the
@@ -453,7 +485,7 @@ fn upsampling_cuts_at_the_input_band_edge() {
 #[test]
 fn an_unusable_rate_is_an_error() {
     let new = |from: f64, to: f64| {
-        StreamingResampler::new(
+        StreamingResampler::<f32>::new(
             1,
             SampleRate::of(from),
             SampleRate::of(to),
@@ -587,31 +619,58 @@ fn the_passband_is_flat_to_the_band_edge() {
 #[test]
 fn rates_of_one_whole_hz_are_no_conversion() {
     let hz = |r: f64| SampleRate::of(r);
-    assert!(!StreamingResampler::converts(hz(44_100.0), hz(44_100.2)));
-    assert!(StreamingResampler::converts(hz(44_100.0), hz(48_000.0)));
-    assert!(StreamingResampler::converts(hz(0.4), hz(0.4)));
+    assert!(!needs_resampling(hz(44_100.0), hz(44_100.2)));
+    assert!(needs_resampling(hz(44_100.0), hz(48_000.0)));
+    assert!(needs_resampling(hz(0.4), hz(0.4)));
     assert_eq!(
-        StreamingResampler::output_frames(hz(44_100.0), hz(44_100.2), Samples(1_000_000)),
+        resampled_frames(hz(44_100.0), hz(44_100.2), Samples(1_000_000)),
         Samples(1_000_000)
     );
 }
 
-/// A channel count a `ChannelLayout` cannot hold is refused with the buffer
-/// error, not a panic.
+/// A channel count a `ChannelLayout` cannot hold is refused by `new`, with the layout error.
 #[test]
-fn a_width_over_the_layout_limit_is_refused_when_a_chunk_runs() {
+fn new_refuses_a_width_over_the_layout_limit() {
     let channels = usize::from(u16::MAX) + 1;
-    let mut r = StreamingResampler::new(
+    let made = StreamingResampler::<f32>::new(
         channels,
         SampleRate::from_hz(44_100).unwrap(),
         SampleRate::from_hz(48_000).unwrap(),
         ChunkSize::MIN,
-    )
-    .unwrap();
-    let planes = vec![vec![0.0f32; 64]; channels];
-    let mut out = vec![Vec::new(); channels];
-    assert!(matches!(
-        r.push(&planes, &mut out),
-        Err(ResampleError::Buffer(tutti_buffers::BufferError::Layout(_)))
-    ));
+    );
+    assert!(matches!(made, Err(ResampleError::Layout(_))));
+}
+
+/// A view narrower or wider than the resampler is refused with both widths and consumes
+/// nothing: the next matching push gives what a fresh resampler gives.
+#[test]
+fn a_view_of_another_width_is_refused_and_leaves_the_resampler_unchanged() {
+    let make = || {
+        StreamingResampler::<f32>::new(2, SampleRate::SR_44K1, SampleRate::SR_48K, ChunkSize::N512)
+            .unwrap()
+    };
+    let signal: Vec<Vec<f32>> = (0..2).map(|c| vec![0.1 * (c + 1) as f32; 3000]).collect();
+    let mut fresh = make();
+    let mut want = vec![Vec::new(); 2];
+    fresh
+        .push(Planes::from_vecs(&signal).unwrap(), &mut want)
+        .unwrap();
+    fresh.finish(&mut want).unwrap();
+
+    let mut r = make();
+    let mut got = vec![Vec::new(); 2];
+    for width in [1usize, 3] {
+        let other = vec![vec![0.9f32; 3000]; width];
+        assert_eq!(
+            r.push(Planes::from_vecs(&other).unwrap(), &mut got),
+            Err(ResampleError::WidthMismatch {
+                expected: 2,
+                got: width
+            })
+        );
+    }
+    r.push(Planes::from_vecs(&signal).unwrap(), &mut got)
+        .unwrap();
+    r.finish(&mut got).unwrap();
+    assert_eq!(got, want);
 }
