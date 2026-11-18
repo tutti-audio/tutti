@@ -25,12 +25,13 @@
 //! `streamer_loop` is written in terms of `StreamerCycle::step`, so a
 //! divergence between what tests drive and what ships is not representable.
 
+use super::StreamerSender;
 use super::command::StreamerCommand;
 use super::config::BufferConfig;
 use super::handlers::{Handles, Local, handle_command};
 use super::io::refill::{FILL_THRESHOLD, refill_all, refill_all_parallel};
 use super::record::{Record, Streams};
-use super::{StreamFloat, StreamerSender};
+use tutti_rt::RingFloat;
 
 /// What the loop should do after one streamer cycle.
 ///
@@ -74,12 +75,12 @@ pub enum StepOutcome {
 /// borrows nothing. Both the thread's loop and a test driver build one
 /// and call [`step`](Self::step) repeatedly; the only difference between them is
 /// what happens *between* the calls.
-pub(crate) struct StreamerCycle<F: StreamFloat = f32> {
+pub(crate) struct StreamerCycle<F: RingFloat = f32> {
     local: Local<F>,
     config: BufferConfig,
 }
 
-impl<F: StreamFloat> StreamerCycle<F> {
+impl<F: RingFloat> StreamerCycle<F> {
     /// The stream table (tests).
     #[cfg(test)]
     pub(crate) fn streams(&self) -> &Streams<F> {
@@ -166,7 +167,7 @@ impl<F: StreamFloat> StreamerCycle<F> {
 /// about the cycle as a whole: did *any* refill land? A per-stream comparison
 /// would report a stall for a stream at EOF even while its neighbours were
 /// still filling, and the loop must keep running for those.
-fn total_buffered<F: StreamFloat>(streams: &Streams<F>) -> usize {
+fn total_buffered<F: RingFloat>(streams: &Streams<F>) -> usize {
     streams
         .records()
         .iter()
@@ -177,7 +178,7 @@ fn total_buffered<F: StreamFloat>(streams: &Streams<F>) -> usize {
 
 /// True when no stream needs a refill: the loop can safely sleep until rung
 /// instead of spinning.
-fn buffers_healthy<F: StreamFloat>(streams: &Streams<F>) -> bool {
+fn buffers_healthy<F: RingFloat>(streams: &Streams<F>) -> bool {
     // Every live stream must be at or above its refill threshold.
     streams
         .records()

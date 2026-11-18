@@ -13,17 +13,17 @@ use std::sync::Arc;
 use tutti_rt::{Loan, PosClaim, PosFrame, PosReader, Reader};
 use tutti_types::Samples;
 
-use super::StreamFloat;
 use super::bell::Bell;
 use super::io::refill::{Refill, needs_refill};
 use super::loops::RingControl;
 use crate::{Direction, Loop};
+use tutti_rt::RingFloat;
 
 /// The audio side's two handles on a ring: its position reader and the
 /// reader of its published control, registered together on the control side.
 /// A voice holds one, by value, and reads a block through it.
 #[derive(Debug)]
-pub(crate) struct RingReader<F: StreamFloat = f32> {
+pub(crate) struct RingReader<F: RingFloat = f32> {
     pos: PosReader<F>,
     /// Registered on the control side (registering allocates).
     control: Reader<RingControl<F>>,
@@ -39,7 +39,7 @@ struct Wake {
     frames: usize,
 }
 
-impl<F: StreamFloat> RingReader<F> {
+impl<F: RingFloat> RingReader<F> {
     pub(crate) fn new(pos: PosReader<F>, control: Reader<RingControl<F>>) -> Self {
         Self {
             pos,
@@ -220,7 +220,7 @@ impl<F: StreamFloat> RingReader<F> {
 /// ```
 #[derive(Debug)]
 #[must_use = "a block that is dropped unread claimed and lent for nothing"]
-pub struct Block<'r, F: StreamFloat = f32> {
+pub struct Block<'r, F: RingFloat = f32> {
     claim: PosClaim<'r, F>,
     control: Loan<'r, RingControl<F>>,
     /// The claim and the loan stay on the audio thread (`Loan` is `!Send`
@@ -228,7 +228,7 @@ pub struct Block<'r, F: StreamFloat = f32> {
     _not_send: PhantomData<*const ()>,
 }
 
-impl<F: StreamFloat> Block<'_, F> {
+impl<F: RingFloat> Block<'_, F> {
     /// Whether position `pos` may be read this block: the ring's window holds
     /// it.
     #[inline]

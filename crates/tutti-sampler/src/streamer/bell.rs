@@ -29,8 +29,8 @@ use crossbeam_channel::TrySendError;
 use crossbeam_channel::{SendError, Sender};
 use tutti_rt::{Doorbell, Sleeper, doorbell};
 
-use super::StreamFloat;
 use super::command::StreamerCommand;
+use tutti_rt::RingFloat;
 
 /// The streamer thread's wake-up, shared by every sender, every voice's
 /// reader and the thread itself.
@@ -131,12 +131,12 @@ impl Bell {
 /// fails once the streamer has gone (every receiver dropped: the thread's on
 /// its exit, a built streamer's on its drop).
 #[derive(Clone)]
-pub(crate) struct StreamerSender<F: StreamFloat = f32> {
+pub(crate) struct StreamerSender<F: RingFloat = f32> {
     tx: Sender<StreamerCommand<F>>,
     bell: Arc<Bell>,
 }
 
-impl<F: StreamFloat> StreamerSender<F> {
+impl<F: RingFloat> StreamerSender<F> {
     pub(crate) fn new(tx: Sender<StreamerCommand<F>>, bell: Arc<Bell>) -> Self {
         Self { tx, bell }
     }
@@ -172,13 +172,13 @@ impl<F: StreamFloat> StreamerSender<F> {
 /// A sender whose bell nobody sleeps on: for a test that holds the receiving
 /// end itself.
 #[cfg(test)]
-impl<F: StreamFloat> From<Sender<StreamerCommand<F>>> for StreamerSender<F> {
+impl<F: RingFloat> From<Sender<StreamerCommand<F>>> for StreamerSender<F> {
     fn from(tx: Sender<StreamerCommand<F>>) -> Self {
         Self::new(tx, Bell::new().0)
     }
 }
 
-impl<F: StreamFloat> std::fmt::Debug for StreamerSender<F> {
+impl<F: RingFloat> std::fmt::Debug for StreamerSender<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamerSender").finish_non_exhaustive()
     }

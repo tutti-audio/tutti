@@ -35,14 +35,15 @@ use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
 use tutti_rt::{PriorityRequest, StopToken, ThreadHandle, spawn_named};
 
+use super::StreamerSender;
 use super::cache::LruCache;
 #[cfg(codec)]
 use super::cache::wave_bytes;
 use super::command::{Decoded, StreamId, StreamerCommand};
 use super::handlers::Handles;
 use super::metrics::{Metrics, ReadMeter};
-use super::{StreamFloat, StreamerSender};
 use crate::OpenError;
+use tutti_rt::RingFloat;
 
 /// How a thread is started: the seam a test replaces to see a spawn fail.
 pub(super) type Spawner = fn(
@@ -109,14 +110,14 @@ struct Job {
 }
 
 /// The decode thread's queue, started on first use. Streamer-thread-local.
-pub(super) struct DecodeLane<F: StreamFloat = f32> {
+pub(super) struct DecodeLane<F: RingFloat = f32> {
     /// The streamer's own queue, where a result is sent.
     reports: StreamerSender<F>,
     /// The job queue, once the thread has started.
     jobs: Option<Sender<Job>>,
 }
 
-impl<F: StreamFloat> DecodeLane<F> {
+impl<F: RingFloat> DecodeLane<F> {
     pub(super) fn new(reports: StreamerSender<F>) -> Self {
         Self {
             reports,
@@ -205,7 +206,7 @@ impl<F: StreamFloat> DecodeLane<F> {
 /// With no codec feature enabled there is no decoder to call, so the miss arm is
 /// gated out and a miss is simply `None`. The cache *lookup* stays live in both
 /// builds: entries reach it from elsewhere, and a hit needs no decoder.
-fn load_wave<F: StreamFloat>(
+fn load_wave<F: RingFloat>(
     cache: &LruCache<F>,
     metrics: &Metrics,
     meter: &mut ReadMeter,

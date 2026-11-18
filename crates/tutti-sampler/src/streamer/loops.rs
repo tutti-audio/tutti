@@ -30,9 +30,9 @@
 
 use std::sync::Arc;
 
-use super::StreamFloat;
 use super::prefetch::RegionOut;
 use tutti_buffers::{Float, Interleaved, InterleavedMut};
+use tutti_rt::RingFloat;
 use tutti_types::{ChannelLayout, ReadRate, SamplePosition, SampleRate, Samples};
 
 use crate::Loop;
@@ -606,7 +606,7 @@ pub(crate) enum Edit {
 /// `fade_frames` output frames at read rate `rate` where the switch is a jump.
 ///
 /// Streamer thread; reads the file only for a fade's record.
-pub(crate) fn apply_mapping<F: StreamFloat>(
+pub(crate) fn apply_mapping<F: RingFloat>(
     writer: &mut RegionOut<F>,
     new: Mapping<F>,
     fade_frames: Samples,

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
 
-use super::StreamFloat;
+use tutti_rt::RingFloat;
 use tutti_types::ChannelLayout;
 
 use super::open::Opened;
@@ -28,9 +28,9 @@ tutti_types::id! {
 pub(crate) type Reply<F = f32> = Sender<Result<Opened<F>, OpenError>>;
 
 /// What the decode thread made of a file: the whole wave, or why there is none.
-pub(crate) struct Decoded<F: StreamFloat = f32>(pub(crate) Result<Arc<Wave<F>>, OpenError>);
+pub(crate) struct Decoded<F: RingFloat = f32>(pub(crate) Result<Arc<Wave<F>>, OpenError>);
 
-impl<F: StreamFloat> std::fmt::Debug for Decoded<F> {
+impl<F: RingFloat> std::fmt::Debug for Decoded<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
             Ok(wave) => write!(f, "Decoded({} frames)", wave.len()),
@@ -41,7 +41,7 @@ impl<F: StreamFloat> std::fmt::Debug for Decoded<F> {
 
 /// Command sent to the Streamer thread.
 #[derive(Debug)]
-pub(crate) enum StreamerCommand<F: StreamFloat = f32> {
+pub(crate) enum StreamerCommand<F: RingFloat = f32> {
     /// Open `file_path` as stream `id`, its window starting at frame `start`,
     /// and answer on `reply`.
     Open {

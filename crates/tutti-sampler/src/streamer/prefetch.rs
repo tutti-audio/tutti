@@ -55,11 +55,11 @@ use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 #[cfg(codec)]
 use tutti_codec::FileIn;
 
-use super::StreamFloat;
 use super::command::StreamId;
 use super::loops::{Arrangement, Content, Mapping, RingControl, RingMap};
 use crate::Loop;
 use crate::nonempty;
+use tutti_rt::RingFloat;
 
 /// Frames a ring keeps behind where its reader plays: the taps a position
 /// reads behind itself, and a little slack.
@@ -67,7 +67,7 @@ pub(crate) const HISTORY_FRAMES: u64 = 4;
 
 /// A region's ring, shared by the streamer's writer and the audio thread's
 /// reader.
-pub(crate) struct Ring<F: StreamFloat = f32> {
+pub(crate) struct Ring<F: RingFloat = f32> {
     region_id: StreamId,
     file_path: PathBuf,
     channels: ChannelLayout,
@@ -93,7 +93,7 @@ pub(crate) struct Ring<F: StreamFloat = f32> {
     registered: std::sync::atomic::AtomicUsize,
 }
 
-impl<F: StreamFloat> std::fmt::Debug for Ring<F> {
+impl<F: RingFloat> std::fmt::Debug for Ring<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Ring")
             .field("region_id", &self.region_id)
@@ -102,7 +102,7 @@ impl<F: StreamFloat> std::fmt::Debug for Ring<F> {
     }
 }
 
-impl<F: StreamFloat> Ring<F> {
+impl<F: RingFloat> Ring<F> {
     pub(crate) fn region_id(&self) -> StreamId {
         self.region_id
     }
@@ -219,7 +219,7 @@ pub(crate) type SharedReader<F = f32> = Arc<Ring<F>>;
 /// The streamer's end of a region's ring: the writer, its source (a disk
 /// decoder, or the file resident whole) and what it holds (`loops::Content`).
 /// Streamer-thread-local.
-pub(crate) struct RegionOut<F: StreamFloat = f32> {
+pub(crate) struct RegionOut<F: RingFloat = f32> {
     ring: Arc<Ring<F>>,
     /// The ring's one writer.
     writer: PosWriter<F>,
@@ -241,7 +241,7 @@ pub(crate) struct RegionOut<F: StreamFloat = f32> {
     read_hook: Option<super::decode::ReadHook>,
 }
 
-impl<F: StreamFloat> RegionOut<F> {
+impl<F: RingFloat> RegionOut<F> {
     /// The shared ring.
     pub(crate) fn ring(&self) -> &Arc<Ring<F>> {
         &self.ring
@@ -436,7 +436,7 @@ impl RegionBuffer {
     /// [`MAX_POS_RING_FRAMES`]), holding nothing, read as an unlooped forward
     /// stream of a file of unknown length. Returns the writer, the ring and the ring's one position reader.
     #[cfg(test)]
-    pub(crate) fn with_capacity<F: StreamFloat>(
+    pub(crate) fn with_capacity<F: RingFloat>(
         region_id: StreamId,
         file_path: PathBuf,
         capacity: usize,
@@ -448,7 +448,7 @@ impl RegionBuffer {
     /// [`with_capacity`](Self::with_capacity), whose readers crossfade over
     /// `fade_frames` output frames at a jump.
     #[cfg(test)]
-    pub(crate) fn with_fade<F: StreamFloat>(
+    pub(crate) fn with_fade<F: RingFloat>(
         region_id: StreamId,
         file_path: PathBuf,
         capacity: usize,
@@ -462,7 +462,7 @@ impl RegionBuffer {
 
     /// `RegionBuffer::with_capacity` for a file `len` long (`None`: not known), whose
     /// readers crossfade over `fade_frames` output frames at a jump.
-    pub(crate) fn for_file<F: StreamFloat>(
+    pub(crate) fn for_file<F: RingFloat>(
         region_id: StreamId,
         file_path: PathBuf,
         capacity: usize,
@@ -507,7 +507,7 @@ impl RegionBuffer {
 
     /// Point a fresh ring at `start`: the reader there and the window from
     /// just behind it (the taps a position reads one frame back).
-    pub(crate) fn place<F: StreamFloat>(writer: &mut RegionOut<F>, start: u64) {
+    pub(crate) fn place<F: RingFloat>(writer: &mut RegionOut<F>, start: u64) {
         writer.reset(start.saturating_sub(HISTORY_FRAMES));
         writer.set_play(start);
     }

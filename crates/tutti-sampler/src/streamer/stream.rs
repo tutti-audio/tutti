@@ -9,7 +9,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::StreamFloat;
 use super::StreamerSender;
 use super::cells::Cells;
 use super::command::{StreamId, StreamerCommand};
@@ -19,6 +18,7 @@ use super::status::{StatusCell, StreamStatus};
 use crate::Loop;
 use crate::voice::Direction;
 use tutti_rt::Publisher;
+use tutti_rt::RingFloat;
 
 /// The way onto one streamer's command queue, cloned into every [`Stream`].
 ///
@@ -27,11 +27,11 @@ use tutti_rt::Publisher;
 /// fails once the streamer has gone (every receiver dropped: the thread's on
 /// its exit, a built streamer's on its drop).
 #[derive(Clone, Debug)]
-pub(crate) struct StreamerPort<F: StreamFloat = f32> {
+pub(crate) struct StreamerPort<F: RingFloat = f32> {
     tx: StreamerSender<F>,
 }
 
-impl<F: StreamFloat> StreamerPort<F> {
+impl<F: RingFloat> StreamerPort<F> {
     pub(crate) fn new(tx: impl Into<StreamerSender<F>>) -> Self {
         Self { tx: tx.into() }
     }
@@ -45,7 +45,7 @@ impl<F: StreamFloat> StreamerPort<F> {
 }
 
 /// The streamer's command for a loop `setting` on `stream`.
-fn loop_command<F: StreamFloat>(stream: StreamId, setting: Option<Loop>) -> StreamerCommand<F> {
+fn loop_command<F: RingFloat>(stream: StreamId, setting: Option<Loop>) -> StreamerCommand<F> {
     match setting {
         Some(looped) => StreamerCommand::SetStreamLoop { stream, looped },
         None => StreamerCommand::ClearStreamLoop { stream },
@@ -82,7 +82,7 @@ fn loop_command<F: StreamFloat>(stream: StreamId, setting: Option<Loop>) -> Stre
 /// let _again = &stream;
 /// # }
 /// ```
-pub struct Stream<F: StreamFloat = f32> {
+pub struct Stream<F: RingFloat = f32> {
     id: StreamId,
     port: StreamerPort<F>,
     /// What the streamer publishes of the stream ([`status`](Self::status)).
@@ -105,13 +105,13 @@ pub struct Stream<F: StreamFloat = f32> {
     direction: Direction,
 }
 
-impl<F: StreamFloat> std::fmt::Debug for Stream<F> {
+impl<F: RingFloat> std::fmt::Debug for Stream<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Stream").field("id", &self.id).finish()
     }
 }
 
-impl<F: StreamFloat> Stream<F> {
+impl<F: RingFloat> Stream<F> {
     pub(crate) fn new(
         id: StreamId,
         port: StreamerPort<F>,
@@ -250,14 +250,14 @@ impl<F: StreamFloat> Stream<F> {
 
 /// A dropped `Stream` ends its stream. A streamer that is already gone has
 /// nothing left to end.
-impl<F: StreamFloat> Drop for Stream<F> {
+impl<F: RingFloat> Drop for Stream<F> {
     fn drop(&mut self) {
         let _ = self.port.send(StreamerCommand::Close { stream: self.id });
     }
 }
 
 #[cfg(test)]
-impl<F: StreamFloat> Stream<F> {
+impl<F: RingFloat> Stream<F> {
     /// A handle on no streamer's stream: only its sends are in question (tests).
     pub(crate) fn detached(id: StreamId, port: StreamerPort<F>) -> Self {
         Stream::new(

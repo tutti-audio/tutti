@@ -203,8 +203,8 @@ pub(crate) mod streamer;
 
 pub use streamer::{
     Block, DiskStreamer, DiskStreamerConfig, Open, OpenError, Opening, Placement, RefusedPlacement,
-    Running, Stream, StreamFault, StreamFile, StreamFloat, StreamId, StreamPhase, StreamReader,
-    StreamStatus, StreamerGone,
+    Running, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader, StreamStatus,
+    StreamerGone,
 };
 
 // The hand-driven streamer cycle, alongside `DiskStreamer::manual`: its driver

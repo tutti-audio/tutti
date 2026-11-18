@@ -299,7 +299,7 @@ pub mod types {
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        Reading, Reclaim, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
+        Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
@@ -506,8 +506,8 @@ pub mod codec {
 pub mod sampler {
     pub use tutti_sampler::{
         Block, Direction as PlaybackDirection, Error, OpenError, Placement as ClipPlacement,
-        RefusedPlacement, Stream, StreamFault, StreamFile, StreamFloat, StreamId, StreamPhase,
-        StreamReader, StreamStatus, VoiceNodeHandle,
+        RefusedPlacement, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader,
+        StreamStatus, VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{

@@ -13,7 +13,6 @@
 //! Every count here is denominated in frames. The `* ch` at each scratch
 //! resize is the only place the interleave stride enters.
 
-use super::super::StreamFloat;
 use super::super::cells::Cells;
 #[cfg(test)]
 use super::super::command::StreamId;
@@ -25,6 +24,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_rt::MAX_POS_RING_POSITION;
+use tutti_rt::RingFloat;
 use tutti_types::Samples;
 
 /// Samples a parallel worker's scratch starts with; it grows to a chunk.
@@ -84,7 +84,7 @@ fn varifill_chunk(
 /// `interleave_buffer` is the streamer's reusable scratch, passed in so a refill
 /// does not allocate per cycle. Streamer thread throughout — this both blocks on
 /// disk and may grow that buffer, so it must never run on the audio thread.
-pub(crate) fn refill_all<F: StreamFloat>(
+pub(crate) fn refill_all<F: RingFloat>(
     records: &mut [Record<F>],
     metrics: &Metrics,
     base_chunk_size: usize,
@@ -98,7 +98,7 @@ pub(crate) fn refill_all<F: StreamFloat>(
 
 /// [`refill_one`] on `record` under its containment, then its status
 /// published.
-fn refill_contained<F: StreamFloat>(
+fn refill_contained<F: RingFloat>(
     record: &mut Record<F>,
     base_chunk_size: usize,
     read_rate: f64,
@@ -118,7 +118,7 @@ fn refill_contained<F: StreamFloat>(
 /// *different* one, whose mapping — loop included — travels with its writer, so
 /// a looped stream refills here exactly as it does serially. Each worker
 /// grows a scratch of its own, a [`Vec`] per rayon split, not per record.
-pub(crate) fn refill_all_parallel<F: StreamFloat>(
+pub(crate) fn refill_all_parallel<F: RingFloat>(
     records: &mut [Record<F>],
     metrics: &Metrics,
     base_chunk_size: usize,
@@ -213,7 +213,7 @@ pub(crate) fn needs_refill(
 /// Says whether a read of the file failed (a decode fault), whether the ring
 /// is primed (at or above its refill threshold, or holding all it can be
 /// given) and how full it was before this refill wrote anything.
-fn refill_one<F: StreamFloat>(
+fn refill_one<F: RingFloat>(
     writer: &mut RegionOut<F>,
     cells: &Cells,
     base_chunk_size: usize,

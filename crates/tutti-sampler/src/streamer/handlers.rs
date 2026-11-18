@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tutti_types::{AtomicSampleRate, SampleRate, Samples, SrcRatio};
 
+use super::StreamerSender;
 use super::bell::Bell;
 use super::cache::LruCache;
 use super::cells::Cells;
@@ -25,18 +26,18 @@ use super::open::{OpenError, Opened};
 use super::prefetch::RegionBuffer;
 use super::record::{Cmd, Effect, Record, Streams, step};
 use super::status::StatusCell;
-use super::{StreamFloat, StreamerSender};
 use crate::Loop;
 use crate::nonempty;
 use crate::voice::Direction;
 use crate::voice::interp::Place;
 use crate::voice_width;
+use tutti_rt::RingFloat;
 use tutti_types::ChannelLayout;
 
 /// Arc'd handles shared between the control side and the streamer loop.
 /// `Clone` is cheap — every field is an `Arc`.
 #[derive(Clone)]
-pub(super) struct Handles<F: StreamFloat = f32> {
+pub(super) struct Handles<F: RingFloat = f32> {
     pub cache: Arc<LruCache<F>>,
     pub metrics: Arc<Metrics>,
     /// What wakes the streamer: every stream's reader rings it.
@@ -81,7 +82,7 @@ impl SessionRate {
 }
 
 /// Streamer-thread-local state. Never shared. Plain data.
-pub(super) struct Local<F: StreamFloat = f32> {
+pub(super) struct Local<F: RingFloat = f32> {
     /// Every open stream, one record each.
     pub streams: Streams<F>,
     /// Flat interleaved refill scratch. Streamer-thread-local, so it may grow.
@@ -93,7 +94,7 @@ pub(super) struct Local<F: StreamFloat = f32> {
 }
 
 /// An open of a file that cannot seek, waiting for the decode lane.
-pub(super) struct Pending<F: StreamFloat = f32> {
+pub(super) struct Pending<F: RingFloat = f32> {
     id: StreamId,
     file_path: PathBuf,
     start: u64,
@@ -101,7 +102,7 @@ pub(super) struct Pending<F: StreamFloat = f32> {
     reply: Reply<F>,
 }
 
-impl<F: StreamFloat> Local<F> {
+impl<F: RingFloat> Local<F> {
     /// Thread-local state with no streams, a scratch buffer pre-sized for one
     /// `base_chunk_size` refill. `reports` is the queue the decode lane
     /// answers on.
@@ -121,7 +122,7 @@ impl<F: StreamFloat> Local<F> {
 /// [`step`] over the table, and silently no-ops for a stream the streamer no
 /// longer holds: commands race the streams they name, and there is no caller
 /// left to report to by the time the streamer sees one.
-pub(super) fn handle_command<F: StreamFloat>(
+pub(super) fn handle_command<F: RingFloat>(
     cmd: StreamerCommand<F>,
     shared: &Handles<F>,
     config: &BufferConfig,
@@ -183,7 +184,7 @@ pub(super) fn handle_command<F: StreamFloat>(
 /// is asked in exactly one place. Re-deriving it here is how the two would drift
 /// the next time the conditions changed.
 #[cfg(codec)]
-fn open_stream<F: StreamFloat>(
+fn open_stream<F: RingFloat>(
     file_path: &std::path::Path,
 ) -> Option<(tutti_codec::WaveMetadata, tutti_codec::FileIn<F>)> {
     if !crate::probe(file_path).ok()?.streamable {
@@ -206,14 +207,14 @@ type Decoder<F> = (std::convert::Infallible, std::marker::PhantomData<F>);
 
 /// What a stream's ring is fed from: a decoder that seeks in the file, or the
 /// file decoded whole.
-enum Source<F: StreamFloat> {
+enum Source<F: RingFloat> {
     #[cfg(codec)]
     Stream(tutti_codec::WaveMetadata, Box<tutti_codec::FileIn<F>>),
     Whole(Arc<tutti_buffers::Wave<F>>),
 }
 
 /// Where an open stands after its probe.
-enum Begun<F: StreamFloat> {
+enum Begun<F: RingFloat> {
     /// Its source is in hand.
     Ready(Source<F>),
     /// The file is being decoded whole on the decode lane; the open waits for
@@ -228,7 +229,7 @@ enum Begun<F: StreamFloat> {
 /// Probes `file_path` for how to feed stream `id`: a seeking decoder, a wave
 /// the cache already holds, or else a whole-file decode on the decode lane.
 /// The streamer's thread reads a header here and nothing more.
-fn begin<F: StreamFloat>(
+fn begin<F: RingFloat>(
     id: StreamId,
     file_path: &Path,
     shared: &Handles<F>,
@@ -273,7 +274,7 @@ fn begin<F: StreamFloat>(
 ///
 /// The probe and the build run under `catch_unwind`: a decoder that panics on
 /// a file fails that open (`OpenError::Format`), not the streamer.
-fn handle_open<F: StreamFloat>(
+fn handle_open<F: RingFloat>(
     open: Pending<F>,
     shared: &Handles<F>,
     config: &BufferConfig,
@@ -299,7 +300,7 @@ fn handle_open<F: StreamFloat>(
 
 /// Answers `open` from `source`: builds its stream, puts the record in the
 /// table and replies with the reader's parts, or replies with the failure.
-fn complete<F: StreamFloat>(
+fn complete<F: RingFloat>(
     open: Pending<F>,
     source: Result<Source<F>, OpenError>,
     shared: &Handles<F>,
@@ -348,7 +349,7 @@ fn complete<F: StreamFloat>(
 /// Builds the region ring at the file's own width and pins the wave in the
 /// cache for the stream's lifetime. The placement into `width` (the file's own
 /// when `None`) is built, and so refused, before anything is built.
-fn build_stream<F: StreamFloat>(
+fn build_stream<F: RingFloat>(
     id: StreamId,
     file_path: PathBuf,
     start: u64,
@@ -481,7 +482,7 @@ fn build_stream<F: StreamFloat>(
 /// loop change never decodes the whole file. A lead-in that cannot be read
 /// plays the loop hard, is logged, and is what the ring's published control
 /// says is applied (so a fork plays it hard too).
-fn handle_loop<F: StreamFloat>(
+fn handle_loop<F: RingFloat>(
     stream: StreamId,
     ask: Option<Loop>,
     config: &BufferConfig,
@@ -501,7 +502,7 @@ fn handle_loop<F: StreamFloat>(
 
 /// Captures `ask` into `record`'s ring and records it as applied: the file
 /// work of [`handle_loop`].
-fn capture_loop<F: StreamFloat>(record: &mut Record<F>, ask: Option<Loop>, config: &BufferConfig) {
+fn capture_loop<F: RingFloat>(record: &mut Record<F>, ask: Option<Loop>, config: &BufferConfig) {
     let len = record.file_frames.get();
     let rate = record.cells.read_rate();
     let writer = &mut record.out;
@@ -540,7 +541,7 @@ fn capture_loop<F: StreamFloat>(record: &mut Record<F>, ask: Option<Loop>, confi
 /// [`apply_mapping`]'s: a switch the reader crossfades across just past the
 /// block it is in. The direction is the published map's own, so the one
 /// publish carries it to the voice and to a fork.
-fn handle_direction<F: StreamFloat>(
+fn handle_direction<F: RingFloat>(
     stream: StreamId,
     direction: Direction,
     config: &BufferConfig,

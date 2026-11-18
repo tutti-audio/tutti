@@ -76,17 +76,8 @@ use crate::error::Result;
 use decode::Seams;
 use handlers::Handles;
 use thread::Built;
-use tutti_buffers::Float;
-use tutti_rt::RingSample;
+use tutti_rt::RingFloat;
 use tutti_types::{Mint, SampleRate};
-
-/// A [`Float`] a stream's ring can hold: `f32` or `f64`, the two with an atomic
-/// word of their width ([`RingSample`]).
-///
-/// Implemented for every such format; a stream is generic over it.
-pub trait StreamFloat: Float + RingSample {}
-
-impl<F: Float + RingSample> StreamFloat for F {}
 
 /// The disk-streaming engine: owns the streamer thread that reads files into
 /// per-stream rings for [`DiskVoice`](crate::DiskVoice)s to play.
@@ -160,7 +151,7 @@ impl<F: Float + RingSample> StreamFloat for F {}
 /// # Ok(())
 /// # }
 /// ```
-pub struct DiskStreamer<D = Running, F: StreamFloat = f32> {
+pub struct DiskStreamer<D = Running, F: RingFloat = f32> {
     streamer_tx: StreamerSender<F>,
     shared: Handles<F>,
     /// The driver: the thread, which only its drop uses, or the caller's
@@ -173,7 +164,7 @@ pub struct DiskStreamer<D = Running, F: StreamFloat = f32> {
 
 // The driver holds a thread handle or a cycle that can't derive `Debug`; print
 // the sample rate and note the live streamer.
-impl<D, F: StreamFloat> std::fmt::Debug for DiskStreamer<D, F> {
+impl<D, F: RingFloat> std::fmt::Debug for DiskStreamer<D, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiskStreamer")
             .field("sample_rate", &self.shared.session_rate.get().get())
@@ -193,7 +184,7 @@ impl DiskStreamer<Running> {
     }
 }
 
-impl<F: StreamFloat> DiskStreamer<Running, F> {
+impl<F: RingFloat> DiskStreamer<Running, F> {
     /// Creates the streaming engine at `sample_rate` (the engine's rate) and
     /// spawns the streamer thread. Its streams decode into `F` and its rings
     /// hold `F`.
@@ -257,7 +248,7 @@ impl DiskStreamer<ByHand> {
 }
 
 #[cfg(any(test, feature = "testing"))]
-impl<F: StreamFloat> DiskStreamer<ByHand<F>, F> {
+impl<F: RingFloat> DiskStreamer<ByHand<F>, F> {
     /// Creates the streaming engine without spawning the streamer thread;
     /// cycles are then run by hand with `step_once`.
     /// Requires the `testing` feature.
@@ -332,7 +323,7 @@ impl<F: StreamFloat> DiskStreamer<ByHand<F>, F> {
     }
 }
 
-impl<D, F: StreamFloat> DiskStreamer<D, F> {
+impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// Opens `path` as a new stream, its reader starting at `place`, and
     /// answers with an [`Opening`]: poll it for the stream's [`Stream`] and its
     /// one [`StreamReader`]. The voice is as wide as the file

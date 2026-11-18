@@ -18,7 +18,6 @@ use crossbeam_channel::{Receiver, TryRecvError};
 use tutti_rt::{PosReader, Publisher};
 use tutti_types::{ChannelLayout, SamplePosition, SampleRate, Samples};
 
-use super::StreamFloat;
 use super::bell::Bell;
 use super::block::{Block, RingReader};
 use super::cells::Cells;
@@ -30,6 +29,7 @@ use super::status::StatusCell;
 use super::stream::{Stream, StreamerPort};
 use crate::PlaceError;
 use crate::voice::interp::Place;
+use tutti_rt::RingFloat;
 
 /// Where in the file a stream's reader starts, in file frames.
 ///
@@ -116,7 +116,7 @@ pub enum OpenError {
 /// What the streamer answers an open with: everything the audio side's
 /// [`StreamReader`] is built from but the registered control reader, which the
 /// control thread registers ([`Opening::poll`]).
-pub(crate) struct Opened<F: StreamFloat = f32> {
+pub(crate) struct Opened<F: RingFloat = f32> {
     pub(crate) id: StreamId,
     pub(crate) ring: SharedReader<F>,
     pub(crate) pos: PosReader<F>,
@@ -133,7 +133,7 @@ pub(crate) struct Opened<F: StreamFloat = f32> {
     pub(crate) bell: Arc<Bell>,
 }
 
-impl<F: StreamFloat> std::fmt::Debug for Opened<F> {
+impl<F: RingFloat> std::fmt::Debug for Opened<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Opened")
             .field("id", &self.id)
@@ -169,7 +169,7 @@ impl<F: StreamFloat> std::fmt::Debug for Opened<F> {
 /// opened.
 #[derive(Debug)]
 #[must_use = "an open nobody polls is abandoned"]
-pub struct Opening<F: StreamFloat = f32> {
+pub struct Opening<F: RingFloat = f32> {
     id: StreamId,
     reply: Receiver<Result<Opened<F>, OpenError>>,
     /// The streamer's command queue, which the stream it answers with sends
@@ -177,7 +177,7 @@ pub struct Opening<F: StreamFloat = f32> {
     port: StreamerPort<F>,
 }
 
-impl<F: StreamFloat> Opening<F> {
+impl<F: RingFloat> Opening<F> {
     pub(crate) fn new(
         id: StreamId,
         reply: Receiver<Result<Opened<F>, OpenError>>,
@@ -247,7 +247,7 @@ impl<F: StreamFloat> Opening<F> {
 /// An open's answer.
 #[derive(Debug)]
 #[must_use = "a dropped `Pending` abandons the open; a dropped `Stream` closes it"]
-pub enum Open<F: StreamFloat = f32> {
+pub enum Open<F: RingFloat = f32> {
     /// Not answered yet: poll the `Opening` again.
     Pending(Opening<F>),
     /// The stream is open: the handle is the control thread's, and the reader
@@ -279,7 +279,7 @@ pub enum Open<F: StreamFloat = f32> {
 /// let _again = &reader;
 /// # }
 /// ```
-pub struct StreamReader<F: StreamFloat = f32> {
+pub struct StreamReader<F: RingFloat = f32> {
     id: StreamId,
     pub(crate) ring: SharedReader<F>,
     /// The position reader and the control's reader, registered together on
@@ -293,7 +293,7 @@ pub struct StreamReader<F: StreamFloat = f32> {
     pub(crate) width: ChannelLayout,
 }
 
-impl<F: StreamFloat> std::fmt::Debug for StreamReader<F> {
+impl<F: RingFloat> std::fmt::Debug for StreamReader<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamReader")
             .field("id", &self.id)
@@ -302,7 +302,7 @@ impl<F: StreamFloat> std::fmt::Debug for StreamReader<F> {
     }
 }
 
-impl<F: StreamFloat> StreamReader<F> {
+impl<F: RingFloat> StreamReader<F> {
     fn new(opened: Opened<F>) -> Self {
         Self {
             id: opened.id,

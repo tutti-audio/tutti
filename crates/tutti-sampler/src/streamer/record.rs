@@ -20,7 +20,6 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
-use super::StreamFloat;
 use super::cache::StreamPin;
 use super::cells::Cells;
 use super::command::StreamId;
@@ -30,6 +29,7 @@ use super::prefetch::RegionOut;
 use super::status::{Served, StatusCell, StreamFault};
 use crate::Loop;
 use crate::voice::Direction;
+use tutti_rt::RingFloat;
 use tutti_types::{SampleRate, Samples, SrcRatio};
 
 /// Where a stream is in its life. A closed stream has no record, so there is
@@ -48,7 +48,7 @@ pub(super) enum Phase {
 /// One open stream: everything the streamer holds for it.
 ///
 /// Dropping it ends the stream (module docs).
-pub(super) struct Record<F: StreamFloat = f32> {
+pub(super) struct Record<F: RingFloat = f32> {
     phase: Phase,
     /// The ring's writer, the decoder and the resident wave.
     pub(super) out: RegionOut<F>,
@@ -75,7 +75,7 @@ pub(super) struct Record<F: StreamFloat = f32> {
     dead: bool,
 }
 
-impl<F: StreamFloat> Record<F> {
+impl<F: RingFloat> Record<F> {
     pub(super) fn new(
         out: RegionOut<F>,
         cells: Arc<Cells>,
@@ -173,7 +173,7 @@ impl<F: StreamFloat> Record<F> {
 /// `Faulted(StreamerGone)` (a fault already there stays). This is also how a
 /// panic that escapes the per-stream containment tells every stream: it drops
 /// the whole table.
-impl<F: StreamFloat> Drop for Record<F> {
+impl<F: RingFloat> Drop for Record<F> {
     fn drop(&mut self) {
         self.status.fault(StreamFault::StreamerGone);
         self.status.close();
@@ -181,7 +181,7 @@ impl<F: StreamFloat> Drop for Record<F> {
 }
 
 /// A command as the pure step sees it: data, with the file work already done.
-pub(super) enum Cmd<F: StreamFloat = f32> {
+pub(super) enum Cmd<F: RingFloat = f32> {
     /// A stream the driver has built, in [`Phase::Opening`].
     Open(Box<Record<F>>),
     /// The open's reader reached its caller: the stream is [`Phase::Live`].
@@ -216,13 +216,13 @@ pub(super) enum Effect {
 /// `&mut Record` (`par_iter_mut` needs `Send`, not `Sync`), a session has tens
 /// of streams, and a command finds its stream by a scan of ids that are
 /// minted once and never reused.
-pub(super) struct Streams<F: StreamFloat = f32> {
+pub(super) struct Streams<F: RingFloat = f32> {
     records: Vec<Record<F>>,
     /// What the last step asked of the driver.
     effects: Vec<Effect>,
 }
 
-impl<F: StreamFloat> Streams<F> {
+impl<F: RingFloat> Streams<F> {
     pub(super) fn new() -> Self {
         Self {
             records: Vec::new(),
@@ -278,7 +278,7 @@ impl<F: StreamFloat> Streams<F> {
 /// A command for a stream the table does not hold changes nothing and asks
 /// for nothing: commands race the streams they name, and an id is minted once
 /// and never reused, so a late command cannot reach another stream.
-pub(super) fn step<F: StreamFloat>(streams: &mut Streams<F>, cmd: Cmd<F>) -> &[Effect] {
+pub(super) fn step<F: RingFloat>(streams: &mut Streams<F>, cmd: Cmd<F>) -> &[Effect] {
     streams.effects.clear();
     match cmd {
         Cmd::Open(record) => {
