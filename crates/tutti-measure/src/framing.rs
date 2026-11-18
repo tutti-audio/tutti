@@ -79,13 +79,8 @@ pub(crate) const MAX_OVERLAP: usize = 64;
 impl Framing {
     /// How many whole frames fit over `len` samples: none for a signal shorter
     /// than the window, otherwise `(len - window) / hop + 1`.
-    ///
-    /// The window and hop are not zero; [`check`](Self::check) refuses those.
     pub(crate) fn frames_for(self, len: Samples) -> FrameCount {
-        match len.get().checked_sub(self.window.get()) {
-            Some(spare) => FrameCount(spare / self.hop.get() + 1),
-            None => FrameCount(0),
-        }
+        FrameCount::fitting(len, self.window, self.hop)
     }
 }
 
@@ -242,6 +237,19 @@ mod tests {
         ] {
             assert_eq!(f.frames_for(Samples(len)), FrameCount(frames), "{len}");
         }
+    }
+
+    /// A zero window or hop fits no frame, rather than dividing by zero.
+    #[test]
+    fn a_zero_hop_or_window_fits_no_frame() {
+        assert_eq!(
+            Framing::new(WINDOW, Samples(0)).frames_for(Samples(9999)),
+            FrameCount(0)
+        );
+        assert_eq!(
+            Framing::new(Samples(0), HOP).frames_for(Samples(9999)),
+            FrameCount(0)
+        );
     }
 
     /// A hop wider than the window leaves the samples between frames unread:

@@ -290,7 +290,7 @@ impl NotePlan {
     }
 
     /// Whether the hop suits the YIN frame: not wider than it, and no more
-    /// than [`MAX_OVERLAP`](crate::framing) hops across it.
+    /// than `MAX_OVERLAP` hops across it.
     fn check_hop(&self) -> Result<()> {
         check_hop_within(self.frame(), self.hop)?;
         check_overlap(self.frame(), self.hop)
@@ -1625,6 +1625,26 @@ mod tests {
                 max: MAX_FRAMES
             })
         );
+    }
+
+    /// Exactly `MAX_FRAMES` frames are accepted and one more is not, for a length
+    /// that leaves a partial hop: `frame + (MAX_FRAMES - 1) * hop` is the last
+    /// length with `MAX_FRAMES` frames, `hop - 1` samples more still is.
+    #[test]
+    fn the_frame_limit_is_exact_with_a_partial_hop() {
+        let c = Case::new(
+            super::NoteConfig::new().pitch(YinConfig::new().band(band(5000.0, 10000.0))),
+            SampleRate::of(RATE),
+        );
+        let hop = 2;
+        let c = c.hop(PitchHop::of(Samples(hop)));
+        let frame = c.frame().get();
+        let last_ok = frame + (MAX_FRAMES.get() - 1) * hop;
+        let check =
+            |len: usize| check_frame_count(c.framing().frames_for(Samples(len)), MAX_FRAMES);
+        assert!(check(last_ok).is_ok());
+        assert!(check(last_ok + hop - 1).is_ok());
+        assert!(check(last_ok + hop).is_err());
     }
 
     /// A note that runs to the end of the buffer ends at its last whole

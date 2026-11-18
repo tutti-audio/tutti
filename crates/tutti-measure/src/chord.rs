@@ -59,11 +59,15 @@ use tutti_types::{PitchClass, Samples};
 
 use tutti_types::ranged;
 
-use crate::chroma::{CLASSES, Chroma, MAX_FRAMES};
+use crate::chroma::{CLASSES, Chroma};
 use crate::framing::{Framing, check_frame_count};
 use crate::sequence::median;
 use crate::{Error, Result};
-use tutti_dsp::{FrameIndex, Grid};
+use tutti_dsp::{FrameCount, FrameIndex, Grid};
+
+/// The most frames one call smooths, bounding the backpointers (25 bytes a
+/// frame).
+const MAX_FRAMES: FrameCount = FrameCount(1 << 19);
 
 /// The states: 12 major roots, 12 minor roots, and "no chord".
 const STATES: usize = 2 * CLASSES + 1;

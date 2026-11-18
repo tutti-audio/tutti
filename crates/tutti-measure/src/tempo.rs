@@ -512,42 +512,45 @@ impl Periodicity {
     /// The normalised autocorrelation at a lag in `first_lag - 1..=last_lag + 1`
     /// (the searched lags and the one either side that refinement reads);
     /// `values[0]` is lag `first_lag - 1`.
-    fn at(&self, lag: usize) -> f32 {
+    fn at(&self, lag: FrameCount) -> f32 {
+        let lag = lag.get();
         debug_assert!((self.first_lag.get() - 1..=self.last_lag.get() + 1).contains(&lag));
         self.values[lag - (self.first_lag.get() - 1)]
     }
 
     /// The prior's weight at `lag`, from 1 at the centre down.
-    fn weight(&self, cfg: &TempoConfig, lag: usize) -> f32 {
+    fn weight(&self, cfg: &TempoConfig, lag: FrameCount) -> f32 {
         let octaves =
-            libm::log2(self.bpm(lag as f64) / cfg.centre.get()) / f64::from(cfg.spread.get());
+            libm::log2(self.bpm(lag.get() as f64) / cfg.centre.get()) / f64::from(cfg.spread.get());
         libm::exp(-0.5 * octaves * octaves) as f32
     }
 
     /// The lag refined to a fraction of a frame by a parabola through its
     /// value and its neighbours', or `lag` when they do not bend down.
-    fn refined(&self, lag: usize) -> f64 {
-        let peak = parabolic_peak(self.at(lag - 1), self.at(lag), self.at(lag + 1));
-        lag as f64 + f64::from(peak.offset)
+    fn refined(&self, lag: FrameCount) -> f64 {
+        let (below, above) = (FrameCount(lag.get() - 1), FrameCount(lag.get() + 1));
+        let peak = parabolic_peak(self.at(below), self.at(lag), self.at(above));
+        lag.get() as f64 + f64::from(peak.offset)
     }
 
     fn tempo(&self, cfg: &TempoConfig) -> Tempo {
-        let score = |lag: usize| self.at(lag).max(0.0) * self.weight(cfg, lag);
         // Local maxima of the weighted score; an edge of the range counts when
         // the score rises towards it.
-        let scores: Vec<f32> = (self.first_lag.get()..=self.last_lag.get())
-            .map(score)
+        let first = self.first_lag.get();
+        let scores: Vec<f32> = (first..=self.last_lag.get())
+            .map(|lag| self.at(FrameCount(lag)).max(0.0) * self.weight(cfg, FrameCount(lag)))
             .collect();
-        let mut peaks: Vec<usize> = local_maxima(&scores, 0..scores.len())
-            .map(|at| self.first_lag.get() + at)
-            .collect();
+        let mut peaks: Vec<usize> = local_maxima(&scores, 0..scores.len()).collect();
         // Best first; on a tie, the shorter lag (higher tempo).
-        peaks.sort_by(|&a, &b| score(b).total_cmp(&score(a)).then(a.cmp(&b)));
-        let candidate = |lag: usize| TempoCandidate {
-            bpm: Bpm::new(self.bpm(self.refined(lag)))
-                .unwrap_or(cfg.min)
-                .clamp(cfg.min, cfg.max),
-            strength: Confidence::new_clamped(self.at(lag)),
+        peaks.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]).then(a.cmp(&b)));
+        let candidate = |at: usize| {
+            let lag = FrameCount(first + at);
+            TempoCandidate {
+                bpm: Bpm::new(self.bpm(self.refined(lag)))
+                    .unwrap_or(cfg.min)
+                    .clamp(cfg.min, cfg.max),
+                strength: Confidence::new_clamped(self.at(lag)),
+            }
         };
         let best = candidate(peaks[0]);
         Tempo {
@@ -556,7 +559,7 @@ impl Periodicity {
             alternatives: peaks[1..]
                 .iter()
                 .take(cfg.alternatives)
-                .map(|&lag| candidate(lag))
+                .map(|&at| candidate(at))
                 .collect(),
         }
     }

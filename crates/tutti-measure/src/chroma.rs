@@ -76,8 +76,7 @@ pub(crate) const CLASSES: usize = 12;
 /// an absurd one would ask for gigabytes, and a tiny one resolves no pitch.
 const WINDOWS: RangeInclusive<Samples> = Samples(64)..=Samples(1 << 18);
 
-/// The most frames one call analyses, bounding the output (48 bytes a frame),
-/// and the most one chord pass smooths.
+/// The most frames one call analyses, bounding the output (48 bytes a frame).
 pub(crate) const MAX_FRAMES: FrameCount = FrameCount(1 << 19);
 
 /// Smallest positive magnitude, standing in for an empty neighbour bin before
@@ -359,11 +358,9 @@ impl ChromaPlan {
             return false;
         }
         let floor = top * self.peak_floor.get().to_amplitude().get();
-        for i in local_maxima(magnitudes, lo..hi + 1) {
+        // A floor that compares false with a peak (a NaN) keeps none.
+        for i in local_maxima(magnitudes, lo..hi + 1).filter(|&i| magnitudes[i] >= floor) {
             let m = magnitudes[i];
-            if m < floor {
-                continue;
-            }
             let (offset, peak) = interpolate(magnitudes[i - 1], m, magnitudes[i + 1]);
             let frequency = self.geometry.frequency_of(i as f64 + offset);
             if frequency >= self.min_freq && frequency <= self.max_freq {
