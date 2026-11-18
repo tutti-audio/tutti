@@ -153,7 +153,7 @@ fn run(
         // `ProbeOutcome` is `#[non_exhaustive]`: an outcome from a newer probe.
         other => Err(BridgeError::UnexpectedMessage {
             expected: "a described or failed probe outcome",
-            got: format!("{other:?}"),
+            got: format!("{other:?}").into(),
         }
         .into()),
     }

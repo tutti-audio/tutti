@@ -14,7 +14,7 @@ use crate::served::Render;
 use tutti_buffers::{Float, InputOutput};
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_plugin_ipc::SlabWriter;
+use tutti_plugin_ipc::{SlabLayout, SlabWriter};
 use tutti_plugin_types::{
     BlockStatus, BridgeResult, ChannelTable, ChordChanges, ExpressiveContext, Features,
     MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges,
@@ -22,6 +22,7 @@ use tutti_plugin_types::{
     PluginError, PluginResult, ProcessContext, ProcessOutput, SampleFormat, Samples, ScaleChanges,
     TransportChange, TransportInfo, WireMidi, sanitize, silence,
 };
+use tutti_rt::TallyWriter;
 use tutti_ump::Ump;
 
 /// The negotiated sample format.
@@ -42,86 +43,87 @@ impl Default for Clock {
     }
 }
 
+/// One channel's samples, in fixed storage.
+type Channel<T> = Box<[T]>;
+
+/// The channels of one direction: a fixed shape, never pushed to.
+type Channels<T> = Box<[Channel<T>]>;
+
 /// Per-channel scratch, exactly one sample format at a time.
+///
+/// Built by the control side for a slab's layout ([`for_layout`](Self::for_layout))
+/// and shipped to the render thread, which only borrows it: it has no way to
+/// grow, so a block never sizes it.
 ///
 /// An enum rather than both buffers side by side: a session runs at one
 /// negotiated format for the life of a plugin, so holding the unused width would
 /// double the resident scratch for no reachable case.
-enum AudioBuffers {
-    /// `f32` scratch, one `Vec` per channel in each direction.
+pub(crate) enum AudioScratch {
+    /// `f32` scratch, one channel per channel in each direction.
     F32 {
         /// Input scratch, in flat bus order as the plugin's `process` expects.
-        input: Vec<Vec<f32>>,
+        input: Channels<f32>,
         /// Output scratch, zeroed before each block.
-        output: Vec<Vec<f32>>,
+        output: Channels<f32>,
     },
     /// `f64` scratch, used only when the plugin advertised `F64_AUDIO` and the
     /// host asked for it.
     F64 {
         /// Input scratch, in flat bus order as the plugin's `process` expects.
-        input: Vec<Vec<f64>>,
+        input: Channels<f64>,
         /// Output scratch, zeroed before each block.
-        output: Vec<Vec<f64>>,
+        output: Channels<f64>,
     },
 }
 
-impl AudioBuffers {
-    /// Empty scratch in `format`. Allocates nothing; `resize` shapes it.
-    fn new(format: SampleFormat) -> Self {
+impl AudioScratch {
+    /// No channels: what a pipeline holds until a slab is attached.
+    /// Allocates nothing.
+    pub(crate) fn empty(format: SampleFormat) -> Self {
+        Self::new(format, 0, Samples(0))
+    }
+
+    /// Scratch in `format` for `channels` channels of `frames` frames each, in
+    /// both directions. Allocates: control side.
+    pub(crate) fn new(format: SampleFormat, channels: usize, frames: Samples) -> Self {
+        fn shaped<T: Default + Clone>(channels: usize, frames: Samples) -> Channels<T> {
+            (0..channels)
+                .map(|_| vec![T::default(); frames.0].into_boxed_slice())
+                .collect()
+        }
         match format {
             SampleFormat::Float32 => Self::F32 {
-                input: Vec::new(),
-                output: Vec::new(),
+                input: shaped(channels, frames),
+                output: shaped(channels, frames),
             },
             SampleFormat::Float64 => Self::F64 {
-                input: Vec::new(),
-                output: Vec::new(),
+                input: shaped(channels, frames),
+                output: shaped(channels, frames),
             },
         }
     }
 
-    /// `(channels, frames)` the scratch holds now.
-    fn dims(&self) -> (usize, usize) {
-        fn of<T>(bufs: &[Vec<T>]) -> (usize, usize) {
-            (bufs.len(), bufs.first().map_or(0, Vec::len))
-        }
-        match self {
-            Self::F32 { input, .. } => of(input),
-            Self::F64 { input, .. } => of(input),
-        }
+    /// Scratch in `format` for the blocks `layout`'s slab holds: its widest
+    /// direction, at its per-channel room. Allocates: control side.
+    pub(crate) fn for_layout(format: SampleFormat, layout: &SlabLayout) -> Self {
+        Self::new(
+            format,
+            layout.input_channels().max(layout.output_channels()),
+            Samples(layout.samples_per_channel),
+        )
     }
 
-    /// Which format this scratch is currently allocated for.
-    fn format(&self) -> SampleFormat {
-        match self {
-            Self::F32 { .. } => SampleFormat::Float32,
-            Self::F64 { .. } => SampleFormat::Float64,
-        }
-    }
-
-    /// Grow to at least `(num_channels, samples)`; never shrink. A block uses
-    /// the first `samples` frames of each channel, so a shorter block after a
-    /// longer one needs nothing, and the scratch reserved at slab setup
-    /// ([`AudioPipeline::reserve`]) holds every block the session admits: the
-    /// audio thread never grows it.
-    fn resize(&mut self, num_channels: usize, samples: usize) {
-        fn reshape<T: Clone + Default>(bufs: &mut Vec<Vec<T>>, channels: usize, samples: usize) {
-            if bufs.len() >= channels && bufs.iter().all(|v| v.len() >= samples) {
-                return;
-            }
-            let samples = samples.max(bufs.first().map_or(0, Vec::len));
-            let channels = channels.max(bufs.len());
-            bufs.clear();
-            bufs.resize_with(channels, || vec![T::default(); samples]);
+    /// Whether a block of `frames` over `channels` channels fits.
+    pub(crate) fn fits(&self, channels: usize, frames: usize) -> bool {
+        fn holds<T>(bufs: &[Channel<T>], channels: usize, frames: usize) -> bool {
+            bufs.len() >= channels && bufs.iter().all(|chan| chan.len() >= frames)
         }
         match self {
             Self::F32 { input, output } => {
-                reshape(input, num_channels, samples);
-                reshape(output, num_channels, samples);
+                holds(input, channels, frames) && holds(output, channels, frames)
             }
             Self::F64 { input, output } => {
-                reshape(input, num_channels, samples);
-                reshape(output, num_channels, samples);
+                holds(input, channels, frames) && holds(output, channels, frames)
             }
         }
     }
@@ -198,12 +200,17 @@ pub(crate) struct AudioOutput {
     /// The block's audio was not published: its input slot was recycled, or an
     /// output channel was not written. The host reads it as silence.
     pub refused: bool,
+    /// Why the plugin failed the block, when it did: the caller hands it to
+    /// the control side, which logs and frees it.
+    pub failure: Option<PluginError>,
 }
 
 /// Driver for one audio block. Holds scratch across calls so the audio
-/// thread never allocates after warm-up.
+/// thread never allocates: the scratch and the plugin's output are built by
+/// the control side and installed whole ([`install_scratch`](Self::install_scratch),
+/// [`install_output`](Self::install_output)).
 pub(crate) struct AudioPipeline {
-    buffers: AudioBuffers,
+    scratch: Box<AudioScratch>,
     /// The plugin's non-audio outputs for the current block.
     ///
     /// Owned here, and handed to `Render::render` as an out-parameter,
@@ -213,35 +220,25 @@ pub(crate) struct AudioPipeline {
     ///
     /// Read back through [`midi_out`](Self::midi_out) after each
     /// [`process`](Self::process); it is cleared at the top of the next one.
-    plugin_output: ProcessOutput,
+    plugin_output: Box<ProcessOutput>,
     /// What the plugin said of itself at the end of the last block, as the
     /// reply carries it ([`status`](Self::status)).
     status: BlockStatus,
-    /// The point room `plugin_output`'s parameter queues were reserved with
-    /// ([`reserve_params`](Self::reserve_params)).
-    param_room: usize,
-    /// Blocks the plugin failed since the pipeline was built. A failed block
-    /// publishes nothing (the host reads silence) and the session goes on.
-    failed_blocks: u64,
+    /// Blocks the plugin failed. A failed block publishes nothing (the host
+    /// reads silence) and the session goes on.
+    failed_blocks: TallyWriter<u64>,
 }
 
 impl AudioPipeline {
-    /// An empty pipeline for `format`. The scratch buffers start zero-sized and
-    /// are shaped by the first block, so construction allocates nothing.
-    pub(crate) fn new(format: SampleFormat) -> Self {
+    /// A pipeline with no scratch and an empty output, counting the blocks the
+    /// plugin fails into `failed_blocks`. Control side.
+    pub(crate) fn new(failed_blocks: TallyWriter<u64>) -> Self {
         Self {
-            buffers: AudioBuffers::new(format),
-            plugin_output: ProcessOutput::default(),
+            scratch: Box::new(AudioScratch::empty(SampleFormat::Float32)),
+            plugin_output: Box::default(),
             status: BlockStatus::Continue,
-            param_room: 0,
-            failed_blocks: 0,
+            failed_blocks,
         }
-    }
-
-    /// Blocks the plugin failed since the pipeline was built.
-    #[cfg(all(test, any(feature = "vst3", feature = "clap")))]
-    pub(crate) fn failed_blocks(&self) -> u64 {
-        self.failed_blocks
     }
 
     /// The MIDI the plugin emitted during the most recent
@@ -265,53 +262,29 @@ impl AudioPipeline {
         self.plugin_output.midi_dropped()
     }
 
-    /// Reserves the plugin's parameter output for `queues` parameters of up
-    /// to `points` points each ([`ProcessOutput::reserve_params`]), so the
-    /// loaders' copy into it never grows. Called by `Session` on plugin load,
-    /// **not on the audio thread**: it allocates.
-    pub(crate) fn reserve_params(&mut self, queues: usize, points: usize) {
-        self.param_room = points;
-        self.plugin_output.reserve_params(queues, points);
-    }
-
-    /// Re-reserves the plugin's parameter output for `queues` parameters,
-    /// at the room it was reserved with, when it holds fewer queues: a
-    /// plugin whose parameter list grew after load. Called by `Session`'s
-    /// `drain_async_events` when the plugin says its list changed, which runs
-    /// **on the server's realtime audio-phase thread, between blocks**: a
-    /// growth allocates there, once per change; an unchanged or smaller list
-    /// does not.
-    pub(crate) fn fit_params(&mut self, queues: usize) {
-        if queues > self.plugin_output.param_changes.capacity() {
-            self.plugin_output.reserve_params(queues, self.param_room);
-        }
+    /// Installs `output`, the plugin's output reserved for its parameters
+    /// ([`ProcessOutput::reserve_params`]), and returns the one it replaces,
+    /// for the control side to free. Moves two boxes: allocation-free.
+    pub(crate) fn install_output(&mut self, output: Box<ProcessOutput>) -> Box<ProcessOutput> {
+        std::mem::replace(&mut self.plugin_output, output)
     }
 
     /// The parameter queues the plugin's output holds, for the session's
     /// tests of when it is re-reserved.
-    #[cfg(all(test, feature = "vst3"))]
+    #[cfg(test)]
     pub(crate) fn param_queues(&self) -> usize {
         self.plugin_output.param_changes.capacity()
     }
 
-    /// Reseat the scratch variant when the session's negotiated format changes.
-    ///
-    /// Called by `Session` on plugin load, and **not on the audio thread**: a
-    /// real change drops the old scratch and the next block re-allocates.
-    /// A no-op when the format already matches.
-    pub(crate) fn set_format(&mut self, format: SampleFormat) {
-        if self.buffers.format() != format {
-            let (channels, samples) = self.buffers.dims();
-            self.buffers = AudioBuffers::new(format);
-            self.buffers.resize(channels, samples);
-        }
+    /// Installs `scratch` and returns the one it replaces, for the control
+    /// side to free. Moves two boxes: allocation-free.
+    pub(crate) fn install_scratch(&mut self, scratch: Box<AudioScratch>) -> Box<AudioScratch> {
+        std::mem::replace(&mut self.scratch, scratch)
     }
 
-    /// Sizes the scratch for blocks of up to `samples` frames over
-    /// `channels` channels. Called by `Session` when the slab is set up,
-    /// **not on the audio thread**: it allocates, so that no block does.
-    pub(crate) fn reserve(&mut self, channels: usize, samples: usize) {
-        self.buffers.resize(channels, samples);
+    /// Whether the scratch holds a block of `frames` over `channels` channels.
+    pub(crate) fn fits(&self, channels: usize, frames: usize) -> bool {
+        self.scratch.fits(channels, frames)
     }
 
     /// Read input from `shm`, run `plugin`, write output back. Returns the
@@ -320,8 +293,8 @@ impl AudioPipeline {
     /// # Real-time
     ///
     /// Runs on the realtime audio thread and does not allocate: the scratch is
-    /// sized when the slab is set up ([`reserve`](Self::reserve)) and only
-    /// grows, the session refuses a block longer than that, and the slice
+    /// built for the slab by the control side ([`install_scratch`](Self::install_scratch))
+    /// and never grows, a block longer than it holds is refused, and the slice
     /// tables handed to the plugin are fixed stack arrays. Denormals are
     /// flushed for the duration of the block. Pinned by
     /// `tests::process_is_alloc_free` and
@@ -344,7 +317,7 @@ impl AudioPipeline {
     /// # Errors
     ///
     /// Never fails on the plugin's account: a block the plugin's `process`
-    /// fails is counted ([`failed_blocks`](Self::failed_blocks)), leaves its
+    /// fails is counted, leaves its
     /// MIDI empty and publishes nothing, so the host reads it as silence, and
     /// the server goes on to the next block. (An error out of here ends the
     /// server loop, which a licence hiccup or a refused preset load must not.)
@@ -375,7 +348,16 @@ impl AudioPipeline {
         // flat, bus-ordered input view handed to the plugin's `process` (the
         // host crate splits it back into per-bus `AudioBusBuffers`).
         let num_channels = total_in.max(total_out);
-        self.buffers.resize(num_channels, num_samples);
+        if !self.scratch.fits(num_channels, num_samples) {
+            // A block the scratch cannot hold reads silence; the render side
+            // checks this before it gets here (`RenderSide::block_fits`).
+            self.plugin_output.clear();
+            return Ok(AudioOutput {
+                latency_us: 0,
+                refused: true,
+                failure: None,
+            });
+        }
 
         // Flush denormals to zero for the duration of this block. A plugin
         // whose tail decays toward silence can otherwise emit denormalized
@@ -440,16 +422,17 @@ impl AudioPipeline {
             // Whether every output sample of the block is exactly zero: a
             // plugin's *sleep* is believed only over silence.
             let mut silent = true;
+            let mut failure = None;
             self.status = BlockStatus::Continue;
             let Self {
-                buffers,
+                scratch,
                 plugin_output,
                 failed_blocks,
                 ..
             } = self;
             plugin_output.clear();
-            match &mut *buffers {
-                AudioBuffers::F32 { input, output } => {
+            match &mut **scratch {
+                AudioScratch::F32 { input, output } => {
                     // Read every input bus's channels from this block's input slot.
                     // The flat order IS bus order — the host crate splits it back
                     // into per-bus `AudioBusBuffers`.
@@ -471,7 +454,8 @@ impl AudioPipeline {
                         plugin_output,
                     );
                     if let Err(error) = processed {
-                        note_failed_block(failed_blocks, &error);
+                        failed_blocks.add(1);
+                        failure = Some(error);
                         plugin_output.clear();
                         all_channels_written = false;
                     } else {
@@ -489,7 +473,7 @@ impl AudioPipeline {
                         }
                     }
                 }
-                AudioBuffers::F64 { input, output } => {
+                AudioScratch::F64 { input, output } => {
                     for (ch, chan) in input.iter_mut().enumerate().take(in_n) {
                         if inputs_ready {
                             let _ = shm.read_input_into::<f64>(seq, ch, &mut chan[..num_samples]);
@@ -507,7 +491,8 @@ impl AudioPipeline {
                         plugin_output,
                     );
                     if let Err(error) = processed {
-                        note_failed_block(failed_blocks, &error);
+                        failed_blocks.add(1);
+                        failure = Some(error);
                         plugin_output.clear();
                         all_channels_written = false;
                     } else {
@@ -578,6 +563,7 @@ impl AudioPipeline {
             Ok(AudioOutput {
                 latency_us: start.elapsed().as_micros() as u64,
                 refused: !published,
+                failure,
             })
         })
     }
@@ -608,24 +594,13 @@ fn block_midi(midi: &[WireMidi], frames: usize, out: &mut [UmpAt; MIDI_STACK_CAP
     n
 }
 
-/// Counts a block the plugin failed, and says so on the first and then on every
-/// 1024th: the line is rate-limited so a plugin that fails every block cannot
-/// turn the audio phase into a log writer. Nothing is built for a block that
-/// is not logged.
-fn note_failed_block(count: &mut u64, error: &tutti_plugin_types::PluginError) {
-    *count += 1;
-    if *count == 1 || count.is_multiple_of(1024) {
-        tracing::warn!("the plugin failed {} block(s), the latest: {error}", *count);
-    }
-}
-
-/// Renders one block of owned channel vecs through `plugin`. Allocation-free:
+/// Renders one block of the scratch's channels through `plugin`. Allocation-free:
 /// the slice tables are [`ChannelTable`]s, which is what makes this callable on
 /// the audio thread.
 fn render_block<S: Float>(
     plugin: &mut dyn Render,
-    inputs: &[Vec<S>],
-    outputs: &mut [Vec<S>],
+    inputs: &[Channel<S>],
+    outputs: &mut [Channel<S>],
     size: usize,
     ctx: &ProcessContext<'_>,
     out: &mut ProcessOutput,
@@ -649,51 +624,66 @@ mod tests {
 
     use tutti_plugin_types::{PluginTail, Samples};
 
-    #[test]
-    fn buffers_resize_allocates_channels_and_samples() {
-        let mut b = AudioBuffers::new(SampleFormat::Float32);
-        b.resize(2, 512);
-        match &b {
-            AudioBuffers::F32 { input, output } => {
-                assert_eq!(input.len(), 2);
-                assert_eq!(output.len(), 2);
-                assert!(input.iter().all(|v| v.len() == 512));
-                assert!(output.iter().all(|v| v.len() == 512));
-            }
-            _ => panic!("expected F32 variant"),
-        }
+    /// A pipeline whose scratch is sized for `shm`'s layout in `format`, as the
+    /// control side sizes the render thread's.
+    fn pipeline_for(shm: &SlabWriter, format: SampleFormat) -> AudioPipeline {
+        let mut pipeline = AudioPipeline::new(tutti_rt::tally().writer());
+        let _ =
+            pipeline.install_scratch(Box::new(AudioScratch::for_layout(format, shm.layout_ref())));
+        pipeline
     }
 
+    /// **The scratch holds the widest direction at the slab's room, in the
+    /// format's width, and a block fits it exactly up to those.**
     #[test]
-    fn buffers_resize_idempotent_on_same_shape() {
-        let mut b = AudioBuffers::new(SampleFormat::Float32);
-        b.resize(2, 512);
-        let ptr_in = match &b {
-            AudioBuffers::F32 { input, .. } => input[0].as_ptr(),
-            _ => unreachable!(),
+    fn scratch_is_the_slabs_widest_direction_at_its_room_in_its_format() {
+        let layout = SlabLayout::new(
+            512,
+            SampleFormat::Float64,
+            vec![ChannelLayout::STEREO],
+            vec![ChannelLayout::STEREO, ChannelLayout::MONO],
+        );
+        let scratch = AudioScratch::for_layout(SampleFormat::Float64, &layout);
+        let AudioScratch::F64 { input, output } = &scratch else {
+            panic!("the format is f64");
         };
-        b.resize(2, 512);
-        let ptr_in2 = match &b {
-            AudioBuffers::F32 { input, .. } => input[0].as_ptr(),
-            _ => unreachable!(),
-        };
-        assert_eq!(ptr_in, ptr_in2, "same-shape resize should not reallocate");
+        assert_eq!((input.len(), output.len()), (3, 3));
+        assert!(input.iter().chain(output.iter()).all(|c| c.len() == 512));
+        assert!(scratch.fits(3, 512));
+        assert!(!scratch.fits(4, 512), "one channel too wide");
+        assert!(!scratch.fits(3, 513), "one frame too long");
+        assert!(AudioScratch::empty(SampleFormat::Float32).fits(0, 0));
     }
 
+    /// **A block the scratch cannot hold is refused, never sized for**: the
+    /// pipeline has no way to grow its scratch, so an overlong block reads as
+    /// silence and publishes nothing.
     #[test]
-    fn buffers_reshape_grows() {
-        let mut b = AudioBuffers::new(SampleFormat::Float64);
-        b.resize(2, 256);
-        b.resize(4, 512);
-        match &b {
-            AudioBuffers::F64 { input, output } => {
-                assert_eq!(input.len(), 4);
-                assert_eq!(output.len(), 4);
-                assert!(input.iter().all(|v| v.len() == 512));
-                assert!(output.iter().all(|v| v.len() == 512));
-            }
-            _ => panic!("expected F64 variant"),
-        }
+    fn a_block_past_the_scratch_is_refused_not_grown_for() {
+        const N: usize = 64;
+        let layout = test_layout(
+            N,
+            SampleFormat::Float32,
+            &[ChannelLayout::STEREO],
+            &[ChannelLayout::STEREO],
+        );
+        let name = format!("tutti_past_scratch_{}", std::process::id());
+        let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
+        let mut shm = AudioSlab::open(name, layout).unwrap();
+        let mut pipeline = AudioPipeline::new(tutti_rt::tally().writer());
+        let mut plugin = NanPlugin {
+            meta: meta(&[2], &[2]),
+            fill: 0.25,
+        };
+        let block = AudioBlock {
+            seq: 1,
+            num_samples: N,
+            midi: &[],
+            extras: None,
+        };
+        let out = pipeline.process(&mut plugin, &mut shm, block).unwrap();
+        assert!(out.refused, "an empty scratch holds no block");
+        assert!(!pipeline.fits(2, N));
     }
 
     use tutti_plugin_ipc::SlabLayout;
@@ -777,7 +767,7 @@ mod tests {
         let _guard =
             AudioSlab::create(format!("{name}_{}", std::process::id()), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(format!("{name}_{}", std::process::id()), layout).unwrap();
-        let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
         let mut plugin = SaysPlugin {
             meta: meta(&[2], &[2]),
             fill,
@@ -931,7 +921,7 @@ mod tests {
         }
         host.publish(SEQ);
 
-        let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
         let mut plugin = EchoProbe {
             meta: meta(&[2, 1], &[2]),
             seen_inputs: std::cell::RefCell::new(Vec::new()),
@@ -1021,7 +1011,7 @@ mod tests {
             shm.write::<f32>(STALE_SEQ, ch, &[0.5f32; N]).unwrap();
         }
 
-        let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
         let mut plugin = EchoProbe {
             meta: meta(&[CH], &[CH]),
             seen_inputs: std::cell::RefCell::new(Vec::new()),
@@ -1062,7 +1052,7 @@ mod tests {
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
         let mut plugin = NanPlugin {
             meta: meta(&[CH], &[CH]),
             fill,
@@ -1097,7 +1087,7 @@ mod tests {
     }
 
     /// **A shorter block after a longer one does not allocate.** The scratch
-    /// is sized once, when the slab is set up ([`AudioPipeline::reserve`]),
+    /// is built once, when the slab is set up (by the control side),
     /// and a block uses its first frames. The
     /// reshape reallocated whenever the length changed, so a host's ragged
     /// final chunk freed and rebuilt every channel on the audio thread.
@@ -1114,8 +1104,7 @@ mod tests {
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
-        pipeline.reserve(2, N);
+        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
         let mut plugin = NanPlugin {
             meta: meta(&[2], &[2]),
             fill: 0.25,
@@ -1161,7 +1150,7 @@ mod tests {
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = AudioPipeline::new(format);
+        let mut pipeline = pipeline_for(&shm, format);
         // A finite-output fake; sanitize still runs, it just finds nothing.
         let mut plugin = NanPlugin {
             meta: meta(&[CH], &[CH]),
@@ -1228,7 +1217,7 @@ mod tests {
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
         let mut plugin = NanPlugin {
             meta: meta(&[2, 1], &[2]),
             fill: 0.25,
@@ -1336,7 +1325,7 @@ mod tests {
         let _guard = AudioSlab::create(name.clone(), layout.clone()).unwrap();
         let mut shm = AudioSlab::open(name, layout).unwrap();
 
-        let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
+        let mut pipeline = pipeline_for(&shm, SampleFormat::Float32);
         let block = || AudioBlock {
             seq: SEQ,
             num_samples: N,
@@ -1442,25 +1431,5 @@ mod tests {
                 copy(&mut out);
             }
         });
-    }
-
-    /// **A parameter list that grows after load gets its output reserved
-    /// again, at the load's room; one that shrinks keeps it.** A pipeline
-    /// reserved for 4 parameters at a room of 10, fitted to 8: it holds 8
-    /// queues and the budget for them at that room. Fitted to 2: unchanged.
-    #[test]
-    fn a_grown_parameter_list_is_reserved_again_at_the_loads_room() {
-        let mut pipeline = AudioPipeline::new(SampleFormat::Float32);
-        pipeline.reserve_params(4, 10);
-        assert_eq!(pipeline.plugin_output.param_changes.capacity(), 4);
-        pipeline.fit_params(8);
-        let changes = &pipeline.plugin_output.param_changes;
-        assert_eq!(changes.capacity(), 8);
-        assert_eq!(
-            changes.point_storage(),
-            ParameterChanges::point_budget(8, 10)
-        );
-        pipeline.fit_params(2);
-        assert_eq!(pipeline.plugin_output.param_changes.capacity(), 8);
     }
 }

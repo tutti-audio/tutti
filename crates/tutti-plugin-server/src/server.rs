@@ -137,7 +137,7 @@ impl PluginServer {
         drop(handshake);
 
         // Second connection: audio. Third: control.
-        let mut audio = listener.accept()?;
+        let mut audio = listener.accept_audio()?;
         audio.send(&BridgeMessage::Ready {
             protocol_version: PROTOCOL_VERSION,
         })?;
