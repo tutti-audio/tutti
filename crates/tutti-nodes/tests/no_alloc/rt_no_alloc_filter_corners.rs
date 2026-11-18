@@ -26,6 +26,7 @@
 //! 1.001). The sweep covers the whole range: a split at 1 Hz, at the cap, a square between
 //! them on every grid point, and values the node holds or clamps.
 
+use tutti_buffers::Float;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{CrossoverNode, LadderFilterNode, LadderType};
@@ -39,7 +40,7 @@ const NAN: f32 = f32::NAN;
 const INF: f32 = f32::INFINITY;
 
 /// A lane's frames: `lo` to `hi` over the block, then each hostile shape.
-fn lane(shape: usize, lo: f32, hi: f32, bad: f32) -> Vec<f32> {
+fn lane<F: Float>(shape: usize, lo: f32, hi: f32, bad: f32) -> Vec<F> {
     (0..FRAMES)
         .map(|i| match shape {
             0 => lo + (hi - lo) * i as f32 / (FRAMES - 1) as f32,
@@ -62,18 +63,19 @@ fn lane(shape: usize, lo: f32, hi: f32, bad: f32) -> Vec<f32> {
                 }
             }
         })
+        .map(F::from_f32)
         .collect()
 }
 const SHAPES: usize = 7;
 
-fn fill(rig: &mut Direct<impl Node>) {
+fn fill<F: Float>(rig: &mut Direct<impl Node<F>, F>) {
     for (n, c) in rig.inputs_mut().iter_mut().enumerate() {
         let c = c.into_samples_mut();
         for (i, x) in c.iter_mut().enumerate() {
             *x = match (i + n) % 5 {
-                0 | 1 => 0.5,
-                2 => 0.0,
-                _ => -0.5,
+                0 | 1 => F::lit(0.5),
+                2 => F::ZERO,
+                _ => F::lit(-0.5),
             };
         }
     }
@@ -82,30 +84,32 @@ fn fill(rig: &mut Direct<impl Node>) {
 /// Runs `blocks` blocks of the lengths in [`BLOCKS`], `between(i)` first (the cells move),
 /// resetting at one block in 53 and preparing at one in 59, and returns the output's
 /// peak, or `None` if a sample was not finite.
-fn walk<N: Node>(
-    rig: &mut Direct<N>,
+fn walk<F: Float, N: Node<F>>(
+    rig: &mut Direct<N, F>,
     rate: SampleRate,
     blocks: usize,
     outputs: usize,
     mut between: impl FnMut(usize),
-) -> Option<f32> {
-    let (mut peak, mut finite) = (0.0f32, true);
+) -> Option<f64> {
+    let (mut peak, mut finite) = (0.0f64, true);
     assert_no_alloc::assert_no_alloc(|| {
         for i in 0..blocks {
             between(i);
             if i % 53 == 52 {
-                rig.node.reset();
+                Node::<F>::reset(&mut *rig.node);
             }
             if i % 59 == 58 {
-                rig.node
-                    .prepare(&Prepare::new(rate, MaxBlock::of(Samples(FRAMES))));
+                Node::<F>::prepare(
+                    &mut *rig.node,
+                    &Prepare::new(rate, MaxBlock::of(Samples(FRAMES))),
+                );
             }
             rig.set_block_len(BLOCKS[i % BLOCKS.len()]);
             rig.block();
             for c in 0..outputs {
                 for &s in rig.output().plane(c).samples() {
                     finite &= s.is_finite();
-                    peak = peak.max(s.abs());
+                    peak = peak.max(s.to_f64().abs());
                 }
             }
         }
@@ -146,7 +150,7 @@ fn the_ladder_corners_are_allocation_free_with_every_control_moving() {
                             Resonance(0.5),
                         );
                         let set = node.param_set();
-                        let mut rig = Direct::new(node, SR, FRAMES);
+                        let mut rig = Direct::<_, $f>::with_format(node, SR, FRAMES);
                         fill(&mut rig);
                         rig.feed(0, Some(&lane(shape, 1.0, 11_900.0, 5_000.0)));
                         rig.feed(1, Some(&lane(shape, 0.0, 1.0, 9.0)));
@@ -186,7 +190,7 @@ fn the_ladder_at_a_held_extreme_cutoff_is_allocation_free_and_bounded() {
         } * 1.001;
         for cutoff in [1.0e9f64, 23_900.0, 1.0] {
             for shape in 0..SHAPES {
-                let node = LadderFilterNode::<f64>::with_channels(
+                let node = LadderFilterNode::<f32>::with_channels(
                     ChannelLayout::STEREO,
                     ty,
                     Hz(cutoff),
@@ -242,7 +246,7 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
                 }
             };
             for shape in 0..SHAPES {
-                let node = LadderFilterNode::<f64>::with_channels(
+                let node = LadderFilterNode::<f32>::with_channels(
                     ChannelLayout::STEREO,
                     ty,
                     Hz(1_000.0),
@@ -262,7 +266,7 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
                 let peak =
                     peak.unwrap_or_else(|| panic!("{ty:?} at {rate:?} lanes {shape}: not finite"));
                 assert!(
-                    peak <= bound,
+                    peak <= f64::from(bound),
                     "{ty:?} at {rate:?} lanes {shape}: {peak} over {bound}"
                 );
             }
@@ -274,7 +278,7 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
 /// cells), then walked with its own cells moving.
 #[test]
 fn a_forked_ladder_and_crossover_are_allocation_free() {
-    let ladder = LadderFilterNode::<f64>::new(LadderType::HP24, Hz(800.0), Resonance(0.9));
+    let ladder = LadderFilterNode::<f32>::new(LadderType::HP24, Hz(800.0), Resonance(0.9));
     let fork = ladder.fork_fresh();
     let set = fork.param_set();
     let mut rig = Direct::new(fork, SR, FRAMES);
@@ -310,15 +314,15 @@ const GRID: usize = 16;
 
 /// The crossover's lanes: the shapes of [`lane`], and a square that switches between the floor
 /// and the cap at every grid point (`SHAPES`).
-fn crossover_lane(shape: usize) -> Vec<f32> {
+fn crossover_lane<F: Float>(shape: usize) -> Vec<F> {
     if shape == SHAPES {
         (0..FRAMES)
             .map(|i| {
-                if (i / GRID).is_multiple_of(2) {
+                F::from_f32(if (i / GRID).is_multiple_of(2) {
                     1.0
                 } else {
                     23_952.0
-                }
+                })
             })
             .collect()
     } else {
@@ -361,7 +365,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                 })
                 .unwrap_or_else(|| panic!("{bands} bands width {width} lanes {shape}: not finite"));
                 assert!(
-                    f64::from(peak) <= bound,
+                    peak <= bound,
                     "{bands} bands width {width} lanes {shape}: {peak} over {bound}"
                 );
             }
@@ -408,7 +412,10 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
                 );
             })
             .unwrap_or_else(|| panic!("{set:?} lanes {shape}: not finite"));
-            assert!(peak <= bound, "{set:?} lanes {shape}: {peak} over {bound}");
+            assert!(
+                peak <= f64::from(bound),
+                "{set:?} lanes {shape}: {peak} over {bound}"
+            );
         }
     }
 }

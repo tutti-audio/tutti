@@ -4,6 +4,8 @@
 //! independent biquad in `oracle_biquad.rs`; what moves cells and lanes inside a
 //! block is held by `filter_block_independence.rs`.
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive_input, prepared};
 use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition};
@@ -102,7 +104,7 @@ fn a_bell_has_its_gain_at_the_centre_and_unity_far_away() {
 #[test]
 fn a_high_shelf_is_unity_below_and_its_gain_above() {
     let shelf =
-        |gain: f64| EqBandNode::<f64>::new(SvfType::HighShelf, Hz(4_000.0), Q(0.8), Db(gain));
+        |gain: f64| EqBandNode::<f32>::new(SvfType::HighShelf, Hz(4_000.0), Q(0.8), Db(gain));
     near("below", gains_db(shelf(8.0), 100.0, 0.1)[0], 0.0, 0.1);
     near("above", gains_db(shelf(8.0), 18_000.0, 0.1)[0], 8.0, 0.6);
     near(
@@ -119,7 +121,7 @@ fn a_high_shelf_is_unity_below_and_its_gain_above() {
 #[test]
 fn a_ladder_low_pass_has_unity_dc_a_quarter_at_cutoff_and_falls_24_db_an_octave() {
     let ladder = || {
-        LadderFilterNode::<f64>::with_channels(
+        LadderFilterNode::<f32>::with_channels(
             ChannelLayout::STEREO,
             LadderType::LP24,
             Hz(500.0),

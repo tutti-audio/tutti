@@ -1,7 +1,7 @@
 //! One reader for the cells of every [`KernelNode`](crate::KernelNode).
 //!
 //! A kernel writes a [`ControlSet`]: its addresses, and the conversion between its
-//! `Controls` and the `f32`s the ports carry. [`Params`] is the one reader over it,
+//! `Controls` and the `f32` cells a port's lanes (the graph's float) reach. [`Params`] is the one reader over it,
 //! with one rule for every control: the lane's value at
 //! the solve frame when a lane drives it, else a glide from the controls last
 //! designed to the cell's value, each read through [`LastGood`]. Sanitising
@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
+use tutti_buffers::Float;
 use tutti_dsp::{GAIN_GLIDE, Glide};
 use tutti_graph::{Io, ParamSetBuilder};
 use tutti_types::AtomicF32;
@@ -175,7 +176,7 @@ pub trait HasControl<const P: u16> {
 pub trait HasControls<const P: u16>: HasControl<P> {}
 
 /// Writes a kernel's [`ControlSet`] from its `Controls` fields, once: the
-/// addresses, the conversion to the `f32`s the ports carry and back, and the
+/// addresses, the conversion to the `f32` cells and back, and the
 /// unit of each control ([`HasControl`]). The unit a row states is checked
 /// against the field's own type (`flatten` reads it as that unit), so a
 /// mismatch does not compile.
@@ -433,7 +434,8 @@ impl<S: ControlSet> Params<S> {
 
     /// Each control's lowest and highest value in the block (the cell's where no
     /// lane drives it), or `None` when no lane does.
-    fn extremes(&self, io: &Io<'_>) -> Option<[[f32; MAX_CONTROLS]; 2]> {
+    // The lanes narrow to the cell width, `f32`, as `read` does, until the cells are `f64`.
+    fn extremes<G: Float>(&self, io: &Io<'_, G>) -> Option<[[f32; MAX_CONTROLS]; 2]> {
         let mut out = [[0.0; MAX_CONTROLS]; 2];
         let mut driven = false;
         for (k, cell) in self.cells.iter().enumerate() {
@@ -443,7 +445,7 @@ impl<S: ControlSet> Params<S> {
             let fold = |pick: fn(f32, f32) -> f32| {
                 lane.into_iter()
                     .flatten()
-                    .copied()
+                    .map(|v| v.to_f32())
                     .filter(|v| v.is_finite())
                     .fold(base, pick)
             };
@@ -492,7 +494,7 @@ impl<S: ControlSet> Params<S> {
     /// [`ControlRead::Glide`] cell is its glide at that frame ([`begin`](Self::begin)),
     /// a [`ControlRead::Fast`] control is its cell whatever its port carries, and a
     /// [`ControlRead::Whole`] one is its cell.
-    pub(crate) fn read(&mut self, io: &Io<'_>, at: At) -> S::Controls {
+    pub(crate) fn read<G: Float>(&mut self, io: &Io<'_, G>, at: At) -> S::Controls {
         let n = self.cells.len();
         let mut value = [0.0; MAX_CONTROLS];
         for (k, v) in value[..n].iter_mut().enumerate() {
@@ -503,7 +505,9 @@ impl<S: ControlSet> Params<S> {
             };
             *v = match (lane, control.read) {
                 (Some(lane), _) => {
-                    let x = lane[at.frame];
+                    // A lane value narrows to the cell width, `f32`: a value outside `f32`'s range
+                    // reads as non-finite (and holds the last good one) until the cells are `f64`.
+                    let x = lane[at.frame].to_f32();
                     self.good[k].read_if(x, control.accepts(x))
                 }
                 (None, ControlRead::Glide) => {
@@ -521,7 +525,7 @@ impl<S: ControlSet> Params<S> {
 
     /// Whether a port drives a control, so the controls can differ between the frames
     /// of the block.
-    pub(crate) fn driven(&self, io: &Io<'_>) -> bool {
+    pub(crate) fn driven<G: Float>(&self, io: &Io<'_, G>) -> bool {
         (0..self.cells.len())
             .any(|k| self.controls[k].read != ControlRead::Fast && io.param(k).frames().is_some())
     }
@@ -530,7 +534,7 @@ impl<S: ControlSet> Params<S> {
     /// slow control ([`ParamInput::corners`](tutti_graph::ParamInput::corners): where
     /// the trajectory a port delivers changes piece), if any. A fast control is read
     /// every frame and needs none.
-    pub(crate) fn corner_from(&self, io: &Io<'_>, from: usize) -> Option<usize> {
+    pub(crate) fn corner_from<G: Float>(&self, io: &Io<'_, G>, from: usize) -> Option<usize> {
         (0..self.cells.len())
             .filter(|&k| self.controls[k].read != ControlRead::Fast)
             .filter_map(|k| {
@@ -545,7 +549,7 @@ impl<S: ControlSet> Params<S> {
     /// [`ControlLanes`](crate::ControlLanes): the port's frames in the port's own unit, `None` where
     /// nothing drives it. They are the block's, so a caller slices them by the frames it
     /// renders.
-    pub(crate) fn lanes<'a>(&self, io: &Io<'a>) -> [Option<&'a [f32]>; MAX_LANES] {
+    pub(crate) fn lanes<'a, G: Float>(&self, io: &Io<'a, G>) -> [Option<&'a [G]>; MAX_LANES] {
         let mut lanes = [None; MAX_LANES];
         for (lane, &k) in lanes.iter_mut().zip(&self.fast[..self.fast_len]) {
             *lane = io.param(k).frames();
@@ -555,7 +559,7 @@ impl<S: ControlSet> Params<S> {
 
     /// The controls that ring longest among the values a modulated port takes anywhere
     /// in the block, or `None` when nothing is modulated.
-    pub(crate) fn longest(&self, io: &Io<'_>) -> Option<S::Controls> {
+    pub(crate) fn longest<G: Float>(&self, io: &Io<'_, G>) -> Option<S::Controls> {
         let [lowest, highest] = self.extremes(io)?;
         let n = self.cells.len();
         Some(self.set.longest(

@@ -39,7 +39,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
     vec![
         (
             "svf",
-            Box::new(SvfFilterNode::<f64>::new(
+            Box::new(SvfFilterNode::<f32>::new(
                 SvfType::LowPass,
                 Hz(1_000.0),
                 Q(0.707),
@@ -47,7 +47,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "ladder",
-            Box::new(LadderFilterNode::<f64>::new(
+            Box::new(LadderFilterNode::<f32>::new(
                 LadderType::LP24,
                 Hz(1_000.0),
                 Resonance(0.5),

@@ -59,7 +59,7 @@ units! {
             Threshold => Db, Ratio => CompressionRatio, Attack => Seconds, Release => Seconds,
             GainDb => Db
         }
-        tutti_nodes::DynamicEqNode {
+        tutti_nodes::DynamicEqNode<f32> {
             Threshold => Db, Knee => Db, Ratio => CompressionRatio, Attack => Seconds,
             Release => Seconds, Range => Db, Cutoff => Hz, Q => Q
         }
@@ -73,32 +73,32 @@ units! {
         tutti_nodes::LimiterNode<f64> { Threshold => Db, Ceiling => Db, Release => Seconds }
         tutti_nodes::BrickwallLimiterNode<f32> { Ceiling => Db }
         tutti_nodes::BrickwallLimiterNode<f64> { Ceiling => Db }
-        tutti_nodes::DistortionNode { Drive => Drive }
-        tutti_nodes::BitCrusherNode { BitDepth => BitDepth, HoldFactor => HoldFactor }
-        tutti_nodes::EnvelopeFilterNode {
+        tutti_nodes::DistortionNode<f32> { Drive => Drive }
+        tutti_nodes::BitCrusherNode<f32> { BitDepth => BitDepth, HoldFactor => HoldFactor }
+        tutti_nodes::EnvelopeFilterNode<f32> {
             Cutoff => Hz, Q => Q, Attack => Seconds, Release => Seconds, Semitones => Semitones
         }
-        tutti_nodes::TransientShaperNode { GainDb => Db }
+        tutti_nodes::TransientShaperNode<f32> { GainDb => Db }
         tutti_nodes::BusStripNode { Volume => Amplitude, Balance => Balance }
-        tutti_nodes::CrossoverNode { Cutoff => Hz }
-        tutti_nodes::MultibandCompressorNode {
+        tutti_nodes::CrossoverNode<f32> { Cutoff => Hz }
+        tutti_nodes::MultibandCompressorNode<f32> {
             Cutoff => Hz, Threshold => Db, Knee => Db, Ratio => CompressionRatio,
             Attack => Seconds, Release => Seconds, GainDb => Db, Bypass => bool, Solo => bool
         }
-        tutti_nodes::DelayNode {
+        tutti_nodes::DelayNode<f32> {
             DelayTime => Seconds, Feedback => Feedback, CrossFeedback => Feedback
         }
-        tutti_nodes::ModDelayNode { Rate => Hz, Depth => Seconds, Feedback => Feedback }
-        tutti_nodes::PhaserNode { Rate => Hz, Depth => Depth, Feedback => Feedback }
+        tutti_nodes::ModDelayNode<f32> { Rate => Hz, Depth => Seconds, Feedback => Feedback }
+        tutti_nodes::PhaserNode<f32> { Rate => Hz, Depth => Depth, Feedback => Feedback }
         tutti_nodes::LfoNode { Depth => Depth, Rate => Hz }
         tutti_nodes::OscillatorNode { Frequency => Hz, Volume => Amplitude }
-        tutti_nodes::FreeverbNode { RoomSize => Mix, Damping => Mix }
+        tutti_nodes::FreeverbNode<f32> { RoomSize => Mix, Damping => Mix }
         tutti_nodes::ConvolverNode { Volume => Amplitude }
-        tutti_nodes::PlateReverbNode {
+        tutti_nodes::PlateReverbNode<f32> {
             Decay => Seconds, Damping => Mix, DelayTime => Seconds, Cutoff => Hz, Depth => Depth,
             Diffusion => Mix
         }
-        tutti_nodes::FdnNode {
+        tutti_nodes::FdnNode<f32> {
             Decay => Seconds, RoomSize => Mix, Diffusion => Mix, DelayTime => Seconds,
             Depth => Depth, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db, Freeze => bool
         }

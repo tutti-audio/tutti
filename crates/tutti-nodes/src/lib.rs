@@ -111,7 +111,7 @@
 //! // A lowpass alone in a graph, fed by the graph's input. The filter is a
 //! // graph node: inserted, it hands back its `ParamSet` — cutoff, Q and
 //! // gain by `UnitParam` — and the graph prepares it at the graph's rate.
-//! let filter = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(800.0), Q(0.707));
+//! let filter = SvfFilterNode::new(SvfType::LowPass, Hz(800.0), Q(0.707));
 //! let mut solo = Solo::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
 //! let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 //!
@@ -203,10 +203,10 @@
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
 //!   [`TiltFilterNode`], [`EnvelopeFilterNode`]; the coefficient solvers
 //!   [`SvfCoeffs::new`](tutti_dsp::SvfCoeffs::new) and
-//!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); the `f32`/`f64` state type
-//!   is `tutti_buffers::Float` with [`Lanes`].
+//!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); a node runs in the float of the
+//!   graph it is inserted in (`tutti_buffers::Float` with [`Lanes`]).
 //! - Crossover: [`CrossoverNode`], over `tutti_dsp::CrossoverBank`, a 2 to 6 band
-//!   Linkwitz-Riley 4th-order split (`f64` state, solved on the stream's 16-frame grid), each
+//!   Linkwitz-Riley 4th-order split (solved on the stream's 16-frame grid), each
 //!   crossover frequency an indexed [`Cutoff`](tutti_units::UnitParam::Cutoff) param, with
 //!   [`CrossoverError`].
 //! - Delay: [`DelayNode`] over `tutti_dsp::DelayBank`, built to a [`DelayLayout`], with
@@ -245,6 +245,9 @@ mod params;
 mod ramp;
 mod tail_clock;
 
+// Tests of every kernel node in a graph of `f64`.
+#[cfg(test)]
+mod f64_graph;
 // Rendering helpers for the width-generic nodes' unit tests.
 #[cfg(test)]
 mod test_support;
