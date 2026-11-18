@@ -466,7 +466,7 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     ///
     /// What a block does to pass through code written for one width (a plugin
     /// format's ABI) while it is generic over the graph's. `T` names the shape
-    /// of `x` ([`OverFloat`]); [`InputOutput::by_width`] is the usual caller.
+    /// of `x` ([`OverFloat`]); [`InputOutput::by_width`](crate::InputOutput::by_width) is the usual caller.
     #[must_use]
     fn by_width<T: OverFloat>(x: T::At<Self>) -> ByWidth<T>;
 }

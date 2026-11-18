@@ -14,7 +14,7 @@
 //! [`NodeControls::block_losses`](crate::NodeControls::block_losses)).
 //!
 //! A block is one [`Processor::process`]: the graph's channel slices as an
-//! [`InputOutput`](tutti_buffers::InputOutput), the block's MIDI, parameter chunk and transport as a
+//! `InputOutput` (`tutti-buffers`), the block's MIDI, parameter chunk and transport as a
 //! [`ProcessContext`], and a [`ProcessOutput`] the client owns and clears each
 //! block. A block is allocation-free in steady state (verified by the
 //! `assert_no_alloc` test in `tests/`).
