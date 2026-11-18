@@ -8,8 +8,8 @@
 //! input order. A 2 by 2 matrix is true stereo, an N by M matrix is an ambisonic response
 //! set, and a diagonal one is the per-channel convolution.
 
-use tutti_buffers::{Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::{Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_units::Samples;
 
 use super::Convolver;

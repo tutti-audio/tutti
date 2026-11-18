@@ -35,8 +35,8 @@
 //! The bank has no latency (the detector is on the signal and the key, never ahead of them).
 //! Its tail is the bell's ring-out, which follows the Q.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds};
 
 use super::curves::{gain_reduction, level_db, upward_gain_lift};
