@@ -47,7 +47,7 @@ fn make_reader_at(samples: &[(f32, f32)], start: u64) -> (SharedReader, tutti_rt
     writer.reset(start);
     writer.set_play(start);
     let flat: Vec<f32> = samples.iter().flat_map(|&(l, r)| [l, r]).collect();
-    writer.push_interleaved(&flat);
+    writer.push_interleaved(&flat).expect("the ring\'s width");
     (reader, pos)
 }
 
@@ -387,7 +387,9 @@ fn a_stopped_clock_silences_a_fork() {
 fn a_severed_copy_holds_no_live_reader() {
     let (mut writer, ring, pos) =
         RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 4_096, 2u16);
-    writer.push_interleaved(&[0.5; 2 * 1_000]);
+    writer
+        .push_interleaved(&[0.5; 2 * 1_000])
+        .expect("the ring\'s width");
     let state = Arc::new(Cells::new());
     let mut live = DiskVoice::new(
         DiskSource::new(ring, pos, Arc::clone(&state)),
@@ -714,7 +716,7 @@ fn wide_clip(width: usize) -> DiskVoice {
     let flat: Vec<f32> = (AT..AT + 2_000)
         .flat_map(|k| (0..width).map(move |c| wide_value(k, c)))
         .collect();
-    writer.push_interleaved(&flat);
+    writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
     let inner = DiskSource::new(reader, pos, Arc::clone(&state));
     DiskVoice::new(
@@ -812,7 +814,7 @@ fn placed_clip(topology: tutti_types::ChannelTopology) -> DiskVoice {
     let flat: Vec<f32> = (AT..AT + 2_000)
         .flat_map(|k| (0..width).map(move |c| wide_value(k, c)))
         .collect();
-    writer.push_interleaved(&flat);
+    writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
     let place = Place::for_topology(reader.topology(), frame).expect("a test ring places");
     let control = reader.control_reader();
@@ -1111,7 +1113,7 @@ fn make_wide_reader(frames: &[f32], channels: usize) -> (SharedReader, tutti_rt:
         frames.len() / channels + 64,
         ChannelLayout::try_from(channels).expect("a test width is small"),
     );
-    writer.push_interleaved(frames);
+    writer.push_interleaved(frames).expect("the ring\'s width");
     (reader, pos)
 }
 
@@ -1497,7 +1499,7 @@ fn a_skipped_block_forgets_the_fade_and_the_last_position() {
     RegionBuffer::place(&mut writer, AT);
     let from = writer.window().0;
     let flat: Vec<f32> = (from..from + 2_000).map(|k| k as f32).collect();
-    writer.push_interleaved(&flat);
+    writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
     let inner = DiskSource::new(reader, pos, Arc::clone(&state));
     let mut voice = DiskVoice::new(
@@ -1549,7 +1551,7 @@ fn a_skipped_block_releases_the_ring_to_the_writer() {
     writer.reset(AT);
     writer.set_play(AT);
     let flat: Vec<f32> = (AT..AT + 2_000).map(|k| k as f32).collect();
-    writer.push_interleaved(&flat);
+    writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
     let inner = DiskSource::new(reader, pos, Arc::clone(&state));
     let mut voice = DiskVoice::new(
@@ -1581,12 +1583,14 @@ fn a_skipped_block_releases_the_ring_to_the_writer() {
     writer.reset(AGAIN);
     writer.set_play(AGAIN);
     let more: Vec<f32> = (AGAIN..AGAIN + 200).map(|k| k as f32).collect();
-    let first = writer.push_interleaved(&more);
+    let first = writer.push_interleaved(&more).expect("the ring\'s width");
     // Held at the first slot the last block read: 26 143 = 22 047 + 4 096.
     assert_eq!(first.get(), 143, "the unacknowledged claim holds the write");
     t.set_rolling(false);
     assert!(!run(&mut voice), "a stopped block is skipped");
-    let rest = writer.push_interleaved(&more[first.get()..]);
+    let rest = writer
+        .push_interleaved(&more[first.get()..])
+        .expect("the ring\'s width");
     assert_eq!(rest.get(), 200 - 143, "the skipped block released the ring");
 }
 
