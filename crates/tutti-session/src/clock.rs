@@ -30,7 +30,7 @@ pub type OfflineSession<K = &'static str, F = f32> = crate::Session<K, Offline<F
 ///     build();
 /// }
 /// ```
-pub type SystemSession<K = &'static str> = crate::Session<K, SystemClock>;
+pub type SystemSession<K = &'static str, F = f32> = crate::Session<K, SystemClock<F>>;
 
 use std::marker::PhantomData;
 
@@ -111,7 +111,7 @@ pub trait Clock: sealed::Sealed + Sized + 'static {
 /// [`faults`](crate::Session::faults), which `Session::update` reports as
 /// [`SessionEvent::Fault`](crate::SessionEvent::Fault), and the listing of
 /// the host's output devices.
-pub trait RealTime: Clock<Float = f32, Running: sealed::Streaming> {}
+pub trait RealTime: Clock<Running: sealed::Streaming> {}
 
 /// The clock of a session the app steps: the host pulls each block with
 /// [`Session::render`](crate::Session::render), from a game's or a plugin's own
@@ -143,22 +143,64 @@ impl<F: SessionFloat> Default for Offline<F> {
 /// The clock of a session an OS timer thread steps
 /// ([`SessionBuilder::system_clock`](crate::SessionBuilder::system_clock)): no
 /// sound card, for an app that plays MIDI.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SystemClock;
+pub struct SystemClock<F: SessionFloat = f32>(PhantomData<fn() -> F>);
+
+impl<F: SessionFloat> Clone for SystemClock<F> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<F: SessionFloat> Copy for SystemClock<F> {}
+
+impl<F: SessionFloat> std::fmt::Debug for SystemClock<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SystemClock")
+    }
+}
+
+impl<F: SessionFloat> Default for SystemClock<F> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
 /// The clock of a session a sound card's callback steps
 /// ([`SessionBuilder::device`](crate::SessionBuilder::device)): the device sets
 /// the rate, the width and the callback size.
 #[cfg(feature = "device")]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DeviceClock;
+pub struct DeviceClock<F: SessionFloat = f32>(PhantomData<fn() -> F>);
+
+#[cfg(feature = "device")]
+impl<F: SessionFloat> Clone for DeviceClock<F> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+#[cfg(feature = "device")]
+impl<F: SessionFloat> Copy for DeviceClock<F> {}
+
+#[cfg(feature = "device")]
+impl<F: SessionFloat> std::fmt::Debug for DeviceClock<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeviceClock")
+    }
+}
+
+#[cfg(feature = "device")]
+impl<F: SessionFloat> Default for DeviceClock<F> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
 impl<F: SessionFloat> sealed::Sealed for Offline<F> {}
-impl sealed::Sealed for SystemClock {}
+impl<F: SessionFloat> sealed::Sealed for SystemClock<F> {}
 #[cfg(feature = "testing")]
 impl<F: SessionFloat> sealed::Sealed for Detached<F> {}
 #[cfg(feature = "device")]
-impl sealed::Sealed for DeviceClock {}
+impl<F: SessionFloat> sealed::Sealed for DeviceClock<F> {}
 
 /// What an offline session holds: the engine its host pulls blocks from.
 #[derive(Debug)]
@@ -209,17 +251,17 @@ pub struct DetachedGraph;
 /// What a session on the system clock holds: the stream the timer thread runs
 /// the callback on. Dropping the session stops the thread.
 #[derive(Debug)]
-pub struct SystemEngine {
+pub struct SystemEngine<F: SessionFloat = f32> {
     /// The stream's host. Out of its slot only while a clock switch runs, which
     /// puts it back before the switch returns.
-    pub(crate) host: Option<tutti_engine::StreamHost>,
+    pub(crate) host: Option<tutti_engine::StreamHost<F>>,
     /// The platform host a switch to the sound card opens the device on.
     #[cfg(feature = "device")]
     pub(crate) audio_host: tutti_cpal::AudioHost,
 }
 
-impl SystemEngine {
-    pub(crate) fn host(&self) -> &tutti_engine::StreamHost {
+impl<F: SessionFloat> SystemEngine<F> {
+    pub(crate) fn host(&self) -> &tutti_engine::StreamHost<F> {
         self.host
             .as_ref()
             .expect("the stream host is in its slot except while a clock switch runs")
@@ -235,40 +277,40 @@ impl<F: SessionFloat> Clock for Offline<F> {
 
 impl<F: SessionFloat> sealed::Running for OfflineEngine<F> {}
 
-impl Clock for SystemClock {
+impl<F: SessionFloat> Clock for SystemClock<F> {
     type Config = BlockConfig;
     type Dates = ();
-    type Running = SystemEngine;
-    type Float = f32;
+    type Running = SystemEngine<F>;
+    type Float = F;
 }
 
-impl RealTime for SystemClock {}
+impl<F: SessionFloat> RealTime for SystemClock<F> {}
 
-impl sealed::Running for SystemEngine {
+impl<F: SessionFloat> sealed::Running for SystemEngine<F> {
     fn stream(&self) -> Option<&OutputStream> {
         Some(self.host().stream())
     }
 }
 
-impl sealed::Streaming for SystemEngine {
+impl<F: SessionFloat> sealed::Streaming for SystemEngine<F> {
     fn output_stream(&self) -> &OutputStream {
         self.host().stream()
     }
 }
 
 #[cfg(feature = "device")]
-impl Clock for DeviceClock {
+impl<F: SessionFloat> Clock for DeviceClock<F> {
     type Config = tutti_cpal::DeviceSelector;
     type Dates = ();
-    type Running = crate::device::DeviceHandle;
-    type Float = f32;
+    type Running = crate::device::DeviceHandle<F>;
+    type Float = F;
 }
 
 #[cfg(feature = "device")]
-impl RealTime for DeviceClock {}
+impl<F: SessionFloat> RealTime for DeviceClock<F> {}
 
 #[cfg(feature = "device")]
-impl sealed::Running for crate::device::DeviceHandle {
+impl<F: SessionFloat> sealed::Running for crate::device::DeviceHandle<F> {
     fn stream(&self) -> Option<&OutputStream> {
         Some(self.device().output_stream())
     }
@@ -279,7 +321,7 @@ impl sealed::Running for crate::device::DeviceHandle {
 }
 
 #[cfg(feature = "device")]
-impl sealed::Streaming for crate::device::DeviceHandle {
+impl<F: SessionFloat> sealed::Streaming for crate::device::DeviceHandle<F> {
     fn output_stream(&self) -> &OutputStream {
         self.device().output_stream()
     }

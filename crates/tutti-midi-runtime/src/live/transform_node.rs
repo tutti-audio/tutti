@@ -26,6 +26,7 @@
 //! no state of the notes: an offline render starts its clip from the top.
 
 use std::num::NonZeroU32;
+use tutti_buffers::Float;
 use tutti_graph::{
     Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Losses,
     Node, NodeParts, Offset, Prepare, Shape, Status, UmpAt, note_off_room,
@@ -165,7 +166,7 @@ impl tutti_rt::Reclaim for MpeTransformControls {
     }
 }
 
-impl Node for MpeTransformNode {
+impl<F: Float> Node<F> for MpeTransformNode {
     /// No audio; one event input and one event output of the prepared capacity:
     /// [`CLIP_EVENT_DENSITY`] per frame, which is what a clip's port holds, so
     /// a clip's events pass whole (a fan-out may reach past it, and is counted).
@@ -185,7 +186,7 @@ impl Node for MpeTransformNode {
         }
     }
 
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let requested = *self.request.lend();
         let mut staging = Staging::new(&mut self.out, self.capacity.get() as usize);
         // A new mode's stops and ranges, at frame 0, ahead of the block's
@@ -250,18 +251,18 @@ struct ModeFork {
     mode: Publisher<MpeMode>,
 }
 
-impl ForkSource for ModeFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float> ForkSource<F> for ModeFork {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(MpeTransformNode::new(
             *self.mode.current(),
         ))))
     }
 }
 
-impl IntoNode for MpeTransformNode {
+impl<F: Float> IntoNode<F> for MpeTransformNode {
     type Controls = MpeTransformControls;
 
-    fn into_parts(self) -> NodeParts<MpeTransformControls> {
+    fn into_parts(self) -> NodeParts<MpeTransformControls, F> {
         let request = self.request_cell.clone();
         let controls = MpeTransformControls {
             request: request.clone(),

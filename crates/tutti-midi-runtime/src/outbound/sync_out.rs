@@ -39,6 +39,7 @@
 //! forks as a node that sends nothing.
 
 use std::sync::Arc;
+use tutti_buffers::Float;
 
 use tutti_graph::{
     Cx, Event, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Losses, Node, NodeParts,
@@ -231,7 +232,7 @@ fn push_message(
     }
 }
 
-impl Node for SyncOut {
+impl<F: Float> Node<F> for SyncOut {
     /// No audio; one event output of [`SYNC_OUT_EVENT_CAPACITY`].
     fn shape(&self) -> Shape {
         Shape::EMPTY
@@ -247,7 +248,7 @@ impl Node for SyncOut {
         self.clock.set_sample_rate(p.sample_rate());
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let block_len = cx.env.block_len;
         let messages = self.controls.messages.get();
         self.pending.clear();
@@ -331,8 +332,8 @@ struct SyncFork {
     meter: MeterSource,
 }
 
-impl ForkSource for SyncFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float> ForkSource<F> for SyncFork {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         let meter = self.meter.clone();
         let node = SyncOut::new(self.group)
             .meter(move || (meter.0)())
@@ -341,11 +342,11 @@ impl ForkSource for SyncFork {
     }
 }
 
-impl IntoNode for SyncOut {
+impl<F: Float> IntoNode<F> for SyncOut {
     /// What it sends, and what it could not.
     type Controls = Arc<SyncOutControls>;
 
-    fn into_parts(mut self) -> NodeParts<Arc<SyncOutControls>> {
+    fn into_parts(mut self) -> NodeParts<Arc<SyncOutControls>, F> {
         let controls = Arc::clone(&self.controls);
         let fork = SyncFork {
             group: self.group,

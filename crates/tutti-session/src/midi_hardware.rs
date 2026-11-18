@@ -4,6 +4,7 @@
 //! [`midi_output`](crate::midi_output)); what it says of itself is its
 //! handle's [`Peer::info`](crate::Peer::info).
 
+use tutti_buffers::Float;
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_device::MidiIdentity;
 use tutti_midi_hardware::Presented;
@@ -118,7 +119,7 @@ impl MidiPolicyHandle<'_> {
     }
 }
 
-impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
+impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// Makes the OS MIDI layer present what the policy says, in
     /// [`Phase::Poll`](crate::Phase::Poll), before the devices are stepped.
     pub(crate) fn apply_midi_policy(&mut self) {
@@ -139,7 +140,7 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
     }
 }
 
-impl Midi<'_> {
+impl<F: Float> Midi<'_, F> {
     /// The MIDI devices present now, inputs and outputs, ordered by id. Empty on
     /// a session with no OS MIDI layer
     /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)).

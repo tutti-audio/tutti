@@ -493,7 +493,7 @@ fn must_arrive(ump: Ump) -> bool {
     ump.is_note_off() || ump.is_panic_controller()
 }
 
-impl Node for EventInletNode {
+impl<F: tutti_buffers::Float> Node<F> for EventInletNode {
     /// No audio; one event output of [`capacity`](EventInletNode::capacity).
     fn shape(&self) -> Shape {
         Shape::EMPTY
@@ -520,7 +520,7 @@ impl Node for EventInletNode {
         self.publish();
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let env = cx.env;
         let start = env.frame;
         // What waited through blocks the node did not run (a re-prepare
@@ -602,18 +602,18 @@ struct SilentInlet {
     capacity: EventCapacity,
 }
 
-impl ForkSource for SilentInlet {
-    fn fork(&self, _: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: tutti_buffers::Float> ForkSource<F> for SilentInlet {
+    fn fork(&self, _: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(EventInletNode::pair(self.capacity).0)))
     }
 }
 
 /// Inserted with a **silent** fork (see the module docs). No controls: the
 /// writer came out of [`EventInletNode::pair`].
-impl IntoNode for EventInletNode {
+impl<F: tutti_buffers::Float> IntoNode<F> for EventInletNode {
     type Controls = ();
 
-    fn into_parts(self) -> NodeParts<()> {
+    fn into_parts(self) -> NodeParts<(), F> {
         let capacity = self.capacity;
         NodeParts {
             node: Box::new(self),

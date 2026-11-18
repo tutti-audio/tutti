@@ -24,6 +24,7 @@
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
+use tutti_buffers::Float;
 use tutti_rt::LockExt;
 
 use tutti_graph::{
@@ -312,7 +313,7 @@ impl Visit<TimedHarmony> for Sending<'_, '_> {
     }
 }
 
-impl Node for HarmonyNode {
+impl<F: Float> Node<F> for HarmonyNode {
     /// No audio, one event output of [`HARMONY_EVENT_DENSITY`] per frame of
     /// the block it was prepared for.
     fn shape(&self) -> Shape {
@@ -328,7 +329,7 @@ impl Node for HarmonyNode {
         self.capacity = HARMONY_EVENT_DENSITY.capacity(p);
     }
 
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let lanes = self.lanes.lend();
         let seq = lanes.seq();
         if std::mem::replace(&mut self.last_seq, seq) != seq {
@@ -359,18 +360,18 @@ struct HarmonyFork {
     shared: Arc<Shared>,
 }
 
-impl ForkSource for HarmonyFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float> ForkSource<F> for HarmonyFork {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         let lanes = self.shared.current();
         let node = HarmonyNode::new(lanes.changes.iter().copied());
         Ok(Forked::new(Box::new(node)))
     }
 }
 
-impl IntoNode for HarmonyNode {
+impl<F: Float> IntoNode<F> for HarmonyNode {
     type Controls = HarmonyControls;
 
-    fn into_parts(self) -> NodeParts<HarmonyControls> {
+    fn into_parts(self) -> NodeParts<HarmonyControls, F> {
         let controls = HarmonyControls {
             shared: Arc::clone(&self.shared),
         };

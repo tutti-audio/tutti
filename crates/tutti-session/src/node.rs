@@ -246,7 +246,7 @@ impl SessionNode for tutti_graph::InletNode {
 /// An event inlet as a graph node: no controls (the writer is the producer's),
 /// no params; its fork is silent
 /// ([`Graph::open_event_inlet`](crate::Graph::open_event_inlet)).
-impl SessionNode for tutti_graph::EventInletNode {
+impl<F: Float> SessionNode<F> for tutti_graph::EventInletNode {
     fn reclaimer(_: &()) -> Reclaims {
         Reclaims::Nothing
     }
@@ -254,8 +254,8 @@ impl SessionNode for tutti_graph::EventInletNode {
 
 /// The metronome as a graph node: its settings are shared through the
 /// transport, no controls and no params.
-impl SessionNode for tutti_nodes::ClickNode {
-    fn reclaimer(_: &<Self as IntoNode>::Controls) -> Reclaims {
+impl<F: Float> SessionNode<F> for tutti_nodes::ClickNode {
+    fn reclaimer(_: &<Self as IntoNode<F>>::Controls) -> Reclaims {
         Reclaims::Nothing
     }
 }
@@ -263,8 +263,8 @@ impl SessionNode for tutti_nodes::ClickNode {
 /// The transport sent as MIDI, as a graph node: its controls are its
 /// settings and losses, no params.
 #[cfg(feature = "midi")]
-impl SessionNode for tutti_midi_runtime::SyncOut {
-    fn reclaimer(_: &<Self as IntoNode>::Controls) -> Reclaims {
+impl<F: Float> SessionNode<F> for tutti_midi_runtime::SyncOut {
+    fn reclaimer(_: &<Self as IntoNode<F>>::Controls) -> Reclaims {
         Reclaims::Nothing
     }
 }
@@ -280,7 +280,7 @@ impl SessionNode for tutti_nodes::automation::AutomationLaneNode {
 /// A MIDI clip as a graph node: its `MidiClipControls`, no params; the
 /// clips it replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
-impl SessionNode for tutti_midi_runtime::MidiClipNode {
+impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {
     fn reclaimer(controls: &tutti_midi_runtime::MidiClipControls) -> Reclaims {
         Reclaims::of(controls)
     }
@@ -289,7 +289,7 @@ impl SessionNode for tutti_midi_runtime::MidiClipNode {
 /// The MPE transform: its `MpeTransformControls`, no params; the modes it
 /// replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
-impl SessionNode for tutti_midi_runtime::MpeTransformNode {
+impl<F: Float> SessionNode<F> for tutti_midi_runtime::MpeTransformNode {
     fn reclaimer(controls: &tutti_midi_runtime::MpeTransformControls) -> Reclaims {
         Reclaims::of(controls)
     }
@@ -298,7 +298,7 @@ impl SessionNode for tutti_midi_runtime::MpeTransformNode {
 /// The harmony node: its `HarmonyControls`, no params; the timelines it
 /// replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
-impl SessionNode for tutti_midi_runtime::HarmonyNode {
+impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
     fn reclaimer(controls: &tutti_midi_runtime::HarmonyControls) -> Reclaims {
         Reclaims::of(controls)
     }
@@ -307,7 +307,7 @@ impl SessionNode for tutti_midi_runtime::HarmonyNode {
 /// The MIDI ingest: its `MidiIngestControls`, no params; the MPE modes
 /// it replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
-impl SessionNode for tutti_midi_runtime::MidiIngestNode {
+impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiIngestNode {
     fn reclaimer(controls: &tutti_midi_runtime::MidiIngestControls) -> Reclaims {
         Reclaims::of(controls)
     }

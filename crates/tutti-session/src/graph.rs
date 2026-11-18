@@ -829,7 +829,9 @@ impl Graph {
         }
         Ok(InletNode::new(ring.into_reader()))
     }
+}
 
+impl<F: Float> Graph<F> {
     /// Opens an event inlet: MIDI a thread of your own pushes into the graph,
     /// each event on its frame. A ring of [`capacity`](EventCapacity) events is read by an
     /// [`EventInletNode`] (unwired; its one event output feeds what you
@@ -867,9 +869,7 @@ impl Graph {
     pub fn add_event_inlet(&mut self, node: EventInletNode) -> Key<EventInletNode> {
         self.add(node).0
     }
-}
 
-impl<F: Float> Graph<F> {
     /// The table the node's params are addressed in: the session's value
     /// state shares it.
     pub(crate) fn value_table(&self) -> Arc<ValueTable> {

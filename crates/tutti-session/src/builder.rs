@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
-use tutti_nodes::ClickSettings;
+use tutti_nodes::{ClickNode, ClickSettings};
 use tutti_transport::Transport;
 use tutti_types::MAX_CHANNELS;
 use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
@@ -15,7 +15,6 @@ use tutti_units::{SampleRate, Samples};
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
 use tutti_buffers::Float;
 
-use crate::format::Sealed;
 use crate::{Clock, Offline, OfflineSession, Result, Session, SessionFloat, SystemClock};
 use tutti_engine::BlockDates;
 
@@ -293,12 +292,12 @@ impl<C: Clock<Config = BlockConfig>> SessionBuilder<C> {
     }
 }
 
-impl SessionBuilder<Offline> {
+impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     /// Steps the blocks with an OS timer thread instead: no sound card, for an
     /// app that plays MIDI. The rate, the width and the block carry over, and
     /// every other option with them.
     #[must_use]
-    pub fn system_clock(self) -> SessionBuilder<SystemClock> {
+    pub fn system_clock(self) -> SessionBuilder<SystemClock<F>> {
         SessionBuilder {
             opts: self.opts,
             config: self.config,
@@ -322,7 +321,10 @@ impl SessionBuilder<Offline> {
     /// ```
     #[cfg(feature = "device")]
     #[must_use]
-    pub fn device(self, device: tutti_cpal::DeviceSelector) -> SessionBuilder<crate::DeviceClock> {
+    pub fn device(
+        self,
+        device: tutti_cpal::DeviceSelector,
+    ) -> SessionBuilder<crate::DeviceClock<F>> {
         SessionBuilder {
             opts: self.opts,
             config: device,
@@ -438,7 +440,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     }
 }
 
-impl SessionBuilder<SystemClock> {
+impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
     /// A session whose blocks an OS timer thread renders, with no sound card:
     /// the graph runs and its MIDI leaves, and nothing plays. The thread is
     /// running on return; the [`SystemSession`](crate::SystemSession) holds it, and dropping the
@@ -455,7 +457,7 @@ impl SessionBuilder<SystemClock> {
     /// (`midi-hardware`) the MIDI device watch cannot start, (`sampler`) the
     /// disk streamer cannot start, or the OS refuses the timer thread
     /// ([`Error::Clock`](crate::Error::Clock)).
-    pub fn build(mut self) -> Result<crate::SystemSession> {
+    pub fn build(mut self) -> Result<crate::SystemSession<&'static str, F>> {
         let BlockConfig {
             rate,
             outputs: layout,
@@ -475,8 +477,7 @@ impl SessionBuilder<SystemClock> {
         let load = engine.take_load_meter();
         let heard = engine.heard_taps();
         let clock = engine.block_clock();
-        let spec = tutti_engine::OutputSpec::new(rate, layout, tutti_buffers::SampleFormat::F32)
-            .with_quantum(max_block);
+        let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT).with_quantum(max_block);
         let mut host = tutti_engine::StreamHost::new(
             tutti_engine::OutputStream::new(spec),
             Arc::new(tutti_engine::AudioCallbackState::new(engine)),
@@ -508,7 +509,7 @@ impl SessionBuilder<SystemClock> {
 }
 
 #[cfg(feature = "device")]
-impl SessionBuilder<crate::DeviceClock> {
+impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     /// A session on the selected output device: the device opened first, the
     /// graph built at its rate and callback size, the callback live on
     /// return. The [`LiveSession`](crate::LiveSession) holds the
@@ -519,7 +520,7 @@ impl SessionBuilder<crate::DeviceClock> {
     ///
     /// When the device cannot be opened or started, or the graph cannot be
     /// built over it.
-    pub fn build(self) -> Result<crate::LiveSession> {
+    pub fn build(self) -> Result<crate::LiveSession<&'static str, F>> {
         let host = tutti_cpal::DeviceHost::open(self.opts.host)?;
         let device = self.config.clone();
         let engine = tutti_cpal::AudioEngine::open(host, device.clone())?;
@@ -540,9 +541,9 @@ impl SessionBuilder<crate::DeviceClock> {
         self,
         spec: tutti_engine::OutputSpec,
         driver: D,
-    ) -> Result<crate::LiveSession>
+    ) -> Result<crate::LiveSession<&'static str, F>>
     where
-        D: tutti_engine::StreamDriver,
+        D: tutti_engine::StreamDriver<F>,
         D::Error: Into<tutti_cpal::Error>,
     {
         let device = self.config.clone();
@@ -565,9 +566,9 @@ impl SessionBuilder<crate::DeviceClock> {
         chosen: tutti_cpal::DeviceSelector,
         start: impl FnOnce(
             &mut tutti_cpal::AudioEngine,
-            Arc<tutti_engine::AudioCallbackState>,
+            Arc<tutti_engine::AudioCallbackState<F>>,
         ) -> tutti_cpal::Result<()>,
-    ) -> Result<crate::LiveSession> {
+    ) -> Result<crate::LiveSession<&'static str, F>> {
         let spec = audio_engine.spec().clone();
         let root = self.root_width(spec.channels);
         self.check_placement(root, spec.channels)?;
@@ -580,7 +581,7 @@ impl SessionBuilder<crate::DeviceClock> {
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
-        let mut session: crate::LiveSession = self.session(
+        let mut session: crate::LiveSession<&'static str, F> = self.session(
             parts,
             crate::device::DeviceHandle::vacant(self.opts.host),
             true,
@@ -906,22 +907,38 @@ impl<C: Clock> SessionBuilder<C> {
         graph.set_render_worker_start(self.opts.render_worker_start.take());
         let click_settings = Arc::new(ClickSettings::new());
 
-        let nodes = <C::Float as Sealed>::engine_nodes(
-            &mut graph,
-            &transport,
-            &click_settings,
-            #[cfg(feature = "midi")]
-            self.opts.midi_ports,
-        );
+        // The metronome. It reads the beat, play and record state from its
+        // block's `Env`, and the count-in flag off the transport (read only).
+        // It is not wired to the output: what it feeds is the host's
+        // declaration, like every other node's.
+        let (click, _settings) = graph.add(ClickNode::new(&transport, Arc::clone(&click_settings)));
+
+        // The engine's MIDI as graph nodes: the sync node (sends nothing until a
+        // host sets its messages). An input port's ingest node and an output's
+        // node are made when their pool entries load, and the sync node feeds
+        // each output.
+        #[cfg(feature = "midi")]
+        let midi = {
+            let meter = click_settings.project_meter();
+            let (sync, sync_controls) = graph.add(
+                tutti_midi_runtime::SyncOut::new(tutti_ump::MidiGroup::FIRST)
+                    .meter(move || meter.reader()),
+            );
+            Some(crate::MidiNodes {
+                input_ports: self.opts.midi_ports,
+                sync: sync.erase(),
+                sync_controls,
+            })
+        };
 
         Ok(Parts {
             graph,
             transport,
-            click: nodes.click,
+            click: Some(click.erase()),
             click_settings,
             compensation: Arc::default(),
             #[cfg(feature = "midi")]
-            midi: nodes.midi,
+            midi,
             #[cfg(feature = "midi-hardware")]
             midi_io,
             #[cfg(feature = "midi-hardware")]

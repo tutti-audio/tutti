@@ -81,7 +81,9 @@ pub enum NotInstrument {
 
 /// Opens an event inlet in `graph`: its node, and the keys that fill it on
 /// the Group an instrument plays.
-pub(crate) fn open_keys(graph: &mut Graph) -> (Key<EventInletNode>, MidiKeys) {
+pub(crate) fn open_keys<F: tutti_buffers::Float>(
+    graph: &mut Graph<F>,
+) -> (Key<EventInletNode>, MidiKeys) {
     let (node, writer) = graph.open_event_inlet(LIVE_INLET_CAPACITY);
     (node, MidiKeys::new(writer, MidiGroup::FIRST))
 }

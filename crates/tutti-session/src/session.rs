@@ -820,14 +820,6 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
                 self.mods.resync(&mut self.graph);
                 self.report_rewired(out);
             }
-            Step::MidiOut => {
-                #[cfg(feature = "midi")]
-                {
-                    if self.midi_state.midi_out_phase(&mut self.graph, cx.now) {
-                        self.commit();
-                    }
-                }
-            }
             Step::Plugins => {
                 #[cfg(feature = "plugin")]
                 {
@@ -842,50 +834,6 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
             Step::Listing => {
                 #[cfg(feature = "device")]
                 self.listing_poll(cx.now, out);
-            }
-            Step::Devices => {
-                // Who the session is on the wire is in force before the devices
-                // are stepped.
-                #[cfg(feature = "midi-hardware")]
-                self.apply_midi_policy();
-                // A device that connected is heard from the plan that holds
-                // its inlet: committed now, not an update later.
-                #[cfg(feature = "midi-hardware")]
-                if self.midi_state.midi_input_phase(
-                    self.midi_io.as_mut(),
-                    self.midi.as_ref(),
-                    &mut self.graph,
-                    cx.now,
-                    out,
-                ) {
-                    self.commit();
-                }
-                // The tempo the session follows is read after the devices:
-                // what a device sent in the block before is in its tap.
-                #[cfg(feature = "midi")]
-                {
-                    let follow = crate::midi_follow::FollowCx {
-                        settings: self.transport.settings(),
-                        meter: &self.click_settings.project_meter(),
-                        playhead: self.playhead(),
-                    };
-                    let tempo_edited = self.midi_state.follow_phase(&follow, &mut self.graph, out);
-                    let (actions, clock_edited) =
-                        self.midi_state.clock_phase(&follow, &mut self.graph, out);
-                    let (machine_actions, machine_edited) =
-                        self.midi_state.machine_phase(&follow, &mut self.graph, out);
-                    if tempo_edited || clock_edited || machine_edited {
-                        self.commit();
-                    }
-                    let refused: u64 = actions
-                        .into_iter()
-                        .chain(machine_actions)
-                        .map(|action| u64::from(!self.send_clock_action(action)))
-                        .sum();
-                    if refused > 0 {
-                        out.push(crate::MidiReport::ClockCommandsRefused(refused).into());
-                    }
-                }
             }
         }
     }
@@ -1326,14 +1274,62 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             }
             Phase::Modulation => C::Float::host(self, Step::Modulation, cx, out),
             Phase::AfterCommit => C::Float::host(self, Step::Reapply, cx, out),
-            Phase::MidiOut => C::Float::host(self, Step::MidiOut, cx, out),
+            Phase::MidiOut => {
+                #[cfg(feature = "midi")]
+                {
+                    if self.midi_state.midi_out_phase(&mut self.graph, cx.now) {
+                        self.commit();
+                    }
+                }
+            }
             Phase::Plugins => C::Float::host(self, Step::Plugins, cx, out),
             Phase::RenderMode => C::Float::host(self, Step::RenderMode, cx, out),
             Phase::Poll => {
                 // Who the session is on the wire is in force, and the devices
                 // and the tempo the session follows are read, before the
                 // stream's own poll.
-                C::Float::host(self, Step::Devices, cx, out);
+                // Who the session is on the wire is in force before the devices
+                // are stepped.
+                #[cfg(feature = "midi-hardware")]
+                self.apply_midi_policy();
+                // A device that connected is heard from the plan that holds
+                // its inlet: committed now, not an update later.
+                #[cfg(feature = "midi-hardware")]
+                if self.midi_state.midi_input_phase(
+                    self.midi_io.as_mut(),
+                    self.midi.as_ref(),
+                    &mut self.graph,
+                    cx.now,
+                    out,
+                ) {
+                    self.commit();
+                }
+                // The tempo the session follows is read after the devices:
+                // what a device sent in the block before is in its tap.
+                #[cfg(feature = "midi")]
+                {
+                    let follow = crate::midi_follow::FollowCx {
+                        settings: self.transport.settings(),
+                        meter: &self.click_settings.project_meter(),
+                        playhead: self.playhead(),
+                    };
+                    let tempo_edited = self.midi_state.follow_phase(&follow, &mut self.graph, out);
+                    let (actions, clock_edited) =
+                        self.midi_state.clock_phase(&follow, &mut self.graph, out);
+                    let (machine_actions, machine_edited) =
+                        self.midi_state.machine_phase(&follow, &mut self.graph, out);
+                    if tempo_edited || clock_edited || machine_edited {
+                        self.commit();
+                    }
+                    let refused: u64 = actions
+                        .into_iter()
+                        .chain(machine_actions)
+                        .map(|action| u64::from(!self.send_clock_action(action)))
+                        .sum();
+                    if refused > 0 {
+                        out.push(crate::MidiReport::ClockCommandsRefused(refused).into());
+                    }
+                }
                 out.append(&mut self.carried_events);
                 let lost = self.fault_poll(out);
                 C::Float::host(self, Step::Listing, cx, out);
@@ -1922,11 +1918,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     }
 }
 
-impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
+impl<K: AppKey, C: Clock> Session<K, C> {
     /// The session's MIDI: live inputs, clips, the hardware input's routes
     /// and the outputs.
     #[cfg(feature = "midi")]
-    pub fn midi(&mut self) -> crate::Midi<'_> {
+    pub fn midi(&mut self) -> crate::Midi<'_, C::Float> {
         self.midi_and_ids().0
     }
 
@@ -1934,7 +1930,9 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// session's resources: the two borrow disjoint fields, so a stage that
     /// opens a peer holds both.
     #[cfg(feature = "midi")]
-    pub(crate) fn midi_and_ids(&mut self) -> (crate::Midi<'_>, &mut crate::peer::ResourceIds) {
+    pub(crate) fn midi_and_ids(
+        &mut self,
+    ) -> (crate::Midi<'_, C::Float>, &mut crate::peer::ResourceIds) {
         let midi = crate::Midi {
             graph: &mut self.graph,
             state: &mut self.midi_state,

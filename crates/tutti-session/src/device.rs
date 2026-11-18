@@ -49,7 +49,7 @@ use tutti_units::{SampleRate, Samples, Seconds};
 
 use crate::{
     Clock, DeviceClock, DevicePolicy, DeviceWatch, Error, FollowEvent, RealTime, Result, Session,
-    SessionEvent,
+    SessionEvent, SessionFloat,
 };
 
 /// What a session on the device clock holds to run its blocks: the
@@ -61,8 +61,8 @@ use crate::{
 /// restart's hook needs the whole session; a panic in the hook puts it back
 /// before it unwinds on.
 #[derive(Debug)]
-pub struct DeviceHandle {
-    device: Option<Device>,
+pub struct DeviceHandle<F: SessionFloat = f32> {
+    device: Option<Device<F>>,
     /// The platform host the device was opened on, which a switch to the
     /// system clock hands on.
     pub(crate) audio_host: tutti_cpal::AudioHost,
@@ -71,7 +71,7 @@ pub struct DeviceHandle {
     pub(crate) events: Vec<SessionEvent>,
 }
 
-impl DeviceHandle {
+impl<F: SessionFloat> DeviceHandle<F> {
     /// A handle whose device is yet to be started: the builder's, until the
     /// stream is up.
     pub(crate) fn vacant(audio_host: tutti_cpal::AudioHost) -> Self {
@@ -84,17 +84,17 @@ impl DeviceHandle {
     }
 
     /// Puts the started device in its slot.
-    pub(crate) fn fill(&mut self, device: Device) {
+    pub(crate) fn fill(&mut self, device: Device<F>) {
         self.device = Some(device);
     }
 
-    pub(crate) fn device(&self) -> &Device {
+    pub(crate) fn device(&self) -> &Device<F> {
         self.device
             .as_ref()
             .expect("the device is in its slot except while a restart runs")
     }
 
-    pub(crate) fn device_mut(&mut self) -> &mut Device {
+    pub(crate) fn device_mut(&mut self) -> &mut Device<F> {
         self.device
             .as_mut()
             .expect("the device is in its slot except while a restart runs")
@@ -102,12 +102,12 @@ impl DeviceHandle {
 
     /// The device, taken out of the handle: a switch to the system clock
     /// moves its host.
-    pub(crate) fn into_device(mut self) -> Device {
+    pub(crate) fn into_device(mut self) -> Device<F> {
         self.take()
     }
 
     /// Takes the device out for a restart; [`fill`](Self::fill) puts it back.
-    pub(crate) fn take(&mut self) -> Device {
+    pub(crate) fn take(&mut self) -> Device<F> {
         self.device
             .take()
             .expect("the device is in its slot except while a restart runs")
@@ -160,16 +160,16 @@ impl DeviceHandle {
 /// fn is_send<T: Send>() {}
 /// is_send::<tutti_session::LiveSession>();
 /// ```
-pub type LiveSession<K = &'static str> = Session<K, DeviceClock>;
+pub type LiveSession<K = &'static str, F = f32> = Session<K, DeviceClock<F>>;
 
-impl<K: crate::AppKey> Session<K, DeviceClock> {
+impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
     /// The device that drives the session.
-    pub fn device(&self) -> &Device {
+    pub fn device(&self) -> &Device<F> {
         self.running.device()
     }
 
     /// The device, mutably: [`Device::stop`] and [`Device::start_with`].
-    pub fn device_mut(&mut self) -> &mut Device {
+    pub fn device_mut(&mut self) -> &mut Device<F> {
         self.running.device_mut()
     }
 
@@ -270,7 +270,7 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
     /// Runs `f` with the device out of its slot and the session beside it: the
     /// restart's hook moves the whole session while the device's driver runs.
     /// The device goes back before `f`'s panic, if it has one, unwinds on.
-    pub(crate) fn with_device<R>(&mut self, f: impl FnOnce(&mut Self, &mut Device) -> R) -> R {
+    pub(crate) fn with_device<R>(&mut self, f: impl FnOnce(&mut Self, &mut Device<F>) -> R) -> R {
         let mut device = self.running.take();
         let outcome =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self, &mut device)));
@@ -288,7 +288,7 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
     ///
     /// As [`restart`](Self::restart), without the device's own.
     #[cfg(feature = "testing")]
-    pub fn restart_on<D: StreamDriver>(
+    pub fn restart_on<D: StreamDriver<F>>(
         &mut self,
         spec: OutputSpec,
         driver: D,
@@ -335,8 +335,7 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
                     .events
                     .push(SessionEvent::Device(DeviceEvent::Restarted(restarted)));
                 self.note_device(FollowEvent::Opened(name), now);
-                #[cfg(feature = "audio-io")]
-                self.reopen_inputs();
+                F::reopen_inputs(self);
                 Ok(restarted)
             }
             Err(e) => {
@@ -431,8 +430,8 @@ impl<K: crate::AppKey> Session<K, DeviceClock> {
 ///     std::thread::spawn(move || drop(device));
 /// }
 /// ```
-pub struct Device {
-    pub(crate) driver: TuttiDriver,
+pub struct Device<F: SessionFloat = f32> {
+    pub(crate) driver: TuttiDriver<F>,
     /// What the host last chose to run on (the build's, then a restart's):
     /// what the device policy follows.
     pub(crate) chosen: DeviceSelector,
@@ -442,7 +441,7 @@ pub struct Device {
     _not_send: PhantomData<*const ()>,
 }
 
-impl std::fmt::Debug for Device {
+impl<F: SessionFloat> std::fmt::Debug for Device<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Device")
             .field("driver", &self.driver)
@@ -450,9 +449,9 @@ impl std::fmt::Debug for Device {
     }
 }
 
-impl Device {
+impl<F: SessionFloat> Device<F> {
     pub(crate) fn new(
-        driver: TuttiDriver,
+        driver: TuttiDriver<F>,
         chosen: DeviceSelector,
         input_latency: Arc<StreamLatency>,
     ) -> Self {
@@ -556,7 +555,7 @@ impl Device {
     /// # Errors
     ///
     /// What the driver's `open` reports.
-    pub fn start_with<D: StreamDriver>(&mut self, driver: D) -> Result<()>
+    pub fn start_with<D: StreamDriver<F>>(&mut self, driver: D) -> Result<()>
     where
         D::Error: Into<tutti_cpal::Error>,
     {
@@ -847,7 +846,7 @@ impl<K: crate::AppKey, C: RealTime> Session<K, C> {
     }
 }
 
-impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
+impl<K: crate::AppKey, C: Clock> Session<K, C> {
     /// The listing's share of [`Phase::Poll`](crate::Phase::Poll): the answer of
     /// the output-device listing, if one is running.
     pub(crate) fn listing_poll(&mut self, now: std::time::Instant, out: &mut Vec<SessionEvent>) {
@@ -903,7 +902,7 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
         // the host sets a new map.
         self.output_policy
             .routing()
-            .fold::<f32>(&root, &placed)
+            .fold::<C::Float>(&root, &placed)
             .map_err(|refusal| match refusal {
                 tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
                     root: self.graph.root_id(),
@@ -925,7 +924,7 @@ impl<K: crate::AppKey, C: Clock<Float = f32>> Session<K, C> {
     pub(crate) fn rerate(
         &mut self,
         spec: &OutputSpec,
-        stopped: &Stopped<'_>,
+        stopped: &Stopped<'_, C::Float>,
         max_block: Option<MaxBlock>,
         topology: Option<ChannelTopology>,
     ) -> Result<()> {

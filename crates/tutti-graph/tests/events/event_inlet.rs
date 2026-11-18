@@ -85,8 +85,7 @@ fn block_at(d: &mut Direct<EventInletNode>, frame: u64, rate: SampleRate, len: u
 }
 
 fn reprepare(d: &mut Direct<EventInletNode>, rate: SampleRate) {
-    d.node
-        .prepare(&Prepare::new(rate, MaxBlock::of(Samples(64))));
+    Node::<f32>::prepare(&mut *d.node, &Prepare::new(rate, MaxBlock::of(Samples(64))));
 }
 
 /// An event pushed for frame F is emitted in the block that holds F, on offset
@@ -454,7 +453,7 @@ fn what_waits_survives_a_reset() {
     let (mut d, mut tx) = rig(8);
     tx.push(Frame::new(200), note(70)).unwrap();
     d.block();
-    d.node.reset();
+    Node::<f32>::reset(&mut *d.node);
     d.block();
     d.block();
     d.block();
