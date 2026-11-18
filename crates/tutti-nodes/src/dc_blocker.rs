@@ -56,8 +56,8 @@ impl DcBlockerConfig {
 ///
 /// `DcBlockerNode::from` panics past 16 channels: a blocker is one bus.
 ///
-/// `F` is the state precision of the recursion and the pole, `f64` by default.
-pub type DcBlockerNode<F = f64> = KernelNode<DcBlockerKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the recursion and the pole.
+pub type DcBlockerNode<F> = KernelNode<DcBlockerKernel<F>>;
 
 impl<F: Float + Lerp> From<DcBlockerConfig> for DcBlockerNode<F> {
     fn from(config: DcBlockerConfig) -> Self {
@@ -107,6 +107,7 @@ impl<F: Float + Lerp> DcBlockerKernel<F> {
 }
 
 impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
+    type Float = F;
     type Set = DcBlockerSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -138,11 +139,11 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.blocker.process(input, output);
         // A design after a render is a move, which glides.

@@ -2,7 +2,7 @@
 //! as a state-variable section.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Ring, Sos, SosError, TAIL_FLOOR};
+use tutti_dsp::{Lanes, Ring, Sos, SosError, TAIL_FLOOR};
 use tutti_graph::Shape;
 use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Db, SampleRate, Samples, Tail};
@@ -67,16 +67,16 @@ pub trait EqControls:
 /// Made through the node aliases ([`BellFilterNode`](crate::BellFilterNode),
 /// [`TiltFilterNode`](crate::TiltFilterNode)).
 #[derive(Clone, Debug)]
-pub struct EqKernel<C: EqControls> {
+pub struct EqKernel<C: EqControls, F: Float + Lanes> {
     input: BusTopology,
-    sos: GlidedSos,
+    sos: GlidedSos<F>,
     rate: SampleRate,
     /// The tail over every control at `rate`.
     ceiling: Tail,
     controls: core::marker::PhantomData<C>,
 }
 
-impl<C: EqControls> EqKernel<C> {
+impl<C: EqControls, F: Float + Lanes> EqKernel<C, F> {
     /// A kernel on the bus `input`, its output where it is; at a placeholder 48 kHz until
     /// `prepare`, which an unprepared node renders nothing before.
     pub(super) fn new(input: BusTopology) -> Self {
@@ -95,7 +95,7 @@ impl<C: EqControls> EqKernel<C> {
 
     /// The coefficients at `controls`, read within their ranges; the design in force for
     /// controls that are not numbers. No allocation.
-    fn design(&mut self, controls: &C) -> tutti_dsp::SosCoefficients<f64> {
+    fn design(&mut self, controls: &C) -> tutti_dsp::SosCoefficients<F> {
         let (held, rate) = (controls.held(self.rate), self.rate);
         self.sos.design(|into| held.design_into(rate, into))
     }
@@ -121,7 +121,8 @@ impl<C: EqControls> EqKernel<C> {
     }
 }
 
-impl<C: EqControls> Kernel for EqKernel<C> {
+impl<C: EqControls, F: Float + Lanes> Kernel for EqKernel<C, F> {
+    type Float = F;
     type Set = C::Set;
 
     const GRID: usize = GLIDE_STEPS as usize;
@@ -147,11 +148,11 @@ impl<C: EqControls> Kernel for EqKernel<C> {
         self.sos.aim(design);
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.sos.render(input, output);
     }

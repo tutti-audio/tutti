@@ -17,6 +17,8 @@
 //!   driven param, the lane's offset riding on it
 //!   (`an_authored_write_moves_the_base_under_modulation`).
 
+// These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
+
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tutti_buffers::{Mono, Planes};
@@ -244,7 +246,7 @@ struct Case {
 }
 
 fn cases() -> Vec<Case> {
-    fn svf(w: usize) -> SvfFilterNode<f64> {
+    fn svf(w: usize) -> SvfFilterNode<f32> {
         SvfFilterNode::with_channels(
             ChannelLayout::try_from(w).expect("a test width is small"),
             SvfType::LowPass,
@@ -252,7 +254,7 @@ fn cases() -> Vec<Case> {
             Q::new(0.707),
         )
     }
-    fn ladder(w: usize) -> LadderFilterNode<f64> {
+    fn ladder(w: usize) -> LadderFilterNode<f32> {
         LadderFilterNode::with_channels(
             ChannelLayout::try_from(w).expect("a test width is small"),
             LadderType::LP24,
@@ -583,7 +585,7 @@ fn block_rate_cases() -> Vec<Case> {
             name: "svf gain",
             param: UnitParam::GainDb,
             make: |w, v| {
-                let n = SvfFilterNode::<f64>::with_channels(
+                let n = SvfFilterNode::<f32>::with_channels(
                     ChannelLayout::try_from(w).expect("a test width is small"),
                     SvfType::Bell,
                     Hz::new(1_000.0),

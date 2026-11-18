@@ -22,8 +22,9 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// Memoryless past the glide: no latency and no tail. Made from the width it starts at
 /// ([`StereoWidthConfig`], `StereoWidthNode::from`).
 ///
-/// `F` is the precision of the width's glide and of the mid/side arithmetic, `f64` by default.
-pub type StereoWidthNode<F = f64> = KernelNode<StereoWidthKernel<F>>;
+/// `F` is the float of the graph it runs in, and of the width's glide and the mid/side
+/// arithmetic.
+pub type StereoWidthNode<F> = KernelNode<StereoWidthKernel<F>>;
 
 /// What a [`StereoWidthNode`] is made from: the width it starts at.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -98,6 +99,7 @@ impl<F: Float + Lerp> StereoWidthKernel<F> {
 }
 
 impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
+    type Float = F;
     type Set = StereoWidthSet;
 
     const GRID: usize = COEFF_INTERVAL;
@@ -125,11 +127,11 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
         }
     }
 
-    fn render<S: Float>(
+    fn render(
         &mut self,
-        input: Planes<'_, S>,
-        _: ControlLanes<'_, S>,
-        output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        _: ControlLanes<'_, F>,
+        output: PlanesMut<'_, '_, F>,
     ) {
         self.bank.process(input, output);
         // A design after a render is a move, which glides.

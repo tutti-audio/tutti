@@ -86,7 +86,7 @@ fn chain_engine(outputs: usize) -> Engine {
     ed.insert(
         eq,
         "eq",
-        EqBandNode::<f64>::new(SvfType::Bell, Hz(1_000.0), Q(1.0), Db(6.0)),
+        EqBandNode::<f32>::new(SvfType::Bell, Hz(1_000.0), Q(1.0), Db(6.0)),
     );
     ed.insert(strip, "strip", BusStripNode::stereo());
     wire(&mut ed, eq, 0, osc, 0);
@@ -337,7 +337,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
     for i in 0..depth {
         let cutoff = 500.0 + (i as f64) * 7.0;
         let f: Box<dyn tutti_graph::Node> = if ours {
-            tutti_graph::IntoNode::into_node(SvfFilterNode::<f64>::new(
+            tutti_graph::IntoNode::into_node(SvfFilterNode::<f32>::new(
                 SvfType::LowPass,
                 Hz(cutoff),
                 Q(0.7),

@@ -42,14 +42,14 @@ const RATE: f64 = 48_000.0;
 fn saw() -> ForkByClone<Osc> {
     ForkByClone(Osc::saw(Hz(110.0)))
 }
-fn low_pass(cutoff: f64) -> SvfFilterNode<f64> {
-    SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(cutoff), Q(0.9))
+fn low_pass(cutoff: f64) -> SvfFilterNode<f32> {
+    SvfFilterNode::new(SvfType::LowPass, Hz(cutoff), Q(0.9))
 }
 fn shaper(drive: f32) -> DistortionNode<f32> {
-    DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(drive))
+    DistortionNode::new(ShapeKind::Tanh, Drive::new(drive))
 }
 fn limiter() -> LimiterNode<f32> {
-    LimiterNode::<f32>::mono(LimiterControls {
+    LimiterNode::mono(LimiterControls {
         threshold: Db(-12.0),
         ceiling: Db(-1.0),
         ..LimiterControls::DEFAULT

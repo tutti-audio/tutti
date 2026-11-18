@@ -365,9 +365,11 @@ fn lfo() {
             .with_rate(Hz(3.0))
             .with_depth(Depth::clamped(0.8))
     })
-    .control("rate", |l| assert!(l.param_set().set(UnitParam::Rate, 5.0)))
+    .control("rate", |l| {
+        assert!(ParamNode::<f32>::param_set(l).set(UnitParam::Rate, 5.0))
+    })
     .control("depth", |l| {
-        assert!(l.param_set().set(UnitParam::Depth, 0.3))
+        assert!(ParamNode::<f32>::param_set(l).set(UnitParam::Depth, 0.3))
     })
     .check();
 }
@@ -437,7 +439,7 @@ fn plate_reverb() {
 #[test]
 fn ladder() {
     IsolateRow::new("LadderFilterNode (LP12)", || {
-        LadderFilterNode::<f64>::new(LadderType::LP12, Hz(1_000.0), Resonance::new_clamped(0.3))
+        LadderFilterNode::<f32>::new(LadderType::LP12, Hz(1_000.0), Resonance::new_clamped(0.3))
     })
     .control("cutoff", |l| {
         assert!(l.param_set().set(UnitParam::Cutoff, 3_000.0));
@@ -457,7 +459,7 @@ fn ladder() {
 /// unit tests run it).
 #[test]
 fn svf() {
-    tutti_graph::contract::assert_param_fork(SvfFilterNode::<f64>::with_controls(
+    tutti_graph::contract::assert_param_fork(SvfFilterNode::<f32>::with_controls(
         ChannelLayout::MONO,
         SvfControls {
             ty: SvfType::Bell,
@@ -470,7 +472,7 @@ fn svf() {
 
 #[test]
 fn eq_band() {
-    tutti_graph::contract::assert_param_fork(EqBandNode::<f64>::new(
+    tutti_graph::contract::assert_param_fork(EqBandNode::<f32>::new(
         SvfType::Bell,
         Hz(1_000.0),
         Q(0.7),
