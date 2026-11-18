@@ -131,8 +131,9 @@ impl Dropped {
         self.unreported += n;
     }
 
-    /// `count` events the plan's unit `unit` took in and did not deliver
-    /// (`Io::count_lost`): charged to the node, no port.
+    /// `count` events charged to the plan's unit `unit`, no port: events the
+    /// node took in and did not deliver (`Io::count_lost`), or events cut from
+    /// its declared input bound before it ran.
     pub(crate) fn at_node(&mut self, unit: u32, count: u32) {
         self.note(Owner::Unit(unit), None, count, 0);
     }
