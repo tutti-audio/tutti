@@ -101,6 +101,7 @@ use crate::node::{
     TransportPosition,
 };
 use crate::param::{ParamIn, ParamInput};
+use crate::rtlog::{LogCapture, LogFilter, RtRecord};
 use crate::spec::{EventIn, EventOut};
 use tutti_curve::Law;
 
@@ -2193,6 +2194,9 @@ pub struct Direct<N: ?Sized, F: Float = f32> {
     events_out: Vec<Vec<Event>>,
     /// What the node reported with `Io::count_lost`, over every block.
     lost: u64,
+    /// The records the node logged, when [`log`](Direct::log) is set.
+    capture: Option<LogCapture>,
+    logged: Vec<RtRecord>,
 }
 
 impl<N: ?Sized, F: Float> std::fmt::Debug for Direct<N, F> {
@@ -2288,7 +2292,37 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             inputs: vec![vec![F::ZERO; frames]; ins],
             outputs: vec![vec![F::ZERO; frames]; outs],
             lost: 0,
+            capture: None,
+            logged: Vec::new(),
         }
+    }
+
+    /// Keeps what the node writes through `Io::log`, `Io::log_plugin` and
+    /// `Io::log_line` that `filter` lets in (a driver built without this
+    /// drops every record). After each block the records move, in order and
+    /// coalesced as the executor's slots coalesce them, onto
+    /// [`logged`](Self::logged); a record past a node call's fourth is
+    /// counted in [`log_lost`](Self::log_lost). Each record's
+    /// [`source`](RtRecord::source) is `NodeKey(0)`, the one placeholder
+    /// key, and its [`frame`](RtRecord::frame) is the block's first frame
+    /// plus the offset the call gave, as the executor's flush fills them.
+    #[must_use]
+    pub fn log(mut self, filter: LogFilter) -> Self {
+        self.capture = Some(LogCapture::new(filter));
+        self
+    }
+
+    /// The records the node logged over every block since
+    /// [`log`](Self::log) was set, oldest first. Cumulative: reading it does
+    /// not drain it.
+    pub fn logged(&self) -> &[RtRecord] {
+        &self.logged
+    }
+
+    /// The records the node logged past a call's fourth distinct one, over
+    /// every block since [`log`](Self::log) was set; zero without it.
+    pub fn log_lost(&self) -> u64 {
+        self.capture.as_ref().map_or(0, LogCapture::lost)
     }
 
     /// The events the node reported lost (`Io::count_lost`) over every block
@@ -2461,7 +2495,14 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
         .with_main(self.node.shape().main_ports())
         .with_params(&params[..n_par])
         .with_lost(&lost);
+        let io = match &self.capture {
+            Some(capture) => io.with_log(capture.begin_block()),
+            None => io,
+        };
         let status = self.node.process(&cx, io);
+        if let Some(capture) = &mut self.capture {
+            capture.end_block(NodeKey(0), env.frame, &mut self.logged);
+        }
         self.lost += u64::from(lost.get());
         for list in &mut self.events_in {
             list.clear();

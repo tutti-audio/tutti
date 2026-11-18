@@ -6,11 +6,13 @@
 use tutti_graph::testing as common;
 
 use common::{TestPool, prepare, test_pool};
+use tutti_graph::contract::Direct;
 use tutti_graph::{
     Cx, Editor, Executor, Io, LogFilter, Node, NodeKey, Prepare, RtLevel, RtLogReaders, RtRecord,
     RtTarget, RtValue, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
+use tutti_types::SampleRate;
 use tutti_types::{ChannelLayout, Frame, Tail};
 
 /// Sites are statics: coalescing compares the literal's address, which the
@@ -370,4 +372,47 @@ fn logging_lines_and_flushing_allocate_nothing_on_either_executor() {
             assert_eq!(take(&readers, ALL).0.len(), 12, "{workers} workers");
         }
     }
+}
+
+/// A `Direct` driver with `log` set keeps the node's record, with the block's
+/// first frame plus the call's offset; a filter below the record's level for
+/// its target keeps nothing.
+#[test]
+fn a_direct_driver_keeps_the_record_its_filter_lets_in_and_drops_one_below_it() {
+    let acts = || {
+        vec![Act::Log {
+            level: RtLevel::Warn,
+            site: A,
+            offset: 3,
+            value: 7,
+        }]
+    };
+    let logger = || Logger {
+        level: 0.0,
+        acts: acts(),
+    };
+
+    let mut kept = Direct::new(logger(), SampleRate::SR_48K, 8).log(ALL);
+    kept.block();
+    kept.block();
+    let [first, second] = kept.logged() else {
+        panic!("one record a block, got {:?}", kept.logged());
+    };
+    for (record, frame) in [(first, 3), (second, 11)] {
+        assert_eq!(record.level(), RtLevel::Warn);
+        assert_eq!(record.target(), RtTarget::Rt);
+        assert_eq!(record.message(), A);
+        assert_eq!(record.fields(), &[("v", RtValue::I64(7))]);
+        assert_eq!(record.frame(), Frame::new(frame));
+    }
+    assert_eq!(kept.log_lost(), 0);
+
+    let below = LogFilter::new(Some(RtLevel::Error), Some(RtLevel::Trace));
+    let mut dropped = Direct::new(logger(), SampleRate::SR_48K, 8).log(below);
+    dropped.block();
+    assert!(dropped.logged().is_empty());
+
+    let mut unset = Direct::new(logger(), SampleRate::SR_48K, 8);
+    unset.block();
+    assert!(unset.logged().is_empty());
 }
