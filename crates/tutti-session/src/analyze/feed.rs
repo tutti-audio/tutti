@@ -2,7 +2,7 @@
 //! chunk is pushed as, both read from the chunk the job reads.
 
 use tutti_buffers::{
-    Fold, FoldError, Interleaved, InterleavedMut, Mono, Planes, PlanesMut, StereoPlanes,
+    Float, Fold, FoldError, Interleaved, InterleavedMut, Mono, Planes, PlanesMut, StereoPlanes,
     deinterleave, interleave,
 };
 use tutti_types::{ChannelLayout, ChannelTopology, SampleRate, Samples};
@@ -11,9 +11,9 @@ use super::AnalyzeError;
 
 /// How a chunk holds its frames.
 #[derive(Debug)]
-enum Layout<'w> {
+enum Layout<'w, S> {
     /// One plane per channel, borrowed from a wave in memory: no copy.
-    Planar(Vec<&'w [f32]>),
+    Planar(Vec<&'w [S]>),
     /// Interleaved frames the job decoded into its own buffer.
     Interleaved,
 }
@@ -23,20 +23,20 @@ enum Layout<'w> {
 /// scratch a view in the other shape is made in. Opaque: [`AudioInput`] names
 /// it and only this crate makes one.
 #[derive(Debug)]
-pub struct Chunk<'w> {
-    held: Layout<'w>,
+pub struct Chunk<'w, S: Float> {
+    held: Layout<'w, S>,
     layout: ChannelLayout,
-    to_mono: Result<Fold, FoldError>,
+    to_mono: Result<Fold<S>, FoldError>,
     /// The decoded frames of a file chunk, interleaved.
-    data: Vec<f32>,
+    data: Vec<S>,
     /// Interleaved frames made from planes.
-    interleaved: Vec<f32>,
+    interleaved: Vec<S>,
     /// Planes made from interleaved frames.
-    planes: Vec<Vec<f32>>,
-    mono: Vec<f32>,
+    planes: Vec<Vec<S>>,
+    mono: Vec<S>,
 }
 
-impl<'w> Chunk<'w> {
+impl<'w, S: Float> Chunk<'w, S> {
     /// An empty chunk of audio placed as `topology` says.
     pub(crate) fn new(topology: &ChannelTopology) -> Self {
         Self {
@@ -51,7 +51,7 @@ impl<'w> Chunk<'w> {
     }
 
     /// Holds `planes`, one per channel, as the chunk.
-    pub(crate) fn hold_planes(&mut self, planes: impl IntoIterator<Item = &'w [f32]>) {
+    pub(crate) fn hold_planes(&mut self, planes: impl IntoIterator<Item = &'w [S]>) {
         let mut held = match std::mem::replace(&mut self.held, Layout::Interleaved) {
             Layout::Planar(mut held) => {
                 held.clear();
@@ -65,10 +65,11 @@ impl<'w> Chunk<'w> {
 
     /// The interleaved buffer to decode `frames` frames into.
     #[cfg(codec)]
-    pub(crate) fn fill(&mut self, frames: Samples) -> Result<InterleavedMut<'_>, AnalyzeError> {
+    pub(crate) fn fill(&mut self, frames: Samples) -> Result<InterleavedMut<'_, S>, AnalyzeError> {
         self.held = Layout::Interleaved;
         self.data.clear();
-        self.data.resize(self.layout.interleaved_len(frames), 0.0);
+        self.data
+            .resize(self.layout.interleaved_len(frames), S::ZERO);
         Ok(InterleavedMut::new(&mut self.data, self.layout)?)
     }
 
@@ -153,23 +154,25 @@ impl sealed_context::Sealed for () {
 /// is converted only to the shape a meter asks for.
 ///
 /// Sealed: the three views above are the whole set.
-pub trait AudioInput<'a>: sealed::Sealed<'a> {}
+pub trait AudioInput<'a, S: Float>: sealed::Sealed<'a, S> {}
 
 pub(crate) use sealed::Sealed as View;
 
 mod sealed {
+    use tutti_buffers::Float;
+
     use super::{AnalyzeError, Chunk};
 
     /// Makes the view from a chunk; unnameable outside the crate.
-    pub trait Sealed<'a>: Sized {
-        fn view<'w: 'a>(chunk: &'a mut Chunk<'w>) -> Result<Self, AnalyzeError>;
+    pub trait Sealed<'a, S: Float>: Sized {
+        fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, AnalyzeError>;
     }
 }
 
-impl<'a> AudioInput<'a> for Interleaved<'a> {}
+impl<'a, S: Float> AudioInput<'a, S> for Interleaved<'a, S> {}
 
-impl<'a> sealed::Sealed<'a> for Interleaved<'a> {
-    fn view<'w: 'a>(chunk: &'a mut Chunk<'w>) -> Result<Self, AnalyzeError> {
+impl<'a, S: Float> sealed::Sealed<'a, S> for Interleaved<'a, S> {
+    fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, AnalyzeError> {
         let layout = chunk.layout;
         match &chunk.held {
             Layout::Interleaved => Ok(Interleaved::new(&chunk.data, layout)?),
@@ -178,7 +181,7 @@ impl<'a> sealed::Sealed<'a> for Interleaved<'a> {
                 chunk.interleaved.clear();
                 chunk
                     .interleaved
-                    .resize(layout.interleaved_len(frames), 0.0);
+                    .resize(layout.interleaved_len(frames), S::ZERO);
                 interleave(
                     Planes::new(planes)?,
                     InterleavedMut::new(&mut chunk.interleaved, layout)?,
@@ -189,10 +192,10 @@ impl<'a> sealed::Sealed<'a> for Interleaved<'a> {
     }
 }
 
-impl<'a> AudioInput<'a> for Mono<'a> {}
+impl<'a, S: Float> AudioInput<'a, S> for Mono<'a, S> {}
 
-impl<'a> sealed::Sealed<'a> for Mono<'a> {
-    fn view<'w: 'a>(chunk: &'a mut Chunk<'w>) -> Result<Self, AnalyzeError> {
+impl<'a, S: Float> sealed::Sealed<'a, S> for Mono<'a, S> {
+    fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, AnalyzeError> {
         let layout = chunk.layout;
         if layout == ChannelLayout::MONO {
             return Ok(match &chunk.held {
@@ -204,7 +207,7 @@ impl<'a> sealed::Sealed<'a> for Mono<'a> {
         chunk.mono.clear();
         chunk
             .mono
-            .resize(ChannelLayout::MONO.interleaved_len(chunk.frames()), 0.0);
+            .resize(ChannelLayout::MONO.interleaved_len(chunk.frames()), S::ZERO);
         let mono = InterleavedMut::new(&mut chunk.mono, ChannelLayout::MONO)?;
         match &chunk.held {
             Layout::Interleaved => fold.fold(Interleaved::new(&chunk.data, layout)?, mono)?,
@@ -216,10 +219,10 @@ impl<'a> sealed::Sealed<'a> for Mono<'a> {
     }
 }
 
-impl<'a> AudioInput<'a> for StereoPlanes<'a> {}
+impl<'a, S: Float> AudioInput<'a, S> for StereoPlanes<'a, S> {}
 
-impl<'a> sealed::Sealed<'a> for StereoPlanes<'a> {
-    fn view<'w: 'a>(chunk: &'a mut Chunk<'w>) -> Result<Self, AnalyzeError> {
+impl<'a, S: Float> sealed::Sealed<'a, S> for StereoPlanes<'a, S> {
+    fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, AnalyzeError> {
         let layout = chunk.layout;
         if layout != ChannelLayout::STEREO {
             return Err(AnalyzeError::Width {
@@ -234,7 +237,7 @@ impl<'a> sealed::Sealed<'a> for StereoPlanes<'a> {
                 chunk.planes.resize_with(2, Vec::new);
                 for plane in &mut chunk.planes {
                     plane.clear();
-                    plane.resize(frames.get(), 0.0);
+                    plane.resize(frames.get(), S::ZERO);
                 }
                 deinterleave(
                     Interleaved::new(&chunk.data, layout)?,
