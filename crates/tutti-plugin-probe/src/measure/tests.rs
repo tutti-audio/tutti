@@ -4,6 +4,7 @@
 //! with, never another render.
 
 use super::*;
+use std::time::Instant;
 use tutti_graph::MAX_NODE_TAIL;
 use tutti_plugin_types::{PluginAudio, PluginResult, Processing};
 
@@ -469,4 +470,92 @@ fn a_measurement_raises_the_ceiling_by_what_it_found() {
             .ceiling(primary().rate),
         finite(9000)
     );
+}
+
+/// **The settle window starts after the reported latency**: a plugin that reports
+/// (and has) more latency than `SETTLE` is not judged silent before its output has
+/// begun. Its onset is at the latency, so the latency is `Honest` and the tail is
+/// the ring.
+#[test]
+fn the_settle_window_starts_after_the_reported_latency() {
+    let latency = frames_of(SETTLE, primary()) * 3 / 2;
+    let m = measure_at(
+        &mut Fake::new(latency, 1000),
+        effect(finite(1000), latency),
+        primary(),
+    )
+    .unwrap();
+    assert_eq!(m.latency, Some(Samples(latency)));
+    assert_eq!(m.verdict.latency, LatencyVerdict::Honest);
+    assert_eq!(m.tail, Some(Samples(1000)));
+    assert_eq!(m.verdict.tail, TailVerdict::Honest);
+}
+
+/// The frames `t` lasts at `config`'s rate.
+fn frames_of(t: Seconds, config: ProbeConfig) -> usize {
+    t.to_samples_ceil(config.rate).get()
+}
+
+/// **A render past its deadline is a typed timeout naming its configuration**, and
+/// the same render with no deadline completes: the deadline, and not the plugin,
+/// ended it.
+#[test]
+fn a_render_past_its_deadline_is_a_typed_timeout() {
+    let config = primary();
+    let now = Instant::now();
+    let lapsed = Deadline::after(now, Duration::ZERO);
+
+    let timed_out = measure_within(
+        &mut Fake::new(0, 100),
+        effect(finite(100), 0),
+        config,
+        lapsed,
+    );
+    assert_eq!(
+        timed_out.unwrap_err(),
+        MeasureFailure::TimedOut {
+            rate: config.rate,
+            block: config.block
+        }
+    );
+
+    let ran = measure_within(
+        &mut Fake::new(0, 100),
+        effect(finite(100), 0),
+        config,
+        Deadline::never(),
+    );
+    assert!(ran.is_ok(), "{ran:?}");
+}
+
+/// A processor whose every block fails.
+struct Failing;
+
+impl Processor for Failing {
+    fn event_input(&self) -> std::num::NonZeroU32 {
+        tutti_plugin_types::MIDI_STACK_BOUND
+    }
+    fn process(&mut self, _: &mut PluginIo<'_>) -> PluginResult<()> {
+        Err(PluginError::Block("no render today"))
+    }
+    fn stop(&mut self) {}
+    fn reset(&mut self) {}
+}
+
+/// **A block that fails is a `Render` failure naming its configuration and the
+/// plugin's reason**, not an absent measurement.
+#[test]
+fn a_block_that_fails_is_a_typed_render_failure() {
+    let config = primary();
+    let failure = measure_at(&mut Failing, effect(finite(0), 0), config).unwrap_err();
+    let MeasureFailure::Render {
+        rate,
+        block,
+        reason,
+    } = failure
+    else {
+        panic!("a render failure: {failure:?}");
+    };
+    assert_eq!((rate, block), (config.rate, config.block));
+    assert!(reason.contains("no render today"), "{reason}");
 }

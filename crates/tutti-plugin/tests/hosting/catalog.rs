@@ -393,8 +393,12 @@ fn a_measure_state_does_not_reach_the_next_measure() {
     let refused = dir.path().join("state");
     std::fs::write(&refused, b"not a state").expect("a state the plugin refuses");
 
+    // The file holds two plugins, so the state is for the one the ref names.
+    let registered = catalog.register(&a).expect("a plugin file");
+    finish(&mut catalog, registered);
+    let named = PluginRef::from(&catalog.db().plugins().next().expect("a registered plugin"));
     let first = catalog
-        .measure(&PluginRef::file(&a).expect("a clap file"), Some(&refused))
+        .measure(&named, Some(&refused))
         .expect("a file that exists");
     let first = finish(&mut catalog, first);
     let [failed] = first.failures.as_slice() else {

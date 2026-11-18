@@ -835,6 +835,8 @@ mod tests {
                 reason: "dlopen failed".into(),
             }),
             ProbeError::Refused(ProbeRefusal::Describe("no".into())),
+            ProbeError::Refused(ProbeRefusal::UnknownPlugin("p".into())),
+            ProbeError::Refused(ProbeRefusal::AmbiguousPlugin { count: 2 }),
             ProbeError::Refused(ProbeRefusal::Empty),
             ProbeError::Refused(ProbeRefusal::Usage),
             ProbeError::Refused(ProbeRefusal::NotMainThread),
@@ -843,8 +845,8 @@ mod tests {
             ProbeError::Io(std::io::ErrorKind::PermissionDenied),
             ProbeError::Result(ResultError::BadMagic),
             ProbeError::Result(ResultError::ProtocolMismatch {
-                expected: 5,
-                found: 4,
+                expected: 6,
+                found: 5,
             }),
             ProbeError::Cancelled,
         ];

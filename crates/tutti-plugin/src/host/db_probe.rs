@@ -1,8 +1,9 @@
 //! The subprocess probe, as the probe `tutti-plugin-db` scans with.
 
 pub use super::probe::DEFAULT_PROBE_TIMEOUT;
+pub(crate) use super::probe::ProbeState;
 use super::probe::{measure_metadata_with, probe_metadata_with};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 use tracing::debug;
 use tutti_plugin_db::{ProbeFailure, probe_plugin_fallback};
@@ -23,8 +24,8 @@ pub const DEFAULT_MEASURE_TIMEOUT: Duration = Duration::from_secs(180);
 pub(crate) struct Probing {
     /// Also render each plugin ([`DEFAULT_MEASURE_TIMEOUT`]).
     pub(crate) measure: bool,
-    /// The state file a measurement puts the plugin in first.
-    pub(crate) state: Option<PathBuf>,
+    /// The state a measurement puts one plugin in first.
+    pub(crate) state: Option<ProbeState>,
     /// Answer with filename metadata when `plugin-probe` cannot be found. A scan
     /// lists what it found by file name then; a task that was asked about one
     /// file reports the probe's absence instead.
@@ -48,7 +49,7 @@ pub(crate) fn probe_fn(
     };
     move |path, format, stop| {
         let probed = if how.measure {
-            measure_metadata_with(&locator, path, format, timeout, stop, how.state.as_deref())
+            measure_metadata_with(&locator, path, format, timeout, stop, how.state.as_ref())
         } else {
             probe_metadata_with(&locator, path, format, timeout, stop)
         };

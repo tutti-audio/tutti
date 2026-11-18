@@ -7,13 +7,17 @@
 #![forbid(unsafe_code)]
 
 use std::path::Path;
-use tutti_plugin_types::{MainThreadMarker, PluginDescriptor, PluginFormat, ProbeRefusal};
+use std::time::Instant;
+use tutti_plugin_types::{
+    Deadline, MainThreadMarker, MeasureFailure, PluginDescriptor, PluginFormat, ProbeRefusal,
+    Unmeasured,
+};
 
 mod measure;
 
 pub use measure::{
-    BUDGET_MARGIN, CONFIGS, IMPULSE, NOTE, NOTE_LENGTH, SETTLE, SILENCE, Subject, measure,
-    measure_at,
+    BUDGET_MARGIN, CONFIGS, IMPULSE, NOTE, NOTE_LENGTH, RENDER_DEADLINE, SETTLE, SILENCE, Subject,
+    measure, measure_at, measure_within,
 };
 
 /// The format a file is read as: `format` when the caller names one, and the
@@ -129,14 +133,34 @@ fn au(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeRefusal> {
     })
 }
 
-/// [`describe`], then measure each plugin the file holds:
-/// the descriptors come back with [`PluginDescriptor::measured`] set where the
-/// plugin could be measured, and `None` where it could not (it would not load
-/// for a render, has no audio output, or failed a block).
+/// The plugins a measuring probe was asked about: which one takes the state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StateFor<'a> {
+    /// The id of the plugin the state is for; `None` is the file's first plugin.
+    pub plugin: Option<&'a str>,
+    /// The bytes the plugin's own `save_state` wrote.
+    pub bytes: &'a [u8],
+}
+
+impl StateFor<'_> {
+    /// Whether the plugin `id` is the one the state is for: the one named, or, with
+    /// none named, the file's only plugin (the caller has checked there is one).
+    fn is_for(&self, id: &str) -> bool {
+        self.plugin.is_none_or(|wanted| wanted == id)
+    }
+}
+
+/// [`describe`], then measure each plugin the file holds: the descriptors come
+/// back with [`PluginDescriptor::measured`] set where the plugin could be
+/// measured, and the plugins that could not be come back beside them, each with
+/// its [`MeasureFailure`].
 ///
-/// `state` puts each plugin in a state before it is measured (bytes the plugin's
-/// own `save_state` wrote); without it the plugin is measured as it loads. It is
-/// meant for a file of one plugin.
+/// `state` puts one plugin in a state before it is measured (bytes the plugin's
+/// own `save_state` wrote): the plugin it names, or the file's only plugin when it
+/// names none. The others are measured as they load, and without `state` every
+/// plugin is. `run` is the deadline of the whole run: each plugin's renders are
+/// bounded by what it leaves, and once it has passed the plugins that remain are
+/// reported [`MeasureFailure::BudgetSpent`] without being loaded.
 ///
 /// A plugin that crashes or hangs while measuring takes this process with it, so
 /// the host that spawned it sees the crash or the timeout of a probe that failed
@@ -144,36 +168,88 @@ fn au(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeRefusal> {
 ///
 /// # Errors
 ///
-/// As [`describe`], or [`ProbeRefusal::StateRefused`] for a plugin that refused
-/// `state`.
+/// As [`describe`]; [`ProbeRefusal::UnknownPlugin`] if `state` names a plugin the
+/// file does not hold; [`ProbeRefusal::AmbiguousPlugin`] if it names none and the
+/// file holds several; [`ProbeRefusal::StateRefused`] if the plugin took no such state.
 pub fn describe_measured(
     main: MainThreadMarker,
     path: &Path,
     format: Option<PluginFormat>,
-    state: Option<&[u8]>,
-) -> Result<Vec<PluginDescriptor>, ProbeRefusal> {
+    state: Option<StateFor<'_>>,
+    run: Deadline,
+) -> Result<(Vec<PluginDescriptor>, Vec<Unmeasured>), ProbeRefusal> {
     let mut plugins = describe(main, path, format)?;
-    let read_as = routing(path, format);
-    for plugin in &mut plugins {
-        plugin.measured = match read_as {
-            #[cfg(feature = "vst3")]
-            Some(PluginFormat::Vst3) => {
-                measure::<tutti_vst3_host::Vst3Loaded>(main, path, plugin, state)?
-            }
-            #[cfg(feature = "clap")]
-            Some(PluginFormat::Clap) => {
-                measure::<tutti_clap_host::ClapLoaded>(main, path, plugin, state)?
-            }
-            #[cfg(feature = "vst2")]
-            Some(PluginFormat::Vst2) => {
-                measure::<tutti_vst2_host::Vst2Loaded>(main, path, plugin, state)?
-            }
-            #[cfg(all(feature = "au", target_os = "macos"))]
-            Some(PluginFormat::AudioUnit) => {
-                measure::<tutti_au_host::AuLoaded>(main, path, plugin, state)?
-            }
-            _ => None,
-        };
+    match state.map(|s| s.plugin) {
+        Some(Some(wanted)) if !plugins.iter().any(|p| p.id == wanted) => {
+            return Err(ProbeRefusal::UnknownPlugin(wanted.to_owned()));
+        }
+        // A state with no plugin named is for the file's plugin, which must be one.
+        Some(None) if plugins.len() != 1 => {
+            return Err(ProbeRefusal::AmbiguousPlugin {
+                count: plugins.len(),
+            });
+        }
+        _ => {}
     }
-    Ok(plugins)
+    let read_as = routing(path, format);
+    let mut unmeasured = Vec::new();
+    for plugin in &mut plugins {
+        // A spent budget loads nothing more: the plugin is not loaded, activated
+        // or rendered, and a state meant for it is not applied.
+        if run.passed(Instant::now()) {
+            unmeasured.push(Unmeasured {
+                plugin: plugin.id.clone(),
+                failure: MeasureFailure::BudgetSpent,
+            });
+            continue;
+        }
+        let state = state.filter(|s| s.is_for(&plugin.id)).map(|s| s.bytes);
+        match measure_as(read_as, main, path, plugin, state, run) {
+            Ok(measured) => plugin.measured = Some(measured),
+            Err(MeasureFailure::StateRefused { reason }) => {
+                return Err(ProbeRefusal::StateRefused {
+                    plugin: plugin.id.clone(),
+                    reason,
+                });
+            }
+            Err(failure) => unmeasured.push(Unmeasured {
+                plugin: plugin.id.clone(),
+                failure,
+            }),
+        }
+    }
+    Ok((plugins, unmeasured))
+}
+
+/// [`measure()`] with the host of `format`.
+fn measure_as(
+    format: Option<PluginFormat>,
+    main: MainThreadMarker,
+    path: &Path,
+    plugin: &PluginDescriptor,
+    state: Option<&[u8]>,
+    run: Deadline,
+) -> Result<tutti_plugin_types::Measured, MeasureFailure> {
+    match format {
+        #[cfg(feature = "vst3")]
+        Some(PluginFormat::Vst3) => {
+            measure::<tutti_vst3_host::Vst3Loaded>(main, path, plugin, state, run)
+        }
+        #[cfg(feature = "clap")]
+        Some(PluginFormat::Clap) => {
+            measure::<tutti_clap_host::ClapLoaded>(main, path, plugin, state, run)
+        }
+        #[cfg(feature = "vst2")]
+        Some(PluginFormat::Vst2) => {
+            measure::<tutti_vst2_host::Vst2Loaded>(main, path, plugin, state, run)
+        }
+        #[cfg(all(feature = "au", target_os = "macos"))]
+        Some(PluginFormat::AudioUnit) => {
+            measure::<tutti_au_host::AuLoaded>(main, path, plugin, state, run)
+        }
+        // `describe` read this file as a compiled-in format, so this is not reached.
+        _ => Err(MeasureFailure::Load {
+            reason: "the format is not compiled into this plugin-probe".to_owned(),
+        }),
+    }
 }
