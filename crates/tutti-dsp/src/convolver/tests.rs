@@ -182,8 +182,8 @@ fn block_path_is_bit_identical_to_the_per_sample_path() {
 /// history for two FFT cycles and in the overlap for one more; past the
 /// latency plus three blocks the output is pure convolution of zeros.
 ///
-/// The inverse's handling of those parts is tested in
-/// `tutti-types`; here the NaN reaches the output with or without them.
+/// The inverse's handling of those parts is tested with `RealFft` in the
+/// `fft` module; here the NaN reaches the output with or without them.
 #[test]
 fn a_nan_input_propagates_and_then_leaves() {
     let ir: Vec<f32> = vec![0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2];

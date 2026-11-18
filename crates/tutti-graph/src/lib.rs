@@ -700,8 +700,6 @@ pub use rtlog::{
 };
 pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use wake::Wake;
-// The reading is a value type, `tutti-types`' (the modulation compiler
-// carries one without naming the graph); the clock that keeps it is here.
 pub use meter::{Level, MeterReader, MeterWriter};
 #[cfg(feature = "testing")]
 pub use reference::Reference;
