@@ -104,7 +104,7 @@ fn the_tail_covers_the_worst_stopped_input_to_the_floor() {
     let floor = 10f64.powf(-3.0);
     for corner in [1.0f32, 10.0, 100.0] {
         let controls = DcBlockerControls { corner: Hz(corner) };
-        let n = DcBlocker::<f64>::tail(&controls, RATE).get();
+        let n = controls.tail(RATE).get();
         let settle = 20 * n;
         for hold in [1usize, 1000] {
             let mut x = vec![-1.0; settle];

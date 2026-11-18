@@ -14,7 +14,7 @@
 //! The quantizer is applied to the held value every frame, so a depth that moves while a
 //! sample is held changes what is heard of it at once.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_types::ChannelLayout;
 use tutti_units::{BitDepth, HoldFactor};
 
@@ -54,21 +54,6 @@ fn levels(bits: BitDepth) -> f64 {
     }
 }
 
-/// `x` rounded to the nearest whole number, ties to even, in the float `F`: adding and
-/// removing `2^p` (`p` the width of `F`'s significand, `1 / EPSILON`) leaves an integer
-/// below it, and a value at or past it is already one. NaN stays NaN and the sign of zero is
-/// kept.
-#[inline(always)]
-fn round_ties_even<F: Float>(x: F) -> F {
-    let span = F::ONE / F::EPSILON;
-    let magnitude = x.abs();
-    if magnitude >= span {
-        x
-    } else {
-        ((magnitude + span) - span) * x.signum()
-    }
-}
-
 /// `x` quantized to `bits`: `clamp(round(x q) / q, -1, 1)` with `q = 2^(b-1)`.
 ///
 /// The rounding is half to even. A whole depth `b` has the steps `j / q` for the integers
@@ -85,7 +70,7 @@ pub fn quantize<F: Float>(x: F, bits: BitDepth) -> F {
 /// [`quantize`] with `q` already read from the depth.
 #[inline(always)]
 fn crush<F: Float>(x: F, q: F) -> F {
-    (round_ties_even(x * q) / q).clamp(-F::ONE, F::ONE)
+    ((x * q).round_ties_even() / q).clamp(-F::ONE, F::ONE)
 }
 
 /// The controls of a [`BitCrusher`].
@@ -162,10 +147,10 @@ impl<F: Float> BitCrusher<F> {
                     since = 0;
                 }
                 if since == 0 {
-                    *held = F::from_f64(x.to_f64());
+                    *held = x.convert_to::<F>();
                 }
                 since += 1;
-                *y = S::from_f64(crush(*held, q).to_f64());
+                *y = crush(*held, q).convert_to::<S>();
             }
             end = since;
         }

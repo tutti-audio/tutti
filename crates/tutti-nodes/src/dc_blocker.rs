@@ -48,7 +48,7 @@ impl DcBlockerConfig {
 /// built with one reads as the default.
 ///
 /// The tail is finite: the frames for a stopped input to fall under the tail floor,
-/// falling as `R^n` ([`DcBlocker::tail`]), narrowed per block to the corner in force. No
+/// falling as `R^n` ([`DcBlockerControls::tail`]), narrowed per block to the corner in force. No
 /// latency. A [`KernelNode`], so a non-finite sample is heard in at most one block. Made
 /// from a [`DcBlockerConfig`] (`DcBlockerNode::from`).
 ///
@@ -151,16 +151,16 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
 
     /// The ring-out at the lowest corner: the longest over every control.
     fn tail(&self) -> Tail {
-        Tail::Finite(DcBlocker::<F>::tail(
-            &DcBlockerControls {
+        Tail::Finite(
+            DcBlockerControls {
                 corner: MIN_DC_CORNER,
-            },
-            self.rate,
-        ))
+            }
+            .tail(self.rate),
+        )
     }
 
     fn tail_of(&mut self, controls: &DcBlockerControls) -> Tail {
-        Tail::Finite(DcBlocker::<F>::tail(controls, self.rate))
+        Tail::Finite(controls.tail(self.rate))
     }
 }
 

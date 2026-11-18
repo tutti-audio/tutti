@@ -186,3 +186,73 @@ fn float_bounds_sum_rem_div_assign_and_display() {
     assert_eq!(generic::<f32>(), (6.0, 2.5, "2".to_string()));
     assert_eq!(generic::<f64>(), (6.0, 2.5, "2".to_string()));
 }
+
+/// `round` is the nearest integer with a tie away from zero, `round_ties_even` with a tie to
+/// the even one (IEEE 754 `roundToIntegralTiesToEven`); both keep the sign of a zero, leave a
+/// whole value (`2^p` and `2^p + 1`, `p` the significand's width, and a large negative), NaN and
+/// the infinities as they are.
+macro_rules! rounding_pins {
+    ($name:ident, $t:ty, $two_p:expr) => {
+        #[test]
+        fn $name() {
+            let (round, even) = (<$t as Float>::round, <$t as Float>::round_ties_even);
+            for (x, away, ties) in [
+                (0.5, 1.0, 0.0),
+                (-0.5, -1.0, -0.0),
+                (1.5, 2.0, 2.0),
+                (2.5, 3.0, 2.0),
+                (-2.5, -3.0, -2.0),
+                (0.3, 0.0, 0.0),
+                (-0.3, -0.0, -0.0),
+            ] {
+                assert_eq!(round(x).to_bits(), <$t>::to_bits(away), "round {x}");
+                assert_eq!(even(x).to_bits(), <$t>::to_bits(ties), "ties to even {x}");
+            }
+            let two_p: $t = $two_p;
+            for x in [
+                0.0,
+                -0.0,
+                two_p,
+                two_p + 1.0,
+                -two_p,
+                -(two_p + 1.0),
+                -1e30,
+                1e30,
+            ] {
+                assert_eq!(round(x).to_bits(), x.to_bits(), "round {x}");
+                assert_eq!(even(x).to_bits(), x.to_bits(), "ties to even {x}");
+            }
+            for f in [round, even] {
+                assert!(f(<$t>::NAN).is_nan());
+                assert_eq!(f(<$t>::INFINITY), <$t>::INFINITY);
+                assert_eq!(f(<$t>::NEG_INFINITY), <$t>::NEG_INFINITY);
+            }
+        }
+    };
+}
+
+rounding_pins!(f32_rounds_by_ieee_754, f32, 8_388_608.0);
+rounding_pins!(f64_rounds_by_ieee_754, f64, 4_503_599_627_370_496.0);
+
+/// `atan` keeps the sign of a zero, is `π/4` at 1 and `±π/2` at the infinities, is NaN for
+/// NaN, and `atan(1/√3) = π/6`, within an ulp.
+macro_rules! atan_pins {
+    ($name:ident, $t:ty, $pi:expr) => {
+        #[test]
+        fn $name() {
+            let atan = <$t as Float>::atan;
+            let pi: $t = $pi;
+            assert_eq!(atan(0.0).to_bits(), (0.0 as $t).to_bits());
+            assert_eq!(atan(-0.0).to_bits(), (-0.0 as $t).to_bits());
+            assert!((atan(1.0) - pi / 4.0).abs() <= <$t>::EPSILON);
+            assert_eq!(atan(<$t>::INFINITY), pi / 2.0);
+            assert_eq!(atan(<$t>::NEG_INFINITY), -pi / 2.0);
+            assert!(atan(<$t>::NAN).is_nan());
+            let third = 1.0 / (3.0 as $t).sqrt();
+            assert!((atan(third) - pi / 6.0).abs() <= <$t>::EPSILON);
+        }
+    };
+}
+
+atan_pins!(f32_atan_meets_its_closed_forms, f32, core::f32::consts::PI);
+atan_pins!(f64_atan_meets_its_closed_forms, f64, core::f64::consts::PI);

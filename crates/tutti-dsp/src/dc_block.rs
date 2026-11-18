@@ -9,7 +9,7 @@
 //! input decays as `R^n`, and the gain at `omega = 2 pi f / fs` is
 //! `|1 - e^(-j omega)| / |1 - R e^(-j omega)|`, which is `1/sqrt(2)` close to the corner.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_types::ChannelLayout;
 use tutti_units::{Hz, SampleRate, Samples};
 
@@ -45,6 +45,17 @@ pub struct DcBlockerControls {
 impl DcBlockerControls {
     /// The [`DC_CORNER`].
     pub const DEFAULT: Self = Self { corner: DC_CORNER };
+
+    /// The frames, from the end of an input, until the output is under
+    /// [`TAIL_FLOOR`](crate::TAIL_FLOOR) of the input's peak, for a blocker with these controls,
+    /// erring long: past its first tap the impulse response is `-(1 - R) R^(k-1)`, all one
+    /// sign, so after a stop `|y| <= A R^(n-1)` for an input of peak `A`; the frames are those
+    /// of `R^n` under the floor's amplitude, plus one.
+    #[must_use]
+    pub fn tail(&self, rate: SampleRate) -> Samples {
+        let r = dc_pole(self.corner, rate);
+        Samples((ring_frames(r, crate::TAIL_FLOOR).ceil() as usize).saturating_add(1))
+    }
 }
 
 /// A DC blocker of any width in the float `F`: one `(x[n-1], y[n-1])` pair per channel, one
@@ -96,17 +107,6 @@ impl<F: Float + Lerp> DcBlocker<F> {
         self.settle();
     }
 
-    /// The frames, from the end of an input, until the output is under
-    /// [`TAIL_FLOOR`](crate::TAIL_FLOOR) of the input's peak, for a blocker with `controls`,
-    /// erring long: past its first tap the impulse response is `-(1 - R) R^(k-1)`, all one
-    /// sign, so after a stop `|y| <= A R^(n-1)` for an input of peak `A`; the frames are those
-    /// of `R^n` under the floor's amplitude, plus one.
-    #[must_use]
-    pub fn tail(controls: &DcBlockerControls, rate: SampleRate) -> Samples {
-        let r = dc_pole(controls.corner, rate);
-        Samples((ring_frames(r, crate::TAIL_FLOOR).ceil() as usize).saturating_add(1))
-    }
-
     /// Runs `input` into `output`, channel `c` through its own recursion. The channels
     /// rendered are the fewest of the two views' and the blocker's, the frames the fewer of
     /// the two views'. No allocation.
@@ -124,10 +124,10 @@ impl<F: Float + Lerp> DcBlocker<F> {
             let (mut x1, mut y1) = *state;
             for (i, (y, &x)) in y.iter_mut().zip(x).enumerate() {
                 let r = self.pole.at(first.saturating_add(i as u32));
-                let x = F::from_f64(x.to_f64());
+                let x = x.convert_to::<F>();
                 let out = x - x1 + r * y1;
                 (x1, y1) = (x, out);
-                *y = S::from_f64(out.to_f64());
+                *y = out.convert_to::<S>();
             }
             *state = (x1, y1);
         }

@@ -10,7 +10,7 @@
 //! previous input to this one, which removes most of what the curve folds back past the Nyquist
 //! frequency. The bank then keeps each channel's last two inputs.
 
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
 use tutti_types::MAX_CHANNELS;
 use tutti_units::{Drive, SampleRate, Samples};
 
@@ -110,16 +110,13 @@ impl ShapeKind {
         match self {
             Self::Tanh => (x * hardness).tanh(),
             // Rescaled to saturate at ±1 while keeping unit slope at the origin.
-            Self::Atan => {
-                // `atan2(y, 1)` is `atan(y)`.
-                (x * (hardness * F::PI * half)).atan2(one) * (F::from_f32(2.0) / F::PI)
-            }
+            Self::Atan => (x * (hardness * F::PI * half)).atan() * (F::from_f32(2.0) / F::PI),
             Self::Softsign => {
                 let y = x * hardness;
                 y / (one + y.abs())
             }
             Self::HardClip => (x * hardness).clamp(-one, one),
-            Self::Crush => round_half_away(x * hardness) / hardness,
+            Self::Crush => (x * hardness).round() / hardness,
             Self::SoftCrush => {
                 let y = x * hardness;
                 let step = y.floor();
@@ -134,7 +131,7 @@ impl ShapeKind {
     fn shape_held<F: Float, S: Float>(self, hardness: F, input: &[S], output: &mut [S]) {
         with_kind!(self, |K| {
             for (o, x) in output.iter_mut().zip(input) {
-                *o = S::from_f64(K.curve(hardness, F::from_f64(x.to_f64())).to_f64());
+                *o = K.curve(hardness, x.convert_to::<F>()).convert_to::<S>();
             }
         })
     }
@@ -144,24 +141,10 @@ impl ShapeKind {
     fn shape_each<F: Float, S: Float>(self, hardness: &[F], input: &[S], output: &mut [S]) {
         with_kind!(self, |K| {
             for ((o, x), &h) in output.iter_mut().zip(input).zip(hardness) {
-                *o = S::from_f64(K.curve(h, F::from_f64(x.to_f64())).to_f64());
+                *o = K.curve(h, x.convert_to::<F>()).convert_to::<S>();
             }
         })
     }
-}
-
-/// `x` rounded to the nearest whole number, halves away from zero, in the float `F`. NaN
-/// stays NaN and the sign of zero is kept.
-#[inline(always)]
-fn round_half_away<F: Float>(x: F) -> F {
-    let magnitude = x.abs();
-    let whole = magnitude.floor();
-    let up = if magnitude - whole >= F::from_f32(0.5) {
-        whole + F::ONE
-    } else {
-        whole
-    };
-    up * x.signum()
 }
 
 /// The ninth-order smoothstep: `0 → 0`, `1 → 1`, with the first four
@@ -188,8 +171,9 @@ fn smooth9<F: Float>(x: F) -> F {
 ///
 /// The history is the input before the drive, and the drive of the frame scales all of it, so a
 /// drive change makes no step. The quotients are formed in `f64`, where the cancellation of the
-/// antiderivatives is conditioned, and the history is kept in the bank's float. A non-finite input enters the history as 0,
-/// so the frame after it (the two after, at second order) reads its segment from 0.
+/// antiderivatives is conditioned, and the history is kept in the bank's float. A non-finite
+/// input enters the history as 0, so the frame after it (the two after, at second order) reads
+/// its segment from 0.
 ///
 /// Each order delays the signal: half a frame at first order, a whole frame at second
 /// ([`delay`](Self::delay)). A kind whose antiderivatives are not elementary to the order asked
@@ -252,8 +236,8 @@ impl WaveshaperControls {
     };
 }
 
-/// A waveshaper of any width in the float `F`: one curve ([`ShapeKind`]) at one drive shared by every
-/// channel, each channel shaped alone. Memoryless unless [`antialiasing`](Self::antialiasing)
+/// A waveshaper of any width in the float `F`: one curve ([`ShapeKind`]) at one drive shared by
+/// every channel, each channel shaped alone. Memoryless unless [`antialiasing`](Self::antialiasing)
 /// is on, when each channel keeps its last two inputs. At most [`MAX_CHANNELS`] channels wide.
 ///
 /// Built on the control side for one rate; nothing it holds grows.
@@ -357,7 +341,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
                     let i = start + k;
                     let drive = lane
                         .and_then(|l| l.samples().get(i))
-                        .map(|x| F::from_f64(x.to_f64()))
+                        .map(|x| x.convert_to::<F>())
                         .filter(|d| d.is_finite())
                         .unwrap_or_else(|| {
                             let step = taken.saturating_add(1).saturating_add(i as u32);

@@ -5,7 +5,7 @@
 //! scales the side and keeps the mid: `L' = M + w S`, `R' = M - w S`. Width 0 is the mono
 //! sum, 1 the pair as it is, 2 doubles the side.
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, Planes, PlanesMut, Sample};
 use tutti_units::{SampleRate, StereoWidth};
 
 use crate::{GAIN_GLIDE, Glide, Lerp, Steps};
@@ -143,10 +143,10 @@ impl<F: Float + Lerp> WidthBank<F> {
                 } else {
                     held
                 };
-                let (l, r) = (F::from_f64(l.to_f64()), F::from_f64(r.to_f64()));
+                let (l, r) = (l.convert_to::<F>(), r.convert_to::<F>());
                 let (mid, side) = ((l + r) * half, (l - r) * half);
-                *o_l = S::from_f64((mid + w * side).to_f64());
-                *o_r = S::from_f64((mid - w * side).to_f64());
+                *o_l = (mid + w * side).convert_to::<S>();
+                *o_r = (mid - w * side).convert_to::<S>();
             }
         }
         self.width

@@ -395,6 +395,15 @@ pub trait Float:
     /// The smallest integer not below the value.
     #[must_use]
     fn ceil(self) -> Self;
+    /// The nearest integer, a tie away from zero; a value that is already whole, NaN and the
+    /// infinities are returned as they are, and a zero keeps its sign.
+    #[must_use]
+    fn round(self) -> Self;
+    /// The nearest integer, a tie to the even one (IEEE 754 `roundToIntegralTiesToEven`); a
+    /// value that is already whole, NaN and the infinities are returned as they are, and a
+    /// result of zero keeps the value's sign.
+    #[must_use]
+    fn round_ties_even(self) -> Self;
     /// The square root.
     #[must_use]
     fn sqrt(self) -> Self;
@@ -425,6 +434,9 @@ pub trait Float:
     /// The hyperbolic tangent.
     #[must_use]
     fn tanh(self) -> Self;
+    /// The arctangent, in radians, within `-π/2..=π/2`.
+    #[must_use]
+    fn atan(self) -> Self;
     /// The angle of the point `(other, self)` from the positive x axis, in
     /// radians: the four-quadrant arctangent of `self / other`.
     #[must_use]
@@ -468,7 +480,7 @@ pub trait Float:
 macro_rules! float_impl {
     (
         $t:ident,
-        $abs:ident, $floor:ident, $ceil:ident, $sqrt:ident, $exp:ident, $exp2:ident,
+        $abs:ident, $floor:ident, $ceil:ident, $round:ident, $roundeven:ident, $atan:ident, $sqrt:ident, $exp:ident, $exp2:ident,
         $ln:ident, $log10:ident, $pow:ident, $sin:ident, $cos:ident, $tan:ident,
         $tanh:ident, $atan2:ident, $fma:ident, $min:ident, $max:ident, $copysign:ident
     ) => {
@@ -492,6 +504,18 @@ macro_rules! float_impl {
             #[inline]
             fn ceil(self) -> Self {
                 libm::$ceil(self)
+            }
+            #[inline]
+            fn round(self) -> Self {
+                libm::$round(self)
+            }
+            #[inline]
+            fn round_ties_even(self) -> Self {
+                libm::$roundeven(self)
+            }
+            #[inline]
+            fn atan(self) -> Self {
+                libm::$atan(self)
             }
             #[inline]
             fn sqrt(self) -> Self {
@@ -588,10 +612,10 @@ macro_rules! float_impl {
 }
 
 float_impl!(
-    f32, fabsf, floorf, ceilf, sqrtf, expf, exp2f, logf, log10f, powf, sinf, cosf, tanf, tanhf,
-    atan2f, fmaf, fminf, fmaxf, copysignf
+    f32, fabsf, floorf, ceilf, roundf, roundevenf, atanf, sqrtf, expf, exp2f, logf, log10f, powf,
+    sinf, cosf, tanf, tanhf, atan2f, fmaf, fminf, fmaxf, copysignf
 );
 float_impl!(
-    f64, fabs, floor, ceil, sqrt, exp, exp2, log, log10, pow, sin, cos, tan, tanh, atan2, fma,
-    fmin, fmax, copysign
+    f64, fabs, floor, ceil, round, roundeven, atan, sqrt, exp, exp2, log, log10, pow, sin, cos,
+    tan, tanh, atan2, fma, fmin, fmax, copysign
 );

@@ -243,7 +243,7 @@ impl<F: Float + Lerp> Oversampled<F> {
                     *h = l
                         .samples()
                         .get(start + k / factor)
-                        .map_or(F::NAN, |d| F::from_f64(d.to_f64()));
+                        .map_or(F::NAN, |d| d.convert_to::<F>());
                 }
                 Mono::new(&*high)
             });

@@ -188,6 +188,8 @@ impl ShapeKind {
     ) {
         with_kind!(self, |K| {
             for ((o, x), &h) in output.iter_mut().zip(input).zip(hardness) {
+                // The quotients are formed in f64 whatever `F` is: the antiderivatives' cancellation
+                // needs it. The history is kept in `F`.
                 let x = x.to_f64();
                 let past = [history[0].to_f64(), history[1].to_f64()];
                 *o = S::from_f64(K.step(order, h.to_f64(), x, past));
