@@ -209,8 +209,8 @@ fn sixteen_bit_capture_round_trips() {
     assert_eq!(reader.spec().sample_format, SampleFormat::Int);
 
     let samples: Vec<i16> = reader.samples::<i16>().map(|s| s.unwrap()).collect();
-    // Full scale quantizes through the shared `f32_to_i16`, not a local copy.
-    assert_eq!(samples, vec![32767, -32767, 0, 0]);
+    // `Sample`'s rule: +1.0 clips to MAX, -1.0 is MIN exactly.
+    assert_eq!(samples, vec![32767, -32768, 0, 0]);
 }
 
 /// `Int24` — the default depth, and so the one a caller gets by writing
@@ -229,8 +229,8 @@ fn twenty_four_bit_capture_round_trips() {
     assert_eq!(reader.spec().sample_format, SampleFormat::Int);
 
     let samples: Vec<i32> = reader.samples::<i32>().map(|s| s.unwrap()).collect();
-    // Full scale through the shared `f32_to_i24`, not a local copy.
-    assert_eq!(samples, vec![8_388_607, -8_388_607, 0, 0]);
+    // `Sample`'s rule: +1.0 clips to MAX, -1.0 is MIN exactly.
+    assert_eq!(samples, vec![8_388_607, -8_388_608, 0, 0]);
 }
 
 /// The speaker mask of a multichannel file is the one for tutti's order, not
