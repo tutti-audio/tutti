@@ -94,23 +94,22 @@ fn stable_pair<F: Float>(fb: F, cross: F, bound: F) -> (F, F) {
     (F::from_unit(fb), F::from_unit(cross))
 }
 
-/// The per-frame lanes a delay reads beside its audio, in the audio's sample format, each
+/// The per-frame lanes a delay reads beside its audio, in the audio's float, each
 /// `None` where nothing drives it. A lane is at least as long as the frames a call renders;
 /// a frame past its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DelayLanes<'a, S: Float = f32> {
+pub struct DelayLanes<'a, F: Float> {
     /// The delay time in seconds, of every channel.
-    pub time: Option<Mono<'a, S>>,
+    pub time: Option<Mono<'a, F>>,
     /// The feedback.
-    pub feedback: Option<Mono<'a, S>>,
+    pub feedback: Option<Mono<'a, F>>,
 }
 
 /// A feedback delay of any width: a [`DelayLine`] per channel, and the loop that
 /// recirculates them, all in the state float `F`.
 ///
 /// Built on the control side for one rate, where it allocates the lines; a clone keeps
-/// their size, and [`reset`](Self::reset) zeroes them without allocating. A view of
-/// another [`Float`] is converted at the edges.
+/// their size, and [`reset`](Self::reset) zeroes them without allocating.
 #[derive(Clone, Debug)]
 pub struct DelayBank<F: Float> {
     lines: Box<[DelayLine<F>]>,
@@ -148,7 +147,7 @@ impl<F: Float + Lerp> DelayBank<F> {
             interpolation: layout.interpolation(),
             routing: *layout.routing(),
             weights: (0..width * width)
-                .map(|k| F::from_f64(layout.routing().weight(k / width, k % width).get()))
+                .map(|k| F::from_unit(layout.routing().weight(k / width, k % width)))
                 .collect(),
             linked: layout.times().is_linked(),
             rate,
@@ -209,12 +208,12 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// into the line, and one that is not finite is the glided delay; a feedback lane frame
     /// is clamped into the stable range, and one that is not finite is the glided feedback.
     /// No allocation.
-    pub fn process<S: Float>(
+    pub fn process(
         &mut self,
         glides: &mut DelayGlides<F>,
-        lanes: DelayLanes<'_, S>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        lanes: DelayLanes<'_, F>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let width = self
@@ -222,7 +221,7 @@ impl<F: Float + Lerp> DelayBank<F> {
             .len()
             .min(input.channels())
             .min(output.channels());
-        let xs: [&[S]; MAX_DELAY_CHANNELS] = core::array::from_fn(|c| {
+        let xs: [&[F]; MAX_DELAY_CHANNELS] = core::array::from_fn(|c| {
             if c < width {
                 &input.plane(c).samples()[..frames]
             } else {
@@ -230,7 +229,7 @@ impl<F: Float + Lerp> DelayBank<F> {
             }
         });
         let mut outs = output.iter_mut();
-        let mut ys: [&mut [S]; MAX_DELAY_CHANNELS] = core::array::from_fn(|c| {
+        let mut ys: [&mut [F]; MAX_DELAY_CHANNELS] = core::array::from_fn(|c| {
             let plane = if c < width { outs.next() } else { None };
             plane.map_or_else(Default::default, |p| &mut p.into_samples_mut()[..frames])
         });
@@ -256,8 +255,8 @@ impl<F: Float + Lerp> DelayBank<F> {
         let time_at = |i: usize| g.time.at(step(g.time.taken(), i));
         let linked = self.linked;
         let (rate, cap) = (self.rate, self.cap);
-        // The rate crosses into the lane's format once per block.
-        let lane_rate = S::from_f64(rate.get());
+        // The rate crosses into the data's float once per block.
+        let lane_rate = F::from_unit(rate);
         let line_end = ReadPosition::from_frames(Samples::new(cap));
         let base = |c: usize, delay: ReadPosition| {
             if c == 0 || linked { delay } else { g.own[c] }
@@ -281,23 +280,18 @@ impl<F: Float + Lerp> DelayBank<F> {
             // a pair whatever drives them.
             let gain = |i: usize| -> (F, F) {
                 let glided = at(&g.feedback, i);
-                let fb = feedback.and_then(|s| s.get(i)).map_or(glided, |x| {
-                    let x = x.to_f64();
-                    if x.is_finite() {
-                        F::from_f64(x).clamp(F::ZERO, bound)
-                    } else {
-                        glided.clamp(F::ZERO, bound)
-                    }
+                let fb = feedback.and_then(|s| s.get(i)).map_or(glided, |&x| {
+                    if x.is_finite() { x } else { glided }.clamp(F::ZERO, bound)
                 });
                 stable_pair(fb, at(&g.cross, i), bound)
             };
             let delay_at = |c: usize, i: usize| -> ReadPosition {
-                // A lane value is seconds in the audio's own format: frames in that format, then
+                // A lane value is seconds in the audio's own float: frames in that float, then
                 // a position by the one data-to-position direction. A lane-driven time has the
                 // lane's own precision; a held time keeps the exact `ReadPosition::of` path.
                 match time.and_then(|s| s.get(i)) {
                     Some(&x) if x.is_finite() => {
-                        S::offset_position(ReadPosition::START, x * lane_rate).min(line_end)
+                        F::offset_position(ReadPosition::START, x * lane_rate).min(line_end)
                     }
                     _ => base(c, time_at(i)),
                 }
@@ -317,10 +311,10 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// The block, `gain(i)` the bounded `(fb, cf)` pair at frame `i` and `delay_at(c, i)`
     /// channel `c`'s delay. Constant closures compile down to constants.
     #[inline(always)]
-    fn run<S: Float>(
+    fn run(
         &mut self,
-        xs: &[&[S]],
-        ys: &mut [&mut [S]],
+        xs: &[&[F]],
+        ys: &mut [&mut [F]],
         frames: usize,
         coupled: bool,
         gain: impl Fn(usize) -> (F, F),
@@ -333,8 +327,7 @@ impl<F: Float + Lerp> DelayBank<F> {
             for (c, line) in self.lines.iter_mut().enumerate().take(width) {
                 for (i, (y, x)) in ys[c][..frames].iter_mut().zip(xs[c]).enumerate() {
                     let (fb, _) = gain(i);
-                    let out = delay_step(line, x.convert_to::<F>(), delay_at(c, i), fb, interp);
-                    *y = out.convert_to::<S>();
+                    *y = delay_step(line, *x, delay_at(c, i), fb, interp);
                 }
             }
             return;
@@ -348,7 +341,7 @@ impl<F: Float + Lerp> DelayBank<F> {
                 self.taps[c] = line.read_sample(d.saturating_sub(Samples::new(1)), interp);
             }
             for (c, line) in self.lines.iter_mut().enumerate().take(width) {
-                let mut acc = xs[c][i].convert_to::<F>() + self.taps[c] * fb;
+                let mut acc = xs[c][i] + self.taps[c] * fb;
                 for (&w, &tap) in self.weights[c * width..(c + 1) * width]
                     .iter()
                     .zip(&self.taps)
@@ -360,7 +353,7 @@ impl<F: Float + Lerp> DelayBank<F> {
                 line.push_sample(acc);
             }
             for (c, line) in self.lines.iter().enumerate().take(width) {
-                ys[c][i] = line.read_sample(delay_at(c, i), interp).convert_to::<S>();
+                ys[c][i] = line.read_sample(delay_at(c, i), interp);
             }
         }
     }

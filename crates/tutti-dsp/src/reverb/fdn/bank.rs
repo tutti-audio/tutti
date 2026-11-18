@@ -68,9 +68,9 @@ use crate::{Glide, Lerp, Ring, Steps, System, TAIL_FLOOR};
 /// The shortest a line reads at: one frame.
 const ONE_FRAME: ReadPosition = ReadPosition::from_frames(Samples::new(1));
 /// How far a line's length moves in a chunk, in frames.
-const LENGTH_STEP: f32 = 0.5;
+const LENGTH_STEP: f64 = 0.5;
 /// How far the pre-delay moves in a chunk, in frames.
-const PRE_STEP: f32 = 2.0;
+const PRE_STEP: f64 = 2.0;
 
 /// The coefficient point a design asks for, as [`FdnBank::aim`] writes it: the values
 /// [`FdnGlides`] glide to, before any rate is applied. Sized for the most lines the bank was

@@ -239,6 +239,13 @@ impl Seconds {
 #[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
 pub struct SampleRate(f64);
 
+impl crate::Quantity for SampleRate {
+    #[inline]
+    fn value(self) -> f64 {
+        self.0
+    }
+}
+
 impl SampleRate {
     /// The rate, or `None` when `raw` is NaN, infinite, zero or negative.
     #[inline]

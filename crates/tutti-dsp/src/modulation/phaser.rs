@@ -8,9 +8,9 @@
 //! input, which is the graph's mix. It holds no delay line, which is why a phaser's
 //! notches are fewer and unevenly spaced where a flanger's are a comb.
 //!
-//! The chain is the kernel: it runs a block through coefficients that are
+//! The chain is the kernel: it runs a block through complements that are
 //! [`Glide`]s, one per channel, and a feedback glide. The LFO and the solve of the
-//! coefficients are the caller's: it solves the corners of a segment (the coefficient at
+//! complements are the caller's: it solves the corners of a segment (the coefficient at
 //! the segment's start and at its end, [`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames on)
 //! and aims each channel's glide across it, so the cut of the blocks does not move the
 //! render.
@@ -182,6 +182,10 @@ impl Default for PhaserControls {
 /// The state of an all-pass chain in the float `F`: `stages` first-order all-pass sections
 /// per channel and each channel's last output, which feeds back into its input.
 ///
+/// A section with the coefficient `c` (`y = c (x - y1) + x1`, `c` within `2 t` of -1 at a low
+/// centre) runs on its complement `a = 1 + c` ([`allpass_complement`](crate::allpass_complement)):
+/// `y = y1 + ((x1 - x) + a (x - y1))`, whose small terms add first. The glides carry `a`.
+///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block through it
 /// while each channel's coefficient and the feedback glide toward their targets.
 #[derive(Clone, Debug, PartialEq)]
@@ -226,7 +230,7 @@ impl<F: Float + Lerp> PhaserChain<F> {
         self.last.fill(F::ZERO);
     }
 
-    /// Runs `input` into `output`, frame `i` at `coefficients[c].at(taken + 1 + i)` for
+    /// Runs `input` into `output`, frame `i` at `complements[c].at(taken + 1 + i)` for
     /// channel `c` and `feedback.at(taken + 1 + i)`, then takes the block's steps from the
     /// glides.
     ///
@@ -245,17 +249,17 @@ impl<F: Float + Lerp> PhaserChain<F> {
     ///
     /// # Panics
     ///
-    /// If `coefficients` has fewer glides than the chain has channels.
-    pub fn process<S: Float>(
+    /// If `complements` has fewer glides than the chain has channels.
+    pub fn process(
         &mut self,
-        coefficients: &mut [Glide<F>],
+        complements: &mut [Glide<F>],
         feedback: &mut Glide<F>,
-        input: Planes<'_, S>,
-        mut output: PlanesMut<'_, '_, S>,
+        input: Planes<'_, F>,
+        mut output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
         let run = self.width.min(input.channels()).min(output.channels());
-        let xs: [&[S]; MAX_PHASER_CHANNELS] = core::array::from_fn(|c| {
+        let xs: [&[F]; MAX_PHASER_CHANNELS] = core::array::from_fn(|c| {
             if c < run {
                 &input.plane(c).samples()[..frames]
             } else {
@@ -263,36 +267,36 @@ impl<F: Float + Lerp> PhaserChain<F> {
             }
         });
         let mut outs = output.iter_mut();
-        let ys: [&mut [S]; MAX_PHASER_CHANNELS] = core::array::from_fn(|c| {
+        let ys: [&mut [F]; MAX_PHASER_CHANNELS] = core::array::from_fn(|c| {
             let plane = if c < run { outs.next() } else { None };
             plane.map_or_else(Default::default, |p| &mut p.into_samples_mut()[..frames])
         });
-        let coefficients = &mut coefficients[..self.width];
+        let complements = &mut complements[..self.width];
         // The step each glide's first frame reads.
         let first: [u32; MAX_PHASER_CHANNELS] = core::array::from_fn(|c| {
-            coefficients
+            complements
                 .get(c)
                 .map_or(0, |g| g.taken().saturating_add(1))
         });
         let fb_first = feedback.taken().saturating_add(1);
-        let mut coeff = [F::ZERO; MAX_PHASER_CHANNELS];
+        let mut complement = [F::ZERO; MAX_PHASER_CHANNELS];
         let mut lane = [F::ZERO; MAX_PHASER_CHANNELS];
         let mut step = 0u32;
         for i in 0..frames {
             let fb = feedback.at(fb_first.saturating_add(step));
             for c in 0..run {
-                coeff[c] = coefficients[c].at(first[c].saturating_add(step));
-                lane[c] = xs[c][i].convert_to::<F>() + self.last[c] * fb;
+                complement[c] = complements[c].at(first[c].saturating_add(step));
+                lane[c] = xs[c][i] + self.last[c] * fb;
             }
-            self.chain(&coeff[..run], &mut lane[..run]);
+            self.chain(&complement[..run], &mut lane[..run]);
             for c in 0..run {
                 self.last[c] = lane[c];
-                ys[c][i] = lane[c].convert_to::<S>();
+                ys[c][i] = lane[c];
             }
             step = step.saturating_add(1);
         }
         let taken = u32::try_from(frames).unwrap_or(u32::MAX);
-        for glide in coefficients {
+        for glide in complements {
             glide.advance(taken);
         }
         feedback.advance(taken);
@@ -309,7 +313,10 @@ impl<F: Float + Lerp> PhaserChain<F> {
             let y1 = &mut self.y1[s * w..(s + 1) * w];
             for c in 0..coeffs.len() {
                 let input = lane[c];
-                let out = coeffs[c] * (input - y1[c]) + x1[c];
+                // `c (x - y1) + x1` with `c = a - 1`, the stage held as its complement
+                // `a`: the small terms add first, so a low centre (`a` near 0) keeps its
+                // precision.
+                let out = y1[c] + ((x1[c] - input) + coeffs[c] * (input - y1[c]));
                 x1[c] = input;
                 y1[c] = out;
                 lane[c] = out;

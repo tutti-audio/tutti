@@ -373,3 +373,12 @@ fn a_frequency_narrows_to_the_f32_closed_form() {
         assert_eq!(nyquist, hz / 2.0);
     }
 }
+
+/// A sample rate crosses into data as its rate in hertz.
+#[test]
+fn a_sample_rate_is_a_quantity_of_its_hertz() {
+    assert_eq!(
+        <f64 as crate::Real>::from_unit(SampleRate::SR_48K),
+        48_000.0
+    );
+}
