@@ -108,7 +108,7 @@
 
 use tutti_graph::{
     CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, Playhead, RootId,
-    TransportChanges, declick_frames,
+    TransportChanges, declick_frames, fade_gains, fade_in,
 };
 
 use crate::block_clock::{BlockClock, BlockClockReader, BlockDates, DateKeeper, Pose};
@@ -129,7 +129,7 @@ use tutti_transport::{
 };
 use tutti_types::ChannelLayout;
 use tutti_types::MAX_CHANNELS;
-use tutti_units::{Amplitude, At, Frame};
+use tutti_units::{At, Frame};
 use tutti_units::{SampleRate, Samples, Seconds};
 
 /// The block capacity an engine sizes its fold scratch for unless given
@@ -191,7 +191,7 @@ type GraphTransport = tutti_graph::TransportPosition;
 pub struct Engine<F: Float = f32> {
     graph: AudioThreadCell<GraphRender<F>>,
     /// Cached from the transport so the fade path avoids a double deref.
-    fader: AudioThreadCell<Fader>,
+    fader: AudioThreadCell<Fader<F>>,
     /// The block capacity (the editor's `MaxBlock` limit).
     capacity: Samples,
     /// Records each block's render time against its budget.
@@ -345,12 +345,11 @@ impl<F: Float> Mixing<'_, F> {
             .zip(&mut self.gain_new[..frames])
             .enumerate()
         {
-            let (old, new) = if first + i < length {
-                law.gains(Samples(first + i), Samples(length))
+            (*go, *gn) = if first + i < length {
+                fade_gains::<F>(law, Samples(first + i), Samples(length))
             } else {
-                (Amplitude::SILENT, Amplitude::UNITY)
+                (F::ZERO, F::ONE)
             };
-            (*go, *gn) = (F::from_f64(old.get()), F::from_f64(new.get()));
         }
         let new_planes = Planes::new(new.1)?;
         let old_planes = old.map(|(_, planes)| Planes::new(planes)).transpose()?;
@@ -1200,36 +1199,38 @@ impl GainPlan {
 /// late command, an untimed `try_send`): the old audio ends on the jump frame
 /// with the gain at zero there, and the new audio fades in.
 #[derive(Clone, Copy, Debug)]
-struct Fader {
-    gain: Amplitude,
+struct Fader<F: Float> {
+    gain: F,
     aim: Option<Frame>,
     /// Frames a fade spans, at the rate of the block being shaped.
     fade: usize,
     /// The fade the gain is on, if any.
-    run: Option<Run>,
+    run: Option<Run<F>>,
 }
 
 /// One fade of the gain: `n` frames from `from` to silence (a fade-out that
 /// ends on `aim`) or to unity, `k` of them done.
 #[derive(Clone, Copy, Debug)]
-struct Run {
-    from: Amplitude,
+struct Run<F: Float> {
+    from: F,
     k: usize,
     n: usize,
     /// The frame a fade-out ends on; `None`: a fade-in.
     aim: Option<Frame>,
 }
 
-impl Run {
+impl<F: Float> Run<F> {
     /// The gain of the fade's next frame, and the run moved past it; `None`
     /// once it has reached its end.
-    fn step(self) -> (Amplitude, Option<Self>) {
-        let to = if self.aim.is_some() {
-            Amplitude::SILENT
-        } else {
-            Amplitude::UNITY
-        };
-        let gain = FadeLaw::EqualAmplitude.between(self.from, to, Samples(self.k), Samples(self.n));
+    fn step(self) -> (F, Option<Self>) {
+        let to = if self.aim.is_some() { F::ZERO } else { F::ONE };
+        let gain = fade_in(
+            FadeLaw::EqualAmplitude,
+            self.from,
+            to,
+            Samples(self.k),
+            Samples(self.n),
+        );
         // A fade-in lasts one frame past its last law step, which is the
         // gain's exact end; a fade-out ends on its aim, which is zero.
         let next = Self {
@@ -1240,10 +1241,10 @@ impl Run {
     }
 }
 
-impl Fader {
+impl<F: Float> Fader<F> {
     fn new(fade: usize) -> Self {
         Self {
-            gain: Amplitude::UNITY,
+            gain: F::ONE,
             aim: None,
             fade,
             run: None,
@@ -1251,9 +1252,9 @@ impl Fader {
     }
 
     /// A fade-in from silence, starting on the next frame.
-    fn rise(fade: usize) -> Option<Run> {
+    fn rise(fade: usize) -> Option<Run<F>> {
         Some(Run {
-            from: Amplitude::SILENT,
+            from: F::ZERO,
             k: 0,
             n: fade,
             aim: None,
@@ -1263,7 +1264,7 @@ impl Fader {
     /// Shape frames `base..base + frames` of the interleaved `output`
     /// (`channels` wide), the block that starts at `frame0`, by `plan`. The
     /// gain is per frame, the same across every channel.
-    fn apply<F: Float>(
+    fn apply(
         &mut self,
         plan: &GainPlan,
         frame0: Frame,
@@ -1277,7 +1278,7 @@ impl Fader {
         // Nothing to do on a block with no event, full gain, and no fade-out
         // starting inside it: the common case.
         let quiet = self.aim.is_none_or(|to| to.get() > end + fade as u64);
-        if plan.len == 0 && self.gain == Amplitude::UNITY && self.run.is_none() && quiet {
+        if plan.len == 0 && self.gain == F::ONE && self.run.is_none() && quiet {
             return;
         }
         let mut next = 0;
@@ -1297,14 +1298,14 @@ impl Fader {
             }
             let x = frame0.get() + i as u64;
             if jump {
-                self.gain = Amplitude::SILENT;
+                self.gain = F::ZERO;
                 self.run = Self::rise(fade);
             } else {
                 match self.aim {
                     Some(to) if x >= to.get() => {
                         // On the target: zero, and the fade-in starts from
                         // here (whether or not the command was applied).
-                        self.gain = Amplitude::SILENT;
+                        self.gain = F::ZERO;
                         self.aim = None;
                         self.run = Self::rise(fade);
                     }
@@ -1325,7 +1326,7 @@ impl Fader {
                     _ => {
                         let run = match self.run {
                             Some(r) if r.aim.is_none() => Some(r),
-                            _ if self.gain < Amplitude::UNITY => Some(Run {
+                            _ if self.gain < F::ONE => Some(Run {
                                 from: self.gain,
                                 k: 0,
                                 n: fade,
@@ -1340,11 +1341,10 @@ impl Fader {
                     }
                 }
             }
-            if self.gain != Amplitude::UNITY {
+            if self.gain != F::ONE {
                 let at = (base + i) * channels;
-                let gain = F::from_f64(self.gain.get());
                 for s in &mut output[at..at + channels] {
-                    *s *= gain;
+                    *s *= self.gain;
                 }
             }
         }
@@ -1613,7 +1613,7 @@ mod tests {
     use tutti_types::ChannelTopology;
     use tutti_types::MaxBlock;
     use tutti_types::Placement;
-    use tutti_units::Bpm;
+    use tutti_units::{Amplitude, Bpm};
 
     /// `GraphEngineError` is an `Error` a caller can box and move; the bound is
     /// checked where the function is written, so a non-`Send` field fails the build.
@@ -2684,13 +2684,21 @@ mod tests {
         let mut out = vec![0.0f32; frames * 2];
         engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
         for k in 0..frames {
-            // The ramp is `f64`; the `f32` samples take its gain narrowed.
+            // The ramp renders in `f32` as `from + (to - from) * (k + 1) / n`: one
+            // rounding each for the ratio, the product and the sum, plus the ends'
+            // narrowing, at most 4 ulp of the value (the gain stays within 0.5..=1,
+            // so the value is the scale).
             let gain = if k + 1 >= n {
                 0.5
             } else {
                 1.0 + (0.5 - 1.0) * ((k + 1) as f64 / n as f64)
             };
-            assert_eq!(out[2 * k], 21.0 * gain as f32, "left, frame {k}");
+            let want = 21.0 * gain;
+            assert!(
+                (f64::from(out[2 * k]) - want).abs() <= 4.0 * f64::from(f32::EPSILON) * want.abs(),
+                "left, frame {k}: {} against {want}",
+                out[2 * k]
+            );
             assert_eq!(out[2 * k + 1], 22.0, "right is untouched, frame {k}");
         }
         // Muted, it ramps down from where it stands, and the dim scales the rest.
