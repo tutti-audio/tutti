@@ -1,6 +1,6 @@
 //! Owned, capped, slice-lending collection for the audio thread.
 
-use arrayvec::ArrayVec;
+use core::mem::MaybeUninit;
 
 /// A capped per-block collection that owns its storage and lends it out as
 /// `&[T]`.
@@ -16,8 +16,8 @@ use arrayvec::ArrayVec;
 /// `push` **refuses** at `N` and returns `false`; it never grows. A bare
 /// `Vec` in this position grows instead, which means a `malloc`
 /// inside the audio callback (and, if drained with `mem::take`, a `free` there
-/// too). The storage is an inline [`ArrayVec`], which has no heap path at all,
-/// so the collection itself never touches the heap. (Its items may: `clear`
+/// too). The storage is `N` inline slots, which have no heap path at all, so
+/// the collection itself never touches the heap. (Its items may: `clear`
 /// drops them where it runs, so an `RtVec<Box<_>>` cleared on the audio
 /// thread frees there.)
 ///
@@ -50,25 +50,53 @@ use arrayvec::ArrayVec;
 /// assert!(due.is_empty() && !due.is_overflowed());
 /// ```
 pub struct RtVec<T, const N: usize> {
-    buf: ArrayVec<T, N>,
+    /// The slots `..len` hold items; the rest are uninitialised.
+    len: usize,
     overflowed: bool,
+    slots: [MaybeUninit<T>; N],
 }
 
 impl<T, const N: usize> RtVec<T, N> {
     /// Creates an empty collection with `N` inline slots.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            buf: ArrayVec::new(),
+            len: 0,
             overflowed: false,
+            slots: [const { MaybeUninit::uninit() }; N],
+        }
+    }
+
+    /// Creates an empty collection in a box, built in place: no `RtVec` passes
+    /// through the stack, in any build. For a large `N` built on a thread
+    /// whose stack would not hold it.
+    #[must_use]
+    pub fn boxed() -> Box<Self> {
+        let mut uninit = Box::<Self>::new_uninit();
+        let at = uninit.as_mut_ptr();
+        // SAFETY: `at` points at the box's allocation for one `Self`. The two
+        // writes initialise `len` and `overflowed` through raw place
+        // projections, which make no reference to the uninitialised value;
+        // `slots` is an array of `MaybeUninit`, valid uninitialised. Every
+        // field is then initialised, so the box holds a valid empty `Self`.
+        unsafe {
+            (&raw mut (*at).len).write(0);
+            (&raw mut (*at).overflowed).write(false);
+            uninit.assume_init()
         }
     }
 
     /// Drops all items and resets the overflow flag, keeping the storage.
     #[inline]
     pub fn clear(&mut self) {
-        self.buf.clear();
+        let items: *mut [T] = self.as_mut_slice();
+        // The length goes to zero first: a panicking item drop leaks the rest,
+        // never drops one twice.
+        self.len = 0;
         self.overflowed = false;
+        // SAFETY: `items` covered exactly the initialised slots `..len`, and
+        // `len` is now 0, so nothing else reads or drops them.
+        unsafe { core::ptr::drop_in_place(items) };
     }
 
     /// Appends one item if there is room.
@@ -77,10 +105,12 @@ impl<T, const N: usize> RtVec<T, N> {
     /// [`is_overflowed`](Self::is_overflowed)) when already at `N`.
     #[inline]
     pub fn push(&mut self, v: T) -> bool {
-        if self.buf.try_push(v).is_err() {
+        let Some(slot) = self.slots.get_mut(self.len) else {
             self.overflowed = true;
             return false;
-        }
+        };
+        slot.write(v);
+        self.len += 1;
         true
     }
 
@@ -89,7 +119,10 @@ impl<T, const N: usize> RtVec<T, N> {
     /// frees storage.
     #[inline]
     pub fn pop(&mut self) -> Option<T> {
-        self.buf.pop()
+        self.len = self.len.checked_sub(1)?;
+        // SAFETY: the slot at the old `len - 1` was initialised, and lowering
+        // `len` past it hands its item out exactly once.
+        Some(unsafe { self.slots[self.len].assume_init_read() })
     }
 
     /// Latches [`is_overflowed`](Self::is_overflowed) without pushing: the caller
@@ -119,14 +152,17 @@ impl<T, const N: usize> RtVec<T, N> {
     /// Returns the filled run.
     #[inline]
     pub fn as_slice(&self) -> &[T] {
-        &self.buf
+        // SAFETY: the slots `..len` are initialised, and `MaybeUninit<T>` has
+        // `T`'s layout.
+        unsafe { core::slice::from_raw_parts(self.slots.as_ptr().cast(), self.len) }
     }
 
     /// Returns the filled run mutably, for in-place fixups (sorting by frame
     /// offset, clamping) that do not change the length.
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        &mut self.buf
+        // SAFETY: as `as_slice`, through the unique borrow of `self`.
+        unsafe { core::slice::from_raw_parts_mut(self.slots.as_mut_ptr().cast(), self.len) }
     }
 
     /// Returns whether anything has been dropped since the last
@@ -139,26 +175,26 @@ impl<T, const N: usize> RtVec<T, N> {
     /// Returns how many items are in the filled run; never more than `N`.
     #[inline]
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.len
     }
 
     /// Returns whether nothing has been pushed since the last
     /// [`clear`](Self::clear).
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
+        self.len == 0
     }
 
     /// Returns whether the next `push` will be refused.
     #[inline]
     pub fn is_full(&self) -> bool {
-        self.buf.is_full()
+        self.len == N
     }
 
     /// Returns the room left before the cap.
     #[inline]
     pub fn remaining(&self) -> usize {
-        self.buf.remaining_capacity()
+        N - self.len
     }
 
     /// Returns the cap, `N`, for code where `N` is not in scope.
@@ -170,7 +206,13 @@ impl<T, const N: usize> RtVec<T, N> {
     /// Iterates over the filled run.
     #[inline]
     pub fn iter(&self) -> core::slice::Iter<'_, T> {
-        self.buf.iter()
+        self.as_slice().iter()
+    }
+}
+
+impl<T, const N: usize> Drop for RtVec<T, N> {
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 
@@ -193,7 +235,7 @@ impl<'a, T, const N: usize> IntoIterator for &'a RtVec<T, N> {
     type IntoIter = core::slice::Iter<'a, T>;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        self.buf.iter()
+        self.iter()
     }
 }
 

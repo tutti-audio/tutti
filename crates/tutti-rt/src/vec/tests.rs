@@ -111,3 +111,65 @@ fn pop_takes_the_last_item_and_keeps_the_flag() {
     assert!(v.push(9));
     assert_eq!(v.as_slice(), &[1, 9]);
 }
+
+/// Counts its drops in a shared cell.
+struct Counted<'a>(&'a core::cell::Cell<usize>);
+
+impl Drop for Counted<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() + 1);
+    }
+}
+
+#[test]
+fn every_stored_item_drops_exactly_once_through_pop_clear_and_drop() {
+    let drops = core::cell::Cell::new(0);
+    let mut v: RtVec<Counted<'_>, 4> = RtVec::new();
+    for _ in 0..4 {
+        assert!(v.push(Counted(&drops)));
+    }
+    assert!(
+        !v.push(Counted(&drops)),
+        "the refused item is dropped at once"
+    );
+    assert_eq!(drops.get(), 1);
+    drop(v.pop());
+    assert_eq!(drops.get(), 2, "a popped item drops with its owner");
+    v.clear();
+    assert_eq!(drops.get(), 5, "clear drops the three left");
+    assert!(v.push(Counted(&drops)));
+    assert!(v.push(Counted(&drops)));
+    drop(v);
+    assert_eq!(
+        drops.get(),
+        7,
+        "dropping the collection drops what it holds"
+    );
+}
+
+#[test]
+fn a_boxed_collection_is_empty_and_works_as_new() {
+    let mut v = RtVec::<u32, 3>::boxed();
+    assert!(v.is_empty() && !v.is_overflowed());
+    assert_eq!(v.capacity(), 3);
+    assert_eq!(v.extend([1, 2, 3, 4]), 3);
+    assert_eq!(v.as_slice(), &[1, 2, 3]);
+    assert!(v.is_overflowed());
+}
+
+/// `boxed` builds in the box: a collection eight times the thread's stack is
+/// made and filled on that thread without overflowing it.
+#[test]
+fn boxed_builds_a_collection_larger_than_the_stack() {
+    const STACK: usize = 64 * 1024;
+    let handle = std::thread::Builder::new()
+        .stack_size(STACK)
+        .spawn(|| {
+            let mut v = RtVec::<[u8; 64], { 8 * STACK / 64 }>::boxed();
+            assert!(core::mem::size_of_val(&*v) > 8 * STACK - 1);
+            while v.push([7; 64]) {}
+            v.len()
+        })
+        .expect("spawn the small-stack thread");
+    assert_eq!(handle.join().expect("no stack overflow"), 8 * STACK / 64);
+}
