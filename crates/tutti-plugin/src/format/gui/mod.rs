@@ -11,7 +11,23 @@ use tutti_plugin_types::{BridgeError, BridgeResult, PluginFormat};
 use tutti_plugin_types::{Editor, MainThreadMarker, MainWorkHandle};
 use tutti_plugin_types::{Load, LoadStage};
 
-#[cfg(all(any(feature = "vst3", feature = "clap", feature = "au"), unix))]
+// The one platform seam, built with a format host: the platform decides how an
+// Audio Unit's editor is loaded (`audio_unit`), and nothing else here names a
+// platform.
+#[cfg(all(
+    any(feature = "vst3", feature = "clap", feature = "au"),
+    target_os = "macos"
+))]
+#[path = "macos.rs"]
+mod platform;
+#[cfg(all(
+    any(feature = "vst3", feature = "clap", feature = "au"),
+    not(target_os = "macos")
+))]
+#[path = "other.rs"]
+mod platform;
+
+#[cfg(any(feature = "vst3", feature = "clap", feature = "au"))]
 pub(crate) fn load_gui_instance(
     main: MainThreadMarker,
     work: &MainWorkHandle,
@@ -19,15 +35,14 @@ pub(crate) fn load_gui_instance(
     format: PluginFormat,
     load: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
-    // A build whose only format here is AU off macOS has no arm that reads them.
+    // A build whose only format here is AU has no arm that reads them.
     let _ = (main, work, load);
     match format {
         #[cfg(feature = "vst3")]
         PluginFormat::Vst3 => editor::<tutti_vst3_host::Vst3Loaded>(main, work, path, load, "VST3"),
         #[cfg(feature = "clap")]
         PluginFormat::Clap => editor::<tutti_clap_host::ClapLoaded>(main, work, path, load, "CLAP"),
-        #[cfg(all(feature = "au", target_os = "macos"))]
-        PluginFormat::AudioUnit => editor::<tutti_au_host::AuLoaded>(main, work, path, load, "AU"),
+        PluginFormat::AudioUnit => platform::audio_unit(main, work, path, load),
         PluginFormat::Vst2 => Err(BridgeError::LoadFailed {
             path: Some(path.to_path_buf()),
             stage: LoadStage::Opening,
@@ -37,9 +52,7 @@ pub(crate) fn load_gui_instance(
                 .into(),
         }),
         // `PluginFormat` is `#[non_exhaustive]` and another crate's, so the
-        // arm stays even when every format above is compiled in (a `cfg` that
-        // removed it then failed to build tutti-plugin with every format on
-        // macOS).
+        // arm stays even when every format above is compiled in.
         _ => Err(BridgeError::LoadFailed {
             path: Some(path.to_path_buf()),
             stage: LoadStage::Opening,
@@ -49,10 +62,7 @@ pub(crate) fn load_gui_instance(
 }
 
 /// `F`'s editor-only instance, boxed.
-#[cfg(any(
-    all(any(feature = "vst3", feature = "clap"), unix),
-    all(feature = "au", target_os = "macos")
-))]
+#[cfg(any(feature = "vst3", feature = "clap", feature = "au"))]
 fn editor<F: tutti_plugin_types::OutOfProcess>(
     main: MainThreadMarker,
     work: &MainWorkHandle,
@@ -71,7 +81,8 @@ where
     Ok(Box::new(editor))
 }
 
-#[cfg(not(all(any(feature = "vst3", feature = "clap", feature = "au"), unix)))]
+/// With no format host built there is no editor to load.
+#[cfg(not(any(feature = "vst3", feature = "clap", feature = "au")))]
 pub(crate) fn load_gui_instance(
     _main: MainThreadMarker,
     _work: &MainWorkHandle,
@@ -82,6 +93,8 @@ pub(crate) fn load_gui_instance(
     Err(BridgeError::LoadFailed {
         path: Some(path.to_path_buf()),
         stage: LoadStage::Opening,
-        reason: "In-process GUI support not built (no gui features enabled)".into(),
+        reason: "In-process GUI support not built (no format feature enabled: \
+                 vst3, clap or au)"
+            .into(),
     })
 }

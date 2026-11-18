@@ -34,8 +34,8 @@
 //! use tutti_transport::TempoReader;
 //! use tutti_units::Bpm;
 //!
-//! // `sample_rate` takes anything convertible to `SampleRate` — the engine's
-//! // unit type, not a bare rate that could be a block size.
+//! // `sample_rate` is a `SampleRate`, the engine's unit type, not a bare rate
+//! // that could be a block size.
 //! // A saved id names the plugin; the catalog says where it is on this machine, and
 //! // a load takes what the catalog resolved (so its blacklist is asked).
 //! let catalog = Catalog::new(
@@ -208,13 +208,14 @@
 //! | `EDITOR_FLOATING` | Negotiated | ✕ | ◐ | ✕ | ✕ |
 //!
 //! Notes: the AU loader reports `MIDI_IN`, `EDITOR`, `TRANSPORT`, `RENDER_MODE`
-//! and the two preset bits; its MIDI-output and f64 paths are unimplemented (`○`),
-//! not spec-impossible. AU's `TRANSPORT` is `◐` because it reports whether the unit
+//! and the two preset bits; its f64 path is unimplemented (`○`), not spec-impossible,
+//! and it never reports `MIDI_OUT`. AU's `TRANSPORT` is `◐` because it reports whether the unit
 //! accepted `kAudioUnitProperty_HostCallbacks`; the loader feeds it every block. AU's `MIDI_IN` is `◐` off the component type (`aumu` /
 //! `aumf` / `aumi` receive MIDI, `aufx` does not), which is the same predicate the
-//! process path gates its per-block MIDI on. `MIDI_OUT` is not its mirror: reading
-//! events back needs a MIDI-output callback this loader does not install, so it stays
-//! `○`. VST2's `F64_AUDIO` is advisory (the `vst` crate is f32 internally).
+//! process path gates its per-block MIDI on. `MIDI_OUT` is not its mirror: the loader
+//! installs a MIDI-output callback on a unit that declares MIDI output streams, and the
+//! host reads that MIDI back, but it asks the unit nothing about it, so the bit stays
+//! unset (`○`). VST2's `F64_AUDIO` is advisory (the `vst` crate is f32 internally).
 //! `SEQUENCER_CONTEXT` (chord/scale/per-note text) is a VST3-only concept by spec.
 //!
 //! The preset bits are two because the formats split there. A VST3 plugin answers

@@ -312,9 +312,10 @@ pub mod probed {
     /// predicate the process path gates its per-block `send_midi` on. A plain
     /// `aufx` effect therefore reports `Some(false)` rather than silence.
     ///
-    /// `MIDI_OUT` stays unprobed even though the two look symmetric: reading
-    /// MIDI back out of an AU needs a MIDI-output callback installed on the
-    /// unit, and this loader installs none, so no unit has been asked.
+    /// `MIDI_OUT` stays unprobed even though the two look symmetric: the
+    /// loader installs a MIDI-output callback on a unit that declares MIDI
+    /// output streams, but it asks no unit whether it emits MIDI, so no unit
+    /// has been asked.
     ///
     /// The preset bits are live-probed together because one AU property backs
     /// both: a unit answering `kAudioUnitProperty_FactoryPresets` can be asked

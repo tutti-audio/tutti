@@ -416,6 +416,13 @@ impl PluginBridge {
         self.audio.set_render_mode_rt(mode)
     }
 
+    /// The render mode the host last queued for the plugin
+    /// ([`set_render_mode_rt`](Self::set_render_mode_rt)): realtime until it
+    /// queues another.
+    pub fn render_mode(&self) -> crate::protocol::RenderMode {
+        self.audio.render_mode()
+    }
+
     /// See [`AudioBridge::reset_rt`].
     pub(crate) fn reset_rt(&self) -> bool {
         self.audio.reset_rt()
@@ -922,6 +929,21 @@ impl PluginBridge {
     /// which is the mechanism for exactly this.
     pub fn load_preset(&self, id: PresetId) -> bool {
         self.audio.load_preset(id)
+    }
+
+    /// [`load_state`](Self::load_state) into the audio instance alone: for a
+    /// fresh instance that has no editor to keep in sync, so it needs no
+    /// main thread.
+    ///
+    /// # Errors
+    ///
+    /// As `AudioBridge::load_state`.
+    pub fn load_state_unmirrored(
+        &self,
+        data: &[u8],
+        state_use: tutti_plugin_types::StateUse,
+    ) -> std::result::Result<(), StateError> {
+        self.audio.load_state(data, state_use)
     }
 
     /// The preset the plugin says is loaded, if it says.

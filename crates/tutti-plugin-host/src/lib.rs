@@ -19,6 +19,7 @@
 
 mod control_handle;
 mod controls;
+mod fork_state;
 mod listeners;
 mod liveness;
 mod meter;
@@ -37,6 +38,7 @@ mod walk_tests;
 
 pub use control_handle::{MainThreadControl, PluginHandle, PluginStatus};
 pub use controls::{ForkedSources, NodeControls, PluginControls, PluginReports};
+pub use fork_state::ForkState;
 pub use listeners::{
     InvalidateSink, Listener, ParameterChangeSink, PluginSignal, RefreshSink, Subscription,
     TransportSink,

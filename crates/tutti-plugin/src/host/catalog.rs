@@ -58,8 +58,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use tutti_plugin_db::{
-    BlacklistedFile, FileFacts, FilesError, PluginDb, PluginEntry, RowChange, Scan, ScanBusy,
-    ScanError, ScanPoll, Scanner,
+    BlacklistedFile, FileFacts, FileRow, FilesError, PluginDb, PluginEntry, RowChange, Scan,
+    ScanBusy, ScanError, ScanPoll, Scanner,
 };
 use tutti_plugin_ipc::CatalogConfig;
 use tutti_plugin_types::{BridgeError, BridgeResult};
@@ -170,22 +170,42 @@ fn blacklisted_rows(db: &PluginDb) -> PluginDb {
     rows
 }
 
-/// The refusal of `db`'s blacklist for `plugin`: the one rule behind
-/// [`Catalog::check`] and [`BlacklistView::check`].
-fn refusal(db: &PluginDb, plugin: &PluginRef) -> BridgeResult<()> {
-    let path = plugin.path();
-    let canonical = key(path);
-    if !db.is_blacklisted_and_unchanged(&canonical, &FileFacts::read(&canonical)) {
+/// `db`'s blacklisted rows when they are not what `published` holds, else
+/// `None`: what a change has to publish.
+fn moved_blacklist(published: &PluginDb, db: &PluginDb) -> Option<PluginDb> {
+    let rows = blacklisted_rows(db);
+    (rows != *published).then_some(rows)
+}
+
+/// The row `db` holds for `canonical` when it is a blacklist: a copy, so the
+/// lock a view read it under is released before the file is read.
+fn blacklist_row(db: &PluginDb, canonical: &Path) -> Option<FileRow> {
+    db.row(canonical)
+        .filter(|row| row.blacklist_reason().is_some())
+        .cloned()
+}
+
+/// The refusal of a blacklist's `row` for `plugin`, whose file is read now
+/// through `read_facts`: the one rule behind [`Catalog::check`] and
+/// [`BlacklistView::check`].
+fn refusal(
+    row: Option<FileRow>,
+    canonical: &Path,
+    plugin: &PluginRef,
+    read_facts: impl FnOnce(&Path) -> FileFacts,
+) -> BridgeResult<()> {
+    let Some(row) = row else {
+        return Ok(());
+    };
+    if !row.is_blacklisted_and_unchanged(&read_facts(canonical)) {
         return Ok(());
     }
-    let reason = db
-        .row(&canonical)
-        .and_then(|row| row.blacklist_reason())
-        .unwrap_or("no reason recorded")
-        .to_string();
     Err(BridgeError::Blacklisted {
-        path: path.to_path_buf(),
-        reason,
+        path: plugin.path().to_path_buf(),
+        reason: row
+            .blacklist_reason()
+            .unwrap_or("no reason recorded")
+            .to_string(),
     })
 }
 
@@ -214,30 +234,62 @@ impl BlacklistView {
     /// [`BridgeError::Blacklisted`] with the recorded reason when the plugin's
     /// file is blacklisted and unchanged.
     pub fn check(&self, plugin: &PluginRef) -> BridgeResult<()> {
-        refusal(
+        self.check_reading(plugin, |path| FileFacts::read(path))
+    }
+
+    /// [`check`](Self::check) with the file's facts read through `read_facts`.
+    /// The row is copied out and the lock released before `read_facts` runs: a
+    /// slow volume holds no lock the owner's next change waits on.
+    fn check_reading(
+        &self,
+        plugin: &PluginRef,
+        read_facts: impl FnOnce(&Path) -> FileFacts,
+    ) -> BridgeResult<()> {
+        let canonical = key(plugin.path());
+        let row = blacklist_row(
             &self.rows.read().unwrap_or_else(PoisonError::into_inner),
-            plugin,
-        )
+            &canonical,
+        );
+        refusal(row, &canonical, plugin, read_facts)
     }
 }
 
 impl Catalog {
-    /// The one way the table changes: runs `f` over the table, the scanner and
-    /// the configuration, then republishes the blacklisted rows to the views,
-    /// so no change leaves a [`BlacklistView`] behind.
+    /// The one way the table changes: runs `f` over the table and the
+    /// configuration, then republishes the blacklisted rows to the views, so no
+    /// change leaves a [`BlacklistView`] behind.
+    fn change_with<R>(&mut self, f: impl FnOnce(&mut PluginDb, &CatalogConfig) -> R) -> R {
+        let out = f(&mut self.db, &self.config);
+        self.republish_blacklist();
+        out
+    }
+
+    /// [`change_with`](Self::change_with) for a caller that scans: it gets a
+    /// scanner on the catalog's own probe. Only this builds one.
     fn change<R>(&mut self, f: impl FnOnce(&mut PluginDb, &Scanner, &CatalogConfig) -> R) -> R {
         let scanner = self.scanner(self.scanning());
         self.change_with(|db, config| f(db, &scanner, config))
     }
 
-    /// [`change`](Self::change) for a caller that brings its own scanner.
-    fn change_with<R>(&mut self, f: impl FnOnce(&mut PluginDb, &CatalogConfig) -> R) -> R {
-        let out = f(&mut self.db, &self.config);
-        *self
-            .blacklist
-            .write()
-            .unwrap_or_else(PoisonError::into_inner) = blacklisted_rows(&self.db);
-        out
+    /// Publishes the table's blacklisted rows to the views when they differ
+    /// from what is published. The rows are collected before the lock is
+    /// taken and the write lock is held for the swap alone, so the poll that
+    /// ends every UI tick of a scan neither builds a table nor stops a
+    /// reader when no blacklist moved.
+    fn republish_blacklist(&self) {
+        let moved = moved_blacklist(
+            &self
+                .blacklist
+                .read()
+                .unwrap_or_else(PoisonError::into_inner),
+            &self.db,
+        );
+        if let Some(rows) = moved {
+            *self
+                .blacklist
+                .write()
+                .unwrap_or_else(PoisonError::into_inner) = rows;
+        }
     }
 
     /// What a scan's probe does: measures if the catalog was told to, and lists
@@ -423,7 +475,7 @@ impl Catalog {
     /// before the next task, `save` or drop. Drop the task once it reports
     /// `Done` or `Died`.
     pub fn try_apply(&mut self, task: &mut Scan) -> ScanPoll {
-        let poll = self.change(|db, _, _| task.poll(db));
+        let poll = self.change_with(|db, _| task.poll(db));
         if matches!(poll, ScanPoll::Done(_)) {
             self.save_in_background();
         }
@@ -577,7 +629,13 @@ impl Catalog {
     /// (a load that does not name the catalog) or to
     /// [`unblacklist`](Self::unblacklist) it.
     pub fn check(&self, plugin: &PluginRef) -> BridgeResult<()> {
-        refusal(&self.db, plugin)
+        let canonical = key(plugin.path());
+        refusal(
+            blacklist_row(&self.db, &canonical),
+            &canonical,
+            plugin,
+            |path| FileFacts::read(path),
+        )
     }
 
     /// Blacklists a plugin by path, hiding it from `iter` and `entries`,
@@ -586,7 +644,7 @@ impl Catalog {
     pub fn blacklist(&mut self, path: impl AsRef<Path>, reason: impl Into<String>) {
         let path = key(path.as_ref());
         let reason = reason.into();
-        self.change(|db, _, _| db.blacklist(&path, reason, &FileFacts::read(&path)));
+        self.change_with(|db, _| db.blacklist(&path, reason, &FileFacts::read(&path)));
     }
 
     /// Clears one blacklist entry so the plugin is probed again on the next
@@ -609,7 +667,7 @@ impl Catalog {
     pub fn unblacklist(&mut self, path: impl AsRef<Path>) -> bool {
         let path = key(path.as_ref());
         self.forget_in_pedal(&path);
-        self.change(|db, _, _| db.unblacklist(&path))
+        self.change_with(|db, _| db.unblacklist(&path))
     }
 
     fn forget_in_pedal(&self, file: &Path) {
@@ -620,7 +678,7 @@ impl Catalog {
 
     /// Clears every blacklist entry and returns the paths cleared.
     pub fn clear_blacklist(&mut self) -> Vec<PathBuf> {
-        self.change(|db, _, _| db.clear_blacklist())
+        self.change_with(|db, _| db.clear_blacklist())
     }
 
     /// Removes one file, blacklisted or not.
@@ -630,7 +688,7 @@ impl Catalog {
     pub fn remove(&mut self, path: impl AsRef<Path>) {
         let path = key(path.as_ref());
         self.forget_in_pedal(&path);
-        self.change(|db, _, _| db.apply(RowChange::remove(path)));
+        self.change_with(|db, _| db.apply(RowChange::remove(path)));
     }
 
     /// Measures the file `plugin` names, as the format `plugin` has, on a
@@ -674,7 +732,7 @@ impl Catalog {
     /// [`RowChange::put`] of a row from its own source. A task's changes go through
     /// [`try_apply`](Self::try_apply). Call [`save`](Self::save) to persist.
     pub fn apply(&mut self, change: RowChange) {
-        self.change(|db, _, _| db.apply(change));
+        self.change_with(|db, _| db.apply(change));
     }
 
     /// Writes the in-memory catalog through the catalog's persistence.
@@ -733,7 +791,7 @@ impl Catalog {
             .filter(|(path, _)| FileFacts::read(path).exists)
             .map(|(path, _)| path.to_path_buf())
             .collect();
-        self.change(|db, _, _| db.prune_missing(&present))
+        self.change_with(|db, _| db.prune_missing(&present))
     }
 }
 
@@ -988,6 +1046,71 @@ mod tests {
         assert!(
             matches!(&err, BridgeError::Blacklisted { reason, .. } if reason == "crashed while scanning"),
             "{err:?}"
+        );
+    }
+
+    /// **Only a move of the blacklist is published**: a probed row changing
+    /// leaves the published rows alone, a blacklisted row appearing or going
+    /// replaces them.
+    #[test]
+    fn a_change_publishes_the_blacklist_only_when_it_moved() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("Crasher.clap");
+        std::fs::write(&path, b"x").unwrap();
+        let facts = FileFacts::read(&path);
+        let mut db = PluginDb::new();
+        let published = blacklisted_rows(&db);
+
+        db.apply(RowChange::put(
+            key(&path),
+            FileRow::probed(PluginFormat::Clap, &facts, Vec::new()),
+        ));
+        assert_eq!(moved_blacklist(&published, &db), None, "a probed row");
+
+        db.blacklist(&key(&path), "hung".into(), &facts);
+        let moved = moved_blacklist(&published, &db).expect("a blacklisted row appeared");
+        assert!(moved.is_blacklisted(&key(&path)));
+        assert_eq!(moved_blacklist(&moved, &db), None, "nothing since");
+
+        assert!(db.unblacklist(&key(&path)));
+        assert_eq!(
+            moved_blacklist(&moved, &db),
+            Some(PluginDb::new()),
+            "the blacklist went"
+        );
+    }
+
+    /// **A blacklist check holds no lock while it reads the file**: with the
+    /// file read still in flight, the owner's write to the published
+    /// blacklist is not blocked. Ordered by channels, never by a sleep.
+    #[test]
+    fn a_blacklist_check_releases_its_lock_before_it_reads_the_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("Crasher.clap");
+        let mut plugins = catalog_of(&path, PluginFormat::Clap, &["crasher"]);
+        plugins.blacklist(&path, "hung");
+        let view = plugins.blacklist_view();
+        let plugin = PluginRef::loaded(&path, PluginFormat::Clap, "crasher");
+        let (reading_tx, reading_rx) = crossbeam_channel::bounded::<()>(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(1);
+
+        let checked = std::thread::scope(|scope| {
+            let check = scope.spawn(|| {
+                view.check_reading(&plugin, |path| {
+                    reading_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    FileFacts::read(path)
+                })
+            });
+            reading_rx.recv().unwrap();
+            let writable = view.rows.try_write().is_ok();
+            release_tx.send(()).unwrap();
+            assert!(writable, "the check held the lock across the file read");
+            check.join().unwrap()
+        });
+        assert!(
+            matches!(checked, Err(BridgeError::Blacklisted { .. })),
+            "{checked:?}"
         );
     }
 

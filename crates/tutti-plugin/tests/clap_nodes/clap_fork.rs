@@ -1300,6 +1300,46 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
     );
 }
 
+/// **A live fork of a served plugin that was told to render offline renders
+/// offline**: the live plugin is told `Offline`, a `ForkMode::Live` fork is
+/// made, and the fork's declared latency carries the plugin's offline extra
+/// (which the probe reports only in its offline mode, `clap.latency`). The
+/// fork is the live plugin's mode, not the graph's.
+#[test]
+fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
+    const BASE: Samples = Samples(137);
+    const OFFLINE_EXTRA: Samples = Samples(24);
+    let _lock = machine_lock();
+    let _env = ProbeEnv::new()
+        .render_mode(render::LATENCY)
+        .offline_extra_latency(OFFLINE_EXTRA.0 as u32);
+    let probe = load_probe(SAMPLE_RATE);
+    assert!(
+        probe
+            .client
+            .set_render_mode(tutti_plugin_types::RenderMode::Offline),
+        "the live plugin takes the mode"
+    );
+    // Forked through the graph in `ForkMode::Live`, prepared in realtime: the
+    // graph does not say offline, so only the live plugin's mode can.
+    let rate = SampleRate::of(SAMPLE_RATE);
+    let (live, _exec) = live_graph(probe.client);
+    let (editor, executor) = live
+        .fork(
+            ForkTarget::Master,
+            ForkMode::Live,
+            Prepare::new(rate, MaxBlock::of(Samples(BLOCK))),
+        )
+        .expect("a graph holding a plugin forks");
+    let graph = tutti_export::RenderGraph::assemble(editor, executor, tutti_export::Setup::new())
+        .expect("forked together");
+    assert_eq!(
+        graph.reported_latency(),
+        BASE + OFFLINE_EXTRA + Samples(BLOCK),
+        "the fork carries the plugin's offline latency"
+    );
+}
+
 /// **An export renders a graph of plugins the same on a worker pool as
 /// alone** (doc 013, "The parallel executor"): two out-of-process probes side by side, each
 /// at its own gain, forked offline twice — once rendered on the export's

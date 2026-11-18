@@ -15,10 +15,10 @@
 //!
 //! [`PluginClient::fork_instance`], which the fork source calls:
 //!
-//! 1. **Ask the live instance for its state** — the one thing the live side
-//!    is asked, over the control channel `PluginHandle::save_state` already
-//!    uses. Nothing else of the live instance is touched: no reset, no rate
-//!    change, no block. It is not free, though: the save runs on the live
+//! 1. **Ask the live instance for its state** — its current preset (when it
+//!    lists any), its saved state and the render mode it runs in, over the
+//!    control channel `PluginHandle::save_state` already uses. Nothing else
+//!    of the live instance is touched: no reset, no rate change, no block. It is not free, though: the save runs on the live
 //!    bridge thread, which queues the live instance's blocks behind it for
 //!    as long as the plugin takes to serialise — the same stall a project
 //!    save causes. (Blocks it misses meanwhile read as silence, as for any
@@ -50,8 +50,9 @@
 //!    its CPU is not spent on the live server's audio thread. It is launched
 //!    at the live node's rate; the editor then prepares it at the fork's
 //!    rate, which reaches the new server as a rate change.
-//! 3. **Check it is the same plugin** (its id), then **load the state into
-//!    it**. Parameters come with it: the state is the format's own
+//! 3. **Check it is the same plugin** (its id). The state went in with the
+//!    launch, and a current preset goes in over it, then the state again
+//!    (`ForkState::restore`, the in-process fork's too). Parameters come with it: the state is the format's own
 //!    save/load (CLAP `clap.state`, VST3 `getState`/`setState`, AU class
 //!    info), which is what a project save restores parameters from.
 //! 4. **Give it the live node's meter and a reader of its tempo map**
@@ -67,8 +68,9 @@
 //!    host value the live plugin was sent once and then edited away from in
 //!    its own editor is never re-sent live; seeded, the fork does not send
 //!    it either, and the export renders what playback plays.
-//! 5. **Bind it**, and **offline only:** tell it
-//!    [`RenderMode::Offline`](crate::RenderMode), and make its pipeline wait for
+//! 5. **Bind it**, tell it [`RenderMode::Offline`](crate::RenderMode) when
+//!    it renders offline (an offline fork, or a live fork of a plugin that
+//!    ran offline), and **for an offline fork only:** make its pipeline wait for
 //!    each chunk (`Ipc::watch`, before the plugin is activated; the live
 //!    pipeline never waits, which on a render worker would turn every chunk the
 //!    subprocess had not finished yet into silence) — and drop its host clock,
@@ -129,10 +131,9 @@ use tutti_graph::{ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, For
 use tutti_units::{Latency, SampleRate};
 
 use super::{Bound, PluginClient, Unbound};
-use tutti_plugin_host::{ForkedSources, PluginControls};
+use tutti_plugin_host::{ForkState, ForkedSources, PluginControls};
 use tutti_plugin_ipc::{IpcOrigin, Launched, OfflineWait, PluginBridge, PluginRenderFault};
-use tutti_plugin_types::RenderMode;
-use tutti_plugin_types::StateError;
+use tutti_plugin_types::{Features, RenderMode, StateError, StateUse};
 use tutti_plugin_types::{PluginFailure, PluginForkError};
 
 /// Whether a forked instance has failed while rendering: its
@@ -199,10 +200,12 @@ pub(crate) struct ServedFork {
     /// bridge with no process behind it.
     bridge: Weak<PluginBridge>,
     /// Where the live instance came from, which the fresh one is launched
-    /// from again (`None`: nothing to reopen).
-    origin: Option<IpcOrigin>,
+    /// from again.
+    origin: IpcOrigin,
     /// The live instance's plugin id, which the fresh one must match.
     id: String,
+    /// What the live plugin can do: whether it has presets to carry across.
+    features: Features,
     /// The live node's controls: its installed sources and its rate.
     controls: PluginControls,
     /// The live node's reader of the project's tempo map. A fork lends the
@@ -224,6 +227,7 @@ impl ServedFork {
             bridge: Arc::downgrade(&client.bridge),
             origin: client.origin.clone(),
             id: client.descriptor.id.clone(),
+            features: client.loaded.features,
             controls: client.controls.clone(),
         }
     }
@@ -248,20 +252,27 @@ impl ServedFork {
         // the fork once, harmlessly. Read after, a value delivered in between
         // would be recorded as the fork's though its state predates it.
         let delivered = self.controls.delivered();
+        // A plugin with no presets has none to carry (and would refuse the
+        // current one's id).
+        let preset = if self.features.contains(Features::PRESET_LOAD) {
+            live.current_preset()
+        } else {
+            None
+        };
         let state = live
-            .save_state(tutti_plugin_types::StateUse::Duplicate)
+            .save_state(StateUse::Duplicate)
             .map_err(PluginForkError::SaveState)?;
+        let snapshot = ForkState::new(preset, state, live.render_mode());
         drop(live);
-        let origin = self.origin.clone().ok_or(PluginForkError::NoOrigin)?;
         Ok(Capture {
-            state,
+            snapshot,
             delivered,
-            origin,
+            origin: self.origin.clone(),
             id: self.id.clone(),
             sample_rate: self.controls.sample_rate(),
             sources: self.controls.sources_now(),
             tempo: self.tempo.clone(),
-            offline: matches!(mode, ForkMode::Offline),
+            mode,
         })
     }
 }
@@ -271,7 +282,8 @@ impl ServedFork {
 /// fork from this alone, on any thread, so nothing the host does to the live
 /// node after the gather reaches the fork.
 struct Capture {
-    state: Vec<u8>,
+    /// The live plugin's preset, state and render mode.
+    snapshot: ForkState,
     /// What the live node had delivered per parameter when the state was
     /// saved: the fork's delivery is seeded with it, so a host value the
     /// live plugin holds unchanged (under an edit made in its editor, say)
@@ -287,7 +299,7 @@ struct Capture {
     /// A reader of the project's tempo map of the fork's own, registered at
     /// the gather.
     tempo: tutti_transport::TempoReader,
-    offline: bool,
+    mode: ForkMode,
 }
 
 impl Capture {
@@ -295,12 +307,12 @@ impl Capture {
     /// launch and a state load), free to run off the control thread.
     fn build(self) -> Result<PluginClient<Bound>, PluginForkError> {
         let path = self.origin.path.clone();
-        // The live instance's state goes in **before the fork's plugin is
+        // The state goes in with the launch, **before the fork's plugin is
         // activated** (`IpcOrigin::reopen`): a plugin may take its mode from
         // the state at activation.
         let Launched { mut ipc, restored } = self
             .origin
-            .reopen(self.sample_rate, Some(&self.state))
+            .reopen(self.sample_rate, Some(self.snapshot.state()))
             .map_err(|source| PluginForkError::Load {
                 path: path.clone(),
                 source,
@@ -315,10 +327,22 @@ impl Capture {
         if let Some(Err(reason)) = restored {
             return Err(PluginForkError::LoadState(StateError::Rejected(reason)));
         }
+        // A current preset goes in over it, in `ForkState::restore`'s order
+        // (the preset, then the state, which is the live plugin's now), still
+        // before activation.
+        if self.snapshot.has_preset() {
+            self.snapshot
+                .restore(
+                    &mut ipc,
+                    |ipc, preset| ipc.load_preset(preset),
+                    |ipc, state| ipc.load_state(state, StateUse::Duplicate),
+                )
+                .map_err(PluginForkError::LoadState)?;
+        }
 
         // Watched before it is activated: offline, the pipeline waits for each
         // chunk; either way a `prepare` settles and records the plan.
-        let wait = ipc.watch(self.offline);
+        let wait = ipc.watch(matches!(self.mode, ForkMode::Offline));
         let mut fork = PluginClient::over(ipc).map_err(|source| PluginForkError::Load {
             path: path.clone(),
             source,
@@ -329,7 +353,7 @@ impl Capture {
             wait,
         }));
         fork.state.client.seed_delivery(&self.delivered);
-        if self.offline {
+        if self.snapshot.offline(self.mode) {
             // Advisory: a plugin without the concept keeps rendering as it
             // would live, which is not an error (`Features::RENDER_MODE`).
             let _ = fork.set_render_mode(RenderMode::Offline);
@@ -446,10 +470,12 @@ impl PluginClient<Bound> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::mock_server::{PRESET, STATE, rig, tempo};
     use super::*;
     use std::time::Duration;
-    use tutti_plugin_ipc::ServerWatch;
+    use tutti_plugin_ipc::{BridgeConfig, ServerWatch, unique_socket_path};
     use tutti_plugin_types::PluginTail;
+    use tutti_plugin_types::{Load, PluginFormat, PresetId};
     use tutti_units::{SampleRate, Samples};
 
     /// A fork's health reports a latency that moved after its graph was
@@ -483,5 +509,90 @@ mod tests {
             }
             other => panic!("expected LatencyChanged, got {other:?}"),
         }
+    }
+
+    /// A source over a live mock-served plugin, which lists presets.
+    fn source_over(rig: &super::super::mock_server::Rig) -> ServedFork {
+        let origin = IpcOrigin {
+            config: BridgeConfig::at(unique_socket_path().expect("a socket path")),
+            path: "test.vst3".into(),
+            format: PluginFormat::Vst3,
+            load: Load::new(),
+            load_editor: None,
+        };
+        let (controls, _) =
+            PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+        ServedFork {
+            bridge: Arc::downgrade(&rig.bridge),
+            origin,
+            id: rig.descriptor.id.clone(),
+            features: Features::PRESET_LOAD,
+            controls,
+            tempo: tempo(4.0),
+        }
+    }
+
+    /// What a capture restores a fresh plugin with: its preset id (when it
+    /// loads one) and its state bytes.
+    fn restored_with(capture: &Capture) -> (Option<PresetId>, Vec<u8>) {
+        let mut seen = (None, Vec::new());
+        capture
+            .snapshot
+            .restore(
+                &mut seen,
+                |seen, id| {
+                    seen.0 = Some(id.clone());
+                    true
+                },
+                |seen, state| {
+                    seen.1 = state.to_vec();
+                    Ok(())
+                },
+            )
+            .expect("the recorder accepts both");
+        seen
+    }
+
+    /// A fork of a served plugin with preset P loaded carries P, and its
+    /// saved state: the preset is read from the live plugin at the gather.
+    #[test]
+    fn a_served_forks_capture_carries_the_live_preset() {
+        let rig = rig("preset");
+        let capture = source_over(&rig).capture(ForkMode::Live).expect("captures");
+        let (preset, state) = restored_with(&capture);
+        assert_eq!(preset, Some(PresetId::Number(PRESET)));
+        assert_eq!(state, STATE);
+    }
+
+    /// A plugin that cannot load presets has none to carry, whatever it
+    /// reports as current.
+    #[test]
+    fn a_plugin_without_preset_loading_forks_without_a_preset() {
+        let rig = rig("no_preset");
+        let mut source = source_over(&rig);
+        source.features = Features::empty();
+        let capture = source.capture(ForkMode::Live).expect("captures");
+        assert_eq!(restored_with(&capture).0, None);
+    }
+
+    /// A live fork of a served plugin in render mode M is in M: offline when
+    /// the live plugin was told offline, realtime when it was told nothing,
+    /// and an offline fork is offline either way.
+    #[test]
+    fn a_served_live_fork_keeps_the_live_render_mode() {
+        let rig = rig("mode");
+        let source = source_over(&rig);
+        let live = source.capture(ForkMode::Live).expect("captures");
+        assert!(!live.snapshot.offline(live.mode), "told nothing: realtime");
+        let offline = source.capture(ForkMode::Offline).expect("captures");
+        assert!(offline.snapshot.offline(offline.mode));
+
+        assert!(rig.bridge.set_render_mode_rt(RenderMode::Offline));
+        let live = source.capture(ForkMode::Live).expect("captures");
+        assert!(live.snapshot.offline(live.mode), "told offline: offline");
+
+        assert!(rig.bridge.set_render_mode_rt(RenderMode::Realtime));
+        let live = source.capture(ForkMode::Live).expect("captures");
+        assert!(!live.snapshot.offline(live.mode), "told realtime again");
     }
 }

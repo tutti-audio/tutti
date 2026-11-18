@@ -381,7 +381,19 @@ impl AudioBridge {
     /// blocks around it — a mode that overtook an in-flight block would apply
     /// to audio the caller thought was already rendered.
     pub fn set_render_mode_rt(&self, mode: crate::protocol::RenderMode) -> bool {
-        !self.lifecycle.is_crashed() && self.channels.push_command(Command::SetRenderMode { mode })
+        let queued = !self.lifecycle.is_crashed()
+            && self.channels.push_command(Command::SetRenderMode { mode });
+        if queued {
+            self.lifecycle.set_render_mode(mode);
+        }
+        queued
+    }
+
+    /// The render mode the host last queued for the plugin
+    /// ([`set_render_mode_rt`](Self::set_render_mode_rt)): realtime until it
+    /// queues another.
+    pub fn render_mode(&self) -> crate::protocol::RenderMode {
+        self.lifecycle.render_mode()
     }
 
     /// Makes the bridge thread wait `wait` for each block's reply, in place of
