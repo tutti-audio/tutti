@@ -25,7 +25,7 @@ use crate::{Error, Written};
 use std::path::Path;
 use tutti_buffers::{Interleaved, InterleavedMut, Planes, Sink, SinkFailed};
 use tutti_codec::{Encoder, Finalized, Spec};
-use tutti_dsp::{DitherSink, StreamingResampler};
+use tutti_dsp::{DitherSink, StreamingResampler, rates_convert, resampled_frames};
 use tutti_types::{Amplitude, ChannelLayout, SampleRate, Samples};
 
 /// The rate the file is written at: the resample target, else the rate it is
@@ -50,7 +50,7 @@ fn spec(target: &FileTarget, source_rate: SampleRate) -> Spec {
 ///
 /// Refuses a render the format cannot hold before the temporary exists: the
 /// encoder judges the frames the file will hold, which are the plan's kept
-/// frames at the output rate (`StreamingResampler::output_frames`), and the
+/// frames at the output rate (`tutti_dsp::resampled_frames`), and the
 /// error is its own. The frames of `plan` are at `source_rate`.
 pub(crate) fn open_file(
     target: &FileTarget,
@@ -58,8 +58,7 @@ pub(crate) fn open_file(
     source_rate: SampleRate,
 ) -> Result<Chain> {
     let spec = spec(target, source_rate);
-    let planned =
-        StreamingResampler::<f32>::output_frames(source_rate, spec.rate(), plan.output_length);
+    let planned = resampled_frames(source_rate, spec.rate(), plan.output_length);
     let encoder = Encoder::create_file_planned(&spec, target.path(), planned)?;
     Chain::new(target, source_rate, encoder, &spec)
 }
@@ -204,14 +203,14 @@ pub(crate) fn resampler_for(
     ch: usize,
 ) -> Result<Option<Resampler>> {
     // Whether to convert at all is the converter's to say
-    // (`StreamingResampler::converts`), not a float comparison here.
+    // (`tutti_dsp::rates_convert`), not a float comparison here.
     //
     // `source_rate` is the PARAMETER, not a rate of the target's.
     // Frames handed to `write_buffers` already exist and carry their own
     // rate, which may not be the one a config was rendered at; reading
     // it from a config resamples from a rate the samples were never at.
     Ok(match target.resample {
-        Some(r) if StreamingResampler::<f32>::converts(source_rate, r.target_rate) => Some((
+        Some(r) if rates_convert(source_rate, r.target_rate) => Some((
             StreamingResampler::new(ch, source_rate, r.target_rate, r.chunk)?,
             vec![Vec::<f32>::new(); ch],
             vec![Vec::<f32>::new(); ch],

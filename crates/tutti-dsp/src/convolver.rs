@@ -196,7 +196,7 @@ fn plan_levels(ir_len: usize, head: usize) -> Vec<Plan> {
 /// # Panics
 ///
 /// If the two slices differ in length.
-pub(super) fn convert_mono<A: Sample, B: Sample>(src: &[A], dst: &mut [B]) {
+pub(crate) fn convert_mono<A: Sample, B: Sample>(src: &[A], dst: &mut [B]) {
     let one = ChannelLayout::MONO;
     let (src, dst) = (Interleaved::new(src, one), InterleavedMut::new(dst, one));
     let done = src.and_then(|s| dst.and_then(|d| convert(s, d)));

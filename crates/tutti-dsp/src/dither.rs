@@ -166,18 +166,24 @@ mod tests {
         assert_eq!(whole, split);
     }
 
-    /// In `f64` the first rectangular draw is the seeded word over `2^32 - 1`, scaled to
-    /// `[-0.5, 0.5]` (the `f32` draw widened), and the noise is added to the signal.
+    /// In `f64` the first rectangular draw is the seeded word over `2^32 - 1` scaled to
+    /// `[-0.5, 0.5]`, and it is added to the signal at full `f64` precision: a signal of 0.1
+    /// (not an `f32`) leaves exactly an `f32` draw behind once 0.1 is taken off.
     #[test]
-    fn an_f64_block_gets_the_seeded_draw_added_to_the_signal() {
-        let mut s = [0.25f64; 1];
+    fn an_f64_block_keeps_its_precision_and_gets_the_seeded_draw() {
+        let mut s = [0.1f64; 1];
         apply(
             &mut DitherNoise::new(),
             DitherShape::Rectangular,
             LSB,
             &mut s,
         );
-        let want = 0.25 + (2_274_908_837.0_f64 / 4_294_967_295.0 - 0.5);
-        assert!((s[0] - want).abs() < 1e-7, "{} vs {want}", s[0]);
+        let want = 2_274_908_837.0_f64 / 4_294_967_295.0 - 0.5;
+        let added = s[0] - 0.1;
+        assert!((added - want).abs() < 1e-7, "{added} vs {want}");
+        assert!(
+            (f64::from(added as f32) - added).abs() < 1e-15,
+            "the signal was rounded through f32: {added}"
+        );
     }
 }

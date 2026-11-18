@@ -201,33 +201,42 @@ mod tests {
         assert_eq!(held, DirectForm1::default());
     }
 
-    /// In `f64` the section is the difference equation to the last bit: a block run through
-    /// `process` equals the recurrence computed in the test, and `hold` keeps the last two
-    /// inputs as both histories.
+    /// In `f64` a block through `process` is the input convolved with the section's impulse
+    /// response, to f64 rounding (an `f32` round trip would be off by 1e-8), and `hold` leaves
+    /// the last two inputs as both histories.
     #[test]
-    fn direct_form_i_in_f64_is_the_recurrence_exactly() {
+    fn direct_form_i_in_f64_is_the_input_convolved_with_the_impulse_response() {
         let c = Biquad {
-            b0: 0.5,
-            b1: 0.25,
-            b2: -0.125,
-            a1: -0.5,
-            a2: 0.25,
+            b0: 0.1,
+            b1: 0.37,
+            b2: -0.23,
+            a1: -0.61,
+            a2: 0.29,
         };
-        let input = [1.0f64, -0.5, 0.25, 0.75, -1.0];
+        let input = [0.9f64, -0.41, 0.13, 0.77, -0.58, 0.31, 0.07, -0.93];
+        // The impulse response of the all-pole recurrence, then the numerator on top.
+        let b = [c.b0, c.b1, c.b2];
+        let mut h = [0.0f64; 8];
+        for n in 0..h.len() {
+            let ar = -c.a1 * n.checked_sub(1).map_or(0.0, |k| h[k])
+                - c.a2 * n.checked_sub(2).map_or(0.0, |k| h[k]);
+            h[n] = b.get(n).copied().unwrap_or(0.0) + ar;
+        }
         let mut got = input;
         DirectForm1::default().process(&c, MonoMut::new(&mut got));
-        let (mut x, mut y) = ([0.0f64; 2], [0.0f64; 2]);
-        for (n, &xn) in input.iter().enumerate() {
-            let yn = c.b0 * xn + c.b1 * x[0] + c.b2 * x[1] - c.a1 * y[0] - c.a2 * y[1];
-            x = [xn, x[0]];
-            y = [yn, y[0]];
-            assert_eq!(got[n], yn, "frame {n}");
+        for n in 0..input.len() {
+            let want: f64 = (0..=n).map(|k| h[k] * input[n - k]).sum();
+            assert!(
+                (got[n] - want).abs() < 1e-13,
+                "frame {n}: {} vs {want}",
+                got[n]
+            );
         }
         let mut held = DirectForm1::default();
-        held.hold(Mono::new(&[9.0f64, 1.0, 2.0]));
+        held.hold(Mono::new(&[9.1f64, 1.1, 2.3]));
         let mut after = [0.0f64];
         held.process(&c, MonoMut::new(&mut after));
-        let want = c.b1 * 2.0 + c.b2 * 1.0 - c.a1 * 2.0 - c.a2 * 1.0;
-        assert_eq!(after[0], want);
+        let want = c.b1 * 2.3 + c.b2 * 1.1 - c.a1 * 2.3 - c.a2 * 1.1;
+        assert!((after[0] - want).abs() < 1e-15, "{} vs {want}", after[0]);
     }
 }

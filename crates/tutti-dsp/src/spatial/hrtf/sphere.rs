@@ -13,6 +13,7 @@ use rustfft::FftNum;
 use tutti_buffers::{Float, Mono, Sample};
 use tutti_types::{Direction, SampleRate};
 
+use crate::convolver::convert_mono;
 use crate::{Complex, CosineWindow, RealFft, WindowedSinc};
 
 use super::hull::convex_hull;
@@ -169,10 +170,12 @@ impl HrirSphere {
             .iter()
             .map(|m| unit_vector(m.direction))
             .collect();
-        let mut responses = Vec::with_capacity(measurements.len() * 2 * len);
-        for m in measurements {
-            let ears = m.left.samples().iter().chain(m.right.samples());
-            responses.extend(ears.map(|&s| s.convert_to::<f32>()));
+        // Every response is `len` long (checked above): the left ear's, then the right's.
+        let mut responses = vec![0.0f32; measurements.len() * 2 * len];
+        for (m, ears) in measurements.iter().zip(responses.chunks_exact_mut(2 * len)) {
+            let (left, right) = ears.split_at_mut(len);
+            convert_mono(m.left.samples(), left);
+            convert_mono(m.right.samples(), right);
         }
         // The check on the raw values comes first: a NaN direction would
         // poison the duplicate test and the hull.
@@ -627,9 +630,7 @@ impl<F: Float + FftNum> HrtfSet<F> {
         let mut transform = |r: usize, response: &[f32]| {
             // The measured responses are `f32`; they enter the render's format here.
             let (head, tail) = frame.split_at_mut(response.len());
-            for (d, &x) in head.iter_mut().zip(response) {
-                *d = <F as Float>::from_f32(x);
-            }
+            convert_mono(response, head);
             tail.fill(F::ZERO);
             let out = &mut spectra[r * bins..(r + 1) * bins];
             fft.forward(Mono::new(&frame), out, &mut scratch);

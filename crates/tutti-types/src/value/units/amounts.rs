@@ -23,7 +23,7 @@ unit! {
     /// A blend position between two signals, `0..1`: `0` is all of the first
     /// signal (the input, as it was before the node: the "dry" end), `1` all of
     /// the second (the node's output: the "wet" end). In between is
-    /// `first * (1 - mix) + second * mix`, [`blend`](Mix::blend).
+    /// `first * (1 - mix) + second * mix` (`tutti_dsp::lerp`).
     ///
     /// What the graph holds per node is this blend of the node's output with
     /// its own input delayed by the node's declared latency
@@ -57,14 +57,6 @@ impl Mix {
     #[must_use]
     pub fn new_clamped(v: f32) -> Mix {
         Mix(v).clamp(Self::DRY, Self::WET)
-    }
-
-    /// Crossfades `dry` and `wet` at this position:
-    /// `dry * (1.0 - mix) + wet * mix`.
-    #[inline]
-    #[must_use]
-    pub fn blend(self, dry: f32, wet: f32) -> f32 {
-        dry * (1.0 - self.0) + wet * self.0
     }
 }
 

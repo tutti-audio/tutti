@@ -6,7 +6,7 @@ mod streaming;
 
 pub use fft::FftResampler;
 pub use sinc::WindowedSinc;
-pub use streaming::{ChunkSize, StreamingResampler};
+pub use streaming::{ChunkSize, StreamingResampler, rates_convert, resampled_frames};
 
 /// Why an [`FftResampler`] could not be built or fed.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]

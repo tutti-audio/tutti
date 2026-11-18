@@ -246,7 +246,10 @@ pub use oversample::{
 };
 pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
-pub use resample::{ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc};
+pub use resample::{
+    ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc, rates_convert,
+    resampled_frames,
+};
 pub use reverb::fdn::bank::{FdnBank, FdnGlides};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, MAX_PRE_DELAY, MIN_DECAY};
 pub use reverb::freeverb::bank::{FreeverbBank, FreeverbGlides};

@@ -24,11 +24,12 @@
 
 use core::ops::Range;
 
-use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate, Samples};
 
 use super::compressor::{CompressorBank, CompressorControls, CompressorLanes};
 use super::shared::{CHUNK, GAIN_GLIDE};
+use crate::convolver::convert_mono;
 use crate::{
     COEFF_INTERVAL, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
     CrossoverModel, Glide, Steps,
@@ -369,11 +370,7 @@ impl MultibandBank {
         for (c, plane) in scratch.input.iter_mut().enumerate() {
             let dst = &mut plane[..n];
             match input.get_plane(c) {
-                Some(src) => {
-                    for (d, s) in dst.iter_mut().zip(&src.samples()[at.clone()]) {
-                        *d = s.convert_to::<f32>();
-                    }
-                }
+                Some(src) => convert_mono(&src.samples()[at.clone()], dst),
                 None => dst.fill(0.0),
             }
         }
@@ -462,12 +459,7 @@ impl MultibandBank {
         }
         for c in 0..width.min(output.channels()) {
             let mut plane = output.plane_mut(c);
-            for (y, &x) in plane.samples_mut()[at.clone()]
-                .iter_mut()
-                .zip(&scratch.sum[c][..n])
-            {
-                *y = x.convert_to::<S>();
-            }
+            convert_mono(&scratch.sum[c][..n], &mut plane.samples_mut()[at.clone()]);
         }
     }
 }

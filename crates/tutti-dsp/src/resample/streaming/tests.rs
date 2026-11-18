@@ -50,7 +50,7 @@ fn the_length_is_the_rounded_ratio_however_the_input_is_blocked() {
                 let planes: Vec<Vec<f32>> = (0..2).map(|_| vec![0.1f32; n]).collect();
                 let want = (n as f64 * f64::from(to) / f64::from(from)).round() as usize;
                 assert_eq!(
-                    StreamingResampler::<f32>::output_frames(
+                    resampled_frames(
                         SampleRate::from_hz(from).unwrap(),
                         SampleRate::from_hz(to).unwrap(),
                         Samples(n)
@@ -368,7 +368,7 @@ fn an_f64_stream_has_the_rounded_length_and_unit_dc_gain() {
         );
         let mid = &x[x.len() / 4..3 * x.len() / 4];
         let worst = mid.iter().map(|s| (s - 0.5).abs()).fold(0.0f64, f64::max);
-        assert!(worst < 1e-5, "{from}->{to}: DC off by {worst}");
+        assert!(worst < 1e-9, "{from}->{to}: DC off by {worst}");
     }
 }
 
@@ -619,36 +619,47 @@ fn the_passband_is_flat_to_the_band_edge() {
 #[test]
 fn rates_of_one_whole_hz_are_no_conversion() {
     let hz = |r: f64| SampleRate::of(r);
-    assert!(!StreamingResampler::<f32>::converts(
-        hz(44_100.0),
-        hz(44_100.2)
-    ));
-    assert!(StreamingResampler::<f32>::converts(
-        hz(44_100.0),
-        hz(48_000.0)
-    ));
-    assert!(StreamingResampler::<f32>::converts(hz(0.4), hz(0.4)));
+    assert!(!rates_convert(hz(44_100.0), hz(44_100.2)));
+    assert!(rates_convert(hz(44_100.0), hz(48_000.0)));
+    assert!(rates_convert(hz(0.4), hz(0.4)));
     assert_eq!(
-        StreamingResampler::<f32>::output_frames(hz(44_100.0), hz(44_100.2), Samples(1_000_000)),
+        resampled_frames(hz(44_100.0), hz(44_100.2), Samples(1_000_000)),
         Samples(1_000_000)
     );
 }
 
 /// A channel count a `ChannelLayout` cannot hold is refused with the buffer
-/// error where the input view is built, so no chunk runs over it and nothing panics.
+/// error when a chunk runs, not a panic: a narrower view (the rest silent) of one chunk
+/// is pushed into a resampler wider than the layout allows.
 #[test]
-fn a_width_over_the_layout_limit_is_refused_when_the_input_view_is_built() {
+fn a_width_over_the_layout_limit_is_refused_when_a_chunk_runs() {
     let channels = usize::from(u16::MAX) + 1;
-    StreamingResampler::<f32>::new(
+    let mut r = StreamingResampler::<f32>::new(
         channels,
         SampleRate::from_hz(44_100).unwrap(),
         SampleRate::from_hz(48_000).unwrap(),
         ChunkSize::MIN,
     )
     .unwrap();
-    let planes = vec![vec![0.0f32; 64]; channels];
+    let planes = vec![vec![0.0f32; ChunkSize::MIN.chunk().get()]];
+    let mut out = vec![Vec::new(); channels];
     assert!(matches!(
-        Planes::from_vecs(&planes),
-        Err(tutti_buffers::BufferError::Layout(_))
+        r.push(Planes::from_vecs(&planes).unwrap(), &mut out),
+        Err(ResampleError::Buffer(tutti_buffers::BufferError::Layout(_)))
     ));
+}
+
+/// A view narrower than the resampler is silent in the channels it lacks.
+#[test]
+fn a_narrower_view_leaves_the_other_channels_silent() {
+    let mut r =
+        StreamingResampler::<f32>::new(2, SampleRate::SR_48K, SampleRate::SR_48K, ChunkSize::N512)
+            .unwrap();
+    let planes = vec![vec![0.5f32; 4096]];
+    let mut out = vec![Vec::new(); 2];
+    r.push(Planes::from_vecs(&planes).unwrap(), &mut out)
+        .unwrap();
+    assert!(!out[0].is_empty());
+    assert!(out[0].iter().any(|&x| x != 0.0));
+    assert!(out[1].iter().all(|&x| x == 0.0));
 }
