@@ -206,7 +206,7 @@ jobs:
         run: cargo nextest run --locked -p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests
 
   # Every AU crate is macOS-only, so the Linux and Windows jobs compile it to nothing. Lints only: the AU
-  # suites need installed audio units and run locally.
+  # suites need installed audio units and run locally, and the macOS `test` runs on pushes to main.
   clippy-macos:
     name: clippy (macos)
     needs: changes
@@ -227,23 +227,6 @@ jobs:
       # AU alone: the one-format loop in `clippy` runs on Linux, where the AU row is empty. `--lib` because the
       # server's dev-dependency `tutti-vst3-host` builds the VST3 SDK, which this job does not check out.
       - run: cargo clippy --locked -p tutti-plugin-server --no-default-features --features au --lib -- -D warnings
-      # Rustdoc over what only macOS compiles, in the merge queue, so a broken link fails before it reaches main;
-      # `rustdoc` documents the rest of the workspace on Linux.
-      # `tutti-vst3-ffi` needs the VST3 SDK, which this job does not check out, so its macOS view code is the one
-      # piece left out.
-      - run: >-
-          cargo doc --locked --no-deps -p tutti-au-ffi -p tutti-au-host -p tutti-coremidi-ffi -p tutti-midi-hardware
-          -p tutti-plugin-types -p tutti-plugin-ipc-ffi -p tutti-clap-ffi -p tutti-rt
-        env:
-          RUSTDOCFLAGS: -D warnings --document-private-items
-      - run: cargo doc --locked --no-deps -p tutti-plugin --features au --lib
-        env:
-          RUSTDOCFLAGS: -D warnings --document-private-items
-      - run: >-
-          cargo doc --locked --no-deps -p tutti-plugin-server -p tutti-plugin-probe --no-default-features
-          --features tutti-plugin-server/clap,tutti-plugin-server/au,tutti-plugin-probe/clap,tutti-plugin-probe/au --lib
-        env:
-          RUSTDOCFLAGS: -D warnings --document-private-items
 
   # Not a required check: it finds out whether the shared plugin loads on a Windows runner.
   contract-windows:
@@ -274,58 +257,22 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+      # JACK too: `--all-features` turns on `tutti-cpal/jack`, whose build script wants the headers.
       - name: Install Linux audio deps
         uses: ./.github/actions/linux-audio-deps
+        with:
+          extra: libjack-jackd2-dev
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
 
-      # Feature combinations no other job compiles: nothing in the workspace turns on `capture`, `audio-io` or the
-      # codec and plugin-format features, so the clippy and test jobs never see them. Not `--all-features`, which
-      # pulls every plugin-format SDK: name each combination, and add one when a feature is added.
-      # `tutti-midi-hardware/sequencer-tests` is linted here and run only locally (`cargo xtask test-features`): it
-      # needs the kernel's `snd-seq` module, which the runner lacks.
+      # Every feature of every member at once: nothing in the workspace turns on `capture`, `audio-io`, `jack` or
+      # the codec and plugin-format features, so the clippy and test jobs never see them. The VST3 SDK is checked
+      # out above, and the AU crates compile to nothing on Linux.
       - name: Lint
-        run: |
-          cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-session --features audio-io --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde,analyze --all-targets -- -D warnings
-          cargo clippy --locked -p tutti --features clap,export,sampler,midi-hardware,synth --all-targets -- -D warnings
-          cargo clippy --locked -p tutti --features audio-io --all-targets -- -D warnings
-          cargo clippy --locked -p tutti --features analyze,decode-wav,sampler --all-targets -- -D warnings
-          cargo clippy --locked -p tutti --no-default-features --features io --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-export --lib -- -D warnings
-          cargo clippy --locked -p tutti-session --lib --features export,encode-flac,encode-aiff,encode-vorbis -- -D warnings
-          cargo clippy --locked -p tutti-session --lib --features vst3,au -- -D warnings
-          cargo clippy --locked -p tutti --features device,soundfont,decode-wav,decode-flac,decode-mp3,decode-ogg,export,encode-flac,encode-aiff,encode-vorbis --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-sampler --lib -- -D warnings
-          cargo clippy --locked -p tutti-sampler --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-plugin --features vst3,au,serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-codec --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-codec --features encode-wav --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-codec --features encode-aiff --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-codec --features encode-flac --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-codec --features encode-vorbis --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-codec --lib --features decode-wav -- -D warnings
-          cargo clippy --locked -p tutti-codec --lib --features decode-flac -- -D warnings
-          cargo clippy --locked -p tutti-codec --lib --features decode-mp3 -- -D warnings
-          cargo clippy --locked -p tutti-codec --lib --features decode-ogg -- -D warnings
-          cargo clippy --locked -p tutti-codec --all-features --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-ump --features serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-buffers --features serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-midi-protocol --features serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-midi-device --features serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-tempo --features serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-measure --features serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-dsp --lib -- -D warnings
-          cargo clippy --locked -p tutti-plugin-types --lib --features contract -- -D warnings
-          cargo clippy --locked -p tutti-midi-hardware --features sequencer-tests --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-clap-ffi --lib -- -D warnings
-          cargo clippy --locked -p tutti-plugin --features clap,vst2,serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-plugin-db --features serde --all-targets -- -D warnings
-          cargo clippy --locked -p tutti-plugin-contract --features server --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
       - name: no_std build
         run: |
@@ -339,45 +286,16 @@ jobs:
           cargo build --locked -p tutti-plugin-server --no-default-features --features clap,vst3
           cargo build --locked -p tutti-plugin-probe
 
+      # The members whose suites a feature gates, each with every feature on. `tutti-midi-hardware` is left out:
+      # its `sequencer-tests` need the kernel's `snd-seq` module, which the runner lacks (`cargo xtask
+      # test-features` runs it locally).
       - name: Test
-        run: |
-          cargo nextest run --locked -p tutti-cpal --features capture
-          cargo nextest run --locked -p tutti-session --features audio-io
-          cargo nextest run --locked -p tutti-session --features clap,export,midi-hardware,synth,soundfont,sampler,vst2,device,audio-io,serde,analyze
-          cargo nextest run --locked -p tutti --features clap,export,sampler,midi-hardware,synth
-          cargo nextest run --locked -p tutti --features audio-io
-          cargo nextest run --locked -p tutti --features analyze,decode-wav,sampler
-          cargo nextest run --locked -p tutti --no-default-features --features io
-          cargo nextest run --locked -p tutti-session --features export,encode-flac,encode-aiff,encode-vorbis
-          cargo nextest run --locked -p tutti-codec
-          cargo nextest run --locked -p tutti-codec --features encode-wav
-          cargo nextest run --locked -p tutti-codec --features encode-aiff
-          cargo nextest run --locked -p tutti-codec --features encode-flac
-          cargo nextest run --locked -p tutti-codec --features encode-vorbis
-          cargo nextest run --locked -p tutti-codec --all-features
-          # Named so `tests/messages/serde.rs` runs even when no other member turns the feature on.
-          cargo nextest run --locked -p tutti-ump --features serde
-          cargo nextest run --locked -p tutti-midi-protocol --features serde
-          cargo nextest run --locked -p tutti-midi-device --features serde
-          cargo nextest run --locked -p tutti-tempo --features serde
-          cargo nextest run --locked -p tutti-measure --features serde
-          cargo nextest run --locked -p tutti-buffers --features serde
-          cargo nextest run --locked -p tutti-plugin-types --features testing
-          cargo nextest run --locked -p tutti-plugin-db --features serde
-          cargo nextest run --locked -p tutti-plugin-contract --features server
+        run: >-
+          cargo nextest run --locked --all-features
+          -p tutti-cpal -p tutti-session -p tutti -p tutti-codec -p tutti-ump -p tutti-midi-protocol
+          -p tutti-midi-device -p tutti-tempo -p tutti-measure -p tutti-buffers -p tutti-plugin-types
+          -p tutti-plugin-db -p tutti-plugin-contract
 
-      # JACK hard-links libjack at build time, so it has its own step and apt package. `AudioHost::Jack` exists
-      # on every platform, so only the Linux build reaches the real code.
-      - name: Install JACK headers
-        uses: ./.github/actions/linux-audio-deps
-        with:
-          extra: libjack-jackd2-dev
-      - name: Lint JACK
-        run: cargo clippy --locked -p tutti-cpal --features jack --all-targets -- -D warnings
-
-      # Driven at real callback pacing against the reference CLAP probe, with `plugin-server` built first (see above).
-      # These pace to a 1.333 ms block and spawn up to 8 subprocesses; if that is too much for a shared runner,
-      # reduce the instance count rather than add `continue-on-error`.
       - name: Build plugin-server and plugin-probe
         run: |
           cargo build --locked -p tutti-plugin-server
@@ -509,16 +427,14 @@ jobs:
   doc:
     name: rustdoc
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+      # JACK too: `--all-features` turns on `tutti-cpal/jack`, whose build script wants the headers.
       - name: Install Linux audio deps
-        uses: ./.github/actions/linux-audio-deps
-      # JACK too: `--all-features` below turns on `tutti-cpal/jack`, whose build script wants the headers.
-      - name: Install JACK headers
         uses: ./.github/actions/linux-audio-deps
         with:
           extra: libjack-jackd2-dev
@@ -526,28 +442,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # Intra-doc link lints are denied workspace-wide but only rustdoc enforces them. `--document-private-items`
-      # catches links that break only in a private item.
-      - run: cargo doc --locked --workspace --no-deps
+      # Intra-doc link lints are denied workspace-wide but only rustdoc enforces them. Every feature of every member
+      # at once, so an item behind a feature nothing in the workspace enables is documented too;
+      # `--document-private-items` catches links that break only in a private item.
+      - run: cargo doc --locked --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings --document-private-items
-      # Both umbrellas with every feature, JACK included (the one feature `check-doc-features` leaves out).
-      - run: cargo doc --locked -p tutti-session -p tutti --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: -D warnings --document-private-items
-      # Every member with its features together, then each umbrella feature alone: a workspace build documents only
-      # what some member's edge enables. The lists come from the manifests.
-      - run: cargo xtask check-doc-features
-      # The docs.rs build: nightly with `--cfg docsrs`. A dated nightly, bumped by hand, so a new rustdoc lint cannot
-      # turn CI red; named with `+` because `rust-toolchain.toml` pins stable.
+      # Every type in the signatures of what `tutti` exports has a path in `tutti`: the public-api text of each crate
+      # it exports from, read on a dated nightly (named with `+` because `rust-toolchain.toml` pins stable).
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-10-14
-      - run: cargo +nightly-2026-10-14 doc --locked --workspace --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings --cfg docsrs
-      # Every type in the signatures of what `tutti` exports has a path in `tutti`: the public-api text of each crate
-      # it exports from, read on the same nightly.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-public-api@0.52.0
@@ -591,12 +496,11 @@ jobs:
   # `code`: false when every change is prose nothing compiles (top-level `docs/`, or a root `*.md`). A crate's
   # README is pulled in by `include_str!`, so it counts as code. `canonical paths` still runs for prose.
   # `loom`: the change can affect a loom model: `tutti-rt`, `tutti-plugin-ipc-ffi`, the lock, the toolchain or this file.
-  # `macos`: the change touches code that differs on macOS. It gates `clippy (macos)` (which also runs rustdoc over
-  # the macOS-only crates) and the macOS `test`; the macOS editor, release and doctest runs are for pushes only.
+  # `macos`: the change touches code that differs on macOS. It gates `clippy (macos)`; the macOS `test`, editor,
+  # release and doctest runs are for pushes to main only.
   # `deps`: a manifest, the lock, `deny.toml`, the toolchain or this file changed, which is what `cargo deny` reads.
   # `full`: false on a pull request, which runs the light set (static gates, Linux clippy, the Linux `test`,
-  # rustdoc, `cargo deny` when `deps`); the merge group and the push run the rest. `cargo xtask check-windows`
-  # and `check-features` run locally what a pull request skips.
+  # `cargo deny` when `deps`); the merge group and the push run the rest.
   changes:
     name: what changed?
     runs-on: ubuntu-24.04
@@ -647,8 +551,9 @@ jobs:
             echo "loom=false" >> "$GITHUB_OUTPUT"
           fi
           # The macOS editor, release and doctest runs are for pushes only: Linux runs the same tests, and
-          # `clippy (macos)` lints and documents what only macOS compiles.
+          # `clippy (macos)` lints what only macOS compiles. The macOS `test` is for pushes only too.
           echo 'test_more_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+          echo 'test_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           if echo "$changed" | grep -qE '^(Cargo\.(toml|lock)|deny\.toml|rust-toolchain\.toml|\.github/workflows/ci\.yml)$|/Cargo\.toml$'; then
             echo "deps=true" >> "$GITHUB_OUTPUT"
           else
@@ -656,14 +561,8 @@ jobs:
           fi
           if echo "$changed" | grep -qE '^(crates/(tutti-rt|tutti-cpal|tutti-midi-hardware|tutti-coremidi-ffi|tutti-au-[a-z]+|tutti-vst2-[a-z]+|tutti-vst3-[a-z]+|tutti-clap-[a-z]+|tutti-plugin[a-z-]*)/|crates/tutti-session/(src|tests)/plugin|testing/tutti-(shared-plugin[a-z0-9-]*|clap-test-plugin|vst2-[a-z]+|vst2-test-plugin|plugin-contract|fixtures)/|vendor/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
-            if [ "$EVENT" = "pull_request" ]; then
-              echo 'test_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-            else
-              echo 'test_os=["ubuntu-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
-            fi
           else
             echo "macos=false" >> "$GITHUB_OUTPUT"
-            echo 'test_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           fi
 
   loom:

@@ -87,8 +87,7 @@ pub enum Division {
     /// Ticks per quarter note. Zero is representable and must be rejected by
     /// any reader that divides by it.
     Metrical(u16),
-    /// SMPTE: negative frames-per-second byte plus ticks-per-frame. Not a
-    /// tempo-relative grid, so `tutti-midi-file` refuses it.
+    /// SMPTE: negative frames-per-second byte plus ticks-per-frame.
     Smpte { fps: i8, ticks_per_frame: u8 },
 }
 

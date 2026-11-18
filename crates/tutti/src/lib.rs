@@ -298,7 +298,7 @@ pub mod types {
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        Reading, Reclaim, Setting, SettingWord, Tally, TallyWriter, Words,
+        Reading, Reclaim, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
     };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
@@ -669,10 +669,12 @@ pub mod midi {
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
     };
     pub use tutti_midi_file::{
-        Altered, Converted, DropReason, Dropped, LyricChange, MalformedMeta, MicrosPerQuarter,
-        MicrosPerQuarterOutOfRange, MidiFileKind, Moved, NoCommonTimeline, OtherMetaKind,
-        OtherMetaKindOutOfRange, OutOfOrder, PairedNote, SmfDivision, SmfDivisionOutOfRange,
-        TextKind, Timeline, TimelineDrop, WriteOptions,
+        Altered, Converted, DropReason, Dropped, FileTime, LyricChange, MalformedMeta,
+        MicrosPerQuarter, MicrosPerQuarterOutOfRange, MidiFileKind, Moved, OtherMetaKind,
+        OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
+        SmfDivision, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter,
+        SmfTicksPerQuarterOutOfRange, TextKind, Timeline, TimelineDrop, TimelineError,
+        WriteOptions,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
