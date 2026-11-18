@@ -2,6 +2,10 @@
 //! bank of one filter per channel over buffers views ([`SvfBank`], [`LadderBank`],
 //! [`CrossoverBank`]), over the [`Lanes`] arithmetic their steps share.
 
+/// The share of Nyquist a cutoff is held under, where `tan` of its warp is finite and the
+/// bilinear map is well conditioned.
+const NYQUIST_MARGIN: f32 = 0.998;
+
 mod biquad;
 mod crossover;
 mod envelope;

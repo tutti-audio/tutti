@@ -160,7 +160,7 @@ impl<F: Float + Lanes> EnvelopeFilterBank<F> {
     #[must_use]
     pub(crate) fn cutoff_at(&self, env: Amplitude) -> Hz {
         let ratio = (self.controls.depth * env.get()).to_pitch_ratio();
-        (self.controls.base * ratio).clamp(Hz(1.0), self.rate.nyquist_scaled(0.998))
+        (self.controls.base * ratio).clamp(Hz(1.0), self.rate.nyquist_scaled(super::NYQUIST_MARGIN))
     }
 
     /// The coefficients at the envelope `env`.

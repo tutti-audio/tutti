@@ -151,7 +151,7 @@ fn the_design_holds_the_figures_of_its_definition() {
     let m = Design::of(&controls(-20.0, 0.001, 0.0102, 0.1, -12.0), RATE);
     // 0.0102 s at 48 kHz is 489.6 frames, floored.
     assert_eq!(m.hold_samples, 489);
-    assert_eq!(m.threshold_linear, Db(-20.0).to_amplitude().get());
+    assert_eq!(m.threshold, Db(-20.0).to_amplitude());
     assert_eq!(m.attack, Seconds(0.001).one_pole_coeff(RATE));
     assert_eq!(m.release, Seconds(0.1).one_pole_coeff(RATE));
     assert_eq!(m.range, Db(-12.0));
@@ -172,7 +172,7 @@ fn the_design_holds_the_figures_of_its_definition() {
         "a time under 0 is instant"
     );
     assert_eq!(m.hold_samples, 0);
-    assert_eq!(m.range, Db(0.0), "a range over 0 dB reads as 0");
+    assert_eq!(m.range, Db::UNITY, "a range over 0 dB reads as 0");
 
     let m = Design::of(
         &GateControls {
@@ -182,10 +182,7 @@ fn the_design_holds_the_figures_of_its_definition() {
         },
         RATE,
     );
-    assert_eq!(
-        m.threshold_linear,
-        GateControls::DEFAULT.threshold.to_amplitude().get()
-    );
+    assert_eq!(m.threshold, GateControls::DEFAULT.threshold.to_amplitude());
     assert_eq!(m.range, GateControls::DEFAULT.range);
 }
 

@@ -461,7 +461,7 @@ fn taps_width_and_wet_follow_the_kernels_fold() {
     assert!(close(a, mid * wet) && close(b, mid * wet));
     // A width above 1 raises the l1 gain by the width.
     n.width = StereoWidth(2.0);
-    n.wet = Db(0.0);
+    n.wet = Db::UNITY;
     assert!((n.l1_norm() - 1.0).abs() < 1e-12);
 }
 

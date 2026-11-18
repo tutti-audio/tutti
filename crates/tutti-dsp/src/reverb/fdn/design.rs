@@ -114,7 +114,7 @@ impl FdnControls {
         modulation: Depth::of(0.3),
         rate: Hz(0.5),
         width: StereoWidth::NATURAL,
-        wet: Db(0.0),
+        wet: Db::UNITY,
         freeze: false,
     };
 }
@@ -257,7 +257,7 @@ impl FdnLayout {
         let wet = {
             let w = c.wet;
             if w.get().is_nan() {
-                Db(0.0)
+                Db::UNITY
             } else if w <= SILENT_WET {
                 Db(f32::NEG_INFINITY)
             } else {

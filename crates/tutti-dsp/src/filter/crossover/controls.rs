@@ -43,7 +43,7 @@ impl CrossoverControls {
     }
 
     fn of(frequencies: &[Hz]) -> Self {
-        let mut set = [Hz(0.0); MAX_SPLITS];
+        let mut set = [Hz::ZERO; MAX_SPLITS];
         set[..frequencies.len()].copy_from_slice(frequencies);
         Self { frequencies: set }
     }

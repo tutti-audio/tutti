@@ -186,7 +186,7 @@ fn a_downward_band_is_unity_below_the_threshold() {
         let x = sine(1000.0, amplitude(-30.0), SETTLE);
         let mut b = bank(DynamicMode::Downward, 1, &c);
         let y = run(&mut b, &[&x], &[&x], 256).remove(0);
-        assert_eq!(b.gain(), Db(0.0), "knee {knee}");
+        assert_eq!(b.gain(), Db::UNITY, "knee {knee}");
         assert!(
             x.iter().zip(&y).all(|(a, b)| a == b),
             "knee {knee}: the signal is not unchanged"
@@ -203,7 +203,7 @@ fn an_upward_band_is_unity_above_the_threshold() {
     let x = sine(1000.0, amplitude(-10.0), SETTLE);
     let mut b = bank(DynamicMode::Upward, 1, &c);
     let y = run(&mut b, &[&x], &[&x], 256).remove(0);
-    assert_eq!(b.gain(), Db(0.0));
+    assert_eq!(b.gain(), Db::UNITY);
     let tail = SETTLE - MEASURE;
     assert!(x[tail..].iter().zip(&y[tail..]).all(|(a, b)| a == b));
 }
@@ -325,7 +325,7 @@ fn an_upward_band_at_ratio_one_and_a_huge_threshold_lifts_nothing() {
     let x = sine(1000.0, 0.5, 4096);
     let mut b = bank(DynamicMode::Upward, 1, &c);
     let y = run(&mut b, &[&x], &[&x], 333).remove(0);
-    assert_eq!(b.gain(), Db(0.0));
+    assert_eq!(b.gain(), Db::UNITY);
     assert_eq!(y, x);
 }
 
@@ -404,7 +404,7 @@ fn a_reset_band_is_flat() {
     run(&mut b, &[&x], &[&x], 480);
     assert!(b.gain().get() < -9.0);
     b.reset();
-    assert_eq!(b.gain(), Db(0.0));
+    assert_eq!(b.gain(), Db::UNITY);
     let silent = vec![0.0f32; 64];
     let y = run(&mut b, &[&silent], &[&silent], 64).remove(0);
     assert!(y.iter().all(|&v| v == 0.0));

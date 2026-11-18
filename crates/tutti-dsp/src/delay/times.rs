@@ -74,7 +74,7 @@ impl ChannelTimes {
     pub const fn linked() -> Self {
         Self {
             count: 0,
-            times: [Seconds(0.0); MAX_WIDTH - 1],
+            times: [Seconds::ZERO; MAX_WIDTH - 1],
             linked: true,
         }
     }
@@ -91,7 +91,7 @@ impl ChannelTimes {
                 max: MAX_WIDTH - 1,
             });
         }
-        let mut all = [Seconds(0.0); MAX_WIDTH - 1];
+        let mut all = [Seconds::ZERO; MAX_WIDTH - 1];
         for (i, &t) in times.iter().enumerate() {
             if !(t.get().is_finite() && t.get() >= 0.0) {
                 return Err(ChannelTimesError::NotATime {

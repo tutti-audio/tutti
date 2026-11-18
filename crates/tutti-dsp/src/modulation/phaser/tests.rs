@@ -1,5 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{Feedback, Hz, SampleRate};
+use tutti_types::{ChannelLayout, Feedback, Hz, SampleRate};
 
 use super::*;
 use crate::{Complex64, allpass_coeff};
@@ -15,7 +15,10 @@ fn run(
     audio: &[Vec<f32>],
     block: usize,
 ) -> Vec<Vec<f32>> {
-    let mut chain = PhaserChain::new(Stages::of(stages), coefficients.len());
+    let mut chain = PhaserChain::new(
+        Stages::of(stages),
+        ChannelLayout::clamped(coefficients.len()),
+    );
     run_on(&mut chain, coefficients, feedback, audio, block)
 }
 
@@ -104,7 +107,7 @@ fn a_held_chain_is_flat_with_the_nth_power_of_a_stage_at_no_feedback() {
     let sr = RATE.get();
     for stages in [2usize, 3, 4, 7, 12] {
         let c = textbook_c(1_000.0, sr);
-        let h = held_response(stages, allpass_coeff(1_000.0, sr as f32), 0.0, 8_192);
+        let h = held_response(stages, allpass_coeff(Hz(1_000.0), RATE), 0.0, 8_192);
         for hz in [30.0f64, 250.0, 1_000.0, 3_000.0, 11_000.0, 23_000.0] {
             let got = dft(&h, hz, sr);
             let want = textbook(stages, c, 0.0, hz, sr);
@@ -127,7 +130,7 @@ fn a_held_chain_is_flat_with_the_nth_power_of_a_stage_at_no_feedback() {
 #[test]
 fn two_stages_invert_at_their_centre() {
     let sr = RATE.get();
-    let c = allpass_coeff(1_000.0, sr as f32);
+    let c = allpass_coeff(Hz(1_000.0), RATE);
     let h = held_response(2, c, 0.0, 8_192);
     let g = dft(&h, 1_000.0, sr);
     assert!((g + 1.0).norm() < 1e-3, "H(f0) = {g}");
@@ -187,7 +190,7 @@ fn a_half_mix_of_the_chain_has_ceil_n_over_two_notches_where_the_phase_is_odd_pi
             let last = *notches.last().unwrap();
             assert!((last - sr / 2.0).abs() < 1e-3, "{stages}: Nyquist, {last}");
         }
-        let h = held_response(stages, allpass_coeff(700.0, sr as f32), 0.0, 8_192);
+        let h = held_response(stages, allpass_coeff(Hz(700.0), RATE), 0.0, 8_192);
         for hz in notches {
             let mix = (dft(&h, hz, sr) + 1.0) * 0.5;
             assert!(
@@ -212,7 +215,7 @@ fn the_feedback_closes_the_loop_at_dc_and_nyquist_and_peaks_at_dc() {
         for g in [0.0f32, 0.5, 0.9, Feedback::MAX_STABLE.get()] {
             let q = f64::from(g);
             let len = if g > 0.95 { 262_144 } else { 16_384 };
-            let h = held_response(stages, allpass_coeff(900.0, sr as f32), g, len);
+            let h = held_response(stages, allpass_coeff(Hz(900.0), RATE), g, len);
             let nyquist = if stages % 2 == 0 {
                 1.0 / (1.0 + q)
             } else {
@@ -278,7 +281,7 @@ fn the_feedback_response_is_the_closed_loop_of_the_stages() {
     let sr = RATE.get();
     let (stages, g) = (4usize, 0.8f32);
     let c = textbook_c(2_000.0, sr);
-    let h = held_response(stages, allpass_coeff(2_000.0, sr as f32), g, 16_384);
+    let h = held_response(stages, allpass_coeff(Hz(2_000.0), RATE), g, 16_384);
     for hz in [0.0f64, 100.0, 1_500.0, 2_000.0, 5_000.0, 17_000.0, 24_000.0] {
         let got = dft(&h, hz, sr);
         let want = textbook(stages, c, f64::from(g), hz, sr);
@@ -377,8 +380,8 @@ fn a_silent_channel_stays_silent_and_each_channel_keeps_its_own_state() {
         x.clone(),
         noise(6),
     ];
-    let a = allpass_coeff(1_000.0, 48_000.0);
-    let b = allpass_coeff(2_500.0, 48_000.0);
+    let a = allpass_coeff(Hz(1_000.0), RATE);
+    let b = allpass_coeff(Hz(2_500.0), RATE);
     let mut coefficients = [a, b, a, a, a, a].map(Glide::landed);
     let out = run(6, &mut coefficients, &mut Glide::landed(0.99), &audio, 64);
     assert!(out[3].iter().all(|&s| s == 0.0), "no bleed into a silence");
@@ -391,8 +394,8 @@ fn a_silent_channel_stays_silent_and_each_channel_keeps_its_own_state() {
 /// Reset is silence: after a loud stretch and a reset, silence in is exactly silence out.
 #[test]
 fn reset_empties_the_chain() {
-    let c = allpass_coeff(1_000.0, 48_000.0);
-    let mut chain = PhaserChain::new(Stages::of(6), 2);
+    let c = allpass_coeff(Hz(1_000.0), RATE);
+    let mut chain = PhaserChain::new(Stages::of(6), ChannelLayout::clamped(2));
     let mut coefficients = [Glide::landed(c); 2];
     let mut fb = Glide::landed(0.9);
     let loud = vec![vec![1.0f32; 300]; 2];
@@ -412,8 +415,8 @@ fn reset_empties_the_chain() {
 /// A clone is the chain with its history: it carries on where the original is.
 #[test]
 fn a_clone_continues_where_the_original_is() {
-    let c = allpass_coeff(1_000.0, 48_000.0);
-    let mut chain = PhaserChain::new(Stages::of(4), 1);
+    let c = allpass_coeff(Hz(1_000.0), RATE);
+    let mut chain = PhaserChain::new(Stages::of(4), ChannelLayout::clamped(1));
     let mut coefficients = [Glide::landed(c)];
     let mut fb = Glide::landed(0.5);
     run_on(
@@ -434,9 +437,9 @@ fn a_clone_continues_where_the_original_is() {
 /// The chain is generic over the sample format: an `f64` impulse gives the `f32` figure.
 #[test]
 fn an_f64_signal_runs_through_the_same_chain() {
-    let c = allpass_coeff(1_000.0, 48_000.0);
+    let c = allpass_coeff(Hz(1_000.0), RATE);
     let want = held_response(2, c, 0.0, 64);
-    let mut chain = PhaserChain::new(Stages::of(2), 1);
+    let mut chain = PhaserChain::new(Stages::of(2), ChannelLayout::clamped(1));
     let mut x = vec![0.0f64; 64];
     x[0] = 1.0;
     let mut y = vec![0.0f64; 64];

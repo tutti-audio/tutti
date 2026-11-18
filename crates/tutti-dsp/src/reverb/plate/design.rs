@@ -216,7 +216,7 @@ impl PlateControls {
     /// The bandwidth in force at `rate`: finite, within 10 Hz and 0.45 of the rate.
     pub(crate) fn bandwidth_at(&self, rate: SampleRate) -> Hz {
         let hz = finite_or(self.bandwidth.get(), Self::DEFAULT.bandwidth.get());
-        Hz(hz.clamp(MIN_BANDWIDTH.get(), (0.45 * rate.get()) as f32))
+        Hz(hz.clamp(MIN_BANDWIDTH.get(), rate.nyquist_scaled(0.9).get()))
     }
 
     /// Designs the controls into `out` in place, at `rate`: the network the bank runs (the

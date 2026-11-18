@@ -51,7 +51,7 @@ fn hostile() -> Vec<LimiterControls> {
             ..base
         },
         LimiterControls {
-            release: Seconds(0.0),
+            release: Seconds::ZERO,
             ..base
         },
     ];
@@ -641,7 +641,7 @@ fn a_lookahead_keeps_the_range_checked_shape() {
         of: Some(Lookahead::of),
         valid: &[Seconds(1e-9), Seconds(0.005), Seconds(0.1), Lookahead::CAP],
         invalid: &[
-            Seconds(0.0),
+            Seconds::ZERO,
             Seconds(-0.005),
             Seconds(1.000_001),
             Seconds(f64::NAN),

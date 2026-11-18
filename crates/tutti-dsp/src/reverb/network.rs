@@ -122,7 +122,7 @@ impl Network {
             pre_delay: Samples::ZERO,
             stages: Inline::new(),
             width: StereoWidth::NATURAL,
-            wet: Db(0.0),
+            wet: Db::UNITY,
         }
     }
 
@@ -134,7 +134,7 @@ impl Network {
         self.pre_delay = Samples::ZERO;
         self.stages.clear();
         self.width = StereoWidth::NATURAL;
-        self.wet = Db(0.0);
+        self.wet = Db::UNITY;
     }
 }
 
@@ -262,7 +262,7 @@ impl LineModulation {
     /// No modulation.
     pub const NONE: LineModulation = LineModulation {
         depth: SampleSpan::ZERO,
-        rate: Hz(0.0),
+        rate: Hz::ZERO,
     };
 }
 

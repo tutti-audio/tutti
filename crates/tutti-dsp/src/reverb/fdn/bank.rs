@@ -73,7 +73,7 @@ const PRE_STEP: f32 = 2.0;
 struct Target {
     /// The lines in use.
     n: usize,
-    rate_hz: f32,
+    rate: Hz,
     crossover: [f32; 2],
     pole: [f32; 2],
 
@@ -94,7 +94,7 @@ impl Target {
     fn new(lines: usize) -> Self {
         Self {
             n: 0,
-            rate_hz: 0.5,
+            rate: Hz(0.5),
             crossover: [0.0; 2],
             pole: [0.0; 2],
             len: vec![1.0; lines],
@@ -124,7 +124,7 @@ pub struct FdnGlides {
     ramp: Steps,
     /// The lines in use: 0 until the first aim, and the bank is silent.
     n: usize,
-    rate_hz: f32,
+    rate: Hz,
     pole: [f32; 2],
     crossover: [f32; 2],
 
@@ -156,7 +156,7 @@ impl FdnGlides {
         Self {
             ramp,
             n: 0,
-            rate_hz: 0.5,
+            rate: Hz(0.5),
             pole: t.pole,
             crossover: t.crossover,
             len: vec![Glide::landed(1.0); lines],
@@ -228,7 +228,7 @@ impl FdnGlides {
         self.v_len.aim_by(t.v_len, ramp);
         self.mix.aim_by(t.mix, ramp);
         self.depth.aim_by(t.depth, ramp);
-        self.rate_hz = t.rate_hz;
+        self.rate = t.rate;
         self.pre_len.aim_by(t.pre_len, Steps::Rate(PRE_STEP));
         self.wet.aim_by(t.wet, ramp);
         self.width.aim_by(t.width, ramp);
@@ -473,11 +473,11 @@ impl FdnBank {
         let m = f.lines[0].modulation;
         t.depth = (m.depth.get() as f32).min((self.cap as f32) * 0.25);
         let hz = m.rate.get();
-        t.rate_hz = if hz.is_finite() {
+        t.rate = Hz(if hz.is_finite() {
             hz.clamp(0.0, 20.0)
         } else {
             0.5
-        };
+        });
         let pre = self.network.pre_delay.get() as f32;
         t.pre_len = pre.clamp(0.0, (self.pre_cap - 4) as f32);
         let wet = self.network.wet.to_amplitude().get();
@@ -503,7 +503,7 @@ impl FdnBank {
             }
         }
         let dphi =
-            std::f64::consts::TAU * f64::from(c.rate_hz) * Self::CHUNK as f64 / self.rate.get();
+            std::f64::consts::TAU * f64::from(c.rate.get()) * Self::CHUNK as f64 / self.rate.get();
         for j in 0..n {
             s.phase[j] = (s.phase[j] + dphi) % std::f64::consts::TAU;
             s.c_len[j] = c.len[j].now();

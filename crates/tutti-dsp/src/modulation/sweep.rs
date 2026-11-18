@@ -1,7 +1,7 @@
 //! [`Sweep`] and [`Stagger`]: the construction constants of a chorus or flanger, each
 //! checked where it is made.
 
-use tutti_types::{Feedback, MAX_CHANNELS, Phase, PhaseIncrement, Seconds};
+use tutti_types::{ChannelIndex, Feedback, MAX_CHANNELS, Phase, PhaseIncrement, Seconds};
 
 use crate::MaxDelay;
 
@@ -129,7 +129,7 @@ impl Sweep {
     pub const CHORUS: Self = Self::of(
         Seconds(0.01),
         MaxDelay::of(Seconds(0.05)),
-        Seconds(0.0),
+        Seconds::ZERO,
         Seconds(0.04),
         Feedback::MAX_STABLE,
     );
@@ -153,7 +153,7 @@ impl Sweep {
     pub const GENERAL_MIDI_CHORUS: Self = Self::of(
         Seconds(0.002),
         MaxDelay::of(Seconds(0.005)),
-        Seconds(0.0),
+        Seconds::ZERO,
         Seconds(0.0019),
         Feedback::NONE,
     );
@@ -317,12 +317,13 @@ impl Stagger {
     /// Channel `c`'s offset in cycles, wrapped into `[0, 1)`: `c` times the step, or the
     /// offset it was given (zero for a channel an [`each`](Self::each) names none for).
     #[must_use]
-    pub fn offset(&self, channel: usize) -> PhaseIncrement {
+    pub fn offset(&self, channel: ChannelIndex) -> PhaseIncrement {
         match self.kind {
-            Kind::Step(step) => wrap(PhaseIncrement(step.0 * channel as f32)),
-            Kind::Each { offsets, .. } => {
-                offsets.get(channel).copied().unwrap_or(PhaseIncrement(0.0))
-            }
+            Kind::Step(step) => wrap(PhaseIncrement(step.0 * channel.get() as f32)),
+            Kind::Each { offsets, .. } => offsets
+                .get(channel.get())
+                .copied()
+                .unwrap_or(PhaseIncrement(0.0)),
         }
     }
 }

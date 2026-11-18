@@ -15,7 +15,7 @@ pub(super) type Mat3 = [Vec3; 3];
 /// A 2x2 matrix as its columns.
 pub(super) type Mat2 = [[f64; 2]; 2];
 
-const DEG: f64 = core::f64::consts::PI / 180.0;
+pub(super) const DEG: f64 = core::f64::consts::PI / 180.0;
 
 /// A determinant smaller than this has no inverse: the columns are, to that
 /// figure, dependent.
