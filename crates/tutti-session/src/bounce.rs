@@ -1767,6 +1767,9 @@ where
         if !pending.is_empty() {
             return Err(BounceError::PoolPending(pending));
         }
+        // The fork renders the project as set: the staged tempo, meter and
+        // loop are published first.
+        self.values.publish_pending();
         let Bounce {
             master,
             stems,
@@ -2459,7 +2462,6 @@ mod tests {
                     .to(tutti_tempo::TempoMap::constant(Bpm::of(90.0)).unwrap()),
             )
             .expect("not following");
-        let _published = session.update();
         let seen: Arc<Mutex<Option<(tutti_units::Beat, Bpm)>>> = Arc::default();
         let into = Arc::clone(&seen);
         session
@@ -2479,6 +2481,34 @@ mod tests {
             seen.lock().unwrap().expect("the edit ran"),
             (Beat(3.0), Bpm::of(90.0))
         );
+    }
+
+    /// **A bounce after a tempo write, with no update between, renders the new
+    /// tempo**: the write is staged, and the bounce publishes it before it
+    /// forks, so the fork's tempo map is the one written, not the one in force.
+    #[test]
+    fn a_bounce_after_a_tempo_set_renders_the_new_tempo_without_an_update() {
+        let mut session = session();
+        let before = session.tempo_map();
+        let written = Arc::new(tutti_tempo::TempoMap::constant(Bpm::of(75.0)).unwrap());
+        session
+            .set(session.transport_handle().tempo().to(Arc::clone(&written)))
+            .expect("not following");
+        assert!(Arc::ptr_eq(&session.tempo_map(), &before), "staged only");
+        let seen: Arc<Mutex<Option<Option<Bpm>>>> = Arc::default();
+        let into = Arc::clone(&seen);
+        session
+            .bounce(
+                Bounce::project()
+                    .master_buffers()
+                    .range(Range::Beats(Beat(0.0), Beat(1.0)))
+                    .edit(Box::new(move |prepared: PreparedGraph<'_>| {
+                        *into.lock().unwrap() = Some(prepared.ctx.tempo_map().constant_tempo());
+                    })),
+            )
+            .expect("renders");
+        let seen = seen.lock().unwrap().expect("the edit ran");
+        assert_eq!(seen, Some(Bpm::of(75.0)));
     }
 
     /// **A bounce kept in flight past `BOUNCE_STALL_WARNING` is warned about

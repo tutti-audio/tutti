@@ -232,8 +232,8 @@ slot_target!(
     /// A write is staged and published by the next
     /// [`Session::update`](crate::Session::update) as one edit for the next
     /// block, so the engine takes the bounds and the arming together; a
-    /// read answers the pending region, else the one the engine last
-    /// published, which shows an edit once the engine has applied it. Disarm
+    /// read answers the pending region, else the one sent and not yet
+    /// applied, else the one the engine last published. Disarm
     /// with `looping.modify(|r| LoopRegion::new(r.bounds(), false))`. A
     /// change at a frame or beat is a [`LoopEdit`] scheduled on the
     /// transport.
@@ -575,22 +575,50 @@ impl Held for ProjectMeter {
 }
 
 /// The loop region, which the engine owns: a write is one edit scheduled for
-/// the next block, and the value read is the region the engine last
-/// published.
-pub(crate) struct LoopCell(pub Transport);
+/// the next block. The value read is the region sent and not yet applied,
+/// else the region the engine last published: the sent one is forgotten once
+/// the reading equals it or no scheduled command is left in flight, so an
+/// edit timed later shows through the reading.
+pub(crate) struct LoopCell {
+    transport: Transport,
+    sent: std::sync::Mutex<Option<LoopRegion>>,
+}
+
+impl LoopCell {
+    pub(crate) fn new(transport: Transport) -> Self {
+        Self {
+            transport,
+            sent: std::sync::Mutex::new(None),
+        }
+    }
+}
 
 impl Held for LoopCell {
     type Value = LoopRegion;
 
     fn current(&self) -> LoopRegion {
-        self.0.motion().loop_region()
+        let motion = self.transport.motion();
+        let reading = motion.loop_region();
+        let mut sent = self.sent.lock_recover();
+        match *sent {
+            Some(region) if region != reading && motion.scheduled_outstanding() > 0 => region,
+            _ => {
+                *sent = None;
+                reading
+            }
+        }
     }
 
     fn replace(&self, value: &LoopRegion) -> bool {
-        self.0
+        let landed = self
+            .transport
             .motion()
             .schedule(At::NextBlock, LoopEdit::region(*value))
-            .is_ok()
+            .is_ok();
+        if landed {
+            *self.sent.lock_recover() = Some(*value);
+        }
+        landed
     }
 }
 

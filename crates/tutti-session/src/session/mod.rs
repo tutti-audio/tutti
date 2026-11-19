@@ -301,7 +301,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         );
         table.provide_staged(
             SlotId::Loop,
-            PublishedSlot::new(LoopCell(self.transport.transport().clone())),
+            PublishedSlot::new(LoopCell::new(self.transport.transport().clone())),
         );
         table.provide(
             SlotId::ClickVolume,

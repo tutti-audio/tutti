@@ -60,6 +60,24 @@ fn a_loop_read_before_the_update_is_the_pending_region() {
     assert_eq!(s.get(looping).unwrap(), region(2.0, 6.0, true));
 }
 
+/// **A loop read after the update and before any block is the region sent**,
+/// not the engine's earlier one; once a block applies it the reading agrees.
+#[test]
+fn a_loop_read_after_the_update_and_before_a_block_is_the_region_sent() {
+    let mut s = offline();
+    let looping = s.transport_handle().looping();
+    s.set(looping.to(region(2.0, 6.0, true))).unwrap();
+    let _ = s.update();
+    assert_eq!(s.get(looping).unwrap(), region(2.0, 6.0, true));
+    assert!(
+        !s.transport_handle().loop_region().is_armed(),
+        "no block yet"
+    );
+    render(&s, 1);
+    assert_eq!(s.get(looping).unwrap(), region(2.0, 6.0, true));
+    assert_eq!(s.transport_handle().loop_region(), region(2.0, 6.0, true));
+}
+
 /// **Writing the region disarmed disarms the loop and keeps its bounds**, in
 /// the one edit that carries both.
 #[test]
