@@ -257,8 +257,22 @@ fn pump(
     // Unsolicited events read while a command waited for its reply. One
     // buffer for the connection, handed to the listener after each command.
     let mut inbox = Unsolicited::with_lifecycle(lifecycle.clone());
+    // The block taken off its queue and not yet sent: see below.
+    let mut held: Option<AudioCommand> = None;
     while live(lifecycle) {
-        let result = if let Some(cmd) = channels.pop_block() {
+        // **The control lane goes first, and a block is taken off its queue
+        // before the control queue is looked at.** The one thread used to take
+        // every command in the order it was queued, so a rate or mode change
+        // queued before a block was applied before it. With two queues, that
+        // holds when a block taken here finds the change it followed already
+        // queued (it was pushed first), and a steady stream of blocks cannot
+        // starve the control lane.
+        if held.is_none() {
+            held = channels.pop_block();
+        }
+        let result = if let Some(cmd) = channels.pop_control() {
+            handle_control(cmd, &mut lanes.control, channels, &mut inbox, lifecycle)
+        } else if let Some(cmd) = held.take() {
             handle_audio(cmd, &mut lanes.audio, channels, payloads, &mut inbox).and_then(|()| {
                 // The plugin's news arrives on the control lane, which a block
                 // does not read: take what is there between blocks.
@@ -268,8 +282,6 @@ fn pump(
                     Ok(())
                 }
             })
-        } else if let Some(cmd) = channels.pop_control() {
-            handle_control(cmd, &mut lanes.control, channels, &mut inbox, lifecycle)
         } else {
             match wait.wait(&lanes.control.stream, None) {
                 // The server spoke: read the lane.
