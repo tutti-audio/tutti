@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::host::midi_mapping::{MidiCcMapping, declared_assignments, scan};
-use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginVersion};
+use tutti_plugin_types::{
+    MainThreadMarker, MainWorkHandle, PluginId, PluginRef, PluginVersion, Uid,
+};
 use tutti_vst3_ffi::RestartFlags;
 
 impl Vst3Loaded {
@@ -101,7 +103,7 @@ impl Vst3Loaded {
     ) -> Result<Self> {
         Self::reap_retired();
         let path = path.as_ref();
-        let class_id = options.class_id.as_deref();
+        let class_id = options.class_id;
         check_exists(path)?;
         let library = Library::load(path)?;
         ensure_has_classes(&library, path)?;
@@ -132,11 +134,9 @@ impl Vst3Loaded {
         // initialized (`reconcile_bus_counts`).
         let info = build_plugin_info_raw(&library, &class);
 
-        let load = match options.class_id {
-            Some(class) => tutti_plugin_types::Load::new().plugin(class),
-            None => tutti_plugin_types::Load::new(),
-        };
-        let origin = tutti_plugin_types::Origin::new(path, load);
+        // The plugin chosen by id even when the load named none, so a reopen
+        // takes the same class.
+        let origin = PluginRef::new(path, PluginId::Vst3(id_of(&class.cid)));
         let mut loaded = Self::assemble(library, plugin, info, origin, work.clone());
         loaded.initialize(main)?;
         // Whether there is an editor is asked of the plugin here, on the main
@@ -152,7 +152,7 @@ impl Vst3Loaded {
         library: Arc<Library>,
         plugin: Plugin,
         info: PluginInfo,
-        origin: tutti_plugin_types::Origin,
+        origin: PluginRef,
         work: MainWorkHandle,
     ) -> Self {
         Self {
@@ -505,25 +505,26 @@ pub(super) fn build_plugin_info_raw(library: &Library, class: &AudioClass) -> Pl
         .sub_categories(class.sub_categories.clone())
 }
 
-/// The id a class has in the catalog and in a [`Load`](tutti_plugin_types::Load):
-/// `vst3.<class id>`, the value of the descriptor's `id`.
-pub(super) fn id_of(cid: &[i8; 16]) -> String {
-    format!("vst3.{}", cid_to_string(&cid.map(|b| b as u8)))
+/// The id of the class whose raw id is `cid`: the SDK's `TUID` bytes (signed on
+/// some targets), the type stops here.
+pub(super) fn id_of(cid: &[i8; 16]) -> Uid {
+    Uid::new(cid.map(|b| b as u8))
 }
 
-/// The id of a class as `Library::class_info` reports it: what a descriptor of
-/// that class carries as its `id`, and what [`LoadOptions::class_id`] takes.
+/// The id of a class as `Library::class_info` reports it: what a
+/// [`PluginId::Vst3`](tutti_plugin_types::PluginId) holds, and what
+/// [`LoadOptions::class_id`] takes.
 #[must_use]
-pub fn class_id(info: &tutti_vst3_ffi::ClassInfo) -> String {
+pub fn class_id(info: &tutti_vst3_ffi::ClassInfo) -> Uid {
     id_of(&info.cid)
 }
 
-/// The audio class with id `wanted` (`vst3.<class id>`), or a `LoadFailed`
+/// The audio class with id `wanted`, or a `LoadFailed`
 /// listing the bundle's audio classes by id and name.
 pub(super) fn find_audio_class_by_id(
     library: &Library,
     path: &Path,
-    wanted: &str,
+    wanted: Uid,
 ) -> Result<AudioClass> {
     let audio: Vec<_> = (0..library.count_classes())
         .filter_map(|i| library.class_info(i).ok())

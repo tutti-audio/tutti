@@ -9,11 +9,9 @@
 //! does not compile. Adding a format is one row and, if it
 //! differs from the defaults in what this process does, a `ServerSide` impl.
 
-use std::path::Path;
-
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Hand, Load, LoadStage, MainThreadMarker, MainWorkHandle, PluginError, PluginFormat,
+    Hand, LoadStage, MainThreadMarker, MainWorkHandle, PluginError, PluginFormat, PluginRef,
     PluginResult, StateUse,
 };
 
@@ -33,7 +31,7 @@ macro_rules! served {
         }
 
         impl AnyServed {
-            /// Loads the plugin `load` chooses in the file at `path` and
+            /// Loads the plugin `plugin` names and
             /// activates it, as `format`: the file's extension does not choose
             /// it, so a link whose target has another extension is opened as
             /// the format it was catalogued as.
@@ -50,9 +48,8 @@ macro_rules! served {
             pub(crate) fn load(
                 main: MainThreadMarker,
                 work: &MainWorkHandle,
-                path: &Path,
+                plugin: &PluginRef,
                 format: PluginFormat,
-                load: &Load,
                 sample_rate: tutti_plugin_types::SampleRate,
                 block_size: usize,
                 requested: FloatWidth,
@@ -60,7 +57,7 @@ macro_rules! served {
                 before_restore: &mut dyn FnMut(),
                 ties: Ties,
             ) -> PluginResult<(Self, Option<PluginError>, Box<dyn RenderEnd>)> {
-                if !path.exists() {
+                if !plugin.path().exists() {
                     return Err(PluginError::Load {
                         stage: LoadStage::Scanning,
                         reason: "the plugin file does not exist".to_string(),
@@ -72,8 +69,7 @@ macro_rules! served {
                         let (plugin, state_error) = Served::<$loaded>::load(
                             main,
                             work,
-                            path,
-                            load,
+                            plugin,
                             sample_rate,
                             block_size,
                             requested,

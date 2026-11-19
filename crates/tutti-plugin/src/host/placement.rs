@@ -20,8 +20,23 @@ pub fn placement(plugin: &Loadable) -> BridgeResult<Hosting> {
     resolve(
         plugin.requested_hosting(),
         plugin.plugin().path(),
-        plugin.plugin().format(),
+        format_of(plugin)?,
     )
+}
+
+/// The format whose loader opens `plugin`.
+///
+/// # Errors
+///
+/// [`BridgeError::UnknownFormat`] for a plugin with no id whose file's extension
+/// names no format.
+pub(crate) fn format_of(plugin: &Loadable) -> BridgeResult<PluginFormat> {
+    plugin
+        .format()
+        .map_err(|source| BridgeError::UnknownFormat {
+            path: plugin.plugin().path().to_path_buf(),
+            source,
+        })
 }
 
 /// Where a load of the `format` plugin at `path` runs when it asks for `hosting`:

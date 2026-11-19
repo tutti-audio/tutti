@@ -41,7 +41,7 @@ fn session_with_plugin() -> (Session, tutti_graph::NodeKey) {
     let plugin = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            Spec::new(PluginRef::file(file).expect("a plugin file")),
+            Spec::new(PluginRef::file(file)),
         )
         .expect("the shared plugin loads");
     let _ = s.update();
@@ -109,7 +109,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
-        &Loadable::uncatalogued(PluginRef::file(plugin_file()).expect("a plugin file")),
+        &Loadable::uncatalogued(PluginRef::file(plugin_file())),
         SampleRate::SR_48K,
     )
     .expect("a second instance loads");

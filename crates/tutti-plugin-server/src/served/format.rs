@@ -7,11 +7,11 @@
 //! it: the pool it serves a plugin's thread-pool extension on, what it drops
 //! unread, and how a write waiting for a block is delivered early.
 
-use tutti_plugin_types::{Lifecycle, MainThreadMarker, OutOfProcess, ParamEdit, Request};
+use tutti_plugin_types::{InProc, Lifecycle, MainThreadMarker, OutOfProcess, ParamEdit, Request};
 
 /// What the server does to a loaded plugin of format `Self`, beyond what the
 /// format's [`OutOfProcess::load_served`] and its `Control` give.
-pub(crate) trait ServerSide: OutOfProcess {
+pub(crate) trait ServerSide: OutOfProcess + InProc {
     /// Called once on a plugin just loaded, before it is activated: what this
     /// process lends it (CLAP's `clap.thread-pool`).
     fn adopt(&mut self) {}

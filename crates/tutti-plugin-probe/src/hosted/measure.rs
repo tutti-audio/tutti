@@ -34,8 +34,8 @@ use tutti_buffers::InputOutput;
 
 use tutti_graph::{MAX_NODE_TAIL, Offset, UmpAt};
 use tutti_plugin_types::{
-    Controller, Deadline, InProc, LatencyVerdict, Load, MainThreadMarker, MaxBlock, MeasureFailure,
-    Measured, NotChecked, PROBE_FLOOR, PluginDescriptor, PluginError, PluginIo, PluginTail,
+    Controller, Deadline, InProc, LatencyVerdict, MainThreadMarker, MaxBlock, MeasureFailure,
+    Measured, NotChecked, PROBE_FLOOR, PluginError, PluginId, PluginIo, PluginRef, PluginTail,
     Prepare, ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash, TailVerdict,
     Verdict,
 };
@@ -405,16 +405,18 @@ fn judge(
 pub(crate) fn measure<L: InProc>(
     main: MainThreadMarker,
     path: &Path,
-    descriptor: &PluginDescriptor,
+    id: &PluginId,
     state: Option<&[u8]>,
     run: Deadline,
 ) -> Result<Measured, MeasureFailure> {
     // The plugin closes on this thread when `loaded` drops, so the collector it is
     // given never receives work.
     let (_collector, work) = tutti_plugin_types::MainWork::new();
-    let mut loaded = L::load_in_process(main, &work, path, &Load::new().plugin(&descriptor.id))
-        .map_err(|e| MeasureFailure::Load {
-            reason: e.to_string(),
+    let mut loaded =
+        L::load_in_process(main, &work, &PluginRef::new(path, id.clone())).map_err(|e| {
+            MeasureFailure::Load {
+                reason: e.to_string(),
+            }
         })?;
     if let Some(bytes) = state {
         loaded

@@ -2,32 +2,6 @@
 
 use vst3::Steinberg::TUID;
 
-/// Formats a 16-byte class ID as four dash-separated groups of four bytes
-/// (`XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX`), upper-case hex. The catalog ids
-/// (`vst3.<id>`) are persisted in this shape.
-#[must_use]
-pub fn cid_to_string(cid: &[u8; 16]) -> String {
-    format!(
-        "{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}",
-        cid[0],
-        cid[1],
-        cid[2],
-        cid[3],
-        cid[4],
-        cid[5],
-        cid[6],
-        cid[7],
-        cid[8],
-        cid[9],
-        cid[10],
-        cid[11],
-        cid[12],
-        cid[13],
-        cid[14],
-        cid[15]
-    )
-}
-
 /// Converts a 16-byte `Guid` (`[u8; 16]`) to a `TUID` (`[i8; 16]`).
 #[must_use]
 pub(crate) fn guid_as_tuid(guid: &vst3::com_scrape_types::Guid) -> TUID {
@@ -119,16 +93,4 @@ pub(crate) fn zeroed<T: Zeroable>() -> T {
     // those, for which all-zero bytes is a valid value (null pointers, `0`,
     // `0.0`).
     unsafe { std::mem::zeroed() }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A class id formats as four dashed groups of four bytes, upper-case hex.
-    #[test]
-    fn a_class_id_formats_as_dashed_upper_case_hex() {
-        let cid: [u8; 16] = std::array::from_fn(|i| (i as u8) * 17);
-        assert_eq!(cid_to_string(&cid), "00112233-44556677-8899AABB-CCDDEEFF");
-    }
 }

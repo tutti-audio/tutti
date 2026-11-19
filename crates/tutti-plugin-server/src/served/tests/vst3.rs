@@ -600,7 +600,10 @@ fn test_vst3_load() {
     let instance = instance.unwrap();
     let meta = instance.descriptor();
     assert!(!meta.name.is_empty(), "Plugin name should not be empty");
-    assert!(!meta.id.is_empty(), "Plugin id should not be empty");
+    assert!(
+        instance.origin().id().is_some(),
+        "the loaded plugin names its own id"
+    );
 }
 
 #[test]

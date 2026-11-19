@@ -4,7 +4,8 @@ use super::{MainThreadMarker, Measuring, Read, StateFor, routing};
 use std::path::Path;
 use std::time::Instant;
 use tutti_plugin_types::{
-    Describe, InProc, MeasureFailure, PluginError, PluginFormat, ProbeRefusal, Unmeasured,
+    Describe, Described, InProc, MeasureFailure, PluginError, PluginFormat, PluginId, ProbeRefusal,
+    Unmeasured,
 };
 
 mod measure;
@@ -61,7 +62,7 @@ mod audio_unit {
 
 /// Whether the plugin `id` is the one `state` is for: the one named, or, with
 /// none named, the file's only plugin (the caller has checked there is one).
-fn is_for(state: &StateFor<'_>, id: &str) -> bool {
+fn is_for(state: &StateFor<'_>, id: &PluginId) -> bool {
     state.plugin.is_none_or(|wanted| wanted == id)
 }
 
@@ -74,11 +75,11 @@ fn run<L: InProc + Describe>(
 ) -> Read {
     let mut plugins = L::describe(main, path).map_err(|e| refusal(path, e))?;
     let Some((state, run)) = measuring else {
-        return Ok((plugins, Vec::new()));
+        return Ok((listed(plugins), Vec::new()));
     };
     match state.map(|s| s.plugin) {
-        Some(Some(wanted)) if !plugins.iter().any(|p| p.id == wanted) => {
-            return Err(ProbeRefusal::UnknownPlugin(wanted.to_owned()));
+        Some(Some(wanted)) if !plugins.iter().any(|(id, _)| id == wanted) => {
+            return Err(ProbeRefusal::UnknownPlugin(wanted.clone()));
         }
         // A state with no plugin named is for the file's plugin, which must be one.
         Some(None) if plugins.len() != 1 => {
@@ -89,32 +90,40 @@ fn run<L: InProc + Describe>(
         _ => {}
     }
     let mut unmeasured = Vec::new();
-    for plugin in &mut plugins {
+    for (id, descriptor) in &mut plugins {
         // A spent budget loads nothing more: the plugin is not loaded, activated
         // or rendered, and a state meant for it is not applied.
         if run.passed(Instant::now()) {
             unmeasured.push(Unmeasured {
-                plugin: plugin.id.clone(),
+                plugin: id.clone(),
                 failure: MeasureFailure::BudgetSpent,
             });
             continue;
         }
-        let state = state.filter(|s| is_for(s, &plugin.id)).map(|s| s.bytes);
-        match measure::<L>(main, path, plugin, state, run) {
-            Ok(measured) => plugin.measured = Some(measured),
+        let state = state.filter(|s| is_for(s, id)).map(|s| s.bytes);
+        match measure::<L>(main, path, id, state, run) {
+            Ok(measured) => descriptor.measured = Some(measured),
             Err(MeasureFailure::StateRefused { reason }) => {
                 return Err(ProbeRefusal::StateRefused {
-                    plugin: plugin.id.clone(),
+                    plugin: id.clone(),
                     reason,
                 });
             }
             Err(failure) => unmeasured.push(Unmeasured {
-                plugin: plugin.id.clone(),
+                plugin: id.clone(),
                 failure,
             }),
         }
     }
-    Ok((plugins, unmeasured))
+    Ok((listed(plugins), unmeasured))
+}
+
+/// The plugins as the result file lists them: each with the id its format named.
+fn listed(plugins: Vec<(PluginId, tutti_plugin_types::PluginDescriptor)>) -> Vec<Described> {
+    plugins
+        .into_iter()
+        .map(|(id, descriptor)| Described::new(id, descriptor))
+        .collect()
 }
 
 /// Why the host `error` read the file at `path` as no plugins: a file that is

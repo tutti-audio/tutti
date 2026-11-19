@@ -26,8 +26,8 @@ use tutti_midi_protocol::widen_velocity;
 use tutti_plugin_host::{InProcClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
-    EditorWindow, Features, InProc, Load, Loaded, LoadedPlugin, MainThreadMarker, MainWorkHandle,
-    Origin, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult,
+    EditorWindow, Features, InProc, Loaded, LoadedPlugin, MainThreadMarker, MainWorkHandle,
+    ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginRef, PluginResult,
     PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused, RenderModeSupport,
     RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
 };
@@ -115,7 +115,7 @@ thread_local! {
 struct Rec {
     rig: Arc<Rig>,
     descriptor: PluginDescriptor,
-    origin: Origin,
+    origin: PluginRef,
     work: MainWorkHandle,
 }
 
@@ -128,7 +128,7 @@ struct RecProcessor {
 struct RecController {
     rig: Arc<Rig>,
     descriptor: PluginDescriptor,
-    origin: Origin,
+    origin: PluginRef,
     work: MainWorkHandle,
 }
 
@@ -323,22 +323,20 @@ impl InProc for Rec {
     fn load_in_process(
         _: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self> {
         let rig = ROUTE.with(|r| r.borrow_mut().take()).expect("a rig routed");
         Ok(Rec {
             rig,
             descriptor: PluginDescriptor {
-                id: "rec".into(),
                 name: "Rec".into(),
                 ..PluginDescriptor::default()
             },
-            origin: Origin::new(path, load.clone()),
+            origin: plugin.clone(),
             work: work.clone(),
         })
     }
-    fn origin(&self) -> &Origin {
+    fn origin(&self) -> &PluginRef {
         &self.origin
     }
     fn main_work(&self) -> &MainWorkHandle {
@@ -464,8 +462,7 @@ fn node(rig: &Arc<Rig>, block: usize, map: TempoReader) -> (Direct<PluginNode<Re
     let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        Path::new("rec"),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(Path::new("rec")),
         SR,
     )
     .expect("the recording plugin loads");
@@ -855,8 +852,7 @@ fn a_node_built_over_an_activated_plugin_has_no_origin_to_fork_from() {
     let loaded = Rec::load_in_process(
         main,
         &tutti_fixtures::detached_work(),
-        Path::new("rec"),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(Path::new("rec")),
     )
     .expect("loads");
     let wiring = loaded.wiring(main);
@@ -922,8 +918,7 @@ fn a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause() {
     let (_client, handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        Path::new("rec"),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(Path::new("rec")),
         SR,
     )
     .expect("the recording plugin loads");
@@ -972,8 +967,7 @@ fn a_rebuilt_nodes_overflow_is_counted_once_in_the_shared_controls() {
     let loaded = Rec::load_in_process(
         main,
         &tutti_fixtures::detached_work(),
-        Path::new("rec"),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(Path::new("rec")),
     )
     .expect("loads");
     let wiring = loaded.wiring(main);
@@ -1072,8 +1066,7 @@ fn a_chunked_processors_lost_midi_reaches_the_graphs_event_losses() {
     let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        Path::new("rec"),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(Path::new("rec")),
         SR,
     )
     .expect("the recording plugin loads");
@@ -1244,8 +1237,7 @@ fn the_shape_declares_the_plugins_buses_with_their_placement() {
         let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
             main_thread(),
             &tutti_fixtures::detached_work(),
-            Path::new("rec"),
-            &Load::new(),
+            &tutti_plugin_types::PluginRef::file(Path::new("rec")),
             SR,
         )
         .expect("the recording plugin loads");

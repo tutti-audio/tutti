@@ -42,7 +42,6 @@ mod loadable;
 mod mtime;
 mod os_path;
 mod pedal;
-mod plugin_ref;
 mod probe;
 mod probing;
 mod scanner;
@@ -56,7 +55,6 @@ pub use facts::FileFacts;
 pub use fs::canonical_path;
 pub use loadable::{BindError, Hosting, Loadable, Resolved};
 pub use mtime::{BeforeEpoch, Mtime};
-pub use plugin_ref::PluginRef;
 pub use probe::DEFAULT_PROBE_TIMEOUT;
 pub use probing::DEFAULT_MEASURE_TIMEOUT;
 pub use scanner::{

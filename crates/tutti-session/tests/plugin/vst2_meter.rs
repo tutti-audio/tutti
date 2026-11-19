@@ -65,10 +65,7 @@ fn an_in_process_vst2_plugin_is_given_the_project_meter() {
     .unwrap();
     let main = tutti_fixtures::main_thread();
     let node = s
-        .load_plugin_blocking(
-            main,
-            Spec::new(PluginRef::file(vst2_probe()).expect("a plugin file")),
-        )
+        .load_plugin_blocking(main, Spec::new(PluginRef::file(vst2_probe())))
         .expect("the in-process VST2 loads");
     s.graph().connect(node, Root).unwrap();
 

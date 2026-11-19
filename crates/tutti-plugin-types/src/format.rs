@@ -1,6 +1,9 @@
 //! [`PluginFormat`]: which format's loader opens a plugin, and [`PluginId`]:
 //! the identity a saved reference to a plugin names.
 
+use crate::AuComponentType;
+use std::fmt;
+use std::str::FromStr;
 use thiserror::Error;
 
 /// A plugin format.
@@ -109,31 +112,212 @@ pub struct UnknownExtension {
     pub extension: String,
 }
 
-/// Which plugin a saved reference names: its format and the format's own id
-/// for it ([`PluginDescriptor::id`](crate::PluginDescriptor): a CLAP plugin id,
-/// a VST3 class id, an AU descriptor id, a VST2 `vst2.<uniqueID>`).
+/// A VST3 class id: the 16 bytes a factory names a class by.
+///
+/// Text is the four dash-separated groups of four bytes the catalog keeps
+/// (`00112233-44556677-8899AABB-CCDDEEFF`, upper-case hex).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Uid([u8; 16]);
+
+impl Uid {
+    /// The class id of these bytes.
+    #[must_use]
+    pub const fn new(bytes: [u8; 16]) -> Self {
+        Self(bytes)
+    }
+
+    /// The 16 bytes.
+    #[must_use]
+    pub const fn get(self) -> [u8; 16] {
+        self.0
+    }
+}
+
+impl fmt::Display for Uid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, byte) in self.0.iter().enumerate() {
+            if i > 0 && i % 4 == 0 {
+                f.write_str("-")?;
+            }
+            write!(f, "{byte:02X}")?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for Uid {
+    type Err = PluginIdError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let groups: Vec<&str> = text.split('-').collect();
+        let hex = groups.concat();
+        if groups.len() != 4
+            || groups.iter().any(|g| g.len() != 8)
+            || !hex.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(PluginIdError::Uid(text.to_owned()));
+        }
+        let mut bytes = [0u8; 16];
+        for (i, byte) in bytes.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16)
+                .expect("two hex digits, checked above");
+        }
+        Ok(Self(bytes))
+    }
+}
+
+/// A four-character code: an Audio Unit's component subtype or manufacturer.
+///
+/// Text is the four characters, a space kept (`dls `).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FourCc(u32);
+
+impl FourCc {
+    /// The code `raw` spells, its first character the high byte.
+    #[must_use]
+    pub const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    /// The code as an integer.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for FourCc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&String::from_utf8_lossy(&self.0.to_be_bytes()))
+    }
+}
+
+impl FromStr for FourCc {
+    type Err = PluginIdError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        <[u8; 4]>::try_from(text.as_bytes())
+            .map(|bytes| Self(u32::from_be_bytes(bytes)))
+            .map_err(|_| PluginIdError::FourCc(text.to_owned()))
+    }
+}
+
+/// Which plugin a saved reference names: the format and that format's own id
+/// for it. A CLAP plugin id, a VST3 class id, an AU component's type, subtype
+/// and manufacturer, a VST2 plugin's `uniqueID`.
 ///
 /// The id is the identity, not the file that holds it: a plugin moves between
 /// directories and machines, and a catalog resolves the id to the file it is
 /// in now.
+///
+/// Text is `<format>.<id>` (`clap.com.vendor.synth`,
+/// `vst3.00112233-44556677-8899AABB-CCDDEEFF`, `au.aufx.dely.appl`,
+/// `vst2.1234`), what [`Display`](fmt::Display) writes and
+/// [`FromStr`] reads: for a command line and a message, not for storage.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PluginId {
-    /// Which format's loader opens it.
-    pub format: PluginFormat,
-    /// The format's own id for the plugin.
-    pub id: String,
+pub enum PluginId {
+    /// A CLAP plugin id (`com.vendor.synth`).
+    Clap(String),
+    /// A VST3 class id.
+    Vst3(Uid),
+    /// An Audio Unit component.
+    Au {
+        /// The component type (`aufx`, `aumu`, ..): an effect and an
+        /// instrument of one manufacturer can share a subtype.
+        component_type: AuComponentType,
+        /// The component subtype.
+        subtype: FourCc,
+        /// The component manufacturer.
+        manufacturer: FourCc,
+    },
+    /// A VST2 plugin's `uniqueID` (a shell's sub-plugin has its own).
+    Vst2(u32),
 }
 
 impl PluginId {
-    /// The plugin `id` of `format`.
+    /// The format whose loader opens a plugin with this id.
     #[must_use]
-    pub fn new(format: PluginFormat, id: impl Into<String>) -> Self {
-        Self {
-            format,
-            id: id.into(),
+    pub const fn format(&self) -> PluginFormat {
+        match self {
+            Self::Clap(_) => PluginFormat::Clap,
+            Self::Vst3(_) => PluginFormat::Vst3,
+            Self::Au { .. } => PluginFormat::AudioUnit,
+            Self::Vst2(_) => PluginFormat::Vst2,
         }
     }
+}
+
+impl fmt::Display for PluginId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let format = self.format().extension_id();
+        match self {
+            Self::Clap(id) => write!(f, "{format}.{id}"),
+            Self::Vst3(uid) => write!(f, "{format}.{uid}"),
+            Self::Au {
+                component_type,
+                subtype,
+                manufacturer,
+            } => write!(
+                f,
+                "{format}.{}.{subtype}.{manufacturer}",
+                FourCc::new(component_type.code())
+            ),
+            Self::Vst2(id) => write!(f, "{format}.{id}"),
+        }
+    }
+}
+
+impl FromStr for PluginId {
+    type Err = PluginIdError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let (format, rest) = text
+            .split_once('.')
+            .ok_or_else(|| PluginIdError::Format(text.to_owned()))?;
+        match PluginFormat::from_extension_id(format) {
+            Some(PluginFormat::Clap) => Ok(Self::Clap(rest.to_owned())),
+            Some(PluginFormat::Vst3) => rest.parse().map(Self::Vst3),
+            Some(PluginFormat::Vst2) => rest
+                .parse()
+                .map(Self::Vst2)
+                .map_err(|_| PluginIdError::Vst2(rest.to_owned())),
+            Some(PluginFormat::AudioUnit) => {
+                let mut codes = rest.split('.');
+                match (codes.next(), codes.next(), codes.next(), codes.next()) {
+                    (Some(t), Some(s), Some(m), None) => Ok(Self::Au {
+                        component_type: AuComponentType::from_code(t.parse::<FourCc>()?.get()),
+                        subtype: s.parse()?,
+                        manufacturer: m.parse()?,
+                    }),
+                    _ => Err(PluginIdError::Au(rest.to_owned())),
+                }
+            }
+            None => Err(PluginIdError::Format(text.to_owned())),
+        }
+    }
+}
+
+/// Text that is not a [`PluginId`].
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PluginIdError {
+    /// No `<format>.` prefix naming a format.
+    #[error("`{0}` does not start with a plugin format (`clap.`, `vst3.`, `au.`, `vst2.`)")]
+    Format(String),
+    /// Not a VST3 class id.
+    #[error("`{0}` is not a VST3 class id (`XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX`)")]
+    Uid(String),
+    /// Not a four-character code.
+    #[error("`{0}` is not a four-character code")]
+    FourCc(String),
+    /// Not `<type>.<subtype>.<manufacturer>`.
+    #[error("`{0}` is not an AU id (`<type>.<subtype>.<manufacturer>`)")]
+    Au(String),
+    /// Not a VST2 `uniqueID`.
+    #[error("`{0}` is not a VST2 id (a number)")]
+    Vst2(String),
 }
 
 #[cfg(test)]

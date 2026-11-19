@@ -136,9 +136,14 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: a test-local codec fixture, never read from a document",
     ),
     (
-        "crates/tutti-plugin-types/src/hosting.rs",
-        "Load",
-        "permanent: every optional id is a choice of plugin; a missing one is the load's error",
+        "crates/tutti-plugin-types/src/format.rs",
+        "Uid",
+        "permanent: every sixteen bytes are a class id",
+    ),
+    (
+        "crates/tutti-plugin-types/src/format.rs",
+        "FourCc",
+        "permanent: every u32 is a four-character code",
     ),
     (
         "crates/tutti-plugin-types/src/parameters.rs",
@@ -146,9 +151,9 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "temporary: a document can set `flags` outside `known` and a `measures` its range does not fit; `serde(try_from)` removes it",
     ),
     (
-        "crates/tutti-plugin-db/src/plugin_ref.rs",
+        "crates/tutti-plugin-types/src/plugin_ref.rs",
         "PluginRef",
-        "permanent: any path, format and id names a plugin; a missing one is the load's error",
+        "permanent: any path and id names a plugin; one the file does not hold is the load's error",
     ),
     (
         "crates/tutti-session/src/peer_state.rs",

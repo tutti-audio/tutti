@@ -171,7 +171,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
         &mut s,
         node,
         handle,
-        tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
+        tutti_plugin::catalog::PluginRef::file("fake.clap"),
     );
     s.commit();
     (s, key, fake, refresh)

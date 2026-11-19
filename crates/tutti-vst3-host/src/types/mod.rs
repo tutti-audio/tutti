@@ -80,8 +80,8 @@ impl<'a> ProcessOutputRef<'a> {
 /// construct equivalent `PluginInfo` values by hand.
 #[derive(Debug, Clone)]
 pub struct PluginInfo {
-    /// Unique id, formatted as `vst3.<CID>` by this crate.
-    pub id: String,
+    /// The class id.
+    pub id: tutti_plugin_types::Uid,
     /// Display name from the factory's class info.
     pub name: String,
     /// Vendor string; empty when the factory declares none.
@@ -123,9 +123,9 @@ impl PluginInfo {
     /// Starts a descriptor from the two fields with no sensible default.
     /// Channel counts default to stereo in and out; every other field is empty
     /// or `false` until a builder method sets it.
-    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+    pub fn new(id: tutti_plugin_types::Uid, name: impl Into<String>) -> Self {
         Self {
-            id: id.into(),
+            id,
             name: name.into(),
             vendor: String::new(),
             version: PluginVersion::Absent,
@@ -308,7 +308,7 @@ mod plugin_info_bus_tests {
     /// (single-bus legacy behaviour).
     #[test]
     fn empty_bus_layout_falls_back_to_flat_counts() {
-        let info = PluginInfo::new("vst3.x", "X").audio_io(2, 2);
+        let info = PluginInfo::new(tutti_plugin_types::Uid::new([0; 16]), "X").audio_io(2, 2);
         assert!(info.input_bus_channels.is_empty());
         assert!(info.output_bus_channels.is_empty());
         assert_eq!(info.total_input_channels(), 2);
@@ -320,7 +320,7 @@ mod plugin_info_bus_tests {
     #[test]
     fn multi_bus_layout_sums_all_buses() {
         // stereo main + mono sidechain in; stereo main + stereo aux out.
-        let info = PluginInfo::new("vst3.x", "X")
+        let info = PluginInfo::new(tutti_plugin_types::Uid::new([0; 16]), "X")
             .audio_io(2, 2)
             .bus_channels(vec![2, 1], vec![2, 2]);
         assert_eq!(info.input_bus_channels, vec![2, 1]);

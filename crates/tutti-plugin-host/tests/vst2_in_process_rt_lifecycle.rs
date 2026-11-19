@@ -26,7 +26,6 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use tutti_buffers::Planes;
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
 use tutti_vst2_host::Vst2Loaded;
 
@@ -117,8 +116,7 @@ fn load() -> Loaded {
     let (unit, handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        &path,
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(&path),
         SampleRate::of(SAMPLE_RATE),
     )
     .unwrap_or_else(|e| panic!("in-process load of reference plugin at {path:?}: {e:?}"));
@@ -497,8 +495,7 @@ fn a_plugin_wider_than_a_block_is_refused_at_load() {
     let loaded = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        &path,
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(&path),
         SampleRate::of(SAMPLE_RATE),
     );
     unsafe {
@@ -741,8 +738,7 @@ fn a_plugin_without_64_bit_audio_fails_a_64_bit_load_and_returns_at_32() {
     let loaded = load_client::<Vst2Loaded, f64>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        &path,
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(&path),
         SampleRate::of(SAMPLE_RATE),
     );
     let Err(tutti_plugin_host::LoadClientError::Width(refused)) = loaded else {

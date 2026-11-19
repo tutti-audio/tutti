@@ -7,7 +7,8 @@
 //! note expression, reached here through capability accessors.
 
 use crate::host::placement::placement;
-use tutti_plugin_db::{Hosting, Loadable, PluginRef};
+use tutti_plugin_db::{Hosting, Loadable};
+use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_rt::LockExt;
 
@@ -15,12 +16,6 @@ use crate::host::node::PluginClient;
 use tutti_plugin_host::{AnyInProcClient, Commit, InProcNode, InProcRebinder, PluginHandle};
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::BridgeResult;
-#[cfg(any(
-    feature = "vst2",
-    feature = "clap",
-    feature = "vst3",
-    all(feature = "au", target_os = "macos")
-))]
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{Features, LoadedPlugin, PluginDescriptor, PluginRole};
 use tutti_units::SampleRate;
@@ -63,7 +58,7 @@ enum Placed {
 /// use tutti_units::SampleRate;
 /// use tutti_plugin::catalog::{Loadable, Plugin, PluginRef};
 ///
-/// let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3").expect("a plugin file");
+/// let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3");
 /// let (_collector, work) = tutti_plugin::MainWork::new();
 /// let plugin = Plugin::open(None, &work, &Loadable::uncatalogued(file), SampleRate::SR_48K)?;
 /// println!("{} ({:?})", plugin.descriptor().name, plugin.role());
@@ -98,11 +93,10 @@ impl Plugin {
     /// # fn ex() -> Result<(), Box<dyn std::error::Error>> {
     /// use tutti_plugin::catalog::{Catalog, CatalogConfig, Plugin, PluginId};
     /// use tutti_plugin_db::PluginDb;
-    /// use tutti_plugin_types::PluginFormat;
     /// # let dir = std::path::PathBuf::from("/my/app/state");
     /// let catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir), |_| Ok(()));
     /// let foo = catalog
-    ///     .resolve(&PluginId::new(PluginFormat::Vst3, "vst3.00112233-44556677-8899AABB-CCDDEEFF"))
+    ///     .resolve(&"vst3.00112233-44556677-8899AABB-CCDDEEFF".parse::<PluginId>()?)
     ///     .bind()?;
     /// let (_collector, work) = tutti_plugin::MainWork::new();
     /// let plugin = Plugin::open(None, &work, &foo, tutti_units::SampleRate::SR_48K)?;
@@ -203,7 +197,14 @@ impl Plugin {
                         .into(),
                 });
             };
-            return Self::open_in_process(main, work, plugin.plugin(), sample_rate, state);
+            return Self::open_in_process(
+                main,
+                work,
+                plugin.plugin(),
+                crate::host::placement::format_of(plugin)?,
+                sample_rate,
+                state,
+            );
         }
 
         let ((client, restored), handle) =
@@ -222,10 +223,11 @@ impl Plugin {
         main: MainThreadMarker,
         work: &MainWorkHandle,
         plugin: &PluginRef,
+        format: PluginFormat,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
-        match plugin.format() {
+        match format {
             #[cfg(feature = "vst2")]
             PluginFormat::Vst2 => Self::load_in_process::<tutti_vst2_host::Vst2Loaded>(
                 main,
@@ -300,13 +302,14 @@ impl Plugin {
         let (client, handle, restored) = tutti_plugin_host::load_client_restoring(
             main,
             work,
-            plugin.path(),
-            &plugin.load(),
+            plugin,
             sample_rate,
             restore.as_mut().map(|r| r as _),
         )
         .map_err(|e| e.into_bridge(plugin.path()))?;
-        let plugin = plugin.identified(&handle.descriptor().id);
+        // The ref carries the id the load opened, so a state the plugin saves
+        // names it as a scan would.
+        let plugin = client.origin().cloned().unwrap_or_else(|| plugin.clone());
         Ok((
             Self {
                 placed: Placed::InProc(AnyInProcClient::new(client)),

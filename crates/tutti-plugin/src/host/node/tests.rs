@@ -164,7 +164,7 @@ fn handle_with_mock_server(
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(
             crate::format::gui::load_gui_instance,
@@ -198,7 +198,6 @@ fn handle_with_mock_server(
     });
 
     let descriptor = PluginDescriptor {
-        id: "test.plugin".into(),
         name: "Test Plugin".into(),
         vendor: String::new(),
         version: tutti_plugin_types::PluginVersion::Absent,
@@ -252,7 +251,7 @@ fn handle_with_multi_reply_server(
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(
             crate::format::gui::load_gui_instance,
@@ -287,7 +286,6 @@ fn handle_with_multi_reply_server(
     });
 
     let descriptor = PluginDescriptor {
-        id: "test.plugin".into(),
         name: "Test Plugin".into(),
         vendor: String::new(),
         version: tutti_plugin_types::PluginVersion::Absent,

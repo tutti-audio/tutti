@@ -102,8 +102,12 @@ impl Au {
         let loaded = AuLoaded::load(
             main_thread(),
             &tutti_fixtures::detached_work(),
-            &tutti_fixtures::au_bundle(),
-            &tutti_plugin_types::Load::new().plugin(tutti_shared_plugin::AU_ID),
+            &tutti_plugin_types::PluginRef::new(
+                tutti_fixtures::au_bundle(),
+                tutti_shared_plugin::AU_ID
+                    .parse()
+                    .expect("the shared AU's id is an AU id"),
+            ),
         )
         .expect("the shared AU loads");
         let mut au = Self::of(loaded);

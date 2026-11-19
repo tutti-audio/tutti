@@ -5,12 +5,11 @@
 //! the plugin server: the host mirrors parameters and state into it. It is an
 //! [`AuLoaded`] that is never initialized (the GUI works without audio setup).
 
-use std::path::Path;
-
 use dpi::Size;
 use tutti_plugin_types::{
-    ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow, InProc, Load,
-    MainThreadMarker, MainWorkHandle, ParamEdit, PluginError, PluginResult, WindowHandle,
+    ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow, InProc,
+    MainThreadMarker, MainWorkHandle, ParamEdit, PluginError, PluginRef, PluginResult,
+    WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -43,10 +42,9 @@ impl AuEditorInstance {
     pub(crate) fn load(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self> {
-        let mut inner = AuLoaded::load_in_process(main, work, path, load)?;
+        let mut inner = AuLoaded::load_in_process(main, work, plugin)?;
         // The unit's own view changes parameters through `AudioUnitSetParameter`,
         // which only a parameter listener hears: the one `AuLoaded` installs for
         // the audio instance, so `poll_edits` reports what the user does in it.
@@ -149,13 +147,20 @@ mod tests {
     /// own reading after the write is what this asserts.
     #[test]
     fn the_gui_mirror_denormalizes_against_the_declared_range() {
+        use tutti_plugin_types::{AuComponentType, FourCc, PluginId};
         let main = tutti_fixtures::main_thread();
         let (_collector, work) = tutti_plugin_types::MainWork::new();
         let mut gui = AuEditorInstance::load(
             main,
             &work,
-            Path::new("/System/Library/Components/CoreAudio.component"),
-            &Load::new().plugin("au.aufx.dely.appl"),
+            &PluginRef::new(
+                "/System/Library/Components/CoreAudio.component",
+                PluginId::Au {
+                    component_type: AuComponentType::Effect,
+                    subtype: FourCc::new(u32::from_be_bytes(*b"dely")),
+                    manufacturer: FourCc::new(u32::from_be_bytes(*b"appl")),
+                },
+            ),
         )
         .expect("AUDelay ships with macOS and loads");
 

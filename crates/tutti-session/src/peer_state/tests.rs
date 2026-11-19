@@ -2,7 +2,7 @@ use super::*;
 
 #[cfg(feature = "plugin")]
 fn plugin(path: &str) -> PluginRef {
-    PluginRef::file(path).expect("a plugin file extension")
+    PluginRef::file(path)
 }
 
 /// **A plugin's media type is its format's constant**, one per format.

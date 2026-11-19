@@ -16,7 +16,6 @@ use crate::param_reads::ParamReads as _;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
 use tutti_vst2_host::Vst2Loaded;
 
@@ -77,8 +76,7 @@ fn load_handle(env: &[(&str, &str)]) -> PluginHandle {
     let (_unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
-        &path,
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(&path),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     )
     .unwrap_or_else(|e| panic!("in-process VST2 load failed for {path:?}: {e:?}"));
@@ -236,9 +234,9 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
     let plugin = tutti_plugin::catalog::Plugin::open(
         Some(main_thread()),
         &tutti_fixtures::pumped_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(
-            tutti_plugin::catalog::PluginRef::file(staged.clone()).expect("a plugin file"),
-        ),
+        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+            staged.clone(),
+        )),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     )
     .expect("Plugin::open should load a .vst in-process");
@@ -333,9 +331,9 @@ fn the_node_carries_midi_on_its_event_ports() {
         let plugin = tutti_plugin::catalog::Plugin::open(
             Some(main_thread()),
             &tutti_fixtures::pumped_work(),
-            &tutti_plugin::catalog::Loadable::uncatalogued(
-                tutti_plugin::catalog::PluginRef::file(staged.clone()).expect("a plugin file"),
-            ),
+            &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+                staged.clone(),
+            )),
             tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         )
         .unwrap_or_else(|e| panic!("in-process VST2 load failed for {staged:?}: {e:?}"));
@@ -396,8 +394,7 @@ fn the_node_reports_the_decoded_tail_rather_than_unknown() {
         let (unit, _handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
             main_thread(),
             &tutti_fixtures::pumped_work(),
-            &path,
-            &Load::new(),
+            &tutti_plugin_types::PluginRef::file(&path),
             tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         )
         .unwrap_or_else(|e| panic!("in-process VST2 load failed: {e:?}"));
@@ -435,8 +432,7 @@ fn midi_past_the_blocks_capacity_is_counted() {
     let (unit, _handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
-        tutti_fixtures::vst2_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     )
     .expect("load the probe");

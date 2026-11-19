@@ -13,7 +13,6 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_plugin::catalog::{Catalog, Hosting, PluginId, PluginRef};
 use tutti_plugin::error::StateError;
-use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_session::{
@@ -30,26 +29,27 @@ const BLOCK: usize = 512;
 use crate::support::clap_probe;
 
 fn first_id() -> PluginId {
-    PluginId::new(
-        PluginFormat::Clap,
-        tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8"),
+    PluginId::Clap(
+        tutti_clap_test_plugin::PLUGIN_ID
+            .to_str()
+            .expect("utf-8")
+            .into(),
     )
 }
 
 fn second_id() -> PluginId {
-    PluginId::new(
-        PluginFormat::Clap,
+    PluginId::Clap(
         tutti_clap_test_plugin::SECOND_PLUGIN_ID
             .to_str()
-            .expect("utf-8"),
+            .expect("utf-8")
+            .into(),
     )
 }
 
 /// A catalog that scanned the reference bundle (both of its plugins). It is
 /// probed first thing in a test, before the plugin's variables are set.
 fn catalog() -> (Catalog, tempfile::TempDir) {
-    let (catalog, _id, dir) =
-        crate::pooled::catalog_of(&PluginRef::file(clap_probe()).expect("a plugin file"));
+    let (catalog, _id, dir) = crate::pooled::catalog_of(&PluginRef::file(clap_probe()));
     (catalog, dir)
 }
 
@@ -211,7 +211,7 @@ fn a_served_plugin_lands_through_the_pool() {
 
     let handle = s.plugin(&"verb").expect("loaded");
     assert_eq!(
-        handle.info().descriptor().id,
+        crate::pooled::clap_id(handle.info().plugin()),
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap(),
         "the plugin the id names, not the file's first"
     );
@@ -236,7 +236,7 @@ fn a_served_plugin_lands_through_the_pool() {
 fn an_id_the_catalog_lacks_fails_its_load() {
     let (catalog, _dir) = catalog();
     let mut s = session(true);
-    let absent = PluginId::new(PluginFormat::Clap, "com.example.absent");
+    let absent = PluginId::Clap("com.example.absent".into());
     s.pool(s.plugin_entry("gone", &absent, &catalog)).unwrap();
     let event = until(&mut s, "the failure", |k, _| *k == "gone");
     assert!(
@@ -256,9 +256,9 @@ fn an_initial_state_of_another_plugin_is_refused() {
     let state_of = |id: &PluginId| {
         let entry = catalog
             .entries()
-            .find(|entry| entry.descriptor.id == id.id)
+            .find(|entry| entry.id == Some(id))
             .expect("the plugin is listed");
-        PeerState::of_plugin(PluginRef::from(&entry), Vec::new())
+        PeerState::of_plugin(entry.plugin_ref(), Vec::new())
     };
     let declared = s.plugin_entry("a", &second_id(), &catalog);
     assert!(matches!(
@@ -513,9 +513,9 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
     let foreign = {
         let entry = catalog
             .entries()
-            .find(|entry| entry.descriptor.id == second_id().id)
+            .find(|entry| entry.id == Some(&second_id()))
             .expect("the second plugin is listed");
-        PeerState::of_plugin(PluginRef::from(&entry), Vec::new())
+        PeerState::of_plugin(entry.plugin_ref(), Vec::new())
     };
     assert!(matches!(
         s.restore_state(&"idle", foreign.clone()),
@@ -650,7 +650,10 @@ fn a_swap_to_a_plugin_with_other_ports_fails_the_entry() {
         Some(PoolState::Failed(LoadError::PluginPorts { .. }))
     ));
     assert!(s.plugin(&"fx").is_err(), "the unused plugin is gone");
-    assert_eq!(s.plugin_view(node).unwrap().descriptor().id, first);
+    assert_eq!(
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+        first
+    );
     let _ = pump(&mut s);
     assert!(
         s.update()
@@ -671,7 +674,8 @@ fn a_changed_identity_swaps_the_node() {
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
     let first = s.plugin(&"fx").unwrap();
-    let id_of_node = |s: &Session| s.plugin_view(node).unwrap().descriptor().id.clone();
+    let id_of_node =
+        |s: &Session| crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()).to_owned();
     assert_eq!(
         id_of_node(&s),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
@@ -691,7 +695,10 @@ fn a_changed_identity_swaps_the_node() {
         std::thread::sleep(Duration::from_millis(2));
     }
     assert!(matches!(first.presence(), Presence::Closed));
-    assert_eq!(s.plugin(&"fx").unwrap().info().descriptor().id, second);
+    assert_eq!(
+        crate::pooled::clap_id(s.plugin(&"fx").unwrap().info().plugin()),
+        second
+    );
 }
 
 /// **A node holds its entry.** The app stops declaring the key and the entry
@@ -810,7 +817,7 @@ fn a_swap_to_the_same_totals_in_other_buses_fails_the_entry() {
         )
     );
     assert_eq!(
-        s.plugin_view(node).unwrap().descriptor().id,
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -843,7 +850,7 @@ fn a_retry_after_a_refused_swap_swaps_the_node() {
     );
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
     pump_until(&mut s, "the swap", |s| {
-        s.plugin_view(node).unwrap().descriptor().id == second
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()) == second
     });
     assert_ne!(pid_of(&s, node), first, "another server");
     assert!(matches!(
@@ -866,7 +873,7 @@ fn a_later_identity_is_the_one_the_node_ends_on() {
     declare_with_layout(&mut s, &catalog, &first_id(), Hosting::OutOfProcess, "0");
     pump_until(&mut s, "the swap", |s| pid_of(s, node) != first);
     assert_eq!(
-        s.plugin_view(node).unwrap().descriptor().id,
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -933,7 +940,7 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
         pid_of(s, node) != first
     });
     assert_eq!(
-        s.plugin_view(node).unwrap().descriptor().id,
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap(),
         "the last identity declared"
     );
@@ -965,7 +972,7 @@ fn a_node_removed_while_its_swap_waits_leaves_the_plugin_to_the_entry() {
         .add_pooled_plugin(&"fx")
         .expect("the landed plugin is the next node's");
     assert_eq!(
-        s.plugin_view(next).unwrap().descriptor().id,
+        crate::pooled::clap_id(s.plugin_view(next).unwrap().plugin()),
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -995,7 +1002,7 @@ fn a_graph_that_refuses_the_swap_fails_the_entry() {
         "{refused:?}"
     );
     assert_eq!(
-        s.plugin_view(node).unwrap().descriptor().id,
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
 }

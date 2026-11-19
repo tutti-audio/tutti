@@ -50,7 +50,6 @@
 //! the audio thread.
 
 use crate::loadable::{Loadable, Resolved};
-use crate::plugin_ref::PluginRef;
 use crate::probe::ProbeState;
 use crate::probing::{Probing, probe_fn};
 use crate::{
@@ -61,7 +60,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use tutti_plugin_types::{BridgeError, BridgeResult};
-use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginId};
+use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginId, PluginRef};
 use tutti_rt::LockExt;
 
 /// Why the persistence a catalog was given could not store the database.
@@ -500,9 +499,7 @@ impl Catalog {
 
     /// Iterates the refs and descriptors of all non-blacklisted plugins.
     pub fn iter(&self) -> impl Iterator<Item = (PluginRef, &PluginDescriptor)> {
-        self.db
-            .plugins()
-            .map(|p| (PluginRef::from(&p), p.descriptor))
+        self.db.plugins().map(|p| (p.plugin_ref(), p.descriptor))
     }
 
     /// Iterates all non-blacklisted plugins with their file and format.
@@ -532,8 +529,8 @@ impl Catalog {
         let mut found: Vec<PluginRef> = self
             .db
             .plugins()
-            .filter(|p| p.format == id.format && p.descriptor.id == id.id)
-            .map(|p| PluginRef::from(&p))
+            .filter(|p| p.id == Some(id))
+            .map(|p| p.plugin_ref())
             .collect();
         found.sort_by(|a, b| a.path().cmp(b.path()));
         let mut loadables = found
@@ -557,7 +554,7 @@ impl Catalog {
         let file = key(plugin.path());
         self.db
             .plugins()
-            .find(|p| p.path == file && plugin.id().is_none_or(|id| p.descriptor.id == id))
+            .find(|p| p.path == file && plugin.id().is_none_or(|id| p.id == Some(id)))
             .map(|p| p.descriptor)
     }
 
@@ -692,11 +689,14 @@ impl Catalog {
             measure: true,
             state: state.map(|file| ProbeState {
                 file: file.to_path_buf(),
-                plugin: plugin.id().map(str::to_owned),
+                plugin: plugin.id().cloned(),
             }),
             fallback: false,
         };
-        self.spawn_file(probing, plugin.path(), plugin.format())
+        let format = plugin
+            .format()
+            .map_err(|_| FilesError::UnrecognizedFormat(plugin.path().to_path_buf()))?;
+        self.spawn_file(probing, plugin.path(), format)
     }
 
     /// Applies a change the caller built to the catalog, such as a
@@ -769,6 +769,11 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_plugin_types::Described;
+
+    fn clap(id: &str) -> PluginId {
+        PluginId::Clap(id.into())
+    }
     use crate::loadable::BindError;
     use crate::{FileRow, ScanPoll, ScanResult};
 
@@ -806,7 +811,10 @@ mod tests {
         use tutti_plugin_types::{PluginClass, PluginDescriptor};
         let path = std::env::temp_dir().join("tutti-two-plugins.clap");
         std::fs::write(&path, b"x").unwrap();
-        let describe = |id: &str| PluginDescriptor::new(id, id, PluginClass::Unknown);
+        let describe = |id: &str| Described {
+            id: Some(PluginId::Clap(id.into())),
+            descriptor: PluginDescriptor::new(id, PluginClass::Unknown),
+        };
         let row = FileRow::probed(
             PluginFormat::Clap,
             &FileFacts::read(&path),
@@ -816,10 +824,10 @@ mod tests {
 
         let refs: Vec<_> = plugins.iter().map(|(r, _)| r).collect();
         let ids: Vec<_> = refs.iter().map(|r| r.id().unwrap()).collect();
-        assert_eq!(ids, ["one", "two"]);
-        assert_eq!(plugins.info(&refs[1]).map(|d| d.id.as_str()), Some("two"));
-        let by_file = PluginRef::file(&path).unwrap();
-        assert_eq!(plugins.info(&by_file).map(|d| d.id.as_str()), Some("one"));
+        assert_eq!(ids, [&clap("one"), &clap("two")]);
+        assert_eq!(plugins.info(&refs[1]).map(|d| d.name.as_str()), Some("two"));
+        let by_file = PluginRef::file(&path);
+        assert_eq!(plugins.info(&by_file).map(|d| d.name.as_str()), Some("one"));
         // A ref through a link names the scanned file (macOS's temp dir is
         // one: `/var` links to `/private/var`).
         #[cfg(unix)]
@@ -827,8 +835,8 @@ mod tests {
             let link = std::env::temp_dir().join("tutti-two-plugins-link.clap");
             std::fs::remove_file(&link).ok();
             std::os::unix::fs::symlink(&path, &link).unwrap();
-            let by_link = PluginRef::file(&link).unwrap();
-            assert_eq!(plugins.info(&by_link).map(|d| d.id.as_str()), Some("one"));
+            let by_link = PluginRef::file(&link);
+            assert_eq!(plugins.info(&by_link).map(|d| d.name.as_str()), Some("one"));
             std::fs::remove_file(&link).ok();
         }
 
@@ -849,7 +857,7 @@ mod tests {
 
         let plugins = catalog_with(&path, blacklisted_row(&path, "SIGSEGV during probe"));
 
-        match plugins.check(&PluginRef::file(&path).unwrap()) {
+        match plugins.check(&PluginRef::file(&path)) {
             Err(BridgeError::Blacklisted { path: p, reason }) => {
                 assert_eq!(p, path);
                 assert_eq!(reason, "SIGSEGV during probe");
@@ -883,7 +891,7 @@ mod tests {
         let plugins = catalog_with(&path, row);
 
         plugins
-            .check(&PluginRef::file(&path).unwrap())
+            .check(&PluginRef::file(&path))
             .expect("a changed file must not be refused as blacklisted");
 
         std::fs::remove_file(&path).ok();
@@ -915,7 +923,7 @@ mod tests {
         );
         assert!(
             matches!(
-                fresh.check(&PluginRef::file(&path).unwrap()),
+                fresh.check(&PluginRef::file(&path)),
                 Err(BridgeError::Blacklisted { .. })
             ),
             "unchanged and blacklisted: the check must refuse"
@@ -936,19 +944,22 @@ mod tests {
             "a changed file lifts the blacklist — this is the half that was wrong"
         );
         plugins
-            .check(&PluginRef::file(&path).unwrap())
+            .check(&PluginRef::file(&path))
             .expect("the check must admit it too, so the two answers agree");
 
         std::fs::remove_file(&path).ok();
     }
 
     /// A catalog of one file holding the plugins `ids` of `format`.
-    fn catalog_of(path: &Path, format: PluginFormat, ids: &[&str]) -> Catalog {
+    fn catalog_of(path: &Path, format: PluginFormat, ids: &[PluginId]) -> Catalog {
         use tutti_plugin_types::{PluginClass, PluginDescriptor};
         std::fs::write(path, b"x").unwrap();
         let plugins = ids
             .iter()
-            .map(|id| PluginDescriptor::new(*id, *id, PluginClass::Unknown))
+            .map(|id| Described {
+                id: Some(id.clone()),
+                descriptor: PluginDescriptor::new(id.to_string(), PluginClass::Unknown),
+            })
             .collect();
         catalog_with(
             path,
@@ -993,15 +1004,14 @@ mod tests {
     fn an_id_resolves_to_the_plugin_that_has_it() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("Bundle.clap");
-        let plugins = catalog_of(&path, PluginFormat::Clap, &["one", "two"]);
+        let plugins = catalog_of(&path, PluginFormat::Clap, &[clap("one"), clap("two")]);
 
-        let Resolved::Exact(two) = plugins.resolve(&PluginId::new(PluginFormat::Clap, "two"))
-        else {
+        let Resolved::Exact(two) = plugins.resolve(&clap("two")) else {
             panic!("the id is in the catalog");
         };
 
-        assert_eq!(two.format(), PluginFormat::Clap);
-        assert_eq!(two.plugin().id(), Some("two"));
+        assert_eq!(two.format(), Ok(PluginFormat::Clap));
+        assert_eq!(two.plugin().id(), Some(&clap("two")));
         assert_eq!(two.plugin().path(), key(&path));
     }
 
@@ -1011,16 +1021,13 @@ mod tests {
     fn an_id_in_another_format_is_missing() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("Synth.clap");
-        let plugins = catalog_of(&path, PluginFormat::Clap, &["synth"]);
+        let plugins = catalog_of(&path, PluginFormat::Clap, &[clap("synth")]);
 
         assert!(matches!(
-            plugins.resolve(&PluginId::new(PluginFormat::Vst3, "synth")),
+            plugins.resolve(&PluginId::Vst2(7)),
             Resolved::Missing
         ));
-        assert!(matches!(
-            plugins.resolve(&PluginId::new(PluginFormat::Clap, "other")),
-            Resolved::Missing
-        ));
+        assert!(matches!(plugins.resolve(&clap("other")), Resolved::Missing));
     }
 
     /// **A plugin blacklisted at the resolve is missing**, not bound to a file
@@ -1029,8 +1036,8 @@ mod tests {
     fn a_blacklisted_plugin_resolves_missing() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("Crasher.clap");
-        let mut plugins = catalog_of(&path, PluginFormat::Clap, &["crasher"]);
-        let id = PluginId::new(PluginFormat::Clap, "crasher");
+        let mut plugins = catalog_of(&path, PluginFormat::Clap, &[clap("crasher")]);
+        let id = clap("crasher");
 
         plugins.blacklist(&path, "hung");
         assert!(matches!(plugins.resolve(&id), Resolved::Missing));
@@ -1051,17 +1058,16 @@ mod tests {
                 FileRow::probed(
                     PluginFormat::Clap,
                     &FileFacts::read(path),
-                    vec![PluginDescriptor::new(
-                        "twice",
-                        "twice",
-                        PluginClass::Unknown,
-                    )],
+                    vec![Described {
+                        id: Some(clap("twice")),
+                        descriptor: PluginDescriptor::new("twice", PluginClass::Unknown),
+                    }],
                 ),
             ));
         }
         let plugins = Catalog::new(db, CatalogConfig::new("/nonexistent"), |_| Ok(()));
 
-        let resolved = plugins.resolve(&PluginId::new(PluginFormat::Clap, "twice"));
+        let resolved = plugins.resolve(&clap("twice"));
 
         let Resolved::Ambiguous(candidates) = resolved.clone() else {
             panic!("{resolved:?}");
@@ -1090,7 +1096,10 @@ mod tests {
                 FileRow::probed(
                     PluginFormat::Vst3,
                     &FileFacts::read(path),
-                    vec![PluginDescriptor::default()],
+                    vec![Described {
+                        id: None,
+                        descriptor: PluginDescriptor::default(),
+                    }],
                 ),
             ));
         }

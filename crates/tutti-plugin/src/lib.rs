@@ -28,7 +28,6 @@
 //!     Catalog, CatalogConfig, Plugin, PluginId,
 //! };
 //! use tutti_plugin_db::PluginDb;
-//! use tutti_plugin_types::PluginFormat;
 //! use tutti_units::Samples;
 //! use tutti_graph::NodeKey;
 //! use tutti_transport::TempoReader;
@@ -43,7 +42,7 @@
 //!     CatalogConfig::new("/my/app/state"),
 //!     |_db| Ok(()),
 //! );
-//! let id = PluginId::new(PluginFormat::Vst3, "vst3.00112233-44556677-8899AABB-CCDDEEFF");
+//! let id: PluginId = "vst3.00112233-44556677-8899AABB-CCDDEEFF".parse()?;
 //! let loadable = catalog.resolve(&id).bind()?;
 //! let (_collector, work) = tutti_plugin::MainWork::new();
 //! let plugin = Plugin::open(None, &work, &loadable, SampleRate::SR_48K)?;
@@ -441,11 +440,11 @@ pub mod catalog {
     pub use tutti_plugin_db::{
         BindError, BlacklistView, Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT,
         DEFAULT_PROBE_TIMEOUT, FileFailure, FilesError, Hosting, Loadable, PersistError, PluginDb,
-        PluginRef, ProbeFailure, Resolved, Scan, ScanBusy, ScanError, ScanPoll, ScanResult,
+        ProbeFailure, Resolved, Scan, ScanBusy, ScanError, ScanPoll, ScanResult,
     };
     pub use tutti_plugin_host::Commit;
     pub use tutti_plugin_ipc::AudioConfig;
-    pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};
+    pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef, PluginRole};
 }
 
 // The graph node of a served plugin and its two states. The control handle,

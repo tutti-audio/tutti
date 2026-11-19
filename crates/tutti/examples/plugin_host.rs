@@ -30,11 +30,11 @@ use std::path::PathBuf;
 
 use tutti::midi::{Address, Message, MidiChannel, NoteNumber, TimedMidiEvent, U7, Ump, Voice1};
 use tutti::plugin::PresetSupport;
-use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
+use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
 use tutti::session::{Peer as _, PoolEvent};
 use tutti::{
-    Beat, Bounce, Catalog, Format, MaxBlock, ParamId, Pcm, PluginEvent, PluginRef, Range, Root,
-    SampleRate, Samples, Session, SessionEvent, StateUse,
+    Beat, Bounce, Catalog, Format, MaxBlock, ParamId, Pcm, PluginEvent, Range, Root, SampleRate,
+    Samples, Session, SessionEvent, StateUse,
 };
 use tutti_units::Normalized;
 
@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The request's `Hosting::Auto` serves CLAP, VST3 and AU from a
     //    `plugin-server` process and runs VST2 here; `.hosting(Hosting::InProcess)`
     //    asks for this process where the format allows it.
-    let plugin = PluginRef::from(&entry);
+    let plugin = entry.plugin_ref();
     eprintln!("{name}: {:?} in {}", plugin.id(), plugin.path().display());
 
     // 3. Declare it to an offline session as a pool entry, and update until it
@@ -97,7 +97,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_block(MaxBlock::of(Samples(512)))
         .build()?;
     let main = tutti::plugin::MainThreadMarker::new().ok_or("run on the process's main thread")?;
-    let id = PluginId::new(entry.format, entry.descriptor.id.clone());
+    let id = entry
+        .id
+        .cloned()
+        .ok_or("the scan could not read the plugin's id")?;
     session.pool(session.plugin_entry("plugin", &id, &catalog))?;
     let node = loop {
         let mut landed = false;

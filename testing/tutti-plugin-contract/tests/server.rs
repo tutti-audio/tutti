@@ -21,8 +21,7 @@ use tutti_plugin_contract::{
 };
 use tutti_plugin_ipc::{BridgeConfig as IpcConfig, BridgeEvent, Ipc, Launched};
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Control, Editor, Load, LoadStage, MainThreadMarker, ParamEdit,
-    SampleRate,
+    BridgeError, BridgeResult, Control, Editor, LoadStage, MainThreadMarker, ParamEdit, SampleRate,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -35,9 +34,9 @@ fn through_server<F: Format>(path: PathBuf) {
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(
-            tutti_plugin::catalog::PluginRef::file(path).expect("a plugin file"),
-        ),
+        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+            path,
+        )),
         tutti_plugin_types::SampleRate::SR_48K,
     )
     .unwrap_or_else(|e| panic!("{}: the server loads the plugin: {e:?}", F::NAME));
@@ -115,12 +114,11 @@ fn vst3_cpp_mode_and_transcript_cross_the_process_boundary() {
 fn no_editor(
     _: MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
-    path: &std::path::Path,
+    plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-    _: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+        path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: "these tests load no editor".into(),
     })
@@ -139,7 +137,7 @@ fn served<F: Format>(
     let Launched { ipc, .. } = Ipc::launch(
         IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
         &tutti_plugin_ipc::LoadRequest {
-            origin: &tutti_plugin_types::Origin::new(path, Load::new()),
+            origin: &tutti_plugin_types::PluginRef::file(path),
             format: F::FORMAT,
             rate: SampleRate::of(RATE),
             restore: None,

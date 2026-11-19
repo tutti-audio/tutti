@@ -26,14 +26,15 @@
 //!    live node's audio thread renders through its lent Processor meanwhile,
 //!    as it does through a project save.
 //! 2. **Load a second instance** of the same file at the live node's rate,
-//!    from the live instance's [`Origin`] as `Reopen::reopen` does
+//!    from the live instance's origin ([`PluginRef`]) as `Reopen::reopen` does
 //!    (`InProc::load_in_process`; an active `Lifecycle` holds a Controller,
 //!    not the loaded plugin `reopen` borrows). For VST2 the second `dlopen` of
 //!    the path maps the image already loaded (one more reference to it), and
 //!    the plugin's entry point builds a second `AEffect`. The image is never
 //!    unloaded (`tutti-vst2-ffi`'s `PluginInstance` leaks the module on purpose),
 //!    so the library outlives both instances whatever order they drop in.
-//! 3. **Check it is the same plugin** (its id), then **restore the state**:
+//! 3. **Restore the state** (the load took the live instance's plugin id, so a
+//!    file that now holds another plugin refuses there):
 //!    the preset first, then the blob (`Control::load_state`, a duplicate). In that order
 //!    because a preset change may move every parameter; the blob is what the
 //!    live instance holds now.
@@ -103,7 +104,7 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use parking_lot::Mutex;
 use tutti_graph::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
-use tutti_plugin_types::{Control, Features, InProc, Origin, RenderMode, StateUse};
+use tutti_plugin_types::{Control, Features, InProc, PluginRef, RenderMode, StateUse};
 
 use super::client::{PluginNode, RateDelivery, TransportFeed};
 use super::instance::Instance;
@@ -119,14 +120,12 @@ pub(super) struct Fork<L: InProc, F: Float> {
     /// node and handle on it is gone, a fork answers
     /// [`PluginForkError::LiveGone`].
     live: Weak<Mutex<Instance<L>>>,
-    /// Where the live instance came from: the file and the choice of plugin
-    /// in it, which the second instance loads again.
-    origin: Origin,
+    /// Where the live instance came from: the file and the plugin in it, which
+    /// the second instance loads again.
+    origin: PluginRef,
     /// The collector of the live instance's owner, which the second instance hands
     /// its close to.
     work: MainWorkHandle,
-    /// The live instance's plugin id, which the second one must match.
-    id: String,
     /// The live node's rate when this source was taken: what the second
     /// instance is loaded at. The fork's own `prepare` then tells it the
     /// fork's rate.
@@ -161,7 +160,6 @@ where
             live: Arc::downgrade(&client.inner),
             origin: reload.origin.clone(),
             work: reload.work.clone(),
-            id: client.descriptor.id.clone(),
             sample_rate: client.sample_rate,
             features: client.features,
             transport: client.transport.clone(),
@@ -213,13 +211,12 @@ where
                 },
             )
         };
-        // From the stored `Origin`, not `Reopen::reopen`: an active `Lifecycle`
+        // From the stored origin, not `Reopen::reopen`: an active `Lifecycle`
         // holds a Controller, not the `&L` that `reopen` needs.
         let (mut fork, handle, restored) = load_client_restoring::<L, F>(
             main,
             &self.work,
-            self.origin.path(),
-            self.origin.load(),
+            &self.origin,
             self.sample_rate,
             Some(&mut restore),
         )
@@ -232,13 +229,6 @@ where
         // The fork is driven through its node alone: no editor, no parameter
         // surface. Its instance stays alive in the node.
         drop(handle);
-        if fork.descriptor.id != self.id {
-            return Err(PluginForkError::Mismatch {
-                path: self.origin.path().to_path_buf(),
-                expected: self.id.clone(),
-                found: fork.descriptor.id.clone(),
-            });
-        }
         if let Some(Err(refused)) = restored {
             return Err(PluginForkError::LoadState(refused));
         }

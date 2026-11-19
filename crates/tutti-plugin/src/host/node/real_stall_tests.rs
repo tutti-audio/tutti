@@ -123,9 +123,9 @@ fn load_probe(env: &mut ScopedEnv, render_mode: u32) -> (PluginClient, PluginHan
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
-        &crate::catalog::Loadable::uncatalogued(
-            crate::catalog::PluginRef::file(tutti_fixtures::clap_probe()).expect("a plugin file"),
-        ),
+        &crate::catalog::Loadable::uncatalogued(crate::catalog::PluginRef::file(
+            tutti_fixtures::clap_probe(),
+        )),
         SampleRate::of(SAMPLE_RATE),
     )
     .expect("load the reference CLAP plugin through a real plugin-server");

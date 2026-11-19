@@ -282,7 +282,11 @@ fn describing_a_plugin_does_not_resume_it() {
     let [descriptor] = plugins.as_slice() else {
         panic!("a plugin that is no shell is one plugin: {plugins:?}");
     };
-    assert_eq!(descriptor.name, "Tutti VST2 Probe");
+    assert_eq!(descriptor.1.name, "Tutti VST2 Probe");
+    assert_eq!(
+        descriptor.0,
+        tutti_plugin_types::PluginId::Vst2(tutti_vst2_test_plugin::PROBE_UNIQUE_ID as u32)
+    );
     assert_eq!(
         capture().resume_count,
         0,

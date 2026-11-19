@@ -24,7 +24,6 @@ use crate::param_reads::ParamReads as _;
 use std::sync::{Mutex, MutexGuard};
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
 use tutti_vst2_host::Vst2Loaded;
 
@@ -150,8 +149,7 @@ fn load_with(tempo: tutti_transport::TempoReader) -> (PluginNode<Vst2Loaded>, Pl
     let (client, handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
-        path,
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(path),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     )
     .unwrap_or_else(|e| panic!("in-process load of the probe at {path:?}: {e:?}"));
@@ -351,10 +349,9 @@ fn a_plugin_handed_back_by_into_client_forks() {
     let plugin = tutti_plugin::catalog::Plugin::open(
         Some(main_thread()),
         &tutti_fixtures::pumped_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(
-            tutti_plugin::catalog::PluginRef::file(tutti_fixtures::vst2_probe())
-                .expect("a plugin file"),
-        ),
+        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+            tutti_fixtures::vst2_probe(),
+        )),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     )
     .expect("the probe opens");
@@ -485,11 +482,11 @@ fn a_live_fork_keeps_the_live_render_mode() {
     drop(handle);
 }
 
-/// **A file that now loads as another plugin is `Mismatch`**: the second
-/// instance's id is not the live one's, so the live state is not loaded into
-/// it. The probe's `uniqueId` is changed between the two loads (as a plugin
-/// replaced on disk would be).
-fn a_second_instance_of_another_plugin_is_a_mismatch() {
+/// **A file that now loads as another plugin is refused by id**: the second
+/// instance is asked for the live plugin's id, and the file now creates
+/// another, so the live state is not loaded into it. The probe's `uniqueId` is
+/// changed between the two loads (as a plugin replaced on disk would be).
+fn a_second_instance_of_another_plugin_is_refused() {
     let _lock = lock_probe();
     reset_probe();
     let mut env = ProbeEnv::new(true);
@@ -499,13 +496,15 @@ fn a_second_instance_of_another_plugin_is_a_mismatch() {
         .fork_instance(main_thread(), ForkMode::Live)
         .expect_err("a different plugin is not a fork");
     match err {
-        PluginForkError::Mismatch {
-            expected, found, ..
-        } => {
-            assert_eq!(expected, client_id(&handle));
-            assert_eq!(found, "vst2.4242");
+        PluginForkError::Load { source, .. } => {
+            let text = source.to_string();
+            assert!(text.contains("no plugin"), "{text}");
+            assert!(
+                text.contains("vst2.4242"),
+                "the plugin that came up: {text}"
+            );
         }
-        other => panic!("expected Mismatch, got {other:?}"),
+        other => panic!("expected a refused load, got {other:?}"),
     }
     drop(client);
     drop(handle);
@@ -536,11 +535,6 @@ fn a_live_program_out_of_the_second_instances_range_is_a_named_error() {
     drop(handle);
 }
 
-/// The live plugin's id, as the host reports it.
-fn client_id(handle: &PluginHandle) -> String {
-    handle.descriptor().id.clone()
-}
-
 /// The cases, run by `main`.
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases![
     a_chunk_plugin_forks_with_the_live_chunk_and_renders_offline,
@@ -551,6 +545,6 @@ pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases![
     a_plugin_handed_back_by_into_client_forks,
     a_fork_reads_its_transport_from_the_render,
     a_live_fork_keeps_the_live_render_mode,
-    a_second_instance_of_another_plugin_is_a_mismatch,
+    a_second_instance_of_another_plugin_is_refused,
     a_live_program_out_of_the_second_instances_range_is_a_named_error,
 ];

@@ -72,7 +72,6 @@ fn editor_bits(embeddable: bool, floating: bool) -> EditorBits {
 /// verbatim as the native class.
 pub(super) fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> PluginDescriptor {
     PluginDescriptor {
-        id: info.id.clone(),
         name: info.name.clone(),
         vendor: info.vendor.clone(),
         version: info.version.clone(),

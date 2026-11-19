@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use tutti_plugin_types::{
-    Describe, InProc, Load, MainThreadMarker, MainWorkHandle, Origin, OutOfProcess,
-    PluginDescriptor, PluginResult,
+    Describe, InProc, MainThreadMarker, MainWorkHandle, OutOfProcess, PluginDescriptor, PluginId,
+    PluginRef, PluginResult,
 };
 
 use crate::editor_instance::AuEditorInstance;
@@ -15,13 +15,12 @@ impl InProc for AuLoaded {
     fn load_in_process(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self> {
-        AuLoaded::load(main, work, path, load)
+        AuLoaded::load(main, work, plugin)
     }
 
-    fn origin(&self) -> &Origin {
+    fn origin(&self) -> &PluginRef {
         &self.origin
     }
 
@@ -34,7 +33,10 @@ impl Describe for AuLoaded {
     /// Each unit the bundle declares, read from the registry's component, none
     /// created: an editor is a property of an instance, so it is
     /// [`EditorPresence::Unknown`](tutti_plugin_types::EditorPresence::Unknown).
-    fn describe(_main: MainThreadMarker, path: &Path) -> PluginResult<Vec<PluginDescriptor>> {
+    fn describe(
+        _main: MainThreadMarker,
+        path: &Path,
+    ) -> PluginResult<Vec<(PluginId, PluginDescriptor)>> {
         AuLoaded::describe_all(path)
     }
 }
@@ -45,18 +47,16 @@ impl OutOfProcess for AuLoaded {
     fn load_served(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self> {
-        Self::load_in_process(main, work, path, load)
+        Self::load_in_process(main, work, plugin)
     }
 
     fn load_editor(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<AuEditorInstance> {
-        AuEditorInstance::load(main, work, path, load)
+        AuEditorInstance::load(main, work, plugin)
     }
 }

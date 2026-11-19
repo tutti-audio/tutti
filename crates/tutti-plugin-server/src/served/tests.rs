@@ -1,8 +1,9 @@
 //! `Served<L>` against each format's reference plugin.
 
 use super::*;
+use std::path::Path;
 use tutti_buffers::{Float, FloatWidth};
-use tutti_plugin_types::{PluginFormat, PluginIo, ProcessContext, Processor};
+use tutti_plugin_types::{PluginFormat, PluginIo, PluginRef, ProcessContext, Processor};
 
 #[cfg(served_au)]
 mod au;
@@ -24,8 +25,7 @@ impl<L: ServerSide> Served<L> {
         Self::load(
             main,
             &tutti_fixtures::detached_work(),
-            path,
-            &Load::new(),
+            &PluginRef::file(path),
             SampleRate::of(rate),
             block,
             requested,
@@ -85,9 +85,8 @@ fn load_any(path: &Path, format: PluginFormat) -> PluginResult<AnyServed> {
     AnyServed::load(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        path,
+        &PluginRef::file(path),
         format,
-        &Load::new(),
         SampleRate::SR_44K1,
         512,
         FloatWidth::F32,

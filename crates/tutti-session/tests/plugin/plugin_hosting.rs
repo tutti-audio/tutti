@@ -35,7 +35,7 @@ fn set_server(path: impl AsRef<std::ffi::OsStr>) {
 fn a_blacklisted_plugin_does_not_resolve_and_loads_once_unblacklisted() {
     set_server(tutti_fixtures::plugin_server());
     let path = clap_probe();
-    let plugin = PluginRef::file(&path).expect("a plugin file");
+    let plugin = PluginRef::file(&path);
     let (mut catalog, id, _dir) = catalog_of(&plugin);
     catalog.blacklist(&path, "SIGSEGV during probe");
     let mut s = session();
@@ -100,7 +100,7 @@ fn run_held(held: &Arc<Mutex<Vec<Task>>>) {
 fn the_blacklist_is_asked_when_the_load_runs() {
     set_server(tutti_fixtures::plugin_server());
     let path = clap_probe();
-    let plugin = PluginRef::file(&path).expect("a plugin file");
+    let plugin = PluginRef::file(&path);
     let (mut catalog, id, _dir) = catalog_of(&plugin);
     let main = tutti_fixtures::main_thread();
 
@@ -139,7 +139,7 @@ fn the_blacklist_is_asked_when_the_load_runs() {
 #[cfg(feature = "vst2")]
 #[test]
 fn vst2_asked_for_out_of_process_is_refused_at_load() {
-    let plugin = PluginRef::file(tutti_fixtures::vst2_probe()).expect("a plugin file");
+    let plugin = PluginRef::file(tutti_fixtures::vst2_probe());
     let (catalog, id, _dir) = catalog_of(&plugin);
     let mut s = session();
     match s.load_entry_blocking(
@@ -163,7 +163,7 @@ fn vst2_asked_for_out_of_process_is_refused_at_load() {
 #[test]
 fn a_clap_plugin_asked_in_process_is_hosted_here() {
     set_server("/nonexistent/plugin-server");
-    let plugin = PluginRef::file(clap_probe()).expect("a plugin file");
+    let plugin = PluginRef::file(clap_probe());
     let mut s = session();
     let node = s
         .load_plugin_blocking(
@@ -174,7 +174,7 @@ fn a_clap_plugin_asked_in_process_is_hosted_here() {
     let hosted = s.plugin_view(node).expect("it is hosted");
     assert_eq!(hosted.diagnostics().server_pid(), None);
     assert_eq!(
-        hosted.descriptor().id,
+        crate::pooled::clap_id(hosted.plugin()),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8")
     );
 }

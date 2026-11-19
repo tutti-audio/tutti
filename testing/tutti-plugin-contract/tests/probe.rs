@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use tutti_plugin::catalog::{
     Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator,
-    PluginDescriptor, PluginRef, ProbeFailure, ScanPoll,
+    PluginDescriptor, PluginId, PluginRef, ProbeFailure, ScanPoll,
 };
 use tutti_plugin_contract::{
     Clap, Format, Vst2, Vst3, Vst3Cpp, bundle_of, clap_path, library, spec, state_with_fault,
@@ -27,9 +27,8 @@ use tutti_plugin_contract::{
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_ipc::{BridgeConfig as IpcConfig, Ipc, Launched};
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Control, Editor, InProc, LatencyVerdict, Load, LoadStage,
-    MainThreadMarker, MaxBlock, Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash,
-    TailVerdict,
+    BridgeError, BridgeResult, Editor, InProc, LatencyVerdict, LoadStage, MainThreadMarker,
+    MaxBlock, Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash, TailVerdict,
 };
 use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeOutcome, ProbeRefusal};
 use tutti_vst2_author::shell::{ALPHA_ID, ALPHA_NAME, BETA_ID, BETA_NAME};
@@ -107,7 +106,7 @@ fn probe_all_with_timeout(
 fn measure_db(path: &Path, file: &Path, timeout: Duration) -> Result<PluginDb, ProbeFailure> {
     let scanned = probe_db(path)?;
     let entry = scanned.plugins().next().expect("a plugin in the file");
-    let plugin = PluginRef::from(&entry);
+    let plugin = entry.plugin_ref();
     let pedal = tempfile::tempdir().unwrap();
     let config = config(pedal.path()).measure_timeout(timeout);
     run_task(config, |catalog| {
@@ -130,7 +129,9 @@ fn assert_named(d: &PluginDescriptor, format: &str, name: &str) {
 fn clap_is_probed_through_the_binary() {
     let d = probe(&clap_path()).expect("probes");
     assert_shared_plugin(&d, "clap");
-    assert_eq!(d.id, "tutti.shared-test-plugin");
+    let db = probe_db(&clap_path()).expect("probes");
+    let id = db.plugins().next().and_then(|p| p.id.cloned());
+    assert_eq!(id, Some(PluginId::Clap("tutti.shared-test-plugin".into())));
 }
 
 /// The shared plugin under a `.vst` name in a directory of its own, so the probe
@@ -157,6 +158,7 @@ fn vst2_is_probed_through_the_binary() {
 fn vst3_is_probed_through_the_binary() {
     let db = probe_db(&bundle_of(&vst3_module())).expect("probes");
     let found: Vec<_> = db.plugins().map(|p| p.descriptor.clone()).collect();
+    let classes: Vec<_> = db.plugins().map(|p| p.id.cloned()).collect();
     let names: Vec<_> = found.iter().map(|d| d.name.as_str()).collect();
     assert_eq!(
         names,
@@ -168,11 +170,14 @@ fn vst3_is_probed_through_the_binary() {
     );
     for d in &found {
         assert_named(d, "vst3", &d.name);
-        assert!(d.id.starts_with("vst3."), "{}", d.id);
     }
-    let mut ids: Vec<_> = found.iter().map(|d| d.id.clone()).collect();
-    ids.sort();
-    ids.dedup();
+    assert!(
+        classes
+            .iter()
+            .all(|id| matches!(id, Some(PluginId::Vst3(_)))),
+        "{classes:?}"
+    );
+    let ids: std::collections::HashSet<_> = classes.iter().collect();
     assert_eq!(ids.len(), 3, "one id per class: {found:?}");
 }
 
@@ -186,12 +191,11 @@ fn vst3_cpp_is_probed_through_the_binary() {
 fn no_editor(
     _: MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
-    path: &Path,
+    plugin: &PluginRef,
     _: tutti_plugin_types::PluginFormat,
-    _: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+        path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: "these tests load no editor".into(),
     })
@@ -199,14 +203,14 @@ fn no_editor(
 
 /// The id of the plugin a `plugin-server` loads for `plugin`: what a served load of
 /// the ref picks.
-fn served_id(plugin: &PluginRef) -> String {
+fn served_id(plugin: &PluginRef) -> PluginId {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let Launched { ipc, .. } = Ipc::launch(
         IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
         &tutti_plugin_ipc::LoadRequest {
-            origin: &tutti_plugin_types::Origin::new(plugin.path(), plugin.load()),
-            format: plugin.format(),
+            origin: plugin,
+            format: plugin.format().expect("the ref names its format"),
             rate: SampleRate::SR_48K,
             restore: None,
         },
@@ -216,7 +220,9 @@ fn served_id(plugin: &PluginRef) -> String {
         )),
     )
     .unwrap_or_else(|e| panic!("{plugin:?}: the server loads it: {e:?}"));
-    Control::info(&ipc).id.clone()
+    ipc.origin()
+        .and_then(|origin| origin.origin.id().cloned())
+        .expect("the server named the plugin it loaded")
 }
 
 /// **A CLAP factory of two plugins is two entries**, the factory's order, and a served
@@ -233,18 +239,18 @@ fn a_clap_factory_of_two_plugins_is_probed_as_two() {
     )
     .expect("copy the plugin");
     let db = probe_db(&path).expect("probes");
-    let ids: Vec<_> = db.plugins().map(|p| p.descriptor.id.clone()).collect();
+    let ids: Vec<_> = db.plugins().map(|p| p.id.cloned()).collect();
     // The factory's two descriptors, by the ids the reference plugin declares (the
     // crate is a dev-dependency to be built, not linked: its entry point would clash
     // with the shared plugin's).
     assert_eq!(
         ids,
-        ["tutti.conformance-probe", "tutti.conformance-probe.second"]
+        [FACTORY_FIRST, FACTORY_SECOND].map(|text| Some(factory_id(text)))
     );
 
     for entry in db.plugins() {
-        let plugin = PluginRef::from(&entry);
-        assert_eq!(served_id(&plugin), entry.descriptor.id, "{ids:?}");
+        let plugin = entry.plugin_ref();
+        assert_eq!(Some(served_id(&plugin)), entry.id.cloned(), "{ids:?}");
     }
 }
 
@@ -255,8 +261,8 @@ fn a_served_vst3_load_picks_the_class_its_ref_names() {
     let db = probe_db(&bundle_of(&vst3_module())).expect("probes");
     let entry = db.plugins().nth(2).expect("a third class");
     assert_eq!(
-        served_id(&PluginRef::from(&entry)),
-        entry.descriptor.id,
+        Some(served_id(&entry.plugin_ref())),
+        entry.id.cloned(),
         "{:?}",
         entry.descriptor
     );
@@ -278,27 +284,25 @@ fn a_vst2_shell_is_probed_as_its_sub_plugins() {
 
     let found: Vec<_> = db
         .plugins()
-        .map(|p| (p.descriptor.id.clone(), p.descriptor.name.clone()))
+        .map(|p| (p.id.cloned(), p.descriptor.name.clone()))
         .collect();
     assert_eq!(
         found,
         [
-            (format!("vst2.{ALPHA_ID}"), ALPHA_NAME.to_string()),
-            (format!("vst2.{BETA_ID}"), BETA_NAME.to_string()),
+            (
+                Some(PluginId::Vst2(ALPHA_ID as u32)),
+                ALPHA_NAME.to_string()
+            ),
+            (Some(PluginId::Vst2(BETA_ID as u32)), BETA_NAME.to_string()),
         ]
     );
 
     let main = tutti_fixtures::main_thread();
     for entry in db.plugins() {
-        let plugin = PluginRef::from(&entry);
-        let loaded = Vst2Loaded::load_in_process(
-            main,
-            &tutti_fixtures::detached_work(),
-            plugin.path(),
-            &plugin.load(),
-        )
-        .expect("the sub-plugin loads");
-        assert_eq!(loaded.metadata().id, entry.descriptor.id);
+        let plugin = entry.plugin_ref();
+        let loaded = Vst2Loaded::load_in_process(main, &tutti_fixtures::detached_work(), &plugin)
+            .expect("the sub-plugin loads");
+        assert_eq!(Some(&PluginId::Vst2(loaded.metadata().id)), entry.id);
     }
 }
 
@@ -671,8 +675,14 @@ fn an_unreadable_state_file_is_a_refusal() {
 }
 
 /// The two plugins of the reference CLAP factory, under a file name of its own.
-const FACTORY_FIRST: &str = "tutti.conformance-probe";
-const FACTORY_SECOND: &str = "tutti.conformance-probe.second";
+/// Each as the text of its [`PluginId`], which a command line carries.
+const FACTORY_FIRST: &str = "clap.tutti.conformance-probe";
+const FACTORY_SECOND: &str = "clap.tutti.conformance-probe.second";
+
+/// The id `text` spells.
+fn factory_id(text: &str) -> PluginId {
+    text.parse().expect("a plugin id")
+}
 
 /// A state file the reference plugins refuse, in a directory of its own.
 fn refused_state(dir: &tempfile::TempDir) -> PathBuf {
@@ -711,8 +721,8 @@ fn a_state_goes_only_to_the_plugin_it_names() {
         }
     };
 
-    assert_eq!(refusing(Some(FACTORY_SECOND)), FACTORY_SECOND);
-    assert_eq!(refusing(Some(FACTORY_FIRST)), FACTORY_FIRST);
+    assert_eq!(refusing(Some(FACTORY_SECOND)), factory_id(FACTORY_SECOND));
+    assert_eq!(refusing(Some(FACTORY_FIRST)), factory_id(FACTORY_FIRST));
 
     // No plugin named, and the file holds two: the state would go to one by position.
     let args = state_args(None);
@@ -783,10 +793,13 @@ fn a_spent_budget_loads_no_plugin_and_the_probe_finishes() {
     else {
         panic!("a described result: {outcome:?}");
     };
-    let ids: Vec<_> = plugins.iter().map(|p| p.id.as_str()).collect();
-    assert_eq!(ids, [FACTORY_FIRST, FACTORY_SECOND]);
-    assert!(plugins.iter().all(|p| p.measured.is_none()));
-    let lost: Vec<_> = unmeasured.iter().map(|u| u.plugin.as_str()).collect();
+    let ids: Vec<_> = plugins.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(
+        ids,
+        [FACTORY_FIRST, FACTORY_SECOND].map(|text| Some(factory_id(text)))
+    );
+    assert!(plugins.iter().all(|p| p.descriptor.measured.is_none()));
+    let lost: Vec<_> = unmeasured.iter().map(|u| Some(u.plugin.clone())).collect();
     assert_eq!(lost, ids, "each plugin lost its own rows");
     assert!(
         unmeasured
@@ -809,9 +822,9 @@ fn a_state_for_a_plugin_the_file_does_not_hold_is_refused() {
             "--state".as_ref(),
             state.as_os_str(),
             "--plugin".as_ref(),
-            "no.such.plugin".as_ref(),
+            "clap.no.such.plugin".as_ref(),
         ],
-        &ProbeRefusal::UnknownPlugin("no.such.plugin".into()),
+        &ProbeRefusal::UnknownPlugin(PluginId::Clap("no.such.plugin".into())),
     );
 }
 

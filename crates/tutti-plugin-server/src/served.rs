@@ -15,15 +15,14 @@
 //! each [`Notice`] of the core as the [`BridgeMessage`] that carries it.
 
 use crate::ties::{Patience, Ties};
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
-    AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, Load,
-    LoadStage, LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess,
-    ParamEdit, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginIo,
+    AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, LoadStage,
+    LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess, ParamEdit,
+    ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginIo, PluginRef,
     PluginResult, Prepare, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request,
     SampleRate, Samples, Seat, Stage, State, StateError, StateUse, TrackInfo, Widths,
 };
@@ -75,6 +74,9 @@ pub(crate) trait Render {
 /// Object-safe, implemented by [`Served<L>`] alone; the
 /// `served!` table's enum lends it as a trait object.
 pub(crate) trait ServedPlugin {
+    /// The file and plugin the load opened: the id is the plugin's, whatever
+    /// the load chose.
+    fn origin(&self) -> &PluginRef;
     /// The plugin's catalog identity.
     fn descriptor(&self) -> &PluginDescriptor;
     /// The plugin's wiring as last read: buses, latency, tail, capabilities.
@@ -203,6 +205,8 @@ pub(crate) struct Served<L: OutOfProcess> {
     lifecycle: Lifecycle<L>,
     state: State,
     hand: Hand<L::Processor>,
+    /// The file and plugin the load opened.
+    origin: PluginRef,
     descriptor: PluginDescriptor,
     wiring: LoadedPlugin,
     /// The buses the host was last told: at load, or by `PluginIoChanged`.
@@ -256,7 +260,7 @@ fn load_failed(stage: LoadStage, reason: String) -> PluginError {
 }
 
 impl<L: ServerSide> Served<L> {
-    /// Loads the plugin `load` chooses in the file at `path`, not activated.
+    /// Loads the plugin `plugin` names, not activated.
     ///
     /// # Errors
     ///
@@ -264,10 +268,9 @@ impl<L: ServerSide> Served<L> {
     pub(crate) fn open(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<L> {
-        let mut loaded = L::load_served(main, work, path, load)?;
+        let mut loaded = L::load_served(main, work, plugin)?;
         loaded.adopt();
         Ok(loaded)
     }
@@ -281,8 +284,7 @@ impl<L: ServerSide> Served<L> {
     pub(crate) fn load(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
         sample_rate: SampleRate,
         block_size: usize,
         requested: FloatWidth,
@@ -293,7 +295,7 @@ impl<L: ServerSide> Served<L> {
     ) -> PluginResult<(Self, Option<PluginError>)> {
         Self::activate(
             main,
-            Self::open(main, work, path, load)?,
+            Self::open(main, work, plugin)?,
             sample_rate,
             block_size,
             requested,
@@ -350,6 +352,7 @@ impl<L: ServerSide> Served<L> {
             })?;
 
         let mut this = Self {
+            origin: loaded.origin().clone(),
             lifecycle: Lifecycle::new(loaded),
             state: Lifecycle::<L>::initial_state(),
             hand,
@@ -694,6 +697,10 @@ impl<L: ServerSide> Served<L> {
 }
 
 impl<L: ServerSide> ServedPlugin for Served<L> {
+    fn origin(&self) -> &PluginRef {
+        &self.origin
+    }
+
     fn descriptor(&self) -> &PluginDescriptor {
         &self.descriptor
     }

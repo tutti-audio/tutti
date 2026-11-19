@@ -71,7 +71,7 @@ pub(crate) fn is_blacklisted_and_unchanged(row: &FileRow, facts: &FileFacts) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_plugin_types::{PluginClass, PluginDescriptor};
+    use tutti_plugin_types::{Described, PluginClass, PluginDescriptor, PluginId};
 
     use std::time::Duration;
 
@@ -93,7 +93,10 @@ mod tests {
         FileRow::probed(
             PluginFormat::Clap,
             &facts(mtime),
-            vec![PluginDescriptor::new("id", "name", PluginClass::Unknown)],
+            vec![Described {
+                id: Some(PluginId::Vst2(1)),
+                descriptor: PluginDescriptor::new("name", PluginClass::Unknown),
+            }],
         )
     }
 

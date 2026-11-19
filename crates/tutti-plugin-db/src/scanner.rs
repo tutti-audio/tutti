@@ -14,7 +14,7 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
-use tutti_plugin_types::{PluginClass, PluginDescriptor, PluginFormat, ProbeError};
+use tutti_plugin_types::{Described, PluginClass, PluginDescriptor, PluginFormat, ProbeError};
 use tutti_rt::{LockExt, StopToken, Tally, TallyWriter, ThreadHandle};
 
 /// How many progress updates wait for the owner before the scan drops the
@@ -71,9 +71,8 @@ pub enum ScanProgress {
 }
 
 /// What a scanner calls to read one plugin file's metadata.
-type ProbeFn = dyn Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<PluginDescriptor>, ProbeFailure>
-    + Send
-    + Sync;
+type ProbeFn =
+    dyn Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<Described>, ProbeFailure> + Send + Sync;
 
 /// Scans plugin directories into a [`PluginDb`], with crash recovery.
 ///
@@ -112,7 +111,7 @@ impl Scanner {
     /// for the probe in flight to return.
     pub fn new(
         pedal_path: impl Into<PathBuf>,
-        probe: impl Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<PluginDescriptor>, ProbeFailure>
+        probe: impl Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<Described>, ProbeFailure>
         + Send
         + Sync
         + 'static,
@@ -696,32 +695,39 @@ impl ScanResult {
 
 /// Minimal metadata from the file name, for a host whose probe is unavailable.
 /// The native classification is unknown without a probe, so the descriptor
-/// carries [`PluginClass::Unknown`].
-pub fn probe_plugin_fallback(path: &Path, format: PluginFormat) -> PluginDescriptor {
+/// carries [`PluginClass::Unknown`], and with no id read from the file the
+/// listing names the file's first plugin.
+pub fn probe_plugin_fallback(path: &Path) -> Described {
     let name = path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown")
         .to_string();
-
-    let id = format!(
-        "{}.{}",
-        format.extension_id(),
-        name.to_lowercase().replace(' ', "_")
-    );
-
-    PluginDescriptor::new(id, name, PluginClass::Unknown)
+    Described {
+        id: None,
+        descriptor: PluginDescriptor::new(name, PluginClass::Unknown),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mtime::Mtime;
+
+    /// A CLAP plugin listing named `name`.
+    fn described(name: &str) -> Described {
+        Described::new(
+            PluginId::Clap(name.into()),
+            PluginDescriptor::new(name, PluginClass::Unknown),
+        )
+    }
     use crate::table::FileState;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, UNIX_EPOCH};
     use tempfile::TempDir;
-    use tutti_plugin_types::{LoadStage, ProbeDeath, ProbeExit, ProbeRefusal, ResultError};
+    use tutti_plugin_types::{
+        LoadStage, PluginId, ProbeDeath, ProbeExit, ProbeRefusal, ResultError,
+    };
 
     fn create_fake_plugin(dir: &Path, name: &str) -> PathBuf {
         let path = dir.join(name);
@@ -746,10 +752,10 @@ mod tests {
 
     fn filename_probe(
         path: &Path,
-        format: PluginFormat,
+        _: PluginFormat,
         _: &StopToken,
-    ) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
-        Ok(vec![probe_plugin_fallback(path, format)])
+    ) -> Result<Vec<Described>, ProbeFailure> {
+        Ok(vec![probe_plugin_fallback(path)])
     }
 
     /// A generous bound on how long a test waits for an event it knows is
@@ -778,7 +784,7 @@ mod tests {
     /// A scanner whose probe counts its calls and answers `answer`.
     fn counting_scanner(
         dir: &Path,
-        answer: fn(&Path) -> Result<Vec<PluginDescriptor>, ProbeFailure>,
+        answer: fn(&Path) -> Result<Vec<Described>, ProbeFailure>,
     ) -> (Scanner, Arc<AtomicUsize>) {
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = Arc::clone(&calls);
@@ -789,8 +795,8 @@ mod tests {
         (scanner, calls)
     }
 
-    fn named(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
-        Ok(vec![probe_plugin_fallback(path, PluginFormat::Clap)])
+    fn named(path: &Path) -> Result<Vec<Described>, ProbeFailure> {
+        Ok(vec![probe_plugin_fallback(path)])
     }
 
     /// The failure of a probe whose process was killed by a segfault.
@@ -827,7 +833,7 @@ mod tests {
             ProbeError::Refused(ProbeRefusal::FormatNotCompiled(PluginFormat::AudioUnit)),
             ProbeError::Refused(ProbeRefusal::StateUnreadable("denied".into())),
             ProbeError::Refused(ProbeRefusal::StateRefused {
-                plugin: "p".into(),
+                plugin: PluginId::Vst2(1),
                 reason: "no".into(),
             }),
             ProbeError::Refused(ProbeRefusal::Load {
@@ -835,7 +841,7 @@ mod tests {
                 reason: "dlopen failed".into(),
             }),
             ProbeError::Refused(ProbeRefusal::Describe("no".into())),
-            ProbeError::Refused(ProbeRefusal::UnknownPlugin("p".into())),
+            ProbeError::Refused(ProbeRefusal::UnknownPlugin(PluginId::Vst2(1))),
             ProbeError::Refused(ProbeRefusal::AmbiguousPlugin { count: 2 }),
             ProbeError::Refused(ProbeRefusal::Empty),
             ProbeError::Refused(ProbeRefusal::Usage),
@@ -858,7 +864,7 @@ mod tests {
         }
     }
 
-    fn crashes(_: &Path) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
+    fn crashes(_: &Path) -> Result<Vec<Described>, ProbeFailure> {
         Err(crashed())
     }
 
@@ -965,7 +971,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
         let measured_row = |plugin: &Path, mtime: Option<Mtime>| {
-            let mut descriptor = PluginDescriptor::new("p", "p", PluginClass::Unknown);
+            let mut descriptor = PluginDescriptor::new("p", PluginClass::Unknown);
             descriptor.measured = Some(Measured {
                 tail: None,
                 latency: None,
@@ -982,7 +988,14 @@ mod tests {
             });
             let mut facts = FileFacts::read(plugin);
             facts.mtime = mtime.or(facts.mtime);
-            FileRow::probed(PluginFormat::Vst3, &facts, vec![descriptor])
+            FileRow::probed(
+                PluginFormat::Vst3,
+                &facts,
+                vec![Described {
+                    id: Some(PluginId::Vst2(1)),
+                    descriptor,
+                }],
+            )
         };
         let same = create_fake_plugin(&plugins_dir, "same.vst3");
         let changed = create_fake_plugin(&plugins_dir, "changed.vst3");
@@ -995,7 +1008,12 @@ mod tests {
 
         scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
 
-        let measured = |path: &Path| db.row(path).unwrap().plugins()[0].measured.is_some();
+        let measured = |path: &Path| {
+            db.row(path).unwrap().plugins()[0]
+                .descriptor
+                .measured
+                .is_some()
+        };
         assert!(measured(&same), "an unchanged file keeps its measurement");
         assert!(
             !measured(&changed),
@@ -1015,11 +1033,7 @@ mod tests {
             FileRow::probed(
                 PluginFormat::Vst3,
                 &FileFacts::read(&plugin),
-                vec![PluginDescriptor::new(
-                    "cached",
-                    "cached",
-                    PluginClass::Unknown,
-                )],
+                vec![described("cached")],
             ),
         ));
 
@@ -1230,9 +1244,9 @@ mod tests {
 
     #[test]
     fn probe_plugin_fallback_returns_metadata() {
-        let meta = probe_plugin_fallback(Path::new("/plugins/My Reverb.vst3"), PluginFormat::Vst3);
-        assert_eq!(meta.name, "My Reverb");
-        assert_eq!(meta.id, "vst3.my_reverb");
+        let meta = probe_plugin_fallback(Path::new("/plugins/My Reverb.vst3"));
+        assert_eq!(meta.descriptor.name, "My Reverb");
+        assert_eq!(meta.id, None, "a file name holds no id");
     }
 
     /// The consequence rather than the classification: once a crash is
@@ -1278,9 +1292,9 @@ mod tests {
 
     // New tests.
 
-    fn two_plugins(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
-        let first = probe_plugin_fallback(path, PluginFormat::Clap);
-        let second = PluginDescriptor::new("second", "Second", PluginClass::Unknown);
+    fn two_plugins(path: &Path) -> Result<Vec<Described>, ProbeFailure> {
+        let first = probe_plugin_fallback(path);
+        let second = described("second");
         Ok(vec![first, second])
     }
 
@@ -1298,8 +1312,8 @@ mod tests {
         scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
 
         assert_eq!(db.len(), 1, "one file, one row");
-        let ids: Vec<_> = db.plugins().map(|p| p.descriptor.id.clone()).collect();
-        assert_eq!(ids, ["clap.bundle", "second"]);
+        let names: Vec<_> = db.plugins().map(|p| p.descriptor.name.clone()).collect();
+        assert_eq!(names, ["bundle", "second"]);
         assert!(db.plugins().all(|p| p.path == bundle));
     }
 
@@ -1425,11 +1439,11 @@ mod tests {
         let fatal = create_fake_plugin(&plugins_dir, "fatal.clap");
         let pedal_file = dir.path().join(".scanning");
 
-        let dying = Scanner::new(pedal_file.clone(), |path, format, _| {
+        let dying = Scanner::new(pedal_file.clone(), |path, _, _| {
             if path.ends_with("fatal.clap") {
                 panic!("the host went down inside the plugin");
             }
-            Ok(vec![probe_plugin_fallback(path, format)])
+            Ok(vec![probe_plugin_fallback(path)])
         });
         let mut before = PluginDb::new();
         let scan = dying.spawn(&mut before, [&plugins_dir], no_save).unwrap();
@@ -1486,7 +1500,7 @@ mod tests {
                 mtime: Some(at(old)),
                 ..FileFacts::read(p)
             };
-            let stale = vec![PluginDescriptor::new("old", "old", PluginClass::Unknown)];
+            let stale = vec![described("old")];
             db.apply(RowChange::put(
                 p,
                 FileRow::probed(PluginFormat::Clap, &facts, stale),
@@ -1501,11 +1515,7 @@ mod tests {
                 parked_tx.send(path.to_path_buf()).unwrap();
                 release_rx.recv_timeout(HANG_GUARD).unwrap();
             }
-            Ok(vec![PluginDescriptor::new(
-                "new",
-                "new",
-                PluginClass::Unknown,
-            )])
+            Ok(vec![described("new")])
         });
         let scan = scanner.spawn(&mut db, [&plugins_dir], no_save).unwrap();
 
@@ -1524,7 +1534,7 @@ mod tests {
         db.unblacklist(Path::new("/elsewhere.vst3"));
         let whole = |db: &PluginDb, path: &Path| {
             let row = db.row(path).unwrap();
-            let name = row.plugins()[0].name.as_str();
+            let name = row.plugins()[0].descriptor.name.as_str();
             matches!((row.mtime, name), (Some(t), "old") if t == at(old))
                 || matches!((row.mtime, name), (Some(t), "new") if t == at(new))
         };
@@ -1572,7 +1582,7 @@ mod tests {
     /// parked, a sender that releases it, and the probe count.
     fn gated_scanner(
         dir: &Path,
-        answer: fn(&Path) -> Result<Vec<PluginDescriptor>, ProbeFailure>,
+        answer: fn(&Path) -> Result<Vec<Described>, ProbeFailure>,
     ) -> (
         Scanner,
         crossbeam_channel::Receiver<PathBuf>,
@@ -1593,7 +1603,7 @@ mod tests {
         (scanner, parked_rx, release_tx, calls)
     }
 
-    fn environmental(_: &Path) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
+    fn environmental(_: &Path) -> Result<Vec<Described>, ProbeFailure> {
         Err(ProbeError::ProbeNotFound.into())
     }
 
@@ -1776,7 +1786,7 @@ mod tests {
         let recorded = Arc::clone(&seen);
         let scanner = Scanner::new(dir.path().join(".scanning"), move |path, format, _| {
             recorded.lock().unwrap().push(format);
-            Ok(vec![probe_plugin_fallback(path, format)])
+            Ok(vec![probe_plugin_fallback(path)])
         });
         let mut db = PluginDb::new();
 

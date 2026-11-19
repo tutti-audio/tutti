@@ -296,7 +296,6 @@ impl Shared {
 
     fn descriptor() -> PluginDescriptor {
         PluginDescriptor {
-            id: "fake".into(),
             name: "Fake".into(),
             ..PluginDescriptor::default()
         }

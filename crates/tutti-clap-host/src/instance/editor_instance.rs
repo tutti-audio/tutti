@@ -5,12 +5,10 @@
 //! the plugin server: the host mirrors parameters and state into it and
 //! collects the edits the user makes in it.
 
-use std::path::Path;
-
 use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProc, Load, MainThreadMarker, MainWorkHandle, ParamEdit, ParamMapping, PluginError,
+    InProc, MainThreadMarker, MainWorkHandle, ParamEdit, ParamMapping, PluginError, PluginRef,
     PluginResult, Request, RescanScope, WindowHandle,
 };
 use tutti_units::Normalized;
@@ -48,10 +46,9 @@ impl ClapEditor {
     pub(crate) fn load(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self> {
-        let inner = ClapLoaded::load_in_process(main, work, path, load)?;
+        let inner = ClapLoaded::load_in_process(main, work, plugin)?;
         Ok(Self {
             inner,
             asked: Vec::new(),

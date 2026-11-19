@@ -18,7 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::path::{Path, PathBuf};
 
 /// The version of the record layout [`PluginDb`] serializes and deserializes.
-pub const DB_VERSION: u64 = 5;
+pub const DB_VERSION: u64 = 6;
 
 /// Why a record is not a database this version can read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -203,8 +203,8 @@ mod tests {
     use crate::facts::FileFacts;
     use crate::table::FileState;
     use tutti_plugin_types::{
-        LatencyVerdict, MaxBlock, Measured, NotChecked, PROBE_FLOOR, PluginClass, PluginDescriptor,
-        PluginFormat, ProbeConfig, StateHash, TailVerdict, Verdict,
+        Described, LatencyVerdict, MaxBlock, Measured, NotChecked, PROBE_FLOOR, PluginClass,
+        PluginDescriptor, PluginFormat, PluginId, ProbeConfig, StateHash, TailVerdict, Verdict,
     };
     use tutti_units::{Db, SampleRate, Samples};
 
@@ -219,7 +219,10 @@ mod tests {
         FileRow::probed(
             PluginFormat::Vst3,
             &facts,
-            vec![PluginDescriptor::new(name, name, PluginClass::Unknown)],
+            vec![Described::new(
+                PluginId::Clap(name.into()),
+                PluginDescriptor::new(name, PluginClass::Unknown),
+            )],
         )
     }
 
@@ -264,7 +267,7 @@ mod tests {
         let FileState::Probed { plugins, .. } = &mut row.state else {
             unreachable!("a probed row");
         };
-        plugins[0].measured = Some(measured);
+        plugins[0].descriptor.measured = Some(measured);
         row
     }
 

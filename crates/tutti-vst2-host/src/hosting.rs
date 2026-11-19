@@ -5,8 +5,8 @@ use std::path::Path;
 
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{
-    Describe, InProc, Load, LoadStage, MainThreadMarker, MainWorkHandle, Origin, PluginDescriptor,
-    PluginError, PluginResult,
+    Describe, InProc, MainThreadMarker, MainWorkHandle, PluginDescriptor, PluginFormat, PluginId,
+    PluginRef, PluginResult,
 };
 
 use crate::control::plugin_error;
@@ -15,32 +15,25 @@ use crate::loaded::Vst2Loaded;
 impl InProc for Vst2Loaded {
     /// # Errors
     ///
-    /// Also refuses a [`Load::plugin`] that is not `vst2.<uniqueID>` of a plugin the
-    /// file holds: a shell's sub-plugin, or the one plugin of a file that is no shell.
+    /// Also refuses a chosen plugin that is not a VST2 id of a plugin the file
+    /// holds: a shell's sub-plugin, or the one plugin of a file that is no shell.
     fn load_in_process(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self> {
-        let module = native_module_path(path, ModuleKind::Vst2)?;
-        match load.chosen() {
-            None => Vst2Loaded::load(main, work, &module),
-            Some(chosen) => {
-                let id = chosen
-                    .strip_prefix("vst2.")
-                    .and_then(|n| n.parse::<i32>().ok())
-                    .ok_or_else(|| PluginError::Load {
-                        stage: LoadStage::Opening,
-                        reason: format!("`{chosen}` is not a VST2 plugin id (`vst2.<uniqueID>`)"),
-                    })?;
-                Vst2Loaded::load_plugin(main, work, &module, id)
+        let module = native_module_path(plugin.path(), ModuleKind::Vst2)?;
+        match plugin.id_for(PluginFormat::Vst2)? {
+            Some(PluginId::Vst2(id)) => {
+                // the plugin's unique id is signed; the id holds its bits.
+                Vst2Loaded::load_plugin(main, work, &module, *id as i32)
             }
+            _ => Vst2Loaded::load(main, work, &module),
         }
         .map_err(plugin_error)
     }
 
-    fn origin(&self) -> &Origin {
+    fn origin(&self) -> &PluginRef {
         &self.origin
     }
 
@@ -51,7 +44,10 @@ impl InProc for Vst2Loaded {
 
 impl Describe for Vst2Loaded {
     /// A load of the file (init runs, no resume), and of each sub-plugin of a shell.
-    fn describe(main: MainThreadMarker, path: &Path) -> PluginResult<Vec<PluginDescriptor>> {
+    fn describe(
+        main: MainThreadMarker,
+        path: &Path,
+    ) -> PluginResult<Vec<(PluginId, PluginDescriptor)>> {
         Vst2Loaded::describe_all(main, path).map_err(plugin_error)
     }
 }

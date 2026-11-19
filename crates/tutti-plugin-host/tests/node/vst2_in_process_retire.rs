@@ -15,7 +15,6 @@
 
 use std::path::PathBuf;
 use tutti_buffers::MaxBlock;
-use tutti_plugin_types::Load;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::NodeKey;
@@ -58,8 +57,7 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
     let (unit, handle) = load_client::<Vst2Loaded, f32>(
         main,
         &tutti_fixtures::pumped_work(),
-        &path,
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(&path),
         SampleRate::of(RATE),
     )
     .expect("the probe loads in process");

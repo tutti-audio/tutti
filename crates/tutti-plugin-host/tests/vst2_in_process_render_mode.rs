@@ -29,7 +29,6 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use tutti_buffers::Planes;
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
 use tutti_vst2_host::Vst2Loaded;
 
@@ -122,8 +121,7 @@ fn load() -> Loaded {
     let (unit, handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        &path,
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(&path),
         SampleRate::of(SAMPLE_RATE),
     )
     .unwrap_or_else(|e| panic!("in-process load of reference plugin at {path:?}: {e:?}"));

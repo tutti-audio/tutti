@@ -20,8 +20,6 @@ use crate::{ClapFeature, PluginRole, PluginVersion, Vst3SubCategories};
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PluginDescriptor {
-    /// Stable plugin id (also the database/dedup/blacklist key).
-    pub id: String,
     /// Display name.
     pub name: String,
     /// Vendor / author string (may be empty).
@@ -63,6 +61,32 @@ pub struct PluginDescriptor {
     // which has no defaults: its magic carries the version.)
     #[cfg_attr(feature = "serde", serde(default))]
     pub measured: Option<crate::Measured>,
+}
+
+/// One plugin a file holds, as a scan read it: the id the format names it by,
+/// and its descriptor.
+///
+/// The id is `None` for a plugin the scan could not read, one listed by its
+/// file name alone: it names the file's first plugin, as
+/// [`PluginRef::file`](crate::PluginRef::file) does.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Described {
+    /// The format's own id for the plugin; `None` for a file-name listing.
+    pub id: Option<crate::PluginId>,
+    /// What the scan read of it.
+    pub descriptor: PluginDescriptor,
+}
+
+impl Described {
+    /// The plugin `id` with its `descriptor`.
+    #[must_use]
+    pub fn new(id: crate::PluginId, descriptor: PluginDescriptor) -> Self {
+        Self {
+            id: Some(id),
+            descriptor,
+        }
+    }
 }
 
 /// Whether a plugin has an editor, and whether anyone has actually looked.
@@ -124,12 +148,11 @@ impl PluginDescriptor {
         self.editor.is_present()
     }
 
-    /// Creates a descriptor with an id, name and class; the vendor is empty, the
+    /// Creates a descriptor with a name and class; the vendor is empty, the
     /// version is [`PluginVersion::Absent`] and [`editor`](Self::editor) is
     /// [`EditorPresence::Unknown`].
-    pub fn new(id: impl Into<String>, name: impl Into<String>, class: PluginClass) -> Self {
+    pub fn new(name: impl Into<String>, class: PluginClass) -> Self {
         Self {
-            id: id.into(),
             name: name.into(),
             vendor: String::new(),
             version: PluginVersion::Absent,
@@ -216,6 +239,39 @@ impl PluginClass {
 }
 
 impl AuComponentType {
+    /// The four-character code of this type (`aufx` for [`Effect`](Self::Effect)).
+    #[must_use]
+    pub const fn code(self) -> u32 {
+        match self {
+            Self::Effect => u32::from_be_bytes(*b"aufx"),
+            Self::Instrument => u32::from_be_bytes(*b"aumu"),
+            Self::Generator => u32::from_be_bytes(*b"augn"),
+            Self::MusicEffect => u32::from_be_bytes(*b"aumf"),
+            Self::Mixer => u32::from_be_bytes(*b"aumx"),
+            Self::Converter => u32::from_be_bytes(*b"aufc"),
+            Self::Output => u32::from_be_bytes(*b"auou"),
+            Self::MidiProcessor => u32::from_be_bytes(*b"aumi"),
+            Self::Unknown(code) => code,
+        }
+    }
+
+    /// The type a four-character code names, [`Unknown`](Self::Unknown) for a
+    /// code this enum does not name.
+    #[must_use]
+    pub const fn from_code(code: u32) -> Self {
+        match code.to_be_bytes() {
+            [b'a', b'u', b'f', b'x'] => Self::Effect,
+            [b'a', b'u', b'm', b'u'] => Self::Instrument,
+            [b'a', b'u', b'g', b'n'] => Self::Generator,
+            [b'a', b'u', b'm', b'f'] => Self::MusicEffect,
+            [b'a', b'u', b'm', b'x'] => Self::Mixer,
+            [b'a', b'u', b'f', b'c'] => Self::Converter,
+            [b'a', b'u', b'o', b'u'] => Self::Output,
+            [b'a', b'u', b'm', b'i'] => Self::MidiProcessor,
+            _ => Self::Unknown(code),
+        }
+    }
+
     /// Returns the role this component type describes.
     ///
     /// `MusicEffect` (`aumf`) is an **effect**: it takes MIDI *and* audio, so
@@ -307,7 +363,7 @@ mod tests {
     fn a_defaulted_descriptor_claims_nothing_about_its_editor() {
         assert_eq!(PluginDescriptor::default().editor, EditorPresence::Unknown);
         assert_eq!(
-            PluginDescriptor::new("id", "name", PluginClass::Unknown).editor,
+            PluginDescriptor::new("name", PluginClass::Unknown).editor,
             EditorPresence::Unknown
         );
     }
@@ -322,7 +378,7 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn a_catalog_record_without_the_field_still_loads() {
-        let old = r#"{"id":"au.appl.dely","name":"AUDelay","vendor":"Apple",
+        let old = r#"{"name":"AUDelay","vendor":"Apple",
                       "version":{"Text":"1.6.0"},"class":"Unknown"}"#;
         let d: PluginDescriptor = serde_json::from_str(old).expect(
             "a record written before `editor` existed must still parse — the \
@@ -344,7 +400,7 @@ mod tests {
             EditorPresence::Absent,
             EditorPresence::Present,
         ] {
-            let mut d = PluginDescriptor::new("id", "name", PluginClass::Unknown);
+            let mut d = PluginDescriptor::new("name", PluginClass::Unknown);
             d.editor = want;
             let bytes = postcard::to_allocvec(&d).expect("serialize");
             let back: PluginDescriptor = postcard::from_bytes(&bytes).expect("deserialize");

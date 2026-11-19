@@ -10,7 +10,7 @@
 //! crashed or hung, to the host that spawned it. `--state <file>` puts one plugin
 //! in the state the file holds (what the plugin's own `save_state` wrote) before it
 //! is measured, so the figure is of that patch: the record carries a hash of it.
-//! The plugin is the one `--plugin` names by descriptor id, else the file's only
+//! The plugin is the one `--plugin` names by its id (`PluginId`'s text, `clap.<id>`), else the file's only
 //! plugin (a state with no plugin named for a file of several is refused); the
 //! others are measured as they load. `--budget` bounds the whole run: each
 //! plugin's renders get what the budget leaves, so a slow plugin times out its own
@@ -102,7 +102,7 @@ fn main() -> ExitCode {
                 .as_deref()
                 .zip(named.as_ref())
                 .map(|(bytes, named)| StateFor {
-                    plugin: named.plugin.as_deref(),
+                    plugin: named.plugin.as_ref(),
                     bytes,
                 });
             describe_measured(main, &path, format, state, run)

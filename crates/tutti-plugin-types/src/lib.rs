@@ -213,6 +213,7 @@ mod param_mapping;
 mod param_unit;
 mod parameters;
 mod pipeline;
+mod plugin_ref;
 mod points;
 mod presets;
 #[cfg(feature = "probe-wire")]
@@ -269,21 +270,22 @@ pub use c_string::{
 };
 pub use channels::{ChannelTable, MAX_BLOCK_CHANNELS, PluginTooWide, sanitize, silence};
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
-pub use descriptor::{AuComponentType, EditorPresence, PluginClass, PluginDescriptor};
+pub use descriptor::{AuComponentType, Described, EditorPresence, PluginClass, PluginDescriptor};
 pub use driver::{Hand, Lifecycle, Seat, Successor};
 pub use editor::{
     AspectRatio, ContentScale, EditorCapabilities, EditorError, EditorUnit, InvalidContentScale,
     KeyEvent, KeyUse, ModifierConvention, ResizeHints, WindowHandle,
 };
 pub use failure::{PluginFailure, TerminationReason};
-pub use format::{PluginFormat, PluginId, UnknownExtension};
+pub use format::{FourCc, PluginFormat, PluginId, PluginIdError, Uid, UnknownExtension};
 pub use guard::{contained_panics, ffi_guard};
 pub use host::{
     Control, Controller, Loaded, PluginIo, Processor, Refused, Stuck, Wraps, process_block,
 };
-pub use hosting::{Describe, Editor, EditorWindow, InProc, Load, Origin, OutOfProcess, Reopen};
+pub use hosting::{Describe, Editor, EditorWindow, InProc, OutOfProcess, Reopen};
 pub use invalidation::{PluginInvalidation, PluginRefresh, ResyncClass, ResyncKind};
 pub use order::{StableOrder, insertion_sort_by_key};
+pub use plugin_ref::{PluginRef, canonical_path};
 pub use points::{PointBuf, PointPool};
 pub use process_wake::ProcessWake;
 pub use requests::{Edit, EditDrain, EditQueue, EditSink, edits, taken};

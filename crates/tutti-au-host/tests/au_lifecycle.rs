@@ -19,7 +19,7 @@ use tutti_au_host::component::{AuComponentRef, find_component};
 use tutti_au_host::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::{Load, MainWork, MaxBlock, Prepare, SampleRate};
+use tutti_plugin_types::{MainWork, MaxBlock, PluginRef, Prepare, SampleRate};
 use tutti_units::Samples;
 
 fn find_apple_delay() -> Option<AuComponentRef> {
@@ -685,8 +685,12 @@ fn an_in_process_au_dropped_while_rendered_is_disposed_by_the_control_tick() {
     let loaded = AuLoaded::load(
         main,
         &handle,
-        &tutti_fixtures::au_bundle(),
-        &Load::new().plugin(tutti_shared_plugin::AU_ID),
+        &PluginRef::new(
+            tutti_fixtures::au_bundle(),
+            tutti_shared_plugin::AU_ID
+                .parse()
+                .expect("the shared AU's id is an AU id"),
+        ),
     )
     .expect("the shared AU loads");
     let prepare = Prepare::new(SampleRate::of(48_000.0), MaxBlock::of(Samples::new(FRAMES)));

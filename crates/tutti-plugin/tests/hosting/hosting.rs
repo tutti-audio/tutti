@@ -18,8 +18,7 @@ fn a_vst2_plugin_asked_for_out_of_process_is_refused_at_load() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", "/nonexistent/plugin-server");
     for name in ["Synth.vst", "Legacy.dll", "Old.so"] {
-        let plugin = Loadable::uncatalogued(PluginRef::file(name).expect("a plugin file"))
-            .hosting(Hosting::OutOfProcess);
+        let plugin = Loadable::uncatalogued(PluginRef::file(name)).hosting(Hosting::OutOfProcess);
         match Plugin::open(
             None,
             &tutti_fixtures::detached_work(),
@@ -38,10 +37,7 @@ mod clap {
     use super::*;
 
     fn clap(hosting: Hosting) -> Loadable {
-        Loadable::uncatalogued(
-            PluginRef::file(tutti_fixtures::clap_probe()).expect("a plugin file"),
-        )
-        .hosting(hosting)
+        Loadable::uncatalogued(PluginRef::file(tutti_fixtures::clap_probe())).hosting(hosting)
     }
 
     fn with_server() -> tutti_fixtures::ScopedEnv {
@@ -114,8 +110,13 @@ mod clap {
         assert_eq!(plugin.hosting(), Hosting::InProcess);
         assert_eq!(plugin.handle().server_pid(), None);
         assert_eq!(
-            plugin.descriptor().id,
-            tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8")
+            plugin.plugin().id(),
+            Some(&tutti_plugin::catalog::PluginId::Clap(
+                tutti_clap_test_plugin::PLUGIN_ID
+                    .to_str()
+                    .expect("utf-8")
+                    .into()
+            ))
         );
     }
 }
@@ -131,7 +132,7 @@ fn auto_hosts_a_vst2_plugin_in_process() {
     let plugin = Plugin::open(
         Some(main),
         &tutti_fixtures::detached_work(),
-        &Loadable::uncatalogued(PluginRef::file(&staged).expect("a plugin file")),
+        &Loadable::uncatalogued(PluginRef::file(&staged)),
         SampleRate::of(RATE),
     )
     .expect("the reference VST2 plugin loads in this process");

@@ -47,7 +47,7 @@ mod clap {
 
     fn loaded(layout: Option<&str>) -> (Session, Key<AnyPlugin>) {
         // The plugin's file is probed before its variables are set.
-        crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
+        crate::pooled::prime(&PluginRef::file(clap_probe()));
         set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         if let Some(layout) = layout {
             set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);
@@ -56,7 +56,7 @@ mod clap {
         let node = s
             .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+                Spec::new(PluginRef::file(clap_probe())),
             )
             .expect("the reference CLAP plugin loads");
         (s, node)
@@ -203,10 +203,7 @@ mod vst2 {
         let node = s
             .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                Spec::new(
-                    PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())
-                        .expect("a plugin file"),
-                ),
+                Spec::new(PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())),
             )
             .expect("the in-process VST2 loads");
         s.graph().connect(node, Root).unwrap();

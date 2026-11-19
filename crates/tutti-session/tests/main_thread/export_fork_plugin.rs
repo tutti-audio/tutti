@@ -97,7 +97,7 @@ fn session_with_probe_at(
     hosting: Hosting,
 ) -> (DetachedSession, NodeKey, ScopedEnv) {
     // The plugin's file is probed before its variables are set.
-    crate::pooled::prime(&PluginRef::file(&path).expect("a plugin file"));
+    crate::pooled::prime(&PluginRef::file(&path));
     let mut env = ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     env.set("TUTTI_CLAP_PROBE_RENDER_MODE", mode.to_string());
@@ -123,7 +123,7 @@ fn session_with_probe_at(
     let probe = session
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            Spec::new(PluginRef::file(path).expect("a plugin file")).hosting(hosting),
+            Spec::new(PluginRef::file(path)).hosting(hosting),
         )
         .expect("the reference CLAP plugin loads");
     session.graph().connect(probe, Root).unwrap();

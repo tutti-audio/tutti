@@ -12,7 +12,9 @@ use crate::facts::{self, FileFacts};
 use crate::mtime::Mtime;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginRole};
+use tutti_plugin_types::{
+    Described, PluginDescriptor, PluginFormat, PluginId, PluginRef, PluginRole,
+};
 
 /// What the database knows about one plugin file.
 #[derive(Debug, Clone, PartialEq)]
@@ -41,7 +43,7 @@ pub enum FileState {
         /// of a CLAP factory, every audio class of a VST3 factory, every unit
         /// of an AU bundle, every sub-plugin of a VST2 shell; one for any other
         /// file.
-        plugins: Vec<PluginDescriptor>,
+        plugins: Vec<Described>,
     },
     /// The file brought a scan down and will not be opened.
     Blacklisted {
@@ -53,7 +55,7 @@ pub enum FileState {
 impl FileRow {
     /// The row for a file that probed into `plugins`, stamped with `facts`' time.
     #[must_use]
-    pub fn probed(format: PluginFormat, facts: &FileFacts, plugins: Vec<PluginDescriptor>) -> Self {
+    pub fn probed(format: PluginFormat, facts: &FileFacts, plugins: Vec<Described>) -> Self {
         Self {
             mtime: facts.mtime,
             state: FileState::Probed { format, plugins },
@@ -73,7 +75,7 @@ impl FileRow {
 
     /// The format and plugins of a probed file; `None` when it is blacklisted.
     #[must_use]
-    pub fn probe_result(&self) -> Option<(PluginFormat, &[PluginDescriptor])> {
+    pub fn probe_result(&self) -> Option<(PluginFormat, &[Described])> {
         match &self.state {
             FileState::Probed { format, plugins } => Some((*format, plugins)),
             FileState::Blacklisted { .. } => None,
@@ -82,7 +84,7 @@ impl FileRow {
 
     /// The plugins the file holds; none when it is blacklisted.
     #[must_use]
-    pub fn plugins(&self) -> &[PluginDescriptor] {
+    pub fn plugins(&self) -> &[Described] {
         self.probe_result().map_or(&[], |(_, plugins)| plugins)
     }
 
@@ -167,11 +169,24 @@ pub struct PluginEntry<'a> {
     pub path: &'a Path,
     /// Which format's loader opens it.
     pub format: PluginFormat,
+    /// The format's own id for it; `None` for a plugin listed by its file name
+    /// alone (a scan whose probe was unavailable), which names the file's first
+    /// plugin.
+    pub id: Option<&'a PluginId>,
     /// What the probe reported.
     pub descriptor: &'a PluginDescriptor,
 }
 
 impl PluginEntry<'_> {
+    /// The plugin as a ref: its file and id.
+    #[must_use]
+    pub fn plugin_ref(&self) -> PluginRef {
+        match self.id {
+            Some(id) => PluginRef::new(self.path, id.clone()),
+            None => PluginRef::file(self.path),
+        }
+    }
+
     /// What the plugin is (instrument, effect, ...), normalized across formats.
     #[must_use]
     pub fn role(&self) -> PluginRole {
@@ -265,10 +280,11 @@ impl PluginDb {
                     .map(|(format, plugins)| (path, format, plugins))
             })
             .flat_map(|(path, format, plugins)| {
-                plugins.iter().map(move |descriptor| PluginEntry {
+                plugins.iter().map(move |plugin| PluginEntry {
                     path,
                     format,
-                    descriptor,
+                    id: plugin.id.as_ref(),
+                    descriptor: &plugin.descriptor,
                 })
             })
     }
@@ -368,7 +384,10 @@ mod tests {
         FileRow::probed(
             PluginFormat::Vst3,
             &facts(mtime),
-            vec![PluginDescriptor::new("id", "name", PluginClass::Unknown)],
+            vec![Described {
+                id: Some(PluginId::Vst2(1)),
+                descriptor: PluginDescriptor::new("name", PluginClass::Unknown),
+            }],
         )
     }
 
@@ -466,7 +485,12 @@ mod tests {
     /// A file may hold several plugins and each is listed under the file's path.
     #[test]
     fn a_file_with_several_plugins_lists_each() {
-        let ids = ["a", "b"].map(|n| PluginDescriptor::new(n, n, PluginClass::Unknown));
+        let ids = [1, 2].map(|n| {
+            Described::new(
+                PluginId::Vst2(n),
+                PluginDescriptor::new(["a", "b"][n as usize - 1], PluginClass::Unknown),
+            )
+        });
         let db = db_with(
             "/p/shell.vst3",
             FileRow::probed(PluginFormat::Vst3, &facts(T), ids.to_vec()),

@@ -18,7 +18,7 @@ use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, read_frame, socket_name, write_frame};
-use tutti_plugin_types::{Load, PluginFormat, SampleRate};
+use tutti_plugin_types::{PluginFormat, PluginId, SampleRate};
 
 /// Kills the server if the test fails before it shuts it down.
 struct Server(Child);
@@ -51,21 +51,21 @@ fn connect(socket: &Path, server: &mut Server) -> Stream {
 }
 
 fn load(stream: &mut Stream, path: &Path, format: PluginFormat) -> BridgeMessage {
-    load_choosing(stream, path, format, Load::new())
+    load_choosing(stream, path, format, None)
 }
 
 fn load_choosing(
     stream: &mut Stream,
     path: &Path,
     format: PluginFormat,
-    load: Load,
+    plugin: Option<PluginId>,
 ) -> BridgeMessage {
     write_frame(
         stream,
         &HostMessage::LoadPlugin {
             path: path.to_path_buf(),
             format,
-            load,
+            plugin,
             sample_rate: SampleRate::SR_48K,
             block_size: 512,
             preferred_format: FloatWidth::F32,
@@ -154,14 +154,14 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
 
 /// **A load that chooses a plugin of a file that exports several loads that
 /// one, through the real `plugin-server`** (the choice crosses the wire in
-/// `LoadPlugin::load`, protocol 28). The reference CLAP file is a factory of
+/// `LoadPlugin::plugin`). The reference CLAP file is a factory of
 /// two: the first without a choice, the second when named.
 #[test]
 fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
     let (_not_a_plugin, good) = fixtures();
     let (server, mut stream) = start_server();
     let id_of = |reply: BridgeMessage| match reply {
-        BridgeMessage::PluginLoaded { descriptor, .. } => descriptor.id,
+        BridgeMessage::PluginLoaded { id, .. } => id,
         other => panic!("expected PluginLoaded, got {other:?}"),
     };
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID
@@ -170,7 +170,12 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
 
     assert_eq!(
         id_of(load(&mut stream, &good, PluginFormat::Clap)),
-        tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8"),
+        PluginId::Clap(
+            tutti_clap_test_plugin::PLUGIN_ID
+                .to_str()
+                .expect("utf-8")
+                .into()
+        ),
         "no choice loads the first plugin"
     );
     assert_eq!(
@@ -178,9 +183,9 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
             &mut stream,
             &good,
             PluginFormat::Clap,
-            Load::new().plugin(second)
+            Some(PluginId::Clap(second.into()))
         )),
-        second,
+        PluginId::Clap(second.into()),
         "the named plugin loads, not the first"
     );
 

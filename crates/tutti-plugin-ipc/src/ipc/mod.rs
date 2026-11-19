@@ -53,9 +53,9 @@ use tutti_rt::LockExt;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     BridgeError, BridgeResult, ChunkCounters, Controller, LoadStage, Loaded, LoadedPlugin,
-    MainThreadMarker, Origin, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
-    PluginDescriptor, PluginError, PluginFormat, PluginResult, PluginTail, Prepare, PresetId,
-    ProcessWake, Refused, Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples,
+    MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
+    PluginDescriptor, PluginError, PluginFormat, PluginRef, PluginResult, PluginTail, Prepare,
+    PresetId, ProcessWake, Refused, Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples,
     StateError, StateUse, Stuck, Widths,
 };
 use tutti_rt::AtomicSampleRate;
@@ -75,7 +75,7 @@ pub struct IpcOrigin {
     /// The launch's configuration. A reopen gives it a socket of its own.
     pub config: BridgeConfig,
     /// The plugin file, and which plugin of it the first launch chose.
-    pub origin: Origin,
+    pub origin: PluginRef,
     /// The format that opens it, as the first launch named it.
     pub format: PluginFormat,
     /// Loads the editor-only instance, as the first launch's did; `None`
@@ -555,12 +555,10 @@ impl Ipc {
         load_editor: Option<EditorLoader>,
     ) -> BridgeResult<Launched> {
         let server = launch(&config, request)?;
-        let LoadRequest {
-            origin,
-            format,
-            rate,
-            ..
-        } = *request;
+        let LoadRequest { format, rate, .. } = *request;
+        // The plugin the server opened, so a reopen and the editor instance
+        // load that one, though the request chose none.
+        let origin = &request.origin.identified(server.id.clone());
         let restored = server.state_restore.clone();
         // Guarded since the spawn: an `Err` from `PluginBridge::new` drops the
         // guard, which kills and reaps the child. The bridge shares the guard's
