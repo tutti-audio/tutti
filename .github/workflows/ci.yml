@@ -86,7 +86,7 @@ jobs:
       - run: cargo xtask check-paths tutti_curve envelope law
       - run: cargo xtask check-paths tutti_buffers convert error i24 interleaved mono planes sample
       - run: cargo xtask check-paths tutti_voicing controller holds phase voicing
-      - run: cargo xtask check-paths tutti_rt cell denormals doorbell drain_clock job_gate level_cell packed_atomic pos_ring request_word scope seq_cell spin split task_graph vec
+      - run: cargo xtask check-paths tutti_rt cell denormals drain_clock job_gate level_cell packed_atomic parker pos_ring request_word scope seq_cell spin split task_graph vec
       # Compares the SDK version the prose states against the commits the superproject records; a bumped submodule
       # otherwise shows as an unexplained C++ error in `audio-probe`.
       - run: cargo xtask check-submodule-pins
@@ -576,13 +576,13 @@ jobs:
     name: loom (${{ matrix.group }})
     needs: changes
     if: needs.changes.outputs.loom == 'true' && needs.changes.outputs.full == 'true'
-    # Three runners: `pos_ring_loom` and `doorbell_loom` were most of the runtime. Every model runs, at the same
+    # Three runners: `pos_ring_loom` and `parker_loom` were most of the runtime. Every model runs, at the same
     # bound, in exactly one group. Release builds, since loom explores every interleaving in-process; `--cfg loom`
     # is global, so each model builds for its own target, never the workspace.
     strategy:
       fail-fast: false
       matrix:
-        group: [pos_ring, doorbell, rest]
+        group: [pos_ring, parker, rest]
     runs-on: ubuntu-24.04
     # About 12 minutes; a model that stops terminating fails here.
     timeout-minutes: 25
@@ -617,8 +617,8 @@ jobs:
       - if: matrix.group == 'rest'
         run: cargo test --locked -p tutti-rt --release --test handoff_loom -- --nocapture
       # Unbounded (about 45 s): the variant its model guards against needs 4 preemptions.
-      - if: matrix.group == 'doorbell'
-        run: cargo test --locked -p tutti-rt --release --test doorbell_loom
+      - if: matrix.group == 'parker'
+        run: cargo test --locked -p tutti-rt --release --test parker_loom
       - if: matrix.group == 'rest'
         run: cargo test --locked -p tutti-plugin-ipc-ffi --release --lib loom_model
       # `LOOM_MAX_PREEMPTIONS=3` bounds the run to under a second; unbounded, the two-callback model ran past 60 s.

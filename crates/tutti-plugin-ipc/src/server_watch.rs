@@ -75,7 +75,7 @@ impl ServerWatch {
     }
 
     /// Has `wake` called when the latch is set, or at once when it is set
-    /// already: how a thread that waits on a descriptor or a doorbell, which
+    /// already: how a thread that waits on a descriptor or a bell, which
     /// [`wake`](Self::wake)'s gate does not reach, hears the server's end.
     /// Called on whichever thread declares, so it takes no lock and does not wait.
     pub(crate) fn on_declared(&self, wake: impl Fn() + Send + Sync + 'static) {
