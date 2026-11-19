@@ -54,8 +54,8 @@ use tutti_graph::fade_gains;
 use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventIn, EventOut, Executor, Fade, GraphInvalid, InletNode,
-    InletRing, IntoNode, MeterReader, MixError, ModeError, NodeMode, ParamIn, ParamMod, ParamRange,
-    Prepare, RenderMode, TapWriter,
+    InletRing, IntoNode, MeterReader, NodeMode, ParamIn, ParamMod, ParamRange, Prepare, RenderMode,
+    TapWriter,
 };
 use tutti_graph::{
     Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, Sink, Source,
@@ -80,7 +80,7 @@ pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 pub use testing::{AudioSide, Testing};
 
 use crate::key::{Bus, BusSink, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Wire};
-use crate::value::ValueTable;
+use crate::value::{ValueTable, Write};
 use crate::{
     ConnectError, Connection, Edge, EdgeGainError, EventInPort, EventOutPort, InPort, InletError,
     Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode,
@@ -774,6 +774,7 @@ impl<F: Float> Graph<F> {
         // A fresh key has no wiring recorded, so nothing is unwired.
         let controls = self.editor.insert(id, N::kind(), node).controls;
         self.nodes.insert(id, Entry { reclaimer: None });
+        self.note_pass(id);
         self.edited = true;
         (Key::new(id), controls)
     }
@@ -943,6 +944,7 @@ impl Graph {
         // A fresh key has no wiring recorded, so nothing is unwired.
         let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
         self.nodes.insert(node, Entry { reclaimer: None });
+        self.note_pass(node);
         self.plugins.insert(node, hosted);
         self.write_own_bypass(node);
         self.edited = true;
@@ -1323,6 +1325,7 @@ impl<F: Float> Graph<F> {
             self.values.retire(node);
             entry.reclaimer = None;
         }
+        self.note_pass(node);
         self.edited = true;
         Ok(controls)
     }
@@ -1913,6 +1916,7 @@ impl<F: Float> Graph<F> {
     pub fn remove(&mut self, node: impl Into<NodeKey>) -> Result<(), RemoveError> {
         let node = node.into();
         self.values.retire(node);
+        self.values.retire_node_controls(node);
         if self.nodes.remove(&node).is_none() {
             return Err(RemoveError::NoSuchNode(node));
         }
@@ -2772,40 +2776,47 @@ impl<F: Float> Graph<F> {
             .map(|s| (*s.buses_in(), *s.buses_out()))
     }
 
-    /// Sets `node`'s mode: [`NodeMode::Active`] renders it,
-    /// [`NodeMode::Bypassed`] passes its input through, delayed by its declared
-    /// latency so it stays in time with the rest of the graph, and
-    /// [`NodeMode::Muted`] silences its outputs while it keeps running. A change
-    /// fades over 256 frames, and a node coming back from a bypass is reset
-    /// first (doc 013, "Bypass and mute are graph state").
-    ///
-    /// A control, not an edit: the graph is not recompiled, the mode lands at
-    /// the next block, and the graph is not marked edited.
+    /// Records why `node` has no pass, if it has none, and whether it
+    /// bypasses itself: what its mode and mix targets check a write against.
+    /// Called wherever a node's shape is taken (an insert, a replacement).
+    fn note_pass(&self, node: NodeKey) {
+        let no_pass = self.editor.check_pass(node).err();
+        self.values
+            .provide_node_controls(node, no_pass, self.editor.bypasses_itself(node));
+    }
+
+    /// Hands the editor the controls written since the last call: each
+    /// node's mode and mix, as the editor's own
+    /// controls, which a running node reads from its next block with no
+    /// commit and no edit. A control whose node has since left the graph is
+    /// dropped.
     ///
     /// A hosted plugin with a bypass of its own is not bypassed by the
-    /// executor: the host writes the plugin's bypass in this call
+    /// executor: the host writes the plugin's bypass with the mode
     /// (`PluginHandle::set_bypassed`) and compares it on every control tick.
-    /// Off the main thread an in-process plugin's write is lost, and it is kept
-    /// only by a tick on the main thread.
-    ///
-    /// # Errors
-    ///
-    /// [`ModeError::NoSuchNode`] when `node` is not in the graph;
-    /// [`ModeError::Unplaced`] to bypass a node with no pass
-    /// ([`PassError`](crate::PassError): its buses do not say where its input
-    /// goes, so a bypass would have to guess); nothing changes.
-    pub fn set_mode(&mut self, node: impl Into<NodeKey>, mode: NodeMode) -> Result<(), ModeError> {
-        let node = node.into();
-        if self.editor.is_leaving(node) {
-            return Err(ModeError::NoSuchNode { node });
+    /// Off the main thread an in-process plugin's write is lost, and it is
+    /// kept only by a tick on the main thread.
+    pub(crate) fn apply_controls(&mut self) {
+        for write in self.values.take_writes() {
+            match write {
+                Write::Mode(node, mode) => {
+                    if self.editor.is_leaving(node) || self.editor.set_mode(node, mode).is_err() {
+                        continue;
+                    }
+                    // A plugin with a bypass of its own keeps running in
+                    // `Bypassed` (its node declares it), so its bypass is
+                    // written here, once per change. `set_bypassed` leaves a
+                    // plugin without one alone.
+                    #[cfg(feature = "plugin")]
+                    self.write_own_bypass(node);
+                }
+                Write::Mix(node, mix) => {
+                    if !self.editor.is_leaving(node) {
+                        let _ = self.editor.set_mix(node, mix);
+                    }
+                }
+            }
         }
-        self.editor.set_mode(node, mode)?;
-        // A plugin with a bypass of its own keeps running in `Bypassed` (its
-        // node declares it), so its bypass is written here, once per change.
-        // `set_bypassed` leaves a plugin without one alone.
-        #[cfg(feature = "plugin")]
-        self.write_own_bypass(node);
-        Ok(())
     }
 
     /// Writes the bypass of the plugin hosted at `node`, if any, to what the
@@ -2862,7 +2873,9 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// `node`'s mode, [`NodeMode::Active`] for a node never given one.
+    /// `node`'s mode as the editor holds it, [`NodeMode::Active`] for a node
+    /// never given one: [`ModeTarget`](crate::ModeTarget) holds the value a
+    /// write has just made, which the editor takes at the next update.
     ///
     /// # Errors
     ///
@@ -2874,39 +2887,9 @@ impl<F: Float> Graph<F> {
         Ok(self.editor.mode(node))
     }
 
-    /// Sets `node`'s blend with its own aligned input (doc 013, "Bypass and mute
-    /// are graph state"): `out = y * m + x̂ * (1 - m)` per channel, `y` being what
-    /// the node writes and `x̂` its input, delayed by its declared latency so the
-    /// two line up. [`Mix::WET`] is all of the node's output (the node as it
-    /// is, and the default), [`Mix::DRY`] all of the aligned input (what a
-    /// bypass passes, though the node keeps running). It gives any node, a
-    /// plugin included, a parallel-processing knob.
-    ///
-    /// A control, not an edit: the graph is not recompiled, the mix lands at the
-    /// next block and ramps across it, and the graph is not marked edited. A
-    /// node that is [`Bypassed`](NodeMode::Bypassed) or
-    /// [`Muted`](NodeMode::Muted) ignores the mix: the mode wins.
-    ///
-    /// A modulation route onto the mix (`Mods::route`
-    /// with a `MixRef`) has this as its base: `set_mix` is the one writer of
-    /// the mix, routed or not.
-    ///
-    /// # Errors
-    ///
-    /// [`MixError::NoSuchNode`] when `node` is not in the graph,
-    /// [`MixError::OutOfRange`] for a mix that is NaN or outside `0..=1` (make
-    /// one with [`Mix::new_clamped`]), [`MixError::Unplaced`] for a mix short of
-    /// [`Mix::WET`] on a node with no pass ([`PassError`](crate::PassError));
-    /// nothing changes.
-    pub fn set_mix(&mut self, node: impl Into<NodeKey>, mix: Mix) -> Result<(), MixError> {
-        let node = node.into();
-        if self.editor.is_leaving(node) {
-            return Err(MixError::NoSuchNode { node });
-        }
-        self.editor.set_mix(node, mix)
-    }
-
-    /// `node`'s mix, [`Mix::WET`] for a node never given one.
+    /// `node`'s mix as the editor holds it, [`Mix::WET`] for a node never given
+    /// one: [`MixTarget`](crate::MixTarget) holds the value a write has just
+    /// made, which the editor takes at the next update.
     ///
     /// Once the graph has committed the node this reads its live cell, which is
     /// also the knob of a modulation route onto the node's mix (`Mods::route`
@@ -3830,6 +3813,15 @@ pub trait ModKeys {
     }
     /// What feeds source `source`'s node.
     fn feed(&self, source: tutti_modulation::SourceKey) -> Option<tutti_nodes::Feed>;
+    /// The cell holding route `route`'s depth, when the host moves it between
+    /// applies: the route's lane reads the depth from it at every
+    /// evaluation, so a depth edit republishes no program. A host that
+    /// declares its depths with its routes leaves the default, which names
+    /// none.
+    fn depth(&self, route: tutti_modulation::RouteKey) -> Option<tutti_modulation::LiveDepth> {
+        let _ = route;
+        None
+    }
 }
 
 /// `tutti_nodes::ModHost` over the graph's nodes and the host's keys: a
@@ -3912,6 +3904,10 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
 
     fn feed(&self, source: tutti_modulation::SourceKey) -> Option<tutti_nodes::Feed> {
         self.keys.feed(source)
+    }
+
+    fn depth(&self, route: tutti_modulation::RouteKey) -> Option<tutti_modulation::LiveDepth> {
+        self.keys.depth(route)
     }
 }
 

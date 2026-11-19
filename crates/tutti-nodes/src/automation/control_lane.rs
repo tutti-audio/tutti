@@ -283,6 +283,8 @@ struct Seen {
     seq: Option<u64>,
     knob: Option<u64>,
     range: (u64, u64),
+    /// The program's depth cells, bit for bit (`ControlProgram::depth_bits`).
+    depths: u64,
     /// The frame after the last block, the transport and play clock at its
     /// last frame: how a seek between blocks is told from a roll.
     end: Option<(Frame, TransportPosition, PlayReading)>,
@@ -371,6 +373,7 @@ fn fresh_seen() -> Seen {
         seq: None,
         knob: None,
         range: (0, 0),
+        depths: 0,
         end: None,
     }
 }
@@ -473,7 +476,9 @@ impl ControlLaneNode {
     /// never a lend), the knob and the range, so it needs no read state of
     /// its own.
     fn fresh_over(s: &Shared, make: &Arc<MakeSegment>, native: bool) -> Self {
-        let program = s.program.current();
+        // Depth cells of its own, so a depth moved after the fork does not
+        // reach it.
+        let program = Arc::new(s.program.current().detached());
         let knob = s.knob.as_ref().map(ParamCell::detached);
         let range = match &s.range {
             RangeSource::None => RangeSource::None,
@@ -1040,6 +1045,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             s.unranged.fetch_add(1, Ordering::Relaxed);
         }
         let range_bits = (range.0.to_bits(), range.1.to_bits());
+        let depths = program.depth_bits();
         if seq != self.seen.seq {
             // A new program: forget every input it does not read, so a
             // source id a later program reuses starts from nothing, never from the
@@ -1052,7 +1058,8 @@ impl<F: Float> Node<F> for ControlLaneNode {
         }
         let changed = seq != self.seen.seq
             || knob.map(f64::to_bits) != self.seen.knob
-            || range_bits != self.seen.range;
+            || range_bits != self.seen.range
+            || depths != self.seen.depths;
         // A resync is a point at frame 0, never a glide (`LaneControls::resync`).
         let resync = s.resync.swap(false, Ordering::AcqRel);
         let t0 = cx.transport_at(Offset::ZERO);
@@ -1123,6 +1130,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             seq,
             knob: knob.map(f64::to_bits),
             range: range_bits,
+            depths,
             end: Some((
                 env.frame + Samples(len),
                 cx.transport_at(last),

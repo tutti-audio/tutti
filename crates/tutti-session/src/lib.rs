@@ -169,7 +169,8 @@ pub use edge::EdgeGainError;
 #[cfg(feature = "plugin")]
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
-    ConnectError, Error, HeardTapError, InletError, NoSuchNode, RemoveError, Result, TempoError,
+    ConnectError, DeclarationError, Error, HeardTapError, InletError, NoSuchNode, RemoveError,
+    Result, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -221,10 +222,9 @@ pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, SinkOptio
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
-    RouteInfo, RouteMut, RouteSpec, SourceInfo, SourceName, TargetName, declare_targets,
+    RouteInfo, RouteSpec, SourceInfo, SourceName, TargetName, declare_targets,
 };
 pub use node::{Reclaimer, Reclaims, SessionNode};
-pub use params::RangeError;
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
@@ -302,8 +302,7 @@ pub use tutti_graph::{
     BusError, BusRef, BusSource, Buses, HasParam, HasParams, MissingSource, ParamUnit, Scalar,
 };
 pub use tutti_graph::{
-    CloseError, CommitError, EventCapacity, Losses, MixError, ModeError, NodeMode, PassError,
-    Stamp, Wired, WiredMask,
+    CloseError, CommitError, EventCapacity, Losses, NodeMode, PassError, Stamp, Wired, WiredMask,
 };
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};
@@ -312,9 +311,10 @@ pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget, MeterTarget, Modify,
-    Moved, NodeSlots, ParamTarget, PolarityTarget, RateTarget, ScalarTarget, SetRefusal,
-    SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    DepthTarget, Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget,
+    MeterTarget, MixTarget, ModeTarget, Modify, Moved, NodeSlots, ParamTarget, PolarityTarget,
+    RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target, TargetInfo,
+    TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};

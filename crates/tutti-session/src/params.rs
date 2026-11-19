@@ -18,34 +18,10 @@
 
 use std::any::TypeId;
 
-use thiserror::Error;
 use tutti_graph::{HasParam, HasParams};
 use tutti_units::{UnitAddr, UnitParam};
 
 use crate::{Key, ParamTarget};
-
-/// Why `Mods::range` refused a range; nothing was
-/// stored.
-#[derive(Clone, Copy, Debug, PartialEq, Error)]
-#[non_exhaustive]
-pub enum RangeError {
-    /// A bound is NaN, so the range has no order.
-    #[error("a range needs numbers, not NaN: {min}..{max}")]
-    NotANumber {
-        /// The lower bound given.
-        min: f64,
-        /// The upper bound given.
-        max: f64,
-    },
-    /// The lower bound is above the upper: `min > max`.
-    #[error("the range is backwards: min {min} is above max {max}")]
-    MinAboveMax {
-        /// The lower bound given.
-        min: f64,
-        /// The upper bound given.
-        max: f64,
-    },
-}
 
 /// Generates a [`Key`]'s param methods, one pair per kind, from the kind's
 /// name.

@@ -22,9 +22,9 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_modulation::{
-    CompileError, Compiled, ControlProgram, Declarations, RouteDecl, RouteKey, RouteTarget,
-    SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl, TargetKey,
-    compile,
+    CompileError, Compiled, ControlProgram, Declarations, LayerId, LiveDepth, RouteDecl, RouteKey,
+    RouteTarget, SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl,
+    TargetKey, compile, layer_id,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{At, ParamAddr, ParamId};
@@ -50,6 +50,16 @@ pub trait ModHost {
     /// ([`Applied::unresolved_sources`]); a note envelope gets one with
     /// nothing on its MIDI input.
     fn feed(&self, source: SourceKey) -> Option<Feed>;
+
+    /// The cell holding route `route`'s depth, when the host moves it
+    /// between applies: the lane reads the depth from it at every
+    /// evaluation, so a depth edit republishes no program. `None`, the
+    /// default: the depth the route was declared with is the compiled one.
+    /// Only a route into a target (not a depth route) takes a cell.
+    fn depth(&self, route: RouteKey) -> Option<LiveDepth> {
+        let _ = route;
+        None
+    }
 }
 
 /// Where a target's lane delivers ([`ModHost::target`]).
@@ -722,12 +732,13 @@ impl Modulation {
         }
         self.memo = None;
         let now = editor.play_reading();
-        let compiled = compile(
+        let mut compiled = compile(
             decl,
             self.prev.as_ref(),
             now,
             editor.prepare().sample_rate(),
         )?;
+        attach_depths(&mut compiled, decl, host);
         let mut applied = Applied::default();
         let mut resolved = Vec::with_capacity(compiled.programs.len());
         let mut feeds = Vec::with_capacity(compiled.nodes.len());
@@ -1599,6 +1610,27 @@ fn unused_key<F: Float>(editor: &Editor<F>) -> NodeKey {
         let key = NodeKey::fresh();
         if !editor.spec().topology.nodes.contains_key(&key) {
             return key;
+        }
+    }
+}
+
+/// Gives each compiled program the depth cells the host holds for its routes
+/// ([`ModHost::depth`]).
+fn attach_depths(compiled: &mut Compiled, decl: &Declarations<'_>, host: &dyn ModHost) {
+    let mut cells: BTreeMap<TargetKey, Vec<(LayerId, LiveDepth)>> = BTreeMap::new();
+    for (key, route) in decl.routes {
+        if let RouteTarget::Param(target) = route.to
+            && let Some(cell) = host.depth(*key)
+        {
+            cells
+                .entry(target)
+                .or_default()
+                .push((layer_id(*key, None), cell));
+        }
+    }
+    for (target, cells) in cells {
+        if let Some(program) = compiled.programs.get_mut(&target) {
+            *program = std::mem::take(program).depths(cells);
         }
     }
 }

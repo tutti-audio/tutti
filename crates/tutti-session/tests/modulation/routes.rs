@@ -1,11 +1,14 @@
-//! A route can be found again, and edited through a view of it (doc 030, T4):
+//! A route can be found again, and edited through its targets (doc 030, T4):
 //! the keys are minted, `routes()` / `routes_to()` / `sources()` read what is
 //! declared, and polarity and curve are part of declaring a route.
 
 use tutti_buffers::MaxBlock;
 use tutti_modulation::{Law, Lfo, Polarity, Source};
 use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_session::{ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec, Session};
+use tutti_session::{
+    DepthTarget, ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec, Session,
+    ValueErrorKind,
+};
 use tutti_units::{Depth, Hz, Q, Samples};
 
 fn session() -> Session {
@@ -105,9 +108,10 @@ fn routes_and_sources_are_found_again() {
     );
 }
 
-/// **A route is edited through a view of it**, by named setters, and a route
-/// that is not there is an error, not a silent no-op. What the view changes is
-/// what `routes()` then reads.
+/// **A route is edited through its targets** (`DepthTarget`, `route.polarity()`,
+/// `route.curve()`), and a route that is not there is `NoSuchTarget`, not a
+/// silent no-op. What they change is what `routes()` then reads: the depth at
+/// once, the others at the update.
 #[test]
 fn a_route_is_edited_through_its_view() {
     let mut s = session();
@@ -117,15 +121,17 @@ fn a_route_is_edited_through_its_view() {
     let lfo = m.lfo(Lfo::sine());
     let route = m.route(RouteSpec::new(lfo, a, Depth::of(0.5))).unwrap();
 
-    s.mods_mut()
-        .route_of(route)
-        .unwrap()
-        .set_depth(Depth::of(-0.75));
     s.set((
+        DepthTarget::of(lfo, a).to(Depth::of(-0.75)),
         route.polarity().to(Polarity::Unipolar),
         route.curve().to(Law::Hold),
     ))
     .unwrap();
+    assert_eq!(
+        s.mods().route(route).unwrap().depth,
+        Depth::of(-0.75),
+        "the depth is in force at once"
+    );
     let _ = s.update();
     let read = s.mods().route(route).unwrap();
     assert_eq!(
@@ -134,10 +140,13 @@ fn a_route_is_edited_through_its_view() {
     );
 
     s.mods_mut().remove_route(route).unwrap();
-    assert!(matches!(
-        s.mods_mut().route_of(route),
-        Err(NoSuchModRoute(id)) if id == route
-    ));
+    assert_eq!(
+        s.set(DepthTarget::of(lfo, a).to(Depth::of(0.1)))
+            .unwrap_err()
+            .kind,
+        ValueErrorKind::NoSuchTarget
+    );
+    assert_eq!(s.mods().route(route), None);
 }
 
 /// **Reading the declarations takes a shared borrow of the session**: a

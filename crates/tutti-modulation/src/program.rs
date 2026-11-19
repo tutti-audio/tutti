@@ -6,8 +6,9 @@
 //! span. It holds no clock and no state: equal programs evaluate to equal
 //! bits at equal times, which is what lets a live lane and an export's fork of
 //! it agree. Phase is a function of the time a lane hands in
-//! ([`ProgramTime`]), never of the program's age, so a depth edit is a
-//! republish and never a phase reset.
+//! ([`ProgramTime`]), never of the program's age, so no edit is a phase
+//! reset. A route's depth may live in a cell ([`LiveDepth`]) the program
+//! reads at every evaluation, so moving it republishes nothing.
 //!
 //! Ungated: the floor, with [`Curve`]. The lane that evaluates it is
 //! `tutti-nodes`' `ControlLaneNode`; the compiler that builds it from routes
@@ -17,6 +18,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_curve::{Law, Piece};
 use tutti_units::{
@@ -41,6 +43,52 @@ pub const MAX_LANE_INPUTS: usize = 8;
 /// comes from (a route), so a republish keeps it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct LayerId(pub u64);
+
+/// A route's depth in a cell the control side moves between blocks: a program
+/// that holds one reads the depth from it at every evaluation, so a depth
+/// edit is a store and the program is not republished.
+///
+/// A program's [`Amount`] holds the depth the route was declared with; a
+/// [`LiveDepth`] attached to the layer ([`ControlProgram::depths`])
+/// replaces it. Clones share the cell; two are equal when they are the same
+/// cell.
+#[derive(Clone, Debug)]
+pub struct LiveDepth(Arc<AtomicU64>);
+
+impl LiveDepth {
+    /// A cell holding `depth`.
+    #[must_use]
+    pub fn new(depth: Depth) -> Self {
+        Self(Arc::new(AtomicU64::new(depth.get().to_bits())))
+    }
+
+    /// The depth now.
+    #[inline]
+    #[must_use]
+    pub fn get(&self) -> Depth {
+        Depth::clamped(f64::from_bits(self.0.load(Ordering::Acquire)))
+    }
+
+    /// Stores `depth`: the next evaluation reads it.
+    pub fn set(&self, depth: Depth) {
+        self.0.store(depth.get().to_bits(), Ordering::Release);
+    }
+
+    /// A cell of its own holding the depth now: what a fork reads, so a
+    /// depth moved after the fork does not reach it.
+    #[must_use]
+    pub fn detached(&self) -> Self {
+        Self::new(self.get())
+    }
+}
+
+impl PartialEq for LiveDepth {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for LiveDepth {}
 
 /// A signal source's identity on a lane's event input: its events are
 /// addressed `ParamAddr::Id(source.0)` and carry its raw value.
@@ -340,6 +388,8 @@ pub struct ControlProgram {
     automation: Option<Arc<dyn Curve>>,
     layers: Box<[Layer]>,
     inputs: Box<[InputLayer]>,
+    /// The depth cells of the layers and inputs that have one, by id.
+    depths: Box<[(LayerId, LiveDepth)]>,
 }
 
 impl fmt::Debug for ControlProgram {
@@ -348,6 +398,7 @@ impl fmt::Debug for ControlProgram {
             .field("automation", &self.automation.as_ref().map(|_| "<curve>"))
             .field("layers", &self.layers)
             .field("inputs", &self.inputs)
+            .field("depths", &self.depths.len())
             .finish()
     }
 }
@@ -363,7 +414,10 @@ impl PartialEq for ControlProgram {
             (Some(a), Some(b)) => core::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
             _ => false,
         };
-        same_curve && self.layers == other.layers && self.inputs == other.inputs
+        same_curve
+            && self.layers == other.layers
+            && self.inputs == other.inputs
+            && self.depths == other.depths
     }
 }
 
@@ -432,7 +486,58 @@ impl ControlProgram {
             automation: automation.map(|c| c.frozen().unwrap_or(c)),
             layers: layers.into_boxed_slice(),
             inputs: inputs.into_boxed_slice(),
+            depths: Box::new([]),
         })
+    }
+
+    /// The program with `depths` as the depth of the layers and inputs they
+    /// name, each read from its cell at every evaluation; an id no layer or
+    /// input has is ignored.
+    #[must_use]
+    pub fn depths(mut self, depths: impl IntoIterator<Item = (LayerId, LiveDepth)>) -> Self {
+        let mut depths: Vec<_> = depths
+            .into_iter()
+            .filter(|(id, _)| {
+                self.layers.iter().any(|l| l.id == *id) || self.inputs.iter().any(|i| i.id == *id)
+            })
+            .collect();
+        depths.sort_by_key(|(id, _)| *id);
+        self.depths = depths.into_boxed_slice();
+        self
+    }
+
+    /// The program with a cell of its own for every depth cell it holds, at
+    /// the depth now: what a fork evaluates.
+    #[must_use]
+    pub fn detached(&self) -> Self {
+        let mut program = self.clone();
+        program.depths = self
+            .depths
+            .iter()
+            .map(|(id, cell)| (*id, cell.detached()))
+            .collect();
+        program
+    }
+
+    /// The depths the program's layers and inputs hold in cells, bit for
+    /// bit: what a lane compares to see a depth move.
+    #[must_use]
+    pub fn depth_bits(&self) -> u64 {
+        self.depths.iter().fold(0u64, |acc, (id, cell)| {
+            acc.rotate_left(7) ^ id.0 ^ cell.get().get().to_bits()
+        })
+    }
+
+    /// `id`'s amount with the depth its cell holds, if it has one.
+    #[inline]
+    fn amount_of(&self, id: LayerId, amount: Amount) -> Amount {
+        match self.depths.binary_search_by_key(&id, |(id, _)| *id) {
+            Ok(at) => Amount {
+                depth: self.depths[at].1.get(),
+                ..amount
+            },
+            Err(_) => amount,
+        }
     }
 
     /// A program of automation alone: the curve where it has a value, the
@@ -442,6 +547,7 @@ impl ControlProgram {
             automation: Some(curve.frozen().unwrap_or(curve)),
             layers: Box::new([]),
             inputs: Box::new([]),
+            depths: Box::new([]),
         }
     }
 
@@ -536,13 +642,13 @@ impl ControlProgram {
         }
         let mut acc = -0.0f64;
         for l in self.layers.iter() {
-            if let Some(o) = l.offset(at, span, limit) {
+            if let Some(o) = l.offset(at, span, limit, self.amount_of(l.id, l.amount)) {
                 acc += o;
             }
         }
         for (k, l) in self.inputs.iter().enumerate() {
             if let Some(x) = inputs.get(k).copied().flatten() {
-                acc += l.amount.offset(x, span);
+                acc += self.amount_of(l.id, l.amount).offset(x, span);
             }
         }
         let sum = base + acc;
@@ -665,9 +771,9 @@ impl Layer {
 
     /// This layer's offset at `at` (just before it for [`Limit::Before`]),
     /// `None` when its clock gives no position.
-    fn offset(&self, at: &ProgramTime, span: f64, limit: Limit) -> Option<f64> {
+    fn offset(&self, at: &ProgramTime, span: f64, limit: Limit, amount: Amount) -> Option<f64> {
         let raw = self.wave.raw_on(&self.clock, at, limit)?;
-        let mut off = self.amount.offset(raw, span);
+        let mut off = amount.offset(raw, span);
         if let Some(d) = &self.depth_by {
             let m = d
                 .wave

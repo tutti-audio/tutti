@@ -190,9 +190,10 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget, MeterTarget, Modify,
-    Moved, OutputPolicyTarget, ParamTarget, PolarityTarget, RateTarget, ScalarTarget, SetRefusal,
-    SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    DepthTarget, Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget,
+    MeterTarget, MixTarget, ModeTarget, Modify, Moved, OutputPolicyTarget, ParamTarget,
+    PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
+    TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -411,14 +412,13 @@ pub mod session {
     pub use tutti_session::Param as PluginParam;
     pub use tutti_session::{
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
-        Connection, Crossfade, CrossfadeId, CrossfadeRefused, EdgeGainError,
+        Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError, EdgeGainError,
         Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
         NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError, Reclaimer,
-        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted,
-        Wire, root_width,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
+        RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_transport::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -468,7 +468,7 @@ pub mod session {
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
-        RouteError, RouteInfo, RouteMut, SourceInfo, SourceName, TargetName, declare_targets,
+        RouteError, RouteInfo, SourceInfo, SourceName, TargetName, declare_targets,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{

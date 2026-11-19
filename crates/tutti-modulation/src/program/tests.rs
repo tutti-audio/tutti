@@ -120,6 +120,40 @@ fn a_layer_offsets_by_depth_times_span() {
     );
 }
 
+/// A layer whose depth is in a cell reads the cell at every evaluation: the
+/// square's ±1 at the cell's depth on a span of 800 is `±800 × depth`, a
+/// depth stored after the program was built is the next evaluation's, and a
+/// fork's detached program holds the depth it had and is moved by nothing
+/// after. A program without the cell uses the depth it was built with, and an
+/// id no layer has is ignored.
+#[test]
+fn a_layer_reads_its_depth_from_a_cell() {
+    let cell = LiveDepth::new(Depth::of(0.25));
+    let p = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.5))])
+        .depths([(LayerId(1), cell.clone()), (LayerId(9), cell.clone())]);
+    let value = |p: &ControlProgram, beat: f64| {
+        p.value_at(None, Some(1000.0), &at_beat(beat), 800.0, &[])
+            .unwrap()
+    };
+    assert_eq!(value(&p, 1.0), 1200.0, "the cell's 0.25, not the built 0.5");
+    assert_eq!(value(&p, 3.0), 800.0);
+
+    let fork = p.detached();
+    cell.set(Depth::of(-0.5));
+    assert_eq!(value(&p, 1.0), 600.0, "the next evaluation reads it");
+    assert_eq!(value(&p, 3.0), 1400.0);
+    assert_eq!(value(&fork, 1.0), 1200.0, "the fork's cell is its own");
+    assert_ne!(p, fork, "a detached program has cells of its own");
+
+    let plain = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.5))]);
+    assert_eq!(value(&plain, 1.0), 1400.0);
+    assert_eq!(
+        plain.clone().depths([(LayerId(9), cell)]),
+        plain,
+        "an id no layer has is ignored"
+    );
+}
+
 /// An input's offset is exactly `depth × span × x` for IEEE-exact figures;
 /// an input that has not sent adds nothing, even unipolar (whose raw 0
 /// would be half its depth).
