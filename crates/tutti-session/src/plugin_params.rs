@@ -71,7 +71,7 @@ use std::marker::PhantomData;
 use tutti_graph::NodeKey;
 
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginSignal};
-use tutti_plugin_types::{ParamEdit, ParamUnit, ParameterInfo, PlainUnit};
+use tutti_plugin_types::{ParamEdit, ParamUnit, ParameterInfo, PlainUnit, UnknownParam};
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -368,12 +368,21 @@ impl<'a> Param<'a> {
     /// A parameter a modulation lane drives takes the value as the lane's knob
     /// and sends the plugin nothing: the lane sends the plugin the knob plus
     /// its routes.
-    fn send(&self, value: Normalized) {
+    ///
+    /// # Errors
+    ///
+    /// [`PluginParamError::Unknown`] when the plugin no longer declares the
+    /// parameter; the mirror is then left as it was.
+    fn send(&self, value: Normalized) -> Result<(), PluginParamError> {
         let hosted = self.params.hosted;
         if !hosted.driven.write(self.id(), value) {
-            hosted.handle.send_parameter(self.id(), value);
+            hosted
+                .handle
+                .send_parameter(self.id(), value)
+                .map_err(|UnknownParam(id)| PluginParamError::Unknown(id))?;
         }
         hosted.mirror.report(self.id(), value);
+        Ok(())
     }
 
     /// The plugin's own text for the value now ("-6.0 dB"); `None` when the
@@ -404,7 +413,7 @@ impl<'a> Param<'a> {
                 id: self.id(),
                 text: text.to_owned(),
             })?;
-        self.send(value);
+        self.send(value)?;
         Ok(value)
     }
 
@@ -438,7 +447,7 @@ impl<'a> Param<'a> {
             .handle
             .parameter_normalized(self.id(), plain)
             .ok_or(PluginParamError::NoPlainValue(self.id()))?;
-        self.send(value);
+        self.send(value)?;
         Ok(value)
     }
 
@@ -517,13 +526,16 @@ impl ParamGesture {
     /// # Errors
     ///
     /// [`PluginParamError::Gone`] once the plugin was removed or replaced, or no
-    /// longer declares the parameter.
+    /// longer declares the parameter, including when the write finds it
+    /// undeclared.
     pub fn set(&self, value: Normalized) -> Result<(), PluginParamError> {
         if !self.gate.holds(self.id) {
             return Err(PluginParamError::Gone(self.id));
         }
         if !self.driven.write(self.id, value) {
-            self.handle.send_parameter(self.id, value);
+            self.handle
+                .send_parameter(self.id, value)
+                .map_err(|UnknownParam(id)| PluginParamError::Gone(id))?;
         }
         self.reporter.report(self.id, value);
         queue(
