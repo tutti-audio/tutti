@@ -4,7 +4,7 @@
 //! Reduction (JR) timestamps it supports and has active, who it is, and its
 //! Function Blocks. [`Endpoint::reply`] is the answering side as one pure step
 //! over a received message, with no allocation. The asking side is
-//! [`Connection`](crate::Connection).
+//! [`EndpointDiscovery`](crate::EndpointDiscovery).
 
 use tutti_ump::{
     BlockDirection, BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, FirstGroup,
@@ -516,7 +516,7 @@ const fn contradicts(direction: BlockDirection, hint: UiHint) -> bool {
 /// What [`Endpoint::reply`] did with one message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
-pub enum Reply {
+pub enum EndpointReply {
     /// The message is not one an Endpoint answers: nothing was sent and
     /// nothing changed.
     Ignored,
@@ -837,8 +837,8 @@ impl Endpoint {
     ///   active, which is the current configuration for a part it could not
     ///   change (§7.1.6.1 step 3).
     ///
-    /// Any other message answers nothing ([`Reply::Ignored`]). A Stream
-    /// Configuration Request's [`Reply::Configured`] says whether the request was
+    /// Any other message answers nothing ([`EndpointReply::Ignored`]). A Stream
+    /// Configuration Request's [`EndpointReply::Configured`] says whether the request was
     /// granted whole, so the owner of the port can switch to the Protocol and JR
     /// Timestamps now active.
     ///
@@ -848,25 +848,27 @@ impl Endpoint {
     /// reserved bits not read. A lower one is read as that version defines
     /// the message, and Table 5 gives 1.0 no Stream messages (and no version
     /// below it), so it defines no filter bit and gets no answer
-    /// ([`Reply::Ignored`]).
-    pub fn reply(&mut self, message: Message, out: &mut impl Extend<Ump>) -> Reply {
+    /// ([`EndpointReply::Ignored`]).
+    pub fn reply(&mut self, message: Message, out: &mut impl Extend<Ump>) -> EndpointReply {
         let Message::Stream(stream) = message else {
-            return Reply::Ignored;
+            return EndpointReply::Ignored;
         };
         match stream {
-            Stream::EndpointDiscovery { version, .. } if version < UMP_VERSION => Reply::Ignored,
+            Stream::EndpointDiscovery { version, .. } if version < UMP_VERSION => {
+                EndpointReply::Ignored
+            }
             Stream::EndpointDiscovery { filter, .. } => {
                 self.answer_discovery(filter, out);
-                Reply::Answered
+                EndpointReply::Answered
             }
             Stream::FunctionBlockDiscovery { block, filter } => {
                 self.answer_block_discovery(block, filter, out);
-                Reply::Answered
+                EndpointReply::Answered
             }
             Stream::StreamConfigurationRequest(request) => {
                 self.configure(request);
                 send(out, Stream::StreamConfigurationNotification(self.active));
-                Reply::Configured(if self.active == request {
+                EndpointReply::Configured(if self.active == request {
                     Configuration::Granted(self.active)
                 } else {
                     Configuration::Reduced {
@@ -875,7 +877,7 @@ impl Endpoint {
                     }
                 })
             }
-            _ => Reply::Ignored,
+            _ => EndpointReply::Ignored,
         }
     }
 
