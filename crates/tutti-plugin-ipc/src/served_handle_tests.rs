@@ -33,12 +33,11 @@ use tutti_units::SampleRate;
 fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
-    path: &std::path::Path,
+    plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-    _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+        path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
