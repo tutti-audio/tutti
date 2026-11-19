@@ -45,7 +45,7 @@ fn session_with_open_editor(command: u32) -> (Session, Editor) {
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("an offline session builds");
-    let plugin = PluginRef::file(clap_probe()).expect("a plugin file");
+    let plugin = PluginRef::file(clap_probe());
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),

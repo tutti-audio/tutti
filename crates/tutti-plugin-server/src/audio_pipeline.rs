@@ -1328,7 +1328,6 @@ mod tests {
     #[test]
     fn process_through_the_real_vst3_loader_is_alloc_free() {
         use crate::served::{Served, ServedPlugin};
-        use tutti_plugin_types::Load;
         use tutti_vst3_host::Vst3Loaded;
 
         const N: usize = 128;
@@ -1338,8 +1337,7 @@ mod tests {
         let (mut plugin, _) = Served::<Vst3Loaded>::load(
             tutti_fixtures::main_thread(),
             &tutti_fixtures::detached_work(),
-            std::path::Path::new(crate::test_utils::vst3_probe_path()),
-            &Load::new(),
+            &tutti_plugin_types::PluginRef::file(crate::test_utils::vst3_probe_path()),
             tutti_units::SampleRate::of(SR),
             N,
             FloatWidth::F32,

@@ -10,15 +10,14 @@
 //! pending for the main thread is run by the pump, and the Processor comes
 //! back at the audio thread's next poll.
 
-use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use parking_lot::Mutex;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Event, Hand, HostOp, InProcess, Layout, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin,
-    PluginError, PluginFailure, PluginInvalidation, Prepare, Processor, RenderMode,
+    Event, Hand, HostOp, InProcess, Layout, Lifecycle, Loaded, MaxBlock, Notice, PluginError,
+    PluginFailure, PluginInvalidation, PluginRef, Prepare, Processor, RenderMode,
     RenderModeSupport, SampleRate, Samples, State, Successor, Widths, standing,
 };
 use tutti_rt::Rt;
@@ -132,7 +131,7 @@ pub(super) struct Instance<L: Loaded> {
     hand: Hand<L::Processor>,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
-    origin: Option<Origin>,
+    origin: Option<PluginRef>,
     /// The widths the plugin processes audio in, as read before its
     /// activation (for a plugin its shell activated, the width it runs at).
     widths: Widths,
@@ -174,14 +173,13 @@ impl<L: InProcess> Instance<L> {
     pub(super) fn load(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
         sample_rate: SampleRate,
         block_size: usize,
         width: FloatWidth,
         restore: Option<&mut dyn FnMut(&mut L) -> Result<(), StateError>>,
     ) -> Result<(Self, Rt<L::Processor>, Option<Result<(), StateError>>), (LoadStage, String)> {
-        let mut loaded = L::load_in_process(main, work, path, load).map_err(|e| match e {
+        let mut loaded = L::load_in_process(main, work, plugin).map_err(|e| match e {
             PluginError::Load { stage, reason } => (stage, reason),
             other => (LoadStage::Opening, other.to_string()),
         })?;
@@ -203,7 +201,7 @@ impl<L: Loaded> Instance<L> {
     pub(super) fn start(
         main: MainThreadMarker,
         loaded: L,
-        origin: Option<Origin>,
+        origin: Option<PluginRef>,
         sample_rate: SampleRate,
         block_size: usize,
         width: FloatWidth,
@@ -704,7 +702,7 @@ impl<L: Loaded> Instance<L> {
 
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again.
-    pub(super) fn origin(&self) -> Option<&Origin> {
+    pub(super) fn origin(&self) -> Option<&PluginRef> {
         self.origin.as_ref()
     }
 
@@ -731,8 +729,7 @@ mod tests {
         match Instance::<Vst2Loaded>::load(
             main_thread(),
             &tutti_fixtures::detached_work(),
-            tutti_fixtures::vst2_probe(),
-            &Load::new(),
+            &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
             SampleRate::SR_48K,
             0,
             FloatWidth::F32,
@@ -797,8 +794,7 @@ mod tests {
         let (mut instance, _rt, _) = Instance::<Vst2Loaded>::load(
             main_thread(),
             &tutti_fixtures::detached_work(),
-            tutti_fixtures::vst2_probe(),
-            &Load::new(),
+            &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
             SampleRate::SR_48K,
             64,
             FloatWidth::F32,
@@ -826,8 +822,7 @@ mod tests {
         let (mut instance, mut rt, _) = Instance::<Vst2Loaded>::load(
             main,
             &tutti_fixtures::detached_work(),
-            tutti_fixtures::vst2_probe(),
-            &Load::new(),
+            &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
             SampleRate::SR_48K,
             64,
             FloatWidth::F32,

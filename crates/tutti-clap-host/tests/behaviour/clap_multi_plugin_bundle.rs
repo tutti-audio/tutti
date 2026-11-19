@@ -127,3 +127,23 @@ fn an_unknown_id_fails_rather_than_falling_back() {
         "the error should name the id that was asked for: {msg}"
     );
 }
+
+/// **A CLAP load refuses an id of another format at the call**, naming both, and
+/// loads nothing: a VST3 class id picks no CLAP plugin of the bundle.
+#[test]
+fn an_id_of_another_format_is_refused_at_the_call() {
+    use tutti_plugin_types::{InProcess, PluginId, PluginRef, Uid};
+    let other = PluginId::Vst3(Uid::new([7; 16]));
+    let plugin = PluginRef::new(bundle(), other.clone());
+    // Matched rather than `expect_err`, because `ClapLoaded` is not `Debug`.
+    let msg =
+        match ClapLoaded::load_in_process(main_thread(), &tutti_fixtures::detached_work(), &plugin)
+        {
+            Ok(_) => panic!("a VST3 id must not load a CLAP plugin"),
+            Err(e) => e.to_string(),
+        };
+    assert!(
+        msg.contains(&other.to_string()) && msg.contains("clap"),
+        "the error names the id and the loader: {msg}"
+    );
+}

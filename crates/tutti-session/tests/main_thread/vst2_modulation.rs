@@ -39,7 +39,7 @@ fn session_with_probe() -> (DetachedSession, NodeKey) {
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            Spec::new(PluginRef::file(vst2_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(vst2_probe())),
         )
         .expect("the in-process VST2 loads");
     s.graph().connect(node, Root).unwrap();

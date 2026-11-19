@@ -684,6 +684,13 @@ where
 }
 
 impl<L: InProcess, F: Float> InProcessClient<L, F> {
+    /// The file and plugin the load opened: its id is the plugin's, whatever the
+    /// load chose. `None` for a client built over a plugin that has no origin.
+    #[must_use]
+    pub fn origin(&self) -> Option<&tutti_plugin_types::PluginRef> {
+        self.reload.as_ref().map(|reload| &reload.origin)
+    }
+
     /// The node's controls: its meter cell and its parameter delivery's
     /// counters, the same [`NodeControls`] inserting it hands back. Its block
     /// is the out-of-process node's chunk: a block's points all count as sent,
@@ -703,7 +710,7 @@ impl<L: InProcess, F: Float> InProcessClient<L, F> {
 #[cfg(test)]
 mod owed_tests {
     use tutti_fixtures::main_thread;
-    use tutti_plugin_types::{Load, MainThreadMarker};
+    use tutti_plugin_types::MainThreadMarker;
     use tutti_vst2_host::Vst2Loaded;
 
     use tutti_graph::contract::Direct;
@@ -723,8 +730,7 @@ mod owed_tests {
         crate::load_client::<Vst2Loaded, f32>(
             main,
             &tutti_fixtures::pumped_work(),
-            path,
-            &Load::new(),
+            &tutti_plugin_types::PluginRef::file(path),
             rate,
         )
         .map_err(|e| e.into_bridge(path))

@@ -105,7 +105,7 @@ pub struct AuLoaded {
     /// resolved. A unit made straight from a component
     /// ([`new`](Self::new)) has no bundle, so its origin is an empty path, and
     /// reopening it fails at the `Scanning` stage rather than finding another unit.
-    pub(crate) origin: tutti_plugin_types::Origin,
+    pub(crate) origin: tutti_plugin_types::PluginRef,
     /// The collector of this unit's owner, given at construction, which a reopen
     /// gives its new instance.
     pub(crate) work: MainWorkHandle,
@@ -226,7 +226,7 @@ impl AuLoaded {
             offline: false,
             mode_accepted,
             last_latency: Cell::new(Samples::ZERO),
-            origin: tutti_plugin_types::Origin::new("", tutti_plugin_types::Load::new()),
+            origin: tutti_plugin_types::PluginRef::file(""),
             work: work.clone(),
         })
     }

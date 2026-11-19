@@ -93,6 +93,17 @@ pub enum BridgeError {
         format: &'static str,
     },
 
+    /// The plugin names no id and its file's extension names no plugin format,
+    /// so no format's loader can be chosen for it.
+    #[error("{} names no plugin format", path.display())]
+    UnknownFormat {
+        /// The plugin file.
+        path: PathBuf,
+        /// What its extension was.
+        #[source]
+        source: crate::UnknownExtension,
+    },
+
     /// The `plugin-server` executable could not be located.
     #[error(
         "plugin-server binary not found. Build it with `cargo build -p tutti-plugin-server` \
@@ -302,19 +313,6 @@ pub enum PluginForkError {
     /// from. Answered before anything is loaded.
     #[error("the live instance has no origin to load a fresh instance from")]
     NoOrigin,
-
-    /// The file at the live instance's path now holds a different plugin
-    /// (replaced on disk since the live instance loaded). Its state is not
-    /// this plugin's to load.
-    #[error("{} now loads as plugin `{found}`, not `{expected}`", path.display())]
-    Mismatch {
-        /// The plugin file.
-        path: PathBuf,
-        /// The live instance's plugin id.
-        expected: String,
-        /// The id the fresh instance reported.
-        found: String,
-    },
 
     /// The fresh instance refused the live instance's state.
     #[error("the fresh instance refused the live instance's state")]

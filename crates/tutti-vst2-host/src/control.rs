@@ -58,7 +58,6 @@ pub(crate) fn plugin_error(error: Vst2Error) -> PluginError {
 #[must_use]
 pub(crate) fn descriptor_of(info: &PluginInfo) -> PluginDescriptor {
     PluginDescriptor {
-        id: info.id.clone(),
         name: info.name.clone(),
         vendor: info.vendor.clone(),
         version: info.version.clone(),

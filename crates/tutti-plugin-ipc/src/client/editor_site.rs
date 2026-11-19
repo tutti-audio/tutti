@@ -16,8 +16,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::AutomationMode;
 use tutti_plugin_types::{
-    ContentScale, Editor, EditorCapabilities, EditorError, EditorWindow, MainThreadMarker, Origin,
-    ParamEdit, PluginError, PluginFormat, Request, StateError, WindowHandle,
+    ContentScale, Editor, EditorCapabilities, EditorError, EditorWindow, MainThreadMarker,
+    ParamEdit, PluginError, PluginFormat, PluginRef, Request, StateError, WindowHandle,
 };
 use tutti_rt::{LockExt, PackedAtomic, Tally, TallyWriter, tally};
 use tutti_units::{Normalized, ParamId};
@@ -45,7 +45,7 @@ pub(crate) struct InProcessEditor {
     audio: AudioBridge,
     /// The file and the plugin in it, which the instance loads (the one the
     /// audio instance is).
-    origin: Origin,
+    origin: PluginRef,
     /// The format that opens `origin`'s file.
     format: PluginFormat,
     /// Loads the instance on the first open: the host's table of formats,
@@ -86,7 +86,7 @@ impl EditorSite {
     /// `origin` as `format`, or with no loader the editor in the server.
     pub(crate) fn new(
         audio: &AudioBridge,
-        origin: Origin,
+        origin: PluginRef,
         format: PluginFormat,
         loader: Option<EditorLoader>,
     ) -> Self {
@@ -393,7 +393,7 @@ impl InProcessEditor {
                 tracing::info!("[bridge] lazy-loading the in-process GUI");
                 let instance = self
                     .loader
-                    .load(main, self.origin.path(), self.format, self.origin.load())
+                    .load(main, &self.origin, self.format)
                     .map_err(|e| {
                         EditorError::PluginError(format!("failed to load in-process GUI: {e}"))
                     })?;

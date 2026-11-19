@@ -20,7 +20,7 @@ mod clap {
 
     fn loaded() -> (Session, u64, NodeKey) {
         // The plugin's file is probed before its variables are set.
-        crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
+        crate::pooled::prime(&PluginRef::file(clap_probe()));
         // SAFETY: nextest runs each test in its own process, and this is set
         // before the first server is spawned, from the test's own thread.
         unsafe {
@@ -35,7 +35,7 @@ mod clap {
         let (entry, node) = s
             .load_plugin_keyed(
                 tutti_fixtures::main_thread(),
-                Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+                Spec::new(PluginRef::file(clap_probe())),
             )
             .expect("the reference CLAP plugin loads");
         (s, entry, node.erase())
@@ -173,7 +173,7 @@ mod vst3 {
             tutti_plugin_types::bundle::ModuleKind::Vst3,
         )
         .expect("a .vst3 bundle around the module");
-        let plugin = PluginRef::file(bundle.to_path_buf()).expect("a plugin bundle");
+        let plugin = PluginRef::file(bundle.to_path_buf());
         let (catalog, id, _dir) = crate::pooled::catalog_of(&plugin);
         let mut s = Session::builder()
             .spawn_with(|job| job.run())
@@ -263,10 +263,7 @@ mod vst2 {
         let (entry, _) = s
             .load_plugin_keyed(
                 tutti_fixtures::main_thread(),
-                Spec::new(
-                    PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())
-                        .expect("a plugin file"),
-                ),
+                Spec::new(PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())),
             )
             .expect("the in-process VST2 loads");
         (s, entry, env)
@@ -347,10 +344,7 @@ mod vst2 {
         let (other, _) = s
             .load_plugin_keyed(
                 tutti_fixtures::main_thread(),
-                Spec::new(
-                    PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())
-                        .expect("a plugin file"),
-                ),
+                Spec::new(PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())),
             )
             .expect("a second VST2 loads");
         let refused = s.load_preset(&other, &foreign);
@@ -379,7 +373,7 @@ mod vst2 {
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
-        let plugin = PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf()).expect("a file");
+        let plugin = PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf());
         let (catalog, id, dir) = crate::pooled::catalog_of(&plugin);
         let main = tutti_fixtures::main_thread();
         let key = s.declare_entry(main, &catalog, &id, Hosting::Auto, None);

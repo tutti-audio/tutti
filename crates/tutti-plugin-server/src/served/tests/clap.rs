@@ -122,7 +122,10 @@ fn test_clap_metadata() {
         .expect("Failed to load CLAP plugin");
     let meta = instance.descriptor();
     assert!(!meta.name.is_empty(), "Plugin name should not be empty");
-    assert!(!meta.id.is_empty(), "Plugin id should not be empty");
+    assert!(
+        instance.origin().id().is_some(),
+        "the loaded plugin names its own id"
+    );
 
     let loaded = instance.loaded();
 
@@ -171,8 +174,7 @@ fn the_buses_are_those_the_plugin_has_at_activation() {
     let opened = ClapInstance::open(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        path,
-        &Load::new(),
+        &PluginRef::file(path),
     )
     .expect("open");
 
@@ -244,8 +246,7 @@ fn a_plugin_that_drops_its_64_bit_flags_after_open_loads_as_32_bit() {
     let opened = ClapInstance::open(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        path,
-        &Load::new(),
+        &PluginRef::file(path),
     )
     .expect("open");
     assert!(opened.supports_f64(), "fixture: flagged at open");
@@ -1267,7 +1268,7 @@ fn test_reference_load() {
     let instance = instance.unwrap();
     let meta = instance.descriptor();
     assert!(!meta.name.is_empty());
-    assert!(!meta.id.is_empty());
+    assert!(instance.origin().id().is_some());
 }
 
 #[test]

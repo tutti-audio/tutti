@@ -17,9 +17,9 @@ use tutti_plugin_ipc::state_chunk::{self, ChunkError, Reassembler};
 use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, StagedState};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, EditorError, Load, MAX_STATE_BYTES, MainThreadMarker, MainWork,
-    MainWorkHandle, ParameterQueue, PluginError, PluginFormat, PluginResult, SampleRate, StateUse,
-    Wakeups, WindowHandle,
+    BridgeError, BridgeResult, EditorError, MAX_STATE_BYTES, MainThreadMarker, MainWork,
+    MainWorkHandle, ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult,
+    SampleRate, StateUse, Wakeups, WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
@@ -247,7 +247,7 @@ impl Session {
             M::LoadPlugin {
                 path,
                 format,
-                load,
+                plugin,
                 sample_rate,
                 block_size,
                 preferred_format,
@@ -257,7 +257,7 @@ impl Session {
                 main,
                 path,
                 format,
-                &load,
+                plugin,
                 sample_rate,
                 block_size,
                 preferred_format,
@@ -681,7 +681,7 @@ impl Session {
         main: MainThreadMarker,
         path: std::path::PathBuf,
         format: PluginFormat,
-        load: &Load,
+        plugin: Option<PluginId>,
         sample_rate: SampleRate,
         block_size: usize,
         preferred_format: FloatWidth,
@@ -719,9 +719,8 @@ impl Session {
         let (plugin, state_error, seat) = match AnyServed::load(
             main,
             &self.work_handle,
-            &path,
+            &PluginRef::of(path, plugin),
             format,
-            load,
             sample_rate,
             block_size,
             preferred_format,
@@ -731,6 +730,12 @@ impl Session {
         ) {
             Ok(loaded) => loaded,
             Err(e) => return Ok(load_failure(&e).into()),
+        };
+        let Some(id) = plugin.plugin().origin().id().cloned() else {
+            return Ok(BridgeMessage::Error {
+                message: "the loaded plugin names no id of its own".into(),
+            }
+            .into());
         };
         let descriptor = plugin.plugin().descriptor().clone();
         let loaded = plugin.plugin().loaded().clone();
@@ -751,6 +756,7 @@ impl Session {
         self.publish();
         self.render.send(ToRender::Seat(seat));
         Ok(BridgeMessage::PluginLoaded {
+            id,
             descriptor: Box::new(descriptor),
             loaded,
             negotiated_format: negotiated,
@@ -1649,7 +1655,7 @@ mod tests {
                 HostMessage::LoadPlugin {
                     path: std::path::PathBuf::from("/nonexistent/path/plugin.vst3"),
                     format: PluginFormat::Vst3,
-                    load: tutti_plugin_types::Load::new(),
+                    plugin: None,
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
                     preferred_format: FloatWidth::F32,
@@ -1693,7 +1699,7 @@ mod tests {
             HostMessage::LoadPlugin {
                 path: std::path::PathBuf::from(clap_plugin()),
                 format: PluginFormat::Clap,
-                load: tutti_plugin_types::Load::new(),
+                plugin: None,
                 sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 block_size: 512,
                 preferred_format,
@@ -1718,16 +1724,16 @@ mod tests {
         (s, shm_guard)
     }
 
-    /// The reply to loading the reference CLAP plugin's file with `load`.
+    /// The reply to loading the reference CLAP plugin's file choosing `plugin`.
     #[cfg(feature = "clap")]
-    fn load_clap_choosing(load: Load) -> BridgeMessage {
+    fn load_clap_choosing(plugin: Option<PluginId>) -> BridgeMessage {
         Rig::new()
             .handle(
                 main_thread(),
                 HostMessage::LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
                     format: PluginFormat::Clap,
-                    load,
+                    plugin,
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
                     preferred_format: FloatWidth::F32,
@@ -1750,7 +1756,7 @@ mod tests {
     fn a_load_that_chooses_a_plugin_loads_that_one() {
         let _lock = crate::test_utils::plugin_load_lock();
         let id_of = |reply: BridgeMessage| match reply {
-            BridgeMessage::PluginLoaded { descriptor, .. } => descriptor.id,
+            BridgeMessage::PluginLoaded { id, .. } => id,
             other => panic!("expected PluginLoaded, got {other:?}"),
         };
         let first = tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8");
@@ -1758,13 +1764,14 @@ mod tests {
             .to_str()
             .expect("utf-8");
 
-        assert_eq!(id_of(load_clap_choosing(Load::new())), first, "no choice");
+        let clap = |id: &str| PluginId::Clap(id.into());
+        assert_eq!(id_of(load_clap_choosing(None)), clap(first), "no choice");
         assert_eq!(
-            id_of(load_clap_choosing(Load::new().plugin(second))),
-            second,
+            id_of(load_clap_choosing(Some(clap(second)))),
+            clap(second),
             "the second plugin of the factory"
         );
-        match load_clap_choosing(Load::new().plugin("tutti.no-such-plugin")) {
+        match load_clap_choosing(Some(clap("tutti.no-such-plugin"))) {
             BridgeMessage::Error { message } => {
                 assert!(message.contains("tutti.no-such-plugin"), "{message}");
             }
@@ -2491,7 +2498,7 @@ mod tests {
                 HostMessage::LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
                     format: PluginFormat::Clap,
-                    load: tutti_plugin_types::Load::new(),
+                    plugin: None,
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
                     preferred_format: FloatWidth::F32,
@@ -2513,7 +2520,7 @@ mod tests {
             HostMessage::LoadPlugin {
                 path: std::path::PathBuf::from("/nonexistent/plugin.clap"),
                 format: PluginFormat::Clap,
-                load: tutti_plugin_types::Load::new(),
+                plugin: None,
                 sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
@@ -2692,7 +2699,7 @@ mod tests {
                     HostMessage::LoadPlugin {
                         path: std::path::PathBuf::from(clap_plugin()),
                         format: PluginFormat::Clap,
-                        load: tutti_plugin_types::Load::new(),
+                        plugin: None,
                         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                         block_size: 512,
                         preferred_format: FloatWidth::F32,
@@ -2859,7 +2866,7 @@ mod tests {
             HostMessage::LoadPlugin {
                 path: bundle,
                 format: PluginFormat::Vst3,
-                load: tutti_plugin_types::Load::new(),
+                plugin: None,
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
@@ -3027,7 +3034,7 @@ mod tests {
             HostMessage::LoadPlugin {
                 path: bundle,
                 format: PluginFormat::Vst3,
-                load: tutti_plugin_types::Load::new(),
+                plugin: None,
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
@@ -3089,8 +3096,7 @@ mod tests {
         let (vst3, _) = crate::served::Served::<tutti_vst3_host::Vst3Loaded>::load(
             main_thread(),
             &tutti_fixtures::detached_work(),
-            std::path::Path::new(crate::test_utils::vst3_probe_path()),
-            &Load::new(),
+            &tutti_plugin_types::PluginRef::file(crate::test_utils::vst3_probe_path()),
             SampleRate::SR_48K,
             128,
             FloatWidth::F32,

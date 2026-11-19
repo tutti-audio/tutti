@@ -144,7 +144,7 @@ fn a_peer_states_media_type_is_named_through_the_facade() {
     use tutti::midi::property::MediaType;
     use tutti::{PeerState, PluginRef, SavedPeer};
 
-    let plugin = PluginRef::file("/p/synth.clap").expect("a plugin file");
+    let plugin = PluginRef::file("/p/synth.clap");
     let media_type = MediaType::new("application/x-clap-state").expect("a media type");
     let state = PeerState::new(SavedPeer::Plugin(plugin), media_type.clone(), vec![1, 2]);
     let read: &MediaType = state.media_type();

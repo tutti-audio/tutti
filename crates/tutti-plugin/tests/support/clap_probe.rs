@@ -470,10 +470,9 @@ pub fn load_probe_with(config: BridgeConfig, sample_rate: f64) -> LoadedProbe {
     let client = PluginClient::new(
         config,
         &tutti_fixtures::detached_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(
-            tutti_plugin::catalog::PluginRef::file(tutti_fixtures::clap_probe())
-                .expect("a plugin file"),
-        ),
+        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+            tutti_fixtures::clap_probe(),
+        )),
         SampleRate::of(sample_rate),
     )
     .expect("load the reference CLAP plugin through a real plugin-server");

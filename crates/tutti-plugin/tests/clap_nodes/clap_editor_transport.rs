@@ -66,7 +66,6 @@ fn served_a_request_the_editor_instance_makes_reaches_subscribers_in_order() {
 #[test]
 fn in_process_a_request_the_plugin_makes_reaches_subscribers() {
     use tutti_clap_host::ClapLoaded;
-    use tutti_plugin_types::Load;
     use tutti_units::SampleRate;
 
     let _lock = machine_lock();
@@ -78,8 +77,7 @@ fn in_process_a_request_the_plugin_makes_reaches_subscribers() {
     let (_client, handle) = tutti_plugin_host::load_client::<ClapLoaded, f32>(
         main,
         &tutti_fixtures::detached_work(),
-        tutti_fixtures::clap_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
         SampleRate::of(SAMPLE_RATE),
     )
     .expect("the reference plugin loads in process");

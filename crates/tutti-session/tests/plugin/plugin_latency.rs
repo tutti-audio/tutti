@@ -53,7 +53,7 @@ fn add_probe_on_outputs(s: &mut Session) -> tutti_graph::NodeKey {
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(clap_probe())),
         )
         .expect("the reference CLAP plugin loads");
     s.graph()
@@ -165,7 +165,7 @@ fn request() -> Bounce<tutti_graph::NodeKey, BufferMaster> {
 #[test]
 fn a_latency_the_plugin_reports_reaches_the_graph() {
     // The plugin's file is probed before its variables are set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
+    crate::pooled::prime(&PluginRef::file(clap_probe()));
     // SAFETY: as `set_server`: before the first server, from the test's thread.
     unsafe { std::env::set_var("TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY", "300") };
     let mut s = offline();
@@ -226,7 +226,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     const OFFLINE_EXTRA: usize = 74;
     const OWN: usize = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
     // The plugin's file is probed before its variables are set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
+    crate::pooled::prime(&PluginRef::file(clap_probe()));
     // SAFETY: as `set_server`: before the first server, from the test's thread.
     unsafe {
         std::env::set_var(
@@ -268,7 +268,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
-        &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
+        &Loadable::uncatalogued(PluginRef::file(clap_probe())),
         RATE,
     )
     .expect("load a second instance of the reference plugin");
@@ -330,7 +330,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
-        &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
+        &Loadable::uncatalogued(PluginRef::file(clap_probe())),
         RATE,
     )
     .expect("the reference plugin loads");
@@ -384,7 +384,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
-        &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
+        &Loadable::uncatalogued(PluginRef::file(clap_probe())),
         RATE,
     )
     .expect("the reference plugin loads");

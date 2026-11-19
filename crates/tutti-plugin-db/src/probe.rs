@@ -18,7 +18,7 @@ use tutti_platform::Instant;
 use tutti_platform::StopToken;
 use tutti_plugin_ipc_ffi::{HOST_PID_ENV, Reaped};
 use tutti_plugin_types::{
-    Deadline, Helper, Locator, PluginDescriptor, PluginFormat, ProbeDeath, ProbeError,
+    Deadline, Described, Helper, Locator, PluginFormat, PluginId, ProbeDeath, ProbeError,
     ProbeOutcome, ProbeRefusal, ResultError, read_result,
 };
 
@@ -46,9 +46,8 @@ fn run_budget(timeout: Duration) -> Duration {
 pub struct ProbeState {
     /// A file of the bytes the plugin's own `save_state` wrote.
     pub file: PathBuf,
-    /// The descriptor id of the plugin the state is for; `None` is the file's
-    /// first plugin.
-    pub plugin: Option<String>,
+    /// The plugin the state is for; `None` is the file's first plugin.
+    pub plugin: Option<PluginId>,
 }
 
 /// Reads the descriptor of every plugin a file holds in a `plugin-probe` subprocess, so a plugin that
@@ -70,13 +69,13 @@ pub fn probe_metadata_with(
     format: PluginFormat,
     timeout: Duration,
     stop: &StopToken,
-) -> Result<Vec<PluginDescriptor>, ProbeError> {
+) -> Result<Vec<Described>, ProbeError> {
     run(locator, plugin_path, format, timeout, stop, &[])
 }
 
 /// [`probe_metadata_with`] that also **measures** each plugin (`plugin-probe
 /// --measure`): the descriptors come back with
-/// [`PluginDescriptor::measured`] set where the plugin could be measured, and a
+/// [`PluginDescriptor::measured`](tutti_plugin_types::PluginDescriptor::measured) set where the plugin could be measured, and a
 /// plugin that could not be is logged with why. It renders the plugin, so give it
 /// the long deadline
 /// ([`DEFAULT_MEASURE_TIMEOUT`](crate::DEFAULT_MEASURE_TIMEOUT)):
@@ -105,13 +104,18 @@ pub fn measure_metadata_with(
     timeout: Duration,
     stop: &StopToken,
     state: Option<&ProbeState>,
-) -> Result<Vec<PluginDescriptor>, ProbeError> {
+) -> Result<Vec<Described>, ProbeError> {
     let budget = run_budget(timeout).as_secs().to_string();
     let mut args = vec!["--measure".as_ref(), "--budget".as_ref(), budget.as_ref()];
+    // The command line carries the id as text (`PluginId`'s `Display`), which
+    // the probe reads back with `FromStr`.
+    let chosen = state
+        .and_then(|state| state.plugin.as_ref())
+        .map(ToString::to_string);
     if let Some(state) = state {
         args.push("--state".as_ref());
         args.push(state.file.as_os_str());
-        if let Some(plugin) = &state.plugin {
+        if let Some(plugin) = &chosen {
             args.push("--plugin".as_ref());
             args.push(plugin.as_ref());
         }
@@ -126,7 +130,7 @@ fn run(
     timeout: Duration,
     stop: &StopToken,
     flags: &[&std::ffi::OsStr],
-) -> Result<Vec<PluginDescriptor>, ProbeError> {
+) -> Result<Vec<Described>, ProbeError> {
     let probe = locator
         .resolve(Helper::Probe)
         .ok_or(ProbeError::ProbeNotFound)?;
@@ -244,7 +248,7 @@ mod tests {
         Locator::at(path)
     }
 
-    fn probe(locator: &Locator, timeout: Duration) -> Result<Vec<PluginDescriptor>, ProbeError> {
+    fn probe(locator: &Locator, timeout: Duration) -> Result<Vec<Described>, ProbeError> {
         probe_metadata_with(
             locator,
             Path::new("/plugins/Some.clap"),

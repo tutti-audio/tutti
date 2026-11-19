@@ -15,7 +15,7 @@ use dpi::Size;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MidiEventVec;
 use tutti_plugin_types::Samples;
-use tutti_plugin_types::{BlockStatus, ContentScale, Load, StateUse};
+use tutti_plugin_types::{BlockStatus, ContentScale, PluginId, StateUse};
 use tutti_plugin_types::{
     LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginTail, Preset, PresetId,
 };
@@ -68,12 +68,15 @@ pub enum HostMessage {
         /// which a path's extension need not give (a link `Foo.clap` to
         /// `libfoo.so` is CLAP).
         format: PluginFormat,
-        /// Which plugin of the file to load, when it exports several (a CLAP
-        /// plugin id, a VST3 class id, an AU descriptor id): the same
-        /// [`Load`] the server hands its format's
-        /// `OutOfProcess::load_served`. The file's first plugin when it chooses
-        /// none; a format whose files hold one refuses a choice.
-        load: Load,
+        /// Which plugin of the file to load, when it exports several. The
+        /// server hands it, with the path, to its format's
+        /// `OutOfProcess::load_served`. The file's first plugin when it
+        /// chooses none; an id of another format than `format` is refused.
+        ///
+        /// A [`PluginId`] crosses as itself: it is plain data (a CLAP id's text,
+        /// a VST3 class id's sixteen bytes, an AU's three codes, a VST2 number),
+        /// and a value the peer cannot make is a decode failure.
+        plugin: Option<PluginId>,
         /// Sample rate, an `f64` on the wire because plugin ABIs denominate it so.
         sample_rate: SampleRate,
         /// Maximum frames per [`ProcessAudio`](Self::ProcessAudio) block. The
@@ -310,7 +313,10 @@ pub enum HostMessage {
 pub enum BridgeMessage {
     /// The plugin was loaded successfully.
     PluginLoaded {
-        /// Catalog identity (id, name, vendor, version, native class, editor).
+        /// The plugin the load opened: the chosen one, or the file's first when
+        /// it chose none.
+        id: PluginId,
+        /// Catalog identity (name, vendor, version, native class, editor).
         descriptor: Box<PluginDescriptor>,
         /// Engine-wiring data from instantiation (bus widths, latency, f64).
         #[serde(default)]

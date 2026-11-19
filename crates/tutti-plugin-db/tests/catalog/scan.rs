@@ -3,8 +3,9 @@
 //! `clap`, the reference plugin; `cargo build -p tutti-plugin-probe` first, or
 //! the scan degrades to filename metadata, which still lists the file).
 
-use tutti_plugin_db::{Catalog, CatalogConfig, PluginDb, PluginRef, Scan, ScanPoll, ScanResult};
+use tutti_plugin_db::{Catalog, CatalogConfig, PluginDb, Scan, ScanPoll, ScanResult};
 use tutti_plugin_types::Locator;
+use tutti_plugin_types::PluginRef;
 
 /// Applies `task` as it arrives until it ends, and returns its result; the wait
 /// is bounded by a hang guard.
@@ -304,7 +305,7 @@ mod stand_in_probe {
     fn dropping_a_measure_kills_a_stuck_probe() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
-        let plugin = PluginRef::file(file).expect("a clap file");
+        let plugin = PluginRef::file(file);
 
         let task = catalog.measure(&plugin, None).expect("a file that exists");
         let pid = running_pid(&pid_file);
@@ -405,7 +406,12 @@ fn a_measure_state_does_not_reach_the_next_measure() {
     // The file holds two plugins, so the state is for the one the ref names.
     let registered = catalog.register(&a).expect("a plugin file");
     finish(&mut catalog, registered);
-    let named = PluginRef::from(&catalog.db().plugins().next().expect("a registered plugin"));
+    let named = catalog
+        .db()
+        .plugins()
+        .next()
+        .expect("a registered plugin")
+        .plugin_ref();
     let first = catalog
         .measure(&named, Some(&refused))
         .expect("a file that exists");
@@ -428,7 +434,7 @@ fn a_measure_state_does_not_reach_the_next_measure() {
     );
 
     let second = catalog
-        .measure(&PluginRef::file(&b).expect("a clap file"), None)
+        .measure(&PluginRef::file(&b), None)
         .expect("a file that exists");
     let second = finish(&mut catalog, second);
 
@@ -449,7 +455,7 @@ fn measure_names_a_missing_probe_binary() {
         .probe_locator(Locator::at(dir.path().join("no-such-plugin-probe")));
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
 
-    let plugin = PluginRef::file(&file).expect("a clap file");
+    let plugin = PluginRef::file(&file);
     let task = catalog.measure(&plugin, None).expect("a plugin file");
     let result = finish(&mut catalog, task);
 

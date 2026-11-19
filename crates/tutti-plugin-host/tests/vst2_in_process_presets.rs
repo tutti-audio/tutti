@@ -20,7 +20,6 @@
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
 use tutti_vst2_host::Vst2Loaded;
 
@@ -64,8 +63,7 @@ fn load_handle(env: &[(&str, &str)]) -> PluginHandle {
     let (_client, handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
-        &path,
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(&path),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     )
     .unwrap_or_else(|e| panic!("in-process VST2 load failed for {path:?}: {e:?}"));

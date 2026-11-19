@@ -9,7 +9,7 @@
 
 use std::path::Path;
 use tutti_plugin_types::{
-    Deadline, MainThreadMarker, PluginDescriptor, PluginFormat, ProbeRefusal, Unmeasured,
+    Deadline, Described, MainThreadMarker, PluginFormat, PluginId, ProbeRefusal, Unmeasured,
 };
 
 /// The format a file is read as: `format` when the caller names one, and the
@@ -35,21 +35,21 @@ pub fn describe(
     main: MainThreadMarker,
     path: &Path,
     format: Option<PluginFormat>,
-) -> Result<Vec<PluginDescriptor>, ProbeRefusal> {
+) -> Result<Vec<Described>, ProbeRefusal> {
     with_host(main, path, format, None).map(|(plugins, _)| plugins)
 }
 
 /// The plugins a measuring probe was asked about: which one takes the state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StateFor<'a> {
-    /// The id of the plugin the state is for; `None` is the file's first plugin.
-    pub plugin: Option<&'a str>,
+    /// The plugin the state is for; `None` is the file's first plugin.
+    pub plugin: Option<&'a PluginId>,
     /// The bytes the plugin's own `save_state` wrote.
     pub bytes: &'a [u8],
 }
 
 /// [`describe`], then measure each plugin the file holds: the descriptors come
-/// back with [`PluginDescriptor::measured`] set where the plugin could be
+/// back with [`PluginDescriptor::measured`](tutti_plugin_types::PluginDescriptor::measured) set where the plugin could be
 /// measured, and the plugins that could not be come back beside them, each with
 /// its [`MeasureFailure`](tutti_plugin_types::MeasureFailure).
 ///
@@ -84,7 +84,7 @@ pub fn describe_measured(
 type Measuring<'a> = (Option<StateFor<'a>>, Deadline);
 
 /// What a read of a file answers: its plugins, and those that could not be measured.
-type Read = Result<(Vec<PluginDescriptor>, Vec<Unmeasured>), ProbeRefusal>;
+type Read = Result<(Vec<Described>, Vec<Unmeasured>), ProbeRefusal>;
 
 /// The one module that differs by build: with a format to host it reads files; with
 /// none (no format feature, or only `au` off macOS) every format is refused.

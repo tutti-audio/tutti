@@ -42,7 +42,6 @@ mod loadable;
 mod mtime;
 mod os_path;
 mod pedal;
-mod plugin_ref;
 mod probe;
 mod probing;
 mod scanner;
@@ -56,13 +55,14 @@ pub use facts::FileFacts;
 pub use fs::canonical_path;
 pub use loadable::{BindError, Hosting, Loadable, Resolved};
 pub use mtime::{BeforeEpoch, Mtime};
-pub use plugin_ref::PluginRef;
 pub use probe::DEFAULT_PROBE_TIMEOUT;
 pub use probing::DEFAULT_MEASURE_TIMEOUT;
 pub use scanner::{
     FileFailure, FilesError, ProbeFailure, Scan, ScanBusy, ScanError, ScanPoll, ScanProgress,
     ScanResult, Scanner, probe_plugin_fallback,
 };
-pub use table::{BlacklistedFile, FileRow, FileState, PluginDb, PluginEntry, RowChange};
+pub use table::{
+    BlacklistedFile, FileRow, FileState, FormatMismatch, PluginDb, PluginEntry, Probed, RowChange,
+};
 #[cfg(feature = "serde")]
 pub use wire::{DB_VERSION, InvalidDb};

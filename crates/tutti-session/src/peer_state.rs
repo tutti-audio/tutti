@@ -138,11 +138,23 @@ impl PeerState {
     }
 
     /// The state `plugin` saved, under its format's media type
-    /// (`PeerState::plugin_media_type`).
+    /// (`PeerState::plugin_media_type`); `application/octet-stream` for a ref
+    /// whose file no format claims.
+    ///
+    /// # Panics
+    ///
+    /// Never: each name is 1 to 75 printable ASCII characters.
     #[cfg(feature = "plugin")]
     #[must_use]
     pub fn of_plugin(plugin: PluginRef, bytes: Vec<u8>) -> Self {
-        let media_type = Self::plugin_media_type(plugin.format());
+        // A ref of a file no format claims names no format: its state is bytes.
+        let media_type = plugin.format().map_or_else(
+            |_| {
+                MediaType::new("application/octet-stream")
+                    .expect("a constant of 1 to 75 printable ASCII characters")
+            },
+            Self::plugin_media_type,
+        );
         Self::new(SavedPeer::Plugin(plugin), media_type, bytes)
     }
 

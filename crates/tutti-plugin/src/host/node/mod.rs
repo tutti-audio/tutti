@@ -99,7 +99,7 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
-use tutti_plugin_db::{Loadable, PluginRef};
+use tutti_plugin_db::Loadable;
 use tutti_plugin_host::{
     InProcessClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
     Rebinder, RefreshSink, TransportSink, client_over,
@@ -109,8 +109,9 @@ use tutti_plugin_ipc::{
     Restore,
 };
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Features, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock, Origin,
-    ParameterChanges, PluginDescriptor, PluginInvalidation, PluginTail, Prepare, ResyncClass,
+    BridgeError, BridgeResult, Features, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock,
+    ParameterChanges, PluginDescriptor, PluginInvalidation, PluginRef, PluginTail, Prepare,
+    ResyncClass,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -230,7 +231,7 @@ impl PluginClient<Unbound> {
     /// Spawns the plugin-server, loads `plugin` and returns the loaded
     /// plugin, [`Unbound`].
     ///
-    /// `plugin` names the plugin in its file ([`PluginRef::load`]) and the
+    /// `plugin` names the plugin in its file ([`PluginRef::id`]) and the
     /// format that opens it: a scanned plugin's id picks it in a bundle that
     /// exports several, and [`PluginRef::file`] is the explicit "the file's
     /// first". The server opens the file as that format, whatever its extension.
@@ -276,7 +277,7 @@ impl PluginClient<Unbound> {
         state: Option<&[u8]>,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
         plugin.check()?;
-        let format = plugin.format();
+        let format = crate::host::placement::format_of(plugin)?;
         let plugin = plugin.plugin();
         let plugin_path = plugin.path().to_path_buf();
         // A VST2 plugin is not served (its editor and audio are one object):
@@ -287,7 +288,7 @@ impl PluginClient<Unbound> {
                 format: "VST2",
             });
         }
-        let origin = Origin::new(plugin_path, plugin.load());
+        let origin = plugin.clone();
         let Launched { ipc, restored } = Ipc::launch(
             config,
             &LoadRequest {
@@ -418,9 +419,9 @@ impl PluginClient<Unbound> {
             .origin()
             .cloned()
             .ok_or_else(|| failed("the served plugin has no origin".into()))?;
-        // The ref carries the id the plugin reports, so a state it saves and a
+        // The ref carries the id the server loaded, so a state it saves and a
         // hand-inserted node name it as a scan would.
-        let plugin = PluginRef::loaded(origin.origin.path(), origin.format, &descriptor.id);
+        let plugin = origin.origin.clone();
         let format = ipc.format();
         let served = ipc.controller();
         // Report the FULL input width (main + sidechain/aux input buses) so a

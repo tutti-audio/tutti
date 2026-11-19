@@ -49,10 +49,7 @@ fn session() -> DetachedSession {
 /// what is left of it is the returned handle, so dropping that is the last release.
 fn loaded_and_released(session: &mut DetachedSession, main: MainThreadMarker) -> PluginHandle {
     let node = session
-        .load_plugin_blocking(
-            main,
-            Spec::new(PluginRef::file(probe()).expect("a plugin file")),
-        )
+        .load_plugin_blocking(main, Spec::new(PluginRef::file(probe())))
         .expect("the in-process VST2 loads");
     let handle = session.plugin_view(node).expect("hosted").handle().clone();
     session.remove(node).expect("the plugin is removed");
@@ -117,10 +114,7 @@ fn a_session_dropped_off_the_main_thread_counts_its_stranded_closes() {
     let mut session = session();
     for _ in 0..2 {
         session
-            .load_plugin_blocking(
-                main,
-                Spec::new(PluginRef::file(probe()).expect("a plugin file")),
-            )
+            .load_plugin_blocking(main, Spec::new(PluginRef::file(probe())))
             .expect("the in-process VST2 loads");
     }
     let (closed, stranded) = (closes(), MainWork::stranded());

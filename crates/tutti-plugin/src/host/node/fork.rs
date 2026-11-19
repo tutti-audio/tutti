@@ -51,7 +51,8 @@
 //!    its CPU is not spent on the live server's audio thread. It is launched
 //!    at the live node's rate; the editor then prepares it at the fork's
 //!    rate, which reaches the new server as a rate change.
-//! 3. **Check it is the same plugin** (its id). The server loaded the state
+//! 3. **Restore the state.** The launch names the live instance's plugin id, so a
+//!    file that now holds another plugin refuses there. The server loaded the state
 //!    and activated the plugin at launch; a current preset then goes in over
 //!    the active plugin, and the state again after it (`ForkState::restore`,
 //!    which the in-process fork runs before activation). Parameters come
@@ -205,8 +206,6 @@ pub(crate) struct ServedFork {
     /// Where the live instance came from, which the fresh one is launched
     /// from again.
     origin: IpcOrigin,
-    /// The live instance's plugin id, which the fresh one must match.
-    id: String,
     /// What the live plugin can do: whether it has presets to carry across.
     features: Features,
     /// The live node's controls: its installed sources and its rate.
@@ -229,7 +228,6 @@ impl ServedFork {
             tempo,
             bridge: Arc::downgrade(&client.bridge),
             origin: client.origin.clone(),
-            id: client.descriptor.id.clone(),
             features: client.loaded.features,
             controls: client.controls.clone(),
         }
@@ -272,7 +270,6 @@ impl ServedFork {
             snapshot,
             delivered,
             origin: self.origin.clone(),
-            id: self.id.clone(),
             sample_rate: self.controls.sample_rate(),
             sources: self.controls.sources_now(),
             tempo: self.tempo.clone(),
@@ -295,8 +292,6 @@ struct Capture {
     /// playback plays.
     delivered: Vec<(tutti_units::ParamId, f64)>,
     origin: IpcOrigin,
-    /// The live instance's plugin id, which the fresh one must match.
-    id: String,
     /// The live node's rate, which the fresh instance is launched at.
     sample_rate: SampleRate,
     sources: ForkedSources,
@@ -322,13 +317,6 @@ impl Capture {
                 path: path.clone(),
                 source,
             })?;
-        if ipc.descriptor().id != self.id {
-            return Err(PluginForkError::Mismatch {
-                path,
-                expected: self.id,
-                found: ipc.descriptor().id.clone(),
-            });
-        }
         if let Some(Err(reason)) = restored {
             return Err(PluginForkError::LoadState(StateError::Rejected(reason)));
         }
@@ -481,7 +469,7 @@ mod tests {
     use std::time::Duration;
     use tutti_plugin_ipc::{BridgeConfig, ServerWatch, unique_socket_path};
     use tutti_plugin_types::PluginTail;
-    use tutti_plugin_types::{Load, Origin, PluginFormat, PresetId};
+    use tutti_plugin_types::{PluginFormat, PluginRef, PresetId};
     use tutti_units::{SampleRate, Samples};
 
     /// A fork's health reports a latency that moved after its graph was
@@ -521,7 +509,7 @@ mod tests {
     fn source_over(rig: &super::super::mock_server::Rig) -> ServedFork {
         let origin = IpcOrigin {
             config: BridgeConfig::at(unique_socket_path().expect("a socket path")),
-            origin: Origin::new("test.vst3", Load::new()),
+            origin: PluginRef::file("test.vst3"),
             format: PluginFormat::Vst3,
             load_editor: None,
         };
@@ -530,7 +518,6 @@ mod tests {
         ServedFork {
             bridge: Arc::downgrade(&rig.bridge),
             origin,
-            id: rig.descriptor.id.clone(),
             features: Features::PRESET_LOAD,
             controls,
             tempo: tempo(4.0),

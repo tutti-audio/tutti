@@ -31,7 +31,7 @@ fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
     let node = session
         .load_plugin_blocking(
             main,
-            Spec::new(PluginRef::file(tutti_fixtures::vst2_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(tutti_fixtures::vst2_probe())),
         )
         .expect("the in-process VST2 loads");
     let handle = session.plugin_view(node).expect("hosted").handle().clone();

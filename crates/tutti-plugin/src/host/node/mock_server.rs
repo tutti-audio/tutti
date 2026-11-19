@@ -83,12 +83,11 @@ fn layout() -> SlabLayout {
 fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
-    path: &std::path::Path,
+    plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-    _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+        path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -202,7 +201,7 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
     let server_slab = AudioSlab::open(shm, layout()).unwrap();
     let (bridge, thread, replies) = PluginBridge::new(
         path.clone(),
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(
             no_editor,
@@ -244,7 +243,6 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
         replies,
         record,
         descriptor: PluginDescriptor {
-            id: "test.plugin".into(),
             name: "Test Plugin".into(),
             vendor: String::new(),
             version: tutti_plugin_types::PluginVersion::Absent,

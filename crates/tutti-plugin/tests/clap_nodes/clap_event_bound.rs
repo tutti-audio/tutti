@@ -10,7 +10,6 @@ use tutti_fixtures::{machine_lock, main_thread};
 use tutti_buffers::MaxBlock;
 use tutti_clap_host::ClapLoaded;
 use tutti_graph::{Node, Prepare};
-use tutti_plugin_types::Load;
 use tutti_units::{SampleRate, Samples};
 
 /// The node's declared bound after a `prepare` at a graph block of `frames`.
@@ -28,8 +27,7 @@ fn the_declared_bound_is_what_the_list_holds_and_the_intake_takes() {
     let (client, _handle) = tutti_plugin_host::load_client::<ClapLoaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        tutti_fixtures::clap_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
         SampleRate::of(SAMPLE_RATE),
     )
     .expect("the reference plugin loads in process");

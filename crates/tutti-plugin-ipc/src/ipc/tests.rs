@@ -111,12 +111,11 @@ fn ask_until(what: &str, mut ask: impl FnMut(), done: impl Fn() -> bool) {
 fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
-    path: &std::path::Path,
+    plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-    _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+        path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -129,7 +128,7 @@ const POLL_GUARD: Duration = Duration::from_secs(60);
 
 fn mock() -> (Ipc, Mock) {
     mock_loading(
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         crate::EditorLoader::new(no_editor, tutti_fixtures::detached_work()),
     )
@@ -138,7 +137,7 @@ fn mock() -> (Ipc, Mock) {
 /// [`mock`] whose bridge was made for `origin` and loads its editor with
 /// `load_editor`.
 fn mock_loading(
-    origin: tutti_plugin_types::Origin,
+    origin: tutti_plugin_types::PluginRef,
     format: tutti_plugin_types::PluginFormat,
     load_editor: crate::EditorLoader,
 ) -> (Ipc, Mock) {
@@ -148,14 +147,14 @@ fn mock_loading(
 /// [`mock`] whose bridge has no editor loader: its editor lives in the server.
 fn mock_remote() -> (Ipc, Mock) {
     mock_with(
-        tutti_plugin_types::Origin::new("test.clap", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.clap"),
         tutti_plugin_types::PluginFormat::Clap,
         None,
     )
 }
 
 fn mock_with(
-    origin: tutti_plugin_types::Origin,
+    origin: tutti_plugin_types::PluginRef,
     format: tutti_plugin_types::PluginFormat,
     load_editor: Option<crate::EditorLoader>,
 ) -> (Ipc, Mock) {
@@ -756,20 +755,23 @@ fn a_plugin_with_no_origin_is_not_reopened() {
     assert!(ipc.reopen(main_thread()).is_err());
 }
 
-/// The format and `Load` the last [`recording_editor`] was given.
-static EDITOR_LOAD: Mutex<Option<(tutti_plugin_types::PluginFormat, tutti_plugin_types::Load)>> =
-    Mutex::new(None);
+/// The plugin and format the last [`recording_editor`] was given.
+static EDITOR_LOAD: Mutex<
+    Option<(
+        tutti_plugin_types::PluginRef,
+        tutti_plugin_types::PluginFormat,
+    )>,
+> = Mutex::new(None);
 
 fn recording_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
-    path: &std::path::Path,
+    plugin: &tutti_plugin_types::PluginRef,
     format: tutti_plugin_types::PluginFormat,
-    load: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
-    *EDITOR_LOAD.lock().unwrap() = Some((format, load.clone()));
+    *EDITOR_LOAD.lock().unwrap() = Some((plugin.clone(), format));
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+        path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "records the choice and loads nothing".into(),
     })
@@ -777,17 +779,20 @@ fn recording_editor(
 
 /// **The editor-only instance loads the plugin the audio instance is**, not
 /// the file's first, and as the format the audio instance was launched as,
-/// whatever the file's extension: the bridge hands its loader the format and
-/// `Load` it was made for.
+/// whatever the file's extension: the bridge hands its loader the plugin and
+/// format it was made for.
 /// It needs no display (the floating open takes no window), because the loader
 /// is asked before any editor exists; a real editor's identity cannot be read
 /// without one, so the choice is pinned where it is made.
 #[test]
 fn the_editor_instance_is_loaded_with_the_choice_the_bridge_was_made_for() {
     let _machine = machine_lock();
-    let chosen = tutti_plugin_types::Load::new().plugin("the.second.plugin");
+    let chosen = tutti_plugin_types::PluginRef::new(
+        "libbundle.so",
+        tutti_plugin_types::PluginId::Clap("the.second.plugin".into()),
+    );
     let (ipc, _peer) = mock_loading(
-        tutti_plugin_types::Origin::new("libbundle.so", chosen.clone()),
+        chosen.clone(),
         tutti_plugin_types::PluginFormat::Clap,
         crate::EditorLoader::new(recording_editor, tutti_fixtures::detached_work()),
     );
@@ -795,7 +800,7 @@ fn the_editor_instance_is_loaded_with_the_choice_the_bridge_was_made_for() {
     assert!(refused.is_err(), "the recording loader loads no editor");
     assert_eq!(
         *EDITOR_LOAD.lock().unwrap(),
-        Some((tutti_plugin_types::PluginFormat::Clap, chosen))
+        Some((chosen, tutti_plugin_types::PluginFormat::Clap))
     );
 }
 

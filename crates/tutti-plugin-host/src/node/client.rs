@@ -26,7 +26,7 @@ use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    Loaded, MainThreadMarker, MainWorkHandle, Origin, PluginDescriptor, PluginError,
+    Loaded, MainThreadMarker, MainWorkHandle, PluginDescriptor, PluginError, PluginRef,
     ProcessContext, ProcessOutput, Processor, process_block, sanitize,
 };
 use tutti_rt::Rt;
@@ -507,7 +507,7 @@ pub(super) fn drain_sample_rate<L: Loaded>(
 /// of its owner, which the new instance hands its close to.
 #[derive(Clone)]
 pub(super) struct Reload {
-    pub(super) origin: Origin,
+    pub(super) origin: PluginRef,
     pub(super) work: MainWorkHandle,
 }
 

@@ -188,8 +188,12 @@ impl Format for Au {
         tutti_au_host::AuLoaded::load(
             main_thread(),
             &tutti_fixtures::detached_work(),
-            &plugin::au_bundle(),
-            &tutti_plugin_types::Load::new().plugin(tutti_shared_plugin::AU_ID),
+            &tutti_plugin_types::PluginRef::new(
+                plugin::au_bundle(),
+                tutti_shared_plugin::AU_ID
+                    .parse()
+                    .expect("the shared AU's id is an AU id"),
+            ),
         )
         .expect("the shared AU loads")
     }

@@ -12,8 +12,7 @@
 //! the blacklist.
 
 use crate::catalog::{BlacklistView, Catalog};
-use crate::plugin_ref::PluginRef;
-use tutti_plugin_types::{BridgeResult, PluginFormat};
+use tutti_plugin_types::{BridgeResult, PluginFormat, PluginRef, UnknownExtension};
 
 /// Where a plugin runs: in the host's own process or in a `plugin-server`
 /// process. A choice made per load ([`Loadable::hosting`]); everything a
@@ -117,9 +116,14 @@ impl Loadable {
         &self.plugin
     }
 
-    /// The format whose loader opens the file.
-    #[must_use]
-    pub fn format(&self) -> PluginFormat {
+    /// The format whose loader opens the file: the plugin id's, so a link
+    /// `Foo.clap` to `libfoo.so` is CLAP.
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownExtension`] for a plugin with no id (the file's first) whose
+    /// extension names no format.
+    pub fn format(&self) -> Result<PluginFormat, UnknownExtension> {
         self.plugin.format()
     }
 
@@ -194,7 +198,7 @@ mod tests {
     use super::*;
 
     fn loadable(name: &str) -> Loadable {
-        Loadable::uncatalogued(PluginRef::file(format!("/p/{name}.clap")).expect("a plugin file"))
+        Loadable::uncatalogued(PluginRef::file(format!("/p/{name}.clap")))
     }
 
     /// **`bind` takes an exact resolution and nothing else**: an ambiguous one

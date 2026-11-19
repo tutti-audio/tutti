@@ -20,8 +20,23 @@ pub fn placement(plugin: &Loadable) -> BridgeResult<Hosting> {
     resolve(
         plugin.requested_hosting(),
         plugin.plugin().path(),
-        plugin.plugin().format(),
+        format_of(plugin)?,
     )
+}
+
+/// The format whose loader opens `plugin`.
+///
+/// # Errors
+///
+/// [`BridgeError::UnknownFormat`] for a plugin with no id whose file's extension
+/// names no format.
+pub(crate) fn format_of(plugin: &Loadable) -> BridgeResult<PluginFormat> {
+    plugin
+        .format()
+        .map_err(|source| BridgeError::UnknownFormat {
+            path: plugin.plugin().path().to_path_buf(),
+            source,
+        })
 }
 
 /// Where a load of the `format` plugin at `path` runs when it asks for `hosting`:
@@ -141,5 +156,18 @@ mod tests {
             resolve(Hosting::InProcess, Path::new("P.clap"), PluginFormat::Clap).unwrap(),
             Hosting::InProcess
         );
+    }
+
+    /// **A ref with no id whose extension names no format is refused at
+    /// placement**, typed, before anything is loaded.
+    #[test]
+    fn a_ref_of_no_format_is_refused_at_placement() {
+        let loadable = Loadable::uncatalogued(tutti_plugin_types::PluginRef::file("/p/notes.txt"));
+        match placement(&loadable) {
+            Err(BridgeError::UnknownFormat { path, .. }) => {
+                assert_eq!(path, Path::new("/p/notes.txt"));
+            }
+            other => panic!("expected UnknownFormat, got {other:?}"),
+        }
     }
 }

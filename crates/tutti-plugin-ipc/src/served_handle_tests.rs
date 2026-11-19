@@ -33,12 +33,11 @@ use tutti_units::SampleRate;
 fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
-    path: &std::path::Path,
+    plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-    _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+        path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -181,7 +180,7 @@ fn handle_with_mock_server(
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
@@ -215,7 +214,6 @@ fn handle_with_mock_server(
     });
 
     let descriptor = PluginDescriptor {
-        id: "test.plugin".into(),
         name: "Test Plugin".into(),
         vendor: String::new(),
         version: tutti_plugin_types::PluginVersion::Absent,
@@ -269,7 +267,7 @@ fn handle_with_multi_reply_server(
     .unwrap();
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
@@ -304,7 +302,6 @@ fn handle_with_multi_reply_server(
     });
 
     let descriptor = PluginDescriptor {
-        id: "test.plugin".into(),
         name: "Test Plugin".into(),
         vendor: String::new(),
         version: tutti_plugin_types::PluginVersion::Absent,

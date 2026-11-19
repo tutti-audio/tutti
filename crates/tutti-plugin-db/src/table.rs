@@ -12,7 +12,9 @@ use crate::facts::{self, FileFacts};
 use crate::mtime::Mtime;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginRole};
+use tutti_plugin_types::{
+    Described, PluginDescriptor, PluginFormat, PluginId, PluginRef, PluginRole,
+};
 
 /// What the database knows about one plugin file.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +26,51 @@ pub struct FileRow {
     pub mtime: Option<Mtime>,
     /// What the probe found.
     pub state: FileState,
+}
+
+/// A probed row being made ([`FileRow::probed`]).
+#[derive(Debug, Clone)]
+#[must_use = "a Probed does nothing until build makes the row"]
+pub struct Probed {
+    format: PluginFormat,
+    mtime: Option<Mtime>,
+    plugins: Vec<Described>,
+}
+
+impl Probed {
+    /// The plugins the file held, in the probe's order.
+    pub fn plugins(mut self, plugins: Vec<Described>) -> Self {
+        self.plugins = plugins;
+        self
+    }
+
+    /// The row.
+    ///
+    /// # Errors
+    ///
+    /// [`FormatMismatch`] when a plugin's id is of another format than the
+    /// row's: the row would name two formats for one file.
+    pub fn build(self) -> Result<FileRow, FormatMismatch> {
+        let row = FileRow {
+            mtime: self.mtime,
+            state: FileState::Probed {
+                format: self.format,
+                plugins: self.plugins,
+            },
+        };
+        row.check_formats()?;
+        Ok(row)
+    }
+}
+
+/// A probed row holding a plugin id of another format than the row's.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("a {} row holds the plugin id `{id}`", row.extension_id())]
+pub struct FormatMismatch {
+    /// The row's format.
+    pub row: PluginFormat,
+    /// The id of another format.
+    pub id: PluginId,
 }
 
 /// What a probe made of a file.
@@ -41,7 +88,7 @@ pub enum FileState {
         /// of a CLAP factory, every audio class of a VST3 factory, every unit
         /// of an AU bundle, every sub-plugin of a VST2 shell; one for any other
         /// file.
-        plugins: Vec<PluginDescriptor>,
+        plugins: Vec<Described>,
     },
     /// The file brought a scan down and will not be opened.
     Blacklisted {
@@ -51,12 +98,36 @@ pub enum FileState {
 }
 
 impl FileRow {
-    /// The row for a file that probed into `plugins`, stamped with `facts`' time.
-    #[must_use]
-    pub fn probed(format: PluginFormat, facts: &FileFacts, plugins: Vec<PluginDescriptor>) -> Self {
-        Self {
+    /// The row of a file that probed as `format`, stamped with `facts`' time:
+    /// [`Probed::plugins`] says what it held, and [`Probed::build`] refuses an id
+    /// of another format.
+    pub fn probed(format: PluginFormat, facts: &FileFacts) -> Probed {
+        Probed {
+            format,
             mtime: facts.mtime,
-            state: FileState::Probed { format, plugins },
+            plugins: Vec::new(),
+        }
+    }
+
+    /// Whether every plugin id of a probed row is of the row's format.
+    ///
+    /// # Errors
+    ///
+    /// [`FormatMismatch`] naming the first id that is not.
+    pub fn check_formats(&self) -> Result<(), FormatMismatch> {
+        let FileState::Probed { format, plugins } = &self.state else {
+            return Ok(());
+        };
+        match plugins
+            .iter()
+            .filter_map(|p| p.id.as_ref())
+            .find(|id| id.format() != *format)
+        {
+            Some(id) => Err(FormatMismatch {
+                row: *format,
+                id: id.clone(),
+            }),
+            None => Ok(()),
         }
     }
 
@@ -73,7 +144,7 @@ impl FileRow {
 
     /// The format and plugins of a probed file; `None` when it is blacklisted.
     #[must_use]
-    pub fn probe_result(&self) -> Option<(PluginFormat, &[PluginDescriptor])> {
+    pub fn probe_result(&self) -> Option<(PluginFormat, &[Described])> {
         match &self.state {
             FileState::Probed { format, plugins } => Some((*format, plugins)),
             FileState::Blacklisted { .. } => None,
@@ -82,7 +153,7 @@ impl FileRow {
 
     /// The plugins the file holds; none when it is blacklisted.
     #[must_use]
-    pub fn plugins(&self) -> &[PluginDescriptor] {
+    pub fn plugins(&self) -> &[Described] {
         self.probe_result().map_or(&[], |(_, plugins)| plugins)
     }
 
@@ -167,11 +238,24 @@ pub struct PluginEntry<'a> {
     pub path: &'a Path,
     /// Which format's loader opens it.
     pub format: PluginFormat,
+    /// The format's own id for it; `None` for a plugin listed by its file name
+    /// alone (a scan whose probe was unavailable), which names the file's first
+    /// plugin.
+    pub id: Option<&'a PluginId>,
     /// What the probe reported.
     pub descriptor: &'a PluginDescriptor,
 }
 
 impl PluginEntry<'_> {
+    /// The plugin as a ref: its file and id.
+    #[must_use]
+    pub fn plugin_ref(&self) -> PluginRef {
+        match self.id {
+            Some(id) => PluginRef::new(self.path, id.clone()),
+            None => PluginRef::first_of(self.path, self.format),
+        }
+    }
+
     /// What the plugin is (instrument, effect, ...), normalized across formats.
     #[must_use]
     pub fn role(&self) -> PluginRole {
@@ -265,10 +349,11 @@ impl PluginDb {
                     .map(|(format, plugins)| (path, format, plugins))
             })
             .flat_map(|(path, format, plugins)| {
-                plugins.iter().map(move |descriptor| PluginEntry {
+                plugins.iter().map(move |plugin| PluginEntry {
                     path,
                     format,
-                    descriptor,
+                    id: plugin.id.as_ref(),
+                    descriptor: &plugin.descriptor,
                 })
             })
     }
@@ -350,7 +435,7 @@ impl PluginDb {
 mod tests {
     use super::*;
     use crate::facts::{ScanDecision, classify};
-    use tutti_plugin_types::PluginClass;
+    use tutti_plugin_types::{PluginClass, Uid};
 
     const T: u64 = 1_700_000_000;
 
@@ -365,11 +450,13 @@ mod tests {
     }
 
     fn row(mtime: u64) -> FileRow {
-        FileRow::probed(
-            PluginFormat::Vst3,
-            &facts(mtime),
-            vec![PluginDescriptor::new("id", "name", PluginClass::Unknown)],
-        )
+        FileRow::probed(PluginFormat::Vst3, &facts(mtime))
+            .plugins(vec![Described {
+                id: Some(PluginId::Vst3(Uid::new([1; 16]))),
+                descriptor: PluginDescriptor::new("name", PluginClass::Unknown),
+            }])
+            .build()
+            .expect("ids of the row's format")
     }
 
     fn db_with(path: &str, row: FileRow) -> PluginDb {
@@ -453,7 +540,10 @@ mod tests {
     fn a_blacklisted_row_names_no_format_and_a_probed_one_names_its_own() {
         let mut db = db_with(
             "/p/good.clap",
-            FileRow::probed(PluginFormat::Clap, &facts(T), vec![]),
+            FileRow::probed(PluginFormat::Clap, &facts(T))
+                .plugins(vec![])
+                .build()
+                .expect("ids of the row's format"),
         );
         db.blacklist(Path::new("/p/bad.vst3"), "boom".into(), &facts(T));
         assert_eq!(
@@ -466,10 +556,18 @@ mod tests {
     /// A file may hold several plugins and each is listed under the file's path.
     #[test]
     fn a_file_with_several_plugins_lists_each() {
-        let ids = ["a", "b"].map(|n| PluginDescriptor::new(n, n, PluginClass::Unknown));
+        let ids = [1, 2].map(|n| {
+            Described::new(
+                PluginId::Vst2(n),
+                PluginDescriptor::new(["a", "b"][n as usize - 1], PluginClass::Unknown),
+            )
+        });
         let db = db_with(
-            "/p/shell.vst3",
-            FileRow::probed(PluginFormat::Vst3, &facts(T), ids.to_vec()),
+            "/p/shell.vst",
+            FileRow::probed(PluginFormat::Vst2, &facts(T))
+                .plugins(ids.to_vec())
+                .build()
+                .expect("ids of the row's format"),
         );
         let names: Vec<_> = db.plugins().map(|p| p.descriptor.name.as_str()).collect();
         assert_eq!(names, ["a", "b"]);
@@ -521,5 +619,47 @@ mod tests {
         assert_eq!(pruned, vec![PathBuf::from("/p/gone.vst3")]);
         assert_eq!(db.len(), 1);
         assert!(db.row(Path::new("/p/here.vst3")).is_some());
+    }
+
+    /// **A row holds one format**: a plugin id of another format is refused when
+    /// the row is made, naming both.
+    #[test]
+    fn a_row_refuses_an_id_of_another_format() {
+        let stray = Described::new(
+            PluginId::Vst2(1),
+            PluginDescriptor::new("x", PluginClass::Unknown),
+        );
+        let refused = FileRow::probed(PluginFormat::Vst3, &facts(T))
+            .plugins(vec![stray])
+            .build()
+            .expect_err("a VST2 id in a VST3 row");
+        assert_eq!(
+            refused,
+            FormatMismatch {
+                row: PluginFormat::Vst3,
+                id: PluginId::Vst2(1)
+            }
+        );
+        assert!(refused.to_string().contains("vst3") && refused.to_string().contains("vst2.1"));
+    }
+
+    /// **An id-less listing keeps its row's format in its ref**, whatever its
+    /// path's extension: a link keyed by its target `libfoo.bin` is still CLAP.
+    #[test]
+    fn an_id_less_entry_keeps_its_rows_format() {
+        let listing = Described {
+            id: None,
+            descriptor: PluginDescriptor::new("foo", PluginClass::Unknown),
+        };
+        let db = db_with(
+            "/p/libfoo.bin",
+            FileRow::probed(PluginFormat::Clap, &facts(T))
+                .plugins(vec![listing])
+                .build()
+                .expect("no ids to disagree"),
+        );
+        let entry = db.plugins().next().expect("one entry");
+        assert_eq!(entry.plugin_ref().format(), Ok(PluginFormat::Clap));
+        assert_eq!(entry.plugin_ref().id(), None);
     }
 }

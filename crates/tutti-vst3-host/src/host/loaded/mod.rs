@@ -27,11 +27,11 @@ use tutti_vst3_ffi::{
 };
 
 use crate::error::{LoadCause, LoadStage, Result, Vst3Error};
-use crate::helpers::cid_to_string;
 use crate::types::{
     ContentScale, EditorCapabilities, PluginInfo, PrefetchSupport, Vst3KeyswitchInfo,
     Vst3NoteExpressionInfo, Vst3ParameterInfo, Vst3ProgramListInfo, Vst3UnitInfo, WindowHandle,
 };
+use tutti_plugin_types::Uid;
 
 use super::instance::usable_topology;
 use super::library::Library;
@@ -66,7 +66,7 @@ pub struct Vst3Loaded {
     /// and outlives activate/deactivate cycles.
     pub(super) midi_learn: MidiLearnConsumer,
     /// What `rebuild` and `Reopen` load again.
-    pub(super) origin: tutti_plugin_types::Origin,
+    pub(super) origin: tutti_plugin_types::PluginRef,
     /// The collector of this plugin's owner, which a reload gives its new instance.
     pub(super) work: tutti_plugin_types::MainWorkHandle,
     /// The catalog identity, with the editor measured on first ask.
@@ -120,7 +120,7 @@ impl Activation {
 /// The default loads the bundle's first audio class.
 #[derive(Debug, Clone, Default)]
 pub struct LoadOptions {
-    class_id: Option<String>,
+    class_id: Option<Uid>,
 }
 
 impl LoadOptions {
@@ -131,16 +131,16 @@ impl LoadOptions {
     }
 
     /// Loads the audio class with this id from a bundle that exports several:
-    /// `vst3.<class id>`, the `id` of the class's descriptor (and of
-    /// [`class_id`] over a [`Library::class_info`]). A display
-    /// name is not an id.
+    /// the id a [`PluginId::Vst3`](tutti_plugin_types::PluginId) holds (and
+    /// [`class_id`] gives over a [`Library::class_info`]). A display name is
+    /// not an id.
     ///
     /// One VST3 bundle may export many plugins: that is the normal shape for a
     /// commercial suite, and `mda-vst3` exports 34 audio classes from one
     /// binary.
     #[must_use]
-    pub fn class_id(mut self, id: impl Into<String>) -> Self {
-        self.class_id = Some(id.into());
+    pub fn class_id(mut self, id: Uid) -> Self {
+        self.class_id = Some(id);
         self
     }
 }

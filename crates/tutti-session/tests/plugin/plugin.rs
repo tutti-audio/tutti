@@ -70,7 +70,7 @@ fn session_built(
     build: impl FnOnce(tutti_session::SessionBuilder) -> tutti_session::SessionBuilder,
 ) -> Session {
     // The probe of the plugin's file runs before any fault variable is set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
+    crate::pooled::prime(&PluginRef::file(clap_probe()));
     set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     set_env(
         "TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY",
@@ -93,7 +93,7 @@ fn session_built(
 fn add_probe(s: &mut Session) -> NodeKey {
     s.load_plugin_blocking(
         tutti_fixtures::main_thread(),
-        Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+        Spec::new(PluginRef::file(clap_probe())),
     )
     .expect("the reference CLAP plugin loads")
     .erase()

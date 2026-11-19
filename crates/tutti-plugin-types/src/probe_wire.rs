@@ -10,7 +10,7 @@
 //! probe did not finish (a crash or a hang), which the reader tells from the
 //! process, not from the file.
 
-use crate::{PluginDescriptor, ProbeRefusal, ResultError, Unmeasured};
+use crate::{Described, ProbeRefusal, ResultError, Unmeasured};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -25,7 +25,7 @@ const TAG: [u8; 4] = *b"TPRB";
 /// version mismatch is [`ResultError::ProtocolMismatch`] and not a decode
 /// error. Nothing derives the version from the types; a test that pinned the
 /// bytes of a value would pin tutti's own output, which is no spec.
-const VERSION: u8 = 6;
+const VERSION: u8 = 7;
 
 /// Magic, the version, then the payload length as a little-endian `u64`.
 const HEADER: usize = TAG.len() + 1 + 8;
@@ -41,10 +41,10 @@ pub enum ProbeOutcome {
     /// no plugin is a [`Failed`](Self::Failed).
     Described {
         /// The descriptors.
-        plugins: Vec<PluginDescriptor>,
+        plugins: Vec<Described>,
         /// The plugins a measuring probe could not measure, and why; empty when
         /// it did not measure. Such a plugin's descriptor has no
-        /// [`measured`](PluginDescriptor::measured).
+        /// [`measured`](crate::PluginDescriptor::measured).
         unmeasured: Vec<Unmeasured>,
     },
     /// The probe ran to its end and refused the plugin.
@@ -169,18 +169,20 @@ pub fn read_result(result: &Path) -> Result<Option<ProbeOutcome>, ResultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MeasureFailure;
+    use crate::{MeasureFailure, PluginDescriptor, PluginId};
 
     fn described() -> ProbeOutcome {
-        let plugin = |id: &str| PluginDescriptor {
-            id: id.into(),
-            name: id.into(),
-            ..PluginDescriptor::default()
+        let plugin = |id: &str| Described {
+            id: Some(PluginId::Clap(id.into())),
+            descriptor: PluginDescriptor {
+                name: id.into(),
+                ..PluginDescriptor::default()
+            },
         };
         ProbeOutcome::Described {
-            plugins: vec![plugin("clap.test"), plugin("clap.other")],
+            plugins: vec![plugin("test"), plugin("other")],
             unmeasured: vec![Unmeasured {
-                plugin: "clap.other".into(),
+                plugin: PluginId::Clap("other".into()),
                 failure: MeasureFailure::NoAudioOutput,
             }],
         }
@@ -335,10 +337,12 @@ mod tests {
         let plugins = verdicts
             .into_iter()
             .enumerate()
-            .map(|(k, (tail, latency))| PluginDescriptor {
-                id: format!("plugin{k}"),
-                measured: Some(measured(tail, latency)),
-                ..PluginDescriptor::default()
+            .map(|(k, (tail, latency))| Described {
+                id: Some(PluginId::Vst2(k as u32)),
+                descriptor: PluginDescriptor {
+                    measured: Some(measured(tail, latency)),
+                    ..PluginDescriptor::default()
+                },
             })
             .collect();
         let outcome = ProbeOutcome::Described {
@@ -366,7 +370,7 @@ mod tests {
             ProbeRefusal::FormatNotCompiled(PluginFormat::AudioUnit),
             ProbeRefusal::StateUnreadable(reason()),
             ProbeRefusal::StateRefused {
-                plugin: "p".into(),
+                plugin: PluginId::Vst2(1),
                 reason: reason(),
             },
             ProbeRefusal::Load {
@@ -374,7 +378,7 @@ mod tests {
                 reason: reason(),
             },
             ProbeRefusal::Describe(reason()),
-            ProbeRefusal::UnknownPlugin("p".into()),
+            ProbeRefusal::UnknownPlugin(PluginId::Vst2(1)),
             ProbeRefusal::AmbiguousPlugin { count: 2 },
             ProbeRefusal::Usage,
             ProbeRefusal::NotMainThread,
@@ -408,11 +412,14 @@ mod tests {
             MeasureFailure::TimedOut { rate, block },
         ];
         let outcome = ProbeOutcome::Described {
-            plugins: vec![PluginDescriptor::default()],
+            plugins: vec![Described {
+                id: None,
+                descriptor: PluginDescriptor::default(),
+            }],
             unmeasured: failures
                 .into_iter()
                 .map(|failure| Unmeasured {
-                    plugin: "p".into(),
+                    plugin: PluginId::Vst2(1),
                     failure,
                 })
                 .collect(),
@@ -428,7 +435,13 @@ mod tests {
         else {
             panic!("described");
         };
-        let ids: Vec<_> = plugins.iter().map(|p| p.id.as_str()).collect();
-        assert_eq!(ids, ["clap.test", "clap.other"]);
+        let ids: Vec<_> = plugins.iter().map(|p| p.id.clone().unwrap()).collect();
+        assert_eq!(
+            ids,
+            [
+                PluginId::Clap("test".into()),
+                PluginId::Clap("other".into())
+            ]
+        );
     }
 }
