@@ -64,9 +64,10 @@ tutti-export = { version = "0.0.1", path = "../tutti-export", default-features =
 # `DecodeError` (in `Error::Decode`, whatever decoders are on) and `Format`,
 # the file format a bounce names (`Bounce::format`). No codec feature.
 tutti-codec = { version = "0.0.1", path = "../tutti-codec" }
-# `DitherSink`, the dither a recording opts into (the one an export uses), and
-# the `DitherShape` a bounce names.
-tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false, optional = true }
+# `DitherSink`, the dither a recording opts into (the one an export uses), the
+# `DitherShape` a bounce names, and the `Lerp` and `Lanes` bounds of the nodes
+# the session wires in any float.
+tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false }
 tutti-plugin = { version = "0.0.1", path = "../tutti-plugin", optional = true }
 # The control handle, the node's controls and the host policy over a handle
 # (`Liveness`, `PluginParamValues`): what a hosted plugin is, whatever serves it.
@@ -82,7 +83,7 @@ default = []
 device = ["dep:tutti-cpal"]
 # The `Recorder` and its pump loop, device-free: a host that records files or
 # taps without a microphone takes it alone.
-record = ["dep:tutti-dsp"]
+record = []
 # Live audio input from the sound card: `Session::add_input`, takes, mic capture;
 # implies `device` and `record`.
 capture = ["device", "record", "tutti-cpal/capture", "encode-wav"]
@@ -111,7 +112,7 @@ synth = ["midi", "dep:tutti-polysynth"]
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the
 # Vorbis library, `ogg_next_sys`). `cargo xtask check-layout` holds that a build
 # with `export` alone reaches no C.
-export = ["dep:tutti-export", "dep:tutti-dsp", "encode-wav"]
+export = ["dep:tutti-export", "encode-wav"]
 # The encoders `tutti-codec` writes, under the codec's own names; none implies `export`.
 encode-wav = ["tutti-codec/encode-wav"]
 encode-flac = ["tutti-codec/encode-flac"]

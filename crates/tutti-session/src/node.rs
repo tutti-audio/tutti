@@ -172,9 +172,18 @@ macro_rules! param_session_node {
         param_session_node!(@impl f32, tutti_nodes::$ty<f32>);
         param_session_node!(@impl f64, tutti_nodes::$ty<f64>);
     )*};
-    // A node of the session's default float only.
-    (f32 => $($ty:ty),* $(,)?) => {$(
-        param_session_node!(@impl f32, $ty);
+    // A kernel node of a float with the lerp its kernel needs, in a graph of that float.
+    (kernel: $($ty:ident),* $(,)?) => {$(
+        impl<F: Float + tutti_dsp::Lerp> SessionNode<F> for tutti_nodes::$ty<F> {
+            fn params(controls: &ParamSet) -> Option<ParamSet> {
+                Some(controls.clone())
+            }
+
+            // A `ParamSet` publishes through `Param` atomics, no cell.
+            fn reclaimer(_: &ParamSet) -> Reclaims {
+                Reclaims::Nothing
+            }
+        }
     )*};
     // A node of no float of its own, in a graph of any.
     (any: $($ty:ty),* $(,)?) => {$(
@@ -242,8 +251,8 @@ param_session_node!(
     CrossoverNode,
 );
 
-/// The bus strip: its params by address, in the session's default float.
-impl SessionNode for tutti_nodes::BusStripNode {
+/// The bus strip: its params by address, in a graph of any float.
+impl<F: Float> SessionNode<F> for tutti_nodes::BusStripNode {
     fn params(controls: &ParamSet) -> Option<ParamSet> {
         Some(controls.clone())
     }
@@ -275,14 +284,13 @@ multiband_session_node!(f32, f64);
 // blend is the graph's mix), and the convolution reverb (its wet gain, `Volume`).
 param_session_node!(
     floats: DelayNode,
-    ModDelayNode,
     PhaserNode,
-    FreeverbNode,
     FdnNode,
     PlateReverbNode,
     ConvolverNode,
 );
 param_session_node!(any: tutti_nodes::LfoNode, tutti_nodes::OscillatorNode);
+param_session_node!(kernel: ModDelayNode, FreeverbNode);
 
 /// An audio inlet as a graph node: no controls (the writer is the producer's),
 /// no params. Its fork is refused ([`Graph::open_inlet`](crate::Graph::open_inlet)).
@@ -382,7 +390,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiIngestNode {
 
 /// The SoundFont player as a graph node.
 #[cfg(feature = "soundfont")]
-impl SessionNode for tutti_soundfont::SoundFontUnit<f32> {
+impl<F: Float + tutti_dsp::Lanes> SessionNode<F> for tutti_soundfont::SoundFontUnit<F> {
     fn reclaimer(_: &()) -> Reclaims {
         Reclaims::Nothing
     }
@@ -396,7 +404,16 @@ param_session_node!(floats: VbapPannerNode, HrtfBinauralNode);
 // (master volume, unison detune and spread) as a `ParamSet`, so a param
 // write reaches it and a fork of it starts from what was set.
 #[cfg(feature = "synth")]
-param_session_node!(f32 => tutti_polysynth::PolySynth<f32>);
+impl<F: tutti_polysynth::SynthFloat> SessionNode<F> for tutti_polysynth::PolySynth<F> {
+    fn params(controls: &ParamSet) -> Option<ParamSet> {
+        Some(controls.clone())
+    }
+
+    // A `ParamSet` publishes through `Param` atomics, no cell.
+    fn reclaimer(_: &ParamSet) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// A voice as a graph node: its params (the gain) addressed by its set, so a
 /// param write reaches the cell the node reads and a fork starts from the
