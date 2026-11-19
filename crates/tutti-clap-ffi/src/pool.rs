@@ -167,7 +167,7 @@ unsafe impl TaskPool for GraphPool {
 
     fn try_run(&self, wake: usize, job: &(dyn Fn(usize) + Sync)) -> bool {
         self.0
-            .try_run(wake, &|i| tutti_rt::with_no_denormals(|| job(i)))
+            .try_run(wake, &|i| tutti_platform::with_no_denormals(|| job(i)))
     }
 }
 

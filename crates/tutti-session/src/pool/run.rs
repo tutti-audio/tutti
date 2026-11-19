@@ -3,7 +3,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tutti_rt::MainThreadMarker;
+use tutti_platform::MainThreadMarker;
 
 use crate::jobs::panic_message;
 use crate::pool::entry::{LoadError, Step, Value};

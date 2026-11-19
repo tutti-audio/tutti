@@ -20,6 +20,7 @@ members = [
     "crates/tutti-units",
     "crates/tutti-music",
     "crates/tutti-codec",
+    "crates/tutti-platform",
     "crates/tutti-rt",
     "crates/tutti-ump",
     "crates/tutti-midi-protocol",

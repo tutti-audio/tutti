@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::{cdylib, main_thread, profile_dir};
+use tutti_platform::MainThreadMarker;
 use tutti_plugin_types::{Loaded, MainWork, MainWorkHandle, PluginError, Prepare, WindowHandle};
-use tutti_rt::MainThreadMarker;
 
 /// The constant 120 BPM a plugin node's tests render under.
 ///

@@ -164,8 +164,11 @@ std only. A rule the compiler already enforces is not a gate.
 - A library with no `unsafe` carries `#![forbid(unsafe_code)]` (`cargo xtask check-ffi`).
 - Plugin FFI `unsafe` lives only in `tutti-clap-ffi`, `tutti-vst3-ffi`, `tutti-au-ffi` and
   `tutti-vst2-ffi`; the process edge's in `tutti-plugin-ipc-ffi`; MIDI's OS calls in
-  `tutti-alsa-ffi`, `tutti-coremidi-ffi` and `tutti-winmm-ffi`. Everything above them forbids `unsafe`.
-  Test-only `unsafe` is `tutti-fixtures`'.
+  `tutti-alsa-ffi`, `tutti-coremidi-ffi` and `tutti-winmm-ffi`; the OS calls (clock, thread
+  priority, main-thread detection, denormal control) in `tutti-platform`. Everything above
+  them forbids `unsafe`. Test-only `unsafe` is `tutti-fixtures`'.
+- Time, threads, thread priority, the main thread and denormal control come from
+  `tutti-platform`; it names no tutti crate and holds only what needs a platform `cfg`.
 - New lock-free or `unsafe` runtime structure goes in `tutti-rt`, with a loom model that
   runs the shipped code. The publish cell is the `arc-lend` crate from its own repository
   (github.com/tutti-audio/arc-lend); a change to it is made there.
@@ -185,7 +188,7 @@ touched.
 - A wake-up is `tutti_rt::parker()`: any number of `Unparker`s unpark one `Parker`.
 - A value the audio thread must never drop holds a `tutti_rt::ControlDrop`.
 - A `Mutex` is taken with `tutti_rt::LockExt::lock_recover`; a thread is started with
-  `tutti_rt::spawn_named`.
+  `tutti_platform::spawn_named`.
 - A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at
   construction, refusing past it, never growing. A value of more than one field read as
   one word is a `PackedAtomic`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.
@@ -300,22 +303,23 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 **Layering.** Normal and build dependencies point strictly down this list
 (dev-dependencies may go anywhere); `cargo xtask check-layout` holds it:
 
-0. `tutti-units`, `tutti-plugin-ipc-ffi`
-1. `tutti-music`, `tutti-ump`, `tutti-buffers`
-2. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-midi-protocol`,
+0. `tutti-platform`
+1. `tutti-units`, `tutti-plugin-ipc-ffi`
+2. `tutti-music`, `tutti-ump`, `tutti-buffers`
+3. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-midi-protocol`,
    `tutti-midi-ci`, `tutti-curve`
-3. `tutti-rt`, `tutti-midi-device`
-4. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
+4. `tutti-rt`, `tutti-midi-device`
+5. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
    `tutti-tempo`, `tutti-voicing`, `tutti-sf2`, `tutti-midi-network`
-5. `tutti-transport`, `tutti-plugin-types`, `tutti-measure`
-6. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
+6. `tutti-transport`, `tutti-plugin-types`, `tutti-measure`
+7. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
    `tutti-vst3-ffi`, `tutti-au-ffi`, `tutti-vst2-ffi`, `tutti-plugin-db`, `tutti-plugin-ipc`
-7. `tutti-cpal`, `tutti-export`, `tutti-sampler`, `tutti-polysynth`, `tutti-soundfont`,
+8. `tutti-cpal`, `tutti-export`, `tutti-sampler`, `tutti-polysynth`, `tutti-soundfont`,
    `tutti-midi-hardware`, `tutti-clap-host`, `tutti-vst3-host`, `tutti-au-host`,
    `tutti-vst2-host`, `tutti-plugin-host`
-8. `tutti-plugin`, `tutti-plugin-probe`
-9. `tutti-plugin-server`, `tutti-session`
-10. `tutti`
+9. `tutti-plugin`, `tutti-plugin-probe`
+10. `tutti-plugin-server`, `tutti-session`
+11. `tutti`
 
 - Nothing under `crates/` has a normal or build dependency on `testing/`.
 - Only `tutti` depends on `tutti-session`, and nothing depends on `tutti` but a
@@ -324,6 +328,7 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 - A crate keeps its modules private and is named from its root; `check-paths` enforces it.
 - `check-layout` also holds each crate's limits on its own dependencies: which workspace
   crates it may name, and which modules alone may name a wrapped library (`symphonia` in
-  `tutti-codec`'s decode module, `winnow` in the listed parser modules).
+  `tutti-codec`'s decode module, `winnow` in the listed parser modules, `web_time` and
+  `thread_priority` in `tutti-platform`).
 - A codec format is a cargo feature (`encode-*`, `decode-*`), none on by default; a decode
   feature pulls no encoder, and the C Vorbis library is `encode-vorbis`'s alone.

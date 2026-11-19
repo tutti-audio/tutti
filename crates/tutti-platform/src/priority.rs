@@ -5,7 +5,10 @@
 //! within the OS's ordinary scheduler (on Linux `SCHED_OTHER`, so a lower nice
 //! value), never a real-time class, and the OS may refuse it: Linux with
 //! `EPERM`/`EACCES` below the process's `RLIMIT_NICE` (an unprivileged user,
-//! a container, most CI). What each request means per OS is `wanted`'s table.
+//! a container, most CI), and the web, which has no thread priorities, always refuses.
+//! What each request means per OS: Linux nice -20 (`Highest`) and nice -10
+//! (`Raised`), Windows `HIGHEST` and `ABOVE_NORMAL`, macOS and iOS the
+//! `SCHED_OTHER` maximum and a quarter of the way down from it.
 //! The result is read back as a [`PriorityOutcome`], so a caller logs what it got,
 //! rather than the name of what it asked for.
 //!
@@ -87,46 +90,15 @@ impl fmt::Display for PriorityOutcome {
     }
 }
 
-/// What each request asks the OS for, per platform, as the `thread_priority`
-/// value it is converted from (a pure function, so the mapping is tested
-/// without the privilege to apply it).
-///
-/// | | `Highest` | `Raised` |
-/// |---|---|---|
-/// | Linux | nice -20 | nice -10 |
-/// | Windows | `THREAD_PRIORITY_HIGHEST` | `THREAD_PRIORITY_ABOVE_NORMAL` |
-/// | macOS, iOS | the `SCHED_OTHER` maximum | a quarter of the way down from it to the minimum |
-///
-/// macOS's time-sharing priority is a number in a small range (about 15 to
-/// 47, default 31), so a cross-platform percentage would land outside it
-/// and be refused; there the point is computed from
-/// `sched_get_priority_min/max`.
-fn wanted(request: PriorityRequest) -> thread_priority::ThreadPriority {
-    match request {
-        PriorityRequest::Highest => thread_priority::ThreadPriority::Max,
-        PriorityRequest::Raised => raised::raised(),
-    }
-}
-
-#[cfg_attr(
-    any(target_os = "macos", target_os = "ios"),
-    path = "priority/apple.rs"
-)]
-#[cfg_attr(
-    not(any(target_os = "macos", target_os = "ios")),
-    path = "priority/cross.rs"
-)]
-mod raised;
-
-#[cfg_attr(unix, path = "priority/unix.rs")]
-#[cfg_attr(not(unix), path = "priority/other.rs")]
-mod scheduling_class;
+#[cfg_attr(not(target_arch = "wasm32"), path = "priority/native.rs")]
+#[cfg_attr(target_arch = "wasm32", path = "priority/wasm.rs")]
+mod os;
 
 /// Ask the OS to raise the **calling thread**'s priority, and report what it
 /// did. A refusal changes nothing and is harmless to the caller.
 ///
 /// ```
-/// use tutti_rt::{PriorityRequest, request_priority};
+/// use tutti_platform::{PriorityRequest, request_priority};
 ///
 /// // Unprivileged, this is a refusal; privileged, a grant. Either is an answer.
 /// let outcome = request_priority(PriorityRequest::Raised);
@@ -134,22 +106,5 @@ mod scheduling_class;
 /// ```
 #[must_use]
 pub fn request_priority(request: PriorityRequest) -> PriorityOutcome {
-    use thread_priority::set_current_thread_priority;
-    match set_current_thread_priority(wanted(request)) {
-        Ok(()) => PriorityOutcome::Granted {
-            requested: request,
-            scheduling: scheduling_class::scheduling(),
-        },
-        Err(e) => PriorityOutcome::Refused {
-            requested: request,
-            error: format!("{e:?}"),
-        },
-    }
+    os::request(request)
 }
-
-#[cfg(all(test, any(target_os = "macos", target_os = "ios")))]
-mod apple_tests;
-#[cfg(all(test, target_os = "linux"))]
-mod linux_tests;
-#[cfg(all(test, windows))]
-mod windows_tests;

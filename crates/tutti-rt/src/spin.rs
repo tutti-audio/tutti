@@ -62,7 +62,7 @@ use std::time::Duration;
 #[cfg(not(loom))]
 use std::hint::spin_loop;
 #[cfg(not(loom))]
-use std::time::Instant;
+use tutti_platform::Instant;
 
 #[cfg(loom)]
 use loom::thread::yield_now;

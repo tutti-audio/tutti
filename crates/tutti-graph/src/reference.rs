@@ -109,7 +109,7 @@ use crate::lane::fade_gains;
 use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
-use tutti_rt::with_no_denormals;
+use tutti_platform::with_no_denormals;
 use tutti_units::{Amplitude, At, Frame, Latency, Mix, Normalized, Samples};
 
 use crate::command::Scheduled;

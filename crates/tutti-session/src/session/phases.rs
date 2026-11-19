@@ -6,7 +6,7 @@ use std::fmt::{self, Debug, Formatter};
 use std::time::Instant;
 
 use tutti_modulation::Declarations;
-use tutti_rt::MainThreadMarker;
+use tutti_platform::MainThreadMarker;
 
 use super::parts::MidiPart;
 use crate::clock::sealed::Running;

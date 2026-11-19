@@ -207,7 +207,7 @@ impl<J: JobKind> Job<J> {
     ///
     /// The main-thread stage of a job runs inside an `update`, so `wait` runs
     /// it only when called on the thread that holds the process claim
-    /// ([`tutti_rt::MainThreadMarker::new`]). Called elsewhere on a job that
+    /// ([`tutti_platform::MainThreadMarker::new`]). Called elsewhere on a job that
     /// is [`WaitingForMainThread`](JobStatus::WaitingForMainThread), it
     /// answers [`WaitError::NeedsMainThread`] and the job runs on.
     ///
@@ -231,7 +231,7 @@ impl<J: JobKind> Job<J> {
             // landing, which that update then finds.
             let ended = self.cell.ended.load(Ordering::Acquire);
             if self.status() == JobStatus::WaitingForMainThread
-                && tutti_rt::MainThreadMarker::new().is_none()
+                && tutti_platform::MainThreadMarker::new().is_none()
             {
                 return Err(WaitError::NeedsMainThread.into());
             }

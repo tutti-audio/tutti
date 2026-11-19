@@ -14,12 +14,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use tracing::warn;
+use tutti_platform::StopToken;
 use tutti_plugin_ipc_ffi::{HOST_PID_ENV, Reaped};
 use tutti_plugin_types::{
     Deadline, Helper, Locator, PluginDescriptor, PluginFormat, ProbeDeath, ProbeError,
     ProbeOutcome, ProbeRefusal, ResultError, read_result,
 };
-use tutti_rt::StopToken;
 
 /// How long a probe may take, spawn and the plugin's load included, unless the
 /// caller says otherwise. A cold plugin can take seconds to `dlopen`; the old
@@ -276,7 +276,7 @@ mod tests {
         // written its pid, so the stop comes while the probe waits on the child.
         let raiser = {
             let stop = stop.clone();
-            tutti_rt::spawn_named("probe-raiser", None, move |_| {
+            tutti_platform::spawn_named("probe-raiser", None, move |_| {
                 let pid = std::fs::read_to_string(&fifo).expect("the child writes its pid");
                 stop.stop();
                 pid

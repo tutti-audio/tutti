@@ -9,16 +9,16 @@ use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::{Transport, TransportListener};
 use std::path::PathBuf;
+use tutti_platform::StopToken;
 use tutti_plugin_ipc::{BridgeMessage, PROTOCOL_VERSION};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{BridgeError, BridgeResult};
-use tutti_rt::StopToken;
 
 /// Ask the OS for the highest priority it grants this thread, now that it is
 /// about to do nothing but per-block audio work (the render thread, and a
 /// plugin's thread-pool helpers), and log what it got once.
 /// That is not real time: on Linux it is nice -20 at best, and a refusal
-/// (`EPERM`) is common (`tutti_rt::request_priority`).
+/// (`EPERM`) is common (`tutti_platform::request_priority`).
 ///
 /// The host side needs this less: CoreAudio, WASAPI and JACK create the
 /// audio callback's thread at an elevated priority themselves (cpal's ALSA
@@ -34,7 +34,7 @@ use tutti_rt::StopToken;
 /// Failure is logged and ignored — elevation needs privileges a sandbox or CI
 /// runner may not grant, and degraded quality beats refusing to run.
 pub(crate) fn request_audio_priority(what: &str) {
-    let outcome = tutti_rt::request_priority(tutti_rt::PriorityRequest::Highest);
+    let outcome = tutti_platform::request_priority(tutti_platform::PriorityRequest::Highest);
     if outcome.is_granted() {
         tracing::debug!("plugin-server: {what}: {outcome}");
     } else {

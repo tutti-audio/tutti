@@ -369,6 +369,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     ),
     ("check-loom", "", "clippy under --cfg loom"),
     (
+        "check-wasm",
+        "",
+        "clippy for wasm32-unknown-unknown: tutti-platform and tutti, lib only",
+    ),
+    (
         "check-no-std",
         "",
         "build each no_std crate for a bare-metal target (needs `rustup target add aarch64-unknown-none`)",
@@ -756,6 +761,9 @@ impl Planner<'_> {
             "check-loom" => self.lines(&[
                 r#"RUSTFLAGS="--cfg loom" cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi -p tutti-winmm-ffi --all-targets -- -D warnings"#,
             ]),
+            "check-wasm" => self.lines(&[
+                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti --lib -- -D warnings",
+            ]),
             "book" => {
                 let [out] = Self::params(name, args, [""])?;
                 for example in BOOK_SOUNDS {
@@ -842,7 +850,7 @@ impl Planner<'_> {
                 for d in [
                     "gates", "lint", "deny", "check-conformance",
                     "check-features", "package",
-                    "check-no-std", "check-loom", "test", "test-features", "test-doc",
+                    "check-no-std", "check-loom", "check-wasm", "test", "test-features", "test-doc",
                     "test-release", "doc",
                 ] {
                     self.dep(d)?;
