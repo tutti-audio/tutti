@@ -1505,11 +1505,11 @@ impl PluginInstance {
 /// pre-clear for the deprecated accumulating `process` entry point, which adds
 /// into the outputs rather than overwriting them.
 fn zero_outputs<T: Float>(buffer: &mut AudioBuffer<'_, T>) {
-    let samples = buffer.samples();
-    for &channel in buffer.raw_outputs().iter() {
-        // SAFETY: `AudioBuffer`'s constructor contract has each output channel pointer
-        // address `samples` live elements, unaliased, for the buffer's lifetime.
-        unsafe { std::slice::from_raw_parts_mut(channel, samples) }.fill(T::zero());
+    let (_, mut outputs) = buffer.split();
+    for i in 0..outputs.len() {
+        for sample in outputs.get_mut(i).iter_mut() {
+            *sample = T::zero();
+        }
     }
 }
 

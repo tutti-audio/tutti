@@ -28,7 +28,6 @@ authors = [
 ]
 
 [dependencies]
-num-traits = "0.2"
 tutti-plugin-types = { path = "../../crates/tutti-plugin-types" }
 tutti-vst2-ffi = { path = "../../crates/tutti-vst2-ffi" }
 tracing.workspace = true

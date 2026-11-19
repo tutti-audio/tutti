@@ -14,11 +14,7 @@ use tutti_vst2_ffi::{
 
 pub use tutti_vst2_ffi::plugin::*;
 
-use crate::{
-    buffer::{AudioBuffer, AudioBufferExt as _},
-    channels::ChannelInfo,
-    editor::Editor,
-};
+use crate::{buffer::AudioBuffer, channels::ChannelInfo, editor::Editor};
 
 /// Must be implemented by all VST plugins.
 ///
@@ -210,7 +206,7 @@ pub trait Plugin: Send {
     /// # Example
     /// ```no_run
     /// # use tutti_vst2_author::plugin::{HostCallback, Info, Plugin};
-    /// # use tutti_vst2_author::buffer::{AudioBuffer, AudioBufferExt as _};
+    /// # use tutti_vst2_author::buffer::AudioBuffer;
     /// #
     /// # struct ExamplePlugin;
     /// # impl Plugin for ExamplePlugin {
@@ -253,7 +249,7 @@ pub trait Plugin: Send {
     /// # Example
     /// ```no_run
     /// # use tutti_vst2_author::plugin::{HostCallback, Info, Plugin};
-    /// # use tutti_vst2_author::buffer::{AudioBuffer, AudioBufferExt as _};
+    /// # use tutti_vst2_author::buffer::AudioBuffer;
     /// #
     /// # struct ExamplePlugin;
     /// # impl Plugin for ExamplePlugin {

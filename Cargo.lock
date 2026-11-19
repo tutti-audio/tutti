@@ -3588,7 +3588,6 @@ dependencies = [
 name = "tutti-vst2-author"
 version = "0.3.0"
 dependencies = [
- "num-traits",
  "rand",
  "tracing",
  "tutti-plugin-types",

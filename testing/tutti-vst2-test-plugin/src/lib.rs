@@ -38,7 +38,7 @@ use tutti_rt::LockExt;
 
 use num_traits::Float;
 use vst::api::{self, AEffect, HostCallbackProc, Supported};
-use vst::buffer::{AudioBuffer, AudioBufferExt as _};
+use vst::buffer::AudioBuffer;
 use vst::editor::{Editor, KeyCode};
 // `update_display` and `get_process_level` are `Host` methods on the callback,
 // not `Plugin` ones.

@@ -2,8 +2,8 @@
 //!
 //! `tutti-vst2-ffi` is the host half (the ABI types, the loader, the host callback).
 //! This crate is what a VST2 *plugin* needs on top: the `Plugin` and `PluginParameters`
-//! traits, `HostCallback`, `Editor`, `ChannelInfo` and the buffer views
-//! (`plugin`, `editor`, `channels`, `buffer`), `plugin_main!`, `main` (which builds the
+//! traits, `HostCallback`, `Editor` and `ChannelInfo`
+//! (`plugin`, `editor`, `channels`), `plugin_main!`, `main` (which builds the
 //! `AEffect`), the plugin-side dispatcher, `PluginCache` and the `util` helpers. The
 //! shared items are re-exported from the ffi crate, so a plugin names `vst::api`,
 //! `vst::plugin::Plugin`, ... from one place. Derived from vst-rs 0.3.0 (MIT, see
@@ -20,10 +20,9 @@ extern crate tracing;
 
 use std::ptr;
 
-pub use tutti_vst2_ffi::{api, host, speaker};
+pub use tutti_vst2_ffi::{api, buffer, host, speaker};
 
 mod aeffect;
-pub mod buffer;
 mod cache;
 pub mod channels;
 mod dispatch;

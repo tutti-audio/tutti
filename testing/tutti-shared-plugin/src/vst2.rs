@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
 use vst::api::{self, AEffect, HostCallbackProc, TimeInfoFlags};
-use vst::buffer::{AudioBuffer, AudioBufferExt as _};
+use vst::buffer::AudioBuffer;
 use vst::host::Host;
 use vst::plugin::{CanDo, Category, HostCallback, Info, Plugin, PluginParameters};
 
