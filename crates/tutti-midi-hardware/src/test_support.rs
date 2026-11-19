@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use tutti_rt::LockExt;
 
-use crate::capability::{OsEndpoint, UmpCapability};
+use crate::capability::{OsEndpoint, from_os};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -34,6 +34,7 @@ use crate::{InputFault, InputProducerHandle};
 use tutti_midi_device::{EndpointId, Identity, OsChange, PortDirection};
 use tutti_midi_runtime::{MidiOut, Taken};
 use tutti_rt::PushError;
+use tutti_ump::Protocol;
 
 /// A backend with a fixed device list and no OS behind it.
 ///
@@ -377,7 +378,7 @@ pub fn endpoint(raw: u64, name: &str) -> OsEndpoint {
         id: EndpointId::from_raw(raw),
         identity: Identity::alsa(name, "port"),
         name: name.to_string(),
-        capability: UmpCapability::midi2(),
+        capability: from_os(Protocol::Midi2, None, []),
     }
 }
 
@@ -569,9 +570,7 @@ pub fn property_peer(
     resources: tutti_midi_device::PeResourceList,
 ) -> crate::PropertyPeer {
     crate::PropertyPeer {
-        device,
-        group,
-        muid,
+        at: crate::PeerRef::new(device, crate::PeerId { group, muid }),
         resources: Arc::new(resources),
     }
 }

@@ -85,7 +85,7 @@ fn transport() -> TransportInfo {
 
 /// A cycle over `start..end` beats.
 fn cycle(start: f64, end: f64) -> LoopRegion {
-    LoopRegion::new(LoopRange::new(Beat(start), Beat(end)).expect("a loop"))
+    LoopRegion::new(LoopRange::new(Beat::new(start), Beat::new(end)).expect("a loop"))
 }
 const BLOCK: u32 = 512;
 
@@ -107,10 +107,10 @@ fn effects_report_their_measured_tail_time() {
             .unwrap_or_else(|e| panic!("{}: tail time read failed: {e:?}", unit.label));
 
         assert!(
-            tail.0.is_finite(),
+            tail.get().is_finite(),
             "{}: tail must be finite, got {}",
             unit.label,
-            tail.0
+            tail.get()
         );
         // Relative tolerance: the table's figures are `f32` readings of the
         // AU's `Float64` tail, so the small values (0.0046) cannot be compared
@@ -118,10 +118,10 @@ fn effects_report_their_measured_tail_time() {
         let expected = f64::from(*expected);
         let tolerance = (expected * 1e-4).max(1e-6);
         assert!(
-            (tail.0 - expected).abs() <= tolerance,
+            (tail.get() - expected).abs() <= tolerance,
             "{}: expected tail {expected}s (measured on macOS 15.6), got {}s",
             unit.label,
-            tail.0
+            tail.get()
         );
     }
 }
@@ -141,9 +141,9 @@ fn a_reverb_tail_is_large_and_distinct_from_its_latency() {
     let latency = au.get_latency().expect("latency read");
 
     assert!(
-        tail.0 > 1.0,
+        tail.get() > 1.0,
         "AUMatrixReverb should report a multi-second tail, got {}s",
-        tail.0
+        tail.get()
     );
     assert_eq!(
         latency,
@@ -179,7 +179,7 @@ fn a_unit_with_both_latency_and_tail_reports_them_separately() {
 
     assert_eq!(
         latency,
-        Samples(256),
+        Samples::new(256),
         "AUDynamicsProcessor's 256-sample lookahead is what makes this test's \
          tail-vs-latency contrast meaningful; re-measure if it moved"
     );
@@ -190,7 +190,7 @@ fn a_unit_with_both_latency_and_tail_reports_them_separately() {
     // which ceils to 9601 (one frame of tail that was never asked for).
     assert_eq!(
         tail_samples,
-        Samples(9600),
+        Samples::new(9600),
         "0.2s at 48kHz, rounded up: the *allocation* rounding, because a bounce \
          that rounds a tail down truncates it"
     );
@@ -205,7 +205,7 @@ fn a_unit_with_both_latency_and_tail_reports_them_separately() {
 /// a unit that refuses the property.
 ///
 /// This pair is the reason [`Au::get_tail_time`] propagates the refusal
-/// instead of absorbing it into `Seconds(0.0)`. AUSampleDelay genuinely has no
+/// instead of absorbing it into `Seconds::new(0.0)`. AUSampleDelay genuinely has no
 /// tail; AUSampler cannot say. Flattening the second into the first would tell a
 /// bounce that a unit of *unknown* tail has *none*, and it would truncate
 /// exactly the material the property was read to protect.
@@ -223,13 +223,14 @@ fn zero_tail_and_absent_tail_are_different_answers() {
         // asserting "is small" without "is finite" is how a NaN-blind check
         // passes vacuously.
         assert!(
-            tail.0.is_finite(),
+            tail.get().is_finite(),
             "{}: tail must be finite, got {}",
             unit.label,
-            tail.0
+            tail.get()
         );
         assert_eq!(
-            tail.0, 0.0,
+            tail.get(),
+            0.0,
             "{}: measured to report exactly zero tail",
             unit.label
         );
@@ -239,7 +240,7 @@ fn zero_tail_and_absent_tail_are_different_answers() {
         let au = unit.open(RATE, BLOCK);
         let err = au.get_tail_time().expect_err(&format!(
             "{}: every Apple instrument/mixer rejects TailTime; absorbing that \
-             into Seconds(0) would make it indistinguishable from AUSampleDelay's \
+             into Seconds::new(0) would make it indistinguishable from AUSampleDelay's \
              genuine zero",
             unit.label
         ));
@@ -272,7 +273,7 @@ fn tail_time_is_readable_before_initialize() {
     let tail = au
         .get_tail_time()
         .expect("tail time must be readable in the Loaded state");
-    assert!(tail.0 > 1.0, "got {}s", tail.0);
+    assert!(tail.get() > 1.0, "got {}s", tail.0);
 }
 
 // ----------------------------------------------------------- host callbacks
@@ -402,11 +403,11 @@ fn every_transport_field_reaches_the_callbacks() {
         .with_tempo(Bpm::of(137.5))
         .with_playing(true)
         .with_recording(true)
-        .with_beat(Beat(12.25))
-        .with_seconds(Seconds(5.0))
+        .with_beat(Beat::new(12.25))
+        .with_seconds(Seconds::new(5.0))
         .with_position_samples(240_000)
         .with_loop(cycle(4.0, 20.0))
-        .with_bar(Beat(8.0), BarNumber::new(3))
+        .with_bar(Beat::new(8.0), BarNumber::new(3))
         .with_time_signature(TimeSignature::of(7, 8));
     state.set_transport(&info, true);
     state.set_samples_to_next_beat(123);
@@ -720,11 +721,11 @@ fn an_au_pulls_the_published_transport_through_audiotoolbox() {
     let info = transport()
         .with_tempo(Bpm::of(137.5))
         .with_playing(true)
-        .with_beat(Beat(12.25))
-        .with_seconds(Seconds(5.0))
+        .with_beat(Beat::new(12.25))
+        .with_seconds(Seconds::new(5.0))
         .with_position_samples(240_000)
         .with_loop(cycle(4.0, 20.0))
-        .with_bar(Beat(8.0), BarNumber::new(3))
+        .with_bar(Beat::new(8.0), BarNumber::new(3))
         .with_time_signature(TimeSignature::of(7, 8));
     au.transport()
         .expect("installed")
@@ -748,10 +749,14 @@ fn an_au_pulls_the_published_transport_through_audiotoolbox() {
     assert_eq!(pull.changed, 1, "the locate reaches the AU");
 
     // The next block publishes no locate, and the AU is told so.
-    assert!(au.set_transport(
-        &info.with_beat(Beat(12.5)).with_seconds(Seconds(5.0)),
-        false
-    ));
+    assert!(
+        au.set_transport(
+            &info
+                .with_beat(Beat::new(12.5))
+                .with_seconds(Seconds::new(5.0)),
+            false
+        )
+    );
     render(&mut au, &input, &mut output, BLOCK).expect("render");
     let pull = last_host_pull(&au);
     assert_eq!(pull.changed, 0, "the locate flag must not latch");
@@ -848,8 +853,8 @@ fn a_real_au_pulls_and_consumes_the_transport() {
     let transport = transport()
         .with_tempo(Bpm::of(137.5))
         .with_playing(true)
-        .with_beat(Beat(12.25))
-        .with_seconds(Seconds(5.0));
+        .with_beat(Beat::new(12.25))
+        .with_seconds(Seconds::new(5.0));
     au.set_transport(&transport, true);
     assert!(
         au.transport().unwrap().state_changed_pending(),

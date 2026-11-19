@@ -18,8 +18,6 @@
 use tutti_buffers::Float;
 use tutti_units::{Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate};
 
-use crate::finite::finite_or;
-
 /// The shape an [`Oscillator`] reads its phase through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OscillatorWave {
@@ -110,7 +108,7 @@ impl<F: Float> OscillatorStep<F> {
     #[inline]
     #[must_use]
     pub fn new(frequency: Hz, rate: SampleRate) -> Self {
-        let f = finite_or(frequency.get(), 0.0);
+        let f = frequency.finite_or(Hz::ZERO).get();
         let cycles = PhaseIncrement((f / rate.get()).clamp(0.0, 0.5));
         Self {
             step: PhaseStep::from(cycles),

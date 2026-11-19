@@ -17,7 +17,12 @@ fn sine() -> PolySynth<f64> {
     PolySynth::<f64>::new(SynthConfig {
         oscillator: OscillatorType::Sine,
         polyphony: NonZeroUsize::new(1).unwrap(),
-        envelope: Adsr::new(Seconds(0.0), Seconds(0.0), Amplitude(1.0), Seconds(0.1)),
+        envelope: Adsr::new(
+            Seconds::new(0.0),
+            Seconds::new(0.0),
+            Amplitude::new(1.0),
+            Seconds::new(0.1),
+        ),
         ..Default::default()
     })
 }

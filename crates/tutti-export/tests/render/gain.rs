@@ -22,7 +22,7 @@ fn config(pcm: Pcm, dither: Option<DitherShape>, seconds: f64) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: RATE,
-            duration_seconds: Seconds(seconds),
+            duration_seconds: Seconds::new(seconds),
             ..Default::default()
         },
         encode: EncodeConfig {
@@ -53,10 +53,10 @@ fn a_peak_normalized_export_reports_its_gain_and_reading() {
     let path = dir.path().join("six.wav");
     for target in [-6.0f64, -3.0] {
         let written = render_normalized_to_file(
-            sine(Hz(RATE.get() / 4.0)),
+            sine(Hz::new(RATE.get() / 4.0)),
             &config(Pcm::Int16, Some(DitherShape::Triangular), 0.1),
             &FrozenClock,
-            Normalize::peak(Db(target)),
+            Normalize::peak(Db::new(target)),
             &path,
         )
         .unwrap();
@@ -67,7 +67,7 @@ fn a_peak_normalized_export_reports_its_gain_and_reading() {
     }
 
     let plain = render_to_file(
-        sine(Hz(1_000.0)),
+        sine(Hz::new(1_000.0)),
         &config(Pcm::Int16, None, 0.1),
         &FrozenClock,
         &path,
@@ -87,10 +87,10 @@ fn a_loudness_normalized_export_reports_the_gain_to_its_target() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("lufs.wav");
     let written = render_normalized_to_file(
-        sine(Hz(1_000.0)),
+        sine(Hz::new(1_000.0)),
         &config(Pcm::Float32, None, 3.0),
         &FrozenClock,
-        Normalize::lufs(Db(-23.0)),
+        Normalize::lufs(Db::new(-23.0)),
         &path,
     )
     .unwrap();

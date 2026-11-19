@@ -48,7 +48,7 @@ pub const MAX_OUTPUT_AHEAD: Duration = Duration::from_secs(2);
 
 /// The largest magnitude of an [`OutputOffset`] and of a device's latency in an
 /// [`OutputLatency`]: 1 s.
-pub const MAX_OUTPUT_LATENCY: Seconds = Seconds(1.0);
+pub const MAX_OUTPUT_LATENCY: Seconds = Seconds::new(1.0);
 
 /// When a backend should put an event on the wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,7 +132,7 @@ tutti_units::ranged! {
 
 impl OutputOffset {
     /// No trim.
-    pub const ZERO: Self = Self::of(Seconds(0.0));
+    pub const ZERO: Self = Self::of(Seconds::new(0.0));
 }
 
 impl Default for OutputOffset {
@@ -234,7 +234,8 @@ impl OutputPlan {
         };
         // One signed sum in seconds, then one step on the clock: later by the
         // audio output and the trim, earlier by the device.
-        let net = self.terms.audio_output.unwrap_or(Seconds(0.0)) + self.terms.latency.offset.get()
+        let net = self.terms.audio_output.unwrap_or(Seconds::new(0.0))
+            + self.terms.latency.offset.get()
             - self.terms.latency.device;
         let step = Duration::try_from_secs_f64(net.get().abs()).ok();
         let Some(at) = step.and_then(|step| {

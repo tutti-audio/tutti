@@ -84,8 +84,8 @@ fn dc_graph(level: f32) -> RenderGraph {
 fn sine_graph(freq: f64) -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let id = g.add(
-        Osc::sine(Hz(freq))
-            .with_amplitude(Amplitude(0.5))
+        Osc::sine(Hz::new(freq))
+            .with_amplitude(Amplitude::new(0.5))
             .with_layout(ChannelLayout::STEREO),
     );
     g.pipe_output(id);
@@ -108,7 +108,7 @@ fn config(format: Format) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: tutti_units::SampleRate::of(SR),
-            duration_seconds: Seconds(DUR),
+            duration_seconds: Seconds::new(DUR),
             ..Default::default()
         },
         encode: EncodeConfig {
@@ -467,8 +467,8 @@ fn a_flac_decodes_to_exactly_the_rendered_frames_with_a_valid_md5() {
         let graph = || {
             let mut g = GraphBuilder::new(ChannelLayout::EMPTY, layout);
             let id = g.add(
-                Osc::sine(Hz(997.0))
-                    .with_amplitude(Amplitude(0.5))
+                Osc::sine(Hz::new(997.0))
+                    .with_amplitude(Amplitude::new(0.5))
                     .with_layout(layout),
             );
             g.pipe_output(id);
@@ -479,8 +479,8 @@ fn a_flac_decodes_to_exactly_the_rendered_frames_with_a_valid_md5() {
                 let cfg = |format| ExportConfig {
                     render: RenderConfig {
                         sample_rate: tutti_units::SampleRate::of(SR),
-                        duration_seconds: Seconds(0.0),
-                        tail: tutti_units::Samples(frames),
+                        duration_seconds: Seconds::new(0.0),
+                        tail: tutti_units::Samples::new(frames),
                         ..Default::default()
                     },
                     encode: EncodeConfig {

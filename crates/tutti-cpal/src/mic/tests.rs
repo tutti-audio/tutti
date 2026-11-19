@@ -131,7 +131,7 @@ fn mic_without_a_device() -> MicIn {
 /// [`mic_without_a_device`] `width` wide, and the writer its callback would
 /// hold.
 fn mic_with_ring(width: u16, frames: usize) -> (MicIn, TapWriter) {
-    let (reader, writer) = TapReader::pair(usize::from(width), Samples(frames));
+    let (reader, writer) = TapReader::pair(usize::from(width), Samples::new(frames));
     let mic = MicIn {
         tap: reader,
         sample_rate: SampleRate::SR_48K,
@@ -152,8 +152,12 @@ fn a_full_ring_counts_the_frames_the_callback_dropped() {
     for i in 0..5 {
         writer.push_interleaved(Interleaved::new(&[i as f32, 0.0], writer.layout()).unwrap());
     }
-    assert_eq!(Source::take_lost(&mut mic), Samples(3));
-    assert_eq!(Source::take_lost(&mut mic), Samples(0), "reading clears");
+    assert_eq!(Source::take_lost(&mut mic), Samples::new(3));
+    assert_eq!(
+        Source::take_lost(&mut mic),
+        Samples::new(0),
+        "reading clears"
+    );
 }
 
 /// A capture of `device` inputs, selecting `inputs`, over rings of room for
@@ -165,8 +169,8 @@ fn capture<F: Float>(
 ) -> (Capture<F>, MicIn<F>, TapReader<F>) {
     let select = Fold::select(ChannelLayout::from(device), inputs).expect("a selection");
     let width = select.dst_layout();
-    let (reader, rec) = TapReader::pair(usize::from(width.count()), Samples(frames));
-    let (ring, mon) = TapReader::pair(usize::from(width.count()), Samples(frames));
+    let (reader, rec) = TapReader::pair(usize::from(width.count()), Samples::new(frames));
+    let (ring, mon) = TapReader::pair(usize::from(width.count()), Samples::new(frames));
     let capture = Capture::new(select, ChannelLayout::from(device), rec, Some(mon));
     let mic = MicIn {
         tap: reader,
@@ -199,7 +203,7 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
     );
     assert_eq!(mic.device_inputs(), ChannelLayout::from(16u16));
     let mut out = [0.0f32; 8];
-    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(3)));
+    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples::new(3)));
     assert_eq!(out[..6], [2.0, 3.0, 102.0, 103.0, 202.0, 203.0]);
 
     let mut node =
@@ -207,7 +211,7 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
     let env = tutti_graph::Env {
         frame: tutti_units::Frame::new(0),
         sample_rate: SampleRate::SR_48K,
-        block_len: Samples(3),
+        block_len: Samples::new(3),
         transport: tutti_graph::TransportPosition::default(),
         changes: tutti_graph::TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,
@@ -230,13 +234,13 @@ fn a_six_input_interface_is_six_inputs_not_five_point_one() {
         edge::from_native::<f32, f32>,
     );
     let mut out = [0.0f32; 6];
-    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(1)));
+    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples::new(1)));
     assert_eq!(out, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
 
     let (mut cap, mut mic, _ring) = capture(1, &[0, 0], 64);
     cap.block(&[0.25f32, -0.5], edge::from_native::<f32, f32>);
     let mut out = [0.0f32; 4];
-    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(2)));
+    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples::new(2)));
     assert_eq!(out, [0.25, 0.25, -0.5, -0.5]);
 }
 
@@ -252,7 +256,7 @@ fn a_big_callback_runs_in_chunks_and_integers_convert() {
     cap.block(&data, edge::from_native::<i16, f32>);
     let mut out = vec![0.0f32; 200];
     let n = pull_into(&mut mic, &mut out);
-    assert_eq!(n, Pull::Frames(Samples(150)));
+    assert_eq!(n, Pull::Frames(Samples::new(150)));
     for (f, &s) in out[..150].iter().enumerate() {
         // An `i16` over 2^15 is exact in `f32`.
         let want = f32::from(f as i16 * 100) / 32768.0;
@@ -345,7 +349,7 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
     let Pull::Frames(n) = pull_into(&mut mic, &mut scratch) else {
         panic!("the buffered frame is delivered before the failure");
     };
-    assert_eq!(n, Samples(1));
+    assert_eq!(n, Samples::new(1));
     let layout = Source::layout(&mic);
     let written = Interleaved::new(&scratch[..layout.interleaved_len(n)], layout).unwrap();
     sink.write(written).expect("the file takes it");
@@ -410,8 +414,8 @@ fn ring_depths_follow_the_stream_rate() {
         (SampleRate::SR_48K, 480, 48_000),
         (SampleRate::SR_44K1, 441, 44_100),
     ] {
-        assert_eq!(MONITOR_RING.to_samples_ceil(rate), Samples(monitor));
-        assert_eq!(CAPTURE_RING.to_samples_ceil(rate), Samples(capture));
+        assert_eq!(MONITOR_RING.to_samples_ceil(rate), Samples::new(monitor));
+        assert_eq!(CAPTURE_RING.to_samples_ceil(rate), Samples::new(capture));
     }
 }
 
@@ -423,7 +427,7 @@ fn an_offset_binary_input_reads_mid_scale_as_silence() {
     let (mut cap, mut mic, _ring) = capture(1, &[0], 64);
     cap.block(&[32768u16, 49152, 0], edge::from_offset::<u16, f32>);
     let mut out = vec![9.0f32; 8];
-    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(3)));
+    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples::new(3)));
     assert_eq!(out[..3], [0.0, 0.5, -1.0]);
     assert_eq!(edge::from_offset::<u8, f32>(128), 0.0);
     assert_eq!(edge::from_offset::<u32, f32>(2_147_483_648), 0.0);
@@ -445,7 +449,7 @@ fn an_i32_capture_in_an_f64_graph_keeps_more_than_24_bits() {
         edge::from_native::<i32, f64>,
     );
     let mut out = [9.0f64; 4];
-    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples(3)));
+    assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples::new(3)));
     assert_eq!(out[..3], [want, -1.0, 0.0]);
 }
 

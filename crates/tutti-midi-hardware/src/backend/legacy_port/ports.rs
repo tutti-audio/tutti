@@ -1,6 +1,6 @@
 //! What names a byte port: its identity, and the id it is opened by.
 
-use crate::capability::{OsEndpoint, UmpCapability};
+use crate::capability::{OsEndpoint, legacy};
 use std::collections::BTreeMap;
 
 use tutti_midi_device::{EndpointId, Identity, WinMmDevice};
@@ -185,7 +185,7 @@ pub(in crate::backend) fn endpoint(side: Side, occurrence: u32, info: PortInfo) 
         id: endpoint_id(side, occurrence, &info.device),
         identity,
         name: info.name,
-        capability: UmpCapability::midi1(),
+        capability: legacy(),
     }
 }
 

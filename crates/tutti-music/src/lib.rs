@@ -35,8 +35,8 @@
 //! use tutti_units::{BarNumber, Beat};
 //!
 //! // In 4/4, beat 8.0 of the timeline opens the third bar.
-//! let pos = TimeSignature::of(4, 4).bar_at(Beat(8.0));
-//! assert_eq!(pos.bar, BarNumber(3));
+//! let pos = TimeSignature::of(4, 4).bar_at(Beat::new(8.0));
+//! assert_eq!(pos.bar, BarNumber::new(3));
 //! assert_eq!(pos.beat, BeatsPerBar::of(1));
 //! ```
 //!

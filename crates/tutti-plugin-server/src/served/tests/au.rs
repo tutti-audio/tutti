@@ -190,7 +190,7 @@ fn an_au_latency_poll_refreshes_the_cached_wiring() {
     // re-read both return the load-time figure and agree whether or not the
     // refresh happened.
     let real_latency = au.loaded().latency_samples;
-    au.poison_cached_latency(Samples(real_latency.0 + 1234));
+    au.poison_cached_latency(Samples::new(real_latency.0 + 1234));
 
     let requests = au.requests_for_test();
     Request::LatencyChanged.raise(&requests);
@@ -263,7 +263,7 @@ fn run(
     let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
     let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(inputs[0].len()),
+        tutti_plugin_types::Samples::new(inputs[0].len()),
         &inputs,
         &mut outputs,
     )
@@ -389,7 +389,7 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
         .with_tempo(tutti_units::Bpm::of(137.5))
         .with_time_signature(TimeSignature::of(3, 4))
         .with_playing(true)
-        .with_beat(tutti_units::Beat(beat0));
+        .with_beat(tutti_units::Beat::new(beat0));
     run(&mut au, FRAMES, Some(&start), None).expect("process");
     let (status, beat, tempo, delta, num, den, changed, playing) = pull(&au);
     assert_eq!(status, 0);
@@ -401,14 +401,14 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
     assert!(changed, "the first block is a start");
 
     // The next block is where playing leaves the playhead: no locate.
-    let next = start.with_beat(tutti_units::Beat(
+    let next = start.with_beat(tutti_units::Beat::new(
         beat0 + FRAMES as f64 / RATE * 137.5 / 60.0,
     ));
     run(&mut au, FRAMES, Some(&next), None).expect("process");
     assert!(!pull(&au).6, "a continuous block is not a locate");
 
     // A seek is one.
-    let seek = next.with_beat(tutti_units::Beat(32.0));
+    let seek = next.with_beat(tutti_units::Beat::new(32.0));
     run(&mut au, FRAMES, Some(&seek), None).expect("process");
     let (_, beat, _, delta, _, _, changed, _) = pull(&au);
     assert_eq!(beat, 32.0);
@@ -426,7 +426,7 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
     run(&mut au, FRAMES, Some(&next), None).expect("process");
     run(&mut au, FRAMES, None, None).expect("process");
     assert_eq!(pull(&au).0, CANNOT_DO, "no frozen beat after a gap");
-    let resumed = next.with_beat(tutti_units::Beat(next.position.beat.get() + 0.026));
+    let resumed = next.with_beat(tutti_units::Beat::new(next.position.beat.get() + 0.026));
     run(&mut au, FRAMES, Some(&resumed), None).expect("process");
     let (status, _, _, _, _, _, changed, _) = pull(&au);
     assert_eq!(status, 0);
@@ -477,7 +477,7 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
         refused: false,
         ties: crate::ties::ties().expect("bells").0,
     };
-    let prepare = Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples(512)));
+    let prepare = Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples::new(512)));
     assert!(
         au.drive(main_thread(), Event::Op(HostOp::Activate(prepare)))
             .is_none()

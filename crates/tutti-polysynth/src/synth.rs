@@ -276,7 +276,7 @@ impl Default for SynthConfig {
             unison: None,
             allocation_strategy: AllocationStrategy::Oldest,
             tuning: Tuning::equal_temperament(),
-            pitch_bend_range: Semitones(2.0),
+            pitch_bend_range: Semitones::new(2.0),
             filter_mod: FilterModConfig::default(),
             group: MidiGroup::FIRST,
             device: SysexDeviceId::DEFAULT,

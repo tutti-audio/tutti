@@ -113,7 +113,7 @@
 //!
 //! let read = MidiFile::from_bytes(&file.to_bytes())?;
 //! assert_eq!(read, file);
-//! assert_eq!(read.timebase().metrical().unwrap().seconds_at(Tick(8 * 480)), Seconds(6.0));
+//! assert_eq!(read.timebase().metrical().unwrap().seconds_at(Tick(8 * 480)), Seconds::new(6.0));
 //! let notes = read.tracks()[0].notes();
 //! assert_eq!((notes[0].start, notes[0].end), (Tick(0), Tick(1_440)));
 //! # Ok::<(), Box<dyn std::error::Error>>(())

@@ -11,7 +11,7 @@ use super::ports::{
 use super::schedule::{Next, Outbox, Schedule};
 use super::sender::{Mailbox, run};
 use crate::Devices;
-use crate::capability::{OsEndpoint, UmpCapability};
+use crate::capability::{OsEndpoint, legacy};
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, Result};
@@ -264,11 +264,7 @@ fn a_byte_port_is_listed_as_midi1_with_no_blocks_in_list_order() {
         ["A", "B"]
     );
     assert_ne!(listed[0].id, listed[1].id);
-    assert!(
-        listed
-            .iter()
-            .all(|e| e.capability == UmpCapability::midi1())
-    );
+    assert!(listed.iter().all(|e| e.capability == legacy()));
 }
 
 // ---- bytes in -------------------------------------------------------------

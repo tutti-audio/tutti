@@ -104,7 +104,7 @@ fn process_honors_frame_offset_within_block() {
     let note = |offset: usize| {
         let velocity = widen_velocity(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
         (
-            Offset::of(Samples(offset), Samples(BLOCK)),
+            Offset::of(Samples::new(offset), Samples::new(BLOCK)),
             midi::note_on(MidiChannel::FIRST, 60, velocity),
         )
     };
@@ -191,7 +191,7 @@ fn two_events_in_one_block_apply_at_their_own_offsets() {
     let note = |key: u8, offset: usize| {
         let velocity = widen_velocity(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
         (
-            Offset::of(Samples(offset), Samples(BLOCK)),
+            Offset::of(Samples::new(offset), Samples::new(BLOCK)),
             midi::note_on(MidiChannel::FIRST, key, velocity),
         )
     };
@@ -280,7 +280,7 @@ fn event_at_last_frame_of_block_still_applies() {
     let note = |offset: usize| {
         let velocity = widen_velocity(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
         (
-            Offset::of(Samples(offset), Samples(BLOCK)),
+            Offset::of(Samples::new(offset), Samples::new(BLOCK)),
             midi::note_on(MidiChannel::FIRST, 60, velocity),
         )
     };
@@ -357,7 +357,7 @@ fn a_same_rate_reprepare_mid_stream_does_not_disturb_rendering() {
         &mut *interrupted,
         &tutti_graph::Prepare::new(
             tutti_units::SampleRate::SR_44K1,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(128)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(128)),
         ),
     );
     got.extend(render_process_blocks(

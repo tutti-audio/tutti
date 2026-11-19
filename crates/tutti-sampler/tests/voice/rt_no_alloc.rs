@@ -485,7 +485,7 @@ fn wraps_without_allocating<N: Node>(node: N) {
         direct.set_block_len(len);
         direct.block();
         heard.extend_from_slice(direct.output().plane(0).samples());
-        clock.advance(tutti_units::Samples(len), Some(region));
+        clock.advance(tutti_units::Samples::new(len), Some(region));
         clock.beat() < before
     };
     for i in 0..64 {
@@ -1172,7 +1172,7 @@ fn voice_node_command_drain_does_not_allocate() {
         .expect("a placeable wave")
         .placed_at(VoiceWindow {
             start: Beat::new(0.0),
-            duration: Some(BeatDuration(4.0)),
+            duration: Some(BeatDuration::new(4.0)),
         });
     source.play();
 
@@ -1197,7 +1197,7 @@ fn voice_node_command_drain_does_not_allocate() {
     for i in 0..8u64 {
         handle.window_cell().publish(Some(VoiceWindow::span(
             Beat::new(i as f64 * 0.25),
-            BeatDuration(4.0),
+            BeatDuration::new(4.0),
         )));
     }
 

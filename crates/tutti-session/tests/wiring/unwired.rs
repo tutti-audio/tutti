@@ -124,8 +124,12 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
         g.connect(from, to).unwrap();
     }
     let kept = Edge::new(OutPort::new(a, 0), x.input(0));
-    kept.set_gain(g, Amplitude::new(f64::from(GAIN)))
-        .expect("an edge");
+    // The gain lane is the wire's declaration: the connection is made again
+    // with it (the edge is held already, so only its gain is set).
+    g.connect(kept.source(), kept.sink())
+        .unwrap()
+        .gain(Amplitude::new(f64::from(GAIN)))
+        .unwrap();
     let events = s.update();
     assert!(!refused(&events));
     assert!(unwired(&events).is_empty(), "nothing was dropped yet");
@@ -171,9 +175,13 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
         channel(&mut s, 1).iter().all(|&v| v == 0.0),
         "output 1 lost its source"
     );
+    let gain = s
+        .graph_ref()
+        .gain_target(kept.source(), kept.sink())
+        .expect("a lane");
     assert_eq!(
-        kept.gain(s.graph()),
-        Some(Amplitude::new(f64::from(GAIN))),
+        s.get(gain).unwrap(),
+        Amplitude::new(f64::from(GAIN)),
         "the surviving edge keeps its gain"
     );
     assert!(

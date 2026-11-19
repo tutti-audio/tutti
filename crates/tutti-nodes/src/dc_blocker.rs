@@ -176,7 +176,7 @@ mod tests {
     // The node tests run `F = f32`, the session's audio format: their tolerances are `f32`'s.
     fn node(width: u16, corner: f64) -> DcBlockerNode<f32> {
         prepared(DcBlockerNode::<f32>::from(
-            DcBlockerConfig::new(width).corner(Hz(corner)),
+            DcBlockerConfig::new(width).corner(Hz::new(corner)),
         ))
     }
 
@@ -233,7 +233,7 @@ mod tests {
             want[n] = y1;
         }
         let mut k = DcBlockerKernel::<f64>::new(ChannelLayout::MONO);
-        k.prepare(RATE, MaxBlock::of(tutti_units::Samples(len)));
+        k.prepare(RATE, MaxBlock::of(tutti_units::Samples::new(len)));
         let y = drive_kernel(&mut k, &[(0, DcBlockerControls::DEFAULT)], &[x]).remove(0);
         assert_close_f64(&y, &want, 2.0f64.powi(-45));
     }

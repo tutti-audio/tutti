@@ -69,7 +69,7 @@ fn set_late_latency(samples: i32) {
     // starts a fresh image reading zero.
     //
     // Without the leak this file looks flaky: a read can come back as
-    // `Samples(0)` instead of the value just set, pass single-threaded, and
+    // `Samples::new(0)` instead of the value just set, pass single-threaded, and
     // pass whenever another test's instance keeps the image resident.
     //
     // `PROBE_LOCK` cannot help — it serializes callers, but the hazard is the
@@ -121,7 +121,7 @@ fn latency_declared_after_construction_reaches_the_metadata() {
 
     assert_eq!(
         instance.wiring(main_thread()).latency_samples,
-        Samples(LATE_LATENCY as usize),
+        Samples::new(LATE_LATENCY as usize),
         "the host read `initialDelay` from the construction-time snapshot, \
          before the plugin had been told its sample rate"
     );
@@ -140,7 +140,7 @@ fn a_plugin_with_no_latency_reports_none() {
 
     assert_eq!(
         instance.wiring(main_thread()).latency_samples,
-        Samples(0),
+        Samples::new(0),
         "a probe declaring no latency must not acquire one"
     );
 }
@@ -161,7 +161,7 @@ fn the_latency_accessor_reads_the_live_field() {
 
     assert_eq!(
         instance.loaded().latency_samples(),
-        Samples(LATE_LATENCY as usize),
+        Samples::new(LATE_LATENCY as usize),
         "the accessor must see what the plugin declared during init"
     );
     assert_eq!(
@@ -190,7 +190,7 @@ fn a_sample_rate_change_can_be_followed_by_a_fresh_read() {
     let mut instance = probe.load();
     assert_eq!(
         instance.loaded().latency_samples(),
-        Samples(LATE_LATENCY as usize)
+        Samples::new(LATE_LATENCY as usize)
     );
 
     // A plugin that halves its filter length at a higher rate.
@@ -200,7 +200,7 @@ fn a_sample_rate_change_can_be_followed_by_a_fresh_read() {
 
     assert_eq!(
         instance.loaded().latency_samples(),
-        Samples(recomputed as usize),
+        Samples::new(recomputed as usize),
         "after a rate change the host must re-ask; the load-time figure is stale"
     );
 }

@@ -23,7 +23,7 @@ fn saw() -> PolySynth<f32> {
     PolySynth::<f32>::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
-            attack: Seconds(0.0),
+            attack: Seconds::new(0.0),
             ..Default::default()
         },
         ..Default::default()
@@ -32,7 +32,7 @@ fn saw() -> PolySynth<f32> {
 
 fn note_on_at(frame: u64) -> TimedMidiEvent {
     TimedMidiEvent::new(
-        Beat(frame as f64 / 24_000.0),
+        Beat::new(frame as f64 / 24_000.0),
         Message::midi2(
             MidiChannel::FIRST,
             Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
@@ -46,7 +46,7 @@ fn note_on_at(frame: u64) -> TimedMidiEvent {
 fn graph(frame: u64) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new([note_on_at(frame)]));
     ed.insert(NodeKey(2), "synth", saw());
@@ -74,7 +74,12 @@ fn graph(frame: u64) -> (Editor, Executor) {
 fn render(ed: Editor, exec: Executor, frames: usize) -> Vec<f32> {
     let mut r = Renderer::new(ed, exec);
     r.set_transport_fn(|f| {
-        TransportPosition::new(true, Bpm::of(120.0), Beat(f.get() as f64 / 24_000.0), None)
+        TransportPosition::new(
+            true,
+            Bpm::of(120.0),
+            Beat::new(f.get() as f64 / 24_000.0),
+            None,
+        )
     });
     r.render(frames).swap_remove(0)
 }

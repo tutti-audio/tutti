@@ -327,7 +327,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
                     parameters: vec![ParameterInfo::new(ParamId::new(0), "Vol".to_string())],
                 },
                 BridgeMessage::LatencyChanged {
-                    samples: Samples(256),
+                    samples: Samples::new(256),
                 },
                 BridgeMessage::ParameterChanged {
                     edit: tutti_plugin_types::ParamEdit::change(

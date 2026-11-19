@@ -10,10 +10,10 @@
 //!
 //! # Units are labels
 //!
-//! A unit is a name on a float, not a validated value: `Pan(5.0)` and
-//! `Mix(-3.0)` build through the public field and `new`. The range a
-//! type documents is what its named constructors and methods produce
-//! (`new_clamped`, `wrapped`, `wrap`), not what a hand-built value holds.
+//! A unit is a name on a float, not a validated value: `Pan::new(5.0)` and
+//! `Mix::new(-3.0)` both build. The range a type documents is what its
+//! named constructors and methods produce (`new_clamped`, `wrapped`,
+//! `wrap`), not what a value built with `new` holds.
 //! The exceptions are range-checked (`new` returns an `Option`): [`Bpm`],
 //! [`Depth`] and [`Bipolar`], which no hand-built value leaves.
 //!

@@ -18,7 +18,7 @@ fn manual_spec() -> OutputSpec {
 /// The state over an empty graph at `rate`.
 fn empty_state(rate: SampleRate) -> Arc<AudioCallbackState> {
     let transport = Transport::new(rate);
-    let (mut ed, exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(512))));
+    let (mut ed, exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples::new(512))));
     let graph = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("an empty graph");
     Arc::new(AudioCallbackState::new(graph))

@@ -6,6 +6,7 @@ use tutti_ump::{
 };
 
 use super::*;
+use crate::Initiator;
 use crate::ci::{
     CI_VERSION, CiMessage, CiVersion, Decoded, Muid, ProfileChannels, ProfileInitiator,
     ProfileTarget,
@@ -143,12 +144,15 @@ fn target(address: CiDeviceId, channels: u16) -> ProfileTarget {
 fn table(reports: &[(CiDeviceId, Option<u16>)]) -> ProfileTable {
     let (mut peer, _) = ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), Instant::now());
     for &(address, channels) in reports {
-        peer.on_message(&Decoded::Message(CiMessage::ProfileEnabled {
-            source: Muid::of(PEER),
-            ci_version: CiVersion::of(if channels.is_some() { 2 } else { 1 }),
-            target: target(address, channels.unwrap_or(0)),
-            profile: ProfileId::MPE,
-        }));
+        peer.on_message(
+            &Decoded::Message(CiMessage::ProfileEnabled {
+                source: Muid::of(PEER),
+                ci_version: CiVersion::of(if channels.is_some() { 2 } else { 1 }),
+                target: target(address, channels.unwrap_or(0)),
+                profile: ProfileId::MPE,
+            }),
+            Instant::now(),
+        );
     }
     peer.table().clone()
 }
@@ -301,12 +305,15 @@ fn mpe_enabled_on_the_group_or_block_is_refused() {
 fn a_disabled_mpe_profile_is_no_zone() {
     // M2-102 §7.3.3: a supported Profile that is not enabled does not apply.
     let (mut peer, _) = ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), Instant::now());
-    peer.on_message(&Decoded::Message(CiMessage::ProfileDisabled {
-        source: Muid::of(PEER),
-        ci_version: CI_VERSION,
-        target: target(channel(0), 8),
-        profile: ProfileId::MPE,
-    }));
+    peer.on_message(
+        &Decoded::Message(CiMessage::ProfileDisabled {
+            source: Muid::of(PEER),
+            ci_version: CI_VERSION,
+            target: target(channel(0), 8),
+            profile: ProfileId::MPE,
+        }),
+        Instant::now(),
+    );
     assert_eq!(
         *of(&speaking(Protocol::Midi2), peer.table())
             .unwrap()

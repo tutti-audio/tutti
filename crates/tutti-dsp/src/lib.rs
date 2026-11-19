@@ -64,11 +64,11 @@
 //!   from).
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with analytic queries
 //!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
-//!   densities) and a [`NetworkCapacity`] worst case; [`FreeverbBank`] (Freeverb's combs and
-//!   all-passes), [`FdnBank`] (the feedback delay network, over an [`FdnLayout`]) and
+//!   densities); [`FreeverbBank`] (Freeverb's combs and all-passes), [`FdnBank`] (the
+//!   feedback delay network, over an [`FdnLayout`]) and
 //!   [`PlateBank`] (Dattorro's plate), their parameters [`Glide`]s in [`FreeverbGlides`],
-//!   [`FdnGlides`] and [`PlateGlides`]. [`loop_gain`] and [`rt60_from_gain`] are the RT60
-//!   formula both ways.
+//!   [`FdnGlides`] and [`PlateGlides`]. [`rt60_from_gain`] is the RT60 of a loop of a
+//!   given gain.
 //! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], six memoryless curves, and
 //!   [`WaveshaperBank`], which runs one over a block at a gliding or per-frame drive, with
 //!   [`Antialiasing`] of the first or second order.
@@ -101,7 +101,7 @@
 //!   [`RingModulator`], the input times a sine carrier.
 //! - **Bit crusher and DC blocker** (`bit_crush.rs`, `dc_block.rs`): [`BitCrusher`], a
 //!   sample-and-hold every [`hold_frames`] frames, then [`quantize`] to a bit depth;
-//!   [`DcBlocker`], a first-order high-pass with its pole from [`dc_pole`].
+//!   [`DcBlocker`], a first-order high-pass with its pole `exp(-2 pi fc / fs)`.
 //! - **Spectral features and onset novelty** (`spectral.rs`, `novelty.rs`): the shape of one
 //!   magnitude spectrum ([`spectral_centroid`], [`spectral_flatness`], [`spectral_rolloff`]) and
 //!   how much a frame differs from the one before ([`spectral_flux`],
@@ -145,7 +145,6 @@ mod dither;
 mod dynamics;
 mod fft;
 mod filter;
-mod finite;
 mod fir;
 mod follower;
 mod glide;
@@ -180,14 +179,15 @@ mod xorshift;
 
 pub use bands::{log_band_edges, octave_band_edges};
 pub use beat::track_beat_frames;
-pub use bit_crush::{BitCrusher, BitCrusherControls, DEFAULT_BIT_DEPTH, hold_frames, quantize};
+pub use bit_crush::{BitCrusher, BitCrusherControls, hold_frames, quantize};
 pub use control::{COEFF_INTERVAL, LANES};
 pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError};
-pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER, dc_pole};
+pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
+pub(crate) use delay::delay_step;
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayGlides, DelayLanes,
     DelayLayout, DelayLine, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
-    Routing, RoutingError, delay_step,
+    Routing, RoutingError,
 };
 pub use dither::sink::DitherSink;
 pub use dither::{DitherNoise, DitherShape};
@@ -238,10 +238,11 @@ pub use reverb::fdn::bank::{FdnBank, FdnGlides};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, MAX_PRE_DELAY, MIN_DECAY};
 pub use reverb::freeverb::bank::{FreeverbBank, FreeverbGlides};
 pub use reverb::freeverb::design::FreeverbControls;
+pub(crate) use reverb::network::loop_gain;
 pub use reverb::network::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Full, Gains, Inline, Line,
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
-    NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain, pre_delay_frames, rt60_from_gain,
+    OutputMap, Stage, Tap, Taps, rt60_from_gain,
 };
 pub use reverb::plate::bank::{PlateBank, PlateGlides};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};

@@ -18,9 +18,9 @@ use tutti_units::Samples;
 ///
 /// let data = [0.1f32, 0.2, 0.3, 0.4];
 /// let run = Mono::new(&data);
-/// assert_eq!(run.frames(), Samples(4));
-/// assert_eq!(run.slice(Samples(1)..Samples(3)).samples(), &[0.2, 0.3]);
-/// assert_eq!(run.get_slice(Samples(3)..Samples(9)), None);
+/// assert_eq!(run.frames(), Samples::new(4));
+/// assert_eq!(run.slice(Samples::new(1)..Samples::new(3)).samples(), &[0.2, 0.3]);
+/// assert_eq!(run.get_slice(Samples::new(3)..Samples::new(9)), None);
 /// ```
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(transparent)]
@@ -38,7 +38,7 @@ impl<'a, S: Sample> Mono<'a, S> {
     #[inline]
     #[must_use]
     pub const fn frames(&self) -> Samples {
-        Samples(self.0.len())
+        Samples::new(self.0.len())
     }
 
     /// Returns whether there are no frames.
@@ -186,7 +186,7 @@ impl<'a, S: Sample> MonoMut<'a, S> {
     #[inline]
     #[must_use]
     pub const fn frames(&self) -> Samples {
-        Samples(self.0.len())
+        Samples::new(self.0.len())
     }
 
     /// Returns whether there are no frames.

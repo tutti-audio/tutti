@@ -115,7 +115,7 @@ fn pos_ring_reader_is_allocation_free() {
     let (mut writer, mut reader) = PosRing::<f32>::new(64, ChannelLayout::STEREO, 8).unwrap();
     let data: Vec<f32> = (0..2 * 32).map(|i| i as f32).collect();
     let frames = Interleaved::new(&data, ChannelLayout::STEREO).unwrap();
-    assert_eq!(writer.push(frames), Ok(Samples(32)));
+    assert_eq!(writer.push(frames), Ok(Samples::new(32)));
     assert_no_alloc::assert_no_alloc(|| {
         for round in 0..1_000u64 {
             let play = round % 8;

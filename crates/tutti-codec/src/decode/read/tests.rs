@@ -77,5 +77,5 @@ fn a_data_length_far_past_the_source_decodes_the_frames_present() {
     bytes.extend([0u8; 32]);
     let wave = read_wave_bytes::<f32>(bytes).expect("decodes");
     assert_eq!(wave.channels(), 1);
-    assert_eq!(wave.len().0, 16);
+    assert_eq!(wave.len().get(), 16);
 }

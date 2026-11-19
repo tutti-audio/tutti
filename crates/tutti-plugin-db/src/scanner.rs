@@ -971,7 +971,7 @@ mod tests {
                 latency: None,
                 config: ProbeConfig {
                     rate: SampleRate::SR_48K,
-                    block: MaxBlock::new(Samples(512)).unwrap(),
+                    block: MaxBlock::new(Samples::new(512)).unwrap(),
                     floor: PROBE_FLOOR,
                     state: StateHash::of(&[]),
                 },

@@ -425,7 +425,7 @@ impl TransportFeed {
             self.source.advance(frames);
             return TransportInfo::new(cx.env.sample_rate);
         }
-        let Some(at) = Offset::new(Samples(0), Samples(frames)) else {
+        let Some(at) = Offset::new(Samples::new(0), Samples::new(frames)) else {
             return self
                 .last
                 .unwrap_or_else(|| TransportInfo::new(cx.env.sample_rate));
@@ -541,7 +541,7 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
         // reads it again.
         let pipeline = pipeline.unwrap_or_else(|| {
             rt.poll(Processor::stop)
-                .map_or(Samples(0), |processor| processor.latency())
+                .map_or(Samples::new(0), |processor| processor.latency())
         });
         if let Some(controls) = &controls {
             controls.set_pipeline(pipeline);
@@ -600,7 +600,7 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
             event_room,
             params,
             segments,
-            phase: Samples(0),
+            phase: Samples::new(0),
             walk: TransportWalk::default(),
             chunk_info: TransportInfo::new(sample_rate),
             changes: TransportChanges::default(),
@@ -683,7 +683,7 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
     /// it has none in hand or does not follow the graph (an in-process one).
     pub(super) fn retune(&mut self, p: &tutti_graph::Prepare) -> bool {
         let rate = p.sample_rate();
-        let max_block = Samples(p.max_block().get());
+        let max_block = Samples::new(p.max_block().get());
         let Some(processor) = self.rt.poll(Processor::stop) else {
             return false;
         };
@@ -890,7 +890,7 @@ pub(super) fn render_with<P: Processor, S: Float>(
     // The block's MIDI as the graph's `(Offset, Ump)`: every offset came from
     // an `Offset` of this block (the node's intake), so the clamp only keeps
     // a stray one inside the block.
-    let block = Samples(size);
+    let block = Samples::new(size);
     let timed: ArrayVec<UmpAt, MIDI_STACK_CAPACITY> = midi_events
         .iter()
         .map(|e| (Offset::clamped(e.offset, block), e.ump))
@@ -941,8 +941,8 @@ mod transport_tests {
         Env {
             frame: Frame::new(0),
             sample_rate: SampleRate::SR_48K,
-            block_len: Samples(64),
-            transport: TransportPosition::new(true, Bpm::of(132.0), Beat(4.0), None),
+            block_len: Samples::new(64),
+            transport: TransportPosition::new(true, Bpm::of(132.0), Beat::new(4.0), None),
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
         }
@@ -972,7 +972,10 @@ mod transport_tests {
     }
 
     fn seven_eight_meter() -> ProjectMeter {
-        ProjectMeter::new(MeterMap::new([MeterChange::new(Beat(0.0), seven_eight())]))
+        ProjectMeter::new(MeterMap::new([MeterChange::new(
+            Beat::new(0.0),
+            seven_eight(),
+        )]))
     }
 
     /// The feature set the in-process loader builds for a plugin reporting no

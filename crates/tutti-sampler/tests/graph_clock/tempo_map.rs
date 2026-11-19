@@ -56,7 +56,7 @@ const BLOCKS: [usize; 6] = [1, 64, 100, 512, 1_000, 4_096];
 fn map(points: &[(f64, f64, Transition)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm, shape)| TempoPoint {
-            beat: Beat(beat),
+            beat: Beat::new(beat),
             tempo: Bpm::of(bpm),
             transition: shape,
         }))
@@ -124,15 +124,15 @@ fn render(
     let wave = Arc::new(wave);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(MAX_BLOCK)),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     match voice {
         Some((start, duration)) => {
             let source = MemorySource::placed(
                 wave,
                 match duration {
-                    Some(d) => VoiceWindow::span(Beat(start), BeatDuration::new(d)),
-                    None => VoiceWindow::from(Beat(start)),
+                    Some(d) => VoiceWindow::span(Beat::new(start), BeatDuration::new(d)),
+                    None => VoiceWindow::from(Beat::new(start)),
                 },
             )
             .expect("a placeable wave");

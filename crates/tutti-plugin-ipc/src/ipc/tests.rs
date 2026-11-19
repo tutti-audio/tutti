@@ -325,7 +325,7 @@ fn mock_with(
         loaded: LoadedPlugin {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(ChannelLayout::STEREO)],
-            latency_samples: Samples(5),
+            latency_samples: Samples::new(5),
             ..LoadedPlugin::default()
         },
         format: FloatWidth::F32,
@@ -350,7 +350,7 @@ fn mock_with(
 }
 
 fn prepare(block: usize) -> Prepare {
-    Prepare::new(RATE, MaxBlock::of(Samples(block)))
+    Prepare::new(RATE, MaxBlock::of(Samples::new(block)))
 }
 
 fn activate(ipc: Ipc, block: usize) -> (IpcProcessor, IpcController) {
@@ -404,10 +404,14 @@ fn a_processor_follows_the_graphs_rate_block_and_quantum() {
     let (ipc, server) = mock();
     let received = Arc::clone(&server.received);
     let (mut processor, _controller) = activate(ipc, 48);
-    assert!(processor.retune(SampleRate::SR_96K, Samples(60), Some(Samples(40))));
+    assert!(processor.retune(SampleRate::SR_96K, Samples::new(60), Some(Samples::new(40))));
     assert_eq!(processor.chunk(), NonZeroUsize::new(40), "the quantum");
-    assert_eq!(processor.latency(), Samples(40), "one chunk of latency");
-    assert!(processor.retune(SampleRate::SR_96K, Samples(30), None));
+    assert_eq!(
+        processor.latency(),
+        Samples::new(40),
+        "one chunk of latency"
+    );
+    assert!(processor.retune(SampleRate::SR_96K, Samples::new(30), None));
     assert_eq!(processor.chunk(), NonZeroUsize::new(30), "the block");
     assert!(
         received.wait_for(|log| log.iter().any(
@@ -455,8 +459,8 @@ fn the_controller_reports_what_the_plugin_re_reports() {
     let say = |latency| server.say(&BridgeMessage::LatencyChanged { samples: latency });
     let main = main_thread();
     let (_processor, mut controller) = activate(ipc, 32);
-    assert_eq!(controller.latency(main), Samples(5));
-    say(Samples(77));
+    assert_eq!(controller.latency(main), Samples::new(5));
+    say(Samples::new(77));
     // An idle bridge reads nothing: the next command's reply reads it.
     assert_eq!(controller.parameters(main).len(), 1);
     // The bridge's thread stores the latency, asks for the re-read, then
@@ -466,7 +470,7 @@ fn the_controller_reports_what_the_plugin_re_reports() {
         heard.wait_for(|log| log.iter().any(|e| e.contains("LatencyChanged"))),
         "the host hears it"
     );
-    assert_eq!(controller.latency(main), Samples(77));
+    assert_eq!(controller.latency(main), Samples::new(77));
     let mut asked = Vec::new();
     controller.take_requests(main, &mut asked);
     assert_eq!(asked, [Request::LatencyChanged]);
@@ -948,7 +952,7 @@ fn render_silence(processor: &mut IpcProcessor, frames: usize) {
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
         buffer: InputOutput::from_slices(
-            tutti_plugin_types::Samples(inputs[0].len()),
+            tutti_plugin_types::Samples::new(inputs[0].len()),
             &inputs,
             &mut outputs,
         )
@@ -1240,7 +1244,7 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
         }
     })));
     server.say(&BridgeMessage::LatencyChanged {
-        samples: tutti_plugin_types::Samples(64),
+        samples: tutti_plugin_types::Samples::new(64),
     });
     held_rx
         .recv_timeout(POLL_GUARD)

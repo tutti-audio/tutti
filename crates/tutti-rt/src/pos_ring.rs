@@ -258,7 +258,7 @@ impl RingWindow {
 /// // Streaming thread: frames for positions 0..3.
 /// let data = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
 /// let frames = Interleaved::new(&data, ChannelLayout::STEREO)?;
-/// assert_eq!(writer.push(frames)?, Samples(3));
+/// assert_eq!(writer.push(frames)?, Samples::new(3));
 ///
 /// // Audio thread, once per block: play from 0, may read [0, 3).
 /// let claim = reader.claim(0, [(0, 3), (0, 0)]);
@@ -326,7 +326,7 @@ impl<S: RingSample> PosRing<S> {
             frames,
             recip: recip(frames as u64),
             keep_behind,
-            slots: (0..layout.interleaved_len(Samples(frames)))
+            slots: (0..layout.interleaved_len(Samples::new(frames)))
                 .map(|_| S::atom(S::SILENCE))
                 .collect(),
             window: AtomicU64::new(0),
@@ -595,13 +595,13 @@ impl<S: RingSample> PosWriter<S> {
                 ring.window
                     .store(RingWindow { from, to }.pack(), Ordering::Release);
             }
-            return Ok(Samples(0));
+            return Ok(Samples::new(0));
         }
-        let landing = Samples((end - to) as usize);
-        for (i, frame) in view.slice(Samples(0)..landing).iter().enumerate() {
+        let landing = Samples::new((end - to) as usize);
+        for (i, frame) in view.slice(Samples::new(0)..landing).iter().enumerate() {
             let at = ring
                 .layout
-                .interleaved_len(Samples(ring.slot(to + i as u64)));
+                .interleaved_len(Samples::new(ring.slot(to + i as u64)));
             for (word, &s) in ring.slots[at..at + frame.len()].iter().zip(frame) {
                 S::store(word, s);
             }
@@ -723,8 +723,8 @@ impl<'a, S: RingSample> PosClaim<'a, S> {
         let slot = self.ring.slot(s);
         let layout = self.ring.layout;
         let (from, to) = (
-            layout.interleaved_len(Samples(slot)),
-            layout.interleaved_len(Samples(slot + 1)),
+            layout.interleaved_len(Samples::new(slot)),
+            layout.interleaved_len(Samples::new(slot + 1)),
         );
         PosFrame(&self.ring.slots[from..to])
     }

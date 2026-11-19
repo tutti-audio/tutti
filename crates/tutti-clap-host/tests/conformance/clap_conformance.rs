@@ -45,7 +45,7 @@ const OFFSET_BLOCK: usize = 10_000;
 
 /// The offset `k` frames into the block.
 fn at(k: usize) -> Offset {
-    Offset::of(Samples(k), Samples(OFFSET_BLOCK))
+    Offset::of(Samples::new(k), Samples::new(OFFSET_BLOCK))
 }
 
 // CLAP event type constants we assert against (from clap-sys).
@@ -138,8 +138,9 @@ fn drive_once(
     let in_r = vec![0.0f32; frames];
     let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
     let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-    let mut buffer = InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
-        .expect("equal channels");
+    let mut buffer =
+        InputOutput::from_slices(tutti_plugin_types::Samples::new(ins[0].len()), ins, outs)
+            .expect("equal channels");
     inst.process(&mut buffer, ctx).expect("process succeeds");
     read_capture()
 }

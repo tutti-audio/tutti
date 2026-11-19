@@ -423,7 +423,7 @@ fn capability_is_the_backends_for_a_present_device() {
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     wake(&events);
     let caps = devices.capability(&id_of(&devices, "Keys")).unwrap();
-    assert!(caps.carries_midi2_only());
+    assert_eq!(caps.active().protocol, tutti_ump::Protocol::Midi2);
 }
 
 #[test]

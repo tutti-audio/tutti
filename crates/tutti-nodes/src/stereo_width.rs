@@ -154,7 +154,7 @@ mod tests {
     // The node tests run `F = f32`, the session's audio format.
     fn node(width: f64) -> StereoWidthNode<f32> {
         prepared(StereoWidthNode::<f32>::from(
-            StereoWidthConfig::new().width(StereoWidth(width)),
+            StereoWidthConfig::new().width(StereoWidth::new(width)),
         ))
     }
 
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn a_fork_shares_no_cell() {
         assert_param_fork(StereoWidthNode::<f32>::from(
-            StereoWidthConfig::new().width(StereoWidth(0.5)),
+            StereoWidthConfig::new().width(StereoWidth::new(0.5)),
         ));
     }
 
@@ -170,7 +170,7 @@ mod tests {
     /// width built with.
     #[test]
     fn the_shape_declares_the_width_param() {
-        let n = StereoWidthNode::<f32>::from(StereoWidthConfig::new().width(StereoWidth(1.5)));
+        let n = StereoWidthNode::<f32>::from(StereoWidthConfig::new().width(StereoWidth::new(1.5)));
         let shape = n.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -223,9 +223,9 @@ mod tests {
         let r: Vec<f64> = l.iter().rev().map(|v| v * 0.75).collect();
         let run = |w: f64| {
             let mut k = StereoWidthKernel::<f64>::new();
-            k.prepare(RATE, MaxBlock::of(Samples(len)));
+            k.prepare(RATE, MaxBlock::of(Samples::new(len)));
             let controls = WidthControls {
-                width: StereoWidth(w),
+                width: StereoWidth::new(w),
             };
             drive_kernel(&mut k, &[(0, controls)], &[l.clone(), r.clone()])
         };

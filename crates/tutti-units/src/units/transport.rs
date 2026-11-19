@@ -96,7 +96,8 @@ impl Bpm {
     }
 
     /// The tempo of a beat that lasts `period`: 60 over its seconds. `None`
-    /// when `period` is zero, negative or not finite (no tempo has such a beat).
+    /// when `period` is zero, negative or not finite (no tempo has such a beat), or so
+    /// short that 60 over it overflows `Bpm`'s range.
     ///
     /// ```
     /// use tutti_units::{Bpm, Seconds};
@@ -121,6 +122,19 @@ impl Bpm {
     #[must_use]
     pub fn beat_period(self) -> Seconds {
         Seconds::new(60.0 / self.0)
+    }
+
+    /// The beats that pass over `span` at this tempo: its beats per minute
+    /// times `span` over 60. A negative span gives a negative duration.
+    ///
+    /// ```
+    /// use tutti_units::{BeatDuration, Bpm, Seconds};
+    /// assert_eq!(Bpm::of(90.0).beats_in(Seconds::new(2.0)), BeatDuration::new(3.0));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn beats_in(self, span: Seconds) -> BeatDuration {
+        BeatDuration::new(span.get() * self.0 / 60.0)
     }
 
     /// Whether this tempo differs from `other` by more than `epsilon`, a
@@ -482,7 +496,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn advanced_by(self, frames: Samples) -> SamplePosition {
-        SamplePosition(self.0 + frames.0 as f64)
+        SamplePosition::new(self.0 + frames.get() as f64)
     }
 
     /// Whole frames fully elapsed before this position — rounds **down**.
@@ -497,7 +511,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn to_samples_floor(self) -> Samples {
-        Samples(libm::floor(self.0).max(0.0) as usize)
+        Samples::new(libm::floor(self.0).max(0.0) as usize)
     }
 
     /// Whole frames needed to *contain* this position — rounds **up**.
@@ -513,7 +527,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn to_samples_ceil(self) -> Samples {
-        Samples(libm::ceil(self.0).max(0.0) as usize)
+        Samples::new(libm::ceil(self.0).max(0.0) as usize)
     }
 }
 
@@ -546,9 +560,9 @@ impl BeatDuration {
     pub fn to_seconds(self, tempo: Bpm) -> Seconds {
         // A tempo too slow for a finite seconds-per-beat reads as zero, not inf.
         if !(60.0 / tempo.0).is_finite() {
-            return Seconds(0.0);
+            return Seconds::new(0.0);
         }
-        Seconds(self.0 * 60.0 / tempo.0)
+        Seconds::new(self.0 * 60.0 / tempo.get())
     }
 
     /// Magnitude, discarding direction.

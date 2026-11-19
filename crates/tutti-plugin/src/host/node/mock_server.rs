@@ -297,7 +297,7 @@ fn answer(slab: &mut SlabWriter, scratch: &mut [f32], data: ProcessAudioData) ->
 /// A map at 120 BPM that steps to 90 at `beat`.
 pub(super) fn tempo(beat: f64) -> TempoReader {
     let point = |beat: f64, bpm: f64| TempoPoint {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         tempo: Bpm::of(bpm),
         transition: Transition::Step,
     };
@@ -331,7 +331,7 @@ pub(super) fn new_node(
         origin: None,
     });
     let _ = ipc.watch(true);
-    let prepare = Prepare::new(SR, MaxBlock::new(Samples(CHUNK)).expect("a block"));
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(CHUNK)).expect("a block"));
     let descriptor = ipc.descriptor().clone();
     let wiring = ipc.loaded().clone();
     let (processor, controller) = ipc
@@ -353,5 +353,5 @@ pub(super) fn new_node(
 }
 
 pub(super) fn at(frame: usize, len: usize) -> Offset {
-    Offset::of(Samples(frame), Samples(len))
+    Offset::of(Samples::new(frame), Samples::new(len))
 }

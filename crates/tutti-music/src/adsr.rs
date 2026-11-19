@@ -51,19 +51,34 @@ impl Adsr {
     /// release. The note is at full level for exactly as long as the key is
     /// held, and the short release only takes the edge off the note-off click.
     pub fn organ() -> Self {
-        Self::new(Seconds(0.001), Seconds(0.0), Amplitude(1.0), Seconds(0.01))
+        Self::new(
+            Seconds::new(0.001),
+            Seconds::new(0.0),
+            Amplitude::new(1.0),
+            Seconds::new(0.01),
+        )
     }
 
     /// A plucked envelope: 1 ms attack, 300 ms decay to **zero** sustain,
     /// 100 ms release. Zero sustain is what makes the note die on its own.
     pub fn pluck() -> Self {
-        Self::new(Seconds(0.001), Seconds(0.3), Amplitude(0.0), Seconds(0.1))
+        Self::new(
+            Seconds::new(0.001),
+            Seconds::new(0.3),
+            Amplitude::new(0.0),
+            Seconds::new(0.1),
+        )
     }
 
     /// A pad envelope: 500 ms swell, 200 ms decay to 0.8, 1 s release. The long
     /// release means voices keep ringing well past note-off.
     pub fn pad() -> Self {
-        Self::new(Seconds(0.5), Seconds(0.2), Amplitude(0.8), Seconds(1.0))
+        Self::new(
+            Seconds::new(0.5),
+            Seconds::new(0.2),
+            Amplitude::new(0.8),
+            Seconds::new(1.0),
+        )
     }
 
     fn bits(&self) -> [u64; 4] {
@@ -79,7 +94,12 @@ impl Adsr {
 impl Default for Adsr {
     /// 10 ms attack, 100 ms decay, 0.7 sustain, 200 ms release.
     fn default() -> Self {
-        Self::new(Seconds(0.01), Seconds(0.1), Amplitude(0.7), Seconds(0.2))
+        Self::new(
+            Seconds::new(0.01),
+            Seconds::new(0.1),
+            Amplitude::new(0.7),
+            Seconds::new(0.2),
+        )
     }
 }
 
@@ -99,14 +119,24 @@ mod tests {
     /// itself.
     #[test]
     fn equality_is_bitwise() {
-        let a = Adsr::new(Seconds(0.0), Seconds(0.1), Amplitude(0.5), Seconds(0.2));
-        let neg = Adsr::new(Seconds(-0.0), Seconds(0.1), Amplitude(0.5), Seconds(0.2));
+        let a = Adsr::new(
+            Seconds::new(0.0),
+            Seconds::new(0.1),
+            Amplitude::new(0.5),
+            Seconds::new(0.2),
+        );
+        let neg = Adsr::new(
+            Seconds::new(-0.0),
+            Seconds::new(0.1),
+            Amplitude::new(0.5),
+            Seconds::new(0.2),
+        );
         assert_ne!(a, neg);
         let nan = Adsr::new(
-            Seconds(f64::NAN),
-            Seconds(0.1),
-            Amplitude(0.5),
-            Seconds(0.2),
+            Seconds::new(f64::NAN),
+            Seconds::new(0.1),
+            Amplitude::new(0.5),
+            Seconds::new(0.2),
         );
         assert_eq!(nan, nan);
     }
@@ -114,9 +144,9 @@ mod tests {
     /// The presets and the default keep their stages.
     #[test]
     fn presets_hold_their_stages() {
-        assert_eq!(Adsr::organ().sustain, Amplitude(1.0));
-        assert_eq!(Adsr::pluck().sustain, Amplitude(0.0));
-        assert_eq!(Adsr::pad().release, Seconds(1.0));
-        assert_eq!(Adsr::default().release, Seconds(0.2));
+        assert_eq!(Adsr::organ().sustain, Amplitude::new(1.0));
+        assert_eq!(Adsr::pluck().sustain, Amplitude::new(0.0));
+        assert_eq!(Adsr::pad().release, Seconds::new(1.0));
+        assert_eq!(Adsr::default().release, Seconds::new(0.2));
     }
 }

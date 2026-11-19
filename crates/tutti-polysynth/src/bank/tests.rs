@@ -10,7 +10,12 @@ fn sr() -> SampleRate {
 /// Instant attack, full sustain: the envelope is 1.0 from the first
 /// sample, so the output is the oscillator/filter chain alone.
 fn flat() -> Adsr {
-    Adsr::new(Seconds(0.0), Seconds(0.0), Amplitude(1.0), Seconds(0.1))
+    Adsr::new(
+        Seconds::new(0.0),
+        Seconds::new(0.0),
+        Amplitude::new(1.0),
+        Seconds::new(0.1),
+    )
 }
 
 fn bank<F: SynthFloat>(osc: OscillatorType, filter: FilterType, env: Adsr) -> VoiceBank<F> {
@@ -70,9 +75,20 @@ fn envelope_trace<F: SynthFloat>(bank: &mut VoiceBank<F>, lane: usize, frames: u
 /// to the 0.5 sustain, and a 30 ms release 1440 samples to silence.
 #[test]
 fn adsr_stages_take_their_authored_times() {
-    let env = Adsr::new(Seconds(0.01), Seconds(0.02), Amplitude(0.5), Seconds(0.03));
+    let env = Adsr::new(
+        Seconds::new(0.01),
+        Seconds::new(0.02),
+        Amplitude::new(0.5),
+        Seconds::new(0.03),
+    );
     let mut b = bank::<f32>(OscillatorType::Sine, FilterType::None, env);
-    start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
+    start(
+        &mut b,
+        0,
+        Hz::new(440.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
 
     let trace = envelope_trace(&mut b, 0, 3000);
     let peak = trace.iter().position(|&e| e >= 1.0).unwrap();
@@ -122,9 +138,20 @@ fn adsr_stages_take_their_authored_times() {
 /// the second from zero.)
 #[test]
 fn a_release_starts_from_the_current_level() {
-    let env = Adsr::new(Seconds(0.01), Seconds(0.02), Amplitude(0.5), Seconds(0.03));
+    let env = Adsr::new(
+        Seconds::new(0.01),
+        Seconds::new(0.02),
+        Amplitude::new(0.5),
+        Seconds::new(0.03),
+    );
     let mut b = bank::<f32>(OscillatorType::Sine, FilterType::None, env);
-    start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
+    start(
+        &mut b,
+        0,
+        Hz::new(440.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
 
     // 150 samples into a 480-sample attack.
     let _ = envelope_trace(&mut b, 0, 150);
@@ -171,17 +198,17 @@ fn a_release_starts_from_the_current_level() {
 #[test]
 fn a_voice_renders_the_same_in_any_lane_and_lanes_sum() {
     let filter = FilterType::Moog {
-        cutoff: Hz(1_500.0),
-        resonance: Resonance(0.6),
+        cutoff: Hz::new(1_500.0),
+        resonance: Resonance::new(0.6),
     };
     let solo = |lane: usize, freq: Hz| {
         let mut b = bank::<f32>(OscillatorType::Saw, filter, flat());
-        start(&mut b, lane, freq, Hz(1_500.0), Resonance(0.6));
+        start(&mut b, lane, freq, Hz::new(1_500.0), Resonance::new(0.6));
         render(&mut b, &[lane], 2048, CONTROL_BLOCK)
     };
 
-    let in_lane_0 = solo(0, Hz(220.0));
-    let in_lane_5 = solo(5, Hz(220.0));
+    let in_lane_0 = solo(0, Hz::new(220.0));
+    let in_lane_5 = solo(5, Hz::new(220.0));
     assert!(
         in_lane_0.iter().any(|s| s.abs() > 0.1),
         "the solo lane is silent"
@@ -192,12 +219,30 @@ fn a_voice_renders_the_same_in_any_lane_and_lanes_sum() {
     );
 
     // Two lanes of one group at once, and a lane in the next group.
-    let other = solo(3, Hz(331.0));
-    let far = solo(9, Hz(97.0));
+    let other = solo(3, Hz::new(331.0));
+    let far = solo(9, Hz::new(97.0));
     let mut b = bank::<f32>(OscillatorType::Saw, filter, flat());
-    start(&mut b, 0, Hz(220.0), Hz(1_500.0), Resonance(0.6));
-    start(&mut b, 3, Hz(331.0), Hz(1_500.0), Resonance(0.6));
-    start(&mut b, 9, Hz(97.0), Hz(1_500.0), Resonance(0.6));
+    start(
+        &mut b,
+        0,
+        Hz::new(220.0),
+        Hz::new(1_500.0),
+        Resonance::new(0.6),
+    );
+    start(
+        &mut b,
+        3,
+        Hz::new(331.0),
+        Hz::new(1_500.0),
+        Resonance::new(0.6),
+    );
+    start(
+        &mut b,
+        9,
+        Hz::new(97.0),
+        Hz::new(1_500.0),
+        Resonance::new(0.6),
+    );
     let together = render(&mut b, &[0, 3, 9], 2048, CONTROL_BLOCK);
     for (i, &t) in together.iter().enumerate() {
         let sum = in_lane_0[i] + other[i] + far[i];
@@ -220,7 +265,7 @@ fn filtered_sine_amplitude<F: SynthFloat>(
 ) -> f64 {
     const WINDOW: usize = 4800;
     let mut b = bank::<F>(OscillatorType::Sine, filter, flat());
-    start(&mut b, 0, Hz(hz), cutoff, res);
+    start(&mut b, 0, Hz::new(hz), cutoff, res);
     let _ = render(&mut b, &[0], WINDOW, CONTROL_BLOCK);
     let y = render(&mut b, &[0], WINDOW, CONTROL_BLOCK);
     let w = core::f64::consts::TAU * hz / SR;
@@ -282,13 +327,13 @@ fn svf_gain_matches_the_closed_form<F: SynthFloat>() {
         SvfMode::Notch,
     ] {
         let filter = FilterType::Svf {
-            cutoff: Hz(fc),
-            q: Q(q),
+            cutoff: Hz::new(fc),
+            q: Q::new(q),
             mode,
         };
         for hz in [90.0, 450.0, 900.0, 3_000.0, 9_000.0] {
             let want = svf_gain(mode, fc, q, hz);
-            let got = filtered_sine_amplitude::<F>(filter, Hz(fc), Resonance::NONE, hz);
+            let got = filtered_sine_amplitude::<F>(filter, Hz::new(fc), Resonance::NONE, hz);
             let bound = 64.0 * eps * q * q * want.max(0.01);
             assert!(
                 (got - want).abs() < bound,
@@ -331,11 +376,11 @@ fn ladder_gain_matches_the_closed_form<F: SynthFloat>() {
     let (fc, res) = (1_200.0f64, 0.5f64);
     let eps: f64 = F::EPSILON.into();
     let filter = FilterType::Moog {
-        cutoff: Hz(fc),
-        resonance: Resonance(res),
+        cutoff: Hz::new(fc),
+        resonance: Resonance::new(res),
     };
     let mut b = bank::<F>(OscillatorType::Sine, filter, flat());
-    b.set_filter(0, 1, Hz(fc), Resonance(res));
+    b.set_filter(0, 1, Hz::new(fc), Resonance::new(res));
     let c = b.coef_target[0];
     let coefficients = tutti_dsp::LadderCoefficients { g1: c[0], k: c[1] };
     const AMPLITUDE: f64 = 1e-3;
@@ -388,11 +433,17 @@ fn the_lane_ladder_gain_is_the_closed_form_at_f64() {
 #[test]
 fn a_pitch_change_ramps_every_sample_across_the_step() {
     let mut b = bank::<f32>(OscillatorType::Saw, FilterType::None, flat());
-    start(&mut b, 0, Hz(100.0), Hz(20_000.0), Resonance::NONE);
-    b.start(0, Phase(0.1));
+    start(
+        &mut b,
+        0,
+        Hz::new(100.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
+    b.start(0, Phase::new(0.1));
     let _ = render(&mut b, &[0], CONTROL_BLOCK, CONTROL_BLOCK);
 
-    b.set_pitch(0, Hz(200.0));
+    b.set_pitch(0, Hz::new(200.0));
     let out = render(&mut b, &[0], CONTROL_BLOCK + 1, CONTROL_BLOCK);
     let phase: Vec<f64> = out.iter().map(|&y| (f64::from(y) + 1.0) / 2.0).collect();
     let steps: Vec<f64> = phase.windows(2).map(|w| w[1] - w[0]).collect();
@@ -421,9 +472,20 @@ fn a_pitch_change_ramps_every_sample_across_the_step() {
 /// level below where the note was held.
 #[test]
 fn a_retrigger_at_a_boosted_sustain_does_not_drop() {
-    let env = Adsr::new(Seconds(0.001), Seconds(0.001), Amplitude(1.5), Seconds(0.1));
+    let env = Adsr::new(
+        Seconds::new(0.001),
+        Seconds::new(0.001),
+        Amplitude::new(1.5),
+        Seconds::new(0.1),
+    );
     let mut b = bank::<f32>(OscillatorType::Sine, FilterType::None, env);
-    start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
+    start(
+        &mut b,
+        0,
+        Hz::new(440.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
     let held = envelope_trace(&mut b, 0, 500);
     let before = *held.last().unwrap();
     b.gate_on(0);
@@ -449,7 +511,13 @@ fn a_zero_pulse_width_still_oscillates() {
         FilterType::None,
         flat(),
     );
-    start(&mut b, 0, Hz(220.0), Hz(20_000.0), Resonance::NONE);
+    start(
+        &mut b,
+        0,
+        Hz::new(220.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
     let out = render(&mut b, &[0], 4800, CONTROL_BLOCK);
     let mean = out.iter().sum::<f32>() / out.len() as f32;
     let ac = (out.iter().map(|s| (s - mean).powi(2)).sum::<f32>() / out.len() as f32).sqrt();
@@ -524,13 +592,19 @@ fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_f32() {
     const ELAPSED: usize = RELEASE / 100;
     let sustain = 0.27;
     let env = Adsr::new(
-        Seconds(0.0),
-        Seconds(0.0),
-        Amplitude(sustain),
-        Seconds(100.0),
+        Seconds::new(0.0),
+        Seconds::new(0.0),
+        Amplitude::new(sustain),
+        Seconds::new(100.0),
     );
     let mut b = extreme_bank::<f32>(SampleRate::SR_192K, env);
-    start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
+    start(
+        &mut b,
+        0,
+        Hz::new(440.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
     run(&mut b, 32);
     let from = b.envelope(0).get();
     assert_eq!(from, f64::from(sustain as f32), "the sustain level");
@@ -566,9 +640,20 @@ fn a_100_second_release_at_192_khz_moves_at_its_authored_slope_at_f64() {
     const RELEASE: usize = 19_200_000;
     /// One second of it, a hundredth of the release.
     const ELAPSED: usize = RELEASE / 100;
-    let env = Adsr::new(Seconds(0.0), Seconds(0.0), Amplitude(0.27), Seconds(100.0));
+    let env = Adsr::new(
+        Seconds::new(0.0),
+        Seconds::new(0.0),
+        Amplitude::new(0.27),
+        Seconds::new(100.0),
+    );
     let mut b = extreme_bank::<f64>(SampleRate::SR_192K, env);
-    start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
+    start(
+        &mut b,
+        0,
+        Hz::new(440.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
     run(&mut b, 32);
     let from = b.envelope(0).get();
     assert_eq!(from, 0.27);
@@ -597,9 +682,14 @@ fn turn_distance(a: f64, b: f64) -> f64 {
 fn pitch_after<F: SynthFloat>(freq: Hz, rate: SampleRate, frames: usize) {
     let mut b = extreme_bank::<F>(
         rate,
-        Adsr::new(Seconds(0.0), Seconds(0.0), Amplitude(1.0), Seconds(0.1)),
+        Adsr::new(
+            Seconds::new(0.0),
+            Seconds::new(0.0),
+            Amplitude::new(1.0),
+            Seconds::new(0.1),
+        ),
     );
-    start(&mut b, 0, freq, Hz(20_000.0), Resonance::NONE);
+    start(&mut b, 0, freq, Hz::new(20_000.0), Resonance::NONE);
     b.start(0, Phase::START);
     run(&mut b, frames);
 
@@ -639,21 +729,32 @@ fn pitch_after<F: SynthFloat>(freq: Hz, rate: SampleRate, frames: usize) {
 /// the pitch to the increment's own rounding.
 #[test]
 fn a_20_hz_voice_at_192_khz_keeps_its_phase_for_a_second_and_a_half_cycle_at_f32() {
-    pitch_after::<f32>(Hz(20.0), SampleRate::SR_192K, 192_000 + 4_800);
+    pitch_after::<f32>(Hz::new(20.0), SampleRate::SR_192K, 192_000 + 4_800);
 }
 
 #[test]
 fn a_20_hz_voice_at_192_khz_keeps_its_phase_for_a_second_and_a_half_cycle_at_f64() {
-    pitch_after::<f64>(Hz(20.0), SampleRate::SR_192K, 192_000 + 4_800);
+    pitch_after::<f64>(Hz::new(20.0), SampleRate::SR_192K, 192_000 + 4_800);
 }
 
 /// At `f64` the closed-form tests of the envelope's stage times hold as at `f32`, with
 /// the stages one sample off at most.
 #[test]
 fn adsr_stages_take_their_authored_times_at_f64() {
-    let env = Adsr::new(Seconds(0.01), Seconds(0.02), Amplitude(0.5), Seconds(0.03));
+    let env = Adsr::new(
+        Seconds::new(0.01),
+        Seconds::new(0.02),
+        Amplitude::new(0.5),
+        Seconds::new(0.03),
+    );
     let mut b = bank::<f64>(OscillatorType::Sine, FilterType::None, env);
-    start(&mut b, 0, Hz(440.0), Hz(20_000.0), Resonance::NONE);
+    start(
+        &mut b,
+        0,
+        Hz::new(440.0),
+        Hz::new(20_000.0),
+        Resonance::NONE,
+    );
     let trace = envelope_trace(&mut b, 0, 3000);
     let peak = trace.iter().position(|&e| e >= 1.0).unwrap();
     assert!(
@@ -686,23 +787,33 @@ fn adsr_stages_take_their_authored_times_at_f64() {
 #[test]
 fn lanes_sum_and_do_not_touch_each_other_at_f64() {
     let filter = FilterType::Moog {
-        cutoff: Hz(1_500.0),
-        resonance: Resonance(0.6),
+        cutoff: Hz::new(1_500.0),
+        resonance: Resonance::new(0.6),
     };
     let solo = |lane: usize, freq: Hz| {
         let mut b = bank::<f64>(OscillatorType::Saw, filter, flat());
-        start(&mut b, lane, freq, Hz(1_500.0), Resonance(0.6));
+        start(&mut b, lane, freq, Hz::new(1_500.0), Resonance::new(0.6));
         render(&mut b, &[lane], 2048, CONTROL_BLOCK)
     };
-    let (a, o, far) = (solo(0, Hz(220.0)), solo(3, Hz(331.0)), solo(5, Hz(97.0)));
+    let (a, o, far) = (
+        solo(0, Hz::new(220.0)),
+        solo(3, Hz::new(331.0)),
+        solo(5, Hz::new(97.0)),
+    );
     assert_eq!(
         a,
-        solo(2, Hz(220.0)),
+        solo(2, Hz::new(220.0)),
         "lane 2 renders differently from lane 0"
     );
     let mut b = bank::<f64>(OscillatorType::Saw, filter, flat());
     for (lane, freq) in [(0, 220.0), (3, 331.0), (5, 97.0)] {
-        start(&mut b, lane, Hz(freq), Hz(1_500.0), Resonance(0.6));
+        start(
+            &mut b,
+            lane,
+            Hz::new(freq),
+            Hz::new(1_500.0),
+            Resonance::new(0.6),
+        );
     }
     let together = render(&mut b, &[0, 3, 5], 2048, CONTROL_BLOCK);
     for (i, &t) in together.iter().enumerate() {

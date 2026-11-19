@@ -142,7 +142,7 @@ impl Node for Kick {
         for i in 0..io.frames() {
             let t = cx
                 .env
-                .transport_at(Offset::of(Samples(i), cx.env.block_len));
+                .transport_at(Offset::of(Samples::new(i), cx.env.block_len));
             let v = if t.playing {
                 let frac = t.beat().get().rem_euclid(1.0);
                 if frac < 0.1 {
@@ -342,8 +342,8 @@ fn sine(rate: f64) -> ModSource {
             seed: 0,
         },
         clock: Clock::Seconds {
-            rate: Hz(rate),
-            phase: PhaseIncrement(0.0),
+            rate: Hz::new(rate),
+            phase: PhaseIncrement::new(0.0),
             anchor: None,
         },
     }
@@ -351,18 +351,18 @@ fn sine(rate: f64) -> ModSource {
 
 fn follower() -> ModSource {
     ModSource::Follower {
-        attack: Seconds(0.001),
-        release: Seconds(0.05),
+        attack: Seconds::new(0.001),
+        release: Seconds::new(0.05),
     }
 }
 
 fn envelope() -> ModSource {
     ModSource::NoteEnvelope {
         adsr: Adsr {
-            attack: Seconds(0.002),
-            decay: Seconds(0.003),
-            sustain: Amplitude(0.4),
-            release: Seconds(0.2),
+            attack: Seconds::new(0.002),
+            decay: Seconds::new(0.003),
+            sustain: Amplitude::new(0.4),
+            release: Seconds::new(0.2),
         },
     }
 }
@@ -372,7 +372,7 @@ fn envelope() -> ModSource {
 fn editor(max: usize) -> (Editor, Executor) {
     Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(max)),
+        MaxBlock::of(Samples::new(max)),
     ))
 }
 
@@ -421,7 +421,7 @@ fn append(all: &mut Vec<Vec<f32>>, got: Vec<Vec<f32>>) {
 }
 
 fn stopped() -> TransportPosition {
-    TransportPosition::new(false, TEMPO, Beat(0.0), None)
+    TransportPosition::new(false, TEMPO, Beat::new(0.0), None)
 }
 
 /// `total` stopped frames in blocks of `n`.
@@ -1289,7 +1289,7 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
             node: lane,
             port: 0,
         },
-        delay: Samples(128),
+        delay: Samples::new(128),
     };
     ed.spec_mut().connect_events(to, feedback);
     m.apply(&decl.get(), &mut ed, &host).expect("applies");
@@ -1376,12 +1376,12 @@ struct Playhead(FrameClock);
 
 impl Playhead {
     fn new() -> Self {
-        Self(FrameClock::new(Beat(0.0), TEMPO, SampleRate::of(RATE)))
+        Self(FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(RATE)))
     }
     fn roll(&mut self, ed: &mut Editor, exec: &mut Executor, n: usize, all: &mut Vec<Vec<f32>>) {
         let t = TransportPosition::counted(true, TEMPO, self.0.origin(), None);
         append(all, block(ed, exec, &t, &TransportChanges::NONE, n));
-        self.0.advance(Samples(n), None);
+        self.0.advance(Samples::new(n), None);
     }
 }
 
@@ -1422,20 +1422,20 @@ fn an_export_is_the_live_render_on_a_native_param() {
         .fork(
             ForkTarget::Master,
             ForkMode::Offline,
-            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples(1024))),
+            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
         )
         .expect("forks");
     let total = 48_000;
     let mut head = Playhead::new();
     let mut ch = TransportChanges::NONE;
     let start = TransportPosition::counted(true, TEMPO, head.0.origin(), None);
-    ch.push(Offset::of(Samples(37), Samples(128)), start)
+    ch.push(Offset::of(Samples::new(37), Samples::new(128)), start)
         .expect("room");
     let mut live = block(&mut ed, &mut exec, &stopped(), &ch, 128);
     for c in &mut live {
         c.drain(..37);
     }
-    head.0.advance(Samples(128 - 37), None);
+    head.0.advance(Samples::new(128 - 37), None);
     for n in ragged(total - (128 - 37), 128) {
         head.roll(&mut ed, &mut exec, n, &mut live);
     }
@@ -1710,8 +1710,8 @@ fn a_play_start_after_a_steady_state_republishes_an_anchored_program() {
     assert_eq!(reapply(&mut r).republished, vec![cutoff_of(1)]);
     steady(&mut r);
     let mut ch = TransportChanges::NONE;
-    let start = TransportPosition::new(true, TEMPO, Beat(0.0), None);
-    ch.push(Offset::of(Samples(37), Samples(128)), start)
+    let start = TransportPosition::new(true, TEMPO, Beat::new(0.0), None);
+    ch.push(Offset::of(Samples::new(37), Samples::new(128)), start)
         .expect("room");
     block(&mut r.ed, &mut r.exec, &stopped(), &ch, 128);
     assert_eq!(reapply(&mut r).republished, vec![cutoff_of(1)]);
@@ -1858,7 +1858,7 @@ fn a_rate_change_after_a_steady_state_is_not_skipped() {
     let skipped = r.m.skipped();
     r.ed.reprepare(Prepare::new(
         SampleRate::of(RATE * 2.0),
-        MaxBlock::of(Samples(128)),
+        MaxBlock::of(Samples::new(128)),
     ))
     .expect("reprepares");
     let applied = reapply(&mut r);

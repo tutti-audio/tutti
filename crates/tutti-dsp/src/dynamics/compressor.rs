@@ -26,7 +26,6 @@ use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 use super::curves::{db_gain, gain_reduction, level_db};
 use super::key_filter::{KeyFilter, KeyStage};
 use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE, floored, key_levels};
-use crate::finite::finite_or;
 use crate::follower::{Follower, Smoothed};
 use crate::{Glide, Lanes, Lerp, Steps};
 
@@ -104,15 +103,14 @@ impl CompressorMember {
     fn designed(c: &CompressorControls, rate: SampleRate) -> Self {
         let d = CompressorControls::DEFAULT;
         Self {
-            threshold: Db(finite_or(c.threshold.get(), d.threshold.get())),
-            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())),
-            ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
+            threshold: c.threshold.finite_or(d.threshold),
+            knee: c.knee.finite_or(d.knee).clamp(Db::UNITY, MAX_KNEE),
+            ratio: CompressionRatio::new_clamped(c.ratio.finite_or(d.ratio).get()),
             attack: c.attack,
             release: c.release,
-            makeup: Db(finite_or(c.makeup.get(), d.makeup.get())
-                .clamp(-MAX_MAKEUP.get(), MAX_MAKEUP.get())),
-            key_cutoff: Hz(finite_or(c.key_cutoff.get(), d.key_cutoff.get())),
-            key_q: Q(finite_or(c.key_q.get(), d.key_q.get())),
+            makeup: c.makeup.finite_or(d.makeup).clamp(-MAX_MAKEUP, MAX_MAKEUP),
+            key_cutoff: c.key_cutoff.finite_or(d.key_cutoff),
+            key_q: c.key_q.finite_or(d.key_q),
             rate,
         }
     }

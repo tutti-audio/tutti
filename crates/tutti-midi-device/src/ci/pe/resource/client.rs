@@ -22,7 +22,7 @@ use super::fields::PeDataError;
 use super::kind::PeResource;
 use super::request::{RequestRefused, ResourceGet, ResourceSet, ResourceTarget, SetBody};
 use super::state::StateStamp;
-use crate::{CiMessage, Decoded, Muid};
+use crate::{CiMessage, Decoded, Initiator, Muid};
 
 /// The most entries of a List Resource a walk gathers, so a peer that never
 /// ends its list cannot make the walk grow without bound.
@@ -329,24 +329,6 @@ impl ResourceInitiator {
     /// before and, once they arrive, the ResourceList.
     pub fn ask_capabilities(&mut self, now: Instant) -> Vec<ResourceAction> {
         let actions = self.pe.ask_capabilities(now);
-        self.map(actions, now)
-    }
-
-    /// When [`on_timeout`](Self::on_timeout) is next needed.
-    #[must_use]
-    pub fn deadline(&self) -> Option<Instant> {
-        self.pe.deadline()
-    }
-
-    /// Time has passed.
-    pub fn on_timeout(&mut self, now: Instant) -> Vec<ResourceAction> {
-        let actions = self.pe.on_timeout(now);
-        self.map(actions, now)
-    }
-
-    /// A CI message of the connection's Group arrived.
-    pub fn on_message(&mut self, decoded: &Decoded, now: Instant) -> Vec<ResourceAction> {
-        let actions = self.pe.on_message(decoded, now);
         self.map(actions, now)
     }
 
@@ -906,4 +888,22 @@ fn apply_partial(held: &PeData, bytes: &[u8]) -> Option<PeData> {
     let update = PartialUpdate::try_from(&PeJson::try_from(bytes).ok()?).ok()?;
     let changed = update.apply(&held.to_json()?).ok()?;
     PeData::decode(&held.resource(), &changed).ok()
+}
+
+impl Initiator for ResourceInitiator {
+    type Action = ResourceAction;
+
+    fn deadline(&self) -> Option<Instant> {
+        self.pe.deadline()
+    }
+
+    fn on_message(&mut self, decoded: &Decoded, now: Instant) -> Vec<ResourceAction> {
+        let actions = self.pe.on_message(decoded, now);
+        self.map(actions, now)
+    }
+
+    fn on_timeout(&mut self, now: Instant) -> Vec<ResourceAction> {
+        let actions = self.pe.on_timeout(now);
+        self.map(actions, now)
+    }
 }

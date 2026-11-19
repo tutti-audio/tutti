@@ -101,11 +101,11 @@ impl Kernel for Echo {
     }
 
     fn latency(&self) -> Samples {
-        Samples(self.latency)
+        Samples::new(self.latency)
     }
 
     fn tail(&self) -> Tail {
-        Tail::Finite(Samples(self.claimed))
+        Tail::Finite(Samples::new(self.claimed))
     }
 }
 
@@ -134,7 +134,7 @@ impl Rig {
         let env = Env {
             frame: Frame::new(self.frame),
             sample_rate: SR,
-            block_len: Samples(input.len()),
+            block_len: Samples::new(input.len()),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
@@ -151,7 +151,7 @@ impl Rig {
 }
 
 fn impulse_block() -> Vec<f32> {
-    tutti_fixtures::signal::impulse(Samples(BLOCK))
+    tutti_fixtures::signal::impulse(Samples::new(BLOCK))
 }
 
 /// The kernel's latency and tail are declared apart (a tail excludes latency), and the
@@ -160,7 +160,7 @@ fn impulse_block() -> Vec<f32> {
 fn latency_and_tail_are_declared_apart() {
     let mut n = node(Echo::new(100, 100, 7));
     let shape = n.shape();
-    assert_eq!(shape.latency.samples(), Samples(7));
+    assert_eq!(shape.latency.samples(), Samples::new(7));
     assert_eq!(shape.tail.samples().expect("finite").get(), 100);
     assert_honest_tail(&mut n, SR);
 }
@@ -278,12 +278,12 @@ fn the_graphs_mix_is_aligned_to_the_kernels_latency() {
     let (claimed, latency) = (25, 7);
     let mut solo = Solo::new(
         kernel_node(Echo::new(claimed, claimed, latency)),
-        Prepare::new(SR, MaxBlock::of(Samples(BLOCK))),
+        Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))),
     );
     let key = solo.key();
     solo.renderer_mut()
         .editor_mut()
-        .set_mix(key, Mix(0.5))
+        .set_mix(key, Mix::new(0.5))
         .expect("a mix");
     let mut x = vec![0.0; BLOCK];
     x.extend(impulse_block());

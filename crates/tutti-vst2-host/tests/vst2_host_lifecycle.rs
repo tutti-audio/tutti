@@ -320,14 +320,14 @@ fn an_io_change_is_answered_and_re_read() {
     );
     assert_eq!(
         instance.wiring(main_thread()).latency_samples,
-        Samples(2048)
+        Samples::new(2048)
     );
     assert_eq!(
         instance.loaded().pins().0.count(),
         4,
         "the pin count was re-read"
     );
-    assert_eq!(instance.loaded().latency_samples(), Samples(2048));
+    assert_eq!(instance.loaded().latency_samples(), Samples::new(2048));
 
     assert_eq!(requests(&mut instance), [], "consumed");
 }
@@ -344,18 +344,18 @@ fn a_rate_change_that_moves_latency_is_read() {
     let mut instance = load(512);
     assert_eq!(
         Controller::latency(instance.controller(), main_thread()),
-        Samples(0)
+        Samples::new(0)
     );
     set_late_latency(1537);
     instance.set_sample_rate(96_000.0);
 
     assert_eq!(
         Controller::latency(instance.controller(), main_thread()),
-        Samples(1537)
+        Samples::new(1537)
     );
     assert_eq!(
         instance.wiring(main_thread()).latency_samples,
-        Samples(1537)
+        Samples::new(1537)
     );
     assert_eq!(
         requests(&mut instance),
@@ -367,7 +367,7 @@ fn a_rate_change_that_moves_latency_is_read() {
     instance.set_sample_rate(44_100.0);
     assert_eq!(
         Controller::latency(instance.controller(), main_thread()),
-        Samples(0)
+        Samples::new(0)
     );
     set_late_latency(0);
 }
@@ -1073,7 +1073,7 @@ fn midi_is_delivered_in_the_piece_it_falls_in() {
 
     let at = |frame: usize, note: u8| {
         (
-            Offset::of(Samples(frame), Samples(200)),
+            Offset::of(Samples::new(frame), Samples::new(200)),
             midi::note_on(MidiChannel::FIRST, note, 0x4000),
         )
     };
@@ -1100,7 +1100,7 @@ fn the_realtime_flag_is_set_live_and_clear_offline() {
     let _guard = lock_probe();
     let mut instance = load(BLOCK);
     let note = [(
-        Offset::of(Samples(10), Samples(64)),
+        Offset::of(Samples::new(10), Samples::new(64)),
         midi::note_on(MidiChannel::FIRST, 60, 0x4000),
     )];
     let flags = |instance: &mut Active| {
@@ -1130,7 +1130,7 @@ fn a_later_piece_sees_the_transport_advanced() {
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_beat(tutti_units::Beat(4.0))
+        .with_beat(tutti_units::Beat::new(4.0))
         .with_position_samples(1_000)
         .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default());
@@ -1159,11 +1159,11 @@ fn a_bar_line_in_a_later_piece_moves_the_bar_start() {
     let mut instance = load(BLOCK);
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_beat(tutti_units::Beat(3.995))
+        .with_beat(tutti_units::Beat::new(3.995))
         .with_position_samples(1_000)
         .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default())
-        .with_bar(tutti_units::Beat(0.0), Default::default());
+        .with_bar(tutti_units::Beat::new(0.0), Default::default());
     render_f32(&mut instance, 200, &[], Some(&transport), 0.0);
     let cap = read_capture();
     assert_eq!(cap.time_bar_start_pos, 4.0);
@@ -1184,7 +1184,7 @@ fn a_later_piece_measures_its_clock_offset_at_its_own_position() {
     let mut instance = load(BLOCK);
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_beat(tutti_units::Beat(4.0 + 100.0 / 24_000.0))
+        .with_beat(tutti_units::Beat::new(4.0 + 100.0 / 24_000.0))
         .with_position_samples(1_000)
         .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default());
@@ -1212,7 +1212,7 @@ fn a_block_with_no_transport_reports_a_stopped_one() {
     let mut instance = load(BLOCK);
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_beat(tutti_units::Beat(3.0))
+        .with_beat(tutti_units::Beat::new(3.0))
         .with_position_samples(1_000);
     render_f32(&mut instance, 64, &[], Some(&transport), 0.0);
     assert_ne!(read_capture().time_flags & PLAYING, 0);

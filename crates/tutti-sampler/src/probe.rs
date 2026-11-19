@@ -82,7 +82,7 @@ impl SampleFacts {
     /// rather than for policy. Policy reads [`frames`](Self::frames).
     #[must_use]
     pub fn frames_or_zero(&self) -> Samples {
-        self.frames.unwrap_or(Samples(0))
+        self.frames.unwrap_or(Samples::new(0))
     }
 }
 
@@ -131,7 +131,7 @@ pub fn probe(path: impl AsRef<Path>) -> Result<SampleFacts, ProbeError> {
         source,
     })?;
     Ok(SampleFacts {
-        frames: meta.total_frames.map(|f| Samples(f as usize)),
+        frames: meta.total_frames.map(|f| Samples::new(f as usize)),
         sample_rate: meta.sample_rate,
         layout: meta.topology.width(),
         streamable: streamable(path, &meta),
@@ -196,7 +196,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = write_wav(&dir, "probe_ok.wav", 4800);
         let facts = probe(&path).expect("readable");
-        assert_eq!(facts.frames, Some(Samples(4800)));
+        assert_eq!(facts.frames, Some(Samples::new(4800)));
         assert_eq!(facts.sample_rate, SampleRate::SR_48K);
         assert_eq!(facts.layout.count(), 2);
         assert!(
@@ -225,7 +225,7 @@ mod tests {
             topology: ChannelTopology::assumed(ChannelLayout::STEREO),
             streamable: false,
         };
-        assert_eq!(unknown.frames_or_zero(), Samples(0));
+        assert_eq!(unknown.frames_or_zero(), Samples::new(0));
         assert_eq!(unknown.frames, None, "the policy field stays honest");
     }
 
@@ -236,6 +236,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = write_wav(&dir, "probe_empty.wav", 0);
         let facts = probe(&path).expect("an empty wav is still a valid wav");
-        assert_eq!(facts.frames, Some(Samples(0)));
+        assert_eq!(facts.frames, Some(Samples::new(0)));
     }
 }

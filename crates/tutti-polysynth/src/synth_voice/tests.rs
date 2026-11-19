@@ -1,7 +1,7 @@
 use super::*;
 use tutti_units::Semitones;
 
-const BASE: Hz = Hz(1000.0);
+const BASE: Hz = Hz::new(1000.0);
 
 fn voice(lfo_rate: Option<Hz>) -> SynthVoice {
     let config = SynthConfig {
@@ -24,7 +24,7 @@ fn voice(lfo_rate: Option<Hz>) -> SynthVoice {
 #[test]
 fn an_lfo_with_no_rate_leaves_the_cutoff_at_its_base() {
     let mut voice = voice(None);
-    let channel = ChannelState::new(Semitones(2.0));
+    let channel = ChannelState::new(Semitones::new(2.0));
     for _ in 0..4 {
         assert_eq!(
             voice.modulated_cutoff(2400, SampleRate::SR_48K, &channel),
@@ -38,8 +38,8 @@ fn an_lfo_with_no_rate_leaves_the_cutoff_at_its_base() {
 /// crest, so a full depth lifts the cutoff by 50%.
 #[test]
 fn an_lfo_sweeps_the_cutoff_by_half_its_depth_at_the_crest() {
-    let mut voice = voice(Some(Hz(5.0)));
-    let channel = ChannelState::new(Semitones(2.0));
+    let mut voice = voice(Some(Hz::new(5.0)));
+    let channel = ChannelState::new(Semitones::new(2.0));
     let cutoff = voice.modulated_cutoff(2400, SampleRate::SR_48K, &channel);
     assert!(
         (cutoff.get() - 1.5 * BASE.get()).abs() < 0.5,
@@ -64,7 +64,7 @@ fn the_cutoff_control_moves_two_octaves_per_unit() {
 #[test]
 fn a_channels_pan_is_rp_036_scaled_to_unity_at_the_centre_with_exact_dead_sides() {
     let pair = |p: f64| {
-        let (l, r) = unity_centre_pan(Pan(p));
+        let (l, r) = unity_centre_pan(Pan::new(p));
         (l.get(), r.get())
     };
     let root = std::f64::consts::SQRT_2;

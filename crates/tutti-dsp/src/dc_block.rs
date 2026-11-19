@@ -13,7 +13,6 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Hz, SampleRate, Samples};
 
-use crate::finite::finite_or;
 use crate::onepole::{cutoff_pole, ring_frames};
 use crate::{COEFF_INTERVAL, Glide, Lerp, Steps};
 
@@ -29,14 +28,15 @@ pub const MIN_DC_CORNER: Hz = Hz(1.0);
 /// as at least [`MIN_DC_CORNER`] and at most the rate's Nyquist, and a corner that is not
 /// finite as [`DC_CORNER`].
 #[must_use]
-pub fn dc_pole(corner: Hz, rate: SampleRate) -> f64 {
+pub(crate) fn dc_pole(corner: Hz, rate: SampleRate) -> f64 {
     cutoff_pole(held_corner(corner, rate), rate)
 }
 
 /// The corner as a blocker reads it: finite, within [`MIN_DC_CORNER`] and the Nyquist.
 fn held_corner(corner: Hz, rate: SampleRate) -> Hz {
-    let corner = finite_or(corner.get(), DC_CORNER.get());
-    Hz(corner.clamp(MIN_DC_CORNER.get(), rate.nyquist().get()))
+    corner
+        .finite_or(DC_CORNER)
+        .clamp(MIN_DC_CORNER, rate.nyquist())
 }
 
 /// The control of a [`DcBlocker`].
@@ -65,7 +65,7 @@ impl DcBlockerControls {
 /// The complement `1 - R` of the pole of a blocker with `corner` at `rate`: the small term the
 /// recursion runs on, solved in `f64`.
 fn dc_complement(corner: Hz, rate: SampleRate) -> f64 {
-    -libm::expm1(-std::f64::consts::TAU * held_corner(corner, rate).get() / rate.get())
+    -libm::expm1(-held_corner(corner, rate).angle_per_frame(rate).get())
 }
 
 /// A DC blocker of any width in the float `F`: one `(x[n-1], y[n-1])` pair per channel, one

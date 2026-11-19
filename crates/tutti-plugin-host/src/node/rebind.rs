@@ -415,7 +415,7 @@ mod tests {
             ));
         }
         let descriptor = loaded.info().clone();
-        let prepare = Prepare::new(SR, MaxBlock::new(Samples(BLOCK)).expect("a block"));
+        let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(BLOCK)).expect("a block"));
         let Ok((processor, controller)) = loaded.activate(main, prepare) else {
             panic!("the fake activates");
         };
@@ -497,7 +497,7 @@ mod tests {
         Env {
             frame: Frame::new(frame),
             sample_rate: SR,
-            block_len: Samples(BLOCK),
+            block_len: Samples::new(BLOCK),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
@@ -777,8 +777,8 @@ mod tests {
     /// A ramp of `PARAM` to `value` at the block's first frame.
     fn ramp(value: f64) -> [ParamEvent; 1] {
         [ParamEvent::ramp(
-            Offset::of(Samples(0), Samples(BLOCK)),
-            ParamRamp::foreign(PARAM, value, Samples(0)),
+            Offset::of(Samples::new(0), Samples::new(BLOCK)),
+            ParamRamp::foreign(PARAM, value, Samples::new(0)),
         )]
     }
 
@@ -828,7 +828,7 @@ mod tests {
         let _hearing = reporting.invalidate.subscribe(move |e| sink.lock().push(e));
         rebinder.reporting = Some(reporting);
 
-        fake.set_tail(Samples(77));
+        fake.set_tail(Samples::new(77));
         assert!(Request::TailChanged.raise(fake.request_word()));
         rebinder.tick(main_thread());
         let heard = heard.lock();
@@ -836,7 +836,7 @@ mod tests {
             heard.iter().any(|e| matches!(
                 e,
                 PluginInvalidation::Tail { tail }
-                    if *tail == tutti_plugin_types::PluginTail::Finite(Samples(77))
+                    if *tail == tutti_plugin_types::PluginTail::Finite(Samples::new(77))
             )),
             "{heard:?}"
         );
@@ -850,7 +850,7 @@ mod tests {
     fn the_shape_is_the_current_figures_while_the_instance_is_held() {
         let (fake, _rebinder, node, inner) = rig();
         let at_load = node.shape();
-        fake.set_tail(Samples(77));
+        fake.set_tail(Samples::new(77));
         assert!(Request::TailChanged.raise(fake.request_word()));
         inner.lock().pump(main_thread());
         let free = node.shape();

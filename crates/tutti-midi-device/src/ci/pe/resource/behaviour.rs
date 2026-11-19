@@ -21,7 +21,7 @@ use super::super::value::{PeExtra, PeExtraError};
 use super::exchange::*;
 use super::*;
 use crate::ci::testing::{OURS, PEER};
-use crate::{CiHeader, CiMessage, Decoded, MaxSysexSize, Muid, TimeoutWait};
+use crate::{CiHeader, CiMessage, Decoded, Initiator, MaxSysexSize, Muid, TimeoutWait};
 
 fn from_initiator(message: CiMessage) -> Decoded {
     Decoded::Message(message)
@@ -57,10 +57,11 @@ fn inquire(
     let chunks = split_message(PeRequestId::of(id), &header, body, MaxSysexSize::of(512)).unwrap();
     let mut out = Vec::new();
     for chunk in chunks {
-        out.extend(
-            link.resp
-                .on_message(&pe_message(PeCiMessage::Chunk { kind, chunk }), link.now),
-        );
+        out.extend(link.resp.on_message(
+            &mut link.store,
+            &pe_message(PeCiMessage::Chunk { kind, chunk }),
+            link.now,
+        ));
     }
     out
 }
@@ -77,6 +78,7 @@ fn reply_to_update(link: &mut Link, id: PeRequestId, status: PeStatus) -> Vec<Re
     let mut out = Vec::new();
     for chunk in chunks {
         out.extend(link.resp.on_message(
+            &mut link.store,
             &pe_message(PeCiMessage::Chunk {
                 kind: PeMessageKind::SUBSCRIPTION_REPLY,
                 chunk,
@@ -169,10 +171,19 @@ fn request_id(actions: &[ResponderAction]) -> PeRequestId {
 #[test]
 fn an_update_waits_for_a_free_request_id_and_carries_the_data_as_it_is_then() {
     let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
-    let first = link.resp.publish(&target, channels(1), link.now).unwrap();
+    let first = link
+        .resp
+        .publish(&mut link.store, &target, channels(1), link.now)
+        .unwrap();
     assert_eq!(chunks_of(&first).len(), 1);
-    let second = link.resp.publish(&target, channels(2), link.now).unwrap();
-    let third = link.resp.publish(&target, channels(3), link.now).unwrap();
+    let second = link
+        .resp
+        .publish(&mut link.store, &target, channels(2), link.now)
+        .unwrap();
+    let third = link
+        .resp
+        .publish(&mut link.store, &target, channels(3), link.now)
+        .unwrap();
     assert!(second.is_empty() && third.is_empty());
     assert_eq!(link.resp.queued(Muid::of(OURS)), 1);
     let sent = reply_to_update(&mut link, request_id(&first), PeStatus::Ok);
@@ -196,7 +207,9 @@ fn an_update_waits_for_a_free_request_id_and_carries_the_data_as_it_is_then() {
 fn the_queue_holds_one_item_for_each_subscription() {
     let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
     for n in 1..=20 {
-        link.resp.publish(&target, channels(n), link.now).unwrap();
+        link.resp
+            .publish(&mut link.store, &target, channels(n), link.now)
+            .unwrap();
     }
     assert_eq!(link.resp.queued(Muid::of(OURS)), 1);
 }
@@ -213,16 +226,31 @@ fn queued_partial_updates_fold_into_one() {
     let change = |p: &str, n: i64| PartialUpdate::new().with(pointer(p), PartialValue::Integer(n));
     let first = link
         .resp
-        .change(&target, change("/lfoSpeed", 10), link.now)
+        .change(&mut link.store, &target, change("/lfoSpeed", 10), link.now)
         .unwrap();
     link.resp
-        .change(&target, change("/pitchEnvelope/rates/0", 80), link.now)
+        .change(
+            &mut link.store,
+            &target,
+            change("/pitchEnvelope/rates/0", 80),
+            link.now,
+        )
         .unwrap();
     link.resp
-        .change(&target, change("/pitchEnvelope/levels/0", 60), link.now)
+        .change(
+            &mut link.store,
+            &target,
+            change("/pitchEnvelope/levels/0", 60),
+            link.now,
+        )
         .unwrap();
     link.resp
-        .change(&target, change("/pitchEnvelope/rates/0", 81), link.now)
+        .change(
+            &mut link.store,
+            &target,
+            change("/pitchEnvelope/rates/0", 81),
+            link.now,
+        )
         .unwrap();
     assert_eq!(link.resp.queued(Muid::of(OURS)), 1);
     let sent = reply_to_update(&mut link, request_id(&first), PeStatus::Ok);
@@ -252,11 +280,11 @@ fn partial_updates_that_cannot_fold_are_told_as_a_full() {
     let (mut link, target) = subscribed_link(1, custom("X-ProgramEdit"), Some("abcd"));
     let first = link
         .resp
-        .change(&target, one("/lfoSpeed"), link.now)
+        .change(&mut link.store, &target, one("/lfoSpeed"), link.now)
         .unwrap();
     for n in 0..70 {
         link.resp
-            .change(&target, one(&format!("/p{n}")), link.now)
+            .change(&mut link.store, &target, one(&format!("/p{n}")), link.now)
             .unwrap();
     }
     let sent = reply_to_update(&mut link, request_id(&first), PeStatus::Ok);
@@ -267,7 +295,7 @@ fn partial_updates_that_cannot_fold_are_told_as_a_full() {
     // The data as it is: a `full` when it fits one chunk, a `notify` when not.
     match command {
         PeUpdateCommand::Full => {
-            let held = link.resp.store().get(&target).unwrap().to_json().unwrap();
+            let held = link.store.get(&target).unwrap().to_json().unwrap();
             assert_eq!(PeJson::try_from(body.as_slice()).unwrap(), held);
         }
         other => assert_eq!(*other, PeUpdateCommand::Notify),
@@ -280,10 +308,15 @@ fn partial_updates_that_cannot_fold_are_told_as_a_full() {
 #[test]
 fn an_end_goes_after_the_replies_and_replaces_queued_updates() {
     let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
-    let first = link.resp.publish(&target, channels(1), link.now).unwrap();
-    link.resp.publish(&target, channels(2), link.now).unwrap();
+    let first = link
+        .resp
+        .publish(&mut link.store, &target, channels(1), link.now)
+        .unwrap();
+    link.resp
+        .publish(&mut link.store, &target, channels(2), link.now)
+        .unwrap();
     let id = link.resp.subscriptions().next().unwrap().0.clone();
-    let ended = link.resp.end_subscription(&id, link.now);
+    let ended = link.resp.end_subscription(&mut link.store, &id, link.now);
     assert!(chunks_of(&ended).is_empty(), "no Request ID is free");
     assert_eq!(link.resp.queued(Muid::of(OURS)), 1);
     let sent = reply_to_update(&mut link, request_id(&first), PeStatus::Ok);
@@ -305,11 +338,15 @@ fn an_end_goes_after_the_replies_and_replaces_queued_updates() {
 #[test]
 fn a_timeout_frees_the_request_id_for_the_queue() {
     let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
-    link.resp.publish(&target, channels(1), link.now).unwrap();
-    link.resp.publish(&target, channels(2), link.now).unwrap();
+    link.resp
+        .publish(&mut link.store, &target, channels(1), link.now)
+        .unwrap();
+    link.resp
+        .publish(&mut link.store, &target, channels(2), link.now)
+        .unwrap();
     assert!(link.resp.deadline().is_some());
     let later = link.now + PE_TIMEOUT + Duration::from_millis(1);
-    let sent = link.resp.on_timeout(later);
+    let sent = link.resp.on_timeout(&mut link.store, later);
     assert_eq!(updates_of(&sent).len(), 1);
     assert_eq!(link.resp.queued(Muid::of(OURS)), 0);
 }
@@ -319,7 +356,10 @@ fn a_timeout_frees_the_request_id_for_the_queue() {
 #[test]
 fn a_timeout_wait_extends_the_wait_for_a_reply_to_an_update() {
     let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
-    let sent = link.resp.publish(&target, channels(1), link.now).unwrap();
+    let sent = link
+        .resp
+        .publish(&mut link.store, &target, channels(1), link.now)
+        .unwrap();
     let before = link.resp.deadline().unwrap();
     let signal = PeSignal::TimeoutWait {
         request_id: request_id(&sent),
@@ -327,6 +367,7 @@ fn a_timeout_wait_extends_the_wait_for_a_reply_to_an_update() {
         chunk: None,
     };
     link.resp.on_message(
+        &mut link.store,
         &signal_message(PeTransaction::Subscription, signal),
         link.now,
     );
@@ -340,13 +381,19 @@ fn a_timeout_wait_extends_the_wait_for_a_reply_to_an_update() {
 #[test]
 fn a_terminate_of_an_update_frees_its_request_id() {
     let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
-    let sent = link.resp.publish(&target, channels(1), link.now).unwrap();
-    link.resp.publish(&target, channels(2), link.now).unwrap();
+    let sent = link
+        .resp
+        .publish(&mut link.store, &target, channels(1), link.now)
+        .unwrap();
+    link.resp
+        .publish(&mut link.store, &target, channels(2), link.now)
+        .unwrap();
     let signal = PeSignal::Terminate {
         request_id: request_id(&sent),
         by: PeTerminator::Initiator,
     };
     let after = link.resp.on_message(
+        &mut link.store,
         &signal_message(PeTransaction::Subscription, signal),
         link.now,
     );
@@ -368,7 +415,10 @@ fn the_update_past_the_peers_count_waits_for_a_reply_and_then_goes() {
         link.call(made);
     }
     assert_eq!(link.resp.subscriptions().count(), usize::from(most) + 1);
-    let sent = link.resp.publish(&target, channels(1), link.now).unwrap();
+    let sent = link
+        .resp
+        .publish(&mut link.store, &target, channels(1), link.now)
+        .unwrap();
     let mut ids: Vec<u8> = chunks_of(&sent)
         .iter()
         .map(|(_, c)| c.request_id().get())
@@ -396,6 +446,7 @@ fn long_channel_link() -> Link {
         .collect();
     link.resp
         .publish(
+            &mut link.store,
             &super::exchange::target(PeResource::ChannelList),
             PeData::ChannelList(PeChannelList::new(many)),
             link.now,
@@ -462,12 +513,12 @@ fn a_resend_nak_gets_the_last_chunk_again() {
         )
     };
     for _ in 0..3 {
-        let again = link.resp.on_message(&resend(), link.now);
+        let again = link.resp.on_message(&mut link.store, &resend(), link.now);
         let chunks = chunks_of(&again);
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].1, first);
     }
-    let end = link.resp.on_message(&resend(), link.now);
+    let end = link.resp.on_message(&mut link.store, &resend(), link.now);
     assert!(chunks_of(&end).is_empty());
     assert!(matches!(
         acks_and_naks(&end).as_slice(),
@@ -488,13 +539,13 @@ fn a_chunk_with_no_ack_is_sent_again_three_times_and_then_terminated() {
     let mut now = link.now;
     for _ in 0..3 {
         now += PE_TIMEOUT + Duration::from_millis(1);
-        let again = link.resp.on_timeout(now);
+        let again = link.resp.on_timeout(&mut link.store, now);
         let chunks = chunks_of(&again);
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].1, first);
     }
     now += PE_TIMEOUT + Duration::from_millis(1);
-    let end = link.resp.on_timeout(now);
+    let end = link.resp.on_timeout(&mut link.store, now);
     assert!(matches!(
         acks_and_naks(&end).as_slice(),
         [PeSignal::Terminate {
@@ -519,14 +570,14 @@ fn an_ack_sends_the_next_chunk_and_a_repeat_sends_nothing() {
             },
         )
     };
-    let second = link.resp.on_message(&ack(1), link.now);
+    let second = link.resp.on_message(&mut link.store, &ack(1), link.now);
     let chunks = chunks_of(&second);
     assert_eq!(chunks.len(), 1);
     assert_eq!(
         chunks[0].1.position(),
         super::super::chunk::ChunkPosition::Number(super::super::chunk::ChunkNo::of(2))
     );
-    assert!(chunks_of(&link.resp.on_message(&ack(1), link.now)).is_empty());
+    assert!(chunks_of(&link.resp.on_message(&mut link.store, &ack(1), link.now)).is_empty());
 }
 
 // M2-103 §15.3: a Set under Flow Control is ACKed a chunk at a time except the
@@ -544,7 +595,7 @@ fn a_set_under_flow_control_is_acked_a_chunk_at_a_time() {
     let call = link.call(made);
     assert_eq!(link.set_result(call), Ok(PeStatus::Ok));
     assert_eq!(
-        link.resp.store().get(&target),
+        link.store.get(&target),
         Some(&blob_data("X-BigBlob", &bytes))
     );
     let from_resp = link.wire[mark..].iter().filter(|(to, _)| !*to).count();
@@ -614,7 +665,7 @@ fn a_busy_resource_is_answered_with_a_timeout_wait_and_then_the_reply() {
         link.init.deadline(),
         Some(start + PE_TIMEOUT + Duration::from_secs(2))
     );
-    let sent = link.resp.ready(&device, link.now);
+    let sent = link.resp.ready(&mut link.store, &device, link.now);
     link.publish(sent);
     assert_eq!(link.got(call), Ok(PeData::DeviceInfo(device_info())));
 }
@@ -628,7 +679,9 @@ fn a_responder_asks_again_while_the_resource_stays_busy() {
     link.resp.mark_busy(device, TimeoutWait::of(20));
     let made = link.init.get(&get(PeResource::DeviceInfo), link.now);
     link.call(made);
-    let again = link.resp.on_timeout(link.now + Duration::from_secs(2));
+    let again = link
+        .resp
+        .on_timeout(&mut link.store, link.now + Duration::from_secs(2));
     assert!(matches!(
         acks_and_naks(&again).as_slice(),
         [PeSignal::TimeoutWait { wait, .. }] if wait.tenths() == 20
@@ -649,14 +702,14 @@ fn a_set_for_a_busy_resource_is_held_until_it_is_ready() {
     let made = link.init.set(&set, link.now);
     let call = link.call(made);
     assert_eq!(
-        link.resp.store().get(&local_on),
+        link.store.get(&local_on),
         Some(&PeData::LocalOn(PeLocalOn(false)))
     );
-    let sent = link.resp.ready(&local_on, link.now);
+    let sent = link.resp.ready(&mut link.store, &local_on, link.now);
     link.publish(sent);
     assert_eq!(link.set_result(call), Ok(PeStatus::Ok));
     assert_eq!(
-        link.resp.store().get(&local_on),
+        link.store.get(&local_on),
         Some(&PeData::LocalOn(PeLocalOn(true)))
     );
 }
@@ -713,10 +766,7 @@ fn a_set_of_binary_data_carries_its_media_type() {
     let made = link.init.set(&set, link.now);
     let call = link.call(made);
     assert_eq!(link.set_result(call), Ok(PeStatus::Ok));
-    assert_eq!(
-        link.resp.store().get(&blob),
-        Some(&blob_data("X-Blob", &new))
-    );
+    assert_eq!(link.store.get(&blob), Some(&blob_data("X-Blob", &new)));
     let sets: Vec<_> = link
         .wire
         .iter()
@@ -774,7 +824,12 @@ fn a_full_update_of_binary_data_carries_its_media_type() {
     let new = blob_bytes(40);
     let actions = link
         .resp
-        .publish(&target, blob_data("X-Blob", &new), link.now)
+        .publish(
+            &mut link.store,
+            &target,
+            blob_data("X-Blob", &new),
+            link.now,
+        )
         .unwrap();
     let updates = updates_of(&actions);
     let [(PeSubscription::Update { media_type, .. }, _)] = updates.as_slice() else {
@@ -813,7 +868,7 @@ fn a_partial_change_does_not_apply_to_binary_data() {
     let blob = super::exchange::target(custom("X-Blob"));
     let update = PartialUpdate::new().with(pointer("/a"), PartialValue::Integer(1));
     assert!(matches!(
-        link.resp.change(&blob, update, link.now),
+        link.resp.change(&mut link.store, &blob, update, link.now),
         Err(PublishError::Data(_))
     ));
 }
@@ -827,12 +882,13 @@ fn a_publish_that_cannot_be_made_names_the_resource() {
     let empty = ResourceTarget::try_from(PeResource::ProgramList)
         .unwrap_or_else(|_| super::exchange::entry_target(PeResource::ProgramList, "none"));
     assert_eq!(
-        link.resp.change(&empty, update, link.now),
+        link.resp.change(&mut link.store, &empty, update, link.now),
         Err(PublishError::NoData(PeResource::ProgramList))
     );
     let local_on = super::exchange::target(PeResource::LocalOn);
     assert_eq!(
         link.resp.publish(
+            &mut link.store,
             &local_on,
             PeData::ExternalSync(PeExternalSync(true)),
             link.now

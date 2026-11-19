@@ -25,18 +25,18 @@ use crate::{BufferError, ByWidth, Float, OverFloat, Planes, PlanesMut, Sample};
 /// let mut output = [&mut out_l[..], &mut out_r[..]];
 ///
 /// let mut block = InputOutput::new(
-///     Samples(4),
+///     Samples::new(4),
 ///     Planes::new(&input).unwrap(),
 ///     PlanesMut::new(&mut output).unwrap(),
 /// )
 /// .unwrap();
-/// assert_eq!(block.frames(), Samples(4));
+/// assert_eq!(block.frames(), Samples::new(4));
 /// assert_eq!(block.input().channels(), 1);
 /// assert_eq!(block.output().channels(), 2);
 ///
 /// // A MIDI effect has no audio on either side; the block keeps its length.
-/// let block = InputOutput::<f32>::new(Samples(4), Planes::default(), PlanesMut::default()).unwrap();
-/// assert_eq!(block.frames(), Samples(4));
+/// let block = InputOutput::<f32>::new(Samples::new(4), Planes::default(), PlanesMut::default()).unwrap();
+/// assert_eq!(block.frames(), Samples::new(4));
 /// ```
 #[derive(Debug)]
 pub struct InputOutput<'data, S: Sample = f32> {

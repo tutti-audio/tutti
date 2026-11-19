@@ -57,7 +57,7 @@ enum Host {
 fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(MAX_BLOCK)),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     if workers > 1 {
         let pool = WorkerPool::builder()
@@ -71,7 +71,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
         let key = NodeKey(k + 1);
         // Placed before the loop's start, on it, and inside the fade.
         let at = [0.0, LOOP.0, LOOP.0 + 0.002][k as usize % 3] + k as f64 * 0.0001;
-        let source = MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat(at)))
+        let source = MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat::new(at)))
             .expect("a placeable wave");
         match host {
             Host::Pool => {
@@ -98,19 +98,19 @@ fn render(exec: &mut Executor) -> Vec<Vec<u32>> {
     let channels = 2 * READS as usize;
     let mut all = vec![Vec::new(); channels];
     let region = tutti_music::LoopRange::new(Beat::new(LOOP.0), Beat::new(LOOP.1)).expect("a loop");
-    let mut clock = FrameClock::new(Beat(0.0), Bpm::of(120.0), SampleRate::of(SR));
+    let mut clock = FrameClock::new(Beat::new(0.0), Bpm::of(120.0), SampleRate::of(SR));
     let mut wraps = 0;
     for i in 0..600 {
         let n = 1 + (i * 37) % MAX_BLOCK;
         let mut chunk = vec![vec![0.0f32; n]; channels];
         {
             let mut outs: Vec<&mut [f32]> = chunk.iter_mut().map(Vec::as_mut_slice).collect();
-            let looping = LoopRange::new(Beat(LOOP.0), Beat(LOOP.1)).expect("a loop");
+            let looping = LoopRange::new(Beat::new(LOOP.0), Beat::new(LOOP.1)).expect("a loop");
             let t = TransportPosition::new(true, Bpm::of(120.0), clock.beat(), Some(looping));
             exec.process(n, &t, &[], &mut outs);
         }
         let before = clock.beat();
-        clock.advance(Samples(n), Some(region));
+        clock.advance(Samples::new(n), Some(region));
         wraps += usize::from(clock.beat() < before);
         for (a, c) in all.iter_mut().zip(chunk) {
             a.extend(c.iter().map(|x| x.to_bits()));

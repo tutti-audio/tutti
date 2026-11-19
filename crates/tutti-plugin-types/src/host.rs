@@ -499,7 +499,7 @@ pub trait Processor: Send {
     /// after [`retune`](Self::retune), so a graph compiled from the node's
     /// shape compensates for it.
     fn latency(&self) -> Samples {
-        Samples(0)
+        Samples::new(0)
     }
 
     /// Follows the graph's rate, block ceiling and device quantum without a

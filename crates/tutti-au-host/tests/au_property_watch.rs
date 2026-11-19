@@ -180,7 +180,7 @@ fn a_latency_change_reaches_a_watching_host() {
             .expect("the probe answers kAudioUnitProperty_Latency");
     assert_eq!(
         latency,
-        Samples(512),
+        Samples::new(512),
         "the AU must already hold the new latency by the time it notifies"
     );
 }

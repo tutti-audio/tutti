@@ -42,7 +42,6 @@ use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Samples, S
 use super::curves::{gain_reduction, level_db, upward_gain_lift};
 use super::key_filter::KeyStage;
 use super::shared::{MAX_KNEE, floored};
-use crate::finite::finite_or;
 use crate::follower::{Follower, Pole, Smoothed};
 use crate::{
     COEFF_INTERVAL, Glide, Lanes, Lerp, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel,
@@ -165,19 +164,19 @@ impl<F: Float> Design<F> {
         });
         Self {
             threshold: F::from_unit(
-                Db(finite_or(c.threshold.get(), d.threshold.get()))
+                c.threshold
+                    .finite_or(d.threshold)
                     .clamp(-MAX_THRESHOLD, MAX_THRESHOLD),
             ),
-            knee: F::from_unit(Db(
-                finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())
+            knee: F::from_unit(c.knee.finite_or(d.knee).clamp(Db::UNITY, MAX_KNEE)),
+            ratio: F::from_unit(CompressionRatio::new_clamped(
+                c.ratio.finite_or(d.ratio).get(),
             )),
-            ratio: F::from_unit(CompressionRatio::new_clamped(finite_or(
-                c.ratio.get(),
-                d.ratio.get(),
-            ))),
-            range: F::from_unit(Db(
-                finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN.get())
-            )),
+            range: F::from_unit(
+                c.range
+                    .finite_or(d.range)
+                    .clamp(Db::UNITY, SvfCoeffs::MAX_GAIN),
+            ),
             max_key: F::from_unit(MAX_KEY),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
             key_scale: F::ONE / F::from_unit(q),
@@ -294,8 +293,8 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
         let model = SvfModel::new(
             SvfControls {
                 ty: SvfType::Bell,
-                freq: Hz(finite_or(controls.center.get(), d.center.get())),
-                q: Q(finite_or(controls.q.get(), d.q.get())),
+                freq: controls.center.finite_or(d.center),
+                q: controls.q.finite_or(d.q),
                 gain: Db::UNITY,
             },
             self.rate,

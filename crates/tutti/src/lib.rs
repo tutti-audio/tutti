@@ -190,10 +190,10 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    DepthTarget, Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget,
-    MeterTarget, MixTarget, ModeTarget, Modify, Moved, OutputPolicyTarget, ParamTarget,
-    PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
-    TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, Knobs,
+    LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Moved, OutputPolicyTarget,
+    ParamTarget, PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget,
+    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -414,7 +414,7 @@ pub mod session {
     pub use tutti_session::Param as PluginParam;
     pub use tutti_session::{
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
-        Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError, EdgeGainError,
+        Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError,
         Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
         NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
@@ -720,8 +720,7 @@ pub mod midi {
     pub use tutti_midi_hardware::MidiHardwareError;
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        InputTiming, NotAChannelCount, ProcessChange, ReportAsk, ReportError, Reporter,
-        WatchFailure,
+        InputTiming, NotAChannelCount, ProcessChange, ReportAsk, Reporter, WatchFailure,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
@@ -798,8 +797,8 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
-        InputFault, MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch,
-        ProfilesChange, Switcher, WholeSwitcher,
+        InputFault, MidiHardwareOptions, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError,
+        ProfileSwitch, ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -843,9 +842,7 @@ pub mod midi {
             SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
-        pub use tutti_midi_hardware::{
-            PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer,
-        };
+        pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
         #[cfg(all(feature = "session", feature = "midi-hardware"))]
         pub use tutti_session::{
             GetProperty, ListedResource, PeFailure, ResourcePeer, SetProperty, Subscribe,

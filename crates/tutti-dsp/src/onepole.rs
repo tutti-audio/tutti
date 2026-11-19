@@ -5,14 +5,14 @@ use tutti_units::{Db, Hz, SampleRate};
 
 /// The pole `exp(-2 pi fc / fs)` of the one-pole low-pass of cutoff `cutoff` at `rate`.
 pub(crate) fn cutoff_pole(cutoff: Hz, rate: SampleRate) -> f64 {
-    libm::exp(-std::f64::consts::TAU * cutoff.get() / rate.get())
+    libm::exp(-cutoff.angle_per_frame(rate).get())
 }
 
 /// The complement `1 - exp(-2 pi fc / fs)` of that pole, solved without the cancellation a
 /// pole near 1 (a low cutoff at a high rate) would suffer in `1 - pole`: the coefficient a
 /// one-pole's update `y += c (x - y)` runs on.
 pub(crate) fn cutoff_complement(cutoff: Hz, rate: SampleRate) -> f64 {
-    -libm::expm1(-std::f64::consts::TAU * cutoff.get() / rate.get())
+    -libm::expm1(-cutoff.angle_per_frame(rate).get())
 }
 
 /// The frames, fractional (a count `Samples` does not cover), for the decay `pole^n` to reach `floor`: `ln(floor) / ln(pole)`.

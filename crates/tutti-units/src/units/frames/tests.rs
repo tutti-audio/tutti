@@ -70,28 +70,31 @@ fn saturation_is_by_name_and_through_a_cell_only() {
 fn seconds_round_trip_through_a_span_at_a_rate() {
     let rate = SampleRate::SR_48K;
     assert_eq!(
-        SampleSpan::from_seconds(Seconds(1.0), rate).map(SampleSpan::get),
+        SampleSpan::from_seconds(Seconds::new(1.0), rate).map(SampleSpan::get),
         Some(48_000.0)
     );
-    assert_eq!(SampleSpan::of(504.0).to_seconds(rate), Seconds(0.0105));
-    let one_and_a_half = SampleSpan::from_seconds(Seconds(1.5 / 48_000.0), rate).unwrap();
+    assert_eq!(SampleSpan::of(504.0).to_seconds(rate), Seconds::new(0.0105));
+    let one_and_a_half = SampleSpan::from_seconds(Seconds::new(1.5 / 48_000.0), rate).unwrap();
     assert!((one_and_a_half.get() - 1.5).abs() < 1e-12);
     for secs in [0.0, 0.0105, 0.25, 2.0] {
-        let back = SampleSpan::from_seconds(Seconds(secs), rate)
+        let back = SampleSpan::from_seconds(Seconds::new(secs), rate)
             .unwrap()
             .to_seconds(rate);
         assert!((back.get() - secs).abs() < 1e-12, "{secs}");
     }
     let rate = SampleRate::of(44_100.0);
-    assert_eq!(SampleSpan::of(44_100.0).to_seconds(rate), Seconds(1.0));
+    assert_eq!(SampleSpan::of(44_100.0).to_seconds(rate), Seconds::new(1.0));
 }
 
 #[test]
 fn a_negative_or_nan_time_is_no_span() {
     let rate = SampleRate::SR_48K;
-    assert_eq!(SampleSpan::from_seconds(Seconds(-0.001), rate), None);
-    assert_eq!(SampleSpan::from_seconds(Seconds(f64::NAN), rate), None);
-    assert_eq!(SampleSpan::from_seconds(Seconds(f64::INFINITY), rate), None);
+    assert_eq!(SampleSpan::from_seconds(Seconds::new(-0.001), rate), None);
+    assert_eq!(SampleSpan::from_seconds(Seconds::new(f64::NAN), rate), None);
+    assert_eq!(
+        SampleSpan::from_seconds(Seconds::new(f64::INFINITY), rate),
+        None
+    );
 }
 
 #[test]
@@ -174,21 +177,21 @@ fn spans_add_and_scale_and_subtract_by_name() {
 /// the later minus the earlier, and the reverse is refused.
 #[test]
 fn a_span_and_a_position_form_an_affine_pair() {
-    let write = SamplePosition(1_000.25);
+    let write = SamplePosition::new(1_000.25);
     let delay = SampleSpan::of(504.5);
     let read = write - delay;
-    assert_eq!(read, SamplePosition(495.75));
+    assert_eq!(read, SamplePosition::new(495.75));
     assert_eq!(read + delay, write);
     assert_eq!(write.span_since(read), Some(delay));
     assert_eq!(read.span_since(write), None);
     assert_eq!(write.span_since(write), Some(SampleSpan::ZERO));
-    assert_eq!(SamplePosition(f64::NAN).span_since(read), None);
+    assert_eq!(SamplePosition::new(f64::NAN).span_since(read), None);
 
-    let mut cursor = SamplePosition(10.0);
+    let mut cursor = SamplePosition::new(10.0);
     cursor += SampleSpan::of(2.5);
-    assert_eq!(cursor, SamplePosition(12.5));
+    assert_eq!(cursor, SamplePosition::new(12.5));
     cursor -= SampleSpan::of(0.5);
-    assert_eq!(cursor, SamplePosition(12.0));
+    assert_eq!(cursor, SamplePosition::new(12.0));
 }
 
 #[test]
@@ -200,7 +203,7 @@ fn negative_zero_is_never_a_span() {
             .get()
             .is_sign_positive()
     );
-    let none = SampleSpan::from_seconds(Seconds(-0.0), SampleRate::SR_48K).unwrap();
+    let none = SampleSpan::from_seconds(Seconds::new(-0.0), SampleRate::SR_48K).unwrap();
     assert!(none.get().is_sign_positive());
 }
 
@@ -208,15 +211,21 @@ const QUANTUM: f64 = 1.0 / ReadPosition::COUNTS_PER_FRAME;
 
 #[test]
 fn a_read_position_of_whole_frames_is_the_count_shifted_up_32_bits() {
-    assert_eq!(ReadPosition::from_frames(Samples(0)), ReadPosition::START);
-    assert_eq!(ReadPosition::from_frames(Samples(1)).get(), 1_u64 << 32);
     assert_eq!(
-        ReadPosition::from_frames(Samples(1_920_000)).get(),
+        ReadPosition::from_frames(Samples::new(0)),
+        ReadPosition::START
+    );
+    assert_eq!(
+        ReadPosition::from_frames(Samples::new(1)).get(),
+        1_u64 << 32
+    );
+    assert_eq!(
+        ReadPosition::from_frames(Samples::new(1_920_000)).get(),
         1_920_000_u64 << 32
     );
     assert_eq!(
-        ReadPosition::from_frames(Samples(1_920_000)).frames(),
-        Samples(1_920_000)
+        ReadPosition::from_frames(Samples::new(1_920_000)).frames(),
+        Samples::new(1_920_000)
     );
 }
 
@@ -224,15 +233,15 @@ fn a_read_position_of_whole_frames_is_the_count_shifted_up_32_bits() {
 fn a_read_position_saturates_at_two_to_the_32_frames() {
     let top = u32::MAX as usize;
     assert_eq!(
-        ReadPosition::from_frames(Samples(top)).get(),
+        ReadPosition::from_frames(Samples::new(top)).get(),
         u64::from(u32::MAX) << 32
     );
     assert_eq!(
-        ReadPosition::from_frames(Samples(top + 1)),
+        ReadPosition::from_frames(Samples::new(top + 1)),
         ReadPosition::MAX
     );
     assert_eq!(
-        ReadPosition::of(Seconds(1e12), SampleRate::SR_48K),
+        ReadPosition::of(Seconds::new(1e12), SampleRate::SR_48K),
         ReadPosition::MAX
     );
 }
@@ -242,13 +251,13 @@ fn a_read_position_of_a_time_is_its_frames_to_the_quantum() {
     // 9.9 s at 192 kHz is 1 900 800 frames; 0.3 of a frame is 3/10 * 2^32 counts, rounded.
     let rate = SampleRate::SR_192K;
     assert_eq!(
-        ReadPosition::of(Seconds(9.9), rate).frames(),
-        Samples(1_900_800)
+        ReadPosition::of(Seconds::new(9.9), rate).frames(),
+        Samples::new(1_900_800)
     );
-    let one_tenth = ReadPosition::of(Seconds(0.1 / 192_000.0), rate);
+    let one_tenth = ReadPosition::of(Seconds::new(0.1 / 192_000.0), rate);
     assert!((one_tenth.get() as f64 * QUANTUM - 0.1).abs() <= QUANTUM);
     assert_eq!(
-        ReadPosition::of(Seconds(0.25), SampleRate::SR_48K).get(),
+        ReadPosition::of(Seconds::new(0.25), SampleRate::SR_48K).get(),
         12_000_u64 << 32
     );
 }
@@ -257,12 +266,12 @@ fn a_read_position_of_a_time_is_its_frames_to_the_quantum() {
 fn a_read_position_of_a_negative_or_nan_time_is_the_start() {
     for t in [-1.0, -1e-30, f64::NAN, f64::NEG_INFINITY] {
         assert_eq!(
-            ReadPosition::of(Seconds(t), SampleRate::SR_48K),
+            ReadPosition::of(Seconds::new(t), SampleRate::SR_48K),
             ReadPosition::START
         );
     }
     assert_eq!(
-        ReadPosition::of(Seconds(f64::INFINITY), SampleRate::SR_48K),
+        ReadPosition::of(Seconds::new(f64::INFINITY), SampleRate::SR_48K),
         ReadPosition::MAX
     );
 }
@@ -271,15 +280,15 @@ fn a_read_position_of_a_negative_or_nan_time_is_the_start() {
 fn a_read_position_holds_a_count_a_float_would_round() {
     // 2^23 + 2^-32 frames: an f32 holds 2^23 + 1 at best. The position keeps every bit.
     let p = ReadPosition::from_count((1_u64 << 55) + 1);
-    assert_eq!(p.frames(), Samples(1 << 23));
+    assert_eq!(p.frames(), Samples::new(1 << 23));
     assert_eq!(p.get() & 0xffff_ffff, 1);
 }
 
 #[test]
 fn a_read_position_saturating_sub_stops_at_the_start() {
     let p = ReadPosition::from_count((5_u64 << 32) + 7);
-    assert_eq!(p.saturating_sub(Samples(2)).get(), (3_u64 << 32) + 7);
-    assert_eq!(p.saturating_sub(Samples(6)), ReadPosition::START);
+    assert_eq!(p.saturating_sub(Samples::new(2)).get(), (3_u64 << 32) + 7);
+    assert_eq!(p.saturating_sub(Samples::new(6)), ReadPosition::START);
 }
 
 #[test]

@@ -49,8 +49,7 @@ fn record(protocol: Protocol, blocks: Vec<UmpBlock>) -> UmpEndpoint {
 
 fn blocks_of(blocks: Vec<UmpBlock>) -> Vec<u8> {
     capability_of(Some(&record(Protocol::Midi2, blocks)))
-        .blocks
-        .iter()
+        .function_blocks()
         .map(|b| b.id().get())
         .collect()
 }
@@ -81,8 +80,8 @@ fn a_midi1_port_block_keeps_its_bandwidth_and_is_kept_when_it_cannot_be_a_port()
             Protocol::Midi2,
             vec![block(3, 3, 0, groups, midi1, UiHint::Unknown)],
         )))
-        .blocks
-        .first()
+        .function_blocks()
+        .next()
         .map(FunctionBlock::midi1)
     };
     assert_eq!(port(1, 1), Some(Midi1Port::Unrestricted));
@@ -99,8 +98,11 @@ fn a_hint_that_contradicts_the_direction_reads_as_unknown() {
         Protocol::Midi2,
         vec![block(0, 2, 0, 1, 0, UiHint::Receiver)],
     )));
-    assert_eq!(cap.blocks.len(), 1);
-    assert_eq!(cap.blocks[0].ui_hint(), UiHint::Unknown);
+    assert_eq!(cap.function_blocks().count(), 1);
+    assert_eq!(
+        cap.function_blocks().next().unwrap().ui_hint(),
+        UiHint::Unknown
+    );
 }
 
 /// A name with a Byte Order Mark drops the name and keeps the block.
@@ -109,8 +111,8 @@ fn a_name_with_a_bom_drops_only_the_name() {
     let mut b = block(3, 3, 0, 1, 0, UiHint::Unknown);
     b.name = Some("\u{FEFF}Keys".to_owned());
     let cap = capability_of(Some(&record(Protocol::Midi2, vec![b])));
-    assert_eq!(cap.blocks.len(), 1);
-    assert_eq!(cap.blocks[0].name(), None);
+    assert_eq!(cap.function_blocks().count(), 1);
+    assert_eq!(cap.function_blocks().next().unwrap().name(), None);
 }
 
 /// A name the OS gives past a block name's 91 bytes is cut for display, and the
@@ -120,7 +122,7 @@ fn a_long_os_name_is_cut_not_refused() {
     let mut b = block(3, 3, 0, 1, 0, UiHint::Unknown);
     b.name = Some("é".repeat(60));
     let cap = capability_of(Some(&record(Protocol::Midi2, vec![b])));
-    let name = cap.blocks[0].name().unwrap();
+    let name = cap.function_blocks().next().unwrap().name().unwrap();
     assert_eq!(name.as_str(), "é".repeat(45));
 }
 
@@ -128,16 +130,17 @@ fn a_long_os_name_is_cut_not_refused() {
 // the rest reads.
 #[test]
 fn a_client_with_no_endpoint_record_is_midi1() {
-    assert_eq!(capability_of(None), UmpCapability::midi1());
+    assert_eq!(capability_of(None), legacy());
 }
 
-/// The protocol in use is the record's, never the protocols it offers: an
-/// Endpoint that offers both and is in MIDI 1.0 is in MIDI 1.0; a reserved
-/// protocol is kept as read.
+/// The protocol in use and those offered are kept apart: an Endpoint that
+/// offers both and is in MIDI 1.0 is in MIDI 1.0 and supports MIDI 2.0; a
+/// reserved protocol reads as MIDI 1.0.
 #[test]
-fn the_protocol_in_use_is_the_records() {
+fn the_protocol_in_use_and_those_offered_are_kept_apart() {
     let cap = capability_of(Some(&record(Protocol::Midi1, Vec::new())));
-    assert_eq!(cap.protocol, Protocol::Midi1);
+    assert_eq!(cap.active().protocol, Protocol::Midi1);
+    assert!(cap.capabilities().midi2 && cap.capabilities().midi1);
     let cap = capability_of(Some(&record(read_protocol(0), Vec::new())));
-    assert!(matches!(cap.protocol, Protocol::Reserved(_)));
+    assert_eq!(cap.active().protocol, Protocol::Midi1);
 }

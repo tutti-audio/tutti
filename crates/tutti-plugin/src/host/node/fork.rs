@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn a_latency_moved_after_the_plan_is_a_fault() {
         let (controls, reports) =
-            PluginControls::new(Samples(137), PluginTail::default(), SampleRate::SR_48K);
+            PluginControls::new(Samples::new(137), PluginTail::default(), SampleRate::SR_48K);
         let watch = ForkWatch {
             controls: controls.clone(),
             wait: Arc::new(OfflineWait::new(
@@ -499,19 +499,19 @@ mod tests {
             )),
         };
         assert!(watch.fault().is_none(), "not planned yet");
-        controls.set_pipeline(Samples(64));
+        controls.set_pipeline(Samples::new(64));
         watch.wait.plan(controls.declared_latency().samples());
         assert!(watch.fault().is_none(), "the plan holds");
         // The plugin reports a new latency, as the bridge listener hands it over.
         reports.take_report(&tutti_plugin_types::PluginInvalidation::Latency {
-            samples: Samples(161),
+            samples: Samples::new(161),
         });
         let (kind, cause) = watch.fault().expect("the latency moved");
         assert_eq!(kind, ForkFaultKind::Failed);
         match cause.downcast_ref::<PluginRenderFault>() {
             Some(PluginRenderFault::LatencyChanged { planned, now }) => {
-                assert_eq!(planned.samples(), Samples(137 + 64));
-                assert_eq!(now.samples(), Samples(161 + 64));
+                assert_eq!(planned.samples(), Samples::new(137 + 64));
+                assert_eq!(now.samples(), Samples::new(161 + 64));
             }
             other => panic!("expected LatencyChanged, got {other:?}"),
         }
@@ -526,7 +526,7 @@ mod tests {
             load_editor: None,
         };
         let (controls, _) =
-            PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+            PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
         ServedFork {
             bridge: Arc::downgrade(&rig.bridge),
             origin,

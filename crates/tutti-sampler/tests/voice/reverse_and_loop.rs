@@ -95,7 +95,7 @@ impl Clock {
         let env = Env {
             frame: Frame::new(0),
             sample_rate: SampleRate::of(SR),
-            block_len: Samples(BLOCK),
+            block_len: Samples::new(BLOCK),
             transport: tutti_graph::TransportPosition::new(
                 true,
                 Bpm::of(self.tempo),
@@ -380,7 +380,7 @@ fn loop_is_continuous(len: usize, start: f64, end: f64, fade: usize) {
     let free = {
         // From the file's start, as the placed voice below plays it.
         let mut source = looping_source(sine(len), start, end, fade);
-        source.trigger_at(SamplePosition(0.0));
+        source.trigger_at(SamplePosition::new(0.0));
         render(&mut source, 150)
     };
     let placed = {
@@ -430,7 +430,7 @@ fn looping_source(wave: Arc<Wave>, start: f64, end: f64, xfade: usize) -> Memory
     )
     .expect("a placeable wave");
     source.set_loop(Some(loop_frames(start as usize, end as usize, xfade)));
-    source.trigger_at(SamplePosition(start));
+    source.trigger_at(SamplePosition::new(start));
     source.play();
     source
 }
@@ -637,7 +637,7 @@ fn a_one_shot_source_stops_at_the_end() {
         },
     )
     .expect("a placeable wave");
-    source.trigger_at(SamplePosition(0.0));
+    source.trigger_at(SamplePosition::new(0.0));
     source.play();
     let mut source = source;
 
@@ -678,7 +678,7 @@ fn reverse_and_loop_work_at_mono_width() {
     )
     .expect("a placeable wave");
     source.set_loop(Some(loop_frames(200, 1200, 64)));
-    source.trigger_at(SamplePosition(200.0));
+    source.trigger_at(SamplePosition::new(200.0));
     source.play();
 
     let clock = Clock::new();

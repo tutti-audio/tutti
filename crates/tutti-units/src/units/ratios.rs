@@ -102,7 +102,7 @@ unit! {
     /// filter's four poles.
     ///
     /// Distinct from [`Q`] even though both mean "how resonant": at `1.0` a
-    /// ladder self-oscillates, whereas `Q(1.0)` is a mild bell. They are
+    /// ladder self-oscillates, whereas `Q::new(1.0)` is a mild bell. They are
     /// different parameterizations of different topologies, and swapping them
     /// is silent.
     pub struct Resonance(pub f64): Unit, Ordered, Bounded;
@@ -162,7 +162,7 @@ impl Cents {
     /// [`to_pitch_ratio`](Self::to_pitch_ratio).
     ///
     /// A named method rather than a `From`, because it is not total: a
-    /// non-positive ratio has no logarithm. Those give [`Cents(0.0)`](Cents) —
+    /// non-positive ratio has no logarithm. Those give [`Cents::new(0.0)`](Cents) —
     /// the unison a caller building a scale degree wants — rather than a NaN
     /// that reaches a frequency table before anyone notices.
     #[inline]

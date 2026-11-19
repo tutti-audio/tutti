@@ -75,12 +75,12 @@ fn compressor() -> CompressorNode<f32> {
         BusTopology::STEREO,
         KeySource::Sidechain,
         CompressorControls {
-            threshold: Db(-20.0),
-            knee: Db(6.0),
-            ratio: CompressionRatio(4.0),
-            attack: Seconds(0.0),
-            release: Seconds(0.0),
-            makeup: Db(0.0),
+            threshold: Db::new(-20.0),
+            knee: Db::new(6.0),
+            ratio: CompressionRatio::new(4.0),
+            attack: Seconds::new(0.0),
+            release: Seconds::new(0.0),
+            makeup: Db::new(0.0),
             ..CompressorControls::DEFAULT
         },
     )
@@ -91,11 +91,11 @@ fn gate() -> GateNode<f32> {
         BusTopology::STEREO,
         KeySource::Sidechain,
         GateControls {
-            threshold: Db(-30.0),
-            attack: Seconds(0.0),
-            hold: Seconds(0.0),
-            release: Seconds(1.0),
-            range: Db(-40.0),
+            threshold: Db::new(-30.0),
+            attack: Seconds::new(0.0),
+            hold: Seconds::new(0.0),
+            release: Seconds::new(1.0),
+            range: Db::new(-40.0),
             ..GateControls::DEFAULT
         },
     )
@@ -103,14 +103,14 @@ fn gate() -> GateNode<f32> {
 
 fn limiter() -> LimiterNode<f32> {
     LimiterNode::<f32>::stereo(LimiterControls {
-        threshold: Db(-12.0),
-        ceiling: Db(-3.0),
-        release: Seconds(0.05),
+        threshold: Db::new(-12.0),
+        ceiling: Db::new(-3.0),
+        release: Seconds::new(0.05),
     })
 }
 
 fn brickwall() -> BrickwallLimiterNode<f32> {
-    BrickwallLimiterNode::<f32>::new(Db(0.0))
+    BrickwallLimiterNode::<f32>::new(Db::new(0.0))
 }
 
 /// A write between blocks to a control that lands whole starts at the next grid point: with
@@ -223,12 +223,12 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
                         BusTopology::STEREO,
                         KeySource::Sidechain,
                         CompressorControls {
-                            threshold: Db(-20.0),
-                            knee: Db(6.0),
-                            ratio: CompressionRatio(4.0),
-                            attack: Seconds(0.002),
-                            release: Seconds(0.03),
-                            makeup: Db(0.0),
+                            threshold: Db::new(-20.0),
+                            knee: Db::new(6.0),
+                            ratio: CompressionRatio::new(4.0),
+                            attack: Seconds::new(0.002),
+                            release: Seconds::new(0.03),
+                            makeup: Db::new(0.0),
                             ..CompressorControls::DEFAULT
                         },
                     ),
@@ -253,11 +253,11 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
                         BusTopology::STEREO,
                         KeySource::Sidechain,
                         GateControls {
-                            threshold: Db(-30.0),
-                            attack: Seconds(0.002),
-                            hold: Seconds(0.01),
-                            release: Seconds(0.03),
-                            range: Db(-30.0),
+                            threshold: Db::new(-30.0),
+                            attack: Seconds::new(0.002),
+                            hold: Seconds::new(0.01),
+                            release: Seconds::new(0.03),
+                            range: Db::new(-30.0),
                             ..GateControls::DEFAULT
                         },
                     ),
@@ -280,12 +280,12 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             Box::new(|block, moved, _| {
                 render(
                     DynamicEqNode::<f32>::from(
-                        DynamicEqConfig::new(ChannelLayout::STEREO, Hz(1_000.0), Q(1.5))
-                            .threshold(Db(-30.0))
-                            .ratio(CompressionRatio(4.0))
-                            .knee(Db(6.0))
-                            .attack(Seconds(0.002))
-                            .release(Seconds(0.03))
+                        DynamicEqConfig::new(ChannelLayout::STEREO, Hz::new(1_000.0), Q::new(1.5))
+                            .threshold(Db::new(-30.0))
+                            .ratio(CompressionRatio::new(4.0))
+                            .knee(Db::new(6.0))
+                            .attack(Seconds::new(0.002))
+                            .release(Seconds::new(0.03))
                             .key(KeySource::Sidechain),
                     ),
                     &[&audio[0], &audio[1], &key[0], &key[1]],
@@ -326,7 +326,7 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             "brickwall",
             Box::new(|block, moved, driven| {
                 render(
-                    BrickwallLimiterNode::<f32>::new(Db(-1.0)),
+                    BrickwallLimiterNode::<f32>::new(Db::new(-1.0)),
                     &[&audio[0], &audio[1]],
                     &[driven.then_some(&ceiling[..])],
                     block,
@@ -440,7 +440,7 @@ fn a_clone_starts_silent_and_shares_the_cells() {
 #[test]
 fn the_limiter_reports_its_lookahead_as_latency_and_never_parks() {
     let rate = SampleRate::SR_44K1;
-    let lookahead = Lookahead::of(Seconds(0.005));
+    let lookahead = Lookahead::of(Seconds::new(0.005));
     let make = || {
         prepared(
             LimiterNode::<f32>::new(BusTopology::STEREO, lookahead, LimiterControls::DEFAULT),
@@ -451,7 +451,7 @@ fn the_limiter_reports_its_lookahead_as_latency_and_never_parks() {
     let node = make();
     // 5 ms is 220.5 frames at 44.1 kHz, rounded up.
     let frames = 221;
-    assert_eq!(node.shape().latency, Latency::new(Samples(frames)));
+    assert_eq!(node.shape().latency, Latency::new(Samples::new(frames)));
     assert_eq!(node.shape().tail, Tail::None);
 
     let mut node = make();
@@ -463,7 +463,7 @@ fn the_limiter_reports_its_lookahead_as_latency_and_never_parks() {
         let env = Env {
             frame: Frame::new(block * 64),
             sample_rate: rate,
-            block_len: Samples(64),
+            block_len: Samples::new(64),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
@@ -615,7 +615,7 @@ fn no_node_here_parks() {
             let env = Env {
                 frame: Frame::new(block * 64),
                 sample_rate: SR,
-                block_len: Samples(64),
+                block_len: Samples::new(64),
                 transport: TransportPosition::default(),
                 changes: TransportChanges::NONE,
                 play: PlayClock::ZERO,

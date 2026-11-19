@@ -4,7 +4,6 @@
 //! Configuration and Process Inquiry are, and what they send goes in the same
 //! batch.
 
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use tutti_midi_device::Muid;
@@ -16,7 +15,7 @@ use tutti_midi_device::{
 };
 use tutti_ump::MidiGroup;
 
-use super::{CiChanges, Member, PeerId, Running};
+use super::{CiChanges, Member, Running, expire_all, hear_all};
 use crate::answer::Answer;
 use crate::properties::{PropertyAsk, PropertyCall, PropertyChange};
 
@@ -39,10 +38,9 @@ const RESPONDER: ResponderSettings = ResponderSettings {
     body_limit: BODY,
 };
 
-/// The Responder of a device with MUID `own`, serving the `store` every device of
-/// the session serves.
-pub(super) fn responder(own: Muid, store: Arc<Mutex<ResourceStore>>) -> ResourceResponder {
-    ResourceResponder::sharing(own, RESPONDER, store)
+/// The Responder of a device with MUID `own`.
+pub(super) fn responder(own: Muid) -> ResourceResponder {
+    ResourceResponder::new(own, RESPONDER)
 }
 
 /// Which side of a device a Property Exchange message is for.
@@ -117,16 +115,17 @@ impl Member {
         }
     }
 
-    /// The device's MUID changed: the Responder is for the new one, over the
-    /// store as the peers left it, and holds no Subscription.
+    /// The device's MUID changed: the Responder is for the new one, is handed
+    /// the session's store on each call, and holds no Subscription.
     pub(super) fn renew_property(&mut self, new: Muid) {
-        self.server = responder(new, self.server.shared_store());
+        self.server = responder(new);
     }
 
     /// Hands the Responder and every Initiator the message, which is theirs to
     /// keep or ignore.
     pub(super) fn route_property(
         &mut self,
+        store: &mut ResourceStore,
         decoded: &Decoded,
         now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
@@ -142,16 +141,13 @@ impl Member {
         }
         let route = self.route_of(decoded);
         if route != Route::Initiators {
-            let served = self.server.on_message(decoded, now);
+            let served = self.server.on_message(store, decoded, now);
             self.carry_out_served(served, sends, changes);
         }
         let heard: Vec<_> = if route == Route::Responder {
             Vec::new()
         } else {
-            self.properties
-                .iter_mut()
-                .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
-                .collect()
+            hear_all(&mut self.properties, decoded, now)
         };
         for (muid, actions) in heard {
             self.carry_out_property(muid, actions, sends, changes);
@@ -207,21 +203,16 @@ impl Member {
     /// Ends every wait of the Responder and the Initiators that has run out.
     pub(super) fn expire_property(
         &mut self,
+        store: &mut ResourceStore,
         now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
         if self.server.deadline().is_some_and(|at| now >= at) {
-            let served = self.server.on_timeout(now);
+            let served = self.server.on_timeout(store, now);
             self.carry_out_served(served, sends, changes);
         }
-        let ended: Vec<_> = self
-            .properties
-            .iter_mut()
-            .filter(|(_, initiator)| initiator.deadline().is_some_and(|at| now >= at))
-            .map(|(&muid, initiator)| (muid, initiator.on_timeout(now)))
-            .collect();
-        for (muid, actions) in ended {
+        for (muid, actions) in expire_all(&mut self.properties, now) {
             self.carry_out_property(muid, actions, sends, changes);
         }
     }
@@ -234,7 +225,7 @@ impl Member {
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let muid = ask.peer.muid;
+        let muid = ask.peer.muid();
         let Some(initiator) = self.properties.get_mut(&muid) else {
             changes.answers.push((
                 self.peer_id(muid),
@@ -350,12 +341,13 @@ impl Running {
     ) {
         let mut sends = Vec::new();
         for ask in asks.drain(..) {
-            let Some(member) = self.members.iter_mut().find(|m| m.group == ask.peer.group) else {
+            let Some(member) = self
+                .members
+                .iter_mut()
+                .find(|m| m.group == ask.peer.group())
+            else {
                 changes.answers.push((
-                    PeerId {
-                        group: ask.peer.group,
-                        muid: ask.peer.muid,
-                    },
+                    ask.peer.at().peer(),
                     Answer::PropertyLost {
                         call: Box::new(ask.call.clone()),
                     },

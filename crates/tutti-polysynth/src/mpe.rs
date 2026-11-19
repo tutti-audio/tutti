@@ -70,8 +70,8 @@ impl MpeVoiceState {
     /// channel's, `channel_pressure`.
     pub(crate) fn gain_factors(&self, channel_pressure: Normalized) -> GainFactors {
         GainFactors {
-            pressure: Amplitude(1.0 + self.pressure.get().max(channel_pressure.get()) * 0.5),
-            note: Amplitude(self.gain.get()),
+            pressure: Amplitude::new(1.0 + self.pressure.get().max(channel_pressure.get()) * 0.5),
+            note: Amplitude::new(self.gain.get()),
         }
     }
 }

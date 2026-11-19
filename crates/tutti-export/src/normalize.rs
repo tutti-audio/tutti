@@ -120,7 +120,7 @@ impl Normalize {
     pub const fn lufs(target: Db) -> Self {
         Self::Lufs {
             target,
-            ceiling: Db(-1.0),
+            ceiling: Db::new(-1.0),
         }
     }
 
@@ -180,7 +180,7 @@ impl Normalize {
         let mut control = Control::none();
         control.weigh(Weights::Normalized);
         let total = rendered.frames();
-        let outcome = self.measure(rendered, topology, Samples(0), total, &mut control)?;
+        let outcome = self.measure(rendered, topology, Samples::new(0), total, &mut control)?;
         Ok(finished(outcome).gain())
     }
 
@@ -222,7 +222,7 @@ impl Normalize {
             let end = (at + chunk).min(frames);
             measurer.feed(planes, at..end)?;
             at = end;
-            control.advance(Stage::Measuring, Samples(done.get() + at), total);
+            control.advance(Stage::Measuring, done + Samples::new(at), total);
         }
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
@@ -246,7 +246,7 @@ impl Normalize {
         let Some(limit) = headroom_ceiling(target) else {
             return self;
         };
-        let cap = |db: Db| Db(db.get().min(limit.get()));
+        let cap = |db: Db| db.min(limit);
         match self {
             Self::Peak { target } => Self::Peak {
                 target: cap(target),
@@ -277,7 +277,7 @@ fn headroom_ceiling(target: &FileTarget) -> Option<Db> {
         Some(DitherShape::Rectangular) => 0.5,
         Some(DitherShape::Triangular) => 1.0,
     };
-    Some(Db::from_amplitude(Amplitude(
+    Some(Db::from_amplitude(Amplitude::new(
         1.0 - (1.0 + dither_peak) * lsb,
     )))
 }
@@ -509,10 +509,10 @@ impl Measurer {
         // The scratch is taken out so the meter and the chunk borrow apart.
         let mut buf = std::mem::take(&mut self.scratch);
         buf.clear();
-        buf.resize(layout.interleaved_len(Samples(span.len())), 0.0);
+        buf.resize(layout.interleaved_len(Samples::new(span.len())), 0.0);
         let fed = (|| -> crate::Result<()> {
             let mut chunk = InterleavedMut::new(&mut buf, layout)?;
-            let span = Samples(span.start)..Samples(span.end);
+            let span = Samples::new(span.start)..Samples::new(span.end);
             interleave(Planes::from_vecs(planes)?.slice(span), chunk.reborrow())?;
             self.push(chunk.as_interleaved());
             Ok(())
@@ -590,7 +590,7 @@ impl Measurer {
 
 /// EBU R128's absolute gate, in LUFS: what the meter's integrated loudness
 /// reads when no block passed it.
-const ABSOLUTE_GATE_LUFS: Db = Db(-70.0);
+const ABSOLUTE_GATE_LUFS: Db = Db::new(-70.0);
 
 #[cfg(test)]
 mod tests;

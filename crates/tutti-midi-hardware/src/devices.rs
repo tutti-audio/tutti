@@ -17,14 +17,14 @@ use tutti_rt::LockExt;
 
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{
-    DeviceEvent, DeviceId, DeviceInfo, DeviceTable, EndpointId, OsChange, OsDevice, PortDirection,
-    Resolved,
+    DeviceEvent, DeviceId, DeviceInfo, DeviceTable, Endpoint, EndpointId, OsChange, OsDevice,
+    PortDirection, Resolved,
 };
 use tutti_midi_runtime::{DeviceWriters, InputId, Outgoing, Taken};
 use tutti_ump::StreamConfig;
 
 use crate::backend;
-use crate::capability::UmpCapability;
+use crate::capability::{described, legacy};
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::sensing::Heartbeat;
@@ -368,7 +368,7 @@ impl Devices {
     pub fn open_output(&self, id: &DeviceId) -> Result<OpenOutput> {
         let (info, handle) = self.present(id, PortDirection::is_output)?;
         // What the OS says it speaks, until a negotiation says better.
-        let described = self.capability(id).unwrap_or_default().endpoint().active();
+        let described = described(&self.capability(id).unwrap_or_else(legacy)).active();
         let sink = self.inner.backend.open_output(handle)?;
         sink.follow(described.protocol);
         Ok(OpenOutput {
@@ -413,10 +413,11 @@ impl Devices {
         self.state().table.resolve(saved)
     }
 
-    /// What the OS says `id` can carry, asked of the backend now. `None` when
-    /// `id` is not present.
+    /// What the OS says `id` is, asked of the backend now: the Endpoint it
+    /// describes, with its protocol in use, the protocols it supports and its
+    /// Function Blocks. `None` when `id` is not present.
     #[must_use]
-    pub fn capability(&self, id: &DeviceId) -> Option<UmpCapability> {
+    pub fn capability(&self, id: &DeviceId) -> Option<Endpoint> {
         let handle = self.state().table.handle(id)?;
         let backend = &self.inner.backend;
         backend

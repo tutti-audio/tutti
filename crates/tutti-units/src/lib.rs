@@ -32,33 +32,33 @@
 //! use tutti_units::{Cents, Db, SampleRate, Samples, Seconds, Semitones};
 //!
 //! // dB → linear gain. `Db` is logarithmic, so this is a conversion, not a cast.
-//! let trim = Db(-6.0);
+//! let trim = Db::new(-6.0);
 //! assert!((trim.to_amplitude().get() - 0.501_187).abs() < 1e-5);
 //!
 //! // Cascaded gain stages ADD in dB: that operator is opted in because it
 //! // means something. Multiplication is NOT: scaling the dB value squares the
 //! // amplitude, so `trim * 2.0` would be a quarter of the signal, not half of
 //! // it. `Db` has no `Mul`; a factor of two lives in the amplitude domain.
-//! assert_eq!(trim + trim, Db(-12.0));
-//! let quartered = Db(-12.0).to_amplitude().get();
+//! assert_eq!(trim + trim, Db::new(-12.0));
+//! let quartered = Db::new(-12.0).to_amplitude().get();
 //! let squared = trim.to_amplitude().get() * trim.to_amplitude().get();
 //! assert!((quartered - squared).abs() < 1e-6);
 //!
 //! // Seconds → frames. The rounding is IN THE NAME because allocating a delay
 //! // line and counting elapsed frames want different answers from one span.
 //! let rate = SampleRate::SR_48K;
-//! let block = Seconds(0.010_51); // 504.48 frames
-//! assert_eq!(block.to_samples_floor(rate), Samples(504)); // frames elapsed
-//! assert_eq!(block.to_samples_ceil(rate), Samples(505)); // frames to allocate
+//! let block = Seconds::new(0.010_51); // 504.48 frames
+//! assert_eq!(block.to_samples_floor(rate), Samples::new(504)); // frames elapsed
+//! assert_eq!(block.to_samples_ceil(rate), Samples::new(505)); // frames to allocate
 //!
 //! // Pitch offsets convert too: `cents.get() / 100.0` would compile and return
 //! // `Cents`, a value wrong by 100x whose type claims it is fine.
-//! assert_eq!(Cents(1200.0).to_semitones(), Semitones(12.0));
+//! assert_eq!(Cents::new(1200.0).to_semitones(), Semitones::new(12.0));
 //! ```
 //!
 //! ## Units are labels
 //!
-//! A unit is a name on a float, not a validated value: `Pan(5.0)` builds. The
+//! A unit is a name on a float, not a validated value: `Pan::new(5.0)` builds. The
 //! range a type documents is what its `new_clamped` or wrap produces, and
 //! `new_clamped` passes NaN through (see the `units` module docs). The types that
 //! do validate are `SampleRate`, `Bpm`, `Depth` and `Bipolar`: `SampleRate::new`
