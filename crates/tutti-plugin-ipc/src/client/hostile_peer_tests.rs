@@ -2256,7 +2256,8 @@ fn a_control_call_on_a_full_queue_is_busy() {
     while mock
         .bridge
         .audio()
-        .set_parameter_rt(ParamId::new(1), Normalized::of(0.5))
+        .set_automation_state_rt(tutti_plugin_types::AutomationMode::Off)
+        == tutti_plugin_types::Delivered::Yes
     {}
 
     let refused = mock.bridge.audio().commands_refused_cell();

@@ -235,7 +235,13 @@ fn mock_with(
                 let Ok(message) = postcard::from_bytes::<HostMessage>(&bytes) else {
                     break;
                 };
+                let applied = matches!(message, HostMessage::ApplyParameters { .. });
                 log.push(message);
+                // The parameters sent between blocks are answered, as the
+                // server's render thread answers them.
+                if applied {
+                    reply(&audio, &BridgeMessage::ParametersApplied);
+                }
             }
         }
     });
@@ -303,6 +309,12 @@ fn mock_with(
                 }
                 HostMessage::SetEditorSize { size } => {
                     reply(&served, &BridgeMessage::EditorSized { result: Ok(*size) })
+                }
+                HostMessage::LoadStateChunk { last: Some(_), .. } => {
+                    reply(&served, &BridgeMessage::StateLoaded { error: None })
+                }
+                HostMessage::GetParameter { .. } => {
+                    reply(&served, &BridgeMessage::ParameterValue { value: None })
                 }
                 HostMessage::GetParameterList => reply(
                     &served,
@@ -1222,7 +1234,7 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     let _machine = machine_lock();
     let sets = |got: &[HostMessage]| {
         got.iter()
-            .filter(|m| matches!(m, HostMessage::SetParameter { .. }))
+            .filter(|m| matches!(m, HostMessage::ApplyParameters { .. }))
             .count()
     };
     let (mut ipc, server) = mock();
@@ -1230,6 +1242,8 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    // A read of the plugin sends what no block has carried, ahead of itself.
+    let _ = ipc.parameter(main, ParamId::new(3));
     assert!(
         server.wait_for(|got| sets(got) == 1),
         "the first write reaches the server"
@@ -1278,7 +1292,7 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     });
     // The control stream is ordered: once a round trip has come back, a write
     // the refused one had put on it would be on the record.
-    let _ = ipc.parameters(main);
+    let _ = ipc.parameter(main, ParamId::new(3));
     assert_eq!(
         sets(&server.received.lock().unwrap()),
         1,
@@ -1364,28 +1378,216 @@ fn a_refill_older_than_a_forgetting_is_not_kept() {
     assert_eq!(cache.get().unwrap()[0].1, ParamAccess::ReadOnly);
 }
 
-/// **A write to a parameter the declared list lacks is `UnknownParam` at the
-/// call**, once the list is kept: the realtime write asks nothing, and reads the
-/// list it holds. One the list names is queued.
+/// Submits one block of silence by hand, and returns the parameter changes the
+/// server was sent with it (the block with sequence `seq`).
+fn changes_sent_with_block(
+    ipc: &Ipc,
+    server: &Mock,
+    seq: u64,
+) -> tutti_plugin_types::ParameterChanges {
+    let accepted = ipc.bridge().audio().submit(
+        seq,
+        32,
+        Default::default(),
+        &mut tutti_plugin_types::ParameterChanges::new(),
+        Default::default(),
+        Default::default(),
+        tutti_plugin_types::TransportInfo::new(RATE),
+        Default::default(),
+    );
+    assert!(accepted.accepted());
+    let sent = |log: &[HostMessage]| {
+        log.iter()
+            .any(|m| matches!(m, HostMessage::ProcessAudio(d) if d.seq == seq))
+    };
+    assert!(server.wait_for(sent), "block {seq} reached the server");
+    server
+        .received
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|m| match m {
+            HostMessage::ProcessAudio(d) if d.seq == seq => Some(d.param_changes.clone()),
+            _ => None,
+        })
+        .expect("the block was sent")
+}
+
+/// The last value a block's changes carry for `id`.
+fn last_change(changes: &tutti_plugin_types::ParameterChanges, id: ParamId) -> Option<f64> {
+    changes
+        .queues
+        .iter()
+        .find(|q| q.param_id == id)
+        .and_then(|q| q.points.last())
+        .map(|p| p.value.get())
+}
+
+/// **Writes do not drop for lack of room, and the latest to each parameter
+/// reaches the plugin with the next block.** Three times the control queue's
+/// room in writes, round-robin over three parameters, are made before any block
+/// is sent; the block carries each parameter's last value, on its first frame.
 #[test]
-fn a_served_write_the_kept_list_lacks_is_unknown_at_the_call() {
+fn many_served_writes_before_a_block_leave_each_parameter_at_its_latest() {
+    use tutti_plugin_types::AnyThread;
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(1, false), param(2, false), param(3, false)];
+    let ids = [ParamId::new(1), ParamId::new(2), ParamId::new(3)];
+    let writes = 3 * crate::client::audio::COMMAND_QUEUE_SIZE;
+    for n in 0..writes {
+        let id = ids[n % 3];
+        let value = Normalized::of(n as f64 / writes as f64);
+        assert_eq!(AnyThread::set_parameter_value(&ipc, id, value), Ok(()));
+    }
+    let changes = changes_sent_with_block(&ipc, &server, 1);
+    for (k, id) in ids.iter().enumerate() {
+        let last = writes - 3 + k;
+        assert_eq!(
+            last_change(&changes, *id),
+            Some(last as f64 / writes as f64),
+            "{id:?}"
+        );
+        let queue = changes.queues.iter().find(|q| q.param_id == *id).unwrap();
+        assert_eq!(
+            queue.points.len(),
+            1,
+            "one value per parameter, not a queue"
+        );
+        assert_eq!(queue.points[0].sample_offset, 0, "on the first frame");
+    }
+}
+
+/// **A write to a parameter the plugin does not declare fails at the call**,
+/// naming it, from the table the first write built: the plugin's list is asked
+/// once, not once per write.
+#[test]
+fn a_served_write_to_an_unknown_parameter_is_unknown_at_the_call_without_asking_again() {
     use tutti_plugin_types::{AnyThread, UnknownParam};
     use tutti_units::Normalized;
     let _machine = machine_lock();
-    let (mut ipc, server) = mock();
+    let (ipc, server) = mock();
     *server.parameters.lock().unwrap() = vec![param(3, false)];
     let half = Normalized::of(0.5);
-    // The write policy asks for the list once and keeps it.
-    assert_eq!(
-        ipc.set_parameter(main_thread(), ParamId::new(3), half),
-        Ok(())
-    );
-    assert_eq!(
-        AnyThread::set_parameter_value(&ipc, ParamId::new(9), half),
-        Err(UnknownParam(ParamId::new(9)))
-    );
     assert_eq!(
         AnyThread::set_parameter_value(&ipc, ParamId::new(3), half),
         Ok(())
     );
+    let asks = list_asks(&server);
+    for _ in 0..5 {
+        assert_eq!(
+            AnyThread::set_parameter_value(&ipc, ParamId::new(9), half),
+            Err(UnknownParam(ParamId::new(9)))
+        );
+    }
+    assert_eq!(
+        list_asks(&server),
+        asks,
+        "no write asked for the list again"
+    );
+}
+
+/// **A write queued before a state load never lands after it**: the load
+/// replaced the values the write was made against, so the next block carries
+/// nothing for it, and a write made after the load does.
+#[test]
+fn a_served_write_queued_before_a_state_load_does_not_land_after_it() {
+    use tutti_plugin_types::{AnyThread, StateUse};
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(1, false), param(2, false)];
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.25)),
+        Ok(())
+    );
+    assert!(ipc.load_state(&[1, 2, 3], StateUse::Project).is_ok());
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(2), Normalized::of(0.75)),
+        Ok(())
+    );
+    let changes = changes_sent_with_block(&ipc, &server, 1);
+    assert_eq!(
+        last_change(&changes, ParamId::new(1)),
+        None,
+        "the stale write"
+    );
+    assert_eq!(last_change(&changes, ParamId::new(2)), Some(0.75));
+}
+
+/// **A write drained into a block pushed before a load lands before the load,
+/// never after it**: the audio lane sends the block, and the control lane's load
+/// waits for it (the stamp every control command carries), so the server has
+/// the write when it takes the load, and what the load replaces is not
+/// overwritten by it.
+#[test]
+fn a_write_in_a_block_pushed_before_a_load_reaches_the_server_before_the_load() {
+    use tutti_plugin_types::{AnyThread, StateUse};
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(1, false)];
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.25)),
+        Ok(())
+    );
+    // The block carries the write (it is drained when the lane sends it), and
+    // the load is asked for once the lane has drained it.
+    let _ = changes_sent_with_block(&ipc, &server, 1);
+    assert!(ipc.load_state(&[1], StateUse::Project).is_ok());
+    let log = server.received.lock().unwrap();
+    let block = log
+        .iter()
+        .position(|m| matches!(m, HostMessage::ProcessAudio(d) if d.seq == 1))
+        .expect("the block was sent");
+    let load = log
+        .iter()
+        .position(|m| matches!(m, HostMessage::LoadStateChunk { .. }))
+        .expect("the load was sent");
+    assert!(block < load, "the block, and its write, came first");
+    let HostMessage::ProcessAudio(data) = &log[block] else {
+        unreachable!()
+    };
+    assert_eq!(
+        last_change(&data.param_changes, ParamId::new(1)),
+        Some(0.25)
+    );
+}
+
+/// **A read after writes no block has carried sends them on the audio lane,
+/// in order with the blocks**: a block pushed before the write reaches the
+/// server first, and the parameters follow it as their own message, before the
+/// request that asked.
+#[test]
+fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
+    use tutti_plugin_types::AnyThread;
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(1, false)];
+    let _ = changes_sent_with_block(&ipc, &server, 1);
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(1), Normalized::of(0.5)),
+        Ok(())
+    );
+    let _ = ipc.parameter(main_thread(), ParamId::new(1));
+    let log = server.received.lock().unwrap();
+    let block = log
+        .iter()
+        .position(|m| matches!(m, HostMessage::ProcessAudio(_)))
+        .expect("the block");
+    let flush = log
+        .iter()
+        .position(|m| matches!(m, HostMessage::ApplyParameters { .. }))
+        .expect("the parameters sent between blocks");
+    let read = log
+        .iter()
+        .position(|m| matches!(m, HostMessage::GetParameter { .. }))
+        .expect("the read");
+    assert!(block < flush && flush < read, "{block} {flush} {read}");
+    let HostMessage::ApplyParameters { param_changes } = &log[flush] else {
+        unreachable!()
+    };
+    assert_eq!(last_change(param_changes, ParamId::new(1)), Some(0.5));
 }

@@ -39,58 +39,44 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameter(id)
             }
 
-            /// Fire-and-forget on the control queue: a parameter the declared
-            /// list this link already holds does not name fails at the call
-            /// ([`UnknownParam`]), and a write to any other parameter is queued as
-            /// it is (a full queue refuses it, counted
-            /// (`PluginControls::refused_commands`)). The server's own
-            /// `Control::set_parameter` refuses a write the plugin does not
-            /// declare or declares read-only, and writes nothing. The
-            /// client-side check, which names the error and may ask the plugin,
-            /// is [`Control::set_parameter`].
+            /// Stored in the parameter's slot and sent with the next block as a
+            /// change on its first frame ([`AudioBridge::write_parameter`]), so
+            /// it is never refused for a full queue, and the latest write to a
+            /// parameter wins. The server's own `Control::set_parameter` policy
+            /// refuses a write to a read-only parameter, and writes nothing. The
+            /// client-side check, which names the error, is
+            /// [`Control::set_parameter`].
             ///
-            /// A control-side call: it reads the declared list under a lock,
-            /// and is not for the audio thread.
+            /// A control-side call: it takes a lock, and is not for the audio
+            /// thread.
             ///
             /// Stays `Normalized` to the wire, which carries its `f64`.
             /// The server's decode refuses a value outside 0..=1 (NaN
             /// included): the wire is a foreign boundary and the peer is
             /// another process.
+            ///
+            /// [`AudioBridge::write_parameter`]: crate::AudioBridge
             fn set_parameter_value(
                 &self,
                 id: ParamId,
                 value: Normalized,
             ) -> Result<(), UnknownParam> {
-                if let Some(list) = self.link.declared_if_known()
-                    && list.binary_search_by_key(&id, |&(known, _)| known).is_err()
-                {
-                    return Err(UnknownParam(id));
-                }
-                let _ = self.link.bridge.set_parameter_rt(id, value);
-                Ok(())
+                self.link.bridge.set_parameter_value(id, value)
             }
 
-            /// A parameter bypass is a parameter write, [`Lost`](BypassWrite::Lost)
-            /// when the command queue refuses it or the link is gone, so the
-            /// session writes it again, and [`Refused`](BypassWrite::Refused)
-            /// for a parameter the declared list does not name. A property
-            /// bypass is not claimed by a served plugin.
+            /// A parameter bypass is a parameter write: [`Lost`](BypassWrite::Lost)
+            /// when the link is gone, so the session writes it again,
+            /// [`Refused`](BypassWrite::Refused) for a parameter the plugin does
+            /// not declare. A property bypass is not claimed by a served plugin.
             fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
                 match site {
+                    OwnBypass::Parameter(_) if self.link.bridge.audio().is_crashed() => {
+                        BypassWrite::Lost
+                    }
                     OwnBypass::Parameter(id) => {
-                        if let Some(list) = self.link.declared_if_known()
-                            && list.binary_search_by_key(&id, |&(known, _)| known).is_err()
-                        {
-                            return BypassWrite::Refused;
-                        }
-                        if self
-                            .link
-                            .bridge
-                            .set_parameter_rt(id, bypass_value(bypassed))
-                        {
-                            BypassWrite::Sent
-                        } else {
-                            BypassWrite::Lost
+                        match self.set_parameter_value(id, bypass_value(bypassed)) {
+                            Ok(()) => BypassWrite::Sent,
+                            Err(UnknownParam(_)) => BypassWrite::Refused,
                         }
                     }
                     OwnBypass::Property => BypassWrite::Lost,

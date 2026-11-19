@@ -966,6 +966,64 @@ fn a_write_after_a_flush_is_the_blocks_last_word() {
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
 }
 
+/// **A flush between blocks delivers parameters to a plugin that is
+/// processing**, with a `process` call of no samples (the SDK's route for
+/// parameters outside a block): the next block renders the flushed value.
+#[test]
+fn a_flush_between_blocks_reaches_a_processing_plugin() {
+    let probe = Probe::behaving();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    render_f32(&mut processor);
+    let mut changes = ParameterChanges::reserved(1, 1);
+    assert!(changes.add_change(id(PARAM_RAMP), 0, 0.4));
+    Processor::flush_parameters(&mut processor, &changes).expect("the plugin takes the flush");
+    let rendered = render_f32(&mut processor);
+    assert!((rendered - 0.4).abs() < 1e-6, "{rendered}");
+    Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
+}
+
+/// **A flush while the plugin is not processing waits for the next block, and
+/// does not start processing**: the SDK has `process` follow `setProcessing(true)`, which
+/// a flush does not toggle, so the writes are staged for the next block's input
+/// changes and that block renders them.
+#[test]
+fn a_flush_while_the_plugin_is_not_processing_is_staged_for_the_next_block_and_starts_nothing() {
+    let probe = Probe::behaving();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    render_f32(&mut processor);
+    Processor::stop(&mut processor);
+    let mut changes = ParameterChanges::reserved(1, 1);
+    assert!(changes.add_change(id(PARAM_RAMP), 0, 0.4));
+    Processor::flush_parameters(&mut processor, &changes).expect("staged");
+    let ProcessorAny::F32(inner) = &processor else {
+        panic!("activated at f32");
+    };
+    assert!(!inner.is_processing(), "the flush did not start processing");
+    let rendered = render_f32(&mut processor);
+    assert!((rendered - 0.4).abs() < 1e-6, "{rendered}");
+    Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
+}
+
 /// **A Processor that outlives its Controller does not destroy the plugin
 /// when it drops**: it hands it to a retirement queue that a control-side call
 /// empties. The Processor is dropped on another thread, as a realtime thread

@@ -378,6 +378,38 @@ impl ClapProcessor {
         self.do_process(audio, num_samples, transport)
     }
 
+    /// Delivers `changes` between blocks with `clap.params.flush`, the
+    /// Controller's writes first, as at the head of a block. `false` when the
+    /// plugin has no flush entry or is busy.
+    pub fn flush_parameters(&mut self, changes: &tutti_plugin_types::ParameterChanges) -> bool {
+        self.scratch.input_events.clear();
+        self.scratch.output_events.clear();
+        {
+            let table = self.ranges.lend();
+            let input_events = &mut self.scratch.input_events;
+            let drain = &mut self.drain;
+            input_events.add_param_edits(&table.ranges, table.claims, |each| {
+                drain.drain(each);
+            });
+            if !changes.is_empty() {
+                input_events.add_param_changes(changes, &table.ranges, table.claims);
+            }
+        }
+        self.scratch.input_events.sort_by_time();
+        let AudioScratch {
+            input_events,
+            output_events,
+            ..
+        } = &mut *self.scratch;
+        let flushed = self.audio_side.params_flush(&*input_events, output_events);
+        if flushed {
+            // What the plugin said while it took them (its own edits and
+            // gestures) goes where a block's goes: to the Controller's reports.
+            self.report_edits();
+        }
+        flushed
+    }
+
     /// Hands the block to the plugin through the FFI crate, which binds the
     /// channel tables, takes the audio claim, starts processing if need be,
     /// serves a `clap.thread-pool` request for exactly the span of the call and

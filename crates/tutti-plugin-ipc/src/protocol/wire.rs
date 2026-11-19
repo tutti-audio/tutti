@@ -316,14 +316,14 @@ mod tests {
         use tutti_units::ParamId;
         use tutti_units::SampleRate;
 
-        let set = HostMessage::SetParameter {
+        let text = HostMessage::GetParameterText {
             param_id: ParamId::new(0x0102_0304),
             value: Normalized::of(0.25),
         };
-        // variant 3, id 0x0102_0304 as a varint, 0.25f64
+        // variant 17, id 0x0102_0304 as a varint, 0.25f64
         assert_eq!(
-            postcard::to_allocvec(&set).unwrap(),
-            [3, 0x84, 0x86, 0x88, 0x08, 0, 0, 0, 0, 0, 0, 208, 63]
+            postcard::to_allocvec(&text).unwrap(),
+            [17, 0x84, 0x86, 0x88, 0x08, 0, 0, 0, 0, 0, 0, 208, 63]
         );
 
         let rate = HostMessage::SetSampleRate {
@@ -548,12 +548,6 @@ mod tests {
         use crate::{BridgeMessage, HostMessage};
         use tutti_units::Normalized;
         use tutti_units::ParamId;
-        let set_message = |raw: f64| {
-            // variant 3, id 1 (one varint byte each), then the f64.
-            let mut bytes = vec![3, 1];
-            bytes.extend(raw.to_le_bytes());
-            postcard::from_bytes::<HostMessage>(&bytes)
-        };
         let f64_tail = |message: &dyn Fn() -> Vec<u8>, raw: f64| {
             let mut bytes = message();
             let end = bytes.len();
@@ -584,10 +578,6 @@ mod tests {
         };
 
         assert!(matches!(
-            set_message(0.25).unwrap(),
-            HostMessage::SetParameter { value, .. } if value == Normalized::of(0.25)
-        ));
-        assert!(matches!(
             postcard::from_bytes::<HostMessage>(&f64_tail(&get_text, 0.25)).unwrap(),
             HostMessage::GetParameterText { value, .. } if value == Normalized::of(0.25)
         ));
@@ -600,7 +590,6 @@ mod tests {
             BridgeMessage::ParameterValue { value } if value == Some(Normalized::of(0.25))
         ));
         for raw in [7.5, -3.0, f64::NAN, f64::INFINITY] {
-            assert!(set_message(raw).is_err(), "set {raw}");
             assert!(value_of(raw).is_err(), "optional reply {raw}");
             assert!(
                 postcard::from_bytes::<HostMessage>(&f64_tail(&get_text, raw)).is_err(),

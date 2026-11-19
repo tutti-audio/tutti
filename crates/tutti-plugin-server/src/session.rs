@@ -133,6 +133,9 @@ pub(crate) struct Session {
     /// the plugin has been waited for since: a state saved now could miss it
     /// ([`Session::handle_save_state`]).
     write_pending: bool,
+    /// The reader of the slots the render thread leaves each block's parameter
+    /// values in: the edit controller is told of them on each tick.
+    informs: Option<tutti_plugin_types::EditReader>,
 }
 
 /// How long a save waits for a block to apply a pending write before it
@@ -175,6 +178,7 @@ impl Session {
             editor_open: false,
             editor_closed_unasked: false,
             write_pending: false,
+            informs: None,
         };
         Ok((session, side))
     }
@@ -275,24 +279,13 @@ impl Session {
             // A block belongs to the audio connection, where the render thread
             // answers it: one here is a peer that confuses its connections,
             // and it expects an answer.
-            M::ProcessAudio(_) => Ok(BridgeMessage::Error {
-                message: "a block is carried on the audio connection".to_string(),
+            M::ProcessAudio(_) | M::ApplyParameters { .. } => Ok(BridgeMessage::Error {
+                message:
+                    "a block, and the parameters outside one, are carried on the audio connection"
+                        .to_string(),
             }
             .into()),
 
-            M::SetParameter { param_id, value } => {
-                self.write_pending = true;
-                if let Some(plugin) = self.plugin.as_mut() {
-                    // The wire's decode refuses an out-of-range or NaN value
-                    // (`Normalized::new`), so one from the peer fails the frame
-                    // and never reaches a live plugin.
-                    // A write the plugin refuses (undeclared, read-only) is
-                    // refused here and not written; the wire has no reply to
-                    // carry the error.
-                    let _ = plugin.plugin_mut().set_parameter(main, param_id, value);
-                }
-                Ok(Reaction::None)
-            }
             M::SetAutomationState { mode } => {
                 self.write_pending = true;
                 if let Some(plugin) = self.plugin.as_mut() {
@@ -336,6 +329,7 @@ impl Session {
             }
             M::LoadPreset { id } => {
                 self.write_pending = true;
+                self.forget_informs();
                 let ok = self
                     .plugin
                     .as_mut()
@@ -444,6 +438,9 @@ impl Session {
 
             M::SaveState { state_use } => Ok(self.handle_save_state(main, state_use)),
             M::LoadStateChunk { seq, last, bytes } => {
+                if last.is_some() {
+                    self.forget_informs();
+                }
                 Ok(self.handle_load_state_chunk(main, seq, last, &bytes))
             }
             M::StageStateChunk { seq, last, bytes } => {
@@ -563,6 +560,7 @@ impl Session {
     /// closed here. Allocates only to hold what it tells the host.
     pub(crate) fn tick(&mut self, main: MainThreadMarker) -> Vec<BridgeMessage> {
         self.work.run(main);
+        self.inform_controller(main);
         self.render.report_losses();
         let mut told = self.drain_async_events(main);
         if self.editor_open
@@ -580,6 +578,51 @@ impl Session {
             told.push(BridgeMessage::EditorClosed);
         }
         told
+    }
+
+    /// Makes the slots the render thread leaves each block's parameter values
+    /// in follow the parameters the plugin lists now, and hands it their writer.
+    fn declare_informs(&mut self, main: MainThreadMarker) {
+        let Some(control) = self
+            .plugin
+            .as_mut()
+            .and_then(|p| p.plugin_mut().control_mut())
+        else {
+            return;
+        };
+        let (writer, reader) =
+            tutti_plugin_types::edit_slots(control.parameters(main).iter().map(|p| p.id()));
+        self.informs = Some(reader);
+        self.render.send(ToRender::Informs(writer));
+    }
+
+    /// Tells the plugin's edit controller of the values the blocks since the
+    /// last tick carried, each parameter's newest
+    /// ([`Control::inform_controller`](tutti_plugin_types::Control::inform_controller)):
+    /// the component has them through the block, and the controller hears them
+    /// on the main thread, as a VST3 host informs both halves.
+    fn inform_controller(&mut self, main: MainThreadMarker) {
+        let (Some(reader), Some(control)) = (
+            self.informs.as_mut(),
+            self.plugin
+                .as_mut()
+                .and_then(|p| p.plugin_mut().control_mut()),
+        ) else {
+            return;
+        };
+        reader.drain(|id, value| control.inform_controller(main, id, value));
+    }
+
+    /// Forgets the values no tick has told the controller of: a state or a
+    /// preset load is about to replace them, and a stale one told after it
+    /// would put the controller back where it was. What the render thread has
+    /// not yet written for a block that began before the load is voided too
+    /// ([`Informs`](crate::render::Informs)).
+    fn forget_informs(&mut self) {
+        self.render.void_informs();
+        if let Some(reader) = self.informs.as_mut() {
+            reader.drain(|_, _| {});
+        }
     }
 
     /// Reports what the render thread lost in the session, once it has stopped.
@@ -754,6 +797,7 @@ impl Session {
         self.plugin = Some(plugin);
         self.rate_refused = None;
         self.publish();
+        self.declare_informs(main);
         self.render.send(ToRender::Seat(seat));
         Ok(BridgeMessage::PluginLoaded {
             id,
@@ -1016,7 +1060,9 @@ mod tests {
         /// side's (the audio connection), the rest the session's (control).
         fn handle(&mut self, main: MainThreadMarker, msg: HostMessage) -> BridgeResult<Reaction> {
             match msg {
-                HostMessage::ProcessAudio(_) | HostMessage::Reset => {
+                HostMessage::ProcessAudio(_)
+                | HostMessage::Reset
+                | HostMessage::ApplyParameters { .. } => {
                     let mut side = self.side();
                     side.poll_seat();
                     Ok(side.handle(msg)?.map_or(Reaction::None, Reaction::Reply))
@@ -1222,15 +1268,10 @@ mod tests {
         rendered_to(WARM_UP + SETTLED);
         if write {
             let r = s
-                .handle(
-                    main_thread(),
-                    HostMessage::SetParameter {
-                        param_id: ParamId::new(GAIN),
-                        value: Normalized::of(0.25),
-                    },
-                )
-                .unwrap();
-            assert_none(r);
+                .handle(main_thread(), apply_parameter(GAIN, 0.25))
+                .unwrap()
+                .into_reply();
+            assert!(matches!(r, BridgeMessage::ParametersApplied), "{r:?}");
         }
         let after = save_state_bytes(&mut s);
         let saved_at = tutti_platform::Instant::now();
@@ -1304,15 +1345,10 @@ mod tests {
         let (mut s, _shm) = load_clap("save_quiet", FloatWidth::F32);
         let before = save_state_bytes(&mut s);
         let r = s
-            .handle(
-                main_thread(),
-                HostMessage::SetParameter {
-                    param_id: ParamId::new(77),
-                    value: Normalized::of(0.25),
-                },
-            )
-            .unwrap();
-        assert_none(r);
+            .handle(main_thread(), apply_parameter(77, 0.25))
+            .unwrap()
+            .into_reply();
+        assert!(matches!(r, BridgeMessage::ParametersApplied), "{r:?}");
         assert_ne!(before, save_state_bytes(&mut s));
     }
 
@@ -1370,14 +1406,6 @@ mod tests {
                     )
                 }),
                 RefusedBlock,
-            ),
-            (
-                "SetParameter",
-                HostMessage::SetParameter {
-                    param_id: ParamId::new(0),
-                    value: Normalized::of(0.5),
-                },
-                Silent,
             ),
             ("Reset", HostMessage::Reset, Silent),
         ];
@@ -2364,8 +2392,9 @@ mod tests {
         }
     }
 
-    /// **A write reaches the plugin with the next block**: the value read back
-    /// after it is the one written, and `SetParameter` itself answers nothing.
+    /// **A write sent between blocks reaches the plugin by the format's own
+    /// route** (CLAP `params.flush`): the value read back is the one written,
+    /// and the answer says it was applied.
     #[test]
     #[cfg(feature = "clap")]
     fn a_parameter_write_reaches_the_plugin_and_reads_back() {
@@ -2373,15 +2402,10 @@ mod tests {
         let (mut s, mut shm) = load_clap("set_param_clap", FloatWidth::F32);
         let param_id = ParamId::new(CUTOFF);
         let r = s
-            .handle(
-                main_thread(),
-                HostMessage::SetParameter {
-                    param_id,
-                    value: Normalized::of(0.25),
-                },
-            )
-            .unwrap();
-        assert_none(r);
+            .handle(main_thread(), apply_parameter(param_id.get(), 0.25))
+            .unwrap()
+            .into_reply();
+        assert!(matches!(r, BridgeMessage::ParametersApplied), "{r:?}");
         assert!(
             run_silent_block(&mut s, &mut shm, 1, 64),
             "the block renders"
@@ -2887,6 +2911,16 @@ mod tests {
         let guard = AudioSlab::create(buffer_name.clone(), layout.clone()).unwrap();
         s.attach(AudioSlab::open(buffer_name, layout).unwrap());
         (s, guard)
+    }
+
+    /// The host's write of `id` to `value`, as the audio lane sends it between
+    /// blocks.
+    fn apply_parameter(id: u32, value: f64) -> HostMessage {
+        let mut changes = ParameterChanges::reserved(1, 1);
+        assert!(changes.add_change(ParamId::new(id), 0, value));
+        HostMessage::ApplyParameters {
+            param_changes: changes,
+        }
     }
 
     /// One block of `frames` silent frames through `s`'s slab, and whether it

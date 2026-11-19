@@ -124,7 +124,10 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
     let _lock = machine_lock();
     let _env = env();
     let probe = load_probe(SAMPLE_RATE);
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
 
     let fork = probe
         .client
@@ -189,7 +192,10 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     let _env = env();
     let probe = load_probe(SAMPLE_RATE);
     let handle: PluginHandle = probe.handle.clone();
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
 
     let fork = probe
         .client
@@ -203,7 +209,10 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
         .expect("the probe saves");
 
     // After the fork: the live instance moves to -15 dB.
-    probe.client.set_parameter(GAIN, gain_at(-15.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-15.0))
+        .expect("a declared parameter");
 
     const MIN_FORK_BLOCKS: usize = 40;
     let start = Arc::new(Barrier::new(2));
@@ -386,7 +395,10 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
     let _lock = machine_lock();
     let _env = env();
     let probe = load_probe(SAMPLE_RATE);
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
 
     let prepare = Prepare::new(
         SampleRate::of(SAMPLE_RATE),
@@ -716,7 +728,10 @@ fn an_export_through_a_failing_fork_fails_by_name() {
         ..BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
     let (live, _exec) = live_graph(probe.client);
 
     let healthy = export_through_a_fork(&live).expect("a healthy fork exports");
@@ -1382,7 +1397,10 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
     let _lock = machine_lock();
     let _env = env().preset_load();
     let probe = load_probe(SAMPLE_RATE);
-    probe.client.set_parameter(GAIN, gain_at(-6.0));
+    probe
+        .client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
     let state = probe
         .handle
         .save_state(StateUse::Duplicate)
@@ -1429,8 +1447,12 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
     let _env = env();
     let a = load_probe(SAMPLE_RATE);
     let b = load_probe(SAMPLE_RATE);
-    a.client.set_parameter(GAIN, gain_at(-6.0));
-    b.client.set_parameter(GAIN, gain_at(-12.0));
+    a.client
+        .set_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
+    b.client
+        .set_parameter(GAIN, gain_at(-12.0))
+        .expect("a declared parameter");
     let (mut live, _exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),

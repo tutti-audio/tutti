@@ -175,6 +175,9 @@ struct Events {
     wake: OnceLock<ProcessWake>,
     /// The parameters the plugin declares: see [`DeclaredCache`].
     declared: DeclaredCache,
+    /// The bridge whose table of the host's parameter slots follows the same
+    /// word: the plugin saying its declarations changed.
+    audio: crate::AudioBridge,
     /// The buses the plugin last announced (`PluginIoChanged`); `None` until it
     /// announces any, when the buses it had at load stand.
     layout: Mutex<Option<tutti_plugin_types::Layout>>,
@@ -247,6 +250,7 @@ impl Events {
             // parameters may follow its buses).
             BridgeEvent::Resync(ResyncKind::Io) => {
                 self.declared.forget();
+                self.audio.invalidate_host_edits();
                 self.ask(Request::IoChanged);
             }
             BridgeEvent::ProcessRequested => {
@@ -260,7 +264,10 @@ impl Events {
             // which every dropped parameter event raises and which says nothing
             // of the list: a forget on it would make the next write a round trip.
             BridgeEvent::Resync(ResyncKind::ParamTitles | ResyncKind::Reloaded)
-            | BridgeEvent::Crashed { .. } => self.declared.forget(),
+            | BridgeEvent::Crashed { .. } => {
+                self.declared.forget();
+                self.audio.invalidate_host_edits();
+            }
             // A transport request reaches the application through the
             // listener, in order; nothing is queued for it here.
             _ => {}
@@ -373,13 +380,11 @@ impl Link {
         sorted.sort_unstable_by_key(|&(id, _)| id);
         let list: Arc<[(ParamId, ParamAccess)]> = sorted.into();
         self.events.declared.store(started, &list);
+        // The host's parameter slots are built from the list the policy asked for.
+        self.bridge
+            .audio()
+            .declare_host_edits(list.iter().map(|&(id, _)| id));
         Ok(list)
-    }
-
-    /// The declared list if one is kept now, without asking the plugin or
-    /// waiting: `None` before the first fill and after a forgetting.
-    pub(crate) fn declared_if_known(&self) -> Option<Arc<[(ParamId, ParamAccess)]>> {
-        self.events.declared.get().ok()
     }
 
     pub(crate) fn tail(&self) -> PluginTail {
@@ -508,6 +513,7 @@ impl Ipc {
             forward: Mutex::new(None),
             wake: OnceLock::new(),
             declared: DeclaredCache::default(),
+            audio: bridge.audio().clone(),
             layout: Mutex::new(None),
         });
         let listening = Arc::clone(&events);

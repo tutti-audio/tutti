@@ -490,7 +490,9 @@ impl InProcessEditor {
     fn forward_edits(&self, edits: Vec<ParamEdit>) {
         for edit in edits {
             if let ParamEdit::Change { id, value, .. } = edit {
-                self.audio.set_parameter_rt(id, value);
+                // An id the editor reports is the plugin's own; the table
+                // follows its list, so the write has a slot.
+                let _ = self.audio.write_parameter(id, value);
             }
             self.audio.report_edit(edit);
         }

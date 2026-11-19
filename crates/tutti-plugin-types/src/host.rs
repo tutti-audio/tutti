@@ -34,7 +34,7 @@ use crate::{
     PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
     SampleRate, Samples, WindowHandle,
 };
-use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
+use crate::{Delivered, ParamEdit, ParameterChanges, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
     MainThreadMarker, Prepare, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
     StateUse, TimerId, TrackInfo, Wakeups, Widths,
@@ -456,6 +456,31 @@ pub trait Processor: Send {
     /// request a plugin may ignore); VST2 `effStopProcess`, started again in the next
     /// block (likewise a request). Every format drops a SysEx open across the reset.
     fn reset(&mut self);
+
+    /// Delivers `changes` to the plugin between blocks, by the format's own
+    /// route for parameters outside a block, so a caller that must see them
+    /// applied (a state save, a read of the plugin) has them in before it asks.
+    /// Realtime, between blocks, on the thread that renders them. What the
+    /// Processor's own slots hold (the Controller's writes) goes in first, then
+    /// `changes`, as at the head of a block, so a later write is the last word.
+    ///
+    /// Per format: CLAP `params.flush` (an audio-thread entry, never beside
+    /// `process`); VST3 `process` with `numSamples = 0`, which the SDK
+    /// allows for flushing parameters; VST2 and AU a direct set of each
+    /// parameter's last value.
+    ///
+    /// The default refuses: a Processor takes parameters in a block only.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError::Block`] when the Processor has no such route, or the
+    /// plugin refused the call.
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+        let _ = changes;
+        Err(PluginError::Block(
+            "this Processor takes parameters in a block only",
+        ))
+    }
 
     /// The frames this Processor renders in, if it renders in fixed chunks
     /// that may begin in the middle of a graph block and span several

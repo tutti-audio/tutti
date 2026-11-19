@@ -490,6 +490,17 @@ fn count_of(n: u64) -> usize {
 }
 
 impl Processor for Vst2Processor {
+    /// A direct `setParameter` of each parameter's last value, which the SDK
+    /// allows between blocks.
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+        let refused = self.write_automation(changes);
+        if refused == 0 {
+            Ok(())
+        } else {
+            Err(PluginError::Block("the plugin refused a parameter write"))
+        }
+    }
+
     /// Takes the node's own intake: events go to the plugin's own queue.
     fn event_input(&self) -> std::num::NonZeroU32 {
         tutti_plugin_types::MIDI_STACK_BOUND

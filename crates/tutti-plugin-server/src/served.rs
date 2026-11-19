@@ -23,9 +23,9 @@ use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
     AutomationMode, Control, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle, LoadStage,
     LoadedPlugin, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess, ParamEdit,
-    ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginIo, PluginRef,
-    PluginResult, Prepare, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request,
-    SampleRate, Samples, Seat, Stage, State, StateError, StateUse, TrackInfo, Widths,
+    ParameterInfo, PluginDescriptor, PluginError, PluginIo, PluginRef, PluginResult, Prepare,
+    Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, SampleRate, Samples,
+    Seat, Stage, State, StateError, StateUse, TrackInfo, Widths,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -120,17 +120,6 @@ pub(crate) trait ServedPlugin {
     fn parameters(&self, main: MainThreadMarker) -> Vec<ParameterInfo>;
     /// A parameter's value, normalized.
     fn parameter(&self, main: MainThreadMarker, id: ParamId) -> Option<Normalized>;
-    /// Sets a parameter, or says why the plugin refuses it.
-    ///
-    /// # Errors
-    ///
-    /// As [`Control::set_parameter`].
-    fn set_parameter(
-        &mut self,
-        main: MainThreadMarker,
-        id: ParamId,
-        value: Normalized,
-    ) -> Result<(), ParamWriteError>;
     /// The host's automation mode.
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode);
     /// What the host says of the plugin's track.
@@ -822,22 +811,6 @@ impl<L: ServerSide> ServedPlugin for Served<L> {
 
     fn parameter(&self, main: MainThreadMarker, id: ParamId) -> Option<Normalized> {
         self.lifecycle.control_ref()?.parameter(main, id)
-    }
-
-    /// Normalized `0..=1`. On an active plugin the write is queued to the
-    /// Processor and reaches the plugin at the head of the next block.
-    fn set_parameter(
-        &mut self,
-        main: MainThreadMarker,
-        id: ParamId,
-        value: Normalized,
-    ) -> Result<(), ParamWriteError> {
-        match self.lifecycle.control() {
-            Some(control) => control.set_parameter(main, id, value),
-            // A lost plugin has nothing to write to: the write is refused, as
-            // a client's is.
-            None => Err(ParamWriteError::Lost(id)),
-        }
     }
 
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
