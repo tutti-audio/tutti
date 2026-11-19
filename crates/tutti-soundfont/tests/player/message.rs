@@ -274,7 +274,7 @@ fn a_bend_reaches_the_synth_at_its_value() {
 /// +200 cents at the default and after an explicit 2, +700 at 7, and the
 /// cents field is hundredths of a semitone (7 semitones 50 cents is +750,
 /// 0 and 64 cents is +64, not the 50 a binary fraction would give). The bend is
-/// the note logic's alone (`VoiceAllocator::step`).
+/// the note logic's alone (`Voicing::step`).
 /// Spec: sf2.mod.default.10, sf2.mod.src.pitchWheelSensitivity
 #[test]
 fn a_full_bend_spans_the_registered_sensitivity() {

@@ -5,7 +5,7 @@
 //! Every scale, whether equal, just, meantone or user-supplied, is flattened to
 //! the same table at construction. It is built off the audio thread and handed
 //! to the note logic once; the audio thread never reads it (the note logic's
-//! tuning offsets are what a voice is told, `tutti_voicing::VoiceCommand::Start`).
+//! tuning offsets are what a voice is told, `tutti_voicing::Command::Start`).
 
 use tutti_midi_protocol::{KeyTable, TuningFrequency};
 use tutti_ump::NoteNumber;
@@ -43,7 +43,7 @@ impl ScaleDegree {
 /// The frequency of a MIDI note (a fractional number is between keys) at
 /// equal temperament over A4 = 440 Hz, `tune` semitones sharp. This is the one
 /// place a voice's pitch is made of a note: the note logic says how far each key
-/// sounds from equal temperament (`tutti_voicing::VoiceCommand::Start`'s `tune`), so
+/// sounds from equal temperament (`tutti_voicing::Command::Start`'s `tune`), so
 /// the scale itself is no state of a voice.
 pub(crate) fn key_freq(note: f64, tune: Semitones) -> Hz {
     A4_FREQ * (Semitones::new(note - f64::from(A4_NOTE.get())) + tune).to_pitch_ratio()

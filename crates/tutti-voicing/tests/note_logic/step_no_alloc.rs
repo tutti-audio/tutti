@@ -1,4 +1,4 @@
-//! `VoiceAllocator::step` allocates nothing, on every path: poly stealing, the
+//! `Voicing::step` allocates nothing, on every path: poly stealing, the
 //! exclusive cut, mono and legato takeover, the return to a held key, the
 //! pedals, the panics, the bends and the per-note controllers.
 
@@ -16,8 +16,8 @@ use tutti_ump::{
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::{Amplitude, Semitones};
 use tutti_voicing::{
-    Mode, Order, Patch, PerNoteState, Steal, TuningCapacity, VoiceAllocator, VoiceCommand,
-    VoiceConfig, VoiceId, VoiceSpec,
+    Command, Mode, Order, Patch, PerNoteState, Rules, Steal, TuningCapacity, VoiceId, VoiceSpec,
+    Voicing,
 };
 
 /// Two layers, one exclusive class.
@@ -34,8 +34,8 @@ impl Patch for Grouped {
     }
 }
 
-fn rules(mode: Mode) -> VoiceConfig {
-    VoiceConfig::poly(NonZeroUsize::new(6).unwrap())
+fn rules(mode: Mode) -> Rules {
+    Rules::poly(NonZeroUsize::new(6).unwrap())
         .with_mode(mode)
         .with_steal(Steal::By(Order::Quietest))
         .with_exclusive_groups(true)
@@ -44,7 +44,7 @@ fn rules(mode: Mode) -> VoiceConfig {
 #[test]
 fn step_is_allocation_free_in_every_mode() {
     for mode in [Mode::Poly, Mode::Mono, Mode::Legato] {
-        let mut core = VoiceAllocator::new(rules(mode));
+        let mut core = Voicing::new(rules(mode));
         let mut voices: Vec<(VoiceId, Amplitude)> = Vec::with_capacity(4096);
         let ch = |n| MidiChannel::of(n);
         let cc = |n: u8, v: u32| Voice2::ControlChange {
@@ -149,11 +149,11 @@ fn step_is_allocation_free_in_every_mode() {
                         voices.iter().find(|v| v.0 == id).map(|v| v.1)
                     }) {
                         match *cmd {
-                            VoiceCommand::Start { id, steal, .. } => {
+                            Command::Start { id, steal, .. } => {
                                 voices.retain(|v| Some(v.0) != steal);
                                 voices.push((id, Amplitude::new(0.5)));
                             }
-                            VoiceCommand::Cut(id) => voices.retain(|v| v.0 != id),
+                            Command::Cut(id) => voices.retain(|v| v.0 != id),
                             _ => {}
                         }
                     }
@@ -235,8 +235,8 @@ fn per_note_state_is_allocation_free() {
 /// MIDI reset that cuts every voice, allocate nothing.
 #[test]
 fn universal_is_allocation_free() {
-    let mut core = VoiceAllocator::new(
-        VoiceConfig::poly(NonZeroUsize::new(6).unwrap()).with_percussion(MidiChannel::of(9)),
+    let mut core = Voicing::new(
+        Rules::poly(NonZeroUsize::new(6).unwrap()).with_percussion(MidiChannel::of(9)),
     );
     let on = |k: u8| Voice2::NoteOn {
         note: NoteNumber::of(k),
@@ -280,8 +280,8 @@ fn universal_is_allocation_free() {
 #[test]
 fn mts_is_allocation_free() {
     for mode in [Mode::Poly, Mode::Mono, Mode::Legato] {
-        let mut core = VoiceAllocator::new(
-            VoiceConfig::poly(NonZeroUsize::new(6).unwrap())
+        let mut core = Voicing::new(
+            Rules::poly(NonZeroUsize::new(6).unwrap())
                 .with_mode(mode)
                 .with_percussion(MidiChannel::of(9))
                 .with_tuning_capacity(TuningCapacity::new(2, 8).unwrap()),

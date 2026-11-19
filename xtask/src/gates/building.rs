@@ -554,7 +554,6 @@ pub(super) const ALLOW: &[Allow] = &[
         NOT_A_NODE,
     ),
     ty("crates/tutti-session/", "PoolConfig", WIDTH, NOT_A_NODE),
-    ty("crates/tutti-voicing/", "VoiceConfig", WIDTH, NOT_A_NODE),
     ty("crates/tutti-graph/", "Direct", SETTER, TEST_SUPPORT),
     ty("crates/tutti-graph/", "Reference", SETTER, TEST_SUPPORT),
     ty("crates/tutti-session/", "AudioSide", SETTER, TEST_SUPPORT),

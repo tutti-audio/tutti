@@ -46,7 +46,7 @@ impl Controller {
             CCNumber::SOSTENUTO => Effect::Sostenuto(Self::pedal(value)),
             CCNumber::ALL_SOUND_OFF => Effect::Stop(Stop::Cut),
             // All Notes Off, and the four mode messages (124 to 127), which also
-            // do All Notes Off. The mode they name is the instrument's `VoiceConfig`.
+            // do All Notes Off. The mode they name is the instrument's `Rules`.
             CCNumber::ALL_NOTES_OFF => Effect::Stop(Stop::Release),
             c if (124..=127).contains(&c.get()) => Effect::Stop(Stop::Release),
             CCNumber::RESET_ALL => Effect::ResetControllers,

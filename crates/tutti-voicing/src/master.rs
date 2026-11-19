@@ -1,10 +1,10 @@
 //! What the Universal Device Control messages set: the device's own volume,
 //! balance and tuning, apart from every channel's.
 //!
-//! [`Master`] is the value [`VoiceAllocator`](crate::VoiceAllocator) keeps. The instrument
+//! [`Master`] is the value [`Voicing`](crate::Voicing) keeps. The instrument
 //! reads two things from it when it renders: the [`MasterGain`] its output is
-//! multiplied by (`VoiceAllocator::master_gain`), and, through each channel's pitch,
-//! the tuning (the core adds it to what `VoiceCommand::Retune` says).
+//! multiplied by (`Voicing::master_gain`), and, through each channel's pitch,
+//! the tuning (the core adds it to what `Command::Retune` says).
 //!
 //! # Volume and balance
 //!

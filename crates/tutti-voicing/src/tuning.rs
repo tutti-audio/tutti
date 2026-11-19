@@ -1,13 +1,13 @@
 //! The MIDI Tuning Standard's tables: what a tuning program stores and what a
 //! channel's Scale/Octave Tuning adds.
 //!
-//! [`Tunings`] is the value [`VoiceAllocator`](crate::VoiceAllocator) keeps. A key's tuning is
+//! [`Tunings`] is the value [`Voicing`](crate::Voicing) keeps. A key's tuning is
 //! its **offset** from equal temperament, in semitones: the stored word's pitch
 //! (`TuningFrequency::pitch`, semitones above note 0) minus the key number, plus
 //! the channel's Scale/Octave offset for the key's pitch class. A voice carries
-//! it as [`VoiceCommand::Start::tune`](crate::VoiceCommand::Start) (and `Retarget`, and
+//! it as [`Command::Start::tune`](crate::Command::Start) (and `Retarget`, and
 //! `Tune` when it changes), and the channel's own pitch (the wheel, RPN 1 and 2,
-//! the master tuning) stays a [`VoiceCommand::Retune`](crate::VoiceCommand::Retune): the
+//! the master tuning) stays a [`Command::Retune`](crate::Command::Retune): the
 //! two add. Nothing here is in Hz, so the reference (A440 at note 69) is the
 //! master tuning's alone.
 //!
@@ -15,12 +15,12 @@
 //!
 //! MTS asks for 128 tuning programs as a maximum: an instrument may have
 //! fewer, and ignores a Tuning Program or Bank number it has none for. So the capacity is a [`TuningCapacity`], banks and programs a
-//! bank, chosen with the [`VoiceConfig`](crate::VoiceConfig) (default one bank of 128
+//! bank, chosen with the [`Rules`](crate::Rules) (default one bank of 128
 //! programs, 64 KiB of tables: the spec's temporary copies of tuning tables are one
 //! 512-byte table a program here), allocated once in
-//! [`VoiceAllocator::new`](crate::VoiceAllocator::new). A message
+//! [`Voicing::new`](crate::Voicing::new). A message
 //! for a bank or program beyond it changes nothing and is counted
-//! ([`VoiceAllocator::tuning_refused`](crate::VoiceAllocator::tuning_refused)).
+//! ([`Voicing::tuning_refused`](crate::Voicing::tuning_refused)).
 //!
 //! Every program starts as equal temperament (RP-020: the initial tuning is equal temperament, in Bank 0H
 //! and Preset 0H). A message

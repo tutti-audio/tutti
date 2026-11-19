@@ -106,7 +106,7 @@
 //!
 //! ## How a note is decided
 //!
-//! The note logic is `tutti-voicing`'s: `VoiceAllocator::step` reads each message and
+//! The note logic is `tutti-voicing`'s: `Voicing::step` reads each message and
 //! says which voices to start, release or cut, and the unit does it. A note
 //! starts one voice for each pair of a preset zone and an instrument zone whose
 //! key and velocity ranges hold it (SF2 2.04 sections 8.1.2 and 9.4). The rules are
@@ -253,7 +253,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 ///
 /// # How a note is decided
 ///
-/// A note is not decided here: `tutti-voicing`'s `VoiceAllocator` reads each message
+/// A note is not decided here: `tutti-voicing`'s `Voicing` reads each message
 /// and says which voices start, release or cut. A note starts one voice for
 /// each pair of a preset zone and an instrument zone that hold its key and
 /// velocity (SF2 2.04 section 8.1.2, generators 43 and 44; section 9.4). The

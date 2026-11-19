@@ -1,18 +1,18 @@
 //! The note logic of an instrument, as one pure step.
 //!
-//! `VoiceAllocator::step(channel, message, patch, level)` reads one channel voice
-//! message and the voices that exist, and returns the [`VoiceCommand`]s the
+//! `Voicing::step(channel, message, patch, level)` reads one channel voice
+//! message and the voices that exist, and returns the [`Command`]s the
 //! instrument must carry out. It renders no audio, owns no voice and allocates
-//! nothing after [`VoiceAllocator::new`]. What differs between instruments is a value
-//! of [`VoiceConfig`] and a [`Patch`]; the logic below is the same for all of them.
+//! nothing after [`Voicing::new`]. What differs between instruments is a value
+//! of [`Rules`] and a [`Patch`]; the logic below is the same for all of them.
 //!
 //! The core serves one Group's sixteen channels (M2-104 section 2.1.2: a Group's
 //! channels are separate from every other Group's): an instrument that plays
 //! one Group reads its messages and gives `step` the channel, so no Group is
 //! ever merged into these tables.
 //!
-//! Reading order: [`VoiceConfig`] (the declared differences), [`VoiceCommand`] (what comes
-//! out), then `VoiceAllocator::step`, which is the whole of it.
+//! Reading order: [`Rules`] (the declared differences), [`Command`] (what comes
+//! out), then `Voicing::step`, which is the whole of it.
 //!
 //! # What the instrument tells the core
 //!
@@ -25,7 +25,7 @@
 //! until then, so a command may name a voice that has since ended. The
 //! instrument ignores a command for a voice it no longer has.
 //!
-//! # VoiceConfig that are tutti's own
+//! # Rules that are tutti's own
 //!
 //! MIDI 1.0 does not say what a repeated key, a full pool, or a mono
 //! instrument whose key is let go while another is still held should do. The
@@ -47,7 +47,7 @@
 //! only that one), which then glides from it, or, in a polyphonic channel with a
 //! voice sounding at the source key, moves that voice with no new attack;
 //! Portamento On (CC 65) glides a note from the key struck before it. The
-//! [`Glide`] on a [`VoiceCommand::Start`] or [`VoiceCommand::Retarget`] says from which key
+//! [`Glide`] on a [`Command::Start`] or [`Command::Retarget`] says from which key
 //! and for how long (the channel's Portamento Time). What a channel holds
 //! besides notes is its [`ChannelState`].
 
@@ -173,7 +173,7 @@ pub enum Steal {
 
 /// The declared differences between instruments.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct VoiceConfig {
+pub struct Rules {
     /// Poly, mono or legato.
     pub mode: Mode,
     /// A key struck again.
@@ -203,8 +203,8 @@ pub struct VoiceConfig {
     pub tuning: TuningCapacity,
 }
 
-impl VoiceConfig {
-    /// The polyphony of [`VoiceConfig::default`], [`mono`](Self::mono) and
+impl Rules {
+    /// The polyphony of [`Rules::default`], [`mono`](Self::mono) and
     /// [`legato`](Self::legato): enough for a monophonic note's layers.
     pub const DEFAULT_POLYPHONY: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
@@ -301,7 +301,7 @@ impl VoiceConfig {
     }
 
     /// These rules with `channel` as the percussion channel: the master tuning
-    /// does not move it ([`VoiceConfig::percussion`]).
+    /// does not move it ([`Rules::percussion`]).
     #[must_use]
     pub const fn with_percussion(mut self, channel: MidiChannel) -> Self {
         self.percussion = Some(channel);
@@ -309,7 +309,7 @@ impl VoiceConfig {
     }
 }
 
-impl VoiceConfig {
+impl Rules {
     /// These rules with room for `capacity` tuning programs.
     #[must_use]
     pub const fn with_tuning_capacity(mut self, capacity: TuningCapacity) -> Self {
@@ -318,8 +318,8 @@ impl VoiceConfig {
     }
 }
 
-impl Default for VoiceConfig {
-    /// [`VoiceConfig::poly`] of [`DEFAULT_POLYPHONY`](VoiceConfig::DEFAULT_POLYPHONY) voices.
+impl Default for Rules {
+    /// [`Rules::poly`] of [`DEFAULT_POLYPHONY`](Rules::DEFAULT_POLYPHONY) voices.
     fn default() -> Self {
         Self::poly(Self::DEFAULT_POLYPHONY)
     }
@@ -337,7 +337,7 @@ pub struct VoiceSpec {
     /// gives its preset's number). Groups of different scopes are unrelated.
     pub scope: u32,
     /// The patch's own name for the voice (a region number), given back in
-    /// [`VoiceCommand::Start`]. It is also how a mono or legato channel matches a
+    /// [`Command::Start`]. It is also how a mono or legato channel matches a
     /// prior voice to the same layer of the next key: equal tags are the same
     /// layer.
     pub tag: u32,
@@ -355,7 +355,7 @@ pub struct Glide {
     /// both the Portamento Control starting note and the target Note-On).
     pub from: NoteNumber,
     /// How far the key it leaves sounds from equal temperament on this channel
-    /// (its [MIDI Tuning](crate::VoiceCommand::Start::tune)).
+    /// (its [MIDI Tuning](crate::Command::Start::tune)).
     pub from_tune: Semitones,
     /// How long it takes to arrive.
     pub time: Seconds,
@@ -394,7 +394,7 @@ pub trait Patch {
 
 /// What the instrument must do, in order.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum VoiceCommand {
+pub enum Command {
     /// Start a voice. With `steal`, in the slot that voice leaves, which it
     /// cuts; without, in a free slot.
     Start {
@@ -407,7 +407,7 @@ pub enum VoiceCommand {
         /// How far the key sounds from its equal-tempered pitch: what the
         /// channel's tuning program stores for it (MIDI Tuning Standard) and
         /// the channel's Scale/Octave offset, in semitones, on top of the
-        /// channel's own [`Retune`](VoiceCommand::Retune). Zero in equal temperament
+        /// channel's own [`Retune`](Command::Retune). Zero in equal temperament
         /// and on the percussion channel.
         tune: Semitones,
         /// The strike's velocity, 16 bits, at least 1.
@@ -427,7 +427,7 @@ pub enum VoiceCommand {
         id: VoiceId,
         /// The new key.
         key: NoteNumber,
-        /// The new key's tuning (see [`VoiceCommand::Start`]'s `tune`).
+        /// The new key's tuning (see [`Command::Start`]'s `tune`).
         tune: Semitones,
         /// The new velocity.
         velocity: u16,
@@ -454,7 +454,7 @@ pub enum VoiceCommand {
     /// released (so it is the first to give way), and a later note-off, pedal
     /// or panic has nothing left to release in it. Only a voice of an
     /// exclusive group is ever damped, so an instrument without
-    /// [`VoiceConfig::exclusive_groups`] never sees this command.
+    /// [`Rules::exclusive_groups`] never sees this command.
     Damp(VoiceId),
     /// A per-note controller of a voice's Note Number took a value (M2-104
     /// section 7.4): sent when the message arrives, for each voice of that note
@@ -470,7 +470,7 @@ pub enum VoiceCommand {
     /// Management Reset, section 7.4.5), whatever it keeps sounding.
     ResetControls(VoiceId),
     /// A sounding voice's tuning changed: its key now sounds `tune` from its
-    /// equal-tempered pitch (see [`VoiceCommand::Start`]'s `tune`), moving with no
+    /// equal-tempered pitch (see [`Command::Start`]'s `tune`), moving with no
     /// new attack. Sent when a real-time tuning message or a Tuning Program or
     /// Bank Select reaches a note that sounds (MTS: the note is re-tuned instantly while it continues to sound), never
     /// for a non-real-time one.
@@ -554,8 +554,8 @@ impl Held {
 
 /// The note logic. See the module docs.
 #[derive(Debug)]
-pub struct VoiceAllocator {
-    rules: VoiceConfig,
+pub struct Voicing {
+    rules: Rules,
     /// Sorted by id: voices are appended as they start.
     notes: Vec<Note>,
     sustain: [bool; CHANNELS],
@@ -576,10 +576,10 @@ pub struct VoiceAllocator {
     retired: Vec<NoteId>,
     /// The id of the note being started, which the voices it starts take.
     strike_note: NoteId,
-    out: Vec<VoiceCommand>,
+    out: Vec<Command>,
 }
 
-impl Clone for VoiceAllocator {
+impl Clone for Voicing {
     /// A copy with its tables as roomy as the original's: a derived clone
     /// would shrink them to their length, and `step` must never grow them.
     fn clone(&self) -> Self {
@@ -604,10 +604,10 @@ impl Clone for VoiceAllocator {
     }
 }
 
-impl VoiceAllocator {
+impl Voicing {
     /// A core for `rules`. Allocates its tables; `step` never does.
     #[must_use]
-    pub fn new(rules: VoiceConfig) -> Self {
+    pub fn new(rules: Rules) -> Self {
         let polyphony = rules.polyphony.get();
         Self {
             notes: Vec::with_capacity(polyphony + 1),
@@ -690,7 +690,7 @@ impl VoiceAllocator {
 
     /// Where `channel`'s pitch stands now: its wheel over its sensitivity, and
     /// the device's master tuning. What the last
-    /// [`VoiceCommand::Retune`] for it said.
+    /// [`Command::Retune`] for it said.
     #[must_use]
     pub fn channel_pitch(&self, channel: MidiChannel) -> Semitones {
         self.pitch(channel.index())
@@ -736,7 +736,7 @@ impl VoiceAllocator {
             .map(|i| &self.notes[i])
     }
 
-    fn push(&mut self, c: VoiceCommand) {
+    fn push(&mut self, c: Command) {
         debug_assert!(self.out.len() < self.out.capacity(), "command buffer full");
         if self.out.len() < self.out.capacity() {
             self.out.push(c);
@@ -765,7 +765,7 @@ impl VoiceAllocator {
         message: Voice2,
         patch: &P,
         level: impl Fn(VoiceId) -> Option<Amplitude>,
-    ) -> &[VoiceCommand] {
+    ) -> &[Command] {
         let levels: Levels<'_> = &level;
         self.out.clear();
         self.events.clear();
@@ -845,10 +845,10 @@ impl VoiceAllocator {
     ///   [`master_gain`](Self::master_gain), which the instrument reads when it renders; no
     ///   command.
     /// - **Master Fine and Coarse Tuning** (CA-025) move every channel's pitch:
-    ///   a [`VoiceCommand::Retune`] for each channel but the percussion one
-    ///   ([`VoiceConfig::percussion`]).
+    ///   a [`Command::Retune`] for each channel but the percussion one
+    ///   ([`Rules::percussion`]).
     /// - **General MIDI System On and Off** (M1 p.52, GM2 section 4.9): all
-    ///   currently sounding notes mute immediately ([`VoiceCommand::Cut`] for each),
+    ///   currently sounding notes mute immediately ([`Command::Cut`] for each),
     ///   and the device returns to its initial status: each channel's
     ///   controllers back to their defaults ([`ChannelState::new`], which is
     ///   RP-015's reset and more: volume 100, pan centre, no registered
@@ -856,19 +856,19 @@ impl VoiceAllocator {
     ///   tuning, volume and balance sent to all devices back to their defaults. On
     ///   is General MIDI System Level 1's status, a wheel that spans 2 semitones
     ///   (RP-003); Off is the instrument's own initialized mode, the
-    ///   [`VoiceConfig::bend_range`] it was built with. A [`VoiceCommand::Retune`] follows for
+    ///   [`Rules::bend_range`] it was built with. A [`Command::Retune`] follows for
     ///   every channel.
     /// - **The MIDI Tuning Standard** (`08`; tables: [`TuningCapacity`]): a Single Note
     ///   Tuning Change and a dump store into the tuning program they name (bank 0 when
     ///   the message has no bank byte); a real-time change (and Scale/Octave Tuning, per
-    ///   channel mask) answers a [`VoiceCommand::Tune`] for each sounding note whose key now
+    ///   channel mask) answers a [`Command::Tune`] for each sounding note whose key now
     ///   sounds elsewhere, a non-real-time one and a dump tell no voice. A program or bank
     ///   the core has no room for is ignored and counted ([`tuning_refused`](Self::tuning_refused)).
     ///   A Bulk Tuning Dump Request is answered with nothing: an instrument has no SysEx
     ///   output to reply on.
     /// - Identity Request and Reply are the device inquiry's (M1 p.40), a message
     ///   on a wire the instrument does not own: no command.
-    pub fn universal(&mut self, heard: Heard) -> &[VoiceCommand] {
+    pub fn universal(&mut self, heard: Heard) -> &[Command] {
         self.out.clear();
         self.events.clear();
         self.retired.clear();
@@ -963,7 +963,7 @@ impl VoiceAllocator {
             let tune = self.tune_of(n.channel, n.key);
             if tune != n.tune {
                 self.notes[i].tune = tune;
-                self.push(VoiceCommand::Tune { id: n.id, tune });
+                self.push(Command::Tune { id: n.id, tune });
             }
         }
     }
@@ -992,7 +992,7 @@ impl VoiceAllocator {
     /// # Errors
     ///
     /// [`NoSuchTuning`] when the core has no such bank or program
-    /// ([`VoiceConfig::tuning`]); it is not counted, the caller has it.
+    /// ([`Rules::tuning`]); it is not counted, the caller has it.
     pub fn store_tuning(
         &mut self,
         bank: U7,
@@ -1035,7 +1035,7 @@ impl VoiceAllocator {
             }
             if let Some(channel) = MidiChannel::new(i as u8) {
                 let bend = self.pitch(i);
-                self.push(VoiceCommand::Retune { channel, bend });
+                self.push(Command::Retune { channel, bend });
             }
         }
     }
@@ -1044,7 +1044,7 @@ impl VoiceAllocator {
     fn general_midi(&mut self, mode: GeneralMidiMode) {
         for i in 0..self.notes.len() {
             let id = self.notes[i].id;
-            self.push(VoiceCommand::Cut(id));
+            self.push(Command::Cut(id));
         }
         self.forget_notes();
         self.per_note.clear();
@@ -1206,8 +1206,8 @@ impl VoiceAllocator {
                 if self.notes[i].note == note {
                     let id = self.notes[i].id;
                     self.push(match control {
-                        Some(control) => VoiceCommand::Control { id, control },
-                        None => VoiceCommand::ResetControls(id),
+                        Some(control) => Command::Control { id, control },
+                        None => Command::ResetControls(id),
                     });
                 }
             }
@@ -1290,7 +1290,7 @@ impl VoiceAllocator {
                 let id = n.id;
                 let old = core::mem::replace(&mut n.note, self.strike_note);
                 self.retire(old);
-                self.push(VoiceCommand::Retarget {
+                self.push(Command::Retarget {
                     id,
                     key,
                     tune,
@@ -1340,7 +1340,7 @@ impl VoiceAllocator {
     /// A voice of an exclusive class ends the sounding voices of that class in
     /// its scope (SF2 2.04 section 8.1.2, generator 57), on any channel, never
     /// one of its own strike. The spec says rapidly terminated, not cut: the
-    /// voices are told to [`VoiceCommand::Damp`], once, and count as released from
+    /// voices are told to [`Command::Damp`], once, and count as released from
     /// then on. `except` is a (channel, tag) taken over in place instead
     /// (mono), which is not damped.
     fn damp_exclusive(&mut self, spec: VoiceSpec, except: Option<(MidiChannel, u32)>) {
@@ -1359,7 +1359,7 @@ impl VoiceAllocator {
                 n.damped = true;
                 n.released = true;
                 let id = n.id;
-                self.push(VoiceCommand::Damp(id));
+                self.push(Command::Damp(id));
             }
         }
     }
@@ -1438,7 +1438,7 @@ impl VoiceAllocator {
                     self.notes[i].strike = strike;
                     let moved = core::mem::replace(&mut self.notes[i].note, self.strike_note);
                     self.retire(moved);
-                    self.push(VoiceCommand::Retarget {
+                    self.push(Command::Retarget {
                         id,
                         key,
                         tune,
@@ -1491,7 +1491,7 @@ impl VoiceAllocator {
             damped: false,
             off_velocity: NEUTRAL_RELEASE,
         });
-        self.push(VoiceCommand::Start {
+        self.push(Command::Start {
             id,
             channel,
             key,
@@ -1619,7 +1619,7 @@ impl VoiceAllocator {
                 while i < self.notes.len() {
                     if covers(self.notes[i].channel) {
                         let id = self.notes[i].id;
-                        self.push(VoiceCommand::Cut(id));
+                        self.push(Command::Cut(id));
                         let gone = self.notes.remove(i).note;
                         self.retire(gone);
                     } else {
@@ -1684,7 +1684,7 @@ impl VoiceAllocator {
     fn bend(&mut self, channel: MidiChannel, change: impl Fn(&mut Bend)) {
         change(&mut self.channels[channel.index()].bend);
         let bend = self.pitch(channel.index());
-        self.push(VoiceCommand::Retune { channel, bend });
+        self.push(Command::Retune { channel, bend });
     }
 
     fn release_where(&mut self, which: impl Fn(&Note) -> bool) {
@@ -1699,7 +1699,7 @@ impl VoiceAllocator {
             if !n.released && which(n) && f(n) {
                 n.released = true;
                 let (id, velocity) = (n.id, n.off_velocity);
-                self.push(VoiceCommand::Release { id, velocity });
+                self.push(Command::Release { id, velocity });
             }
         }
     }
@@ -1760,14 +1760,14 @@ mod tests {
         }
     }
 
-    const POLY: VoiceConfig = VoiceConfig::poly(NonZeroUsize::new(4).unwrap());
-    const MONO: VoiceConfig = VoiceConfig::mono();
-    const LEGATO: VoiceConfig = VoiceConfig::legato();
+    const POLY: Rules = Rules::poly(NonZeroUsize::new(4).unwrap());
+    const MONO: Rules = Rules::mono();
+    const LEGATO: Rules = Rules::legato();
 
     /// The instrument's side: the voices it has, in id order, carrying out the
     /// commands.
     struct Sim {
-        core: VoiceAllocator,
+        core: Voicing,
         voices: Vec<Sounding>,
     }
 
@@ -1779,21 +1779,21 @@ mod tests {
     fn id(n: u64) -> VoiceId {
         VoiceId::new(n)
     }
-    fn release(n: u64) -> VoiceCommand {
-        VoiceCommand::Release {
+    fn release(n: u64) -> Command {
+        Command::Release {
             id: id(n),
             velocity: NEUTRAL_RELEASE,
         }
     }
 
     impl Sim {
-        fn new(rules: VoiceConfig) -> Self {
+        fn new(rules: Rules) -> Self {
             Self {
-                core: VoiceAllocator::new(rules),
+                core: Voicing::new(rules),
                 voices: vec![],
             }
         }
-        fn send<P: Patch>(&mut self, c: u8, m: Voice2, p: &P) -> Vec<VoiceCommand> {
+        fn send<P: Patch>(&mut self, c: u8, m: Voice2, p: &P) -> Vec<Command> {
             let voices = &self.voices;
             let cmds = self
                 .core
@@ -1803,23 +1803,23 @@ mod tests {
                 .to_vec();
             for cmd in &cmds {
                 match *cmd {
-                    VoiceCommand::Start { id, steal, .. } => {
+                    Command::Start { id, steal, .. } => {
                         self.voices.retain(|v| Some(v.id) != steal);
                         self.voices.push(Sounding {
                             id,
                             level: Amplitude::new(1.0),
                         });
                     }
-                    VoiceCommand::Cut(id) => self.voices.retain(|v| v.id != id),
+                    Command::Cut(id) => self.voices.retain(|v| v.id != id),
                     _ => {}
                 }
             }
             cmds
         }
-        fn on(&mut self, c: u8, k: u8) -> Vec<VoiceCommand> {
+        fn on(&mut self, c: u8, k: u8) -> Vec<Command> {
             self.on_with(c, k, &One)
         }
-        fn on_with<P: Patch>(&mut self, c: u8, k: u8, p: &P) -> Vec<VoiceCommand> {
+        fn on_with<P: Patch>(&mut self, c: u8, k: u8, p: &P) -> Vec<Command> {
             self.send(
                 c,
                 Voice2::NoteOn {
@@ -1830,10 +1830,10 @@ mod tests {
                 p,
             )
         }
-        fn off(&mut self, c: u8, k: u8) -> Vec<VoiceCommand> {
+        fn off(&mut self, c: u8, k: u8) -> Vec<Command> {
             self.off_with(c, k, &One)
         }
-        fn off_with<P: Patch>(&mut self, c: u8, k: u8, p: &P) -> Vec<VoiceCommand> {
+        fn off_with<P: Patch>(&mut self, c: u8, k: u8, p: &P) -> Vec<Command> {
             self.send(
                 c,
                 Voice2::NoteOff {
@@ -1844,7 +1844,7 @@ mod tests {
                 p,
             )
         }
-        fn cc(&mut self, c: u8, n: u8, v: u8) -> Vec<VoiceCommand> {
+        fn cc(&mut self, c: u8, n: u8, v: u8) -> Vec<Command> {
             self.send(
                 c,
                 Voice2::ControlChange {
@@ -1867,28 +1867,23 @@ mod tests {
     /// per-note range has none, tutti's 48.
     #[test]
     fn the_rules_constructors_differ_in_mode_and_the_setters_in_one_field() {
+        assert_eq!(Rules::poly(NonZeroUsize::new(8).unwrap()), Rules::default());
         assert_eq!(
-            VoiceConfig::poly(NonZeroUsize::new(8).unwrap()),
-            VoiceConfig::default()
+            Rules::mono(),
+            Rules::poly(Rules::DEFAULT_POLYPHONY).with_mode(Mode::Mono)
         );
+        assert_eq!(Rules::legato().mode, Mode::Legato);
         assert_eq!(
-            VoiceConfig::mono(),
-            VoiceConfig::poly(VoiceConfig::DEFAULT_POLYPHONY).with_mode(Mode::Mono)
-        );
-        assert_eq!(VoiceConfig::legato().mode, Mode::Legato);
-        assert_eq!(
-            VoiceConfig::poly(NonZeroUsize::new(5).unwrap())
-                .polyphony
-                .get(),
+            Rules::poly(NonZeroUsize::new(5).unwrap()).polyphony.get(),
             5
         );
-        assert_eq!(VoiceConfig::default().bend_range, Semitones::new(2.0));
-        let r = VoiceConfig::default().with_sostenuto(false);
+        assert_eq!(Rules::default().bend_range, Semitones::new(2.0));
+        let r = Rules::default().with_sostenuto(false);
         assert_eq!(
             r,
-            VoiceConfig {
+            Rules {
                 sostenuto: false,
-                ..VoiceConfig::default()
+                ..Rules::default()
             }
         );
     }
@@ -1897,7 +1892,7 @@ mod tests {
     /// pressure never call the lookup.
     #[test]
     fn only_a_note_message_asks_about_voices() {
-        let mut core = VoiceAllocator::new(POLY);
+        let mut core = Voicing::new(POLY);
         let ch = MidiChannel::of(0);
         let never = |_: VoiceId| -> Option<Amplitude> { panic!("asked") };
         core.step(
@@ -1928,10 +1923,7 @@ mod tests {
         }
         s.end(id(1));
         let c = s.on(0, 70);
-        assert!(
-            matches!(c[0], VoiceCommand::Start { steal: None, .. }),
-            "{c:?}"
-        );
+        assert!(matches!(c[0], Command::Start { steal: None, .. }), "{c:?}");
     }
 
     #[test]
@@ -1942,7 +1934,7 @@ mod tests {
         }
         let c = s.on(0, 64);
         assert_eq!(c.len(), 1);
-        assert!(matches!(c[0], VoiceCommand::Start { steal: Some(v), .. } if v == id(1)));
+        assert!(matches!(c[0], Command::Start { steal: Some(v), .. } if v == id(1)));
     }
 
     /// A patch that starts `.0` voices for every note.
@@ -1967,10 +1959,10 @@ mod tests {
     #[test]
     fn a_strike_starts_at_most_the_cap_and_a_patch_within_it_is_whole() {
         let rules = POLY.with_polyphony(NonZeroUsize::new(64).unwrap());
-        let tags = |c: &[VoiceCommand]| -> Vec<u32> {
+        let tags = |c: &[Command]| -> Vec<u32> {
             c.iter()
                 .filter_map(|c| match c {
-                    VoiceCommand::Start { spec, .. } => Some(spec.tag),
+                    Command::Start { spec, .. } => Some(spec.tag),
                     _ => None,
                 })
                 .collect()
@@ -1992,7 +1984,7 @@ mod tests {
         s.off(0, 63);
         let c = s.on(0, 64);
         assert!(
-            matches!(c[0], VoiceCommand::Start { steal: Some(v), .. } if v == id(4)),
+            matches!(c[0], Command::Start { steal: Some(v), .. } if v == id(4)),
             "{c:?}"
         );
     }
@@ -2021,7 +2013,7 @@ mod tests {
             }
             let c = s.on(0, 70);
             assert!(
-                matches!(c[0], VoiceCommand::Start { steal: Some(v), .. } if v == id(want)),
+                matches!(c[0], Command::Start { steal: Some(v), .. } if v == id(want)),
                 "{order:?} {c:?}"
             );
         }
@@ -2033,7 +2025,7 @@ mod tests {
         s.voices[2].level = Amplitude::new(0.1);
         let c = s.on(0, 70);
         assert!(
-            matches!(c[0], VoiceCommand::Start { steal: Some(v), .. } if v == id(3)),
+            matches!(c[0], Command::Start { steal: Some(v), .. } if v == id(3)),
             "{c:?}"
         );
         let mut s = Sim::new(POLY);
@@ -2045,7 +2037,7 @@ mod tests {
         s.voices[2].level = Amplitude::new(0.1);
         let c = s.on(0, 70);
         assert!(
-            matches!(c[0], VoiceCommand::Start { steal: Some(v), .. } if v == id(3)),
+            matches!(c[0], Command::Start { steal: Some(v), .. } if v == id(3)),
             "the quieter of the released ones: {c:?}"
         );
     }
@@ -2061,7 +2053,7 @@ mod tests {
         let starts: Vec<_> = c
             .iter()
             .filter_map(|x| match x {
-                VoiceCommand::Start { steal, .. } => Some(*steal),
+                Command::Start { steal, .. } => Some(*steal),
                 _ => None,
             })
             .collect();
@@ -2080,12 +2072,12 @@ mod tests {
         s.on(0, 60);
         let c = s.on(0, 60);
         assert_eq!(c[0], release(1));
-        assert!(matches!(c[1], VoiceCommand::Start { steal: None, .. }));
+        assert!(matches!(c[1], Command::Start { steal: None, .. }));
         let mut s = Sim::new(POLY.with_retrigger(Retrigger::Layer));
         s.on(0, 60);
         let c = s.on(0, 60);
         assert_eq!(c.len(), 1);
-        assert!(matches!(c[0], VoiceCommand::Start { .. }));
+        assert!(matches!(c[0], Command::Start { .. }));
         // A note-off then ends both layers.
         assert_eq!(s.off(0, 60), [release(1), release(2)]);
     }
@@ -2100,7 +2092,7 @@ mod tests {
 
     // ---- exclusive groups (SF2 2.04 section 8.1.2, generator 57) --------
 
-    const EXCLUSIVE: VoiceConfig = POLY
+    const EXCLUSIVE: Rules = POLY
         .with_exclusive_groups(true)
         .with_polyphony(NonZeroUsize::new(8).unwrap());
 
@@ -2113,7 +2105,7 @@ mod tests {
         let mut s = Sim::new(EXCLUSIVE);
         s.on_with(1, 60, &Grouped { scope: 5 });
         let c = s.on_with(0, 62, &Grouped { scope: 5 });
-        assert_eq!(c[0], VoiceCommand::Damp(id(1)), "{c:?}");
+        assert_eq!(c[0], Command::Damp(id(1)), "{c:?}");
     }
 
     /// The same group number in another preset is another group.
@@ -2122,10 +2114,7 @@ mod tests {
         let mut s = Sim::new(EXCLUSIVE);
         s.on_with(0, 60, &Grouped { scope: 5 });
         let c = s.on_with(0, 62, &Grouped { scope: 6 });
-        assert!(
-            !c.iter().any(|x| matches!(x, VoiceCommand::Damp(_))),
-            "{c:?}"
-        );
+        assert!(!c.iter().any(|x| matches!(x, Command::Damp(_))), "{c:?}");
     }
 
     /// The voices one strike starts (a stereo pair, both of one class) do not
@@ -2135,25 +2124,16 @@ mod tests {
         let mut s = Sim::new(EXCLUSIVE);
         let pair = Pair { group: 7, scope: 5 };
         let c = s.on_with(0, 60, &pair);
-        assert!(
-            !c.iter().any(|x| matches!(x, VoiceCommand::Damp(_))),
-            "{c:?}"
-        );
+        assert!(!c.iter().any(|x| matches!(x, Command::Damp(_))), "{c:?}");
         assert_eq!(s.voices.len(), 2);
         let c = s.on_with(0, 62, &pair);
-        let damps: Vec<_> = c
-            .iter()
-            .filter(|x| matches!(x, VoiceCommand::Damp(_)))
-            .collect();
+        let damps: Vec<_> = c.iter().filter(|x| matches!(x, Command::Damp(_))).collect();
         assert_eq!(damps.len(), 2, "{c:?}");
         // A damp is a release, not a cut: all four voices still exist.
         assert_eq!(s.voices.len(), 4);
         // Told once: a third strike damps only the second's pair.
         let c = s.on_with(0, 64, &pair);
-        let damps: Vec<_> = c
-            .iter()
-            .filter(|x| matches!(x, VoiceCommand::Damp(_)))
-            .collect();
+        let damps: Vec<_> = c.iter().filter(|x| matches!(x, Command::Damp(_))).collect();
         assert_eq!(damps.len(), 2, "{c:?}");
     }
 
@@ -2185,10 +2165,7 @@ mod tests {
         s.on(0, 62);
         s.off(0, 62);
         assert!(s.cc(0, 123, 0).is_empty(), "held by the pedal");
-        assert_eq!(
-            s.cc(0, 120, 0),
-            [VoiceCommand::Cut(id(1)), VoiceCommand::Cut(id(2))]
-        );
+        assert_eq!(s.cc(0, 120, 0), [Command::Cut(id(1)), Command::Cut(id(2))]);
         let mut s = Sim::new(POLY);
         s.on(0, 60);
         assert_eq!(s.cc(0, 123, 0), [release(1)]);
@@ -2196,7 +2173,7 @@ mod tests {
 
     /// The mode messages, CC 124 to 127, also do All Notes Off (MIDI 1.0
     /// Detailed Specification, Channel Mode Messages; Est, the text is not in
-    /// the repo); the mode they name is `VoiceConfig`'.
+    /// the repo); the mode they name is `Rules`'.
     #[test]
     fn the_mode_messages_also_release_what_is_held() {
         for n in 124..=127 {
@@ -2221,7 +2198,7 @@ mod tests {
             s.cc(0, 121, 0),
             [
                 release(1),
-                VoiceCommand::Retune {
+                Command::Retune {
                     channel: MidiChannel::of(0),
                     bend: Semitones::new(0.0)
                 }
@@ -2266,7 +2243,7 @@ mod tests {
         };
         assert_eq!(
             off(&mut s, 60, NoteVelocity::new(0x1234)),
-            [VoiceCommand::Release {
+            [Command::Release {
                 id: id(1),
                 velocity: 0x1234
             }]
@@ -2277,7 +2254,7 @@ mod tests {
         off(&mut s, 60, NoteVelocity::new(0x4321));
         assert_eq!(
             s.cc(0, 64, 0),
-            [VoiceCommand::Release {
+            [Command::Release {
                 id: id(1),
                 velocity: 0x4321
             }]
@@ -2309,7 +2286,7 @@ mod tests {
         };
         let c = s.send(0, two, &One);
         assert!(
-            matches!(c[..], [VoiceCommand::Start { velocity: 1, .. }]),
+            matches!(c[..], [Command::Start { velocity: 1, .. }]),
             "{c:?}"
         );
     }
@@ -2323,12 +2300,12 @@ mod tests {
         s.on(0, 60);
         let other = s.on(1, 64);
         assert!(
-            matches!(other[..], [VoiceCommand::Start { steal: None, .. }]),
+            matches!(other[..], [Command::Start { steal: None, .. }]),
             "{other:?}"
         );
         let again = s.on(0, 62);
         assert!(
-            matches!(again[..], [VoiceCommand::Start { steal: Some(v), .. }] if v == id(1)),
+            matches!(again[..], [Command::Start { steal: Some(v), .. }] if v == id(1)),
             "taken over in place, no release before: {again:?}"
         );
         // Channel 0's old key is gone from its stack: its note-off is nothing.
@@ -2344,15 +2321,15 @@ mod tests {
         s.off(0, 60);
         let c = s.on(0, 62);
         assert!(
-            matches!(c[..], [VoiceCommand::Start { steal: Some(v), .. }] if v == id(1)),
+            matches!(c[..], [Command::Start { steal: Some(v), .. }] if v == id(1)),
             "{c:?}"
         );
     }
 
-    fn starts(c: &[VoiceCommand]) -> Vec<(u64, Option<u64>, u32)> {
+    fn starts(c: &[Command]) -> Vec<(u64, Option<u64>, u32)> {
         c.iter()
             .filter_map(|x| match x {
-                VoiceCommand::Start {
+                Command::Start {
                     id, steal, spec, ..
                 } => Some((id.0, steal.map(|v| v.0), spec.tag)),
                 _ => None,
@@ -2396,14 +2373,14 @@ mod tests {
         assert_eq!(
             second,
             [
-                VoiceCommand::Retarget {
+                Command::Retarget {
                     id: id(1),
                     key: NoteNumber::of(62),
                     tune: Semitones::new(0.0),
                     velocity: 0x8000,
                     glide: None,
                 },
-                VoiceCommand::Retarget {
+                Command::Retarget {
                     id: id(2),
                     key: NoteNumber::of(62),
                     tune: Semitones::new(0.0),
@@ -2447,7 +2424,7 @@ mod tests {
         assert_eq!(
             b,
             [
-                VoiceCommand::Retarget {
+                Command::Retarget {
                     id: id(1),
                     key: NoteNumber::of(62),
                     tune: Semitones::new(0.0),
@@ -2504,7 +2481,7 @@ mod tests {
         let back = s.off(0, 64);
         assert_eq!(back.len(), 1, "{back:?}");
         assert!(
-            matches!(back[0], VoiceCommand::Start { key: k, steal: Some(v), .. } if k == NoteNumber::of(60) && v == id(2)),
+            matches!(back[0], Command::Start { key: k, steal: Some(v), .. } if k == NoteNumber::of(60) && v == id(2)),
             "{back:?}"
         );
         // 60 is the last held: letting it go releases.
@@ -2527,7 +2504,7 @@ mod tests {
         s.on(0, 64);
         assert_eq!(
             s.off(0, 64),
-            [VoiceCommand::Retarget {
+            [Command::Retarget {
                 id: id(1),
                 key: NoteNumber::of(60),
                 tune: Semitones::new(0.0),
@@ -2570,10 +2547,7 @@ mod tests {
             s.on(0, 67);
             // 60 and 64 are forgotten: 67 alone, so its release releases.
             let c = s.off(0, 67);
-            assert!(
-                matches!(c[..], [VoiceCommand::Release { .. }]),
-                "CC {n}: {c:?}"
-            );
+            assert!(matches!(c[..], [Command::Release { .. }]), "CC {n}: {c:?}");
         }
         let mut s = Sim::new(MONO);
         s.on(0, 60);
@@ -2581,7 +2555,7 @@ mod tests {
         s.core.reset();
         s.voices.clear();
         s.on(0, 67);
-        assert!(matches!(s.off(0, 67)[..], [VoiceCommand::Release { .. }]));
+        assert!(matches!(s.off(0, 67)[..], [Command::Release { .. }]));
     }
 
     /// The stack holds `HELD_KEYS`; past that the oldest is forgotten.
@@ -2596,12 +2570,12 @@ mod tests {
         for k in (41 + 1..=top).rev() {
             let c = s.off(0, k);
             assert!(
-                matches!(c[..], [VoiceCommand::Start { key: back, .. }] if back == NoteNumber::of(k - 1)),
+                matches!(c[..], [Command::Start { key: back, .. }] if back == NoteNumber::of(k - 1)),
                 "{k}: {c:?}"
             );
         }
         // 41 is the oldest kept (40 was dropped): releasing it releases.
-        assert!(matches!(s.off(0, 41)[..], [VoiceCommand::Release { .. }]));
+        assert!(matches!(s.off(0, 41)[..], [Command::Release { .. }]));
     }
 
     /// A note the core released (Replace) is held by nothing: `holds` agrees
@@ -2628,7 +2602,7 @@ mod tests {
             s.end(id(sounding));
             let c = s.off(0, 64);
             assert!(
-                matches!(c[..], [VoiceCommand::Start { key: k, steal: None, .. }] if k == NoteNumber::of(60)),
+                matches!(c[..], [Command::Start { key: k, steal: None, .. }] if k == NoteNumber::of(60)),
                 "{:?}: {c:?}",
                 rules.mode
             );
@@ -2645,16 +2619,14 @@ mod tests {
         let mut s = Sim::new(EXCLUSIVE.with_polyphony(NonZeroUsize::new(2).unwrap()));
         s.on_with(0, 60, &Grouped { scope: 5 });
         let c = s.on_with(0, 62, &Grouped { scope: 5 });
-        assert_eq!(c[0], VoiceCommand::Damp(id(1)), "{c:?}");
+        assert_eq!(c[0], Command::Damp(id(1)), "{c:?}");
         assert!(
             s.off(0, 60).is_empty(),
             "a damped voice has nothing left to release"
         );
         let c = s.on_with(0, 64, &Grouped { scope: 5 });
         assert_eq!(
-            c.iter()
-                .filter(|x| matches!(x, VoiceCommand::Damp(_)))
-                .count(),
+            c.iter().filter(|x| matches!(x, Command::Damp(_))).count(),
             1,
             "only the second voice is damped now: {c:?}"
         );
@@ -2664,13 +2636,13 @@ mod tests {
         let c = s.on_with(0, 65, &One);
         assert!(
             c.iter().any(
-                |x| matches!(x, VoiceCommand::Start { steal: Some(v), .. } if *v == id(1) || *v == id(2))
+                |x| matches!(x, Command::Start { steal: Some(v), .. } if *v == id(1) || *v == id(2))
             ),
             "a released voice gives way: {c:?}"
         );
         assert!(
             !c.iter()
-                .any(|x| matches!(x, VoiceCommand::Start { steal: Some(v), .. } if *v == id(3))),
+                .any(|x| matches!(x, Command::Start { steal: Some(v), .. } if *v == id(3))),
             "the held voice stays: {c:?}"
         );
     }
@@ -2683,10 +2655,10 @@ mod tests {
         s.on(0, 60);
         s.on_with(1, 62, &Grouped { scope: 5 });
         let c = s.on_with(0, 64, &Grouped { scope: 5 });
-        assert!(c.contains(&VoiceCommand::Damp(id(2))), "{c:?}");
+        assert!(c.contains(&Command::Damp(id(2))), "{c:?}");
         assert!(
             c.iter()
-                .any(|x| matches!(x, VoiceCommand::Start { steal: Some(v), .. } if *v == id(1))),
+                .any(|x| matches!(x, Command::Start { steal: Some(v), .. } if *v == id(1))),
             "the takeover itself is not cut: {c:?}"
         );
     }
@@ -2696,10 +2668,10 @@ mod tests {
     fn bend(v: u32) -> Voice2 {
         Voice2::PitchBend(BendValue::new(v))
     }
-    fn retunes(c: &[VoiceCommand]) -> Vec<(u8, f64)> {
+    fn retunes(c: &[Command]) -> Vec<(u8, f64)> {
         c.iter()
             .filter_map(|x| match x {
-                VoiceCommand::Retune { channel, bend } => Some((channel.get(), bend.get())),
+                Command::Retune { channel, bend } => Some((channel.get(), bend.get())),
                 _ => None,
             })
             .collect()
@@ -2947,10 +2919,7 @@ mod tests {
         s.end(id(1));
         // A pedal lifting still names nothing it should not: 1 is already released.
         let c = s.on(0, 64);
-        assert!(
-            matches!(c[0], VoiceCommand::Start { steal: None, .. }),
-            "{c:?}"
-        );
+        assert!(matches!(c[0], Command::Start { steal: None, .. }), "{c:?}");
         assert!(s.off(0, 60).is_empty(), "nothing left of the ended voice");
     }
 
@@ -3001,13 +2970,10 @@ mod tests {
             },
             &One,
         );
-        assert!(
-            cmds.iter()
-                .all(|c| matches!(c, VoiceCommand::Control { .. }))
-        );
+        assert!(cmds.iter().all(|c| matches!(c, Command::Control { .. })));
     }
 
-    fn per_note_bend(s: &mut Sim, c: u8, k: u8, value: u32) -> Vec<VoiceCommand> {
+    fn per_note_bend(s: &mut Sim, c: u8, k: u8, value: u32) -> Vec<Command> {
         s.send(
             c,
             Voice2::PerNotePitchBend {
@@ -3018,7 +2984,7 @@ mod tests {
         )
     }
 
-    fn management(s: &mut Sim, c: u8, k: u8, management: PerNoteManagement) -> Vec<VoiceCommand> {
+    fn management(s: &mut Sim, c: u8, k: u8, management: PerNoteManagement) -> Vec<Command> {
         s.send(
             c,
             Voice2::PerNoteManagement {
@@ -3041,20 +3007,20 @@ mod tests {
         management(&mut s, 0, 0, PerNoteManagement::DetachAndReset);
         pnc(&mut s, 0, 0, RegisteredPerNoteController::Pitch, PITCH_60);
         let c = s.on(0, 0);
-        assert!(matches!(c[0], VoiceCommand::Start { .. }), "{c:?}");
+        assert!(matches!(c[0], Command::Start { .. }), "{c:?}");
         assert_eq!(
             c[1..],
-            [VoiceCommand::Control {
+            [Command::Control {
                 id: id(1),
                 control: NoteControl::Pitch(Pitch::from_q7_25(PITCH_60)),
             }]
         );
     }
 
-    fn told(c: &[VoiceCommand]) -> Vec<VoiceId> {
+    fn told(c: &[Command]) -> Vec<VoiceId> {
         c.iter()
             .filter_map(|c| match c {
-                VoiceCommand::Control { id, .. } => Some(*id),
+                Command::Control { id, .. } => Some(*id),
                 _ => None,
             })
             .collect()
@@ -3084,7 +3050,7 @@ mod tests {
         };
         let mut s = Sim::new(POLY);
         let c = s.on(0, 5);
-        assert!(matches!(c[0], VoiceCommand::Start { .. }), "{c:?}");
+        assert!(matches!(c[0], Command::Start { .. }), "{c:?}");
         for number in [0u8, 4, 9, 13, 69, 80, 96, 255] {
             let c = s.send(0, reserved(number), &One);
             assert_eq!(told(&c), vec![], "{number}: {c:?}");
@@ -3139,15 +3105,12 @@ mod tests {
         pnc(&mut s, 0, 5, RegisteredPerNoteController::Pitch, PITCH_60);
         s.core.forget_notes();
         let c = s.on(0, 5);
-        assert!(
-            matches!(c.last(), Some(VoiceCommand::Control { .. })),
-            "{c:?}"
-        );
+        assert!(matches!(c.last(), Some(Command::Control { .. })), "{c:?}");
         s.core.reset();
         s.voices.clear();
         let c = s.on(0, 5);
         assert!(
-            !c.iter().any(|c| matches!(c, VoiceCommand::Control { .. })),
+            !c.iter().any(|c| matches!(c, Command::Control { .. })),
             "{c:?}"
         );
     }
@@ -3169,7 +3132,7 @@ mod tests {
         let pitch = NoteControl::Pitch(Pitch::from_q7_25(PITCH_60));
         assert_eq!(
             c.last(),
-            Some(&VoiceCommand::Control {
+            Some(&Command::Control {
                 id: id(2),
                 control: pitch
             })
@@ -3177,7 +3140,7 @@ mod tests {
         // Later changes reach voice 2 and not voice 1.
         let c = per_note_bend(&mut s, 0, 5, 0xC000_0000);
         assert!(
-            matches!(c[..], [VoiceCommand::Control { id: v, .. }] if v == id(2)),
+            matches!(c[..], [Command::Control { id: v, .. }] if v == id(2)),
             "{c:?}"
         );
     }
@@ -3198,8 +3161,8 @@ mod tests {
         );
         let c = s.on(0, 5);
         assert!(
-            c.iter().any(|c| matches!(c, VoiceCommand::Start { .. }))
-                && !c.iter().any(|c| matches!(c, VoiceCommand::Control { .. })),
+            c.iter().any(|c| matches!(c, Command::Start { .. }))
+                && !c.iter().any(|c| matches!(c, Command::Control { .. })),
             "no controller follows the start: {c:?}"
         );
     }
@@ -3215,11 +3178,11 @@ mod tests {
         s.on(0, 5);
         assert_eq!(
             management(&mut s, 0, 5, PerNoteManagement::Reset),
-            vec![VoiceCommand::ResetControls(id(1))]
+            vec![Command::ResetControls(id(1))]
         );
         let c = s.on(0, 5);
         assert!(
-            !c.iter().any(|c| matches!(c, VoiceCommand::Control { .. })),
+            !c.iter().any(|c| matches!(c, Command::Control { .. })),
             "{c:?}"
         );
     }
@@ -3232,17 +3195,14 @@ mod tests {
         pnc(&mut s, 0, 5, RegisteredPerNoteController::Pitch, PITCH_60);
         s.cc(0, 121, 0);
         let c = s.on(0, 5);
-        assert!(
-            matches!(c.last(), Some(VoiceCommand::Control { .. })),
-            "{c:?}"
-        );
+        assert!(matches!(c.last(), Some(Command::Control { .. })), "{c:?}");
     }
 
     // ---- channel controllers, glide and legato -----------------------------
 
-    fn glide_of(c: &[VoiceCommand]) -> Option<Glide> {
+    fn glide_of(c: &[Command]) -> Option<Glide> {
         c.iter().find_map(|x| match x {
-            VoiceCommand::Start { glide, .. } | VoiceCommand::Retarget { glide, .. } => *glide,
+            Command::Start { glide, .. } | Command::Retarget { glide, .. } => *glide,
             _ => None,
         })
     }
@@ -3267,15 +3227,15 @@ mod tests {
         s.on(0, 60);
         let c = s.on(0, 62);
         assert!(
-            matches!(c[..], [VoiceCommand::Retarget { id: v, .. }] if v == id(1)),
+            matches!(c[..], [Command::Retarget { id: v, .. }] if v == id(1)),
             "{c:?}"
         );
         // Another channel is still polyphonic.
         s.on(1, 60);
-        assert!(matches!(s.on(1, 62)[..], [VoiceCommand::Start { .. }]));
+        assert!(matches!(s.on(1, 62)[..], [Command::Start { .. }]));
         // Up: poly again, and the first note's key sounds as the voice's.
         s.cc(0, 68, 0x3F);
-        assert!(matches!(s.on(0, 64)[..], [VoiceCommand::Start { .. }]));
+        assert!(matches!(s.on(0, 64)[..], [Command::Start { .. }]));
     }
 
     /// M1 p.16, Example 2: `B0 54 3C` (PTC from #60), `90 40 40` (Note-On #64)
@@ -3310,7 +3270,7 @@ mod tests {
         assert_eq!(s.cc(0, 84, 60), []);
         let c = s.on(0, 64);
         assert!(
-            matches!(&c[..], [VoiceCommand::Retarget { id: v, key, glide: Some(g), .. }]
+            matches!(&c[..], [Command::Retarget { id: v, key, glide: Some(g), .. }]
                 if *v == id(1) && *key == NoteNumber::of(64) && g.from == NoteNumber::of(60)),
             "{c:?}"
         );
@@ -3329,7 +3289,7 @@ mod tests {
         s.cc(0, 84, 55);
         let c = s.on(0, 64);
         assert!(
-            matches!(&c[..], [VoiceCommand::Retarget { glide: Some(g), .. }] if g.from == NoteNumber::of(55)),
+            matches!(&c[..], [Command::Retarget { glide: Some(g), .. }] if g.from == NoteNumber::of(55)),
             "{c:?}"
         );
     }
@@ -3468,7 +3428,7 @@ mod tests {
         assert!(
             c.iter().any(|x| matches!(
                 x,
-                VoiceCommand::Control {
+                Command::Control {
                     control: NoteControl::Pressure(0),
                     ..
                 }
@@ -3478,7 +3438,7 @@ mod tests {
         assert!(
             !c.iter().any(|x| matches!(
                 x,
-                VoiceCommand::Control {
+                Command::Control {
                     control: NoteControl::Registered(..),
                     ..
                 }
@@ -3633,15 +3593,15 @@ mod tests {
                     // this very message starts.
                     for cmd in &cmds {
                         let named = match *cmd {
-                            VoiceCommand::Release { id, .. }
-                            | VoiceCommand::Cut(id)
-                            | VoiceCommand::Damp(id)
-                            | VoiceCommand::Retarget { id, .. }
-                            | VoiceCommand::Tune { id, .. }
-                            | VoiceCommand::Control { id, .. }
-                            | VoiceCommand::ResetControls(id) => Some(id),
-                            VoiceCommand::Start { steal, .. } => steal,
-                            VoiceCommand::Retune { .. } => None,
+                            Command::Release { id, .. }
+                            | Command::Cut(id)
+                            | Command::Damp(id)
+                            | Command::Retarget { id, .. }
+                            | Command::Tune { id, .. }
+                            | Command::Control { id, .. }
+                            | Command::ResetControls(id) => Some(id),
+                            Command::Start { steal, .. } => steal,
+                            Command::Retune { .. } => None,
                         };
                         if let Some(v) = named {
                             assert!(
@@ -3777,9 +3737,9 @@ mod tests {
         }
     }
 
-    fn starts_in(cmds: &[VoiceCommand], v: VoiceId) -> bool {
+    fn starts_in(cmds: &[Command], v: VoiceId) -> bool {
         cmds.iter()
-            .any(|c| matches!(c, VoiceCommand::Start { id, .. } if *id == v))
+            .any(|c| matches!(c, Command::Start { id, .. } if *id == v))
     }
     // ---- the chase ------------------------------------------------------
 
@@ -3825,7 +3785,7 @@ mod tests {
 
         let mut messages = Vec::new();
         a.core.chase(MidiGroup::of(2), |u| messages.push(u));
-        assert!(messages.len() <= VoiceAllocator::CHASE_MESSAGES);
+        assert!(messages.len() <= Voicing::CHASE_MESSAGES);
 
         let mut b = Sim::new(POLY);
         for ump in messages {
@@ -3851,7 +3811,7 @@ mod tests {
     #[test]
     fn a_fresh_core_chases_nothing() {
         let mut n = 0;
-        VoiceAllocator::new(POLY).chase(MidiGroup::FIRST, |_| n += 1);
+        Voicing::new(POLY).chase(MidiGroup::FIRST, |_| n += 1);
         assert_eq!(n, 0);
     }
 }

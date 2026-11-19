@@ -57,7 +57,7 @@
 //! A Mono Mode On or Poly Mode On sent to a zone's lowest-numbered member
 //! channel, not to its manager, switches the zone between MIDI Mode 4 and
 //! Mode 3 (§2.2.4.3). The ingest records only that switch; what Mono means for
-//! a note is the instrument's own `tutti_voicing::VoiceConfig`. A Poly Key
+//! a note is the instrument's own `tutti_voicing::Rules`. A Poly Key
 //! Pressure on a member channel is not filtered: it cannot be told from a
 //! native per-note pressure message.
 //!
@@ -67,7 +67,7 @@
 //! rules take it there), All Notes Off and Reset All Controllers apply to the
 //! whole zone (M1-100 section 2.3.1) and a member's to its own channel. The
 //! transform sends each of them on the manager and on every member channel of
-//! its zone; the instrument (`tutti_voicing::VoiceAllocator`) reads one channel's
+//! its zone; the instrument (`tutti_voicing::Voicing`) reads one channel's
 //! message as that channel's own and holds no zone.
 //!
 //! A manager's Pitch Bend moves every note of its zone (RP-053): it goes on and

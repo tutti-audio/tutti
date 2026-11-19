@@ -133,7 +133,7 @@
 
 mod note_id;
 mod voice;
-pub(crate) use voice::{SynthVoices, SynthVoicesConfig};
+pub(crate) use voice::{VoiceAllocator, VoiceAllocatorConfig};
 
 mod mpe;
 pub(crate) use mpe::MpeVoiceState;

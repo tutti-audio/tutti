@@ -18,7 +18,7 @@ use tutti_graph::{
 };
 use tutti_units::UnitParam;
 use tutti_units::{Amplitude, CentsSpan, Spread};
-use tutti_voicing::VoiceAllocator;
+use tutti_voicing::Voicing;
 
 use super::PolySynth;
 use crate::lane::SynthFloat;
@@ -75,7 +75,7 @@ impl<F: SynthFloat> Node<F> for PolySynth<F> {
             .with_cost(self.cost())
             .with_param_addrs(self.declared_ports().as_slice())
             // The channel state it hands the synth that replaces it (`chase`).
-            .with_chase(VoiceAllocator::CHASE_MESSAGES as u32)
+            .with_chase(Voicing::CHASE_MESSAGES as u32)
     }
 
     fn prepare(&mut self, p: &Prepare) {
@@ -134,7 +134,7 @@ impl<F: SynthFloat> Node<F> for PolySynth<F> {
 
     /// Hands the instrument that replaces this one every channel's
     /// controllers, pedals, pitch wheel, pressure and registered controllers,
-    /// as MIDI 2.0 messages in the synth's Group (`VoiceAllocator::chase`): what a
+    /// as MIDI 2.0 messages in the synth's Group (`Voicing::chase`): what a
     /// performer set survives a swap, whatever the successor is. The sounding
     /// notes are not carried (nothing re-strikes a held key), nor the
     /// per-note controllers or the key a portamento glides from. A synth has
