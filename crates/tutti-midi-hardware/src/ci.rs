@@ -24,7 +24,7 @@
 //!
 //! A device ends when its Group is no
 //! longer called for: a settled Endpoint whose Function Block changes (the
-//! the discovery keeps hearing them unless the Endpoint declared them static)
+//! discovery keeps hearing them unless the Endpoint declared them static)
 //! is read again, and the Groups recomputed. A Group that stays keeps its
 //! device and peers; one that goes ends its device (Invalidate MUID, peers
 //! lost: M2-101 §3.3.2, a block that changes its Group location or number of
