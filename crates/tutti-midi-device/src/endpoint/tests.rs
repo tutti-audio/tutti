@@ -1087,5 +1087,5 @@ fn an_endpoint_is_not_in_a_protocol_or_jr_direction_it_does_not_support() {
         rx_jr: true,
         tx_jr: false,
     };
-    assert_eq!(midi1_only.in_use(jr_only).active().rx_jr, false);
+    assert!(!midi1_only.in_use(jr_only).active().rx_jr);
 }
