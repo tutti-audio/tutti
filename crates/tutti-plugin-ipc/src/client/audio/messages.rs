@@ -60,22 +60,9 @@ impl ProcessPayload {
 pub(super) enum AudioCommand {
     Process(Box<ProcessPayload>),
     Reset,
-    /// Format-neutral render mode. Ordered against the blocks by being queued
-    /// with them: the lane's thread has the control lane apply it and waits for
-    /// that before it sends the next block.
-    SetRenderMode {
-        mode: tutti_plugin_types::RenderMode,
-    },
-    /// The rate the plugin runs at: ordered against the blocks as
-    /// [`SetRenderMode`](Self::SetRenderMode) is, since a block rendered
-    /// before the plugin has taken the rate (or been refused it) is at the
-    /// wrong one.
-    SetSampleRate {
-        rate: SampleRate,
-    },
 }
 
-/// A setting the audio lane holds its blocks for. Written by the audio lane's
+/// A setting the audio lane holds its blocks for. Requested by a caller into a slot, then written by the audio lane's
 /// thread into a latest-value slot per kind ([`Channels::put_setting`](super::channels::Channels::put_setting)), never
 /// queued, so a full control queue cannot lose one; taken first by the control
 /// lane's thread, which answers `applied` once the server has applied it.

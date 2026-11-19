@@ -14,7 +14,9 @@ use super::ListenerSlot;
 #[cfg(test)]
 use super::channels::response_ring;
 use super::channels::{Channels, ResponseWriter, Waits};
-use super::dispatch::{Lane, Owed, handle_audio, handle_control, handle_setting, read_news};
+use super::dispatch::{
+    Lane, Owed, apply_setting, handle_audio, handle_control, handle_setting, read_news,
+};
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioCommand, AudioResponse, BridgeEvent, Unsolicited};
 use super::payload_pool::PayloadPool;
@@ -228,6 +230,11 @@ fn audio_loop(
     let mut failed = false;
     while live(lifecycle) {
         let Some(cmd) = channels.pop_block() else {
+            // Idle: a setting asked for meanwhile is applied now.
+            if let Some(setting) = channels.take_request(None) {
+                apply_setting(channels, lifecycle, setting);
+                continue;
+            }
             // Sleep on the doorbell: `push_block` rings it the instant a block
             // arrives, so the socket round-trip starts immediately. The ring
             // cannot be lost and `shutdown` rings it too, so there is no
@@ -235,7 +242,13 @@ fn audio_loop(
             channels.wait_for_block(sleeper, || !live(lifecycle));
             continue;
         };
-        let result = handle_audio(cmd, &mut lane, channels, payloads, &mut inbox, lifecycle);
+        // The settings asked for before this block go before it.
+        if let AudioCommand::Process(payload) = &cmd {
+            while let Some(setting) = channels.take_request(Some(payload.seq)) {
+                apply_setting(channels, lifecycle, setting);
+            }
+        }
+        let result = handle_audio(cmd, &mut lane, channels, payloads, &mut inbox);
         drain_unsolicited(&mut inbox, channels, listener);
         channels.turn_done();
 

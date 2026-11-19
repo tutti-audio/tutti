@@ -90,7 +90,7 @@ pub use channels::Replies;
 pub(crate) use channels::response_ring;
 pub(crate) use channels::{FATES, Fate};
 use lifecycle::Lifecycle;
-use messages::{AudioCommand, AudioResponse, ControlCommand};
+use messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
 use parking_lot::Mutex;
 pub use payload_pool::{PARAM_BUFFERS, PayloadPool};
 use progress::StateProgress;
@@ -446,45 +446,47 @@ impl AudioBridge {
         })
     }
 
-    /// Queues a rate change. Realtime-safe; `false` when it was not queued.
+    /// Asks for a rate change, ordered against the blocks. `false` only when the
+    /// bridge is crashed: the request goes into a slot (the latest value), never
+    /// a queue that can be full. Not for the audio thread (a lock).
     ///
-    /// `true` means it is queued with the blocks, not that the plugin has taken
-    /// it: the audio lane holds the blocks after it until the plugin has
-    /// answered or its deadline passes. A change the bridge then gave up on is
-    /// counted ([`unapplied_settings`](Self::unapplied_settings)) and logged.
+    /// `true` means it is requested, not that the plugin has taken it: the audio
+    /// lane holds the blocks submitted after it until the plugin has answered or
+    /// its deadline passes. A change the bridge then gave up on is counted
+    /// ([`unapplied_settings`](Self::unapplied_settings)) and logged.
     pub(crate) fn set_sample_rate_rt(&self, rate: SampleRate) -> bool {
-        // Publish before queueing, so both the staleness bound and
+        // Publish before requesting, so both the staleness bound and
         // the bridge thread's reply timeout track the new period from here on.
         self.channels.set_sample_rate(rate);
-        !self.lifecycle.is_crashed()
-            && self
-                .channels
-                .push_block(AudioCommand::SetSampleRate { rate })
+        if self.lifecycle.is_crashed() {
+            return false;
+        }
+        self.channels.request_setting(Setting::SampleRate(rate));
+        true
     }
 
-    /// Queue a render-mode change for the plugin.
+    /// Asks for a render-mode change, ordered against the blocks. `false` only
+    /// when the bridge is crashed; the request goes into a slot, never a queue
+    /// that can be full.
     ///
-    /// `true` means it is queued with the blocks, not that the plugin has
-    /// applied it: the audio lane holds the blocks after it until the server has
+    /// `true` means it is requested, not that the plugin has applied it: the
+    /// audio lane holds the blocks submitted after it until the server has
     /// answered a request sent after it, or its deadline passes. A change the
     /// bridge then gave up on is counted
     /// ([`unapplied_settings`](Self::unapplied_settings)) and logged.
     ///
-    /// Named `_rt` like its neighbours because it shares their bounded,
-    /// non-blocking queue, not because the audio thread is the expected caller:
-    /// a bounce sets this once from the control thread before it starts
-    /// pulling. Riding the same queue is what keeps it ordered against the
-    /// blocks around it — a mode that overtook an in-flight block would apply
-    /// to audio the caller thought was already rendered.
+    /// Named `_rt` like its neighbours, though the audio thread is not the
+    /// expected caller: a bounce sets this once from the control thread before it
+    /// starts pulling. The blocks submitted before it are sent first; a mode that
+    /// overtook an in-flight block would apply to audio the caller thought was
+    /// already rendered.
     pub fn set_render_mode_rt(&self, mode: tutti_plugin_types::RenderMode) -> bool {
-        let queued = !self.lifecycle.is_crashed()
-            && self
-                .channels
-                .push_block(AudioCommand::SetRenderMode { mode });
-        if queued {
-            self.lifecycle.set_render_mode(mode);
+        if self.lifecycle.is_crashed() {
+            return false;
         }
-        queued
+        self.channels.request_setting(Setting::RenderMode(mode));
+        self.lifecycle.set_render_mode(mode);
+        true
     }
 
     /// How many render-mode and rate changes the bridge gave up on, ever: the

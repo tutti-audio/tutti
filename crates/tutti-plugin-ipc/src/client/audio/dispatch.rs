@@ -441,7 +441,6 @@ pub(super) fn handle_audio(
     channels: &Channels,
     payloads: &PayloadPool,
     inbox: &mut Unsolicited,
-    lifecycle: &Lifecycle,
 ) -> BridgeResult<()> {
     let Lane { stream, owed } = lane;
     match cmd {
@@ -590,29 +589,13 @@ pub(super) fn handle_audio(
         AudioCommand::Reset => {
             ipc::send(stream, &HostMessage::Reset)?;
         }
-        AudioCommand::SetRenderMode { mode } => {
-            hold_for(
-                channels,
-                lifecycle,
-                "a render mode",
-                Setting::RenderMode(mode),
-            );
-        }
-        AudioCommand::SetSampleRate { rate } => {
-            hold_for(
-                channels,
-                lifecycle,
-                "a rate change",
-                Setting::SampleRate(rate),
-            );
-        }
     }
     Ok(())
 }
 
-/// Ordered against the blocks by sitting between them in the audio lane's
-/// queue: the blocks before it are sent, and the ones after wait until the
-/// control lane has had the server apply it. The setting goes into the control
+/// Applies a setting a caller requested ([`Channels::request_setting`]), ahead
+/// of the blocks submitted after the request: the blocks before it are sent,
+/// and the ones after wait until the control lane has had the server apply it. The setting goes into the control
 /// lane's latest-value slot, not its queue, so a full queue cannot lose it; the
 /// control lane answers `applied` (the server answers that lane, not the audio
 /// one).
@@ -621,7 +604,11 @@ pub(super) fn handle_audio(
 /// bridge stops or crashes. A change the lane gives up on at the deadline is
 /// counted ([`Channels::note_unapplied`]) and logged, and the blocks go on: a
 /// lane that cannot answer in that time is the control lane's to report.
-fn hold_for(channels: &Channels, lifecycle: &Lifecycle, what: &str, setting: Setting) {
+pub(super) fn apply_setting(channels: &Channels, lifecycle: &Lifecycle, setting: Setting) {
+    let what = match setting {
+        Setting::SampleRate(_) => "a rate change",
+        Setting::RenderMode(_) => "a render mode",
+    };
     let (applied, reply) = super::ask::ask::<()>();
     let deadline = Deadline::after(Instant::now(), lifecycle.timeouts().settle_wait());
     channels.put_setting(setting, reply);
