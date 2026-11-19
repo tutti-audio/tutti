@@ -203,11 +203,9 @@ fn disk(
         DiskStreamer::<ByHand<f64>, f64>::by_hand(SampleRate::of(RATE), Default::default())
             .expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
-    let (mut stream, reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
     if direction == Direction::Reverse {
-        stream
-            .set_direction(direction)
-            .expect("the streamer is alive");
+        stream.direction_cell().publish(direction);
         assert!(
             streamer.step_until_settled(1_000) < 1_000,
             "the ring follows the direction"

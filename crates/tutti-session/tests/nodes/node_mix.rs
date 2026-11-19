@@ -13,9 +13,9 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{Cx, FadeLaw, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
+use tutti_graph::{Cx, FadeLaw, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
-use tutti_session::{InPort, MixError, NodeMode, OutPort, Root, Session};
+use tutti_session::{InPort, Key, NodeMode, OutPort, Root, Session, SetRefusal, ValueErrorKind};
 use tutti_units::{Mix, Seconds};
 
 const A: f32 = 0.25;
@@ -45,7 +45,7 @@ impl Node for Halve {
 
 struct Rig {
     s: Session,
-    halve: NodeKey,
+    halve: Key<ForkByClone<Halve>>,
 }
 
 /// `Const(A) -> Halve -> output 0`, committed once.
@@ -60,10 +60,7 @@ fn rig() -> Rig {
         .unwrap();
     let _ = s.update();
     assert!(!s.graph_ref().is_edited());
-    Rig {
-        s,
-        halve: halve.erase(),
-    }
+    Rig { s, halve }
 }
 
 impl Rig {
@@ -91,16 +88,16 @@ fn each_mix_reaches_the_running_node() {
     let mut r = rig();
     assert!(all_are(&r.settled(), A * 0.5), "WET is the node's output");
 
-    r.s.graph().set_mix(r.halve, Mix::DRY).unwrap();
+    r.s.set(r.halve.mix().to(Mix::DRY)).unwrap();
     assert!(all_are(&r.settled(), A), "DRY is the aligned input");
 
-    r.s.graph().set_mix(r.halve, Mix::new(0.5)).unwrap();
+    r.s.set(r.halve.mix().to(Mix::new(0.5))).unwrap();
     assert!(
         all_are(&r.settled(), A * 0.5 * 0.5 + A * (1.0 - 0.5)),
         "one half is the blend"
     );
 
-    r.s.graph().set_mix(r.halve, Mix::WET).unwrap();
+    r.s.set(r.halve.mix().to(Mix::WET)).unwrap();
     assert!(all_are(&r.settled(), A * 0.5), "WET again");
 }
 
@@ -109,29 +106,33 @@ fn each_mix_reaches_the_running_node() {
 #[test]
 fn the_mode_wins_over_the_mix() {
     let mut r = rig();
-    r.s.graph().set_mix(r.halve, Mix::new(0.5)).unwrap();
-    r.s.graph().set_mode(r.halve, NodeMode::Bypassed).unwrap();
+    r.s.set(r.halve.mix().to(Mix::new(0.5))).unwrap();
+    r.s.set(r.halve.mode().to(NodeMode::Bypassed)).unwrap();
     // The mode's fade is 256 frames: more blocks than a mix needs.
     for _ in 0..6 {
         r.settled();
     }
     assert!(all_are(&r.settled(), A), "bypassed passes the input");
-    r.s.graph().set_mode(r.halve, NodeMode::Muted).unwrap();
+    r.s.set(r.halve.mode().to(NodeMode::Muted)).unwrap();
     for _ in 0..6 {
         r.settled();
     }
     assert!(all_are(&r.settled(), 0.0), "muted is +0.0");
 }
 
-/// `mix` reads back what `set_mix` stored, and is `WET` for a node never given
-/// one.
+/// A mix reads back through `get` the moment it is written, before any
+/// update, and is `WET` for a node never given one.
 #[test]
 fn mix_reads_back_what_was_set() {
     let mut r = rig();
+    assert_eq!(r.s.get(r.halve.mix()).unwrap(), Mix::WET);
+    r.s.set(r.halve.mix().to(Mix::new(0.25))).unwrap();
+    assert_eq!(r.s.get(r.halve.mix()).unwrap(), Mix::new(0.25));
+    r.s.set(r.halve.mix().to(Mix::DRY)).unwrap();
+    assert_eq!(r.s.get(r.halve.mix()).unwrap(), Mix::DRY);
+    // The editor takes it with the next update.
     assert_eq!(r.s.graph_ref().mix(r.halve).unwrap(), Mix::WET);
-    r.s.graph().set_mix(r.halve, Mix::new(0.25)).unwrap();
-    assert_eq!(r.s.graph_ref().mix(r.halve).unwrap(), Mix::new(0.25));
-    r.s.graph().set_mix(r.halve, Mix::DRY).unwrap();
+    let _ = r.settled();
     assert_eq!(r.s.graph_ref().mix(r.halve).unwrap(), Mix::DRY);
 }
 
@@ -143,7 +144,8 @@ fn a_mix_is_not_an_edit() {
     let plan = r.s.graph_ref().testing().sent_plan().expect("a plan");
     let sent = r.s.graph_ref().testing().commits_sent();
 
-    r.s.graph().set_mix(r.halve, Mix::DRY).unwrap();
+    r.s.set(r.halve.mix().to(Mix::DRY)).unwrap();
+    let _ = r.s.update();
     assert!(!r.s.graph_ref().is_edited(), "a mix marks nothing edited");
     let _ = r.settled();
 
@@ -156,36 +158,30 @@ fn a_mix_is_not_an_edit() {
     assert!(std::sync::Arc::ptr_eq(&plan, &now), "the same plan");
 }
 
-/// A node that is not in the graph, or no longer is, is refused (set and
-/// read alike); a mix off the scale (NaN, negative, above one) is refused and
-/// changes nothing.
+/// A node that is no longer in the graph is refused (set and read alike); a
+/// mix off the scale (NaN, negative, above one) is refused and changes
+/// nothing.
 #[test]
-fn a_missing_node_and_a_bad_mix_are_refused() {
+fn a_removed_node_and_a_bad_mix_are_refused() {
     let mut r = rig();
-    let stranger = NodeKey::fresh();
-    assert_eq!(
-        r.s.graph().set_mix(stranger, Mix::DRY),
-        Err(MixError::NoSuchNode { node: stranger })
-    );
-    assert_eq!(r.s.graph_ref().mix(stranger).unwrap_err().node(), stranger);
-
-    r.s.graph().set_mix(r.halve, Mix::new(0.5)).unwrap();
-    for bad in [f64::NAN, -0.5, 1.5] {
-        assert_eq!(
-            r.s.graph().set_mix(r.halve, Mix::new(bad)),
-            Err(MixError::OutOfRange)
-        );
+    r.s.set(r.halve.mix().to(Mix::new(0.5))).unwrap();
+    for (bad, why) in [
+        (f64::NAN, SetRefusal::NotFinite),
+        (f64::INFINITY, SetRefusal::NotFinite),
+        (-0.5, SetRefusal::OutOfRange),
+        (1.5, SetRefusal::OutOfRange),
+    ] {
+        let refused = r.s.set(r.halve.mix().to(Mix::new(bad))).unwrap_err();
+        assert_eq!(refused.kind, ValueErrorKind::Refused(why), "{bad}");
     }
-    assert_eq!(r.s.graph_ref().mix(r.halve).unwrap(), Mix::new(0.5));
+    assert_eq!(r.s.get(r.halve.mix()).unwrap(), Mix::new(0.5));
 
     r.s.graph().remove(r.halve).unwrap();
-    assert_eq!(
-        r.s.graph().set_mix(r.halve, Mix::DRY),
-        Err(MixError::NoSuchNode { node: r.halve })
-    );
+    let refused = r.s.set(r.halve.mix().to(Mix::DRY)).unwrap_err();
+    assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
     assert_eq!(
         r.s.graph_ref().mix(r.halve).unwrap_err().node(),
-        r.halve,
+        r.halve.erase(),
         "a removed node's mix goes with it, and asking for it is refused"
     );
 }
@@ -228,10 +224,10 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
     for bypass in [false, true] {
         let mut r = rig();
         let before = if bypass {
-            r.s.graph().set_mode(r.halve, NodeMode::Bypassed).unwrap();
+            r.s.set(r.halve.mode().to(NodeMode::Bypassed)).unwrap();
             A
         } else {
-            r.s.graph().set_mix(r.halve, Mix::new(0.5)).unwrap();
+            r.s.set(r.halve.mix().to(Mix::new(0.5))).unwrap();
             A * 0.5 * 0.5 + A * 0.5
         };
         for _ in 0..6 {
@@ -264,9 +260,9 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
         );
 
         if bypass {
-            r.s.graph().set_mode(r.halve, NodeMode::Active).unwrap();
+            r.s.set(r.halve.mode().to(NodeMode::Active)).unwrap();
         } else {
-            r.s.graph().set_mix(r.halve, Mix::WET).unwrap();
+            r.s.set(r.halve.mix().to(Mix::WET)).unwrap();
         }
         for _ in 0..6 {
             r.settled();
@@ -277,4 +273,49 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
         );
         assert!(!r.s.graph_ref().is_edited(), "bypass {bypass}: committed");
     }
+}
+
+/// **A node with no pass refuses a bypass and a blend short of WET at the
+/// call, and a batch with a refused item lands none of it**: its input would
+/// have to be placed by guess (`PassError::Unplaced`). A mute and a WET mix
+/// need no pass, so they land.
+#[test]
+fn a_node_with_no_pass_refuses_a_bypass_and_a_blend_and_lands_nothing() {
+    let mut s = Session::builder().build().expect("builds");
+    let g = s.graph();
+    let (a, _) = g.add(ForkByClone(Const::mono(A)));
+    let (q, _) = g.add(ForkByClone(Quarter));
+    g.set_sources_hard(InPort::new(q, 0), [OutPort::new(a, 0)])
+        .unwrap();
+    g.set_sources_hard(Root::output(0), [OutPort::new(q, 0)])
+        .unwrap();
+    let _ = s.update();
+
+    let refused = s.set(q.mode().to(NodeMode::Bypassed)).unwrap_err();
+    assert!(
+        matches!(
+            refused.kind,
+            ValueErrorKind::Refused(SetRefusal::Unplaced(_))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(s.get(q.mode()).unwrap(), NodeMode::Active, "nothing landed");
+
+    let refused = s.set(q.mix().to(Mix::new(0.5))).unwrap_err();
+    assert!(matches!(
+        refused.kind,
+        ValueErrorKind::Refused(SetRefusal::Unplaced(_))
+    ));
+    assert_eq!(s.get(q.mix()).unwrap(), Mix::WET, "nothing landed");
+
+    // The batch's second item is refused: the first lands nothing either.
+    let refused = s
+        .set((q.mode().to(NodeMode::Muted), q.mix().to(Mix::DRY)))
+        .unwrap_err();
+    assert_eq!(refused.at, 1);
+    assert_eq!(s.get(q.mode()).unwrap(), NodeMode::Active);
+
+    s.set((q.mode().to(NodeMode::Muted), q.mix().to(Mix::WET)))
+        .unwrap();
+    assert_eq!(s.get(q.mode()).unwrap(), NodeMode::Muted);
 }

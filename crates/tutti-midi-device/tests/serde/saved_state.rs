@@ -23,7 +23,7 @@ fn round_trip(saved: &SavedState) -> SavedState {
 #[test]
 fn a_binary_state_reads_back_with_its_device_revision_and_time() {
     let state = PeState::octets(vec![0, 127, 128, 255])
-        .revised(StateRev::new("buui890adj").unwrap())
+        .revised(StateRev::new("buui890adj"))
         .stamped(UnixSeconds::of(1_586_786_400));
     let saved = saved(state);
     assert_eq!(round_trip(&saved), saved);

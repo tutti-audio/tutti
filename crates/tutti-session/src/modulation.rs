@@ -42,18 +42,19 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::{LaneControls, RecordMode, Recorder, Trajectory};
 use tutti_nodes::{Feed, ReconcileError};
+use tutti_rt::Param;
 use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
 
+use crate::DeclarationError;
 use crate::Edge;
 use crate::ModKeys;
 use crate::ParamUnit;
-use crate::RangeError;
 use tutti_buffers::Float;
 
 use crate::graph::Graph;
 use crate::value::{
-    Automation, AutomationCell, AutomationField, Declared, Edited, Field, MacroField,
-    PublishedSlot, RateField, SlotId, ValueTable,
+    Automation, AutomationCell, AutomationField, Bounds, Declared, DepthSlot, Edited, Field,
+    MacroField, PublishedSlot, RangeSlot, RateField, SlotId, ValueTable,
 };
 
 /// How long a modulation target may stay unresolved before it is logged:
@@ -131,8 +132,8 @@ impl ParamRef {
 
 /// The mix of a node in the session's graph (doc 013, "Bypass and mute are
 /// graph state"): the node's blend with its aligned input, which
-/// [`Graph::set_mix`] sets and a modulation route onto it ([`ModTarget`])
-/// drives. Its range is `0..=1`: a route's depth is a fraction of the range
+/// [`MixTarget`](crate::MixTarget) writes and a modulation route onto it
+/// ([`ModTarget`]) drives. Its range is `0..=1`: a route's depth is a fraction of the range
 /// declared for it (`Mods::range`), and the value is clamped to the blend.
 /// The mix is the lane's knob (one cell), so a route modulates around the mix
 /// the graph holds and removing it returns to that mix.
@@ -162,7 +163,7 @@ impl MixRef {
 /// ([`MixRef`]). Each converts: `mods.route(source, param_ref, depth)`,
 /// `mods.route(source, edge_ref, depth)` and `mods.route(source, mix_ref,
 /// depth)`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ModTarget {
     /// A param of a node.
     Param(ParamRef),
@@ -298,7 +299,7 @@ fn route_id(key: RouteKey) -> ModRouteId {
 #[error("no modulation source {0:?}")]
 pub struct NoSuchModSource(pub ModSourceId);
 
-/// What [`Mods::remove_route`] and [`Mods::route_of`] found missing: the route
+/// What [`Mods::remove_route`] found missing: the route
 /// the id named.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("no modulation route {0:?}")]
@@ -327,6 +328,14 @@ pub enum RouteError {
     /// The route's source was removed (or is another session's).
     #[error(transparent)]
     NoSuchSource(NoSuchModSource),
+    /// The source already has a route into `target`: a route is named by its
+    /// source and target ([`DepthTarget::of`](crate::DepthTarget::of)), so a
+    /// second between the two would have no name.
+    #[error("{target} already has a route from this source")]
+    Duplicate {
+        /// The target the route named.
+        target: ModTarget,
+    },
 }
 
 /// Why the session refused modulation. What it names is in the keys the
@@ -871,6 +880,10 @@ struct OwnRoute {
     target: ModTarget,
     polarity: Arc<Declared<Polarity>>,
     curve: Arc<Declared<Law>>,
+    /// The depth in force, in the cell the route's lane reads
+    /// ([`DepthTarget`](crate::DepthTarget)): `decl.depth` is the one the
+    /// route was declared with.
+    depth: Param<Depth>,
 }
 
 impl OwnRoute {
@@ -910,7 +923,7 @@ pub(crate) struct OwnMods {
     minted: tutti_rt::Mint,
     sources: BTreeMap<SourceKey, OwnSource>,
     routes: BTreeMap<RouteKey, OwnRoute>,
-    ranges: BTreeMap<TargetKey, (f64, f64)>,
+    ranges: BTreeMap<TargetKey, Arc<Bounds>>,
     automation: BTreeMap<TargetKey, OwnAutomation>,
     /// The key the reconciler is given for each edge a target names (an
     /// edge has no node bits to be its key): minted on first use, kept for
@@ -970,6 +983,15 @@ impl OwnMods {
             SlotId::RouteCurve(id),
             PublishedSlot::new(Field(Arc::clone(&route.curve))),
         );
+        self.table.provide(
+            Self::depth_slot(route),
+            Arc::new(DepthSlot(route.depth.handle())) as crate::value::SlotCell<Depth>,
+        );
+    }
+
+    /// The slot of `route`'s depth: named by its source and target.
+    fn depth_slot(route: &OwnRoute) -> SlotId {
+        SlotId::RouteDepth((source_id(route.decl.source), route.target))
     }
 
     /// Registers the target `source` has: an LFO's rate, a macro's value.
@@ -993,13 +1015,18 @@ impl OwnMods {
             .unprovide(&[SlotId::SourceRate(id), SlotId::SourceValue(id)]);
     }
 
-    /// Forgets the targets of the routes `ids`, and what was written to them.
-    fn retire_routes(&self, ids: impl IntoIterator<Item = RouteKey>) {
-        let slots: Vec<SlotId> = ids
+    /// Forgets the targets of the routes `routes`, and what was written to
+    /// them.
+    fn retire_routes(&self, routes: impl IntoIterator<Item = (RouteKey, OwnRoute)>) {
+        let slots: Vec<SlotId> = routes
             .into_iter()
-            .flat_map(|key| {
+            .flat_map(|(key, route)| {
                 let id = route_id(key);
-                [SlotId::RoutePolarity(id), SlotId::RouteCurve(id)]
+                [
+                    SlotId::RoutePolarity(id),
+                    SlotId::RouteCurve(id),
+                    Self::depth_slot(&route),
+                ]
             })
             .collect();
         self.table.unprovide(&slots);
@@ -1103,7 +1130,10 @@ impl OwnMods {
                 .collect(),
             routes: self.routes.iter().map(|(&k, r)| (k, r.decl())).collect(),
             targets: declare_targets(
-                self.ranges.iter().map(|(&k, &(min, max))| (k, min, max)),
+                self.ranges.iter().map(|(&k, bounds)| {
+                    let (min, max) = bounds.get();
+                    (k, min, max)
+                }),
                 self.automation.iter().map(|(&k, a)| {
                     // An open take: the knob (the gesture) drives the param.
                     (k, a.take.is_none().then(|| a.cell.curve()))
@@ -1124,12 +1154,21 @@ impl OwnMods {
             .filter(|(_, e)| e.touches(node))
             .map(|(&k, _)| k)
             .collect();
-        self.edge_refs.retain(|k, _| !dead.contains(k));
-        self.edge_keys.retain(|_, k| !dead.contains(k));
         let gone = |t: &TargetKey| match t {
             TargetKey::Param { node: n, .. } | TargetKey::Mix(n) => *n == bits,
             TargetKey::Edge(k) => dead.contains(k),
         };
+        // Named before the edges' keys go: a range's target is found by its key.
+        let unranged: Vec<SlotId> = self
+            .ranges
+            .keys()
+            .filter(|t| gone(t))
+            .filter_map(|&t| self.target_of(t))
+            .map(SlotId::Range)
+            .collect();
+        self.table.unprovide(&unranged);
+        self.edge_refs.retain(|k, _| !dead.contains(k));
+        self.edge_keys.retain(|_, k| !dead.contains(k));
         self.ranges.retain(|t, _| !gone(t));
         let unautomated: Vec<SlotId> = self
             .automation
@@ -1145,9 +1184,10 @@ impl OwnMods {
             .filter(|(_, r)| matches!(r.decl.to, RouteTarget::Param(t) if gone(&t)))
             .map(|(&k, _)| k)
             .collect();
-        for key in &lost {
-            self.routes.remove(key);
-        }
+        let lost: Vec<_> = lost
+            .into_iter()
+            .filter_map(|key| Some((key, self.routes.remove(&key)?)))
+            .collect();
         self.retire_routes(lost);
     }
 }
@@ -1172,6 +1212,10 @@ impl ModKeys for OwnKeys<'_> {
             OwnFeed::Audio(node) => Feed::Audio(node),
             OwnFeed::Events(node, port) => Feed::Events(EventOut { node, port }),
         })
+    }
+
+    fn depth(&self, route: RouteKey) -> Option<Param<Depth>> {
+        Some(self.0.routes.get(&route)?.depth.handle())
     }
 }
 
@@ -1409,7 +1453,10 @@ impl ModsView<'_> {
     #[must_use]
     pub fn range_of(&self, target: impl Into<ModTarget>) -> Option<std::ops::RangeInclusive<f64>> {
         let key = self.own.peek_key(target.into())?;
-        self.own.ranges.get(&key).map(|&(min, max)| min..=max)
+        self.own.ranges.get(&key).map(|bounds| {
+            let (min, max) = bounds.get();
+            min..=max
+        })
     }
 
     /// Whether `target` has automation declared.
@@ -1433,7 +1480,7 @@ impl OwnRoute {
             id: route_id(key),
             source: source_id(self.decl.source),
             target: self.target,
-            depth: self.decl.depth,
+            depth: self.depth.load(),
             polarity: self.polarity.get(),
             curve: self.curve.get(),
         }
@@ -1450,30 +1497,6 @@ impl OwnSource {
                 None => None,
             },
         }
-    }
-}
-
-/// A route of the session's own declarations, to edit in place
-/// ([`Mods::route_of`]): its depth. What it changes the next update applies.
-/// Its polarity and curve are values
-/// ([`ModRouteId::polarity`], [`ModRouteId::curve`]).
-#[derive(Debug)]
-pub struct RouteMut<'a> {
-    id: ModRouteId,
-    route: &'a mut OwnRoute,
-}
-
-impl RouteMut<'_> {
-    /// The route as it is now.
-    #[must_use]
-    pub fn info(&self) -> RouteInfo {
-        self.route.info(RouteKey(self.id.get()))
-    }
-
-    /// Sets the depth, a fraction of the target's range.
-    pub fn set_depth(&mut self, depth: Depth) -> &mut Self {
-        self.route.decl.depth = depth;
-        self
     }
 }
 
@@ -1589,9 +1612,10 @@ impl Mods<'_> {
             .filter(|(_, r)| r.decl.source == key)
             .map(|(&k, _)| k)
             .collect();
-        for route in &lost {
-            self.own.routes.remove(route);
-        }
+        let lost: Vec<_> = lost
+            .into_iter()
+            .filter_map(|key| Some((key, self.own.routes.remove(&key)?)))
+            .collect();
         self.own.retire_routes(lost);
         Ok(())
     }
@@ -1619,6 +1643,16 @@ impl Mods<'_> {
                 target: spec.target,
             });
         }
+        if self
+            .own
+            .routes
+            .values()
+            .any(|r| r.decl.source == source && r.target == spec.target)
+        {
+            return Err(RouteError::Duplicate {
+                target: spec.target,
+            });
+        }
         let key = RouteKey(self.own.mint());
         let route = OwnRoute {
             decl: RouteDecl {
@@ -1631,22 +1665,11 @@ impl Mods<'_> {
             target: spec.target,
             polarity: Declared::new(spec.polarity, &self.own.edited),
             curve: Declared::new(spec.curve, &self.own.edited),
+            depth: Param::new(spec.depth),
         };
         self.own.provide_route(route_id(key), &route);
         self.own.routes.insert(key, route);
         Ok(route_id(key))
-    }
-
-    /// The route `id`, to edit in place: its depth.
-    ///
-    /// # Errors
-    ///
-    /// [`NoSuchModRoute`] when this session declared no route `id`.
-    pub fn route_of(&mut self, id: ModRouteId) -> Result<RouteMut<'_>, NoSuchModRoute> {
-        match self.own.routes.get_mut(&RouteKey(id.get())) {
-            Some(route) => Ok(RouteMut { id, route }),
-            None => Err(NoSuchModRoute(id)),
-        }
     }
 
     /// Removes a route.
@@ -1658,18 +1681,21 @@ impl Mods<'_> {
     pub fn remove_route(&mut self, id: ModRouteId) -> Result<(), NoSuchModRoute> {
         let key = RouteKey(id.get());
         match self.own.routes.remove(&key) {
-            Some(_) => {
-                self.own.retire_routes([key]);
+            Some(route) => {
+                self.own.retire_routes([(key, route)]);
                 Ok(())
             }
             None => Err(NoSuchModRoute(id)),
         }
     }
 
-    /// `target`'s range, `range.start..=range.end` in its own unit: what a
-    /// route's depth is a fraction of, and what the value is clamped to
-    /// (both ends inclusive). Replaces the one it had; an edit is a store
-    /// into the lane, never a plan.
+    /// Declares `target`'s range, `range.start..=range.end` in its own unit:
+    /// what a route's depth is a fraction of, and what the lane clamps its
+    /// effective value to (both ends inclusive). This is the declaration: it
+    /// gives `target` a range with its initial value, and a route needs one.
+    /// The value is the [`RangeTarget`](crate::RangeTarget)'s from then on, so
+    /// a target that has a range keeps its value and the call answers
+    /// `false`.
     ///
     /// `target` is a [`Key`](crate::Key)'s param method (`lp.cutoff()`, in
     /// [`Hz`](tutti_units::Hz)), an [`Edge`] (its gain, in
@@ -1680,20 +1706,31 @@ impl Mods<'_> {
     ///
     /// # Errors
     ///
-    /// [`RangeError`] when a bound is NaN or the start is above the end;
-    /// nothing is stored.
+    /// [`DeclarationError::NotFinite`] for a bound that is NaN or infinite and
+    /// [`DeclarationError::Backwards`] when the start is above the end;
+    /// nothing is declared.
     pub fn range<T: Ranged>(
         &mut self,
         target: T,
         range: std::ops::Range<T::Unit>,
-    ) -> Result<(), RangeError> {
-        self.range_raw(target, range.start.to_cell(), range.end.to_cell())
+    ) -> Result<bool, DeclarationError> {
+        let (min, max) = (range.start.to_cell(), range.end.to_cell());
+        let target: ModTarget = target.into();
+        let bounds = match self.declare_range(target, min, max)? {
+            Some(bounds) => bounds,
+            None => return Ok(false),
+        };
+        self.own
+            .table
+            .provide(SlotId::Range(target), RangeSlot::<T::Unit>::cell(bounds));
+        Ok(true)
     }
 
     /// [`range`](Self::range) for a target whose unit is not tutti's: a
     /// plugin's param ([`ParamRef::plugin`]), whose range is in whatever the
     /// plugin's own value is (normalized, usually), or any target given as
-    /// bare numbers.
+    /// bare numbers. It is a declaration only: a plugin's param has no range
+    /// target until it has a typed one.
     ///
     /// # Errors
     ///
@@ -1703,21 +1740,38 @@ impl Mods<'_> {
         target: impl Into<ModTarget>,
         min: f64,
         max: f64,
-    ) -> Result<(), RangeError> {
-        if min.is_nan() || max.is_nan() {
-            return Err(RangeError::NotANumber { min, max });
+    ) -> Result<bool, DeclarationError> {
+        Ok(self.declare_range(target.into(), min, max)?.is_some())
+    }
+
+    /// Checks and records the range of `target`, unless it has one; its
+    /// bounds when it was declared now.
+    fn declare_range(
+        &mut self,
+        target: ModTarget,
+        min: f64,
+        max: f64,
+    ) -> Result<Option<Arc<Bounds>>, DeclarationError> {
+        if !min.is_finite() || !max.is_finite() {
+            return Err(DeclarationError::NotFinite);
         }
         if min > max {
-            return Err(RangeError::MinAboveMax { min, max });
+            return Err(DeclarationError::Backwards { min, max });
         }
-        let key = self.own.key_of(target.into());
-        self.own.ranges.insert(key, (min, max));
-        Ok(())
+        let key = self.own.key_of(target);
+        if self.own.ranges.contains_key(&key) {
+            return Ok(None);
+        }
+        let bounds = Declared::new((min, max), &self.own.edited);
+        self.own.ranges.insert(key, Arc::clone(&bounds));
+        Ok(Some(bounds))
     }
 
     /// Takes `target`'s range away.
     pub fn clear_range(&mut self, target: impl Into<ModTarget>) -> bool {
-        let key = self.own.key_of(target.into());
+        let target = target.into();
+        let key = self.own.key_of(target);
+        self.own.table.unprovide(&[SlotId::Range(target)]);
         self.own.ranges.remove(&key).is_some()
     }
 

@@ -1,23 +1,23 @@
 //! A modulation route onto the **mix of a node** (doc 013, "Bypass and mute
 //! are graph state", M4b): `Mods::route(source, MixRef, depth)` gives the node
 //! a driven mix lane, as a route onto a param gives a port one, and the mix
-//! cell is the lane's knob (`Graph::set_mix` is the one writer).
+//! cell is the lane's knob (`MixTarget` is the one writer).
 //!
 //! The figures are analytic. A constant `A` through a node that halves it: the
 //! node's output is `y = A / 2`, its aligned input `x̂ = A` (the node has no
 //! latency), and the render is `y * m + x̂ * (1 - m)` with `m` the lane's value
-//! (a bipolar linear route: the knob, the mix `Graph::set_mix` holds, plus
+//! (a bipolar linear route: the knob, the mix `MixTarget` holds, plus
 //! `depth * macro * span`, clamped to the range; every figure is exact in
 //! `f32`).
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
+use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::ReconcileError;
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    InPort, MixRef, ModRefusal, ModTarget, OutPort, ParamRef, PassError, Problem, Root, RouteSpec,
-    Session, TargetName,
+    InPort, Key, MixRef, ModRefusal, ModTarget, OutPort, ParamRef, PassError, Problem, Root,
+    RouteSpec, Session, SetRefusal, TargetName, ValueErrorKind,
 };
 use tutti_units::{Bipolar, Depth, Mix, UnitParam};
 
@@ -72,7 +72,7 @@ fn render(s: &mut Session, blocks: usize) -> Vec<f32> {
 }
 
 /// `Const(A) -> Halve -> output 0`; the node and the render's blend at `m`.
-fn rig(s: &mut Session) -> NodeKey {
+fn rig(s: &mut Session) -> Key<ForkByClone<Halve>> {
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (halve, _) = g.add(ForkByClone(Halve));
@@ -80,7 +80,7 @@ fn rig(s: &mut Session) -> NodeKey {
         .unwrap();
     g.set_sources(Root::output(0), [OutPort::new(halve, 0)])
         .unwrap();
-    halve.erase()
+    halve
 }
 
 fn blend(m: f32) -> f32 {
@@ -97,22 +97,22 @@ fn figure(s: &mut Session, m: f32, what: &str) {
 }
 
 /// A route onto a node's mix is the blend at the analytic mix, and the mix has
-/// one writer: `Graph::set_mix` is the knob whether or not the node is
+/// one writer: `MixTarget` is the knob whether or not the node is
 /// routed. A mix of `0.25` stays the base when a route arrives (the lane
 /// modulates around it), the route moves it by `depth * macro * span` (over the
 /// range `0..=1`, macro `0.5` at depth `0.5`: `0.25 + 0.25 = 0.5`), a base moved
 /// while routed moves the modulated figure (`0.5 + 0.25 = 0.75`), the macro
 /// moved is the offset moved (`0.5 - 0.25 = 0.25`), a value past the range is
-/// clamped (the knob written through `Graph::set_mix` to `0.875` and the
+/// clamped (the knob written through `MixTarget` to `0.875` and the
 /// macro back to `0.5` is `1.125`, clamped to `1.0`), and with the route
 /// removed the mix returns to the base the knob left, `0.875`, once the lane's
 /// source goes (the declick), not to WET.
 #[test]
-fn a_route_onto_a_mix_modulates_around_the_base_set_mix_writes() {
+fn a_route_onto_a_mix_modulates_around_the_base_the_mix_target_writes() {
     let mut s = offline();
     let node = rig(&mut s);
     settle(&mut s);
-    s.graph().set_mix(node, Mix::new(0.25)).expect("a node");
+    s.set(node.mix().to(Mix::new(0.25))).expect("a node");
     settle(&mut s);
     figure(&mut s, 0.25, "the base, before any route");
 
@@ -126,7 +126,7 @@ fn a_route_onto_a_mix_modulates_around_the_base_set_mix_writes() {
     settle(&mut s);
     figure(&mut s, 0.5, "the base plus the route's offset");
 
-    s.graph().set_mix(node, Mix::new(0.5)).expect("a node");
+    s.set(node.mix().to(Mix::new(0.5))).expect("a node");
     settle(&mut s);
     figure(&mut s, 0.75, "the base moved while routed");
     assert_eq!(
@@ -140,7 +140,7 @@ fn a_route_onto_a_mix_modulates_around_the_base_set_mix_writes() {
     figure(&mut s, 0.25, "the macro moved");
 
     s.set(source.value().to(Bipolar::of(0.5))).unwrap();
-    s.graph().set_mix(node, Mix::new(0.875)).expect("a node");
+    s.set(node.mix().to(Mix::new(0.875))).expect("a node");
     settle(&mut s);
     figure(&mut s, 1.0, "clamped to the blend");
     assert_eq!(
@@ -211,7 +211,7 @@ impl Node for Spread {
 }
 
 /// **A route onto the mix of a node with no pass is refused**, naming the
-/// target and what the node would need to declare, as `Graph::set_mix` refuses
+/// target and what the node would need to declare, as `MixTarget` refuses
 /// the same mix: the lane would blend in a dry signal the graph would have to
 /// guess. The node itself runs.
 #[test]
@@ -226,8 +226,11 @@ fn a_route_onto_the_mix_of_a_node_with_no_pass_is_refused() {
         .unwrap();
     settle(&mut s);
     assert!(
-        s.graph().set_mix(spread, Mix::new(0.5)).is_err(),
-        "set_mix refuses the same mix"
+        matches!(
+            s.set(spread.mix().to(Mix::new(0.5))).unwrap_err().kind,
+            ValueErrorKind::Refused(SetRefusal::Unplaced(_))
+        ),
+        "the mix target refuses the same mix"
     );
 
     let mix = MixRef::of(spread);

@@ -584,19 +584,19 @@ fn naks_from_client(sim: &Sim) -> Vec<(NakReason, u32)> {
 }
 
 fn auth_required() -> Command {
-    Command::AuthRequired(AuthChallenge {
+    Command::AuthRequired(Box::new(AuthChallenge {
         state: AuthState::First,
         nonce: fixed_nonce(),
         identity: identity("Studio", "HOST-1"),
-    })
+    }))
 }
 
 fn user_auth_required() -> Command {
-    Command::UserAuthRequired(UserAuthChallenge {
+    Command::UserAuthRequired(Box::new(UserAuthChallenge {
         state: UserAuthState::First,
         nonce: fixed_nonce(),
         identity: identity("Studio", "HOST-1"),
-    })
+    }))
 }
 
 /// Spec: m2-124/6.7#10, m2-124/6.8#8

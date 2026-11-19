@@ -1195,10 +1195,10 @@ fn voice_node_command_drain_does_not_allocate() {
     // Queue more than one block's worth, so the drain loop runs repeatedly
     // rather than taking its empty fast path once.
     for i in 0..8u64 {
-        handle.set_window(VoiceWindow::span(
+        handle.window_cell().publish(Some(VoiceWindow::span(
             Beat::new(i as f64 * 0.25),
             BeatDuration(4.0),
-        ));
+        )));
     }
 
     assert_no_alloc::assert_no_alloc(|| {

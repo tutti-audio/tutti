@@ -25,7 +25,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::error::{Error, Operation, OsStatus};
-use crate::source::{Protocol, shared_raw_client};
+use crate::source::{protocol_id, shared_raw_client};
+use tutti_ump::Protocol;
 
 /// The receive block CoreMIDI calls with each event list: the list, and the
 /// connection's reference constant, which this block never reads. The list is
@@ -104,11 +105,13 @@ impl UmpDestination {
     ///
     /// # Errors
     ///
+    /// [`Error::ReservedProtocol`] for a reserved `protocol`, and
     /// [`Error::Call`] when the client or the endpoint cannot be created.
     pub fn new<F>(name: &str, protocol: Protocol, on_packet: F) -> Result<Self, Error>
     where
         F: FnMut(MIDITimeStamp, &[u32]) + Send + 'static,
     {
+        let protocol = protocol_id(protocol)?;
         let client =
             shared_raw_client().map_err(|status| Error::call(Operation::CreateClient, status))?;
         let callback = Arc::new(Callback {
@@ -132,7 +135,7 @@ impl UmpDestination {
             MIDIDestinationCreateWithProtocol(
                 client,
                 name.as_concrete_TypeRef(),
-                protocol.id(),
+                protocol,
                 &mut endpoint,
                 RcBlock::as_ptr(&block).cast::<c_void>() as MIDIReceiveBlock,
             )
@@ -257,7 +260,10 @@ mod tests {
         // SAFETY: `Init` initialises `list`, which `Add` then fills inside its
         // real size; `words` outlives the call, and `assume_init_ref` follows both.
         let list = unsafe {
-            let packet = MIDIEventListInit(list.as_mut_ptr(), Protocol::Midi2.id());
+            let packet = MIDIEventListInit(
+                list.as_mut_ptr(),
+                protocol_id(Protocol::Midi2).expect("MIDI 2.0 has an id"),
+            );
             let packet = MIDIEventListAdd(
                 list.as_mut_ptr(),
                 size_of::<MIDIEventList>() as ByteCount,

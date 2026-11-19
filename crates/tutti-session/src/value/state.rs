@@ -9,12 +9,13 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
-use tutti_graph::{NodeKey, ParamSet};
+use tutti_graph::{NodeKey, ParamSet, PassError};
 use tutti_rt::LockExt;
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Fail, IntoAssign, IntoRead, Readable, Stageable};
+use super::controls::{MixSlot, ModeSlot, NodeControl, Queue, Write};
 use super::error::{ValueError, ValueErrorKind};
 use super::slot::{self, NodeSlots, SlotCell, SlotId};
 use super::target::AnyTarget;
@@ -38,6 +39,8 @@ pub struct Params {
     /// The session's own values, by what they are: each a
     /// [`SlotCell`] of its value type.
     pub(super) slots: BTreeMap<SlotId, slot::Erased>,
+    /// Each node's mode and mix, which its two targets share.
+    controls: BTreeMap<NodeKey, Arc<NodeControl>>,
 }
 
 impl Params {
@@ -70,6 +73,8 @@ pub struct ValueTable {
     /// What the output policy is checked against, which the graph publishes.
     /// A lock of its own: a check reads it under the value lock.
     output: crate::policy::FactsCell,
+    /// The controls written since the last update, for the graph's editor.
+    queue: Arc<Queue>,
 }
 
 impl fmt::Debug for ValueTable {
@@ -209,6 +214,74 @@ impl ValueTable {
         assign.stage(&mut batch).map_err(|fail| fail.kind)?;
         batch.land();
         Ok(())
+    }
+
+    /// Gives `node` its mode and mix targets, or refreshes what they check
+    /// against: why the node has no pass (`None` when it has one), and whether
+    /// it bypasses itself. Control thread.
+    pub(crate) fn provide_node_controls(
+        &self,
+        node: NodeKey,
+        no_pass: Option<PassError>,
+        own_bypass: bool,
+    ) {
+        let mut params = self.params.lock_recover();
+        if let Some(control) = params.controls.get(&node) {
+            control.note_pass(no_pass, own_bypass);
+            return;
+        }
+        let control = NodeControl::new(node, no_pass, own_bypass, Arc::clone(&self.queue));
+        params.controls.insert(node, Arc::clone(&control));
+        params.slots.insert(
+            SlotId::Mode(node),
+            slot::erase(Arc::new(ModeSlot(Arc::clone(&control))) as SlotCell<_>),
+        );
+        params.slots.insert(
+            SlotId::Mix(node),
+            slot::erase(Arc::new(MixSlot(control)) as SlotCell<_>),
+        );
+    }
+
+    /// Forgets the targets of what is declared on `node`'s params and mix and
+    /// on the edges that touch it (a range, a route's depth), the moment the
+    /// node leaves the graph: a call that names them fails at the call, not
+    /// at the next update. Control thread.
+    pub(crate) fn retire_declared_on(&self, node: NodeKey) {
+        let touches = |target: &crate::ModTarget| match target {
+            crate::ModTarget::Param(p) => p.node == node,
+            crate::ModTarget::Mix(m) => m.node == node,
+            crate::ModTarget::Edge(e) => e.touches(node),
+        };
+        let gone: Vec<_> = self
+            .params
+            .lock_recover()
+            .slots
+            .extract_if(.., |id, _| match id {
+                SlotId::Range(target) | SlotId::RouteDepth((_, target)) => touches(target),
+                _ => false,
+            })
+            .collect();
+        drop(gone);
+    }
+
+    /// Forgets `node`'s mode and mix targets, and what was written to them
+    /// and not yet handed to the editor. Control thread.
+    pub(crate) fn retire_node_controls(&self, node: NodeKey) {
+        let gone = {
+            let mut params = self.params.lock_recover();
+            (
+                params.controls.remove(&node),
+                params.slots.remove(&SlotId::Mode(node)),
+                params.slots.remove(&SlotId::Mix(node)),
+            )
+        };
+        self.queue.forget_node(node);
+        drop(gone);
+    }
+
+    /// The controls written since the last call, for the graph's editor.
+    pub(crate) fn take_writes(&self) -> Vec<Write> {
+        self.queue.take()
     }
 
     /// Forgets `node`'s params and slots: its targets are gone.

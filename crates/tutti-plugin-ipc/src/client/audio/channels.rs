@@ -406,6 +406,10 @@ impl Channels {
     /// The control thread is reading the control connection for news.
     pub(super) fn set_news(&self) {
         self.news.store(true, Ordering::Release);
+        // Pairs with the fence after `bytes_waiting`'s poll: this flag is
+        // visible before the bytes it covers are taken off the connection, so
+        // a checker that saw the bytes gone and then fenced reads it set.
+        std::sync::atomic::fence(Ordering::SeqCst);
     }
 
     /// Whether [`set_news`](Self::set_news) was called since the last
@@ -425,12 +429,17 @@ impl Channels {
     }
 
     /// Whether the control connection has bytes the control thread has not read
-    /// (one `poll`, no wait). `false` with no probe.
+    /// (one `poll`, no wait). `false` with no probe. A fence follows the poll,
+    /// so a [`news_pending`](Self::news_pending) read after this sees a flag
+    /// the control thread set before it took the bytes.
     pub(super) fn bytes_waiting(&self) -> bool {
-        self.probe
+        let waiting = self
+            .probe
             .lock_recover()
             .as_ref()
-            .is_some_and(|watch| watch.wait_readable(Duration::ZERO))
+            .is_some_and(|watch| watch.wait_readable(Duration::ZERO));
+        std::sync::atomic::fence(Ordering::SeqCst);
+        waiting
     }
 
     /// The control thread has read the control connection dry and delivered
