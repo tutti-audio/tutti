@@ -705,7 +705,7 @@ impl Lti for Network {
         let rate = self.rate;
         let width = self.width_after();
         for (g, f) in gain.iter_mut().zip(freqs) {
-            let w = std::f64::consts::TAU * f.get() / rate.get();
+            let w = f.angle_per_frame(rate).get();
             *g = if output < width {
                 self.channels_at(w)[output]
             } else {

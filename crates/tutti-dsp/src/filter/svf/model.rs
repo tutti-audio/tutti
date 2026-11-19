@@ -307,7 +307,7 @@ impl Lti for SvfModel {
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
         for (g, f) in gain.iter_mut().zip(freqs) {
             *g = if output == 0 {
-                self.at(2.0 * PI * f.get() / self.rate.get())
+                self.at(f.angle_per_frame(self.rate).get())
             } else {
                 Complex64::new(f64::NAN, f64::NAN)
             };

@@ -39,7 +39,6 @@ use tutti_units::{
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};
-use crate::finite::finite_or;
 use crate::{DelayLine, Glide, InterpolationMode, Lerp, MaxDelay, delay_step};
 
 /// The LFO's slowest rate: 0.01 Hz, a lane's value and a cell's alike. A rate below it
@@ -279,7 +278,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     #[must_use]
     pub fn design(&self, controls: &ModDelayControls) -> SweepDesign {
         let d = ModDelayControls::DEFAULT;
-        let hz = finite_or(controls.rate.get(), d.rate.get()).max(MIN_RATE.get());
+        let hz = controls.rate.finite_or(d.rate).max(MIN_RATE);
         let depth = if controls.depth.get().is_finite() {
             controls.depth
         } else {
@@ -291,13 +290,15 @@ impl<F: Float + Lerp> ModDelayBank<F> {
         let depth = SampleSpan::from_seconds(Seconds(depth), self.rate)
             .unwrap_or(SampleSpan::ZERO)
             .min(SampleSpan::from_samples(self.cap.frames()));
-        let feedback = finite_or(controls.feedback.get(), d.feedback.get())
-            .max(0.0)
-            .min(self.sweep.feedback_max().get());
+        let feedback = controls
+            .feedback
+            .finite_or(d.feedback)
+            .max(Feedback::NONE)
+            .min(self.sweep.feedback_max());
         SweepDesign {
-            inc: PhaseIncrement::per_sample(Hz(hz), self.rate),
+            inc: PhaseIncrement::per_sample(hz, self.rate),
             depth,
-            feedback: Feedback(feedback),
+            feedback,
         }
     }
 

@@ -34,7 +34,6 @@ use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds, Semitones};
 use super::SvfBank;
 use super::svf::{SvfCoefficients, SvfControls, SvfModel, SvfType};
 use crate::dynamics::{floored, key_levels};
-use crate::finite::finite_or;
 use crate::follower::{Follower, Smoothed};
 use crate::{COEFF_INTERVAL, Glide, Lanes, Lerp};
 
@@ -146,14 +145,12 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
     /// at 0. No allocation.
     pub fn aim(&mut self, controls: &EnvelopeFilterControls) {
         let d = EnvelopeFilterControls::DEFAULT;
-        let max = EnvelopeFilterControls::MAX_DEPTH.get();
+        let max = EnvelopeFilterControls::MAX_DEPTH;
         let times = floored(controls.attack, controls.release);
         self.controls = EnvelopeFilterControls {
-            base: Hz(finite_or(controls.base.get(), d.base.get())),
-            depth: Semitones(
-                finite_or(controls.depth.get(), Semitones::UNISON.get()).clamp(-max, max),
-            ),
-            q: Q(finite_or(controls.q.get(), d.q.get())),
+            base: controls.base.finite_or(d.base),
+            depth: controls.depth.finite_or(Semitones::UNISON).clamp(-max, max),
+            q: controls.q.finite_or(d.q),
             attack: times.attack(),
             release: times.release(),
         };

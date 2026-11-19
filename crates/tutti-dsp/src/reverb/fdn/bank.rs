@@ -540,7 +540,7 @@ impl<F: Float + Lerp> FdnBank<F> {
                 s.c_mod_next[j] = F::from_design(depth * libm::sin(s.phase[j]));
             }
         }
-        let dphi = std::f64::consts::TAU * c.rate.get() * Self::CHUNK as f64 / self.rate.get();
+        let dphi = c.rate.angle_per_frame(self.rate).get() * Self::CHUNK as f64;
         for j in 0..n {
             s.phase[j] = (s.phase[j] + dphi) % std::f64::consts::TAU;
             s.c_len[j] = c.len[j].now();

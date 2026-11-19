@@ -6,8 +6,6 @@
 //! own and the all-pass of every later one (see `state.rs`), so each band's
 //! response is the product of those, in closed form.
 
-use core::f64::consts::PI;
-
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use super::bands::{CrossoverError, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING, check_bands, validate};
@@ -167,7 +165,7 @@ impl Lti for CrossoverModel {
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
         for (g, f) in gain.iter_mut().zip(freqs) {
             *g = if output < self.bands {
-                let w = 2.0 * PI * f.get() / self.rate.get();
+                let w = f.angle_per_frame(self.rate).get();
                 let mut h = Complex64::new(1.0, 0.0);
                 for (j, c) in self.coeffs[..self.splits()].iter().enumerate() {
                     if j < output {
