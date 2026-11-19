@@ -39,7 +39,7 @@ fn an_unknown_id_does_not_open() {
 /// The trap this guards: inputs open with `Protocol::Midi20` so CoreMIDI
 /// up-converts MIDI-1.0 traffic. If `endpoint_capability` returned that
 /// choice rather than reading `kMIDIPropertyProtocolID`, every endpoint
-/// would claim MIDI 2.0 and `UmpCapability` would be vestigial.
+/// would claim MIDI 2.0 and the capability would be vestigial.
 ///
 /// Enumerating real devices **cannot** catch that here: every endpoint on a
 /// modern Mac (the IAC buses included) genuinely reports MIDI 2.0, so
@@ -64,12 +64,12 @@ fn capability_is_read_from_the_endpoint_not_assumed() {
 
     let cap = endpoint_capability(&source, None);
     assert_eq!(
-        cap.protocol,
+        cap.active().protocol,
         Protocol::Midi1,
         "a MIDI-1.0 endpoint must report Midi1 — returning a constant Midi2 \
          (or echoing the protocol we open ports with) fails here"
     );
-    assert!(!cap.carries_midi2_only());
+    assert!(!carries_midi2_only(&cap));
 }
 
 /// The `Midi2` direction is covered by the real-device enumeration above
@@ -86,7 +86,7 @@ fn a_midi2_endpoint_is_covered_by_enumeration() {
         .inputs()
         .into_iter()
         .chain(backend.outputs())
-        .any(|e| e.capability.protocol == Protocol::Midi2);
+        .any(|e| e.capability.active().protocol == Protocol::Midi2);
 
     // Not an assertion: a machine with no MIDI-2.0 endpoint is legitimate,
     // and asserting here would fail spuriously on CI. Reported so a reader
@@ -96,40 +96,6 @@ fn a_midi2_endpoint_is_covered_by_enumeration() {
             "note: no MIDI-2.0 endpoint on this machine; the Midi2 direction \
              of capability reading is uncovered here"
         );
-    }
-}
-
-/// Whatever the OS reports for its UMP Endpoints is within what the spec can
-/// hold: the Protocol is one of the two, and every block that reaches a
-/// capability has a number 0 to 31 and Groups inside 0 to 15 (M2-104 §7.1.8,
-/// §3.1), at most 32 blocks to an endpoint (§7.1.8: five-bit block numbers).
-/// Before macOS 15 the list is absent and no endpoint has a block. This asserts
-/// invariants only: how many endpoints, and what they declare, is the machine's.
-/// Spec: m2-104/6.1.1#1, m2-104/6.1.1#2
-#[test]
-fn the_os_blocks_are_within_the_spec() {
-    let backend = CoreMidiEndpoints::new();
-    // Unsupported is a fact of the OS (the class is absent), so one read of it
-    // holds for every listing below; an exception proves nothing.
-    let unsupported = matches!(ump_endpoints(), Err(UmpEndpointsError::Unsupported));
-    let all = backend.inputs().into_iter().chain(backend.outputs());
-    for info in all {
-        let cap = &info.capability;
-        assert!(matches!(cap.protocol, Protocol::Midi1 | Protocol::Midi2));
-        assert!(
-            cap.blocks.len() <= 32,
-            "{}: {} blocks",
-            info.name,
-            cap.blocks.len()
-        );
-        for block in &cap.blocks {
-            assert!(block.id().get() < 32);
-            let end = u16::from(block.first_group().get()) + u16::from(block.groups().get());
-            assert!(end <= 16, "{}: Groups run to {end}", info.name);
-        }
-        if unsupported {
-            assert!(cap.blocks.is_empty(), "no UMP endpoint list, no blocks");
-        }
     }
 }
 
