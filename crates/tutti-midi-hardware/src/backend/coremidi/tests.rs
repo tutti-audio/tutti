@@ -62,7 +62,10 @@ fn capability_is_read_from_the_endpoint_not_assumed() {
         return;
     };
 
-    let cap = endpoint_capability(&source, None);
+    // The ffi reads the capability from the endpoint taken by its unique id.
+    let id = UniqueId::new(source.unique_id().expect("a unique id").cast_signed());
+    let endpoint = tutti_coremidi_ffi::find_source(id).expect("the source is listed");
+    let cap = endpoint_capability(&endpoint, None);
     assert_eq!(
         cap.active().protocol,
         Protocol::Midi1,

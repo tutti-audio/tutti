@@ -4,17 +4,16 @@
 //! Timestamps) reach the wire. The safe `coremidi` wrapper has only the MIDI 1.0
 //! source, whose send path is legacy packet bytes.
 
-use crate::client_retry::create_client;
-use crate::error::{Error, Operation, OsStatus};
+use super::client::SharedClient;
+use super::error::{Error, Operation, OsStatus};
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use coremidi_sys::{
-    ByteCount, MIDIClientCreate, MIDIClientRef, MIDIEndpointDispose, MIDIEndpointRef,
-    MIDIEventList, MIDIEventListAdd, MIDIEventListInit, MIDIProtocolID, MIDIReceivedEventList,
-    MIDISourceCreateWithProtocol, MIDITimeStamp, kMIDIProtocol_1_0, kMIDIProtocol_2_0,
+    ByteCount, MIDIEndpointDispose, MIDIEndpointRef, MIDIEventList, MIDIEventListAdd,
+    MIDIEventListInit, MIDIProtocolID, MIDIReceivedEventList, MIDISourceCreateWithProtocol,
+    MIDITimeStamp, kMIDIProtocol_1_0, kMIDIProtocol_2_0,
 };
 use std::mem::MaybeUninit;
-use std::sync::Mutex;
 use tutti_ump::{Protocol, Ump};
 
 /// CoreMIDI's id (`MIDIProtocolID`) for the protocol a virtual endpoint
@@ -31,38 +30,6 @@ pub(crate) fn protocol_id(protocol: Protocol) -> Result<MIDIProtocolID, Error> {
         _ => return Err(Error::ReservedProtocol),
     };
     Ok(id as MIDIProtocolID)
-}
-
-/// The process-wide raw client every endpoint here belongs to.
-///
-/// Never disposed: disposing the last client may make the MIDI server exit and
-/// fail every later client creation. A failed creation is retried for a bounded
-/// time and not cached.
-pub(crate) fn shared_raw_client() -> Result<MIDIClientRef, OsStatus> {
-    static CLIENT: Mutex<Option<MIDIClientRef>> = Mutex::new(None);
-    let mut slot = CLIENT
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(client) = *slot {
-        return Ok(client);
-    }
-    let name = CFString::new("tutti-ump-src");
-    let client = create_client(|| {
-        let mut client: MIDIClientRef = 0;
-        // SAFETY: `name` outlives the call; `client` is a valid out-pointer. A NULL
-        // notify proc with a NULL context is the documented "no notifications" form.
-        let status = unsafe {
-            MIDIClientCreate(
-                name.as_concrete_TypeRef(),
-                None,
-                std::ptr::null_mut(),
-                &mut client,
-            )
-        };
-        OsStatus::check(status).map(|()| client)
-    })?;
-    *slot = Some(client);
-    Ok(client)
 }
 
 /// Send this timestamp to mean "now" (CoreMIDI treats 0 as immediate delivery).
@@ -83,18 +50,17 @@ pub struct UmpSource {
 }
 
 impl UmpSource {
-    /// Creates a virtual source named `name` carrying `protocol`, visible to
-    /// other apps as a UMP-capable MIDI source.
+    /// Creates a virtual source named `name` carrying `protocol` on `client`,
+    /// visible to other apps as a UMP-capable MIDI source.
     ///
     /// # Errors
     ///
     /// [`Error::ReservedProtocol`] for a reserved `protocol`, and
-    /// [`Error::Call`] when CoreMIDI refuses the client or the endpoint.
-    pub fn new(name: &str, protocol: Protocol) -> Result<Self, Error> {
+    /// [`Error::Call`] when CoreMIDI refuses the endpoint.
+    pub fn new(client: SharedClient, name: &str, protocol: Protocol) -> Result<Self, Error> {
         let protocol = protocol_id(protocol)?;
         let source_name = CFString::new(name);
-        let client =
-            shared_raw_client().map_err(|status| Error::call(Operation::CreateClient, status))?;
+        let client = client.get();
 
         let mut source: MIDIEndpointRef = 0;
         // SAFETY: `client` is the live process-wide client; `source_name` outlives
@@ -161,6 +127,7 @@ impl Drop for UmpSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::os::client::test_client;
     use tutti_ump::read_protocol;
 
     fn assert_send_sync<T: Send + Sync>() {}
@@ -186,7 +153,7 @@ mod tests {
             Ok(kMIDIProtocol_2_0 as MIDIProtocolID)
         );
         assert!(matches!(
-            UmpSource::new("tutti-ffi-test", read_protocol(3)),
+            UmpSource::new(test_client(), "tutti-ffi-test", read_protocol(3)),
             Err(Error::ReservedProtocol)
         ));
     }
@@ -195,7 +162,8 @@ mod tests {
     /// 2-word MIDI 2.0 note and a 4-word SysEx8 each fit the event list.
     #[test]
     fn a_message_of_each_length_is_sent() {
-        let source = UmpSource::new("tutti-ffi-test", Protocol::Midi2).expect("CoreMIDI");
+        let source =
+            UmpSource::new(test_client(), "tutti-ffi-test", Protocol::Midi2).expect("CoreMIDI");
         assert_eq!(source.send(&Ump([0x0020_1234, 0, 0, 0])), Ok(()));
         assert_eq!(source.send(&Ump([0x4090_3C00, 0x8000_0000, 0, 0])), Ok(()));
         assert_eq!(source.send(&Ump([0x5001_0000, 1, 2, 3])), Ok(()));

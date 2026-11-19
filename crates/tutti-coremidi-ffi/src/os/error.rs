@@ -89,6 +89,9 @@ pub enum Error {
     /// one), and no endpoint is created in it.
     #[error("no endpoint is created in a reserved protocol")]
     ReservedProtocol,
+    /// The process's client has been started: it has one, and a second is not made.
+    #[error("the process's CoreMIDI client is already started")]
+    ClientExists,
 }
 
 impl Error {

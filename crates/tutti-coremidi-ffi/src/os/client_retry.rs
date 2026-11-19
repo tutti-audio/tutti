@@ -5,7 +5,7 @@
 //! fresh server is up about five seconds later. `ClientRetry` decides when to
 //! try again; [`create_client`] is the loop that reads the clock and sleeps.
 
-use crate::error::OsStatus;
+use super::error::OsStatus;
 use std::sync::Mutex;
 use std::time::Duration;
 use tutti_platform::Instant;

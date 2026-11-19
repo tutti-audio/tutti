@@ -25,9 +25,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::error::{Error, Operation, OsStatus};
-use crate::host_clock::Timebase;
-use crate::source::{protocol_id, shared_raw_client};
+use super::client::SharedClient;
+use super::error::{Error, Operation, OsStatus};
+use super::host_clock::Timebase;
+use super::source::protocol_id;
 use tutti_ump::{Protocol, Ump, split_stream};
 
 /// The receive block CoreMIDI calls with each event list: the list, and the
@@ -108,20 +109,24 @@ impl fmt::Debug for UmpDestination {
 }
 
 impl UmpDestination {
-    /// Publishes a virtual destination named `name` carrying `protocol`;
-    /// `on_ump` gets each message sent to it.
+    /// Publishes a virtual destination named `name` carrying `protocol` on
+    /// `client`; `on_ump` gets each message sent to it.
     ///
     /// # Errors
     ///
     /// [`Error::ReservedProtocol`] for a reserved `protocol`, and
-    /// [`Error::Call`] when the client or the endpoint cannot be created.
-    pub fn new<F>(name: &str, protocol: Protocol, on_ump: F) -> Result<Self, Error>
+    /// [`Error::Call`] when the endpoint cannot be created.
+    pub fn new<F>(
+        client: SharedClient,
+        name: &str,
+        protocol: Protocol,
+        on_ump: F,
+    ) -> Result<Self, Error>
     where
         F: FnMut(Option<Duration>, Ump) + Send + 'static,
     {
         let protocol = protocol_id(protocol)?;
-        let client =
-            shared_raw_client().map_err(|status| Error::call(Operation::CreateClient, status))?;
+        let client = client.get();
         let callback = Arc::new(Callback {
             on_ump: Mutex::new(Some(Box::new(on_ump))),
             faults: AtomicU64::new(0),

@@ -26,6 +26,10 @@ objc2-core-midi = { workspace = true }
 # `Instant`, the one clock type.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
+# The OS-free checks derive their errors on every target the tests run on.
+[dev-dependencies]
+thiserror = { workspace = true, features = ["std"] }
+
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2-foundation = { workspace = true, features = ["NSDictionary"] }
 objc2-core-midi = { workspace = true, features = ["block2", "MIDIUMPMutableEndpoint", "MIDIUMPMutableFunctionBlock"] }
