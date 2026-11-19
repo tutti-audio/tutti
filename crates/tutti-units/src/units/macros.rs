@@ -9,6 +9,8 @@
 //         pub struct Db(pub f64): Unit, Ordered, Bounded, Additive, Signed;
 //     }
 //
+// Every float quantity also gets `finite_or`.
+//
 // The struct form picks the representation from the raw type. `f64` gives a
 // float quantity: derives `Copy, Clone, Debug, PartialEq, Default`,
 // serde `transparent` under `serde`. Any other raw type gives an integer
@@ -36,6 +38,16 @@ macro_rules! unit {
         #[cfg_attr(feature = "serde", serde(transparent))]
         $v struct $name($fv $raw);
         $(unit!(@ability $ability $name, $raw $(, $arg)?);)*
+
+        impl $name {
+            /// This value when it is finite, else `fallback`, exactly: no clamping, and a
+            /// finite `-0.0` is kept.
+            #[inline]
+            #[must_use]
+            pub fn finite_or(self, fallback: Self) -> Self {
+                if self.0.is_finite() { self } else { fallback }
+            }
+        }
     };
 
     // Integer quantities.
