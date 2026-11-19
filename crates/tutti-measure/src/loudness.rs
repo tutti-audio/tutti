@@ -201,7 +201,7 @@ impl Loudness {
 /// Wraps `EbuR128`, which accumulates internally. Not for the audio thread: the
 /// meter keeps the gating blocks of the whole run, so it grows with the audio
 /// and allocates.
-pub struct LoudnessMeter<S: Sample = f32> {
+pub struct LoudnessMeter<S: Sample> {
     layout: ChannelLayout,
     meter: EbuR128,
     sample: PhantomData<fn(S)>,
@@ -329,7 +329,7 @@ impl<S: Sample> Measure<S> for TruePeakConfig {
 /// Not for the audio thread: the meter's own buffers allocate as it grows. A
 /// push widens the chunk to the meter's `f64` in blocks of a scratch built with
 /// the meter, and allocates nothing itself.
-pub struct TruePeakMeter<S: Sample = f32> {
+pub struct TruePeakMeter<S: Sample> {
     layout: ChannelLayout,
     meter: EbuR128,
     /// One block of a chunk widened to the meter's `f64`.
@@ -532,7 +532,7 @@ impl WindowedReading {
 /// Each push yields the [`WindowedReading`] after it, and
 /// [`finish`](Meter::finish) reads the last one. Not for the audio thread (see
 /// [`push`](Meter::push)).
-pub struct WindowedMeter<S: Sample = f32> {
+pub struct WindowedMeter<S: Sample> {
     layout: ChannelLayout,
     rate: SampleRate,
     meter: EbuR128,

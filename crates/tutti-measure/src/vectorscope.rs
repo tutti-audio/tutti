@@ -83,7 +83,7 @@ impl<S: Sample> Measure<S> for VectorscopeConfig {
 /// Carries how many frames to skip before the next point, so a stream fed in
 /// blocks keeps one stride phase instead of restarting it per block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VectorscopeMeter<S: Sample = f32> {
+pub struct VectorscopeMeter<S: Sample> {
     decimate: NonZeroUsize,
     skip: usize,
     sample: PhantomData<fn(S)>,

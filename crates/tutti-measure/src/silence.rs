@@ -149,7 +149,7 @@ impl<S: Sample> Measure<S> for SilenceConfig {
 /// Not for the audio thread: it keeps one entry per region found, so it grows
 /// with the audio and allocates. Feed it from the offline or UI side.
 #[derive(Debug, Clone)]
-pub struct SilenceMeter<S: Sample = f32> {
+pub struct SilenceMeter<S: Sample> {
     /// The threshold as a linear magnitude.
     floor: Amplitude,
     min_silence: Samples,
