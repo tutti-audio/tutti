@@ -228,7 +228,7 @@ pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 pub use tutti_session::{ParamRef, RouteSpec};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, UnitError,
+    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError,
 };
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{SamplerEvent, SamplerLoad};

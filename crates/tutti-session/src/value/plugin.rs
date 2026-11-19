@@ -1,7 +1,6 @@
 //! Targets on a hosted plugin: [`PluginParamTarget`] for a parameter's position
 //! and [`PluginAutomationModeTarget`] for the host's automation mode.
 
-use std::any::TypeId;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -118,9 +117,9 @@ impl From<PluginParamTarget> for crate::ModTarget {
     }
 }
 
-impl<U: 'static> sealed::Sealed for PluginParamTarget<U> {
+impl<U> sealed::Sealed for PluginParamTarget<U> {
     fn id(self) -> TargetId {
-        TargetId::PluginParam(self.node, self.id, TypeId::of::<U>())
+        TargetId::PluginParam(self.node, self.id)
     }
 }
 impl Target for PluginParamTarget {
@@ -174,7 +173,7 @@ struct Conversion {
 impl Conversion {
     /// The conversion of parameter `id` into `U`, from its declared map and
     /// unit.
-    fn of<U: PlainUnit>(
+    fn of<U: PluginUnit>(
         id: ParamId,
         map: Option<PlainMap>,
         measures: Option<ParamUnit>,
@@ -215,7 +214,7 @@ impl Conversion {
     }
 
     /// The position `position` in `U`.
-    fn read<U: PlainUnit>(&self, position: Normalized) -> Option<U> {
+    fn read<U: PluginUnit>(&self, position: Normalized) -> Option<U> {
         U::from_plain(
             self.unit,
             self.map.plain(position).clamp(self.low, self.high),
@@ -223,7 +222,7 @@ impl Conversion {
     }
 
     /// The position of `value`, or why the range does not take it.
-    fn position<U: PlainUnit>(&self, value: U) -> Result<Normalized, SetRefusal> {
+    fn position<U: PluginUnit>(&self, value: U) -> Result<Normalized, SetRefusal> {
         let plain = value.to_plain(self.unit);
         if !plain.is_finite() {
             return Err(SetRefusal::NotFinite);
@@ -235,7 +234,7 @@ impl Conversion {
     }
 }
 
-impl<U: PlainUnit> PluginParamTarget<U> {
+impl<U: PluginUnit> PluginParamTarget<U> {
     /// Parameter `info` of the plugin at `node` as a target in `U`, when its
     /// declaration reads as `U`.
     pub(crate) fn declared(node: NodeKey, info: &ParameterInfo) -> Result<Self, UnitError> {
@@ -265,6 +264,16 @@ impl<U: PlainUnit> PluginParamTarget<U> {
     }
 }
 
+mod unit_sealed {
+    /// Names the units a plugin parameter is a target in.
+    pub trait Sealed {}
+}
+
+/// A tutti unit a plugin parameter is a target in
+/// ([`Param::try_unit`](crate::Param::try_unit)): the [`PlainUnit`]s with a
+/// target, sealed so the units that make a target are the units that store.
+pub trait PluginUnit: PlainUnit + unit_sealed::Sealed {}
+
 /// What a plugin parameter in a unit is written through: its cell and the
 /// conversion read when the write was staged.
 #[derive(Debug)]
@@ -274,9 +283,13 @@ pub struct UnitCell {
 }
 
 /// The targets of a parameter in each of the units a plugin declares
-/// ([`PlainUnit`]).
+/// ([`PlainUnit`]): one impl per type, since a blanket impl over
+/// [`PluginUnit`] overlaps `Normalized`'s under coherence.
 macro_rules! unit_targets {
     ($($ty:ty),+ $(,)?) => {$(
+        impl unit_sealed::Sealed for $ty {}
+        impl PluginUnit for $ty {}
+
         impl Target for PluginParamTarget<$ty> {
             type Value = $ty;
         }
@@ -446,7 +459,7 @@ impl PluginEntry {
 
     /// The conversion of `id` into `U` from the declaration held now: `None`
     /// for a parameter that is not declared.
-    fn conversion<U: PlainUnit>(&self, id: ParamId) -> Option<Result<Conversion, UnitError>> {
+    fn conversion<U: PluginUnit>(&self, id: ParamId) -> Option<Result<Conversion, UnitError>> {
         let declared = self.param(id)?;
         Some(Conversion::of::<U>(
             id,

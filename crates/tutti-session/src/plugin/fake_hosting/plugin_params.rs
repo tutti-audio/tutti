@@ -958,3 +958,36 @@ fn a_write_to_a_parameter_a_rescan_dropped_is_counted_and_then_no_target() {
         "a write that is refused at the call is not counted"
     );
 }
+
+/// **One plugin parameter named in two value types in one batch is refused**:
+/// a position write and a hertz write to `cutoff`, in either order, fail at the
+/// second item with `MixedValueTypes` and land nothing; two writes in one type
+/// stay last-wins, landing the analytic position of the last.
+#[test]
+fn a_batch_naming_one_parameter_in_two_units_is_refused() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let hz = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+    let position = key.param(CUTOFF);
+
+    let Err(error) = s.set((position.to(Normalized::of(0.1)), hz.to(Hz::new(5_015.0)))) else {
+        panic!("a mixed pair is refused");
+    };
+    assert_eq!(
+        (error.at, error.kind),
+        (1, ValueErrorKind::Refused(SetRefusal::MixedValueTypes))
+    );
+    let Err(error) = s.set((hz.to(Hz::new(5_015.0)), position.to(Normalized::of(0.1)))) else {
+        panic!("a mixed pair is refused in the other order");
+    };
+    assert_eq!(error.at, 1);
+    assert_eq!(s.get(position).unwrap(), Normalized::of(0.5));
+    assert!(fake.sets().is_empty(), "a refused batch lands nothing");
+
+    s.set((
+        hz.to(Hz::new(100.0)),
+        hz.to(Hz::new(20.0 + 19_980.0 * 0.75)),
+    ))
+    .unwrap();
+    assert_eq!(fake.sets(), [(CUTOFF, 0.75)]);
+}

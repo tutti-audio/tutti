@@ -62,7 +62,7 @@ pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "plugin")]
 pub(crate) use plugin::{AutomationModeSlot, CarriedParam, PluginEntry};
 #[cfg(feature = "plugin")]
-pub use plugin::{PluginAutomationModeTarget, PluginParamTarget};
+pub use plugin::{PluginAutomationModeTarget, PluginParamTarget, PluginUnit};
 pub(crate) use program::{
     Automation, AutomationCell, AutomationField, Declared, Edited, Field, MacroField, RateField,
 };

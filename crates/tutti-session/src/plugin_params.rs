@@ -69,13 +69,13 @@
 use tutti_graph::NodeKey;
 
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginSignal};
-use tutti_plugin_types::{ParamEdit, ParameterInfo, PlainUnit, UnknownParam};
+use tutti_plugin_types::{ParamEdit, ParameterInfo, UnknownParam};
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use crate::plugin::{Gate, HostedPlugin, Signals, queue};
-use crate::{PluginParamRefusal, PluginParamTarget, UnitError};
+use crate::{PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError};
 
 /// The lane knobs of a plugin's driven parameters: where a set of one goes,
 /// whether the host made it or the plugin reported it. The modulation apply
@@ -251,7 +251,7 @@ impl<'a> Param<'a> {
     /// range), [`UnitError::UnitMismatch`] for a unit `U` does not read
     /// (`Db` on a parameter in hertz) and [`UnitError::RangeUnfit`] for a
     /// declared range `U` cannot hold all of.
-    pub fn try_unit<U: PlainUnit>(&self) -> Result<PluginParamTarget<U>, UnitError> {
+    pub fn try_unit<U: PluginUnit>(&self) -> Result<PluginParamTarget<U>, UnitError> {
         PluginParamTarget::declared(self.params.node, self.info())
     }
 
