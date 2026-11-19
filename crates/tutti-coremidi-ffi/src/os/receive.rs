@@ -2,10 +2,8 @@
 //! each event list, and the callback it hands each UMP message to.
 //!
 //! [`UmpDestination`](crate::UmpDestination) and [`InputPort`](crate::InputPort)
-//! share it. The safe `coremidi` wrapper's receive block reads the connection's
-//! reference constant as a `&mut ()`; a virtual destination has no connection, so
-//! CoreMIDI passes a null one, and the wrapper makes a null reference out of it on
-//! the first packet. The block here never reads the reference constant.
+//! share it. A virtual destination has no connection, so CoreMIDI passes the block a
+//! null reference constant; the block never reads it.
 
 use block2::RcBlock;
 use coremidi_sys::{

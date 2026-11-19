@@ -1,16 +1,11 @@
 //! A **native-UMP** virtual MIDI destination, the inbound counterpart to
 //! [`UmpSource`](crate::UmpSource).
 //!
-//! The safe `coremidi` wrapper has `Client::virtual_destination_with_protocol`,
-//! but its receive block reads the connection's reference constant as a
-//! `&mut ()`. A virtual destination has no connection, so CoreMIDI passes a
-//! null one, and the wrapper makes a null reference out of it on the first
-//! packet ("null reference produced" in a debug build, undefined behaviour in
-//! a release one). [`UmpDestination`] creates the endpoint with
-//! `MIDIDestinationCreateWithProtocol` itself, with a block that never reads
-//! the reference constant, and hands the caller each UMP message of each packet
-//! with its time.
-//! The receive block is shared with [`InputPort`](crate::InputPort).
+//! A virtual destination has no connection, so CoreMIDI passes its receive block a
+//! null reference constant; [`UmpDestination`] creates the endpoint with
+//! `MIDIDestinationCreateWithProtocol` and a block that never reads it, and hands
+//! the caller each UMP message of each packet with its time. The block is shared
+//! with [`InputPort`](crate::InputPort).
 
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;

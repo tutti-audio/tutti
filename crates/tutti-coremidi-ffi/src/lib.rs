@@ -16,7 +16,7 @@
 //!
 //! | | |
 //! |---|---|
-//! | `UmpSource` | a native-UMP virtual source in the MIDI 1.0 or MIDI 2.0 protocol (a `tutti_ump::Protocol`; a reserved one is refused): it disposes its endpoint on drop, and sends a UMP message as an event list. The safe `coremidi` wrapper has the destination side and no source |
+//! | `UmpSource` | a native-UMP virtual source in the MIDI 1.0 or MIDI 2.0 protocol (a `tutti_ump::Protocol`; a reserved one is refused): it disposes its endpoint on drop, and sends a UMP message as an event list. |
 //! | `UmpDestination` | a native-UMP virtual destination: it hands its callback each UMP message of each packet with its time as an `Option<Duration>` since the host clock's origin, and counts a truncated tail it drops |
 //! | `ump_endpoints` | the UMP Endpoints and Function Blocks CoreMIDI reports (macOS 15's `MIDIUMPEndpoint`, Objective-C classes bound through `objc2-core-midi`), as `tutti-ump` values; `UmpEndpointsError::Unsupported` before macOS 15, where the classes do not exist, and `Exception` for an Objective-C exception CoreMIDI raises (as seen when no MIDI server is reachable) |
 //! | `UniqueId`, `OsStatus` | CoreMIDI's `kMIDIPropertyUniqueID` and the `OSStatus` of a failed call |

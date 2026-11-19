@@ -1,8 +1,7 @@
 //! A **native-UMP** virtual MIDI source: an endpoint created with
 //! `MIDISourceCreateWithProtocol` and fed raw UMP words through
 //! `MIDIReceivedEventList`, so MIDI 2.0 messages (per-note controllers, JR
-//! Timestamps) reach the wire. The safe `coremidi` wrapper has only the MIDI 1.0
-//! source, whose send path is legacy packet bytes.
+//! Timestamps) reach the wire.
 
 use super::client::SharedClient;
 use super::error::{Error, Operation, OsStatus};
