@@ -37,7 +37,7 @@ use tutti_rt::RingFloat;
 /// Consumed by [`start`](Self::start) (a thread) or `by_hand` (the caller).
 /// Dropping it drops the queue's one receiver, so a sender is told the
 /// streamer is gone.
-pub(super) struct Built<F: RingFloat = f32> {
+pub(super) struct Built<F: RingFloat> {
     /// The command queue's sending end, cloned for every sender.
     tx: StreamerSender<F>,
     /// Its receiving end, until a driver takes it.
@@ -167,7 +167,7 @@ impl<F: RingFloat> Built<F> {
 }
 
 /// The streamer driven by its own thread: what
-/// [`DiskStreamer::new`](crate::DiskStreamer::new) builds.
+/// [`DiskStreamer::start`](crate::DiskStreamer::start) builds.
 ///
 /// `Drop` stops the thread and joins it.
 pub struct Running {
@@ -209,13 +209,13 @@ impl Drop for Running {
 }
 
 /// The streamer driven by the caller, a cycle at a time: what
-/// `DiskStreamer::manual` builds. Requires the
+/// `DiskStreamer::by_hand` builds. Requires the
 /// `testing` feature.
 ///
 /// There is no thread to race, so a test can say "after this many cycles the
 /// ring holds audio"; it is the same `StreamerCycle::step` the thread runs.
 #[cfg(any(test, feature = "testing"))]
-pub struct ByHand<F: RingFloat = f32> {
+pub struct ByHand<F: RingFloat> {
     rx: Option<Receiver<StreamerCommand<F>>>,
     cycle: StreamerCycle<F>,
     shared: Handles<F>,
@@ -268,14 +268,14 @@ mod tests {
     const _: () = {
         fn sync<T: Sync>() {}
         let _ = sync::<Running>;
-        let _ = sync::<ByHand>;
+        let _ = sync::<ByHand<f32>>;
     };
 
     /// A backstop far longer than any test waits: a streamer that wakes inside
     /// a test's bound was rung, not timed out.
     const LONG_WAIT: Duration = Duration::from_secs(60);
 
-    fn built(capacity: usize) -> Built {
+    fn built(capacity: usize) -> Built<f32> {
         Built::new(
             capacity,
             SampleRate::SR_48K,

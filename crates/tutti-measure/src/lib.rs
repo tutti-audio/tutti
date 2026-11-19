@@ -85,6 +85,10 @@
 //! converting block by block on the stack; `Measure::<i16>::measure(&config,
 //! context)` names another format when a push does not fix it.
 //!
+//! Every analysis reads its input in whatever format the caller holds and runs
+//! at `f64`: spectra, statistics and readings are `f64`, and the transform
+//! scratch is a `FftScratch<f64>`. A reading is never narrowed on the way out.
+//!
 //! | Analysis | Config | One-shot | Meter | Context | Input | Item | Output | Audio thread |
 //! |---|---|---|---|---|---|---|---|---|
 //! | silence | [`SilenceConfig`] | [`strip_silence`] | [`SilenceMeter`] | `SampleRate` | `Mono` | `()` | `Vec<Region>` | no: grows per region |

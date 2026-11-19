@@ -84,10 +84,7 @@ impl Node for ProbeUnit {
 
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         match io.param(0).frames() {
-            Some(v) => {
-                let v: Vec<f32> = v.to_vec();
-                io.output(0).copy_from_slice(&v);
-            }
+            Some(v) => io.output(0).copy_from_slice(v),
             None => {
                 let k = self.knob.load(Ordering::Acquire);
                 io.output(0).fill(k as f32);

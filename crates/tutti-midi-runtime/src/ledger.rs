@@ -36,9 +36,10 @@
 //! like one the port refused: the note does not start, so no off is owed. A
 //! note already started always has its row, so a full table never strands one.
 
-use crate::held::Controllers;
 use tutti_graph::{Event, EventWriter, Offset};
-use tutti_ump::{Message, NoteKey, NoteKeyEvent, NoteVelocity, Protocol, Ump, Voice2};
+use tutti_ump::{
+    HeldControllers, Message, NoteKey, NoteKeyEvent, NoteVelocity, Protocol, Ump, Voice2,
+};
 
 /// The off a ledger owes `key`: a MIDI 2.0 Note Off at velocity 0 on its Group,
 /// Channel and Note Number.
@@ -108,7 +109,7 @@ pub(crate) struct NoteLedger<T> {
     owing: usize,
     /// The hold pedals and the pitch bend the port has been told are off
     /// their normal position.
-    controllers: Controllers,
+    controllers: Box<HeldControllers>,
 }
 
 impl<T> std::fmt::Debug for NoteLedger<T> {
@@ -128,7 +129,7 @@ impl<T: Copy + PartialEq> NoteLedger<T> {
             entries: Vec::with_capacity(capacity),
             capacity,
             owing: 0,
-            controllers: Controllers::new(),
+            controllers: Box::default(),
         }
     }
 
@@ -143,7 +144,7 @@ impl<T: Copy + PartialEq> NoteLedger<T> {
     pub fn forget(&mut self) {
         self.entries.clear();
         self.owing = 0;
-        self.controllers.forget();
+        self.controllers.clear();
     }
 
     /// The handle a block sends through. Everything owed goes out first, at
@@ -221,7 +222,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
     fn pay(&mut self, at: Offset) {
         if self.ledger.owing == 0 {
             // The pedals only after every owed note-off (A-5).
-            self.ledger.controllers.pay(self.out, at);
+            self.pay_controllers(at);
             return;
         }
         let mut full = false;
@@ -240,8 +241,20 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
         });
         self.ledger.recount();
         if self.ledger.owing == 0 {
-            self.ledger.controllers.pay(self.out, at);
+            self.pay_controllers(at);
         }
+    }
+
+    /// Writes the controller lifts the port refused earlier, stopping at the
+    /// first it refuses again. Each attempt gives its count back, so a delayed
+    /// lift nets zero.
+    fn pay_controllers(&mut self, at: Offset) {
+        let out = &mut *self.out;
+        self.ledger.controllers.pay(|lift| {
+            let taken = out.push(Event::midi(at, lift)).is_ok();
+            out.recovered();
+            taken
+        });
     }
 
     /// Writes `ump` at `at`. A note message is kept track of: a note-on the
@@ -411,7 +424,25 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
         self.ledger.recount();
         // Then the controllers: a pedal still down holds the notes just ended
         // (MIDI 1.0 Detailed Spec A-5), so it is lifted after them.
-        self.ledger.controllers.lift_all(self.out, at);
+        let out = &mut *self.out;
+        let mut full = false;
+        self.ledger.controllers.lift_all(|lift, owed| {
+            let attempted = !full;
+            if attempted && out.push(Event::midi(at, lift)).is_ok() {
+                if owed {
+                    out.recovered();
+                }
+                return true;
+            }
+            match (attempted, owed) {
+                // The refused push counted itself.
+                (true, true) => out.recovered(),
+                (false, false) => out.withhold(),
+                _ => {}
+            }
+            full = true;
+            false
+        });
     }
 }
 

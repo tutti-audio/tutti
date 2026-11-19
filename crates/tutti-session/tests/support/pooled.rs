@@ -12,9 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tutti_plugin::catalog::{
-    Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId, PluginRef,
-};
+use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, PluginId, PluginRef};
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_rt::LockExt;
@@ -95,8 +93,8 @@ pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
 /// file's first plugin when the ref names none).
 pub fn catalog_of(plugin: &PluginRef) -> (Catalog, PluginId, tempfile::TempDir) {
     let dir = tempfile::TempDir::new().expect("a scratch directory");
-    let config = CatalogConfig::new(dir.path(), NO_SCAN_DIRS)
-        .probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
+    let config =
+        CatalogConfig::new(dir.path()).probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
     probe(&mut catalog, plugin.path());
     let file = tutti_plugin_db::canonical_path(plugin.path());

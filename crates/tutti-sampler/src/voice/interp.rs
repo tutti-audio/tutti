@@ -546,7 +546,7 @@ pub(crate) fn read_looped_frame<S: Sample, F: Float>(
 /// frame of any width other than the one the spread was built for. A width past
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) is built for that many, the most a reader writes.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MonoSpread<F: Float = f32> {
+pub struct MonoSpread<F: Float> {
     /// `None`: to every channel. Otherwise the fold of one channel into the
     /// destination.
     fold: Option<Fold<F>>,
@@ -668,7 +668,7 @@ pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
 /// The frame is the one a reader writes: its width is the node's, at most
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) (a wider node's remaining channels are silent).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Place<F: Float = f32> {
+pub enum Place<F: Float> {
     /// A mono wave placed by its spread, or a wave read channel for channel.
     Native(MonoSpread<F>),
     /// A wave that is not mono and not already the frame's order and width,

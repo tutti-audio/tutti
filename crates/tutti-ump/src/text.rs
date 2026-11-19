@@ -5,6 +5,8 @@
 
 use core::iter::FusedIterator;
 
+use tutti_units::Text;
+
 use crate::Form;
 
 /// The packets of `bytes`, `W` bytes each: one `Complete` when it fits, else a
@@ -92,6 +94,7 @@ impl<const W: usize> FusedIterator for TextPackets<'_, W> {}
 /// - A message longer than `N` is dropped whole, counted, and its remaining
 ///   packets are skipped.
 /// - The text ends at the first `0x00`, the padding.
+/// - A message that is not UTF-8 is dropped whole, counted.
 ///
 /// ```
 /// use tutti_ump::{StreamTextAssembler, text_packets};
@@ -100,10 +103,10 @@ impl<const W: usize> FusedIterator for TextPackets<'_, W> {}
 /// let mut done = None;
 /// for (form, packet) in text_packets::<4>(b"a name") {
 ///     if let Some(text) = assembler.feed(0, form, &packet) {
-///         done = Some(text.to_vec());
+///         done = Some(text);
 ///     }
 /// }
-/// assert_eq!(done.as_deref(), Some(&b"a name"[..]));
+/// assert_eq!(done.as_ref().map(|text| text.as_str()), Some("a name"));
 /// assert_eq!(assembler.dropped(), 0);
 /// ```
 #[derive(Clone, Copy, Debug)]
@@ -134,7 +137,7 @@ impl<const N: usize> StreamTextAssembler<N> {
 
     /// Takes one packet of `owner`'s text; the message it completes comes back,
     /// cut at the first `0x00`.
-    pub fn feed(&mut self, owner: u8, form: Form, bytes: &[u8]) -> Option<&[u8]> {
+    pub fn feed(&mut self, owner: u8, form: Form, bytes: &[u8]) -> Option<Text<0, N>> {
         match form {
             Form::Complete | Form::Start => {
                 if self.open.is_some() {
@@ -162,11 +165,15 @@ impl<const N: usize> StreamTextAssembler<N> {
         self.open = None;
         let text = &self.buf[..self.len];
         let cut = text.iter().position(|&b| b == 0).unwrap_or(text.len());
-        Some(&text[..cut])
+        let text = core::str::from_utf8(&text[..cut]).ok().and_then(Text::new);
+        if text.is_none() {
+            self.dropped += 1;
+        }
+        text
     }
 
     /// Messages dropped whole since this assembler was made: interrupted by
-    /// another message's start, or longer than `N` bytes.
+    /// another message's start, longer than `N` bytes, or not UTF-8.
     #[must_use]
     pub const fn dropped(&self) -> u64 {
         self.dropped
@@ -181,10 +188,14 @@ mod tests {
         assembler: &mut StreamTextAssembler<N>,
         owner: u8,
         parts: &[(Form, &[u8])],
-    ) -> Vec<Option<Vec<u8>>> {
+    ) -> Vec<Option<String>> {
         parts
             .iter()
-            .map(|(form, bytes)| assembler.feed(owner, *form, bytes).map(<[u8]>::to_vec))
+            .map(|(form, bytes)| {
+                assembler
+                    .feed(owner, *form, bytes)
+                    .map(|text| text.as_str().to_owned())
+            })
             .collect()
     }
 
@@ -213,9 +224,9 @@ mod tests {
         for text in ["", "a", "abcd", "abcde", "twenty-three bytes of txt"] {
             let mut assembler = StreamTextAssembler::<32>::new();
             let done = text_packets::<4>(text.as_bytes())
-                .filter_map(|(form, packet)| assembler.feed(0, form, &packet).map(<[u8]>::to_vec))
+                .filter_map(|(form, packet)| assembler.feed(0, form, &packet))
                 .last();
-            assert_eq!(done.as_deref(), Some(text.as_bytes()), "{text:?}");
+            assert_eq!(done.as_ref().map(Text::as_str), Some(text), "{text:?}");
         }
     }
 
@@ -231,7 +242,7 @@ mod tests {
                 (Form::End, b"BB\0\0\0\0\0\0\0\0\0\0\0\0"),
             ],
         );
-        assert_eq!(out, [None, Some(b"AAAAAAAAAAAAAABB".to_vec())]);
+        assert_eq!(out, [None, Some("AAAAAAAAAAAAAABB".to_owned())]);
     }
 
     #[test]
@@ -246,7 +257,7 @@ mod tests {
                 (Form::End, b"yy\0\0"),
             ],
         );
-        assert_eq!(out[2].as_deref(), Some(&b"wxyzyy"[..]));
+        assert_eq!(out[2].as_deref(), Some("wxyzyy"));
         assert_eq!(a.dropped(), 1);
     }
 
@@ -256,7 +267,10 @@ mod tests {
         assert_eq!(a.feed(0, Form::End, b"abcd"), None);
         assert_eq!(a.feed(1, Form::Start, b"abcd"), None);
         assert_eq!(a.feed(2, Form::End, b"zz\0\0"), None);
-        assert_eq!(a.feed(1, Form::End, b"ef\0\0"), Some(&b"abcdef"[..]));
+        assert_eq!(
+            a.feed(1, Form::End, b"ef\0\0").as_ref().map(Text::as_str),
+            Some("abcdef")
+        );
         assert_eq!(a.dropped(), 0);
     }
 
@@ -273,6 +287,23 @@ mod tests {
             ],
         );
         assert_eq!(out, [None, None, None]);
+        assert_eq!(a.dropped(), 1);
+    }
+
+    /// A message that is not UTF-8 is dropped whole and counted, never handed
+    /// on as a text.
+    #[test]
+    fn a_message_that_is_not_utf8_is_dropped_and_counted() {
+        let mut a = StreamTextAssembler::<8>::new();
+        assert_eq!(a.feed(0, Form::Complete, b"\xFF\xFEab"), None);
+        assert_eq!(a.dropped(), 1);
+        // A character split across two packets is joined before it is read.
+        let out = feed_all(
+            &mut a,
+            0,
+            &[(Form::Start, b"a\xC3"), (Form::End, b"\xA9\0\0")],
+        );
+        assert_eq!(out, [None, Some("a\u{e9}".to_owned())]);
         assert_eq!(a.dropped(), 1);
     }
 }

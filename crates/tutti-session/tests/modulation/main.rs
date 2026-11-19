@@ -2,6 +2,11 @@
 
 mod common;
 
+/// Inert outside `assert_no_alloc`, so every test here may also gate a closure on
+/// allocating nothing.
+#[global_allocator]
+static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+
 // The session's modulation loop (`Session::mods`, `ModInput`).
 mod modulation;
 // A route onto a param on an `f64` session.
@@ -28,3 +33,6 @@ mod ranges;
 mod routes;
 // One place to ask why nothing modulates (doc 030, T5).
 mod problems;
+// A route's polarity and curve, an LFO's rate and a macro's value are values:
+// staged at `set`, republished at the update.
+mod program_targets;

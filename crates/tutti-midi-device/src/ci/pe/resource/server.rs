@@ -25,7 +25,7 @@ use super::data::PeData;
 use super::fields::PeDataError;
 use super::kind::{CanSet, PeResource};
 use super::request::ResourceTarget;
-use super::state::{Arrival, PeState, RefusedAt, StateDevice, StateId, Verdict};
+use super::state::{Arrival, PeState, RefusedAt, StateDevice, StateId, StateVerdict};
 use super::store::{ResourceStore, StoreError};
 use crate::deadline;
 use crate::{CiHeader, CiMessage, Decoded, Destination, MaxSysexSize, Muid, TimeoutWait};
@@ -742,7 +742,7 @@ impl ResourceResponder {
         let Some(prefix) = prefix else {
             return false;
         };
-        if device.judge(&id, Arrival::Prefix(&prefix)) != Verdict::Refuse {
+        if device.judge(&id, Arrival::Prefix(&prefix)) != StateVerdict::Refuse {
             return false;
         }
         self.reassembler
@@ -1097,7 +1097,7 @@ impl ResourceResponder {
             .ok_or_else(|| refusal(PeStatus::BadRequest, "State needs a resId"))?;
         let mut state = state;
         if let Some(device) = self.device.as_mut() {
-            if device.judge(&id, Arrival::Whole(&state)) == Verdict::Refuse {
+            if device.judge(&id, Arrival::Whole(&state)) == StateVerdict::Refuse {
                 out.push(ResponderAction::Event(ResponderEvent::StateRefused {
                     peer,
                     state_id: id,

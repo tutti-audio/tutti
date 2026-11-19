@@ -221,7 +221,7 @@ pub(crate) struct LoopSpan {
 /// file frame it reads, and, inside the crossfade, the lead-in frame it blends
 /// toward and the lead-in's weight.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct LoopTap<F = f32> {
+pub(crate) struct LoopTap<F> {
     pub(crate) frame: usize,
     pub(crate) fade: Option<(usize, F)>,
 }

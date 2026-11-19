@@ -108,10 +108,11 @@ use tutti_plugin_host::{
     Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
-    BridgeConfig, BridgeEvent, Ipc, IpcController, IpcOrigin, Launched, PluginBridge,
+    BridgeConfig, BridgeEvent, Ipc, IpcController, IpcOrigin, Launched, LoadRequest, PluginBridge,
+    Restore,
 };
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Features, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock,
+    BridgeError, BridgeResult, Features, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock, Origin,
     ParameterChanges, PluginDescriptor, PluginInvalidation, PluginTail, Prepare, ResyncClass,
 };
 use tutti_units::Normalized;
@@ -289,14 +290,18 @@ impl PluginClient<Unbound> {
                 format: "VST2",
             });
         }
+        let origin = Origin::new(plugin_path, plugin.load());
         let Launched { ipc, restored } = Ipc::launch(
             config,
-            plugin_path,
-            format,
-            plugin.load(),
-            sample_rate,
-            state,
-            tutti_plugin_types::StateUse::Project,
+            &LoadRequest {
+                origin: &origin,
+                format,
+                rate: sample_rate,
+                restore: state.map(|state| Restore {
+                    state,
+                    state_use: tutti_plugin_types::StateUse::Project,
+                }),
+            },
             Some(tutti_plugin_ipc::EditorLoader::new(
                 crate::format::gui::load_gui_instance,
                 work.clone(),
@@ -315,7 +320,7 @@ impl PluginClient<Unbound> {
         let loaded = ipc.loaded().clone();
         let rate = ipc.rate();
         // The plugin's file, when the ipc knows it: the path of a failure here.
-        let origin_path = ipc.origin().map(|o| o.path.clone());
+        let origin_path = ipc.origin().map(|o| o.origin.path().to_path_buf());
         let failed = |reason: String| BridgeError::LoadFailed {
             path: origin_path.clone(),
             stage: LoadStage::Activation,
@@ -341,7 +346,7 @@ impl PluginClient<Unbound> {
         );
         controls
             .delivery_counters()
-            .attach_bridge_midi(bridge.dropped_midi_cell());
+            .attach_bridge_midi(bridge.audio().dropped_midi_cell());
         let param_sink = ParameterChangeSink::new();
         let refresh_sink = RefreshSink::new();
         let invalidate_sink = InvalidateSink::new();
@@ -401,7 +406,7 @@ impl PluginClient<Unbound> {
         // The parameter list, once, while loading blocks anyway: the node's
         // per-parameter delivery is sized from it. A `prepare` may not make
         // this round trip; a load already has.
-        let params: Vec<ParamId> = match bridge.parameters() {
+        let params: Vec<ParamId> = match bridge.audio().parameters() {
             Some(list) => list.into_iter().map(|p| p.id()).collect(),
             None => {
                 tracing::warn!(
@@ -418,7 +423,7 @@ impl PluginClient<Unbound> {
             .ok_or_else(|| failed("the served plugin has no origin".into()))?;
         // The ref carries the id the plugin reports, so a state it saves and a
         // hand-inserted node name it as a scan would.
-        let plugin = PluginRef::loaded(&origin.path, origin.format, &descriptor.id);
+        let plugin = PluginRef::loaded(origin.origin.path(), origin.format, &descriptor.id);
         let format = ipc.format();
         let served = ipc.controller();
         // Report the FULL input width (main + sidechain/aux input buses) so a
@@ -654,7 +659,7 @@ impl<S> PluginClient<S> {
     /// Returns `true` once the connection to the plugin-server has failed (for
     /// example, the subprocess crashed); the node then outputs silence.
     pub fn is_crashed(&self) -> bool {
-        self.bridge.is_crashed()
+        self.bridge.audio().is_crashed()
     }
 
     /// How many parameter-change events the plugin sent that the bridge
@@ -665,7 +670,7 @@ impl<S> PluginClient<S> {
     /// host that re-reads on it loses nothing; latency, tail and resync events
     /// are never dropped.
     pub fn dropped_parameter_events(&self) -> u64 {
-        self.bridge.dropped_parameter_events()
+        self.bridge.audio().dropped_parameter_events()
     }
 
     /// Queues a parameter change for the plugin. RT-safe, fire-and-forget: it
@@ -702,7 +707,7 @@ impl<S> PluginClient<S> {
     /// caller already has. `false` here means the bridge is crashed or its
     /// queue is full. The served control answers from any thread.
     pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
-        self.bridge.set_render_mode_rt(mode)
+        self.bridge.audio().set_render_mode_rt(mode)
     }
 
     /// The bridge, for the tests that script or read the server.

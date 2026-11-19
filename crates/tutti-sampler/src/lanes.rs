@@ -38,7 +38,7 @@ use tutti_units::{Amplitude, SamplePosition};
 pub(crate) const UNPREPARED_FRAMES: usize = 64;
 
 /// One channel of a block, planar: as long as its scratch's frames.
-pub(crate) type Lane<F = f32> = Vec<F>;
+pub(crate) type Lane<F> = Vec<F>;
 
 /// A block of planar scratch: [`MAX_CHANNELS`] lanes, the first
 /// `width` (the owner's channel count) as long as the longest block its
@@ -49,7 +49,7 @@ pub(crate) type Lane<F = f32> = Vec<F>;
 /// nothing between blocks: every read writes each frame it hands on. A read
 /// writes only lanes below its `n`, which every caller clamps to the
 /// owner's width.
-pub(crate) struct Lanes<F: Float = f32>(Box<[Lane<F>; MAX_CHANNELS]>);
+pub(crate) struct Lanes<F: Float>(Box<[Lane<F>; MAX_CHANNELS]>);
 
 impl<F: Float> Lanes<F> {
     /// No frames in any lane. Allocates the box: control thread.
@@ -121,7 +121,7 @@ impl<F: Float> std::fmt::Debug for Lanes<F> {
 /// prepared at 1024 frames (`tests::a_resize_sizes_every_buffer_to_the_width`
 /// counts it).
 #[derive(Debug)]
-pub(crate) struct BlockScratch<F: Float = f32> {
+pub(crate) struct BlockScratch<F: Float> {
     /// The voice's output for the block, before the mix.
     pub(crate) out: Lanes<F>,
     /// The source's frames, when a stretch filter sits between them and
@@ -200,7 +200,7 @@ fn fit<T: Clone>(v: &mut Vec<T>, frames: usize, fill: T) {
 /// The four taps of frame `i` are derived from `index[i]` per channel
 /// (`interp::tap`), rather than kept: 4 bytes a frame, not 32.
 #[derive(Debug)]
-pub(crate) struct Gather<F: Float = f32> {
+pub(crate) struct Gather<F: Float> {
     pub(crate) index: Vec<u32>,
     pub(crate) frac: Vec<F>,
     /// Whether frame `i` has a sample (a position inside the file).

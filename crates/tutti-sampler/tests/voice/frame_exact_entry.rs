@@ -65,7 +65,7 @@ const HAND: usize = 77;
 
 /// A pool with one voice placed at `start`, playing a constant (so its first
 /// frame is already non-zero).
-fn pool(start: Beat) -> VoicePool {
+fn pool(start: Beat) -> VoicePool<f32> {
     let mut wave = Wave::new(1, SampleRate::of(SR));
     for _ in 0..SR as usize {
         wave.append(Interleaved::new(&[0.5], wave.layout()).unwrap())
@@ -123,7 +123,10 @@ fn play(engine: &Engine, t: &Transport) -> Vec<f32> {
 }
 
 /// The pool on the outputs, and a probe beside it.
-fn graph_with(pool: VoicePool, probe: Arc<Mutex<Option<Beat>>>) -> (Editor, tutti_graph::Executor) {
+fn graph_with(
+    pool: VoicePool<f32>,
+    probe: Arc<Mutex<Option<Beat>>>,
+) -> (Editor, tutti_graph::Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples(1024)),

@@ -166,7 +166,7 @@ pub(crate) fn check_nyquist(top: Hz, rate: SampleRate) -> Result<()> {
 pub(crate) struct FrameCutter {
     framing: Framing,
     /// The samples from absolute index `base` that no frame has finished with.
-    buffer: Vec<f32>,
+    buffer: Vec<f64>,
     base: Samples,
     /// The first sample of the next frame.
     next_start: Samples,
@@ -187,7 +187,7 @@ impl FrameCutter {
 
     /// Takes `block` and calls `each(index, frame)` for every frame it
     /// completes.
-    pub(crate) fn feed(&mut self, block: &[f32], mut each: impl FnMut(usize, &[f32])) {
+    pub(crate) fn feed(&mut self, block: &[f64], mut each: impl FnMut(usize, &[f64])) {
         let (window, hop) = (self.framing.window, self.framing.hop);
         self.buffer.extend_from_slice(block);
         let held = Samples(self.buffer.len());

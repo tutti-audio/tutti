@@ -21,3 +21,5 @@ mod sys;
 #[cfg(not(unix))]
 #[path = "sys/windows.rs"]
 mod sys;
+
+pub(crate) use sys::socket_path_in;

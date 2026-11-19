@@ -68,7 +68,7 @@ pub(crate) const HISTORY_FRAMES: u64 = 4;
 
 /// A region's ring, shared by the streamer's writer and the audio thread's
 /// reader.
-pub(crate) struct Ring<F: RingFloat = f32> {
+pub(crate) struct Ring<F: RingFloat> {
     region_id: StreamId,
     file_path: PathBuf,
     channels: ChannelLayout,
@@ -215,12 +215,12 @@ impl<F: RingFloat> Ring<F> {
 }
 
 /// The audio thread's handle on a region's ring.
-pub(crate) type SharedReader<F = f32> = Arc<Ring<F>>;
+pub(crate) type SharedReader<F> = Arc<Ring<F>>;
 
 /// The streamer's end of a region's ring: the writer, its source (a disk
 /// decoder, or the file resident whole) and what it holds (`loops::Content`).
 /// Streamer-thread-local.
-pub(crate) struct RegionOut<F: RingFloat = f32> {
+pub(crate) struct RegionOut<F: RingFloat> {
     ring: Arc<Ring<F>>,
     /// The ring's one writer.
     writer: PosWriter<F>,
@@ -524,7 +524,7 @@ mod tests {
         (0..frames * channels).map(|i| i as f32).collect()
     }
 
-    fn ring(capacity: usize, channels: usize) -> (RegionOut, SharedReader, PosReader) {
+    fn ring(capacity: usize, channels: usize) -> (RegionOut<f32>, SharedReader<f32>, PosReader) {
         RegionBuffer::with_capacity(
             StreamId::of(1),
             PathBuf::new(),

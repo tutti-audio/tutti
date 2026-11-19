@@ -45,7 +45,7 @@ use tutti_transport::TempoReader;
 ///
 /// It is not a graph node: it knows neither where on the timeline it plays
 /// nor its file. A [`DiskVoice`] is, and forks.
-pub struct DiskSource<F: SamplerFloat = f32> {
+pub struct DiskSource<F: SamplerFloat> {
     /// Boxed: a voice in a pool should not carry the reader's jump state
     /// inline (it is built on the control thread, where the box is).
     read: Box<LiveRead<F>>,
@@ -201,7 +201,7 @@ pub struct DiskVoiceConfig {
 /// (it reads its render's `Env`), read as the memory tier reads it; see
 /// `offline_read`. That path blocks on file I/O and is never taken live: a
 /// live fork of a disk voice is refused.
-pub struct DiskVoice<F: SamplerFloat = f32> {
+pub struct DiskVoice<F: SamplerFloat> {
     inner: DiskSource<F>,
     /// The playback controls: the streamer's cell, shared with `inner`, while
     /// live; a private snapshot of it in a fork.

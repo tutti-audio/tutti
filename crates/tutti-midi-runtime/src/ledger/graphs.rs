@@ -834,6 +834,12 @@ fn filled(then: Vec<Act>) -> Vec<Act> {
 /// What a probe's sink heard, and the executor's counts.
 fn probe(capacity: usize, blocks: Vec<Vec<Act>>) -> (Shared, u64, u64) {
     let n = blocks.len() as u64 + 1;
+    probe_for(capacity, blocks, n)
+}
+
+/// [`probe`] run for `n` blocks, so a block the script does not name need not
+/// pay what is owed.
+fn probe_for(capacity: usize, blocks: Vec<Vec<Act>>, n: u64) -> (Shared, u64, u64) {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
     ed.insert(
@@ -892,6 +898,41 @@ fn an_off_refused_twice_is_one_loss() {
     );
     assert!(tally.lock().unwrap().held.is_empty());
     assert_eq!((dropped, lost), (4, 2));
+}
+
+/// Three pedals are down and a release finds the port full: the first lift is
+/// refused (counted by the port, 1) and the other two are not tried but are
+/// withheld and counted (3), all three losses. The next block pays them, each
+/// attempt giving its count back, so the dropped count stays 3 and the lost
+/// count falls by exactly the 3 paid, to 0.
+#[test]
+fn a_refused_pedal_lift_is_counted_and_its_payment_gives_the_count_back() {
+    let pedal = |cc| Act::Send(midi::cc(MidiChannel::FIRST, cc, u32::MAX), None);
+    let blocks = || {
+        vec![
+            vec![
+                pedal(CCNumber::SUSTAIN),
+                pedal(CCNumber::SOSTENUTO),
+                pedal(CCNumber::SOFT_PEDAL),
+            ],
+            filled(vec![Act::Release]),
+            vec![],
+        ]
+    };
+    let (_, dropped, lost) = probe_for(8, blocks(), 2);
+    assert_eq!((dropped, lost), (3, 3), "refused, then withheld twice");
+    let (tally, dropped, lost) = probe(8, blocks());
+    assert_eq!(
+        (dropped, lost),
+        (3, 0),
+        "each paid lift gives its count back"
+    );
+    let t = tally.lock().unwrap();
+    assert_eq!(
+        t.others,
+        8 + 3 + 3,
+        "the filler, the pedals down, the lifts"
+    );
 }
 
 /// Two notes on one key are both refused by a full port, and both offs come:

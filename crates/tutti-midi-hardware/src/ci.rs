@@ -24,7 +24,7 @@
 //!
 //! A device ends when its Group is no
 //! longer called for: a settled Endpoint whose Function Block changes (the
-//! Connection keeps hearing them unless the Endpoint declared them static)
+//! discovery keeps hearing them unless the Endpoint declared them static)
 //! is read again, and the Groups recomputed. A Group that stays keeps its
 //! device and peers; one that goes ends its device (Invalidate MUID, peers
 //! lost: M2-101 §3.3.2, a block that changes its Group location or number of
@@ -166,7 +166,7 @@ use tutti_graph::{Losses, Offset};
 use tutti_midi_device::{
     CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, EntropyError,
     EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessError, ProcessFeatures,
-    ProcessInitiator, ProfileAction, ProfileInitiator, RequestError, ResourceInitiator,
+    ProcessInitiator, ProfileAction, ProfileInitiator, ProfileRequestError, ResourceInitiator,
     ResourceResponder, ResourceStore,
 };
 use tutti_rt::CounterWriter;
@@ -1256,7 +1256,7 @@ impl Member {
             // The session sends a switch of a Profile at an address only once
             // the one in flight has ended; a second here has no answer of its
             // own.
-            Err(RequestError::AlreadyAsking) => {}
+            Err(ProfileRequestError::AlreadyAsking) => {}
         }
     }
 
@@ -1782,7 +1782,7 @@ mod tests {
                 [(
                     id,
                     Answer::SwitchLost {
-                        request: tutti_midi_device::Request::SetOff {
+                        request: tutti_midi_device::ProfileRequest::SetOff {
                             address: CiDeviceId::Group,
                             profile
                         }

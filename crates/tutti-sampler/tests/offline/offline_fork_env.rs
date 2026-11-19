@@ -43,11 +43,11 @@ fn ramp_wave() -> Arc<Wave> {
     ))
 }
 
-fn placed() -> MemorySource {
+fn placed() -> MemorySource<f32> {
     MemorySource::placed(ramp_wave(), VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave")
 }
 
-fn voice() -> Voice {
+fn voice() -> Voice<f32> {
     Voice {
         source: VoiceSource::Memory(placed()),
         play: Playback::default(),

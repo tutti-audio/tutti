@@ -19,6 +19,9 @@ use tutti_units::{Amplitude, At};
 use super::error::SetRefusal;
 use super::state::Params;
 use super::target::{Target, TargetId, sealed, target_builders};
+use tutti_modulation::TargetKey;
+
+use crate::{ModRouteId, ModSourceId};
 
 /// Which of the session's own values a slot target names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -50,6 +53,16 @@ pub enum SlotId {
     /// The chord and scale changes a harmony node sends.
     #[cfg(feature = "midi")]
     Harmony(NodeKey),
+    /// How a modulation route maps its source's value onto its span.
+    RoutePolarity(ModRouteId),
+    /// The law that shapes a modulation route's value.
+    RouteCurve(ModRouteId),
+    /// An LFO source's rate.
+    SourceRate(ModSourceId),
+    /// A macro source's value.
+    SourceValue(ModSourceId),
+    /// A param's automation curve, by the key the reconciler holds it under.
+    Automation(TargetKey),
 }
 
 impl SlotId {
@@ -58,6 +71,7 @@ impl SlotId {
         match self {
             #[cfg(feature = "midi")]
             Self::ClipEvents(node) | Self::Harmony(node) => Some(node),
+            Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
     }
@@ -142,7 +156,7 @@ pub(crate) trait Stage: Send + Sync + 'static {
 }
 
 impl Params {
-    fn slot<V: 'static>(&self, id: SlotId) -> Option<SlotCell<V>> {
+    pub(super) fn slot<V: 'static>(&self, id: SlotId) -> Option<SlotCell<V>> {
         self.slots
             .get(&id)?
             .cell
@@ -303,24 +317,18 @@ slot_target!(
     SlotId::OutputLatency
 );
 
-/// Writes the target, `Target`, `Land` and builders of a slot target on a node
-/// of the graph: its `SlotId` names the node, and the value type is fixed.
-#[cfg(feature = "midi")]
-macro_rules! node_slot_target {
-    ($(#[$meta:meta])* $name:ident, $value:ty, $id:ident) => {
+/// Writes the target, `Target`, `Land` and builders of a slot target whose
+/// `SlotId` is built from a key of the thing it is on (`$key`), with the
+/// value type fixed.
+macro_rules! keyed_slot_target {
+    ($(#[$meta:meta])* $name:ident, $value:ty, $key:ty, $id:ident) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-        pub struct $name(NodeKey);
+        pub struct $name($key);
 
         impl $name {
-            pub(crate) const fn new(node: NodeKey) -> Self {
-                Self(node)
-            }
-
-            /// The node the target is on.
-            #[must_use]
-            pub const fn node(self) -> NodeKey {
-                self.0
+            pub(crate) const fn new(key: $key) -> Self {
+                Self(key)
             }
         }
 
@@ -350,6 +358,24 @@ macro_rules! node_slot_target {
             }
         }
         target_builders!([] $name);
+    };
+}
+pub(super) use keyed_slot_target;
+
+/// Writes the target, `Target`, `Land` and builders of a slot target on a node
+/// of the graph: its `SlotId` names the node, and the value type is fixed.
+#[cfg(feature = "midi")]
+macro_rules! node_slot_target {
+    ($(#[$meta:meta])* $name:ident, $value:ty, $id:ident) => {
+        keyed_slot_target!($(#[$meta])* $name, $value, NodeKey, $id);
+
+        impl $name {
+            /// The node the target is on.
+            #[must_use]
+            pub const fn node(self) -> NodeKey {
+                self.0
+            }
+        }
     };
 }
 

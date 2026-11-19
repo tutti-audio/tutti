@@ -33,11 +33,11 @@ macro_rules! serde_through_try_from {
 
 serde_through_try_from! {
     Harmonics: usize,
-    HarmonicDecay: f32,
+    HarmonicDecay: f64,
     PeakFloor: Db,
     TuningOffset: Cents,
-    PriorSpread: f32,
-    Tightness: f32,
+    PriorSpread: f64,
+    Tightness: f64,
     SpectrumTime: Seconds,
     SpectrumFloor: Db,
     PeakDecay: Db,
@@ -45,8 +45,8 @@ serde_through_try_from! {
     BandCount: usize,
     NoteSpan: Seconds,
     PitchSplit: Cents,
-    SelfTransition: f32,
-    Sharpness: f32,
+    SelfTransition: f64,
+    Sharpness: f64,
     OnsetThreshold: Amplitude,
     OnsetSensitivity: Amplitude,
     OnsetGap: Seconds,
@@ -56,9 +56,9 @@ serde_through_try_from! {
     YinThreshold: Confidence,
 }
 
-const NAN: f32 = f32::NAN;
-const INF: f32 = f32::INFINITY;
-const NEG_INF: f32 = f32::NEG_INFINITY;
+const NAN: f64 = f64::NAN;
+const INF: f64 = f64::INFINITY;
+const NEG_INF: f64 = f64::NEG_INFINITY;
 
 fn db(raws: &[f64]) -> Vec<Db> {
     raws.iter().map(|&r| Db(r)).collect()
@@ -95,7 +95,7 @@ fn harmonic_decay_keeps_the_range_checked_shape() {
         new: HarmonicDecay::new,
         get: HarmonicDecay::get,
         of: Some(HarmonicDecay::of),
-        valid: &[f32::MIN_POSITIVE, 0.6, 1.0],
+        valid: &[f64::MIN_POSITIVE, 0.6, 1.0],
         invalid: &[0.0, -0.1, 1.000_000_1, NAN, INF, NEG_INF],
     });
 }
@@ -131,7 +131,7 @@ fn prior_spread_keeps_the_range_checked_shape() {
         new: PriorSpread::new,
         get: PriorSpread::get,
         of: Some(PriorSpread::of),
-        valid: &[f32::MIN_POSITIVE, 1.0, f32::MAX],
+        valid: &[f64::MIN_POSITIVE, 1.0, f64::MAX],
         invalid: &[0.0, -1.0, NAN, INF, NEG_INF],
     });
 }
@@ -143,8 +143,8 @@ fn tightness_keeps_the_range_checked_shape() {
         new: Tightness::new,
         get: Tightness::get,
         of: Some(Tightness::of),
-        valid: &[0.0, 100.0, f32::MAX],
-        invalid: &[-1.0, -f32::MIN_POSITIVE, NAN, INF, NEG_INF],
+        valid: &[0.0, 100.0, f64::MAX],
+        invalid: &[-1.0, -f64::MIN_POSITIVE, NAN, INF, NEG_INF],
     });
 }
 
@@ -246,7 +246,7 @@ fn self_transition_keeps_the_range_checked_shape() {
         new: SelfTransition::new,
         get: SelfTransition::get,
         of: Some(SelfTransition::of),
-        valid: &[f32::MIN_POSITIVE, 0.9, 0.999_999_94],
+        valid: &[f64::MIN_POSITIVE, 0.9, 0.999_999_999_999_999_9],
         invalid: &[0.0, 1.0, -0.5, 1.5, NAN, INF, NEG_INF],
     });
 }
@@ -258,7 +258,7 @@ fn sharpness_keeps_the_range_checked_shape() {
         new: Sharpness::new,
         get: Sharpness::get,
         of: Some(Sharpness::of),
-        valid: &[f32::MIN_POSITIVE, 8.0, 100.0],
+        valid: &[f64::MIN_POSITIVE, 8.0, 100.0],
         invalid: &[0.0, -1.0, 100.1, NAN, INF, NEG_INF],
     });
 }
@@ -270,7 +270,7 @@ fn onset_threshold_keeps_the_range_checked_shape() {
         new: OnsetThreshold::new,
         get: OnsetThreshold::get,
         of: Some(OnsetThreshold::of),
-        valid: &amplitudes(&[0.0, 0.3, 1.0, f64::from(f32::MAX)]),
+        valid: &amplitudes(&[0.0, 0.3, 1.0, f64::MAX]),
         invalid: &amplitudes(&[-0.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
     });
 }
@@ -282,7 +282,7 @@ fn onset_sensitivity_keeps_the_range_checked_shape() {
         new: OnsetSensitivity::new,
         get: OnsetSensitivity::get,
         of: Some(OnsetSensitivity::of),
-        valid: &amplitudes(&[f64::from(f32::MIN_POSITIVE), 1.0, 3.0, f64::from(f32::MAX)]),
+        valid: &amplitudes(&[f64::MIN_POSITIVE, 1.0, 3.0, f64::MAX]),
         invalid: &amplitudes(&[0.0, -1.0, f64::NAN, f64::INFINITY]),
     });
 }

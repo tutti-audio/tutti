@@ -170,7 +170,7 @@ fn a_host_that_takes_no_more_sessions_still_answers_a_ping_from_a_stranger() {
     let refusal = host.poll_transmit().unwrap();
     assert_eq!(
         commands(&refusal.payload),
-        [Command::Bye(Bye::new(ByeReason::TooManySessions))]
+        [Command::Bye(Box::new(Bye::new(ByeReason::TooManySessions)))]
     );
     host.on_message(stranger, &datagram(&Command::Ping(PingId::new(8))), now);
     let again = host.poll_transmit().unwrap();

@@ -16,30 +16,29 @@
 
 use core::marker::PhantomData;
 
-use tutti_buffers::{Mono, Sample};
+use tutti_buffers::{Float, Mono, Sample};
 use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
-use crate::convert::{for_blocks, to_f32};
+use crate::convert::{for_blocks, widen};
 use crate::framing::{FrameCutter, Framing};
 use crate::{Measure, Meter, Result};
-use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
+use tutti_dsp::{Complex, Complex64};
 use tutti_units::ranged;
 
 ranged! {
-    /// The multiplier on the adaptive threshold: not negative and at most `f32::MAX`, the width
-    /// of the novelty curve it scales. Higher rejects more.
+    /// The multiplier on the adaptive threshold: finite and not negative.
+    /// Higher rejects more.
     OnsetThreshold(Amplitude), OnsetThresholdError, "an onset threshold of zero or more",
-    |raw| raw.get() >= 0.0 && raw.get() <= f32::MAX as f64
+    |raw| raw.get() >= 0.0 && raw.get().is_finite()
 }
 
 ranged! {
-    /// The gain applied to the detection function before thresholding: above zero, since a
-    /// gain of zero detects nothing, and at most `f32::MAX`, the width of the novelty curve it
-    /// scales.
+    /// The gain applied to the detection function before thresholding: finite and above zero,
+    /// since a gain of zero detects nothing.
     OnsetSensitivity(Amplitude), OnsetSensitivityError, "an onset sensitivity above zero",
-    |raw| raw.get() > 0.0 && raw.get() <= f32::MAX as f64
+    |raw| raw.get() > 0.0 && raw.get().is_finite()
 }
 
 ranged! {
@@ -73,24 +72,35 @@ pub enum DetectionFunction {
 ///
 /// Only *growth* counts: a bin that quietens contributes nothing, which is
 /// what makes this an onset detector rather than a change detector.
-pub fn spectral_flux(previous: &[f32], current: &[Complex32]) -> f32 {
+pub fn spectral_flux<F: Float>(previous: &[F], current: &[Complex<F>]) -> f64 {
     current
         .iter()
         .zip(previous)
-        .map(|(bin, &prev)| (bin.norm() - prev).max(0.0))
+        .map(|(&bin, &prev)| (magnitude(bin) - prev.convert_to::<f64>()).max(0.0))
         .sum()
+}
+
+/// A bin's magnitude, taken at `f64`.
+fn magnitude<F: Float>(bin: Complex<F>) -> f64 {
+    libm::hypot(bin.re.convert_to::<f64>(), bin.im.convert_to::<f64>())
+}
+
+/// A bin's squared magnitude, taken at `f64`.
+fn power<F: Float>(bin: Complex<F>) -> f64 {
+    let (re, im) = (bin.re.convert_to::<f64>(), bin.im.convert_to::<f64>());
+    re * re + im * im
 }
 
 /// Magnitude energy weighted by bin index.
 ///
 /// Bright transients concentrate energy at high frequencies, so weighting by
 /// bin favours them over low-frequency rumble.
-pub fn high_frequency_content(current: &[Complex32]) -> f32 {
+pub fn high_frequency_content<F: Float>(current: &[Complex<F>]) -> f64 {
     current
         .iter()
         .enumerate()
-        .map(|(i, bin)| (i + 1) as f32 * bin.norm_sqr())
-        .sum::<f32>()
+        .map(|(i, &bin)| (i + 1) as f64 * power(bin))
+        .sum::<f64>()
         .sqrt()
 }
 
@@ -100,12 +110,12 @@ pub fn high_frequency_content(current: &[Complex32]) -> f32 {
 /// Not an RMS: the sum is not divided by the frame's length, so the value
 /// grows with the window (by `sqrt(len)` for a steady signal). Onset
 /// detection compares frames of one length, where the scale cancels.
-pub fn spectral_energy<S: Sample>(frame: Mono<'_, S>) -> f32 {
-    energy(&to_f32(frame.samples()))
+pub fn spectral_energy<S: Sample>(frame: Mono<'_, S>) -> f64 {
+    energy(&widen(frame.samples()))
 }
 
-fn energy(frame: &[f32]) -> f32 {
-    frame.iter().map(|s| s * s).sum::<f32>().sqrt()
+fn energy(frame: &[f64]) -> f64 {
+    frame.iter().map(|s| s * s).sum::<f64>().sqrt()
 }
 
 /// Euclidean distance between successive magnitude spectra.
@@ -114,15 +124,15 @@ fn energy(frame: &[f32]) -> f32 {
 /// sensitive to tonal onsets where energy moves between bins rather than
 /// simply arriving. It compares magnitudes only (`previous` holds the last
 /// frame's magnitudes); no phase enters it.
-pub fn complex_domain_deviation(previous: &[f32], current: &[Complex32]) -> f32 {
+pub fn complex_domain_deviation<F: Float>(previous: &[F], current: &[Complex<F>]) -> f64 {
     current
         .iter()
         .zip(previous)
-        .map(|(bin, &prev)| {
-            let diff = bin.norm() - prev;
+        .map(|(&bin, &prev)| {
+            let diff = magnitude(bin) - prev.convert_to::<f64>();
             diff * diff
         })
-        .sum::<f32>()
+        .sum::<f64>()
         .sqrt()
 }
 
@@ -200,9 +210,8 @@ impl OnsetConfig {
         Ok(OnsetPlan {
             geometry: self.framing.geometry(rate)?,
             function: self.function,
-            // The detection curve is an `f32` measurement: the gains narrow once into the plan.
-            threshold: self.threshold.get().get() as f32,
-            sensitivity: self.sensitivity.get().get() as f32,
+            threshold: self.threshold.get().get(),
+            sensitivity: self.sensitivity.get().get(),
             min_gap: self.min_gap.get().to_samples(rate),
         })
     }
@@ -228,8 +237,8 @@ impl<S: Sample> Measure<S> for OnsetConfig {
 pub(crate) struct OnsetPlan {
     geometry: StftGeometry,
     function: DetectionFunction,
-    threshold: f32,
-    sensitivity: f32,
+    threshold: f64,
+    sensitivity: f64,
     min_gap: Samples,
 }
 
@@ -273,7 +282,7 @@ pub struct Novelty {
     /// The frame's first sample, in [`Samples`] of the stream.
     pub frame: Samples,
     /// The novelty at the frame, in the detection function's own scale.
-    pub value: f32,
+    pub value: f64,
 }
 
 /// How far after the start of its frame the onset a spectral-flux peak marks
@@ -302,13 +311,13 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> Samples {
 pub struct OnsetMeter<S: Sample = f32> {
     plan: OnsetPlan,
     cutter: FrameCutter,
-    fft: FftScratch,
+    fft: FftScratch<f64>,
     /// The analysis window of the plan's geometry.
-    window: Vec<f32>,
+    window: Vec<f64>,
     /// The previous frame's magnitudes.
-    previous: Vec<f32>,
+    previous: Vec<f64>,
     /// The current frame's bins, reused across frames.
-    spectrum: Vec<Complex32>,
+    spectrum: Vec<Complex64>,
     /// Novelty per frame, in analysis order. Thresholding is global, so peaks
     /// can only be picked once the run is complete.
     novelty: Vec<Novelty>,
@@ -332,7 +341,7 @@ impl<S: Sample> OnsetMeter<S> {
             fft: FftScratch::new(),
             window: plan.geometry.window_coefficients(),
             previous: vec![0.0; bins],
-            spectrum: vec![Complex32::default(); bins],
+            spectrum: vec![Complex64::default(); bins],
             novelty: Vec::new(),
             sample: PhantomData,
             plan,
@@ -341,7 +350,7 @@ impl<S: Sample> OnsetMeter<S> {
 
     /// Takes samples and steps each frame they complete, calling `each` with
     /// the frame's position and novelty.
-    fn feed(&mut self, block: &[f32], mut each: impl FnMut(Novelty)) {
+    fn feed(&mut self, block: &[f64], mut each: impl FnMut(Novelty)) {
         let Self {
             plan,
             cutter,
@@ -446,16 +455,16 @@ pub fn detect_onsets<S: Sample>(
     cfg: &OnsetConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<Vec<Onset>> {
     let plan = cfg.plan(rate.into())?;
-    Ok(run(plan, &to_f32(samples.samples()), fft).finish())
+    Ok(run(plan, &widen(samples.samples()), fft).finish())
 }
 
 /// A meter for `plan` fed `samples`, with the caller's scratch lent to it: the
 /// whole-buffer run of the crate's own callers (tempo, notes), which hold a
-/// resolved plan and `f32` samples.
-pub(crate) fn run(plan: OnsetPlan, samples: &[f32], fft: &mut FftScratch) -> OnsetMeter {
+/// resolved plan and `f64` samples.
+pub(crate) fn run(plan: OnsetPlan, samples: &[f64], fft: &mut FftScratch<f64>) -> OnsetMeter {
     let mut meter = OnsetMeter::new(plan);
     core::mem::swap(&mut meter.fft, fft);
     meter.feed(samples, |_| {});
@@ -499,15 +508,17 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[Novelty]) -> Vec<Onset> {
         return Vec::new();
     }
 
-    let len = novelty.len() as f32;
-    let (sum, sum_sq, max) = novelty
+    let len = novelty.len() as f64;
+    let max = novelty.iter().fold(0.0f64, |mx, n| mx.max(n.value));
+    let mean = novelty.iter().map(|n| n.value).sum::<f64>() / len;
+    // Two passes: the squared deviations are small whatever the level, where
+    // `sum_sq / len - mean^2` cancels at a large one.
+    let variance = novelty
         .iter()
-        .fold((0.0f32, 0.0f32, 0.0f32), |(s, sq, mx), n| {
-            let v = n.value;
-            (s + v, sq + v * v, mx.max(v))
-        });
-    let mean = sum / len;
-    let std_dev = (sum_sq / len - mean * mean).max(0.0).sqrt();
+        .map(|n| (n.value - mean).powi(2))
+        .sum::<f64>()
+        / len;
+    let std_dev = variance.sqrt();
     let threshold = mean + std_dev * cfg.threshold * 3.0;
 
     (1..novelty.len() - 1)
@@ -520,19 +531,19 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[Novelty]) -> Vec<Onset> {
             let falling = value > novelty[i + 1].value;
             (rising && falling && value > threshold).then(|| Onset {
                 position,
-                strength: Amplitude(f64::from(if max > 0.0 {
+                strength: Amplitude(if max > 0.0 {
                     (value / max).min(1.0)
                 } else {
                     0.0
-                })),
+                }),
             })
         })
         .collect()
 }
 
-fn store_magnitudes(previous: &mut [f32], spectrum: &[Complex32]) {
+fn store_magnitudes(previous: &mut [f64], spectrum: &[Complex64]) {
     for (slot, bin) in previous.iter_mut().zip(spectrum) {
-        *slot = bin.norm();
+        *slot = magnitude(*bin);
     }
 }
 

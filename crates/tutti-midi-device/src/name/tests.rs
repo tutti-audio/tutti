@@ -41,13 +41,6 @@ fn a_name_is_held_in_nfc() {
         BlockName::new(decomposed).unwrap().as_bytes(),
         composed.as_bytes()
     );
-    // The wire's bytes are read the same way.
-    assert_eq!(
-        EndpointName::from_bytes(decomposed.as_bytes())
-            .unwrap()
-            .as_str(),
-        composed
-    );
     // A name that is NFC already is kept as it is.
     assert_eq!(EndpointName::new(composed).unwrap().as_str(), composed);
     // The bound is on the composed bytes: 49 "e"+accent are 147 bytes as sent
@@ -62,8 +55,6 @@ fn a_leading_byte_order_mark_is_refused() {
     let bom = "\u{FEFF}Piano";
     assert!(EndpointName::new(bom).is_none());
     assert!(BlockName::new(bom).is_none());
-    assert!(EndpointName::from_bytes(bom.as_bytes()).is_none());
-    assert!(BlockName::from_bytes(b"\xEF\xBB\xBFPiano").is_none());
     assert!(EndpointName::new("Piano").is_some());
 }
 

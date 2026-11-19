@@ -90,7 +90,7 @@ fn details_name(details: [u8; 5], profile: ProfileId) -> bool {
 
 /// A request in flight: what [`ProfileAction::Resolved`] names.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Request {
+pub enum ProfileRequest {
     /// A Set Profile On.
     SetOn {
         /// Where.
@@ -116,7 +116,7 @@ pub enum Request {
     },
 }
 
-impl Request {
+impl ProfileRequest {
     fn address(&self) -> CiDeviceId {
         match self {
             Self::SetOn { address, .. }
@@ -146,10 +146,10 @@ impl Request {
     }
 }
 
-/// How a [`Request`] ended.
+/// How a [`ProfileRequest`] ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Outcome {
+pub enum ProfileOutcome {
     /// A Set Profile On or Off was answered by a Report: the state the peer says
     /// the Profile is in now (it is the state asked for unless the peer could not
     /// comply) and its Channel count, 0 for a Group or Function Block address or a
@@ -209,9 +209,9 @@ pub enum ProfileAction {
     /// A request ended.
     Resolved {
         /// Which.
-        request: Request,
+        request: ProfileRequest,
         /// How.
-        outcome: Outcome,
+        outcome: ProfileOutcome,
     },
     /// Profile Specific Data arrived (§7.12), uninterpreted.
     SpecificData {
@@ -226,7 +226,7 @@ pub enum ProfileAction {
 
 /// A request that cannot be made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-pub enum RequestError {
+pub enum ProfileRequestError {
     /// The same request, or a Set On or Off of the same Profile at the same
     /// address, is still waiting for its answer.
     #[error("a request for that Profile at that address is already in flight")]
@@ -394,7 +394,7 @@ impl ProfileTable {
 
 #[derive(Clone, Debug)]
 struct InFlight {
-    request: Request,
+    request: ProfileRequest,
     wait: Pending,
 }
 
@@ -459,16 +459,16 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::AlreadyAsking`] when a Set On or Off of that Profile at
+    /// [`ProfileRequestError::AlreadyAsking`] when a Set On or Off of that Profile at
     /// that address is waiting.
     pub fn set_on(
         &mut self,
         target: ProfileTarget,
         profile: ProfileId,
         now: Instant,
-    ) -> Result<Vec<ProfileAction>, RequestError> {
+    ) -> Result<Vec<ProfileAction>, ProfileRequestError> {
         let address = target.address();
-        self.begin(Request::SetOn { address, profile }, now)?;
+        self.begin(ProfileRequest::SetOn { address, profile }, now)?;
         Ok(vec![self.send(address, |header, to| {
             CiMessage::SetProfileOn {
                 source: header.source,
@@ -484,14 +484,14 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::AlreadyAsking`] as for [`set_on`](Self::set_on).
+    /// [`ProfileRequestError::AlreadyAsking`] as for [`set_on`](Self::set_on).
     pub fn set_off(
         &mut self,
         address: CiDeviceId,
         profile: ProfileId,
         now: Instant,
-    ) -> Result<Vec<ProfileAction>, RequestError> {
-        self.begin(Request::SetOff { address, profile }, now)?;
+    ) -> Result<Vec<ProfileAction>, ProfileRequestError> {
+        self.begin(ProfileRequest::SetOff { address, profile }, now)?;
         Ok(vec![self.send(address, |header, to| {
             CiMessage::SetProfileOff {
                 header,
@@ -505,16 +505,16 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::AlreadyAsking`] when the same inquiry is waiting.
+    /// [`ProfileRequestError::AlreadyAsking`] when the same inquiry is waiting.
     pub fn details(
         &mut self,
         address: CiDeviceId,
         profile: ProfileId,
         target: InquiryTarget,
         now: Instant,
-    ) -> Result<Vec<ProfileAction>, RequestError> {
+    ) -> Result<Vec<ProfileAction>, ProfileRequestError> {
         self.begin(
-            Request::Details {
+            ProfileRequest::Details {
                 address,
                 profile,
                 target,
@@ -556,7 +556,7 @@ impl ProfileInitiator {
         self.pending = waiting;
         actions.extend(expired.into_iter().map(|pending| ProfileAction::Resolved {
             request: pending.request,
-            outcome: Outcome::TimedOut,
+            outcome: ProfileOutcome::TimedOut,
         }));
         actions
     }
@@ -631,7 +631,7 @@ impl ProfileInitiator {
             } if from_peer && to_us => {
                 let at = self.pending.iter().position(|pending| {
                     pending.request
-                        == Request::Details {
+                        == ProfileRequest::Details {
                             address,
                             profile: *profile,
                             target: *target,
@@ -641,7 +641,7 @@ impl ProfileInitiator {
                     let pending = self.pending.remove(at);
                     actions.push(ProfileAction::Resolved {
                         request: pending.request,
-                        outcome: Outcome::Details(data.clone()),
+                        outcome: ProfileOutcome::Details(data.clone()),
                     });
                 }
             }
@@ -720,7 +720,7 @@ impl ProfileInitiator {
             let pending = self.pending.remove(at);
             actions.push(ProfileAction::Resolved {
                 request: pending.request,
-                outcome: Outcome::Reported { state, channels },
+                outcome: ProfileOutcome::Reported { state, channels },
             });
         }
     }
@@ -767,12 +767,12 @@ impl ProfileInitiator {
             let pending = self.pending.remove(at);
             actions.push(ProfileAction::Resolved {
                 request: pending.request,
-                outcome: Outcome::Refused(nak.clone()),
+                outcome: ProfileOutcome::Refused(nak.clone()),
             });
         }
     }
 
-    fn begin(&mut self, request: Request, now: Instant) -> Result<(), RequestError> {
+    fn begin(&mut self, request: ProfileRequest, now: Instant) -> Result<(), ProfileRequestError> {
         let clash = self.pending.iter().any(|pending| {
             pending.request == request
                 || (request.is_set()
@@ -781,7 +781,7 @@ impl ProfileInitiator {
                     && pending.request.profile() == request.profile())
         });
         if clash {
-            return Err(RequestError::AlreadyAsking);
+            return Err(ProfileRequestError::AlreadyAsking);
         }
         self.pending.push(InFlight {
             request,
