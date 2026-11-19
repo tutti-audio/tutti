@@ -177,7 +177,12 @@ impl fmt::Display for DeviceId {
     }
 }
 
-/// Which way MIDI flows through a device.
+/// Which way MIDI flows through a device, from the host's side: `Input` is a
+/// port the engine reads from, `Output` one it writes to.
+///
+/// A Function Block's [`BlockDirection`](tutti_ump::BlockDirection) is the same
+/// flow from the device's side, so the two are opposite words for one fact: a
+/// port the engine reads from belongs to a block that transmits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PortDirection {

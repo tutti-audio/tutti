@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use tutti_midi_device::{
     CiDeviceId, DeviceId, Muid, ProfileChange, ProfileChannels, ProfileEntry, ProfileId,
-    ProfileState, ProfileTable, ProfileTarget, Request, SpecificData, Whole,
+    ProfileRequest, ProfileState, ProfileTable, ProfileTarget, SpecificData, Whole,
 };
 use tutti_midi_protocol::{ChannelResponse, MpeZones, PitchBendSensitivity};
 use tutti_ump::{MidiChannel, MidiGroup, MpeOverlap};
@@ -118,13 +118,13 @@ impl ProfileSwitch {
 
     /// What the peer is asked: the Profile and the address, on or off.
     #[must_use]
-    pub const fn request(&self) -> Request {
+    pub const fn request(&self) -> ProfileRequest {
         match self.switch {
-            Switch::On(target) => Request::SetOn {
+            Switch::On(target) => ProfileRequest::SetOn {
                 address: target.address(),
                 profile: self.profile,
             },
-            Switch::Off(address) => Request::SetOff {
+            Switch::Off(address) => ProfileRequest::SetOff {
                 address,
                 profile: self.profile,
             },

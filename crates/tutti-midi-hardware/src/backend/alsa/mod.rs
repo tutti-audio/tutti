@@ -43,10 +43,9 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::Result;
-use enumerate::BlockDirection;
 use std::sync::Mutex;
 use tutti_alsa_ffi::{Address, Blocking, Client, UmpVersion};
-use tutti_midi_device::{EndpointId, OsDevice};
+use tutti_midi_device::{EndpointId, OsDevice, PortDirection};
 use tutti_rt::LockExt;
 
 /// The handle a port is listed under.
@@ -87,7 +86,7 @@ impl AlsaEndpoints {
     /// An unopenable sequencer means no endpoints, not a panic — the same shape
     /// CoreMIDI's failed-client path takes. Callers see an empty list and the
     /// reason lands in `debug!`.
-    fn list(&self, direction: BlockDirection) -> Vec<OsEndpoint> {
+    fn list(&self, direction: PortDirection) -> Vec<OsEndpoint> {
         let mut held = self.enumerator.lock_recover();
         if held.is_none() {
             *held = client::open("tutti-enum", Blocking::NonBlock, UmpVersion::Midi2)
@@ -113,11 +112,11 @@ impl MidiEndpoints for AlsaEndpoints {
     }
 
     fn inputs(&self) -> Vec<OsEndpoint> {
-        self.list(BlockDirection::Input)
+        self.list(PortDirection::Input)
     }
 
     fn outputs(&self) -> Vec<OsEndpoint> {
-        self.list(BlockDirection::Output)
+        self.list(PortDirection::Output)
     }
 
     fn open_input(

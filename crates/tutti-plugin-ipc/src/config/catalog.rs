@@ -46,24 +46,13 @@ pub struct CatalogConfig {
     pub measure_timeout: Option<Duration>,
 }
 
-/// An empty `scan_dirs` list, for [`CatalogConfig::new`].
-///
-/// `scan_dirs` is generic over `Into<PathBuf>`, so a bare `vec![]` or
-/// `Vec::new()` has no element type to infer. This names it once instead of
-/// making every "no directories yet" call site spell out a turbofish.
-pub const NO_SCAN_DIRS: [PathBuf; 0] = [];
-
 impl CatalogConfig {
-    /// Creates a config with the sentinel directory and the directories to scan.
-    ///
-    /// Pass [`NO_SCAN_DIRS`] for an empty directory list.
-    pub fn new(
-        pedal_dir: impl Into<PathBuf>,
-        scan_dirs: impl IntoIterator<Item = impl Into<PathBuf>>,
-    ) -> Self {
+    /// Creates a config with the sentinel directory and no scan directories
+    /// ([`scan_dirs`](Self::scan_dirs) names them).
+    pub fn new(pedal_dir: impl Into<PathBuf>) -> Self {
         Self {
             pedal_dir: pedal_dir.into(),
-            scan_dirs: scan_dirs.into_iter().map(Into::into).collect(),
+            scan_dirs: Vec::new(),
             probe_locator: Locator::Search,
             probe_timeout: None,
             measure_timeout: None,
@@ -215,27 +204,21 @@ impl AudioConfig {
 mod tests {
     use super::*;
 
-    /// The constructor accepts what the setter accepts.
-    ///
-    /// The two write the same field, so they take the same bound; the `&str`
-    /// array below is the case a narrower `Vec<PathBuf>` would reject.
+    /// **A new config scans nothing**, and `scan_dirs` takes any paths and
+    /// replaces what was set.
     #[test]
-    fn new_takes_the_same_dirs_the_setter_does() {
-        let from_new = CatalogConfig::new("/tmp", ["/usr/lib/vst3", "/usr/lib/clap"]);
-        let from_setter = CatalogConfig::new("/tmp", Vec::<PathBuf>::new())
-            .scan_dirs(["/usr/lib/vst3", "/usr/lib/clap"]);
-
-        assert_eq!(from_new.scan_dirs, from_setter.scan_dirs);
-        assert_eq!(from_new.scan_dirs.len(), 2);
-        assert_eq!(from_new.pedal_dir, PathBuf::from("/tmp"));
-    }
-
-    /// An empty literal still infers. `Vec::new()` and `vec![]` are what the
-    /// in-repo callers pass, and a bare `IntoIterator` bound can leave the
-    /// element type unconstrained.
-    #[test]
-    fn an_empty_dir_list_still_infers() {
-        let cfg = CatalogConfig::new("/tmp", Vec::<PathBuf>::new());
+    fn scan_dirs_replaces_the_empty_default() {
+        let cfg = CatalogConfig::new("/tmp");
         assert!(cfg.scan_dirs.is_empty());
+        assert_eq!(cfg.pedal_dir, PathBuf::from("/tmp"));
+
+        let cfg = cfg.scan_dirs(["/usr/lib/vst3", "/usr/lib/clap"]);
+        assert_eq!(
+            cfg.scan_dirs,
+            [
+                PathBuf::from("/usr/lib/vst3"),
+                PathBuf::from("/usr/lib/clap")
+            ]
+        );
     }
 }

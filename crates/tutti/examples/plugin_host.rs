@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    blacklisted, not loaded into this process.
     let mut catalog = Catalog::new(
         PluginDb::new(),
-        CatalogConfig::new(std::env::temp_dir(), dirs),
+        CatalogConfig::new(std::env::temp_dir()).scan_dirs(dirs),
         |_| Ok(()),
     );
     //    The scan is a task: this example has nothing else to do, so it polls it to

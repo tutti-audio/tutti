@@ -65,7 +65,7 @@
 //!
 //! If the host dies, at any point of the session, the server notices on its own
 //! and exits: from [`PluginServer::new`] on, a thread the OS wakes when the host
-//! process ends (the PID the host passes in `TUTTI_PLUGIN_HOST_PID`) ends the
+//! process ends (the PID the host passes in `HOST_PID_ENV`) ends the
 //! server wherever it is blocked.
 //!
 //! ## Logs and the exit status

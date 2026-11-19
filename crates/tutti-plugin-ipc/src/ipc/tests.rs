@@ -17,9 +17,8 @@ use tutti_units::ParamId;
 use super::DeclaredCache;
 
 use crate::{
-    AudioSlab, BridgeConfig, BridgeEvent, BridgeMessage, HostMessage, Ipc, IpcController, IpcParts,
-    IpcProcessor, PROTOCOL_VERSION, PluginBridge, ProcessGuard, RING_SLOTS, SlabLayout,
-    unique_socket_path,
+    AudioSlab, BridgeEvent, BridgeMessage, HostMessage, Ipc, IpcController, IpcParts, IpcProcessor,
+    PROTOCOL_VERSION, PluginBridge, ProcessGuard, RING_SLOTS, SlabLayout, unique_socket_path,
 };
 
 const CEILING: usize = 64;
@@ -318,9 +317,9 @@ fn mock_with(
     });
     let ipc = Ipc::new(IpcParts {
         bridge,
-        guard: Arc::new(ProcessGuard::for_test(BridgeConfig::at(
+        guard: Arc::new(ProcessGuard::for_test(
             crate::unique_socket_path().expect("the OS has a random source"),
-        ))),
+        )),
         descriptor: PluginDescriptor::default(),
         loaded: LoadedPlugin {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],

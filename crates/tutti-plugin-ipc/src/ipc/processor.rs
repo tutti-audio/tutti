@@ -313,9 +313,7 @@ impl Chunks for Piece<'_, '_> {
         self.said = status;
     }
 
-    /// Nothing: each event goes out where it plays ([`emit`](Chunks::emit)).
-    fn midi_out(&mut self, _events: &tutti_plugin_types::MidiEventVec) {}
-
+    /// Each event goes out where it plays.
     fn emit(&mut self, frame: usize, mut event: WireMidi) {
         event.offset = u32::try_from(frame).unwrap_or(u32::MAX);
         let _ = self.out.emit_midi([event]);

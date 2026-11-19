@@ -10,7 +10,7 @@
 //! [`ProcessChange`](crate::ProcessChange).
 
 use tutti_midi_device::{
-    CallError, Nak, Outcome, PeData, PeResource, PeStatus, Request, ResourceFailure,
+    CallError, Nak, PeData, PeResource, PeStatus, ProfileOutcome, ProfileRequest, ResourceFailure,
     ResourceTarget, SubscribeId,
 };
 
@@ -24,15 +24,15 @@ pub enum Answer {
     /// NAKed it, or did not answer in time.
     Switch {
         /// What was asked.
-        request: Request,
+        request: ProfileRequest,
         /// How it ended.
-        outcome: Outcome,
+        outcome: ProfileOutcome,
     },
     /// A switch was not sent: the peer was lost between the request and the
     /// poll that would have sent it.
     SwitchLost {
         /// What was asked.
-        request: Request,
+        request: ProfileRequest,
     },
     /// A MIDI Message Report ended.
     Report(ReportEnd),

@@ -13,7 +13,7 @@ use tutti_buffers::PlanesMut;
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 
 use tutti_buffers::MaxBlock;
-use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId};
+use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, PluginId};
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::PluginFormat;
 use tutti_session::{
@@ -58,8 +58,8 @@ fn id() -> PluginId {
 /// A catalog that probed the reference plugin.
 fn catalog() -> (Catalog, tempfile::TempDir) {
     let dir = tempfile::TempDir::new().expect("a scratch directory");
-    let config = CatalogConfig::new(dir.path(), NO_SCAN_DIRS)
-        .probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
+    let config =
+        CatalogConfig::new(dir.path()).probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
     let mut task = catalog.register(clap_probe()).expect("a plugin file");
     let deadline = Instant::now() + Duration::from_secs(120);
