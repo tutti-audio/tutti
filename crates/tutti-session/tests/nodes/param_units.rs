@@ -112,8 +112,8 @@ units! {
         tutti_polysynth::PolySynth<f32> { Volume => Amplitude, Detune => tutti_units::CentsSpan, StereoSpread => Spread }
     }
     the_samplers_params_are_in_their_declared_unit #[cfg(feature = "sampler")] {
-        tutti_sampler::VoiceNode { Volume => Amplitude }
-        tutti_sampler::MemorySource { Volume => Amplitude }
-        tutti_sampler::Clip { Volume => Amplitude }
+        tutti_sampler::VoiceNode<f32> { Volume => Amplitude }
+        tutti_sampler::MemorySource<f32> { Volume => Amplitude }
+        tutti_sampler::Clip<f32> { Volume => Amplitude }
     }
 }

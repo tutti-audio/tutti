@@ -7,6 +7,7 @@ use tutti_buffers::ChannelLayout;
 
 use super::memory_source::{MemorySource, VoiceWindow};
 use super::types::{Playback, Voice, VoiceSource};
+use crate::SamplerFloat;
 use crate::{PlaceError, Wave};
 
 /// Builds an in-memory voice from a decoded wave.
@@ -28,12 +29,12 @@ use crate::{PlaceError, Wave};
 /// with a channel no speaker names (a `Speaker::Unknown` in its topology) is
 /// refused here rather than played with a channel in the wrong place or
 /// dropped.
-pub fn memory_voice(
-    wave: Arc<Wave>,
+pub fn memory_voice<F: SamplerFloat>(
+    wave: Arc<Wave<F>>,
     width: ChannelLayout,
     play: Playback,
     window: VoiceWindow,
-) -> Result<Voice, PlaceError> {
+) -> Result<Voice<F>, PlaceError> {
     let source = MemorySource::with_channels(wave, width)?.placed_at(window);
     Ok(Voice {
         source: VoiceSource::Memory(source),

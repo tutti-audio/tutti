@@ -73,7 +73,7 @@ pub(super) const COMMAND_CAPACITY: usize = 64;
 /// allocated control-side: that is why the two stretch-carrying variants
 /// have the filter handed to them rather than constructing one. Each is one
 /// of the handle's methods.
-pub(crate) enum VoiceCommand<F: SamplerFloat = f32> {
+pub(crate) enum VoiceCommand<F: SamplerFloat> {
     /// Add a voice by handing the reader a fully-formed [`Voice`]: a
     /// [`VoiceSource`] (in-memory `MemorySource` or
     /// streaming `DiskVoice`) plus its
@@ -309,7 +309,7 @@ impl<F: SamplerFloat> std::fmt::Debug for VoiceCommand<F> {
 /// or direction only when this names that slot's stream, so whether a setting
 /// reached a stream is decided from the command itself, never from what the
 /// handle believed the slot held. Only [`VoicePoolHandle::send`] builds one.
-pub(crate) struct Queued<F: SamplerFloat = f32> {
+pub(crate) struct Queued<F: SamplerFloat> {
     pub(crate) cmd: VoiceCommand<F>,
     pub(crate) forwarded: Option<StreamId>,
 }
@@ -415,7 +415,7 @@ impl SendError {
 /// handle.set_window(VoiceWindow::from(tutti_units::Beat::new(1.0)));
 /// ```
 #[derive(Clone, Debug)]
-pub struct VoiceNodeHandle<F: SamplerFloat = f32> {
+pub struct VoiceNodeHandle<F: SamplerFloat> {
     /// What the handle publishes besides the gain, shared with the node
     /// (which reads it once per block) and with its fork source (which reads
     /// it at fork time).
@@ -605,7 +605,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
 /// stream per refused streaming add. A loop sent for such an id reaches a
 /// stream nothing plays, and the drain finds no slot to record it on.
 #[derive(Clone, Debug)]
-pub struct VoicePoolHandle<F: SamplerFloat = f32> {
+pub struct VoicePoolHandle<F: SamplerFloat> {
     /// Pushes into the pool's bounded command ring. A handle is `Clone` and
     /// several control threads send, so the one writer sits behind a lock no
     /// audio thread ever takes.
@@ -645,14 +645,14 @@ pub struct VoicePoolHandle<F: SamplerFloat = f32> {
 /// one slot reach its stream and the pool in one order and a command for another
 /// slot (a remove, an in-memory add) never waits on the streamer. Control
 /// threads only.
-pub(crate) type SlotStreams<F = f32> = Arc<Mutex<HashMap<SlotId, Arc<Mutex<Stream<F>>>>>>;
+pub(crate) type SlotStreams<F> = Arc<Mutex<HashMap<SlotId, Arc<Mutex<Stream<F>>>>>>;
 
 /// A streaming add that did not reach the pool: why, and the stream, which the
 /// handle takes only once the add is queued. Its loop and direction are as they
 /// were before the call.
 #[derive(Debug, thiserror::Error)]
 #[error("{error}")]
-pub struct StreamingAddError<F: SamplerFloat = f32> {
+pub struct StreamingAddError<F: SamplerFloat> {
     /// Why the add was refused, with the command (the voice) it carried.
     pub error: SendError,
     /// The stream that was to steer the voice, handed back.
@@ -794,7 +794,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// Setting a streaming voice's loop waits while the streamer's queue is
     /// full, as a [`Stream`]'s commands do: as long as a stalled streamer
     /// stalls, and for good on a streamer nobody drains (a controller never
-    /// started, or a `DiskStreamer::manual` stepped on this thread). While it
+    /// started, or a `DiskStreamer::by_hand` stepped on this thread). While it
     /// waits, another thread's command for *that voice* through a clone of
     /// this handle waits with it, so its stream and the pool see them in one
     /// order. Every other command never waits on another thread's stream.

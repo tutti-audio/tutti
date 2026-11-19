@@ -31,7 +31,7 @@ const RATE: u32 = 4_000;
 const BOUND: Duration = Duration::from_secs(10);
 
 /// A threaded streamer whose backstop is 60 s, and its bell.
-fn sleeper(seams: Seams) -> (DiskStreamer<Running>, Arc<Bell>) {
+fn sleeper(seams: Seams) -> (DiskStreamer<Running, f32>, Arc<Bell>) {
     let built = Built::new(
         256,
         SampleRate::of(f64::from(RATE)),
@@ -63,7 +63,15 @@ fn until_asleep(bell: &Bell) {
 
 /// A stream on the long file, primed and the streamer asleep again, with the
 /// window it holds.
-fn primed(path: &Path) -> (DiskStreamer<Running>, Arc<Bell>, Stream, StreamReader, u64) {
+fn primed(
+    path: &Path,
+) -> (
+    DiskStreamer<Running, f32>,
+    Arc<Bell>,
+    Stream<f32>,
+    StreamReader<f32>,
+    u64,
+) {
     let (streamer, bell) = sleeper(Seams::default());
     let (stream, reader) = settle_threaded(streamer.open(path, Placement::HEAD)).expect("opens");
     assert!(
@@ -84,7 +92,7 @@ fn long_file(dir: &Path) -> PathBuf {
     constant_file(dir, "long.wav", RATE, 40, 0.25)
 }
 
-fn claim(reader: &mut StreamReader, play: u64) {
+fn claim(reader: &mut StreamReader<f32>, play: u64) {
     let none = Samples::new(0)..Samples::new(0);
     drop(reader.block(Samples::new(play as usize), [none.clone(), none]));
 }

@@ -62,7 +62,7 @@ use tutti_units::{Amplitude, SampleRate, Tail, UnitParam};
 /// set to the gain last set, with a stretch filter of its own. It reads its render's
 /// transport from its block's `Env`. A disk voice's node
 /// forks only for an offline render.
-pub struct VoiceNode<F: SamplerFloat = f32> {
+pub struct VoiceNode<F: SamplerFloat> {
     /// The single voice plus its resident stretch filter and the per-sample
     /// read, shared with the pool's slots.
     pub(crate) slot: PlaybackSlot<F>,
@@ -614,8 +614,9 @@ mod tests {
         let path = dir.path().join("tone.wav");
         let samples = vec![0.25f32; 4_800];
         tutti_fixtures::signal::write_wav_f32(&path, SampleRate::SR_48K, 1, &samples);
-        let mut streamer = crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default())
-            .expect("streamer builds");
+        let mut streamer =
+            crate::DiskStreamer::<_, f32>::by_hand(SampleRate::SR_48K, Default::default())
+                .expect("streamer builds");
         let opening = streamer.open(&path, crate::Placement::HEAD);
         let (stream, reader) = crate::testing::settle(&mut streamer, opening).expect("opens");
         let served = Arc::clone(&reader.status);

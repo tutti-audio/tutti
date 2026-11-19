@@ -19,7 +19,7 @@ pub(in crate::streamer) fn record(
     path: PathBuf,
     capacity: usize,
     channels: impl Into<ChannelLayout>,
-) -> (Record, SharedReader, tutti_rt::PosReader) {
+) -> (Record<f32>, SharedReader<f32>, tutti_rt::PosReader) {
     let (rec, ring, pos, _status) = record_with_status(id, path, capacity, channels);
     (rec, ring, pos)
 }
@@ -30,7 +30,12 @@ fn record_with_status(
     path: PathBuf,
     capacity: usize,
     channels: impl Into<ChannelLayout>,
-) -> (Record, SharedReader, tutti_rt::PosReader, Arc<StatusCell>) {
+) -> (
+    Record<f32>,
+    SharedReader<f32>,
+    tutti_rt::PosReader,
+    Arc<StatusCell>,
+) {
     let (out, ring, pos) = RegionBuffer::with_capacity(id, path.clone(), capacity, channels);
     let cache = Arc::new(LruCache::<f32>::new(4, 1 << 20));
     let pin = cache.pin(&path);
@@ -46,7 +51,7 @@ fn record_with_status(
     (record, ring, pos, status)
 }
 
-fn open(streams: &mut Streams, id: u64) -> (Weak<Ring>, Arc<StatusCell>) {
+fn open(streams: &mut Streams<f32>, id: u64) -> (Weak<Ring<f32>>, Arc<StatusCell>) {
     let (rec, ring, _pos, status) =
         record_with_status(StreamId::of(id), PathBuf::from("t.wav"), 1024, 1u16);
     let weak = Arc::downgrade(&ring);
@@ -54,7 +59,7 @@ fn open(streams: &mut Streams, id: u64) -> (Weak<Ring>, Arc<StatusCell>) {
     (weak, status)
 }
 
-fn live(streams: &mut Streams, id: u64) -> (Weak<Ring>, Arc<StatusCell>) {
+fn live(streams: &mut Streams<f32>, id: u64) -> (Weak<Ring<f32>>, Arc<StatusCell>) {
     let opened = open(streams, id);
     let _ = step(streams, Cmd::Opened(StreamId::of(id)));
     opened

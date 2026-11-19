@@ -69,9 +69,9 @@ enum Host {
 }
 
 enum Hosted {
-    Pool(VoicePool),
-    Node(MemorySource),
-    Voice(Option<VoiceNode>),
+    Pool(VoicePool<f32>),
+    Node(MemorySource<f32>),
+    Voice(Option<VoiceNode<f32>>),
 }
 
 /// Runs a test on each [`Host`], as `name::pool` and `name::node`.
