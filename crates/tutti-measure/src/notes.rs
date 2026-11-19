@@ -75,11 +75,11 @@ use tutti_units::{Amplitude, Cents, Db, SampleRate, Samples, Seconds};
 use crate::convert::widen;
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
 use crate::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
-use crate::sequence::{median, median_of_sorted};
 use crate::silence::FiniteLevel;
 use crate::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
 use crate::{Error, Meter, Result};
 use tutti_dsp::FftScratch;
+use tutti_dsp::{median, median_of_sorted};
 use tutti_units::ranged;
 
 /// The longest YIN frame accepted. YIN allocates several buffers of about this

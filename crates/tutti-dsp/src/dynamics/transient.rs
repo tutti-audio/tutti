@@ -39,7 +39,6 @@ use tutti_units::{Db, SampleRate, Seconds};
 
 use super::curves::db_gain;
 use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
-use crate::finite::finite_or;
 use crate::follower::{Follower, Smoothed};
 use crate::{Glide, Lerp};
 
@@ -67,10 +66,10 @@ impl TransientControls {
     /// These controls within range, a non-finite amount as the default's.
     fn designed(self) -> Amounts {
         let amount = |db: Db| {
-            Db(finite_or(db.get(), Db::UNITY.get()).clamp(
-                -TransientControls::MAX_AMOUNT.get(),
-                TransientControls::MAX_AMOUNT.get(),
-            ))
+            db.finite_or(Db::UNITY).clamp(
+                -TransientControls::MAX_AMOUNT,
+                TransientControls::MAX_AMOUNT,
+            )
         };
         Amounts {
             attack: amount(self.attack),

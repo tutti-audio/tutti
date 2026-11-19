@@ -76,6 +76,7 @@ use tutti_dsp::FftScratch;
 use tutti_dsp::FrameCount;
 use tutti_dsp::StftGeometry;
 use tutti_dsp::smooth_toward;
+use tutti_dsp::{log_band_edges, octave_band_edges};
 use tutti_units::ranged;
 
 /// The smallest and largest window accepted.
@@ -399,31 +400,24 @@ impl SpectrumPlan {
     }
 
     /// The edge frequencies of the bands, `None` for per-bin outputs.
-    fn edge_frequencies(&self) -> Result<Option<Vec<f64>>> {
-        let (min, max, count, per_octave) = match self.banding {
+    fn edge_frequencies(&self) -> Result<Option<Vec<Hz>>> {
+        let (min, max, edges) = match self.banding {
             Banding::Bins => return Ok(None),
-            Banding::Octave { per_octave, band } => {
-                (band.min(), band.max(), 0, Some(per_octave.get()))
-            }
-            Banding::Log { count, band } => (band.min(), band.max(), count.get(), None),
+            Banding::Octave { per_octave, band } => (
+                band.min(),
+                band.max(),
+                octave_band_edges(band.min(), band.max(), per_octave.get()),
+            ),
+            Banding::Log { count, band } => (
+                band.min(),
+                band.max(),
+                log_band_edges(band.min(), band.max(), count.get()),
+            ),
         };
-        let empty = Error::EmptyFrequencyRange { min, max };
         check_nyquist(max, self.geometry.sample_rate())?;
-        let (lo, hi) = (min.get(), max.get());
-        let edges: Vec<f64> = match per_octave {
-            Some(n) => {
-                let bands = (n as f64 * libm::log2(hi / lo) + 1e-9).floor() as usize;
-                if bands == 0 {
-                    return Err(empty);
-                }
-                (0..=bands)
-                    .map(|j| lo * libm::exp2(j as f64 / n as f64))
-                    .collect()
-            }
-            None => (0..=count)
-                .map(|j| lo * libm::pow(hi / lo, j as f64 / count as f64))
-                .collect(),
-        };
+        if edges.is_empty() {
+            return Err(Error::EmptyFrequencyRange { min, max });
+        }
         Ok(Some(edges))
     }
 
@@ -442,19 +436,19 @@ impl SpectrumPlan {
         let bins = self.bins();
         let first: Vec<usize> = edges
             .iter()
-            .map(|&e| (self.geometry.bin_of(Hz(e)).ceil() as usize).min(bins))
+            .map(|&e| (self.geometry.bin_of(e).ceil() as usize).min(bins))
             .collect();
         if let Some(band) = first.windows(2).position(|w| w[0] >= w[1]) {
             // A band `w` Hz wide holds a bin once the bin spacing is within `w`.
             let narrowest = edges
                 .windows(2)
-                .map(|e| e[1] - e[0])
+                .map(|e| e[1].get() - e[0].get())
                 .fold(f64::MAX, f64::min);
             let needed = (self.geometry.sample_rate().get() / narrowest).ceil();
             return Err(Error::EmptyBand {
                 band,
-                lower: Hz(edges[band]),
-                upper: Hz(edges[band + 1]),
+                lower: edges[band],
+                upper: edges[band + 1],
                 window: Samples((needed.min((1u64 << 40) as f64) as usize).next_power_of_two()),
             });
         }
@@ -523,7 +517,10 @@ impl<S: Sample> SpectrumMeter<S> {
         let band_bins = edges.unwrap_or_default();
         let size = cfg.geometry.window().get();
         let frequencies: Vec<Hz> = match cfg.edge_frequencies()? {
-            Some(edges) => edges.windows(2).map(|e| Hz((e[0] * e[1]).sqrt())).collect(),
+            Some(edges) => edges
+                .windows(2)
+                .map(|e| Hz((e[0].get() * e[1].get()).sqrt()))
+                .collect(),
             None => (0..cfg.bins())
                 .map(|k| cfg.geometry.bin_frequency(BinIndex(k)))
                 .collect(),

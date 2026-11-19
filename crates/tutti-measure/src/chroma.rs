@@ -50,9 +50,9 @@
 //! [`harmonic_decay`]: ChromaConfig::harmonic_decay
 
 use crate::level::SILENCE_FLOOR;
-use crate::sequence::local_maxima;
 use core::marker::PhantomData;
 use core::ops::RangeInclusive;
+use tutti_dsp::local_maxima;
 
 use tutti_buffers::{Mono, Sample};
 use tutti_music::Note;

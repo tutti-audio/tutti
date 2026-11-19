@@ -28,5 +28,5 @@ fn tables_never_outgrow_the_curve() {
     // And a period too long for any gap tracks without a beat chain.
     let mut curve = vec![0.0f64; 1000];
     curve[10] = 1.0;
-    assert!(track(&curve, 1e12, 100.0).len() <= 1);
+    assert!(track_beat_frames(&curve, 1e12, 100.0).len() <= 1);
 }

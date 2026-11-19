@@ -180,7 +180,7 @@ impl FirDesign {
             });
         }
 
-        let delta_omega = std::f64::consts::TAU * transition / rate.get();
+        let delta_omega = self.transition.angle_per_frame(rate).get();
         let mut len = odd_up(kaiser_order(attenuation, delta_omega));
         if matches!(self.response, FirResponse::HalfBand) {
             // The centre's offset (len - 1) / 2 is odd, so the outermost taps
@@ -195,7 +195,7 @@ impl FirDesign {
 
         let omega: Vec<f64> = edges
             .iter()
-            .map(|f| std::f64::consts::TAU * f / rate.get())
+            .map(|f| Hz::new(*f).angle_per_frame(rate).get())
             .collect();
         Ok(Fir {
             taps: self.taps(len, &omega, kaiser_beta(self.attenuation)),
