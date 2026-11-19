@@ -35,7 +35,8 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_plugin_ipc_ffi::{FdId, Interest, Ready};
 use tutti_plugin_types::{MainThreadMarker, Wakeups};
 use tutti_rt::LockExt;

@@ -33,6 +33,7 @@ mod lints;
 mod logging;
 mod midi_spec;
 mod passive_tests;
+mod platform;
 mod platform_seam;
 mod pointers;
 mod prose;
@@ -151,6 +152,8 @@ pub(crate) enum Gate {
     AllocBinaries,
     /// A platform cfg stands only on a `mod` declaration.
     PlatformSeam,
+    /// `Instant` and `SystemTime::now` come from `tutti_platform`, never std.
+    Platform,
     /// The spec inventories are well formed, tags name rows, CLAP matches `clap-sys`.
     Conformance,
     /// A public item names audio with a fixed sample format only as a row of the list.
@@ -194,6 +197,7 @@ impl Gate {
             Gate::Comments => "gate check-comments".to_owned(),
             Gate::AllocBinaries => "gate check-alloc-binaries".to_owned(),
             Gate::PlatformSeam => "gate check-platform-seam".to_owned(),
+            Gate::Platform => "gate check-platform".to_owned(),
             Gate::Conformance => "gate check-conformance".to_owned(),
             Gate::Buffers => "gate check-buffers".to_owned(),
             Gate::Building => "gate check-building".to_owned(),
@@ -248,6 +252,7 @@ impl Gate {
             Gate::Width => width::check(&tree, width::EDGES, width::MIN_FILES),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),
             Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
+            Gate::Platform => platform::check(&tree, platform::MIN_FILES),
             Gate::Conformance => {
                 let sys = clap_sys_tree(&tree);
                 let require =

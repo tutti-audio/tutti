@@ -337,7 +337,7 @@ fn a_change_of_protocol_drops_an_mpe_notes_channel() {
 /// time, and a neighbour keeps its own.
 #[test]
 fn a_send_time_stays_with_its_event_through_the_conversion() {
-    let t = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    let t = tutti_platform::Instant::now() + std::time::Duration::from_secs(1);
     let rpn_event = Outgoing::new(Offset::ZERO, SendAt::At(t), rpn(0, 0, 12 << 25));
     let after = Outgoing::new(Offset::ZERO, SendAt::Now, rpn(0, 0, 12 << 25));
     let mut wire = Wire::new(MIDI1);

@@ -20,7 +20,9 @@
 //! are POSIX's, VST3's run loop is Linux's) no plugin registers one, and the
 //! wait is timers alone.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 #[cfg(doc)]
 use crate::EditorWindow;

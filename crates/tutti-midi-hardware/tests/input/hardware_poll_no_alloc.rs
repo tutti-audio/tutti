@@ -18,9 +18,10 @@
 //! whose ring the test drains, so what was carried is counted.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::BlockClock;
+use tutti_platform::Instant;
 
 use tutti_fixtures::midi;
 use tutti_graph::EventInletNode;

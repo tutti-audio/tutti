@@ -6,8 +6,9 @@
 
 use crate::param_reads::ParamReads as _;
 use crate::pooled::{LoadPlugin, Spec};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::PlanesMut;
+use tutti_platform::Instant;
 use tutti_session::Root;
 
 use tutti_buffers::ChannelLayout;

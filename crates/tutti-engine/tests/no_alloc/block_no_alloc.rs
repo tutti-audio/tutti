@@ -220,13 +220,13 @@ fn a_delayed_render_and_the_render_thread_fault_records_are_allocation_free() {
     disconnected.record(
         tutti_engine::BackendErrorKind::DeviceGone,
         &"unplugged",
-        std::time::Instant::now(),
+        tutti_platform::Instant::now(),
     );
     let backend = tutti_engine::StreamFaults::new();
     backend.record(
         tutti_engine::BackendErrorKind::Other,
         &"xrun",
-        std::time::Instant::now(),
+        tutti_platform::Instant::now(),
     );
     let clean = tutti_engine::StreamFaults::new();
     clean.record_overrun("warm");

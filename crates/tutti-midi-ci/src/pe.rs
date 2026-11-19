@@ -53,7 +53,7 @@
 //! A message sent in chunks, and received:
 //!
 //! ```
-//! use std::time::Instant;
+//! use tutti_platform::Instant;
 //! use tutti_midi_ci::{
 //!     BufferLimit, MaxSysexSize, Muid, PeEncoding, PeFlowControl, PeHeader, PeMessageKind,
 //!     PeReassembler, PeReassemblyLimits, PeRequest, PeRequestId, PeStep, ResourceName,

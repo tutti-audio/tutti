@@ -16,7 +16,8 @@
 
 use crate::ties::{Patience, Ties};
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::BridgeMessage;

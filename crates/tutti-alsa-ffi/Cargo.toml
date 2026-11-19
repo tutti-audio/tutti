@@ -26,3 +26,7 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }

@@ -43,8 +43,8 @@
 //! starts the wait again, for the End; so the time a report takes is bounded by
 //! the peer's silence, not by how much it has to say.
 
-use std::time::Instant;
 use std::vec::Vec;
+use tutti_platform::Instant;
 
 use super::Initiator;
 use super::handshake::Handshake;

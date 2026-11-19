@@ -28,6 +28,8 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device" }
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [dev-dependencies]
 # The clock tests' shared beat.

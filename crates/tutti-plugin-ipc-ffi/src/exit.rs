@@ -101,7 +101,7 @@ impl ExitWait {
 mod tests {
     use super::*;
     use std::process::Command;
-    use std::time::Instant;
+    use tutti_platform::Instant;
 
     /// A command that ends at once, on every platform.
     fn quick() -> Command {

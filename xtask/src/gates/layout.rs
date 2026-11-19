@@ -111,15 +111,23 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-midi-protocol",
         &["tutti-ump", "tutti-music", "tutti-units"],
     ),
-    ("tutti-midi-ci", &["tutti-ump", "tutti-units"]),
+    (
+        "tutti-midi-ci",
+        &["tutti-ump", "tutti-units", "tutti-platform"],
+    ),
     (
         "tutti-midi-device",
-        &["tutti-midi-ci", "tutti-ump", "tutti-units"],
+        &[
+            "tutti-midi-ci",
+            "tutti-ump",
+            "tutti-units",
+            "tutti-platform",
+        ],
     ),
-    // The OS edges: the UMP types for what the spec defines, nothing else.
-    ("tutti-alsa-ffi", &["tutti-ump"]),
-    ("tutti-coremidi-ffi", &["tutti-ump"]),
-    ("tutti-winmm-ffi", &["tutti-ump"]),
+    // The OS edges: the UMP types for what the spec defines and the platform's clock, nothing else.
+    ("tutti-alsa-ffi", &["tutti-ump", "tutti-platform"]),
+    ("tutti-coremidi-ffi", &["tutti-ump", "tutti-platform"]),
+    ("tutti-winmm-ffi", &["tutti-ump", "tutti-platform"]),
     ("tutti-ump", &["tutti-units"]),
     // The unit vocabulary a `Gauge<U>` and a `Param<U>` hold (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
@@ -130,7 +138,12 @@ const ONLY: &[(&str, &[&str])] = &[
     ),
     (
         "tutti-midi-network",
-        &["tutti-ump", "tutti-midi-ci", "tutti-units"],
+        &[
+            "tutti-ump",
+            "tutti-midi-ci",
+            "tutti-units",
+            "tutti-platform",
+        ],
     ),
     ("tutti-metering", &["tutti-units"]),
     // The staged files' `Mint` and the encoders' worker threads (`spawn_named`).
@@ -230,6 +243,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-vst3-host",
             "tutti-vst2-host",
             "tutti-au-host",
+            "tutti-platform",
         ],
     ),
     ("tutti-dsp", &["tutti-units", "tutti-buffers", "tutti-rt"]),
@@ -918,7 +932,7 @@ mod tests {
     }
 
     #[test]
-    fn an_os_edge_names_the_ump_types_only() {
+    fn an_os_edge_names_the_ump_types_and_the_platform_only() {
         let os = |dir, krate, dep| {
             let mut v = base();
             v.push(("crates/tutti-music", "tutti-music", ""));
@@ -929,7 +943,11 @@ mod tests {
             ("crates/tutti-alsa-ffi", "tutti-alsa-ffi"),
             ("crates/tutti-coremidi-ffi", "tutti-coremidi-ffi"),
         ] {
-            let r = os(dir, krate, "[dependencies]\ntutti-ump = { path = \"x\" }\n");
+            let r = os(
+                dir,
+                krate,
+                "[dependencies]\ntutti-ump = { path = \"x\" }\ntutti-platform = { path = \"x\" }\n",
+            );
             assert!(r.passed(), "{:?}", r.findings);
             let r = os(
                 dir,
@@ -937,7 +955,7 @@ mod tests {
                 "[dependencies]\ntutti-music = { path = \"x\" }\n",
             );
             assert!(r.findings.iter().any(|l| l.contains(&format!(
-                "{krate} may depend on [\"tutti-ump\"] only; it depends on {{\"tutti-music\"}}"
+                "{krate} may depend on [\"tutti-platform\", \"tutti-ump\"] only; it depends on {{\"tutti-music\"}}"
             ))));
         }
     }

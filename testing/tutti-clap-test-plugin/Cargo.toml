@@ -29,6 +29,8 @@ clap-sys = "0.5"
 # (`probe.rs`), opened on its cdylib through `libloading`, for the suites that
 # load it. Off in the plugin itself.
 libloading = { workspace = true, optional = true }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../../crates/tutti-platform" }
 
 # `kill(getpid(), SIGKILL)`: how the probe dies on unix (`die`).
 [target.'cfg(unix)'.dependencies]

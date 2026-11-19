@@ -240,7 +240,8 @@ fn split_claims_and_views_are_allocation_free() {
 #[test]
 fn task_graph_blocks_are_allocation_free() {
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
     use tutti_rt::{BlockWaits, Participant, TaskGraph};
 
     // 0 -> {1, 2, 3, 4} -> 5.

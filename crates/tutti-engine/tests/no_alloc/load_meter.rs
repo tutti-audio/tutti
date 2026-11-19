@@ -8,7 +8,8 @@
 //! The meter's arithmetic (mean, peak, reset) is pinned exactly, on fake
 //! durations, by the unit tests beside it (`metering/load.rs`).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
@@ -16,6 +17,7 @@ use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Prepare, Unforkable};
 use tutti_graph::{OutPort, Source};
+use tutti_platform::Instant;
 use tutti_transport::Transport;
 use tutti_units::{SampleRate, Samples};
 

@@ -1,10 +1,10 @@
-use std::time::Instant;
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
     BodyLimit, BufferLimit, PeChunk, PeData, PeEncoding, PeFlowControl, PeHeader, PeJson,
     PeMessageKind, PeReassembler, PeReassemblyLimits, PeResource, PeStep, ResourceName,
     StreamLimit, decode_body, encode_body, mcoded7,
 };
+use tutti_platform::Instant;
 
 /// The most Property Data bytes a decode may return.
 const BODY: usize = 4096;

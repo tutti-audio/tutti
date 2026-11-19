@@ -1,4 +1,4 @@
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use super::*;
 use tutti_ump::U7;

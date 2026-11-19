@@ -291,7 +291,7 @@ impl Node for Heavy {
         self.0.prepare(p);
     }
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
-        let t = std::time::Instant::now();
+        let t = tutti_platform::Instant::now();
         while t.elapsed() < std::time::Duration::from_micros(40) {
             std::hint::spin_loop();
         }

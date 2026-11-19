@@ -395,7 +395,7 @@ mod tests {
         std::fs::write(&new, b"x").unwrap();
         // Set the mtimes outright: equal mtimes would let `max_by_key` return
         // either file, and the test would pass for the wrong reason.
-        let now = std::time::SystemTime::now();
+        let now = tutti_platform::SystemTime::now();
         let age = |file: &Path, by: u64| {
             std::fs::File::options()
                 .write(true)

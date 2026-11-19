@@ -3,7 +3,7 @@
 //! reporting what they found as [`SessionEvent`]s.
 
 use std::fmt::{self, Debug, Formatter};
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_modulation::Declarations;
 use tutti_platform::MainThreadMarker;

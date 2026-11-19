@@ -86,8 +86,9 @@
 //! value for ever, or the redraw does not end.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::vec::Vec;
+use tutti_platform::Instant;
 
 use tutti_ump::{DeviceIdentity, U7};
 

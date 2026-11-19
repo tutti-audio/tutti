@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_session::Stamp;
 
 #[cfg(feature = "midi-hardware")]
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_graph::Losses;
 #[cfg(feature = "midi-hardware")]
 use tutti_graph::NodeKey;
@@ -20,6 +20,8 @@ use tutti_midi_device::{EndpointId, PortDirection};
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, TimedMidiEvent};
+#[cfg(feature = "midi-hardware")]
+use tutti_platform::Instant;
 use tutti_rt::PushError;
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::MidiGroup;

@@ -198,8 +198,8 @@ pub fn wait_for_open<F: tutti_rt::RingFloat>(
     streamer: &mut crate::DiskStreamer<crate::Manual<F>, F>,
     mut opening: crate::PendingOpen<F>,
 ) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while std::time::Instant::now() < deadline {
+    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
+    while tutti_platform::Instant::now() < deadline {
         let _ = streamer.step();
         match opening.poll() {
             crate::Open::Pending(again) => opening = again,
@@ -227,7 +227,7 @@ pub fn wait_for_open<F: tutti_rt::RingFloat>(
 pub fn wait_for_open_threaded<F: tutti_rt::RingFloat>(
     mut opening: crate::PendingOpen<F>,
 ) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         match opening.poll() {
             crate::Open::Pending(again) => opening = again,
@@ -235,7 +235,7 @@ pub fn wait_for_open_threaded<F: tutti_rt::RingFloat>(
             crate::Open::Failed(error) => return Err(error),
         }
         assert!(
-            std::time::Instant::now() < deadline,
+            tutti_platform::Instant::now() < deadline,
             "the streamer did not answer an open in 10 s"
         );
         std::thread::sleep(std::time::Duration::from_millis(1));

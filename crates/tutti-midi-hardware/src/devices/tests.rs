@@ -694,7 +694,8 @@ fn a_reference_to_the_events_iterates_the_queued_changes() {
 /// `Synth`, in `protocol`, and the fake that records what it was sent. The
 /// schedule's timing is `Pulse`'s tests; these cover the thread that runs it.
 mod sensing {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
 
     use tutti_midi_device::{EndpointId, PortDirection};
     use tutti_ump::{Message, MidiGroup, Protocol, StreamConfig, System, Ump};

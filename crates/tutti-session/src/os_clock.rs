@@ -1,7 +1,9 @@
 //! The OS monotonic clock ([`tutti_platform::monotonic_ns`]) and the `Instant`s the
 //! backends stamp with are one timebase; this relates them.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 /// The one pairing of the two clocks, read once per process: an `Instant` and
 /// the [`tutti_platform::monotonic_ns`] reading taken with it.

@@ -1,6 +1,8 @@
 //! An arrival stamp as an `Instant`.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 /// How long after its stamp an event may be seen before the stamp is not
 /// trusted: a handler that late has been starved, or the stamp's clock has

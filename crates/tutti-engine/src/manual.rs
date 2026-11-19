@@ -8,7 +8,8 @@
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::{Float, Sample};
 use tutti_rt::LockExt;

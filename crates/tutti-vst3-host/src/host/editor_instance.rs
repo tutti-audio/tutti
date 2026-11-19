@@ -186,7 +186,7 @@ impl EditorWindow for Vst3Editor {
         &mut self,
         main: MainThreadMarker,
         ready: &[tutti_plugin_ipc_ffi::Ready],
-        now: std::time::Instant,
+        now: tutti_platform::Instant,
     ) {
         EditorWindow::wake(&mut self.inner, main, ready, now);
     }

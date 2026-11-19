@@ -117,11 +117,11 @@ use crate::routing::StageTargets;
 use crate::stage::OutputStage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, FoldError, Interleaved, InterleavedMut, Planes};
 use tutti_metering::{LoadMeter, LoadRecorder};
+use tutti_platform::Instant;
 use tutti_rt::{AudioThreadCell, Reader, RtScope};
 #[cfg(doc)]
 use tutti_transport::MotionFsm;

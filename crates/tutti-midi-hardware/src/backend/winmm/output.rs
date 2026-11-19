@@ -1,7 +1,8 @@
 //! Sending MIDI 1.0 to a winmm output, each event at its time.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use super::super::legacy_port::bytes::{ByteOut, Wire};
 use super::super::legacy_port::sender::{Mailbox, run};

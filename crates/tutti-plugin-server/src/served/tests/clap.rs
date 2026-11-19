@@ -737,7 +737,7 @@ fn a_timer_the_plugin_registers_is_ticked() {
         instance.loaded_mut_unwrapped(),
         main_thread(),
         &[],
-        std::time::Instant::now() + std::time::Duration::from_secs(1),
+        tutti_platform::Instant::now() + std::time::Duration::from_secs(1),
     );
     instance.service_requests();
 

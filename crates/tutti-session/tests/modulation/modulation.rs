@@ -9,7 +9,8 @@
 use crate::common;
 
 use std::cell::Cell;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;

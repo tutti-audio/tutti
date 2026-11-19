@@ -7,7 +7,7 @@
 //! callers that pump one, are the same code on every platform.
 
 use std::sync::Arc;
-use std::time::Instant;
+use tutti_platform::Instant;
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{MainThreadMarker, Wakeups};
 use vst3::Steinberg::IPlugFrame;

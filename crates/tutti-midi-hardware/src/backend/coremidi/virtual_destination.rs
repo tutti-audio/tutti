@@ -112,7 +112,7 @@ impl UmpVirtualDestination {
     /// reached CoreMIDI (the packet's host time).
     fn stamped<F>(name: &str, protocol: VirtualProtocol, mut on_event: F) -> Result<Self>
     where
-        F: FnMut(Ump, std::time::Instant) + Send + 'static,
+        F: FnMut(Ump, tutti_platform::Instant) + Send + 'static,
     {
         // The device watch's client starts before this endpoint's (`hub_first`).
         super::hub_first();

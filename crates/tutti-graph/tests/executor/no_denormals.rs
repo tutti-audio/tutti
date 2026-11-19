@@ -21,8 +21,9 @@
 use tutti_graph::testing as common;
 
 use std::hint::black_box;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::MaxBlock;
+use tutti_platform::Instant;
 
 use common::{WORKERS, test_pool};
 use tutti_buffers::ChannelLayout;

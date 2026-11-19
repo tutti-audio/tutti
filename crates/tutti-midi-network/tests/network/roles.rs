@@ -3,7 +3,7 @@
 
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_midi_network::{
     Admission, AuthMethods, Bye, ByeReason, Client, Command, Credentials, DatagramBuilder, Digest,

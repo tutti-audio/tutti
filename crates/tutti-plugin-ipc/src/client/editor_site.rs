@@ -171,7 +171,7 @@ impl EditorSite {
         &self,
         main: MainThreadMarker,
         ready: &[tutti_plugin_ipc_ffi::Ready],
-        now: std::time::Instant,
+        now: tutti_platform::Instant,
     ) {
         if let Site::InProcess(site) = &self.site {
             site.wake(main, ready, now);
@@ -556,7 +556,7 @@ impl InProcessEditor {
         &self,
         main: MainThreadMarker,
         ready: &[tutti_plugin_ipc_ffi::Ready],
-        now: std::time::Instant,
+        now: tutti_platform::Instant,
     ) {
         if let Ok(mut guard) = self.gui.lock()
             && let Some(gui) = guard.as_mut()
