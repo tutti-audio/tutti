@@ -81,7 +81,7 @@ impl Processor for IpcProcessor {
             said: BlockStatus::Continue,
         };
         self.batcher
-            .process(&self.link.bridge, &mut io.buffer, &mut piece);
+            .process(self.link.bridge.audio(), &mut io.buffer, &mut piece);
         let carries = carries_input(piece.ctx, io.buffer.split().0);
         let over = piece.over;
         let said = piece.said;
@@ -118,7 +118,7 @@ impl Processor for IpcProcessor {
         self.pending = BlockPayload::new(self.link.rate());
         self.params.clear();
         // A refused reset is counted (`PluginControls::refused_commands`).
-        let _ = self.link.bridge.reset_rt();
+        let _ = self.link.bridge.audio().reset_rt();
     }
 
     /// A block's MIDI is as large as a chunk's: [`MIDI_STACK_CAPACITY`](tutti_plugin_types::MIDI_STACK_CAPACITY)
@@ -150,18 +150,18 @@ impl Processor for IpcProcessor {
         self.params = ParameterChanges::reserved_bridged(queues, points);
         self.pending = BlockPayload::new(rate);
         // A refused rate command is counted (`PluginControls::refused_commands`).
-        let _ = self.link.bridge.set_sample_rate_rt(rate);
+        let _ = self.link.bridge.audio().set_sample_rate_rt(rate);
         self.link.set_rate(rate);
         // A fork's graph is compiled from the shape read right after this, and
         // a plugin may move its latency when its rate or render mode changes
         // (an HQ offline mode is the usual case). Both changes are queued
         // commands the server has not necessarily handled yet, so wait for
-        // them and for any latency they caused (`PluginBridge::settle`), then
+        // them and for any latency they caused (`AudioBridge::settle`), then
         // record the figure the plan will hold: the fork's health reports a
         // later move as a fault rather than a silently misaligned export.
         // Live, the latency poll re-plans instead, and a retune never blocks.
         if let Some(super::Watch { wait, .. }) = self.link.watch() {
-            self.link.bridge.settle();
+            self.link.bridge.audio().settle();
             wait.plan(Samples(self.link.latency().get() + self.batcher.chunk()));
         }
         true

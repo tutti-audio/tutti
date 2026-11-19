@@ -61,9 +61,9 @@ pub(crate) use batcher::Batcher;
 pub(crate) use batcher::{BlockPayload, Chunks};
 pub(crate) use client::audio::BridgeListener;
 pub(crate) use client::audio::HarmonyInputs;
-pub use client::audio::{BridgeEvent, BridgeThread};
+pub use client::audio::{AudioBridge, BridgeEvent, BridgeThread};
 pub(crate) use client::audio::{FATES, Fate};
-pub use client::{EditorLoader, PluginBridge};
+pub use client::{EditorLoader, EditorSite, PluginBridge};
 pub(crate) use wake::Wake;
 // The bridge's free-buffer pool, for the delivery test in `tutti-plugin` that
 // fills it the way the node does.
@@ -80,8 +80,8 @@ pub use protocol::{
     STATE_CHUNK_BYTES, SlabLayout, StagedState,
 };
 pub use server_watch::ServerWatch;
-pub use subprocess::Reaped;
 pub(crate) use subprocess::launch;
+pub use subprocess::{LoadRequest, Reaped, Restore};
 pub use transport::control::socket_name;
 pub use transport::shm::{AudioSlab, RING_SLOTS, SlabWriter};
 // Splitting and reassembling plugin state across frames: both ends must chunk

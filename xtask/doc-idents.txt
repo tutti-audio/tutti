@@ -69,7 +69,6 @@
 1 crates/tutti-nodes/src/strip.rs
 1 crates/tutti-plugin-host/src/control_handle.rs
 1 crates/tutti-plugin-host/src/node/width_error.rs
-1 crates/tutti-plugin-ipc/src/client/composite.rs
 1 crates/tutti-plugin-ipc/src/protocol/envelope.rs
 1 crates/tutti-plugin-ipc/src/protocol/frame.rs
 1 crates/tutti-plugin-ipc/src/transport/sys/unix.rs
