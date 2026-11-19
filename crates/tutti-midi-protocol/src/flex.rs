@@ -1,10 +1,12 @@
 //! The Flex Data values the transport follows, as the project's unit types:
 //! Set Tempo (M2-104 section 7.5.3) as a [`Bpm`] and Set Time Signature
-//! (section 7.5.4) as a [`tutti_music::TimeSignature`]. [`tutti_ump::Flex`]
+//! (section 7.5.4) as a [`tutti_music::TimeSignature`]; [`flex_metronome`] is the
+//! Set Metronome (section 7.5.5) of a click on every beat of a meter. [`tutti_ump::Flex`]
 //! holds the wire's integers; this is the one reading of them as units.
 
+use core::num::NonZeroU8;
 use tutti_music::{BeatsPerBar, NoteValue};
-use tutti_ump::FlexTimeSignature;
+use tutti_ump::{BarAccents, FlexTimeSignature, Metronome, System};
 use tutti_units::{Bpm, Seconds};
 
 /// 10-nanosecond units in one second: the Set Tempo field counts them per
@@ -110,5 +112,41 @@ pub fn flex_time_signature_wire(
         numerator: signature.beats_per_bar().get() as u8,
         denominator,
         thirty_seconds: 8,
+    })
+}
+
+/// The Set Metronome fields of a metronome that clicks once on each beat of
+/// `signature` and accents the bar's first beat: the primary click is a beat,
+/// which is `4 * 24 / note value` MIDI clocks, the bar is undivided (Part 1 the
+/// beats per bar, Parts 2 and 3 zero) and no subdivision clicks sound
+/// (section 7.5.5). `None` for a note value whose beat is not a whole number of
+/// clocks (a 64th note is a clock and a half): no Set Metronome has that form,
+/// so none is sent and a receiver keeps the click it was last told. A whole
+/// note has one (96 clocks), though its Set Time Signature does not
+/// ([`flex_time_signature_wire`]).
+///
+/// ```
+/// use tutti_midi_protocol::flex_metronome;
+/// use tutti_music::TimeSignature;
+///
+/// let six_eight = flex_metronome(TimeSignature::of(6, 8)).unwrap();
+/// assert_eq!(six_eight.clocks_per_click, 12);
+/// assert_eq!(six_eight.accents.parts(), [6, 0, 0]);
+/// assert_eq!(flex_metronome(TimeSignature::of(4, 64)), None);
+/// ```
+#[must_use]
+pub fn flex_metronome(signature: tutti_music::TimeSignature) -> Option<Metronome> {
+    let clocks = 4 * System::TIMING_CLOCKS_PER_QUARTER;
+    let value = signature.note_value().get();
+    if !clocks.is_multiple_of(value) {
+        return None;
+    }
+    Some(Metronome {
+        // At most 96, for a whole note.
+        clocks_per_click: (clocks / value) as u8,
+        // A bar has 1 to 64 beats, never zero.
+        accents: BarAccents::Undivided(NonZeroU8::new(signature.beats_per_bar().get() as u8)?),
+        subdivision_1: 0,
+        subdivision_2: 0,
     })
 }

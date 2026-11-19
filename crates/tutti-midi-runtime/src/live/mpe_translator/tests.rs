@@ -860,7 +860,7 @@ fn an_mpe_1_1_zone_starts_in_the_mode_its_response_names() {
         PitchBendSensitivity::MPE_MEMBER_DEFAULT,
     )
     .unwrap()
-    .with_channel_response(ChannelResponse::Monophonic);
+    .channel_response(ChannelResponse::Monophonic);
     let mut translator = MpeTranslator::new(MpeMode::Zones(MpeZones::single(zone)));
     let program = at(0, midi::program_change(MidiChannel::of(3), 5, None));
     assert_eq!(translator.translated(&program).count(), 1, "Mode 4");
@@ -1281,7 +1281,7 @@ fn program_change_on_a_member_follows_the_channel_response() {
     let mut mono = MpeTranslator::new(MpeMode::Disabled);
     enable(
         &mut mono,
-        MpeZones::single(zone(0, 4).with_channel_response(ChannelResponse::Monophonic)),
+        MpeZones::single(zone(0, 4).channel_response(ChannelResponse::Monophonic)),
     );
     assert_eq!(mono.translated(&program(0)).count(), 1, "the manager's");
     assert_eq!(mono.translated(&program(2)).count(), 1, "monophonic");
