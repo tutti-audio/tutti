@@ -18,10 +18,20 @@ use std::path::{Path, PathBuf};
 /// reloaded project finds out whether two refs name one plugin.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PluginRef {
     path: PathBuf,
-    /// `None`: the file's first plugin.
-    id: Option<PluginId>,
+    /// `None`: the file's first plugin, of the format its extension names.
+    choice: Option<Choice>,
+}
+
+/// What a ref says beyond its file: the plugin, whose id gives the format, or
+/// the file's first plugin as a format the extension need not name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+enum Choice {
+    Plugin(PluginId),
+    Format(PluginFormat),
 }
 
 impl PluginRef {
@@ -30,7 +40,7 @@ impl PluginRef {
     pub fn new(path: impl Into<PathBuf>, id: PluginId) -> Self {
         Self {
             path: path.into(),
-            id: Some(id),
+            choice: Some(Choice::Plugin(id)),
         }
     }
 
@@ -38,9 +48,9 @@ impl PluginRef {
     /// `id` is `None`: what a wire that carries an optional id builds.
     #[must_use]
     pub fn of(path: impl Into<PathBuf>, id: Option<PluginId>) -> Self {
-        Self {
-            path: path.into(),
-            id,
+        match id {
+            Some(id) => Self::new(path, id),
+            None => Self::file(path),
         }
     }
 
@@ -53,7 +63,18 @@ impl PluginRef {
     pub fn file(path: impl Into<PathBuf>) -> Self {
         Self {
             path: path.into(),
-            id: None,
+            choice: None,
+        }
+    }
+
+    /// The first plugin of the file at `path`, opened as `format`: for a file
+    /// whose extension does not name its format (a `Foo.clap` link keyed by its
+    /// target `libfoo.so`).
+    #[must_use]
+    pub fn first_of(path: impl Into<PathBuf>, format: PluginFormat) -> Self {
+        Self {
+            path: path.into(),
+            choice: Some(Choice::Format(format)),
         }
     }
 
@@ -64,21 +85,26 @@ impl PluginRef {
     }
 
     /// The plugin's id in its file; `None` for the file's first plugin
-    /// ([`file`](Self::file)).
+    /// ([`file`](Self::file), [`first_of`](Self::first_of)).
     #[must_use]
     pub fn id(&self) -> Option<&PluginId> {
-        self.id.as_ref()
+        match &self.choice {
+            Some(Choice::Plugin(id)) => Some(id),
+            _ => None,
+        }
     }
 
-    /// The format whose loader opens it: its id's, else its file's extension's.
+    /// The format whose loader opens it: its id's, else the one it was made
+    /// with ([`first_of`](Self::first_of)), else its file's extension's.
     ///
     /// # Errors
     ///
-    /// [`UnknownExtension`] when it has no id and its file's extension names no
-    /// format.
+    /// [`UnknownExtension`] when it names no plugin and no format and its file's
+    /// extension names none.
     pub fn format(&self) -> Result<PluginFormat, UnknownExtension> {
-        match &self.id {
-            Some(id) => Ok(id.format()),
+        match &self.choice {
+            Some(Choice::Plugin(id)) => Ok(id.format()),
+            Some(Choice::Format(format)) => Ok(*format),
             None => PluginFormat::from_extension(
                 self.path
                     .extension()
@@ -96,7 +122,7 @@ impl PluginRef {
     /// [`PluginError::Load`] at [`LoadStage::Opening`] when the id names a
     /// plugin of another format.
     pub fn id_for(&self, format: PluginFormat) -> Result<Option<&PluginId>, PluginError> {
-        match &self.id {
+        match self.id() {
             Some(id) if id.format() != format => Err(PluginError::Load {
                 stage: LoadStage::Opening,
                 reason: format!(
@@ -105,7 +131,7 @@ impl PluginRef {
                     format.extension_id()
                 ),
             }),
-            id => Ok(id.as_ref()),
+            id => Ok(id),
         }
     }
 
@@ -114,7 +140,7 @@ impl PluginRef {
     /// and file.
     #[must_use]
     pub fn is_same_plugin(&self, other: &Self) -> bool {
-        match (&self.id, &other.id) {
+        match (self.id(), other.id()) {
             (Some(a), Some(b)) => a == b,
             // Canonical, as a scan keys a file: a link and the file it names
             // are one plugin.
@@ -125,13 +151,13 @@ impl PluginRef {
         }
     }
 
-    /// The plugin at `path` with this ref's id: the file a loader opened, which
-    /// can be the module inside the bundle the ref names.
+    /// The plugin at `path` with this ref's choice: the file a loader opened,
+    /// which can be the module inside the bundle the ref names.
     #[must_use]
     pub fn at(&self, path: impl Into<PathBuf>) -> Self {
         Self {
             path: path.into(),
-            id: self.id.clone(),
+            choice: self.choice.clone(),
         }
     }
 
@@ -139,9 +165,9 @@ impl PluginRef {
     /// learns which plugin that was).
     #[must_use]
     pub fn identified(&self, id: PluginId) -> Self {
-        Self {
-            id: self.id.clone().or(Some(id)),
-            ..self.clone()
+        match self.id() {
+            Some(_) => self.clone(),
+            None => Self::new(self.path.clone(), id),
         }
     }
 }
@@ -149,7 +175,7 @@ impl PluginRef {
 /// The plugin as text, for an error: its id, else its file.
 impl fmt::Display for PluginRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.id {
+        match self.id() {
             Some(id) => write!(f, "{id}"),
             None => write!(f, "{}", self.path.display()),
         }
@@ -196,10 +222,7 @@ mod tests {
     }
 
     fn at(path: &str, id: Option<PluginId>) -> PluginRef {
-        PluginRef {
-            path: path.into(),
-            id,
-        }
+        PluginRef::of(path, id)
     }
 
     /// **An id reads back from its text, in every format**, and each text
@@ -403,18 +426,21 @@ mod tests {
         assert_eq!("clap.".parse::<PluginId>(), Err(E::EmptyClap));
     }
 
-    /// **A value the peer cannot make is a decode failure**: an empty CLAP id, an
-    /// id in the old string shape (a project file written before ids were typed
-    /// fails to read; one with no id still reads), and a known component code is
+    /// **A value the peer cannot make is a decode failure**: an empty CLAP id, a
+    /// ref in the old shape (a project file written before ids were typed fails
+    /// to read whole), and a known component code is
     /// read as its own type, never as `Unknown`.
     #[cfg(feature = "serde")]
     #[test]
     fn a_document_cannot_make_an_id_the_text_refuses() {
         let read = |json: &str| serde_json::from_str::<PluginRef>(json);
-        assert!(read(r#"{"path":"/p/x.clap","id":{"Clap":""}}"#).is_err());
+        assert!(read(r#"{"path":"/p/x.clap","choice":{"Plugin":{"Clap":""}}}"#).is_err());
+        // The shape before ids were typed (`format` and a string `id`) is
+        // refused whole, not read as the file's first plugin.
         assert!(read(r#"{"path":"/p/x.clap","format":"Clap","id":"com.vendor.synth"}"#).is_err());
+        assert!(read(r#"{"path":"/p/x.clap","format":"Clap","id":null}"#).is_err());
         assert_eq!(
-            read(r#"{"path":"/p/x.clap","format":"Clap","id":null}"#).unwrap(),
+            read(r#"{"path":"/p/x.clap","choice":null}"#).unwrap(),
             PluginRef::file("/p/x.clap")
         );
         let unknown = AuComponentType::Unknown(AuComponentType::Effect.code());
@@ -423,5 +449,21 @@ mod tests {
         assert_eq!(back, AuComponentType::Effect);
         let postcard = postcard::to_allocvec(&PluginId::Clap(String::new())).unwrap();
         assert!(postcard::from_bytes::<PluginId>(&postcard).is_err());
+    }
+
+    /// **A ref made `first_of` a format keeps it whatever the extension**: a
+    /// `.so` that is CLAP is CLAP; the extension answers only when nothing else
+    /// does; a plugin id's format wins over both.
+    #[test]
+    fn first_of_keeps_the_format_the_extension_does_not_name() {
+        let link = PluginRef::first_of("/p/libfoo.bin", PluginFormat::Clap);
+        assert_eq!(link.format(), Ok(PluginFormat::Clap));
+        assert_eq!(link.id(), None);
+        assert!(PluginRef::file("/p/libfoo.bin").format().is_err());
+        assert!(link.is_same_plugin(&PluginRef::first_of("/p/libfoo.bin", PluginFormat::Clap)));
+        assert!(!link.is_same_plugin(&PluginRef::first_of("/p/libfoo.bin", PluginFormat::Vst3)));
+        let named = link.identified(PluginId::Vst2(3));
+        assert_eq!(named.format(), Ok(PluginFormat::Vst2));
+        assert_eq!(link.at("/q/libfoo.bin").format(), Ok(PluginFormat::Clap));
     }
 }

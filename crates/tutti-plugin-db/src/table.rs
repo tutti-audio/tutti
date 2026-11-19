@@ -252,7 +252,7 @@ impl PluginEntry<'_> {
     pub fn plugin_ref(&self) -> PluginRef {
         match self.id {
             Some(id) => PluginRef::new(self.path, id.clone()),
-            None => PluginRef::file(self.path),
+            None => PluginRef::first_of(self.path, self.format),
         }
     }
 
@@ -641,5 +641,25 @@ mod tests {
             }
         );
         assert!(refused.to_string().contains("vst3") && refused.to_string().contains("vst2.1"));
+    }
+
+    /// **An id-less listing keeps its row's format in its ref**, whatever its
+    /// path's extension: a link keyed by its target `libfoo.bin` is still CLAP.
+    #[test]
+    fn an_id_less_entry_keeps_its_rows_format() {
+        let listing = Described {
+            id: None,
+            descriptor: PluginDescriptor::new("foo", PluginClass::Unknown),
+        };
+        let db = db_with(
+            "/p/libfoo.bin",
+            FileRow::probed(PluginFormat::Clap, &facts(T))
+                .plugins(vec![listing])
+                .build()
+                .expect("no ids to disagree"),
+        );
+        let entry = db.plugins().next().expect("one entry");
+        assert_eq!(entry.plugin_ref().format(), Ok(PluginFormat::Clap));
+        assert_eq!(entry.plugin_ref().id(), None);
     }
 }
