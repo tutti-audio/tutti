@@ -166,7 +166,8 @@ impl Vst3Controller {
     fn queue_edit(&mut self, id: ParamId, value: Normalized) {
         // The write policy refused an id the plugin does not declare before
         // this call, so the slot exists.
-        let _ = self.edits.write(id, value);
+        let written = self.edits.write(id, value);
+        debug_assert!(written.is_ok(), "{written:?}");
         let sent_at = self.watch.mark();
         self.hand(id, value, sent_at);
     }
@@ -255,11 +256,15 @@ impl Wraps for Vst3Controller {
         self.queue_edit(id, value);
     }
 
-    /// The writes queued before are stale. The writes the state or the program
-    /// carried (the plugin keeps them in `carried`) are queued to the Processor,
-    /// which the component's own stream did not hold.
-    fn after_restore(&mut self, _main: MainThreadMarker) {
+    /// The writes queued before the load are stale, voided before it runs.
+    fn before_restore(&mut self, _main: MainThreadMarker) {
         self.reset_edits();
+    }
+
+    /// The writes the state or the program carried (the plugin keeps them in
+    /// `carried`) are queued to the Processor, which the component's own stream
+    /// did not hold, under the stamp the reset made current.
+    fn after_restore(&mut self, _main: MainThreadMarker) {
         for (id, value) in std::mem::take(&mut self.loaded_mut().carried) {
             self.queue_edit(id, value);
         }

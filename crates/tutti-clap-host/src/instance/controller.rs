@@ -175,7 +175,8 @@ impl ClapController {
     pub(crate) fn queue_edit(&mut self, id: ParamId, value: Normalized) {
         // The write policy refused an id the plugin does not declare before
         // this call, so the slot exists.
-        let _ = self.edits.write(id, value);
+        let written = self.edits.write(id, value);
+        debug_assert!(written.is_ok(), "{written:?}");
     }
 
     /// Makes every write made so far stale (see [`EditWriter::reset`]).

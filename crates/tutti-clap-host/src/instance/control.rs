@@ -704,7 +704,8 @@ impl Wraps for ClapController {
         self.queue_edit(id, value);
     }
 
-    fn after_restore(&mut self, _main: MainThreadMarker) {
+    /// The writes queued before the load are stale, voided before it runs.
+    fn before_restore(&mut self, _main: MainThreadMarker) {
         self.reset_edits();
     }
 

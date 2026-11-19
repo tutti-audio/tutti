@@ -573,8 +573,15 @@ pub trait Wraps {
         let _ = (main, id, value);
     }
 
-    /// A state or a preset load took: the writes queued before it are stale, and
-    /// whatever it carried is owed to the Processor.
+    /// A state or a preset load is about to run: the writes queued before it
+    /// are stale, so they are voided first, and no block can put one over what
+    /// the load sets.
+    fn before_restore(&mut self, main: MainThreadMarker) {
+        let _ = main;
+    }
+
+    /// A state or a preset load took: whatever it carried is owed to the
+    /// Processor.
     fn after_restore(&mut self, main: MainThreadMarker) {
         let _ = main;
     }
@@ -727,6 +734,7 @@ impl<W: Wraps> Control for W {
         bytes: &[u8],
         state_use: StateUse,
     ) -> PluginResult<()> {
+        self.before_restore(main);
         let result = self.plugin_mut().load_state(main, bytes, state_use);
         self.after_restore(main);
         result
@@ -737,6 +745,7 @@ impl<W: Wraps> Control for W {
     }
 
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+        self.before_restore(main);
         let loaded = self.plugin_mut().load_preset(main, id);
         if loaded {
             self.after_restore(main);
