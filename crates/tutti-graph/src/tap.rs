@@ -443,7 +443,7 @@ impl<F: Float> TapReader<F> {
             run += next.frames;
             end = next.start + Samples::new(next.frames);
         }
-        Samples::new(run.min(self.available().get()))
+        Samples::new(run).min(self.available())
     }
 
     /// Advances the clock over `frames` just handed out, across run
