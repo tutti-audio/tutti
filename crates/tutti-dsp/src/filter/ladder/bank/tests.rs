@@ -6,7 +6,7 @@ use tutti_units::{Drive, Hz, Resonance, SampleRate};
 
 use super::*;
 use crate::Complex64;
-use crate::{LadderCoeffs, LadderControls};
+use crate::{LadderControls, LadderDesign};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const TYPES: [LadderType; 4] = [
@@ -16,21 +16,21 @@ const TYPES: [LadderType; 4] = [
     LadderType::HP24,
 ];
 
-fn design<F: Float + Lanes>(ty: LadderType, fc: f64, res: f64, drive: f64) -> LadderDesign<F> {
+fn design<F: Float + SimdLanes>(ty: LadderType, fc: f64, res: f64, drive: f64) -> LadderBlend<F> {
     let controls = LadderControls {
         ty,
         freq: Hz::new(fc),
         res: Resonance::new(res),
         drive: Drive::new(drive),
     };
-    LadderDesign::from(&LadderModel::new(controls, RATE))
+    LadderBlend::from(&LadderModel::new(controls, RATE))
 }
 
 /// Runs `input` (one `Vec` per channel) through `bank` in blocks of the lengths in
 /// `blocks`, cycled, and returns the output per channel.
-fn run<F: Float + Lanes>(
+fn run<F: Float + SimdLanes>(
     bank: &mut LadderBank<F>,
-    glide: &mut Glide<LadderDesign<F>>,
+    glide: &mut Glide<LadderBlend<F>>,
     input: &[Vec<F>],
     blocks: &[usize],
 ) -> Vec<Vec<F>> {
@@ -234,18 +234,18 @@ fn just_below_k_four_the_oscillation_decays_at_the_poles_modulus() {
     }
 }
 
-/// The resonance is held at 1: `LadderCoeffs` reads `k = 4 min(res, 1)`, `k = 4` being where
+/// The resonance is held at 1: `LadderDesign` reads `k = 4 min(res, 1)`, `k = 4` being where
 /// the continuous poles reach the imaginary axis (`the_ladder_self_oscillates_at_the_cutoff_at_k_four`).
 #[test]
 fn the_resonance_ceiling_is_k_four() {
     for res in [1.0f64, 1.5, 2.0, 1e30, f64::INFINITY] {
         assert_eq!(
-            LadderCoeffs::new(Hz::new(1_000.0), Resonance::new(res), RATE).k,
+            LadderDesign::new(Hz::new(1_000.0), Resonance::new(res), RATE).k,
             4.0,
             "{res}"
         );
     }
-    assert!(LadderCoeffs::new(Hz::new(1_000.0), Resonance::new(0.999), RATE).k < 4.0);
+    assert!(LadderDesign::new(Hz::new(1_000.0), Resonance::new(0.999), RATE).k < 4.0);
 }
 
 /// Past the knee the loop is bounded whatever the controls. The saturator limits the loop
@@ -484,7 +484,7 @@ fn a_glides_midpoint_is_stable() {
         seed ^= seed << 5;
         lo + (hi - lo) * f64::from(seed >> 8) / f64::from(1u32 << 24)
     };
-    fn reachable(next: &mut dyn FnMut(f64, f64) -> f64) -> LadderDesign<f64> {
+    fn reachable(next: &mut dyn FnMut(f64, f64) -> f64) -> LadderBlend<f64> {
         let ty = TYPES[next(0.0, 4.0) as usize % 4];
         design(ty, next(20.0, 3_000.0), next(0.0, 0.7), next(0.1, 8.0))
     }
@@ -538,7 +538,7 @@ fn a_five_hz_low_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
         .collect();
     let model = LadderModel::new(controls, SampleRate::of(FS));
     let mut bank = LadderBank::<f32>::new(ChannelLayout::MONO);
-    let mut glide = Glide::landed(LadderDesign::<f32>::from(&model));
+    let mut glide = Glide::landed(LadderBlend::<f32>::from(&model));
     let y = run(&mut bank, &mut glide, &[input], &[2 * whole]).remove(0);
     let y: Vec<f64> = y.iter().map(|&v| f64::from(v)).collect();
 

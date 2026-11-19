@@ -625,7 +625,7 @@ fn present(s: &mut Session, identity: tutti_ump::DeviceIdentity) {
             .to(tutti_session::MidiPolicy {
                 identity: Some(tutti_midi_device::MidiIdentity {
                     device: identity,
-                    name: tutti_midi_device::EndpointName::new("Session").unwrap(),
+                    name: tutti_midi_ci::EndpointName::new("Session").unwrap(),
                     instance: None,
                 }),
             }),
@@ -1020,8 +1020,9 @@ fn a_port_that_loses_events_is_reported() {
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
-    use tutti_midi_device::{
-        BlockName, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize, Muid,
+    use tutti_midi_ci::Muid;
+    use tutti_midi_ci::{
+        BlockName, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_ump::{
@@ -1135,9 +1136,10 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
-    use tutti_midi_device::{
+    use tutti_midi_ci::Muid;
+    use tutti_midi_ci::{
         BlockName, CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded,
-        DiscoveryData, MaxSysexSize, Muid, ProfileChannels, ProfileId, ProfileList, ProfileLists,
+        DiscoveryData, MaxSysexSize, ProfileChannels, ProfileId, ProfileList, ProfileLists,
         ProfileState, StandardProfile,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
@@ -1400,11 +1402,11 @@ pub(crate) enum Reply {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Asked {
     /// A Set Profile On, with the Number of Channels.
-    On(tutti_midi_device::ProfileChannels),
+    On(tutti_midi_ci::ProfileChannels),
     /// A Set Profile Off.
     Off,
     /// An Inquiry: MIDI Message Report, with the scope asked.
-    Report(tutti_midi_device::ReportScope),
+    Report(tutti_midi_ci::ReportScope),
 }
 
 /// A MIDI-CI peer that lists the MPE Profile (M2-120 section 3.2) disabled on
@@ -1416,7 +1418,7 @@ pub(crate) enum Asked {
 pub(crate) struct MpePeer {
     device: tutti_midi_device::Endpoint,
     assembler: tutti_ump::SysexAssembler<Box<[u8]>>,
-    pub(crate) muid: tutti_midi_device::Muid,
+    pub(crate) muid: tutti_midi_ci::Muid,
     pub(crate) switch: Reply,
     pub(crate) report: Reply,
     /// What the session asked of it so far.
@@ -1439,7 +1441,7 @@ impl MpePeer {
             GroupSpan::new(1).unwrap(),
         )
         .midi_ci(2, 0)
-        .name(tutti_midi_device::BlockName::new("Main").unwrap())
+        .name(tutti_midi_ci::BlockName::new("Main").unwrap())
         .build()
         .unwrap();
         let room = SysexAssembler::room_for(256, 1, 16);
@@ -1451,7 +1453,7 @@ impl MpePeer {
             }))
             .block(block),
             assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16),
-            muid: tutti_midi_device::Muid::of(0x0012_3456),
+            muid: tutti_midi_ci::Muid::of(0x0012_3456),
             switch: Reply::Answer,
             report: Reply::Answer,
             asked: Vec::new(),
@@ -1464,7 +1466,7 @@ impl MpePeer {
         fake: &tutti_midi_hardware::test_support::FakeCounters,
         now: Instant,
     ) {
-        use tutti_midi_device::{
+        use tutti_midi_ci::{
             CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DiscoveryData,
             MaxSysexSize, Nak, NakStatus, PeTerminator, ProfileId, ProfileList, ProfileLists,
             ProfileTarget, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF,
@@ -1576,7 +1578,7 @@ impl MpePeer {
                             target: match header.device_id {
                                 CiDeviceId::Channel(channel) => ProfileTarget::Channel {
                                     channel,
-                                    channels: tutti_midi_device::ProfileChannels::of(4),
+                                    channels: tutti_midi_ci::ProfileChannels::of(4),
                                 },
                                 CiDeviceId::Group => ProfileTarget::Group,
                                 CiDeviceId::FunctionBlock => ProfileTarget::FunctionBlock,
@@ -1605,7 +1607,7 @@ impl MpePeer {
                         CiMessage::ProcessCapabilitiesReply {
                             header: at(CiDeviceId::FunctionBlock),
                             to: header.source,
-                            features: tutti_midi_device::ProcessFeatures::MIDI_MESSAGE_REPORT,
+                            features: tutti_midi_ci::ProcessFeatures::MIDI_MESSAGE_REPORT,
                         }
                         .packets(MidiGroup::FIRST)
                         .unwrap(),
@@ -1672,7 +1674,7 @@ impl MpePeer {
 #[test]
 fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     use tutti_fixtures::midi::BendRanges;
-    use tutti_midi_device::{ProfileChange, ProfileState};
+    use tutti_midi_ci::{ProfileChange, ProfileState};
     use tutti_midi_hardware::{ChannelCount, ProfilesChange};
     use tutti_midi_protocol::{MpeZoneConfig, MpeZones, PitchBendSensitivity};
     use tutti_session::ListedProfile;
@@ -1829,9 +1831,10 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
-    use tutti_midi_device::{
+    use tutti_midi_ci::Muid;
+    use tutti_midi_ci::{
         BlockName, CI_VERSION, ChannelControllers, CiCategories, CiDeviceId, CiHeader, CiMessage,
-        DataControl, Decoded, DiscoveryData, MaxSysexSize, Muid, NoteData, ProcessFeatures,
+        DataControl, Decoded, DiscoveryData, MaxSysexSize, NoteData, ProcessFeatures,
         ReportRequest, ReportScope, SystemMessages,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};

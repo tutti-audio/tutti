@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use tutti_midi_device::ProfileOnRequest;
+use tutti_midi_ci::ProfileOnRequest;
 use tutti_midi_protocol::{MtcRate, channel_voice, flex_tempo};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
@@ -1110,7 +1110,7 @@ impl Track {
     /// is built.
     ///
     /// ```
-    /// use tutti_midi_device::{ProfileId, ProfileOnRequest, ProfileTarget};
+    /// use tutti_midi_ci::{ProfileId, ProfileOnRequest, ProfileTarget};
     /// use tutti_midi_file::Track;
     ///
     /// let on = ProfileOnRequest { target: ProfileTarget::Group, profile: ProfileId::MPE };

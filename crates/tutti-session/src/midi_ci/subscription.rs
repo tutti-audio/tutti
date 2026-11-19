@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use tutti_midi_device::{PeData, PeResource, SubscribeId};
+use tutti_midi_ci::{PeData, PeResource, SubscribeId};
 use tutti_midi_hardware::{PeerId, PropertyAsk, PropertyCall, PropertyPeer};
 use tutti_rt::LockExt;
 

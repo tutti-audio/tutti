@@ -9,7 +9,7 @@
 //! through [`ProfilesChange`](crate::ProfilesChange) and
 //! [`ProcessChange`](crate::ProcessChange).
 
-use tutti_midi_device::{
+use tutti_midi_ci::{
     CallError, Nak, PeData, PeResource, PeStatus, ProfileOutcome, ProfileRequest, ResourceFailure,
     ResourceTarget, SubscribeId,
 };

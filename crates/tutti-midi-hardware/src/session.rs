@@ -36,7 +36,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tutti_midi_device::ResourceStore;
+use tutti_midi_ci::ResourceStore;
 
 use crate::answer::Answer;
 use crate::backend;
@@ -52,10 +52,10 @@ use crate::properties::{PropertyAsk, PropertyChange, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
-use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
+use tutti_midi_ci::ProductInstanceId;
+use tutti_midi_ci::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{
-    DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, ProductInstanceId, SavedDevice,
-    random_bytes,
+    DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, SavedDevice, random_bytes,
 };
 use tutti_midi_runtime::{InputInlets, InputWriters};
 use tutti_ump::{GroupSpan, MidiGroup};
@@ -797,7 +797,7 @@ impl MidiSession {
     /// since closed, with [`PeerError::NoSuchPeer`] when the peer is gone, and
     /// [`ProfileError::NotListed`] when it no longer lists the Profile there.
     ///
-    /// [`PEER_REPLY_TIMEOUT`]: tutti_midi_device::PEER_REPLY_TIMEOUT
+    /// [`PEER_REPLY_TIMEOUT`]: tutti_midi_ci::PEER_REPLY_TIMEOUT
     pub fn set_profile(&mut self, switch: ProfileSwitch) -> std::result::Result<(), ProfileError> {
         self.input_of(switch.at())?.stream.set_profile(switch)
     }

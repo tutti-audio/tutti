@@ -26,6 +26,7 @@ atomic_float = "1.1"
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device" }
+tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 
 [dev-dependencies]

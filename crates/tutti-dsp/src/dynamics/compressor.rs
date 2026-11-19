@@ -24,10 +24,10 @@ use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gain_reduction, level_db};
+use super::gain_pass::{CHUNK, GAIN_GLIDE, MAX_KNEE, floored, key_levels};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE, floored, key_levels};
 use crate::follower::{Follower, Smoothed};
-use crate::{Glide, Lanes, Lerp, Steps};
+use crate::{Glide, Lerp, SimdLanes, Steps};
 
 /// The controls of a [`CompressorBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -175,7 +175,7 @@ pub struct CompressorLanes<'a, F: Float> {
 /// Built on the control side for one rate; the state, the views and the lane are `F`, the
 /// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct CompressorBank<F: Float + Lanes> {
+pub struct CompressorBank<F: Float + SimdLanes> {
     detector: Detector<F>,
     /// The makeup in dB, gliding over [`GAIN_GLIDE`].
     makeup: Glide<F>,
@@ -191,7 +191,7 @@ pub struct CompressorBank<F: Float + Lanes> {
     key: Option<KeyStage<F>>,
 }
 
-impl<F: Float + Lanes + Lerp> CompressorBank<F> {
+impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
     /// A compressor that does nothing at `rate`, to be aimed.
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {

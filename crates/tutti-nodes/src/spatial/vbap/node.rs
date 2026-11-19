@@ -443,7 +443,7 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
             // The first frame after a grid point reads step 1.
             let first = self.pos as u32 + 1;
             for (ch, out) in outputs.iter_mut().enumerate() {
-                VbapGains::render_channel(
+                VbapGains::process_channel(
                     &self.gains,
                     first,
                     self.speaker_of_channel[ch],

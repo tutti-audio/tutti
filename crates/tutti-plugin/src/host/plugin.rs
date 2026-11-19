@@ -6,8 +6,8 @@
 //! more than its node: it also takes per-block MIDI, chord/scale context and
 //! note expression, reached here through capability accessors.
 
-use crate::host::loadable::{Hosting, Loadable};
-use crate::host::plugin_ref::PluginRef;
+use crate::host::placement::placement;
+use tutti_plugin_db::{Hosting, Loadable, PluginRef};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_rt::LockExt;
 
@@ -219,7 +219,7 @@ impl Plugin {
         sample_rate: SampleRate,
         state: Option<&[u8]>,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
-        if plugin.placement()? == Hosting::InProcess {
+        if placement(plugin)? == Hosting::InProcess {
             // A served load asks the blacklist in `PluginClient::open`; a
             // session load has asked it once already, before it defers.
             plugin.check()?;

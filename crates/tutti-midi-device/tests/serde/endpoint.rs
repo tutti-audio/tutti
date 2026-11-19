@@ -2,9 +2,8 @@
 //! back as the Endpoint it was, and a document whose parts disagree is refused.
 
 use serde_json::{Value, json};
-use tutti_midi_device::{
-    BlockName, Capabilities, Endpoint, EndpointName, FunctionBlock, ProductInstanceId, Supports,
-};
+use tutti_midi_ci::{BlockName, EndpointName, ProductInstanceId};
+use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
 use tutti_ump::{
     BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
     Midi1Port, SoftwareRevision, U7, UiHint,

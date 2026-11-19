@@ -1,6 +1,7 @@
 use std::time::Instant;
-use tutti_midi_device::{
-    BodyLimit, BufferLimit, Muid, PeChunk, PeData, PeEncoding, PeFlowControl, PeHeader, PeJson,
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
+    BodyLimit, BufferLimit, PeChunk, PeData, PeEncoding, PeFlowControl, PeHeader, PeJson,
     PeMessageKind, PeReassembler, PeReassemblyLimits, PeResource, PeStep, ResourceName,
     StreamLimit, decode_body, encode_body, mcoded7,
 };
