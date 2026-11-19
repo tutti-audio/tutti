@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use tutti_platform::{Asset, Identity};
+use tutti_platform::Asset;
 
 use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry, Sharing};
 
@@ -16,18 +16,6 @@ use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry, Sharing};
 pub struct AudioFile {
     asset: Asset,
     tier: Tier,
-}
-
-/// What tells one declared asset from another, as [`PoolEntry::Identity`]: its
-/// [`Identity`] as it was when the entry was declared (a file's carries its
-/// stamp, so a file rewritten since is another entry) and its
-/// [`name`](Asset::name), which alone tells apart assets with no identity.
-#[cfg(any(feature = "soundfont", all(feature = "sampler", codec)))]
-type Declaration = (Option<Identity>, String);
-
-#[cfg(any(feature = "soundfont", all(feature = "sampler", codec)))]
-fn declaration(asset: &Asset) -> Declaration {
-    (asset.identity(), asset.name())
 }
 
 /// Where a file's samples are read from: half of [`AudioFile`]'s identity.
@@ -108,9 +96,9 @@ impl AudioFile {
 /// entry reads as [`AudioEntry::Resident`]. Another key declared with the same
 /// asset shares the one decode, and every handle is the same `Arc`.
 ///
-/// Two declarations are of the same asset when their [`Identity`]s are equal
-/// (the path and its stamp, for a file) taken when each is declared; an asset
-/// with none is the same as another of the same [`name`](Asset::name).
+/// Two declarations are of the same asset when their [`Asset`]s are equal (the
+/// same path, or clones of one bytes asset): the diff reads no file, so a file
+/// rewritten since loads again at [`refresh_pool`](crate::Session::refresh_pool).
 #[cfg(all(feature = "sampler", codec))]
 pub fn audio_file<K>(key: K, asset: impl Into<Asset>) -> Declared<K, AudioFile, Sharing> {
     Declared::shared(
@@ -157,12 +145,12 @@ impl<K, M> Declared<K, AudioFile, M> {
 
 #[cfg(all(feature = "sampler", codec))]
 impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
-    type Identity = (Declaration, Tier);
+    type Identity = (Asset, Tier);
     type Loaded = AudioEntry<S>;
     type Handle = AudioEntry<S>;
 
     fn identity(&self) -> Self::Identity {
-        (declaration(&self.asset), self.tier)
+        (self.asset.clone(), self.tier)
     }
 
     fn load(&self) -> Load<Self::Loaded, S> {
@@ -249,12 +237,12 @@ pub fn soundfont<K>(key: K, asset: impl Into<Asset>) -> Declared<K, SoundFontFil
 
 #[cfg(feature = "soundfont")]
 impl<S: tutti_buffers::Float> PoolEntry<S> for SoundFontFile {
-    type Identity = Declaration;
+    type Identity = Asset;
     type Loaded = Arc<tutti_sf2::SoundFont>;
     type Handle = Arc<tutti_sf2::SoundFont>;
 
-    fn identity(&self) -> Declaration {
-        declaration(&self.asset)
+    fn identity(&self) -> Asset {
+        self.asset.clone()
     }
 
     fn load(&self) -> Load<Self::Loaded, S> {

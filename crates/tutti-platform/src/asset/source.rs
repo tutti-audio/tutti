@@ -152,12 +152,27 @@ impl Open for BytesSource {
 #[derive(Clone)]
 pub struct Asset {
     source: Arc<dyn Open>,
+    key: Arc<SourceKey>,
     hint: Option<Arc<str>>,
 }
 
+/// What two assets are equal by: their source, with no I/O.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum SourceKey {
+    File(PathBuf),
+    /// The id the bytes' source holds.
+    Minted(Identity),
+    /// The data address of an app's own source, which the asset keeps alive.
+    Pointer(usize),
+}
+
 impl Asset {
-    fn new(source: Arc<dyn Open>) -> Self {
-        Self { source, hint: None }
+    fn new(source: Arc<dyn Open>, key: SourceKey) -> Self {
+        Self {
+            source,
+            key: Arc::new(key),
+            hint: None,
+        }
     }
 
     /// Sets the file extension a decoder probes with, in place of the source's
@@ -199,6 +214,32 @@ impl Asset {
     }
 }
 
+/// Two assets are equal when they are the same source, decided without I/O:
+///
+/// - paths are equal when their `PathBuf`s are, so two assets of one path are
+///   equal whatever the file holds now;
+/// - bytes are equal when one is a clone of the other: the id minted when the
+///   bytes were wrapped is the key, so two assets of equal bytes are not;
+/// - an `Arc<dyn Open>` is equal to another of the same `Arc` (its data
+///   address). The asset keeps its `Arc` alive, so the address is not reused
+///   while an asset is compared with it.
+///
+/// The [`hint`](Asset::hint) is not part of it.
+impl PartialEq for Asset {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for Asset {}
+
+/// Hashes the same source key [`PartialEq`] compares.
+impl std::hash::Hash for Asset {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
+    }
+}
+
 impl fmt::Debug for Asset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Asset")
@@ -210,7 +251,8 @@ impl fmt::Debug for Asset {
 
 impl From<PathBuf> for Asset {
     fn from(path: PathBuf) -> Self {
-        Self::new(Arc::new(FileSource { path }))
+        let key = SourceKey::File(path.clone());
+        Self::new(Arc::new(FileSource { path }), key)
     }
 }
 
@@ -234,10 +276,9 @@ impl From<&str> for Asset {
 
 impl From<Arc<[u8]>> for Asset {
     fn from(bytes: Arc<[u8]>) -> Self {
-        Self::new(Arc::new(BytesSource {
-            bytes,
-            id: Identity::minted(),
-        }))
+        let id = Identity::minted();
+        let key = SourceKey::Minted(id.clone());
+        Self::new(Arc::new(BytesSource { bytes, id }), key)
     }
 }
 
@@ -249,7 +290,8 @@ impl From<Vec<u8>> for Asset {
 
 impl From<Arc<dyn Open>> for Asset {
     fn from(source: Arc<dyn Open>) -> Self {
-        Self::new(source)
+        let key = SourceKey::Pointer(Arc::as_ptr(&source).cast::<()>() as usize);
+        Self::new(source, key)
     }
 }
 

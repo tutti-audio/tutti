@@ -34,7 +34,7 @@
 //! An entry that reads an asset takes the asset's [`Identity`](tutti_platform::Identity)
 //! on the worker that loads it (a file's is its path and stamp, bytes' is minted
 //! once), and [`Session::refresh_pool`] takes it again on a worker and loads
-//! again the entries whose asset changed.
+//! again the entries whose asset changed; the diff itself never reads metadata.
 //!
 //! # Stages
 //!
@@ -229,8 +229,10 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// never changes, so it never reloads, and an asset that never has an
     /// identity is not watched.
     ///
-    /// A plugin binary that changed on disk or a provided asset is never
-    /// detected. The result arrives in a later
+    /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
+    /// never does, so a key declared after its file changed shares the loaded
+    /// entry until the next refresh, and a plugin binary that changed on disk
+    /// or a provided asset is never detected. The result arrives in a later
     /// [`update`](Self::update) as a [`RefreshReport`], or as the job's failure.
     /// Dropping the job cancels the reloads the check would start.
     pub fn refresh_pool(&mut self) -> crate::Job<RefreshPool> {
