@@ -39,7 +39,7 @@ fn delay_loaded() -> AuLoaded {
 }
 
 fn activate(au: AuLoaded) -> (AuProcessor, AuController) {
-    let prepare = Prepare::new(RATE, MaxBlock::of(tutti_units::Samples(BLOCK as _)));
+    let prepare = Prepare::new(RATE, MaxBlock::of(tutti_units::Samples::new(BLOCK as _)));
     au.activate(tutti_fixtures::main_thread(), prepare)
         .unwrap_or_else(|e| panic!("AUDelay activates: {}", e.reason))
 }
@@ -54,7 +54,7 @@ fn render_block(processor: &mut AuProcessor, level: f32, changes: &ParameterChan
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
         buffer: InputOutput::from_slices(
-            tutti_plugin_types::Samples(inputs[0].len()),
+            tutti_plugin_types::Samples::new(inputs[0].len()),
             &inputs,
             &mut outputs,
         )

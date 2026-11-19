@@ -33,7 +33,7 @@ const TEST_BLOCK: usize = 1 << 16;
 
 /// The offset `k` frames into a test block.
 fn at(k: usize) -> Offset {
-    Offset::of(Samples(k), Samples(TEST_BLOCK))
+    Offset::of(Samples::new(k), Samples::new(TEST_BLOCK))
 }
 
 /// Encodes one event on a fresh stream (every per-note bend range at the
@@ -168,7 +168,7 @@ fn a_huge_frame_offset_saturates_rather_than_going_negative() {
     let last = usize::try_from(u32::MAX).unwrap();
     let event = (
         // A block of 2^32 frames, so that its last offset is `u32::MAX`.
-        Offset::of(Samples(last), Samples(last + 1)),
+        Offset::of(Samples::new(last), Samples::new(last + 1)),
         midi::note_on(MidiChannel::FIRST, 60, 0x8000),
     );
     let vst3 = encode(&event).expect("NoteOn should convert");

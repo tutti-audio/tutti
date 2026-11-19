@@ -1290,12 +1290,12 @@ fn process_with_transport() {
 
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
         .with_playing(true)
-        .with_beat(tutti_units::Beat(2.0))
+        .with_beat(tutti_units::Beat::new(2.0))
         .with_position_samples(44_100)
         .with_tempo(tutti_units::Bpm::of(120.0))
         .with_time_signature(TimeSignature::default())
         .with_loop(tutti_plugin_types::LoopRegion::new(
-            tutti_music::LoopRange::new(tutti_units::Beat(0.0), tutti_units::Beat(4.0))
+            tutti_music::LoopRange::new(tutti_units::Beat::new(0.0), tutti_units::Beat::new(4.0))
                 .expect("a loop"),
         ));
 
@@ -1329,7 +1329,7 @@ fn many_midi_events_in_one_block() {
     let events: Vec<UmpAt> = (0..10usize)
         .map(|i| {
             (
-                Offset::of(Samples(i), Samples(BLOCK)),
+                Offset::of(Samples::new(i), Samples::new(BLOCK)),
                 midi::note_on(MidiChannel::of(1), 60 + i as u8, 100),
             )
         })

@@ -183,7 +183,7 @@ fn drive(inst: &mut Active<f32>, params: &ParameterChanges) -> Vec<f32> {
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(in_refs[0].len()),
+            tutti_plugin_types::Samples::new(in_refs[0].len()),
             &in_refs,
             &mut out_refs,
         )

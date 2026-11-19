@@ -46,7 +46,7 @@ const SAMPLE_RATE: f64 = 48_000.0;
 fn points_inside_blocks() -> tutti_tempo::TempoMap {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let point = |beat: f64, bpm: f64| TempoPoint {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         tempo: Bpm::of(bpm),
         transition: Transition::Step,
     };
@@ -87,7 +87,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         id: LayerId(1),
         clock: Clock::Beats {
             per_cycle: BeatsPerCycle::of(0.25),
-            phase: PhaseIncrement(0.0),
+            phase: PhaseIncrement::new(0.0),
         },
         wave: Waveform::Shape {
             shape: LfoShape::Sine,
@@ -104,9 +104,9 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
     let lfo = ControlLaneNode::for_foreign(ParamId::new(77), program, Some(0.5), (0.0, 1.0));
     let prepare = tutti_graph::Prepare::new(
         tutti_units::SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     )
-    .with_quantum(MaxBlock::of(Samples(QUANTUM)));
+    .with_quantum(MaxBlock::of(Samples::new(QUANTUM)));
     // Curve segments on another parameter: an exponential trajectory, so
     // each segment runs across chunks and the node follows it.
     let mut env = Trajectory::new();
@@ -114,7 +114,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         let v = if k % 2 == 0 { 0.2 } else { 0.9 };
         env.add_breakpoint(Breakpoint::with_law(
             Beat::new(f64::from(k) * 2.0),
-            Hz(v),
+            Hz::new(v),
             Law::PowerIn(Exponent::of(2.0)),
         ));
     }
@@ -134,7 +134,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         vec![lfo, lane],
     );
     let meter = tutti_transport::ProjectMeter::new(MeterMap::new([MeterChange::new(
-        Beat(0.0),
+        Beat::new(0.0),
         TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
     )]));
     rig.controls.set_meter(meter.clone());
@@ -146,8 +146,8 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
     let mut changes = TransportChanges::NONE;
     changes
         .push(
-            Offset::of(Samples(20), Samples(BLOCK)),
-            TransportPosition::new(true, Bpm::of(90.0), Beat(9.0), None),
+            Offset::of(Samples::new(20), Samples::new(BLOCK)),
+            TransportPosition::new(true, Bpm::of(90.0), Beat::new(9.0), None),
         )
         .expect("a change inside the block");
     let mut block = |b: usize, outs: &mut [&mut [f32]]| {
@@ -159,8 +159,8 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
             sender.push(tutti_graph::Stamp::NextBlock, off).unwrap();
         }
         let n = BLOCK;
-        let t =
-            TransportPosition::new(true, Bpm::of(120.0), Beat(b as f64), None).with_recording(true);
+        let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(b as f64), None)
+            .with_recording(true);
         let ins: [&[f32]; 2] = [&inputs[0][..n], &inputs[1 % inputs.len()][..n]];
         let (a, rest) = outs.split_at_mut(1);
         let mut o: [&mut [f32]; 2] = [&mut a[0][..n], &mut rest[0][..n]];

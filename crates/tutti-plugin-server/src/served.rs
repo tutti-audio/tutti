@@ -341,7 +341,7 @@ impl<L: ServerSide> Served<L> {
                 format!("the activation failed: {reason}"),
             )
         };
-        let prepare = MaxBlock::new(Samples(block_size))
+        let prepare = MaxBlock::new(Samples::new(block_size))
             .map(|block| Prepare::new(sample_rate, block))
             .ok_or_else(|| {
                 activation_failed(format!(

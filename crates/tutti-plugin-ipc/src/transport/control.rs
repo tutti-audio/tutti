@@ -619,7 +619,7 @@ mod tests {
 
     fn latency_msg(samples: i64) -> BridgeMessage {
         BridgeMessage::LatencyChanged {
-            samples: tutti_plugin_types::Samples(samples as usize),
+            samples: tutti_plugin_types::Samples::new(samples as usize),
         }
     }
 

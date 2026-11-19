@@ -19,7 +19,7 @@ const TEST_BLOCK: usize = 1 << 16;
 
 /// The offset `k` frames into a test block.
 fn at(k: usize) -> Offset {
-    Offset::of(Samples(k), Samples(TEST_BLOCK))
+    Offset::of(Samples::new(k), Samples::new(TEST_BLOCK))
 }
 
 use conformance_support::*;
@@ -92,7 +92,7 @@ fn midi_learn_forwards_from_the_main_thread() {
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
     let mut buffer = InputOutput::new(
-        tutti_plugin_types::Samples(in_refs[0].len()),
+        tutti_plugin_types::Samples::new(in_refs[0].len()),
         Planes::new(&in_refs).expect("equal channels"),
         PlanesMut::new(&mut out_refs).expect("equal channels"),
     )

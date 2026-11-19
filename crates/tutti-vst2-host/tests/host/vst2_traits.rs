@@ -36,7 +36,7 @@ const START_PROCESS: i32 = 71;
 const STOP_PROCESS: i32 = 72;
 
 fn prepare() -> Prepare {
-    Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples(BLOCK)))
+    Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples::new(BLOCK)))
 }
 
 /// Holds the probe for one test and puts its switches, capture, trace and
@@ -193,7 +193,7 @@ fn render_f32(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> Vec<Ve
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
         buffer: InputOutput::from_slices(
-            tutti_plugin_types::Samples(inputs[0].len()),
+            tutti_plugin_types::Samples::new(inputs[0].len()),
             &inputs,
             &mut outputs,
         )
@@ -236,7 +236,7 @@ fn render_out(processor: &mut Vst2Processor, ctx: &ProcessContext<'_>) -> Proces
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: InputOutput::from_slices(Samples(BLOCK), &inputs, &mut outputs)
+        buffer: InputOutput::from_slices(Samples::new(BLOCK), &inputs, &mut outputs)
             .expect("equal channels"),
         ctx,
         out: &mut out,
@@ -314,7 +314,7 @@ fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     processor
         .process(&mut PluginIo {
             buffer: InputOutput::from_slices(
-                tutti_plugin_types::Samples(inputs[0].len()),
+                tutti_plugin_types::Samples::new(inputs[0].len()),
                 &inputs,
                 &mut outputs,
             )
@@ -334,7 +334,7 @@ fn a_64_bit_activation_is_entered_at_64_and_refuses_a_32_bit_block() {
     let mut outputs32 = [left32.as_mut_slice(), right32.as_mut_slice()];
     let refused = processor.process(&mut PluginIo {
         buffer: InputOutput::from_slices(
-            tutti_plugin_types::Samples(inputs32[0].len()),
+            tutti_plugin_types::Samples::new(inputs32[0].len()),
             &inputs32,
             &mut outputs32,
         )
@@ -364,7 +364,7 @@ fn a_32_bit_activation_refuses_a_64_bit_block() {
     let mut out = ProcessOutput::default();
     let refused = processor.process(&mut PluginIo {
         buffer: InputOutput::from_slices(
-            tutti_plugin_types::Samples(inputs[0].len()),
+            tutti_plugin_types::Samples::new(inputs[0].len()),
             &inputs,
             &mut outputs,
         )
@@ -387,7 +387,7 @@ fn a_32_bit_activation_refuses_a_64_bit_block() {
 fn no_prepare_holds_a_block_that_is_none() {
     let probe = Probe::acquire();
     let loaded = probe.load();
-    assert!(MaxBlock::new(Samples(0)).is_none());
+    assert!(MaxBlock::new(Samples::new(0)).is_none());
     let (processor, controller) = loaded
         .activate(main_thread(), prepare())
         .expect("a valid rate");
@@ -476,7 +476,7 @@ fn a_write_to_a_parameter_the_plugin_lacks_is_reported_in_the_output() {
         let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
         let mut io = PluginIo {
             buffer: InputOutput::from_slices(
-                tutti_plugin_types::Samples(inputs[0].len()),
+                tutti_plugin_types::Samples::new(inputs[0].len()),
                 &inputs,
                 &mut outputs,
             )
@@ -521,7 +521,7 @@ fn a_block_with_automation_midi_and_transport_does_not_allocate() {
         let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
         let mut io = PluginIo {
             buffer: InputOutput::from_slices(
-                tutti_plugin_types::Samples(inputs[0].len()),
+                tutti_plugin_types::Samples::new(inputs[0].len()),
                 &inputs,
                 &mut outputs,
             )
@@ -644,7 +644,7 @@ fn a_block_reports_the_midi_it_lost_once() {
     let (mut processor, controller) = probe.activate();
     let at = |group: u8| {
         (
-            Offset::of(Samples(3), Samples(BLOCK)),
+            Offset::of(Samples::new(3), Samples::new(BLOCK)),
             midi::note_on(
                 Address::new(MidiGroup::new(group).expect("a group"), MidiChannel::FIRST),
                 60,
@@ -668,7 +668,7 @@ fn a_refused_block_reports_its_midi_and_its_refused_entries() {
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
     let events = [(
-        Offset::of(Samples(3), Samples(BLOCK)),
+        Offset::of(Samples::new(3), Samples::new(BLOCK)),
         midi::note_on(MidiChannel::FIRST, 60, 0x4000),
     )];
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
@@ -692,7 +692,7 @@ fn a_refused_block_reports_its_midi_and_its_refused_entries() {
 fn a_refused_piece_counts_each_lost_event_once() {
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
-    let at = |frame: usize, ump| (Offset::of(Samples(frame), Samples(BLOCK)), ump);
+    let at = |frame: usize, ump| (Offset::of(Samples::new(frame), Samples::new(BLOCK)), ump);
     let body: Vec<u8> = (1..=20).collect();
     let packets: Vec<_> = tutti_plugin_types::sysex_packets(MidiGroup::FIRST, &body)
         .expect("a message")
@@ -724,7 +724,7 @@ fn a_loss_between_activations_is_reported_once() {
         .expect("a message")
         .next()
         .expect("a START");
-    let events = [(Offset::of(Samples(0), Samples(BLOCK)), start)];
+    let events = [(Offset::of(Samples::new(0), Samples::new(BLOCK)), start)];
     let out = render_out(&mut processor, &ProcessContext::new().midi(&events));
     assert_eq!(out.input_refused(), 0, "open across the block, not lost");
 
@@ -1039,7 +1039,7 @@ fn an_io_changed_callback_restarts_the_plugin_and_renders_its_new_pins() {
         driven
             .notices
             .iter()
-            .any(|n| matches!(n, Notice::LatencyChanged(s) if *s == Samples(2048))),
+            .any(|n| matches!(n, Notice::LatencyChanged(s) if *s == Samples::new(2048))),
         "{:?}",
         driven.notices
     );
@@ -1201,7 +1201,7 @@ fn a_rate_change_that_moves_the_latency_is_told() {
         driven
             .notices
             .iter()
-            .any(|n| matches!(n, Notice::LatencyChanged(s) if *s == Samples(1537))),
+            .any(|n| matches!(n, Notice::LatencyChanged(s) if *s == Samples::new(1537))),
         "{:?}",
         driven.notices
     );

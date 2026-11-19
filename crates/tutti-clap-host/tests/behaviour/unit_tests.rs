@@ -25,7 +25,7 @@ const BLOCK: usize = 1_000;
 
 /// The offset `k` frames into the block.
 fn at(k: usize) -> Offset {
-    Offset::of(Samples(k), Samples(BLOCK))
+    Offset::of(Samples::new(k), Samples::new(BLOCK))
 }
 
 /// A fresh list `event` was added to: its first event is what it converts to.

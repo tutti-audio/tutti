@@ -72,7 +72,7 @@
 //! let (inputs_width, outputs_width) = plugin.pins();
 //!
 //! // The rate, block size and precision are the activation's.
-//! let Ok((mut processor, controller)) = plugin.activate(main, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512)))) else {
+//! let Ok((mut processor, controller)) = plugin.activate(main, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512)))) else {
 //!     panic!("the plugin refused to run");
 //! };
 //!
@@ -85,7 +85,7 @@
 //! let mut out_refs: Vec<&mut [f32]> =
 //!     outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
 //! let mut block = InputOutput::new(
-//!     Samples(512),
+//!     Samples::new(512),
 //!     Planes::new(&in_refs).unwrap(),
 //!     PlanesMut::new(&mut out_refs).unwrap(),
 //! )

@@ -68,7 +68,7 @@
 //!
 //! // A refusal hands the plugin back in the error, so a plugin that declines f64
 //! // can be retried at f32 without reloading.
-//! let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512)));
+//! let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512)));
 //! let (mut processor, controller) = loaded
 //!     .activate(main, prepare)
 //!     .map_err(|refused| tutti_clap_host::ClapError::ProcessError(refused.reason.to_string()))?;
@@ -79,7 +79,7 @@
 //! let (mut left, mut right) = (vec![0.0f32; 512], vec![0.0f32; 512]);
 //! let mut outputs: [&mut [f32]; 2] = [&mut left, &mut right];
 //! let mut buffer = InputOutput::new(
-//!     Samples(512),
+//!     Samples::new(512),
 //!     Planes::new(&inputs).expect("two equal planes"),
 //!     PlanesMut::new(&mut outputs).expect("two equal planes"),
 //! )

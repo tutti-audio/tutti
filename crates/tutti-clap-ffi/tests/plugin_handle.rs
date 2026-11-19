@@ -225,7 +225,7 @@ fn the_main_thread_half_reads_the_plugins_extensions() {
     let plugin = load(Arc::default());
     assert_eq!(
         plugin.latency(main_thread()),
-        Samples(REPORTED_LATENCY_SAMPLES as usize)
+        Samples::new(REPORTED_LATENCY_SAMPLES as usize)
     );
     assert!(plugin.param_count(main_thread()) > 0);
     assert!(plugin.audio_port_count(main_thread(), false) > 0);
@@ -248,7 +248,7 @@ fn activation_hands_out_one_audio_half_and_refuses_a_second_activation() {
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512)),
+            MaxBlock::of(Samples::new(512)),
         )
         .expect("activates");
     let side = plugin.audio_side().expect("active: an audio half");
@@ -258,7 +258,7 @@ fn activation_hands_out_one_audio_half_and_refuses_a_second_activation() {
         plugin.activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512))
+            MaxBlock::of(Samples::new(512))
         ),
         Err(ActivateError::ProcessorStillAlive),
         "the half is still alive: its own error, not a refusal"
@@ -281,7 +281,7 @@ fn a_block_runs_the_plugin_through_the_bound_channels() {
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512)),
+            MaxBlock::of(Samples::new(512)),
         )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
@@ -308,7 +308,7 @@ fn a_short_channel_is_refused_without_calling_the_plugin() {
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512)),
+            MaxBlock::of(Samples::new(512)),
         )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
@@ -402,7 +402,7 @@ fn a_retired_audio_half_calls_nothing() {
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512)),
+            MaxBlock::of(Samples::new(512)),
         )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
@@ -435,7 +435,7 @@ fn a_mismatched_block_is_refused_before_the_retired_check() {
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512)),
+            MaxBlock::of(Samples::new(512)),
         )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
@@ -477,7 +477,7 @@ fn a_deactivated_plugins_audio_half_is_retired() {
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512)),
+            MaxBlock::of(Samples::new(512)),
         )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
@@ -505,7 +505,7 @@ fn deactivating_a_processing_plugin_stops_it_and_a_drop_tears_it_down() {
             .activate(
                 main_thread(),
                 SampleRate::SR_48K,
-                MaxBlock::of(Samples(512)),
+                MaxBlock::of(Samples::new(512)),
             )
             .expect("activates");
         let mut side = plugin.audio_side().unwrap();
@@ -522,7 +522,7 @@ fn deactivating_a_processing_plugin_stops_it_and_a_drop_tears_it_down() {
             plugin.activate(
                 main_thread(),
                 SampleRate::SR_48K,
-                MaxBlock::of(Samples(512))
+                MaxBlock::of(Samples::new(512))
             ),
             Err(ActivateError::ProcessorStillAlive)
         );
@@ -532,7 +532,7 @@ fn deactivating_a_processing_plugin_stops_it_and_a_drop_tears_it_down() {
                 .activate(
                     main_thread(),
                     SampleRate::SR_48K,
-                    MaxBlock::of(Samples(512))
+                    MaxBlock::of(Samples::new(512))
                 )
                 .is_ok(),
             "and activates again once gone"
@@ -541,7 +541,7 @@ fn deactivating_a_processing_plugin_stops_it_and_a_drop_tears_it_down() {
     let plugin = load(Arc::default());
     assert_eq!(
         plugin.latency(main_thread()),
-        Samples(REPORTED_LATENCY_SAMPLES as usize)
+        Samples::new(REPORTED_LATENCY_SAMPLES as usize)
     );
 }
 
@@ -580,7 +580,7 @@ fn start(plugin: &mut Plugin, max_frames: u32) -> (tutti_clap_ffi::AudioSide, Po
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::new(Samples(max_frames as usize)).expect("a block"),
+            MaxBlock::new(Samples::new(max_frames as usize)).expect("a block"),
         )
         .expect("activates");
     let mut scratch = PortScratch::new(FloatWidth::F32);
@@ -691,7 +691,7 @@ fn state_gated_entries_are_refused_while_active() {
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512)),
+            MaxBlock::of(Samples::new(512)),
         )
         .expect("activates");
     assert_eq!(
@@ -821,7 +821,7 @@ fn one_process_call_runs_either_width_and_refuses_a_mismatch() {
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512)),
+            MaxBlock::of(Samples::new(512)),
         )
         .expect("activates");
     let mut side = plugin.audio_side().unwrap();
@@ -914,7 +914,7 @@ fn an_active_plugin_is_not_activated_again_even_with_no_audio_half() {
         .activate(
             main_thread(),
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(512)),
+            MaxBlock::of(Samples::new(512)),
         )
         .expect("activates");
     assert_eq!(plugin.audio_sides(), 0, "no half was taken");
@@ -922,7 +922,7 @@ fn an_active_plugin_is_not_activated_again_even_with_no_audio_half() {
         plugin.activate(
             main_thread(),
             SampleRate::SR_44K1,
-            MaxBlock::of(Samples(256))
+            MaxBlock::of(Samples::new(256))
         ),
         Err(ActivateError::AlreadyActive)
     );
@@ -931,7 +931,7 @@ fn an_active_plugin_is_not_activated_again_even_with_no_audio_half() {
         .activate(
             main_thread(),
             SampleRate::SR_44K1,
-            MaxBlock::of(Samples(256)),
+            MaxBlock::of(Samples::new(256)),
         )
         .expect("after a deactivation it activates again");
 }
@@ -943,7 +943,11 @@ fn a_one_frame_block_is_a_legal_activation() {
     let _g = lock();
     let mut plugin = load(Arc::default());
     plugin
-        .activate(main_thread(), SampleRate::SR_48K, MaxBlock::of(Samples(1)))
+        .activate(
+            main_thread(),
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(1)),
+        )
         .expect("a one-frame block is legal");
     assert!(plugin.is_active());
 }
