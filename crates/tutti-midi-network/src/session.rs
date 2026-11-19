@@ -521,7 +521,7 @@ impl Session {
             .map(|(username, password)| {
                 Box::new(UserAuthentication {
                     digest: Digest::of_user(&challenge.nonce, username, password),
-                    username: username.clone(),
+                    username: *username,
                 })
             });
         let Some(answer) = answer else {

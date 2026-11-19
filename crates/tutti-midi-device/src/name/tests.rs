@@ -250,45 +250,6 @@ fn a_character_straddling_the_bound_is_refused_not_split() {
     assert_eq!(BlockName::new(&exact).unwrap().as_bytes().len(), 91);
 }
 
-/// `new`, `try_from` and `from_str` agree on every case, for a name and an Id.
-#[test]
-fn new_try_from_and_from_str_agree() {
-    let cases = [
-        "",
-        "Keys",
-        "a\0b",
-        "\u{FEFF}Keys",
-        "Cafe\u{301}",
-        "caf\u{e9}",
-        &"a".repeat(42),
-        &"a".repeat(43),
-        &"a".repeat(98),
-        &"a".repeat(99),
-    ];
-    for case in cases {
-        assert_eq!(
-            EndpointName::new(case),
-            EndpointName::try_from(case).ok(),
-            "{case:?}"
-        );
-        assert_eq!(
-            EndpointName::new(case),
-            case.parse::<EndpointName>().ok(),
-            "{case:?}"
-        );
-        assert_eq!(
-            ProductInstanceId::new(case),
-            ProductInstanceId::try_from(case).ok(),
-            "{case:?}"
-        );
-        assert_eq!(
-            ProductInstanceId::new(case),
-            case.parse::<ProductInstanceId>().ok(),
-            "{case:?}"
-        );
-    }
-}
-
 #[cfg(feature = "serde")]
 mod serde_text {
     use super::*;

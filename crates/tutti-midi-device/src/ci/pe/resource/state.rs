@@ -9,7 +9,9 @@ use tutti_ump::DeviceIdentity;
 
 use super::super::body::BodyLimit;
 use super::super::header::PeEncoding;
-use super::super::limits::{MediaType, NotValid, PropertyName, ResourceId, text_type};
+use tutti_units::Text;
+
+use super::super::limits::{MediaType, PeTextError, PropertyName, ResourceId, alphabet, text_type};
 use super::super::tree::{PeJson, PeObject};
 use super::super::value::PeExtra;
 use super::client::{CallError, CallId, ResourceInitiator};
@@ -45,18 +47,48 @@ text_type! {
     /// text says `a-z`, `0-9` and `_` (M2-111 §2.3) and its own ids have capitals
     /// (`fullState`, Appendix A), so the letters are those of a Resource ID, which
     /// a State inquiry names it as (`resId`, M2-103 Table 13).
-    StateId, "state id",
-    |t| {
-        (1..=36).contains(&t.len())
-            && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    StateId, Text<1, 36>, PeTextError,
+    |t| alphabet(t, |b| b.is_ascii_alphanumeric() || b == b'_', "ASCII letters, digits and `_`")
+}
+
+/// The device's own mark of the content of a state, the `stateRev` of a
+/// StateList entry and of a State reply (M2-111 §2.3, §3.1.1). Any text,
+/// unbounded, so owned.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(from = "String", into = "String"))]
+pub struct StateRev(String);
+
+impl StateRev {
+    /// The revision `text` spells.
+    #[must_use]
+    pub fn new(text: &str) -> Self {
+        Self(text.to_owned())
+    }
+
+    /// The text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
-text_type! {
-    /// The device's own mark of the content of a state, the `stateRev` of a
-    /// StateList entry and of a State reply (M2-111 §2.3, §3.1.1).
-    StateRev, "state revision",
-    |_| true
+impl From<String> for StateRev {
+    fn from(text: String) -> Self {
+        Self(text)
+    }
+}
+
+impl From<StateRev> for String {
+    fn from(rev: StateRev) -> String {
+        rev.0
+    }
+}
+
+impl fmt::Display for StateRev {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 impl StateId {
@@ -188,7 +220,7 @@ impl PeStateEntry {
         let id = f.required("stateId", "a string", text)?.to_owned();
         let state_id = StateId::new(&id)
             .ok_or_else(|| f.fail("stateId", PeDataFault::NotValid("state id")))?;
-        let rev = f.optional("stateRev", "a string", |j| text(j).and_then(StateRev::new))?;
+        let rev = f.optional("stateRev", "a string", |j| text(j).map(StateRev::new))?;
         let timestamp = f.optional("timestamp", "an integer", unix_seconds)?;
         let description = f.optional("description", "a string", |j| text(j).map(str::to_owned))?;
         let size = f.optional("size", "an integer", |j| {
@@ -408,7 +440,7 @@ impl StateStamp {
     /// no time.
     pub(super) fn read(extra: &PeExtra) -> Result<Self, PeDataError> {
         let rev = match extra.get("stateRev") {
-            Some(json) => Some(text(json).and_then(StateRev::new).ok_or_else(|| {
+            Some(json) => Some(text(json).map(StateRev::new).ok_or_else(|| {
                 PeDataError::new(
                     Place::of("State").property("stateRev"),
                     PeDataFault::WrongType("a string"),
@@ -700,9 +732,6 @@ pub enum SavedStateError {
     /// The media type is not one.
     #[error("{0:?} is not a media type")]
     MediaType(String),
-    /// The revision is not one.
-    #[error("{0:?} is not a revision")]
-    Rev(String),
     /// The bytes are not the state of the media type.
     #[error("the state's bytes do not read back: {0}")]
     State(#[source] PeDataError),
@@ -754,11 +783,7 @@ mod wire {
                 .transpose()?;
             let mut state = PeState::from_wire(media_type.as_ref(), &wire.bytes)
                 .map_err(SavedStateError::State)?;
-            state.rev = wire
-                .rev
-                .as_deref()
-                .map(|r| StateRev::new(r).ok_or_else(|| SavedStateError::Rev(r.to_owned())))
-                .transpose()?;
+            state.rev = wire.rev.as_deref().map(StateRev::new);
             state.timestamp = wire.timestamp;
             Ok(Self::new(wire.device, state_id, state))
         }

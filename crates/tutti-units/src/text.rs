@@ -309,7 +309,7 @@ mod tests {
         // A shorter string sorts before a longer one it prefixes, as `str` does.
         assert!(Name::of("ab") < Name::of("abc"));
         let hasher = std::collections::hash_map::RandomState::new();
-        assert_eq!(hasher.hash_one(&a), hasher.hash_one("abc"));
+        assert_eq!(hasher.hash_one(a), hasher.hash_one("abc"));
     }
 
     #[test]
