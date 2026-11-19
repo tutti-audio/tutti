@@ -32,7 +32,6 @@ setter  crates/tutti-session/src/modulation.rs::RouteMut::set_polarity  a route 
 setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain  a plugin param's peer path (7a S6)
 setter  crates/tutti-session/src/plugin_params.rs::Param::set_text  a plugin param's peer path (7a S6)
 setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode  a plugin's automation mode (7a S6)
-setter  crates/tutti-session/src/session/transport.rs::Session::set_loop  a timed loop edit, a published value (7c)
 set  crates/tutti-session/src/plugin_params.rs::Param::set  a plugin param's peer path (7a S6)
 set  crates/tutti-session/src/plugin_params.rs::ParamGesture::set  a plugin param's gesture, until `Gesture` lands (7d)
 set  crates/tutti-session/src/plugin_params.rs::TypedParam::set  a plugin param's peer path (7a S6)

@@ -23,8 +23,6 @@ use std::sync::Arc;
 
 use tutti_engine::{OutputSpec, StreamFaults};
 use tutti_graph::NodeKey;
-use tutti_music::MeterMap;
-use tutti_tempo::TempoMap;
 use tutti_units::{Amplitude, SampleRate};
 
 use crate::clock::sealed::Streaming;
@@ -287,18 +285,23 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         table: &ValueTable,
         click: Arc<tutti_nodes::ClickSettings>,
     ) {
-        use crate::value::{ClickVolumeSlot, MeterSlot, SettingSlot, SlotId, TempoSlot};
-        table.provide(
+        use crate::value::{
+            ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotId, TempoCell,
+        };
+        table.provide_staged(
             SlotId::Tempo,
-            Arc::new(TempoSlot {
+            PublishedSlot::new(TempoCell {
                 settings: self.transport.settings().clone(),
                 following: self.midi.following(),
-            }) as SlotCell<Arc<TempoMap>>,
+            }),
         );
-        table.provide(
+        table.provide_staged(
             SlotId::Meter,
-            Arc::new(MeterSlot(self.transport.settings().project_meter().clone()))
-                as SlotCell<Arc<MeterMap>>,
+            PublishedSlot::new(self.transport.settings().project_meter().clone()),
+        );
+        table.provide_staged(
+            SlotId::Loop,
+            PublishedSlot::new(LoopCell(self.transport.transport().clone())),
         );
         table.provide(
             SlotId::ClickVolume,

@@ -481,7 +481,7 @@ fn the_apps_tempo_is_refused_while_following() {
     let (mut s, _fake) = rig();
     let project = s.tempo_map();
     follow(&mut s, MidiGroup::FIRST, false);
-    let refused = crate::tempo::set_tempo(&s, Bpm::of(90.0)).unwrap_err();
+    let refused = crate::tempo::set_tempo(&mut s, Bpm::of(90.0)).unwrap_err();
     assert_eq!(refused.kind, ValueErrorKind::Refused(SetRefusal::Following));
     assert_eq!(refused.at, 0);
     assert!(
@@ -489,5 +489,5 @@ fn the_apps_tempo_is_refused_while_following() {
         "a refusal publishes nothing"
     );
     s.midi().unfollow_tempo().expect("was following");
-    assert_eq!(crate::tempo::set_tempo(&s, Bpm::of(90.0)), Ok(()));
+    assert_eq!(crate::tempo::set_tempo(&mut s, Bpm::of(90.0)), Ok(()));
 }

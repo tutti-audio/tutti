@@ -2459,6 +2459,7 @@ mod tests {
                     .to(tutti_tempo::TempoMap::constant(Bpm::of(90.0)).unwrap()),
             )
             .expect("not following");
+        let _published = session.update();
         let seen: Arc<Mutex<Option<(tutti_units::Beat, Bpm)>>> = Arc::default();
         let into = Arc::clone(&seen);
         session

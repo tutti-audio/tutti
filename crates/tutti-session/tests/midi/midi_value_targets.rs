@@ -106,15 +106,17 @@ fn a_clips_target_reads_the_clip_written() {
 /// A different clip does end it, on the next block's first frame (512).
 #[test]
 fn writing_an_equal_clip_cuts_no_note_and_a_different_one_does() {
-    let (s, clip, seen) = sounding();
+    let (mut s, clip, seen) = sounding();
     let mut again = note(60, MF, Beat(0.0), BeatDuration(1_000.0));
     again.reverse();
     s.set(clip.events().to(clip_of(again))).unwrap();
+    let _ = s.update();
     blocks(&s, 1);
     assert_eq!(note_offs(&seen), vec![], "the same clip: nothing cut");
 
     s.set(clip.events().modify(|_| ClipEvents::default().into()))
         .unwrap();
+    let _ = s.update();
     blocks(&s, 1);
     assert_eq!(note_offs(&seen), vec![(1_024, 60)], "a new clip ends it");
 }
@@ -215,7 +217,7 @@ fn harmony_session() -> (
 /// at that beat.
 #[test]
 fn harmony_changes_written_through_the_target_reach_the_node() {
-    let (s, harmony, seen) = harmony_session();
+    let (mut s, harmony, seen) = harmony_session();
     blocks(&s, 1);
     assert_eq!(*seen.lock().unwrap(), vec![]);
     s.set(
@@ -226,6 +228,7 @@ fn harmony_changes_written_through_the_target_reach_the_node() {
                 .collect::<HarmonyChanges>()),
     )
     .unwrap();
+    let _ = s.update();
     blocks(&s, 1);
     assert_eq!(*seen.lock().unwrap(), vec![(512, C), (512, C_MAJOR)]);
     blocks(&s, (BEAT / 512) as usize);
@@ -238,13 +241,15 @@ fn harmony_changes_written_through_the_target_reach_the_node() {
 /// listed; different changes do.
 #[test]
 fn writing_equal_harmony_changes_restates_nothing_and_different_ones_do() {
-    let (s, harmony, seen) = harmony_session();
+    let (mut s, harmony, seen) = harmony_session();
     let changes = || -> HarmonyChanges { [at(0.0, C), at(0.0, C_MAJOR)].into_iter().collect() };
     s.set(harmony.changes().to(changes())).unwrap();
+    let _ = s.update();
     blocks(&s, 2);
     assert_eq!(seen.lock().unwrap().len(), 2);
 
     s.set(harmony.changes().to(changes())).unwrap();
+    let _ = s.update();
     blocks(&s, 2);
     assert_eq!(seen.lock().unwrap().len(), 2, "the same changes: nothing");
 
@@ -254,6 +259,7 @@ fn writing_equal_harmony_changes_restates_nothing_and_different_ones_do() {
             .to([at(0.0, G)].into_iter().collect::<HarmonyChanges>()),
     )
     .unwrap();
+    let _ = s.update();
     blocks(&s, 1);
     assert_eq!(seen.lock().unwrap()[2..], [(2_048, G)]);
     assert_eq!(s.get(harmony.changes()).unwrap().as_slice(), [at(0.0, G)]);
@@ -324,6 +330,7 @@ fn blocks_adopting_written_values_do_not_allocate() {
             .to([at(0.0, C)].into_iter().collect::<HarmonyChanges>()),
     ))
     .unwrap();
+    let _ = s.update();
     let mut buf = vec![0.0f32; 512 * 2];
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..4 {
@@ -368,6 +375,7 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
 
     let written = clip_of(note(64, MF, Beat(1.0 / 3.0), BeatDuration(1.0)));
     s.set(clip.events().to(written)).unwrap();
+    let _ = s.update();
     assert_eq!(new.len(), 2, "the new node holds the written clip");
     assert_eq!(old.len(), 2);
     assert_eq!(
@@ -424,4 +432,60 @@ fn writing_the_clip_in_force_by_pointer_cuts_no_note() {
     s.set(clip.events().to(Arc::clone(&held))).unwrap();
     blocks(&s, 1);
     assert_eq!(note_offs(&seen), vec![]);
+}
+
+/// **A clip written and not yet updated is read back, while its node still
+/// holds the clip in force**; the update gives the node the written one.
+#[test]
+fn a_clip_written_is_pending_until_the_update_publishes_it() {
+    let mut s = offline();
+    let (synth, _seen) = tap(&mut s);
+    let (clip, controls) = s.graph().add(MidiClipNode::new(note(
+        60,
+        MF,
+        Beat(0.0),
+        BeatDuration(1.0),
+    )));
+    s.graph()
+        .set_feed(synth, Feeder::Declared, vec![clip.events_out()]);
+    let _ = s.update();
+    let in_force = controls.current();
+    let written = Arc::new(clip_of(note(64, MF, Beat(0.0), BeatDuration(1.0))));
+
+    s.set(clip.events().to(Arc::clone(&written))).unwrap();
+    assert!(Arc::ptr_eq(&s.get(clip.events()).unwrap(), &written));
+    assert!(
+        Arc::ptr_eq(&controls.current(), &in_force),
+        "the node's cell holds the old clip before the update"
+    );
+    let _ = s.update();
+    assert!(Arc::ptr_eq(&controls.current(), &written));
+}
+
+/// **A clip write pending when its node is removed never publishes and
+/// leaks nothing**: the node's cell keeps the clip it had through the
+/// updates after, and the written clip is freed (no handle on it remains).
+#[test]
+fn a_pending_clip_write_to_a_removed_node_never_publishes_and_is_freed() {
+    let mut s = offline();
+    let (clip, controls) = s.graph().add(MidiClipNode::new(note(
+        60,
+        MF,
+        Beat(0.0),
+        BeatDuration(1.0),
+    )));
+    let _ = s.update();
+    let in_force = controls.current();
+    let written = Arc::new(clip_of(note(64, MF, Beat(0.0), BeatDuration(1.0))));
+    let gone = Arc::downgrade(&written);
+
+    s.set(clip.events().to(written)).unwrap();
+    s.remove(clip).unwrap();
+    let _ = s.update();
+    let _ = s.update();
+    assert!(
+        Arc::ptr_eq(&controls.current(), &in_force),
+        "the removed node's cell never took the write"
+    );
+    assert!(gone.upgrade().is_none(), "the pending clip is freed");
 }

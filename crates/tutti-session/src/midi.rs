@@ -1278,7 +1278,7 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// **A clip does not loop itself**: it plays on the transport's timeline,
     /// so a repeat is the transport's loop
-    /// ([`Session::set_loop`](crate::Session::set_loop)) over the beats it
+    /// (`session.transport_handle().looping()`) over the beats it
     /// occupies.
     ///
     /// # Examples
