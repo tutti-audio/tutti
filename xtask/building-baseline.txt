@@ -235,7 +235,7 @@ tutti-nodes  setter  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::
 tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_frequency
 tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_level
 tutti-nodes  setter  crates/tutti-nodes/src/strip.rs::BusStripNode::set_volume
-tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/control_lane.rs::ControlLaneNode::for_foreign
+tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/control_lane.rs::ControlLaneNode::for_id
 tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/control_lane.rs::ControlLaneNode::for_unit
 tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/lane.rs::AutomationLaneNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/click.rs::ClickNode::new

@@ -52,7 +52,7 @@ tutti-vst2-host = { path = "../tutti-vst2-host" }
 # `contract::{drive_input, Direct}`: the in-process node driven by hand, as a
 # graph drives it, in its tests, allocation gate and bench.
 tutti-graph = { path = "../tutti-graph", features = ["contract"] }
-# `ControlLaneNode::for_foreign` and its `ControlProgram`: the control lane that
+# `ControlLaneNode::for_id` and its `ControlProgram`: the control lane that
 # drives the in-process plugin's parameters through its event input.
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 tutti-modulation = { path = "../tutti-modulation", default-features = false }

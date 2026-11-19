@@ -4,7 +4,7 @@
 //! event on the frame the plugin gave it.
 //!
 //! **Parameters** arrive on the same event input: a ramp or a curve segment
-//! (a foreign control lane's, `ControlLaneNode::for_foreign`), addressed by
+//! (a foreign control lane's, `ControlLaneNode::for_id`), addressed by
 //! the plugin's own parameter id.
 //! They go through the out-of-process node's delivery (`host::node`'s
 //! `param_delivery` and `param_input`): a slot per parameter declared at
@@ -827,7 +827,7 @@ mod owed_tests {
                     tutti_units::Samples::new(0),
                     tutti_units::Samples::new(BLOCK),
                 ),
-                ParamRamp::foreign(ParamId::new(1), 0.75, tutti_units::Samples::new(0)),
+                ParamRamp::by_id(ParamId::new(1), 0.75, tutti_units::Samples::new(0)),
             )],
         );
         unit.block();

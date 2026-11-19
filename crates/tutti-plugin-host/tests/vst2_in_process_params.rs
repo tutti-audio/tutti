@@ -115,7 +115,7 @@ fn read(handle: &PluginHandle, i: u32) -> Option<f64> {
 fn ramp(at: usize, id: u32, value: f64) -> ParamEvent {
     ParamEvent::ramp(
         Offset::of(Samples::new(at), Samples::new(BLOCK)),
-        ParamRamp::foreign(ParamId::new(id), value, Samples::new(0)),
+        ParamRamp::by_id(ParamId::new(id), value, Samples::new(0)),
     )
 }
 
@@ -223,7 +223,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let _env = ProbeEnv::new().params(4).state_dc();
     let (client, handle) = load();
     // A host's knob for VST2 parameter 0, held still.
-    let held = ControlLaneNode::for_foreign(
+    let held = ControlLaneNode::for_id(
         ParamId::new(0),
         ControlProgram::default(),
         Some(0.25),

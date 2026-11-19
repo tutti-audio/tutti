@@ -207,7 +207,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     };
     for k in 0..200u64 {
         let kind: Scheduled = if k % 3 == 0 {
-            ParamKind::Ramp(ParamRamp::foreign(
+            ParamKind::Ramp(ParamRamp::by_id(
                 tutti_units::ParamId::new(1),
                 0.5,
                 Samples::new(16),
@@ -1146,9 +1146,9 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
     let id = tutti_units::ParamId::new(1);
     for k in 0..200u64 {
         let kind: ParamKind = if k % 2 == 0 {
-            ParamKind::Ramp(ParamRamp::foreign(id, 0.5, Samples::new(16)))
+            ParamKind::Ramp(ParamRamp::by_id(id, 0.5, Samples::new(16)))
         } else {
-            ParamKind::Segment(ParamSegment::foreign(
+            ParamKind::Segment(ParamSegment::by_id(
                 id,
                 0.0,
                 1.0,
@@ -1174,13 +1174,13 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
     ed.schedule(
         At::Frame(Frame::new(0)),
         consumer(0),
-        ParamKind::Ramp(ParamRamp::foreign(id, 0.25, Samples::new(0))),
+        ParamKind::Ramp(ParamRamp::by_id(id, 0.25, Samples::new(0))),
     )
     .expect("under capacity");
     ed.schedule(
         At::Beat(Beat::new(4.0)),
         consumer(1),
-        ParamKind::Ramp(ParamRamp::foreign(id, 0.25, Samples::new(0))),
+        ParamKind::Ramp(ParamRamp::by_id(id, 0.25, Samples::new(0))),
     )
     .expect("under capacity");
     assert_eq!(

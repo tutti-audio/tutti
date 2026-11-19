@@ -1239,11 +1239,6 @@ impl RingingNode {
         self.event_out = true;
         self
     }
-
-    /// An honest reporter: the whole ring-out, under `ceiling`.
-    pub fn honest(ceiling: Tail, ring: usize) -> Self {
-        Self::new(ceiling, ring, ring as u64)
-    }
 }
 
 impl Node for RingingNode {

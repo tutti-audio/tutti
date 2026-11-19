@@ -41,7 +41,7 @@ use crate::time::Offset;
 ///   the unit's `f64`), because one event port carries ramps for parameters of
 ///   different units and a [`ParamEvent`] has to be one `Copy` type. The raw
 ///   value is private: nothing reads a built-in ramp without naming its key.
-/// - **Foreign params** ([`ParamRamp::foreign`]) carry a [`ParamId`] and
+/// - **Foreign params** ([`ParamRamp::by_id`]) carry a [`ParamId`] and
 ///   a raw value in the foreign unit's own normalisation. That is the C ABI
 ///   boundary the units rule stops at: tutti does not know the unit.
 ///
@@ -51,7 +51,7 @@ use crate::time::Offset;
 /// let r = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(800.0), Samples::new(64));
 /// assert_eq!(r.target(ParamKey::<Hz>::CUTOFF), Some(Hz::new(800.0)));
 /// assert_eq!(r.target(ParamKey::<Db>::THRESHOLD), None); // another param
-/// assert_eq!(r.foreign_target(ParamId::new(7)), None); // not a foreign param at all
+/// assert_eq!(r.target_by_id(ParamId::new(7)), None); // not a foreign param at all
 /// assert_eq!(r.shape(), Law::Linear);
 /// let eased = r.with_shape(Law::PowerIn(Exponent::of(2.0)));
 /// assert_eq!(eased.shape(), Law::PowerIn(Exponent::of(2.0)));
@@ -86,7 +86,7 @@ impl ParamRamp {
     /// on, else the value the node last gave it). On a parameter the node has
     /// never given a value it knows no start, and the ramp is a jump to
     /// `target` on its frame, whatever its duration and shape.
-    pub fn foreign(id: ParamId, target: f64, duration: Samples) -> Self {
+    pub fn by_id(id: ParamId, target: f64, duration: Samples) -> Self {
         Self::packed(ParamAddr::Id(id), target, duration)
     }
 
@@ -125,7 +125,7 @@ impl ParamRamp {
     }
 
     /// The raw target, if this ramp is for foreign parameter `id`.
-    pub fn foreign_target(&self, id: ParamId) -> Option<f64> {
+    pub fn target_by_id(&self, id: ParamId) -> Option<f64> {
         (self.addr == ParamAddr::Id(id)).then_some(self.target)
     }
 
@@ -249,7 +249,7 @@ impl ParamSegment {
 
     /// A segment of a foreign unit's parameter `id`, in its own
     /// normalisation, as [`new`](Self::new) otherwise.
-    pub fn foreign(id: ParamId, from: f64, to: f64, duration: Samples, shape: Law) -> Self {
+    pub fn by_id(id: ParamId, from: f64, to: f64, duration: Samples, shape: Law) -> Self {
         Self::packed(ParamAddr::Id(id), from, to, duration, shape)
     }
 
@@ -318,12 +318,12 @@ impl ParamSegment {
     }
 
     /// The raw end value, if this segment is for foreign parameter `id`.
-    pub fn foreign_target(&self, id: ParamId) -> Option<f64> {
+    pub fn target_by_id(&self, id: ParamId) -> Option<f64> {
         self.is_for(ParamAddr::Id(id)).then_some(self.to)
     }
 
     /// The raw start value, if this segment is for foreign parameter `id`.
-    pub fn foreign_start(&self, id: ParamId) -> Option<f64> {
+    pub fn start_by_id(&self, id: ParamId) -> Option<f64> {
         self.is_for(ParamAddr::Id(id)).then_some(self.from)
     }
 
@@ -486,15 +486,15 @@ mod tests {
     /// when the foreign id equals the built-in's discriminant.
     #[test]
     fn foreign_and_builtin_ramps_are_distinct_addresses() {
-        let foreign = ParamRamp::foreign(
+        let foreign = ParamRamp::by_id(
             ParamId::new(ParamKey::<Hz>::CUTOFF.addr().to_u16() as u32),
             0.5,
             Samples::new(0),
         );
         assert_eq!(foreign.target(ParamKey::<Hz>::CUTOFF), None);
-        assert_eq!(foreign.foreign_target(ParamId::new(0)), Some(0.5));
+        assert_eq!(foreign.target_by_id(ParamId::new(0)), Some(0.5));
         let builtin = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(100.0), Samples::new(0));
-        assert_eq!(builtin.foreign_target(ParamId::new(0)), None);
+        assert_eq!(builtin.target_by_id(ParamId::new(0)), None);
     }
 
     /// A segment's address round-trips, built-in and foreign never answer
@@ -503,7 +503,7 @@ mod tests {
     fn a_segment_reads_back_as_built() {
         let key = ParamKey::<Hz>::CUTOFF;
         let id = ParamId::new(u32::from(key.addr().to_u16()));
-        let foreign = ParamSegment::foreign(
+        let foreign = ParamSegment::by_id(
             id,
             0.25,
             0.75,
@@ -511,8 +511,8 @@ mod tests {
             Law::Exp(Curvature::of(2.0)),
         );
         assert_eq!(foreign.target(key), None);
-        assert_eq!(foreign.foreign_target(id), Some(0.75));
-        assert_eq!(foreign.foreign_start(id), Some(0.25));
+        assert_eq!(foreign.target_by_id(id), Some(0.75));
+        assert_eq!(foreign.start_by_id(id), Some(0.25));
         assert_eq!(foreign.addr(), ParamAddr::Id(id));
         let s = ParamSegment::new(
             key,
@@ -523,7 +523,7 @@ mod tests {
         )
         .resumed(Samples::new(2), Samples::new(10));
         assert_eq!(s.addr(), ParamAddr::unit(key.addr()));
-        assert_eq!(s.foreign_target(id), None);
+        assert_eq!(s.target_by_id(id), None);
         assert_eq!(s.start(key), Some(Hz::new(1.0)));
         assert_eq!(s.shape(), Law::PowerOut(Exponent::of(3.0)));
         assert_eq!(s.position(), Samples::new(2));

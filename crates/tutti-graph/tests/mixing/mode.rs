@@ -1054,7 +1054,7 @@ fn a_bypassed_node_is_not_called_after_the_fade() {
     ] {
         let mut p = Probe::new(3.0);
         p.latency = latency;
-        let ringer = RingingNode::honest(Tail::Finite(Samples::new(1)), 1);
+        let ringer = RingingNode::new(Tail::Finite(Samples::new(1)), 1, 1);
         let ring_calls = Arc::clone(&ringer.calls);
         let mut s = Solo::new(0);
         // A source that is loud for 5 blocks and then says it is silent.

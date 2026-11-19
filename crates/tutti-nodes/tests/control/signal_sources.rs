@@ -230,8 +230,8 @@ impl Node for Tap {
                     a => panic!("a source sends foreign segments, got {a:?}"),
                 };
                 out[1][i] = 1.0;
-                out[2][i] = control_in(s.foreign_start(id).expect("foreign"));
-                out[3][i] = control_in(s.foreign_target(id).expect("foreign"));
+                out[2][i] = control_in(s.start_by_id(id).expect("foreign"));
+                out[3][i] = control_in(s.target_by_id(id).expect("foreign"));
                 k += 1;
             }
             out[0][i] = control_in(self.last.map_or(0.0, |(s, at)| {
