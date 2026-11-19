@@ -142,7 +142,7 @@ jobs:
       # The book renders its programs' sounds, then builds into site/book.
       - run: cargo xtask book site/book
       # The book's links into the reference are relative: `../api/tutti/...`.
-      # `device` makes the builder docs' links to `device` resolve.
+      # It covers what the chapters use: export, FLAC and the sound card (`device`).
       - run: cargo doc --locked -p tutti --features export,encode-flac,device
       - run: cp -r target/doc site/api
       - run: cargo xtask conformance --results junit --out site/conformance
