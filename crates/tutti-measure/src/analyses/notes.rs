@@ -72,11 +72,11 @@ use tutti_dsp::{FrameCount, rms};
 use tutti_music::Note;
 use tutti_units::{Amplitude, Cents, Db, SampleRate, Samples, Seconds};
 
+use crate::analyses::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
 use crate::convert::widen;
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
-use crate::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
-use crate::silence::FiniteLevel;
-use crate::yin::{PitchEstimate, YinConfig, YinPlan, yin_track_at};
+use crate::meters::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
+use crate::meters::silence::FiniteLevel;
 use crate::{Error, Meter, Result};
 use tutti_dsp::FftScratch;
 use tutti_dsp::{median, median_of_sorted};

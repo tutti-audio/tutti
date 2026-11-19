@@ -16,10 +16,10 @@
 use tutti_buffers::{Mono, Sample};
 use tutti_units::{Confidence, SampleRate, Samples, Seconds};
 
-use crate::chroma::FrequencyBand;
+use crate::analyses::xcorr::{CrossCorrelation, cross_correlate_shaped};
 use crate::convert::widen;
 use crate::framing::check_nyquist;
-use crate::xcorr::{CrossCorrelation, cross_correlate_shaped};
+use crate::meters::chroma::FrequencyBand;
 use crate::{Error, Result};
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
