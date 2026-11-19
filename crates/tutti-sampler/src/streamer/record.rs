@@ -77,7 +77,7 @@ pub(super) struct Record<F: RingFloat> {
     /// The loop the control side asks for, lent on each cycle. In a `Mutex`
     /// only so the streamer stays `Sync` (a reader is `Send`, not `Sync`):
     /// only the streamer's thread reaches it, through `get_mut`, which never
-    /// locks. `tutti_rt::Exclusive` replaces the `Mutex` when it lands.
+    /// locks. An exclusive-access cell from tutti-rt replaces the `Mutex` when one lands.
     looping: Mutex<Reader<Option<Loop>>>,
     /// The loop the stream was last asked for, so a cycle applies a request
     /// once, when it changes. A stream starts asked for no loop, the value its

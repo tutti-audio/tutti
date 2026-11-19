@@ -63,7 +63,6 @@ impl<T> SteerCell<T> {
 
     /// A reader of the cell, registered here (control side) for the thread
     /// that will lend it.
-    #[must_use]
     pub fn reader(&self) -> Reader<T> {
         self.cell.reader()
     }
