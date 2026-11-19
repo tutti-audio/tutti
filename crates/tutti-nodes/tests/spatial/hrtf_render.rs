@@ -125,7 +125,7 @@ fn mirror(verts: &[[f32; 3]], v: usize) -> usize {
 
 /// Deterministic decaying noise, distinct per `seed`.
 fn shape(seed: usize, len: usize) -> Vec<f32> {
-    Noise::from_state(0x9e37_79b9_u32.wrapping_mul(seed as u32 + 1))
+    Noise::seeded(seed as u32)
         .take(len)
         .enumerate()
         .map(|(i, x)| x * (-(i as f32) / 40.0).exp())
@@ -823,7 +823,7 @@ fn a_vertexs_hrir_energy_reaches_the_output_ear_by_ear() {
 
 /// Deterministic noise in `[-1, 1)`.
 fn noise(len: usize) -> Vec<f32> {
-    Noise::from_state(0x1234_5678).take(len).collect()
+    Noise::seeded(0x1234_5678).take(len).collect()
 }
 
 /// `input` rendered in blocks of `block` frames from `start`, the source
@@ -882,13 +882,13 @@ fn the_render_is_independent_of_the_block_length() {
 
 /// A moving source renders the same whatever the block length, provided the
 /// commanded position changes at the same frame: a step reads the position
-/// of the block that completes it and glides toward it step by step, and
+/// of the block that completes it and ramps toward it step by step, and
 /// each step's crossfade ramps over the step's own 128 frames, so neither
 /// depends on where the blocks fall. (The position is read once per block,
 /// so a move between two frames inside a block lands at that block's end;
 /// that is why the moves here sit on frames every block length below
 /// starts a block at, and mid-step: 320 and 832 are not multiples of 128.)
-/// The source jumps across the sphere twice, so the aim glides through
+/// The source jumps across the sphere twice, so the aim ramps through
 /// many faces and every step crossfades.
 #[test]
 fn a_moving_source_is_independent_of_the_block_length() {

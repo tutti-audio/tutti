@@ -12,8 +12,8 @@ use crate::{Complex32, Complex64, Lti, RealFft};
 // the `f64` banks have their own tests below.
 
 const RATE: SampleRate = SampleRate::SR_48K;
-/// Frames a glide takes at [`RATE`]: `ceil(0.005 * 48000)`.
-const GLIDE: usize = 240;
+/// Frames a ramp takes at [`RATE`]: `ceil(0.005 * 48000)`.
+const RAMP: usize = 240;
 /// Frames for the crossover's sections and the followers to settle on a constant.
 const SETTLE: usize = 24_000;
 
@@ -212,7 +212,7 @@ fn unity_bands_sum_to_the_analytic_all_pass_response() {
         for i in 0..14 {
             let f = (30.0 * (18_000.0f64 / 30.0).powf(f64::from(i) / 13.0) / 5.0).round() * 5.0;
             let mut k = bank(1, bands);
-            k.aim(&unity(&freqs));
+            k.retarget(&unity(&freqs));
             let x = tone(f, 1.0, SETTLE + WINDOW);
             let out = run(&mut k, &[&x]).remove(0);
             let (xr, xi) = lock_in(&x[SETTLE..], f, RATE.get());
@@ -248,7 +248,7 @@ fn unity_bands_have_a_flat_impulse_magnitude() {
         (4, vec![120.0, 1_000.0, 6_000.0]),
     ] {
         let mut k = bank(1, bands);
-        k.aim(&unity(&freqs));
+        k.retarget(&unity(&freqs));
         let out = run(&mut k, &[&impulse]).remove(0);
         let fft = RealFft::new(N);
         let mut scratch = fft.new_scratch();
@@ -290,13 +290,13 @@ fn a_tone_in_a_band_settles_on_that_bands_static_curve() {
             let level = db(a * band_magnitude(b, &splits, f));
             let threshold = level - over;
             let mut k = bank(1, 4);
-            k.aim(&unity(&splits));
+            k.retarget(&unity(&splits));
             let x = tone(f, a as f32, SETTLE + 4_800 + WINDOW);
             run(&mut k, &[&x[..SETTLE]]);
             k.take_reading();
             let mut set = unity(&splits);
             set.bands[b] = band(threshold, knee, ratio, 0.0, f64::INFINITY, makeup);
-            k.aim(&set);
+            k.retarget(&set);
             let out = run(&mut k, &[&x[SETTLE..]]).remove(0);
             let reading = k.take_reading();
 
@@ -340,7 +340,7 @@ fn a_loud_band_follows_the_static_curve_and_a_quiet_band_is_left_alone() {
     let len = SETTLE + 9_600;
     let x: Vec<f32> = tone(5_000.0, 0.01, len).iter().map(|s| 0.5 + s).collect();
     let mut k = bank(1, 3);
-    k.aim(&set);
+    k.retarget(&set);
     let mut out = run(&mut k, &[&x[..SETTLE]]);
     k.take_reading();
     out[0].extend_from_slice(&run(&mut k, &[&x[SETTLE..]])[0]);
@@ -370,13 +370,13 @@ fn a_bypassed_band_passes_unprocessed() {
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.001, 6.0);
     set.bands[0].bypass = true;
     let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 3, RATE).unwrap();
-    k.aim(&set);
+    k.retarget(&set);
     let x = vec![0.5f64; SETTLE + 9_600];
     let out = run(&mut k, &[&x]);
     assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < 1e-12);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     set.bands[0].bypass = false;
-    k.aim(&set);
+    k.retarget(&set);
     let out = run(&mut k, &[&x]);
     // Over -30 dB at 8:1 the 0.5 DC is reduced by `(30 - 6.02) * 7/8`, with the makeup.
     let want = 0.5 * linear(6.0 - hard(db(0.5), -30.0, 8.0));
@@ -409,38 +409,38 @@ fn solo_leaves_only_the_soloed_bands() {
             .map(|b| band_magnitude(b, &freqs, tone_hz))
             .sum();
         let mut k = bank(1, 3);
-        k.aim(&set);
+        k.retarget(&set);
         let out = run(&mut k, &[&x]);
         let got = amplitude_at(&out[0][SETTLE..], tone_hz, RATE.get());
         assert!((got - want).abs() < 1e-5, "{soloed:?}: {got} vs {want}");
     }
 }
 
-/// A bypass that flips glides linearly over 5 ms and lands: on a settled DC the output is the
+/// A bypass that flips ramps linearly over 5 ms and lands: on a settled DC the output is the
 /// blend `g (1 - w) + w` of the compressed gain `g` and unity, `w` the weight `k / 240` at
-/// frame `k - 1` of the glide.
+/// frame `k - 1` of the ramp.
 #[test]
-fn a_moved_bypass_glides_over_five_milliseconds() {
+fn a_moved_bypass_ramps_over_five_milliseconds() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.001, 0.0);
     let mut k = bank(1, 3);
-    k.aim(&set);
-    let x = vec![0.5f32; SETTLE + 2 * GLIDE];
+    k.retarget(&set);
+    let x = vec![0.5f32; SETTLE + 2 * RAMP];
     let before = run(&mut k, &[&x[..SETTLE]]);
     let held = f64::from(*before[0].last().unwrap());
     set.bands[0].bypass = true;
-    k.aim(&set);
+    k.retarget(&set);
     let out = run(&mut k, &[&x[SETTLE..]])[0].clone();
-    for (j, &y) in out.iter().take(GLIDE).enumerate() {
-        let w = (j + 1) as f64 / GLIDE as f64;
+    for (j, &y) in out.iter().take(RAMP).enumerate() {
+        let w = (j + 1) as f64 / RAMP as f64;
         let want = held * (1.0 - w) + 0.5 * w;
         assert!(
             (f64::from(y) - want).abs() < 2e-4,
             "frame {j}: {y} vs {want}"
         );
     }
-    for (j, &y) in out.iter().enumerate().skip(GLIDE) {
-        assert!((y - 0.5).abs() < 1e-5, "frame {j} after the glide: {y}");
+    for (j, &y) in out.iter().enumerate().skip(RAMP) {
+        assert!((y - 0.5).abs() < 1e-5, "frame {j} after the ramp: {y}");
     }
     assert!(
         held < 0.45,
@@ -451,27 +451,27 @@ fn a_moved_bypass_glides_over_five_milliseconds() {
 /// A solo that moves mutes the other band over 5 ms: the muted band's DC is its settled level
 /// times the audible weight `1 - k / 240`, and lands on silence.
 #[test]
-fn a_moved_solo_glides_the_mute_over_five_milliseconds() {
+fn a_moved_solo_ramps_the_mute_over_five_milliseconds() {
     let set = unity(&[200.0, 3_000.0]);
     let mut k = bank(1, 3);
-    k.aim(&set);
-    let x = vec![0.5f32; SETTLE + 2 * GLIDE];
+    k.retarget(&set);
+    let x = vec![0.5f32; SETTLE + 2 * RAMP];
     let before = run(&mut k, &[&x[..SETTLE]]);
     let held = f64::from(*before[0].last().unwrap());
     let mut soloed = set;
     soloed.bands[1].solo = true;
-    k.aim(&soloed);
+    k.retarget(&soloed);
     let out = run(&mut k, &[&x[SETTLE..]])[0].clone();
-    for (j, &y) in out.iter().take(GLIDE).enumerate() {
-        let w = (j + 1) as f64 / GLIDE as f64;
+    for (j, &y) in out.iter().take(RAMP).enumerate() {
+        let w = (j + 1) as f64 / RAMP as f64;
         let want = held * (1.0 - w);
         assert!(
             (f64::from(y) - want).abs() < 2e-4,
             "frame {j}: {y} vs {want}"
         );
     }
-    for (j, &y) in out.iter().enumerate().skip(GLIDE) {
-        assert!(y.abs() < 1e-5, "frame {j} after the glide: {y}");
+    for (j, &y) in out.iter().enumerate().skip(RAMP) {
+        assert!(y.abs() < 1e-5, "frame {j} after the ramp: {y}");
     }
     assert!((held - 0.5).abs() < 1e-5, "{held}");
 }
@@ -487,7 +487,7 @@ fn the_linked_gain_follows_the_loudest_channel() {
     let g = linear(-hard(db(0.5), -20.0, 4.0));
     for (left, right, loud_side) in [(&loud, &quiet, 0), (&quiet, &loud, 1)] {
         let mut k = bank(2, 3);
-        k.aim(&set);
+        k.retarget(&set);
         let out = run(&mut k, &[left, right]);
         let (l, r) = (mean(&out[0][SETTLE..]), mean(&out[1][SETTLE..]));
         let (want_l, want_r) = if loud_side == 0 {
@@ -519,7 +519,7 @@ fn a_bands_follower_closes_one_minus_one_over_e_in_one_attack() {
     let attack = 0.01;
     set.bands[0] = band(0.0, 0.0, 8.0, attack, 1.0, 0.0);
     let mut k = bank(1, 3);
-    k.aim(&set);
+    k.retarget(&set);
     let high = vec![20.0f32; SETTLE];
     run_in(
         &mut k,
@@ -549,7 +549,7 @@ fn the_meter_reports_the_deepest_reduction_since_the_last_read() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.005, 0.0);
     let mut k = bank(1, 3);
-    k.aim(&set);
+    k.retarget(&set);
     run(&mut k, &[&vec![0.5f32; SETTLE]]);
     k.take_reading();
     run(&mut k, &[&vec![0.5f32; 4_800]]);
@@ -566,7 +566,7 @@ fn the_meter_reports_the_deepest_reduction_since_the_last_read() {
 }
 
 /// Each band reads its own threshold lane per frame: driving band 0's lane low reduces band
-/// 0 and no other, a frame that is not finite falls back to the aimed threshold, and a lane
+/// 0 and no other, a frame that is not finite falls back to the set threshold, and a lane
 /// in `f64` reads as the same dB.
 #[test]
 fn a_band_reads_its_own_threshold_lane() {
@@ -578,22 +578,22 @@ fn a_band_reads_its_own_threshold_lane() {
     let x = vec![0.5f32; len];
     let low = vec![-30.0f32; len];
     let mut k = bank(1, 3);
-    k.aim(&set);
+    k.retarget(&set);
     run_in(&mut k, &[&x], [Some(&low), None, None, None], 256);
     let want = hard(db(0.5), -30.0, 4.0);
     let reading = k.take_reading();
     let d0 = reading.band(0).unwrap().get();
     assert!((d0 - want).abs() < 0.05, "{d0} vs {want}");
     assert!(reading.band(1).unwrap().get() < 1e-3 && reading.band(2).unwrap().get() < 1e-3);
-    // A lane that is NaN reads as the aimed threshold (0 dB): nothing to reduce.
+    // A lane that is NaN reads as the set threshold (0 dB): nothing to reduce.
     let nan = vec![f32::NAN; len];
     let mut k = bank(1, 3);
-    k.aim(&set);
+    k.retarget(&set);
     run_in(&mut k, &[&x], [Some(&nan), None, None, None], 256);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     // The same lane in f64 over f64 audio.
     let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 3, RATE).unwrap();
-    k.aim(&set);
+    k.retarget(&set);
     let (x64, low64) = (vec![0.5f64; len], vec![-30.0f64; len]);
     let mut out = vec![0.0f64; len];
     let mut lanes = MultibandLanes::<f64>::default();
@@ -642,7 +642,7 @@ fn any_call_length_gives_the_same_bits() {
         let mut out = vec![vec![0.0f32; len]; 3];
         for (i, &(at, set)) in cuts.iter().enumerate() {
             let end = cuts.get(i + 1).map_or(len, |c| c.0);
-            k.aim(&set);
+            k.retarget(&set);
             let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
             let got = run_in(&mut k, &a, [Some(&lane[at..end]), None, None, None], chunk);
             for (o, g) in out.iter_mut().zip(got) {
@@ -668,8 +668,8 @@ fn any_call_length_gives_the_same_bits() {
 }
 
 /// A reset bank is a fresh one: after a loud, moved and bypassed run, `reset` and the same
-/// aim render the bits a fresh bank renders, and so does `process` straight after `reset`
-/// with no aim; the meters read nothing.
+/// retarget render the bits a fresh bank renders, and so does `process` straight after `reset`
+/// with no `retarget`; the meters read nothing.
 #[test]
 fn a_reset_bank_renders_as_a_fresh_one() {
     let len = 3_000;
@@ -683,14 +683,14 @@ fn a_reset_bank_renders_as_a_fresh_one() {
     let mut set = unity(&[400.0, 2_000.0]);
     set.bands[1] = band(-20.0, 3.0, 3.0, 0.001, 0.05, 2.0);
     let mut fresh = bank(1, 3);
-    fresh.aim(&set);
+    fresh.retarget(&set);
     let want = run(&mut fresh, &[&x]);
     let mut k = bank(1, 3);
-    k.aim(&loud);
+    k.retarget(&loud);
     run(&mut k, &[&vec![0.9f32; 5_000]]);
     k.reset();
     assert_eq!(k.take_reading().iter().map(Db::get).sum::<f64>(), 0.0);
-    k.aim(&set);
+    k.retarget(&set);
     let got = run(&mut k, &[&x]);
     assert!(
         got[0]
@@ -699,12 +699,12 @@ fn a_reset_bank_renders_as_a_fresh_one() {
             .all(|(a, b)| a.to_bits() == b.to_bits()),
         "a reset bank differs from a fresh one"
     );
-    // Straight after the reset, with no aim: the fresh bank splits and sums at the octave
+    // Straight after the reset, with no `retarget`: the fresh bank splits and sums at the octave
     // splits, and a reset one does the same.
     let mut fresh = bank(1, 3);
     let want = run(&mut fresh, &[&x]);
     let mut k = bank(1, 3);
-    k.aim(&loud);
+    k.retarget(&loud);
     run(&mut k, &[&vec![0.9f32; 5_000]]);
     k.reset();
     let got = run(&mut k, &[&x]);
@@ -713,19 +713,19 @@ fn a_reset_bank_renders_as_a_fresh_one() {
             .iter()
             .zip(&want[0])
             .all(|(a, b)| a.to_bits() == b.to_bits()),
-        "a reset bank differs from a fresh one without an aim"
+        "a reset bank differs from a fresh one without a `retarget`"
     );
 }
 
 /// A threshold lane that ends inside a chunk drives the frames it has and no others: with
 /// instant followers, frames up to the lane's end are reduced by the curve at the lane's
-/// -30 dB and the frames after it are at the aimed 0 dB threshold, unreduced, chunk or not.
+/// -30 dB and the frames after it are at the set 0 dB threshold, unreduced, chunk or not.
 #[test]
 fn a_lane_that_ends_inside_a_chunk_drives_its_own_frames() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(0.0, 0.0, 4.0, 0.0, 0.0, 0.0);
     let mut k = bank(1, 3);
-    k.aim(&set);
+    k.retarget(&set);
     run(&mut k, &[&vec![0.5f32; SETTLE]]);
     // 70 frames of lane over 300 of audio: the end falls inside the second chunk of 64.
     let lane = vec![-30.0f32; 70];
@@ -764,10 +764,10 @@ fn the_crossover_inside_stays_within_the_bound_under_a_switching_split() {
         let bound = bands as f64 * tap.powi(2 * (bands as i32 - 1));
         for alternate in [false, true] {
             let mut k = bank(1, bands);
-            k.aim(&unity(&low));
+            k.retarget(&unity(&low));
             let mut peak = 0.0f64;
             for period in 0..6_250usize {
-                k.aim(&unity(if period.is_multiple_of(2) {
+                k.retarget(&unity(if period.is_multiple_of(2) {
                     &low
                 } else {
                     &high
@@ -796,7 +796,7 @@ fn a_huge_knee_is_held_and_a_band_returns_to_the_static_curve() {
         let mut set = unity(&[200.0, 3_000.0]);
         set.bands[0] = band(-20.0, knee, 4.0, 0.001, 0.001, 0.0);
         let mut k = bank(1, 3);
-        k.aim(&set);
+        k.retarget(&set);
         let out = run(&mut k, &[&vec![0.5f32; SETTLE]]);
         assert!(out[0].iter().all(|s| s.is_finite()), "knee {knee}");
         let out = run(&mut k, &[&vec![0.0f32; 4_800]]);
@@ -822,7 +822,7 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
     let x = wide_signal(n);
     let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 2, RATE).unwrap();
     // The signal is near 0.25 (-12 dB), 12 dB under the threshold of every band.
-    k.aim(&MultibandSettings {
+    k.retarget(&MultibandSettings {
         crossover: hz(&[1_000.0]),
         bands: [band(0.0, 0.0, 8.0, 0.01, 0.1, 0.0); MAX_BANDS],
     });

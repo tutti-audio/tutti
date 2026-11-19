@@ -6,7 +6,7 @@
 //! its reset), because audio runs through it while the transport is stopped. A source
 //! produces on the **play** clock, which counts one per frame whether the transport is
 //! rolling or stopped and restarts at 0 on every play start. A control an effect samples
-//! is exact at any frame, so the two meet without loss; only the glide between two
+//! is exact at any frame, so the two meet without loss; only the ramp between two
 //! solves approximates, by at most one period.
 
 mod follower;

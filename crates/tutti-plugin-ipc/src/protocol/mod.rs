@@ -198,13 +198,13 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use tutti_buffers::FloatWidth;
-    use tutti_midi_protocol::{widen_value, widen_velocity};
+
     use tutti_plugin_types::{
         ChordValue, Load, MidiEventVec, NoteExpressionIntValue, NoteExpressionTextValue,
         ParameterInfo, PluginFormat, PluginTail, Preset, PresetId, RenderMode, Samples, ScaleValue,
         TransportInfo, WireMidi,
     };
-    use tutti_ump::{CCNumber, Message, MidiChannel, U7, Ump, Voice2};
+    use tutti_ump::{CCNumber, ControlValue, Message, MidiChannel, NoteVelocity, U7, Ump, Voice2};
     use tutti_units::{Normalized, ParamId, SampleRate};
 
     use tutti_fixtures::midi;
@@ -619,14 +619,18 @@ mod tests {
         let midi_out: MidiEventVec = [
             at(
                 0,
-                midi::note_on(MidiChannel::FIRST, 60, widen_velocity(U7::of(100)).get()),
+                midi::note_on(
+                    MidiChannel::FIRST,
+                    60,
+                    NoteVelocity::from(U7::of(100)).get(),
+                ),
             ),
             at(
                 64,
                 midi::cc(
                     MidiChannel::FIRST,
                     CCNumber::VOLUME,
-                    widen_value(U7::of(64)).get(),
+                    ControlValue::from(U7::of(64)).get(),
                 ),
             ),
         ]
@@ -747,18 +751,26 @@ mod tests {
         let midi_events: MidiEventVec = [
             at(
                 0,
-                midi::note_on(MidiChannel::FIRST, 60, widen_velocity(U7::of(100)).get()),
+                midi::note_on(
+                    MidiChannel::FIRST,
+                    60,
+                    NoteVelocity::from(U7::of(100)).get(),
+                ),
             ),
             at(
                 128,
-                midi::note_on(MidiChannel::FIRST, 64, widen_velocity(U7::of(100)).get()),
+                midi::note_on(
+                    MidiChannel::FIRST,
+                    64,
+                    NoteVelocity::from(U7::of(100)).get(),
+                ),
             ),
             at(
                 256,
                 midi::cc(
                     MidiChannel::FIRST,
                     CCNumber::VOLUME,
-                    widen_value(U7::of(64)).get(),
+                    ControlValue::from(U7::of(64)).get(),
                 ),
             ),
         ]

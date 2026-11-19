@@ -48,9 +48,8 @@ serde = ["dep:serde", "tutti-buffers/serde", "tutti-units/serde"]
 # The README's "Reading from a running graph" doctest shows the engine-side
 # seam (a graph tap's `TapReader`); nothing in the library reaches tutti-graph.
 tutti-graph = { path = "../tutti-graph" }
-# Reproducible noise for the correlation tests, which otherwise hand-roll a
-# generator. Seeded, so an uncorrelated-input assertion is not flaky.
-rand = "0.10"
+# The one seeded generator: noise for the tests and the FFT bench.
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # The shared sine, impulse and level readings (`signal`), and
 # `check_range_contract` for the range-checked settings, which are serde's
 # `try_from` shape in the tests only.

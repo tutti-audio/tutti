@@ -34,7 +34,7 @@ tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, n {
 /// [`Elevation`](tutti_units::UnitParam::Elevation) and [`Wet`](tutti_units::UnitParam::Wet)), which
 /// move the source lock-free while it renders, and a graph's control lanes
 /// may drive all three .
-/// Position changes are de-zippered over 50 ms, and each step of the glide
+/// Position changes are de-zippered over 50 ms, and each step of the ramp
 /// crossfades between the filters on either side of it. The filter for a
 /// direction is blended across the sphere face that direction crosses. A
 /// non-finite bearing or height (NaN, ±∞) is ignored: the source stays at the

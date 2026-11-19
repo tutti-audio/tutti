@@ -142,7 +142,7 @@ impl<F: Float> Kernel for AutoPanKernel<F> {
     }
 
     fn retarget(&mut self, controls: &AutoPanControls) {
-        self.pan.aim(controls);
+        self.pan.retarget(controls);
     }
 
     fn render(

@@ -143,7 +143,7 @@ fn blocks_of_any_length_render_alike_with_lanes_and_moved_cells() {
                 &inputs[..1],
                 &[Some(sweep(1_000.0, 8_000.0)), None, None],
                 |set| {
-                    // Before the first block: nothing to glide from, so the cells
+                    // Before the first block: nothing to ramp from, so the cells
                     // are the controls of the first solve at every block length.
                     assert!(set.set(UnitParam::GainDb, -5.0));
                     assert!(set.set(UnitParam::Q, 2.5));
@@ -244,7 +244,7 @@ fn a_drive_lane_step_is_in_the_render_within_one_segment() {
 }
 
 /// A step in a cutoff lane at frame 40 reaches the SVF on the stream grid: the point
-/// at 32 reads the old cutoff, the point at 48 the new one, and the coefficients glide
+/// at 32 reads the old cutoff, the point at 48 the new one, and the coefficients ramp
 /// from 48 to land at frame 63. With no state a low-pass answers an impulse with the
 /// `a3` of the set in force at that frame, so the output at frame 47 is the old set's
 /// `a3` and at frame 63 the new set's, bit for bit.
@@ -390,7 +390,7 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
                 &inputs,
                 &[None, Some(sweep(2_500.0, 9_000.0))],
                 |set| {
-                    // Before the first block: nothing to glide from.
+                    // Before the first block: nothing to ramp from.
                     assert!(set.set(UnitAddr::new(UnitParam::Cutoff, 0), 900.0));
                 },
             )
@@ -398,14 +398,14 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
     });
 }
 
-/// A step in a crossover's lane at frame 40 is held to the next grid point, then glides: the
+/// A step in a crossover's lane at frame 40 is held to the next grid point, then ramps: the
 /// point at 32 reads the old frequency and its segment runs on that set to frame 47; the
 /// point at 48 reads the new one and the integrator gain `g = tan(pi f / fs)` moves linearly
 /// to it over the 16 frames, frame 48 + m at step m + 1 of 16, reached exactly at frame 63. An
 /// impulse into a crossover with no state answers with the set in force at that frame, so the
 /// low band there is `a3^2`, `a3 = g^2 / (1 + g (g + sqrt2))`, at that frame's gain.
 #[test]
-fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_glides() {
+fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_ramps() {
     const STEP: usize = 40;
     let (old, new) = (400.0f64, 4_000.0f64);
     // The lane carries `f32` words.

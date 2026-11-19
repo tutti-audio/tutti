@@ -30,7 +30,7 @@ use super::IrLayout;
 use crate::kernel::{slice_in, slice_out};
 use crate::ramp::LastGood;
 use crate::tail_clock::{Heard, TailClock, tail_frames};
-use tutti_dsp::Glide;
+use tutti_dsp::Ramp;
 use tutti_dsp::{Convolver, FftFloat, Lerp, MatrixConvolver, MatrixConvolverError};
 
 /// The block a folded node's scratch holds before `prepare` sizes it to the graph's.
@@ -593,7 +593,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
     /// Scale one output channel's already-convolved block `out` by the wet gain, in
     /// place, ramped across the block (see [`begin_block`](Self::begin_block)).
     #[inline]
-    fn apply_gain(out: &mut [F], glide: &Glide<F>, held: Option<Amplitude>) {
+    fn apply_gain(out: &mut [F], ramp: &Ramp<F>, held: Option<Amplitude>) {
         if let Some(gain) = held {
             // Nothing moved: a constant in the loop.
             let gain = F::from_unit(gain);
@@ -603,7 +603,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
             return;
         }
         for (i, o) in out.iter_mut().enumerate() {
-            *o *= glide.at(u32::try_from(i + 1).unwrap_or(u32::MAX));
+            *o *= ramp.at(u32::try_from(i + 1).unwrap_or(u32::MAX));
         }
     }
 
@@ -619,9 +619,9 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
 
     /// Read the gain once, and ramp from where the previous block ended. It
     /// scales the output directly — a stepped gain is a click — so a change
-    /// between blocks glides across the next one and lands exactly on the new
+    /// between blocks ramps across the next one and lands exactly on the new
     /// value (a block of one takes it at once).
-    fn begin_block(&mut self, size: usize) -> (Glide<F>, Option<Amplitude>) {
+    fn begin_block(&mut self, size: usize) -> (Ramp<F>, Option<Amplitude>) {
         // The cell's gain narrows once, and a gain that is not finite reads as the last finite
         // one (`from_unit` would saturate an infinity to a finite value).
         let cell = self.gain.load();
@@ -633,10 +633,10 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         let from = self.last.unwrap_or(gain);
         self.last = Some(gain);
         // The ramp runs over the block: its ends narrow once per block.
-        let mut glide = Glide::landed(F::from_unit(from));
-        glide.aim_in(F::from_unit(gain), u32::try_from(size).unwrap_or(u32::MAX));
+        let mut ramp = Ramp::new(F::from_unit(from));
+        ramp.retarget_in(F::from_unit(gain), u32::try_from(size).unwrap_or(u32::MAX));
         let held = (from.get() == gain.get()).then_some(gain);
-        (glide, held)
+        (ramp, held)
     }
 }
 
@@ -645,8 +645,8 @@ enum WetGain<'a, F: FftFloat + Lerp> {
     /// The per-frame values on the wet-gain param port.
     Driven(&'a [F]),
     /// The cell's value, ramped from where the previous block ended; the
-    /// value is `Some` when the glide is flat.
-    Ramped(Glide<F>, Option<Amplitude>),
+    /// value is `Some` when the ramp is flat.
+    Ramped(Ramp<F>, Option<Amplitude>),
 }
 
 impl<F: FftFloat + Lerp> ConvolverNode<F> {
@@ -670,8 +670,8 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                 WetGain::Driven(&lane[at..at + size])
             }
             None => {
-                let (glide, held) = self.begin_block(size);
-                WetGain::Ramped(glide, held)
+                let (ramp, held) = self.begin_block(size);
+                WetGain::Ramped(ramp, held)
             }
         };
         let n_in = usize::from(self.inputs.layout().count());
@@ -742,7 +742,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                     self.good = good;
                     Self::apply_driven_gain(out, lane, &mut self.good);
                 }
-                WetGain::Ramped(glide, held) => Self::apply_gain(out, glide, *held),
+                WetGain::Ramped(ramp, held) => Self::apply_gain(out, ramp, *held),
             }
         }
     }

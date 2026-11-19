@@ -361,7 +361,7 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
     /// While held, the device policy asks for no restart (the watch still
     /// reports devices). For a host that must not have the stream moved
     /// under it, a take being recorded: a restart can change the rate.
-    pub fn hold_device_restarts(&mut self, held: bool) {
+    pub fn pause_device_restarts(&mut self, held: bool) {
         if let Some(watch) = &mut self.running.watch {
             watch.hold(held);
         }
@@ -991,7 +991,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         self.sampler.set_sample_rate(rate);
         // The heard tap opens at the device's width from here on; one open
         // across this change keeps counting its blocks lost (see
-        // `Session::open_heard_tap`).
+        // `Session::open_output_tap`).
         self.output.set_device_width(spec.channels);
         Ok(())
     }

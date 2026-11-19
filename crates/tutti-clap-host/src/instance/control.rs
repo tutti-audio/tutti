@@ -698,13 +698,19 @@ impl Wraps for ClapController {
         self.loaded_mut()
     }
 
-    /// Applied at the head of the Processor's next block. A full ring keeps the
-    /// latest value per parameter and retries on the next tick.
+    /// Applied at the head of the Processor's next block: the slot of the
+    /// parameter keeps the latest value.
     fn queue_write(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {
         self.queue_edit(id, value);
     }
 
-    fn after_restore(&mut self, _main: MainThreadMarker) {
+    /// A `Number` or `Program` id is refused without touching the plugin.
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+        preset_path(id).is_some() && self.restore_preset(main, id)
+    }
+
+    /// The writes queued before the load are stale, voided before it runs.
+    fn before_restore(&mut self, _main: MainThreadMarker) {
         self.reset_edits();
     }
 
@@ -713,11 +719,7 @@ impl Wraps for ClapController {
     /// `CLAP_EVENT_PARAM_GESTURE_BEGIN` and `_END` as a gesture's ends, which
     /// carry no value in CLAP.
     fn collect_reports(&mut self, _main: MainThreadMarker, out: &mut Vec<ParamEdit>, _from: usize) {
-        self.reported.drain(|edit| {
-            if let tutti_plugin_types::Edit::Reported(edit) = edit {
-                out.push(edit);
-            }
-        });
+        self.reported.drain(|edit| out.push(edit));
     }
 
     fn lost_reports(&self) -> u64 {
@@ -733,7 +735,7 @@ impl Wraps for ClapController {
     }
 
     fn tick(&mut self, _main: MainThreadMarker) {
-        self.retry_edits();
+        self.reclaim();
     }
 }
 

@@ -55,7 +55,7 @@ use tutti_buffers::Wave;
 use tutti_graph::contract::{self, Direct};
 use tutti_graph::{Env, Node, TransportChanges, TransportPosition};
 use tutti_sampler::{
-    ByHand, Direction, DiskStreamer, DiskStreamerConfig, MemorySource, Playback, SlotId,
+    Direction, DiskStreamer, DiskStreamerConfig, Manual, MemorySource, Playback, SlotId,
     StepOutcome, Stream, Voice, VoiceNode, VoicePool, VoiceSource,
 };
 use tutti_units::{Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor};
@@ -327,16 +327,17 @@ fn write_wav(path: &Path, frames: usize) {
 fn disk_voice(
     path: &Path,
 ) -> (
-    DiskStreamer<ByHand<f32>, f32>,
+    DiskStreamer<Manual<f32>, f32>,
     Stream<f32>,
     tutti_sampler::DiskVoice<f32>,
 ) {
-    let mut s = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut s = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let opening = s.open(path, tutti_sampler::Placement::HEAD);
-    let (stream, reader) = tutti_sampler::testing::settle(&mut s, opening).expect("the file opens");
+    let (stream, reader) =
+        tutti_sampler::testing::wait_for_open(&mut s, opening).expect("the file opens");
     for _ in 0..4096 {
-        if s.step_once() != StepOutcome::Busy {
+        if s.step() != StepOutcome::Busy {
             break;
         }
     }

@@ -16,7 +16,7 @@
 //! everything here is self-contained.
 
 use crate::support;
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_ump::U7;
 
 use std::num::NonZeroUsize;
@@ -27,13 +27,17 @@ use tutti_fixtures::signal::rms;
 use tutti_polysynth::{
     Adsr, AllocationStrategy, OscillatorType, PolySynth, SynthConfig, VoiceMode,
 };
-use tutti_ump::{MidiChannel, MidiGroup, Ump};
+use tutti_ump::{MidiChannel, MidiGroup, NoteVelocity, Ump};
 use tutti_units::{Amplitude, Normalized, Seconds};
 
 const SR: f64 = 48_000.0;
 
 fn note_on(note: u8, vel: u8) -> Ump {
-    midi::note_on(MidiChannel::FIRST, note, widen_velocity(U7::of(vel)).get())
+    midi::note_on(
+        MidiChannel::FIRST,
+        note,
+        NoteVelocity::from(U7::of(vel)).get(),
+    )
 }
 
 fn note_off(note: u8) -> Ump {
@@ -474,7 +478,7 @@ fn a_key_struck_twice_then_released_once_goes_silent() {
         midi::note_on(
             tutti_ump::Address::new(group, MidiChannel::FIRST),
             69,
-            widen_velocity(U7::of(100)).get(),
+            NoteVelocity::from(U7::of(100)).get(),
         )
     };
     let off = |group: MidiGroup| {

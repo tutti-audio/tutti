@@ -1,6 +1,6 @@
 //! A root declaration crossfades through the public API: the old root's
 //! output fades out and the new root's fades in over the declick length,
-//! unless the declaration is made `.hard()`.
+//! unless the declaration is made `.unfaded()`.
 //!
 //! Every figure is analytic: constants of exactly representable values and
 //! the equal-amplitude gains `(1 - s, s)` with the smootherstep
@@ -26,7 +26,7 @@ fn session() -> Session {
     let (node, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
-            .set_sources_hard(Root::output(c), [OutPort::new(node, c)])
+            .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
             .unwrap();
     }
     let _ = block(&mut s);
@@ -74,12 +74,12 @@ fn a_declared_root_change_crossfades_over_the_declick() {
     }
 }
 
-/// **`.hard()` cuts**: the new root is the whole mix from the first frame.
+/// **`.unfaded()` cuts**: the new root is the whole mix from the first frame.
 #[test]
 fn a_hard_declaration_cuts_at_the_block() {
     let mut s = session();
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::MONO)))
         .expect("a mono root")
-        .hard();
+        .unfaded();
     assert!(block(&mut s).iter().all(|&r| r == 0.25));
 }

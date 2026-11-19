@@ -534,7 +534,7 @@ pub struct Bus;
 /// An event edge: an [`EventOutPort`] into an [`EventInPort`]. Events merge by
 /// offset at the sink, the graph ordering ties by source, and an event edge is
 /// **never faded**: a note-off is a message, not a level (doc 030, section 4),
-/// so [`Connection::hard`] and `disconnect_hard` are the same as their plain
+/// so [`Connection::unfaded`] and `disconnect_unfaded` are the same as their plain
 /// forms here.
 #[derive(Clone, Copy, Debug)]
 pub struct Event;
@@ -841,7 +841,7 @@ impl Inlet<Bus> for Root {
 
 /// A root declaration just made ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
 /// borrowing the graph so it can be made a cut:
-/// `session.declare_root_topology(root)?.hard()`.
+/// `session.declare_root_topology(root)?.unfaded()`.
 ///
 /// Dropping it keeps the declaration as made, which crossfades the old root
 /// into the new over [`DECLICK`](tutti_graph::DECLICK).
@@ -853,11 +853,11 @@ pub struct RootDeclaration<'g, F: Float = f32> {
 impl<F: Float> RootDeclaration<'_, F> {
     /// Takes the new root at one block, a cut: no old root is rendered beside
     /// it. The default is a crossfade over [`DECLICK`](tutti_graph::DECLICK)
-    /// (5 ms), so a change of layout never steps the sound; `hard` is for a
+    /// (5 ms), so a change of layout never steps the sound; `unfaded` is for a
     /// test, an analysis graph or a root changed before anything is listening.
     /// A declaration that waits for a running crossfade applies at once, and
     /// the cut is its.
-    pub fn hard(self) -> Self {
+    pub fn unfaded(self) -> Self {
         self.graph.harden_root();
         self
     }
@@ -892,10 +892,10 @@ impl<'g, W: Wire, F: Float> Connection<'g, W, F> {
 
     /// Connects at full weight at once: no fade in. The default is a fade in
     /// over [`DECLICK`](tutti_graph::DECLICK) (5 ms), so a new
-    /// wire never steps into a running sum; `hard` is for a test, an analysis
+    /// wire never steps into a running sum; `unfaded` is for a test, an analysis
     /// graph or a wire made before anything is listening. It also stops a
     /// fade-out of an edge this call brought back.
-    pub fn hard(self) -> Self {
+    pub fn unfaded(self) -> Self {
         W::harden(self.graph, self.ends.0, self.ends.1, &self.edges);
         self
     }

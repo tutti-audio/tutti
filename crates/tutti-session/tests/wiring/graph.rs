@@ -214,7 +214,7 @@ fn every_source_reads_back_as_written() {
         Root::input(0),
     ] {
         graph
-            .set_sources_hard(InPort::new(sink, 0), [source])
+            .set_sources_unfaded(InPort::new(sink, 0), [source])
             .unwrap();
         let held = vec![source];
         assert_eq!(
@@ -222,7 +222,9 @@ fn every_source_reads_back_as_written() {
             held,
             "node port"
         );
-        graph.set_sources_hard(Root::output(1), [source]).unwrap();
+        graph
+            .set_sources_unfaded(Root::output(1), [source])
+            .unwrap();
         assert_eq!(
             graph.sources(Root::output(1)).unwrap(),
             held,
@@ -246,16 +248,16 @@ fn every_setter_stores_silence_as_the_empty_set() {
     );
 
     graph
-        .set_sources_hard(InPort::new(sink, 0), [OutPort::new(src, 0)])
+        .set_sources_unfaded(InPort::new(sink, 0), [OutPort::new(src, 0)])
         .unwrap();
-    graph.set_sources_hard(InPort::new(sink, 0), []).unwrap();
+    graph.set_sources_unfaded(InPort::new(sink, 0), []).unwrap();
     assert!(
         graph.testing().planned_compensation().is_some(),
         "set_sources of none"
     );
 
     graph
-        .set_sources_hard(Root::output(0), [OutPort::new(src, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(src, 0)])
         .unwrap();
     assert!(graph.disconnect_all(Root::output(0)).unwrap());
     assert!(
@@ -263,7 +265,7 @@ fn every_setter_stores_silence_as_the_empty_set() {
         "disconnect_all"
     );
 
-    graph.connect(src, Root).unwrap().hard();
+    graph.connect(src, Root).unwrap().unfaded();
     graph.disconnect(src, Root).unwrap();
     assert!(
         graph.testing().planned_compensation().is_some(),
@@ -374,7 +376,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
     let mut s = detached(1);
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
         .unwrap();
     let _ = s.update();
     let sent = s.graph_ref().testing().commits_sent();
@@ -386,7 +388,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
 
     let (b, _) = s.graph().add(ForkByClone(Const::mono(2.0)));
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(b, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(b, 0)])
         .unwrap();
     assert!(s.graph_ref().is_edited());
     let _ = s.update();
@@ -410,7 +412,7 @@ fn an_update_with_no_edit_sends_no_plan() {
     let mut s = detached(1);
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
         .unwrap();
     let _ = s.update();
     let sent = s.graph_ref().testing().commits_sent();
@@ -461,7 +463,7 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     let mut side = s.graph().take_audio_side();
     let (knob, old) = s.graph().add(Params(Knob::new()));
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(knob, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(knob, 0)])
         .unwrap();
     assert!(s.update().is_empty());
     let mut out = [0.0f32];
@@ -599,10 +601,10 @@ fn every_param_write_path_reaches_a_fork() {
     let (k0, _) = s.graph().add(Params(Knob::new()));
     let (k1, c1) = s.graph().add(Params(Knob::new()));
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(k0, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(k0, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(1), [OutPort::new(k1, 0)])
+        .set_sources_unfaded(Root::output(1), [OutPort::new(k1, 0)])
         .unwrap();
     let _ = s.update();
 
@@ -705,7 +707,7 @@ fn an_offline_session_renders_a_sines_analytic_rms() {
         s.graph()
             .connect(osc.out(0), Root::output(c))
             .unwrap()
-            .hard();
+            .unfaded();
     }
     let _ = s.update();
     let out = pull(&s, ChannelLayout::MONO, 48_000, 512);
@@ -740,13 +742,13 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
     let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(440.0))));
     let (late, _) = s.graph().add(ForkByClone(Late::<N>::new()));
     s.graph()
-        .set_sources_hard(InPort::new(late, 0), [OutPort::new(osc, 0)])
+        .set_sources_unfaded(InPort::new(late, 0), [OutPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(osc, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(1), [OutPort::new(late, 0)])
+        .set_sources_unfaded(Root::output(1), [OutPort::new(late, 0)])
         .unwrap();
     let _ = s.update();
     assert_eq!(s.latency(), Samples::new(N), "the total is published");
@@ -896,7 +898,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     let mut s = detached(1);
     let (node, first) = s.graph().add(Published::new());
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
     assert_eq!(Arc::strong_count(&first.token), 2, "the graph keeps one");
@@ -997,7 +999,7 @@ fn the_update_frees_the_slots_a_graph_pool_retired() {
     let (bare, bare_handle) = tutti_sampler::VoicePool::new().with_handle();
     let (bare, ()) = s.graph().add(tutti_graph::Unforkable(bare));
     s.graph()
-        .set_sources_hard(
+        .set_sources_unfaded(
             Root::output(0),
             [OutPort::new(pool, 0), OutPort::new(bare, 0)],
         )

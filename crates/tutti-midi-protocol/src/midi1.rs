@@ -3,7 +3,7 @@
 
 use tutti_ump::{Message, Midi1Bytes, Ump, Voice1, Voice2};
 
-use crate::{ExtremeValues, narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
+use crate::ExtremeValues;
 
 /// Why a MIDI 2.0 channel voice message has no single MIDI 1.0 message
 /// ([`narrow`]'s refusal): the kind of message, as M2-104 Appendix D.2 groups
@@ -58,31 +58,25 @@ pub fn narrow_with(extremes: ExtremeValues, voice: Voice2) -> Result<Voice1, NoM
     Ok(match voice {
         Voice2::NoteOn { note, velocity, .. } => Voice1::NoteOn {
             note,
-            velocity: extremes.seven(
-                narrow_note_on_velocity(velocity),
-                u32::from(velocity.get()),
-                16,
-            ),
+            velocity: extremes.seven(velocity.to_note_on_u7(), u32::from(velocity.get()), 16),
         },
         Voice2::NoteOff { note, velocity, .. } => Voice1::NoteOff {
             note,
-            velocity: extremes.seven(narrow_velocity(velocity), u32::from(velocity.get()), 16),
+            velocity: extremes.seven(velocity.to_u7(), u32::from(velocity.get()), 16),
         },
         Voice2::PolyPressure { note, value } => Voice1::PolyPressure {
             note,
-            pressure: extremes.seven(narrow_value(value), value.get(), 32),
+            pressure: extremes.seven(value.to_u7(), value.get(), 32),
         },
         Voice2::ControlChange { controller, value } => Voice1::ControlChange {
             controller,
-            value: extremes.seven(narrow_value(value), value.get(), 32),
+            value: extremes.seven(value.to_u7(), value.get(), 32),
         },
         Voice2::ProgramChange { program, .. } => Voice1::ProgramChange(program),
         Voice2::ChannelPressure(value) => {
-            Voice1::ChannelPressure(extremes.seven(narrow_value(value), value.get(), 32))
+            Voice1::ChannelPressure(extremes.seven(value.to_u7(), value.get(), 32))
         }
-        Voice2::PitchBend(bend) => {
-            Voice1::PitchBend(extremes.fourteen(narrow_bend(bend), bend.get()))
-        }
+        Voice2::PitchBend(bend) => Voice1::PitchBend(extremes.fourteen(bend.to_u14(), bend.get())),
         Voice2::RegisteredPerNote { .. }
         | Voice2::AssignablePerNote { .. }
         | Voice2::PerNotePitchBend { .. } => return Err(NoMidi1Form::PerNote),
@@ -109,11 +103,13 @@ pub fn narrow_with(extremes: ExtremeValues, voice: Voice2) -> Result<Voice1, NoM
 /// # Examples
 ///
 /// ```
-/// use tutti_midi_protocol::{narrow_message, widen_velocity};
-/// use tutti_ump::{Address, Message, MidiChannel, MidiGroup, NoteNumber, U7, Voice1, Voice2};
+/// use tutti_midi_protocol::narrow_message;
+/// use tutti_ump::{
+///     Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Voice1, Voice2,
+/// };
 ///
 /// let to = Address::new(MidiGroup::of(2), MidiChannel::of(5));
-/// let on2 = Message::Midi2(to, Voice2::note_on(NoteNumber::of(60), widen_velocity(U7::of(100))));
+/// let on2 = Message::Midi2(to, Voice2::note_on(NoteNumber::of(60), NoteVelocity::from(U7::of(100))));
 /// let on1 = narrow_message(on2).unwrap();
 /// assert_eq!(on1, Message::midi1(to, Voice1::note_on(NoteNumber::of(60), U7::of(100))));
 /// ```

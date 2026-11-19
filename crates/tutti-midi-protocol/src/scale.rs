@@ -1,50 +1,10 @@
-//! Min-Center-Max upscaling (M2-115 section 3).
-
-/// Widens `value` of `src` bits to `dst` bits. `1 < src < dst <= 32`.
-///
-/// Values up to the centre shift left, which keeps the steps even towards the
-/// centre; values above it also repeat their low `src - 1` bits into the new
-/// low bits, which lands the maximum on the maximum.
-#[inline]
-pub(crate) const fn upscale(value: u32, src: u32, dst: u32) -> u32 {
-    let scale_bits = dst - src;
-    let shifted = value << scale_bits;
-    if value <= 1 << (src - 1) {
-        return shifted;
-    }
-    let repeat_bits = src - 1;
-    let mut repeat = value & ((1 << repeat_bits) - 1);
-    repeat = if scale_bits > repeat_bits {
-        repeat << (scale_bits - repeat_bits)
-    } else {
-        repeat >> (repeat_bits - scale_bits)
-    };
-    let mut out = shifted;
-    while repeat != 0 {
-        out |= repeat;
-        repeat >>= repeat_bits;
-    }
-    out
-}
-
-/// A 7-bit controller or pressure value as 32 bits.
-#[inline]
-pub(crate) const fn value(v: u8) -> u32 {
-    upscale(v as u32, 7, 32)
-}
-
-/// A 14-bit pitch bend as 32 bits.
-#[inline]
-pub(crate) const fn bend(v: u16) -> u32 {
-    upscale(v as u32, 14, 32)
-}
+//! Where M2-115 section 4.1 zero-extends rather than scales.
 
 /// Whether the Registered Controller `index` is zero-extended (M2-115 section
 /// 4.1: "Translators shall use Zero-Extension Scaling on all Registered
 /// Controller (RPN) Messages where the index (RPN LSB) is 0-31") rather than
 /// scaled Min-Center-Max (section 3.1, index 32 to 127), whatever the bank.
-/// The translator widens by it and the translator narrows by it, so the two
-/// cannot disagree.
+/// Both translators go by it, so the two cannot disagree.
 #[inline]
 pub(crate) const fn zero_extended(index: tutti_ump::U7) -> bool {
     index.get() < 32

@@ -314,12 +314,12 @@ fn placement_is_the_formula_with_each_term_stated() {
         .expect("armed");
     rig.run_until(finished);
     let done = recorded(&rig.events);
-    let terms = *done.terms();
-    assert_eq!(terms.in_latency, Some(Samples::new(240)));
-    assert_eq!(terms.out_latency, Some(Samples::new(480)));
-    assert_eq!(terms.inlet_lead, Samples::new(7));
-    assert_eq!(terms.offset, Trim::Earlier(Samples::new(3)));
-    assert!(terms.is_complete());
+    let latency = *done.latency();
+    assert_eq!(latency.in_latency, Some(Samples::new(240)));
+    assert_eq!(latency.out_latency, Some(Samples::new(480)));
+    assert_eq!(latency.inlet_lead, Samples::new(7));
+    assert_eq!(latency.offset, Trim::Earlier(Samples::new(3)));
+    assert!(latency.is_complete());
     assert_eq!(done.placement().first_frame(), Frame::new(10_000));
     assert_eq!(done.start(), Start::At(Frame::new(10_000 - 727 - 3)));
     drop(take);
@@ -345,9 +345,9 @@ fn an_unreported_latency_is_stated_unknown_not_zero() {
         .expect("armed");
     rig.run_until(finished);
     let done = recorded(&rig.events);
-    let terms = *done.terms();
-    assert_eq!((terms.in_latency, terms.out_latency), (None, None));
-    assert!(!terms.is_complete());
+    let latency = *done.latency();
+    assert_eq!((latency.in_latency, latency.out_latency), (None, None));
+    assert!(!latency.is_complete());
     assert_eq!(
         done.start(),
         Start::At(Frame::new(2_000 - 7)),

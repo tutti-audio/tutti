@@ -507,7 +507,11 @@ fn steady_lanes<F: SamplerFloat>(
         let off = taps[0].wrapping_sub(base);
         // The claim's window is one contiguous range, so holding the first
         // and last of four consecutive taps holds all four.
-        if !consecutive || off > u32::MAX as u64 || !block.holds(taps[0]) || !block.holds(taps[3]) {
+        if !consecutive
+            || off > u32::MAX as u64
+            || !block.contains(taps[0])
+            || !block.contains(taps[3])
+        {
             return false;
         }
         index[i] = off as u32;
@@ -673,7 +677,7 @@ fn read_ring<F: SamplerFloat>(
         out.fill(F::ZERO);
         return true;
     };
-    if !taps.iter().all(|&t| block.holds(t)) {
+    if !taps.iter().all(|&t| block.contains(t)) {
         return false;
     }
     // Written out rather than `taps.map(..)`: the array map compiled to an

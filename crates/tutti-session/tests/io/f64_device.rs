@@ -31,11 +31,14 @@ fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
         .expect("an f64 device session builds with no device");
     let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
     let (gain, _) = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
-    s.graph().connect(dc.out(0), gain.input(0)).unwrap().hard();
+    s.graph()
+        .connect(dc.out(0), gain.input(0))
+        .unwrap()
+        .unfaded();
     s.graph()
         .connect(gain.out(0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     let _ = s.update();
     s.set(gain.volume().to(Amplitude::new(0.75))).unwrap();
 
@@ -67,7 +70,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
     live.graph()
         .connect(dc.out(0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     let _ = live.update();
     stream.render_block(Samples::new(64)).expect("open");
     let mut system = live
@@ -82,7 +85,10 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
     let mut tap = None;
     tutti_fixtures::wait_until("the audio side never took the graph", guard, || {
         let _ = system.update();
-        tap = system.open_heard_tap(Samples::new(2_048)).unwrap().reader();
+        tap = system
+            .open_output_tap(Samples::new(2_048))
+            .unwrap()
+            .reader();
         tap.is_some()
     });
     let mut tap = tap.expect("opened");

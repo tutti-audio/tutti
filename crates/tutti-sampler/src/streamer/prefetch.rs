@@ -21,7 +21,7 @@
 //! argument, and `tutti-rt/tests/pos_ring_loom.rs` checks it under loom).
 //! Its one `PosWriter` is the streamer's [`RegionOut`]'s; its one `PosReader`
 //! is handed out by value, once, with the stream's open
-//! ([`Opening::poll`](crate::Opening::poll)), so one live reader per ring is the
+//! ([`PendingOpen::poll`](crate::PendingOpen::poll)), so one live reader per ring is the
 //! type's rule, not a flag's. This module
 //! adds what a disk stream needs on top: the region, the file, the map the
 //! reader reads the slots by (and the direction and applied loop beside it: the

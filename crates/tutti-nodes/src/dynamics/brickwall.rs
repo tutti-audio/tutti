@@ -102,7 +102,7 @@ pub struct BrickwallKernel<F: Float> {
 }
 
 impl<F: Float> BrickwallKernel<F> {
-    /// A clipper on `input`, at the full scale until aimed.
+    /// A clipper on `input`, at the full scale until set.
     fn new(input: BusTopology) -> Self {
         Self {
             input,
@@ -132,7 +132,7 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
     fn reset(&mut self) {}
 
     fn retarget(&mut self, controls: &BrickwallControls) {
-        self.bank.aim(controls);
+        self.bank.retarget(controls);
     }
 
     fn render(

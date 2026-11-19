@@ -14,8 +14,8 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// channel) in blocks of `block`.
 fn run(
     stages: usize,
-    coefficients: &mut [Glide<f32>],
-    feedback: &mut Glide<f32>,
+    coefficients: &mut [Ramp<f32>],
+    feedback: &mut Ramp<f32>,
     audio: &[Vec<f32>],
     block: usize,
 ) -> Vec<Vec<f32>> {
@@ -28,8 +28,8 @@ fn run(
 
 fn run_on(
     chain: &mut PhaserChain<f32>,
-    coefficients: &mut [Glide<f32>],
-    feedback: &mut Glide<f32>,
+    coefficients: &mut [Ramp<f32>],
+    feedback: &mut Ramp<f32>,
     audio: &[Vec<f32>],
     block: usize,
 ) -> Vec<Vec<f32>> {
@@ -98,8 +98,8 @@ fn complement(c: f64) -> f32 {
 fn held_response(stages: usize, a: f32, g: Feedback, len: usize) -> Vec<f32> {
     run(
         stages,
-        &mut [Glide::landed(a)],
-        &mut Glide::landed(f32::from_unit(g)),
+        &mut [Ramp::new(a)],
+        &mut Ramp::new(f32::from_unit(g)),
         &[impulse(len, 0)],
         64,
     )
@@ -153,8 +153,8 @@ fn two_stages_invert_at_their_centre() {
         .collect();
     let y = run(
         2,
-        &mut [Glide::landed(c)],
-        &mut Glide::landed(0.0),
+        &mut [Ramp::new(c)],
+        &mut Ramp::new(0.0),
         std::slice::from_ref(&x),
         64,
     )
@@ -341,24 +341,24 @@ fn feedback_rings_as_a_train_of_the_loop_length() {
     }
 }
 
-// ---- the glides ------------------------------------------------------------------
+// ---- the ramps ------------------------------------------------------------------
 
-/// A coefficient glide is read at the step after the ones taken: an impulse at frame `n`
+/// A coefficient ramp is read at the step after the ones taken: an impulse at frame `n`
 /// of a fresh two-stage chain with no feedback comes out as the square of that frame's
-/// coefficient (`out = c (in - y1) + x1` with no history, the glide running on `1 + c`), which
-/// is the glide's step `n + 1`
+/// coefficient (`out = c (in - y1) + x1` with no history, the ramp running on `1 + c`), which
+/// is the ramp's step `n + 1`
 /// (`from + (to - from) (n + 1) / 16`, and `to` from the sixteenth step on), whatever the blocks.
 #[test]
-fn a_coefficient_glide_is_read_a_step_ahead_and_lands_exactly() {
+fn a_coefficient_ramp_is_read_a_step_ahead_and_lands_exactly() {
     let (from, to) = (0.2f32, -0.5f32);
     for n in [0usize, 1, 7, 14, 15, 16, 17, 31] {
         for block in [1, 5, 64] {
-            let mut glide = Glide::landed(complement(f64::from(from)));
-            glide.aim_in(complement(f64::from(to)), 16);
+            let mut ramp = Ramp::new(complement(f64::from(from)));
+            ramp.retarget_in(complement(f64::from(to)), 16);
             let y = run(
                 2,
-                &mut [glide],
-                &mut Glide::landed(0.0),
+                &mut [ramp],
+                &mut Ramp::new(0.0),
                 &[impulse(n + 1, n)],
                 block,
             )
@@ -375,18 +375,18 @@ fn a_coefficient_glide_is_read_a_step_ahead_and_lands_exactly() {
     }
 }
 
-/// The feedback glides on the stream and lands exactly: at a coefficient of 0 and two stages
+/// The feedback ramps on the stream and lands exactly: at a coefficient of 0 and two stages
 /// the first echo of an impulse at frame 0 leaves at frame 5 with the feedback of frame 3
-/// (the loop reads it three frames after the output), the glide's step 4 of 240 from 0.2 to
-/// 0.8, and one past the glide it is 0.8.
+/// (the loop reads it three frames after the output), the ramp's step 4 of 240 from 0.2 to
+/// 0.8, and one past the ramp it is 0.8.
 #[test]
-fn a_feedback_glide_is_read_a_step_ahead_and_lands_exactly() {
+fn a_feedback_ramp_is_read_a_step_ahead_and_lands_exactly() {
     for (steps, want) in [(240u32, 0.2 + 0.6 * 4.0 / 240.0), (2, 0.8)] {
-        let mut fb = Glide::landed(0.2f32);
-        fb.aim_in(0.8, steps);
+        let mut fb = Ramp::new(0.2f32);
+        fb.retarget_in(0.8, steps);
         let y = run(
             2,
-            &mut [Glide::landed(complement(0.0))],
+            &mut [Ramp::new(complement(0.0))],
             &mut fb,
             &[impulse(8, 0)],
             3,
@@ -423,8 +423,8 @@ fn a_silent_channel_stays_silent_and_each_channel_keeps_its_own_state() {
     ];
     let a = allpass_complement(Hz::new(1_000.0), RATE);
     let b = allpass_complement(Hz::new(2_500.0), RATE);
-    let mut coefficients = [a, b, a, a, a, a].map(Glide::landed);
-    let out = run(6, &mut coefficients, &mut Glide::landed(0.99), &audio, 64);
+    let mut coefficients = [a, b, a, a, a, a].map(Ramp::new);
+    let out = run(6, &mut coefficients, &mut Ramp::new(0.99), &audio, 64);
     assert!(out[3].iter().all(|&s| s == 0.0), "no bleed into a silence");
     assert_eq!(out[4], out[0], "one coefficient, one signal, one output");
     assert_eq!(out[2], out[0]);
@@ -437,8 +437,8 @@ fn a_silent_channel_stays_silent_and_each_channel_keeps_its_own_state() {
 fn reset_empties_the_chain() {
     let c = allpass_complement(Hz::new(1_000.0), RATE);
     let mut chain = PhaserChain::new(Stages::of(6), ChannelLayout::clamped(2));
-    let mut coefficients = [Glide::landed(c); 2];
-    let mut fb = Glide::landed(0.9);
+    let mut coefficients = [Ramp::new(c); 2];
+    let mut fb = Ramp::new(0.9);
     let loud = vec![vec![1.0f32; 300]; 2];
     let y = run_on(&mut chain, &mut coefficients, &mut fb, &loud, 64);
     assert!(y[0].iter().any(|&s| s != 0.0));
@@ -458,8 +458,8 @@ fn reset_empties_the_chain() {
 fn a_clone_continues_where_the_original_is() {
     let c = allpass_complement(Hz::new(1_000.0), RATE);
     let mut chain = PhaserChain::new(Stages::of(4), ChannelLayout::clamped(1));
-    let mut coefficients = [Glide::landed(c)];
-    let mut fb = Glide::landed(0.5);
+    let mut coefficients = [Ramp::new(c)];
+    let mut fb = Ramp::new(0.5);
     run_on(
         &mut chain,
         &mut coefficients,
@@ -571,8 +571,8 @@ fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
         want[n] = u;
     }
     let mut chain = PhaserChain::<f64>::new(Stages::of(stages), ChannelLayout::clamped(1));
-    let mut coefficients = [Glide::landed(a)];
-    let mut feedback = Glide::landed(g);
+    let mut coefficients = [Ramp::new(a)];
+    let mut feedback = Ramp::new(g);
     let mut y = vec![0.0f64; len];
     chain.process(
         &mut coefficients,
@@ -619,8 +619,8 @@ fn an_f32_chain_at_its_lowest_sweeps_at_192_khz_inverts_a_sine_at_the_centre() {
         let a: f32 = allpass_complement(f0, rate);
         let y = run(
             2,
-            &mut [Glide::landed(a)],
-            &mut Glide::landed(0.0),
+            &mut [Ramp::new(a)],
+            &mut Ramp::new(0.0),
             std::slice::from_ref(&x),
             512,
         )

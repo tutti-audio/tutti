@@ -26,13 +26,13 @@ use std::sync::Arc;
 
 use tutti_fixtures::midi;
 use tutti_graph::{Offset, TransportChanges, TransportPosition};
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_modulation::{
     Amount, Clock, ControlProgram, Layer, LayerId, LfoShape, Polarity, Waveform,
 };
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Law, Trajectory};
-use tutti_ump::{MidiChannel, U7};
+use tutti_ump::{MidiChannel, NoteVelocity, U7};
 use tutti_units::{Beat, BeatsPerCycle, Bpm, Samples};
 use tutti_units::{Depth, ParamId, PhaseIncrement};
 
@@ -153,7 +153,11 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
     let mut block = |b: usize, outs: &mut [&mut [f32]]| {
         if b.is_multiple_of(4) {
             let note = 60 + (b % 12) as u8;
-            let on = midi::note_on(MidiChannel::of(1), note, widen_velocity(U7::of(100)).get());
+            let on = midi::note_on(
+                MidiChannel::of(1),
+                note,
+                NoteVelocity::from(U7::of(100)).get(),
+            );
             let off = midi::note_off(MidiChannel::of(1), note, 0);
             sender.push(tutti_graph::Stamp::NextBlock, on).unwrap();
             sender.push(tutti_graph::Stamp::NextBlock, off).unwrap();

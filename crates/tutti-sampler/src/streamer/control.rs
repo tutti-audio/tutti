@@ -1,7 +1,7 @@
 //! What a stream plays ([`StreamFile`], what an export fork reads).
 //!
 //! The control side of a stream is [`Stream`](crate::Stream); the reader it
-//! hands its voice is the reply of its open ([`Opening`](crate::Opening)).
+//! hands its voice is the reply of its open ([`PendingOpen`](crate::PendingOpen)).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

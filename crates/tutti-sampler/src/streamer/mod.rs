@@ -18,6 +18,7 @@ mod config;
 #[cfg(test)]
 mod contained;
 mod control;
+mod control_cell;
 mod decode;
 mod handlers;
 mod io;
@@ -28,7 +29,6 @@ mod open;
 mod prefetch;
 mod record;
 mod status;
-mod steer;
 mod step;
 mod stream;
 mod thread;
@@ -45,7 +45,7 @@ pub(crate) use loops::RingControl;
 pub(crate) use loops::{Arrangement, RingMap, straight};
 pub(crate) use prefetch::SharedReader;
 #[cfg(any(test, feature = "testing"))]
-pub use thread::ByHand;
+pub use thread::Manual;
 pub use thread::Running;
 
 pub(crate) use bell::StreamerSender;
@@ -55,10 +55,10 @@ pub(crate) use bell::StreamerSender;
 pub use block::Block;
 pub(crate) use block::RingReader;
 pub use control::StreamFile;
-pub use open::{Open, OpenError, Opening, Placement, RefusedPlacement, StreamReader};
+pub use control_cell::ControlCell;
+pub use open::{Open, OpenError, PendingOpen, Placement, RefusedPlacement, StreamReader};
 pub(crate) use status::StatusCell;
 pub use status::{StreamFault, StreamPhase, StreamStatus};
-pub use steer::SteerCell;
 pub use stream::Stream;
 pub(crate) use stream::StreamerPort;
 
@@ -93,7 +93,7 @@ use tutti_units::SampleRate;
 ///
 /// Its type says how it is driven: [`DiskStreamer<Running, f32>`](Running) (the
 /// default, from `new`) on a thread of its own, or, with the `testing`
-/// feature, `DiskStreamer<ByHand<f32>, f32>` from `manual`,
+/// feature, `DiskStreamer<Manual<f32>, f32>` from `manual`,
 /// stepped by the caller.
 ///
 /// All of this is control-thread API. The audio thread only ever touches the
@@ -112,7 +112,7 @@ use tutti_units::SampleRate;
 /// let streamer = DiskStreamer::<Running, f32>::start(tutti_units::SampleRate::SR_48K, Default::default())?;
 ///
 /// // The streamer opens the file on its own thread; the reply is polled, and
-/// // a poll that is not ready hands the `Opening` back.
+/// // a poll that is not ready hands the `PendingOpen` back.
 /// let mut opening = streamer.open("take_1.wav".as_ref(), Placement::HEAD);
 /// let (stream, reader) = loop {
 ///     match opening.poll() {
@@ -139,7 +139,7 @@ use tutti_units::SampleRate;
 /// ```compile_fail
 /// # fn run() -> tutti_sampler::Result<()> {
 /// let mut streamer = tutti_sampler::DiskStreamer::<tutti_sampler::Running, f32>::start(tutti_units::SampleRate::SR_48K, Default::default())?;
-/// streamer.step_once(); // only a `DiskStreamer<ByHand<f32>, f32>` steps
+/// streamer.step(); // only a `DiskStreamer<Manual<f32>, f32>` steps
 /// # Ok(())
 /// # }
 /// ```
@@ -148,8 +148,8 @@ use tutti_units::SampleRate;
 ///
 /// ```
 /// # fn run() -> tutti_sampler::Result<()> {
-/// let mut streamer = tutti_sampler::DiskStreamer::<_, f32>::by_hand(tutti_units::SampleRate::SR_48K, Default::default())?;
-/// let _ = streamer.step_once();
+/// let mut streamer = tutti_sampler::DiskStreamer::<_, f32>::manual(tutti_units::SampleRate::SR_48K, Default::default())?;
+/// let _ = streamer.step();
 /// # Ok(())
 /// # }
 /// ```
@@ -213,9 +213,9 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
 }
 
 #[cfg(any(test, feature = "testing"))]
-impl<F: RingFloat> DiskStreamer<ByHand<F>, F> {
+impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
     /// Creates the streaming engine without spawning the streamer thread;
-    /// cycles are then run by hand with `step_once`.
+    /// cycles are then run by hand with `step`.
     /// Requires the `testing` feature.
     ///
     /// The step is the same one the thread runs, so this is the shipped path
@@ -227,11 +227,11 @@ impl<F: RingFloat> DiskStreamer<ByHand<F>, F> {
     /// # Errors
     ///
     /// None at present, as for [`start`](DiskStreamer::start).
-    pub fn by_hand(sample_rate: impl Into<SampleRate>, config: DiskStreamerConfig) -> Result<Self> {
+    pub fn manual(sample_rate: impl Into<SampleRate>, config: DiskStreamerConfig) -> Result<Self> {
         Self::manual_with(sample_rate.into(), config, Seams::default())
     }
 
-    /// [`by_hand`](Self::by_hand) with what a test replaces.
+    /// [`manual`](Self::manual) with what a test replaces.
     fn manual_with(
         sample_rate: SampleRate,
         config: DiskStreamerConfig,
@@ -243,7 +243,7 @@ impl<F: RingFloat> DiskStreamer<ByHand<F>, F> {
         Ok(DiskStreamer {
             streamer_tx,
             shared,
-            driver: built.by_hand(),
+            driver: built.manual(),
             next_stream: Mint::new(),
         })
     }
@@ -258,9 +258,9 @@ impl<F: RingFloat> DiskStreamer<ByHand<F>, F> {
     /// exactly as far as the threaded streamer would before it parks.
     ///
     /// There is no thread to race: this method exists only on a
-    /// `DiskStreamer<ByHand<f32>, f32>`.
-    pub fn step_once(&mut self) -> StepOutcome {
-        self.driver.step_once()
+    /// `DiskStreamer<Manual<f32>, f32>`.
+    pub fn step(&mut self) -> StepOutcome {
+        self.driver.step()
     }
 
     /// Steps until the streamer stops making progress, or `budget` cycles have run
@@ -278,9 +278,9 @@ impl<F: RingFloat> DiskStreamer<ByHand<F>, F> {
     /// streamer is refilling forever without ever catching up, and a caller should
     /// treat that as the failure it is rather than proceeding to measure.
     #[must_use = "an exhausted budget means the rings never primed"]
-    pub fn step_until_settled(&mut self, budget: usize) -> usize {
+    pub fn step_until_idle(&mut self, budget: usize) -> usize {
         for taken in 0..budget {
-            if self.step_once() != StepOutcome::Busy {
+            if self.step() != StepOutcome::Busy {
                 return taken + 1;
             }
         }
@@ -290,7 +290,7 @@ impl<F: RingFloat> DiskStreamer<ByHand<F>, F> {
 
 impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// Opens `path` as a new stream, its reader starting at `place`, and
-    /// answers with an [`Opening`]: poll it for the stream's [`Stream`] and its
+    /// answers with an [`PendingOpen`]: poll it for the stream's [`Stream`] and its
     /// one [`StreamReader`]. The voice is as wide as the file
     /// ([`voice_width`](crate::voice_width)); [`open_into`](Self::open_into)
     /// asks for another width.
@@ -301,7 +301,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// Control thread. It waits while the streamer's queue is full, as every
     /// stream command does. A streamer that is gone answers
     /// [`OpenError::StreamerGone`] at the first poll.
-    pub fn open(&self, path: &std::path::Path, place: Placement) -> Opening<F> {
+    pub fn open(&self, path: &std::path::Path, place: Placement) -> PendingOpen<F> {
         self.open_as(path, place, None)
     }
 
@@ -320,7 +320,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
         path: &std::path::Path,
         place: Placement,
         width: tutti_buffers::ChannelLayout,
-    ) -> Opening<F> {
+    ) -> PendingOpen<F> {
         self.open_as(path, place, Some(width))
     }
 
@@ -329,7 +329,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
         path: &std::path::Path,
         place: Placement,
         width: Option<tutti_buffers::ChannelLayout>,
-    ) -> Opening<F> {
+    ) -> PendingOpen<F> {
         let id = StreamId::mint(&self.next_stream);
         let (reply, answer) = crossbeam_channel::bounded(1);
         // A refused send drops the command and with it `reply`, which is how
@@ -341,7 +341,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
             width,
             reply,
         });
-        Opening::new(id, answer, StreamerPort::new(self.streamer_tx.clone()))
+        PendingOpen::new(id, answer, StreamerPort::new(self.streamer_tx.clone()))
     }
 
     /// The session rate: the one the streamer was built with, or the one
@@ -416,15 +416,15 @@ mod tests {
         let path = dir.path().join("loop.wav");
         write_tone(&path, 48_000, 2.0);
         let mut sampler =
-            DiskStreamer::<_, f32>::by_hand(SampleRate::SR_48K, Default::default()).unwrap();
+            DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default()).unwrap();
         let opening = sampler.open(&path, Placement::HEAD);
         let (stream, reader) =
-            crate::testing::settle(&mut sampler, opening).expect("the file opens");
+            crate::testing::wait_for_open(&mut sampler, opening).expect("the file opens");
         for fade in [0usize, 500] {
             stream
                 .looping_cell()
                 .publish(Some(loop_frames(10_000, 20_000, fade)));
-            let _ = sampler.step_until_settled(1_000);
+            let _ = sampler.step_until_idle(1_000);
         }
         let window = reader.ring.window();
         assert!(
@@ -473,10 +473,10 @@ mod tests {
         write_tone(&at_48, 48_000, 1.0);
         write_tone(&at_44, 44_100, 1.0);
 
-        let mut sampler = DiskStreamer::by_hand(SampleRate::SR_44K1, Default::default()).unwrap();
-        let stream = |sampler: &mut DiskStreamer<ByHand<f32>, f32>, path: &std::path::Path| {
+        let mut sampler = DiskStreamer::manual(SampleRate::SR_44K1, Default::default()).unwrap();
+        let stream = |sampler: &mut DiskStreamer<Manual<f32>, f32>, path: &std::path::Path| {
             let opening = sampler.open(path, Placement::HEAD);
-            crate::testing::settle(sampler, opening).expect("the file opens")
+            crate::testing::wait_for_open(sampler, opening).expect("the file opens")
         };
 
         let (_first_stream, first) = stream(&mut sampler, &at_48);
@@ -501,7 +501,7 @@ mod tests {
             SrcRatio::for_rates(SampleRate::SR_48K, SampleRate::SR_44K1),
             "the ratio is the streamer's to write: it moves when the streamer takes the command"
         );
-        let _ = sampler.step_once();
+        let _ = sampler.step();
         assert_eq!(
             first_ratio.src_ratio(),
             SrcRatio::UNITY,
@@ -532,10 +532,10 @@ mod tests {
         write_tone(&path, 48_000, 1.0);
 
         let mut sampler =
-            DiskStreamer::<_, f32>::by_hand(SampleRate::SR_48K, Default::default()).unwrap();
+            DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default()).unwrap();
         let opening = sampler.open(&path, Placement::HEAD);
         let (stream, reader) =
-            crate::testing::settle(&mut sampler, opening).expect("the file opens");
+            crate::testing::wait_for_open(&mut sampler, opening).expect("the file opens");
         let ring = Arc::downgrade(&reader.ring);
         drop(reader);
         assert!(ring.upgrade().is_some(), "setup: the writer holds the ring");
@@ -546,7 +546,7 @@ mod tests {
             ring.upgrade().is_some(),
             "dropping the handle only sends: the streamer frees on its own step"
         );
-        let _ = sampler.step_once();
+        let _ = sampler.step();
         assert!(
             ring.upgrade().is_none(),
             "the dropped stream's ring is still alive: its region leaked"

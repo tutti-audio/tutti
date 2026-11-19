@@ -1,4 +1,4 @@
-//! Opening a stream: the request ([`Placement`]), the reply ([`Opening`],
+//! Opening a stream: the request ([`Placement`]), the reply ([`PendingOpen`],
 //! [`Open`], [`OpenError`]) and what the reply carries: the control side's
 //! [`Stream`] and the audio side's one [`StreamReader`].
 //!
@@ -6,10 +6,10 @@
 //! streamer's thread after the probe, and a file that cannot seek is decoded
 //! whole before it can be. The reader therefore cannot be the return value of
 //! `open`; it is the **reply** of one open: a cell the streamer writes once
-//! and [`Opening::poll`] reads once, consuming the `Opening`. There is nothing
+//! and [`PendingOpen::poll`] reads once, consuming the `PendingOpen`. There is nothing
 //! to look a reader up by, so a reader cannot be taken twice (`poll` takes
 //! `self`), cannot be taken before the stream exists (`Pending` carries the
-//! `Opening` back), and cannot be another open's (the reply is this open's).
+//! `PendingOpen` back), and cannot be another open's (the reply is this open's).
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -24,10 +24,10 @@ use super::block::{Block, RingReader};
 use super::cells::Cells;
 use super::command::StreamId;
 use super::control::StreamFile;
+use super::control_cell::ControlCell;
 use super::loops::RingControl;
 use super::prefetch::SharedReader;
 use super::status::StatusCell;
-use super::steer::SteerCell;
 use super::stream::{Stream, StreamerPort};
 use crate::voice::Direction;
 use crate::voice::interp::Place;
@@ -118,7 +118,7 @@ pub enum OpenError {
 
 /// What the streamer answers an open with: everything the audio side's
 /// [`StreamReader`] is built from but the registered control reader, which the
-/// control thread registers ([`Opening::poll`]).
+/// control thread registers ([`PendingOpen::poll`]).
 pub(crate) struct Opened<F: RingFloat> {
     pub(crate) id: StreamId,
     pub(crate) ring: SharedReader<F>,
@@ -132,8 +132,8 @@ pub(crate) struct Opened<F: RingFloat> {
     pub(crate) control: Publisher<RingControl<F>>,
     /// The loop and direction the control side asks for, which the streamer
     /// reads: the handle holds the publishing ends.
-    pub(crate) looping: SteerCell<Option<Loop>>,
-    pub(crate) direction: SteerCell<Direction>,
+    pub(crate) looping: ControlCell<Option<Loop>>,
+    pub(crate) direction: ControlCell<Direction>,
     pub(crate) place: Place<F>,
     pub(crate) width: ChannelLayout,
     /// What the reader rings when its ring wants the streamer.
@@ -154,29 +154,29 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
 /// and a reply is received once.
 ///
 /// ```compile_fail
-/// # use tutti_sampler::Opening;
-/// # fn twice(opening: Opening<f32>) {
+/// # use tutti_sampler::PendingOpen;
+/// # fn twice(opening: PendingOpen<f32>) {
 /// let _ = opening.poll();
 /// let _ = opening.poll(); // `poll` took `opening` by value
 /// # }
 /// ```
 ///
-/// Its compiling twin polls the `Opening` it is handed back instead:
+/// Its compiling twin polls the `PendingOpen` it is handed back instead:
 ///
 /// ```
-/// # use tutti_sampler::{Open, Opening};
-/// # fn again(opening: Opening<f32>) {
+/// # use tutti_sampler::{Open, PendingOpen};
+/// # fn again(opening: PendingOpen<f32>) {
 /// if let Open::Pending(opening) = opening.poll() {
 ///     let _ = opening.poll();
 /// }
 /// # }
 /// ```
 ///
-/// Dropping an `Opening` abandons the open: the streamer closes the stream it
+/// Dropping a `PendingOpen` abandons the open: the streamer closes the stream it
 /// opened.
 #[derive(Debug)]
 #[must_use = "an open nobody polls is abandoned"]
-pub struct Opening<F: RingFloat> {
+pub struct PendingOpen<F: RingFloat> {
     id: StreamId,
     reply: Receiver<Result<Opened<F>, OpenError>>,
     /// The streamer's command queue, which the stream it answers with sends
@@ -184,7 +184,7 @@ pub struct Opening<F: RingFloat> {
     port: StreamerPort<F>,
 }
 
-impl<F: RingFloat> Opening<F> {
+impl<F: RingFloat> PendingOpen<F> {
     pub(crate) fn new(
         id: StreamId,
         reply: Receiver<Result<Opened<F>, OpenError>>,
@@ -216,7 +216,7 @@ impl<F: RingFloat> Opening<F> {
     /// that has nothing else to do (the session's spawner), where
     /// [`poll`](Self::poll) is for one that has. It sleeps on the reply, so
     /// no loop of polls is needed; but a streamer nobody drives (a
-    /// `DiskStreamer::by_hand` no one steps)
+    /// `DiskStreamer::manual` no one steps)
     /// never answers, and this never returns.
     ///
     /// # Errors
@@ -257,8 +257,8 @@ impl<F: RingFloat> Opening<F> {
 #[derive(Debug)]
 #[must_use = "a dropped `Pending` abandons the open; a dropped `Stream` closes it"]
 pub enum Open<F: RingFloat> {
-    /// Not answered yet: poll the `Opening` again.
-    Pending(Opening<F>),
+    /// Not answered yet: poll the `PendingOpen` again.
+    Pending(PendingOpen<F>),
     /// The stream is open: the handle is the control thread's, and the reader
     /// is the voice's, by value. Dropping the [`Stream`] ends the stream.
     Ready(Stream<F>, StreamReader<F>),
@@ -292,7 +292,7 @@ pub struct StreamReader<F: RingFloat> {
     id: StreamId,
     pub(crate) ring: SharedReader<F>,
     /// The position reader and the control's reader, registered together on
-    /// the control side ([`Opening::poll`]): registering allocates.
+    /// the control side ([`PendingOpen::poll`]): registering allocates.
     pub(crate) reader: RingReader<F>,
     pub(crate) cells: Arc<Cells>,
     /// What a fork of the voice plays, and whether its stream is still served.

@@ -1,5 +1,5 @@
 //! The cut filter does not allocate per block, held and with its cutoff moved between
-//! blocks (a design into the held scratch and the coefficient glide).
+//! blocks (a design into the held scratch and the coefficient ramp).
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;

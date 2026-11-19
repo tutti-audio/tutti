@@ -399,12 +399,12 @@ fn clone_shares_the_position_atomics() {
 }
 
 /// Two graph rates above [`MAX_PREPARED_RATE`] share one prepared set, but
-/// the de-zipper still glides in the graph's own time: built at 1.536 MHz
+/// the de-zipper still ramps in the graph's own time: built at 1.536 MHz
 /// and prepared at 1.024 MHz, 50 ms is 51 200 samples, exactly 400 steps,
 /// and leaves `e^-1` of a move. Left at 1.536 MHz's coefficient (600 steps
 /// per 50 ms) it would leave `e^-(2/3)` = 0.51.
 #[test]
-fn a_prepare_above_the_ceiling_retunes_the_glide() {
+fn a_prepare_above_the_ceiling_retunes_the_ramp() {
     assert_eq!(HRTF_STEP, 128, "the rates below assume 128-sample steps");
     let mut node = HrtfBinauralNode::<f32>::new(
         &synthetic_hrir_sphere(48_000, 4),
@@ -439,7 +439,7 @@ fn remaining_after(aim: &mut AngleSmoother, steps: usize) -> f64 {
 /// 2560 samples, exactly twenty 128-sample steps; at 102.4 kHz (after a
 /// retune) it is forty.
 #[test]
-fn the_glide_has_a_50_ms_time_constant_in_audio_time() {
+fn the_ramp_has_a_50_ms_time_constant_in_audio_time() {
     assert_eq!(HRTF_STEP, 128, "the rates below assume 128-sample steps");
     let e_inv = (-1.0f64).exp();
 

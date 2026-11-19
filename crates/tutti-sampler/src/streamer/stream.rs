@@ -4,7 +4,7 @@
 //! A stream is addressed by its [`StreamId`], which every command carries; the
 //! streamer ignores an id it no longer holds, so a command can never reach
 //! another stream. What a stream is asked to play (its loop and direction) is
-//! two [`SteerCell`]s the streamer reads; the only command a stream sends is
+//! two [`ControlCell`]s the streamer reads; the only command a stream sends is
 //! the close its drop sends.
 
 use std::sync::Arc;
@@ -14,9 +14,9 @@ use super::StreamerSender;
 use super::cells::Cells;
 use super::command::{StreamId, StreamerCommand};
 use super::control::StreamFile;
+use super::control_cell::ControlCell;
 use super::loops::RingControl;
 use super::status::{StatusCell, StreamStatus};
-use super::steer::SteerCell;
 use crate::Loop;
 use crate::voice::Direction;
 use tutti_rt::Publisher;
@@ -98,9 +98,9 @@ pub struct Stream<F: RingFloat> {
     control: Publisher<RingControl<F>>,
     /// The loop asked for, which the streamer reads and applies on its own
     /// thread. The same cell the stream's node steers.
-    looping: SteerCell<Option<Loop>>,
+    looping: ControlCell<Option<Loop>>,
     /// The direction asked for, read and applied the same way.
-    direction: SteerCell<Direction>,
+    direction: ControlCell<Direction>,
 }
 
 impl<F: RingFloat> std::fmt::Debug for Stream<F> {
@@ -117,8 +117,8 @@ impl<F: RingFloat> Stream<F> {
         cells: Arc<Cells>,
         file: Arc<StreamFile<F>>,
         control: Publisher<RingControl<F>>,
-        looping: SteerCell<Option<Loop>>,
-        direction: SteerCell<Direction>,
+        looping: ControlCell<Option<Loop>>,
+        direction: ControlCell<Direction>,
     ) -> Self {
         Self {
             id,
@@ -208,7 +208,7 @@ impl<F: RingFloat> Stream<F> {
     /// hand publishes into it, from the control thread, and reclaims it
     /// ([`reclaim`](Self::reclaim)).
     #[must_use]
-    pub fn looping_cell(&self) -> &SteerCell<Option<Loop>> {
+    pub fn looping_cell(&self) -> &ControlCell<Option<Loop>> {
         &self.looping
     }
 
@@ -221,7 +221,7 @@ impl<F: RingFloat> Stream<F> {
     /// direction is published with the ring's control: the voice and a fork
     /// read it from there, and nothing polls a flag.
     #[must_use]
-    pub fn direction_cell(&self) -> &SteerCell<Direction> {
+    pub fn direction_cell(&self) -> &ControlCell<Direction> {
         &self.direction
     }
 
@@ -261,8 +261,8 @@ impl<F: RingFloat> Stream<F> {
                 ),
                 None,
             )),
-            SteerCell::new(None),
-            SteerCell::new(Direction::Forward),
+            ControlCell::new(None),
+            ControlCell::new(Direction::Forward),
         )
     }
 }

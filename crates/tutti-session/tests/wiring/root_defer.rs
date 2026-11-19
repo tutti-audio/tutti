@@ -29,7 +29,7 @@ fn session() -> Session {
     let (node, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
-            .set_sources_hard(Root::output(c), [OutPort::new(node, c)])
+            .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
             .unwrap();
     }
     let _ = s.update();
@@ -289,7 +289,7 @@ fn a_refused_newer_declaration_leaves_the_waiting_one_to_apply() {
     assert_eq!(s.requested_root_topology(), Some(&buses));
 }
 
-/// **A `.hard()` declaration mid-fade applies at once** and drops a waiting
+/// **A `.unfaded()` declaration mid-fade applies at once** and drops a waiting
 /// one: the announcement is that update's, and the next block is the new root
 /// alone.
 #[test]
@@ -297,7 +297,9 @@ fn a_hard_redeclare_mid_fade_applies_at_once_and_drops_the_waiting_one() {
     let mut s = session();
     let _tap = start_fade(&mut s);
     s.declare_root_topology(Some(root(6))).expect("5.1");
-    s.declare_root_topology(Some(root(4))).expect("quad").hard();
+    s.declare_root_topology(Some(root(4)))
+        .expect("quad")
+        .unfaded();
     assert_eq!(s.root_topology(), Some(&root(4)), "in force at once");
     let (events, frames) = block(&mut s);
     assert_eq!(reopened(&events).len(), 1);
@@ -364,7 +366,7 @@ fn a_bus_fed_root_redeclared_mid_fade_keeps_its_fold_until_the_fade_ends() {
     s.graph()
         .connect(BusSource::Node(BusRef::new(src.erase(), 0)), Root)
         .expect("folds by index")
-        .hard();
+        .unfaded();
     let _ = block(&mut s);
     s.declare_root_topology(Some(ChannelTopology::unassigned(ChannelLayout::STEREO)))
         .expect("buses");

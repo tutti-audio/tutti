@@ -291,10 +291,11 @@ fn a_refusal_names_why_there_is_no_midi1_message() {
 /// it came.
 #[test]
 fn narrow_message_keeps_the_address() {
-    use tutti_midi_protocol::{narrow_message, widen_velocity};
+    use tutti_midi_protocol::narrow_message;
+    use tutti_ump::NoteVelocity;
     let to = Address::new(MidiGroup::of(2), MidiChannel::of(5));
     let note = NoteNumber::of(60);
-    let on2 = Message::Midi2(to, Voice2::note_on(note, widen_velocity(U7::of(100))));
+    let on2 = Message::Midi2(to, Voice2::note_on(note, NoteVelocity::from(U7::of(100))));
     assert_eq!(
         narrow_message(on2),
         Ok(Message::midi1(to, Voice1::note_on(note, U7::of(100))))

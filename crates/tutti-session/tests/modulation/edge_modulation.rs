@@ -78,13 +78,13 @@ fn mixer(s: &mut Session) -> Edge {
     s.graph()
         .connect(OutPort::new(a, 0), Root::output(0))
         .unwrap()
-        .hard()
+        .unfaded()
         .gain(Amplitude::UNITY)
         .unwrap();
     s.graph()
         .connect(OutPort::new(b, 0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     Edge::new(OutPort::new(a, 0), Root::output(0))
 }
 

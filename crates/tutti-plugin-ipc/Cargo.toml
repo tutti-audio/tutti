@@ -52,6 +52,9 @@ thiserror = "2"
 tracing.workspace = true
 
 [dev-dependencies]
+# The plugin handle the served-handle tests drive over the mock server. Not a
+# dependency: a format host knows no hosting, and the handle is `tutti-plugin-host`'s.
+tutti-plugin-host = { path = "../tutti-plugin-host" }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 tutti-graph = { path = "../tutti-graph" }
 tempfile = "3"
