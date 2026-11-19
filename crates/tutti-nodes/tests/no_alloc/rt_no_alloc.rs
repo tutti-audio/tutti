@@ -76,12 +76,12 @@ fn convolver_ragged_calls_are_allocation_free() {
     let lens = [1usize, 7, 33, 100, 127, 128, 129, 255, 513, 64];
     for k in 0..40 {
         let n = lens[k % lens.len()];
-        c.process_block(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
+        c.process(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
     }
     assert_no_alloc::assert_no_alloc(|| {
         for k in 0..3_000 {
             let n = lens[k % lens.len()];
-            c.process_block(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
+            c.process(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
         }
     });
 }
@@ -103,12 +103,12 @@ fn convolver_tail_levels_are_allocation_free() {
     let lens = [1usize, 64, 64, 64, 333, 512, 700, 2049, 4999, 64, 127, 3];
     for k in 0..60 {
         let n = lens[k % lens.len()];
-        c.process_block(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
+        c.process(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
     }
     assert_no_alloc::assert_no_alloc(|| {
         for k in 0..1_500 {
             let n = lens[k % lens.len()];
-            c.process_block(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
+            c.process(Mono::new(&x[..n]), MonoMut::new(&mut y[..n]));
         }
     });
 }

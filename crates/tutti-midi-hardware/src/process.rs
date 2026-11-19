@@ -16,7 +16,9 @@
 
 use std::sync::Arc;
 
-use tutti_midi_device::{DeviceId, Muid, ProcessFeatures, ReportRequest};
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{ProcessFeatures, ReportRequest};
+use tutti_midi_device::DeviceId;
 use tutti_ump::MidiGroup;
 
 use crate::peer::{PeerError, PeerRef};

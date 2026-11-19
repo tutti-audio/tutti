@@ -2,7 +2,9 @@
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, Lanes, Lerp, SvfType};
+use tutti_dsp::{
+    COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, Lerp, SimdLanes, SvfType,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, Tail};
 
@@ -85,7 +87,7 @@ impl EnvelopeFilterConfig {
 /// `EnvelopeFilterNode::from` panics past 16 channels: a filter is one bus.
 pub type EnvelopeFilterNode<F> = KernelNode<EnvelopeFilterKernel<F>>;
 
-impl<F: Float + Lanes + Lerp> From<EnvelopeFilterConfig> for EnvelopeFilterNode<F> {
+impl<F: Float + SimdLanes + Lerp> From<EnvelopeFilterConfig> for EnvelopeFilterNode<F> {
     fn from(config: EnvelopeFilterConfig) -> Self {
         Self::with_kernel(
             EnvelopeFilterKernel::new(filter_bus(config.width), config.ty),
@@ -116,7 +118,7 @@ control_set! {
 
 /// The filter as a [`Kernel`]: an [`EnvelopeFilterBank`] at the prepared rate.
 #[derive(Clone, Debug)]
-pub struct EnvelopeFilterKernel<F: Float + Lanes> {
+pub struct EnvelopeFilterKernel<F: Float + SimdLanes> {
     input: BusTopology,
     ty: SvfType,
     /// `None` until [`prepare`](Kernel::prepare).
@@ -125,7 +127,7 @@ pub struct EnvelopeFilterKernel<F: Float + Lanes> {
     landed: bool,
 }
 
-impl<F: Float + Lanes + Lerp> EnvelopeFilterKernel<F> {
+impl<F: Float + SimdLanes + Lerp> EnvelopeFilterKernel<F> {
     fn new(input: BusTopology, ty: SvfType) -> Self {
         Self {
             input,
@@ -136,7 +138,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterKernel<F> {
     }
 }
 
-impl<F: Float + Lanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
+impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
     type Float = F;
     type Set = EnvelopeFilterSet;
 

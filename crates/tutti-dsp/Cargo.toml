@@ -31,8 +31,8 @@ rustfft = { version = "6.4", default-features = false }
 # The filters' models call `libm`'s pure-Rust transcendentals (the crossover's `tan`), so results do not depend on the platform's C math library.
 libm = "0.2.15"
 
-# `f32x8`, so the filter steps written over `Lanes` run eight voices of the
-# polysynth's lane bank at a time (`filter/lanes.rs`). Same version as `Cargo.lock`'s.
+# `f32x8`, so the filter steps written over `SimdLanes` run eight voices of the
+# polysynth's lane bank at a time (`filter/simd_lanes.rs`). Same version as `Cargo.lock`'s.
 wide = { version = "1.6", default-features = false }
 
 # The `Error` enum's Display/Error impls.

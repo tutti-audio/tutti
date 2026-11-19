@@ -3,8 +3,8 @@
 
 use tutti_buffers::Float;
 
-use super::shared::{held, level};
-use super::window::MonotonicMinDeque;
+use super::gain_pass::{held, level};
+use super::sliding_min::MonotonicMinDeque;
 use tutti_units::Samples;
 
 use crate::DelayLine;

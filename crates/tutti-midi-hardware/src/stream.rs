@@ -76,7 +76,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_graph::{Losses, Offset};
-use tutti_midi_device::ResourceStore;
+use tutti_midi_ci::ResourceStore;
 use tutti_midi_device::{
     Capabilities, DiscoveryAction, DiscoveryEnding, Endpoint, EndpointDiscovery, EndpointReply,
     EntropyError, IdentityInquiry, InquiryAction, Learned, Supports,

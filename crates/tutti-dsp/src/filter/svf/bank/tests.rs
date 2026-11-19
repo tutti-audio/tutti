@@ -9,7 +9,7 @@ use super::*;
 use crate::design::prewarp;
 use crate::filter::svf::model::tests::{TYPES, rbj};
 use crate::testing::{sine_fit, steady_deviation};
-use crate::{Lerp, SvfCoeffs, SvfControls, SvfModel, SvfType};
+use crate::{Lerp, SvfControls, SvfDesign, SvfModel, SvfType};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -250,7 +250,7 @@ fn high_pass_at_the_cutoff(fc: Hz, step: impl Fn(&mut [f32; 2], f32) -> f32) -> 
 
 /// The f32 high-pass of the SVF bank: the library's own step at the f32 coefficients.
 fn complement_step(fc: Hz) -> impl Fn(&mut [f32; 2], f32) -> f32 {
-    let design = SvfCoeffs::new(
+    let design = SvfDesign::new(
         SvfType::HighPass,
         fc,
         Q::BUTTERWORTH,
@@ -264,7 +264,7 @@ fn complement_step(fc: Hz) -> impl Fn(&mut [f32; 2], f32) -> f32 {
 /// Simper's `v1 = a1 ic1 + a2 v3` with `a1 = 1 / (1 + g (g + k))` stored in `f32`, the
 /// recurrence otherwise the bank's: what storing `a1` and not its complement leaves.
 fn stored_a1_step(fc: Hz) -> impl Fn(&mut [f32; 2], f32) -> f32 {
-    let design = SvfCoeffs::new(
+    let design = SvfDesign::new(
         SvfType::HighPass,
         fc,
         Q::BUTTERWORTH,
@@ -295,7 +295,7 @@ fn extreme_cutoffs() -> impl Iterator<Item = Hz> {
 fn the_complement_keeps_the_damping_of_a_low_cutoff_to_the_f32_ulp() {
     let (mut a1_worst, mut d_worst) = (0.0f64, 0.0f64);
     for fc in extreme_cutoffs() {
-        let design = SvfCoeffs::new(
+        let design = SvfDesign::new(
             SvfType::HighPass,
             fc,
             Q::BUTTERWORTH,

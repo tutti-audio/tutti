@@ -141,7 +141,7 @@ impl<K: Sink, F: Float> Sink for DitherSink<K, F> {
                     self.noisy.extend_from_slice(part.samples());
                     let mut noisy =
                         InterleavedMut::new(&mut self.noisy, layout).map_err(|_| SinkFailed)?;
-                    self.noise.apply(shape, self.lsb, noisy.reborrow());
+                    self.noise.process(shape, self.lsb, noisy.reborrow());
                     convert_counting_clips(noisy.as_interleaved(), converted)
                 }
                 None => convert_counting_clips(part, converted),

@@ -8,13 +8,11 @@
 //! - [`node`] — the [`PluginClient`](node::PluginClient): the generic plugin
 //!   node over the served hosting, its typestates (born `Unbound`, bound into a
 //!   graph node) and what the host keeps beside it.
-//! - [`plugin`] / [`catalog`] / [`loadable`] — the public load API.
+//! - [`plugin`] / [`placement`] — the public load API.
 //!
 //! The control handle, the node's controls and the host policy written once
 //! over a handle live in `tutti-plugin-host`.
 
-pub mod catalog;
-pub mod loadable;
 pub mod node;
+pub mod placement;
 pub mod plugin;
-pub mod plugin_ref;

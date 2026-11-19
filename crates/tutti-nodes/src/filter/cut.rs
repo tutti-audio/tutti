@@ -4,7 +4,7 @@
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    Butterworth, ButterworthOrder, CutResponse, Lanes, LinkwitzRiley, Ring, SosCoefficients,
+    Butterworth, ButterworthOrder, CutResponse, LinkwitzRiley, Ring, SimdLanes, SosCoefficients,
     System, TAIL_FLOOR,
 };
 use tutti_graph::Shape;
@@ -99,7 +99,7 @@ impl CutFilterConfig {
 /// `CutFilterNode::from` panics past 16 channels: a filter is one bus.
 pub type CutFilterNode<F> = KernelNode<CutFilterKernel<F>>;
 
-impl<F: Float + Lanes> From<CutFilterConfig> for CutFilterNode<F> {
+impl<F: Float + SimdLanes> From<CutFilterConfig> for CutFilterNode<F> {
     fn from(config: CutFilterConfig) -> Self {
         Self::with_kernel(
             CutFilterKernel::new(filter_bus(config.width), &config),
@@ -126,7 +126,7 @@ control_set! {
 /// The filter as a [`Kernel`]: a [`SosBank`](tutti_dsp::SosBank) run with the glide of the
 /// coefficients every channel shares.
 #[derive(Clone, Debug)]
-pub struct CutFilterKernel<F: Float + Lanes> {
+pub struct CutFilterKernel<F: Float + SimdLanes> {
     input: BusTopology,
     response: CutResponse,
     alignment: CutAlignment,
@@ -137,7 +137,7 @@ pub struct CutFilterKernel<F: Float + Lanes> {
     ladder: [Tail; LADDER],
 }
 
-impl<F: Float + Lanes> CutFilterKernel<F> {
+impl<F: Float + SimdLanes> CutFilterKernel<F> {
     /// A filter on the bus `input`, its output where it is; at a placeholder 48 kHz until
     /// `prepare`, which an unprepared node renders nothing before.
     fn new(input: BusTopology, config: &CutFilterConfig) -> Self {
@@ -176,7 +176,7 @@ fn rung_cutoff(rung: usize) -> Hz {
     MIN_CUT_CUTOFF * f64::from(1u32 << rung)
 }
 
-impl<F: Float + Lanes> Kernel for CutFilterKernel<F> {
+impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
     type Float = F;
     type Set = CutFilterSet;
 

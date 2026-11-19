@@ -62,7 +62,7 @@ fn unity(freqs: &[f64]) -> MultibandSettings {
 
 /// `audio` (one slice per channel) through `k` in calls of `chunk` frames, band `b`'s
 /// threshold lane `lanes[b]` where given.
-fn run_in<F: Float + Lanes + Lerp>(
+fn run_in<F: Float + SimdLanes + Lerp>(
     k: &mut MultibandBank<F>,
     audio: &[&[F]],
     lanes: [Option<&[F]>; MAX_BANDS],
@@ -89,7 +89,7 @@ fn run_in<F: Float + Lanes + Lerp>(
     out
 }
 
-fn run<F: Float + Lanes + Lerp>(k: &mut MultibandBank<F>, audio: &[&[F]]) -> Vec<Vec<F>> {
+fn run<F: Float + SimdLanes + Lerp>(k: &mut MultibandBank<F>, audio: &[&[F]]) -> Vec<Vec<F>> {
     run_in(k, audio, [None; MAX_BANDS], 256)
 }
 

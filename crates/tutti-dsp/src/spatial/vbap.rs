@@ -5,7 +5,7 @@
 //! from its last reset), hands [`VbapKernel::gains`] the bearing, height, width
 //! and spread of the grid point, glides from the previous grid point's gains to
 //! these ([`Glide`]), and renders each speaker's channel with
-//! [`VbapGains::render_channel`].
+//! [`VbapGains::process_channel`].
 
 use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, Fold, Mono, MonoMut};
@@ -79,7 +79,7 @@ impl VbapGains {
     /// width crossing the mono-fold threshold between grid points crossfades
     /// instead of stepping.
     #[inline]
-    pub fn render_channel<F: Float>(
+    pub fn process_channel<F: Float>(
         glide: &Glide<VbapGains>,
         first: u32,
         speaker: Option<usize>,
