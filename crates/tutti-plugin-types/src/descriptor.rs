@@ -8,7 +8,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{ClapFeature, PluginRole, PluginVersion, Vst3SubCategories};
+use crate::{ClapFeature, PluginRole, PluginVersion, Vst3SubCategories, Widths};
 
 /// The catalog identity of a discovered plugin.
 ///
@@ -61,6 +61,15 @@ pub struct PluginDescriptor {
     // which has no defaults: its magic carries the version.)
     #[cfg_attr(feature = "serde", serde(default))]
     pub measured: Option<crate::Measured>,
+    /// The audio widths the plugin processes, as a probe read them from a load
+    /// of it, so a browser shows them before the plugin is loaded. `None` is
+    /// "nobody read them": a path that does not load the plugin, or a plugin
+    /// that would not load, never "32-bit only".
+    ///
+    /// The same [`Widths`] a load reports through
+    /// [`Loaded::widths`](crate::Loaded::widths), so an app compares one with
+    /// the other.
+    pub widths: Option<Widths>,
 }
 
 /// One plugin a file holds, as a scan read it: the id the format names it by,
@@ -159,6 +168,7 @@ impl PluginDescriptor {
             class,
             editor: EditorPresence::Unknown,
             measured: None,
+            widths: None,
         }
     }
 }
@@ -398,7 +408,7 @@ mod tests {
     #[test]
     fn a_catalog_record_without_the_field_still_loads() {
         let old = r#"{"name":"AUDelay","vendor":"Apple",
-                      "version":{"Text":"1.6.0"},"class":"Unknown"}"#;
+                      "version":{"Text":"1.6.0"},"class":"Unknown","widths":null}"#;
         let d: PluginDescriptor = serde_json::from_str(old).expect(
             "a record written before `editor` existed must still parse — the \
              whole database fails to deserialize on a parse error",

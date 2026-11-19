@@ -61,6 +61,7 @@ pub(super) fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> Plugin
         },
         editor,
         measured: None,
+        widths: None,
     }
 }
 

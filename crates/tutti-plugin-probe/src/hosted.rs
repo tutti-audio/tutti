@@ -4,8 +4,8 @@ use super::{MainThreadMarker, Measuring, Read, StateFor, routing};
 use std::path::Path;
 use tutti_platform::Instant;
 use tutti_plugin_types::{
-    Describe, Described, InProcess, MeasureFailure, PluginError, PluginFormat, PluginId,
-    ProbeRefusal, Unmeasured,
+    Describe, Described, InProcess, MeasureFailure, PluginError, PluginFormat, PluginId, PluginRef,
+    ProbeRefusal, Unmeasured, Widths,
 };
 
 mod measure;
@@ -66,14 +66,30 @@ fn is_for(state: &StateFor<'_>, id: &PluginId) -> bool {
     state.plugin.is_none_or(|wanted| wanted == id)
 }
 
-/// Describes the file's plugins as `L`, and, when `measuring`, measures each one
-/// with one load of its own.
+/// The audio widths of the plugin `id` of the file at `path`, read from a load of
+/// it as `L` (no activation): `L`'s own [`tutti_plugin_types::Loaded::widths`], the answer an
+/// activation negotiates against. `None` when the plugin does not load, so the
+/// listing keeps it with its widths unread.
+fn widths_of<L: InProcess>(main: MainThreadMarker, path: &Path, id: &PluginId) -> Option<Widths> {
+    // The plugin closes on this thread when `loaded` drops, so the collector it is
+    // given never receives work.
+    let (_collector, work) = tutti_plugin_types::MainWork::new();
+    L::load_in_process(main, &work, &PluginRef::new(path, id.clone()))
+        .ok()
+        .map(|loaded| loaded.widths())
+}
+
+/// Describes the file's plugins as `L`, reads each one's widths with one load of
+/// its own, and, when `measuring`, measures each one with another.
 fn run<L: InProcess + Describe>(
     main: MainThreadMarker,
     path: &Path,
     measuring: Option<Measuring<'_>>,
 ) -> Read {
     let mut plugins = L::describe(main, path).map_err(|e| refusal(path, e))?;
+    for (id, descriptor) in &mut plugins {
+        descriptor.widths = widths_of::<L>(main, path, id);
+    }
     let Some((state, run)) = measuring else {
         return Ok((listed(plugins), Vec::new()));
     };

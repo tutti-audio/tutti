@@ -4,7 +4,7 @@
 //! plugin's own copy is the spec in `tutti-shared-plugin`'s `core` module.
 
 use tutti_plugin_types::{
-    Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, ParamSteps, Samples,
+    Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, ParamSteps, Samples, Widths,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::Normalized;
@@ -218,6 +218,11 @@ impl Mode {
 
 /// The plugin's one bus a side: a stereo main, in every format.
 pub const MAIN_BUS: ChannelLayout = ChannelLayout::STEREO;
+
+/// The audio widths the plugin processes, in every format: 32-bit and 64-bit
+/// (CLAP's ports declare 64-bit support, VST3 answers `canProcessSampleSize`
+/// for `kSample64`, VST2 sets `effFlagsCanDoubleReplacing`).
+pub const WIDTHS: Widths = Widths::BOTH;
 
 /// The Delay mode's latency.
 pub const LATENCY: Samples = Samples::new(137);
