@@ -139,7 +139,13 @@ impl Threaded {
             if pool.len() < self.cap {
                 let ready = Arc::clone(&self.ready);
                 let name = format!("tutti-exec-{}", pool.len());
-                pool.push(spawn_named(&name, None, move |_| ready.work())?);
+                match spawn_named(&name, None, move |_| ready.work()) {
+                    Ok(thread) => pool.push(thread),
+                    // A pool with a thread runs the future on it; only an empty pool
+                    // refuses.
+                    Err(error) if pool.is_empty() => return Err(error),
+                    Err(_) => {}
+                }
             }
         }
         self.ready.spawn(future);
@@ -385,8 +391,9 @@ impl Executor {
     ///
     /// # Errors
     ///
-    /// The OS's refusal to start a pool thread (threaded form only). The future is
-    /// not run.
+    /// The OS's refusal to start the pool's first thread (threaded form only). The
+    /// future is not run. Once the pool has a thread, a refused further thread only
+    /// leaves the pool smaller.
     pub fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) -> io::Result<()> {
         match &*self.kind {
             Kind::Threaded(threaded) => threaded.spawn(Box::pin(future)),
