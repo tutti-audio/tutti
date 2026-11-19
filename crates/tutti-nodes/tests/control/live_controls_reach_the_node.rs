@@ -24,10 +24,10 @@
 //! the one that renders, and a test that reads a control back proves only
 //! that the write happened somewhere.
 
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_graph::{Fade, FadeLaw, IntoNode, NodeMode, Prepare, Solo};
 use tutti_nodes::{EqBandNode, SvfType};
-use tutti_types::MaxBlock;
 use tutti_units::UnitParam;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 

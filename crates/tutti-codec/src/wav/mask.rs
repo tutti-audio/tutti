@@ -15,7 +15,7 @@
 //! `... BL BR SL SR`).
 
 use crate::wave_mask::bit_of;
-use tutti_types::ChannelTopology;
+use tutti_buffers::ChannelTopology;
 
 /// The speaker mask a WAV file declares for `topology`, or `0` (unassigned)
 /// when a speaker has no WAVE bit or the speakers are not in ascending bit
@@ -38,7 +38,7 @@ pub(crate) fn channel_mask(topology: &ChannelTopology) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::Speaker;
+    use tutti_buffers::Speaker;
 
     /// The masks are the `ksmedia.h` constants for the assumed widths whose
     /// order WAVE can state (mono, stereo, quad, 5.1), and `0` for 7.1 and 7.1.4
@@ -48,9 +48,9 @@ mod tests {
     #[test]
     fn masks_match_ksmedia_and_are_zero_where_they_cannot_be_stated() {
         let m = |n: u16| {
-            channel_mask(&ChannelTopology::assumed(tutti_types::ChannelLayout::from(
-                n,
-            )))
+            channel_mask(&ChannelTopology::assumed(
+                tutti_buffers::ChannelLayout::from(n),
+            ))
         };
         assert_eq!(m(1), 0x4);
         assert_eq!(m(2), 0x3);
@@ -66,7 +66,7 @@ mod tests {
         assert_eq!(channel_mask(&t(&[FrontLeft, Unknown(3)])), 0);
         assert_eq!(
             channel_mask(
-                &tutti_types::AmbisonicFormat::ambix(tutti_types::AmbisonicOrder::of(1)).into()
+                &tutti_buffers::AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1)).into()
             ),
             0
         );

@@ -109,7 +109,7 @@ pub enum AuError {
         /// Why no layout holds the `mChannelsPerFrame` the AU reported;
         /// carries the count.
         #[source]
-        source: tutti_types::LayoutError,
+        source: tutti_buffers::LayoutError,
     },
     /// The AU declined the requested sample rate: after the stream-format /
     /// `kAudioUnitProperty_SampleRate` writes, its ASBD still reports a

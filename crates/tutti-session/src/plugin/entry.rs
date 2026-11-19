@@ -30,13 +30,13 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use tutti_buffers::ChannelLayout;
 use tutti_plugin::catalog::{
     AudioConfig, BindError, Catalog, Hosting, Loadable, PluginDescriptor, PluginId, PluginRef,
 };
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle, PluginFailure};
 use tutti_rt::LockExt;
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 use super::{AnyPlugin, HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded};
@@ -666,7 +666,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 cx: Context {
                     rate: self.graph.prepared().sample_rate(),
                     work: self.work.clone(),
-                    ids: self.resource_ids.clone(),
+                    ids: self.pool.resource_ids.clone(),
                     recovery: self.recovery.is_some(),
                 },
             },
@@ -685,7 +685,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.handle::<P, PluginEntry>(key)
+        self.pool.entries.handle::<P, PluginEntry>(key)
     }
 
     /// Puts the plugin of the entry under `key` in the graph, unwired: its
@@ -711,11 +711,18 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         P: crate::AppKey,
     {
         let pool_key = PoolKey::new(key);
-        if self.pool.loaded::<P, PluginEntry>(key)?.standing.lost() {
+        if self
+            .pool
+            .entries
+            .loaded::<P, PluginEntry>(key)?
+            .standing
+            .lost()
+        {
             return Err(AddPluginError::Lost(key.clone()));
         }
         let hold = self
             .pool
+            .entries
             .hold(&pool_key, HoldKind::Node)
             .ok_or_else(|| HandleError::NotPooled(key.clone()))?;
         // A node over the key has the plugin the entry's next one swaps in.
@@ -728,7 +735,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         if linked {
             return Err(AddPluginError::Installed(key.clone()));
         }
-        let loaded = self.pool.loaded::<P, PluginEntry>(key)?;
+        let loaded = self.pool.entries.loaded::<P, PluginEntry>(key)?;
         let Some(install) = loaded.take_install() else {
             return Err(AddPluginError::Installed(key.clone()));
         };
@@ -775,7 +782,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     pub(crate) fn swap_pooled_plugins(&mut self) {
         // A landing with no node over the key (a first load) is not a swap:
         // `swap_pooled` finds no link and does nothing.
-        self.pooled_swaps.extend(self.pool.landed_keys());
+        self.pooled_swaps.extend(self.pool.entries.landed_keys());
         for key in std::mem::take(&mut self.pooled_swaps) {
             match self.swap_pooled(&key) {
                 Swap::Done => {}
@@ -783,7 +790,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                     self.pooled_swaps.insert(key);
                 }
                 Swap::Refused(generation, error) => {
-                    self.pool.refuse_landed(&key, generation, error);
+                    self.pool.entries.refuse_landed(&key, generation, error);
                 }
             }
         }
@@ -796,7 +803,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         }) else {
             return Swap::Done;
         };
-        let Some((generation, loaded)) = self.pool.landing_of::<PluginEntry>(key) else {
+        let Some((generation, loaded)) = self.pool.entries.landing_of::<PluginEntry>(key) else {
             return Swap::Done;
         };
         if !loaded.has_install() {

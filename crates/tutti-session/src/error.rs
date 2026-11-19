@@ -235,6 +235,12 @@ pub enum MidiError {
     #[error("{0:?} has no clip")]
     NoClip(tutti_graph::NodeKey),
 
+    /// A clip's events could not be written through its target: the clip's
+    /// node was taken out of the graph directly (`Graph::remove`), or the call
+    /// was made from inside a `modify` closure.
+    #[error("a clip's events could not be written")]
+    ClipEvents(#[source] crate::ValueErrorKind),
+
     /// A beat that is not finite (NaN or infinite) names no frame: a clip's
     /// start, or an event moved by it.
     #[error("a clip beat must be finite, not {0}")]
@@ -336,9 +342,9 @@ pub enum Error {
         /// The root generation in force.
         root: tutti_graph::RootId,
         /// The root's channels.
-        width: tutti_types::ChannelLayout,
+        width: tutti_buffers::ChannelLayout,
         /// The device's channels.
-        device: tutti_types::ChannelLayout,
+        device: tutti_buffers::ChannelLayout,
         /// Why the fold is refused.
         source: tutti_buffers::FoldError,
     },
@@ -352,7 +358,7 @@ pub enum Error {
         /// The map in force.
         map: tutti_engine::OutputMap,
         /// The device's channels.
-        device: tutti_types::ChannelLayout,
+        device: tutti_buffers::ChannelLayout,
         /// What the map broke on.
         source: tutti_engine::RoutingError,
     },

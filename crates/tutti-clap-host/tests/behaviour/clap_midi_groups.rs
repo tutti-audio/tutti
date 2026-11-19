@@ -368,7 +368,7 @@ fn a_per_note_bend_is_scaled_by_the_channels_sensitivity() {
         midi::registered(
             Address::new(group(0), ch(3)),
             Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-            PitchBendSensitivity::of(12).to_rpn_bits(),
+            PitchBendSensitivity::from_semitones(U7::of(12)).to_rpn_bits(),
         ),
     );
     let events = drain(&mut list);
@@ -453,7 +453,7 @@ fn the_sensitivity_is_per_group() {
         midi::registered(
             Address::new(group(0), ch(0)),
             Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-            PitchBendSensitivity::of(12).to_rpn_bits(),
+            PitchBendSensitivity::from_semitones(U7::of(12)).to_rpn_bits(),
         ),
     );
     for g in [0, 1] {

@@ -10,10 +10,10 @@
 
 use crate::clap_probe;
 use clap_probe::{ProbeEnv, load_probe, render};
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::machine_lock;
 use tutti_graph::Exponent;
-use tutti_types::MaxBlock;
 use tutti_units::{Hz, ParamId};
 
 use std::sync::Arc;

@@ -434,7 +434,7 @@ fn a_per_note_bend_is_scaled_by_the_channels_sensitivity() {
         &[midi::registered(
             Address::new(group(0), ch(3)),
             Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-            PitchBendSensitivity::of(12).to_rpn_bits(),
+            PitchBendSensitivity::from_semitones(U7::of(12)).to_rpn_bits(),
         )],
     );
     let [

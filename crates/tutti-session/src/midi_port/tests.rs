@@ -1,8 +1,8 @@
 use super::*;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
-use tutti_types::ChannelLayout;
 use tutti_units::Frame;
 
 fn render(s: &Session, blocks: usize) {

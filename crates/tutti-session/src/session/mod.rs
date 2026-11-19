@@ -4,6 +4,7 @@
 //! methods by job.
 
 mod event;
+pub(crate) mod parts;
 mod phases;
 mod root;
 mod taps;
@@ -22,21 +23,18 @@ use std::sync::Arc;
 #[cfg(feature = "plugin")]
 use std::time::Instant;
 
-use tutti_engine::{HeardTaps, OutputSpec, StreamFaults};
-use tutti_graph::{NodeKey, PrerollTable, RootError};
-use tutti_metering::LoadMeter;
+use tutti_engine::{OutputSpec, StreamFaults};
+use tutti_graph::NodeKey;
 use tutti_music::MeterMap;
 use tutti_tempo::TempoMap;
-use tutti_transport::Transport;
-use tutti_types::{ChannelLayout, ChannelTopology};
-use tutti_units::{Amplitude, SampleRate, Samples};
+use tutti_units::{Amplitude, SampleRate};
 
 use crate::clock::sealed::Streaming;
 use crate::graph::Graph;
 use crate::jobs::Jobs;
-use crate::peer::ResourceIds;
-use crate::value::{Cell, SlotCell, ValueState, ValueTable};
+use crate::value::{SlotCell, ValueState, ValueTable};
 use crate::{Clock, Offline, OutputPolicy, RealTime, RemoveError, SessionFloat};
+use parts::{OutputPart, PoolPart, Reports, TransportPart};
 
 /// The bound on an app's key type, the name an app gives a node in its model.
 /// Every `Ord + Clone + Debug + Send + Sync + 'static` type is one.
@@ -65,9 +63,9 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// (`MainThreadMarker`): `Session::editor`, `Plugin::presets`.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{SampleRate, Samples};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// use tutti_buffers::InterleavedMut;
 /// use tutti_graph::ForkByClone;
 /// use tutti_session::{OutPort, Root, Session};
@@ -101,43 +99,17 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// so a stream stops before the session's own state drops.
     pub(crate) running: C::Running,
     pub(crate) graph: Graph<C::Float>,
-    /// The source of the ids of this session's resources.
-    pub(crate) resource_ids: ResourceIds,
-    /// What the app declared loaded ([`Session::pool`]).
-    pub(crate) pool: crate::Pool<K, C>,
+    /// What the app declared loaded, and the ids of the session's resources.
+    pub(crate) pool: PoolPart<K, C>,
     /// The plugin entries whose node waits to swap to a reloaded plugin.
     #[cfg(feature = "plugin")]
     pub(crate) pooled_swaps: std::collections::BTreeSet<crate::PoolKey>,
-    pub(crate) transport: Transport,
-    /// The engine's load meter, offline or on a device; `None` detached.
-    pub(crate) load: Option<LoadMeter>,
-    /// The engine's tap after the fader and the device width it was built
-    /// for; `None` detached.
-    pub(crate) heard: Option<(HeardTaps<C::Float>, ChannelLayout)>,
-    /// The transport's verbs and the engine's block clock behind
-    /// [`playhead`](Self::playhead); the clock is `None` detached, where
-    /// nothing renders.
-    pub(crate) transport_handle: crate::TransportHandle,
-    /// The root topology last asked for
-    /// ([`declare_root_topology`](Self::declare_root_topology)), applied or not.
-    pub(crate) root_request: Option<ChannelTopology>,
-    /// Why `root_request` is not in force, if it is not.
-    pub(crate) root_refusal: Option<RootError>,
-    /// Where the mix lands, as set ([`Session::policy`]).
-    pub(crate) output_policy: Arc<Cell<OutputPolicy>>,
-    pub(crate) click: Option<NodeKey>,
-    /// The per-channel pre-roll of the plan sent last, for sources outside
-    /// the graph (a disk stream), republished with every plan.
-    pub(crate) compensation: Arc<PrerollTable>,
-    /// The total latency of the plan sent last.
-    pub(crate) latency: Samples,
-    /// A re-prepare resumed in this update's collect: its plan's figures
-    /// are published at the commit.
-    pub(crate) resumed: bool,
-    /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced) as
-    /// the last update read it: the next update reports the rise
-    /// ([`SessionEvent::BlocksSilenced`]).
-    pub(crate) silenced_seen: u64,
+    /// The transport and the figures of the plan sent last.
+    pub(crate) transport: TransportPart,
+    /// Where the mix lands: the root, the policy, the engine's output readings.
+    pub(crate) output: OutputPart<C::Float>,
+    /// What the last update read, for the next one's reports.
+    pub(crate) reports: Reports,
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<MidiNodes>,
     /// Clips, live inputs, routes and the outputs.
@@ -149,7 +121,7 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
     /// Who the session is on the wire, as set ([`Session::policy`]).
     #[cfg(feature = "midi-hardware")]
-    pub(crate) midi_policy: Arc<Cell<crate::MidiPolicy>>,
+    pub(crate) midi_policy: Arc<crate::value::Cell<crate::MidiPolicy>>,
     #[cfg(feature = "sampler")]
     pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::Running, C::Float>>,
     /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
@@ -158,8 +130,6 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// What the opens landed, until the host takes it ([`Session::take_stream`]).
     #[cfg(feature = "sampler")]
     pub(crate) sampler_streams: crate::sampler::OpenedStreams<C::Float>,
-    /// The count of the stream's faults the last poll saw.
-    pub(crate) faults_seen: u64,
     /// The one-shot listing of the output devices, until it answers.
     #[cfg(feature = "device")]
     pub(crate) output_listing: Option<crate::watch::OutputListing>,
@@ -201,9 +171,6 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// [`MainWork`](tutti_plugin_types::MainWork)'s own drop runs what is left.
     #[cfg(feature = "plugin")]
     pub(crate) main_work: SharedWork,
-    /// Events the session kept for its next poll: what a clock switch reported
-    /// on the clock it left.
-    pub(crate) carried_events: Vec<SessionEvent>,
 }
 
 /// The fallback of `Session::close`, as a field: on the main thread, runs the
@@ -357,22 +324,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             _early_work,
             running: old_running,
             graph,
-            resource_ids,
             pool,
             #[cfg(feature = "plugin")]
             pooled_swaps,
-            output_policy,
             transport,
-            load,
-            heard,
-            transport_handle,
-            root_request,
-            root_refusal,
-            click,
-            compensation,
-            latency,
-            resumed,
-            silenced_seen,
+            output,
+            reports,
             #[cfg(feature = "midi")]
             midi,
             #[cfg(feature = "midi")]
@@ -388,7 +345,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             sampler_opens,
             #[cfg(feature = "sampler")]
             sampler_streams,
-            faults_seen,
             #[cfg(feature = "device")]
             output_listing,
             #[cfg(feature = "device")]
@@ -412,7 +368,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             work,
             #[cfg(feature = "plugin")]
             main_work,
-            carried_events,
         } = self;
         let pool = pool.rebind();
         (
@@ -422,22 +377,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 _early_work,
                 running,
                 graph,
-                resource_ids,
                 pool,
                 #[cfg(feature = "plugin")]
                 pooled_swaps,
-                output_policy,
                 transport,
-                load,
-                heard,
-                transport_handle,
-                root_request,
-                root_refusal,
-                click,
-                compensation,
-                latency,
-                resumed,
-                silenced_seen,
+                output,
+                reports,
                 #[cfg(feature = "midi")]
                 midi,
                 #[cfg(feature = "midi")]
@@ -453,7 +398,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 sampler_opens,
                 #[cfg(feature = "sampler")]
                 sampler_streams,
-                faults_seen,
                 #[cfg(feature = "device")]
                 output_listing,
                 #[cfg(feature = "device")]
@@ -477,7 +421,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 work,
                 #[cfg(feature = "plugin")]
                 main_work,
-                carried_events,
             },
             old_running,
         )
@@ -517,7 +460,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         );
         table.provide(
             SlotId::OutputPolicy,
-            Arc::clone(&self.output_policy) as SlotCell<OutputPolicy>,
+            Arc::clone(&self.output.policy) as SlotCell<OutputPolicy>,
         );
         #[cfg(feature = "midi-hardware")]
         table.provide(

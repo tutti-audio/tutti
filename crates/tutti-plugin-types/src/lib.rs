@@ -120,8 +120,8 @@
 //!
 //! ## Where it sits
 //!
-//! Depends on `tutti-units` ([`Samples`]) and `tutti-types` ([`ChannelLayout`],
-//! [`ChannelTopology`], the meter vocabulary), `tutti-graph` (`Offset`), `tutti-rt` and `tutti-ump`,
+//! Depends on `tutti-units` ([`Samples`]), `tutti-buffers` ([`ChannelLayout`],
+//! [`ChannelTopology`]), `tutti-music` (the meter vocabulary), `tutti-graph` (`Offset`), `tutti-rt` and `tutti-ump`,
 //! re-exporting the parts format crates need so none of them takes its
 //! own dependency for the type names.
 //! All four format hosts and `tutti-plugin` depend on it.
@@ -243,9 +243,9 @@ mod wire_error;
 #[global_allocator]
 static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
+pub use tutti_buffers::MaxBlock;
+pub use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 pub use tutti_rt::{RequestBit, RequestBits, RequestWord};
-pub use tutti_types::MaxBlock;
-pub use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 /// Re-exported so every format crate spells a sample count the same way
 /// without each taking its own `tutti-units` dependency — `ChannelLayout`
 /// above is here for the same reason.
@@ -255,7 +255,7 @@ mod layout_support;
 pub use layout_support::LayoutSupport;
 // Musical vocabulary carried on `TransportInfo`. Re-exported for the same reason
 // as `ChannelLayout`: format hosts speak these at their ABI boundary and should
-// not need a `tutti-types` dependency of their own to name them.
+// not need a `tutti-music` dependency of their own to name them.
 pub use tutti_music::{BeatsPerBar, NoteValue, TimeSignature};
 pub use tutti_units::{BarNumber, Seconds};
 

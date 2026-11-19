@@ -27,7 +27,7 @@
 //! [`MmcReservedCommand`] or [`MmcOtherField`], skipped by the length its code gives
 //! (RP-013 p.6), including the extension sets (`00 nn`, `00 00 nn`). A message
 //! that is not a whole number of well-formed commands or fields, or is longer
-//! than [`MMC_MAX_DATA`] bytes, is [`Read::Unread`](crate::Read::Unread).
+//! than [`MMC_MAX_DATA`] bytes, is [`UniversalRead::Unread`](crate::UniversalRead::Unread).
 //!
 //! # Writing
 //!
@@ -78,10 +78,16 @@ pub(crate) use read::{commands, fields, truncated_segment};
 /// The most bytes a message holds after its sub-ID (RP-013 p.2).
 pub const MMC_MAX_DATA: usize = 48;
 
-/// More bytes than a Machine Control message holds ([`MMC_MAX_DATA`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("a Machine Control message holds at most 48 bytes")]
-pub struct MmcTooLong;
+/// Bytes a Machine Control message cannot hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum MmcBytesRefused {
+    /// More than [`MMC_MAX_DATA`] bytes.
+    #[error("a Machine Control message holds at most {MMC_MAX_DATA} bytes")]
+    TooLong,
+    /// A byte above 127, which no data byte is.
+    #[error("a Machine Control message holds data bytes, each below 128")]
+    NotSevenBit,
+}
 
 /// Up to [`MMC_MAX_DATA`] data bytes, each below 128.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -110,30 +116,34 @@ impl MmcBytes {
         self.len
     }
 
-    pub(crate) fn push(&mut self, byte: u8) -> Result<(), MmcTooLong> {
+    pub(crate) fn push(&mut self, byte: u8) -> Result<(), MmcBytesRefused> {
         self.extend(&[byte])
     }
 
-    pub(crate) fn extend(&mut self, bytes: &[u8]) -> Result<(), MmcTooLong> {
+    pub(crate) fn extend(&mut self, bytes: &[u8]) -> Result<(), MmcBytesRefused> {
         let at = usize::from(self.len);
         let end = at + bytes.len();
-        if end > MMC_MAX_DATA || first_non_seven_bit(bytes).is_some() {
-            return Err(MmcTooLong);
+        let len = u8::try_from(end)
+            .ok()
+            .filter(|&len| usize::from(len) <= MMC_MAX_DATA)
+            .ok_or(MmcBytesRefused::TooLong)?;
+        if first_non_seven_bit(bytes).is_some() {
+            return Err(MmcBytesRefused::NotSevenBit);
         }
         self.buf[at..end].copy_from_slice(bytes);
-        self.len = u8::try_from(end).expect("end is at most MMC_MAX_DATA, which fits a u8");
+        self.len = len;
         Ok(())
     }
 }
 
 mod sealed {
-    use super::{MmcBytes, MmcTooLong, read};
+    use super::{MmcBytes, MmcBytesRefused, read};
 
     /// What a [`MmcSequence`](super::MmcSequence) can hold: read from and written to
     /// the wire.
     pub trait Sealed: Sized {
         fn parse(input: &mut &[u8]) -> read::Res<Self>;
-        fn write(&self, out: &mut MmcBytes) -> Result<(), MmcTooLong>;
+        fn write(&self, out: &mut MmcBytes) -> Result<(), MmcBytesRefused>;
     }
 }
 
@@ -147,7 +157,7 @@ macro_rules! item {
             fn parse(input: &mut &[u8]) -> read::Res<Self> {
                 $parse(input)
             }
-            fn write(&self, out: &mut MmcBytes) -> Result<(), MmcTooLong> {
+            fn write(&self, out: &mut MmcBytes) -> Result<(), MmcBytesRefused> {
                 $write(*self, out)
             }
         }
@@ -159,7 +169,7 @@ impl sealed::Sealed for MmcCommand {
     fn parse(input: &mut &[u8]) -> read::Res<Self> {
         read::command(input)
     }
-    fn write(&self, out: &mut MmcBytes) -> Result<(), MmcTooLong> {
+    fn write(&self, out: &mut MmcBytes) -> Result<(), MmcBytesRefused> {
         write::command(self, out)
     }
 }
@@ -169,7 +179,7 @@ impl sealed::Sealed for MmcInfoField {
     fn parse(input: &mut &[u8]) -> read::Res<Self> {
         read::info_field(input)
     }
-    fn write(&self, out: &mut MmcBytes) -> Result<(), MmcTooLong> {
+    fn write(&self, out: &mut MmcBytes) -> Result<(), MmcBytesRefused> {
         write::info_field(self, out)
     }
 }
@@ -246,9 +256,9 @@ impl<T: MmcItem> MmcSequence<T> {
     ///
     /// # Errors
     ///
-    /// [`MmcTooLong`] when it does not fit in [`MMC_MAX_DATA`] bytes; the list is
-    /// unchanged.
-    pub fn push(&mut self, item: &T) -> Result<(), MmcTooLong> {
+    /// [`MmcBytesRefused`] when it does not fit in [`MMC_MAX_DATA`] bytes or holds a
+    /// byte above 127; the list is unchanged.
+    pub fn push(&mut self, item: &T) -> Result<(), MmcBytesRefused> {
         let mut grown = self.bytes;
         item.write(&mut grown)?;
         self.bytes = grown;
@@ -369,7 +379,7 @@ impl MmcCommands {
     /// as SysEx7 through [`Sysex7Packets::from_payload`](tutti_ump::Sysex7Packets::from_payload).
     #[must_use]
     pub fn payload(&self, to: Recipient) -> MmcPayload {
-        MmcPayload::framed(to.device_byte(), 0x06, self.as_bytes())
+        MmcPayload::framed(to.device_byte(), 0x06, &self.bytes)
     }
 }
 
@@ -378,7 +388,7 @@ impl MmcFields {
     /// fields`), the bytes between `F0` and `F7`.
     #[must_use]
     pub fn payload(&self, source: SysexDeviceId) -> MmcPayload {
-        MmcPayload::framed(source.get(), 0x07, self.as_bytes())
+        MmcPayload::framed(source.get(), 0x07, &self.bytes)
     }
 }
 
@@ -393,13 +403,14 @@ pub struct MmcPayload {
 
 impl MmcPayload {
     /// `7F`, the device ID, the sub-ID and the data.
-    fn framed(device: u8, sub_id: u8, data: &[u8]) -> Self {
+    fn framed(device: u8, sub_id: u8, data: &MmcBytes) -> Self {
         let mut buf = [0; 3 + MMC_MAX_DATA];
         buf[..3].copy_from_slice(&[0x7F, device, sub_id]);
-        buf[3..3 + data.len()].copy_from_slice(data);
+        buf[3..3 + usize::from(data.len())].copy_from_slice(data.as_slice());
         Self {
             buf,
-            len: u8::try_from(3 + data.len()).expect("a message holds at most 48 data bytes"),
+            // `MmcBytes` holds at most `MMC_MAX_DATA` bytes.
+            len: 3 + data.len(),
         }
     }
 

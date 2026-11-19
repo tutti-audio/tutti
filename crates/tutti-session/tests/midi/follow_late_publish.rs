@@ -1,10 +1,10 @@
 //! A late publish: a map whose step is
 //! behind the playhead moves no beat.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_session::Session;
 use tutti_tempo::{TempoMap, TempoPoint};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, SampleRate};
 
 const RATE: f64 = 48_000.0;

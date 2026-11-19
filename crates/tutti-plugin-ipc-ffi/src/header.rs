@@ -11,15 +11,21 @@
 //!
 //! # The ordering
 //!
-//! Publish is `memcpy` every channel, *then* store `seq` with
-//! [`Release`](Ordering::Release). Read is the mirror: load `seq` with
-//! [`Acquire`](Ordering::Acquire), and only `memcpy` out if it matches. Without
-//! the pair a reader may observe the new sequence number alongside the *old*
-//! samples. The header's atomics are `loom`'s under `--cfg loom`, and
-//! the `loom_model` module below runs `publish`, `sequence`, `initialize` and
-//! `validate` under every interleaving and reordering the memory model permits
-//! between threads; it does not cover a reader in another process or a creator
-//! that crashed mid-initialize.
+//! A slot is a seqlock. The writer [`begin`](SlabHeader::begin)s it (stores
+//! `BUSY`, then a [`Release`](Ordering::Release) fence), `memcpy`s every
+//! channel, then [`publish`](SlabHeader::publish)es `seq` with
+//! [`Release`](Ordering::Release). The reader loads `seq` with
+//! [`Acquire`](Ordering::Acquire), `memcpy`s out only if it matches, then
+//! [`recheck`](SlabHeader::recheck)s: an [`Acquire`](Ordering::Acquire) fence
+//! and a second load, which must still name `seq`. Without the busy mark a
+//! reader that started on block N accepts half of N and half of N+2 when the
+//! writer reuses the slot; without the fence the copy's loads may be satisfied
+//! after the recheck on a weakly ordered CPU. The header's atomics are `loom`'s
+//! under `--cfg loom`, and the `loom_model` module below runs `begin`,
+//! `publish`, `sequence`, `recheck`, `initialize` and `validate` under every
+//! interleaving and reordering the memory model permits between threads; it
+//! does not cover a reader in another process or a creator that crashed
+//! mid-initialize.
 //!
 //! # Sequence numbers, not a "newest" index
 //!
@@ -37,24 +43,28 @@ use std::mem::{align_of, offset_of, size_of};
 /// in `loom_model` runs this code. The mapped layout is the `std` one.
 mod sync {
     #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+    pub(super) use loom::sync::atomic::{AtomicU32, AtomicU64, Ordering, fence};
     #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+    pub(super) use std::sync::atomic::{AtomicU32, AtomicU64, Ordering, fence};
 }
 
-use sync::{AtomicU32, AtomicU64, Ordering};
+use sync::{AtomicU32, AtomicU64, Ordering, fence};
 
 /// Identifies a tutti audio slab. Checked by the opening side before it trusts
 /// a single byte of the mapping.
 pub(crate) const SLAB_MAGIC: u64 = u64::from_le_bytes(*b"TTI_SLAB");
 
-/// Bumped when this header's *layout* changes. Distinct from the wire
+/// Bumped when this header's layout or the meaning of a word in it changes. Distinct from the wire
 /// `PROTOCOL_VERSION`: that one gates the control-socket message shapes, this
 /// one gates the bytes at offset 0 of the mapping. Both sides are the same
 /// binary in practice, so a mismatch means something is badly wrong — but the
 /// check is nearly free and the failure it prevents (mapping a wrong-shaped
 /// region and reading it as audio) is not.
-pub(crate) const HEADER_VERSION: u32 = 1;
+pub(crate) const HEADER_VERSION: u32 = 2;
+
+/// The sequence a slot carries while its writer is rewriting it. Real
+/// sequences start at 1 and never reach it, so no reader asks for it.
+pub(crate) const BUSY: u64 = u64::MAX;
 
 /// The number of blocks the shared-memory ring holds.
 ///
@@ -230,10 +240,24 @@ impl SlabHeader {
         }
     }
 
+    /// Marks `slot` as being rewritten, in `direction`: until the next
+    /// [`publish`](Self::publish) no reader accepts it.
+    ///
+    /// Call before the first sample write of a block. A block is published once
+    /// per slot, ever: republishing the same sequence into a slot is an ABA,
+    /// and a reader that copied the first would accept the second's samples. The `Release` fence
+    /// keeps the sample writes after the mark, so a reader that copies any of
+    /// them sees `BUSY` (or a later block) at its [`recheck`](Self::recheck).
+    #[inline]
+    pub fn begin(&self, direction: Direction, slot: usize) {
+        self.array(direction)[slot].store(BUSY, Ordering::Relaxed);
+        fence(Ordering::Release);
+    }
+
     /// Announce that `slot` now holds block `seq`, in `direction`.
     ///
-    /// **Call this exactly once, after the last channel's samples are in
-    /// place.** Publishing per-channel would let a reader observe a slot marked
+    /// **Call this exactly once, after [`begin`](Self::begin) and the last
+    /// channel's samples are in place.** Publishing per-channel would let a reader observe a slot marked
     /// valid while later channels are still being copied — the block would be
     /// half this block and half the previous one, which is worse than silence
     /// because it sounds almost right.
@@ -246,7 +270,9 @@ impl SlabHeader {
         self.array(direction)[slot].store(seq, Ordering::Release);
     }
 
-    /// The block currently published in `slot`, or 0 if nothing ever was.
+    /// The block currently published in `slot`, or 0 if nothing is: nothing
+    /// ever was, or the writer is rewriting it (`BUSY` reads as 0, so a
+    /// peer-supplied sequence of `u64::MAX` cannot match a slot mid-write).
     ///
     /// `Acquire` pairs with [`publish`](Self::publish)'s `Release`: once this
     /// returns the expected sequence, every sample write that preceded that
@@ -254,7 +280,19 @@ impl SlabHeader {
     /// or loading `Relaxed`, would defeat the ordering entirely.
     #[inline]
     pub fn sequence(&self, direction: Direction, slot: usize) -> u64 {
-        self.array(direction)[slot].load(Ordering::Acquire)
+        match self.array(direction)[slot].load(Ordering::Acquire) {
+            BUSY => 0,
+            seq => seq,
+        }
+    }
+
+    /// Whether `slot` still holds block `seq` after the reader copied its
+    /// samples: an `Acquire` fence, so the copy's loads are ordered before the
+    /// second load of the sequence, then that load.
+    #[inline]
+    pub fn recheck(&self, direction: Direction, slot: usize, seq: u64) -> bool {
+        fence(Ordering::Acquire);
+        self.array(direction)[slot].load(Ordering::Relaxed) == seq
     }
 }
 
@@ -407,88 +445,74 @@ mod tests {
         }
     }
 
-    /// Two threads run the real publish/read protocol against a real header for
-    /// a million blocks, and no read ever sees a sequence number without the
-    /// data that sequence number promises.
-    ///
-    /// A smoke test of the code end to end: it catches a publish that stamps
-    /// the wrong slot, a reader that checks the wrong direction or a sequence
-    /// that goes backwards. A strongly ordered CPU passes it with any ordering;
-    /// the ordering is `loom_model`'s.
+    /// A busy slot names no block: `begin` hides the previous occupant, and a
+    /// peer-supplied `u64::MAX` cannot match it.
     #[test]
-    fn a_million_blocks_never_show_a_sequence_without_its_data() {
+    fn a_busy_slot_names_no_block() {
+        let h = header();
+        h.initialize();
+        h.publish(Direction::Output, 1, 5);
+        h.begin(Direction::Output, 1);
+        assert_eq!(h.sequence(Direction::Output, 1), 0);
+        assert_ne!(h.sequence(Direction::Output, 1), u64::MAX);
+        assert!(!h.recheck(Direction::Output, 1, 5));
+        h.publish(Direction::Output, 1, 7);
+        assert_eq!(h.sequence(Direction::Output, 1), 7);
+        assert!(h.recheck(Direction::Output, 1, 7));
+    }
+
+    /// Two threads run the real seqlock against a real header: the writer laps
+    /// the two slots freely, the reader takes whatever block a slot holds, and
+    /// every accepted read has both of its words from one block. The ordering
+    /// itself is `loom_model`'s; this catches a protocol that tears under real
+    /// preemption.
+    #[test]
+    fn a_free_running_writer_never_shows_a_reader_a_torn_block() {
         use std::sync::Arc;
         use std::sync::atomic::AtomicU64 as StdAtomicU64;
 
-        /// A stand-in for the audio region: one word per slot, carrying the
-        /// same sequence number the header publishes for it. A reader that
-        /// sees a header sequence must see this word already updated — that is
-        /// the property, in miniature.
+        const BLOCKS: u64 = 1_000_000;
         struct Region {
             header: Box<SlabHeader>,
-            data: [StdAtomicU64; RING_SLOTS],
+            data: [[StdAtomicU64; 2]; RING_SLOTS],
         }
-
-        const BLOCKS: u64 = 1_000_000;
-
         let region = Arc::new(Region {
             header: header(),
-            data: [const { StdAtomicU64::new(0) }; RING_SLOTS],
+            data: [const { [const { StdAtomicU64::new(0) }; 2] }; RING_SLOTS],
         });
         region.header.initialize();
 
-        // The writer stays at most one block ahead of the reader, which is the
-        // real protocol's constraint and not a convenience: `RING_SLOTS` is 2
-        // precisely because "the bridge pumps serially, so at most one block is
-        // ever in flight" (see `RING_SLOTS`, and `MAX_BEHIND` in `dispatch.rs`).
-        //
-        // Letting the writer run free instead makes the test *wrong*, not
-        // merely stricter, and it cost a flake to see why: with the writer
-        // arbitrarily far ahead, block N+2 lands in block N's slot, so a reader
-        // asking for N can find `seq == N` from a stale load while `data`
-        // already holds N+2. That is a torn read in this miniature and no
-        // failure at all in the real slab, where that pair never coexists.
-        let consumed = Arc::new(StdAtomicU64::new(0));
-
         let writer = {
             let region = Arc::clone(&region);
-            let consumed = Arc::clone(&consumed);
             std::thread::spawn(move || {
                 for seq in 1..=BLOCKS {
-                    // Wait until the reader is done with the block whose slot
-                    // this one reuses.
-                    while seq > consumed.load(Ordering::Acquire) + 1 {
-                        std::hint::spin_loop();
-                    }
                     let slot = slot_for(seq);
-                    // The "samples", then the publish — the order the module
-                    // docs mandate.
-                    region.data[slot].store(seq, Ordering::Relaxed);
+                    region.header.begin(Direction::Output, slot);
+                    region.data[slot][0].store(seq, Ordering::Relaxed);
+                    region.data[slot][1].store(seq, Ordering::Relaxed);
                     region.header.publish(Direction::Output, slot, seq);
                 }
             })
         };
 
-        let mut torn = 0u64;
-        for seq in 1..=BLOCKS {
-            let slot = slot_for(seq);
-            // Spin until this block is published, exactly as the bridge waits
-            // for the server's reply before reading the slot.
-            while region.header.sequence(Direction::Output, slot) != seq {
-                std::hint::spin_loop();
+        let (mut accepted, mut torn) = (0u64, 0u64);
+        while !writer.is_finished() {
+            for slot in 0..RING_SLOTS {
+                let seq = region.header.sequence(Direction::Output, slot);
+                if seq == 0 {
+                    continue;
+                }
+                let a = region.data[slot][0].load(Ordering::Relaxed);
+                let b = region.data[slot][1].load(Ordering::Relaxed);
+                if region.header.recheck(Direction::Output, slot, seq) {
+                    accepted += 1;
+                    torn += u64::from(a != seq || b != seq);
+                }
             }
-            if region.data[slot].load(Ordering::Relaxed) != seq {
-                torn += 1;
-            }
-            consumed.store(seq, Ordering::Release);
         }
         writer.join().expect("writer thread");
-
-        assert_eq!(
-            torn, 0,
-            "{torn} of {BLOCKS} reads saw a published sequence number without \
-             the data it promises"
-        );
+        assert!(accepted > 0, "the reader never caught a block");
+        assert_eq!(torn, 0, "{torn} of {accepted} accepted reads were torn");
     }
 
     /// The header must not grow into the audio regions' space unnoticed, and the
@@ -513,33 +537,43 @@ mod loom_model {
     use loom::sync::atomic::{AtomicU64, Ordering};
     use loom::thread;
 
-    /// A header and the words standing for the samples it guards: one per slot,
-    /// written `Relaxed` before the publish and read `Relaxed` after the sequence
-    /// check, so all the ordering is the header's.
+    /// A header and the words standing for the samples it guards: two per slot,
+    /// written `Relaxed` between `begin` and `publish` and read `Relaxed`
+    /// between the sequence check and the recheck, so all the ordering is the
+    /// header's. Two words, so a read that spans two blocks shows two values.
     struct Region {
         header: SlabHeader,
-        data: [AtomicU64; RING_SLOTS],
+        data: [[AtomicU64; 2]; RING_SLOTS],
     }
 
     impl Region {
         fn new() -> Arc<Self> {
             Arc::new(Self {
                 header: SlabHeader::zeroed(),
-                data: std::array::from_fn(|_| AtomicU64::new(0)),
+                data: std::array::from_fn(|_| [AtomicU64::new(0), AtomicU64::new(0)]),
             })
         }
 
         fn publish(&self, direction: Direction, seq: u64) {
             let slot = slot_for(seq);
-            self.data[slot].store(seq, Ordering::Relaxed);
+            self.header.begin(direction, slot);
+            self.data[slot][0].store(seq, Ordering::Relaxed);
+            self.data[slot][1].store(seq, Ordering::Relaxed);
             self.header.publish(direction, slot, seq);
         }
 
-        /// The slot's data when its sequence is `want`, `None` when it is not yet.
-        fn read(&self, direction: Direction, want: u64) -> Option<u64> {
+        /// The slot's two words when its sequence is `want` before and after
+        /// the copy, `None` when it is not.
+        fn read(&self, direction: Direction, want: u64) -> Option<(u64, u64)> {
             let slot = slot_for(want);
-            (self.header.sequence(direction, slot) == want)
-                .then(|| self.data[slot].load(Ordering::Relaxed))
+            if self.header.sequence(direction, slot) != want {
+                return None;
+            }
+            let words = (
+                self.data[slot][0].load(Ordering::Relaxed),
+                self.data[slot][1].load(Ordering::Relaxed),
+            );
+            self.header.recheck(direction, slot, want).then_some(words)
         }
     }
 
@@ -555,7 +589,7 @@ mod loom_model {
                     thread::spawn(move || region.publish(direction, 1))
                 };
                 if let Some(data) = region.read(direction, 1) {
-                    assert_eq!(data, 1, "the sequence was visible without its samples");
+                    assert_eq!(data, (1, 1), "the sequence was visible without its samples");
                 }
                 writer.join().expect("writer thread");
             });
@@ -578,11 +612,30 @@ mod loom_model {
             };
             for want in 1..=2u64 {
                 if let Some(data) = region.read(Direction::Output, want) {
-                    assert_eq!(
-                        data, want,
-                        "a read of block {want} got block {data}'s samples"
-                    );
+                    assert_eq!(data, (want, want), "a read of block {want} got {data:?}");
                 }
+            }
+            writer.join().expect("writer thread");
+        });
+    }
+
+    /// The writer laps slot 1 (blocks 1 then 3) while a reader copies block 1:
+    /// an accepted read is block 1's two words, never one word of each. Without
+    /// `begin`'s mark or `recheck`'s fence the model finds the torn pair.
+    #[test]
+    fn a_reader_overtaken_by_a_lapping_writer_never_accepts_a_torn_block() {
+        loom::model(|| {
+            let region = Region::new();
+            let writer = {
+                let region = Arc::clone(&region);
+                thread::spawn(move || {
+                    for seq in 1..=3u64 {
+                        region.publish(Direction::Output, seq);
+                    }
+                })
+            };
+            if let Some(words) = region.read(Direction::Output, 1) {
+                assert_eq!(words, (1, 1), "an accepted read of block 1 was torn");
             }
             writer.join().expect("writer thread");
         });

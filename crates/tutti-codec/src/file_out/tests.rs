@@ -1,8 +1,8 @@
 use super::*;
 use crate::{Error as CodecError, Format, Pcm};
 use hound::SampleFormat;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Interleaved, Sink};
-use tutti_types::ChannelTopology;
 
 /// One write of `samples`, viewed at the sink's own width.
 fn write_samples(sink: &mut FileOut, samples: &[f32]) -> std::result::Result<(), SinkFailed> {
@@ -274,7 +274,7 @@ fn a_multichannel_file_declares_the_mask_of_tutti_s_channel_order() {
 }
 
 /// Quad is declared only by a caller that says it is quad: the same four
-/// channels with `tutti_types::Bed::Quad.topology()` carry `0x33`. (A topology of
+/// channels with `tutti_buffers::Bed::Quad.topology()` carry `0x33`. (A topology of
 /// another width than the file cannot be asked for: the constructor takes the
 /// width from the topology.)
 #[test]
@@ -284,7 +284,7 @@ fn a_declared_quad_topology_sets_the_quad_mask() {
     let mut sink = wav_with_topology(
         &path,
         48_000.0,
-        tutti_types::Bed::Quad.topology(),
+        tutti_buffers::Bed::Quad.topology(),
         Pcm::Float32,
     )
     .unwrap();

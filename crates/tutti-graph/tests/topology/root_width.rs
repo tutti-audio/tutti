@@ -2,9 +2,9 @@
 //! (`fold_to_width`): by speaker where both ends have an order, by index
 //! where either has none, and never a guess.
 
+use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_buffers::{Float, FoldError};
 use tutti_graph::{RootError, fold_to_width};
-use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 
 const M: f32 = <f32 as Float>::MINUS_3_DB;
 

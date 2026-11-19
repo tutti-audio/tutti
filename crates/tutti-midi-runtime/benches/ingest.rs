@@ -18,13 +18,13 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use std::time::{Duration, Instant};
 
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::{
     Editor, EventCapacity, EventEdge, EventIn, EventOut, Executor, NodeKey, Prepare,
     TransportPosition,
 };
 use tutti_midi_runtime::{DeviceEpochs, DeviceInput, InputInlets, MidiIngestNode};
-use tutti_types::MaxBlock;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
 use tutti_units::{SampleRate, Samples};
 

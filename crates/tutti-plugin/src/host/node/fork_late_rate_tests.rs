@@ -10,11 +10,11 @@
 //! of that command's reply. This pins it.
 
 use std::time::Duration;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{ForkMode, GraphBuilder, Prepare, Renderer};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 use crate::PluginClient;

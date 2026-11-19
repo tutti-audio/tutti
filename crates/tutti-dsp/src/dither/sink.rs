@@ -1,10 +1,10 @@
 //! [`DitherSink`]: the stage that turns a float signal into an integer one, the
 //! one path an export and a live recording share.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{
     Float, Interleaved, InterleavedMut, Sample, Sink, SinkFailed, convert_counting_clips,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Samples};
 
 use crate::dither::{DitherNoise, DitherShape};
@@ -44,7 +44,7 @@ fn lsb_of<I: Sample>() -> Amplitude {
 /// ```
 /// use tutti_buffers::{Interleaved, Sink, SinkFailed};
 /// use tutti_dsp::{DitherShape, DitherSink};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// struct Count(usize);
 /// impl Sink for Count {

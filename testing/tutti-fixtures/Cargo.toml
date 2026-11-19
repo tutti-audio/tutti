@@ -24,9 +24,12 @@ tutti-midi-protocol = { path = "../../crates/tutti-midi-protocol" }
 # `tutti-units` dev-depends on this crate, so its own tests meet a second copy
 # of it here: they use none of `signal`, whose signatures name its units.
 tutti-units = { path = "../../crates/tutti-units" }
-# `Mint` (`unique`) and the event rig's `ChannelLayout` and `MaxBlock`.
-# `tutti-types` dev-depends on this crate too, with the same second copy.
+# `Mint` (`unique`).
 tutti-types = { path = "../../crates/tutti-types" }
+# The event rig's `ChannelLayout` and `MaxBlock`. `tutti-buffers` dev-depends on this
+# crate too, so its own tests meet a second copy of it here: they use no event rig,
+# whose signatures name its types.
+tutti-buffers = { path = "../../crates/tutti-buffers" }
 # `signal`'s float WAV, the independent reader and writer the codecs are
 # checked against.
 hound = "3.5"

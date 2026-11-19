@@ -5,7 +5,7 @@
 //! render. The clip plays at 120 BPM and 48 kHz, so a beat is 24,000 frames.
 
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use crate::common::{at, beat_of, connect};
 

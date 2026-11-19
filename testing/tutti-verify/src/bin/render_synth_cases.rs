@@ -26,7 +26,7 @@ use tutti_polysynth::{
     Adsr, FilterType, OscillatorType, PolySynth, SvfMode, SynthConfig, UnisonConfig,
 };
 use tutti_ump::{MidiChannel, U7, Ump};
-use tutti_units::{Amplitude, CentsSpan, Hz, Q, Samples, Seconds, Spread};
+use tutti_units::{Amplitude, CentsSpan, Hz, Normalized, Q, Samples, Seconds, Spread};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -48,7 +48,7 @@ fn render(cfg: SynthConfig, notes: &[u8]) -> (Vec<f32>, Vec<f32>) {
     let rate = tutti_units::SampleRate::of(SR);
     // Driven as a graph drives it: `Node::process`, the notes on its event
     // input in the first block.
-    let mut synth = Direct::new(PolySynth::new(cfg), rate, BLOCK);
+    let mut synth = Direct::new(PolySynth::<f32>::new(cfg), rate, BLOCK);
     let at = Offset::of(Samples(0), Samples(BLOCK));
     let events: Vec<Event> = notes
         .iter()
@@ -124,7 +124,12 @@ fn main() {
     for (name, osc) in [
         ("sine", OscillatorType::Sine),
         ("saw", OscillatorType::Saw),
-        ("square", OscillatorType::Square { pulse_width: 0.5 }),
+        (
+            "square",
+            OscillatorType::Square {
+                pulse_width: Normalized::of(0.5),
+            },
+        ),
         ("triangle", OscillatorType::Triangle),
     ] {
         for note in [45u8, 57, 69] {

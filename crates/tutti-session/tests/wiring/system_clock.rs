@@ -4,11 +4,11 @@
 use std::time::{Duration, Instant};
 use tutti_buffers::InterleavedMut;
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::StreamFaultKind;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{OutPort, Root, Session, SessionEvent, SystemSession};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 480;

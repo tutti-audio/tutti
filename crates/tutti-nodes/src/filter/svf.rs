@@ -7,10 +7,10 @@
 //! ([`SvfBank`]); the node is a [`KernelNode`] over it, and this file holds the
 //! kernel, the cells and how a block reads them.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Glide, Lanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{Db, Hz, Q, SampleRate, Tail};
 
 use super::filter_bus;
@@ -29,7 +29,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///
 /// ```
 /// # use tutti_buffers::Planes;
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Hz, Q, UnitParam};
 /// use tutti_graph::{Prepare, Solo};
 /// use tutti_nodes::{SvfFilterNode, SvfType};

@@ -101,7 +101,7 @@ crates/             everything shipped, directory name = package name
   tutti-units       # The unit newtypes (`Hz`, `Seconds`, `Beat`, ...), `Samples`,
                     #   `Latency`, `Tail`. `no_std`, no alloc, no atomics; no
                     #   workspace dependency; forbids `unsafe`.
-  tutti-types       # Channel layouts, `Param<U>`, ids. Names only tutti-units;
+  tutti-types       # `Param<U>`, ids. Names only tutti-units;
                     #   forbids `unsafe`.
   tutti-music       # Notes, meter, loop ranges, the frame clock, `Adsr`. `no_std`
                     #   + alloc; names only tutti-units; forbids `unsafe`.
@@ -116,7 +116,7 @@ crates/             everything shipped, directory name = package name
   tutti-codec       # File codecs: the encoders and FileOut, the decoder (Wave, FileIn).
   tutti-modulation         # Pure modulation: the route compiler, curves. Audio-free.
   tutti-export      # Offline rendering and export
-  tutti-dsp         # Pure algorithms over slices. Names only tutti-units, tutti-types and tutti-buffers.
+  tutti-dsp         # Pure algorithms over slices. Names only tutti-units and tutti-buffers.
   tutti-nodes       # DSP nodes (LFO, dynamics, convolution, automation, VBAP and HRTF panners).
   tutti-sampler     # Sample playback (streaming, audition)
   tutti-polysynth   # Polyphonic subtractive/wavetable synth
@@ -566,13 +566,17 @@ Nightly jobs (miri) name `+nightly`, which overrides the file.
 
 ## Platform status, and what it cost to get there
 
-**All three platforms pass, and Windows is the one to know about.** Linux,
-macOS and Windows are green in CI along with every static gate. Windows had
-*never been compiled* before the extraction — the app repo's CI ran from a root
-that excluded this workspace — so its first run reported 69 failures that were
-accumulated reality, not regression. Getting to zero turned up six causes, and
-**not one of them announced itself**; each returned a plausible wrong answer
-rather than an error, which is why they survived so long. They are worth
+**Windows is the platform to know about.** CI lints every crate for Windows
+(`clippy (windows)`, natively) and runs the tests of the two MIDI crates and of
+the plugin IPC transport there (`tutti-plugin-ipc-ffi`, and the `transport::`
+tests of `tutti-plugin-ipc`); the plugin contract runs in its own job, which is
+not a required check. No other suite runs on Windows: the client, the server and
+the hostile-peer suites run on Linux, and the macOS tests run after a merge.
+Windows had *never been compiled* before the extraction — the app repo's CI ran
+from a root that excluded this workspace — so its first run reported 69 failures
+that were accumulated reality, not regression. Getting to zero turned up six
+causes, and **not one of them announced itself**; each returned a plausible
+wrong answer rather than an error, which is why they survived so long. They are worth
 knowing because the same shapes recur:
 
 - **`interprocess` refuses a receive timeout on a named pipe** —

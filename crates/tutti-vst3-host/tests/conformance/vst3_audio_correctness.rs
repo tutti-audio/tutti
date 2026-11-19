@@ -45,7 +45,7 @@ use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
 use tutti_graph::Offset;
-use tutti_ump::{MidiChannel, MidiGroup};
+use tutti_ump::{MidiChannel, MidiGroup, U7};
 use tutti_units::ParamId;
 use tutti_units::Samples;
 use tutti_vst3_host::{
@@ -1151,7 +1151,7 @@ fn a_per_note_pitch_bend_reaches_the_plugin_as_tuning() {
             midi::registered(
                 MidiChannel::FIRST,
                 tutti_ump::Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-                PitchBendSensitivity::of(24).to_rpn_bits(),
+                PitchBendSensitivity::from_semitones(U7::of(24)).to_rpn_bits(),
             ),
         ),
         quarter_bend(192),

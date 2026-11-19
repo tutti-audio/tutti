@@ -16,6 +16,7 @@
 use std::borrow::BorrowMut;
 use std::path::{Path, PathBuf};
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_codec::Format;
 use tutti_dsp::DitherShape;
 use tutti_export::{
@@ -24,7 +25,6 @@ use tutti_export::{
 };
 use tutti_graph::{Editor, ForkMode, ForkTarget};
 use tutti_transport::RenderClock;
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{SampleRate, Samples, Seconds};
 
 /// The render stage: what to produce, and for how long.

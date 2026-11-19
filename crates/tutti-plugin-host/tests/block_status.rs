@@ -12,6 +12,7 @@ use tutti_buffers::{Float, FloatWidth, Planes};
 
 use tutti_fixtures::main_thread;
 
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::contract::{self, Direct, assert_honest_tail, drive_input};
 use tutti_graph::{
@@ -26,7 +27,6 @@ use tutti_plugin_types::{
 };
 use tutti_tempo::TempoMap;
 use tutti_transport::TempoReader;
-use tutti_types::MaxBlock;
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{Bpm, Frame, SampleRate, Samples, Tail};
 

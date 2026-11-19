@@ -8,6 +8,7 @@ use std::error::Error as _;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Sink, SinkFailed};
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
@@ -16,7 +17,6 @@ use tutti_session::{
     Armed, Input, InputConfig, InputOpener, LiveSession, OpenedInput, Punch, Recorded, Session,
     SessionEvent, Start, Take, TakeEnd, TakeError, TakeEvent, TakeTarget, Trim,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;

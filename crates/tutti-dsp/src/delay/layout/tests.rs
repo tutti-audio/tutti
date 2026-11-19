@@ -1,4 +1,4 @@
-use tutti_types::BusTopology;
+use tutti_buffers::BusTopology;
 use tutti_units::{Amplitude, Gain, SampleRate, Samples, Seconds};
 
 use super::*;

@@ -1,10 +1,10 @@
 //! Parametric EQ band: an SVF with a mono layout and an EQ band's constructor.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{
     Cx, HasParam, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, Hz, Q};
 
 use super::svf::SvfFilterNode;

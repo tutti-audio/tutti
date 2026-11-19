@@ -1065,7 +1065,7 @@ fn rpns(events: impl IntoIterator<Item = UmpAt>, rpn: Rpn) -> Vec<(u8, u32)> {
 fn enabling_the_profile_starts_every_channel_at_48_semitones() {
     let mut ingest = MpeIngest::new(MpeMode::Disabled);
     let out = enable(&mut ingest, MpeZones::single(zone(2, 4)));
-    let forty_eight = PitchBendSensitivity::of(48).to_rpn_bits();
+    let forty_eight = PitchBendSensitivity::from_semitones(U7::of(48)).to_rpn_bits();
     let channel_forty_eight = RegisteredData::new(U7::of(48), U7::of(0)).to_word();
     assert_eq!(
         rpns(out.iter().copied(), Rpn::PITCH_BEND_SENSITIVITY),
@@ -1201,7 +1201,7 @@ fn the_pitch_bend_sensitivity_is_the_managers() {
             ),
         )
     };
-    let twelve = PitchBendSensitivity::of(12).to_rpn_bits();
+    let twelve = PitchBendSensitivity::from_semitones(U7::of(12)).to_rpn_bits();
     let channel_twelve = RegisteredData::new(U7::of(12), U7::of(0)).to_word();
     let mut ingest = profiled(0, 4);
     let out: Vec<UmpAt> = ingest.translated(&sensitivity(0, 12)).collect();

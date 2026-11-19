@@ -21,10 +21,10 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::Direct;
 use tutti_graph::{Cx, Io, Node, ParamNode, Prepare, Shape, Status};
 use tutti_nodes::BusStripNode;
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{Amplitude, SampleRate};
 
 const BLOCK: usize = 128;

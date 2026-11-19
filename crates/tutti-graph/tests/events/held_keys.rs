@@ -10,6 +10,7 @@ use tutti_graph::testing as common;
 use std::sync::{Arc, Mutex};
 
 use common::TestPool;
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeSpec;
 use tutti_graph::{
@@ -18,7 +19,6 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Topology};
-use tutti_types::ChannelLayout;
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, U7, Ump, Voice1};
 use tutti_units::Samples;
 

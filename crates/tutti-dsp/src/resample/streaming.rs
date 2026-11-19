@@ -17,8 +17,8 @@
 
 use super::{FftResampler, ResampleError};
 use crate::FftFloat;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 /// Input frames per FFT chunk, and how finely each chunk is subdivided.

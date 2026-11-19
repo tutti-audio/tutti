@@ -8,9 +8,10 @@
 
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
+use tutti_buffers::MaxBlock;
 use tutti_graph::ForkByClone;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::Op;
 use tutti_graph::TapAlign;
@@ -18,7 +19,6 @@ use tutti_nodes::MetronomeMode;
 use tutti_nodes::testing::Const;
 use tutti_session::{CloseError, MissingSource, OutPort, Root, Session};
 use tutti_transport::MotionEvent;
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;

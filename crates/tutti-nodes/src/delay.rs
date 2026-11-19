@@ -6,13 +6,13 @@
 //! read is fractional: a delay whose time is modulated must interpolate between taps or it
 //! steps audibly.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, DelayBank, DelayControls, DelayGlides, DelayLanes, DelayLayout, GAIN_GLIDE,
     InterpolationMode, Lerp, MaxDelay,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Feedback, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -261,10 +261,10 @@ mod tests {
     // format, so their tolerances are `f32`'s.
     use super::*;
     use crate::test_support::drive_kernel;
+    use tutti_buffers::ChannelLayout;
     use tutti_dsp::{ChannelTimes, Routing};
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::ChannelLayout;
     use tutti_units::{Gain, Latency, Samples, Tail, UnitParam};
 
     /// A rate at which a time of `n / 1024` seconds is exactly `n` frames.

@@ -1,9 +1,9 @@
 //! [`MidSideNode`]: a stereo pair converted to mid/side or back.
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::MidSide;
 use tutti_graph::{Cost, Cx, ForkByClone, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status};
-use tutti_types::BusTopology;
 
 use crate::kernel::through_planes;
 

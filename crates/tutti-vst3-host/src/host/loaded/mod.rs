@@ -14,12 +14,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     ParamAccess, ParamFlags, ParamRange, ParamSteps, ParameterInfo, PluginDescriptor,
 };
 use tutti_rt::Publisher;
-use tutti_types::ChannelTopology;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_vst3_ffi::{

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_transport::MeterSlot;
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, SampleRate};
 
 use crate::Session;

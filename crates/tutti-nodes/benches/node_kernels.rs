@@ -19,9 +19,10 @@
 //! //! ```
 
 use std::hint::black_box;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
@@ -30,7 +31,6 @@ use tutti_nodes::{
     GateNode, InterpolationMode, KeySource, LimiterControls, LimiterNode, Lookahead, MaxDelay,
     ShapeKind,
 };
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{CompressionRatio, Db, Drive, Feedback, SampleRate, Samples, Seconds};
 
 const BLOCKS: [usize; 2] = [64, 1024];
@@ -86,8 +86,8 @@ fn run<N: Node>(
 /// output channel summing its channel of every group. No node runs, so the
 /// figure is the op's.
 fn channel_sum(c: &mut Criterion) {
+    use tutti_buffers::ChannelLayout;
     use tutti_graph::{Editor, Prepare, Source, TransportPosition};
-    use tutti_types::ChannelLayout;
     use tutti_units::Samples;
 
     let mut g = c.benchmark_group("channel_sum");

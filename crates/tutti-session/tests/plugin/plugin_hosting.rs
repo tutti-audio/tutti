@@ -5,10 +5,10 @@ use crate::pooled::{LoadEntry, LoadPlugin, Spec, catalog_of, probe};
 use crate::support::{clap_probe, plugin_server};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tutti_buffers::MaxBlock;
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::BridgeError;
 use tutti_session::{LoadError, PoolEvent, Session, SessionEvent, Task};
-use tutti_types::MaxBlock;
 use tutti_units::Samples;
 
 fn session() -> Session {

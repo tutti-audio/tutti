@@ -20,7 +20,7 @@ use tutti_units::Samples;
 ///
 /// ```
 /// use tutti_units::Samples;
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 ///
 /// assert_eq!(MaxBlock::new(Samples(512)).map(MaxBlock::get), Some(512));
 /// assert_eq!(MaxBlock::new(Samples(0)), None);

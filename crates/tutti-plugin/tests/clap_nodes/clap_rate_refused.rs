@@ -14,8 +14,8 @@
 
 use crate::clap_probe;
 use clap_probe::{ProbeEnv, Rig, load_probe, render};
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
-use tutti_types::MaxBlock;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

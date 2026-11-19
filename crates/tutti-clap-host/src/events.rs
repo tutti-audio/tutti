@@ -4023,7 +4023,7 @@ mod tests {
             midi::registered(
                 MidiChannel::of(3),
                 tutti_ump::Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-                PitchBendSensitivity::of(12).to_rpn_bits(),
+                PitchBendSensitivity::from_semitones(U7::of(12)).to_rpn_bits(),
             ),
         ));
         list.add_midi(&bend(3)).add_midi(&bend(4));

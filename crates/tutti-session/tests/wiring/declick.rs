@@ -9,11 +9,11 @@
 //! `j` (240 frames, `DECLICK` at 48 kHz), one frame per render call, so the
 //! position of every sample is exact.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, declick_frames};
 use tutti_nodes::testing::Const;
 use tutti_session::{DetachedSession, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 /// `DECLICK` at the session's 48 kHz.

@@ -1011,7 +1011,7 @@ mod tests {
     use crate::spec::GraphSpec;
     use crate::{NodeKey, Topology};
     use crate::{NodeSpec, OutPort, Source};
-    use tutti_types::ChannelLayout;
+    use tutti_buffers::ChannelLayout;
 
     /// Two independent generators, each to its own output: the ops touching
     /// their values are unordered, so they must never share a slot.
@@ -1043,7 +1043,7 @@ mod tests {
             &shapes,
             &crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_types::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
             ),
             None,
         )
@@ -1109,7 +1109,7 @@ mod tests {
             &shapes,
             &crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_types::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
             ),
             None,
         )
@@ -1253,7 +1253,7 @@ mod tests {
             &shapes,
             &crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_types::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
             ),
             None,
         )
@@ -1321,7 +1321,7 @@ mod tests {
             &shapes,
             &crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_types::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
             ),
             None,
         )
@@ -1596,7 +1596,7 @@ mod tests {
         let valid = GraphSpec::new(t).validate().expect("valid");
         let prep = crate::node::Prepare::new(
             tutti_units::SampleRate::SR_48K,
-            tutti_types::MaxBlock::of(tutti_units::Samples(64)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
         );
         let split = compile(&valid, &shapes, &prep, None).expect("compiles").0;
         let u = split.units.iter().position(|p| p.key == thru).unwrap();
@@ -1656,7 +1656,7 @@ mod tests {
         let valid = GraphSpec::new(t).validate().expect("valid");
         let prep = crate::node::Prepare::new(
             tutti_units::SampleRate::SR_48K,
-            tutti_types::MaxBlock::of(tutti_units::Samples(64)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
         );
         let plan = compile(&valid, &shapes, &prep, None).expect("compiles").0;
         let u = plan.units.iter().position(|p| p.key == thru).unwrap();
@@ -1744,7 +1744,7 @@ mod tests {
         }
         let prep = crate::node::Prepare::new(
             tutti_units::SampleRate::SR_48K,
-            tutti_types::MaxBlock::of(tutti_units::Samples(64)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
         );
         let good = compile(&g.validate().unwrap(), &shapes, &prep, None)
             .unwrap()
@@ -1811,7 +1811,7 @@ mod tests {
             spec.generations.insert(a, gen_a);
             let prepare = crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_types::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
             );
             compile(&spec.validate().expect("valid"), &shapes, &prepare, prev).expect("compiles")
         };

@@ -10,11 +10,11 @@ use tutti_graph::testing as common;
 use std::collections::BTreeMap;
 
 use common::{Kind, prepare};
+use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, Buses, Edge, GraphSpec, InPort, MAX_BUSES, NodeKey, NodeSpec, OutPort, PortKind,
     Shape, Source, Topology, compile,
 };
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 
 fn width(n: u16) -> ChannelLayout {
     ChannelLayout::from(n)

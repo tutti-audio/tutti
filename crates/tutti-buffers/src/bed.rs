@@ -33,7 +33,7 @@ use tutti_units::{Azimuth, Direction, Elevation};
 /// keeping the top front pair (U±045).
 ///
 /// ```
-/// use tutti_types::{Bed, Speaker};
+/// use tutti_buffers::{Bed, Speaker};
 ///
 /// assert_eq!(Bed::Surround51.label(Speaker::SideLeft), Some("M+110"));
 /// assert_eq!(Bed::Surround71.label(Speaker::SideLeft), Some("M+090"));
@@ -223,7 +223,7 @@ impl Bed {
     /// [`index_of`](ChannelTopology::index_of) on the bed's topology.
     ///
     /// ```
-    /// use tutti_types::{Bed, ChannelTopology, Speaker::*};
+    /// use tutti_buffers::{Bed, ChannelTopology, Speaker::*};
     ///
     /// let vst3_quad = ChannelTopology::new([FrontLeft, FrontRight, SideLeft, SideRight]).unwrap();
     /// let wav_quad = ChannelTopology::new([FrontLeft, FrontRight, BackLeft, BackRight]).unwrap();

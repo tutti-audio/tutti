@@ -8,9 +8,10 @@
 //! beside the gated pool they share.
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 use tutti_ump::{MidiChannel, U7, Ump};
 
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -26,7 +27,7 @@ use tutti_modulation::{
 use tutti_music::FrameClock;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
-use tutti_types::{AtomicF64, ChannelLayout};
+use tutti_types::AtomicF64;
 use tutti_ump::NoteVelocity;
 use tutti_units::{
     Amplitude, Ballistics, Beat, Bpm, Depth, Frame, Hz, ParamKey, SampleRate, Samples, Seconds,

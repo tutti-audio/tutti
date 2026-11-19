@@ -24,6 +24,7 @@ use tutti_sampler::testing::loop_frames;
 
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
@@ -33,7 +34,6 @@ use tutti_sampler::{
     Direction, MemorySource, MemorySourceConfig, Playback, SlotId, Voice, VoiceNode, VoicePool,
     VoiceSource, VoiceWindow,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{
     Beat, BeatDuration, Bpm, Cents, PlaybackRate, SampleRate, Seconds, StretchFactor,
 };

@@ -1,7 +1,7 @@
 //! The views' construction errors, counts and sub-views.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, I24, Interleaved, InterleavedMut, Mono, MonoMut, Sample};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 #[test]

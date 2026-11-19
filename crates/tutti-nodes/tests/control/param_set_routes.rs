@@ -12,10 +12,11 @@
 //! drives a control lane whose knob is the filter's cell.
 
 use std::sync::atomic::Ordering;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Mono, Planes};
 use tutti_fixtures::signal::peak;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -32,7 +33,6 @@ use tutti_nodes::{
     LimiterControls, LimiterNode, ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterNode,
     SvfType,
 };
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::UnitParam;
 use tutti_units::{
     BeatsPerCycle, Db, Depth, Hz, PhaseIncrement, Q, Resonance, SampleRate, Samples,

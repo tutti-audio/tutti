@@ -11,8 +11,8 @@
 //! corner is the segment's end.
 
 use tutti_buffers::Float;
+use tutti_buffers::MAX_CHANNELS;
 use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp};
-use tutti_types::MAX_CHANNELS;
 use tutti_units::{Bipolar, Phase, PhaseIncrement, PhaseStep, RunningPhase};
 
 /// The frames of a segment: a corner's glide takes this many steps.
