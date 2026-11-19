@@ -196,9 +196,9 @@ pub use key::{
 pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{
-    ChannelProfile, GetProperty, ListedProfile, ListedResource, PeFailure, ProfilePeer, ReportPeer,
-    RequestReport, ResourcePeer, SetProperty, Subscribe, Subscription, SubscriptionCause,
-    SwitchProfile, WholeProfile,
+    ChannelProfile, GetProperty, ListedPeer, ListedProfile, ListedResource, PeFailure, ProfilePeer,
+    ReportPeer, RequestReport, ResourcePeer, SetProperty, Subscribe, Subscription,
+    SubscriptionCause, SwitchProfile, WholeProfile,
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};

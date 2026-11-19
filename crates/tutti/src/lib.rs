@@ -816,9 +816,9 @@ pub mod midi {
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
-        ChannelProfile, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy, MidiPolicyError,
-        MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer, ReportPeer,
-        RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
+        ChannelProfile, ListedPeer, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy,
+        MidiPolicyError, MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer,
+        ReportPeer, RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
     };
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.

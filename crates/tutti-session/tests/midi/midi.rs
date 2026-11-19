@@ -1061,6 +1061,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     .block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
+    let later = Muid::of(0x0045_6789);
     let data = DiscoveryData::new(
         tutti_ump::DeviceIdentity {
             manufacturer: tutti_ump::ManufacturerId::of(0x41),
@@ -1102,12 +1103,15 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
                 && !replied
             {
                 replied = true;
-                let reply = CiMessage::DiscoveryReply {
-                    header: CiHeader::new(peer),
-                    to: header.source,
-                    data,
-                };
-                answers.extend(reply.packets(MidiGroup::FIRST).unwrap());
+                // The later MUID answers first: the list is still by MUID.
+                for source in [later, peer] {
+                    let reply = CiMessage::DiscoveryReply {
+                        header: CiHeader::new(source),
+                        to: header.source,
+                        data,
+                    };
+                    answers.extend(reply.packets(MidiGroup::FIRST).unwrap());
+                }
             }
         }
         for ump in answers {
@@ -1118,12 +1122,22 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     assert!(noticed, "the port's info changed when the peer was found");
     let info = port.info();
     assert_eq!(info.device().name, "Wire");
-    let [listed] = info.peers() else {
-        panic!("one peer listed, got {:?}", info.peers());
+    let [first, second] = info.peers() else {
+        panic!("two peers listed, got {:?}", info.peers());
     };
-    assert_eq!(listed.id().muid, peer);
-    assert_eq!(listed.id().group, MidiGroup::FIRST);
-    assert_eq!(listed.peer().discovery(), &data);
+    assert_eq!(first.peer_id().muid, peer, "listed by MUID, not by arrival");
+    assert_eq!(second.peer_id().muid, later);
+    assert_eq!(first.peer_id().group, MidiGroup::FIRST);
+    assert_eq!(first.info().peer().discovery(), &data);
+    assert_eq!(first.port(), port.id());
+    for listed in [first, second] {
+        assert!(
+            listed.profiles().is_none()
+                && listed.report().is_none()
+                && listed.resources().is_none(),
+            "a peer that declared no category offers none: {listed:?}"
+        );
+    }
 }
 
 /// **A MIDI-CI peer's Profiles are the session's, and it switches them as the
@@ -1212,7 +1226,11 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         }
         if enable.is_none() && seen.iter().any(|c| matches!(c, ProfilesChange::Known)) {
             let info = port.info();
-            let listed: Vec<_> = info.profiles()[0].listed().collect();
+            let listed: Vec<_> = info.peers()[0]
+                .profiles()
+                .expect("the peer lists Profiles")
+                .listed()
+                .collect();
             let [ListedProfile::Channel(c)] = listed.as_slice() else {
                 panic!("one Profile on a Channel: {listed:?}");
             };
@@ -1302,7 +1320,11 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         "the Enabled Report lands the job"
     );
     let info = port.info();
-    let listed: Vec<_> = info.profiles()[0].listed().collect();
+    let listed: Vec<_> = info.peers()[0]
+        .profiles()
+        .expect("the peer lists Profiles")
+        .listed()
+        .collect();
     assert_eq!(listed[0].state(), ProfileState::Enabled);
     assert_eq!(listed[0].channels(), Some(ProfileChannels::of(2)));
 
@@ -1335,7 +1357,9 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         },
     );
     let info = port.info();
-    let stale = info.profiles()[0]
+    let stale = info.peers()[0]
+        .profiles()
+        .expect("the peer lists Profiles")
         .listed()
         .find(|listed| listed.profile() == second)
         .expect("the second Profile is listed");
@@ -1729,7 +1753,11 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             .any(|(_, c)| matches!(c, ProfilesChange::Known)),
         "the peer's Profiles are known"
     );
-    let all: Vec<_> = port.info().profiles()[0].listed().collect();
+    let all: Vec<_> = port.info().peers()[0]
+        .profiles()
+        .expect("the peer lists Profiles")
+        .listed()
+        .collect();
     let [ListedProfile::Channel(listed)] = all.as_slice() else {
         panic!("one Profile on a Channel: {all:?}");
     };
@@ -1785,7 +1813,11 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     );
     let info = port.info();
     assert_eq!(
-        info.profiles()[0].profiles().mpe_zones(),
+        info.peers()[0]
+            .profiles()
+            .expect("the peer lists Profiles")
+            .profiles()
+            .mpe_zones(),
         Some(MpeZones::single(MpeZoneConfig::profile(
             MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
             PitchBendSensitivity::MPE_PROFILE_DEFAULT
@@ -1807,7 +1839,11 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     assert_eq!(omni_offs(&seen), 1, "the Profile prohibits it on a Member");
 
     // Disabled: the rules are MPE-less again.
-    let listed: Vec<_> = port.info().profiles()[0].listed().collect();
+    let listed: Vec<_> = port.info().peers()[0]
+        .profiles()
+        .expect("the peer lists Profiles")
+        .listed()
+        .collect();
     let [ListedProfile::Channel(listed)] = listed.as_slice() else {
         panic!("one Profile on a Channel: {listed:?}");
     };
@@ -1820,7 +1856,14 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             .find_map(|l| l.take(&disable)),
         Some(Ok(ProfileState::Disabled))
     );
-    assert_eq!(port.info().profiles()[0].profiles().mpe_zones(), None);
+    assert_eq!(
+        port.info().peers()[0]
+            .profiles()
+            .expect("the peer lists Profiles")
+            .profiles()
+            .mpe_zones(),
+        None
+    );
     assert!(fake.send_input(raw, omni_off(2), Instant::now()));
     let _ = run(&mut s, 5);
     assert_eq!(omni_offs(&seen), 2, "no zone, no rule");
@@ -1912,9 +1955,10 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                 .any(|c| matches!(c, ProcessChange::Capabilities(_)))
         {
             let info = port.info();
-            let [handle] = info.report_peers() else {
-                panic!("one peer that can be asked: {:?}", info.report_peers());
+            let [listed] = info.peers() else {
+                panic!("one peer: {:?}", info.peers());
             };
+            let handle = listed.report().expect("the peer can report");
             request = Some(handle.request(ReportRequest::new(DataControl::Full, asked)));
         }
         let mut answers: Vec<Ump> = Vec::new();
@@ -1999,7 +2043,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     // once the device is back with no peers found, a request made from the old
     // listing fails at the call.
     let info = port.info();
-    let handle = &info.report_peers()[0];
+    let handle = &info.peers()[0].report().expect("the peer can report");
     let gone = handle.request(ReportRequest::new(DataControl::Full, asked));
     fake.unplug(raw);
     assert_eq!(

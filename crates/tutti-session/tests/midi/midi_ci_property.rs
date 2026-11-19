@@ -287,9 +287,10 @@ impl Wire {
     /// reads now.
     fn listed(&self, resource: &PeResource) -> ListedResource {
         let info = self.port.info();
-        let [peer] = info.resource_peers() else {
-            panic!("one peer lists Resources: {:?}", info.resource_peers());
+        let [listed] = info.peers() else {
+            panic!("one peer: {:?}", info.peers());
         };
+        let peer = listed.resources().expect("the peer lists Resources");
         peer.listed()
             .find(|listed| listed.resource() == resource)
             .unwrap_or_else(|| panic!("{resource:?} is listed"))
@@ -306,9 +307,10 @@ fn on(value: bool) -> PeData {
 fn the_info_lists_the_resources_of_the_peers_resource_list() {
     let wire = Wire::new(store());
     let info = wire.port.info();
-    let [peer] = info.resource_peers() else {
-        panic!("one peer: {:?}", info.resource_peers());
+    let [listed] = info.peers() else {
+        panic!("one peer: {:?}", info.peers());
     };
+    let peer = listed.resources().expect("the peer lists Resources");
     let listed: Vec<_> = peer.listed().map(|l| l.resource().clone()).collect();
     assert_eq!(listed, [PeResource::LocalOn, PeResource::DeviceInfo]);
 }
@@ -694,7 +696,11 @@ impl Wire {
     fn held(&self, resource: &PeResource) -> Option<PeData> {
         let info = self.port.info();
         let listed = self.listed(resource);
-        info.resource_peers()[0].property(&listed).cloned()
+        info.peers()[0]
+            .resources()
+            .expect("the peer lists Resources")
+            .property(&listed)
+            .cloned()
     }
 
     /// Subscribes to `resource` and runs until the lease and its first Property
@@ -980,7 +986,13 @@ fn a_peer_that_leaves_ends_its_leases_as_ended_by_the_peer() {
         Presence::Lost(SubscriptionCause::EndedByPeer)
     );
     assert!(wire.changed.contains(&(lease.id(), ResourceFact::Presence)));
-    assert!(wire.port.info().resource_peers().is_empty());
+    assert!(
+        wire.port
+            .info()
+            .peers()
+            .iter()
+            .all(|p| p.resources().is_none())
+    );
 }
 
 /// A lease whose port was unplugged stays lost across the device's return, with its

@@ -99,9 +99,10 @@ impl Wire {
     /// The Profile the peer lists on Channel 1, as the port's info reads now.
     fn profile(&self) -> ChannelProfile {
         let info = self.port.info();
-        let [peer] = info.profiles() else {
-            panic!("one peer lists Profiles: {:?}", info.profiles());
+        let [listed] = info.peers() else {
+            panic!("one peer: {:?}", info.peers());
         };
+        let peer = listed.profiles().expect("the peer lists Profiles");
         match peer.listed().next() {
             Some(ListedProfile::Channel(profile)) => profile,
             other => panic!("one Profile on a Channel: {other:?}"),
@@ -110,15 +111,21 @@ impl Wire {
 
     fn reporter(&self) -> ReportPeer {
         let info = self.port.info();
-        let [peer] = info.report_peers() else {
-            panic!("one peer can report: {:?}", info.report_peers());
+        let [listed] = info.peers() else {
+            panic!("one peer: {:?}", info.peers());
         };
-        peer.clone()
+        listed.report().expect("the peer can report").clone()
     }
 
     fn state(&self) -> ProfileState {
         let info = self.port.info();
-        info.profiles()[0].listed().next().expect("listed").state()
+        info.peers()[0]
+            .profiles()
+            .expect("the peer lists Profiles")
+            .listed()
+            .next()
+            .expect("listed")
+            .state()
     }
 }
 

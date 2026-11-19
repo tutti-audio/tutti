@@ -1,9 +1,9 @@
 //! A request to a MIDI-CI peer is a typed [`Job`] (feature `midi-hardware`).
 //!
 //! The Profiles an input's peers list
-//! ([`MidiInputInfo::profiles`](crate::MidiInputInfo::profiles)) and the peers it
+//! ([`ListedPeer::profiles`](crate::ListedPeer::profiles)) and the peers it
 //! can ask for a MIDI Message Report
-//! ([`MidiInputInfo::report_peers`](crate::MidiInputInfo::report_peers))
+//! ([`ListedPeer::report`](crate::ListedPeer::report))
 //! are handles that carry their port's request queue, so a request names only
 //! what the peer listed: [`ChannelProfile::enable`], [`WholeProfile::enable`]
 //! and `disable` return a [`Job<SwitchProfile>`](Job), [`ReportPeer::request`]
@@ -12,7 +12,7 @@
 //! [`SessionEvent::JobDone`].
 //!
 //! A peer's Property Exchange Resources
-//! ([`MidiInputInfo::resource_peers`](crate::MidiInputInfo::resource_peers)) are
+//! ([`ListedPeer::resources`](crate::ListedPeer::resources)) are
 //! handles the same way: [`ListedResource::fetch`] returns a [`Job<GetProperty>`](Job)
 //! landing the Property Data, [`ListedResource::write`] a [`Job<SetProperty>`](Job)
 //! landing the status of the reply, [`ListedResource::subscribe`] a
@@ -37,8 +37,8 @@ use tutti_midi_ci::{
     ResourceEntry, ResourceFailure, ResourceGet, ResourceSet, ResourceTarget,
 };
 use tutti_midi_hardware::{
-    Answer, ChannelCount, ChannelSwitcher as ListedChannel, MidiSession, PeerId, PeerProfiles,
-    ProfileSwitch, PropertyAsk, PropertyCall, PropertyPeer, ReportAsk, ReportEnd,
+    Answer, ChannelCount, ChannelSwitcher as ListedChannel, CiPeerInfo, MidiSession, PeerId,
+    PeerProfiles, ProfileSwitch, PropertyAsk, PropertyCall, PropertyPeer, ReportAsk, ReportEnd,
     Reporter as ListedReporter, WholeSwitcher as ListedWhole,
 };
 use tutti_ump::MidiChannel;
@@ -46,7 +46,7 @@ use tutti_ump::MidiChannel;
 use crate::SessionEvent;
 use crate::job::{JobOutputQueue, Ticket, job_kind};
 use crate::midi_port::{Ended, InputRequest, InputShared};
-use crate::peer::ResourceIds;
+use crate::peer::{ResourceId, ResourceIds};
 use crate::{Job, PeerError};
 
 job_kind!(
@@ -182,8 +182,80 @@ impl std::fmt::Debug for PortLink {
     }
 }
 
+/// A MIDI-CI peer found on an input, as
+/// [`MidiInputInfo::peers`](crate::MidiInputInfo::peers) lists it: what its
+/// Discovery declared ([`info`](Self::info)) and the handles of what it offers,
+/// each `None` for a peer that did not declare it. It names its port and its
+/// [`PeerId`]; its requests go through the port's queue.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListedPeer {
+    port: ResourceId,
+    info: CiPeerInfo,
+    profiles: Option<ProfilePeer>,
+    report: Option<ReportPeer>,
+    resources: Option<ResourcePeer>,
+}
+
+impl ListedPeer {
+    pub(crate) const fn new(
+        port: ResourceId,
+        info: CiPeerInfo,
+        profiles: Option<ProfilePeer>,
+        report: Option<ReportPeer>,
+        resources: Option<ResourcePeer>,
+    ) -> Self {
+        Self {
+            port,
+            info,
+            profiles,
+            report,
+            resources,
+        }
+    }
+
+    /// The input the peer was found on, by its [`ResourceId`].
+    #[must_use]
+    pub const fn port(&self) -> ResourceId {
+        self.port
+    }
+
+    /// The peer's Group and MUID.
+    #[must_use]
+    pub const fn peer_id(&self) -> PeerId {
+        self.info.id()
+    }
+
+    /// What Discovery and the Endpoint Inquiry told of the peer.
+    #[must_use]
+    pub const fn info(&self) -> &CiPeerInfo {
+        &self.info
+    }
+
+    /// The peer's Profiles (M2-101 section 7), `None` when it did not declare
+    /// Profile Configuration. A switch is a request of a listed Profile
+    /// ([`ProfilePeer::listed`]).
+    #[must_use]
+    pub const fn profiles(&self) -> Option<&ProfilePeer> {
+        self.profiles.as_ref()
+    }
+
+    /// The peer as one that supports MIDI Message Report (M2-101 section 9),
+    /// `None` when it did not declare Process Inquiry or does not support it.
+    #[must_use]
+    pub const fn report(&self) -> Option<&ReportPeer> {
+        self.report.as_ref()
+    }
+
+    /// The peer's Property Exchange Resources (M2-103), `None` when it did not
+    /// declare Property Exchange or has not answered its Capabilities.
+    #[must_use]
+    pub const fn resources(&self) -> Option<&ResourcePeer> {
+        self.resources.as_ref()
+    }
+}
+
 /// One found peer's Profiles
-/// ([`MidiInputInfo::profiles`](crate::MidiInputInfo::profiles)): the Profiles it
+/// ([`ListedPeer::profiles`](crate::ListedPeer::profiles)): the Profiles it
 /// lists, as handles to switch them from ([`listed`](Self::listed)), and the
 /// peer's table ([`profiles`](Self::profiles)).
 #[derive(Clone, Debug)]
@@ -343,17 +415,13 @@ impl WholeProfile {
 fn switch_job(link: &PortLink, switch: tutti_midi_hardware::ProfileSwitch) -> Job<SwitchProfile> {
     link.submit(
         switch,
-        |info, switch| {
-            switch
-                .check(info.profiles().iter().map(ProfilePeer::profiles))
-                .is_ok()
-        },
+        |info, switch| switch.check(info.profile_tables()).is_ok(),
         InputRequest::Profile,
     )
 }
 
 /// A peer that declared Process Inquiry and supports MIDI Message Report
-/// ([`MidiInputInfo::report_peers`](crate::MidiInputInfo::report_peers)): the
+/// ([`ListedPeer::report`](crate::ListedPeer::report)): the
 /// handle a report is asked from.
 #[derive(Clone, Debug)]
 pub struct ReportPeer {
@@ -377,10 +445,7 @@ impl ReportPeer {
     pub fn request(&self, what: ReportRequest) -> Job<RequestReport> {
         self.link.submit(
             self.peer.ask(what),
-            |info, ask| {
-                ask.check(info.report_peers().iter().map(ReportPeer::peer))
-                    .is_ok()
-            },
+            |info, ask| ask.check(info.reporters()).is_ok(),
             InputRequest::Report,
         )
     }
@@ -395,7 +460,7 @@ impl PartialEq for ReportPeer {
 impl Eq for ReportPeer {}
 
 /// A peer that declared Property Exchange and answered its Capabilities
-/// ([`MidiInputInfo::resource_peers`](crate::MidiInputInfo::resource_peers)): the
+/// ([`ListedPeer::resources`](crate::ListedPeer::resources)): the
 /// Resources its ResourceList names, as handles to get and set them from.
 #[derive(Clone, Debug)]
 pub struct ResourcePeer {
@@ -521,9 +586,7 @@ impl ListedResource {
 
 /// Whether the port's info still lists the peer of `ask`.
 pub(crate) fn listed_peer(info: &crate::MidiInputInfo, ask: &PropertyAsk) -> bool {
-    info.resource_peers()
-        .iter()
-        .map(ResourcePeer::peer)
+    info.property_peers()
         .any(|peer| peer.group() == ask.peer().group() && peer.muid() == ask.peer().muid())
 }
 
@@ -533,9 +596,7 @@ fn listing(entry: &ResourceEntry) -> impl FnOnce(&crate::MidiInputInfo, &Propert
     move |info, ask| {
         listed_peer(info, ask)
             && info
-                .resource_peers()
-                .iter()
-                .map(ResourcePeer::peer)
+                .property_peers()
                 .find(|peer| peer.group() == ask.peer().group() && peer.muid() == ask.peer().muid())
                 .is_some_and(|peer| peer.resources().entry(entry.resource()) == Some(entry))
     }

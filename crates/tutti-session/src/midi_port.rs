@@ -22,8 +22,8 @@ use std::sync::{Arc, Mutex, Weak};
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
 use tutti_midi_hardware::{
-    Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, ProfileSwitch, PropertyAsk,
-    ReportAsk,
+    Answer, DeviceStream, InputFault, MidiSession, PeerProfiles, ProfileSwitch, PropertyAsk,
+    PropertyPeer, ReportAsk,
 };
 use tutti_midi_runtime::{
     DeviceGeneration, GenerationWriter, InputReaders, InputWriters, JrStream, MidiInputControls,
@@ -36,8 +36,8 @@ use tutti_units::{Resyncs, Seconds};
 use crate::job::Ticket;
 use crate::midi::{LossReaders, LossWriters, UmpOut, loss_cells};
 use crate::midi_ci::{
-    EndSubscription, GetProperty, Pending, PortLink, ProfilePeer, ReportPeer, RequestReport,
-    ResourcePeer, SetProperty, Subscribe, SwitchProfile,
+    EndSubscription, GetProperty, ListedPeer, Pending, PortLink, ProfilePeer, ReportPeer,
+    RequestReport, ResourcePeer, SetProperty, Subscribe, SwitchProfile,
 };
 use crate::pool::{Declared, HandleError, Life, Load, LoadError, PoolEntry};
 use crate::{
@@ -159,10 +159,7 @@ pub struct MidiInputInfo {
     device: DeviceInfo,
     stream: Option<DeviceStream>,
     learned: Learned,
-    peers: Arc<[CiPeerInfo]>,
-    profiles: Arc<[ProfilePeer]>,
-    report_peers: Arc<[ReportPeer]>,
-    resource_peers: Arc<[ResourcePeer]>,
+    peers: Arc<[ListedPeer]>,
 }
 
 impl MidiInputInfo {
@@ -190,35 +187,33 @@ impl MidiInputInfo {
         &self.learned
     }
 
-    /// The MIDI-CI peers found on the input, by Group then MUID: what a device
-    /// that answered the session's Discovery declared.
+    /// The MIDI-CI peers found on the input, by [`PeerId`] (Group then MUID):
+    /// what a device that answered the session's Discovery declared, each with
+    /// the handles of what it offers ([`ListedPeer`]).
     #[must_use]
-    pub fn peers(&self) -> &[CiPeerInfo] {
+    pub fn peers(&self) -> &[ListedPeer] {
         &self.peers
     }
 
-    /// The Profiles of the peers that declared Profile Configuration, by Group
-    /// then MUID (M2-101 section 7). A switch is a request of a listed Profile
-    /// of these ([`ProfilePeer::listed`]).
-    #[must_use]
-    pub fn profiles(&self) -> &[ProfilePeer] {
-        &self.profiles
+    /// The Profile tables of the peers that declared Profile Configuration.
+    pub(crate) fn profile_tables(&self) -> impl Iterator<Item = &PeerProfiles> {
+        self.peers
+            .iter()
+            .filter_map(|peer| peer.profiles().map(ProfilePeer::profiles))
     }
 
-    /// The peers that declared Process Inquiry and support MIDI Message Report
-    /// (M2-101 section 9): a report is a request of one
-    /// ([`ReportPeer::request`]).
-    #[must_use]
-    pub fn report_peers(&self) -> &[ReportPeer] {
-        &self.report_peers
+    /// The peers that support MIDI Message Report.
+    pub(crate) fn reporters(&self) -> impl Iterator<Item = &tutti_midi_hardware::Reporter> {
+        self.peers
+            .iter()
+            .filter_map(|peer| peer.report().map(ReportPeer::peer))
     }
 
-    /// The peers that declared Property Exchange and answered its Capabilities
-    /// (M2-103), each with the Resources its ResourceList names: a Get or a Set is
-    /// a request of one ([`ResourcePeer::listed`]).
-    #[must_use]
-    pub fn resource_peers(&self) -> &[ResourcePeer] {
-        &self.resource_peers
+    /// The peers that answered Property Exchange Capabilities.
+    pub(crate) fn property_peers(&self) -> impl Iterator<Item = &PropertyPeer> {
+        self.peers
+            .iter()
+            .filter_map(|peer| peer.resources().map(ResourcePeer::peer))
     }
 
     /// The device as an app keeps it: the listing's row with what it has said,
@@ -872,36 +867,42 @@ fn set_presence<I>(
 /// The snapshot of the open input `device`, as the OS layer reads it now.
 fn input_info(
     io: &MidiSession,
+    port: ResourceId,
     device: &DeviceInfo,
     link: &PortLink,
     pending: &Pending,
 ) -> MidiInputInfo {
+    let profiles = io.profiles(&device.id);
+    let reporters = io.report_peers(&device.id);
+    let properties = io.property_peers(&device.id);
+    let peers = io
+        .ci_peers(&device.id)
+        .iter()
+        .map(|info| {
+            let id = info.id();
+            ListedPeer::new(
+                port,
+                info.clone(),
+                profiles
+                    .iter()
+                    .find(|p| p.group() == id.group && p.muid() == id.muid)
+                    .map(|p| ProfilePeer::new(link.clone(), p.clone())),
+                reporters
+                    .iter()
+                    .find(|p| p.group() == id.group && p.muid() == id.muid)
+                    .map(|p| ReportPeer::new(link.clone(), p.clone())),
+                properties
+                    .iter()
+                    .find(|p| p.group() == id.group && p.muid() == id.muid)
+                    .map(|p| ResourcePeer::new(link.clone(), p.clone(), pending.bodies(id))),
+            )
+        })
+        .collect();
     MidiInputInfo {
         device: device.clone(),
         stream: io.stream(&device.id),
         learned: io.learned(&device.id),
-        peers: io.ci_peers(&device.id),
-        profiles: io
-            .profiles(&device.id)
-            .iter()
-            .map(|peer| ProfilePeer::new(link.clone(), peer.clone()))
-            .collect(),
-        report_peers: io
-            .report_peers(&device.id)
-            .iter()
-            .map(|peer| ReportPeer::new(link.clone(), peer.clone()))
-            .collect(),
-        resource_peers: io
-            .property_peers(&device.id)
-            .iter()
-            .map(|peer| {
-                let id = tutti_midi_hardware::PeerId {
-                    group: peer.group(),
-                    muid: peer.muid(),
-                };
-                ResourcePeer::new(link.clone(), peer.clone(), pending.bodies(id))
-            })
-            .collect(),
+        peers,
     }
 }
 
@@ -934,15 +935,18 @@ impl InputPort {
         let Some(device) = io.devices().list().into_iter().find(|d| d.id == *id) else {
             return;
         };
-        let info = input_info(io, &device, &self.shared.link, &self.pending);
+        let info = input_info(
+            io,
+            self.shared.id,
+            &device,
+            &self.shared.link,
+            &self.pending,
+        );
         let mut cell = self.shared.cell.lock_recover();
         let same = cell.info.device == info.device
             && cell.info.stream == info.stream
             && cell.info.learned == info.learned
-            && *cell.info.peers == *info.peers
-            && *cell.info.profiles == *info.profiles
-            && *cell.info.report_peers == *info.report_peers
-            && *cell.info.resource_peers == *info.resource_peers;
+            && *cell.info.peers == *info.peers;
         if !same {
             cell.info = Arc::new(info);
             changed(out, self.shared.id, ResourceFact::Info);
@@ -1209,7 +1213,13 @@ impl Ports {
             let shared = &self.inputs[at].shared;
             let presence = match result {
                 Ok(()) => {
-                    let info = input_info(io, arrived, &shared.link, &self.inputs[at].pending);
+                    let info = input_info(
+                        io,
+                        shared.id,
+                        arrived,
+                        &shared.link,
+                        &self.inputs[at].pending,
+                    );
                     shared.cell.lock_recover().info = Arc::new(info);
                     changed(out, shared.id, ResourceFact::Info);
                     Presence::Live
@@ -1517,7 +1527,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             InputShared {
                 id,
                 cell: Mutex::new(Cell {
-                    info: Arc::new(input_info(io, &info, &link, &pending)),
+                    info: Arc::new(input_info(io, id, &info, &link, &pending)),
                     presence: Presence::Lost(PortCause::Unplugged),
                 }),
                 requests: Mutex::new(Inbox::default()),
@@ -1556,6 +1566,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             let mut cell = shared.cell.lock_recover();
             cell.info = Arc::new(input_info(
                 io,
+                shared.id,
                 &info,
                 &shared.link,
                 &self.state.ports.inputs[at].pending,
