@@ -391,7 +391,8 @@ jobs:
           if [ "$PACKAGES" = all ]; then
             cargo nextest run --locked --workspace --no-fail-fast
           else
-            cargo nextest run --locked --no-fail-fast $PACKAGES
+            # A selection of crates with no tests on this OS (an FFI crate for another platform) is not a failure.
+            cargo nextest run --locked --no-fail-fast --no-tests=warn $PACKAGES
           fi
 
       # The `plugin` suite is feature-gated and the dark-features job is Linux-only; its timing and file naming differ on macOS.
