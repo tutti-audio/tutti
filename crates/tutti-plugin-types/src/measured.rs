@@ -276,7 +276,7 @@ mod tests {
 
     fn honest(tail: Option<usize>, cfg: ProbeConfig) -> Measured {
         Measured {
-            tail: tail.map(Samples),
+            tail: tail.map(Samples::new),
             latency: Some(Samples::new(0)),
             config: cfg,
             verdict: Verdict {
