@@ -113,13 +113,43 @@ fn public_items(text: &str) -> Vec<(usize, usize)> {
         let at = indent(text, ls);
         let end = pub_item_end(text, at)
             .or_else(|| pub_field_end(text, at))
-            .or_else(|| keyword(&text[at..], "impl").map(|_| header_end(text, at)));
+            .or_else(|| {
+                keyword(&text[at..], "impl")
+                    .map(|_| header_end(text, at))
+                    .filter(|&end| !impls_for_private_type(text, at, end))
+            });
         if let Some(end) = end {
             out.push((ls, end));
             next = end;
         }
     }
     out
+}
+
+/// Whether the `impl Trait for Type` header at `at..end` is for a `Type` the
+/// file declares as a private `struct` or `enum`: nothing outside the module
+/// can name the type, so the impl reaches no public signature.
+fn impls_for_private_type(text: &str, at: usize, end: usize) -> bool {
+    let header = &text[at..end];
+    let Some(for_at) = header.rfind(" for ") else {
+        return false;
+    };
+    let name: String = header[for_at + 5..]
+        .trim_start()
+        .chars()
+        .take_while(|&c| is_word(c))
+        .collect();
+    !name.is_empty()
+        && line_starts(text).into_iter().any(|ls| {
+            let line = &text[indent(text, ls)..];
+            ["struct", "enum"]
+                .iter()
+                .filter_map(|kw| keyword(line, kw))
+                .any(|rest| {
+                    let rest = rest.trim_start();
+                    rest.starts_with(&name) && !rest[name.len()..].starts_with(is_word)
+                })
+        })
 }
 
 /// `pub enum|trait .. {` through its closing brace.
@@ -436,6 +466,18 @@ mod tests {
             one("use symphonia::core::errors::Error;\npub fn f() -> io::Error { todo!() }\n")
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn an_impl_for_a_private_type_passes_and_one_for_a_pub_type_fails() {
+        let head = "use symphonia::core::io::MediaSource;\n";
+        let private = format!("{head}struct Reader;\nimpl MediaSource for Reader {{}}\n");
+        assert!(one(&private).is_empty(), "{:?}", one(&private));
+        let public = format!("{head}pub struct Reader;\nimpl MediaSource for Reader {{}}\n");
+        assert_eq!(one(&public).len(), 1);
+        // A type that only starts with a private type's name is another type.
+        let prefix = format!("{head}struct Read;\nimpl MediaSource for Reader {{}}\n");
+        assert_eq!(one(&prefix).len(), 1);
     }
 
     #[test]

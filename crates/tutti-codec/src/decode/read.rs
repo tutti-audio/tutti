@@ -1,12 +1,14 @@
 //! Decoding a file into a [`Wave`], and reading its header without decoding.
 //!
-//! The entry points are [`read_wave`], [`read_wave_metadata`] and
-//! [`read_wave_bytes`]. Decoded samples are held to the
+//! The entry points are [`read_wave`], [`read_wave_metadata`],
+//! [`read_wave_metadata_from`] and [`read_wave_bytes`]. Decoded samples are held to the
 //! generator of the committed fixtures by `tests/decode_fixtures.rs`.
 
 use std::any::Any;
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::{Mutex, PoisonError};
 use tutti_buffers::{I24, Planes, Sample, SampleFormat, Wave};
 use tutti_units::{SampleRate, Samples};
 
@@ -229,6 +231,64 @@ pub(super) fn probe_path(path: &Path) -> Result<Box<dyn FormatReader>, Error> {
     probe_source(source, &hint)
 }
 
+/// Probes any reader holding a whole container, with no extension hint.
+///
+/// symphonia's [`MediaSource`] is `Sync`; a reader that is only `Send` is made
+/// so by a [`Mutex`] that is never locked (it is reached through `get_mut`).
+pub(super) fn probe_reader<R: Read + Seek + Send + 'static>(
+    mut reader: R,
+) -> Result<Box<dyn FormatReader>, Error> {
+    // The length is what lets a container (Ogg) find its last page, and so its
+    // frame count.
+    let start = reader.stream_position().map_err(Error::IoError)?;
+    let len = reader.seek(SeekFrom::End(0)).map_err(Error::IoError)?;
+    reader
+        .seek(SeekFrom::Start(start))
+        .map_err(Error::IoError)?;
+    let source = Reader {
+        reader: Mutex::new(reader),
+        len,
+    };
+    probe_source(Box::new(source), &Hint::new())
+}
+
+/// A `Read + Seek + Send` source as a [`MediaSource`].
+struct Reader<R> {
+    reader: Mutex<R>,
+    /// The source's length in bytes.
+    len: u64,
+}
+
+impl<R> Reader<R> {
+    fn get(&mut self) -> &mut R {
+        self.reader
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl<R: Read> Read for Reader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.get().read(buf)
+    }
+}
+
+impl<R: Seek> Seek for Reader<R> {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.get().seek(pos)
+    }
+}
+
+impl<R: Read + Seek + Send> MediaSource for Reader<R> {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.len)
+    }
+}
+
 fn probe_source(
     mut source: Box<dyn MediaSource>,
     hint: &Hint,
@@ -317,8 +377,32 @@ pub fn read_wave<S: Sample>(path: impl AsRef<Path>) -> Result<Wave<S>, DecodeErr
 /// A [`DecodeError`] if the file cannot be opened, its container is not one
 /// this build reads, it has no audio track, or the track states no sample
 /// rate ([`DecodeError::NoSampleRate`]).
+///
+/// [`read_wave_metadata_from`] reads a file from any reader, such as a
+/// `Cursor` over bytes held in memory.
 pub fn read_wave_metadata(path: impl AsRef<Path>) -> Result<WaveMetadata, DecodeError> {
-    let reader = probe_path(path.as_ref()).map_err(convert)?;
+    metadata_of(probe_path(path.as_ref()).map_err(convert)?)
+}
+
+/// Reads the metadata of a complete file from `reader`, as
+/// [`read_wave_metadata`] reads a file's. There is no extension hint, so the
+/// container is identified from the bytes alone.
+///
+/// A file held in memory is read through a `Cursor`; a shared buffer
+/// (`Cursor<Arc<[u8]>>`) is read without a copy, so one buffer can be probed
+/// and opened as often as needed.
+///
+/// # Errors
+///
+/// As [`read_wave_metadata`], less the open.
+pub fn read_wave_metadata_from<R: Read + Seek + Send + 'static>(
+    reader: R,
+) -> Result<WaveMetadata, DecodeError> {
+    metadata_of(probe_reader(reader).map_err(convert)?)
+}
+
+/// The metadata of a probed container's first audio track.
+fn metadata_of(reader: Box<dyn FormatReader>) -> Result<WaveMetadata, DecodeError> {
     let (track, params) = first_audio_track(&*reader)?;
     let (topology, placement) = topology_of(params.channels.as_ref());
     Ok(WaveMetadata {

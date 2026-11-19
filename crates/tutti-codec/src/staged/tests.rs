@@ -25,3 +25,21 @@ fn the_temporary_is_beside_the_target_and_unique() {
     assert_eq!(a.temp().parent(), target.parent());
     assert_ne!(a.temp(), b.temp());
 }
+
+/// The name is made of the process-wide counter, the clock and the target's
+/// name, so two stagings of one target differ even in one nanosecond, and the
+/// target's own name is in it.
+#[test]
+fn many_stagings_of_one_target_all_differ() {
+    let target = std::path::Path::new("a.wav");
+    let names: std::collections::HashSet<_> = (0..1000)
+        .map(|_| Staged::beside(target).temp().to_path_buf())
+        .collect();
+    assert_eq!(names.len(), 1000);
+    assert!(names.iter().all(|n| {
+        n.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(".a.wav.")
+    }));
+}

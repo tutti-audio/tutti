@@ -316,7 +316,7 @@ two quantities that must not share a type), `bevy-tutti/graph/param.rs` (the
 model: the unit is a type parameter), `bevy-tutti/export`, `bevy-tutti/latency`,
 all four plugin format hosts (correctly bare — ABI), the IPC protocol
 (settled in #105/#108), and every MIDI file outside the four named above —
-`registry`, `endpoint`, `mpe_ingest`, `pre_block`, `port`, `snapshot_reader`,
+`registry`, `endpoint`, `mpe_translator`, `pre_block`, `port`, `snapshot_reader`,
 `routing_table`, both sysex reassemblers, `capability_inquiry`, and
 `jr_timestamp` (fully typed; the model for the rest of MIDI).
 
