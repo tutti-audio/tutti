@@ -16,47 +16,18 @@
 //! ([`UnknownParam`]).
 //!
 //! [`EditWriter::reset`] makes every write made so far stale, for a state or a
-//! preset load that replaced the values they were written against. Each write
-//! carries the stamp current when it was made, and the reader drops a value
-//! whose stamp is older than the reset stamp it loads. Stamps are 32 bits and
-//! compare as serial numbers, so they wrap. The reader loads the reset stamp
-//! once per drain, after it has read every slot, behind a `SeqCst` fence that
-//! pairs with the one in [`EditWriter::reset`]: a write read before a reset the
-//! reader observes is never applied.
-//!
-//! A drain whose slots no write has touched since the last one reads nothing:
-//! the writer bumps a generation after each cell write, and the reader sweeps
-//! only when it has moved.
+//! preset load that replaced the values they were written against: it ends the
+//! [`tutti_rt::SeqSlotsWriter`] epoch, and a drain that observes it never
+//! yields a write from before it. The slots, the epoch and the drain's
+//! ordering are that type's; this one adds the `ParamId` table.
 //!
 //! What a plugin reports back to the host is the other direction and a ring of
 //! events: [`reports`](crate::reports()).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering, fence};
 
-use bytemuck::{Pod, Zeroable};
-use tutti_rt::{SeqReader, SeqWriter};
+use tutti_rt::{SeqSlotsReader, SeqSlotsWriter, seq_slots};
 use tutti_units::{Normalized, ParamId};
-
-/// What a slot holds.
-///
-/// The value is a raw `f64`, not a [`Normalized`]: the sequence cell copies its
-/// payload as plain words and needs `AnyBitPattern`, which a range-checked type
-/// cannot be. Every value came from a `Normalized`, and the reader makes one
-/// again.
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct Cell {
-    value: f64,
-    /// The writer's stamp when it wrote the value.
-    stamp: u32,
-    _pad: u32,
-}
-
-/// Whether stamp `a` is older than stamp `b`, as 32-bit serial numbers.
-const fn stamp_before(a: u32, b: u32) -> bool {
-    (a.wrapping_sub(b) as i32) < 0
-}
 
 /// A write to a parameter the activation did not declare.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -71,28 +42,17 @@ pub fn edit_slots(ids: impl IntoIterator<Item = ParamId>) -> (EditWriter, EditRe
     ids.sort_unstable();
     ids.dedup();
     let ids: Arc<[ParamId]> = ids.into();
-    let cells: Vec<SeqWriter<Cell>> = ids.iter().map(|_| SeqWriter::new()).collect();
-    let readers: Vec<SeqReader<Cell>> = cells.iter().map(SeqWriter::reader).collect();
-    let reset = Arc::new(AtomicU32::new(0));
-    let dirty = Arc::new(AtomicU32::new(0));
+    // The slot holds a raw `f64`, not a [`Normalized`]: the sequence cell copies
+    // its payload as plain words and needs `AnyBitPattern`, which a
+    // range-checked type cannot be. Every value came from a `Normalized`, and
+    // the reader makes one again.
+    let (writer, reader) = seq_slots::<f64>(ids.len());
     (
         EditWriter {
             ids: Arc::clone(&ids),
-            cells,
-            stamp: 0,
-            reset: Arc::clone(&reset),
-            generation: 0,
-            dirty: Arc::clone(&dirty),
+            slots: writer,
         },
-        EditReader {
-            seen: vec![0; ids.len()],
-            scratch: Vec::with_capacity(ids.len()),
-            ids,
-            cells: readers,
-            reset,
-            dirty,
-            generation: 0,
-        },
+        EditReader { ids, slots: reader },
     )
 }
 
@@ -100,14 +60,7 @@ pub fn edit_slots(ids: impl IntoIterator<Item = ParamId>) -> (EditWriter, EditRe
 #[derive(Debug)]
 pub struct EditWriter {
     ids: Arc<[ParamId]>,
-    cells: Vec<SeqWriter<Cell>>,
-    /// The stamp of the writes made now.
-    stamp: u32,
-    /// The stamp of the last [`reset`](Self::reset), which the reader loads.
-    reset: Arc<AtomicU32>,
-    /// Counts the writes (wrapping), stored after each cell write.
-    generation: u32,
-    dirty: Arc<AtomicU32>,
+    slots: SeqSlotsWriter<f64>,
 }
 
 impl EditWriter {
@@ -119,15 +72,7 @@ impl EditWriter {
     /// [`UnknownParam`] when the activation did not declare `id`.
     pub fn write(&mut self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
         let slot = self.ids.binary_search(&id).map_err(|_| UnknownParam(id))?;
-        self.cells[slot].write(Cell {
-            value: value.get(),
-            stamp: self.stamp,
-            _pad: 0,
-        });
-        // After the cell write: a reader that loads this generation, then reads
-        // the cells, sees the write.
-        self.generation = self.generation.wrapping_add(1);
-        self.dirty.store(self.generation, Ordering::Release);
+        self.slots.write(slot, value.get());
         Ok(())
     }
 
@@ -135,13 +80,10 @@ impl EditWriter {
     /// the values they were written against, and no block may put them back.
     ///
     /// A caller that follows it with a change a stale write must not overwrite
-    /// (a plugin's `set_state`) calls it first: the `SeqCst` fence orders the
-    /// stamp store before anything after the call, and pairs with the reader's.
+    /// (a plugin's `set_state`) calls it first: it is ordered before whatever
+    /// follows the call (see [`tutti_rt::SeqSlotsWriter::new_epoch`]).
     pub fn reset(&mut self) {
-        self.stamp = self.stamp.wrapping_add(1);
-        self.reset.store(self.stamp, Ordering::Release);
-        // A store-load pair with the reader's stamp load.
-        fence(Ordering::SeqCst);
+        self.slots.new_epoch();
     }
 }
 
@@ -149,15 +91,7 @@ impl EditWriter {
 #[derive(Debug)]
 pub struct EditReader {
     ids: Arc<[ParamId]>,
-    cells: Vec<SeqReader<Cell>>,
-    /// The sequence of the last write each slot gave up, per slot.
-    seen: Vec<u64>,
-    /// The cells [`collect`](Self::collect) read, reserved for every slot.
-    scratch: Vec<(usize, Cell)>,
-    reset: Arc<AtomicU32>,
-    /// The generation of the last sweep that read every slot it could.
-    generation: u32,
-    dirty: Arc<AtomicU32>,
+    slots: SeqSlotsReader<f64>,
 }
 
 impl EditReader {
@@ -165,59 +99,14 @@ impl EditReader {
     /// value of its latest write, skipping what a [`reset`](EditWriter::reset)
     /// made stale. Reads each slot once and never retries: a slot a write
     /// overlaps is read on the next call. Never allocates, locks or waits.
-    pub fn drain(&mut self, apply: impl FnMut(ParamId, Normalized)) {
-        self.collect();
-        self.finish(apply);
-    }
-
-    /// Phase one: reads every slot a write has changed into the scratch buffer.
-    ///
-    /// The generation is loaded before the reads and recorded only when no slot
-    /// was contended, so a write is never missed: a contended slot makes the
-    /// next call sweep again.
-    fn collect(&mut self) {
-        let generation = self.dirty.load(Ordering::Acquire);
-        if generation == self.generation {
-            return;
-        }
-        let mut contended = false;
-        for (slot, cell) in self.cells.iter().enumerate() {
-            match cell.try_read() {
-                Some((sequence, cell)) => {
-                    if sequence != self.seen[slot] {
-                        self.seen[slot] = sequence;
-                        // At most one per slot, within the reserved room.
-                        self.scratch.push((slot, cell));
-                    }
-                }
-                // Never written is not contention; a torn copy is.
-                None => contended |= !matches!(self.cells[slot].read(0), Ok(None)),
-            }
-        }
-        if !contended {
-            self.generation = generation;
-        }
-    }
-
-    /// Phases two and three: loads the reset stamp once, after every read, and
-    /// applies the collected cells it does not make stale.
-    fn finish(&mut self, mut apply: impl FnMut(ParamId, Normalized)) {
-        if self.scratch.is_empty() {
-            return;
-        }
-        // A store-load pair with the fence in `EditWriter::reset`: the reads
-        // above are ordered before the stamp load.
-        fence(Ordering::SeqCst);
-        let reset = self.reset.load(Ordering::Acquire);
-        for (slot, cell) in self.scratch.drain(..) {
-            if stamp_before(cell.stamp, reset) {
-                continue;
-            }
+    pub fn drain(&mut self, mut apply: impl FnMut(ParamId, Normalized)) {
+        let ids = &self.ids;
+        self.slots.drain(|slot, value| {
             // `clamped` is the range contract's hot-path form: every value came
             // from a `Normalized`, so it changes nothing, and the audio thread
             // must not panic.
-            apply(self.ids[slot], Normalized::clamped(cell.value));
-        }
+            apply(ids[slot], Normalized::clamped(value));
+        });
     }
 }
 
@@ -269,48 +158,6 @@ mod tests {
         writer.reset();
         writer.write(id(1), Normalized::of(0.75)).unwrap();
         assert_eq!(drained(&mut reader), [(id(1), 0.75)]);
-    }
-
-    /// **Stamps compare as serial numbers across the 32-bit wrap**: a stamp just
-    /// before the wrap is older than one just after it, and equal is not older.
-    #[test]
-    fn stamps_compare_across_the_wrap() {
-        assert!(stamp_before(u32::MAX, 0));
-        assert!(stamp_before(u32::MAX - 5, 3));
-        assert!(!stamp_before(0, u32::MAX));
-        assert!(!stamp_before(3, u32::MAX - 5));
-        assert!(!stamp_before(7, 7));
-        assert!(stamp_before(6, 7));
-        assert!(!stamp_before(7, 6));
-    }
-
-    /// **A reset between the reads and the stamp load drops what was read.** The
-    /// drain's phases are split at the point a reset can land inside one block.
-    #[test]
-    fn a_reset_inside_a_drain_voids_what_it_had_read() {
-        let (mut writer, mut reader) = edit_slots([id(1), id(2)]);
-        writer.write(id(1), Normalized::of(0.25)).unwrap();
-        writer.write(id(2), Normalized::of(0.5)).unwrap();
-        reader.collect();
-        writer.reset();
-        let mut applied = Vec::new();
-        reader.finish(|id, value| applied.push((id, value.get())));
-        assert!(applied.is_empty(), "{applied:?}");
-    }
-
-    /// **A sweep with no write since the last reads nothing, and a slot a read
-    /// missed is swept again.**
-    #[test]
-    fn an_unchanged_generation_skips_the_sweep() {
-        let (mut writer, mut reader) = edit_slots([id(1)]);
-        assert!(drained(&mut reader).is_empty());
-        writer.write(id(1), Normalized::of(0.25)).unwrap();
-        assert_eq!(drained(&mut reader), [(id(1), 0.25)]);
-        // Forget what the slot gave up: only the generation keeps the sweep off.
-        reader.seen[0] = 0;
-        assert!(drained(&mut reader).is_empty(), "the sweep was skipped");
-        writer.write(id(1), Normalized::of(0.5)).unwrap();
-        assert_eq!(drained(&mut reader), [(id(1), 0.5)]);
     }
 
     /// **A write to an undeclared id is refused at the call**, naming it.

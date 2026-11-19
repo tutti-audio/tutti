@@ -3229,7 +3229,6 @@ dependencies = [
  "arrayvec",
  "assert_no_alloc",
  "bitflags 2.13.2",
- "bytemuck",
  "dpi",
  "keyboard-types",
  "postcard",
