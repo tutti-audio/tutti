@@ -1,9 +1,10 @@
 //! The Timeout Wait ACK (M2-101 §5.10, Table 14): how long it asks, and how a
 //! transaction's deadline takes it.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::Ack;
+use crate::deadline::Pending;
 
 /// How long an Initiator waits on a peer's answer where the specification gives
 /// no limit: 3 seconds. A Profile Inquiry, Set Profile On or Off, or Details
@@ -20,8 +21,6 @@ tutti_units::ranged! {
     /// How long a Timeout Wait asks to keep a transaction open: 0 to 127 tenths of
     /// a second, 0 to 12.7 s (M2-101 Table 14, M2-103 §12.2.1).
     #[derive(Eq, Hash)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     TimeoutWait(u8), NotATimeoutWait, "a timeout wait (0 to 127 tenths of a second)",
     |raw| raw <= 127
 }
@@ -52,8 +51,8 @@ impl TimeoutWait {
 
     /// Adds this wait to a transaction's deadline (M2-103 §12.2.1: the wait is
     /// added to the current timeout period).
-    pub(crate) fn extend(self, deadline: &mut Instant) {
-        *deadline += self.duration();
+    pub(crate) fn extend(self, wait: &mut Pending) {
+        wait.extend(self.duration());
     }
 }
 

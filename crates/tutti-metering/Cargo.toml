@@ -15,7 +15,7 @@ workspace = true
 
 [dependencies]
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
+atomic_float = "1.1"
 
 [package.metadata.docs.rs]
 all-features = true

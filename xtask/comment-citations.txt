@@ -18,7 +18,7 @@
 4 crates/tutti-graph/src/cost.rs
 2 crates/tutti-graph/src/editor.rs
 1 crates/tutti-graph/src/event_inlet.rs
-3 crates/tutti-graph/src/event.rs
+1 crates/tutti-graph/src/event.rs
 1 crates/tutti-graph/src/exec/mode_op.rs
 1 crates/tutti-graph/src/gain.rs
 2 crates/tutti-graph/src/graph.rs
@@ -27,7 +27,7 @@
 1 crates/tutti-graph/src/lib.rs
 3 crates/tutti-graph/src/mode.rs
 1 crates/tutti-graph/src/node.rs
-5 crates/tutti-graph/src/param.rs
+3 crates/tutti-graph/src/param.rs
 3 crates/tutti-graph/src/par.rs
 1 crates/tutti-graph/src/pass.rs
 3 crates/tutti-graph/src/plan.rs
@@ -56,14 +56,6 @@
 1 crates/tutti-graph/tests/topology/buses.rs
 1 crates/tutti-graph/tests/topology/cost_model.rs
 1 crates/tutti-graph/tests/topology/fork.rs
-1 crates/tutti-plugin-host/src/controls.rs
-6 crates/tutti-plugin-host/src/param_delivery.rs
-2 crates/tutti-plugin-host/src/param_input.rs
-4 crates/tutti-plugin-host/src/segment_points.rs
-1 crates/tutti-plugin-host/src/transport_source.rs
-1 crates/tutti-plugin-host/src/transport_walk.rs
-1 crates/tutti-plugin-host/src/walk_tests.rs
-1 crates/tutti-plugin-host/tests/vst2_in_process_params.rs
 1 crates/tutti-plugin-ipc/src/batcher.rs
 2 crates/tutti-plugin-ipc/src/client/audio/payload_pool.rs
 1 crates/tutti-plugin-ipc/src/protocol/wire.rs

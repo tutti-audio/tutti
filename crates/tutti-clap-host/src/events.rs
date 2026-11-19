@@ -38,7 +38,7 @@ use tutti_plugin_types::{
 };
 use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
 use tutti_units::ParamId;
-use tutti_units::{Normalized, Semitones};
+use tutti_units::{Normalized, Semitones, Velocity};
 
 /// The parameter edits the Controller can have queued to the Processor before
 /// the ring refuses one: one block holds as many, and the Processor reserves
@@ -473,7 +473,7 @@ impl ClapEvent {
         // The 16-bit velocity the event came from, narrowed by the shift of
         // M2-115 section 3.4. A note-on at velocity 0 is a note-off in
         // MIDI 1.0, so the lowest audible note-on velocity is 1.
-        let narrowed = narrow_velocity(NoteVelocity::from_normalized(Normalized::clamped(
+        let narrowed = narrow_velocity(NoteVelocity::from_velocity(Velocity::new_clamped(
             e.velocity,
         )));
         let velocity = if note_on && narrowed.get() == 0 {
@@ -662,7 +662,7 @@ impl ClapEvent {
                         channel,
                         Voice2::note_on(
                             note,
-                            NoteVelocity::from_normalized(Normalized::clamped(e.velocity)),
+                            NoteVelocity::from_velocity(Velocity::new_clamped(e.velocity)),
                         ),
                     ),
                 })
@@ -678,7 +678,7 @@ impl ClapEvent {
                         channel,
                         Voice2::note_off(
                             note,
-                            NoteVelocity::from_normalized(Normalized::clamped(e.velocity)),
+                            NoteVelocity::from_velocity(Velocity::new_clamped(e.velocity)),
                         ),
                     ),
                 })
@@ -1323,7 +1323,7 @@ impl InputEventList {
                     time,
                     i16::from(address.channel.get()),
                     i16::from(note.get()),
-                    velocity.normalized().get(),
+                    velocity.velocity().get(),
                 )
                 .addressed(port, -1);
                 let off = if self.midi_ports >> port & 1 != 0 {
@@ -1424,7 +1424,7 @@ impl InputEventList {
                     time,
                     i16::from(channel.get()),
                     i16::from(note.get()),
-                    velocity.map_or(0.0, |v| v.normalized().get()),
+                    velocity.map_or(0.0, |v| v.velocity().get()),
                 )
                 .into_midi_dialect(port, None),
                 (Voice2::PolyPressure { .. }, _) => narrow(voice)
@@ -1456,7 +1456,7 @@ impl InputEventList {
                         time,
                         i16::from(channel.get()),
                         i16::from(note.get()),
-                        velocity.map_or(0.0, |v| v.normalized().get()),
+                        velocity.map_or(0.0, |v| v.velocity().get()),
                     )
                     .addressed(port, plugin_note_id(id));
                     push(&mut self.events, Some(on));

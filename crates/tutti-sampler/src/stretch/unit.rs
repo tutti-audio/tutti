@@ -10,9 +10,10 @@ use tutti_dsp::{FftFloat, StftGeometry};
 
 use super::vocoder::Vocoder;
 use super::{FftSize, MAX_BUFFER_SIZE};
+use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 use tutti_buffers::ChannelLayout;
-use tutti_types::{AtomicF64, Param64};
+use tutti_rt::Param64;
 use tutti_units::{Cents, ReadRate, SampleRate, StretchFactor};
 
 /// Real-time time-stretching and pitch-shifting unit.

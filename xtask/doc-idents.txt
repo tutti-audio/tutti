@@ -87,6 +87,7 @@
 1 crates/tutti-polysynth/src/bank.rs
 1 crates/tutti-polysynth/src/polysynth.rs
 1 crates/tutti-polysynth/src/polysynth/tests.rs
+1 crates/tutti-rt/src/param.rs
 1 crates/tutti-sampler/src/lib.rs
 2 crates/tutti-sampler/src/stretch/mod.rs
 1 crates/tutti-sampler/src/stretch/tests.rs
@@ -101,7 +102,6 @@
 1 crates/tutti-session/tests/midi/midi.rs
 1 crates/tutti-sf2/src/sample_header.rs
 1 crates/tutti-music/src/note.rs
-1 crates/tutti-types/src/value/param.rs
 4 crates/tutti-units/src/unit_param.rs
 1 crates/tutti-vst2-ffi/CHANGELOG.md
 3 crates/tutti-vst2-ffi/src/api.rs
@@ -141,7 +141,7 @@
 1 crates/tutti-vst3-host/tests/host/integration_tests.rs
 3 crates/tutti-vst3-host/tests/support/audio-probe/README.md
 9 crates/tutti-vst3-host/tests/support/conformance.rs
-40 docs/engineering-notes.md
+39 docs/engineering-notes.md
 5 docs/style-guide.md
 1 testing/tutti-clap-test-plugin/src/lib.rs
 3 testing/tutti-clap-test-plugin/src/params_state.rs

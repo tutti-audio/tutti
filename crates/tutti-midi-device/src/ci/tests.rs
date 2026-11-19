@@ -301,10 +301,24 @@ fn an_unreadable_ack_or_nak_is_not_nakked() {
     }
 }
 
-#[cfg(feature = "serde")]
+/// M2-101 Table 5: `7E` is the whole Group and `7F` the whole Function Block;
+/// each whole is the Device ID and the Profile target of its own byte.
+#[test]
+fn a_whole_is_the_device_id_and_profile_target_of_its_byte() {
+    for (whole, byte, target) in [
+        (Whole::Group, 0x7E, ProfileTarget::Group),
+        (Whole::FunctionBlock, 0x7F, ProfileTarget::FunctionBlock),
+    ] {
+        let id = CiDeviceId::from(whole);
+        assert_eq!(id.get(), byte);
+        assert_eq!(ProfileTarget::from(whole), target);
+        assert_eq!(target.address(), id);
+    }
+}
+
 #[test]
 fn the_device_id_and_version_are_range_checked_values() {
-    use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
+    use tutti_fixtures::{RangeContract, check_range_contract};
     let c = RangeContract {
         new: CiDeviceId::new,
         get: CiDeviceId::get,
@@ -313,7 +327,6 @@ fn the_device_id_and_version_are_range_checked_values() {
         invalid: &[0x10, 0x7D, 0x80, 0xFF],
     };
     check_range_contract(&c);
-    check_range_serde(&c);
     let c = RangeContract {
         new: CiVersion::new,
         get: CiVersion::get,
@@ -322,12 +335,10 @@ fn the_device_id_and_version_are_range_checked_values() {
         invalid: &[0x00, 0x20, 0x80, 0xFF],
     };
     check_range_contract(&c);
-    check_range_serde(&c);
 }
 
 /// The ranged values of the CI messages keep the range-checked contract at
-/// each edge of their spec range, and the ones that are stored keep it through
-/// serde.
+/// each edge of their spec range.
 #[test]
 fn the_ci_ranged_values_keep_the_range_contract() {
     use tutti_fixtures::{RangeContract, check_range_contract};
@@ -341,8 +352,6 @@ fn the_ci_ranged_values_keep_the_range_contract() {
                 invalid: &$invalid,
             };
             check_range_contract(&c);
-            #[cfg(feature = "serde")]
-            tutti_fixtures::check_range_serde(&c);
         }};
     }
     contract!(
@@ -376,7 +385,6 @@ fn the_ci_ranged_values_keep_the_range_contract() {
         [0, 0x7FFF_FFFF_FFFF_FFFF],
         [0x8000_0000_0000_0000, u64::MAX]
     );
-    // `ProfileChannels` is not stored, so it has no serde form.
     check_range_contract(&RangeContract {
         new: ProfileChannels::new,
         get: ProfileChannels::get,
@@ -421,7 +429,6 @@ fn packets_carry_the_payload_in_sysex7_packets() {
     assert_eq!(bytes, payload);
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_muid_is_a_range_checked_value() {
     use tutti_fixtures::{RangeContract, check_range_contract};

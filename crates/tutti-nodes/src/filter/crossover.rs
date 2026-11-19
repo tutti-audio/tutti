@@ -9,7 +9,7 @@ use tutti_dsp::{
     Lanes, MAX_SPLITS, fit_to_rate,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Hz, SampleRate, Tail};
 #[cfg(test)]
 use tutti_units::{UnitAddr, UnitParam};

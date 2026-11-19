@@ -18,7 +18,7 @@ use tutti_graph::{
     Shape, SilenceMask, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_ump::{Message, Voice1};
 use tutti_units::{Amplitude, Latency, Samples, Tail};
 

@@ -70,5 +70,4 @@ crates/tutti-soundfont/src/node.rs  1  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/oscillator.rs  10  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/player.rs  5  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/voice.rs  5  migrating: dsp S7/instruments
-crates/tutti-types/src/lib.rs  1  migrating: foundation
 crates/tutti-voicing/src/channel.rs  3  migrating: foundation

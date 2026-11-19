@@ -28,7 +28,7 @@ use tutti_dsp::MatrixConvolver;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::ConvolverNode;
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 const SR: SampleRate = SampleRate::SR_48K;

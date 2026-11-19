@@ -2,29 +2,10 @@
 //! and (feature `midi`) the engine's MIDI nodes and the `Session::midi` handle.
 
 use tutti_graph::MeterReader;
-#[cfg(feature = "midi")]
-use tutti_graph::NodeKey;
 use tutti_metering::LoadMeter;
 use tutti_units::Samples;
 
 use crate::{AppKey, Clock, HeardOpen, HeardTapError, Session};
-
-/// The engine's MIDI, as graph nodes the builder inserts: the sync node (Beat
-/// Clock, MTC and Machine Control, sending nothing until a host sets its
-/// messages), with its controls. An input port's ingest node is not here: each
-/// `midi_input` entry makes its own (`MidiInput::node`), and each output its own
-/// (`MidiSink::node`, `MidiOutput::node`), fed by the sync node.
-#[cfg(feature = "midi")]
-#[derive(Clone, Debug)]
-pub struct MidiNodes {
-    /// Which of an input port's event outputs carries which Group and channel
-    /// ([`SessionBuilder::midi_groups`](crate::SessionBuilder::midi_groups)).
-    pub input_ports: tutti_midi_runtime::MidiInputPorts,
-    /// The sync node, on Group 1.
-    pub sync: NodeKey,
-    /// What the sync node sends (`messages()`) and could not send (`losses()`).
-    pub sync_controls: std::sync::Arc<tutti_midi_runtime::SyncOutControls>,
-}
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Opens the tap on **what the engine renders**: every output channel at
@@ -131,8 +112,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// The engine's MIDI nodes, when the builder inserted them.
     #[cfg(feature = "midi")]
-    pub fn midi_nodes(&self) -> Option<&MidiNodes> {
-        self.midi.as_ref()
+    pub fn midi_nodes(&self) -> Option<&crate::MidiNodes> {
+        self.midi.nodes.as_ref()
     }
 }
 
@@ -153,13 +134,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ) -> (crate::Midi<'_, C::Float>, &mut crate::peer::ResourceIds) {
         let midi = crate::Midi {
             graph: &mut self.graph,
-            state: &mut self.midi_state,
-            nodes: self.midi.as_ref(),
+            state: &mut self.midi.state,
+            nodes: self.midi.nodes.as_ref(),
             jobs: &mut self.jobs,
             settings: self.transport.settings(),
             meter: self.transport.settings().project_meter().clone(),
             #[cfg(feature = "midi-hardware")]
-            io: self.midi_io.as_mut(),
+            io: self.midi.hardware.io.as_mut(),
         };
         (midi, &mut self.pool.resource_ids)
     }

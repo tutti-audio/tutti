@@ -824,7 +824,7 @@ impl<K: crate::AppKey, C: RealTime> Session<K, C> {
     /// Replaces a listing still waiting, whose thread is left to end on its
     /// own.
     pub fn list_outputs(&mut self, listing: tutti_cpal::DeviceListing) {
-        self.output_listing = Some(crate::watch::OutputListing::new(listing));
+        self.devices.start(listing);
     }
 
     /// [`list_outputs`](Self::list_outputs), once: `make` builds the listing
@@ -839,28 +839,16 @@ impl<K: crate::AppKey, C: RealTime> Session<K, C> {
         &mut self,
         make: impl FnOnce() -> tutti_cpal::Result<tutti_cpal::DeviceListing>,
     ) -> Result<()> {
-        if self.outputs_listed {
+        if self.devices.listed() {
             return Ok(());
         }
         self.list_outputs(make()?);
-        self.outputs_listed = true;
+        self.devices.mark_listed();
         Ok(())
     }
 }
 
 impl<K: crate::AppKey, C: Clock> Session<K, C> {
-    /// The listing's share of [`Phase::Poll`](crate::Phase::Poll): the answer of
-    /// the output-device listing, if one is running.
-    pub(crate) fn listing_poll(&mut self, now: std::time::Instant, out: &mut Vec<SessionEvent>) {
-        if let Some(listing) = &mut self.output_listing {
-            let (event, finished) = listing.poll(now);
-            out.extend(event);
-            if finished {
-                self.output_listing = None;
-            }
-        }
-    }
-
     /// The checks that must pass before the stream stops.
     pub(crate) fn check_restart(&self, max_block: Option<MaxBlock>) -> Result<()> {
         self.graph.check_reprepare(max_block)?;
@@ -960,9 +948,8 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         self.graph.place_device(spec.channels, topology)?;
         // The outputs' taps read frames of one rate: reopened at the
         // new one, committed with the rest below.
-        #[cfg(feature = "midi")]
         if self
-            .midi_state
+            .midi
             .follow_rate(&mut self.graph, std::time::Instant::now())
         {
             self.commit();
@@ -993,21 +980,15 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // The hardware inlets place an arrival a block after it came, a
         // block of this device's callback; the clock map follows the rate
         // from the engine's own readings.
-        #[cfg(feature = "midi-hardware")]
-        if let Some(io) = &self.midi_io {
-            io.ports().inlets().set_lead(crate::midi::input_lead(
-                spec.quantum
-                    .unwrap_or(self.graph.prepared().max_block())
-                    .samples(),
-                rate,
-            ));
-        }
+        self.midi.set_block(
+            spec.quantum
+                .unwrap_or(self.graph.prepared().max_block())
+                .samples(),
+            rate,
+        );
         // Every open stream's ratio (file rate / session rate) is
         // re-derived, so it plays on at its pitch.
-        #[cfg(feature = "sampler")]
-        if let Some(streamer) = &self.disk_streamer {
-            streamer.set_sample_rate(rate);
-        }
+        self.sampler.set_sample_rate(rate);
         // The heard tap opens at the device's width from here on; one open
         // across this change keeps counting its blocks lost (see
         // `Session::open_heard_tap`).

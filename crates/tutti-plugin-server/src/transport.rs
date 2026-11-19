@@ -5,10 +5,12 @@
 //! only moves bytes.
 //!
 use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
+use std::io::Read;
+use std::time::{Duration, Instant};
 use tutti_plugin_ipc::{
     BridgeMessage, FrameBuf, HostMessage, MAX_FRAME_BYTES, read_frame, write_frame,
 };
-use tutti_plugin_types::{BridgeResult, MIDI_STACK_CAPACITY};
+use tutti_plugin_types::{BridgeResult, Deadline, MIDI_STACK_CAPACITY};
 
 use crate::main_loop::Bell;
 use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
@@ -77,6 +79,44 @@ pub(crate) trait Transport: Send {
     fn send(&mut self, msg: &BridgeMessage) -> BridgeResult<()>;
 }
 
+/// How long the rest of an audio frame may take to arrive once its first byte
+/// has: a frame is written by one `write`, so a host that stops part-way has
+/// stopped, and the render thread must not wait on it for ever. Less than the
+/// patience the server gives a stopping render thread.
+const PARTIAL_FRAME_PATIENCE: Duration = Duration::from_secs(2);
+
+/// A reader that, after its first read, waits for the stream to be readable
+/// within a [`Deadline`] before each further one: a frame that stops part-way
+/// ends in `TimedOut` and not in a read that never returns. A trickle of bytes
+/// does not extend it, as the deadline is the frame's and not the read's.
+/// `wait` and `now` are the readiness wait and the clock, so the rule is a
+/// function of the instants it is given.
+struct FrameReader<'a, R, W, N> {
+    inner: &'a mut R,
+    began: bool,
+    deadline: Deadline,
+    wait: W,
+    now: N,
+}
+
+impl<R, W, N> Read for FrameReader<'_, R, W, N>
+where
+    R: Read,
+    W: FnMut(&R, Option<Duration>) -> std::io::Result<bool>,
+    N: FnMut() -> Instant,
+{
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // The first read follows the readable wait that began the frame.
+        if std::mem::replace(&mut self.began, true) {
+            let now = (self.now)();
+            if self.deadline.passed(now) || !(self.wait)(self.inner, self.deadline.left(now))? {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
+        }
+        self.inner.read(buf)
+    }
+}
+
 /// [`Transport`] over the platform's local socket (Unix domain socket, or a
 /// Windows named pipe).
 pub(crate) struct SocketTransport {
@@ -85,6 +125,9 @@ pub(crate) struct SocketTransport {
     /// frames allocate nothing on the render thread; `None` for a connection
     /// that is served off it.
     frames: Option<FrameBuf>,
+    /// Never rung: the wake argument of the wait for the rest of a frame, which
+    /// only its deadline ends.
+    quiet: Option<Bell>,
 }
 
 impl SocketTransport {
@@ -94,17 +137,23 @@ impl SocketTransport {
         Self {
             stream,
             frames: None,
+            quiet: None,
         }
     }
 
     /// Wraps the audio connection's stream, which the render thread reads and
     /// writes through buffers built here: a frame is never read into, or
     /// serialized into, memory that is sized on that thread.
-    pub(crate) fn audio(stream: PlatformStream) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// The OS refused the bell of the frame wait.
+    pub(crate) fn audio(stream: PlatformStream) -> std::io::Result<Self> {
+        Ok(Self {
             stream,
             frames: Some(FrameBuf::new(AUDIO_REQUEST_BYTES, AUDIO_REPLY_BYTES)),
-        }
+            quiet: Some(Bell::new()?),
+        })
     }
 }
 
@@ -119,9 +168,21 @@ impl Transport for SocketTransport {
         // oversize length as `ProcessCrashed`; here the peer is the host,
         // which has not crashed, so the error names the frame and the session
         // ends on it either way.
-        match self.frames.as_mut() {
-            Some(frames) => frames.read(&mut self.stream),
-            None => read_frame(&mut self.stream),
+        match (self.frames.as_mut(), self.quiet.as_ref()) {
+            (Some(frames), Some(quiet)) => {
+                let mut reader = FrameReader {
+                    inner: &mut self.stream,
+                    began: false,
+                    deadline: Deadline::after(Instant::now(), PARTIAL_FRAME_PATIENCE),
+                    wait: |stream: &PlatformStream, timeout| {
+                        crate::main_loop::wait_readable(stream, timeout, quiet)
+                            .map_err(std::io::Error::other)
+                    },
+                    now: Instant::now,
+                };
+                frames.read(&mut reader)
+            }
+            _ => read_frame(&mut self.stream),
         }
     }
 
@@ -190,7 +251,7 @@ impl TransportListener {
     /// [`accept`](Self::accept) for the audio connection, whose transport reads
     /// and writes through fixed buffers ([`SocketTransport::audio`]).
     pub(crate) fn accept_audio(&self) -> BridgeResult<SocketTransport> {
-        Ok(SocketTransport::audio(self.accept_stream()?))
+        Ok(SocketTransport::audio(self.accept_stream()?)?)
     }
 
     fn accept_stream(&self) -> BridgeResult<PlatformStream> {
@@ -354,5 +415,77 @@ mod audio_frame_tests {
             .map(ParameterQueue::len)
             .sum();
         assert_eq!(points, QUEUES as usize * room);
+    }
+}
+
+#[cfg(test)]
+mod frame_reader_tests {
+    use super::*;
+
+    /// **A frame that stops part-way ends in `TimedOut` at its deadline, and the
+    /// wait for each further read is for the time that is left**: a trickle that
+    /// keeps every read short does not extend the frame's one deadline. The
+    /// clock is constructed, a second per look, and the wait never finds more
+    /// bytes.
+    #[test]
+    fn a_frame_that_stops_part_way_times_out_at_its_deadline() {
+        let start = Instant::now();
+        let ticks = std::cell::Cell::new(0_u64);
+        let waits = std::cell::RefCell::new(Vec::new());
+        let mut source: &[u8] = &[1, 2, 3, 4, 5, 6];
+        let mut reader = FrameReader {
+            inner: &mut source,
+            began: false,
+            deadline: Deadline::after(start, Duration::from_secs(3)),
+            wait: |_: &&[u8], left: Option<Duration>| {
+                waits.borrow_mut().push(left);
+                Ok(true)
+            },
+            now: || {
+                ticks.set(ticks.get() + 1);
+                start + Duration::from_secs(ticks.get() - 1)
+            },
+        };
+        let mut one = [0_u8; 1];
+
+        // The first read is the frame's first byte: no wait, no look at the clock.
+        assert_eq!(reader.read(&mut one).expect("the first byte"), 1);
+        assert!(waits.borrow().is_empty());
+        // One byte a look, a second per look: the waits ask for what is left.
+        assert_eq!(reader.read(&mut one).expect("at 0 s"), 1);
+        assert_eq!(reader.read(&mut one).expect("at 1 s"), 1);
+        assert_eq!(reader.read(&mut one).expect("at 2 s"), 1);
+        let late = reader
+            .read(&mut one)
+            .expect_err("the deadline passed at 3 s");
+
+        assert_eq!(late.kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(
+            *waits.borrow(),
+            [
+                Some(Duration::from_secs(3)),
+                Some(Duration::from_secs(2)),
+                Some(Duration::from_secs(1)),
+            ]
+        );
+    }
+
+    /// A wait that finds nothing readable within the time left is a timeout
+    /// too, however much time the deadline has.
+    #[test]
+    fn a_wait_that_finds_nothing_readable_times_out() {
+        let start = Instant::now();
+        let mut source: &[u8] = &[1, 2];
+        let mut reader = FrameReader {
+            inner: &mut source,
+            began: true,
+            deadline: Deadline::after(start, Duration::from_secs(3)),
+            wait: |_: &&[u8], _| Ok(false),
+            now: || start,
+        };
+
+        let mut one = [0_u8; 1];
+        let late = reader.read(&mut one).expect_err("nothing came");
+        assert_eq!(late.kind(), std::io::ErrorKind::TimedOut);
     }
 }

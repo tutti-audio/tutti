@@ -15,8 +15,8 @@ use tutti_graph::{
     Cx, FadeLaw, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
     param_parts,
 };
+use tutti_rt::{Param, Param64};
 use tutti_transport::TempoReader;
-use tutti_types::{Param, Param64};
 use tutti_units::UnitParam;
 use tutti_units::{
     Amplitude, Beat, BeatDuration, PlaybackRate, ReadRate, SamplePosition, SampleRate, Samples,

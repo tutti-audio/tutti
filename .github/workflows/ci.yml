@@ -421,8 +421,8 @@ jobs:
 
       # Some of these properties exist only with `debug_assertions` off: `tutti-graph`'s executor guards assert in
       # debug and render silence in release.
-      - name: Test tutti-units, tutti-types, tutti-rt and tutti-graph (release)
-        run: cargo nextest run --locked --release -p tutti-units -p tutti-types -p tutti-rt -p tutti-graph
+      - name: Test tutti-units, tutti-rt and tutti-graph (release)
+        run: cargo nextest run --locked --release -p tutti-units -p tutti-rt -p tutti-graph
 
       # nextest does not run doctests and does not say so; these are the only tests of the `///` examples.
       - name: Doctests

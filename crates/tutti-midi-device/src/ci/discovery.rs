@@ -56,8 +56,6 @@ tutti_units::ranged! {
     /// whether a device is one is the caller's to say, so that floor is
     /// [`INITIATOR_MIN`](Self::INITIATOR_MIN) and not checked here.
     #[derive(Eq, PartialOrd, Ord, Hash)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
     MaxSysexSize(u32), NotASysexSize, "a receivable SysEx size (128 to 2^28 - 1)",
     |raw| raw >= 128 && raw <= 0x0FFF_FFFF
 }

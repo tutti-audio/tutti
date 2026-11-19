@@ -261,12 +261,7 @@ fn a_lane_drives_the_voice_gain_around_its_cell() {
 /// Wires a control lane onto `at` (a `Volume` port) whose knob is `knob`
 /// and whose one layer adds a constant `depth` of a 0..1 range, and
 /// commits it.
-fn drive_volume(
-    ed: &mut tutti_graph::Editor,
-    at: ParamIn,
-    knob: tutti_types::ParamCell,
-    depth: f64,
-) {
+fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::ParamCell, depth: f64) {
     ed.set_param_range(at, ParamRange::new(0.0, 1.0))
         .expect("the node is placed");
     let range = ed

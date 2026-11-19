@@ -154,7 +154,7 @@ impl MmcTimeLabel {
     pub(super) fn head(self) -> [u8; 4] {
         let p = self.time_code;
         [
-            p.rate().code() << 5 | p.timecode().hours(),
+            p.hours_byte(),
             u8::from(self.color_frame) << 6 | p.timecode().minutes(),
             u8::from(self.blank) << 6 | p.timecode().seconds(),
             self.sign.wire() << 6 | p.timecode().frames(),
@@ -168,15 +168,15 @@ impl MmcTimeLabel {
         if hr >= 0x80 || mn >= 0x80 || sc >= 0x80 || fr >= 0x80 {
             return None;
         }
-        let rate = MtcRate::masked(hr >> 5);
-        let (h, m, s, f) = (hr & 0x1F, mn & 0x3F, sc & 0x3F, fr & 0x1F);
+        let (rate, h) = MtcRate::from_hours_byte(hr);
+        let (m, s, f) = (mn & 0x3F, sc & 0x3F, fr & 0x1F);
         let label = if sc & 0x40 != 0 {
             if h | m | s | f != 0 {
                 return None;
             }
             Self::blank(rate)
         } else {
-            match MtcTimeCode::new(rate, h, m, s, f) {
+            match MtcTimeCode::from_hours_byte(hr, m, s, f) {
                 Some(time_code) => Self::new(time_code),
                 None => return None,
             }

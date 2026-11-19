@@ -23,12 +23,12 @@ workspace = true
 # `encode-*` feature on.
 default = []
 encode-wav = []
-encode-flac = ["dep:flacenc", "dep:md-5", "dep:tutti-rt"]
+encode-flac = ["dep:flacenc", "dep:md-5"]
 encode-aiff = ["dep:aifc"]
 # Ogg Vorbis. Its C library (`ogg_next_sys`) does not cross-compile to Windows
 # MSVC from Linux, so `cargo xtask check-windows` leaves it out of the lint run. A
 # decode-only build never reaches it.
-encode-vorbis = ["dep:vorbis_rs", "dep:tutti-rt"]
+encode-vorbis = ["dep:vorbis_rs"]
 # Each `decode-*` feature pulls exactly one symphonia container (and its codec)
 # for `read_wave`, `read_wave_metadata` and `FileIn`: a build lists exactly
 # what it can read. `decode-wav` needs `pcm`: WAV is only the container. AIFF
@@ -46,9 +46,9 @@ thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
-# `spawn_named`: the encoders' worker threads, joined when the writer drops.
-tutti-rt = { version = "0.0.1", path = "../tutti-rt", optional = true }
+# `Mint` (the staged files' names) and `spawn_named` (the encoders' worker threads, joined
+# when the writer drops).
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
 # No default features: the encoder drives flacenc's frame encoder on its own
 # workers, so flacenc's `par` (and its `serde`/`log`) are unused.

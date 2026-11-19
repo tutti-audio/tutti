@@ -64,7 +64,7 @@ use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
     TapAlign, TapId,
 };
-use tutti_types::Mint;
+use tutti_rt::Mint;
 #[cfg(feature = "plugin")]
 use tutti_units::Latency;
 use tutti_units::{Amplitude, Mix, SampleRate, Seconds, UnitAddr};
@@ -143,7 +143,7 @@ pub enum Feeder {
     Clock,
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// A crossfade waiting for a re-prepare, named so its landing can be told
     /// from another's ([`SessionEvent::CrossfadeLanded`](crate::SessionEvent)).
     pub struct CrossfadeId;
@@ -576,13 +576,6 @@ impl<F: Float> Graph<F> {
 
     /// What every node is prepared for: the rate, the largest block, and the
     /// device's callback size when the session knows it.
-    #[cfg(any(
-        feature = "testing",
-        feature = "midi",
-        feature = "plugin",
-        feature = "sampler",
-        feature = "device"
-    ))]
     pub(crate) fn prepared(&self) -> Prepare {
         *self.editor.prepare()
     }

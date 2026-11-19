@@ -36,9 +36,9 @@ use parking_lot::Mutex;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
 use tutti_plugin_types::{Layout, LoadedPlugin, PluginBus};
+use tutti_rt::ParkedSampleRate;
 use tutti_tempo::TempoView;
 use tutti_transport::TempoReader;
-use tutti_types::ParkedSampleRate;
 use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;

@@ -286,7 +286,8 @@ pub mod nodes {
     };
 }
 
-/// The unit vocabulary (`tutti-units`, `tutti-music`, `tutti-types`, `tutti-buffers`) a program names less
+/// The shared vocabulary (units, music types, buffers and the param cells: `tutti-units`,
+/// `tutti-music`, `tutti-buffers`, `tutti-rt`) a program names less
 /// often than the root's units: moments and notes, the parameter cell and its
 /// addresses, shape terms (`Tail`, `Latency`), the edge traits (`Source`,
 /// `Sink`, `Pull`), channel folds and the range errors.
@@ -312,11 +313,11 @@ pub mod types {
         NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
+    pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
         Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
     };
-    pub use tutti_types::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
@@ -681,12 +682,12 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, Identity, InquiryTarget, ManufacturerProfile, MaxSysexSize,
-        MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid, NotASysexSize,
-        NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError, ProcessFeatures,
-        ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry, ProfileState,
-        ProfileTable, ReportRequest, ReportScope, Request, RequestError, SpecificData,
-        StandardProfile, SystemMessages, WinMmDevice,
+        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
+        MaxSysexSize, MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid,
+        NotASysexSize, NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError,
+        ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
+        ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
+        SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
@@ -781,13 +782,13 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         DeviceId as MidiDeviceId, DeviceInfo, EndpointName, Learned, Match, MidiIdentity, Name,
-        SavedDevice,
+        SavedDevice, Whole,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
         InputFault, MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch,
-        ProfilesChange, Switcher, Whole, WholeSwitcher,
+        ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -823,12 +824,13 @@ pub mod midi {
             PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
             PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
             PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
-            PeText, PeTransaction, PeUnreadable, PeVersion, Priority, PropertyName, RefusedAt,
-            RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry, ResourceEntryBuilder,
-            ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet,
-            ResourceTarget, ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits,
-            SimpleAction, SimultaneousRequests, StateId, StateRev, StateSize, StateStamp,
-            StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
+            PeText, PeTransaction, PeUnreadable, PeVersion, Place, Priority, PropertyName,
+            RefusedAt, RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry,
+            ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
+            ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName, SelectorAction,
+            SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId, StateRev,
+            StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint,
+            UnixSeconds, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{

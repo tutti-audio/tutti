@@ -65,7 +65,7 @@ use crate::{Input, Session, SessionEvent, Trim};
 /// How many frames the pump moves a pass.
 const PASS_FRAMES: usize = 1024;
 
-tutti_types::id! {
+tutti_rt::id! {
     /// One take of a session: the number [`TakeEvent`]s carry.
     pub struct TakeId;
 }
