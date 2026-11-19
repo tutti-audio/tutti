@@ -138,9 +138,9 @@ impl ProcessGuard {
 
 impl Drop for ProcessGuard {
     fn drop(&mut self) {
-        // The bridge is asked to stop before the end, so the EOF the end
-        // causes is read after the request and declares nothing; the exit
-        // thread is stopped for the same reason. (The request ends in a SeqCst
+        // The exit thread and then the bridge are told to stop before the
+        // end, so neither declares the end a death: the EOF the end causes is
+        // read after the bridge's request. (The request ends in a SeqCst
         // fence and `crash` loads the flag after another, so a failure read
         // after the end cannot miss the stop: a store-load pair, fenced.) The
         // bridge says `Shutdown` to the server as it ends, and the server
