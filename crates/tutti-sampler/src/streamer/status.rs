@@ -64,7 +64,7 @@ pub struct StreamStatus {
     /// Where the stream is.
     pub phase: StreamPhase,
     /// The loop the stream runs, as the streamer applied it. It can differ from
-    /// the one asked for ([`Stream::set_loop`](crate::Stream::set_loop)): a
+    /// the one asked for ([`Stream::looping_cell`](crate::Stream::looping_cell)): a
     /// lead-in that cannot be read plays the loop hard, with no crossfade, and
     /// this says so. It is the loop an export fork of the stream plays.
     /// `None` until the streamer has applied one.

@@ -115,27 +115,19 @@ pub(crate) enum Retired<F: SamplerFloat> {
 /// should not have, since the pool was built: a reading a host polls
 /// ([`VoicePoolHandle::drops`]), never a log line from the callback.
 ///
-/// Each is a count of commands (or values) and only ever grows. The
-/// `loops_streamer_gone` and `directions_dropped` counts are taken where a
-/// streaming voice's loop or direction is passed to its stream, on the
-/// control thread ([`VoicePoolHandle::set_loop`],
-/// [`add_streaming`](VoicePoolHandle::add_streaming)); the rest by the drain.
+/// Each is a count of commands (or values) and only ever grows. They are taken
+/// by the drain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct PoolDrops {
-    /// Streaming loops (set or cleared) whose stream found the streamer
-    /// thread exited. The loop is not recorded in the voice's `Playback`: the
-    /// handle puts the record back, as far as the queue has room to.
-    pub loops_streamer_gone: u64,
     /// Loop commands (set or cleared) the drain found aimed at a streaming
     /// slot whose stream the handle had not passed them to: a slot the
     /// handle's stream no longer belongs to. Not recorded, since the stream
     /// was not told.
     pub loops_not_forwarded: u64,
-    /// Streaming directions (reverse, or back to forward) that never reached
-    /// their stream: the streamer thread has exited, or the drain found the
-    /// command aimed at a slot whose stream the handle had not passed it to.
-    /// Not recorded in the voice's `Playback`.
+    /// Streaming directions (reverse, or back to forward) the drain found
+    /// aimed at a slot whose stream the handle had not passed them to. Not
+    /// recorded in the voice's `Playback`.
     pub directions_dropped: u64,
     /// [`replace_wave`](VoicePoolHandle::replace_wave) calls aimed at a
     /// streaming voice, which changes source by a fresh
@@ -153,11 +145,10 @@ pub struct PoolDrops {
 }
 
 /// The atomics behind [`PoolDrops`], shared by a pool and its handle. Bumped
-/// with a relaxed add (by the drain on the audio thread, and by a loop
-/// forward on the control thread); read on the control thread.
+/// with a relaxed add (by the drain on the audio thread); read on the control
+/// thread.
 #[derive(Debug, Default)]
 pub(crate) struct DrainCounters {
-    pub(crate) loops_streamer_gone: AtomicU64,
     pub(crate) loops_not_forwarded: AtomicU64,
     pub(crate) directions_dropped: AtomicU64,
     wave_swaps_ignored: AtomicU64,
@@ -187,7 +178,6 @@ impl DrainCounters {
     pub(crate) fn snapshot(&self) -> PoolDrops {
         let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
         PoolDrops {
-            loops_streamer_gone: load(&self.loops_streamer_gone),
             loops_not_forwarded: load(&self.loops_not_forwarded),
             directions_dropped: load(&self.directions_dropped),
             wave_swaps_ignored: load(&self.wave_swaps_ignored),

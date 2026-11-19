@@ -1,5 +1,6 @@
 //! A sampler voice's steering values written with the session's verbs: its
-//! window (`clip.window()`) is staged at `set` and published by the next
+//! window (`clip.window()`), loop (`clip.looping()`) and direction
+//! (`clip.direction()`) are staged at `set` and published by the next
 //! `update()`.
 
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, Wave};
@@ -244,4 +245,457 @@ fn a_block_adopting_a_written_window_does_not_allocate() {
         }
     });
     assert!(buf.iter().any(|&x| x != 0.0), "the window took");
+}
+
+/// File frames of the ramp both tiers play. Frame `i` holds `i / 2^17`, exact
+/// in `f32`, so an output sample names the source frame it was read from.
+const LEN: usize = 8_000;
+
+/// Frames of a device block the rig renders in.
+const BLOCK: usize = 512;
+
+fn ramp(i: usize) -> f32 {
+    i as f32 / 131_072.0
+}
+
+/// A clip of the ramp at beat 0 in `tier`, wired to the output, with the
+/// session rolling and, for the streamed tier, the streamer that feeds it.
+struct Rig {
+    s: Session,
+    clip: tutti_session::Key<Clip<f32>>,
+    handle: tutti_sampler::VoiceNodeHandle<f32>,
+    streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::ByHand<f32>, f32>>,
+    /// Frames rendered so far: the frame the next render starts at.
+    at: usize,
+    _dir: tempfile::TempDir,
+}
+
+impl Rig {
+    fn new(streamed: bool) -> Self {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let samples: Vec<f32> = (0..LEN).map(ramp).collect();
+        let mut s = offline();
+        let (clip, streamer) = if streamed {
+            let path = dir.path().join("ramp.wav");
+            tutti_fixtures::signal::write_wav_f32(&path, SampleRate::of(RATE), 1, &samples);
+            let mut streamer =
+                tutti_sampler::DiskStreamer::by_hand(SampleRate::of(RATE), Default::default())
+                    .expect("builds");
+            let opening = streamer.open(&path, tutti_sampler::Placement::HEAD);
+            let (stream, reader) =
+                tutti_sampler::testing::settle(&mut streamer, opening).expect("the file opens");
+            (Clip::streaming(reader, stream), Some(streamer))
+        } else {
+            let mut wave = Wave::new(1, SampleRate::of(RATE));
+            for &x in &samples {
+                wave.append(Interleaved::new(&[x], wave.layout()).unwrap())
+                    .unwrap();
+            }
+            (Clip::new(wave).expect("a placeable wave"), None)
+        };
+        let (clip, handle) = s.graph().add(clip.at(Beat(0.0)));
+        for port in 0..2 {
+            s.graph()
+                .set_sources_hard(Root::output(port), [OutPort::new(clip.erase(), 0)])
+                .unwrap();
+        }
+        let _ = s.update();
+        s.play().expect("room");
+        let mut rig = Self {
+            s,
+            clip,
+            handle,
+            streamer,
+            at: 0,
+            _dir: dir,
+        };
+        rig.settle();
+        rig
+    }
+
+    /// The streamer's work done: the ring holds what its cells ask for.
+    fn settle(&mut self) {
+        if let Some(streamer) = &mut self.streamer {
+            let _ = streamer.step_until_settled(1_000);
+        }
+    }
+
+    /// `frames` frames of the first output, in 512-frame blocks, the streamer
+    /// stepped between them as a running one is.
+    fn render(&mut self, frames: usize) -> Vec<f32> {
+        let mut out = Vec::new();
+        let mut buf = vec![0.0f32; BLOCK * 2];
+        while out.len() < frames {
+            self.s
+                .render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+            out.extend(buf.chunks(2).map(|f| f[0]));
+            self.settle();
+        }
+        out.truncate(frames);
+        self.at += frames;
+        out
+    }
+}
+
+fn loop_1000_3000() -> Option<tutti_sampler::Loop> {
+    Some(tutti_sampler::testing::loop_frames(1_000, 3_000, 0))
+}
+
+/// **A loop set is pending until the update, and then the voice wraps at its
+/// end**, in either tier: a loop over frames `1000..3000` is written. A read
+/// answers it while the node's cell holds none; after the update the cell
+/// holds it, and the output is the source frame `f` up to the loop's end, the
+/// position wrapping to `1000` on frame 3000 and every 2000 frames after
+/// (source frame `1000 + (f - 3000) % 2000`). Resident: the node applies it.
+/// Streamed: the streamer reads the same cell and republishes the ring's
+/// layout.
+fn a_loop_set_wraps_the_voice_at_its_end(streamed: bool) {
+    let mut rig = Rig::new(streamed);
+    let looped = loop_1000_3000();
+    rig.s.set(rig.clip.looping().to(looped)).unwrap();
+    assert_eq!(rig.s.get(rig.clip.looping()).unwrap(), looped);
+    assert_eq!(*rig.handle.looping_cell().current(), None, "pending");
+    let _ = rig.s.update();
+    assert_eq!(*rig.handle.looping_cell().current(), looped);
+    rig.settle();
+    let out = rig.render(7_000);
+    for (f, &got) in out.iter().enumerate() {
+        let source = if f < 3_000 {
+            f
+        } else {
+            1_000 + (f - 3_000) % 2_000
+        };
+        assert_eq!(
+            got.to_bits(),
+            ramp(source).to_bits(),
+            "frame {f}: source {source}"
+        );
+    }
+}
+
+#[test]
+fn a_loop_set_lands_at_the_update_and_wraps_a_resident_voice_at_its_end() {
+    a_loop_set_wraps_the_voice_at_its_end(false);
+}
+
+#[test]
+fn a_loop_set_lands_at_the_update_and_wraps_a_streamed_voice_at_its_end() {
+    a_loop_set_wraps_the_voice_at_its_end(true);
+}
+
+/// **A direction set is pending until the update, and then the voice plays
+/// the source backwards from its last frame**, in either tier: output frame
+/// `f` is source frame `LEN - 1 - f` (a streamed voice from its second block).
+fn a_direction_set_plays_the_voice_backwards(streamed: bool) {
+    let mut rig = Rig::new(streamed);
+    rig.s
+        .set(rig.clip.direction().to(tutti_sampler::Direction::Reverse))
+        .unwrap();
+    assert_eq!(
+        rig.s.get(rig.clip.direction()).unwrap(),
+        tutti_sampler::Direction::Reverse
+    );
+    assert_eq!(
+        *rig.handle.direction_cell().current(),
+        tutti_sampler::Direction::Forward,
+        "pending"
+    );
+    let _ = rig.s.update();
+    rig.settle();
+    let out = rig.render(LEN);
+    if streamed {
+        // The streamer turns its ring from a switch point a guard past the
+        // block the reader is in, crossfaded over the seek crossfade: the
+        // voice plays forwards up to the guard, blends the two across the
+        // crossfade (each frame between the forward and the reversed one),
+        // and plays backwards from the block, the guard and the crossfade on.
+        let guard = tutti_sampler::GUARD_FRAMES.get();
+        let fade = tutti_sampler::DiskStreamerConfig::default()
+            .buffer_config
+            .seek_crossfade_frames
+            .get();
+        for (f, &got) in out.iter().enumerate().take(guard) {
+            assert_eq!(got.to_bits(), ramp(f).to_bits(), "frame {f} plays forwards");
+        }
+        for (f, &got) in out.iter().enumerate().skip(guard).take(fade) {
+            let (a, b) = (ramp(f), ramp(LEN - 1 - f));
+            let (lo, hi) = (a.min(b), a.max(b));
+            assert!(
+                (lo..=hi).contains(&got),
+                "frame {f}: {got} is not between {lo} and {hi}"
+            );
+        }
+        let landed = out
+            .iter()
+            .enumerate()
+            .rposition(|(f, &x)| x.to_bits() != ramp(LEN - 1 - f).to_bits())
+            .map_or(0, |last| last + 1);
+        assert!(
+            landed <= BLOCK + guard + fade,
+            "the turn landed at frame {landed}, past a block, the guard and the crossfade"
+        );
+        assert!(landed > guard, "the turn is not instant: it crossfades");
+        for (f, &got) in out.iter().enumerate().skip(BLOCK + guard + fade) {
+            assert_eq!(got.to_bits(), ramp(LEN - 1 - f).to_bits(), "frame {f}");
+        }
+    } else {
+        for (f, &got) in out.iter().enumerate() {
+            assert_eq!(got.to_bits(), ramp(LEN - 1 - f).to_bits(), "frame {f}");
+        }
+    }
+}
+
+#[test]
+fn a_direction_set_lands_at_the_update_and_plays_a_resident_voice_backwards() {
+    a_direction_set_plays_the_voice_backwards(false);
+}
+
+#[test]
+fn a_direction_set_lands_at_the_update_and_plays_a_streamed_voice_backwards() {
+    a_direction_set_plays_the_voice_backwards(true);
+}
+
+/// **Two loops or directions written before an update publish once, and the
+/// second wins**: each cell's `seq` moves by one.
+#[test]
+fn two_loop_and_direction_writes_before_an_update_publish_once_and_the_second_wins() {
+    let mut rig = Rig::new(false);
+    let cells = (
+        rig.handle.looping_cell().clone(),
+        rig.handle.direction_cell().clone(),
+    );
+    let before = (cells.0.seq(), cells.1.seq());
+    let second = Some(tutti_sampler::testing::loop_frames(500, 900, 0));
+    for looped in [loop_1000_3000(), second] {
+        rig.s.set(rig.clip.looping().to(looped)).unwrap();
+    }
+    for direction in [
+        tutti_sampler::Direction::Reverse,
+        tutti_sampler::Direction::Forward,
+    ] {
+        rig.s.set(rig.clip.direction().to(direction)).unwrap();
+    }
+    let _ = rig.s.update();
+    assert_eq!(*cells.0.current(), second);
+    assert_eq!(cells.0.seq(), before.0 + 1);
+    assert_eq!(
+        cells.1.seq(),
+        before.1,
+        "a direction written back to the one in force publishes nothing"
+    );
+    let _ = rig.s.update();
+    assert_eq!(cells.0.seq(), before.0 + 1, "nothing pending");
+}
+
+/// **A loop or direction written to a node removed before the update never
+/// publishes**: the node's cells keep what they held through the updates
+/// after, and the targets are gone.
+#[test]
+fn a_pending_loop_or_direction_write_to_a_removed_node_never_publishes() {
+    let mut rig = Rig::new(false);
+    let cells = (
+        rig.handle.looping_cell().clone(),
+        rig.handle.direction_cell().clone(),
+    );
+    let seqs = (cells.0.seq(), cells.1.seq());
+    rig.s.set(rig.clip.looping().to(loop_1000_3000())).unwrap();
+    rig.s
+        .set(rig.clip.direction().to(tutti_sampler::Direction::Reverse))
+        .unwrap();
+    let clip = rig.clip;
+    rig.s.remove(clip).unwrap();
+    let _ = rig.s.update();
+    let _ = rig.s.update();
+    assert_eq!((cells.0.seq(), cells.1.seq()), seqs);
+    assert_eq!(*cells.0.current(), None);
+    assert_eq!(*cells.1.current(), tutti_sampler::Direction::Forward);
+    let err = rig
+        .s
+        .set(clip.looping().to(None))
+        .expect_err("the node is gone");
+    assert_eq!(err.kind, ValueErrorKind::NoSuchTarget);
+    assert_eq!(
+        rig.s.get(clip.direction()).expect_err("gone").kind,
+        ValueErrorKind::NoSuchTarget
+    );
+}
+
+/// **Blocks that adopt a written loop and direction allocate nothing**, in
+/// either tier (the streamer's work on the streamed one is done outside).
+fn blocks_adopting_a_loop_and_direction_do_not_allocate(streamed: bool) {
+    let mut rig = Rig::new(streamed);
+    let _ = rig.render(1_024);
+    rig.s.set(rig.clip.looping().to(loop_1000_3000())).unwrap();
+    rig.s
+        .set(rig.clip.direction().to(tutti_sampler::Direction::Reverse))
+        .unwrap();
+    let _ = rig.s.update();
+    rig.settle();
+    let mut buf = vec![0.0f32; 512 * 2];
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..4 {
+            rig.s
+                .render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+        }
+    });
+    // The direction was adopted: the last block's first frame is frame 2 560
+    // of the voice, which plays the source backwards.
+    assert_eq!(buf[0].to_bits(), ramp(LEN - 1 - 2_560).to_bits());
+}
+
+#[test]
+fn blocks_adopting_a_loop_and_direction_do_not_allocate_on_a_resident_voice() {
+    blocks_adopting_a_loop_and_direction_do_not_allocate(false);
+}
+
+#[test]
+fn blocks_adopting_a_loop_and_direction_do_not_allocate_on_a_streamed_voice() {
+    blocks_adopting_a_loop_and_direction_do_not_allocate(true);
+}
+
+/// Frames after an update by which a change is fully heard: at once on a
+/// resident voice; on a streamed one a block, the guard and the crossfade on
+/// (and a few frames for the fade's tail).
+fn landing(streamed: bool) -> usize {
+    if !streamed {
+        return 0;
+    }
+    let fade = tutti_sampler::DiskStreamerConfig::default()
+        .buffer_config
+        .seek_crossfade_frames
+        .get();
+    BLOCK + tutti_sampler::GUARD_FRAMES.get() + fade + 8
+}
+
+/// Asserts `out`, rendered from frame `start`, is `source(f)` at every frame
+/// `f` from `from` on, bit for bit.
+fn assert_source(out: &[f32], start: usize, from: usize, source: impl Fn(usize) -> usize) {
+    for (i, &got) in out.iter().enumerate() {
+        let f = start + i;
+        if f >= from {
+            assert_eq!(
+                got.to_bits(),
+                ramp(source(f)).to_bits(),
+                "frame {f}: source {}",
+                source(f)
+            );
+        }
+    }
+}
+
+/// **A loop set mid-play wraps the voice at its end**: the voice plays
+/// forwards over 1 024 frames, then a loop over `1000..3000` is written; the
+/// voice plays on to frame 3 000 and wraps there and every 2 000 frames after.
+fn a_loop_set_mid_play_wraps_at_its_end(streamed: bool) {
+    let mut rig = Rig::new(streamed);
+    let before = rig.render(1_024);
+    assert_source(&before, 0, 0, |f| f);
+    rig.s.set(rig.clip.looping().to(loop_1000_3000())).unwrap();
+    let _ = rig.s.update();
+    let after = rig.render(6_000);
+    let wrap = |f: usize| {
+        if f < 3_000 {
+            f
+        } else {
+            1_000 + (f - 3_000) % 2_000
+        }
+    };
+    assert_source(&after, 1_024, 1_024 + landing(streamed), wrap);
+}
+
+/// **A loop cleared mid-play plays the file straight on**: inside the second
+/// lap of a loop over `1000..3000`, the loop is cleared; the voice, at
+/// straight position `f`, plays file frame `f` from then on.
+fn a_loop_cleared_mid_play_plays_straight_on(streamed: bool) {
+    let mut rig = Rig::new(streamed);
+    rig.s.set(rig.clip.looping().to(loop_1000_3000())).unwrap();
+    let _ = rig.s.update();
+    rig.settle();
+    let wrap = |f: usize| {
+        if f < 3_000 {
+            f
+        } else {
+            1_000 + (f - 3_000) % 2_000
+        }
+    };
+    let before = rig.render(4_096);
+    assert_source(&before, 0, 0, wrap);
+    rig.s.set(rig.clip.looping().to(None)).unwrap();
+    let _ = rig.s.update();
+    let after = rig.render(3_072);
+    assert_source(&after, 4_096, 4_096 + landing(streamed), |f| f);
+}
+
+/// **A direction reversed mid-play and turned forward again lands each time**:
+/// forwards over 1 024 frames, reversed (frame `f` plays source `LEN - 1 - f`),
+/// then forwards (frame `f` plays source `f`).
+fn a_direction_reversed_then_forward_mid_play(streamed: bool) {
+    use tutti_sampler::Direction;
+    let mut rig = Rig::new(streamed);
+    let first = rig.render(1_024);
+    assert_source(&first, 0, 0, |f| f);
+    rig.s
+        .set(rig.clip.direction().to(Direction::Reverse))
+        .unwrap();
+    let _ = rig.s.update();
+    let reversed = rig.render(3_072);
+    assert_source(&reversed, 1_024, 1_024 + landing(streamed), |f| LEN - 1 - f);
+    rig.s
+        .set(rig.clip.direction().to(Direction::Forward))
+        .unwrap();
+    let _ = rig.s.update();
+    let forward = rig.render(3_072);
+    assert_source(&forward, 4_096, 4_096 + landing(streamed), |f| f);
+}
+
+#[test]
+fn a_loop_set_mid_play_wraps_a_resident_voice() {
+    a_loop_set_mid_play_wraps_at_its_end(false);
+}
+
+#[test]
+fn a_loop_set_mid_play_wraps_a_streamed_voice() {
+    a_loop_set_mid_play_wraps_at_its_end(true);
+}
+
+#[test]
+fn a_loop_cleared_mid_play_plays_a_resident_voice_straight_on() {
+    a_loop_cleared_mid_play_plays_straight_on(false);
+}
+
+#[test]
+fn a_loop_cleared_mid_play_plays_a_streamed_voice_straight_on() {
+    a_loop_cleared_mid_play_plays_straight_on(true);
+}
+
+#[test]
+fn a_direction_reversed_then_forward_mid_play_lands_on_a_resident_voice() {
+    a_direction_reversed_then_forward_mid_play(false);
+}
+
+#[test]
+fn a_direction_reversed_then_forward_mid_play_lands_on_a_streamed_voice() {
+    a_direction_reversed_then_forward_mid_play(true);
+}
+
+/// **A direction turned mid-play on a free-running voice jumps to the mirrored
+/// frame**: the free cursor is at `p` after `p` frames, and a reversed read
+/// of cursor `p` is source frame `LEN - 1 - p`. After 1 024 frames of
+/// `ramp(f)`, the next frame is `ramp(LEN - 1 - 1024)` and the voice goes on
+/// backwards from there, bit for bit.
+#[test]
+fn a_direction_turned_mid_play_on_a_free_running_voice_jumps_to_the_mirrored_frame() {
+    use tutti_sampler::Direction;
+    let mut rig = Rig::new(false);
+    rig.s.set(rig.clip.window().to(None)).unwrap();
+    let _ = rig.s.update();
+    rig.handle.play().expect("a free-running voice");
+    let forward = rig.render(1_024);
+    assert_source(&forward, 0, 0, |f| f);
+    rig.s
+        .set(rig.clip.direction().to(Direction::Reverse))
+        .unwrap();
+    let _ = rig.s.update();
+    let reversed = rig.render(2_048);
+    assert_source(&reversed, 1_024, 1_024, |f| LEN - 1 - f);
 }

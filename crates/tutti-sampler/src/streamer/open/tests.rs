@@ -276,20 +276,20 @@ fn a_loop_set_through_one_stream_leaves_the_other_unchanged() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (mut a, reader_a) = settle(&mut streamer, opening).expect("the file opens");
+    let (a, reader_a) = settle(&mut streamer, opening).expect("the file opens");
     let opening = streamer.open(&path, Placement::HEAD);
-    let (mut b, reader_b) = settle(&mut streamer, opening).expect("the file opens");
+    let (b, reader_b) = settle(&mut streamer, opening).expect("the file opens");
     let loop_of = |reader: &StreamReader<f32>| reader.ring.applied().loop_;
     let looped = |start, end| Some(loop_frames(start, end, 0));
 
     // B is opened second, so a command that went to "the newest" or to "the
     // first" would be A's or B's by accident; both directions are checked.
-    a.set_loop(looped(1_000, 3_000)).expect("alive");
+    a.looping_cell().publish(looped(1_000, 3_000));
     let _ = streamer.step_until_settled(1_000);
     assert_eq!(loop_of(&reader_a), looped(1_000, 3_000));
     assert_eq!(loop_of(&reader_b), None, "B was not asked");
 
-    b.set_loop(looped(500, 900)).expect("alive");
+    b.looping_cell().publish(looped(500, 900));
     let _ = streamer.step_until_settled(1_000);
     assert_eq!(loop_of(&reader_b), looped(500, 900));
     assert_eq!(loop_of(&reader_a), looped(1_000, 3_000), "A is as it was");
@@ -318,10 +318,10 @@ fn a_stopped_streams_handle_commands_nothing() {
 
     // The handle of the stream that is gone: what a late command still
     // reaching the queue looks like.
-    let mut ghost = Stream::detached(id_a, StreamerPort::new(streamer.streamer_tx.clone()));
+    let ghost = Stream::detached(id_a, StreamerPort::new(streamer.streamer_tx.clone()));
     ghost
-        .set_loop(Some(loop_frames(1_000, 3_000, 0)))
-        .expect("the queue is alive: the command is sent, and ignored");
+        .looping_cell()
+        .publish(Some(loop_frames(1_000, 3_000, 0)));
     let _ = streamer.step_until_settled(1_000);
     assert_eq!(
         reader_b.ring.applied().loop_,
@@ -422,10 +422,10 @@ fn an_f64_stream_writes_a_loop_by_position() {
     let (_dir, path) = i32_file();
     let mut streamer = manual_f64();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (mut stream, mut reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (stream, mut reader) = settle(&mut streamer, opening).expect("the file opens");
     stream
-        .set_loop(Some(loop_frames(1_000, 1_500, 0)))
-        .expect("the streamer is alive");
+        .looping_cell()
+        .publish(Some(loop_frames(1_000, 1_500, 0)));
     let _ = streamer.step_until_settled(1_000);
 
     let play = 1_600usize;

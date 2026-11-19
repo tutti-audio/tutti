@@ -6,14 +6,16 @@
 //!
 //! | Source | Rung by |
 //! |---|---|
-//! | a command (open, close, loop, direction, session rate) | [`StreamerSender::send`], after the push |
+//! | a command (open, close, session rate) | [`StreamerSender::send`], after the push |
+//! | a loop or direction a stream's control side publishes | [`SteerCell::publish`](super::steer::SteerCell::publish), through [`Bell::ring_steer`] |
 //! | the decode lane's answer to an open | the same send (the lane holds a `StreamerSender`) |
 //! | a voice's ring below its refill threshold, or a jump outside the window | [`Bell::ring_refill`], from the audio thread (`RingReader::block`, through [`needs_refill`](super::io::refill::needs_refill)) |
 //! | shutdown | [`Bell::shut`] |
 //! | the reclaim backstop | the wait's timeout, which stays |
 //!
 //! The wait is [`Sleeper::wait_timeout`] over what each source publishes: a
-//! command is in the queue, the refill flag is set, or the shutdown flag is.
+//! command is in the queue, the refill or steer flag is set, or the shutdown
+//! flag is.
 //! The flag a voice sets and the doorbell's ring are in the order the
 //! doorbell's protocol asks (publish, then ring), so a ring that lands between
 //! the streamer's last look and its park is not lost. The backstop bounds how
@@ -39,6 +41,9 @@ pub(crate) struct Bell {
     /// A voice found its ring wanting a refill since the streamer's last
     /// cycle began ([`begin_cycle`](Self::begin_cycle) clears it).
     refill: AtomicBool,
+    /// A loop or direction was published for the streamer to take since its
+    /// last cycle began.
+    steer: AtomicBool,
     /// The streamer is to stop: the one shutdown mechanism.
     shut: AtomicBool,
     /// Cycles the thread has begun (tests: how often it woke).
@@ -54,6 +59,7 @@ impl Bell {
         let bell = Arc::new(Self {
             door,
             refill: AtomicBool::new(false),
+            steer: AtomicBool::new(false),
             shut: AtomicBool::new(false),
             #[cfg(test)]
             cycles: std::sync::atomic::AtomicU64::new(0),
@@ -76,6 +82,13 @@ impl Bell {
         self.door.ring();
     }
 
+    /// A request was published for the streamer (a loop or direction): set
+    /// the flag it reads, then ring. Control thread.
+    pub(crate) fn ring_steer(&self) {
+        self.steer.store(true, Ordering::Release);
+        self.door.ring();
+    }
+
     /// Ask the streamer to stop, and wake it to see it.
     pub(crate) fn shut(&self) {
         self.shut.store(true, Ordering::Release);
@@ -92,8 +105,15 @@ impl Bell {
     /// the next wait.
     pub(crate) fn begin_cycle(&self) {
         self.refill.store(false, Ordering::Relaxed);
+        self.steer.store(false, Ordering::Relaxed);
         #[cfg(test)]
         self.cycles.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Whether a flag the streamer sleeps on is set: a voice's refill, a
+    /// published request, or shutdown.
+    pub(crate) fn has_work(&self) -> bool {
+        self.is_shut() || self.refill.load(Ordering::Acquire) || self.steer.load(Ordering::Acquire)
     }
 
     /// Whether the streamer is parked, or about to be (tests).
@@ -118,10 +138,7 @@ impl Bell {
         queued: impl FnOnce() -> bool,
         backstop: Duration,
     ) {
-        sleeper.wait_timeout(
-            || queued() || self.is_shut() || self.refill.load(Ordering::Acquire),
-            backstop,
-        );
+        sleeper.wait_timeout(|| queued() || self.has_work(), backstop);
     }
 }
 

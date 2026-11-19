@@ -56,6 +56,12 @@ pub enum SlotId {
     /// Where a sampler voice sits on the transport.
     #[cfg(feature = "sampler")]
     Window(NodeKey),
+    /// A sampler voice's loop.
+    #[cfg(feature = "sampler")]
+    Looping(NodeKey),
+    /// Which way a sampler voice plays.
+    #[cfg(feature = "sampler")]
+    Direction(NodeKey),
     /// How a modulation route maps its source's value onto its span.
     RoutePolarity(ModRouteId),
     /// The law that shapes a modulation route's value.
@@ -79,7 +85,7 @@ impl SlotId {
             #[cfg(feature = "midi")]
             Self::ClipEvents(node) | Self::Harmony(node) => Some(node),
             #[cfg(feature = "sampler")]
-            Self::Window(node) => Some(node),
+            Self::Window(node) | Self::Looping(node) | Self::Direction(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
@@ -113,6 +119,13 @@ impl NodeSlots {
     #[cfg(any(feature = "midi", feature = "sampler"))]
     pub(crate) fn of<C: Held>(id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
         Self(vec![(id, erase_staged(slot))])
+    }
+
+    /// These slots and `slot` as the value `id` names.
+    #[cfg(feature = "sampler")]
+    pub(crate) fn and<C: Held>(mut self, id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
+        self.0.push((id, erase_staged(slot)));
+        self
     }
 }
 
@@ -435,6 +448,8 @@ node_slot_target!(
     /// [`stop`](tutti_sampler::VoiceNodeHandle::stop) drive such a voice and
     /// refuse a placed one with [`PlayError::Placed`](tutti_sampler::PlayError)).
     /// A streamed voice is always placed: `None` leaves it at its window.
+    /// Stretch applies only to a placed voice, so a stretched clip given
+    /// `None` plays dry.
     ///
     /// A write is staged and published by the next
     /// [`Session::update`](crate::Session::update); the voice reads the window
@@ -447,22 +462,69 @@ node_slot_target!(
 );
 
 #[cfg(feature = "sampler")]
-impl<F: tutti_sampler::SamplerFloat> crate::Key<tutti_sampler::VoiceNode<F>> {
-    /// The window the voice plays on the transport.
-    #[must_use]
-    pub const fn window(self) -> WindowTarget {
-        WindowTarget::new(self.erase())
-    }
+node_slot_target!(
+    /// A sampler voice's loop, as `sampler.looping()` names it: `Some` plays
+    /// the [`Loop`](tutti_sampler::Loop), `None` plays once.
+    ///
+    /// A write is staged and published by the next
+    /// [`Session::update`](crate::Session::update). The voice's node applies
+    /// it to a resident source at its next block after that. For a streamed
+    /// voice the streamer reads the same cell on its next cycle and applies
+    /// the loop to the ring's layout, which the node reads: the session
+    /// forwards nothing. A read answers the staged loop, else the one in
+    /// force. A write to a node removed before the update is dropped.
+    LoopingTarget,
+    Option<tutti_sampler::Loop>,
+    Looping
+);
+
+#[cfg(feature = "sampler")]
+node_slot_target!(
+    /// Which way a sampler voice plays, as `sampler.direction()` names it:
+    /// [`Direction::Reverse`](tutti_sampler::Direction) reads the source from
+    /// its end and ignores the loop.
+    ///
+    /// A write is staged and published by the next
+    /// [`Session::update`](crate::Session::update), and lands as the loop's
+    /// does: a resident voice at its next block, a streamed one through the
+    /// streamer's next cycle. A free-running voice (no window) turned mid-play
+    /// jumps rather than continuing: its cursor `p` then reads the file
+    /// mirrored, frame `len - 1 - p`, and goes on backwards from there. A read
+    /// answers the staged direction, else the one in force. A write to a node removed before the update is dropped.
+    DirectionTarget,
+    tutti_sampler::Direction,
+    Direction
+);
+
+/// Where a sampler node's value targets are reached from its key: a voice node
+/// and a clip are the same node underneath.
+#[cfg(feature = "sampler")]
+macro_rules! sampler_keys {
+    ($($node:ty),*) => {$(
+        impl<F: tutti_sampler::SamplerFloat> crate::Key<$node> {
+            /// The window the voice plays on the transport.
+            #[must_use]
+            pub const fn window(self) -> WindowTarget {
+                WindowTarget::new(self.erase())
+            }
+
+            /// The voice's loop.
+            #[must_use]
+            pub const fn looping(self) -> LoopingTarget {
+                LoopingTarget::new(self.erase())
+            }
+
+            /// Which way the voice plays.
+            #[must_use]
+            pub const fn direction(self) -> DirectionTarget {
+                DirectionTarget::new(self.erase())
+            }
+        }
+    )*};
 }
 
 #[cfg(feature = "sampler")]
-impl<F: tutti_sampler::SamplerFloat> crate::Key<tutti_sampler::Clip<F>> {
-    /// The window the clip plays on the transport.
-    #[must_use]
-    pub const fn window(self) -> WindowTarget {
-        WindowTarget::new(self.erase())
-    }
-}
+sampler_keys!(tutti_sampler::VoiceNode<F>, tutti_sampler::Clip<F>);
 
 #[cfg(feature = "midi")]
 impl crate::Key<tutti_midi_runtime::MidiClipNode> {
@@ -784,6 +846,24 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T
 
     fn replace(&self, value: &T) -> bool {
         if *tutti_rt::Publisher::current(self) != *value {
+            self.publish(*value);
+        }
+        true
+    }
+}
+
+/// A sampler voice's loop or direction cell: written through the cell, which
+/// publishes when the value differs and wakes the streamer of a streamed voice.
+#[cfg(feature = "sampler")]
+impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_sampler::SteerCell<T> {
+    type Value = T;
+
+    fn current(&self) -> T {
+        *tutti_sampler::SteerCell::current(self)
+    }
+
+    fn replace(&self, value: &T) -> bool {
+        if *tutti_sampler::SteerCell::current(self) != *value {
             self.publish(*value);
         }
         true
