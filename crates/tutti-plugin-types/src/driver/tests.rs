@@ -9,8 +9,8 @@
 use super::*;
 use crate::fake::{Call, FakeLoaded, FakePlugin};
 use crate::{
-    HostOp, MaxBlock, PluginError, PluginIo, PluginResult, PluginTail, ProcessContext,
-    ProcessOutput, Processor, RenderMode, Request, RequestWord, Samples, Stage, taken,
+    AtomicRequestFlags, HostOp, MaxBlock, PluginError, PluginIo, PluginResult, PluginTail,
+    ProcessContext, ProcessOutput, Processor, RenderMode, Request, Samples, Stage, taken,
 };
 use tutti_buffers::FloatWidth;
 use tutti_buffers::InputOutput;
@@ -75,7 +75,7 @@ impl Rig {
 
     /// Delivers what the plugin raised, then the idle pass.
     fn tick(&mut self) {
-        let requests: Vec<_> = taken(self.plugin.request_word()).collect();
+        let requests: Vec<_> = taken(self.plugin.request_flags()).collect();
         for request in requests {
             self.drive(Event::Request(request));
         }
@@ -318,7 +318,7 @@ fn a_latency_change_restarts_once_and_is_announced() {
     rig.take_notices();
 
     rig.plugin.set_latency(Samples::new(128));
-    Request::LatencyChanged.raise(rig.plugin.request_word());
+    Request::LatencyChanged.raise(rig.plugin.request_flags());
     rig.tick();
 
     assert_eq!(activations(&rig.plugin.calls()), 2);
@@ -339,7 +339,7 @@ fn a_tail_change_is_read_in_place() {
     rig.take_notices();
 
     rig.plugin.set_tail(Samples::new(500));
-    Request::TailChanged.raise(rig.plugin.request_word());
+    Request::TailChanged.raise(rig.plugin.request_flags());
     rig.tick();
 
     assert_eq!(activations(&rig.plugin.calls()), 1);
@@ -357,7 +357,7 @@ fn a_failed_rebuild_is_refused_and_the_next_activation_rebuilds_first() {
     rig.op(HostOp::Activate(prepare(48_000.0)));
     rig.take_notices();
     rig.plugin.fail_rebuild(true);
-    Request::Reload.raise(rig.plugin.request_word());
+    Request::Reload.raise(rig.plugin.request_flags());
     rig.tick();
 
     assert!(matches!(rig.state.stage(), Stage::Refused { .. }));
@@ -528,21 +528,21 @@ fn the_processor_renders_without_allocating() {
 /// once each.**
 #[test]
 fn requests_raised_while_taking_arrive_once() {
-    let word = std::sync::Arc::new(RequestWord::new());
+    let flags = std::sync::Arc::new(AtomicRequestFlags::new());
     let raiser = {
-        let word = word.clone();
+        let flags = flags.clone();
         std::thread::spawn(move || {
-            Request::Restart.raise(&word);
-            Request::TailChanged.raise(&word);
+            Request::Restart.raise(&flags);
+            Request::TailChanged.raise(&flags);
         })
     };
     let mut got = Vec::new();
     while got.len() < 2 {
-        got.extend(taken(&word));
+        got.extend(taken(&flags));
         std::thread::yield_now();
     }
     raiser.join().unwrap();
-    got.extend(taken(&word));
+    got.extend(taken(&flags));
     got.sort_by_key(|r| format!("{r:?}"));
     assert_eq!(got, [Request::Restart, Request::TailChanged]);
 }
@@ -564,7 +564,7 @@ fn a_panic_in_rebuild_poisons() {
     let mut rig = Rig::new();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     rig.plugin.panic_in_rebuild(true);
-    Request::Reload.raise(rig.plugin.request_word());
+    Request::Reload.raise(rig.plugin.request_flags());
     rig.tick();
     assert!(rig.lifecycle.is_poisoned());
     assert_eq!(rig.state.stage(), Stage::Poisoned);
@@ -579,7 +579,7 @@ fn a_panic_in_a_read_poisons_without_losing_the_state() {
     rig.op(HostOp::Activate(prepare(48_000.0)));
     rig.plugin.panic_in_latency(true);
     rig.plugin.set_latency(Samples::new(8));
-    Request::LatencyChanged.raise(rig.plugin.request_word());
+    Request::LatencyChanged.raise(rig.plugin.request_flags());
     rig.tick();
     assert!(rig.lifecycle.is_poisoned());
     assert_eq!(rig.state.stage(), Stage::Poisoned);
@@ -614,7 +614,7 @@ fn a_refused_rebuild_is_retried_with_no_rate() {
     let mut rig = Rig::new();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     rig.plugin.fail_rebuild(true);
-    Request::Reload.raise(rig.plugin.request_word());
+    Request::Reload.raise(rig.plugin.request_flags());
     rig.tick();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     assert!(matches!(
@@ -690,8 +690,8 @@ fn a_mapping_change_rebuilds_the_mapping_once() {
     rig.op(HostOp::Activate(prepare(48_000.0)));
     rig.take_notices();
     rig.plugin.clear_calls();
-    Request::MidiCcAssignmentChanged.raise(rig.plugin.request_word());
-    Request::NoteExpressionChanged.raise(rig.plugin.request_word());
+    Request::MidiCcAssignmentChanged.raise(rig.plugin.request_flags());
+    Request::NoteExpressionChanged.raise(rig.plugin.request_flags());
     rig.tick();
     rig.tick();
     assert_eq!(rig.plugin.calls(), [Call::RebuildMidiMapping]);
@@ -710,7 +710,7 @@ fn a_panic_outside_a_transition_is_told_to_the_host() {
     rig.op(HostOp::Activate(prepare(48_000.0)));
     rig.take_notices();
     rig.plugin.panic_in_latency(true);
-    Request::LatencyChanged.raise(rig.plugin.request_word());
+    Request::LatencyChanged.raise(rig.plugin.request_flags());
     rig.tick();
     assert!(rig.lifecycle.is_poisoned());
     let notices = rig.take_notices();

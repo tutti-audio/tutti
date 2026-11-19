@@ -11,7 +11,9 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use tutti_clap_ffi::ThreadRoles;
-use tutti_plugin_types::{MainThreadMarker, ProcessWake, RequestWord, TrackInfo, TransportRequest};
+use tutti_plugin_types::{
+    AtomicRequestFlags, MainThreadMarker, ProcessWake, TrackInfo, TransportRequest,
+};
 use tutti_rt::PackedAtomic;
 
 pub(crate) struct TimerEntry {
@@ -252,7 +254,7 @@ pub struct HostState {
     /// restart, a main-thread callback, a latency or tail change, an
     /// audio-ports or parameter rescan. The main thread takes it once per
     /// pass ([`Control::take_requests`](tutti_plugin_types::Control::take_requests)).
-    pub requests: RequestWord,
+    pub requests: AtomicRequestFlags,
     /// What `request_process` raises: the host's wake for a plugin it parked.
     /// Set once, by [`Control::bind_wake`](tutti_plugin_types::Control::bind_wake);
     /// a request before then has nobody to wake.
@@ -290,7 +292,7 @@ impl HostState {
     pub fn new(main: MainThreadMarker) -> Self {
         Self {
             roles: Arc::new(ThreadRoles::new(main)),
-            requests: RequestWord::new(),
+            requests: AtomicRequestFlags::new(),
             process_wake: OnceLock::new(),
             state_dirty: AtomicBool::new(false),
             flush_requested: AtomicBool::new(false),
