@@ -59,7 +59,7 @@ fn session() -> Result<Session, Error> {
         };
         builder
             .sample_rate(RATE)
-            .max_block(MaxBlock::of(Samples(BLOCK)))
+            .max_block(MaxBlock::of(Samples::new(BLOCK)))
             .build()
     };
     // A machine with no MIDI sequencer fails to open the OS layer: say so, and
@@ -193,7 +193,7 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     // where the performer meant it for this device's latencies (figures a host
     // reads off its devices; here zero, and a 10 ms trim).
     let placement = TakePlacement {
-        trim: Samples(480),
+        trim: Samples::new(480),
         ..TakePlacement::default()
     };
     let take = take

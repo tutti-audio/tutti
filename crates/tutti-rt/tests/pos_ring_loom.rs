@@ -90,7 +90,7 @@ fn push<S: RingSample>(writer: &mut PosWriter<S>, data: &[S]) -> Samples {
 fn full_ring<S: RingSample>(keep: u64, play: u64) -> (PosWriter<S>, PosReader<S>) {
     let (mut writer, reader) = PosRing::new(4, LAYOUT, keep).expect("stereo");
     writer.set_play(4);
-    assert_eq!(push(&mut writer, &frames(0, 4, 0)), Samples(4));
+    assert_eq!(push(&mut writer, &frames(0, 4, 0)), Samples::new(4));
     writer.set_play(play);
     (writer, reader)
 }

@@ -160,7 +160,7 @@ pub enum Waveform {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PeriodPoint {
     /// Where in the period, in `[0, 1)` (a program with one outside is
-    /// refused: `Phase(x)` does not wrap, and a point past the period's end
+    /// refused: `Phase::new(x)` does not wrap, and a point past the period's end
     /// is a mistake, not the next period's start).
     pub at: Phase,
     /// The raw value there, in `[-1, 1]`.

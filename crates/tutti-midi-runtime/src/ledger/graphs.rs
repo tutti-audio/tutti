@@ -404,7 +404,7 @@ fn a_refused_off_is_paid_at_the_first_frame_of_the_next_block() {
     assert_eq!(exec.lost_event_count(), 0);
 }
 
-/// A table of 4 keys against 6 notes: the last 2 note-ons are withheld and
+/// A table of 4 keys against 6 notes: the last 2 note-ons are skipped and
 /// counted (2 in the dropped count, never silent), the 4 that started end,
 /// and the table is free again afterwards, so a later note starts. A relay's
 /// off carries no owner, so the 2 offs of the notes that never started pass
@@ -559,7 +559,7 @@ fn a_clip_leaves_nothing_sounding_after_a_stop() {
 
 /// 2,100 notes sound at once across two groups, one starting on each frame
 /// from frame 0, against a table of 2,048 keys. The first 2,048 start. The
-/// last 52 are withheld, each counted once in the dropped count and charged
+/// last 52 are skipped, each counted once in the dropped count and charged
 /// to the clip's port; their offs are swallowed, not counted again. The 2,048
 /// that started all end (frame 100,000 on), nothing is orphaned, and once
 /// the table has room a later note starts.
@@ -880,9 +880,9 @@ fn send(n: u32, on: bool, owner: u32) -> Act {
 
 /// Note 1 holds key 60. In block 1 the port is full and note 2 takes the key:
 /// the off that ends note 1 is refused (counted, 1), note 2 does not start
-/// (withheld, counted, 2). In block 2 the off is paid (given back) and note 3
+/// (skipped, counted, 2). In block 2 the off is paid (given back) and note 3
 /// starts and ends on the key, which note 2's off then finds still marked, so
-/// it is withheld and counted (3). Two events are lost: note 2's on and off.
+/// it is skipped and counted (3). Two events are lost: note 2's on and off.
 #[test]
 fn a_refused_mark_outlives_the_off_that_was_paid_and_the_note_that_used_the_key() {
     let (tally, dropped, lost) = probe(
@@ -901,7 +901,7 @@ fn a_refused_mark_outlives_the_off_that_was_paid_and_the_note_that_used_the_key(
 
 /// As above, but note 1's own off arrives in the same full block: refused
 /// again (3), and the same loss as the one owed, so it is given back at
-/// once. Paid in block 2 (given back), note 2's off withheld (4). Lost: 2.
+/// once. Paid in block 2 (given back), note 2's off skipped (4). Lost: 2.
 #[test]
 fn an_off_refused_twice_is_one_loss() {
     let (tally, dropped, lost) = probe(
@@ -916,13 +916,13 @@ fn an_off_refused_twice_is_one_loss() {
     assert_eq!((dropped, lost), (4, 2));
 }
 
-/// Three pedals are down and a release finds the port full: the first lift is
+/// Three pedals are down and a release finds the port full: the first release is
 /// refused (counted by the port, 1) and the other two are not tried but are
-/// withheld and counted (3), all three losses. The next block pays them, each
+/// skipped and counted (3), all three losses. The next block pays them, each
 /// attempt giving its count back, so the dropped count stays 3 and the lost
 /// count falls by exactly the 3 paid, to 0.
 #[test]
-fn a_refused_pedal_lift_is_counted_and_its_payment_gives_the_count_back() {
+fn a_refused_pedal_release_is_counted_and_its_payment_gives_the_count_back() {
     let pedal = |cc| Act::Send(midi::cc(MidiChannel::FIRST, cc, u32::MAX), None);
     let blocks = || {
         vec![
@@ -936,23 +936,23 @@ fn a_refused_pedal_lift_is_counted_and_its_payment_gives_the_count_back() {
         ]
     };
     let (_, dropped, lost) = probe_for(8, blocks(), 2);
-    assert_eq!((dropped, lost), (3, 3), "refused, then withheld twice");
+    assert_eq!((dropped, lost), (3, 3), "refused, then skipped twice");
     let (tally, dropped, lost) = probe(8, blocks());
     assert_eq!(
         (dropped, lost),
         (3, 0),
-        "each paid lift gives its count back"
+        "each paid release gives its count back"
     );
     let t = tally.lock().unwrap();
     assert_eq!(
         t.others,
         8 + 3 + 3,
-        "the filler, the pedals down, the lifts"
+        "the filler, the pedals down, the releases"
     );
 }
 
 /// Two notes on one key are both refused by a full port, and both offs come:
-/// each on is a loss and each off is withheld and counted: 4, none given back.
+/// each on is a loss and each off is skipped and counted: 4, none given back.
 #[test]
 fn overlapping_refused_ons_on_one_key_are_each_counted_with_their_offs() {
     let (tally, dropped, lost) = probe(
@@ -989,12 +989,12 @@ fn a_release_clears_the_mark_of_a_row_that_stays_owed() {
 
 /// An untagged source (a relay) has a note-on refused behind a full port.
 /// Its table holds 6 keys, so 6 of the 8 ons leave a refused row and 2 are
-/// withheld. The offs of the 6 find their rows: cleared, swallowed and
+/// skipped. The offs of the 6 find their rows: cleared, swallowed and
 /// counted like a tagged off; the offs of the other 2 have no row and pass.
 /// Six new keys then all start: the table has room again.
 ///
 /// Counted: 32 controllers refused, 8 note-ons (6 refused by the port, 2
-/// withheld), 6 offs withheld: 46, none given back.
+/// skipped), 6 offs skipped: 46, none given back.
 #[test]
 fn an_untagged_off_settles_the_row_of_a_refused_on() {
     let script = vec![
@@ -1105,7 +1105,7 @@ fn play(exec: &mut Executor, events: &[TimedMidiEvent], passes: u64) {
 
 /// A clip whose notes never overlap on a key, played straight through, looped
 /// and replaced, loses exactly what it could not deliver: every note-on the
-/// sink did not hear is one loss, and so is its note-off (withheld, counted
+/// sink did not hear is one loss, and so is its note-off (skipped, counted
 /// once), and every controller it did not hear is one. Offs the port refused
 /// are given back when they go out. After the stop nothing sounds, every
 /// note-on has its note-off, and no off is orphaned.
@@ -1191,7 +1191,7 @@ impl<F: Float> Node<F> for SendThenRelease {
 /// Control Change 64 with value 0 and a MIDI 1.0 Pitch Bend at 0x2000, never
 /// a MIDI 2.0 packet (M1 p. 31, Stop; the 14-bit centre is 0x2000, M1 table
 /// of Pitch Bend). A pedal value below 64 is up (M1 CC 64: 0 to 63 is off), so a
-/// pedal sent at 63 is not lifted again.
+/// pedal sent at 63 is not released again.
 #[test]
 fn a_midi_1_pedal_and_bend_are_returned_in_midi_1() {
     use tutti_ump::{Message, U7, U14, Voice1};

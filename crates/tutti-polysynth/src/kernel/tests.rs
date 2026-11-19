@@ -1,5 +1,6 @@
 use super::*;
-use wide::{f32x8, f64x4, u32x4, u32x8};
+use tutti_rt::SplitMix64;
+use wide::{f32x8, f64x4};
 
 /// The `f32` lanes: the aliasing measurements and the width-specific tolerances run here.
 type V = f32x8;
@@ -87,58 +88,46 @@ fn white_noise_is_uniform_and_centred<L: Lane>(mut state: L::Rng) {
     );
 }
 
+/// The generators of a group seeded `k + 1` in lane order.
+fn noise_state<L: Lane>() -> L::Rng {
+    L::seed_rng({
+        let mut k = 0;
+        move || {
+            k += 1;
+            k
+        }
+    })
+}
+
 #[test]
 fn white_noise_at_f32_is_in_range_uniform_and_centred() {
-    white_noise_is_uniform_and_centred::<f32x8>(u32x8::new(core::array::from_fn(|k| {
-        0x9E37_79B9 ^ (k as u32 + 1)
-    })));
+    white_noise_is_uniform_and_centred::<f32x8>(noise_state::<f32x8>());
 }
 
 #[test]
 fn white_noise_at_f64_is_in_range_uniform_and_centred() {
-    white_noise_is_uniform_and_centred::<f64x4>(u32x4::new(core::array::from_fn(|k| {
-        0x9E37_79B9 ^ (k as u32 + 1)
-    })));
+    white_noise_is_uniform_and_centred::<f64x4>(noise_state::<f64x4>());
 }
 
-/// Every lane of the eight-lane generator steps as the scalar generator does
-/// from its seed: the state after each call is the scalar's next word, and the
-/// output is that word's top 23 bits as the mantissa of a float in 1..2, mapped
-/// onto -1..1 by `2m - 3`.
+/// Lane `k` draws from its own stream, seeded `k + 1`, and its output is the word's high
+/// bits as a unit fraction of the float's own resolution, mapped onto `-1..1` by `2u - 1`:
+/// `word >> 40` over `2^24` at `f32`, `word >> 11` over `2^53` at `f64`.
 #[test]
-fn each_noise_lane_is_the_scalar_xorshift32() {
-    let seeds: [u32; 8] = core::array::from_fn(|k| 0x9E37_79B9 ^ (k as u32 + 1));
-    let mut state = u32x8::new(seeds);
-    let mut scalar =
-        seeds.map(|s| tutti_dsp::Xorshift32::new(core::num::NonZeroU32::new(s).unwrap()));
+fn each_noise_lane_scales_its_own_stream_onto_minus_one_to_one() {
+    let mut f32_state = noise_state::<f32x8>();
+    let mut f64_state = noise_state::<f64x4>();
+    let mut f32_ref: [SplitMix64; 8] = core::array::from_fn(|k| SplitMix64::new(k as u64 + 1));
+    let mut f64_ref: [SplitMix64; 4] = core::array::from_fn(|k| SplitMix64::new(k as u64 + 1));
     for _ in 0..64 {
-        let out = V::white(&mut state).to_array();
-        for (k, g) in scalar.iter_mut().enumerate() {
-            let word = g.next_u32();
-            assert_eq!(state.to_array()[k], word, "lane {k} state");
-            let mantissa = f32::from_bits((word >> 9) | 0x3F80_0000);
-            assert_eq!(out[k], 2.0 * mantissa - 3.0, "lane {k} output");
+        let out = f32x8::white(&mut f32_state).to_array();
+        for (k, g) in f32_ref.iter_mut().enumerate() {
+            let unit = (g.next_u64() >> 40) as f32 / (1u32 << 24) as f32;
+            assert_eq!(out[k], 2.0 * unit - 1.0, "f32 lane {k}");
         }
-    }
-}
-
-/// The same at `f64`: the output is the word's top 31 bits over `2^30`, less 1.
-#[test]
-fn each_f64_noise_lane_is_the_scalar_xorshift32() {
-    let seeds: [u32; 4] = core::array::from_fn(|k| 0x9E37_79B9 ^ (k as u32 + 1));
-    let mut state = u32x4::new(seeds);
-    let mut scalar =
-        seeds.map(|s| tutti_dsp::Xorshift32::new(core::num::NonZeroU32::new(s).unwrap()));
-    for _ in 0..64 {
-        let out = f64x4::white(&mut state).to_array();
-        for (k, g) in scalar.iter_mut().enumerate() {
-            let word = g.next_u32();
-            assert_eq!(state.to_array()[k], word, "lane {k} state");
-            assert_eq!(
-                out[k],
-                f64::from(word >> 1) / f64::from(1_u32 << 30) - 1.0,
-                "lane {k} output"
-            );
+        let out = f64x4::white(&mut f64_state).to_array();
+        for (k, g) in f64_ref.iter_mut().enumerate() {
+            let unit = (g.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+            assert_eq!(out[k], 2.0 * unit - 1.0, "f64 lane {k}");
         }
     }
 }

@@ -27,7 +27,7 @@ thread-priority = "3.1"
 arc-lend = "0.2.1"
 # The byte views behind `SeqWriter<T>` and `PackedAtomic<T>`: a `NoUninit +
 # AnyBitPattern` value to and from its bytes with no `unsafe`.
-bytemuck = "1.16"
+bytemuck = { version = "1.16", features = ["derive"] }
 
 # `PosRing`'s, `PackedAtomic`'s, `SeqWriter`/`SeqReader`'s and `AudioThreadCell`'s
 # atomics become loom's under `--cfg loom`, so the models in `tests/*_loom.rs`
@@ -45,7 +45,7 @@ thiserror = { workspace = true, features = ["std"] }
 # `Sample`, the formats `PosRing` is generic over, and `ChannelLayout`, the width it is written in.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `Reading` for every `Unit`: a `Gauge<Db>` holds a unit, and the unit vocabulary is below this crate.
-# `ranged!`, which writes `RequestBit`.
+# `ranged!`, which writes `RequestFlag`.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
@@ -63,7 +63,7 @@ loom = "0.7"
 
 [dev-dependencies]
 assert_no_alloc = { version = "1", default-features = false }
-# `tests/request_bit.rs` checks `RequestBit` with `check_range_contract`; an integration
+# `tests/request_flag.rs` checks `RequestFlag` with `check_range_contract`; an integration
 # test links the one `tutti-rt` this crate builds, so the copies never meet.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 

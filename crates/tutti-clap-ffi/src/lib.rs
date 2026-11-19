@@ -2,7 +2,7 @@
 //! The unsafe half of the CLAP host. Every `unsafe` the host needs to talk to a
 //! CLAP plugin lives here, behind safe handles over [`clap-sys`]; the host crate
 //! above it, `tutti-clap-host`, is `#![forbid(unsafe_code)]` and holds the logic
-//! (the lifecycle, the shell, the request words, the edit ring).
+//! (the lifecycle, the shell, the request flags, the edit ring).
 //!
 //! This crate names nothing of tutti's except `tutti-plugin-types` (`WindowHandle`,
 //! whose unsafe constructor carries the claim of a valid parent window, and

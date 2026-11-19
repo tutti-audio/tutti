@@ -38,7 +38,7 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_transport::{
-    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Timeline,
+    AfterLocate, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Timeline,
     Transport, TransportCommand, render_graph,
 };
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
@@ -191,7 +191,7 @@ fn the_env_walk_is_the_env_beat() {
     let locate = |beat: f64| MotionEvent::Locate {
         beat: Beat::new(beat),
         fade: FadeOut::Immediate,
-        then: Then::Keep,
+        then: AfterLocate::Keep,
     };
     let m = &transport.motion();
     m.try_send(MotionEvent::Play).expect("room");
@@ -332,7 +332,7 @@ fn click_clicks_on_the_model_beats() {
     let transport = Transport::new(SampleRate::of(SR));
     let settings = Arc::new(ClickSettings::new());
     settings.mode().set(MetronomeMode::Always);
-    settings.store_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
+    settings.set_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
         1.0,
     )));
     let click = ClickNode::new(&transport, settings);
@@ -360,7 +360,7 @@ fn click_clicks_on_the_model_beats() {
         MotionEvent::Locate {
             beat: Beat::new(6.9),
             fade: FadeOut::Immediate,
-            then: Then::Keep,
+            then: AfterLocate::Keep,
         },
     )
     .expect("room");

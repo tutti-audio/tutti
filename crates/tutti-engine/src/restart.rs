@@ -105,7 +105,7 @@ impl<F: Float> StreamHost<F> {
     /// hook failed part way and left the graph where it is, so that what the
     /// host reports is what the graph is prepared at. It takes the graph's own
     /// values whole, so it cannot be told anything else.
-    pub fn settle(&mut self, prepared: &tutti_graph::Prepare) {
+    pub fn sync_to_graph(&mut self, prepared: &tutti_graph::Prepare) {
         self.graph_rate = prepared.sample_rate();
         let mut spec = self.stream.spec().clone();
         spec.sample_rate = prepared.sample_rate();

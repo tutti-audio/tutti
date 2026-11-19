@@ -61,7 +61,7 @@ fn settle(s: &mut Session) {
 fn knob(s: &Session, node: NodeKey) -> Option<f64> {
     s.mod_state()
         .lane(ParamRef::unit(node, UnitParam::Drive).key())
-        .and_then(|(_, lane)| lane.knob())
+        .and_then(|(_, lane)| lane.value())
 }
 
 /// The lane's knob reads `cell`: what it holds, and a write into it.

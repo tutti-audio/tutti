@@ -306,13 +306,13 @@ pub enum Resolution {
 }
 
 impl Resolution {
-    /// Whether a node at this resolution honours an edge that requires
+    /// Whether a node at this resolution satisfies an edge that requires
     /// `required`: it is at least as fine.
     ///
-    /// `Frames(n)` honours `Frames(m)` when `n <= m` — a finer chunk is still
+    /// `Frames(n)` satisfies `Frames(m)` when `n <= m` — a finer chunk is still
     /// inside the coarser one's promise — but never `Sample` unless `n == 1`.
     #[must_use]
-    pub const fn honours(self, required: Resolution) -> bool {
+    pub const fn satisfies(self, required: Resolution) -> bool {
         match (self, required) {
             (Resolution::Sample, _) | (_, Resolution::Block) => true,
             (Resolution::Frames(n), Resolution::Sample) => n <= 1,
@@ -1598,20 +1598,20 @@ pub trait Node<F: Float = f32>: Send + 'static {
     /// re-prepare hands the same handle back), so `prepare` may already use
     /// it. Keep it, and give a clone to any thread that will need to wake the
     /// node (a plugin's `request_process` callback, a worker, a device
-    /// thread); each calls [`Wake::raise`].
+    /// thread); each calls [`Wake::notify`].
     ///
-    /// **A raise wakes the node on the next block**: even with silent
+    /// **A notify wakes the node on the next block**: even with silent
     /// inputs, no events, and a last call that returned [`Status::Idle`], the
     /// node is called once on the first block the executor runs after the
-    /// raise (and is parked again by the usual rules if it returns `Idle`
-    /// again). Several raises before that block wake it once. A raise on a
+    /// notify (and is parked again by the usual rules if it returns `Idle`
+    /// again). Several notifies before that block wake it once. A notify on a
     /// node that is running, not parked, or mid-block is harmless: the next
     /// block consumes it. A node that never parks itself ignores this, which
     /// is the default. A node that wraps another forwards the call, or the
     /// inner node never hears of its handle.
     ///
     /// The handle is the placement's: a node it was replaced by, or a fork's
-    /// copy, gets its own, and a raise on this one wakes neither.
+    /// copy, gets its own, and a notify on this one wakes neither.
     fn bind_wake(&mut self, wake: Wake) {
         let _ = wake;
     }

@@ -14,7 +14,7 @@ pub enum HeardTapError {
     Detached,
     /// The engine's tap refused: a reader is alive, or none is open.
     #[error(transparent)]
-    Tap(#[from] tutti_engine::HeardTapError),
+    Tap(#[from] tutti_engine::OutputTapError),
 }
 
 /// Why a declaration was refused: a value declared with a wire or a target

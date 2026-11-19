@@ -116,23 +116,29 @@ fn svf(dir: &Path, cases: &mut Cases) {
         (SvfType::Notch, "notch", 8_000.0, 1.0, Db::UNITY),
         (SvfType::Allpass, "allpass", 1_000.0, 0.707, Db::UNITY),
         (SvfType::Allpass, "allpass", 4_000.0, 3.0, Db::UNITY),
-        (SvfType::Bell, "bell", 1_000.0, 1.0, Db(9.0)),
-        (SvfType::Bell, "bell", 250.0, 0.707, Db(-6.0)),
-        (SvfType::Bell, "bell", 6_000.0, 3.0, Db(12.0)),
-        (SvfType::LowShelf, "lowshelf", 200.0, 0.707, Db(9.0)),
-        (SvfType::LowShelf, "lowshelf", 1_000.0, 1.0, Db(-12.0)),
-        (SvfType::LowShelf, "lowshelf", 4_000.0, 0.5, Db(6.0)),
-        (SvfType::HighShelf, "highshelf", 500.0, 0.707, Db(-9.0)),
-        (SvfType::HighShelf, "highshelf", 3_000.0, 1.0, Db(12.0)),
-        (SvfType::HighShelf, "highshelf", 8_000.0, 0.5, Db(-6.0)),
-        (SvfType::HighShelf, "highshelf", 12_000.0, 0.707, Db(6.0)),
+        (SvfType::Bell, "bell", 1_000.0, 1.0, Db::new(9.0)),
+        (SvfType::Bell, "bell", 250.0, 0.707, Db::new(-6.0)),
+        (SvfType::Bell, "bell", 6_000.0, 3.0, Db::new(12.0)),
+        (SvfType::LowShelf, "lowshelf", 200.0, 0.707, Db::new(9.0)),
+        (SvfType::LowShelf, "lowshelf", 1_000.0, 1.0, Db::new(-12.0)),
+        (SvfType::LowShelf, "lowshelf", 4_000.0, 0.5, Db::new(6.0)),
+        (SvfType::HighShelf, "highshelf", 500.0, 0.707, Db::new(-9.0)),
+        (SvfType::HighShelf, "highshelf", 3_000.0, 1.0, Db::new(12.0)),
+        (SvfType::HighShelf, "highshelf", 8_000.0, 0.5, Db::new(-6.0)),
+        (
+            SvfType::HighShelf,
+            "highshelf",
+            12_000.0,
+            0.707,
+            Db::new(6.0),
+        ),
     ];
     for (i, (ty, label, freq, q, level)) in settings.into_iter().enumerate() {
         let gain = level.get();
         let c = SvfControls {
             ty,
-            freq: Hz(freq),
-            q: Q(q),
+            freq: Hz::new(freq),
+            q: Q::new(q),
             gain: level,
         };
         // Every setting in f64; the first of each type again in f32 state.
@@ -163,8 +169,8 @@ fn ladder(dir: &Path, cases: &mut Cases) {
         ] {
             let c = LadderControls {
                 ty,
-                freq: Hz(freq),
-                res: Resonance(res),
+                freq: Hz::new(freq),
+                res: Resonance::new(res),
                 drive: Drive::UNITY,
             };
             let name = format!("ladder_{label}_{freq}_{res}");
@@ -192,7 +198,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         ("lr4_2band", vec![1_000.0f64]),
         ("lr4_3band", vec![300.0, 3_000.0]),
     ] {
-        let hz: Vec<Hz> = splits.iter().map(|&f| Hz(f)).collect();
+        let hz: Vec<Hz> = splits.iter().map(|&f| Hz::new(f)).collect();
         let c = CrossoverControls::new(&hz, rate).expect("controls");
         let model = CrossoverModel::designed(splits.len() + 1, &c, rate).expect("bands");
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
@@ -209,7 +215,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
 fn phaser(dir: &Path, cases: &mut Cases) {
     for stages in [2usize, 4] {
         for fc in [300.0f64, 2_000.0, 10_000.0] {
-            let c = allpass_complement(Hz(fc), SampleRate::of(RATE));
+            let c = allpass_complement(Hz::new(fc), SampleRate::of(RATE));
             let mut chain = PhaserChain::new(Stages::of(stages), ChannelLayout::MONO);
             let x = impulse(1.0);
             let mut y = vec![0.0f32; IR_FRAMES];

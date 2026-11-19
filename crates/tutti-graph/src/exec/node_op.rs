@@ -435,8 +435,8 @@ pub(super) fn node_op_with<
     let scheduled = !ein.is_empty() && !discards && st.has_due[st.at];
 
     let (in_silent, in_constant) = in_masks(ain, &*st.flags);
-    // A raised `Wake` counts as input. Taken for every node every block, so a
-    // raise on a node that is not parked is consumed and cannot wake it later.
+    // A notified `Wake` counts as input. Taken for every node every block, so a
+    // notify on a node that is not parked is consumed and cannot wake it later.
     let woken = u.node.take_wake();
     let quiet_inputs = !woken
         && !injected

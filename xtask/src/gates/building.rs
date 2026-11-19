@@ -191,7 +191,7 @@ pub(super) const ALLOW: &[Allow] = &[
     },
     Allow {
         path: GRAPH,
-        owner: "Pulse",
+        owner: "ImpulseSource",
         rules: &[],
         reason: "the contract harness a node crate writes rows with: node-author test support",
     },
@@ -418,12 +418,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "reading OS entropy: the failure is the OS's, not a value's",
     ),
     ty(
-        "crates/tutti-midi-device/",
-        "EntropyWords::from_os",
-        CTOR,
-        "reading OS entropy: the failure is the OS's, not a value's",
-    ),
-    ty(
         "crates/tutti-midi-ci/src/pe/resource/fields.rs",
         "",
         RANGE,
@@ -586,6 +580,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "PosWriter",
         SETTER,
         "the one writer of a position ring: a writer handle, not a node, source, spec or config",
+    ),
+    ty(
+        "crates/tutti-nodes/src/click.rs",
+        "ClickSettings",
+        SETTER,
+        "a live control cell the audio thread reads: it is written while the node renders, not a config",
     ),
     ty(
         "crates/tutti-midi-ci/src/initiator.rs",

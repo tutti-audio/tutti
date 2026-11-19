@@ -311,7 +311,7 @@ impl<F: Float> Editor<F> {
     ///   in (at full level) to the newest: the root that was fading out is
     ///   dropped, as a plan holds two roots at most. That is two steps of
     ///   `1 - g`, `g` the dropped root's gain at the block: a caller that
-    ///   wants no step declares the new root after [`settle_fades`](Self::settle_fades)
+    ///   wants no step declares the new root after [`finish_fades`](Self::finish_fades)
     ///   reports the running fade over (the session does).
     /// - A commit that changes the root's width without declaring it again
     ///   ends the crossfade running as a cut: the old root's channels cannot

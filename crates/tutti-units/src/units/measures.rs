@@ -22,7 +22,7 @@ unit! {
     /// [`Amplitude`] either: a confidence is never multiplied onto a signal,
     /// and giving it a gain's algebra would license `sample * confidence`,
     /// silently turning an uncertain pitch estimate into a volume dip.
-    pub struct Confidence(pub f64): Unit, Ordered, Bounded, Scalable;
+    pub struct Confidence(f64): Unit, Ordered, Bounded, Scalable;
 }
 // Scalable because the smoothers genuinely attenuate it: a Viterbi track
 // penalizes a jump by multiplying the confidence by a decay factor.
@@ -68,7 +68,7 @@ unit! {
     /// The negative half is the whole point — `-1` is the mono-compatibility
     /// failure a correlation meter exists to catch, and it is not "less" than
     /// `+1` in any audible sense; it is the opposite fault.
-    pub struct Correlation(pub f64): Unit, Ordered, Bounded, Signed;
+    pub struct Correlation(f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable`: the value is a normalized inner product, so rescaling
 // denormalizes it and the result no longer means "coherence".
@@ -119,7 +119,7 @@ unit! {
     /// A reading, not a [`Pan`]: it is measured from a signal, not set on a
     /// processor. Feeding a meter's balance back as a pan position is a
     /// crossing a caller spells out, `Pan::new(balance.get())`.
-    pub struct StereoBalance(pub f64): Unit, Ordered, Bounded, Signed;
+    pub struct StereoBalance(f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable`: a ratio of measured energy rescaled is no longer that ratio.
 // NOT `Additive`: two balances do not sum into a third.
@@ -158,7 +158,7 @@ unit! {
     /// **Not a [`Mix`]**: nothing is being blended, and a crossfade
     /// position (a linear interpolation's `t`) is meaningless here. **Not a [`Depth`]**: that
     /// is bipolar, and there is no such thing as negative velocity.
-    pub struct Velocity(pub f64): Unit, Ordered, Bounded;
+    pub struct Velocity(f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable`: `velocity * 0.5` reads as "half as loud", which is
 // exactly the amplitude confusion this type exists to prevent — the mapping
