@@ -43,7 +43,7 @@ impl Hz {
     #[inline]
     #[must_use]
     pub fn angle_per_frame(self, rate: SampleRate) -> Radians {
-        Radians(core::f64::consts::TAU * (self.0 / rate.get()))
+        Radians::new(core::f64::consts::TAU * (self.get() / rate.get()))
     }
 }
 
