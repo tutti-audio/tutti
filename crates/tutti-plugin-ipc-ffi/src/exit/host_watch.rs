@@ -23,17 +23,16 @@ const NAP: Duration = Duration::from_millis(250);
 ///
 /// The thread could not be started.
 pub fn watch_host(host: u32, on_gone: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
-    std::thread::Builder::new()
-        .name("host-watch".into())
-        .spawn(move || {
-            if !Imp::of_pid(host).is_some_and(|imp| imp.wait_ended()) {
-                while crate::process_exists(host) {
-                    std::thread::sleep(NAP);
-                }
+    // Detached: the watch lives as long as the process, or until the host ends.
+    tutti_platform::spawn_named("host-watch", None, move |_| {
+        if !Imp::of_pid(host).is_some_and(|imp| imp.wait_ended()) {
+            while crate::process_exists(host) {
+                std::thread::sleep(NAP);
             }
-            on_gone();
-        })
-        .map(drop)
+        }
+        on_gone();
+    })
+    .map(tutti_platform::ThreadHandle::detach)
 }
 
 /// The environment variable through which a host states its own PID to the
@@ -102,10 +101,12 @@ fn host_given(stated: Option<&str>, parent: Option<u32>, exists: impl FnOnce(u32
 pub fn watch_spawner(on_gone: impl FnOnce() + Send + 'static) -> std::io::Result<bool> {
     match host_pid() {
         Host::Running(host) => watch_host(host, on_gone).map(|()| true),
-        Host::Gone => std::thread::Builder::new()
-            .name("host-watch".into())
-            .spawn(on_gone)
-            .map(|_| true),
+        Host::Gone => {
+            tutti_platform::spawn_named("host-watch", None, move |_| on_gone()).map(|handle| {
+                handle.detach();
+                true
+            })
+        }
         Host::Unknown => Ok(false),
     }
 }

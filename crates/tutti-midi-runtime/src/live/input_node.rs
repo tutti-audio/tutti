@@ -8,7 +8,7 @@
 //! inlet emitted. Each block it translates the device's events,
 //! MIDI 1.0 to MIDI 2.0 ([`Midi2Translator`]: RPN and NRPN runs, Bank Select,
 //! translating), and rewrites classic MPE into native per-note messages
-//! ([`MpeIngest`]), then sends every event out of the port for its address
+//! ([`MpeTranslator`]), then sends every event out of the port for its address
 //! ([`MidiInputPorts`]). **The translator and the MPE state are the
 //! device's own**: a device that replaces another starts from none of the
 //! one before's half-sent runs. A Group is a channel space of its own
@@ -85,7 +85,7 @@ use tutti_rt::{Counter, CounterWriter, LockExt, Publisher, Reader, counter};
 use tutti_ump::{Held, Message, MidiChannel, MidiGroup, System, Ump};
 use tutti_units::{Frame, SampleRate, Samples};
 
-use super::mpe_ingest::MpeIngest;
+use super::mpe_translator::MpeTranslator;
 use super::order::{BLANK, in_offset_order, offset_of};
 use super::sensing::ActiveSensing;
 use crate::live::device_generation::DeviceGeneration;
@@ -316,7 +316,7 @@ const NO_PROFILES: GroupProfiles = [None; MidiGroup::COUNT as usize];
 /// classic-MPE state.
 struct Device {
     translator: Midi2Translator,
-    mpe: MpeIngest,
+    mpe: MpeTranslator,
     /// The MPE mode in force.
     mode: MpeMode,
     /// The generation this state was last reset at.
@@ -337,7 +337,7 @@ impl Device {
     fn new(mode: MpeMode) -> Self {
         Self {
             translator: Midi2Translator::new(),
-            mpe: MpeIngest::new(mode),
+            mpe: MpeTranslator::new(mode),
             mode,
             generation: 0,
             present: true,
@@ -350,12 +350,12 @@ impl Device {
 
     /// Adopt a requested MPE mode that differs from the one in force; `true`
     /// when it did, and the block then sends the new zones' default bend
-    /// ranges first ([`MpeIngest::zone_defaults`]: what an MPE Configuration
+    /// ranges first ([`MpeTranslator::zone_defaults`]: what an MPE Configuration
     /// Message resets a receiver to, as this node sends an MCM's).
     ///
     /// **The comparison is load-bearing**: the session's cell keeps the mode
     /// it was last given, so every block reads it, and `set_mode` rebuilds the
-    /// ingest: re-adopting it every block would drop every sounding note's
+    /// MPE translator: re-adopting it every block would drop every sounding note's
     /// voice mapping, and re-send the ranges, every block.
     fn adopt(&mut self, requested: Option<MpeMode>) -> bool {
         let Some(mode) = requested else {
@@ -374,7 +374,7 @@ impl Device {
     /// fit is owed.
     fn restart(&mut self, generation: u64) {
         self.translator.reset();
-        self.mpe = MpeIngest::new(self.mode);
+        self.mpe = MpeTranslator::new(self.mode);
         self.sensing.forget_all();
         self.generation = generation;
         // A device is there while its generation is odd.
@@ -453,7 +453,7 @@ impl Default for MidiInputNode {
 }
 
 impl MidiInputNode {
-    /// A node with its one event input, with MPE ingestion off.
+    /// A node with its one event input, with MPE translation off.
     #[must_use]
     pub fn new() -> Self {
         let cell = Publisher::new(Requests::new());
@@ -502,7 +502,7 @@ impl MidiInputNode {
         self
     }
 
-    /// Ingest classic MPE in the mode `mode` holds from the first block, on
+    /// Translate classic MPE in the mode `mode` holds from the first block, on
     /// every Group, and follow it: a publish to `mode` is adopted at the next
     /// block. The reader is registered here, so build the node on the control
     /// side.
@@ -515,7 +515,7 @@ impl MidiInputNode {
     pub fn with_mpe(mut self, mode: &Publisher<MpeMode>) -> Self {
         let initial = *mode.current();
         self.device.mode = initial;
-        self.device.mpe = MpeIngest::new(initial);
+        self.device.mpe = MpeTranslator::new(initial);
         self.mpe_mode = Some(mode.reader());
         self
     }
@@ -537,7 +537,7 @@ pub struct MidiInputControls {
 impl MidiInputControls {
     /// The MIDI-CI MPE Profile zones (M2-120) the device enabled on `group`: from the next block, what the device sends on
     /// that Group follows the zones' rules instead of the mode's, until `zones`
-    /// is `None` ([`MpeIngest::set_profile`] says what the change stops and
+    /// is `None` ([`MpeTranslator::set_profile`] says what the change stops and
     /// resets). Control thread. Setting what is set changes nothing.
     ///
     /// The zones are the device's alone: the session's mode is not changed. A device that
@@ -701,9 +701,9 @@ impl<F: Float> Node<F> for MidiInputNode {
         // What the control side may wait for, stored once this block's events are
         // pushed: nothing is owed. A release that did not fit the block stays
         // owed (`Staging::whole` refuses it whole) and a push a port refuses is
-        // counted by the executor, so a generation settles only for what was sent or
+        // counted by the executor, so a generation is handled only for what was sent or
         // counted.
-        let settled = self
+        let handled_generation = self
             .generation
             .as_ref()
             .filter(|_| device.owing == 0)
@@ -726,14 +726,14 @@ impl<F: Float> Node<F> for MidiInputNode {
                 .event_out(port)
                 .push(Event::midi(offset_of(ev, block_len), ev.1));
         }
-        if let (Some(cell), Some(handled)) = (&self.generation, settled) {
-            cell.settle(handled);
+        if let (Some(cell), Some(handled)) = (&self.generation, handled_generation) {
+            cell.mark_handled(handled);
         }
         Status::Modified
     }
 
-    /// The device state of a freshly prepared node: the translator and the MPE
-    /// ingest start empty (the MPE mode in force stays), nothing is held or
+    /// The device state of a freshly prepared node: the MIDI 1 translator and the MPE
+    /// translator start empty (the MPE mode in force stays), nothing is held or
     /// owed, no Group has sent an Active Sensing, and the Profile zones in
     /// force are read again from the requests. What the node held is not
     /// released: `reset` has no output to release into. The executor, when it
@@ -741,7 +741,7 @@ impl<F: Float> Node<F> for MidiInputNode {
     /// on its event outputs.
     fn reset(&mut self) {
         self.device.translator.reset();
-        self.device.mpe = MpeIngest::new(self.device.mode);
+        self.device.mpe = MpeTranslator::new(self.device.mode);
         self.device.held.clear();
         self.device.sensing.forget_all();
         self.device.owing = 0;

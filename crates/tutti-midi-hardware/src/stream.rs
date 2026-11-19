@@ -819,7 +819,7 @@ impl Negotiation {
             match action {
                 DiscoveryAction::Wait | DiscoveryAction::Changed => {}
                 DiscoveryAction::Send(ump) => self.send(ump),
-                DiscoveryAction::Settled(ending) => return self.settle(ending),
+                DiscoveryAction::Ended(ending) => return self.settle(ending),
             }
         }
         None

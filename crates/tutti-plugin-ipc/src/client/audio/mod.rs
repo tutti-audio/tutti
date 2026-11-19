@@ -518,9 +518,16 @@ impl AudioBridge {
             return None;
         }
         let (done_ask, done) = ask::ask::<bool>();
-        self.channels
-            .push_block(AudioCommand::Params { done })
-            .then_some(done_ask)
+        if self.channels.push_block(AudioCommand::Params { done }) {
+            Some(done_ask)
+        } else {
+            // The flush never queued: the writes are still unsent, so the next
+            // request asks again.
+            if let Some(table) = self.host_edits.lock().as_mut() {
+                table.written = true;
+            }
+            None
+        }
     }
 
     /// Has the plugin apply the writes no block has carried yet, before the
@@ -1185,6 +1192,58 @@ mod tests {
             .flat_map(|q| q.points.iter().map(|p| p.value.get()))
             .collect();
         assert_eq!(sent, [0.75], "the newest write, taken when dequeued");
+    }
+
+    /// **A flush the full block queue refused is asked for again**: the writes
+    /// are still in their slots, so a later request sends them.
+    #[test]
+    fn a_flush_refused_on_a_full_queue_is_asked_for_again() {
+        let bridge = bridge_without_a_lane();
+        let id = ParamId::new(1);
+        bridge.declare_host_edits([id]);
+        assert_eq!(bridge.write_parameter(id, Normalized::of(0.5)), Ok(()));
+        let mut held = Vec::new();
+        while let Some(answer) = {
+            let (_ask, done) = ask::ask::<bool>();
+            bridge
+                .channels
+                .try_push_block(AudioCommand::Params { done })
+                .err()
+                .map_or(Some(()), |_| None)
+        } {
+            let _ = answer;
+            held.push(());
+        }
+        assert!(bridge.request_flush().is_none(), "the queue is full");
+        while bridge.channels.pop_block().is_some() {}
+        assert!(
+            bridge.request_flush().is_some(),
+            "the writes still wait for a flush"
+        );
+    }
+
+    /// **Writes either side of a queued flush end at the last**: W1, a flush
+    /// asked for, a block queued ahead, W2, then the lane dequeues both. What the
+    /// server is sent last for the parameter is W2.
+    #[test]
+    fn the_last_write_is_the_last_the_server_is_sent_whatever_is_queued() {
+        let bridge = bridge_without_a_lane();
+        let id = ParamId::new(1);
+        bridge.declare_host_edits([id]);
+        assert_eq!(bridge.write_parameter(id, Normalized::of(0.25)), Ok(()));
+        let _answer = bridge.request_flush().expect("room");
+        assert!(bridge.channels.push_block(AudioCommand::Params {
+            done: ask::ask::<bool>().1
+        }));
+        assert_eq!(bridge.write_parameter(id, Normalized::of(0.75)), Ok(()));
+        let mut last = None;
+        while let Some(AudioCommand::Params { .. }) = bridge.channels.pop_block() {
+            let changes = dispatch::host_edit_changes(&bridge.channels);
+            for point in changes.queues.iter().flat_map(|q| q.points.iter()) {
+                last = Some(point.value.get());
+            }
+        }
+        assert_eq!(last, Some(0.75));
     }
 
     /// **A block submitted to an empty pool is refused and counted, nothing
