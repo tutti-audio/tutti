@@ -33,12 +33,22 @@ use tutti_units::SampleRate;
 pub(super) const COMMAND_QUEUE_SIZE: usize = 128;
 const RESPONSE_QUEUE_SIZE: usize = 128;
 
+/// A queued command and its place in the order commands were pushed in, across
+/// both lanes' queues.
+pub(super) struct Stamped<T> {
+    pub(super) at: u64,
+    pub(super) cmd: T,
+}
+
 #[derive(Clone)]
 pub(super) struct Channels {
     /// What rides the audio lane: blocks and resets.
-    blocks: Arc<ArrayQueue<AudioCommand>>,
+    blocks: Arc<ArrayQueue<Stamped<AudioCommand>>>,
     /// What rides the control lane: every other request.
-    controls: Arc<ArrayQueue<ControlCommand>>,
+    controls: Arc<ArrayQueue<Stamped<ControlCommand>>>,
+    /// The next stamp: every command takes one as it is pushed, so the one
+    /// thread that serves both queues takes them in the order they were pushed.
+    order: Arc<AtomicU64>,
     /// Whether a control request owes a reply: one at a time.
     owing: ControlSlot,
     /// The newest block sequence the audio thread has submitted. Owned here
@@ -234,6 +244,7 @@ impl Channels {
         let (abandoned, late, commands_refused, leaked_buffers) =
             (tally(), tally(), tally(), tally());
         let channels = Self {
+            order: Arc::new(AtomicU64::new(0)),
             blocks: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             controls: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             owing: ControlSlot::default(),
@@ -498,22 +509,24 @@ impl Channels {
     /// rather than dropping it, so the audio thread can return what it holds
     /// to its pools instead of freeing it.
     pub(super) fn try_push_block(&self, cmd: AudioCommand) -> Result<(), AudioCommand> {
-        if let Err(cmd) = self.blocks.push(cmd) {
+        let at = self.order.fetch_add(1, Ordering::Relaxed);
+        if let Err(back) = self.blocks.push(Stamped { at, cmd }) {
             self.note_command_refused();
-            return Err(cmd);
+            return Err(back.cmd);
         }
         self.bell.ring();
         Ok(())
     }
 
-    pub(super) fn pop_block(&self) -> Option<AudioCommand> {
+    pub(super) fn pop_block(&self) -> Option<Stamped<AudioCommand>> {
         self.blocks.pop()
     }
 
     /// Pushes a control-lane command and rings the bell. A refused command is
     /// counted.
     pub(super) fn push_control(&self, cmd: ControlCommand) -> bool {
-        if self.controls.push(cmd).is_err() {
+        let at = self.order.fetch_add(1, Ordering::Relaxed);
+        if self.controls.push(Stamped { at, cmd }).is_err() {
             self.note_command_refused();
             return false;
         }
@@ -521,7 +534,7 @@ impl Channels {
         true
     }
 
-    pub(super) fn pop_control(&self) -> Option<ControlCommand> {
+    pub(super) fn pop_control(&self) -> Option<Stamped<ControlCommand>> {
         self.controls.pop()
     }
 
@@ -682,7 +695,10 @@ mod tests {
     fn a_push_and_its_ring_allocate_nothing() {
         let (c, _wait) = channels();
         assert_no_alloc::assert_no_alloc(|| assert!(c.push_block(AudioCommand::Reset)));
-        assert!(matches!(c.pop_block(), Some(AudioCommand::Reset)));
+        assert!(matches!(
+            c.pop_block().map(|s| s.cmd),
+            Some(AudioCommand::Reset)
+        ));
     }
 
     /// **Every command a full queue refuses is counted, and an accepted one is

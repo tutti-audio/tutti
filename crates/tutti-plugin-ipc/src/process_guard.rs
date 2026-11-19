@@ -146,11 +146,15 @@ impl Drop for ProcessGuard {
         // bridge says `Shutdown` to the server as it ends, and the server
         // destroys its plugin before it exits.
         let shutting_down = self._bridge_thread.is_some();
-        if let Some(bridge) = &self._bridge_thread {
-            bridge.request_stop();
-        }
+        // The exit thread first: the bridge's stop makes it say `Shutdown`, and
+        // a server that ends on that is a clean end this guard asked for. A
+        // server that ended before the exit thread was told would be declared
+        // dead by it.
         if let Some(exit) = &self.exit_thread {
             exit.token().stop();
+        }
+        if let Some(bridge) = &self._bridge_thread {
+            bridge.request_stop();
         }
         let process = self.process.lock_recover().take();
         if let (Some(mut process), Some(wait)) = (process, &self.wait) {
