@@ -36,7 +36,9 @@ fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
         .expect("the in-process VST2 loads");
     let handle = session.plugin_view(node).expect("hosted").handle().clone();
     let id = ParamId::new(1);
-    handle.send_parameter(id, Normalized::of(0.75));
+    handle
+        .send_parameter(id, Normalized::of(0.75))
+        .expect("a declared parameter");
     let expected = handle
         .save_state(tutti_plugin_types::StateUse::Project)
         .expect("saved on the main thread");

@@ -185,7 +185,9 @@ fn a_held_value_is_sent_once_and_an_edit_on_the_plugin_survives_it() {
     assert_eq!(read(&handle, p), Some(0.25));
     assert_eq!(controls.param_delivery().points_sent, 1, "sent once");
 
-    handle.send_parameter(ParamId::new((p as i32) as u32), Normalized::of(0.75));
+    handle
+        .send_parameter(ParamId::new((p as i32) as u32), Normalized::of(0.75))
+        .expect("a declared parameter");
     assert_eq!(read(&handle, p), Some(0.75), "the edit reached the plugin");
     held(&mut unit, 0.25, 32);
     assert_eq!(
@@ -252,7 +254,9 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
         Some(251.0),
         "live, held"
     );
-    handle.send_parameter(ParamId::new(0), Normalized::of(0.5));
+    handle
+        .send_parameter(ParamId::new(0), Normalized::of(0.5))
+        .expect("a declared parameter");
     assert_eq!(
         channel_0(&live.render(BLOCK * 8)),
         Some(501.0),

@@ -8,8 +8,8 @@
 
 use crate::{
     AutomationMode, AutomationModeError, BlockCounts, BypassWrite, OwnBypass, ParameterInfo,
-    PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason, bypass_value,
-    is_bypassed,
+    PluginFailure, RenderMode, SampleRate, StateError, StateUse, TerminationReason, UnknownParam,
+    bypass_value, is_bypassed,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -57,7 +57,12 @@ pub trait AnyThread: Send + Sync {
     /// [`Normalized`], not a bare float: an in-process plugin is written
     /// straight through, so the type is what stops an out-of-range or NaN
     /// value there (a served one is clamped again on receipt).
-    fn set_parameter_value(&self, id: ParamId, value: Normalized);
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownParam`] when the plugin did not declare `id`, as far as the
+    /// hosting knows without asking the plugin.
+    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam>;
 
     /// The plain value `value` stands for, converted by the plugin's format
     /// ([`Control::parameter_plain`](crate::Control::parameter_plain)), so a
@@ -117,8 +122,10 @@ pub trait AnyThread: Send + Sync {
     fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
         match site {
             OwnBypass::Parameter(id) => {
-                self.set_parameter_value(id, bypass_value(bypassed));
-                BypassWrite::Sent
+                match self.set_parameter_value(id, bypass_value(bypassed)) {
+                    Ok(()) => BypassWrite::Sent,
+                    Err(UnknownParam(_)) => BypassWrite::Refused,
+                }
             }
             OwnBypass::Property => BypassWrite::Lost,
         }
@@ -201,8 +208,9 @@ mod tests {
         fn parameter_value(&self, _: ParamId) -> Option<Normalized> {
             None
         }
-        fn set_parameter_value(&self, id: ParamId, value: Normalized) {
+        fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
             self.written.lock().unwrap().push((id, value.get()));
+            Ok(())
         }
         fn parameter_plain(&self, _: ParamId, _: Normalized) -> Option<f64> {
             None

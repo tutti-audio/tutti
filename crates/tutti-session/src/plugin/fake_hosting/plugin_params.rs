@@ -105,12 +105,17 @@ impl AnyThread for Fake {
     fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
         self.values.lock_recover().get(&id).copied()
     }
-    fn set_parameter_value(&self, id: ParamId, value: Normalized) {
+    fn set_parameter_value(
+        &self,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), tutti_plugin_types::UnknownParam> {
         if self.held.load(std::sync::atomic::Ordering::SeqCst) {
             self.pending.lock_recover().push((id, value));
         } else {
             self.take(id, value);
         }
+        Ok(())
     }
     fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
         let (min, max) = self.range(id)?;

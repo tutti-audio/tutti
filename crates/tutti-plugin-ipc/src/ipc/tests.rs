@@ -1363,3 +1363,29 @@ fn a_refill_older_than_a_forgetting_is_not_kept() {
     cache.store(started, &list(true));
     assert_eq!(cache.get().unwrap()[0].1, ParamAccess::ReadOnly);
 }
+
+/// **A write to a parameter the declared list lacks is `UnknownParam` at the
+/// call**, once the list is kept: the realtime write asks nothing, and reads the
+/// list it holds. One the list names is queued.
+#[test]
+fn a_served_write_the_kept_list_lacks_is_unknown_at_the_call() {
+    use tutti_plugin_types::{AnyThread, UnknownParam};
+    use tutti_units::Normalized;
+    let _machine = machine_lock();
+    let (mut ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    let half = Normalized::of(0.5);
+    // The write policy asks for the list once and keeps it.
+    assert_eq!(
+        ipc.set_parameter(main_thread(), ParamId::new(3), half),
+        Ok(())
+    );
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(9), half),
+        Err(UnknownParam(ParamId::new(9)))
+    );
+    assert_eq!(
+        AnyThread::set_parameter_value(&ipc, ParamId::new(3), half),
+        Ok(())
+    );
+}

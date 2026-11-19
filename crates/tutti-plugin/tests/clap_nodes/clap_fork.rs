@@ -259,7 +259,9 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     // The live state moved only by its own parameter change: put the gain
     // back and it is byte for byte what it was at the fork. Through the
     // handle, the path a host has once the node is in a graph.
-    handle.send_parameter(GAIN, gain_at(-6.0));
+    handle
+        .send_parameter(GAIN, gain_at(-6.0))
+        .expect("a declared parameter");
     assert_eq!(
         handle
             .save_state(tutti_plugin_types::StateUse::Project)

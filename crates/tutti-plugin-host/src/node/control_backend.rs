@@ -43,7 +43,7 @@ use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
-    OwnBypass, StateError, bypass_value, is_bypassed,
+    OwnBypass, StateError, UnknownParam, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{ParameterInfo, PluginFailure, RenderMode, TerminationReason};
 use tutti_units::Normalized;
@@ -204,7 +204,7 @@ where
     /// subprocess boundary to re-clamp at: it is a `Normalized` rather than a
     /// bare float precisely because nothing downstream would catch one that
     /// was not.
-    fn set_parameter_value(&self, id: ParamId, value: Normalized) {
+    fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
         self.post(move |main, instance| {
             if let Some(control) = instance.control() {
                 // Fire-and-forget: a write the plugin refuses (undeclared,
@@ -214,6 +214,7 @@ where
                 let _ = control.set_parameter(main, id, value);
             }
         });
+        Ok(())
     }
 
     /// The plugin's own bypass at `site`, written on the main thread and only
@@ -439,7 +440,8 @@ mod off_main_tests {
         .unwrap_or_else(|e| panic!("in-process load of the probe: {e:?}"));
         handle
             .any_thread()
-            .set_parameter_value(ParamId::new(1), Normalized::of(0.75));
+            .set_parameter_value(ParamId::new(1), Normalized::of(0.75))
+            .expect("a declared parameter");
         (client, handle)
     }
 
@@ -522,7 +524,8 @@ mod off_main_tests {
         let (_client, handle, _pump) = loaded();
         handle
             .any_thread()
-            .set_parameter_value(ParamId::new(1), Normalized::of(0.25));
+            .set_parameter_value(ParamId::new(1), Normalized::of(0.25))
+            .expect("a declared parameter");
         assert_eq!(
             handle
                 .any_thread()

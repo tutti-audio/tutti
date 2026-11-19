@@ -265,11 +265,16 @@ pub(crate) mod tests {
                 .load(SeqCst)
                 .then(|| bypass_value(self.held.load(SeqCst)))
         }
-        fn set_parameter_value(&self, _id: ParamId, value: Normalized) {
+        fn set_parameter_value(
+            &self,
+            _id: ParamId,
+            value: Normalized,
+        ) -> Result<(), tutti_plugin_types::UnknownParam> {
             self.writes.fetch_add(1, SeqCst);
             if self.accepts.load(SeqCst) {
                 self.held.store(is_bypassed(value), SeqCst);
             }
+            Ok(())
         }
         fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
             self.attempts.fetch_add(1, SeqCst);
@@ -282,7 +287,7 @@ pub(crate) mod tests {
             let OwnBypass::Parameter(id) = site else {
                 return BypassWrite::Lost;
             };
-            self.set_parameter_value(id, bypass_value(bypassed));
+            let _ = self.set_parameter_value(id, bypass_value(bypassed));
             BypassWrite::Sent
         }
         fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {

@@ -12,7 +12,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
-    Health, PluginError, PluginFailure, RenderMode, StateError, TerminationReason, WindowHandle,
+    Health, PluginError, PluginFailure, RenderMode, StateError, TerminationReason, UnknownParam,
+    WindowHandle,
 };
 use tutti_plugin_types::{BlockCounts, BypassWrite};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
@@ -318,8 +319,12 @@ impl PluginHandle {
 
     /// Sends one parameter value to the plugin ([`AnyThread::set_parameter_value`]);
     /// updates no mirror and raises no notice.
-    pub fn send_parameter(&self, id: ParamId, value: Normalized) {
-        self.any_thread.set_parameter_value(id, value);
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownParam`] when the plugin does not declare `id`.
+    pub fn send_parameter(&self, id: ParamId, value: Normalized) -> Result<(), UnknownParam> {
+        self.any_thread.set_parameter_value(id, value)
     }
 
     /// The plugin's display string for `value` ([`AnyThread::parameter_text`]).
@@ -1045,7 +1050,13 @@ mod tests {
             fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
                 None
             }
-            fn set_parameter_value(&self, _id: ParamId, _value: Normalized) {}
+            fn set_parameter_value(
+                &self,
+                _id: ParamId,
+                _value: Normalized,
+            ) -> Result<(), UnknownParam> {
+                Ok(())
+            }
             fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
                 None
             }
