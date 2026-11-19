@@ -24,10 +24,10 @@ use super::block::{Block, RingReader};
 use super::cells::Cells;
 use super::command::StreamId;
 use super::control::StreamFile;
+use super::control_cell::ControlCell;
 use super::loops::RingControl;
 use super::prefetch::SharedReader;
 use super::status::StatusCell;
-use super::steer::ControlCell;
 use super::stream::{Stream, StreamerPort};
 use crate::voice::Direction;
 use crate::voice::interp::Place;
@@ -172,7 +172,7 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
 /// # }
 /// ```
 ///
-/// Dropping an `PendingOpen` abandons the open: the streamer closes the stream it
+/// Dropping a `PendingOpen` abandons the open: the streamer closes the stream it
 /// opened.
 #[derive(Debug)]
 #[must_use = "an open nobody polls is abandoned"]

@@ -7,7 +7,7 @@
 //! | Source | Rung by |
 //! |---|---|
 //! | a command (open, close, session rate) | [`StreamerSender::send`], after the push |
-//! | a loop or direction a stream's control side publishes | [`ControlCell::publish`](super::steer::ControlCell::publish), through [`Bell::ring_steer`] |
+//! | a loop or direction a stream's control side publishes | [`ControlCell::publish`](super::control_cell::ControlCell::publish), through [`Bell::ring_control`] |
 //! | the decode lane's answer to an open | the same send (the lane holds a `StreamerSender`) |
 //! | a voice's ring below its refill threshold, or a jump outside the window | [`Bell::ring_refill`], from the audio thread (`RingReader::block`, through [`needs_refill`](super::io::refill::needs_refill)) |
 //! | shutdown | [`Bell::shut`] |
@@ -84,7 +84,7 @@ impl Bell {
 
     /// A request was published for the streamer (a loop or direction): set
     /// the flag it reads, then ring. Control thread.
-    pub(crate) fn ring_steer(&self) {
+    pub(crate) fn ring_control(&self) {
         self.steer.store(true, Ordering::Release);
         self.unparker.unpark();
     }

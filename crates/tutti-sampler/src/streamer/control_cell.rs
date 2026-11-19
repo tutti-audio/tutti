@@ -46,7 +46,7 @@ impl<T> ControlCell<T> {
     pub fn publish(&self, value: impl Into<Arc<T>>) {
         self.cell.publish(value);
         if let Some(bell) = &self.bell {
-            bell.ring_steer();
+            bell.ring_control();
         }
     }
 

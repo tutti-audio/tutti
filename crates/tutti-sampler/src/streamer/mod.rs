@@ -18,6 +18,7 @@ mod config;
 #[cfg(test)]
 mod contained;
 mod control;
+mod control_cell;
 mod decode;
 mod handlers;
 mod io;
@@ -28,7 +29,6 @@ mod open;
 mod prefetch;
 mod record;
 mod status;
-mod steer;
 mod step;
 mod stream;
 mod thread;
@@ -55,10 +55,10 @@ pub(crate) use bell::StreamerSender;
 pub use block::Block;
 pub(crate) use block::RingReader;
 pub use control::StreamFile;
+pub use control_cell::ControlCell;
 pub use open::{Open, OpenError, PendingOpen, Placement, RefusedPlacement, StreamReader};
 pub(crate) use status::StatusCell;
 pub use status::{StreamFault, StreamPhase, StreamStatus};
-pub use steer::ControlCell;
 pub use stream::Stream;
 pub(crate) use stream::StreamerPort;
 
