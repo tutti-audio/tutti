@@ -150,7 +150,7 @@ pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, Interleaved
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_units::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Normalized, ParamId,
-    Q, SampleRate, Samples, Seconds, Semitones,
+    Q, SampleRate, Samples, Seconds, Semitones, TextError,
 };
 
 // The device handle and a device's identity.
@@ -688,12 +688,13 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
-        MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError, NotADataControl, NotADeviceId,
-        NotAMuid, NotASysexSize, NotProfileChannels, NoteData, PortDirection, ProcessError,
-        ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
-        ProfileOutcome, ProfileRequest, ProfileRequestError, ProfileState, ProfileTable,
-        ReportRequest, ReportScope, SpecificData, StandardProfile, SystemMessages, WinMmDevice,
+        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, InstanceIdError,
+        ManufacturerProfile, MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError,
+        NotADataControl, NotADeviceId, NotAMuid, NotASysexSize, NotProfileChannels, NoteData,
+        PortDirection, ProcessError, ProcessFeatures, ProductInstanceId, ProfileChange,
+        ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest, ProfileRequestError,
+        ProfileState, ProfileTable, ReportRequest, ReportScope, SpecificData, StandardProfile,
+        SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
@@ -820,25 +821,24 @@ pub mod midi {
             EntryError, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
             NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
             NotAStateSize, NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits,
-            NotUnixSeconds, NotValid, NotVendorName, OpaqueBody, PaginationFault, ParamPath,
-            PartialError, PartialUpdate, PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer,
-            PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeCapabilities,
-            PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry,
-            PeChannelList, PeChannelMode, PeChunkError, PeCluster, PeColumn, PeController, PeCtrl,
-            PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault,
-            PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError, PeExtensions, PeExternalSync,
-            PeExtra, PeExtraError, PeFlowControl, PeHeaderError, PeHeaderTooLong, PeJson,
-            PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage, PeMidiMode, PeModeEntry,
-            PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
-            PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
-            PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
-            PeText, PeTransaction, PeUnreadable, PeVersion, Place, Priority, PropertyName,
-            RefusedAt, RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry,
-            ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
-            ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName, SelectorAction,
-            SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId, StateRev,
-            StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint,
-            UnixSeconds, UpdateKind,
+            NotUnixSeconds, NotVendorName, OpaqueBody, PaginationFault, ParamPath, PartialError,
+            PartialUpdate, PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram,
+            PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeCapabilities, PeCapabilitiesFailure,
+            PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
+            PeChunkError, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
+            PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
+            PeEndedBy, PeError, PeExtensions, PeExternalSync, PeExtra, PeExtraError, PeFlowControl,
+            PeHeaderError, PeHeaderTooLong, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn,
+            PeMessage, PeMidiMode, PeModeEntry, PeModeList, PeObject, PeOpaque, PeOutcome, PePage,
+            PeProgramEntry, PeProgramList, PeReassemblyError, PeReply, PeRequestId, PeResource,
+            PeResourceList, PeResponse, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus,
+            PeStatusClass, PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable,
+            PeVersion, Place, Priority, PropertyName, PropertyNameError, RefusedAt, RequestRefused,
+            ResIdUse, ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent,
+            ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceTarget,
+            ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction,
+            SimultaneousRequests, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{

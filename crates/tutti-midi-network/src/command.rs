@@ -1,7 +1,7 @@
 //! [`Command`]: one Command Packet (M2-124 section 5.4) as a value, with the
 //! one writer and the one reader of its bytes.
 
-use tutti_midi_device::{EndpointName, NameError, ProductInstanceId};
+use tutti_midi_device::{EndpointName, InstanceIdError, NameError, ProductInstanceId};
 use tutti_ump::{Ump, split_stream};
 
 use tutti_units::{Text, TextError};
@@ -579,10 +579,10 @@ pub enum Command {
     /// Invitation Reply: Pending, `0x11` (Host to Client).
     Pending(EndpointIdentity),
     /// Invitation Reply: Authentication Required, `0x12` (Host to Client).
-    AuthRequired(AuthChallenge),
+    AuthRequired(Box<AuthChallenge>),
     /// Invitation Reply: User Authentication Required, `0x13` (Host to
     /// Client).
-    UserAuthRequired(UserAuthChallenge),
+    UserAuthRequired(Box<UserAuthChallenge>),
     /// Ping, `0x20`.
     Ping(PingId),
     /// Ping Reply, `0x21`.
@@ -634,7 +634,7 @@ pub enum ParseError {
     Name(#[source] NameError),
     /// The Product Instance Id is not a valid Id.
     #[error("the Product Instance Id is invalid")]
-    InstanceId(#[source] NameError),
+    InstanceId(#[source] InstanceIdError),
     /// A text is empty or too long for its field, or holds a NUL.
     #[error("a text is not valid for its field")]
     Text(#[source] TextError),
@@ -900,11 +900,11 @@ impl Command {
                         1 => AuthState::DigestWrong,
                         _ => return Err(ParseError::Reserved),
                     };
-                    Ok(Self::AuthRequired(AuthChallenge {
+                    Ok(Self::AuthRequired(Box::new(AuthChallenge {
                         state,
                         nonce,
                         identity,
-                    }))
+                    })))
                 } else {
                     let state = match header.data2() {
                         0 => UserAuthState::First,
@@ -912,11 +912,11 @@ impl Command {
                         2 => UserAuthState::UserNotFound,
                         _ => return Err(ParseError::Reserved),
                     };
-                    Ok(Self::UserAuthRequired(UserAuthChallenge {
+                    Ok(Self::UserAuthRequired(Box::new(UserAuthChallenge {
                         state,
                         nonce,
                         identity,
-                    }))
+                    })))
                 }
             }
             code::PING | code::PING_REPLY => {
