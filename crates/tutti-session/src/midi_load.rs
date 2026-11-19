@@ -67,7 +67,7 @@ pub enum TrackError {
 }
 
 /// Why a [`LoadedMidi`] has no one tempo map and meter.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum NoCommonTimelineError {
     /// The tracks are independent sequences (format 2): each keeps its own
