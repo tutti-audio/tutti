@@ -229,34 +229,73 @@ impl<T: NoUninit + AnyBitPattern> SeqReader<T> {
     ///
     /// [`Contended`], as above.
     pub fn read(&self, retries: usize) -> Result<Option<T>, Contended> {
-        let (seq, words) = split(&self.cell);
         for _ in 0..=retries {
-            let before = seq.load(Ordering::Acquire);
-            if before == 0 {
-                return Ok(None);
+            match self.attempt() {
+                Attempt::Never => return Ok(None),
+                Attempt::Stable(_, copy) => return Ok(Some(copy)),
+                Attempt::Torn => sync::spin_loop(),
             }
-            if !before.is_multiple_of(2) {
-                sync::spin_loop();
-                continue;
-            }
-            let mut copy = T::zeroed();
-            for (chunk, word) in bytemuck::bytes_of_mut(&mut copy)
-                .chunks_mut(WORD)
-                .zip(words)
-            {
-                let bytes = word.load(Ordering::Relaxed).to_ne_bytes();
-                chunk.copy_from_slice(&bytes[..chunk.len()]);
-            }
-            // Orders the word loads before the re-check: a word from a later
-            // write makes that write's odd mark visible to the load below.
-            fence(Ordering::Acquire);
-            if seq.load(Ordering::Relaxed) == before {
-                return Ok(Some(copy));
-            }
-            sync::spin_loop();
         }
         Err(Contended)
     }
+
+    /// One copy of the value of the last completed write, with that write's
+    /// sequence: `None` if nothing has been written yet, or if a write
+    /// overlapped the copy. Never spins and never retries, so a caller with a
+    /// block to finish loses nothing by a `None`: it tries again next block.
+    ///
+    /// The sequence is even and nonzero, and unique to the write: it grows by
+    /// two with every write. A caller that keeps the sequence of the last
+    /// value it applied tells "already seen" by comparing, and applies a value
+    /// only when the sequence differs.
+    ///
+    /// Before the first write it returns `None`, as [`read`](Self::read)
+    /// returns `Ok(None)`; the two are not told apart here.
+    pub fn try_read(&self) -> Option<(u64, T)> {
+        match self.attempt() {
+            Attempt::Stable(seq, copy) => Some((seq, copy)),
+            Attempt::Never | Attempt::Torn => None,
+        }
+    }
+
+    /// The protocol's one copy attempt, shared by [`read`](Self::read) and
+    /// [`try_read`](Self::try_read).
+    fn attempt(&self) -> Attempt<T> {
+        let (seq, words) = split(&self.cell);
+        let before = seq.load(Ordering::Acquire);
+        if before == 0 {
+            return Attempt::Never;
+        }
+        if !before.is_multiple_of(2) {
+            return Attempt::Torn;
+        }
+        let mut copy = T::zeroed();
+        for (chunk, word) in bytemuck::bytes_of_mut(&mut copy)
+            .chunks_mut(WORD)
+            .zip(words)
+        {
+            let bytes = word.load(Ordering::Relaxed).to_ne_bytes();
+            chunk.copy_from_slice(&bytes[..chunk.len()]);
+        }
+        // Orders the word loads before the re-check: a word from a later
+        // write makes that write's odd mark visible to the load below.
+        fence(Ordering::Acquire);
+        if seq.load(Ordering::Relaxed) == before {
+            Attempt::Stable(before, copy)
+        } else {
+            Attempt::Torn
+        }
+    }
+}
+
+/// What one copy attempt found.
+enum Attempt<T> {
+    /// The sequence was zero: nothing written.
+    Never,
+    /// A write was in progress or overlapped the copy.
+    Torn,
+    /// The sequence of one completed write, and its value.
+    Stable(u64, T),
 }
 
 impl<T> Clone for SeqReader<T> {
