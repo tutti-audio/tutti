@@ -35,6 +35,7 @@
 mod batch;
 mod error;
 mod param;
+mod program;
 mod slot;
 mod state;
 mod target;
@@ -43,6 +44,8 @@ mod verbs;
 pub use batch::{IntoAssign, IntoRead};
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
+pub use program::{CurveTarget, MacroTarget, PolarityTarget, RateTarget};
+pub(crate) use program::{Declared, Edited, Field, MacroField, RateField};
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
 pub(crate) use slot::{

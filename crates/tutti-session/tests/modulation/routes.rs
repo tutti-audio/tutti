@@ -120,9 +120,13 @@ fn a_route_is_edited_through_its_view() {
     s.mods_mut()
         .route_of(route)
         .unwrap()
-        .set_depth(Depth::of(-0.75))
-        .set_polarity(Polarity::Unipolar)
-        .set_curve(Law::Hold);
+        .set_depth(Depth::of(-0.75));
+    s.set((
+        route.polarity().to(Polarity::Unipolar),
+        route.curve().to(Law::Hold),
+    ))
+    .unwrap();
+    let _ = s.update();
     let read = s.mods().route(route).unwrap();
     assert_eq!(
         (read.depth, read.polarity, read.curve),

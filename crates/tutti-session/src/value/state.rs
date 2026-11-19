@@ -72,6 +72,12 @@ pub struct ValueTable {
     output: crate::policy::FactsCell,
 }
 
+impl fmt::Debug for ValueTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValueTable").finish_non_exhaustive()
+    }
+}
+
 /// The value lock, held; released and forgotten by this thread when dropped.
 pub struct Held<'a> {
     guard: MutexGuard<'a, Params>,
@@ -156,6 +162,18 @@ impl ValueTable {
             .lock_recover()
             .slots
             .insert(id, slot::erase_staged(slot));
+    }
+
+    /// Forgets the slots `ids` name, with what was written to them and not
+    /// yet published. Control thread.
+    pub(crate) fn unprovide(&self, ids: &[SlotId]) {
+        let gone: Vec<_> = {
+            let mut params = self.params.lock_recover();
+            ids.iter()
+                .filter_map(|id| params.slots.remove(id))
+                .collect()
+        };
+        drop(gone);
     }
 
     /// Drops what was written to the slots `ids` name and not yet published.

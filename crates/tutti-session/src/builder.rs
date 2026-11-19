@@ -998,7 +998,10 @@ impl<C: Clock> SessionBuilder<C> {
             reports: Default::default(),
             midi: crate::session::parts::MidiPart::new(&mut parts, &self.opts),
             graph: parts.graph,
-            mods: crate::modulation::ModSession::new(self.opts.unresolved_warning),
+            mods: crate::modulation::ModSession::new(
+                self.opts.unresolved_warning,
+                Arc::clone(&table),
+            ),
             sampler,
             devices: Default::default(),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),

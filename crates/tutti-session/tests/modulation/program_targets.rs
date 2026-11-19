@@ -1,0 +1,347 @@
+//! A modulation program's values (`route.polarity()`, `route.curve()`,
+//! `lfo.rate()`, `macro_.value()`): a write is staged, the update publishes it
+//! as one republish of the lanes it reaches, and a lane that republishes keeps
+//! its LFO's phase.
+
+use std::sync::Arc;
+
+use tutti_modulation::{Clock, Law, Lfo, LfoRate, Polarity, ProgramTime, Waveform, shape};
+use tutti_session::{ModRouteId, ModSourceId, ParamRef, RouteSpec, ValueErrorKind};
+use tutti_units::{Beat, BeatsPerCycle, Bipolar, Depth, Hz, SamplePosition, SampleRate, UnitParam};
+
+use crate::common::probe::ProbeUnit;
+use crate::mod_lanes::{frame, master, render, rig, settle};
+
+const RATE: f64 = 48_000.0;
+
+/// A cutoff probe (knob 500, range `0..=1000`) on output 0 with `source`
+/// routed into it at `depth`, settled and rendered once. Returns the param and
+/// the route.
+fn scene(
+    s: &mut tutti_session::DetachedSession,
+    side: &mut tutti_session::AudioSide,
+    source: impl FnOnce(&mut tutti_session::Mods<'_>) -> ModSourceId,
+    depth: f64,
+) -> (ParamRef, ModSourceId, ModRouteId) {
+    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    master(s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let source = source(&mut m);
+    let route = m
+        .route(RouteSpec::new(source, cutoff, Depth::of(depth)))
+        .unwrap();
+    settle(s);
+    render(side, 1_024, 128);
+    (cutoff, source, route)
+}
+
+/// The program the lane on `cutoff` holds now.
+fn program(
+    s: &tutti_session::DetachedSession,
+    cutoff: ParamRef,
+) -> Arc<tutti_modulation::ControlProgram> {
+    let (_, lane) = s.mod_state().lane(cutoff.key()).expect("a lane");
+    lane.program()
+}
+
+/// The clock of the one layer of the lane's program.
+fn clock(s: &tutti_session::DetachedSession, cutoff: ParamRef) -> Clock {
+    program(s, cutoff).layers()[0].clock
+}
+
+/// **A route's polarity and curve land at the update, as the figure the shape
+/// gives.** A macro at 0.5 on a route of depth 0.4 over a span of 1000:
+/// bipolar linear offsets by `0.4 * 0.5 * 1000` = 200; unipolar maps 0.5 to
+/// 0.75 and offsets by 300; bipolar `Hold` below full scale offsets by 0.
+#[test]
+fn a_route_polarity_and_curve_land_at_the_update_as_the_shaped_offset() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, _, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    // The route's depth is an `f32` in the program: its offsets carry that
+    // rounding.
+    let offset = |s: &tutti_session::DetachedSession| {
+        program(s, cutoff).layers()[0]
+            .amount
+            .offset(0.5f32, 1_000.0)
+    };
+    let near = |got: f64, want: f64| assert!((got - want).abs() < 1e-3, "{got} is not {want}");
+    near(offset(&s), 200.0);
+
+    s.set(route.polarity().to(Polarity::Unipolar)).unwrap();
+    near(offset(&s), 200.0);
+    let _ = s.update();
+    near(offset(&s), 300.0);
+    let amount = program(&s, cutoff).layers()[0].amount;
+    assert_eq!(amount.polarity, Polarity::Unipolar);
+    assert_eq!(
+        shape(0.5f32, Depth::of(0.4), amount.polarity, amount.curve),
+        0.3f32,
+        "unipolar 0.5 is 0.75, at depth 0.4"
+    );
+
+    s.set((
+        route.polarity().to(Polarity::Bipolar),
+        route.curve().to(Law::Hold),
+    ))
+    .unwrap();
+    let _ = s.update();
+    near(offset(&s), 0.0);
+    assert_eq!(program(&s, cutoff).layers()[0].amount.curve, Law::Hold);
+}
+
+/// **A read before the update is the pending value, and the lane still holds
+/// the one in force.**
+#[test]
+fn a_get_before_the_update_is_the_pending_value() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, lfo, route) = scene(&mut s, &mut side, |m| m.lfo(Lfo::sine().rate(Hz(2.0))), 0.5);
+    let before = program(&s, cutoff);
+    assert_eq!(s.get(route.polarity()).unwrap(), Polarity::Bipolar);
+    assert_eq!(s.get(route.curve()).unwrap(), Law::Linear);
+    assert_eq!(s.get(lfo.rate()).unwrap(), LfoRate::Hz(Hz(2.0)));
+
+    s.set((
+        route.polarity().to(Polarity::Unipolar),
+        lfo.rate().to(LfoRate::Hz(Hz(5.0))),
+    ))
+    .unwrap();
+    assert_eq!(s.get(route.polarity()).unwrap(), Polarity::Unipolar);
+    assert_eq!(s.get(lfo.rate()).unwrap(), LfoRate::Hz(Hz(5.0)));
+    assert!(
+        Arc::ptr_eq(&program(&s, cutoff), &before),
+        "nothing is published before the update"
+    );
+
+    let _ = s.update();
+    assert!(!Arc::ptr_eq(&program(&s, cutoff), &before), "published");
+    assert_eq!(s.get(route.polarity()).unwrap(), Polarity::Unipolar);
+    assert_eq!(s.get(lfo.rate()).unwrap(), LfoRate::Hz(Hz(5.0)));
+}
+
+/// **Two writes before an update publish the second, and a pair that ends
+/// where it began publishes nothing.**
+#[test]
+fn two_writes_before_an_update_publish_the_second_value_once() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, _, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let settled = program(&s, cutoff);
+
+    s.set(route.polarity().to(Polarity::Unipolar)).unwrap();
+    s.set(route.polarity().to(Polarity::Bipolar)).unwrap();
+    let _ = s.update();
+    assert!(
+        Arc::ptr_eq(&program(&s, cutoff), &settled),
+        "the first write never reached the lane, and the second changes nothing"
+    );
+
+    s.set(route.curve().to(Law::Hold)).unwrap();
+    s.set(route.curve().to(Law::Smootherstep)).unwrap();
+    let _ = s.update();
+    assert_eq!(
+        program(&s, cutoff).layers()[0].amount.curve,
+        Law::Smootherstep
+    );
+    let published = program(&s, cutoff);
+    let _ = s.update();
+    assert!(
+        Arc::ptr_eq(&program(&s, cutoff), &published),
+        "an update with nothing written republishes nothing"
+    );
+}
+
+/// **A rate set lands at the update with the LFO's phase continuing.** A 2 Hz
+/// sine set to 5 Hz is dated by an anchor, at which the layer is where 2 Hz
+/// left it (`2 * at / rate` cycles, not 0) and from which it advances 5
+/// cycles a second: the layer's cycles are continuous across the anchor and
+/// gain 5 over the next second.
+#[test]
+fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, lfo, _) = scene(&mut s, &mut side, |m| m.lfo(Lfo::sine().rate(Hz(2.0))), 0.5);
+    assert!(matches!(
+        clock(&s, cutoff),
+        Clock::Seconds {
+            rate: Hz(2.0),
+            anchor: None,
+            ..
+        }
+    ));
+
+    s.set(lfo.rate().to(LfoRate::Hz(Hz(5.0)))).unwrap();
+    frame(&mut s, &mut side);
+    let Clock::Seconds {
+        rate,
+        anchor: Some(anchor),
+        ..
+    } = clock(&s, cutoff)
+    else {
+        panic!("the new rate is dated by an anchor");
+    };
+    assert_eq!(rate, Hz(5.0));
+    assert_eq!(anchor.prev_rate, Hz(2.0));
+    let at = anchor.at.get() as f64;
+    assert!(at > 0.0, "the anchor is past the frames already played");
+    assert!(
+        (anchor.phase - 2.0 * at / RATE).abs() < 1e-9,
+        "the anchor holds where 2 Hz left the phase: {} cycles",
+        anchor.phase
+    );
+
+    let layer = program(&s, cutoff).layers()[0].clone();
+    let cycles = |frame: f64| {
+        layer
+            .clock
+            .cycles(&ProgramTime {
+                beat: Beat(0.0),
+                play: SamplePosition(frame),
+                play_epoch: anchor.epoch,
+                rate: SampleRate::of(RATE),
+            })
+            .unwrap()
+    };
+    assert!((cycles(at - 4_800.0) - 2.0 * (at - 4_800.0) / RATE).abs() < 1e-9);
+    assert!((cycles(at) - 2.0 * at / RATE).abs() < 1e-9, "continuous");
+    assert!(
+        (cycles(at + RATE) - cycles(at) - 5.0).abs() < 1e-9,
+        "5 cycles in the next second"
+    );
+}
+
+/// **A rate in beats per cycle replaces the clock and keeps its phase offset:
+/// the layer is at `beat / per_cycle` cycles.**
+#[test]
+fn an_lfo_rate_in_beats_per_cycle_is_bar_locked() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, lfo, _) = scene(
+        &mut s,
+        &mut side,
+        |m| m.lfo(Lfo::sine().phase(tutti_units::PhaseIncrement(0.25))),
+        0.5,
+    );
+    s.set(lfo.rate().to(LfoRate::Beats(BeatsPerCycle::of(4.0))))
+        .unwrap();
+    let _ = s.update();
+    let clock = clock(&s, cutoff);
+    let at = |beat: f64| ProgramTime {
+        beat: Beat(beat),
+        play: SamplePosition(0.0),
+        play_epoch: 0,
+        rate: SampleRate::of(RATE),
+    };
+    assert!((clock.cycles(&at(2.0)).unwrap() - 0.75).abs() < 1e-12);
+    assert!((clock.cycles(&at(6.0)).unwrap() - 1.75).abs() < 1e-12);
+}
+
+/// **A macro stays a constant when its value is set, so its lane stays steady**:
+/// every layer is a `Waveform::Const` of the new value, which is what keeps the
+/// lane from walking a grid.
+#[test]
+fn a_macro_set_keeps_the_lane_steady() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, knob, _) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    assert!(program(&s, cutoff).layers().iter().all(|l| l.is_constant()));
+
+    s.set(knob.value().to(Bipolar::of(-0.25))).unwrap();
+    assert_eq!(s.get(knob.value()).unwrap(), Bipolar::of(-0.25), "pending");
+    assert_eq!(program(&s, cutoff).layers()[0].wave, Waveform::Const(0.5));
+    let _ = s.update();
+    let program = program(&s, cutoff);
+    assert_eq!(program.layers().len(), 1);
+    assert!(program.layers().iter().all(|l| l.is_constant()), "steady");
+    assert_eq!(program.layers()[0].wave, Waveform::Const(-0.25));
+    assert_eq!(s.get(knob.value()).unwrap(), Bipolar::of(-0.25));
+}
+
+/// **A target names what the source is.** A macro has a value and no rate, an
+/// LFO a rate and no value, and a route or source that was removed has none: a
+/// call that names one fails at the call, and `set_source` re-registers the
+/// targets of the source it installs.
+#[test]
+fn a_target_the_source_does_not_have_is_refused_at_the_call() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, knob, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let refused = |r: Result<(), tutti_session::ValueError<&'static str>>| r.unwrap_err().kind;
+    assert_eq!(
+        refused(s.set(knob.rate().to(LfoRate::Hz(Hz(1.0))))),
+        ValueErrorKind::NoSuchTarget
+    );
+
+    s.mods_mut().set_source(knob, Lfo::sine()).unwrap();
+    assert_eq!(
+        refused(s.set(knob.value().to(Bipolar::ZERO))),
+        ValueErrorKind::NoSuchTarget,
+        "no longer a macro"
+    );
+    s.set(knob.rate().to(LfoRate::Hz(Hz(3.0)))).unwrap();
+    let _ = s.update();
+    assert!(matches!(
+        program(&s, cutoff).layers()[0].wave,
+        Waveform::Shape { .. }
+    ));
+    assert!(matches!(
+        clock(&s, cutoff),
+        Clock::Seconds { rate: Hz(3.0), .. }
+    ));
+
+    s.mods_mut().remove_route(route).unwrap();
+    assert_eq!(
+        refused(s.set(route.curve().to(Law::Hold))),
+        ValueErrorKind::NoSuchTarget
+    );
+    s.mods_mut().remove_source(knob).unwrap();
+    assert_eq!(
+        refused(s.set(knob.rate().to(LfoRate::Hz(Hz(1.0))))),
+        ValueErrorKind::NoSuchTarget
+    );
+}
+
+/// **A block that adopts a republished program allocates nothing**: the writes
+/// and the update run outside the gate, and the audio side only lends.
+#[test]
+fn blocks_adopting_a_republished_program_do_not_allocate() {
+    let mut s = tutti_session::Session::builder()
+        .outputs_floor(tutti_buffers::ChannelLayout::MONO)
+        .max_block(tutti_buffers::MaxBlock::of(tutti_units::Samples(128)))
+        .build()
+        .expect("builds");
+    let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
+    s.graph()
+        .set_sources(
+            tutti_session::Root::output(0),
+            [tutti_session::OutPort::new(probe, 0)],
+        )
+        .unwrap();
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let route = m
+        .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+        .unwrap();
+    for _ in 0..4 {
+        let _ = s.update();
+    }
+    let mut block = vec![0.0f32; 128];
+    let mut render = |s: &tutti_session::Session| {
+        s.render(
+            &mut tutti_buffers::InterleavedMut::new(&mut block, tutti_buffers::ChannelLayout::MONO)
+                .unwrap(),
+        );
+    };
+    render(&s);
+
+    s.set((
+        route.polarity().to(Polarity::Unipolar),
+        route.curve().to(Law::Hold),
+        lfo.rate().to(LfoRate::Hz(Hz(7.0))),
+    ))
+    .unwrap();
+    let _ = s.update();
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..8 {
+            render(&s);
+        }
+    });
+}

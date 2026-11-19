@@ -475,9 +475,7 @@ tutti-session  setter  crates/tutti-session/src/instrument.rs::InstrumentHandle:
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
-tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_curve
 tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_depth
-tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_polarity
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode
