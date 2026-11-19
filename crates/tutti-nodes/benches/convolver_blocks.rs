@@ -1,7 +1,7 @@
 //! **How does the partitioned convolver's cost spread across host blocks?**
 //!
 //! A mean per-block figure hides the block that pays for a transform. This
-//! times every `Convolver::process_block` call on its own and reports the
+//! times every `Convolver::process` call on its own and reports the
 //! mean, the 99th and 99.9th percentiles and the maximum, per IR length
 //! (0.5, 2 and 5 s at 48 kHz) and host block size (64, 128, 512), against a
 //! 512-frame head partition. The last row is a ragged mix (64, 64, 64, 500)
@@ -44,7 +44,7 @@ fn main() {
         let warm = (2 * ir.len() / mean_len) + 4 * partition;
         for k in 0..warm {
             let n = lens[k % lens.len()];
-            c.process_block(Mono::new(&input[..n]), MonoMut::new(&mut out[..n]));
+            c.process(Mono::new(&input[..n]), MonoMut::new(&mut out[..n]));
         }
         let calls = (16 * partition.max(4096) / mean_len).max(2048);
         let mut all = Vec::with_capacity(calls * 21);
@@ -54,7 +54,7 @@ fn main() {
             for k in 0..calls {
                 let n = lens[k % lens.len()];
                 let t = Instant::now();
-                c.process_block(
+                c.process(
                     Mono::new(black_box(&input[..n])),
                     MonoMut::new(&mut out[..n]),
                 );

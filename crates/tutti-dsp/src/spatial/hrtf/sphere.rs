@@ -13,7 +13,7 @@ use crate::FftFloat;
 use tutti_buffers::{Mono, Sample};
 use tutti_units::{Direction, SampleRate};
 
-use crate::convert::convert_equal;
+use crate::sample_convert::convert_equal;
 use crate::{Complex, CosineWindow, RealFft, WindowedSinc};
 
 mod words;

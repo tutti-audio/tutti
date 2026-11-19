@@ -4,7 +4,7 @@
 
 use tutti_buffers::BusTopology;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Glide, Lanes, MAX_SECTIONS, Sos, SosBank, SosCoefficients, SosError};
+use tutti_dsp::{Glide, MAX_SECTIONS, SimdLanes, Sos, SosBank, SosCoefficients, SosError};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::SampleRate;
 
@@ -24,7 +24,7 @@ pub(super) fn filter_shape(input: BusTopology) -> Shape {
 /// The cascade of a [`Sos`] per channel, the design in progress and the glide of the
 /// coefficients every channel shares.
 #[derive(Clone, Debug)]
-pub(super) struct GlidedSos<F: Float + Lanes> {
+pub(super) struct GlidedSos<F: Float + SimdLanes> {
     bank: SosBank<F>,
     coefficients: Glide<SosCoefficients<F>>,
     /// The design in progress, its room for [`MAX_SECTIONS`] sections held.
@@ -33,7 +33,7 @@ pub(super) struct GlidedSos<F: Float + Lanes> {
     landed: bool,
 }
 
-impl<F: Float + Lanes> GlidedSos<F> {
+impl<F: Float + SimdLanes> GlidedSos<F> {
     /// A silent cascade on the bus `input`, passing the input until a design is
     /// [`start`](Self::start)ed or [`restart`](Self::restart)ed.
     pub(super) fn new(input: BusTopology) -> Self {
