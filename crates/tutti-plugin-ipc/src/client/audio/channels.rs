@@ -296,6 +296,9 @@ impl Channels {
     /// The bridge thread is reading the control connection for news.
     pub(super) fn set_news(&self) {
         self.news.store(true, Ordering::Release);
+        // Store-load pair with `bytes_waiting`'s poll in `news_settled`: this
+        // flag is visible before the bytes it covers are taken.
+        std::sync::atomic::fence(Ordering::SeqCst);
     }
 
     /// Whether [`set_news`](Self::set_news) was called since the last
@@ -317,6 +320,7 @@ impl Channels {
     /// Whether the control connection has bytes the bridge thread has not read
     /// (one `poll`, no wait). `false` with no probe.
     pub(super) fn bytes_waiting(&self) -> bool {
+        std::sync::atomic::fence(Ordering::SeqCst);
         self.probe
             .lock_recover()
             .as_ref()
