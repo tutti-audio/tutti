@@ -705,8 +705,8 @@ impl Wraps for ClapController {
     }
 
     /// A `Number` or `Program` id is refused without touching the plugin.
-    fn load_preset_override(&mut self, _main: MainThreadMarker, id: &PresetId) -> Option<bool> {
-        preset_path(id).is_none().then_some(false)
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+        preset_path(id).is_some() && self.restore_preset(main, id)
     }
 
     /// The writes queued before the load are stale, voided before it runs.

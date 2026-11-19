@@ -832,7 +832,11 @@ fn a_refused_preset_keeps_the_queued_writes() {
     controller
         .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3))
         .expect("a declared, writable parameter");
-    assert!(!controller.load_preset(main_thread(), &PresetId::Number(3)));
+    assert!(!Control::load_preset(
+        &mut controller,
+        main_thread(),
+        &PresetId::Number(3)
+    ));
     let rendered = render_f32(&mut processor);
     assert!((rendered - 0.3).abs() < 1e-6, "{rendered}");
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");

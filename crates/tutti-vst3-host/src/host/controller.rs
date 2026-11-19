@@ -259,20 +259,20 @@ impl Wraps for Vst3Controller {
     /// Looks the program up once and refuses, without touching the plugin, an
     /// id that is no program or a program parameter the host may not write;
     /// otherwise runs the restore hooks around the load itself.
-    fn load_preset_override(&mut self, main: MainThreadMarker, id: &PresetId) -> Option<bool> {
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
         let loaded = self.loaded();
         let Some((param, value)) = loaded.program_write(main, id) else {
-            return Some(false);
+            return false;
         };
         if loaded.parameter_writable(main, param).is_err() {
-            return Some(false);
+            return false;
         }
         self.before_restore(main);
         let selected = self.loaded_mut().select_program(main, param, value);
         if selected {
             self.after_restore(main);
         }
-        Some(selected)
+        selected
     }
 
     /// The writes queued before the load are stale, voided before it runs.

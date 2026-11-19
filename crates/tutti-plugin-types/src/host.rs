@@ -584,18 +584,27 @@ pub trait Wraps {
         let _ = main;
     }
 
-    /// Answers a preset load that the format can refuse up front, without the
-    /// generic path: `Some(loaded)` is the whole answer (the format runs
-    /// [`before_restore`](Self::before_restore) and
-    /// [`after_restore`](Self::after_restore) itself when it loads), and `None`
-    /// takes the generic path.
+    /// Loads a preset. The default is [`restore_preset`](Self::restore_preset);
+    /// a format overrides it to refuse a preset up front, without touching the
+    /// plugin.
     ///
     /// A refusal that never reaches the plugin voids no write. A preset that
     /// reaches the plugin and then fails still voids the pending writes, since
     /// the plugin may be half-applied.
-    fn load_preset_override(&mut self, main: MainThreadMarker, id: &PresetId) -> Option<bool> {
-        let _ = (main, id);
-        None
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+        self.restore_preset(main, id)
+    }
+
+    /// The generic preset load: [`before_restore`](Self::before_restore), the
+    /// plugin's own load, then [`after_restore`](Self::after_restore) if it
+    /// loaded.
+    fn restore_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+        self.before_restore(main);
+        let loaded = self.plugin_mut().load_preset(main, id);
+        if loaded {
+            self.after_restore(main);
+        }
+        loaded
     }
 
     /// A state or a preset load took: whatever it carried is owed to the
@@ -763,15 +772,7 @@ impl<W: Wraps> Control for W {
     }
 
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
-        if let Some(answer) = self.load_preset_override(main, id) {
-            return answer;
-        }
-        self.before_restore(main);
-        let loaded = self.plugin_mut().load_preset(main, id);
-        if loaded {
-            self.after_restore(main);
-        }
-        loaded
+        Wraps::load_preset(self, main, id)
     }
 
     fn current_preset(&mut self, main: MainThreadMarker) -> Option<PresetId> {
@@ -1014,12 +1015,8 @@ mod tests {
             self.hooks.push(("after", loads));
         }
 
-        fn load_preset_override(
-            &mut self,
-            _main: MainThreadMarker,
-            _id: &PresetId,
-        ) -> Option<bool> {
-            (!self.reaches).then_some(false)
+        fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+            self.reaches && self.restore_preset(main, id)
         }
     }
 
