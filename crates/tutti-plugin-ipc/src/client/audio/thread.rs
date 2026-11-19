@@ -5,10 +5,10 @@
 use super::ListenerSlot;
 #[cfg(test)]
 use super::channels::response_ring;
-use super::channels::{BridgeSide, Channels, ResponseWriter};
+use super::channels::{BridgeSide, Channels, ResponseWriter, Stamped};
 use super::dispatch::{Lane, Lanes, Owed, handle_audio, handle_control, read_news};
 use super::lifecycle::Lifecycle;
-use super::messages::{AudioCommand, AudioResponse, BridgeEvent, Unsolicited};
+use super::messages::{AudioCommand, AudioResponse, BridgeEvent, ControlCommand, Unsolicited};
 use super::payload_pool::PayloadPool;
 use crate::HostMessage;
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
@@ -257,26 +257,37 @@ fn pump(
     // Unsolicited events read while a command waited for its reply. One
     // buffer for the connection, handed to the listener after each command.
     let mut inbox = Unsolicited::with_lifecycle(lifecycle.clone());
-    // The block taken off its queue and not yet sent: see below.
-    let mut held: Option<AudioCommand> = None;
+    // The head of each queue, taken and not yet handled: see below.
+    let mut held_block: Option<Stamped<AudioCommand>> = None;
+    let mut held_control: Option<Stamped<ControlCommand>> = None;
     while live(lifecycle) {
-        // **The control lane goes first, and a block is taken off its queue
-        // before the control queue is looked at.** The one thread used to take
-        // every command in the order it was queued, so a rate or mode change
-        // queued before a block was applied before it. With two queues, that
-        // holds when a block taken here finds the change it followed already
-        // queued (it was pushed first), and a steady stream of blocks cannot
-        // starve the control lane.
-        if held.is_none() {
-            held = channels.pop_block();
+        // **Commands are taken in the order they were pushed**, across the two
+        // queues: the head of each is held, and the one with the lesser stamp
+        // goes first. The one thread used to take every command in queue order,
+        // so a rate change queued before a block was applied before it and a
+        // request queued after a block was sent after it; neither queue can
+        // starve the other.
+        if held_block.is_none() {
+            held_block = channels.pop_block();
         }
-        let result = if let Some(cmd) = channels.pop_control() {
+        if held_control.is_none() {
+            held_control = channels.pop_control();
+        }
+        let control_first = match (&held_block, &held_control) {
+            (Some(block), Some(control)) => control.at < block.at,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        let result = if control_first && let Some(Stamped { cmd, .. }) = held_control.take() {
+            // A command's turn reads the news that comes during it too.
+            channels.set_news();
             handle_control(cmd, &mut lanes.control, channels, &mut inbox, lifecycle)
-        } else if let Some(cmd) = held.take() {
+        } else if let Some(Stamped { cmd, .. }) = held_block.take() {
             handle_audio(cmd, &mut lanes.audio, channels, payloads, &mut inbox).and_then(|went| {
                 // The plugin's news arrives on the control lane, which a block
                 // does not read: take what is there after each block sent.
                 if went && ipc::has_pending(&lanes.control.stream) {
+                    channels.set_news();
                     read_news(&mut lanes.control, channels, &mut inbox)
                 } else {
                     Ok(())
@@ -400,7 +411,7 @@ fn drain_unsolicited(inbox: &mut Unsolicited, channels: &Channels, listener: &Li
 /// so its MIDI is counted dropped; nothing can splice past it, as the server
 /// is gone.
 fn drain_with_errors(channels: &mut BridgeSide) {
-    while let Some(cmd) = channels.pop_block() {
+    while let Some(Stamped { cmd, .. }) = channels.pop_block() {
         if let AudioCommand::Process(payload) = &cmd {
             channels.note_dropped_midi(payload.midi_events.len() as u64);
         }

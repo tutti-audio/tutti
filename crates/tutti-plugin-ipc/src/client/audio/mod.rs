@@ -289,8 +289,12 @@ impl AudioBridge {
     pub(crate) fn news_settled(&self, within: std::time::Duration) -> bool {
         let deadline = crate::Wake::deadline_in(within);
         self.channels.progress().wait_until(deadline, || {
+            // The bytes first, then the flag: the bridge thread sets the flag
+            // before it takes bytes off the connection, so bytes gone from the
+            // connection mean the flag is already set. The other order can read
+            // the flag unset, then see the bytes gone.
             self.lifecycle.is_crashed()
-                || !(self.channels.news_pending() || self.channels.bytes_waiting())
+                || !(self.channels.bytes_waiting() || self.channels.news_pending())
         });
         !self.lifecycle.is_crashed()
     }
