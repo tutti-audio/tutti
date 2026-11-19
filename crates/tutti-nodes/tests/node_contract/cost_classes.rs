@@ -4,9 +4,10 @@
 //! for bit the serial one.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::plane_bits as bits;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Schedule, Shape, Status, WorkerPool,
@@ -15,7 +16,6 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{TransportPosition as BlockTransport, Unforkable};
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_transport::Transport;
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -77,7 +77,7 @@ impl Node for Sum {
     fn reset(&mut self) {}
 }
 
-fn click(transport: &Transport) -> ClickNode {
+fn click(transport: &Transport) -> ClickNode<f32> {
     let settings = Arc::new(ClickSettings::new());
     settings.mode().set(MetronomeMode::Always);
     ClickNode::new(transport, settings)

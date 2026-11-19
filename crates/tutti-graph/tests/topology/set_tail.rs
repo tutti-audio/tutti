@@ -8,13 +8,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::{Kind, TestNode, prepare};
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, Cx, Editor, Executor, Fade, FadeLaw, Io, MAX_NODE_TAIL, Node, Prepare, Shape,
     Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{SampleRate, Samples, Tail};
 
 const NODE: NodeKey = NodeKey(1);

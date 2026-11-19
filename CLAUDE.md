@@ -188,13 +188,13 @@ touched.
   `tutti_rt::spawn_named`.
 - A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at
   construction, refusing past it, never growing. A value of more than one field read as
-  one word is a `PackedAtomic`; an atomic float is `tutti_types::AtomicF32`/`AtomicF64`.
+  one word is a `PackedAtomic`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.
 - A setting the audio thread reads is a `tutti_rt::Setting<T>` over a `SettingWord`
   (`setting_word!`); a node declares it in `declare_params!`'s `settings` block.
-- An id type is written with `tutti_types::id!` and minted from a `Mint`.
+- An id type is written with `tutti_rt::id!` and minted from a `tutti_rt::Mint`.
 - Time and layout have one type each: `tutti_music::LoopRange` for a loop,
   `TimeSignature` and `MeterMap` for meter, `tutti_tempo::TempoMap` for tempo,
-  `ChannelLayout`, `ChannelTopology` and `BusTopology` for channels, and
+  `tutti_buffers::{ChannelLayout, ChannelTopology, BusTopology}` for channels, and
   `tutti_curve::Trajectory<U>` for an automation curve.
 
 ### Unit types
@@ -301,9 +301,9 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 (dev-dependencies may go anywhere); `cargo xtask check-layout` holds it:
 
 0. `tutti-units`, `tutti-plugin-ipc-ffi`
-1. `tutti-types`, `tutti-music`, `tutti-ump`
+1. `tutti-music`, `tutti-ump`, `tutti-buffers`
 2. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-midi-protocol`,
-   `tutti-midi-device`, `tutti-curve`, `tutti-buffers`
+   `tutti-midi-device`, `tutti-curve`
 3. `tutti-rt`
 4. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
    `tutti-tempo`, `tutti-voicing`, `tutti-sf2`, `tutti-midi-network`

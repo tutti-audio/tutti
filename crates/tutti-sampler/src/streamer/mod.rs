@@ -76,8 +76,8 @@ use crate::error::Result;
 use decode::Seams;
 use handlers::Handles;
 use thread::Built;
+use tutti_rt::Mint;
 use tutti_rt::RingFloat;
-use tutti_types::Mint;
 use tutti_units::SampleRate;
 
 /// The disk-streaming engine: owns the streamer thread that reads files into
@@ -343,7 +343,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
 
     /// [`open`](Self::open) for a voice `width` channels wide: the file's
     /// channels are placed into it by their
-    /// [`ChannelTopology`](tutti_types::ChannelTopology), as
+    /// [`ChannelTopology`](tutti_buffers::ChannelTopology), as
     /// [`memory_voice`](crate::memory_voice) places a wave. A file in another
     /// order than the engine's (a WAV 7.1 lists the rears before the sides) is
     /// permuted to it, one wider than `width` with an order is folded into it,
@@ -355,7 +355,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
         &self,
         path: &std::path::Path,
         place: Placement,
-        width: tutti_types::ChannelLayout,
+        width: tutti_buffers::ChannelLayout,
     ) -> Opening<F> {
         self.open_as(path, place, Some(width))
     }
@@ -364,7 +364,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
         &self,
         path: &std::path::Path,
         place: Placement,
-        width: Option<tutti_types::ChannelLayout>,
+        width: Option<tutti_buffers::ChannelLayout>,
     ) -> Opening<F> {
         let id = StreamId::mint(&self.next_stream);
         let (reply, answer) = crossbeam_channel::bounded(1);

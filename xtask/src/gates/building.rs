@@ -39,7 +39,7 @@
 //!   named in the generics or the `where` clause). A function with no parameter has no
 //!   first one.
 //! - `ctor-result`: no receiver, a built type wrapped in `Result`, on any owner.
-//! - `range-macro`: a `macro_rules!` outside `tutti-units` and `tutti-types` (the homes of
+//! - `range-macro`: a `macro_rules!` outside `tutti-units` and `tutti-rt`'s `id.rs` (the homes of
 //!   `ranged!` and `id!`) whose body holds a
 //!   `fn new` of one parameter returning `Option<..>`, the `new(raw) -> Option`
 //!   signature of a range-checked type.
@@ -837,7 +837,7 @@ pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
             .max_by_key(|b| b.open)
     };
     let in_macro_home =
-        path.starts_with("crates/tutti-units/") || path.starts_with("crates/tutti-types/");
+        path.starts_with("crates/tutti-units/") || path == "crates/tutti-rt/src/id.rs";
     let mut sites = BTreeSet::new();
     if !in_macro_home {
         for (open, close, name) in &macros {
@@ -1246,7 +1246,7 @@ mod tests {
     #[test]
     fn a_config_constructor_must_take_a_width_first() {
         let ok = "impl AConfig { pub fn new(l: ChannelLayout, r: u8) -> Self { todo!() } }\n\
-                  impl BConfig { pub fn new(t: tutti_types::BusTopology) -> Self { todo!() } }\n\
+                  impl BConfig { pub fn new(t: tutti_buffers::BusTopology) -> Self { todo!() } }\n\
                   impl CConfig { pub fn new(l: impl Into<ChannelLayout>) -> Self { todo!() } }\n\
                   impl DConfig { pub fn new<L: Into<BusTopology>>(l: L) -> Self { todo!() } }\n\
                   impl EConfig { pub fn new<L>(l: L) -> Self where L: Into<ChannelLayout> { todo!() } }\n\
@@ -1290,7 +1290,7 @@ mod tests {
                    macro_rules! plain { ($n:ident) => { impl $n { pub fn new(a: u8, b: u8) -> Option<Self> { todo!() } } }; }";
         assert_eq!(rules(src), one("ranged", "range-macro"));
         assert!(scan("crates/tutti-units/src/lib.rs", src).is_empty());
-        assert!(scan("crates/tutti-types/src/id.rs", src).is_empty());
+        assert!(scan("crates/tutti-rt/src/id.rs", src).is_empty());
     }
 
     #[test]

@@ -17,6 +17,7 @@ use std::f64::consts::TAU;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, Glide, LadderBank, LadderControls,
@@ -24,7 +25,6 @@ use tutti_dsp::{
     SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_complement,
 };
 use tutti_fixtures::signal::write_wav_f32;
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, Drive, Hz, Q, Resonance, SampleRate};
 
 const RATE: f64 = 48_000.0;

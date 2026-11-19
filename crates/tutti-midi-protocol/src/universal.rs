@@ -2,7 +2,7 @@
 //! or a device inquiry reads, as typed values.
 //!
 //! [`read()`](fn@read) turns a whole SysEx message ([`SysexMessage`], which
-//! `tutti_ump::SysexAssembler` hands out) into a [`Read`]. It is a pure parse of
+//! `tutti_ump::SysexAssembler` hands out) into a [`UniversalRead`]. It is a pure parse of
 //! one message: no state, no allocation. [`UniversalReader`] is the instrument's
 //! edge: it takes every UMP of one Group, reassembles the SysEx7 packets, reads
 //! the message and answers only the ones addressed to the instrument
@@ -22,10 +22,10 @@
 //!   field of the specification typed ([`MmcCommand`], [`MmcInfoField`]).
 //! - The MIDI Tuning Standard (`08`): [`TuningMessage`], with its
 //!   [frequency data](crate::TuningFrequency). A dump whose checksum does not hold is
-//!   [`Read::BadChecksum`], not `Unread`.
+//!   [`UniversalRead::BadChecksum`], not `Unread`.
 //!
-//! Anything else is [`Read::Unread`] when it is Universal (another sub-id, or one
-//! of these cut short or with data bytes over), and [`Read::Foreign`] when the
+//! Anything else is [`UniversalRead::Unread`] when it is Universal (another sub-id, or one
+//! of these cut short or with data bytes over), and [`UniversalRead::Foreign`] when the
 //! SysEx id is a manufacturer's. Neither is an error: a stream is never dropped
 //! for a message nobody here reads. MIDI-CI (`7E dev 0D`) is Universal too and
 //! is `tutti-midi-device`'s codec; here it is `Unread`.
@@ -51,7 +51,7 @@ pub use machine_control::*;
 
 use tutti_ump::{
     DeviceIdentity, Message, MidiGroup, Sysex7Packet, SysexAssembler, SysexMessage, SysexStatus,
-    SysexStep, U7, U14, UNIVERSAL_NON_REAL_TIME, UNIVERSAL_REAL_TIME, Ump,
+    SysexStep, U4, U7, U14, UNIVERSAL_NON_REAL_TIME, UNIVERSAL_REAL_TIME, Ump,
 };
 use tutti_units::Seconds;
 
@@ -71,14 +71,145 @@ impl SysexDeviceId {
     pub const DEFAULT: Self = Self::of(0);
 }
 
+tutti_units::ranged! {
+    /// Which of the eight pieces of an MTC cycle a Quarter Frame carries: `0` to
+    /// `7`, the three bits above its nibble (M1 p.53).
+    #[derive(Eq, Hash)]
+    QuarterFramePiece(u8), NotQuarterFramePiece, bits 3
+}
+
+/// One MTC Quarter Frame (System Common `F1`, data byte `0nnn dddd`): the piece
+/// of the cycle it is and the nibble of the time code it carries (M1 p.53). Eight
+/// of them in a cycle state one position ([`QuarterFrameCycle`], from [`MtcTimeCode::cycle`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct QuarterFrame {
+    /// Which piece of the cycle: `0` is the frames' low nibble, `7` the hours'
+    /// high nibble over the rate code.
+    pub piece: QuarterFramePiece,
+    /// The four bits of time code it carries.
+    pub nibble: U4,
+}
+
+impl QuarterFrame {
+    /// Piece 0 with nibble 0.
+    pub const FIRST: Self = Self {
+        piece: QuarterFramePiece::masked(0),
+        nibble: U4::masked(0),
+    };
+
+    /// The Quarter Frame a data byte `0nnn dddd` carries: every seven-bit value
+    /// is one.
+    #[must_use]
+    pub const fn from_data(data: U7) -> Self {
+        Self {
+            piece: QuarterFramePiece::masked(data.get() >> 4),
+            nibble: U4::masked(data.get()),
+        }
+    }
+
+    /// The data byte of the Quarter Frame, `0nnn dddd`: the inverse of
+    /// [`from_data`](Self::from_data).
+    #[must_use]
+    pub const fn data(self) -> U7 {
+        U7::masked((self.piece.get() << 4) | self.nibble.get())
+    }
+}
+
+/// The eight nibbles of one MTC cycle, indexed by piece ([`MtcTimeCode::nibbles`]
+/// as [`U4`]s). A [`QuarterFrame`] of it takes its piece from the index, so a
+/// frame never names a piece other than the nibble's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct QuarterFrameCycle([U4; 8]);
+
+impl QuarterFrameCycle {
+    /// A cycle of eight zero nibbles.
+    pub const ZERO: Self = Self([U4::masked(0); 8]);
+
+    /// The Quarter Frame of `piece`.
+    #[must_use]
+    pub const fn frame(&self, piece: QuarterFramePiece) -> QuarterFrame {
+        QuarterFrame {
+            piece,
+            nibble: self.0[piece.get() as usize],
+        }
+    }
+
+    /// The eight Quarter Frames, in piece order.
+    #[must_use]
+    pub const fn frames(&self) -> [QuarterFrame; 8] {
+        let mut frames = [QuarterFrame::FIRST; 8];
+        let mut piece = 0;
+        while piece < 8 {
+            frames[piece] = self.frame(QuarterFramePiece::masked(piece as u8));
+            piece += 1;
+        }
+        frames
+    }
+}
+
 /// A time code at a rate that has an MTC code (24, 25, 29.97 drop-frame or 30
 /// frames): the labels `hours:minutes:seconds:frames` checked against their
 /// ranges, so a value of this type is a position some clock can read. It is
-/// what an MTC Full Message and an MMC time code both state.
+/// what an MTC Full Message and an MMC [`MmcTimeLabel`] both state.
+///
+/// It is a [`SmpteTimecode`] restricted to an [`MtcRate`]: [`timecode`](Self::timecode)
+/// is the position at any SMPTE rate, for counting frames and reading seconds,
+/// and the rate is held here once, as the two-bit MTC code. An MMC
+/// [`MmcTimeCode`] is a different thing: the five-byte field of RP-013, a label
+/// and its tail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "MtcTimeCodeRaw", into = "MtcTimeCodeRaw")
+)]
 pub struct MtcTimeCode {
     rate: MtcRate,
-    timecode: SmpteTimecode,
+    hours: u8,
+    minutes: u8,
+    seconds: u8,
+    frames: u8,
+}
+
+/// The persisted shape of an [`MtcTimeCode`]: its rate and labels as written,
+/// checked by `TryFrom` on the way back in.
+#[cfg(feature = "serde")]
+#[derive(serde::Serialize, serde::Deserialize)]
+struct MtcTimeCodeRaw {
+    rate: MtcRate,
+    hours: u8,
+    minutes: u8,
+    seconds: u8,
+    frames: u8,
+}
+
+/// A persisted position with a label out of range for its rate.
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("a time code label is out of range for its MTC rate")]
+pub struct InvalidMtcTimeCode;
+
+#[cfg(feature = "serde")]
+impl From<MtcTimeCode> for MtcTimeCodeRaw {
+    fn from(t: MtcTimeCode) -> Self {
+        Self {
+            rate: t.rate,
+            hours: t.hours,
+            minutes: t.minutes,
+            seconds: t.seconds,
+            frames: t.frames,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<MtcTimeCodeRaw> for MtcTimeCode {
+    type Error = InvalidMtcTimeCode;
+
+    fn try_from(raw: MtcTimeCodeRaw) -> Result<Self, Self::Error> {
+        Self::new(raw.rate, raw.hours, raw.minutes, raw.seconds, raw.frames)
+            .ok_or(InvalidMtcTimeCode)
+    }
 }
 
 impl MtcTimeCode {
@@ -87,7 +218,10 @@ impl MtcTimeCode {
     pub const fn origin(rate: MtcRate) -> Self {
         Self {
             rate,
-            timecode: SmpteTimecode::origin(rate.frame_rate()),
+            hours: 0,
+            minutes: 0,
+            seconds: 0,
+            frames: 0,
         }
     }
 
@@ -103,28 +237,61 @@ impl MtcTimeCode {
         frames: u8,
     ) -> Option<Self> {
         match SmpteTimecode::new(hours, minutes, seconds, frames, rate.frame_rate()) {
-            Some(timecode) => Some(Self { rate, timecode }),
+            Some(_) => Some(Self {
+                rate,
+                hours,
+                minutes,
+                seconds,
+                frames,
+            }),
             None => None,
         }
+    }
+
+    /// The position of `timecode`, or `None` when its rate has no MTC code
+    /// (29.97 non-drop).
+    #[must_use]
+    pub const fn from_timecode(timecode: SmpteTimecode) -> Option<Self> {
+        let Some(rate) = timecode.frame_rate().mtc_rate() else {
+            return None;
+        };
+        Self::new(
+            rate,
+            timecode.hours(),
+            timecode.minutes(),
+            timecode.seconds(),
+            timecode.frames(),
+        )
     }
 
     /// The position of the frame nearest `seconds` at `rate`
     /// ([`SmpteTimecode::from_seconds`]).
     #[must_use]
     pub fn at(seconds: Seconds, rate: MtcRate) -> Self {
-        Self {
+        Self::at_rate(
+            SmpteTimecode::from_seconds(seconds, rate.frame_rate()),
             rate,
-            timecode: SmpteTimecode::from_seconds(seconds, rate.frame_rate()),
-        }
+        )
     }
 
     /// The position of frame number `count` since `00:00:00:00` at `rate`
     /// ([`SmpteTimecode::from_frame_count`]); hours wrap at 24.
     #[must_use]
     pub fn from_frame_count(count: u64, rate: MtcRate) -> Self {
+        Self::at_rate(
+            SmpteTimecode::from_frame_count(count, rate.frame_rate()),
+            rate,
+        )
+    }
+
+    /// `timecode`, counted at `rate.frame_rate()` by the caller.
+    fn at_rate(timecode: SmpteTimecode, rate: MtcRate) -> Self {
         Self {
             rate,
-            timecode: SmpteTimecode::from_frame_count(count, rate.frame_rate()),
+            hours: timecode.hours(),
+            minutes: timecode.minutes(),
+            seconds: timecode.seconds(),
+            frames: timecode.frames(),
         }
     }
 
@@ -137,16 +304,39 @@ impl MtcTimeCode {
     /// The time code, for counting frames and reading seconds.
     #[must_use]
     pub const fn timecode(self) -> SmpteTimecode {
-        self.timecode
+        SmpteTimecode::counted(
+            self.hours,
+            self.minutes,
+            self.seconds,
+            self.frames,
+            self.rate.frame_rate(),
+        )
+    }
+
+    /// The hours byte `0rrhhhhh` of a Full Message and of an MMC time code: the
+    /// rate code over the hours ([`MtcRate::hours_byte`]). The last two Quarter
+    /// Frame nibbles are its halves.
+    #[must_use]
+    pub const fn hours_byte(self) -> u8 {
+        self.rate.hours_byte(self.hours)
+    }
+
+    /// The position the four bytes `hr mn sc fr` state, with `hr` as
+    /// `0rrhhhhh`: the inverse of [`hours_byte`](Self::hours_byte)
+    /// ([`MtcRate::from_hours_byte`]).
+    #[must_use]
+    pub(crate) const fn from_hours_byte(hr: u8, mn: u8, sc: u8, fr: u8) -> Option<Self> {
+        let (rate, hours) = MtcRate::from_hours_byte(hr);
+        Self::new(rate, hours, mn, sc, fr)
     }
 
     /// The eight Quarter Frame nibbles that state this position (M1 p.53,
     /// T-9), in piece order: frames low and high, seconds low and high,
-    /// minutes low and high, hours low, and hours high over the rate code.
+    /// minutes low and high, and the hours byte low and high.
     #[must_use]
     pub const fn nibbles(self) -> [u8; 8] {
-        let t = self.timecode;
-        let (h, m, s, f) = (t.hours(), t.minutes(), t.seconds(), t.frames());
+        let (m, s, f) = (self.minutes, self.seconds, self.frames);
+        let hr = self.hours_byte();
         [
             f & 0x0F,
             f >> 4,
@@ -154,23 +344,22 @@ impl MtcTimeCode {
             s >> 4,
             m & 0x0F,
             m >> 4,
-            h & 0x0F,
-            ((h >> 4) & 0x01) | (self.rate.code() << 1),
+            hr & 0x0F,
+            hr >> 4,
         ]
     }
 
-    /// The Quarter Frame data bytes (`0nnn dddd`, piece number over nibble) a
-    /// generator sends for this position, in the order of the pieces.
+    /// The eight Quarter Frames that state this position, as a cycle.
     #[must_use]
-    pub const fn quarter_frames(self) -> [U7; 8] {
+    pub const fn cycle(self) -> QuarterFrameCycle {
         let nibbles = self.nibbles();
-        let mut bytes = [U7::masked(0); 8];
+        let mut cycle = [U4::masked(0); 8];
         let mut piece = 0;
         while piece < 8 {
-            bytes[piece] = U7::masked(((piece as u8) << 4) | nibbles[piece]);
+            cycle[piece] = U4::masked(nibbles[piece]);
             piece += 1;
         }
-        bytes
+        QuarterFrameCycle(cycle)
     }
 
     /// The position the eight nibbles of a completed cycle state, the inverse
@@ -182,8 +371,8 @@ impl MtcTimeCode {
         let frames = (n[0] & 0x0F) | ((n[1] & 0x01) << 4);
         let seconds = (n[2] & 0x0F) | ((n[3] & 0x03) << 4);
         let minutes = (n[4] & 0x0F) | ((n[5] & 0x03) << 4);
-        let hours = (n[6] & 0x0F) | ((n[7] & 0x01) << 4);
-        Self::new(MtcRate::masked(n[7] >> 1), hours, minutes, seconds, frames)
+        let hours_byte = (n[6] & 0x0F) | ((n[7] & 0x07) << 4);
+        Self::from_hours_byte(hours_byte, minutes, seconds, frames)
     }
 }
 
@@ -267,7 +456,7 @@ impl MtcFullMessage {
             Recipient::AllCall.device_byte(),
             0x01,
             0x01,
-            (self.rate().code() << 5) | self.hours(),
+            self.0.hours_byte(),
             self.minutes(),
             self.seconds(),
             self.frames(),
@@ -282,7 +471,10 @@ impl MtcFullMessage {
         if hr >= 0x80 {
             return None;
         }
-        Self::new(MtcRate::masked(hr >> 5), hr & 0x1F, mn, sc, fr)
+        match MtcTimeCode::from_hours_byte(hr, mn, sc, fr) {
+            Some(time) => Some(Self(time)),
+            None => None,
+        }
     }
 }
 
@@ -324,7 +516,7 @@ impl Recipient {
 
 /// General MIDI System On or Off (M1 p.52).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum GeneralMidi {
+pub enum GeneralMidiMode {
     /// `09 01`: the device goes to General MIDI System Level 1's initial status.
     On,
     /// `09 02`: a device with another initialized mode returns to it.
@@ -344,7 +536,7 @@ pub enum Universal {
     /// Identity Reply (`06 02`, M1 p.40).
     IdentityReply(DeviceIdentity),
     /// General MIDI System On or Off (`09`, M1 p.52).
-    GeneralMidi(GeneralMidi),
+    GeneralMidi(GeneralMidiMode),
     /// Master Volume (`04 01`, M1 p.57): 14 bits, `0` is off.
     MasterVolume(U14),
     /// Master Balance (`04 02`, M1 p.57): 14 bits, `0` is hard left and
@@ -398,7 +590,7 @@ pub struct BadChecksum {
 // Copy, and read on the audio thread: boxing the table or the changes would allocate there.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Read {
+pub enum UniversalRead {
     /// A Universal message this crate reads.
     Universal(Addressed),
     /// A tuning dump whose checksum field is not the XOR of the bytes before it
@@ -416,33 +608,35 @@ pub enum Read {
 /// Reads one whole System Exclusive message.
 ///
 /// ```
-/// use tutti_midi_protocol::{Read, Universal, read};
+/// use tutti_midi_protocol::{UniversalRead, Universal, read};
 /// use tutti_ump::SysexMessage;
 ///
 /// // Master Volume, all-call, 0x3FFF (lsb first).
 /// let bytes = [0xF0, 0x7F, 0x7F, 0x04, 0x01, 0x7F, 0x7F, 0xF7];
-/// let Read::Universal(heard) = read(SysexMessage::from_framed(&bytes).unwrap()) else { panic!() };
+/// let UniversalRead::Universal(heard) = read(SysexMessage::from_framed(&bytes).unwrap()) else { panic!() };
 /// assert_eq!(heard.to, tutti_midi_protocol::Recipient::AllCall);
 /// assert!(matches!(heard.message, Universal::MasterVolume(v) if v.get() == 0x3FFF));
 /// ```
 #[must_use]
-pub fn read(message: SysexMessage<'_>) -> Read {
+pub fn read(message: SysexMessage<'_>) -> UniversalRead {
     let payload = message.payload();
     match payload.first() {
         Some(&(UNIVERSAL_NON_REAL_TIME | UNIVERSAL_REAL_TIME)) => match read::parse(payload) {
-            read::Parsed::Message(to, message) => Read::Universal(Addressed { to, message }),
+            read::Parsed::Message(to, message) => {
+                UniversalRead::Universal(Addressed { to, message })
+            }
             read::Parsed::BadChecksum {
                 to,
                 expected,
                 found,
-            } => Read::BadChecksum(BadChecksum {
+            } => UniversalRead::BadChecksum(BadChecksum {
                 to,
                 expected,
                 found,
             }),
-            read::Parsed::Unread => Read::Unread,
+            read::Parsed::Unread => UniversalRead::Unread,
         },
-        _ => Read::Foreign,
+        _ => UniversalRead::Foreign,
     }
 }
 
@@ -516,8 +710,8 @@ impl UniversalReader {
             return None;
         };
         let (recipient, message) = match read(self.assembler.message(done)) {
-            Read::Universal(Addressed { to, message }) => (to, message),
-            Read::BadChecksum(bad) => {
+            UniversalRead::Universal(Addressed { to, message }) => (to, message),
+            UniversalRead::BadChecksum(bad) => {
                 if self.is_for_us(bad.to).is_some() {
                     self.corrupt += 1;
                 }
@@ -550,7 +744,7 @@ impl UniversalReader {
     }
 
     /// Dumps addressed to this device that failed their checksum and were not
-    /// passed on ([`Read::BadChecksum`]).
+    /// passed on ([`UniversalRead::BadChecksum`]).
     #[must_use]
     pub fn corrupt(&self) -> u64 {
         self.corrupt

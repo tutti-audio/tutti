@@ -19,20 +19,7 @@ extern crate tutti_vst2_author as vst;
 use vst::api::{AEffect, HostCallbackProc};
 use vst::host::Host as _;
 use vst::plugin::{Category, HostCallback, Info, Plugin};
-
-/// The shell's own `uniqueID` ("SHEL"): the plugin the host gets when it names none.
-pub const SHELL_ID: i32 = i32::from_be_bytes(*b"SHEL");
-/// The first sub-plugin ("SHAL"): an effect.
-pub const ALPHA_ID: i32 = i32::from_be_bytes(*b"SHAL");
-/// The second sub-plugin ("SHBE"): an instrument.
-pub const BETA_ID: i32 = i32::from_be_bytes(*b"SHBE");
-
-/// The shell's name, as `effGetEffectName` answers it.
-pub const SHELL_NAME: &str = "Tutti VST2 Shell";
-/// The first sub-plugin's name.
-pub const ALPHA_NAME: &str = "Shell Alpha";
-/// The second sub-plugin's name.
-pub const BETA_NAME: &str = "Shell Beta";
+use vst::shell::{ALPHA_ID, ALPHA_NAME, BETA_ID, BETA_NAME, SHELL_ID, SHELL_NAME};
 
 /// What `effShellGetNextPlugin` walks, in order: each sub-plugin's `uniqueID` and name.
 pub const SUB_PLUGINS: [(i32, &str); 2] = [(ALPHA_ID, ALPHA_NAME), (BETA_ID, BETA_NAME)];

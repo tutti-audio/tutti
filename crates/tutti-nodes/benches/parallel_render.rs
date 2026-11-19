@@ -38,16 +38,16 @@
 
 use std::hint::black_box;
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, Unforkable};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_types::ChannelLayout;
 use tutti_units::{Hz, Q, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

@@ -5,7 +5,7 @@ use crate::scale;
 use crate::voice::{widen, widen_velocity};
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
-    NoteVelocity, U7, Ump, Voice1, Voice2,
+    NoteVelocity, U7, U14, Ump, Voice1, Voice2,
 };
 
 /// The byte that, in both halves of a parameter number, is the Null Function.
@@ -294,7 +294,7 @@ impl Channel {
     fn velocity(&mut self, high: U7) -> NoteVelocity {
         match self.velocity_low.take() {
             Some(low) => NoteVelocity::new(scale::upscale(
-                (u32::from(high.get()) << 7) | u32::from(low.get()),
+                u32::from(U14::from_halves(high, low).get()),
                 14,
                 16,
             ) as u16),
@@ -404,8 +404,8 @@ fn flush(channel: &mut Channel, send: &mut impl FnMut(Voice2)) {
 /// An MSB that never arrived is 0.
 fn emit(channel: &mut Channel, lsb: Option<U7>, send: &mut impl FnMut(Voice2)) {
     channel.pending = false;
-    let half = |v: Option<U7>| u32::from(v.map_or(0, U7::get));
-    let data = (half(channel.msb) << 7) | half(lsb);
+    let half = |v: Option<U7>| v.unwrap_or(U7::of(0));
+    let data = u32::from(U14::from_halves(half(channel.msb), half(lsb)).get());
     let voice = match channel.kind {
         Kind::None => return,
         Kind::Registered => {

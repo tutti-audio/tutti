@@ -7,12 +7,13 @@ use tutti_buffers::Float;
 use tutti_graph::testing as common;
 
 use common::prepare;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, EventOut, Executor, ForkByClone, Io, Law, Node, NodeKey, OutPort, ParamEvent,
     ParamIn, ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, Prepare, Shape,
     Source, Status, TransportPosition, declare_params,
 };
-use tutti_types::{ChannelLayout, Param};
+use tutti_rt::Param;
 use tutti_units::{Azimuth, Hz, ParamKey, Samples, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.

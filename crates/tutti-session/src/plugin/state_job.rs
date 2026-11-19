@@ -173,7 +173,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             .map_err(StateJobError::OtherPeer)?;
         let (job, ticket) = self.jobs.new_job();
         ticket.waiting_for_main_thread();
-        self.work.defer(move |main| {
+        self.plugins.work.defer(move |main| {
             // A dropped job restores nothing.
             ticket.complete(|| {
                 let applied = handle.load_state(main, state.bytes());

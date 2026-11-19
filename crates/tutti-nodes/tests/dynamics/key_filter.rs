@@ -10,11 +10,11 @@
 use core::f64::consts::PI;
 use tutti_buffers::Planes;
 
+use tutti_buffers::BusTopology;
 use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
 use tutti_nodes::{CompressorNode, GateNode, KeySource};
-use tutti_types::BusTopology;
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;

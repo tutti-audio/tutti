@@ -27,7 +27,8 @@ use std::vec::Vec;
 use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, U14, U28, Ump, first_non_seven_bit};
 
 use super::{
-    CI_VERSION, CiDeviceId, CiHeader, CiVersion, Destination, encode_preamble, read, sysex7_packets,
+    CI_VERSION, CiDeviceId, CiHeader, CiVersion, Destination, Whole, encode_preamble, read,
+    sysex7_packets,
 };
 
 /// Profile Inquiry, Sub-ID#2 `0x20` (§7.2).
@@ -348,11 +349,7 @@ impl ProfileLists {
     pub(crate) fn encode_body(&self, out: &mut impl Extend<u8>) {
         for list in [&self.enabled, &self.disabled] {
             // A `ProfileList` holds its length to 14 bits.
-            out.extend(
-                U14::from_len(list.as_slice().len())
-                    .expect("a `ProfileList` holds its length to 14 bits")
-                    .to_le7(),
-            );
+            out.extend(U14::saturating_from_len(list.as_slice().len()).to_le7());
             for id in list.as_slice() {
                 out.extend(id.to_bytes());
             }
@@ -611,6 +608,15 @@ pub enum ProfileTarget {
     FunctionBlock,
 }
 
+impl From<Whole> for ProfileTarget {
+    fn from(whole: Whole) -> Self {
+        match whole {
+            Whole::Group => Self::Group,
+            Whole::FunctionBlock => Self::FunctionBlock,
+        }
+    }
+}
+
 impl ProfileTarget {
     /// The Device ID the message goes to.
     #[must_use]
@@ -754,7 +760,10 @@ impl ProfileOnRequest {
 
     /// The message as SysEx7 packets on `group` (M2-104 section 7.7).
     pub fn packets(self, group: MidiGroup) -> std::vec::IntoIter<Ump> {
+        // Every field is a 7-bit value: the Profile Id and the count are
+        // range-checked and the MUIDs are Broadcast.
         sysex7_packets(group, &self.encode())
+            .unwrap_or_else(|_| unreachable!("a Set Profile On has only 7-bit fields"))
     }
 }
 

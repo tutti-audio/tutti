@@ -50,7 +50,7 @@ interprocess = { version = "2" }
 
 # Logging
 tracing.workspace = true
-tracing-subscriber.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 # CLAP plugin hosting (optional)
 tutti-clap-host = { version = "0.0.1", path = "../tutti-clap-host", optional = true }

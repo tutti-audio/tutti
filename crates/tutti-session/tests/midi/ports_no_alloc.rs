@@ -7,13 +7,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use crate::common::{MF, play};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
 use tutti_session::{MidiRouteRule, Session, midi_input, midi_output};
-use tutti_types::ChannelLayout;
 use tutti_ump::MidiChannel;
 
 /// A stand-in synth that counts the events it takes and keeps none (the common

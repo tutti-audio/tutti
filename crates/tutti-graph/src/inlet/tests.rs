@@ -4,8 +4,8 @@ use crate::event::{EventWriter, SortedEvents};
 use crate::node::{ConstantMask, Env, InPlaceMask, SilenceMask};
 use crate::{PlayClock, TransportChanges, TransportPosition};
 use tutti_buffers::Interleaved;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 use tutti_units::{Frame, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;

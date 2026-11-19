@@ -25,7 +25,7 @@ use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
 use tutti_rt::MAX_POS_RING_POSITION;
 use tutti_rt::RingFloat;
-use tutti_units::Samples;
+use tutti_units::{ReadRate, Samples};
 
 /// Samples a parallel worker's scratch starts with; it grows to a chunk.
 const PARALLEL_SCRATCH_SAMPLES: usize = 16384;
@@ -33,7 +33,7 @@ const PARALLEL_SCRATCH_SAMPLES: usize = 16384;
 /// The fraction of a ring ahead of its reader below which the streamer refills
 /// it, and at which a stream counts as primed and healthy. A ring occupancy,
 /// not audio, so no sample format or unit applies.
-pub(in crate::streamer) const FILL_THRESHOLD: f32 = 0.75;
+pub(in crate::streamer) const FILL_THRESHOLD: f64 = 0.75;
 
 /// How many frames to read this cycle, under the varifill strategy.
 ///
@@ -51,12 +51,13 @@ pub(in crate::streamer) const FILL_THRESHOLD: f32 = 0.75;
 /// the clamp and the floor between them bound every path.
 #[inline]
 fn varifill_chunk(
-    buffer_fill: f32,
+    // An occupancy of the ring in `0..=1`, not a quantity a unit covers.
+    buffer_fill: f64,
     base_chunk: usize,
     read_rate_bytes_per_sec: f64,
-    playback_speed: f32,
+    playback_speed: ReadRate,
 ) -> usize {
-    let urgency = (1.0 - buffer_fill) as f64;
+    let urgency = 1.0 - buffer_fill;
 
     const BASELINE_RATE: f64 = 10_000_000.0;
     let bandwidth_factor = if read_rate_bytes_per_sec > 0.0 {
@@ -67,7 +68,7 @@ fn varifill_chunk(
         1.0
     };
 
-    let speed_factor = playback_speed.max(1.0) as f64;
+    let speed_factor = playback_speed.get().max(1.0);
 
     let multiplier = (0.5 + urgency * 1.5) * bandwidth_factor * speed_factor;
 
@@ -146,12 +147,12 @@ pub(crate) enum Refill {
     /// all the mapping writes (an unlooped stream's end): nothing to do.
     Satisfied {
         /// The fraction of the ring ahead of the reader (0 to 1).
-        fill: f32,
+        fill: f64,
     },
     /// Below the threshold with room to write: `room` frames can still land.
     Below {
         /// The fraction of the ring ahead of the reader (0 to 1).
-        fill: f32,
+        fill: f64,
         /// Frames the window may still grow by (to most of a ring ahead of
         /// the reader, never past `end`).
         room: u64,
@@ -191,7 +192,7 @@ pub(crate) fn needs_refill(
     let limit = end
         .map_or(ahead, |end| end.min(ahead))
         .min(MAX_POS_RING_POSITION);
-    let fill = ((to.saturating_sub(play) as f64 / frames as f64) as f32).clamp(0.0, 1.0);
+    let fill = (to.saturating_sub(play) as f64 / frames as f64).clamp(0.0, 1.0);
     if fill >= FILL_THRESHOLD || to >= limit {
         Refill::Satisfied { fill }
     } else {
@@ -255,7 +256,7 @@ fn refill_one<F: RingFloat>(
             };
         }
     };
-    let speed = cells.read_rate().get() as f32;
+    let speed = cells.read_rate();
     let chunk = varifill_chunk(fill, base_chunk_size, read_rate, speed);
     let n = (chunk as u64).min(room) as usize;
     let (_, to) = writer.window();
@@ -284,7 +285,7 @@ pub(in crate::streamer) struct Refilled {
     pub(in crate::streamer) primed: bool,
     /// How full the ring was before this refill wrote, as a fraction of its
     /// capacity (0 to 1): what the loop reads to sleep or come straight back.
-    pub(in crate::streamer) fill: f32,
+    pub(in crate::streamer) fill: f64,
 }
 
 #[cfg(test)]
@@ -351,7 +352,7 @@ mod tests {
         const BASELINE: f64 = 10_000_000.0;
 
         // (label, fill, base, bytes/sec, speed, expected frames)
-        let cases: &[(&str, f32, usize, f64, f32, usize)] = &[
+        let cases: &[(&str, f64, usize, f64, f64, usize)] = &[
             // -- urgency: an emptier ring pulls harder, linearly.
             ("empty ring doubles", 0.0, BASE, BASELINE, 1.0, BASE * 2),
             ("half-full is 1.25x", 0.5, BASE, BASELINE, 1.0, BASE * 5 / 4),
@@ -466,7 +467,7 @@ mod tests {
         ];
 
         for &(label, fill, base, rate, speed, want) in cases {
-            let got = varifill_chunk(fill, base, rate, speed);
+            let got = varifill_chunk(fill, base, rate, ReadRate(speed));
             assert_eq!(
                 got, want,
                 "{label}: varifill_chunk returned {got}, want {want}"
@@ -476,7 +477,7 @@ mod tests {
         // NaN has no arithmetic expectation -- `f64::clamp` propagates it and
         // the `as usize` cast saturates to 0 -- so it is asserted against the
         // floor, which is the only guarantee the function can make here.
-        let nan = varifill_chunk(f32::NAN, BASE, BASELINE, 1.0);
+        let nan = varifill_chunk(f64::NAN, BASE, BASELINE, ReadRate::UNITY);
         assert!(
             nan >= 1024,
             "a NaN fill must still respect the 1024 floor, got {nan}"

@@ -16,13 +16,13 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 use tutti_buffers::Mono;
 
 use crate::support::{render_to_buffers, render_to_file};
+use tutti_buffers::ChannelTopology;
+use tutti_buffers::{Bed, ChannelLayout};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::{FrozenClock, RenderClock};
-use tutti_types::ChannelTopology;
-use tutti_types::{Bed, ChannelLayout};
 use tutti_units::Seconds;
 use tutti_units::{Amplitude, Drive, Hz, SampleRate};
 
@@ -1349,8 +1349,8 @@ fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_ex
 #[test]
 fn a_declared_root_is_what_the_file_is_placed_from() {
     use tutti_buffers::FoldError;
+    use tutti_buffers::{ChannelTopology, Speaker};
     use tutti_export::ConfigError;
-    use tutti_types::{ChannelTopology, Speaker};
     let mut graph = four_buses(None);
     assert_eq!(
         first_frame(&mut graph, 6).unwrap(),

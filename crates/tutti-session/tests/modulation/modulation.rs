@@ -11,6 +11,7 @@ use crate::common;
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
@@ -23,7 +24,6 @@ use tutti_session::{
     ModInput, ModKeys, ModRefusal, OutPort, PHASES, ParamRef, PhaseCx, Problem, Root, RouteError,
     RouteSpec, Session, SessionEvent, TargetName,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{BeatsPerCycle, Depth, Hz, ParamAddr, UnitParam};
 use tutti_units::{SampleRate, Samples};
 

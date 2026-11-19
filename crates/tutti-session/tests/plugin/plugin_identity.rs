@@ -4,13 +4,13 @@
 //! `plugin-server`.
 
 use crate::pooled::{LoadPlugin, Spec, catalog_of};
-use crate::support::{clap_probe, plugin_server};
+use crate::support::clap_probe;
+use tutti_buffers::MaxBlock;
 use tutti_plugin::catalog::{PluginId, PluginRef};
 use tutti_plugin_db::PluginEntry;
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{PluginClass, PluginDescriptor, StateUse};
 use tutti_session::{PeerState, RestoreError, SavedPeer, Session};
-use tutti_types::MaxBlock;
 use tutti_units::Samples;
 
 /// The plugin a state names.
@@ -34,7 +34,7 @@ fn second_id() -> &'static str {
 fn session() -> Session {
     // SAFETY: nextest runs each test in its own process, and this is set before
     // the first server is spawned, from the test's own thread.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server()) };
+    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     Session::builder()
         .max_block(MaxBlock::of(Samples(512)))
         .build()

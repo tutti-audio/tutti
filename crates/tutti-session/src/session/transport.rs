@@ -4,10 +4,9 @@
 use std::sync::Arc;
 
 use tutti_graph::{NodeKey, PrerollTable};
-use tutti_music::LoopRange;
 use tutti_rt::monotonic_ns;
 use tutti_tempo::TempoMap;
-use tutti_transport::{FadeOut, LoopEdit, MotionEvent, TimedError};
+use tutti_transport::{FadeOut, MotionEvent, TimedError};
 use tutti_units::{At, Beat, SampleRate, Samples};
 
 use crate::{AppKey, Clock, Playhead, Session};
@@ -111,60 +110,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.transport.handle.clone()
     }
 
-    /// Sends what a followed MIDI clock asked of the transport, each command at
-    /// the frame it was placed on (`At::NextBlock` for Machine Control), and says
-    /// whether the transport took it. A command the transport's list has no room for is dropped and logged, and the caller counts it
-    /// ([`MidiReport::ClockCommandsRefused`](crate::MidiReport::ClockCommandsRefused)):
-    /// the source says its position again with the next message.
-    #[cfg(feature = "midi")]
-    pub(super) fn send_clock_action(&self, placed: crate::midi_follow::Placed) -> bool {
-        use crate::midi_follow::ClockAction;
-        let event = match placed.action {
-            ClockAction::Play => MotionEvent::Play,
-            ClockAction::Stop => MotionEvent::stop(),
-            ClockAction::Locate(beat) => MotionEvent::locate(beat),
-            ClockAction::PlayFrom(beat) => MotionEvent::play_from(beat),
-        };
-        match self.schedule(placed.at, event) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!("midi: a followed clock's {event:?} was not sent: {error}");
-                false
-            }
-        }
-    }
-
-    /// Loops the transport over `range` from the next block, and arms it: the
-    /// engine owns the loop region and takes this as one edit that lands whole
-    /// ([`LoopEdit::over`]). Build the range with `LoopRange::try_from(a..b)`,
-    /// which names why a region is refused.
-    ///
-    /// A playhead already at or past the loop's end does not jump: the loop takes
-    /// effect once the playhead is inside it.
-    ///
-    /// # Errors
-    ///
-    /// [`TimedError::Full`] when the timed-command list is full; the edit is handed
-    /// back in it.
-    pub fn set_loop(&self, range: LoopRange) -> Result<(), TimedError<LoopEdit>> {
-        self.transport
-            .motion()
-            .schedule(At::NextBlock, LoopEdit::over(range))
-    }
-
-    /// Stops looping from the next block. The loop's bounds are kept, so
-    /// [`set_loop`](Self::set_loop) with them (or arming through the transport)
-    /// restores it ([`LoopEdit::armed`]).
-    ///
-    /// # Errors
-    ///
-    /// [`TimedError::Full`], as [`set_loop`](Self::set_loop).
-    pub fn clear_loop(&self) -> Result<(), TimedError<LoopEdit>> {
-        self.transport
-            .motion()
-            .schedule(At::NextBlock, LoopEdit::armed(false))
-    }
-
     /// The per-channel compensation of the plan sent last, by output channel:
     /// what the compiler delays each output by, for a host that displays it.
     /// Republished with every plan; empty until the first. A node in the graph
@@ -186,6 +131,14 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// when the builder inserted one.
     pub fn click_node(&self) -> Option<NodeKey> {
         self.transport.click
+    }
+
+    /// The session's MPE mode as a target, written with [`set`](Self::set)
+    /// and read with [`get`](Self::get).
+    #[cfg(feature = "midi")]
+    #[must_use]
+    pub const fn mpe(&self) -> crate::MpeModeTarget {
+        crate::MpeModeTarget::new()
     }
 
     /// The metronome's targets: its level and when it sounds, written with

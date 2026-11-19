@@ -9,13 +9,13 @@
 
 use super::{Expr, FoldError, Row, Term};
 use crate::Float;
+use crate::{AmbisonicFormat, AmbisonicNormalization, AmbisonicOrdering};
 use alloc::boxed::Box;
-use tutti_types::{AmbisonicFormat, AmbisonicNormalization, AmbisonicOrdering};
 
 /// The ACN index held by FuMa channel `i` (`W X Y Z R S T U V K L M N O P Q`).
 ///
 /// Furse-Malham exists to third order, which is the highest an
-/// [`AmbisonicOrder`](tutti_types::AmbisonicOrder) holds, so no format asks for
+/// [`AmbisonicOrder`](crate::AmbisonicOrder) holds, so no format asks for
 /// a FuMa channel past `Q` and a "FuMa above third order" refusal is
 /// unwritable: the type states it.
 const FUMA_TO_ACN: [u16; 16] = [0, 3, 1, 2, 6, 7, 5, 8, 4, 12, 13, 11, 14, 10, 15, 9];

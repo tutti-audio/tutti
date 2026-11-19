@@ -31,7 +31,7 @@
 //! This needs a `.sf2` on disk, so it is `no_run`.
 //!
 //! ```rust,no_run
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_graph::{OutPort, Source};
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_graph::NodeKey;
@@ -42,7 +42,7 @@
 //!
 //! let soundfont = SoundFont::open("piano.sf2")?;
 //!
-//! let mut unit = SoundFontUnit::new(soundfont, Settings::new())?;
+//! let mut unit = SoundFontUnit::<f32>::new(soundfont, Settings::new())?;
 //! unit.program_change(MidiChannel::FIRST, U7::of(0)); // channel 0 → program 0
 //!
 //! // Into the graph: no audio input, five outputs, one MIDI event input (wire a
@@ -211,6 +211,9 @@ use tutti_sf2::{Preset, SoundFont};
 use tutti_ump::{Attribute, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
 use tutti_units::{SampleRate, Seconds, Tail};
 
+use tutti_buffers::Float;
+use tutti_dsp::Lanes;
+
 use crate::player::{Heard, Plane, Planes, Player};
 use crate::render::Render;
 
@@ -278,10 +281,18 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// use tutti_soundfont::{Settings, SoundFontUnit};
 ///
 /// let soundfont = SoundFont::open("piano.sf2")?;
-/// let mut unit = SoundFontUnit::new(soundfont, Settings::new())?;
+/// let mut unit = SoundFontUnit::<f32>::new(soundfont, Settings::new())?;
 /// unit.program_change(MidiChannel::FIRST, U7::of(0));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+///
+/// # The float
+///
+/// `F` is the graph's float, `f32` or `f64`: the unit is a `Node<F>`, and its voices render,
+/// filter and mix in it. A SoundFont's generators are integers in the spec's units; a voice
+/// reads them as `f64` quantities once, when its note starts, and what reaches `F` is the
+/// sample data (a point of the pool converted to `F` by its format's scale), the low-pass's
+/// coefficients and the gains the mix ramps between.
 ///
 /// # How an event's offset is honoured
 ///
@@ -301,8 +312,8 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// player at the graph's rate (control thread, keeping the presets and
 /// channel state), and a rate outside 16 to 192 kHz leaves it at its own. The
 /// rate is the graph's: nothing here names one.
-pub struct SoundFontUnit {
-    player: Player,
+pub struct SoundFontUnit<F: Float + Lanes> {
+    player: Player<F>,
     /// The longest the unit can keep sounding after its last key is up, in
     /// seconds, if that is bounded: see [`Self::shape_tail`].
     ring_out: Option<Seconds>,
@@ -311,10 +322,10 @@ pub struct SoundFontUnit {
     /// node's `prepare` to the graph's largest block and never resized on the
     /// audio thread. A block renders into `[..size]` in segments split at each
     /// event's offset.
-    planes: [Vec<f32>; Plane::COUNT],
+    planes: [Vec<F>; Plane::COUNT],
 }
 
-impl std::fmt::Debug for SoundFontUnit {
+impl<F: Float + Lanes> std::fmt::Debug for SoundFontUnit<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SoundFontUnit")
             .field("player", &self.player)
@@ -323,13 +334,13 @@ impl std::fmt::Debug for SoundFontUnit {
     }
 }
 
-impl SoundFontUnit {
-    fn from_player(player: Player, buffers: usize) -> Self {
+impl<F: Float + Lanes> SoundFontUnit<F> {
+    fn from_player(player: Player<F>, buffers: usize) -> Self {
         Self {
             sample_rate: player.sample_rate(),
             ring_out: player.ring_out(),
             player,
-            planes: std::array::from_fn(|_| vec![0.0; buffers]),
+            planes: std::array::from_fn(|_| vec![F::ZERO; buffers]),
         }
     }
 
@@ -510,7 +521,7 @@ impl SoundFontUnit {
     }
 }
 
-impl Clone for SoundFontUnit {
+impl<F: Float + Lanes> Clone for SoundFontUnit<F> {
     fn clone(&self) -> Self {
         Self {
             player: self.player.clone(),
@@ -518,7 +529,7 @@ impl Clone for SoundFontUnit {
             sample_rate: self.sample_rate,
             // Scratch, not state: sized fresh rather than copied, since every
             // block overwrites the frames it reads back.
-            planes: std::array::from_fn(|_| vec![0.0; self.planes[0].len()]),
+            planes: std::array::from_fn(|_| vec![F::ZERO; self.planes[0].len()]),
         }
     }
 }

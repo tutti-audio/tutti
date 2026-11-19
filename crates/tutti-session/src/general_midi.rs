@@ -15,10 +15,10 @@
 //! that wants a different reverb, two units into one chorus or no chorus wires
 //! the unit's outputs itself, through [`Graph::connect`](crate::Graph::connect).
 
+use tutti_buffers::BusTopology;
 use tutti_graph::ParamSet;
 use tutti_nodes::{BusStripNode, FreeverbNode, ModDelayNode};
 use tutti_soundfont::SoundFontUnit;
-use tutti_types::BusTopology;
 use tutti_units::{Amplitude, UnitParam};
 
 use crate::instrument::AddedInstrument;
@@ -40,7 +40,7 @@ use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session};
 /// and the channel's (CC 91 and CC 93), not a gain's.
 #[derive(Debug)]
 pub struct GeneralMidi {
-    instrument: InstrumentHandle<SoundFontUnit>,
+    instrument: InstrumentHandle<SoundFontUnit<f32>>,
     chorus: Key<ModDelayNode<f32>>,
     reverb: Key<FreeverbNode<f32>>,
     strip: Key<BusStripNode>,
@@ -50,12 +50,12 @@ pub struct GeneralMidi {
 impl GeneralMidi {
     /// The unit, played through its handle.
     #[must_use]
-    pub fn instrument(&self) -> &InstrumentHandle<SoundFontUnit> {
+    pub fn instrument(&self) -> &InstrumentHandle<SoundFontUnit<f32>> {
         &self.instrument
     }
 
     /// The unit's handle, to send with ([`InstrumentHandle::keys_mut`]).
-    pub fn instrument_mut(&mut self) -> &mut InstrumentHandle<SoundFontUnit> {
+    pub fn instrument_mut(&mut self) -> &mut InstrumentHandle<SoundFontUnit<f32>> {
         &mut self.instrument
     }
 
@@ -127,7 +127,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// [`Error::NotInstrument`](crate::Error::NotInstrument) if the unit cannot
     /// be played as an instrument; none for a `SoundFontUnit`, which has an
     /// event input and five outputs.
-    pub fn add_general_midi(&mut self, unit: SoundFontUnit) -> Result<GeneralMidi, crate::Error> {
+    pub fn add_general_midi(
+        &mut self,
+        unit: SoundFontUnit<f32>,
+    ) -> Result<GeneralMidi, crate::Error> {
         let AddedInstrument {
             handle: instrument, ..
         } = self.add_instrument_unwired(unit)?;

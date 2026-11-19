@@ -6,16 +6,17 @@
 //! prepared rate (control thread, where that may allocate), keeping the
 //! preset.
 
+use tutti_buffers::{ChannelLayout, Float};
+use tutti_dsp::Lanes;
 use tutti_graph::{
     Chase, ConstantMask, Cx, IntoNode, Io, Node, NodeParts, Prepare, Resolution, Shape,
     SilenceMask, Status,
 };
-use tutti_types::ChannelLayout;
 
 use crate::SoundFontUnit;
-use crate::player::{Plane, Player};
+use crate::player::{CHASE_MESSAGES, Plane};
 
-impl Node for SoundFontUnit {
+impl<F: Float + Lanes> Node<F> for SoundFontUnit<F> {
     /// No audio in, five out (dry left and right, chorus send left and right,
     /// reverb send), one MIDI event input, placed to the 8-frame chunk the
     /// voices render in, and the tail of the longest release.
@@ -33,7 +34,7 @@ impl Node for SoundFontUnit {
             // release. The effects after the unit declare their own.
             .with_tail(self.shape_tail())
             // The state it hands the unit that replaces it (`chase`).
-            .with_chase(Player::CHASE_MESSAGES as u32)
+            .with_chase(CHASE_MESSAGES as u32)
     }
 
     /// Re-rate to the prepared rate (keeping the preset), and size the
@@ -48,7 +49,7 @@ impl Node for SoundFontUnit {
         let frames = p.max_block().get();
         for plane in &mut self.planes {
             if plane.len() < frames {
-                plane.resize(frames, 0.0);
+                plane.resize(frames, F::ZERO);
             }
         }
     }
@@ -57,7 +58,7 @@ impl Node for SoundFontUnit {
     /// nothing was written; else [`Status::Masked`] naming the planes no voice
     /// sent anything to (exact zeros, written), and [`Status::Modified`] when
     /// every plane has something in it.
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         // No clamp: `prepare` sized the scratch to the prepared `MaxBlock`,
         // and the graph never hands a node a longer block.
         let size = io.frames();
@@ -105,10 +106,10 @@ impl Node for SoundFontUnit {
 /// The unit, inserted as a graph node: its fork is a graph node too, which
 /// follows its render's rate (see the `fork` module docs). No controls: the
 /// unit has no param a host sets while it plays (its preset is MIDI's).
-impl IntoNode for SoundFontUnit {
+impl<F: Float + Lanes> IntoNode<F> for SoundFontUnit<F> {
     type Controls = ();
 
-    fn into_parts(self) -> NodeParts<()> {
+    fn into_parts(self) -> NodeParts<(), F> {
         let fork = self.fork_template();
         NodeParts {
             node: Box::new(self),
@@ -120,7 +121,7 @@ impl IntoNode for SoundFontUnit {
 
 /// A SoundFont unit is an instrument: MIDI on event input 0, its dry pair on
 /// outputs 0 and 1. The other three outputs are the effect sends.
-impl tutti_graph::Instrument for SoundFontUnit {
+impl tutti_graph::Instrument for SoundFontUnit<f32> {
     fn main_outputs(&self) -> [u16; 2] {
         [Plane::DryLeft as u16, Plane::DryRight as u16]
     }

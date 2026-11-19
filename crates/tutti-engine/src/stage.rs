@@ -3,8 +3,8 @@
 
 use crate::routing::StageTargets;
 use tutti_buffers::Float;
+use tutti_buffers::MAX_CHANNELS;
 use tutti_graph::ramp_in;
-use tutti_types::MAX_CHANNELS;
 use tutti_units::{Amplitude, Samples};
 
 /// One output's ramp: from the gain it left off at to the target, `done` of

@@ -82,6 +82,7 @@ use super::reassemble::{
 use super::request_ids::RequestIds;
 use crate::ci::handshake::Handshake;
 use crate::ci::link::Link;
+use crate::deadline::Pending;
 use crate::{CiHeader, CiMessage, Decoded, MaxSysexSize, Muid, Nak, TimeoutWait};
 
 /// The most times a chunk is sent again, whether for a NAK or for the lack of an
@@ -461,10 +462,10 @@ impl Work {
 }
 
 #[derive(Clone, Debug)]
-struct Pending {
+struct InFlight {
     id: PeRequestId,
     work: Work,
-    deadline: Instant,
+    wait: Pending,
 }
 
 /// The Initiator of Property Exchange with one peer.
@@ -475,7 +476,7 @@ pub struct PeInitiator {
     /// The Capabilities Inquiry: waiting, or answered with what the peer reported.
     phase: Handshake<PeCapabilities>,
     ids: RequestIds,
-    pending: Vec<Pending>,
+    pending: Vec<InFlight>,
     reassembler: PeReassembler,
     subscriptions: Vec<(SubscribeId, PeSubscribed)>,
 }
@@ -603,10 +604,10 @@ impl PeInitiator {
             },
             other => other,
         };
-        self.pending.push(Pending {
+        self.pending.push(InFlight {
             id,
             work,
-            deadline: now + PE_TIMEOUT,
+            wait: Pending::after(now, PE_TIMEOUT),
         });
         Ok((id, actions))
     }
@@ -659,10 +660,14 @@ impl PeInitiator {
     /// with nothing waiting.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        self.phase
-            .deadline()
+        let waits = Pending::earliest(
+            self.phase
+                .wait()
+                .into_iter()
+                .chain(self.pending.iter().map(|pending| pending.wait)),
+        );
+        waits
             .into_iter()
-            .chain(self.pending.iter().map(|pending| pending.deadline))
             .chain(self.reassembler.next_deadline())
             .min()
     }
@@ -685,7 +690,7 @@ impl PeInitiator {
                 self.conclude(at, PeOutcome::TimedOut, &mut actions);
             }
         }
-        while let Some(at) = self.pending.iter().position(|p| now >= p.deadline) {
+        while let Some(at) = self.pending.iter().position(|p| p.wait.expired(now)) {
             self.on_pending_timeout(at, now, &mut actions);
         }
         actions
@@ -706,7 +711,7 @@ impl PeInitiator {
             if *resends < MAX_RESENDS {
                 *resends += 1;
                 let chunk = chunks[*sent - 1].clone();
-                self.pending[at].deadline = now + PE_TIMEOUT;
+                self.pending[at].wait.restart(now, PE_TIMEOUT);
                 let action = self.send_chunk(PeMessageKind::SET_INQUIRY, chunk);
                 actions.push(action);
             } else {
@@ -780,7 +785,7 @@ impl PeInitiator {
             // As an ACK that asks to wait, with no period named: one more timeout.
             PeStatus::TimeoutWait => {
                 let Some(at) = at else { return };
-                NOTIFY_WAIT.extend(&mut self.pending[at].deadline);
+                NOTIFY_WAIT.extend(&mut self.pending[at].wait);
                 let kind = self.pending[at].work.reply_kind();
                 self.reassembler
                     .extend(self.link.peer, kind, id, NOTIFY_WAIT);
@@ -851,7 +856,7 @@ impl PeInitiator {
                 }
                 actions.extend(send.map(|s| self.signal_action(kind.transaction, s)));
                 if let Some(at) = self.find(id, kind) {
-                    self.pending[at].deadline = now + PE_TIMEOUT;
+                    self.pending[at].wait.restart(now, PE_TIMEOUT);
                 }
             }
             Ok(PeStep::Complete { message, send }) => {
@@ -1092,7 +1097,7 @@ impl PeInitiator {
         };
         match signal {
             PeSignal::TimeoutWait { wait, .. } => {
-                wait.extend(&mut self.pending[at].deadline);
+                wait.extend(&mut self.pending[at].wait);
                 let kind = self.pending[at].work.reply_kind();
                 self.reassembler.extend(self.link.peer, kind, id, wait);
             }
@@ -1125,7 +1130,7 @@ impl PeInitiator {
         let chunk = chunks[*sent].clone();
         *sent += 1;
         *resends = 0;
-        self.pending[at].deadline = now + PE_TIMEOUT;
+        self.pending[at].wait.restart(now, PE_TIMEOUT);
         let action = self.send_chunk(PeMessageKind::SET_INQUIRY, chunk);
         actions.push(action);
     }
@@ -1153,7 +1158,7 @@ impl PeInitiator {
         }
         *resends += 1;
         let chunk = chunks[*sent - 1].clone();
-        self.pending[at].deadline = now + PE_TIMEOUT;
+        self.pending[at].wait.restart(now, PE_TIMEOUT);
         let action = self.send_chunk(PeMessageKind::SET_INQUIRY, chunk);
         actions.push(action);
     }

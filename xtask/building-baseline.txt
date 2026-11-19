@@ -10,7 +10,7 @@
 #       node-ctor     a public constructor on a `*Node`
 #       config-width  a `*Config` constructor whose first parameter is not a width
 #       ctor-result   a receiverless `pub fn` returning its type in a `Result`
-#       range-macro   a `macro_rules!` writing a range type outside tutti-units and tutti-types
+#       range-macro   a `macro_rules!` writing a range type outside tutti-units and tutti-rt's id.rs
 #       option-arg    a chained option (`self` in, `Self` out) that takes an `Option`
 # key   `<file>::<Owner>::<fn>`, or `<file>::<macro>` for `range-macro`.
 
@@ -41,6 +41,8 @@ tutti-buffers  ctor-result  crates/tutti-buffers/src/planes.rs::Planes::new
 tutti-buffers  ctor-result  crates/tutti-buffers/src/planes.rs::PlanesMut::from_vecs
 tutti-buffers  ctor-result  crates/tutti-buffers/src/planes.rs::PlanesMut::new
 tutti-buffers  ctor-result  crates/tutti-buffers/src/stereo.rs::StereoPlanes::new
+tutti-buffers  ctor-result  crates/tutti-buffers/src/topology.rs::ChannelTopology::new
+tutti-buffers  ctor-result  crates/tutti-buffers/src/topology.rs::Speakers::new
 
 # tutti-clap-host
 tutti-clap-host  setter  crates/tutti-clap-host/src/events.rs::InputEventList::set_note_ports
@@ -76,7 +78,6 @@ tutti-dsp  with-prefix  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_
 tutti-dsp  with-prefix  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::with_window_fn
 tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_routing
 tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
-tutti-dsp  setter  crates/tutti-dsp/src/smoother.rs::Smoother::set_coeff
 tutti-dsp  setter  crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::set_sample_rate
 tutti-dsp  ctor-result  crates/tutti-dsp/src/convolver/matrix.rs::MatrixConvolver::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::new
@@ -203,13 +204,11 @@ tutti-midi-protocol  ctor-result  crates/tutti-midi-protocol/src/universal/machi
 tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestNode::with_mpe
 tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/outbound/jr_timestamp.rs::JrStream::with_clock
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/clock_map.rs::ClockMap::set_rate
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestControls::set_mpe_mode
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestControls::set_mpe_profile
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_inlets.rs::InputInlets::set_clock
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_inlets.rs::InputInlets::set_lead
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_ingest.rs::MpeIngest::set_mode
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_ingest.rs::MpeIngest::set_profile
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformControls::set_mode
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/outbound/out_node.rs::MidiOutNode::new
@@ -473,7 +472,6 @@ tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources_hard
 tutti-session  setter  crates/tutti-session/src/instrument.rs::InstrumentHandle::set_gain
-tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_mpe
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
@@ -483,7 +481,6 @@ tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_pol
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode
-tutti-session  setter  crates/tutti-session/src/session/transport.rs::Session::set_loop
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite
@@ -516,10 +513,6 @@ tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettin
 tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_tempo
 tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_tempo_map
 tutti-transport  ctor-result  crates/tutti-transport/src/tempo_reader.rs::TempoReader::constant
-
-# tutti-types
-tutti-types  ctor-result  crates/tutti-types/src/topology.rs::ChannelTopology::new
-tutti-types  ctor-result  crates/tutti-types/src/topology.rs::Speakers::new
 
 # tutti-ump
 tutti-ump  chain-result  crates/tutti-ump/src/mpe_zone.rs::MpeZoneSet::with

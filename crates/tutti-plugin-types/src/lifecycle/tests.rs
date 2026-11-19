@@ -1633,8 +1633,7 @@ fn a_prepare_carries_a_rate_and_a_block() {
     assert!(MaxBlock::new(Samples(0)).is_none());
 }
 
-/// `MaxBlock` keeps the range contract. It is tested here, not in
-/// `tutti-types`, which dev-depends on no workspace crate.
+/// `MaxBlock` keeps the range contract, serde included.
 #[cfg(feature = "serde")]
 #[test]
 fn a_max_block_keeps_the_range_contract() {
@@ -1662,8 +1661,7 @@ fn a_max_block_keeps_the_range_contract() {
     tutti_fixtures::check_range_serde(&c);
 }
 
-/// `BeatsPerBar` keeps the range contract. It is tested here, not in
-/// `tutti-types`, which dev-depends on no workspace crate.
+/// `BeatsPerBar` keeps the range contract.
 #[cfg(feature = "serde")]
 #[test]
 fn a_beats_per_bar_keeps_the_range_contract() {

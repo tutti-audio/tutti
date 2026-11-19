@@ -11,6 +11,8 @@
 //! lanes, and 200 lanes of every layer kind with republishes, knob writes
 //! and range edits between blocks.
 
+use tutti_buffers::MaxBlock;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::midi;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node, ParamNode, ParamSet};
@@ -18,8 +20,6 @@ use tutti_nodes::{
     ChannelTimes, DelayControls, DelayLayout, DelayNode, InterpolationMode, LfoNode, LfoShape,
     MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Routing, Stages, Stagger, SweepRange,
 };
-use tutti_types::MaxBlock;
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
     Ballistics, BeatsPerCycle, Feedback, Hz, PhaseIncrement, Real, SampleRate, Seconds, UnitParam,
@@ -720,9 +720,9 @@ fn lane_for(
     k: usize,
     range: tutti_graph::ParamRangeCell,
 ) -> tutti_nodes::automation::ControlLaneNode {
+    use atomic_float::AtomicF64;
     use std::sync::Arc;
     use tutti_nodes::automation::ControlLaneNode as L;
-    use tutti_types::AtomicF64;
     use tutti_units::{Db, Depth, Feedback, Hz, Mix, ParamKey, Q};
     let p = lane_program(k, 0);
     let knob = Some(Arc::new(AtomicF64::new(400.0 + k as f64)).into());
@@ -1021,6 +1021,7 @@ impl tutti_graph::Node for Notes {
 const CHAINS: usize = 12;
 
 fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
+    use atomic_float::AtomicF64;
     use std::sync::Arc;
     use tutti_graph::NodeKey;
     use tutti_graph::{Edge, InPort, OutPort, Source};
@@ -1030,7 +1031,6 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     };
     use tutti_nodes::automation::ControlLaneNode;
     use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
-    use tutti_types::AtomicF64;
     use tutti_units::{Amplitude, Depth, Hz, ParamKey, Samples, Seconds, UnitParam};
     let (mut ed, exec) =
         tutti_graph::Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max))));
@@ -1315,7 +1315,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     struct Host {
         filter: NodeKey,
         saw: NodeKey,
-        knobs: [Option<tutti_types::ParamCell>; 2],
+        knobs: [Option<tutti_rt::ParamCell>; 2],
     }
     impl ModHost for Host {
         fn target(&self, t: TargetKey) -> Option<Target> {

@@ -77,7 +77,6 @@ fn the_message_data_control_is_closed_over_table_44() {
     assert_eq!(u8::from(DataControl::Full), 0x7F);
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_data_control_is_a_range_checked_value() {
     use tutti_fixtures::{RangeContract, check_range_contract};
@@ -261,7 +260,7 @@ fn a_message_report_inquiry_that_table_43_forbids_is_malformed() {
         let Some(CiMessage::Nak { nak, .. }) = got.nak(Muid::of(9)) else {
             panic!("a NAK");
         };
-        assert_eq!(nak.status_code, Nak::STATUS_MALFORMED);
+        assert_eq!(nak.status, NakStatus::Malformed);
     }
     want[13] = 0x00;
     // System Messages requested of a Channel or a Group.

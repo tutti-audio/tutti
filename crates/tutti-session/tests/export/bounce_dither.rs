@@ -5,11 +5,11 @@
 //! does to the quantization: undithered, every sample is the plain rounding;
 //! dithered, the samples scatter around it by at most the shape's peak.
 
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, IntDepth, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{Bounce, DitherShape, Range, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Seconds};
 
 /// 9830.1 steps of 16 bit: a tenth of a step off a code.

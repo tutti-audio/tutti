@@ -51,7 +51,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: every Samples is a valid latency, and new is infallible",
     ),
     (
-        "crates/tutti-types/src/channels.rs",
+        "crates/tutti-buffers/src/channels.rs",
         "ChannelLayout",
         "permanent: every u16 is a valid layout, so the derive cannot admit a bad raw",
     ),
@@ -83,6 +83,26 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
     (
         "crates/tutti-midi-protocol/src/mpe/zone.rs",
         "MpeZoneConfigRaw",
+        "permanent: the persisted shape `TryFrom` reads and checks",
+    ),
+    (
+        "crates/tutti-midi-protocol/src/smpte.rs",
+        "SmpteTimecodeRaw",
+        "permanent: the persisted shape `TryFrom` reads and checks",
+    ),
+    (
+        "crates/tutti-midi-protocol/src/tuning.rs",
+        "ChannelMask",
+        "permanent: every u16 is a channel mask, so the derive cannot admit a bad raw",
+    ),
+    (
+        "crates/tutti-midi-protocol/src/tuning.rs",
+        "TuningName",
+        "permanent: each byte is a checked U7, so any sixteen of them is a name",
+    ),
+    (
+        "crates/tutti-midi-protocol/src/universal.rs",
+        "MtcTimeCodeRaw",
         "permanent: the persisted shape `TryFrom` reads and checks",
     ),
     (
@@ -136,7 +156,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: any peer with any saved bytes and media type is a state; a plugin's restore does not read the media type (its format decides), and the peer refuses bytes it cannot read",
     ),
     (
-        "crates/tutti-types/src/ambisonic.rs",
+        "crates/tutti-buffers/src/ambisonic.rs",
         "AmbisonicFormat",
         "permanent: each field is its own checked type, so every combination is a format",
     ),
@@ -532,7 +552,7 @@ mod tests {
     use super::super::fake::Mem;
     use super::*;
 
-    const FILE: &str = "crates/tutti-types/src/lib.rs";
+    const FILE: &str = "crates/tutti-rt/src/lib.rs";
 
     fn run(files: &[(&str, &str)], ex: &[(&str, &str, &str)]) -> Report {
         check(&Mem::with(files), ex)

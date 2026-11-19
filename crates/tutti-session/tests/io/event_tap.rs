@@ -7,13 +7,13 @@
 //! the copy, a reader dropped first is closed by the `Reclaim` phase, and the
 //! taps are opened again at the graph's new rate.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{
     Cx, Event, EventCapacity, Io, MissingSource, Node, Op, Prepare, Shape, Status, TapAlign,
     TapEvent, Unforkable,
 };
 use tutti_session::{CloseError, DetachedSession, EventInPort, EventOutPort, Session};
-use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
 use tutti_units::{Frame, SampleRate};
 

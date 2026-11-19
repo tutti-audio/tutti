@@ -164,8 +164,8 @@ fn a_token_is_shared_and_none_never_cancels() {
 #[test]
 fn preparing_reports_steps_in_the_band_the_render_leaves() {
     use crate::{BufferTarget, FileTarget, Normalize, NormalizeSpec, Output};
+    use tutti_buffers::ChannelLayout;
     use tutti_codec::{Format, Pcm};
-    use tutti_types::ChannelLayout;
     use tutti_units::Db;
     let streaming = [Output::<f32>::master(BufferTarget::new(
         ChannelLayout::STEREO,

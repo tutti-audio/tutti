@@ -32,7 +32,7 @@ bitflags = "2"
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
+tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 vst3 = "0.3"

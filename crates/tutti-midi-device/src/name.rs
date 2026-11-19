@@ -44,7 +44,11 @@ pub enum NameError {
 /// receiver, so a receiver that composes keeps the name it displays and compares
 /// one thing, where one that refuses would lose a name a sender spelled
 /// loosely). The length bound is on the composed bytes.
+///
+/// With the `serde` feature it is its text, read back through [`FromStr`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
 pub struct Name<const N: usize> {
     bytes: [u8; N],
     len: u8,
@@ -182,6 +186,20 @@ impl<const N: usize> TryFrom<&str> for Name<N> {
 
     fn try_from(text: &str) -> Result<Self, NameError> {
         Self::parse(text)
+    }
+}
+
+impl<const N: usize> TryFrom<String> for Name<N> {
+    type Error = NameError;
+
+    fn try_from(text: String) -> Result<Self, NameError> {
+        Self::parse(&text)
+    }
+}
+
+impl<const N: usize> From<Name<N>> for String {
+    fn from(name: Name<N>) -> Self {
+        name.as_str().to_owned()
     }
 }
 

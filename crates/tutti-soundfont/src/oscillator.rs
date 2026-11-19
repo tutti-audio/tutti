@@ -3,36 +3,30 @@
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
 use crate::render::Render;
+use tutti_buffers::{Float, I24, Sample};
 use tutti_sf2::{LoopMode, Pcm24, SamplePool};
-use tutti_units::{SampleRate, Semitones};
+use tutti_units::{ReadPosition, SampleRate, Semitones};
 
-// In this class, fixed-point numbers are used for speed-up.
-// A fixed-point number is expressed by Int64, whose lower 24 bits represent the fraction part,
-// and the rest represent the integer part.
-// For clarity, fixed-point number variables have a suffix "_fp".
+// The read position is a fixed-point number for speed: an `i64` whose lower 24 bits are
+// the fraction and the rest the whole frames. A fixed-point variable is suffixed "_fp".
 
-/// A sample pool read as integers of its own width, with the scale that takes a
-/// point at the fixed-point fraction to a full-scale-1 `f32`.
+/// A sample pool read as integers of its own width, a point at a time as data of the
+/// reader's float: the integer-to-float edge, `Sample::convert_to` from the stored format.
 trait Points: Copy {
-    /// One over the point's full scale and the fixed-point unit.
-    const FP_TO_SAMPLE: f32;
-
-    fn at(self, index: usize) -> i64;
+    fn at<F: Float>(self, index: usize) -> F;
 }
 
 impl Points for &[i16] {
-    const FP_TO_SAMPLE: f32 = 1_f32 / (32768 * Oscillator::FRAC_UNIT) as f32;
-
-    fn at(self, index: usize) -> i64 {
-        i64::from(self[index])
+    fn at<F: Float>(self, index: usize) -> F {
+        self[index].convert_to()
     }
 }
 
 impl Points for Pcm24<'_> {
-    const FP_TO_SAMPLE: f32 = 1_f32 / (8_388_608 * Oscillator::FRAC_UNIT) as f32;
-
-    fn at(self, index: usize) -> i64 {
-        i64::from(self.high()[index]) << 8 | i64::from(self.low()[index])
+    fn at<F: Float>(self, index: usize) -> F {
+        // The high word shifted over a byte is within the 24-bit range, so `of` does not panic.
+        let word = i32::from(self.high()[index]) << 8 | i32::from(self.low()[index]);
+        I24::of(word).convert_to()
     }
 }
 
@@ -48,9 +42,10 @@ pub(crate) struct Oscillator {
     end_loop: i32,
     root_key: i32,
 
-    tune: f32,
-    pitch_change_scale: f32,
-    sample_rate_ratio: f32,
+    tune: Semitones,
+    /// Semitones of pitch change a semitone of key moves (generator 56 over 100).
+    pitch_change_scale: f64,
+    sample_rate_ratio: f64,
 
     looping: bool,
 
@@ -70,9 +65,9 @@ impl Oscillator {
             start_loop: 0,
             end_loop: 0,
             root_key: 0,
-            tune: 0_f32,
-            pitch_change_scale: 0_f32,
-            sample_rate_ratio: 0_f32,
+            tune: Semitones(0.0),
+            pitch_change_scale: 0.0,
+            sample_rate_ratio: 0.0,
             looping: false,
             position_fp: 0,
         }
@@ -98,10 +93,10 @@ impl Oscillator {
         self.end_loop = end_loop;
         self.root_key = root_key;
 
-        self.tune = coarse_tune as f32 + 0.01_f32 * fine_tune as f32;
-        self.pitch_change_scale = 0.01_f32 * scale_tuning as f32;
+        self.tune = Semitones(f64::from(coarse_tune) + 0.01 * f64::from(fine_tune));
+        self.pitch_change_scale = 0.01 * f64::from(scale_tuning);
         // Both rates are whole hertz: a header states its rate as a `u32`.
-        self.sample_rate_ratio = sample_rate.get() as f32 / self.synthesizer_sample_rate as f32;
+        self.sample_rate_ratio = sample_rate.get() / f64::from(self.synthesizer_sample_rate);
         self.looping = self.loop_mode != LoopMode::NoLoop;
         self.position_fp = (start as i64) << Oscillator::FRAC_BITS;
     }
@@ -112,11 +107,18 @@ impl Oscillator {
         }
     }
 
-    pub(crate) fn process(&mut self, data: SamplePool<'_>, block: &mut [f32], pitch: f32) -> bool {
-        let pitch_change = self.pitch_change_scale * (pitch - self.root_key as f32) + self.tune;
-        // The ratio narrows once per block; the position advance runs in `f64`.
-        let pitch_ratio =
-            f64::from(self.sample_rate_ratio) * Semitones(f64::from(pitch_change)).to_pitch_ratio();
+    /// Fills `block` from the pool at the pitch `pitch` (a key number in semitones): the
+    /// position advances by the sample's rate over the synthesizer's and the pitch's ratio
+    /// to the root key, in fixed point, so no float accumulates.
+    pub(crate) fn process<F: Float>(
+        &mut self,
+        data: SamplePool<'_>,
+        block: &mut [F],
+        pitch: Semitones,
+    ) -> bool {
+        let pitch_change =
+            (pitch - Semitones(f64::from(self.root_key))) * self.pitch_change_scale + self.tune;
+        let pitch_ratio = self.sample_rate_ratio * pitch_change.to_pitch_ratio();
         // The pool's width is matched once per block, not per point.
         match data {
             SamplePool::Pcm16(points) => self.fill_block(points, block, pitch_ratio),
@@ -124,7 +126,12 @@ impl Oscillator {
         }
     }
 
-    fn fill_block<P: Points>(&mut self, data: P, block: &mut [f32], pitch_ratio: f64) -> bool {
+    fn fill_block<P: Points, F: Float>(
+        &mut self,
+        data: P,
+        block: &mut [F],
+        pitch_ratio: f64,
+    ) -> bool {
         let pitch_ratio_fp = (Oscillator::FRAC_UNIT as f64 * pitch_ratio) as i64;
 
         if self.looping {
@@ -134,28 +141,38 @@ impl Oscillator {
         }
     }
 
-    fn fill_block_no_loop<P: Points>(
+    /// The linear interpolation between the points at `index` and `index2`, at the
+    /// position's fraction: the fraction is the position's top bits as data of the
+    /// float, and the points are the pool's own values.
+    #[inline]
+    fn interpolate<P: Points, F: Float>(&self, data: P, index: usize, index2: usize) -> F {
+        let fraction_fp = (self.position_fp & (Oscillator::FRAC_UNIT - 1)) as u64;
+        let (_, a) = F::split_position(ReadPosition::from_count(
+            fraction_fp << (ReadPosition::FRACTION_BITS as i32 - Oscillator::FRAC_BITS),
+        ));
+        let x1: F = data.at(index);
+        let x2: F = data.at(index2);
+        x1 + a * (x2 - x1)
+    }
+
+    fn fill_block_no_loop<P: Points, F: Float>(
         &mut self,
         data: P,
-        block: &mut [f32],
+        block: &mut [F],
         pitch_ratio_fp: i64,
     ) -> bool {
         for t in 0..block.len() {
             let index = (self.position_fp >> Oscillator::FRAC_BITS) as usize;
             if index >= self.end as usize {
                 if t > 0 {
-                    let len = block.len();
-                    block[t..len].fill(0_f32);
+                    block[t..].fill(F::ZERO);
                     return true;
                 } else {
                     return false;
                 }
             }
 
-            let x1 = data.at(index);
-            let x2 = data.at(index + 1);
-            let a_fp = self.position_fp & (Oscillator::FRAC_UNIT - 1);
-            block[t] = P::FP_TO_SAMPLE * ((x1 << Oscillator::FRAC_BITS) + a_fp * (x2 - x1)) as f32;
+            block[t] = self.interpolate(data, index, index + 1);
 
             self.position_fp += pitch_ratio_fp;
         }
@@ -163,10 +180,10 @@ impl Oscillator {
         true
     }
 
-    fn fill_block_continuous<P: Points>(
+    fn fill_block_continuous<P: Points, F: Float>(
         &mut self,
         data: P,
-        block: &mut [f32],
+        block: &mut [F],
         pitch_ratio_fp: i64,
     ) -> bool {
         let end_loop_fp = (self.end_loop as i64) << Oscillator::FRAC_BITS;
@@ -184,10 +201,7 @@ impl Oscillator {
                 index2 -= loop_length as usize;
             }
 
-            let x1 = data.at(index1);
-            let x2 = data.at(index2);
-            let a_fp = self.position_fp & (Oscillator::FRAC_UNIT - 1);
-            *sample = P::FP_TO_SAMPLE * ((x1 << Oscillator::FRAC_BITS) + a_fp * (x2 - x1)) as f32;
+            *sample = self.interpolate(data, index1, index2);
 
             self.position_fp += pitch_ratio_fp;
         }
@@ -240,38 +254,112 @@ mod tests {
     /// The first `count` frames of a no-loop read at a pitch ratio of 1: the
     /// position steps by exactly one point from point 0, so every read sits on
     /// a point and the interpolation has no fraction.
-    fn read(pool: SamplePool<'_>, count: usize) -> Vec<f32> {
+    fn read<F: Float>(pool: SamplePool<'_>, count: usize) -> Vec<F> {
         let rate = SampleRate::SR_44K1;
         let mut oscillator = Oscillator::new(&Render::new(rate));
         oscillator.start(LoopMode::NoLoop, rate, 0, 2000, 0, 0, 60, 0, 0, 100);
-        let mut block = vec![0_f32; count];
-        assert!(oscillator.process(pool, &mut block, 60.0));
+        let mut block = vec![F::ZERO; count];
+        assert!(oscillator.process(pool, &mut block, Semitones(60.0)));
         block
     }
 
     /// A 24-bit point is `(smpl << 8) | sm24` over 2^23: on a point of the pool
-    /// the read is that figure exactly (a 24-bit integer shifted by the 24
-    /// fraction bits has 24 significant bits, which an `f32` holds, and 2^-47
-    /// is a power of two).
+    /// the read is that figure exactly, in either float (a 24-bit integer has 24
+    /// significant bits, which `f32` holds, and 2^-23 is a power of two).
     /// Spec: sf2.sdta.sm24.low-byte
     #[test]
     fn a_24_bit_point_reads_as_its_value_over_2_to_the_23() {
         let (font, points) = font(true);
         assert_eq!(font.bits_per_sample(), 24);
-        let out = read(font.sample_pool(), 1500);
-        for (t, &sample) in out.iter().enumerate() {
-            assert_eq!(sample, points[t] as f32 / 8_388_608.0, "frame {t}");
+        for (t, &sample) in read::<f32>(font.sample_pool(), 1500).iter().enumerate() {
+            assert_eq!(
+                f64::from(sample),
+                f64::from(points[t]) / 8_388_608.0,
+                "f32 frame {t}"
+            );
+        }
+        for (t, &sample) in read::<f64>(font.sample_pool(), 1500).iter().enumerate() {
+            assert_eq!(sample, f64::from(points[t]) / 8_388_608.0, "f64 frame {t}");
         }
     }
 
-    /// The 16-bit pool reads a point as its value over 2^15, as it always has.
+    /// The 16-bit pool reads a point as its value over 2^15, in either float.
     #[test]
     fn a_16_bit_point_reads_as_its_value_over_2_to_the_15() {
         let (font, points) = font(false);
         assert_eq!(font.bits_per_sample(), 16);
-        let out = read(font.sample_pool(), 1500);
-        for (t, &sample) in out.iter().enumerate() {
-            assert_eq!(sample, points[t] as f32 / 32_768.0, "frame {t}");
+        for (t, &sample) in read::<f32>(font.sample_pool(), 1500).iter().enumerate() {
+            assert_eq!(
+                f64::from(sample),
+                f64::from(points[t]) / 32_768.0,
+                "f32 frame {t}"
+            );
         }
+        for (t, &sample) in read::<f64>(font.sample_pool(), 1500).iter().enumerate() {
+            assert_eq!(sample, f64::from(points[t]) / 32_768.0, "f64 frame {t}");
+        }
+    }
+
+    /// A read over 10 s at 192 kHz at a pitch whose ratio is irrational: the position is an
+    /// integer count of `2^-24` frames advanced by the ratio truncated to that grid, so it
+    /// is within `N 2^-24` frames of `N r` (`N` the frames, `r` the ratio) however long it
+    /// runs, where an `f32` position at 1.92 million frames steps by 1/8 frame.
+    /// The pool's ramp (`31 i - 32000` over `2^15` at point `i`) is linear, so the
+    /// `f32` sample at a position `p` of the grid is `(31 p - 32000) / 2^15` to the
+    /// interpolation's rounding: the difference `x2 - x1` rounds (relative `u =
+    /// 2^-24`), the product with the fraction rounds, and the sum rounds, `3 u` of a
+    /// full-scale value.
+    #[test]
+    fn the_fixed_point_position_after_ten_seconds_is_within_its_truncation_of_the_phase() {
+        let rate = SampleRate::SR_192K;
+        let (pool_font, _) = font(false);
+        let pool = pool_font.sample_pool();
+        let mut oscillator = Oscillator::new(&Render::new(rate));
+        // Looped over 100..1900, so the position stays in the 2100-point pool; the pool's
+        // sample rate is the render's, so the ratio is the pitch's alone.
+        oscillator.start(
+            LoopMode::Continuous,
+            rate,
+            0,
+            2000,
+            100,
+            1900,
+            60,
+            0,
+            0,
+            100,
+        );
+        let pitch = Semitones(67.0);
+        let ratio = Semitones(7.0).to_pitch_ratio();
+        let frames = 1_920_000_usize;
+        let mut block = [0_f32; 8];
+        for _ in 0..frames / block.len() {
+            assert!(oscillator.process(pool, &mut block, pitch));
+        }
+        let position = oscillator.position_fp as f64 / Oscillator::FRAC_UNIT as f64;
+        // The loop wraps by whole frames, so the position is `N r` folded into 100..1900.
+        let want = 100.0 + (frames as f64 * ratio - 100.0).rem_euclid(1800.0);
+        let drift = frames as f64 / Oscillator::FRAC_UNIT as f64;
+        assert!(
+            (position - want).abs() <= drift,
+            "position {position} against {want}, drift bound {drift}"
+        );
+        // The last sample was read one step (the ratio on the `2^-24` grid) before `position`.
+        let step = (Oscillator::FRAC_UNIT as f64 * ratio) as i64;
+        let read = (oscillator.position_fp - step) as f64 / Oscillator::FRAC_UNIT as f64;
+        assert!(
+            read > 100.0 && read < 1898.0,
+            "the last read {read} is not near a wrap"
+        );
+        let want_sample = (31.0 * read - 32_000.0) / 32_768.0;
+        let bound = 3.0 * f64::from(f32::EPSILON) / 2.0;
+        let got = f64::from(block[7]);
+        eprintln!(
+            "position {position}, want {want}, sample {got}, want {want_sample}, bound {bound:e}"
+        );
+        assert!(
+            (got - want_sample).abs() <= bound,
+            "{got} against {want_sample}"
+        );
     }
 }

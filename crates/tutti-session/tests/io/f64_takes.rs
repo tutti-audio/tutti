@@ -6,6 +6,7 @@ use std::any::Any;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, SampleFormat};
 use tutti_codec::{Format, Pcm};
 use tutti_cpal::MicConfig;
@@ -15,7 +16,6 @@ use tutti_session::{
     InputConfig, InputOpener, OpenedInput, Punch, Root, Session, SessionEvent, TakeEvent,
     TakeTarget,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Frame, SampleRate, Samples};
 
 use super::f64_device::f64_nodes::FINE;

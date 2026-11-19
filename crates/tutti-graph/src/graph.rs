@@ -21,7 +21,7 @@
 //!
 //! ```
 //! use tutti_graph::{Edge, InPort, NodeSpec, OutPort, Source};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_graph::{NodeKey, Topology};
 //!
 //! let (osc, gain) = (NodeKey(1), NodeKey(2));
@@ -43,7 +43,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::latency::{ChannelFeed, Feed, LatencyGraph, PortFeed};
 use crate::spec::{EventIn, EventOut};
 use crate::tail::TailGraph;
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 use tutti_units::{Samples, Tail};
 
 /// A stable identity for a node, chosen by the **author** of the topology.
@@ -67,7 +67,7 @@ impl NodeKey {
     /// `Entity`'s bits, a literal) is not reserved against it, so a host
     /// mixing the two keeps them in ranges that cannot meet.
     pub fn fresh() -> Self {
-        static NEXT: tutti_types::Mint = tutti_types::Mint::new();
+        static NEXT: tutti_rt::Mint = tutti_rt::Mint::new();
         Self(NEXT.mint().get())
     }
 }
@@ -297,7 +297,7 @@ pub struct Topology {
     pub meters: BTreeMap<MeterId, MeterSpec>,
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// The name of one level meter.
     pub struct MeterId: named;
 }
@@ -363,7 +363,7 @@ impl MeterSpec {
     }
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// The name of one tap.
     pub struct TapId: named;
 }
@@ -382,7 +382,7 @@ pub enum TapAlign {
     ToOutput,
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// The name of one event tap. Its own type: a [`TapId`] names a key of
     /// [`Topology::taps`], and the two maps do not share a namespace.
     pub struct EventTapId: named;

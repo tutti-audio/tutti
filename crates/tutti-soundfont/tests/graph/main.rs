@@ -2,6 +2,7 @@
 
 mod chase;
 mod contract;
+mod f64_unit;
 mod graph_node;
 mod ring_out;
 #[path = "../support/mod.rs"]

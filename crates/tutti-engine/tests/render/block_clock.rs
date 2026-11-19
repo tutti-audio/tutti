@@ -3,13 +3,13 @@
 //! it on a frame. Figures are
 //! analytic: the frame of call `k` is the frames rendered before it.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MaxBlock;
 use tutti_engine::{BlockDates, Engine};
 use tutti_graph::{Editor, Prepare};
 use tutti_transport::MotionEvent;
 use tutti_transport::Transport;
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{Beat, Seconds};
 use tutti_units::{Frame, SampleRate, Samples};
 

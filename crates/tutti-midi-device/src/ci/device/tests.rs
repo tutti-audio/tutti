@@ -272,7 +272,7 @@ fn a_message_to_us_we_do_not_support_is_nakked_with_0x01_naming_it() {
     assert_eq!(header.source, Muid::of(OURS));
     assert_eq!(*to, Muid::of(PEER));
     assert_eq!(nak.nak_sub_id2, U7::of(0x3E));
-    assert_eq!(nak.status_code, Nak::STATUS_MESSAGE_NOT_SUPPORTED);
+    assert_eq!(nak.status, NakStatus::MessageNotSupported);
 }
 
 // M2-101 §8.13: a Notify is still honoured on receipt, so it is neither refused as
@@ -300,7 +300,7 @@ fn a_malformed_message_to_us_is_nakked_with_0x41() {
     let [CiMessage::Nak { nak, .. }] = sent(&actions)[..] else {
         panic!("a NAK, got {actions:?}");
     };
-    assert_eq!(nak.status_code, Nak::STATUS_MALFORMED);
+    assert_eq!(nak.status, NakStatus::Malformed);
 }
 
 #[test]
@@ -409,7 +409,7 @@ fn a_nak_of_the_endpoint_inquiry_leaves_the_id_unknown() {
     let nak = Decoded::Message(CiMessage::Nak {
         header: CiHeader::new(Muid::of(PEER)),
         to: Muid::of(OURS),
-        nak: Nak::new(U7::of(SUB_ID2_ENDPOINT_INQUIRY), Nak::STATUS_NAK),
+        nak: Nak::new(U7::of(SUB_ID2_ENDPOINT_INQUIRY), NakStatus::Nak),
     });
     assert!(device.on_message(&nak, now).is_empty(), "never answered");
     // The inquiry is over: a reply after the NAK is not the answer to one.
@@ -441,7 +441,7 @@ fn an_endpoint_inquiry_to_us_is_nakked_for_we_have_no_id_to_give() {
     };
     assert_eq!(*to, Muid::of(PEER));
     assert_eq!(nak.nak_sub_id2, U7::of(0x72));
-    assert_eq!(nak.status_code, Nak::STATUS_NAK);
+    assert_eq!(nak.status, NakStatus::Nak);
     assert!(device.on_message(&inquiry(OTHER), now).is_empty());
 }
 
@@ -593,7 +593,7 @@ fn a_set_on_set_off_or_details_inquiry_to_us_is_nakked_0x04_with_the_profile_id(
         assert_eq!(header.device_id, channel, "{sub:#x}");
         assert_eq!(*to, Muid::of(PEER));
         assert_eq!(nak.nak_sub_id2, U7::of(sub));
-        assert_eq!(nak.status_code, Nak::STATUS_PROFILE_NOT_SUPPORTED);
+        assert_eq!(nak.status, NakStatus::ProfileNotSupported);
         assert_eq!(nak.details.map(U7::get), [0x7E, 1, 2, 3, 4]);
     }
 }
@@ -752,7 +752,7 @@ fn a_report_of_a_channel_is_nakked_0x03_as_no_channel_is_in_use() {
     assert_eq!(header.device_id, channel);
     assert_eq!(*to, Muid::of(PEER));
     assert_eq!(nak.nak_sub_id2, U7::of(SUB_ID2_MESSAGE_REPORT_INQUIRY));
-    assert_eq!(nak.status_code, Nak::STATUS_NOT_IN_USE);
+    assert_eq!(nak.status, NakStatus::NotInUse);
 }
 
 #[test]
@@ -783,7 +783,7 @@ fn a_device_not_declaring_process_inquiry_nakks_both_inquiries_0x01() {
         };
         assert_eq!(*to, Muid::of(PEER));
         assert_eq!(nak.nak_sub_id2, U7::of(original));
-        assert_eq!(nak.status_code, Nak::STATUS_MESSAGE_NOT_SUPPORTED);
+        assert_eq!(nak.status, NakStatus::MessageNotSupported);
     }
 }
 
@@ -842,7 +842,7 @@ fn a_property_exchange_inquiry_is_nakked_and_the_rest_is_left_to_the_initiator()
         };
         assert_eq!(*to, Muid::of(PEER));
         assert_eq!(nak.nak_sub_id2.get(), sub_id2);
-        assert_eq!(nak.status_code, Nak::STATUS_MESSAGE_NOT_SUPPORTED);
+        assert_eq!(nak.status, NakStatus::MessageNotSupported);
     }
     for kind in [
         PeMessageKind::GET_REPLY,
@@ -898,7 +898,7 @@ fn an_inquiry_a_responder_did_not_accept_is_refused_with_a_nak() {
         };
         assert_eq!(to, Muid::of(PEER));
         assert_eq!(nak.nak_sub_id2.get(), sub_id2);
-        assert_eq!(nak.status_code, Nak::STATUS_MESSAGE_NOT_SUPPORTED);
+        assert_eq!(nak.status, NakStatus::MessageNotSupported);
     }
     assert!(
         device

@@ -125,13 +125,13 @@ fn a_nak_of_the_capabilities_inquiry_ends_it_as_refused() {
     let refusal = nak(
         CiDeviceId::FunctionBlock,
         SUB_ID2_PROCESS_CAPABILITIES_INQUIRY,
-        Nak::STATUS_MESSAGE_NOT_SUPPORTED,
+        NakStatus::MessageNotSupported,
     );
     let actions = initiator.on_message(&refusal, now);
     let [ProcessAction::CapabilitiesRefused(nak)] = &actions[..] else {
         panic!("a refusal, got {actions:?}");
     };
-    assert_eq!(nak.status_code, Nak::STATUS_MESSAGE_NOT_SUPPORTED);
+    assert_eq!(nak.status, NakStatus::MessageNotSupported);
     assert_eq!(initiator.deadline(), None);
 }
 
@@ -230,7 +230,10 @@ fn an_end_before_the_reply_does_not_end_the_report() {
 #[test]
 fn a_nak_ends_the_report_without_an_end() {
     // §9.8.1.
-    for status in [Nak::STATUS_TERMINATE, Nak::STATUS_RETRY] {
+    for status in [
+        NakStatus::Terminate(PeTerminator::Responder),
+        NakStatus::Retry,
+    ] {
         let (mut initiator, now) = known(ProcessFeatures::MIDI_MESSAGE_REPORT);
         initiator.report(function_block(), now).unwrap();
         initiator.on_message(&begin(everything(CiDeviceId::FunctionBlock)), now);
@@ -245,7 +248,7 @@ fn a_nak_ends_the_report_without_an_end() {
         let [ProcessAction::ReportRefused(nak)] = &actions[..] else {
             panic!("a refusal, got {actions:?}");
         };
-        assert_eq!(nak.status_code, status);
+        assert_eq!(nak.status, status);
         assert!(!initiator.is_reporting());
         assert_eq!(initiator.deadline(), None);
     }
@@ -258,11 +261,7 @@ fn a_nak_of_the_report_before_the_reply_ends_it_too() {
     let request = ReportRequest::new(DataControl::Full, everything(channel));
     initiator.report(request, now).unwrap();
     let actions = initiator.on_message(
-        &nak(
-            channel,
-            SUB_ID2_MESSAGE_REPORT_INQUIRY,
-            Nak::STATUS_NOT_IN_USE,
-        ),
+        &nak(channel, SUB_ID2_MESSAGE_REPORT_INQUIRY, NakStatus::NotInUse),
         now,
     );
     assert!(matches!(&actions[..], [ProcessAction::ReportRefused(_)]));
@@ -276,7 +275,7 @@ fn a_nak_of_the_capabilities_does_not_end_a_report() {
     let refusal = nak(
         CiDeviceId::FunctionBlock,
         SUB_ID2_PROCESS_CAPABILITIES_INQUIRY,
-        Nak::STATUS_NAK,
+        NakStatus::Nak,
     );
     assert!(initiator.on_message(&refusal, now).is_empty());
     assert!(initiator.is_reporting());

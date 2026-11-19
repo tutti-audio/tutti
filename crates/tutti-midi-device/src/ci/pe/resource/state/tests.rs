@@ -336,7 +336,9 @@ fn a_reply_header_with_a_bad_timestamp_is_refused() {
         )
         .unwrap();
     let error = PeState::octets(vec![1]).read_header(&extra).unwrap_err();
-    assert_eq!(error.place, "State.timestamp");
+    assert_eq!(error.place.what(), "State");
+    assert_eq!(error.place.at_property(), Some("timestamp"));
+    assert_eq!(error.place.to_string(), "State.timestamp");
     let mut extra = PeExtra::default();
     extra
         .insert(PropertyName::new("timestamp").unwrap(), PeJson::Integer(-3))

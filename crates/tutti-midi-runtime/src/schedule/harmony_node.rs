@@ -65,8 +65,8 @@ impl TimedHarmony {
 }
 
 impl Beated for TimedHarmony {
-    fn beat(&self) -> f64 {
-        self.beat.get()
+    fn beat(&self) -> Beat {
+        self.beat
     }
 }
 
@@ -117,7 +117,7 @@ impl FromIterator<TimedHarmony> for HarmonyChanges {
 /// See the module docs.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Beat, SampleRate, Samples};
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Harmony, Prepare};
@@ -245,7 +245,7 @@ impl Sent {
 /// The harmony side of the walk: each change on its frame, at a jump the
 /// chord and the scale in force there, and at a loop wrap those of them that
 /// differ from what was sent.
-struct Sending<'a, 'w> {
+struct HarmonyWriter<'a, 'w> {
     out: &'a mut EventWriter<'w>,
     sent: &'a mut Sent,
     /// The frame this block last re-stated the context on: the changes the
@@ -253,7 +253,7 @@ struct Sending<'a, 'w> {
     restated: Option<Offset>,
 }
 
-impl Sending<'_, '_> {
+impl HarmonyWriter<'_, '_> {
     /// Send `h` at `at`, recording it when the port takes it.
     fn send(&mut self, at: Offset, h: Harmony) {
         // Refused past the capacity: counted by the executor.
@@ -269,7 +269,7 @@ impl Sending<'_, '_> {
     fn restate(
         &mut self,
         at: Option<Offset>,
-        beat: f64,
+        beat: Beat,
         frames_per_beat: f64,
         changes: &[TimedHarmony],
         changed_only: bool,
@@ -289,12 +289,11 @@ impl Sending<'_, '_> {
     /// playback is on at `beat`.
     fn in_force(
         changes: &[TimedHarmony],
-        beat: f64,
+        beat: Beat,
         frames_per_beat: f64,
         kind: HarmonyKind,
     ) -> Option<Harmony> {
-        let upto =
-            changes.partition_point(|c| lands_on_first_frame(c.beat.get(), beat, frames_per_beat));
+        let upto = changes.partition_point(|c| lands_on_first_frame(c.beat, beat, frames_per_beat));
         changes[..upto]
             .iter()
             .rev()
@@ -303,18 +302,18 @@ impl Sending<'_, '_> {
     }
 }
 
-impl Visit<TimedHarmony> for Sending<'_, '_> {
+impl Visit<TimedHarmony> for HarmonyWriter<'_, '_> {
     fn stop(&mut self, _at: Option<Offset>) {}
 
     /// Re-state the context in force on the jump's frame.
-    fn jump(&mut self, at: Option<Offset>, beat: f64, fpb: f64, changes: &[TimedHarmony]) {
+    fn jump(&mut self, at: Option<Offset>, beat: Beat, fpb: f64, changes: &[TimedHarmony]) {
         self.restate(at, beat, fpb, changes, false);
     }
 
     /// A loop pass re-states only what differs from what was last sent: a
     /// receiver holds the context, so a pass that starts in the context the
     /// last one ended in sends nothing here.
-    fn wrap(&mut self, at: Option<Offset>, beat: f64, fpb: f64, changes: &[TimedHarmony]) {
+    fn wrap(&mut self, at: Option<Offset>, beat: Beat, fpb: f64, changes: &[TimedHarmony]) {
         self.restate(at, beat, fpb, changes, true);
     }
 
@@ -348,14 +347,14 @@ impl<F: Float> Node<F> for HarmonyNode {
             self.walk.forget();
             self.sent = Sent::default();
         }
-        let mut sending = Sending {
+        let mut writer = HarmonyWriter {
             out: io.event_out(0),
             sent: &mut self.sent,
             restated: None,
         };
         for (start, seg) in cx.env.segments() {
             self.walk
-                .segment(&lanes.changes, cx.env, start, &seg, &mut sending);
+                .segment(&lanes.changes, cx.env, start, &seg, &mut writer);
         }
         Status::Modified
     }

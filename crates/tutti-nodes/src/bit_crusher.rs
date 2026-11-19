@@ -1,9 +1,9 @@
 //! [`BitCrusherNode`]: a sample-and-hold and a quantizer.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{BitCrusher, BitCrusherControls, COEFF_INTERVAL};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{BitDepth, HoldFactor, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

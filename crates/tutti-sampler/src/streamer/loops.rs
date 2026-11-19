@@ -31,9 +31,9 @@
 use std::sync::Arc;
 
 use super::prefetch::RegionOut;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, InterleavedMut};
 use tutti_rt::RingFloat;
-use tutti_types::ChannelLayout;
 use tutti_units::{ReadRate, SamplePosition, SampleRate, Samples};
 
 use crate::Loop;
@@ -1155,7 +1155,7 @@ mod tests {
             StreamId::of(1),
             std::path::PathBuf::new(),
             LEN,
-            tutti_types::ChannelTopology::new([tutti_types::Speaker::FrontCenter]).unwrap(),
+            tutti_buffers::ChannelTopology::new([tutti_buffers::Speaker::FrontCenter]).unwrap(),
             Some(Samples::new(LEN)),
             Samples::new(0),
         );

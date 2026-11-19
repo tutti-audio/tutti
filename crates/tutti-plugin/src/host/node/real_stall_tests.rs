@@ -32,11 +32,11 @@
 //! later taken back off the socket*.
 
 use std::time::{Duration, Instant};
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 use crate::PluginClient;

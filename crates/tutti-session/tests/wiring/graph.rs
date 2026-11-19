@@ -4,9 +4,11 @@
 //! Design 015 §9.4.
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MAX_CHANNELS;
 use tutti_graph::FadeLaw;
 use tutti_graph::Params;
 use tutti_graph::{
@@ -14,13 +16,11 @@ use tutti_graph::{
     Unforkable,
 };
 use tutti_nodes::testing::{Const, Osc, Through};
+use tutti_rt::Param;
 use tutti_session::{
     Crossfade, CrossfadeRefused, DetachedSession, EventInPort, Feeder, InPort, OutPort,
     RemoveError, Root, Session, SessionEvent, SessionNode, root_width,
 };
-use tutti_types::ChannelLayout;
-use tutti_types::MAX_CHANNELS;
-use tutti_types::Param;
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples, Seconds};
 use tutti_units::{Latency, UnitParam};
 

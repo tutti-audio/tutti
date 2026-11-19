@@ -3,11 +3,11 @@
 
 use std::sync::Arc;
 
+use crate::SamplerFloat;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{HasParam, IntoNode, NodeParts};
-use tutti_rt::RingFloat;
 use tutti_transport::TempoReader;
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, PlaybackRate};
 
 use crate::streamer::{Stream, StreamReader};
@@ -54,7 +54,7 @@ use crate::{
 /// what a clip does not say (a pool of voices: [`VoicePool`](crate::VoicePool)).
 #[derive(Debug)]
 #[must_use = "a clip is a node: add it to a graph"]
-pub struct Clip<F: RingFloat = f32> {
+pub struct Clip<F: SamplerFloat = f32> {
     tier: Tier<F>,
     window: VoiceWindow,
     gain: Amplitude,
@@ -65,7 +65,7 @@ pub struct Clip<F: RingFloat = f32> {
 
 /// What a clip plays.
 #[derive(Debug)]
-enum Tier<F: RingFloat> {
+enum Tier<F: SamplerFloat> {
     /// The decoded wave, placed.
     Resident {
         wave: Arc<Wave<F>>,
@@ -78,7 +78,7 @@ enum Tier<F: RingFloat> {
     },
 }
 
-impl<F: RingFloat> Clip<F> {
+impl<F: SamplerFloat> Clip<F> {
     fn over(tier: Tier<F>) -> Self {
         Self {
             tier,
@@ -214,14 +214,14 @@ impl<F: RingFloat> Clip<F> {
 }
 
 /// A clip has the params of the node it builds.
-impl<F: RingFloat, const P: u16> HasParam<P> for Clip<F>
+impl<F: SamplerFloat, const P: u16> HasParam<P> for Clip<F>
 where
     VoiceNode<F>: HasParam<P>,
 {
     type Unit = <VoiceNode<F> as HasParam<P>>::Unit;
 }
 
-impl<F: RingFloat> IntoNode<F> for Clip<F> {
+impl<F: SamplerFloat> IntoNode<F> for Clip<F> {
     type Controls = VoiceNodeHandle<F>;
 
     fn into_parts(self) -> NodeParts<VoiceNodeHandle<F>, F> {

@@ -8,16 +8,15 @@
 //! tests fail without it, by design.
 
 use crate::param_reads::ParamReads as _;
-use crate::support;
 
 use std::time::{Duration, Instant};
 
 use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_session::{NodeMode, Session};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples, Seconds};
@@ -32,7 +31,7 @@ fn plugin_file() -> std::path::PathBuf {
 fn session_with_plugin() -> (Session, tutti_graph::NodeKey) {
     // SAFETY: nextest runs each test in its own process, and this is set from
     // the test's own thread before the first server is spawned.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", support::plugin_server()) };
+    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let mut s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .max_block(MaxBlock::of(Samples(BLOCK)))

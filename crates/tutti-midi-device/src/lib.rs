@@ -74,6 +74,7 @@
 
 mod ci;
 mod connection;
+mod deadline;
 mod dialect;
 mod endpoint;
 mod entropy;
@@ -85,67 +86,71 @@ mod name;
 mod table;
 
 pub use ci::{
-    Ack, ActionError, Arrival, ArticulationDetails, ArticulationDetailsError, ArticulationFeatures,
-    ArticulationLevel, BitmapPosition, BodyLimit, BufferLimit, CI_SUB_ID_1, CI_VERSION, CallError,
-    CallId, CanSet, CcFunction, CcIndex, CcPart, CcReset, CcValue, ChangeKind, ChannelControllers,
-    ChannelsDetail, ChunkNo, ChunkPosition, ChunkTotal, CiAction, CiCategories, CiDevice,
-    CiDeviceId, CiHeader, CiMessage, CiPeer, CiVersion, ClusterKind, ColumnSource, CommonState,
-    ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind,
-    CustomResource, CustomSounds, DISCOVERY_WINDOW, DataControl, Decoded, DefaultCcLevel,
-    Destination, DetailsData, DiscoveryData, Drawbar, DrawbarSetting, DrumControl, DrumFeatures,
-    DrumInstrument, DrumNoteMapLevel, DrumSounds, EndpointInfo, EndpointStatus, EntryError,
-    GetStateError, Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, InquiryTarget,
-    JsonPointer, LinkRole, ListTooLong, ListedTwice, MAX_LIST_ENTRIES, ManufacturerProfile,
-    MaxSysexSize, MediaType, MessageText, ModeId, Muid, MutuallyExclusiveSet, Nak, NotABodyLimit,
-    NotABufferLimit, NotAChunkNo, NotADataControl, NotADeviceId, NotADrawbarSetting,
-    NotAGm2ChannelCount, NotAMuid, NotAMutuallyExclusiveSet, NotAPeChannel, NotAPriority,
-    NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount, NotAStreamLimit,
-    NotASysexSize, NotATimeoutWait, NotAVersion, NotProfileChannels, NotSetProfileOn,
-    NotSignificantBits, NotUnixSeconds, NotValid, NotVariationCount, NotVendorName, NoteData,
-    ORGAN_HIGHEST_NOTE, ORGAN_LOWEST_NOTE, ORGAN_REFERENCE_NOTE, OpaqueBody, OrganFeatures,
-    OrganLevel, OrganOption, OrganValue, Outcome, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN,
-    PE_MAX_HEADER_LEN, PE_TIMEOUT, PEER_REPLY_TIMEOUT, PaginationFault, ParamPath, PartialError,
-    PartialUpdate, PartialValue, PeAction, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram,
-    PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeBuffered, PeCall, PeCapabilities,
-    PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChange, PeChannel, PeChannelEntry,
-    PeChannelList, PeChannelMode, PeChunk, PeChunkError, PeCiMessage, PeCluster, PeColumn,
-    PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError,
-    PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions,
-    PeExternalSync, PeExtra, PeExtraError, PeFlowControl, PeGet, PeHeader, PeHeaderError,
-    PeHeaderTooLong, PeHeld, PeInitiator, PeJson, PeJsonError, PeJsonSchema, PeKind, PeLink,
-    PeLocalOn, PeMessage, PeMessageKind, PeMidiMode, PeModeEntry, PeModeList, PeNotification,
-    PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList, PeReassembler,
-    PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeReply, PeRequest, PeRequestId,
-    PeResource, PeResourceList, PeResponse, PeSet, PeSetScope, PeSettings, PeSignal, PeState,
-    PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeStep, PeSubscribed, PeSubscription,
-    PeTerminator, PeText, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion, Priority,
-    ProcessAction, ProcessError, ProcessFeatures, ProcessInitiator, ProfileAction, ProfileChange,
-    ProfileChannels, ProfileDataError, ProfileEntry, ProfileId, ProfileInitiator, ProfileList,
-    ProfileLists, ProfileOnRequest, ProfileSpecific, ProfileState, ProfileTable, ProfileTarget,
-    PropertyName, PublishError, RefusedAt, ReportRequest, ReportScope, Request, RequestError,
-    RequestRefused, ResIdUse, ResourceAction, ResourceDefaults, ResourceEntry,
-    ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
-    ResourceInitiator, ResourceName, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
-    ResponderAction, ResponderEvent, ResponderSettings, RestoreError, RoleName, RotaryControl,
-    RotarySpeaker, RotaryValue, SUB_ID2_ACK, SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY,
-    SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY, SUB_ID2_INVALIDATE_MUID,
-    SUB_ID2_MESSAGE_REPORT_END, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_MESSAGE_REPORT_REPLY,
-    SUB_ID2_NAK, SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY,
-    SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, SUB_ID2_PROCESS_CAPABILITIES_REPLY,
-    SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY,
-    SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY,
-    SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
-    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SavedState, SelectorAction, SetBody,
-    SignificantBits, SimpleAction, SimultaneousRequests, Sound, SoundSet, SpecificData,
-    StandardProfile, StateDevice, StateId, StateRev, StateSize, StateStamp, StepCount, StoreError,
-    StreamLimit, SubclassCounts, SubscribeId, SuggestedCc, SwitchMeaning, SystemMessages,
-    TimeoutWait, TwoState, TypeHint, UnixSeconds, Unread, UnreadReason, UpdateKind, VariationCount,
-    Verdict, VibratoChorus, WrongDevice, decode_body, encode_body, is_property_exchange,
-    is_set_profile_on, mcoded7, send_level, split_message, volume_gain,
+    Ack, AckStatus, ActionError, Arrival, ArticulationDetails, ArticulationDetailsError,
+    ArticulationFeatures, ArticulationLevel, BitmapPosition, BodyLimit, BufferLimit, CI_SUB_ID_1,
+    CI_VERSION, CallError, CallId, CanSet, CcFunction, CcIndex, CcPart, CcReset, CcValue,
+    ChangeKind, ChannelControllers, ChannelsDetail, ChunkNo, ChunkPosition, ChunkTotal, CiAction,
+    CiCategories, CiDevice, CiDeviceId, CiHeader, CiMessage, CiPeer, CiVersion, ClusterKind,
+    ColumnSource, CommonState, ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind,
+    CtrlRange, CtrlValueKind, CustomResource, CustomSounds, DISCOVERY_WINDOW, DataControl, Decoded,
+    DefaultCcLevel, Destination, DetailsData, DiscoveryData, Drawbar, DrawbarSetting, DrumControl,
+    DrumFeatures, DrumInstrument, DrumNoteMapLevel, DrumSounds, EnabledMpeZones, EndpointInfo,
+    EndpointStatus, EntryError, GetStateError, Gm2ChannelCount, Gm2FunctionBlock, Gm2Role,
+    Gm2SingleChannel, InquiryTarget, JsonPointer, LinkRole, ListTooLong, ListedTwice,
+    MAX_LIST_ENTRIES, ManufacturerProfile, MaxSysexSize, MediaType, MessageText, ModeId, Muid,
+    MutuallyExclusiveSet, Nak, NakStatus, NotABodyLimit, NotABufferLimit, NotAChunkNo,
+    NotADataControl, NotADeviceId, NotADrawbarSetting, NotAGm2ChannelCount, NotAMuid,
+    NotAMutuallyExclusiveSet, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
+    NotAStateSize, NotAStepCount, NotAStreamLimit, NotASysexSize, NotATimeoutWait, NotAVersion,
+    NotProfileChannels, NotSetProfileOn, NotSignificantBits, NotUnixSeconds, NotValid,
+    NotVariationCount, NotVendorName, NoteData, ORGAN_HIGHEST_NOTE, ORGAN_LOWEST_NOTE,
+    ORGAN_REFERENCE_NOTE, OpaqueBody, OrganFeatures, OrganLevel, OrganOption, OrganValue, Outcome,
+    PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT, PEER_REPLY_TIMEOUT,
+    PaginationFault, ParamPath, PartialError, PartialUpdate, PartialValue, PeAction,
+    PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
+    PeBodyError, PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry,
+    PeChCtrlList, PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk,
+    PeChunkError, PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry,
+    PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo,
+    PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
+    PeFlowControl, PeGet, PeHeader, PeHeaderError, PeHeaderTooLong, PeHeld, PeInitiator, PeJson,
+    PeJsonError, PeJsonSchema, PeKind, PeLink, PeLocalOn, PeMessage, PeMessageKind, PeMidiMode,
+    PeModeEntry, PeModeList, PeNotification, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry,
+    PeProgramList, PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused,
+    PeReply, PeRequest, PeRequestId, PeResource, PeResourceList, PeResponse, PeSet, PeSetScope,
+    PeSettings, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeStep,
+    PeSubscribed, PeSubscription, PeTerminator, PeText, PeTransaction, PeUnreadable,
+    PeUpdateCommand, PeVersion, Place, Priority, ProcessAction, ProcessError, ProcessFeatures,
+    ProcessInitiator, ProfileAction, ProfileChange, ProfileChannels, ProfileDataError,
+    ProfileEntry, ProfileId, ProfileInitiator, ProfileList, ProfileLists, ProfileOnRequest,
+    ProfileSpecific, ProfileState, ProfileTable, ProfileTarget, PropertyName, PublishError,
+    RefusedAt, ReportRequest, ReportScope, Request, RequestError, RequestRefused, ResIdUse,
+    ResourceAction, ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent,
+    ResourceFailure, ResourceGet, ResourceId, ResourceInitiator, ResourceName, ResourceResponder,
+    ResourceSet, ResourceStore, ResourceTarget, ResponderAction, ResponderEvent, ResponderSettings,
+    RestoreError, RoleName, RotaryControl, RotarySpeaker, RotaryValue, SUB_ID2_ACK,
+    SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
+    SUB_ID2_INVALIDATE_MUID, SUB_ID2_MESSAGE_REPORT_END, SUB_ID2_MESSAGE_REPORT_INQUIRY,
+    SUB_ID2_MESSAGE_REPORT_REPLY, SUB_ID2_NAK, SUB_ID2_PE_CAPABILITIES_INQUIRY,
+    SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SUB_ID2_PROCESS_CAPABILITIES_INQUIRY,
+    SUB_ID2_PROCESS_CAPABILITIES_REPLY, SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY,
+    SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED,
+    SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY,
+    SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SavedState,
+    SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, Sound, SoundSet,
+    SpecificData, StandardProfile, StateDevice, StateId, StateRev, StateSize, StateStamp,
+    StepCount, StoreError, StreamLimit, SubclassCounts, SubscribeId, SuggestedCc, SwitchMeaning,
+    SystemMessages, TimeoutWait, TwoState, TypeHint, UnixSeconds, Unread, UnreadReason, UpdateKind,
+    VariationCount, Verdict, VibratoChorus, Whole, WrongDevice, decode_body, encode_body,
+    is_property_exchange, is_set_profile_on, mcoded7, send_level, split_message, volume_gain,
 };
 
+#[cfg(feature = "serde")]
+pub use ci::SavedStateError;
 pub use connection::{Action, Connection, Ending, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT};
 pub use dialect::{ChannelVoice, Dialect, Expression, JrTimestamps, Midi1Rate, NoDialect};
+#[cfg(feature = "serde")]
+pub use endpoint::NotAnEndpoint;
 pub use endpoint::{
     BlockError, BlockField, Capabilities, ChangeError, Configuration, Endpoint, EndpointChange,
     FunctionBlock, FunctionBlockBuilder, MAX_FUNCTION_BLOCKS, MidiIdentity, NoProtocol, Reply,
@@ -154,7 +159,7 @@ pub use endpoint::{
 pub use entropy::{EntropyError, EntropyWords, random_bytes};
 pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDevice};
 pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAction};
-pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_HZ, Unmapped};
+pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_RATE, Unmapped, tick_time};
 pub use learned::{Learned, Match, SavedDevice};
 pub use name::{BlockName, EndpointName, Name, NameError, ProductInstanceId};
 pub use table::{BindPolicy, DeviceEvent, DeviceTable, OsChange, OsDevice, Resolved};

@@ -11,10 +11,10 @@
 
 use crate::common;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_session::{Edge, ModTarget, OutPort, ParamRef, Root, RouteSpec, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
 
 use common::probe::Pulse;

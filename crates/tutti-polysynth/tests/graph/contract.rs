@@ -14,15 +14,17 @@ use tutti_graph::EventKind;
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
 use tutti_ump::MidiChannel;
-use tutti_units::Samples;
+use tutti_units::{Normalized, Samples};
 
 fn synth_row() -> Row {
     let note = midi::note_on(MidiChannel::FIRST, 69, 0xFFFF);
     Row::new(
         "PolySynth",
         || {
-            Box::new(PolySynth::new(SynthConfig {
-                oscillator: OscillatorType::Square { pulse_width: 0.5 },
+            Box::new(PolySynth::<f32>::new(SynthConfig {
+                oscillator: OscillatorType::Square {
+                    pulse_width: Normalized::of(0.5),
+                },
                 envelope: Adsr {
                     attack: tutti_units::Seconds(0.0),
                     ..Default::default()

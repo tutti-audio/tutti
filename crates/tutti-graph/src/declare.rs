@@ -11,7 +11,9 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_types::{AtomicF64, Param, ParamCell};
+use atomic_float::AtomicF64;
+
+use tutti_rt::{Param, ParamCell};
 use tutti_units::{
     Amplitude, Azimuth, Balance, BitDepth, CentsSpan, CompressionRatio, Db, Depth, Drive,
     Elevation, Feedback, Gain, HoldFactor, Hz, Mix, Pan, Q, Resonance, SampleSpan, Seconds,
@@ -147,7 +149,7 @@ impl Cells<bool> for &Arc<AtomicF64> {
     }
 
     fn cell(&self) -> Option<ParamCell> {
-        Some(ParamCell::F64(Arc::clone(self)))
+        Some(ParamCell::from(Arc::clone(self)))
     }
 }
 
@@ -289,7 +291,7 @@ pub fn input<'a, F: Float>(
 /// ```
 /// use tutti_graph::declare_params;
 /// use tutti_units::{Hz, Q};
-/// use tutti_types::Param;
+/// use tutti_rt::Param;
 ///
 /// struct Filter {
 ///     cutoff: Param<Hz>,
@@ -314,7 +316,7 @@ pub fn input<'a, F: Float>(
 /// ```compile_fail
 /// use tutti_graph::declare_params;
 /// use tutti_units::{Db, Hz};
-/// use tutti_types::Param;
+/// use tutti_rt::Param;
 ///
 /// struct Filter {
 ///     cutoff: Param<Db>,
@@ -435,7 +437,8 @@ pub fn input<'a, F: Float>(
 /// ```
 /// use tutti_graph::{declare_params, Cx, Io, Node, Prepare, Shape, Status};
 /// use tutti_units::{Amplitude, Hz, Real, UnitParam};
-/// use tutti_types::{ChannelLayout, Param};
+/// use tutti_rt::Param;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// struct Tone {
 ///     level: Param<Amplitude>,

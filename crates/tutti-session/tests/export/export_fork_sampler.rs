@@ -17,6 +17,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::Root;
 
+use tutti_buffers::ChannelLayout;
 use tutti_export::Produced;
 use tutti_graph::NodeKey;
 use tutti_sampler::testing::settle;
@@ -30,7 +31,6 @@ use tutti_session::{
     Stem,
 };
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;

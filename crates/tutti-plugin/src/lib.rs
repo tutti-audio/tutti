@@ -21,7 +21,7 @@
 //! subprocess against a real `.vst3` / `.clap` on disk.
 //!
 //! ```rust,no_run
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_units::SampleRate;
 //! use tutti_graph::{Editor, Prepare};
 //! use tutti_plugin::catalog::{

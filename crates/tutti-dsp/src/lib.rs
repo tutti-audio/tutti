@@ -4,7 +4,7 @@
 //!
 //! Each algorithm is laid out as its controls (what a caller sets), its model (a [`System`],
 //! and an [`Lti`] where it is linear and time-invariant) and its bank (the per-frame math
-//! over buffers views). Values are `tutti_types` units.
+//! over buffers views). Values are `tutti_units` units.
 //!
 //! ## Catalogue
 //!
@@ -103,7 +103,7 @@
 //!   sample-and-hold every [`hold_frames`] frames, then [`quantize`] to a bit depth;
 //!   [`DcBlocker`], a first-order high-pass with its pole from [`dc_pole`].
 //! - **Control and small kernels**: [`Glide`], a value that moves to its target in steps
-//!   (with [`Lerp`] and [`Steps`]); [`Smoother`], a one-pole smoother; [`COEFF_INTERVAL`] and
+//!   (with [`Lerp`] and [`Steps`]); [`smooth_toward`], the one-pole step; [`COEFF_INTERVAL`] and
 //!   [`LANES`], the solve interval and channel grouping of the filter banks; [`lerp`],
 //!   [`cubic_hermite`] and [`parabolic_peak`]; [`rms`]; [`Xorshift32`], a seeded noise
 //!   source.
@@ -224,7 +224,7 @@ pub use reverb::network::{
 pub use reverb::plate::bank::{PlateBank, PlateGlides};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};
 pub use ring_mod::{RingModControls, RingModulator};
-pub use smoother::Smoother;
+pub use smoother::smooth_toward;
 pub use sos::{
     Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley,
     MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, Sos, SosBank, SosCoefficients, SosError, Tilt,

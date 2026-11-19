@@ -8,6 +8,7 @@ use std::time::Instant;
 use tutti_modulation::Declarations;
 use tutti_rt::MainThreadMarker;
 
+use super::parts::MidiPart;
 use crate::clock::sealed::Running;
 use crate::format::Sealed;
 use crate::{AppKey, Clock, Committed, Session, SessionEvent};
@@ -45,9 +46,13 @@ pub enum Phase {
     /// onto the graph, staging what is new for the commit. A refusal is
     /// `SessionEvent::Modulation`.
     Modulation,
-    /// The output policy staged since the last update, applied
-    /// ([`Session::policy`]); then the commit, iff the graph was edited since
-    /// the last one, and the compensation of the plan it sent (or of a re-prepare's resumed plan)
+    /// The values written since the last update that wait for it published
+    /// (the tempo map, the meter, the loop region, a clip's events, a
+    /// harmony node's changes), together and in a fixed order: the tempo,
+    /// the meter, the loop, then each node's by key. Then the output policy
+    /// staged since the last update, applied ([`Session::policy`]); then the
+    /// commit, iff the graph was edited since the last one, and the
+    /// compensation of the plan it sent (or of a re-prepare's resumed plan)
     /// published.
     Commit,
     /// Modulation's re-apply and resyncs: while a
@@ -65,8 +70,8 @@ pub enum Phase {
     /// Frees, here, what the audio thread let go of in every cell the
     /// session publishes to (`Publisher::reclaim`): the project meter and the
     /// plugin slots following it, the graph's param ranges, the modulation
-    /// lanes' programs, the session's clips, the hardware input's MPE
-    /// request and port set. A value a block still held when it was
+    /// lanes' programs, the session's clips, the session's MPE mode, the
+    /// hardware input's Profile zones and port set. A value a block still held when it was
     /// replaced stays retired until a scan after the block ends; a cell
     /// that is not published again gets that scan here. A lock and a
     /// length check per cell when nothing is retired. It also closes the
@@ -200,11 +205,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.graph.report_crossfades(out);
                 // What an export left behind (a render's fork, an edit
                 // that never ran) drops here, on the main thread.
-                #[cfg(feature = "export")]
-                {
-                    self.bounce.drop_leftovers();
-                    self.bounce.watch_stall(cx.now);
-                }
+                self.bounce.collect(cx.now);
                 // A re-prepare resumed in this collect sent the resumed plan, whose
                 // shapes are new (a lookahead is a time, so a rate change moves
                 // latencies): its figures are published at the commit.
@@ -213,16 +214,16 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // Closes a plugin that was dropped off its own thread (a pool thread at an
                 // export's end, say): it handed the close to this session's collector, which
                 // runs on the main thread (`PhaseCx::main` is `Some` only there).
-                #[cfg(feature = "plugin")]
-                if let Some(main) = cx.main {
-                    self.main_work.run(main);
-                }
+                self.plugins.run_main_work(cx.main);
                 self.graph.report_event_losses(out);
                 self.output.report_silenced(out);
                 // Last: the landings this update's own stages queued.
                 self.jobs.report_landed(out);
             }
             Phase::Commit => {
+                // First: the plan this phase sends and the blocks after it
+                // read the values this update publishes.
+                self.values.publish_pending();
                 self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
                 self.graph.report_commit(out);
@@ -244,65 +245,35 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.graph.report_rewired(out);
             }
             Phase::MidiOut => {
-                #[cfg(feature = "midi")]
-                {
-                    if self.midi_state.midi_out_phase(&mut self.graph, cx.now) {
-                        self.commit();
-                    }
+                if self.midi.out_phase(&mut self.graph, cx.now) {
+                    self.commit();
                 }
             }
             Phase::Plugins => C::Float::serve_plugins(self, cx, out),
             Phase::RenderMode => C::Float::announce_render_mode(self),
             Phase::Poll => {
-                // Who the session is on the wire is in force, and the devices
-                // and the tempo the session follows are read, before the
-                // stream's own poll.
-                // Who the session is on the wire is in force before the devices
-                // are stepped.
-                #[cfg(feature = "midi-hardware")]
-                self.apply_midi_policy();
-                // A device that connected is heard from the plan that holds
-                // its inlet: committed now, not an update later.
-                #[cfg(feature = "midi-hardware")]
-                if self.midi_state.midi_input_phase(
-                    self.midi_io.as_mut(),
-                    self.midi.as_ref(),
-                    &mut self.graph,
-                    cx.now,
-                    out,
-                ) {
+                // Who the session is on the wire is in force and the devices are
+                // read before the stream's own poll; a device that connected is
+                // heard from the plan that holds its inlet: committed now, not an
+                // update later.
+                if self.midi.poll_devices(&mut self.graph, cx.now, out) {
                     self.commit();
                 }
                 // The tempo the session follows is read after the devices:
                 // what a device sent in the block before is in its tap.
-                #[cfg(feature = "midi")]
-                {
-                    let follow = crate::midi_follow::FollowCx {
-                        settings: self.transport.settings(),
-                        meter: self.transport.settings().project_meter(),
-                        playhead: self.playhead(),
-                    };
-                    let tempo_edited = self.midi_state.follow_phase(&follow, &mut self.graph, out);
-                    let (actions, clock_edited) =
-                        self.midi_state.clock_phase(&follow, &mut self.graph, out);
-                    let (machine_actions, machine_edited) =
-                        self.midi_state.machine_phase(&follow, &mut self.graph, out);
-                    if tempo_edited || clock_edited || machine_edited {
-                        self.commit();
-                    }
-                    let refused: u64 = actions
-                        .into_iter()
-                        .chain(machine_actions)
-                        .map(|action| u64::from(!self.send_clock_action(action)))
-                        .sum();
-                    if refused > 0 {
-                        out.push(crate::MidiReport::ClockCommandsRefused(refused).into());
-                    }
+                let followed = self.midi.poll_follow(
+                    &self.transport,
+                    self.transport.handle.playhead(),
+                    &mut self.graph,
+                    out,
+                );
+                if followed.edited() {
+                    self.commit();
                 }
+                MidiPart::send_follow(followed, &self.transport.handle, out);
                 self.reports.drain_carried(out);
                 let lost = self.fault_poll(out);
-                #[cfg(feature = "device")]
-                self.listing_poll(cx.now, out);
+                self.devices.poll(cx.now, out);
                 Running::poll(&mut self.running, cx.now, lost, out);
             }
             Phase::Reclaim => {
@@ -316,11 +287,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.reclaim();
                 self.graph.drain_rt_log();
                 // What the main thread owns of the retired and the open.
-                #[cfg(feature = "plugin")]
-                if let Some(main) = cx.main {
-                    self.graph.graveyard.exhume(main);
-                    self.graph.graveyard.service(main);
-                }
+                self.plugins.service_retired(&mut self.graph, cx.main);
             }
         }
     }

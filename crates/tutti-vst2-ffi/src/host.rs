@@ -27,6 +27,7 @@ use crate::{
     editor::{KeyCode, Rect},
     interfaces,
     plugin::{self, Category, Info},
+    speaker::{ArrangementRead, SpeakerArrangement},
 };
 
 primitive_enum! {
@@ -2231,6 +2232,89 @@ impl PluginInstance {
                 0.0,
             );
         });
+    }
+
+    /// `effSetSpeakerArrangement`: proposes `input` and `output`, whether the plugin keeps
+    /// them. The input travels in `value` and the output in `ptr`, both as pointers to a
+    /// `VstSpeakerArrangement`. Legal only while the plugin is suspended, so it is
+    /// exclusive and answers `false` without a call once the plugin is resumed.
+    ///
+    /// `true` is the plugin's `1`; what it kept is [`speaker_arrangement`](Self::speaker_arrangement).
+    pub fn set_speaker_arrangement(
+        &mut self,
+        _main: MainThreadMarker,
+        input: &SpeakerArrangement,
+        output: &SpeakerArrangement,
+    ) -> bool {
+        if self.resumed {
+            return false;
+        }
+        let mut input = input.encode();
+        let mut output = output.encode();
+        self.exclusive(|| {
+            self.dispatch(
+                plugin::OpCode::SetSpeakerArrangement,
+                0,
+                input.as_mut_ptr() as isize,
+                output.as_mut_ptr().cast::<c_void>(),
+                0.0,
+            ) == 1
+        })
+    }
+
+    /// `effGetSpeakerArrangement`: the input and output arrangements the plugin holds.
+    ///
+    /// The host passes the addresses of two null `VstSpeakerArrangement` pointers and the
+    /// plugin points them at arrangements it owns; both are copied before the call's lock is
+    /// released, so neither outlives the plugin's storage. A suspended plugin is read
+    /// exclusively; a resumed one under the dispatcher lock alone, which excludes other
+    /// dispatches but not `process`.
+    ///
+    /// # Errors
+    ///
+    /// [`ArrangementRead::Unanswered`] when the plugin returns 0, and
+    /// [`ArrangementRead::Malformed`] when it returns 1 with a null pointer, or with a type,
+    /// speaker or channel count the format does not have.
+    pub fn speaker_arrangement(
+        &self,
+        _main: MainThreadMarker,
+    ) -> Result<(SpeakerArrangement, SpeakerArrangement), ArrangementRead> {
+        let mut input: *const c_void = ptr::null();
+        let mut output: *const c_void = ptr::null();
+        let read = || {
+            let answered = self.dispatch(
+                plugin::OpCode::GetSpeakerArrangement,
+                0,
+                ptr::addr_of_mut!(input) as isize,
+                ptr::addr_of_mut!(output).cast::<c_void>(),
+                0.0,
+            );
+            if answered != 1 {
+                return Err(ArrangementRead::Unanswered);
+            }
+            // SAFETY: effGetSpeakerArrangement has the plugin point each slot at a
+            // `VstSpeakerArrangement` it owns, readable for its channel count; `from_ptr`
+            // refuses a null, misaligned or over-wide one. The calling lock (see below)
+            // keeps every other dispatch, and for a suspended plugin the audio entries,
+            // from running meanwhile; the plugin's own threads are its to keep from
+            // rewriting an arrangement it has just reported.
+            let (input, output) = unsafe {
+                (
+                    SpeakerArrangement::from_ptr(input),
+                    SpeakerArrangement::from_ptr(output),
+                )
+            };
+            input.zip(output).ok_or(ArrangementRead::Malformed)
+        };
+        // Suspended: exclusive, so no render is in flight either. Resumed: only the
+        // dispatcher lock, which a read must not stall a render for, so the plugin keeps
+        // its arrangement stable while it is resumed (the SDK has it set only when
+        // suspended).
+        if self.resumed {
+            self.concurrent(read)
+        } else {
+            self.exclusive(read)
+        }
     }
 
     /// `effEditKeyDown` for `key`, to the open editor: whether the plugin used the key.
@@ -4714,5 +4798,121 @@ mod tests {
         }
         let (params, _main) = instance_over(fake_effect(dispatch));
         assert_eq!(params.get_parameter_name(0).len(), 200);
+    }
+
+    /// `effGetSpeakerArrangement` is pointer to pointer: the plugin points the two slots the
+    /// host passes at arrangements it owns, and the host reads what they point at. A plugin
+    /// returning 0 has none to report, and one returning 1 with a null slot or an unnamed
+    /// speaker has written something that is not an arrangement.
+    #[test]
+    fn a_speaker_arrangement_is_read_through_the_slots_the_plugin_points() {
+        use crate::speaker::{ArrangementRead, Speaker, SpeakerArrangement};
+        use std::sync::atomic::{AtomicIsize, Ordering};
+        static STEREO: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
+        static MODE: AtomicIsize = AtomicIsize::new(0);
+
+        extern "C" fn dispatch(
+            _: *mut AEffect,
+            opcode: i32,
+            _: i32,
+            value: isize,
+            ptr: *mut c_void,
+            _: f32,
+        ) -> isize {
+            if opcode != plugin::OpCode::GetSpeakerArrangement as i32 {
+                return 0;
+            }
+            let stereo = STEREO.get().expect("set before the call");
+            match MODE.load(Ordering::SeqCst) {
+                0 => 0,
+                // SAFETY: the host passes the addresses of two pointer slots (the property
+                // under test).
+                1 => unsafe {
+                    *(value as *mut *const u32) = stereo.as_ptr();
+                    *ptr.cast::<*const u32>() = stereo.as_ptr();
+                    1
+                },
+                _ => 1,
+            }
+        }
+        STEREO
+            .set(SpeakerArrangement::new(vec![Speaker::Left, Speaker::Right]).encode())
+            .unwrap();
+        let (instance, main) = instance_over(fake_effect(dispatch));
+
+        MODE.store(0, Ordering::SeqCst);
+        assert_eq!(
+            instance.speaker_arrangement(main),
+            Err(ArrangementRead::Unanswered)
+        );
+
+        MODE.store(1, Ordering::SeqCst);
+        let stereo = SpeakerArrangement::new(vec![Speaker::Left, Speaker::Right]);
+        assert_eq!(
+            instance.speaker_arrangement(main),
+            Ok((stereo.clone(), stereo))
+        );
+
+        MODE.store(2, Ordering::SeqCst);
+        assert_eq!(
+            instance.speaker_arrangement(main),
+            Err(ArrangementRead::Malformed)
+        );
+    }
+
+    /// A proposal reaches the plugin as the two `VstSpeakerArrangement`s in `value` and `ptr`
+    /// while it is suspended, and is not sent once it is resumed.
+    #[test]
+    fn a_speaker_arrangement_is_proposed_only_while_suspended() {
+        use crate::speaker::{Speaker, SpeakerArrangement};
+        use std::sync::Mutex;
+        static SEEN: Mutex<Vec<(Vec<u32>, Vec<u32>)>> = Mutex::new(Vec::new());
+
+        extern "C" fn dispatch(
+            _: *mut AEffect,
+            opcode: i32,
+            _: i32,
+            value: isize,
+            ptr: *mut c_void,
+            _: f32,
+        ) -> isize {
+            if opcode != plugin::OpCode::SetSpeakerArrangement as i32 {
+                return 0;
+            }
+            // SAFETY: the host passes two arrangements of the channels it proposes (the
+            // property under test): mono and stereo here, 2 + 28 and 2 + 56 words.
+            let (input, output) = unsafe {
+                (
+                    std::slice::from_raw_parts(value as *const u32, 2 + 28),
+                    std::slice::from_raw_parts(ptr as *const u32, 2 + 56),
+                )
+            };
+            SEEN.lock().unwrap().push((input.to_vec(), output.to_vec()));
+            1
+        }
+        let mono = SpeakerArrangement::new(vec![Speaker::Mono]);
+        let stereo = SpeakerArrangement::new(vec![Speaker::Left, Speaker::Right]);
+        let (mut instance, main) = instance_over(fake_effect(dispatch));
+
+        assert!(instance.set_speaker_arrangement(main, &mono, &stereo));
+        let seen = std::mem::take(&mut *SEEN.lock().unwrap());
+        assert_eq!(seen, vec![(mono.encode(), stereo.encode())]);
+        assert_eq!(
+            (seen[0].0[0], seen[0].0[1]),
+            (0, 1),
+            "kSpeakerArrMono, one channel"
+        );
+        assert_eq!(
+            (seen[0].1[0], seen[0].1[1]),
+            (1, 2),
+            "kSpeakerArrStereo, two channels"
+        );
+
+        instance.resume(main);
+        assert!(!instance.set_speaker_arrangement(main, &mono, &stereo));
+        assert!(
+            SEEN.lock().unwrap().is_empty(),
+            "a resumed plugin is sent nothing"
+        );
     }
 }

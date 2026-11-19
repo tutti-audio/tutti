@@ -28,12 +28,12 @@
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use crate::support::render_to_file;
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Const;
 use tutti_transport::FrozenClock;
-use tutti_types::ChannelLayout;
 use tutti_units::Seconds;
 
 const SR: f64 = 44_100.0;
@@ -100,7 +100,7 @@ fn lsb(bit_depth: Pcm) -> f32 {
         Pcm::Float32 | Pcm::Float64 => 1.0 / 8_388_608.0,
         // No `_` arm: `Pcm` is deliberately not `#[non_exhaustive]`, so a
         // fourth depth must fail to compile here rather than pick up a silent
-        // default. See the enum's docs in tutti-types::pcm.
+        // default. See the enum's docs.
     }
 }
 

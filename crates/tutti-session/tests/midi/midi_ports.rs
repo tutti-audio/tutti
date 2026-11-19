@@ -1043,3 +1043,43 @@ fn an_output_port_counts_the_events_its_tap_had_no_room_for() {
     let _ = s.update();
     assert!(out.losses().lost > 0, "{:?}", out.losses());
 }
+
+/// How many Registered Controller messages the synth heard.
+fn registered(seen: &Seen) -> usize {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, e)| matches!(e.decode(), Ok(Message::Midi2(_, Voice2::Registered { .. }))))
+        .count()
+}
+
+/// **The session's MPE mode reaches a port's ingest node**: with no mode the
+/// routed synth hears no bend range; once `session.mpe()` is written with a
+/// lower zone of three members, the ingest sends the zone's seven default
+/// bend ranges (the master's, and a channel's and a per-note one on each
+/// member) from the next block, and writing the same mode again sends none.
+#[test]
+fn the_sessions_mpe_mode_reaches_a_ports_ingest() {
+    let (mut s, fake) = session();
+    plug(&fake, 1, "Keys", PortDirection::Input);
+    let _ = s.update();
+    let (synth, seen) = tap(&mut s);
+    s.midi()
+        .route(MidiRouteRule::any_channel().to(synth))
+        .expect("routes");
+    let keys = device(&mut s, "Keys");
+    declare(&mut s, &[("keys", &keys)], &[]);
+    let _ = s.update();
+    roll(&s, 1_024);
+    assert_eq!(registered(&seen), 0);
+
+    s.set(s.mpe().to(midi::lower_zone(3))).unwrap();
+    let _ = s.update();
+    blocks(&s, 2);
+    assert_eq!(registered(&seen), 7);
+
+    s.set(s.mpe().to(midi::lower_zone(3))).unwrap();
+    let _ = s.update();
+    blocks(&s, 2);
+    assert_eq!(registered(&seen), 7, "the same mode: nothing sent");
+}

@@ -13,13 +13,12 @@ use super::flow::{PE_TIMEOUT, PeMessageKind, PeSignal, PeTerminator};
 use super::header::{PeHeader, PeHeaderError, PeSubscription};
 use crate::Muid;
 use crate::TimeoutWait;
+use crate::deadline::Pending;
 
 tutti_units::ranged! {
     /// The most messages received at once from all peers: 1 to 128, the Request IDs
     /// there are (M2-103 §5.3). A message past it is refused.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     StreamLimit(u8), NotAStreamLimit, "a stream limit (1 to 128)", |raw| raw >= 1 && raw <= 128
 }
 
@@ -32,8 +31,6 @@ tutti_units::ranged! {
     /// The most bytes buffered across all the messages being received, Header Data
     /// and Property Data together.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "usize", into = "usize"))]
     BufferLimit(usize), NotABufferLimit, "a buffer limit (at least 1)", |raw| raw >= 1
 }
 
@@ -182,7 +179,7 @@ struct Stream {
     declared: ChunkTotal,
     /// The number of the last chunk taken.
     last: ChunkNo,
-    deadline: Instant,
+    wait: Pending,
     flow: PeFlowControl,
 }
 
@@ -239,7 +236,7 @@ impl PeReassembler {
     /// The instant the earliest message times out, or `None` when none is held.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Instant> {
-        self.streams.iter().map(|s| s.deadline).min()
+        Pending::earliest(self.streams.iter().map(|s| s.wait))
     }
 
     /// Takes a chunk that arrived at `now`.
@@ -279,7 +276,7 @@ impl PeReassembler {
     ) -> Result<PeStep, PeRefused> {
         let id = chunk.request_id();
         self.streams
-            .retain(|s| !(s.is(peer, kind, id) && s.deadline <= now));
+            .retain(|s| !(s.is(peer, kind, id) && s.wait.expired(now)));
         let at = self.streams.iter().position(|s| s.is(peer, kind, id));
         let refuse = |error, send| Err(PeRefused { error, send });
         let number = match chunk.position() {
@@ -372,7 +369,7 @@ impl PeReassembler {
             header_len: 0,
             declared: chunk.total(),
             last: ChunkNo::FIRST,
-            deadline: now + PE_TIMEOUT,
+            wait: Pending::after(now, PE_TIMEOUT),
             flow: if reply_flow == PeFlowControl::On {
                 PeFlowControl::On
             } else {
@@ -445,7 +442,7 @@ impl PeReassembler {
         stream.header_len += chunk.header().len();
         stream.data.extend_from_slice(chunk.data());
         stream.last = number;
-        stream.deadline = now + PE_TIMEOUT;
+        stream.wait.restart(now, PE_TIMEOUT);
         let acknowledge =
             stream.flow == PeFlowControl::On && (!last || stream.kind == PeMessageKind::GET_REPLY);
         let send = acknowledge.then_some(PeSignal::SendNext {
@@ -477,7 +474,7 @@ impl PeReassembler {
     pub fn expire(&mut self, now: Instant) -> Vec<PeExpired> {
         let mut expired = Vec::new();
         self.streams.retain(|s| {
-            let due = s.deadline <= now;
+            let due = s.wait.expired(now);
             if due {
                 expired.push(PeExpired {
                     peer: s.peer,
@@ -504,7 +501,7 @@ impl PeReassembler {
     ) -> bool {
         match self.find(peer, kind, request_id) {
             Some(stream) => {
-                wait.extend(&mut stream.deadline);
+                wait.extend(&mut stream.wait);
                 true
             }
             None => false,

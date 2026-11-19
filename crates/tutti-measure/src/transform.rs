@@ -514,7 +514,7 @@ pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch) -> Vec<S> {
         return Vec::new();
     }
 
-    let window = geometry.window_coefficients();
+    let window = geometry.window_coefficients::<f32>();
     let mut out = vec![0.0f32; out_len];
     let mut window_sum = vec![0.0f32; out_len];
     let mut frame_buf = vec![0.0f32; window_len];
@@ -541,7 +541,7 @@ pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch) -> Vec<S> {
 fn compute(samples: &[f32], geometry: StftGeometry, fft: &mut FftScratch) -> Stft {
     let frames = geometry.frames_for(Samples(samples.len()));
     let bins_per_frame = geometry.bins_per_frame();
-    let window = geometry.window_coefficients();
+    let window = geometry.window_coefficients::<f32>();
     let window_len = geometry.window().get();
 
     let mut bins = vec![Complex32::default(); frames.get() * bins_per_frame.get()];

@@ -4,10 +4,10 @@
 //! the glides); this file holds the kernel that aims it, the cells and how the graph reaches
 //! them.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Lerp, PlateBank, PlateControls, PlateGlides};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

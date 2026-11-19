@@ -2,14 +2,14 @@
 //! own topology (which port feeds which), not from a render.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_session::InPort;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_session::{GeneralMidi, NodeMode, OutPort, Root, Session};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples, Tail};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -22,7 +22,7 @@ fn offline_session() -> Session {
         .expect("an offline session builds")
 }
 
-fn unit() -> SoundFontUnit {
+fn unit() -> SoundFontUnit<f32> {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
     let mut file = std::fs::File::open(&path).expect("the test font is in the checkout");
     let font = Arc::new(SoundFont::from_reader(&mut file).expect("the test font parses"));

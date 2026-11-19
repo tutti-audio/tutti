@@ -34,7 +34,6 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 # Tutti fork of the `vst` crate: adds the host-side audioMaster callbacks
 # (get_sample_rate / size_window / io_changed / latency / process_level /
@@ -63,6 +62,10 @@ tempfile = "3"
 # the test the `ProcessCapture` type and the misbehaviour switches directly
 # instead of hand-mirroring them across the dlopen seam.
 tutti-vst2-test-plugin = { path = "../../testing/tutti-vst2-test-plugin" }
+# A VST2 file of two plugins, for the shell's enumeration and the choice of a sub-plugin.
+tutti-vst2-shell-plugin = { path = "../../testing/tutti-vst2-shell-plugin" }
+# The shell's ids and names.
+tutti-vst2-author = { path = "../../testing/tutti-vst2-author" }
 
 [package.metadata.docs.rs]
 all-features = true

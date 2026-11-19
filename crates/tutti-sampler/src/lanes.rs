@@ -28,7 +28,7 @@
 //! never enters.
 
 use tutti_buffers::Float;
-use tutti_types::MAX_CHANNELS;
+use tutti_buffers::MAX_CHANNELS;
 use tutti_units::{Amplitude, SamplePosition};
 
 /// Frames of scratch a node holds before any `prepare` (its constructor's
@@ -248,18 +248,17 @@ pub(crate) fn accumulate<F: Float>(dst: &mut [F], src: &[F]) {
     }
 }
 
-/// A gain as it multiplies audio: a NaN or infinite one is silence. Every
-/// place a voice's gain scales a sample reads it through this.
-#[inline]
-pub(crate) fn audible<F: Float>(gain: F) -> F {
-    if gain.is_finite() { gain } else { F::ZERO }
-}
-
 /// A voice's gain cell as the sample-domain scalar its block multiplies by:
-/// widened to `F`, and silence when it is NaN or infinite ([`audible`]).
+/// crossed once to `F`, and silence when it is NaN or infinite (checked in the
+/// cell's own width, before the crossing saturates it). Every place a voice's
+/// gain scales a sample reads it through this.
 #[inline]
 pub(crate) fn audible_gain<F: Float>(gain: Amplitude) -> F {
-    audible(F::from_f64(gain.get()))
+    if gain.get().is_finite() {
+        F::from_unit(gain)
+    } else {
+        F::ZERO
+    }
 }
 
 /// `lane[i] *= gain`: one voice gain over a lane.
@@ -275,7 +274,7 @@ mod tests {
     use super::*;
     use crate::VoiceWindow;
     use tutti_buffers::Interleaved;
-    use tutti_types::MaxBlock;
+    use tutti_buffers::MaxBlock;
 
     /// [`BlockScratch`]'s bytes a frame that do not depend on the width: a
     /// position, the gather's index, fraction, flag and four tap lanes.

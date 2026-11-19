@@ -3,8 +3,8 @@
 use core::marker::PhantomData;
 
 use super::{Fold, FoldError};
+use crate::ChannelTopology;
 use crate::Float;
-use tutti_types::ChannelTopology;
 use tutti_units::Amplitude;
 
 /// The gains a fold applies where a speaker the destination lacks folds into
@@ -18,7 +18,7 @@ use tutti_units::Amplitude;
 /// ```
 /// use tutti_buffers::{Fold, FoldLevels};
 /// use tutti_units::Amplitude;
-/// use tutti_types::Bed;
+/// use tutti_buffers::Bed;
 ///
 /// let levels = FoldLevels {
 ///     centre: Amplitude(0.5),

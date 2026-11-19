@@ -2,21 +2,25 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
+use tutti_buffers::Float;
 use tutti_dsp::{
-    PanLaw, SOLVE_CEILING, SvfCoefficients, SvfControls, SvfModel, SvfType, pan_gains, svf_step,
+    Lanes, PanLaw, SOLVE_CEILING, SvfCoefficients, SvfControls, SvfModel, SvfType, pan_gains,
+    svf_step,
 };
 use tutti_sf2::{SamplePool, Side};
 use tutti_ump::ControlValue;
 use tutti_ump::{MidiChannel, NoteNumber, RegisteredPerNoteController};
-use tutti_units::{Db, Hz, Pan, Q, SampleRate, Semitones};
+use tutti_units::{
+    Amplitude, Cents, Db, Hz, Normalized, Pan, Q, SampleRate, Samples, Seconds, Semitones,
+};
 use tutti_voicing::{ChannelState, Glide, NoteControl};
 
-/// The longest an exclusive class's quick release takes, in seconds, to fall
+/// The longest an exclusive class's quick release takes, to fall
 /// 100 dB as every release time does (section 8.1.2, generator 38): the floor
 /// every release is given at its start, to avoid a pop. The spec says "rapidly"
 /// and no more (SF2 2.04 section 8.1.2, generator 57); this is tutti's figure,
 /// the shortest release a voice can have.
-pub(crate) const QUICK_RELEASE: f32 = 0.01;
+pub(crate) const QUICK_RELEASE: Seconds = Seconds(0.01);
 
 use crate::channel::Channel;
 use crate::lfo::Lfo;
@@ -28,15 +32,15 @@ use crate::render::Render;
 use crate::soundfont_math::SoundFontMath;
 use crate::volume_envelope::VolumeEnvelope;
 
-/// The voice's low-pass for a cutoff in hertz and a resonance as a linear peak
+/// The voice's low-pass for a cutoff and a resonance as a linear peak
 /// height above the DC gain (SF2 2.04 section 8.1.3, generators 8 and 9: the
 /// cutoff is the filter's corner and the Q is the height of the resonant peak
 /// in decibels, here already converted). `None` from [`SOLVE_CEILING`] of the
 /// rate up: the filter would do nothing there.
 ///
 /// The filter is the trapezoidal state-variable low-pass, `1 / (s^2 + s / q + 1)`
-/// under the prewarped bilinear map, designed in `f64` and narrowed once to the
-/// voice's `f32`. Its DC gain is 1 for every `q`. The prototype's peak height is
+/// under the prewarped bilinear map, designed in `f64` and crossed once to the
+/// voice's float. Its DC gain is 1 for every `q`. The prototype's peak height is
 /// `P = q / sqrt(1 - 1 / (4 q^2))` for `q > 1 / sqrt(2)` (the maximum of
 /// `|H|^2 = 1 / ((1 - x^2)^2 + x^2 / q^2)` over `x`, at `x^2 = 1 - 1 / (2 q^2)`),
 /// and the bilinear map moves the peak along the frequency axis and not its
@@ -45,19 +49,21 @@ use crate::volume_envelope::VolumeEnvelope;
 /// up to [`SvfControls::MAX_Q`] (a resonance of about 60 dB; the model clamps
 /// `q` there and a larger resonance peaks at that cap), and a resonance of 1
 /// (0 dB) is `q = 1 / sqrt(2)`, Butterworth.
-fn low_pass(cutoff: f32, resonance: f32, rate: SampleRate) -> Option<SvfCoefficients<f32>> {
+fn low_pass<F: Float + Lanes>(
+    cutoff: Hz,
+    resonance: Amplitude,
+    rate: SampleRate,
+) -> Option<SvfCoefficients<F>> {
     low_pass_model(cutoff, resonance, rate).map(|model| SvfCoefficients::from(&model))
 }
 
-/// The model [`low_pass`] narrows: the `f64` design of the voice's low-pass.
-fn low_pass_model(cutoff: f32, resonance: f32, rate: SampleRate) -> Option<SvfModel> {
-    // The voice's cutoff is an `f32` state; the design takes it as `Hz`.
-    let cutoff = Hz(f64::from(cutoff));
+/// The model [`low_pass`] crosses: the `f64` design of the voice's low-pass.
+fn low_pass_model(cutoff: Hz, resonance: Amplitude, rate: SampleRate) -> Option<SvfModel> {
     if cutoff.get() >= SOLVE_CEILING * rate.get() {
         return None;
     }
     // A resonance below 0 dB asks for no peak.
-    let peak = f64::from(resonance).max(1.0);
+    let peak = resonance.get().max(1.0);
     let q = libm::sqrt(0.5 * (peak * peak + peak * libm::sqrt(peak * peak - 1.0)));
     let controls = SvfControls {
         ty: SvfType::LowPass,
@@ -77,37 +83,41 @@ enum VoiceState {
 /// What the note's per-note controllers have set.
 #[derive(Debug, Clone, Copy)]
 struct NoteControls {
-    /// The sounding pitch in semitones (the told pitch with the per-note bend
+    /// The sounding pitch (the told pitch with the per-note bend
     /// in it, `tutti-voicing`'s), if one was set; else the key's.
-    pitch: Option<f32>,
-    /// Per-note volume, `0..=1`.
-    volume: f32,
-    /// Per-note pan in the channel's `-50..=50`, if one was set.
-    pan: Option<f32>,
+    pitch: Option<Semitones>,
+    /// Per-note volume.
+    volume: Amplitude,
+    /// Per-note pan, if one was set.
+    pan: Option<Pan>,
 }
 
 impl NoteControls {
     const DEFAULT: Self = Self {
         pitch: None,
-        volume: 1_f32,
+        volume: Amplitude::UNITY,
         pan: None,
     };
 }
 
-/// A glide in progress: the pitch is `offset` semitones above the note's own
-/// and falls to it in a straight line over `frames` frames, a constant rate in
-/// cents (General MIDI 2 section 3.3.3 gives the portamento rate in cents a
+/// A glide in progress: the pitch is `offset` above the note's own and falls
+/// to it in a straight line over `frames` frames, a constant rate in cents
+/// (General MIDI 2 section 3.3.3 gives the portamento rate in cents a
 /// millisecond).
 #[derive(Debug, Clone, Copy)]
 struct GlideRun {
-    offset: f32,
-    frames: f32,
-    done: f32,
+    offset: Semitones,
+    frames: Samples,
+    done: Samples,
 }
 
+/// A voice: its envelopes, LFOs, oscillator and filter, rendering a chunk at a time in the
+/// graph's float `F`. Its controls are designed in `f64` quantities, at its start and, for the filter, per chunk
+/// while the cutoff moves; what reaches `F` is the chunk of audio, the filter's coefficients and state, and the gains
+/// the mix ramps between.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub(crate) struct Voice {
+pub(crate) struct Voice<F: Float + Lanes> {
     vol_env: VolumeEnvelope,
     mod_env: ModulationEnvelope,
 
@@ -116,26 +126,27 @@ pub(crate) struct Voice {
 
     oscillator: Oscillator,
     rate: SampleRate,
-    /// The low-pass, or `None` while the cutoff is too near Nyquist to filter.
-    low_pass: Option<SvfCoefficients<f32>>,
+    /// The low-pass, designed at the start and per chunk while the cutoff moves, or `None`
+    /// while the cutoff is too near Nyquist to filter.
+    low_pass: Option<SvfCoefficients<F>>,
     /// The low-pass's integrator state `[ic1eq, ic2eq]`.
-    history: [f32; 2],
+    history: [F; 2],
 
-    block: Vec<f32>,
+    block: Vec<F>,
 
     // A sudden change in the mix gain will cause pop noise.
     // To avoid this, we save the mix gain of the previous block,
     // and smooth out the gain if the gap between the current and previous gain is too large.
     // The actual smoothing process is done in the WriteBlock method of the Synthesizer class.
-    pub(crate) previous_mix_gain_left: f32,
-    pub(crate) previous_mix_gain_right: f32,
-    pub(crate) current_mix_gain_left: f32,
-    pub(crate) current_mix_gain_right: f32,
+    pub(crate) previous_mix_gain_left: F,
+    pub(crate) previous_mix_gain_right: F,
+    pub(crate) current_mix_gain_left: F,
+    pub(crate) current_mix_gain_right: F,
 
-    pub(crate) previous_reverb_send: f32,
-    pub(crate) previous_chorus_send: f32,
-    pub(crate) current_reverb_send: f32,
-    pub(crate) current_chorus_send: f32,
+    pub(crate) previous_reverb_send: F,
+    pub(crate) previous_chorus_send: F,
+    pub(crate) current_reverb_send: F,
+    pub(crate) current_chorus_send: F,
 
     channel: i32,
     key: i32,
@@ -144,47 +155,49 @@ pub(crate) struct Voice {
     /// move or a Portamento Control last took it (the zone's forced key, which
     /// `key` follows, is not it).
     played: i32,
-    /// Semitones the voice has been moved from the key it started on.
-    transpose: f32,
+    /// How far the voice has been moved from the key it started on.
+    transpose: Semitones,
     glide: Option<GlideRun>,
 
     // The note's per-note controllers (M2-104 section 7.4); the defaults of
     // `NoteControls::DEFAULT` until a message sets one.
     note: NoteControls,
-    /// How far the key sounds from equal temperament, in semitones: the note
-    /// logic's tuning of it (`Command::Start`'s `tune`).
-    tune: f32,
+    /// How far the key sounds from equal temperament: the note logic's tuning
+    /// of it (`Command::Start`'s `tune`).
+    tune: Semitones,
 
-    note_gain: f32,
+    note_gain: Amplitude,
 
-    cutoff: f32,
-    resonance: f32,
+    cutoff: Hz,
+    /// The resonance as the linear height of the filter's peak.
+    resonance: Amplitude,
 
-    vib_lfo_to_pitch: f32,
-    mod_lfo_to_pitch: f32,
-    mod_env_to_pitch: f32,
+    vib_lfo_to_pitch: Semitones,
+    mod_lfo_to_pitch: Semitones,
+    mod_env_to_pitch: Semitones,
 
-    mod_lfo_to_cutoff: i32,
-    mod_env_to_cutoff: i32,
+    mod_lfo_to_cutoff: Cents,
+    mod_env_to_cutoff: Cents,
     dynamic_cutoff: bool,
 
-    mod_lfo_to_volume: f32,
+    mod_lfo_to_volume: Db,
     dynamic_volume: bool,
 
-    instrument_pan: f32,
-    instrument_reverb: f32,
-    instrument_chorus: f32,
+    instrument_pan: Pan,
+    /// The zone's reverb and chorus sends, as fractions of full level.
+    instrument_reverb: Amplitude,
+    instrument_chorus: Amplitude,
 
     // Some instruments require fast cutoff change, which can cause pop noise.
     // This is used to smooth out the cutoff frequency.
-    smoothed_cutoff: f32,
+    smoothed_cutoff: Hz,
 
     voice_state: VoiceState,
     /// Time elapsed in samples, so a voice's first block takes its gains whole.
     voice_length: usize,
 }
 
-impl Voice {
+impl<F: Float + Lanes> Voice<F> {
     pub(crate) fn new(settings: &Render) -> Self {
         Self {
             vol_env: VolumeEnvelope::new(settings),
@@ -194,39 +207,39 @@ impl Voice {
             oscillator: Oscillator::new(settings),
             rate: settings.rate(),
             low_pass: None,
-            history: [0_f32; 2],
-            block: vec![0_f32; settings.block_len()],
-            previous_mix_gain_left: 0_f32,
-            previous_mix_gain_right: 0_f32,
-            current_mix_gain_left: 0_f32,
-            current_mix_gain_right: 0_f32,
-            previous_reverb_send: 0_f32,
-            previous_chorus_send: 0_f32,
-            current_reverb_send: 0_f32,
-            current_chorus_send: 0_f32,
+            history: [F::ZERO; 2],
+            block: vec![F::ZERO; settings.block_len()],
+            previous_mix_gain_left: F::ZERO,
+            previous_mix_gain_right: F::ZERO,
+            current_mix_gain_left: F::ZERO,
+            current_mix_gain_right: F::ZERO,
+            previous_reverb_send: F::ZERO,
+            previous_chorus_send: F::ZERO,
+            current_reverb_send: F::ZERO,
+            current_chorus_send: F::ZERO,
             channel: 0,
             key: 0,
             velocity: 0,
             played: 0,
-            transpose: 0_f32,
+            transpose: Semitones(0.0),
             glide: None,
             note: NoteControls::DEFAULT,
-            tune: 0_f32,
-            note_gain: 0_f32,
-            cutoff: 0_f32,
-            resonance: 0_f32,
-            vib_lfo_to_pitch: 0_f32,
-            mod_lfo_to_pitch: 0_f32,
-            mod_env_to_pitch: 0_f32,
-            mod_lfo_to_cutoff: 0,
-            mod_env_to_cutoff: 0,
+            tune: Semitones(0.0),
+            note_gain: Amplitude::SILENT,
+            cutoff: Hz(0.0),
+            resonance: Amplitude::SILENT,
+            vib_lfo_to_pitch: Semitones(0.0),
+            mod_lfo_to_pitch: Semitones(0.0),
+            mod_env_to_pitch: Semitones(0.0),
+            mod_lfo_to_cutoff: Cents(0.0),
+            mod_env_to_cutoff: Cents(0.0),
             dynamic_cutoff: false,
-            mod_lfo_to_volume: 0_f32,
+            mod_lfo_to_volume: Db::UNITY,
             dynamic_volume: false,
-            instrument_pan: 0_f32,
-            instrument_reverb: 0_f32,
-            instrument_chorus: 0_f32,
-            smoothed_cutoff: 0_f32,
+            instrument_pan: Pan(0.0),
+            instrument_reverb: Amplitude::SILENT,
+            instrument_chorus: Amplitude::SILENT,
+            smoothed_cutoff: Hz(0.0),
             voice_state: VoiceState::Playing,
             voice_length: 0,
         }
@@ -234,7 +247,7 @@ impl Voice {
 
     pub(crate) fn start(&mut self, region: &RegionPair, channel: i32, key: i32, velocity: i32) {
         self.played = key;
-        self.transpose = 0_f32;
+        self.transpose = Semitones(0.0);
         self.glide = None;
         // Generators 46 and 47 (SF2 2.04 section 8.1.2) force the key and the
         // velocity of the zone: everything keyed on either reads the forced one.
@@ -256,48 +269,48 @@ impl Voice {
             // the concave curve, read as 40 log10(v / 127) dB; at v = 1 this gives 84 dB, not
             // the curve's 127/128 of 960 cB), less generator 48's attenuation whole (8.1.2),
             // less half of generator 9's resonance, the DC cut the filter's Q brings (8.1.2).
-            let sample_attenuation = region.initial_attenuation();
-            let filter_attenuation = 0.5_f32 * region.initial_filter_q();
-            let decibels = 2_f32 * SoundFontMath::linear_to_decibels(velocity as f32 / 127_f32)
-                - sample_attenuation
-                - filter_attenuation;
-            self.note_gain = SoundFontMath::decibels_to_linear(decibels);
+            let curve = Db::from_amplitude(Amplitude(f64::from(velocity) / 127.0));
+            let filter_attenuation = Db(0.5 * region.initial_filter_q().get());
+            self.note_gain =
+                (curve + curve - region.initial_attenuation() - filter_attenuation).to_amplitude();
         } else {
-            self.note_gain = 0_f32;
+            self.note_gain = Amplitude::SILENT;
         }
 
         self.cutoff = region.initial_filter_cutoff_frequency();
-        self.resonance = SoundFontMath::decibels_to_linear(region.initial_filter_q());
+        self.resonance = region.initial_filter_q().to_amplitude();
 
-        self.vib_lfo_to_pitch = 0.01_f32 * region.vibrato_lfo_to_pitch() as f32;
-        self.mod_lfo_to_pitch = 0.01_f32 * region.modulation_lfo_to_pitch() as f32;
-        self.mod_env_to_pitch = 0.01_f32 * region.modulation_envelope_to_pitch() as f32;
+        // A generator's cents as the semitones it moves the pitch by.
+        self.vib_lfo_to_pitch = region.vibrato_lfo_to_pitch().into();
+        self.mod_lfo_to_pitch = region.modulation_lfo_to_pitch().into();
+        self.mod_env_to_pitch = region.modulation_envelope_to_pitch().into();
 
         self.mod_lfo_to_cutoff = region.modulation_lfo_to_filter_cutoff_frequency();
         self.mod_env_to_cutoff = region.modulation_envelope_to_filter_cutoff_frequency();
-        self.dynamic_cutoff = self.mod_lfo_to_cutoff != 0 || self.mod_env_to_cutoff != 0;
+        self.dynamic_cutoff =
+            self.mod_lfo_to_cutoff.get() != 0.0 || self.mod_env_to_cutoff.get() != 0.0;
 
         self.mod_lfo_to_volume = region.modulation_lfo_to_volume();
-        self.dynamic_volume = self.mod_lfo_to_volume > 0.05_f32;
+        self.dynamic_volume = self.mod_lfo_to_volume > Db(0.05);
 
         // A sample of a stereo pair sounds on its own side (section 7.10); any
         // other takes the zone's pan.
         self.instrument_pan = match region.instrument.sample_side() {
-            Some(Side::Left) => -50_f32,
-            Some(Side::Right) => 50_f32,
-            None => SoundFontMath::clamp(region.pan(), -50_f32, 50_f32),
+            Some(Side::Left) => Pan(-1.0),
+            Some(Side::Right) => Pan(1.0),
+            None => region.pan(),
         };
         // Tenths of a percent to a fraction of full level (section 8.1.2,
         // generators 15 and 16).
-        self.instrument_reverb = 0.001_f32 * region.reverb_effects_send() as f32;
-        self.instrument_chorus = 0.001_f32 * region.chorus_effects_send() as f32;
+        self.instrument_reverb = Amplitude(0.001 * f64::from(region.reverb_effects_send()));
+        self.instrument_chorus = Amplitude(0.001 * f64::from(region.chorus_effects_send()));
 
         RegionEx::start_volume_envelope(&mut self.vol_env, region, key, velocity);
         RegionEx::start_modulation_envelope(&mut self.mod_env, region, key, velocity);
         RegionEx::start_vibrato(&mut self.vib_lfo, region, key, velocity);
         RegionEx::start_modulation(&mut self.mod_lfo, region, key, velocity);
         RegionEx::start_oscillator(&mut self.oscillator, region);
-        self.history = [0_f32; 2];
+        self.history = [F::ZERO; 2];
         self.low_pass = low_pass(self.cutoff, self.resonance, self.rate);
 
         self.smoothed_cutoff = self.cutoff;
@@ -315,42 +328,41 @@ impl Voice {
     /// Sets how far the voice's key sounds from equal temperament, with no new
     /// attack. A glide in progress keeps the offset it left with.
     pub(crate) fn tune(&mut self, tune: Semitones) {
-        // The voice's pitch state is `f32`.
-        self.tune = tune.get() as f32;
+        self.tune = tune;
     }
 
     /// Moves the voice to `key` with no new attack (a legato move, or the voice
     /// a Portamento Control names). With a glide it jumps to the glide's key and
     /// glides to the new one; without, it is at the new key at once.
     pub(crate) fn retarget(&mut self, key: NoteNumber, tune: Semitones, glide: Option<Glide>) {
-        self.tune = tune.get() as f32;
+        self.tune = tune;
         let key = i32::from(key.get());
-        self.transpose += (key - self.played) as f32;
+        self.transpose += Semitones(f64::from(key - self.played));
         self.played = key;
         self.glide = glide.map(|g| self.glide_run(g));
     }
 
     fn glide_run(&self, glide: Glide) -> GlideRun {
         GlideRun {
-            offset: (i32::from(glide.from.get()) - self.played) as f32
-                + glide.from_tune.get() as f32
+            offset: Semitones(f64::from(i32::from(glide.from.get()) - self.played))
+                + glide.from_tune
                 - self.tune,
-            frames: (glide.time.get() * self.rate.get()) as f32,
-            done: 0_f32,
+            frames: glide.time.to_samples(self.rate),
+            done: Samples(0),
         }
     }
 
     /// The glide's offset now, and its advance by `frames`.
-    fn step_glide(&mut self, frames: usize) -> f32 {
+    fn step_glide(&mut self, frames: usize) -> Semitones {
         let Some(run) = &mut self.glide else {
-            return 0_f32;
+            return Semitones(0.0);
         };
-        let offset = if run.frames > 0_f32 {
-            run.offset * (1_f32 - run.done / run.frames)
+        let offset = if run.frames.get() > 0 {
+            run.offset * (1.0 - Normalized::progress(run.done, run.frames).get())
         } else {
-            0_f32
+            Semitones(0.0)
         };
-        run.done += frames as f32;
+        run.done = Samples(run.done.get() + frames);
         if run.done >= run.frames {
             self.glide = None;
         }
@@ -369,15 +381,12 @@ impl Voice {
     /// no generator in a SoundFont voice to drive and is dropped.
     pub(crate) fn control(&mut self, control: NoteControl) {
         match control {
-            NoteControl::Pitch(pitch) => self.note.pitch = Some(pitch.note_number() as f32),
+            NoteControl::Pitch(pitch) => self.note.pitch = Some(Semitones(pitch.note_number())),
             NoteControl::Registered(RegisteredPerNoteController::Volume, value) => {
-                // The voice's gains are `f32` DSP state: narrowed once here.
-                self.note.volume = ControlValue::new(value).normalized().get() as f32;
+                self.note.volume = Amplitude(ControlValue::new(value).normalized().get());
             }
             NoteControl::Registered(RegisteredPerNoteController::Pan, value) => {
-                // The pan is `f32` DSP state: narrowed once here.
-                self.note.pan =
-                    Some((100.0 * ControlValue::new(value).normalized().get() - 50.0) as f32);
+                self.note.pan = Some(Pan(2.0 * ControlValue::new(value).normalized().get() - 1.0));
             }
             NoteControl::Pressure(_)
             | NoteControl::Registered(..)
@@ -415,7 +424,7 @@ impl Voice {
     }
 
     /// The volume envelope's level now: what the core steals by.
-    pub(crate) fn level(&self) -> f32 {
+    pub(crate) fn level(&self) -> Amplitude {
         self.vol_env.value()
     }
 
@@ -441,18 +450,20 @@ impl Voice {
         self.vib_lfo.process();
         self.mod_lfo.process();
 
-        // The wheel's depth in cents (the Modulation Depth Range of RPN 5 over its
-        // position) and the generator's, as semitones.
-        let vib_pitch_change = (0.01_f32 * state.modulation_depth().get() as f32
-            + self.vib_lfo_to_pitch)
-            * self.vib_lfo.value();
-        let mod_pitch_change = self.mod_lfo_to_pitch * self.mod_lfo.value()
-            + self.mod_env_to_pitch * self.mod_env.value();
+        // The wheel's depth (the Modulation Depth Range of RPN 5 over its
+        // position) and the generator's.
+        let vib_pitch_change = (Semitones::from(state.modulation_depth()) + self.vib_lfo_to_pitch)
+            * self.vib_lfo.value().get();
+        let mod_pitch_change = self.mod_lfo_to_pitch * self.mod_lfo.value().get()
+            + self.mod_env_to_pitch * self.mod_env.value().get();
         // The core's pitch for the channel: the wheel over its sensitivity and
         // the Channel Tuning (RP-022).
-        let channel_pitch_change = bends[self.channel as usize].get() as f32;
+        let channel_pitch_change = bends[self.channel as usize];
         let glide = self.step_glide(self.block.len());
-        let pitch = self.note.pitch.unwrap_or(self.key as f32 + self.tune)
+        let pitch = self
+            .note
+            .pitch
+            .unwrap_or(Semitones(f64::from(self.key)) + self.tune)
             + self.transpose
             + glide
             + vib_pitch_change
@@ -463,15 +474,14 @@ impl Voice {
         }
 
         if self.dynamic_cutoff {
-            let cents = self.mod_lfo_to_cutoff as f32 * self.mod_lfo.value()
-                + self.mod_env_to_cutoff as f32 * self.mod_env.value();
-            let factor = SoundFontMath::cents_to_multiplying_factor(cents);
-            let new_cutoff = factor * self.cutoff;
+            let cents = self.mod_lfo_to_cutoff * self.mod_lfo.value().get()
+                + self.mod_env_to_cutoff * self.mod_env.value().get();
+            let new_cutoff = self.cutoff * cents.to_pitch_ratio();
 
             // The cutoff change is limited within x0.5 and x2 to reduce pop noise.
-            let lower_limit = 0.5_f32 * self.smoothed_cutoff;
-            let upper_limit = 2_f32 * self.smoothed_cutoff;
-            self.smoothed_cutoff = SoundFontMath::clamp(new_cutoff, lower_limit, upper_limit);
+            let lower_limit = self.smoothed_cutoff * 0.5;
+            let upper_limit = self.smoothed_cutoff * 2.0;
+            self.smoothed_cutoff = new_cutoff.clamp(lower_limit, upper_limit);
 
             self.low_pass = low_pass(self.smoothed_cutoff, self.resonance, self.rate);
         }
@@ -485,7 +495,7 @@ impl Voice {
             // section takes over without a step.
             None => {
                 if let Some(&last) = self.block.last() {
-                    self.history = [0_f32, last];
+                    self.history = [F::ZERO, last];
                 }
             }
         }
@@ -496,45 +506,29 @@ impl Voice {
         self.previous_chorus_send = self.current_chorus_send;
 
         // According to the GM spec, the following value should be squared.
-        let ve = state.volume() * state.expression();
+        let ve = f64::from(state.volume()) * f64::from(state.expression());
         let channel_gain = ve * ve;
 
         // A per-note Volume is the channel's law (the GM square) applied to
         // the one note.
+        let note_volume = self.note.volume.get();
         let mut mix_gain = self.note_gain
-            * channel_gain
-            * self.note.volume
-            * self.note.volume
-            * self.vol_env.value();
+            * (channel_gain * note_volume * note_volume * self.vol_env.value().get());
         if self.dynamic_volume {
-            let decibels = self.mod_lfo_to_volume * self.mod_lfo.value();
-            mix_gain *= SoundFontMath::decibels_to_linear(decibels);
+            let level = Db(self.mod_lfo_to_volume.get() * self.mod_lfo.value().get());
+            mix_gain *= level.to_amplitude().get();
         }
 
-        // RP-036's pan, in the percent the zone's pan adds to: the channel's or the
-        // note's, plus the zone's, over the 50 that is hard right.
-        let pan = self
-            .note
-            .pan
-            .map_or_else(|| 50.0 * state.pan().get(), f64::from);
-        let (left, right) = pan_gains(
-            Pan((pan + f64::from(self.instrument_pan)) / 50.0),
-            PanLaw::Rp036,
-        );
-        // The voice's mix gains are `f32`: the pan gains narrow into them.
-        self.current_mix_gain_left = mix_gain * left.get() as f32;
-        self.current_mix_gain_right = mix_gain * right.get() as f32;
+        // RP-036's pan: the channel's or the note's, plus the zone's.
+        let pan = self.note.pan.unwrap_or_else(|| state.pan());
+        let (left, right) = pan_gains(Pan(pan.get() + self.instrument_pan.get()), PanLaw::Rp036);
+        self.current_mix_gain_left = F::from_unit(mix_gain * left.get());
+        self.current_mix_gain_right = F::from_unit(mix_gain * right.get());
 
-        self.current_reverb_send = SoundFontMath::clamp(
-            channel_info.reverb_send() + self.instrument_reverb,
-            0_f32,
-            1_f32,
-        );
-        self.current_chorus_send = SoundFontMath::clamp(
-            channel_info.chorus_send() + self.instrument_chorus,
-            0_f32,
-            1_f32,
-        );
+        self.current_reverb_send =
+            F::from_unit(send(channel_info.reverb_send(), self.instrument_reverb));
+        self.current_chorus_send =
+            F::from_unit(send(channel_info.chorus_send(), self.instrument_chorus));
 
         if self.voice_length == 0 {
             self.previous_mix_gain_left = self.current_mix_gain_left;
@@ -548,26 +542,32 @@ impl Voice {
         true
     }
 
-    pub(crate) fn block(&self) -> &[f32] {
+    pub(crate) fn block(&self) -> &[F] {
         &self.block
     }
+}
+
+/// A send: the channel's level and the zone's, summed and limited to the generator's
+/// range (section 8.1.3, 0 to 1000 tenths of a percent).
+fn send(channel: Amplitude, instrument: Amplitude) -> Amplitude {
+    Amplitude(channel.get() + instrument.get()).clamp(Amplitude::SILENT, Amplitude::UNITY)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tutti_dsp::Complex64;
-    use tutti_units::Amplitude;
-
     const RATE: SampleRate = SampleRate::SR_44K1;
-    const CUTOFF: f32 = 500.0;
+    const CUTOFF: Hz = Hz(500.0);
+    /// SF2's lowest filter cutoff, 1500 absolute cents (generator 8): about 20 Hz.
+    const FLOOR: Hz = Hz(20.0);
 
     /// The steady-state gain of the voice's low-pass at `hz`, measured by
     /// running a sine through the section the voice runs.
-    fn gain(resonance: f32, hz: f32) -> f64 {
-        let section = low_pass(CUTOFF, resonance, RATE).expect("below Nyquist");
+    fn gain(resonance: Amplitude, hz: f64) -> f64 {
+        let section = low_pass::<f32>(CUTOFF, resonance, RATE).expect("below Nyquist");
         let mut state = [0_f32; 2];
-        let w = core::f64::consts::TAU * f64::from(hz) / RATE.get();
+        let w = core::f64::consts::TAU * hz / RATE.get();
         let mut peak = 0.0f64;
         for n in 0..8_000 {
             let x = (w * f64::from(n)).sin() as f32;
@@ -584,7 +584,7 @@ mod tests {
     /// quality `q`, independent of the code under test.
     fn closed_form(q: f64, hz: f64) -> f64 {
         let s = (core::f64::consts::PI * hz / RATE.get()).tan()
-            / (core::f64::consts::PI * f64::from(CUTOFF) / RATE.get()).tan();
+            / (core::f64::consts::PI * CUTOFF.get() / RATE.get()).tan();
         1.0 / ((1.0 - s * s).powi(2) + (s / q).powi(2)).sqrt()
     }
 
@@ -609,8 +609,8 @@ mod tests {
     /// a 2-pole low-pass whose gain at DC is 0 dB whatever the Q.
     #[test]
     fn the_low_pass_has_unity_gain_at_dc_whatever_the_resonance() {
-        for db in [0.0f32, 6.0, 12.0, 24.0] {
-            let g = gain(SoundFontMath::decibels_to_linear(db), 10.0);
+        for db in [0.0, 6.0, 12.0, 24.0] {
+            let g = gain(Db(db).to_amplitude(), 10.0);
             assert!((g - 1.0).abs() < 0.01, "{db} dB: {g}");
         }
     }
@@ -627,21 +627,21 @@ mod tests {
     /// Spec: sf2.synth.filter.resonance.peak, sf2.gen.initialFilterQ
     #[test]
     fn the_gain_at_the_cutoff_is_q_and_the_peak_is_the_spec_peak_height() {
-        let g = (core::f64::consts::PI * f64::from(CUTOFF) / RATE.get()).tan();
-        for db in [0.0f32, 6.0, 12.0, 24.0] {
-            let resonance = SoundFontMath::decibels_to_linear(db);
-            let want = f64::from(resonance);
+        let g = (core::f64::consts::PI * CUTOFF.get() / RATE.get()).tan();
+        for db in [0.0, 6.0, 12.0, 24.0] {
+            let resonance = Db(db).to_amplitude();
+            let want = resonance.get();
             let q = q_of(want);
             let sampling = 1.0 - (core::f64::consts::PI / 88.0).cos();
             let settling = (-g * 6_400.0 / (2.0 * q)).exp();
-            let at_cutoff = gain(resonance, CUTOFF);
+            let at_cutoff = gain(resonance, CUTOFF.get());
             assert!(
                 (at_cutoff / q - 1.0).abs() < sampling + settling,
                 "{db} dB: {at_cutoff} vs {q}"
             );
             let peak = (300..700)
                 .step_by(5)
-                .map(|hz| gain(resonance, hz as f32))
+                .map(|hz| gain(resonance, f64::from(hz)))
                 .fold(0.0f64, f64::max);
             let (f2, f0, dx) = (
                 8.0 - 4.0 / (q * q),
@@ -667,11 +667,11 @@ mod tests {
     /// Spec: sf2.synth.filter.shape, sf2.gen.initialFilterFc
     #[test]
     fn the_stopband_follows_the_closed_form_at_twelve_db_per_octave() {
-        let resonance = SoundFontMath::decibels_to_linear(6.0);
-        let q = q_of(f64::from(resonance));
-        for hz in [2_000.0f32, 4_000.0, 8_000.0] {
+        let resonance = Db(6.0).to_amplitude();
+        let q = q_of(resonance.get());
+        for hz in [2_000.0, 4_000.0, 8_000.0] {
             let got = gain(resonance, hz);
-            let want = closed_form(q, f64::from(hz));
+            let want = closed_form(q, hz);
             assert!((got / want - 1.0).abs() < 0.02, "{hz} Hz: {got} vs {want}");
         }
         let octave = Db::from_amplitude(Amplitude::new(
@@ -685,8 +685,9 @@ mod tests {
     /// Spec: sf2.synth.filter.bypass, sf2.gen.initialFilterFc
     #[test]
     fn a_cutoff_near_nyquist_is_no_filter() {
-        assert!(low_pass(0.4 * RATE.get() as f32, 1.0, RATE).is_some());
-        assert!(low_pass(0.5 * RATE.get() as f32, 1.0, RATE).is_none());
+        let none = Amplitude::UNITY;
+        assert!(low_pass::<f32>(Hz(0.4 * RATE.get()), none, RATE).is_some());
+        assert!(low_pass::<f32>(Hz(0.5 * RATE.get()), none, RATE).is_none());
     }
 
     /// `H(e^jw)` of the trapezoidal section with coefficients `c`, from its state
@@ -741,8 +742,8 @@ mod tests {
 
     /// The frames the section needs to forget its start to `eps`: the slow
     /// envelope is `exp(-g n / (2 q))`, so `(2 q / g) ln(1 / eps)`.
-    fn settle(q: f64, cutoff: f32, rate: SampleRate, eps: f64) -> usize {
-        let g = (core::f64::consts::PI * f64::from(cutoff) / rate.get()).tan();
+    fn settle(q: f64, cutoff: Hz, rate: SampleRate, eps: f64) -> usize {
+        let g = (core::f64::consts::PI * cutoff.get() / rate.get()).tan();
         (2.0 * q / g * (1.0 / eps).ln()).ceil() as usize
     }
 
@@ -765,11 +766,11 @@ mod tests {
         let x = 0.3_f32;
         let a = f64::from(x);
         for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
-            for db in [0.0f32, 12.0] {
-                let resonance = SoundFontMath::decibels_to_linear(db);
-                let c32 = low_pass(20.0, resonance, rate).expect("below Nyquist");
-                let q = q_of(f64::from(resonance));
-                let frames = settle(q, 20.0, rate, 1e-13);
+            for db in [0.0, 12.0] {
+                let resonance = Db(db).to_amplitude();
+                let c32 = low_pass::<f32>(FLOOR, resonance, rate).expect("below Nyquist");
+                let q = q_of(resonance.get());
+                let frames = settle(q, FLOOR, rate, 1e-13);
                 let norm = error_norm(&widened(&c32), frames);
                 let bound = a * u * (5.0 * norm + 1.0);
                 let mut state = [0_f32; 2];
@@ -807,25 +808,25 @@ mod tests {
     #[test]
     fn the_f32_low_pass_at_the_20_hz_floor_has_its_analytic_magnitude_at_the_cutoff() {
         let u = f64::from(f32::EPSILON) / 2.0;
-        let hz = 20.0;
+        let hz = FLOOR.get();
         for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
             assert_eq!(rate.get() % hz, 0.0, "the window is whole periods");
             let period = (rate.get() / hz) as usize;
-            for db in [0.0f32, 12.0] {
-                let resonance = SoundFontMath::decibels_to_linear(db);
-                let model = low_pass_model(20.0, resonance, rate).expect("below Nyquist");
+            for db in [0.0, 12.0] {
+                let resonance = Db(db).to_amplitude();
+                let model = low_pass_model(FLOOR, resonance, rate).expect("below Nyquist");
                 let c64 = SvfCoefficients::<f64>::from(&model);
                 let c32 = SvfCoefficients::<f32>::from(&model);
                 let w = core::f64::consts::TAU * hz / rate.get();
                 let (h64, h32) = (response(&c64, w), response(&widened(&c32), w));
-                let q = q_of(f64::from(resonance));
-                let g = (core::f64::consts::PI * 20.0 / rate.get()).tan();
+                let q = q_of(resonance.get());
+                let g = (core::f64::consts::PI * FLOOR.get() / rate.get()).tan();
                 let narrowing = u / (g * (g + 1.0 / q)) + 6.0 * u;
                 assert!(
                     (h32 / h64 - 1.0).abs() <= narrowing,
                     "{rate:?} {db} dB: narrowing moved |H| from {h64} to {h32}, bound {narrowing:e}"
                 );
-                let frames = settle(q, 20.0, rate, 1e-13);
+                let frames = settle(q, FLOOR, rate, 1e-13);
                 let norm = error_norm(&widened(&c32), frames);
                 let bound = u * (5.0 * norm + 1.0);
                 let mut state = [0_f32; 2];
@@ -849,5 +850,98 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A font whose one instrument zone has `release` timecents of volume-envelope release.
+    fn font_with_release(release: i16) -> tutti_sf2::SoundFont {
+        use tutti_fixtures::sf2::{Inst, Preset, bytes, generator};
+        let file = bytes(
+            &[Preset {
+                name: "p",
+                bank: 0,
+                program: 0,
+                zones: vec![(vec![], 0)],
+            }],
+            &[Inst {
+                name: "i",
+                zones: vec![vec![(generator::RELEASE_VOL_ENV, release)]],
+            }],
+        );
+        tutti_sf2::SoundFont::from_reader(&mut std::io::Cursor::new(file))
+            .expect("the built SoundFont parses")
+    }
+
+    /// The left mix gain of a voice at `rate` the `last`th chunk after its key-off over the
+    /// `first`th's, with the font's one zone struck at velocity 127 and run through its
+    /// attack to full level before the key-off.
+    fn gain_ratio_after_release<F: Float + Lanes>(
+        font: &tutti_sf2::SoundFont,
+        rate: SampleRate,
+        first: usize,
+        last: usize,
+    ) -> f64 {
+        let channels = vec![Channel::new(false); 16];
+        let states = [ChannelState::new(Semitones(2.0)); 16];
+        let bends = [Semitones(0.0); 16];
+        let preset = &font.presets()[0].regions()[0];
+        let instrument = &font.instruments()[preset.instrument_id()].regions()[0];
+        let mut voice = Voice::<F>::new(&Render::new(rate));
+        voice.start(&RegionPair::new(preset, instrument), 0, 60, 127);
+        let data = font.sample_pool();
+        let chunks = |voice: &mut Voice<F>, n: usize| {
+            for _ in 0..n {
+                assert!(voice.process(data, &channels, &states, &bends));
+            }
+        };
+        // The delay, attack, hold and decay at their default millisecond each are 96 chunks at
+        // 192 kHz.
+        chunks(&mut voice, 200);
+        voice.release();
+        chunks(&mut voice, first);
+        let g1: f64 = voice.current_mix_gain_left.into();
+        chunks(&mut voice, last - first);
+        let g2: f64 = voice.current_mix_gain_left.into();
+        g2 / g1
+    }
+
+    /// The longest volume-envelope release SF2 allows, 8000 timecents (`R = 2^(8000/1200)` s,
+    /// about 101.6 s), at the highest rate a voice runs at, 192 kHz: the mix gain 25 s into the
+    /// release over its first chunk's is `exp(-5 ln 10 dt / R)` (the release falls 100 dB, a
+    /// factor `10^-5` in amplitude, in `R`), whatever the float the voice mixes in. Returns the
+    /// relative deviation, asserted within `2 u + 1e-15`: each gain is an `f64` figure rounded
+    /// once to `F` (relative `u = eps / 2`), their quotient is taken in `f64`, and `1e-15`
+    /// covers the `f64` evaluation of the closed form (a time is a count over the rate, the
+    /// fall one `exp`).
+    ///
+    /// The envelope is a closed form of the time, so no float stalls it. A one-pole `e <- r e`
+    /// with `r = exp(-5 ln 10 / (R fs))` would: at `f32`, `1 - r = 5.9e-7` sits on a grid of
+    /// `2^-24 = 6e-8`, so the pole's exponent is wrong by up to 5%.
+    fn deviation_at_the_longest_release<F: Float + Lanes>() -> f64 {
+        let rate = SampleRate::SR_192K;
+        let release = 2f64.powf(8000.0 / 1200.0);
+        let (first, last) = (1, (25.0 * rate.get() / 8.0) as usize);
+        let seconds = (last - first) as f64 * 8.0 / rate.get();
+        let want = (-5.0 * 10f64.ln() * seconds / release).exp();
+        let got = gain_ratio_after_release::<F>(&font_with_release(8000), rate, first, last);
+        let deviation = (got / want - 1.0).abs();
+        let epsilon: f64 = F::EPSILON.into();
+        let bound = epsilon + 1e-15;
+        assert!(deviation <= bound, "deviation {deviation:e} over {bound:e}");
+        deviation
+    }
+
+    /// The `f32` voice at the longest release and the highest rate has its closed-form level
+    /// (see `deviation_at_the_longest_release`): the bound is `2 u + 1e-15 = 1.19e-7`.
+    /// Spec: sf2.synth.env.release-time, sf2.gen.releaseVolEnv
+    #[test]
+    fn an_f32_voice_has_the_closed_form_level_at_the_longest_release_and_highest_rate() {
+        deviation_at_the_longest_release::<f32>();
+    }
+
+    /// The `f64` voice at the same figure, within `2 u + 1e-15` for the `f64` `u`.
+    /// Spec: sf2.synth.env.release-time, sf2.gen.releaseVolEnv
+    #[test]
+    fn an_f64_voice_has_the_closed_form_level_at_the_longest_release_and_highest_rate() {
+        deviation_at_the_longest_release::<f64>();
     }
 }

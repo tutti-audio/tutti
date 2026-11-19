@@ -1,12 +1,12 @@
 //! Regression gate: tremolo, auto-pan and the ring modulator must not allocate per block,
 //! held and with their controls moved between blocks.
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
     AutoPanConfig, AutoPanNode, RingModConfig, RingModNode, TremoloConfig, TremoloNode,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, UnitParam};
 
 /// `node` alone through `BlockRig`: a signal on every channel, 16 warm-up blocks, then 2 000

@@ -20,7 +20,10 @@ pub fn ci_decode(data: &[u8]) {
             if let Decoded::Message(again) = again {
                 assert_eq!(again.encode(), bytes);
             }
-            let _ = message.packets(MidiGroup::FIRST).count();
+            assert!(
+                message.packets(MidiGroup::FIRST).is_ok(),
+                "{message:?} encoded a byte that is not 7-bit"
+            );
         }
         Decoded::Unread(unread) => {
             let _ = unread.nak(Muid::of(1));

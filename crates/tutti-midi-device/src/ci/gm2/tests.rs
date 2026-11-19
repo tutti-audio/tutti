@@ -1,5 +1,5 @@
 use tutti_fixtures::{RangeContract, check_range_contract};
-use tutti_ump::MidiChannel;
+use tutti_ump::{GroupSpan, MidiChannel};
 
 use super::super::testing::{channel, profile_table};
 use super::super::*;
@@ -57,8 +57,8 @@ fn a_channel_count_is_a_multiple_of_16_up_to_256() {
         get: Gm2ChannelCount::get,
         of: Some(Gm2ChannelCount::of),
     });
-    assert_eq!(Gm2ChannelCount::of(48).groups(), 3);
-    assert_eq!(Gm2ChannelCount::of(256).groups(), 16);
+    assert_eq!(Gm2ChannelCount::of(48).groups(), GroupSpan::of(3));
+    assert_eq!(Gm2ChannelCount::of(256).groups(), GroupSpan::of(16));
 }
 
 #[test]

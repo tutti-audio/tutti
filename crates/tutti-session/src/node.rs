@@ -4,9 +4,6 @@
 use tutti_buffers::Float;
 use tutti_graph::{ForkByClone, IntoNode, Node, NodeKey, ParamNode, ParamSet, Params, Unforkable};
 
-#[cfg(feature = "midi")]
-use std::sync::Arc;
-
 use crate::NodeSlots;
 
 /// A node that may enter a session's graph: it declares its own ports (event
@@ -303,7 +300,7 @@ impl<F: Float> SessionNode<F> for tutti_graph::EventInletNode {
 
 /// The metronome as a graph node: its settings are shared through the
 /// transport, no controls and no params.
-impl<F: Float> SessionNode<F> for tutti_nodes::ClickNode {
+impl<F: Float> SessionNode<F> for tutti_nodes::ClickNode<F> {
     fn reclaimer(_: &<Self as IntoNode<F>>::Controls) -> Reclaims {
         Reclaims::Nothing
     }
@@ -334,8 +331,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {
     fn slots(node: NodeKey, controls: &tutti_midi_runtime::MidiClipControls) -> NodeSlots {
         NodeSlots::of(
             crate::value::SlotId::ClipEvents(node),
-            Arc::new(crate::value::PublishedSlot(controls.clone()))
-                as crate::value::SlotCell<Arc<tutti_midi_runtime::ClipEvents>>,
+            crate::value::PublishedSlot::new(controls.clone()),
         )
     }
 
@@ -344,12 +340,12 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {
     }
 }
 
-/// The MPE transform: its `MpeTransformControls`, no params; the modes it
-/// replaced freed by its reclaimer.
+/// The MPE transform: its `MpeTransformControls` read its losses, no params;
+/// its mode is the session's cell, which the session sweeps.
 #[cfg(feature = "midi")]
 impl<F: Float> SessionNode<F> for tutti_midi_runtime::MpeTransformNode {
-    fn reclaimer(controls: &tutti_midi_runtime::MpeTransformControls) -> Reclaims {
-        Reclaims::of(controls)
+    fn reclaimer(_: &tutti_midi_runtime::MpeTransformControls) -> Reclaims {
+        Reclaims::Nothing
     }
 }
 
@@ -361,8 +357,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
     fn slots(node: NodeKey, controls: &tutti_midi_runtime::HarmonyControls) -> NodeSlots {
         NodeSlots::of(
             crate::value::SlotId::Harmony(node),
-            Arc::new(crate::value::PublishedSlot(controls.clone()))
-                as crate::value::SlotCell<Arc<tutti_midi_runtime::HarmonyChanges>>,
+            crate::value::PublishedSlot::new(controls.clone()),
         )
     }
 
@@ -371,7 +366,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
     }
 }
 
-/// The MIDI ingest: its `MidiIngestControls`, no params; the MPE modes
+/// The MIDI ingest: its `MidiIngestControls`, no params; the Profile zones
 /// it replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
 impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiIngestNode {
@@ -382,7 +377,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiIngestNode {
 
 /// The SoundFont player as a graph node.
 #[cfg(feature = "soundfont")]
-impl SessionNode for tutti_soundfont::SoundFontUnit {
+impl SessionNode for tutti_soundfont::SoundFontUnit<f32> {
     fn reclaimer(_: &()) -> Reclaims {
         Reclaims::Nothing
     }
@@ -396,13 +391,13 @@ param_session_node!(floats: VbapPannerNode, HrtfBinauralNode);
 // (master volume, unison detune and spread) as a `ParamSet`, so a param
 // write reaches it and a fork of it starts from what was set.
 #[cfg(feature = "synth")]
-param_session_node!(f32 => tutti_polysynth::PolySynth);
+param_session_node!(f32 => tutti_polysynth::PolySynth<f32>);
 
 /// A voice as a graph node: its params (the gain) addressed by its set, so a
 /// param write reaches the cell the node reads and a fork starts from the
 /// gain as set; the placements it replaced freed by its reclaimer.
 #[cfg(feature = "sampler")]
-impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {
+impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
@@ -419,7 +414,7 @@ impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {
 /// A pool as a graph node; its controls are its `VoicePoolHandle`, whose
 /// retired voices its reclaimer frees.
 #[cfg(feature = "sampler")]
-impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::VoicePool<F> {
+impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoicePool<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
@@ -431,7 +426,7 @@ impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::VoicePool<F> {
 
 /// A bare clip reader as a graph node, its gain addressed by its set.
 #[cfg(feature = "sampler")]
-impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::MemorySource<F> {
+impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySource<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
@@ -450,7 +445,7 @@ impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::MemorySource<F> {
 /// a streamed clip's stream) kept by its reclaimer for as long as the node is
 /// in the graph.
 #[cfg(feature = "sampler")]
-impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::Clip<F> {
+impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
@@ -467,7 +462,7 @@ impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::Clip<F> {
 /// A streamed voice as a graph node; its controls are its
 /// `DiskVoiceControls`.
 #[cfg(feature = "sampler")]
-impl<F: tutti_rt::RingFloat> SessionNode<F> for tutti_sampler::DiskVoice<F> {
+impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::DiskVoice<F> {
     fn bind_tempo(self, tempo: &tutti_transport::TempoReader) -> Self {
         self.with_tempo(tempo.clone())
     }
@@ -488,8 +483,8 @@ mod tests {
     }
 
     /// **Every engine node whose controls publish to it keeps a
-    /// reclaimer**: the clip, the MPE transform, the harmony track, the live
-    /// input, the pool and the voice (a `Clip`'s impl returns the same
+    /// reclaimer**: the clip, the harmony track, the live input, the pool and
+    /// the voice (a `Clip`'s impl returns the same
     /// `VoiceNodeHandle` sweep as the voice's). What each one frees is pinned
     /// with a held loan in its own crate; the graph's sweep of them in
     /// `tests/wiring/graph.rs`.
@@ -498,9 +493,6 @@ mod tests {
         #[cfg(feature = "midi")]
         {
             assert!(keeps_one(tutti_midi_runtime::MidiClipNode::new([])));
-            assert!(keeps_one(tutti_midi_runtime::MpeTransformNode::new(
-                tutti_midi_protocol::MpeMode::Disabled
-            )));
             assert!(keeps_one(tutti_midi_runtime::HarmonyNode::new([])));
             assert!(keeps_one(tutti_midi_runtime::MidiIngestNode::new()));
         }

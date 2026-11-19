@@ -951,13 +951,6 @@ impl InputPort {
 }
 
 impl Ports {
-    /// Every input port ingests classic MPE in `mode` from the next block.
-    pub(crate) fn set_mpe_mode(&self, mode: tutti_midi_protocol::MpeMode) {
-        for port in &self.inputs {
-            port.controls.set_mpe_mode(mode);
-        }
-    }
-
     /// The ingest nodes of the ports, and of those going, for the routes to read.
     pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
         // A node going keeps its routes until it is taken out: its release goes
@@ -1507,7 +1500,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             .map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
         let node = tutti_midi_runtime::MidiIngestNode::new()
             .hearing(layout)
-            .with_mpe(*self.state.mpe())
+            .with_mpe(self.state.mpe())
             .following(&epochs);
         let (key, controls) = self.graph.add(node);
         let node = key.erase();

@@ -23,3 +23,28 @@ fn locate_is_the_target_time_code_and_then_deferred_play() {
     played.push(0x03);
     assert_eq!(MmcCommands::locate(target, true).as_bytes(), played);
 }
+
+/// **A message holds at most 48 data bytes of seven bits (RP-013 p.2)**: a byte
+/// past the 48th is `TooLong`, a byte above 127 is `NotSevenBit`, and neither
+/// changes the list.
+#[test]
+fn a_list_refuses_the_49th_byte_and_a_byte_above_127_by_name() {
+    let mut list = MmcCommands::new();
+    for _ in 0..MMC_MAX_DATA {
+        list.push(&MmcCommand::Play).unwrap();
+    }
+    assert_eq!(list.push(&MmcCommand::Play), Err(MmcBytesRefused::TooLong));
+    assert_eq!(list.as_bytes().len(), MMC_MAX_DATA);
+
+    let mut bytes = MmcBytes::EMPTY;
+    assert_eq!(
+        bytes.extend(&[0x01, 0x80]),
+        Err(MmcBytesRefused::NotSevenBit)
+    );
+    assert_eq!(bytes.len(), 0);
+    assert_eq!(
+        bytes.extend(&[0x7F; MMC_MAX_DATA + 1]),
+        Err(MmcBytesRefused::TooLong)
+    );
+    assert_eq!(bytes.extend(&[0x7F; MMC_MAX_DATA]), Ok(()));
+}

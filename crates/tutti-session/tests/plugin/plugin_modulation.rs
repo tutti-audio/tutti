@@ -18,7 +18,8 @@ use tutti_session::{PluginChange, PluginEvent};
 
 use std::time::{Duration, Instant};
 
-use support::{clap_probe, plugin_server};
+use support::clap_probe;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_modulation::Lfo;
 use tutti_plugin::PluginClient;
@@ -27,7 +28,6 @@ use tutti_session::{
     Crossfade, DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec,
     Session, SessionEvent,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Depth, Hz, SampleRate, Seconds};
@@ -49,7 +49,7 @@ fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
 /// A detached stereo session at 48 kHz, the probe's server in the
 /// environment.
 fn detached() -> DetachedSession {
-    set_env("TUTTI_PLUGIN_SERVER", plugin_server());
+    set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     // Jobs run inline, in the phase that submits them, and land in the next
     // update's `Collect`.
     Session::builder()
@@ -557,9 +557,9 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
 fn an_export_is_the_live_render_on_a_clap_gain() {
     use std::sync::Arc;
 
+    use tutti_buffers::ChannelLayout;
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
     use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-    use tutti_types::ChannelLayout;
     use tutti_units::{Beat, Bpm};
 
     const BLOCK: usize = 1_024;

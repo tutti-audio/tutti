@@ -20,13 +20,13 @@ use crate::types::{ParameterChanges, ParameterQueue, PluginInfo};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_buffers::FloatWidth;
+use tutti_buffers::MaxBlock;
 use tutti_clap_ffi::ActivateError;
 use tutti_plugin_types::{
     Control, Loaded, MIDI_STACK_BOUND, PluginError, Prepare, Refused, Request, taken,
 };
 use tutti_plugin_types::{MainThreadMarker, SampleRate};
 use tutti_rt::Publisher;
-use tutti_types::MaxBlock;
 use tutti_units::ParamId;
 
 /// The events the plugin's output list holds besides parameter values, in one

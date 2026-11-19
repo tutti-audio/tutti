@@ -4,7 +4,7 @@ use atomic_float::AtomicF64;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool as StdAtomicBool, Ordering};
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::SmpteFrameRate;
+use tutti_midi_protocol::{QuarterFramePiece, SmpteFrameRate};
 use tutti_music::LoopRange;
 use tutti_music::MeterChange;
 use tutti_transport::ProjectMeter;
@@ -507,7 +507,8 @@ fn the_mtc_grid_is_closed_form_and_never_early() {
     let quarters = of(&events, 0xF1);
     assert!(quarters.len() > 8_000, "{} quarter-frames", quarters.len());
     for (k, &at) in quarters.iter().enumerate() {
-        let time = (k as f64 * rate) / (SmpteFrameRate::from(fps).fps() * 4.0);
+        let (num, den) = SmpteFrameRate::from(fps).ratio();
+        let time = (k as f64 * rate * den as f64) / (num as f64 * 4.0);
         let at = at as f64;
         assert!(
             at >= time - 1e-6 && at - time < 1.0 + 1e-6,
@@ -634,8 +635,9 @@ fn mtc_loopback(rate: f64, fps: MtcRate, offset: f64) {
         last_count = Some(count);
         cycles += 1;
     }
+    let (num, den) = SmpteFrameRate::from(fps).ratio();
     assert!(
-        f64::from(cycles) > 5.0 * SmpteFrameRate::from(fps).fps() / 2.0 - 3.0,
+        f64::from(cycles) > 5.0 * (num as f64 / den as f64) / 2.0 - 3.0,
         "{cycles} cycles"
     );
     assert_eq!(
@@ -671,7 +673,8 @@ fn outbound_mtc_assembles_whole_valid_timecodes_across_a_minute() {
 fn timecode_rounds_to_the_nearest_even_frame() {
     let at = |pos: f64, fps| {
         let cycle = mtc_cycle(Seconds::new(pos / SampleRate::SR_48K.get()), fps);
-        let nibbles = std::array::from_fn(|p| ((cycle >> (4 * p)) & 0x0F) as u8);
+        let nibbles =
+            std::array::from_fn(|p| cycle.frame(QuarterFramePiece::masked(p as u8)).nibble.get());
         MtcTimeCode::from_nibbles(nibbles)
             .expect("a position the grid sends is one a clock reads")
             .timecode()

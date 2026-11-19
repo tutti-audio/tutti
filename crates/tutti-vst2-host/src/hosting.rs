@@ -5,7 +5,8 @@ use std::path::Path;
 
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{
-    InProcess, Load, LoadStage, MainThreadMarker, MainWorkHandle, Origin, PluginError, PluginResult,
+    Describe, InProcess, Load, LoadStage, MainThreadMarker, MainWorkHandle, Origin,
+    PluginDescriptor, PluginError, PluginResult,
 };
 
 use crate::control::plugin_error;
@@ -45,5 +46,12 @@ impl InProcess for Vst2Loaded {
 
     fn main_work(&self) -> &MainWorkHandle {
         &self.work
+    }
+}
+
+impl Describe for Vst2Loaded {
+    /// A load of the file (init runs, no resume), and of each sub-plugin of a shell.
+    fn describe(main: MainThreadMarker, path: &Path) -> PluginResult<Vec<PluginDescriptor>> {
+        Vst2Loaded::describe_all(main, path).map_err(plugin_error)
     }
 }

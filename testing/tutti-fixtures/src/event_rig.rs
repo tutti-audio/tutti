@@ -4,11 +4,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, Io, Node, NodeKey,
     OutPort, Prepare, Shape, Source, Status, TransportPosition,
 };
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_ump::Ump;
 use tutti_units::{Frame, Moment, SampleRate, Samples};
 

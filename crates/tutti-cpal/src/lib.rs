@@ -31,7 +31,7 @@
 //! both to a [`TuttiDriver`] with [`TuttiDriver::new`]:
 //!
 //! ```rust,no_run
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use std::sync::Arc;
 //! use tutti_graph::{OutPort, Source};
 //! use tutti_engine::Engine;

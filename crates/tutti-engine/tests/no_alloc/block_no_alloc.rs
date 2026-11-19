@@ -23,7 +23,9 @@
 //! width. `renders_something_to_gate` asserts that, so the gates cannot pass
 //! by rendering nothing.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MaxBlock;
 use tutti_engine::{AudioCallbackState, Engine, MAX_FRAMES, OutputBlock, process_audio};
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, MeterReader, Prepare, TapReader};
@@ -31,8 +33,6 @@ use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_transport::{MotionEvent, Transport};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{Bpm, Hz, Q, SampleRate, Samples};
 const SAMPLE_RATE: f64 = 48_000.0;
 

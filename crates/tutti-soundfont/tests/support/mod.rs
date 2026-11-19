@@ -26,7 +26,7 @@ pub const BLOCK: usize = 64;
 /// A [`SoundFontUnit`] driven by hand. Derefs to the unit, so its own
 /// methods (`note_on`, `program_change`, …) are reachable.
 pub struct Hand {
-    direct: Direct<SoundFontUnit>,
+    direct: Direct<SoundFontUnit<f32>>,
     queued: Vec<Event>,
     /// What the last block returned, and so what its outputs are: a node that
     /// returns `Silent` or `Idle` wrote nothing, and the executor zeroes.
@@ -37,13 +37,13 @@ pub struct Hand {
 
 impl Hand {
     /// `unit`, prepared at its own rate for [`BLOCK`]-frame blocks.
-    pub fn new(unit: SoundFontUnit) -> Self {
+    pub fn new(unit: SoundFontUnit<f32>) -> Self {
         let rate = unit.sample_rate();
         Self::at(unit, rate)
     }
 
     /// `unit`, prepared at `rate` for [`BLOCK`]-frame blocks.
-    pub fn at(unit: SoundFontUnit, rate: SampleRate) -> Self {
+    pub fn at(unit: SoundFontUnit<f32>, rate: SampleRate) -> Self {
         Self {
             direct: Direct::new(unit, rate, BLOCK),
             queued: Vec::with_capacity(HAND_EVENT_CAPACITY),
@@ -55,7 +55,7 @@ impl Hand {
 
     /// The unit, with the state it has, out of its harness: a new `Hand` over
     /// it prepares it again (at another rate, say).
-    pub fn into_unit(self) -> SoundFontUnit {
+    pub fn into_unit(self) -> SoundFontUnit<f32> {
         *self.direct.node
     }
 
@@ -131,14 +131,14 @@ impl Hand {
 }
 
 impl Deref for Hand {
-    type Target = SoundFontUnit;
-    fn deref(&self) -> &SoundFontUnit {
+    type Target = SoundFontUnit<f32>;
+    fn deref(&self) -> &SoundFontUnit<f32> {
         &self.direct.node
     }
 }
 
 impl DerefMut for Hand {
-    fn deref_mut(&mut self) -> &mut SoundFontUnit {
+    fn deref_mut(&mut self) -> &mut SoundFontUnit<f32> {
         &mut self.direct.node
     }
 }

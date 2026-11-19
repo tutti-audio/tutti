@@ -158,7 +158,7 @@ impl SyncOut {
     /// // An f32 graph's node; any float format takes the same.
     /// let (_node, controls): (Box<dyn tutti_graph::Node<f32>>, _) =
     ///     SyncOut::new(MidiGroup::masked(2))
-    ///         .messages(SyncMessages {
+    ///         .sending(SyncMessages {
     ///             clock: true,
     ///             mmc: Some(Recipient::AllCall),
     ///             rate: MtcRate::Fps30,
@@ -202,7 +202,7 @@ impl SyncOut {
 
     /// What the node sends from its first block.
     #[must_use]
-    pub fn messages(self, messages: SyncMessages) -> Self {
+    pub fn sending(self, messages: SyncMessages) -> Self {
         self.controls
             .messages
             .set(SyncSettings::new().messages(messages).messages);
@@ -339,7 +339,7 @@ impl<F: Float> ForkSource<F> for SyncFork {
         let meter = self.meter.clone();
         let node = SyncOut::new(self.group)
             .meter(move || (meter.0)())
-            .messages(self.controls.messages.get());
+            .sending(self.controls.messages.get());
         Ok(Forked::new(Box::new(node)))
     }
 }

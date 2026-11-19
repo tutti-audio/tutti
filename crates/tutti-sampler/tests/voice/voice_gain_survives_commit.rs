@@ -29,10 +29,11 @@ use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use std::sync::atomic::Ordering;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -41,7 +42,6 @@ use tutti_graph::{
 use tutti_modulation::{Amount, Clock, ControlProgram, Law, Layer, LayerId, Polarity};
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceNodeHandle, VoiceSource};
-use tutti_types::ChannelLayout;
 use tutti_units::{
     Amplitude, Beat, BeatsPerCycle, Bpm, Depth, Frame, PhaseIncrement, SampleRate, Samples,
     UnitParam,
@@ -261,12 +261,7 @@ fn a_lane_drives_the_voice_gain_around_its_cell() {
 /// Wires a control lane onto `at` (a `Volume` port) whose knob is `knob`
 /// and whose one layer adds a constant `depth` of a 0..1 range, and
 /// commits it.
-fn drive_volume(
-    ed: &mut tutti_graph::Editor,
-    at: ParamIn,
-    knob: tutti_types::ParamCell,
-    depth: f64,
-) {
+fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::ParamCell, depth: f64) {
     ed.set_param_range(at, ParamRange::new(0.0, 1.0))
         .expect("the node is placed");
     let range = ed

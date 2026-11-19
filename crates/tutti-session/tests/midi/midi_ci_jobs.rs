@@ -6,9 +6,9 @@
 use std::time::{Duration, Instant};
 
 use tutti_midi_device::{
-    ChannelControllers, CiHeader, CiMessage, DataControl, EndpointId, Nak, NoteData,
-    PEER_REPLY_TIMEOUT, PortDirection, ProfileChannels, ProfileState, ReportRequest, ReportScope,
-    SystemMessages,
+    ChannelControllers, CiHeader, CiMessage, DataControl, EndpointId, NakStatus, NoteData,
+    PEER_REPLY_TIMEOUT, PeTerminator, PortDirection, ProfileChannels, ProfileState, ReportRequest,
+    ReportScope, SystemMessages,
 };
 use tutti_midi_hardware::ChannelCount;
 use tutti_midi_hardware::test_support::FakeCounters;
@@ -170,7 +170,7 @@ fn a_switch_the_peer_naks_is_refused_with_its_nak() {
     let Some(Err(PeerError::Refused(nak))) = wire.result(&job) else {
         panic!("a refusal: {:?}", wire.landed);
     };
-    assert_eq!(nak.status_code, Nak::STATUS_PROFILE_NOT_SUPPORTED);
+    assert_eq!(nak.status, NakStatus::ProfileNotSupported);
     assert_eq!(wire.state(), ProfileState::Disabled);
 }
 
@@ -201,6 +201,7 @@ fn a_switch_whose_peer_leaves_before_it_answers_is_disconnected() {
         target: muid,
     })
     .packets(MidiGroup::FIRST)
+    .unwrap()
     {
         let now = wire.start + Duration::from_millis(wire.ms);
         assert!(
@@ -274,7 +275,7 @@ fn a_report_the_peer_naks_is_refused_with_its_nak() {
     let Some(Err(PeerError::Refused(nak))) = wire.result(&job) else {
         panic!("a refusal: {:?}", wire.landed);
     };
-    assert_eq!(nak.status_code, Nak::STATUS_TERMINATE);
+    assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Responder));
 }
 
 /// A report no one answers lands `TimedOut` after the peer reply timeout.
@@ -300,6 +301,7 @@ fn a_report_whose_peer_leaves_before_its_end_is_disconnected() {
         target: muid,
     })
     .packets(MidiGroup::FIRST)
+    .unwrap()
     {
         let now = wire.start + Duration::from_millis(wire.ms);
         assert!(

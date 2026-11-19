@@ -8,6 +8,7 @@ use super::dispatch::{Lane, Lanes, Owed, handle};
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioResponse, BridgeEvent, Command, Unsolicited};
 use super::payload_pool::PayloadPool;
+use crate::protocol::HostMessage;
 use crate::transport::control::{self as ipc, ControlStream};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -69,23 +70,21 @@ impl BridgeThread {
     }
 
     /// Asks the thread to stop, without waiting for it: from here on a failure
-    /// it reads (the server's end, say) is not declared a death.
+    /// it reads (the server's end, say) is not declared a death. The thread
+    /// says `Shutdown` to the server on its way out.
     pub fn request_stop(&self) {
         self.lifecycle.request_shutdown();
-        self.channels.push_command(Command::Shutdown);
         self.channels.wake();
     }
 
     /// Asks the thread to stop and joins it. Idempotent.
     pub fn shutdown(&mut self) {
         self.lifecycle.request_shutdown();
-        self.channels.push_command(Command::Shutdown);
-        // The queue may have been full, so the push may have rung nothing.
         self.channels.wake();
         if let Some(handle) = self.handle.take() {
-            // The thread ends on the `Shutdown` it was sent, so this waits for
-            // that and asks for nothing more. A panic in it is not reported:
-            // the bridge is gone either way.
+            // The thread ends on the stop flag, so this waits for that and asks
+            // for nothing more. A panic in it is not reported: the bridge is
+            // gone either way.
             let _ = handle.join();
         }
     }
@@ -187,12 +186,24 @@ fn run_thread(
         &listener,
         &mut lanes,
     );
+    say_shutdown(&lifecycle, &mut lanes);
     // The watcher ends with the pump, whether the bridge was shut down or the
     // connection failed: asked to stop, never waited for (it ends within one
     // slice, and drops its duplicate of the connection then).
     if let Some(news) = news {
         news.token().stop();
         news.detach();
+    }
+}
+
+/// Tells the server to shut down when the bridge was asked to stop and the
+/// server is still there to hear it: its plugin is then destroyed by the server
+/// itself, and the host's wait for the process's end (the guard's) is the
+/// grace. Best effort: a server that cannot be written to is gone or hung, and
+/// the guard kills it at the end of the grace.
+fn say_shutdown(lifecycle: &Lifecycle, lanes: &mut Lanes) {
+    if !lifecycle.is_running() && lifecycle.crash_cause().is_none() {
+        let _ = ipc::send(&mut lanes.control.stream, &HostMessage::Shutdown);
     }
 }
 

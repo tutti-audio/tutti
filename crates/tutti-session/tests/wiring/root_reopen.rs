@@ -6,12 +6,12 @@
 //! Every figure is analytic: the source is the constant frame (0.25, 0.75), so
 //! the stereo root carries 0.25 and 0.75 and a mono root keeps channel 0.
 
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_graph::ForkByClone;
 use tutti_graph::TapId;
 use tutti_nodes::testing::Const;
 use tutti_session::{NotReopened, OutPort, Reopened, Root, RootReader, Session, SessionEvent};
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 64;

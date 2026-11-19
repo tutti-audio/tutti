@@ -44,7 +44,7 @@
 //! implies `encode-wav` only, so `encode-vorbis` is the one path to C.
 //!
 //! This crate re-exports no other crate's type: a `Format` or `Pcm` is
-//! `tutti_codec`'s, a `ChannelLayout` is `tutti_types`', and the clocks (`RenderClock`,
+//! `tutti_codec`'s, a `ChannelLayout` is `tutti_buffers`', and the clocks (`RenderClock`,
 //! `FrozenClock`) are `tutti_transport`'s. Each figure it needs of one of them it asks
 //! that crate for: the frames a file can hold of the encoder, the length of a resampled
 //! stream of the resampler.
@@ -91,7 +91,7 @@
 //! use tutti_transport::FrozenClock;
 //! use tutti_units::{Hz, SampleRate, Samples, Seconds};
 //! use tutti_export::{render, render_one, BufferTarget, Control, FileTarget, Job, Output, Produced, RenderGraph, Setup};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 //! use tutti_graph::GraphBuilder;
 //! use tutti_nodes::testing::Osc;
@@ -225,10 +225,10 @@ pub(crate) mod render;
 pub use process::ChunkSize;
 
 use std::path::PathBuf;
+use tutti_buffers::ChannelLayout;
 use tutti_dsp::FftFloat;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, Samples};
 
 /// A file an export wrote, from a file [`Output`] of [`render()`]
@@ -280,12 +280,12 @@ pub struct Written {
     /// [`gain`](Self::gain) is still its peak normalization.
     pub measured: Option<Loudness>,
     /// Whether the file's channels were placed by the output
-    /// ([`FileTarget::topology`]: [`Stated`](tutti_types::Placement::Stated))
+    /// ([`FileTarget::topology`]: [`Stated`](tutti_buffers::Placement::Stated))
     /// or taken to be the engine's order for the width
-    /// ([`ChannelTopology::assumed`](tutti_types::ChannelTopology::assumed):
-    /// [`Assumed`](tutti_types::Placement::Assumed)). A `Lufs` normalize
+    /// ([`ChannelTopology::assumed`](tutti_buffers::ChannelTopology::assumed):
+    /// [`Assumed`](tutti_buffers::Placement::Assumed)). A `Lufs` normalize
     /// weighted the file's loudness by that placement.
-    pub placement: tutti_types::Placement,
+    pub placement: tutti_buffers::Placement,
 }
 
 /// The frame width an export config asks for, as the interleave stride.

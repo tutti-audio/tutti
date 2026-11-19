@@ -201,7 +201,11 @@ impl Dialect {
     }
 }
 
-/// The zones of the MPE Profiles `table` has enabled.
+/// The zones of the MPE Profiles `table` has enabled, strictly: a Profile that
+/// makes no zone is an error. A caller that must know the peer is
+/// understood (building a [`Dialect`]) wants this reading; a caller that
+/// follows what a peer enabled and skips the rest wants
+/// [`ProfileTable::mpe_zones`](crate::ProfileTable::mpe_zones).
 fn expression(table: &ProfileTable) -> Result<Expression, NoDialect> {
     let mut zones: Option<MpeZoneSet> = None;
     for address in table.addresses() {

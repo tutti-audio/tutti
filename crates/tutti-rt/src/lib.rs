@@ -4,11 +4,11 @@
 //!
 //! The structures the engine's audio callback touches, allocation-free on the
 //! audio path (`tests/no_alloc/rt_no_alloc.rs` gates it), and the home of the
-//! engine's lock-free and `unsafe` runtime structures. It names three tutti
-//! crates, `tutti-units` (the units a [`Gauge`] reads, and [`RequestBit`]'s range),
-//! `tutti-types` (the `ChannelLayout` a [`PosRing`] is written in)
-//! and `tutti-buffers` (the `Sample` formats [`PosRing`] is generic over);
-//! its other dependencies are `arc-lend` and `bytemuck` (and `loom`
+//! engine's lock-free and `unsafe` runtime structures. It names two tutti
+//! crates, `tutti-units` (the units a [`Gauge`] and a [`Param`] hold, and [`RequestBit`]'s range)
+//! and `tutti-buffers` (the `ChannelLayout` a [`PosRing`] is written in and the
+//! `Sample` formats it is generic over);
+//! its other dependencies are `arc-lend`, `atomic_float` and `bytemuck` (and `loom`
 //! under `--cfg loom`).
 //!
 //! **Cells and collections**
@@ -35,6 +35,13 @@
 //!   one load per word.
 //! - [`tally()`] — a count with many writers ([`Tally`], [`TallyWriter`]):
 //!   `Clone` writers that `fetch_add`, for owners whose writers overlap.
+//!
+//! - [`Param`] / [`Param64`] / [`ParamCell`] — a unit held in an atomic cell:
+//!   shared and cloned by handle ([`Param`], addressed without its unit as a
+//!   [`ParamCell`]) or inline ([`Param64`]); [`AtomicSampleRate`] and
+//!   [`ParkedSampleRate`] carry a `SampleRate` the same way.
+//! - [`Mint`] and [`id!`] — a lock-free counter of unique non-zero numbers from 1,
+//!   and the macro that writes an id type minted from one.
 //!
 //! **Queues and signals**
 //!
@@ -158,6 +165,7 @@
 #![deny(missing_docs)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
+mod atomic_rate;
 mod backoff;
 mod capped_vec;
 mod cell;
@@ -171,12 +179,17 @@ mod drain_clock;
 mod fault_latch;
 mod gauge;
 mod handoff;
+// `id!` is `#[macro_export]`ed: the one way any crate writes an id, used as
+// `tutti_rt::id!`.
+mod id;
 mod job_gate;
 mod last_out;
 mod level_cell;
 mod lock;
 mod main_thread;
+mod mint;
 mod packed_atomic;
+mod param;
 mod pos_ring;
 mod priority;
 mod reclaim;
@@ -194,6 +207,7 @@ mod task_graph;
 mod thread;
 mod vec;
 
+pub use atomic_rate::{AtomicSampleRate, ParkedSampleRate};
 pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use claim_lock::{Claim, ClaimGuard};
@@ -213,7 +227,9 @@ pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
 pub use lock::LockExt;
 pub use main_thread::MainThreadMarker;
+pub use mint::Mint;
 pub use packed_atomic::PackedAtomic;
+pub use param::{Param, Param64, ParamCell};
 pub use pos_ring::{
     MAX_POS_RING_FRAMES, MAX_POS_RING_POSITION, PosClaim, PosFrame, PosReader, PosRing, PosWriter,
     RingFloat, RingSample, RingWindow,

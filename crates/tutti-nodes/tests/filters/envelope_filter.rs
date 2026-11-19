@@ -6,12 +6,12 @@
 
 use core::f64::consts::PI;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Planes;
 use tutti_dsp::SvfType;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{EnvelopeFilterConfig, EnvelopeFilterNode};
-use tutti_types::ChannelLayout;
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;

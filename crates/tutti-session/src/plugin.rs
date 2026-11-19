@@ -1566,7 +1566,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 let (key, rebinder) = self.graph.insert_plugin_with_rebinder(client);
                 if let Some(hosted) = self.graph.plugins.get_mut(&key.erase()) {
                     hosted.origin = Some(origin);
-                    hosted.recovery = self.recovery.map(Recovery::new);
+                    hosted.recovery = self.plugins.recovery.map(Recovery::new);
                 }
                 (key, rebinder)
             }
@@ -1720,7 +1720,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         loaded: PluginLoaded,
         out: &mut Vec<SessionEvent>,
     ) {
-        let now = self.plugins_now;
+        let now = self.plugins.now;
         let mut gave_up = Vec::new();
         let Some(hosted) = self.graph.plugins.get_mut(&node) else {
             return;
@@ -2118,7 +2118,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             rate,
             config: origin.config,
             state: hosted.snapshot.clone().map(Arc::new),
-            work: self.work.clone(),
+            work: self.plugins.work.clone(),
         };
         let token = Arc::clone(&hosted.reload.token);
         let snapshot_age = hosted
@@ -2157,7 +2157,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         failed: WorkerError,
         out: &mut Vec<SessionEvent>,
     ) {
-        let now = self.plugins_now;
+        let now = self.plugins.now;
         let Some(hosted) = self.graph.plugins.get(&node) else {
             return;
         };
@@ -2179,7 +2179,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 
     /// The render mode last announced to the hosted plugins.
     pub fn render_mode(&self) -> tutti_plugin::RenderMode {
-        self.render_mode.announced
+        self.plugins.render_mode.announced
     }
 
     /// `Phase::Plugins`. See the module docs.
@@ -2187,9 +2187,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         self.graph.graveyard.warn_if_piling();
         self.graph.reconcile_own_bypass();
         let now = cx.now;
-        self.plugins_now = now;
-        let interval = self.snapshot_interval;
-        let hang_policy = self.hang;
+        self.plugins.now = now;
+        let interval = self.plugins.snapshot_interval;
+        let hang_policy = self.plugins.hang;
         let mut dead = Vec::new();
         let mut gave_up = Vec::new();
         // Nodes of plugins that are gone whose silent stand-in the graph has
@@ -2422,7 +2422,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             } else {
                 tutti_plugin::RenderMode::Realtime
             };
-            let changed = self.render_mode.announced != wanted;
+            let changed = self.plugins.render_mode.announced != wanted;
             for hosted in self.graph.plugins.values_mut() {
                 if !tutti_plugin_host::needs_announcement(changed, hosted.told) {
                     continue;
@@ -2433,7 +2433,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 let _ = hosted.handle.announce_render_mode(wanted);
                 hosted.told = true;
             }
-            self.render_mode.announced = wanted;
+            self.plugins.render_mode.announced = wanted;
         }
     }
 }
@@ -3170,7 +3170,7 @@ mod tests {
             };
             hosted.reload.in_flight = true;
             let token = Arc::clone(&hosted.reload.token);
-            rig.session.plugins_now = now;
+            rig.session.plugins.now = now;
 
             let mut out = Vec::new();
             rig.session
