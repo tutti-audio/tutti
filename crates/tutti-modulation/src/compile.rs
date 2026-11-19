@@ -47,7 +47,7 @@ const LARGEST_BLOCK_FRAMES: usize = 4096;
 /// of slack for the publish to land, so every lane reads the new program
 /// before its anchor and switches on the same frame. A frame count, so its
 /// length in time follows the rate.
-pub const RATE_ANCHOR_MARGIN: Samples = Samples(3 * LARGEST_BLOCK_FRAMES);
+pub const RATE_ANCHOR_MARGIN: Samples = Samples::new(3 * LARGEST_BLOCK_FRAMES);
 
 /// How far ahead of the play reading a pending anchor must still be for a
 /// second rate edit to reuse its frame: two of the largest block, the margin
@@ -55,7 +55,7 @@ pub const RATE_ANCHOR_MARGIN: Samples = Samples(3 * LARGEST_BLOCK_FRAMES);
 /// that lands late would reach the lanes after the anchor, and they would
 /// jump by the difference of the two new rates times the lag; the edit
 /// re-anchors at [`RATE_ANCHOR_MARGIN`] instead (see `anchored`).
-const ANCHOR_REUSE_MIN: Samples = Samples(2 * LARGEST_BLOCK_FRAMES);
+const ANCHOR_REUSE_MIN: Samples = Samples::new(2 * LARGEST_BLOCK_FRAMES);
 
 /// A source's key: the host's identity for it. Only compared. The session's own
 /// declarations name a source with a
@@ -453,7 +453,7 @@ pub enum CompileError {
 /// clock has no corners for a constant.
 const MACRO_CLOCK: Clock = Clock::Beats {
     per_cycle: BeatsPerCycle::of(1.0),
-    phase: PhaseIncrement(0.0),
+    phase: PhaseIncrement::new(0.0),
 };
 
 /// The [`LayerId`] of `route`'s layer, scaled by `depth_by` (if any).
@@ -825,8 +825,8 @@ fn anchored(clock: Clock, old: Option<&Clock>, now: PlayReading, rate: SampleRat
             _ => {
                 let at = now.after(RATE_ANCHOR_MARGIN).play;
                 let t = ProgramTime {
-                    beat: Beat(0.0),
-                    play: SamplePosition(at.get() as f64),
+                    beat: Beat::new(0.0),
+                    play: SamplePosition::new(at.get() as f64),
                     play_epoch: now.epoch,
                     rate,
                 };

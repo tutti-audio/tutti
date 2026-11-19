@@ -368,15 +368,15 @@ pub enum ProgramError {
 /// // A bar-locked square, a quarter of the range deep, on a knob of 1000.
 /// let square = Layer {
 ///     id: LayerId(1),
-///     clock: Clock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement(0.0) },
+///     clock: Clock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement::new(0.0) },
 ///     wave: Waveform::Shape { shape: LfoShape::Square, seed: 0 },
 ///     amount: Amount { depth: Depth::of(0.25), polarity: Polarity::Bipolar, curve: Law::Linear },
 ///     depth_by: None,
 /// };
 /// let program = ControlProgram::new(None, vec![square], vec![]).unwrap();
 /// let at = |beat| ProgramTime {
-///     beat: Beat(beat),
-///     play: SamplePosition(0.0),
+///     beat: Beat::new(beat),
+///     play: SamplePosition::new(0.0),
 ///     play_epoch: 1,
 ///     rate: SampleRate::SR_48K,
 /// };
@@ -708,7 +708,7 @@ impl ControlProgram {
             }
         }
         let sum = base + acc;
-        Some(circular.map_or(sum, |_| Azimuth(sum).wrap().get()))
+        Some(circular.map_or(sum, |_| Azimuth::new(sum).wrap().get()))
     }
 
     /// The next corner strictly after `at` on each clock: the earliest of
@@ -722,7 +722,7 @@ impl ControlProgram {
         let mut out = Corners::default();
         let mut beat = |b: f64| {
             if b.is_finite() && out.beat.is_none_or(|o| b < o.get()) {
-                out.beat = Some(Beat(b));
+                out.beat = Some(Beat::new(b));
             }
         };
         if let Some(c) = &self.automation {
@@ -788,13 +788,13 @@ fn automation_at(
                 from,
                 to,
                 shape,
-            }) = curve.segment_at(Beat(b))
+            }) = curve.segment_at(Beat::new(b))
             && end.get() > start.get()
         {
-            let t = Normalized::clamped((Beat(b) - start) / (end - start));
+            let t = Normalized::clamped((Beat::new(b) - start) / (end - start));
             return Some(Piece::new(from, to, shape).value(Some(p), t));
         }
-        return curve.value_at(Beat(b));
+        return curve.value_at(Beat::new(b));
     }
     let x = b - tol(b);
     if let Some(CurveSegment::Move {
@@ -803,13 +803,13 @@ fn automation_at(
         from,
         to,
         shape,
-    }) = curve.segment_at(Beat(x))
+    }) = curve.segment_at(Beat::new(x))
         && end > start
     {
-        let t = Normalized::clamped((Beat(x) - start) / (end - start));
+        let t = Normalized::clamped((Beat::new(x) - start) / (end - start));
         return Some(Piece::new(from, to, shape).value(circular, t));
     }
-    curve.value_at(Beat(x))
+    curve.value_at(Beat::new(x))
 }
 
 impl Layer {
@@ -904,7 +904,7 @@ impl Clock {
             Self::Beats { per_cycle, phase } => Corners {
                 beat: wave
                     .next_corner(c, true, kinks)
-                    .map(|n| Beat((n - phase.get()) * per_cycle.get())),
+                    .map(|n| Beat::new((n - phase.get()) * per_cycle.get())),
                 play: None,
             },
             Self::Seconds {
@@ -938,7 +938,7 @@ impl Clock {
                 };
                 Corners {
                     beat: None,
-                    play: p.map(SamplePosition),
+                    play: p.map(SamplePosition::new),
                 }
             }
         }
@@ -1010,7 +1010,7 @@ impl Waveform {
                     let (a, b) = (hash_cycle(n - 1.0, *seed), hash_cycle(n, *seed));
                     a + (b - a) * frac as f32
                 }
-                periodic => periodic.evaluate_periodic(Phase(frac.min(1.0))),
+                periodic => periodic.evaluate_periodic(Phase::new(frac.min(1.0))),
             },
             Self::Drawn(points) => drawn_value(points, frac),
             Self::Const(v) => *v,

@@ -21,14 +21,14 @@ fn lookup(c: &mut Criterion) {
             Transition::RampBeats { end: None },
         ] {
             let map = TempoMap::new((0..n).map(|i| TempoPoint {
-                beat: Beat(i as f64 * 4.0),
+                beat: Beat::new(i as f64 * 4.0),
                 tempo: Bpm::of(80.0 + (i % 7) as f64 * 10.0),
                 transition: if i + 1 == n { Transition::Step } else { shape },
             }))
             .expect("a valid map");
             let total = map
                 .view(RATE)
-                .frame_at_or_after(Beat(n as f64 * 4.0))
+                .frame_at_or_after(Beat::new(n as f64 * 4.0))
                 .get()
                 .max(1);
             let id = |name: &str| BenchmarkId::new(name, format!("n={n} {shape:?}"));
@@ -49,7 +49,7 @@ fn lookup(c: &mut Criterion) {
                 b.iter(|| {
                     i += 1;
                     black_box(
-                        view.beat_at_seconds(Seconds((i * 3 % total) as f64 / RATE.get()))
+                        view.beat_at_seconds(Seconds::new((i * 3 % total) as f64 / RATE.get()))
                             .get(),
                     )
                 })
@@ -59,7 +59,7 @@ fn lookup(c: &mut Criterion) {
                     i += 1;
                     black_box(
                         map.view(RATE)
-                            .frame_at_or_after(Beat((i % (n as u64 * 4000)) as f64 / 1000.0))
+                            .frame_at_or_after(Beat::new((i % (n as u64 * 4000)) as f64 / 1000.0))
                             .get(),
                     )
                 })

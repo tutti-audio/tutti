@@ -37,11 +37,11 @@
 //!
 //! // 120 to 180 BPM over four beats, tempo linear in time, lasts 1.6 s.
 //! let map = TempoMap::new([
-//!     TempoPoint::ramp_time(Beat(0.0), Bpm::of(120.0)),
-//!     TempoPoint::step(Beat(4.0), Bpm::of(180.0)),
+//!     TempoPoint::ramp_time(Beat::new(0.0), Bpm::of(120.0)),
+//!     TempoPoint::step(Beat::new(4.0), Bpm::of(180.0)),
 //! ])?;
 //! let rate = SampleRate::SR_48K;
-//! assert_eq!(map.view(rate).frame_at_or_after(Beat(4.0)), Frame::new(76_800));
+//! assert_eq!(map.view(rate).frame_at_or_after(Beat::new(4.0)), Frame::new(76_800));
 //! # Ok::<(), tutti_tempo::TempoError>(())
 //! ```
 #![forbid(unsafe_code)]

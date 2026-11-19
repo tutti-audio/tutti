@@ -14,23 +14,26 @@ use tutti_units::{Beat, Bpm, Frame, Seconds};
 #[test]
 fn step_is_beats_over_rate() {
     let m = TempoMap::constant(Bpm::of(120.0)).unwrap();
-    assert_eq!(m.seconds_at(Beat(4.0)).get(), 2.0);
-    assert_eq!(m.view(R).frame_at_or_after(Beat(4.0)), Frame::new(96_000));
-    assert_eq!(m.view(R).beat_at_frame(Frame::new(96_000)), Beat(4.0));
+    assert_eq!(m.seconds_at(Beat::new(4.0)).get(), 2.0);
     assert_eq!(
-        m.seconds_at(Beat(-2.0)).get(),
+        m.view(R).frame_at_or_after(Beat::new(4.0)),
+        Frame::new(96_000)
+    );
+    assert_eq!(m.view(R).beat_at_frame(Frame::new(96_000)), Beat::new(4.0));
+    assert_eq!(
+        m.seconds_at(Beat::new(-2.0)).get(),
         -1.0,
         "before beat 0 at the first tempo"
     );
     assert_eq!(
-        m.view(R).frame_at_or_after(Beat(-2.0)),
+        m.view(R).frame_at_or_after(Beat::new(-2.0)),
         Frame::new(0),
         "no frame before 0"
     );
     for bpm in [60.8, 61.3, 61.9, 133.3] {
         let m = TempoMap::constant(Bpm::of(bpm)).unwrap();
-        assert_eq!(m.tempo_at(Beat(3.0)), Bpm::of(bpm));
-        assert_eq!(m.tempo_at_seconds(Seconds(1.0)), Bpm::of(bpm));
+        assert_eq!(m.tempo_at(Beat::new(3.0)), Bpm::of(bpm));
+        assert_eq!(m.tempo_at_seconds(Seconds::new(1.0)), Bpm::of(bpm));
     }
 }
 
@@ -41,15 +44,24 @@ fn step_is_beats_over_rate() {
 #[test]
 fn frames_between_integrates_the_tempo_over_the_span() {
     let m = TempoMap::constant(Bpm::of(120.0)).unwrap();
-    assert_eq!(m.view(R).frames_between(Beat(0.0), Beat(1.0)), 24_000);
-    assert_eq!(m.view(R).frames_between(Beat(1.0), Beat(0.0)), -24_000);
-    assert_eq!(m.view(R).frames_between(Beat(3.0), Beat(3.0)), 0);
+    assert_eq!(
+        m.view(R).frames_between(Beat::new(0.0), Beat::new(1.0)),
+        24_000
+    );
+    assert_eq!(
+        m.view(R).frames_between(Beat::new(1.0), Beat::new(0.0)),
+        -24_000
+    );
+    assert_eq!(m.view(R).frames_between(Beat::new(3.0), Beat::new(3.0)), 0);
     let m = TempoMap::new([
         pt(0.0, 120.0, Transition::Step),
         pt(4.0, 240.0, Transition::Step),
     ])
     .unwrap();
-    assert_eq!(m.view(R).frames_between(Beat(2.0), Beat(6.0)), 72_000);
+    assert_eq!(
+        m.view(R).frames_between(Beat::new(2.0), Beat::new(6.0)),
+        72_000
+    );
 }
 
 /// A span within `FRAME_TOLERANCE` (1e-6 frame) past a whole frame is that
@@ -58,10 +70,10 @@ fn frames_between_integrates_the_tempo_over_the_span() {
 #[test]
 fn frames_between_lands_on_a_frame_within_the_tolerance() {
     let m = TempoMap::constant(Bpm::of(120.0)).unwrap();
-    let within = Beat((1.0 + 5e-7) / 24_000.0);
-    let beyond = Beat((1.0 + 2e-6) / 24_000.0);
-    assert_eq!(m.view(R).frames_between(Beat(0.0), within), 1);
-    assert_eq!(m.view(R).frames_between(Beat(0.0), beyond), 2);
+    let within = Beat::new((1.0 + 5e-7) / 24_000.0);
+    let beyond = Beat::new((1.0 + 2e-6) / 24_000.0);
+    assert_eq!(m.view(R).frames_between(Beat::new(0.0), within), 1);
+    assert_eq!(m.view(R).frames_between(Beat::new(0.0), beyond), 2);
 }
 
 /// 120 -> 180 over 4 beats, tempo linear in time. `T = 2*4/(2+3) = 1.6 s`
@@ -73,13 +85,16 @@ fn time_ramp_matches_closed_form() {
         pt(4.0, 180.0, Transition::Step),
     ])
     .unwrap();
-    assert_eq!(m.view(R).frame_at_or_after(Beat(4.0)), Frame::new(76_800));
-    assert!((m.seconds_at(Beat(4.0)).get() - 1.6).abs() < 1e-15);
-    assert!((m.beat_at_seconds(Seconds(0.8)).get() - 1.8).abs() < 1e-15);
-    assert!((m.tempo_at_seconds(Seconds(0.8)).get() - 150.0).abs() < 1e-12);
-    assert!((m.tempo_at(Beat(1.8)).get() - 150.0).abs() < 1e-12);
+    assert_eq!(
+        m.view(R).frame_at_or_after(Beat::new(4.0)),
+        Frame::new(76_800)
+    );
+    assert!((m.seconds_at(Beat::new(4.0)).get() - 1.6).abs() < 1e-15);
+    assert!((m.beat_at_seconds(Seconds::new(0.8)).get() - 1.8).abs() < 1e-15);
+    assert!((m.tempo_at_seconds(Seconds::new(0.8)).get() - 150.0).abs() < 1e-12);
+    assert!((m.tempo_at(Beat::new(1.8)).get() - 150.0).abs() < 1e-12);
     // After the ramp: 180 BPM = 3 beats/s.
-    assert!((m.seconds_at(Beat(7.0)).get() - (1.6 + 1.0)).abs() < 1e-15);
+    assert!((m.seconds_at(Beat::new(7.0)).get() - (1.6 + 1.0)).abs() < 1e-15);
     // Frame 38 400 is 0.8 s.
     assert!((m.view(R).beat_at_frame(Frame::new(38_400)).get() - 1.8).abs() < 1e-14);
 }
@@ -96,16 +111,25 @@ fn beat_ramp_matches_closed_form() {
     .unwrap();
     let t4 = 4.0 * libm::log(1.5);
     assert!(
-        (m.seconds_at(Beat(4.0)).get() - t4).abs() < 1e-14,
+        (m.seconds_at(Beat::new(4.0)).get() - t4).abs() < 1e-14,
         "{}",
-        m.seconds_at(Beat(4.0)).get()
+        m.seconds_at(Beat::new(4.0)).get()
     );
     // 4 ln 1.5 s is 77 849.3 frames: the first frame at or after is 77 850.
-    assert_eq!(m.view(R).frame_at_or_after(Beat(4.0)), Frame::new(77_850));
-    assert!((m.seconds_at(Beat(2.0)).get() - 4.0 * libm::log(1.25)).abs() < 1e-14);
-    assert!((m.tempo_at(Beat(2.0)).get() - 150.0).abs() < 1e-12);
-    assert!((m.tempo_at_seconds(Seconds(4.0 * libm::log(1.25))).get() - 150.0).abs() < 1e-11);
-    assert!((m.beat_at_seconds(Seconds(t4)).get() - 4.0).abs() < 1e-13);
+    assert_eq!(
+        m.view(R).frame_at_or_after(Beat::new(4.0)),
+        Frame::new(77_850)
+    );
+    assert!((m.seconds_at(Beat::new(2.0)).get() - 4.0 * libm::log(1.25)).abs() < 1e-14);
+    assert!((m.tempo_at(Beat::new(2.0)).get() - 150.0).abs() < 1e-12);
+    assert!(
+        (m.tempo_at_seconds(Seconds::new(4.0 * libm::log(1.25)))
+            .get()
+            - 150.0)
+            .abs()
+            < 1e-11
+    );
+    assert!((m.beat_at_seconds(Seconds::new(t4)).get() - 4.0).abs() < 1e-13);
 }
 
 /// Independent oracle: integrate `dt = db / r(b)` by Simpson using only
@@ -126,7 +150,7 @@ fn seconds_agree_with_numeric_integration() {
         // The interval's end belongs to the next segment: read just inside it.
         let f = |x: f64| {
             60.0 / m
-                .tempo_at(Beat(if x == b { b.next_down() } else { x }))
+                .tempo_at(Beat::new(if x == b { b.next_down() } else { x }))
                 .get()
         };
         let mut s = f(a) + f(b);
@@ -144,7 +168,7 @@ fn seconds_agree_with_numeric_integration() {
         (31.0, 40.0),
     ] {
         let want = simpson(a, b);
-        let got = m.seconds_at(Beat(b)).get() - m.seconds_at(Beat(a)).get();
+        let got = m.seconds_at(Beat::new(b)).get() - m.seconds_at(Beat::new(a)).get();
         worst = worst.max((got - want).abs());
     }
     assert!(worst < 1e-10, "worst {worst:e} s");
@@ -169,16 +193,16 @@ fn long_session_round_trip() {
         ));
     }
     let m = TempoMap::new(pts).unwrap();
-    let total = m.seconds_at(Beat(40_000.0)).get();
+    let total = m.seconds_at(Beat::new(40_000.0)).get();
     assert!(total > 3600.0 * 4.0, "a session of hours: {total} s");
     let (mut worst_beat, mut worst_sec) = (0.0f64, 0.0f64);
     let mut bad = 0;
     for _ in 0..200_000 {
         let b = rng.next() * 40_000.0;
-        let s = m.seconds_at(Beat(b)).get();
-        let back = m.beat_at_seconds(Seconds(s)).get();
+        let s = m.seconds_at(Beat::new(b)).get();
+        let back = m.beat_at_seconds(Seconds::new(s)).get();
         worst_beat = worst_beat.max((back - b).abs());
-        worst_sec = worst_sec.max((m.seconds_at(Beat(back)).get() - s).abs());
+        worst_sec = worst_sec.max((m.seconds_at(Beat::new(back)).get() - s).abs());
         let f = Frame::new((rng.next() * total * 48_000.0) as u64);
         if m.view(R).frame_at_or_after(m.view(R).beat_at_frame(f)) != f {
             bad += 1;
@@ -207,7 +231,7 @@ fn anchors_do_not_drift() {
     let want = |k: usize| (9 * (k / 4)) as f64 / 5.0;
     let mut worst: f64 = 0.0;
     for k in (0..n).step_by(4) {
-        worst = worst.max((m.seconds_at(Beat(k as f64)).get() - want(k)).abs());
+        worst = worst.max((m.seconds_at(Beat::new(k as f64)).get() - want(k)).abs());
     }
     assert!(worst < 1e-10, "worst {worst:e} s");
     // The test can fail: a naive sum drifts past the bound.
@@ -235,21 +259,21 @@ fn edit_in_the_past() {
     .unwrap();
     let m2 = m.with_point(pt(8.0, 60.0, Transition::Step)).unwrap();
     assert_eq!(
-        m.seconds_at(Beat(4.0)).get(),
-        m2.seconds_at(Beat(4.0)).get()
+        m.seconds_at(Beat::new(4.0)).get(),
+        m2.seconds_at(Beat::new(4.0)).get()
     );
     // 8 beats at 120 (4 s) then 8 beats at 60 (8 s) = 12 s at beat 16, vs 8 s.
-    assert_eq!(m2.seconds_at(Beat(16.0)).get(), 12.0);
-    assert_eq!(m.seconds_at(Beat(16.0)).get(), 8.0);
+    assert_eq!(m2.seconds_at(Beat::new(16.0)).get(), 12.0);
+    assert_eq!(m.seconds_at(Beat::new(16.0)).get(), 8.0);
     // Beat 20 (was 10 s) is now 12 + 4 beats at 120 (2 s) = 14 s.
-    assert_eq!(m2.seconds_at(Beat(20.0)).get(), 14.0);
+    assert_eq!(m2.seconds_at(Beat::new(20.0)).get(), 14.0);
     // The same beat again replaces the point rather than adding one.
     let m3 = m2.with_point(pt(8.0, 240.0, Transition::Step)).unwrap();
     assert_eq!(m3.points().len(), 3);
-    assert_eq!(m3.seconds_at(Beat(16.0)).get(), 4.0 + 2.0);
+    assert_eq!(m3.seconds_at(Beat::new(16.0)).get(), 4.0 + 2.0);
     assert_eq!(m2.points().len(), 3);
     assert_eq!(
-        m2.tempo_at(Beat(9.0)),
+        m2.tempo_at(Beat::new(9.0)),
         Bpm::of(60.0),
         "the earlier map is unchanged"
     );
@@ -362,7 +386,7 @@ fn a_views_hint_agrees_with_cold_lookup() {
     queries.extend((0..2000).rev().map(|i| i as f64 * 0.25)); // backward
     queries.extend((0..2000).map(|_| rng.next() * 500.0)); // random
     for b in queries {
-        let beat = Beat(b);
+        let beat = Beat::new(b);
         assert_eq!(
             view.seconds_at(beat).get(),
             m.seconds_at(beat).get(),
@@ -370,8 +394,8 @@ fn a_views_hint_agrees_with_cold_lookup() {
         );
         let s = m.seconds_at(beat).get();
         assert_eq!(
-            view.beat_at_seconds(Seconds(s)),
-            m.beat_at_seconds(Seconds(s)),
+            view.beat_at_seconds(Seconds::new(s)),
+            m.beat_at_seconds(Seconds::new(s)),
             "seconds {s}"
         );
         assert_eq!(
@@ -392,22 +416,22 @@ fn a_point_belongs_to_the_segment_it_starts() {
         pt(12.0, 60.0, Transition::Step),
     ])
     .unwrap();
-    assert_eq!(m.tempo_at(Beat(4.0)), Bpm::of(180.0));
-    assert_eq!(m.tempo_at(Beat(8.0)), Bpm::of(90.0));
-    assert_eq!(m.tempo_at(Beat(12.0)), Bpm::of(60.0));
+    assert_eq!(m.tempo_at(Beat::new(4.0)), Bpm::of(180.0));
+    assert_eq!(m.tempo_at(Beat::new(8.0)), Bpm::of(90.0));
+    assert_eq!(m.tempo_at(Beat::new(12.0)), Bpm::of(60.0));
     assert!(
-        (m.tempo_at(Beat(4.0_f64.next_down())).get() - 180.0).abs() < 1e-9,
+        (m.tempo_at(Beat::new(4.0_f64.next_down())).get() - 180.0).abs() < 1e-9,
         "the ramp arrives at 180"
     );
     for b in [4.0_f64, 8.0, 12.0] {
-        let below = m.seconds_at(Beat(b.next_down())).get();
+        let below = m.seconds_at(Beat::new(b.next_down())).get();
         assert!(
-            (m.seconds_at(Beat(b)).get() - below).abs() < 1e-12,
+            (m.seconds_at(Beat::new(b)).get() - below).abs() < 1e-12,
             "seconds jump at beat {b}"
         );
-        let s = m.seconds_at(Beat(b)).get();
+        let s = m.seconds_at(Beat::new(b)).get();
         assert!(
-            (m.beat_at_seconds(Seconds(s)).get() - b).abs() < 1e-12,
+            (m.beat_at_seconds(Seconds::new(s)).get() - b).abs() < 1e-12,
             "beat {b}"
         );
     }
@@ -422,10 +446,10 @@ fn a_first_ramp_extrapolates_at_its_first_tempo() {
         Transition::RampBeats { end: None },
     ] {
         let m = TempoMap::new([pt(0.0, 120.0, shape), pt(4.0, 240.0, Transition::Step)]).unwrap();
-        assert_eq!(m.seconds_at(Beat(-1.0)).get(), -0.5);
-        assert_eq!(m.beat_at_seconds(Seconds(-0.5)), Beat(-1.0));
-        assert_eq!(m.tempo_at(Beat(-100.0)), Bpm::of(120.0));
-        assert_eq!(m.tempo_at_seconds(Seconds(-3.0)), Bpm::of(120.0));
+        assert_eq!(m.seconds_at(Beat::new(-1.0)).get(), -0.5);
+        assert_eq!(m.beat_at_seconds(Seconds::new(-0.5)), Beat::new(-1.0));
+        assert_eq!(m.tempo_at(Beat::new(-100.0)), Bpm::of(120.0));
+        assert_eq!(m.tempo_at_seconds(Seconds::new(-3.0)), Bpm::of(120.0));
     }
 }
 
@@ -468,7 +492,7 @@ fn a_tempo_at_its_point_is_the_given_tempo_to_the_bit() {
         );
         let sec = m.seconds_at(p.beat).get();
         assert_eq!(
-            m.tempo_at_seconds(Seconds(sec)).get().to_bits(),
+            m.tempo_at_seconds(Seconds::new(sec)).get().to_bits(),
             p.tempo.get().to_bits(),
             "tempo_at_seconds {:?}",
             p
@@ -486,7 +510,7 @@ fn an_edit_at_negative_zero_replaces_the_first_point() {
     .unwrap();
     let m2 = m.with_point(pt(-0.0, 100.0, Transition::Step)).unwrap();
     assert_eq!(m2.points().len(), 2);
-    assert_eq!(m2.tempo_at(Beat(0.0)), Bpm::of(100.0));
+    assert_eq!(m2.tempo_at(Beat::new(0.0)), Bpm::of(100.0));
     assert_eq!(
         m2.points()[0].beat.get().to_bits(),
         0.0f64.to_bits(),
@@ -509,12 +533,12 @@ fn constant_tempo_is_the_single_points_tempo_to_the_bit() {
     ] {
         let two = TempoMap::new([
             TempoPoint {
-                beat: Beat(0.0),
+                beat: Beat::new(0.0),
                 tempo: odd,
                 transition: shape,
             },
             TempoPoint {
-                beat: Beat(4.0),
+                beat: Beat::new(4.0),
                 tempo: odd,
                 transition: Transition::Step,
             },
@@ -562,17 +586,17 @@ fn the_slope_is_held_inside_the_segment_it_starts_in() {
     .unwrap();
     let mut view = m.view(R);
     for (from, to) in [(0.0, 0.5), (0.25, 1.0), (1.0, 1.6)] {
-        let got = view.tempo_slope(Seconds(from), Seconds(to));
+        let got = view.tempo_slope(Seconds::new(from), Seconds::new(to));
         assert!((got - 37.5).abs() < 1e-9, "{from}..{to}: {got}");
     }
     // The ramp ends at 1.6 s; a span to 2.0 s is held to that end.
-    let held = view.tempo_slope(Seconds(1.0), Seconds(2.0));
+    let held = view.tempo_slope(Seconds::new(1.0), Seconds::new(2.0));
     assert!((held - 37.5).abs() < 1e-9, "{held}");
     // A step segment, though its end (2.933 s) is crossed: no slope.
-    assert_eq!(view.tempo_slope(Seconds(2.0), Seconds(3.5)), 0.0);
+    assert_eq!(view.tempo_slope(Seconds::new(2.0), Seconds::new(3.5)), 0.0);
     // Empty and reversed spans.
-    assert_eq!(view.tempo_slope(Seconds(0.5), Seconds(0.5)), 0.0);
-    assert_eq!(view.tempo_slope(Seconds(0.5), Seconds(0.2)), 0.0);
+    assert_eq!(view.tempo_slope(Seconds::new(0.5), Seconds::new(0.5)), 0.0);
+    assert_eq!(view.tempo_slope(Seconds::new(0.5), Seconds::new(0.2)), 0.0);
     // A beat ramp's tempo is exponential in time (120 e^(0.25 s)), so a span
     // past its end (4 ln 1.5 = 1.6219 s) is the chord to that end, not to the
     // span's own: (180 - 120 e^0.125) / (1.6219 - 0.5).
@@ -583,7 +607,9 @@ fn the_slope_is_held_inside_the_segment_it_starts_in() {
     .unwrap();
     let end = 4.0 * libm::log(1.5);
     let want = (180.0 - 120.0 * libm::exp(0.125)) / (end - 0.5);
-    let got = beats.view(R).tempo_slope(Seconds(0.5), Seconds(5.0));
+    let got = beats
+        .view(R)
+        .tempo_slope(Seconds::new(0.5), Seconds::new(5.0));
     assert!((got - want).abs() < 1e-9, "{got} vs {want}");
 }
 
@@ -603,8 +629,8 @@ fn a_view_answers_the_closed_forms_across_a_step_and_a_ramp() {
     let mut view = m.view(R);
     assert_eq!(view.rate(), R);
     // 4 beats at 90 BPM: 2.666.. s.
-    assert_eq!(view.frame_at_or_after(Beat(3.0)), Frame::new(96_000));
-    assert_eq!(view.beat_at_frame(Frame::new(96_000)), Beat(3.0));
+    assert_eq!(view.frame_at_or_after(Beat::new(3.0)), Frame::new(96_000));
+    assert_eq!(view.beat_at_frame(Frame::new(96_000)), Beat::new(3.0));
     assert_eq!(view.tempo_at_frame(Frame::new(96_000)), Bpm::of(90.0));
     let ramp_start = 4.0 * 60.0 / 90.0;
     let on = Frame::new((ramp_start * 48_000.0) as u64);
@@ -612,7 +638,7 @@ fn a_view_answers_the_closed_forms_across_a_step_and_a_ramp() {
     let at = Frame::new(((ramp_start + 0.8) * 48_000.0) as u64);
     assert!((view.beat_at_frame(at).get() - 5.8).abs() < 1e-9);
     assert!((view.tempo_at_frame(at).get() - 150.0).abs() < 1e-9);
-    let end = view.frame_at_or_after(Beat(8.0));
+    let end = view.frame_at_or_after(Beat::new(8.0));
     assert_eq!(end, Frame::new(((ramp_start + 1.6) * 48_000.0) as u64));
 }
 
@@ -622,27 +648,27 @@ fn a_view_answers_the_closed_forms_across_a_step_and_a_ramp() {
 #[test]
 fn the_builder_writes_the_points_and_never_ends_on_a_ramp() {
     let built = TempoMap::builder(Bpm::of(120.0))
-        .ramp_time_to(Beat(4.0), Bpm::of(180.0))
-        .ramp_beats_to(Beat(8.0), Bpm::of(90.0))
+        .ramp_time_to(Beat::new(4.0), Bpm::of(180.0))
+        .ramp_beats_to(Beat::new(8.0), Bpm::of(90.0))
         .build()
         .unwrap();
     assert_eq!(
         built.points(),
         [
-            TempoPoint::ramp_time(Beat(0.0), Bpm::of(120.0)),
-            TempoPoint::ramp_beats(Beat(4.0), Bpm::of(180.0)),
-            TempoPoint::step(Beat(8.0), Bpm::of(90.0)),
+            TempoPoint::ramp_time(Beat::new(0.0), Bpm::of(120.0)),
+            TempoPoint::ramp_beats(Beat::new(4.0), Bpm::of(180.0)),
+            TempoPoint::step(Beat::new(8.0), Bpm::of(90.0)),
         ]
     );
     assert!(matches!(
         TempoMap::builder(Bpm::of(120.0))
-            .step_to(Beat(0.0), Bpm::of(90.0))
+            .step_to(Beat::new(0.0), Bpm::of(90.0))
             .build(),
         Err(TempoError::BadOrder(1))
     ));
     // The list form still refuses the trailing ramp.
     assert!(matches!(
-        TempoMap::new([TempoPoint::ramp_time(Beat(0.0), Bpm::of(120.0))]),
+        TempoMap::new([TempoPoint::ramp_time(Beat::new(0.0), Bpm::of(120.0))]),
         Err(TempoError::RampWithoutEnd)
     ));
 }
@@ -653,7 +679,7 @@ fn the_builder_writes_the_points_and_never_ends_on_a_ramp() {
 /// `k` = (3 - 2) / 1.6 = 0.625 beats/s^2.
 fn ramp_ending_in_a_step() -> TempoMap {
     TempoMap::builder(Bpm::of(120.0))
-        .ramp_time_to(Beat(4.0), Bpm::of(180.0))
+        .ramp_time_to(Beat::new(4.0), Bpm::of(180.0))
         .then_step(Bpm::of(90.0))
         .build()
         .unwrap()
@@ -666,15 +692,15 @@ fn ramp_ending_in_a_step() -> TempoMap {
 fn a_ramp_ending_in_a_step_leaves_no_plateau() {
     let map = ramp_ending_in_a_step();
     assert_eq!(map.points().len(), 2);
-    let below = map.tempo_at(Beat(4.0f64.next_down())).get();
+    let below = map.tempo_at(Beat::new(4.0f64.next_down())).get();
     assert!((below - 180.0).abs() < 1e-9, "{below}");
-    assert_eq!(map.tempo_at(Beat(4.0)), Bpm::of(90.0));
-    let mid = map.tempo_at(Beat(3.0)).get();
+    assert_eq!(map.tempo_at(Beat::new(4.0)), Bpm::of(90.0));
+    let mid = map.tempo_at(Beat::new(3.0)).get();
     assert!((mid - 60.0 * 7.75f64.sqrt()).abs() < 1e-9, "{mid}");
-    let in_time = map.tempo_at_seconds(Seconds(1.6f64.next_down())).get();
+    let in_time = map.tempo_at_seconds(Seconds::new(1.6f64.next_down())).get();
     assert!((in_time - 180.0).abs() < 1e-6, "{in_time}");
-    assert_eq!(map.tempo_at_seconds(Seconds(1.6)), Bpm::of(90.0));
-    assert_eq!(map.tempo_at(Beat(100.0)), Bpm::of(90.0));
+    assert_eq!(map.tempo_at_seconds(Seconds::new(1.6)), Bpm::of(90.0));
+    assert_eq!(map.tempo_at(Beat::new(100.0)), Bpm::of(90.0));
 }
 
 /// **A step changes the tempo, not the time**: beat 4 is at the ramp's integral,
@@ -684,20 +710,20 @@ fn a_ramp_ending_in_a_step_leaves_no_plateau() {
 #[test]
 fn a_step_after_a_ramp_keeps_the_ramps_time() {
     let map = ramp_ending_in_a_step();
-    assert!((map.seconds_at(Beat(4.0)).get() - 1.6).abs() < 1e-12);
-    assert!((map.seconds_at(Beat(5.5)).get() - 2.6).abs() < 1e-12);
-    let near = map.seconds_at(Beat(4.0f64.next_down())).get();
+    assert!((map.seconds_at(Beat::new(4.0)).get() - 1.6).abs() < 1e-12);
+    assert!((map.seconds_at(Beat::new(5.5)).get() - 2.6).abs() < 1e-12);
+    let near = map.seconds_at(Beat::new(4.0f64.next_down())).get();
     assert!((near - 1.6).abs() < 1e-12, "continuous below: {near}");
 
     let beats = TempoMap::builder(Bpm::of(120.0))
-        .ramp_beats_to(Beat(4.0), Bpm::of(180.0))
+        .ramp_beats_to(Beat::new(4.0), Bpm::of(180.0))
         .then_step(Bpm::of(60.0))
         .build()
         .unwrap();
     let want = 4.0 * libm::log(1.5);
-    assert!((beats.seconds_at(Beat(4.0)).get() - want).abs() < 1e-12);
-    assert_eq!(beats.tempo_at(Beat(4.0)), Bpm::of(60.0));
-    assert!((beats.seconds_at(Beat(5.0)).get() - want - 1.0).abs() < 1e-12);
+    assert!((beats.seconds_at(Beat::new(4.0)).get() - want).abs() < 1e-12);
+    assert_eq!(beats.tempo_at(Beat::new(4.0)), Bpm::of(60.0));
+    assert!((beats.seconds_at(Beat::new(5.0)).get() - want - 1.0).abs() < 1e-12);
 }
 
 /// **Time to beat round-trips across the point**, below it, on it and after it.
@@ -705,11 +731,11 @@ fn a_step_after_a_ramp_keeps_the_ramps_time() {
 fn time_and_beat_round_trip_across_a_ramps_step() {
     let map = ramp_ending_in_a_step();
     for b in [0.0, 1.0, 3.999, 4.0, 4.001, 5.5, 20.0] {
-        let back = map.beat_at_seconds(map.seconds_at(Beat(b))).get();
+        let back = map.beat_at_seconds(map.seconds_at(Beat::new(b))).get();
         assert!((back - b).abs() < 1e-12, "beat {b}: {back}");
     }
-    assert!((map.beat_at_seconds(Seconds(1.6)).get() - 4.0).abs() < 1e-12);
-    assert!((map.beat_at_seconds(Seconds(2.6)).get() - 5.5).abs() < 1e-12);
+    assert!((map.beat_at_seconds(Seconds::new(1.6)).get() - 4.0).abs() < 1e-12);
+    assert!((map.beat_at_seconds(Seconds::new(2.6)).get() - 5.5).abs() < 1e-12);
 }
 
 /// **One map has one representation**: a ramp whose end is the next point's
@@ -742,7 +768,7 @@ fn a_ramp_end_equal_to_the_next_tempo_folds_away() {
 #[test]
 fn a_second_then_step_keeps_the_arrival() {
     let map = TempoMap::builder(Bpm::of(120.0))
-        .ramp_time_to(Beat(4.0), Bpm::of(180.0))
+        .ramp_time_to(Beat::new(4.0), Bpm::of(180.0))
         .then_step(Bpm::of(90.0))
         .then_step(Bpm::of(60.0))
         .build()
@@ -753,11 +779,11 @@ fn a_second_then_step_keeps_the_arrival() {
             end: Some(Bpm::of(180.0))
         }
     );
-    assert_eq!(map.tempo_at(Beat(4.0)), Bpm::of(60.0));
-    let below = map.tempo_at(Beat(4.0f64.next_down())).get();
+    assert_eq!(map.tempo_at(Beat::new(4.0)), Bpm::of(60.0));
+    let below = map.tempo_at(Beat::new(4.0f64.next_down())).get();
     assert!((below - 180.0).abs() < 1e-9, "{below}");
-    assert!((map.seconds_at(Beat(4.0)).get() - 1.6).abs() < 1e-12);
-    assert!((map.seconds_at(Beat(5.0)).get() - 2.6).abs() < 1e-12);
+    assert!((map.seconds_at(Beat::new(4.0)).get() - 1.6).abs() < 1e-12);
+    assert!((map.seconds_at(Beat::new(5.0)).get() - 2.6).abs() < 1e-12);
 }
 
 /// A beat-linear ramp with an end: 120 to 180 over beats 0..4 (`g` = 0.25
@@ -775,11 +801,11 @@ fn a_beat_ramp_with_an_end_follows_its_own_line() {
         pt(4.0, 60.0, Transition::Step),
     ])
     .unwrap();
-    let mid = map.tempo_at(Beat(3.0)).get();
+    let mid = map.tempo_at(Beat::new(3.0)).get();
     assert!((mid - 165.0).abs() < 1e-9, "{mid}");
-    let below = map.tempo_at(Beat(4.0f64.next_down())).get();
+    let below = map.tempo_at(Beat::new(4.0f64.next_down())).get();
     assert!((below - 180.0).abs() < 1e-9, "{below}");
-    assert_eq!(map.tempo_at(Beat(4.0)), Bpm::of(60.0));
+    assert_eq!(map.tempo_at(Beat::new(4.0)), Bpm::of(60.0));
 }
 
 /// **`then_step` changes only the last segment**: after a step at beat 2 to 90
@@ -790,8 +816,8 @@ fn a_beat_ramp_with_an_end_follows_its_own_line() {
 fn then_step_on_a_map_with_earlier_points_changes_only_the_last_segment() {
     let base = || {
         TempoMap::builder(Bpm::of(120.0))
-            .step_to(Beat(2.0), Bpm::of(90.0))
-            .ramp_time_to(Beat(6.0), Bpm::of(180.0))
+            .step_to(Beat::new(2.0), Bpm::of(90.0))
+            .ramp_time_to(Beat::new(6.0), Bpm::of(180.0))
     };
     let (plain, stepped) = (
         base().build().unwrap(),
@@ -799,17 +825,17 @@ fn then_step_on_a_map_with_earlier_points_changes_only_the_last_segment() {
     );
     for b in [0.0, 1.0, 2.0, 4.0, 6.0] {
         assert_eq!(
-            plain.seconds_at(Beat(b)),
-            stepped.seconds_at(Beat(b)),
+            plain.seconds_at(Beat::new(b)),
+            stepped.seconds_at(Beat::new(b)),
             "beat {b}"
         );
     }
     assert_eq!(stepped.points().len(), 3);
     assert_eq!(stepped.points()[0], plain.points()[0]);
-    assert_eq!(stepped.tempo_at(Beat(1.0)), Bpm::of(120.0));
-    assert_eq!(stepped.tempo_at(Beat(2.0)), Bpm::of(90.0));
-    assert_eq!(stepped.tempo_at(Beat(6.0)), Bpm::of(60.0));
-    assert_eq!(plain.tempo_at(Beat(6.0)), Bpm::of(180.0));
-    let below = stepped.tempo_at(Beat(6.0f64.next_down())).get();
+    assert_eq!(stepped.tempo_at(Beat::new(1.0)), Bpm::of(120.0));
+    assert_eq!(stepped.tempo_at(Beat::new(2.0)), Bpm::of(90.0));
+    assert_eq!(stepped.tempo_at(Beat::new(6.0)), Bpm::of(60.0));
+    assert_eq!(plain.tempo_at(Beat::new(6.0)), Bpm::of(180.0));
+    let below = stepped.tempo_at(Beat::new(6.0f64.next_down())).get();
     assert!((below - 180.0).abs() < 1e-9, "{below}");
 }

@@ -40,7 +40,7 @@ impl TempoMap {
     /// [`TempoError::Unrepresentable`] when `tempo` is so small that a beat's
     /// rate underflows.
     pub fn constant(tempo: Bpm) -> Result<Self, TempoError> {
-        Self::new([TempoPoint::step(Beat(0.0), tempo)])
+        Self::new([TempoPoint::step(Beat::new(0.0), tempo)])
     }
 
     /// A [`TempoMapBuilder`] that starts at `first` from beat 0, for a map
@@ -88,9 +88,16 @@ impl TempoMap {
         for (i, p) in pts.iter().enumerate() {
             let (r1, db) = match pts.get(i + 1) {
                 Some(n) => (reached(p.transition, n).get() / 60.0, n.beat - p.beat),
-                None => (p.tempo.get() / 60.0, BeatDuration(f64::INFINITY)),
+                None => (p.tempo.get() / 60.0, BeatDuration::new(f64::INFINITY)),
             };
-            let s = Seg::new(p.beat, Seconds(sum + comp), p.tempo, r1, p.transition, db);
+            let s = Seg::new(
+                p.beat,
+                Seconds::new(sum + comp),
+                p.tempo,
+                r1,
+                p.transition,
+                db,
+            );
             if i + 1 < pts.len() {
                 if !s.is_sound(db) {
                     return Err(TempoError::Unrepresentable(i));
@@ -125,7 +132,7 @@ impl TempoMap {
         // `-0.0 + 0.0` is `+0.0`: `total_cmp` would otherwise order a negative
         // zero before the point at beat 0 and insert instead of replace.
         let point = TempoPoint {
-            beat: Beat(point.beat.get() + 0.0),
+            beat: Beat::new(point.beat.get() + 0.0),
             ..point
         };
         let mut pts = self.pts.clone();
@@ -154,7 +161,7 @@ impl TempoMap {
     /// A [`TempoError`] when the result cannot be held (a tempo so small that a
     /// segment's duration overflows).
     pub fn stepped_to(&self, beat: Beat, tempo: Bpm) -> Result<Option<Self>, TempoError> {
-        let beat = Beat(beat.get().max(0.0));
+        let beat = Beat::new(beat.get().max(0.0));
         let points = self.points();
         if points
             .last()
@@ -367,7 +374,7 @@ impl TempoMap {
     ) -> Option<Frame> {
         let (seg, start, next) = self.by_frame(frame, rate, hint);
         // Only the first segment starts at beat 0, and that is not a change.
-        if start == frame.get() && seg.beat0 != Beat(0.0) {
+        if start == frame.get() && seg.beat0 != Beat::new(0.0) {
             return Some(frame);
         }
         next.map(Frame::new)

@@ -8,13 +8,13 @@ use crate::Law;
 /// swapped, a transport stop, a loop seam); a [ramp](crate::Piece::ramp_at) is
 /// continuous interpolation chained block after block and has a length of its
 /// own, never this one.
-pub const DECLICK: Seconds = Seconds(0.005);
+pub const DECLICK: Seconds = Seconds::new(0.005);
 
 /// The frames of [`DECLICK`] at `rate`: `round(rate * DECLICK)`, at least one.
 #[inline]
 #[must_use]
 pub fn declick_frames(rate: SampleRate) -> Samples {
-    Samples(DECLICK.to_samples(rate).get().max(1))
+    Samples::new(DECLICK.to_samples(rate).get().max(1))
 }
 
 /// The gain law of a fade between two signals.
@@ -60,10 +60,10 @@ impl FadeLaw {
             .eval(Normalized::clamped((k + 1) as f64 / (n + 1) as f64))
             .get();
         match self {
-            Self::EqualAmplitude => (Amplitude(1.0 - s), Amplitude(s)),
+            Self::EqualAmplitude => (Amplitude::new(1.0 - s), Amplitude::new(s)),
             Self::EqualPower => {
                 let a = s * core::f64::consts::FRAC_PI_2;
-                (Amplitude(libm::cos(a)), Amplitude(libm::sin(a)))
+                (Amplitude::new(libm::cos(a)), Amplitude::new(libm::sin(a)))
             }
         }
     }
@@ -77,7 +77,7 @@ impl FadeLaw {
             return to;
         }
         let (out, inn) = self.gains(k, n);
-        Amplitude(from.get() * out.get() + to.get() * inn.get())
+        Amplitude::new(from.get() * out.get() + to.get() * inn.get())
     }
 }
 

@@ -28,14 +28,14 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
 
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(sample_rate),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     let (source, filter) = (NodeKey(1), NodeKey(2));
-    ed.insert(source, "sine", Osc::sine(Hz(220.0)));
+    ed.insert(source, "sine", Osc::sine(Hz::new(220.0)));
     ed.insert(
         filter,
         "filter",
-        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(2_000.0), Q(0.7)),
+        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(2_000.0), Q::new(0.7)),
     );
     ed.spec_mut().topology.edges.insert(
         InPort {
@@ -77,10 +77,10 @@ fn test_transport_advances_with_graph() {
         &mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap(),
     );
 
-    let expected_beat = Beat(256.0 * (120.0 / 60.0) / 44100.0);
+    let expected_beat = Beat::new(256.0 * (120.0 / 60.0) / 44100.0);
     let actual_beat = transport.beat();
     assert!(
-        (actual_beat - expected_beat).abs() < BeatDuration(1e-6),
+        (actual_beat - expected_beat).abs() < BeatDuration::new(1e-6),
         "expected {expected_beat:?}, got {actual_beat:?}"
     );
 }
@@ -101,7 +101,9 @@ fn test_transport_loop_wrapping() {
         )
         .expect("room");
     let _ = transport.motion().try_send(MotionEvent::Play);
-    let _ = transport.motion().try_send(MotionEvent::locate(Beat(3.99)));
+    let _ = transport
+        .motion()
+        .try_send(MotionEvent::locate(Beat::new(3.99)));
 
     let frames = 1024;
     let mut output = vec![0.0f32; frames * 2];
@@ -115,9 +117,9 @@ fn test_transport_loop_wrapping() {
     // length. No seek would leave it at the block's own length, and a wrap
     // counted twice or not at all would miss it.
     let beat = transport.beat();
-    let expected = Beat(3.99 + 1024.0 * (120.0 / 60.0) / 44100.0 - 4.0);
+    let expected = Beat::new(3.99 + 1024.0 * (120.0 / 60.0) / 44100.0 - 4.0);
     assert!(
-        (beat - expected).abs() < BeatDuration(1e-6),
+        (beat - expected).abs() < BeatDuration::new(1e-6),
         "expected {expected:?} after one wrap, got {beat:?}"
     );
 }

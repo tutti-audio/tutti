@@ -26,14 +26,14 @@ fn queries_do_not_allocate() {
     assert_no_alloc(|| {
         let mut view = map.view(R);
         for i in 0..4000u64 {
-            let beat = Beat((i % 130) as f64 * 0.97);
+            let beat = Beat::new((i % 130) as f64 * 0.97);
             let frame = Frame::new(i * 977);
-            let secs = Seconds(i as f64 * 0.01);
+            let secs = Seconds::new(i as f64 * 0.01);
             acc += map.seconds_at(beat).get() + view.seconds_at(beat).get();
             acc += map.beat_at_seconds(secs).get() + view.beat_at_seconds(secs).get();
             acc += map.tempo_at(beat).get() + view.tempo_at(beat).get();
             acc += map.tempo_at_seconds(secs).get() + view.tempo_at_seconds(secs).get();
-            acc += view.tempo_slope(secs, Seconds(secs.get() + 0.1));
+            acc += view.tempo_slope(secs, Seconds::new(secs.get() + 0.1));
             acc += view.tempo_at_frame(frame).get();
             acc += view.beat_at_frame(frame).get();
             acc += view.frame_at_or_after(beat).get() as f64;

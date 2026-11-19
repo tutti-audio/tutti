@@ -19,7 +19,7 @@ fn engine() -> Engine {
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
@@ -99,7 +99,7 @@ fn a_stop_and_a_locate_land_in_one_snapshot() {
     let p = reader.playhead();
     assert_eq!(
         (p.playing(), p.beat(), p.frame()),
-        (false, Beat(0.0), Frame::new(0))
+        (false, Beat::new(0.0), Frame::new(0))
     );
 
     motion(MotionEvent::Play);
@@ -108,7 +108,7 @@ fn a_stop_and_a_locate_land_in_one_snapshot() {
     assert!(p.playing(), "the play landed on the call's first frame");
     assert_eq!(
         (p.frame(), p.beat(), p.seconds()),
-        (Frame::new(256), Beat(0.0), Seconds(0.0))
+        (Frame::new(256), Beat::new(0.0), Seconds::new(0.0))
     );
 
     render(&engine, 480, false);
@@ -132,12 +132,12 @@ fn a_stop_and_a_locate_land_in_one_snapshot() {
     );
     assert!((p.seconds().get() - p.beat().get() / 2.0).abs() < 1e-12);
 
-    motion(MotionEvent::locate(Beat(8.0)));
+    motion(MotionEvent::locate(Beat::new(8.0)));
     render(&engine, 480, false);
     let p = reader.playhead();
     assert_eq!(
         (p.playing(), p.beat(), p.seconds()),
-        (false, Beat(8.0), Seconds(4.0))
+        (false, Beat::new(8.0), Seconds::new(4.0))
     );
     assert_eq!(p.frame(), Frame::new(1_696));
 }
@@ -186,7 +186,7 @@ fn dated(dates: BlockDates, rate: f64) -> (Engine, Editor, Transport) {
     let transport = Transport::new(SampleRate::of(rate));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(rate),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec, dates).expect("within limits");
@@ -263,8 +263,11 @@ fn rerated(from: f64, to: f64) {
     for _ in 0..3 {
         step(&engine, 480);
     }
-    ed.reprepare(Prepare::new(SampleRate::of(to), MaxBlock::of(Samples(512))))
-        .expect("re-prepares");
+    ed.reprepare(Prepare::new(
+        SampleRate::of(to),
+        MaxBlock::of(Samples::new(512)),
+    ))
+    .expect("re-prepares");
     // The suspended block, then the resumed ones at the new rate.
     step(&engine, 480);
     ed.collect();

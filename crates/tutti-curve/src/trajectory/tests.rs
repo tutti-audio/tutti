@@ -8,14 +8,14 @@ use super::{Breakpoint, Trajectory};
 use crate::Law;
 
 fn point(beat: f64, value: f64) -> Breakpoint<Db> {
-    Breakpoint::new(Beat(beat), Db(value))
+    Breakpoint::new(Beat::new(beat), Db::new(value))
 }
 
 fn ramp() -> Trajectory<Db> {
     let mut e = Trajectory::new();
     e.add_breakpoint(Breakpoint::with_law(
-        Beat(1.0),
-        Db(0.0),
+        Beat::new(1.0),
+        Db::new(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     e.add_breakpoint(point(3.0, 1.0));
@@ -25,11 +25,11 @@ fn ramp() -> Trajectory<Db> {
 /// No breakpoint, no value; one breakpoint is its value everywhere.
 #[test]
 fn an_empty_trajectory_has_no_value_and_one_breakpoint_is_everywhere() {
-    assert_eq!(Trajectory::<Db>::new().value_at(Beat(1.0)), None);
+    assert_eq!(Trajectory::<Db>::new().value_at(Beat::new(1.0)), None);
     let mut one = Trajectory::new();
     one.add_breakpoint(point(2.0, 0.7));
     for b in [-1.0, 2.0, 9.0] {
-        assert_eq!(one.value_at(Beat(b)), Some(Db(0.7)));
+        assert_eq!(one.value_at(Beat::new(b)), Some(Db::new(0.7)));
     }
 }
 
@@ -39,12 +39,12 @@ fn an_empty_trajectory_has_no_value_and_one_breakpoint_is_everywhere() {
 #[test]
 fn a_piece_follows_its_starting_breakpoints_law() {
     let e = ramp();
-    assert_eq!(e.value_at(Beat(0.0)), Some(Db(0.0)));
-    assert_eq!(e.value_at(Beat(1.0)), Some(Db(0.0)));
-    assert_eq!(e.value_at(Beat(2.0)), Some(Db(0.25)));
-    assert_eq!(e.value_at(Beat(2.5)), Some(Db(0.5625)));
-    assert_eq!(e.value_at(Beat(3.0)), Some(Db(1.0)));
-    assert_eq!(e.value_at(Beat(9.0)), Some(Db(1.0)));
+    assert_eq!(e.value_at(Beat::new(0.0)), Some(Db::new(0.0)));
+    assert_eq!(e.value_at(Beat::new(1.0)), Some(Db::new(0.0)));
+    assert_eq!(e.value_at(Beat::new(2.0)), Some(Db::new(0.25)));
+    assert_eq!(e.value_at(Beat::new(2.5)), Some(Db::new(0.5625)));
+    assert_eq!(e.value_at(Beat::new(3.0)), Some(Db::new(1.0)));
+    assert_eq!(e.value_at(Beat::new(9.0)), Some(Db::new(1.0)));
 }
 
 /// A linear piece between two breakpoints is the straight line: a quarter of
@@ -54,8 +54,8 @@ fn a_linear_piece_is_the_straight_line() {
     let mut e = Trajectory::new();
     e.add_breakpoint(point(0.0, 100.0))
         .add_breakpoint(point(4.0, 300.0));
-    assert_eq!(e.value_at(Beat(1.0)), Some(Db(150.0)));
-    assert_eq!(e.value_at(Beat(2.0)), Some(Db(200.0)));
+    assert_eq!(e.value_at(Beat::new(1.0)), Some(Db::new(150.0)));
+    assert_eq!(e.value_at(Beat::new(2.0)), Some(Db::new(200.0)));
 }
 
 /// A breakpoint reads its own value, whatever the law before it, and each
@@ -63,12 +63,20 @@ fn a_linear_piece_is_the_straight_line() {
 #[test]
 fn a_breakpoint_reads_its_own_value() {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::with_law(Beat(0.0), Db(0.0), Law::Hold));
-    e.add_breakpoint(Breakpoint::with_law(Beat(2.0), Db(5.0), Law::Hold));
+    e.add_breakpoint(Breakpoint::with_law(
+        Beat::new(0.0),
+        Db::new(0.0),
+        Law::Hold,
+    ));
+    e.add_breakpoint(Breakpoint::with_law(
+        Beat::new(2.0),
+        Db::new(5.0),
+        Law::Hold,
+    ));
     e.add_breakpoint(point(4.0, 9.0));
-    assert_eq!(e.value_at(Beat(1.999)), Some(Db(0.0)));
-    assert_eq!(e.value_at(Beat(2.0)), Some(Db(5.0)));
-    assert_eq!(e.value_at(Beat(3.999)), Some(Db(5.0)));
+    assert_eq!(e.value_at(Beat::new(1.999)), Some(Db::new(0.0)));
+    assert_eq!(e.value_at(Beat::new(2.0)), Some(Db::new(5.0)));
+    assert_eq!(e.value_at(Beat::new(3.999)), Some(Db::new(5.0)));
 }
 
 /// Breakpoints sort by time as they come, and a breakpoint at an existing time replaces
@@ -82,22 +90,22 @@ fn add_breakpoint_keeps_time_order_and_replaces_a_tie() {
     e.add_breakpoint(point(1.0, 0.9));
     let times: Vec<f64> = e.breakpoints().iter().map(|p| p.time.get()).collect();
     assert_eq!(times, [0.0, 1.0, 2.0]);
-    assert_eq!(e.breakpoints()[1].value, Db(0.9));
+    assert_eq!(e.breakpoints()[1].value, Db::new(0.9));
     assert_eq!((e.len(), e.is_empty()), (3, false));
 }
 
 /// A range clamps every value read, a held end and a piece's middle alike.
 #[test]
 fn a_range_clamps_what_is_read() {
-    let mut e = Trajectory::new().with_range(Db(0.0), Db(1.0));
+    let mut e = Trajectory::new().with_range(Db::new(0.0), Db::new(1.0));
     e.add_breakpoint(point(0.0, -1.0));
     e.add_breakpoint(point(2.0, 3.0));
-    assert_eq!(e.range(), Some((Db(0.0), Db(1.0))));
-    assert_eq!(e.value_at(Beat(0.0)), Some(Db(0.0)));
-    assert_eq!(e.value_at(Beat(0.25)), Some(Db(0.0)));
-    assert_eq!(e.value_at(Beat(1.0)), Some(Db(1.0)));
-    assert_eq!(e.value_at(Beat(1.5)), Some(Db(1.0)));
-    assert_eq!(e.value_at(Beat(2.0)), Some(Db(1.0)));
+    assert_eq!(e.range(), Some((Db::new(0.0), Db::new(1.0))));
+    assert_eq!(e.value_at(Beat::new(0.0)), Some(Db::new(0.0)));
+    assert_eq!(e.value_at(Beat::new(0.25)), Some(Db::new(0.0)));
+    assert_eq!(e.value_at(Beat::new(1.0)), Some(Db::new(1.0)));
+    assert_eq!(e.value_at(Beat::new(1.5)), Some(Db::new(1.0)));
+    assert_eq!(e.value_at(Beat::new(2.0)), Some(Db::new(1.0)));
 }
 
 /// A trajectory over a range-checked unit reads values that unit holds: a
@@ -106,13 +114,13 @@ fn a_range_clamps_what_is_read() {
 #[test]
 fn a_bipolar_trajectory_reads_in_its_unit() {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::new(Beat(0.0), Bipolar::MIN))
-        .add_breakpoint(Breakpoint::new(Beat(4.0), Bipolar::MAX));
-    assert_eq!(e.value_at(Beat(2.0)), Some(Bipolar::ZERO));
-    assert_eq!(e.value_at(Beat(1.0)), Some(Bipolar::of(-0.5)));
+    e.add_breakpoint(Breakpoint::new(Beat::new(0.0), Bipolar::MIN))
+        .add_breakpoint(Breakpoint::new(Beat::new(4.0), Bipolar::MAX));
+    assert_eq!(e.value_at(Beat::new(2.0)), Some(Bipolar::ZERO));
+    assert_eq!(e.value_at(Beat::new(1.0)), Some(Bipolar::of(-0.5)));
     let e = e.with_range(Bipolar::of(-0.5), Bipolar::of(0.5));
-    assert_eq!(e.value_at(Beat(0.0)), Some(Bipolar::of(-0.5)));
-    assert_eq!(e.value_at(Beat(4.0)), Some(Bipolar::of(0.5)));
+    assert_eq!(e.value_at(Beat::new(0.0)), Some(Bipolar::of(-0.5)));
+    assert_eq!(e.value_at(Beat::new(4.0)), Some(Bipolar::of(0.5)));
 }
 
 /// Simplify drops a breakpoint its neighbours' piece already gives and keeps a
@@ -138,7 +146,7 @@ fn simplify_drops_the_redundant_and_keeps_the_corner() {
 fn simplify_reads_the_previous_breakpoints_law() {
     let build = |law| {
         let mut e = Trajectory::new();
-        e.add_breakpoint(Breakpoint::with_law(Beat(0.0), Db(0.0), law));
+        e.add_breakpoint(Breakpoint::with_law(Beat::new(0.0), Db::new(0.0), law));
         e.add_breakpoint(point(1.0, 0.25));
         e.add_breakpoint(point(2.0, 1.0));
         e.simplify(0.01);
@@ -156,13 +164,13 @@ fn an_f64_unit_is_read_at_its_own_width() {
     use tutti_units::Azimuth;
     let tiny = 90.0 + 1e-9;
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::new(Beat(0.0), Azimuth(10.0)))
-        .add_breakpoint(Breakpoint::new(Beat(4.0), Azimuth(tiny)));
-    assert_eq!(e.value_at(Beat(4.0)), Some(Azimuth(tiny)));
+    e.add_breakpoint(Breakpoint::new(Beat::new(0.0), Azimuth::new(10.0)))
+        .add_breakpoint(Breakpoint::new(Beat::new(4.0), Azimuth::new(tiny)));
+    assert_eq!(e.value_at(Beat::new(4.0)), Some(Azimuth::new(tiny)));
     assert_ne!(tiny as f32 as f64, tiny, "the figure needs more than f32");
     assert_eq!(
-        e.value_at(Beat(2.0)),
-        Some(Azimuth(10.0 + (tiny - 10.0) * 0.5))
+        e.value_at(Beat::new(2.0)),
+        Some(Azimuth::new(10.0 + (tiny - 10.0) * 0.5))
     );
 }
 
@@ -172,7 +180,7 @@ fn simplify_takes_its_tolerance_in_the_units_width() {
     use tutti_units::Elevation;
     let mut e = Trajectory::new();
     for (b, v) in [(0.0, 0.0), (1.0, 10.0 + 1e-9), (2.0, 20.0)] {
-        e.add_breakpoint(Breakpoint::new(Beat(b), Elevation(v)));
+        e.add_breakpoint(Breakpoint::new(Beat::new(b), Elevation::new(v)));
     }
     e.simplify(1e-12);
     assert_eq!(e.len(), 3, "a 1e-9 corner is above a 1e-12 tolerance");

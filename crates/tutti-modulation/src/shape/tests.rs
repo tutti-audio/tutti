@@ -5,33 +5,33 @@ use tutti_curve::{Curvature, Exponent};
 
 #[test]
 fn test_lfo_shapes() {
-    let sine_val = LfoShape::Sine.evaluate_periodic(Phase(0.25));
+    let sine_val = LfoShape::Sine.evaluate_periodic(Phase::new(0.25));
     assert!((sine_val - 1.0).abs() < 0.01);
 
-    let square_val = LfoShape::Square.evaluate_periodic(Phase(0.25));
+    let square_val = LfoShape::Square.evaluate_periodic(Phase::new(0.25));
     assert_eq!(square_val, 1.0);
 
-    let square_val2 = LfoShape::Square.evaluate_periodic(Phase(0.75));
+    let square_val2 = LfoShape::Square.evaluate_periodic(Phase::new(0.75));
     assert_eq!(square_val2, -1.0);
 
-    let tri_val = LfoShape::Triangle.evaluate_periodic(Phase(0.25));
+    let tri_val = LfoShape::Triangle.evaluate_periodic(Phase::new(0.25));
     assert!((tri_val - 1.0).abs() < 0.01);
 
-    let saw_val = LfoShape::Sawtooth.evaluate_periodic(Phase(0.5));
+    let saw_val = LfoShape::Sawtooth.evaluate_periodic(Phase::new(0.5));
     assert!((saw_val - 0.0).abs() < 0.01);
 }
 
 #[test]
 fn test_sawtooth_down_shape() {
-    let val_start = LfoShape::SawtoothDown.evaluate_periodic(Phase(0.0));
+    let val_start = LfoShape::SawtoothDown.evaluate_periodic(Phase::new(0.0));
     assert!((val_start - 1.0).abs() < 0.01);
 
-    let val_mid = LfoShape::SawtoothDown.evaluate_periodic(Phase(0.5));
+    let val_mid = LfoShape::SawtoothDown.evaluate_periodic(Phase::new(0.5));
     assert!((val_mid - 0.0).abs() < 0.01);
 
     // Phase 1.0 is the cycle's end — reachable only as a literal, since
     // `wrapped` would fold it to the next cycle's start.
-    let val_end = LfoShape::SawtoothDown.evaluate_periodic(Phase(1.0));
+    let val_end = LfoShape::SawtoothDown.evaluate_periodic(Phase::new(1.0));
     assert!((val_end - (-1.0)).abs() < 0.01);
 }
 
@@ -160,7 +160,7 @@ fn shape_scurve_is_flatter_at_extremes() {
 /// `sqrt(1/2)` at an eighth, and 0 at the half.
 #[test]
 fn the_sine_shape_is_the_closed_form_of_the_phase() {
-    let at = |p: f64| LfoShape::Sine.evaluate_periodic(Phase(p));
+    let at = |p: f64| LfoShape::Sine.evaluate_periodic(Phase::new(p));
     assert_eq!(at(0.25), 1.0);
     assert_eq!(at(0.75), -1.0);
     assert!(at(0.5).abs() < 1e-7);

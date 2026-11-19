@@ -26,7 +26,7 @@ use pacer::{Due, Pacer};
 
 /// The block a [`TimerDriver`] renders when the spec fixes no
 /// [`quantum`](OutputSpec::quantum): 256 frames, 5.3 ms at 48 kHz.
-pub const DEFAULT_BLOCK: MaxBlock = MaxBlock::of(Samples(256));
+pub const DEFAULT_BLOCK: MaxBlock = MaxBlock::of(Samples::new(256));
 
 /// Runs an output stream on a thread that sleeps to each block's deadline,
 /// with no device: the graph renders through the same [`OutputBlock`] a sound
@@ -108,7 +108,7 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
         let frames = spec.quantum.unwrap_or(DEFAULT_BLOCK).get().min(MAX_FRAMES);
         let rate = spec.sample_rate;
         // Sized here, on the control thread; the loop only fills it.
-        let mut scratch = vec![F::ZERO; block.layout().interleaved_len(Samples(frames))];
+        let mut scratch = vec![F::ZERO; block.layout().interleaved_len(Samples::new(frames))];
         // A refusal of the priority leaves the thread at the default.
         let thread = spawn_named("tutti-timer", Some(PriorityRequest::Highest), move |stop| {
             let time = OsTime;

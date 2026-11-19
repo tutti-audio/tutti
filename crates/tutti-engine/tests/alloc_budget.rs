@@ -112,8 +112,11 @@ fn measure<T>(f: impl FnOnce() -> T) -> (usize, usize, T) {
 /// executor its commit is queued for. The budgets are on the graph `Engine`
 /// renders.
 fn graph(nodes: usize) -> (Editor, Executor) {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
-    ed.insert(NodeKey(0), "sine", ForkByClone(Sine::new(Hz(440.0))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(256)),
+    ));
+    ed.insert(NodeKey(0), "sine", ForkByClone(Sine::new(Hz::new(440.0))));
     for i in 1..=nodes as u64 {
         // Which node is chained does not matter to a budget on the graph
         // itself; it has to be one that takes an input, and `tutti-nodes`'
@@ -222,8 +225,10 @@ fn a_no_op_commit_allocates_a_bounded_amount() {
 /// four-participant [`WorkerPool`](tutti_graph::WorkerPool) when `pooled`:
 /// one task per gain, so the plan spreads.
 fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(256)),
+    ));
     if pooled {
         exec.set_pool(Some(std::sync::Arc::new(
             tutti_graph::WorkerPool::builder()
@@ -232,7 +237,7 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
                 .expect("a worker pool"),
         )));
     }
-    ed.insert(NodeKey(0), "sine", ForkByClone(Sine::new(Hz(440.0))));
+    ed.insert(NodeKey(0), "sine", ForkByClone(Sine::new(Hz::new(440.0))));
     for i in 1..=nodes as u64 {
         ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)));
         ed.spec_mut().topology.edges.insert(

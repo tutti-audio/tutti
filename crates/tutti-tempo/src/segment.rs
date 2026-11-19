@@ -73,7 +73,7 @@ impl Seg {
             bpm0,
             r0,
             transition,
-            dsec: Seconds(dsec),
+            dsec: Seconds::new(dsec),
             k,
         }
     }
@@ -89,7 +89,7 @@ impl Seg {
 
     /// Time into the segment at `db` beats in.
     pub fn sec_in(&self, db: BeatDuration) -> Seconds {
-        Seconds(self.raw_sec_in(db.get()))
+        Seconds::new(self.raw_sec_in(db.get()))
     }
 
     fn raw_sec_in(&self, db: f64) -> f64 {
@@ -107,7 +107,7 @@ impl Seg {
 
     /// Beats into the segment at `ds` in.
     pub fn beat_in(&self, ds: Seconds) -> BeatDuration {
-        BeatDuration(self.raw_beat_in(ds.get()))
+        BeatDuration::new(self.raw_beat_in(ds.get()))
     }
 
     fn raw_beat_in(&self, ds: f64) -> f64 {
