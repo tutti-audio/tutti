@@ -1167,7 +1167,7 @@ mod tests {
                 start: Frame::new(0),
                 end: Some(Frame::new(250)),
             },
-            latency: (Samples::new(0), Trim::NONE),
+            terms: (Samples::new(0), Trim::NONE),
             probe: LatencyProbe::new(Arc::default(), None),
             anchor: Anchor {
                 beat: Beat::new(0.0),
