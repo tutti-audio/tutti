@@ -592,11 +592,11 @@ mod tests {
         let offline = source.capture(ForkMode::Offline).expect("captures");
         assert!(offline.snapshot.offline(offline.mode));
 
-        assert!(rig.bridge.audio().set_render_mode_rt(RenderMode::Offline));
+        assert!(rig.bridge.audio().set_render_mode(RenderMode::Offline));
         let live = source.capture(ForkMode::Live).expect("captures");
         assert!(live.snapshot.offline(live.mode), "told offline: offline");
 
-        assert!(rig.bridge.audio().set_render_mode_rt(RenderMode::Realtime));
+        assert!(rig.bridge.audio().set_render_mode(RenderMode::Realtime));
         let live = source.capture(ForkMode::Live).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told realtime again");
     }

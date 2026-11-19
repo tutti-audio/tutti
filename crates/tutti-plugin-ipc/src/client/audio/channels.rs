@@ -37,12 +37,28 @@ use tutti_units::SampleRate;
 pub(super) const COMMAND_QUEUE_SIZE: usize = 128;
 const RESPONSE_QUEUE_SIZE: usize = 128;
 
+/// A control command with the newest block sequence submitted when it was
+/// pushed: the control lane sends it once the audio lane has dealt with that
+/// block. Two lanes' threads order nothing by themselves, and a request that
+/// reached the server before the blocks pushed ahead of it (a `save_state`
+/// that misses a block's parameter writes) would read a state the host has
+/// already moved past.
+pub(super) struct Stamped<T> {
+    pub(super) after: u64,
+    pub(super) cmd: T,
+}
+
 #[derive(Clone)]
 pub(super) struct Channels {
     /// What rides the audio lane: blocks, resets, render modes.
     blocks: Arc<ArrayQueue<AudioCommand>>,
     /// What rides the control lane: every other request.
-    controls: Arc<ArrayQueue<ControlCommand>>,
+    controls: Arc<ArrayQueue<Stamped<ControlCommand>>>,
+    /// The newest block sequence the audio lane has dealt with: answered by the
+    /// server (or abandoned at its budget), or skipped as stale. A control command stamped with a sequence
+    /// waits for it ([`Stamped`]), so it never reaches the server ahead of a
+    /// block submitted before it.
+    handled: Arc<AtomicU64>,
     /// Whether a control request owes a reply: one at a time.
     owing: ControlSlot,
     /// The settings the audio lane has written and the control lane has not
@@ -251,7 +267,8 @@ struct Settings {
 /// The settings a caller has requested and the audio lane has not taken, each
 /// with the newest block sequence submitted when it was requested: the blocks
 /// after it (a greater sequence) wait for it. A kind requested again replaces
-/// the one waiting: the latest value stands.
+/// the one waiting: the latest value stands, **and so does its stamp** (the
+/// blocks between the two requests are held for the later value too).
 #[derive(Default)]
 struct Requests {
     rate: Option<(tutti_units::SampleRate, u64)>,
@@ -285,6 +302,7 @@ impl Channels {
         let channels = Self {
             blocks: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             controls: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
+            handled: Arc::new(AtomicU64::new(0)),
             owing: ControlSlot::default(),
             settings: Arc::default(),
             requests: Arc::default(),
@@ -458,6 +476,7 @@ impl Channels {
     pub(super) fn wake(&self) {
         self.bell.ring();
         self.control_bell.ring();
+        self.progress.notify();
     }
 
     /// A call that wakes both lanes' threads, for what has no `Channels` to
@@ -638,12 +657,31 @@ impl Channels {
     /// one non-blocking write, no lock, no allocation. A refused command is
     /// counted.
     pub(super) fn push_control(&self, cmd: ControlCommand) -> bool {
-        if self.controls.push(cmd).is_err() {
+        let after = self.newest_submitted();
+        if self.controls.push(Stamped { after, cmd }).is_err() {
             self.note_command_refused();
             return false;
         }
         self.control_bell.ring();
         true
+    }
+
+    /// Records that the audio lane has dealt with block `seq` (sent or skipped),
+    /// or with every block submitted so far when it idles. The audio lane's
+    /// thread only; a waiter is woken by the lane's turn-done notice.
+    pub(super) fn note_handled(&self, seq: u64) {
+        self.handled.fetch_max(seq, Ordering::Release);
+    }
+
+    /// The newest block sequence the audio lane has dealt with.
+    pub(super) fn handled(&self) -> u64 {
+        self.handled.load(Ordering::Acquire)
+    }
+
+    /// Whether a setting waits for the control lane.
+    pub(super) fn setting_waiting(&self) -> bool {
+        let slots = self.settings.lock_recover();
+        slots.rate.is_some() || slots.mode.is_some()
     }
 
     /// Writes `setting` into its slot and rings the control lane's bell: no
@@ -665,6 +703,9 @@ impl Channels {
             }
         }
         self.control_bell.ring();
+        // A control command waiting for blocks the audio lane is holding for
+        // this setting must see it.
+        self.progress.notify();
     }
 
     /// The setting waiting for the control lane, if any: a rate first, then a
@@ -691,7 +732,7 @@ impl Channels {
         self.unapplied.clone()
     }
 
-    pub(super) fn pop_control(&self) -> Option<ControlCommand> {
+    pub(super) fn pop_control(&self) -> Option<Stamped<ControlCommand>> {
         self.controls.pop()
     }
 

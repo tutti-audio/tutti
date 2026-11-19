@@ -90,7 +90,7 @@ impl PluginBridge {
     /// one consumer.
     ///
     /// `sample_rate` seeds the bridge thread's per-block reply timeout (see
-    /// `dispatch::process_timeout`); `set_sample_rate_rt` keeps it current after
+    /// `dispatch::process_timeout`); `set_sample_rate` keeps it current after
     /// device rate changes. The audio thread itself sizes nothing from the rate
     /// any more — it does not wait.
     ///

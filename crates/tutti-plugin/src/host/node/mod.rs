@@ -707,7 +707,7 @@ impl<S> PluginClient<S> {
     /// caller already has. `false` here means the bridge is crashed or its
     /// queue is full. The served control answers from any thread.
     pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
-        self.bridge.audio().set_render_mode_rt(mode)
+        self.bridge.audio().set_render_mode(mode)
     }
 
     /// The bridge, for the tests that script or read the server.
