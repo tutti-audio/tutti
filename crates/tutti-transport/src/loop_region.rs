@@ -120,6 +120,15 @@ impl LoopEdit {
         }
     }
 
+    /// Set the whole region: its bounds and whether it is armed, in one edit.
+    #[must_use]
+    pub const fn region(region: LoopRegion) -> Self {
+        Self {
+            bounds: Some(region.bounds),
+            armed: Some(region.armed),
+        }
+    }
+
     /// Loop over `bounds`: move the bounds and arm, in one edit.
     #[must_use]
     pub const fn over(bounds: LoopRange) -> Self {

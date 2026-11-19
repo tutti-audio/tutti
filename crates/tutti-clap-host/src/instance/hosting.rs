@@ -5,10 +5,12 @@ use std::path::Path;
 
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{
-    InProcess, Load, MainThreadMarker, MainWorkHandle, Origin, OutOfProcess, PluginResult,
+    Describe, EditorPresence, InProcess, Load, MainThreadMarker, MainWorkHandle, Origin,
+    OutOfProcess, PluginDescriptor, PluginResult,
 };
 
 use super::ClapLoaded;
+use super::control::descriptor_of;
 use super::editor_instance::ClapEditor;
 use super::lifecycle::plugin_error;
 use super::load::LoadOptions;
@@ -37,6 +39,20 @@ impl InProcess for ClapLoaded {
 
     fn main_work(&self) -> &MainWorkHandle {
         &self.work
+    }
+}
+
+impl Describe for ClapLoaded {
+    /// The factory's plugins, read without instantiating one: an editor is a
+    /// property of an instance, so each is [`EditorPresence::Unknown`].
+    fn describe(_main: MainThreadMarker, path: &Path) -> PluginResult<Vec<PluginDescriptor>> {
+        let module = native_module_path(path, ModuleKind::Clap)?;
+        let library = (module != path).then_some(module.as_path());
+        let infos = ClapLoaded::probe_all(path, library).map_err(plugin_error)?;
+        Ok(infos
+            .iter()
+            .map(|info| descriptor_of(info, EditorPresence::Unknown))
+            .collect())
     }
 }
 

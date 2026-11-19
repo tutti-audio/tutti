@@ -4,6 +4,8 @@
 
 //! The voices that sound, and the commands that start and end them.
 
+use tutti_buffers::Float;
+use tutti_dsp::Lanes;
 use tutti_midi_protocol::narrow_note_on_velocity;
 use tutti_sf2::{SamplePool, SoundFont};
 use tutti_ump::{MidiChannel, NoteVelocity};
@@ -18,22 +20,22 @@ use crate::voice::Voice;
 
 /// A sounding voice and the id the core knows it by.
 #[derive(Debug, Clone)]
-struct Slot {
+struct Slot<F: Float + Lanes> {
     id: VoiceId,
-    voice: Voice,
+    voice: Voice<F>,
 }
 
 /// The pool of voices: `active` in id order (the order they started, which is
 /// the order the core wants them listed in), `free` the rest. Both are sized
 /// at construction to the polyphony, so nothing here allocates afterwards.
 #[derive(Debug)]
-pub(crate) struct Voices {
+pub(crate) struct Voices<F: Float + Lanes> {
     polyphony: usize,
-    active: Vec<Slot>,
-    free: Vec<Voice>,
+    active: Vec<Slot<F>>,
+    free: Vec<Voice<F>>,
 }
 
-impl Clone for Voices {
+impl<F: Float + Lanes> Clone for Voices<F> {
     /// A copy with its lists as roomy as the original's: a derived clone would
     /// shrink them to their length, and a list that grows is an allocation on
     /// the audio thread.
@@ -49,7 +51,7 @@ impl Clone for Voices {
     }
 }
 
-impl Voices {
+impl<F: Float + Lanes> Voices<F> {
     pub(crate) fn new(render: &Render, polyphony: usize) -> Self {
         Self {
             polyphony,
@@ -156,13 +158,13 @@ impl Voices {
         }
     }
 
-    fn slot(&mut self, id: VoiceId) -> Option<&mut Slot> {
+    fn slot(&mut self, id: VoiceId) -> Option<&mut Slot<F>> {
         let i = self.active.binary_search_by_key(&id, |s| s.id).ok()?;
         Some(&mut self.active[i])
     }
 
     /// Takes the voice out of play, keeping the others in order.
-    fn take(&mut self, id: VoiceId) -> Option<Voice> {
+    fn take(&mut self, id: VoiceId) -> Option<Voice<F>> {
         let i = self.active.binary_search_by_key(&id, |s| s.id).ok()?;
         Some(self.active.remove(i).voice)
     }
@@ -192,7 +194,7 @@ impl Voices {
     }
 
     /// The voices, for the mix.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Voice> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Voice<F>> {
         self.active.iter().map(|s| &s.voice)
     }
 

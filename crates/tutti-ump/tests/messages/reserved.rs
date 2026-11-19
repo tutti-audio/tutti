@@ -17,8 +17,8 @@ use tutti_ump::{
     ChordBass, ChordName, ChordPitch, ChordType, Field, FirstGroup, Flex, FlexAddress,
     FlexTextKind, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks,
     GroupSpan, KeySignature, Letter, Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber,
-    NoteVelocity, Protocol, RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, U4,
-    UiHint, Ump, Unknown, Utility, Voice2,
+    NoteVelocity, OsFunctionBlock, Protocol, RegisteredPerNoteController, SharpsFlats, Stream,
+    StreamConfig, U4, UiHint, Ump, Unknown, Utility, Voice2, read_function_block, read_protocol,
 };
 
 /// `dirty` decodes to the message `clean` encodes, and re-encoding gives
@@ -716,4 +716,104 @@ fn a_constructed_message_encodes_no_reserved_value() {
             },
         )));
     }
+}
+
+/// What an operating system reports reads as the decoder reads the wire: a
+/// Function Block the OS holds as numbers reads as the Function Block Info the
+/// same numbers decode to as words, so a reserved raw is kept and a value in
+/// range is never reserved; a number wider than its field is reserved, never
+/// read as another value.
+#[test]
+fn an_os_value_reads_as_the_decoder_reads_the_wire() {
+    for direction in 0..4u8 {
+        for midi1 in 0..4u8 {
+            for id in [0u8, 31, 32, 127] {
+                let block = OsFunctionBlock {
+                    active: true,
+                    id,
+                    direction,
+                    ui_hint: UiHint::Sender,
+                    midi1,
+                    first_group: 16,
+                    groups_spanned: 0,
+                    midi_ci_version: 7,
+                    max_sysex8_streams: 9,
+                };
+                let words = [
+                    0xF011_8000
+                        | (u32::from(id) << 8)
+                        | (2 << 4)
+                        | (u32::from(midi1) << 2)
+                        | u32::from(direction),
+                    (16 << 24) | (7 << 8) | 9,
+                    0,
+                    0,
+                ];
+                let Ok(Message::Stream(Stream::FunctionBlockInfo(decoded))) = Ump(words).decode()
+                else {
+                    panic!("{words:08x?}");
+                };
+                assert_eq!(read_function_block(block), decoded, "{block:?}");
+            }
+        }
+    }
+    let read = |edit: fn(&mut OsFunctionBlock)| {
+        let mut block = OsFunctionBlock {
+            active: true,
+            id: 3,
+            direction: 3,
+            ui_hint: UiHint::Both,
+            midi1: 0,
+            first_group: 4,
+            groups_spanned: 2,
+            midi_ci_version: 0,
+            max_sysex8_streams: 0,
+        };
+        edit(&mut block);
+        read_function_block(block)
+    };
+    let defined = read(|_| {});
+    assert_eq!(defined.id, Field::Value(FunctionBlockId::of(3)));
+    assert_eq!(defined.first_group, Field::Value(FirstGroup::of(4)));
+    assert_eq!(defined.groups_spanned, Field::Value(GroupSpan::of(2)));
+    assert!(
+        matches!(read(|b| b.first_group = 16).first_group, Field::Reserved(r) if r.get() == 16)
+    );
+    assert!(
+        matches!(read(|b| b.groups_spanned = 17).groups_spanned, Field::Reserved(r) if r.get() == 17)
+    );
+    assert!(
+        matches!(read(|b| b.groups_spanned = 0).groups_spanned, Field::Reserved(r) if r.get() == 0)
+    );
+    assert!(matches!(read(|b| b.id = 200).id, Field::Reserved(r) if r.get() == 127));
+    assert!(matches!(read(|b| b.id = 128).id, Field::Reserved(r) if r.get() == 127));
+    assert!(matches!(
+        read(|b| b.direction = 255).direction,
+        BlockDirection::Reserved(r) if r.get() == 0
+    ));
+    assert!(matches!(
+        read(|b| b.midi1 = 255).midi1,
+        Midi1Port::Reserved(r) if r.get() == 3
+    ));
+    assert!(matches!(
+        read(|b| b.direction = 4).direction,
+        BlockDirection::Reserved(_)
+    ));
+    assert!(matches!(
+        read(|b| b.midi1 = 4).midi1,
+        Midi1Port::Reserved(_)
+    ));
+    assert_eq!(
+        read(|b| b.midi1 = 4).direction,
+        BlockDirection::Bidirectional
+    );
+    for raw in 0..=u8::MAX {
+        assert_eq!(
+            matches!(read_protocol(raw), Protocol::Reserved(_)),
+            !matches!(raw, 1 | 2),
+            "{raw}"
+        );
+    }
+    assert_eq!(read_protocol(1), Protocol::Midi1);
+    assert!(matches!(read_protocol(0), Protocol::Reserved(r) if r.get() == 0));
 }

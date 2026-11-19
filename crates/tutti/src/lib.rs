@@ -190,8 +190,9 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
-    IntoRead, Knobs, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget, ScalarTarget,
-    SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    IntoRead, Knobs, LoopTarget, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget,
+    ScalarTarget, SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError,
+    ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -205,12 +206,16 @@ pub use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, Written,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
-pub use tutti_session::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
+pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
+};
+#[cfg(all(feature = "session", feature = "midi", feature = "analyze"))]
+pub use tutti_session::{
+    LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords,
 };
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
@@ -520,8 +525,8 @@ pub mod codec {
 pub mod sampler {
     pub use tutti_sampler::{
         Block, Direction as PlaybackDirection, Error, OpenError, Placement as ClipPlacement,
-        RefusedPlacement, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader,
-        StreamStatus, VoiceNodeHandle,
+        RefusedPlacement, SamplerFloat, Stream, StreamFault, StreamFile, StreamId, StreamPhase,
+        StreamReader, StreamStatus, VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
@@ -683,11 +688,11 @@ pub mod midi {
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
         DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
-        MaxSysexSize, MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid,
-        NotASysexSize, NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError,
+        MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError, NotADataControl, NotADeviceId,
+        NotAMuid, NotASysexSize, NotProfileChannels, NoteData, PortDirection, ProcessError,
         ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
-        ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
-        SpecificData, StandardProfile, SystemMessages, WinMmDevice,
+        ProfileOutcome, ProfileRequest, ProfileRequestError, ProfileState, ProfileTable,
+        ReportRequest, ReportScope, SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
@@ -697,10 +702,10 @@ pub mod midi {
         MalformedMeta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
         MicrosPerQuarterOutOfRange, MidiFileKind, Moved, Normalized, OtherMetaKind,
         OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
-        Pattern, Placement, SmfDivision, SmfPart, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange,
-        SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, SmpteFractionalFrames,
-        SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView,
-        SysEx, TextKind, Timebase, Timeline, TimelineDrop, WriteOptions,
+        Pattern, Placement, RefusedTimeSignature, SmfDivision, SmfPart, SmfTicksPerFrame,
+        SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange,
+        SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence,
+        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
@@ -763,16 +768,18 @@ pub mod midi {
     };
 
     /// The session's one MIDI error (`tutti_session::MidiError`): each cause
-    /// (hardware, file, send, route) is its source.
+    /// (hardware, send, route) is its source.
     #[cfg(feature = "session")]
     pub use tutti_session::MidiError as Error;
     #[cfg(feature = "session")]
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AddedInstrument, AnyNode, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        Midi, MidiLoad, MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry,
-        MidiSinkInfo, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement, midi_sink,
+        AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
+        InstrumentHandle, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, Midi,
+        MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo,
+        NoCommonTimelineError, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement,
+        TrackError, midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -806,10 +813,10 @@ pub mod midi {
         pub use tutti_midi_device::mcoded7::Mcoded7Error;
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_device::{
-            Ack, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex,
-            ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
-            CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, EntryError,
-            JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
+            Ack, AckStatus, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet,
+            CcIndex, ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType,
+            Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
+            EntryError, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
             NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
             NotAStateSize, NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits,
             NotUnixSeconds, NotValid, NotVendorName, OpaqueBody, PaginationFault, ParamPath,

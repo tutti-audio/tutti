@@ -9,6 +9,7 @@ use tutti_vst2_ffi::{
     buffer::AudioBuffer,
     editor::{Key, KeyCode, Rect},
     interfaces,
+    speaker::SpeakerArrangement,
 };
 
 use crate::aeffect::AEffectExt as _;
@@ -424,6 +425,41 @@ fn dispatch_inner(
                 })),
                 _ => 0,
             };
+        }
+        // `value` is the input `VstSpeakerArrangement*` and `ptr` the output.
+        Ok(OpCode::SetSpeakerArrangement) => {
+            // SAFETY: VST2 ABI: the host passes pointers to arrangements sized for their
+            // channel counts, or null.
+            let arrangements = unsafe {
+                (
+                    SpeakerArrangement::from_ptr(value as *const c_void),
+                    SpeakerArrangement::from_ptr(ptr),
+                )
+            };
+            return match arrangements {
+                (Some(input), Some(output)) => {
+                    isize::from(get_plugin().set_speaker_arrangement(&input, &output))
+                }
+                _ => 0,
+            };
+        }
+        // `value` and `ptr` are the addresses of the host's two `VstSpeakerArrangement*`
+        // slots, which the plugin points at arrangements it keeps.
+        Ok(OpCode::GetSpeakerArrangement) => {
+            let Some((input, output)) = get_plugin().speaker_arrangement() else {
+                return 0;
+            };
+            // SAFETY: as for `get_editor`.
+            let words = unsafe { (*effect).get_arrangement_words() };
+            words[0] = input.encode();
+            words[1] = output.encode();
+            // SAFETY: VST2 ABI: the host passes the addresses of two pointer slots; the
+            // words stay in the plugin's cache until the next call.
+            unsafe {
+                *(value as *mut *const u32) = words[0].as_ptr();
+                *ptr.cast::<*const u32>() = words[1].as_ptr();
+            }
+            return 1;
         }
         Ok(OpCode::StartProcess) => get_plugin().start_process(),
         Ok(OpCode::StopProcess) => get_plugin().stop_process(),

@@ -151,7 +151,7 @@ pub use resource::{
     ResourceInitiator, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
     ResponderAction, ResponderEvent, ResponderSettings, RestoreError, RoleName, SavedState,
     SelectorAction, SetBody, SignificantBits, SimpleAction, StateDevice, StateId, StateRev,
-    StateSize, StateStamp, StepCount, StoreError, TypeHint, UnixSeconds, UpdateKind, Verdict,
+    StateSize, StateStamp, StateVerdict, StepCount, StoreError, TypeHint, UnixSeconds, UpdateKind,
     WrongDevice,
 };
 pub use tree::{PE_JSON_MAX_DEPTH, PeDecimal, PeJson, PeJsonError, PeObject};

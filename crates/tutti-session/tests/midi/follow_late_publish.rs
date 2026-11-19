@@ -20,7 +20,7 @@ const BLOCK: usize = 512;
 /// advances by more than a block at the old tempo.
 #[test]
 fn a_step_published_behind_the_playhead_moves_no_beat() {
-    let s = Session::builder()
+    let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -45,6 +45,7 @@ fn a_step_published_behind_the_playhead_moves_no_beat() {
     .unwrap();
     s.set(s.transport_handle().tempo().to(behind))
         .expect("not following");
+    let _ = s.update();
     for _ in 0..8 {
         beats.push(block(&s));
     }

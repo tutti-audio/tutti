@@ -279,7 +279,7 @@ impl UnisonEngine {
 
         for i in 0..count {
             self.voices[i].phase_offset =
-                Phase::new(f64::from(Xorshift32::to_unit(self.rng.next_u32())));
+                Phase::new(Xorshift32::to_unit::<f64>(self.rng.next_u32()));
         }
         self.all_params()
     }

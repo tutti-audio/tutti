@@ -24,7 +24,7 @@
 //!
 //! A device ends when its Group is no
 //! longer called for: a settled Endpoint whose Function Block changes (the
-//! Connection keeps hearing them unless the Endpoint declared them static)
+//! discovery keeps hearing them unless the Endpoint declared them static)
 //! is read again, and the Groups recomputed. A Group that stays keeps its
 //! device and peers; one that goes ends its device (Invalidate MUID, peers
 //! lost: M2-101 §3.3.2, a block that changes its Group location or number of
@@ -166,7 +166,7 @@ use tutti_graph::{Losses, Offset};
 use tutti_midi_device::{
     CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, EntropyError,
     EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessError, ProcessFeatures,
-    ProcessInitiator, ProfileAction, ProfileInitiator, RequestError, ResourceInitiator,
+    ProcessInitiator, ProfileAction, ProfileInitiator, ProfileRequestError, ResourceInitiator,
     ResourceResponder, ResourceStore,
 };
 use tutti_rt::CounterWriter;
@@ -1256,7 +1256,7 @@ impl Member {
             // The session sends a switch of a Profile at an address only once
             // the one in flight has ended; a second here has no answer of its
             // own.
-            Err(RequestError::AlreadyAsking) => {}
+            Err(ProfileRequestError::AlreadyAsking) => {}
         }
     }
 
@@ -1317,10 +1317,12 @@ impl Member {
 fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
     let mut refused = 0;
     for (group, message) in sends {
-        let packets: Vec<_> = message
-            .packets(*group)
-            .map(|ump| (Offset::ZERO, ump))
-            .collect();
+        let Ok(unsent) = message.packets(*group) else {
+            refused += 1;
+            tracing::debug!("a MIDI-CI message encoded a byte that is not 7-bit");
+            continue;
+        };
+        let packets: Vec<_> = unsent.map(|ump| (Offset::ZERO, ump)).collect();
         if !out.queue(&packets).is_all(&packets) {
             refused += 1;
             tracing::debug!("a MIDI-CI message was refused by {}", out.name());
@@ -1377,7 +1379,7 @@ mod tests {
             header: CiHeader::new(Muid::of(0x0012_3456)),
             data: DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(256)),
         };
-        let packets = message.packets(G0).count();
+        let packets = message.packets(G0).unwrap().count();
         assert!(packets >= 2, "a message of several packets");
         let (mut out, counters) = output_taking(packets - 1);
         assert_eq!(send(&mut out, &[(G0, message.clone())]), Losses::refused(1));
@@ -1446,7 +1448,7 @@ mod tests {
             header: CiHeader::new(Muid::of(0x0012_3456)),
             data: DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(256)),
         };
-        let packets: Vec<Ump> = message.packets(G0).collect();
+        let packets: Vec<Ump> = message.packets(G0).unwrap().collect();
         assert!(packets.len() >= 2);
         let (head, tail) = packets.split_at(packets.len() / 2);
         for (ms, part) in [(1, head), (2, tail)] {
@@ -1780,7 +1782,7 @@ mod tests {
                 [(
                     id,
                     Answer::SwitchLost {
-                        request: tutti_midi_device::Request::SetOff {
+                        request: tutti_midi_device::ProfileRequest::SetOff {
                             address: CiDeviceId::Group,
                             profile
                         }

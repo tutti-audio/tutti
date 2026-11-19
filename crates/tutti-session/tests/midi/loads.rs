@@ -1,16 +1,22 @@
-//! A MIDI file load is a job: `Midi::load_file` returns a `MidiLoad` at once
-//! and the result lands as `MidiReport::FileLoaded` carrying that id, in
-//! `update()`. A SoundFont is a pool entry, loaded the pool's way.
+//! A MIDI file load is a job: `Midi::load_midi` returns a `Job<LoadMidi>` at
+//! once and the `LoadedMidi` lands through `Landed::take` in `update()`, or
+//! `Job::wait` returns it. Each track arrives as a clip value built on the
+//! worker. A SoundFont is a pool entry, loaded the pool's way.
+//!
+//! The fixtures are bytes written by hand, so every figure is the file's own
+//! (SMF 1.0): ticks over the division are beats, a Set Tempo of 500 000
+//! microseconds is a quarter note in half a second.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use tutti_midi_file::{Layout, LeadTrack, MidiFile, SmfDivision, Tick, Track};
+use tutti_midi_file::{Normalized, TimelineDrop};
+use tutti_music::TimeSignature;
 use tutti_session::{
-    DetachedSession, MidiError, MidiLoad, MidiReport, Session, SessionEvent, WorkerError,
+    DetachedSession, LoadMidiError, LoadedMidi, NoCommonTimelineError, Session, SessionEvent,
+    TrackError, WorkerError,
 };
-use tutti_ump::{MidiChannel, NoteNumber, U7};
-use tutti_units::SampleRate;
+use tutti_units::{Beat, SampleRate, Seconds};
 
 fn session() -> DetachedSession {
     Session::builder()
@@ -18,107 +24,271 @@ fn session() -> DetachedSession {
         .expect("builds")
 }
 
-/// A one-note SMF written to `dir`; returns the file as built.
-fn write_file(dir: &Path, name: &str, key: u8) -> (std::path::PathBuf, MidiFile) {
-    let track = Track::new().note(
-        Tick(0),
-        Tick(480),
-        MidiChannel::FIRST,
-        NoteNumber::of(key),
-        U7::of(100),
-    );
-    let file = MidiFile::smf(
-        SmfDivision::per_quarter(480),
-        Layout::Format0(LeadTrack::new(track)),
-    )
-    .expect("builds");
-    let path = dir.join(name);
-    file.write(&path).expect("writes");
-    (path, file)
+/// Set Tempo, 120 beats a minute (500 000 microseconds a quarter), at tick 0.
+const TEMPO_120: [u8; 7] = [0, 0xFF, 0x51, 3, 0x07, 0xA1, 0x20];
+/// Set Tempo, 60 beats a minute (1 000 000 microseconds a quarter), at tick 0.
+const TEMPO_60: [u8; 7] = [0, 0xFF, 0x51, 3, 0x0F, 0x42, 0x40];
+/// Time Signature 3/4, at tick 0.
+const THREE_FOUR: [u8; 8] = [0, 0xFF, 0x58, 4, 3, 2, 24, 8];
+/// A note one quarter long (480 ticks at a division of 480) at the delta before it.
+fn note(delta: u8, key: u8) -> [u8; 9] {
+    [delta, 0x90, key, 100, 0x83, 0x60, 0x80, key, 64]
 }
 
-/// Updates until `want` events of `pick` have landed, or panics after 10 s.
-fn land<T>(
-    s: &mut DetachedSession,
-    want: usize,
-    mut pick: impl FnMut(MidiReport) -> Option<T>,
-) -> Vec<T> {
+/// An MTrk chunk of `events`, ended by End of Track.
+fn track(events: &[&[u8]]) -> Vec<u8> {
+    let body: Vec<u8> = events
+        .iter()
+        .flat_map(|e| e.iter().copied())
+        .chain([0, 0xFF, 0x2F, 0])
+        .collect();
+    let mut chunk = b"MTrk".to_vec();
+    chunk.extend((body.len() as u32).to_be_bytes());
+    chunk.extend(body);
+    chunk
+}
+
+/// An SMF of `format` over a division of 480 ticks a quarter.
+fn smf(format: u16, tracks: &[Vec<u8>]) -> Vec<u8> {
+    let mut bytes = b"MThd\0\0\0\x06".to_vec();
+    bytes.extend(format.to_be_bytes());
+    bytes.extend((tracks.len() as u16).to_be_bytes());
+    bytes.extend(480u16.to_be_bytes());
+    bytes.extend(tracks.concat());
+    bytes
+}
+
+fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, bytes).expect("writes");
+    path
+}
+
+/// Loads the file at `path` and waits for it.
+fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, LoadMidiError> {
+    let job = s.midi().load_midi(path);
+    job.wait(s)
+}
+
+/// A format 1 file lands each track as a clip over the file's one tempo map
+/// and meter, and a file that needed no repair reports clean.
+#[test]
+fn a_format_1_file_lands_each_track_with_its_clip_and_the_shared_timeline() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = smf(
+        1,
+        &[
+            track(&[&TEMPO_120, &THREE_FOUR, &note(0, 60)]),
+            track(&[&note(0, 64), &note(0, 67)]),
+        ],
+    );
+    let loaded = load(&mut session(), write(dir.path(), "f1.mid", &bytes)).expect("loads");
+
+    assert_eq!(loaded.file().tracks().len(), 2);
+    // A note is its note-on and its note-off.
+    assert_eq!(loaded.track(0).unwrap().events.len(), 2);
+    assert_eq!(loaded.track(1).unwrap().events.len(), 4);
+    assert!(loaded.report().is_clean(), "{:?}", loaded.report());
+
+    // 500 000 microseconds a quarter: two quarters are one second.
+    let tempo = loaded.tempo().expect("one timeline");
+    assert_eq!(tempo.seconds_at(Beat(2.0)), Seconds(1.0));
+    let meter = loaded.meter().expect("one timeline");
+    let changes = meter.current();
+    assert_eq!(changes.changes().len(), 1);
+    assert_eq!(changes.changes()[0].signature, TimeSignature::of(3, 4));
+    for i in 0..2 {
+        let track = loaded.track(i).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&track.tempo, tempo));
+        assert!(std::sync::Arc::ptr_eq(&track.meter, meter));
+    }
+}
+
+/// A format 2 file's sequences are independent: it has no common timeline,
+/// and each track keeps its own tempo map.
+#[test]
+fn a_format_2_file_has_no_common_timeline_and_each_track_its_own_tempo() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = smf(
+        2,
+        &[
+            track(&[&TEMPO_120, &note(0, 60)]),
+            track(&[&TEMPO_60, &note(0, 62)]),
+        ],
+    );
+    let loaded = load(&mut session(), write(dir.path(), "f2.mid", &bytes)).expect("loads");
+
+    assert_eq!(loaded.tempo().unwrap_err(), NoCommonTimelineError::PerTrack);
+    assert_eq!(loaded.meter().unwrap_err(), NoCommonTimelineError::PerTrack);
+    let (first, second) = (loaded.track(0).unwrap(), loaded.track(1).unwrap());
+    assert_eq!(first.tempo.seconds_at(Beat(1.0)), Seconds(0.5));
+    assert_eq!(second.tempo.seconds_at(Beat(1.0)), Seconds(1.0));
+    assert_eq!(first.events.len(), 2);
+}
+
+#[test]
+fn a_track_past_the_end_is_no_such_track() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = smf(
+        1,
+        &[track(&[&TEMPO_120, &THREE_FOUR]), track(&[&note(0, 60)])],
+    );
+    let loaded = load(&mut session(), write(dir.path(), "two.mid", &bytes)).expect("loads");
+    assert_eq!(
+        loaded.track(2).unwrap_err(),
+        TrackError::NoSuch {
+            index: 2,
+            tracks: 2
+        }
+    );
+}
+
+/// A file with no tempo and no time signature is read as SMF 1.0 section 2.2
+/// says (120 beats a minute, 4/4) and the load reports what it added.
+#[test]
+fn a_repaired_file_reports_what_the_read_added() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = smf(0, &[track(&[&note(0, 60)])]);
+    let loaded = load(&mut session(), write(dir.path(), "bare.mid", &bytes)).expect("loads");
+    let report = loaded.report();
+    assert_eq!(
+        report.normalized,
+        vec![
+            Normalized::DefaultTempo { track: 0 },
+            Normalized::DefaultTimeSignature { track: 0 },
+        ]
+    );
+    assert!(report.dropped.is_empty());
+    assert!(!report.is_clean());
+    assert_eq!(
+        loaded.tempo().unwrap().seconds_at(Beat(2.0)),
+        Seconds(1.0),
+        "the 120 beats a minute the repair added"
+    );
+}
+
+/// A bare `F7` escape has no SysEx7 packet: the load reports it at its beat
+/// (tick 240 of 480 a quarter is beat 0.5) and the clip holds the rest.
+#[test]
+fn an_event_with_no_packet_is_reported_at_its_beat() {
+    let dir = tempfile::tempdir().unwrap();
+    // Delta 240, F7 escape of the one byte 0x55.
+    let escape: [u8; 5] = [0x81, 0x70, 0xF7, 1, 0x55];
+    let bytes = smf(
+        0,
+        &[track(&[&TEMPO_120, &THREE_FOUR, &escape, &note(0, 60)])],
+    );
+    let loaded = load(&mut session(), write(dir.path(), "esc.mid", &bytes)).expect("loads");
+    let dropped = &loaded.report().dropped;
+    assert_eq!(dropped.len(), 1);
+    assert_eq!((dropped[0].track, dropped[0].beat), (0, Beat(0.5)));
+    assert_eq!(dropped[0].why, TimelineDrop::BareEscape);
+    assert_eq!(loaded.track(0).unwrap().events.len(), 2);
+}
+
+/// A Time Signature of numerator 0 is no meter: the load reports it at its
+/// beat (tick 960 of 480 a quarter is beat 2) and the meter stays 4/4.
+#[test]
+fn a_time_signature_no_meter_holds_is_reported_at_its_beat() {
+    let dir = tempfile::tempdir().unwrap();
+    // Delta 960 (`87 40`), Time Signature 0/4.
+    let zero: [u8; 8] = [0x87, 0x40, 0xFF, 0x58, 4, 0, 2, 24];
+    let mut zero = zero.to_vec();
+    zero.push(8);
+    let bytes = smf(0, &[track(&[&TEMPO_120, &zero])]);
+    let loaded = load(&mut session(), write(dir.path(), "zero.mid", &bytes)).expect("loads");
+    let refused = &loaded.report().refused_time_signatures;
+    assert_eq!(refused.len(), 1);
+    assert_eq!((refused[0].0, refused[0].1.beat), (None, Beat(2.0)));
+    assert_eq!(refused[0].1.numerator, 0);
+    assert!(!loaded.report().is_clean());
+    assert_eq!(loaded.meter().unwrap().current().changes().len(), 1);
+}
+
+/// A file in SMPTE time has seconds and no beats: it lands, and each
+/// of its tracks and timeline answers `SmpteTiming`.
+#[test]
+fn a_file_in_smpte_time_lands_and_says_why_it_has_no_clip_or_timeline() {
+    let dir = tempfile::tempdir().unwrap();
+    // -25 frames a second, 40 ticks a frame (`E7 28`).
+    let bytes = b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x04\0\xFF\x2F\0";
+    let loaded = load(&mut session(), write(dir.path(), "smpte.mid", bytes)).expect("loads");
+    assert_eq!(loaded.track(0).unwrap_err(), TrackError::SmpteTiming);
+    assert_eq!(
+        loaded.tempo().unwrap_err(),
+        NoCommonTimelineError::SmpteTiming
+    );
+    assert_eq!(
+        loaded.meter().unwrap_err(),
+        NoCommonTimelineError::SmpteTiming
+    );
+}
+
+#[test]
+fn a_missing_file_lands_a_read_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let outcome = load(&mut session(), dir.path().join("none.mid"));
+    assert!(
+        matches!(outcome, Err(LoadMidiError::Read(_))),
+        "{outcome:?}"
+    );
+}
+
+/// The result lands in `update()` through `Landed::take`, each load with its
+/// own job and file.
+#[test]
+fn two_loads_land_in_update_each_for_its_own_job() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = write(
+        dir.path(),
+        "a.mid",
+        &smf(0, &[track(&[&TEMPO_120, &THREE_FOUR, &note(0, 60)])]),
+    );
+    let b = write(
+        dir.path(),
+        "b.mid",
+        &smf(
+            0,
+            &[track(&[
+                &TEMPO_120,
+                &THREE_FOUR,
+                &note(0, 60),
+                &note(0, 62),
+            ])],
+        ),
+    );
+    let mut s = session();
+    let (ja, jb) = (s.midi().load_midi(a), s.midi().load_midi(b));
+    assert_ne!(ja.id(), jb.id());
+    let (mut got_a, mut got_b) = (None, None);
     let deadline = Instant::now() + Duration::from_secs(10);
-    let mut got = Vec::new();
-    while got.len() < want {
-        assert!(Instant::now() < deadline, "the load never landed");
+    while got_a.is_none() || got_b.is_none() {
+        assert!(Instant::now() < deadline, "the loads never landed");
         for event in s.update() {
-            if let SessionEvent::Midi(event) = event
-                && let Some(t) = pick(event)
-            {
-                got.push(t);
+            if let SessionEvent::Landed(mut landed) = event {
+                got_a = got_a.or(landed.take(&ja));
+                got_b = got_b.or(landed.take(&jb));
             }
         }
         std::thread::yield_now();
     }
-    got
+    let events = |got: Option<Result<LoadedMidi, LoadMidiError>>| {
+        got.unwrap().unwrap().track(0).unwrap().events.len()
+    };
+    assert_eq!((events(got_a), events(got_b)), (2, 4));
 }
 
-fn files(event: MidiReport) -> Option<(MidiLoad, Result<MidiFile, MidiError>)> {
-    match event {
-        MidiReport::FileLoaded { load, file } => Some((load, file)),
-        _ => None,
-    }
-}
-
-/// A file lands with the id `load_file` returned, holding what was written,
-/// and not before `update()`.
+/// A spawner that drops the job lands the load as `Worker(Dropped)`.
 #[test]
-fn a_file_lands_in_update_with_its_id_and_its_tracks() {
-    let dir = tempfile::tempdir().unwrap();
-    let (path, built) = write_file(dir.path(), "a.mid", 60);
-    let mut s = session();
-    let id = s.midi().load_file(path);
-    let mut landed = land(&mut s, 1, files);
-    let (load, file) = landed.pop().unwrap();
-    assert_eq!(load, id);
-    assert_eq!(file.expect("reads").tracks(), built.tracks());
-}
-
-#[test]
-fn a_missing_file_lands_as_a_file_error_with_its_id() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut s = session();
-    let id = s.midi().load_file(dir.path().join("none.mid"));
-    let (load, file) = land(&mut s, 1, files).pop().unwrap();
-    assert_eq!(load, id);
-    assert!(matches!(file, Err(MidiError::Read(_))), "{file:?}");
-}
-
-#[test]
-fn two_loads_land_each_with_its_own_id_and_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let (pa, fa) = write_file(dir.path(), "a.mid", 60);
-    let (pb, fb) = write_file(dir.path(), "b.mid", 72);
-    assert_ne!(fa.tracks(), fb.tracks());
-    let mut s = session();
-    let a = s.midi().load_file(pa);
-    let b = s.midi().load_file(pb);
-    assert_ne!(a, b);
-    for (load, file) in land(&mut s, 2, files) {
-        let want = if load == a { &fa } else { &fb };
-        assert_eq!(file.unwrap().tracks(), want.tracks());
-    }
-}
-
-/// A spawner that drops the job lands the load as `Job(Dropped)`.
-#[test]
-fn a_dropped_job_lands_as_a_job_error() {
+fn a_dropped_job_lands_as_a_worker_error() {
     let mut s = Session::builder()
         .spawn_with(drop)
         .build_detached(SampleRate::SR_48K)
         .expect("builds");
-    let id = s.midi().load_file("never-read.mid");
-    let (load, file) = land(&mut s, 1, files).pop().unwrap();
-    assert_eq!(load, id);
+    let outcome = load(&mut s, "never-read.mid".into());
     assert!(
-        matches!(file, Err(MidiError::Job(WorkerError::Dropped))),
-        "{file:?}"
+        matches!(outcome, Err(LoadMidiError::Worker(WorkerError::Dropped))),
+        "{outcome:?}"
     );
 }
 
@@ -156,7 +326,7 @@ mod soundfont {
         .unwrap();
         assert!(matches!(settled(&mut s, "gm"), PoolState::Loaded));
         let font = s.soundfont(&"gm").unwrap();
-        let unit = SoundFontUnit::new(font, Settings::new());
+        let unit = SoundFontUnit::<f32>::new(font, Settings::new());
         assert!(unit.is_ok(), "{:?}", unit.err());
     }
 

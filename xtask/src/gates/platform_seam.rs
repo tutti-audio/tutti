@@ -76,7 +76,6 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
         8,
         PLUGINS,
     ),
-    ("crates/tutti-plugin-probe/src/lib.rs", 3, PLUGINS),
     ("crates/tutti-plugin-types/src/bundle.rs", 13, PLUGINS),
     ("crates/tutti-plugin-types/src/editor.rs", 2, PLUGINS),
     (

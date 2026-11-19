@@ -17,13 +17,10 @@ fn the_wait_is_a_range_checked_value() {
 
 #[test]
 fn only_a_timeout_wait_ack_is_a_wait() {
-    let wait = Ack::new(U7::of(0x34), Ack::STATUS_TIMEOUT_WAIT).with_status_data(U7::of(30));
+    let wait = Ack::new(U7::of(0x34), AckStatus::TimeoutWait(TimeoutWait::of(30)));
     assert_eq!(TimeoutWait::from_ack(&wait), Some(TimeoutWait::of(30)));
     assert_eq!(
-        TimeoutWait::from_ack(&Ack::new(
-            U7::of(0x34),
-            Ack::STATUS_FLOW_CONTROL_NEXT_CHUNKS
-        )),
+        TimeoutWait::from_ack(&Ack::new(U7::of(0x34), AckStatus::FlowControlNextChunks)),
         None
     );
 }

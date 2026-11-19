@@ -1,6 +1,7 @@
 //! The text types of a Header Data property, each holding the limit M2-103 sets
 //! on it (§6.1, §7.1.1 to §7.5, §8.4, §8.5, §11.1).
 
+use std::borrow::Cow;
 use std::fmt;
 
 use super::write::escaped_len;
@@ -20,14 +21,14 @@ macro_rules! text_type {
         #[derive(Clone, Debug, PartialEq, Eq, Hash)]
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         #[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
-        pub struct $name(String);
+        pub struct $name(::std::borrow::Cow<'static, str>);
 
         impl $name {
             /// The value, or `None` when `text` breaks the limit.
             #[must_use]
             pub fn new(text: &str) -> Option<Self> {
                 let valid: fn(&str) -> bool = $valid;
-                valid(text).then(|| Self(text.to_owned()))
+                valid(text).then(|| Self(::std::borrow::Cow::Owned(text.to_owned())))
             }
 
             /// The text.
@@ -55,7 +56,7 @@ macro_rules! text_type {
 
         impl From<$name> for String {
             fn from(value: $name) -> String {
-                value.0
+                value.0.into_owned()
             }
         }
 
@@ -125,7 +126,44 @@ text_type! {
     /// A Media Type, as `mediaType` carries it (§7.5, Table 16): 1 to 75 printable
     /// ASCII characters.
     MediaType, "media type",
-    |t| (1..=75).contains(&t.len()) && t.bytes().all(|b| matches!(b, b' '..=b'~'))
+    |t| media_type_valid(t)
+}
+
+const fn media_type_valid(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    if bytes.is_empty() || bytes.len() > 75 {
+        return false;
+    }
+    let mut i = 0;
+    while i < bytes.len() {
+        if !matches!(bytes[i], b' '..=b'~') {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+impl MediaType {
+    /// The media type of a literal, checked when it is a constant.
+    ///
+    /// # Panics
+    ///
+    /// When `text` is not 1 to 75 printable ASCII characters; in a `const` that
+    /// is a compile error.
+    #[must_use]
+    pub const fn of(text: &'static str) -> Self {
+        assert!(media_type_valid(text), "not a media type");
+        Self(Cow::Borrowed(text))
+    }
+
+    /// `application/json`, the media type of Property Data unless a Resource
+    /// lists others (M2-103 §8.3).
+    pub const JSON: Self = Self::of("application/json");
+
+    /// `application/octet-stream`, the media type of Property Data no format
+    /// names.
+    pub const OCTET_STREAM: Self = Self::of("application/octet-stream");
 }
 
 /// The explanatory text of a Reply (§7.3, Table 14), held as the text it says:
@@ -168,5 +206,21 @@ impl From<PeMessage> for String {
 impl fmt::Display for PeMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// M2-103 Table 16: the literal media types are valid media types, and the
+    /// one a Resource lists by default is JSON.
+    #[test]
+    fn the_named_media_types_are_the_ones_new_accepts() {
+        assert_eq!(MediaType::JSON, MediaType::new("application/json").unwrap());
+        assert_eq!(
+            MediaType::OCTET_STREAM,
+            MediaType::new("application/octet-stream").unwrap()
+        );
     }
 }

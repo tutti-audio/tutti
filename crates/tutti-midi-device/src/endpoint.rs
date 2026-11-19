@@ -4,7 +4,7 @@
 //! Reduction (JR) timestamps it supports and has active, who it is, and its
 //! Function Blocks. [`Endpoint::reply`] is the answering side as one pure step
 //! over a received message, with no allocation. The asking side is
-//! [`Connection`](crate::Connection).
+//! [`EndpointDiscovery`](crate::EndpointDiscovery).
 
 use tutti_ump::{
     BlockDirection, BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, FirstGroup,
@@ -12,7 +12,7 @@ use tutti_ump::{
     Protocol, Stream, StreamConfig, Sysex8StreamIds, UiHint, Ump, UmpVersion, text_packets,
 };
 
-use crate::name::{BlockName, EndpointName, ProductInstanceId};
+use crate::name::{BlockName, EndpointName, NameError, ProductInstanceId};
 
 /// How many Function Blocks an Endpoint holds (M2-104 §7.1.7: numbers `0..=31`).
 pub const MAX_FUNCTION_BLOCKS: usize = 32;
@@ -168,6 +168,31 @@ pub enum BlockError {
         /// How many Groups it was to span.
         groups: GroupSpan,
     },
+    /// A field of a [`FunctionBlockInfo`] is outside its range: a number above
+    /// 31, a first Group above 15, or a Group span outside `1..=16`.
+    #[error("the block's {field} is outside its range")]
+    OutOfRange {
+        /// Which field.
+        field: BlockField,
+    },
+    /// The block's name is not a [`BlockName`].
+    #[error("the block's name is refused: {0}")]
+    Name(NameError),
+}
+
+/// A field of a [`FunctionBlockInfo`] that holds a range-checked number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
+pub enum BlockField {
+    /// The block number.
+    #[error("block number")]
+    Id,
+    /// The first Group it spans.
+    #[error("first Group")]
+    FirstGroup,
+    /// How many Groups it spans.
+    #[error("Group span")]
+    Groups,
 }
 
 /// A [`FunctionBlock`] being described: [`FunctionBlock::builder`] starts one
@@ -199,11 +224,7 @@ impl FunctionBlockBuilder {
     /// out is kept as [`UiHint::Unknown`], so a block a peer or an OS
     /// describes is never refused for it.
     pub const fn wire_ui_hint(self, hint: UiHint) -> Self {
-        let hint = if contradicts(self.block.direction, hint) {
-            UiHint::Unknown
-        } else {
-            hint
-        };
+        let hint = wire_ui_hint(self.block.direction, hint);
         self.ui_hint(hint)
     }
 
@@ -294,6 +315,34 @@ impl FunctionBlock {
         }
     }
 
+    /// Block 0 from Group 1 over `groups`: active, bidirectional, no hint and
+    /// no MIDI 1.0 port. Group 1 and at most 16 Groups never run past Group 16,
+    /// so the builder's checks have nothing to refuse.
+    pub(crate) const fn first(groups: GroupSpan) -> Self {
+        Self {
+            id: FunctionBlockId::of(0),
+            active: true,
+            direction: BlockDirection::Bidirectional,
+            ui_hint: UiHint::Unknown,
+            midi1: Midi1Port::No,
+            first_group: FirstGroup::of(0),
+            groups,
+            midi_ci_version: 0,
+            max_sysex8_streams: 0,
+            name: None,
+        }
+    }
+
+    /// The block a MIDI 1.0 device is inferred to have: [`first`](Self::first)
+    /// over Group 1 alone, a MIDI 1.0 port of unrestricted bandwidth, with a
+    /// UI hint of both.
+    pub(crate) const fn inferred() -> Self {
+        let mut block = Self::first(GroupSpan::of(1));
+        block.ui_hint = UiHint::Both;
+        block.midi1 = Midi1Port::Unrestricted;
+        block
+    }
+
     /// Its number.
     #[must_use]
     pub const fn id(&self) -> FunctionBlockId {
@@ -362,8 +411,9 @@ impl FunctionBlock {
     pub const fn name(&self) -> Option<&BlockName> {
         self.name.as_ref()
     }
-
-    fn info(&self) -> FunctionBlockInfo {
+    /// The Function Block Info Notification that describes it (§7.1.8): the
+    /// inverse of [`from_info`](Self::from_info), without the name.
+    pub fn info(&self) -> FunctionBlockInfo {
         FunctionBlockInfo {
             active: self.active,
             id: self.id.into(),
@@ -377,26 +427,79 @@ impl FunctionBlock {
         }
     }
 
-    /// The block a peer's Function Block Info describes, or `None` when a
-    /// field the wire kept is out of range: a number above 31, a Group span
-    /// off the end, or a reserved direction.
-    pub(crate) fn from_info(info: &FunctionBlockInfo) -> Option<Self> {
-        let id = info.id.value()?;
-        let first_group = info.first_group.value()?;
-        let groups = info.groups_spanned.value()?;
-        // A peer's reserved MIDI 1.0 value, or a port over several Groups, is
-        // kept as not a port: the block is still usable as MIDI 2.0.
+    /// The block `info` describes, named `name` when it has one; what an OS
+    /// reports or an application declares, and refused when it does not hold
+    /// together. Nothing is clamped or repaired. A name over
+    /// [`BlockName`]'s 91 bytes is refused too: cut one for display with
+    /// [`BlockName::truncated`] first.
+    ///
+    /// # Errors
+    ///
+    /// A [`BlockError`]: [`OutOfRange`](BlockError::OutOfRange) for a number,
+    /// first Group or Group span the wire kept as reserved,
+    /// [`Name`](BlockError::Name) for a `name` that is not a [`BlockName`],
+    /// else what [`FunctionBlockBuilder::build`] refuses.
+    pub fn from_info(info: &FunctionBlockInfo, name: Option<&str>) -> Result<Self, BlockError> {
+        let id = info.id.value().ok_or(BlockError::OutOfRange {
+            field: BlockField::Id,
+        })?;
+        let first_group = info.first_group.value().ok_or(BlockError::OutOfRange {
+            field: BlockField::FirstGroup,
+        })?;
+        let groups = info.groups_spanned.value().ok_or(BlockError::OutOfRange {
+            field: BlockField::Groups,
+        })?;
+        let mut builder = Self::builder(id, info.direction, first_group, groups)
+            .active(info.active)
+            .ui_hint(info.ui_hint)
+            .midi1(info.midi1)
+            .midi_ci(info.midi_ci_version, info.max_sysex8_streams);
+        if let Some(name) = name {
+            builder = builder.name(BlockName::try_from(name).map_err(BlockError::Name)?);
+        }
+        builder.build()
+    }
+
+    /// The block that `info` and `name` describe, read as a receiver reads
+    /// what a device or an OS reports (§7.1.8), not as a caller who builds one:
+    /// `None` when a field the wire kept is out of range (a number above 31, a
+    /// Group span off the end) or the direction is reserved. A UI hint the
+    /// direction rules out is read as unknown, a reserved MIDI 1.0 value, or a
+    /// port over several Groups, as not a port: the block is still usable as
+    /// MIDI 2.0. A `name` is display text: one over [`BlockName`]'s 91 bytes is
+    /// cut ([`BlockName::truncated`]), and one with a NUL or a Byte Order Mark is
+    /// dropped, the block kept. [`from_info`](Self::from_info) refuses all of it.
+    #[must_use]
+    pub fn received(info: &FunctionBlockInfo, name: Option<&str>) -> Option<Self> {
         let midi1 = match info.midi1 {
-            Midi1Port::Unrestricted | Midi1Port::Restricted if groups.get() == 1 => info.midi1,
+            Midi1Port::Unrestricted | Midi1Port::Restricted
+                if info.groups_spanned.value().is_some_and(|g| g.get() == 1) =>
+            {
+                info.midi1
+            }
             _ => Midi1Port::No,
         };
-        Self::builder(id, info.direction, first_group, groups)
-            .active(info.active)
-            .wire_ui_hint(info.ui_hint)
-            .midi1(midi1)
-            .midi_ci(info.midi_ci_version, info.max_sysex8_streams)
-            .build()
-            .ok()
+        let ui_hint = wire_ui_hint(info.direction, info.ui_hint);
+        let name = name.and_then(BlockName::truncated);
+        Self::from_info(
+            &FunctionBlockInfo {
+                midi1,
+                ui_hint,
+                ..*info
+            },
+            name.as_ref().map(BlockName::as_str),
+        )
+        .ok()
+    }
+}
+
+/// The UI hint a receiver reads (§7.1.8): `hint`, or [`UiHint::Unknown`] when it
+/// names a role `direction` rules out.
+const fn wire_ui_hint(direction: BlockDirection, hint: UiHint) -> UiHint {
+    if contradicts(direction, hint) {
+        UiHint::Unknown
+    } else {
+        hint
     }
 }
 
@@ -413,7 +516,7 @@ const fn contradicts(direction: BlockDirection, hint: UiHint) -> bool {
 /// What [`Endpoint::reply`] did with one message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
-pub enum Reply {
+pub enum EndpointReply {
     /// The message is not one an Endpoint answers: nothing was sent and
     /// nothing changed.
     Ignored,
@@ -570,20 +673,7 @@ impl Endpoint {
     }
 
     fn insert_inferred_block(&mut self) {
-        let (Some(id), Some(first), Some(span)) = (
-            FunctionBlockId::new(0),
-            FirstGroup::new(0),
-            GroupSpan::new(1),
-        ) else {
-            return;
-        };
-        let block = FunctionBlock::builder(id, BlockDirection::Bidirectional, first, span)
-            .ui_hint(UiHint::Both)
-            .midi1(Midi1Port::Unrestricted)
-            .build();
-        if let Ok(block) = block {
-            self.insert_block(block);
-        }
+        self.insert_block(FunctionBlock::inferred());
     }
 
     /// The Endpoint a MIDI application presents for a port over `groups` from
@@ -593,14 +683,9 @@ impl Endpoint {
     /// [`named`](Self::named)).
     #[must_use]
     pub fn local(supports: Supports, groups: GroupSpan) -> Self {
-        let mut endpoint = Self::new(supports).static_blocks(true);
-        if let (Some(id), Some(first)) = (FunctionBlockId::new(0), FirstGroup::new(0))
-            && let Ok(block) =
-                FunctionBlock::builder(id, BlockDirection::Bidirectional, first, groups).build()
-        {
-            endpoint.insert_block(block);
-        }
-        endpoint
+        Self::new(supports)
+            .static_blocks(true)
+            .block(FunctionBlock::first(groups))
     }
 
     /// An Endpoint with nothing known, for a discoverer to fill.
@@ -615,9 +700,13 @@ impl Endpoint {
         endpoint
     }
 
-    /// The Endpoint with the Protocol and JR Timestamps in use now set, for an
-    /// Endpoint whose state an OS reports rather than one that was asked
-    /// (§7.1.6.3). Nothing is checked against its capabilities.
+    /// The Endpoint with the Protocol and JR Timestamps in force now recorded
+    /// (§7.1.6.3): what is happening on the link, reported by an OS, a
+    /// peer's Notification or the owner of the port. It is not a request, so
+    /// it may exceed what this Endpoint advertises (a peer that sends JR
+    /// Timestamps to an Endpoint that did not offer to receive them): a
+    /// request is taken through [`Endpoint::reply`], which keeps the parts the
+    /// Endpoint does not support (§7.1.6.1 step 3).
     #[must_use]
     pub const fn in_use(mut self, active: StreamConfig) -> Self {
         self.active = active;
@@ -748,8 +837,8 @@ impl Endpoint {
     ///   active, which is the current configuration for a part it could not
     ///   change (§7.1.6.1 step 3).
     ///
-    /// Any other message answers nothing ([`Reply::Ignored`]). A Stream
-    /// Configuration Request's [`Reply::Configured`] says whether the request was
+    /// Any other message answers nothing ([`EndpointReply::Ignored`]). A Stream
+    /// Configuration Request's [`EndpointReply::Configured`] says whether the request was
     /// granted whole, so the owner of the port can switch to the Protocol and JR
     /// Timestamps now active.
     ///
@@ -759,25 +848,27 @@ impl Endpoint {
     /// reserved bits not read. A lower one is read as that version defines
     /// the message, and Table 5 gives 1.0 no Stream messages (and no version
     /// below it), so it defines no filter bit and gets no answer
-    /// ([`Reply::Ignored`]).
-    pub fn reply(&mut self, message: Message, out: &mut impl Extend<Ump>) -> Reply {
+    /// ([`EndpointReply::Ignored`]).
+    pub fn reply(&mut self, message: Message, out: &mut impl Extend<Ump>) -> EndpointReply {
         let Message::Stream(stream) = message else {
-            return Reply::Ignored;
+            return EndpointReply::Ignored;
         };
         match stream {
-            Stream::EndpointDiscovery { version, .. } if version < UMP_VERSION => Reply::Ignored,
+            Stream::EndpointDiscovery { version, .. } if version < UMP_VERSION => {
+                EndpointReply::Ignored
+            }
             Stream::EndpointDiscovery { filter, .. } => {
                 self.answer_discovery(filter, out);
-                Reply::Answered
+                EndpointReply::Answered
             }
             Stream::FunctionBlockDiscovery { block, filter } => {
                 self.answer_block_discovery(block, filter, out);
-                Reply::Answered
+                EndpointReply::Answered
             }
             Stream::StreamConfigurationRequest(request) => {
                 self.configure(request);
                 send(out, Stream::StreamConfigurationNotification(self.active));
-                Reply::Configured(if self.active == request {
+                EndpointReply::Configured(if self.active == request {
                     Configuration::Granted(self.active)
                 } else {
                     Configuration::Reduced {
@@ -786,7 +877,7 @@ impl Endpoint {
                     }
                 })
             }
-            _ => Reply::Ignored,
+            _ => EndpointReply::Ignored,
         }
     }
 
@@ -1013,14 +1104,14 @@ impl Endpoint {
     }
 
     /// The block a peer's Function Block Info describes, read as this
-    /// Endpoint's: `None` for one `from_info` refuses and for one outside the
+    /// Endpoint's: `None` for one `received` refuses and for one outside the
     /// count the Endpoint declared (its numbers are `0..declared`, §7.1.7). A
     /// block a peer that declared its blocks static sends inactive is read
     /// active: §7.1.8 says such an Endpoint has no inactive
     /// Function Blocks, every one having the bit set. A MIDI 1.0 port over several Groups is already read as a plain
-    /// block (`from_info`: §7.1.8 requires it to span one Group).
+    /// block (`received`: §7.1.8 requires it to span one Group).
     pub(crate) fn read_block(&self, info: &FunctionBlockInfo) -> Option<FunctionBlock> {
-        let mut block = FunctionBlock::from_info(info)?;
+        let mut block = FunctionBlock::received(info, None)?;
         if block.id.get() >= self.declared_blocks.get() {
             return None;
         }

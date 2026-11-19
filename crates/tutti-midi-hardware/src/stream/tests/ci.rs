@@ -25,7 +25,7 @@ pub(super) fn ci_sent(wire: &Wire) -> Vec<(MidiGroup, CiMessage)> {
 
 /// The device says `message` on `group` at `ms`.
 fn say(wire: &Wire, group: MidiGroup, message: &CiMessage, ms: u64) {
-    reply_at(wire, message.packets(group).collect(), ms);
+    reply_at(wire, message.packets(group).unwrap().collect(), ms);
 }
 
 /// A peer of ours on the wire, and what it declares.
@@ -419,7 +419,7 @@ fn nothing_midi_ci_reaches_the_sessions_output_and_the_graph_still_hears_sysex()
 
     rig.run(40);
     let heard: Vec<_> = rig.take().into_iter().map(|(_, _, ump)| ump).collect();
-    let said: Vec<_> = [identity_reply(0), reply.packets(GROUP_0).collect()].concat();
+    let said: Vec<_> = [identity_reply(0), reply.packets(GROUP_0).unwrap().collect()].concat();
     assert_eq!(heard, said, "the graph hears every packet MIDI-CI heard");
 }
 
@@ -918,8 +918,8 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 use crate::{ChannelCount, ProfileError, ProfilesChange, Switcher};
 use tutti_midi_device::Whole;
 use tutti_midi_device::{
-    Outcome, PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileList,
-    ProfileLists, ProfileState, ProfileTarget, Request, StandardProfile,
+    PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileList, ProfileLists,
+    ProfileOutcome, ProfileRequest, ProfileState, ProfileTarget, StandardProfile,
 };
 use tutti_ump::MidiChannel;
 
@@ -1175,11 +1175,11 @@ fn a_set_profile_on_names_the_channel_and_its_enabled_report_updates_the_table()
     assert_eq!(
         request_answers(&changes),
         [&Answer::Switch {
-            request: Request::SetOn {
+            request: ProfileRequest::SetOn {
                 address: channel(0),
                 profile: profile(2)
             },
-            outcome: Outcome::Reported {
+            outcome: ProfileOutcome::Reported {
                 state: ProfileState::Enabled,
                 channels: ProfileChannels::of(3),
             },
@@ -1412,8 +1412,8 @@ fn a_set_profile_on_a_group_asks_for_no_channels_and_off_is_resolved_by_the_disa
         request_answers(&changes).iter().any(|a| matches!(
             a,
             Answer::Switch {
-                request: Request::SetOff { .. },
-                outcome: Outcome::Reported {
+                request: ProfileRequest::SetOff { .. },
+                outcome: ProfileOutcome::Reported {
                     state: ProfileState::Disabled,
                     ..
                 },
@@ -1556,7 +1556,7 @@ fn a_set_profile_nothing_answers_times_out_after_the_profile_timeout() {
         matches!(
             request_answers(&ended).as_slice(),
             [Answer::Switch {
-                outcome: Outcome::TimedOut,
+                outcome: ProfileOutcome::TimedOut,
                 ..
             }]
         ),
@@ -1828,7 +1828,7 @@ fn a_nak_of_a_report_ends_it_and_is_reported() {
     let _ = polled(&mut wire, 110);
     let nak = Nak::new(
         U7::of(SUB_ID2_MESSAGE_REPORT_INQUIRY),
-        Nak::STATUS_TERMINATE,
+        tutti_midi_device::NakStatus::Terminate(tutti_midi_device::PeTerminator::Responder),
     );
     say(
         &wire,
@@ -2659,8 +2659,8 @@ fn an_inquiry_of_a_peer_that_declared_no_property_exchange_is_nakked() {
     assert_eq!(*to, peer());
     assert_eq!(nak.nak_sub_id2.get(), 0x30);
     assert_eq!(
-        nak.status_code,
-        tutti_midi_device::Nak::STATUS_MESSAGE_NOT_SUPPORTED
+        nak.status,
+        tutti_midi_device::NakStatus::MessageNotSupported
     );
 }
 

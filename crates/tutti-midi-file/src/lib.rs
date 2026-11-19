@@ -167,9 +167,9 @@ pub use file::{
     MalformedMeta, Meta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
     MicrosPerQuarterOutOfRange, MidiFile, Moved, Normalized, OtherMetaKind,
     OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, PairedNote, Pattern,
-    Placement, SmfFormat, SmfPart, SmpteFractionalFrames, SmpteFractionalFramesOutOfRange,
-    SmpteOffset, SmpteSequence, SmpteSequences, SmpteView, SysEx, TextKind, Tick, Timebase,
-    Timeline, TimelineDrop, ToClipError, Track,
+    Placement, RefusedTimeSignature, SmfFormat, SmfPart, SmpteFractionalFrames,
+    SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView, SysEx,
+    TextKind, Tick, Timebase, Timeline, TimelineDrop, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
 pub use smf::{

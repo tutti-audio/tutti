@@ -33,6 +33,11 @@ impl TransportPart {
         }
     }
 
+    /// The transport.
+    pub(crate) const fn transport(&self) -> &Transport {
+        &self.transport
+    }
+
     /// The transport's settings: the tempo map and the project meter.
     pub(crate) fn settings(&self) -> &TransportSettings {
         self.transport.settings()

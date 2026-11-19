@@ -18,7 +18,7 @@ use tutti_session::{PluginChange, PluginEvent};
 
 use std::time::{Duration, Instant};
 
-use support::{clap_probe, plugin_server};
+use support::clap_probe;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_modulation::Lfo;
@@ -49,7 +49,7 @@ fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
 /// A detached stereo session at 48 kHz, the probe's server in the
 /// environment.
 fn detached() -> DetachedSession {
-    set_env("TUTTI_PLUGIN_SERVER", plugin_server());
+    set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     // Jobs run inline, in the phase that submits them, and land in the next
     // update's `Collect`.
     Session::builder()

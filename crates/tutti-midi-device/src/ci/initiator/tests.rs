@@ -230,11 +230,11 @@ fn a_nak_of_the_inquiry_ends_it() {
     let refusal = Decoded::Message(CiMessage::Nak {
         header: header_from(PEER, CiDeviceId::FunctionBlock),
         to: Muid::of(OURS),
-        nak: Nak::new(U7::of(0x20), Nak::STATUS_MESSAGE_NOT_SUPPORTED),
+        nak: Nak::new(U7::of(0x20), NakStatus::MessageNotSupported),
     });
     let actions = i.on_message(&refusal);
     assert!(
-        matches!(&actions[..], [ProfileAction::InquiryRefused(n)] if n.status_code == Nak::STATUS_MESSAGE_NOT_SUPPORTED)
+        matches!(&actions[..], [ProfileAction::InquiryRefused(n)] if n.status == NakStatus::MessageNotSupported)
     );
     assert_eq!(i.deadline(), None);
     assert!(!i.is_known());
@@ -415,7 +415,7 @@ fn set_on_resolves_on_the_enabled_report_of_that_profile_at_that_address() {
         channels: ProfileChannels::of(2),
     };
     i.set_on(target, profile(1), now).unwrap();
-    let request = Request::SetOn {
+    let request = ProfileRequest::SetOn {
         address: channel(0),
         profile: profile(1),
     };
@@ -436,7 +436,7 @@ fn set_on_resolves_on_the_enabled_report_of_that_profile_at_that_address() {
     let actions = i.on_message(&enabled(channel(0), profile(1), 2));
     assert!(actions.contains(&ProfileAction::Resolved {
         request,
-        outcome: Outcome::Reported {
+        outcome: ProfileOutcome::Reported {
             state: ProfileState::Enabled,
             channels: ProfileChannels::of(2)
         },
@@ -451,11 +451,11 @@ fn set_on_answered_by_a_disabled_report_is_the_peer_unable_to_comply() {
     i.set_on(ProfileTarget::Group, profile(1), now).unwrap();
     let actions = i.on_message(&disabled(CiDeviceId::Group, profile(1), 0));
     assert!(actions.contains(&ProfileAction::Resolved {
-        request: Request::SetOn {
+        request: ProfileRequest::SetOn {
             address: CiDeviceId::Group,
             profile: profile(1)
         },
-        outcome: Outcome::Reported {
+        outcome: ProfileOutcome::Reported {
             state: ProfileState::Disabled,
             channels: ProfileChannels::BY_ADDRESS
         },
@@ -481,11 +481,11 @@ fn set_off_resolves_on_the_disabled_report_or_the_enabled_one_if_the_peer_could_
         assert_eq!((header.device_id, *p), (channel(3), profile(1)));
         let actions = i.on_message(&report);
         assert!(actions.contains(&ProfileAction::Resolved {
-            request: Request::SetOff {
+            request: ProfileRequest::SetOff {
                 address: channel(3),
                 profile: profile(1)
             },
-            outcome: Outcome::Reported {
+            outcome: ProfileOutcome::Reported {
                 state,
                 channels: ProfileChannels::of(1)
             },
@@ -509,7 +509,10 @@ fn a_report_from_another_muid_does_not_resolve_a_request() {
 
 #[test]
 fn a_nak_of_a_set_resolves_it_as_refused_whatever_its_status() {
-    for status in [Nak::STATUS_PROFILE_NOT_SUPPORTED, Nak::STATUS_BUSY] {
+    for status in [
+        NakStatus::ProfileNotSupported,
+        NakStatus::Busy(TimeoutWait::of(30)),
+    ] {
         let (mut i, now) = known();
         i.set_on(ProfileTarget::FunctionBlock, profile(1), now)
             .unwrap();
@@ -522,7 +525,7 @@ fn a_nak_of_a_set_resolves_it_as_refused_whatever_its_status() {
         let [
             ProfileAction::Resolved {
                 request,
-                outcome: Outcome::Refused(n),
+                outcome: ProfileOutcome::Refused(n),
             },
         ] = &actions[..]
         else {
@@ -530,12 +533,12 @@ fn a_nak_of_a_set_resolves_it_as_refused_whatever_its_status() {
         };
         assert_eq!(
             *request,
-            Request::SetOn {
+            ProfileRequest::SetOn {
                 address: CiDeviceId::FunctionBlock,
                 profile: profile(1)
             }
         );
-        assert_eq!(n.status_code, status);
+        assert_eq!(n.status, status);
         assert_eq!(i.deadline(), None);
     }
 }
@@ -549,19 +552,19 @@ fn a_nak_for_another_profile_or_another_message_resolves_nothing() {
         nak_with(
             CiDeviceId::Group,
             0x22,
-            Nak::STATUS_PROFILE_NOT_SUPPORTED,
+            NakStatus::ProfileNotSupported,
             profile(2).to_bytes(),
         ),
         nak_with(
             CiDeviceId::Group,
             0x23,
-            Nak::STATUS_PROFILE_NOT_SUPPORTED,
+            NakStatus::ProfileNotSupported,
             profile(1).to_bytes(),
         ),
         nak_with(
             channel(0),
             0x22,
-            Nak::STATUS_PROFILE_NOT_SUPPORTED,
+            NakStatus::ProfileNotSupported,
             profile(1).to_bytes(),
         ),
     ] {
@@ -577,7 +580,7 @@ fn a_nak_from_another_muid_resolves_nothing() {
     let foreign = Decoded::Message(CiMessage::Nak {
         header: header_from(OTHER, CiDeviceId::Group),
         to: Muid::of(OURS),
-        nak: Nak::new(U7::of(0x22), Nak::STATUS_PROFILE_NOT_SUPPORTED)
+        nak: Nak::new(U7::of(0x22), NakStatus::ProfileNotSupported)
             .with_details(profile(1).to_bytes().map(U7::of)),
     });
     assert!(i.on_message(&foreign).is_empty());
@@ -594,11 +597,11 @@ fn a_request_with_no_answer_times_out() {
     assert_eq!(
         i.on_timeout(later + PEER_REPLY_TIMEOUT),
         [ProfileAction::Resolved {
-            request: Request::SetOn {
+            request: ProfileRequest::SetOn {
                 address: CiDeviceId::Group,
                 profile: profile(1)
             },
-            outcome: Outcome::TimedOut,
+            outcome: ProfileOutcome::TimedOut,
         }]
     );
 }
@@ -609,11 +612,11 @@ fn the_same_set_cannot_be_asked_twice_at_once() {
     i.set_on(ProfileTarget::Group, profile(1), now).unwrap();
     assert_eq!(
         i.set_on(ProfileTarget::Group, profile(1), now),
-        Err(RequestError::AlreadyAsking)
+        Err(ProfileRequestError::AlreadyAsking)
     );
     assert_eq!(
         i.set_off(CiDeviceId::Group, profile(1), now),
-        Err(RequestError::AlreadyAsking)
+        Err(ProfileRequestError::AlreadyAsking)
     );
     // Another Profile or address is a request of its own.
     assert!(i.set_on(ProfileTarget::Group, profile(2), now).is_ok());
@@ -676,12 +679,12 @@ fn details_resolves_on_the_reply_that_echoes_the_profile_and_target() {
     assert_eq!(
         actions,
         [ProfileAction::Resolved {
-            request: Request::Details {
+            request: ProfileRequest::Details {
                 address: channel(2),
                 profile: profile(1),
                 target
             },
-            outcome: Outcome::Details(data),
+            outcome: ProfileOutcome::Details(data),
         }]
     );
     assert_eq!(i.deadline(), None);
@@ -695,19 +698,19 @@ fn details_is_refused_by_a_nak_0x04_and_times_out() {
     let actions = i.on_message(&nak_with(
         channel(2),
         0x28,
-        Nak::STATUS_PROFILE_NOT_SUPPORTED,
+        NakStatus::ProfileNotSupported,
         profile(1).to_bytes(),
     ));
     assert!(matches!(
         &actions[..],
-        [ProfileAction::Resolved { outcome: Outcome::Refused(n), .. }] if n.status_code == Nak::STATUS_PROFILE_NOT_SUPPORTED
+        [ProfileAction::Resolved { outcome: ProfileOutcome::Refused(n), .. }] if n.status == NakStatus::ProfileNotSupported
     ));
     i.details(channel(2), profile(1), target, now).unwrap();
     assert!(matches!(
         &i.on_timeout(now + PEER_REPLY_TIMEOUT)[..],
         [ProfileAction::Resolved {
-            outcome: Outcome::TimedOut,
-            request: Request::Details { .. }
+            outcome: ProfileOutcome::TimedOut,
+            request: ProfileRequest::Details { .. }
         }]
     ));
 }
@@ -820,7 +823,7 @@ fn a_timeout_wait_adds_its_time_to_a_sets_deadline() {
     assert!(matches!(
         actions.last(),
         Some(ProfileAction::Resolved {
-            outcome: Outcome::Reported { .. },
+            outcome: ProfileOutcome::Reported { .. },
             ..
         })
     ));
@@ -839,15 +842,13 @@ fn a_timeout_wait_that_is_not_for_the_set_extends_nothing() {
         Decoded::Message(CiMessage::Ack {
             header: header_from(OTHER, CiDeviceId::Group),
             to: Muid::of(OURS),
-            ack: Ack::new(U7::of(0x22), Ack::STATUS_TIMEOUT_WAIT)
-                .with_status_data(U7::of(100))
+            ack: Ack::new(U7::of(0x22), AckStatus::TimeoutWait(TimeoutWait::of(100)))
                 .with_details(profile(1).to_bytes().map(U7::of)),
         }),
         Decoded::Message(CiMessage::Ack {
             header: header_from(PEER, CiDeviceId::Group),
             to: Muid::of(OTHER),
-            ack: Ack::new(U7::of(0x22), Ack::STATUS_TIMEOUT_WAIT)
-                .with_status_data(U7::of(100))
+            ack: Ack::new(U7::of(0x22), AckStatus::TimeoutWait(TimeoutWait::of(100)))
                 .with_details(profile(1).to_bytes().map(U7::of)),
         }),
     ] {
@@ -889,8 +890,7 @@ fn a_success_ack_does_not_end_a_set() {
     let ack = Decoded::Message(CiMessage::Ack {
         header: header_from(PEER, CiDeviceId::Group),
         to: Muid::of(OURS),
-        ack: Ack::new(U7::of(0x22), Ack::STATUS_ACK)
-            .with_details(profile(1).to_bytes().map(U7::of)),
+        ack: Ack::new(U7::of(0x22), AckStatus::Ack).with_details(profile(1).to_bytes().map(U7::of)),
     });
     assert!(i.on_message(&ack).is_empty());
     assert_eq!(i.deadline(), Some(now + PEER_REPLY_TIMEOUT));

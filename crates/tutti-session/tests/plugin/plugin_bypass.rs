@@ -22,7 +22,7 @@ use crate::support;
 use std::time::{Duration, Instant};
 use tutti_buffers::MaxBlock;
 
-use support::{clap_probe, plugin_server};
+use support::clap_probe;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
@@ -44,7 +44,7 @@ fn set_server() {
     // The plugin's file is probed before its variables are set.
     crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
     unsafe {
-        std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server());
+        std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
     }
 }

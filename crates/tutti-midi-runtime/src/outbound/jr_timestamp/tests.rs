@@ -35,7 +35,7 @@ fn clock_maps_samples_to_ticks_monotonically() {
 fn clock_wraps_at_16_bits() {
     // At exactly the JR reference rate, one sample is one tick, so the wrap
     // boundary is integer-exact (no float rounding at the edge).
-    let clock = JrClock::new(SampleRate::of(f64::from(TICK_HZ)));
+    let clock = JrClock::new(TICK_RATE);
     assert_eq!(clock.ticks_at(Frame::new(0xFFFF)), 0xFFFF);
     assert_eq!(
         clock.ticks_at(Frame::new(0x1_0000)),
