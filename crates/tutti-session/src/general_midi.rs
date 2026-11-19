@@ -23,7 +23,7 @@ use tutti_soundfont::SoundFontUnit;
 use tutti_units::{Amplitude, UnitParam};
 
 use crate::instrument::AddedInstrument;
-use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session};
+use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session, SessionNode};
 
 /// A SoundFont unit wired to its chorus and reverb, and what they sum to.
 ///
@@ -40,7 +40,7 @@ use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session};
 /// here: `Graph::set_mode(gm.out(), NodeMode::Muted)`. A send's level is the font's
 /// and the channel's (CC 91 and CC 93), not a gain's.
 #[derive(Debug)]
-pub struct GeneralMidi<F: Float + Lanes + Lerp = f32> {
+pub struct GeneralMidi<F: Float + Lanes + Lerp> {
     instrument: InstrumentHandle<SoundFontUnit<F>>,
     chorus: Key<ModDelayNode<F>>,
     reverb: Key<FreeverbNode<F>>,
@@ -115,6 +115,8 @@ impl<F: Float + Lanes + Lerp> GeneralMidi<F> {
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C>
 where
     C::Float: Lanes + Lerp,
+    ModDelayNode<C::Float>: SessionNode<C::Float>,
+    FreeverbNode<C::Float>: SessionNode<C::Float>,
 {
     /// Adds `unit` with a General MIDI chorus and reverb, and a fader that
     /// sums the three.

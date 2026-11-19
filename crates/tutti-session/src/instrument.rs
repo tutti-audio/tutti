@@ -192,7 +192,7 @@ impl<N: ?Sized> InstrumentHandle<N> {
 
 /// What [`Session::add_instrument`] hands back: the instrument's handle and
 /// the controls its node was added with.
-pub struct AddedInstrument<I: Instrument<F> + SessionNode<F>, F: Float = f32> {
+pub struct AddedInstrument<I: Instrument<F> + SessionNode<F>, F: Float> {
     /// The instrument, playable, and wired to the master.
     pub handle: InstrumentHandle<I>,
     /// The node's controls (`SessionNode::Controls`).
