@@ -54,7 +54,7 @@ impl SvfControls {
     /// NaN is held off only until another control moves); a node reads its cells
     /// through `LastGood`, which does.
     #[must_use]
-    pub fn moved_from(&self, applied: &Self) -> bool {
+    pub fn differs_from(&self, applied: &Self) -> bool {
         const FREQ_EPS: f64 = 0.01;
         const Q_EPS: f64 = 0.0001;
         const GAIN_EPS: f64 = 0.01;

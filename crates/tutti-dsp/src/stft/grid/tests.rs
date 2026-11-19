@@ -114,8 +114,11 @@ fn shape_agreement_is_checkable_before_elementwise_work() {
     let same = Grid::filled(0i32, FrameCount(3), BinCount(4));
     let different = Grid::filled(0i32, FrameCount(4), BinCount(3));
 
-    assert!(g.same_shape_as(&same));
-    assert!(!g.same_shape_as(&different), "same length, different shape");
+    assert!(g.has_same_shape(&same));
+    assert!(
+        !g.has_same_shape(&different),
+        "same length, different shape"
+    );
 }
 
 /// Frames of 4 every 2 over 9 samples: (9 - 4) / 2 + 1 = 3. Under one window
