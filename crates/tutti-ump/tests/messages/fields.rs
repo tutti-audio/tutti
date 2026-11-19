@@ -109,3 +109,17 @@ fn serde_refuses_what_new_refuses() {
     assert!(serde_json::from_str::<DeltaTicks>("1048576").is_err());
     assert!(serde_json::from_str::<U4>("16").is_err());
 }
+
+/// A count of blocks past what an Endpoint holds is the most it holds, never
+/// wrapped to a smaller count.
+#[test]
+fn a_block_count_saturates_at_the_most_an_endpoint_holds() {
+    assert_eq!(FunctionBlockCount::saturating(0).get(), 0);
+    assert_eq!(FunctionBlockCount::saturating(32).get(), 32);
+    assert_eq!(FunctionBlockCount::saturating(33), FunctionBlockCount::MAX);
+    assert_eq!(FunctionBlockCount::saturating(256), FunctionBlockCount::MAX);
+    assert_eq!(
+        FunctionBlockCount::saturating(usize::MAX),
+        FunctionBlockCount::MAX
+    );
+}
