@@ -488,8 +488,8 @@ impl AudioBridge {
     }
 
     /// How many render-mode and rate changes the bridge gave up on, ever: the
-    /// control queue stayed full, or the plugin did not apply the change in time.
-    /// The change may still land; the blocks after it were not held for it.
+    /// plugin did not apply the change within the fence deadline. The change may
+    /// still land; the blocks after it were not held for it.
     pub fn unapplied_settings(&self) -> u64 {
         self.channels.unapplied_cell().get()
     }
