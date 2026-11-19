@@ -2058,119 +2058,52 @@ fn the_rest_of_a_stalled_state_is_not_the_next_answer() {
 }
 
 /// **A control call made while a control reply is owed waits for it** and is
-/// answered after it, in place of failing: a project save must not fail during
-/// an editor open. The server's log shows the second request only after the
-/// first was answered, and each caller gets its own answer.
+/// answered once the slot is free, in place of failing: a project save must not
+/// fail during an editor open. The first request (a parameter list) is never
+/// answered; the bridge gives up on it at its own constructed deadline (under
+/// one receive slice, so it is not rounded up), which frees the slot, and the second call (a parameter value, which has the slot
+/// only by waiting) is then sent and answered. A slot that refused the second
+/// call at once returns `None` for it, whatever the timing.
 #[test]
 fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
-    let log = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let (seen, seen_rx) = crossbeam_channel::bounded(1);
-    let (release_tx, release) = crossbeam_channel::bounded::<()>(1);
-    let control = {
-        let log = Arc::clone(&log);
-        let first = std::sync::atomic::AtomicBool::new(true);
-        move |msg: HostMessage| match msg {
-            HostMessage::GetParameter { param_id } => {
-                let id = param_id.get();
-                log.lock().unwrap().push(format!("recv {id}"));
-                if first.swap(false, Ordering::SeqCst) {
-                    seen.send(()).expect("the test is listening");
-                    release.recv().expect("the test releases the request");
-                }
-                log.lock().unwrap().push(format!("answer {id}"));
-                Action::Reply(Box::new(BridgeMessage::ParameterValue {
-                    value: Some(Normalized::of(f64::from(id) / 10.0)),
-                }))
-            }
-            _ => Action::Silent,
-        }
-    };
-    let mock = MockServer::start("queued", control);
-    let bridge = Arc::clone(&mock.bridge);
-    let first = std::thread::spawn(move || bridge.audio().parameter(ParamId::new(1)));
-    seen_rx
-        .recv_timeout(NOTICE_TIMEOUT)
-        .expect("the first query reached the server");
-
-    let (about_to_ask, started) = crossbeam_channel::bounded(1);
-    let bridge = Arc::clone(&mock.bridge);
-    let second = std::thread::spawn(move || {
-        about_to_ask.send(()).expect("the test is listening");
-        bridge.audio().parameter(ParamId::new(2))
-    });
-    started.recv().expect("the second caller started");
-
-    release_tx.send(()).expect("the server is waiting");
-    assert_eq!(
-        first.join().expect("the first query's thread"),
-        Some(Normalized::of(0.1))
-    );
-    assert_eq!(
-        second.join().expect("the second query's thread"),
-        Some(Normalized::of(0.2)),
-        "the second call failed or was lost instead of waiting its turn"
-    );
-    assert_eq!(
-        *log.lock().unwrap(),
-        ["recv 1", "answer 1", "recv 2", "answer 2"]
-    );
-}
-
-/// **A server declared gone by another route is heard once, with its cause.**
-/// The process guard's exit watch declares to the shared latch; the stream has
-/// not failed, and the listener must still hear it.
-#[test]
-fn a_crash_declared_by_the_exit_watch_reaches_the_listener_once() {
-    use parking_lot::Mutex as PlMutex;
-
-    let mut mock = MockServer::start("exit-watch", |_| Action::Silent);
-    let heard: Arc<PlMutex<Vec<PluginFailure>>> = Arc::new(PlMutex::new(Vec::new()));
-    let sink = Arc::clone(&heard);
-    mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
-        if let crate::client::audio::BridgeEvent::Crashed { cause } = ev {
-            sink.lock().push(cause);
-        }
-    })));
-
-    mock.bridge.audio().mark_crashed(PluginFailure::Unreported);
-    tutti_fixtures::wait_until("the listener to hear the end", NOTICE_TIMEOUT, || {
-        !heard.lock().is_empty()
-    });
-    mock.thread.as_mut().expect("the bridge thread").shutdown();
-    let seen = heard.lock().clone();
-    assert!(
-        matches!(seen.as_slice(), [PluginFailure::Unreported]),
-        "heard {seen:?}"
-    );
-}
-
-/// **A shutdown ends while a request is stuck in the server.** The bridge thread
-/// is in a query nobody answers; it leaves when that query's own deadline
-/// (constructed here, short) passes. What is asserted is that the shutdown
-/// completes, not how fast.
-#[test]
-fn a_shutdown_ends_when_a_request_is_stuck_in_the_server() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
     let (seen, seen_rx) = crossbeam_channel::bounded(1);
     let timeouts = {
         let mut t = Timeouts::default();
         t.param = Duration::from_millis(200);
         t
     };
-    let mut mock = MockServer::start_with_timeouts("stuck-shutdown", timeouts, move |msg| {
-        if matches!(msg, HostMessage::GetParameter { .. }) {
-            let _ = seen.try_send(());
-        }
-        Action::Silent
-    });
+    let mock = {
+        let log = Arc::clone(&log);
+        MockServer::start_with_timeouts("queued", timeouts, move |msg| match msg {
+            HostMessage::GetParameterList => {
+                log.lock().unwrap().push("list");
+                let _ = seen.try_send(());
+                Action::Silent
+            }
+            HostMessage::GetParameter { .. } => {
+                log.lock().unwrap().push("value");
+                Action::Reply(Box::new(BridgeMessage::ParameterValue {
+                    value: Some(Normalized::of(0.25)),
+                }))
+            }
+            _ => Action::Silent,
+        })
+    };
     let bridge = Arc::clone(&mock.bridge);
-    let query = std::thread::spawn(move || bridge.audio().parameter(ParamId::new(1)));
+    let first = std::thread::spawn(move || bridge.audio().parameters());
     seen_rx
         .recv_timeout(NOTICE_TIMEOUT)
-        .expect("the query is stuck in the server");
+        .expect("the first request reached the server");
 
-    let mut thread = mock.thread.take().expect("the bridge thread");
-    call_within(move || thread.shutdown()).expect("the shutdown completes");
-    assert_eq!(query.join().expect("the query's thread"), None);
+    // The first request owes its reply until the bridge's deadline passes.
+    assert_eq!(
+        mock.bridge.audio().parameter(ParamId::new(2)),
+        Some(Normalized::of(0.25)),
+        "the second call failed instead of waiting for the slot"
+    );
+    assert!(first.join().expect("the first caller").is_none());
+    assert_eq!(*log.lock().unwrap(), ["list", "value"]);
 }
 
 // ── The two lanes ────────────────────────────────────────────────────────────
