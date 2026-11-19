@@ -24,7 +24,9 @@
 
 use std::vec::Vec;
 
-use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, UNIVERSAL_NON_REAL_TIME, Ump};
+use tutti_ump::{
+    MidiChannel, MidiGroup, Sysex7Packets, SysexError, U7, U28, UNIVERSAL_NON_REAL_TIME, Ump,
+};
 
 use crate::name::ProductInstanceId;
 
@@ -129,7 +131,7 @@ pub use profile::{
     SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
 };
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
-pub use status::{Ack, Nak};
+pub use status::{Ack, AckStatus, Nak, NakStatus};
 pub use text::MessageText;
 pub use two_state::{SwitchMeaning, TwoState};
 pub use wait::{NotATimeoutWait, PEER_REPLY_TIMEOUT, TimeoutWait};
@@ -400,15 +402,14 @@ impl CiHeader {
     }
 }
 
-/// `payload` as SysEx7 packets on `group`. Every byte a CI message encodes is
-/// 7-bit: the fields are `U7`, the MUIDs and sizes are cut to 7-bit bytes and a
-/// text is ASCII.
-fn sysex7_packets(group: MidiGroup, payload: &[u8]) -> std::vec::IntoIter<Ump> {
-    Sysex7Packets::from_payload(group, payload)
-        .into_iter()
-        .flatten()
+/// `payload` as SysEx7 packets on `group`, or the first byte that is not 7-bit.
+/// Every byte a CI message encodes is 7-bit (the fields are `U7`, the MUIDs
+/// and sizes are cut to 7-bit bytes and a text is ASCII), so a refusal is a
+/// codec fault, and it is returned rather than sent short.
+fn sysex7_packets(group: MidiGroup, payload: &[u8]) -> Result<std::vec::IntoIter<Ump>, SysexError> {
+    Ok(Sysex7Packets::from_payload(group, payload)?
         .collect::<Vec<_>>()
-        .into_iter()
+        .into_iter())
 }
 
 /// Appends the preamble (§5.2.1): `7E device_id 0D sub_id2 version`, the Source
@@ -889,7 +890,12 @@ impl CiMessage {
     /// `Complete`, or a `Start`, `Continue`s and an `End`. It allocates once,
     /// for the payload; a MIDI 1.0 byte stream frames
     /// [`encode`](Self::encode)'s bytes with `tutti_ump::frame` instead.
-    pub fn packets(&self, group: MidiGroup) -> std::vec::IntoIter<Ump> {
+    ///
+    /// # Errors
+    ///
+    /// [`SysexError::NotSevenBit`] when a byte of the encoding is 128 or more,
+    /// which no message of this type encodes: a message is never sent short.
+    pub fn packets(&self, group: MidiGroup) -> Result<std::vec::IntoIter<Ump>, SysexError> {
         sysex7_packets(group, &self.encode())
     }
 
@@ -1210,19 +1216,19 @@ pub enum UnreadReason {
 }
 
 impl UnreadReason {
-    /// The NAK Status Code Table 16 gives this: `0x02` (version not
+    /// The NAK status Table 16 gives this: `0x02` (version not
     /// supported) for a version the Device cannot read (§5.3 names reserved
     /// bits; version 0 is tutti's reading), `0x01` (message not
     /// supported), else `0x41` (message malformed).
     #[must_use]
-    pub(crate) fn nak_status(self) -> U7 {
+    pub(crate) fn nak_status(self) -> NakStatus {
         match self {
-            Self::ReservedVersionBits | Self::VersionZero => Nak::STATUS_VERSION_NOT_SUPPORTED,
-            Self::UnsupportedMessage => Nak::STATUS_MESSAGE_NOT_SUPPORTED,
+            Self::ReservedVersionBits | Self::VersionZero => NakStatus::VersionNotSupported,
+            Self::UnsupportedMessage => NakStatus::MessageNotSupported,
             // §5.8: a device that cannot provide the information for the given
             // Status replies with a NAK: the generic one, which is not retried.
-            Self::ReservedStatus => Nak::STATUS_NAK,
-            _ => Nak::STATUS_MALFORMED,
+            Self::ReservedStatus => NakStatus::Nak,
+            _ => NakStatus::Malformed,
         }
     }
 }

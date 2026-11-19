@@ -294,6 +294,34 @@ impl FunctionBlock {
         }
     }
 
+    /// Block 0 from Group 1 over `groups`: active, bidirectional, no hint and
+    /// no MIDI 1.0 port. Group 1 and at most 16 Groups never run past Group 16,
+    /// so the builder's checks have nothing to refuse.
+    pub(crate) const fn first(groups: GroupSpan) -> Self {
+        Self {
+            id: FunctionBlockId::of(0),
+            active: true,
+            direction: BlockDirection::Bidirectional,
+            ui_hint: UiHint::Unknown,
+            midi1: Midi1Port::No,
+            first_group: FirstGroup::of(0),
+            groups,
+            midi_ci_version: 0,
+            max_sysex8_streams: 0,
+            name: None,
+        }
+    }
+
+    /// The block a MIDI 1.0 device is inferred to have: [`first`](Self::first)
+    /// over Group 1 alone, a MIDI 1.0 port of unrestricted bandwidth, with a
+    /// UI hint of both.
+    pub(crate) const fn inferred() -> Self {
+        let mut block = Self::first(GroupSpan::of(1));
+        block.ui_hint = UiHint::Both;
+        block.midi1 = Midi1Port::Unrestricted;
+        block
+    }
+
     /// Its number.
     #[must_use]
     pub const fn id(&self) -> FunctionBlockId {
@@ -570,20 +598,7 @@ impl Endpoint {
     }
 
     fn insert_inferred_block(&mut self) {
-        let (Some(id), Some(first), Some(span)) = (
-            FunctionBlockId::new(0),
-            FirstGroup::new(0),
-            GroupSpan::new(1),
-        ) else {
-            return;
-        };
-        let block = FunctionBlock::builder(id, BlockDirection::Bidirectional, first, span)
-            .ui_hint(UiHint::Both)
-            .midi1(Midi1Port::Unrestricted)
-            .build();
-        if let Ok(block) = block {
-            self.insert_block(block);
-        }
+        self.insert_block(FunctionBlock::inferred());
     }
 
     /// The Endpoint a MIDI application presents for a port over `groups` from
@@ -593,14 +608,9 @@ impl Endpoint {
     /// [`named`](Self::named)).
     #[must_use]
     pub fn local(supports: Supports, groups: GroupSpan) -> Self {
-        let mut endpoint = Self::new(supports).static_blocks(true);
-        if let (Some(id), Some(first)) = (FunctionBlockId::new(0), FirstGroup::new(0))
-            && let Ok(block) =
-                FunctionBlock::builder(id, BlockDirection::Bidirectional, first, groups).build()
-        {
-            endpoint.insert_block(block);
-        }
-        endpoint
+        Self::new(supports)
+            .static_blocks(true)
+            .block(FunctionBlock::first(groups))
     }
 
     /// An Endpoint with nothing known, for a discoverer to fill.
@@ -615,9 +625,13 @@ impl Endpoint {
         endpoint
     }
 
-    /// The Endpoint with the Protocol and JR Timestamps in use now set, for an
-    /// Endpoint whose state an OS reports rather than one that was asked
-    /// (§7.1.6.3). Nothing is checked against its capabilities.
+    /// The Endpoint with the Protocol and JR Timestamps in force now recorded
+    /// (§7.1.6.3): what is happening on the link, reported by an OS, a
+    /// peer's Notification or the owner of the port. It is not a request, so
+    /// it may exceed what this Endpoint advertises (a peer that sends JR
+    /// Timestamps to an Endpoint that did not offer to receive them): a
+    /// request is taken through [`Endpoint::reply`], which keeps the parts the
+    /// Endpoint does not support (§7.1.6.1 step 3).
     #[must_use]
     pub const fn in_use(mut self, active: StreamConfig) -> Self {
         self.active = active;

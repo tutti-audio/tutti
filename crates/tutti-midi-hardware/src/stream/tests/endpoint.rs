@@ -610,3 +610,47 @@ fn a_request_for_the_session_to_send_jr_is_granted_and_the_output_stamps() {
     wire.send(&events);
     assert_eq!(received(&wire), [clock, note], "JR after the grant");
 }
+
+/// A device that never answered is the OS's Endpoint, which offers no JR. A
+/// peer's Stream Configuration Request the session grants (the session sends
+/// JR Timestamps) is a fact about the link, so the device's configuration
+/// records it (the device receives them) and the stream settles: the same
+/// request again changes nothing.
+#[test]
+fn a_granted_jr_request_is_recorded_for_an_os_described_device_and_settles() {
+    let silent = Endpoint::new(Supports::of(Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    }));
+    let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, silent);
+    wire.session.present(Some(presented(identity())));
+    wire.open();
+    let step = STEP_TIMEOUT.as_millis() as u64;
+    let mut settled = Vec::new();
+    for ms in [0, step, 2 * step, 3 * step + 1] {
+        settled.extend(streams(wire.poll(ms)));
+    }
+    let [(_, stream)] = settled.as_slice() else {
+        panic!("settled: {settled:?}");
+    };
+    assert_eq!(stream.basis(), Basis::Unanswered);
+    assert!(!stream.config().rx_jr);
+    let _ = received(&wire);
+
+    let at = 4 * step;
+    send_ump(&wire, request(Protocol::Midi2, false, true), at);
+    let moved = streams(wire.poll(at + 1));
+    let [(_, moved)] = moved.as_slice() else {
+        panic!("the grant moves the stream: {moved:?}");
+    };
+    assert!(
+        moved.config().rx_jr,
+        "the device receives what the session sends"
+    );
+
+    send_ump(&wire, request(Protocol::Midi2, false, true), at + 10);
+    assert!(
+        streams(wire.poll(at + 11)).is_empty(),
+        "the stream has settled"
+    );
+}

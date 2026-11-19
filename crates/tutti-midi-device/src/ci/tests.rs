@@ -78,7 +78,7 @@ fn a_reply_keeps_the_device_it_goes_to() {
     let msg = CiMessage::Nak {
         header: header(),
         to: Muid::of(0x0042_4242),
-        nak: Nak::new(U7::of(0x20), Nak::STATUS_MESSAGE_NOT_SUPPORTED),
+        nak: Nak::new(U7::of(0x20), NakStatus::MessageNotSupported),
     };
     let bytes = msg.encode();
     assert_eq!(&bytes[9..13], Muid::of(0x0042_4242).to_bytes());
@@ -130,7 +130,7 @@ fn a_message_that_is_not_read_keeps_its_header() {
                 source: Muid::of(0x77),
             },
             to: Muid::of(SRC),
-            nak: Nak::new(U7::of(0x3E), U7::of(0x01)),
+            nak: Nak::new(U7::of(0x3E), NakStatus::MessageNotSupported),
         }
     );
     assert_eq!(decoded(&reply.encode()), reply);
@@ -155,7 +155,7 @@ fn reserved_version_bits_are_nakked_with_0x02_in_the_receivers_version() {
         let CiMessage::Nak { header, nak, .. } = got.nak(Muid::of(9)).unwrap() else {
             panic!("a NAK")
         };
-        assert_eq!(nak.status_code, U7::of(0x02));
+        assert_eq!(nak.status, NakStatus::VersionNotSupported);
         assert_eq!(header.ci_version, CI_VERSION);
     }
 }
@@ -198,7 +198,7 @@ fn a_reserved_device_id_is_refused() {
             panic!("a NAK")
         };
         assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
-        assert_eq!(nak.status_code, Nak::STATUS_MALFORMED);
+        assert_eq!(nak.status, NakStatus::Malformed);
     }
     for id in (0x00..=0x0F).chain([0x7E, 0x7F]) {
         let mut bytes = invalidate();
@@ -267,12 +267,12 @@ fn the_broadcast_rule_is_held_in_both_directions() {
         CiMessage::Ack {
             header: header(),
             to: Muid::of(7),
-            ack: Ack::new(U7::of(0x34), Ack::STATUS_ACK),
+            ack: Ack::new(U7::of(0x34), AckStatus::Ack),
         },
         CiMessage::Nak {
             header: header(),
             to: Muid::of(7),
-            nak: Nak::new(U7::of(0x34), Nak::STATUS_NAK),
+            nak: Nak::new(U7::of(0x34), NakStatus::Nak),
         },
     ] {
         let mut bytes = msg.encode();
@@ -409,7 +409,7 @@ fn packets_carry_the_payload_in_sysex7_packets() {
     use tutti_ump::{Message, MidiGroup, SysexStatus};
     let message = long_message();
     let payload = message.encode();
-    let packets: Vec<_> = message.packets(MidiGroup::of(3)).collect();
+    let packets: Vec<_> = message.packets(MidiGroup::of(3)).unwrap().collect();
     assert_eq!(packets.len(), payload.len().div_ceil(6));
     let mut bytes = Vec::new();
     for (i, ump) in packets.iter().enumerate() {
@@ -474,4 +474,16 @@ fn the_preamble_tells_property_exchange_and_set_profile_on() {
     // Only the preamble is read: a first packet's data can stop at it.
     assert!(is_property_exchange(&[0x7E, 0x7F, 0x0D, 0x34]));
     assert!(is_set_profile_on(&[0x7E, 0x7F, 0x0D, 0x22]));
+}
+
+/// A payload byte of 128 or more is refused with its index, never dropped from
+/// the packets: M2-104 §7.7 SysEx7 carries 7-bit bytes only.
+#[test]
+fn a_payload_that_is_not_seven_bit_is_refused_not_sent_short() {
+    let group = MidiGroup::of(3);
+    assert_eq!(
+        sysex7_packets(group, &[0x01, 0x80, 0x02]).err(),
+        Some(tutti_ump::SysexError::NotSevenBit { index: 1 })
+    );
+    assert_eq!(sysex7_packets(group, &[0x01, 0x7F]).unwrap().count(), 1);
 }
