@@ -17,6 +17,7 @@ Everyone together, which is what *tutti* means.
 | `tutti-banner-{light,dark}.svg` | The README banner: the mark beside the reeded-glass name |
 | `tutti-avatar.png` | Organisation avatar, 1024 px, the mark inside a round crop's safe area |
 | `favicon.ico`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | Site icons |
+| `tutti-social.png` | The repository's social preview card, 1280 × 640 |
 
 The white marks are separate drawings, not recoloured copies: light on dark reads heavier, so
 they are drawn 3 % thinner. Use them on dark backgrounds.
