@@ -192,7 +192,6 @@ tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::Comma
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::UmpData::new
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::Advertisement::start
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::FoundHost::from_service
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/text.rs::BoundedText::new
 
 # tutti-midi-protocol
 tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/mpe/zone.rs::MpeZoneConfig::with_channel_response

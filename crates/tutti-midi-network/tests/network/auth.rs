@@ -61,3 +61,16 @@ fn random_nonces_are_valid_and_differ() {
         "two random nonces differ"
     );
 }
+
+/// The digest hashes the peer's bytes, so a username is not NFC-normalised: a
+/// decomposed "e" and accent digests differently from the composed "é".
+#[test]
+fn a_decomposed_username_digests_differently_from_the_composed_one() {
+    let nonce = Nonce::new(*b"XI|~=NNRVaD;XCPL").unwrap();
+    let decomposed = Username::new("e\u{301}").unwrap();
+    let composed = Username::new("\u{e9}").unwrap();
+    assert_ne!(
+        Digest::of_user(&nonce, &decomposed, "pw").get(),
+        Digest::of_user(&nonce, &composed, "pw").get()
+    );
+}

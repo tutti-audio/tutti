@@ -140,7 +140,13 @@ impl Client {
     ) -> Self {
         Self {
             host,
-            session: Session::new(Role::Client(credentials), config, identity, host, now),
+            session: Session::new(
+                Role::Client(Box::new(credentials)),
+                config,
+                identity,
+                host,
+                now,
+            ),
             outbox: Outbox::default(),
         }
     }
