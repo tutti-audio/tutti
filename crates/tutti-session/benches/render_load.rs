@@ -127,6 +127,7 @@ use tutti_buffers::{InterleavedMut, Mono};
 use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::{BusStripNode, ConvolverNode, LimiterControls, LimiterNode};
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
+use tutti_rt::SplitMix64;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_session::{InPort, OutPort, Root, Session, Workers};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
@@ -177,18 +178,15 @@ impl Node for Hold {
     fn reset(&mut self) {}
 }
 
-/// Deterministic white noise in `-1..1` (xorshift), so the bench needs no
-/// RNG crate and every run renders the same scene.
-fn noise(state: &mut u32) -> f32 {
-    *state ^= *state << 13;
-    *state ^= *state >> 17;
-    *state ^= *state << 5;
-    (*state as f32 / u32::MAX as f32) * 2.0 - 1.0
+/// Deterministic white noise in `-1..1` from a seeded stream, so every run
+/// renders the same scene.
+fn noise(rng: &mut SplitMix64) -> f32 {
+    ((rng.next_u32() >> 8) as f32 / (1u32 << 24) as f32) * 2.0 - 1.0
 }
 
 /// A 2 s exponentially decaying noise tail: a plain reverb IR.
-fn ir(seed: u32) -> Vec<f32> {
-    let mut s = seed;
+fn ir(seed: u64) -> Vec<f32> {
+    let mut s = SplitMix64::new(seed);
     let len = Seconds::new(2.0).to_samples(SampleRate::of(RATE)).get();
     (0..len)
         .map(|i| noise(&mut s) * (-6.9 * i as f32 / len as f32).exp() * 0.05)
@@ -265,7 +263,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     }
 
     let mut tone = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
-    let mut seed = 0x1234_5678;
+    let mut seed = SplitMix64::new(0x1234_5678);
     let frames = Seconds::new(20.0).to_samples(SampleRate::of(RATE)).get();
     for i in 0..frames {
         let t = i as f32 / RATE as f32;
