@@ -41,6 +41,9 @@ use crate::plugin_params::Driven;
 /// declaration (a rescan), which the re-read then makes
 /// [`NoSuchTarget`](crate::ValueErrorKind::NoSuchTarget).
 ///
+/// Between a plugin's rescan and its re-read landing in `update`, a unit write
+/// converts with the map read before the rescan.
+///
 /// The map of a unit target is the declaration as the session holds it at each
 /// call, never a copy made when the target was: a rescan that removes the unit
 /// or the map refuses the call with [`UnitError`] (as
@@ -221,7 +224,10 @@ impl Conversion {
         )
     }
 
-    /// The position of `value`, or why the range does not take it.
+    /// The position of `value`, or why the range does not take it. The
+    /// position is the map's own for the plain value it names, so a stepped map
+    /// lands on a step. A value outside the declared range is `OutOfRange` even
+    /// when it would round into it (12.4 on -12..12).
     fn position<U: PluginUnit>(&self, value: U) -> Result<Normalized, SetRefusal> {
         let plain = value.to_plain(self.unit);
         if !plain.is_finite() {
@@ -230,7 +236,9 @@ impl Conversion {
         if !(self.low..=self.high).contains(&plain) {
             return Err(SetRefusal::OutOfRange);
         }
-        Ok(self.map.normalized(plain))
+        Ok(self
+            .map
+            .normalized(self.map.plain(self.map.normalized(plain))))
     }
 }
 

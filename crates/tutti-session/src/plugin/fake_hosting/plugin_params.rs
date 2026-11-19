@@ -416,6 +416,11 @@ fn a_stepped_unit_write_reads_back_the_step_the_map_rounds_to() {
     assert_eq!(s.get(transpose).unwrap(), Semitones::new(6.0));
 
     s.set(transpose.to(Semitones::new(-2.6))).unwrap();
+    assert_eq!(
+        fake.sets()[1],
+        (TRANSPOSE, 0.375),
+        "the plugin is sent the step's position"
+    );
     assert_eq!(s.get(transpose).unwrap(), Semitones::new(-3.0));
 }
 
@@ -990,4 +995,26 @@ fn a_batch_naming_one_parameter_in_two_units_is_refused() {
     ))
     .unwrap();
     assert_eq!(fake.sets(), [(CUTOFF, 0.75)]);
+}
+
+/// **A rescan to another range with the unit kept moves a target made before it
+/// to the new map once the re-read lands**: `150 Hz` on `100..=200` is position
+/// `0.5`.
+#[test]
+fn a_rescan_to_another_range_converts_a_target_made_before_it_with_the_new_map() {
+    let (mut s, key, fake, refresh) = session_keyed();
+    let _ = update(&mut s);
+    let cutoff = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+
+    *fake.infos.lock_recover() = vec![
+        cutoff_info()
+            .with_plain_range(100.0, 200.0, 100.0)
+            .with_plain_map(PlainMap::Linear(LinearRange::new(100.0, 200.0))),
+    ];
+    refresh.fire(PluginRefresh::ParamTitles);
+    let _ = update(&mut s);
+
+    s.set(cutoff.to(Hz::new(150.0))).unwrap();
+    assert_eq!(fake.sets(), [(CUTOFF, 0.5)]);
+    assert_eq!(s.get(cutoff).unwrap(), Hz::new(150.0));
 }
