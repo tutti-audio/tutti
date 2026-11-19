@@ -65,7 +65,7 @@ pub enum PluginRenderFault {
 /// `BridgeMessage`.
 pub(crate) fn unexpected_message(
     expected: &'static str,
-    got: &crate::protocol::BridgeMessage,
+    got: &crate::BridgeMessage,
 ) -> BridgeError {
     BridgeError::UnexpectedMessage {
         expected,

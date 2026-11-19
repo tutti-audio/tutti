@@ -3,10 +3,6 @@
 use super::audio::{AudioBridge, BridgeListener, BridgeThread, Fate, HarmonyInputs, Submitted};
 use super::remote_editor::RemoteEditor;
 use crate::ServerWatch;
-use crate::protocol::{
-    MidiEventVec, NoteExpressionChanges, ParamId, ParameterChanges, ParameterInfo, Preset,
-    PresetId, TransportChanges, TransportInfo,
-};
 use crossbeam::queue::ArrayQueue;
 use dpi::Size;
 use std::path::{Path, PathBuf};
@@ -19,8 +15,13 @@ use tutti_plugin_types::{
 use tutti_plugin_types::{ContentScale, EditorCapabilities, WindowHandle};
 use tutti_plugin_types::{Editor, EditorWindow, Load, Origin, PluginFormat, Timeouts};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, ParamEdit};
+use tutti_plugin_types::{
+    MidiEventVec, NoteExpressionChanges, ParameterChanges, ParameterInfo, Preset, PresetId,
+    TransportChanges, TransportInfo,
+};
 use tutti_rt::{LockExt, PackedAtomic, Tally, TallyWriter, tally};
 use tutti_units::Normalized;
+use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
 /// Gives the audio instance the editor instance's state when the user changed
@@ -147,8 +148,8 @@ impl std::fmt::Debug for EditorLoader {
 const MIRROR_CAPACITY: usize = 256;
 
 /// An automation mode as a nonzero code, 0 being "none".
-fn mode_code(mode: crate::protocol::AutomationMode) -> u8 {
-    use crate::protocol::AutomationMode;
+fn mode_code(mode: tutti_plugin_types::AutomationMode) -> u8 {
+    use tutti_plugin_types::AutomationMode;
     match mode {
         AutomationMode::Off => 1,
         AutomationMode::Reading => 2,
@@ -158,8 +159,8 @@ fn mode_code(mode: crate::protocol::AutomationMode) -> u8 {
 }
 
 /// The mode a [`mode_code`] stands for; `None` for 0.
-fn mode_of_code(code: u8) -> Option<crate::protocol::AutomationMode> {
-    use crate::protocol::AutomationMode;
+fn mode_of_code(code: u8) -> Option<tutti_plugin_types::AutomationMode> {
+    use tutti_plugin_types::AutomationMode;
     match code {
         1 => Some(AutomationMode::Off),
         2 => Some(AutomationMode::Reading),
@@ -228,7 +229,7 @@ impl GuiMirror {
 
     /// Records the latest automation mode for the editor, if one is open.
     /// Wait-free, any thread: one store.
-    fn push_automation(&self, mode: crate::protocol::AutomationMode) {
+    fn push_automation(&self, mode: tutti_plugin_types::AutomationMode) {
         if self.open.load(Ordering::Acquire) {
             self.automation.store(mode_code(mode));
         }
@@ -236,7 +237,7 @@ impl GuiMirror {
 
     /// The automation mode written since the editor was last shown one, if
     /// any. Main thread.
-    fn take_automation(&self) -> Option<crate::protocol::AutomationMode> {
+    fn take_automation(&self) -> Option<tutti_plugin_types::AutomationMode> {
         let latest = self.automation.load();
         if latest == self.shown.load() {
             return None;
@@ -311,7 +312,7 @@ impl PluginBridge {
     /// `AudioBridge::submit`: `param_changes` is swapped for a free buffer
     /// when it goes, and [`Submitted::block`] means the block was accepted,
     /// never that its output is ready.
-    pub fn submit(
+    pub(crate) fn submit(
         &self,
         seq: u64,
         num_samples: usize,
@@ -378,7 +379,7 @@ impl PluginBridge {
 
     /// Sends the host's automation mode to the plugin, mirrored into an open
     /// editor. Realtime-safe; says whether it was delivered.
-    pub fn set_automation_state_rt(&self, mode: crate::protocol::AutomationMode) -> Delivered {
+    pub fn set_automation_state_rt(&self, mode: tutti_plugin_types::AutomationMode) -> Delivered {
         // Deliver to BOTH the audio subprocess AND the in-process GUI instance
         // (mirrors `set_parameter_rt`). The automation-state advisory drives
         // editor UI feedback (a glowing knob ring), which lives in the GUI
@@ -397,7 +398,7 @@ impl PluginBridge {
 
     /// See `AudioBridge::set_track_info`. The audio instance only: the
     /// editor's instance has no track.
-    pub fn set_track_info(&self, info: &tutti_plugin_types::TrackInfo) -> Delivered {
+    pub(crate) fn set_track_info(&self, info: &tutti_plugin_types::TrackInfo) -> Delivered {
         self.audio.set_track_info(info)
     }
 
@@ -412,14 +413,14 @@ impl PluginBridge {
     /// feedback, so the GUI mirror has nothing to show. Sending it there would
     /// also mean re-initializing the GUI instance on three of the four formats
     /// for no visible effect.
-    pub fn set_render_mode_rt(&self, mode: crate::protocol::RenderMode) -> bool {
+    pub fn set_render_mode_rt(&self, mode: tutti_plugin_types::RenderMode) -> bool {
         self.audio.set_render_mode_rt(mode)
     }
 
     /// The render mode the host last queued for the plugin
     /// ([`set_render_mode_rt`](Self::set_render_mode_rt)): what the host asked
     /// for, not what the plugin accepted. Realtime until it queues another.
-    pub fn render_mode(&self) -> crate::protocol::RenderMode {
+    pub fn render_mode(&self) -> tutti_plugin_types::RenderMode {
         self.audio.render_mode()
     }
 
@@ -429,11 +430,7 @@ impl PluginBridge {
     }
 
     /// See `AudioBridge::setup_shared_memory`.
-    pub fn setup_shared_memory(
-        &self,
-        shm_name: String,
-        layout: crate::protocol::SlabLayout,
-    ) -> bool {
+    pub(crate) fn setup_shared_memory(&self, shm_name: String, layout: crate::SlabLayout) -> bool {
         self.audio.setup_shared_memory(shm_name, layout)
     }
 
@@ -466,13 +463,13 @@ impl PluginBridge {
     }
 
     /// See `AudioBridge::news_settled`.
-    pub fn news_settled(&self, within: Duration) -> bool {
+    pub(crate) fn news_settled(&self, within: Duration) -> bool {
         self.audio.news_settled(within)
     }
 
     /// The count of editor-mirror parameter writes a full queue refused. The
     /// audio command is unaffected: the mirror only keeps the display current.
-    pub fn mirror_refused_cell(&self) -> tutti_rt::Tally<u64> {
+    pub(crate) fn mirror_refused_cell(&self) -> tutti_rt::Tally<u64> {
         self.mirror.refused.clone()
     }
 
@@ -484,19 +481,19 @@ impl PluginBridge {
 
     /// The count of commands the audio side could not hand to the bridge
     /// thread. See `AudioBridge::commands_refused_cell`.
-    pub fn commands_refused_cell(&self) -> tutti_rt::Tally<u64> {
+    pub(crate) fn commands_refused_cell(&self) -> tutti_rt::Tally<u64> {
         self.audio.commands_refused_cell()
     }
 
     /// The count of audio responses lost to a full response queue. See
     /// `AudioBridge::responses_lost_cell`.
-    pub fn responses_lost_cell(&self) -> tutti_rt::Tally<u64> {
+    pub(crate) fn responses_lost_cell(&self) -> tutti_rt::Tally<u64> {
         self.audio.responses_lost_cell()
     }
 
     /// The count of parameter buffers the audio thread leaked. See
     /// `AudioBridge::leaked_buffers_cell`.
-    pub fn leaked_buffers_cell(&self) -> tutti_rt::Tally<u64> {
+    pub(crate) fn leaked_buffers_cell(&self) -> tutti_rt::Tally<u64> {
         self.audio.leaked_buffers_cell()
     }
 
@@ -512,12 +509,12 @@ impl PluginBridge {
 
     /// Why the bridge died, or `None` while it is alive. See
     /// `AudioBridge::crash_cause`.
-    pub fn crash_cause(&self) -> Option<PluginFailure> {
+    pub(crate) fn crash_cause(&self) -> Option<PluginFailure> {
         self.audio.crash_cause()
     }
 
     /// The server's watch: whether it is alive, and why not.
-    pub fn watch(&self) -> &Arc<ServerWatch> {
+    pub(crate) fn watch(&self) -> &Arc<ServerWatch> {
         self.audio.watch()
     }
 
@@ -528,7 +525,7 @@ impl PluginBridge {
     }
 
     /// See `AudioBridge::rate_refused`.
-    pub fn rate_refused(&self) -> bool {
+    pub(crate) fn rate_refused(&self) -> bool {
         self.audio.rate_refused()
     }
 
@@ -577,7 +574,7 @@ impl PluginBridge {
     ///
     /// The plugin is dead, the editor instance cannot be loaded, or the plugin
     /// refuses to open its editor.
-    pub fn open_editor(
+    pub(crate) fn open_editor(
         &self,
         main: MainThreadMarker,
         parent: WindowHandle,
@@ -642,7 +639,7 @@ impl PluginBridge {
     /// # Errors
     ///
     /// As [`open_editor`](Self::open_editor).
-    pub fn open_floating_editor(
+    pub(crate) fn open_floating_editor(
         &self,
         main: MainThreadMarker,
     ) -> std::result::Result<(), EditorError> {
@@ -724,7 +721,7 @@ impl PluginBridge {
 
     /// Closes the editor, after sending the audio instance what the user changed
     /// in it. `false` when no editor was open.
-    pub fn close_editor(&self, main: MainThreadMarker) -> bool {
+    pub(crate) fn close_editor(&self, main: MainThreadMarker) -> bool {
         if self.load_editor.is_none() {
             let Ok(mut remote) = self.remote.lock() else {
                 return false;
@@ -756,7 +753,7 @@ impl PluginBridge {
     /// wait on (its descriptors and timers, added to `out`). A served editor
     /// (`remote`) lives in the server, whose own loop waits on them: nothing
     /// here.
-    pub fn wakeups(&self, main: MainThreadMarker, out: &mut tutti_plugin_types::Wakeups) {
+    pub(crate) fn wakeups(&self, main: MainThreadMarker, out: &mut tutti_plugin_types::Wakeups) {
         if self.load_editor.is_none() {
             return;
         }
@@ -769,7 +766,7 @@ impl PluginBridge {
 
     /// Hands the editor instance in this process what a wait on
     /// [`wakeups`](Self::wakeups) found.
-    pub fn wake(
+    pub(crate) fn wake(
         &self,
         main: MainThreadMarker,
         ready: &[tutti_plugin_ipc_ffi::Ready],
@@ -787,7 +784,7 @@ impl PluginBridge {
 
     /// The editor's main-thread tick: applies what the realtime setters queued
     /// for it and sends the audio instance the user's edits.
-    pub fn editor_idle(&self, main: MainThreadMarker) {
+    pub(crate) fn editor_idle(&self, main: MainThreadMarker) {
         if self.load_editor.is_none() {
             if let Ok(mut remote) = self.remote.lock() {
                 remote.editor_idle(main);
@@ -892,29 +889,33 @@ impl PluginBridge {
 
     /// The plain value the format converts a normalized one to, or `None` when
     /// it cannot be asked or the format has none.
-    pub fn parameter_plain(&self, param_id: ParamId, value: Normalized) -> Option<f64> {
+    pub(crate) fn parameter_plain(&self, param_id: ParamId, value: Normalized) -> Option<f64> {
         self.audio.parameter_plain(param_id, value)
     }
 
     /// The normalized value the format converts a plain one to, or `None` as for
     /// [`parameter_plain`](Self::parameter_plain).
-    pub fn parameter_normalized(&self, param_id: ParamId, plain: f64) -> Option<Normalized> {
+    pub(crate) fn parameter_normalized(&self, param_id: ParamId, plain: f64) -> Option<Normalized> {
         self.audio.parameter_normalized(param_id, plain)
     }
 
     /// The plugin's text for a parameter value, or `None` when it cannot be asked.
-    pub fn parameter_text(&self, param_id: ParamId, value: Normalized) -> Option<String> {
+    pub(crate) fn parameter_text(&self, param_id: ParamId, value: Normalized) -> Option<String> {
         self.audio.parameter_text(param_id, value)
     }
 
     /// The value the plugin parses `text` to, or `None` when it cannot be asked
     /// or does not parse it.
-    pub fn parameter_value_from_text(&self, param_id: ParamId, text: &str) -> Option<Normalized> {
+    pub(crate) fn parameter_value_from_text(
+        &self,
+        param_id: ParamId,
+        text: &str,
+    ) -> Option<Normalized> {
         self.audio.parameter_value_from_text(param_id, text)
     }
 
     /// The plugin's presets, or `None` when it cannot be asked.
-    pub fn presets(&self) -> Option<Vec<Preset>> {
+    pub(crate) fn presets(&self) -> Option<Vec<Preset>> {
         self.audio.presets()
     }
 
@@ -927,7 +928,7 @@ impl PluginBridge {
     /// after this reports it through the existing
     /// `PluginParamValuesChanged` / `PluginParamTitlesChanged` refresh path,
     /// which is the mechanism for exactly this.
-    pub fn load_preset(&self, id: PresetId) -> bool {
+    pub(crate) fn load_preset(&self, id: PresetId) -> bool {
         self.audio.load_preset(id)
     }
 
@@ -954,12 +955,12 @@ impl PluginBridge {
     /// Wait until every command queued so far has been handled and every
     /// event it caused has reached the listener. See the audio bridge's
     /// `settle`.
-    pub fn settle(&self) {
+    pub(crate) fn settle(&self) {
         self.audio.settle()
     }
 
     /// The open editor's resize capabilities (the default when none is open).
-    pub fn editor_capabilities(&self, main: MainThreadMarker) -> EditorCapabilities {
+    pub(crate) fn editor_capabilities(&self, main: MainThreadMarker) -> EditorCapabilities {
         if self.load_editor.is_none() {
             return self
                 .remote
@@ -981,7 +982,7 @@ impl PluginBridge {
     /// # Errors
     ///
     /// No editor is open, or it cannot resize.
-    pub fn set_editor_size(
+    pub(crate) fn set_editor_size(
         &self,
         main: MainThreadMarker,
         requested: Size,
@@ -1002,7 +1003,7 @@ impl PluginBridge {
     /// # Errors
     ///
     /// No editor is open, or the editor's own refusal (`set_editor_scale`).
-    pub fn set_editor_scale(
+    pub(crate) fn set_editor_scale(
         &self,
         main: MainThreadMarker,
         scale: ContentScale,
@@ -1019,7 +1020,7 @@ impl PluginBridge {
     }
 
     /// A size the open editor asked its window to take since the last poll.
-    pub fn poll_editor_resize_request(&self, main: MainThreadMarker) -> Option<Size> {
+    pub(crate) fn poll_editor_resize_request(&self, main: MainThreadMarker) -> Option<Size> {
         if self.load_editor.is_none() {
             return self.remote.lock().ok()?.poll_editor_resize_request(main);
         }
@@ -1077,7 +1078,7 @@ mod gui_mirror_tests {
         let mirror = GuiMirror::new();
         let id = ParamId::new(3);
         mirror.push_param(id, Normalized::of(0.9));
-        mirror.push_automation(crate::protocol::AutomationMode::Writing);
+        mirror.push_automation(tutti_plugin_types::AutomationMode::Writing);
         assert!(
             applied(&mirror).is_empty(),
             "nothing is queued with no editor"
@@ -1113,7 +1114,7 @@ mod gui_mirror_tests {
     /// drops one not yet applied.
     #[test]
     fn an_automation_mode_is_applied_once() {
-        use crate::protocol::AutomationMode;
+        use tutti_plugin_types::AutomationMode;
         let mirror = GuiMirror::new();
         mirror.opened();
         assert_eq!(mirror.take_automation(), None, "nothing written yet");
@@ -1152,7 +1153,7 @@ mod gui_mirror_tests {
             for i in 0..MIRROR_CAPACITY + 2 {
                 mirror.push_param(ParamId::new(i as u32), Normalized::of(0.25));
             }
-            mirror.push_automation(crate::protocol::AutomationMode::ReadWriting);
+            mirror.push_automation(tutti_plugin_types::AutomationMode::ReadWriting);
         });
         assert_eq!(mirror.refused.get(), 2);
     }

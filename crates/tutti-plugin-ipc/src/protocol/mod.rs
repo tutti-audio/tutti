@@ -192,26 +192,6 @@ pub(crate) use envelope::default_format;
 pub use envelope::{BridgeMessage, HostMessage, StagedState};
 pub use process::ProcessAudioData;
 pub use shm::SlabLayout;
-pub use tutti_plugin_types::MidiEventVec;
-
-// Types that are owned elsewhere but speak on the wire, adopted here so
-// `crate::protocol::{...}` is the single import point for the bridge.
-//
-// - Plugin load metadata: the catalog-identity `PluginDescriptor` (+ its
-//   per-format `PluginClass`) lives in `tutti-plugin-types`; the
-//   runtime engine-wiring `LoadedPlugin` lives in the format-agnostic
-//   `tutti-plugin-types`. They ride on `BridgeMessage::PluginLoaded`
-//   (descriptor + loaded) / probe replies (descriptor only).
-// - Parameters, transport snapshot, note-expression and harmony events:
-//   cross-format vocabulary shared with the host crates
-//   (`tutti-{vst2,vst3,clap,au}-host`) via `tutti-plugin-types`.
-pub use tutti_plugin_types::{
-    AutomationMode, BusChannels, ChannelLayout, ChordChanges, LoadedPlugin, NoteExpressionChanges,
-    NoteExpressionIntChanges, NoteExpressionTextChanges, ParamEdit, ParameterChanges,
-    ParameterInfo, ParameterPoint, ParameterQueue, PluginDescriptor, PluginFormat, PluginTail,
-    Preset, PresetId, RenderMode, Samples, ScaleChanges, TransportChanges, TransportInfo,
-};
-pub use tutti_units::ParamId;
 
 #[cfg(test)]
 mod tests {
@@ -220,10 +200,12 @@ mod tests {
     use tutti_buffers::FloatWidth;
     use tutti_midi_protocol::{widen_value, widen_velocity};
     use tutti_plugin_types::{
-        ChordValue, Load, NoteExpressionIntValue, NoteExpressionTextValue, ScaleValue, WireMidi,
+        ChordValue, Load, MidiEventVec, NoteExpressionIntValue, NoteExpressionTextValue,
+        ParameterInfo, PluginFormat, PluginTail, Preset, PresetId, RenderMode, Samples, ScaleValue,
+        TransportInfo, WireMidi,
     };
     use tutti_ump::{CCNumber, Message, MidiChannel, U7, Ump, Voice2};
-    use tutti_units::{Normalized, SampleRate};
+    use tutti_units::{Normalized, ParamId, SampleRate};
 
     use tutti_fixtures::midi;
 

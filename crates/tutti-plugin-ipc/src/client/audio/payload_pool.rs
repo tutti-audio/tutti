@@ -9,10 +9,10 @@
 //! never allocates.
 
 use super::messages::ProcessPayload;
-use crate::protocol::ParameterChanges;
 use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tutti_plugin_types::ParameterChanges;
 use tutti_rt::TallyWriter;
 use tutti_units::SampleRate;
 
@@ -270,7 +270,7 @@ impl PayloadPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ParameterQueue;
+    use tutti_plugin_types::ParameterQueue;
 
     /// **Every payload that can be out at once comes from the pool**: a full
     /// queue, the one the bridge thread holds, and the one the audio thread
