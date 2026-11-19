@@ -869,7 +869,7 @@ mod tests {
     fn an_os_edge_names_the_ump_types_only() {
         let os = |dir, krate, dep| {
             let mut v = base();
-            v.push(("crates/tutti-types", "tutti-types", ""));
+            v.push(("crates/tutti-music", "tutti-music", ""));
             v.push((dir, krate, dep));
             run(&v)
         };
@@ -882,10 +882,10 @@ mod tests {
             let r = os(
                 dir,
                 krate,
-                "[dependencies]\ntutti-types = { path = \"x\" }\n",
+                "[dependencies]\ntutti-music = { path = \"x\" }\n",
             );
             assert!(r.findings.iter().any(|l| l.contains(&format!(
-                "{krate} may depend on [\"tutti-ump\"] only; it depends on {{\"tutti-types\"}}"
+                "{krate} may depend on [\"tutti-ump\"] only; it depends on {{\"tutti-music\"}}"
             ))));
         }
     }
