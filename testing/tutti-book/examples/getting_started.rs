@@ -1,0 +1,81 @@
+//! Getting started: a 440 Hz sine, two seconds of it, written to a FLAC file.
+//!
+//! ```text
+//! cargo run -p tutti-book --example getting_started -- <dir>
+//! ```
+
+use std::path::Path;
+
+// ANCHOR: imports
+use tutti::nodes::OscillatorNode;
+use tutti::{Amplitude, Bounce, ChannelLayout, Format, Hz, Root, SampleRate, Seconds, Session};
+// ANCHOR_END: imports
+
+// ANCHOR: session
+/// A session whose output plays a 440 Hz sine at a quarter of full scale.
+fn tone() -> Result<Session, tutti::Error> {
+    // No sound card: the session renders when we ask it to.
+    let mut session = Session::new(SampleRate::SR_48K)?;
+
+    // An A at 440 Hz, a quarter of full scale.
+    let (sine, _) = session
+        .graph()
+        .add(OscillatorNode::sine(Hz::new(440.0)).with_level(Amplitude::new(0.25)));
+
+    // One mono output, heard in the left and the right channel.
+    session.graph().connect(sine.out(0), Root::output(0))?;
+    session.graph().connect(sine.out(0), Root::output(1))?;
+    Ok(session)
+}
+// ANCHOR_END: session
+
+// ANCHOR: bounce
+/// The first two seconds of the session, in stereo.
+fn two_seconds() -> Bounce {
+    Bounce::project()
+        .range(Seconds::new(0.0)..Seconds::new(2.0)) // from 0 s to 2 s
+        .channels(ChannelLayout::STEREO) // left and right
+}
+// ANCHOR_END: bounce
+
+// ANCHOR: main
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = std::env::args().nth(1).unwrap_or_else(|| ".".to_owned());
+    std::fs::create_dir_all(&dir)?;
+    let path = Path::new(&dir).join("getting_started.flac");
+
+    // The file's name picks its format: `.flac` is FLAC.
+    tone()?.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+
+    println!("wrote {}", path.display());
+    Ok(())
+}
+// ANCHOR_END: main
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// After the connection's fade-in, both channels carry the sine at its
+    /// level: a peak of 0.25 and an RMS of 0.25 / √2.
+    #[test]
+    fn the_bounce_is_a_sine_at_its_level_on_both_channels() {
+        let rendered = tone()
+            .unwrap()
+            .bounce(two_seconds().master_buffers())
+            .unwrap()
+            .into_master();
+        let frames = rendered.interleaved();
+        let settled = &frames[frames.len() / 2..];
+        for channel in 0..2 {
+            let x: Vec<f32> = settled.iter().skip(channel).step_by(2).copied().collect();
+            let peak = x.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();
+            assert!((peak - 0.25).abs() < 1e-3, "channel {channel} peak {peak}");
+            assert!(
+                (rms - 0.25 / 2f32.sqrt()).abs() < 1e-3,
+                "channel {channel} rms {rms}"
+            );
+        }
+    }
+}

@@ -393,6 +393,8 @@ pub(super) fn landing() -> String {
     "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
 <title>tutti</title></head><body>\n<h1>tutti</h1>\n<ul>\n\
+<li><a href=\"book/index.html\">The tutti Book</a></li>\n\
+<li><a href=\"api/tutti/index.html\">API reference</a></li>\n\
 <li><a href=\"conformance/index.html\">Spec conformance</a></li>\n\
 <li><a href=\"coverage/html/index.html\">Line coverage</a></li>\n\
 </ul>\n</body></html>\n"
@@ -660,8 +662,10 @@ pub fn gapped_one<F>() {}
     }
 
     #[test]
-    fn the_landing_page_links_the_dashboard_and_the_coverage_relatively() {
+    fn the_landing_page_links_the_book_the_reference_the_dashboard_and_the_coverage_relatively() {
         let page = landing();
+        assert!(page.contains("href=\"book/index.html\""));
+        assert!(page.contains("href=\"api/tutti/index.html\""));
         assert!(page.contains("href=\"conformance/index.html\""));
         assert!(page.contains("href=\"coverage/html/index.html\""));
         assert!(!page.contains("http://") && !page.contains("https://"));
