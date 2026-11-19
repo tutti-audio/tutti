@@ -557,7 +557,7 @@ impl Job {
         }
         match probed {
             Ok(plugins) => {
-                match FileRow::probed(format, facts, plugins) {
+                match FileRow::probed(format, facts).plugins(plugins).build() {
                     Ok(row) => (ScanOutcome::New, Some(RowChange::put(key, row)), None),
                     // A probe that read the file as another format than it was asked
                     // for says nothing worth recording: the file is retried.
@@ -1001,15 +1001,13 @@ mod tests {
             });
             let mut facts = FileFacts::read(plugin);
             facts.mtime = mtime.or(facts.mtime);
-            FileRow::probed(
-                PluginFormat::Vst3,
-                &facts,
-                vec![Described {
+            FileRow::probed(PluginFormat::Vst3, &facts)
+                .plugins(vec![Described {
                     id: Some(PluginId::Vst3(Uid::new([1; 16]))),
                     descriptor,
-                }],
-            )
-            .expect("ids of the row's format")
+                }])
+                .build()
+                .expect("ids of the row's format")
         };
         let same = create_fake_plugin(&plugins_dir, "same.vst3");
         let changed = create_fake_plugin(&plugins_dir, "changed.vst3");
@@ -1044,15 +1042,13 @@ mod tests {
         let mut db = PluginDb::new();
         db.apply(RowChange::put(
             &plugin,
-            FileRow::probed(
-                PluginFormat::Vst3,
-                &FileFacts::read(&plugin),
-                vec![Described::new(
+            FileRow::probed(PluginFormat::Vst3, &FileFacts::read(&plugin))
+                .plugins(vec![Described::new(
                     PluginId::Vst3(Uid::new([1; 16])),
                     PluginDescriptor::new("cached", PluginClass::Unknown),
-                )],
-            )
-            .expect("ids of the row's format"),
+                )])
+                .build()
+                .expect("ids of the row's format"),
         ));
 
         let result = scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
@@ -1521,7 +1517,9 @@ mod tests {
             let stale = vec![described("old")];
             db.apply(RowChange::put(
                 p,
-                FileRow::probed(PluginFormat::Clap, &facts, stale)
+                FileRow::probed(PluginFormat::Clap, &facts)
+                    .plugins(stale)
+                    .build()
                     .expect("ids of the row's format"),
             ));
         }

@@ -230,17 +230,15 @@ mod tests {
             ),
             format: Some(PluginFormat::Vst3),
         };
-        FileRow::probed(
-            PluginFormat::Vst3,
-            &facts,
-            vec![Described::new(
+        FileRow::probed(PluginFormat::Vst3, &facts)
+            .plugins(vec![Described::new(
                 PluginId::Vst3(Uid::new(std::array::from_fn(|i| {
                     name.as_bytes().get(i).copied().unwrap_or(0)
                 }))),
                 PluginDescriptor::new(name, PluginClass::Unknown),
-            )],
-        )
-        .expect("ids of the row's format")
+            )])
+            .build()
+            .expect("ids of the row's format")
     }
 
     fn db_of<S: AsRef<str>>(names: &[S]) -> PluginDb {

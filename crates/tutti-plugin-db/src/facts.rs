@@ -90,15 +90,13 @@ mod tests {
     }
 
     fn healthy(mtime: Option<Mtime>) -> FileRow {
-        FileRow::probed(
-            PluginFormat::Clap,
-            &facts(mtime),
-            vec![Described {
+        FileRow::probed(PluginFormat::Clap, &facts(mtime))
+            .plugins(vec![Described {
                 id: Some(PluginId::Clap("id".into())),
                 descriptor: PluginDescriptor::new("name", PluginClass::Unknown),
-            }],
-        )
-        .expect("ids of the row's format")
+            }])
+            .build()
+            .expect("ids of the row's format")
     }
 
     fn bad(mtime: Option<Mtime>) -> FileRow {

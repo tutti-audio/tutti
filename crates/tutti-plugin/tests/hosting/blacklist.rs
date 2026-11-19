@@ -14,15 +14,13 @@ fn catalog_over(path: &std::path::Path, format: PluginFormat, id: Option<&str>) 
     std::fs::write(path, b"not a real plugin").unwrap();
     let facts = FileFacts::read(path);
     let row = match id {
-        Some(id) => FileRow::probed(
-            format,
-            &facts,
-            vec![Described::new(
+        Some(id) => FileRow::probed(format, &facts)
+            .plugins(vec![Described::new(
                 PluginId::Clap(id.into()),
                 PluginDescriptor::new(id, PluginClass::Unknown),
-            )],
-        )
-        .expect("ids of the row's format"),
+            )])
+            .build()
+            .expect("ids of the row's format"),
         None => FileRow::blacklisted("SIGSEGV during probe".to_string(), &facts),
     };
     let mut db = PluginDb::new();

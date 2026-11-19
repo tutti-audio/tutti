@@ -466,6 +466,7 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
     );
 
     let mut au = AuInstance {
+        origin: tutti_plugin_types::InProcess::origin(&loaded).clone(),
         lifecycle: Lifecycle::new(loaded),
         state: Lifecycle::<AuLoaded>::initial_state(),
         hand: Hand::local(),

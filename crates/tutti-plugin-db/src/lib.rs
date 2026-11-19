@@ -62,7 +62,7 @@ pub use scanner::{
     ScanResult, Scanner, probe_plugin_fallback,
 };
 pub use table::{
-    BlacklistedFile, FileRow, FileState, FormatMismatch, PluginDb, PluginEntry, RowChange,
+    BlacklistedFile, FileRow, FileState, FormatMismatch, PluginDb, PluginEntry, Probed, RowChange,
 };
 #[cfg(feature = "serde")]
 pub use wire::{DB_VERSION, InvalidDb};

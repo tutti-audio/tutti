@@ -13,7 +13,7 @@ use crate::mtime::Mtime;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use tutti_plugin_types::{
-    Described, PluginDescriptor, PluginFormat, PluginId, PluginRef, PluginRole, Uid,
+    Described, PluginDescriptor, PluginFormat, PluginId, PluginRef, PluginRole,
 };
 
 /// What the database knows about one plugin file.
@@ -26,6 +26,41 @@ pub struct FileRow {
     pub mtime: Option<Mtime>,
     /// What the probe found.
     pub state: FileState,
+}
+
+/// A probed row being made ([`FileRow::probed`]).
+#[derive(Debug, Clone)]
+#[must_use = "a Probed does nothing until build makes the row"]
+pub struct Probed {
+    format: PluginFormat,
+    mtime: Option<Mtime>,
+    plugins: Vec<Described>,
+}
+
+impl Probed {
+    /// The plugins the file held, in the probe's order.
+    pub fn plugins(mut self, plugins: Vec<Described>) -> Self {
+        self.plugins = plugins;
+        self
+    }
+
+    /// The row.
+    ///
+    /// # Errors
+    ///
+    /// [`FormatMismatch`] when a plugin's id is of another format than the
+    /// row's: the row would name two formats for one file.
+    pub fn build(self) -> Result<FileRow, FormatMismatch> {
+        let row = FileRow {
+            mtime: self.mtime,
+            state: FileState::Probed {
+                format: self.format,
+                plugins: self.plugins,
+            },
+        };
+        row.check_formats()?;
+        Ok(row)
+    }
 }
 
 /// A probed row holding a plugin id of another format than the row's.
@@ -63,23 +98,15 @@ pub enum FileState {
 }
 
 impl FileRow {
-    /// The row for a file that probed into `plugins`, stamped with `facts`' time.
-    ///
-    /// # Errors
-    ///
-    /// [`FormatMismatch`] when a plugin's id is of another format than `format`:
-    /// the row would name two formats for one file.
-    pub fn probed(
-        format: PluginFormat,
-        facts: &FileFacts,
-        plugins: Vec<Described>,
-    ) -> Result<Self, FormatMismatch> {
-        let row = Self {
+    /// The row of a file that probed as `format`, stamped with `facts`' time:
+    /// [`Probed::plugins`] says what it held, and [`Probed::build`] refuses an id
+    /// of another format.
+    pub fn probed(format: PluginFormat, facts: &FileFacts) -> Probed {
+        Probed {
+            format,
             mtime: facts.mtime,
-            state: FileState::Probed { format, plugins },
-        };
-        row.check_formats()?;
-        Ok(row)
+            plugins: Vec::new(),
+        }
     }
 
     /// Whether every plugin id of a probed row is of the row's format.
@@ -408,7 +435,7 @@ impl PluginDb {
 mod tests {
     use super::*;
     use crate::facts::{ScanDecision, classify};
-    use tutti_plugin_types::PluginClass;
+    use tutti_plugin_types::{PluginClass, Uid};
 
     const T: u64 = 1_700_000_000;
 
@@ -423,15 +450,13 @@ mod tests {
     }
 
     fn row(mtime: u64) -> FileRow {
-        FileRow::probed(
-            PluginFormat::Vst3,
-            &facts(mtime),
-            vec![Described {
+        FileRow::probed(PluginFormat::Vst3, &facts(mtime))
+            .plugins(vec![Described {
                 id: Some(PluginId::Vst3(Uid::new([1; 16]))),
                 descriptor: PluginDescriptor::new("name", PluginClass::Unknown),
-            }],
-        )
-        .expect("ids of the row's format")
+            }])
+            .build()
+            .expect("ids of the row's format")
     }
 
     fn db_with(path: &str, row: FileRow) -> PluginDb {
@@ -515,7 +540,9 @@ mod tests {
     fn a_blacklisted_row_names_no_format_and_a_probed_one_names_its_own() {
         let mut db = db_with(
             "/p/good.clap",
-            FileRow::probed(PluginFormat::Clap, &facts(T), vec![])
+            FileRow::probed(PluginFormat::Clap, &facts(T))
+                .plugins(vec![])
+                .build()
                 .expect("ids of the row's format"),
         );
         db.blacklist(Path::new("/p/bad.vst3"), "boom".into(), &facts(T));
@@ -537,7 +564,9 @@ mod tests {
         });
         let db = db_with(
             "/p/shell.vst",
-            FileRow::probed(PluginFormat::Vst2, &facts(T), ids.to_vec())
+            FileRow::probed(PluginFormat::Vst2, &facts(T))
+                .plugins(ids.to_vec())
+                .build()
                 .expect("ids of the row's format"),
         );
         let names: Vec<_> = db.plugins().map(|p| p.descriptor.name.as_str()).collect();
@@ -600,7 +629,9 @@ mod tests {
             PluginId::Vst2(1),
             PluginDescriptor::new("x", PluginClass::Unknown),
         );
-        let refused = FileRow::probed(PluginFormat::Vst3, &facts(T), vec![stray])
+        let refused = FileRow::probed(PluginFormat::Vst3, &facts(T))
+            .plugins(vec![stray])
+            .build()
             .expect_err("a VST2 id in a VST3 row");
         assert_eq!(
             refused,
