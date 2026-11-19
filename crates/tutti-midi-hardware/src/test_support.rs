@@ -570,9 +570,7 @@ pub fn property_peer(
     resources: tutti_midi_device::PeResourceList,
 ) -> crate::PropertyPeer {
     crate::PropertyPeer {
-        device,
-        group,
-        muid,
+        at: crate::PeerRef::new(device, crate::PeerId { group, muid }),
         resources: Arc::new(resources),
     }
 }

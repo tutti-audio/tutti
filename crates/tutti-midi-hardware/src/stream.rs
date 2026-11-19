@@ -72,7 +72,7 @@
 //! is, and what the output sends in follows it, and where the input's event
 //! times come from follows its TXJR.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_graph::{Losses, Offset};
@@ -95,9 +95,10 @@ use crate::ci::{
     Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
 };
 use crate::devices::OpenOutput;
-use crate::process::{self, ProcessChange, ReportAsk, ReportError};
+use crate::peer::PeerError;
+use crate::process::{self, ProcessChange, ReportAsk};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
-use crate::properties::{self, PropertyAsk, PropertyChange, PropertyError};
+use crate::properties::{self, PropertyAsk, PropertyChange};
 use crate::session::Presented;
 use tutti_midi_device::DeviceId;
 
@@ -426,7 +427,6 @@ impl Negotiation {
         out: Option<OpenOutput>,
         timing: InputTiming,
         ci_refused: CounterWriter<Losses>,
-        store: Arc<Mutex<ResourceStore>>,
     ) -> Self {
         let asks = is_ump_endpoint(&os) && out.is_some();
         let inquire = if !is_ump_endpoint(&os) && out.is_some() {
@@ -450,7 +450,7 @@ impl Negotiation {
             out,
             run,
             inquire,
-            ci: Ci::new(device, ci_refused, store),
+            ci: Ci::new(device, ci_refused),
             answering: None,
             timing,
             stop: StopJr::Settled,
@@ -504,12 +504,12 @@ impl Negotiation {
     }
 
     /// Asks that a peer be made a Property Exchange call at the next poll.
-    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PropertyError> {
+    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerError> {
         self.ci.ask_property(ask)
     }
 
     /// Asks that a peer be sent a MIDI Message Report request at the next poll.
-    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), ReportError> {
+    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerError> {
         self.ci.report(ask)
     }
 
@@ -585,10 +585,11 @@ impl Negotiation {
         now: Instant,
         heard: &Heard<'_>,
         presented: Option<Presented>,
+        store: &mut ResourceStore,
     ) -> Stepped {
         let ci = presented.map(|p| p.identity.device);
         let changes = match &mut self.out {
-            Some(out) => self.ci.poll(now, heard, ci, out),
+            Some(out) => self.ci.poll(now, heard, ci, store, out),
             None => CiChanges::default(),
         };
         let stream = self.poll_stream(now, heard);

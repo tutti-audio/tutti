@@ -239,6 +239,7 @@ mod fault;
     allow(dead_code, reason = "only a native backend has a driver callback")
 )]
 mod guard;
+mod peer;
 mod port;
 mod process;
 mod profiles;
@@ -275,13 +276,14 @@ pub use devices::{
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{MidiHardwareError, MidiThread, NotFound, Result};
 pub use fault::{Errno, ErrnoOutOfRange, InputFault};
+pub use peer::{PeerError, PeerRef};
 pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StreamDrain};
-pub use process::{ProcessChange, ReportAsk, ReportError, Reporter};
+pub use process::{ProcessChange, ReportAsk, Reporter};
 pub use profiles::{
     ChannelCount, ChannelSwitcher, NotAChannelCount, PeerProfiles, ProfileError, ProfileSwitch,
     ProfilesChange, Switcher, WholeSwitcher,
 };
-pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
+pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
