@@ -68,6 +68,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 use std::vec::Vec;
 
+use super::Initiator;
 use super::TimeoutWait;
 use super::handshake::Handshake;
 use super::link::Link;
@@ -531,142 +532,6 @@ impl ProfileInitiator {
         })])
     }
 
-    /// When the Initiator next needs [`on_timeout`](Self::on_timeout), or `None`
-    /// with nothing waiting.
-    #[must_use]
-    pub fn deadline(&self) -> Option<Instant> {
-        Pending::earliest(
-            self.inquiry
-                .wait()
-                .into_iter()
-                .chain(self.pending.iter().map(|pending| pending.wait)),
-        )
-    }
-
-    /// Time has passed: everything whose wait is over ends. Calling it early is
-    /// harmless.
-    pub fn on_timeout(&mut self, now: Instant) -> Vec<ProfileAction> {
-        let mut actions = Vec::new();
-        if self.inquiry.expire(now) {
-            actions.push(ProfileAction::InquiryTimedOut);
-        }
-        let (expired, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending)
-            .into_iter()
-            .partition(|pending| pending.wait.expired(now));
-        self.pending = waiting;
-        actions.extend(expired.into_iter().map(|pending| ProfileAction::Resolved {
-            request: pending.request,
-            outcome: ProfileOutcome::TimedOut,
-        }));
-        actions
-    }
-
-    /// A CI message of the connection's Group arrived.
-    pub fn on_message(&mut self, decoded: &Decoded) -> Vec<ProfileAction> {
-        let mut actions = Vec::new();
-        let Decoded::Message(message) = decoded else {
-            return actions;
-        };
-        let from_peer = self.link.is_from_peer(message);
-        let to_us = self.link.is_to_us(message);
-        let address = message.header().device_id;
-        match message {
-            CiMessage::ProfileReply { profiles, .. } if from_peer && to_us => {
-                self.on_reply(address, profiles, &mut actions);
-            }
-            CiMessage::ProfileEnabled {
-                ci_version,
-                target,
-                profile,
-                ..
-            } if from_peer => self.on_state(
-                *profile,
-                ProfileState::Enabled,
-                *target,
-                *ci_version,
-                &mut actions,
-            ),
-            CiMessage::ProfileDisabled {
-                ci_version,
-                target,
-                profile,
-                ..
-            } if from_peer => self.on_state(
-                *profile,
-                ProfileState::Disabled,
-                *target,
-                *ci_version,
-                &mut actions,
-            ),
-            CiMessage::ProfileAdded { profile, .. } if from_peer => {
-                let entry = ProfileEntry {
-                    state: ProfileState::Disabled,
-                    channels: None,
-                };
-                // A Profile already listed keeps its state: the Report says only
-                // that it is supported.
-                if self.table.get(address, *profile).is_none() {
-                    self.table.set(address, *profile, entry);
-                    actions.push(ProfileAction::Changed {
-                        address,
-                        profile: *profile,
-                        change: ProfileChange::Added,
-                    });
-                }
-            }
-            CiMessage::ProfileRemoved { profile, .. } if from_peer => {
-                if self.table.remove(address, *profile) {
-                    actions.push(ProfileAction::Changed {
-                        address,
-                        profile: *profile,
-                        change: ProfileChange::Removed,
-                    });
-                }
-            }
-            CiMessage::ProfileDetailsReply {
-                profile,
-                target,
-                data,
-                ..
-            } if from_peer && to_us => {
-                let at = self.pending.iter().position(|pending| {
-                    pending.request
-                        == ProfileRequest::Details {
-                            address,
-                            profile: *profile,
-                            target: *target,
-                        }
-                });
-                if let Some(at) = at {
-                    let pending = self.pending.remove(at);
-                    actions.push(ProfileAction::Resolved {
-                        request: pending.request,
-                        outcome: ProfileOutcome::Details(data.clone()),
-                    });
-                }
-            }
-            CiMessage::ProfileSpecificData(specific)
-                if from_peer && (specific.to() == Destination::Broadcast || to_us) =>
-            {
-                actions.push(ProfileAction::SpecificData {
-                    address,
-                    profile: specific.profile(),
-                    data: specific.data().clone(),
-                });
-            }
-            CiMessage::Ack { ack, .. } if from_peer && to_us => {
-                if let Some(wait) = TimeoutWait::from_ack(ack) {
-                    self.on_wait(address, ack, wait);
-                }
-            }
-            CiMessage::Nak { nak, .. } if from_peer && to_us => {
-                self.on_nak(address, nak, &mut actions);
-            }
-            _ => {}
-        }
-        actions
-    }
-
     fn on_reply(
         &mut self,
         address: CiDeviceId,
@@ -796,6 +661,140 @@ impl ProfileInitiator {
         message: impl FnOnce(CiHeader, Muid) -> CiMessage,
     ) -> ProfileAction {
         ProfileAction::Send(self.link.message(address, message))
+    }
+}
+
+impl Initiator for ProfileInitiator {
+    type Action = ProfileAction;
+
+    fn deadline(&self) -> Option<Instant> {
+        Pending::earliest(
+            self.inquiry
+                .wait()
+                .into_iter()
+                .chain(self.pending.iter().map(|pending| pending.wait)),
+        )
+    }
+
+    fn on_message(&mut self, decoded: &Decoded, _now: Instant) -> Vec<ProfileAction> {
+        let mut actions = Vec::new();
+        let Decoded::Message(message) = decoded else {
+            return actions;
+        };
+        let from_peer = self.link.is_from_peer(message);
+        let to_us = self.link.is_to_us(message);
+        let address = message.header().device_id;
+        match message {
+            CiMessage::ProfileReply { profiles, .. } if from_peer && to_us => {
+                self.on_reply(address, profiles, &mut actions);
+            }
+            CiMessage::ProfileEnabled {
+                ci_version,
+                target,
+                profile,
+                ..
+            } if from_peer => self.on_state(
+                *profile,
+                ProfileState::Enabled,
+                *target,
+                *ci_version,
+                &mut actions,
+            ),
+            CiMessage::ProfileDisabled {
+                ci_version,
+                target,
+                profile,
+                ..
+            } if from_peer => self.on_state(
+                *profile,
+                ProfileState::Disabled,
+                *target,
+                *ci_version,
+                &mut actions,
+            ),
+            CiMessage::ProfileAdded { profile, .. } if from_peer => {
+                let entry = ProfileEntry {
+                    state: ProfileState::Disabled,
+                    channels: None,
+                };
+                // A Profile already listed keeps its state: the Report says only
+                // that it is supported.
+                if self.table.get(address, *profile).is_none() {
+                    self.table.set(address, *profile, entry);
+                    actions.push(ProfileAction::Changed {
+                        address,
+                        profile: *profile,
+                        change: ProfileChange::Added,
+                    });
+                }
+            }
+            CiMessage::ProfileRemoved { profile, .. } if from_peer => {
+                if self.table.remove(address, *profile) {
+                    actions.push(ProfileAction::Changed {
+                        address,
+                        profile: *profile,
+                        change: ProfileChange::Removed,
+                    });
+                }
+            }
+            CiMessage::ProfileDetailsReply {
+                profile,
+                target,
+                data,
+                ..
+            } if from_peer && to_us => {
+                let at = self.pending.iter().position(|pending| {
+                    pending.request
+                        == ProfileRequest::Details {
+                            address,
+                            profile: *profile,
+                            target: *target,
+                        }
+                });
+                if let Some(at) = at {
+                    let pending = self.pending.remove(at);
+                    actions.push(ProfileAction::Resolved {
+                        request: pending.request,
+                        outcome: ProfileOutcome::Details(data.clone()),
+                    });
+                }
+            }
+            CiMessage::ProfileSpecificData(specific)
+                if from_peer && (specific.to() == Destination::Broadcast || to_us) =>
+            {
+                actions.push(ProfileAction::SpecificData {
+                    address,
+                    profile: specific.profile(),
+                    data: specific.data().clone(),
+                });
+            }
+            CiMessage::Ack { ack, .. } if from_peer && to_us => {
+                if let Some(wait) = TimeoutWait::from_ack(ack) {
+                    self.on_wait(address, ack, wait);
+                }
+            }
+            CiMessage::Nak { nak, .. } if from_peer && to_us => {
+                self.on_nak(address, nak, &mut actions);
+            }
+            _ => {}
+        }
+        actions
+    }
+
+    fn on_timeout(&mut self, now: Instant) -> Vec<ProfileAction> {
+        let mut actions = Vec::new();
+        if self.inquiry.expire(now) {
+            actions.push(ProfileAction::InquiryTimedOut);
+        }
+        let (expired, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending)
+            .into_iter()
+            .partition(|pending| pending.wait.expired(now));
+        self.pending = waiting;
+        actions.extend(expired.into_iter().map(|pending| ProfileAction::Resolved {
+            request: pending.request,
+            outcome: ProfileOutcome::TimedOut,
+        }));
+        actions
     }
 }
 

@@ -165,7 +165,7 @@ use std::time::Instant;
 use tutti_graph::{Losses, Offset};
 use tutti_midi_device::{
     CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, EntropyError,
-    EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessError, ProcessFeatures,
+    EntropyWords, Initiator, MaxSysexSize, Muid, ProcessAction, ProcessError, ProcessFeatures,
     ProcessInitiator, ProfileAction, ProfileInitiator, ProfileRequestError, ResourceInitiator,
     ResourceResponder, ResourceStore,
 };
@@ -365,6 +365,31 @@ impl Member {
             server,
         }
     }
+}
+
+/// What each Initiator of `initiators` does with the message `decoded`, by peer.
+fn hear_all<I: Initiator>(
+    initiators: &mut BTreeMap<Muid, I>,
+    decoded: &Decoded,
+    now: Instant,
+) -> Vec<(Muid, Vec<I::Action>)> {
+    initiators
+        .iter_mut()
+        .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
+        .collect()
+}
+
+/// What each Initiator of `initiators` whose wait has run out does about it, by
+/// peer.
+fn expire_all<I: Initiator>(
+    initiators: &mut BTreeMap<Muid, I>,
+    now: Instant,
+) -> Vec<(Muid, Vec<I::Action>)> {
+    initiators
+        .iter_mut()
+        .filter(|(_, initiator)| initiator.deadline().is_some_and(|at| now >= at))
+        .map(|(&muid, initiator)| (muid, initiator.on_timeout(now)))
+        .collect()
 }
 
 /// The devices running on one input, and what hears their SysEx.
@@ -879,8 +904,7 @@ impl Running {
             for member in self.members.iter_mut().filter(|m| m.group == group) {
                 let actions = member.device.on_message(&decoded, now);
                 member.apply(actions, now, &mut sends, changes);
-                member.route(&decoded, &mut sends, changes);
-                member.route_process(&decoded, now, &mut sends, changes);
+                member.hear(&decoded, now, &mut sends, changes);
                 member.route_property(store, &decoded, now, &mut sends, changes);
             }
         }
@@ -894,7 +918,6 @@ impl Running {
                 member.apply(actions, now, &mut sends, changes);
             }
             member.expire(now, &mut sends, changes);
-            member.expire_process(now, &mut sends, changes);
             member.expire_property(store, now, &mut sends, changes);
         }
         changes.refused += send(out, &sends);
@@ -1084,39 +1107,35 @@ impl Member {
         self.carry_out_process(muid, actions, sends, changes);
     }
 
-    /// Hands every Process Inquiry Initiator the message, which is theirs to keep
-    /// or ignore.
-    fn route_process(
+    /// Hands every Profile Configuration and Process Inquiry Initiator the
+    /// message, which is theirs to keep or ignore.
+    fn hear(
         &mut self,
         decoded: &Decoded,
         now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let heard: Vec<_> = self
-            .process
-            .iter_mut()
-            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
-            .collect();
-        for (muid, actions) in heard {
+        for (muid, actions) in hear_all(&mut self.initiators, decoded, now) {
+            self.carry_out(muid, actions, sends, changes);
+        }
+        for (muid, actions) in hear_all(&mut self.process, decoded, now) {
             self.carry_out_process(muid, actions, sends, changes);
         }
     }
 
-    /// Ends every wait of the Process Inquiry Initiators that has run out.
-    fn expire_process(
+    /// Ends every wait of the Profile Configuration and Process Inquiry
+    /// Initiators that has run out.
+    fn expire(
         &mut self,
         now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let ended: Vec<_> = self
-            .process
-            .iter_mut()
-            .filter(|(_, initiator)| initiator.deadline().is_some_and(|at| now >= at))
-            .map(|(&muid, initiator)| (muid, initiator.on_timeout(now)))
-            .collect();
-        for (muid, actions) in ended {
+        for (muid, actions) in expire_all(&mut self.initiators, now) {
+            self.carry_out(muid, actions, sends, changes);
+        }
+        for (muid, actions) in expire_all(&mut self.process, now) {
             self.carry_out_process(muid, actions, sends, changes);
         }
     }
@@ -1183,41 +1202,6 @@ impl Member {
                 _ => continue,
             };
             changes.process.push((id, change));
-        }
-    }
-
-    /// Hands every Initiator the message, which is theirs to keep or ignore.
-    fn route(
-        &mut self,
-        decoded: &Decoded,
-        sends: &mut Vec<(MidiGroup, CiMessage)>,
-        changes: &mut CiChanges,
-    ) {
-        let heard: Vec<_> = self
-            .initiators
-            .iter_mut()
-            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded)))
-            .collect();
-        for (muid, actions) in heard {
-            self.carry_out(muid, actions, sends, changes);
-        }
-    }
-
-    /// Ends every wait of the Initiators that has run out.
-    fn expire(
-        &mut self,
-        now: Instant,
-        sends: &mut Vec<(MidiGroup, CiMessage)>,
-        changes: &mut CiChanges,
-    ) {
-        let ended: Vec<_> = self
-            .initiators
-            .iter_mut()
-            .filter(|(_, initiator)| initiator.deadline().is_some_and(|at| now >= at))
-            .map(|(&muid, initiator)| (muid, initiator.on_timeout(now)))
-            .collect();
-        for (muid, actions) in ended {
-            self.carry_out(muid, actions, sends, changes);
         }
     }
 
