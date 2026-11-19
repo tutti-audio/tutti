@@ -15,7 +15,7 @@ use tutti_units::{Amplitude, Db, SampleRate, SampleSpan, Seconds};
 /// zero, negative or NaN `rt60` has no memory and gives gain 0; an infinite
 /// one, or one so long its frame count overflows, never decays and gives 1.
 #[must_use]
-pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitude {
+pub(crate) fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitude {
     let Some(trips) = SampleSpan::from_seconds(rt60, rate) else {
         // Not a span: a positive RT60 whose frames overflow (infinity included)
         // never decays, anything else (negative, NaN) has no memory.
@@ -31,7 +31,7 @@ pub fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> Amplitud
     Db(-60.0 * delay.get() / trips.get()).to_amplitude()
 }
 
-/// The inverse of [`loop_gain`]: the RT60 of a loop of `delay` frames at
+/// The inverse of `loop_gain`: the RT60 of a loop of `delay` frames at
 /// gain `gain`, `-60 d / (fs · 20 log10 g)`.
 ///
 /// A gain of 0 decays at once (zero seconds); a gain of 1 or more, and a gain
