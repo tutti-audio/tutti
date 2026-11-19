@@ -567,7 +567,7 @@ fn a_refusing_sink_counts_what_it_refused() {
 
 /// **The session's own MIDI nodes go in through `add`**, so the reclaim
 /// phase sweeps their published cells: a clip `play_clip` made (its events)
-/// and an input port's ingest node (its MPE mode). What each reclaimer frees is
+/// and an input port's input node (its MPE mode). What each reclaimer frees is
 /// pinned in `tutti-midi-runtime` with a held loan, and the sweep of the
 /// graph's reclaimers in `tests/wiring/graph.rs`.
 #[cfg(feature = "midi-hardware")]
@@ -586,7 +586,7 @@ fn the_sessions_midi_nodes_keep_their_reclaimers() {
     assert!(s.graph_ref().testing().keeps_reclaimer(clip), "the clip's");
     assert!(
         s.graph_ref().testing().keeps_reclaimer(input),
-        "the ingest node's"
+        "the input node's"
     );
     assert!(
         !s.graph_ref().testing().keeps_reclaimer(synth),
@@ -712,7 +712,7 @@ fn keyboards() -> (
 }
 
 /// Declares an input port for each of `names` (a device's name, which is also
-/// its key), whole, and updates: the entries load and their ingest nodes and
+/// its key), whole, and updates: the entries load and their input nodes and
 /// inlets are in the plan.
 #[cfg(feature = "midi-hardware")]
 pub(crate) fn connect(s: &mut Session, names: &[&'static str]) {
@@ -739,7 +739,7 @@ fn key(channel: u8, n: u8) -> Ump {
 
 /// **A connected device's note reaches the synth its channel routes to**
 /// through the device's own event inlet, once: the update after the connection
-/// wires the inlet to the ingest node, the device's thread
+/// wires the inlet to the input node, the device's thread
 /// pushes, and the synth hears it.
 #[cfg(feature = "midi-hardware")]
 #[test]
@@ -755,7 +755,7 @@ fn a_connected_devices_note_reaches_the_synth_through_its_inlet() {
 }
 
 /// **Two devices are two ports, merged at the synth**: each device's note is
-/// heard, and one port going takes only its own ingest node and inlet.
+/// heard, and one port going takes only its own input node and inlet.
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
@@ -765,7 +765,7 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
     assert_eq!(
         plan_nodes(&s),
         before + 4,
-        "an ingest node and an inlet each"
+        "an input node and an inlet each"
     );
     roll(&s, 1_024);
     // Both arrive at one instant, the second device's first: the merged order
@@ -788,7 +788,7 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
     assert_eq!(
         plan_nodes(&s),
         before + 2,
-        "only the removed port's ingest node and inlet left"
+        "only the removed port's input node and inlet left"
     );
     assert!(
         fake.send_input(EndpointId::from_raw(2), key(0, 65), Instant::now()),

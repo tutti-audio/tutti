@@ -93,7 +93,7 @@
 //! the engine's block clock puts it on and pushes it into that device's event
 //! inlet. The graph reads the inlets on their frames (the node
 //! `connect_input` returns is the inlet's graph side, to be wired to a
-//! [`MidiIngestNode`](tutti_midi_runtime::MidiIngestNode)), so the audio thread converts no time. The session only
+//! [`MidiInputNode`](tutti_midi_runtime::MidiInputNode)), so the audio thread converts no time. The session only
 //! owns the connection. Disconnecting drops the connection's
 //! [`InputProducerHandle`] and retires its port.
 //!

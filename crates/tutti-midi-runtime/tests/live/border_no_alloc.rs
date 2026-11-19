@@ -11,7 +11,7 @@ use tutti_graph::{
 };
 use tutti_graph::{ForkByClone, NodeKey, Stamp};
 use tutti_midi_runtime::{
-    DeviceEpochs, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiIngestNode, MidiKeys,
+    DeviceGeneration, HarmonyNode, LIVE_INLET_CAPACITY, MidiClipNode, MidiInputNode, MidiKeys,
     MidiOutNode, MpeTransformNode, SyncMessages, SyncOut, TimedHarmony, TimedMidiEvent,
 };
 use tutti_music::{FrameClock, LoopRange};
@@ -69,7 +69,7 @@ fn the_border_nodes_process_without_allocating() {
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(512)),
     ));
-    ed.insert(NodeKey(1), "in", MidiIngestNode::new());
+    ed.insert(NodeKey(1), "in", MidiInputNode::new());
     let mut dev = device(&mut ed, 4);
     let (inlet, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(2), "keys", inlet);
@@ -164,17 +164,21 @@ fn the_border_nodes_process_without_allocating() {
 }
 
 /// **A device's departure and arrival process without allocating**: the ingest
-/// node that follows its epochs releases what the departing device held,
+/// node that follows its generations releases what the departing device held,
 /// restarts for the next, pays what it owes and settles, block after block.
 #[test]
-fn an_epoch_change_processes_without_allocating() {
+fn a_generation_change_processes_without_allocating() {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(512)),
     ));
-    let (mut writer, epochs) = DeviceEpochs::new();
+    let (mut writer, generations) = DeviceGeneration::new();
     writer.arrive();
-    ed.insert(NodeKey(1), "in", MidiIngestNode::new().following(&epochs));
+    ed.insert(
+        NodeKey(1),
+        "in",
+        MidiInputNode::new().following(&generations),
+    );
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (1, 6), (1, 9)]);
     ed.commit().unwrap();
@@ -207,7 +211,7 @@ fn an_epoch_change_processes_without_allocating() {
     assert!(offs > 0, "the departures released the keys they held");
     writer.depart();
     exec.process(512, &t, &[], &mut []);
-    assert!(epochs.is_settled(), "the last departure was handled");
+    assert!(generations.is_settled(), "the last departure was handled");
 }
 
 /// **A device output's node passes events without allocating.**
@@ -264,7 +268,7 @@ fn the_mpe_bend_range_fan_out_processes_without_allocating() {
         MaxBlock::of(Samples::new(512)),
     ));
     let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
-    ed.insert(NodeKey(1), "in", MidiIngestNode::new().with_mpe(&mode));
+    ed.insert(NodeKey(1), "in", MidiInputNode::new().with_mpe(&mode));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();
@@ -321,7 +325,7 @@ fn the_mpe_expression_paths_process_without_allocating() {
         MaxBlock::of(Samples::new(512)),
     ));
     let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
-    ed.insert(NodeKey(1), "in", MidiIngestNode::new().with_mpe(&mode));
+    ed.insert(NodeKey(1), "in", MidiInputNode::new().with_mpe(&mode));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 2)]);
     ed.commit().unwrap();
@@ -378,7 +382,7 @@ fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
         MaxBlock::of(Samples::new(512)),
     ));
     let cell = Publisher::new(MpeMode::Disabled);
-    ed.insert(NodeKey(1), "in", MidiIngestNode::new().with_mpe(&cell));
+    ed.insert(NodeKey(1), "in", MidiInputNode::new().with_mpe(&cell));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();
@@ -859,7 +863,7 @@ fn resetting_the_border_nodes_allocates_nothing() {
     use tutti_graph::contract::Direct;
 
     let rate = SampleRate::SR_48K;
-    let mut ingest = Direct::new(MidiIngestNode::new(), rate, 64);
+    let mut ingest = Direct::new(MidiInputNode::new(), rate, 64);
     let sync = SyncOut::new(MidiGroup::FIRST).sending(SyncMessages {
         clock: true,
         mtc: true,

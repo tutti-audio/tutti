@@ -9,7 +9,7 @@ fn the_node_adopts_the_mode_last_published() {
     let lower = tutti_fixtures::midi::lower_zone(15);
     let upper = tutti_fixtures::midi::upper_zone(7);
     let cell = Publisher::new(MpeMode::Disabled);
-    let mut node = MidiIngestNode::new().with_mpe(&cell);
+    let mut node = MidiInputNode::new().with_mpe(&cell);
     assert_eq!(node.device.mode, MpeMode::Disabled);
     cell.publish(lower);
     cell.publish(upper);
@@ -28,8 +28,8 @@ fn the_node_adopts_the_mode_last_published() {
 /// the next `reclaim`**, with no further publish.
 #[test]
 fn reclaim_frees_a_request_a_block_held_across_the_next() {
-    let mut node = MidiIngestNode::new();
-    let controls = MidiIngestControls {
+    let mut node = MidiInputNode::new();
+    let controls = MidiInputControls {
         request: node.mpe_request_cell.clone(),
         serial: Arc::clone(&node.request_serial),
         dropped: node.dropped_reader.clone(),
@@ -136,8 +136,8 @@ fn a_group_has_ports_of_its_own() {
 fn sent_at_arrival(reset: bool) -> usize {
     use tutti_graph::Event;
     use tutti_graph::contract::Direct;
-    let (mut writer, epochs) = DeviceEpochs::new();
-    let node = MidiIngestNode::new().following(&epochs);
+    let (mut writer, generations) = DeviceGeneration::new();
+    let node = MidiInputNode::new().following(&generations);
     let mut d = Direct::new(node, SampleRate::SR_48K, 64);
     let on = midi::note_on(
         MidiChannel::of(0),

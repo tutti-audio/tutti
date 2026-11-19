@@ -1,4 +1,4 @@
-//! [`MidiIngestNode`]: the graph side of the MIDI input edge, its events out of
+//! [`MidiInputNode`]: the graph side of the MIDI input edge, its events out of
 //! one event port per Group and channel.
 //!
 //! A hardware device reaches the graph through an event inlet of its own
@@ -16,7 +16,7 @@
 //! to Channels in another), so a Group has its own sixteen channel ports and
 //! its own channelless port, which carries that Group's System, SysEx and Flex
 //! messages. The node hears the first Group unless built to hear more
-//! ([`MidiIngestNode::hearing`]), so a one-Group device has [`MIDI_INPUT_PORTS`]
+//! ([`MidiInputNode::hearing`]), so a one-Group device has [`MIDI_INPUT_PORTS`]
 //! ports. A message with no Group (Utility, UMP Stream: they address
 //! the Endpoint, not a Group) leaves the first Group's channelless port.
 //! **Routing is wiring**: a synth listening to channel 3 of a Group takes event
@@ -34,9 +34,9 @@
 //! centred bends; `Held`'s docs say why not All Notes Off) through the
 //! same translation as any other message, in three cases:
 //!
-//! - *The device changed or went.* Built [`following`](MidiIngestNode::following)
-//!   the [`DeviceEpochs`] that track its input's device, the node compares the
-//!   epoch (which the control side moves as each device arrives and as it
+//! - *The device changed or went.* Built [`following`](MidiInputNode::following)
+//!   the [`DeviceGeneration`] that track its input's device, the node compares the
+//!   generation (which the control side moves as each device arrives and as it
 //!   departs) with the one it last saw every block. A change releases
 //!   everything the old device held, at the block's first frame, then starts
 //!   empty, translator and MPE state, so one device's half-sent run is not
@@ -88,19 +88,19 @@ use tutti_units::{Frame, SampleRate, Samples};
 use super::mpe_ingest::MpeIngest;
 use super::order::{BLANK, in_offset_order, offset_of};
 use super::sensing::ActiveSensing;
-use crate::live::device_epochs::DeviceEpochs;
+use crate::live::device_generation::DeviceGeneration;
 
 /// The port that carries a Group's events with no channel: after its sixteen
 /// channel ports. For the first Group (and a node that hears only it); Group
 /// `g`'s is [`MidiInputPorts::channelless`].
 pub const CHANNELLESS_PORT: usize = MidiChannel::COUNT as usize;
 
-/// How many event outputs a [`MidiIngestNode`] that hears one Group has: one
+/// How many event outputs a [`MidiInputNode`] that hears one Group has: one
 /// per channel and [`CHANNELLESS_PORT`]. Each further Group adds as many
 /// ([`MidiInputPorts::count`]).
 pub const MIDI_INPUT_PORTS: usize = CHANNELLESS_PORT + 1;
 
-/// The fewest events a [`MidiIngestNode`] translates in one block, and each port's
+/// The fewest events a [`MidiInputNode`] translates in one block, and each port's
 /// declared event capacity at the shortest blocks.
 pub const MIDI_INPUT_EVENT_CAPACITY: usize = 512;
 
@@ -108,7 +108,7 @@ pub const MIDI_INPUT_EVENT_CAPACITY: usize = 512;
 pub(super) const MIDI_INPUT_PORT_CAPACITY: NonZeroU32 =
     NonZeroU32::new(MIDI_INPUT_EVENT_CAPACITY as u32).unwrap();
 
-/// The events per frame a [`MidiIngestNode`] is sized for: one in eight
+/// The events per frame a [`MidiInputNode`] is sized for: one in eight
 /// (6,000 a second at 48 kHz, where a 16-channel MPE controller sending a
 /// bend, a pressure and a slide every 8 ms on each channel is 6,000), which
 /// with its block is the node's poll and port capacity when that is more than
@@ -120,7 +120,7 @@ pub(super) const MIDI_INPUT_PORT_CAPACITY: NonZeroU32 =
 /// that (0.16 MB at 512, 0.62 MB at 2,048).
 pub const MIDI_INPUT_DENSITY: EventDensity = EventDensity::per_kiloframe(128);
 
-/// Which output port of a [`MidiIngestNode`] carries what: the layout of the
+/// Which output port of a [`MidiInputNode`] carries what: the layout of the
 /// Groups it hears.
 ///
 /// Group `g` owns the ports `g * 17 ..= g * 17 + 16`: channel `c`'s is
@@ -245,22 +245,22 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_midi_protocol::MpeMode;
-/// use tutti_midi_runtime::MidiIngestNode;
+/// use tutti_midi_runtime::MidiInputNode;
 /// use tutti_rt::Publisher;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// // The inlet is not wired yet.
 /// let mode = Publisher::new(MpeMode::Disabled);
-/// let node = MidiIngestNode::new().with_mpe(&mode);
+/// let node = MidiInputNode::new().with_mpe(&mode);
 /// let controls = editor.insert(NodeKey(1), "midi in", node).controls;
 /// controls.clear_mpe_profiles();
 /// ```
-pub struct MidiIngestNode {
+pub struct MidiInputNode {
     /// The device's translation state.
     device: Device,
-    /// The device's epochs ([`MidiIngestNode::following`]); `None` for a node
+    /// The device's generations ([`MidiInputNode::following`]); `None` for a node
     /// that follows none, whose device is always present and never restarts.
-    epochs: Option<DeviceEpochs>,
+    generations: Option<DeviceGeneration>,
     /// What the block sends: the translated events, which may outnumber the
     /// ones read (a member channel's bend range fans out over its zone).
     out: Box<[UmpAt]>,
@@ -283,7 +283,7 @@ pub struct MidiIngestNode {
     /// the cell's first value, which holds none).
     profiles_seq: u64,
     /// Translated events a block had no room for in `out`
-    /// ([`MidiIngestControls::losses`]).
+    /// ([`MidiInputControls::losses`]).
     dropped: CounterWriter<Losses>,
     /// The reading end of `dropped`, given to the controls.
     dropped_reader: Counter<Losses>,
@@ -319,10 +319,10 @@ struct Device {
     mpe: MpeIngest,
     /// The MPE mode in force.
     mode: MpeMode,
-    /// The epoch this state was last reset at.
-    epoch: u64,
+    /// The generation this state was last reset at.
+    generation: u64,
     /// Whether a device is there: an event of none is not read. Always for a
-    /// node that follows no epochs.
+    /// node that follows no generations.
     present: bool,
     /// What the device started and has not ended, as it sent it.
     held: Held,
@@ -339,7 +339,7 @@ impl Device {
             translator: Midi2Translator::new(),
             mpe: MpeIngest::new(mode),
             mode,
-            epoch: 0,
+            generation: 0,
             present: true,
             held: Held::new(),
             // Built again for the real rate in `prepare`.
@@ -372,13 +372,13 @@ impl Device {
     /// Empty, as for a device that has not sent anything. What the old device
     /// still holds is not forgotten: it was released first, and what did not
     /// fit is owed.
-    fn restart(&mut self, epoch: u64) {
+    fn restart(&mut self, generation: u64) {
         self.translator.reset();
         self.mpe = MpeIngest::new(self.mode);
         self.sensing.forget_all();
-        self.epoch = epoch;
-        // A device is there while its epoch is odd.
-        self.present = epoch % 2 == 1;
+        self.generation = generation;
+        // A device is there while its generation is odd.
+        self.present = generation % 2 == 1;
     }
 
     /// Releases what `group` (every Group for `None`) held, at `at`, through
@@ -435,9 +435,9 @@ impl Device {
     }
 }
 
-impl std::fmt::Debug for MidiIngestNode {
+impl std::fmt::Debug for MidiInputNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MidiIngestNode")
+        f.debug_struct("MidiInputNode")
             .field("mpe_mode", &self.device.mode)
             .field("mpe_request", &self.mpe_request)
             .field("profiles", &self.profiles)
@@ -446,13 +446,13 @@ impl std::fmt::Debug for MidiIngestNode {
     }
 }
 
-impl Default for MidiIngestNode {
+impl Default for MidiInputNode {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl MidiIngestNode {
+impl MidiInputNode {
     /// A node with its one event input, with MPE ingestion off.
     #[must_use]
     pub fn new() -> Self {
@@ -466,7 +466,7 @@ impl MidiIngestNode {
             device: Device::new(MpeMode::Disabled),
             profiles: NO_PROFILES,
             profiles_seq: 0,
-            epochs: None,
+            generations: None,
             out: vec![BLANK; tutti_graph::note_off_room(MIDI_INPUT_EVENT_CAPACITY)]
                 .into_boxed_slice(),
             ports: MidiInputPorts::FIRST_GROUP,
@@ -476,19 +476,19 @@ impl MidiIngestNode {
         }
     }
 
-    /// Follows the device `epochs` says is behind the node's event input: each
-    /// block the node reads the epoch (an acquire load of a cell the control
+    /// Follows the device `generations` says is behind the node's event input: each
+    /// block the node reads the generation (an acquire load of a cell the control
     /// side stores to when a device comes or goes), and when it changed it
     /// releases what the device held, starts over, and hears nothing while no
     /// device is there. Without it a device is there from the first block. The
-    /// node starts at the epoch the epochs are at now, whatever it is, so a node
+    /// node starts at the generation the generations are at now, whatever it is, so a node
     /// built before any device has arrived treats its device as present until
     /// the first change (it has sent nothing to release), and one built while a
     /// device is there releases nothing at its first block.
     #[must_use]
-    pub fn following(mut self, epochs: &DeviceEpochs) -> Self {
-        self.device.epoch = epochs.epoch();
-        self.epochs = Some(epochs.clone());
+    pub fn following(mut self, generations: &DeviceGeneration) -> Self {
+        self.device.generation = generations.generation();
+        self.generations = Some(generations.clone());
         self
     }
 
@@ -521,10 +521,10 @@ impl MidiIngestNode {
     }
 }
 
-/// The host's handle on a [`MidiIngestNode`]: the MPE Profile zones of its
+/// The host's handle on a [`MidiInputNode`]: the MPE Profile zones of its
 /// device. Cheap to clone.
 #[derive(Clone, Debug)]
-pub struct MidiIngestControls {
+pub struct MidiInputControls {
     /// What the node reads; the controls publish to it and read it back with
     /// `Publisher::current`.
     request: Publisher<Requests>,
@@ -534,7 +534,7 @@ pub struct MidiIngestControls {
     dropped: Counter<Losses>,
 }
 
-impl MidiIngestControls {
+impl MidiInputControls {
     /// The MIDI-CI MPE Profile zones (M2-120) the device enabled on `group`: from the next block, what the device sends on
     /// that Group follows the zones' rules instead of the mode's, until `zones`
     /// is `None` ([`MpeIngest::set_profile`] says what the change stops and
@@ -583,7 +583,7 @@ impl MidiIngestControls {
     }
 }
 
-impl<F: Float> Node<F> for MidiIngestNode {
+impl<F: Float> Node<F> for MidiInputNode {
     /// No audio; one event input per attached input, [`MidiInputPorts::count`]
     /// event outputs ([`MIDI_INPUT_PORTS`] for the first Group alone) of the
     /// prepared capacity ([`MIDI_INPUT_EVENT_CAPACITY`] at least, and
@@ -652,11 +652,11 @@ impl<F: Float> Node<F> for MidiIngestNode {
         }
         // A device that arrived or left: what the one before held is ended
         // before anything else of the input is read.
-        if let Some(epochs) = &self.epochs {
-            let epoch = epochs.epoch();
-            if epoch != device.epoch {
+        if let Some(generations) = &self.generations {
+            let generation = generations.generation();
+            if generation != device.generation {
                 device.release(None, Offset::ZERO, &mut staging);
-                device.restart(epoch);
+                device.restart(generation);
                 // The new device has enabled no Profile.
                 self.profiles = NO_PROFILES;
             }
@@ -701,13 +701,13 @@ impl<F: Float> Node<F> for MidiIngestNode {
         // What the control side may wait for, stored once this block's events are
         // pushed: nothing is owed. A release that did not fit the block stays
         // owed (`Staging::whole` refuses it whole) and a push a port refuses is
-        // counted by the executor, so an epoch settles only for what was sent or
+        // counted by the executor, so an generation settles only for what was sent or
         // counted.
         let settled = self
-            .epochs
+            .generations
             .as_ref()
             .filter(|_| device.owing == 0)
-            .map(|_| device.epoch);
+            .map(|_| device.generation);
         let Staging { kept, dropped, .. } = staging;
         if dropped > 0 {
             self.dropped.add(Losses::refused(dropped));
@@ -726,8 +726,8 @@ impl<F: Float> Node<F> for MidiIngestNode {
                 .event_out(port)
                 .push(Event::midi(offset_of(ev, block_len), ev.1));
         }
-        if let (Some(epochs), Some(epoch)) = (&self.epochs, settled) {
-            epochs.settle(epoch);
+        if let (Some(generations), Some(generation)) = (&self.generations, settled) {
+            generations.settle(generation);
         }
         Status::Modified
     }
@@ -809,7 +809,7 @@ impl Staging<'_> {
     }
 }
 
-/// A [`MidiIngestNode`]'s fork: the same ports, nothing to read.
+/// A [`MidiInputNode`]'s fork: the same ports, nothing to read.
 struct SilentInput {
     ports: MidiInputPorts,
 }
@@ -817,17 +817,17 @@ struct SilentInput {
 impl<F: Float> ForkSource<F> for SilentInput {
     fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(
-            MidiIngestNode::new().hearing(self.ports),
+            MidiInputNode::new().hearing(self.ports),
         )))
     }
 }
 
-impl<F: Float> IntoNode<F> for MidiIngestNode {
-    type Controls = MidiIngestControls;
+impl<F: Float> IntoNode<F> for MidiInputNode {
+    type Controls = MidiInputControls;
 
-    fn into_parts(self) -> NodeParts<MidiIngestControls, F> {
+    fn into_parts(self) -> NodeParts<MidiInputControls, F> {
         let fork = SilentInput { ports: self.ports };
-        let controls = MidiIngestControls {
+        let controls = MidiInputControls {
             request: self.mpe_request_cell.clone(),
             serial: Arc::clone(&self.request_serial),
             dropped: self.dropped_reader.clone(),
@@ -842,7 +842,7 @@ impl<F: Float> IntoNode<F> for MidiIngestNode {
 
 /// Frees what the control side retired and no block holds, without publishing
 /// (the MPE requests a replacement left behind); control thread, from the owner's tick.
-impl tutti_rt::Reclaim for MidiIngestControls {
+impl tutti_rt::Reclaim for MidiInputControls {
     fn reclaim(&self) -> usize {
         self.request.reclaim()
     }

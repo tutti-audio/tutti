@@ -1,19 +1,11 @@
 use super::*;
+use tutti_rt::SplitMix64;
 
 const MS: Duration = Duration::from_millis(1);
 
-/// A SplitMix64 stream from a fixed seed: the jitter of the arrivals. Private to
-/// this test: no shared generator exists in `tutti_fixtures`.
-struct Rng(u64);
-
-impl Rng {
-    fn unit(&mut self) -> f64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
-    }
+/// The jitter of an arrival: a unit value from the stream.
+fn unit(rng: &mut SplitMix64) -> f64 {
+    (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64
 }
 
 /// A sender whose clock runs `1 + drift` times the host's, started at
@@ -25,7 +17,7 @@ struct Link {
     phase: f64,
     latency: Duration,
     jitter: Duration,
-    rng: Rng,
+    rng: SplitMix64,
 }
 
 impl Link {
@@ -36,7 +28,7 @@ impl Link {
             phase,
             latency: 3 * MS,
             jitter,
-            rng: Rng(0x5EED),
+            rng: SplitMix64::new(0x5EED),
         }
     }
 
@@ -52,7 +44,7 @@ impl Link {
 
     /// When a message sent at `t` arrives.
     fn arrival(&mut self, t: f64) -> Instant {
-        self.send(t) + self.latency + self.jitter.mul_f64(self.rng.unit())
+        self.send(t) + self.latency + self.jitter.mul_f64(unit(&mut self.rng))
     }
 
     /// Sends a JR Clock at `t`.

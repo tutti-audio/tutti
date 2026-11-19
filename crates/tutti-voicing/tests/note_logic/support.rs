@@ -2,7 +2,7 @@
 
 use tutti_ump::{Attribute, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::Amplitude;
-use tutti_voicing::{Command, Patch, VoiceSpec, Voicing};
+use tutti_voicing::{Patch, VoiceAllocator, VoiceCommand, VoiceSpec};
 
 pub struct One;
 impl Patch for One {
@@ -16,7 +16,7 @@ impl Patch for One {
 }
 
 /// `message` on `channel`, every voice sounding at unit level.
-pub fn step(core: &mut Voicing, channel: u8, message: Voice2) -> Vec<Command> {
+pub fn step(core: &mut VoiceAllocator, channel: u8, message: Voice2) -> Vec<VoiceCommand> {
     core.step(MidiChannel::of(channel), message, &One, |_| {
         Some(Amplitude::new(1.0))
     })

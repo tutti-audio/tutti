@@ -99,7 +99,7 @@ pub fn play(s: &Session) {
 
 /// A session over a fake OS with one device, `Keys`, declared as the input port
 /// `"input"` and loaded (hearing Groups up to `groups`, the first alone with
-/// `None`): the port's ingest node, which route rules wire from.
+/// `None`): the port's input node, which route rules wire from.
 #[cfg(feature = "midi-hardware")]
 pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Session, NodeKey) {
     use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};

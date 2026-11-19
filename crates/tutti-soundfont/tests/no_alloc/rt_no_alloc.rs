@@ -15,7 +15,7 @@
 //! Driven by hand through `support::Hand` (`tutti_graph::contract::Direct`
 //! underneath), prepared outside every gate as a graph prepares a node.
 //! - the player's voices (a pool sized to the polyphony), the core's tables
-//!   (`Voicing`, sized to the polyphony) and the chorus and reverb lines are
+//!   (`VoiceAllocator`, sized to the polyphony) and the chorus and reverb lines are
 //!   all sized at construction.
 //!
 //! Note the fixture dependency: these run against the committed `TimGM6mb.sf2`,

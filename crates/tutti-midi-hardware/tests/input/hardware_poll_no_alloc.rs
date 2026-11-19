@@ -1,15 +1,15 @@
 //! Regression gate for the **hardware** MIDI input on the audio thread.
 //!
-//! `tutti-midi-runtime`'s own gate drives `MidiIngestNode` through a scripted
+//! `tutti-midi-runtime`'s own gate drives `MidiInputNode` through a scripted
 //! inlet, which cannot show what the production input does. That is a
 //! `HardwareMidiInputs` port: a driver thread stamps each arrival with the
 //! frame the engine's block clock puts it on and pushes it into an event
-//! inlet; the graph's inlet node holds it until its block and the ingest node
+//! inlet; the graph's inlet node holds it until its block and the input node
 //! translates it. Reaching it needs this crate, because `tutti-midi-runtime`
 //! cannot depend on `tutti-midi-hardware` (the dependency runs the other way).
 //!
 //! Both halves run inside `assert_no_alloc`: the audio thread (the inlet node,
-//! the ingest node, the block clock's write) **and** the driver's `push`,
+//! the input node, the block clock's write) **and** the driver's `push`,
 //! which runs on a thread the OS owns and must not allocate either. A waiting
 //! list that grew, a stamp that boxed, or an event held and dropped on the
 //! wrong side would `realloc` or free inside a callback.
@@ -30,14 +30,14 @@ use tutti_graph::{
     TapEvent, TransportPosition,
 };
 use tutti_midi_hardware::{HardwareMidiInputs, InputProducerHandle};
-use tutti_midi_runtime::{InputInlets, InputWriters, MidiIngestNode};
+use tutti_midi_runtime::{InputInlets, InputWriters, MidiInputNode};
 use tutti_ump::{Message, MidiChannel, Ump, Utility};
 use tutti_units::{Frame, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 const INGEST: NodeKey = NodeKey(1);
 
-/// A graph holding an ingest node over the inlets of `inputs`, its channel-0
+/// A graph holding an input node over the inlets of `inputs`, its channel-0
 /// port under an event tap, and the engine's part of the block clock.
 struct Rig {
     _editor: Editor,
@@ -53,17 +53,17 @@ struct Rig {
 
 impl Rig {
     /// `ports` are the inlets of the ports of `inputs` that were opened: they
-    /// are added here, each feeding an ingest node of its own.
+    /// are added here, each feeding an input node of its own.
     fn new(inputs: &HardwareMidiInputs, ports: Vec<EventInletNode>) -> Self {
         let inlets = inputs.inlets();
         let (mut editor, exec) = Editor::new(Prepare::new(
             SampleRate::of(RATE),
             MaxBlock::of(Samples::new(1024)),
         ));
-        // An ingest node for each port, the first one's channel 0 under the tap.
+        // An input node for each port, the first one's channel 0 under the tap.
         for (input, node) in ports.into_iter().enumerate() {
             let ingest = NodeKey(INGEST.0 + 1000 * input as u64);
-            editor.insert(ingest, "in", MidiIngestNode::new());
+            editor.insert(ingest, "in", MidiInputNode::new());
             let key = NodeKey(100 + input as u64);
             editor.insert(key, "inlet", node);
             editor.spec_mut().connect_events(
@@ -84,7 +84,7 @@ impl Rig {
                 TapAlign::Raw,
                 tutti_graph::EventCapacity::of(1024),
             )
-            .expect("the ingest node is in the graph");
+            .expect("the input node is in the graph");
         editor.commit().expect("commits");
         let clock = BlockClock::new();
         inlets.set_clock(Some(clock.reader()));

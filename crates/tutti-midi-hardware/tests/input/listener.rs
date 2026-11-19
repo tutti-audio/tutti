@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use tutti_fixtures::{BlockClock, EventRig};
 use tutti_graph::{EventEdge, EventIn, EventInletNode, EventOut, NodeKey};
-use tutti_midi_runtime::{InputInlets, MidiIngestNode};
+use tutti_midi_runtime::{InputInlets, MidiInputNode};
 use tutti_ump::Ump;
 use tutti_units::{Frame, SampleRate};
 
@@ -28,7 +28,7 @@ pub struct Listener {
     clock: BlockClock,
     origin: Instant,
     frames: u64,
-    /// Where an inlet is wired: the sink, or an ingest node in front of it.
+    /// Where an inlet is wired: the sink, or an input node in front of it.
     entry: NodeKey,
 }
 
@@ -38,7 +38,7 @@ impl Listener {
         Self::build(inlets, false)
     }
 
-    /// As [`over`](Self::over), with the engine's ingest node between the
+    /// As [`over`](Self::over), with the engine's input node between the
     /// inlets and the log: a MIDI 1.0 message arrives translated.
     pub fn over_ingest(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, true)
@@ -51,7 +51,7 @@ impl Listener {
         let slots = if ingest { ports } else { 1 };
         let mut rig = EventRig::new(RATE, BLOCK, slots as u16);
         if ingest {
-            rig.editor.insert(INGEST, "ingest", MidiIngestNode::new());
+            rig.editor.insert(INGEST, "ingest", MidiInputNode::new());
             for port in 0..ports as u16 {
                 rig.feed(INGEST, port, port);
             }

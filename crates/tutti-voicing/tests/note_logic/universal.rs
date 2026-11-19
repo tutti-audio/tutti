@@ -9,9 +9,9 @@ use tutti_midi_protocol::{Addressee, GeneralMidiMode, Heard, Universal};
 use tutti_ump::{Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, Rpn, U7, U14, Voice2};
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::Semitones;
-use tutti_voicing::{Command, Rules, Voicing};
+use tutti_voicing::{VoiceAllocator, VoiceCommand, VoiceConfig};
 
-fn say(core: &mut Voicing, to: Addressee, message: Universal) -> Vec<Command> {
+fn say(core: &mut VoiceAllocator, to: Addressee, message: Universal) -> Vec<VoiceCommand> {
     core.universal(Heard { to, message }).to_vec()
 }
 
@@ -23,11 +23,11 @@ fn cc(n: u8, value7: u32) -> Voice2 {
 }
 
 /// The pitch of each channel a list of commands retunes.
-fn retunes(commands: &[Command]) -> Vec<(u8, f64)> {
+fn retunes(commands: &[VoiceCommand]) -> Vec<(u8, f64)> {
     commands
         .iter()
         .filter_map(|c| match c {
-            Command::Retune { channel, bend } => Some((channel.get(), bend.get())),
+            VoiceCommand::Retune { channel, bend } => Some((channel.get(), bend.get())),
             _ => None,
         })
         .collect()
@@ -40,7 +40,7 @@ const COARSE: fn(u8) -> Universal = |v| Universal::MasterCoarseTuning(U7::of(v))
 /// cents, `00 40` is A440 and `7F 7F` is +8191 steps; every channel moves.
 #[test]
 fn master_fine_tuning_is_a_hundred_over_8192_cents_a_step() {
-    let mut core = Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()));
+    let mut core = VoiceAllocator::new(VoiceConfig::poly(NonZeroUsize::new(4).unwrap()));
     let all = say(&mut core, Addressee::All, FINE(0));
     let r = retunes(&all);
     assert_eq!(r.len(), 16, "every channel");
@@ -55,7 +55,7 @@ fn master_fine_tuning_is_a_hundred_over_8192_cents_a_step() {
 /// semitones and `00 7F` +63.
 #[test]
 fn master_coarse_tuning_is_a_semitone_a_step() {
-    let mut core = Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()));
+    let mut core = VoiceAllocator::new(VoiceConfig::poly(NonZeroUsize::new(4).unwrap()));
     for (msb, semitones) in [(0x00, -64.0), (0x40, 0.0), (0x4C, 12.0), (0x7F, 63.0)] {
         let r = retunes(&say(&mut core, Addressee::All, COARSE(msb)));
         assert!(r.iter().all(|&(_, b)| b == semitones), "{msb:#x}: {r:?}");
@@ -66,7 +66,7 @@ fn master_coarse_tuning_is_a_semitone_a_step() {
 /// Tuning and that of Fine Tuning using RPN, and likewise coarse; the channel's wheel adds as it always did.
 #[test]
 fn the_master_tuning_sums_with_the_channels_own_tuning_and_wheel() {
-    let mut core = Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()));
+    let mut core = VoiceAllocator::new(VoiceConfig::poly(NonZeroUsize::new(4).unwrap()));
     // Channel Coarse Tuning (RPN 2) +3 on channel 0: the MSB is 64 + 3.
     step(
         &mut core,
@@ -90,8 +90,8 @@ fn the_master_tuning_sums_with_the_channels_own_tuning_and_wheel() {
 /// there is a different sound and not a different pitch.
 #[test]
 fn the_percussion_channel_is_not_retuned() {
-    let mut core = Voicing::new(
-        Rules::poly(NonZeroUsize::new(4).unwrap()).with_percussion(MidiChannel::of(9)),
+    let mut core = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(4).unwrap()).with_percussion(MidiChannel::of(9)),
     );
     let r = retunes(&say(&mut core, Addressee::All, COARSE(0x4C)));
     assert_eq!(r.len(), 15);
@@ -100,7 +100,7 @@ fn the_percussion_channel_is_not_retuned() {
     assert!((retunes(&bend)[0].1 - 2.0).abs() < 1e-3, "the wheel alone");
 }
 
-fn gain(core: &Voicing) -> (f64, f64) {
+fn gain(core: &VoiceAllocator) -> (f64, f64) {
     let g = core.master_gain();
     (g.left.get(), g.right.get())
 }
@@ -109,7 +109,7 @@ fn gain(core: &Voicing) -> (f64, f64) {
 /// default 7F/7F, and `00 00` is off (M1 p.57).
 #[test]
 fn master_volume_is_the_square_of_the_value() {
-    let mut core = Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()));
+    let mut core = VoiceAllocator::new(VoiceConfig::poly(NonZeroUsize::new(4).unwrap()));
     assert_eq!(gain(&core), (1.0, 1.0));
     let volume = |v| Universal::MasterVolume(U14::of(v));
     assert!(say(&mut core, Addressee::All, volume(0x2000)).is_empty());
@@ -124,7 +124,7 @@ fn master_volume_is_the_square_of_the_value() {
 /// All Call ID are tracked apart and multiply, so each level is kept.
 #[test]
 fn the_own_and_all_call_volumes_are_kept_apart_and_multiply() {
-    let mut core = Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()));
+    let mut core = VoiceAllocator::new(VoiceConfig::poly(NonZeroUsize::new(4).unwrap()));
     let volume = |v| Universal::MasterVolume(U14::of(v));
     say(&mut core, Addressee::Own, volume(0x2000));
     say(&mut core, Addressee::All, volume(0x2000));
@@ -140,7 +140,7 @@ fn the_own_and_all_call_volumes_are_kept_apart_and_multiply() {
 /// away from.
 #[test]
 fn master_balance_attenuates_the_side_it_turns_from() {
-    let mut core = Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()));
+    let mut core = VoiceAllocator::new(VoiceConfig::poly(NonZeroUsize::new(4).unwrap()));
     let balance = |v| Universal::MasterBalance(U14::of(v));
     say(&mut core, Addressee::All, balance(0x2000));
     assert_eq!(gain(&core), (1.0, 1.0));
@@ -155,7 +155,7 @@ fn master_balance_attenuates_the_side_it_turns_from() {
     assert_eq!(gain(&core), (1.0, 0.25));
 }
 
-fn dirty(core: &mut Voicing, bend_range: u32) {
+fn dirty(core: &mut VoiceAllocator, bend_range: u32) {
     step(core, 0, cc(7, 20));
     step(core, 0, cc(11, 50));
     step(core, 0, cc(1, 90));
@@ -180,12 +180,12 @@ fn dirty(core: &mut Voicing, bend_range: u32) {
 /// GM2 section 3.3: pan centre).
 #[test]
 fn general_midi_on_mutes_and_returns_every_channel_to_its_defaults() {
-    let mut core = Voicing::new(
-        Rules::poly(NonZeroUsize::new(4).unwrap()).with_bend_range(Semitones::new(12.0)),
+    let mut core = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(4).unwrap()).with_bend_range(Semitones::new(12.0)),
     );
     dirty(&mut core, 24);
     let started = step(&mut core, 0, note_on(60));
-    let Some(Command::Start { id, .. }) = started.first().copied() else {
+    let Some(VoiceCommand::Start { id, .. }) = started.first().copied() else {
         panic!("{started:?}");
     };
     step(&mut core, 5, note_on(62));
@@ -195,11 +195,13 @@ fn general_midi_on_mutes_and_returns_every_channel_to_its_defaults() {
         Universal::GeneralMidi(GeneralMidiMode::On),
     );
     assert_eq!(
-        on.iter().filter(|c| matches!(c, Command::Cut(_))).count(),
+        on.iter()
+            .filter(|c| matches!(c, VoiceCommand::Cut(_)))
+            .count(),
         2,
         "each sounding note is cut"
     );
-    assert!(on.contains(&Command::Cut(id)));
+    assert!(on.contains(&VoiceCommand::Cut(id)));
     // The wheel is centred and every channel is told.
     let r = retunes(&on);
     assert_eq!(r.len(), 16);
@@ -224,15 +226,18 @@ fn general_midi_on_mutes_and_returns_every_channel_to_its_defaults() {
             attribute: Attribute::None,
         },
     );
-    assert!(off.iter().any(|c| matches!(c, Command::Release { .. })));
+    assert!(
+        off.iter()
+            .any(|c| matches!(c, VoiceCommand::Release { .. }))
+    );
 }
 
 /// GM2 section 4.9.3: General MIDI Off returns a device to its initialized
 /// mode: here the bend range the instrument's rules were built with.
 #[test]
 fn general_midi_off_returns_to_the_instruments_own_status() {
-    let mut core = Voicing::new(
-        Rules::poly(NonZeroUsize::new(4).unwrap()).with_bend_range(Semitones::new(12.0)),
+    let mut core = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(4).unwrap()).with_bend_range(Semitones::new(12.0)),
     );
     dirty(&mut core, 24);
     say(
@@ -249,7 +254,7 @@ fn general_midi_off_returns_to_the_instruments_own_status() {
 /// message and stays.
 #[test]
 fn general_midi_resets_the_master_but_not_the_own_knob() {
-    let mut core = Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()));
+    let mut core = VoiceAllocator::new(VoiceConfig::poly(NonZeroUsize::new(4).unwrap()));
     say(&mut core, Addressee::All, COARSE(0x4C));
     say(
         &mut core,
@@ -275,7 +280,7 @@ fn general_midi_resets_the_master_but_not_the_own_knob() {
 /// takes nothing from them.
 #[test]
 fn the_identity_messages_change_nothing() {
-    let mut core = Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()));
+    let mut core = VoiceAllocator::new(VoiceConfig::poly(NonZeroUsize::new(4).unwrap()));
     step(&mut core, 0, note_on(60));
     let before = (core.channels().to_vec(), gain(&core));
     assert!(say(&mut core, Addressee::All, Universal::IdentityRequest).is_empty());

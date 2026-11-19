@@ -16,8 +16,8 @@ use tutti_ump::Voice2;
 use tutti_ump::{MidiChannel, NoteId, NoteNumber, NoteVelocity};
 use tutti_units::{Amplitude, Semitones, Velocity};
 use tutti_voicing::{
-    ChannelState, Command, Glide, MasterGain, Mode, NoteControl, Order, Patch, Rules, Steal,
-    VoiceSpec, Voicing,
+    ChannelState, Glide, MasterGain, Mode, NoteControl, Order, Patch, Steal, VoiceAllocator,
+    VoiceCommand, VoiceConfig, VoiceSpec,
 };
 
 use tutti_ump::ControlValue;
@@ -77,7 +77,7 @@ pub enum VoiceMode {
 }
 
 /// Where a slot is in its life. What holds an active voice open is the core's
-/// to say (`VoiceAllocator::holds_of`), not copied here.
+/// to say (`SynthVoices::holds_of`), not copied here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum VoiceState {
     #[default]
@@ -200,7 +200,7 @@ impl VoiceSlot {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct VoiceAllocatorConfig {
+pub struct SynthVoicesConfig {
     pub max_voices: NonZeroUsize,
     pub strategy: AllocationStrategy,
     pub mode: VoiceMode,
@@ -211,7 +211,7 @@ pub struct VoiceAllocatorConfig {
     pub per_note_bend_range: Semitones,
 }
 
-impl Default for VoiceAllocatorConfig {
+impl Default for SynthVoicesConfig {
     fn default() -> Self {
         Self {
             max_voices: NonZeroUsize::new(16).unwrap(),
@@ -223,10 +223,10 @@ impl Default for VoiceAllocatorConfig {
     }
 }
 
-impl VoiceAllocatorConfig {
+impl SynthVoicesConfig {
     /// This synth's rules: a value of the shared note logic.
-    fn rules(&self) -> Rules {
-        Rules::poly(self.max_voices)
+    fn rules(&self) -> VoiceConfig {
+        VoiceConfig::poly(self.max_voices)
             .with_mode(match self.mode {
                 VoiceMode::Poly => Mode::Poly,
                 VoiceMode::Mono => Mode::Mono,
@@ -314,34 +314,34 @@ pub(crate) enum Gate {
 }
 
 /// The synth's half of the note logic: the slot table. The decisions are
-/// `tutti_voicing::Voicing`'s; this carries out its commands on slots and keeps
+/// `tutti_voicing::VoiceAllocator`'s; this carries out its commands on slots and keeps
 /// what only the synth knows (the per-note identity, the envelope level).
 #[derive(Debug)]
-pub struct VoiceAllocator {
-    config: VoiceAllocatorConfig,
-    core: Voicing,
+pub struct SynthVoices {
+    config: SynthVoicesConfig,
+    core: VoiceAllocator,
     slots: Vec<VoiceSlot>,
     /// [`NoteId`] → active slot index. Keyed by full per-note identity, so two
     /// notes sharing a note number map to distinct slots.
     id_to_slot: PerNoteMap<usize, 128>,
-    commands: Vec<Command>,
+    commands: Vec<VoiceCommand>,
     gates: Vec<Gate>,
 }
 
-impl VoiceAllocator {
+impl SynthVoices {
     /// The channel state the note logic holds, as messages in `group`
-    /// (`tutti_voicing::Voicing::chase`).
+    /// (`tutti_voicing::VoiceAllocator::chase`).
     pub(crate) fn chase(&self, group: tutti_ump::MidiGroup, emit: impl FnMut(tutti_ump::Ump)) {
         self.core.chase(group, emit);
     }
 
-    pub fn new(config: VoiceAllocatorConfig) -> Self {
+    pub fn new(config: SynthVoicesConfig) -> Self {
         let rules = config.rules();
         let slots = (0..config.max_voices.get())
             .map(|_| VoiceSlot::default())
             .collect();
         Self {
-            core: Voicing::new(rules),
+            core: VoiceAllocator::new(rules),
             commands: Vec::with_capacity(2 * config.max_voices.get() + 64),
             gates: Vec::with_capacity(2 * config.max_voices.get() + 64),
             config,
@@ -378,7 +378,7 @@ impl VoiceAllocator {
         let mut result = AllocationResult::Unavailable;
         for i in 0..self.commands.len() {
             match self.commands[i] {
-                Command::Start {
+                VoiceCommand::Start {
                     id,
                     channel,
                     key,
@@ -415,7 +415,7 @@ impl VoiceAllocator {
                         AllocationResult::Allocated { slot_index }
                     };
                 }
-                Command::Retarget {
+                VoiceCommand::Retarget {
                     id,
                     key,
                     tune,
@@ -440,34 +440,34 @@ impl VoiceAllocator {
                         result = AllocationResult::LegatoRetrigger { slot_index };
                     }
                 }
-                Command::Retune { channel, bend } => {
+                VoiceCommand::Retune { channel, bend } => {
                     self.gates.push(Gate::Retune(channel, bend));
                 }
-                Command::Tune { id, tune } => {
+                VoiceCommand::Tune { id, tune } => {
                     if let Some(slot_index) = self.slot_of_voice(id) {
                         self.gates.push(Gate::Tune(slot_index, tune));
                     }
                 }
-                Command::Control { id, control } => {
+                VoiceCommand::Control { id, control } => {
                     if let Some(slot_index) = self.slot_of_voice(id) {
                         self.gates.push(Gate::Control(slot_index, control));
                     }
                 }
-                Command::ResetControls(id) => {
+                VoiceCommand::ResetControls(id) => {
                     if let Some(slot_index) = self.slot_of_voice(id) {
                         self.gates.push(Gate::ResetControls(slot_index));
                     }
                 }
                 // `Damp` is an exclusive class's, which `PolySynth`'s rules
                 // never turn on; if it came, its own release is the answer.
-                Command::Release { id, .. } | Command::Damp(id) => {
+                VoiceCommand::Release { id, .. } | VoiceCommand::Damp(id) => {
                     if let Some(slot_index) = self.slot_of_voice(id) {
                         self.unmap(slot_index);
                         self.slots[slot_index].release();
                         self.gates.push(Gate::Off(slot_index));
                     }
                 }
-                Command::Cut(id) => {
+                VoiceCommand::Cut(id) => {
                     if let Some(slot_index) = self.slot_of_voice(id) {
                         self.unmap(slot_index);
                         self.slots[slot_index].silence();
@@ -666,7 +666,7 @@ impl VoiceAllocator {
         self.carry_out(None);
     }
 
-    /// The gain the Master Volume and Balance set (`Voicing::master_gain`).
+    /// The gain the Master Volume and Balance set (`VoiceAllocator::master_gain`).
     pub(crate) fn master_gain(&self) -> MasterGain {
         self.core.master_gain()
     }
@@ -696,7 +696,7 @@ impl VoiceAllocator {
     }
 }
 
-impl Clone for VoiceAllocator {
+impl Clone for SynthVoices {
     fn clone(&self) -> Self {
         Self {
             config: self.config.clone(),

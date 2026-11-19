@@ -881,13 +881,13 @@ impl MidiState {
         self.rules = rules;
     }
 
-    /// The ingest nodes of the input ports: none on a session without the OS
+    /// The input nodes of the input ports: none on a session without the OS
     /// MIDI layer.
     pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
         self.ports.input_nodes()
     }
 
-    /// Whether `node` is the ingest node of an input port.
+    /// Whether `node` is the input node of an input port.
     pub(crate) fn is_input_node(&self, node: NodeKey) -> bool {
         self.ports.is_input_node(node)
     }
@@ -1553,7 +1553,7 @@ impl<F: Float> Midi<'_, F> {
         self.state.compile_session_feeds(self.graph, layout);
     }
 
-    /// Routes `input` (a `MidiIngestNode`: one event output per channel and
+    /// Routes `input` (a `MidiInputNode`: one event output per channel and
     /// one for channelless messages, in each Group it hears) by `rules`, keyed by the host's own
     /// `T` and resolved to nodes through `resolve`, replacing every route
     /// before (the session's own rules included).
@@ -1576,9 +1576,9 @@ impl<F: Float> Midi<'_, F> {
     /// fallback are declared ([`unroute`](Self::unroute) them first), and
     /// [`MidiError::NotAnInput`] when `input` is not in the graph or has no event
     /// output. Nothing is changed. Those are the only refusals: any node with event
-    /// outputs may be the source (a host's own `MidiIngestNode`, or a stand-in
-    /// that sends on the ingest layout's ports), because a host routes from
-    /// sources the session did not make, so a port's ingest node is not required.
+    /// outputs may be the source (a host's own `MidiInputNode`, or a stand-in
+    /// that sends on the input layout's ports), because a host routes from
+    /// sources the session did not make, so a port's input node is not required.
     pub fn set_routes<'r, T: Copy + Ord + 'r>(
         &mut self,
         input: impl Into<NodeKey>,
@@ -1649,7 +1649,7 @@ impl<F: Float> Midi<'_, F> {
     /// The tap is on **the keys' inlet only**: a clip ([`play_clip`](Self::play_clip))
     /// is already on the timeline, and notes a hardware input routes straight to
     /// `target` ([`route`](Self::route)) do not pass it. To record a
-    /// hardware player, tap the ingest node's port with `Graph::taps`, or
+    /// hardware player, tap the input node's port with `Graph::taps`, or
     /// send what its device pushes through the keys.
     ///
     /// The tap is closed when its reader is dropped (the next
@@ -1741,7 +1741,7 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node,
+    /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's input node,
     /// [`MidiError::GroupNotHeard`] for a Group the input does not hear,
     /// [`MidiError::Tap`] when the tap cannot open because the host removed the node, and
     /// [`MidiError::TempoSourceTaken`] while a Beat Clock
@@ -1857,7 +1857,7 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node,
+    /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's input node,
     /// [`MidiError::GroupNotHeard`] for a Group the input does not hear,
     /// [`MidiError::Tap`] when the tap cannot open because the host removed the node, and
     /// [`MidiError::TempoSourceTaken`] for a Beat Clock follow while
@@ -1957,7 +1957,7 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's ingest node and
+    /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's input node and
     /// [`MidiError::GroupNotHeard`] for a Group the input does not hear, and
     /// [`MidiError::Tap`] when the tap cannot open because the host removed the node.
     /// Nothing changes.

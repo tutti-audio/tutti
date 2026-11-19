@@ -4,7 +4,7 @@
 //!
 //! The pure core is `tutti_midi_runtime::TempoFollower`: it decodes and says
 //! *what* to apply. This module says *where* and *how*: it drains an event tap
-//! on the followed Group's channelless port of the ingest node in
+//! on the followed Group's channelless port of the input node in
 //! [`Phase::Poll`](crate::Phase::Poll), places each change at the next block
 //! start, builds the new [`TempoMap`] and [`MeterMap`] and publishes them.
 //!
@@ -105,12 +105,12 @@ pub(crate) const FOLLOW_TAP_CAPACITY: tutti_graph::EventCapacity =
 /// What [`Midi::follow_tempo`](crate::Midi::follow_tempo) follows.
 ///
 /// The source is a Group's Flex Data Set Tempo (and Set Time Signature) on an
-/// input port's ingest node (`MidiInput::node`).
+/// input port's input node (`MidiInput::node`).
 /// MIDI Beat Clock and MIDI Time Code are followed with
 /// [`Midi::follow_clock`](crate::Midi::follow_clock) and [`FollowClock`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowTempo {
-    /// The input port followed: its ingest node
+    /// The input port followed: its input node
     /// (`MidiInput::node`).
     pub input: tutti_graph::NodeKey,
     /// The Group followed. A Group is a cable of its own (M2-104 §2.1.2,
@@ -135,7 +135,7 @@ pub(crate) const CLOCK_TAP_CAPACITY: tutti_graph::EventCapacity =
 /// session has one transport and one authority for its position.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowClock {
-    /// The input port followed: its ingest node
+    /// The input port followed: its input node
     /// (`MidiInput::node`).
     pub input: tutti_graph::NodeKey,
     /// The Group followed. A Group is a cable of its own (M2-104 §2.1.2,
@@ -160,7 +160,7 @@ pub(crate) const MACHINE_TAP_CAPACITY: tutti_graph::EventCapacity =
 /// [`FollowClock`] and never contends with it for the tempo map.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowMachineControl {
-    /// The input port followed: its ingest node
+    /// The input port followed: its input node
     /// (`MidiInput::node`).
     pub input: tutti_graph::NodeKey,
     /// The Group followed. A Group is a cable of its own (M2-104 §2.1.2,

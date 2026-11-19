@@ -161,7 +161,7 @@ fn an_inlet_eviction_raises_the_ports_count_and_carries_across_a_replug() {
     assert_eq!(port.losses().evicted, 200, "cumulative across the replug");
 }
 
-/// **An ingest node whose block translates more than its mailbox holds counts
+/// **An input node whose block translates more than its mailbox holds counts
 /// the rest as refused on its port**: 2,000 events due in one block overrun the
 /// mailbox, and the port's reading says so, with nothing lost at the inlet.
 #[test]

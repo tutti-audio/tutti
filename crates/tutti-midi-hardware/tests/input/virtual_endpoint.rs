@@ -195,7 +195,7 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
 
 /// An endpoint created as MIDI 1.0 reports MIDI 1.0 and publishes it, and the
 /// MIDI 1.0 channel voice message (type 2) a client sends it reaches the graph's
-/// ingest node as it does from a MIDI 1.0 device, which translates it: velocity
+/// input node as it does from a MIDI 1.0 device, which translates it: velocity
 /// `0x40` is `0x8000` (M2-115).
 /// Spec: m2-115/2.3#1
 #[test]
