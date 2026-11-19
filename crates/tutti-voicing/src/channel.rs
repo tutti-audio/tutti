@@ -4,12 +4,12 @@
 //! the 14-bit controllers (modulation, volume, pan, expression), channel
 //! pressure, the pitch wheel with its sensitivity and tuning, the Modulation
 //! Depth Range, and the portamento and legato switches with the pending
-//! Portamento Control. [`Voicing`](crate::Voicing) keeps one for each of a
+//! Portamento Control. [`VoiceAllocator`](crate::VoiceAllocator) keeps one for each of a
 //! Group's sixteen channels and reads every message into it, so the two
 //! instruments (and a future one) share one reading of them; an instrument asks
-//! for the value it needs when it renders ([`Voicing::channel`](crate::Voicing::channel)).
+//! for the value it needs when it renders ([`VoiceAllocator::channel`](crate::VoiceAllocator::channel)).
 //! The note logic that follows from them (a glide, a legato move) is the core's
-//! and reaches the instrument as [`Command`](crate::Command)s.
+//! and reaches the instrument as [`VoiceCommand`](crate::VoiceCommand)s.
 //!
 //! A channel's whole state is this value and nothing else of the core's is
 //! per-channel controller state, so it can be handed on whole (a SoundFont swap
@@ -140,7 +140,7 @@ impl ChannelState {
     /// (#7), Pan (#10), the sound controllers, nor the registered or
     /// non-registered parameters (the sensitivity, the tuning and the
     /// Modulation Depth Range stay), nor the Legato Footswitch (#68), which the
-    /// list does not name. The pitch wheel centres ([`Voicing`](crate::Voicing)
+    /// list does not name. The pitch wheel centres ([`VoiceAllocator`](crate::VoiceAllocator)
     /// does it, for it tells the instrument), and the pedals #64 and #66 are
     /// the note logic's.
     pub(crate) fn reset_controllers(&mut self) {
@@ -186,12 +186,12 @@ impl ChannelState {
     }
 
     /// Writes what this value holds that `fresh` does not, as the messages
-    /// that set it (the chase of a node swap, [`Voicing::chase`](crate::Voicing::chase)):
+    /// that set it (the chase of a node swap, [`VoiceAllocator::chase`](crate::VoiceAllocator::chase)):
     /// each 14-bit controller as its MSB then, when nonzero, its LSB (M1
     /// p.12: an MSB zeroes the LSB), Portamento On and the Legato Footswitch
     /// as switches, the pending Portamento Control, Channel Pressure, the
     /// pitch wheel, and RPN 0 to 5 as MIDI 2.0 Registered Controllers
-    /// with the data words [`Voicing::step`](crate::Voicing::step) reads them
+    /// with the data words [`VoiceAllocator::step`](crate::VoiceAllocator::step) reads them
     /// from. A value equal to `fresh`'s is left out, so a channel nobody
     /// touched writes nothing. At most [`ChannelState::CHASE_MESSAGES`].
     ///
@@ -262,7 +262,7 @@ impl ChannelState {
         Rpn::MODULATION_DEPTH_RANGE,
     ];
 
-    /// The data word [`Voicing::step`](crate::Voicing::step) would read `rpn`'s
+    /// The data word [`VoiceAllocator::step`](crate::VoiceAllocator::step) would read `rpn`'s
     /// value from, so that the state is the value a Registered Controller set
     /// (the inverse of what it reads), or `None` for a parameter this state
     /// does not hold. A word carries only the resolution the parameter has:

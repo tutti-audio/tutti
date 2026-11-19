@@ -10,7 +10,7 @@ use tutti_dsp::SimdLanes;
 use tutti_sf2::{SamplePool, SoundFont};
 use tutti_ump::{MidiChannel, NoteVelocity};
 use tutti_units::{Amplitude, Semitones};
-use tutti_voicing::{ChannelState, Command, VoiceId};
+use tutti_voicing::{ChannelState, VoiceCommand, VoiceId};
 
 use crate::channel::Channel;
 use crate::patch::PresetPatch;
@@ -74,10 +74,10 @@ impl<F: Float + SimdLanes> Voices<F> {
 
     /// Carries out what the core said, in order. A command that names a voice
     /// that has ended is ignored, as the core's contract says.
-    pub(crate) fn execute(&mut self, commands: &[Command], font: &SoundFont) {
+    pub(crate) fn execute(&mut self, commands: &[VoiceCommand], font: &SoundFont) {
         for command in commands {
             match *command {
-                Command::Start {
+                VoiceCommand::Start {
                     id,
                     channel,
                     key,
@@ -106,7 +106,7 @@ impl<F: Float + SimdLanes> Voices<F> {
                 // A voice moved to a new key without a new attack: a legato
                 // channel's (the footswitch, CC 68), or the sounding voice a
                 // Portamento Control names.
-                Command::Retarget {
+                VoiceCommand::Retarget {
                     id,
                     key,
                     tune,
@@ -119,41 +119,41 @@ impl<F: Float + SimdLanes> Voices<F> {
                 }
                 // A voice's key moved off equal temperament by a tuning message
                 // or a Tuning Program or Bank Select, with no new attack.
-                Command::Tune { id, tune } => {
+                VoiceCommand::Tune { id, tune } => {
                     if let Some(slot) = self.slot(id) {
                         slot.voice.tune(tune);
                     }
                 }
-                Command::Release { id, .. } => {
+                VoiceCommand::Release { id, .. } => {
                     if let Some(slot) = self.slot(id) {
                         slot.voice.release();
                     }
                 }
-                Command::Damp(id) => {
+                VoiceCommand::Damp(id) => {
                     if let Some(slot) = self.slot(id) {
                         slot.voice.damp();
                     }
                 }
-                Command::Cut(id) => {
+                VoiceCommand::Cut(id) => {
                     if let Some(voice) = self.take(id) {
                         self.free.push(voice);
                     }
                 }
                 // A `Retune` is the core's answer to a bend or a tuning, which
                 // `process` reads back from the core each chunk
-                // (`Voicing::channel_pitch`): it is the one place the bend
+                // (`VoiceAllocator::channel_pitch`): it is the one place the bend
                 // lives, so there is nothing to mirror here.
-                Command::Control { id, control } => {
+                VoiceCommand::Control { id, control } => {
                     if let Some(slot) = self.slot(id) {
                         slot.voice.control(control);
                     }
                 }
-                Command::ResetControls(id) => {
+                VoiceCommand::ResetControls(id) => {
                     if let Some(slot) = self.slot(id) {
                         slot.voice.reset_controls();
                     }
                 }
-                Command::Retune { .. } => {}
+                VoiceCommand::Retune { .. } => {}
             }
         }
     }

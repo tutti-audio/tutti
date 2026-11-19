@@ -4,7 +4,7 @@
 //! [`PerNoteState::step`] reads one message and returns the [`NoteEvent`]s it
 //! means: a note started (with the id it was minted), a controller's value for
 //! a note, a note's controllers reset. It owns no voice and renders nothing, so
-//! an instrument that allocates voices ([`Voicing`](crate::Voicing)) and a
+//! an instrument that allocates voices ([`VoiceAllocator`](crate::VoiceAllocator)) and a
 //! plugin host that addresses notes by id use the one copy of the rules:
 //!
 //! - **State is per (Group, channel, Note Number)** (section 2.1.2: a Group's

@@ -13,13 +13,15 @@ use tutti_midi_protocol::{
 use tutti_ump::ControlValue;
 use tutti_ump::{CCNumber, MidiChannel, NoteNumber, Rpn, U7, U14, Voice2};
 use tutti_units::Seconds;
-use tutti_voicing::{Command, NoSuchTuning, Rules, TuningCapacity, VoiceId, Voicing};
+use tutti_voicing::{
+    NoSuchTuning, TuningCapacity, VoiceAllocator, VoiceCommand, VoiceConfig, VoiceId,
+};
 
-fn on(core: &mut Voicing, channel: u8, key: u8) -> Vec<Command> {
+fn on(core: &mut VoiceAllocator, channel: u8, key: u8) -> Vec<VoiceCommand> {
     step(core, channel, note_on(key))
 }
 
-fn say(core: &mut Voicing, message: TuningMessage) -> Vec<Command> {
+fn say(core: &mut VoiceAllocator, message: TuningMessage) -> Vec<VoiceCommand> {
     core.universal(Heard {
         to: Addressee::All,
         message: Universal::Tuning(message),
@@ -27,7 +29,7 @@ fn say(core: &mut Voicing, message: TuningMessage) -> Vec<Command> {
     .to_vec()
 }
 
-fn rpn(core: &mut Voicing, channel: u8, which: Rpn, value: u8) -> Vec<Command> {
+fn rpn(core: &mut VoiceAllocator, channel: u8, which: Rpn, value: u8) -> Vec<VoiceCommand> {
     step(
         core,
         channel,
@@ -40,22 +42,22 @@ fn rpn(core: &mut Voicing, channel: u8, which: Rpn, value: u8) -> Vec<Command> {
 }
 
 /// The tuning a note's `Start` carries.
-fn start_tune(commands: &[Command]) -> f64 {
+fn start_tune(commands: &[VoiceCommand]) -> f64 {
     commands
         .iter()
         .find_map(|c| match c {
-            Command::Start { tune, .. } => Some(tune.get()),
+            VoiceCommand::Start { tune, .. } => Some(tune.get()),
             _ => None,
         })
         .expect("a Start")
 }
 
 /// What the `Tune` commands say, by voice.
-fn tunes(commands: &[Command]) -> Vec<(u64, f64)> {
+fn tunes(commands: &[VoiceCommand]) -> Vec<(u64, f64)> {
     commands
         .iter()
         .filter_map(|c| match c {
-            Command::Tune { id, tune } => Some((id_of(*id), tune.get())),
+            VoiceCommand::Tune { id, tune } => Some((id_of(*id), tune.get())),
             _ => None,
         })
         .collect()
@@ -112,13 +114,13 @@ fn cents(of: &[(usize, i8)]) -> OctaveOffsets {
     OctaveOffsets::Cents(bytes)
 }
 
-const SAMPLE: Rules = Rules::poly(NonZeroUsize::new(8).unwrap());
+const SAMPLE: VoiceConfig = VoiceConfig::poly(NonZeroUsize::new(8).unwrap());
 
 /// RP-020: the initial tuning of the instrument is equal temperament: every
 /// key of every program starts at its own number, so a note is not retuned.
 #[test]
 fn every_program_starts_in_equal_temperament() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     assert_eq!(start_tune(&on(&mut core, 0, 61)), 0.0);
     let table = core.tuning(U7::of(0), U7::of(127)).unwrap();
     assert_eq!(table, &KeyTable::equal_temperament());
@@ -130,7 +132,7 @@ fn every_program_starts_in_equal_temperament() {
 /// struck afterwards on the channel (which plays program 0 of bank 0) has it.
 #[test]
 fn a_single_note_change_retunes_the_next_note_on_the_programs_channels() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     let out = say(
         &mut core,
         note_change(
@@ -153,7 +155,7 @@ fn a_single_note_change_retunes_the_next_note_on_the_programs_channels() {
 /// a semitone (50 cents) above note 69's pitch.
 #[test]
 fn the_fraction_of_a_word_is_a_fraction_of_a_semitone() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
         note_change(Timing::RealTime, None, 0, &[change(69, word(69, 0x2000))]),
@@ -167,7 +169,7 @@ fn the_fraction_of_a_word_is_a_fraction_of_a_semitone() {
 /// only the voices of the key and of channels that play the program.
 #[test]
 fn a_real_time_change_retunes_the_sounding_note_and_only_it() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     on(&mut core, 0, 60);
     on(&mut core, 0, 64);
     on(&mut core, 1, 60);
@@ -203,7 +205,7 @@ fn a_real_time_change_retunes_the_sounding_note_and_only_it() {
 /// notes: the sounding voice is left, the next Note On has the new tuning.
 #[test]
 fn a_non_real_time_change_leaves_the_sounding_note() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     on(&mut core, 0, 60);
     let out = say(
         &mut core,
@@ -219,8 +221,8 @@ fn a_non_real_time_change_leaves_the_sounding_note() {
 /// program. The basic channel number discriminates between active tunings.
 #[test]
 fn rpn_3_and_4_select_the_channels_tuning_and_retune_its_sounding_notes() {
-    let mut core = Voicing::new(
-        Rules::poly(NonZeroUsize::new(8).unwrap())
+    let mut core = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(8).unwrap())
             .with_tuning_capacity(TuningCapacity::new(2, 4).unwrap()),
     );
     // Program 2 of bank 1 raises key 60 by a semitone; program 2 of bank 0 by two.
@@ -256,8 +258,8 @@ fn rpn_3_and_4_select_the_channels_tuning_and_retune_its_sounding_notes() {
 /// 4 programs ignores program 4 and bank 1, and counts each.
 #[test]
 fn a_program_or_bank_the_core_has_none_of_is_ignored_and_counted() {
-    let mut core = Voicing::new(
-        Rules::poly(NonZeroUsize::new(4).unwrap())
+    let mut core = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(4).unwrap())
             .with_tuning_capacity(TuningCapacity::new(1, 4).unwrap()),
     );
     on(&mut core, 0, 60);
@@ -277,11 +279,11 @@ fn a_program_or_bank_the_core_has_none_of_is_ignored_and_counted() {
 /// `store_tuning` answers with the error instead.
 #[test]
 fn a_change_for_a_program_there_is_no_room_for_is_refused_and_counted() {
-    let mut core = Voicing::new(
-        Rules::poly(NonZeroUsize::new(4).unwrap())
+    let mut core = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(4).unwrap())
             .with_tuning_capacity(TuningCapacity::new(1, 4).unwrap()),
     );
-    let refused = |core: &mut Voicing, bank: Option<u8>, program: u8| {
+    let refused = |core: &mut VoiceAllocator, bank: Option<u8>, program: u8| {
         let before = core.tuning_refused();
         say(
             core,
@@ -332,7 +334,7 @@ fn a_capacity_is_one_to_128_banks_and_programs() {
 /// modified tuning: a second message replaces the first.
 #[test]
 fn scale_octave_offsets_repeat_every_octave_and_replace_the_last_message() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
         octave(Timing::NonRealTime, 0b1, cents(&[(1, 30)])),
@@ -353,7 +355,7 @@ fn scale_octave_offsets_repeat_every_octave_and_replace_the_last_message() {
 /// updated, on the named channels only.
 #[test]
 fn the_channel_mask_picks_the_channels_and_real_time_moves_their_sounding_notes() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     on(&mut core, 0, 60);
     on(&mut core, 1, 60);
     on(&mut core, 15, 60);
@@ -377,7 +379,7 @@ fn the_channel_mask_picks_the_channels_and_real_time_moves_their_sounding_notes(
 /// sounding note.
 #[test]
 fn non_real_time_scale_octave_leaves_the_sounding_notes() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     on(&mut core, 0, 60);
     let out = say(
         &mut core,
@@ -391,7 +393,7 @@ fn non_real_time_scale_octave_leaves_the_sounding_notes() {
 /// semitone in the table and 20 cents by the octave offset.
 #[test]
 fn the_programs_tuning_and_the_channels_octave_offset_add() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
         note_change(Timing::NonRealTime, None, 0, &[change(60, word(61, 0))]),
@@ -407,7 +409,7 @@ fn the_programs_tuning_and_the_channels_octave_offset_add() {
 /// what is stored, and sound at the next Note On, not now.
 #[test]
 fn a_key_dump_stores_the_table_and_no_change_keeps_a_key() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
         note_change(Timing::NonRealTime, None, 5, &[change(50, word(53, 0))]),
@@ -438,7 +440,7 @@ fn a_key_dump_stores_the_table_and_no_change_keeps_a_key() {
 /// twelve offsets; a channel that plays it hears them.
 #[test]
 fn an_octave_dump_stores_equal_temperament_plus_the_offsets() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
         TuningMessage::OctaveDump {
@@ -458,7 +460,7 @@ fn an_octave_dump_stores_equal_temperament_plus_the_offsets() {
 /// has no output to reply on.
 #[test]
 fn a_dump_request_does_nothing_here() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     on(&mut core, 0, 60);
     let out = say(
         &mut core,
@@ -475,8 +477,8 @@ fn a_dump_request_does_nothing_here() {
 /// no tuning of a key reaches it (as the master tuning does not).
 #[test]
 fn the_percussion_channel_takes_no_key_tuning() {
-    let mut core = Voicing::new(
-        Rules::poly(NonZeroUsize::new(4).unwrap()).with_percussion(MidiChannel::of(9)),
+    let mut core = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(4).unwrap()).with_percussion(MidiChannel::of(9)),
     );
     say(
         &mut core,
@@ -495,7 +497,7 @@ fn the_percussion_channel_takes_no_key_tuning() {
 /// other.
 #[test]
 fn a_keys_tuning_is_apart_from_the_channels_pitch() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
         note_change(Timing::NonRealTime, None, 0, &[change(60, word(61, 0))]),
@@ -508,7 +510,7 @@ fn a_keys_tuning_is_apart_from_the_channels_pitch() {
         .to_vec();
     assert!(
         out.iter()
-            .all(|c| matches!(c, Command::Retune { bend, .. } if bend.get() == 2.0))
+            .all(|c| matches!(c, VoiceCommand::Retune { bend, .. } if bend.get() == 2.0))
     );
     assert_eq!(start_tune(&on(&mut core, 0, 60)), 1.0);
 }
@@ -517,7 +519,7 @@ fn a_keys_tuning_is_apart_from_the_channels_pitch() {
 /// key it leaves at that key's tuning.
 #[test]
 fn a_retarget_and_a_glide_carry_the_tuning_of_their_keys() {
-    let mut core = Voicing::new(Rules::legato());
+    let mut core = VoiceAllocator::new(VoiceConfig::legato());
     say(
         &mut core,
         note_change(
@@ -538,8 +540,9 @@ fn a_retarget_and_a_glide_carry_the_tuning_of_their_keys() {
     );
     assert_eq!(start_tune(&on(&mut core, 0, 60)), 0.25);
     let out = on(&mut core, 0, 64);
-    let Some(Command::Retarget { tune, glide, .. }) =
-        out.iter().find(|c| matches!(c, Command::Retarget { .. }))
+    let Some(VoiceCommand::Retarget { tune, glide, .. }) = out
+        .iter()
+        .find(|c| matches!(c, VoiceCommand::Retarget { .. }))
     else {
         panic!("{out:?}");
     };
@@ -555,7 +558,7 @@ fn a_retarget_and_a_glide_carry_the_tuning_of_their_keys() {
 /// (RP-020's default), and what the programs hold stays.
 #[test]
 fn general_midi_on_returns_the_channels_to_program_zero_and_keeps_the_tables() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
         note_change(Timing::NonRealTime, None, 3, &[change(60, word(65, 0))]),
@@ -581,7 +584,7 @@ fn general_midi_on_returns_the_channels_to_program_zero_and_keeps_the_tables() {
 /// MSB selects program 1.
 #[test]
 fn a_relative_registered_controller_steps_the_program() {
-    let mut core = Voicing::new(SAMPLE);
+    let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
         note_change(Timing::NonRealTime, None, 1, &[change(60, word(61, 0))]),
@@ -603,16 +606,16 @@ fn a_relative_registered_controller_steps_the_program() {
 /// 4 as Registered Controllers on the channel), the tables are not.
 #[test]
 fn the_chase_carries_the_selected_program_and_bank() {
-    let mut core = Voicing::new(
-        Rules::poly(NonZeroUsize::new(4).unwrap())
+    let mut core = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(4).unwrap())
             .with_tuning_capacity(TuningCapacity::new(3, 8).unwrap()),
     );
     rpn(&mut core, 5, Rpn::TUNING_PROGRAM_SELECT, 6);
     rpn(&mut core, 5, Rpn::TUNING_BANK_SELECT, 2);
     let mut sent = Vec::new();
     core.chase(tutti_ump::MidiGroup::FIRST, |ump| sent.push(ump));
-    let mut heir = Voicing::new(
-        Rules::poly(NonZeroUsize::new(4).unwrap())
+    let mut heir = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(4).unwrap())
             .with_tuning_capacity(TuningCapacity::new(3, 8).unwrap()),
     );
     for ump in sent {
@@ -634,11 +637,11 @@ fn the_chase_carries_the_selected_program_and_bank() {
 /// Spec: m2-104/7.4.7.1#3, m2-104/7.4.7.1#4
 #[test]
 fn rpn_3_and_4_read_only_the_top_seven_bits() {
-    let mut core = Voicing::new(
-        Rules::poly(NonZeroUsize::new(8).unwrap())
+    let mut core = VoiceAllocator::new(
+        VoiceConfig::poly(NonZeroUsize::new(8).unwrap())
             .with_tuning_capacity(TuningCapacity::new(3, 4).unwrap()),
     );
-    let select = |core: &mut Voicing, which: Rpn, number: u32, below: u32| {
+    let select = |core: &mut VoiceAllocator, which: Rpn, number: u32, below: u32| {
         step(
             core,
             0,
