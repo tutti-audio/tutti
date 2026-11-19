@@ -498,6 +498,11 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                 unit.filter_lanes(raw.lanes(), out.lanes_mut(), n, 0..frames);
                 Piece::Ready
             }
+            // A free-running voice steps its own cursor (the transport is not
+            // its clock), unstretched and forwards.
+            (VoiceSource::Memory(sampler), _) if !sampler.is_placed() => {
+                sampler.render_free(frames, n, out.lanes_mut())
+            }
             (VoiceSource::Memory(sampler), _) => {
                 // Seated at the gate's origin (`window_rate`, varispeed
                 // alone, in the wave's own frames) and stepped by `read_rate`

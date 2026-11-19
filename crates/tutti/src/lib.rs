@@ -178,6 +178,8 @@ pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
+#[cfg(all(feature = "session", feature = "sampler"))]
+pub use tutti_session::WindowTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
@@ -530,8 +532,8 @@ pub mod sampler {
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
-        Loop, LoopError, PlaceError, Playback, SendError, StreamerGone, StreamingAddError,
-        VoiceWindow,
+        Loop, LoopError, PlaceError, PlayError, Playback, SendError, StreamerGone,
+        StreamingAddError, VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",

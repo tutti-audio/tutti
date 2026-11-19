@@ -318,6 +318,17 @@ pub(crate) struct Queued<F: SamplerFloat> {
 // Handle — held by ECS systems, sends commands to the audio-thread unit.
 // ---------------------------------------------------------------------------
 
+/// A voice on the transport cannot be played or stopped by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
+pub enum PlayError {
+    /// The voice is placed: its window says when it sounds, and
+    /// [`play`](VoiceNodeHandle::play) and [`stop`](VoiceNodeHandle::stop)
+    /// drive a free-running voice.
+    #[error("the voice is placed on the transport; its window says when it sounds")]
+    Placed,
+}
+
 /// A command never reached the pool, and the work it carried is gone.
 ///
 /// Modelled on `tutti_transport::TimedError`: the two failures are told apart
@@ -412,7 +423,7 @@ impl SendError {
 /// #     play: Playback::default(),
 /// # };
 /// let (_node, handle) = VoiceNode::new(voice).with_handle();
-/// handle.set_window(VoiceWindow::from(tutti_units::Beat::new(1.0)));
+/// handle.window_cell().publish(Some(VoiceWindow::from(tutti_units::Beat::new(1.0))));
 /// ```
 #[derive(Clone, Debug)]
 pub struct VoiceNodeHandle<F: SamplerFloat> {
@@ -420,6 +431,9 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
     /// (which reads it once per block) and with its fork source (which reads
     /// it at fork time).
     pub(crate) steering: SteeringCell,
+    /// The voice's window: `Some` places it on the transport, `None` leaves it
+    /// free-running. The cell the node reads once per block.
+    pub(crate) window: Publisher<Option<VoiceWindow>>,
     /// The latest steering, which the setters edit under the lock and
     /// publish: two handles racing never lose each other's field.
     latest: Arc<Mutex<Steering>>,
@@ -447,12 +461,14 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
 /// last, and nothing else rides with it to be ordered against.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Steering {
-    pub(crate) window: Option<VoiceWindow>,
     /// The memory tier's loop; a disk voice's is its stream's.
     pub(crate) loop_: Option<Option<Loop>>,
     pub(crate) speed: Option<PlaybackRate>,
     /// Whether the handle has stopped the voice.
     pub(crate) stopped: bool,
+    /// How many times the handle has played the voice: each one starts a
+    /// free-running memory voice's cursor, which a reset leaves stopped.
+    pub(crate) plays: u32,
 }
 
 pub(crate) type SteeringCell = Publisher<Steering>;
@@ -460,6 +476,7 @@ pub(crate) type SteeringCell = Publisher<Steering>;
 impl<F: SamplerFloat> VoiceNodeHandle<F> {
     pub(crate) fn new(
         steering: SteeringCell,
+        window: Publisher<Option<VoiceWindow>>,
         gain: Param<Amplitude>,
         params: ParamSet,
         stream: Option<Stream<F>>,
@@ -467,6 +484,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
         Self {
             latest: Arc::new(Mutex::new(*steering.current())),
             steering,
+            window,
             gain,
             params,
             stream: stream.map(|s| Arc::new(Mutex::new(s))),
@@ -482,17 +500,26 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
         self.steering.publish(*latest);
     }
 
-    /// Moves the voice's timeline window, from the node's next block on.
+    /// The cell holding the voice's window: `Some` places the voice on the
+    /// transport, `None` leaves it free-running.
     ///
     /// A window is a [`Beat`](tutti_units::Beat) (`f64`) plus an optional
     /// duration: two values, and a precision the transport cannot afford to
     /// lose, so it is no scalar param (an `f32` beat position loses whole
-    /// frames past ~2²⁴). It is published to a cell the node reads once per
-    /// block: never lost and never queued, and only the latest window is
-    /// heard (a window set twice between two blocks plays the second). A fork
-    /// of the node taken after this call starts from it.
-    pub fn set_window(&self, window: VoiceWindow) {
-        self.steer(|s| s.window = Some(window));
+    /// frames past ~2²⁴). The node lends the cell once per block, so a window
+    /// published twice between two blocks plays the second. A fork of the node
+    /// taken after a publish starts from it. A streamed voice is always
+    /// placed: `None` leaves it at the window it has.
+    ///
+    /// The session writes it (`sampler.window()`); a host driving a node by
+    /// hand publishes into it.
+    pub fn window_cell(&self) -> &Publisher<Option<VoiceWindow>> {
+        &self.window
+    }
+
+    /// Whether the voice plays its window of the transport, as published.
+    pub fn is_placed(&self) -> bool {
+        self.stream.is_some() || self.window.current().is_some()
     }
 
     /// Sets the voice's loop, or clears it with `None`, from the node's next
@@ -544,17 +571,39 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
         self.steer(|s| s.speed = Some(speed));
     }
 
-    /// Resumes a voice [`stop`](Self::stop)ped: the voice reads and sounds
-    /// again from the node's next block. A voice is playing until stopped.
-    pub fn play(&self) {
-        self.steer(|s| s.stopped = false);
+    /// Starts a free-running voice, or resumes one [`stop`](Self::stop)ped:
+    /// the voice sounds from the node's next block, from where its cursor is
+    /// (a reset rewinds it).
+    ///
+    /// # Errors
+    ///
+    /// [`PlayError::Placed`] for a voice on the transport: its window says
+    /// when it sounds.
+    pub fn play(&self) -> Result<(), PlayError> {
+        self.drive(false)
     }
 
-    /// Stops the voice: it is silent from the node's next block and reads
-    /// nothing, until [`play`](Self::play). A voice on the transport resumes
-    /// where the transport is; a free-running one, where it stopped.
-    pub fn stop(&self) {
-        self.steer(|s| s.stopped = true);
+    /// Stops a free-running voice: it is silent from the node's next block and
+    /// reads nothing, until [`play`](Self::play).
+    ///
+    /// # Errors
+    ///
+    /// [`PlayError::Placed`] for a voice on the transport.
+    pub fn stop(&self) -> Result<(), PlayError> {
+        self.drive(true)
+    }
+
+    fn drive(&self, stopped: bool) -> Result<(), PlayError> {
+        if self.is_placed() {
+            return Err(PlayError::Placed);
+        }
+        self.steer(|s| {
+            s.stopped = stopped;
+            if !stopped {
+                s.plays = s.plays.wrapping_add(1);
+            }
+        });
+        Ok(())
     }
 
     /// Whether the voice is playing (not [`stop`](Self::stop)ped).
@@ -1109,7 +1158,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
 /// (the placement windows a replacement left behind); control thread, from the owner's tick.
 impl<F: SamplerFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
     fn reclaim(&self) -> usize {
-        self.steering.reclaim()
+        self.steering.reclaim() + self.window.reclaim()
     }
 }
 

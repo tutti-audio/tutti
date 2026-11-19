@@ -241,24 +241,35 @@ fn play_pool(pool: &mut VoicePool<f32>, streamer: &mut DiskStreamer<ByHand<f32>,
     out
 }
 
-/// **The handle sets a memory voice's speed and stops and resumes it.** At
-/// speed 2 the voice reads every second file frame; stopped it is silent and
-/// reads nothing, and it resumes where the transport is.
+/// **The handle sets a memory voice's speed, and stops and resumes a
+/// free-running one.** At speed 2 the voice reads every second file frame; a
+/// placed voice refuses `stop` and `play`; a free-running one, stopped, is
+/// silent and reads nothing, and resumes where its cursor stopped.
 #[test]
-fn a_node_handle_sets_speed_and_stops_and_resumes_the_voice() {
+fn a_node_handle_sets_speed_and_stops_and_resumes_a_free_running_voice() {
     let (mut node, handle) = memory_node();
     handle.set_speed(PlaybackRate::new(2.0));
     let got = render_with(&mut node, 400);
     assert_frames("speed 2", &got, |n| 2 * n);
+    assert_eq!(handle.stop(), Err(tutti_sampler::PlayError::Placed));
+    assert_eq!(handle.play(), Err(tutti_sampler::PlayError::Placed));
 
-    let (mut node, handle) = memory_node();
+    let source = MemorySource::new(ramp()).expect("a placeable wave");
+    let (mut node, handle) = VoiceNode::with_channels(
+        tutti_sampler::Voice {
+            source: VoiceSource::Memory(source),
+            play: Playback::default(),
+        },
+        tutti_buffers::ChannelLayout::MONO,
+    )
+    .with_handle();
     node = tutti_sampler::testing::prepared(node, RATE, BLOCK);
     let t = rolling();
     let mut heard = Vec::new();
     for block in 0..6 {
         match block {
-            2 => handle.stop(),
-            4 => handle.play(),
+            2 => handle.stop().expect("a free-running voice"),
+            4 => handle.play().expect("a free-running voice"),
             _ => {}
         }
         heard.extend(tutti_sampler::testing::block(&mut node, &t, RATE, BLOCK).swap_remove(0));
@@ -267,7 +278,8 @@ fn a_node_handle_sets_speed_and_stops_and_resumes_the_voice() {
     assert!(handle.is_playing());
     for (n, &g) in heard.iter().enumerate() {
         let stopped = (2 * BLOCK..4 * BLOCK).contains(&n);
-        let want = if stopped { 0.0 } else { value(n) };
+        let cursor = if n >= 4 * BLOCK { n - 2 * BLOCK } else { n };
+        let want = if stopped { 0.0 } else { value(cursor) };
         assert!(
             (g - want).abs() < 1e-6,
             "frame {n}: {g}, want {want} (stopped: {stopped})"

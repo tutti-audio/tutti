@@ -391,10 +391,16 @@ impl<F: Float> MemorySource<F> {
     /// Places the source on the transport at `window`, or moves its window.
     /// The next frame reads at the new window.
     ///
-    /// A free-running source that is sent this (a free-running voice given
-    /// `UpdatePlacement`) becomes transport-gated, as a `DiskVoice` always is.
+    /// A free-running source that is given a window becomes transport-gated,
+    /// as a `DiskVoice` always is.
     pub fn set_window(&mut self, window: VoiceWindow) {
         self.placement = Some(window);
+    }
+
+    /// Takes the source off the transport: it reads on its own cursor from
+    /// the next frame.
+    pub fn free_run(&mut self) {
+        self.placement = None;
     }
 
     /// Places this source on the transport at `window`.
@@ -1142,6 +1148,29 @@ impl<F: Float> MemorySource<F> {
         });
         if !blended && !sounds {
             return Piece::Silent;
+        }
+        Piece::Ready
+    }
+
+    /// The free-running read of `frames` block frames into frames `0..frames`
+    /// of the first `n` `head` lanes: each frame is the cursor's own step,
+    /// gained by the source's gain. [`Piece::Silent`] while the cursor is
+    /// stopped (nothing is written, and the cursor stays).
+    pub(crate) fn render_free<H: AsMut<[F]>>(
+        &mut self,
+        frames: usize,
+        n: usize,
+        head: &mut [H],
+    ) -> Piece {
+        if !self.playing.load(Ordering::Relaxed) {
+            return Piece::Silent;
+        }
+        let mut frame = [F::ZERO; MAX_CHANNELS];
+        for i in 0..frames {
+            self.free_frame_into(&mut frame[..n]);
+            for (lane, &sample) in head.iter_mut().zip(&frame[..n]) {
+                lane.as_mut()[i] = sample;
+            }
         }
         Piece::Ready
     }
