@@ -17,12 +17,12 @@ mod tests {
         let env = Env {
             frame: Frame::new(0),
             sample_rate: SR,
-            block_len: Samples(len),
+            block_len: Samples::new(len),
             transport: TransportPosition::counted(true, host.tempo(), host.origin(), looping),
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
         };
-        let mut out = vec![Beat(f64::NAN); len];
+        let mut out = vec![Beat::new(f64::NAN); len];
         env.for_each_beat(|i, b| out[i] = b);
         out
     }
@@ -40,11 +40,11 @@ mod tests {
                 tutti_music::LoopRange::new(Beat::new(1_000.0), Beat::new(1_000.004)),
             ),
         ] {
-            let mut host = FrameClock::new(Beat(0.25), Bpm::of(tempo), SR);
-            host.advance(Samples(987_654_321), None);
+            let mut host = FrameClock::new(Beat::new(0.25), Bpm::of(tempo), SR);
+            host.advance(Samples::new(987_654_321), None);
             if let Some(l) = looping {
-                host.seat(Beat(1_000.0));
-                host.advance(Samples(3), Some(l));
+                host.seat(Beat::new(1_000.0));
+                host.advance(Samples::new(3), Some(l));
             }
             let got = walked(&host, 512, looping);
             for (i, b) in got.iter().enumerate() {
@@ -53,7 +53,7 @@ mod tests {
                     host.beat().get().to_bits(),
                     "{tempo} BPM, loop {looping:?}: frame {i}"
                 );
-                host.advance(Samples(1), looping);
+                host.advance(Samples::new(1), looping);
             }
         }
     }

@@ -158,7 +158,7 @@ impl<F: Float> OutputBlock<F> {
             state,
             layout,
             channels,
-            buffer: vec![F::ZERO; layout.interleaved_len(Samples(MAX_FRAMES))],
+            buffer: vec![F::ZERO; layout.interleaved_len(Samples::new(MAX_FRAMES))],
             last_rendered_frames: 0,
             latency: Arc::new(StreamLatency::new()),
             faults: Arc::new(StreamFaults::new()),
@@ -333,7 +333,7 @@ impl<F: Float> OutputBlock<F> {
         let frames = self
             .layout
             .from_interleaved_len(data.len())
-            .min(Samples(MAX_FRAMES));
+            .min(Samples::new(MAX_FRAMES));
         self.last_rendered_frames = frames.get();
 
         let mix = &mut self.buffer[..self.layout.interleaved_len(frames)];

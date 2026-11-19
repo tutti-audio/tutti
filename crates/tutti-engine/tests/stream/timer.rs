@@ -36,7 +36,7 @@ fn spec(quantum: Option<usize>) -> OutputSpec {
         SampleFormat::F32,
     );
     quantum.map_or(spec.clone(), |q| {
-        spec.with_quantum(MaxBlock::of(Samples(q)))
+        spec.with_quantum(MaxBlock::of(Samples::new(q)))
     })
 }
 

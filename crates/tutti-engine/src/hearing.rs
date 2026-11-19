@@ -277,7 +277,7 @@ mod tests {
     use super::*;
 
     fn writer(width: usize) -> Box<TapWriter<f32>> {
-        Box::new(TapReader::pair(width, Samples(8)).1)
+        Box::new(TapReader::pair(width, Samples::new(8)).1)
     }
 
     fn width(h: &Hearing<f32>) -> Option<usize> {

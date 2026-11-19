@@ -330,7 +330,7 @@ mod tests {
 
     fn meter_of(n: u32) -> Arc<MeterMap> {
         Arc::new(MeterMap::new([MeterChange::new(
-            Beat(0.0),
+            Beat::new(0.0),
             TimeSignature::from_numbers(n, 4).unwrap(),
         )]))
     }
@@ -342,7 +342,7 @@ mod tests {
         let project = ProjectMeter::new(MeterMap::default());
         let mut click = project.reader();
         let five = MeterMap::new([MeterChange::new(
-            Beat(0.0),
+            Beat::new(0.0),
             TimeSignature::from_numbers(5, 4).unwrap(),
         )]);
         project.set_meter(five.clone());

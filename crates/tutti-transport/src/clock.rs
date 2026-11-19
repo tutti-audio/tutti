@@ -141,7 +141,7 @@ impl TransportClock {
 
         let clock = Self {
             links,
-            clock: FrameClock::new(Beat(0.0), tempo, sample_rate),
+            clock: FrameClock::new(Beat::new(0.0), tempo, sample_rate),
             rolling: false,
             walk: TempoWalk::default(),
             #[cfg(test)]
@@ -343,7 +343,7 @@ impl TransportClock {
                     self.walk.roll(map, &mut self.clock, frames, region, false);
                     self.publish_tempo();
                 }
-                None => self.clock.advance(Samples(frames), region),
+                None => self.clock.advance(Samples::new(frames), region),
             }
         }
         self.advance_steady_time(frames);
@@ -774,7 +774,7 @@ mod tests {
         assert_eq!(in_force.load(Ordering::Acquire), Bpm::of(120.0));
         assert_eq!(
             clock.current_beat(),
-            Beat(0.0) + tutti_music::beats_per_sample(Bpm::of(120.0), SampleRate::SR_48K),
+            Beat::new(0.0) + tutti_music::beats_per_sample(Bpm::of(120.0), SampleRate::SR_48K),
         );
     }
 

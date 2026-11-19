@@ -410,7 +410,7 @@ mod tests {
         let s = Schedule::new();
         let play = TransportCommand::Motion(MotionEvent::Play);
         for i in 0..SCHEDULE_CAPACITY {
-            s.send(At::Beat(tutti_units::Beat(1000.0 + i as f64)), play)
+            s.send(At::Beat(tutti_units::Beat::new(1000.0 + i as f64)), play)
                 .expect("room");
         }
         assert!(s.send(At::Frame(Frame::new(0)), play).is_err());

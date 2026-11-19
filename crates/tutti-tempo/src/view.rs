@@ -100,7 +100,7 @@ impl<'a> TempoView<'a> {
     #[must_use]
     #[inline]
     pub fn tempo_at_frame(&mut self, frame: Frame) -> Bpm {
-        let seconds = Seconds(frame.get() as f64 / self.rate.get());
+        let seconds = Seconds::new(frame.get() as f64 / self.rate.get());
         self.tempo_at_seconds(seconds)
     }
 
@@ -108,7 +108,7 @@ impl<'a> TempoView<'a> {
     #[must_use]
     #[inline]
     pub fn beat_at_frame(&mut self, frame: Frame) -> Beat {
-        let seconds = Seconds(frame.get() as f64 / self.rate.get());
+        let seconds = Seconds::new(frame.get() as f64 / self.rate.get());
         self.beat_at_seconds(seconds)
     }
 
@@ -207,7 +207,7 @@ impl<'a> TempoView<'a> {
         Cell {
             start: Frame::new(start),
             end: Frame::new(end),
-            beat: Beat(b0),
+            beat: Beat::new(b0),
             tempo,
         }
     }

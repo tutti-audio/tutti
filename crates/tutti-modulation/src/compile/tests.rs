@@ -42,14 +42,14 @@ fn lfo(shape: LfoShape, clock: Clock) -> Source {
 fn beats(per_cycle: f64) -> Clock {
     Clock::Beats {
         per_cycle: BeatsPerCycle::of(per_cycle),
-        phase: PhaseIncrement(0.0),
+        phase: PhaseIncrement::new(0.0),
     }
 }
 
 fn seconds(rate: f64) -> Clock {
     Clock::Seconds {
-        rate: Hz(rate),
-        phase: PhaseIncrement(0.0),
+        rate: Hz::new(rate),
+        phase: PhaseIncrement::new(0.0),
         anchor: None,
     }
 }
@@ -70,17 +70,17 @@ fn to(node: u64) -> RouteTarget {
 
 fn follower() -> Source {
     Source::Follower {
-        attack: Seconds(0.01),
-        release: Seconds(0.2),
+        attack: Seconds::new(0.01),
+        release: Seconds::new(0.2),
     }
 }
 
 fn adsr() -> Adsr {
     Adsr {
-        attack: Seconds(0.01),
-        decay: Seconds(0.1),
-        sustain: Amplitude(0.6),
-        release: Seconds(0.3),
+        attack: Seconds::new(0.01),
+        decay: Seconds::new(0.1),
+        sustain: Amplitude::new(0.6),
+        release: Seconds::new(0.3),
     }
 }
 
@@ -103,8 +103,8 @@ fn run(
 
 fn time(beat: f64, play: f64, epoch: u32) -> ProgramTime {
     ProgramTime {
-        beat: Beat(beat),
-        play: SamplePosition(play),
+        beat: Beat::new(beat),
+        play: SamplePosition::new(play),
         play_epoch: epoch,
         rate: SR,
     }
@@ -113,8 +113,8 @@ fn time(beat: f64, play: f64, epoch: u32) -> ProgramTime {
 /// A frozen trajectory: what a host hands as automation.
 fn trajectory() -> Arc<dyn Curve> {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(100.0)));
-    e.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(900.0)));
+    e.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(100.0)));
+    e.add_breakpoint(Breakpoint::new(Beat::new(4.0), Hz::new(900.0)));
     Arc::new(e)
 }
 
@@ -442,7 +442,7 @@ fn a_rate_edit_anchors_continuously() {
     else {
         panic!("anchored: {:?}", clock(&after));
     };
-    assert_eq!((a.epoch, a.at, a.prev_rate), (7, at, Hz(2.0)));
+    assert_eq!((a.epoch, a.at, a.prev_rate), (7, at, Hz::new(2.0)));
     let cyc = |c: &Compiled, play: f64| clock(c).cycles(&time(0.0, play, 7)).expect("a phase");
     let t = at.get() as f64;
     assert_eq!(
@@ -516,8 +516,8 @@ fn an_anchor_is_carried_until_a_play_start() {
             seed: 0,
         },
         clock: Clock::Seconds {
-            rate: Hz(5.0),
-            phase: PhaseIncrement(0.25),
+            rate: Hz::new(5.0),
+            phase: PhaseIncrement::new(0.25),
             anchor: None,
         },
     };
@@ -713,12 +713,12 @@ fn each_refusal_fires_by_name() {
     let bad_sources = [
         Source::Macro { value: f32::NAN },
         Source::Follower {
-            attack: Seconds(-0.1),
-            release: Seconds(0.1),
+            attack: Seconds::new(-0.1),
+            release: Seconds::new(0.1),
         },
         Source::NoteEnvelope {
             adsr: Adsr {
-                sustain: Amplitude(1.5),
+                sustain: Amplitude::new(1.5),
                 ..adsr()
             },
         },
@@ -741,13 +741,13 @@ fn each_refusal_fires_by_name() {
             seed: 0,
         },
         clock: Clock::Seconds {
-            rate: Hz(1.0),
-            phase: PhaseIncrement(0.0),
+            rate: Hz::new(1.0),
+            phase: PhaseIncrement::new(0.0),
             anchor: Some(RateAnchor {
                 epoch: 1,
                 at: Frame::new(0),
                 phase: 0.0,
-                prev_rate: Hz(1.0),
+                prev_rate: Hz::new(1.0),
             }),
         },
     };
@@ -784,9 +784,9 @@ fn every_declaration_a_host_can_make_compiles_without_a_runtime() {
     let mut routes = Vec::new();
     for (k, &shape) in LfoShape::all().iter().enumerate() {
         let k = k as u64;
-        let phase = PhaseIncrement(0.25);
+        let phase = PhaseIncrement::new(0.25);
         let free = Clock::Seconds {
-            rate: Hz(1.5),
+            rate: Hz::new(1.5),
             phase,
             anchor: None,
         };
@@ -956,7 +956,7 @@ fn a_second_rate_edit_near_its_anchor_reanchors() {
     let a2 = anchor_of(new).expect("anchored");
     assert_eq!(
         (a2.at, a2.prev_rate),
-        (edit.after(RATE_ANCHOR_MARGIN).play, Hz(5.0))
+        (edit.after(RATE_ANCHOR_MARGIN).play, Hz::new(5.0))
     );
     let cyc = |c: Clock, p: f64| c.cycles(&time(0.0, p, 7)).expect("a phase");
     let a = a1.at.get() as f64;
@@ -999,13 +999,13 @@ fn a_value_that_is_not_finite_is_refused() {
         );
     }
     let clock = |rate: f64, phase: f64| Clock::Seconds {
-        rate: Hz(rate),
-        phase: PhaseIncrement(phase),
+        rate: Hz::new(rate),
+        phase: PhaseIncrement::new(phase),
         anchor: None,
     };
     let beat = |phase: f64| Clock::Beats {
         per_cycle: BeatsPerCycle::of(1.0),
-        phase: PhaseIncrement(phase),
+        phase: PhaseIncrement::new(phase),
     };
     for c in [
         clock(f64::INFINITY, 0.0),

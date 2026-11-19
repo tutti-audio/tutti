@@ -28,7 +28,7 @@ pub const SAMPLE_RATE: f64 = 48_000.0;
 pub fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> Engine {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     build(&mut ed);
     ed.commit().expect("commits");
@@ -53,11 +53,11 @@ pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
     let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
     let engine = graph_engine(&transport, |ed| {
         let (source, filter) = (NodeKey(1), NodeKey(2));
-        ed.insert(source, "sine", Osc::sine(Hz(220.0)));
+        ed.insert(source, "sine", Osc::sine(Hz::new(220.0)));
         ed.insert(
             filter,
             "filter",
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(2_000.0), Q(0.7)),
+            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(2_000.0), Q::new(0.7)),
         );
         ed.spec_mut().topology.edges.insert(
             InPort {

@@ -68,9 +68,9 @@ impl NoteAdsr {
         let s = adsr.sustain.get();
         Self {
             adsr,
-            attack: Samples(0),
-            decay: Samples(0),
-            release: Samples(0),
+            attack: Samples::new(0),
+            decay: Samples::new(0),
+            release: Samples::new(0),
             // A NaN sustain is 0: the envelope never sends a NaN.
             sustain: if s >= 0.0 { s.min(1.0) } else { 0.0 },
             held: [0; NOTE_WORDS],

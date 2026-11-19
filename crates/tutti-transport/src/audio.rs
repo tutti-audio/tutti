@@ -256,7 +256,7 @@ impl TransportAudio {
         if self.stepped {
             self.tempo_map.lend().seconds_at(beat)
         } else {
-            BeatDuration(beat.get()).to_seconds(tempo)
+            BeatDuration::new(beat.get()).to_seconds(tempo)
         }
     }
 
@@ -285,8 +285,8 @@ impl TransportAudio {
     /// use tutti_transport::{Timeline, Transport};
     /// let transport = Transport::new(SampleRate::SR_48K);
     /// let mut audio = transport.audio(SampleRate::SR_48K).expect("the only audio side");
-    /// audio.set_playhead(Beat(4.0));
-    /// assert_eq!(transport.beat(), Beat(4.0));
+    /// audio.set_playhead(Beat::new(4.0));
+    /// assert_eq!(transport.beat(), Beat::new(4.0));
     /// // A jump: a reader keyed on the segment re-seats.
     /// assert_eq!(transport.segment_generation(), 1);
     /// // The audio side is held: nobody else may store.
@@ -336,7 +336,7 @@ mod tests {
     fn a_waiting_command_outlives_its_audio_side() {
         let t = Transport::new(SampleRate::SR_48K);
         t.motion
-            .schedule(At::Beat(tutti_units::Beat(1000.0)), MotionEvent::Play)
+            .schedule(At::Beat(tutti_units::Beat::new(1000.0)), MotionEvent::Play)
             .expect("room");
         let mut first = t.audio(SampleRate::SR_48K).expect("first");
         first.gather();
@@ -433,7 +433,7 @@ mod tests {
         };
         assert_eq!(change.at.index(), 100);
         assert_eq!(change.to.tempo, Bpm::of(60.0));
-        assert_eq!(change.to.beat(), Beat(4.0));
+        assert_eq!(change.to.beat(), Beat::new(4.0));
         assert_eq!(change.to.tempo, Bpm::of(60.0));
         let full = a.tempo_ahead(512, &t, 0);
         assert!(full.changes.is_empty());
@@ -470,10 +470,10 @@ mod tests {
             let blk = a.begin_block();
             blk.beat()
         };
-        assert_eq!(ended, Beat(1.0));
+        assert_eq!(ended, Beat::new(1.0));
         t.settings.set_tempo_map(steps(&[(0.0, 90.0), (2.0, 60.0)]));
         let blk = a.begin_block();
-        assert_eq!(blk.beat(), Beat(1.0), "no jump");
+        assert_eq!(blk.beat(), Beat::new(1.0), "no jump");
         assert_eq!(blk.tempo, Bpm::of(90.0), "the map's tempo here");
         // Beat 2 is 32 000 frames on at 90 BPM.
         let _ = roll(&mut a, 31_999);
@@ -481,14 +481,14 @@ mod tests {
         let _ = roll(&mut a, 1);
         let blk = a.begin_block();
         assert_eq!(blk.tempo, Bpm::of(60.0));
-        assert_eq!(blk.beat(), Beat(2.0));
+        assert_eq!(blk.beat(), Beat::new(2.0));
     }
 
     fn steps(points: &[(f64, f64)]) -> std::sync::Arc<TempoMap> {
         use tutti_tempo::{TempoPoint, Transition};
         std::sync::Arc::new(
             TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {
-                beat: Beat(beat),
+                beat: Beat::new(beat),
                 tempo: Bpm::of(bpm),
                 transition: Transition::Step,
             }))
@@ -505,15 +505,15 @@ mod tests {
         let (_t, mut a) = rolling(48_000.0, &[(0.0, 120.0), (4.0, 60.0), (8.0, 240.0)]);
         // 4 beats at 120, then 2 at 60: beat 6.
         let _ = roll(&mut a, 96_000 + 96_000);
-        assert_eq!(a.begin_block().beat(), Beat(6.0));
+        assert_eq!(a.begin_block().beat(), Beat::new(6.0));
         a.follow_rate(SampleRate::SR_96K);
         let blk = a.begin_block();
-        assert_eq!((blk.beat(), blk.tempo), (Beat(6.0), Bpm::of(60.0)));
+        assert_eq!((blk.beat(), blk.tempo), (Beat::new(6.0), Bpm::of(60.0)));
         let _ = roll(&mut a, 191_999);
         assert_eq!(a.begin_block().tempo, Bpm::of(60.0));
         let _ = roll(&mut a, 1);
         let blk = a.begin_block();
-        assert_eq!((blk.beat(), blk.tempo), (Beat(8.0), Bpm::of(240.0)));
+        assert_eq!((blk.beat(), blk.tempo), (Beat::new(8.0), Bpm::of(240.0)));
     }
 
     /// A rate change inside a ramp re-seats at the current beat on the map's
@@ -531,12 +531,12 @@ mod tests {
         let map = std::sync::Arc::new(
             TempoMap::new([
                 TempoPoint {
-                    beat: Beat(0.0),
+                    beat: Beat::new(0.0),
                     tempo: Bpm::of(120.0),
                     transition: Transition::RampTime { end: None },
                 },
                 TempoPoint {
-                    beat: Beat(4.0),
+                    beat: Beat::new(4.0),
                     tempo: Bpm::of(60.0),
                     transition: Transition::Step,
                 },
@@ -596,9 +596,13 @@ mod tests {
         assert_eq!(seen[0].0, Bpm::of(120.0));
         assert_eq!(
             seen[1],
-            (Bpm::of(60.0), Beat(4.0)),
+            (Bpm::of(60.0), Beat::new(4.0)),
             "the step, on its frame"
         );
-        assert_eq!(seen[2].1, Beat(6.0), "96 000 frames at 60 BPM are 2 beats");
+        assert_eq!(
+            seen[2].1,
+            Beat::new(6.0),
+            "96 000 frames at 60 BPM are 2 beats"
+        );
     }
 }

@@ -153,7 +153,10 @@ fn encode(region: LoopRegion) -> Wire {
 /// `None` for bounds `LoopRange` refuses, which only a cell nobody wrote to
 /// (all zero) holds.
 fn decode([start, end, armed]: Wire) -> Option<LoopRegion> {
-    let bounds = LoopRange::new(Beat(f64::from_bits(start)), Beat(f64::from_bits(end)))?;
+    let bounds = LoopRange::new(
+        Beat::new(f64::from_bits(start)),
+        Beat::new(f64::from_bits(end)),
+    )?;
     Some(LoopRegion::new(bounds, armed != 0))
 }
 

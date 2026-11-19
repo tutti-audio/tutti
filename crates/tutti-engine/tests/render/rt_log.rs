@@ -40,7 +40,10 @@ impl Node for Logger {
 #[test]
 fn an_engine_renders_a_nodes_records_to_its_readers_from_the_block_after_the_filter_is_stored() {
     let transport = Transport::new(SampleRate::SR_48K);
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(64)),
+    ));
     ed.insert(NodeKey(1), "logger", Unforkable(Logger));
     ed.spec_mut()
         .topology

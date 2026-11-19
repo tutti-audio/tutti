@@ -306,7 +306,7 @@ impl MotionFsm {
     /// let transport = Transport::new(tutti_units::SampleRate::SR_48K);
     /// // Start rolling one second into the stream, stop at beat 16.
     /// transport.motion().schedule(At::Frame(Frame::new(48_000)), MotionEvent::Play)?;
-    /// transport.motion().schedule(At::Beat(Beat(16.0)), MotionEvent::stop())?;
+    /// transport.motion().schedule(At::Beat(Beat::new(16.0)), MotionEvent::stop())?;
     /// assert_eq!(transport.motion().scheduled_outstanding(), 2);
     /// # Ok::<_, tutti_transport::TimedError<MotionEvent>>(())
     /// ```
@@ -686,7 +686,7 @@ mod tests {
         let _ = m.try_send(MotionEvent::Play);
         a.drain();
         for beat in [4.0, 8.0] {
-            let _ = m.try_send(MotionEvent::locate(Beat(beat)));
+            let _ = m.try_send(MotionEvent::locate(Beat::new(beat)));
             a.drain();
             assert_eq!(m.motion(), MotionState::DeclickToLocate);
             a.complete_declick();
@@ -716,7 +716,7 @@ mod tests {
         m.try_send(MotionEvent::Play).expect("room");
         a.drain();
         assert!(m.is_playing());
-        m.schedule(At::Beat(Beat(1000.0)), MotionEvent::Play)
+        m.schedule(At::Beat(Beat::new(1000.0)), MotionEvent::Play)
             .expect("room");
         m.try_send(MotionEvent::stop_unfaded()).expect("room");
         m.cancel_scheduled();
@@ -739,7 +739,7 @@ mod tests {
         a.drain();
         assert!(m.is_playing());
         for _ in 0..SCHEDULE_CAPACITY {
-            m.schedule(At::Beat(Beat(1000.0)), MotionEvent::Play)
+            m.schedule(At::Beat(Beat::new(1000.0)), MotionEvent::Play)
                 .expect("room");
         }
         for _ in 1..IMMEDIATE_RESERVE {
@@ -787,20 +787,24 @@ mod tests {
     #[test]
     fn locate_requests_a_seek_and_moves_the_beat() {
         let (m, mut a) = fsm();
-        let _ = m.try_send(MotionEvent::locate(Beat(8.0)));
+        let _ = m.try_send(MotionEvent::locate(Beat::new(8.0)));
         a.drain();
 
-        assert_eq!(m.seek.take(), Some(Beat(8.0)), "the clock must see a seek");
+        assert_eq!(
+            m.seek.take(),
+            Some(Beat::new(8.0)),
+            "the clock must see a seek"
+        );
         assert_eq!(m.settings.beat.load(Ordering::Acquire), 8.0);
     }
 
     #[test]
     fn locate_and_play_rolls_after_the_jump() {
         let (m, mut a) = fsm();
-        let _ = m.try_send(MotionEvent::play_from(Beat(4.0)));
+        let _ = m.try_send(MotionEvent::play_from(Beat::new(4.0)));
         a.drain();
 
-        assert_eq!(m.seek.take(), Some(Beat(4.0)));
+        assert_eq!(m.seek.take(), Some(Beat::new(4.0)));
         assert!(m.is_playing());
 
         // The assertion above passes even when the FSM is desynced from its
@@ -829,11 +833,11 @@ mod tests {
         a.drain();
         m.settings.set_beat(Beat::new(12.0));
 
-        let _ = m.try_send(MotionEvent::stop_then_locate(Beat(0.0)));
+        let _ = m.try_send(MotionEvent::stop_then_locate(Beat::new(0.0)));
         a.drain();
 
         assert_eq!(m.motion(), MotionState::DeclickToLocate);
-        assert_eq!(m.seek.take(), Some(Beat(0.0)), "the jump lands now");
+        assert_eq!(m.seek.take(), Some(Beat::new(0.0)), "the jump lands now");
         assert_eq!(m.settings.beat.load(Ordering::Acquire), 0.0);
         assert!(m.settings.is_paused(), "and the playhead holds there");
 
@@ -864,11 +868,11 @@ mod tests {
         let (m, mut a) = fsm();
         m.settings.set_beat(Beat::new(9.0));
 
-        let _ = m.try_send(MotionEvent::stop_then_locate(Beat(0.0)));
+        let _ = m.try_send(MotionEvent::stop_then_locate(Beat::new(0.0)));
         a.drain();
 
         assert!(m.motion() == MotionState::Stopped);
-        assert_eq!(m.seek.take(), Some(Beat(0.0)));
+        assert_eq!(m.seek.take(), Some(Beat::new(0.0)));
     }
 
     #[test]
@@ -888,12 +892,12 @@ mod tests {
     fn send_all_preserves_order() {
         let (m, mut a) = fsm();
         assert!(
-            m.try_send_all([MotionEvent::locate(Beat(16.0)), MotionEvent::Play])
+            m.try_send_all([MotionEvent::locate(Beat::new(16.0)), MotionEvent::Play])
                 .is_ok()
         );
         a.drain();
 
-        assert_eq!(m.seek.take(), Some(Beat(16.0)));
+        assert_eq!(m.seek.take(), Some(Beat::new(16.0)));
         assert!(m.is_playing());
     }
 

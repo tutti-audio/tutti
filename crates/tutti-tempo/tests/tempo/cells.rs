@@ -46,7 +46,7 @@ fn cells_seen(map: &TempoMap, grid: CellGrid, end: u64, blocks: &[u64]) -> BTree
 fn cells_do_not_depend_on_the_block_layout() {
     let map = mixed();
     let grid = CellGrid::of(128);
-    let end = map.view(R).frame_at_or_after(Beat(16.0)).get();
+    let end = map.view(R).frame_at_or_after(Beat::new(16.0)).get();
     let reference = cells_seen(&map, grid, end, &[grid.get()]);
     assert!(
         reference.len() > 1000,
@@ -113,7 +113,7 @@ fn cells_do_not_depend_on_the_block_layout() {
 #[test]
 fn cells_seat_on_the_map() {
     let map = mixed();
-    let end = map.view(R).frame_at_or_after(Beat(16.0)).get();
+    let end = map.view(R).frame_at_or_after(Beat::new(16.0)).get();
     let one_frame = 240.0 / 60.0 / R.get();
     for grid in [CellGrid::of(37), CellGrid::of(128), CellGrid::of(512)] {
         let cells = cells_seen(&map, grid, end, &[grid.get()]);
@@ -172,7 +172,7 @@ fn a_step_inside_a_grid_cell_cuts_it() {
         (Frame::new(480_000), Frame::new(480_256))
     );
     assert_eq!(after.tempo.get().to_bits(), 240.0f64.to_bits());
-    assert_eq!(after.beat, Beat(10.0), "the beat at the cut");
+    assert_eq!(after.beat, Beat::new(10.0), "the beat at the cut");
     assert_eq!(
         on_frame.view(R).next_change(Frame::new(479_000)),
         Some(Frame::new(480_000))
@@ -290,7 +290,7 @@ fn chord_error_stays_under_a_fraction_of_a_frame() {
     ];
     for (shape, a, b, db, grids) in cases {
         let map = TempoMap::new([pt(0.0, a, shape), pt(db, b, Transition::Step)]).unwrap();
-        let end = map.view(R).frame_at_or_after(Beat(db)).get();
+        let end = map.view(R).frame_at_or_after(Beat::new(db)).get();
         for (g, ceiling) in grids {
             let grid = CellGrid::of(g);
             let mut worst = 0.0f64;
@@ -299,7 +299,7 @@ fn chord_error_stays_under_a_fraction_of_a_frame() {
                 let want = map.view(R).beat_at_frame(Frame::new(f)).get();
                 let got = c.beat_at(Frame::new(f), R).get();
                 // Beat error to frames, at the local rate.
-                let rate = map.tempo_at(Beat(want)).get() / 60.0;
+                let rate = map.tempo_at(Beat::new(want)).get() / 60.0;
                 worst = worst.max((got - want).abs() / rate * R.get());
             }
             assert!(
@@ -418,7 +418,7 @@ fn cells_over_sub_frame_segments_stay_inside_the_map() {
             .collect();
         let map = TempoMap::new(pts).unwrap();
         let grid = CellGrid::of(1 + (rng.next() * 300.0) as u64);
-        let end = map.view(R).frame_at_or_after(Beat(beat)).get() + 500;
+        let end = map.view(R).frame_at_or_after(Beat::new(beat)).get() + 500;
         check(
             &map,
             R,

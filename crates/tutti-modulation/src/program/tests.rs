@@ -11,8 +11,8 @@ const SR: f64 = 48_000.0;
 
 fn at_beat(beat: f64) -> ProgramTime {
     ProgramTime {
-        beat: Beat(beat),
-        play: SamplePosition(0.0),
+        beat: Beat::new(beat),
+        play: SamplePosition::new(0.0),
         play_epoch: 1,
         rate: SampleRate::of(SR),
     }
@@ -20,8 +20,8 @@ fn at_beat(beat: f64) -> ProgramTime {
 
 fn at_play(play: f64, epoch: u32) -> ProgramTime {
     ProgramTime {
-        beat: Beat(0.0),
-        play: SamplePosition(play),
+        beat: Beat::new(0.0),
+        play: SamplePosition::new(play),
         play_epoch: epoch,
         rate: SampleRate::of(SR),
     }
@@ -48,14 +48,14 @@ fn layer(id: u64, clock: Clock, shape: LfoShape, amount: Amount) -> Layer {
 fn beats(per_cycle: f64) -> Clock {
     Clock::Beats {
         per_cycle: BeatsPerCycle::of(per_cycle),
-        phase: PhaseIncrement(0.0),
+        phase: PhaseIncrement::new(0.0),
     }
 }
 
 fn seconds(rate: f64) -> Clock {
     Clock::Seconds {
-        rate: Hz(rate),
-        phase: PhaseIncrement(0.0),
+        rate: Hz::new(rate),
+        phase: PhaseIncrement::new(0.0),
         anchor: None,
     }
 }
@@ -76,8 +76,8 @@ fn program(layers: Vec<Layer>) -> ControlProgram {
 /// A 500 at beat 0 → 0 at beat 4 trajectory.
 fn ramp() -> Arc<dyn Curve> {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(500.0)));
-    e.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(0.0)));
+    e.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(500.0)));
+    e.add_breakpoint(Breakpoint::new(Beat::new(4.0), Hz::new(0.0)));
     Arc::new(e)
 }
 
@@ -310,8 +310,8 @@ fn layers_sum_in_id_order_in_f64() {
 #[test]
 fn phase_survives_a_depth_edit() {
     let clock = Clock::Seconds {
-        rate: Hz(3.0),
-        phase: PhaseIncrement(0.125),
+        rate: Hz::new(3.0),
+        phase: PhaseIncrement::new(0.125),
         anchor: None,
     };
     let a = program(vec![layer(1, clock, LfoShape::Sine, amount(0.3))]);
@@ -337,11 +337,11 @@ fn a_rate_anchor_continues_the_phase() {
         epoch: 9,
         at: Frame::new(48_000),
         phase: 10.25,
-        prev_rate: Hz(2.0),
+        prev_rate: Hz::new(2.0),
     };
     let clock = Clock::Seconds {
-        rate: Hz(4.0),
-        phase: PhaseIncrement(0.0),
+        rate: Hz::new(4.0),
+        phase: PhaseIncrement::new(0.0),
         anchor: Some(anchor),
     };
     assert_eq!(clock.cycles(&at_play(48_000.0, 9)), Some(10.25));
@@ -355,16 +355,16 @@ fn a_rate_anchor_continues_the_phase() {
     let p = program(vec![layer(1, clock, LfoShape::Square, amount(1.0))]);
     assert_eq!(
         p.next_corner(&at_play(40_800.0, 9)).play,
-        Some(SamplePosition(42_000.0))
+        Some(SamplePosition::new(42_000.0))
     );
     assert_eq!(
         p.next_corner(&at_play(42_000.0, 9)).play,
-        Some(SamplePosition(48_000.0))
+        Some(SamplePosition::new(48_000.0))
     );
     // From the anchor: edge 10.5 at rate 4 is 3000 frames on.
     assert_eq!(
         p.next_corner(&at_play(48_000.0, 9)).play,
-        Some(SamplePosition(51_000.0))
+        Some(SamplePosition::new(51_000.0))
     );
 }
 
@@ -384,16 +384,22 @@ fn each_wave_has_its_corners() {
         curve: Law::PowerIn(Exponent::of(2.0)),
         ..lin
     };
-    assert_eq!(corner(LfoShape::Square, lin, 0.5), Some(Beat(2.0)));
-    assert_eq!(corner(LfoShape::Square, lin, 2.0), Some(Beat(4.0)));
-    assert_eq!(corner(LfoShape::Triangle, lin, 0.0), Some(Beat(1.0)));
-    assert_eq!(corner(LfoShape::Triangle, lin, 1.0), Some(Beat(3.0)));
-    assert_eq!(corner(LfoShape::Triangle, curved, 1.0), Some(Beat(2.0)));
-    assert_eq!(corner(LfoShape::Sawtooth, lin, 1.0), Some(Beat(4.0)));
-    assert_eq!(corner(LfoShape::Sawtooth, curved, 1.0), Some(Beat(2.0)));
-    assert_eq!(corner(LfoShape::Random, lin, 5.0), Some(Beat(8.0)));
+    assert_eq!(corner(LfoShape::Square, lin, 0.5), Some(Beat::new(2.0)));
+    assert_eq!(corner(LfoShape::Square, lin, 2.0), Some(Beat::new(4.0)));
+    assert_eq!(corner(LfoShape::Triangle, lin, 0.0), Some(Beat::new(1.0)));
+    assert_eq!(corner(LfoShape::Triangle, lin, 1.0), Some(Beat::new(3.0)));
+    assert_eq!(
+        corner(LfoShape::Triangle, curved, 1.0),
+        Some(Beat::new(2.0))
+    );
+    assert_eq!(corner(LfoShape::Sawtooth, lin, 1.0), Some(Beat::new(4.0)));
+    assert_eq!(
+        corner(LfoShape::Sawtooth, curved, 1.0),
+        Some(Beat::new(2.0))
+    );
+    assert_eq!(corner(LfoShape::Random, lin, 5.0), Some(Beat::new(8.0)));
     assert_eq!(corner(LfoShape::Sine, lin, 1.0), None);
-    assert_eq!(corner(LfoShape::Sine, curved, 1.0), Some(Beat(2.0)));
+    assert_eq!(corner(LfoShape::Sine, curved, 1.0), Some(Beat::new(2.0)));
     let uni = Amount {
         polarity: Polarity::Unipolar,
         ..curved
@@ -423,7 +429,7 @@ fn every_non_linear_curve_kinks_a_bipolar_sine() {
         Law::PowerIn(Exponent::of(0.5)),
         Law::Exp(Curvature::of(3.0)),
     ] {
-        assert_eq!(corner(c), Some(Beat(2.0)), "{c:?}");
+        assert_eq!(corner(c), Some(Beat::new(2.0)), "{c:?}");
     }
 }
 
@@ -438,9 +444,9 @@ fn automation_and_seconds_corners_are_on_their_clocks() {
     )
     .expect("valid");
     let c = p.next_corner(&at_play(1_000.0, 1));
-    assert_eq!(c.beat, Some(Beat(4.0)));
+    assert_eq!(c.beat, Some(Beat::new(4.0)));
     // Edge 0.5 at 2 Hz is 12 000 frames.
-    assert_eq!(c.play, Some(SamplePosition(12_000.0)));
+    assert_eq!(c.play, Some(SamplePosition::new(12_000.0)));
 }
 
 /// The left limit differs from the value only at a jump: on a square's edge
@@ -468,8 +474,12 @@ fn the_left_limit_is_the_level_before_a_jump() {
     assert_eq!(before, r.value_at(None, Some(0.0), &at_beat(2.5), 1.0, &[]));
     assert_ne!(before, r.value_at(None, Some(0.0), &at_beat(3.0), 1.0, &[]));
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::with_law(Beat(0.0), Hz(100.0), Law::Hold));
-    e.add_breakpoint(Breakpoint::new(Beat(2.0), Hz(300.0)));
+    e.add_breakpoint(Breakpoint::with_law(
+        Beat::new(0.0),
+        Hz::new(100.0),
+        Law::Hold,
+    ));
+    e.add_breakpoint(Breakpoint::new(Beat::new(2.0), Hz::new(300.0)));
     let a = ControlProgram::from_curve(Arc::new(e));
     assert_eq!(a.value_at(None, None, &at_beat(2.0), 1.0, &[]), Some(300.0));
     assert_eq!(
@@ -510,7 +520,7 @@ fn depth_by_scales_the_offset_and_adds_its_corners() {
         Some(0.0)
     );
     let p = program(vec![scaled(beats(3.0))]);
-    assert_eq!(p.next_corner(&at_beat(0.5)).beat, Some(Beat(1.5)));
+    assert_eq!(p.next_corner(&at_beat(0.5)).beat, Some(Beat::new(1.5)));
 }
 
 /// A curve that reads one value and freezes to another: what a program
@@ -522,7 +532,7 @@ impl Curve for Thawed {
     }
     fn frozen(&self) -> Option<Arc<dyn Curve>> {
         let mut e = Trajectory::new();
-        e.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(2.0)));
+        e.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(2.0)));
         Some(Arc::new(e))
     }
 }
@@ -601,17 +611,17 @@ fn random_steps_cover_the_range() {
 fn a_drawn_wave_follows_its_points() {
     let points: Arc<[PeriodPoint]> = Arc::from(vec![
         PeriodPoint {
-            at: Phase(0.1),
+            at: Phase::new(0.1),
             value: 1.0,
             curve: Law::Linear,
         },
         PeriodPoint {
-            at: Phase(0.5),
+            at: Phase::new(0.5),
             value: -1.0,
             curve: Law::PowerIn(Exponent::of(2.0)),
         },
         PeriodPoint {
-            at: Phase(0.9),
+            at: Phase::new(0.9),
             value: 0.5,
             curve: Law::Linear,
         },
@@ -660,12 +670,12 @@ fn new_refuses_what_a_lane_cannot_hold() {
     let bad = Layer {
         wave: Waveform::Drawn(Arc::from(vec![
             PeriodPoint {
-                at: Phase(0.5),
+                at: Phase::new(0.5),
                 value: 0.0,
                 curve: Law::Linear,
             },
             PeriodPoint {
-                at: Phase(0.2),
+                at: Phase::new(0.2),
                 value: 0.0,
                 curve: Law::Linear,
             },
@@ -706,7 +716,7 @@ fn a_curved_bipolar_depth_by_kinks_at_its_zero_crossings() {
         curve: Law::PowerIn(Exponent::of(2.0)),
     };
     let p = program(vec![scaled(curved)]);
-    assert_eq!(p.next_corner(&at_beat(1.0)).beat, Some(Beat(2.0)));
+    assert_eq!(p.next_corner(&at_beat(1.0)).beat, Some(Beat::new(2.0)));
     assert_eq!(
         p.value_at(None, Some(0.0), &at_beat(1.0), 1.0, &[]),
         Some(0.5)
@@ -734,7 +744,7 @@ fn a_curved_bipolar_depth_by_kinks_at_its_zero_crossings() {
 fn the_unit_depth_by_is_half_raw_plus_one_in_f64() {
     for raw in [-1.0f32, -0.7, 0.0, 1e-7, 0.3, 0.9, 1.0] {
         let held = Waveform::Drawn(Arc::from(vec![PeriodPoint {
-            at: Phase(0.0),
+            at: Phase::new(0.0),
             value: raw,
             curve: Law::Linear,
         }]));
@@ -768,8 +778,8 @@ fn the_unit_depth_by_is_half_raw_plus_one_in_f64() {
 #[test]
 fn a_constant_wave_needs_no_clock() {
     let dead = Clock::Seconds {
-        rate: Hz(f64::INFINITY),
-        phase: PhaseIncrement(0.0),
+        rate: Hz::new(f64::INFINITY),
+        phase: PhaseIncrement::new(0.0),
         anchor: None,
     };
     let c = Layer {
@@ -815,8 +825,8 @@ fn new_refuses_a_nan() {
     let nan_depth_by = Layer {
         depth_by: Some(DepthBy {
             clock: Clock::Seconds {
-                rate: Hz(1.0),
-                phase: PhaseIncrement(f64::NAN),
+                rate: Hz::new(1.0),
+                phase: PhaseIncrement::new(f64::NAN),
                 anchor: None,
             },
             wave: Waveform::Const(0.0),
@@ -841,12 +851,12 @@ fn new_refuses_a_nan() {
 #[test]
 fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
     let mut e = Trajectory::new();
-    e.add_breakpoint(Breakpoint::new(Beat(0.0), Azimuth(170.0)));
-    e.add_breakpoint(Breakpoint::new(Beat(4.0), Azimuth(-170.0)));
+    e.add_breakpoint(Breakpoint::new(Beat::new(0.0), Azimuth::new(170.0)));
+    e.add_breakpoint(Breakpoint::new(Beat::new(4.0), Azimuth::new(-170.0)));
     let p = ControlProgram::from_curve(Arc::new(e));
     let az = UnitParam::Azimuth;
     for b in [0.5f64, 1.0, 1.9, 2.0, 2.1, 3.0, 3.5] {
-        let want = Azimuth(170.0 + 5.0 * b).wrap().get();
+        let want = Azimuth::new(170.0 + 5.0 * b).wrap().get();
         let got = p
             .value_at(Some(az), None, &at_beat(b), 360.0, &[])
             .expect("a value");
@@ -859,7 +869,7 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
         // On the circle: at the seam itself the left limit is 180, and 180 is
         // -180.
         assert!(
-            Azimuth(before - want).wrap().get().abs() < 1e-2,
+            Azimuth::new(before - want).wrap().get().abs() < 1e-2,
             "beat {b}: {before}"
         );
         // A height over the same curve is the straight line.
@@ -877,7 +887,7 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
     let q = program(vec![l]);
     assert_eq!(
         q.value_at(Some(az), Some(170.0), &at_beat(1.0), 360.0, &[]),
-        Some(Azimuth(170.0 + f64::from(0.1f32) * 360.0).wrap().get())
+        Some(Azimuth::new(170.0 + f64::from(0.1f32) * 360.0).wrap().get())
     );
     assert_eq!(
         q.value_at(

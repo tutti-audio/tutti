@@ -59,7 +59,10 @@ impl Node for BeatLog {
 }
 
 fn graph(log: &Log) -> (Editor, Executor) {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(512)),
+    ));
     ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(Arc::clone(log))));
     ed.spec_mut()
         .topology
@@ -74,7 +77,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
 fn steps(points: &[(f64, f64)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {
-            beat: Beat(beat),
+            beat: Beat::new(beat),
             tempo: Bpm::of(bpm),
             transition: Transition::Step,
         }))
@@ -116,7 +119,7 @@ fn live(map: &Arc<TempoMap>, start: f64, blocks: &[usize], total: usize) -> Seen
     transport.settings().set_tempo_map(Arc::clone(map));
     transport
         .motion()
-        .try_send(MotionEvent::play_from(Beat(start)))
+        .try_send(MotionEvent::play_from(Beat::new(start)))
         .expect("room");
     let mut done = 0;
     for &n in blocks.iter().cycle() {
@@ -239,7 +242,7 @@ fn an_offline_render_is_the_live_render_with_a_step_map() {
     let log = Log::default();
     let (_ed, mut exec) = graph(&log);
     let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(0.0),
+        start_beat: Beat::new(0.0),
         tempo_map: Arc::clone(&map),
         sample_rate: SampleRate::of(SR),
         loop_range: None,
@@ -284,10 +287,11 @@ fn a_seek_seats_at_the_exact_beat_in_its_step() {
         .expect("within the limits");
     transport.settings().set_tempo_map(steps(&points));
     let m = &transport.motion();
-    m.try_send(MotionEvent::play_from(Beat(0.0))).expect("room");
+    m.try_send(MotionEvent::play_from(Beat::new(0.0)))
+        .expect("room");
     render(&engine, 1_000);
     let locate = |beat: f64| MotionEvent::Locate {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         fade: FadeOut::Immediate,
         then: Then::Keep,
     };
@@ -338,7 +342,7 @@ fn a_loop_wrap_takes_the_tempo_where_it_lands() {
         .expect("room");
     transport
         .motion()
-        .try_send(MotionEvent::play_from(Beat(3.5)))
+        .try_send(MotionEvent::play_from(Beat::new(3.5)))
         .expect("room");
     let total = 150_000;
     let mut done = 0;
