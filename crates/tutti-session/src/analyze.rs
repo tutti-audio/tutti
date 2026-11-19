@@ -227,7 +227,7 @@ impl<'w, S: Float> Reader<'w, S> {
         match self {
             Self::Wave { wave, at } => {
                 let wave: &'w Wave<S> = wave;
-                let frames = CHUNK_FRAMES.min(Samples::new(wave.len().get() - at.get()));
+                let frames = CHUNK_FRAMES.min(wave.len().remaining_after(*at));
                 let span = at.get()..at.get() + frames.get();
                 chunk.hold_planes(
                     (0..wave.channels()).map(|c| &wave.channel(c).samples()[span.clone()]),

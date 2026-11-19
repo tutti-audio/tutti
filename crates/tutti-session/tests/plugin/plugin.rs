@@ -191,7 +191,7 @@ fn wired_probe(s: &mut Session) -> (NodeKey, Samples) {
 fn an_export_announces_offline_before_its_first_block_and_realtime_after() {
     let mut s = session(&[]);
     let (node, base) = wired_probe(&mut s);
-    let offline = Samples::new(base.get() + OFFLINE_EXTRA);
+    let offline = base + Samples::new(OFFLINE_EXTRA);
 
     let job = s.bounce_start(request()).expect("the export starts");
     assert_eq!(s.render_mode(), RenderMode::Offline);
@@ -215,7 +215,7 @@ fn an_export_announces_offline_before_its_first_block_and_realtime_after() {
 fn a_dropped_export_job_restores_realtime_on_the_next_update() {
     let mut s = session(&[]);
     let (node, base) = wired_probe(&mut s);
-    let offline = Samples::new(base.get() + OFFLINE_EXTRA);
+    let offline = base + Samples::new(OFFLINE_EXTRA);
 
     // The job, dropped unrun (a cancelled task).
     let job = s.bounce_start(request()).expect("starts");
@@ -264,7 +264,7 @@ fn a_plugin_added_mid_export_is_told_offline() {
     await_latency(
         &s,
         late,
-        Samples::new(base.get() + OFFLINE_EXTRA),
+        base + Samples::new(OFFLINE_EXTRA),
         "a plugin added mid-export, after its first update",
     );
 
@@ -666,7 +666,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
     assert_eq!(*latency_before, base);
     assert_eq!(
         *latency_after,
-        Samples::new(base.get() + EXTRA),
+        base + Samples::new(EXTRA),
         "the replacement's latency"
     );
     assert!(s.graph_ref().contains(node));

@@ -52,7 +52,7 @@ fn multiband(s: &mut DetachedSession) -> tutti_session::Key<MultibandCompressorN
 }
 
 fn plus_one(h: &Hz) -> Hz {
-    Hz::new(h.get() + 1.0)
+    *h + Hz::new(1.0)
 }
 
 /// **A batch runs its `modify`s in argument order, each over the value the call has built
@@ -192,7 +192,7 @@ fn a_value_call_inside_a_modify_is_reentrant() {
                 .filter(|k| **k == ValueErrorKind::Reentrant)
                 .count(),
         );
-        Hz::new(h.get() + 1.0)
+        *h + Hz::new(1.0)
     };
     s.set(lp.cutoff().modify(inside)).unwrap();
     assert_eq!(seen.get(), 4);
@@ -285,8 +285,7 @@ fn a_seconds_param_keeps_its_full_width() {
     assert_eq!(s.get(attack).unwrap(), Seconds::new(wide));
     s.knobs().set(attack.to(Seconds::new(wide + 1e-9))).unwrap();
     assert_eq!(s.get(attack).unwrap(), Seconds::new(wide + 1e-9));
-    s.set(attack.modify(|a| Seconds::new(a.get() + 1e-9)))
-        .unwrap();
+    s.set(attack.modify(|a| *a + Seconds::new(1e-9))).unwrap();
     assert_eq!(s.get(attack).unwrap(), Seconds::new(wide + 2e-9));
 }
 

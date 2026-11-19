@@ -1577,7 +1577,7 @@ fn open_stem_taps<F: Float>(
         .keys()
         .next_back()
         .map_or(1, |id| id.get() + 1);
-    let capacity = Samples::new(2 * GRAPH_MAX_BLOCK.get());
+    let capacity = GRAPH_MAX_BLOCK.samples() * 2;
     stems
         .iter()
         .map(|stem| {
@@ -1699,7 +1699,7 @@ fn span(
             if !a.get().is_finite() || !b.get().is_finite() || a.get() < 0.0 || b.get() < 0.0 {
                 return Err(BounceConfigError::InvalidRange);
             }
-            let long = Seconds::new((b.get() - a.get()).max(0.0)).to_samples(rate);
+            let long = (b - a).max(Seconds::new(0.0)).to_samples(rate);
             (map.beat_at_seconds(a), long.get() as u64)
         }
         Range::Frames(a, b) => (

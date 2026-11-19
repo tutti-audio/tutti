@@ -155,11 +155,7 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
     );
     assert_eq!(s.sample_rate(), SampleRate::SR_96K);
     let at96 = in_step(&s, "96 kHz, before the first block");
-    assert_eq!(
-        at96,
-        Samples::new(2 * at48.get()),
-        "the lookahead is a time"
-    );
+    assert_eq!(at96, at48 * 2, "the lookahead is a time");
 
     for _ in 0..4 {
         new.render_block(Samples::new(960)).expect("open");

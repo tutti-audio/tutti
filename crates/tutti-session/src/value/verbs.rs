@@ -39,7 +39,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///     .graph()
     ///     .add(SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(500.0), Q::new(0.7)));
     /// session.set(filter.cutoff().to(Hz::new(800.0))).unwrap();
-    /// session.set(filter.cutoff().modify(|hz| Hz::new(hz.get() * 2.0))).unwrap();
+    /// session.set(filter.cutoff().modify(|hz| *hz * 2.0)).unwrap();
     /// assert_eq!(session.get(filter.cutoff()).unwrap(), Hz::new(1_600.0));
     /// ```
     pub fn set(&self, assign: impl IntoAssign<K>) -> Result<(), ValueError<K>> {

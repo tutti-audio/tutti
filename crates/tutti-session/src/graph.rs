@@ -4034,7 +4034,7 @@ mod tail_tests {
             };
             assert_eq!(tail_after(tail_limit), Tail::Finite(tail_limit), "{rate:?}");
             assert_eq!(
-                tail_after(Samples::new(tail_limit.get() + 1)),
+                tail_after(tail_limit + Samples::new(1)),
                 Tail::Unbounded,
                 "{rate:?}"
             );
@@ -4060,7 +4060,7 @@ mod tail_tests {
             };
             assert_eq!(latency_after(latency_limit), latency_limit, "{rate:?}");
             assert_eq!(
-                latency_after(Samples::new(latency_limit.get() + 1)),
+                latency_after(latency_limit + Samples::new(1)),
                 latency_limit,
                 "{rate:?}"
             );
@@ -4090,7 +4090,7 @@ mod tail_tests {
         assert!(!g.is_edited());
 
         let limit = tutti_graph::MAX_NODE_TAIL.to_samples_ceil(g.editor.prepare().sample_rate());
-        let past = Tail::Finite(Samples::new(limit.get() + 1));
+        let past = Tail::Finite(limit + Samples::new(1));
         assert!(g.refresh_node_tail(node, past));
         assert_eq!(
             g.node_tail(node),
