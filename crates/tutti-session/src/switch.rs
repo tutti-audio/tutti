@@ -297,7 +297,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
             |spec, stopped| self.rerate(spec, stopped, None, None),
         );
         if restored.is_err() {
-            host.settle(&self.graph.prepared());
+            host.sync_to_graph(&self.graph.prepared());
         }
         self.reports
             .faults_restarted(host.stream().faults().count());

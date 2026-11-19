@@ -10596,7 +10596,7 @@ updated; un-parking ports it.
   editor's return types and errors. The **heard tap is not a facet**: its
   writer is in the engine's output buffer, after the declick fader, which the
   graph does not own, so it stays `Session::open_heard_tap`. A busy audio
-  thread is the outcome `HeardOpen::Retry` there, not a `HeardTapError` (which
+  thread is the outcome `OutputTapOpen::Retry` there, not a `HeardTapError` (which
   keeps the refusals for good: `Detached`, `Busy`, `NotOpen`).
 - **Plumbing.** `take_audio_side`, `AudioSide` (`tick`, `render`,
   `set_transport`) and `Graph::testing()` (`prepared`, `is_repreparing`,

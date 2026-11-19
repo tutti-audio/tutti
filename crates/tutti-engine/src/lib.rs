@@ -26,7 +26,7 @@
 //!   each block and writes it, because it is not audio.
 //! - **Taps.** Copying audio out of the graph is `tutti-graph`'s (`Editor::open_tap`,
 //!   `TapReader`), an op in the compiled plan, before the declick fader. The engine
-//!   writes the other kind itself: `Engine::heard_taps()` opens a tap on its
+//!   writes the other kind itself: `Engine::output_taps()` opens a tap on its
 //!   device-width output after the fader (what is heard), read through the same
 //!   `TapReader`.
 //! - **MIDI.** `Engine` is MIDI-free; MIDI travels on the graph's event ports
@@ -142,7 +142,7 @@ pub use faults::{
     BackendErrorKind, Lagging, RT_TEXT_BYTES, STALL_GRACE, StreamFault, StreamFaultKind,
     StreamFaults,
 };
-pub use hearing::{HeardOpen, HeardTapError, HeardTaps};
+pub use hearing::{OutputTapError, OutputTapOpen, OutputTaps};
 pub use latency::StreamLatency;
 pub use manual::{ManualRunning, ManualStream, ManualStreamDriver};
 pub use output::{MAX_PENDING_ROOTS, OutputControl, OutputPlacement};
