@@ -8,9 +8,9 @@
 
 use crate::common::{MF, Seen, Tap, note, offline};
 use std::sync::Arc;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_midi_protocol::channel_voice;
-use tutti_types::ChannelLayout;
 use tutti_ump::Voice2;
 use tutti_units::{Beat, BeatDuration};
 

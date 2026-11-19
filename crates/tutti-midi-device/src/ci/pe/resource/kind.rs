@@ -1,6 +1,8 @@
 //! The names of Resources: the standard ones, the manufacturer-specific ones,
 //! and what each standard one declares by default.
 
+use std::fmt;
+
 use super::super::limits::ResourceName;
 
 /// What a ResourceList entry declares for a Resource when it names nothing
@@ -150,6 +152,12 @@ const STANDARD: [(PeResource, &str); 17] = [
     (PeResource::StateList, "StateList"),
     (PeResource::State, "State"),
 ];
+
+impl fmt::Display for PeResource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 impl PeResource {
     /// The Resource a name on the wire stands for.

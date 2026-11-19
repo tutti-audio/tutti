@@ -163,7 +163,7 @@ fn drive_blocks_in(
     let rate = SampleRate::of(hz);
     Node::prepare(
         unit,
-        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(max)))
+        &Prepare::new(rate, tutti_buffers::MaxBlock::of(tutti_units::Samples(max)))
             .with_render_mode(mode),
     );
     let silence = vec![0.0f32; frames];

@@ -1246,7 +1246,7 @@ mod tests {
     #[test]
     fn a_config_constructor_must_take_a_width_first() {
         let ok = "impl AConfig { pub fn new(l: ChannelLayout, r: u8) -> Self { todo!() } }\n\
-                  impl BConfig { pub fn new(t: tutti_types::BusTopology) -> Self { todo!() } }\n\
+                  impl BConfig { pub fn new(t: tutti_buffers::BusTopology) -> Self { todo!() } }\n\
                   impl CConfig { pub fn new(l: impl Into<ChannelLayout>) -> Self { todo!() } }\n\
                   impl DConfig { pub fn new<L: Into<BusTopology>>(l: L) -> Self { todo!() } }\n\
                   impl EConfig { pub fn new<L>(l: L) -> Self where L: Into<ChannelLayout> { todo!() } }\n\

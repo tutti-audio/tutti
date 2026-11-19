@@ -570,6 +570,27 @@ fn a_controller_is_listed_twice_only_for_transmit_and_recognize() {
     let twice = r#"[{"title":"A","ctrlType":"cc","channel":1,"ctrlIndex":[2]},
         {"title":"B","ctrlType":"cc","channel":1,"ctrlIndex":[2]}]"#;
     assert!(decode(&PeResource::AllCtrlList, twice).is_err());
+    // The fault is the list's, and the repeat names its controller and Channel.
+    let error = fails(PeResource::AllCtrlList, twice);
+    assert_eq!(error.place, Place::of("AllCtrlList"));
+    assert_eq!(error.place.at_property(), None);
+    let PeData::AllCtrlList(pair_list) = round_trips(PeResource::AllCtrlList, pair) else {
+        panic!("not AllCtrlList");
+    };
+    let first = pair_list.entries()[0].clone();
+    let repeated = PeAllCtrlList::try_from(vec![first.clone(), first.clone()]).unwrap_err();
+    assert_eq!(
+        repeated,
+        ListedTwice {
+            controller: first.ctrl.controller,
+            channel: Some(first.channel),
+        }
+    );
+    assert!(
+        repeated
+            .to_string()
+            .contains("of Channel 1 is listed twice")
+    );
     // Two entries that both describe what is sent, or both what is recognized.
     let entry = |extra: &str| {
         format!(r#"{{"title":"T","ctrlType":"cc","channel":1,"ctrlIndex":[2],{extra}}}"#)
@@ -923,12 +944,12 @@ fn columns_name_a_property_or_a_link() {
 fn a_target_has_a_res_id_when_the_resource_has_entries() {
     assert!(matches!(
         ResourceTarget::try_from(PeResource::ProgramList),
-        Err(RequestRefused::ResIdRequired(_))
+        Err(RequestRefused::ResIdRequired(PeResource::ProgramList))
     ));
     assert!(ResourceTarget::entry(PeResource::ProgramList, id("general")).is_ok());
     assert!(matches!(
         ResourceTarget::entry(PeResource::LocalOn, id("x")),
-        Err(RequestRefused::ResIdUnused(_))
+        Err(RequestRefused::ResIdUnused(PeResource::LocalOn))
     ));
     assert!(ResourceTarget::try_from(PeResource::LocalOn).is_ok());
     // A manufacturer Resource is either, as its entry says.
@@ -988,10 +1009,13 @@ fn a_page_of_a_non_list_resource_is_refused_before_the_resource_list_is_known() 
 fn a_set_carries_data_of_its_resource() {
     let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
     assert!(ResourceSet::full(target.clone(), PeData::LocalOn(PeLocalOn(true))).is_ok());
-    assert!(matches!(
-        ResourceSet::full(target, PeData::ExternalSync(PeExternalSync(true))),
-        Err(RequestRefused::DataOfAnotherResource { .. })
-    ));
+    assert_eq!(
+        ResourceSet::full(target, PeData::ExternalSync(PeExternalSync(true))).unwrap_err(),
+        RequestRefused::DataOfAnotherResource {
+            data: PeResource::ExternalSync,
+            target: PeResource::LocalOn,
+        }
+    );
 }
 
 fn entry_of(resource: PeResource) -> ResourceEntry {

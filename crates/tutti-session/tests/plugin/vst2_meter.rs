@@ -6,9 +6,9 @@
 //!
 
 use crate::pooled::{LoadPlugin, Spec};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_session::Root;
-use tutti_types::ChannelLayout;
 
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin::catalog::PluginRef;

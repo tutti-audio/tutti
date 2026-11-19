@@ -7,8 +7,8 @@
 //! these ([`Glide`]), and renders each speaker's channel with
 //! [`VbapGains::render_channel`].
 
+use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, Fold, Mono, MonoMut};
-use tutti_types::MAX_CHANNELS;
 use tutti_units::{ArcDegrees, Azimuth, Elevation, Gain, Spread, StereoWidth};
 
 use crate::design::along;

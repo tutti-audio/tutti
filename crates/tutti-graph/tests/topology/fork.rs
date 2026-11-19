@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use common::{Kind, TestNode, bits, prepare};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventOut, Fade, FadeLaw, ForkBuild, ForkByClone, ForkCause,
@@ -16,7 +17,7 @@ use tutti_graph::{
     Renderer, Shape, Status, Unforkable, param_parts,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, Param};
+use tutti_types::Param;
 use tutti_units::{Amplitude, Samples, Tail, UnitParam};
 
 /// Output `c` is `base + c`, so which port feeds a channel reads straight off

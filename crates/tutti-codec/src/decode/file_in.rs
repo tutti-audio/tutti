@@ -34,10 +34,10 @@ use symphonia::core::codecs::audio::well_known::CODEC_ID_FLAC;
 use symphonia::core::errors::{Error, SeekErrorKind};
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
 use symphonia::core::units::Timestamp;
+use tutti_buffers::{ChannelLayout, ChannelTopology, Placement};
 use tutti_buffers::{
     FiniteSource, Interleaved, InterleavedMut, Planes, Pull, Sample, Source, interleave,
 };
-use tutti_types::{ChannelLayout, ChannelTopology, Placement};
 use tutti_units::{SampleRate, Samples};
 
 use super::error::convert;

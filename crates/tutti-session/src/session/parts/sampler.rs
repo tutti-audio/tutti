@@ -1,0 +1,51 @@
+//! [`SamplerPart`] with the `sampler` feature: the disk streamer and the streams its opens
+//! landed.
+
+#![cfg_attr(
+    not(feature = "device"),
+    expect(dead_code, reason = "a device restart (feature `device`) is the user")
+)]
+
+use tutti_sampler::{DiskStreamer, DiskStreamerConfig, Running};
+use tutti_types::Mint;
+use tutti_units::SampleRate;
+
+use crate::SessionFloat;
+use crate::sampler::OpenedStreams;
+
+/// The disk streamer, the names of its opens, and what they landed.
+#[derive(Debug)]
+pub(crate) struct SamplerPart<F: SessionFloat> {
+    /// Streams the files the session's sampler voices play; `None` when the
+    /// clock has no stream.
+    pub(crate) streamer: Option<DiskStreamer<Running, F>>,
+    /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
+    pub(crate) opens: Mint,
+    /// What the opens landed, until the host takes it
+    /// ([`Session::take_stream`](crate::Session::take_stream)).
+    pub(crate) streams: OpenedStreams<F>,
+}
+
+impl<F: SessionFloat> SamplerPart<F> {
+    /// The part for a graph at `rate`, with a streamer when `streamer` is set.
+    pub(crate) fn new(streamer: bool, rate: SampleRate) -> crate::Result<Self> {
+        let streamer = if streamer {
+            Some(DiskStreamer::start(rate, DiskStreamerConfig::default())?)
+        } else {
+            None
+        };
+        Ok(Self {
+            streamer,
+            opens: Mint::new(),
+            streams: Default::default(),
+        })
+    }
+
+    /// Every open stream's ratio (file rate / session rate) is re-derived, so
+    /// it plays on at its pitch.
+    pub(crate) fn set_sample_rate(&self, rate: SampleRate) {
+        if let Some(streamer) = &self.streamer {
+            streamer.set_sample_rate(rate);
+        }
+    }
+}

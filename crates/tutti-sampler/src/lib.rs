@@ -50,7 +50,7 @@
 //! build the `Wave`, wrap it, put it in a graph and render.
 //!
 //! ```rust
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use std::sync::Arc;
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_graph::{Prepare, Solo};
@@ -94,7 +94,7 @@
 //!
 //! ## Channel ceiling
 //!
-//! `tutti_types::MAX_CHANNELS` is the widest frame a voice reads or emits, the
+//! `tutti_buffers::MAX_CHANNELS` is the widest frame a voice reads or emits, the
 //! same cap as a bus and the graph root: a voice wider than the root could
 //! render would be truncated downstream, so the sampler refuses it here instead
 //! (`VoicePool::with_channels` returns `PoolTooWide`).
@@ -142,17 +142,17 @@ pub use clip::Clip;
 mod error;
 pub use error::{Error, PlaceError, Result};
 
-/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) as a layout's count. The cast is
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) as a layout's count. The cast is
 /// checked at compile time: the build fails if the cap ever grows past what a
 /// layout holds.
 pub(crate) const MAX_SAMPLER_WIDTH: u16 = {
-    assert!(tutti_types::MAX_CHANNELS <= u16::MAX as usize);
-    tutti_types::MAX_CHANNELS as u16
+    assert!(tutti_buffers::MAX_CHANNELS <= u16::MAX as usize);
+    tutti_buffers::MAX_CHANNELS as u16
 };
 
 /// Reject the empty layout for anything that is a graph node.
 ///
-/// [`ChannelLayout`](tutti_types::ChannelLayout) can represent an empty bus
+/// [`ChannelLayout`](tutti_buffers::ChannelLayout) can represent an empty bus
 /// (`Multi(0)`) — deliberately, because a plugin port genuinely can be zero
 /// wide. A sampler node cannot: a node that reports zero outputs is a node
 /// nothing can be wired to. So the widths a node's `Shape` declares go
@@ -160,13 +160,13 @@ pub(crate) const MAX_SAMPLER_WIDTH: u16 = {
 ///
 /// This is the one place that clamp lives: the layout carries the declaration
 /// and this carries the node-arity invariant, so no call site has to re-remember
-/// the rule. The upper bound is *not* applied here — [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) is
+/// the rule. The upper bound is *not* applied here — [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) is
 /// a per-read stack ceiling, not a limit on what a node may declare, and only
 /// [`DiskVoice`] needs it.
 #[inline]
-pub(crate) fn nonempty(layout: tutti_types::ChannelLayout) -> tutti_types::ChannelLayout {
+pub(crate) fn nonempty(layout: tutti_buffers::ChannelLayout) -> tutti_buffers::ChannelLayout {
     if layout.count() == 0 {
-        tutti_types::ChannelLayout::MONO
+        tutti_buffers::ChannelLayout::MONO
     } else {
         layout
     }

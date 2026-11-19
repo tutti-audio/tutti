@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, EventKind, Harmony, IntoNode, Io, Node, NodeParts, Prepare, Shape};
 use tutti_graph::{ForkByClone, Status};
@@ -14,7 +15,6 @@ use tutti_midi_runtime::{
     ClipEvents, HarmonyChanges, HarmonyNode, MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
 use tutti_session::{Feeder, Session, SessionNode, ValueErrorKind};
-use tutti_types::ChannelLayout;
 use tutti_ump::NoteKeyEvent;
 use tutti_units::{Beat, BeatDuration};
 

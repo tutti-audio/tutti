@@ -1,7 +1,7 @@
 use super::*;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, prepared};
-use tutti_types::MaxBlock;
 use tutti_units::{Gain, UnitParam};
 
 use tutti_dsp::SpeakerLayout;

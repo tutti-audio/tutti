@@ -17,6 +17,7 @@ use std::sync::Arc;
 use support::{clap_probe, plugin_server};
 use tutti_export::Produced;
 
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::{ScopedEnv, midi};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
@@ -30,7 +31,6 @@ use tutti_session::{
     Range, Session, Stem,
 };
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::ChannelLayout;
 use tutti_ump::MidiChannel;
 use tutti_units::{Beat, Bpm, SampleRate, Seconds};
 

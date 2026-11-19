@@ -5,7 +5,7 @@
 //!   speakers; its params move it while it renders.
 //! - [`VbapError`] is what building a panner can fail with.
 //!
-//! A VBAP panner is parameterized by a [`Bed`](tutti_types::Bed): its output
+//! A VBAP panner is parameterized by a [`Bed`](tutti_buffers::Bed): its output
 //! width is the bed's and its speakers sit where the bed's one table puts them.
 //! The binaural renderer (`HrtfBinauralNode`) is parameterized by an HRIR
 //! dataset instead, always has two outputs and has its own error type.

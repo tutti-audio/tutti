@@ -32,8 +32,9 @@ use tutti_buffers::{Planes, PlanesMut};
 use tutti_sampler::VoiceWindow;
 
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::Wave;
 use tutti_engine::Engine;
@@ -46,7 +47,6 @@ use tutti_tempo::TempoMap;
 use tutti_transport::{
     MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

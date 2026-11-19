@@ -30,6 +30,7 @@ use tutti_ump::{
     StreamTextAssembler, Ump,
 };
 
+use crate::deadline::Retry;
 use crate::endpoint::{Endpoint, MAX_FUNCTION_BLOCKS, UMP_VERSION};
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
 
@@ -109,8 +110,7 @@ enum Step {
 pub struct Connection {
     wanted: StreamConfig,
     step: Step,
-    sent: Instant,
-    attempts: u8,
+    retry: Retry,
     endpoint: Endpoint,
     endpoint_name: StreamTextAssembler<98>,
     instance_id: StreamTextAssembler<42>,
@@ -142,8 +142,7 @@ impl Connection {
         let connection = Self {
             wanted,
             step: Step::Discover(Heard::empty()),
-            sent: now,
-            attempts: 1,
+            retry: Retry::first(now),
             endpoint: Endpoint::blank(),
             endpoint_name: StreamTextAssembler::new(),
             instance_id: StreamTextAssembler::new(),
@@ -178,7 +177,7 @@ impl Connection {
             Step::Blocks {
                 infos: Some(at), ..
             } => Some(at + NAME_GRACE),
-            _ => Some(self.sent + STEP_TIMEOUT),
+            _ => Some(self.retry.deadline(STEP_TIMEOUT)),
         }
     }
 
@@ -235,14 +234,11 @@ impl Connection {
                 Action::Wait
             };
         }
-        if matches!(self.step, Step::Done(_))
-            || now.saturating_duration_since(self.sent) < STEP_TIMEOUT
-        {
+        if matches!(self.step, Step::Done(_)) || !self.retry.due(now, STEP_TIMEOUT) {
             return Action::Wait;
         }
-        if self.attempts < MAX_ATTEMPTS {
-            self.attempts += 1;
-            self.sent = now;
+        if !self.retry.spent(MAX_ATTEMPTS) {
+            self.retry.resend(now);
             return Action::Send(self.packet_for_step());
         }
         match self.step {
@@ -419,8 +415,7 @@ impl Connection {
     }
 
     fn send_step(&mut self, now: Instant) -> Action {
-        self.sent = now;
-        self.attempts = 1;
+        self.retry = Retry::first(now);
         Action::Send(self.packet_for_step())
     }
 

@@ -13,7 +13,7 @@ use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_fixtures::main_thread;

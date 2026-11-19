@@ -20,14 +20,14 @@ use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 
 use std::time::{Duration, Instant};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use support::{clap_probe, plugin_server};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_plugin::catalog::PluginRef;
 use tutti_session::{InPort, NodeMode, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;

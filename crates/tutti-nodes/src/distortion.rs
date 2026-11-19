@@ -1,12 +1,12 @@
 //! The waveshaper [`DistortionNode`]: six curves ([`ShapeKind`]) at a drive.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MAX_CHANNELS, MaxBlock};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::{
     Antialiasing, COEFF_INTERVAL, Lerp, Oversampler, Oversampling, OversamplingFactor,
     OversamplingPlan, ShapeKind, WaveshaperBank, WaveshaperControls,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MAX_CHANNELS, MaxBlock};
 use tutti_units::{Drive, SampleRate, Samples, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

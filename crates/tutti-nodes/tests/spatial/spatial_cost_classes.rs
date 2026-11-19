@@ -3,9 +3,10 @@
 //! undeclared ones, and the render on a pool is bit for bit the serial one.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::plane_bits as bits;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::ParamNode;
 use tutti_graph::WorkerPool;
@@ -16,7 +17,6 @@ use tutti_graph::{
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::ChannelLayout;
 use tutti_units::{Azimuth, Beat, Bpm, Elevation, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

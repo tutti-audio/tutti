@@ -96,6 +96,7 @@ pub mod interfaces;
 pub mod midi;
 pub mod plugin;
 pub mod scratch;
+pub mod speaker;
 
 pub use primitive_enum::UnknownPrimitive;
 

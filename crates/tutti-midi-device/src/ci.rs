@@ -75,8 +75,8 @@ pub use drum_map::{
 pub use endpoint::{EndpointInfo, EndpointStatus};
 pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
 pub use initiator::{
-    Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable, Request,
-    RequestError,
+    EnabledMpeZones, Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator,
+    ProfileTable, Request, RequestError,
 };
 pub use pe::{
     ActionError, Arrival, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex, ChangeKind,
@@ -100,7 +100,7 @@ pub use pe::{
     PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeReply, PeRequest, PeRequestId,
     PeResource, PeResourceList, PeResponse, PeSet, PeSetScope, PeSettings, PeSignal, PeState,
     PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeStep, PeSubscribed, PeSubscription,
-    PeTerminator, PeText, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion, Priority,
+    PeTerminator, PeText, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion, Place, Priority,
     PropertyName, PublishError, RefusedAt, RequestRefused, ResIdUse, ResourceAction,
     ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure,
     ResourceGet, ResourceId, ResourceInitiator, ResourceName, ResourceResponder, ResourceSet,
@@ -244,6 +244,24 @@ impl CiDeviceId {
             Self::Channel(channel) => channel.get(),
             Self::Group => 0x7E,
             Self::FunctionBlock => 0x7F,
+        }
+    }
+}
+
+/// A Device ID that is no Channel: the whole Group or the whole Function Block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Whole {
+    /// The Group, not channelized (`0x7E`).
+    Group,
+    /// The Function Block, not channelized (`0x7F`).
+    FunctionBlock,
+}
+
+impl From<Whole> for CiDeviceId {
+    fn from(whole: Whole) -> Self {
+        match whole {
+            Whole::Group => Self::Group,
+            Whole::FunctionBlock => Self::FunctionBlock,
         }
     }
 }

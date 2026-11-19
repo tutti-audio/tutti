@@ -16,12 +16,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CommitError, Cx, Edge, EdgeGain, EdgeId, Editor, Executor, ForkByClone, ForkMode, ForkTarget,
     GraphInvalid, GraphSpec, InPort, Io, Node, NodeKey, Op, OutPort, Plan, Prepare, Renderer,
     Shape, Sink, Source, Status, Topology, TransportPosition, Unforkable, ValidGraph, compile,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::Amplitude;
 
 const BLOCK: usize = 64;

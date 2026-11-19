@@ -435,7 +435,8 @@ pub fn input<'a, F: Float>(
 /// ```
 /// use tutti_graph::{declare_params, Cx, Io, Node, Prepare, Shape, Status};
 /// use tutti_units::{Amplitude, Hz, Real, UnitParam};
-/// use tutti_types::{ChannelLayout, Param};
+/// use tutti_types::Param;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// struct Tone {
 ///     level: Param<Amplitude>,

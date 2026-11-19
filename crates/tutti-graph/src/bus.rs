@@ -7,7 +7,7 @@
 //! about a port changes: a bus is what a fold between two declared layouts
 //! will be built from, and nothing the compiler or the executor reads yet.
 
-use tutti_types::{BusTopology, ChannelLayout};
+use tutti_buffers::{BusTopology, ChannelLayout};
 
 /// Most buses declared per side of one node: a main, a sidechain and two aux.
 ///
@@ -160,12 +160,12 @@ impl Bus {
 /// [`width`](Self::width) is at most the side's channel count. Equal to it for
 /// a node whose every channel is in a bus (every node but a plugin with more
 /// than [`MAX_BUSES`] buses, or a bus wider than
-/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)): the ports past the
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)): the ports past the
 /// buses are reached by port, not by bus.
 ///
 /// ```
 /// use tutti_graph::{Bus, BusRole, Buses};
-/// use tutti_types::{BusTopology, ChannelLayout, Speaker};
+/// use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
 ///
 /// let stereo = BusTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
 /// let key = BusTopology::unassigned(ChannelLayout::MONO).unwrap();
@@ -199,19 +199,19 @@ impl Buses {
     }
 
     /// One [`Main`](BusRole::Main) bus of `width` channels that name no
-    /// speaker ([`Unassigned`](tutti_types::Speaker::Unassigned)): unplaced, said
+    /// speaker ([`Unassigned`](tutti_buffers::Speaker::Unassigned)): unplaced, said
     /// so. [`NONE`](Self::NONE) for a width of 0.
     ///
     /// # Panics
     ///
-    /// Past [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) (in a `const`
+    /// Past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) (in a `const`
     /// context, at compile time): a wider side is
     /// [`Shape::through_unassigned`](crate::Shape::through_unassigned) and its
     /// kin, or several buses.
     #[must_use]
     pub const fn unassigned(width: ChannelLayout) -> Self {
         assert!(
-            width.count() as usize <= tutti_types::MAX_CHANNELS,
+            width.count() as usize <= tutti_buffers::MAX_CHANNELS,
             "an unassigned bus wider than a bus holds"
         );
         Self::unplaced(width)

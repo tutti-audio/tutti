@@ -1,9 +1,9 @@
 //! [`Mono`] and [`MonoMut`]: one channel's run of samples.
 
+use crate::ChannelLayout;
 use crate::{Sample, bounds};
 use core::fmt;
 use core::ops::Range;
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// A borrowed run of one channel's samples.

@@ -68,6 +68,21 @@
 //! process ends (the PID the host passes in `TUTTI_PLUGIN_HOST_PID`) ends the
 //! server wherever it is blocked.
 //!
+//! ## Logs and the exit status
+//!
+//! The binary logs to standard error, at `info` unless `RUST_LOG` says otherwise.
+//! It exits with status 0 when its session ended and every plugin was destroyed,
+//! [`EXIT_PLUGIN_LEAKED`] when a plugin had to be leaked (its render thread never
+//! returned the processor), and 1 on an error.
+//!
+//! ## Isolation
+//!
+//! Hosting a plugin in this process gives crash and hang isolation: a plugin
+//! that crashes or hangs takes down this process, not the host's. It is **not a
+//! security boundary**: the process runs as the host's user, so a hostile plugin
+//! can do what that user can do. The host's side of this
+//! (`BridgeConfig::protect_host_memory`) is documented in `tutti-plugin-ipc`.
+//!
 //! ## Features
 //!
 //! | Feature | Enables |
@@ -95,6 +110,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod audio_pipeline;
+mod leak;
 mod main_loop;
 mod render;
 // With no format served the table is an uninhabited enum and nothing above it
@@ -106,7 +122,7 @@ mod session;
 mod ties;
 mod transport;
 
-pub use server::PluginServer;
+pub use server::{EXIT_PLUGIN_LEAKED, Ended, PluginServer};
 
 // Test-only global allocator for the audio-pipeline RT-safety regression
 // test (`audio_pipeline::tests::process_is_alloc_free`). Active only in the

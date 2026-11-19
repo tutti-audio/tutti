@@ -26,9 +26,9 @@ use std::f64::consts::TAU;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use tutti_buffers::{Bed, ChannelLayout};
 use tutti_buffers::{Interleaved, Mono};
 use tutti_measure::{LoudnessConfig, PitchHop, YinConfig, measure_loudness, yin, yin_track};
-use tutti_types::{Bed, ChannelLayout};
 use tutti_units::SampleRate;
 
 const SR: f64 = 48_000.0;

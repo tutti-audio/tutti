@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{Error, Normalize, Produced, Resample, TargetError};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
@@ -21,7 +22,6 @@ use tutti_session::{
     ExportClock, InPort, OutPort, PreparedGraph, Range, Root, Session, Stem, StemGain,
 };
 use tutti_session::{Bounced, BufferMaster, Master};
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -275,8 +275,9 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
     }
     let to_mono = Stem::new(wide.erase(), dir.path().join("mono.wav"), float_wav())
         .layout(ChannelLayout::MONO);
-    let wrong_width = Stem::new(wide.erase(), dir.path().join("two.wav"), float_wav())
-        .topology(tutti_types::ChannelTopology::assumed(ChannelLayout::STEREO));
+    let wrong_width = Stem::new(wide.erase(), dir.path().join("two.wav"), float_wav()).topology(
+        tutti_buffers::ChannelTopology::assumed(ChannelLayout::STEREO),
+    );
     for stem in [to_mono, wrong_width] {
         let b = bounce(0.01).stem_with(stem);
         match refused(&mut session, b) {

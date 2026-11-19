@@ -12,7 +12,7 @@
 
 #![cfg(feature = "clap")]
 
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use crate::clap_probe::Rig;
 use crate::param_probe::{knobs, load_param_probe};

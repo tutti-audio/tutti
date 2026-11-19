@@ -2541,7 +2541,6 @@ dependencies = [
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-shared-plugin",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2557,7 +2556,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tutti-fixtures",
- "tutti-types",
  "tutti-units",
 ]
 
@@ -2578,7 +2576,6 @@ dependencies = [
  "tutti-graph",
  "tutti-plugin-types",
  "tutti-rt",
- "tutti-types",
  "tutti-units",
 ]
 
@@ -2606,7 +2603,6 @@ dependencies = [
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "tutti-voicing",
@@ -2675,7 +2671,6 @@ dependencies = [
  "tutti-nodes",
  "tutti-rt",
  "tutti-transport",
- "tutti-types",
  "tutti-units",
 ]
 
@@ -2699,7 +2694,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-fixtures",
- "tutti-types",
  "tutti-units",
  "wide",
 ]
@@ -2720,7 +2714,6 @@ dependencies = [
  "tutti-rt",
  "tutti-tempo",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2762,6 +2755,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tutti-buffers",
  "tutti-graph",
  "tutti-midi-protocol",
  "tutti-plugin-types",
@@ -2837,7 +2831,6 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-music",
- "tutti-types",
  "tutti-units",
 ]
 
@@ -2895,6 +2888,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "tutti-alsa-ffi",
+ "tutti-buffers",
  "tutti-coremidi-ffi",
  "tutti-fixtures",
  "tutti-graph",
@@ -2903,7 +2897,6 @@ dependencies = [
  "tutti-midi-protocol",
  "tutti-midi-runtime",
  "tutti-rt",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "tutti-winmm-ffi",
@@ -3052,7 +3045,6 @@ dependencies = [
  "tutti-rt",
  "tutti-tempo",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "tutti-vst2-host",
@@ -3250,7 +3242,6 @@ dependencies = [
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
 ]
@@ -3293,7 +3284,6 @@ dependencies = [
  "thread-priority",
  "tutti-buffers",
  "tutti-fixtures",
- "tutti-types",
  "tutti-units",
  "windows",
 ]
@@ -3430,7 +3420,6 @@ dependencies = [
  "tutti-midi-runtime",
  "tutti-polysynth",
  "tutti-sf2",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "tutti-voicing",
@@ -3471,10 +3460,6 @@ name = "tutti-types"
 version = "0.0.1"
 dependencies = [
  "atomic_float",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tutti-fixtures",
  "tutti-units",
 ]
 
@@ -3521,7 +3506,6 @@ dependencies = [
  "tutti-polysynth",
  "tutti-sampler",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
 ]
@@ -3625,6 +3609,7 @@ dependencies = [
  "parking_lot",
  "thiserror 2.0.21",
  "tracing",
+ "tutti-buffers",
  "tutti-fixtures",
  "tutti-music",
  "tutti-plugin-ipc-ffi",
@@ -3658,7 +3643,6 @@ dependencies = [
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-shared-plugin",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "tutti-voicing",

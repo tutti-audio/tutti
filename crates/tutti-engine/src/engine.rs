@@ -118,6 +118,8 @@ use crate::stage::OutputStage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, FoldError, Interleaved, InterleavedMut, Planes};
 use tutti_metering::{LoadMeter, LoadRecorder};
 use tutti_rt::{AudioThreadCell, Reader, RtScope};
@@ -127,8 +129,6 @@ use tutti_transport::{
     AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionEvent, SCHEDULE_CAPACITY, Scheduled,
     TransportAudio, TransportCommand,
 };
-use tutti_types::ChannelLayout;
-use tutti_types::MAX_CHANNELS;
 use tutti_units::{At, Frame};
 use tutti_units::{SampleRate, Samples, Seconds};
 
@@ -1606,13 +1606,13 @@ impl<F: Float> GraphRender<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_buffers::Bed;
+    use tutti_buffers::ChannelTopology;
+    use tutti_buffers::MaxBlock;
+    use tutti_buffers::Placement;
     use tutti_graph::Prepare;
     use tutti_transport::Timeline;
     use tutti_transport::{MotionEvent, Transport};
-    use tutti_types::Bed;
-    use tutti_types::ChannelTopology;
-    use tutti_types::MaxBlock;
-    use tutti_types::Placement;
     use tutti_units::{Amplitude, Bpm};
 
     /// `GraphEngineError` is an `Error` a caller can box and move; the bound is
@@ -1717,7 +1717,7 @@ mod tests {
     /// applies it.
     #[test]
     fn a_block_refused_the_graph_is_silent_and_retries() {
-        use tutti_types::ChannelLayout;
+        use tutti_buffers::ChannelLayout;
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) =
             Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
@@ -1746,7 +1746,7 @@ mod tests {
     /// frames for a block the graph did not render.
     #[test]
     fn a_refused_block_is_silence_in_the_heard_tap() {
-        use tutti_types::ChannelLayout;
+        use tutti_buffers::ChannelLayout;
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) =
             Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
@@ -1782,7 +1782,7 @@ mod tests {
     /// left rolling can still be stopped.
     #[test]
     fn a_later_engine_resumes_the_motion_machine() {
-        use tutti_types::ChannelLayout;
+        use tutti_buffers::ChannelLayout;
         let transport = Transport::new(SampleRate::SR_48K);
         let mut buf = vec![0.0f32; 64 * 2];
         {
@@ -1826,7 +1826,7 @@ mod tests {
     /// `Play` then a `Stop` ends stopped.
     #[test]
     fn try_send_and_a_next_block_command_apply_in_send_order() {
-        use tutti_types::ChannelLayout;
+        use tutti_buffers::ChannelLayout;
         let run = |first_is_play: bool| {
             let transport = Transport::new(SampleRate::SR_48K);
             let (mut ed, exec) =
@@ -1869,9 +1869,9 @@ mod tests {
     /// Analytic figures: 120 BPM at 48 kHz is 1/24 000 beat a frame.
     #[test]
     fn a_locate_on_the_first_frame_is_taken_once_and_a_wrap_counted_once() {
+        use tutti_buffers::ChannelLayout;
         use tutti_music::LoopRange;
         use tutti_transport::LoopEdit;
-        use tutti_types::ChannelLayout;
         use tutti_units::Beat;
         let engine_for = |transport: &Transport| {
             let (mut ed, exec) = Editor::new(Prepare::new(
@@ -1977,7 +1977,7 @@ mod tests {
     /// zeroes it.
     #[test]
     fn a_block_refused_the_graph_counts_as_silenced() {
-        use tutti_types::ChannelLayout;
+        use tutti_buffers::ChannelLayout;
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) =
             Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
@@ -2005,7 +2005,7 @@ mod tests {
 
     impl tutti_graph::Node for Ramp {
         fn shape(&self) -> tutti_graph::Shape {
-            tutti_graph::Shape::source_unassigned(tutti_types::ChannelLayout::from_count(self.0))
+            tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::from_count(self.0))
                 .with_tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
@@ -2263,7 +2263,7 @@ mod tests {
     /// declaration is what is folded.
     #[test]
     fn a_declared_surround_root_folds_by_its_speakers() {
-        use tutti_types::Speaker::*;
+        use tutti_buffers::Speaker::*;
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) =
             Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
@@ -2594,7 +2594,7 @@ mod tests {
             "no routing: the identity by speaker"
         );
         control.set_routing(Routing {
-            monitor: Some(tutti_types::Bed::Stereo.topology()),
+            monitor: Some(tutti_buffers::Bed::Stereo.topology()),
             map: OutputMap::channels([2, 3]).unwrap(),
             ..Routing::default()
         });
@@ -2629,7 +2629,7 @@ mod tests {
         rewire(&mut ed, 6);
         let _ = first_frame(&engine, 2);
         engine.output_control().set_routing(Routing {
-            monitor: Some(tutti_types::Bed::Stereo.topology()),
+            monitor: Some(tutti_buffers::Bed::Stereo.topology()),
             levels: FoldLevels {
                 centre: Amplitude(0.5),
                 surround: Amplitude(0.25),
@@ -2762,7 +2762,7 @@ mod tests {
     /// channel, and taking the statement back is the identity again.
     #[test]
     fn a_stated_device_is_folded_into_by_its_speakers() {
-        use tutti_types::Speaker::*;
+        use tutti_buffers::Speaker::*;
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) =
             Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
@@ -3143,8 +3143,8 @@ mod tests {
         rewire(&mut ed, 2);
         let _ = first_frame(&engine, 2);
         let swapped = ChannelTopology::new([
-            tutti_types::Speaker::FrontRight,
-            tutti_types::Speaker::FrontLeft,
+            tutti_buffers::Speaker::FrontRight,
+            tutti_buffers::Speaker::FrontLeft,
         ])
         .unwrap();
         engine
@@ -3540,14 +3540,14 @@ mod tests {
             ),
             Err(tutti_graph::RootError::Fold(FoldError::Unplaced {
                 channel: 2,
-                speaker: tutti_types::Speaker::Unassigned
+                speaker: tutti_buffers::Speaker::Unassigned
             }))
         );
         let lfe2 = ChannelTopology::new([
-            tutti_types::Speaker::FrontLeft,
-            tutti_types::Speaker::FrontRight,
-            tutti_types::Speaker::Unknown(9),
-            tutti_types::Speaker::FrontCenter,
+            tutti_buffers::Speaker::FrontLeft,
+            tutti_buffers::Speaker::FrontRight,
+            tutti_buffers::Speaker::Unknown(9),
+            tutti_buffers::Speaker::FrontCenter,
         ])
         .unwrap();
         assert!(matches!(

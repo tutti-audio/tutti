@@ -14,7 +14,7 @@ use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
 use crate::nonempty;
 use crate::streamer::Stream;
 use crate::stretch;
-use tutti_types::MAX_CHANNELS;
+use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{Steering, SteeringCell, VoiceNodeHandle};
@@ -22,13 +22,14 @@ use super::disk_voice::DiskVoice;
 use super::disk_voice::VoiceHealth;
 use super::slot::{PlaybackSlot, stretch_wanted};
 use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, ParamSet, Prepare,
     Shape, Status,
 };
 use tutti_rt::{Reader, RingFloat};
 use tutti_transport::TempoReader;
-use tutti_types::{ChannelLayout, Param};
+use tutti_types::Param;
 use tutti_units::{Amplitude, SampleRate, Tail, UnitParam};
 
 /// One [`Voice`] as a graph node in its own right: zero inputs, `channels`
@@ -553,7 +554,7 @@ mod tests {
         ));
         let prepare = Prepare::new(
             SampleRate::SR_48K,
-            tutti_types::MaxBlock::of(tutti_units::Samples(64)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
         );
         let free = |play: Playback| {
             let voice = Voice {

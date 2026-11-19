@@ -237,9 +237,10 @@ fn session(name: &str) -> (Fixture, tutti_plugin_ipc::SlabWriter) {
         Fixture {
             session,
             side: Some(side),
-            audio: Some(SocketTransport::audio(Stream::from(OwnedFd::from(
-                server_end,
-            )))),
+            audio: Some(
+                SocketTransport::audio(Stream::from(OwnedFd::from(server_end)))
+                    .expect("the audio transport"),
+            ),
             host: Some(HostEnd { stream: host_end }),
         },
         creator,
@@ -269,7 +270,7 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
     );
     // As the server ends: the plugin goes home, then the render thread stops.
     fixture.session.drop_plugin(main);
-    drop(render.stop());
+    drop(render);
     // A script that ends ends in `recv`'s refusal; any other end is a failure.
     assert!(
         matches!(result, Err(BridgeError::Io(ref e)) if e.to_string() == "the script is over")
@@ -417,7 +418,7 @@ fn a_lost_plugin_ends_the_server_abnormally() {
         TICK,
     );
     fixture.session.drop_plugin(main);
-    drop(render.stop());
+    drop(render);
     assert!(
         matches!(
             result,
@@ -465,7 +466,7 @@ fn an_undecodable_audio_frame_ends_the_session() {
         TICK,
     );
     fixture.session.drop_plugin(main);
-    drop(render.stop());
+    drop(render);
     assert!(
         matches!(
             result,

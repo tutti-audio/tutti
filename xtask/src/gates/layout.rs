@@ -50,7 +50,7 @@ fn skipped(dir: &str) -> bool {
 /// Lowest first. A normal or build dependency must land in a strictly lower layer.
 pub(super) const LAYERS: &[&[&str]] = &[
     &["tutti-units", "tutti-plugin-ipc-ffi"],
-    &["tutti-types", "tutti-music", "tutti-ump"],
+    &["tutti-types", "tutti-music", "tutti-ump", "tutti-buffers"],
     &[
         "tutti-alsa-ffi",
         "tutti-coremidi-ffi",
@@ -58,7 +58,6 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-midi-protocol",
         "tutti-midi-device",
         "tutti-curve",
-        "tutti-buffers",
     ],
     &["tutti-rt"],
     &[
@@ -118,7 +117,7 @@ const ONLY: &[(&str, &[&str])] = &[
     // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
     // audio-shaped structures are generic over.
-    ("tutti-rt", &["tutti-types", "tutti-units", "tutti-buffers"]),
+    ("tutti-rt", &["tutti-units", "tutti-buffers"]),
     (
         "tutti-midi-network",
         &["tutti-ump", "tutti-midi-device", "tutti-units"],
@@ -187,7 +186,6 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-plugin-ipc",
             "tutti-plugin-ipc-ffi",
             "tutti-plugin-types",
-            "tutti-types",
             "tutti-units",
             "tutti-rt",
             "tutti-ump",
@@ -216,25 +214,16 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-au-host",
         ],
     ),
-    (
-        "tutti-dsp",
-        &["tutti-types", "tutti-units", "tutti-buffers"],
-    ),
+    ("tutti-dsp", &["tutti-units", "tutti-buffers"]),
     ("tutti-curve", &["tutti-units"]),
-    ("tutti-buffers", &["tutti-types", "tutti-units"]),
+    ("tutti-buffers", &["tutti-units"]),
     (
         "tutti-modulation",
         &["tutti-units", "tutti-music", "tutti-curve", "tutti-ump"],
     ),
     (
         "tutti-measure",
-        &[
-            "tutti-types",
-            "tutti-music",
-            "tutti-units",
-            "tutti-buffers",
-            "tutti-dsp",
-        ],
+        &["tutti-music", "tutti-units", "tutti-buffers", "tutti-dsp"],
     ),
     (
         "tutti-graph",
@@ -923,7 +912,7 @@ mod tests {
             "[dependencies]\ntutti-units = { path = \"x\" }\ntutti-ump = { path = \"x\" }\n",
         ));
         assert!(r.findings.iter().any(|l| l.contains(
-            "tutti-rt may depend on [\"tutti-buffers\", \"tutti-types\", \"tutti-units\"] only; it depends on {\"tutti-ump\"}"
+            "tutti-rt may depend on [\"tutti-buffers\", \"tutti-units\"] only; it depends on {\"tutti-ump\"}"
         )));
     }
 

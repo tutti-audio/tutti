@@ -8,7 +8,7 @@
 use crate::nonempty;
 use crate::streamer::StreamId;
 use crate::stretch;
-use tutti_types::MAX_CHANNELS;
+use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{
@@ -21,6 +21,7 @@ use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
@@ -28,7 +29,6 @@ use tutti_graph::{
 };
 use tutti_rt::{Overflow, RingFloat, RingReader, RingWriter, ring};
 use tutti_transport::TempoReader;
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Tail};
 
 // ---------------------------------------------------------------------------

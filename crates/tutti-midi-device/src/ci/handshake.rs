@@ -1,6 +1,8 @@
 //! [`Handshake`]: where an Initiator's opening inquiry stands.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use crate::deadline::Pending;
 
 /// The opening inquiry of an Initiator with one peer (Profile Inquiry, Process
 /// Inquiry Capabilities, Property Exchange Capabilities): not answered, waiting
@@ -17,7 +19,7 @@ pub(super) enum Handshake<K, A = ()> {
     /// The inquiry is out; the answer is not in.
     Asking {
         /// When the wait ends.
-        deadline: Instant,
+        wait: Pending,
         /// What the wait has collected.
         progress: A,
         /// The answer the peer gave before this inquiry, if it did.
@@ -29,14 +31,14 @@ pub(super) enum Handshake<K, A = ()> {
 
 impl<K, A> Handshake<K, A> {
     /// The inquiry goes out at `now` and waits `wait`.
-    pub(super) fn ask(&mut self, now: Instant, wait: std::time::Duration, progress: A) {
+    pub(super) fn ask(&mut self, now: Instant, wait: Duration, progress: A) {
         let previous = match std::mem::replace(self, Self::Unanswered) {
             Self::Answered(answer) => Some(answer),
             Self::Asking { previous, .. } => previous,
             Self::Unanswered => None,
         };
         *self = Self::Asking {
-            deadline: now + wait,
+            wait: Pending::after(now, wait),
             progress,
             previous,
         };
@@ -51,18 +53,18 @@ impl<K, A> Handshake<K, A> {
         }
     }
 
-    /// When the wait ends, while there is one.
-    pub(super) fn deadline(&self) -> Option<Instant> {
+    /// The wait, while there is one.
+    pub(super) fn wait(&self) -> Option<Pending> {
         match self {
-            Self::Asking { deadline, .. } => Some(*deadline),
+            Self::Asking { wait, .. } => Some(*wait),
             _ => None,
         }
     }
 
-    /// The wait's deadline, to move it.
-    pub(super) fn deadline_mut(&mut self) -> Option<&mut Instant> {
+    /// The wait, to move its deadline.
+    pub(super) fn wait_mut(&mut self) -> Option<&mut Pending> {
         match self {
-            Self::Asking { deadline, .. } => Some(deadline),
+            Self::Asking { wait, .. } => Some(wait),
             _ => None,
         }
     }
@@ -82,7 +84,7 @@ impl<K, A> Handshake<K, A> {
 
     /// The wait ends without an answer when `now` is at its deadline; whether it did.
     pub(super) fn expire(&mut self, now: Instant) -> bool {
-        if self.deadline().is_some_and(|at| now >= at) {
+        if matches!(self, Self::Asking { wait, .. } if wait.expired(now)) {
             *self = Self::Unanswered;
             true
         } else {

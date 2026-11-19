@@ -9,13 +9,13 @@
 //! added the same way, and, unlike the audio inlet, there is no rate to refuse
 //! and an export fork is accepted.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_graph::{EventCapacity, EventInletNode, EventTapReader, TapAlign, TapEvent};
 use tutti_session::{DetachedSession, Losses, OutPort, Root, Session, Stamp};
-use tutti_types::ChannelLayout;
 use tutti_ump::{MidiChannel, U7, Ump};
 use tutti_units::{Frame, SampleRate};
 

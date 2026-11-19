@@ -3,11 +3,11 @@
 //! `f_n = L (1 - a^n)` and `a = exp(-1 / (tau * rate))`; and its two amounts are the `GainDb`
 //! params at index 0 (attack) and 1 (sustain).
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Planes;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{TransientShaperConfig, TransientShaperNode};
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, SampleRate, Seconds, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;

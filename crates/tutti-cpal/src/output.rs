@@ -6,11 +6,11 @@
 
 use cpal::traits::DeviceTrait;
 use std::sync::Arc;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_engine::{
     AudioCallbackState, OutputSpec, OutputStream, StreamDriver, StreamFaults, StreamLatency,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 use crate::driver_seam::{CpalDriver, spec_from_supported};

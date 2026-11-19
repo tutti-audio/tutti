@@ -195,7 +195,7 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
     assert_eq!(Source::layout(&mic), ChannelLayout::STEREO);
     assert_eq!(
         mic.topology().positions().unwrap(),
-        [tutti_types::Speaker::Unassigned; 2]
+        [tutti_buffers::Speaker::Unassigned; 2]
     );
     assert_eq!(mic.device_inputs(), ChannelLayout::from(16u16));
     let mut out = [0.0f32; 8];
