@@ -201,12 +201,12 @@ fn median_filter_removes_a_lone_outlier() {
         voiced(440.0),
     ];
 
-    let smoothed = median_filter(&track, FrameCount(3));
+    let smoothed = median_filter(FrameCount(3), &track);
     assert_eq!(smoothed[2].frequency(), Hz::new(440.0), "outlier replaced");
 
     // A window of 1 or wider than the track is a no-op.
-    assert_eq!(median_filter(&track, FrameCount(1)), track);
-    assert_eq!(median_filter(&track, FrameCount(99)), track);
+    assert_eq!(median_filter(FrameCount(1), &track), track);
+    assert_eq!(median_filter(FrameCount(99), &track), track);
 }
 
 /// Accuracy across the range, not just at A440.
@@ -270,7 +270,7 @@ fn penalize_jumps_attenuates_implausible_leaps() {
     };
 
     let track = vec![voiced(440.0, 0.9), voiced(880.0, 0.9), voiced(440.0, 0.9)];
-    let smoothed = penalize_jumps(&track, Confidence::new(1.0));
+    let smoothed = penalize_jumps(Confidence::new(1.0), &track);
 
     // The octave leap loses confidence; the frames around it do not.
     assert!(smoothed[1].confidence() < track[1].confidence());
@@ -279,7 +279,7 @@ fn penalize_jumps_attenuates_implausible_leaps() {
     assert!(smoothed[1].is_voiced());
 
     // A zero penalty is the identity, and a steady track is untouched.
-    assert_eq!(penalize_jumps(&track, Confidence::NONE), track);
+    assert_eq!(penalize_jumps(Confidence::NONE, &track), track);
     let steady = vec![voiced(440.0, 0.9), voiced(445.0, 0.9)];
-    assert_eq!(penalize_jumps(&steady, Confidence::new(1.0)), steady);
+    assert_eq!(penalize_jumps(Confidence::new(1.0), &steady), steady);
 }

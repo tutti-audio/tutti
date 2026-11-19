@@ -31,16 +31,20 @@ ranged! {
     |raw| raw.get().is_finite()
 }
 
-/// A half-open span of samples, `start..end`.
-///
-/// Built only by [`SilenceMeter::finish`], so `start <= end` always holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A half-open span of samples, `start..end`, with `start <= end`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Region {
     start: Samples,
     end: Samples,
 }
 
 impl Region {
+    /// The span `start..end`, or `None` when `end` is before `start`.
+    #[must_use]
+    pub fn new(start: Samples, end: Samples) -> Option<Self> {
+        (start <= end).then_some(Self { start, end })
+    }
+
     /// The first sample in the region, in [`Samples`].
     #[inline]
     pub fn start(&self) -> Samples {
