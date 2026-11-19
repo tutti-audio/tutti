@@ -310,8 +310,6 @@ pub use tutti_ump::{MidiChannel, MidiGroup};
 #[cfg(feature = "midi-hardware")]
 pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
-#[cfg(feature = "sampler")]
-pub use value::WindowTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
     Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget, MeterTarget, Modify,
