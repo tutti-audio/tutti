@@ -15,7 +15,8 @@ use tutti_fixtures::midi::{
     m1_cc, m1_note_on, note_on, per_note_pitch_bend, program_change, registered,
 };
 use tutti_graph::EventCapacity;
-use tutti_midi_device::{BlockName, EndpointName, FunctionBlock};
+use tutti_midi_ci::{BlockName, EndpointName};
+use tutti_midi_device::FunctionBlock;
 use tutti_midi_hardware::{
     HardwareMidiInputs, VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec,
 };

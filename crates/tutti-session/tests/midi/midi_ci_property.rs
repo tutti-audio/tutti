@@ -5,14 +5,15 @@
 
 use std::time::{Duration, Instant};
 
-use tutti_midi_device::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
-use tutti_midi_device::{
-    CallError, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointId, JsonPointer,
+use tutti_midi_ci::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
+use tutti_midi_ci::{
+    CallError, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, JsonPointer,
     MaxSysexSize, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities, PeData, PeExternalSync,
     PeHeader, PeJson, PeLocalOn, PeReassemblyLimits, PeResource, PeStatus, PeSubscription,
-    PortDirection, RequestRefused, ResourceEntry, ResourceResponder, ResourceStore, ResourceTarget,
+    RequestRefused, ResourceEntry, ResourceResponder, ResourceStore, ResourceTarget,
     ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
 };
+use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::FakeCounters;
 use tutti_session::Peer as _;
 use tutti_session::{
@@ -50,7 +51,7 @@ enum Reply {
 struct PePeer {
     device: tutti_midi_device::Endpoint,
     assembler: tutti_ump::SysexAssembler<Box<[u8]>>,
-    muid: tutti_midi_device::Muid,
+    muid: tutti_midi_ci::Muid,
     responder: ResourceResponder,
     store: ResourceStore,
     reply: Reply,
@@ -68,10 +69,10 @@ impl PePeer {
             GroupSpan::new(1).unwrap(),
         )
         .midi_ci(2, 0)
-        .name(tutti_midi_device::BlockName::new("Main").unwrap())
+        .name(tutti_midi_ci::BlockName::new("Main").unwrap())
         .build()
         .unwrap();
-        let muid = tutti_midi_device::Muid::of(0x0012_3457);
+        let muid = tutti_midi_ci::Muid::of(0x0012_3457);
         let room = SysexAssembler::room_for(1024, 1, 16);
         Self {
             device: Endpoint::new(Supports::of(Capabilities {
@@ -571,7 +572,7 @@ fn calls_past_the_peers_simultaneous_requests_wait_for_room_and_all_land() {
 /// the rule it broke.
 #[test]
 fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
-    let table_6 = tutti_midi_device::PeJson::try_from(
+    let table_6 = tutti_midi_ci::PeJson::try_from(
         br#"{"version":"1.0","manufacturerId":[125,0,0],"manufacturer":"Educational Use",
         "familyId":[0,0],"family":"Test Range","modelId":[48,0],"model":"Workbench",
         "versionId":[0,0,1,0]}"#

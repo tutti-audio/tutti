@@ -1,6 +1,5 @@
-use tutti_midi_device::{
-    DeviceId, DeviceInfo, Learned, Match, PortDirection, ProductInstanceId, SavedDevice,
-};
+use tutti_midi_ci::ProductInstanceId;
+use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, PortDirection, SavedDevice};
 use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
 fn said() -> Learned {

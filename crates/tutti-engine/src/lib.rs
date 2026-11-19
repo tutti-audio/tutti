@@ -32,7 +32,7 @@
 //! - **MIDI.** `Engine` is MIDI-free; MIDI travels on the graph's event ports
 //!   (`tutti-graph`), and the MIDI nodes are `tutti-midi-runtime`'s.
 //! - **The device.** Opening a sound card's stream is `tutti-cpal`'s job; this
-//!   crate owns the block seam under it ([`StreamDriver`], [`OutputBlock`]), so a
+//!   crate owns the block interface under it ([`StreamDriver`], [`OutputBlock`]), so a
 //!   driver of any other clock calls the same block.
 //! - **The value vocabulary.** The unit newtypes are `tutti-units`'; the `Source`/`Sink` traits
 //!   are `tutti-buffers`'. Delay compensation (`latency_plan`,

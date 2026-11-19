@@ -32,7 +32,7 @@ use tutti_ump::{
 
 use crate::deadline::Retry;
 use crate::endpoint::{Endpoint, MAX_FUNCTION_BLOCKS, UMP_VERSION};
-use crate::name::{
+use tutti_midi_ci::{
     BLOCK_NAME_BYTES, BlockName, ENDPOINT_NAME_BYTES, EndpointName, INSTANCE_ID_BYTES,
     ProductInstanceId,
 };

@@ -5,7 +5,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 
 use super::{Sos, svf_form};
-use crate::{Glide, Lanes, Lerp, SvfCoefficients, svf_step};
+use crate::{Glide, Lerp, SimdLanes, SvfCoefficients, svf_step};
 
 /// The most sections a [`SosCoefficients`] holds: order 16 is eight.
 pub const MAX_SECTIONS: usize = 8;
@@ -13,12 +13,12 @@ pub const MAX_SECTIONS: usize = 8;
 /// The coefficients [`SosBank`] reads: one [`SvfCoefficients`] per section of a [`Sos`], in
 /// the arithmetic `F` it runs in. A blend is section by section.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SosCoefficients<F: Lanes> {
+pub struct SosCoefficients<F: SimdLanes> {
     sections: [SvfCoefficients<F>; MAX_SECTIONS],
     len: usize,
 }
 
-impl<F: Float + Lanes> SosCoefficients<F> {
+impl<F: Float + SimdLanes> SosCoefficients<F> {
     /// The section forms of `sos` (`svf_form`) narrowed once to `F`, or
     /// `None` for a cascade of more than [`MAX_SECTIONS`] sections.
     #[must_use]
@@ -49,7 +49,7 @@ impl<F: Float + Lanes> SosCoefficients<F> {
     };
 }
 
-impl<F: Float + Lanes> Lerp for SosCoefficients<F> {
+impl<F: Float + SimdLanes> Lerp for SosCoefficients<F> {
     /// Each section blended linearly; the sections past the shorter cascade are the longer's.
     #[inline]
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
@@ -71,7 +71,7 @@ pub struct SosBank<F> {
     state: Box<[[[F; 2]; MAX_SECTIONS]]>,
 }
 
-impl<F: Float + Lanes> SosBank<F> {
+impl<F: Float + SimdLanes> SosBank<F> {
     /// A silent bank `width` channels wide. Allocates: build it on the control side.
     #[must_use]
     pub fn new(width: ChannelLayout) -> Self {
@@ -126,7 +126,11 @@ impl<F: Float + Lanes> SosBank<F> {
 
 /// One frame `x` through the sections of `set`, over the channel's `state`.
 #[inline(always)]
-fn run<F: Float + Lanes>(set: &SosCoefficients<F>, state: &mut [[F; 2]; MAX_SECTIONS], x: F) -> F {
+fn run<F: Float + SimdLanes>(
+    set: &SosCoefficients<F>,
+    state: &mut [[F; 2]; MAX_SECTIONS],
+    x: F,
+) -> F {
     set.sections[..set.len]
         .iter()
         .zip(state.iter_mut())

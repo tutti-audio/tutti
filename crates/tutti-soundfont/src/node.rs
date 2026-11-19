@@ -7,7 +7,7 @@
 //! preset.
 
 use tutti_buffers::{ChannelLayout, Float};
-use tutti_dsp::Lanes;
+use tutti_dsp::SimdLanes;
 use tutti_graph::{
     Chase, ConstantMask, Cx, IntoNode, Io, Node, NodeParts, Prepare, Resolution, Shape,
     SilenceMask, Status,
@@ -16,7 +16,7 @@ use tutti_graph::{
 use crate::SoundFontUnit;
 use crate::player::{CHASE_MESSAGES, Plane};
 
-impl<F: Float + Lanes> Node<F> for SoundFontUnit<F> {
+impl<F: Float + SimdLanes> Node<F> for SoundFontUnit<F> {
     /// No audio in, five out (dry left and right, chorus send left and right,
     /// reverb send), one MIDI event input, placed to the 8-frame chunk the
     /// voices render in, and the tail of the longest release.
@@ -106,7 +106,7 @@ impl<F: Float + Lanes> Node<F> for SoundFontUnit<F> {
 /// The unit, inserted as a graph node: its fork is a graph node too, which
 /// follows its render's rate (see the `fork` module docs). No controls: the
 /// unit has no param a host sets while it plays (its preset is MIDI's).
-impl<F: Float + Lanes> IntoNode<F> for SoundFontUnit<F> {
+impl<F: Float + SimdLanes> IntoNode<F> for SoundFontUnit<F> {
     type Controls = ();
 
     fn into_parts(self) -> NodeParts<(), F> {
@@ -121,7 +121,7 @@ impl<F: Float + Lanes> IntoNode<F> for SoundFontUnit<F> {
 
 /// A SoundFont unit is an instrument: MIDI on event input 0, its dry pair on
 /// outputs 0 and 1. The other three outputs are the effect sends.
-impl<F: Float + Lanes> tutti_graph::Instrument<F> for SoundFontUnit<F> {
+impl<F: Float + SimdLanes> tutti_graph::Instrument<F> for SoundFontUnit<F> {
     fn main_outputs(&self) -> [u16; 2] {
         [Plane::DryLeft as u16, Plane::DryRight as u16]
     }
