@@ -48,6 +48,13 @@ impl Timebase {
         Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX))
     }
 
+    /// A packet's stamp as a duration since the host clock's origin: `None` for
+    /// the stamp 0, which CoreMIDI reads as "now" and which carries no time.
+    #[must_use]
+    pub fn stamp(self, ticks: u64) -> Option<Duration> {
+        (ticks != 0).then(|| self.duration(ticks))
+    }
+
     /// `duration` as ticks of host time, rounded down: the inverse of
     /// [`duration`](Self::duration), saturating at `u64::MAX`.
     #[must_use]
@@ -109,6 +116,15 @@ mod tests {
             intel.ticks(Duration::from_nanos(50_000_000_000)),
             50_000_000_000
         );
+    }
+
+    // A stamp of 3 ticks at Apple Silicon's 125/3 is 125 ns; the stamp 0 is no
+    // time, not the origin.
+    #[test]
+    fn a_stamp_is_its_duration_and_zero_is_none() {
+        let base = Timebase::new(125, 3).unwrap();
+        assert_eq!(base.stamp(3), Some(Duration::from_nanos(125)));
+        assert_eq!(base.stamp(0), None);
     }
 
     // A base with no denominator cannot be built, so `duration` never divides by

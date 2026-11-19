@@ -236,7 +236,7 @@ fn split_packet(
     words: &[u32],
     on_ump: &mut dyn FnMut(Option<Duration>, Ump),
 ) -> bool {
-    let time = (stamp != 0).then(|| base.duration(stamp));
+    let time = base.stamp(stamp);
     let mut used = 0;
     for ump in split_stream(words) {
         used += ump.words().len();
@@ -262,11 +262,12 @@ unsafe fn packets(list: *const MIDIEventList, on_packet: &mut dyn FnMut(MIDITime
     let mut packet: *const MIDIEventPacket = unsafe { std::ptr::addr_of!((*list).packet).cast() };
     for _ in 0..count {
         // SAFETY: `packet` is one of the list's `count` packets (the first, or
-        // `MIDIEventPacketNext` of the one before), each `wordCount` words long;
-        // its fields are read unaligned for the four-byte packing.
+        // `MIDIEventPacketNext` of the one before); its fields are read unaligned
+        // for the four-byte packing, and `wordCount` is clamped to the 64 words
+        // of the packet's `words` array, so the slice stays inside it.
         let (stamp, words) = unsafe {
             let stamp = std::ptr::addr_of!((*packet).timeStamp).read_unaligned();
-            let len = std::ptr::addr_of!((*packet).wordCount).read_unaligned() as usize;
+            let len = (std::ptr::addr_of!((*packet).wordCount).read_unaligned() as usize).min(64);
             let words = std::ptr::addr_of!((*packet).words).cast::<u32>();
             (stamp, std::slice::from_raw_parts(words, len))
         };

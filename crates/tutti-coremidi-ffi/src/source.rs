@@ -119,13 +119,12 @@ impl UmpSource {
     ///
     /// # Errors
     ///
-    /// [`Error::TooLong`] when the message will not fit the event list, and
     /// [`Error::Call`] when `MIDIReceivedEventList` returns a non-zero status.
     pub fn send(&self, ump: &Ump) -> Result<(), Error> {
         let words = ump.words();
 
         // A `MIDIEventList` holds one packet of up to 64 words inline, so a single
-        // message of up to 4 words always fits.
+        // message of up to 4 words always fits and `Add` cannot return NULL.
         let mut list = MaybeUninit::<MIDIEventList>::uninit();
         let list_ptr = list.as_mut_ptr();
         let list_size = std::mem::size_of::<MIDIEventList>();
@@ -135,8 +134,8 @@ impl UmpSource {
         // after both calls have run. `list_size` is that allocation's real size,
         // so `Add` cannot write past it, and `words` outlives the call.
         let status = unsafe {
-            let mut packet = MIDIEventListInit(list_ptr, self.protocol);
-            packet = MIDIEventListAdd(
+            let packet = MIDIEventListInit(list_ptr, self.protocol);
+            MIDIEventListAdd(
                 list_ptr,
                 list_size as ByteCount,
                 packet,
@@ -144,10 +143,6 @@ impl UmpSource {
                 words.len() as ByteCount,
                 words.as_ptr(),
             );
-            if packet.is_null() {
-                // The message didn't fit: nothing was queued.
-                return Err(Error::TooLong);
-            }
             MIDIReceivedEventList(self.source, list.assume_init_ref() as *const MIDIEventList)
         };
 

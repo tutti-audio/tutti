@@ -78,8 +78,8 @@ impl SourceBackend for UmpVirtualSource {
     ///
     /// # Errors
     ///
-    /// [`MidiHardwareError::Os`] when the message will not fit the event list, or when
-    /// `MIDIReceivedEventList` returns a non-zero `OSStatus`.
+    /// [`MidiHardwareError::Os`] when `MIDIReceivedEventList` returns a non-zero
+    /// `OSStatus`.
     fn send(&self, ump: &Ump) -> Result<()> {
         Ok(self.source.send(ump)?)
     }

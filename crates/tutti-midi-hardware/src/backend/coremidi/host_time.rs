@@ -36,10 +36,7 @@ impl Pairing {
     /// The instant of a packet stamped `host_time` ticks; a 0 stamp ("now") is
     /// the pairing's own.
     pub(super) fn instant_of(&self, host_time: u64) -> Instant {
-        if host_time == 0 {
-            return self.instant_of_stamp(None);
-        }
-        self.instant_of_stamp(Some(self.base.duration(host_time)))
+        self.instant_of_stamp(self.base.stamp(host_time))
     }
 
     /// The instant of a packet stamped `time` of host time; no stamp ("now") is
