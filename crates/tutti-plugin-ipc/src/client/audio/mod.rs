@@ -2,9 +2,10 @@
 //! plugin-server subprocess.
 //!
 //! Composition:
-//! - [`Channels`] — the two lock-free queues (commands, audio responses)
-//!   plus the shared newest-sequence and sample-rate cells. Unsolicited
-//!   events never cross threads: the bridge thread buffers them itself.
+//! - [`Channels`] — the lock-free queues (the audio lane's blocks, the control
+//!   lane's requests, audio responses) plus the shared newest-sequence and
+//!   sample-rate cells. Unsolicited events never cross threads: the control
+//!   lane's thread buffers them itself.
 //!   Payload recycling lives in [`PayloadPool`]; the batcher owns the block
 //!   sequence.
 //! - [`Lifecycle`] — running/crashed flags.
@@ -13,7 +14,9 @@
 //! one it writes and reads, and the bridge only asks the server to open a new one
 //! ([`AudioBridge::setup_shared_memory`]).
 //!
-//! The bridge thread lives in [`BridgeThread`]; its `Drop` shuts it down.
+//! The bridge's threads live in [`BridgeThread`] (the audio lane's, which owns the
+//! control lane's); its `Drop` shuts them down. **A block never waits behind a
+//! control request**: each lane has its own thread, queue and doorbell.
 
 mod ask;
 mod channels;
@@ -87,7 +90,7 @@ pub use channels::Replies;
 pub(crate) use channels::response_ring;
 pub(crate) use channels::{FATES, Fate};
 use lifecycle::Lifecycle;
-use messages::{AudioCommand, AudioResponse, ControlCommand};
+use messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
 use parking_lot::Mutex;
 pub use payload_pool::{PARAM_BUFFERS, PayloadPool};
 use progress::StateProgress;
@@ -110,9 +113,9 @@ fn await_reply<T>(
     ask.recv_timeout(wait)
 }
 
-/// Listener for plugin-originated unsolicited events. Invoked on the
-/// bridge thread (a plain OS thread) — blocking is OK, but prefer posting
-/// to a channel and returning promptly.
+/// Listener for plugin-originated unsolicited events. Invoked on either lane's
+/// thread (plain OS threads, so it can be called concurrently) — blocking is
+/// OK, but prefer posting to a channel and returning promptly.
 pub(crate) type BridgeListener = Arc<dyn Fn(BridgeEvent) + Send + Sync>;
 
 pub(super) type ListenerSlot = Arc<Mutex<Option<BridgeListener>>>;
@@ -205,10 +208,10 @@ impl AudioBridge {
         // The rate lives on `Channels`, not here: the bridge thread sizes its
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
-        let (channels, wait) = Channels::new(sample_rate, Arc::clone(watch.wake()))?;
+        let (channels, waits) = Channels::new(sample_rate, Arc::clone(watch.wake()))?;
         // An end of the server declared by anyone (the process guard, the host)
-        // rings the bridge thread, which waits on a bell and not on the watch's
-        // gate.
+        // rings both lanes' threads, which each wait on a bell and not on the
+        // watch's gate.
         watch.on_declared(channels.waker());
         let payloads = PayloadPool::new(
             sample_rate,
@@ -221,7 +224,7 @@ impl AudioBridge {
         let thread = BridgeThread::spawn(
             channels.clone(),
             responses,
-            wait,
+            waits,
             payloads.clone(),
             lifecycle.clone(),
             Arc::clone(&listener),
@@ -247,8 +250,9 @@ impl AudioBridge {
     }
 
     /// Install a listener for plugin-originated unsolicited events. Pass
-    /// `None` to clear. The callback runs on the bridge thread after each
-    /// dispatched command.
+    /// `None` to clear. The callback runs on a lane's thread after each
+    /// dispatched command: the control lane's for the plugin's news, either's
+    /// for a crash.
     pub fn set_listener(&self, listener: Option<BridgeListener>) {
         *self.listener.lock() = listener;
     }
@@ -279,7 +283,7 @@ impl AudioBridge {
     }
 
     /// Waits, for at most `within`, until the bridge has handed the listener
-    /// everything the server has sent so far (news the bridge thread saw is read and
+    /// everything the server has sent so far (news the control lane's thread saw is read and
     /// delivered, and no byte is left unread on the connection). It sleeps on
     /// the bridge's progress, which each turn of the bridge thread and the
     /// server's end notify: call it from the control thread only. `false` when
@@ -401,6 +405,11 @@ impl AudioBridge {
 
     /// Queues a parameter write for the plugin. Realtime-safe; `false` when the
     /// queue was full or the plugin is dead.
+    ///
+    /// Ordered one way against blocks: it never reaches the server ahead of a
+    /// block submitted before it, but it may land after a block submitted after
+    /// it (the write is on the control lane, which a block does not wait for, so
+    /// a stuck control request cannot stall audio).
     pub(crate) fn set_parameter_rt(&self, param_id: ParamId, value: Normalized) -> bool {
         !self.lifecycle.is_crashed()
             && self
@@ -446,38 +455,57 @@ impl AudioBridge {
         })
     }
 
-    /// Queues a rate change. Realtime-safe; `false` when it was not queued.
-    pub(crate) fn set_sample_rate_rt(&self, rate: SampleRate) -> bool {
-        // Publish before queueing, so both the staleness bound and
+    /// Asks for a rate change, ordered against the blocks. `false` only when the
+    /// bridge is crashed: the request goes into a slot (the latest value), never
+    /// a queue that can be full. Not for the audio thread (a lock).
+    ///
+    /// `true` means it is requested, not that the plugin has taken it: the audio
+    /// lane holds the blocks submitted after it until the plugin has answered or
+    /// its deadline passes. A change the bridge then gave up on is counted
+    /// ([`unapplied_settings`](Self::unapplied_settings)) and logged.
+    pub(crate) fn set_sample_rate(&self, rate: SampleRate) -> bool {
+        // Publish before requesting, so both the staleness bound and
         // the bridge thread's reply timeout track the new period from here on.
         self.channels.set_sample_rate(rate);
-        !self.lifecycle.is_crashed()
-            && self
-                .channels
-                .push_control(ControlCommand::SetSampleRate { rate })
+        if self.lifecycle.is_crashed() {
+            return false;
+        }
+        self.channels.request_setting(Setting::SampleRate(rate));
+        true
     }
 
-    /// Queue a render-mode change for the plugin.
+    /// Asks for a render-mode change, ordered against the blocks. `false` only
+    /// when the bridge is crashed; the request goes into a slot, never a queue
+    /// that can be full.
     ///
-    /// Named `_rt` like its neighbours because it shares their bounded,
-    /// non-blocking queue, not because the audio thread is the expected caller:
-    /// a bounce sets this once from the control thread before it starts
-    /// pulling. Riding the same queue is what keeps it ordered against the
-    /// blocks around it — a mode that overtook an in-flight block would apply
-    /// to audio the caller thought was already rendered.
-    pub fn set_render_mode_rt(&self, mode: tutti_plugin_types::RenderMode) -> bool {
-        let queued = !self.lifecycle.is_crashed()
-            && self
-                .channels
-                .push_control(ControlCommand::SetRenderMode { mode });
-        if queued {
-            self.lifecycle.set_render_mode(mode);
+    /// `true` means it is requested, not that the plugin has applied it: the
+    /// audio lane holds the blocks submitted after it until the server has
+    /// answered a request sent after it, or its deadline passes. A change the
+    /// bridge then gave up on is counted
+    /// ([`unapplied_settings`](Self::unapplied_settings)) and logged.
+    ///
+    /// Not for the audio thread (a lock): a bounce sets this once from the
+    /// control thread before it starts pulling. The blocks submitted before it
+    /// are sent first; a mode that overtook an in-flight block would apply to
+    /// audio the caller thought was already rendered.
+    pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
+        if self.lifecycle.is_crashed() {
+            return false;
         }
-        queued
+        self.channels.request_setting(Setting::RenderMode(mode));
+        self.lifecycle.set_render_mode(mode);
+        true
+    }
+
+    /// How many render-mode and rate changes the bridge gave up on, ever: the
+    /// plugin did not apply the change within the fence deadline. The change may
+    /// still land; the blocks after it were not held for it.
+    pub fn unapplied_settings(&self) -> u64 {
+        self.channels.unapplied_cell().get()
     }
 
     /// The render mode the host last queued for the plugin
-    /// ([`set_render_mode_rt`](Self::set_render_mode_rt)): what the host asked
+    /// ([`set_render_mode`](Self::set_render_mode)): what the host asked
     /// for, not what the plugin accepted. Realtime until it queues another.
     pub fn render_mode(&self) -> tutti_plugin_types::RenderMode {
         self.lifecycle.render_mode()
@@ -566,7 +594,11 @@ impl AudioBridge {
         // block is judged against a stale `newest` and dropped as if it were two
         // blocks old.
         self.channels.note_submitted(seq);
-        match self.channels.try_push_block(AudioCommand::Process(payload)) {
+        let pushed = self.channels.try_push_block(AudioCommand::Process(payload));
+        if pushed.is_ok() {
+            self.channels.note_pushed(seq);
+        }
+        match pushed {
             Ok(()) if params => Submitted::BlockAndParams,
             Ok(()) => Submitted::Block,
             Err(cmd) => {
@@ -591,6 +623,10 @@ impl AudioBridge {
     /// The plugin's state for `state_use`, read through the server. Blocks while
     /// it travels: up to a stalled transfer's wait for a request already owed,
     /// then for as long as the transfer makes progress.
+    ///
+    /// Ordered one way against blocks: the request is sent after the blocks
+    /// submitted before it have been answered, so it sees what they did; blocks
+    /// submitted after it may be sent first.
     ///
     /// # Errors
     ///
@@ -663,12 +699,12 @@ impl AudioBridge {
         progress.wait(ask_resp)
     }
 
-    /// Queues a request that owes a reply, and the reply's `Ask`. A request made
-    /// while another owes one **waits for it** up to `slot_wait` (the caller's own
-    /// timeout), in place of queueing a second request behind it or failing at
-    /// once; `None` (counted) when the slot is still held then, or the queue is
-    /// full. The slot is the request's until the bridge thread answers it or drops
-    /// it.
+    /// Queues a control request that owes a reply, and the reply's `Ask`. A
+    /// request made while another owes one **waits for it** up to `slot_wait`
+    /// (the caller's own timeout), in place of queueing a second request behind
+    /// it on the lane or failing at once; `None` (counted) when the slot is still
+    /// held then, or the queue is full. The slot is the request's until the
+    /// lane's thread answers it or drops it.
     fn request<T>(
         &self,
         slot_wait: Duration,
@@ -682,8 +718,8 @@ impl AudioBridge {
         self.channels.push_control(make(reply)).then_some(waiting)
     }
 
-    /// Why a state request was refused: a crashed bridge (its queue is drained
-    /// with errors, and nothing reads it again), or a full queue or an owed
+    /// Why a state request was refused: a crashed bridge (its queues are drained
+    /// with errors, and nothing reads them again), or a full queue or an owed
     /// request that did not clear in time, which is not a crash.
     fn refused(&self) -> StateError {
         if self.lifecycle.is_crashed() {

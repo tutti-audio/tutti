@@ -55,14 +55,30 @@ impl ProcessPayload {
     }
 }
 
-/// Audio thread → bridge thread: what rides the audio lane (the block
-/// connection), in the order the audio thread queued it.
+/// Audio thread → the audio lane's thread: what rides the block connection, in
+/// the order the audio thread queued it.
 pub(super) enum AudioCommand {
     Process(Box<ProcessPayload>),
     Reset,
 }
 
-/// Callers and the audio thread → bridge thread: what rides the control lane.
+/// A setting the audio lane holds its blocks for. Requested by a caller into a slot, then written by the audio lane's
+/// thread into a latest-value slot per kind ([`Channels::put_setting`](super::channels::Channels::put_setting)), never
+/// queued, so a full control queue cannot lose one; taken first by the control
+/// lane's thread, which answers `applied` once the server has applied it.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Setting {
+    /// The rate the plugin runs at.
+    SampleRate(SampleRate),
+    /// Format-neutral render mode, encoded onto each format's own ABI at the
+    /// FFI edge (VST3 `ProcessSetup::processMode`, CLAP `clap.render`, AU
+    /// `kAudioUnitProperty_OfflineRender`, VST2
+    /// `audioMasterGetCurrentProcessLevel`). The server answers it with
+    /// nothing, so the lane's own fence after it is the answer.
+    RenderMode(tutti_plugin_types::RenderMode),
+}
+
+/// Callers and the audio thread → the control lane's thread.
 ///
 /// Variants that need a reply carry their own [`Reply<T>`]; the calling
 /// thread holds the paired `Ask<T>` and blocks on it. There is no shared
@@ -82,16 +98,6 @@ pub(super) enum ControlCommand {
     /// slots small.
     SetTrackInfo {
         info: Box<tutti_plugin_types::TrackInfo>,
-    },
-    SetSampleRate {
-        rate: SampleRate,
-    },
-    /// Format-neutral render mode, encoded onto each format's own ABI at the
-    /// FFI edge (VST3 `ProcessSetup::processMode`, CLAP `clap.render`, AU
-    /// `kAudioUnitProperty_OfflineRender`, VST2
-    /// `audioMasterGetCurrentProcessLevel`).
-    SetRenderMode {
-        mode: tutti_plugin_types::RenderMode,
     },
     /// Chunked state read.
     ///
@@ -280,11 +286,11 @@ pub(super) const UNSOLICITED_TRANSPORT: usize = 64;
 pub(super) const UNSOLICITED_PARAMS: usize = 128;
 
 /// The unsolicited events read off the control stream while a command waited
-/// for its reply, held until `pump` hands them to the listener.
+/// for its reply, held until its lane's loop hands them to the listener.
 ///
 /// A plain buffer, not a queue between threads: `recv_reply` fills it and
-/// `pump` drains it after each command, both on the bridge thread, so it is
-/// owned by `pump` and lent to `handle`. The listener runs after the drain
+/// the loop drains it after each command, both on the lane's thread, so it is
+/// owned by the loop and lent to the handler. The listener runs after the drain
 /// rather than from `recv_reply` itself so a slow listener never delays the
 /// reply a blocked caller is waiting on.
 ///
@@ -516,6 +522,20 @@ impl Unsolicited {
     /// How many parameter events were dropped since the last call.
     pub(super) fn take_dropped(&mut self) -> u64 {
         std::mem::take(&mut self.dropped)
+    }
+}
+
+impl ControlCommand {
+    /// Whether the command has no reply: its caller learns nothing of its fate
+    /// but from the counts.
+    pub(super) fn is_fire_and_forget(&self) -> bool {
+        matches!(
+            self,
+            Self::SetParameter { .. }
+                | Self::SetAutomationState { .. }
+                | Self::SetTrackInfo { .. }
+                | Self::CloseEditor
+        )
     }
 }
 

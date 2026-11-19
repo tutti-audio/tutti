@@ -68,7 +68,7 @@ pub fn socket_path_in(temp: &Path, name: &str) -> PathBuf {
 /// Whether `stream` has something to read now, asked without blocking or
 /// consuming. **A failed ask is "yes"**: the read is the authority on a closed
 /// or broken stream, and this must never be able to hide one.
-pub fn has_pending(stream: &ControlStream) -> bool {
+fn has_pending(stream: &ControlStream) -> bool {
     bytes_available(stream).map_or(true, |n| n > 0)
 }
 

@@ -111,7 +111,7 @@ fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin
 /// **Served, a `request_process` the plugin makes on a thread of its own while
 /// its node is parked wakes the node.** No tick is driven: the server's main
 /// loop sends `ProcessRequested` when the plugin asks (the plugin's call rings
-/// the loop's bell), the bridge thread's wait on the control connection reads it and raises the node's
+/// the loop's bell), the bridge's control lane thread reads it and raises the node's
 /// wake, and the plugin's sound comes back through the pipeline. Blocks run
 /// until the sound arrives; [`PATIENCE`] only guards a wake that never comes.
 #[test]
