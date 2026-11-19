@@ -67,7 +67,7 @@ use tutti_graph::{
     Cx, EventDensity, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
     MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, Prepare, Shape, Status,
 };
-use tutti_midi_protocol::Translator;
+use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{Publisher, Reader};
 use tutti_ump::{Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteKey, Ump, Voice1, Voice2};
 use tutti_units::Beat;
@@ -279,7 +279,7 @@ fn class_of(timed: &TimedMidiEvent) -> Class {
     Class::of(timed.event())
 }
 
-/// `events` through one [`Translator`], in beat order (a clip is translated as it is loaded, so the graph carries MIDI 2.0 from it
+/// `events` through one [`Midi2Translator`], in beat order (a clip is translated as it is loaded, so the graph carries MIDI 2.0 from it
 /// as from a wire), each translated event at its source's beat and in its
 /// source's place in the list, which the note pairing below reads. An event
 /// the translator absorbs (an RPN select, Data Entry, Bank Select) is gone; a
@@ -302,7 +302,7 @@ fn translated(events: impl IntoIterator<Item = TimedMidiEvent>) -> Vec<TimedMidi
     // The last Data Entry (CC 6 or 38) of each group and channel: a run still
     // waiting when the clip ends is waiting on it.
     let mut data_entry: HashMap<(MidiGroup, MidiChannel), usize> = HashMap::new();
-    let mut translator = Translator::new();
+    let mut translator = Midi2Translator::new();
     for i in order {
         out[i] = translator.translate(events[i].event());
         if let Ok(Message::Midi1(

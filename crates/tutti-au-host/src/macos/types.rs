@@ -218,7 +218,7 @@ pub const K_AUDIO_UNIT_PARAMETER_FLAG_OMIT_FROM_PRESETS: u32 =
 pub const K_AUDIO_UNIT_PARAMETER_FLAG_IS_GLOBAL_META: u32 =
     sys::kAudioUnitParameterFlag_IsGlobalMeta;
 /// "Changing this parameter may change others in the same element as the current
-/// parameter." Narrower than `IsGlobalMeta`: the dependents must share one scope
+/// parameter." Midi1Translator than `IsGlobalMeta`: the dependents must share one scope
 /// and apply only within that single element.
 pub const K_AUDIO_UNIT_PARAMETER_FLAG_IS_ELEMENT_META: u32 =
     sys::kAudioUnitParameterFlag_IsElementMeta;

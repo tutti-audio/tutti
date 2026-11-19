@@ -18,7 +18,7 @@
 //!
 //! An input port opens in the protocol of its source (one port per opened
 //! input): `Protocol::Midi10` for a source whose capability is MIDI 1.0,
-//! so CoreMIDI hands it MIDI 1.0 UMP (type 2) and the ingest node's `Translator`
+//! so CoreMIDI hands it MIDI 1.0 UMP (type 2) and the ingest node's `Midi2Translator`
 //! widens it, never the OS; `Protocol::Midi20` otherwise.
 //! A MIDI 1.0 source is not a device speaking MIDI 2.0, so the capability records `kMIDIPropertyProtocolID` as
 //! the OS reports it — and falls back to `Midi1` when the property is absent,
@@ -133,7 +133,7 @@ fn endpoint_capability(object: &coremidi::Object, ump: Option<&UmpEndpointInfo>)
 /// The protocol an input port on `source` is created with, as ALSA chooses
 /// its client's version: MIDI 1.0 for a source that cannot
 /// speak the MIDI 2.0 Protocol, so CoreMIDI hands it MIDI 1.0 UMP (type 2)
-/// and the ingest node's `Translator` widens it, never the OS. A UMP Endpoint
+/// and the ingest node's `Midi2Translator` widens it, never the OS. A UMP Endpoint
 /// that supports MIDI 2.0 opens as MIDI 2.0 even while it is in MIDI 1.0:
 /// the session asks every Endpoint for MIDI 2.0, and a MIDI 1.0 port would
 /// have CoreMIDI narrow what it then sends natively. A source with no UMP
@@ -329,7 +329,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
         let (source, unique) = Self::find_source(id).ok_or(NotFound::Endpoint(id))?;
 
         // The port speaks the source's protocol: a MIDI 1.0 source is delivered
-        // as MIDI 1.0 UMP (type 2), which the ingest node's `Translator`
+        // as MIDI 1.0 UMP (type 2), which the ingest node's `Midi2Translator`
         // widens; CoreMIDI up-converts nothing. A MIDI 2.0 source is delivered
         // as MIDI 2.0 UMP.
         //
