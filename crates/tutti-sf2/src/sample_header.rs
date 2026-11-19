@@ -115,25 +115,25 @@ impl SampleHeader {
     /// 16-bit sample points (SF2 2.04 section 9.3), counted from the first.
     #[must_use]
     pub fn start(&self) -> Samples {
-        Samples(self.start as usize)
+        Samples::new(self.start as usize)
     }
 
     /// The end point of the sample in the sample data.
     #[must_use]
     pub fn end(&self) -> Samples {
-        Samples(self.end as usize)
+        Samples::new(self.end as usize)
     }
 
     /// The loop start point of the sample in the sample data.
     #[must_use]
     pub fn start_loop(&self) -> Samples {
-        Samples(self.start_loop as usize)
+        Samples::new(self.start_loop as usize)
     }
 
     /// The loop end point of the sample in the sample data.
     #[must_use]
     pub fn end_loop(&self) -> Samples {
-        Samples(self.end_loop as usize)
+        Samples::new(self.end_loop as usize)
     }
 
     /// The rate the sample plays at: the rate the file states, or
@@ -155,7 +155,7 @@ impl SampleHeader {
     /// The pitch correction that should be applied to the sample on playback.
     #[must_use]
     pub fn pitch_correction(&self) -> Cents {
-        Cents(f64::from(self.pitch_correction))
+        Cents::new(f64::from(self.pitch_correction))
     }
 
     /// The link info: the index of the sample this one is linked with.

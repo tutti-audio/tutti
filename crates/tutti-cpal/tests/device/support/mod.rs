@@ -23,7 +23,7 @@ pub fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
     let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", Const::mono(level));
     ed.spec_mut().topology.set_outputs(vec![
@@ -63,7 +63,7 @@ pub fn dc_state_f64(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> 
     let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
     let (mut ed, exec) = Editor::<f64>::with_format(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level)));
     ed.spec_mut().topology.set_outputs(vec![

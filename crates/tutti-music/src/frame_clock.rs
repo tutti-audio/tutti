@@ -20,12 +20,12 @@
 //! use tutti_units::{Beat, Bpm, SampleRate, Samples};
 //! use tutti_music::FrameClock;
 //!
-//! let mut clock = FrameClock::new(Beat(0.0), Bpm::of(90.0), SampleRate::of(48_000.0));
+//! let mut clock = FrameClock::new(Beat::new(0.0), Bpm::of(90.0), SampleRate::of(48_000.0));
 //! for _ in 0..1_500 {
-//!     clock.advance(Samples(64), None);
+//!     clock.advance(Samples::new(64), None);
 //! }
 //! // 96 000 frames at 90 BPM is exactly beat 3, with no accumulated drift.
-//! assert_eq!(clock.beat(), Beat(3.0));
+//! assert_eq!(clock.beat(), Beat::new(3.0));
 //! ```
 
 use crate::TimelineSegment;
@@ -178,7 +178,7 @@ impl LoopRange {
         if wrapped < self.end {
             wrapped
         } else {
-            Beat(self.end.get().next_down()).max(self.start)
+            Beat::new(self.end.get().next_down()).max(self.start)
         }
     }
 }
@@ -379,7 +379,7 @@ impl FrameClock {
     pub fn advance(&mut self, frames: Samples, looping: Option<LoopRange>) {
         let mut left = frames;
         while let Some(rolled) = self.advance_to_wrap(left, looping) {
-            left = Samples(left.get() - rolled.get());
+            left = left.remaining_after(rolled);
         }
     }
 
@@ -422,7 +422,7 @@ impl FrameClock {
                 beat,
                 end,
             };
-            start = Samples(start.get() + len.get());
+            start += len;
             Some(pass)
         })
     }
@@ -435,6 +435,10 @@ impl FrameClock {
     /// For a reader that walks a block pass by pass: a wrap is at least a
     /// frame after the last, so a block of `n` frames has at most `n`,
     /// however short the loop.
+    ///
+    /// # Panics
+    ///
+    /// Never: a wrap is found after the frame the roll starts from.
     pub fn advance_to_wrap(
         &mut self,
         frames: Samples,
@@ -449,7 +453,11 @@ impl FrameClock {
             let reached = self.segment.beat_at(wrap);
             self.at = wrap;
             self.restart(region.wrap(reached));
-            return Some(Samples((wrap.get() - from.get()) as usize));
+            // `wrap_frame` finds a wrap after `from`, so `since` is `Some`.
+            return Some(
+                wrap.since(from)
+                    .expect("a wrap lies after the frame the roll starts from"),
+            );
         }
         self.at = target;
         None
@@ -462,7 +470,7 @@ impl FrameClock {
     /// the unique frame `f` with `beat_at(f - 1) < end <= beat_at(f)`. The
     /// estimate is within a frame or two of it; the walk makes it exact.
     fn wrap_frame(&self, end: Beat, limit: Frame) -> Option<Frame> {
-        let next = self.at + Samples(1);
+        let next = self.at + Samples::new(1);
         if next > limit {
             return None;
         }
@@ -482,7 +490,7 @@ impl FrameClock {
             f = Frame::new(f.get() - 1);
         }
         while f <= limit && self.segment.beat_at(f) < end {
-            f += Samples(1);
+            f += Samples::new(1);
         }
         (f <= limit).then_some(f)
     }
@@ -496,7 +504,7 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn a_loop_range_round_trips_serde_as_its_pair() {
-        let range = LoopRange::new(Beat(2.0), Beat(6.5)).expect("a loop");
+        let range = LoopRange::new(Beat::new(2.0), Beat::new(6.5)).expect("a loop");
         let json = serde_json::to_string(&range).unwrap();
         assert_eq!(json, "[2.0,6.5]");
         assert_eq!(serde_json::from_str::<LoopRange>(&json).unwrap(), range);
@@ -509,18 +517,18 @@ mod tests {
     #[test]
     fn a_pair_that_is_not_a_region_is_refused_on_the_wire() {
         assert_eq!(
-            LoopRange::try_from((Beat(6.0), Beat(2.0))),
+            LoopRange::try_from((Beat::new(6.0), Beat::new(2.0))),
             Err(LoopRangeError::Reversed {
-                start: Beat(6.0),
-                end: Beat(2.0)
+                start: Beat::new(6.0),
+                end: Beat::new(2.0)
             })
         );
         assert_eq!(
-            LoopRange::try_from((Beat(3.0), Beat(3.0))),
-            Err(LoopRangeError::Empty { at: Beat(3.0) })
+            LoopRange::try_from((Beat::new(3.0), Beat::new(3.0))),
+            Err(LoopRangeError::Empty { at: Beat::new(3.0) })
         );
         assert!(matches!(
-            LoopRange::try_from((Beat(f64::NAN), Beat(3.0))),
+            LoopRange::try_from((Beat::new(f64::NAN), Beat::new(3.0))),
             Err(LoopRangeError::NotFinite { .. })
         ));
         for refused in ["[6.0,2.0]", "[3.0,3.0]", "[null,3.0]"] {
@@ -539,7 +547,7 @@ mod tests {
     /// `try_from` on every case.
     #[test]
     fn loop_range_try_from_names_the_reason() {
-        let (a, b) = (Beat(2.0), Beat(6.0));
+        let (a, b) = (Beat::new(2.0), Beat::new(6.0));
         assert_eq!(
             LoopRange::try_from(b..a),
             Err(LoopRangeError::Reversed { start: b, end: a })
@@ -549,10 +557,10 @@ mod tests {
             Err(LoopRangeError::Empty { at: a })
         );
         for (start, end) in [
-            (Beat(f64::NAN), b),
-            (a, Beat(f64::NAN)),
-            (a, Beat(f64::INFINITY)),
-            (Beat(f64::NEG_INFINITY), b),
+            (Beat::new(f64::NAN), b),
+            (a, Beat::new(f64::NAN)),
+            (a, Beat::new(f64::INFINITY)),
+            (Beat::new(f64::NEG_INFINITY), b),
         ] {
             assert!(
                 matches!(
@@ -564,7 +572,7 @@ mod tests {
         }
         let ok = LoopRange::try_from(a..b).unwrap();
         assert_eq!((ok.start(), ok.end()), (a, b));
-        for (start, end) in [(b, a), (a, a), (a, Beat(f64::NAN)), (a, b)] {
+        for (start, end) in [(b, a), (a, a), (a, Beat::new(f64::NAN)), (a, b)] {
             assert_eq!(
                 LoopRange::new(start, end),
                 LoopRange::try_from(start..end).ok()
@@ -582,10 +590,26 @@ mod tests {
     #[test]
     fn loop_range_advance_wraps_only_a_crossing() {
         let r = LoopRange::new(Beat::new(4.0), Beat::new(8.0)).unwrap();
-        assert_eq!(r.advance(Beat(7.5), Beat(8.5)), Beat(4.5), "crossed");
-        assert_eq!(r.advance(Beat(9.0), Beat(9.5)), Beat(9.5), "armed behind");
-        assert_eq!(r.advance(Beat(8.0), Beat(8.5)), Beat(8.5), "from the end");
-        assert_eq!(r.advance(Beat(2.0), Beat(8.25)), Beat(4.25), "from before");
+        assert_eq!(
+            r.advance(Beat::new(7.5), Beat::new(8.5)),
+            Beat::new(4.5),
+            "crossed"
+        );
+        assert_eq!(
+            r.advance(Beat::new(9.0), Beat::new(9.5)),
+            Beat::new(9.5),
+            "armed behind"
+        );
+        assert_eq!(
+            r.advance(Beat::new(8.0), Beat::new(8.5)),
+            Beat::new(8.5),
+            "from the end"
+        );
+        assert_eq!(
+            r.advance(Beat::new(2.0), Beat::new(8.25)),
+            Beat::new(4.25),
+            "from before"
+        );
     }
 
     #[test]
@@ -593,13 +617,13 @@ mod tests {
         let r = LoopRange::new(Beat::new(4.0), Beat::new(8.0)).unwrap();
 
         // Inside the region: untouched.
-        assert_eq!(r.wrap(Beat(6.0)), Beat(6.0));
+        assert_eq!(r.wrap(Beat::new(6.0)), Beat::new(6.0));
         // One beat past the end wraps to one beat past the start.
-        assert_eq!(r.wrap(Beat(9.0)), Beat(5.0));
+        assert_eq!(r.wrap(Beat::new(9.0)), Beat::new(5.0));
         // Exactly at the end wraps to the start.
-        assert_eq!(r.wrap(Beat(8.0)), Beat(4.0));
+        assert_eq!(r.wrap(Beat::new(8.0)), Beat::new(4.0));
         // More than one length past still lands inside.
-        let far = r.wrap(Beat(4.0 + 4.0 * 3.5));
+        let far = r.wrap(Beat::new(4.0 + 4.0 * 3.5));
         assert!(far.get() >= 4.0 && far.get() < 8.0, "got {far:?}");
     }
 
@@ -616,7 +640,7 @@ mod tests {
             (3.5544260744842737, 5.620754820044198, 30.416699766763283),
         ] {
             let r = LoopRange::new(Beat::new(start), Beat::new(end)).expect("non-empty");
-            let wrapped = r.wrap(Beat(past));
+            let wrapped = r.wrap(Beat::new(past));
             assert!(
                 r.contains(wrapped),
                 "{past} wrapped to {wrapped:?}, outside {r:?}"
@@ -625,7 +649,7 @@ mod tests {
         // Brute force over many near-end overshoots of a tiny loop.
         let tiny = LoopRange::new(Beat::new(0.5), Beat::new(0.5 + 1e-9)).expect("non-empty");
         for i in 0..100_000u64 {
-            let b = Beat(0.5 + 1e-9 + i as f64 * 1.7e-12);
+            let b = Beat::new(0.5 + 1e-9 + i as f64 * 1.7e-12);
             assert!(tiny.contains(tiny.wrap(b)), "{b:?} wrapped outside");
         }
     }
@@ -635,15 +659,15 @@ mod tests {
     /// reads 2.999999999999891 and 1.0000000000000007.
     #[test]
     fn chunked_frames_land_on_the_beat_exactly() {
-        let mut c = FrameClock::new(Beat(0.0), Bpm::of(90.0), SR);
+        let mut c = FrameClock::new(Beat::new(0.0), Bpm::of(90.0), SR);
         for _ in 0..500 {
-            c.advance(Samples(64), None);
+            c.advance(Samples::new(64), None);
         }
-        assert_eq!(c.beat(), Beat(1.0));
+        assert_eq!(c.beat(), Beat::new(1.0));
         for _ in 500..1_500 {
-            c.advance(Samples(64), None);
+            c.advance(Samples::new(64), None);
         }
-        assert_eq!(c.beat(), Beat(3.0));
+        assert_eq!(c.beat(), Beat::new(3.0));
     }
 
     /// Frame by frame and a block at a time land on the same bits, through
@@ -659,7 +683,7 @@ mod tests {
         ];
         for tempo in [90.0, 97.0, 120.0, 133.3] {
             for looping in loops {
-                let mut one = FrameClock::new(Beat(0.1), Bpm::of(tempo), SR);
+                let mut one = FrameClock::new(Beat::new(0.1), Bpm::of(tempo), SR);
                 let mut block = one;
                 let sizes: [usize; 6] = [64, 300, 1, 1024, 77, 512];
                 for (i, n) in sizes.iter().cycle().take(60).enumerate() {
@@ -668,13 +692,13 @@ mod tests {
                         block.set_tempo(Bpm::of(tempo * 1.5));
                     }
                     if i == 40 {
-                        one.seat(Beat(0.3));
-                        block.seat(Beat(0.3));
+                        one.seat(Beat::new(0.3));
+                        block.seat(Beat::new(0.3));
                     }
                     for _ in 0..*n {
-                        one.advance(Samples(1), looping);
+                        one.advance(Samples::new(1), looping);
                     }
-                    block.advance(Samples(*n), looping);
+                    block.advance(Samples::new(*n), looping);
                     assert_eq!(
                         one.beat().get().to_bits(),
                         block.beat().get().to_bits(),
@@ -693,18 +717,22 @@ mod tests {
     fn a_loop_wraps_on_its_frame() {
         // 4 beats at 90 BPM is 128 000 frames.
         let four = LoopRange::new(Beat::new(0.0), Beat::new(4.0));
-        let mut c = FrameClock::new(Beat(0.0), Bpm::of(90.0), SR);
-        c.advance(Samples(127_999), four);
-        assert!(c.beat() < Beat(4.0));
-        c.advance(Samples(1), four);
-        assert_eq!(c.beat(), Beat(0.0), "on the loop's end frame: the start");
-        c.advance(Samples(96_000), four);
-        assert_eq!(c.beat(), Beat(3.0), "the second pass is as exact");
+        let mut c = FrameClock::new(Beat::new(0.0), Bpm::of(90.0), SR);
+        c.advance(Samples::new(127_999), four);
+        assert!(c.beat() < Beat::new(4.0));
+        c.advance(Samples::new(1), four);
+        assert_eq!(
+            c.beat(),
+            Beat::new(0.0),
+            "on the loop's end frame: the start"
+        );
+        c.advance(Samples::new(96_000), four);
+        assert_eq!(c.beat(), Beat::new(3.0), "the second pass is as exact");
 
         let behind = LoopRange::new(Beat::new(1.0), Beat::new(2.0));
-        let mut c = FrameClock::new(Beat(3.0), Bpm::of(90.0), SR);
-        c.advance(Samples(32_000), behind);
-        assert_eq!(c.beat(), Beat(4.0), "armed behind: plays on");
+        let mut c = FrameClock::new(Beat::new(3.0), Bpm::of(90.0), SR);
+        c.advance(Samples::new(32_000), behind);
+        assert_eq!(c.beat(), Beat::new(4.0), "armed behind: plays on");
     }
 
     /// `advance_to_wrap` stops on each wrap and reports the frames it rolled,
@@ -714,28 +742,32 @@ mod tests {
     #[test]
     fn advance_to_wrap_stops_on_each_wrap() {
         let four = LoopRange::new(Beat::new(0.0), Beat::new(4.0));
-        let mut c = FrameClock::new(Beat(0.0), Bpm::of(90.0), SR);
+        let mut c = FrameClock::new(Beat::new(0.0), Bpm::of(90.0), SR);
         assert_eq!(
-            c.advance_to_wrap(Samples(200_000), four),
-            Some(Samples(128_000))
+            c.advance_to_wrap(Samples::new(200_000), four),
+            Some(Samples::new(128_000))
         );
-        assert_eq!(c.beat(), Beat(0.0), "on the wrap's frame, at the start");
-        assert_eq!(c.advance_to_wrap(Samples(96_000), four), None);
-        assert_eq!(c.beat(), Beat(3.0), "no wrap: every frame rolled");
+        assert_eq!(
+            c.beat(),
+            Beat::new(0.0),
+            "on the wrap's frame, at the start"
+        );
+        assert_eq!(c.advance_to_wrap(Samples::new(96_000), four), None);
+        assert_eq!(c.beat(), Beat::new(3.0), "no wrap: every frame rolled");
 
         // A third of a frame at 90 BPM and 48 kHz.
         let tiny = LoopRange::new(Beat::new(1.0), Beat::new(1.0 + 1.0 / 96_000.0));
-        let mut walked = FrameClock::new(Beat(1.0), Bpm::of(90.0), SR);
+        let mut walked = FrameClock::new(Beat::new(1.0), Bpm::of(90.0), SR);
         let mut whole = walked;
         let mut stops = 0;
         let mut left = 64;
-        while let Some(rolled) = walked.advance_to_wrap(Samples(left), tiny) {
-            assert_eq!(rolled, Samples(1), "a wrap a frame");
+        while let Some(rolled) = walked.advance_to_wrap(Samples::new(left), tiny) {
+            assert_eq!(rolled, Samples::new(1), "a wrap a frame");
             left -= rolled.get();
             stops += 1;
         }
         assert_eq!(stops, 64);
-        whole.advance(Samples(64), tiny);
+        whole.advance(Samples::new(64), tiny);
         assert_eq!(walked.beat(), whole.beat());
     }
 
@@ -743,22 +775,22 @@ mod tests {
     /// has none, and a loop the block never reaches is no loop.
     #[test]
     fn a_block_with_no_wrap_is_one_pass() {
-        let mut c = FrameClock::new(Beat(1.0), Bpm::of(90.0), SR);
-        let passes: Vec<_> = c.passes(Samples(512), None).collect();
+        let mut c = FrameClock::new(Beat::new(1.0), Bpm::of(90.0), SR);
+        let passes: Vec<_> = c.passes(Samples::new(512), None).collect();
         assert_eq!(
             passes,
             [Pass {
-                start: Samples(0),
-                len: Samples(512),
-                beat: Beat(1.0),
+                start: Samples::new(0),
+                len: Samples::new(512),
+                beat: Beat::new(1.0),
                 end: PassEnd::Block
             }]
         );
-        assert_eq!(c.passes(Samples(0), None).count(), 0, "empty block");
+        assert_eq!(c.passes(Samples::new(0), None).count(), 0, "empty block");
 
         let far = LoopRange::new(Beat::new(8.0), Beat::new(9.0));
-        let mut c = FrameClock::new(Beat(1.0), Bpm::of(90.0), SR);
-        assert_eq!(c.passes(Samples(512), far).count(), 1);
+        let mut c = FrameClock::new(Beat::new(1.0), Bpm::of(90.0), SR);
+        assert_eq!(c.passes(Samples::new(512), far).count(), 1);
     }
 
     /// Several wraps in one block: each pass starts where the last one's
@@ -768,21 +800,21 @@ mod tests {
     #[test]
     fn several_wraps_in_a_block_are_several_passes() {
         let region = LoopRange::new(Beat::new(0.0), Beat::new(0.1));
-        let mut c = FrameClock::new(Beat(0.0), Bpm::of(90.0), SR);
-        let passes: Vec<_> = c.passes(Samples(10_000), region).collect();
+        let mut c = FrameClock::new(Beat::new(0.0), Bpm::of(90.0), SR);
+        let passes: Vec<_> = c.passes(Samples::new(10_000), region).collect();
         let starts: Vec<_> = passes.iter().map(|p| p.start.get()).collect();
         let lens: Vec<_> = passes.iter().map(|p| p.len.get()).collect();
         assert_eq!(starts, [0, 3_200, 6_400, 9_600]);
         assert_eq!(lens, [3_200, 3_200, 3_200, 400]);
-        assert!(passes.iter().all(|p| p.beat == Beat(0.0)));
+        assert!(passes.iter().all(|p| p.beat == Beat::new(0.0)));
 
         // Entered mid-loop, the first pass starts at the entry beat.
-        let mut c = FrameClock::new(Beat(0.05), Bpm::of(90.0), SR);
-        let passes: Vec<_> = c.passes(Samples(5_000), region).collect();
-        assert_eq!(passes[0].beat, Beat(0.05));
-        assert_eq!(passes[0].len, Samples(1_600));
-        assert_eq!(passes[1].start, Samples(1_600));
-        assert_eq!(passes[1].beat, Beat(0.0));
+        let mut c = FrameClock::new(Beat::new(0.05), Bpm::of(90.0), SR);
+        let passes: Vec<_> = c.passes(Samples::new(5_000), region).collect();
+        assert_eq!(passes[0].beat, Beat::new(0.05));
+        assert_eq!(passes[0].len, Samples::new(1_600));
+        assert_eq!(passes[1].start, Samples::new(1_600));
+        assert_eq!(passes[1].beat, Beat::new(0.0));
     }
 
     /// A pass ends in a wrap when one falls on its last frame's successor,
@@ -792,17 +824,23 @@ mod tests {
     #[test]
     fn a_wrap_on_the_block_edge_ends_the_last_pass() {
         let four = LoopRange::new(Beat::new(0.0), Beat::new(4.0));
-        let mut c = FrameClock::new(Beat(0.0), Bpm::of(90.0), SR);
-        let ends: Vec<_> = c.passes(Samples(128_000), four).map(|p| p.end).collect();
+        let mut c = FrameClock::new(Beat::new(0.0), Bpm::of(90.0), SR);
+        let ends: Vec<_> = c
+            .passes(Samples::new(128_000), four)
+            .map(|p| p.end)
+            .collect();
         assert_eq!(ends, [PassEnd::Wrap]);
         let next: Vec<_> = c
-            .passes(Samples(512), four)
+            .passes(Samples::new(512), four)
             .map(|p| (p.beat, p.end))
             .collect();
-        assert_eq!(next, [(Beat(0.0), PassEnd::Block)]);
+        assert_eq!(next, [(Beat::new(0.0), PassEnd::Block)]);
 
-        let mut c = FrameClock::new(Beat(0.0), Bpm::of(90.0), SR);
-        let ends: Vec<_> = c.passes(Samples(128_001), four).map(|p| p.end).collect();
+        let mut c = FrameClock::new(Beat::new(0.0), Bpm::of(90.0), SR);
+        let ends: Vec<_> = c
+            .passes(Samples::new(128_001), four)
+            .map(|p| p.end)
+            .collect();
         assert_eq!(ends, [PassEnd::Wrap, PassEnd::Block]);
     }
 
@@ -811,10 +849,10 @@ mod tests {
     #[test]
     fn passes_leave_the_clock_where_advance_does() {
         let region = LoopRange::new(Beat::new(1.0 / 3.0), Beat::new(2.0 / 3.0));
-        let mut a = FrameClock::new(Beat(0.5), Bpm::of(133.0), SR);
+        let mut a = FrameClock::new(Beat::new(0.5), Bpm::of(133.0), SR);
         let mut b = a;
-        let passes: Vec<_> = a.passes(Samples(40_001), region).collect();
-        b.advance(Samples(40_001), region);
+        let passes: Vec<_> = a.passes(Samples::new(40_001), region).collect();
+        b.advance(Samples::new(40_001), region);
         assert_eq!(passes.iter().map(|p| p.len.get()).sum::<usize>(), 40_001);
         assert!(passes.iter().all(|p| !p.len.is_zero()));
         assert_eq!(a.beat(), b.beat());
@@ -839,11 +877,11 @@ mod tests {
             let rate = [22_050.0, 44_100.0, 48_000.0, 88_200.0, 96_000.0, 192_000.0]
                 [(next() % 6) as usize];
             let start = (next() % 1_000) as f64 / 7.0;
-            let mut c = FrameClock::new(Beat(start), Bpm::of(tempo), SampleRate::of(rate));
+            let mut c = FrameClock::new(Beat::new(start), Bpm::of(tempo), SampleRate::of(rate));
             let mut frames = 0u64;
             for _ in 0..blocks {
                 let n = 1 + (next() % 1_024) as usize;
-                c.advance(Samples(n), None);
+                c.advance(Samples::new(n), None);
                 frames += n as u64;
             }
             let closed = start + (frames as f64 * tempo) / (60.0 * rate);
@@ -871,13 +909,13 @@ mod tests {
             let tempo = 40.0 + (next() % 20_000) as f64 / 100.0;
             let rate = [44_100.0, 48_000.0, 96_000.0][(next() % 3) as usize];
             let origin = (next() % 4_096) as f64 / 64.0;
-            let mut c = FrameClock::new(Beat(origin), Bpm::of(tempo), SampleRate::of(rate));
-            c.advance(Samples((next() % 10_000) as usize), None);
+            let mut c = FrameClock::new(Beat::new(origin), Bpm::of(tempo), SampleRate::of(rate));
+            c.advance(Samples::new((next() % 10_000) as usize), None);
             // An end that is itself a frame's beat on this segment, nudged by
             // up to an ulp: the case the estimate's rounding gets wrong.
             let k = 1 + next() % 100_000;
-            let on = c.segment.beat_at(c.at + Samples(k as usize)).get();
-            let end = Beat(f64::from_bits(
+            let on = c.segment.beat_at(c.at + Samples::new(k as usize)).get();
+            let end = Beat::new(f64::from_bits(
                 (on.to_bits() as i64 + (next() % 3) as i64 - 1) as u64,
             ));
             if end <= c.beat() {
@@ -888,7 +926,7 @@ mod tests {
                 .expect("a rolling clock reaches it");
             assert!(c.segment.beat_at(f) >= end, "{tempo} {rate}: {f} short");
             assert!(
-                f == c.at + Samples(1) || c.segment.beat_at(Frame::new(f.get() - 1)) < end,
+                f == c.at + Samples::new(1) || c.segment.beat_at(Frame::new(f.get() - 1)) < end,
                 "{tempo} BPM at {rate} Hz: frame {f} is not the first to reach {end:?}"
             );
         }
@@ -897,14 +935,14 @@ mod tests {
     /// A snapshot's origin rebuilds the clock it came from.
     #[test]
     fn a_snapshot_continues_the_clock() {
-        let mut c = FrameClock::new(Beat(0.0), Bpm::of(97.0), SR);
-        c.advance(Samples(10_000), None);
+        let mut c = FrameClock::new(Beat::new(0.0), Bpm::of(97.0), SR);
+        c.advance(Samples::new(10_000), None);
         c.set_tempo(Bpm::of(133.0));
-        c.advance(Samples(5_555), None);
+        c.advance(Samples::new(5_555), None);
         let mut again = FrameClock::from_origin(c.origin(), c.tempo());
         assert_eq!(again.beat(), c.beat());
-        again.advance(Samples(777), None);
-        c.advance(Samples(777), None);
+        again.advance(Samples::new(777), None);
+        c.advance(Samples::new(777), None);
         assert_eq!(again.beat().get().to_bits(), c.beat().get().to_bits());
     }
 
@@ -914,10 +952,10 @@ mod tests {
     /// the clock only rolls or is told what it already runs at.
     #[test]
     fn every_discontinuity_and_nothing_else_moves_the_generation() {
-        let mut c = FrameClock::new(Beat(2.0), Bpm::of(120.0), SR);
+        let mut c = FrameClock::new(Beat::new(2.0), Bpm::of(120.0), SR);
         let g = |c: &FrameClock| c.generation();
         assert_eq!(g(&c), 0);
-        c.advance(Samples(4_800), None);
+        c.advance(Samples::new(4_800), None);
         c.set_tempo(Bpm::of(120.0));
         c.set_sample_rate(SR);
         assert_eq!(g(&c), 0, "rolling, and unchanged settings, are one line");
@@ -936,10 +974,10 @@ mod tests {
 
         // A loop one beat long, rolled exactly one beat: it wraps and lands
         // on the beat it left.
-        let mut l = FrameClock::new(Beat(4.0), Bpm::of(120.0), SR);
-        let one_beat = Samples(24_000);
+        let mut l = FrameClock::new(Beat::new(4.0), Bpm::of(120.0), SR);
+        let one_beat = Samples::new(24_000);
         l.advance(one_beat, LoopRange::new(Beat::new(4.0), Beat::new(5.0)));
-        assert_eq!(l.beat(), Beat(4.0), "the wrap lands where it left");
+        assert_eq!(l.beat(), Beat::new(4.0), "the wrap lands where it left");
         assert_eq!(l.generation(), 1, "but it jumped");
     }
 }

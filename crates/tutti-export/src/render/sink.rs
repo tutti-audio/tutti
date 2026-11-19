@@ -52,37 +52,37 @@ mod tests {
 
     fn cursor(start: usize, latency: usize, kept: usize, output_length: usize) -> BlockCursor {
         BlockCursor {
-            block_start: Samples(start),
-            latency: Samples(latency),
-            kept_so_far: Samples(kept),
-            output_length: Samples(output_length),
+            block_start: Samples::new(start),
+            latency: Samples::new(latency),
+            kept_so_far: Samples::new(kept),
+            output_length: Samples::new(output_length),
         }
     }
 
     #[test]
     fn a_block_entirely_before_the_gate_is_dropped() {
-        assert_eq!(cursor(0, 100, 0, 1000).window(Samples(64)), 0..0);
+        assert_eq!(cursor(0, 100, 0, 1000).window(Samples::new(64)), 0..0);
     }
 
     #[test]
     fn a_block_straddling_the_gate_keeps_its_tail() {
         // block 80..144, gate at 100 → keep indices 20..64
-        assert_eq!(cursor(80, 100, 0, 1000).window(Samples(64)), 20..64);
+        assert_eq!(cursor(80, 100, 0, 1000).window(Samples::new(64)), 20..64);
     }
 
     #[test]
     fn a_block_past_the_gate_is_kept_whole() {
-        assert_eq!(cursor(200, 100, 100, 1000).window(Samples(64)), 0..64);
+        assert_eq!(cursor(200, 100, 100, 1000).window(Samples::new(64)), 0..64);
     }
 
     #[test]
     fn the_last_block_is_capped_at_the_output_length() {
         // 990 of 1000 kept → at most 10 more
-        assert_eq!(cursor(200, 100, 990, 1000).window(Samples(64)), 0..10);
+        assert_eq!(cursor(200, 100, 990, 1000).window(Samples::new(64)), 0..10);
     }
 
     #[test]
     fn a_block_past_the_cap_is_dropped() {
-        assert_eq!(cursor(200, 100, 1000, 1000).window(Samples(64)), 0..0);
+        assert_eq!(cursor(200, 100, 1000, 1000).window(Samples::new(64)), 0..0);
     }
 }
