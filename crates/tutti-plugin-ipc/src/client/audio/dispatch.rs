@@ -931,6 +931,14 @@ pub(super) fn handle_control(
     Ok(())
 }
 
+/// Tells the audio lane the plugin has answered a rate change, once: its blocks
+/// go on before the answer's bookkeeping (the refusal's record and its events).
+fn answer_applied(applied: &mut Option<Reply<()>>) {
+    if let Some(applied) = applied.take() {
+        applied.send(());
+    }
+}
+
 /// A setting the audio lane holds its blocks for, applied on the control
 /// lane's thread: sent, and answered `applied` once the server has taken it.
 pub(super) fn handle_setting(
@@ -944,6 +952,7 @@ pub(super) fn handle_setting(
     let Lane { stream, owed } = lane;
     match setting {
         Setting::SampleRate(rate) => {
+            let mut applied = Some(applied);
             ipc::send(stream, &HostMessage::SetSampleRate { rate })?;
             // Wait for the answer: the plugin's re-activation is the slowest
             // thing the bridge asks of it, and the requests queued behind it
@@ -990,6 +999,11 @@ pub(super) fn handle_setting(
                     // stays loaded, the server renders silence for it, and the
                     // next rate change retries it.
                     BridgeMessage::SampleRateSet { rate, error } => {
+                        // A rate the plugin took lets the blocks go on at once;
+                        // a refusal is recorded first, so they find it.
+                        if error.is_none() {
+                            answer_applied(&mut applied);
+                        }
                         apply_rate_reply(lifecycle, inbox, rate, error);
                         break;
                     }
@@ -1001,7 +1015,7 @@ pub(super) fn handle_setting(
                     }
                 }
             }
-            applied.send(());
+            answer_applied(&mut applied);
         }
         Setting::RenderMode(mode) => {
             ipc::send(stream, &HostMessage::SetRenderMode { mode })?;
