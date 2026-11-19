@@ -15,9 +15,11 @@ workspace = true
 
 [dependencies]
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
+# `SplitMix64`, the one pseudo-random generator, behind the dither and noise sources.
+tutti-rt = { version = "0.0.1", path = "../tutti-rt", default-features = false }
 # The unit vocabulary (Hz / Seconds / Samples / Amplitude / Confidence / …),
 # `ChannelLayout`, `Interleaved` and the downmix helpers. Nothing here needs
-# the engine runtime, so it and `tutti-buffers` are the only tutti edges.
+# the engine runtime, so these are the only tutti edges.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 
 # `RealFft` (`fft/real.rs`), the one real-input FFT of the convolver, the

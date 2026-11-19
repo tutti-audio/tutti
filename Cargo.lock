@@ -2702,6 +2702,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-fixtures",
+ "tutti-rt",
  "tutti-units",
  "wide",
 ]
