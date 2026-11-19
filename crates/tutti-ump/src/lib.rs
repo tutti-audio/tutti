@@ -143,7 +143,7 @@ pub use flex_write::{
     flex_text_packets,
 };
 pub use held_controllers::HeldControllers;
-pub use held_keys::{Held, KeyBitset, Lane, LaneSet};
+pub use held_keys::{Held, KeyBitset, Lane};
 pub use manufacturer::{ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
