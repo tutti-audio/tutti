@@ -1,15 +1,15 @@
-//! `narrow` and `midi1`: a message at MIDI 1.0.
+//! `Voice1::try_from` and `midi1`: a message at MIDI 1.0.
 //!
 //! The expected bytes are written out from M2-104 Appendix D and M2-115, or
-//! follow from `widen` and the figures `narrow.rs` pins.
+//! follow from `Voice2::from` and the figures `to_midi1.rs` pins.
 
 use tutti_fixtures::midi;
-use tutti_midi_protocol::{NoMidi1Form, midi1, narrow, widen};
+use tutti_midi_protocol::midi1;
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, DeltaTicks, ManufacturerId, MdsChunkUmps, MdsIdentity,
-    Message, MidiChannel, MidiGroup, MixedDataSet, NoteNumber, NoteVelocity, PerNoteManagement,
-    RegisteredPerNoteController, Sysex7Packet, Sysex8StreamIds, SysexStatus, System,
-    TicksPerQuarterNote, U4, U7, U14, Utility, Voice1, Voice2,
+    Message, MidiChannel, MidiGroup, MixedDataSet, NoMidi1Form, NoteNumber, NoteVelocity,
+    PerNoteManagement, RegisteredPerNoteController, Sysex7Packet, Sysex8StreamIds, SysexStatus,
+    System, TicksPerQuarterNote, U4, U7, U14, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 
@@ -26,12 +26,12 @@ fn bytes(message: Message) -> Vec<Vec<u8>> {
 
 /// M2-104 section 7.4.2: a translated velocity that would be
 /// zero is replaced by 1. Every
-/// 16-bit velocity that narrows to 0, and 0 itself.
+/// 16-bit velocity that downscales to 0, and 0 itself.
 /// Spec: m2-104/7.4.2#1
 #[test]
-fn a_note_on_never_narrows_to_velocity_zero() {
+fn a_note_on_never_translates_to_velocity_zero() {
     for velocity in 0..=u16::MAX {
-        let Ok(Voice1::NoteOn { velocity: got, .. }) = narrow(Voice2::NoteOn {
+        let Ok(Voice1::NoteOn { velocity: got, .. }) = Voice1::try_from(Voice2::NoteOn {
             note: NoteNumber::of(60),
             velocity: NoteVelocity::new(velocity),
             attribute: Attribute::None,
@@ -51,7 +51,7 @@ fn a_note_on_never_narrows_to_velocity_zero() {
 #[test]
 fn a_note_off_keeps_a_zero_velocity() {
     for (velocity, want) in [(0, 0), (0x01FF, 0), (0x0200, 1), (0xFFFF, 127)] {
-        let off = narrow(Voice2::NoteOff {
+        let off = Voice1::try_from(Voice2::NoteOff {
             note: NoteNumber::of(60),
             velocity: NoteVelocity::new(velocity),
             attribute: Attribute::None,
@@ -130,7 +130,7 @@ fn a_bank_is_three_messages() {
 }
 
 /// MIDI 1.0 voice and System messages are their own bytes; a MIDI 2.0
-/// controller, pressure and bend narrow to the top bits.
+/// controller, pressure and bend downscale to the top bits.
 #[test]
 fn the_other_messages_are_their_bytes() {
     let channel = MidiChannel::of(1);
@@ -208,7 +208,7 @@ fn messages_without_a_midi1_form_send_nothing() {
         },
     ];
     for voice in none {
-        assert!(narrow(voice).is_err(), "{voice:?}");
+        assert!(Voice1::try_from(voice).is_err(), "{voice:?}");
         assert!(
             bytes(Message::Midi2(address(0), voice)).is_empty(),
             "{voice:?}"
@@ -218,12 +218,12 @@ fn messages_without_a_midi1_form_send_nothing() {
     assert!(bytes(Message::Sysex7(MidiGroup::FIRST, packet)).is_empty());
 }
 
-/// Widening a MIDI 1.0 voice message and narrowing it back returns it, for
+/// Translating a MIDI 1.0 voice message to MIDI 2.0 and back returns it, for
 /// every value on every channel, except the Note On at velocity 0 that
-/// `widen` turns into a Note Off (Appendix D.3.1).
+/// `Voice2::from` turns into a Note Off (Appendix D.3.1).
 /// Spec: m2-104/d.1.1#2, m2-104/d.1.2#1
 #[test]
-fn narrow_returns_what_widen_was_given() {
+fn to_midi1_returns_what_to_midi2_was_given() {
     for d1 in 0..128u8 {
         for d2 in 0..128u8 {
             let (note, v) = (NoteNumber::of(d1), U7::of(d2));
@@ -239,7 +239,11 @@ fn narrow_returns_what_widen_was_given() {
                 Voice1::PitchBend(U14::of(u16::from(d1) << 7 | u16::from(d2))),
             ];
             for voice in voices {
-                assert_eq!(narrow(widen(voice)), Ok(voice), "{voice:?}");
+                assert_eq!(
+                    Voice1::try_from(Voice2::from(voice)),
+                    Ok(voice),
+                    "{voice:?}"
+                );
             }
             let on = Voice1::NoteOn { note, velocity: v };
             let want = if d2 == 0 {
@@ -250,7 +254,7 @@ fn narrow_returns_what_widen_was_given() {
             } else {
                 on
             };
-            assert_eq!(narrow(widen(on)), Ok(want), "{on:?}");
+            assert_eq!(Voice1::try_from(Voice2::from(on)), Ok(want), "{on:?}");
         }
     }
 }
@@ -262,14 +266,14 @@ fn narrow_returns_what_widen_was_given() {
 fn a_refusal_names_why_there_is_no_midi1_message() {
     let note = NoteNumber::of(60);
     assert_eq!(
-        narrow(Voice2::PerNotePitchBend {
+        Voice1::try_from(Voice2::PerNotePitchBend {
             note,
             value: BendValue::new(0)
         }),
         Err(NoMidi1Form::PerNote)
     );
     assert_eq!(
-        narrow(Voice2::Registered {
+        Voice1::try_from(Voice2::Registered {
             bank: U7::of(0),
             index: U7::of(0),
             value: ControlValue::new(0)
@@ -277,7 +281,7 @@ fn a_refusal_names_why_there_is_no_midi1_message() {
         Err(NoMidi1Form::Parameter)
     );
     assert_eq!(
-        narrow(Voice2::PerNoteManagement {
+        Voice1::try_from(Voice2::PerNoteManagement {
             note,
             management: PerNoteManagement::Detach
         }),
@@ -285,32 +289,29 @@ fn a_refusal_names_why_there_is_no_midi1_message() {
     );
 }
 
-/// `narrow_message` is `narrow` on the voice with the Group and Channel kept
+/// `Message::try_to_midi1` is `Voice1::try_from` on the voice with the Group and Channel kept
 /// (M2-104 Appendix D.2): a MIDI 2.0 Note On on Group 2, Channel 5 is the MIDI
 /// 1.0 Note On there, and a message that is not MIDI 2.0 channel voice is as
 /// it came.
 #[test]
-fn narrow_message_keeps_the_address() {
-    use tutti_midi_protocol::narrow_message;
-    use tutti_ump::NoteVelocity;
+fn try_to_midi1_keeps_the_address() {
     let to = Address::new(MidiGroup::of(2), MidiChannel::of(5));
     let note = NoteNumber::of(60);
     let on2 = Message::Midi2(to, Voice2::note_on(note, NoteVelocity::from(U7::of(100))));
     assert_eq!(
-        narrow_message(on2),
+        on2.try_to_midi1(),
         Ok(Message::midi1(to, Voice1::note_on(note, U7::of(100))))
     );
     let clock = Message::System(MidiGroup::of(2), System::TimingClock);
-    assert_eq!(narrow_message(clock), Ok(clock));
+    assert_eq!(clock.try_to_midi1(), Ok(clock));
     let already = Message::midi1(to, Voice1::note_on(note, U7::of(9)));
-    assert_eq!(narrow_message(already), Ok(already));
+    assert_eq!(already.try_to_midi1(), Ok(already));
 }
 
 /// A message MIDI 1.0 has no single message for is refused with the reason
-/// `narrow` gives, not dropped: a Per-Note Pitch Bend (D.2.8).
+/// `Voice1::try_from` gives, not dropped: a Per-Note Pitch Bend (D.2.8).
 #[test]
-fn narrow_message_refuses_what_narrow_refuses() {
-    use tutti_midi_protocol::narrow_message;
+fn try_to_midi1_refuses_what_try_from_refuses() {
     let bend = Message::Midi2(
         address(0),
         Voice2::PerNotePitchBend {
@@ -318,7 +319,7 @@ fn narrow_message_refuses_what_narrow_refuses() {
             value: BendValue::CENTER,
         },
     );
-    assert_eq!(narrow_message(bend), Err(NoMidi1Form::PerNote));
+    assert_eq!(bend.try_to_midi1(), Err(NoMidi1Form::PerNote));
 }
 
 /// **SysEx 8, Mixed Data Set and Utility messages have no MIDI 1.0 bytes.**

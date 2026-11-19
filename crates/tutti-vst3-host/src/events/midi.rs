@@ -1,7 +1,7 @@
 //! A UMP event to VST3 event and back.
 
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{PitchBendSensitivity, widen};
+use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_plugin_types::{
     NoteExpressionType, NoteExpressionValue, WireMidi, expression_of_per_note_controller,
     group_of_port, per_note_message, per_note_tuning, plugin_note_id,
@@ -145,7 +145,7 @@ impl MidiEncoder {
     /// stream state the encoder holds.
     ///
     /// The packet is read through `Ump::decode`. A MIDI 1.0 note or key
-    /// pressure is widened ([`widen`]) and a MIDI 2.0 one is read as is, so
+    /// pressure is translated (`Voice2::from`) and a MIDI 2.0 one is read as is, so
     /// velocity and pressure reach the plugin at their full bit width as `f32`
     /// rather than through 7-bit MIDI 1.
     ///
@@ -203,11 +203,11 @@ impl MidiEncoder {
     fn message(&mut self, offset: i32, message: Message) {
         match message {
             Message::Midi1(address, voice) => match voice {
-                // Widened here, so a MIDI 1.0 Note On at velocity 0 is the Note
+                // Upscaled here, so a MIDI 1.0 Note On at velocity 0 is the Note
                 // Off of M2-104 App. D.3.1, which `voice2` encodes. `voice2`
                 // handles a MIDI 2.0 velocity of 0 itself.
                 Voice1::NoteOn { .. } | Voice1::NoteOff { .. } | Voice1::PolyPressure { .. } => {
-                    self.voice2(offset, address, widen(voice));
+                    self.voice2(offset, address, Voice2::from(voice));
                 }
                 Voice1::ControlChange { .. }
                 | Voice1::ProgramChange(_)
@@ -310,7 +310,7 @@ impl MidiEncoder {
                     // at velocity 0 as a release, so it goes at the smallest
                     // velocity the field carries above 0: M2-104 D.2's rule for a
                     // note-on that cannot be 0 (velocity 0 -> 1). CLAP carries the
-                    // 0. A widened MIDI 1.0 Note On at velocity 0 never gets here:
+                    // 0. A translated MIDI 1.0 Note On at velocity 0 never gets here:
                     // it arrives as a Note Off.
                     let velocity = velocity.map_or(1, |v| v.get().max(1));
                     self.out.push(on_bus(

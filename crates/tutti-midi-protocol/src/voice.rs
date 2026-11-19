@@ -1,86 +1,9 @@
-//! The stateless `Voice1` to `Voice2` widening, and reading a channel voice
-//! message through it.
+//! Reading a channel voice message at MIDI 2.0.
 
-use tutti_ump::{
-    Address, Attribute, BendValue, ControlValue, Message, MidiGroup, NoteVelocity, Ump, Voice1,
-    Voice2, parse_exact,
-};
-
-/// The release velocity a MIDI 1.0 Note On at velocity 0 becomes (M2-104
-/// Appendix D.3.1).
-const NOTE_ON_ZERO_RELEASE: NoteVelocity = NoteVelocity::new(0x8000);
-
-/// The MIDI 2.0 message that means what `voice` means (M2-104 Appendix D.3,
-/// M2-115 section 3). The caller keeps the [`Address`] unchanged.
-///
-/// Control Changes that would need RPN or Bank Select assembly widen by value
-/// as plain Control Changes, and a Program Change has no bank.
-#[inline]
-#[must_use]
-pub fn widen(voice: Voice1) -> Voice2 {
-    match voice {
-        Voice1::NoteOn { note, velocity } if velocity.get() == 0 => Voice2::NoteOff {
-            note,
-            velocity: NOTE_ON_ZERO_RELEASE,
-            attribute: Attribute::None,
-        },
-        Voice1::NoteOn { note, velocity } => Voice2::NoteOn {
-            note,
-            velocity: NoteVelocity::from(velocity),
-            attribute: Attribute::None,
-        },
-        Voice1::NoteOff { note, velocity } => Voice2::NoteOff {
-            note,
-            velocity: NoteVelocity::from(velocity),
-            attribute: Attribute::None,
-        },
-        Voice1::PolyPressure { note, pressure } => Voice2::PolyPressure {
-            note,
-            value: ControlValue::from(pressure),
-        },
-        Voice1::ControlChange { controller, value } => Voice2::ControlChange {
-            controller,
-            value: ControlValue::from(value),
-        },
-        Voice1::ProgramChange(program) => Voice2::ProgramChange {
-            program,
-            bank: None,
-        },
-        Voice1::ChannelPressure(pressure) => Voice2::ChannelPressure(ControlValue::from(pressure)),
-        Voice1::PitchBend(bend) => Voice2::PitchBend(BendValue::from(bend)),
-    }
-}
-
-/// `message` as MIDI 2.0 when it is a MIDI 1.0 channel voice message
-/// ([`widen`], address kept); every other message as it came.
-///
-/// Stateless, like `widen`: a MIDI 1.0 RPN run widens as plain Control
-/// Changes. An edge that can see a whole stream runs a
-/// [`Midi2Translator`](crate::Midi2Translator) instead.
-#[inline]
-#[must_use]
-pub fn widen_message(message: Message) -> Message {
-    match message {
-        Message::Midi1(address, voice) => Message::Midi2(address, widen(voice)),
-        other => other,
-    }
-}
-
-/// The packet for the MIDI 1.0 message at the start of `bytes` (a plugin's or
-/// a file's wire bytes, padding after the message ignored), in `group`: read by
-/// [`parse_exact`] and [`widen_message`]d, so a channel voice message
-/// is MIDI 2.0 and a System one is as it is.
-///
-/// `None` when `parse_exact` reads none: a SysEx or undefined status,
-/// a message cut short, or a data byte with its top bit set.
-#[inline]
-#[must_use]
-pub fn widen_bytes(group: MidiGroup, bytes: &[u8]) -> Option<Ump> {
-    parse_exact(group, bytes).map(|message| Ump::from(widen_message(message)))
-}
+use tutti_ump::{Address, Message, Ump, Voice2};
 
 /// The channel voice message `ump` carries, as the MIDI 2.0 message it means
-/// (M2-104 Appendix D.3: a MIDI 1.0 one is widened, so its Note On at velocity
+/// (M2-104 Appendix D.3: a MIDI 1.0 one is translated, so its Note On at velocity
 /// 0 is a Note Off, while a MIDI 2.0 Note On at velocity 0 stays a Note On), or
 /// `None` for any other packet, one [`Ump::decode`] cannot frame included.
 ///
@@ -89,7 +12,7 @@ pub fn widen_bytes(group: MidiGroup, bytes: &[u8]) -> Option<Ump> {
 #[inline]
 #[must_use]
 pub fn channel_voice(packet: impl Into<Ump>) -> Option<(Address, Voice2)> {
-    match packet.into().decode().ok().map(widen_message)? {
+    match packet.into().decode().ok().map(Message::to_midi2)? {
         Message::Midi2(address, voice) => Some((address, voice)),
         _ => None,
     }

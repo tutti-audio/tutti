@@ -61,7 +61,7 @@ fn ramp(frames: usize, base: f32) -> Vec<f32> {
 fn note(offset: usize, on: bool) -> UmpAt {
     let (group, channel) = (MidiGroup::FIRST, MidiChannel::of(0));
     let ump = if on {
-        // 7-bit 100, widened (M2-115).
+        // 7-bit 100, upscaled (M2-115).
         midi::note_on(
             tutti_ump::Address::new(group, channel),
             60,
