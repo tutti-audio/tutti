@@ -49,14 +49,14 @@ pub const MAX_LANE_DEPTHS: usize = MAX_LANE_LAYERS + MAX_LANE_INPUTS;
 #[derive(Clone, Copy, Debug)]
 pub struct DepthSnapshot {
     len: usize,
-    bits: [u64; MAX_LANE_DEPTHS],
+    depths: [Depth; MAX_LANE_DEPTHS],
 }
 
 impl DepthSnapshot {
     /// The snapshot of a program with no depth cells.
     pub const EMPTY: Self = Self {
         len: 0,
-        bits: [0; MAX_LANE_DEPTHS],
+        depths: [Depth::NONE; MAX_LANE_DEPTHS],
     };
 }
 
@@ -69,7 +69,11 @@ impl Default for DepthSnapshot {
 /// Equal when every depth is the same bit for bit.
 impl PartialEq for DepthSnapshot {
     fn eq(&self, other: &Self) -> bool {
-        self.len == other.len && self.bits[..self.len] == other.bits[..other.len]
+        self.len == other.len
+            && self.depths[..self.len]
+                .iter()
+                .zip(&other.depths[..other.len])
+                .all(|(a, b)| a.get().to_bits() == b.get().to_bits())
     }
 }
 
@@ -546,7 +550,7 @@ impl ControlProgram {
     pub fn depth_snapshot(&self) -> DepthSnapshot {
         let mut snapshot = DepthSnapshot::EMPTY;
         for (at, (_, cell)) in self.depths.iter().enumerate() {
-            snapshot.bits[at] = cell.load().get().to_bits();
+            snapshot.depths[at] = cell.load();
         }
         snapshot.len = self.depths.len();
         snapshot
@@ -557,7 +561,7 @@ impl ControlProgram {
     fn amount_of(&self, id: LayerId, amount: Amount, depths: &DepthSnapshot) -> Amount {
         match self.depths.binary_search_by_key(&id, |(id, _)| *id) {
             Ok(at) if at < depths.len => Amount {
-                depth: Depth::clamped(f64::from_bits(depths.bits[at])),
+                depth: depths.depths[at],
                 ..amount
             },
             _ => amount,
