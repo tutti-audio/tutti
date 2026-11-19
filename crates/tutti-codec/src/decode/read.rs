@@ -1,7 +1,7 @@
 //! Decoding a file into a [`Wave`], and reading its header without decoding.
 //!
 //! The entry points are [`read_wave`], [`read_wave_metadata`],
-//! [`read_wave_metadata_bytes`] and [`read_wave_bytes`]. Decoded samples are held to the
+//! [`read_wave_metadata_from`] and [`read_wave_bytes`]. Decoded samples are held to the
 //! generator of the committed fixtures by `tests/decode_fixtures.rs`.
 
 use std::any::Any;
@@ -378,20 +378,27 @@ pub fn read_wave<S: Sample>(path: impl AsRef<Path>) -> Result<Wave<S>, DecodeErr
 /// this build reads, it has no audio track, or the track states no sample
 /// rate ([`DecodeError::NoSampleRate`]).
 ///
-/// [`read_wave_metadata_bytes`] reads a file held in memory.
+/// [`read_wave_metadata_from`] reads a file from any reader, such as a
+/// `Cursor` over bytes held in memory.
 pub fn read_wave_metadata(path: impl AsRef<Path>) -> Result<WaveMetadata, DecodeError> {
     metadata_of(probe_path(path.as_ref()).map_err(convert)?)
 }
 
-/// Reads the metadata of a complete file held in memory, as
+/// Reads the metadata of a complete file from `reader`, as
 /// [`read_wave_metadata`] reads a file's. There is no extension hint, so the
 /// container is identified from the bytes alone.
+///
+/// A file held in memory is read through a `Cursor`; a shared buffer
+/// (`Cursor<Arc<[u8]>>`) is read without a copy, so one buffer can be probed
+/// and opened as often as needed.
 ///
 /// # Errors
 ///
 /// As [`read_wave_metadata`], less the open.
-pub fn read_wave_metadata_bytes(bytes: Vec<u8>) -> Result<WaveMetadata, DecodeError> {
-    metadata_of(probe_source(Box::new(std::io::Cursor::new(bytes)), &Hint::new()).map_err(convert)?)
+pub fn read_wave_metadata_from<R: Read + Seek + Send + 'static>(
+    reader: R,
+) -> Result<WaveMetadata, DecodeError> {
+    metadata_of(probe_reader(reader).map_err(convert)?)
 }
 
 /// The metadata of a probed container's first audio track.

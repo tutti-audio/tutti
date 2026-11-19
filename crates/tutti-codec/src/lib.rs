@@ -88,7 +88,7 @@ mod writer;
 pub use aiff::AiffWriter;
 #[cfg(decode)]
 pub use decode::{
-    FileIn, WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata, read_wave_metadata_bytes,
+    FileIn, WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata, read_wave_metadata_from,
 };
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;

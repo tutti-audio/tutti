@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use tutti_buffers::Wave;
 use tutti_buffers::{Interleaved, InterleavedMut, PlanesMut, Pull, Source, deinterleave};
 use tutti_codec::{
-    FileIn, read_wave, read_wave_bytes, read_wave_metadata, read_wave_metadata_bytes,
+    FileIn, read_wave, read_wave_bytes, read_wave_metadata, read_wave_metadata_from,
 };
 use tutti_units::Samples;
 
@@ -566,8 +566,8 @@ fn an_a_law_wav_is_16_bit_integers() {
 #[test]
 fn the_metadata_of_a_files_bytes_is_the_metadata_of_its_path() {
     for &name in FIXTURES {
-        let bytes = std::fs::read(asset(name)).expect("fixture");
-        let from_bytes = read_wave_metadata_bytes(bytes).expect("probe bytes");
+        let bytes: std::sync::Arc<[u8]> = std::fs::read(asset(name)).expect("fixture").into();
+        let from_bytes = read_wave_metadata_from(std::io::Cursor::new(bytes)).expect("probe bytes");
         let from_path = read_wave_metadata(asset(name)).expect("probe path");
         assert_eq!(from_bytes, from_path, "{name}");
     }
