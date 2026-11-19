@@ -616,7 +616,6 @@ fn a_request_for_the_session_to_send_jr_is_granted_and_the_output_stamps() {
 /// JR Timestamps) is a fact about the link, so the device's configuration
 /// records it (the device receives them) and the stream settles: the same
 /// request again changes nothing.
-/// Spec: m2-104/7.1.6.3#1
 #[test]
 fn a_granted_jr_request_is_recorded_for_an_os_described_device_and_settles() {
     let silent = Endpoint::new(Supports::of(Capabilities {
