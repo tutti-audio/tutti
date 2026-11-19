@@ -217,7 +217,7 @@ impl ClapLoaded {
             .audio_side()
             .expect("an activated plugin has an audio half");
         let (sink, drain) = tutti_plugin_types::edits(EDIT_CAPACITY);
-        let (reports, reported) = tutti_plugin_types::edits(REPORT_CAPACITY);
+        let (reports, reported) = tutti_plugin_types::reports(REPORT_CAPACITY);
         let reports_dropped = Arc::new(AtomicU64::new(0));
         let processor = ClapProcessor::new(ProcessorParts {
             audio_side,
