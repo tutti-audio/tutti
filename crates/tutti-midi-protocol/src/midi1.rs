@@ -16,7 +16,7 @@ pub enum NoMidi1Form {
     #[error("a per-note controller or bend has no MIDI 1.0 message")]
     PerNote,
     /// A Registered or Assignable Controller, absolute or relative: MIDI 1.0
-    /// sends it as four Control Changes ([`Narrower`](crate::Narrower), which
+    /// sends it as four Control Changes ([`Midi1Translator`](crate::Midi1Translator), which
     /// keeps the select).
     #[error("a registered or assignable controller is four MIDI 1.0 messages")]
     Parameter,
@@ -26,7 +26,7 @@ pub enum NoMidi1Form {
 }
 
 /// The Default Translation; [`narrow_with`] and
-/// [`Narrower::with_mode`](crate::Narrower::with_mode) run the alternate ones.
+/// [`Midi1Translator::with_mode`](crate::Midi1Translator::with_mode) run the alternate ones.
 ///
 /// `voice` at MIDI 1.0 resolution (M2-115 section 3.4), or the [`NoMidi1Form`]
 /// that says why MIDI 1.0 has no single message for it: per-note controllers
@@ -94,7 +94,7 @@ pub fn narrow_with(extremes: ExtremeValues, voice: Voice2) -> Result<Voice1, NoM
     })
 }
 
-/// The Default Translation; see [`Narrower::with_mode`](crate::Narrower::with_mode) for the alternates.
+/// The Default Translation; see [`Midi1Translator::with_mode`](crate::Midi1Translator::with_mode) for the alternates.
 ///
 /// `message` as MIDI 1.0 when it is a MIDI 2.0 channel voice message
 /// ([`narrow`], Group and Channel kept); every other message as it came. The
@@ -103,7 +103,7 @@ pub fn narrow_with(extremes: ExtremeValues, voice: Voice2) -> Result<Voice1, NoM
 ///
 /// Stateless, like `narrow`: a Program Change keeps its program and loses its
 /// bank, and a Registered or Assignable Controller is refused. A stream that
-/// must keep them runs a [`Narrower`](crate::Narrower); the wire bytes are
+/// must keep them runs a [`Midi1Translator`](crate::Midi1Translator); the wire bytes are
 /// [`midi1()`](fn@midi1).
 ///
 /// # Examples
@@ -129,7 +129,7 @@ pub fn narrow_message(message: Message) -> Result<Message, NoMidi1Form> {
     }
 }
 
-/// The Default Translation; see [`Narrower::with_mode`](crate::Narrower::with_mode) for the alternates.
+/// The Default Translation; see [`Midi1Translator::with_mode`](crate::Midi1Translator::with_mode) for the alternates.
 ///
 /// The MIDI 1.0 messages `message` stands for, in the order to send them:
 /// none when it has no MIDI 1.0 form, three for a MIDI 2.0 Program Change with
@@ -138,7 +138,7 @@ pub fn narrow_message(message: Message) -> Result<Message, NoMidi1Form> {
 ///
 /// The bytes of the wire, for an output that speaks MIDI 1.0 and has no state
 /// to keep: a stream that must keep Registered and Assignable Controllers is a
-/// [`Narrower`](crate::Narrower). Takes a [`Message`] or the [`Ump`] it is (a
+/// [`Midi1Translator`](crate::Midi1Translator). Takes a [`Message`] or the [`Ump`] it is (a
 /// packet that does not decode has no MIDI 1.0 form).
 pub fn midi1(packet: impl Into<Ump>) -> impl Iterator<Item = Midi1Bytes> {
     let none = None;

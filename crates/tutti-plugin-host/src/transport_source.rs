@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 use tutti_plugin_types::{Features, LoopRegion, TransportInfo};
 use tutti_rt::Loan;
-use tutti_transport::MeterSlotReader;
+use tutti_transport::TimeSignatureSlotReader;
 
 /// The transport facts a plugin snapshot is made of, at one frame.
 ///
@@ -547,7 +547,7 @@ pub fn transport_info(s: &Snapshot, meter: &MeterMap) -> TransportInfo {
 pub(crate) struct TransportSource {
     /// A reader of the node's meter cell, registered when the source was
     /// built: installing or clearing a meter publishes into it.
-    meter: MeterSlotReader,
+    meter: TimeSignatureSlotReader,
     /// The meter read when none is installed (4/4 from bar 0), built once on
     /// the control side because building a `MeterMap` allocates.
     default_meter: MeterMap,
@@ -568,7 +568,7 @@ impl std::fmt::Debug for TransportSource {
 
 impl TransportSource {
     /// A source reading `meter`, nothing rendered, on the host clock.
-    pub fn new(meter: MeterSlotReader) -> Self {
+    pub fn new(meter: TimeSignatureSlotReader) -> Self {
         Self {
             meter,
             default_meter: MeterMap::default(),

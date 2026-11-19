@@ -261,7 +261,7 @@ the interpreter.
   drain) is built; a fork's node registers on its own new cell,
   and a control-side `&self` method keeps a mirror instead of reading a
   cell the audio thread reads. The plugin meter is one cell per node
-  (`MeterSlot`), which `ProjectMeter::set_meter` publishes into before it
+  (`TimeSignatureSlot`), which `ProjectMeter::set_meter` publishes into before it
   returns. `MidiIn::poll_block` takes `&mut self`. `debug_check_reclaiming`
   and `PARKED_LOAN_LIMIT` are gone: a node cannot park a `Loan` across
   blocks, and a `mem::forget` pins one value per reader. The per-channel
@@ -322,7 +322,7 @@ the interpreter.
   the settings in force since, erring long. The figure is measured from the last non-quiet input
   frame, not from the call, and it matters only for a node **without event
   inputs** (one with event inputs parks on its own `Status::Idle`).
-  `contract::assert_honest_tail` checks the duty for an impulse in. Pinned by `tests/executor/executor.rs`
+  `contract::assert_declared_tail` checks the duty for an impulse in. Pinned by `tests/executor/executor.rs`
   (`a_reported_tail_shorter_than_the_ceiling_is_what_the_skip_waits`,
   `a_reported_tail_above_the_ceiling_is_clamped`,
   `a_call_that_reports_nothing_restores_the_ceiling`,
@@ -739,7 +739,7 @@ place that loses precision to be written out explicitly:
    `ParamRamp` can only be built from a `PerSample` key, so automating a
    block-rate knob is a compile error.
 3. **Commands must say when, for the graph and the transport.** Control-thread
-   commands take `At::{Frame(Frame), Beat(Beat), NextBlock}` (`tutti-types`,
+   commands take `At::{Frame(Frame), Beat::new(Beat), NextBlock}` (`tutti-types`,
    so the engine's transport commands share it), with no untimed overload.
    `NextBlock` stays available, but it is a visible, greppable choice.
    `Editor::schedule` sends a command over its own preallocated SPSC ring,
@@ -805,7 +805,7 @@ place that loses precision to be written out explicitly:
    The `Net` path (deleted with fundsp) rendered the pieces one after
    another instead, applying the commands between them. Beats resolved by
    the graph's rule on both paths (the Net path with the tempo its clock
-   actually ran at, `tempo_in_force`, after the clock's hysteresis). A command past the 8-cut bound, or already past
+   actually ran at, `current_tempo`, after the clock's hysteresis). A command past the 8-cut bound, or already past
    due, lands at the next block's first frame and is counted
    (`late_command_count`); an `At::NextBlock` needs no cut and is never late.
    Commands due on one frame apply in send order. On the Graph path the
@@ -1977,7 +1977,7 @@ behind them:
   graph has no control-side copy, so it drives the executor instead.
 
 For the native backend: `crossfade_audio_node` maps to
-`Editor::replace(key, unit, Fade::seconds(Seconds(0.005), rate, CrossfadeCurve::EqualAmplitude))`.
+`Editor::replace(key, unit, Fade::seconds(Seconds::new(0.005), rate, CrossfadeCurve::EqualAmplitude))`.
 **`set_latency` × fades:** a runtime latency
 change at a key that is mid-fade, running or queued, is a hard edit for the
 fade. The next commit carries the key in `Delta::cuts`; the executor retires
@@ -6467,7 +6467,7 @@ bits, as `ParamRange` is), the weighted kernel and ramp, the cell,
   whose only change is a base or a range sends nothing. A fork keeps the
   entries of the edges it keeps.
 - **`Amplitude` is a signed weight here.** Its docs name zero as its floor; a
-  negative edge weight (polarity) is representable (`Amplitude(-1.0)`) and
+  negative edge weight (polarity) is representable (`Amplitude::new(-1.0)`) and
   accepted, as the section above intends.
 - **Tests.** `tests/edge_gain.rs` (the fold, the wide chain, unity against the
   plain sum and the one-edge corner, the ramp, the carry across commits, the
@@ -8303,7 +8303,7 @@ fourth.
 >
 > **The control lane:** `ControlLaneNode` sends a target's whole
 > `ControlProgram` on a 32-frame grid of the play clock plus every corner,
-> and `AutomationLaneNode::for_param` / `for_foreign` now build one (014
+> and `AutomationLaneNode::for_param` / `for_id` now build one (014
 > §12.2). The producer and the plugin delivery described under "Curve
 > segments" below are superseded where marked. It is built over the
 > shared point pool (014 §9's
@@ -8689,7 +8689,7 @@ the source stands ("Shaped ramps" below).
   segment's endpoints are never rewritten: a range that shrinks pins the
   value, and widening it releases the value onto the curve where the
   segment has run on to.
-- **The producer: `AutomationLaneNode::for_param` / `for_foreign`.**
+- **The producer: `AutomationLaneNode::for_param` / `for_id`.**
   **Superseded by doc 014's control lane (§12.2):** these return a `ControlLaneNode`; a
   piece with no segment shape goes on the play-clock grid, not at block
   edges; the capacity is 256 and past it the lane thins its grid and
@@ -8865,7 +8865,7 @@ a gated `WorkerPool`, and bit for bit serial against pools of 2, 3, 4 and
 end value on its frame, an interruption), and `tests/clap_nodes/clap_automation.rs`
 against the reference CLAP plugin's gain: a scheduled segment drives it
 through the curve to exactly its end value on its frame across four
-chunks, an interrupting ramp wins, and a `for_foreign` lane does the
+chunks, an interrupting ramp wins, and a `for_id` lane does the
 same along its envelope.
 
 **Deferred.** `LayeredCurve` and the automation `Recorder` answer
@@ -10596,7 +10596,7 @@ updated; un-parking ports it.
   editor's return types and errors. The **heard tap is not a facet**: its
   writer is in the engine's output buffer, after the declick fader, which the
   graph does not own, so it stays `Session::open_heard_tap`. A busy audio
-  thread is the outcome `HeardOpen::Retry` there, not a `HeardTapError` (which
+  thread is the outcome `OutputTapOpen::Retry` there, not a `HeardTapError` (which
   keeps the refusals for good: `Detached`, `Busy`, `NotOpen`).
 - **Plumbing.** `take_audio_side`, `AudioSide` (`tick`, `render`,
   `set_transport`) and `Graph::testing()` (`prepared`, `is_repreparing`,

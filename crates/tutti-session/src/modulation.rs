@@ -767,7 +767,7 @@ impl ModState {
             .range((node, ParamId::new(0))..=(node, ParamId::new(u32::MAX)))
             .filter_map(|(&(_, id), &target)| {
                 let (_, lane) = self.lane(target)?;
-                lane.knob().is_some().then(|| (id, lane.clone()))
+                lane.value().is_some().then(|| (id, lane.clone()))
             })
             .collect()
     }
@@ -1701,7 +1701,7 @@ impl Mods<'_> {
     /// [`Hz`](tutti_units::Hz)), an [`Edge`] (its gain, in
     /// [`Amplitude`](tutti_units::Amplitude)) or a [`MixRef`] (in
     /// [`Mix`](tutti_units::Mix)), and the range is a range of that unit:
-    /// `m.range(lp.cutoff(), Hz(100.0)..Hz(4000.0))?`. A plugin's param, which
+    /// `m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4000.0))?`. A plugin's param, which
     /// has no unit tutti knows, takes [`range_raw`](Self::range_raw).
     ///
     /// # Errors

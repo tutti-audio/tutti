@@ -1,4 +1,4 @@
-//! Taps, event taps and meters: opening, closing and reaping the copies
+//! Taps, event taps and meters: opening, closing and pruning the copies
 //! out of the graph.
 
 use tutti_buffers::Float;
@@ -223,7 +223,7 @@ impl<F: Float> Editor<F> {
     /// A dropped reader leaves its tap open (the audio thread then writes
     /// nothing for it); this is the control-side tick that takes it out of the
     /// plan. Moves the spec only when it closes one.
-    pub fn reap_taps(&mut self) -> usize {
+    pub fn prune_taps(&mut self) -> usize {
         let gone = self.taps.dropped();
         for &id in &gone {
             // Open: the reader table named it.
@@ -329,7 +329,7 @@ impl<F: Float> Editor<F> {
     /// returns how many. A dropped reader leaves its tap open (the audio
     /// thread then writes nothing for it); this is the control-side tick that
     /// takes it out of the plan. Moves the spec only when it closes one.
-    pub fn reap_event_taps(&mut self) -> usize {
+    pub fn prune_event_taps(&mut self) -> usize {
         let gone = self.event_taps.dropped();
         for &id in &gone {
             // Open: the reader table named it.
@@ -432,7 +432,7 @@ impl<F: Float> Editor<F> {
     /// many. A dropped reader leaves its meter in the plan (the op then
     /// measures for nobody); this is the control-side tick that takes it out.
     /// Moves the spec only when it closes one.
-    pub fn reap_meters(&mut self) -> usize {
+    pub fn prune_meters(&mut self) -> usize {
         let gone = self.meters.dropped();
         for &id in &gone {
             // Open: the reader table named it.

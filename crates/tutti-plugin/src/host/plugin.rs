@@ -12,14 +12,7 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_rt::LockExt;
 
 use crate::host::node::PluginClient;
-#[cfg(any(
-    feature = "vst2",
-    feature = "clap",
-    feature = "vst3",
-    all(feature = "au", target_os = "macos")
-))]
-use tutti_plugin_host::InProcClient;
-use tutti_plugin_host::PluginHandle;
+use tutti_plugin_host::{Commit, InProcessClient, InProcessNode, InProcessRebinder, PluginHandle};
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::BridgeResult;
 #[cfg(any(
@@ -44,33 +37,9 @@ use tutti_units::SampleRate;
 /// carrying one) pay the larger figure.
 enum Placed {
     Served(Box<PluginClient>),
-    #[cfg(feature = "vst2")]
-    Vst2(Box<InProcClient<tutti_vst2_host::Vst2Loaded>>),
-    #[cfg(feature = "clap")]
-    Clap(Box<InProcClient<tutti_clap_host::ClapLoaded>>),
-    #[cfg(feature = "vst3")]
-    Vst3(Box<InProcClient<tutti_vst3_host::Vst3Loaded>>),
-    #[cfg(all(feature = "au", target_os = "macos"))]
-    Au(Box<InProcClient<tutti_au_host::AuLoaded>>),
-}
-
-/// Runs `$in_process` on the client of whichever in-process format a [`Placed`]
-/// holds, or `$served` on the served client: the one place the format arms are
-/// listed for a call that does not change a client's type.
-macro_rules! placed {
-    ($placed:expr, served $s:ident => $served:expr, in_process $c:ident => $in_process:expr $(,)?) => {
-        match $placed {
-            Placed::Served($s) => $served,
-            #[cfg(feature = "vst2")]
-            Placed::Vst2($c) => $in_process,
-            #[cfg(feature = "clap")]
-            Placed::Clap($c) => $in_process,
-            #[cfg(feature = "vst3")]
-            Placed::Vst3($c) => $in_process,
-            #[cfg(all(feature = "au", target_os = "macos"))]
-            Placed::Au($c) => $in_process,
-        }
-    };
+    /// Built only where a format feature is on.
+    #[allow(dead_code)]
+    InProcess(InProcessClient),
 }
 
 /// A loaded plugin: its audio node, its control surface, and the per-block
@@ -264,7 +233,6 @@ impl Plugin {
                 plugin,
                 sample_rate,
                 state,
-                Placed::Vst2,
             ),
             #[cfg(feature = "clap")]
             PluginFormat::Clap => Self::load_in_process::<tutti_clap_host::ClapLoaded>(
@@ -273,7 +241,6 @@ impl Plugin {
                 plugin,
                 sample_rate,
                 state,
-                Placed::Clap,
             ),
             #[cfg(feature = "vst3")]
             PluginFormat::Vst3 => Self::load_in_process::<tutti_vst3_host::Vst3Loaded>(
@@ -282,7 +249,6 @@ impl Plugin {
                 plugin,
                 sample_rate,
                 state,
-                Placed::Vst3,
             ),
             #[cfg(all(feature = "au", target_os = "macos"))]
             PluginFormat::AudioUnit => Self::load_in_process::<tutti_au_host::AuLoaded>(
@@ -291,7 +257,6 @@ impl Plugin {
                 plugin,
                 sample_rate,
                 state,
-                Placed::Au,
             ),
             // `Loadable::placement` refused every format with no host built in; this
             // arm is the same refusal, for a caller that skipped it.
@@ -303,7 +268,7 @@ impl Plugin {
     }
 
     /// Loads the format `L` in this process, restoring `state` before it is
-    /// activated, and wraps its client as `place`.
+    /// activated.
     #[cfg(any(
         feature = "vst2",
         feature = "clap",
@@ -316,7 +281,6 @@ impl Plugin {
         plugin: &PluginRef,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-        place: fn(Box<InProcClient<L>>) -> Placed,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)>
     where
         L: tutti_plugin_types::InProcess + 'static,
@@ -345,7 +309,7 @@ impl Plugin {
         let plugin = plugin.identified(&handle.descriptor().id);
         Ok((
             Self {
-                placed: place(Box::new(client)),
+                placed: Placed::InProcess(InProcessClient::new(client)),
                 handle,
                 plugin,
             },
@@ -369,8 +333,7 @@ impl Plugin {
     pub fn hosting(&self) -> Hosting {
         match &self.placed {
             Placed::Served(_) => Hosting::OutOfProcess,
-            #[allow(unreachable_patterns)]
-            _ => Hosting::InProcess,
+            Placed::InProcess(_) => Hosting::InProcess,
         }
     }
 
@@ -450,7 +413,10 @@ impl Plugin {
         if !self.accepts(Features::RENDER_MODE) {
             return false;
         }
-        placed!(&self.placed, served c => c.set_render_mode(mode), in_process c => c.set_render_mode(mode))
+        match &self.placed {
+            Placed::Served(c) => c.set_render_mode(mode),
+            Placed::InProcess(c) => c.set_render_mode(mode),
+        }
     }
 
     /// Gives the plugin the project meter, for the time signature and bar of
@@ -482,7 +448,10 @@ impl Plugin {
     /// what a host keeps to install the meter after the plugin has moved
     /// into a graph (the same cell [`set_meter`](Self::set_meter) writes).
     pub fn meter(&self) -> tutti_plugin_host::PluginMeter {
-        placed!(&self.placed, served c => c.controls().meter(), in_process c => c.controls().meter())
+        match &self.placed {
+            Placed::Served(c) => c.controls().meter(),
+            Placed::InProcess(c) => c.meter(),
+        }
     }
 
     /// What the node counts and holds, for either hosting: its meter cell and
@@ -490,7 +459,10 @@ impl Plugin {
     /// merged or refused). The same cells the node writes, so a host keeps
     /// this to read them after the plugin has moved into a graph.
     pub fn node_controls(&self) -> tutti_plugin_host::NodeControls {
-        placed!(&self.placed, served c => (*c.controls()).clone(), in_process c => c.controls())
+        match &self.placed {
+            Placed::Served(c) => (*c.controls()).clone(),
+            Placed::InProcess(c) => c.controls(),
+        }
     }
 
     /// Returns whether the plugin takes chord and scale context (it declared
@@ -500,7 +472,10 @@ impl Plugin {
     /// event input. `false` for a plugin that declined, and for an in-process
     /// node, whose event input takes only MIDI.
     pub fn takes_harmony(&self) -> bool {
-        placed!(&self.placed, served c => c.takes_harmony(), in_process _c => false)
+        match &self.placed {
+            Placed::Served(c) => c.takes_harmony(),
+            Placed::InProcess(_) => false,
+        }
     }
 
     // ---- The graph node ---------------------------------------------------
@@ -531,29 +506,12 @@ impl Plugin {
                 let rebinder = PluginRebinder::served(&bound);
                 (BoundPlaced::Served(Box::new(bound)), rebinder)
             }
-            #[cfg(feature = "vst2")]
-            Placed::Vst2(c) => {
-                let rebinder =
-                    PluginRebinder::in_process(c.rebinder(tempo.clone()), BoundPlaced::Vst2);
-                (BoundPlaced::Vst2(Box::new(c.bind(tempo))), rebinder)
-            }
-            #[cfg(feature = "clap")]
-            Placed::Clap(c) => {
-                let rebinder =
-                    PluginRebinder::in_process(c.rebinder(tempo.clone()), BoundPlaced::Clap);
-                (BoundPlaced::Clap(Box::new(c.bind(tempo))), rebinder)
-            }
-            #[cfg(feature = "vst3")]
-            Placed::Vst3(c) => {
-                let rebinder =
-                    PluginRebinder::in_process(c.rebinder(tempo.clone()), BoundPlaced::Vst3);
-                (BoundPlaced::Vst3(Box::new(c.bind(tempo))), rebinder)
-            }
-            #[cfg(all(feature = "au", target_os = "macos"))]
-            Placed::Au(c) => {
-                let rebinder =
-                    PluginRebinder::in_process(c.rebinder(tempo.clone()), BoundPlaced::Au);
-                (BoundPlaced::Au(Box::new(c.bind(tempo))), rebinder)
+            Placed::InProcess(c) => {
+                let (node, rebinder) = c.bind(tempo);
+                (
+                    BoundPlaced::InProcess(node),
+                    PluginRebinder::in_process(rebinder),
+                )
             }
         };
         (BoundPlugin { bound }, rebinder)
@@ -581,8 +539,7 @@ impl Plugin {
     pub fn into_client(self) -> std::result::Result<Box<PluginClient>, Box<Self>> {
         match self.placed {
             Placed::Served(c) => Ok(c),
-            #[allow(unreachable_patterns)]
-            _ => Err(Box::new(self)),
+            Placed::InProcess(_) => Err(Box::new(self)),
         }
     }
 }
@@ -644,27 +601,6 @@ impl Rebuilt {
     }
 }
 
-/// The move of a plugin's Processor to a node [`PluginRebinder::prepare`]
-/// built: see [`Pending::commit`](tutti_plugin_host::Pending::commit). Dropping
-/// it changes nothing.
-#[must_use = "a node renders nothing until its move is committed"]
-pub struct Commit(Box<dyn FnOnce(MainThreadMarker) + Send>);
-
-impl Commit {
-    /// Names the node the Processor's way and recalls the Processor from the
-    /// node it replaces; see [`Pending::commit`](tutti_plugin_host::Pending::commit).
-    /// Call it once the node is in the graph: it does not fail.
-    pub fn commit(self, main: MainThreadMarker) {
-        (self.0)(main);
-    }
-}
-
-impl std::fmt::Debug for Commit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Commit").finish_non_exhaustive()
-    }
-}
-
 /// One hosting's rebinder, behind the format.
 trait Rebind: Send {
     fn layout(&self) -> Option<tutti_plugin_types::Layout>;
@@ -674,14 +610,29 @@ trait Rebind: Send {
     fn prepare(&self) -> std::result::Result<Rebuilt, tutti_plugin_host::RebindError>;
 }
 
-/// An in-process format's rebinder.
-#[cfg(any(
-    feature = "vst2",
-    feature = "clap",
-    feature = "vst3",
-    all(feature = "au", target_os = "macos")
-))]
-mod in_process;
+/// An in-process plugin's rebinder, in any format.
+struct InProcessRebind(InProcessRebinder);
+
+impl Rebind for InProcessRebind {
+    fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        self.0.layout()
+    }
+
+    fn settled(&self) -> tutti_plugin_host::Settlement {
+        self.0.settled()
+    }
+
+    fn prepare(&self) -> std::result::Result<Rebuilt, tutti_plugin_host::RebindError> {
+        let rebuilt = self.0.prepare()?;
+        Ok(Rebuilt {
+            bound: BoundPlugin {
+                bound: BoundPlaced::InProcess(rebuilt.node),
+            },
+            controls: Some(rebuilt.controls),
+            commit: rebuilt.commit,
+        })
+    }
+}
 
 /// A served plugin's rebinder. The node it builds goes into the graph with the
 /// served fork source of the node it replaces (which reopens the plugin from
@@ -711,7 +662,7 @@ impl Rebind for ServedRebind {
                 bound: BoundPlaced::ServedNode(Box::new(node), Box::new(self.fork.clone())),
             },
             controls: None,
-            commit: Commit(Box::new(move |main| pending.commit(main))),
+            commit: Commit::new(move |main| pending.commit(main)),
         })
     }
 }
@@ -723,6 +674,13 @@ impl std::fmt::Debug for PluginRebinder {
 }
 
 impl PluginRebinder {
+    /// The rebinder of an in-process plugin.
+    fn in_process(rebinder: InProcessRebinder) -> Self {
+        Self {
+            inner: std::sync::Arc::new(std::sync::Mutex::new(InProcessRebind(rebinder))),
+        }
+    }
+
     /// The rebinder of a served plugin's bound client
     /// ([`PluginClient::rebinder`](crate::PluginClient::rebinder)).
     #[must_use]
@@ -782,14 +740,9 @@ enum BoundPlaced {
         Box<tutti_plugin_host::PluginNode<tutti_plugin_ipc::Ipc>>,
         Box<crate::host::node::fork::ServedFork>,
     ),
-    #[cfg(feature = "vst2")]
-    Vst2(Box<tutti_plugin_host::PluginNode<tutti_vst2_host::Vst2Loaded>>),
-    #[cfg(feature = "clap")]
-    Clap(Box<tutti_plugin_host::PluginNode<tutti_clap_host::ClapLoaded>>),
-    #[cfg(feature = "vst3")]
-    Vst3(Box<tutti_plugin_host::PluginNode<tutti_vst3_host::Vst3Loaded>>),
-    #[cfg(all(feature = "au", target_os = "macos"))]
-    Au(Box<tutti_plugin_host::PluginNode<tutti_au_host::AuLoaded>>),
+    /// Built only where a format feature is on.
+    #[allow(dead_code)]
+    InProcess(InProcessNode),
 }
 
 impl std::fmt::Debug for BoundPlugin {
@@ -807,24 +760,6 @@ impl tutti_graph::IntoNode for BoundPlugin {
     }
 
     fn into_parts(self) -> tutti_graph::NodeParts<Self::Controls> {
-        // An in-process node has no `PluginControls` (its meter is reached
-        // through `Plugin::meter`, taken before binding).
-        #[cfg(any(
-            feature = "vst2",
-            feature = "clap",
-            feature = "vst3",
-            all(feature = "au", target_os = "macos")
-        ))]
-        macro_rules! in_process {
-            ($c:expr) => {{
-                let parts = tutti_graph::IntoNode::into_parts(*$c);
-                tutti_graph::NodeParts {
-                    node: parts.node,
-                    controls: None,
-                    fork: parts.fork,
-                }
-            }};
-        }
         match self.bound {
             BoundPlaced::Served(c) => {
                 let parts = tutti_graph::IntoNode::into_parts(*c);
@@ -841,14 +776,16 @@ impl tutti_graph::IntoNode for BoundPlugin {
                 controls: None,
                 fork: Some(fork),
             },
-            #[cfg(feature = "vst2")]
-            BoundPlaced::Vst2(c) => in_process!(c),
-            #[cfg(feature = "clap")]
-            BoundPlaced::Clap(c) => in_process!(c),
-            #[cfg(feature = "vst3")]
-            BoundPlaced::Vst3(c) => in_process!(c),
-            #[cfg(all(feature = "au", target_os = "macos"))]
-            BoundPlaced::Au(c) => in_process!(c),
+            // An in-process node has no `PluginControls` (its meter is reached
+            // through `Plugin::meter`, taken before binding).
+            BoundPlaced::InProcess(node) => {
+                let parts = node.into_parts();
+                tutti_graph::NodeParts {
+                    node: parts.node,
+                    controls: None,
+                    fork: parts.fork,
+                }
+            }
         }
     }
 }

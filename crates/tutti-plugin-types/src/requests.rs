@@ -1,31 +1,31 @@
 //! How a plugin's calls into the host cross threads.
 //!
-//! A plugin calls its host from any thread. Each such call is one bit of a
-//! [`RequestWord`]: [`Request::bit`] names it, the
-//! callback raises it, and the main thread's idle pass turns the taken bits
+//! A plugin calls its host from any thread. Each such call is one flag of an
+//! [`AtomicRequestFlags`]: [`Request::flag`] names it, the
+//! callback raises it, and the main thread's idle pass turns the taken flags
 //! back into [`Request`]s ([`taken`]) and feeds them to the core. Timers and
 //! file descriptors carry an id, so they are main-thread registrations and
-//! have no bit.
+//! have no flag.
 
-use tutti_rt::{RequestBit, RequestWord};
+use tutti_rt::{AtomicRequestFlags, RequestFlag};
 
 use crate::{Request, RescanScope};
 
-const RESTART: RequestBit = RequestBit::of(0);
-const IO_CHANGED: RequestBit = RequestBit::of(1);
-const LATENCY_CHANGED: RequestBit = RequestBit::of(2);
-const TAIL_CHANGED: RequestBit = RequestBit::of(3);
-const RELOAD: RequestBit = RequestBit::of(4);
-const CALLBACK: RequestBit = RequestBit::of(5);
-const RESCAN_VALUES: RequestBit = RequestBit::of(6);
-const RESCAN_TEXT: RequestBit = RequestBit::of(7);
-const RESCAN_INFO: RequestBit = RequestBit::of(8);
-const RESCAN_ALL: RequestBit = RequestBit::of(9);
-const MIDI_CC: RequestBit = RequestBit::of(10);
-const NOTE_EXPRESSION: RequestBit = RequestBit::of(11);
+const RESTART: RequestFlag = RequestFlag::of(0);
+const IO_CHANGED: RequestFlag = RequestFlag::of(1);
+const LATENCY_CHANGED: RequestFlag = RequestFlag::of(2);
+const TAIL_CHANGED: RequestFlag = RequestFlag::of(3);
+const RELOAD: RequestFlag = RequestFlag::of(4);
+const CALLBACK: RequestFlag = RequestFlag::of(5);
+const RESCAN_VALUES: RequestFlag = RequestFlag::of(6);
+const RESCAN_TEXT: RequestFlag = RequestFlag::of(7);
+const RESCAN_INFO: RequestFlag = RequestFlag::of(8);
+const RESCAN_ALL: RequestFlag = RequestFlag::of(9);
+const MIDI_CC: RequestFlag = RequestFlag::of(10);
+const NOTE_EXPRESSION: RequestFlag = RequestFlag::of(11);
 
-/// Every request that has a bit, in the order [`taken`] yields them.
-const WORD_REQUESTS: [(RequestBit, Request); 12] = [
+/// Every request that has a flag, in the order [`taken`] yields them.
+const FLAG_REQUESTS: [(RequestFlag, Request); 12] = [
     (RESTART, Request::Restart),
     (IO_CHANGED, Request::IoChanged),
     (LATENCY_CHANGED, Request::LatencyChanged),
@@ -41,22 +41,22 @@ const WORD_REQUESTS: [(RequestBit, Request); 12] = [
 ];
 
 impl Request {
-    /// The bit a callback raises for this request, or `None` for a timer or a
+    /// The flag a callback raises for this request, or `None` for a timer or a
     /// file descriptor, which carry an id and are registered on the main
     /// thread.
     #[must_use]
-    pub fn bit(self) -> Option<RequestBit> {
-        WORD_REQUESTS
+    pub fn flag(self) -> Option<RequestFlag> {
+        FLAG_REQUESTS
             .iter()
-            .find_map(|&(bit, request)| (request == self).then_some(bit))
+            .find_map(|&(flag, request)| (request == self).then_some(flag))
     }
 
-    /// Raises this request on `word`. Wait-free; any thread. `false` when the
-    /// request has no bit and nothing was raised.
-    pub fn raise(self, word: &RequestWord) -> bool {
-        match self.bit() {
-            Some(bit) => {
-                word.raise(bit);
+    /// Raises this request on `flags`. Wait-free; any thread. `false` when the
+    /// request has no flag and nothing was raised.
+    pub fn raise(self, flags: &AtomicRequestFlags) -> bool {
+        match self.flag() {
+            Some(flag) => {
+                flags.raise(flag);
                 true
             }
             None => false,
@@ -64,33 +64,33 @@ impl Request {
     }
 }
 
-/// The requests raised on `word` since the last call, each once. Main thread
-/// only: it takes the word.
-pub fn taken(word: &RequestWord) -> impl Iterator<Item = Request> + use<> {
-    let bits = word.take();
-    WORD_REQUESTS
+/// The requests raised on `flags` since the last call, each once. Main thread
+/// only: it takes the flags.
+pub fn taken(flags: &AtomicRequestFlags) -> impl Iterator<Item = Request> + use<> {
+    let taken = flags.take();
+    FLAG_REQUESTS
         .into_iter()
-        .filter_map(move |(bit, request)| bits.contains(bit).then_some(request))
+        .filter_map(move |(flag, request)| taken.contains(flag).then_some(request))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every request with a bit round-trips through the word, once each, and a
+    /// Every request with a flag round-trips through the flags, once each, and a
     /// timer or descriptor has none.
     #[test]
-    fn every_request_with_a_bit_is_taken_once() {
-        let word = RequestWord::new();
-        for &(_, request) in &WORD_REQUESTS {
-            assert!(request.raise(&word));
-            assert!(request.raise(&word), "raising twice is one request");
+    fn every_request_with_a_flag_is_taken_once() {
+        let flags = AtomicRequestFlags::new();
+        for &(_, request) in &FLAG_REQUESTS {
+            assert!(request.raise(&flags));
+            assert!(request.raise(&flags), "raising twice is one request");
         }
-        assert!(!Request::Timer(crate::TimerId(1)).raise(&word));
-        assert!(!Request::Fd(tutti_plugin_ipc_ffi::FdId::new(3).unwrap()).raise(&word));
-        let got: Vec<_> = taken(&word).collect();
-        let want: Vec<_> = WORD_REQUESTS.iter().map(|&(_, r)| r).collect();
+        assert!(!Request::Timer(crate::TimerId(1)).raise(&flags));
+        assert!(!Request::Fd(tutti_plugin_ipc_ffi::FdId::new(3).unwrap()).raise(&flags));
+        let got: Vec<_> = taken(&flags).collect();
+        let want: Vec<_> = FLAG_REQUESTS.iter().map(|&(_, r)| r).collect();
         assert_eq!(got, want);
-        assert_eq!(taken(&word).count(), 0);
+        assert_eq!(taken(&flags).count(), 0);
     }
 }

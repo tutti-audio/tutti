@@ -14,7 +14,7 @@ use tutti_fixtures::main_thread;
 
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
-use tutti_graph::contract::{self, Direct, assert_honest_tail, drive_input};
+use tutti_graph::contract::{self, Direct, assert_declared_tail, drive_input};
 use tutti_graph::{
     Editor, Env, EventCapacity, EventEdge, EventIn, EventInletNode, EventOut, Executor, Node,
     NodeKey, OutPort, PlayClock, Prepare as GraphPrepare, Source, Status, TransportChanges,
@@ -127,7 +127,7 @@ fn a_sleeping_plugin_reports_no_tail_and_idles() {
 fn the_plugin_node_passes_the_honest_tail_contract() {
     let (node, _fake) = node(Samples::new(100), Samples::new(128));
     let mut node = contract::prepared(node, SR, BLOCK);
-    assert_honest_tail(&mut node, SR);
+    assert_declared_tail(&mut node, SR);
 }
 
 /// **A plugin that says sleep over sound is not believed**: its audio is

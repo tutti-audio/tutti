@@ -5,7 +5,7 @@
 //! The structures the engine's audio callback touches, allocation-free on the
 //! audio path (`tests/no_alloc/rt_no_alloc.rs` gates it), and the home of the
 //! engine's lock-free and `unsafe` runtime structures. It names two tutti
-//! crates, `tutti-units` (the units a [`Gauge`] and a [`Param`] hold, and [`RequestBit`]'s range)
+//! crates, `tutti-units` (the units a [`Gauge`] and a [`Param`] hold, and [`RequestFlag`]'s range)
 //! and `tutti-buffers` (the `ChannelLayout` a [`PosRing`] is written in and the
 //! `Sample` formats it is generic over);
 //! its other dependencies are `arc-lend`, `atomic_float` and `bytemuck` (and `loom`
@@ -55,7 +55,7 @@
 //!   them moves with one publish.
 //! - [`PosRing`] — frames a writer thread places ahead of the audio thread,
 //!   indexed by position (a disk stream's ring).
-//! - [`RequestWord`] — up to 32 kinds of request ([`RequestBit`]) raised from
+//! - [`AtomicRequestFlags`] — up to 32 kinds of request ([`RequestFlag`]) raised from
 //!   any thread with one `fetch_or` and taken whole by any one thread.
 //! - [`DirtySet`] — a sized set of dirty flags, an atomic bit per index, with
 //!   no capacity to overflow.
@@ -202,7 +202,7 @@ mod priority;
 mod reclaim;
 mod render_count;
 mod render_gate;
-mod request_word;
+mod request_flags;
 mod ring;
 mod scope;
 mod seq_cell;
@@ -248,7 +248,7 @@ pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priorit
 pub use reclaim::Reclaim;
 pub use render_count::{RenderCount, RenderGuard};
 pub use render_gate::{Closing, GateGuard, GateState, HeldClosed, Opening, RenderGate};
-pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
+pub use request_flags::{AtomicRequestFlags, RequestFlag, RequestFlagOutOfRange, RequestFlags};
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
@@ -280,6 +280,6 @@ mod error_bounds {
     fn the_errors_are_boxable() {
         err::<crate::ClaimConflict>();
         err::<crate::Contended>();
-        err::<crate::RequestBitOutOfRange>();
+        err::<crate::RequestFlagOutOfRange>();
     }
 }

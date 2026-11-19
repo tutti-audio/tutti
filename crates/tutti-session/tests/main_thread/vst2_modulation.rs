@@ -71,7 +71,7 @@ fn knob_of(s: &mut DetachedSession, target: ParamRef) -> f64 {
             "the declarations apply"
         );
         if let Some((_, lane)) = s.mod_state().lane(target.key()) {
-            return lane.knob().expect("a plugin lane has a knob");
+            return lane.value().expect("a plugin lane has a knob");
         }
         assert!(Instant::now() < deadline, "no lane on {target:?}");
         update(s, now);
@@ -137,9 +137,9 @@ fn a_plugin_gui_edit_becomes_the_knob() {
     update(&mut s, Instant::now());
 
     let state = s.mod_state();
-    assert_eq!(state.lane(p0.key()).expect("a lane").1.knob(), Some(0.5));
+    assert_eq!(state.lane(p0.key()).expect("a lane").1.value(), Some(0.5));
     assert_eq!(
-        state.lane(p1.key()).expect("a lane").1.knob(),
+        state.lane(p1.key()).expect("a lane").1.value(),
         Some(1.0 / 16.0)
     );
     assert_eq!(
@@ -265,7 +265,7 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
         handle.editor_idle(tutti_fixtures::main_thread());
         update(&mut s, Instant::now());
         assert_eq!(
-            s.mod_state().lane(p0.key()).expect("a lane").1.knob(),
+            s.mod_state().lane(p0.key()).expect("a lane").1.value(),
             Some(0.0),
             "round {round}: the knob"
         );

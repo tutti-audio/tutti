@@ -41,7 +41,7 @@ use tutti_graph::{
 use tutti_graph::{OutPort, Source};
 use tutti_music::LoopRange;
 use tutti_transport::{
-    FadeOut, LoopEdit, MotionEvent, Then, Timeline, Transport, TransportCommand,
+    AfterLocate, FadeOut, LoopEdit, MotionEvent, Timeline, Transport, TransportCommand,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
@@ -367,7 +367,7 @@ fn beat_timed_seek_and_stop_land_on_their_frames() {
         MotionEvent::Locate {
             beat: Beat::new(10.0),
             fade: FadeOut::Immediate,
-            then: Then::Keep,
+            then: AfterLocate::Keep,
         },
     )
     .expect("room");
@@ -547,7 +547,7 @@ fn a_timed_declicked_seek_fades_out_before_and_in_after_its_frame() {
                 MotionEvent::Locate {
                     beat: Beat::new(10.0),
                     fade: FadeOut::Declick,
-                    then: Then::Keep,
+                    then: AfterLocate::Keep,
                 },
             )
             .expect("room");
@@ -591,7 +591,7 @@ fn a_declicked_seek_with_short_notice_fades_over_what_is_left() {
                 MotionEvent::Locate {
                     beat: Beat::new(10.0),
                     fade: FadeOut::Declick,
-                    then: Then::Keep,
+                    then: AfterLocate::Keep,
                 },
             )
             .expect("room");
@@ -683,7 +683,7 @@ fn a_next_block_declicked_seek_fades_in_after_the_jump() {
             m.try_send(MotionEvent::Locate {
                 beat: Beat::new(10.0),
                 fade: FadeOut::Declick,
-                then: Then::Keep,
+                then: AfterLocate::Keep,
             })
             .expect("room");
         }
@@ -825,7 +825,7 @@ fn env_beats_are_the_closed_form_of_each_segment() {
         MotionEvent::Locate {
             beat: Beat::new(3.25),
             fade: FadeOut::Immediate,
-            then: Then::Keep,
+            then: AfterLocate::Keep,
         },
     )
     .expect("room");
@@ -926,7 +926,7 @@ fn a_loop_armed_behind_the_playhead_does_not_jump() {
         MotionEvent::Locate {
             beat: Beat::new(1.9),
             fade: FadeOut::Immediate,
-            then: Then::Keep,
+            then: AfterLocate::Keep,
         },
     )
     .expect("room");
@@ -1170,7 +1170,7 @@ fn a_tempo_wiggle_under_the_clock_hysteresis_does_not_move_the_beat() {
         .expect("the graph stopped");
     assert_eq!(stop, 240_000, "stops on beat 10's frame");
     assert_eq!(log[stop].1, 10.0, "and holds beat 10");
-    let in_force = transport.settings().tempo_in_force();
+    let in_force = transport.settings().current_tempo();
     assert_eq!(in_force, Bpm::of(120.0), "the tempo in force");
 }
 
@@ -1289,7 +1289,7 @@ fn two_declicked_commands_close_together_stay_continuous() {
     let seek = |beat: f64| MotionEvent::Locate {
         beat: Beat::new(beat),
         fade: FadeOut::Declick,
-        then: Then::Keep,
+        then: AfterLocate::Keep,
     };
     // (first frame, second frame, whether the second is a stop)
     for (a, b, stop) in [(1_000u64, 1_020u64, true), (900, 1_000, false)] {
@@ -1470,7 +1470,7 @@ fn a_seek_to_the_same_beat_moves_the_live_generation() {
         .try_send(MotionEvent::Locate {
             beat,
             fade: FadeOut::Immediate,
-            then: Then::Keep,
+            then: AfterLocate::Keep,
         })
         .expect("room");
     render(&engine, ChannelLayout::STEREO, &[256]);

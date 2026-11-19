@@ -1,4 +1,4 @@
-//! The `Translator` against M2-104 Appendix D.3 and M2-115, with figures
+//! The `Midi2Translator` against M2-104 Appendix D.3 and M2-115, with figures
 //! written here from the spec, never read from the code under test.
 //!
 //! `midi_2_packets_pass_through_unchanged` has no line here: the translator
@@ -7,7 +7,7 @@
 //! MIDI 2.0 packet it drops is the Control Change of a controller the Protocol
 //! ignores.
 
-use tutti_midi_protocol::Translator;
+use tutti_midi_protocol::Midi2Translator;
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
@@ -26,7 +26,7 @@ fn cc(controller: CCNumber, value: u8) -> Ump {
 
 /// What each input became, one entry per input: a run's controller is sent
 /// on the trigger that ends it, so the position says which input sent it.
-fn run(t: &mut Translator, input: &[Ump]) -> Vec<Vec<Message>> {
+fn run(t: &mut Midi2Translator, input: &[Ump]) -> Vec<Vec<Message>> {
     input
         .iter()
         .map(|&ump| {
@@ -71,7 +71,7 @@ fn zx(msb: u8, lsb: u8) -> u32 {
 /// Spec: m2-104/7.4.6#1, m2-104/7.4.6#2, m2-104/d.3.3#7
 #[test]
 fn cc_6_then_cc_38_is_one_controller() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -90,7 +90,7 @@ fn cc_6_then_cc_38_is_one_controller() {
 /// Spec: m2-104/d.3.3#5
 #[test]
 fn a_cc_6_alone_waits_for_a_trigger() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     // Nothing at the CC 6; the Null Function's first byte is a select, which
     // ends the run with an LSB of 0.
     let out = run(
@@ -118,7 +118,7 @@ fn a_cc_6_alone_waits_for_a_trigger() {
 /// Spec: m2-104/d.3.3#7
 #[test]
 fn cc_38_then_cc_6_is_one_controller() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -136,7 +136,7 @@ fn cc_38_then_cc_6_is_one_controller() {
 
 #[test]
 fn a_later_cc_6_ends_the_run_before_it() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -156,7 +156,7 @@ fn a_later_cc_6_ends_the_run_before_it() {
 
 #[test]
 fn a_new_cc_6_never_reuses_an_old_lsb() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -175,7 +175,7 @@ fn a_new_cc_6_never_reuses_an_old_lsb() {
 
 #[test]
 fn a_cc_38_after_a_sent_run_refines_it() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -191,7 +191,7 @@ fn a_cc_38_after_a_sent_run_refines_it() {
 
 #[test]
 fn the_null_function_ends_a_run_and_drops_data_entry_after_it() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -211,7 +211,7 @@ fn the_null_function_ends_a_run_and_drops_data_entry_after_it() {
 
 #[test]
 fn data_entry_with_nothing_selected_is_dropped() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     assert_eq!(
         run(
             &mut t,
@@ -224,7 +224,7 @@ fn data_entry_with_nothing_selected_is_dropped() {
 /// Spec: m2-104/d.3.3#4
 #[test]
 fn a_select_of_one_half_keeps_the_other() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     // A full select of RPN 1/2, then of the LSB alone: the number is 1/5.
     let out = run(
         &mut t,
@@ -261,7 +261,7 @@ fn a_select_of_one_half_keeps_the_other() {
 
 #[test]
 fn rpn_and_nrpn_keep_their_own_numbers() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     // RPN 3/4, then an NRPN select of its LSB alone: the NRPN's MSB is its
     // own (never selected: 0), not the RPN's 3.
     let out = run(
@@ -289,7 +289,7 @@ fn rpn_and_nrpn_keep_their_own_numbers() {
 #[test]
 fn registered_controllers_0_to_31_are_zero_extended_in_every_bank() {
     for (bank, index) in [(0, 0), (0, 1), (0, 6), (0, 31), (1, 0), (1, 31), (127, 7)] {
-        let mut t = Translator::new();
+        let mut t = Midi2Translator::new();
         let out = run(
             &mut t,
             &[
@@ -330,7 +330,7 @@ fn other_controllers_are_scaled_min_center_max() {
             assignable,
         ),
     ] {
-        let number = |t: &mut Translator| {
+        let number = |t: &mut Midi2Translator| {
             let mut n = (0, 0);
             for &s in &selects {
                 let _ = t.translate(s);
@@ -347,7 +347,7 @@ fn other_controllers_are_scaled_min_center_max() {
             n
         };
         for (msb, lsb, want) in [(127, 127, 0xFFFF_FFFF), (64, 0, 0x8000_0000), (0, 0, 0)] {
-            let mut t = Translator::new();
+            let mut t = Midi2Translator::new();
             let (bank, index) = number(&mut t);
             let out = run(
                 &mut t,
@@ -363,7 +363,7 @@ fn other_controllers_are_scaled_min_center_max() {
 
 #[test]
 fn the_group_and_channel_are_kept() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let a = Address::new(MidiGroup::of(5), MidiChannel::of(3));
     let mut out = Vec::new();
     for ump in [
@@ -390,7 +390,7 @@ fn the_group_and_channel_are_kept() {
 /// Spec: m2-104/2.1.2#2
 #[test]
 fn groups_keep_their_own_runs() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let (g0, g1) = (
         Address::new(MidiGroup::of(0), MidiChannel::of(0)),
         Address::new(MidiGroup::of(1), MidiChannel::of(0)),
@@ -442,7 +442,7 @@ fn groups_keep_their_own_runs() {
 /// Spec: m2-104/7.4.6#3, m2-104/7.4.6#4, m2-104/d.3.3#8
 #[test]
 fn the_valid_bank_select_rides_on_every_program_change_until_changed() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let pc = |p: u8| -> Ump { Message::Midi1(A, Voice1::ProgramChange(U7::of(p))).into() };
     let program = |p: u8, bank: Option<(u8, u8)>| {
         Message::Midi2(
@@ -504,7 +504,7 @@ fn program_change(address: Address, p: u8, bank: Option<(u8, u8)>) -> Message {
 /// Spec: m2-104/d.3.3#8
 #[test]
 fn an_unrelated_control_change_leaves_the_bank_valid() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let pc = |p: u8| -> Ump { Message::Midi1(A, Voice1::ProgramChange(U7::of(p))).into() };
     let out = run(
         &mut t,
@@ -527,7 +527,7 @@ fn an_unrelated_control_change_leaves_the_bank_valid() {
 /// same channel of another Group, is B=0 while the first channel's bank holds.
 #[test]
 fn the_valid_bank_is_per_channel_and_group() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let other_channel = Address::new(MidiGroup::FIRST, MidiChannel::of(1));
     let other_group = Address::new(MidiGroup::of(1), MidiChannel::FIRST);
     let pc = |address: Address, p: u8| -> Ump {
@@ -551,7 +551,7 @@ fn the_valid_bank_is_per_channel_and_group() {
 /// Spec: m2-104/d.3.1#1, m2-104/d.3.1#2, m2-115/3.1#1, m2-104/6.2#4
 #[test]
 fn stateless_messages_are_widened() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let note = NoteNumber::of(60);
     let on0: Ump = Message::Midi1(
         A,
@@ -588,7 +588,7 @@ fn stateless_messages_are_widened() {
 
 #[test]
 fn midi_2_packets_pass_through_unchanged() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let note = NoteNumber::of(60);
     // M2-104 7.4.2: a MIDI 2.0 Note On at velocity 0 is a Note On.
     let on0: Ump = Message::Midi2(
@@ -623,7 +623,7 @@ fn a_midi_2_control_change_the_protocol_ignores_is_dropped() {
         )
         .into()
     };
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     for controller in 0..=127u8 {
         let ump = native(controller);
         let ignored = matches!(controller, 0 | 6 | 32 | 38 | 98..=101);
@@ -635,7 +635,7 @@ fn a_midi_2_control_change_the_protocol_ignores_is_dropped() {
     }
     // The run a MIDI 1.0 sender would make of them builds nothing from MIDI 2.0
     // Control Changes: the Data Entry has no parameter selected.
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out: Vec<Option<Ump>> = [(101, 0), (100, 0), (6, 12), (38, 0)]
         .into_iter()
         .map(|(controller, value)| {
@@ -652,7 +652,7 @@ fn a_midi_2_control_change_the_protocol_ignores_is_dropped() {
 
 #[test]
 fn reset_all_controllers_nulls_the_selection() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     // RP-015: CC 121 sets the RPN to null; it passes on, and Data Entry after
     // it is dropped. The CC 6 before it was never sent, and is dropped too.
     let out = run(
@@ -692,7 +692,7 @@ fn reset_all_controllers_nulls_the_selection() {
 /// sensitivity) must not come back from a lone `CC 100 = 0`.
 #[test]
 fn reset_all_controllers_nulls_both_halves_of_the_number() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -736,7 +736,7 @@ fn a_velocity_prefix_is_the_low_seven_bits_of_the_next_note_on() {
             },
         )
     };
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -774,7 +774,7 @@ fn a_velocity_prefix_waits_across_other_messages_on_its_channel_only() {
         )
         .into()
     };
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -819,7 +819,7 @@ fn a_velocity_prefix_has_no_effect_on_a_note_on_at_zero() {
         )
         .into()
     };
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[cc(CCNumber::VELOCITY_PREFIX, 0x55), note(0), note(64)],
@@ -855,7 +855,7 @@ fn a_velocity_prefix_has_no_effect_on_a_note_on_at_zero() {
 /// the fourth a clip's loader supplies), and a second flush sends nothing.
 #[test]
 fn flush_sends_a_lone_cc_6_once() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     run(
         &mut t,
         &[
@@ -882,7 +882,7 @@ fn flush_sends_a_lone_cc_6_once() {
 /// channel's own group and channel.
 #[test]
 fn flush_sends_a_lone_cc_38_on_its_own_channel() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let a = Address::new(MidiGroup::of(3), MidiChannel::of(5));
     for ump in [
         cc_on(a, CCNumber::NRPN_MSB, 1),
@@ -908,7 +908,7 @@ fn flush_sends_a_lone_cc_38_on_its_own_channel() {
 /// Spec: m2-104/d.3.3#3
 #[test]
 fn increment_and_decrement_stay_control_changes() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let out = run(
         &mut t,
         &[
@@ -933,7 +933,7 @@ fn increment_and_decrement_stay_control_changes() {
 /// Spec: m2-104/2.1.2#2
 #[test]
 fn reset_group_forgets_that_groups_selection_alone() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let (g1, g2) = (
         Address::new(MidiGroup::of(0), MidiChannel::of(0)),
         Address::new(MidiGroup::of(1), MidiChannel::of(0)),
@@ -943,7 +943,7 @@ fn reset_group_forgets_that_groups_selection_alone() {
         t.translate(cc_on(a, CCNumber::RPN_LSB, 0));
     }
     t.reset_group(MidiGroup::of(1));
-    let entry = |t: &mut Translator, a: Address| {
+    let entry = |t: &mut Midi2Translator, a: Address| {
         t.translate(cc_on(a, CCNumber::DATA_ENTRY, 12));
         t.translate(cc_on(a, CCNumber::DATA_ENTRY_LSB, 0))
     };
@@ -965,7 +965,7 @@ fn reset_group_forgets_that_groups_selection_alone() {
 /// Spec: m2-104/d.3.3#1, m2-104/d.3.3#2
 #[test]
 fn a_14_bit_controller_pair_stays_two_control_changes() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let control = |number: u8, value: u32| {
         Message::Midi2(
             A,
@@ -1002,7 +1002,7 @@ fn a_14_bit_controller_pair_stays_two_control_changes() {
 /// Spec: m2-104/3.3.1#2, m2-104/7.4#1
 #[test]
 fn translated_channel_voice_messages_are_all_midi_2() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     let note = NoteNumber::of(60);
     let voice = |v: Voice1| -> Ump { Message::Midi1(A, v).into() };
     let input = [
@@ -1040,7 +1040,7 @@ fn translated_channel_voice_messages_are_all_midi_2() {
 /// Spec: m2-104/d.1.5#1
 #[test]
 fn near_extreme_midi_1_values_widen_off_the_extremes() {
-    let mut t = Translator::new();
+    let mut t = Midi2Translator::new();
     for (velocity, wide) in [(1, 0x0200), (126, 0xFDF7), (127, 0xFFFF)] {
         let on = Message::midi1(A, Voice1::note_on(NoteNumber::of(60), U7::of(velocity)));
         let out = t.translate(on).and_then(|u| u.decode().ok());

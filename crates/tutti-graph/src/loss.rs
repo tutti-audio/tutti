@@ -3,7 +3,7 @@
 //!
 //! Three figures, all exact:
 //!
-//! - [`Executor::dropped_event_count`]: every event refused or withheld. A
+//! - [`Executor::dropped_event_count`]: every event refused or skipped. A
 //!   note-off a node refused and sent again later is in it.
 //! - [`Executor::lost_event_count`]: that, less the refusals a node says it
 //!   recovered (`EventWriter::recovered`): the events that never arrived.
@@ -40,7 +40,7 @@ pub(crate) const LOG_CAPACITY: usize = 64;
 /// The events one node lost in one block, at one of its ports or in all.
 ///
 /// `port` is the output port whose events were lost: refused by its own
-/// writer (past its capacity), withheld by the node because they belonged to
+/// writer (past its capacity), skipped by the node because they belonged to
 /// an event the port refused, or dropped by a delay or feedback FIFO fed by
 /// it. `None` for a loss the node had but no output port owns: events a
 /// plugin took from its input and did not deliver (`Io::count_lost`), and a
@@ -51,7 +51,7 @@ pub struct EventLoss {
     pub node: NodeKey,
     /// Its event output port.
     pub port: Option<u16>,
-    /// How many events were refused or withheld, in that block.
+    /// How many events were refused or skipped, in that block.
     pub count: u32,
     /// How many refusals a node says it then recovered in that block
     /// (a note-off it sent again): refused earlier, delivered in this block.

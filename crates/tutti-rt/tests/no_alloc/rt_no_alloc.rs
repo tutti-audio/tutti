@@ -76,19 +76,19 @@ fn audio_thread_cell_borrows_neither_allocate_nor_free() {
     assert_eq!(*cell.borrow(), (0..10_000u64).sum::<u64>());
 }
 
-/// `RequestWord::raise` and `take`, and a `ring` push and pop (full and
+/// `AtomicRequestFlags::raise` and `take`, and a `ring` push and pop (full and
 /// empty answers included), neither allocate nor free: the whole of what a
 /// host callback and the block-head drain do.
 #[test]
-fn request_word_and_ring_are_allocation_free() {
-    use tutti_rt::{Overflow, RequestBit, RequestWord, ring};
+fn request_flags_and_ring_are_allocation_free() {
+    use tutti_rt::{AtomicRequestFlags, Overflow, RequestFlag, ring};
 
-    let word = RequestWord::new();
+    let flags = AtomicRequestFlags::new();
     let (mut writer, mut reader) = ring::<[u32; 3]>(4, Overflow::DropNewest);
     assert_no_alloc::assert_no_alloc(|| {
         for round in 0..1_000u32 {
-            word.raise(RequestBit::of((round % 32) as u8));
-            let taken = word.take();
+            flags.raise(RequestFlag::of((round % 32) as u8));
+            let taken = flags.take();
             assert_eq!(taken.iter().count(), 1);
             for n in 0..6 {
                 let _ = writer.push([round, n, 0]);

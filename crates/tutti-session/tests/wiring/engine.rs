@@ -52,7 +52,7 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
                     MotionEvent::Locate {
                         beat: tutti_units::Beat::new(0.75),
                         fade: tutti_transport::FadeOut::Immediate,
-                        then: tutti_transport::Then::Keep,
+                        then: tutti_transport::AfterLocate::Keep,
                     },
                 )
                 .expect("room");
@@ -515,7 +515,7 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
     assert_eq!(
         s.close_heard_tap(),
         Err(tutti_session::HeardTapError::Tap(
-            tutti_engine::HeardTapError::NotOpen
+            tutti_engine::OutputTapError::NotOpen
         )),
         "none was opened"
     );
@@ -528,7 +528,7 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
     assert_eq!(
         s.close_heard_tap(),
         Err(tutti_session::HeardTapError::Tap(
-            tutti_engine::HeardTapError::NotOpen
+            tutti_engine::OutputTapError::NotOpen
         )),
         "closed already"
     );
@@ -871,7 +871,7 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     assert_eq!(
         s.open_heard_tap(Samples::new(8)).err(),
         Some(tutti_session::HeardTapError::Tap(
-            tutti_engine::HeardTapError::Busy
+            tutti_engine::OutputTapError::Busy
         ))
     );
     let mut block = vec![0.0f32; 64 * 2];

@@ -265,7 +265,7 @@ Coverage limit, stated in the module rather than implied: `PluginClient::new`
 launches a subprocess, so no unit test can put a live plugin in a graph. The
 decision rule is split into `needs_recompensation` and pinned (unchanged /
 changed both directions / never-compensated, including the `None` vs
-`Some(Samples(0))` conflation). The flag actually being raised for a live plugin
+`Some(Samples::new(0))` conflation). The flag actually being raised for a live plugin
 needs an integration test loading a real binary, and no such harness exists in
 `bevy-tutti` yet.
 

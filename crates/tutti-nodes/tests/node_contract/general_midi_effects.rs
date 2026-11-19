@@ -5,7 +5,7 @@
 
 use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, ChannelLayout};
-use tutti_graph::contract::assert_honest_tail;
+use tutti_graph::contract::assert_declared_tail;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
 use tutti_nodes::{FreeverbNode, ModDelayNode};
@@ -102,7 +102,7 @@ fn a_raw_write_cannot_make_the_general_midi_chorus_recirculate() {
 /// The chorus declares its delay as its tail (a ceiling, 5 ms,
 /// which errs long over the 3.9 ms its longest sweep takes), and the output never
 /// outlasts it. The tail is the sweep's `max_delay`: 240 frames at 48 kHz.
-/// `assert_honest_tail` renders an impulse past it and fails on a sound.
+/// `assert_declared_tail` renders an impulse past it and fails on a sound.
 #[test]
 fn the_general_midi_chorus_declares_its_delay_as_its_tail() {
     let node = prepared(chorus(), SR, BLOCK);
@@ -114,7 +114,7 @@ fn the_general_midi_chorus_declares_its_delay_as_its_tail() {
     for channel in &out {
         assert!(last_nonzero(channel).unwrap() < tail.get());
     }
-    assert_honest_tail(&mut chorus(), SR);
+    assert_declared_tail(&mut chorus(), SR);
 }
 
 /// The ceiling is the sweep's: the presets that recirculate keep their tail

@@ -19,7 +19,7 @@ use tutti_rt::LockExt;
 
 use dpi::{PhysicalSize, Size};
 use tutti_plugin_ipc_ffi::FdId;
-use tutti_rt::RequestWord;
+use tutti_rt::AtomicRequestFlags;
 
 use crate::StateError;
 use crate::{
@@ -228,7 +228,7 @@ struct Shared {
     latency: AtomicUsize,
     tail: AtomicUsize,
     outputs: AtomicU32,
-    requests: RequestWord,
+    requests: AtomicRequestFlags,
     state: Mutex<Vec<u8>>,
     /// Frames the fake sounds after each trigger, or `0` for a silent fake
     /// (`FakePlugin::ring_out`).
@@ -325,7 +325,7 @@ impl FakePlugin {
             latency: AtomicUsize::new(0),
             tail: AtomicUsize::new(0),
             outputs: AtomicU32::new(2),
-            requests: RequestWord::new(),
+            requests: AtomicRequestFlags::new(),
             state: Mutex::new(Vec::new()),
             ring: AtomicUsize::new(0),
             sleeps_over_sound: AtomicBool::new(false),
@@ -531,7 +531,7 @@ impl FakePlugin {
 
     /// The word the plugin's host callbacks raise, which the shell takes.
     #[must_use]
-    pub fn request_word(&self) -> &RequestWord {
+    pub fn request_flags(&self) -> &AtomicRequestFlags {
         &self.0.requests
     }
 }
@@ -688,7 +688,7 @@ macro_rules! fake_control {
                 self.shared.log.push(Call::ServiceFd(id));
             }
 
-            /// What a test raised on [`FakePlugin::request_word`], taken once.
+            /// What a test raised on [`FakePlugin::request_flags`], taken once.
             fn take_requests(&mut self, _main: MainThreadMarker, out: &mut Vec<Request>) {
                 out.extend(crate::taken(&self.shared.requests));
             }

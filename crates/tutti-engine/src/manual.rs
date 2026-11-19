@@ -103,7 +103,7 @@ impl<F: Float> ManualStream<F> {
     /// Runs one callback, exactly as a device driver would, into a buffer of
     /// any [`Sample`] format ([`OutputBlock::render`]). Returns `None` if no
     /// stream is open.
-    pub fn callback_once<S: Sample>(&self, data: &mut [S]) -> Option<()> {
+    pub fn run_callback<S: Sample>(&self, data: &mut [S]) -> Option<()> {
         self.with_block(|b| b.render(data))
     }
 

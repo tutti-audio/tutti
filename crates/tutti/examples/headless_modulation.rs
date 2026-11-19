@@ -83,13 +83,15 @@ fn main() -> Result<(), Error> {
     let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .outputs(ChannelLayout::MONO)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("builds");
-    let (saw, _) = s.graph().add(ForkByClone(Osc::saw(Hz(110.0))));
-    let (filter, _) = s
-        .graph()
-        .add(SvfFilterNode::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)));
+    let (saw, _) = s.graph().add(ForkByClone(Osc::saw(Hz::new(110.0))));
+    let (filter, _) = s.graph().add(SvfFilterNode::new(
+        SvfType::LowPass,
+        Hz::new(1_000.0),
+        Q::new(0.7),
+    ));
     let (kick, _) = s.graph().add(ForkByClone(Kick));
     s.graph()
         .set_sources(InPort::new(filter, 0), [OutPort::new(saw, 0)])
@@ -101,9 +103,9 @@ fn main() -> Result<(), Error> {
     let cutoff = filter.cutoff();
     let resonance = filter.q();
     let mut m = s.mods_mut();
-    m.range(cutoff, Hz(100.0)..Hz(4_000.0))?;
-    m.range(resonance, Q(0.5)..Q(8.0))?;
-    let wobble = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    m.range(cutoff, Hz::new(100.0)..Hz::new(4_000.0))?;
+    m.range(resonance, Q::new(0.5)..Q::new(8.0))?;
+    let wobble = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.route(RouteSpec::new(wobble, cutoff, Depth::of(0.2)))?;
     let hits = m.follower(Follower::default(), kick);
     m.route(RouteSpec::new(hits, resonance, Depth::of(0.5)))?;

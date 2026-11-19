@@ -549,7 +549,7 @@ pub fn compile(
     // `GraphSpec::require_resolution` for the rule, and why only marked edges).
     for (&(at, from), &required) in graph.required_resolution() {
         let sink = node_shapes[dense[&at.node]].event_resolution;
-        if !sink.honours(required) {
+        if !sink.satisfies(required) {
             return Err(CompileError::ResolutionTooCoarse {
                 at,
                 from,

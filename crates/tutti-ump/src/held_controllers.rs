@@ -26,11 +26,11 @@ const HELD: u16 = 0x1f;
 /// messages: 0 to 63 off, 64 to 127 on; MIDI 2.0 the upper half of the 32-bit
 /// range) or a bend off centre is held, and back at its normal position it is
 /// let go. The message that returns each one to normal is what
-/// [`closes`](Self::closes), [`lift_while`](Self::lift_while) and the other
-/// lifts hand out. A per-note controller (MIDI 2.0) ends with its note
+/// [`closes`](Self::closes), [`release_while`](Self::release_while) and the other
+/// releases hand out. A per-note controller (MIDI 2.0) ends with its note
 /// (M2-104 section 7.4), so none is tracked.
 ///
-/// A lift a caller was refused can be owed: the controller stays held, marked,
+/// A release a caller was refused can be owed: the controller stays held, marked,
 /// until [`pay`](Self::pay) takes it; a new value for it forgets the mark.
 ///
 /// ```
@@ -46,7 +46,7 @@ const HELD: u16 = 0x1f;
 /// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct HeldControllers {
-    /// The held bits in the low byte, and the ones whose lift is owed in the
+    /// The held bits in the low byte, and the ones whose release is owed in the
     /// high byte (the same bits).
     lanes: [u16; Lane::COUNT],
     /// How many controllers are held.
@@ -93,7 +93,7 @@ impl HeldControllers {
         self.len == 0
     }
 
-    /// Whether some lift is owed ([`lift_all`](Self::lift_all) was refused).
+    /// Whether some release is owed ([`release_all`](Self::release_all) was refused).
     #[must_use]
     pub const fn owing(&self) -> bool {
         self.owing
@@ -117,7 +117,7 @@ impl HeldControllers {
 
     /// Folds in a message the source sent: a pedal or bend off its normal
     /// position is held, back at it is forgotten, and a new value supersedes a
-    /// lift still owed. Anything else changes nothing.
+    /// release still owed. Anything else changes nothing.
     #[inline]
     pub fn observe(&mut self, ump: Ump) {
         // Channel voice, MIDI 1.0 or 2.0, status Control Change or Pitch Bend.
@@ -228,7 +228,7 @@ impl HeldControllers {
     /// in lane and bit order, and forgets the ones it takes (`true`). Stops at
     /// the first `accept` refuses (`false`): that one and the rest stay held.
     /// Returns whether every controller in scope was taken. Allocates nothing.
-    pub fn lift_while(
+    pub fn release_while(
         &mut self,
         group: Option<MidiGroup>,
         mut accept: impl FnMut(Ump) -> bool,
@@ -254,11 +254,11 @@ impl HeldControllers {
     }
 
     /// Hands `send` the message that returns each held controller to its normal
-    /// position, in lane and bit order, with whether its lift was already owed:
+    /// position, in lane and bit order, with whether its release was already owed:
     /// `true` forgets it, `false` leaves it held and owed to
     /// [`pay`](Self::pay). `send` is called for every held controller, so it
     /// can count the ones it did not try. Allocates nothing.
-    pub fn lift_all(&mut self, mut send: impl FnMut(Ump, bool) -> bool) {
+    pub fn release_all(&mut self, mut send: impl FnMut(Ump, bool) -> bool) {
         if self.len == 0 {
             return;
         }
@@ -278,7 +278,7 @@ impl HeldControllers {
         }
     }
 
-    /// Hands `send` the message of each owed lift, in lane and bit order, and
+    /// Hands `send` the message of each owed release, in lane and bit order, and
     /// forgets the ones it takes (`true`). Stops at the first it refuses
     /// (`false`): that one and the rest stay owed. Allocates nothing.
     pub fn pay(&mut self, mut send: impl FnMut(Ump) -> bool) {

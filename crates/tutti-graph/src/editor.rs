@@ -94,7 +94,7 @@ use outlets::Outlets;
 use placements::Placements;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_units::Amplitude;
-pub use unwired::{Placed, Unwired};
+pub use unwired::{Inserted, Unwired};
 
 /// The host's side of a root generation: whether it has published the folds
 /// for `root` at `outputs` channels ([`Editor::set_root_gate`]).

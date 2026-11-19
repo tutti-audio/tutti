@@ -169,7 +169,7 @@ impl<F: Float> Editor<F> {
     ///
     /// The fade is the lane's: it starts when the kind the lane reads is not
     /// the one it last acted on, and its end is reported through
-    /// [`settle_fades`](Self::settle_fades), which finishes it in the spec
+    /// [`finish_fades`](Self::finish_fades), which finishes it in the spec
     /// (an `Out` edge is removed, an `In` one forgets the fade). A host that
     /// never sets one never has a fade.
     ///
@@ -227,7 +227,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// Whether the plan sent last carries an old root whose crossfade the
-    /// executor has not yet been reported through ([`settle_fades`](Self::settle_fades)
+    /// executor has not yet been reported through ([`finish_fades`](Self::finish_fades)
     /// reports it): a declaration of the root made now would end that fade at
     /// its block.
     #[must_use]
@@ -246,7 +246,7 @@ impl<F: Float> Editor<F> {
     /// fade is stale and ignored.
     ///
     /// Control thread. Cheap when nothing ended: a pop of an empty ring.
-    pub fn settle_fades(&mut self) -> bool {
+    pub fn finish_fades(&mut self) -> bool {
         let mut changed = false;
         while let Some((id, kind)) = self.link.pop_edge_fade() {
             changed |= self.settle_edge(id, kind);

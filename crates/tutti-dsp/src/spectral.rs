@@ -18,7 +18,7 @@ const RELATIVE_POWER_FLOOR: f64 = 1e-12;
 /// sits, and the usual proxy for brightness.
 ///
 /// `bin_width` is the spacing of the bins in [`Hz`]
-/// (`sample_rate / window`). `Hz(0.0)` for a silent spectrum, and for one with
+/// (`sample_rate / window`). `Hz::new(0.0)` for a silent spectrum, and for one with
 /// a NaN or infinite magnitude.
 pub fn spectral_centroid<F: Float>(magnitudes: &[F], bin_width: Hz) -> Hz {
     let (weighted, total) =
@@ -77,7 +77,7 @@ pub fn spectral_flatness<F: Float>(magnitudes: &[F]) -> f64 {
 /// `f64`, not a unit type, for the reason given at [`spectral_flatness`]: no
 /// unit covers a 0..1 spectral ratio, and `Mix` is a blend control.
 ///
-/// `Hz(0.0)` for a silent spectrum, and for one with a NaN or infinite
+/// `Hz::new(0.0)` for a silent spectrum, and for one with a NaN or infinite
 /// magnitude. At `1.0` this is the highest bin that holds any energy.
 pub fn spectral_rolloff<F: Float>(magnitudes: &[F], bin_width: Hz, fraction: f64) -> Hz {
     let energy = |m: F| {

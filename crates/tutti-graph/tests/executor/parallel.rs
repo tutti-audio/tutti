@@ -785,7 +785,7 @@ fn the_executor_waits_by_its_pools_budget() {
     }
 }
 
-/// Three pulses, each into a [`common::Ringer`] that reports less than its
+/// Three pulses, each into a [`common::RingingNode`] that reports less than its
 /// ceiling (and one that reports nothing): the units' skip decisions are
 /// their own, so the pooled render stays bit-identical to the serial one,
 /// and no ring is lost (analytic: a pulse of `len` frames into a ring of
@@ -798,7 +798,7 @@ fn the_executor_waits_by_its_pools_budget() {
 /// It pins that the pooled and serial skips lose nothing.
 #[test]
 fn reporting_nodes_render_bit_identically_on_a_pool() {
-    use common::{NO_REPORT, Pulse, Ringer};
+    use common::{Burst, NO_REPORT, RingingNode};
     use tutti_units::Tail;
     const RINGERS: [(usize, usize, Tail, u64); 3] = [
         (50, 300, Tail::Finite(Samples::new(1000)), 300),
@@ -814,9 +814,9 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
         let mut outputs = Vec::new();
         for (i, (pulse, ring, ceiling, report)) in RINGERS.into_iter().enumerate() {
             let (src, fx) = (NodeKey(10 + i as u64), NodeKey(20 + i as u64));
-            let ringer = Ringer::new(ceiling, ring, report);
+            let ringer = RingingNode::new(ceiling, ring, report);
             calls.push(Arc::clone(&ringer.calls));
-            ed.insert(src, "pulse", Unforkable(Pulse::new(pulse)));
+            ed.insert(src, "pulse", Unforkable(Burst::new(pulse)));
             ed.insert(fx, "ringer", Unforkable(ringer));
             ed.spec_mut()
                 .topology

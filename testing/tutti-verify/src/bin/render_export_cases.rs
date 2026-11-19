@@ -54,8 +54,8 @@ fn built(g: GraphBuilder) -> RenderGraph {
 fn tone_graph() -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let id = g.add(
-        Osc::sine(Hz(TONE_HZ))
-            .with_amplitude(Amplitude(0.5))
+        Osc::sine(Hz::new(TONE_HZ))
+            .with_amplitude(Amplitude::new(0.5))
             .with_layout(ChannelLayout::STEREO),
     );
     g.pipe_output(id);
@@ -73,7 +73,7 @@ fn dc_graph(level: f32) -> RenderGraph {
 /// A mono graph, for the upmix/fold cases.
 fn mono_graph() -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-    let id = g.add(Osc::sine(Hz(TONE_HZ)).with_amplitude(Amplitude(0.5)));
+    let id = g.add(Osc::sine(Hz::new(TONE_HZ)).with_amplitude(Amplitude::new(0.5)));
     g.pipe_output(id);
     built(g)
 }
@@ -87,8 +87,8 @@ fn mono_graph() -> RenderGraph {
 fn near_nyquist_graph() -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let id = g.add(
-        Osc::sine(Hz(18_000.0))
-            .with_amplitude(Amplitude(0.5))
+        Osc::sine(Hz::new(18_000.0))
+            .with_amplitude(Amplitude::new(0.5))
             .with_layout(ChannelLayout::STEREO),
     );
     g.pipe_output(id);
@@ -139,8 +139,13 @@ impl Case {
 fn base(format: Format, channels: ChannelLayout) -> Case {
     let rate = tutti_units::SampleRate::of(SR);
     Case {
-        job: Job::new(rate, Seconds(DUR).to_samples(rate), Samples(0), Samples(0))
-            .expect("a render"),
+        job: Job::new(
+            rate,
+            Seconds::new(DUR).to_samples(rate),
+            Samples::new(0),
+            Samples::new(0),
+        )
+        .expect("a render"),
         format,
         channels,
         resample: None,

@@ -8,6 +8,7 @@
 //! `grep -E` or a Python regex is plain string code, written to the same
 //! language the pattern accepted (each gate's docs say how).
 
+mod affected;
 mod alloc_binaries;
 mod buffers;
 mod buffers_loops;
@@ -524,6 +525,32 @@ fn clap_inventory(root: &Path) -> Result<(), String> {
         .map_err(|e| format!("cannot write {}: {e}", file.display()))?;
     println!("wrote {path}: {} rows", items.len());
     Ok(())
+}
+
+/// `affected <base>`: the selection for the diff `<base>...HEAD` of the checkout
+/// at `root` (the one `git` call), as `affected::select` makes it.
+pub(crate) fn affected(root: &Path, base: &str) -> Result<String, String> {
+    let out = process::Command::new("git")
+        .args(["diff", "--name-only", &format!("{base}...HEAD")])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("cannot run git: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git diff {base}...HEAD failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let changed: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    affected::select(
+        &changed,
+        &RealTree {
+            root: root.to_path_buf(),
+        },
+    )
 }
 
 /// The checkout on disk.
