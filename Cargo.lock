@@ -2866,6 +2866,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-midi-device",
  "tutti-midi-protocol",
+ "tutti-music",
  "tutti-tempo",
  "tutti-ump",
  "tutti-units",
