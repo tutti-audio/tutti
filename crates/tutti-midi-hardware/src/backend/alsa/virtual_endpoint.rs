@@ -8,17 +8,15 @@
 //! reads the protocol it carries instead of taking it for a legacy port.
 
 use tutti_alsa_ffi::{
-    BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Blocking, Client, DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT,
-    Operation, PROTO_MIDI1, PROTO_MIDI2, Packet, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint,
+    Blocking, Client, Operation, Packet, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint,
     UmpVersion,
 };
-use tutti_midi_device::FunctionBlock;
+use tutti_midi_device::{FunctionBlock, UMP_VERSION};
 use tutti_rt::LockExt;
-use tutti_ump::BlockDirection;
+use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Protocol};
 
 use super::input::{self, AlsaInput};
 use crate::InputProducerHandle;
-use crate::block::RawBlock;
 use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
 
@@ -53,45 +51,36 @@ fn open_client(spec: &VirtualSpec, blocking: Blocking) -> Result<(Client, Virtua
 
 /// The sequencer's record of a Function Block.
 fn ump_block(block: &FunctionBlock) -> UmpBlock {
-    let raw = RawBlock::of(block);
     UmpBlock {
-        id: raw.id,
-        active: raw.active,
-        flags: match raw.midi1 {
-            0 => 0,
-            1 => BLOCK_IS_MIDI1,
-            _ => BLOCK_IS_MIDI1 | BLOCK_IS_LOWSPEED,
-        },
-        direction: match block.direction() {
-            BlockDirection::Input => DIR_INPUT,
-            BlockDirection::Output => DIR_OUTPUT,
-            _ => DIR_BIDIRECTION,
-        },
-        first_group: raw.first_group,
-        num_groups: raw.groups,
-        midi_ci_version: raw.midi_ci_version,
-        sysex8_streams: raw.sysex8_streams,
-        ui_hint: raw.ui_hint,
-        name: raw.name.map(str::to_owned),
+        info: block.info(),
+        name: block.name().map(|name| name.as_str().to_owned()),
     }
 }
 
 /// Publishes the endpoint record on `client`: the protocol it carries and the
 /// spec's blocks.
 fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Result<()> {
-    let bits = match protocol {
-        VirtualProtocol::Midi1 => PROTO_MIDI1,
-        VirtualProtocol::Midi2 => PROTO_MIDI2,
+    let (in_use, midi1, midi2) = match protocol {
+        VirtualProtocol::Midi1 => (Protocol::Midi1, true, false),
+        VirtualProtocol::Midi2 => (Protocol::Midi2, false, true),
     };
-    // The record names the MIDI protocol only: neither the protocol in use nor
-    // the protocols offered carry `PROTO_JRTS_TX` or `PROTO_JRTS_RX`, so the
-    // endpoint declares that it sends and receives no JR Timestamps (the spec
-    // has no JR support).
+    let blocks: Vec<UmpBlock> = spec.function_blocks().iter().map(ump_block).collect();
+    // The record names the MIDI protocol only: it offers no JR Timestamps in
+    // either direction, so the endpoint declares that it sends and receives none
+    // (the spec has no JR support).
     client.publish_ump_endpoint(&UmpEndpoint {
-        protocol: bits,
-        protocol_caps: bits,
+        protocol: in_use,
+        offered: EndpointInfoNotification {
+            version: UMP_VERSION,
+            static_function_blocks: true,
+            function_blocks: FunctionBlocks::Count(FunctionBlockCount::saturating(blocks.len())),
+            midi2,
+            midi1,
+            rx_jr: false,
+            tx_jr: false,
+        },
         name: Some(spec.name().as_str().to_owned()),
-        blocks: spec.function_blocks().iter().map(ump_block).collect(),
+        blocks,
     })?;
     Ok(())
 }

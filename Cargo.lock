@@ -2496,6 +2496,7 @@ version = "0.0.1"
 dependencies = [
  "libc",
  "thiserror 2.0.21",
+ "tutti-ump",
 ]
 
 [[package]]
@@ -2650,6 +2651,7 @@ dependencies = [
  "objc2-core-midi",
  "objc2-foundation",
  "thiserror 2.0.21",
+ "tutti-ump",
 ]
 
 [[package]]
