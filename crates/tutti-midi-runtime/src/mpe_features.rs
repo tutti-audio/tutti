@@ -5,15 +5,15 @@
 //! ([`ProfileId::MPE`]) with the Optional Features Inquiry Target
 //! ([`MpeFeatures::INQUIRY_TARGET`]); the Reply carries four Inquiry Target
 //! Data bytes. [`ask_mpe_features`] sends the inquiry through a
-//! [`ProfileInitiator`], and [`mpe_features`] reads the [`Outcome`] it
+//! [`ProfileInitiator`], and [`mpe_features`] reads the [`ProfileOutcome`] it
 //! settles with. The two live here because `MpeFeatures` is the protocol
 //! crate's and the Initiator the device crate's, and neither names the other.
 
 use std::time::Instant;
 
 use tutti_midi_device::{
-    CiDeviceId, DetailsData, InquiryTarget, Nak, Outcome, ProfileAction, ProfileId,
-    ProfileInitiator, RequestError,
+    CiDeviceId, DetailsData, InquiryTarget, Nak, ProfileAction, ProfileId, ProfileInitiator,
+    ProfileOutcome, ProfileRequestError,
 };
 use tutti_midi_protocol::MpeFeatures;
 use tutti_ump::{MidiChannel, U7};
@@ -42,12 +42,12 @@ pub enum MpeFeaturesError {
 ///
 /// # Errors
 ///
-/// [`RequestError::AlreadyAsking`] when the same inquiry is waiting.
+/// [`ProfileRequestError::AlreadyAsking`] when the same inquiry is waiting.
 pub fn ask_mpe_features(
     initiator: &mut ProfileInitiator,
     channel: MidiChannel,
     now: Instant,
-) -> Result<Vec<ProfileAction>, RequestError> {
+) -> Result<Vec<ProfileAction>, ProfileRequestError> {
     initiator.details(
         CiDeviceId::Channel(channel),
         ProfileId::MPE,
@@ -56,19 +56,19 @@ pub fn ask_mpe_features(
     )
 }
 
-/// The features an [`Outcome`] of [`ask_mpe_features`] declares.
+/// The features an [`ProfileOutcome`] of [`ask_mpe_features`] declares.
 ///
 /// # Errors
 ///
 /// [`MpeFeaturesError`] for a refusal, a timeout, data that is not a defined
 /// feature set (a reserved bit or enumerator is refused, not read as the
 /// nearest feature), or an outcome of another request.
-pub fn mpe_features(outcome: &Outcome) -> Result<MpeFeatures, MpeFeaturesError> {
+pub fn mpe_features(outcome: &ProfileOutcome) -> Result<MpeFeatures, MpeFeaturesError> {
     match outcome {
-        Outcome::Details(data) => MpeFeatures::from_data(data.as_bytes())
+        ProfileOutcome::Details(data) => MpeFeatures::from_data(data.as_bytes())
             .ok_or_else(|| MpeFeaturesError::Unreadable(data.clone())),
-        Outcome::Refused(nak) => Err(MpeFeaturesError::Refused(nak.clone())),
-        Outcome::TimedOut => Err(MpeFeaturesError::TimedOut),
+        ProfileOutcome::Refused(nak) => Err(MpeFeaturesError::Refused(nak.clone())),
+        ProfileOutcome::TimedOut => Err(MpeFeaturesError::TimedOut),
         _ => Err(MpeFeaturesError::NotDetails),
     }
 }

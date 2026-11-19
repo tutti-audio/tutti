@@ -2,7 +2,7 @@
 //! Identity Request and Reply.
 //!
 //! A MIDI 1.0 port with no Function Blocks has no UMP Stream to ask what it is
-//! (M2-104 Appendix I), so the Endpoint Discovery of a [`Connection`](crate::Connection)
+//! (M2-104 Appendix I), so the Endpoint Discovery of an [`EndpointDiscovery`](crate::EndpointDiscovery)
 //! has nobody to answer it. What a device of that kind can say about itself is
 //! its Identity Reply:
 //!
@@ -12,7 +12,7 @@
 //! ```
 //!
 //! An [`IdentityInquiry`] is the pure state machine over the reply and time,
-//! shaped as `Connection` is: every step returns an [`InquiryAction`], and time
+//! shaped as `EndpointDiscovery` is: every step returns an [`InquiryAction`], and time
 //! comes in as an [`Instant`] value. It sends nothing and reads no clock. The
 //! reply itself is read by whoever owns the wire (`tutti_midi_protocol::read`
 //! gives the [`DeviceIdentity`]).

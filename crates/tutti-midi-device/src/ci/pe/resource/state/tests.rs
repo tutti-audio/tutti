@@ -542,14 +542,14 @@ impl Device {
 }
 
 impl StateDevice for Device {
-    fn judge(&mut self, _: &StateId, arrival: Arrival<'_>) -> Verdict {
+    fn judge(&mut self, _: &StateId, arrival: Arrival<'_>) -> StateVerdict {
         match arrival {
             Arrival::Prefix(prefix) => {
                 self.asked.lock().unwrap().push((prefix.len(), false));
                 *self.seen.lock().unwrap() = prefix.to_vec();
                 match self.refuse_prefix_from {
-                    Some(at) if prefix.len() >= at => Verdict::Refuse,
-                    _ => Verdict::Undecided,
+                    Some(at) if prefix.len() >= at => StateVerdict::Refuse,
+                    _ => StateVerdict::Undecided,
                 }
             }
             Arrival::Whole(state) => {
@@ -558,9 +558,9 @@ impl StateDevice for Device {
                     .unwrap()
                     .push((state.to_wire().1.len(), true));
                 if self.refuse_whole {
-                    Verdict::Refuse
+                    StateVerdict::Refuse
                 } else {
-                    Verdict::Sound
+                    StateVerdict::Sound
                 }
             }
         }

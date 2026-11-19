@@ -77,8 +77,8 @@ pub use drum_map::{
 pub use endpoint::{EndpointInfo, EndpointStatus};
 pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
 pub use initiator::{
-    EnabledMpeZones, Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator,
-    ProfileTable, Request, RequestError,
+    EnabledMpeZones, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileOutcome,
+    ProfileRequest, ProfileRequestError, ProfileTable,
 };
 #[cfg(feature = "serde")]
 pub use pe::SavedStateError;
@@ -111,9 +111,9 @@ pub use pe::{
     ResourceStore, ResourceTarget, ResponderAction, ResponderEvent, ResponderSettings,
     RestoreError, RoleName, SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY,
     SUB_ID2_PE_NOTIFY, SavedState, SelectorAction, SetBody, SignificantBits, SimpleAction,
-    SimultaneousRequests, StateDevice, StateId, StateRev, StateSize, StateStamp, StepCount,
-    StoreError, StreamLimit, SubscribeId, TypeHint, UnixSeconds, UpdateKind, Verdict, WrongDevice,
-    decode_body, encode_body, mcoded7, split_message,
+    SimultaneousRequests, StateDevice, StateId, StateRev, StateSize, StateStamp, StateVerdict,
+    StepCount, StoreError, StreamLimit, SubscribeId, TypeHint, UnixSeconds, UpdateKind,
+    WrongDevice, decode_body, encode_body, mcoded7, split_message,
 };
 pub use process::{
     ChannelControllers, DataControl, NotADataControl, NoteData, ProcessFeatures, ReportScope,
