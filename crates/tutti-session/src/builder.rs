@@ -285,7 +285,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     /// option set so far carries over. Default `f32`.
     ///
     /// It is the one place the choice is made: [`system_clock`](Self::system_clock)
-    /// and [`device`](Self::device) carry the float, so
+    /// and `device` carry the float, so
     /// `.float::<f64>().device(..)` reaches every clock.
     ///
     /// ```
