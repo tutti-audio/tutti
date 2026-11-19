@@ -49,9 +49,9 @@ fn the_delay_returns_a_wide_signal_sixteen_frames_on() {
     const RATE: SampleRate = SampleRate::of(1_024.0);
     let x = wide_signal(256);
     let node = DelayNode::<f64>::mono(
-        MaxDelay::of(Seconds(0.5)),
+        MaxDelay::of(Seconds::new(0.5)),
         DelayControls {
-            time: Seconds(16.0 / RATE.get()),
+            time: Seconds::new(16.0 / RATE.get()),
             ..DelayControls::DEFAULT
         },
     );
@@ -67,8 +67,8 @@ fn the_delay_returns_a_wide_signal_sixteen_frames_on() {
 fn the_limiter_under_its_threshold_returns_a_wide_signal_a_lookahead_late() {
     let x = wide_signal(4_800);
     let node = LimiterNode::<f64>::mono(LimiterControls {
-        threshold: Db(0.0),
-        ceiling: Db(0.0),
+        threshold: Db::new(0.0),
+        ceiling: Db::new(0.0),
         ..LimiterControls::DEFAULT
     });
     let mut d = Direct::<_, f64>::with_format(node, RATE, x.len());
@@ -95,30 +95,31 @@ fn the_dynamics_that_do_nothing_return_a_wide_signal_as_it_is() {
     let x = wide_signal(4_800);
     let input = on(1, &x);
     let compressor = CompressorNode::<f64>::mono(CompressorControls {
-        threshold: Db(0.0),
-        knee: Db(6.0),
-        ratio: CompressionRatio(4.0),
-        attack: Seconds(0.002),
-        release: Seconds(0.05),
-        makeup: Db(0.0),
+        threshold: Db::new(0.0),
+        knee: Db::new(6.0),
+        ratio: CompressionRatio::new(4.0),
+        attack: Seconds::new(0.002),
+        release: Seconds::new(0.05),
+        makeup: Db::new(0.0),
         ..CompressorControls::DEFAULT
     });
     assert_close_f64(&render(compressor, RATE, &input)[0], &x, F64_TOLERANCE);
     let gate = GateNode::<f64>::mono(GateControls {
-        threshold: Db(-40.0),
-        attack: Seconds(0.0),
-        hold: Seconds(0.0),
-        release: Seconds(0.0),
-        range: Db(-80.0),
+        threshold: Db::new(-40.0),
+        attack: Seconds::new(0.0),
+        hold: Seconds::new(0.0),
+        release: Seconds::new(0.0),
+        range: Db::new(-80.0),
         ..GateControls::DEFAULT
     });
     assert_close_f64(&render(gate, RATE, &input)[0], &x, F64_TOLERANCE);
-    let brickwall = BrickwallLimiterNode::<f64>::new(Db(0.0));
+    let brickwall = BrickwallLimiterNode::<f64>::new(Db::new(0.0));
     assert_close_f64(&render(brickwall, RATE, &input)[0], &x, F64_TOLERANCE);
     let shaper = TransientShaperNode::<f64>::from(TransientShaperConfig::new(ChannelLayout::MONO));
     assert_close_f64(&render(shaper, RATE, &input)[0], &x, F64_TOLERANCE);
     let band = DynamicEqNode::<f64>::from(
-        DynamicEqConfig::new(ChannelLayout::MONO, Hz(1_000.0), Q(1.0)).range(Db(0.0)),
+        DynamicEqConfig::new(ChannelLayout::MONO, Hz::new(1_000.0), Q::new(1.0))
+            .range(Db::new(0.0)),
     );
     assert_close_f64(&render(band, RATE, &input)[0], &x, F64_TOLERANCE);
 }
@@ -139,7 +140,7 @@ fn the_distortion_is_the_softsign_curve_of_a_wide_signal() {
     let x = wide_signal(300);
     let h = 1.7;
     let want: Vec<f64> = x.iter().map(|&x| h * x / (1.0 + (h * x).abs())).collect();
-    let node = DistortionNode::<f64>::new(ShapeKind::Softsign, Drive(1.7));
+    let node = DistortionNode::<f64>::new(ShapeKind::Softsign, Drive::new(1.7));
     assert_close_f64(&render(node, RATE, &on(1, &x))[0], &want, F64_TOLERANCE);
 }
 
@@ -157,7 +158,7 @@ fn the_tremolo_at_depth_zero_returns_a_wide_signal() {
 fn the_ring_modulator_at_a_quarter_of_the_rate_multiplies_by_zero_one_zero_minus_one() {
     let x = wide_signal(64);
     let node = RingModNode::<f64>::from(
-        RingModConfig::new(ChannelLayout::MONO).frequency(Hz(RATE.get() / 4.0)),
+        RingModConfig::new(ChannelLayout::MONO).frequency(Hz::new(RATE.get() / 4.0)),
     );
     let out = render(node, RATE, &on(1, &x)).remove(0);
     let want: Vec<f64> = x
@@ -174,7 +175,7 @@ fn the_ring_modulator_at_a_quarter_of_the_rate_multiplies_by_zero_one_zero_minus
 #[test]
 fn the_auto_pan_at_a_quarter_of_the_rate_is_hard_right_then_hard_left() {
     let x = wide_signal(64);
-    let node = AutoPanNode::<f64>::from(AutoPanConfig::new().rate(Hz(RATE.get() / 4.0)));
+    let node = AutoPanNode::<f64>::from(AutoPanConfig::new().rate(Hz::new(RATE.get() / 4.0)));
     let out = render(node, RATE, &[x.clone(), x.clone()]);
     for n in (1..64).step_by(2) {
         let (kept, dropped) = if n % 4 == 1 {
@@ -207,7 +208,7 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
     let held = vec![DC; FRAMES];
     let input = on(1, &held);
     let settled = |out: Vec<Vec<f64>>| out[0][FRAMES - 1];
-    let svf = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.707));
+    let svf = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.707));
     assert!(
         (settled(render(svf, RATE, &input)) - DC).abs() <= F64_TOLERANCE,
         "svf"
@@ -223,9 +224,9 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
     );
     let bell = BellFilterNode::<f64>::from(BellFilterConfig::new(
         ChannelLayout::MONO,
-        Hz(2_000.0),
-        Q(2.0),
-        Db(6.0),
+        Hz::new(2_000.0),
+        Q::new(2.0),
+        Db::new(6.0),
     ));
     assert!(
         (settled(render(bell, RATE, &input)) - DC).abs() <= F64_TOLERANCE,
@@ -233,16 +234,16 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
     );
     let tilt = TiltFilterNode::<f64>::from(TiltFilterConfig::new(
         ChannelLayout::MONO,
-        Hz(1_000.0),
-        Db(0.0),
+        Hz::new(1_000.0),
+        Db::new(0.0),
     ));
     assert!(
         (settled(render(tilt, RATE, &input)) - DC).abs() <= F64_TOLERANCE,
         "tilt"
     );
     let envelope = EnvelopeFilterNode::<f64>::from(
-        EnvelopeFilterConfig::new(ChannelLayout::MONO, Hz(1_000.0), SvfType::LowPass)
-            .depth(Semitones(0.0)),
+        EnvelopeFilterConfig::new(ChannelLayout::MONO, Hz::new(1_000.0), SvfType::LowPass)
+            .depth(Semitones::new(0.0)),
     );
     assert!(
         (settled(render(envelope, RATE, &input)) - DC).abs() <= F64_TOLERANCE,
@@ -251,7 +252,7 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
     let phaser = PhaserNode::<f64>::mono(
         Stages::of(4),
         PhaserControls {
-            feedback: Feedback(0.0),
+            feedback: Feedback::new(0.0),
             ..PhaserControls::DEFAULT
         },
     );
@@ -266,7 +267,7 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
 fn the_crossover_bands_sum_to_a_wide_constant() {
     const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
     const FRAMES: usize = 16_384;
-    let node = CrossoverNode::<f64>::new(ChannelLayout::MONO, &[Hz(1_000.0)]).unwrap();
+    let node = CrossoverNode::<f64>::new(ChannelLayout::MONO, &[Hz::new(1_000.0)]).unwrap();
     let out = render(node, RATE, &on(1, &vec![DC; FRAMES]));
     let sum = out[0][FRAMES - 1] + out[1][FRAMES - 1];
     assert!((sum - DC).abs() <= F64_TOLERANCE, "{sum} against {DC}");
@@ -278,7 +279,8 @@ fn the_crossover_bands_sum_to_a_wide_constant() {
 fn the_ladder_settles_a_wide_constant_to_its_saturation() {
     const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
     const FRAMES: usize = 4_096;
-    let node = LadderFilterNode::<f64>::new(LadderType::LP24, Hz(5_000.0), Resonance(0.0));
+    let node =
+        LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(5_000.0), Resonance::new(0.0));
     let out = render(node, RATE, &on(1, &vec![DC; FRAMES]));
     assert!(
         (out[0][FRAMES - 1] - DC.tanh()).abs() <= F64_TOLERANCE,
@@ -294,10 +296,10 @@ fn the_linear_nodes_satisfy_superposition() {
     assert_linear(
         || {
             DelayNode::<f64>::mono(
-                MaxDelay::of(Seconds(0.05)),
+                MaxDelay::of(Seconds::new(0.05)),
                 DelayControls {
-                    time: Seconds(0.01),
-                    feedback: Feedback(0.6),
+                    time: Seconds::new(0.01),
+                    feedback: Feedback::new(0.6),
                     ..DelayControls::DEFAULT
                 },
             )
@@ -321,8 +323,8 @@ fn the_linear_nodes_satisfy_superposition() {
     assert_linear(
         || {
             FreeverbNode::<f64>::live(FreeverbControls {
-                room: Mix(0.7),
-                damp: Mix(0.3),
+                room: Mix::new(0.7),
+                damp: Mix::new(0.3),
             })
         },
         SampleRate::SR_44K1,
@@ -353,13 +355,13 @@ fn the_linear_nodes_satisfy_superposition() {
         2_400,
     );
     assert_linear(
-        || SvfFilterNode::<f64>::new(SvfType::BandPass, Hz(1_000.0), Q(2.0)),
+        || SvfFilterNode::<f64>::new(SvfType::BandPass, Hz::new(1_000.0), Q::new(2.0)),
         RATE,
         1,
         2_400,
     );
     assert_linear(
-        || CrossoverNode::<f64>::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap(),
+        || CrossoverNode::<f64>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap(),
         RATE,
         2,
         2_400,

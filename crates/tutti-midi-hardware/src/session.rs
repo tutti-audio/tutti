@@ -40,6 +40,7 @@ use tutti_midi_device::ResourceStore;
 
 use crate::answer::Answer;
 use crate::backend;
+use crate::capability::legacy;
 use crate::ci::{CiChange, CiPeerInfo, Heard, PeerId};
 use crate::devices::{Devices, OpenInput, OpenOutput};
 use crate::endpoints::MidiEndpoints;
@@ -427,7 +428,7 @@ impl MidiSession {
         // A UMP Endpoint with an output is asked what it is by the next
         // `poll`. Its output is the negotiation's own, not the session's one
         // destination: asking must not wait for, or disturb, that choice.
-        let os = self.devices.capability(&id).unwrap_or_default();
+        let os = self.devices.capability(&id).unwrap_or_else(legacy);
         // A MIDI 1.0 port with an output is asked for its identity instead.
         let out = self.devices.open_output(&id).ok();
         let stream = Negotiation::new(id.clone(), os, out, timing, ci_refused);

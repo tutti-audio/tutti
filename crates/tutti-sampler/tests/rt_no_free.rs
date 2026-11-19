@@ -145,15 +145,15 @@ fn write_wav(path: &std::path::Path) {
 /// reader.
 fn stream() -> (
     tempfile::TempDir,
-    DiskStreamer<ByHand>,
-    Stream,
-    tutti_sampler::StreamReader,
+    DiskStreamer<ByHand<f32>, f32>,
+    Stream<f32>,
+    tutti_sampler::StreamReader<f32>,
 ) {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("two_seconds.wav");
     write_wav(&path);
     let mut streamer =
-        DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
+        DiskStreamer::by_hand(SampleRate::SR_48K, Default::default()).expect("builds");
     let opening = streamer.open(&path, Placement::HEAD);
     let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
     (dir, streamer, stream, reader)
@@ -193,12 +193,12 @@ fn dropping_a_stream_frees_the_ring_in_the_streamers_step() {
 /// never owns published state.
 #[test]
 fn a_block_that_ends_after_a_publish_frees_nothing() {
-    let (_dir, mut streamer, mut stream, mut reader) = stream();
+    let (_dir, mut streamer, stream, mut reader) = stream();
     let none = || Samples::new(0)..Samples::new(0);
     let block = reader.block(Samples::new(0), [none(), none()]);
     stream
-        .set_loop(Some(loop_frames(1_000, 3_000, 0)))
-        .expect("the streamer lives");
+        .looping_cell()
+        .publish(Some(loop_frames(1_000, 3_000, 0)));
     let _ = streamer.step_once();
 
     let frees = frees_during(|| drop(block));
@@ -219,10 +219,10 @@ fn a_block_that_ends_after_a_publish_frees_nothing() {
 /// closed, so the voice's reader is the ring's **last holder**: its drop
 /// frees the ring wherever it happens.
 fn pool_holding_the_last_holder(
-    streamer: DiskStreamer<ByHand>,
-    stream: Stream,
-    reader: tutti_sampler::StreamReader,
-) -> (VoicePool, tutti_sampler::VoicePoolHandle) {
+    streamer: DiskStreamer<ByHand<f32>, f32>,
+    stream: Stream<f32>,
+    reader: tutti_sampler::StreamReader<f32>,
+) -> (VoicePool<f32>, tutti_sampler::VoicePoolHandle<f32>) {
     let (pool, handle) = VoicePool::new().with_handle();
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     handle

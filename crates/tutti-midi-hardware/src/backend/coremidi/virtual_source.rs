@@ -10,7 +10,8 @@
 //! [`UmpVirtualSource`] owns the endpoint, disposed on drop.
 
 use tracing::debug;
-use tutti_coremidi_ffi::{Protocol, UmpSource};
+use tutti_coremidi_ffi::UmpSource;
+use tutti_ump::Protocol;
 
 use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};

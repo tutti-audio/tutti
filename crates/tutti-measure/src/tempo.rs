@@ -29,11 +29,11 @@
 //! autocorrelation and the tracker's tables.
 
 use crate::level::SILENCE_FLOOR;
-use tutti_buffers::{Mono, Sample};
+use tutti_buffers::{Float, Mono, Sample};
 use tutti_units::{Bpm, Confidence, SampleRate, Samples, Seconds};
 
 use crate::beat;
-use crate::convert::to_f32;
+use crate::convert::widen;
 use crate::framing::Framing;
 use crate::onset::{DetectionFunction, OnsetConfig, onset_lag, run};
 use crate::sequence::local_maxima;
@@ -57,9 +57,11 @@ const MAX_BPM: f64 = 1000.0;
 /// The most runner-up tempi kept.
 const MAX_ALTERNATIVES: usize = 16;
 
-/// A curve with less relative spread than this is flat: its peak-to-peak range
-/// is within rounding of its own level.
-const FLAT: f32 = f32::EPSILON;
+/// A curve with less relative spread than this is flat: `hi - lo` is compared
+/// with `FLAT * max(|hi|, |lo|)`, and one unit of `f64` epsilon is one ulp of
+/// the level, so a curve that is constant up to the last-bit rounding of the
+/// transform and the detection function reads flat.
+const FLAT: f64 = f64::EPSILON;
 
 ranged! {
     /// How many runner-up tempi a tempo estimate holds: within `0..=16`.
@@ -71,16 +73,16 @@ ranged! {
     /// How wide the tempo prior is, in octaves (a factor of two in tempo per
     /// octave): finite and above zero. A ratio between two tempi, which no unit
     /// type covers.
-    PriorSpread(f32), PriorSpreadError, "a prior spread above zero",
-    |raw| raw > 0.0 && raw <= f32::MAX
+    PriorSpread(f64), PriorSpreadError, "a prior spread above zero",
+    |raw| raw > 0.0 && raw.is_finite()
 }
 
 ranged! {
     /// How hard the beat tracker holds to the tempo: finite and not negative.
     /// The weight of a penalty against a novelty score of unit standard
     /// deviation, which no unit type covers.
-    Tightness(f32), TightnessError, "a tightness of zero or more",
-    |raw| raw >= 0.0 && raw <= f32::MAX
+    Tightness(f64), TightnessError, "a tightness of zero or more",
+    |raw| raw >= 0.0 && raw.is_finite()
 }
 
 /// The tempi searched: `min` below `max`, each within `1..=1000` BPM.
@@ -275,11 +277,11 @@ pub fn estimate_tempo<S: Sample>(
     cfg: &TempoConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<Tempo> {
     let rate = rate.into();
     let hop = cfg.framing.hop();
-    let novelty = novelty(cfg, &to_f32(samples.samples()), rate, fft)?.0;
+    let novelty = novelty(cfg, &widen(samples.samples()), rate, fft)?.0;
     estimate_tempo_from_novelty(cfg, &novelty, rate, hop, fft)
 }
 
@@ -299,15 +301,15 @@ pub fn estimate_tempo<S: Sample>(
 ///
 /// `novelty` is a curve of readings, not audio, and `hop` is the spacing of
 /// its values in samples.
-pub fn estimate_tempo_from_novelty(
+pub fn estimate_tempo_from_novelty<F: Float>(
     cfg: &TempoConfig,
-    novelty: &[f32],
+    novelty: &[F],
     sample_rate: impl Into<SampleRate>,
     hop: Samples,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<Tempo> {
     let rate = frame_rate(sample_rate.into(), hop)?;
-    let curve = Periodicity::new(cfg, novelty, rate, hop, fft)?;
+    let curve = Periodicity::new(cfg, &widen(novelty), rate, hop, fft)?;
     Ok(curve.tempo(cfg))
 }
 
@@ -324,10 +326,10 @@ pub fn track_beats<S: Sample>(
     cfg: &TempoConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<BeatGrid> {
     let rate = rate.into();
-    let (novelty, geometry) = novelty(cfg, &to_f32(samples.samples()), rate, fft)?;
+    let (novelty, geometry) = novelty(cfg, &widen(samples.samples()), rate, fft)?;
     let mut grid = track_beats_from_novelty(cfg, &novelty, rate, geometry.hop(), None, fft)?;
     let shift = onset_lag(geometry);
     for beat in &mut grid.beats {
@@ -349,15 +351,16 @@ pub fn track_beats<S: Sample>(
 /// [`Error::NonFiniteInput`] for a NaN or infinite value in `novelty`, and
 /// [`Error::UntrackableTempo`] for a tempo whose period is not between two
 /// frames and the curve's length; a flat curve gives no beats.
-pub fn track_beats_from_novelty(
+pub fn track_beats_from_novelty<F: Float>(
     cfg: &TempoConfig,
-    novelty: &[f32],
+    novelty: &[F],
     sample_rate: impl Into<SampleRate>,
     hop: Samples,
     tempo: Option<Bpm>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<BeatGrid> {
     let sample_rate = sample_rate.into();
+    let novelty = &widen(novelty);
     let rate = frame_rate(sample_rate, hop)?;
     let bpm = match tempo {
         Some(bpm) => {
@@ -408,10 +411,10 @@ fn bpm_of(lag: f64, rate: SampleRate) -> f64 {
 /// the first frame zeroed, and the geometry it was taken on.
 fn novelty(
     cfg: &TempoConfig,
-    samples: &[f32],
+    samples: &[f64],
     rate: SampleRate,
-    fft: &mut FftScratch,
-) -> Result<(Vec<f32>, StftGeometry)> {
+    fft: &mut FftScratch<f64>,
+) -> Result<(Vec<f64>, StftGeometry)> {
     let onset = OnsetConfig::new(DetectionFunction::SpectralFlux)
         .framing(cfg.framing)
         .plan(rate)?;
@@ -426,11 +429,11 @@ fn novelty(
             got: Samples(samples.len()),
         });
     }
-    let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-    if f64::from(peak) < SILENCE_FLOOR.to_amplitude().get() {
+    let peak = samples.iter().fold(0.0f64, |m, s| m.max(s.abs()));
+    if peak < SILENCE_FLOOR.to_amplitude().get() {
         return Err(Error::NoSignal);
     }
-    let mut curve: Vec<f32> = run(onset, samples, fft)
+    let mut curve: Vec<f64> = run(onset, samples, fft)
         .novelty()
         .iter()
         .map(|n| n.value)
@@ -445,7 +448,7 @@ fn novelty(
 struct Periodicity {
     /// Normalised autocorrelation at lags `first_lag..=last_lag`, including
     /// the one lag either side that the refinement reads.
-    values: Vec<f32>,
+    values: Vec<f64>,
     /// The first lag inside the tempo range, in novelty frames.
     first_lag: FrameCount,
     /// The last lag inside the tempo range, in novelty frames.
@@ -456,10 +459,10 @@ struct Periodicity {
 impl Periodicity {
     fn new(
         cfg: &TempoConfig,
-        novelty: &[f32],
+        novelty: &[f64],
         frame_rate: SampleRate,
         hop: Samples,
-        fft: &mut FftScratch,
+        fft: &mut FftScratch<f64>,
     ) -> Result<Self> {
         if novelty.iter().any(|v| !v.is_finite()) {
             return Err(Error::NonFiniteInput);
@@ -490,17 +493,14 @@ impl Periodicity {
 
         let (lo, hi) = novelty
             .iter()
-            .fold((f32::MAX, f32::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+            .fold((f64::MAX, f64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
         if hi - lo <= FLAT * hi.abs().max(lo.abs()) {
             return Err(Error::NoSignal);
         }
-        let mean = novelty.iter().map(|&v| f64::from(v)).sum::<f64>() / n as f64;
-        let centred: Vec<f32> = novelty
-            .iter()
-            .map(|&v| (f64::from(v) - mean) as f32)
-            .collect();
+        let mean = novelty.iter().copied().sum::<f64>() / n as f64;
+        let centred: Vec<f64> = novelty.iter().map(|&v| v - mean).collect();
         let correlation = cross_correlate(Mono::new(&centred), Mono::new(&centred), fft);
-        let power = correlation.at(0).unwrap_or(0.0) / n as f32;
+        let power = correlation.at(0).unwrap_or(0.0) / n as f64;
         if power <= 0.0 {
             return Err(Error::NoSignal);
         }
@@ -508,7 +508,7 @@ impl Periodicity {
         // in -1..=1 (Cauchy-Schwarz), where a long lag has fewer terms and
         // reads lower.
         let values = (first_lag.get() - 1..=last_lag.get() + 1)
-            .map(|lag| correlation.at(lag as isize).unwrap_or(0.0) / n as f32 / power)
+            .map(|lag| correlation.at(lag as isize).unwrap_or(0.0) / n as f64 / power)
             .collect();
         Ok(Self {
             values,
@@ -526,17 +526,16 @@ impl Periodicity {
     /// The normalised autocorrelation at a lag in `first_lag - 1..=last_lag + 1`
     /// (the searched lags and the one either side that refinement reads);
     /// `values[0]` is lag `first_lag - 1`.
-    fn at(&self, lag: FrameCount) -> f32 {
+    fn at(&self, lag: FrameCount) -> f64 {
         let lag = lag.get();
         debug_assert!((self.first_lag.get() - 1..=self.last_lag.get() + 1).contains(&lag));
         self.values[lag - (self.first_lag.get() - 1)]
     }
 
     /// The prior's weight at `lag`, from 1 at the centre down.
-    fn weight(&self, cfg: &TempoConfig, lag: FrameCount) -> f32 {
-        let octaves =
-            libm::log2(self.bpm(lag.get() as f64) / cfg.centre.get()) / f64::from(cfg.spread.get());
-        libm::exp(-0.5 * octaves * octaves) as f32
+    fn weight(&self, cfg: &TempoConfig, lag: FrameCount) -> f64 {
+        let octaves = libm::log2(self.bpm(lag.get() as f64) / cfg.centre.get()) / cfg.spread.get();
+        libm::exp(-0.5 * octaves * octaves)
     }
 
     /// The lag refined to a fraction of a frame by a parabola through its
@@ -544,14 +543,14 @@ impl Periodicity {
     fn refined(&self, lag: FrameCount) -> f64 {
         let (below, above) = (FrameCount(lag.get() - 1), FrameCount(lag.get() + 1));
         let peak = parabolic_peak(self.at(below), self.at(lag), self.at(above));
-        lag.get() as f64 + f64::from(peak.offset)
+        lag.get() as f64 + peak.offset
     }
 
     fn tempo(&self, cfg: &TempoConfig) -> Tempo {
         // Local maxima of the weighted score; an edge of the range counts when
         // the score rises towards it.
         let first = self.first_lag.get();
-        let scores: Vec<f32> = (first..=self.last_lag.get())
+        let scores: Vec<f64> = (first..=self.last_lag.get())
             .map(|lag| self.at(FrameCount(lag)).max(0.0) * self.weight(cfg, FrameCount(lag)))
             .collect();
         let mut peaks: Vec<usize> = local_maxima(&scores, 0..scores.len()).collect();
@@ -563,7 +562,7 @@ impl Periodicity {
                 bpm: Bpm::new(self.bpm(self.refined(lag)))
                     .unwrap_or(cfg.min)
                     .clamp(cfg.min, cfg.max),
-                strength: Confidence::new_clamped(f64::from(self.at(lag))),
+                strength: Confidence::new_clamped(self.at(lag)),
             }
         };
         let best = candidate(peaks[0]);

@@ -45,10 +45,10 @@ fn tone(secs: f64) -> Arc<Wave> {
     Arc::new(w)
 }
 
-fn stretched(wave: &Arc<Wave>) -> VoiceNode {
+fn stretched(wave: &Arc<Wave>) -> VoiceNode<f32> {
     VoiceNode::new(Voice {
         source: VoiceSource::Memory(
-            MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat(0.0)))
+            MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0)))
                 .expect("a placeable wave"),
         ),
         play: Playback {
@@ -84,7 +84,7 @@ impl<N: Node> Node for Undeclared<N> {
 fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(MAX_BLOCK)),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     if workers > 1 {
         exec.set_pool(Some(Arc::new(
@@ -101,9 +101,11 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
     for k in 0..sources {
         let key = NodeKey(k + 1);
         if k < READS {
-            let read =
-                MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat(k as f64 * 0.001)))
-                    .expect("a placeable wave");
+            let read = MemorySource::placed(
+                Arc::clone(wave),
+                VoiceWindow::from(Beat::new(k as f64 * 0.001)),
+            )
+            .expect("a placeable wave");
             if declared {
                 ed.insert(key, "read", read);
             } else {
@@ -142,7 +144,7 @@ fn render(exec: &mut Executor, channels: usize) -> Vec<Vec<f32>> {
         {
             let mut outs: Vec<&mut [f32]> = chunk.iter_mut().map(Vec::as_mut_slice).collect();
             let beat = frame as f64 * BPM / 60.0 / SR;
-            let t = TransportPosition::new(true, Bpm::of(BPM), Beat(beat), None);
+            let t = TransportPosition::new(true, Bpm::of(BPM), Beat::new(beat), None);
             exec.process(n, &t, &[], &mut outs);
         }
         for (a, c) in all.iter_mut().zip(chunk) {
@@ -160,7 +162,7 @@ fn each_node_declares_its_class() {
     let wave = tone(0.1);
     let plain = VoiceNode::new(Voice {
         source: VoiceSource::Memory(
-            MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat(0.0)))
+            MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
                 .expect("a placeable wave"),
         ),
         play: Playback::default(),
@@ -210,7 +212,7 @@ fn moderate_reads_pack_and_render_bit_identically() {
         // From a one-frame block: every ragged block below is spread, so
         // the comparison is never a serial walk against itself.
         assert!(
-            matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples(1)),
+            matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples::new(1)),
             "{:?}",
             plan.schedule(4)
         );

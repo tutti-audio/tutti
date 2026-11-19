@@ -17,7 +17,7 @@ use tutti_units::{Cents, Hz, Semitones};
 // definition, so the duplication is inert — unlike the *conversions* that used
 // to sit beside it, which are now `Semitones::to_pitch_ratio` and
 // `Cents::to_pitch_ratio`.
-pub(crate) const A4_FREQ: Hz = Hz(440.0);
+pub(crate) const A4_FREQ: Hz = Hz::new(440.0);
 const A4_NOTE: NoteNumber = NoteNumber::of(69);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -46,7 +46,7 @@ impl ScaleDegree {
 /// sounds from equal temperament (`tutti_voicing::Command::Start`'s `tune`), so
 /// the scale itself is no state of a voice.
 pub(crate) fn key_freq(note: f64, tune: Semitones) -> Hz {
-    A4_FREQ * (Semitones(note - f64::from(A4_NOTE.get())) + tune).to_pitch_ratio()
+    A4_FREQ * (Semitones::new(note - f64::from(A4_NOTE.get())) + tune).to_pitch_ratio()
 }
 
 /// A note-number-to-frequency map, resolved once into a 128-entry table.
@@ -87,12 +87,12 @@ impl Tuning {
         reference_note: NoteNumber,
     ) -> Self {
         let degrees: Vec<ScaleDegree> = (0..12)
-            .map(|i| ScaleDegree::from_cents(Semitones(f64::from(i)).to_cents()))
+            .map(|i| ScaleDegree::from_cents(Semitones::new(f64::from(i)).to_cents()))
             .collect();
 
         let mut tuning = Self {
             degrees,
-            freq_table: [Hz(0.0); 128],
+            freq_table: [Hz::new(0.0); 128],
             reference_freq: reference_freq.into(),
             reference_note,
         };
@@ -131,7 +131,7 @@ impl Tuning {
 
         let mut tuning = Self {
             degrees,
-            freq_table: [Hz(0.0); 128],
+            freq_table: [Hz::new(0.0); 128],
             reference_freq: A4_FREQ,
             reference_note: A4_NOTE,
         };
@@ -166,7 +166,7 @@ impl Tuning {
 
         let mut tuning = Self {
             degrees,
-            freq_table: [Hz(0.0); 128],
+            freq_table: [Hz::new(0.0); 128],
             reference_freq: A4_FREQ,
             reference_note: A4_NOTE,
         };
@@ -186,7 +186,7 @@ impl Tuning {
 
         let mut tuning = Self {
             degrees,
-            freq_table: [Hz(0.0); 128],
+            freq_table: [Hz::new(0.0); 128],
             reference_freq: A4_FREQ,
             reference_note: A4_NOTE,
         };
@@ -205,7 +205,7 @@ impl Tuning {
 
         let mut tuning = Self {
             degrees,
-            freq_table: [Hz(0.0); 128],
+            freq_table: [Hz::new(0.0); 128],
             reference_freq: A4_FREQ,
             reference_note: A4_NOTE,
         };
@@ -217,7 +217,7 @@ impl Tuning {
         let scale_size = self.degrees.len();
         if scale_size == 0 {
             for note in 0..128 {
-                let semitones = Semitones(note as f64 - f64::from(self.reference_note.get()));
+                let semitones = Semitones::new(note as f64 - f64::from(self.reference_note.get()));
                 self.freq_table[note] = self.reference_freq * semitones.to_pitch_ratio();
             }
             return;
@@ -263,7 +263,7 @@ impl Tuning {
             // MIDI note 69 is A4 = 440 Hz: the pitch of a frequency is its
             // interval over A4 above that note.
             let above_a4 = Semitones::from_pitch_ratio(hz / A4_FREQ);
-            *word = TuningFrequency::nearest(above_a4 + Semitones(f64::from(A4_NOTE.get())));
+            *word = TuningFrequency::nearest(above_a4 + Semitones::new(f64::from(A4_NOTE.get())));
         }
         KeyTable::new(words)
     }

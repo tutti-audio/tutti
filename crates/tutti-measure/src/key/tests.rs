@@ -2,12 +2,12 @@ use super::*;
 use tutti_dsp::{BinCount, FrameCount};
 
 /// A key's own profile, as the chroma a perfect rendition would have.
-fn profile_chroma(tonic: usize, mode: Mode, profile: KeyProfile) -> [f32; CLASSES] {
+fn profile_chroma(tonic: usize, mode: Mode, profile: KeyProfile) -> [f64; CLASSES] {
     let r = profile.ratings(mode);
-    core::array::from_fn(|i| r[(i + CLASSES - tonic) % CLASSES] as f32)
+    core::array::from_fn(|i| r[(i + CLASSES - tonic) % CLASSES])
 }
 
-fn rotate(v: &[f32; CLASSES], by: usize) -> [f32; CLASSES] {
+fn rotate(v: &[f64; CLASSES], by: usize) -> [f64; CLASSES] {
     core::array::from_fn(|i| v[(i + CLASSES - by) % CLASSES])
 }
 
@@ -37,7 +37,7 @@ fn a_profile_names_its_own_key_with_full_confidence() {
 /// millions of ulps of twelve terms of order one).
 #[test]
 fn rotating_the_chroma_rotates_the_key() {
-    let base: [f32; CLASSES] = [0.9, 0.1, 0.5, 0.0, 0.6, 0.4, 0.1, 0.8, 0.0, 0.3, 0.1, 0.4];
+    let base: [f64; CLASSES] = [0.9, 0.1, 0.5, 0.0, 0.6, 0.4, 0.1, 0.8, 0.0, 0.3, 0.1, 0.4];
     let first = estimate_key_from_mean(&base, KeyProfile::Krumhansl).unwrap();
     for k in 0..CLASSES {
         let est = estimate_key_from_mean(&rotate(&base, k), KeyProfile::Krumhansl).unwrap();
@@ -53,14 +53,14 @@ fn rotating_the_chroma_rotates_the_key() {
 /// correlations, here recomputed independently in f64.
 #[test]
 fn the_confidence_is_the_documented_margin() {
-    let x: [f32; CLASSES] = [0.9, 0.1, 0.5, 0.0, 0.6, 0.4, 0.1, 0.8, 0.0, 0.3, 0.1, 0.4];
+    let x: [f64; CLASSES] = [0.9, 0.1, 0.5, 0.0, 0.6, 0.4, 0.1, 0.8, 0.0, 0.3, 0.1, 0.4];
     let est = estimate_key_from_mean(&x, KeyProfile::Temperley).unwrap();
     let pearson = |tonic: usize, mode: Mode| {
         let p = KeyProfile::Temperley.ratings(mode);
         let q: Vec<f64> = (0..CLASSES)
             .map(|i| p[(i + CLASSES - tonic) % CLASSES])
             .collect();
-        let a: Vec<f64> = x.iter().map(|&v| f64::from(v)).collect();
+        let a: Vec<f64> = x.to_vec();
         let (ma, mq) = (a.iter().sum::<f64>() / 12.0, q.iter().sum::<f64>() / 12.0);
         let cov: f64 = a.iter().zip(&q).map(|(a, q)| (a - ma) * (q - mq)).sum();
         let va: f64 = a.iter().map(|a| (a - ma).powi(2)).sum();
@@ -88,7 +88,7 @@ fn the_confidence_is_the_documented_margin() {
 fn a_blurred_chroma_is_less_certain() {
     let pure = profile_chroma(0, Mode::Major, KeyProfile::Krumhansl);
     let other = profile_chroma(7, Mode::Major, KeyProfile::Krumhansl);
-    let blend: [f32; CLASSES] = core::array::from_fn(|i| pure[i] + other[i]);
+    let blend: [f64; CLASSES] = core::array::from_fn(|i| pure[i] + other[i]);
     let c = |x| {
         estimate_key_from_mean(x, KeyProfile::Krumhansl)
             .unwrap()
@@ -103,15 +103,15 @@ fn a_blurred_chroma_is_less_certain() {
 /// a chroma barely off flat is a key.
 #[test]
 fn silence_and_flat_chroma_are_errors() {
-    let bad = |x: [f32; CLASSES]| estimate_key_from_mean(&x, KeyProfile::Krumhansl).unwrap_err();
+    let bad = |x: [f64; CLASSES]| estimate_key_from_mean(&x, KeyProfile::Krumhansl).unwrap_err();
     assert_eq!(bad([0.0; CLASSES]), Error::NoTonalContent);
     assert_eq!(bad([0.3; CLASSES]), Error::NoTonalContent);
     assert_eq!(bad([1e-30; CLASSES]), Error::NoTonalContent);
     // One ulp of spread on 0.3 is rounding, not a key.
-    let mut ulp = [0.3f32; CLASSES];
-    ulp[0] = 0.3 + 0.3 * f32::EPSILON;
+    let mut ulp = [0.3f64; CLASSES];
+    ulp[0] = 0.3 + 0.3 * f64::EPSILON;
     assert_eq!(bad(ulp), Error::NoTonalContent);
-    let mut tilted = [0.5f32; CLASSES];
+    let mut tilted = [0.5f64; CLASSES];
     tilted[0] = 0.51;
     assert!(estimate_key_from_mean(&tilted, KeyProfile::Krumhansl).is_ok());
     let none = Grid::new(Vec::new(), FrameCount(0), BinCount(CLASSES)).unwrap();
@@ -124,11 +124,11 @@ fn silence_and_flat_chroma_are_errors() {
 /// NaN, infinity, a negative value and a wrong width are refused.
 #[test]
 fn bad_chroma_is_refused() {
-    let mut x = [0.5f32; CLASSES];
-    x[3] = f32::NAN;
-    let e = |x: &[f32; CLASSES]| estimate_key_from_mean(x, KeyProfile::Krumhansl).unwrap_err();
+    let mut x = [0.5f64; CLASSES];
+    x[3] = f64::NAN;
+    let e = |x: &[f64; CLASSES]| estimate_key_from_mean(x, KeyProfile::Krumhansl).unwrap_err();
     assert_eq!(e(&x), Error::NonFiniteInput);
-    x[3] = f32::INFINITY;
+    x[3] = f64::INFINITY;
     assert_eq!(e(&x), Error::NonFiniteInput);
     x[3] = -0.1;
     assert_eq!(e(&x), Error::NegativeInput);
@@ -145,7 +145,7 @@ fn bad_chroma_is_refused() {
 fn a_grid_is_read_as_its_mean() {
     let a = profile_chroma(0, Mode::Major, KeyProfile::Krumhansl);
     let b = profile_chroma(5, Mode::Minor, KeyProfile::Krumhansl);
-    let rows = |first: &[f32; 12], second: &[f32; 12]| {
+    let rows = |first: &[f64; 12], second: &[f64; 12]| {
         let data = [first.as_slice(), second.as_slice(), second.as_slice()].concat();
         Grid::new(data, FrameCount(3), BinCount(CLASSES)).unwrap()
     };

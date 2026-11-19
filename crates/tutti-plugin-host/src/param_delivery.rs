@@ -17,7 +17,7 @@
 //! not name (a plugin that grows a parameter later, or a list the server
 //! could not give). A chunk's [`ParameterChanges`] has room for a queue per
 //! slot, so every parameter can move in the same chunk. The bridge's buffers are reserved with the same
-//! room (`PluginBridge::reserve_param_changes`).
+//! room (`AudioBridge::reserve_param_changes`).
 //!
 //! **Points.** Each queue has room for [`points_for`] the chunk: one point
 //! per 32 frames (a control lane's grid), one for the chunk's last frame,

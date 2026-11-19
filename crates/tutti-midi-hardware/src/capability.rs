@@ -1,137 +1,15 @@
 //! What a MIDI endpoint is and what it can carry.
 //!
 //! [`OsEndpoint`] is what enumeration returns: a name, an opaque
-//! [`EndpointId`] to open it by, and a [`UmpCapability`] describing what the OS
-//! says it can do.
+//! [`EndpointId`] to open it by, and the [`Endpoint`] the OS describes.
 //!
 //! Capability is a property of the **endpoint**, not of the platform: two
 //! devices on the same machine, through the same backend, can differ. So it is
 //! a plain value that travels with the endpoint, read from the OS rather than
 //! assumed, and code that depends on it is an ordinary `match`.
-//!
-//! [`Protocol`] is the MIDI 2.0 spec's own noun from `tutti-ump`, reused
-//! here rather than restated; the blocks are `tutti-midi-device`'s `FunctionBlock`.
 
 use tutti_midi_device::{Capabilities, Endpoint, EndpointId, FunctionBlock, Identity, Supports};
-use tutti_ump::{Protocol, StreamConfig};
-
-/// What an endpoint can carry, and the blocks it declares.
-///
-/// Built by the backend at enumeration time from whatever the OS reports (an
-/// [`Endpoint`] the OS describes), and after a negotiation from the
-/// [`Endpoint`] the device itself described ([`DeviceStream::capability`]).
-/// Read by anything deciding how to talk to it.
-///
-/// [`DeviceStream::capability`]: crate::DeviceStream::capability
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UmpCapability {
-    /// The protocol the endpoint speaks now.
-    ///
-    /// `Midi1` is the common case even on a UMP-native transport: most hardware
-    /// in the world is MIDI 1.0, and the OS can hand us UMP words for it (a MIDI
-    /// 1.0 source is opened as MIDI 1.0 and arrives as type 2, widened by the
-    /// ingest node's `Translator`, never by the OS). That is a
-    /// real distinction a caller may act on (a per-note controller is pointless
-    /// to send to a `Midi1` endpoint), so it is recorded rather than flattened.
-    pub protocol: Protocol,
-    /// The Function Blocks the endpoint declares (the kernel's Group Terminal
-    /// Blocks), by number: which Groups each spans, in which direction, and its
-    /// name. Empty where the OS exposes none (a MIDI 1.0 port, or a backend
-    /// that does not read them).
-    pub blocks: Vec<FunctionBlock>,
-}
-
-/// Hand-written rather than derived, and the polarity is the point.
-///
-/// MIDI 2.0 is what this engine speaks, and the **wrong** default for a *device*
-/// whose protocol the OS never told us: it would quietly claim MIDI 2.0 for
-/// every unknown endpoint, sending it per-note messages a MIDI 1.0 endpoint
-/// cannot carry. Assuming MIDI 1.0 only costs resolution, so unknown means `Midi1`.
-impl Default for UmpCapability {
-    fn default() -> Self {
-        Self::midi1()
-    }
-}
-
-impl UmpCapability {
-    /// A MIDI-2.0 endpoint that declares no blocks.
-    pub fn midi2() -> Self {
-        Self {
-            protocol: Protocol::Midi2,
-            blocks: Vec::new(),
-        }
-    }
-
-    /// A MIDI-1.0 endpoint that declares no blocks.
-    pub fn midi1() -> Self {
-        Self {
-            protocol: Protocol::Midi1,
-            blocks: Vec::new(),
-        }
-    }
-
-    /// What `endpoint` is: the protocol it has active, and its blocks. A
-    /// reserved protocol is one nobody can speak, so it reads as MIDI 1.0.
-    #[must_use]
-    pub fn of(endpoint: &Endpoint) -> Self {
-        Self {
-            protocol: usable(endpoint.active().protocol),
-            blocks: endpoint.function_blocks().copied().collect(),
-        }
-    }
-
-    /// Whether this endpoint carries MIDI-2-only messages — per-note
-    /// controllers, per-note pitch bend, and JR Timestamps — intact.
-    ///
-    /// A `Midi1` endpoint carries MIDI 1.0 messages, which have none of those:
-    /// the output narrows the graph's MIDI 2.0 messages for it (`OpenOutput`).
-    /// This is the question a caller actually asks, named once so no call site
-    /// re-derives it from `protocol` and gets the polarity wrong.
-    pub fn carries_midi2_only(&self) -> bool {
-        matches!(self.protocol, Protocol::Midi2)
-    }
-
-    /// Whether the endpoint is a UMP Endpoint that can be asked what it is:
-    /// one in the MIDI 2.0 Protocol, or one that declares blocks. A MIDI 1.0
-    /// port with no blocks has no UMP Stream to ask (M2-104 Appendix I).
-    pub(crate) fn is_ump_endpoint(&self) -> bool {
-        self.carries_midi2_only() || !self.blocks.is_empty()
-    }
-
-    /// The Endpoint as the OS describes it: in the protocol it reports, with
-    /// JR Timestamps off (the OS reports none), and the blocks it declares. A
-    /// MIDI 1.0 port that declares none is [`Endpoint::midi1_device`].
-    pub(crate) fn endpoint(&self) -> Endpoint {
-        let protocol = usable(self.protocol);
-        let mut endpoint = if protocol == Protocol::Midi1 && self.blocks.is_empty() {
-            Endpoint::midi1_device(None)
-        } else {
-            Endpoint::new(Supports::of(Capabilities {
-                midi1: protocol == Protocol::Midi1,
-                midi2: protocol == Protocol::Midi2,
-                rx_jr: false,
-                tx_jr: false,
-            }))
-        };
-        endpoint = endpoint.in_use(StreamConfig {
-            protocol,
-            rx_jr: false,
-            tx_jr: false,
-        });
-        for block in &self.blocks {
-            endpoint = endpoint.block(*block);
-        }
-        endpoint
-    }
-}
-
-/// A protocol this engine can speak: a reserved value reads as MIDI 1.0.
-fn usable(protocol: Protocol) -> Protocol {
-    match protocol {
-        Protocol::Reserved(_) => Protocol::Midi1,
-        p => p,
-    }
-}
+use tutti_ump::{EndpointInfoNotification, FunctionBlockInfo, Protocol, StreamConfig};
 
 /// One endpoint as enumeration found it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -142,8 +20,113 @@ pub struct OsEndpoint {
     pub identity: Identity,
     /// Display name, as the OS reports it.
     pub name: String,
-    /// What it can carry.
-    pub capability: UmpCapability,
+    /// What the OS says it is: the protocol it speaks now, the protocols it
+    /// supports and the Function Blocks it declares, with JR Timestamps off (the
+    /// OS reports none).
+    ///
+    /// A legacy MIDI 1.0 port is MIDI 1.0 with no blocks. That is also what an
+    /// endpoint whose protocol the OS did not say is: MIDI 2.0 is
+    /// what this engine speaks and the wrong guess for a device, since it sends
+    /// per-note messages a MIDI 1.0 endpoint cannot carry, while assuming MIDI 1.0
+    /// only costs resolution.
+    pub capability: Endpoint,
+}
+
+/// The Endpoint of a MIDI 1.0 port the OS describes no further: the MIDI 1.0
+/// Protocol in use, with no JR Timestamps and no blocks.
+pub(crate) fn legacy() -> Endpoint {
+    from_os(Protocol::Midi1, None, std::iter::empty())
+}
+
+/// The Endpoint an OS describes: in `protocol`, supporting what `offered` says,
+/// with JR Timestamps off, and the blocks it declares ([`blocks_of`]).
+///
+/// A reserved protocol is one nobody can speak, so it reads as MIDI 1.0 in use;
+/// the Endpoint supports what `offered` says, and only when that is neither
+/// protocol is MIDI 1.0, the one thing this engine then speaks, claimed.
+pub(crate) fn from_os<'a>(
+    protocol: Protocol,
+    offered: Option<&EndpointInfoNotification>,
+    blocks: impl IntoIterator<Item = (FunctionBlockInfo, Option<&'a str>)>,
+) -> Endpoint {
+    let supported = Capabilities {
+        midi1: protocol == Protocol::Midi1 || offered.is_some_and(|o| o.midi1),
+        midi2: protocol == Protocol::Midi2 || offered.is_some_and(|o| o.midi2),
+        rx_jr: false,
+        tx_jr: false,
+    };
+    let supports = Supports::new(supported).unwrap_or(Supports::of(Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    }));
+    let in_use = match protocol {
+        Protocol::Midi2 => Protocol::Midi2,
+        _ => Protocol::Midi1,
+    };
+    let mut endpoint = Endpoint::new(supports).in_use(StreamConfig {
+        protocol: in_use,
+        rx_jr: false,
+        tx_jr: false,
+    });
+    for block in blocks_of(blocks) {
+        endpoint = endpoint.block(block);
+    }
+    endpoint
+}
+
+/// The Function Blocks an OS declares: each as the OS describes it, in the
+/// order given, read as a receiver reads what a device reports
+/// ([`FunctionBlock::received`]): a UI hint the direction rules out reads as
+/// unknown, a MIDI 1.0 port over several Groups or of a reserved value as not a
+/// port, an over-long name is cut and a name with a NUL or a Byte Order Mark
+/// dropped, the block kept. A block that is still out of range (a number above
+/// 31, a Group span off the end, a reserved direction) is left out, never
+/// clamped, and logged at `warn` with its fields.
+fn blocks_of<'a>(
+    blocks: impl IntoIterator<Item = (FunctionBlockInfo, Option<&'a str>)>,
+) -> Vec<FunctionBlock> {
+    blocks
+        .into_iter()
+        .filter_map(|(info, name)| {
+            let block = FunctionBlock::received(&info, name);
+            if block.is_none() {
+                tracing::warn!(
+                    ?info,
+                    ?name,
+                    "an OS Function Block the spec cannot hold is left out"
+                );
+            }
+            block
+        })
+        .collect()
+}
+
+/// Whether the endpoint an OS describes is a UMP Endpoint that can be asked
+/// what it is: one in the MIDI 2.0 Protocol, or one that declares blocks. A MIDI
+/// 1.0 port with no blocks has no UMP Stream to ask (M2-104 Appendix I).
+pub(crate) fn is_ump_endpoint(os: &Endpoint) -> bool {
+    carries_midi2_only(os) || os.function_blocks().next().is_some()
+}
+
+/// Whether the endpoint carries MIDI-2-only messages (per-note controllers,
+/// per-note pitch bend, JR Timestamps) intact. A MIDI 1.0 endpoint carries MIDI
+/// 1.0 messages, which have none of those: the output narrows the graph's MIDI
+/// 2.0 messages for it (`OpenOutput`).
+pub(crate) fn carries_midi2_only(os: &Endpoint) -> bool {
+    os.active().protocol == Protocol::Midi2
+}
+
+/// The Endpoint the session presents for a device the OS describes as `os`
+/// until the device says otherwise: `os`, except that a MIDI 1.0 port that
+/// declares no block and offers no MIDI 2.0 is [`Endpoint::midi1_device`], with
+/// its one inferred block.
+pub(crate) fn described(os: &Endpoint) -> Endpoint {
+    if !carries_midi2_only(os) && os.function_blocks().next().is_none() && !os.capabilities().midi2
+    {
+        Endpoint::midi1_device(None)
+    } else {
+        *os
+    }
 }
 
 #[cfg(test)]

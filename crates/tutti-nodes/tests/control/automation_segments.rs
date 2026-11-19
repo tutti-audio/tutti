@@ -80,7 +80,7 @@ impl Node for Probe {
 fn graph(lane: ControlLaneNode) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(MAX)),
+        MaxBlock::of(Samples::new(MAX)),
     ));
     ed.insert(NodeKey(1), "lane", lane);
     ed.insert(NodeKey(2), "probe", Unforkable(Probe));
@@ -139,7 +139,7 @@ fn check_rolling(
     looping: Option<LoopRange>,
 ) -> Vec<f32> {
     let (mut ed, mut exec) = graph(lane);
-    let mut clock = FrameClock::new(Beat(0.0), TEMPO, SampleRate::of(RATE));
+    let mut clock = FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(RATE));
     let graph_loop = looping.map(|l| LoopRange::new(l.start(), l.end()).expect("a loop"));
     let mut all = Vec::new();
     for &n in blocks {
@@ -154,7 +154,7 @@ fn check_rolling(
                 all.len() + i,
                 beat.get()
             );
-            clock.advance(Samples(1), looping);
+            clock.advance(Samples::new(1), looping);
         }
         all.extend(out);
     }
@@ -170,22 +170,26 @@ fn frames_per_beat() -> f64 {
 fn shaped() -> Trajectory<Hz> {
     let mut e = Trajectory::new();
     e.add_breakpoint(Breakpoint::with_law(
-        Beat(0.0),
-        Hz(0.0),
+        Beat::new(0.0),
+        Hz::new(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     e.add_breakpoint(Breakpoint::with_law(
-        Beat(0.25),
-        Hz(1.0),
+        Beat::new(0.25),
+        Hz::new(1.0),
         Law::PowerOut(Exponent::of(3.0)),
     ));
     e.add_breakpoint(Breakpoint::with_law(
-        Beat(0.4),
-        Hz(0.2),
+        Beat::new(0.4),
+        Hz::new(0.2),
         Law::PowerInOut(Exponent::of(2.0)),
     ));
-    e.add_breakpoint(Breakpoint::with_law(Beat(0.55), Hz(0.9), Law::Linear));
-    e.add_breakpoint(Breakpoint::new(Beat(0.6), Hz(0.4)));
+    e.add_breakpoint(Breakpoint::with_law(
+        Beat::new(0.55),
+        Hz::new(0.9),
+        Law::Linear,
+    ));
+    e.add_breakpoint(Breakpoint::new(Beat::new(0.6), Hz::new(0.4)));
     e
 }
 
@@ -216,31 +220,36 @@ fn an_exponential_lane_renders_the_curve_not_linear_pieces() {
 fn wraps_seeks_and_tempo_changes_stay_on_the_curve() {
     let curve = shaped();
     // Loop 0.1 → 0.5 beats, through four pieces; ragged blocks wrap inside.
-    let looping = LoopRange::new(Beat(0.1), Beat(0.5));
+    let looping = LoopRange::new(Beat::new(0.1), Beat::new(0.5));
     let total = (1.3 * frames_per_beat()) as usize;
     check_rolling(&curve, automation(curve.clone()), &ragged(total), looping);
 
     // A seek, then a tempo change, then a stop, each at offset 50 of a
     // 128-frame block.
     let (mut ed, mut exec) = graph(automation(curve.clone()));
-    let at50 = Offset::of(Samples(50), Samples(MAX));
+    let at50 = Offset::of(Samples::new(50), Samples::new(MAX));
     let cases: [(TransportPosition, TransportPosition); 3] = [
         (
-            TransportPosition::new(true, TEMPO, Beat(0.05), None),
-            TransportPosition::new(true, TEMPO, Beat(0.3), None),
+            TransportPosition::new(true, TEMPO, Beat::new(0.05), None),
+            TransportPosition::new(true, TEMPO, Beat::new(0.3), None),
         ),
         (
-            TransportPosition::new(true, TEMPO, Beat(0.12), None),
+            TransportPosition::new(true, TEMPO, Beat::new(0.12), None),
             TransportPosition::new(
                 true,
                 Bpm::of(71.0),
-                Beat(0.12 + 50.0 / frames_per_beat()),
+                Beat::new(0.12 + 50.0 / frames_per_beat()),
                 None,
             ),
         ),
         (
-            TransportPosition::new(true, TEMPO, Beat(0.45), None),
-            TransportPosition::new(false, TEMPO, Beat(0.45 + 50.0 / frames_per_beat()), None),
+            TransportPosition::new(true, TEMPO, Beat::new(0.45), None),
+            TransportPosition::new(
+                false,
+                TEMPO,
+                Beat::new(0.45 + 50.0 / frames_per_beat()),
+                None,
+            ),
         ),
     ];
     for (k, (t0, t1)) in cases.into_iter().enumerate() {
@@ -256,7 +265,7 @@ fn wraps_seeks_and_tempo_changes_stay_on_the_curve() {
             } else {
                 t1.beat().get()
             };
-            let want = curve.value_at(Beat(beat)).expect("a value").get();
+            let want = curve.value_at(Beat::new(beat)).expect("a value").get();
             assert!(
                 (f64::from(v) - want).abs() <= 1e-4,
                 "case {k}, frame {i}, beat {beat}: {v} vs {want}"
@@ -272,17 +281,17 @@ fn wraps_seeks_and_tempo_changes_stay_on_the_curve() {
 /// such frames. Returns the rendered values.
 fn check_grid(curve: &dyn Curve, lane: ControlLaneNode, blocks: &[usize], tol: f64) -> Vec<f32> {
     let (mut ed, mut exec) = graph(lane);
-    let mut clock = FrameClock::new(Beat(0.0), TEMPO, SampleRate::of(RATE));
+    let mut clock = FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(RATE));
     let mut out = Vec::new();
     for &n in blocks {
         let t = TransportPosition::counted(true, TEMPO, clock.origin(), None);
         out.extend(block(&mut ed, &mut exec, &t, &TransportChanges::NONE, n));
-        clock.advance(Samples(n), None);
+        clock.advance(Samples::new(n), None);
     }
     let step = tutti_modulation::CONTROL_GRID.stride() as usize;
     let at = |f: usize| {
-        let mut c = FrameClock::new(Beat(0.0), TEMPO, SampleRate::of(RATE));
-        c.advance(Samples(f), None);
+        let mut c = FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(RATE));
+        c.advance(Samples::new(f), None);
         curve.value_at(c.beat()).expect("a value")
     };
     for (f, &v) in out.iter().enumerate() {
@@ -302,13 +311,13 @@ fn check_grid(curve: &dyn Curve, lane: ControlLaneNode, blocks: &[usize], tol: f
 /// between, and the same frames whatever the blocks.
 #[test]
 fn an_unrepresentable_piece_is_linear_on_the_grid() {
-    let mut curve = Trajectory::new().with_range(Hz(0.0), Hz(0.5));
+    let mut curve = Trajectory::new().with_range(Hz::new(0.0), Hz::new(0.5));
     curve.add_breakpoint(Breakpoint::with_law(
-        Beat(0.0),
-        Hz(0.0),
+        Beat::new(0.0),
+        Hz::new(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
-    curve.add_breakpoint(Breakpoint::new(Beat(0.2), Hz(1.0)));
+    curve.add_breakpoint(Breakpoint::new(Beat::new(0.2), Hz::new(1.0)));
     let total = (0.15 * frames_per_beat()) as usize;
     let lane = || automation(curve.clone());
     let a = check_grid(&curve, lane(), &ragged(total), 1e-4);

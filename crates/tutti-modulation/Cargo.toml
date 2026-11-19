@@ -25,7 +25,9 @@ tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = f
 
 # The MIDI a note envelope hears (`Ump`, its held `Key`). Layer 0.
 tutti-ump = { version = "0.0.1", path = "../tutti-ump" }
-# `floor` of the program's phase and beat maths, so the crate needs no `std`.
+# `Param<Depth>`, the cell a route's depth lives in. Layer 1.
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
+# `floor` of the program's phase and beat maths.
 libm = "0.2.15"
 # The `Error` derive of the crate's error types.
 thiserror = { workspace = true }

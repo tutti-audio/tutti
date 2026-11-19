@@ -95,7 +95,7 @@ impl Clock {
         let env = Env {
             frame: Frame::new(0),
             sample_rate: SampleRate::of(SR),
-            block_len: Samples(BLOCK),
+            block_len: Samples::new(BLOCK),
             transport: tutti_graph::TransportPosition::new(
                 true,
                 Bpm::of(self.tempo),
@@ -130,7 +130,7 @@ fn render(node: &mut dyn Node, blocks: usize) -> Vec<f32> {
 /// `MemorySource` — the source has no direction verb, and `apply_direction` is
 /// a deliberate no-op on the memory tier. So exercising it means going through a
 /// pool, which is also the assembly a real render uses.
-fn reversed_pool(wave: Arc<Wave>, direction: Direction) -> (VoicePool, Arc<Clock>) {
+fn reversed_pool(wave: Arc<Wave>, direction: Direction) -> (VoicePool<f32>, Arc<Clock>) {
     let clock = Clock::new();
     // Placed, not free-running. `PlaybackSlot` reads `seated_position()`, which
     // needs a timeline; without one the slot returns early and emits silence, so
@@ -159,7 +159,7 @@ fn reversed_pool(wave: Arc<Wave>, direction: Direction) -> (VoicePool, Arc<Clock
 }
 
 /// Render a placed pool, advancing its clock once per block.
-fn render_placed(pool: &mut VoicePool, clock: &Clock, blocks: usize) -> Vec<f32> {
+fn render_placed(pool: &mut VoicePool<f32>, clock: &Clock, blocks: usize) -> Vec<f32> {
     let mut out = Vec::with_capacity(blocks * BLOCK);
     for _ in 0..blocks {
         out.extend(clock.block(pool).swap_remove(0));
@@ -380,7 +380,7 @@ fn loop_is_continuous(len: usize, start: f64, end: f64, fade: usize) {
     let free = {
         // From the file's start, as the placed voice below plays it.
         let mut source = looping_source(sine(len), start, end, fade);
-        source.trigger_at(SamplePosition(0.0));
+        source.trigger_at(SamplePosition::new(0.0));
         render(&mut source, 150)
     };
     let placed = {
@@ -420,7 +420,7 @@ fn loop_is_continuous(len: usize, start: f64, end: f64, fade: usize) {
 /// Looping is driven by the source's own position accumulator, not by a
 /// playhead — the wrap happens in `MemorySource`'s free-running arm. So this
 /// deliberately does *not* attach a timeline.
-fn looping_source(wave: Arc<Wave>, start: f64, end: f64, xfade: usize) -> MemorySource {
+fn looping_source(wave: Arc<Wave>, start: f64, end: f64, xfade: usize) -> MemorySource<f32> {
     let mut source = MemorySource::with_config(
         wave,
         MemorySourceConfig {
@@ -430,7 +430,7 @@ fn looping_source(wave: Arc<Wave>, start: f64, end: f64, xfade: usize) -> Memory
     )
     .expect("a placeable wave");
     source.set_loop(Some(loop_frames(start as usize, end as usize, xfade)));
-    source.trigger_at(SamplePosition(start));
+    source.trigger_at(SamplePosition::new(start));
     source.play();
     source
 }
@@ -637,7 +637,7 @@ fn a_one_shot_source_stops_at_the_end() {
         },
     )
     .expect("a placeable wave");
-    source.trigger_at(SamplePosition(0.0));
+    source.trigger_at(SamplePosition::new(0.0));
     source.play();
     let mut source = source;
 
@@ -678,7 +678,7 @@ fn reverse_and_loop_work_at_mono_width() {
     )
     .expect("a placeable wave");
     source.set_loop(Some(loop_frames(200, 1200, 64)));
-    source.trigger_at(SamplePosition(200.0));
+    source.trigger_at(SamplePosition::new(200.0));
     source.play();
 
     let clock = Clock::new();

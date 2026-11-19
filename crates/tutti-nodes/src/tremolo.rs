@@ -165,7 +165,7 @@ mod tests {
     fn node(width: u16, rate: f64, depth: f64) -> TremoloNode<f32> {
         prepared(TremoloNode::from(
             TremoloConfig::new(width)
-                .rate(Hz(rate))
+                .rate(Hz::new(rate))
                 .depth(Depth::of(depth)),
         ))
     }

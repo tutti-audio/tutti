@@ -80,13 +80,16 @@ fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey, out: u16) {
 /// repeated).
 fn chain_engine(outputs: usize) -> Engine {
     let transport = Transport::new(SampleRate::of(SR));
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(512)),
+    ));
     let [osc, eq, strip] = [1, 2, 3].map(NodeKey);
-    ed.insert(osc, "osc", Osc::sine(Hz(440.0)));
+    ed.insert(osc, "osc", Osc::sine(Hz::new(440.0)));
     ed.insert(
         eq,
         "eq",
-        EqBandNode::<f32>::new(SvfType::Bell, Hz(1_000.0), Q(1.0), Db(6.0)),
+        EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0), Db::new(6.0)),
     );
     ed.insert(strip, "strip", BusStripNode::stereo());
     wire(&mut ed, eq, 0, osc, 0);
@@ -321,10 +324,10 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
     use tutti_graph::{Edge, InPort, OutPort, Source};
     let (mut ed, exec) = tutti_graph::Editor::new(tutti_graph::Prepare::new(
         SampleRate::of(SR),
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     let src: Box<dyn tutti_graph::Node> = if ours {
-        tutti_graph::IntoNode::into_node(Osc::sine(Hz(440.0))).0
+        tutti_graph::IntoNode::into_node(Osc::sine(Hz::new(440.0))).0
     } else {
         Box::new(Sine {
             hz: 440.0,
@@ -339,8 +342,8 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
         let f: Box<dyn tutti_graph::Node> = if ours {
             tutti_graph::IntoNode::into_node(SvfFilterNode::<f32>::new(
                 SvfType::LowPass,
-                Hz(cutoff),
-                Q(0.7),
+                Hz::new(cutoff),
+                Q::new(0.7),
             ))
             .0
         } else {

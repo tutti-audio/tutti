@@ -73,7 +73,7 @@ fn write_wav(path: &Path) {
     tutti_fixtures::signal::write_wav_f32(path, SampleRate::of(SR), 2, &interleaved);
 }
 
-fn memory(w: &Arc<Wave>, start: f64) -> VoiceSource {
+fn memory(w: &Arc<Wave>, start: f64) -> VoiceSource<f32> {
     let mut s = MemorySource::placed(Arc::clone(w), VoiceWindow::from(Beat::new(start)))
         .expect("a placeable wave");
     s.set_render_rate(SampleRate::of(SR));
@@ -95,7 +95,7 @@ impl Host {
 
     fn advance(&mut self, frames: usize) {
         if self.playing {
-            self.clock.advance(Samples(frames), None);
+            self.clock.advance(Samples::new(frames), None);
         }
     }
 }
@@ -120,7 +120,7 @@ fn env(frame: u64, len: usize, transport: TransportPosition, changes: TransportC
     Env {
         frame: Frame::new(frame),
         sample_rate: SampleRate::of(SR),
-        block_len: Samples(len),
+        block_len: Samples::new(len),
         transport,
         changes,
         play: tutti_graph::PlayClock::ZERO,
@@ -164,7 +164,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
 
     // Disk streams: 0..4 for the long-block pool, 4..8 for the
     // short-block one.
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let openings: Vec<_> = (0..8)
         .map(|_| streamer.open(&path, crate::Placement::HEAD))
@@ -197,11 +197,11 @@ fn the_block_read_is_the_same_at_any_block_length() {
             VoicePool::with_channels(ChannelLayout::STEREO).expect("a width the sampler reads");
         pool.prepare(&Prepare::new(
             SampleRate::of(SR),
-            MaxBlock::of(Samples(256)),
+            MaxBlock::of(Samples::new(256)),
         ));
         let mut forked = disk(first_disk + 3).fork_copy();
         forked.set_render(SampleRate::of(SR), RenderMode::Offline);
-        let voices: Vec<(VoiceSource, Playback)> = vec![
+        let voices: Vec<(VoiceSource<f32>, Playback)> = vec![
             (memory(&stereo, 0.0), Playback::default()),
             (
                 memory(&stereo, 0.0),
@@ -292,7 +292,8 @@ fn the_block_read_is_the_same_at_any_block_length() {
                 apply(&mut walk, e);
                 changes
                     .push(
-                        Offset::new(Samples(k * 64), Samples(256)).expect("inside the block"),
+                        Offset::new(Samples::new(k * 64), Samples::new(256))
+                            .expect("inside the block"),
                         walk.transport(),
                     )
                     .expect("a change per piece");

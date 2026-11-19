@@ -80,7 +80,7 @@ fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey) {
 fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(FRAMES)),
+        MaxBlock::of(Samples::new(FRAMES)),
     ));
     if workers > 1 {
         exec.set_pool(Some(Arc::new(
@@ -96,7 +96,7 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
-        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f64)));
+        ed.insert(osc, "osc", Osc::sine(Hz::new(110.0 + lane as f64)));
         let mut last = osc;
         for i in 0..depth {
             let k = NodeKey(base + 1 + i as u64);
@@ -105,8 +105,8 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
                 "svf",
                 SvfFilterNode::<f32>::new(
                     SvfType::LowPass,
-                    Hz(500.0 + (lane * depth + i) as f64 * 3.0),
-                    Q(0.7),
+                    Hz::new(500.0 + (lane * depth + i) as f64 * 3.0),
+                    Q::new(0.7),
                 ),
             );
             wire(&mut ed, k, 0, last);
@@ -169,7 +169,7 @@ fn gain(ed: &mut Editor, k: NodeKey, i: usize, light: bool) {
 fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(FRAMES)),
+        MaxBlock::of(Samples::new(FRAMES)),
     ));
     if workers > 1 {
         exec.set_pool(Some(Arc::new(
@@ -209,7 +209,7 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
 fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(FRAMES)),
+        MaxBlock::of(Samples::new(FRAMES)),
     ));
     if workers > 1 {
         exec.set_pool(Some(Arc::new(
@@ -225,7 +225,7 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
-        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f64)));
+        ed.insert(osc, "osc", Osc::sine(Hz::new(110.0 + lane as f64)));
         let mut last = osc;
         for i in 0..depth {
             let k = NodeKey(base + 1 + i as u64);
@@ -234,8 +234,8 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
                 "svf",
                 SvfFilterNode::<f32>::new(
                     SvfType::LowPass,
-                    Hz(500.0 + (lane * depth + i) as f64 * 3.0),
-                    Q(0.7),
+                    Hz::new(500.0 + (lane * depth + i) as f64 * 3.0),
+                    Q::new(0.7),
                 ),
             );
             wire(&mut ed, k, 0, last);

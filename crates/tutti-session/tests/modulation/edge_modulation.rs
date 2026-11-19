@@ -14,7 +14,7 @@ use crate::common;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
-use tutti_session::{Edge, ModTarget, OutPort, ParamRef, Root, RouteSpec, Session};
+use tutti_session::{Edge, ModTarget, OutPort, ParamRef, RangeTarget, Root, RouteSpec, Session};
 use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
 
 use common::probe::Pulse;
@@ -112,8 +112,7 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     };
     figure(&mut s, 1.5, "knob + offset");
 
-    s.mods_mut()
-        .set_source(source, tutti_modulation::Macro(-0.5))
+    s.set(source.value().to(tutti_units::Bipolar::of(-0.5)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, 0.5, "the macro moved");
@@ -123,14 +122,12 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     figure(&mut s, -0.75, "the knob moved");
 
     // The range is the route's span too: `-0.25 + 0.25 * -0.5 * 2`.
-    s.mods_mut()
-        .range(edge, Amplitude(-2.0)..Amplitude(0.0))
+    s.set(RangeTarget::of(edge).to(Amplitude(-2.0)..Amplitude(0.0)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, -0.5, "within the range");
     // Span 2.25: `-0.25 - 0.28125` is below the range's floor.
-    s.mods_mut()
-        .range(edge, Amplitude(-0.25)..Amplitude(2.0))
+    s.set(RangeTarget::of(edge).to(Amplitude(-0.25)..Amplitude(2.0)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, -0.25, "clamped to the range");

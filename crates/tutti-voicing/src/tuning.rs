@@ -112,7 +112,7 @@ impl Tunings {
         Self {
             capacity,
             tables: vec![KeyTable::equal_temperament(); n].into_boxed_slice(),
-            octave: [[Semitones(0.0); 12]; 16],
+            octave: [[Semitones::new(0.0); 12]; 16],
             refused: 0,
         }
     }
@@ -172,7 +172,7 @@ impl Tunings {
             let offset = offsets.offset(usize::from(k % 12)).to_semitones();
             table.set(
                 key,
-                TuningFrequency::nearest(Semitones(f64::from(k)) + offset),
+                TuningFrequency::nearest(Semitones::new(f64::from(k)) + offset),
             );
         }
         table
@@ -186,7 +186,7 @@ impl Tunings {
     }
 
     pub(crate) fn clear_octave(&mut self) {
-        self.octave = [[Semitones(0.0); 12]; 16];
+        self.octave = [[Semitones::new(0.0); 12]; 16];
     }
 
     /// How far `key` sounds from its equal-tempered pitch on `channel`, which
@@ -201,8 +201,8 @@ impl Tunings {
         let stored = self
             .table(bank, program)
             .and_then(|t| t.get(key).pitch())
-            .map_or(Semitones(0.0), |pitch| {
-                pitch - Semitones(f64::from(key.get()))
+            .map_or(Semitones::new(0.0), |pitch| {
+                pitch - Semitones::new(f64::from(key.get()))
             });
         stored + self.octave[channel][usize::from(key.get() % 12)]
     }

@@ -108,8 +108,8 @@ impl<F: Float + FftFloat> Vocoder<F> {
             fft: Fft::new(size),
             fft_buffer: vec![F::ZERO; size],
             spectrum: vec![Complex::new(F::ZERO, F::ZERO); bins],
-            phase_accumulator: vec![Radians(0.0); bins],
-            last_phase: vec![Radians(0.0); bins],
+            phase_accumulator: vec![Radians::new(0.0); bins],
+            last_phase: vec![Radians::new(0.0); bins],
             phase_per_sample: Arc::new(phase_per_sample),
             // 4x the window: three frames of overlap-add tail plus the frame
             // being written.
@@ -145,8 +145,8 @@ impl<F: Float + FftFloat> Vocoder<F> {
             fft: self.fft.clone_fresh(),
             fft_buffer: vec![F::ZERO; size],
             spectrum: vec![Complex::new(F::ZERO, F::ZERO); bins],
-            phase_accumulator: vec![Radians(0.0); bins],
-            last_phase: vec![Radians(0.0); bins],
+            phase_accumulator: vec![Radians::new(0.0); bins],
+            last_phase: vec![Radians::new(0.0); bins],
             phase_per_sample: Arc::clone(&self.phase_per_sample),
             primed: false,
             norm: F::from_design(1.0 / size as f64),
@@ -160,8 +160,8 @@ impl<F: Float + FftFloat> Vocoder<F> {
     pub(super) fn reset(&mut self) {
         self.fft_buffer.fill(F::ZERO);
         self.spectrum.fill(Complex::new(F::ZERO, F::ZERO));
-        self.phase_accumulator.fill(Radians(0.0));
-        self.last_phase.fill(Radians(0.0));
+        self.phase_accumulator.fill(Radians::new(0.0));
+        self.last_phase.fill(Radians::new(0.0));
         self.input.reset();
         self.output.reset();
         // A flushed stream is a new stream: it must seed its phase again, or it
@@ -221,7 +221,7 @@ impl<F: Float + FftFloat> Vocoder<F> {
             let magnitude = (re * re + im * im).sqrt();
             // The phase widens into the unit, and the accumulated phase
             // crosses back to the spectrum's width once per bin.
-            let phase = Radians(im.atan2(re).into());
+            let phase = Radians::new(im.atan2(re).into());
 
             // Deviation of the observed advance from the expected one, wrapped
             // into [-π, π) — the unwrapping step that recovers the bin's true

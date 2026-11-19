@@ -32,7 +32,7 @@
 //! leave the stay cost under one unit in the last place.
 //!
 //! The scoring is in `f64` and divides by the frame's own norm, so the result
-//! does not depend on the chroma's scale, to the extremes of `f32`.
+//! does not depend on the chroma's scale, to the extremes of `f64`.
 //!
 //! # Time
 //!
@@ -115,7 +115,7 @@ ranged! {
     /// The probability of staying in a chord from one frame to the next: finite
     /// and in `(0, 1)`. 1/25 is the even share, which leaves each frame to its
     /// own best state.
-    SelfTransition(f32), SelfTransitionError,
+    SelfTransition(f64), SelfTransitionError,
     "a self-transition probability within (0, 1)",
     |raw| raw > 0.0 && raw < 1.0
 }
@@ -124,7 +124,7 @@ ranged! {
     /// How strongly a frame's similarity weighs against the transition prior:
     /// finite and in `(0, 100]`. The Viterbi scores are summed over every frame,
     /// so the upper bound keeps their sum within what `f64` resolves.
-    Sharpness(f32), SharpnessError, "a sharpness within (0, 100]",
+    Sharpness(f64), SharpnessError, "a sharpness within (0, 100]",
     |raw| raw > 0.0 && raw <= 100.0
 }
 
@@ -186,7 +186,7 @@ pub fn detect_chords(chroma: &Chroma, cfg: &ChordConfig) -> Result<Vec<ChordSpan
 
 /// [`detect_chords`] over a grid and the framing it was taken at.
 pub(crate) fn detect(
-    chroma: &Grid<f32>,
+    chroma: &Grid<f64>,
     framing: Framing,
     cfg: &ChordConfig,
 ) -> Result<Vec<ChordSpan>> {
@@ -215,9 +215,9 @@ pub(crate) fn detect(
 /// what stands above the frame's median column with each triad, and
 /// [`TRIAD_FLOOR`] for "no chord". A frame with nothing above its median
 /// scores 1 for "no chord" and 0 for the rest.
-fn similarities(frame: &[f32]) -> [f64; STATES] {
+fn similarities(frame: &[f64]) -> [f64; STATES] {
     let mut sims = [0.0f64; STATES];
-    let mut x: [f64; CLASSES] = core::array::from_fn(|i| f64::from(frame[i]));
+    let mut x: [f64; CLASSES] = core::array::from_fn(|i| frame[i]);
     let median = median(&x).unwrap_or_default();
     x.iter_mut().for_each(|v| *v = (*v - median).max(0.0));
     let norm = x.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -239,12 +239,12 @@ fn similarities(frame: &[f32]) -> [f64; STATES] {
 }
 
 /// The best state per frame under the emission and transition model.
-fn viterbi(chroma: &Grid<f32>, cfg: &ChordConfig) -> Vec<u8> {
+fn viterbi(chroma: &Grid<f64>, cfg: &ChordConfig) -> Vec<u8> {
     let frames = chroma.frames().get();
     let stay = libm::log(Score::from(cfg.self_transition.get()));
     let switch = libm::log((1.0 - Score::from(cfg.self_transition.get())) / (STATES - 1) as Score);
     let emit =
-        |frame: &[f32]| similarities(frame).map(|s| s as Score * Score::from(cfg.sharpness.get()));
+        |frame: &[f64]| similarities(frame).map(|s| s as Score * Score::from(cfg.sharpness.get()));
 
     let mut score = emit(chroma.row(FrameIndex::new(0)));
     let mut back = vec![0u8; frames * STATES];

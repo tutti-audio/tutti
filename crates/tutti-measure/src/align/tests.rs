@@ -3,13 +3,13 @@ use crate::cross_correlate;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use tutti_units::Hz;
 
-fn noise(len: usize, seed: u64) -> Vec<f32> {
+fn noise(len: usize, seed: u64) -> Vec<f64> {
     let mut rng = StdRng::seed_from_u64(seed);
     (0..len).map(|_| rng.random_range(-1.0..1.0)).collect()
 }
 
 /// `x` delayed by `delay` samples (negative: advanced), same length.
-fn shifted(x: &[f32], delay: isize) -> Vec<f32> {
+fn shifted(x: &[f64], delay: isize) -> Vec<f64> {
     (0..x.len() as isize)
         .map(|n| {
             usize::try_from(n - delay)
@@ -21,13 +21,13 @@ fn shifted(x: &[f32], delay: isize) -> Vec<f32> {
         .collect()
 }
 
-fn find(reference: &[f32], take: &[f32], max_lag: usize) -> Alignment {
+fn find(reference: &[f64], take: &[f64], max_lag: usize) -> Alignment {
     let cfg = AlignConfig::new(Samples(max_lag));
     align(reference, take, &cfg, &mut FftScratch::new()).unwrap()
 }
 
 /// The lag plain cross-correlation picks for the same pair.
-fn plain_lag(reference: &[f32], take: &[f32], max_lag: usize) -> isize {
+fn plain_lag(reference: &[f64], take: &[f64], max_lag: usize) -> isize {
     cross_correlate(
         Mono::new(take),
         Mono::new(reference),
@@ -40,20 +40,20 @@ fn plain_lag(reference: &[f32], take: &[f32], max_lag: usize) -> isize {
 
 /// `align` at 48 kHz, the rate the tests that do not name one read at.
 fn align(
-    reference: &[f32],
-    take: &[f32],
+    reference: &[f64],
+    take: &[f64],
     config: &AlignConfig,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<Alignment> {
     align_at(SampleRate::SR_48K, reference, take, config, fft)
 }
 
 fn align_at(
     rate: SampleRate,
-    reference: &[f32],
-    take: &[f32],
+    reference: &[f64],
+    take: &[f64],
     config: &AlignConfig,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<Alignment> {
     super::align(Mono::new(reference), Mono::new(take), config, rate, fft)
 }
@@ -62,48 +62,48 @@ fn band(low: f64, high: f64) -> FrequencyBand {
     FrequencyBand::new(Hz(low), Hz(high)).unwrap()
 }
 
-/// A signal that fills the band, evaluable at fractional times: forty
-/// sines with seeded frequencies below 0.4 cycles per sample.
-fn sines(len: usize, delay: f32) -> Vec<f32> {
+/// A signal that fills the band, evaluable at fractional times: four
+/// hundred sines with seeded frequencies below 0.4 cycles per sample.
+fn sines(len: usize, delay: f64) -> Vec<f64> {
     let mut rng = StdRng::seed_from_u64(9);
-    let partials: Vec<(f32, f32, f32)> = (0..40)
+    let partials: Vec<(f64, f64, f64)> = (0..400)
         .map(|_| {
             (
                 rng.random_range(0.02..0.4),
-                rng.random_range(0.0..core::f32::consts::TAU),
+                rng.random_range(0.0..core::f64::consts::TAU),
                 rng.random_range(0.5..1.0),
             )
         })
         .collect();
     (0..len)
         .map(|n| {
-            let t = n as f32 - delay;
+            let t = n as f64 - delay;
             partials
                 .iter()
-                .map(|&(f, p, a)| a * (core::f32::consts::TAU * f * t + p).sin())
+                .map(|&(f, p, a)| a * (core::f64::consts::TAU * f * t + p).sin())
                 .sum()
         })
         .collect()
 }
 
 /// A sine of `amp` and the given period, in samples, added to `x`.
-fn with_tone(mut x: Vec<f32>, amp: f32, period: f32, phase: f32) -> Vec<f32> {
+fn with_tone(mut x: Vec<f64>, amp: f64, period: f64, phase: f64) -> Vec<f64> {
     for (n, v) in x.iter_mut().enumerate() {
-        *v += amp * (core::f32::consts::TAU * n as f32 / period + phase).sin();
+        *v += amp * (core::f64::consts::TAU * n as f64 / period + phase).sin();
     }
     x
 }
 
 /// White noise with everything outside `low..high` (cycles per sample)
 /// removed in the frequency domain.
-fn band_noise(len: usize, seed: u64, low: f32, high: f32) -> Vec<f32> {
+fn band_noise(len: usize, seed: u64, low: f64, high: f64) -> Vec<f64> {
     let mut fft = FftScratch::new();
-    let mut bins = vec![Complex32::default(); len / 2 + 1];
+    let mut bins = vec![Complex64::default(); len / 2 + 1];
     fft.forward_unwindowed(Mono::new(&noise(len, seed)), &mut bins);
     for (k, b) in bins.iter_mut().enumerate() {
-        let f = k as f32 / len as f32;
+        let f = k as f64 / len as f64;
         if f < low || f > high {
-            *b = Complex32::default();
+            *b = Complex64::default();
         }
     }
     let mut out = vec![0.0; len];
@@ -113,9 +113,9 @@ fn band_noise(len: usize, seed: u64, low: f32, high: f32) -> Vec<f32> {
 
 /// Noise through two one-pole lowpasses: a spectrum falling 12 dB per
 /// octave, some 70 dB from the lowest bins to the highest.
-fn tilted_noise(len: usize, seed: u64) -> Vec<f32> {
+fn tilted_noise(len: usize, seed: u64) -> Vec<f64> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let (mut a, mut b) = (0.0f32, 0.0f32);
+    let (mut a, mut b) = (0.0f64, 0.0f64);
     (0..len)
         .map(|_| {
             a = 0.95 * a + rng.random_range(-1.0..1.0);
@@ -146,9 +146,9 @@ fn a_delayed_copy_is_found_at_exactly_its_delay() {
 /// to within a tenth of a sample by the parabolic refinement.
 #[test]
 fn a_fractional_delay_is_recovered_within_a_tenth_of_a_sample() {
-    for delay in [10.5f32, 3.25, -7.75, 100.5] {
+    for delay in [10.5f64, 3.25, -7.75, 100.5] {
         let a = find(&sines(4096, 0.0), &sines(4096, delay), 300);
-        let err = (a.delay_samples() - f64::from(delay)).abs();
+        let err = (a.delay_samples() - delay).abs();
         assert!(err < 0.1, "delay {delay}: found {}", a.delay_samples());
     }
 }
@@ -164,9 +164,9 @@ fn scaling_an_input_changes_nothing() {
     let take = with_tone(shifted(&x, 77), 3.0, 480.0, 1.3);
     let base = find(&reference, &take, 1000);
     assert_eq!(base.lag, 77);
-    let scaled = |v: &[f32], g: f32| v.iter().map(|s| s * g).collect::<Vec<f32>>();
+    let scaled = |v: &[f64], g: f64| v.iter().map(|s| s * g).collect::<Vec<f64>>();
     for (gr, gt) in [
-        (1000.0f32, 1.0f32),
+        (1000.0f64, 1.0f64),
         (1.0, 1000.0),
         (1e-6, 1.0),
         (1.0, 1e-6),
@@ -220,24 +220,24 @@ fn phat_keeps_the_delay_of_a_steeply_tilted_source_under_a_hum() {
 fn a_band_limit_leaves_out_what_does_not_correlate() {
     let n = 2048;
     let mut rng = StdRng::seed_from_u64(31);
-    let partials: Vec<(f32, f32)> = (0..12)
+    let partials: Vec<(f64, f64)> = (0..12)
         .map(|_| {
             (
                 rng.random_range(0.04..0.08),
-                rng.random_range(0.0..core::f32::consts::TAU),
+                rng.random_range(0.0..core::f64::consts::TAU),
             )
         })
         .collect();
-    let common = |t: f32| -> f32 {
+    let common = |t: f64| -> f64 {
         partials
             .iter()
-            .map(|&(f, p)| (core::f32::consts::TAU * f * t + p).sin())
+            .map(|&(f, p)| (core::f64::consts::TAU * f * t + p).sin())
             .sum()
     };
     let (a, b) = (noise(n, 41), noise(n, 42));
-    let reference: Vec<f32> = (0..n).map(|i| 3.0 * a[i] + common(i as f32)).collect();
-    let take: Vec<f32> = (0..n)
-        .map(|i| 3.0 * b[i] + common(i as f32 - 77.0))
+    let reference: Vec<f64> = (0..n).map(|i| 3.0 * a[i] + common(i as f64)).collect();
+    let take: Vec<f64> = (0..n)
+        .map(|i| 3.0 * b[i] + common(i as f64 - 77.0))
         .collect();
 
     let mut fft = FftScratch::new();
@@ -266,8 +266,8 @@ fn a_band_limit_leaves_out_what_does_not_correlate() {
 #[test]
 fn out_of_band_energy_does_not_set_the_level() {
     // 9 bins of a 16-point transform; at rate 16, bin `k` is `k` Hz.
-    let mut bins = vec![Complex32::new(3.0, -4.0); 9];
-    bins[1] = Complex32::new(5.0e6, 0.0);
+    let mut bins = vec![Complex64::new(3.0, -4.0); 9];
+    bins[1] = Complex64::new(5.0e6, 0.0);
     let band = AlignConfig::new(Samples(1)).band(band(4.0, 6.0)).band;
     assert!(phase_transform(&mut bins, band, SampleRate::of(16.0)));
     for (k, bin) in bins.iter().enumerate() {
@@ -275,7 +275,7 @@ fn out_of_band_energy_does_not_set_the_level() {
             assert!((bin.norm() - 1.0).abs() < 1e-3, "bin {k}: {bin}");
             assert!((bin.re - 0.6).abs() < 1e-3 && (bin.im + 0.8).abs() < 1e-3);
         } else {
-            assert_eq!(*bin, Complex32::default(), "bin {k}");
+            assert_eq!(*bin, Complex64::default(), "bin {k}");
         }
     }
 }
@@ -288,8 +288,8 @@ fn out_of_band_energy_does_not_set_the_level() {
 fn a_decaying_filter_on_the_take_keeps_the_lag() {
     let x = noise(8192, 4);
     let delayed = shifted(&x, 77);
-    let taps: Vec<f32> = (0..64).map(|k| 0.9f32.powi(k)).collect();
-    let take: Vec<f32> = (0..delayed.len())
+    let taps: Vec<f64> = (0..64).map(|k| 0.9f64.powi(k)).collect();
+    let take: Vec<f64> = (0..delayed.len())
         .map(|n| {
             taps.iter()
                 .enumerate()
@@ -329,8 +329,8 @@ fn a_wide_peak_is_not_its_own_runner_up() {
     assert!(clean.confidence.get() > 0.7, "{:?}", clean.confidence);
 
     let (n1, n2) = (noise(4096, 6), noise(4096, 7));
-    let reference: Vec<f32> = x.iter().zip(&n1).map(|(a, b)| a + 0.5 * b).collect();
-    let take: Vec<f32> = shifted(&x, 40)
+    let reference: Vec<f64> = x.iter().zip(&n1).map(|(a, b)| a + 0.5 * b).collect();
+    let take: Vec<f64> = shifted(&x, 40)
         .iter()
         .zip(&n2)
         .map(|(a, b)| a + 0.5 * b)
@@ -346,14 +346,14 @@ fn a_wide_peak_is_not_its_own_runner_up() {
 /// does not read as zero, and a lobe that fills the window has no runner-up.
 #[test]
 fn the_lobe_rule_on_made_up_profiles() {
-    let read = |profile: &[f32], lag: isize| {
+    let read = |profile: &[f64], lag: isize| {
         let hi = profile.len() as isize - 1;
         distinctness(
             |l| {
                 profile
                     .get(l as usize)
                     .copied()
-                    .unwrap_or(f32::NEG_INFINITY)
+                    .unwrap_or(f64::NEG_INFINITY)
             },
             lag,
             profile[lag as usize],
@@ -364,11 +364,11 @@ fn the_lobe_rule_on_made_up_profiles() {
     let ripple = [
         0.0, 0.0, 0.1, 0.5, 0.9, 1.0, 0.9, 0.95, 0.7, 0.3, 0.1, 0.35, 0.1,
     ];
-    assert!((read(&ripple, 5) - 0.65).abs() < 1e-6);
+    assert!((read(&ripple, 5) - 0.65).abs() < 1e-12);
     let flank = [0.0, 0.0, 0.1, 0.4, 0.8, 1.0, 0.8, 0.45, 0.3, 0.1, 0.25, 0.1];
-    assert!((read(&flank, 5) - 0.75).abs() < 1e-6);
+    assert!((read(&flank, 5) - 0.75).abs() < 1e-12);
     let tie = [0.0, 0.1, 0.6, 1.0, 1.0, 0.6, 0.1, 0.0, 0.2, 0.0];
-    assert!((read(&tie, 3) - 0.8).abs() < 1e-6);
+    assert!((read(&tie, 3) - 0.8).abs() < 1e-12);
     assert_eq!(read(&[1.0, 0.9, 0.8], 0), 0.0);
 }
 
@@ -393,10 +393,10 @@ fn the_offset_is_zero_unless_three_points_bend_down_inside_the_overlap() {
     let mut fft = FftScratch::new();
     let x = noise(8, 1);
     let delta_at_one = cross_correlate_shaped(&x, &x, &mut fft, |bins| {
-        let size = ((bins.len() - 1) * 2) as f32;
+        let size = ((bins.len() - 1) * 2) as f64;
         for (k, bin) in bins.iter_mut().enumerate() {
-            let w = -core::f32::consts::TAU * k as f32 / size;
-            *bin = Complex32::new(w.cos(), w.sin());
+            let w = -core::f64::consts::TAU * k as f64 / size;
+            *bin = Complex64::new(w.cos(), w.sin());
         }
     });
     assert_eq!(delta_at_one.peak().unwrap().lag, 1);
@@ -405,7 +405,7 @@ fn the_offset_is_zero_unless_three_points_bend_down_inside_the_overlap() {
     assert_eq!(parabolic_offset(&delta_at_one, delta_at_one.max_lag()), 0.0);
 
     let nan = cross_correlate_shaped(&x, &x, &mut fft, |bins| {
-        bins.fill(Complex32::new(f32::NAN, 0.0));
+        bins.fill(Complex64::new(f64::NAN, 0.0));
     });
     assert_eq!(parabolic_offset(&nan, 0), 0.0);
 }
@@ -424,7 +424,7 @@ fn delay_converts_and_bad_input_is_refused() {
     let mut fft = FftScratch::new();
     let cfg = AlignConfig::new(Samples(10));
     assert_eq!(cfg.band, None);
-    let one = [1.0f32];
+    let one = [1.0f64];
     assert!(matches!(
         align(&[], &one, &cfg, &mut fft),
         Err(Error::InsufficientInput { .. })
@@ -433,13 +433,13 @@ fn delay_converts_and_bad_input_is_refused() {
         align(&one, &[], &cfg, &mut fft),
         Err(Error::InsufficientInput { .. })
     ));
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let x = [1.0, bad, 2.0];
         assert_eq!(align(&x, &one, &cfg, &mut fft), Err(Error::NonFiniteInput));
         assert_eq!(align(&one, &x, &cfg, &mut fft), Err(Error::NonFiniteInput));
     }
     // Silence, and a band between two bins: nothing to correlate.
-    let quiet = [0.0f32; 64];
+    let quiet = [0.0f64; 64];
     let x = noise(64, 3);
     assert_eq!(align(&x, &quiet, &cfg, &mut fft), Err(Error::NoSignal));
     assert_eq!(align(&quiet, &x, &cfg, &mut fft), Err(Error::NoSignal));

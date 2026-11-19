@@ -13,7 +13,8 @@ use tutti_graph::{
     Prepare, Shape, Status, TransportPosition,
 };
 use tutti_modulation::{
-    CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
+    CONTROL_GRID, Clock, ControlProgram, CurveSegment, DepthSnapshot, MAX_LANE_INPUTS, ProgramTime,
+    Waveform,
 };
 use tutti_rt::ParamCell;
 use tutti_rt::{Publisher, Reader};
@@ -283,6 +284,8 @@ struct Seen {
     seq: Option<u64>,
     knob: Option<u64>,
     range: (u64, u64),
+    /// The program's depths at the last block's start.
+    depths: DepthSnapshot,
     /// The frame after the last block, the transport and play clock at its
     /// last frame: how a seek between blocks is told from a roll.
     end: Option<(Frame, TransportPosition, PlayReading)>,
@@ -371,6 +374,7 @@ fn fresh_seen() -> Seen {
         seq: None,
         knob: None,
         range: (0, 0),
+        depths: DepthSnapshot::EMPTY,
         end: None,
     }
 }
@@ -429,7 +433,9 @@ impl ControlLaneNode {
             knob,
             range.map_or(RangeSource::None, RangeSource::Port),
             Some(param.param),
-            Arc::new(move |from, to, shape| ParamSegment::unit(param, from, to, Samples(0), shape)),
+            Arc::new(move |from, to, shape| {
+                ParamSegment::unit(param, from, to, Samples::new(0), shape)
+            }),
             true,
         )
     }
@@ -449,7 +455,9 @@ impl ControlLaneNode {
             knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
             RangeSource::Own(Publisher::new(ParamRange::new(range.0, range.1))),
             None,
-            Arc::new(move |from, to, shape| ParamSegment::foreign(id, from, to, Samples(0), shape)),
+            Arc::new(move |from, to, shape| {
+                ParamSegment::foreign(id, from, to, Samples::new(0), shape)
+            }),
             false,
         )
     }
@@ -473,7 +481,9 @@ impl ControlLaneNode {
     /// never a lend), the knob and the range, so it needs no read state of
     /// its own.
     fn fresh_over(s: &Shared, make: &Arc<MakeSegment>, native: bool) -> Self {
-        let program = s.program.current();
+        // Depth cells of its own, so a depth moved after the fork does not
+        // reach it.
+        let program = Arc::new(s.program.current().detached());
         let knob = s.knob.as_ref().map(ParamCell::detached);
         let range = match &s.range {
             RangeSource::None => RangeSource::None,
@@ -490,7 +500,7 @@ fn roll_one(t: TransportPosition, rate: tutti_units::SampleRate) -> TransportPos
         return t;
     }
     let mut clock = t.clock(rate);
-    clock.advance(Samples(1), t.looping);
+    clock.advance(Samples::new(1), t.looping);
     TransportPosition::counted(t.playing, t.tempo, clock.origin(), t.looping)
 }
 
@@ -511,7 +521,7 @@ fn continues(expected: &TransportPosition, got: &TransportPosition) -> bool {
 /// producer sends it as shorter pieces.
 fn exact_span(since: f64, until: f64) -> Option<(SamplePosition, SamplePosition)> {
     let span = since + until;
-    (span <= f64::from(u32::MAX)).then_some((SamplePosition(since), SamplePosition(span)))
+    (span <= f64::from(u32::MAX)).then_some((SamplePosition::new(since), SamplePosition::new(span)))
 }
 
 /// A segment's value `j` frames (fractional) after its event, `to` once it
@@ -540,7 +550,7 @@ impl Input {
             self.seg.foreign_target(id).unwrap_or(0.0),
         );
         if since.fract() == 0.0 && since >= 0.0 {
-            self.seg.raw_value_after(Samples(since as usize))
+            self.seg.raw_value_after(Samples::new(since as usize))
         } else {
             value_along(&self.seg, from, to, since.max(0.0))
         }
@@ -575,6 +585,8 @@ struct Block<'b> {
     /// Thinning failed already: drop past the capacity instead.
     truncate: bool,
     seconds: bool,
+    /// The program's depths, loaded once for the block.
+    depths: DepthSnapshot,
 }
 
 impl Block<'_> {
@@ -604,13 +616,13 @@ impl Block<'_> {
     /// The program's value at `time`, for the lane's param.
     fn value_at(&self, time: &ProgramTime, ins: &[Option<f64>]) -> Option<f64> {
         self.program
-            .value_at(self.unit, self.knob, time, self.span, ins)
+            .value_at_in(self.unit, self.knob, time, self.span, ins, &self.depths)
     }
 
     /// The program's left limit at `time`, for the lane's param.
     fn value_before(&self, time: &ProgramTime, ins: &[Option<f64>]) -> Option<f64> {
         self.program
-            .value_before(self.unit, self.knob, time, self.span, ins)
+            .value_before_in(self.unit, self.knob, time, self.span, ins, &self.depths)
     }
 
     /// The earliest arrival of an input still moving at `at`, in frames.
@@ -633,7 +645,7 @@ impl Block<'_> {
         if out.len() >= SOURCE_EVENT_CAPACITY.get() as usize {
             return Err(Overflow::Full);
         }
-        if let Some(at) = Offset::new(Samples(p), self.cx.env.block_len) {
+        if let Some(at) = Offset::new(Samples::new(p), self.cx.env.block_len) {
             out.push(ParamEvent::segment(at, seg));
         }
         Ok(())
@@ -649,16 +661,16 @@ impl Block<'_> {
         glide: bool,
     ) -> Result<(), Overflow> {
         let env = self.cx.env;
-        let off = Offset::new(Samples(p), env.block_len).unwrap_or(Offset::ZERO);
+        let off = Offset::new(Samples::new(p), env.block_len).unwrap_or(Offset::ZERO);
         let t = self.cx.transport_at(off);
         let play = self.cx.play_at(off);
         let rate = env.sample_rate;
         let fpb = tutti_music::frames_per_beat(t.tempo, rate).filter(|_| t.playing);
-        let abs = self.base() + Samples(p);
+        let abs = self.base() + Samples::new(p);
         let beat = t.beat().get();
         let time = ProgramTime {
             beat: t.beat(),
-            play: SamplePosition(play.play.get() as f64),
+            play: SamplePosition::new(play.play.get() as f64),
             play_epoch: play.epoch,
             rate,
         };
@@ -670,7 +682,7 @@ impl Block<'_> {
         let pf = p as f64;
         let moving = self.inputs_moving(walk, pf);
         let make = self.make;
-        let next_at = |d: Option<f64>| d.map(|d| abs + Samples(d.ceil().max(1.0) as usize));
+        let next_at = |d: Option<f64>| d.map(|d| abs + Samples::new(d.ceil().max(1.0) as usize));
         let flight = |seg: Option<(ParamSegment, f64, f64)>, next: Option<f64>| Flight {
             seg: seg.map(|s| s.0),
             from: seg.map_or(0.0, |s| s.1),
@@ -749,7 +761,7 @@ impl Block<'_> {
         let in_flight = walk.flight.and_then(|f| f.seg.map(|s| (s, f.sent)));
         let v0 = match (glide, in_flight) {
             (true, Some((seg, sent))) => {
-                Some(seg.raw_value_after(abs.since(sent).unwrap_or(Samples(0))))
+                Some(seg.raw_value_after(abs.since(sent).unwrap_or(Samples::new(0))))
             }
             _ => self.value_at(&time, &ins[..n_in]),
         };
@@ -808,8 +820,8 @@ impl Block<'_> {
             d = nearest;
         }
         let end = ProgramTime {
-            beat: Beat(fpb.map_or(beat, |f| beat + d / f)),
-            play: SamplePosition(time.play.get() + d),
+            beat: Beat::new(fpb.map_or(beat, |f| beat + d / f)),
+            play: SamplePosition::new(time.play.get() + d),
             ..time
         };
         let ins_end = self.inputs_at(walk, pf + d);
@@ -842,12 +854,12 @@ impl Block<'_> {
         // the line on the frame after it, extended along the same line. Each
         // frame before the corner is on the line it was, and the next point
         // replaces the piece on the frame that ends it.
-        let len = SamplePosition(d).to_samples_ceil();
+        let len = SamplePosition::new(d).to_samples_ceil();
         let v1 = match len.get() as f64 {
             l if l > d && d > 0.0 => self.clamp(v0 + (v1 - v0) * (l / d)),
             _ => v1,
         };
-        let seg = make(v0, v1, Law::Linear).resumed(Samples(0), len);
+        let seg = make(v0, v1, Law::Linear).resumed(Samples::new(0), len);
         if unchanged(None, v1, Some(d), &seg) {
             return Ok(());
         }
@@ -885,7 +897,12 @@ impl Block<'_> {
                 // Input events on this frame land before its point.
                 while let Some(e) = events.get(ev).filter(|e| e.offset.index() <= p) {
                     if let Some((id, seg)) = self.input_of(e) {
-                        self.take_input(walk, id, seg, self.base() + Samples(e.offset.index()));
+                        self.take_input(
+                            walk,
+                            id,
+                            seg,
+                            self.base() + Samples::new(e.offset.index()),
+                        );
                     }
                     ev += 1;
                 }
@@ -896,11 +913,16 @@ impl Block<'_> {
                     // Full with no grid left to thin: the rest of the block
                     // sends nothing, and the next block starts with a point.
                     if let Some(f) = walk.flight.as_mut() {
-                        f.next = Some(self.base() + Samples(p));
+                        f.next = Some(self.base() + Samples::new(p));
                     }
                     for e in &events[ev..] {
                         if let Some((id, seg)) = self.input_of(e) {
-                            self.take_input(walk, id, seg, self.base() + Samples(e.offset.index()));
+                            self.take_input(
+                                walk,
+                                id,
+                                seg,
+                                self.base() + Samples::new(e.offset.index()),
+                            );
                         }
                     }
                     return Err(o);
@@ -1040,6 +1062,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             s.unranged.fetch_add(1, Ordering::Relaxed);
         }
         let range_bits = (range.0.to_bits(), range.1.to_bits());
+        let depths = program.depth_snapshot();
         if seq != self.seen.seq {
             // A new program: forget every input it does not read, so a
             // source id a later program reuses starts from nothing, never from the
@@ -1052,7 +1075,8 @@ impl<F: Float> Node<F> for ControlLaneNode {
         }
         let changed = seq != self.seen.seq
             || knob.map(f64::to_bits) != self.seen.knob
-            || range_bits != self.seen.range;
+            || range_bits != self.seen.range
+            || depths != self.seen.depths;
         // A resync is a point at frame 0, never a glide (`LaneControls::resync`).
         let resync = s.resync.swap(false, Ordering::AcqRel);
         let t0 = cx.transport_at(Offset::ZERO);
@@ -1061,7 +1085,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             Some((frame, t, play)) => {
                 frame != env.frame
                     || !continues(&roll_one(t, env.sample_rate), &t0)
-                    || play.after(Samples(1)) != p0
+                    || play.after(Samples::new(1)) != p0
             }
             None => true,
         };
@@ -1084,6 +1108,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             stride: u64::from(CONTROL_GRID.stride()),
             truncate: false,
             seconds: has_seconds(program),
+            depths,
         };
         let mut thinned = false;
         loop {
@@ -1118,13 +1143,14 @@ impl<F: Float> Node<F> for ControlLaneNode {
             // Within the declared capacity: never refused.
             let _ = out.push_param(*e);
         }
-        let last = Offset::new(Samples(len - 1), env.block_len).unwrap_or(Offset::ZERO);
+        let last = Offset::new(Samples::new(len - 1), env.block_len).unwrap_or(Offset::ZERO);
         self.seen = Seen {
             seq,
             knob: knob.map(f64::to_bits),
             range: range_bits,
+            depths,
             end: Some((
-                env.frame + Samples(len),
+                env.frame + Samples::new(len),
                 cx.transport_at(last),
                 cx.play_at(last),
             )),
@@ -1190,11 +1216,11 @@ mod tests {
     fn a_piece_keeps_its_fractional_span() {
         assert_eq!(
             exact_span(0.6, 10.4),
-            Some((SamplePosition(0.6), SamplePosition(11.0)))
+            Some((SamplePosition::new(0.6), SamplePosition::new(11.0)))
         );
         assert_eq!(
             exact_span(7.6, 3.4),
-            Some((SamplePosition(7.6), SamplePosition(11.0)))
+            Some((SamplePosition::new(7.6), SamplePosition::new(11.0)))
         );
     }
 

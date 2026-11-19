@@ -31,8 +31,9 @@ mod inline;
 mod queries;
 mod response;
 
-pub use capacity::NetworkCapacity;
-pub use gain::{loop_gain, rt60_from_gain};
+pub(crate) use capacity::NetworkCapacity;
+pub(crate) use gain::loop_gain;
+pub use gain::rt60_from_gain;
 pub use inline::{Full, Inline};
 
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, StereoWidth};
@@ -137,7 +138,7 @@ impl Network {
 
 /// The pre-delay in whole frames, for [`Network::pre_delay`].
 #[must_use]
-pub fn pre_delay_frames(pre_delay: Seconds, rate: SampleRate) -> Samples {
+pub(crate) fn pre_delay_frames(pre_delay: Seconds, rate: SampleRate) -> Samples {
     pre_delay.to_samples(rate)
 }
 

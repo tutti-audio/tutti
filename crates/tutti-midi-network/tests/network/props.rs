@@ -77,11 +77,11 @@ fn command() -> impl Strategy<Value = Command> {
         identity_strategy(),
     )
         .prop_map(|(state, nonce, identity)| {
-            Command::AuthRequired(AuthChallenge {
+            Command::AuthRequired(Box::new(AuthChallenge {
                 state,
                 nonce,
                 identity,
-            })
+            }))
         });
     let user_auth_required = (
         prop_oneof![
@@ -93,30 +93,30 @@ fn command() -> impl Strategy<Value = Command> {
         identity_strategy(),
     )
         .prop_map(|(state, nonce, identity)| {
-            Command::UserAuthRequired(UserAuthChallenge {
+            Command::UserAuthRequired(Box::new(UserAuthChallenge {
                 state,
                 nonce,
                 identity,
-            })
+            }))
         });
     let user_auth = (digest_strategy(), "[a-z]{1,40}").prop_map(|(digest, name)| {
-        Command::InvitationWithUserAuth(UserAuthentication {
+        Command::InvitationWithUserAuth(Box::new(UserAuthentication {
             digest,
             username: Username::new(&name).unwrap(),
-        })
+        }))
     });
     let nak = (nak_reason(), any::<u32>(), "[a-z ]{0,60}").prop_map(|(reason, refused, text)| {
-        Command::Nak(Nak {
+        Command::Nak(Box::new(Nak {
             reason,
             refused: Header::from_word(refused),
             text: NakText::new(&text).unwrap(),
-        })
+        }))
     });
     let bye = (any::<u8>(), "[a-z ]{0,60}").prop_map(|(reason, text)| {
-        Command::Bye(Bye {
+        Command::Bye(Box::new(Bye {
             reason: ByeReason::from_code(reason),
             text: ByeText::new(&text).unwrap(),
-        })
+        }))
     });
     let data = (sequence(), packets())
         .prop_map(|(seq, packets)| Command::UmpData(UmpData::new(seq, &packets).unwrap()));

@@ -97,7 +97,7 @@ fn env_at(frame: usize, len: usize) -> Env {
     Env {
         frame: Frame::new(frame as u64),
         sample_rate: SampleRate::of(SR),
-        block_len: Samples(len),
+        block_len: Samples::new(len),
         transport: TransportPosition::new(true, Bpm::of(BPM), Beat::new(beat), None),
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,
@@ -222,14 +222,14 @@ fn assert_block_invariant<N: Node>(case: &str, mut build: impl FnMut() -> N) {
 }
 
 /// A placed memory source, and the `play` it plays.
-fn memory_parts(wave: &Arc<Wave>, play: Playback) -> (MemorySource, Playback) {
+fn memory_parts(wave: &Arc<Wave>, play: Playback) -> (MemorySource<f32>, Playback) {
     let source = MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
     (source, play)
 }
 
 /// [`memory_parts`] as a voice.
-fn memory_voice(wave: &Arc<Wave>, play: Playback) -> Voice {
+fn memory_voice(wave: &Arc<Wave>, play: Playback) -> Voice<f32> {
     let (source, play) = memory_parts(wave, play);
     Voice {
         source: VoiceSource::Memory(source),
@@ -324,8 +324,14 @@ fn write_wav(path: &Path, frames: usize) {
 /// A live disk voice streaming `path` from its start, on its own
 /// hand-driven streamer, its ring primed (a file this short is prefilled
 /// whole, so the render never waits on the streamer).
-fn disk_voice(path: &Path) -> (DiskStreamer<ByHand>, Stream, tutti_sampler::DiskVoice) {
-    let mut s = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+fn disk_voice(
+    path: &Path,
+) -> (
+    DiskStreamer<ByHand<f32>, f32>,
+    Stream<f32>,
+    tutti_sampler::DiskVoice<f32>,
+) {
+    let mut s = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let opening = s.open(path, tutti_sampler::Placement::HEAD);
     let (stream, reader) = tutti_sampler::testing::settle(&mut s, opening).expect("the file opens");

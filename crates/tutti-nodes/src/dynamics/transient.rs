@@ -26,8 +26,8 @@ impl TransientShaperConfig {
         Self {
             width: width.into(),
             controls: TransientControls::DEFAULT,
-            fast: Seconds(0.001),
-            slow: Seconds(0.03),
+            fast: Seconds::new(0.001),
+            slow: Seconds::new(0.03),
         }
     }
 
@@ -198,11 +198,11 @@ mod tests {
     fn an_f64_kernel_follows_the_step_onset_closed_form_in_f64() {
         let rate = SampleRate::SR_48K;
         let config = TransientShaperConfig::new(ChannelLayout::MONO)
-            .attack(Db(12.0))
-            .fast(Seconds(0.002))
-            .slow(Seconds(0.02));
+            .attack(Db::new(12.0))
+            .fast(Seconds::new(0.002))
+            .slow(Seconds::new(0.02));
         let mut k = TransientShaperKernel::<f64>::new(&config);
-        k.prepare(rate, MaxBlock::of(tutti_units::Samples(2_000)));
+        k.prepare(rate, MaxBlock::of(tutti_units::Samples::new(2_000)));
         k.retarget(&config.controls);
         let c = wide_signal(1)[0];
         let x = vec![c; 2_000];

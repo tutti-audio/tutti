@@ -192,7 +192,6 @@ tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::Comma
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::UmpData::new
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::Advertisement::start
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::FoundHost::from_service
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/text.rs::BoundedText::new
 
 # tutti-midi-protocol
 tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/mpe/zone.rs::MpeZoneConfig::with_channel_response
@@ -343,15 +342,12 @@ tutti-plugin-host  option-arg  crates/tutti-plugin-host/src/control_handle.rs::P
 tutti-plugin-ipc  config-width  crates/tutti-plugin-ipc/src/config/bridge.rs::BridgeConfig::at
 tutti-plugin-ipc  ctor-result  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/batcher.rs::Batcher::set_offline_wait
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_automation_state_rt
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_listener
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_parameter_rt
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_render_mode_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_track_info
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_automation_state_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_listener
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_parameter_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_render_mode_rt
+tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_scale
+tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_size
+tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_automation_state_rt
+tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_parameter_rt
 
 # tutti-plugin-types
 tutti-plugin-types  ctor-result  crates/tutti-plugin-types/src/format.rs::PluginFormat::from_extension
@@ -409,16 +405,12 @@ tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_sp
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_src_ratio
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_stretch_rate
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamer::set_sample_rate
-tutti-sampler  setter  crates/tutti-sampler/src/streamer/stream.rs::Stream::set_direction
-tutti-sampler  setter  crates/tutti-sampler/src/streamer/stream.rs::Stream::set_loop
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_enabled
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_pitch_cents
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_sample_rate
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_stretch_factor
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_gain
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_loop
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_speed
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_window
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_direction
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_gain
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_loop
@@ -462,8 +454,6 @@ tutti-session  chain-result  crates/tutti-session/src/take.rs::Punch::until
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Take::rolling
 tutti-session  setter  crates/tutti-session/src/general_midi.rs::GeneralMidi::set_gain
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_feed
-tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_mix
-tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_mode
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_param_mod
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources
@@ -472,9 +462,6 @@ tutti-session  setter  crates/tutti-session/src/instrument.rs::InstrumentHandle:
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
-tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_curve
-tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_depth
-tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_polarity
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode

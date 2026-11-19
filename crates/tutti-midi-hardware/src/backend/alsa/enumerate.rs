@@ -1,13 +1,8 @@
 //! Walking the sequencer's clients and ports.
 
-use crate::block::RawBlock;
-use crate::capability::{OsEndpoint, UmpCapability};
-use tutti_alsa_ffi::{
-    BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Client, PROTO_MIDI2, PortCaps, PortEntry, UmpBlock,
-    UmpEndpoint,
-};
-use tutti_midi_device::{FunctionBlock, Identity, PortDirection};
-use tutti_ump::Protocol;
+use crate::capability::{OsEndpoint, from_os, legacy};
+use tutti_alsa_ffi::{Client, PortCaps, PortEntry, UmpEndpoint};
+use tutti_midi_device::{Endpoint, Identity, PortDirection};
 
 /// Whether a port allows `direction`: a port that is readable but not
 /// *subscribe*-readable cannot be connected to, so listing it would offer the
@@ -117,48 +112,22 @@ fn endpoint_of(port: PortEntry) -> OsEndpoint {
 ///
 /// A client with a UMP Endpoint record speaks the protocol the record says it
 /// has in use (the kernel runs the USB discovery and keeps the outcome there),
-/// and declares the blocks it lists. One with no record is legacy, a MIDI 1.0
-/// source: MIDI 1.0, with no blocks. The distinction
-/// is real and worth recording: a per-note controller sent to a legacy
-/// port is dropped in translation, not carried. Having a block is not
-/// having the MIDI 2.0 Protocol: an Endpoint that offers both and is in MIDI
-/// 1.0 reads as MIDI 1.0.
-pub(super) fn capability_of(ump: Option<&UmpEndpoint>) -> UmpCapability {
+/// supports the protocols it offers, and declares the blocks it lists. One with
+/// no record is legacy, a MIDI 1.0 source: MIDI 1.0, with no blocks. The
+/// distinction is real and worth recording: a per-note controller sent to a
+/// legacy port is dropped in translation, not carried. Having a block is not
+/// having the MIDI 2.0 Protocol: an Endpoint that offers both and is in MIDI 1.0
+/// reads as MIDI 1.0.
+pub(super) fn capability_of(ump: Option<&UmpEndpoint>) -> Endpoint {
     let Some(endpoint) = ump else {
-        return UmpCapability::midi1();
+        return legacy();
     };
-    let protocol = if endpoint.protocol & PROTO_MIDI2 != 0 {
-        Protocol::Midi2
-    } else {
-        Protocol::Midi1
-    };
-    UmpCapability {
-        protocol,
-        blocks: endpoint.blocks.iter().filter_map(block_of).collect(),
-    }
-}
-
-/// The Function Block a sequencer block is; `None` for one the UMP spec cannot
-/// hold (a number above 31, Groups past 16, a reserved direction).
-fn block_of(block: &UmpBlock) -> Option<FunctionBlock> {
-    let midi1 = if block.flags & BLOCK_IS_MIDI1 == 0 {
-        0
-    } else if block.flags & BLOCK_IS_LOWSPEED != 0 {
-        2
-    } else {
-        1
-    };
-    RawBlock {
-        id: block.id,
-        active: block.active,
-        direction: block.direction,
-        first_group: block.first_group,
-        groups: block.num_groups,
-        midi1,
-        ui_hint: block.ui_hint,
-        midi_ci_version: block.midi_ci_version,
-        sysex8_streams: block.sysex8_streams,
-        name: block.name.as_deref(),
-    }
-    .function_block()
+    from_os(
+        endpoint.protocol,
+        Some(&endpoint.offered),
+        endpoint
+            .blocks
+            .iter()
+            .map(|block| (block.info, block.name.as_deref())),
+    )
 }

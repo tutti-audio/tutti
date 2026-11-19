@@ -94,8 +94,8 @@ impl Fade {
         F::from_unit(FadeLaw::EqualAmplitude.between(
             Amplitude::SILENT,
             Amplitude::UNITY,
-            Samples(k),
-            Samples(frames),
+            Samples::new(k),
+            Samples::new(frames),
         ))
     }
 }
@@ -133,7 +133,7 @@ struct State<F: Float> {
 
 /// A live voice's reader over its stream's ring.
 #[derive(Debug)]
-pub(crate) struct LiveRead<F: SamplerFloat = f32> {
+pub(crate) struct LiveRead<F: SamplerFloat> {
     ring: SharedReader<F>,
     /// The ring's one reader, this voice's alone (see the module docs);
     /// `None` once severed, in a clone, or for a ring whose reader was taken.
@@ -620,8 +620,8 @@ impl<F: Float> State<F> {
             F::from_unit(FadeLaw::EqualAmplitude.between(
                 Amplitude::UNITY,
                 Amplitude::SILENT,
-                Samples(declick - left),
-                Samples(declick),
+                Samples::new(declick - left),
+                Samples::new(declick),
             ))
         };
         fade.started |= new;

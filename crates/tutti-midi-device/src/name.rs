@@ -5,9 +5,10 @@ use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
+use tutti_units::Text;
 use unicode_normalization::{UnicodeNormalization, is_nfc};
 
-/// Why a text is not a name ([`Name`] and [`ProductInstanceId`] read through [`FromStr`], and
+/// Why a text is not a name ([`Name`] reads through [`FromStr`], and
 /// [`MessageText`](crate::MessageText)'s `TryFrom<&str>`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum NameError {
@@ -24,8 +25,18 @@ pub enum NameError {
     /// A name starts with a Byte Order Mark (M2-104 §1.8).
     #[error("the text starts with a Byte Order Mark")]
     Bom,
-    /// A [`ProductInstanceId`] holds a byte outside ASCII `32..=126` (other
-    /// than the NUL that [`Nul`](Self::Nul) names).
+}
+
+/// Why a text is not a [`ProductInstanceId`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum InstanceIdError {
+    /// The text is longer than `max` bytes.
+    #[error("the text is longer than {max} bytes")]
+    TooLong {
+        /// The most bytes an Id holds.
+        max: usize,
+    },
+    /// The text holds a character outside ASCII `32..=126` (a NUL included).
     #[error("the text holds a byte outside printable ASCII (32 to 126)")]
     NotPrintableAscii,
 }
@@ -49,14 +60,21 @@ pub enum NameError {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
-pub struct Name<const N: usize> {
-    bytes: [u8; N],
-    len: u8,
-}
+pub struct Name<const N: usize>(Text<0, N>);
+
+/// The bytes of an Endpoint Name (M2-104 §7.1.4), which is also the capacity
+/// of the assembler that reads one.
+pub(crate) const ENDPOINT_NAME_BYTES: usize = 98;
+
+/// The bytes of a Function Block Name (M2-104 §7.1.9).
+pub(crate) const BLOCK_NAME_BYTES: usize = 91;
+
+/// The bytes of a Product Instance Id (M2-104 §7.1.5).
+pub(crate) const INSTANCE_ID_BYTES: usize = 42;
 
 /// An Endpoint Name: at most 98 bytes, a Start, five Continue and an End
 /// packet of 14 bytes (M2-104 §7.1.4).
-pub type EndpointName = Name<98>;
+pub type EndpointName = Name<ENDPOINT_NAME_BYTES>;
 
 /// A Function Block Name: at most 91 bytes.
 ///
@@ -64,7 +82,7 @@ pub type EndpointName = Name<98>;
 /// message or a Start, up to five Continue messages and an End. A Function
 /// Block Name packet carries 13 bytes, and 7 x 13 = 91, one less than an
 /// Endpoint Name's 98 (7 x 14).
-pub type BlockName = Name<91>;
+pub type BlockName = Name<BLOCK_NAME_BYTES>;
 
 impl<const N: usize> Name<N> {
     /// The name, composed to NFC, or `None` when the composed text is longer
@@ -94,18 +112,12 @@ impl<const N: usize> Name<N> {
         Ok(text)
     }
 
-    /// The name holding `bytes`, at most `N` of them.
-    fn held(bytes: &[u8]) -> Result<Self, NameError> {
-        let too_long = NameError::TooLong { max: N };
-        if bytes.len() > N {
-            return Err(too_long);
-        }
-        let mut held = [0; N];
-        held[..bytes.len()].copy_from_slice(bytes);
-        Ok(Self {
-            bytes: held,
-            len: u8::try_from(bytes.len()).map_err(|_| too_long)?,
-        })
+    /// The composed text as a name; `composed` has refused a NUL, so only the
+    /// length can fail.
+    fn held(text: &str) -> Result<Self, NameError> {
+        Text::new(text)
+            .map(Self)
+            .ok_or(NameError::TooLong { max: N })
     }
 
     /// The name, composed to NFC, or why the text is not one.
@@ -116,7 +128,7 @@ impl<const N: usize> Name<N> {
     /// a NUL, [`NameError::TooLong`] when the composed text is longer than `N`
     /// bytes.
     fn parse(text: &str) -> Result<Self, NameError> {
-        Self::held(Self::composed(text)?.as_bytes())
+        Self::held(&Self::composed(text)?)
     }
 
     /// The name for display: composed to NFC, and cut at the last character
@@ -134,32 +146,25 @@ impl<const N: usize> Name<N> {
         while !text.is_char_boundary(end) {
             end -= 1;
         }
-        Self::held(&text.as_bytes()[..end]).ok()
-    }
-
-    /// A name read off the wire: UTF-8 bytes, read as [`FromStr`]
-    /// reads a text.
-    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        Self::parse(std::str::from_utf8(bytes).ok()?).ok()
+        Self::held(&text[..end]).ok()
     }
 
     /// The text.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        // Checked UTF-8 in `from_bytes`, the only constructor.
-        std::str::from_utf8(self.as_bytes()).unwrap_or("")
+        self.0.as_str()
     }
 
     /// The text's bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes[..usize::from(self.len)]
+        self.0.as_str().as_bytes()
     }
 
     /// Whether the name is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.0.as_str().is_empty()
     }
 }
 
@@ -212,27 +217,14 @@ impl<const N: usize> FromStr for Name<N> {
 }
 
 /// A Product Instance Id: ASCII `32..=126`, at most 42 bytes, a Start, one
-/// Continue and an End packet of 14 bytes (M2-104 §7.1.5).
+/// Continue and an End packet of 14 bytes (M2-104 §7.1.5). It may be empty.
 ///
 /// With the `serde` feature it is its text, read back through
 /// [`FromStr`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
-pub struct ProductInstanceId(Name<42>);
-
-impl PartialOrd for ProductInstanceId {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ProductInstanceId {
-    /// By text.
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.as_str().cmp(other.as_str())
-    }
-}
+pub struct ProductInstanceId(Text<0, INSTANCE_ID_BYTES>);
 
 impl From<ProductInstanceId> for String {
     fn from(id: ProductInstanceId) -> Self {
@@ -241,9 +233,9 @@ impl From<ProductInstanceId> for String {
 }
 
 impl TryFrom<String> for ProductInstanceId {
-    type Error = NameError;
+    type Error = InstanceIdError;
 
-    fn try_from(text: String) -> Result<Self, NameError> {
+    fn try_from(text: String) -> Result<Self, InstanceIdError> {
         Self::parse(&text)
     }
 }
@@ -260,16 +252,15 @@ impl ProductInstanceId {
     ///
     /// # Errors
     ///
-    /// [`NameError::Nul`] for a NUL, [`NameError::NotPrintableAscii`] for any
-    /// other byte outside `32..=126`, [`NameError::TooLong`] past 42 bytes.
-    fn parse(text: &str) -> Result<Self, NameError> {
-        if text.bytes().any(|b| b == 0) {
-            return Err(NameError::Nul);
-        }
+    /// [`InstanceIdError::NotPrintableAscii`] for any byte outside `32..=126`
+    /// (a NUL included), [`InstanceIdError::TooLong`] past 42 bytes.
+    fn parse(text: &str) -> Result<Self, InstanceIdError> {
         if !text.bytes().all(|b| (32..=126).contains(&b)) {
-            return Err(NameError::NotPrintableAscii);
+            return Err(InstanceIdError::NotPrintableAscii);
         }
-        Name::parse(text).map(Self)
+        Text::new(text).map(Self).ok_or(InstanceIdError::TooLong {
+            max: INSTANCE_ID_BYTES,
+        })
     }
 
     /// An Id for a Device that has no serial number to give (§7.1.5 "should
@@ -315,17 +306,17 @@ impl AsRef<str> for ProductInstanceId {
 }
 
 impl TryFrom<&str> for ProductInstanceId {
-    type Error = NameError;
+    type Error = InstanceIdError;
 
-    fn try_from(text: &str) -> Result<Self, NameError> {
+    fn try_from(text: &str) -> Result<Self, InstanceIdError> {
         Self::parse(text)
     }
 }
 
 impl FromStr for ProductInstanceId {
-    type Err = NameError;
+    type Err = InstanceIdError;
 
-    fn from_str(text: &str) -> Result<Self, NameError> {
+    fn from_str(text: &str) -> Result<Self, InstanceIdError> {
         Self::parse(text)
     }
 }

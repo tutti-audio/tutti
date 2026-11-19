@@ -175,7 +175,7 @@ fn mock_with(
         .create_sync()
         .unwrap();
     let slab = AudioSlab::create(shm, layout).unwrap();
-    let (bridge, thread) = PluginBridge::new(
+    let (bridge, thread, replies) = PluginBridge::new(
         path.clone(),
         origin,
         format,
@@ -317,6 +317,7 @@ fn mock_with(
     });
     let ipc = Ipc::new(IpcParts {
         bridge,
+        replies,
         guard: Arc::new(ProcessGuard::for_test(
             crate::unique_socket_path().expect("the OS has a random source"),
         )),
@@ -785,7 +786,7 @@ fn the_editor_instance_is_loaded_with_the_choice_the_bridge_was_made_for() {
         tutti_plugin_types::PluginFormat::Clap,
         crate::EditorLoader::new(recording_editor, tutti_fixtures::detached_work()),
     );
-    let refused = ipc.bridge().open_floating_editor(main_thread());
+    let refused = ipc.bridge().editor().open_floating_editor(main_thread());
     assert!(refused.is_err(), "the recording loader loads no editor");
     assert_eq!(
         *EDITOR_LOAD.lock().unwrap(),
@@ -876,7 +877,10 @@ fn what_the_servers_editor_says_unprompted_is_heard() {
     server.say(&BridgeMessage::EditorWantsSize { size: asked });
     server.say(&BridgeMessage::EditorClosed);
     // An idle bridge reads nothing: the next command's reply reads both.
-    assert_eq!(ipc.bridge().parameters().expect("answered").len(), 1);
+    assert_eq!(
+        ipc.bridge().audio().parameters().expect("answered").len(),
+        1
+    );
 
     assert_eq!(ipc.poll_editor_resize_request(main), Some(asked));
     assert_eq!(ipc.poll_editor_resize_request(main), None, "once");
@@ -887,7 +891,10 @@ fn what_the_servers_editor_says_unprompted_is_heard() {
     // A close of an editor the server already closed sends nothing: asked
     // after it, in order, a reply the mock answers proves what it was sent.
     ipc.close_editor(main);
-    assert_eq!(ipc.bridge().parameters().expect("answered").len(), 1);
+    assert_eq!(
+        ipc.bridge().audio().parameters().expect("answered").len(),
+        1
+    );
     assert!(
         !server
             .received
@@ -910,7 +917,10 @@ fn a_client_with_a_loader_sends_no_editor_message() {
         ipc.open_floating_editor(main_thread()).is_err(),
         "no editor in these tests"
     );
-    assert_eq!(ipc.bridge().parameters().expect("answered").len(), 1);
+    assert_eq!(
+        ipc.bridge().audio().parameters().expect("answered").len(),
+        1
+    );
     assert!(server.wait_for(|got| {
         got.iter()
             .any(|m| matches!(m, HostMessage::GetParameterList))
@@ -1009,7 +1019,7 @@ const CHUNKS_AFTER: usize = 90;
 /// chunk before it returns, and the bridge counts a block abandoned before it
 /// sends the next, so the count is settled when the render is.
 fn assert_off_the_budget(bridge: &PluginBridge, before: u64) {
-    let abandoned = bridge.block_counts().abandoned - before;
+    let abandoned = bridge.audio().block_counts().abandoned - before;
     assert!(
         abandoned >= OFF_THE_BUDGET,
         "the bridge abandoned {abandoned} blocks after {CHUNKS_AFTER} chunks, wanted \
@@ -1059,10 +1069,10 @@ fn a_silent_server_holds_the_bridge_for_one_budget_not_one_per_chunk() {
         "the second render's collect misses its budget"
     );
     assert!(
-        bridge.block_counts().abandoned >= 1,
+        bridge.audio().block_counts().abandoned >= 1,
         "the first block is abandoned at the budget"
     );
-    let before = bridge.block_counts().abandoned;
+    let before = bridge.audio().block_counts().abandoned;
     render_chunks(&mut processor, &server, CHUNKS_AFTER);
     assert_off_the_budget(&bridge, before);
 }
@@ -1085,12 +1095,12 @@ fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
         "the second render's collect misses its budget"
     );
     assert!(
-        bridge.block_counts().abandoned >= 1,
+        bridge.audio().block_counts().abandoned >= 1,
         "the first block is abandoned at the budget"
     );
     let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
     let (mut processor, _controller) = activate(ipc, 32);
-    let before = bridge.block_counts().abandoned;
+    let before = bridge.audio().block_counts().abandoned;
     render_chunks(&mut processor, &server, CHUNKS_AFTER);
     assert_off_the_budget(&bridge, before);
 }
@@ -1306,7 +1316,10 @@ fn a_lost_plugin_refuses_the_write() {
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
-    ipc.link.bridge.mark_crashed(PluginFailure::StreamClosed);
+    ipc.link
+        .bridge
+        .audio()
+        .mark_crashed(PluginFailure::StreamClosed);
     assert_eq!(
         ipc.set_parameter(main, ParamId::new(3), half),
         Err(ParamWriteError::Lost(ParamId::new(3)))

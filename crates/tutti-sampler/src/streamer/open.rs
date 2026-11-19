@@ -27,9 +27,11 @@ use super::control::StreamFile;
 use super::loops::RingControl;
 use super::prefetch::SharedReader;
 use super::status::StatusCell;
+use super::steer::SteerCell;
 use super::stream::{Stream, StreamerPort};
-use crate::PlaceError;
+use crate::voice::Direction;
 use crate::voice::interp::Place;
+use crate::{Loop, PlaceError};
 use tutti_rt::RingFloat;
 
 /// Where in the file a stream's reader starts, in file frames.
@@ -52,7 +54,7 @@ pub struct Placement(SamplePosition);
 
 impl Placement {
     /// The head of the file.
-    pub const HEAD: Self = Self(SamplePosition(0.0));
+    pub const HEAD: Self = Self(SamplePosition::new(0.0));
 
     /// A start at `start` frames into the file; `None` when `start` is
     /// negative or not finite.
@@ -84,7 +86,7 @@ impl TryFrom<f64> for Placement {
     type Error = RefusedPlacement;
 
     fn try_from(raw: f64) -> Result<Self, RefusedPlacement> {
-        Self::new(SamplePosition(raw)).ok_or(RefusedPlacement(raw))
+        Self::new(SamplePosition::new(raw)).ok_or(RefusedPlacement(raw))
     }
 }
 
@@ -117,7 +119,7 @@ pub enum OpenError {
 /// What the streamer answers an open with: everything the audio side's
 /// [`StreamReader`] is built from but the registered control reader, which the
 /// control thread registers ([`Opening::poll`]).
-pub(crate) struct Opened<F: RingFloat = f32> {
+pub(crate) struct Opened<F: RingFloat> {
     pub(crate) id: StreamId,
     pub(crate) ring: SharedReader<F>,
     pub(crate) pos: PosReader<F>,
@@ -128,6 +130,10 @@ pub(crate) struct Opened<F: RingFloat = f32> {
     pub(crate) file: Arc<StreamFile<F>>,
     /// The ring's control cell, which the handle reads the applied loop from.
     pub(crate) control: Publisher<RingControl<F>>,
+    /// The loop and direction the control side asks for, which the streamer
+    /// reads: the handle holds the publishing ends.
+    pub(crate) looping: SteerCell<Option<Loop>>,
+    pub(crate) direction: SteerCell<Direction>,
     pub(crate) place: Place<F>,
     pub(crate) width: ChannelLayout,
     /// What the reader rings when its ring wants the streamer.
@@ -149,7 +155,7 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
 ///
 /// ```compile_fail
 /// # use tutti_sampler::Opening;
-/// # fn twice(opening: Opening) {
+/// # fn twice(opening: Opening<f32>) {
 /// let _ = opening.poll();
 /// let _ = opening.poll(); // `poll` took `opening` by value
 /// # }
@@ -159,7 +165,7 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
 ///
 /// ```
 /// # use tutti_sampler::{Open, Opening};
-/// # fn again(opening: Opening) {
+/// # fn again(opening: Opening<f32>) {
 /// if let Open::Pending(opening) = opening.poll() {
 ///     let _ = opening.poll();
 /// }
@@ -170,7 +176,7 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
 /// opened.
 #[derive(Debug)]
 #[must_use = "an open nobody polls is abandoned"]
-pub struct Opening<F: RingFloat = f32> {
+pub struct Opening<F: RingFloat> {
     id: StreamId,
     reply: Receiver<Result<Opened<F>, OpenError>>,
     /// The streamer's command queue, which the stream it answers with sends
@@ -210,7 +216,7 @@ impl<F: RingFloat> Opening<F> {
     /// that has nothing else to do (the session's spawner), where
     /// [`poll`](Self::poll) is for one that has. It sleeps on the reply, so
     /// no loop of polls is needed; but a streamer nobody drives (a
-    /// `DiskStreamer::manual` no one steps)
+    /// `DiskStreamer::by_hand` no one steps)
     /// never answers, and this never returns.
     ///
     /// # Errors
@@ -239,6 +245,8 @@ impl<F: RingFloat> Opening<F> {
                 Arc::clone(&opened.cells),
                 Arc::clone(&opened.file),
                 opened.control.clone(),
+                opened.looping.clone(),
+                opened.direction.clone(),
             ),
             StreamReader::new(opened),
         )
@@ -248,7 +256,7 @@ impl<F: RingFloat> Opening<F> {
 /// An open's answer.
 #[derive(Debug)]
 #[must_use = "a dropped `Pending` abandons the open; a dropped `Stream` closes it"]
-pub enum Open<F: RingFloat = f32> {
+pub enum Open<F: RingFloat> {
     /// Not answered yet: poll the `Opening` again.
     Pending(Opening<F>),
     /// The stream is open: the handle is the control thread's, and the reader
@@ -267,7 +275,7 @@ pub enum Open<F: RingFloat = f32> {
 ///
 /// ```compile_fail
 /// # use tutti_sampler::StreamReader;
-/// # fn two(reader: StreamReader) {
+/// # fn two(reader: StreamReader<f32>) {
 /// let second = reader.clone(); // a stream has one reader
 /// # }
 /// ```
@@ -276,11 +284,11 @@ pub enum Open<F: RingFloat = f32> {
 ///
 /// ```
 /// # use tutti_sampler::StreamReader;
-/// # fn one(reader: StreamReader) {
+/// # fn one(reader: StreamReader<f32>) {
 /// let _again = &reader;
 /// # }
 /// ```
-pub struct StreamReader<F: RingFloat = f32> {
+pub struct StreamReader<F: RingFloat> {
     id: StreamId,
     pub(crate) ring: SharedReader<F>,
     /// The position reader and the control's reader, registered together on

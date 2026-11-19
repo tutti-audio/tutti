@@ -196,11 +196,17 @@ pub struct Shape {
     /// a node that declares nothing is assumed worth a thread of its own.
     /// A speed hint only — it never changes a sample.
     pub cost: Cost,
-    /// Whether its event outputs may carry notes or a sustain pedal. The
-    /// executor tracks the keys such a port holds so that an edge that ends
+    /// Whether its event outputs may carry notes, hold pedals or a bend. The
+    /// executor tracks what such a port holds so that an edge that ends
     /// can close them at its sink (see
     /// [`with_no_note_events`](Self::with_no_note_events)). `true` unless set
     /// otherwise: a node that declares nothing is assumed to carry them.
+    ///
+    /// The tracking costs about 9 KiB (8 KiB of keys and 1 KiB of controllers)
+    /// for each of the unit's event output ports, in each of the tables it
+    /// keeps: the running one, the one that owes closes, and, while a replace
+    /// waits behind a fade, the waiting unit's. A node that never carries notes
+    /// declares [`with_no_note_events`](Self::with_no_note_events).
     pub note_events: bool,
     /// The most events this node writes into its successor's first event
     /// input when it is replaced (see [`Node::chase`] and
@@ -738,11 +744,11 @@ impl Shape {
         self
     }
 
-    /// This shape, declaring that its event outputs never carry a note or a
-    /// sustain pedal (a clock, a segment stream), so the executor keeps no
-    /// held-key table for them. A node that then writes one trips a debug
-    /// assertion; in a release build nothing checks, and the note it starts is
-    /// never closed when its edge ends.
+    /// This shape, declaring that its event outputs never carry a note, a hold
+    /// pedal or a bend (a clock, a segment stream), so the executor keeps no
+    /// held table for them. A node that then writes a note or a sustain pedal
+    /// trips a debug assertion; in a release build nothing checks, and what it
+    /// starts is never closed when its edge ends.
     ///
     /// ```
     /// use tutti_graph::Shape;

@@ -145,7 +145,7 @@
 //!   whose `push` answers a `Result` of [`Delivered`].
 //! - [`DeviceInfo`](tutti_midi_device::DeviceInfo), [`DeviceId`](tutti_midi_device::DeviceId), [`DeviceEvent`](tutti_midi_device::DeviceEvent): what the list holds and reports;
 //!   they live in `tutti-midi-device`, with the pure `DeviceTable` behind them.
-//! - [`OsEndpoint`], [`EndpointId`](tutti_midi_device::EndpointId), [`UmpCapability`]: what a backend enumerates.
+//! - [`OsEndpoint`], [`EndpointId`](tutti_midi_device::EndpointId), what a backend enumerates.
 //! - [`DeviceStream`], [`Basis`]: what a device's UMP Stream conversation settled
 //!   (`MidiSession::poll` steps it, `MidiSession::stream` reads it).
 //! - [`MidiEndpoints`]: the backend trait; [`MidiSession::open`] picks this
@@ -227,7 +227,6 @@ mod backend;
     any(midi_backend = "none", midi_backend = "winmm"),
     allow(dead_code, reason = "only a UMP backend converts OS blocks")
 )]
-mod block;
 mod capability;
 mod ci;
 mod devices;
@@ -268,7 +267,7 @@ mod wire;
 pub mod test_support;
 
 pub use answer::{Answer, ReportEnd};
-pub use capability::{OsEndpoint, UmpCapability};
+pub use capability::OsEndpoint;
 pub use ci::{CiChange, CiPeerInfo, PeerId};
 pub use devices::{
     ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, RecvTimeoutError, SeedError,

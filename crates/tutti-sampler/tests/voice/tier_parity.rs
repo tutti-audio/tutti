@@ -23,7 +23,7 @@
 //!
 //! # How readiness is handled: by counting, not by waiting
 //!
-//! The streamer is driven by hand here — [`DiskStreamer::manual`] plus
+//! The streamer is driven by hand here — [`DiskStreamer::by_hand`] plus
 //! [`step_once`](DiskStreamer::step_once) — so there is no streamer thread, no
 //! sleep, no `Instant`, and no timeout anywhere in this file.
 //!
@@ -272,8 +272,8 @@ fn push_block(unit: &mut dyn Node, clock: &Clock, out: &mut Vec<(f32, f32)>) {
 /// spans take plain [`render`], which keeps the streamer provably out of the
 /// measurement.
 fn render_streamed(
-    voice: &mut DiskVoice,
-    streamer: &mut DiskStreamer<ByHand>,
+    voice: &mut DiskVoice<f32>,
+    streamer: &mut DiskStreamer<ByHand<f32>, f32>,
     clock: &Clock,
     blocks: usize,
 ) -> Vec<(f32, f32)> {
@@ -307,7 +307,7 @@ fn peak(frames: &[(f32, f32)]) -> f32 {
 /// [`StepOutcome::Stalled`]. Waiting for `Healthy` there would hang; a test that
 /// streams near the end of a file (this file has several) needs the fixed point,
 /// not the threshold.
-fn prime(streamer: &mut DiskStreamer<ByHand>) {
+fn prime(streamer: &mut DiskStreamer<ByHand<f32>, f32>) {
     for _ in 0..PRIME_BUDGET {
         if streamer.step_once() != StepOutcome::Busy {
             return;
@@ -332,14 +332,14 @@ fn prime(streamer: &mut DiskStreamer<ByHand>) {
 /// The stream's handle comes back with the voice: the caller holds it for as
 /// long as the voice plays (dropping it ends the stream).
 fn stream_at(
-    streamer: &mut DiskStreamer<ByHand>,
+    streamer: &mut DiskStreamer<ByHand<f32>, f32>,
     path: &Path,
     at_sec: f64,
-) -> (DiskVoice, Arc<Clock>, Stream) {
+) -> (DiskVoice<f32>, Arc<Clock>, Stream<f32>) {
     let clock = Clock::new(120.0);
     clock.seek_seconds(at_sec);
 
-    let start = Placement::new(SamplePosition(at_sec * SR)).expect("a position in the file");
+    let start = Placement::new(SamplePosition::new(at_sec * SR)).expect("a position in the file");
     let opening = streamer.open(path, start);
     let (stream, reader) = settle(streamer, opening).unwrap_or_else(|e| {
         panic!("the streamer could not open the file streaming from {at_sec}s: {e}")
@@ -387,7 +387,7 @@ fn the_disk_and_memory_tiers_render_the_same_material() {
     let mut mem = contract::prepared(mem, SampleRate::of(SR), BLOCK);
 
     // ---- disk tier -------------------------------------------------------
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let (mut disk, disk_clock, _stream) = stream_at(&mut streamer, &path, 0.0);
 
@@ -462,7 +462,7 @@ fn a_disk_voice_produces_audio_from_a_real_file() {
     let path = d.path().join("stream.wav");
     write_test_wav(&path, (SR * 4.0) as usize);
 
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let (mut voice, clock, _stream) = stream_at(&mut streamer, &path, 0.0);
 
@@ -503,7 +503,7 @@ fn streaming_from_an_offset_delivers_that_part_of_the_file() {
     let path = d.path().join("seek.wav");
     write_chirp_wav(&path, (SR * OFFSET_FILE_SECS) as usize);
 
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
 
     // Spread across the file. Each case is a stream of its own, started cleanly
@@ -551,7 +551,7 @@ fn seeking_a_live_stream_repositions_it_in_both_directions() {
     let path = d.path().join("live_seek.wav");
     write_chirp_wav(&path, (SR * SEEK_FILE_SECS) as usize);
 
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
 
     // Start at 20 s so both a forward (to 28 s) and a backward (to 5 s) seek are
@@ -619,7 +619,7 @@ fn a_seek_transition_does_not_clip() {
     let path = d.path().join("xfade.wav");
     write_chirp_wav(&path, (SR * SEEK_FILE_SECS) as usize);
 
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let (mut voice, clock, _stream) = stream_at(&mut streamer, &path, 10.0);
 
@@ -675,7 +675,7 @@ fn disk_varispeed_transposes_by_its_factor() {
     // the clock forward.
     write_tone_wav(&path, (SR * 8.0) as usize, 440.0);
 
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let (mut voice, clock, _stream) = stream_at(&mut streamer, &path, 0.0);
 
@@ -748,7 +748,7 @@ fn the_tiers_agree_under_varispeed() {
     // transposed partials of a two-tone file collide across the measurement bands.
     write_tone_wav(&path, (SR * 8.0) as usize, 440.0);
 
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let (mut disk, disk_clock, _stream) = stream_at(&mut streamer, &path, 0.0);
 

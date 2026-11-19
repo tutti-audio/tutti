@@ -204,12 +204,12 @@ fn served_id(plugin: &PluginRef) -> String {
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let Launched { ipc, .. } = Ipc::launch(
         IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
-        plugin.path().to_path_buf(),
-        plugin.format(),
-        plugin.load(),
-        SampleRate::SR_48K,
-        None,
-        tutti_plugin_types::StateUse::Project,
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::Origin::new(plugin.path(), plugin.load()),
+            format: plugin.format(),
+            rate: SampleRate::SR_48K,
+            restore: None,
+        },
         Some(tutti_plugin_ipc::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),

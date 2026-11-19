@@ -124,7 +124,8 @@ pub use initiator::{
     PeNotification, PeOutcome, PeResponse, PeSet, PeSettings, PeSubscribed, PeUnreadable,
 };
 pub use limits::{
-    MediaType, NotValid, PeMessage, PropertyName, ResourceId, ResourceName, SubscribeId,
+    MediaType, PeMessage, PeTextError, PropertyName, PropertyNameError, ResourceId, ResourceName,
+    SubscribeId,
 };
 pub use partial::{JsonPointer, PartialError, PartialUpdate, PartialValue};
 pub use reassemble::{

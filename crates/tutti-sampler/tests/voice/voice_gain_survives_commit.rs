@@ -67,7 +67,7 @@ fn rolling(frame: Frame) -> TransportPosition {
     TransportPosition::new(
         true,
         Bpm::of(120.0),
-        Beat(frame.get() as f64 / 24_000.0),
+        Beat::new(frame.get() as f64 / 24_000.0),
         None,
     )
 }
@@ -79,24 +79,24 @@ fn rolling(frame: Frame) -> TransportPosition {
 /// transport renders silence, and every gain comparison in this file would
 /// compare 0.0 against 0.0. A setup without a rolling clock fails on the
 /// guard below, which is what it is for.
-fn solo_voice() -> Solo<VoiceNodeHandle> {
+fn solo_voice() -> Solo<VoiceNodeHandle<f32>> {
     let voice = Voice {
         source: VoiceSource::Memory(
-            MemorySource::placed(flat_wave(48_000), VoiceWindow::from(Beat(0.0)))
+            MemorySource::placed(flat_wave(48_000), VoiceWindow::from(Beat::new(0.0)))
                 .expect("a placeable wave"),
         ),
         play: Playback::default(),
     };
     let mut solo = Solo::new(
         VoiceNode::with_channels(voice, ChannelLayout::MONO),
-        Prepare::new(RATE, MaxBlock::of(Samples(BLOCK))),
+        Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
     solo.renderer_mut().set_transport_fn(rolling);
     solo
 }
 
 /// Every sample of the next block.
-fn block(solo: &mut Solo<VoiceNodeHandle>) -> Vec<f32> {
+fn block(solo: &mut Solo<VoiceNodeHandle<f32>>) -> Vec<f32> {
     solo.render(BLOCK).swap_remove(0)
 }
 
@@ -188,7 +188,7 @@ fn a_fork_starts_from_the_gain_last_set_and_shares_nothing() {
         .fork(
             ForkTarget::Master,
             ForkMode::Live,
-            Prepare::new(RATE, MaxBlock::of(Samples(BLOCK))),
+            Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
         )
         .expect("a memory voice forks");
     s.controls().params().set(UnitParam::Volume, 0.75);
@@ -271,7 +271,7 @@ fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::Param
         id: LayerId(1),
         clock: Clock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
-            phase: PhaseIncrement(0.0),
+            phase: PhaseIncrement::new(0.0),
         },
         wave: tutti_modulation::Waveform::Const(1.0),
         amount: Amount {
@@ -304,7 +304,7 @@ fn a_lane_drives_a_memory_sources_gain_around_its_cell() {
     let mut s = Solo::new(
         MemorySource::with_channels(flat_wave(48_000), ChannelLayout::MONO)
             .expect("a placeable wave"),
-        Prepare::new(RATE, MaxBlock::of(Samples(BLOCK))),
+        Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
     s.renderer_mut().set_transport_fn(rolling);
     assert!(s.controls().set(UnitParam::Volume, 0.25));
@@ -335,7 +335,7 @@ fn a_voices_gain_port_reads_its_cell_as_its_base() {
 
     let voice = Voice {
         source: VoiceSource::Memory(
-            MemorySource::placed(flat_wave(64), VoiceWindow::from(Beat(0.0)))
+            MemorySource::placed(flat_wave(64), VoiceWindow::from(Beat::new(0.0)))
                 .expect("a placeable wave"),
         ),
         play: Playback {

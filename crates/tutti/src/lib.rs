@@ -150,7 +150,7 @@ pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, Interleaved
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_units::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Normalized, ParamId,
-    Q, SampleRate, Samples, Seconds, Semitones,
+    Q, SampleRate, Samples, Seconds, Semitones, TextError,
 };
 
 // The device handle and a device's identity.
@@ -189,10 +189,11 @@ pub use tutti_session::{
 pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
-    IntoRead, Knobs, LoopTarget, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget,
-    ScalarTarget, SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError,
-    ValueErrorKind,
+    AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
+    DepthTarget, Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget,
+    MeterTarget, MixTarget, ModeTarget, Modify, Moved, OutputPolicyTarget, ParamTarget,
+    PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
+    TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -209,6 +210,8 @@ pub use tutti_session::{
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
+#[cfg(all(feature = "session", feature = "sampler"))]
+pub use tutti_session::{DirectionTarget, LoopingTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
@@ -411,14 +414,13 @@ pub mod session {
     pub use tutti_session::Param as PluginParam;
     pub use tutti_session::{
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
-        Connection, Crossfade, CrossfadeId, CrossfadeRefused, EdgeGainError,
+        Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError, EdgeGainError,
         Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
         NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError, Reclaimer,
-        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted,
-        Wire, root_width,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
+        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
+        RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted, Wire, root_width,
     };
     pub use tutti_transport::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -468,7 +470,7 @@ pub mod session {
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
-        RouteError, RouteInfo, RouteMut, SourceInfo, SourceName, TargetName, declare_targets,
+        RouteError, RouteInfo, SourceInfo, SourceName, TargetName, declare_targets,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{
@@ -524,13 +526,13 @@ pub mod codec {
 #[cfg(feature = "sampler")]
 pub mod sampler {
     pub use tutti_sampler::{
-        Block, Direction as PlaybackDirection, Error, OpenError, Placement as ClipPlacement,
-        RefusedPlacement, SamplerFloat, Stream, StreamFault, StreamFile, StreamId, StreamPhase,
-        StreamReader, StreamStatus, VoiceNodeHandle,
+        Block, Direction as PlaybackDirection, Error, GUARD_FRAMES, OpenError,
+        Placement as ClipPlacement, RefusedPlacement, SamplerFloat, Stream, StreamFault,
+        StreamFile, StreamId, StreamPhase, StreamReader, StreamStatus, VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
-        Loop, LoopError, PlaceError, Playback, SendError, StreamerGone, StreamingAddError,
+        Loop, LoopError, PlaceError, PlayError, Playback, SendError, SteerCell, StreamingAddError,
         VoiceWindow,
     };
     #[cfg(any(
@@ -584,7 +586,8 @@ pub mod modulation {
         SignalKind, TargetDecl,
     };
     pub use tutti_modulation::{
-        Clock, LayerId, Leg, PlayGrid, ProgramTime, RateAnchor, RouteKey, SourceKey, TargetKey,
+        Clock, DepthSnapshot, LayerId, Leg, PlayGrid, ProgramTime, RateAnchor, RouteKey, SourceKey,
+        TargetKey,
     };
 }
 
@@ -687,12 +690,13 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
-        MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError, NotADataControl, NotADeviceId,
-        NotAMuid, NotASysexSize, NotProfileChannels, NoteData, PortDirection, ProcessError,
-        ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
-        ProfileOutcome, ProfileRequest, ProfileRequestError, ProfileState, ProfileTable,
-        ReportRequest, ReportScope, SpecificData, StandardProfile, SystemMessages, WinMmDevice,
+        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, InstanceIdError,
+        ManufacturerProfile, MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError,
+        NotADataControl, NotADeviceId, NotAMuid, NotASysexSize, NotProfileChannels, NoteData,
+        PortDirection, ProcessError, ProcessFeatures, ProductInstanceId, ProfileChange,
+        ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest, ProfileRequestError,
+        ProfileState, ProfileTable, ReportRequest, ReportScope, SpecificData, StandardProfile,
+        SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
@@ -818,25 +822,24 @@ pub mod midi {
             EntryError, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
             NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
             NotAStateSize, NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits,
-            NotUnixSeconds, NotValid, NotVendorName, OpaqueBody, PaginationFault, ParamPath,
-            PartialError, PartialUpdate, PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer,
-            PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeCapabilities,
-            PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry,
-            PeChannelList, PeChannelMode, PeChunkError, PeCluster, PeColumn, PeController, PeCtrl,
-            PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault,
-            PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError, PeExtensions, PeExternalSync,
-            PeExtra, PeExtraError, PeFlowControl, PeHeaderError, PeHeaderTooLong, PeJson,
-            PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage, PeMidiMode, PeModeEntry,
-            PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
-            PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
-            PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
-            PeText, PeTransaction, PeUnreadable, PeVersion, Place, Priority, PropertyName,
-            RefusedAt, RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry,
-            ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
-            ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName, SelectorAction,
-            SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId, StateRev,
-            StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint,
-            UnixSeconds, UpdateKind,
+            NotUnixSeconds, NotVendorName, OpaqueBody, PaginationFault, ParamPath, PartialError,
+            PartialUpdate, PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram,
+            PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeCapabilities, PeCapabilitiesFailure,
+            PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
+            PeChunkError, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
+            PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
+            PeEndedBy, PeError, PeExtensions, PeExternalSync, PeExtra, PeExtraError, PeFlowControl,
+            PeHeaderError, PeHeaderTooLong, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn,
+            PeMessage, PeMidiMode, PeModeEntry, PeModeList, PeObject, PeOpaque, PeOutcome, PePage,
+            PeProgramEntry, PeProgramList, PeReassemblyError, PeReply, PeRequestId, PeResource,
+            PeResourceList, PeResponse, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus,
+            PeStatusClass, PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable,
+            PeVersion, Place, Priority, PropertyName, PropertyNameError, RefusedAt, RequestRefused,
+            ResIdUse, ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent,
+            ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceTarget,
+            ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction,
+            SimultaneousRequests, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};

@@ -75,7 +75,7 @@
 //! ```
 //!
 //! Streaming needs a real file. Build a `DiskStreamer` once with
-//! `DiskStreamer::new` (it fails if the OS refuses the streamer's thread), open a
+//! `DiskStreamer::start` (it fails if the OS refuses the streamer's thread), open a
 //! stream with `open`, and build the `DiskVoice` from the reader the open answers
 //! with. The `Stream` it answers with is the control side: `Stream::status` reports
 //! whether the ring is primed, ended or faulted, and how many frames the voice
@@ -106,7 +106,7 @@
 //! - No decoder feature: a decoder is `tutti-codec`'s `decode-*` feature, which an
 //!   app turns on there. With none on, `probe` and `SampleFacts` are absent: no
 //!   header can be read.
-//! - `testing`: `DiskStreamer::manual` and `step_once`, which run the
+//! - `testing`: `DiskStreamer::by_hand` and `step_once`, which run the
 //!   streamer's cycle by hand instead of on its thread, and the `testing` module (a
 //!   mock transport and block driver). For tests; a host has no use for it.
 #![forbid(unsafe_code)]
@@ -212,20 +212,20 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 //
 pub use voice::{
     Direction, DiskVoice, DiskVoiceControls, Loop, LoopError, MemorySource, MemorySourceConfig,
-    Playback, PoolDrops, PoolTooWide, SendError, SlotId, StreamingAddError, Voice, VoiceNode,
-    VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, memory_voice,
+    PlayError, Playback, PoolDrops, PoolTooWide, SendError, SlotId, StreamingAddError, Voice,
+    VoiceNode, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, memory_voice,
     voice_width,
 };
 // The async disk-streaming engine (streamer thread + the `DiskStreamer` handle).
 pub(crate) mod streamer;
 
 pub use streamer::{
-    Block, DiskStreamer, DiskStreamerConfig, Open, OpenError, Opening, Placement, RefusedPlacement,
-    Running, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader, StreamStatus,
-    StreamerGone,
+    Block, DiskStreamer, DiskStreamerConfig, GUARD_FRAMES, Open, OpenError, Opening, Placement,
+    RefusedPlacement, Running, SteerCell, Stream, StreamFault, StreamFile, StreamId, StreamPhase,
+    StreamReader, StreamStatus,
 };
 
-// The hand-driven streamer cycle, alongside `DiskStreamer::manual`: its driver
+// The hand-driven streamer cycle, alongside `DiskStreamer::by_hand`: its driver
 // type and its verdict.
 #[cfg(any(test, feature = "testing"))]
 pub use streamer::{ByHand, StepOutcome};

@@ -28,10 +28,10 @@
 //! assemblers, and skipping an event corrupts the ones after it.
 //!
 //! **A source that ends leaves nothing held downstream.** The node keeps what
-//! its device started and has not ended ([`HeldState`]: the keys down, the hold
+//! its device started and has not ended ([`Held`]: the keys down, the hold
 //! pedals down and the bends off centre, as the device sent them), and
 //! releases it as the messages that end it (Note Offs, then pedal-ups and
-//! centred bends; `HeldState`'s docs say why not All Notes Off) through the
+//! centred bends; `Held`'s docs say why not All Notes Off) through the
 //! same translation as any other message, in three cases:
 //!
 //! - *The device changed or went.* Built [`following`](MidiIngestNode::following)
@@ -42,9 +42,8 @@
 //!   empty, translator and MPE state, so one device's half-sent run is not
 //!   completed by the next; and an input whose device went hears nothing until
 //!   another takes it. (The executor's edge close, `tutti-graph`'s
-//!   `held.rs`, ends the same notes when the device's inlet is taken out of the
-//!   graph; this ends them as soon as the device lets go, and the pedals and
-//!   bends the edge does not track.)
+//!   `held.rs`, ends the same notes, pedals and bends when the device's inlet
+//!   is taken out of the graph; this ends them as soon as the device lets go.)
 //! - *Active Sensing lapsed* ([`ActiveSensing`], MIDI 1.0 Detailed
 //!   Specification p. 32). Once a Group has sent an Active Sensing (FE), a
 //!   message is expected from it at least every 330 ms; when none comes, the
@@ -83,13 +82,12 @@ use tutti_graph::{
 use tutti_midi_protocol::Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
 use tutti_rt::{Counter, CounterWriter, LockExt, Publisher, Reader, counter};
-use tutti_ump::{Message, MidiChannel, MidiGroup, System, Ump};
+use tutti_ump::{Held, Message, MidiChannel, MidiGroup, System, Ump};
 use tutti_units::{Frame, SampleRate, Samples};
 
 use super::mpe_ingest::MpeIngest;
 use super::order::{BLANK, in_offset_order, offset_of};
 use super::sensing::ActiveSensing;
-use crate::held::HeldState;
 use crate::live::device_epochs::DeviceEpochs;
 
 /// The port that carries a Group's events with no channel: after its sixteen
@@ -250,7 +248,7 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 /// use tutti_midi_runtime::MidiIngestNode;
 /// use tutti_rt::Publisher;
 ///
-/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// // The inlet is not wired yet.
 /// let mode = Publisher::new(MpeMode::Disabled);
 /// let node = MidiIngestNode::new().with_mpe(&mode);
@@ -327,7 +325,7 @@ struct Device {
     /// node that follows no epochs.
     present: bool,
     /// What the device started and has not ended, as it sent it.
-    held: HeldState,
+    held: Held,
     /// The device's Groups that have sent an Active Sensing.
     sensing: ActiveSensing,
     /// The Groups (bit `g` for Group `g`) whose release did not fit the
@@ -343,7 +341,7 @@ impl Device {
             mode,
             epoch: 0,
             present: true,
-            held: HeldState::new(),
+            held: Held::new(),
             // Built again for the real rate in `prepare`.
             sensing: ActiveSensing::at_rate(SampleRate::SR_48K),
             owing: 0,
@@ -739,14 +737,12 @@ impl<F: Float> Node<F> for MidiIngestNode {
     /// owed, no Group has sent an Active Sensing, and the Profile zones in
     /// force are read again from the requests. What the node held is not
     /// released: `reset` has no output to release into. The executor, when it
-    /// parks a bypassed node, ends the keys and the sustain pedal the node held
-    /// on its event outputs (the graph's held set covers keys and sustain
-    /// only), so after a bypass the sostenuto, soft and hold-2 pedals and the
-    /// bend the device left are neither lifted nor remembered.
+    /// parks a bypassed node, ends the keys, hold pedals and bends the node held
+    /// on its event outputs.
     fn reset(&mut self) {
         self.device.translator.reset();
         self.device.mpe = MpeIngest::new(self.device.mode);
-        self.device.held.forget();
+        self.device.held.clear();
         self.device.sensing.forget_all();
         self.device.owing = 0;
         self.profiles = NO_PROFILES;

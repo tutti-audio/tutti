@@ -30,8 +30,8 @@ fn write_constant(path: &Path, value: f32, frames: usize) {
     w.finalize().expect("writes");
 }
 
-fn manual() -> DiskStreamer<crate::ByHand> {
-    DiskStreamer::manual(SampleRate::of(RATE), Default::default()).expect("builds")
+fn manual() -> DiskStreamer<crate::ByHand<f32>, f32> {
+    DiskStreamer::by_hand(SampleRate::of(RATE), Default::default()).expect("builds")
 }
 
 /// A file of `value` in a temp dir.
@@ -43,13 +43,13 @@ fn constant_file(value: f32) -> (tempfile::TempDir, PathBuf) {
 }
 
 /// One block of the voice playing `reader` from beat 0, planar.
-fn first_block(reader: StreamReader) -> Vec<Vec<f32>> {
+fn first_block(reader: StreamReader<f32>) -> Vec<Vec<f32>> {
     let mut voice = prepared(
-        DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0))),
+        DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
         SampleRate::of(RATE),
         64,
     );
-    let clock = MockTransport::rolling(Beat(0.0), Bpm::of(120.0));
+    let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     play(&mut voice, &clock, SampleRate::of(RATE), 64, 64)
 }
 
@@ -60,7 +60,7 @@ fn first_block(reader: StreamReader) -> Vec<Vec<f32>> {
 fn placement_keeps_the_range_contract() {
     use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
     let c = RangeContract {
-        new: |raw| Placement::new(SamplePosition(raw)),
+        new: |raw| Placement::new(SamplePosition::new(raw)),
         get: |placement| placement.get().get(),
         of: None,
         valid: &[0.0, 0.5, 4_000.0, 1e12],
@@ -76,7 +76,7 @@ fn placement_keeps_the_range_contract() {
 fn a_fractional_start_opens_at_its_frame() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
-    let start = Placement::new(SamplePosition(4_000.7)).expect("a position");
+    let start = Placement::new(SamplePosition::new(4_000.7)).expect("a position");
     assert_eq!(start.frame(), 4_000);
     let opening = streamer.open(&path, start);
     let (_stream, reader) = settle(&mut streamer, opening).expect("the file opens");
@@ -124,11 +124,11 @@ fn a_ready_reader_has_registered_its_control_before_it_is_returned() {
     );
     let ring = Arc::clone(&reader.ring);
     let mut voice = prepared(
-        DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0))),
+        DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
         SampleRate::of(RATE),
         64,
     );
-    let clock = MockTransport::rolling(Beat(0.0), Bpm::of(120.0));
+    let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let _ = play(&mut voice, &clock, SampleRate::of(RATE), 64, 64);
     assert_eq!(ring.registered_readers(), 1, "the voice registers none");
 }
@@ -276,20 +276,20 @@ fn a_loop_set_through_one_stream_leaves_the_other_unchanged() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (mut a, reader_a) = settle(&mut streamer, opening).expect("the file opens");
+    let (a, reader_a) = settle(&mut streamer, opening).expect("the file opens");
     let opening = streamer.open(&path, Placement::HEAD);
-    let (mut b, reader_b) = settle(&mut streamer, opening).expect("the file opens");
-    let loop_of = |reader: &StreamReader| reader.ring.applied().loop_;
+    let (b, reader_b) = settle(&mut streamer, opening).expect("the file opens");
+    let loop_of = |reader: &StreamReader<f32>| reader.ring.applied().loop_;
     let looped = |start, end| Some(loop_frames(start, end, 0));
 
     // B is opened second, so a command that went to "the newest" or to "the
     // first" would be A's or B's by accident; both directions are checked.
-    a.set_loop(looped(1_000, 3_000)).expect("alive");
+    a.looping_cell().publish(looped(1_000, 3_000));
     let _ = streamer.step_until_settled(1_000);
     assert_eq!(loop_of(&reader_a), looped(1_000, 3_000));
     assert_eq!(loop_of(&reader_b), None, "B was not asked");
 
-    b.set_loop(looped(500, 900)).expect("alive");
+    b.looping_cell().publish(looped(500, 900));
     let _ = streamer.step_until_settled(1_000);
     assert_eq!(loop_of(&reader_b), looped(500, 900));
     assert_eq!(loop_of(&reader_a), looped(1_000, 3_000), "A is as it was");
@@ -318,10 +318,10 @@ fn a_stopped_streams_handle_commands_nothing() {
 
     // The handle of the stream that is gone: what a late command still
     // reaching the queue looks like.
-    let mut ghost = Stream::detached(id_a, StreamerPort::new(streamer.streamer_tx.clone()));
+    let ghost = Stream::detached(id_a, StreamerPort::new(streamer.streamer_tx.clone()));
     ghost
-        .set_loop(Some(loop_frames(1_000, 3_000, 0)))
-        .expect("the queue is alive: the command is sent, and ignored");
+        .looping_cell()
+        .publish(Some(loop_frames(1_000, 3_000, 0)));
     let _ = streamer.step_until_settled(1_000);
     assert_eq!(
         reader_b.ring.applied().loop_,
@@ -422,10 +422,10 @@ fn an_f64_stream_writes_a_loop_by_position() {
     let (_dir, path) = i32_file();
     let mut streamer = manual_f64();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (mut stream, mut reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (stream, mut reader) = settle(&mut streamer, opening).expect("the file opens");
     stream
-        .set_loop(Some(loop_frames(1_000, 1_500, 0)))
-        .expect("the streamer is alive");
+        .looping_cell()
+        .publish(Some(loop_frames(1_000, 1_500, 0)));
     let _ = streamer.step_until_settled(1_000);
 
     let play = 1_600usize;

@@ -43,11 +43,11 @@ fn ramp_wave() -> Arc<Wave> {
     ))
 }
 
-fn placed() -> MemorySource {
+fn placed() -> MemorySource<f32> {
     MemorySource::placed(ramp_wave(), VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave")
 }
 
-fn voice() -> Voice {
+fn voice() -> Voice<f32> {
     Voice {
         source: VoiceSource::Memory(placed()),
         play: Playback::default(),
@@ -55,7 +55,7 @@ fn voice() -> Voice {
 }
 
 fn prepare() -> Prepare {
-    Prepare::new(RATE, MaxBlock::of(Samples(64)))
+    Prepare::new(RATE, MaxBlock::of(Samples::new(64)))
 }
 
 /// `node` at key 1 on every output channel of a `width`-wide graph; its
@@ -84,11 +84,11 @@ fn peak(exec: &mut Executor, width: usize, transport: TransportPosition) -> f32 
 }
 
 fn rolling() -> TransportPosition {
-    TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None)
+    TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None)
 }
 
 fn stopped() -> TransportPosition {
-    TransportPosition::new(false, Bpm::of(120.0), Beat(0.0), None)
+    TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None)
 }
 
 /// The offline fork of `ed`'s graph (what the export takes), applied.

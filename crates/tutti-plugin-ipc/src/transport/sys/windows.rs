@@ -6,6 +6,8 @@ use super::control::{ControlStream, back_off};
 use interprocess::local_socket::{GenericNamespaced, Name, Stream, ToNsName as _};
 use std::os::windows::io::{AsHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Converts a host-chosen socket path into the local-socket name for this
@@ -110,6 +112,91 @@ impl Watch {
                 return false;
             }
             back_off(&mut empty, left);
+        }
+    }
+}
+
+/// The ringing side of a control thread's wait ([`control_bell`]): a flag the
+/// wait looks at between its looks at the pipe. Any thread rings it, the audio
+/// thread included: one store.
+#[derive(Clone)]
+pub struct ControlBell {
+    rung: Arc<AtomicBool>,
+}
+
+impl ControlBell {
+    /// Ends the control thread's wait now, or its next one.
+    pub fn ring(&self) {
+        self.rung.store(true, Ordering::Release);
+    }
+}
+
+/// The waiting side of a control thread's wait ([`control_bell`]): a named pipe
+/// has no `poll`, so it asks the pipe and the flag in turn and naps between
+/// asks ([`back_off`]).
+pub struct ControlWait {
+    rung: Arc<AtomicBool>,
+}
+
+/// What ended a [`ControlWait::wait`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Woken {
+    /// The control stream has something to read (or broke: the read says).
+    pub stream: bool,
+    /// The bell rang.
+    pub rung: bool,
+}
+
+/// A control thread's bell and its wait.
+///
+/// # Errors
+///
+/// Never on this platform.
+pub fn control_bell() -> std::io::Result<(ControlBell, ControlWait)> {
+    let rung = Arc::new(AtomicBool::new(false));
+    Ok((
+        ControlBell {
+            rung: Arc::clone(&rung),
+        },
+        ControlWait { rung },
+    ))
+}
+
+impl ControlWait {
+    /// Waits up to `timeout` (`None`: for ever) for `stream` to have something
+    /// to read or for the bell to ring. A ring is cleared.
+    ///
+    /// # Errors
+    ///
+    /// Never on this platform.
+    pub fn wait(
+        &self,
+        stream: &ControlStream,
+        timeout: Option<Duration>,
+    ) -> std::io::Result<Woken> {
+        /// The longest nap between looks: a ring or a frame is heard within it.
+        const NAP: Duration = Duration::from_millis(1);
+        let deadline = timeout.map(|t| Instant::now() + t);
+        let mut empty = 0u32;
+        loop {
+            let woken = Woken {
+                rung: self.rung.swap(false, Ordering::AcqRel),
+                stream: has_pending(stream),
+            };
+            if woken.rung || woken.stream {
+                return Ok(woken);
+            }
+            let left = match deadline {
+                Some(deadline) => {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Ok(woken);
+                    }
+                    left
+                }
+                None => NAP,
+            };
+            back_off(&mut empty, left.min(NAP));
         }
     }
 }

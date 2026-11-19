@@ -116,7 +116,7 @@ pub struct LfoNode {
 /// half a cycle: a step of half a cycle or more reads as a step back.
 fn lfo_step(rate: f64, per_hz: f64) -> PhaseStep {
     let most = 0.5_f64.next_down();
-    PhaseStep::from(PhaseIncrement((rate * per_hz).clamp(-most, most)))
+    PhaseStep::from(PhaseIncrement::new((rate * per_hz).clamp(-most, most)))
 }
 
 impl LfoNode {
@@ -131,9 +131,9 @@ impl LfoNode {
         Self {
             wave: Waveform::Shape { shape, seed: 0 },
             clock: LfoClock::Free,
-            rate: Param::new(Hz(1.0)),
+            rate: Param::new(Hz::new(1.0)),
             depth: Param::new(Depth::FULL),
-            phase_offset: PhaseIncrement(0.0),
+            phase_offset: PhaseIncrement::new(0.0),
             phase: RunningPhase::START,
             cycle: 0,
             sample_rate: None,
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn the_shape_declares_depth_and_a_free_running_rate() {
         let free = LfoNode::new(LfoShape::Sine)
-            .with_rate(Hz(2.0))
+            .with_rate(Hz::new(2.0))
             .with_depth(Depth::of(0.25));
         assert_eq!(
             Node::<f32>::shape(&free).params.as_slice(),
@@ -422,11 +422,11 @@ mod tests {
     /// `transport` as its own (advancing, when it rolls, by the block).
     fn render_at(node: LfoNode, transport: TransportPosition, n: usize) -> Vec<f32> {
         let rate = SampleRate::SR_48K;
-        let mut solo = Solo::new(node, Prepare::new(rate, MaxBlock::of(Samples(256))));
+        let mut solo = Solo::new(node, Prepare::new(rate, MaxBlock::of(Samples::new(256))));
         solo.renderer_mut().set_transport_fn(move |frame| {
             let mut clock = tutti_music::FrameClock::new(transport.beat(), transport.tempo, rate);
             if transport.playing {
-                clock.advance(Samples(frame.get() as usize), None);
+                clock.advance(Samples::new(frame.get() as usize), None);
             }
             TransportPosition::counted(transport.playing, transport.tempo, clock.origin(), None)
         });
@@ -434,7 +434,7 @@ mod tests {
     }
 
     fn stopped_at(beat: f64) -> TransportPosition {
-        TransportPosition::new(false, Bpm::of(120.0), Beat(beat), None)
+        TransportPosition::new(false, Bpm::of(120.0), Beat::new(beat), None)
     }
 
     #[test]
@@ -455,11 +455,11 @@ mod tests {
     fn setting_a_rate_selects_its_clock() {
         let lfo = LfoNode::new(LfoShape::Sine)
             .with_beat_sync(BeatsPerCycle::of(4.0))
-            .with_rate(Hz(2.0));
+            .with_rate(Hz::new(2.0));
         assert_eq!(lfo.clock(), LfoClock::Free);
-        assert_eq!(lfo.rate.load(), Hz(2.0));
+        assert_eq!(lfo.rate.load(), Hz::new(2.0));
         let lfo = LfoNode::new(LfoShape::Sine)
-            .with_rate(Hz(2.0))
+            .with_rate(Hz::new(2.0))
             .with_beat_sync(BeatsPerCycle::of(4.0));
         assert_eq!(lfo.clock(), LfoClock::Synced(BeatsPerCycle::of(4.0)));
     }
@@ -470,7 +470,7 @@ mod tests {
     /// only while free-running.
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
-        let free = LfoNode::new(LfoShape::Sine).with_rate(Hz(2.0));
+        let free = LfoNode::new(LfoShape::Sine).with_rate(Hz::new(2.0));
         assert_eq!(
             ParamNode::<f32>::param_set(&free)
                 .params()
@@ -518,7 +518,7 @@ mod tests {
     /// across blocks.
     #[test]
     fn a_rolling_transport_is_read_frame_by_frame() {
-        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         // 120 BPM at 48 kHz: 24 000 frames a beat, 96 000 a cycle.
         let out = render_at(
             LfoNode::new(LfoShape::Sine).with_beat_sync(BeatsPerCycle::of(4.0)),
@@ -610,7 +610,7 @@ mod tests {
                 .with_seed(seed)
                 .with_beat_sync(BeatsPerCycle::of(1.0))
         };
-        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         // 7.5 beats at 120 BPM and 48 kHz.
         let rolled = render_at(lfo(), rolling, 180_001);
         let want = random(seed).raw_at(7.5, false);
@@ -632,7 +632,7 @@ mod tests {
         let mut d = Direct::new(
             LfoNode::new(LfoShape::Random)
                 .with_seed(5)
-                .with_rate(Hz(187.5)),
+                .with_rate(Hz::new(187.5)),
             rate,
             4096,
         );
@@ -661,14 +661,14 @@ mod tests {
     fn random_steps_fall_where_the_rate_says() {
         let w = random(0);
         let free = render(
-            LfoNode::new(LfoShape::Random).with_rate(Hz(187.5)),
+            LfoNode::new(LfoShape::Random).with_rate(Hz::new(187.5)),
             48_000.0,
             2048,
         );
         for (i, &v) in free.iter().enumerate() {
             assert_eq!(v, w.raw_at((i / 256) as f64, false), "free frame {i}");
         }
-        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         let synced = render_at(
             LfoNode::new(LfoShape::Random).with_beat_sync(BeatsPerCycle::of(0.5)),
             rolling,
@@ -682,7 +682,7 @@ mod tests {
             assert_ne!(synced[k * 12_000 - 1], synced[k * 12_000], "boundary {k}");
         }
         let smooth = render(
-            LfoNode::new(LfoShape::RandomSmooth).with_rate(Hz(187.5)),
+            LfoNode::new(LfoShape::RandomSmooth).with_rate(Hz::new(187.5)),
             48_000.0,
             2048,
         );
@@ -700,7 +700,7 @@ mod tests {
         let lfo = tutti_modulation::Lfo::new(LfoShape::RandomSmooth)
             .seed(3)
             .rate(BeatsPerCycle::of(2.0))
-            .phase(PhaseIncrement(0.25));
+            .phase(PhaseIncrement::new(0.25));
         let wave = Waveform::Shape {
             shape: LfoShape::RandomSmooth,
             seed: 3,
@@ -711,7 +711,7 @@ mod tests {
             assert!((got - want).abs() < 1e-6, "beat {beat}: {got} vs {want}");
         }
         // 187.5 Hz at 48 kHz: 256 frames a cycle.
-        let free = render(LfoNode::from(lfo.rate(Hz(187.5))), 48_000.0, 2048);
+        let free = render(LfoNode::from(lfo.rate(Hz::new(187.5))), 48_000.0, 2048);
         for i in [0, 100, 256, 777, 2047] {
             let want = wave.raw_at(i as f64 / 256.0 + 0.25, false);
             let got = free[i];
@@ -738,7 +738,7 @@ mod tests {
         // -1 Hz at 100 Hz: frame n is at -n / 100 cycles, whose ramp value is
         // `2 frac(-n / 100) - 1`; frame 0 is on the start, the ramp's -1.
         let out = render(
-            LfoNode::new(LfoShape::Sawtooth).with_rate(Hz(-1.0)),
+            LfoNode::new(LfoShape::Sawtooth).with_rate(Hz::new(-1.0)),
             100.0,
             250,
         );
@@ -762,7 +762,7 @@ mod tests {
     /// within 0.05 of a cycle boundary have an index no rounding can move.
     fn assert_random_follows(rate: f64, step: f64) {
         let out = render(
-            LfoNode::new(LfoShape::Random).with_rate(Hz(rate)),
+            LfoNode::new(LfoShape::Random).with_rate(Hz::new(rate)),
             100.0,
             200,
         );
@@ -810,7 +810,7 @@ mod tests {
     #[test]
     fn in_an_f64_graph_the_lfo_writes_its_wave_widened_exactly() {
         use crate::test_support::{F64_TOLERANCE, RATE, render_f64};
-        let node = LfoNode::new(LfoShape::Sawtooth).with_rate(Hz(RATE.get() / 64.0));
+        let node = LfoNode::new(LfoShape::Sawtooth).with_rate(Hz::new(RATE.get() / 64.0));
         let out = render_f64(node, RATE, &[], 64);
         for (k, &got) in out[0].iter().enumerate().skip(1) {
             let want = k as f64 / 32.0 - 1.0;

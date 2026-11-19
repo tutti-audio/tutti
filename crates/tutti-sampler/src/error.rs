@@ -1,7 +1,7 @@
 //! The crate-wide error type, for the paths that can fail on file access.
 //!
 //! Narrower failures live with the operation that raises them — `ProbeError`
-//! for a header read, `StreamerGone` for a command that outlived its thread —
+//! for a header read, `OpenError` for a stream open —
 //! because a caller of those branches on the specific cause rather than on "an
 //! error happened".
 
@@ -18,7 +18,7 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     /// The OS refused to start the disk streamer's thread
-    /// ([`DiskStreamer::new`](crate::DiskStreamer::new)): there is no
+    /// ([`DiskStreamer::start`](crate::DiskStreamer::start)): there is no
     /// streamer, and a stream command with no consumer would stall silently.
     #[error("the disk streamer's thread could not be started: {0}")]
     Spawn(#[source] std::io::Error),

@@ -159,11 +159,11 @@ fn retransmit_error_puts_the_reason_in_the_header_and_the_sequence_in_the_payloa
 /// Spec: m2-124/5.3#2, m2-124/6.15#3
 #[test]
 fn nak_carries_the_refused_header_then_padded_text() {
-    let nak = Command::Nak(Nak {
+    let nak = Command::Nak(Box::new(Nak {
         reason: NakReason::NotSupported,
         refused: Header::from_word(0xAB00_0000),
         text: NakText::new("hello").unwrap(),
-    });
+    }));
     assert_eq!(
         cmd_bytes(&nak),
         [
@@ -171,11 +171,11 @@ fn nak_carries_the_refused_header_then_padded_text() {
         ]
     );
     assert_eq!(one(&cmd_bytes(&nak)).unwrap(), nak);
-    let bare = Command::Nak(Nak {
+    let bare = Command::Nak(Box::new(Nak {
         reason: NakReason::Malformed,
         refused: Header::from_word(0x2001_0000),
         text: NakText::default(),
-    });
+    }));
     assert_eq!(
         cmd_bytes(&bare)[1],
         1,
@@ -186,12 +186,12 @@ fn nak_carries_the_refused_header_then_padded_text() {
 /// Spec: m2-124/5.3#4, m2-124/6.16#6
 #[test]
 fn bye_carries_the_reason_in_the_header_and_optional_text() {
-    let plain = Command::Bye(Bye::new(ByeReason::Timeout));
+    let plain = Command::Bye(Box::new(Bye::new(ByeReason::Timeout)));
     assert_eq!(cmd_bytes(&plain), [0xF0, 0x00, 0x04, 0x00]);
-    let worded = Command::Bye(Bye {
+    let worded = Command::Bye(Box::new(Bye {
         reason: ByeReason::UserTerminated,
         text: ByeText::new("bye").unwrap(),
-    });
+    }));
     assert_eq!(
         cmd_bytes(&worded),
         [0xF0, 0x01, 0x01, 0x00, b'b', b'y', b'e', 0]
@@ -228,11 +228,11 @@ fn accepted_and_pending_carry_the_host_identity_like_an_invitation() {
 #[test]
 fn authentication_required_puts_the_state_in_data_two_and_the_nonce_before_the_name() {
     let nonce = Nonce::new(*b"nUWrn*@#$hjfwnkL").unwrap();
-    let c = Command::AuthRequired(AuthChallenge {
+    let c = Command::AuthRequired(Box::new(AuthChallenge {
         state: AuthState::DigestWrong,
         nonce,
         identity: identity("Studio", "HOST-1"),
-    });
+    }));
     let bytes = cmd_bytes(&c);
     // payload: 4 nonce + 2 name + 2 id words; csd1 is the name's 2 words.
     assert_eq!(&bytes[..4], [0x12, 0x08, 0x02, 0x01]);
@@ -248,11 +248,11 @@ fn user_authentication_required_has_three_states() {
         (UserAuthState::DigestWrong, 1),
         (UserAuthState::UserNotFound, 2),
     ] {
-        let c = Command::UserAuthRequired(UserAuthChallenge {
+        let c = Command::UserAuthRequired(Box::new(UserAuthChallenge {
             state,
             nonce: Nonce::new(*b"XI|~=NNRVaD;XCPL").unwrap(),
             identity: identity("A", "B"),
-        });
+        }));
         let bytes = cmd_bytes(&c);
         assert_eq!(bytes[0], 0x13);
         assert_eq!(bytes[3], byte);
@@ -270,10 +270,10 @@ fn invitation_with_authentication_is_the_digest_alone_in_eight_words() {
 
 #[test]
 fn invitation_with_user_authentication_appends_the_padded_username() {
-    let auth = Command::InvitationWithUserAuth(UserAuthentication {
+    let auth = Command::InvitationWithUserAuth(Box::new(UserAuthentication {
         digest: Digest::new([1; 32]),
         username: Username::new("Rosa").unwrap(),
-    });
+    }));
     let bytes = cmd_bytes(&auth);
     assert_eq!(&bytes[..4], [0x03, 0x09, 0x00, 0x00]);
     assert_eq!(&bytes[36..], b"Rosa");
@@ -322,22 +322,22 @@ fn every_command_round_trips() {
             identity: id,
         }),
         Command::InvitationWithAuth(Digest::new([9; 32])),
-        Command::InvitationWithUserAuth(UserAuthentication {
+        Command::InvitationWithUserAuth(Box::new(UserAuthentication {
             digest: Digest::new([3; 32]),
             username: Username::new("Ünïcode").unwrap(),
-        }),
+        })),
         Command::Accepted(id),
         Command::Pending(id),
-        Command::AuthRequired(AuthChallenge {
+        Command::AuthRequired(Box::new(AuthChallenge {
             state: AuthState::First,
             nonce,
             identity: id,
-        }),
-        Command::UserAuthRequired(UserAuthChallenge {
+        })),
+        Command::UserAuthRequired(Box::new(UserAuthChallenge {
             state: UserAuthState::UserNotFound,
             nonce,
             identity: id,
-        }),
+        })),
         Command::Ping(PingId::new(1)),
         Command::PingReply(PingId::new(u32::MAX)),
         Command::RetransmitRequest(RetransmitRequest {
@@ -350,15 +350,15 @@ fn every_command_round_trips() {
         }),
         Command::SessionReset,
         Command::SessionResetReply,
-        Command::Nak(Nak {
+        Command::Nak(Box::new(Nak {
             reason: NakReason::Reserved(0x55),
             refused: Header::from_word(0x0102_0304),
             text: NakText::new("why").unwrap(),
-        }),
-        Command::Bye(Bye {
+        })),
+        Command::Bye(Box::new(Bye {
             reason: ByeReason::Reserved(0x99),
             text: ByeText::new("é").unwrap(),
-        }),
+        })),
         Command::ByeReply,
         Command::UmpData(UmpData::new(SequenceNumber::new(5), &packets).unwrap()),
         Command::UmpData(UmpData::idle(SequenceNumber::new(6))),
@@ -517,11 +517,11 @@ fn an_invitation_name_over_twenty_five_words_is_refused() {
 
 #[test]
 fn a_reserved_authentication_state_is_refused() {
-    let c = Command::AuthRequired(AuthChallenge {
+    let c = Command::AuthRequired(Box::new(AuthChallenge {
         state: AuthState::First,
         nonce: Nonce::new(*b"0123456789abcdef").unwrap(),
         identity: identity("A", "B"),
-    });
+    }));
     let mut bytes = cmd_bytes(&c);
     bytes[3] = 2;
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Reserved);
@@ -531,11 +531,11 @@ fn a_reserved_authentication_state_is_refused() {
 /// Spec: m2-124/6.7#14
 #[test]
 fn a_non_ascii_nonce_is_refused() {
-    let c = Command::AuthRequired(AuthChallenge {
+    let c = Command::AuthRequired(Box::new(AuthChallenge {
         state: AuthState::First,
         nonce: Nonce::new(*b"0123456789abcdef").unwrap(),
         identity: identity("A", "B"),
-    });
+    }));
     let mut bytes = cmd_bytes(&c);
     bytes[4] = 0xC3;
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Nonce);
@@ -545,11 +545,11 @@ fn a_non_ascii_nonce_is_refused() {
 /// Spec: m2-124/6.7#14
 #[test]
 fn a_received_nonce_outside_the_senders_range_is_read_but_never_issued() {
-    let mut bytes = cmd_bytes(&Command::AuthRequired(AuthChallenge {
+    let mut bytes = cmd_bytes(&Command::AuthRequired(Box::new(AuthChallenge {
         state: AuthState::First,
         nonce: Nonce::new(*b"0123456789abcdef").unwrap(),
         identity: identity("A", "B"),
-    }));
+    })));
     bytes[4] = 0x01;
     let Ok(Command::AuthRequired(challenge)) = one(&bytes) else {
         panic!("a nonce holding 0x01 is read")
@@ -625,14 +625,14 @@ fn chunks_split_at_sixty_four_words_without_splitting_a_packet_and_number_on() {
 /// Spec: m2-124/6.10#11
 #[test]
 fn texts_refuse_a_nul_and_overlong_input() {
-    assert!(ByeText::new("a\0b").is_err());
-    assert!(ByeText::new(&"x".repeat(1021)).is_err());
-    assert!(ByeText::new(&"x".repeat(1020)).is_ok());
-    assert!(NakText::new(&"x".repeat(1017)).is_err());
-    assert!(NakText::new(&"x".repeat(1016)).is_ok());
-    assert!(Username::new("").is_err());
-    assert!(Username::new(&"u".repeat(989)).is_err());
-    assert!(Username::new(&"u".repeat(988)).is_ok());
+    assert!(ByeText::new("a\0b").is_none());
+    assert!(ByeText::new(&"x".repeat(1021)).is_none());
+    assert!(ByeText::new(&"x".repeat(1020)).is_some());
+    assert!(NakText::new(&"x".repeat(1017)).is_none());
+    assert!(NakText::new(&"x".repeat(1016)).is_some());
+    assert!(Username::new("").is_none());
+    assert!(Username::new(&"u".repeat(989)).is_none());
+    assert!(Username::new(&"u".repeat(988)).is_some());
 }
 
 /// Advisory text: what is UTF-8 is kept.
@@ -645,20 +645,20 @@ fn advisory_text_that_is_not_utf8_is_cut_before_the_bad_byte() {
     .unwrap();
     assert_eq!(
         bye,
-        Command::Bye(Bye {
+        Command::Bye(Box::new(Bye {
             reason: ByeReason::UserTerminated,
             text: ByeText::new("ok").unwrap(),
-        })
+        }))
     );
     // A multi-byte character cut in half is dropped whole.
     let nak = one(&[0x8F, 0x02, 0x03, 0x00, 0x20, 1, 0, 0, b'a', 0xC3, 0, 0]).unwrap();
     assert_eq!(
         nak,
-        Command::Nak(Nak {
+        Command::Nak(Box::new(Nak {
             reason: NakReason::Malformed,
             refused: Header::from_word(0x2001_0000),
             text: NakText::new("a").unwrap(),
-        })
+        }))
     );
 }
 
@@ -690,4 +690,15 @@ mod props {
             prop_assert_eq!(later.distance_from(a), i16::try_from(step).unwrap());
         }
     }
+}
+
+/// A `Command` is built, queued and copied per datagram on the UMP data path,
+/// so it stays at or below 160 bytes, its size before the texts were inline
+/// (the largest variant then was a User Authentication Required at 159 bytes
+/// plus the tag). A variant that holds a text, a user name or a challenge is boxed to stay
+/// under it.
+#[test]
+fn a_command_stays_small() {
+    let size = std::mem::size_of::<Command>();
+    assert!(size <= 160, "{size}");
 }

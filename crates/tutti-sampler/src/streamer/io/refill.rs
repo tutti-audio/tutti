@@ -262,7 +262,7 @@ fn refill_one<F: RingFloat>(
     let (_, to) = writer.window();
     let layout = writer.channels();
     buffer.clear();
-    buffer.resize(layout.interleaved_len(Samples(n)), F::ZERO);
+    buffer.resize(layout.interleaved_len(Samples::new(n)), F::ZERO);
     let mapping = writer.content().current.clone();
     // The buffer is whole frames of the ring's width, so the view is built.
     let read_ok = InterleavedMut::new(buffer.as_mut_slice(), layout)
@@ -467,7 +467,7 @@ mod tests {
         ];
 
         for &(label, fill, base, rate, speed, want) in cases {
-            let got = varifill_chunk(fill, base, rate, ReadRate(speed));
+            let got = varifill_chunk(fill, base, rate, ReadRate::new(speed));
             assert_eq!(
                 got, want,
                 "{label}: varifill_chunk returned {got}, want {want}"

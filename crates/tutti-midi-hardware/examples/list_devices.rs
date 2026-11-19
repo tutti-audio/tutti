@@ -15,6 +15,7 @@
 
 use std::time::{Duration, Instant};
 
+use tutti_midi_device::Endpoint;
 use tutti_midi_hardware::{Devices, RecvTimeoutError};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,13 +29,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     for d in list {
         let capability = devices.capability(&d.id);
-        let protocol = capability.as_ref().map(|c| c.protocol);
+        let protocol = capability.as_ref().map(|c| c.active().protocol);
         println!(
             "  {:<48} {:<32} {:?} {protocol:?}",
             d.id, d.name, d.direction
         );
         // The Function Blocks the OS exposes: which Groups, which way.
-        for block in capability.iter().flat_map(|c| &c.blocks) {
+        for block in capability.iter().flat_map(Endpoint::function_blocks) {
             println!(
                 "      block {}: Groups {}..+{} {:?} {}",
                 block.id().get(),

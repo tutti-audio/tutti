@@ -221,7 +221,7 @@ pub(crate) struct LoopSpan {
 /// file frame it reads, and, inside the crossfade, the lead-in frame it blends
 /// toward and the lead-in's weight.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct LoopTap<F = f32> {
+pub(crate) struct LoopTap<F> {
     pub(crate) frame: usize,
     pub(crate) fade: Option<(usize, F)>,
 }
@@ -532,7 +532,7 @@ mod tests {
     fn a_position_before_the_loop_reads_the_file_behind_it() {
         let span = LoopSpan::unbounded(2_000, 4_000, 0).expect("a loop");
         for looped in [false, true] {
-            let (taps, _) = span.taps::<f32>(10_000, SamplePosition(1_500.5), looped);
+            let (taps, _) = span.taps::<f32>(10_000, SamplePosition::new(1_500.5), looped);
             assert_eq!(taps.map(|t| t.frame), [1_499, 1_500, 1_501, 1_502]);
         }
     }
@@ -543,7 +543,7 @@ mod tests {
     fn taps_wrap_through_the_loop() {
         let span = LoopSpan::unbounded(10, 20, 0).expect("a loop");
         let frames = |pos, looped| {
-            let (taps, _) = span.taps::<f32>(100, SamplePosition(pos), looped);
+            let (taps, _) = span.taps::<f32>(100, SamplePosition::new(pos), looped);
             taps.map(|t| t.frame)
         };
         assert_eq!(frames(18.5, false), [17, 18, 19, 10]);

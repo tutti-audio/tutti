@@ -70,7 +70,7 @@ fn moving(bed: Bed) -> VbapPannerNode<f32> {
     params.set(UnitParam::Spread, 0.2);
     let seat = noise(GRID, 1);
     render(&mut node, &seat, &[GRID]);
-    aim(&params, Azimuth(-120.0), Elevation(20.0));
+    aim(&params, Azimuth::new(-120.0), Elevation::new(20.0));
     params.set(UnitParam::StereoWidth, 0.8);
     node
 }
@@ -123,7 +123,7 @@ fn a_reset_node_renders_what_a_fresh_one_does() {
     let mut fresh = prepared(VbapPannerNode::<f32>::surround_5_1(), RATE, 64);
     let params = fresh.param_set();
     params.set(UnitParam::Spread, 0.2);
-    aim(&params, Azimuth(-120.0), Elevation(20.0));
+    aim(&params, Azimuth::new(-120.0), Elevation::new(20.0));
     params.set(UnitParam::StereoWidth, 0.8);
     let want = bits(&render(&mut fresh, &input, &[64]));
     assert_eq!(bits(&render(&mut used, &input, &[64])), want);
@@ -136,7 +136,7 @@ fn a_reset_node_renders_what_a_fresh_one_does() {
 fn a_width_crossing_the_fold_threshold_crossfades_in_even_steps() {
     let mut node = prepared(VbapPannerNode::<f32>::stereo(), RATE, 64);
     let params = node.param_set();
-    aim(&params, Azimuth(-15.0), Elevation::LEVEL);
+    aim(&params, Azimuth::new(-15.0), Elevation::LEVEL);
     params.set(UnitParam::StereoWidth, 1.0);
     // The left input alone: the two-source branch and the fold weigh it
     // differently.

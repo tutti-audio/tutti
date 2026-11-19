@@ -43,7 +43,7 @@ mod common {
     pub(super) const FRAMES_PER_BEAT: f64 = 24_000.0;
 
     pub(super) fn beat_of(frame: u64) -> Beat {
-        Beat(frame as f64 / FRAMES_PER_BEAT)
+        Beat::new(frame as f64 / FRAMES_PER_BEAT)
     }
 
     /// Rolling at 120 BPM from `frame`.
@@ -199,7 +199,8 @@ struct Latent(usize);
 
 impl<F: Float> Node<F> for Latent {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples(self.0)))
+        Shape::source_unassigned(ChannelLayout::MONO)
+            .with_latency(Latency::new(Samples::new(self.0)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -356,8 +357,10 @@ fn ump_cc(v: u32) -> Ump {
 /// `script` through `relay` into a sink, in 64-frame blocks; `blocks` of
 /// them.
 fn through(script: Vec<Vec<Ump>>, relay: Relay, blocks: u64) -> (Shared, Executor) {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(64)),
+    ));
     ed.insert(
         NodeKey(1),
         "script",
@@ -485,7 +488,10 @@ fn a_ledger_relay_strands_no_note_under_random_refusal() {
 
 /// A clip into a sink in 64-frame blocks (a port of 256 events).
 fn clip_rig(events: Vec<TimedMidiEvent>) -> (Editor, Executor, Shared) {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(64)),
+    ));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     let tally = sink(&mut ed, 2);
     connect(&mut ed, 1, 2);
@@ -603,7 +609,10 @@ fn a_full_table_withholds_what_it_cannot_keep() {
 
 /// A clip holds note 60 from frame 0 to frame 100,000 and feeds sink A.
 fn holding_clip() -> (Editor, Executor, crate::MidiClipControls, Shared, Shared) {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(256)),
+    ));
     let controls = ed
         .insert(
             NodeKey(1),
@@ -644,8 +653,10 @@ fn a_rewire_ends_the_held_note_at_the_old_sink() {
 /// the cut, frame 2,304 here.
 #[test]
 fn the_close_reaches_a_sink_behind_a_delayed_edge() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(256)),
+    ));
     ed.insert(
         NodeKey(1),
         "clip",
@@ -697,7 +708,10 @@ fn forkable_rig() -> (
     Shared,
     Arc<Mutex<Vec<Shared>>>,
 ) {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(256)),
+    ));
     let controls = ed
         .insert(
             NodeKey(1),
@@ -730,7 +744,7 @@ fn forkable_rig() -> (
 }
 
 fn fork_of(ed: &Editor) -> (Editor, Executor) {
-    let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256)));
+    let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
     ed.fork(ForkTarget::Node(NodeKey(2)), ForkMode::Offline, prepare)
         .expect("the clip and the sink fork")
 }
@@ -834,8 +848,16 @@ fn filled(then: Vec<Act>) -> Vec<Act> {
 /// What a probe's sink heard, and the executor's counts.
 fn probe(capacity: usize, blocks: Vec<Vec<Act>>) -> (Shared, u64, u64) {
     let n = blocks.len() as u64 + 1;
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+    probe_for(capacity, blocks, n)
+}
+
+/// [`probe`] run for `n` blocks, so a block the script does not name need not
+/// pay what is owed.
+fn probe_for(capacity: usize, blocks: Vec<Vec<Act>>, n: u64) -> (Shared, u64, u64) {
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(64)),
+    ));
     ed.insert(
         NodeKey(1),
         "probe",
@@ -892,6 +914,41 @@ fn an_off_refused_twice_is_one_loss() {
     );
     assert!(tally.lock().unwrap().held.is_empty());
     assert_eq!((dropped, lost), (4, 2));
+}
+
+/// Three pedals are down and a release finds the port full: the first lift is
+/// refused (counted by the port, 1) and the other two are not tried but are
+/// withheld and counted (3), all three losses. The next block pays them, each
+/// attempt giving its count back, so the dropped count stays 3 and the lost
+/// count falls by exactly the 3 paid, to 0.
+#[test]
+fn a_refused_pedal_lift_is_counted_and_its_payment_gives_the_count_back() {
+    let pedal = |cc| Act::Send(midi::cc(MidiChannel::FIRST, cc, u32::MAX), None);
+    let blocks = || {
+        vec![
+            vec![
+                pedal(CCNumber::SUSTAIN),
+                pedal(CCNumber::SOSTENUTO),
+                pedal(CCNumber::SOFT_PEDAL),
+            ],
+            filled(vec![Act::Release]),
+            vec![],
+        ]
+    };
+    let (_, dropped, lost) = probe_for(8, blocks(), 2);
+    assert_eq!((dropped, lost), (3, 3), "refused, then withheld twice");
+    let (tally, dropped, lost) = probe(8, blocks());
+    assert_eq!(
+        (dropped, lost),
+        (3, 0),
+        "each paid lift gives its count back"
+    );
+    let t = tally.lock().unwrap();
+    assert_eq!(
+        t.others,
+        8 + 3 + 3,
+        "the filler, the pedals down, the lifts"
+    );
 }
 
 /// Two notes on one key are both refused by a full port, and both offs come:
@@ -1026,7 +1083,7 @@ fn spread_clip(r: &mut Rng, overlap: bool) -> (Vec<TimedMidiEvent>, usize, usize
 fn span(events: &[TimedMidiEvent]) -> u64 {
     let last = events
         .iter()
-        .map(|e| (e.beat().0 * FRAMES_PER_BEAT).round() as u64)
+        .map(|e| (e.beat().get() * FRAMES_PER_BEAT).round() as u64)
         .max()
         .unwrap_or(0);
     (last / 64 + 2) * 64
@@ -1036,7 +1093,7 @@ fn span(events: &[TimedMidiEvent]) -> u64 {
 /// then stops for 12 blocks.
 fn play(exec: &mut Executor, events: &[TimedMidiEvent], passes: u64) {
     let len = span(events);
-    let lp = (passes > 1).then(|| LoopRange::new(Beat(0.0), beat_of(len)).expect("a loop"));
+    let lp = (passes > 1).then(|| LoopRange::new(Beat::new(0.0), beat_of(len)).expect("a loop"));
     for f in 0..len * passes {
         if f % 64 == 0 {
             let t = TransportPosition::new(true, Bpm::of(120.0), beat_of(f % len), lp);
@@ -1062,8 +1119,10 @@ fn the_loss_count_is_exact_through_loops_and_replacements() {
         let passes = 1 + r.below(2);
         let (second, ons2, ccs2) = spread_clip(&mut r, overlap);
         let replace = r.below(2) == 0;
-        let (mut ed, mut exec) =
-            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let (mut ed, mut exec) = Editor::new(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(64)),
+        ));
         let controls: MidiClipControls = ed
             .insert(NodeKey(1), "clip", MidiClipNode::new(first.clone()))
             .controls;

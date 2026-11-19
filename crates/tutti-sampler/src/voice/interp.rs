@@ -169,7 +169,7 @@ impl Gate {
         // clip at 120 BPM, 48 kHz came out 127.99999999999). Landed on the
         // frame by the engine's one tolerance, a clip on a beat plays its own
         // samples exactly.
-        SamplePosition(snap_to_whole_frame(position))
+        SamplePosition::new(snap_to_whole_frame(position))
     }
 
     /// Whether the voice was sounding on the loop's last frame, so that a
@@ -284,7 +284,7 @@ pub(crate) fn place(
             sounds = true;
             let origin = gate.origin(run.beat_at(e), run.tempo(), Some(clock));
             for (k, p) in slots[e - a..x - a].iter_mut().enumerate() {
-                *p = Some(origin + step.advance(Samples(k)));
+                *p = Some(origin + step.advance(Samples::new(k)));
             }
         }
     }
@@ -325,7 +325,7 @@ pub(crate) fn place_tail(
         if a < x {
             let origin = gate.origin(run.beat_at(a) + wrap.back, tempo, Some(clock));
             for (k, p) in out[a - base..x - base].iter_mut().enumerate() {
-                *p = Some(origin + step.advance(Samples(k)));
+                *p = Some(origin + step.advance(Samples::new(k)));
             }
             let seen = span.get_or_insert(a - base..x - base);
             seen.start = seen.start.min(a - base);
@@ -453,7 +453,7 @@ pub(crate) fn tap_indices<F: Float>(len: usize, position: SamplePosition) -> ([u
 /// disagree about which frame a reversed position means.
 #[inline]
 pub(crate) fn mirrored(len: Samples, position: SamplePosition) -> SamplePosition {
-    SamplePosition((len.get() as f64 - 1.0 - position.get()).max(0.0))
+    SamplePosition::new((len.get() as f64 - 1.0 - position.get()).max(0.0))
 }
 
 /// Tap `t` (0..4) of [`tap_indices`]'s four for whole frame `idx` of a
@@ -546,7 +546,7 @@ pub(crate) fn read_looped_frame<S: Sample, F: Float>(
 /// frame of any width other than the one the spread was built for. A width past
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) is built for that many, the most a reader writes.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MonoSpread<F: Float = f32> {
+pub struct MonoSpread<F: Float> {
     /// `None`: to every channel. Otherwise the fold of one channel into the
     /// destination.
     fold: Option<Fold<F>>,
@@ -668,7 +668,7 @@ pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
 /// The frame is the one a reader writes: its width is the node's, at most
 /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) (a wider node's remaining channels are silent).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Place<F: Float = f32> {
+pub enum Place<F: Float> {
     /// A mono wave placed by its spread, or a wave read channel for channel.
     Native(MonoSpread<F>),
     /// A wave that is not mono and not already the frame's order and width,
@@ -854,7 +854,7 @@ mod tests {
             )
             .expect("a placeable wave")
         };
-        super::read_frame(wave, &place, SamplePosition(position), out);
+        super::read_frame(wave, &place, SamplePosition::new(position), out);
     }
 
     /// The `(left, right)` of a two-channel read.
@@ -874,7 +874,7 @@ mod tests {
         for whole in [0usize, 1 << 23, 1 << 31, 1 << 40] {
             for k in [1u32, 2048, 4095] {
                 let fraction = f64::from(k) / 4096.0;
-                let position = SamplePosition(whole as f64 + fraction);
+                let position = SamplePosition::new(whole as f64 + fraction);
                 let (idx, f) = split_position::<f32>(position);
                 assert_eq!((idx, f64::from(f)), (whole, fraction), "f32, {position:?}");
                 let (idx, f) = split_position::<f64>(position);
@@ -893,7 +893,7 @@ mod tests {
         let (below, above) = (2.0_f64.powi(-33), 2.0_f64.powi(-24) + 2.0_f64.powi(-33));
         let mut worst = 0.0f64;
         for i in 0..4000u32 {
-            let position = SamplePosition(100_000.0 + f64::from(i) * 0.000_731);
+            let position = SamplePosition::new(100_000.0 + f64::from(i) * 0.000_731);
             let want = position.fract();
             let (_, f) = split_position::<f32>(position);
             let error = want - f64::from(f);
@@ -926,7 +926,7 @@ mod tests {
             .expect("a placeable wave");
         let position = 5000.3125;
         let mut out = [S::ZERO];
-        super::read_frame(&wave, &place, SamplePosition(position), &mut out);
+        super::read_frame(&wave, &place, SamplePosition::new(position), &mut out);
         let want = 0.25 * position;
         let got: f64 = out[0].into();
         assert!(
@@ -953,7 +953,7 @@ mod tests {
     fn a_position_a_hair_under_a_frame_reads_that_frame() {
         let below = 5.0 - 1e-12;
         assert_eq!(
-            tap_indices::<f32>(100, SamplePosition(below)),
+            tap_indices::<f32>(100, SamplePosition::new(below)),
             ([4, 5, 6, 7], 0.0)
         );
         let mut wave = Wave::new(1, SampleRate::SR_48K);
@@ -997,7 +997,7 @@ mod tests {
         ] {
             let src = SrcRatio::for_rates(SampleRate::of(file_rate), SampleRate::of(session));
             let rate = PlaybackRate::new(speed);
-            let transport = TransportPosition::new(true, Bpm::of(120.0), Beat(4.0), None);
+            let transport = TransportPosition::new(true, Bpm::of(120.0), Beat::new(4.0), None);
 
             // Memory's split: the wave's own rate, times varispeed alone.
             let memory = window_position(
@@ -1041,7 +1041,7 @@ mod tests {
     /// cannot read stale material by ignoring a `None`.
     #[test]
     fn window_position_is_none_outside_the_window() {
-        let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(4.0), None);
+        let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat::new(4.0), None);
         assert!(
             window_position(
                 &stopped,
@@ -1054,7 +1054,7 @@ mod tests {
             "a stopped transport has no position"
         );
 
-        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), None);
+        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(2.0), None);
         assert!(
             window_position(
                 &rolling,
@@ -1363,7 +1363,7 @@ mod tests {
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
         assert!(!place.is_direct());
         let mut out = [9.0f32; 8];
-        super::read_frame(&w, &place, SamplePosition(4.0), &mut out);
+        super::read_frame(&w, &place, SamplePosition::new(4.0), &mut out);
         assert_eq!(out, [0.0, 1.0, 2.0, 3.0, 6.0, 7.0, 4.0, 5.0]);
         // The engine's own order needs no fold.
         let own = constant_wave(ChannelTopology::assumed(ChannelLayout::from(8u16)), &frame);
@@ -1423,7 +1423,7 @@ mod tests {
         ));
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
         let mut out = [9.0f32; 8];
-        super::read_frame(&w, &place, SamplePosition(4.0), &mut out);
+        super::read_frame(&w, &place, SamplePosition::new(4.0), &mut out);
         assert!(
             (out[0] - <f32 as Float>::MINUS_3_DB).abs() < 1e-6,
             "{out:?}"
@@ -1440,7 +1440,7 @@ mod tests {
         super::read_frame(
             &quad,
             &Place::for_wave(&quad, ChannelLayout::STEREO).unwrap(),
-            SamplePosition(4.0),
+            SamplePosition::new(4.0),
             &mut out,
         );
         let m = <f32 as Float>::MINUS_3_DB;
@@ -1530,12 +1530,13 @@ mod tests {
     ) -> Env {
         let mut c = TransportChanges::NONE;
         for &(at, to) in changes {
-            c.push(Offset::of(Samples(at), Samples(len)), to).unwrap();
+            c.push(Offset::of(Samples::new(at), Samples::new(len)), to)
+                .unwrap();
         }
         Env {
             frame: Frame::new(0),
             sample_rate: SampleRate::SR_48K,
-            block_len: Samples(len),
+            block_len: Samples::new(len),
             transport,
             changes: c,
             play: tutti_graph::PlayClock::ZERO,
@@ -1546,7 +1547,7 @@ mod tests {
     const FPB: f64 = 24_000.0;
 
     fn rolling(beat: f64) -> TransportPosition {
-        TransportPosition::new(true, Bpm::of(120.0), Beat(beat), None)
+        TransportPosition::new(true, Bpm::of(120.0), Beat::new(beat), None)
     }
 
     /// A gate over a 48 kHz source at unit rate, for `window`.
@@ -1572,9 +1573,12 @@ mod tests {
     /// mid-block, a stopped transport, a stop and a seek inside the block.
     #[test]
     fn place_sounds_iff_a_frame_has_a_position() {
-        let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(1.0), None);
+        let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat::new(1.0), None);
         let span = |start: f64, frames: f64| {
-            gate(VoiceWindow::span(Beat(start), BeatDuration(frames / FPB)))
+            gate(VoiceWindow::span(
+                Beat::new(start),
+                BeatDuration::new(frames / FPB),
+            ))
         };
         let rows: [(Env, Gate); 7] = [
             (env(64, rolling(1.0), &[]), gate(VoiceWindow::default())),
@@ -1616,7 +1620,10 @@ mod tests {
         let env = env(64, rolling(start - 10.0 / FPB), &[]);
         let got = placed(
             &env,
-            gate(VoiceWindow::span(Beat(start), BeatDuration(30.0 / FPB))),
+            gate(VoiceWindow::span(
+                Beat::new(start),
+                BeatDuration::new(30.0 / FPB),
+            )),
         );
         for (i, p) in got.iter().enumerate() {
             let want = (10..40).contains(&i).then(|| (i - 10) as f64);
@@ -1631,7 +1638,7 @@ mod tests {
     /// it there.
     #[test]
     fn a_seek_and_a_stop_inside_a_block_land_on_their_frames() {
-        let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(2.5), None);
+        let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat::new(2.5), None);
         let env = env(64, rolling(1.0), &[(32, rolling(2.0)), (48, stopped)]);
         let got = placed(&env, gate(VoiceWindow::default()));
         for (i, p) in got.iter().enumerate() {
@@ -1650,8 +1657,8 @@ mod tests {
     /// live disk reader — is flushed or crossfaded there.
     #[test]
     fn a_loop_wrap_inside_a_block_reseats_at_the_loop_start() {
-        let looping = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
-        let t = TransportPosition::new(true, Bpm::of(120.0), Beat(1.0 - 20.0 / FPB), looping);
+        let looping = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
+        let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(1.0 - 20.0 / FPB), looping);
         let env = env(64, t, &[]);
         let got = placed(&env, gate(VoiceWindow::default()));
         for (i, p) in got.iter().enumerate() {

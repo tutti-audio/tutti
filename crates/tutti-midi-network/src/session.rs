@@ -81,7 +81,7 @@ enum Phase {
 /// How a Host admits, and the one thing a Host needs that is not data.
 #[derive(Clone, Debug)]
 pub(crate) enum Role {
-    Client(Credentials),
+    Client(Box<Credentials>),
     Host {
         admission: Arc<Admission>,
         nonce_source: fn() -> Result<Nonce, EntropyError>,
@@ -188,11 +188,11 @@ impl Session {
     }
 
     fn nak(&mut self, reason: NakReason, refused: Header) {
-        self.out.push(Command::Nak(Nak {
+        self.out.push(Command::Nak(Box::new(Nak {
             reason,
             refused,
             text: crate::NakText::default(),
-        }));
+        })));
     }
 
     /// Ends the Session or the invitation with a Bye that is repeated until
@@ -201,14 +201,14 @@ impl Session {
         if matches!(self.phase, Phase::Closing { .. } | Phase::Idle) {
             return;
         }
-        let repeat = self.start_repeat(now, Command::Bye(Bye::new(reason)));
+        let repeat = self.start_repeat(now, Command::Bye(Box::new(Bye::new(reason))));
         self.phase = Phase::Closing { repeat, reason };
     }
 
     /// Ends the exchange with a peer that was never in a Session: a Bye
     /// repeated until answered, with no state before it.
     fn refuse(&mut self, now: Instant, reason: ByeReason) {
-        let repeat = self.start_repeat(now, Command::Bye(Bye::new(reason)));
+        let repeat = self.start_repeat(now, Command::Bye(Box::new(Bye::new(reason))));
         self.phase = Phase::Closing { repeat, reason };
     }
 
@@ -518,9 +518,11 @@ impl Session {
         let answer = self
             .inviting_credentials()
             .and_then(|credentials| credentials.user.as_ref())
-            .map(|(username, password)| UserAuthentication {
-                digest: Digest::of_user(&challenge.nonce, username, password),
-                username: username.clone(),
+            .map(|(username, password)| {
+                Box::new(UserAuthentication {
+                    digest: Digest::of_user(&challenge.nonce, username, password),
+                    username: *username,
+                })
             });
         let Some(answer) = answer else {
             return self.nak(NakReason::NotExpected, header);
@@ -862,15 +864,15 @@ fn challenge_command(
     identity: EndpointIdentity,
 ) -> Command {
     match kind {
-        Challenge::SharedSecret => Command::AuthRequired(AuthChallenge {
+        Challenge::SharedSecret => Command::AuthRequired(Box::new(AuthChallenge {
             state: match because {
                 Because::Invited => AuthState::First,
                 Because::DigestWrong | Because::UserNotFound => AuthState::DigestWrong,
             },
             nonce,
             identity,
-        }),
-        Challenge::User => Command::UserAuthRequired(UserAuthChallenge {
+        })),
+        Challenge::User => Command::UserAuthRequired(Box::new(UserAuthChallenge {
             state: match because {
                 Because::Invited => UserAuthState::First,
                 Because::DigestWrong => UserAuthState::DigestWrong,
@@ -878,6 +880,6 @@ fn challenge_command(
             },
             nonce,
             identity,
-        }),
+        })),
     }
 }
