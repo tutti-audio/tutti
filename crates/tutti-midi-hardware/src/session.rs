@@ -33,9 +33,8 @@
 //! [`InputProducerHandle`]: crate::InputProducerHandle
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
-use tutti_rt::LockExt;
 
 use tutti_midi_device::ResourceStore;
 
@@ -98,7 +97,7 @@ pub struct MidiSession {
     generated_instance: Option<ProductInstanceId>,
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
-    properties: Arc<Mutex<ResourceStore>>,
+    properties: ResourceStore,
 }
 
 /// An identity and the Groups its one Function Block spans: what
@@ -317,7 +316,7 @@ impl MidiSession {
             options,
             presented: None,
             generated_instance: None,
-            properties: Arc::default(),
+            properties: ResourceStore::default(),
         })
     }
 
@@ -430,14 +429,7 @@ impl MidiSession {
         let os = self.devices.capability(&id).unwrap_or_default();
         // A MIDI 1.0 port with an output is asked for its identity instead.
         let out = self.devices.open_output(&id).ok();
-        let stream = Negotiation::new(
-            id.clone(),
-            os,
-            out,
-            timing,
-            ci_refused,
-            Arc::clone(&self.properties),
-        );
+        let stream = Negotiation::new(id.clone(), os, out, timing, ci_refused);
         let held = Held {
             stream,
             timing,
@@ -604,7 +596,9 @@ impl MidiSession {
                 lost_during: after > before,
             };
             held.lost_seen = after;
-            let stepped = held.stream.poll(now, &heard, presented);
+            let stepped = held
+                .stream
+                .poll(now, &heard, presented, &mut self.properties);
             // Off the moment nothing listens, so no packet is kept for no one.
             sync_hearing(ports, held, ci);
             if let Some(stream) = stepped.stream {
@@ -739,16 +733,15 @@ impl MidiSession {
     /// cannot be subscribed to (M2-103 §11.1). Publishing to subscribers is not
     /// offered.
     pub fn serve_properties(&mut self, store: ResourceStore) {
-        *self.properties.lock_recover() = store.without_subscriptions();
+        self.properties = store.without_subscriptions();
     }
 
     /// The store the devices serve: what [`serve_properties`](Self::serve_properties)
-    /// gave, as peers' Sets have changed it. Lock it for as short a time as a
-    /// read takes: the devices lock it inside [`poll`](Self::poll), so a guard held on
-    /// the thread that calls `poll` deadlocks it.
+    /// gave, as peers' Sets have changed it. Only
+    /// [`poll`](Self::poll) changes it between calls.
     #[must_use]
-    pub fn served_properties(&self) -> Arc<Mutex<ResourceStore>> {
-        Arc::clone(&self.properties)
+    pub const fn served_properties(&self) -> &ResourceStore {
+        &self.properties
     }
 
     /// The MIDI-CI peers of the open input `id` that declared Property Exchange

@@ -243,6 +243,7 @@ fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
     let changed = PeState::octets(bytes(50));
     link.resp
         .publish(
+            &mut link.store,
             &ResourceTarget::entry(PeResource::State, state_id("buffer").resource_id()).unwrap(),
             PeData::State(changed.clone()),
             link.now,
@@ -257,8 +258,7 @@ fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
     let chunks_to_responder = chunks(&link, true, PeMessageKind::SET_INQUIRY);
     assert!(chunks_to_responder > 10, "{chunks_to_responder} chunks");
     let held = link
-        .resp
-        .store()
+        .store
         .get(&ResourceTarget::entry(PeResource::State, state_id("buffer").resource_id()).unwrap())
         .unwrap()
         .clone();
@@ -610,7 +610,7 @@ fn terminates(link: &Link, to_responder: bool) -> bool {
 
 fn stored_state(link: &Link, id: &str) -> PeState {
     let target = ResourceTarget::entry(PeResource::State, state_id(id).resource_id()).unwrap();
-    let store = link.resp.store();
+    let store = &link.store;
     let Some(PeData::State(state)) = store.get(&target) else {
         panic!("no state");
     };
@@ -618,7 +618,7 @@ fn stored_state(link: &Link, id: &str) -> PeState {
 }
 
 fn listed(link: &Link, id: &str) -> PeStateEntry {
-    let store = link.resp.store();
+    let store = &link.store;
     let Some(PeData::StateList(list)) = store.get(&target(PeResource::StateList)) else {
         panic!("no list");
     };

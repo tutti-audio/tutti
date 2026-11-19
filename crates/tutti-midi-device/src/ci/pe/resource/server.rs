@@ -1,7 +1,6 @@
 //! [`ResourceResponder`]: the Responder of Property Exchange, serving the
 //! Resources of a [`ResourceStore`] (M2-103 §5 to §12, §14, §15).
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use super::super::body::{BodyLimit, decode_body, encode_body};
@@ -273,7 +272,6 @@ enum Announce {
 pub struct ResourceResponder {
     own: Muid,
     settings: ResponderSettings,
-    store: Arc<Mutex<ResourceStore>>,
     device: Option<Box<dyn StateDevice>>,
     peers: Vec<Peer>,
     reassembler: PeReassembler,
@@ -318,25 +316,13 @@ pub(super) fn merged(old: &PartialUpdate, new: &PartialUpdate) -> Option<Partial
 }
 
 impl ResourceResponder {
-    /// A Responder with MUID `own` serving `store`.
+    /// A Responder with MUID `own`. It serves the [`ResourceStore`] each call is
+    /// handed, and holds none.
     #[must_use]
-    pub fn new(own: Muid, settings: ResponderSettings, store: ResourceStore) -> Self {
-        Self::sharing(own, settings, Arc::new(Mutex::new(store)))
-    }
-
-    /// A Responder with MUID `own` serving the `store` that others hold too: a
-    /// Set through this Responder is seen through every one that shares it, and
-    /// by whoever else holds the handle. The lock is held only inside a call.
-    #[must_use]
-    pub fn sharing(
-        own: Muid,
-        settings: ResponderSettings,
-        store: Arc<Mutex<ResourceStore>>,
-    ) -> Self {
+    pub fn new(own: Muid, settings: ResponderSettings) -> Self {
         Self {
             own,
             settings,
-            store,
             device: None,
             peers: Vec::new(),
             reassembler: PeReassembler::new(settings.reassembly),
@@ -357,19 +343,6 @@ impl ResourceResponder {
     pub fn state_device(mut self, device: Box<dyn StateDevice>) -> Self {
         self.device = Some(device);
         self
-    }
-
-    /// The Resources served, locked while the guard lives: drop it before the
-    /// next call on this Responder.
-    pub fn store(&self) -> MutexGuard<'_, ResourceStore> {
-        self.store.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// The handle the Resources are held behind, for another Responder to
-    /// [share](Self::sharing).
-    #[must_use]
-    pub fn shared_store(&self) -> Arc<Mutex<ResourceStore>> {
-        Arc::clone(&self.store)
     }
 
     /// The Subscriptions that are active: the Subscription, its Initiator and
@@ -438,7 +411,12 @@ impl ResourceResponder {
     }
 
     /// Says that `target` can be answered, and answers the inquiries held for it.
-    pub fn ready(&mut self, target: &ResourceTarget, now: Instant) -> Vec<ResponderAction> {
+    pub fn ready(
+        &mut self,
+        store: &mut ResourceStore,
+        target: &ResourceTarget,
+        now: Instant,
+    ) -> Vec<ResponderAction> {
         self.busy.retain(|(t, _)| t != target);
         let mut out = Vec::new();
         let (held, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.deferred)
@@ -446,7 +424,7 @@ impl ResourceResponder {
             .partition(|d| d.target == *target);
         self.deferred = rest;
         for deferred in held {
-            self.complete(deferred.received, now, &mut out);
+            self.complete(store, deferred.received, now, &mut out);
         }
         out
     }
@@ -468,7 +446,7 @@ impl ResourceResponder {
     /// Subscription message nobody replied to is forgotten and the queue goes on, a
     /// Flow Control chunk with no ACK is sent again or the transaction ends, and
     /// an inquiry held for a busy Resource is given more time.
-    pub fn on_timeout(&mut self, now: Instant) -> Vec<ResponderAction> {
+    pub fn on_timeout(&mut self, store: &mut ResourceStore, now: Instant) -> Vec<ResponderAction> {
         let mut out = Vec::new();
         for expired in self.reassembler.expire(now) {
             out.push(self.signal(expired.peer, expired.kind, expired.send));
@@ -479,7 +457,7 @@ impl ResourceResponder {
         self.outgoing = live;
         for o in expired {
             self.release(o.peer, o.id);
-            self.drain(o.peer, now, &mut out);
+            self.drain(store, o.peer, now, &mut out);
         }
         self.streams_timed_out(now, &mut out);
         for at in 0..self.deferred.len() {
@@ -532,7 +510,12 @@ impl ResourceResponder {
     }
 
     /// A CI message of the connection's Group arrived.
-    pub fn on_message(&mut self, decoded: &Decoded, now: Instant) -> Vec<ResponderAction> {
+    pub fn on_message(
+        &mut self,
+        store: &mut ResourceStore,
+        decoded: &Decoded,
+        now: Instant,
+    ) -> Vec<ResponderAction> {
         let mut out = Vec::new();
         let Decoded::Message(message) = decoded else {
             return out;
@@ -552,21 +535,21 @@ impl ResourceResponder {
                         to: source,
                         message: PeCiMessage::CapabilitiesReply(self.settings.capabilities),
                     }));
-                    self.drain(source, now, &mut out);
+                    self.drain(store, source, now, &mut out);
                 }
                 PeCiMessage::Chunk { kind, chunk } => {
-                    self.on_chunk(source, *kind, chunk.clone(), now, &mut out);
+                    self.on_chunk(store, source, *kind, chunk.clone(), now, &mut out);
                 }
                 PeCiMessage::CapabilitiesReply(_) | PeCiMessage::Notify(_) => {}
             },
             CiMessage::Ack { ack, .. } => {
                 if let Some((transaction, signal)) = PeSignal::from_ack(ack) {
-                    self.on_signal(source, transaction, signal, now, &mut out);
+                    self.on_signal(store, source, transaction, signal, now, &mut out);
                 }
             }
             CiMessage::Nak { nak, .. } => {
                 if let Some((transaction, signal)) = PeSignal::from_nak(nak) {
-                    self.on_signal(source, transaction, signal, now, &mut out);
+                    self.on_signal(store, source, transaction, signal, now, &mut out);
                 }
             }
             _ => {}
@@ -578,6 +561,7 @@ impl ResourceResponder {
     /// or a Subscription message.
     fn on_signal(
         &mut self,
+        store: &mut ResourceStore,
         peer: Muid,
         transaction: PeTransaction,
         signal: PeSignal,
@@ -653,7 +637,7 @@ impl ResourceResponder {
                     | PeSignal::TimedOut { .. } => {
                         let gone = self.outgoing.remove(at);
                         self.release(peer, gone.id);
-                        self.drain(peer, now, out);
+                        self.drain(store, peer, now, out);
                     }
                 }
             }
@@ -663,6 +647,7 @@ impl ResourceResponder {
 
     fn on_chunk(
         &mut self,
+        store: &mut ResourceStore,
         peer: Muid,
         kind: PeMessageKind,
         chunk: PeChunk,
@@ -693,7 +678,7 @@ impl ResourceResponder {
             }
             Ok(PeStep::Complete { message, send }) => {
                 out.extend(send.map(|s| self.signal(peer, kind, s)));
-                self.complete(*message, now, out);
+                self.complete(store, *message, now, out);
             }
             Ok(PeStep::Abandoned) => {}
             Err(refused) => out.extend(refused.send.map(|s| self.signal(peer, kind, s))),
@@ -775,18 +760,26 @@ impl ResourceResponder {
         })
     }
 
-    fn complete(&mut self, received: PeReceived, now: Instant, out: &mut Vec<ResponderAction>) {
+    fn complete(
+        &mut self,
+        store: &mut ResourceStore,
+        received: PeReceived,
+        now: Instant,
+        out: &mut Vec<ResponderAction>,
+    ) {
         let (peer, kind, request_id) = (received.peer, received.kind, received.request_id);
         let answer = match (&received.header, kind) {
-            (PeHeader::Request(request), k) if k == PeMessageKind::GET_INQUIRY => self.get(request),
+            (PeHeader::Request(request), k) if k == PeMessageKind::GET_INQUIRY => {
+                self.get(store, request)
+            }
             (PeHeader::Request(request), k) if k == PeMessageKind::SET_INQUIRY => {
-                self.set(peer, request, &received.body, now, out)
+                self.set(store, peer, request, &received.body, now, out)
             }
             (PeHeader::Subscription(sub), k) if k == PeMessageKind::SUBSCRIPTION_INQUIRY => {
-                self.subscription(peer, sub, out)
+                self.subscription(store, peer, sub, out)
             }
             (PeHeader::Reply(reply), k) if k == PeMessageKind::SUBSCRIPTION_REPLY => {
-                self.update_replied(peer, request_id, reply, now, out);
+                self.update_replied(store, peer, request_id, reply, now, out);
                 return;
             }
             _ => Err(refusal(
@@ -889,7 +882,11 @@ impl ResourceResponder {
 
     /// The Resource an inquiry names, checked against the store: its target and
     /// its encoding.
-    fn resolve(&self, request: &PeRequest) -> Result<(ResourceTarget, PeEncoding), Refusal> {
+    fn resolve(
+        &self,
+        store: &ResourceStore,
+        request: &PeRequest,
+    ) -> Result<(ResourceTarget, PeEncoding), Refusal> {
         let resource = PeResource::from_name(&request.resource);
         let encoding = request.mutual_encoding.unwrap_or(PeEncoding::Ascii);
         let target = |resource: PeResource| {
@@ -908,8 +905,7 @@ impl ResourceResponder {
             }
             return Ok((target(resource)?, encoding));
         }
-        let entry = self
-            .store()
+        let entry = store
             .entry(&resource)
             .cloned()
             .ok_or_else(|| refusal(PeStatus::NotFound, "no such Resource"))?;
@@ -936,20 +932,19 @@ impl ResourceResponder {
     }
 
     /// The data a target names.
-    fn data_of(&self, target: &ResourceTarget) -> Result<PeData, Refusal> {
+    fn data_of(&self, store: &ResourceStore, target: &ResourceTarget) -> Result<PeData, Refusal> {
         if *target.resource() == PeResource::ResourceList {
-            return Ok(PeData::ResourceList(self.store().resource_list()));
+            return Ok(PeData::ResourceList(store.resource_list()));
         }
-        self.store()
+        store
             .get(target)
             .cloned()
             .ok_or_else(|| refusal(PeStatus::NotFound, "no data for this resId"))
     }
 
-    fn get(&self, request: &PeRequest) -> Result<Answer, Refusal> {
-        let (target, encoding) = self.resolve(request)?;
-        let (can_get, fc_on_get) = self
-            .store()
+    fn get(&self, store: &ResourceStore, request: &PeRequest) -> Result<Answer, Refusal> {
+        let (target, encoding) = self.resolve(store, request)?;
+        let (can_get, fc_on_get) = store
             .entry(target.resource())
             .map_or((true, false), |e| (e.can_get(), e.fc_on_get()));
         if !can_get {
@@ -965,7 +960,7 @@ impl ResourceResponder {
         if let Some(wait) = self.busy_wait(&target) {
             return Ok(Answer::Defer(target, wait));
         }
-        let data = self.data_of(&target)?;
+        let data = self.data_of(store, &target)?;
         let mut reply = PeReply::new(PeStatus::Ok);
         let (media_type, mut bytes) = data.to_wire();
         if let Some(page) = request.page {
@@ -995,15 +990,15 @@ impl ResourceResponder {
 
     fn set(
         &mut self,
+        store: &mut ResourceStore,
         peer: Muid,
         request: &PeRequest,
         wire: &[u8],
         now: Instant,
         out: &mut Vec<ResponderAction>,
     ) -> Result<Answer, Refusal> {
-        let (target, encoding) = self.resolve(request)?;
-        let entry = self
-            .store()
+        let (target, encoding) = self.resolve(store, request)?;
+        let entry = store
             .entry(target.resource())
             .cloned()
             .ok_or_else(|| refusal(PeStatus::NotAllowed, "ResourceList cannot be set"))?;
@@ -1054,7 +1049,7 @@ impl ResourceResponder {
                     .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))?;
                 let update = PartialUpdate::try_from(&json)
                     .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))?;
-                let data = self.changed(&target, &update).map_err(|e| match e {
+                let data = self.changed(store, &target, &update).map_err(|e| match e {
                     PublishError::NoData(_) => refusal(PeStatus::NotFound, e.to_string()),
                     other => refusal(PeStatus::BadRequest, other.to_string()),
                 })?;
@@ -1064,13 +1059,13 @@ impl ResourceResponder {
         let mut reply = PeReply::new(PeStatus::Ok);
         let data = match data {
             PeData::State(state) => {
-                let state = self.accept_state(peer, &target, state, out)?;
+                let state = self.accept_state(store, peer, &target, state, out)?;
                 state.write_header(&mut reply.extra);
                 PeData::State(state)
             }
             other => other,
         };
-        self.store()
+        store
             .put(target.res_id().cloned(), data)
             .map_err(|e| refusal(PeStatus::InternalError, e.to_string()))?;
         out.push(ResponderAction::Event(ResponderEvent::Changed {
@@ -1078,7 +1073,7 @@ impl ResourceResponder {
             target: target.clone(),
             how,
         }));
-        self.announce(&target, announce, now, out);
+        self.announce(store, &target, announce, now, out);
         Ok(Answer::Reply(reply, Vec::new()))
     }
 
@@ -1086,6 +1081,7 @@ impl ResourceResponder {
     /// StateList lists it as it is now (M2-111 §3.3).
     fn accept_state(
         &mut self,
+        store: &mut ResourceStore,
         peer: Muid,
         target: &ResourceTarget,
         state: PeState,
@@ -1111,7 +1107,7 @@ impl ResourceResponder {
             let stamp = device.stamp(&id, &state);
             state = state.stamped_with(stamp);
         }
-        self.store()
+        store
             .note_state(&id, &state)
             .map_err(|e| refusal(PeStatus::InternalError, e.to_string()))?;
         Ok(state)
@@ -1120,11 +1116,11 @@ impl ResourceResponder {
     /// The data of `target` with `update` made.
     fn changed(
         &self,
+        store: &mut ResourceStore,
         target: &ResourceTarget,
         update: &PartialUpdate,
     ) -> Result<PeData, PublishError> {
-        let held = self
-            .store()
+        let held = store
             .get(target)
             .cloned()
             .ok_or_else(|| PublishError::NoData(target.resource().clone()))?;
@@ -1140,6 +1136,7 @@ impl ResourceResponder {
 
     fn subscription(
         &mut self,
+        store: &mut ResourceStore,
         peer: Muid,
         subscription: &PeSubscription,
         out: &mut Vec<ResponderAction>,
@@ -1152,9 +1149,8 @@ impl ResourceResponder {
                         "a Subscription takes no page",
                     ));
                 }
-                let (target, encoding) = self.resolve(request)?;
-                let subscribable = self
-                    .store()
+                let (target, encoding) = self.resolve(store, request)?;
+                let subscribable = store
                     .entry(target.resource())
                     .is_some_and(|e| e.can_subscribe());
                 if !subscribable {
@@ -1166,7 +1162,7 @@ impl ResourceResponder {
                 if let Some(wait) = self.busy_wait(&target) {
                     return Ok(Answer::Defer(target, wait));
                 }
-                self.data_of(&target)?;
+                self.data_of(store, &target)?;
                 let id = self.new_subscribe_id();
                 self.subs.push(Served {
                     id: id.clone(),
@@ -1221,6 +1217,7 @@ impl ResourceResponder {
     /// A reply to a Subscription message of ours.
     fn update_replied(
         &mut self,
+        store: &mut ResourceStore,
         peer: Muid,
         id: PeRequestId,
         reply: &PeReply,
@@ -1242,20 +1239,25 @@ impl ResourceResponder {
             reply.status.class(),
             PeStatusClass::ClientError | PeStatusClass::ServerError
         ) {
-            out.extend(self.end_subscription(&sent.sub, now));
+            out.extend(self.end_subscription(store, &sent.sub, now));
         }
-        self.drain(peer, now, out);
+        self.drain(store, peer, now, out);
     }
 
     /// Ends a Subscription, sending the End to its Initiator.
-    pub fn end_subscription(&mut self, id: &SubscribeId, now: Instant) -> Vec<ResponderAction> {
+    pub fn end_subscription(
+        &mut self,
+        store: &mut ResourceStore,
+        id: &SubscribeId,
+        now: Instant,
+    ) -> Vec<ResponderAction> {
         let mut out = Vec::new();
         let Some(at) = self.subs.iter().position(|s| s.id == *id) else {
             return out;
         };
         let sub = self.subs.remove(at);
         self.enqueue(sub.peer, &sub.id, Pending::End);
-        self.drain(sub.peer, now, &mut out);
+        self.drain(store, sub.peer, now, &mut out);
         out.push(ResponderAction::Event(ResponderEvent::Unsubscribed {
             peer: sub.peer,
             subscribe_id: sub.id,
@@ -1273,6 +1275,7 @@ impl ResourceResponder {
     /// target's Resource.
     pub fn publish(
         &mut self,
+        store: &mut ResourceStore,
         target: &ResourceTarget,
         data: PeData,
         now: Instant,
@@ -1283,9 +1286,9 @@ impl ResourceResponder {
                 target: target.resource().clone(),
             });
         }
-        self.store().put(target.res_id().cloned(), data.clone())?;
+        store.put(target.res_id().cloned(), data.clone())?;
         let mut out = Vec::new();
-        self.announce(target, Announce::Full, now, &mut out);
+        self.announce(store, target, Announce::Full, now, &mut out);
         Ok(out)
     }
 
@@ -1298,14 +1301,15 @@ impl ResourceResponder {
     /// changed data is not the Resource's.
     pub fn change(
         &mut self,
+        store: &mut ResourceStore,
         target: &ResourceTarget,
         update: PartialUpdate,
         now: Instant,
     ) -> Result<Vec<ResponderAction>, PublishError> {
-        let data = self.changed(target, &update)?;
-        self.store().put(target.res_id().cloned(), data)?;
+        let data = self.changed(store, target, &update)?;
+        store.put(target.res_id().cloned(), data)?;
         let mut out = Vec::new();
-        self.announce(target, Announce::Partial(update), now, &mut out);
+        self.announce(store, target, Announce::Partial(update), now, &mut out);
         Ok(out)
     }
 
@@ -1313,6 +1317,7 @@ impl ResourceResponder {
     /// peers' counts of requests allow.
     fn announce(
         &mut self,
+        store: &mut ResourceStore,
         target: &ResourceTarget,
         what: Announce,
         now: Instant,
@@ -1330,7 +1335,7 @@ impl ResourceResponder {
                 Announce::Partial(update) => Pending::Partial(update.clone()),
             };
             self.enqueue(peer, &id, pending);
-            self.drain(peer, now, out);
+            self.drain(store, peer, now, out);
         }
     }
 
@@ -1362,7 +1367,13 @@ impl ResourceResponder {
 
     /// Sends the queued Subscription messages of `peer` that its count of
     /// simultaneous requests has a place for, oldest first.
-    fn drain(&mut self, peer: Muid, now: Instant, out: &mut Vec<ResponderAction>) {
+    fn drain(
+        &mut self,
+        store: &mut ResourceStore,
+        peer: Muid,
+        now: Instant,
+        out: &mut Vec<ResponderAction>,
+    ) {
         while let Some(at) = self.queue.iter().position(|q| q.peer == peer) {
             let Some(id) = self
                 .peers
@@ -1373,7 +1384,7 @@ impl ResourceResponder {
                 return;
             };
             let Queued { sub, pending, .. } = self.queue.remove(at);
-            self.send_pending(peer, id, &sub, pending, now, out);
+            self.send_pending(store, peer, id, &sub, pending, now, out);
         }
     }
 
@@ -1386,6 +1397,7 @@ impl ResourceResponder {
 
     fn send_pending(
         &mut self,
+        store: &mut ResourceStore,
         peer: Muid,
         id: PeRequestId,
         sub: &SubscribeId,
@@ -1442,7 +1454,7 @@ impl ResourceResponder {
             }
         }
         let held = if message.is_none() {
-            self.store().get(&target).cloned()
+            store.get(&target).cloned()
         } else {
             None
         };

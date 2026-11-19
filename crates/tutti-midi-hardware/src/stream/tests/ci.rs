@@ -2028,6 +2028,7 @@ fn local_on(on: bool) -> ResourceStore {
 /// the test needs one, an Initiator that asks the session.
 struct Far {
     resp: ResourceResponder,
+    store: ResourceStore,
     init: Option<ResourceInitiator>,
     events: Vec<ResourceEvent>,
 }
@@ -2041,7 +2042,6 @@ impl Far {
                 reassembly: pe_limits(),
                 body_limit: BodyLimit::of(1 << 16),
             },
-            store,
         );
         resp.accept(ours, MaxSysexSize::of(512));
         let mut first = Vec::new();
@@ -2063,6 +2063,7 @@ impl Far {
         (
             Self {
                 resp,
+                store,
                 init,
                 events: Vec::new(),
             },
@@ -2085,7 +2086,7 @@ impl Far {
         let decoded = Decoded::Message(message.clone());
         let mut said: Vec<CiMessage> = self
             .resp
-            .on_message(&decoded, now)
+            .on_message(&mut self.store, &decoded, now)
             .into_iter()
             .filter_map(|a| match a {
                 tutti_midi_device::ResponderAction::Send(m) => Some(m),
@@ -2234,7 +2235,7 @@ fn the_session_initiates_property_exchange_with_a_peer_that_declared_it() {
         },
         _ => None,
     });
-    assert_eq!(list, Some(far.resp.store().resource_list()));
+    assert_eq!(list, Some(far.store.resource_list()));
 
     let peers = wire.session.property_peers(&wire.id);
     let [handle] = &*peers else {
@@ -2477,7 +2478,12 @@ fn an_update_of_a_held_subscription_is_answered_once_with_200_and_not_by_the_res
     let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
     let actions = far
         .resp
-        .publish(&target, PeData::LocalOn(PeLocalOn(false)), now)
+        .publish(
+            &mut far.store,
+            &target,
+            PeData::LocalOn(PeLocalOn(false)),
+            now,
+        )
         .expect("publishes");
     for action in actions {
         if let tutti_midi_device::ResponderAction::Send(message) = action {
@@ -2531,7 +2537,7 @@ fn the_peers_end_of_a_held_subscription_reaches_the_initiator() {
     let (mut wire, _, mut far, id) = held_subscription();
     let _ = ci_sent(&wire);
     let now = wire.at(600);
-    for action in far.resp.end_subscription(&id, now) {
+    for action in far.resp.end_subscription(&mut far.store, &id, now) {
         if let tutti_midi_device::ResponderAction::Send(message) = action {
             say(&wire, GROUP_0, &message, 600);
         }

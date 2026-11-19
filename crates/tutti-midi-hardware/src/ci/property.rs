@@ -4,7 +4,6 @@
 //! Configuration and Process Inquiry are, and what they send goes in the same
 //! batch.
 
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use tutti_midi_device::Muid;
@@ -39,10 +38,9 @@ const RESPONDER: ResponderSettings = ResponderSettings {
     body_limit: BODY,
 };
 
-/// The Responder of a device with MUID `own`, serving the `store` every device of
-/// the session serves.
-pub(super) fn responder(own: Muid, store: Arc<Mutex<ResourceStore>>) -> ResourceResponder {
-    ResourceResponder::sharing(own, RESPONDER, store)
+/// The Responder of a device with MUID `own`.
+pub(super) fn responder(own: Muid) -> ResourceResponder {
+    ResourceResponder::new(own, RESPONDER)
 }
 
 /// Which side of a device a Property Exchange message is for.
@@ -120,13 +118,14 @@ impl Member {
     /// The device's MUID changed: the Responder is for the new one, over the
     /// store as the peers left it, and holds no Subscription.
     pub(super) fn renew_property(&mut self, new: Muid) {
-        self.server = responder(new, self.server.shared_store());
+        self.server = responder(new);
     }
 
     /// Hands the Responder and every Initiator the message, which is theirs to
     /// keep or ignore.
     pub(super) fn route_property(
         &mut self,
+        store: &mut ResourceStore,
         decoded: &Decoded,
         now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
@@ -142,7 +141,7 @@ impl Member {
         }
         let route = self.route_of(decoded);
         if route != Route::Initiators {
-            let served = self.server.on_message(decoded, now);
+            let served = self.server.on_message(store, decoded, now);
             self.carry_out_served(served, sends, changes);
         }
         let heard: Vec<_> = if route == Route::Responder {
@@ -207,12 +206,13 @@ impl Member {
     /// Ends every wait of the Responder and the Initiators that has run out.
     pub(super) fn expire_property(
         &mut self,
+        store: &mut ResourceStore,
         now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
         if self.server.deadline().is_some_and(|at| now >= at) {
-            let served = self.server.on_timeout(now);
+            let served = self.server.on_timeout(store, now);
             self.carry_out_served(served, sends, changes);
         }
         let ended: Vec<_> = self

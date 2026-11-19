@@ -72,7 +72,7 @@
 //! is, and what the output sends in follows it, and where the input's event
 //! times come from follows its TXJR.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_graph::{Losses, Offset};
@@ -433,7 +433,6 @@ impl Negotiation {
         out: Option<OpenOutput>,
         timing: InputTiming,
         ci_refused: CounterWriter<Losses>,
-        store: Arc<Mutex<ResourceStore>>,
     ) -> Self {
         let asks = os.is_ump_endpoint() && out.is_some();
         let inquire = if !os.is_ump_endpoint() && out.is_some() {
@@ -457,7 +456,7 @@ impl Negotiation {
             out,
             run,
             inquire,
-            ci: Ci::new(device, ci_refused, store),
+            ci: Ci::new(device, ci_refused),
             answering: None,
             timing,
             stop: StopJr::Settled,
@@ -592,10 +591,11 @@ impl Negotiation {
         now: Instant,
         heard: &Heard<'_>,
         presented: Option<Presented>,
+        store: &mut ResourceStore,
     ) -> Stepped {
         let ci = presented.map(|p| p.identity.device);
         let changes = match &mut self.out {
-            Some(out) => self.ci.poll(now, heard, ci, out),
+            Some(out) => self.ci.poll(now, heard, ci, store, out),
             None => CiChanges::default(),
         };
         let stream = self.poll_stream(now, heard);
