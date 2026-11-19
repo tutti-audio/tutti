@@ -23,11 +23,19 @@
 //!   `poll`, or on a host's executor.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
+//! - [`Asset`] — where bytes come from, as every file entry point takes it
+//!   (`impl Into<Asset>`): a path or shared bytes, or an app's own [`Open`]
+//!   source that opens again and again, with an [`Identity`] to cache by (a
+//!   path's carries its [`Stamp`]). [`Destination`] is where one write goes: a
+//!   path, written staged, or a borrowed writer. The path implementation fails
+//!   at `open` on the web.
 //! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
 //!   restores the mode after, unwinding included.
 //!
 //! An item belongs here only if it needs a `#[cfg]` on the platform or
 //! architecture: each is a module whose platform version one `cfg_attr` chooses.
+//! The asset edge is the exception: it has no `cfg`, because std's file calls
+//! fail at run time on the web, and it sits here so every reader reaches it.
 //! **The root is the API.** Every item is re-exported at the root
 //! (`tutti_platform::monotonic_ns`); the modules are private.
 //!
@@ -51,6 +59,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
+mod asset;
 mod clock;
 mod denormals;
 mod executor;
@@ -59,6 +68,7 @@ mod priority;
 mod sleep;
 mod thread;
 
+pub use asset::{Asset, Destination, Identity, Open, ReadSeek, Stamp};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
 pub use executor::Executor;
