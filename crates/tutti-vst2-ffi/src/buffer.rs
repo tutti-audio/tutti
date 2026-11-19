@@ -119,7 +119,7 @@ where
         if self.index < self.audio_buffer.inputs.len()
             && self.index < self.audio_buffer.outputs.len()
         {
-            // SAFETY: `AudioBuffer`'s constructor contract (`from_raw`/`HostBuffer`) says
+            // SAFETY: `AudioBuffer`'s constructor contract (`from_raw`) says
             // each channel pointer addresses at least `samples` live elements; the index
             // is bounds-checked by the `if` above.
             let input = unsafe {
@@ -257,12 +257,15 @@ impl<'a, T> Outputs<'a, T> {
     ///
     /// The slice borrows `self`, so two live slices of one channel cannot exist:
     ///
-    /// ```compile_fail
-    /// # use tutti_vst2_ffi::host::HostBuffer;
-    /// let mut host_buffer: HostBuffer<f32> = HostBuffer::new(0, 1);
-    /// let inputs: Vec<Vec<f32>> = vec![];
-    /// let mut outputs = vec![vec![0.0f32; 4]];
-    /// let mut buffer = host_buffer.bind(&inputs, &mut outputs);
+    /// ```compile_fail,E0499
+    /// # use tutti_vst2_ffi::buffer::AudioBuffer;
+    /// let mut samples = [0.0f32; 4];
+    /// let inputs: [*const f32; 0] = [];
+    /// let mut outputs = [samples.as_mut_ptr()];
+    /// // SAFETY: one output channel of four live samples, no inputs, both tables outliving
+    /// // `buffer`.
+    /// let mut buffer =
+    ///     unsafe { AudioBuffer::from_raw(0, 1, inputs.as_ptr(), outputs.as_mut_ptr(), 4) };
     /// let (_, mut out) = buffer.split();
     /// let a = out.get_mut(0);
     /// let b = out.get_mut(0);

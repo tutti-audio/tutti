@@ -54,7 +54,7 @@ primitive_enum! {
         /// [return]: `VstTimeInfo` pointer or null if not supported.
         GetTime,
         /// Inform host that the plugin has MIDI events ready to be processed. Should be called at the
-        /// end of `Plugin::process`.
+        /// end of the plugin's process call.
         /// [ptr]: `VstEvents*` the events to be processed.
         /// [return]: 1 if supported and processed OK.
         ProcessEvents,
@@ -300,9 +300,8 @@ pub trait Host {
 
     /// Refresh UI after the plugin's parameters changed.
     ///
-    /// Note: some hosts will call some `PluginParameters` methods from within the `update_display`
-    /// call, including `get_parameter`, `get_parameter_label`, `get_parameter_name`
-    /// and `get_parameter_text`.
+    /// Note: some hosts query parameters from within the `update_display` call, through the
+    /// parameter value, label, name and text opcodes.
     fn update_display(&self) {}
 }
 
