@@ -26,10 +26,11 @@
 //! The search is O(frames x states): with an even switch probability the best
 //! way into a state is a stay or a switch from the best other state, found
 //! from the two highest scores of the last frame ([`sticky_viterbi`]), and the
-//! backpointers are two bytes per frame and state. Scores are `f64` and each frame's are shifted so
-//! the best is 0, so a long input costs no precision: unshifted, they grow by
-//! the emission each frame, and a few million frames at a high sharpness would
-//! leave the stay cost under one unit in the last place.
+//! backpointers are two bytes per frame and state. Scores are `f64` and each
+//! frame's are shifted so the best is 0, so a long input costs no precision:
+//! unshifted, they grow by the emission each frame, and a few million frames
+//! at a high sharpness would leave the stay cost under one unit in the last
+//! place.
 //!
 //! The scoring is in `f64` and divides by the frame's own norm, so the result
 //! does not depend on the chroma's scale, to the extremes of `f64`.
@@ -71,6 +72,11 @@ const MAX_FRAMES: FrameCount = FrameCount(1 << 19);
 
 /// The states: 12 major roots, 12 minor roots, and "no chord".
 const STATES: usize = 2 * CLASSES + 1;
+/// [`STATES`] as the `u16` [`sticky_viterbi`] counts states in.
+const STATE_COUNT: u16 = {
+    assert!(STATES <= u16::MAX as usize);
+    STATES as u16
+};
 const NO_CHORD: usize = 2 * CLASSES;
 
 /// What the Viterbi scores are held in; wide, because they are summed over
@@ -242,7 +248,7 @@ fn viterbi(chroma: &Grid<f64>, cfg: &ChordConfig) -> Vec<u16> {
     let stay = libm::log(Score::from(cfg.self_transition.get()));
     let switch = libm::log((1.0 - Score::from(cfg.self_transition.get())) / (STATES - 1) as Score);
     sticky_viterbi(
-        STATES as u16,
+        STATE_COUNT,
         chroma.frames().get(),
         stay,
         switch,

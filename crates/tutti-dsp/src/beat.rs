@@ -35,7 +35,8 @@ const TAIL_FRACTION: f64 = 0.5;
 /// `period` is in frames and may be fractional; `tightness` is the weight of
 /// the gap penalty against the novelty score (0 turns the period off).
 /// The curve is read at `f64` whatever its float. Returns ascending frame indices;
-/// empty for a flat or too short curve.
+/// empty for a flat or too short curve. It allocates its tables, so it is for
+/// the control or offline side, not the audio thread.
 #[must_use]
 pub fn track_beat_frames<F: Float>(novelty: &[F], period: f64, tightness: f64) -> Vec<usize> {
     let novelty: Vec<f64> = novelty.iter().map(|v| v.convert_to::<f64>()).collect();
