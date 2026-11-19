@@ -199,6 +199,15 @@ impl<J: JobKind> Job<J> {
     }
 
     /// Calls `session.update()` until this job finishes, and returns its result.
+    ///
+    /// This is the native blocking loop over the non-blocking path: `update`,
+    /// then a short wait for the job's worker to send, until the job's
+    /// [`SessionEvent::JobDone`] lands. **Do not call it where a thread cannot
+    /// block** (a browser's main thread): there the app calls `update` itself and
+    /// reads [`status`](Self::status), the `JobDone` event or
+    /// [`JobOutput::take`](crate::JobOutput::take). On a session whose job
+    /// threads were refused ([`Fallback::Jobs`](crate::Fallback::Jobs)) each
+    /// loop's `update` runs one queued job.
     /// The events of those updates stay queued for the app's next `update()`,
     /// in order: a wait delays them, it loses none.
     ///

@@ -39,3 +39,6 @@ mod export_fork_sampler;
     feature = "soundfont"
 ))]
 mod export_fork_synth;
+// A session whose threads are all refused still streams, loads jobs and bounces.
+#[cfg(all(feature = "export", feature = "sampler"))]
+mod stepped_fallback;

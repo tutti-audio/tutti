@@ -15,9 +15,17 @@ use crate::SessionFloat;
 pub(crate) struct SamplerPart<F: SessionFloat>(std::marker::PhantomData<F>);
 
 impl<F: SessionFloat> SamplerPart<F> {
-    pub(crate) fn new(_: bool, _: SampleRate) -> crate::Result<Self> {
-        Ok(Self(std::marker::PhantomData))
+    pub(crate) fn new(_: bool, _: SampleRate, _: tutti_platform::ThreadStart) -> Self {
+        Self(std::marker::PhantomData)
     }
+
+    /// No streamer was stepped.
+    pub(crate) fn fallbacks(&self) -> u64 {
+        0
+    }
+
+    /// No streamer to step.
+    pub(crate) fn settle(&mut self) {}
 
     /// No stream has a ratio.
     pub(crate) fn set_sample_rate(&self, _: SampleRate) {}

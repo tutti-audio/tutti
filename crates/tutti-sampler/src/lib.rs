@@ -106,9 +106,8 @@
 //! - No decoder feature: a decoder is `tutti-codec`'s `decode-*` feature, which an
 //!   app turns on there. With none on, `probe` and `SampleFacts` are absent: no
 //!   header can be read.
-//! - `testing`: `DiskStreamer::manual` and `step`, which run the
-//!   streamer's cycle by hand instead of on its thread, and the `testing` module (a
-//!   mock transport and block driver). For tests; a host has no use for it.
+//! - `testing`: the `testing` module (a mock transport and block driver). For
+//!   tests; a host has no use for it.
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //!
@@ -221,13 +220,12 @@ pub(crate) mod streamer;
 
 pub use streamer::{
     Block, ControlCell, DiskStreamer, DiskStreamerConfig, GUARD_FRAMES, Open, OpenError,
-    PendingOpen, Placement, RefusedPlacement, Running, Stream, StreamFault, StreamFile, StreamId,
-    StreamPhase, StreamReader, StreamStatus,
+    PendingOpen, Placement, RefusedPlacement, Running, Started, Stream, StreamFault, StreamFile,
+    StreamId, StreamPhase, StreamReader, StreamStatus,
 };
 
 // The hand-driven streamer cycle, alongside `DiskStreamer::manual`: its driver
 // type and its verdict.
-#[cfg(any(test, feature = "testing"))]
 pub use streamer::{Manual, StepOutcome};
 
 // Header-only probe: what a file is, and whether *this build's* streamer can

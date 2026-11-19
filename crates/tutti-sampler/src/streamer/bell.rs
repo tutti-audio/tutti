@@ -26,9 +26,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-#[cfg(test)]
-use crossbeam_channel::TrySendError;
-use crossbeam_channel::{SendError, Sender};
+use crossbeam_channel::{SendError, Sender, TrySendError};
 use tutti_rt::{Parker, Unparker, parker};
 
 use super::command::StreamerCommand;
@@ -168,8 +166,7 @@ impl<F: RingFloat> StreamerSender<F> {
         Ok(())
     }
 
-    /// [`send`](Self::send) that refuses instead of waiting (tests).
-    #[cfg(test)]
+    /// [`send`](Self::send) that refuses instead of waiting.
     pub(crate) fn try_send(
         &self,
         cmd: StreamerCommand<F>,

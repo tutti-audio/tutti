@@ -194,7 +194,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     pub fn run_phase(&mut self, phase: Phase, cx: PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
         match phase {
             Phase::Collect => {
-                // First, so what a job landed is in the graph this update commits.
+                // The stepped work first: the streamer's cycles, so a pending
+                // open has its answer, then one inline job, so its landing is
+                // in this update.
+                self.sampler.settle();
+                self.jobs.run_inline();
+                // So what a job landed is in the graph this update commits.
                 self.land_jobs(out);
                 // What those landings and the holds' ends changed, and the pool's
                 // stages on this thread.

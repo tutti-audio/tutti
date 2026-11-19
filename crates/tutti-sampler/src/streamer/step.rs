@@ -29,7 +29,7 @@ use super::StreamerSender;
 use super::command::StreamerCommand;
 use super::config::BufferConfig;
 use super::handlers::{Handles, Local, follow_steering, handle_command};
-use super::io::refill::{FILL_THRESHOLD, refill_all, refill_all_parallel};
+use super::io::refill::{FILL_THRESHOLD, MIN_CHUNK, refill_all, refill_all_parallel};
 use super::record::{Record, Streams};
 use tutti_rt::RingFloat;
 
@@ -114,7 +114,30 @@ impl<F: RingFloat> StreamerCycle<F> {
         while let Some(cmd) = drain() {
             handle_command(cmd, shared, &self.config, &mut self.local);
         }
+        // A whole-file decode with no thread of its own runs here, one per
+        // cycle; its answer is applied by the next cycle's drain, so this one
+        // reports more to do.
+        let decoded = self.local.lane.run_queued(shared);
+        let outcome = self.refill(shared);
+        if decoded { StepOutcome::Busy } else { outcome }
+    }
 
+    /// How many cycles refill every ring once from empty, with the decodes
+    /// still queued: each cycle fills a ring by at least [`MIN_CHUNK`] frames,
+    /// and each decode takes two (its run and the answer's drain).
+    pub(crate) fn fill_steps(&self) -> usize {
+        let rings = self
+            .local
+            .streams
+            .records()
+            .iter()
+            .map(|record| record.out.frames().div_ceil(MIN_CHUNK))
+            .max()
+            .unwrap_or(0);
+        rings + 2 * (self.local.lane.queued() + self.local.pending.len()) + 2
+    }
+
+    fn refill(&mut self, shared: &Handles<F>) -> StepOutcome {
         // The loop and direction each live stream's control side asks for, so
         // the refill below writes the new mapping this cycle.
         follow_steering(&self.config, &mut self.local);

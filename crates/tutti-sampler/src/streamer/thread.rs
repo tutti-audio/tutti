@@ -10,7 +10,7 @@
 //!
 //! The thread body and command handlers live in sibling modules.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use tutti_platform::{PriorityRequest, StopToken, ThreadHandle};
@@ -25,12 +25,31 @@ use super::decode::Seams;
 use super::handlers::{Handles, SessionRate};
 use super::loop_body::{BACKSTOP, streamer_loop};
 use super::metrics::Metrics;
-#[cfg(any(test, feature = "testing"))]
 use super::step::StepOutcome;
 use super::step::StreamerCycle;
 use crate::Error;
 use crossbeam_channel::Receiver;
 use tutti_rt::RingFloat;
+
+/// A `Mutex`'s guard whether or not a panicking holder poisoned it: the lock
+/// guards one `Option` that is only ever taken.
+fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A streamer whose thread was refused: why, and the streamer, unstarted.
+pub(super) struct Refused<F: RingFloat> {
+    pub(super) error: Error,
+    pub(super) built: Built<F>,
+}
+
+impl<F: RingFloat> std::fmt::Debug for Refused<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Refused")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
 
 /// A streamer that is built and drives nothing yet: its queue, its shared
 /// handles and the state a driver will own.
@@ -116,36 +135,62 @@ impl<F: RingFloat> Built<F> {
     ///
     /// # Errors
     ///
-    /// [`Error::Spawn`] when the thread cannot be spawned. Every stream and
-    /// every refill depends on it, so a failure here (the OS out of threads)
-    /// would otherwise degrade into an engine that accepts commands and stays
-    /// mute; it is the caller's to see instead.
-    pub(super) fn start(self) -> Result<Running, Error> {
+    /// [`Refused`] when the thread cannot be spawned: it holds the streamer
+    /// back, still unstarted, so the caller can step it instead
+    /// ([`manual`](Self::manual)) or report the failure. Every stream and every
+    /// refill depends on a driver, so an engine with none would accept
+    /// commands and stay mute.
+    pub(super) fn start(self) -> Result<Running, Box<Refused<F>>> {
         let spawn = self.shared.seams.spawn;
         let bell = Arc::clone(&self.shared.bell);
-        let shared = self.shared;
         let cycle = StreamerCycle::new(self.config, self.tx.clone());
-        let (queue, backstop, parker) = (self.rx, self.backstop, self.parker);
+        // What the thread takes, held where a refusal finds it again.
+        let parts = Arc::new(Mutex::new(Some((self.rx, self.parker))));
+        let shared = self.shared.clone();
+        let backstop = self.backstop;
 
-        let body = move |_: &StopToken| {
-            // The thread owns the queue's one receiver, so however the
-            // loop ends (a panic included) its drop tells every sender
-            // the streamer is gone instead of letting them queue into
-            // nothing; and its table's drop tells every live stream
-            // (`Faulted(StreamerGone)`).
-            streamer_loop(&queue, shared, cycle, parker, backstop);
+        let body = {
+            let parts = Arc::clone(&parts);
+            move |_: &StopToken| {
+                let Some((queue, parker)) = lock_recover(&parts).take() else {
+                    return;
+                };
+                // The thread owns the queue's one receiver, so however the
+                // loop ends (a panic included) its drop tells every sender
+                // the streamer is gone instead of letting them queue into
+                // nothing; and its table's drop tells every live stream
+                // (`Faulted(StreamerGone)`).
+                streamer_loop(&queue, shared, cycle, parker, backstop);
+            }
         };
         // Disk streaming should stay ahead of background work, not compete
         // with the audio threads (Ardour's streamer sets no CPU priority,
         // LinuxSampler's disk thread runs at nice -10): a raised, never
         // real-time priority, nice -10 on Linux and ABOVE_NORMAL on Windows. A
         // refusal is harmless, so the outcome is only logged.
-        let handle = spawn(
+        let handle = match spawn(
             "tutti-streamer",
             Some(PriorityRequest::Raised),
             Box::new(body),
-        )
-        .map_err(Error::Spawn)?;
+        ) {
+            Ok(handle) => handle,
+            Err(error) => {
+                let (rx, parker) = lock_recover(&parts)
+                    .take()
+                    .expect("a thread that did not start took nothing");
+                return Err(Box::new(Refused {
+                    error: Error::Spawn(error),
+                    built: Self {
+                        tx: self.tx,
+                        rx,
+                        shared: self.shared,
+                        parker,
+                        config: self.config,
+                        backstop,
+                    },
+                }));
+            }
+        };
         if let Some(outcome) = handle.priority() {
             tracing::debug!("streamer: {outcome}");
         }
@@ -157,7 +202,6 @@ impl<F: RingFloat> Built<F> {
     }
 
     /// The caller drives: its cycle is stepped by `Manual::step`.
-    #[cfg(any(test, feature = "testing"))]
     pub(super) fn manual(self) -> Manual<F> {
         Manual {
             rx: Some(self.rx),
@@ -210,26 +254,23 @@ impl Drop for Running {
 }
 
 /// The streamer driven by the caller, a cycle at a time: what
-/// `DiskStreamer::manual` builds. Requires the
-/// `testing` feature.
+/// `DiskStreamer::manual` builds, and what a session falls back to when its
+/// streamer thread is refused.
 ///
-/// There is no thread to race, so a test can say "after this many cycles the
-/// ring holds audio"; it is the same `StreamerCycle::step` the thread runs.
-#[cfg(any(test, feature = "testing"))]
+/// There is no thread to race, so "after this many cycles the ring holds
+/// audio" is a count; it is the same `StreamerCycle::step` the thread runs.
 pub struct Manual<F: RingFloat> {
     rx: Option<Receiver<StreamerCommand<F>>>,
     cycle: StreamerCycle<F>,
     shared: Handles<F>,
 }
 
-#[cfg(any(test, feature = "testing"))]
 impl<F: RingFloat> std::fmt::Debug for Manual<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Manual").finish_non_exhaustive()
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
 impl<F: RingFloat> Manual<F> {
     /// One cycle on the calling thread: drain every queued command, then apply
     /// directions and refills. Returns once that work is done, reporting what
@@ -238,6 +279,11 @@ impl<F: RingFloat> Manual<F> {
         let queue = self.rx.as_ref();
         self.cycle
             .step(&self.shared, || queue.and_then(|rx| rx.try_recv().ok()))
+    }
+
+    /// Cycles that refill every open ring once, with the decodes waiting.
+    pub(super) fn fill_steps(&self) -> usize {
+        self.cycle.fill_steps()
     }
 
     /// How many streams the streamer holds (tests).

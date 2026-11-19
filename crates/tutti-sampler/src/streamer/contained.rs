@@ -521,11 +521,11 @@ fn a_decode_held_open_does_not_stop_another_stream() {
     gate.open();
 }
 
-/// **A decode thread that cannot start fails the open with `Io`**, where the
-/// open would wait for good: the lane's spawn is refused through the seam
-/// (the streamer's own thread is not started: hand-stepped).
+/// **A decode thread that cannot start still opens the file, on the
+/// streamer's own cycles**: the lane's spawn is refused through the seam, and
+/// the stream's first frames are the decoded file's.
 #[test]
-fn a_refused_decode_thread_fails_the_open() {
+fn a_refused_decode_thread_still_opens_the_file_through_the_cycles() {
     let seams = Seams {
         spawn: refuse,
         ..Seams::default()
@@ -537,13 +537,54 @@ fn a_refused_decode_thread_fails_the_open() {
     )
     .expect("builds");
     let dir = tempfile::tempdir().expect("a temp dir");
-    let opening = sampler.open(&mp3(dir.path()), Placement::HEAD);
-    let answer = wait_for_open(&mut sampler, opening);
-    assert!(
-        matches!(&answer, Err(OpenError::Io(std::io::ErrorKind::Other))),
-        "{:?}",
-        answer.map(|_| ())
+    let path = mp3(dir.path());
+    let wave = tutti_codec::read_wave::<f32>(&path).expect("the fixture decodes");
+    let opening = sampler.open(&path, Placement::HEAD);
+    let (_stream, mut reader) = wait_for_open(&mut sampler, opening).expect("the file opens");
+    let claim = reader.block(Samples::new(0), [span(0, 4_000), span(0, 0)]);
+    for s in 0..4_000u64 {
+        assert!(claim.contains(s), "frame {s}");
+        for c in 0..2 {
+            assert_eq!(
+                claim.frame(s).get(c),
+                wave.at(c, s as usize),
+                "frame {s} channel {c}"
+            );
+        }
+    }
+}
+
+/// **With no decode thread, one whole-file decode runs per cycle.** Two opens
+/// of files that cannot seek, hand-stepped: the first cycle runs one decode, so
+/// after two cycles the first open is answered and the second is not; the third
+/// answers it.
+#[test]
+fn a_refused_decode_thread_decodes_one_file_per_cycle() {
+    let seams = Seams {
+        spawn: refuse,
+        ..Seams::default()
+    };
+    let mut sampler = DiskStreamer::<Manual<f32>, f32>::manual_with(
+        tutti_units::SampleRate::SR_44K1,
+        Default::default(),
+        seams,
+    )
+    .expect("builds");
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let first = mp3(dir.path());
+    let second = dir.path().join("second.mp3");
+    std::fs::copy(&first, &second).expect("copies");
+    let (opening_first, opening_second) = (
+        sampler.open(&first, Placement::HEAD),
+        sampler.open(&second, Placement::HEAD),
     );
+    // Cycle 1 runs the first decode; cycle 2 applies its answer and runs the
+    // second decode.
+    for _ in 0..2 {
+        let _ = sampler.step();
+    }
+    assert!(matches!(opening_first.poll(), Open::Ready(..)));
+    assert!(matches!(opening_second.poll(), Open::Pending(_)));
 }
 
 /// **A panic in the decode is that open's failure, not the lane's**: the
@@ -708,4 +749,59 @@ fn a_fork_of_a_closed_stream_fails_even_after_a_decode_fault() {
         fault.is_some_and(|e| e.to_string().contains("ended")),
         "the closed stream's fork carries the failure"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The stepped driver.
+// ---------------------------------------------------------------------------
+
+/// **A refused streamer thread is a stepped streamer, and one `settle` primes
+/// an open stream's ring.** The streamer's own thread is refused through the
+/// seam: `Started::new` answers the stepped variant, and a stream opened on it
+/// leaves `Opening` (its ring filled to the refill threshold, or to the file's
+/// end) within one `settle` after the open is answered.
+#[test]
+fn a_refused_streamer_thread_is_stepped_and_one_settle_primes_the_ring() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = constant_file(dir.path(), "long.wav", 8_000, 30, 0.5);
+    let mut started = crate::Started::<f32>::new(
+        tutti_units::SampleRate::of(8_000.0),
+        DiskStreamerConfig::default(),
+        refuse,
+    );
+    assert!(started.is_stepped());
+    let opening = started.open(&path, Placement::HEAD);
+    assert!(started.settle() > 0, "the open's cycle ran");
+    let Open::Ready(stream, _reader) = opening.poll() else {
+        panic!("one settle answers a seekable file's open");
+    };
+    assert_ne!(
+        stream.status().phase,
+        StreamPhase::Opening,
+        "the ring is primed"
+    );
+}
+
+/// **A streamer thread that starts is not stepped**, and `settle` runs no cycle.
+#[test]
+fn a_streamer_whose_thread_starts_is_not_stepped() {
+    let mut started = crate::Started::<f32>::new(
+        tutti_units::SampleRate::SR_48K,
+        DiskStreamerConfig::default(),
+        tutti_platform::start_thread,
+    );
+    assert!(!started.is_stepped());
+    assert_eq!(started.settle(), 0);
+}
+
+/// **`settle` stops at the first cycle that is not `Busy`**: with nothing open
+/// the first cycle is `Idle` and it is the only one.
+#[test]
+fn settle_with_nothing_open_runs_one_cycle() {
+    let mut sampler = DiskStreamer::<Manual<f32>, f32>::manual(
+        tutti_units::SampleRate::SR_48K,
+        DiskStreamerConfig::default(),
+    )
+    .expect("builds");
+    assert_eq!(sampler.settle(), 1);
 }

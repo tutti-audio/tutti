@@ -26,6 +26,7 @@
 )]
 
 use std::any::Any;
+use std::collections::VecDeque;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -33,7 +34,7 @@ use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
-use tutti_platform::{PriorityRequest, StopToken, ThreadHandle, spawn_named};
+use tutti_platform::{StopToken, ThreadStart, start_thread};
 
 use super::StreamerSender;
 use super::cache::LruCache;
@@ -44,22 +45,6 @@ use super::handlers::Handles;
 use super::metrics::{Metrics, ReadMeter};
 use crate::OpenError;
 use tutti_rt::RingFloat;
-
-/// How a thread is started: the seam a test replaces to see a spawn fail.
-pub(super) type Spawner = fn(
-    &str,
-    Option<PriorityRequest>,
-    Box<dyn FnOnce(&StopToken) + Send>,
-) -> io::Result<ThreadHandle<()>>;
-
-/// The OS's thread: what ships.
-fn os_spawn(
-    name: &str,
-    priority: Option<PriorityRequest>,
-    body: Box<dyn FnOnce(&StopToken) + Send>,
-) -> io::Result<ThreadHandle<()>> {
-    spawn_named(name, priority, body)
-}
 
 /// A hook a test runs where the streamer reads a file: the stream and the
 /// frame it reads. It may block, or panic.
@@ -75,17 +60,25 @@ pub(super) type DecodeHook = Arc<dyn Fn(&Path) + Send + Sync>;
 /// streamer reads a file. Production is [`Seams::default`].
 #[derive(Clone)]
 pub(super) struct Seams {
-    pub(super) spawn: Spawner,
+    pub(super) spawn: ThreadStart,
     #[cfg(test)]
     pub(super) read_hook: Option<ReadHook>,
     #[cfg(test)]
     pub(super) decode_hook: Option<DecodeHook>,
 }
 
+impl Seams {
+    /// These seams with threads started by `spawn`.
+    pub(super) fn spawning(mut self, spawn: ThreadStart) -> Self {
+        self.spawn = spawn;
+        self
+    }
+}
+
 impl Default for Seams {
     fn default() -> Self {
         Self {
-            spawn: os_spawn,
+            spawn: start_thread,
             #[cfg(test)]
             read_hook: None,
             #[cfg(test)]
@@ -109,12 +102,21 @@ struct Job {
     path: PathBuf,
 }
 
-/// The decode thread's queue, started on first use. Streamer-thread-local.
+/// The decode lane's queue, started on first use. Streamer-thread-local.
+///
+/// A decode runs on a thread of its own. When that thread cannot start, the
+/// lane keeps its jobs and [`run_queued`](Self::run_queued) runs one per
+/// streamer cycle.
 pub(super) struct DecodeLane<F: RingFloat> {
     /// The streamer's own queue, where a result is sent.
     reports: StreamerSender<F>,
     /// The job queue, once the thread has started.
     jobs: Option<Sender<Job>>,
+    /// The thread was refused: jobs wait here for the streamer's cycles.
+    stepped: bool,
+    queued: VecDeque<Job>,
+    /// The read rate the stepped decodes publish.
+    meter: ReadMeter,
 }
 
 impl<F: RingFloat> DecodeLane<F> {
@@ -122,39 +124,74 @@ impl<F: RingFloat> DecodeLane<F> {
         Self {
             reports,
             jobs: None,
+            stepped: false,
+            queued: VecDeque::new(),
+            meter: ReadMeter::new(),
         }
+    }
+
+    /// Whole-file decodes waiting for a cycle.
+    pub(super) fn queued(&self) -> usize {
+        self.queued.len()
     }
 
     /// Asks for `path` to be decoded whole for stream `id`, starting the thread
     /// if this is the first job. The answer arrives as a `Decoded` command.
     ///
-    /// # Errors
-    ///
-    /// [`OpenError::Io`] when the thread cannot be started, so the open fails
-    /// where it would have waited for good.
-    pub(super) fn submit(
-        &mut self,
-        shared: &Handles<F>,
-        id: StreamId,
-        path: PathBuf,
-    ) -> Result<(), OpenError> {
+    /// A thread that cannot start leaves the job queued for
+    /// [`run_queued`](Self::run_queued).
+    pub(super) fn submit(&mut self, shared: &Handles<F>, id: StreamId, path: PathBuf) {
         let job = Job { id, path };
+        if self.stepped {
+            self.queued.push_back(job);
+            return;
+        }
         let job = match &self.jobs {
             Some(jobs) => match jobs.send(job) {
-                Ok(()) => return Ok(()),
+                Ok(()) => return,
                 // The thread is gone (a panic that escaped the job's own
                 // containment): start another.
                 Err(returned) => returned.0,
             },
             None => job,
         };
-        let jobs = self.start(shared)?;
-        let sent = jobs.send(job);
-        self.jobs = Some(jobs);
-        sent.map_err(|_| OpenError::Io(io::ErrorKind::BrokenPipe))
+        match self.start(shared) {
+            Ok(jobs) => {
+                // The thread was just started with this queue: it is open.
+                let _ = jobs.send(job);
+                self.jobs = Some(jobs);
+            }
+            Err(error) => {
+                tracing::debug!("decode: no thread ({error}); decoding on the streamer's cycles");
+                self.stepped = true;
+                self.queued.push_back(job);
+            }
+        }
     }
 
-    fn start(&self, shared: &Handles<F>) -> Result<Sender<Job>, OpenError> {
+    /// Decodes the oldest queued job and sends its answer; whether one ran.
+    /// A full command queue puts the job back (the decode is cached, so the
+    /// next try answers from the cache).
+    pub(super) fn run_queued(&mut self, shared: &Handles<F>) -> bool {
+        let Some(job) = self.queued.pop_front() else {
+            return false;
+        };
+        let cmd = decode_job(
+            &shared.cache,
+            &shared.metrics,
+            &mut self.meter,
+            #[cfg(test)]
+            shared.seams.decode_hook.as_ref(),
+            &job,
+        );
+        if self.reports.try_send(cmd).is_err() {
+            self.queued.push_front(job);
+            return false;
+        }
+        true
+    }
+
+    fn start(&self, shared: &Handles<F>) -> io::Result<Sender<Job>> {
         let (jobs, queue) = crossbeam_channel::unbounded::<Job>();
         let reports = self.reports.clone();
         let (cache, metrics) = (Arc::clone(&shared.cache), Arc::clone(&shared.metrics));
@@ -162,41 +199,56 @@ impl<F: RingFloat> DecodeLane<F> {
         let decode_hook = shared.seams.decode_hook.clone();
         let body = move |_: &StopToken| {
             let mut meter = ReadMeter::new();
-            for Job { id, path } in queue {
-                // A panic in the decoder is this file's failure, not the
-                // thread's: the next job runs.
-                let wave = catch_unwind(AssertUnwindSafe(|| {
+            for job in queue {
+                let cmd = decode_job(
+                    &cache,
+                    &metrics,
+                    &mut meter,
                     #[cfg(test)]
-                    if let Some(hook) = &decode_hook {
-                        hook(&path);
-                    }
-                    load_wave(&cache, &metrics, &mut meter, &path)
-                }));
-                let wave = match wave {
-                    Ok(Some(wave)) => Ok(wave),
-                    Ok(None) => Err(unreadable(&path)),
-                    Err(payload) => {
-                        tracing::error!(
-                            "decoding {} panicked: {}",
-                            path.display(),
-                            panic_message(payload.as_ref())
-                        );
-                        Err(OpenError::Format)
-                    }
-                };
-                let cmd = StreamerCommand::Decoded {
-                    id,
-                    wave: Decoded(wave),
-                };
+                    decode_hook.as_ref(),
+                    &job,
+                );
                 if reports.send(cmd).is_err() {
                     break;
                 }
             }
         };
-        (shared.seams.spawn)("tutti-decode", None, Box::new(body))
-            .map_err(|error| OpenError::Io(error.kind()))?
-            .detach();
+        (shared.seams.spawn)("tutti-decode", None, Box::new(body))?.detach();
         Ok(jobs)
+    }
+}
+
+/// Decodes `job` and answers it as the command the streamer applies. A panic
+/// in the decoder is this file's failure, not the caller's.
+fn decode_job<F: RingFloat>(
+    cache: &LruCache<F>,
+    metrics: &Metrics,
+    meter: &mut ReadMeter,
+    #[cfg(test)] decode_hook: Option<&DecodeHook>,
+    job: &Job,
+) -> StreamerCommand<F> {
+    let wave = catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(test)]
+        if let Some(hook) = decode_hook {
+            hook(&job.path);
+        }
+        load_wave(cache, metrics, meter, &job.path)
+    }));
+    let wave = match wave {
+        Ok(Some(wave)) => Ok(wave),
+        Ok(None) => Err(unreadable(&job.path)),
+        Err(payload) => {
+            tracing::error!(
+                "decoding {} panicked: {}",
+                job.path.display(),
+                panic_message(payload.as_ref())
+            );
+            Err(OpenError::Format)
+        }
+    };
+    StreamerCommand::Decoded {
+        id: job.id,
+        wave: Decoded(wave),
     }
 }
 

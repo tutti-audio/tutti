@@ -70,9 +70,6 @@ pub enum SamplerError {
     /// detached session, which only the `testing` feature builds).
     #[error("the session has no disk streamer")]
     NoStreamer,
-    /// The disk streamer could not be started ([`SessionBuilder`](crate::SessionBuilder)).
-    #[error(transparent)]
-    Streamer(#[from] tutti_sampler::Error),
     /// The streamer could not open the file: it is missing or unreadable, is
     /// not audio this build decodes, cannot be placed into a voice, or the
     /// streamer thread is gone.

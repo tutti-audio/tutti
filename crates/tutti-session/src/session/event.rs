@@ -43,6 +43,17 @@ impl std::fmt::Debug for CrossfadeControls {
     }
 }
 
+/// What the session steps from [`update`](crate::Session::update) because its
+/// thread was refused ([`SessionBuilder::thread_start`](crate::SessionBuilder::thread_start)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Fallback {
+    /// The disk streamer: `update` runs its cycles on the calling thread.
+    Streamer,
+    /// The jobs: `update` runs one queued job.
+    Jobs,
+}
+
 /// Something an [`update`](crate::Session::update) found for the host.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -51,6 +62,14 @@ pub enum SessionEvent {
     /// [`JobOutput::take`](crate::JobOutput::take). Reported once, in the update
     /// that found it, unless a [`Job::wait`](crate::Job::wait) took it.
     JobDone(JobOutput),
+    /// A thread the session asked for was refused, so `what` is stepped from
+    /// [`update`](crate::Session::update) instead: an app that stops calling
+    /// `update` stalls it. Reported once per fallback, in the first update after
+    /// it; [`Session::fallbacks`](crate::Session::fallbacks) counts them.
+    SteppedFallback {
+        /// What is stepped.
+        what: Fallback,
+    },
     /// The graph's edits could not be committed: the plan sent last keeps
     /// playing. Each update tries again; a refusal is reported once, until a
     /// commit is sent or it fails another way.

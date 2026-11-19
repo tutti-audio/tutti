@@ -12,7 +12,7 @@ mod taps;
 mod tests;
 mod transport;
 
-pub use event::{CrossfadeControls, SessionEvent};
+pub use event::{CrossfadeControls, Fallback, SessionEvent};
 #[cfg(feature = "midi")]
 pub use parts::MidiNodes;
 pub use phases::{ModInput, PHASES, Phase, PhaseCx};
@@ -110,13 +110,6 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// What modulation applied, and the session's own declarations.
     pub(crate) mods: crate::modulation::ModSession,
     /// The disk streamer and the streams the opens landed.
-    #[cfg_attr(
-        not(any(feature = "sampler", feature = "device")),
-        expect(
-            dead_code,
-            reason = "a stream open (feature `sampler`) and a device restart (feature `device`) read it"
-        )
-    )]
     pub(crate) sampler: SamplerPart<C::Float>,
     /// The output-device listing.
     pub(crate) devices: DevicePart,
@@ -157,6 +150,20 @@ impl<K: AppKey, F: SessionFloat> Session<K, Offline<F>> {
     /// start of the next block.
     pub fn render(&self, output: &mut tutti_buffers::InterleavedMut<'_, F>) {
         self.running.engine.process(output);
+    }
+}
+
+impl<K: AppKey, C: Clock> Session<K, C> {
+    /// How many times `what` was stepped from [`update`](Self::update) because
+    /// its thread was refused: 0 or 1 for each kind, since a fallback is kept
+    /// for the session's life. Each is also reported once as
+    /// [`SessionEvent::SteppedFallback`].
+    #[must_use]
+    pub fn fallbacks(&self, what: Fallback) -> u64 {
+        match what {
+            Fallback::Streamer => self.sampler.fallbacks(),
+            Fallback::Jobs => self.jobs.fallbacks(),
+        }
     }
 }
 

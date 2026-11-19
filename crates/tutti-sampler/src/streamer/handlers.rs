@@ -250,7 +250,7 @@ fn begin<F: RingFloat>(
         // A file that is not there is no job: it fails now, where the lane
         // would only fail it later.
         std::fs::File::open(file_path).map_err(|error| OpenError::Io(error.kind()))?;
-        lane.submit(shared, id, file_path.to_path_buf())?;
+        lane.submit(shared, id, file_path.to_path_buf());
         Ok(Begun::Decoding)
     }
 }

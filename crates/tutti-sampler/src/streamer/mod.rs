@@ -44,7 +44,6 @@ pub use loops::GUARD_FRAMES;
 pub(crate) use loops::RingControl;
 pub(crate) use loops::{Arrangement, RingMap, straight};
 pub(crate) use prefetch::SharedReader;
-#[cfg(any(test, feature = "testing"))]
 pub use thread::Manual;
 pub use thread::Running;
 
@@ -62,9 +61,7 @@ pub use status::{StreamFault, StreamPhase, StreamStatus};
 pub use stream::Stream;
 pub(crate) use stream::StreamerPort;
 
-// The hand-driven cycle's verdict. Public only alongside the driver that
-// produces it — the threaded streamer consumes its own outcomes.
-#[cfg(any(test, feature = "testing"))]
+// The hand-driven cycle's verdict, alongside the driver that produces it.
 pub use step::StepOutcome;
 
 // Test-only re-exports for unit tests outside the streamer module tree (e.g.
@@ -77,6 +74,7 @@ use crate::error::Result;
 use decode::Seams;
 use handlers::Handles;
 use thread::Built;
+use tutti_platform::ThreadStart;
 use tutti_rt::Mint;
 use tutti_rt::RingFloat;
 use tutti_units::SampleRate;
@@ -158,7 +156,6 @@ pub struct DiskStreamer<D, F: RingFloat> {
     shared: Handles<F>,
     /// The driver: the thread, which only its drop uses, or the caller's
     /// cycle.
-    #[cfg_attr(not(any(test, feature = "testing")), allow(dead_code))]
     driver: D,
     /// The next stream's identity, minted here on the control side.
     next_stream: Mint,
@@ -206,17 +203,84 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
         Ok(DiskStreamer {
             streamer_tx,
             shared,
-            driver: built.start()?,
+            driver: built.start().map_err(|refused| refused.error)?,
             next_stream: Mint::new(),
         })
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+/// A streamer on its own thread, or, when that thread was refused, stepped by
+/// its owner: what [`Started::new`] builds.
+///
+/// The thread is the normal driver. The stepped one runs the same cycle on the
+/// caller's thread, one [`settle`](Self::settle) at a time, so a host with no
+/// thread to give (a browser's main thread, a sandbox) still streams.
+#[derive(Debug)]
+pub enum Started<F: RingFloat> {
+    /// Driven by its own thread.
+    Thread(DiskStreamer<Running, F>),
+    /// The thread was refused: the owner calls [`settle`](Self::settle).
+    Stepped(Box<DiskStreamer<Manual<F>, F>>),
+}
+
+impl<F: RingFloat> Started<F> {
+    /// A streamer at `sample_rate` whose threads start through `thread_start`,
+    /// stepped when the streamer thread is refused.
+    pub fn new(
+        sample_rate: impl Into<SampleRate>,
+        config: DiskStreamerConfig,
+        thread_start: ThreadStart,
+    ) -> Self {
+        let seams = Seams::default().spawning(thread_start);
+        let built = Built::new(256, sample_rate.into(), config.buffer_config, seams);
+        let (streamer_tx, shared) = (built.command_sender(), built.shared());
+        match built.start() {
+            Ok(driver) => Self::Thread(DiskStreamer {
+                streamer_tx,
+                shared,
+                driver,
+                next_stream: Mint::new(),
+            }),
+            Err(refused) => {
+                tracing::warn!("disk streamer: no thread ({}); stepping it", refused.error);
+                Self::Stepped(Box::new(DiskStreamer {
+                    streamer_tx,
+                    shared,
+                    driver: refused.built.manual(),
+                    next_stream: Mint::new(),
+                }))
+            }
+        }
+    }
+
+    /// Whether the owner steps it ([`settle`](Self::settle)).
+    #[must_use]
+    pub fn is_stepped(&self) -> bool {
+        matches!(self, Self::Stepped(_))
+    }
+
+    /// [`DiskStreamer::open`].
+    pub fn open(&self, path: &std::path::Path, place: Placement) -> PendingOpen<F> {
+        match self {
+            Self::Thread(streamer) => streamer.open(path, place),
+            Self::Stepped(streamer) => streamer.open(path, place),
+        }
+    }
+
+    /// Steps a stepped streamer until it reports anything but
+    /// [`Busy`](StepOutcome::Busy), at most as many cycles as refill every open
+    /// ring once; returns the cycles run. A threaded streamer runs none.
+    pub fn settle(&mut self) -> usize {
+        match self {
+            Self::Thread(_) => 0,
+            Self::Stepped(streamer) => streamer.settle(),
+        }
+    }
+}
+
 impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
     /// Creates the streaming engine without spawning the streamer thread;
     /// cycles are then run by hand with `step`.
-    /// Requires the `testing` feature.
     ///
     /// The step is the same one the thread runs, so this is the shipped path
     /// with its sleeping removed rather than a parallel implementation. What it
@@ -261,6 +325,28 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
     /// `DiskStreamer<Manual<f32>, f32>`.
     pub fn step(&mut self) -> StepOutcome {
         self.driver.step()
+    }
+
+    /// Steps until the streamer reports anything but
+    /// [`Busy`](StepOutcome::Busy), at most [`fill_steps`](Self::fill_steps)
+    /// cycles: enough to refill every open ring once, whatever each cycle
+    /// reads. Returns the cycles run.
+    pub fn settle(&mut self) -> usize {
+        let mut taken = 0;
+        while taken < self.fill_steps() {
+            taken += 1;
+            if self.step() != StepOutcome::Busy {
+                break;
+            }
+        }
+        taken
+    }
+
+    /// How many cycles refill every open ring once from empty, counting the
+    /// whole-file decodes still waiting for a cycle.
+    #[must_use]
+    pub fn fill_steps(&self) -> usize {
+        self.driver.fill_steps()
     }
 
     /// Steps until the streamer stops making progress, or `budget` cycles have run

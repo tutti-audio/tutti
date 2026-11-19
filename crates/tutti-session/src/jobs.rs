@@ -12,7 +12,10 @@
 //! stops writing what no one will land.
 //!
 //! The default spawner starts each task on a thread of
-//! [`tutti_platform::spawn_named`]. When the session drops, `Jobs` stops and joins
+//! [`tutti_platform::spawn_named`] (or the host's own
+//! [`thread_start`](crate::SessionBuilder::thread_start)); when that start is
+//! refused, the session runs its tasks one per [`Session::update`] instead
+//! ([`Spawner::Inline`]). When the session drops, `Jobs` stops and joins
 //! those threads within [`DROP_BOUND`]; a thread still running after it (a
 //! worker blocked on the main thread, say) is detached with a `tracing`
 //! warning and **outlives the session** until its work returns.
@@ -30,13 +33,13 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_platform::ThreadHandle;
+use tutti_platform::{StopToken, ThreadHandle, ThreadStart};
 use tutti_rt::LockExt;
 
 use crate::job::{Cancel, Job, JobKind, JobOutputQueue, Ticket};
@@ -176,11 +179,14 @@ type Lander = Box<dyn FnMut(&mut dyn JobSession, Arrival, &mut Vec<SessionEvent>
 /// Where the session starts its tasks.
 #[derive(Clone, Default)]
 pub(crate) enum Spawner {
-    /// A named thread per task, through [`tutti_platform::spawn_named`]; `Jobs`
-    /// keeps the handles. A thread that cannot start drops its task, which
-    /// lands as [`WorkerError::Dropped`].
+    /// A thread per task, through the session's [`ThreadStart`]; `Jobs` keeps the
+    /// handles. A thread that cannot start switches the session to
+    /// [`Inline`](Self::Inline), which runs that task.
     #[default]
     Threads,
+    /// Each task queues and runs on the control thread, one per
+    /// [`Session::update`]: what the session uses when no thread starts.
+    Inline,
     /// The host's own (`SessionBuilder::spawn_with`).
     Host(Arc<dyn Fn(Task) + Send + Sync>),
 }
@@ -231,6 +237,12 @@ impl Arrivals {
 /// on, and the lander of each job still running.
 pub(crate) struct Jobs {
     spawn: Spawner,
+    /// How [`Spawner::Threads`] starts a thread.
+    thread_start: ThreadStart,
+    /// Tasks [`Spawner::Inline`] has not run yet.
+    inline: VecDeque<Task>,
+    /// Times the session fell back from threads to inline tasks.
+    fallbacks: u64,
     tx: Sender<Arrival>,
     arrivals: Arrivals,
     landers: HashMap<Slot, Lander>,
@@ -346,10 +358,13 @@ impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
 }
 
 impl Jobs {
-    pub(crate) fn new(spawn: Spawner) -> Self {
+    pub(crate) fn new(spawn: Spawner, thread_start: ThreadStart) -> Self {
         let (tx, rx) = channel();
         Self {
             spawn,
+            thread_start,
+            inline: VecDeque::new(),
+            fallbacks: 0,
             tx,
             arrivals: Arrivals {
                 rx,
@@ -424,14 +439,46 @@ impl Jobs {
             Spawner::Host(spawn) => spawn(task),
             Spawner::Threads => {
                 self.threads.retain(|thread| !thread.is_finished());
-                // A start that fails drops its closure, and the task in it.
-                if let Ok(thread) =
-                    tutti_platform::spawn_named("tutti-job", None, move |_| task.run())
-                {
-                    self.threads.push(thread);
+                // The task waits where a refused start finds it again: the
+                // refused body is dropped unrun.
+                let slot = Arc::new(Mutex::new(Some(task)));
+                let body = {
+                    let slot = Arc::clone(&slot);
+                    move |_: &StopToken| {
+                        if let Some(task) = slot.lock_recover().take() {
+                            task.run();
+                        }
+                    }
+                };
+                match (self.thread_start)("tutti-job", None, Box::new(body)) {
+                    Ok(thread) => self.threads.push(thread),
+                    Err(error) => {
+                        tracing::warn!("session jobs: no thread ({error}); running them inline");
+                        self.spawn = Spawner::Inline;
+                        self.fallbacks += 1;
+                        self.held.push(SessionEvent::SteppedFallback {
+                            what: crate::Fallback::Jobs,
+                        });
+                        let task = slot.lock_recover().take();
+                        self.inline.extend(task);
+                    }
                 }
             }
+            Spawner::Inline => self.inline.push_back(task),
         }
+    }
+
+    /// Runs the oldest inline task to its end, if any: one per
+    /// [`Session::update`].
+    pub(crate) fn run_inline(&mut self) {
+        if let Some(task) = self.inline.pop_front() {
+            task.run();
+        }
+    }
+
+    /// How many times the session fell back from threads to inline tasks.
+    pub(crate) fn fallbacks(&self) -> u64 {
+        self.fallbacks
     }
 }
 

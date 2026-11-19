@@ -298,3 +298,76 @@ fn a_save_job_dropped_before_its_worker_starts_does_the_round_trip_never() {
     assert!(!saved.load(Ordering::SeqCst), "nothing was saved");
     assert_eq!(landings(&s.update()), []);
 }
+
+/// A thread start that always answers `Err`: the host's choice of refusing every thread.
+fn no_threads(
+    _: &str,
+    _: Option<tutti_platform::PriorityRequest>,
+    _: Box<dyn FnOnce(&tutti_platform::StopToken) + Send>,
+) -> std::io::Result<tutti_platform::ThreadHandle<()>> {
+    Err(std::io::Error::other("no threads here"))
+}
+
+fn fallbacks(events: &[SessionEvent]) -> usize {
+    events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                SessionEvent::SteppedFallback {
+                    what: crate::Fallback::Jobs
+                }
+            )
+        })
+        .count()
+}
+
+/// **A refused job thread runs its jobs inline, one per update, and says so once.**
+/// Two jobs, no thread: the first update lands the first job and reports the
+/// fallback, the second lands the second, and the fallback count stays 1.
+#[test]
+fn a_refused_job_thread_runs_jobs_inline_one_per_update_and_reports_once() {
+    let mut s = session(Session::builder().thread_start(no_threads));
+    let (first, second) = (echo(&mut s, 1), echo(&mut s, 2));
+    assert_eq!(first.status(), JobStatus::Pending, "queued, not run");
+    assert_eq!(s.fallbacks(crate::Fallback::Jobs), 1);
+
+    let one = s.update();
+    assert_eq!(fallbacks(&one), 1);
+    assert_eq!(landings(&one), [first.id()]);
+    assert_eq!(second.status(), JobStatus::Pending);
+
+    let two = s.update();
+    assert_eq!(fallbacks(&two), 0, "reported once");
+    assert_eq!(landings(&two), [second.id()]);
+    assert_eq!(s.fallbacks(crate::Fallback::Jobs), 1);
+}
+
+/// **`wait` over inline jobs returns each job's own result.**
+#[test]
+fn wait_returns_the_result_of_a_job_run_inline() {
+    let mut s = session(Session::builder().thread_start(no_threads));
+    let (a, b) = (echo(&mut s, 5), echo(&mut s, 6));
+    assert_eq!(b.wait(&mut s), Ok(6));
+    assert_eq!(a.wait(&mut s), Ok(5));
+}
+
+/// A host's own thread start is what a job's thread starts through: the
+/// default spawner calls it once per job, and no fallback is taken.
+#[test]
+fn the_hosts_thread_start_starts_each_jobs_thread() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static STARTS: AtomicUsize = AtomicUsize::new(0);
+    fn counting(
+        name: &str,
+        priority: Option<tutti_platform::PriorityRequest>,
+        body: Box<dyn FnOnce(&tutti_platform::StopToken) + Send>,
+    ) -> std::io::Result<tutti_platform::ThreadHandle<()>> {
+        STARTS.fetch_add(1, Ordering::Relaxed);
+        tutti_platform::start_thread(name, priority, body)
+    }
+    let mut s = session(Session::builder().thread_start(counting));
+    assert_eq!(echo(&mut s, 3).wait(&mut s), Ok(3));
+    assert_eq!(STARTS.load(Ordering::Relaxed), 1);
+    assert_eq!(s.fallbacks(crate::Fallback::Jobs), 0);
+}

@@ -19,6 +19,8 @@
 //!   thread whose body gets a [`StopToken`]; its [`ThreadHandle`] stops and
 //!   joins on drop (or within a bound, `stop_within`) and reports a panic once
 //!   ([`Panicked`]).
+//! - [`ThreadStart`] / [`start_thread`] — how a thread starts as a plain function: the
+//!   default is [`spawn_named`], and a host may name its own.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
 //! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
@@ -61,5 +63,5 @@ pub use denormals::with_no_denormals;
 pub use main_thread::MainThreadMarker;
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use sleep::sleep_until_ns;
-pub use thread::{Panicked, StopToken, ThreadHandle, spawn_named};
+pub use thread::{Panicked, StopToken, ThreadHandle, ThreadStart, spawn_named, start_thread};
 pub use web_time::{Instant, SystemTime};

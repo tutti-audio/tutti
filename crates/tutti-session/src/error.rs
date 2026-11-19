@@ -87,15 +87,6 @@ impl<E: Into<tutti_transport::TransportCommand> + std::fmt::Debug>
     }
 }
 
-/// The disk streamer's own failure (its thread would not start), as the
-/// session's sampler error.
-#[cfg(feature = "sampler")]
-impl From<tutti_sampler::Error> for Error {
-    fn from(error: tutti_sampler::Error) -> Self {
-        Self::Sampler(crate::SamplerError::Streamer(error))
-    }
-}
-
 impl From<NoSuchNode> for ConnectError {
     fn from(e: NoSuchNode) -> Self {
         Self::NoSuchNode(e.node())

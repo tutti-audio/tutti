@@ -14,7 +14,10 @@ use tutti_units::SampleRate;
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
 use tutti_buffers::Float;
 
-use crate::{Clock, Offline, OfflineSession, Result, Session, SessionFloat, SystemClock};
+use crate::{
+    Clock, Fallback, Offline, OfflineSession, Result, Session, SessionEvent, SessionFloat,
+    SystemClock,
+};
 use tutti_engine::BlockDates;
 
 /// Builds a [`Session`], declaratively: chain the options, then
@@ -126,6 +129,7 @@ pub(crate) struct Options {
     unresolved_warning: std::time::Duration,
     pub(crate) plugins: crate::session::parts::PluginOptions,
     spawner: crate::jobs::Spawner,
+    thread_start: tutti_platform::ThreadStart,
     pool: crate::PoolConfig,
 }
 
@@ -164,6 +168,7 @@ impl Default for Options {
             unresolved_warning: crate::modulation::UNRESOLVED_WARNING,
             plugins: Default::default(),
             spawner: crate::jobs::Spawner::default(),
+            thread_start: tutti_platform::start_thread,
             pool: crate::PoolConfig::default(),
         }
     }
@@ -371,7 +376,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
     ///
     /// When the engine refuses the graph, `outputs` has no channels or cannot take
     /// the root ([`Error::Output`](crate::Error::Output)),
-    /// (`midi-hardware`) the MIDI device watch cannot start, or (`sampler`) the disk streamer cannot start.
+    /// (`midi-hardware`) the MIDI device watch cannot start.
     pub fn build(mut self) -> Result<OfflineSession<&'static str, F>> {
         let BlockConfig {
             rate,
@@ -467,8 +472,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
     ///
     /// When the engine refuses the graph, `outputs` has no channels or cannot
     /// take the root ([`Error::Output`](crate::Error::Output)),
-    /// (`midi-hardware`) the MIDI device watch cannot start, (`sampler`) the
-    /// disk streamer cannot start, or the OS refuses the timer thread
+    /// (`midi-hardware`) the MIDI device watch cannot start, or the OS refuses the timer thread
     /// ([`Error::Clock`](crate::Error::Clock)).
     pub fn build(mut self) -> Result<crate::SystemSession<&'static str, F>> {
         let BlockConfig {
@@ -762,6 +766,25 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
+    /// How the session starts the threads it owns: the disk streamer's, and, on
+    /// the default spawner, each job's. The default is
+    /// [`tutti_platform::start_thread`]; a host passes its own to pin a thread to
+    /// a core, name it by its own scheme, set its priority, or register it with
+    /// the embedding app. [`spawn_with`](Self::spawn_with) is unaffected: it
+    /// hands the host a [`Task`](crate::Task) to run wherever it likes.
+    ///
+    /// When `start` answers `Err` the session still works, stepped from
+    /// [`update`](Session::update): a refused streamer thread becomes a streamer
+    /// that `update` steps, and a refused job thread switches the session to
+    /// running its jobs one per `update`. Each emits
+    /// [`SessionEvent::SteppedFallback`] and is counted by
+    /// [`Session::fallbacks`].
+    #[must_use]
+    pub fn thread_start(mut self, start: tutti_platform::ThreadStart) -> Self {
+        self.opts.thread_start = start;
+        self
+    }
+
     /// How the pool runs its loads ([`PoolConfig`](crate::PoolConfig)): how
     /// many worker stages run at once. Default four.
     #[must_use]
@@ -826,7 +849,7 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// How long a modulation target may stay unresolved, measured on
     /// [`PhaseCx::now`](crate::PhaseCx::now), before it is logged and
-    /// reported ([`SessionEvent::Modulation`](crate::SessionEvent::Modulation)).
+    /// reported ([`SessionEvent::Modulation`]).
     /// Default 4 s.
     #[must_use]
     pub fn unresolved_warning(mut self, after: std::time::Duration) -> Self {
@@ -978,11 +1001,12 @@ impl<C: Clock> SessionBuilder<C> {
         let sampler = crate::session::parts::SamplerPart::new(
             streamer,
             parts.graph.prepared().sample_rate(),
-        )?;
+            self.opts.thread_start,
+        );
         let (plugins, _early_work) = crate::session::parts::PluginPart::new(&self.opts.plugins);
         let table = parts.graph.value_table();
         let click_settings = Arc::clone(&parts.click_settings);
-        let session = Session {
+        let mut session = Session {
             values: crate::value::ValueState::new(Arc::clone(&table)),
             _early_work,
             running,
@@ -1006,10 +1030,15 @@ impl<C: Clock> SessionBuilder<C> {
             devices: Default::default(),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
-            jobs: crate::jobs::Jobs::new(self.opts.spawner.clone()),
+            jobs: crate::jobs::Jobs::new(self.opts.spawner.clone(), self.opts.thread_start),
             plugins,
         };
         session.provide_values(&table, click_settings);
+        if session.sampler.fallbacks() > 0 {
+            session.jobs.hold(vec![SessionEvent::SteppedFallback {
+                what: Fallback::Streamer,
+            }]);
+        }
         Ok(session)
     }
 }

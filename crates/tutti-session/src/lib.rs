@@ -275,7 +275,8 @@ pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
 pub use session::MidiNodes;
 pub use session::ModInput;
 pub use session::{
-    AppKey, CrossfadeControls, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent,
+    AppKey, CrossfadeControls, Fallback, PHASES, Phase, PhaseCx, RootTopologyStatus, Session,
+    SessionEvent,
 };
 #[cfg(feature = "device")]
 pub use switch::ClockError;

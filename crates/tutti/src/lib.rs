@@ -200,9 +200,9 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, CrossfadeControls, Edge, EventInPort, EventOutPort,
-    InPort, Job, JobId, JobKind, JobOutput, JobStatus, Key, NoSuchNode, Offline, OfflineSession,
-    OutPort, Playhead, RealTime, Root, Session, SessionBuilder, SessionEvent, SessionFloat,
-    SystemClock, SystemSession, TransportHandle, WaitError, Workers,
+    Fallback, InPort, Job, JobId, JobKind, JobOutput, JobStatus, Key, NoSuchNode, Offline,
+    OfflineSession, OutPort, Playhead, RealTime, Root, Session, SessionBuilder, SessionEvent,
+    SessionFloat, SystemClock, SystemSession, TransportHandle, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{
@@ -326,7 +326,10 @@ pub mod types {
         NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
-    pub use tutti_platform::Panicked;
+    pub use tutti_platform::{
+        Panicked, PriorityOutcome, PriorityRequest, Scheduling, StopToken, ThreadHandle,
+        ThreadStart, start_thread,
+    };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
         LevelSpan, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter, Words,

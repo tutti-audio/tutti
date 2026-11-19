@@ -29,6 +29,29 @@ use std::time::Duration;
 use crate::Instant;
 use crate::priority::{PriorityOutcome, PriorityRequest, request_priority};
 
+/// How a thread starts, as a plain function: [`spawn_named`] for a boxed body
+/// ([`start_thread`]), or a host's own (core affinity, its own naming or priority
+/// policy, a thread registry). An `Err` is the refusal to start.
+pub type ThreadStart = fn(
+    &str,
+    Option<PriorityRequest>,
+    Box<dyn FnOnce(&StopToken) + Send>,
+) -> io::Result<ThreadHandle<()>>;
+
+/// The OS's thread: [`spawn_named`] over a boxed body, the default
+/// [`ThreadStart`].
+///
+/// # Errors
+///
+/// The OS's refusal to start a thread.
+pub fn start_thread(
+    name: &str,
+    priority: Option<PriorityRequest>,
+    body: Box<dyn FnOnce(&StopToken) + Send>,
+) -> io::Result<ThreadHandle<()>> {
+    spawn_named(name, priority, body)
+}
+
 /// A `Mutex`'s guard whether or not a panicking holder poisoned it. Each lock here guards
 /// a flag or `()` that no panic can leave half-written.
 fn lock_recover<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
