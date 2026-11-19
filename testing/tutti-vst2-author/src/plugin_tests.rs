@@ -127,3 +127,29 @@ fn host_callbacks() {
         );
     }
 }
+
+/// A plugin's chunk-**save** failure must be representable through the trait
+/// (`effSetChunk` has no return value to carry a refusal on; `effGetChunk` has the length).
+#[test]
+fn a_chunk_refusal_is_representable() {
+    use crate::api::GetChunkError;
+    use crate::plugin::PluginParameters;
+
+    struct RefusingParams;
+    impl PluginParameters for RefusingParams {
+        fn try_get_preset_data(&self) -> Result<Vec<u8>, GetChunkError> {
+            Err(GetChunkError::Failed(-1))
+        }
+    }
+
+    assert!(
+        RefusingParams.try_get_preset_data().is_err(),
+        "a plugin must be able to report a failed chunk save"
+    );
+
+    // The default must still succeed, so the assertion above is not
+    // satisfied by a blanket failure.
+    struct AcceptingParams;
+    impl PluginParameters for AcceptingParams {}
+    assert_eq!(AcceptingParams.try_get_preset_data(), Ok(Vec::new()));
+}

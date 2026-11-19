@@ -388,7 +388,7 @@ impl MidiSendBuffer {
     /// # Safety
     /// The returned pointer is valid until the next
     /// `Self::stage_piece` call. Caller must hand it to
-    /// `vst::plugin::Plugin::process_events` and not retain it past
+    /// the plugin's `effProcessEvents` and not retain it past
     /// that call.
     fn stage_piece(
         &mut self,
