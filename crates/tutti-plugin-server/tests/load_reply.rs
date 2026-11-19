@@ -94,11 +94,8 @@ fn start_server() -> (Server, Stream) {
 /// [`start_server`], and the socket it serves. The server is this process's
 /// child and takes this process for its host.
 fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
-    // The default config makes a fresh socket path that fits a socket address.
-    let socket = tutti_plugin_ipc::BridgeConfig::at(
-        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-    )
-    .socket_path;
+    // A fresh socket path that fits a socket address.
+    let socket = tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source");
 
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_plugin-server"))
@@ -255,10 +252,7 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     use std::io::BufRead as _;
 
     let (_not_a_plugin, good) = fixtures();
-    let socket = tutti_plugin_ipc::BridgeConfig::at(
-        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-    )
-    .socket_path;
+    let socket = tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source");
     let dir = tempfile::tempdir().expect("a scratch directory");
     let log = dir.path().join("server.log");
     // The shell is the host until its input closes: it states its own pid, prints

@@ -326,13 +326,9 @@ pub trait Chunks {
     /// [`payload`](Self::payload), with its `midi` MIDI events: they never
     /// reach the plugin.
     fn refused(&mut self, _midi: usize) {}
-    /// The plugin's MIDI-out for the chunk the ring now holds, at that
-    /// chunk's frames, sorted: handed over once, as its output starts to
-    /// play.
-    fn midi_out(&mut self, events: &MidiEventVec);
     /// What the plugin said of itself at the end of the chunk the ring now
-    /// holds (CLAP's process status), handed over with its
-    /// [`midi_out`](Self::midi_out). [`BlockStatus::Continue`] when the reply
+    /// holds (CLAP's process status), handed over as its output starts to
+    /// play. [`BlockStatus::Continue`] when the reply
     /// had not arrived by the time the chunk was collected: a status that is
     /// late is not applied, and the caller errs long.
     fn status(&mut self, _status: BlockStatus) {}
@@ -613,8 +609,8 @@ impl Batcher {
     /// be answered — the time the pipeline exists to give the plugin.
     ///
     /// The chunk's MIDI-out comes with it: its reply (and any earlier one that
-    /// missed its own collection, at frame 0) is drained into `reply`, handed
-    /// to `host` once and then emitted as the ring plays it (`process`).
+    /// missed its own collection, at frame 0) is drained into `reply` and
+    /// emitted to `host` as the ring plays it (`process`).
     fn collect(&mut self, bridge: &PluginBridge, host: &mut impl Chunks) {
         self.reply.clear();
         self.said = BlockStatus::Continue;
@@ -647,7 +643,6 @@ impl Batcher {
             e.offset = e.offset.min(last);
         }
         tutti_plugin_types::insertion_sort_by_key(&mut self.reply, |e| e.offset);
-        host.midi_out(&self.reply);
         host.status(self.said);
         self.expect_seq = None;
         self.counters.in_flight.store(0, Ordering::Release);

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use tutti_plugin_types::{MidiEventVec, SampleRate};
 
-use super::{
+use tutti_plugin_types::{
     ChordChanges, NoteExpressionChanges, NoteExpressionIntChanges, NoteExpressionTextChanges,
     ParameterChanges, ScaleChanges, TransportChanges, TransportInfo,
 };
@@ -88,11 +88,11 @@ mod tests {
     /// dimension), a chord, a scale, a note-expression text and an integer
     /// expression.
     fn full_block() -> ProcessAudioData {
-        use crate::protocol::ParamId;
         use tutti_plugin_types::{
             ChordValue, NoteExpressionIntValue, NoteExpressionTextValue, NoteExpressionType,
             NoteExpressionValue, ScaleValue,
         };
+        use tutti_units::ParamId;
         let mut param_changes = ParameterChanges::reserved(2, 2);
         param_changes.add_change(ParamId::new(3), 0, 0.25);
         param_changes.add_change(ParamId::new(3), 32, 0.75);

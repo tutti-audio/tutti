@@ -58,9 +58,10 @@ mod wake;
 mod process_pipeline_tests;
 
 pub(crate) use batcher::Batcher;
-pub use batcher::{BlockPayload, Chunks};
+pub(crate) use batcher::{BlockPayload, Chunks};
 pub(crate) use client::audio::BridgeListener;
-pub use client::audio::{BridgeEvent, BridgeThread, HarmonyInputs, Submitted};
+pub(crate) use client::audio::HarmonyInputs;
+pub use client::audio::{BridgeEvent, BridgeThread};
 pub(crate) use client::audio::{FATES, Fate};
 pub use client::{EditorLoader, PluginBridge};
 pub(crate) use wake::Wake;
@@ -68,9 +69,7 @@ pub(crate) use wake::Wake;
 // fills it the way the node does.
 #[doc(hidden)]
 pub use client::audio::{PARAM_BUFFERS, PayloadPool};
-pub use config::{
-    AudioConfig, BridgeConfig, CatalogConfig, NO_SCAN_DIRS, RandomSourceError, unique_socket_path,
-};
+pub use config::{AudioConfig, BridgeConfig, CatalogConfig, RandomSourceError, unique_socket_path};
 pub use error::PluginRenderFault;
 pub use ipc::{Ipc, IpcController, IpcOrigin, IpcParts, IpcProcessor, Launched};
 pub use offline_wait::OfflineWait;
@@ -81,7 +80,8 @@ pub use protocol::{
     STATE_CHUNK_BYTES, SlabLayout, StagedState,
 };
 pub use server_watch::ServerWatch;
-pub use subprocess::{LaunchedServer, Reaped, launch};
+pub use subprocess::Reaped;
+pub(crate) use subprocess::launch;
 pub use transport::control::socket_name;
 pub use transport::shm::{AudioSlab, RING_SLOTS, SlabWriter};
 // Splitting and reassembling plugin state across frames: both ends must chunk

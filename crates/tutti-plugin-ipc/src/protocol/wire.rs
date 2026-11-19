@@ -310,8 +310,10 @@ mod tests {
     /// desync between two binaries built apart.
     #[test]
     fn typed_parameter_and_rate_fields_keep_their_wire_widths() {
-        use crate::protocol::{BridgeMessage, HostMessage, ParamEdit, ParamId};
+        use crate::{BridgeMessage, HostMessage};
+        use tutti_plugin_types::ParamEdit;
         use tutti_units::Normalized;
+        use tutti_units::ParamId;
         use tutti_units::SampleRate;
 
         let set = HostMessage::SetParameter {
@@ -388,7 +390,7 @@ mod tests {
     /// never reach the server's clock or a plugin.
     #[test]
     fn a_rate_that_is_no_rate_does_not_decode() {
-        use crate::protocol::HostMessage;
+        use crate::HostMessage;
         for bad in [
             0.0f64,
             -48_000.0,
@@ -421,7 +423,7 @@ mod tests {
     /// scale an `f64`, a parent an `Option<u64>`.
     #[test]
     fn the_editor_messages_follow_every_earlier_variant() {
-        use crate::protocol::{BridgeMessage, HostMessage};
+        use crate::{BridgeMessage, HostMessage};
         use dpi::{LogicalSize, PhysicalSize, Size};
         use tutti_plugin_types::ContentScale;
 
@@ -504,7 +506,7 @@ mod tests {
     /// logical one decode.
     #[test]
     fn a_bad_logical_size_is_refused_on_decode() {
-        use crate::protocol::{BridgeMessage, HostMessage};
+        use crate::{BridgeMessage, HostMessage};
         use dpi::{LogicalSize, PhysicalSize, Size};
 
         let logical = |w: f64, h: f64| Size::Logical(LogicalSize::new(w, h));
@@ -543,8 +545,9 @@ mod tests {
 
     #[test]
     fn a_normalized_outside_the_unit_range_is_refused() {
-        use crate::protocol::{BridgeMessage, HostMessage, ParamId};
+        use crate::{BridgeMessage, HostMessage};
         use tutti_units::Normalized;
+        use tutti_units::ParamId;
         let set_message = |raw: f64| {
             // variant 3, id 1 (one varint byte each), then the f64.
             let mut bytes = vec![3, 1];

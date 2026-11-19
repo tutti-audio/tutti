@@ -7,6 +7,7 @@ use dpi::Size;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_plugin_types::{PluginFailure, Timeouts};
+use tutti_rt::LockExt;
 use tutti_units::SampleRate;
 
 #[derive(Clone)]
@@ -59,29 +60,27 @@ impl Lifecycle {
     }
 
     /// Records the render mode the host has just queued for the plugin.
-    pub(super) fn set_render_mode(&self, mode: crate::protocol::RenderMode) {
+    pub(super) fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) {
         self.offline.store(mode.is_offline(), Ordering::Release);
     }
 
     /// The render mode the host last queued: realtime until it says otherwise.
-    pub(super) fn render_mode(&self) -> crate::protocol::RenderMode {
+    pub(super) fn render_mode(&self) -> tutti_plugin_types::RenderMode {
         if self.offline.load(Ordering::Acquire) {
-            crate::protocol::RenderMode::Offline
+            tutti_plugin_types::RenderMode::Offline
         } else {
-            crate::protocol::RenderMode::Realtime
+            tutti_plugin_types::RenderMode::Realtime
         }
     }
 
     /// The server's editor asked for `size`; the latest ask stands.
     pub(super) fn set_editor_wants(&self, size: Size) {
-        if let Ok(mut slot) = self.editor_wants.lock() {
-            *slot = Some(size);
-        }
+        *self.editor_wants.lock_recover() = Some(size);
     }
 
     /// The size the server's editor asked for since the last call.
     pub(super) fn take_editor_wants(&self) -> Option<Size> {
-        self.editor_wants.lock().ok().and_then(|mut s| s.take())
+        self.editor_wants.lock_recover().take()
     }
 
     /// The server closed its editor itself.
@@ -101,7 +100,7 @@ impl Lifecycle {
 
     /// The refused rate (Hz) and the plugin's reason, while one stands.
     pub(super) fn rate_refusal(&self) -> Option<(SampleRate, String)> {
-        self.refusal.lock().ok().and_then(|r| r.clone())
+        self.refusal.lock_recover().clone()
     }
 
     /// Whether a refused rate stands. Wait-free: no lock, no allocation.
@@ -110,11 +109,9 @@ impl Lifecycle {
     }
 
     pub(super) fn set_rate_refusal(&self, refusal: Option<(SampleRate, String)>) {
-        if let Ok(mut slot) = self.refusal.lock() {
-            let refused = refusal.is_some();
-            *slot = refusal;
-            self.refused.store(refused, Ordering::Release);
-        }
+        let refused = refusal.is_some();
+        *self.refusal.lock_recover() = refusal;
+        self.refused.store(refused, Ordering::Release);
     }
 
     /// Whether the server is gone, by any signal. Wait-free.
