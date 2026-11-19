@@ -140,7 +140,10 @@ impl<F: SamplerFloat> Clip<F> {
         Ok(self)
     }
 
-    /// Starts the clip at `start` on the timeline.
+    /// Starts the clip at `start` on the timeline. A clip's node is placed
+    /// from the start; its window can be published away
+    /// ([`VoiceNodeHandle::window_cell`]), which frees it to run on its own
+    /// cursor, forwards or backwards as built, unstretched.
     pub fn at(mut self, start: Beat) -> Self {
         self.window.start = start;
         self

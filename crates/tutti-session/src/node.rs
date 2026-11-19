@@ -411,6 +411,13 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode
         Some(controls.params().clone())
     }
 
+    fn slots(node: NodeKey, controls: &tutti_sampler::VoiceNodeHandle<F>) -> NodeSlots {
+        NodeSlots::of(
+            crate::value::SlotId::Window(node),
+            crate::value::PublishedSlot::new(controls.window_cell().clone()),
+        )
+    }
+
     fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Reclaims {
         Reclaims::of(controls)
     }
@@ -457,6 +464,13 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
 
     fn params(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Option<ParamSet> {
         Some(controls.params().clone())
+    }
+
+    fn slots(node: NodeKey, controls: &tutti_sampler::VoiceNodeHandle<F>) -> NodeSlots {
+        NodeSlots::of(
+            crate::value::SlotId::Window(node),
+            crate::value::PublishedSlot::new(controls.window_cell().clone()),
+        )
     }
 
     fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Reclaims {

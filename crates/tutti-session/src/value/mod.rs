@@ -63,6 +63,8 @@ pub use range::RangeTarget;
 pub(crate) use range::{Bounds, RangeSlot};
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
+#[cfg(feature = "sampler")]
+pub use slot::WindowTarget;
 pub(crate) use slot::{
     Cell, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotCell, SlotId, TempoCell,
 };

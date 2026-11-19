@@ -241,24 +241,35 @@ fn play_pool(pool: &mut VoicePool<f32>, streamer: &mut DiskStreamer<ByHand<f32>,
     out
 }
 
-/// **The handle sets a memory voice's speed and stops and resumes it.** At
-/// speed 2 the voice reads every second file frame; stopped it is silent and
-/// reads nothing, and it resumes where the transport is.
+/// **The handle sets a memory voice's speed, and stops and resumes a
+/// free-running one.** At speed 2 the voice reads every second file frame; a
+/// placed voice refuses `stop` and `play`; a free-running one, stopped, is
+/// silent and reads nothing, and resumes where its cursor stopped.
 #[test]
-fn a_node_handle_sets_speed_and_stops_and_resumes_the_voice() {
+fn a_node_handle_sets_speed_and_stops_and_resumes_a_free_running_voice() {
     let (mut node, handle) = memory_node();
     handle.set_speed(PlaybackRate::new(2.0));
     let got = render_with(&mut node, 400);
     assert_frames("speed 2", &got, |n| 2 * n);
+    assert_eq!(handle.stop(), Err(tutti_sampler::PlayError::Placed));
+    assert_eq!(handle.play(), Err(tutti_sampler::PlayError::Placed));
 
-    let (mut node, handle) = memory_node();
+    let source = MemorySource::new(ramp()).expect("a placeable wave");
+    let (mut node, handle) = VoiceNode::with_channels(
+        tutti_sampler::Voice {
+            source: VoiceSource::Memory(source),
+            play: Playback::default(),
+        },
+        tutti_buffers::ChannelLayout::MONO,
+    )
+    .with_handle();
     node = tutti_sampler::testing::prepared(node, RATE, BLOCK);
     let t = rolling();
     let mut heard = Vec::new();
     for block in 0..6 {
         match block {
-            2 => handle.stop(),
-            4 => handle.play(),
+            2 => handle.stop().expect("a free-running voice"),
+            4 => handle.play().expect("a free-running voice"),
             _ => {}
         }
         heard.extend(tutti_sampler::testing::block(&mut node, &t, RATE, BLOCK).swap_remove(0));
@@ -267,10 +278,123 @@ fn a_node_handle_sets_speed_and_stops_and_resumes_the_voice() {
     assert!(handle.is_playing());
     for (n, &g) in heard.iter().enumerate() {
         let stopped = (2 * BLOCK..4 * BLOCK).contains(&n);
-        let want = if stopped { 0.0 } else { value(n) };
+        let cursor = if n >= 4 * BLOCK { n - 2 * BLOCK } else { n };
+        let want = if stopped { 0.0 } else { value(cursor) };
         assert!(
             (g - want).abs() < 1e-6,
             "frame {n}: {g}, want {want} (stopped: {stopped})"
         );
     }
+}
+
+/// A free-running (unplaced) memory voice node over the ramp, built as `play`
+/// says.
+fn free_node(play: Playback) -> VoiceNode<f32> {
+    let mut source = MemorySource::new(ramp()).expect("a placeable wave");
+    source.set_loop(play.loop_);
+    VoiceNode::with_channels(
+        tutti_sampler::Voice {
+            source: VoiceSource::Memory(source),
+            play,
+        },
+        tutti_buffers::ChannelLayout::MONO,
+    )
+}
+
+/// **A reversed free-running voice plays the ramp backwards from its last
+/// frame**: output frame `n` is file frame `LEN - 1 - n`, and the voice is
+/// silent past the file's first frame.
+#[test]
+fn a_reversed_free_running_voice_plays_the_ramp_backwards() {
+    let mut node = free_node(Playback {
+        direction: Direction::Reverse,
+        ..Playback::default()
+    });
+    let got = render_with(&mut node, LEN + 128);
+    assert_frames("reversed", &got[..LEN], |n| LEN - 1 - n);
+    assert!(
+        got[LEN..].iter().all(|&g| g == 0.0),
+        "silent past the start"
+    );
+}
+
+/// **A looped free-running voice wraps its own cursor at the loop's end**:
+/// output frame `n` is file frame `looped_frame(n, 300, 700)`.
+#[test]
+fn a_looped_free_running_voice_wraps_at_the_loops_end() {
+    let mut node = free_node(Playback {
+        loop_: Some(loop_frames(300, 700, 0)),
+        ..Playback::default()
+    });
+    let got = render_with(&mut node, FRAMES);
+    assert_frames("looped", &got, |n| looped_frame(n, 300, 700));
+}
+
+/// **A pool refuses a stretch for a free-running voice at the call**, on the
+/// add and on a later stretch, and takes it once the voice is placed.
+#[test]
+fn a_free_running_voice_refuses_stretch_until_it_is_placed() {
+    use tutti_units::{Cents, StretchFactor};
+    let (_pool, handle) = VoicePool::new().with_handle();
+    let id = tutti_sampler::SlotId(1);
+    let stretched = Playback {
+        stretch: StretchFactor::new(2.0),
+        ..Playback::default()
+    };
+    let free = || MemorySource::new(ramp()).expect("a placeable wave");
+    assert_eq!(
+        handle.add(id, free(), stretched),
+        Err(tutti_sampler::SendError::FreeRunning)
+    );
+    handle
+        .add(id, free(), Playback::default())
+        .expect("a plain free-running voice");
+    assert_eq!(
+        handle.set_stretch(id, StretchFactor::new(2.0), Cents::new(0.0)),
+        Err(tutti_sampler::SendError::FreeRunning)
+    );
+    handle.set_window(id, window()).expect("room");
+    handle
+        .set_stretch(id, StretchFactor::new(2.0), Cents::new(0.0))
+        .expect("a placed voice stretches");
+}
+
+/// **`play` starts a free-running voice a reset left stopped**: after the
+/// node is reset (which rewinds and stops its cursor) it is silent until
+/// `play`, which sounds it from the ramp's first frame. The transport rolls on
+/// across the blocks, so nothing else flushes the voice.
+#[test]
+fn play_restarts_a_free_running_voice_after_a_reset() {
+    use tutti_graph::Node;
+    let (node, handle) = free_node(Playback::default()).with_handle();
+    let mut node = tutti_sampler::testing::prepared(node, RATE, BLOCK);
+    let t = rolling();
+    let block = |node: &mut VoiceNode<f32>| {
+        let out = tutti_sampler::testing::block(node, &t, RATE, BLOCK).swap_remove(0);
+        t.advance(BLOCK as i64, RATE);
+        out
+    };
+    assert_frames("before the reset", &block(&mut node), |n| n);
+    node.reset();
+    assert!(
+        block(&mut node).iter().all(|&g| g == 0.0),
+        "stopped by the reset"
+    );
+    handle.play().expect("a free-running voice");
+    assert_frames("after play", &block(&mut node), |n| n);
+}
+
+/// **A free-running voice built with a stretch plays dry, not silent**: a
+/// node built directly with a stretch in its `Playback` has no way to refuse
+/// it, and the stretch path reads the transport's clock, which the voice does
+/// not have. It reads its own cursor, unstretched: output frame `n` is file
+/// frame `n`, bit for bit.
+#[test]
+fn a_free_running_voice_built_with_a_stretch_plays_the_ramp_dry() {
+    let mut node = free_node(Playback {
+        stretch: tutti_units::StretchFactor::new(2.0),
+        ..Playback::default()
+    });
+    let got = render_with(&mut node, 1_000);
+    assert_frames("dry", &got, |n| n);
 }

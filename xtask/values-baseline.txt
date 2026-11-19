@@ -15,8 +15,8 @@ unit  crates/tutti-session/src/graph.rs::Graph::set_sample_rate  the graph's pre
 setter  crates/tutti-session/src/graph.rs::Graph::set_sources  wiring, a declaration: goes with the wiring declarations (11b)
 setter  crates/tutti-session/src/graph.rs::Graph::set_sources_hard  wiring, a declaration: goes with the wiring declarations (11b)
 setter  crates/tutti-session/src/graph/testing.rs::AudioSide::set_transport  a hand-driven transport for the detached graph, behind feature `testing`: goes with the transport target (7d)
-setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback  a MIDI routing declaration (7c)
-setter  crates/tutti-session/src/midi.rs::Midi::set_routes  a MIDI routing declaration (7c)
+setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback  goes with the MIDI routing declarations (11b)
+setter  crates/tutti-session/src/midi.rs::Midi::set_routes  goes with the MIDI routing declarations (11b)
 setter  crates/tutti-session/src/modulation.rs::Mods::set_source  which source a route reads, a declaration: goes at 11e
 setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain  a plugin param's peer path (7a S6)
 setter  crates/tutti-session/src/plugin_params.rs::Param::set_text  a plugin param's peer path (7a S6)
