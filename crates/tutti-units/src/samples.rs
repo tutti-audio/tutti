@@ -35,7 +35,7 @@ unit! {
     /// Integer by construction. Distinct from `SamplePosition`, which is an `f64`
     /// *position* within a wave that may be fractional so interpolating readers can
     /// address between two integer sample indices.
-    pub struct Samples(pub usize): Display;
+    pub struct Samples(usize): Display;
 }
 
 impl Samples {

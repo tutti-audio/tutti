@@ -199,7 +199,7 @@ unit! {
     /// audible as automation stair-stepping in a long session. `TransportClock`
     /// splits the beat across two `f32` ports precisely to dodge that; the
     /// scalar form must not reintroduce it.
-    pub struct Beat(pub f64): Unit, Ordered, Bounded, Affine(BeatDuration);
+    pub struct Beat(f64): Unit, Ordered, Bounded, Affine(BeatDuration);
 }
 // NOT `Additive`: `Beat + Beat` has no meaning without an origin.
 // NOT `Scalable`: scaling a position depends on where zero is — scale the
@@ -266,7 +266,7 @@ unit! {
     /// this one asks "what does playing at the right pitch cost?", the other
     /// "how fast does the user want it?". They compose (see
     /// [`PlaybackRate::read_rate`]) but must not be confused for one another.
-    pub struct SrcRatio(pub f64): Unit, Ordered, Bounded;
+    pub struct SrcRatio(f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable` / `Additive`: a conversion ratio is derived from
 // two sample rates, never scaled or summed. Re-derive it instead.
@@ -311,7 +311,7 @@ unit! {
     /// accepts an out-of-range speed the other rejects — same command,
     /// different audio. A newtype alone does not close that; the shared
     /// constructor does.
-    pub struct PlaybackRate(pub f64): Unit, Ordered, Bounded;
+    pub struct PlaybackRate(f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive`: 2× plus 2× is not 4× — rates compose by multiplication.
 // NOT `Scalable`: scaling by a bare `f64` is how the three rate kinds got
@@ -368,7 +368,7 @@ unit! {
     /// million times must not drift, and widening here is what keeps the
     /// accumulation exact. As a type of its own, it cannot be mixed up with a
     /// file sample rate, nor have `src_ratio` applied to it a second time.
-    pub struct ReadRate(pub f64): Unit, Ordered, Bounded;
+    pub struct ReadRate(f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable` / `Additive`: see the type docs. The whole point is
 // that the ONE legal multiplication is by a sample count, and it is named.
@@ -412,7 +412,7 @@ unit! {
     /// 2.0 plays twice as long at unchanged pitch — time-stretching, not
     /// resampling. For the kind that couples pitch to duration,
     /// see [`PlaybackRate`].
-    pub struct StretchFactor(pub f64): Unit, Ordered, Bounded;
+    pub struct StretchFactor(f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive` / `Scalable`: same reasoning as `PlaybackRate` —
 // stretch factors compose by multiplication, and a bare-scalar `*` invites
@@ -446,7 +446,7 @@ unit! {
     /// between two integer sample indices. `f64`-backed because sample offsets
     /// into long buffers routinely exceed `f32`'s integer-precision range and
     /// the fractional part must survive sample-accurate arithmetic.
-    pub struct SamplePosition(pub f64): Unit, Ordered, Bounded, Additive, Scalable;
+    pub struct SamplePosition(f64): Unit, Ordered, Bounded, Additive, Scalable;
 }
 // Self-closed rather than paired with a duration type: `Samples`
 // (samples.rs) is the frame-count vocabulary but is `usize`-backed, and
@@ -537,7 +537,7 @@ unit! {
     /// Distinct from [`Beat`]: subtracting one position from another
     /// yields a duration, not a position. `f64`-backed to match beat-position
     /// precision.
-    pub struct BeatDuration(pub f64):
+    pub struct BeatDuration(f64):
         Unit, Ordered, Bounded, Additive, Signed, Scalable, Ratio, Modular;
 }
 // `dur / dur -> f64` answers "how many of these fit", which is how a beat span
