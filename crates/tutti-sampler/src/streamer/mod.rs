@@ -39,7 +39,6 @@ pub(crate) use cells::Cells;
 pub use command::StreamId;
 pub(crate) use command::StreamerCommand;
 pub(crate) use config::BufferConfig;
-#[cfg(any(test, feature = "testing"))]
 pub use loops::GUARD_FRAMES;
 #[cfg(test)]
 pub(crate) use loops::RingControl;

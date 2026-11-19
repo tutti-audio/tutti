@@ -48,6 +48,11 @@ const BODY_MAX_FRAMES: usize = 1 << 16;
 
 /// How far past the in-flight block a rewrite may start, in frames: room for
 /// the streamer to rewrite before the reader gets there.
+///
+/// It is the latency of a change to a streamed voice's loop or direction
+/// ([`Stream::looping_cell`](crate::Stream::looping_cell)): a change near the
+/// playhead is heard this many frames past the block being played, crossfaded
+/// over `DiskStreamerConfig`'s seek crossfade.
 pub const GUARD_FRAMES: u64 = 256;
 
 /// Frames of old material a [`FadeRecord`] carries past the fade itself: what

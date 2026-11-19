@@ -196,7 +196,7 @@ impl<F: RingFloat> Stream<F> {
     /// A publish rings the streamer's bell, and the streamer reads the cell
     /// at the start of its next cycle and applies a change there, even when
     /// it was parked with nothing else to do. A change near
-    /// the playhead is heard about 256 frames past the block being played,
+    /// the playhead is heard [`GUARD_FRAMES`](crate::GUARD_FRAMES) past the block being played,
     /// crossfaded over the stream's seek crossfade
     /// (`DiskStreamerConfig::seek_crossfade_frames`) from what the old loop
     /// would have played; one further ahead, exactly where the memory tier
