@@ -87,7 +87,7 @@ pub use channels::Replies;
 pub(crate) use channels::response_ring;
 pub(crate) use channels::{FATES, Fate};
 use lifecycle::Lifecycle;
-use messages::{AudioResponse, Command};
+use messages::{AudioCommand, AudioResponse, ControlCommand};
 use parking_lot::Mutex;
 pub use payload_pool::{PARAM_BUFFERS, PayloadPool};
 use progress::StateProgress;
@@ -401,7 +401,7 @@ impl AudioBridge {
         !self.lifecycle.is_crashed()
             && self
                 .channels
-                .push_command(Command::SetParameter { param_id, value })
+                .push_control(ControlCommand::SetParameter { param_id, value })
     }
 
     /// Queue an automation-state push, saying **why** if it did not go.
@@ -424,7 +424,7 @@ impl AudioBridge {
         }
         if self
             .channels
-            .push_command(Command::SetAutomationState { mode })
+            .push_control(ControlCommand::SetAutomationState { mode })
         {
             Delivered::Yes
         } else {
@@ -436,7 +436,7 @@ impl AudioBridge {
     /// did not go. Main thread: the value is boxed here, off the audio thread.
     pub(crate) fn set_track_info(&self, info: &tutti_plugin_types::TrackInfo) -> Delivered {
         delivery(self.lifecycle.is_crashed(), || {
-            self.channels.push_command(Command::SetTrackInfo {
+            self.channels.push_control(ControlCommand::SetTrackInfo {
                 info: Box::new(info.clone()),
             })
         })
@@ -447,7 +447,10 @@ impl AudioBridge {
         // Publish before queueing, so both the staleness bound and
         // the bridge thread's reply timeout track the new period from here on.
         self.channels.set_sample_rate(rate);
-        !self.lifecycle.is_crashed() && self.channels.push_command(Command::SetSampleRate { rate })
+        !self.lifecycle.is_crashed()
+            && self
+                .channels
+                .push_control(ControlCommand::SetSampleRate { rate })
     }
 
     /// Queue a render-mode change for the plugin.
@@ -460,7 +463,9 @@ impl AudioBridge {
     /// to audio the caller thought was already rendered.
     pub fn set_render_mode_rt(&self, mode: tutti_plugin_types::RenderMode) -> bool {
         let queued = !self.lifecycle.is_crashed()
-            && self.channels.push_command(Command::SetRenderMode { mode });
+            && self
+                .channels
+                .push_control(ControlCommand::SetRenderMode { mode });
         if queued {
             self.lifecycle.set_render_mode(mode);
         }
@@ -485,7 +490,7 @@ impl AudioBridge {
     /// Queues a reset of the plugin's processing state. Realtime-safe; `false`
     /// when it was not queued.
     pub(crate) fn reset_rt(&self) -> bool {
-        !self.lifecycle.is_crashed() && self.channels.push_command(Command::Reset)
+        !self.lifecycle.is_crashed() && self.channels.push_block(AudioCommand::Reset)
     }
 
     // --- RT submit (fire-and-forget) ---
@@ -557,14 +562,14 @@ impl AudioBridge {
         // block is judged against a stale `newest` and dropped as if it were two
         // blocks old.
         self.channels.note_submitted(seq);
-        match self.channels.try_push_command(Command::Process(payload)) {
+        match self.channels.try_push_block(AudioCommand::Process(payload)) {
             Ok(()) if params => Submitted::BlockAndParams,
             Ok(()) => Submitted::Block,
             Err(cmd) => {
                 // Refused (the queue is full): hand the changes back to the
                 // caller and the buffers back to their pools, rather than
                 // dropping (freeing) them on this thread.
-                if let Command::Process(mut payload) = cmd {
+                if let AudioCommand::Process(mut payload) = cmd {
                     if !payload.param_changes.queues.is_empty() {
                         std::mem::swap(param_changes, &mut payload.param_changes);
                     }
@@ -592,7 +597,7 @@ impl AudioBridge {
         }
         let progress = StateProgress::new(self.lifecycle.timeouts());
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().state_wait(), |reply| {
-            Command::SaveState {
+            ControlCommand::SaveState {
                 state_use,
                 progress: progress.clone(),
                 reply,
@@ -637,7 +642,7 @@ impl AudioBridge {
         }
         let progress = StateProgress::new(self.lifecycle.timeouts());
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().state_wait(), |reply| {
-            Command::LoadState {
+            ControlCommand::LoadState {
                 state_use,
                 data: data.to_vec(),
                 progress: progress.clone(),
@@ -663,14 +668,14 @@ impl AudioBridge {
     fn request<T>(
         &self,
         slot_wait: Duration,
-        make: impl FnOnce(Reply<T>) -> Command,
+        make: impl FnOnce(Reply<T>) -> ControlCommand,
     ) -> Option<Ask<T>> {
         let Some((waiting, reply)) = self.channels.owing().ask(slot_wait) else {
             self.channels.note_command_refused();
             return None;
         };
         // A refused push drops the command and its reply with it: the slot is free.
-        self.channels.push_command(make(reply)).then_some(waiting)
+        self.channels.push_control(make(reply)).then_some(waiting)
     }
 
     /// Why a state request was refused: a crashed bridge (its queue is drained
@@ -703,7 +708,7 @@ impl AudioBridge {
             return Err(EditorError::PluginCrashed);
         }
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().editor_wait(), |reply| {
-            Command::OpenEditor {
+            ControlCommand::OpenEditor {
                 parent,
                 scale,
                 reply,
@@ -724,7 +729,7 @@ impl AudioBridge {
     /// Closes the server's editor. No answer: `false` when the command could
     /// not be queued.
     pub(crate) fn close_editor_in_server(&self) -> bool {
-        !self.lifecycle.is_crashed() && self.channels.push_command(Command::CloseEditor)
+        !self.lifecycle.is_crashed() && self.channels.push_control(ControlCommand::CloseEditor)
     }
 
     /// Asks the server's editor to take `size`, and answers with the size it
@@ -741,7 +746,7 @@ impl AudioBridge {
             return Err(EditorError::PluginCrashed);
         }
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().editor_wait(), |reply| {
-            Command::SetEditorSize { size, reply }
+            ControlCommand::SetEditorSize { size, reply }
         }) else {
             return Err(EditorError::Busy);
         };
@@ -772,7 +777,7 @@ impl AudioBridge {
             return None;
         }
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::GetParameterList { reply }
+            ControlCommand::GetParameterList { reply }
         })?;
         await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
             .ok()
@@ -788,7 +793,7 @@ impl AudioBridge {
             return None;
         }
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::GetPresetList { reply }
+            ControlCommand::GetPresetList { reply }
         })?;
         await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
             .ok()
@@ -803,7 +808,7 @@ impl AudioBridge {
             return false;
         }
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::LoadPreset { id, reply }
+            ControlCommand::LoadPreset { id, reply }
         }) else {
             return false;
         };
@@ -819,7 +824,7 @@ impl AudioBridge {
             return false;
         }
         let Some(ask_resp) = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::SetupSharedMemory {
+            ControlCommand::SetupSharedMemory {
                 shm_name,
                 layout,
                 reply,
@@ -871,7 +876,7 @@ impl AudioBridge {
             return None;
         }
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::GetCurrentPreset { reply }
+            ControlCommand::GetCurrentPreset { reply }
         })?;
         await_reply(ask_resp, timeout).ok().flatten()
     }
@@ -884,7 +889,7 @@ impl AudioBridge {
             return None;
         }
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::GetParameter { param_id, reply }
+            ControlCommand::GetParameter { param_id, reply }
         })?;
         await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
             .ok()
@@ -899,7 +904,7 @@ impl AudioBridge {
             return None;
         }
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::GetParameterPlain {
+            ControlCommand::GetParameterPlain {
                 param_id,
                 value,
                 reply,
@@ -916,7 +921,7 @@ impl AudioBridge {
             return None;
         }
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::GetParameterNormalized {
+            ControlCommand::GetParameterNormalized {
                 param_id,
                 plain,
                 reply,
@@ -937,7 +942,7 @@ impl AudioBridge {
             return None;
         }
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::GetParameterText {
+            ControlCommand::GetParameterText {
                 param_id,
                 value,
                 reply,
@@ -962,7 +967,7 @@ impl AudioBridge {
             return None;
         }
         let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            Command::GetParameterValueFromText {
+            ControlCommand::GetParameterValueFromText {
                 param_id,
                 text: text.to_string(),
                 reply,
@@ -1018,7 +1023,7 @@ mod tests {
         });
         assert_eq!(submitted, Submitted::Refused);
         assert_eq!(refusals.get(), before + 1, "the refusal is counted");
-        assert!(bridge.channels.pop_command().is_none(), "nothing queued");
+        assert!(bridge.channels.pop_block().is_none(), "nothing queued");
     }
 
     /// **A full command queue is `Busy`, not a crash**. A bridge
@@ -1041,7 +1046,7 @@ mod tests {
             listener: Arc::new(Mutex::new(None)),
             responses_lost: channels::response_ring().2,
         };
-        while bridge.channels.push_command(Command::Reset) {}
+        while bridge.channels.push_control(ControlCommand::CloseEditor) {}
 
         assert_eq!(
             bridge.save_state(tutti_plugin_types::StateUse::Project),

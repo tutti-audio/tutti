@@ -1,14 +1,14 @@
 //! The bridge thread — connects to the plugin-server's RT socket and
-//! pumps [`Command`]s through [`handle`]. Runs entirely on one OS
+//! pumps its two lanes' commands through `handle_audio` and `handle_control`. Runs entirely on one OS
 //! thread; all IPC calls are blocking.
 
 use super::ListenerSlot;
 #[cfg(test)]
 use super::channels::response_ring;
 use super::channels::{BridgeSide, Channels, ResponseWriter};
-use super::dispatch::{Lane, Lanes, Owed, handle};
+use super::dispatch::{Lane, Lanes, Owed, handle_audio, handle_control, read_news};
 use super::lifecycle::Lifecycle;
-use super::messages::{AudioResponse, BridgeEvent, Command, Unsolicited};
+use super::messages::{AudioCommand, AudioResponse, BridgeEvent, Unsolicited};
 use super::payload_pool::PayloadPool;
 use crate::HostMessage;
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
@@ -258,15 +258,26 @@ fn pump(
     // buffer for the connection, handed to the listener after each command.
     let mut inbox = Unsolicited::with_lifecycle(lifecycle.clone());
     while live(lifecycle) {
-        let cmd = match channels.pop_command() {
-            Some(cmd) => cmd,
-            None => match wait.wait(&lanes.control.stream, None) {
+        let result = if let Some(cmd) = channels.pop_block() {
+            handle_audio(cmd, &mut lanes.audio, channels, payloads, &mut inbox).and_then(|()| {
+                // The plugin's news arrives on the control lane, which a block
+                // does not read: take what is there between blocks.
+                if ipc::has_pending(&lanes.control.stream) {
+                    read_news(&mut lanes.control, channels, &mut inbox)
+                } else {
+                    Ok(())
+                }
+            })
+        } else if let Some(cmd) = channels.pop_control() {
+            handle_control(cmd, &mut lanes.control, channels, &mut inbox, lifecycle)
+        } else {
+            match wait.wait(&lanes.control.stream, None) {
                 // The server spoke: read the lane.
                 Ok(woken) if woken.stream => {
                     channels.set_news();
-                    Command::Drain
+                    read_news(&mut lanes.control, channels, &mut inbox)
                 }
-                // A ring: look at the queue and the stop condition again.
+                // A ring: look at the queues and the stop condition again.
                 Ok(_) => continue,
                 Err(e) => {
                     crash(
@@ -278,15 +289,10 @@ fn pump(
                     drain_with_errors(channels);
                     return;
                 }
-            },
+            }
         };
-        let draining = matches!(cmd, Command::Drain);
-
-        let result = handle(cmd, lanes, channels, payloads, &mut inbox, lifecycle);
         drain_unsolicited(&mut inbox, channels, listener);
-        if draining {
-            channels.clear_news();
-        }
+        channels.clear_news();
         channels.turn_done();
 
         if let Err(e) = result {
@@ -382,8 +388,8 @@ fn drain_unsolicited(inbox: &mut Unsolicited, channels: &Channels, listener: &Li
 /// so its MIDI is counted dropped; nothing can splice past it, as the server
 /// is gone.
 fn drain_with_errors(channels: &mut BridgeSide) {
-    while let Some(cmd) = channels.pop_command() {
-        if let Command::Process(payload) = &cmd {
+    while let Some(cmd) = channels.pop_block() {
+        if let AudioCommand::Process(payload) = &cmd {
             channels.note_dropped_midi(payload.midi_events.len() as u64);
         }
         channels.push_audio_response(AudioResponse::Error { seq: None });
@@ -419,10 +425,10 @@ mod tests {
                     ump: midi::note_on(MidiChannel::FIRST, 60, 1),
                 });
             }
-            assert!(channels.push_command(Command::Process(payload)));
+            assert!(channels.push_block(AudioCommand::Process(payload)));
         }
         drain_with_errors(&mut channels);
-        assert!(channels.pop_command().is_none());
+        assert!(channels.pop_block().is_none());
         assert_eq!(channels.dropped_midi_cell().get(), 5);
     }
 
@@ -446,7 +452,7 @@ mod tests {
                 ump: midi::note_on(MidiChannel::FIRST, 60, 1),
             });
         }
-        assert!(channels.push_command(Command::Process(payload)));
+        assert!(channels.push_block(AudioCommand::Process(payload)));
         let socket =
             std::env::temp_dir().join(format!("tutti-no-such-bridge-{}.sock", std::process::id()));
         run_thread(
@@ -463,7 +469,7 @@ mod tests {
             socket,
         );
         assert!(lifecycle.is_crashed());
-        assert!(channels.pop_command().is_none());
+        assert!(channels.pop_block().is_none());
         assert_eq!(channels.dropped_midi_cell().get(), 4);
     }
 

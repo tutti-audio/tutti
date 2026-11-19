@@ -13,7 +13,7 @@
 //! contract.
 
 use super::ask::ControlSlot;
-use super::messages::{AudioResponse, Command};
+use super::messages::{AudioCommand, AudioResponse, ControlCommand};
 use crate::transport::control::{ControlBell, ControlWait, control_bell};
 use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ use tutti_rt::{
 };
 use tutti_units::SampleRate;
 
-/// How many commands the audio thread can queue before `push_command` fails.
+/// How many commands each lane's queue holds before a push fails.
 /// This also bounds how many `Process` payloads can be outstanding at once,
 /// which is why [`super::payload_pool::PayloadPool`] sizes itself from it.
 pub(super) const COMMAND_QUEUE_SIZE: usize = 128;
@@ -35,7 +35,10 @@ const RESPONSE_QUEUE_SIZE: usize = 128;
 
 #[derive(Clone)]
 pub(super) struct Channels {
-    commands: Arc<ArrayQueue<Command>>,
+    /// What rides the audio lane: blocks and resets.
+    blocks: Arc<ArrayQueue<AudioCommand>>,
+    /// What rides the control lane: every other request.
+    controls: Arc<ArrayQueue<ControlCommand>>,
     /// Whether a control request owes a reply: one at a time.
     owing: ControlSlot,
     /// The newest block sequence the audio thread has submitted. Owned here
@@ -231,7 +234,8 @@ impl Channels {
         let (abandoned, late, commands_refused, leaked_buffers) =
             (tally(), tally(), tally(), tally());
         let channels = Self {
-            commands: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
+            blocks: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
+            controls: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             owing: ControlSlot::default(),
             newest_seq: Arc::new(AtomicU64::new(0)),
             bell,
@@ -334,7 +338,7 @@ impl Channels {
 
     /// Wake the bridge thread to re-check its stop condition (shutdown).
     /// Publish the condition first. Real-time safe, like the ring in
-    /// [`push_command`](Self::push_command).
+    /// [`push_block`](Self::push_block).
     pub(super) fn wake(&self) {
         self.bell.ring();
     }
@@ -482,15 +486,15 @@ impl Channels {
     /// refuses rings nothing: the bridge is, or is about to be, draining.
     ///
     /// A refused command is counted ([`note_command_refused`](Self::note_command_refused)).
-    pub(super) fn push_command(&self, cmd: Command) -> bool {
-        self.try_push_command(cmd).is_ok()
+    pub(super) fn push_block(&self, cmd: AudioCommand) -> bool {
+        self.try_push_block(cmd).is_ok()
     }
 
-    /// [`push_command`](Self::push_command), handing a refused command back
+    /// [`push_block`](Self::push_block), handing a refused command back
     /// rather than dropping it, so the audio thread can return what it holds
     /// to its pools instead of freeing it.
-    pub(super) fn try_push_command(&self, cmd: Command) -> Result<(), Command> {
-        if let Err(cmd) = self.commands.push(cmd) {
+    pub(super) fn try_push_block(&self, cmd: AudioCommand) -> Result<(), AudioCommand> {
+        if let Err(cmd) = self.blocks.push(cmd) {
             self.note_command_refused();
             return Err(cmd);
         }
@@ -498,13 +502,28 @@ impl Channels {
         Ok(())
     }
 
+    pub(super) fn pop_block(&self) -> Option<AudioCommand> {
+        self.blocks.pop()
+    }
+
+    /// Pushes a control-lane command and rings the bell. A refused command is
+    /// counted.
+    pub(super) fn push_control(&self, cmd: ControlCommand) -> bool {
+        if self.controls.push(cmd).is_err() {
+            self.note_command_refused();
+            return false;
+        }
+        self.bell.ring();
+        true
+    }
+
+    pub(super) fn pop_control(&self) -> Option<ControlCommand> {
+        self.controls.pop()
+    }
+
     /// The slot a request that owes a reply holds until it is answered.
     pub(super) fn owing(&self) -> &ControlSlot {
         &self.owing
-    }
-
-    pub(super) fn pop_command(&self) -> Option<Command> {
-        self.commands.pop()
     }
 
     /// The gate a waiter on the bridge's progress sleeps on.
@@ -658,8 +677,8 @@ mod tests {
     #[test]
     fn a_push_and_its_ring_allocate_nothing() {
         let (c, _wait) = channels();
-        assert_no_alloc::assert_no_alloc(|| assert!(c.push_command(Command::Reset)));
-        assert!(matches!(c.pop_command(), Some(Command::Reset)));
+        assert_no_alloc::assert_no_alloc(|| assert!(c.push_block(AudioCommand::Reset)));
+        assert!(matches!(c.pop_block(), Some(AudioCommand::Reset)));
     }
 
     /// **Every command a full queue refuses is counted, and an accepted one is
@@ -669,7 +688,7 @@ mod tests {
     fn a_full_command_queue_counts_each_refusal() {
         let (c, _wait) = channels();
         for _ in 0..COMMAND_QUEUE_SIZE {
-            assert!(c.push_command(Command::Reset));
+            assert!(c.push_block(AudioCommand::Reset));
         }
         assert_eq!(
             c.commands_refused_cell().get(),
@@ -678,7 +697,7 @@ mod tests {
         );
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..3 {
-                assert!(!c.push_command(Command::Reset));
+                assert!(!c.push_block(AudioCommand::Reset));
             }
         });
         assert_eq!(c.commands_refused_cell().get(), 3);
