@@ -430,7 +430,10 @@ pub struct Ipc {
     /// and the contract tests that call `Control` on an `Ipc` require, and a
     /// ring reader is not `Sync`. Nothing locks it: an activation takes it by
     /// value (`into_inner`).
-    replies: Mutex<Replies>,
+    /// Boxed, the one box of the reader: its cached indices are large, and an
+    /// `Ipc` is the `Ok` and `Err` payload of an activation
+    /// (`result_large_err`).
+    replies: Box<Mutex<Replies>>,
     /// The sequence the slab's next chunk carries: the slab outlives each
     /// activation's batcher, so the sequence does too.
     next_seq: u64,
@@ -524,7 +527,7 @@ impl Ipc {
         Self {
             link: Arc::new(link),
             slab,
-            replies: Mutex::new(replies),
+            replies: Box::new(Mutex::new(replies)),
             next_seq: 1,
             slab_unsure: false,
         }
@@ -834,7 +837,9 @@ impl Ipc {
             next_seq,
             slab_unsure,
         } = self;
-        let replies = replies.into_inner().unwrap_or_else(PoisonError::into_inner);
+        let replies = (*replies)
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner);
         // The one reading of the buses this activation lays out: the slab, the
         // pipeline's widths and (through `Control::wiring` at the same restart)
         // the node's ports follow it. A change after it is the next restart's.
@@ -860,7 +865,7 @@ impl Ipc {
                     plugin: Some(Self {
                         link,
                         slab,
-                        replies: Mutex::new(replies),
+                        replies: Box::new(Mutex::new(replies)),
                         next_seq,
                         // The server may have taken the slab before the
                         // answer was lost.
@@ -965,7 +970,7 @@ impl Loaded for Ipc {
         Ok(Self {
             link: controller.link,
             slab,
-            replies: Mutex::new(replies),
+            replies: Box::new(Mutex::new(replies)),
             next_seq,
             slab_unsure: false,
         })

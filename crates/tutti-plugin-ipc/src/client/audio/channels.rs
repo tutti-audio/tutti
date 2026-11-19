@@ -521,9 +521,7 @@ pub(crate) struct ResponseWriter {
 /// makes the ring single-consumer.
 #[must_use]
 pub struct Replies {
-    /// Boxed so `Refused<Ipc>` (an `Err` of `Ipc::activate_anywhere`) stays under
-    /// clippy's `result_large_err`: the reader's cached indices are large.
-    ring: Box<RingReader<AudioResponse>>,
+    ring: RingReader<AudioResponse>,
 }
 
 impl std::fmt::Debug for Replies {
@@ -538,9 +536,7 @@ pub(crate) fn response_ring() -> (ResponseWriter, Replies, Counter<u64>) {
     let lost = writer.losses();
     (
         ResponseWriter { ring: writer },
-        Replies {
-            ring: Box::new(reader),
-        },
+        Replies { ring: reader },
         lost,
     )
 }
