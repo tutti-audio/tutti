@@ -139,7 +139,7 @@ fn drive(
         PlanesMut::new(&mut outs).expect("equal channels")
     };
     let mut io = InputOutput::new(Samples(frames), plane_in, plane_out).expect("equal frames");
-    batcher.process(bridge, &mut io, host);
+    batcher.process(bridge.audio(), &mut io, host);
 }
 
 /// `None` on a clean EOF — the host side closing the socket at teardown is
@@ -304,7 +304,7 @@ fn bridge_with_server_mode(
     accept_control(&listener);
 
     let path_cleanup = path;
-    let published = Arc::clone(bridge.progress());
+    let published = Arc::clone(bridge.audio().progress());
     let server_thread = std::thread::Builder::new()
         .name("mock-doubling-server".to_string())
         .spawn(move || {
@@ -518,6 +518,7 @@ fn drive_blocks_with_gap(blocks: usize, gap: std::time::Duration) -> Vec<Vec<Vec
 fn wait_for_reply(bridge: &PluginBridge, slab: &AudioSlab, seq: u64, budget: std::time::Duration) {
     // The server publishes, then replies, and the reply wakes the wait.
     if bridge
+        .audio()
         .progress()
         .wait_until(std::time::Instant::now() + budget, || slab.has_output(seq))
     {
@@ -1009,7 +1010,7 @@ fn a_chunk_never_published_is_missed_and_never_late() {
 /// them.
 fn counters_on(bridge: &PluginBridge) -> Arc<ChunkCounters> {
     let counters = Arc::new(ChunkCounters::default());
-    counters.attach_skipped(bridge.skipped_cell());
+    counters.attach_skipped(bridge.audio().skipped_cell());
     counters
 }
 
@@ -1018,7 +1019,10 @@ fn counters_on(bridge: &PluginBridge) -> Arc<ChunkCounters> {
 /// [`WAIT_BUDGET`].
 fn wait_for(bridge: &PluginBridge, what: &str, done: impl FnMut() -> bool) {
     let deadline = std::time::Instant::now() + WAIT_BUDGET;
-    assert!(bridge.progress().wait_until(deadline, done), "{what}");
+    assert!(
+        bridge.audio().progress().wait_until(deadline, done),
+        "{what}"
+    );
 }
 
 /// **A chunk the server refuses is counted refused, and each resolved miss is
@@ -1062,7 +1066,7 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     // Block 4 sees chunk 2 in the ring; chunk 1's fate is not read yet.
     block();
     wait_for(&bridge, "chunk 1's fate", || {
-        bridge.chunk_fate(1) == Some(crate::Fate::Refused)
+        bridge.audio().chunk_fate(1) == Some(crate::Fate::Refused)
     });
     // Chunk 4 is answered before block 5, so block 5's collect finds it and
     // neither of its two looks can count it late.
@@ -1102,7 +1106,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
     for sent in 1..=2 * FATES as u64 {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
         wait_for(&bridge, "the bridge to deal with the chunk", || {
-            bridge.block_counts().abandoned + bridge.skipped_cell().get() >= sent
+            bridge.audio().block_counts().abandoned + bridge.audio().skipped_cell().get() >= sent
         });
     }
     assert_eq!(counters.refused(), 0, "the server said nothing");
@@ -1186,10 +1190,12 @@ fn silence_on_a_crashed_bridge_does_not_allocate() {
     // guarded region below exercises the crash branch rather than the mismatch
     // one. Bounded rather than unbounded: if the flag never sets, the test
     // should say so instead of hanging.
-    wait_for(&bridge, "the bridge never crashed", || bridge.is_crashed());
+    wait_for(&bridge, "the bridge never crashed", || {
+        bridge.audio().is_crashed()
+    });
     drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
     assert!(
-        bridge.is_crashed(),
+        bridge.audio().is_crashed(),
         "the bridge never marked itself crashed, so this test would have \
          measured the sequence-mismatch branch instead"
     );
@@ -1273,7 +1279,7 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
     // server answer: what is under test is what the host did with the missed
     // deadline, not whether the server ever answered.
     wait_for(&bridge, "the bridge never abandoned the block", || {
-        bridge.block_counts().abandoned >= 1
+        bridge.audio().block_counts().abandoned >= 1
     });
     permits.send(()).expect("the server waits for a permit");
     wait_for(&bridge, "the server never answered", || {
@@ -1286,7 +1292,7 @@ fn a_late_reply_does_not_permanently_crash_the_bridge() {
          anything about the timeout until the server has answered"
     );
     assert!(
-        !bridge.is_crashed(),
+        !bridge.audio().is_crashed(),
         "one reply that missed its per-block budget marked the bridge crashed. \
          The server is alive and published block 1's audio correctly; the host \
          has nonetheless latched a crash, so `Batcher::collectable` will return \
@@ -1351,7 +1357,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
         stamps.push(midi_out.iter().map(|e| e.ump.0[0]).collect());
         if block == 0 {
             wait_for(&bridge, "the bridge never abandoned block 1", || {
-                bridge.block_counts().abandoned >= 1
+                bridge.audio().block_counts().abandoned >= 1
             });
             permits.send(()).expect("the server waits for a permit");
         }
@@ -1359,7 +1365,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     }
 
     assert!(
-        !bridge.is_crashed(),
+        !bridge.audio().is_crashed(),
         "the stalled first block killed the bridge, so nothing below is a \
          statement about pairing"
     );
@@ -1373,7 +1379,7 @@ fn a_timed_out_reply_is_drained_rather_than_paired_with_a_later_block() {
     // Block 1's reply is held past its budget, so at least that
     // one reply is abandoned on any machine; a loaded machine can make a later
     // block miss its few-ms budget too, so neither count is pinned.
-    let counts = bridge.block_counts();
+    let counts = bridge.audio().block_counts();
     assert!(
         counts.abandoned >= 1,
         "block 1 was held past its budget, yet no reply was abandoned — the rig \
@@ -1483,7 +1489,7 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
     accept_control(&listener);
 
     let path_cleanup = path;
-    let published = Arc::clone(bridge.progress());
+    let published = Arc::clone(bridge.audio().progress());
     let server_thread = std::thread::Builder::new()
         .name("mock-stamped-server".to_string())
         .spawn(move || {
@@ -1620,14 +1626,16 @@ fn a_blocks_status_reaches_the_host_with_its_chunk() {
         // collect: wait for it.
         let deadline = std::time::Instant::now() + WAIT_BUDGET;
         assert!(
-            bridge
-                .progress()
-                .wait_until(deadline, || bridge.block_counts().replies >= block),
+            bridge.audio().progress().wait_until(deadline, || bridge
+                .audio()
+                .block_counts()
+                .replies
+                >= block),
             "block {block}'s reply never arrived within {WAIT_BUDGET:?} \
              ({} blocks abandoned, {} replies); a block the bridge abandoned \
              on its reply budget carries no status",
-            bridge.block_counts().abandoned,
-            bridge.block_counts().replies,
+            bridge.audio().block_counts().abandoned,
+            bridge.audio().block_counts().replies,
         );
     }
     assert_eq!(
@@ -1731,7 +1739,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
         tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
-    wait_for(&bridge, "never crashed", || bridge.is_crashed());
+    wait_for(&bridge, "never crashed", || bridge.audio().is_crashed());
     let mut batcher = Batcher::new(CHANNELS, CHANNELS, FloatWidth::F32, BATCH_SIZE, slab);
     let input = Planar::new();
     let mut out = Planar::new();
@@ -1899,7 +1907,7 @@ fn two_stale_blocks(
     });
 
     for (i, midi) in blocks.iter().enumerate() {
-        let submitted = bridge.submit(
+        let submitted = bridge.audio().submit(
             i as u64 + 1,
             BATCH_SIZE,
             midi.iter().copied().collect(),
@@ -1909,7 +1917,7 @@ fn two_stale_blocks(
             tutti_plugin_types::TransportInfo::new(tutti_units::SampleRate::SR_48K),
             Default::default(),
         );
-        assert!(submitted.block);
+        assert!(submitted.accepted());
     }
     release.send(()).unwrap();
     let wait = WAIT_BUDGET;
@@ -1917,8 +1925,8 @@ fn two_stale_blocks(
     assert_eq!(seq, 3);
     let (seq, four) = got.recv_timeout(wait).expect("block 4 sent");
     assert_eq!(seq, 4);
-    let dropped = bridge.dropped_midi_cell().get();
-    let skipped = bridge.skipped_cell().get();
+    let dropped = bridge.audio().dropped_midi_cell().get();
+    let skipped = bridge.audio().skipped_cell().get();
     drop(thread);
     drop(bridge);
     server.join().unwrap();

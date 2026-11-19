@@ -258,14 +258,15 @@ impl ServedFork {
         // A plugin with no presets has none to carry (and would refuse the
         // current one's id).
         let preset = if self.features.contains(Features::PRESET_LOAD) {
-            live.current_preset()
+            live.audio().current_preset()
         } else {
             None
         };
         let state = live
+            .audio()
             .save_state(StateUse::Duplicate)
             .map_err(PluginForkError::SaveState)?;
-        let snapshot = ForkState::new(preset, state, live.render_mode());
+        let snapshot = ForkState::new(preset, state, live.audio().render_mode());
         drop(live);
         Ok(Capture {
             snapshot,
@@ -309,7 +310,7 @@ impl Capture {
     /// Steps 2 to 5 of the module docs: the slow part (a `plugin-server`
     /// launch and a state load), free to run off the control thread.
     fn build(self) -> Result<PluginClient<Bound>, PluginForkError> {
-        let path = self.origin.path.clone();
+        let path = self.origin.origin.path().to_path_buf();
         // The state goes in with the launch: the server restores it and then
         // activates the plugin, so a plugin may take its mode from the state
         // at activation. A command sent after the launch arrives after that
@@ -480,7 +481,7 @@ mod tests {
     use std::time::Duration;
     use tutti_plugin_ipc::{BridgeConfig, ServerWatch, unique_socket_path};
     use tutti_plugin_types::PluginTail;
-    use tutti_plugin_types::{Load, PluginFormat, PresetId};
+    use tutti_plugin_types::{Load, Origin, PluginFormat, PresetId};
     use tutti_units::{SampleRate, Samples};
 
     /// A fork's health reports a latency that moved after its graph was
@@ -520,9 +521,8 @@ mod tests {
     fn source_over(rig: &super::super::mock_server::Rig) -> ServedFork {
         let origin = IpcOrigin {
             config: BridgeConfig::at(unique_socket_path().expect("a socket path")),
-            path: "test.vst3".into(),
+            origin: Origin::new("test.vst3", Load::new()),
             format: PluginFormat::Vst3,
-            load: Load::new(),
             load_editor: None,
         };
         let (controls, _) =
@@ -592,11 +592,11 @@ mod tests {
         let offline = source.capture(ForkMode::Offline).expect("captures");
         assert!(offline.snapshot.offline(offline.mode));
 
-        assert!(rig.bridge.set_render_mode_rt(RenderMode::Offline));
+        assert!(rig.bridge.audio().set_render_mode_rt(RenderMode::Offline));
         let live = source.capture(ForkMode::Live).expect("captures");
         assert!(live.snapshot.offline(live.mode), "told offline: offline");
 
-        assert!(rig.bridge.set_render_mode_rt(RenderMode::Realtime));
+        assert!(rig.bridge.audio().set_render_mode_rt(RenderMode::Realtime));
         let live = source.capture(ForkMode::Live).expect("captures");
         assert!(!live.snapshot.offline(live.mode), "told realtime again");
     }

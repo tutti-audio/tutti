@@ -44,7 +44,6 @@ mod tests;
 
 pub use processor::IpcProcessor;
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -52,8 +51,8 @@ use tutti_rt::LockExt;
 
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, ChunkCounters, Controller, Load, LoadStage, Loaded, LoadedPlugin,
-    MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
+    BridgeError, BridgeResult, ChunkCounters, Controller, LoadStage, Loaded, LoadedPlugin,
+    MainThreadMarker, Origin, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
     PluginDescriptor, PluginError, PluginFormat, PluginResult, PluginTail, Prepare, PresetId,
     ProcessWake, Refused, Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples,
     StateError, StateUse, Stuck, Widths,
@@ -63,8 +62,8 @@ use tutti_units::ParamId;
 
 use crate::subprocess::swap_slab;
 use crate::{
-    AudioSlab, Batcher, BridgeConfig, BridgeEvent, BridgeListener, EditorLoader, OfflineWait,
-    PluginBridge, ProcessGuard, SlabWriter, launch, unique_socket_path,
+    AudioSlab, Batcher, BridgeConfig, BridgeEvent, BridgeListener, EditorLoader, LoadRequest,
+    OfflineWait, PluginBridge, ProcessGuard, Restore, SlabWriter, launch, unique_socket_path,
 };
 
 /// Where a served plugin came from: what [`Ipc::reopen_restoring`] launches
@@ -73,12 +72,10 @@ use crate::{
 pub struct IpcOrigin {
     /// The launch's configuration. A reopen gives it a socket of its own.
     pub config: BridgeConfig,
-    /// The plugin file.
-    pub path: PathBuf,
+    /// The plugin file, and which plugin of it the first launch chose.
+    pub origin: Origin,
     /// The format that opens it, as the first launch named it.
     pub format: PluginFormat,
-    /// Which plugin of the file, as the first launch chose it.
-    pub load: Load,
     /// Loads the editor-only instance, as the first launch's did; `None`
     /// again for an editor in the server.
     pub load_editor: Option<EditorLoader>,
@@ -102,12 +99,15 @@ impl IpcOrigin {
         };
         Ipc::launch(
             config,
-            self.path.clone(),
-            self.format,
-            self.load.clone(),
-            rate,
-            state,
-            StateUse::Duplicate,
+            &LoadRequest {
+                origin: &self.origin,
+                format: self.format,
+                rate,
+                restore: state.map(|state| Restore {
+                    state,
+                    state_use: StateUse::Duplicate,
+                }),
+            },
             self.load_editor.clone(),
         )
     }
@@ -116,7 +116,7 @@ impl IpcOrigin {
 impl std::fmt::Debug for IpcOrigin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IpcOrigin")
-            .field("path", &self.path)
+            .field("path", &self.origin.path())
             .finish_non_exhaustive()
     }
 }
@@ -321,7 +321,7 @@ impl Link {
     /// last answer filled; asks the server only when there is none (the first
     /// write, or the first after a resync). News the plugin sent that the bridge
     /// has not yet processed is settled first, so a resync the bridge is about to
-    /// deliver is not missed ([`PluginBridge::news_settled`]; news not yet read off the
+    /// deliver is not missed (`AudioBridge::news_settled`; news not yet read off the
     /// connection is the one window left, as for any asked-once list). Checked in
     /// this order: a crashed plugin is [`Lost`](ParamWriteError::Lost) (and its
     /// cache is forgotten); one that does not settle or answer in time is
@@ -339,12 +339,12 @@ impl Link {
         &self,
         id: ParamId,
     ) -> Result<Arc<[(ParamId, ParamAccess)]>, ParamWriteError> {
-        if self.bridge.is_crashed() {
+        if self.bridge.audio().is_crashed() {
             self.events.declared.forget();
             return Err(ParamWriteError::Lost(id));
         }
-        if !self.bridge.news_settled(self.timeout) {
-            return Err(if self.bridge.is_crashed() {
+        if !self.bridge.audio().news_settled(self.timeout) {
+            return Err(if self.bridge.audio().is_crashed() {
                 ParamWriteError::Lost(id)
             } else {
                 ParamWriteError::Unanswered(id)
@@ -354,8 +354,8 @@ impl Link {
             Ok(kept) => return Ok(kept),
             Err(generation) => generation,
         };
-        let Some(infos) = self.bridge.parameters() else {
-            return Err(if self.bridge.is_crashed() {
+        let Some(infos) = self.bridge.audio().parameters() else {
+            return Err(if self.bridge.audio().is_crashed() {
                 ParamWriteError::Lost(id)
             } else {
                 ParamWriteError::Unanswered(id)
@@ -401,7 +401,7 @@ impl Link {
     /// Control thread: allocates.
     pub(crate) fn reserve(&self, chunk: usize) {
         let (queues, points) = self.param_room(chunk);
-        self.bridge.reserve_param_changes(queues, points);
+        self.bridge.audio().reserve_param_changes(queues, points);
     }
 }
 
@@ -472,11 +472,11 @@ impl Ipc {
         {
             let answering = Arc::clone(&answering);
             counters.attach(move |seq| answering.lock_recover().has_output(seq));
-            counters.attach_skipped(bridge.skipped_cell());
-            counters.attach_commands_refused(bridge.commands_refused_cell());
-            counters.attach_responses_lost(bridge.responses_lost_cell());
-            counters.attach_leaked_buffers(bridge.leaked_buffers_cell());
-            counters.attach_mirror_refused(bridge.mirror_refused_cell());
+            counters.attach_skipped(bridge.audio().skipped_cell());
+            counters.attach_commands_refused(bridge.audio().commands_refused_cell());
+            counters.attach_responses_lost(bridge.audio().responses_lost_cell());
+            counters.attach_leaked_buffers(bridge.audio().leaked_buffers_cell());
+            counters.attach_mirror_refused(bridge.editor().mirror_refused_cell());
         }
         let events = Arc::new(Events {
             latency: AtomicUsize::new(loaded.latency_samples.get()),
@@ -488,7 +488,9 @@ impl Ipc {
             layout: Mutex::new(None),
         });
         let listening = Arc::clone(&events);
-        bridge.set_listener(Some(Arc::new(move |event| listening.on(event))));
+        bridge
+            .audio()
+            .set_listener(Some(Arc::new(move |event| listening.on(event))));
         let link = Link {
             bridge,
             guard,
@@ -513,11 +515,11 @@ impl Ipc {
         }
     }
 
-    /// Launches a `plugin-server` for the plugin `load` chooses in `path`, opened
-    /// as `format`, at `rate` and returns the plugin loaded in it, with what became of `state` if one was given: it is
-    /// restored **before the plugin is activated**, the order every format
-    /// allows and a plugin that takes its mode from the state at activation
-    /// needs. `state_use` is what that state was saved for.
+    /// Launches a `plugin-server` for the plugin `request` names and returns the
+    /// plugin loaded in it, with what became of its state if it had one: the
+    /// state is restored **before the plugin is activated**, the order every
+    /// format allows and a plugin that takes its mode from the state at
+    /// activation needs.
     ///
     /// Blocks while the server launches and handshakes. Needs no main thread.
     ///
@@ -531,15 +533,16 @@ impl Ipc {
     /// out, the plugin fails to load, or the bridge cannot be set up.
     pub fn launch(
         config: BridgeConfig,
-        path: PathBuf,
-        format: PluginFormat,
-        load: Load,
-        rate: SampleRate,
-        state: Option<&[u8]>,
-        state_use: StateUse,
+        request: &LoadRequest<'_>,
         load_editor: Option<EditorLoader>,
     ) -> BridgeResult<Launched> {
-        let server = launch(&config, &path, format, &load, rate, state, state_use)?;
+        let server = launch(&config, request)?;
+        let LoadRequest {
+            origin,
+            format,
+            rate,
+            ..
+        } = *request;
         let restored = server.state_restore.clone();
         // Guarded since the spawn: an `Err` from `PluginBridge::new` drops the
         // guard, which kills and reaps the child. The bridge shares the guard's
@@ -547,7 +550,7 @@ impl Ipc {
         let mut guard = server.server;
         let (bridge, thread) = PluginBridge::new(
             config.socket_path.clone(),
-            tutti_plugin_types::Origin::new(path.clone(), load.clone()),
+            origin.clone(),
             format,
             load_editor.clone(),
             rate,
@@ -557,7 +560,7 @@ impl Ipc {
         guard.attach(thread);
         // The parameter list, once, while loading blocks anyway: the bridge's
         // buffers are sized by it at activation, which may not make the trip.
-        let parameters = bridge.parameters().map_or(0, |list| list.len());
+        let parameters = bridge.audio().parameters().map_or(0, |list| list.len());
         let ceiling = config.max_buffer_size.min(tutti_plugin_types::MAX_CHUNK);
         let timeout = config.timeouts.call;
         let ipc = Self::new(IpcParts {
@@ -573,9 +576,8 @@ impl Ipc {
             timeout,
             origin: Some(IpcOrigin {
                 config,
-                path,
+                origin: origin.clone(),
                 format,
-                load,
                 load_editor,
             }),
         });
@@ -615,7 +617,7 @@ impl Ipc {
     /// restores with this, then [`load_state`](Self::load_state), after the
     /// server has loaded the state and activated the plugin at launch.
     pub fn load_preset(&self, id: &PresetId) -> bool {
-        self.link.bridge.load_preset(id.clone())
+        self.link.bridge.audio().load_preset(id.clone())
     }
 
     /// Loads `state` into this plugin, into its audio instance alone (an
@@ -626,7 +628,7 @@ impl Ipc {
     ///
     /// The plugin is dead, refused the state, or the transfer stalled.
     pub fn load_state(&self, state: &[u8], state_use: StateUse) -> Result<(), StateError> {
-        self.link.bridge.load_state_unmirrored(state, state_use)
+        self.link.bridge.audio().load_state(state, state_use)
     }
 
     /// Watches this plugin as a fork: the returned [`OfflineWait`] holds what
@@ -640,7 +642,7 @@ impl Ipc {
     pub fn watch(&mut self, offline: bool) -> Arc<OfflineWait> {
         let wait = Arc::new(OfflineWait::new(
             self.link.timeout,
-            Arc::clone(self.link.bridge.watch()),
+            Arc::clone(self.link.bridge.audio().watch()),
         ));
         *self.link.wait.lock_recover() = Some(Watch {
             wait: Arc::clone(&wait),
@@ -851,7 +853,7 @@ impl Ipc {
         };
         let rate = prepare.rate();
         if rate != link.rate() {
-            let _ = link.bridge.set_sample_rate_rt(rate);
+            let _ = link.bridge.audio().set_sample_rate_rt(rate);
             link.set_rate(rate);
         }
         // The widths are the slab's own, which is the snapshot's: one source.
@@ -874,10 +876,10 @@ impl Ipc {
             // death) stays on the live bound: the batcher collects at once, and
             // the bridge must not hold one budget per chunk for a server that
             // did not answer.
-            link.bridge.set_reply_wait(wait.reply_wait());
+            link.bridge.audio().set_reply_wait(wait.reply_wait());
             batcher.set_offline_wait(wait);
         } else {
-            link.bridge.set_reply_wait(None);
+            link.bridge.audio().set_reply_wait(None);
         }
         link.reserve(batcher.chunk());
         let processor = IpcProcessor::new(Arc::clone(&link), batcher);

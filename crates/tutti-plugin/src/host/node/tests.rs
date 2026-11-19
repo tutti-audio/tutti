@@ -353,21 +353,23 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
     {
         let latency_seen = Arc::clone(&latency_seen);
         let param_seen = Arc::clone(&param_seen);
-        bridge.set_listener(Some(Arc::new(move |ev| match ev {
-            BridgeEvent::LatencyChanged { samples } => {
-                latency_seen.store(samples.get(), Ordering::Release);
-            }
-            BridgeEvent::ParameterChanged { edit } => {
-                *param_seen.lock() = edit.value().map(|v| (edit.id().get(), v.get() as f32));
-            }
-            BridgeEvent::TailChanged { .. }
-            | BridgeEvent::Resync(_)
-            | BridgeEvent::IoLayout(_)
-            | BridgeEvent::RateRefusal(_)
-            | BridgeEvent::ProcessRequested
-            | BridgeEvent::Transport { .. }
-            | BridgeEvent::Crashed { .. } => {}
-        })));
+        bridge
+            .audio()
+            .set_listener(Some(Arc::new(move |ev| match ev {
+                BridgeEvent::LatencyChanged { samples } => {
+                    latency_seen.store(samples.get(), Ordering::Release);
+                }
+                BridgeEvent::ParameterChanged { edit } => {
+                    *param_seen.lock() = edit.value().map(|v| (edit.id().get(), v.get() as f32));
+                }
+                BridgeEvent::TailChanged { .. }
+                | BridgeEvent::Resync(_)
+                | BridgeEvent::IoLayout(_)
+                | BridgeEvent::RateRefusal(_)
+                | BridgeEvent::ProcessRequested
+                | BridgeEvent::Transport { .. }
+                | BridgeEvent::Crashed { .. } => {}
+            })));
     }
 
     // First request: receives `ParameterList`; the events that follow it are
@@ -428,7 +430,7 @@ fn a_tail_change_reaches_the_listener() {
     let tail_seen = Arc::new(parking_lot::Mutex::new(None::<PluginTail>));
     {
         let tail_seen = Arc::clone(&tail_seen);
-        bridge.set_listener(Some(Arc::new(move |ev| {
+        bridge.audio().set_listener(Some(Arc::new(move |ev| {
             if let BridgeEvent::TailChanged { tail } = ev {
                 *tail_seen.lock() = Some(tail);
             }

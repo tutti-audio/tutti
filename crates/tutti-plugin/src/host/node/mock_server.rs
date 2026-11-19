@@ -131,7 +131,7 @@ fn serve_lane(
             HostMessage::GetPresetList => Some(BridgeMessage::PresetList {
                 presets: Vec::new(),
             }),
-            // What `PluginBridge::settle` asks, which a watched
+            // What `AudioBridge::settle` asks, which a watched
             // plugin's retune waits on.
             HostMessage::GetCurrentPreset => Some(BridgeMessage::CurrentPreset {
                 id: Some(PresetId::Number(PRESET)),

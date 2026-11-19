@@ -416,7 +416,7 @@ impl MockServer {
     /// while the callback has not run. A test about the event must wait on the
     /// event — see `a_listener_hears_the_crash_with_its_cause`.
     fn wait_for_crash(&self, what: &str) {
-        tutti_fixtures::wait_until(what, NOTICE_TIMEOUT, || self.bridge.is_crashed());
+        tutti_fixtures::wait_until(what, NOTICE_TIMEOUT, || self.bridge.audio().is_crashed());
     }
 }
 
@@ -514,7 +514,7 @@ fn a_server_that_dies_mid_session_marks_the_bridge_crashed() {
         _ => Action::Silent,
     });
 
-    let first = mock.bridge.parameter(ParamId::new(1));
+    let first = mock.bridge.audio().parameter(ParamId::new(1));
     assert_eq!(
         first,
         Some(Normalized::of(0.5)),
@@ -522,12 +522,12 @@ fn a_server_that_dies_mid_session_marks_the_bridge_crashed() {
          `bridge_with_no_server` under another name"
     );
     assert!(
-        !mock.bridge.is_crashed(),
+        !mock.bridge.audio().is_crashed(),
         "the bridge reported a crash while the server was still healthy"
     );
 
     // Second request: the server dies instead of replying.
-    let second = mock.bridge.parameter(ParamId::new(1));
+    let second = mock.bridge.audio().parameter(ParamId::new(1));
     assert_eq!(
         second, None,
         "a request to a dead server returned a value: {second:?}"
@@ -567,14 +567,14 @@ fn a_crash_latches_a_cause_that_outlives_the_call() {
     let mock = MockServer::start("cause-latch", |_| Action::Die);
 
     assert!(
-        mock.bridge.crash_cause().is_none(),
+        mock.bridge.audio().crash_cause().is_none(),
         "a bridge reported a cause before anything went wrong"
     );
 
-    let _ = mock.bridge.parameter(ParamId::new(1));
+    let _ = mock.bridge.audio().parameter(ParamId::new(1));
     mock.wait_for_crash("the bridge to notice the peer died");
 
-    let cause = mock.bridge.crash_cause();
+    let cause = mock.bridge.audio().crash_cause();
     assert!(
         is_closed_stream(cause.as_ref()),
         "a crashed bridge reported no cause ({cause:?}); the reason is gone \
@@ -608,19 +608,19 @@ fn a_listener_hears_the_crash_with_its_cause() {
 
     let heard: Arc<PlMutex<Vec<PluginFailure>>> = Arc::new(PlMutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
-    mock.bridge.set_listener(Some(Arc::new(move |ev| {
+    mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
         if let crate::client::audio::BridgeEvent::Crashed { cause } = ev {
             sink.lock().push(cause);
         }
     })));
 
-    let _ = mock.bridge.parameter(ParamId::new(1));
+    let _ = mock.bridge.audio().parameter(ParamId::new(1));
     tutti_fixtures::wait_until(
         &format!(
             "a crash notification after the peer died (crashed={}, cause={:?}); a latched \
              cause with no event means the notification half of `crash` never fired",
-            mock.bridge.is_crashed(),
-            mock.bridge.crash_cause()
+            mock.bridge.audio().is_crashed(),
+            mock.bridge.audio().crash_cause()
         ),
         NOTICE_TIMEOUT,
         || !heard.lock().is_empty(),
@@ -664,7 +664,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     });
     let heard: Arc<PlMutex<Vec<usize>>> = Arc::new(PlMutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
-    mock.bridge.set_listener(Some(Arc::new(move |ev| {
+    mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
         if let crate::client::audio::BridgeEvent::LatencyChanged { samples } = ev {
             sink.lock().push(samples.get());
         }
@@ -672,6 +672,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
 
     assert!(
         mock.bridge
+            .audio()
             .set_render_mode_rt(tutti_plugin_types::RenderMode::Realtime)
     );
     tutti_fixtures::wait_until(
@@ -717,15 +718,18 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     let layouts: Arc<PlMutex<Vec<Layout>>> = Arc::new(PlMutex::new(Vec::new()));
     let resyncs = Arc::new(AtomicU64::new(0));
     let (sink, count) = (Arc::clone(&layouts), Arc::clone(&resyncs));
-    mock.bridge.set_listener(Some(Arc::new(move |ev| match ev {
-        BridgeEvent::IoLayout(layout) => sink.lock().push(layout),
-        BridgeEvent::Resync(_) => {
-            count.fetch_add(1, Ordering::Relaxed);
-        }
-        _ => {}
-    })));
+    mock.bridge
+        .audio()
+        .set_listener(Some(Arc::new(move |ev| match ev {
+            BridgeEvent::IoLayout(layout) => sink.lock().push(layout),
+            BridgeEvent::Resync(_) => {
+                count.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        })));
     assert!(
         mock.bridge
+            .audio()
             .set_render_mode_rt(tutti_plugin_types::RenderMode::Realtime)
     );
     tutti_fixtures::wait_until("the real layout", NOTICE_TIMEOUT, || {
@@ -748,7 +752,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         _ => Action::Silent,
     });
     assert!(
-        ready.bridge.setup_shared_memory(
+        ready.bridge.audio().setup_shared_memory(
             tutti_fixtures::unique_name("hostile_slab-new"),
             layout.clone()
         ),
@@ -762,7 +766,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         _ => Action::Silent,
     });
     assert!(
-        !refusing.bridge.setup_shared_memory(
+        !refusing.bridge.audio().setup_shared_memory(
             tutti_fixtures::unique_name("hostile_slab-refused"),
             layout.clone()
         ),
@@ -775,7 +779,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     let silent_bridge = Arc::clone(&silent.bridge);
     let silent_layout = layout.clone();
     let answered = call_within(move || {
-        silent_bridge.setup_shared_memory(
+        silent_bridge.audio().setup_shared_memory(
             tutti_fixtures::unique_name("hostile_slab-silent"),
             silent_layout,
         )
@@ -789,7 +793,9 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     });
     let dying_bridge = Arc::clone(&dying.bridge);
     let answered = call_within(move || {
-        dying_bridge.setup_shared_memory(tutti_fixtures::unique_name("hostile_slab-dies"), layout)
+        dying_bridge
+            .audio()
+            .setup_shared_memory(tutti_fixtures::unique_name("hostile_slab-dies"), layout)
     })
     .unwrap_or_else(|w| panic!("a server that died mid-swap held the caller for {w:?}"));
     assert!(!answered, "a server that dies mid-swap is a refusal");
@@ -808,11 +814,11 @@ fn a_crash_before_any_listener_is_still_reported_by_the_query() {
     let mock = MockServer::start("pre-listener", |_| Action::Die);
 
     // No listener is ever installed. Provoke the death.
-    let _ = mock.bridge.parameter(ParamId::new(1));
+    let _ = mock.bridge.audio().parameter(ParamId::new(1));
     mock.wait_for_crash("the bridge to notice the peer died");
 
     assert!(
-        mock.bridge.crash_cause().is_some(),
+        mock.bridge.audio().crash_cause().is_some(),
         "a crash with no listener installed left no cause behind, so a host \
          that subscribes later can never learn why its plugin is dead"
     );
@@ -832,14 +838,14 @@ fn calls_after_a_crash_fail_fast_instead_of_waiting_out_the_timeout() {
 
     // First call establishes the crash.
     let bridge = Arc::clone(&mock.bridge);
-    let _ = call_within(move || bridge.parameter(ParamId::new(1)))
+    let _ = call_within(move || bridge.audio().parameter(ParamId::new(1)))
         .unwrap_or_else(|w| panic!("the call that meets the death blocked for {w:?}"));
     mock.wait_for_crash("the bridge to notice the server was gone");
 
     let bridge = Arc::clone(&mock.bridge);
     let values = call_within(move || {
         (0..5)
-            .map(|_| bridge.parameter(ParamId::new(1)))
+            .map(|_| bridge.audio().parameter(ParamId::new(1)))
             .collect::<Vec<_>>()
     })
     .unwrap_or_else(|w| {
@@ -865,14 +871,18 @@ fn a_crash_during_save_state_does_not_block_the_caller_forever() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let saved = call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
-        .unwrap_or_else(|waited| {
-            panic!(
-                "save_state against a server that died mid-request was still \
+    let saved = call_within(move || {
+        bridge
+            .audio()
+            .save_state(tutti_plugin_types::StateUse::Project)
+    })
+    .unwrap_or_else(|waited| {
+        panic!(
+            "save_state against a server that died mid-request was still \
              blocked after {waited:?}; the caller is waiting on a reply that \
              will never arrive"
-            )
-        });
+        )
+    });
     assert!(
         saved.is_err(),
         "save_state returned {saved:?} from a server that never answered"
@@ -908,12 +918,13 @@ fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
         });
 
     let bridge = Arc::clone(&mock.bridge);
-    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-        panic!(
-            "a 4 GiB length prefix left the host blocked after {waited:?} — it \
+    let value =
+        call_within(move || bridge.audio().parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+            panic!(
+                "a 4 GiB length prefix left the host blocked after {waited:?} — it \
              is allocating on an unvalidated wire length and waiting for the body"
-        )
-    });
+            )
+        });
     assert_eq!(
         value, None,
         "the host returned a parameter value from a frame it could not have read"
@@ -942,13 +953,16 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
             _ => Action::Silent,
         });
     let bridge = Arc::clone(&over.bridge);
-    call_within(move || bridge.parameter(ParamId::new(1)))
+    call_within(move || bridge.audio().parameter(ParamId::new(1)))
         .unwrap_or_else(|w| panic!("an over-cap frame blocked the caller for {w:?}"));
     over.wait_for_crash("the bridge to refuse a frame over the cap");
     assert!(
-        matches!(over.bridge.crash_cause(), Some(PluginFailure::StreamClosed)),
+        matches!(
+            over.bridge.audio().crash_cause(),
+            Some(PluginFailure::StreamClosed)
+        ),
         "MAX_FRAME_BYTES + 1 was not refused by closing the stream: {:?}",
-        over.bridge.crash_cause()
+        over.bridge.audio().crash_cause()
     );
 
     let mut quick = Timeouts::default();
@@ -958,18 +972,18 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
         _ => Action::Silent,
     });
     let bridge = Arc::clone(&under.bridge);
-    call_within(move || bridge.parameter(ParamId::new(1)))
+    call_within(move || bridge.audio().parameter(ParamId::new(1)))
         .unwrap_or_else(|w| panic!("an at-cap frame blocked the caller for {w:?}"));
     under.wait_for_crash("the bridge to give up on the body that never comes");
     assert!(
         matches!(
-            under.bridge.crash_cause(),
+            under.bridge.audio().crash_cause(),
             Some(PluginFailure::TimedOut { .. })
         ),
         "a frame of exactly MAX_FRAME_BYTES was refused rather than accepted and \
          waited on — the bound is off by one in the direction that rejects \
          legitimate traffic: {:?}",
-        under.bridge.crash_cause()
+        under.bridge.audio().crash_cause()
     );
 }
 
@@ -1013,12 +1027,13 @@ fn a_dribbling_peer_cannot_hold_the_bridge_thread_open() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-        panic!(
-            "a dribbling peer left the caller blocked after {waited:?} — the \
+    let value =
+        call_within(move || bridge.audio().parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+            panic!(
+                "a dribbling peer left the caller blocked after {waited:?} — the \
                      host entered a multi-syscall read on an unvalidated length"
-        )
-    });
+            )
+        });
     assert_eq!(value, None, "a dribbled frame produced a value");
 
     // The assertion that matters. The caller returning is not evidence: it has
@@ -1047,7 +1062,7 @@ fn a_garbage_payload_is_rejected_rather_than_decoded() {
         _ => Action::Silent,
     });
 
-    let value = mock.bridge.parameter(ParamId::new(1));
+    let value = mock.bridge.audio().parameter(ParamId::new(1));
     assert_eq!(
         value, None,
         "the host decoded a parameter value out of 64 bytes of 0xAB"
@@ -1070,12 +1085,13 @@ fn a_truncated_body_is_not_mistaken_for_a_complete_message() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-        panic!(
-            "a truncated frame left the host blocked after {waited:?}, waiting \
+    let value =
+        call_within(move || bridge.audio().parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+            panic!(
+                "a truncated frame left the host blocked after {waited:?}, waiting \
              for a body the server never finished sending"
-        )
-    });
+            )
+        });
     assert_eq!(value, None, "a truncated frame produced a value");
 }
 
@@ -1098,7 +1114,7 @@ fn a_valid_but_wrong_reply_type_does_not_satisfy_the_request() {
         _ => Action::Silent,
     });
 
-    let value = mock.bridge.parameter(ParamId::new(1));
+    let value = mock.bridge.audio().parameter(ParamId::new(1));
     assert_eq!(
         value, None,
         "a StateData reply was accepted as the answer to GetParameter — the \
@@ -1108,7 +1124,7 @@ fn a_valid_but_wrong_reply_type_does_not_satisfy_the_request() {
 
 /// Submits block `seq` through the bridge's audio entry, as the node's batcher does.
 fn submit_block(bridge: &PluginBridge, seq: u64) {
-    let submitted = bridge.submit(
+    let submitted = bridge.audio().submit(
         seq,
         64,
         Default::default(),
@@ -1118,7 +1134,7 @@ fn submit_block(bridge: &PluginBridge, seq: u64) {
         tutti_plugin_types::TransportInfo::new(SampleRate::SR_48K),
         Default::default(),
     );
-    assert!(submitted.block, "the block was accepted");
+    assert!(submitted.accepted(), "the block was accepted");
 }
 
 /// **A wrong-kind reply to a block is a protocol error, and not an answer.**
@@ -1139,7 +1155,7 @@ fn a_wrong_kind_reply_to_a_block_is_a_protocol_error_and_not_an_answer() {
     submit_block(&mock.bridge, 1);
     mock.wait_for_crash("the junk reply to end the connection");
     assert_eq!(
-        mock.bridge.block_counts().replies,
+        mock.bridge.audio().block_counts().replies,
         0,
         "a reply of the wrong kind was counted as the plugin answering"
     );
@@ -1163,7 +1179,7 @@ fn a_reply_to_a_block_never_sent_is_a_protocol_error() {
 
     submit_block(&mock.bridge, 1);
     mock.wait_for_crash("the reply to a block never sent to end the connection");
-    assert_eq!(mock.bridge.block_counts().replies, 0);
+    assert_eq!(mock.bridge.audio().block_counts().replies, 0);
 }
 
 /// A server that accepts requests but never answers must not hang the host.
@@ -1176,12 +1192,13 @@ fn a_silent_server_is_bounded_by_the_timeout() {
     let mock = MockServer::start("silent", |_| Action::Silent);
 
     let bridge = Arc::clone(&mock.bridge);
-    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-        panic!(
-            "a server that never replies left the caller blocked for {waited:?} \
+    let value =
+        call_within(move || bridge.audio().parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+            panic!(
+                "a server that never replies left the caller blocked for {waited:?} \
              — the request timeout is not bounding this path"
-        )
-    });
+            )
+        });
     assert_eq!(value, None, "a silent server produced a value");
 }
 
@@ -1201,21 +1218,24 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
         }
         _ => Action::Silent,
     });
-    assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
-        mock.bridge.rate_refusal().is_some()
+        mock.bridge.audio().rate_refusal().is_some()
     });
     assert_eq!(
-        mock.bridge.rate_refusal(),
+        mock.bridge.audio().rate_refusal(),
         Some((SampleRate::SR_96K, "no".to_string()))
     );
-    assert!(!mock.bridge.is_crashed(), "a refusal is not a crash");
+    assert!(
+        !mock.bridge.audio().is_crashed(),
+        "a refusal is not a crash"
+    );
 
-    assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_48K));
+    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_48K));
     tutti_fixtures::wait_until("a rate refusal to be cleared", NOTICE_TIMEOUT, || {
-        mock.bridge.rate_refusal().is_none()
+        mock.bridge.audio().rate_refusal().is_none()
     });
-    assert!(!mock.bridge.is_crashed());
+    assert!(!mock.bridge.audio().is_crashed());
 }
 
 /// **A rate change that is not answered in time is a refusal, not a crash, and
@@ -1237,21 +1257,21 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
         }
         _ => Action::Silent,
     });
-    assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
-        mock.bridge.rate_refusal().is_some()
+        mock.bridge.audio().rate_refusal().is_some()
     });
-    let (rate, reason) = mock.bridge.rate_refusal().unwrap();
+    let (rate, reason) = mock.bridge.audio().rate_refusal().unwrap();
     assert_eq!(rate, SampleRate::SR_96K);
     assert!(reason.contains("did not answer"), "{reason}");
     assert!(
-        !mock.bridge.is_crashed(),
+        !mock.bridge.audio().is_crashed(),
         "an unanswered rate is not a crash"
     );
 
     // The bridge reads the stream when it has something to do: the next
     // command finds the late answer ahead of its own reply and applies it.
-    let value = mock.bridge.parameter(ParamId::new(1));
+    let value = mock.bridge.audio().parameter(ParamId::new(1));
     assert_eq!(
         value,
         Some(Normalized::of(0.5)),
@@ -1260,9 +1280,9 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
     tutti_fixtures::wait_until(
         "the late answer to clear the refusal",
         NOTICE_TIMEOUT,
-        || mock.bridge.rate_refusal().is_none(),
+        || mock.bridge.audio().rate_refusal().is_none(),
     );
-    assert!(!mock.bridge.is_crashed());
+    assert!(!mock.bridge.audio().is_crashed());
 }
 
 /// **A late answer is applied in stream order.** Rate change A times out
@@ -1306,29 +1326,30 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
                 _ => Action::Silent,
             }
         });
-    assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
-        mock.bridge.rate_refusal().is_some()
+        mock.bridge.audio().rate_refusal().is_some()
     });
     // B, queued behind A's wait; its answer follows A's on the stream.
-    assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_88K2));
+    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_88K2));
     release.send(()).expect("the mock is listening");
     tutti_fixtures::wait_until("B's refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge
+            .audio()
             .rate_refusal()
             .is_some_and(|(rate, _)| rate == SampleRate::SR_88K2)
     });
     // Barrier: B's command has ended, with everything it applies.
     assert_eq!(
-        mock.bridge.parameter(ParamId::new(1)),
+        mock.bridge.audio().parameter(ParamId::new(1)),
         Some(Normalized::of(0.5))
     );
     assert_eq!(
-        mock.bridge.rate_refusal(),
+        mock.bridge.audio().rate_refusal(),
         Some((SampleRate::SR_88K2, "no".to_string())),
         "the later answer stands"
     );
-    assert!(!mock.bridge.is_crashed());
+    assert!(!mock.bridge.audio().is_crashed());
 }
 
 /// **Dropping the bridge ends a wait for a rate change that never answers.**
@@ -1343,7 +1364,7 @@ fn dropping_the_bridge_ends_a_hung_rate_change() {
         }
         Action::Silent
     });
-    assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
     // The request is on the wire, so the bridge thread is in the wait.
     request_seen
         .recv_timeout(NOTICE_TIMEOUT)
@@ -1383,7 +1404,10 @@ fn a_bridge_asked_to_stop_tells_the_server_to_shut_down() {
     shutdown_seen
         .recv_timeout(NOTICE_TIMEOUT)
         .expect("the server was never told to shut down");
-    assert!(!mock.bridge.is_crashed(), "a requested stop is no death");
+    assert!(
+        !mock.bridge.audio().is_crashed(),
+        "a requested stop is no death"
+    );
 }
 
 /// The stand-in server of the guard's shutdown test is a shell.
@@ -1463,9 +1487,10 @@ fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let value = call_within(move || bridge.parameter(ParamId::new(1))).unwrap_or_else(|waited| {
-        panic!("an under-cap dribbled frame left the caller blocked after {waited:?}")
-    });
+    let value =
+        call_within(move || bridge.audio().parameter(ParamId::new(1))).unwrap_or_else(|waited| {
+            panic!("an under-cap dribbled frame left the caller blocked after {waited:?}")
+        });
     assert_eq!(value, None, "a dribbled frame produced a value");
     mock.wait_for_crash("the bridge to report a crash");
 }
@@ -1509,8 +1534,12 @@ fn a_state_larger_than_one_frame_round_trips() {
     });
 
     let bridge = Arc::clone(&mock.bridge);
-    let got = call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
-        .unwrap_or_else(|w| panic!("save_state on a multi-chunk state blocked for {w:?}"));
+    let got = call_within(move || {
+        bridge
+            .audio()
+            .save_state(tutti_plugin_types::StateUse::Project)
+    })
+    .unwrap_or_else(|w| panic!("save_state on a multi-chunk state blocked for {w:?}"));
     let got = got.unwrap_or_else(|e| {
         panic!(
             "a {}-byte state failed with {e} — a state larger than one frame \
@@ -1579,7 +1608,7 @@ fn an_oversized_load_state_is_refused_without_killing_the_bridge() {
          limit from a plugin that refused or a subprocess that died"
     );
     assert!(
-        !mock.bridge.is_crashed(),
+        !mock.bridge.audio().is_crashed(),
         "an over-limit state killed the bridge; nothing was written, so the \
          socket is still synchronised and the session was healthy"
     );
@@ -1642,7 +1671,11 @@ fn a_chunked_state_transfer_reassembles_in_order() {
     let bridge = Arc::clone(&mock.bridge);
     let (tx, rx) = crossbeam_channel::bounded(1);
     std::thread::spawn(move || {
-        let _ = tx.send(bridge.save_state(tutti_plugin_types::StateUse::Project));
+        let _ = tx.send(
+            bridge
+                .audio()
+                .save_state(tutti_plugin_types::StateUse::Project),
+        );
     });
     let got = rx
         .recv_timeout(Duration::from_secs(60))
@@ -1711,8 +1744,12 @@ fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
     );
 
     let bridge = Arc::clone(&mock.bridge);
-    let got = call_within(move || bridge.save_state(tutti_plugin_types::StateUse::Project))
-        .unwrap_or_else(|w| panic!("a stalled save_state never returned; blocked for {w:?}"));
+    let got = call_within(move || {
+        bridge
+            .audio()
+            .save_state(tutti_plugin_types::StateUse::Project)
+    })
+    .unwrap_or_else(|w| panic!("a stalled save_state never returned; blocked for {w:?}"));
     let err = got.expect_err("a stalled transfer reported success");
 
     assert!(
@@ -1792,12 +1829,12 @@ fn assert_healthy_after_stall(mock: &MockServer, direction: &str) {
     // before it answers this one, and the probe cannot return `Some` after it.
     // A round trip returning `Some` is reachable only on a live bridge.
     assert!(
-        mock.bridge.parameters().is_some(),
+        mock.bridge.audio().parameters().is_some(),
         "after a stalled {direction} the bridge no longer completes a round \
          trip, so the session is dead in practice however `is_crashed` reads"
     );
     assert!(
-        !mock.bridge.is_crashed(),
+        !mock.bridge.audio().is_crashed(),
         "a stalled {direction} crashed the bridge; the socket is intact and \
          synchronised, so a stall must not be treated as connection-level — \
          otherwise `Stalled` tells the caller to retry against a session that \
@@ -1834,16 +1871,19 @@ fn a_late_query_reply_is_not_the_next_querys_answer() {
     });
 
     assert_eq!(
-        mock.bridge.parameter(ParamId::new(1)),
+        mock.bridge.audio().parameter(ParamId::new(1)),
         None,
         "the first is late"
     );
     assert_eq!(
-        mock.bridge.parameter(ParamId::new(1)),
+        mock.bridge.audio().parameter(ParamId::new(1)),
         Some(Normalized::of(0.75)),
         "the second query was answered with the first's late reply"
     );
-    assert!(!mock.bridge.is_crashed(), "a late reply crashed the bridge");
+    assert!(
+        !mock.bridge.audio().is_crashed(),
+        "a late reply crashed the bridge"
+    );
 }
 
 /// **A plugin that keeps sending events does not extend a request's budget**. The first
@@ -1880,9 +1920,9 @@ fn a_chatty_plugin_does_not_extend_the_budget() {
         }
     });
 
-    assert_eq!(mock.bridge.parameter(ParamId::new(1)), None);
+    assert_eq!(mock.bridge.audio().parameter(ParamId::new(1)), None);
     // Sends the next request; its answer waits for the events to stop.
-    let _ = mock.bridge.parameters();
+    let _ = mock.bridge.audio().parameters();
     tutti_fixtures::wait_until("the peer to finish its events", NOTICE_TIMEOUT, || {
         probe.load(Ordering::SeqCst) != 0
     });
@@ -1892,7 +1932,11 @@ fn a_chatty_plugin_does_not_extend_the_budget() {
         "when the events stopped the bridge had not sent its next request: it \
          was still waiting on the chatty one"
     );
-    assert!(!mock.bridge.is_crashed(), "{:?}", mock.bridge.crash_cause());
+    assert!(
+        !mock.bridge.audio().is_crashed(),
+        "{:?}",
+        mock.bridge.audio().crash_cause()
+    );
 }
 
 /// **A live peer caught part-way through a frame at the budget is not declared
@@ -1916,15 +1960,15 @@ fn a_live_peer_mid_frame_at_the_budget_is_not_a_crash() {
         _ => Action::Silent,
     });
 
-    assert_eq!(mock.bridge.parameter(ParamId::new(1)), None);
+    assert_eq!(mock.bridge.audio().parameter(ParamId::new(1)), None);
     // The barrier: the bridge thread takes commands in order, so this one is
     // handled only after the first has ended, drain included. A crash the
     // first caused is latched by then.
-    let _ = mock.bridge.parameters();
+    let _ = mock.bridge.audio().parameters();
     assert!(
-        !mock.bridge.is_crashed(),
+        !mock.bridge.audio().is_crashed(),
         "a live peer was declared unable to frame: {:?}",
-        mock.bridge.crash_cause()
+        mock.bridge.audio().crash_cause()
     );
 }
 
@@ -1958,6 +2002,7 @@ fn the_rest_of_a_stalled_state_is_not_the_next_answer() {
 
     let err = mock
         .bridge
+        .audio()
         .save_state(tutti_plugin_types::StateUse::Project)
         .expect_err("the transfer stalls");
     assert!(
@@ -1965,8 +2010,8 @@ fn the_rest_of_a_stalled_state_is_not_the_next_answer() {
         "{err:?}"
     );
     assert!(
-        mock.bridge.parameters().is_some(),
+        mock.bridge.audio().parameters().is_some(),
         "a late state chunk was read as the parameter list's answer"
     );
-    assert!(!mock.bridge.is_crashed());
+    assert!(!mock.bridge.audio().is_crashed());
 }
