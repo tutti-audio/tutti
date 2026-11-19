@@ -5,7 +5,7 @@ use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorLanes, KeyFilter, KeySource,
-    Lanes, Lerp,
+    Lerp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
@@ -75,7 +75,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// `F` is the float of the graph it runs in, and of the detector, the gain and the key filter.
 pub type CompressorNode<F> = KernelNode<CompressorKernel<F>>;
 
-impl<F: Float + Lanes + Lerp> CompressorNode<F> {
+impl<F: Float + SimdLanes + Lerp> CompressorNode<F> {
     /// A compressor on the bus `input`, its detector on `key`, running at `controls`.
     ///
     /// The main bus keeps its speaker placement; a [`KeySource::Sidechain`] is a second bus
@@ -191,7 +191,7 @@ control_set! {
 /// never parks: its follower must keep tracking the key, which the main input's silence
 /// says nothing of.
 #[derive(Clone, Debug)]
-pub struct CompressorKernel<F: Float + Lanes> {
+pub struct CompressorKernel<F: Float + SimdLanes> {
     input: BusTopology,
     key: KeySource,
     filter: KeyFilter,
@@ -201,7 +201,7 @@ pub struct CompressorKernel<F: Float + Lanes> {
     landed: bool,
 }
 
-impl<F: Float + Lanes + Lerp> CompressorKernel<F> {
+impl<F: Float + SimdLanes + Lerp> CompressorKernel<F> {
     /// A compressor on `input` whose detector reads `key`.
     fn new(input: BusTopology, key: KeySource, filter: KeyFilter) -> Self {
         Self {
@@ -220,7 +220,7 @@ impl<F: Float + Lanes + Lerp> CompressorKernel<F> {
     }
 }
 
-impl<F: Float + Lanes + Lerp> Kernel for CompressorKernel<F> {
+impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
     type Float = F;
     type Set = CompressorSet;
 

@@ -1,4 +1,4 @@
-//! [`CrossoverCoefficients`]: what the sections of a Linkwitz-Riley crossover run at, the
+//! [`CrossoverBlend`]: the value a crossover's glide moves, the band count and the
 //! integrator gain of each split, and the blend of two of them.
 
 use core::f64::consts::SQRT_2;
@@ -15,7 +15,7 @@ pub(super) const DAMPING: f64 = SQRT_2;
 /// One split's section coefficients at one integrator gain `g = tan(pi fc / fs)`: the
 /// trapezoidal state-variable filter's `d = 1 - 1 / (1 + g (g + k))`, `g / (1 + g (g + k))`
 /// and `g` times that, with `k` [`DAMPING`] (the same set as
-/// [`SvfCoeffs`](crate::SvfCoeffs)).
+/// [`SvfDesign`](crate::SvfDesign)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Tpt {
     pub(super) g: f64,
@@ -84,31 +84,31 @@ impl Tpt {
     }
 }
 
-/// The coefficients a [`CrossoverBank`](super::CrossoverBank) runs at: the band count and
+/// What a [`CrossoverBank`](super::CrossoverBank)'s glide moves: the band count and
 /// the integrator gain of each split, from a [`CrossoverModel`](super::CrossoverModel)
-/// ([`coefficients`](super::CrossoverModel::coefficients)).
+/// ([`blend`](super::CrossoverModel::blend)).
 ///
 /// A [`Lerp`]: a blend moves each split's gain `g` linearly and solves the section
 /// coefficients at that `g`, so it is the coefficients of a split at some frequency, and a
 /// split's low-pass, high-pass and all-pass stay a Butterworth set whole at every step.
 ///
 /// The band count of a blend is the target's. A crossover keeps its band count for its life
-/// (a design holds it, and the node and multiband are built for one), so the splits that
+/// (a model holds it, and the node and multiband are built for one), so the splits that
 /// blend are the ones active at both ends.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CrossoverCoefficients {
+pub struct CrossoverBlend {
     pub(super) bands: usize,
     pub(super) split: [Tpt; MAX_SPLITS],
 }
 
-impl CrossoverCoefficients {
+impl CrossoverBlend {
     /// How many bands they make.
     pub(crate) fn bands(&self) -> usize {
         self.bands
     }
 }
 
-impl Lerp for CrossoverCoefficients {
+impl Lerp for CrossoverBlend {
     /// Each split's `g` blended linearly, `k / n` of the way, and its coefficients solved
     /// there: one division a split, for one frame only.
     #[inline]
@@ -149,7 +149,7 @@ impl Tpt {
     }
 }
 
-/// [`CrossoverCoefficients`] narrowed to the float `F`, once per design: what a
+/// [`CrossoverBlend`] narrowed to the float `F`, once per design: what a
 /// [`CrossoverState<F>`](super::CrossoverState) runs a frame at.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Narrowed<F> {
@@ -157,7 +157,7 @@ pub(super) struct Narrowed<F> {
     pub(super) split: [Gains<F>; MAX_SPLITS],
 }
 
-impl CrossoverCoefficients {
+impl CrossoverBlend {
     /// These coefficients in `F`.
     pub(super) fn narrowed<F: Float>(&self) -> Narrowed<F> {
         Narrowed {

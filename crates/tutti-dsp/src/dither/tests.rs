@@ -1,9 +1,9 @@
 use super::*;
 use tutti_buffers::ChannelLayout;
 
-/// `apply` over a mono run of samples.
-fn apply<F: Float>(n: &mut DitherNoise, shape: DitherShape, lsb: Amplitude, s: &mut [F]) {
-    n.apply(
+/// `DitherNoise::process` over a mono run of samples.
+fn process_mono<F: Float>(n: &mut DitherNoise, shape: DitherShape, lsb: Amplitude, s: &mut [F]) {
+    n.process(
         shape,
         lsb,
         InterleavedMut::new(s, ChannelLayout::MONO).unwrap(),
@@ -17,7 +17,7 @@ const LSB: Amplitude = Amplitude::new(1.0);
 #[test]
 fn the_first_draw_is_the_seeded_word_scaled() {
     let mut s = [0.0f32; 1];
-    apply(
+    process_mono(
         &mut DitherNoise::new(),
         DitherShape::Rectangular,
         LSB,
@@ -32,7 +32,7 @@ fn the_first_draw_is_the_seeded_word_scaled() {
 #[test]
 fn the_first_triangular_draw_is_the_difference_of_two_seeded_words() {
     let mut s = [0.0f32; 1];
-    apply(
+    process_mono(
         &mut DitherNoise::new(),
         DitherShape::Triangular,
         Amplitude::new(0.25),
@@ -46,7 +46,7 @@ fn the_first_triangular_draw_is_the_difference_of_two_seeded_words() {
 fn rectangular_stays_within_half_an_lsb() {
     let mut n = DitherNoise::new();
     let mut s = [0.0f32; 4096];
-    apply(&mut n, DitherShape::Rectangular, LSB, &mut s);
+    process_mono(&mut n, DitherShape::Rectangular, LSB, &mut s);
     assert!(s.iter().all(|x| x.abs() <= 0.5));
     assert!(s.iter().any(|x| x.abs() > 0.4), "the range is used");
 }
@@ -55,7 +55,7 @@ fn rectangular_stays_within_half_an_lsb() {
 fn triangular_stays_within_one_lsb() {
     let mut n = DitherNoise::new();
     let mut s = [0.0f32; 4096];
-    apply(&mut n, DitherShape::Triangular, LSB, &mut s);
+    process_mono(&mut n, DitherShape::Triangular, LSB, &mut s);
     assert!(s.iter().all(|x| x.abs() <= 1.0));
     assert!(s.iter().any(|x| x.abs() > 0.8), "the range is used");
 }
@@ -64,7 +64,7 @@ fn triangular_stays_within_one_lsb() {
 #[test]
 fn the_sequence_continues_across_calls() {
     let mut whole = [0.0f32; 16];
-    apply(
+    process_mono(
         &mut DitherNoise::new(),
         DitherShape::Triangular,
         LSB,
@@ -73,8 +73,8 @@ fn the_sequence_continues_across_calls() {
     let mut split = [0.0f32; 16];
     let mut n = DitherNoise::new();
     let (a, b) = split.split_at_mut(6);
-    apply(&mut n, DitherShape::Triangular, LSB, a);
-    apply(&mut n, DitherShape::Triangular, LSB, b);
+    process_mono(&mut n, DitherShape::Triangular, LSB, a);
+    process_mono(&mut n, DitherShape::Triangular, LSB, b);
     assert_eq!(whole, split);
 }
 
@@ -84,7 +84,7 @@ fn the_sequence_continues_across_calls() {
 #[test]
 fn an_f64_block_keeps_its_precision_and_gets_the_seeded_draw() {
     let mut s = [0.1f64; 1];
-    apply(
+    process_mono(
         &mut DitherNoise::new(),
         DitherShape::Rectangular,
         LSB,
@@ -114,7 +114,7 @@ fn f32_triangular_noise_has_the_variance_of_a_triangle() {
     let mean_bound = factor * (sigma2 / N as f64).sqrt();
     for lsb in [1.0_f64, 2f64.powi(-23)] {
         let mut s = vec![0.0f32; N];
-        apply(
+        process_mono(
             &mut DitherNoise::new(),
             DitherShape::Triangular,
             Amplitude::new(lsb),

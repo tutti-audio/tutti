@@ -245,7 +245,7 @@ static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::Al
 
 pub use tutti_buffers::MaxBlock;
 pub use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
-pub use tutti_rt::{RequestBit, RequestBits, RequestWord};
+pub use tutti_rt::{AtomicRequestFlags, RequestFlag, RequestFlags};
 /// Re-exported so every format crate spells a sample count the same way
 /// without each taking its own `tutti-units` dependency — `ChannelLayout`
 /// above is here for the same reason.

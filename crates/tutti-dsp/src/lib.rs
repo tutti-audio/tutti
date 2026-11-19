@@ -15,13 +15,13 @@
 //!   [`spectral_radius`](Lti::spectral_radius), [`l1_norm`](Lti::l1_norm),
 //!   [`hinf_norm`](Lti::hinf_norm), with [`Complex64`]); [`MaxDecay`] is the longest decay
 //!   a reverb is built to.
-//! - **Filters** (`filter/`): the SVF ([`SvfBank`], [`SvfCoeffs`], [`SvfModel`], [`SvfType`];
+//! - **Filters** (`filter/`): the SVF ([`SvfBank`], [`SvfDesign`], [`SvfModel`], [`SvfType`];
 //!   Simper's trapezoidal state-variable filter, eight responses), the Moog ladder
-//!   ([`LadderBank`], [`LadderCoeffs`], [`LadderModel`], [`LadderType`]) and the
+//!   ([`LadderBank`], [`LadderDesign`], [`LadderBlend`], [`LadderModel`], [`LadderType`]) and the
 //!   Linkwitz-Riley crossover ([`CrossoverBank`], [`CrossoverModel`]; a 2 to 6 band
 //!   4th-order split), each one filter per channel over buffers views with its
 //!   coefficients a [`Glide`] the caller aims; the envelope filter ([`EnvelopeFilterBank`]:
-//!   an SVF whose cutoff follows the input's level); [`Lanes`], the arithmetic their steps
+//!   an SVF whose cutoff follows the input's level); [`SimdLanes`], the arithmetic their steps
 //!   run in, and the [`Biquad`] section they share. The state runs in `f32` or `f64`, and
 //!   its transcendentals call `libm`, so results do not depend on the platform's C math
 //!   library.
@@ -115,7 +115,7 @@
 //!   bands with equal ratios between neighbours.
 //! - **Control and small kernels**: [`Glide`], a value that moves to its target in steps
 //!   (with [`Lerp`] and [`Steps`]); [`smooth_toward`], the one-pole step; [`COEFF_INTERVAL`] and
-//!   [`LANES`], the solve interval and channel grouping of the filter banks; [`lerp`],
+//!   [`CHANNEL_GROUP`], the solve interval and channel grouping of the filter banks; [`lerp`],
 //!   [`cubic_hermite`] and [`parabolic_peak`]; [`rms`]; [`Xorshift32`], a seeded noise
 //!   source.
 //!
@@ -135,8 +135,8 @@
 mod bands;
 mod beat;
 mod bit_crush;
-mod control;
-mod convert;
+mod channel_group;
+mod control_rate;
 mod convolver;
 mod dc_block;
 mod delay;
@@ -159,6 +159,7 @@ mod pan;
 mod polarity;
 mod position;
 mod ring_mod;
+mod sample_convert;
 mod stereo;
 mod tremolo;
 mod waveshape;
@@ -180,7 +181,8 @@ mod xorshift;
 pub use bands::{log_band_edges, octave_band_edges};
 pub use beat::track_beat_frames;
 pub use bit_crush::{BitCrusher, BitCrusherControls, hold_frames, quantize};
-pub use control::{COEFF_INTERVAL, LANES};
+pub use channel_group::CHANNEL_GROUP;
+pub use control_rate::COEFF_INTERVAL;
 pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError};
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub(crate) use delay::delay_step;
@@ -201,11 +203,11 @@ pub use dynamics::{
 };
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};
 pub use filter::{
-    Biquad, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
-    CrossoverModel, EnvelopeFilterBank, EnvelopeFilterControls, LadderBank, LadderCoefficients,
-    LadderCoeffs, LadderControls, LadderDesign, LadderModel, LadderType, Lanes, MAX_SPLITS,
-    SOLVE_CEILING, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType,
-    fit_to_rate, ladder_step, svf_step,
+    Biquad, CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError, CrossoverModel,
+    EnvelopeFilterBank, EnvelopeFilterControls, LadderBank, LadderBlend, LadderCoefficients,
+    LadderControls, LadderDesign, LadderModel, LadderType, MAX_SPLITS, SOLVE_CEILING, SimdLanes,
+    SvfBank, SvfCoefficients, SvfControls, SvfDesign, SvfModel, SvfType, fit_to_rate, ladder_step,
+    svf_step,
 };
 pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
 pub use glide::{Glide, Lerp, Steps};
@@ -235,7 +237,7 @@ pub use resample::{
     resampled_frames,
 };
 pub use reverb::fdn::bank::{FdnBank, FdnGlides};
-pub use reverb::fdn::design::{FdnControls, FdnLayout, MAX_PRE_DELAY, MIN_DECAY};
+pub use reverb::fdn::design::{FdnControls, FdnLayout, FreezeMode, MAX_PRE_DELAY, MIN_DECAY};
 pub use reverb::freeverb::bank::{FreeverbBank, FreeverbGlides};
 pub use reverb::freeverb::design::FreeverbControls;
 pub(crate) use reverb::network::loop_gain;

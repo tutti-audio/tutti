@@ -80,7 +80,7 @@ pub enum Target {
     /// plugin's): the event input of `node` the lane feeds, and the knob the
     /// lane's own cell starts at (the plugin's value as the host mirrors
     /// it). Later writes go through the lane's
-    /// [`LaneControls::set_knob`] ([`Modulation::lane`]).
+    /// [`LaneControls::set_value`] ([`Modulation::lane`]).
     Foreign {
         /// The node hosting the parameter.
         node: NodeKey,
@@ -96,7 +96,7 @@ pub enum Target {
     /// ([`Editor::edge_gain_cell`]), as a native target's is the node's
     /// `Param`: the base the lane's offsets add to, in the gain's own units
     /// (`1.0` is unity), written by whoever sets the edge's gain
-    /// (`Editor::set_edge_gain`, [`LaneControls::set_knob`]: one cell, so one
+    /// (`Editor::set_edge_gain`, [`LaneControls::set_value`]: one cell, so one
     /// writer). A route modulates around the base and its removal returns to
     /// it. The edge's entry is made when the target first resolves (an edge
     /// with none is a plain addend), and the lane is built once the commit
@@ -112,7 +112,7 @@ pub enum Target {
     /// `0..=1`). Its knob is the node's own mix cell
     /// ([`Editor::mix_cell`]), as an edge's is its gain cell: the base the
     /// lane's offsets add to, written by whoever sets the mix
-    /// ([`Editor::set_mix`], [`LaneControls::set_knob`]: one cell, so one
+    /// ([`Editor::set_mix`], [`LaneControls::set_value`]: one cell, so one
     /// writer). A route modulates around the base and its removal returns to
     /// it. The lane is built once a commit has placed the node's unit.
     Mix {

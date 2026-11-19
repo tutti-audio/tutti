@@ -2,7 +2,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
-use tutti_dsp::{Lanes, MatchedBell, Ring, Sos, SosError};
+use tutti_dsp::{MatchedBell, Ring, SimdLanes, Sos, SosError};
 use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::eq::sealed::Sealed;
@@ -74,7 +74,7 @@ pub type BellFilterNode<F> = KernelNode<BellFilterKernel<F>>;
 /// The bell as a [`Kernel`](crate::Kernel).
 pub type BellFilterKernel<F> = EqKernel<BellFilterControls, F>;
 
-impl<F: Float + Lanes> From<BellFilterConfig> for BellFilterNode<F> {
+impl<F: Float + SimdLanes> From<BellFilterConfig> for BellFilterNode<F> {
     fn from(config: BellFilterConfig) -> Self {
         Self::with_kernel(
             BellFilterKernel::new(filter_bus(config.width)),

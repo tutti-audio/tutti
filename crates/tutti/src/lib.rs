@@ -236,9 +236,9 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 pub mod nodes {
     pub use tutti_dsp::{
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, Fdn, FirSummary,
-        Full, Gains, HrtfBinauralError, Inline, Lanes, Lerp, Line, LineModulation, LookaheadError,
-        Matrix, MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap,
-        ResampleError, Ring, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
+        Full, Gains, HrtfBinauralError, Inline, Lerp, Line, LineModulation, LookaheadError, Matrix,
+        MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap, ResampleError,
+        Ring, SimdLanes, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
@@ -266,7 +266,7 @@ pub mod nodes {
         DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig,
         DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
         EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnControls,
-        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
+        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode,
         HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
         LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode,
         MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,

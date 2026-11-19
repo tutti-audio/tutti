@@ -77,7 +77,7 @@ struct Shape {
 /// A coefficient point: what a design asks for (the values [`PlateGlides`] glide to) and
 /// what a chunk runs.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Coeffs<F> {
+struct Coefficients<F> {
     /// The decay coefficient.
     decay: F,
     /// The damping pole's complement `1 - p`.
@@ -96,7 +96,7 @@ struct Coeffs<F> {
     bandwidth: F,
 }
 
-impl<F: Float> Default for Coeffs<F> {
+impl<F: Float> Default for Coefficients<F> {
     fn default() -> Self {
         Self {
             decay: F::ZERO,
@@ -155,8 +155,8 @@ impl<F: Float + Lerp> PlateGlides<F> {
     }
 
     /// The coefficients now.
-    fn now(&self) -> Coeffs<F> {
-        Coeffs {
+    fn now(&self) -> Coefficients<F> {
+        Coefficients {
             decay: self.decay.now(),
             damping: self.damping.now(),
             lattice2: self.lattice2.now(),
@@ -168,7 +168,7 @@ impl<F: Float + Lerp> PlateGlides<F> {
         }
     }
 
-    fn aim(&mut self, t: &Coeffs<F>) {
+    fn aim(&mut self, t: &Coefficients<F>) {
         let ramp = self.ramp;
         self.decay.aim_by(t.decay, ramp);
         self.damping.aim_by(t.damping, ramp);
@@ -207,7 +207,7 @@ struct Half<F> {
 /// at the chunk's start and end.
 #[derive(Clone, Copy, Debug)]
 struct Chunk<F> {
-    k: Coeffs<F>,
+    k: Coefficients<F>,
     prev: [F; 2],
     next: [F; 2],
 }
@@ -300,7 +300,7 @@ impl<F: Float + Lerp> PlateBank<F> {
             phase: 0.0,
             fresh: true,
             chunk: Chunk {
-                k: Coeffs::default(),
+                k: Coefficients::default(),
                 prev: [F::ZERO; 2],
                 next: [F::ZERO; 2],
             },
@@ -575,7 +575,7 @@ fn shape_of(network: &Network) -> Shape {
 
 /// The coefficient point the design in `network` asks for, `None` for a network that is not a
 /// plate's. The bandwidth is the caller's.
-fn target_of<F: Float>(network: &Network) -> Option<Coeffs<F>> {
+fn target_of<F: Float>(network: &Network) -> Option<Coefficients<F>> {
     let Stage::Fdn(f) = network.stages.iter().find(|s| matches!(s, Stage::Fdn(_)))? else {
         return None;
     };
@@ -589,7 +589,7 @@ fn target_of<F: Float>(network: &Network) -> Option<Coeffs<F>> {
     let Absorption::OnePole { gain, damp } = a.absorption else {
         return None;
     };
-    Some(Coeffs {
+    Some(Coefficients {
         decay: F::from_unit(gain),
         damping: F::from_design(1.0 - damp),
         lattice2: F::from_unit(b.diffuser?.gain),

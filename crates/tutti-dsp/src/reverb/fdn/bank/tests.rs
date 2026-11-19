@@ -4,8 +4,8 @@ use tutti_units::{
 };
 
 use super::*;
-use crate::MaxDecay;
 use crate::reverb::network::{Fdn, Network, Stage};
+use crate::{FreezeMode, MaxDecay};
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -25,8 +25,8 @@ fn still(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
     })
 }
 
-fn layout(lines: usize, freezable: bool) -> FdnLayout {
-    FdnLayout::new(lines, MaxDecay::DEFAULT, freezable).unwrap()
+fn layout(lines: usize, freeze: FreezeMode) -> FdnLayout {
+    FdnLayout::new(lines, MaxDecay::DEFAULT, freeze).unwrap()
 }
 
 /// A bank of `layout` at `rate`, landed on `c`.
@@ -134,7 +134,7 @@ fn trip_gain(length: f64, rt60: f64, rate: SampleRate) -> f64 {
 /// 60 dB in the designed RT60, from parallel combs (diffusion 0) to the Householder matrix.
 #[test]
 fn the_schroeder_integral_falls_60_db_in_the_designed_rt60() {
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     for rt60 in [0.5, 1.0, 2.0] {
         for diffusion in [0.0, 1.0] {
             let c = still(|c| {
@@ -198,7 +198,7 @@ fn dtft(block: &[f32], w: f64) -> f64 {
 /// from the one-poles. The decay falls with the frequency as the bands say (3 s, 1.5 s, 0.6 s).
 #[test]
 fn each_band_decays_at_its_designed_rt60() {
-    let l = layout(2, false);
+    let l = layout(2, FreezeMode::Decaying);
     let c = still(|c| {
         c.decay = [Seconds::new(1.5), Seconds::new(3.0), Seconds::new(0.6)];
         c.diffusion = Mix::new(0.0);
@@ -256,7 +256,7 @@ fn each_band_decays_at_its_designed_rt60() {
 /// vector to `f32` moves it 1e-4 dB at most.
 #[test]
 fn a_frozen_network_keeps_its_energy() {
-    let l = layout(8, true);
+    let l = layout(8, FreezeMode::Freezable);
     let c = controls(|c| c.diffusion = Mix::new(1.0));
     let (mut bank, mut glides) = landed(&l, RATE, &c);
     run(&mut bank, &mut glides, &noise(1, 24_000), 64);
@@ -283,7 +283,7 @@ fn a_frozen_network_keeps_its_energy() {
 /// and mixing moves energy between lines of different length.)
 #[test]
 fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
-    let l = layout(8, true);
+    let l = layout(8, FreezeMode::Freezable);
     let at = |diffusion: f64, freeze: bool| {
         still(|c| {
             c.diffusion = Mix::new(diffusion);
@@ -310,7 +310,7 @@ fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
 /// fraction of the figure at a long decay.
 #[test]
 fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
-    let l = layout(8, true);
+    let l = layout(8, FreezeMode::Freezable);
     let c = still(|c| {
         c.decay = [Seconds::new(2.0); 3];
         c.diffusion = Mix::new(0.0);
@@ -344,7 +344,7 @@ fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
 #[test]
 fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
     let n = 8;
-    let l = layout(n, false);
+    let l = layout(n, FreezeMode::Decaying);
     let echo = |wet: Db, width: f64| {
         let c = still(|c| {
             c.pre_delay = Seconds::new(0.1);
@@ -390,7 +390,7 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
 /// from the last reset and not from a call's edge.
 #[test]
 fn any_split_of_the_stream_gives_the_same_bits() {
-    let l = layout(8, true);
+    let l = layout(8, FreezeMode::Freezable);
     let a = controls(|_| {});
     let b = controls(|c| {
         c.decay = [Seconds::new(4.0), Seconds::new(5.0), Seconds::new(2.0)];
@@ -426,7 +426,7 @@ fn any_split_of_the_stream_gives_the_same_bits() {
 /// start over with the lines).
 #[test]
 fn a_reset_bank_renders_as_a_fresh_one() {
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     let c = controls(|c| c.modulation = Depth::of(0.8));
     let (mut used, mut used_glides) = landed(&l, RATE, &c);
     run(&mut used, &mut used_glides, &noise(3, 5_001), 64);
@@ -443,7 +443,7 @@ fn a_reset_bank_renders_as_a_fresh_one() {
 /// continue to the same bits, and one running on does not move the other.
 #[test]
 fn a_clone_continues_where_the_original_was_and_shares_nothing() {
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     let c = controls(|_| {});
     let (mut bank, mut glides) = landed(&l, RATE, &c);
     let x = noise(9, 4_000);
@@ -460,7 +460,7 @@ fn a_clone_continues_where_the_original_was_and_shares_nothing() {
 /// one: a channel and its negation cancel, and two copies of a signal render as the signal.
 #[test]
 fn a_bank_is_silent_until_aimed_and_averages_its_input() {
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     let mut bank = FdnBank::<f32>::new(&l, RATE);
     let mut glides = bank.glides();
     let before = run(&mut bank, &mut glides, &noise(2, 256), 64);
@@ -492,8 +492,8 @@ fn a_bank_is_silent_until_aimed_and_averages_its_input() {
 /// to fall 60 dB).
 #[test]
 fn the_tail_is_the_networks_under_the_ceiling() {
-    let plain = FdnBank::<f32>::new(&layout(8, false), RATE);
-    let freezable = FdnBank::<f32>::new(&layout(8, true), RATE);
+    let plain = FdnBank::<f32>::new(&layout(8, FreezeMode::Decaying), RATE);
+    let freezable = FdnBank::<f32>::new(&layout(8, FreezeMode::Freezable), RATE);
     assert_eq!(freezable.tail(), Tail::Unbounded);
     let Tail::Finite(ceiling) = plain.tail() else {
         panic!("a finite ceiling")
@@ -541,7 +541,7 @@ fn the_tail_is_the_networks_under_the_ceiling() {
 /// which costs a trip's high frequencies as much as any gain does.
 #[test]
 fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     let bands = |size: f64| {
         still(|c| {
             c.decay = [Seconds::new(1.5), Seconds::new(3.0), Seconds::new(0.6)];
@@ -592,7 +592,7 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
 /// decay with the longest pre-delay in flight still fits the ceiling.
 #[test]
 fn the_tail_owes_the_pre_delay_still_to_fall() {
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     let (mut bank, mut glides) = landed(&l, RATE, &still(|c| c.pre_delay = Seconds::new(0.4)));
     bank.aim(&mut glides, &still(|_| {}));
     let Tail::Finite(owed) = bank.tail_of(&glides, &still(|_| {})) else {
@@ -629,7 +629,7 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
 /// `ceil(delta / 0.5)` steps of the glide, one a chunk, and no step is longer than 0.5.
 #[test]
 fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     let (a, b) = (
         still(|c| c.size = Mix::new(0.2)),
         still(|c| c.size = Mix::new(0.3)),
@@ -667,7 +667,7 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
 /// frames, 2400 chunks.
 #[test]
 fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
     bank.aim(&mut glides, &still(|c| c.pre_delay = Seconds::new(0.1)));
     let mut last = ReadPosition::START;
@@ -698,7 +698,7 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
     let wanted = (0.020 * RATE.get() / FdnBank::<f32>::CHUNK as f64).ceil() as u32;
     assert_eq!(wanted, 30);
     assert_eq!(ramp(RATE), Steps::Fixed(wanted));
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
     bank.aim(&mut glides, &still(|c| c.wet = Db::new(-6.0206)));
     let target = glides.wet.target();
@@ -720,19 +720,19 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
 #[test]
 fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
     let c = still(|c| c.pre_delay = Seconds::new(0.0));
-    let (mut bank, mut glides) = landed(&layout(8, false), RATE, &c);
+    let (mut bank, mut glides) = landed(&layout(8, FreezeMode::Decaying), RATE, &c);
     run(&mut bank, &mut glides, &impulse(1), 1);
     let held = bank.state.lines[7].back(1);
     assert_ne!(held, 0.0, "the impulse reached the last line");
 
     let m = 100;
-    bank.layout = layout(4, false);
+    bank.layout = layout(4, FreezeMode::Decaying);
     bank.designed = None;
     bank.aim(&mut glides, &c);
     run(&mut bank, &mut glides, &vec![0.0; m], 7);
     assert_eq!(bank.state.lines[7].back(m + 1), held, "idle for {m} frames");
 
-    bank.layout = layout(8, false);
+    bank.layout = layout(8, FreezeMode::Decaying);
     bank.designed = None;
     bank.aim(&mut glides, &c);
     run(&mut bank, &mut glides, &vec![0.0; m], 7);
@@ -751,7 +751,7 @@ fn an_f64_fdn_is_linear() {
     let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
     let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
     let c = still(|c| c.diffusion = Mix::new(0.6));
-    let l = layout(8, false);
+    let l = layout(8, FreezeMode::Decaying);
     let render = |input: &[f64]| {
         let mut bank = FdnBank::<f64>::new(&l, RATE);
         let mut glides = bank.glides();
@@ -823,7 +823,7 @@ fn the_absorption_complements_keep_their_relative_precision_where_one_minus_the_
 fn the_longest_decay_at_192_khz_on_the_shortest_line_holds_its_closed_form_rt60_in_f32() {
     let rate = SampleRate::SR_192K;
     let decay = MaxDecay::new(MaxDecay::CAP).unwrap();
-    let l = FdnLayout::new(2, decay, false).unwrap();
+    let l = FdnLayout::new(2, decay, FreezeMode::Decaying).unwrap();
     let c = still(|c| {
         c.decay = [decay.get(); 3];
         c.size = Mix::new(0.0);

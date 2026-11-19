@@ -767,7 +767,7 @@ impl ModState {
             .range((node, ParamId::new(0))..=(node, ParamId::new(u32::MAX)))
             .filter_map(|(&(_, id), &target)| {
                 let (_, lane) = self.lane(target)?;
-                lane.knob().is_some().then(|| (id, lane.clone()))
+                lane.value().is_some().then(|| (id, lane.clone()))
             })
             .collect()
     }

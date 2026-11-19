@@ -5,7 +5,7 @@ use crate::reverb::network::{Band, Fdn, Matrix, Network, Stage};
 use crate::{Lti as _, System as _};
 
 fn freezable() -> FdnLayout {
-    FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap()
+    FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap()
 }
 
 fn base() -> FdnControls {
@@ -145,7 +145,7 @@ fn lengths_are_whole_frames_that_grow_with_size_and_rate() {
 #[test]
 fn the_input_feeds_every_line_and_the_ears_take_alternate_lines() {
     for n in [2usize, 8, 16] {
-        let d = FdnLayout::new(n, MaxDecay::of(Seconds::new(2.0)), false).unwrap();
+        let d = FdnLayout::new(n, MaxDecay::of(Seconds::new(2.0)), FreezeMode::Decaying).unwrap();
         let net = design_of(&d, &base());
         let f = fdn_of(&net);
         let input = 1.0 / (n as f64).sqrt();
@@ -174,10 +174,13 @@ fn the_input_feeds_every_line_and_the_ears_take_alternate_lines() {
 #[test]
 fn a_configuration_refuses_a_line_count_it_cannot_hold() {
     let ok = MaxDecay::DEFAULT;
-    assert!(FdnLayout::new(8, ok, false).is_some());
-    assert!(FdnLayout::new(16, ok, true).is_some());
+    assert!(FdnLayout::new(8, ok, FreezeMode::Decaying).is_some());
+    assert!(FdnLayout::new(16, ok, FreezeMode::Freezable).is_some());
     for lines in [0, 1, 7, 17, 18] {
-        assert!(FdnLayout::new(lines, ok, false).is_none(), "{lines}");
+        assert!(
+            FdnLayout::new(lines, ok, FreezeMode::Decaying).is_none(),
+            "{lines}"
+        );
     }
 }
 
