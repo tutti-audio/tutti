@@ -48,7 +48,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// makeup, the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and
 /// the Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth); a node with
 /// [`KeyFilter::Off`] declares neither, as a reverb that cannot freeze declares no freeze.
-/// The filter's coefficients glide to a new cutoff over one grid period.
+/// The filter's coefficients ramp to a new cutoff over one grid period.
 ///
 /// # Controls
 ///
@@ -63,8 +63,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// frames from the last reset, [`Kernel::GRID`]): a cell write or a driven port is sampled
 /// at the grid's solve frame, so it reaches the render within 16 frames and the render does
 /// not depend on how the stream is cut into blocks. The detector's controls land whole (the
-/// follower smooths them), and the makeup is a ramp, a control moving to a target: it glides
-/// over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms.
+/// follower smooths them), and the makeup is a ramp, a control moving to a target: it ramps
+/// over [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP), 5 ms.
 ///
 /// # In a graph
 ///
@@ -172,10 +172,10 @@ control_set! {
     Ratio => CompressionRatio = ratio { whole },
     Attack => Seconds = attack { whole },
     Release => Seconds = release { whole },
-    // The makeup glides in the bank, over `GAIN_GLIDE`: the reader must not ramp it
+    // The makeup ramps in the bank, over `GAIN_RAMP`: the reader must not ramp it
     // across the block as well. It is addressed as `GainDb`.
     GainDb => Db = makeup { whole },
-    // The filter's coefficients glide in the bank, over one grid period.
+    // The filter's coefficients ramp in the bank, over one grid period.
     Cutoff => Hz = key_cutoff { whole },
     Q => Q = key_q { whole };
 
@@ -254,9 +254,9 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
 
     fn retarget(&mut self, controls: &CompressorControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
+        bank.retarget(controls);
         if !self.landed {
-            bank.settle();
+            bank.finish();
             self.landed = true;
         }
     }
@@ -717,11 +717,11 @@ mod tests {
         assert!((out[0] - want).abs() < 1e-4, "{} vs {want}", out[0]);
     }
 
-    /// A makeup written between blocks glides over 5 ms (240 frames at 48 kHz) wherever the
+    /// A makeup written between blocks ramps over 5 ms (240 frames at 48 kHz) wherever the
     /// blocks fall: monotone, starting near the old gain and landing on the new one, which
     /// is the old times 10^(6/20).
     #[test]
-    fn a_makeup_write_glides_over_five_milliseconds() {
+    fn a_makeup_write_ramps_over_five_milliseconds() {
         let rate = SampleRate::SR_48K;
         let mut node = tutti_graph::contract::prepared(comp(0.0, 1.0, 0.0, 0.0), rate, 64);
         let (audio, key) = (vec![0.5f32; 64], vec![0.0f32; 64]);
@@ -735,16 +735,16 @@ mod tests {
                 drive(&mut node, rate, Planes::new(&[&audio, &key]).unwrap(), &[]).remove(0),
             );
         }
-        // The write is sampled on the grid (within 16 frames), then 240 frames of glide.
+        // The write is sampled on the grid (within 16 frames), then 240 frames of ramp.
         assert!(
             out[0] < 0.5 * 1.01,
             "the first frame is near the old gain: {}",
             out[0]
         );
         for w in out.windows(2) {
-            assert!(w[1] >= w[0], "the glide is monotone: {w:?}");
+            assert!(w[1] >= w[0], "the ramp is monotone: {w:?}");
             // 6 dB over 240 frames is 0.025 dB a frame, a factor of 1.0029.
-            assert!(w[1] / w[0] < 1.0035, "no step in the glide: {w:?}");
+            assert!(w[1] / w[0] < 1.0035, "no step in the ramp: {w:?}");
         }
         let want = 0.5 * 10f32.powf(6.0 / 20.0);
         assert!(

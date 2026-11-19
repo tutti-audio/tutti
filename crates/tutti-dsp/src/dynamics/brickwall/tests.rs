@@ -43,7 +43,7 @@ fn render_blocks(
     block: usize,
 ) -> Vec<Vec<f32>> {
     let mut bank = BrickwallBank::<f32>::new();
-    bank.aim(&controls);
+    bank.retarget(&controls);
     let mut out = vec![vec![0.0f32; x.len()]; 2];
     let mut start = 0;
     while start < x.len() {
@@ -251,7 +251,7 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
     let x = wide_signal(64);
     let render = |db: f64| -> Vec<f64> {
         let mut bank = BrickwallBank::<f64>::new();
-        bank.aim(&controls(db));
+        bank.retarget(&controls(db));
         let mut y = vec![0.0f64; x.len()];
         bank.process(
             BrickwallLanes::default(),
@@ -274,7 +274,7 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
 fn an_f32_ceiling_of_800_db_passes_an_infinity_unchanged() {
     let x = [1.0e30f32, -3.0, 0.0, f32::INFINITY, f32::NEG_INFINITY];
     let mut bank = BrickwallBank::<f32>::new();
-    bank.aim(&controls(800.0));
+    bank.retarget(&controls(800.0));
     let mut y = [0.0f32; 5];
     bank.process(
         BrickwallLanes::default(),

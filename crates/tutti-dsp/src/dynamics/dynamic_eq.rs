@@ -28,7 +28,7 @@
 //! The gain is **linked**: one gain from the loudest key channel, applied to every channel.
 //! It is designed once per [`COEFF_INTERVAL`] frames of the stream (a design is a `tan` and a
 //! power), from the smoothed gain change as the previous period ended, and the bell's
-//! coefficients glide to it over the period with the filter's state kept, so the gain the
+//! coefficients ramp to it over the period with the filter's state kept, so the gain the
 //! signal hears trails the detector by up to two periods and does not click. The grid is the
 //! bank's own frame count, so the render does not depend on how the stream is cut into blocks.
 //!
@@ -44,7 +44,7 @@ use super::gain_pass::{MAX_KNEE, floored};
 use super::key_filter::KeyStage;
 use crate::follower::{Follower, Pole, Smoothed};
 use crate::{
-    COEFF_INTERVAL, Glide, Lerp, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfDesign,
+    COEFF_INTERVAL, Lerp, Ramp, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfDesign,
     SvfModel, SvfType,
 };
 
@@ -208,7 +208,7 @@ pub struct DynamicEqBank<F: Float + SimdLanes> {
     /// level in `F`.
     moved: Smoothed<F>,
     bell: SvfBank<F>,
-    coefficients: Glide<SvfCoefficients<F>>,
+    coefficients: Ramp<SvfCoefficients<F>>,
     /// The gain change the coefficients were last designed at, in dB, `None` after the band
     /// moved.
     designed: Option<Db>,
@@ -232,8 +232,8 @@ impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
             mean_square: Smoothed::ZERO,
             moved: Smoothed::ZERO,
             bell: SvfBank::new(width),
-            coefficients: Glide::landed(Self::bell(d.center, d.q, Db::UNITY, rate))
-                .by(COEFF_INTERVAL as u32),
+            coefficients: Ramp::new(Self::bell(d.center, d.q, Db::UNITY, rate))
+                .steps(COEFF_INTERVAL as u32),
             designed: None,
             phase: Samples::ZERO,
         }
@@ -273,22 +273,22 @@ impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
         self.phase = Samples::ZERO;
         self.bell.reset();
         self.key.reset();
-        self.settle();
+        self.finish();
     }
 
     /// Lands the filters on their design now.
-    pub fn settle(&mut self) {
+    pub fn finish(&mut self) {
         self.design_bell();
-        self.coefficients.settle();
-        self.key.settle();
+        self.coefficients.finish();
+        self.key.finish();
     }
 
     /// Aims at `controls`: the curve and the times land whole, and the bell and the detector's
-    /// band-pass glide to the centre and Q over one grid period ([`COEFF_INTERVAL`]). A
+    /// band-pass ramp to the centre and Q over one grid period ([`COEFF_INTERVAL`]). A
     /// non-finite control is the default's, except a time (NaN is 0, `+inf` holds); a knee,
     /// the times and the range are floored at 0, a ratio at 1 and a threshold held within
     /// 1e30 dB. No allocation.
-    pub fn aim(&mut self, controls: &DynamicEqControls) {
+    pub fn retarget(&mut self, controls: &DynamicEqControls) {
         let d = DynamicEqControls::DEFAULT;
         let model = SvfModel::new(
             SvfControls {
@@ -303,16 +303,16 @@ impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
         self.center = model.freq;
         self.q = model.q;
         self.design = Design::of(controls, self.center, self.q, self.rate);
-        self.key.aim(self.center, self.q);
+        self.key.retarget(self.center, self.q);
         self.designed = None;
     }
 
-    /// Aims the bell's glide at the band's gain now, if it is not already there.
+    /// Aims the bell's ramp at the band's gain now, if it is not already there.
     fn design_bell(&mut self) {
         let gain = self.signed();
         if self.designed != Some(gain) {
             self.coefficients
-                .aim(Self::bell(self.center, self.q, gain, self.rate));
+                .retarget(Self::bell(self.center, self.q, gain, self.rate));
             self.designed = Some(gain);
         }
     }

@@ -1,7 +1,7 @@
 use super::error::Result;
 use tutti_buffers::{Bed, ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Fold, Mono, MonoMut};
-use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp, SpeakerLayout, VbapGains, VbapKernel};
+use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::UnitParam;
@@ -12,7 +12,7 @@ use crate::ramp::LastGood;
 
 /// The grid the gains are solved on, in frames: the controls are read, and the
 /// gains solved, every `GRID` frames counted from the last reset, and a frame
-/// reads the gains glided between the two grid points around it.
+/// reads the gains ramped between the two grid points around it.
 ///
 /// It is [`COEFF_INTERVAL`], the grid the filters and the modulated delays solve
 /// on (0.33 ms at 48 kHz): short enough that a gain vector turning through a
@@ -20,9 +20,9 @@ use crate::ramp::LastGood;
 /// chord between them sits within a hair of unit power.
 const GRID: usize = COEFF_INTERVAL;
 
-/// The time a bearing or height written to a cell takes to glide to its new
+/// The time a bearing or height written to a cell takes to ramp to its new
 /// value.
-const GLIDE: Seconds = Seconds::new(0.05);
+const RAMP: Seconds = Seconds::new(0.05);
 
 // The params a [`VbapPannerNode`] lets the graph modulate, in port order.
 tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, n {
@@ -41,10 +41,10 @@ struct Held {
     width: LastGood<f64>,
 }
 
-/// The grid points a glide of [`GLIDE`] takes at `rate`: its length in frames,
+/// The grid points a ramp of [`RAMP`] takes at `rate`: its length in frames,
 /// rounded to whole grid periods (at least one).
-fn glide_steps(rate: SampleRate) -> u32 {
-    let frames = GLIDE.to_samples(rate);
+fn ramp_steps(rate: SampleRate) -> u32 {
+    let frames = RAMP.to_samples(rate);
     let points = ((frames.get() + GRID / 2) / GRID).max(1);
     u32::try_from(points).unwrap_or(u32::MAX)
 }
@@ -90,18 +90,18 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// input. [`Bed::Mono`] has one speaker, so no direction to pan between, and is
 /// refused.
 ///
-/// # The glide
+/// # The ramp
 ///
 /// The controls are read, and the gains solved, on a grid of 16 frames counted
 /// from the last reset. A frame reads the gains of the two grid points around it
-/// blended linearly (`tutti_dsp::Glide`, in closed form), so the render does not
+/// blended linearly (`tutti_dsp::Ramp`, in closed form), so the render does not
 /// depend on where the blocks fall: a control that moves between two grid points
 /// is read at the next one, and sounds from the frame after it.
 ///
-/// A bearing or height written to a cell is a step: the node glides to it over
-/// 50 ms (a whole number of grid points, [`tutti_dsp::Glide`] per coordinate),
+/// A bearing or height written to a cell is a step: the node ramps to it over
+/// 50 ms (a whole number of grid points, [`tutti_dsp::Ramp`] per coordinate),
 /// and the gains are solved for the direction it has reached at each grid point.
-/// The glide of the bearing takes the short arc: from 170 to -170 degrees it
+/// The ramp of the bearing takes the short arc: from 170 to -170 degrees it
 /// passes through 180, never through the front.
 ///
 /// A param that a lane drives is followed, not smoothed: a lane is already a
@@ -124,7 +124,7 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// between them, so a source that moves sits slightly below unit energy between
 /// grid points. The energy of a chord midpoint is `cos²(Δ/2)` for a gain vector
 /// turning through `Δ` in one grid step, a dip of at most `sin²(Δ/2)`. A cell step
-/// of half a turn glides at 1.2 degrees of direction per grid step at 48 kHz; a
+/// of half a turn ramps at 1.2 degrees of direction per grid step at 48 kHz; a
 /// lane moves the direction as fast as it likes, and the dip follows its speed. A held source is exact everywhere.
 ///
 /// Note that LFE is not one of the gains: the panner never feeds it
@@ -134,7 +134,7 @@ fn glide_steps(rate: SampleRate) -> u32 {
 ///
 /// A clone shares the node's control cells (so a clone taken as a fork's
 /// template reads the placement as it is when the fork is taken) and copies
-/// its glides. A fork detaches the cells and resets the copy.
+/// its ramps. A fork detaches the cells and resets the copy.
 #[derive(Clone, Debug)]
 pub struct VbapPannerNode<F: Float> {
     kernel: VbapKernel,
@@ -162,16 +162,16 @@ pub struct VbapPannerNode<F: Float> {
     /// The last finite azimuth, elevation, spread and width the cells held, so
     /// a non-finite write reads as unchanged instead of reaching the solve.
     good: Held,
-    /// The bearing the gains are solved for, gliding to a cell's value over
-    /// [`glide_steps`] grid points (one step per grid point) and parked on a
+    /// The bearing the gains are solved for, ramping to a cell's value over
+    /// [`ramp_steps`] grid points (one step per grid point) and parked on a
     /// lane's.
-    aim_azimuth: Glide<Azimuth>,
+    aim_azimuth: Ramp<Azimuth>,
     /// The height, as `aim_azimuth`.
-    aim_elevation: Glide<Elevation>,
+    aim_elevation: Ramp<Elevation>,
     /// The gains between the grid point behind and the one ahead: its steps
     /// are the frames of a grid segment.
-    gains: Glide<VbapGains>,
-    /// The grid points a bearing or height glide takes (see [`glide_steps`]).
+    gains: Ramp<VbapGains>,
+    /// The grid points a bearing or height ramp takes (see [`ramp_steps`]).
     steps: u32,
     /// Frames into the grid segment, in `0..GRID`: zero is a grid point.
     pos: usize,
@@ -190,7 +190,7 @@ impl<F: Float> VbapPannerNode<F> {
     /// speakers cannot be panned over: [`Bed::Mono`].
     pub fn new(bed: Bed) -> Result<Self> {
         let layout = SpeakerLayout::from_bed(bed)?;
-        let steps = glide_steps(SampleRate::SR_48K);
+        let steps = ramp_steps(SampleRate::SR_48K);
         let mut kernel = VbapKernel::new(layout);
         let gains = kernel.gains(
             Azimuth::FRONT,
@@ -213,9 +213,9 @@ impl<F: Float> VbapPannerNode<F> {
                 spread: LastGood::fixed(Spread::POINT.get()),
                 width: LastGood::fixed(StereoWidth::NATURAL.get()),
             },
-            aim_azimuth: Glide::landed(Azimuth::FRONT).by(steps),
-            aim_elevation: Glide::landed(Elevation::LEVEL).by(steps),
-            gains: Glide::landed(gains).by(GRID as u32),
+            aim_azimuth: Ramp::new(Azimuth::FRONT).steps(steps),
+            aim_elevation: Ramp::new(Elevation::LEVEL).steps(steps),
+            gains: Ramp::new(gains).steps(GRID as u32),
             steps,
             pos: 0,
             seated: false,
@@ -263,10 +263,10 @@ impl<F: Float> VbapPannerNode<F> {
     /// One grid point, at frame `at` of the block: reads the controls (a
     /// lane's value at that frame where a lane drives the param, else the
     /// block's `cells`), steps the bearing and height one grid step and aims the
-    /// gains glide at the gains solved for where they have reached.
+    /// gains ramp at the gains solved for where they have reached.
     ///
-    /// A cell's value is a step, which the bearing and height glide to over
-    /// [`glide_steps`] grid points. A lane is already a signal, so a driven
+    /// A cell's value is a step, which the bearing and height ramp to over
+    /// [`ramp_steps`] grid points. A lane is already a signal, so a driven
     /// coordinate is the lane's value at the grid point, wrapped for a bearing,
     /// and the gains chord to the next grid point from there.
     fn grid_point(
@@ -313,23 +313,23 @@ impl<F: Float> VbapPannerNode<F> {
         let (azimuth, elevation) = (self.aim_azimuth.now(), self.aim_elevation.now());
         let gains = self.kernel.gains(azimuth, elevation, width, spread);
         if whole {
-            self.gains = Glide::landed(gains).by(GRID as u32);
+            self.gains = Ramp::new(gains).steps(GRID as u32);
             self.seated = true;
         }
-        self.gains.settle();
-        self.gains.aim(gains);
+        self.gains.finish();
+        self.gains.retarget(gains);
     }
 }
 
-/// One grid step of a coordinate's glide toward `target`: parked on it when
+/// One grid step of a coordinate's ramp toward `target`: parked on it when
 /// `whole`, else aimed at it when it moved, then stepped.
-fn steer<T: Lerp>(glide: &mut Glide<T>, target: T, whole: bool, steps: u32) {
+fn steer<T: Lerp>(ramp: &mut Ramp<T>, target: T, whole: bool, steps: u32) {
     if whole {
-        *glide = Glide::landed(target).by(steps);
-    } else if target != glide.target() {
-        glide.aim(target);
+        *ramp = Ramp::new(target).steps(steps);
+    } else if target != ramp.target() {
+        ramp.retarget(target);
     }
-    glide.advance(1);
+    ramp.advance(1);
 }
 
 /// The fold of the stereo input to the mono the single-source branch pans.
@@ -364,21 +364,21 @@ fn speaker_of_channel(bed: Bed) -> Vec<Option<usize>> {
 ///
 /// # Reset clears time, not placement
 ///
-/// [`reset`](Node::reset) restarts the grid and drops the glides in flight.
+/// [`reset`](Node::reset) restarts the grid and drops the ramps in flight.
 /// Position, spread and width are caller-set configuration and survive: a host
 /// resets between clips to clear a tail, and a reset that re-aimed would
 /// silently move every spatialised source to front-centre and, since clones
 /// share these cells, the *live* node's source too.
 ///
 /// The first grid point after a reset lands on the controls as they are then, so
-/// the first block after a reset already renders there rather than gliding in
+/// the first block after a reset already renders there rather than ramping in
 /// from front-centre, and a reset node renders what a fresh one does.
 ///
 /// # Tail
 ///
 /// [`Tail::Unknown`], deliberately not [`Tail::None`]: the executor skips a
 /// `Tail::None` node on a silent block, and a skipped block would not step the
-/// grid, so a source moved during silence would resume from a stalled glide
+/// grid, so a source moved during silence would resume from a stalled ramp
 /// instead of the settled bearing.
 impl<F: Float> Node<F> for VbapPannerNode<F> {
     fn shape(&self) -> Shape {
@@ -394,9 +394,9 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
     }
 
     fn prepare(&mut self, p: &Prepare) {
-        self.steps = glide_steps(p.sample_rate());
-        self.aim_azimuth = self.aim_azimuth.by(self.steps);
-        self.aim_elevation = self.aim_elevation.by(self.steps);
+        self.steps = ramp_steps(p.sample_rate());
+        self.aim_azimuth = self.aim_azimuth.steps(self.steps);
+        self.aim_elevation = self.aim_elevation.steps(self.steps);
         // The next grid point lands whole at the new rate.
         self.seated = false;
         self.pos = 0;
@@ -406,7 +406,7 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
     ///
     /// At each grid point (every 16 frames from the last reset, wherever
     /// the blocks fall) the controls are read and the gains solved; the frames
-    /// until the next point read the glide between them. A lane that drives a
+    /// until the next point read the ramp between them. A lane that drives a
     /// param is read at the grid point's frame, a cell once for the block.
     /// Each output channel is rendered over its own planar slice, reading the
     /// speaker that feeds it (LFE: none, so silence). The panner never feeds

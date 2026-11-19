@@ -9,17 +9,17 @@
 //! notches are fewer and unevenly spaced where a flanger's are a comb.
 //!
 //! The chain is the kernel: it runs a block through complements that are
-//! [`Glide`]s, one per channel, and a feedback glide. The LFO and the solve of the
+//! [`Ramp`]s, one per channel, and a feedback ramp. The LFO and the solve of the
 //! complements are the caller's: it solves the corners of a segment (the coefficient at
 //! the segment's start and at its end, [`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames on)
-//! and aims each channel's glide across it, so the cut of the blocks does not move the
+//! and aims each channel's ramp across it, so the cut of the blocks does not move the
 //! render.
 
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Depth, Feedback, Hz};
 
-use crate::{Glide, Lerp};
+use crate::{Lerp, Ramp};
 
 /// The most channels a phaser has: a bus's.
 pub const MAX_PHASER_CHANNELS: usize = MAX_CHANNELS;
@@ -184,10 +184,10 @@ impl Default for PhaserControls {
 ///
 /// A section with the coefficient `c` (`y = c (x - y1) + x1`, `c` within `2 t` of -1 at a low
 /// centre) runs on its complement `a = 1 + c` ([`allpass_complement`](crate::allpass_complement)):
-/// `y = y1 + ((x1 - x) + a (x - y1))`, whose small terms add first. The glides carry `a`.
+/// `y = y1 + ((x1 - x) + a (x - y1))`, whose small terms add first. The ramps carry `a`.
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block through it
-/// while each channel's coefficient and the feedback glide toward their targets.
+/// while each channel's coefficient and the feedback ramp toward their targets.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhaserChain<F: Float> {
     stages: Stages,
@@ -232,7 +232,7 @@ impl<F: Float + Lerp> PhaserChain<F> {
 
     /// Runs `input` into `output`, frame `i` at `complements[c].at(taken + 1 + i)` for
     /// channel `c` and `feedback.at(taken + 1 + i)`, then takes the block's steps from the
-    /// glides.
+    /// ramps.
     ///
     /// Each channel's input plus its last output scaled by the feedback goes through the
     /// stages in turn, a frame at a time and each stage across every channel, and the chain's
@@ -244,16 +244,16 @@ impl<F: Float + Lerp> PhaserChain<F> {
     /// The loop is `g z^-1 A(z)` with `A` the all-pass chain, `|A| = 1` on the circle, so it
     /// is stable for any feedback `g` below 1 and rings for about `(1 + N tau) / (1 - g)`
     /// frames at the slowest pole, `tau` a stage's greatest group delay, `(1 + |c|) / (1 - |c|)`
-    /// for a coefficient `c`. The feedback glide's values must stay below
+    /// for a coefficient `c`. The feedback ramp's values must stay below
     /// 1 ([`Feedback::MAX_STABLE`] is the bound a caller holds them to).
     ///
     /// # Panics
     ///
-    /// If `complements` has fewer glides than the chain has channels.
+    /// If `complements` has fewer ramps than the chain has channels.
     pub fn process(
         &mut self,
-        complements: &mut [Glide<F>],
-        feedback: &mut Glide<F>,
+        complements: &mut [Ramp<F>],
+        feedback: &mut Ramp<F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -272,13 +272,13 @@ impl<F: Float + Lerp> PhaserChain<F> {
             plane.map_or_else(Default::default, |p| &mut p.into_samples_mut()[..frames])
         });
         let complements = &mut complements[..self.width];
-        // The step each glide's first frame reads.
+        // The step each ramp's first frame reads.
         let first: [u32; MAX_PHASER_CHANNELS] = core::array::from_fn(|c| {
             complements
                 .get(c)
-                .map_or(0, |g| g.taken().saturating_add(1))
+                .map_or(0, |g| g.steps_taken().saturating_add(1))
         });
-        let fb_first = feedback.taken().saturating_add(1);
+        let fb_first = feedback.steps_taken().saturating_add(1);
         let mut complement = [F::ZERO; MAX_PHASER_CHANNELS];
         let mut lane = [F::ZERO; MAX_PHASER_CHANNELS];
         let mut step = 0u32;
@@ -296,8 +296,8 @@ impl<F: Float + Lerp> PhaserChain<F> {
             step = step.saturating_add(1);
         }
         let taken = u32::try_from(frames).unwrap_or(u32::MAX);
-        for glide in complements {
-            glide.advance(taken);
+        for ramp in complements {
+            ramp.advance(taken);
         }
         feedback.advance(taken);
     }

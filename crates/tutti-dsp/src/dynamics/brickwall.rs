@@ -60,7 +60,7 @@ pub struct BrickwallLanes<'a, F: Float> {
 }
 
 /// A brickwall at one ceiling, every channel clamped to it: `y = clamp(x, -c, c)`,
-/// memoryless, so no latency and no tail. The ceiling lands whole (a glided bound would let
+/// memoryless, so no latency and no tail. The ceiling lands whole (a ramped bound would let
 /// a sample past the new one), and the clip is memoryless, so the render does not depend on
 /// how the input is cut into blocks.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -79,7 +79,7 @@ impl<F: Float> BrickwallBank<F> {
     /// Aims at `controls`: a NaN ceiling is the default's, 0 dB. A ceiling whose amplitude is
     /// past the float's largest finite value (about 770 dB at `f32`) passes everything, an
     /// infinity included, as `+inf` dB does.
-    pub fn aim(&mut self, controls: &BrickwallControls) {
+    pub fn retarget(&mut self, controls: &BrickwallControls) {
         let ceiling = amplitude::<f64>(controls.ceiling.get()).unwrap_or(1.0);
         // A ceiling past the float's range passes everything, as `+inf` dB does.
         self.ceiling = if ceiling > F::MAX.into() {

@@ -817,7 +817,7 @@ fn a_control_a_lane_lets_go_of_is_handed_back_without_a_step() {
         "held at +12 dB: {}",
         out[511]
     );
-    assert!(out[512 + 16] > 3.0, "glides, not steps: {}", out[512 + 16]);
+    assert!(out[512 + 16] > 3.0, "ramps, not steps: {}", out[512 + 16]);
     assert!(
         (out[1023] - 1.0).abs() < 0.01,
         "arrives at the cell: {}",

@@ -44,7 +44,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// range, the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and
 /// the Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth); a node with
 /// [`KeyFilter::Off`] declares neither, as a reverb that cannot freeze declares no freeze.
-/// The filter's coefficients glide to a new cutoff over one grid period.
+/// The filter's coefficients ramp to a new cutoff over one grid period.
 ///
 /// # Controls
 ///
@@ -58,8 +58,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// frames from the last reset, [`Kernel::GRID`]): a cell write or a driven port is sampled
 /// at the grid's solve frame, so it reaches the render within 16 frames and the render does
 /// not depend on how the stream is cut into blocks. The times land whole (the follower
-/// smooths them), and the range is a ramp, a control moving to a target: it glides over
-/// [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms.
+/// smooths them), and the range is a ramp, a control moving to a target: it ramps over
+/// [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP), 5 ms.
 ///
 /// # In a graph
 ///
@@ -172,10 +172,10 @@ control_set! {
     Attack => Seconds = attack { whole },
     Hold => Seconds = hold { whole },
     Release => Seconds = release { whole },
-    // The range glides in the bank, over `GAIN_GLIDE`: the reader must not ramp it
+    // The range ramps in the bank, over `GAIN_RAMP`: the reader must not ramp it
     // across the block as well.
     Range => Db = range { whole },
-    // The filter's coefficients glide in the bank, over one grid period.
+    // The filter's coefficients ramp in the bank, over one grid period.
     Cutoff => Hz = key_cutoff { whole },
     Q => Q = key_q { whole };
 
@@ -254,9 +254,9 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
 
     fn retarget(&mut self, controls: &GateControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
+        bank.retarget(controls);
         if !self.landed {
-            bank.settle();
+            bank.finish();
             self.landed = true;
         }
     }

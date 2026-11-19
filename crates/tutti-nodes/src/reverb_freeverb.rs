@@ -1,11 +1,11 @@
 //! Freeverb, [`FreeverbNode`].
 //!
-//! [`FreeverbBank`] is the combs and all-passes over buffers views (the lines, the glides);
+//! [`FreeverbBank`] is the combs and all-passes over buffers views (the lines, the ramps);
 //! this file holds the kernel that aims it, the cells and how the graph reaches them.
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{FreeverbBank, FreeverbControls, FreeverbGlides, Lerp};
+use tutti_dsp::{FreeverbBank, FreeverbControls, FreeverbRamps, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Mix, SampleRate, Tail};
 
@@ -21,7 +21,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// # The controls
 ///
 /// The ports are the room size and the damping, each a position on `0..1`
-/// ([`FreeverbControls`]). A cell that moves lands whole on the 32-frame grid and glides in
+/// ([`FreeverbControls`]). A cell that moves lands whole on the 32-frame grid and ramps in
 /// the bank over 20 ms. The send declares no ports: its controls are the General MIDI
 /// figures.
 ///
@@ -79,7 +79,7 @@ pub struct FreeverbSet {
     cells: bool,
 }
 
-// Each lands whole: the bank's glides are the ramp.
+// Each lands whole: the bank's ramps are the ramp.
 control_set! {
     FreeverbSet(s): FreeverbControls = FreeverbControls::GENERAL_MIDI;
     live: (if s.cells { 2 } else { 0 });
@@ -91,16 +91,16 @@ control_set! {
     }
 }
 
-/// A [`FreeverbBank`] and its glides, once the rate is known.
+/// A [`FreeverbBank`] and its ramps, once the rate is known.
 #[derive(Clone, Debug)]
 struct Running<F: Float> {
     /// The rate the bank was sized at: what a tail bound is converted at.
     rate: SampleRate,
     bank: FreeverbBank<F>,
-    glides: FreeverbGlides<F>,
+    ramps: FreeverbRamps<F>,
 }
 
-/// Freeverb as a [`Kernel`]: a [`FreeverbBank`] sized at the prepared rate and the glides its
+/// Freeverb as a [`Kernel`]: a [`FreeverbBank`] sized at the prepared rate and the ramps its
 /// controls are aimed through.
 ///
 /// The bank's state is `F`, the float of the graph.
@@ -145,8 +145,8 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
     /// Sizes the lines at `rate` (Freeverb's tunings scaled to it): a re-prepare empties them.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         let bank = FreeverbBank::new(rate);
-        let glides = bank.glides();
-        self.running = Some(Running { rate, bank, glides });
+        let ramps = bank.ramps();
+        self.running = Some(Running { rate, bank, ramps });
         self.landed = false;
     }
 
@@ -154,16 +154,16 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
     fn reset(&mut self) {
         if let Some(r) = &mut self.running {
             r.bank.reset();
-            r.glides.settle();
+            r.ramps.finish();
         }
         self.landed = false;
     }
 
     fn retarget(&mut self, controls: &FreeverbControls) {
         let Some(r) = &mut self.running else { return };
-        r.bank.aim(&mut r.glides, controls);
+        r.bank.retarget(&mut r.ramps, controls);
         if !self.landed {
-            r.glides.settle();
+            r.ramps.finish();
             self.landed = true;
         }
     }
@@ -175,9 +175,9 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(r) = &mut self.running {
-            r.bank.process(&mut r.glides, input, output);
+            r.bank.process(&mut r.ramps, input, output);
         }
-        // A design after a render is a move, which glides.
+        // A design after a render is a move, which ramps.
         self.landed = true;
     }
 

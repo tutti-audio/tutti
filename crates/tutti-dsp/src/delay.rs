@@ -9,7 +9,7 @@ mod routing;
 mod taps;
 mod times;
 
-pub use bank::{DelayBank, DelayGlides, DelayLanes};
+pub use bank::{DelayBank, DelayLanes, DelayRamps};
 pub use layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 pub use max_delay::{MaxDelay, MaxDelayError};
 pub(crate) use ring::DelayRing;

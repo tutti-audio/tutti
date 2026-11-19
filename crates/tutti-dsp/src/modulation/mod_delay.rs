@@ -7,18 +7,18 @@
 //! long base delay, a flanger at a short one), a [`Stagger`] how the channels' sweeps are
 //! offset, and the controls are three: the LFO's rate, the sweep's depth and the feedback.
 //!
-//! The bank is the kernel: it runs a block through sweep excursions that are [`Glide`]s, one
+//! The bank is the kernel: it runs a block through sweep excursions that are [`Ramp`]s, one
 //! per channel, around its base delay (a [`ReadPosition`], so a long base keeps its fraction),
-//! and a feedback glide. **The LFO is the caller's**, on the stream's clock: it solves the
+//! and a feedback ramp. **The LFO is the caller's**, on the stream's clock: it solves the
 //! corners of a segment (each channel's excursion at the segment's start and at its end, [`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames on, [`swept`](ModDelayBank::swept))
-//! and aims each channel's glide across it, so the cut of the blocks does not move the
+//! and aims each channel's ramp across it, so the cut of the blocks does not move the
 //! render. The chord of a sine over a step of `h` radians misses it by at most `h^2 / 8`,
 //! which at 5 Hz and 48 kHz is 1.4e-5 of the depth (0.03 samples against the deepest chorus,
 //! 40 ms), and it kinks the delay's slope at each corner, a small ripple on the pitch
 //! modulation.
 //!
 //! **A moving depth is a pitch bend**, so its speed is bounded, not its duration: the caller
-//! glides a depth at most [`DELAY_SLEW`](crate::DELAY_SLEW) frames of delay per frame
+//! ramps a depth at most [`DELAY_SLEW`](crate::DELAY_SLEW) frames of delay per frame
 //! ([`design`](ModDelayBank::design) gives the depth as a span of frames).
 //!
 //! The delay has **no latency**: the sweep is the effect, not processing delay, and PDC must
@@ -39,7 +39,7 @@ use tutti_units::{
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};
-use crate::{DelayLine, Glide, InterpolationMode, Lerp, MaxDelay, delay_step};
+use crate::{DelayLine, InterpolationMode, Lerp, MaxDelay, Ramp, delay_step};
 
 /// The LFO's slowest rate: 0.01 Hz, a lane's value and a cell's alike. A rate below it
 /// (or negative) reads as it.
@@ -317,7 +317,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     }
 
     /// The delay a read takes with the sweep `excursion` frames from the base (what
-    /// [`swept`](Self::swept) gives, glided between corners): the base moved by it exactly
+    /// [`swept`](Self::swept) gives, ramped between corners): the base moved by it exactly
     /// ([`Float::offset_position`]), held between one frame and the line's length.
     #[inline]
     #[must_use]
@@ -327,18 +327,18 @@ impl<F: Float + Lerp> ModDelayBank<F> {
 
     /// Runs `input` into `output`, frame `i` at the excursion `delays[c].at(taken + 1 + i)` for
     /// channel `c` ([`position`](Self::position) of it) and `feedback.at(taken + 1 + i)`, then
-    /// takes the block's steps from the glides. Each delay is floored at one frame where it is
+    /// takes the block's steps from the ramps. Each delay is floored at one frame where it is
     /// read.
     ///
     /// Each channel is a feedback delay at its delay: the line's own tap scaled by the
     /// feedback added to the input. Channel `c` of `input` feeds channel `c` of `output`; a channel
     /// past the bank's width, or past the narrower of the two views, is not touched. The
-    /// feedback glide's values must stay below 1 ([`Feedback::MAX_STABLE`] is the bound
+    /// feedback ramp's values must stay below 1 ([`Feedback::MAX_STABLE`] is the bound
     /// [`design`](Self::design) holds them to). No allocation.
     pub fn process(
         &mut self,
-        delays: &mut [Glide<F>],
-        feedback: &mut Glide<F>,
+        delays: &mut [Ramp<F>],
+        feedback: &mut Ramp<F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -349,7 +349,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
             .min(input.channels())
             .min(output.channels())
             .min(delays.len());
-        let fb_first = feedback.taken().saturating_add(1);
+        let fb_first = feedback.steps_taken().saturating_add(1);
         let (base, cap) = (self.base, self.cap);
         for (c, ((line, delay), out)) in self
             .lines
@@ -359,7 +359,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
             .enumerate()
             .take(run)
         {
-            let first = delay.taken().saturating_add(1);
+            let first = delay.steps_taken().saturating_add(1);
             let xs = &input.plane(c).samples()[..frames];
             let ys = &mut out.into_samples_mut()[..frames];
             for (i, (y, x)) in ys.iter_mut().zip(xs).enumerate() {
@@ -370,8 +370,8 @@ impl<F: Float + Lerp> ModDelayBank<F> {
             }
         }
         let taken = u32::try_from(frames).unwrap_or(u32::MAX);
-        for glide in delays.iter_mut().take(run) {
-            glide.advance(taken);
+        for ramp in delays.iter_mut().take(run) {
+            ramp.advance(taken);
         }
         feedback.advance(taken);
     }

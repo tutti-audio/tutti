@@ -40,7 +40,7 @@ fn sine_gain(d: f64, n: usize) -> f64 {
 
 fn tremolo(wave: OscillatorWave, rate: Hz, depth: f64) -> Tremolo {
     let mut t = Tremolo::new(wave, RATE);
-    t.aim(&TremoloControls {
+    t.retarget(&TremoloControls {
         rate,
         depth: Depth::of(depth),
     });
@@ -153,7 +153,7 @@ fn a_square_wave_switches_between_unity_and_one_minus_depth() {
 
 fn auto_pan(law: PanLaw, depth: f64) -> AutoPan {
     let mut p = AutoPan::new(OscillatorWave::Sine, law, RATE);
-    p.aim(&AutoPanControls {
+    p.retarget(&AutoPanControls {
         rate: Hz::new(HZ),
         depth: Depth::of(depth),
     });

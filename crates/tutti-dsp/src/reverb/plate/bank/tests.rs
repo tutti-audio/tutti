@@ -19,12 +19,12 @@ fn still(decay: f64) -> PlateControls {
 }
 
 /// A bank at `rate`, landed on `c`.
-fn landed(rate: SampleRate, c: &PlateControls) -> (PlateBank<f32>, PlateGlides<f32>) {
+fn landed(rate: SampleRate, c: &PlateControls) -> (PlateBank<f32>, PlateRamps<f32>) {
     let mut bank = PlateBank::<f32>::new(rate);
-    let mut glides = bank.glides();
-    bank.aim(&mut glides, c);
-    glides.settle();
-    (bank, glides)
+    let mut ramps = bank.ramps();
+    bank.retarget(&mut ramps, c);
+    ramps.finish();
+    (bank, ramps)
 }
 
 /// A unit impulse followed by silence, `frames` long.
@@ -37,7 +37,7 @@ fn impulse(frames: usize) -> Vec<f32> {
 /// `x` through the bank in calls of `block` frames; the two output channels.
 fn run(
     bank: &mut PlateBank<f32>,
-    glides: &mut PlateGlides<f32>,
+    ramps: &mut PlateRamps<f32>,
     x: &[f32],
     block: usize,
 ) -> [Vec<f32>; 2] {
@@ -46,7 +46,7 @@ fn run(
     for piece in x.chunks(block) {
         let end = at + piece.len();
         bank.process(
-            glides,
+            ramps,
             Planes::new(&[piece]).unwrap(),
             PlanesMut::new(&mut [&mut l[at..end], &mut r[at..end]]).unwrap(),
         );
@@ -57,8 +57,8 @@ fn run(
 
 /// The impulse response of `c` at `rate`, `frames` long.
 fn response(rate: SampleRate, c: &PlateControls, frames: usize) -> [Vec<f32>; 2] {
-    let (mut bank, mut glides) = landed(rate, c);
-    run(&mut bank, &mut glides, &impulse(frames), 480)
+    let (mut bank, mut ramps) = landed(rate, c);
+    run(&mut bank, &mut ramps, &impulse(frames), 480)
 }
 
 /// The Schroeder backward integral of `h` squared, in dB below its total.
@@ -203,14 +203,14 @@ fn the_tail_covers_the_response_falling_under_the_floor() {
                 pre_delay: Seconds::new(pre),
                 ..still(decay)
             };
-            let (mut bank, mut glides) = landed(rate, &c);
+            let (mut bank, mut ramps) = landed(rate, &c);
             let (Tail::Finite(tail), Tail::Finite(ceiling)) =
-                (bank.tail_of(&glides, &c), bank.tail())
+                (bank.tail_of(&ramps, &c), bank.tail())
             else {
                 panic!("finite tails")
             };
             assert!(tail <= ceiling);
-            let [l, r] = run(&mut bank, &mut glides, &impulse(tail.get() + 48_000), 512);
+            let [l, r] = run(&mut bank, &mut ramps, &impulse(tail.get() + 48_000), 512);
             let peak = l.iter().chain(&r).fold(0.0f32, |m, x| m.max(x.abs()));
             let late = (l[tail.get()..].iter().chain(&r[tail.get()..]))
                 .fold(0.0f32, |m, x| m.max(x.abs()));
@@ -291,10 +291,10 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
     ];
     for k in 0..8 {
         let start = k * 6_000;
-        let (mut bank, mut glides) = landed(rate, &c);
+        let (mut bank, mut ramps) = landed(rate, &c);
         let mut x = vec![0.0f32; start + 4_000];
         x[start] = 1.0;
-        let out = run(&mut bank, &mut glides, &x, 480);
+        let out = run(&mut bank, &mut ramps, &x, 480);
         for (channel, delay, tap, wave) in halves {
             let y = &out[channel];
             let n0 = y.iter().position(|&v| v != 0.0).unwrap();
@@ -321,16 +321,16 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
 #[test]
 fn an_unaimed_bank_renders_silence() {
     let mut bank = PlateBank::<f32>::new(SampleRate::SR_48K);
-    let mut glides = bank.glides();
-    let out = run(&mut bank, &mut glides, &impulse(2_000), 256);
+    let mut ramps = bank.ramps();
+    let out = run(&mut bank, &mut ramps, &impulse(2_000), 256);
     assert!(out.iter().flatten().all(|&x| x == 0.0));
 }
 
 /// `x` through an `f64` bank in one call: the two output channels.
-fn run_wide(bank: &mut PlateBank<f64>, glides: &mut PlateGlides<f64>, x: &[f64]) -> [Vec<f64>; 2] {
+fn run_wide(bank: &mut PlateBank<f64>, ramps: &mut PlateRamps<f64>, x: &[f64]) -> [Vec<f64>; 2] {
     let (mut l, mut r) = (vec![0.0f64; x.len()], vec![0.0f64; x.len()]);
     bank.process(
-        glides,
+        ramps,
         Planes::new(&[x]).unwrap(),
         PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
     );
@@ -380,10 +380,10 @@ fn an_f64_plate_is_linear() {
     };
     let render = |input: &[f64]| {
         let mut bank = PlateBank::<f64>::new(SampleRate::SR_48K);
-        let mut glides = bank.glides();
-        bank.aim(&mut glides, &controls);
-        glides.settle();
-        run_wide(&mut bank, &mut glides, input)
+        let mut ramps = bank.ramps();
+        bank.retarget(&mut ramps, &controls);
+        ramps.finish();
+        run_wide(&mut bank, &mut ramps, input)
     };
     let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
     for c in 0..2 {
@@ -463,9 +463,9 @@ fn the_bandwidth_complement_keeps_its_relative_precision_where_one_minus_the_pol
             bandwidth: Hz::new(hz),
             ..PlateControls::DEFAULT
         };
-        let (_, glides) = landed(rate, &controls);
+        let (_, ramps) = landed(rate, &controls);
         let exact = -libm::expm1(-std::f64::consts::TAU * hz / rate.get());
-        let held = f64::from(glides.bandwidth.now());
+        let held = f64::from(ramps.bandwidth.now());
         stored = stored.max((held / exact - 1.0).abs());
         let pole = libm::exp(-std::f64::consts::TAU * hz / rate.get()) as f32;
         let old = f64::from(1.0f32 - pole);
@@ -494,9 +494,9 @@ fn the_damping_complement_keeps_its_relative_precision_near_the_largest_pole() {
             damping: Mix::new(damp),
             ..PlateControls::DEFAULT
         };
-        let (_, glides) = landed(SampleRate::SR_48K, &controls);
+        let (_, ramps) = landed(SampleRate::SR_48K, &controls);
         let exact = 1.0 - damp;
-        stored = stored.max((f64::from(glides.damping.now()) / exact - 1.0).abs());
+        stored = stored.max((f64::from(ramps.damping.now()) / exact - 1.0).abs());
         formed = formed.max((f64::from(1.0f32 - damp as f32) / exact - 1.0).abs());
     }
     assert!(

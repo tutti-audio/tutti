@@ -15,10 +15,10 @@ fn run(blocker: &mut DcBlocker<f64>, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
 
 fn at(corner: f64, rate: SampleRate) -> DcBlocker<f64> {
     let mut b = DcBlocker::<f64>::new(ChannelLayout::MONO, rate);
-    b.aim(&DcBlockerControls {
+    b.retarget(&DcBlockerControls {
         corner: Hz::new(corner),
     });
-    b.settle();
+    b.finish();
     b
 }
 
@@ -54,10 +54,10 @@ fn the_corner_is_held_within_its_bounds() {
 #[test]
 fn a_constant_decays_as_the_pole_to_the_n() {
     let mut b = DcBlocker::<f64>::new(ChannelLayout::STEREO, RATE);
-    b.aim(&DcBlockerControls {
+    b.retarget(&DcBlockerControls {
         corner: Hz::new(20.0),
     });
-    b.settle();
+    b.finish();
     let r = b.pole();
     let out = run(&mut b, &[vec![0.5; 2000], vec![-1.0; 2000]]);
     for n in [0usize, 1, 2, 10, 500, 1999] {
@@ -136,14 +136,14 @@ fn the_tail_covers_the_worst_stopped_input_to_the_floor() {
     }
 }
 
-/// A pole move glides over `COEFF_INTERVAL` frames. Jumping the corner from 10 Hz to 1 kHz at
+/// A pole move ramps over `COEFF_INTERVAL` frames. Jumping the corner from 10 Hz to 1 kHz at
 /// the crest of a 100 Hz unit sine, the first frame after the jump steps by at most
 /// `omega + (1 - r1)`: the input's largest step (`omega = 2 pi f / fs`, amplitude 1) plus the
 /// recursion's `(r1 - 1) y` with `|y| <= 1` (the high-pass gain at 100 Hz is under 1), where
-/// `r1` is the pole one glide step along. Swapping the pole at once steps by the pole's
+/// `r1` is the pole one ramp step along. Swapping the pole at once steps by the pole's
 /// change times `y`, about 0.12, over this bound of about 0.022.
 #[test]
-fn a_corner_jump_steps_the_output_by_the_glide_share() {
+fn a_corner_jump_steps_the_output_by_the_ramp_share() {
     let (f, fs) = (100.0f64, RATE.get());
     let w = std::f64::consts::TAU * f / fs;
     let crest = 120; // a quarter of the 480-frame period
@@ -151,7 +151,7 @@ fn a_corner_jump_steps_the_output_by_the_glide_share() {
     let x: Vec<f64> = (0..jump + 64).map(|i| (w * i as f64).sin()).collect();
     let mut b = at(10.0, RATE);
     let first = run(&mut b, &[x[..jump].to_vec()]);
-    b.aim(&DcBlockerControls {
+    b.retarget(&DcBlockerControls {
         corner: Hz::new(1000.0),
     });
     let second = run(&mut b, &[x[jump..].to_vec()]);
@@ -240,10 +240,10 @@ fn a_one_hz_corner_at_192_khz_holds_its_gain_and_noise_in_f32() {
     };
     let x = input(MIN_DC_CORNER);
     let mut blocker = DcBlocker::<f32>::new(ChannelLayout::MONO, rate);
-    blocker.aim(&DcBlockerControls {
+    blocker.retarget(&DcBlockerControls {
         corner: MIN_DC_CORNER,
     });
-    blocker.settle();
+    blocker.finish();
     let mut out = vec![0.0f32; x.len()];
     blocker.process(
         Planes::new(&[&x[..]]).unwrap(),
@@ -288,10 +288,10 @@ fn a_one_hz_corner_at_192_khz_holds_its_gain_and_noise_in_f32() {
         .collect();
     let stored_error = (sine_fit(&stored, w, 3 * whole).norm() - h.norm()).abs();
     let mut blocker = DcBlocker::<f32>::new(ChannelLayout::MONO, rate);
-    blocker.aim(&DcBlockerControls {
+    blocker.retarget(&DcBlockerControls {
         corner: worst_corner,
     });
-    blocker.settle();
+    blocker.finish();
     blocker.process(
         Planes::new(&[&x[..]]).unwrap(),
         PlanesMut::new(&mut [&mut out[..]]).unwrap(),

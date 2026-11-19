@@ -1,12 +1,12 @@
 //! The Dattorro plate, [`PlateReverbNode`].
 //!
 //! [`PlateBank`] is the plate over buffers views (the lattices, the delays, the output taps,
-//! the glides); this file holds the kernel that aims it, the cells and how the graph reaches
+//! the ramps); this file holds the kernel that aims it, the cells and how the graph reaches
 //! them.
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Lerp, PlateBank, PlateControls, PlateGlides};
+use tutti_dsp::{Lerp, PlateBank, PlateControls, PlateRamps};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
 
@@ -93,7 +93,7 @@ impl Default for PlateReverbConfig {
 ///
 /// The ports are the decay (an RT60 in seconds), the damping, the pre-delay, the input
 /// bandwidth (as [`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff)), the modulation
-/// depth and the diffusion. Each lands whole on the 32-frame grid and glides in the bank.
+/// depth and the diffusion. Each lands whole on the 32-frame grid and ramps in the bank.
 ///
 /// # The tail
 ///
@@ -116,7 +116,7 @@ impl<F: Float + Lerp> From<PlateReverbConfig> for PlateReverbNode<F> {
 #[derive(Clone, Copy, Debug)]
 pub struct PlateSet;
 
-// Each lands whole: the bank's glides are the ramp.
+// Each lands whole: the bank's ramps are the ramp.
 control_set! {
     PlateSet(_s): PlateControls = PlateControls::DEFAULT;
     live: (all);
@@ -132,16 +132,16 @@ control_set! {
     }
 }
 
-/// A [`PlateBank`] and its glides, once the rate is known.
+/// A [`PlateBank`] and its ramps, once the rate is known.
 #[derive(Clone, Debug)]
 struct Running<F: Float> {
     /// The rate the bank was sized at: what a tail bound is converted at.
     rate: SampleRate,
     bank: PlateBank<F>,
-    glides: PlateGlides<F>,
+    ramps: PlateRamps<F>,
 }
 
-/// The plate as a [`Kernel`]: a [`PlateBank`] sized at the prepared rate and the glides its
+/// The plate as a [`Kernel`]: a [`PlateBank`] sized at the prepared rate and the ramps its
 /// design is aimed through.
 ///
 /// The bank's state is `F`, the float of the graph.
@@ -182,8 +182,8 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
     /// Sizes the lines at `rate` (the paper's lengths scaled to it): a re-prepare empties them.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         let bank = PlateBank::new(rate);
-        let glides = bank.glides();
-        self.running = Some(Running { rate, bank, glides });
+        let ramps = bank.ramps();
+        self.running = Some(Running { rate, bank, ramps });
         self.landed = false;
     }
 
@@ -191,15 +191,15 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
     fn reset(&mut self) {
         if let Some(r) = &mut self.running {
             r.bank.reset();
-            r.glides.settle();
+            r.ramps.finish();
         }
     }
 
     fn retarget(&mut self, controls: &PlateControls) {
         let Some(r) = &mut self.running else { return };
-        r.bank.aim(&mut r.glides, controls);
+        r.bank.retarget(&mut r.ramps, controls);
         if !self.landed {
-            r.glides.settle();
+            r.ramps.finish();
             self.landed = true;
         }
     }
@@ -211,7 +211,7 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(r) = &mut self.running {
-            r.bank.process(&mut r.glides, input, output);
+            r.bank.process(&mut r.ramps, input, output);
         }
     }
 
@@ -230,7 +230,7 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
     fn tail_of(&mut self, controls: &PlateControls) -> Tail {
         self.running
             .as_mut()
-            .map_or(Tail::Unknown, |r| r.bank.tail_of(&r.glides, controls))
+            .map_or(Tail::Unknown, |r| r.bank.tail_of(&r.ramps, controls))
     }
 }
 

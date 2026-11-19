@@ -4,18 +4,18 @@
 //! **The LFO is state on the stream's clock.** Its phase is a [`RunningPhase`] walked by the
 //! rate's step, counted from the last reset. The effect's per-channel value (an all-pass
 //! coefficient, a delay) is solved at the **corners** of a segment, every [`COEFF_INTERVAL`]
-//! frames of the stream: the segment's start and its end, and each channel's [`Glide`] runs
+//! frames of the stream: the segment's start and its end, and each channel's [`Ramp`] runs
 //! between them, so the cut of the blocks does not move the render. A channel whose offset
-//! equals its neighbour's shares its glide. The only thing that differs between effects is
+//! equals its neighbour's shares its ramp. The only thing that differs between effects is
 //! the corner: the clock hands the solver the sine of each channel's phase and whether the
 //! corner is the segment's end.
 
 use tutti_buffers::Float;
 use tutti_buffers::MAX_CHANNELS;
-use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp};
+use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp};
 use tutti_units::{Bipolar, Phase, PhaseIncrement, PhaseStep, RunningPhase};
 
-/// The frames of a segment: a corner's glide takes this many steps.
+/// The frames of a segment: a corner's ramp takes this many steps.
 pub(crate) const SEGMENT: u32 = 16;
 const _: () = assert!(COEFF_INTERVAL == SEGMENT as usize);
 
@@ -82,13 +82,13 @@ impl SweepClock {
         self.pos = (self.pos + frames) % COEFF_INTERVAL;
     }
 
-    /// Solves the next segment into `glides`, one per channel: its start corner is the last
+    /// Solves the next segment into `ramps`, one per channel: its start corner is the last
     /// one's end (or the LFO's start after a reset), its end corner the sweep
     /// [`COEFF_INTERVAL`] frames on at the LFO's step. `corner(lfo, end)` is the effect's value
     /// with the LFO at `lfo` (a sine, `-1..=1`) at the segment's start (`end` false) or end.
     pub(crate) fn solve<T: Lerp>(
         &mut self,
-        glides: &mut [Glide<T>],
+        ramps: &mut [Ramp<T>],
         mut corner: impl FnMut(Bipolar, bool) -> T,
     ) {
         let start = self.phase;
@@ -100,19 +100,19 @@ impl SweepClock {
         let sine = |offset: PhaseStep, p: RunningPhase| {
             Bipolar::clamped(Phase::new(f64::from_phase(p.advance(offset))).sin())
         };
-        for c in 0..glides.len() {
+        for c in 0..ramps.len() {
             if c > 0 && self.offsets[c] == self.offsets[c - 1] {
-                glides[c] = glides[c - 1];
+                ramps[c] = ramps[c - 1];
                 continue;
             }
             let from = if self.primed {
-                glides[c].target()
+                ramps[c].target()
             } else {
                 corner(sine(self.offsets[c], start), false)
             };
-            let mut glide = Glide::landed(from);
-            glide.aim_in(corner(sine(self.offsets[c], end), true), SEGMENT);
-            glides[c] = glide;
+            let mut ramp = Ramp::new(from);
+            ramp.retarget_in(corner(sine(self.offsets[c], end), true), SEGMENT);
+            ramps[c] = ramp;
         }
         self.phase = end;
         self.primed = true;

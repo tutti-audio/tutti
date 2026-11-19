@@ -13,7 +13,7 @@
 //! allocation, every control passed per call. A [`VbapKernel`] holds a layout and
 //! solves one direction's [`VbapGains`] (the mono fold of a narrow width, two virtual
 //! sources otherwise, the last solve kept), and [`VbapGains::process_channel`] renders one
-//! output channel along a [`Glide`](crate::Glide) between two of them. A [`SpeakerLayout`] of
+//! output channel along a [`Ramp`](crate::Ramp) between two of them. A [`SpeakerLayout`] of
 //! a [`Bed`](tutti_buffers::Bed) is [`SpeakerLayout::from_bed`]: the speakers sit where
 //! the bed's one table puts them.
 //!

@@ -127,7 +127,7 @@ impl DynamicEqConfig {
 /// side-chain key) N key inputs, and N outputs.
 ///
 /// A [`KernelNode`] over [`DynamicEqKernel`], the detector, the curve and the bell being
-/// [`DynamicEqBank`]'s (see it for the detector and the gain's glide); this file holds the
+/// [`DynamicEqBank`]'s (see it for the detector and the gain's ramp); this file holds the
 /// cells and how the graph reaches them. Made from a [`DynamicEqConfig`]
 /// (`DynamicEqNode::from`).
 ///
@@ -145,7 +145,7 @@ impl DynamicEqConfig {
 /// [`Hz`]) and Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`]), are live
 /// [`Params`](crate::Params) shared across clones. They are on the stream grid (16 frames from
 /// the last reset, [`Kernel::GRID`]), so the render does not depend on how the stream is cut
-/// into blocks; the curve and the times land whole and the bell glides to a new centre or Q.
+/// into blocks; the curve and the times land whole and the bell ramps to a new centre or Q.
 ///
 /// The tail is unknown: a bell rings for as long as its Q says.
 ///
@@ -179,7 +179,7 @@ control_set! {
     Attack => Seconds = attack { whole },
     Release => Seconds = release { whole },
     Range => Db = range { whole },
-    // The bell's and the detector's coefficients glide in the bank, over one grid period.
+    // The bell's and the detector's coefficients ramp in the bank, over one grid period.
     Cutoff => Hz = center { whole },
     Q => Q = q { whole };
 
@@ -247,9 +247,9 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
 
     fn retarget(&mut self, controls: &DynamicEqControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
+        bank.retarget(controls);
         if !self.landed {
-            bank.settle();
+            bank.finish();
             self.landed = true;
         }
     }

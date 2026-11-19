@@ -58,8 +58,8 @@ fn at_frames(frames: f64, rate: SampleRate) -> ModDelayBank<f32> {
 /// `feedback` carried across them.
 fn run(
     bank: &mut ModDelayBank<f32>,
-    delays: &mut [Glide<f32>],
-    feedback: &mut Glide<f32>,
+    delays: &mut [Ramp<f32>],
+    feedback: &mut Ramp<f32>,
     audio: &[Vec<f32>],
     block: usize,
 ) -> Vec<Vec<f32>> {
@@ -85,8 +85,8 @@ fn run(
 /// frames long.
 fn impulse_response(d: f64, g: f32, len: usize, rate: SampleRate) -> Vec<f32> {
     let mut bank = at_frames(d, rate);
-    let mut delays = [Glide::landed(0.0f32)];
-    let mut feedback = Glide::landed(g);
+    let mut delays = [Ramp::new(0.0f32)];
+    let mut feedback = Ramp::new(g);
     let mut x = vec![0.0f32; len];
     x[0] = 1.0;
     run(&mut bank, &mut delays, &mut feedback, &[x], 64).remove(0)
@@ -191,8 +191,8 @@ fn a_sweep_with_no_feedback_ignores_the_control_and_is_a_pure_delay() {
     assert_eq!(design.feedback, Feedback::NONE);
     // The centre is 2 ms, 96 frames.
     assert_eq!(bank.position(0.0), frames(96.0));
-    let mut delays = [Glide::landed(0.0f32)];
-    let mut feedback = Glide::landed(f32::from_unit(design.feedback));
+    let mut delays = [Ramp::new(0.0f32)];
+    let mut feedback = Ramp::new(f32::from_unit(design.feedback));
     let mut x = vec![0.0f32; 400];
     x[0] = 1.0;
     let y = run(&mut bank, &mut delays, &mut feedback, &[x], 64).remove(0);
@@ -278,31 +278,31 @@ fn a_frozen_flanger_has_notches_at_odd_multiples_of_half_over_the_delay() {
     );
 }
 
-/// The delay glides, and a frame reads it in closed form: with the ramp `x[n] = n` through
-/// the line a linear read is exact, so frame `i` of a glide aimed from 100 to 200 frames over
-/// 400 steps is `n - at(i + 1)` (the first frame after an aim reads step 1), and it lands
+/// The delay ramps, and a frame reads it in closed form: with the ramp `x[n] = n` through
+/// the line a linear read is exact, so frame `i` of a ramp aimed from 100 to 200 frames over
+/// 400 steps is `n - at(i + 1)` (the first frame after a `retarget` reads step 1), and it lands
 /// exactly.
 #[test]
-fn a_delay_glide_is_read_in_closed_form_at_the_step_after_those_taken() {
+fn a_delay_ramp_is_read_in_closed_form_at_the_step_after_those_taken() {
     let rate = SampleRate::SR_48K;
     let mut bank = at_frames(100.0, rate);
-    let mut delays = [Glide::landed(0.0f32)];
-    let mut feedback = Glide::landed(0.0f32);
+    let mut delays = [Ramp::new(0.0f32)];
+    let mut feedback = Ramp::new(0.0f32);
     let warm: Vec<f32> = (0..300).map(|n| n as f32).collect();
     run(&mut bank, &mut delays, &mut feedback, &[warm], 64);
-    delays[0].aim_in(100.0, 400);
-    let glide = delays[0];
+    delays[0].retarget_in(100.0, 400);
+    let ramp = delays[0];
     let x: Vec<f32> = (300..720).map(|n| n as f32).collect();
     let y = run(&mut bank, &mut delays, &mut feedback, &[x], 77).remove(0);
     for (i, &got) in y.iter().enumerate() {
-        let want = (300 + i) as f32 - (100.0 + glide.at(i as u32 + 1));
+        let want = (300 + i) as f32 - (100.0 + ramp.at(i as u32 + 1));
         assert!((got - want).abs() < 2e-3, "frame {i}: {got} vs {want}");
     }
     assert_eq!(delays[0].now(), 100.0, "landed exactly");
 }
 
-/// Any split of the stream gives the bits of one call, with a delay glide and a feedback
-/// glide in flight on every channel and a lane of varied input.
+/// Any split of the stream gives the bits of one call, with a delay ramp and a feedback
+/// ramp in flight on every channel and a lane of varied input.
 #[test]
 fn any_block_size_gives_the_same_bits() {
     let layout = ModDelayLayout::chorus(bus(3));
@@ -316,12 +316,12 @@ fn any_block_size_gives_the_same_bits() {
         .collect();
     let render = |block: usize| {
         let mut bank = ModDelayBank::new(&layout, RATE);
-        let mut delays = [Glide::landed(0.0f32); 3];
+        let mut delays = [Ramp::new(0.0f32); 3];
         for (c, g) in delays.iter_mut().enumerate() {
-            g.aim_in(-180.0 + 100.0 * c as f32, 700);
+            g.retarget_in(-180.0 + 100.0 * c as f32, 700);
         }
-        let mut feedback = Glide::landed(0.1f32);
-        feedback.aim_in(0.8, 500);
+        let mut feedback = Ramp::new(0.1f32);
+        feedback.retarget_in(0.8, 500);
         run(&mut bank, &mut delays, &mut feedback, &x, block)
     };
     let whole = render(len);
@@ -343,19 +343,14 @@ fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
                 .collect()
         })
         .collect();
-    let glides = || {
-        (
-            [Glide::landed(0.0f32), Glide::landed(2.0)],
-            Glide::landed(0.7f32),
-        )
-    };
-    let (mut d, mut f) = glides();
+    let ramps = || ([Ramp::new(0.0f32), Ramp::new(2.0)], Ramp::new(0.7f32));
+    let (mut d, mut f) = ramps();
     let mut used = ModDelayBank::new(&layout, RATE);
     run(&mut used, &mut d, &mut f, &x, 64);
     used.reset();
     let mut fresh = ModDelayBank::new(&layout, RATE);
-    let (mut d1, mut f1) = glides();
-    let (mut d2, mut f2) = glides();
+    let (mut d1, mut f1) = ramps();
+    let (mut d2, mut f2) = ramps();
     assert_eq!(
         run(&mut used, &mut d1, &mut f1, &x, 64),
         run(&mut fresh, &mut d2, &mut f2, &x, 64)
@@ -377,12 +372,8 @@ fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
 #[test]
 fn a_silent_channel_stays_silent() {
     let mut bank = ModDelayBank::new(&ModDelayLayout::chorus(bus(3)), RATE);
-    let mut delays = [
-        Glide::landed(0.0f32),
-        Glide::landed(-180.0),
-        Glide::landed(-380.0),
-    ];
-    let mut feedback = Glide::landed(0.9f32);
+    let mut delays = [Ramp::new(0.0f32), Ramp::new(-180.0), Ramp::new(-380.0)];
+    let mut feedback = Ramp::new(0.9f32);
     let noise: Vec<f32> = (0..2_000).map(|n| ((n * 37) % 23) as f32 - 11.0).collect();
     let y = run(
         &mut bank,
@@ -395,18 +386,18 @@ fn a_silent_channel_stays_silent() {
     assert!(y[0].iter().any(|&s| s != 0.0) && y[2].iter().any(|&s| s != 0.0));
 }
 
-/// The slew is a span of frames: a depth glide aimed at `DELAY_SLEW` a frame takes
+/// The slew is a span of frames: a depth ramp aimed at `DELAY_SLEW` a frame takes
 /// `ceil(distance / slew)` steps, so a jump of 1,680 frames takes 13,440.
 #[test]
 fn the_slew_is_frames_of_delay_per_frame() {
     assert_eq!(DELAY_SLEW, 0.125);
-    let mut depth = Glide::landed(240.0f32);
-    depth.aim_by(1_920.0, Steps::Rate(DELAY_SLEW));
+    let mut depth = Ramp::new(240.0f32);
+    depth.retarget_by(1_920.0, Steps::Rate(DELAY_SLEW));
     assert_eq!(depth.at(13_439), 240.0 + 1_680.0 * 13_439.0 / 13_440.0);
     assert_eq!(depth.at(13_440), 1_920.0);
 }
 
-/// With no sweep (depth 0, the glide at the base) an `f64` bank is a fixed delay of the
+/// With no sweep (depth 0, the ramp at the base) an `f64` bank is a fixed delay of the
 /// base `d` whole frames: a signal of more than 24 significant bits returns `d` frames later
 /// exactly, and with feedback `g` it is the loop
 /// `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]`, to 2^-45.
@@ -431,8 +422,8 @@ fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
             frames(d as f64),
             "the centre is the base"
         );
-        let mut delays = [Glide::landed(0.0f64)];
-        let mut feedback = Glide::landed(g);
+        let mut delays = [Ramp::new(0.0f64)];
+        let mut feedback = Ramp::new(g);
         let mut y = vec![0.0f64; len];
         bank.process(
             &mut delays,

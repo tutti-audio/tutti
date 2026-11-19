@@ -122,7 +122,7 @@ pub trait Kernel: Clone + Send + 'static {
     /// How long it rings at `controls`, at most [`tail`](Self::tail), erring long: what the
     /// node narrows its tail to. A kernel whose ring-out does not follow its controls leaves
     /// the ceiling. It may design into the kernel's own scratch, and must not change the
-    /// audio state: lines, glides and phase are as they were. Audio thread: no allocation.
+    /// audio state: lines, ramps and phase are as they were. Audio thread: no allocation.
     fn tail_of(&mut self, _controls: &<Self::Set as ControlSet>::Controls) -> Tail {
         self.tail()
     }

@@ -99,7 +99,7 @@ impl ParamRamp {
         }
     }
 
-    /// This ramp along `shape` instead of a straight line: a glide that
+    /// This ramp along `shape` instead of a straight line: a ramp that
     /// eases in or out from wherever the parameter stands. A zero duration
     /// is still a step.
     #[must_use]

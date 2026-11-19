@@ -65,7 +65,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// nobody drives (or a non-finite one) is read at. **The release is on the stream grid** (16
 /// frames from the last reset, [`Kernel::GRID`]): a cell write or a driven port is sampled
 /// at the grid's solve frame, so it reaches the render within 16 frames and the render does
-/// not depend on how the stream is cut into blocks. Every coefficient lands whole: a glided
+/// not depend on how the stream is cut into blocks. Every coefficient lands whole: a ramped
 /// ceiling would let a sample past the new one.
 ///
 /// # In a graph
@@ -212,7 +212,7 @@ impl<F: Float> Kernel for LimiterKernel<F> {
 
     fn retarget(&mut self, controls: &LimiterControls) {
         if let Some(bank) = &mut self.bank {
-            bank.aim(controls);
+            bank.retarget(controls);
         }
     }
 

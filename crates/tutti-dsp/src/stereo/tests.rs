@@ -109,11 +109,11 @@ fn a_mono_view_is_left_alone() {
 
 fn widen(width: f64, settle: bool, l: &[f64], r: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let mut bank = WidthBank::<f64>::new(SampleRate::SR_48K);
-    bank.aim(&WidthControls {
+    bank.retarget(&WidthControls {
         width: StereoWidth::new(width),
     });
     if settle {
-        bank.settle();
+        bank.finish();
     }
     let input = vec![l.to_vec(), r.to_vec()];
     let mut out = vec![vec![0.0f64; l.len()]; 2];
@@ -140,12 +140,12 @@ fn a_settled_width_is_mid_plus_width_times_side() {
     assert_eq!(b, [0.25, 1.25, 0.5, 0.0]);
 }
 
-/// The width glides linearly over `GAIN_GLIDE` and lands on the target exactly: frame `i`
+/// The width ramps linearly over `GAIN_RAMP` and lands on the target exactly: frame `i`
 /// of a side-only input reads `w(i + 1)` of the line from 1 to 0, and the frames past
-/// the glide read 0.
+/// the ramp read 0.
 #[test]
-fn the_width_glides_linearly_and_lands_exactly() {
-    let n = GAIN_GLIDE.to_samples_ceil(SampleRate::SR_48K).get();
+fn the_width_ramps_linearly_and_lands_exactly() {
+    let n = GAIN_RAMP.to_samples_ceil(SampleRate::SR_48K).get();
     let l = vec![1.0f64; n + 50];
     let r = vec![-1.0f64; n + 50];
     let (a, b) = widen(0.0, false, &l, &r);
@@ -157,7 +157,7 @@ fn the_width_glides_linearly_and_lands_exactly() {
     assert!(a[n..].iter().all(|&y| y == 0.0));
 }
 
-/// A width that is not finite leaves the aim as it was, and a negative one reads as 0.
+/// A width that is not finite leaves the `retarget` as it was, and a negative one reads as 0.
 #[test]
 fn a_bad_width_is_refused_or_floored() {
     let (l, r) = ([1.0], [0.0]);

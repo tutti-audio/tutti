@@ -71,7 +71,7 @@ impl EnvelopeFilterConfig {
 /// channel followed with an attack and a release, in `[0, 1]` (0 silent, 1 at full scale).
 ///
 /// The cutoff is designed once per 16 frames of the stream at the envelope then, and the
-/// coefficients glide to it as the SVF's do ([`EnvelopeFilterBank`]). At depth 0 it is a fixed
+/// coefficients ramp to it as the SVF's do ([`EnvelopeFilterBank`]). At depth 0 it is a fixed
 /// SVF at the base.
 ///
 /// The base (`UnitParam::Cutoff`), the resonance (`UnitParam::Q`), the envelope's attack and
@@ -166,9 +166,9 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
 
     fn retarget(&mut self, controls: &EnvelopeFilterControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
+        bank.retarget(controls);
         if !self.landed {
-            bank.settle();
+            bank.finish();
             self.landed = true;
         }
     }

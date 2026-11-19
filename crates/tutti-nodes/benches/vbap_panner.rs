@@ -6,9 +6,9 @@
 //! consumes.
 //!
 //! `vbap_static` holds the source still, warmed up for two seconds of audio
-//! first so the 50 ms bearing glide has landed (a shorter warmup measures the
-//! tail of the initial glide instead); `vbap_moving` writes a new bearing every
-//! block, which keeps the glide permanently in flight — the case where the
+//! first so the 50 ms bearing ramp has landed (a shorter warmup measures the
+//! tail of the initial ramp instead); `vbap_moving` writes a new bearing every
+//! block, which keeps the ramp permanently in flight — the case where the
 //! gain vector genuinely changes between grid points. Both feed a stereo
 //! pair at the default width, the branch that solves two virtual sources.
 //!
@@ -27,7 +27,7 @@ use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
 use tutti_units::{ArcDegrees, Azimuth, Elevation, SampleRate};
 
-/// Warmup before measuring, in frames: two seconds at 48 kHz, 40 glide
+/// Warmup before measuring, in frames: two seconds at 48 kHz, 40 ramp
 /// lengths, so a held source has landed.
 const WARMUP_FRAMES: usize = 96_000;
 

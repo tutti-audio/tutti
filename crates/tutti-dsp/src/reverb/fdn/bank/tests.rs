@@ -30,12 +30,12 @@ fn layout(lines: usize, freeze: FreezeMode) -> FdnLayout {
 }
 
 /// A bank of `layout` at `rate`, landed on `c`.
-fn landed(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (FdnBank<f32>, FdnGlides<f32>) {
+fn landed(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (FdnBank<f32>, FdnRamps<f32>) {
     let mut bank = FdnBank::<f32>::new(layout, rate);
-    let mut glides = bank.glides();
-    bank.aim(&mut glides, c);
-    glides.settle();
-    (bank, glides)
+    let mut ramps = bank.ramps();
+    bank.retarget(&mut ramps, c);
+    ramps.finish();
+    (bank, ramps)
 }
 
 /// The design of `c`.
@@ -75,7 +75,7 @@ fn impulse(frames: usize) -> Vec<f32> {
 /// `x` through the bank in calls of `block` frames; the two output channels.
 fn run(
     bank: &mut FdnBank<f32>,
-    glides: &mut FdnGlides<f32>,
+    ramps: &mut FdnRamps<f32>,
     x: &[f32],
     block: usize,
 ) -> [Vec<f32>; 2] {
@@ -84,7 +84,7 @@ fn run(
     for piece in x.chunks(block) {
         let end = at + piece.len();
         bank.process(
-            glides,
+            ramps,
             Planes::new(&[piece]).unwrap(),
             PlanesMut::new(&mut [&mut l[at..end], &mut r[at..end]]).unwrap(),
         );
@@ -141,9 +141,9 @@ fn the_schroeder_integral_falls_60_db_in_the_designed_rt60() {
                 c.decay = [Seconds::new(rt60); 3];
                 c.diffusion = Mix::new(diffusion);
             });
-            let (mut bank, mut glides) = landed(&l, RATE, &c);
+            let (mut bank, mut ramps) = landed(&l, RATE, &c);
             let frames = (2.0 * rt60 * RATE.get()) as usize;
-            let [left, right] = run(&mut bank, &mut glides, &impulse(frames), 64);
+            let [left, right] = run(&mut bank, &mut ramps, &impulse(frames), 64);
             // The two channels' energy, summed frame for frame.
             let h: Vec<f64> = left
                 .iter()
@@ -209,8 +209,8 @@ fn each_band_decays_at_its_designed_rt60() {
     let length = fdn_of(&design(&l, RATE, &c)).lines[0].length.get();
     assert_eq!(length.fract(), 0.0, "a whole number of frames");
     let trip = length as usize;
-    let (mut bank, mut glides) = landed(&l, RATE, &c);
-    let [left, _] = run(&mut bank, &mut glides, &impulse(8 * trip), 64);
+    let (mut bank, mut ramps) = landed(&l, RATE, &c);
+    let [left, _] = run(&mut bank, &mut ramps, &impulse(8 * trip), 64);
 
     let g = [3.0, 1.5, 0.6].map(|t| trip_gain(length, t, RATE));
     // The crossovers (300 Hz and 4 kHz) are the design's, restated here: the test's own copy
@@ -258,21 +258,21 @@ fn each_band_decays_at_its_designed_rt60() {
 fn a_frozen_network_keeps_its_energy() {
     let l = layout(8, FreezeMode::Freezable);
     let c = controls(|c| c.diffusion = Mix::new(1.0));
-    let (mut bank, mut glides) = landed(&l, RATE, &c);
-    run(&mut bank, &mut glides, &noise(1, 24_000), 64);
-    bank.aim(
-        &mut glides,
+    let (mut bank, mut ramps) = landed(&l, RATE, &c);
+    run(&mut bank, &mut ramps, &noise(1, 24_000), 64);
+    bank.retarget(
+        &mut ramps,
         &controls(|c| {
             c.diffusion = Mix::new(1.0);
             c.freeze = true;
         }),
     );
     // Past the ramp to the frozen gains.
-    run(&mut bank, &mut glides, &vec![0.0; 4_800], 64);
-    let before = bank.state_energy(&glides);
+    run(&mut bank, &mut ramps, &vec![0.0; 4_800], 64);
+    let before = bank.state_energy(&ramps);
     assert!(before > 0.0, "the lines hold a tail");
-    run(&mut bank, &mut glides, &vec![0.0; 240_000], 64);
-    let db = 10.0 * (bank.state_energy(&glides) / before).log10();
+    run(&mut bank, &mut ramps, &vec![0.0; 240_000], 64);
+    let db = 10.0 * (bank.state_energy(&ramps) / before).log10();
     assert!(db.abs() < 0.01, "the frozen energy moved {db:.5} dB in 5 s");
 }
 
@@ -290,14 +290,14 @@ fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
             c.freeze = freeze;
         })
     };
-    let (mut bank, mut glides) = landed(&l, RATE, &at(0.0, false));
-    run(&mut bank, &mut glides, &noise(5, 48_000), 64);
-    bank.aim(&mut glides, &at(0.0, true));
-    run(&mut bank, &mut glides, &vec![0.0; 24_000], 64);
-    let before = bank.state_energy(&glides);
-    bank.aim(&mut glides, &at(1.0, true));
-    run(&mut bank, &mut glides, &vec![0.0; 9_600], 64);
-    let db = 10.0 * (bank.state_energy(&glides) / before).log10();
+    let (mut bank, mut ramps) = landed(&l, RATE, &at(0.0, false));
+    run(&mut bank, &mut ramps, &noise(5, 48_000), 64);
+    bank.retarget(&mut ramps, &at(0.0, true));
+    run(&mut bank, &mut ramps, &vec![0.0; 24_000], 64);
+    let before = bank.state_energy(&ramps);
+    bank.retarget(&mut ramps, &at(1.0, true));
+    run(&mut bank, &mut ramps, &vec![0.0; 9_600], 64);
+    let db = 10.0 * (bank.state_energy(&ramps) / before).log10();
     assert!(
         db.abs() < 0.01,
         "the frozen energy moved {db:.4} dB through the ramp"
@@ -328,8 +328,8 @@ fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
         })
         .sum::<f64>()
         * net.wet.to_amplitude().get();
-    let (mut bank, mut glides) = landed(&l, RATE, &c);
-    let [left, _] = run(&mut bank, &mut glides, &impulse(10 * 48_000), 64);
+    let (mut bank, mut ramps) = landed(&l, RATE, &c);
+    let [left, _] = run(&mut bank, &mut ramps, &impulse(10 * 48_000), 64);
     let sum: f64 = left.iter().map(|&v| f64::from(v)).sum();
     assert!(
         (sum - expected).abs() < 0.01 * expected.abs(),
@@ -359,8 +359,8 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
             .min()
             .unwrap();
         let at = 4_800 + first;
-        let (mut bank, mut glides) = landed(&l, RATE, &c);
-        let [left, right] = run(&mut bank, &mut glides, &impulse(at + 64), 64);
+        let (mut bank, mut ramps) = landed(&l, RATE, &c);
+        let [left, right] = run(&mut bank, &mut ramps, &impulse(at + 64), 64);
         assert!(
             left[..at].iter().chain(&right[..at]).all(|&x| x == 0.0),
             "silent until the pre-delay and the shortest line have gone round"
@@ -404,10 +404,10 @@ fn any_split_of_the_stream_gives_the_same_bits() {
     let x = noise(7, 6_000);
     for at in [1_024, 1_000] {
         let render = |block: usize| {
-            let (mut bank, mut glides) = landed(&l, RATE, &a);
-            let mut out = run(&mut bank, &mut glides, &x[..at], block);
-            bank.aim(&mut glides, &b);
-            let tail = run(&mut bank, &mut glides, &x[at..], block);
+            let (mut bank, mut ramps) = landed(&l, RATE, &a);
+            let mut out = run(&mut bank, &mut ramps, &x[..at], block);
+            bank.retarget(&mut ramps, &b);
+            let tail = run(&mut bank, &mut ramps, &x[at..], block);
             for (o, t) in out.iter_mut().zip(tail) {
                 o.extend(t);
             }
@@ -428,52 +428,52 @@ fn any_split_of_the_stream_gives_the_same_bits() {
 fn a_reset_bank_renders_as_a_fresh_one() {
     let l = layout(8, FreezeMode::Decaying);
     let c = controls(|c| c.modulation = Depth::of(0.8));
-    let (mut used, mut used_glides) = landed(&l, RATE, &c);
-    run(&mut used, &mut used_glides, &noise(3, 5_001), 64);
+    let (mut used, mut used_ramps) = landed(&l, RATE, &c);
+    run(&mut used, &mut used_ramps, &noise(3, 5_001), 64);
     used.reset();
-    used_glides.settle();
-    let (mut fresh, mut fresh_glides) = landed(&l, RATE, &c);
+    used_ramps.finish();
+    let (mut fresh, mut fresh_ramps) = landed(&l, RATE, &c);
     let x = impulse(12_000);
-    let after = run(&mut used, &mut used_glides, &x, 64);
+    let after = run(&mut used, &mut used_ramps, &x, 64);
     assert!(after[0].iter().any(|&s| s != 0.0));
-    assert_eq!(after, run(&mut fresh, &mut fresh_glides, &x, 64));
+    assert_eq!(after, run(&mut fresh, &mut fresh_ramps, &x, 64));
 }
 
-/// A clone is its own bank holding the lines, chunk count and glides as they were: both
+/// A clone is its own bank holding the lines, chunk count and ramps as they were: both
 /// continue to the same bits, and one running on does not move the other.
 #[test]
 fn a_clone_continues_where_the_original_was_and_shares_nothing() {
     let l = layout(8, FreezeMode::Decaying);
     let c = controls(|_| {});
-    let (mut bank, mut glides) = landed(&l, RATE, &c);
+    let (mut bank, mut ramps) = landed(&l, RATE, &c);
     let x = noise(9, 4_000);
-    run(&mut bank, &mut glides, &x[..1_777], 64);
-    bank.aim(&mut glides, &controls(|c| c.decay = [Seconds::new(0.7); 3]));
-    run(&mut bank, &mut glides, &x[1_777..2_000], 64);
-    let (mut twin, mut twin_glides) = (bank.clone(), glides.clone());
-    let rest = run(&mut bank, &mut glides, &x[2_000..], 64);
+    run(&mut bank, &mut ramps, &x[..1_777], 64);
+    bank.retarget(&mut ramps, &controls(|c| c.decay = [Seconds::new(0.7); 3]));
+    run(&mut bank, &mut ramps, &x[1_777..2_000], 64);
+    let (mut twin, mut twin_ramps) = (bank.clone(), ramps.clone());
+    let rest = run(&mut bank, &mut ramps, &x[2_000..], 64);
     assert!(rest[0].iter().any(|&s| s != 0.0));
-    assert_eq!(rest, run(&mut twin, &mut twin_glides, &x[2_000..], 64));
+    assert_eq!(rest, run(&mut twin, &mut twin_ramps, &x[2_000..], 64));
 }
 
-/// Before its first aim a bank renders silence, and the channels of an input are averaged to
+/// Before its first `retarget` a bank renders silence, and the channels of an input are averaged to
 /// one: a channel and its negation cancel, and two copies of a signal render as the signal.
 #[test]
-fn a_bank_is_silent_until_aimed_and_averages_its_input() {
+fn a_bank_is_silent_until_its_target_is_set_and_averages_its_input() {
     let l = layout(8, FreezeMode::Decaying);
     let mut bank = FdnBank::<f32>::new(&l, RATE);
-    let mut glides = bank.glides();
-    let before = run(&mut bank, &mut glides, &noise(2, 256), 64);
+    let mut ramps = bank.ramps();
+    let before = run(&mut bank, &mut ramps, &noise(2, 256), 64);
     assert!(before.iter().flatten().all(|&s| s == 0.0));
 
     let c = still(|_| {});
     let y = noise(4, 4_096);
     let negated: Vec<f32> = y.iter().map(|s| -s).collect();
     let render = |channels: &[&[f32]]| {
-        let (mut bank, mut glides) = landed(&l, RATE, &c);
+        let (mut bank, mut ramps) = landed(&l, RATE, &c);
         let (mut left, mut right) = (vec![0.0f32; y.len()], vec![0.0f32; y.len()]);
         bank.process(
-            &mut glides,
+            &mut ramps,
             Planes::new(channels).unwrap(),
             PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
         );
@@ -500,27 +500,24 @@ fn the_tail_is_the_networks_under_the_ceiling() {
     };
     assert!(ceiling.get() as f64 >= 8.0 * RATE.get(), "{ceiling:?}");
     let (mut plain, mut freezable) = (plain, freezable);
-    let (glides_p, glides_f) = (plain.glides(), freezable.glides());
+    let (ramps_p, ramps_f) = (plain.ramps(), freezable.ramps());
     for rt60 in [0.3, 1.0, 2.5] {
         let c = still(|c| c.decay = [Seconds::new(rt60); 3]);
-        let Tail::Finite(t) = plain.tail_of(&glides_p, &c) else {
+        let Tail::Finite(t) = plain.tail_of(&ramps_p, &c) else {
             panic!("finite")
         };
         assert!(
             t <= ceiling && t.get() as f64 >= rt60 * RATE.get(),
             "{t:?} at {rt60}"
         );
-        assert_eq!(
-            freezable.tail_of(&glides_f, &c),
-            plain.tail_of(&glides_p, &c)
-        );
+        assert_eq!(freezable.tail_of(&ramps_f, &c), plain.tail_of(&ramps_p, &c));
     }
     assert_eq!(
-        freezable.tail_of(&glides_f, &controls(|c| c.freeze = true)),
+        freezable.tail_of(&ramps_f, &controls(|c| c.freeze = true)),
         Tail::Unbounded
     );
     assert!(matches!(
-        plain.tail_of(&glides_p, &controls(|c| c.freeze = true)),
+        plain.tail_of(&ramps_p, &controls(|c| c.freeze = true)),
         Tail::Finite(_)
     ));
 }
@@ -548,8 +545,8 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
             c.size = Mix::new(size);
         })
     };
-    let (mut bank, mut glides) = landed(&l, RATE, &bands(1.0));
-    bank.aim(&mut glides, &bands(0.0));
+    let (mut bank, mut ramps) = landed(&l, RATE, &bands(1.0));
+    bank.retarget(&mut ramps, &bands(0.0));
     let designed = [3.0, 1.5, 0.6];
     let Steps::Fixed(ramp_chunks) = ramp(RATE) else {
         panic!("a fixed ramp")
@@ -559,13 +556,13 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
     for chunk in 0..16_000 {
         run(
             &mut bank,
-            &mut glides,
+            &mut ramps,
             &[0.0; FdnBank::<f32>::CHUNK],
             FdnBank::<f32>::CHUNK,
         );
-        for j in 0..glides.n {
-            // The length the chunk ran with, not where the glide has got to since.
-            let (now, to) = (bank.state.c_len[j], glides.len[j].target());
+        for j in 0..ramps.n {
+            // The length the chunk ran with, not where the ramp has got to since.
+            let (now, to) = (bank.state.c_len[j], ramps.len[j].target());
             let [high, mid_over, low_over] = bank.state.c_gain[j].map(f64::from);
             let gains = [high + mid_over + low_over, high + mid_over, high];
             // While the gains ramp (a blend of two designs for two lengths) the exponent is
@@ -593,13 +590,13 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
 #[test]
 fn the_tail_owes_the_pre_delay_still_to_fall() {
     let l = layout(8, FreezeMode::Decaying);
-    let (mut bank, mut glides) = landed(&l, RATE, &still(|c| c.pre_delay = Seconds::new(0.4)));
-    bank.aim(&mut glides, &still(|_| {}));
-    let Tail::Finite(owed) = bank.tail_of(&glides, &still(|_| {})) else {
+    let (mut bank, mut ramps) = landed(&l, RATE, &still(|c| c.pre_delay = Seconds::new(0.4)));
+    bank.retarget(&mut ramps, &still(|_| {}));
+    let Tail::Finite(owed) = bank.tail_of(&ramps, &still(|_| {})) else {
         panic!("finite")
     };
-    let (mut fresh, fresh_glides) = landed(&l, RATE, &still(|_| {}));
-    let Tail::Finite(base) = fresh.tail_of(&fresh_glides, &still(|_| {})) else {
+    let (mut fresh, fresh_ramps) = landed(&l, RATE, &still(|_| {}));
+    let Tail::Finite(base) = fresh.tail_of(&fresh_ramps, &still(|_| {})) else {
         panic!("finite")
     };
     assert!(
@@ -607,7 +604,7 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
         "{owed:?} against {base:?}"
     );
     let longest = still(|c| c.decay = [Seconds::new(8.0); 3]);
-    let (mut worst, mut worst_glides) = landed(
+    let (mut worst, mut worst_ramps) = landed(
         &l,
         RATE,
         &still(|c| {
@@ -615,9 +612,9 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
             c.pre_delay = crate::MAX_PRE_DELAY;
         }),
     );
-    worst.aim(&mut worst_glides, &longest);
+    worst.retarget(&mut worst_ramps, &longest);
     let (Tail::Finite(t), Tail::Finite(ceiling)) =
-        (worst.tail_of(&worst_glides, &longest), worst.tail())
+        (worst.tail_of(&worst_ramps, &longest), worst.tail())
     else {
         panic!("finite")
     };
@@ -626,7 +623,7 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
 
 /// A line moves toward its target at most half a frame a chunk and is there in exactly
 /// `ceil(distance / 0.5)` chunks: a size that grows a line `delta` frames takes
-/// `ceil(delta / 0.5)` steps of the glide, one a chunk, and no step is longer than 0.5.
+/// `ceil(delta / 0.5)` steps of the ramp, one a chunk, and no step is longer than 0.5.
 #[test]
 fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
     let l = layout(8, FreezeMode::Decaying);
@@ -634,23 +631,23 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
         still(|c| c.size = Mix::new(0.2)),
         still(|c| c.size = Mix::new(0.3)),
     );
-    let (mut bank, mut glides) = landed(&l, RATE, &a);
+    let (mut bank, mut ramps) = landed(&l, RATE, &a);
     let (from, to) = (
         ReadPosition::from_span(fdn_of(&design(&l, RATE, &a)).lines[3].length),
         ReadPosition::from_span(fdn_of(&design(&l, RATE, &b)).lines[3].length),
     );
     let steps = ((to.span().get() - from.span().get()) / 0.5).ceil() as usize;
     assert!(steps > 100, "a long way: {steps} chunks");
-    bank.aim(&mut glides, &b);
+    bank.retarget(&mut ramps, &b);
     let mut last = from;
     for chunk in 1..=steps {
         run(
             &mut bank,
-            &mut glides,
+            &mut ramps,
             &[0.0; FdnBank::<f32>::CHUNK],
             FdnBank::<f32>::CHUNK,
         );
-        let now = glides.len[3].now();
+        let now = ramps.len[3].now();
         let moved = now.span().get() - last.span().get();
         assert!(moved <= 0.5 + 1e-3, "chunk {chunk}: moved {moved}");
         assert!(now > last);
@@ -668,17 +665,17 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
 #[test]
 fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
     let l = layout(8, FreezeMode::Decaying);
-    let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
-    bank.aim(&mut glides, &still(|c| c.pre_delay = Seconds::new(0.1)));
+    let (mut bank, mut ramps) = landed(&l, RATE, &still(|_| {}));
+    bank.retarget(&mut ramps, &still(|c| c.pre_delay = Seconds::new(0.1)));
     let mut last = ReadPosition::START;
     for chunk in 1..=2_400 {
         run(
             &mut bank,
-            &mut glides,
+            &mut ramps,
             &[0.0; FdnBank::<f32>::CHUNK],
             FdnBank::<f32>::CHUNK,
         );
-        let now = glides.pre_len.now();
+        let now = ramps.pre_len.now();
         let moved = now.span().get() - last.span().get();
         assert!(moved <= 2.0 + 1e-3, "chunk {chunk}: moved {moved}");
         last = now;
@@ -699,18 +696,18 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
     assert_eq!(wanted, 30);
     assert_eq!(ramp(RATE), Steps::Fixed(wanted));
     let l = layout(8, FreezeMode::Decaying);
-    let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
-    bank.aim(&mut glides, &still(|c| c.wet = Db::new(-6.0206)));
-    let target = glides.wet.target();
+    let (mut bank, mut ramps) = landed(&l, RATE, &still(|_| {}));
+    bank.retarget(&mut ramps, &still(|c| c.wet = Db::new(-6.0206)));
+    let target = ramps.wet.target();
     assert!((target - 0.5).abs() < 1e-4);
     for chunk in 1..=wanted {
         run(
             &mut bank,
-            &mut glides,
+            &mut ramps,
             &[0.0; FdnBank::<f32>::CHUNK],
             FdnBank::<f32>::CHUNK,
         );
-        assert_eq!(glides.wet.now() == target, chunk == wanted, "chunk {chunk}");
+        assert_eq!(ramps.wet.now() == target, chunk == wanted, "chunk {chunk}");
     }
 }
 
@@ -720,22 +717,22 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
 #[test]
 fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
     let c = still(|c| c.pre_delay = Seconds::new(0.0));
-    let (mut bank, mut glides) = landed(&layout(8, FreezeMode::Decaying), RATE, &c);
-    run(&mut bank, &mut glides, &impulse(1), 1);
+    let (mut bank, mut ramps) = landed(&layout(8, FreezeMode::Decaying), RATE, &c);
+    run(&mut bank, &mut ramps, &impulse(1), 1);
     let held = bank.state.lines[7].back(1);
     assert_ne!(held, 0.0, "the impulse reached the last line");
 
     let m = 100;
     bank.layout = layout(4, FreezeMode::Decaying);
     bank.designed = None;
-    bank.aim(&mut glides, &c);
-    run(&mut bank, &mut glides, &vec![0.0; m], 7);
+    bank.retarget(&mut ramps, &c);
+    run(&mut bank, &mut ramps, &vec![0.0; m], 7);
     assert_eq!(bank.state.lines[7].back(m + 1), held, "idle for {m} frames");
 
     bank.layout = layout(8, FreezeMode::Decaying);
     bank.designed = None;
-    bank.aim(&mut glides, &c);
-    run(&mut bank, &mut glides, &vec![0.0; m], 7);
+    bank.retarget(&mut ramps, &c);
+    run(&mut bank, &mut ramps, &vec![0.0; m], 7);
     assert_eq!(bank.state.lines[7].back(2 * m + 1), held, "regrown");
 }
 
@@ -754,12 +751,12 @@ fn an_f64_fdn_is_linear() {
     let l = layout(8, FreezeMode::Decaying);
     let render = |input: &[f64]| {
         let mut bank = FdnBank::<f64>::new(&l, RATE);
-        let mut glides = bank.glides();
-        bank.aim(&mut glides, &c);
-        glides.settle();
+        let mut ramps = bank.ramps();
+        bank.retarget(&mut ramps, &c);
+        ramps.finish();
         let (mut l, mut r) = (vec![0.0f64; len], vec![0.0f64; len]);
         bank.process(
-            &mut glides,
+            &mut ramps,
             Planes::new(&[input]).unwrap(),
             PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
         );
@@ -831,10 +828,10 @@ fn the_longest_decay_at_192_khz_on_the_shortest_line_holds_its_closed_form_rt60_
     });
     let frames_per_line = fdn_of(&design(&l, rate, &c)).lines[0].length.get() as usize;
     let trips = (decay.get().get() * rate.get() / frames_per_line as f64) as usize - 2;
-    let (mut bank, mut glides) = landed(&l, rate, &c);
+    let (mut bank, mut ramps) = landed(&l, rate, &c);
     let [left, _] = run(
         &mut bank,
-        &mut glides,
+        &mut ramps,
         &impulse((trips + 2) * frames_per_line),
         4096,
     );

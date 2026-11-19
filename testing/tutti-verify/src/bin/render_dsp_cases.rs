@@ -20,9 +20,10 @@ use std::path::Path;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, Glide, LadderBank, LadderBlend,
-    LadderControls, LadderModel, LadderType, PhaserChain, SimdLanes, Stages, StreamingResampler,
-    SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_complement,
+    ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, LadderBank, LadderBlend,
+    LadderControls, LadderModel, LadderType, PhaserChain, Ramp, SimdLanes, Stages,
+    StreamingResampler, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType,
+    allpass_complement,
 };
 use tutti_fixtures::signal::write_wav_f32;
 use tutti_units::{Db, Drive, Hz, Q, Resonance, SampleRate};
@@ -61,7 +62,7 @@ fn run_svf<F: Float + SimdLanes>(
     input: &[f32],
 ) -> Vec<Vec<f32>> {
     let mut bank = SvfBank::<F>::new(ChannelLayout::MONO);
-    let mut coefficients = Glide::landed(SvfCoefficients::from(&SvfModel::new(*controls, rate)));
+    let mut coefficients = Ramp::new(SvfCoefficients::from(&SvfModel::new(*controls, rate)));
     blocks::<F>(input, 1, |x, y| bank.process(&mut coefficients, x, y))
 }
 
@@ -169,7 +170,7 @@ fn ladder(dir: &Path, cases: &mut Cases) {
             };
             let name = format!("ladder_{label}_{freq}_{res}");
             let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
-            let mut blend = Glide::landed(LadderBlend::from(&LadderModel::new(c, rate)));
+            let mut blend = Ramp::new(LadderBlend::from(&LadderModel::new(c, rate)));
             let out = blocks::<f64>(&impulse(amplitude), 1, |x, y| {
                 bank.process(&mut blend, x, y);
             });
@@ -196,7 +197,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         let c = CrossoverControls::new(&hz, rate).expect("controls");
         let model = CrossoverModel::designed(splits.len() + 1, &c, rate).expect("bands");
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
-        let mut coefficients = Glide::landed(model.blend());
+        let mut coefficients = Ramp::new(model.blend());
         // One channel per band, band 0 first.
         let out = blocks::<f64>(&impulse(1.0), model.bands(), |x, y| {
             bank.process(&mut coefficients, x, y);
@@ -214,8 +215,8 @@ fn phaser(dir: &Path, cases: &mut Cases) {
             let x = impulse(1.0);
             let mut y = vec![0.0f32; IR_FRAMES];
             chain.process(
-                &mut [Glide::landed(c)],
-                &mut Glide::landed(0.0),
+                &mut [Ramp::new(c)],
+                &mut Ramp::new(0.0),
                 Planes::new(&[&x[..]]).expect("one plane"),
                 PlanesMut::new(&mut [&mut y[..]]).expect("one plane"),
             );

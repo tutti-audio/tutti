@@ -117,7 +117,7 @@ impl<F: Float> BitCrusher<F> {
     }
 
     /// Takes `controls` from the next frame on, the held values kept. No allocation.
-    pub fn aim(&mut self, controls: &BitCrusherControls) {
+    pub fn retarget(&mut self, controls: &BitCrusherControls) {
         self.controls = *controls;
     }
 

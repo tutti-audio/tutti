@@ -132,7 +132,7 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
     fn reset(&mut self) {}
 
     fn retarget(&mut self, controls: &BrickwallControls) {
-        self.bank.aim(controls);
+        self.bank.retarget(controls);
     }
 
     fn render(

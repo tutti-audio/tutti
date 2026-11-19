@@ -29,7 +29,7 @@
 //!
 //! The threshold and the ceiling are the two controls read **per frame** when the graph
 //! drives them ([`LimiterLanes`]); a frame that is not finite falls back to the aimed
-//! value. Every coefficient lands whole: a glided ceiling would let a sample past the new
+//! value. Every coefficient lands whole: a ramped ceiling would let a sample past the new
 //! one.
 //!
 //! A reset leaves the envelope **unset** (`+inf`, no history), and the first frame takes
@@ -416,7 +416,7 @@ impl<F: Float> LimiterBank<F> {
     }
 
     /// Designs `controls` and lands them whole. No allocation.
-    pub fn aim(&mut self, controls: &LimiterControls) {
+    pub fn retarget(&mut self, controls: &LimiterControls) {
         self.design = Design::of(controls, self.rate);
     }
 

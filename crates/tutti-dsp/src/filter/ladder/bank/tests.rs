@@ -30,7 +30,7 @@ fn design<F: Float + SimdLanes>(ty: LadderType, fc: f64, res: f64, drive: f64) -
 /// `blocks`, cycled, and returns the output per channel.
 fn run<F: Float + SimdLanes>(
     bank: &mut LadderBank<F>,
-    glide: &mut Glide<LadderBlend<F>>,
+    ramp: &mut Ramp<LadderBlend<F>>,
     input: &[Vec<F>],
     blocks: &[usize],
 ) -> Vec<Vec<F>> {
@@ -45,7 +45,7 @@ fn run<F: Float + SimdLanes>(
         let ins: Vec<&[F]> = input.iter().map(|c| &c[at..end]).collect();
         let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
-            glide,
+            ramp,
             Planes::new(&ins).expect("equal planes"),
             PlanesMut::new(&mut outs).expect("equal planes"),
         );
@@ -65,10 +65,10 @@ fn impulse(amplitude: f64, frames: usize) -> Vec<f64> {
 /// bank in `f64` audio.
 fn held_response(ty: LadderType, fc: f64, res: f64, amplitude: f64, frames: usize) -> Vec<f64> {
     let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
-    let mut glide = Glide::landed(design(ty, fc, res, 1.0));
+    let mut ramp = Ramp::new(design(ty, fc, res, 1.0));
     run(
         &mut bank,
-        &mut glide,
+        &mut ramp,
         &[impulse(amplitude, frames)],
         &[frames],
     )
@@ -271,8 +271,8 @@ fn the_output_is_bounded_by_the_saturator_and_the_stages_l1_norm() {
         for fc in [1.0f64, 100.0, 12_000.0, 23_900.0] {
             for (res, drive) in [(1.0f64, 1e3f64), (1.0, 1.0), (0.5, 1e6)] {
                 let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
-                let mut glide = Glide::landed(design(ty, fc, res, drive));
-                let y = run(&mut bank, &mut glide, std::slice::from_ref(&noise), &[64]).remove(0);
+                let mut ramp = Ramp::new(design(ty, fc, res, drive));
+                let y = run(&mut bank, &mut ramp, std::slice::from_ref(&noise), &[64]).remove(0);
                 let peak = y.iter().fold(0.0f64, |p, &v| p.max(v.abs()));
                 assert!(
                     peak.is_finite() && peak <= bound(ty),
@@ -283,7 +283,7 @@ fn the_output_is_bounded_by_the_saturator_and_the_stages_l1_norm() {
     }
 }
 
-/// Block independence: a glide in flight, rendered in uneven blocks, gives the same frames
+/// Block independence: a ramp in flight, rendered in uneven blocks, gives the same frames
 /// bit for bit as one block, because frame `i` reads step `taken + 1 + i` however the frames
 /// are cut.
 #[test]
@@ -297,9 +297,9 @@ fn any_split_renders_the_frames_of_one_block() {
         .collect();
     let render = |blocks: &[usize]| {
         let mut bank = LadderBank::<f64>::new(ChannelLayout::from(3u16));
-        let mut glide = Glide::landed(design::<f64>(LadderType::LP24, 300.0, 0.3, 1.0)).by(16);
-        glide.aim(design(LadderType::LP24, 6_000.0, 0.8, 4.0));
-        run(&mut bank, &mut glide, &input, blocks)
+        let mut ramp = Ramp::new(design::<f64>(LadderType::LP24, 300.0, 0.3, 1.0)).steps(16);
+        ramp.retarget(design(LadderType::LP24, 6_000.0, 0.8, 4.0));
+        run(&mut bank, &mut ramp, &input, blocks)
     };
     let whole = render(&[997]);
     for blocks in [
@@ -313,25 +313,25 @@ fn any_split_renders_the_frames_of_one_block() {
     }
 }
 
-/// A glide is the linear blend of the two designs, coefficients and drive alike, arriving
+/// A ramp is the linear blend of the two designs, coefficients and drive alike, arriving
 /// exactly on the new design at its last frame: an impulse at frame `i` into a bank with no
 /// state comes out as one `ladder_step` at the set `(i + 1) / 16` of the way from the old
 /// to the new, written out here (`g1` and `k` linearly, the drive `1 -> 4`), and at frame
 /// 15 as the held render of the new design gives it, bit for bit.
 #[test]
-fn a_glide_is_linear_and_arrives_on_the_new_design() {
+fn a_ramp_is_linear_and_arrives_on_the_new_design() {
     let (old, new) = (
         design::<f64>(LadderType::HP12, 500.0, 0.3, 1.0),
         design::<f64>(LadderType::HP12, 5_000.0, 0.3, 4.0),
     );
     for i in [0usize, 7, 15] {
-        let mut glide = Glide::landed(old).by(16);
-        glide.aim(new);
+        let mut ramp = Ramp::new(old).steps(16);
+        ramp.retarget(new);
         let mut x = vec![0.0f64; 16];
         x[i] = 0.5;
         let y = run(
             &mut LadderBank::<f64>::new(ChannelLayout::MONO),
-            &mut glide,
+            &mut ramp,
             &[x],
             &[16],
         )
@@ -355,18 +355,18 @@ fn a_glide_is_linear_and_arrives_on_the_new_design() {
             y[i]
         );
     }
-    let mut glide = Glide::landed(old).by(16);
-    glide.aim(new);
+    let mut ramp = Ramp::new(old).steps(16);
+    ramp.retarget(new);
     let mut x = vec![0.0f64; 16];
     x[15] = 0.5;
     let y = run(
         &mut LadderBank::<f64>::new(ChannelLayout::MONO),
-        &mut glide,
+        &mut ramp,
         &[x.clone()],
         &[16],
     )
     .remove(0);
-    let mut held = Glide::landed(new);
+    let mut held = Ramp::new(new);
     let z = run(
         &mut LadderBank::<f64>::new(ChannelLayout::MONO),
         &mut held,
@@ -376,25 +376,25 @@ fn a_glide_is_linear_and_arrives_on_the_new_design() {
     .remove(0);
     assert_eq!(y[15], z[15]);
     assert_ne!(y[15], 0.0);
-    assert!(!glide.moving());
+    assert!(!ramp.moving());
 }
 
-/// A retarget in the middle of a glide starts from the design in force there, not the one it
-/// was heading for: 8 frames into a glide from 500 Hz to 5 kHz (the half-way `g1`, `k` being
-/// equal at both ends), an aim back to 500 Hz makes the first frame after it step 1 of 16 from
+/// A retarget in the middle of a ramp starts from the design in force there, not the one it
+/// was heading for: 8 frames into a ramp from 500 Hz to 5 kHz (the half-way `g1`, `k` being
+/// equal at both ends), a `retarget` back to 500 Hz makes the first frame after it step 1 of 16 from
 /// the half-way design to the old one, written out here.
 #[test]
-fn an_aim_in_flight_goes_on_from_where_the_glide_was() {
+fn an_aim_in_flight_goes_on_from_where_the_ramp_was() {
     let (a, b) = (
         design::<f64>(LadderType::HP12, 500.0, 0.3, 1.0),
         design::<f64>(LadderType::HP12, 5_000.0, 0.3, 1.0),
     );
-    let mut glide = Glide::landed(a).by(16);
-    glide.aim(b);
+    let mut ramp = Ramp::new(a).steps(16);
+    ramp.retarget(b);
     let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
-    run(&mut bank, &mut glide, &[vec![0.0f64; 8]], &[8]);
-    glide.aim(a);
-    let got = run(&mut bank, &mut glide, &[vec![0.5f64]], &[1])[0][0];
+    run(&mut bank, &mut ramp, &[vec![0.0f64; 8]], &[8]);
+    ramp.retarget(a);
+    let got = run(&mut bank, &mut ramp, &[vec![0.5f64]], &[1])[0][0];
     let mid = 0.5 * (a.coefficients.g1 + b.coefficients.g1);
     let c = LadderCoefficients {
         g1: mid + (a.coefficients.g1 - mid) / 16.0,
@@ -407,22 +407,22 @@ fn an_aim_in_flight_goes_on_from_where_the_glide_was() {
     );
 }
 
-/// A blend keeps the target's tap: a glide between two types reads the new type from the
+/// A blend keeps the target's tap: a ramp between two types reads the new type from the
 /// first frame, so the response is a tap and never a mix of two.
 #[test]
-fn a_glide_changes_the_tap_at_once() {
+fn a_ramp_changes_the_tap_at_once() {
     let (lp, hp) = (
         design::<f64>(LadderType::LP24, 1_000.0, 0.0, 1.0),
         design::<f64>(LadderType::HP24, 1_000.0, 0.0, 1.0),
     );
-    let mut glide = Glide::landed(lp).by(16);
-    glide.aim(hp);
-    let blended = glide.at(8);
+    let mut ramp = Ramp::new(lp).steps(16);
+    ramp.retarget(hp);
+    let blended = ramp.at(8);
     assert_eq!(blended.ty, LadderType::HP24);
 }
 
 /// Channels are independent: a bank of any width gives each channel exactly what a
-/// one-channel bank gives it, held or gliding, whatever group the width falls into.
+/// one-channel bank gives it, held or ramping, whatever group the width falls into.
 #[test]
 fn each_channel_is_its_own_filter() {
     for width in [1u16, 2, 5, 8, 9, 16] {
@@ -433,16 +433,16 @@ fn each_channel_is_its_own_filter() {
                     .collect()
             })
             .collect();
-        let glide = || {
-            let mut g = Glide::landed(design::<f64>(LadderType::LP24, 800.0, 0.4, 1.0)).by(16);
-            g.aim(design(LadderType::LP24, 2_000.0, 0.7, 3.0));
+        let ramp = || {
+            let mut g = Ramp::new(design::<f64>(LadderType::LP24, 800.0, 0.4, 1.0)).steps(16);
+            g.retarget(design(LadderType::LP24, 2_000.0, 0.7, 3.0));
             g
         };
         let mut bank = LadderBank::<f64>::new(ChannelLayout::from(width));
-        let all = run(&mut bank, &mut glide(), &input, &[300]);
+        let all = run(&mut bank, &mut ramp(), &input, &[300]);
         for (c, ch) in input.iter().enumerate() {
             let mut one = LadderBank::<f64>::new(ChannelLayout::MONO);
-            let alone = run(&mut one, &mut glide(), std::slice::from_ref(ch), &[300]).remove(0);
+            let alone = run(&mut one, &mut ramp(), std::slice::from_ref(ch), &[300]).remove(0);
             assert_eq!(all[c], alone, "width {width}, channel {c}");
         }
     }
@@ -452,30 +452,30 @@ fn each_channel_is_its_own_filter() {
 #[test]
 fn a_reset_bank_is_silent() {
     let mut bank = LadderBank::<f64>::new(ChannelLayout::STEREO);
-    let mut glide = Glide::landed(design(LadderType::LP24, 300.0, 0.9, 1.0));
+    let mut ramp = Ramp::new(design(LadderType::LP24, 300.0, 0.9, 1.0));
     let noise: Vec<f64> = (0..512)
         .map(|i| ((i * 31) % 17) as f64 / 8.0 - 1.0)
         .collect();
-    run(&mut bank, &mut glide, &[noise.clone(), noise], &[512]);
+    run(&mut bank, &mut ramp, &[noise.clone(), noise], &[512]);
     bank.reset();
     let out = run(
         &mut bank,
-        &mut glide,
+        &mut ramp,
         &[vec![0.0f64; 64], vec![0.0; 64]],
         &[64],
     );
     assert!(out.iter().flatten().all(|&s| s == 0.0));
 }
 
-/// A glide's midpoint between two designs the small-signal model keeps stable is itself
+/// A ramp's midpoint between two designs the small-signal model keeps stable is itself
 /// stable: an impulse through the half-way design decays (the last thousand frames of
 /// 150 000 peak below half of the first thousand's). 200 pairs drawn from a seeded sweep of
 /// reachable designs: every type, a cutoff from 20 Hz to 3 kHz, a resonance up to 0.7 and
 /// a drive from 0.1 to 8. The reach stops where the linearisation has a pole outside the
-/// circle (a high cutoff with a middling resonance, a resonance of 1); a glide that
+/// circle (a high cutoff with a middling resonance, a resonance of 1); a ramp that
 /// extrapolated, or a blend that left the stable set, fails.
 #[test]
-fn a_glides_midpoint_is_stable() {
+fn a_ramps_midpoint_is_stable() {
     const FRAMES: usize = 150_000;
     let mut seed = 24u32;
     let mut next = |lo: f64, hi: f64| {
@@ -491,9 +491,9 @@ fn a_glides_midpoint_is_stable() {
     for _ in 0..200 {
         let (a, b) = (reachable(&mut next), reachable(&mut next));
         let mid = a.lerp(&b, 8, 16);
-        let mut glide = Glide::landed(mid);
+        let mut ramp = Ramp::new(mid);
         let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
-        let y = run(&mut bank, &mut glide, &[impulse(1.0, FRAMES)], &[FRAMES]).remove(0);
+        let y = run(&mut bank, &mut ramp, &[impulse(1.0, FRAMES)], &[FRAMES]).remove(0);
         let peak = |r: core::ops::Range<usize>| y[r].iter().fold(0.0f64, |m, v| m.max(v.abs()));
         let (first, last) = (peak(0..1_000), peak(FRAMES - 1_000..FRAMES));
         assert!(
@@ -538,8 +538,8 @@ fn a_five_hz_low_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
         .collect();
     let model = LadderModel::new(controls, SampleRate::of(FS));
     let mut bank = LadderBank::<f32>::new(ChannelLayout::MONO);
-    let mut glide = Glide::landed(LadderBlend::<f32>::from(&model));
-    let y = run(&mut bank, &mut glide, &[input], &[2 * whole]).remove(0);
+    let mut ramp = Ramp::new(LadderBlend::<f32>::from(&model));
+    let y = run(&mut bank, &mut ramp, &[input], &[2 * whole]).remove(0);
     let y: Vec<f64> = y.iter().map(|&v| f64::from(v)).collect();
 
     let h = Complex64::new(-0.25 * A, 0.0);

@@ -5,7 +5,7 @@
 // slices.
 
 //! [`FreeverbBank`]: Freeverb's combs and all-passes over buffers views, with the two
-//! coefficients that move as [`Glide`]s ([`FreeverbGlides`]).
+//! coefficients that move as [`Ramp`]s ([`FreeverbRamps`]).
 //!
 //! Per channel eight parallel damped comb filters then four all-pass filters, fed by one mono
 //! input and giving a stereo wet signal. The right channel's lines are 23 frames longer than
@@ -21,15 +21,15 @@
 //! unit-magnitude lattice): `-1` at frame 0 and `a^(k-1)` at `kD`.
 //!
 //! **Chunks.** The render counts [`CHUNK`](FreeverbBank::CHUNK) frames from the last reset
-//! and works once at each chunk's start: the two [`Glide`]s take a step and the combs read
+//! and works once at each chunk's start: the two [`Ramp`]s take a step and the combs read
 //! their coefficients from them. The chunks are counted from the first frame since the last
 //! reset, not from a call's edge, so the output does not depend on how the input is cut into
-//! calls. The design is not the bank's: the caller [aims](FreeverbBank::aim) the glides when
+//! calls. The design is not the bank's: the caller [sets the targets of](FreeverbBank::retarget) the ramps when
 //! its controls move, on a grid of its own. They move in 20 ms of whole chunks, landing
 //! exactly (a size or a damping that jumped would click).
 //!
 //! **Format.** The state and the views are the bank's float `F`. The feedback and the damping
-//! cross to `F` once per aim, from the design in `f64`. Neither is stored as a complement: the
+//! cross to `F` once per `retarget`, from the design in `f64`. Neither is stored as a complement: the
 //! damping pole is at most 0.4 (its complement is at least 0.6), and the comb loop gain is at
 //! most 0.98, so `1 - g` is at least 0.02 and `F`'s rounding of `g` (3e-8 in `f32`) moves it, and
 //! the RT60 with it, by 1.5e-6 of itself; a loop gain multiplies a line's sample, which rounds by
@@ -41,7 +41,7 @@ use tutti_units::{Feedback, Gain, Mix, SampleRate, Seconds, Tail};
 use super::design::FreeverbControls;
 use crate::delay::{DelayRing, ring_seconds, trips};
 use crate::reverb::{CHUNK, ramp};
-use crate::{Glide, Lerp, Steps, TAIL_FLOOR};
+use crate::{Lerp, Ramp, Steps, TAIL_FLOOR};
 
 /// The all-pass feedback.
 const ALLPASS_FEEDBACK: Gain = Gain::new(0.5);
@@ -74,26 +74,26 @@ fn design<F: Float>(controls: &FreeverbControls) -> (F, F) {
 }
 
 /// What a Freeverb reads while it runs: the comb feedback and the damping, each aimed by
-/// [`FreeverbBank::aim`] and stepped once a chunk by [`FreeverbBank::process`].
+/// [`FreeverbBank::retarget`] and stepped once a chunk by [`FreeverbBank::process`].
 ///
-/// A glide steps before its chunk runs: the first chunk after an aim reads step 1. Held in the
+/// A ramp steps before its chunk runs: the first chunk after a `retarget` reads step 1. Held in the
 /// bank's float `F`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FreeverbGlides<F: Float> {
-    feedback: Glide<F>,
-    damp: Glide<F>,
-    /// The steps of the 20 ms glide, at the rate prepared for.
+pub struct FreeverbRamps<F: Float> {
+    feedback: Ramp<F>,
+    damp: Ramp<F>,
+    /// The steps of the 20 ms ramp, at the rate prepared for.
     ramp: Steps,
 }
 
-impl<F: Float + Lerp> FreeverbGlides<F> {
+impl<F: Float + Lerp> FreeverbRamps<F> {
     /// Lands on the targets now.
-    pub fn settle(&mut self) {
-        self.feedback.settle();
-        self.damp.settle();
+    pub fn finish(&mut self) {
+        self.feedback.finish();
+        self.damp.finish();
     }
 
-    /// Takes one step of each glide.
+    /// Takes one step of each ramp.
     fn step(&mut self) {
         self.feedback.advance(1);
         self.damp.advance(1);
@@ -121,7 +121,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// The gain the input is scaled by.
     pub const FIXED_GAIN: Gain = Gain::new(0.015);
 
-    /// The frames between glide steps: the chunk. A caller that designs on a grid of its own
+    /// The frames between ramp steps: the chunk. A caller that designs on a grid of its own
     /// can align it here, so a retarget lands on a chunk's start.
     pub const CHUNK: usize = CHUNK;
 
@@ -159,14 +159,14 @@ impl<F: Float + Lerp> FreeverbBank<F> {
         bank
     }
 
-    /// The glides of this bank, landed on the General MIDI figures: its first
-    /// [`aim`](Self::aim) is the caller's to land.
+    /// The ramps of this bank, landed on the General MIDI figures: its first
+    /// [`retarget`](Self::retarget) is the caller's to land.
     #[must_use]
-    pub fn glides(&self) -> FreeverbGlides<F> {
+    pub fn ramps(&self) -> FreeverbRamps<F> {
         let (feedback, damp) = design(&START);
-        FreeverbGlides {
-            feedback: Glide::landed(feedback),
-            damp: Glide::landed(damp),
+        FreeverbRamps {
+            feedback: Ramp::new(feedback),
+            damp: Ramp::new(damp),
             ramp: ramp(self.rate),
         }
     }
@@ -182,12 +182,12 @@ impl<F: Float + Lerp> FreeverbBank<F> {
         self.into = 0;
     }
 
-    /// Aims `glides` at the comb loop gain and damping of `controls`, each moving in 20 ms.
+    /// Aims `ramps` at the comb loop gain and damping of `controls`, each moving in 20 ms.
     /// No allocation.
-    pub fn aim(&self, glides: &mut FreeverbGlides<F>, controls: &FreeverbControls) {
+    pub fn retarget(&self, ramps: &mut FreeverbRamps<F>, controls: &FreeverbControls) {
         let (feedback, damp) = design(controls);
-        glides.feedback.aim_by(feedback, glides.ramp);
-        glides.damp.aim_by(damp, glides.ramp);
+        ramps.feedback.retarget_by(feedback, ramps.ramp);
+        ramps.damp.retarget_by(damp, ramps.ramp);
     }
 
     /// Sets every comb's loop gain and damping. The damping's complement is `1 - damp`.
@@ -240,11 +240,11 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// (a mono input is itself) and scaled by [`FIXED_GAIN`](Self::FIXED_GAIN), through the combs and the
     /// all-passes of the left channel into plane 0 and of the right into plane 1. A plane
     /// past the second is not touched, and a view with one plane is its left alone. Each
-    /// chunk's glide step is taken at its first frame ([`CHUNK`](Self::CHUNK)). No
+    /// chunk's ramp step is taken at its first frame ([`CHUNK`](Self::CHUNK)). No
     /// allocation.
     pub fn process(
         &mut self,
-        glides: &mut FreeverbGlides<F>,
+        ramps: &mut FreeverbRamps<F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -258,8 +258,8 @@ impl<F: Float + Lerp> FreeverbBank<F> {
         let mut at = 0;
         while at < frames {
             if self.into == 0 {
-                glides.step();
-                self.set_combs(glides.feedback.now(), glides.damp.now());
+                ramps.step();
+                self.set_combs(ramps.feedback.now(), ramps.damp.now());
             }
             let run = (CHUNK - self.into).min(frames - at);
             x[..run].fill(F::ZERO);

@@ -15,11 +15,11 @@ const LEVEL: f64 = 0.5;
 /// A shaper at `RATE` at rest on the amounts `attack` and `sustain` dB.
 fn shaper(attack: f64, sustain: f64) -> TransientBank<f32> {
     let mut bank = TransientBank::<f32>::new(RATE, FAST, SLOW);
-    bank.aim(&TransientControls {
+    bank.retarget(&TransientControls {
         attack: Db::new(attack),
         sustain: Db::new(sustain),
     });
-    bank.settle();
+    bank.finish();
     bank
 }
 
@@ -210,18 +210,18 @@ fn the_amounts_are_held_within_the_range_and_a_non_finite_one_is_zero() {
     }
 }
 
-/// A mid-stream `aim` after `settle` ramps the amount along `lerp(a0, a1, k / steps)` over the
-/// `GAIN_GLIDE` steps (`ceil(5 ms * rate)`), frame `j` after the aim reading step `j + 1`, and
+/// A mid-stream `retarget` after `finish` ramps the amount along `lerp(a0, a1, k / steps)` over the
+/// `GAIN_RAMP` steps (`ceil(5 ms * rate)`), frame `j` after the `retarget` reading step `j + 1`, and
 /// the rendered gain is that amount in the onset's closed form. Tolerance as the onset test's.
 #[test]
-fn an_aimed_amount_glides_along_the_linear_ramp() {
+fn an_aimed_amount_ramps_along_the_linear_ramp() {
     let (a0, a1): (f64, f64) = (6.0, 18.0);
-    let steps = (GAIN_GLIDE.get() * RATE.get()).ceil() as usize;
+    let steps = (GAIN_RAMP.get() * RATE.get()).ceil() as usize;
     let cut = 500;
     let mut bank = shaper(a0, 0.0);
     let x = vec![LEVEL as f32; 1_200];
     let mut y = run(&mut bank, &[&x[..cut]], 64).remove(0);
-    bank.aim(&TransientControls {
+    bank.retarget(&TransientControls {
         attack: Db::new(a1),
         sustain: Db::UNITY,
     });
@@ -244,7 +244,7 @@ fn an_aimed_amount_glides_along_the_linear_ramp() {
     }
 }
 
-/// The render does not depend on where blocks fall, with an `aim` between two calls: the
+/// The render does not depend on where blocks fall, with a `retarget` between two calls: the
 /// frames before and after it come out bit for bit as one block of 1 200 gives them.
 #[test]
 fn the_render_does_not_depend_on_where_blocks_fall() {
@@ -253,7 +253,7 @@ fn the_render_does_not_depend_on_where_blocks_fall() {
     let render = |block: usize| {
         let mut bank = shaper(6.0, -3.0);
         let mut y = run(&mut bank, &[&x[..cut]], block).remove(0);
-        bank.aim(&TransientControls {
+        bank.retarget(&TransientControls {
             attack: Db::new(18.0),
             sustain: Db::new(9.0),
         });
@@ -279,8 +279,8 @@ fn an_f64_shaper_at_zero_amounts_is_the_identity() {
     let rising = wide_signal(2_000);
     let x: Vec<f64> = rising.iter().chain(rising.iter().rev()).copied().collect();
     let mut bank = TransientBank::<f64>::new(RATE, FAST, SLOW);
-    bank.aim(&TransientControls::DEFAULT);
-    bank.settle();
+    bank.retarget(&TransientControls::DEFAULT);
+    bank.finish();
     let mut out = vec![0.0f64; x.len()];
     bank.process(
         Planes::new(&[&x[..]]).unwrap(),

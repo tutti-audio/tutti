@@ -22,8 +22,8 @@ fn sine(hz: f64, amplitude: f64, frames: usize) -> Vec<f32> {
 /// A bank of `ty` at `RATE` aimed at `controls`.
 fn bank(ty: SvfType, controls: &EnvelopeFilterControls) -> EnvelopeFilterBank<f32> {
     let mut bank = EnvelopeFilterBank::<f32>::new(ChannelLayout::MONO, ty, RATE);
-    bank.aim(controls);
-    bank.settle();
+    bank.retarget(controls);
+    bank.finish();
     bank
 }
 
@@ -219,7 +219,7 @@ fn square(levels: &[(usize, f64)]) -> Vec<f32> {
 /// Tolerance 2e-2 of the gain: the window is 10 periods of a gain that moves with `exp(-n / 9600)`
 /// (so the oracle averages the gain over the window, the design lagging the envelope by half a
 /// 16-frame period on average) and the lock-in of the fundamental sees the harmonics' leakage
-/// only through the glide.
+/// only through the ramp.
 #[test]
 fn the_attack_and_the_release_are_told_apart() {
     let (attack, release) = (Seconds::new(0.005), Seconds::new(0.2));
@@ -291,8 +291,8 @@ fn an_f64_bank_at_depth_zero_is_the_cookbook_filter_at_its_base() {
     let x = wide_signal(4_800);
     for ty in [SvfType::LowPass, SvfType::BandPass] {
         let mut b = EnvelopeFilterBank::<f64>::new(ChannelLayout::MONO, ty, RATE);
-        b.aim(&controls(1_000.0, 0.0, 0.707));
-        b.settle();
+        b.retarget(&controls(1_000.0, 0.0, 0.707));
+        b.finish();
         let mut out = vec![0.0f64; x.len()];
         b.process(
             Planes::new(&[&x[..]]).unwrap(),

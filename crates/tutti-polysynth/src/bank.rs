@@ -827,7 +827,7 @@ impl<F: SynthFloat> VoiceBank<F> {
 }
 
 /// The time constant of the output-gain one-pole smoother (not `tutti_dsp`'s 5 ms
-/// linear `GAIN_GLIDE`): half a millisecond settles a
+/// linear `GAIN_RAMP`): half a millisecond settles a
 /// velocity change to 1% in about 2.3 ms — inaudible as a fade, long enough
 /// that no single sample steps by more than 4% of the change at 48 kHz.
 const GAIN_TIME_CONSTANT: Seconds = Seconds::new(0.0005);

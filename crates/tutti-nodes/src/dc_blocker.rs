@@ -132,9 +132,9 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
     }
 
     fn retarget(&mut self, controls: &DcBlockerControls) {
-        self.blocker.aim(controls);
+        self.blocker.retarget(controls);
         if !self.landed {
-            self.blocker.settle();
+            self.blocker.finish();
             self.landed = true;
         }
     }
@@ -146,7 +146,7 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
         output: PlanesMut<'_, '_, F>,
     ) {
         self.blocker.process(input, output);
-        // A design after a render is a move, which glides.
+        // A design after a render is a move, which ramps.
         self.landed = true;
     }
 

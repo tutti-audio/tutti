@@ -86,7 +86,7 @@ impl LadderDesign {
 ///
 /// `g1` is the one-pole stage gain `G = g / (1 + g)` with `g = tan(π·fc/sr)`, solved
 /// once with the `tan` rather than divided out every sample. The powers of `G` the
-/// zero-delay loop needs are derived in the step from `g1` and `k`, so a glide
+/// zero-delay loop needs are derived in the step from `g1` and `k`, so a ramp
 /// interpolates these two and every blended set is a valid ladder.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LadderCoefficients<L: SimdLanes> {

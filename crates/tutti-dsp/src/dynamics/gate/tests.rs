@@ -82,11 +82,11 @@ fn hostile() -> Vec<GateControls> {
     all
 }
 
-/// A bank at `rate` at rest on `c`: aimed and landed, nothing gliding.
+/// A bank at `rate` at rest on `c`: aimed and landed, nothing ramping.
 fn bank_at<F: Float + SimdLanes + Lerp>(c: &GateControls, rate: SampleRate) -> GateBank<F> {
     let mut bank = GateBank::new(rate);
-    bank.aim(c);
-    bank.settle();
+    bank.retarget(c);
+    bank.finish();
     bank
 }
 
@@ -498,11 +498,11 @@ fn a_nan_key_leaves_the_gate_closed_and_finite() {
     assert!(out[3999] > 0.99, "it recovers on a finite key");
 }
 
-/// A range that moves glides over [`GAIN_GLIDE`] (5 ms: 221, 240 and 480 frames at 44.1, 48
+/// A range that moves ramps over [`GAIN_RAMP`] (5 ms: 221, 240 and 480 frames at 44.1, 48
 /// and 96 kHz) in a straight line in dB, frame `i` being `(i + 1) / n` of the way, and is
 /// exactly its value after; no frame steps.
 #[test]
-fn a_moved_range_glides_over_five_milliseconds() {
+fn a_moved_range_ramps_over_five_milliseconds() {
     for (rate, frames) in [(RATES[0], 221usize), (RATES[1], 240), (RATES[2], 480)] {
         assert_eq!((0.005 * rate.get()).ceil() as usize, frames);
         let (a, b) = (
@@ -510,7 +510,7 @@ fn a_moved_range_glides_over_five_milliseconds() {
             controls(-30.0, 0.0, 0.0, 0.0, -12.0),
         );
         let mut k = runner_at(&a, rate);
-        k.aim(&b);
+        k.retarget(&b);
         let n = 2 * frames;
         // A closed gate (silent key): the gain is the range itself.
         let out = run_mono(&mut k, &vec![1.0; n], &vec![0.0; n], None);
@@ -531,7 +531,7 @@ fn a_moved_range_glides_over_five_milliseconds() {
 }
 
 /// A range that does not move is applied exactly from the first frame (a bank at rest on it
-/// has nothing gliding).
+/// has nothing ramping).
 #[test]
 fn a_held_range_applies_exactly() {
     let c = controls(-30.0, 0.0, 0.0, 0.0, -12.0);
@@ -544,7 +544,7 @@ fn a_held_range_applies_exactly() {
 }
 
 /// A time that moves lands at once (the follower is the smoother): a release that
-/// shortens from 1 s to instant closes the gate on the next frame, with no glide.
+/// shortens from 1 s to instant closes the gate on the next frame, with no ramp.
 #[test]
 fn a_moved_time_lands_at_once() {
     let (a, b) = (
@@ -553,7 +553,7 @@ fn a_moved_time_lands_at_once() {
     );
     let mut k = runner(&a);
     let _ = run_mono(&mut k, &vec![1.0; 100], &vec![0.5; 100], None);
-    k.aim(&b);
+    k.retarget(&b);
     let out = run_mono(&mut k, &[1.0; 4], &[0.0; 4], None);
     assert!(
         (out[0] / amplitude(-40.0) - 1.0).abs() < 1e-5,
@@ -624,11 +624,11 @@ fn gain_at(range: f64, open: f64) -> f64 {
 /// The render is the closed form whatever the calls cut the stream into: a key over a lane's
 /// threshold (and under the aimed one) opens the gate along the one-pole `1 - a^n`, then falls
 /// silent at frame 517 (inside a block of 7, 33, 64, 100 and 255 frames alike) with no hold, so
-/// the follower releases as `f b^m` from the `f` the step found, and the range glides linearly in
+/// the follower releases as `f b^m` from the `f` the step found, and the range ramps linearly in
 /// dB over the 240 steps of 5 ms at 48 kHz, in calls of 1, 7, 33, 64, 100 and 255 frames and in
 /// one call.
 #[test]
-fn a_cut_stream_follows_the_one_pole_and_glide_closed_forms() {
+fn a_cut_stream_follows_the_one_pole_and_ramp_closed_forms() {
     let (tau, release, steps, n, step_at) = (0.002, 0.03, 240usize, 1_200usize, 517usize);
     let (from, to) = (-30.0, -6.0);
     let c = controls(-10.0, tau, 0.0, release, from);
@@ -649,7 +649,7 @@ fn a_cut_stream_follows_the_one_pole_and_glide_closed_forms() {
     let lane = vec![-30.0f64; n];
     for block in [1, 7, 33, 64, 100, 255, n] {
         let mut k = bank_at::<f64>(&c, RATE);
-        k.aim(&aimed);
+        k.retarget(&aimed);
         let out = run_in(&mut k, &[&ones], &[&key], Some(&lane), block).remove(0);
         for (i, &y) in out.iter().enumerate() {
             let range = from + (to - from) * ((i + 1).min(steps) as f64 / steps as f64);
@@ -673,9 +673,9 @@ fn a_reset_gate_opens_from_closed_along_the_closed_form() {
     let wear: Vec<f64> = noise(3, n, 0.7).iter().map(|&x| f64::from(x)).collect();
     let mut worn = bank_at::<f64>(&c, RATE);
     let _ = run(&mut worn, &[&wear], &[&wear], None);
-    worn.aim(&controls(-10.0, 0.01, 0.1, 0.1, -3.0));
+    worn.retarget(&controls(-10.0, 0.01, 0.1, 0.1, -3.0));
     let _ = run(&mut worn, &[&wear], &[&wear], None);
-    worn.aim(&c);
+    worn.retarget(&c);
     worn.reset();
     let ones = vec![1.0f64; n];
     let key = vec![0.5f64; n];
@@ -710,7 +710,7 @@ fn a_clone_continues_along_the_closed_form_and_shares_nothing() {
     };
     on(&run(&mut b, &[&ones], &[&key], None)[0], "the clone");
     // The clone moves to other controls and runs on; the original has not heard of it.
-    b.aim(&controls(-10.0, 0.0, 0.0, 0.0, -3.0));
+    b.retarget(&controls(-10.0, 0.0, 0.0, 0.0, -3.0));
     let _ = run(&mut b, &[&ones], &[&key], None);
     on(&run(&mut a, &[&ones], &[&key], None)[0], "the original");
 }
@@ -778,8 +778,8 @@ fn an_infinite_key_opens_the_gate_and_does_not_latch_it() {
 /// `key`.
 fn run_f64(c: &GateControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
     let mut bank = GateBank::<f64>::new(RATE);
-    bank.aim(c);
-    bank.settle();
+    bank.retarget(c);
+    bank.finish();
     let mut out = vec![0.0f64; audio.len()];
     bank.process(
         GateLanes::default(),

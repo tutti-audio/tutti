@@ -796,7 +796,7 @@ fn resync_rig() -> (Rig, SourceKey) {
 /// **A held note envelope newly routed reads its level at once.** A route
 /// from the envelope (held in its sustain) to probe 2's existing lane: a
 /// new edge, one commit. From the first grid piece of the block the commit
-/// lands in (the lane glides one control step from where it stood, as on
+/// lands in (the lane ramps one control step from where it stood, as on
 /// any input change), probe 2 reads `0.1 + 0.5 · 0.4` on every frame, not
 /// its knob until the next note.
 #[test]

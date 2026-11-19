@@ -16,7 +16,7 @@
 //! The threshold is the one control read **per frame** when the graph drives it
 //! ([`GateLanes`]): it is a level to compare against, not a coefficient. The range multiplies
 //! the output directly, so a step in it is a click: it is a ramp, a control moving to a
-//! target, and glides over [`GAIN_GLIDE`] as a [`Glide`]. The times only move what the
+//! target, and ramps over [`GAIN_RAMP`] as a [`Ramp`]. The times only move what the
 //! follower is smoothing toward, and the follower is the smoother: they land whole.
 //!
 //! The gate has no latency (the detector is on the key, never ahead of it) and no tail (the
@@ -27,10 +27,10 @@ use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gate_gain_at, level_db};
-use super::gain_pass::{CHUNK, GAIN_GLIDE, floored, key_levels};
+use super::gain_pass::{CHUNK, GAIN_RAMP, floored, key_levels};
 use super::key_filter::{KeyFilter, KeyStage};
 use crate::follower::{Follower, Smoothed};
-use crate::{Glide, Lerp, SimdLanes, Steps};
+use crate::{Lerp, Ramp, SimdLanes, Steps};
 
 /// The controls of a [`GateBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -136,16 +136,16 @@ pub struct GateLanes<'a, F: Float> {
 
 /// A noise gate of any width: one open/closed decision from the loudest key channel, one
 /// gain applied to every channel, with the follower and the hold that smooth it and the
-/// range that glides.
+/// range that ramps.
 ///
 /// Built on the control side for one rate; the state, the views and the lane are `F`, the
 /// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct GateBank<F: Float + SimdLanes> {
     design: Design<F>,
-    /// The closed gain in dB, gliding over [`GAIN_GLIDE`].
-    range: Glide<F>,
-    /// The steps a range glide takes: [`GAIN_GLIDE`] at the rate.
+    /// The closed gain in dB, ramping over [`GAIN_RAMP`].
+    range: Ramp<F>,
+    /// The steps a range ramp takes: [`GAIN_RAMP`] at the rate.
     steps: u32,
     rate: SampleRate,
     /// The smoothed open fraction, 0 closed to 1 open: a per-sample level in `F`.
@@ -162,10 +162,10 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
     pub fn new(rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
         // than panic, since a prepare must not.
-        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         let design = Design::of(&GateControls::DEFAULT, rate);
         Self {
-            range: Glide::landed(F::from_unit(design.range)),
+            range: Ramp::new(F::from_unit(design.range)),
             design,
             steps,
             rate,
@@ -176,7 +176,7 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
     }
 
     /// This bank with the detector hearing its key through `filter`, over `width` key
-    /// channels at the cutoff and Q [`aim`](Self::aim) gives it. [`KeyFilter::Off`] is no
+    /// channels at the cutoff and Q [`retarget`](Self::retarget) gives it. [`KeyFilter::Off`] is no
     /// filter; key channels past `width` are not heard. Allocates: build it on the control
     /// side.
     #[must_use]
@@ -192,35 +192,35 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
     pub fn reset(&mut self) {
         self.follower = Smoothed::ZERO;
         self.hold_counter = 0;
-        self.range.settle();
+        self.range.finish();
         if let Some(key) = &mut self.key {
             key.reset();
         }
     }
 
     /// Lands the range on its target now.
-    pub fn settle(&mut self) {
-        self.range.settle();
+    pub fn finish(&mut self) {
+        self.range.finish();
         if let Some(key) = &mut self.key {
-            key.settle();
+            key.finish();
         }
     }
 
     /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
-    /// the range glides over [`GAIN_GLIDE`]. The key filter, if any, glides to the cutoff and
+    /// the range ramps over [`GAIN_RAMP`]. The key filter, if any, ramps to the cutoff and
     /// Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)); a non-finite one is
     /// the default's. No allocation.
-    pub fn aim(&mut self, controls: &GateControls) {
+    pub fn retarget(&mut self, controls: &GateControls) {
         self.design = Design::of(controls, self.rate);
         if let Some(key) = &mut self.key {
             let d = GateControls::DEFAULT;
-            key.aim(
+            key.retarget(
                 controls.key_cutoff.finite_or(d.key_cutoff),
                 controls.key_q.finite_or(d.key_q),
             );
         }
         self.range
-            .aim_by(F::from_unit(self.design.range), Steps::Fixed(self.steps));
+            .retarget_by(F::from_unit(self.design.range), Steps::Fixed(self.steps));
     }
 
     /// Runs `input` into `output`, scaled by one gain decided from the loudest channel of
@@ -231,7 +231,7 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
     /// it gains is never filtered). Channel `c` of `input` feeds channel `c` of `output`;
     /// a channel past the narrower of the two views is not touched, and the frames rendered
     /// are the fewest of the three views'. A NaN key sample reads as quiet and an infinite one
-    /// as the largest finite level. Frame `i` reads the range at the glide's step
+    /// as the largest finite level. Frame `i` reads the range at the ramp's step
     /// `taken + 1 + i`, then the block's steps are taken. No allocation.
     pub fn process(
         &mut self,
@@ -248,8 +248,8 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
         let width = input.channels().min(output.channels());
         let d = self.design;
         let threshold = F::from_unit(d.threshold);
-        let blended = self.range.blended(frames);
-        let taken = self.range.taken();
+        let blended = self.range.blend_len(frames);
+        let taken = self.range.steps_taken();
         let held = db_gain(self.range.target());
         let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;

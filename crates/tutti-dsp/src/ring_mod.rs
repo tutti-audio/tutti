@@ -47,7 +47,7 @@ impl RingModulator {
     }
 
     /// Takes `controls`; the carrier's phase is kept. No allocation.
-    pub fn aim(&mut self, controls: &RingModControls) {
+    pub fn retarget(&mut self, controls: &RingModControls) {
         self.controls = *controls;
     }
 

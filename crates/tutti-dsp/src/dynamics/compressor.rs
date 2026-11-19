@@ -11,7 +11,7 @@
 //! The threshold is the one control read **per frame** when the graph drives it
 //! ([`CompressorLanes`]): it is a level to compare against, not a coefficient. The makeup
 //! multiplies the output directly, so a step in it is a click: it is a ramp, a control moving
-//! to a target, and glides over [`GAIN_GLIDE`] as a [`Glide`] read on the stream. The knee,
+//! to a target, and ramps over [`GAIN_RAMP`] as a [`Ramp`] read on the stream. The knee,
 //! the ratio and the times only move what the follower is smoothing toward, and the
 //! follower is the smoother: they land whole.
 //!
@@ -24,10 +24,10 @@ use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gain_reduction, level_db};
-use super::gain_pass::{CHUNK, GAIN_GLIDE, MAX_KNEE, floored, key_levels};
+use super::gain_pass::{CHUNK, GAIN_RAMP, MAX_KNEE, floored, key_levels};
 use super::key_filter::{KeyFilter, KeyStage};
 use crate::follower::{Follower, Smoothed};
-use crate::{Glide, Lerp, SimdLanes, Steps};
+use crate::{Lerp, Ramp, SimdLanes, Steps};
 
 /// The controls of a [`CompressorBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -170,16 +170,16 @@ pub struct CompressorLanes<'a, F: Float> {
 }
 
 /// A feed-forward compressor of any width: one gain from the loudest key channel, applied
-/// to every channel, with the follower that smooths it and the makeup that glides.
+/// to every channel, with the follower that smooths it and the makeup that ramps.
 ///
 /// Built on the control side for one rate; the state, the views and the lane are `F`, the
 /// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct CompressorBank<F: Float + SimdLanes> {
     detector: Detector<F>,
-    /// The makeup in dB, gliding over [`GAIN_GLIDE`].
-    makeup: Glide<F>,
-    /// The steps a makeup glide takes: [`GAIN_GLIDE`] at the rate.
+    /// The makeup in dB, ramping over [`GAIN_RAMP`].
+    makeup: Ramp<F>,
+    /// The steps a makeup ramp takes: [`GAIN_RAMP`] at the rate.
     steps: u32,
     rate: SampleRate,
     /// The smoothed reduction, in dB and positive: a per-sample level in `F`.
@@ -197,10 +197,10 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
     pub fn new(rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
         // than panic, since a prepare must not.
-        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
             detector: Detector::NEUTRAL,
-            makeup: Glide::landed(F::ZERO),
+            makeup: Ramp::new(F::ZERO),
             steps,
             rate,
             reduction: Smoothed::ZERO,
@@ -210,7 +210,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
     }
 
     /// This bank with the detector hearing its key through `filter`, over `width` key
-    /// channels at the cutoff and Q [`aim`](Self::aim) gives it. [`KeyFilter::Off`] is no
+    /// channels at the cutoff and Q [`retarget`](Self::retarget) gives it. [`KeyFilter::Off`] is no
     /// filter; key channels past `width` are not heard. Allocates: build it on the control
     /// side.
     #[must_use]
@@ -226,33 +226,33 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
     pub fn reset(&mut self) {
         self.reduction = Smoothed::ZERO;
         self.deepest = F::ZERO;
-        self.makeup.settle();
+        self.makeup.finish();
         if let Some(key) = &mut self.key {
             key.reset();
         }
     }
 
     /// Lands the makeup on its target now.
-    pub fn settle(&mut self) {
-        self.makeup.settle();
+    pub fn finish(&mut self) {
+        self.makeup.finish();
         if let Some(key) = &mut self.key {
-            key.settle();
+            key.finish();
         }
     }
 
     /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
-    /// the makeup glides over [`GAIN_GLIDE`]. A non-finite control is the default's, a knee
-    /// and the times at 0 (through `floored`) and a ratio at 1. The key filter, if any, glides to the
+    /// the makeup ramps over [`GAIN_RAMP`]. A non-finite control is the default's, a knee
+    /// and the times at 0 (through `floored`) and a ratio at 1. The key filter, if any, ramps to the
     /// cutoff and Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)). No
     /// allocation.
-    pub fn aim(&mut self, controls: &CompressorControls) {
+    pub fn retarget(&mut self, controls: &CompressorControls) {
         let member = CompressorMember::designed(controls, self.rate);
         self.detector = Detector::of(&member);
         if let Some(key) = &mut self.key {
-            key.aim(member.key_cutoff, member.key_q);
+            key.retarget(member.key_cutoff, member.key_q);
         }
         self.makeup
-            .aim_by(F::from_unit(member.makeup), Steps::Fixed(self.steps));
+            .retarget_by(F::from_unit(member.makeup), Steps::Fixed(self.steps));
     }
 
     /// The deepest smoothed reduction any frame reached since the last call (or since
@@ -269,7 +269,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
     /// signal it gains is never filtered). Channel `c` of `input` feeds channel `c` of
     /// `output`; a channel past the narrower of the two views is not touched, and the frames
     /// rendered are the fewest of the three views'. A NaN key sample reads as quiet and an
-    /// infinite one as the largest finite level. Frame `i` reads the makeup at the glide's
+    /// infinite one as the largest finite level. Frame `i` reads the makeup at the ramp's
     /// step `taken + 1 + i`, then the block's steps are taken. No allocation.
     pub fn process(
         &mut self,
@@ -286,8 +286,8 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
         let width = input.channels().min(output.channels());
         let d = self.detector;
         let aimed = F::from_unit(d.threshold);
-        let blended = self.makeup.blended(frames);
-        let taken = self.makeup.taken();
+        let blended = self.makeup.blend_len(frames);
+        let taken = self.makeup.steps_taken();
         let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;
         while start < frames {

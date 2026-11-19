@@ -755,7 +755,7 @@ fn a_rate_anchor_holds_two_lanes_in_phase() {
 /// A range edit rescales an offset from the next block with no republish:
 /// a ±100 square (depth 0.125 of 100..900) on knob 500
 /// reads 600; the range moves to 100..700 between blocks, and the lane
-/// glides from 600 to 575 (0.125 of 600) by the next grid point and holds
+/// ramps from 600 to 575 (0.125 of 600) by the next grid point and holds
 /// it.
 #[test]
 fn a_range_edit_rescales_on_the_next_block() {
@@ -779,10 +779,10 @@ fn a_range_edit_rescales_on_the_next_block() {
     let grid = edit.next_multiple_of(STEP);
     assert_eq!(
         all[0][edit], 600.0,
-        "the glide starts from the value in flight"
+        "the ramp starts from the value in flight"
     );
     for (f, &v) in all[0].iter().enumerate().take(grid).skip(edit + 1) {
-        assert!(v < 600.0 && v > 575.0, "frame {f}: {v}, gliding");
+        assert!(v < 600.0 && v > 575.0, "frame {f}: {v}, ramping");
     }
     for (f, &v) in all[0].iter().enumerate().skip(grid) {
         assert_eq!(v, 575.0, "frame {f}");
@@ -1190,7 +1190,7 @@ fn a_republished_program_reads_a_new_source() {
 
 /// **A reused source id starts from nothing**. A lane reads source 3 at depth 0.5 of a 0..96
 /// range on knob 10, and source 3 steps to 0.5 on frame 0: 34.0. A republish drops the source
-/// (the lane glides to 10.0 by the next grid point), then another reads source 3 again, as a
+/// (the lane ramps to 10.0 by the next grid point), then another reads source 3 again, as a
 /// new source given the old id would be, which has not sent yet: it contributes 0, so the lane
 /// reads 10.0, never the removed source's 0.5. When the new source sends 0.25 on frame 1 000,
 /// 22.0.
@@ -1227,10 +1227,10 @@ fn a_reused_source_id_starts_from_nothing() {
     for (f, &got) in all[0].iter().enumerate() {
         let want = match f {
             0..256 => 34.0,
-            // The first republish glides to the knob by the next grid
+            // The first republish ramps to the knob by the next grid
             // point.
             256..288 => {
-                assert!((10.0..=34.0).contains(&got), "frame {f}: {got}, gliding");
+                assert!((10.0..=34.0).contains(&got), "frame {f}: {got}, ramping");
                 continue;
             }
             288..1_000 => 10.0,

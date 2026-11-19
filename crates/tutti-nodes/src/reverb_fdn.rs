@@ -1,12 +1,12 @@
 //! The feedback delay network, [`FdnNode`].
 //!
 //! [`FdnBank`] is the network over buffers views (the lines, the absorption, the mix, the
-//! glides); this file holds the kernel that aims it, the cells and how the graph reaches
+//! ramps); this file holds the kernel that aims it, the cells and how the graph reaches
 //! them.
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{FdnBank, FdnControls, FdnGlides, FdnLayout, FreezeMode, Lerp};
+use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FdnRamps, FreezeMode, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
@@ -25,7 +25,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// about 6 s for the longest line going from 0 to 1, to avoid pitch artefacts), the
 /// diffusion, the pre-delay, the modulation's depth and rate, the width, the wet gain and,
 /// if the layout can freeze, the freeze: a cell at or above 0.5. Each lands whole on the
-/// 32-frame grid and glides in the bank.
+/// 32-frame grid and ramps in the bank.
 ///
 /// # The tail
 ///
@@ -33,7 +33,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// freeze. The node narrows it each block to what the controls in force ring, and once the
 /// input has been silent for that long it cuts the room off and parks ([`KernelNode`]).
 ///
-/// `F` is the float of the graph it runs in, and of the lines, the pre-delay and the glides;
+/// `F` is the float of the graph it runs in, and of the lines, the pre-delay and the ramps;
 /// the lines are the layout's worst case (its most lines at the longest length the size and the
 /// modulation reach), so an `f32` graph halves the memory of an `f64` one.
 pub type FdnNode<F> = KernelNode<FdnKernel<F>>;
@@ -61,7 +61,7 @@ pub struct FdnSet {
 }
 
 // In port order after the mix; a layout that cannot freeze leaves off the last. Every row
-// lands whole: the bank's glides are the ramp.
+// lands whole: the bank's ramps are the ramp.
 control_set! {
     FdnSet(s): FdnControls = FdnControls { freeze: false, ..FdnControls::DEFAULT };
     live: (if s.freezable { 11 } else { 10 });
@@ -82,17 +82,17 @@ control_set! {
     }
 }
 
-/// A [`FdnBank`] and its glides, once the rate is known.
+/// A [`FdnBank`] and its ramps, once the rate is known.
 #[derive(Clone, Debug)]
 struct Running<F: Float> {
     /// The rate the bank was sized at: what a tail bound is converted at.
     rate: SampleRate,
     bank: FdnBank<F>,
-    glides: FdnGlides<F>,
+    ramps: FdnRamps<F>,
 }
 
 /// The feedback delay network as a [`Kernel`]: a [`FdnBank`] sized at the prepared rate and
-/// the glides its design is aimed through.
+/// the ramps its design is aimed through.
 ///
 /// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
@@ -135,23 +135,23 @@ impl<F: Float + Lerp> Kernel for FdnKernel<F> {
     /// empties them.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         let bank = FdnBank::new(&self.layout, rate);
-        let glides = bank.glides();
-        self.running = Some(Running { rate, bank, glides });
+        let ramps = bank.ramps();
+        self.running = Some(Running { rate, bank, ramps });
         self.landed = false;
     }
 
     fn reset(&mut self) {
         if let Some(r) = &mut self.running {
             r.bank.reset();
-            r.glides.settle();
+            r.ramps.finish();
         }
     }
 
     fn retarget(&mut self, controls: &FdnControls) {
         let Some(r) = &mut self.running else { return };
-        r.bank.aim(&mut r.glides, controls);
+        r.bank.retarget(&mut r.ramps, controls);
         if !self.landed {
-            r.glides.settle();
+            r.ramps.finish();
             self.landed = true;
         }
     }
@@ -163,7 +163,7 @@ impl<F: Float + Lerp> Kernel for FdnKernel<F> {
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(r) = &mut self.running {
-            r.bank.process(&mut r.glides, input, output);
+            r.bank.process(&mut r.ramps, input, output);
         }
     }
 
@@ -184,7 +184,7 @@ impl<F: Float + Lerp> Kernel for FdnKernel<F> {
     fn tail_of(&mut self, controls: &FdnControls) -> Tail {
         self.running
             .as_mut()
-            .map_or(Tail::Unknown, |r| r.bank.tail_of(&r.glides, controls))
+            .map_or(Tail::Unknown, |r| r.bank.tail_of(&r.ramps, controls))
     }
 }
 

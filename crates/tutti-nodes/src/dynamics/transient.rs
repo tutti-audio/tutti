@@ -71,7 +71,7 @@ impl TransientShaperConfig {
 ///
 /// The two amounts are live [`Db`] cells, both [`UnitParam::GainDb`](tutti_units::UnitParam::GainDb): index 0 is the
 /// attack and index 1 the sustain, each read within [`TransientControls::MAX_AMOUNT`]. They are
-/// sampled on the stream grid (16 frames) and glide over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE).
+/// sampled on the stream grid (16 frames) and ramp over [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP).
 /// The two envelope times are the build's.
 ///
 /// No latency and no tail: the gain only scales, so a silent input is a silent output. A
@@ -162,9 +162,9 @@ impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
 
     fn retarget(&mut self, controls: &TransientControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
+        bank.retarget(controls);
         if !self.landed {
-            bank.settle();
+            bank.finish();
             self.landed = true;
         }
     }

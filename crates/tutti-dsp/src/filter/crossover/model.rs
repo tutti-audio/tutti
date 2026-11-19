@@ -24,7 +24,7 @@ fn solve_split(hz: Hz, rate: SampleRate) -> Tpt {
 
 /// The design of a Linkwitz-Riley crossover: its sample rate, the frequencies its
 /// coefficients are solved at and those coefficients. A value without state; the
-/// crossover that runs it keeps the integrators and the glide between two of these
+/// crossover that runs it keeps the integrators and the ramp between two of these
 /// ([`blend`](Self::blend)).
 ///
 /// It is an [`Lti`] with one input and one output a band, lowest first: the bands
@@ -110,7 +110,7 @@ impl CrossoverModel {
         }
     }
 
-    /// The blend value the crossover's glide moves: each split's integrator gain `tan(pi f / rate)`.
+    /// The blend value the crossover's ramp moves: each split's integrator gain `tan(pi f / rate)`.
     #[must_use]
     pub fn blend(&self) -> CrossoverBlend {
         CrossoverBlend {

@@ -9,7 +9,7 @@
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Glide, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
+use tutti_dsp::{Ramp, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, Hz, Q, SampleRate, Tail};
 
@@ -40,7 +40,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 /// assert_eq!(out.len(), 1);
 ///
-/// // Move the cutoff on the running node; it glides over the next block.
+/// // Move the cutoff on the running node; it ramps over the next block.
 /// assert!(solo.controls().set(UnitParam::Cutoff, 2_000.0));
 /// ```
 ///
@@ -49,9 +49,9 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// moves past a small dead-band ([`SvfControls::moved_from`]). The filter is
 /// designed on a 16-frame grid counted from the last reset, at each segment's
 /// first frame, and the coefficients ramp linearly to that solve over the segment,
-/// so an automated cutoff glides rather than stepping, arrives within 16 frames
+/// so an automated cutoff ramps rather than stepping, arrives within 16 frames
 /// and renders the same however the stream is cut into blocks. A cell that moved
-/// glides from the last solve to its value across the block, so it is the one
+/// ramps from the last solve to its value across the block, so it is the one
 /// control whose render depends on the block's length.
 ///
 /// Gain applies only to [`Bell`](SvfType::Bell),
@@ -67,7 +67,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// Cutoff (in [`Hz`]), [`Q`] and the gain (in [`Db`]) are modulatable by the
 /// graph, in that port order. A per-frame value on a param port
 /// ([`Io::param`](tutti_graph::Io::param)) **overrides** the corresponding cell
-/// (and a lane on any of the three stops the cells gliding): it is sampled at the
+/// (and a lane on any of the three stops the cells ramping): it is sampled at the
 /// first frame of each 16-frame segment, with the coefficients interpolated over
 /// the segment, instead of a `tan` per sample. Unmodulated, the filter reads its
 /// cells once per block at the cost of one branch, which is the common case.
@@ -139,16 +139,16 @@ impl<F: Float + SimdLanes> SvfFilterNode<F> {
 
 /// The steps the coefficients take to a new design: one grid period, so a design
 /// arrives at the next grid point.
-const GLIDE_STEPS: u32 = 16;
+const RAMP_STEPS: u32 = 16;
 
 /// The state-variable filter as a [`Kernel`]: an [`SvfBank`] in the float `F`
-/// and the glide of the coefficients every channel shares.
+/// and the ramp of the coefficients every channel shares.
 #[derive(Clone, Debug)]
 pub struct SvfKernel<F: Float + SimdLanes> {
     input: BusTopology,
     bank: SvfBank<F>,
     /// The coefficients in flight; the first design after `prepare` lands at once.
-    coefficients: Glide<SvfCoefficients<F>>,
+    coefficients: Ramp<SvfCoefficients<F>>,
     rate: SampleRate,
     landed: bool,
 }
@@ -162,7 +162,7 @@ impl<F: Float + SimdLanes> SvfKernel<F> {
         Self {
             input,
             bank: SvfBank::new(input.layout()),
-            coefficients: Glide::landed(Self::design(&SvfControls::DEFAULT, rate)),
+            coefficients: Ramp::new(Self::design(&SvfControls::DEFAULT, rate)),
             rate,
             landed: false,
         }
@@ -177,8 +177,8 @@ impl<F: Float + SimdLanes> Kernel for SvfKernel<F> {
     type Float = F;
     type Set = SvfSet;
 
-    // A design arrives at the next grid point: the glide is one grid period long.
-    const GRID: usize = GLIDE_STEPS as usize;
+    // A design arrives at the next grid point: the ramp is one grid period long.
+    const GRID: usize = RAMP_STEPS as usize;
 
     fn shape(&self) -> Shape {
         let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
@@ -191,20 +191,20 @@ impl<F: Float + SimdLanes> Kernel for SvfKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        self.coefficients =
-            Glide::landed(Self::design(&SvfControls::DEFAULT, rate)).by(GLIDE_STEPS);
+        self.coefficients = Ramp::new(Self::design(&SvfControls::DEFAULT, rate)).steps(RAMP_STEPS);
         self.landed = false;
     }
 
     fn reset(&mut self) {
-        self.coefficients.settle();
+        self.coefficients.finish();
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &SvfControls) {
-        self.coefficients.aim(Self::design(controls, self.rate));
+        self.coefficients
+            .retarget(Self::design(controls, self.rate));
         if !self.landed {
-            self.coefficients.settle();
+            self.coefficients.finish();
             self.landed = true;
         }
     }
@@ -659,19 +659,19 @@ mod tests {
 
     // ── Per-block reads ──────────────────────────────────────────────────────
 
-    /// A cutoff written between blocks glides on the stream clock: the render is the
-    /// same at every block length, the glide is still under way one 64-frame block in
-    /// (a design between the two cutoffs), and it has arrived [`GAIN_GLIDE`] after the
+    /// A cutoff written between blocks ramps on the stream clock: the render is the
+    /// same at every block length, the ramp is still under way one 64-frame block in
+    /// (a design between the two cutoffs), and it has arrived [`GAIN_RAMP`] after the
     /// block it was first seen in (5 ms, 240 frames at 48 kHz; 512 frames are rendered).
     ///
     /// (A write *during* a block cannot be staged in a single-threaded test —
     /// the control thread writes between callbacks — so "between blocks" is the
     /// observable form of "not before the next block".)
     ///
-    /// [`GAIN_GLIDE`]: tutti_dsp::GAIN_GLIDE
+    /// [`GAIN_RAMP`]: tutti_dsp::GAIN_RAMP
     #[test]
-    fn a_cutoff_written_between_blocks_glides_on_the_stream() {
-        use crate::test_support::{assert_cell_glides, render_change, sine};
+    fn a_cutoff_written_between_blocks_ramps_on_the_stream() {
+        use crate::test_support::{assert_cell_ramps, render_change, sine};
         // 1.5 kHz: two whole periods in a 64-frame block, so a block's RMS is exact.
         let x = sine(1_500.0, 48_000.0, 64 + 512);
         let make = || {
@@ -686,7 +686,7 @@ mod tests {
             assert!(n.param_set().set(UnitParam::Cutoff, 6_000.0));
         };
         let (before, after) = ([&x[..64], &x[..64]], [&x[64..], &x[64..]]);
-        let mut node = assert_cell_glides(make, change, &before, &after, "svf cutoff");
+        let mut node = assert_cell_ramps(make, change, &before, &after, "svf cutoff");
         // Arrived: a block later the tone is at the 6 kHz low-pass's gain, about 1.
         let arrived = rms(&drive_block(&mut node, &before)[0]);
         let mut start = prepared(make());
@@ -718,11 +718,11 @@ mod tests {
         (gain * core::f64::consts::FRAC_1_SQRT_2) as f32
     }
 
-    /// A clone starts with its cells landed: a clone of a node whose cutoff glide is in
-    /// flight renders its first block at the cell's cutoff, not at where the source's glide
+    /// A clone starts with its cells landed: a clone of a node whose cutoff ramp is in
+    /// flight renders its first block at the cell's cutoff, not at where the source's ramp
     /// stands on the source's clock.
     #[test]
-    fn a_clone_of_a_node_mid_glide_starts_landed() {
+    fn a_clone_of_a_node_mid_ramp_starts_landed() {
         use crate::test_support::sine;
         let rate = SampleRate::SR_48K;
         let mut node = tutti_graph::contract::prepared(

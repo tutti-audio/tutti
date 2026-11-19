@@ -79,7 +79,7 @@ fn hostile() -> Vec<LimiterControls> {
 /// A stereo bank at `rate` aimed at `c`.
 fn runner_at(c: &LimiterControls, rate: SampleRate) -> LimiterBank<f32> {
     let mut bank = LimiterBank::<f32>::new(ChannelLayout::STEREO, LOOKAHEAD, rate);
-    bank.aim(c);
+    bank.retarget(c);
     bank
 }
 
@@ -587,7 +587,7 @@ fn the_threshold_lane_is_read_per_frame_and_a_non_finite_frame_is_the_members() 
 }
 
 /// A moved ceiling lands at once: after a retarget to a lower ceiling, no sample fed from
-/// then on comes out over the new one (a glided ceiling would let samples past it while it
+/// then on comes out over the new one (a ramped ceiling would let samples past it while it
 /// moved), though the samples fed before it, already in the delay, left at the old.
 #[test]
 fn a_moved_ceiling_lands_at_once() {
@@ -597,7 +597,7 @@ fn a_moved_ceiling_lands_at_once() {
     let (old, new) = (controls(-12.0, -3.0, 0.1), controls(-12.0, -18.0, 0.1));
     let mut k = runner(&old);
     let mut out = run(&mut k, &[&x[..at], &x[..at]]).remove(0);
-    k.aim(&new);
+    k.retarget(&new);
     out.extend(run(&mut k, &[&x[at..], &x[at..]]).remove(0));
 
     let bound = bound_of(-18.0);
@@ -925,7 +925,7 @@ fn a_hostile_aimed_ceiling_read_with_a_lane_is_clamped_too() {
             out.iter().flatten().all(|s| s.is_finite()),
             "ceiling {ceiling}"
         );
-        k.aim(&controls(-12.0, -6.0, 0.05));
+        k.retarget(&controls(-12.0, -6.0, 0.05));
         let after = run_in(&mut k, &[&x[0], &x[1]], [Some(&thr), None], 64);
         let peak = after
             .iter()
@@ -1005,7 +1005,7 @@ mod true_peak;
 /// `x` through a mono `f64` bank at 48 kHz aimed at `c`, in one block.
 fn run_f64(c: &LimiterControls, x: &[f64]) -> Vec<f64> {
     let mut bank = LimiterBank::<f64>::new(ChannelLayout::MONO, LOOKAHEAD, RATE);
-    bank.aim(c);
+    bank.retarget(c);
     let mut out = vec![0.0f64; x.len()];
     bank.process(
         LimiterLanes::default(),

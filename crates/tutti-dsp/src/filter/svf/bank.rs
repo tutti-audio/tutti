@@ -6,14 +6,14 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 
 use super::kernel::{SvfCoefficients, svf_step};
 use crate::channel_group::group_size;
-use crate::{Glide, SimdLanes};
+use crate::{Ramp, SimdLanes};
 
 /// The state of an SVF per channel: Simper's trapezoidal integrator pair
 /// `[ic1eq, ic2eq]` in the float `F`, every channel read through one shared
 /// [`SvfCoefficients`].
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block of
-/// audio through it while the coefficients glide toward their target, and the held
+/// audio through it while the coefficients ramp toward their target, and the held
 /// remainder of the block up to eight channels side by side: a recursive filter is
 /// latency-bound on one channel (each sample waits for the last), so independent
 /// channels fill that latency. Measured on the f64 SVF at width 6, one block: all six as
@@ -38,15 +38,15 @@ impl<F: Float + SimdLanes> SvfBank<F> {
     }
 
     /// Runs `input` into `output`, frame `i` at `coefficients.at(taken + 1 + i)`, then
-    /// takes the block's steps from the glide.
+    /// takes the block's steps from the ramp.
     ///
     /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's
     /// width, or past the narrower of the two views, is not touched. Channels run in
-    /// groups of up to eight, each group's planes taken once per block; while the glide
+    /// groups of up to eight, each group's planes taken once per block; while the ramp
     /// moves, a group reads the coefficients once per frame. No allocation.
     pub fn process(
         &mut self,
-        coefficients: &mut Glide<SvfCoefficients<F>>,
+        coefficients: &mut Ramp<SvfCoefficients<F>>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -88,11 +88,11 @@ impl<F: Float + SimdLanes> SvfBank<F> {
 }
 
 /// Channels `first..first + N` over the first `frames` frames, sample-inner, the group's
-/// states in registers: the frames the glide blends at a coefficient set per frame, the
+/// states in registers: the frames the ramp blends at a coefficient set per frame, the
 /// rest at its target.
 #[inline]
 fn group<F: Float + SimdLanes, const N: usize>(
-    glide: &Glide<SvfCoefficients<F>>,
+    ramp: &Ramp<SvfCoefficients<F>>,
     state: &mut [[F; 2]],
     first: usize,
     input: &Planes<'_, F>,
@@ -117,12 +117,12 @@ fn group<F: Float + SimdLanes, const N: usize>(
             }
         };
     }
-    let blended = glide.blended(frames);
-    for (i, step) in (0..blended).zip(glide.taken().saturating_add(1)..) {
-        let c = glide.at(step);
+    let blended = ramp.blend_len(frames);
+    for (i, step) in (0..blended).zip(ramp.steps_taken().saturating_add(1)..) {
+        let c = ramp.at(step);
         frame!(i, &c);
     }
-    let c = glide.target();
+    let c = ramp.target();
     for i in blended..frames {
         frame!(i, &c);
     }

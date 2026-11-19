@@ -9,9 +9,9 @@ use super::kernel::{LadderCoefficients, ladder_step};
 use super::{LadderModel, LadderType};
 use crate::channel_group::group_size;
 use crate::design::along;
-use crate::{Glide, Lerp, SimdLanes};
+use crate::{Lerp, Ramp, SimdLanes};
 
-/// What a ladder's glide blends: the coefficients and the drive, with the tap taken as the
+/// What a ladder's ramp blends: the coefficients and the drive, with the tap taken as the
 /// output, in the arithmetic `F` the bank runs in. A blend keeps the target's tap, so a type
 /// changes at once.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,7 +51,7 @@ impl<F: Float + SimdLanes> Lerp for LadderBlend<F> {
 /// read through one shared [`LadderBlend`].
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block of audio
-/// through it while the design glides toward its target and then holds. Channels run in groups
+/// through it while the design ramps toward its target and then holds. Channels run in groups
 /// of up to eight side by side: a recursive filter is latency-bound on one channel (each sample
 /// waits for the last), so independent channels fill that latency.
 #[derive(Clone, Debug, PartialEq)]
@@ -74,15 +74,15 @@ impl<F: Float + SimdLanes> LadderBank<F> {
     }
 
     /// Runs `input` into `output`, frame `i` at `blend.at(taken + 1 + i)`, then takes the
-    /// block's steps from the glide.
+    /// block's steps from the ramp.
     ///
     /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's
     /// width, or past the narrower of the two views, is not touched. Channels run in groups
-    /// of up to eight, each group's planes taken once per block; while the glide moves, a
+    /// of up to eight, each group's planes taken once per block; while the ramp moves, a
     /// group reads the blend once per frame. No allocation.
     pub fn process(
         &mut self,
-        blend: &mut Glide<LadderBlend<F>>,
+        blend: &mut Ramp<LadderBlend<F>>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -124,11 +124,11 @@ impl<F: Float + SimdLanes> LadderBank<F> {
 }
 
 /// Channels `first..first + N` over the first `frames` frames, sample-inner, the group's
-/// states in registers: the frames the glide blends at a design per frame, the rest at its
+/// states in registers: the frames the ramp blends at a design per frame, the rest at its
 /// target.
 #[inline]
 fn group<F: Float + SimdLanes, const N: usize>(
-    glide: &Glide<LadderBlend<F>>,
+    ramp: &Ramp<LadderBlend<F>>,
     state: &mut [[F; 4]],
     first: usize,
     input: &Planes<'_, F>,
@@ -154,12 +154,12 @@ fn group<F: Float + SimdLanes, const N: usize>(
             }
         };
     }
-    let blended = glide.blended(frames);
-    for (i, step) in (0..blended).zip(glide.taken().saturating_add(1)..) {
-        let d = glide.at(step);
+    let blended = ramp.blend_len(frames);
+    for (i, step) in (0..blended).zip(ramp.steps_taken().saturating_add(1)..) {
+        let d = ramp.at(step);
         frame!(i, &d);
     }
-    let d = glide.target();
+    let d = ramp.target();
     for i in blended..frames {
         frame!(i, &d);
     }
