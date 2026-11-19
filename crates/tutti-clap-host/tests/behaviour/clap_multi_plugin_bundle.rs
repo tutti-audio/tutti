@@ -132,7 +132,7 @@ fn an_unknown_id_fails_rather_than_falling_back() {
 /// loads nothing: a VST3 class id picks no CLAP plugin of the bundle.
 #[test]
 fn an_id_of_another_format_is_refused_at_the_call() {
-    use tutti_plugin_types::{InProc, PluginId, PluginRef, Uid};
+    use tutti_plugin_types::{InProcess, PluginId, PluginRef, Uid};
     let other = PluginId::Vst3(Uid::new([7; 16]));
     let plugin = PluginRef::new(bundle(), other.clone());
     // Matched rather than `expect_err`, because `ClapLoaded` is not `Debug`.

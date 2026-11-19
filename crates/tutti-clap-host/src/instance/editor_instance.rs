@@ -8,7 +8,7 @@
 use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProc, MainThreadMarker, MainWorkHandle, ParamEdit, ParamMapping, PluginError, PluginRef,
+    InProcess, MainThreadMarker, MainWorkHandle, ParamEdit, ParamMapping, PluginError, PluginRef,
     PluginResult, Request, RescanScope, WindowHandle,
 };
 use tutti_units::Normalized;
@@ -28,8 +28,8 @@ fn editor_error(reason: String) -> PluginError {
 /// the refusal on `Vst2Loaded`):
 ///
 /// ```
-/// use tutti_plugin_types::{InProc, OutOfProcess};
-/// fn hostable<L: InProc + OutOfProcess>() {}
+/// use tutti_plugin_types::{InProcess, OutOfProcess};
+/// fn hostable<L: InProcess + OutOfProcess>() {}
 /// hostable::<tutti_clap_host::ClapLoaded>();
 /// ```
 #[derive(Debug)]

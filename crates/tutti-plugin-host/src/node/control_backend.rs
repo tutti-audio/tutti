@@ -1,4 +1,4 @@
-//! An in-process plugin of any [`InProc`] format, behind a handle: its
+//! An in-process plugin of any [`InProcess`] format, behind a handle: its
 //! [`AnyThread`] (the hop to the main thread), its [`Health`] and the
 //! [`MainThreadControl`] a handle's token-taking calls reach it by.
 //!
@@ -41,7 +41,7 @@ use super::off_main_wait::{OffMainWait, await_answer};
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProc,
+    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
     OwnBypass, StateError, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{ParameterInfo, PluginFailure, RenderMode, TerminationReason};
@@ -51,7 +51,7 @@ use tutti_units::ParamId;
 /// Bundles the shared Mutex with the parameter-change sink so editor
 /// idle calls can drain plugin-internal automation events and notify
 /// the user-installed callback.
-pub(crate) struct ControlBackend<L: InProc> {
+pub(crate) struct ControlBackend<L: InProcess> {
     pub(super) inner: Arc<Mutex<Instance<L>>>,
     pub(crate) param_sink: ParameterChangeSink,
     /// The cell the audio unit parks a rate change in, shared with the
@@ -123,7 +123,7 @@ const OFF_MAIN_DEADLINE: Duration = Duration::from_secs(2);
 
 impl<L> ControlBackend<L>
 where
-    L: InProc + 'static,
+    L: InProcess + 'static,
     L::Processor: 'static,
 {
     /// Runs `work` on the plugin on the main thread, under the instance lock,
@@ -181,7 +181,7 @@ where
 
 impl<L> AnyThread for ControlBackend<L>
 where
-    L: InProc + 'static,
+    L: InProcess + 'static,
     L::Processor: 'static,
 {
     /// `None` for a lost plugin, and when the main thread does not answer.
@@ -310,7 +310,7 @@ where
     ///
     /// Off the main thread it runs on the main thread's next tick, and is
     /// `false` if that does not come within the deadline.
-    /// `InProcClient::set_render_mode` is the same call on the node's side.
+    /// `InProcessClient::set_render_mode` is the same call on the node's side.
     fn set_render_mode(&self, mode: RenderMode) -> bool {
         self.on_main(move |main, instance| instance.set_render_mode(main, mode, None))
             .unwrap_or(false)
@@ -328,7 +328,7 @@ where
 /// call into it latches the instance's [`Lost`], which is what this reads, with
 /// no lock. A plugin that takes the host down with it is not observed; the rest
 /// is the trait's defaults.
-impl<L: InProc> Health for ControlBackend<L> {
+impl<L: InProcess> Health for ControlBackend<L> {
     fn is_crashed(&self) -> bool {
         self.lost.is_lost()
     }
@@ -350,7 +350,7 @@ impl<L: InProc> Health for ControlBackend<L> {
 
 impl<L> MainThreadControl for ControlBackend<L>
 where
-    L: InProc + 'static,
+    L: InProcess + 'static,
     L::Processor: 'static,
 {
     /// Under the instance's lock; not called for a lost plugin.
@@ -416,7 +416,7 @@ mod off_main_tests {
     /// (the harness runs tests on threads it spawns), with a thread standing in for
     /// the main thread's tick: every call through the handle hops to it.
     fn loaded() -> (
-        crate::InProcClient<Vst2Loaded>,
+        crate::InProcessClient<Vst2Loaded>,
         PluginHandle,
         tutti_fixtures::Pump,
     ) {
@@ -428,7 +428,7 @@ mod off_main_tests {
 
     /// The probe, loaded in process, with parameter 1 written to 0.75; its main-thread
     /// work goes to `work`.
-    fn load(work: &MainWorkHandle) -> (crate::InProcClient<Vst2Loaded>, PluginHandle) {
+    fn load(work: &MainWorkHandle) -> (crate::InProcessClient<Vst2Loaded>, PluginHandle) {
         let (client, handle) = crate::load_client::<Vst2Loaded, f32>(
             main_thread(),
             work,

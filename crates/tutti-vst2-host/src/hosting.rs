@@ -5,14 +5,14 @@ use std::path::Path;
 
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{
-    Describe, InProc, MainThreadMarker, MainWorkHandle, PluginDescriptor, PluginFormat, PluginId,
+    Describe, InProcess, MainThreadMarker, MainWorkHandle, PluginDescriptor, PluginFormat, PluginId,
     PluginRef, PluginResult,
 };
 
 use crate::control::plugin_error;
 use crate::loaded::Vst2Loaded;
 
-impl InProc for Vst2Loaded {
+impl InProcess for Vst2Loaded {
     /// # Errors
     ///
     /// Also refuses a chosen plugin that is not a VST2 id of a plugin the file

@@ -10,7 +10,7 @@ use std::path::Path;
 
 use tutti_au_host::AuLoaded;
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::{InProc, LoadStage, PluginError, PluginId, PluginRef};
+use tutti_plugin_types::{InProcess, LoadStage, PluginError, PluginId, PluginRef};
 
 const CORE_AUDIO: &str = "/System/Library/Components/CoreAudio.component";
 

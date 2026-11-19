@@ -27,7 +27,7 @@ use tutti_plugin_contract::{
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_ipc::{BridgeConfig as IpcConfig, Ipc, Launched};
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Editor, InProc, LatencyVerdict, LoadStage, MainThreadMarker,
+    BridgeError, BridgeResult, Editor, InProcess, LatencyVerdict, LoadStage, MainThreadMarker,
     MaxBlock, Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash, TailVerdict,
 };
 use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeOutcome, ProbeRefusal};

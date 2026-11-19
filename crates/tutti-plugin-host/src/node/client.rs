@@ -1,5 +1,5 @@
-//! `InProcClient`: the graph node (`node.rs`) that drives an in-process
-//! plugin of any hosting ([`Loaded`]: an [`InProc`](tutti_plugin_types::InProc)
+//! `InProcessClient`: the graph node (`node.rs`) that drives an in-process
+//! plugin of any hosting ([`Loaded`]: an [`InProcess`](tutti_plugin_types::InProcess)
 //! format, or a served plugin, `tutti-plugin-ipc`'s `Ipc`) from the host audio thread.
 //!
 //! The audio thread renders through the Processor the node's realtime end
@@ -74,7 +74,7 @@ use tutti_units::ParamId;
 /// library, restored from this one's saved state. See
 /// [`PluginNode::fork_instance`]. The client becomes a graph node by
 /// [`bind`](Self::bind)ing it to the project's tempo map.
-pub struct InProcClient<L: Loaded, F: Float = f32> {
+pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// The plugin's control side. Control threads only: the audio thread
     /// renders through `rt`.
     pub(super) inner: Arc<Mutex<Instance<L>>>,
@@ -226,7 +226,7 @@ pub struct InProcClient<L: Loaded, F: Float = f32> {
 /// lifecycle poisons, through which nothing else is published) has no
 /// controller left to stop under, so its node does not run `stop`: the Processor drops with the end, as the Processor of a lost plugin
 /// does when the session retires its node.
-impl<L: Loaded, F: Float> Drop for InProcClient<L, F> {
+impl<L: Loaded, F: Float> Drop for InProcessClient<L, F> {
     fn drop(&mut self) {
         if self.lost.is_lost() || self.rt.held().is_none() {
             return;
@@ -236,9 +236,9 @@ impl<L: Loaded, F: Float> Drop for InProcClient<L, F> {
 }
 
 /// Omits `inner`: formatting must not wait on the control side's lock.
-impl<L: Loaded, F: Float> std::fmt::Debug for InProcClient<L, F> {
+impl<L: Loaded, F: Float> std::fmt::Debug for InProcessClient<L, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InProcClient")
+        f.debug_struct("InProcessClient")
             .field("descriptor", &self.descriptor)
             .field("sample_rate", &self.sample_rate)
             .finish_non_exhaustive()
@@ -344,7 +344,7 @@ pub(super) enum RateDelivery {
 #[derive(Clone, Debug)]
 pub(super) struct TransportFeed {
     /// The node's meter slot, shared with its controls
-    /// ([`InProcClient::controls`]), so a meter installed through them
+    /// ([`InProcessClient::controls`]), so a meter installed through them
     /// reaches the node the audio thread runs; a fork has a slot of its own
     /// ([`forked`](Self::forked)). Control side only: the block reads
     /// through `source`.
@@ -438,7 +438,7 @@ impl TransportFeed {
 }
 
 /// An in-process client bound to the project's tempo map
-/// ([`InProcClient::bind`]): the graph node. It owns the reader, lends
+/// ([`InProcessClient::bind`]): the graph node. It owns the reader, lends
 /// the map once per block, read through a view at the block's rate. Only this type is a
 /// [`Node<F>`](tutti_graph::Node) and an [`IntoNode<F>`](tutti_graph::IntoNode), for the
 /// graph float `F` the plugin was activated at (a plugin that does not process
@@ -449,7 +449,7 @@ impl TransportFeed {
 /// The default `F = f32` is the common width and converts nothing; it is
 /// staging until every caller names its graph's float.
 pub struct PluginNode<L: Loaded, F: Float = f32> {
-    pub(super) client: InProcClient<L, F>,
+    pub(super) client: InProcessClient<L, F>,
     pub(super) tempo: TempoReader,
 }
 
@@ -460,14 +460,14 @@ impl<L: Loaded, F: Float> std::fmt::Debug for PluginNode<L, F> {
 }
 
 impl<L: Loaded, F: Float> std::ops::Deref for PluginNode<L, F> {
-    type Target = InProcClient<L, F>;
-    fn deref(&self) -> &InProcClient<L, F> {
+    type Target = InProcessClient<L, F>;
+    fn deref(&self) -> &InProcessClient<L, F> {
         &self.client
     }
 }
 
 impl<L: Loaded, F: Float> std::ops::DerefMut for PluginNode<L, F> {
-    fn deref_mut(&mut self) -> &mut InProcClient<L, F> {
+    fn deref_mut(&mut self) -> &mut InProcessClient<L, F> {
         &mut self.client
     }
 }
@@ -511,7 +511,7 @@ pub(super) struct Reload {
     pub(super) work: MainWorkHandle,
 }
 
-impl<L: Loaded, F: Float> InProcClient<L, F> {
+impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// A client over `inner`, which it locks once for the plugin's lost flag:
     /// a caller must not hold that lock.
     pub(super) fn new(
@@ -663,7 +663,7 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
     }
 }
 
-impl<L: Loaded, F: Float> InProcClient<L, F> {
+impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// The chunk in flight is dropped (a reset, a re-prepare): the walk of its
     /// transport ends, and the MIDI the Processor held for it is lost, counted
     /// now in the delivery's dropped MIDI and in the executor's at the next

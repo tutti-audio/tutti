@@ -3,7 +3,7 @@
 //! real host and the one test plugin (`tutti-shared-plugin`).
 //!
 //! A format is a [`Format`] and a test file,
-//! `contract!(Format, gaps = N, hostings = [InProc, OutOfProcess])`. The
+//! `contract!(Format, gaps = N, hostings = [InProcess, OutOfProcess])`. The
 //! expected figures are in [`spec`], not imported from the plugin. A case a
 //! format cannot pass is a [`Gap`]: it must fail with the stated text, and `N`
 //! must equal the number of gaps, so none is added unnoticed. `hostings` names
@@ -33,7 +33,7 @@ pub use transcript::{
     Kind, Logged, Told, Transcript, find_blob, patch_level, patch_mode, replace_blob, select,
     set_level, set_mode, state_with_fault, state_with_rings, transcript,
 };
-pub use tutti_plugin_types::{InProc, OutOfProcess};
+pub use tutti_plugin_types::{InProcess, OutOfProcess};
 
 /// The case list, once: a test per case, and the names a [`Gap`] may use.
 #[macro_export]

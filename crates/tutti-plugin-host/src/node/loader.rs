@@ -1,4 +1,4 @@
-//! Construct the `(InProcClient<L, F>, PluginHandle)` pair for an in-process
+//! Construct the `(InProcessClient<L, F>, PluginHandle)` pair for an in-process
 //! plugin of format `L`.
 
 use std::path::Path;
@@ -9,7 +9,7 @@ use tutti_rt::ParkedSampleRate;
 
 use parking_lot::Mutex;
 
-use super::client::{Declared, InProcClient, Reload};
+use super::client::{Declared, InProcessClient, Reload};
 use super::control_backend::{ControlBackend, Reporting};
 use super::instance::Instance;
 use super::width_error::WidthError;
@@ -17,7 +17,7 @@ use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
 use tutti_plugin_types::{BridgeError, BridgeResult, StateError};
 use tutti_plugin_types::{
-    Features, InProc, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginRef, PluginTooWide,
+    Features, InProcess, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginRef, PluginTooWide,
     Prepare,
 };
 use tutti_units::ParamId;
@@ -43,7 +43,7 @@ pub enum LoadClientError<L: Loaded + 'static> {
     /// activated at 32-bit: [`WidthError::into_inner`] returns it, with its
     /// handle, to host in a 32-bit graph (boxed, to keep the error small).
     #[error(transparent)]
-    Width(Box<WidthError<(InProcClient<L, f32>, PluginHandle)>>),
+    Width(Box<WidthError<(InProcessClient<L, f32>, PluginHandle)>>),
 }
 
 impl<L: Loaded + 'static> std::fmt::Debug for LoadClientError<L> {
@@ -77,10 +77,10 @@ impl<L: Loaded + 'static> LoadClientError<L> {
 /// handle.
 ///
 /// `tutti-plugin`'s `Plugin::open` calls this for `.vst` files
-/// when the `vst2` feature is on; call it directly for another [`InProc`]
-/// format, or to get the concrete [`InProcClient`] type. `plugin` names the
+/// when the `vst2` feature is on; call it directly for another [`InProcess`]
+/// format, or to get the concrete [`InProcessClient`] type. `plugin` names the
 /// file and, in one that holds several, the plugin in it. Insert the client's node
-/// ([`bind`](InProcClient::bind), then `Editor::insert`). The node and handle
+/// ([`bind`](InProcessClient::bind), then `Editor::insert`). The node and handle
 /// share the plugin
 /// instance; drop both to drop the plugin. Editors are opened through the
 /// handle, and audio runs on whatever thread the graph's executor runs on.
@@ -100,9 +100,9 @@ pub fn load_client<L, F>(
     work: &MainWorkHandle,
     plugin: &PluginRef,
     sample_rate: impl Into<tutti_units::SampleRate>,
-) -> Result<(InProcClient<L, F>, PluginHandle), LoadClientError<L>>
+) -> Result<(InProcessClient<L, F>, PluginHandle), LoadClientError<L>>
 where
-    L: InProc + 'static,
+    L: InProcess + 'static,
     L::Processor: 'static,
     F: Float,
 {
@@ -125,14 +125,14 @@ pub fn load_client_restoring<L, F>(
     restore: Option<&mut dyn FnMut(&mut L) -> std::result::Result<(), StateError>>,
 ) -> Result<
     (
-        InProcClient<L, F>,
+        InProcessClient<L, F>,
         PluginHandle,
         Option<std::result::Result<(), StateError>>,
     ),
     LoadClientError<L>,
 >
 where
-    L: InProc + 'static,
+    L: InProcess + 'static,
     L::Processor: 'static,
     F: Float,
 {
@@ -179,9 +179,9 @@ fn assemble<L, F>(
     rt: tutti_rt::Rt<L::Processor>,
     origin: Option<Reload>,
     sample_rate: tutti_units::SampleRate,
-) -> BridgeResult<(InProcClient<L, F>, PluginHandle)>
+) -> BridgeResult<(InProcessClient<L, F>, PluginHandle)>
 where
-    L: InProc + 'static,
+    L: InProcess + 'static,
     L::Processor: 'static,
     F: Float,
 {
@@ -230,7 +230,7 @@ where
 
 /// What [`wire`] builds around an activated plugin.
 struct Wired<L: Loaded, F: Float> {
-    client: InProcClient<L, F>,
+    client: InProcessClient<L, F>,
     /// The control side the client and a handle both reach.
     inner: Arc<Mutex<Instance<L>>>,
     /// Where the audio side parks a rate for the main thread's pump; drained
@@ -296,7 +296,7 @@ where
     // transport send on the exact value the handle reports. One value, read
     // twice, cannot drift into a declared-but-undelivered capability.
     let ids: Vec<ParamId> = parameters.iter().map(|p| p.id()).collect();
-    let client = InProcClient::new(
+    let client = InProcessClient::new(
         Arc::clone(&inner),
         rt,
         descriptor.clone(),
@@ -370,7 +370,7 @@ pub fn client_over<L, F>(
     parameters: impl IntoIterator<Item = ParamId>,
     spares: usize,
     controls: Option<PluginControls>,
-) -> Result<InProcClient<L, F>, ClientOverError>
+) -> Result<InProcessClient<L, F>, ClientOverError>
 where
     L: Loaded + 'static,
     L::Processor: 'static,
@@ -384,7 +384,7 @@ where
     }
     let declared = Declared::of(wiring)?;
     let (inner, rt) = Instance::<L>::adopt(processor, controller, prepare, wiring);
-    Ok(InProcClient::new(
+    Ok(InProcessClient::new(
         Arc::new(Mutex::new(inner)),
         rt,
         descriptor,

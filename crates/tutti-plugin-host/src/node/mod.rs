@@ -1,5 +1,5 @@
 //! The plugin node, over any [`Loaded`](tutti_plugin_types::Loaded) hosting: an
-//! [`InProc`](tutti_plugin_types::InProc) format ([`load_client`]), or a
+//! [`InProcess`](tutti_plugin_types::InProcess) format ([`load_client`]), or a
 //! plugin served by another process ([`client_over`]: built over an
 //! already-activated plugin, with no main thread).
 //!
@@ -12,7 +12,7 @@
 //! ([`BlockLosses::failed`](crate::BlockLosses::failed)). The handle's control surface is the plugin's
 //! [`Control`](tutti_plugin_types::Control).
 //!
-//! Nothing here names a format: [`load_client`] takes any `InProc` format the
+//! Nothing here names a format: [`load_client`] takes any `InProcess` format the
 //! caller names.
 
 mod client;
@@ -25,7 +25,7 @@ mod off_main_wait;
 mod rebind;
 mod width_error;
 
-pub use client::{InProcClient, PluginNode};
+pub use client::{InProcessClient, PluginNode};
 pub use loader::{
     ClientOverError, LoadClientError, client_over, load_client, load_client_restoring,
 };

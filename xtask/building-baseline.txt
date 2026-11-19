@@ -334,8 +334,8 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::Plugi
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_track_info
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::NodeControls::set_meter
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::PluginControls::set_pipeline
-tutti-plugin-host  setter  crates/tutti-plugin-host/src/in_proc_erased.rs::AnyInProcClient::set_render_mode
-tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProcClient::set_render_mode
+tutti-plugin-host  setter  crates/tutti-plugin-host/src/in_process_erased.rs::AnyInProcessClient::set_render_mode
+tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProcessClient::set_render_mode
 tutti-plugin-host  option-arg  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
 
 # tutti-plugin-ipc

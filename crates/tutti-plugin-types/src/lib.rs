@@ -282,7 +282,7 @@ pub use guard::{contained_panics, ffi_guard};
 pub use host::{
     Control, Controller, Loaded, PluginIo, Processor, Refused, Stuck, Wraps, process_block,
 };
-pub use hosting::{Describe, Editor, EditorWindow, InProc, OutOfProcess, Reopen};
+pub use hosting::{Describe, Editor, EditorWindow, InProcess, OutOfProcess, Reopen};
 pub use invalidation::{PluginInvalidation, PluginRefresh, ResyncClass, ResyncKind};
 pub use order::{StableOrder, insertion_sort_by_key};
 pub use plugin_ref::{PluginRef, canonical_path};

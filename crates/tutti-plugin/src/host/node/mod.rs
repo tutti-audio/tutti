@@ -103,7 +103,7 @@ use tutti_buffers::FloatWidth;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_db::Loadable;
 use tutti_plugin_host::{
-    InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
+    InProcessClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
     Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
@@ -129,7 +129,7 @@ pub struct Unbound {
     /// The generic client over the served plugin, activated at load. Boxed: it
     /// is tens of KiB, and the client moves several times on its way into a
     /// graph (a debug build's frames hold a copy each).
-    client: Box<InProcClient<Ipc>>,
+    client: Box<InProcessClient<Ipc>>,
 }
 
 /// The typestate of a [`PluginClient`] that holds its node and can go into a

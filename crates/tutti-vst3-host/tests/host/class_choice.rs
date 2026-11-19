@@ -79,7 +79,7 @@ fn an_unknown_class_id_is_refused_naming_the_classes() {
 /// and loads nothing: a CLAP id picks no class of the bundle.
 #[test]
 fn an_id_of_another_format_is_refused_at_the_call() {
-    use tutti_plugin_types::{InProc, PluginId, PluginRef};
+    use tutti_plugin_types::{InProcess, PluginId, PluginRef};
     let path = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
     let other = PluginId::Clap("tutti.shared-test-plugin".into());
     // Matched rather than `expect_err`, because `Vst3Loaded` is not `Debug`.

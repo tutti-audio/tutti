@@ -7,7 +7,7 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow, InProc,
+    ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow, InProcess,
     MainThreadMarker, MainWorkHandle, ParamEdit, PluginError, PluginRef, PluginResult,
     WindowHandle,
 };
@@ -27,8 +27,8 @@ fn editor_error(reason: String) -> PluginError {
 /// builds: `AuLoaded` is hostable in this process and over IPC:
 ///
 /// ```
-/// use tutti_plugin_types::{InProc, OutOfProcess};
-/// fn hostable<L: InProc + OutOfProcess>() {}
+/// use tutti_plugin_types::{InProcess, OutOfProcess};
+/// fn hostable<L: InProcess + OutOfProcess>() {}
 /// hostable::<tutti_au_host::AuLoaded>();
 /// ```
 #[derive(Debug)]

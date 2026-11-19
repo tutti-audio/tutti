@@ -3,7 +3,7 @@
 //! A format is [`Loaded`] in its `-host` crate. Whether the host may load it
 //! into its own process, or serve it from another one with an editor-only
 //! second instance here, is a fact the format states by implementing
-//! [`InProc`] or [`OutOfProcess`]. A host that needs one names it as a
+//! [`InProcess`] or [`OutOfProcess`]. A host that needs one names it as a
 //! bound, so a format without it is refused at compile time, not at load.
 //!
 //! The markers are safe traits: a wrong impl is a behaviour bug (an editor that
@@ -28,9 +28,9 @@ use tutti_units::ParamId;
 /// The format can run in the host's own process.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` cannot be hosted in this process",
-    note = "implement `InProc` only if the plugin can be loaded and run here"
+    note = "implement `InProcess` only if the plugin can be loaded and run here"
 )]
-pub trait InProc: Loaded {
+pub trait InProcess: Loaded {
     /// Loads the plugin into this process, not activated, honouring the
     /// format's own thread rules.
     ///
@@ -105,7 +105,7 @@ pub trait OutOfProcess: Loaded {
     ///
     /// # Errors
     ///
-    /// As [`InProc::load_in_process`].
+    /// As [`InProcess::load_in_process`].
     fn load_served(
         main: MainThreadMarker,
         work: &MainWorkHandle,
@@ -117,7 +117,7 @@ pub trait OutOfProcess: Loaded {
     ///
     /// # Errors
     ///
-    /// As [`InProc::load_in_process`].
+    /// As [`InProcess::load_in_process`].
     fn load_editor(
         main: MainThreadMarker,
         work: &MainWorkHandle,
@@ -128,7 +128,7 @@ pub trait OutOfProcess: Loaded {
 /// A loaded plugin can be loaded again the same way, in the same hosting: what
 /// a fork of the graph needs before it copies the state across.
 ///
-/// Every [`InProc`] format has it, from its [`origin`](InProc::origin); an out-of-process
+/// Every [`InProcess`] format has it, from its [`origin`](InProcess::origin); an out-of-process
 /// hosting implements it by starting a new server.
 pub trait Reopen: Loaded {
     /// A fresh instance of the same plugin, not activated, with
@@ -136,11 +136,11 @@ pub trait Reopen: Loaded {
     ///
     /// # Errors
     ///
-    /// As [`InProc::load_in_process`].
+    /// As [`InProcess::load_in_process`].
     fn reopen(&self, main: MainThreadMarker) -> PluginResult<Self>;
 }
 
-impl<L: InProc> Reopen for L {
+impl<L: InProcess> Reopen for L {
     fn reopen(&self, main: MainThreadMarker) -> PluginResult<Self> {
         L::load_in_process(main, self.main_work(), self.origin())
     }
