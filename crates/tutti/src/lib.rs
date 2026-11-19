@@ -212,6 +212,10 @@ pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
 };
+#[cfg(all(feature = "session", feature = "midi", feature = "analyze"))]
+pub use tutti_session::{
+    LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords,
+};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
