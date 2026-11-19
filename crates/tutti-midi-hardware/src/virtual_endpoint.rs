@@ -25,7 +25,7 @@ use tutti_rt::LockExt;
 
 use tutti_midi_ci::EndpointName;
 use tutti_midi_device::FunctionBlock;
-use tutti_midi_protocol::{Narrower, Translator, narrow_message};
+use tutti_midi_protocol::{Midi1Translator, Midi2Translator, narrow_message};
 use tutti_ump::{Message, Ump};
 
 use crate::InputProducerHandle;
@@ -105,12 +105,12 @@ pub(crate) trait SourceBackend: Send + Sync {
 /// How a source brings a message to its protocol.
 enum Conversion {
     /// A MIDI 1.0 endpoint: MIDI 2.0 voice messages narrow through the one
-    /// [`Narrower`] of the endpoint's life (M2-104 Appendix D.2).
-    Narrow(Box<Mutex<Narrower>>),
+    /// [`Midi1Translator`] of the endpoint's life (M2-104 Appendix D.2).
+    Narrow(Box<Mutex<Midi1Translator>>),
     /// A MIDI 2.0 endpoint: MIDI 1.0 voice messages widen, holding the
     /// Registered and Assignable Controller runs a MIDI 1.0 stream spreads over
     /// several messages.
-    Widen(Box<Mutex<Translator>>),
+    Widen(Box<Mutex<Midi2Translator>>),
 }
 
 /// An endpoint other applications read from.
@@ -143,8 +143,12 @@ impl VirtualSource {
     pub fn open(spec: &VirtualSpec) -> Result<Self> {
         let (backend, protocol) = backend::open_virtual_source(spec)?;
         let conversion = match protocol {
-            VirtualProtocol::Midi1 => Conversion::Narrow(Box::new(Mutex::new(Narrower::new()))),
-            VirtualProtocol::Midi2 => Conversion::Widen(Box::new(Mutex::new(Translator::new()))),
+            VirtualProtocol::Midi1 => {
+                Conversion::Narrow(Box::new(Mutex::new(Midi1Translator::new())))
+            }
+            VirtualProtocol::Midi2 => {
+                Conversion::Widen(Box::new(Mutex::new(Midi2Translator::new())))
+            }
         };
         Ok(Self {
             backend,
@@ -181,17 +185,17 @@ impl VirtualSource {
     /// the platform's error when the OS refuses the message.
     pub fn send(&self, ump: Ump) -> Result<()> {
         let ump = match &self.conversion {
-            Conversion::Narrow(narrower) => {
+            Conversion::Narrow(midi1_translator) => {
                 // A packet no message is defined for, and any that is not MIDI 2.0
                 // voice, is forwarded as it is.
                 let Ok(message @ Message::Midi2(..)) = ump.decode() else {
                     return self.backend.send(&ump);
                 };
-                // The packets go in order under the lock: the narrower assumes
+                // The packets go in order under the lock: the MIDI 1.0 translator assumes
                 // that what it emitted was sent before the next message.
-                let mut narrower = narrower.lock_recover();
+                let mut midi1_translator = midi1_translator.lock_recover();
                 let mut sent = Ok(());
-                let count = narrow_voice(&mut narrower, message, |packet| {
+                let count = narrow_voice(&mut midi1_translator, message, |packet| {
                     if sent.is_ok() {
                         sent = self.backend.send(&packet);
                     }
@@ -317,7 +321,7 @@ mod tests {
                 calls: AtomicUsize::new(0),
                 fail_at,
             }),
-            conversion: Conversion::Narrow(Box::new(Mutex::new(Narrower::new()))),
+            conversion: Conversion::Narrow(Box::new(Mutex::new(Midi1Translator::new()))),
             name: EndpointName::new("recorder").unwrap(),
             protocol: VirtualProtocol::Midi1,
         };
@@ -368,7 +372,7 @@ mod tests {
     }
 
     /// **A failed send leaves an MPE note's member channel as it was**: the
-    /// narrower's note allocation is not dropped by a refused packet, so the
+    /// The MIDI 1.0 translator's note allocation is not dropped by a refused packet, so the
     /// note's per-note bend still goes to its channel (M2-104 D.2.8, MPE mode).
     #[test]
     fn a_failed_send_keeps_an_mpe_notes_channel() {
@@ -382,13 +386,13 @@ mod tests {
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
         .unwrap();
-        let narrower = Narrower::with_mode(TranslationMode {
+        let midi1_translator = Midi1Translator::with_mode(TranslationMode {
             extremes: ExtremeValues::Scaled,
             per_note: PerNoteTranslation::Mpe(zone),
         });
         // Send 0 (the Note On) succeeds and send 1 (the RPN's CC 101) is refused.
         let (mut source, sent) = midi1_source(1);
-        source.conversion = Conversion::Narrow(Box::new(Mutex::new(narrower)));
+        source.conversion = Conversion::Narrow(Box::new(Mutex::new(midi1_translator)));
         let address = Address {
             group: MidiGroup::FIRST,
             channel: MidiChannel::FIRST,

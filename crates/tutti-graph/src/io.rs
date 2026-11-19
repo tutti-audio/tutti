@@ -336,7 +336,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// and its report changes nothing.
     ///
     /// The report must cover the node's ring-out (see [`Node`](crate::Node),
-    /// "A tail that follows the params"); `contract::assert_honest_tail`
+    /// "A tail that follows the params"); `contract::assert_declared_tail`
     /// (feature `contract`) checks it. Audio thread: one store into the
     /// unit's own record, no allocation; the plan is untouched, and nothing
     /// but the task that runs the node reads it, so a pooled render parks the

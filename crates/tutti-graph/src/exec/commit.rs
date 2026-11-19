@@ -454,7 +454,7 @@ pub(crate) struct Channels<F: Float = f32> {
     pub(crate) pool: Arc<AtomicUsize>,
     pub(crate) rendered: Arc<AtomicU64>,
     /// The `seq` of the commit whose root crossfade the executor last
-    /// finished (`Editor::settle_fades`).
+    /// finished (`Editor::finish_fades`).
     pub(crate) root_fade_ended: Arc<AtomicU64>,
 }
 

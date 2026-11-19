@@ -148,6 +148,16 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
             }
             if report.passed() { Ok(()) } else { Err(1) }
         }
+        Step::Affected(base) => match gates::affected(&ctx.root, base) {
+            Ok(selection) => {
+                println!("{selection}");
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("xtask: affected: {e}");
+                Err(1)
+            }
+        },
         Step::Package => package(ctx),
         Step::FuzzList => {
             for t in fuzz_targets(ctx)? {

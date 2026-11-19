@@ -16,7 +16,7 @@ use tutti_buffers::MaxBlock;
 use tutti_engine::Engine;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
-use tutti_graph::contract::{Latent, Pulse};
+use tutti_graph::contract::{ImpulseSource, Latent};
 use tutti_graph::{EventIn, EventKind, GraphBuilder, Prepare, Unforkable};
 use tutti_transport::{MotionEvent, Transport};
 use tutti_ump::MidiChannel;
@@ -33,7 +33,7 @@ fn note_on() -> EventKind {
     EventKind::Midi(midi::note_on(MidiChannel::FIRST, 60, 0xC800))
 }
 
-/// An engine over a graph of two `Pulse`s — `(direct, pdc)` — whose global
+/// An engine over a graph of two `ImpulseSource`s — `(direct, pdc)` — whose global
 /// outputs are `[pdc, direct]`, the second pulse's event input merged with a
 /// silent sibling declaring `D` frames of latency.
 fn engine(
@@ -41,8 +41,8 @@ fn engine(
     max_block: usize,
 ) -> (Engine, tutti_graph::Editor, NodeKey, NodeKey) {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-    let direct = g.add(Unforkable(Pulse::new(Latency::ZERO)));
-    let pdc = g.add(Unforkable(Pulse::new(Latency::ZERO)));
+    let direct = g.add(Unforkable(ImpulseSource::new(Latency::ZERO)));
+    let pdc = g.add(Unforkable(ImpulseSource::new(Latency::ZERO)));
     let sibling = g.add(Unforkable(Latent::new(Latency::new(Samples::new(D)))));
     g.connect_events(sibling, 0, pdc, 0);
     g.connect_output(pdc, 0, 0).connect_output(direct, 0, 1);

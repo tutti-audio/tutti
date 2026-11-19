@@ -164,7 +164,7 @@ fn bench_voices(c: &mut Criterion) {
     group.finish();
 }
 
-/// What engaging the phase vocoder costs. `StretchFactor(1.0)` is a
+/// What engaging the phase vocoder costs. `StretchFactor::new(1.0)` is a
 /// bypass, so the gap between it and any other factor is the whole price.
 fn bench_stretch(c: &mut Criterion) {
     let mut group = c.benchmark_group("voices/stretch");

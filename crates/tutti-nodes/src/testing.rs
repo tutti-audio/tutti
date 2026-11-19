@@ -408,12 +408,12 @@ mod tests {
     use std::f64::consts::TAU;
     use tutti_buffers::MaxBlock;
     use tutti_buffers::Planes;
-    use tutti_graph::Solo;
+    use tutti_graph::Standalone;
     use tutti_units::Samples;
 
     /// `node` alone in a graph at `rate`, in blocks of `block` frames.
-    fn solo<N: IntoNode<Controls = ()>>(node: N, rate: SampleRate, block: usize) -> Solo<()> {
-        let mut solo = Solo::new(node, Prepare::new(rate, MaxBlock::of(Samples::new(64))));
+    fn solo<N: IntoNode<Controls = ()>>(node: N, rate: SampleRate, block: usize) -> Standalone<()> {
+        let mut solo = Standalone::new(node, Prepare::new(rate, MaxBlock::of(Samples::new(64))));
         solo.renderer_mut().set_block(Samples::new(block));
         solo
     }

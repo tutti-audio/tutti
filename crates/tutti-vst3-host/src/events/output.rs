@@ -1,6 +1,6 @@
 //! What a plugin's output event stream keeps between events.
 
-use tutti_midi_protocol::Translator;
+use tutti_midi_protocol::Midi2Translator;
 use tutti_ump::{MidiChannel, NoteNumber};
 
 /// The notes a plugin may name in an expression at once. A plugin sounds a few
@@ -23,7 +23,7 @@ struct OwnNote {
 }
 
 /// The state a plugin's output stream carries from event to event and block to
-/// block: the [`Translator`] of its MIDI 1.0 events (RPN, NRPN and Bank Select
+/// block: the [`Midi2Translator`] of its MIDI 1.0 events (RPN, NRPN and Bank Select
 /// runs span messages), and the table of the notes the plugin started under an
 /// id, so an expression on one is a message for that note.
 ///
@@ -44,7 +44,7 @@ struct OwnNote {
 /// everything, sending nothing.
 #[derive(Debug)]
 pub struct OutputStream {
-    pub(super) translator: Translator,
+    pub(super) translator: Midi2Translator,
     notes: [Option<OwnNote>; OWN_NOTES],
     started: u64,
     notes_evicted: u64,
@@ -67,7 +67,7 @@ impl OutputStream {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            translator: Translator::new(),
+            translator: Midi2Translator::new(),
             notes: [None; OWN_NOTES],
             started: 0,
             notes_evicted: 0,

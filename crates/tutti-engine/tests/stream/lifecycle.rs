@@ -404,7 +404,7 @@ fn a_panic_in_the_render_is_caught_latched_and_cleared_by_a_restart() {
 
     let mut dirty = vec![1.0f32; 64 * 2];
     stream
-        .callback_once(&mut dirty)
+        .run_callback(&mut dirty)
         .expect("the callback returns normally on a panic");
     assert!(
         dirty.iter().all(|&s| s == 0.0),
@@ -418,7 +418,7 @@ fn a_panic_in_the_render_is_caught_latched_and_cleared_by_a_restart() {
 
     for _ in 0..3 {
         let mut later = vec![1.0f32; 64 * 2];
-        stream.callback_once(&mut later).unwrap();
+        stream.run_callback(&mut later).unwrap();
         assert!(later.iter().all(|&s| s == 0.0), "later blocks are silent");
     }
     assert_eq!(

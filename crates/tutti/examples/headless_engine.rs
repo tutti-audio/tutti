@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut live = SessionBuilder::default()
         .device(Default::default())
         .build()?;
-    let tone = Osc::sine(Hz(440.0)).with_amplitude(Amplitude(0.2));
+    let tone = Osc::sine(Hz::new(440.0)).with_amplitude(Amplitude::new(0.2));
     let (tone, _) = live.graph().add(ForkByClone(tone));
     live.graph().connect(tone, Root).unwrap();
     report(live.update());

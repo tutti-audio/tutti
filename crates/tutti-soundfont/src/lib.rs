@@ -98,7 +98,7 @@
 //! - Dropped: anything MIDI 1.0 cannot express (per-note pitch bend, per-note
 //!   controllers, per-note management), channel and key pressure, which no generator
 //!   reads, and the assignable controllers (NRPN). An RPN or NRPN arrives
-//!   assembled: the input edge's `tutti_midi_protocol::Translator` turns a MIDI
+//!   assembled: the input edge's `tutti_midi_protocol::Midi2Translator` turns a MIDI
 //!   1.0 Data Entry run into one Registered or Assignable Controller, so Data
 //!   Entry and the RPN and NRPN selects (CC 6, 38 and 98 to 101) reaching the unit
 //!   as plain control changes change nothing. Every other message type, and a

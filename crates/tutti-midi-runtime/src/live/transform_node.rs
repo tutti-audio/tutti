@@ -1,7 +1,7 @@
 //! The MPE transform as a graph node.
 //!
 //! [`MpeTransformNode`] runs one [`MpeIngest`] over one event stream: MIDI 1.0
-//! in is widened by a [`Translator`], classic-MPE channel-spread comes out as
+//! in is widened by a [`Midi2Translator`], classic-MPE channel-spread comes out as
 //! native per-note messages, and a Manager Channel's zone-wide messages and bend
 //! come out on each member channel of its zone, as the ingest's docs say. It is
 //! the input edge's transform for a stream that does not come off a wire (a
@@ -34,7 +34,7 @@ use tutti_graph::{
     Cost, Cx, Event, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Losses,
     Node, NodeParts, Offset, Prepare, Shape, Status, UmpAt, note_off_room,
 };
-use tutti_midi_protocol::{MpeMode, Translator};
+use tutti_midi_protocol::{Midi2Translator, MpeMode};
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
 use tutti_ump::MidiGroup;
 
@@ -59,7 +59,7 @@ use crate::schedule::CLIP_EVENT_DENSITY;
 /// assert_eq!(controls.losses().refused, 0);
 /// ```
 pub struct MpeTransformNode {
-    translator: Translator,
+    translator: Midi2Translator,
     mpe: MpeIngest,
     /// The mode in force.
     mode: MpeMode,
@@ -119,7 +119,7 @@ impl MpeTransformNode {
         let initial = *mode.current();
         let (dropped, dropped_reader) = counter();
         Self {
-            translator: Translator::default(),
+            translator: Midi2Translator::default(),
             mpe: MpeIngest::new(initial),
             mode: initial,
             request: mode.reader(),

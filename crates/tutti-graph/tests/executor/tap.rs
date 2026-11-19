@@ -530,12 +530,12 @@ fn a_read_is_whole_frames() {
 }
 
 /// A reader dropped first costs nothing and frees nothing on the audio thread:
-/// the tap stays in the plan writing nowhere, the editor reaps it, and the
+/// the tap stays in the plan writing nowhere, the editor prunes it, and the
 /// commit that removes it retires the ring with the old state. The ring and
 /// its producer are freed at the editor's collect, never in a block (a lane's
 /// drop is a debug panic inside one).
 #[test]
-fn a_reader_dropped_first_is_reaped_and_freed_on_the_control_side() {
+fn a_reader_dropped_first_is_pruned_and_freed_on_the_control_side() {
     let mut r = rig(1, true);
     let tap =
         r.ed.open_tap(
@@ -551,8 +551,8 @@ fn a_reader_dropped_first_is_reaped_and_freed_on_the_control_side() {
     for i in 0..3 {
         block(&mut r, 100, i * 100);
     }
-    assert_eq!(r.ed.reap_taps(), 1);
-    assert_eq!(r.ed.reap_taps(), 0, "reaped once");
+    assert_eq!(r.ed.prune_taps(), 1);
+    assert_eq!(r.ed.prune_taps(), 0, "pruned once");
     r.ed.commit().expect("compiles");
     r.exec.apply_pending();
     assert_eq!(

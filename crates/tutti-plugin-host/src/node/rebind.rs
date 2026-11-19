@@ -778,7 +778,7 @@ mod tests {
     fn ramp(value: f64) -> [ParamEvent; 1] {
         [ParamEvent::ramp(
             Offset::of(Samples::new(0), Samples::new(BLOCK)),
-            ParamRamp::foreign(PARAM, value, Samples::new(0)),
+            ParamRamp::by_id(PARAM, value, Samples::new(0)),
         )]
     }
 

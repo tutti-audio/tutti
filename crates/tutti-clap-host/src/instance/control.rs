@@ -713,11 +713,7 @@ impl Wraps for ClapController {
     /// `CLAP_EVENT_PARAM_GESTURE_BEGIN` and `_END` as a gesture's ends, which
     /// carry no value in CLAP.
     fn collect_reports(&mut self, _main: MainThreadMarker, out: &mut Vec<ParamEdit>, _from: usize) {
-        self.reported.drain(|edit| {
-            if let tutti_plugin_types::Edit::Reported(edit) = edit {
-                out.push(edit);
-            }
-        });
+        self.reported.drain(|edit| out.push(edit));
     }
 
     fn lost_reports(&self) -> u64 {

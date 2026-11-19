@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use coreaudio_sys::{AudioTimeStamp, MIDIPacket, MIDIPacketList, OSStatus};
-use tutti_midi_protocol::Translator;
+use tutti_midi_protocol::Midi2Translator;
 #[cfg(feature = "testing")]
 use tutti_midi_protocol::midi1;
 use tutti_plugin_types::{MidiEventVec, WireMidi, group_of_port};
@@ -97,7 +97,7 @@ struct MidiOutState {
 /// as SysEx7 packets in the order the parser completes them, each at the
 /// offset of the packet that held its `0xF0` (offset 0 for one opened in an
 /// earlier list). A channel voice message goes through the stream's
-/// [`Translator`] to MIDI 2.0 (M2-104 Appendix D.3), as every plugin's output
+/// [`Midi2Translator`] to MIDI 2.0 (M2-104 Appendix D.3), as every plugin's output
 /// does: its RPN, NRPN and Bank Select runs are assembled across messages and
 /// lists. A run (select, Data Entry MSB) with no LSB waits for one: the translator
 /// never flushes a live output, which has no end (M2-104 Appendix D.3.3). Events are handed to the sink in batches of a [`MidiEventVec`];
@@ -107,7 +107,7 @@ struct MidiOutState {
 struct Decoder {
     group: MidiGroup,
     parser: Midi1Parser,
-    translator: Translator,
+    translator: Midi2Translator,
     batch: MidiEventVec,
     /// The offset of the SysEx being read.
     sysex_at: u32,
@@ -119,7 +119,7 @@ impl Decoder {
         Self {
             group,
             parser: Midi1Parser::new(group),
-            translator: Translator::new(),
+            translator: Midi2Translator::new(),
             batch: MidiEventVec::new(),
             sysex_at: 0,
         }

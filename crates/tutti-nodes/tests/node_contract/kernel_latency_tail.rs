@@ -5,9 +5,11 @@
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_graph::contract::{Driven, assert_honest_tail, drive_input, prepared};
+use tutti_graph::contract::{Driven, assert_declared_tail, drive_input, prepared};
 use tutti_graph::{Buses, Node, ParamNode, Shape};
-use tutti_graph::{Env, PlayClock, Prepare, Solo, Status, TransportChanges, TransportPosition};
+use tutti_graph::{
+    Env, PlayClock, Prepare, Standalone, Status, TransportChanges, TransportPosition,
+};
 use tutti_nodes::{ControlLanes, ControlSet, Kernel, KernelNode};
 use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
@@ -162,7 +164,7 @@ fn latency_and_tail_are_declared_apart() {
     let shape = n.shape();
     assert_eq!(shape.latency.samples(), Samples::new(7));
     assert_eq!(shape.tail.samples().expect("finite").get(), 100);
-    assert_honest_tail(&mut n, SR);
+    assert_declared_tail(&mut n, SR);
 }
 
 /// A kernel with no controls declares no port and addresses no cell: its dry/wet is the
@@ -276,7 +278,7 @@ fn a_block_aligned_cut_parks_and_resets() {
 #[test]
 fn the_graphs_mix_is_aligned_to_the_kernels_latency() {
     let (claimed, latency) = (25, 7);
-    let mut solo = Solo::new(
+    let mut solo = Standalone::new(
         kernel_node(Echo::new(claimed, claimed, latency)),
         Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))),
     );

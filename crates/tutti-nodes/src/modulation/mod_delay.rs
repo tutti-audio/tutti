@@ -326,7 +326,7 @@ mod tests {
     use crate::test_support::drive_kernel;
     use tutti_buffers::{ChannelLayout, MaxBlock};
     use tutti_dsp::MaxDelay;
-    use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
+    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Latency, Samples, UnitParam};
     use tutti_units::{Phase, PhaseIncrement, RunningPhase};
@@ -396,7 +396,7 @@ mod tests {
         );
         assert_eq!(gm.shape().tail, Tail::Finite(Samples::new(240)));
         assert_eq!(gm.shape().latency, Latency::new(Samples::new(0)));
-        assert_honest_tail(&mut gm, RATE);
+        assert_declared_tail(&mut gm, RATE);
     }
 
     /// A stagger that names an offset per channel must name the bus's.

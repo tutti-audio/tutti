@@ -1,5 +1,5 @@
 //! The stateful MIDI 2.0 to MIDI 1.0 translation of M2-104 Appendix D.2: the
-//! [`Narrower`] an output edge runs.
+//! [`Midi1Translator`] an output edge runs.
 
 use crate::scale;
 use crate::{ExtremeValues, PerNoteTranslation, TranslationMode, midi1, narrow_with};
@@ -12,7 +12,7 @@ use tutti_ump::{
 mod members;
 
 /// MIDI 2.0 in, MIDI 1.0 out: the translation an output edge runs, per group
-/// and channel (M2-104 Appendix D.2). The inverse of [`Translator`](crate::Translator).
+/// and channel (M2-104 Appendix D.2). The inverse of [`Midi2Translator`](crate::Midi2Translator).
 ///
 /// - **A Registered or Assignable Controller** is the four Control Changes of
 ///   D.2.3: each message generates a sequence of four MIDI 1.0 Protocol
@@ -20,7 +20,7 @@ mod members;
 ///   parameter, then CC 6 and CC 38, the top 14 bits of the 32-bit value. All
 ///   four are sent for every message, even for the parameter the previous one
 ///   selected.
-/// - **The data narrows** by the rule the [`Translator`](crate::Translator) widened with. A
+/// - **The data narrows** by the rule the [`Midi2Translator`](crate::Midi2Translator) widened with. A
 ///   Registered Controller of index 0 to 31 (any bank) is a fixed-point number
 ///   or a pair of fields, widened by zero-extension (M2-115 section 4.1:
 ///   Zero-Extension Scaling for every Registered Controller whose index is
@@ -52,7 +52,7 @@ mod members;
 /// no clock.
 ///
 /// ```
-/// use tutti_midi_protocol::Narrower;
+/// use tutti_midi_protocol::Midi1Translator;
 /// use tutti_ump::{Address, ControlValue, Message, MidiChannel, MidiGroup, U7, Voice2};
 ///
 /// let address = Address { group: MidiGroup::FIRST, channel: MidiChannel::FIRST };
@@ -62,26 +62,26 @@ mod members;
 ///     index: U7::of(0),
 ///     value: ControlValue::new(12 << 25),
 /// });
-/// let mut narrower = Narrower::new();
+/// let mut translator = Midi1Translator::new();
 /// let mut bytes = Vec::new();
-/// narrower.feed(bend_range, |b| bytes.push(b.as_slice().to_vec()));
+/// translator.feed(bend_range, |b| bytes.push(b.as_slice().to_vec()));
 /// // CC 101, CC 100, CC 6 (12), CC 38 (0).
 /// assert_eq!(bytes, [[0xB0, 101, 0], [0xB0, 100, 0], [0xB0, 6, 12], [0xB0, 38, 0]]);
 /// ```
 #[derive(Clone, Debug)]
-pub struct Narrower {
+pub struct Midi1Translator {
     mode: TranslationMode,
     /// The note allocation of the MPE mode; none in any other.
     members: Option<Box<Members>>,
 }
 
-impl Default for Narrower {
+impl Default for Midi1Translator {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Narrower {
+impl Midi1Translator {
     /// The most MIDI 1.0 messages one [`feed`](Self::feed) sends. An MPE Note
     /// On sends one Note Off when it steals a sounding member or strikes its
     /// key again (never both), then a centred Pitch Bend, Channel Pressure 0
@@ -95,7 +95,7 @@ impl Narrower {
     /// 2-byte Channel Pressure. The Default Translation sends at most 12.
     pub const MAX_BYTES: usize = 14;
 
-    /// A narrower that translates by the Default Translation.
+    /// A translator that translates by the Default Translation.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -107,7 +107,7 @@ impl Narrower {
         }
     }
 
-    /// A narrower that translates by `mode`: [`new`](Self::new) is the Default
+    /// A translator that translates by `mode`: [`new`](Self::new) is the Default
     /// Translation, and any other mode is an Alternate Translation Mode
     /// (M2-104 D.4). [`reset`](Self::reset) in the MPE mode forgets the notes
     /// held without sending their Note Offs.
@@ -118,7 +118,7 @@ impl Narrower {
         Self { mode, members }
     }
 
-    /// The mode this narrower translates by.
+    /// The mode this translator translates by.
     #[must_use]
     pub const fn mode(&self) -> TranslationMode {
         self.mode
