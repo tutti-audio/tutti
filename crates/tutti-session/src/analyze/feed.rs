@@ -87,7 +87,9 @@ impl<'w, S: Float> Chunk<'w, S> {
 
     fn frames(&self) -> Samples {
         match &self.held {
-            Layout::Planar(planes) => planes.first().map_or(Samples::ZERO, |p| Samples(p.len())),
+            Layout::Planar(planes) => planes
+                .first()
+                .map_or(Samples::ZERO, |p| Samples::new(p.len())),
             Layout::Interleaved => self.layout.from_interleaved_len(self.data.len()),
         }
     }

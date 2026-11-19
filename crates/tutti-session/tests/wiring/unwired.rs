@@ -143,7 +143,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
         .replace(
             x,
             ForkByClone(Pass::<1, 1>),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualAmplitude,
         )
         .expect("the node is there");
@@ -214,7 +214,7 @@ fn a_wider_reinsert_reports_nothing() {
         .replace(
             x,
             ForkByClone(Pass::<1, 1>),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualAmplitude,
         )
         .expect("the node is there");
@@ -225,7 +225,7 @@ fn a_wider_reinsert_reports_nothing() {
         .replace(
             x,
             ForkByClone(Pass::<2, 2>),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualAmplitude,
         )
         .expect("the node is there");
@@ -257,7 +257,7 @@ fn a_feed_naming_a_lost_event_output_is_not_written_back() {
         .replace(
             src,
             ForkByClone(Ports::<0, 1>),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualAmplitude,
         )
         .expect("the node is there");
@@ -328,7 +328,7 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
         .replace(
             y,
             ForkByClone(Bused { aux: false }),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualAmplitude,
         )
         .expect("the node is there");
@@ -372,7 +372,7 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
         .replace(
             y,
             ForkByClone(Bused { aux: false }),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualAmplitude,
         )
         .expect("the node is there");
@@ -407,7 +407,7 @@ fn unwired_waits_for_the_commit_that_lands() {
     g.replace(
         x,
         ForkByClone(Pass::<1, 1>),
-        Seconds(0.0),
+        Seconds::new(0.0),
         FadeLaw::EqualAmplitude,
     )
     .expect("the node is there");

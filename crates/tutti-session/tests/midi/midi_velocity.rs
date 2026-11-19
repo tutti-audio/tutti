@@ -19,10 +19,10 @@ fn velocity_keeps_its_full_width() {
     let mut s = offline();
     let seen = Seen::default();
     let (tap, ()) = s.graph().add(Tap(Arc::clone(&seen)));
-    let mut events = note(60, MF, Beat(0.0), BeatDuration(1.0)).to_vec();
-    events.extend(note(64, MF + 1, Beat(0.0), BeatDuration(1.0)));
+    let mut events = note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)).to_vec();
+    events.extend(note(64, MF + 1, Beat::new(0.0), BeatDuration::new(1.0)));
     s.midi()
-        .play_clip(tap, Beat(0.0), events)
+        .play_clip(tap, Beat::new(0.0), events)
         .expect("a tap takes a clip");
     let _ = s.update();
     s.play().expect("room");

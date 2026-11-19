@@ -50,7 +50,7 @@
 //! let lp = g.add(ForkByClone(Lowpass { a: 0.1, y: 0.0 }));
 //! g.pipe_input(lp).pipe_output(lp);
 //! let mut r = g
-//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))))
+//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256))))
 //!     .expect("builds");
 //! let out = r.render_input(Planes::new(&[&[1.0; 1_000]]).unwrap());
 //! assert!(out[0][999] > 0.9); // a lowpass passes DC
@@ -137,7 +137,7 @@
 //! let gain = g.add(ForkByClone(Gain(0.5)));
 //! g.pipe_input(gain).pipe_output(gain);
 //! let mut r = g
-//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 //!     .expect("builds");
 //! assert_eq!(r.render_input(Planes::new(&[&[1.0; 8]]).unwrap())[0], [0.5; 8]);
 //! ```
@@ -173,7 +173,7 @@
 //! let half = g.add(ForkByClone(Half));
 //! g.pipe_input(half).pipe_output(half);
 //! let mut r = g
-//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 //!     .expect("builds");
 //! assert_eq!(r.render_input(Planes::new(&[&[1.0f64; 8]]).unwrap())[0], [0.5; 8]);
 //! ```
@@ -213,7 +213,7 @@
 //!             .unwrap();
 //!         Shape::buses(ins, Buses::unassigned(ChannelLayout::MONO))
 //!             .with_cost(Cost::Light)
-//!             .with_latency(Latency::new(Samples(0)))
+//!             .with_latency(Latency::new(Samples::new(0)))
 //!             .with_tail(Tail::None)
 //!     }
 //!     fn new() -> Self {
@@ -313,10 +313,10 @@
 //! }
 //!
 //! let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
-//! let (volume, controls) = g.add_with_controls(Params(Volume { level: Param::new(Amplitude(1.0)) }));
+//! let (volume, controls) = g.add_with_controls(Params(Volume { level: Param::new(Amplitude::new(1.0)) }));
 //! g.pipe_input(volume).pipe_output(volume);
 //! let mut r = g
-//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 //!     .expect("builds");
 //! assert_eq!(r.render_input(Planes::new(&[&[1.0; 4]]).unwrap())[0], [1.0; 4]);
 //! // A host sets it by address; the next block reads the cell.
@@ -392,7 +392,7 @@
 //! let gate = g.add(ForkByClone(Gate { open: false }));
 //! g.connect_events(pulse, 0, gate, 0).pipe_output(gate);
 //! let mut r = g
-//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 //!     .expect("builds");
 //! assert_eq!(r.render(6)[0], [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
 //! # let _ = Offset::ZERO;
@@ -431,7 +431,7 @@
 //!     fn shape(&self) -> Shape {
 //!         // The ceiling: never longer than this, whatever the params.
 //!         Shape::through_unassigned(ChannelLayout::MONO)
-//!             .with_tail(Tail::Finite(Samples(8 * 4_800)))
+//!             .with_tail(Tail::Finite(Samples::new(8 * 4_800)))
 //!     }
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -440,7 +440,7 @@
 //!             return Status::Bypass;
 //!         }
 //!         // The ring-out follows the params, so say it; err long.
-//!         io.report_tail(Tail::Finite(Samples(self.taps * self.period)));
+//!         io.report_tail(Tail::Finite(Samples::new(self.taps * self.period)));
 //!         io.channel(0).map(|x| x);
 //!         Status::Modified
 //!     }
@@ -451,7 +451,7 @@
 //! let echo = g.add(ForkByClone(Echo { taps: 3, period: 4_800, on: false }));
 //! g.pipe_input(echo).pipe_output(echo);
 //! let mut r = g
-//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 //!     .expect("builds");
 //! assert_eq!(r.render_input(Planes::new(&[&[0.5; 4]]).unwrap())[0], [0.5; 4]);
 //! ```

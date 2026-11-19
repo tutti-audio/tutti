@@ -77,7 +77,7 @@ fn block_at(d: &mut Direct<EventInletNode>, frame: u64, rate: SampleRate, len: u
     d.block_in(&Env {
         frame: Frame::new(frame),
         sample_rate: rate,
-        block_len: Samples(len),
+        block_len: Samples::new(len),
         transport: TransportPosition::default(),
         changes: TransportChanges::NONE,
         play: PlayClock::ZERO,
@@ -85,7 +85,10 @@ fn block_at(d: &mut Direct<EventInletNode>, frame: u64, rate: SampleRate, len: u
 }
 
 fn reprepare(d: &mut Direct<EventInletNode>, rate: SampleRate) {
-    Node::<f32>::prepare(&mut *d.node, &Prepare::new(rate, MaxBlock::of(Samples(64))));
+    Node::<f32>::prepare(
+        &mut *d.node,
+        &Prepare::new(rate, MaxBlock::of(Samples::new(64))),
+    );
 }
 
 /// An event pushed for frame F is emitted in the block that holds F, on offset
@@ -413,7 +416,7 @@ fn a_moment_read_before_a_re_prepare_keeps_its_instant() {
     let read = tx.clock().expect("prepared");
     assert_eq!((read.frame(), read.rate()), (Frame::new(192), R48));
     reprepare(&mut d, R441);
-    tx.push(read.after(Samples(500)), note(61)).unwrap();
+    tx.push(read.after(Samples::new(500)), note(61)).unwrap();
     // 692 x 44100 / 48000 = 635.7, so offset 8 of the block at 628
     block_at(&mut d, 628, R441, 64);
     assert_eq!(sent(&d), [(8, 9, 61)]);

@@ -391,7 +391,7 @@ impl<F: Float> Reference<F> {
             },
             None => PlayReading {
                 epoch: self.play.epoch,
-                play: self.play.play + Samples(frames),
+                play: self.play.play + Samples::new(frames),
             },
         };
         self.play_playing = playing;
@@ -1188,19 +1188,19 @@ impl<F: Float> Reference<F> {
             self.history.observe(&Env {
                 frame: self.frame,
                 sample_rate: next.sample_rate(),
-                block_len: Samples(frames),
+                block_len: Samples::new(frames),
                 transport: *transport,
                 changes: *changes,
                 play,
             });
-            self.frame += Samples(frames);
+            self.frame += Samples::new(frames);
             return;
         }
         let play = self.play_clock(transport, changes, frames);
         let env = Env {
             frame: self.frame,
             sample_rate: self.prepare.sample_rate(),
-            block_len: Samples(frames),
+            block_len: Samples::new(frames),
             transport: *transport,
             changes: *changes,
             play,
@@ -1210,7 +1210,7 @@ impl<F: Float> Reference<F> {
             for o in outputs.iter_mut() {
                 o[..frames].fill(F::ZERO);
             }
-            self.frame += Samples(frames);
+            self.frame += Samples::new(frames);
             return;
         };
         let t = graph.topology();
@@ -1407,7 +1407,7 @@ impl<F: Float> Reference<F> {
                 );
                 f.clock += frames as u64;
             }
-            self.frame += Samples(frames);
+            self.frame += Samples::new(frames);
         });
     }
 
@@ -1737,7 +1737,7 @@ impl<F: Float> Reference<F> {
                 if k >= f.len {
                     break;
                 }
-                let (g_out, g_in) = fade_gains::<F>(f.law, Samples(k), Samples(f.len));
+                let (g_out, g_in) = fade_gains::<F>(f.law, Samples::new(k), Samples::new(f.len));
                 for (o, x) in outs.iter_mut().zip(&old) {
                     o[i] = o[i] * g_in + x[i] * g_out;
                 }
@@ -2148,8 +2148,8 @@ fn ref_port<F: Float>(
                 r.target
             } else {
                 let t = Normalized::progress(
-                    Samples(usize::try_from(into).unwrap_or(usize::MAX)),
-                    Samples(usize::try_from(r.len).unwrap_or(usize::MAX)),
+                    Samples::new(usize::try_from(into).unwrap_or(usize::MAX)),
+                    Samples::new(usize::try_from(r.len).unwrap_or(usize::MAX)),
                 );
                 ref_line(param.param, r.from, r.target, r.shape, t)
             }
@@ -2164,7 +2164,8 @@ fn ref_port<F: Float>(
     for (i, v) in vals.iter_mut().enumerate() {
         if st.fading > 0 && i < st.fading {
             let j = decl - st.fading + i;
-            let (out, inn) = fade_gains::<F>(FadeLaw::EqualAmplitude, Samples(j), Samples(decl));
+            let (out, inn) =
+                fade_gains::<F>(FadeLaw::EqualAmplitude, Samples::new(j), Samples::new(decl));
             *v = st.hold * out + *v * inn;
         }
     }
@@ -2177,7 +2178,7 @@ fn ref_port<F: Float>(
 
 /// `k / n` as the progress a lane's ramp reads, narrowed once to `F`.
 fn progress_in<F: Float>(k: usize, n: usize) -> F {
-    F::from_unit(Normalized::progress(Samples(k), Samples(n)))
+    F::from_unit(Normalized::progress(Samples::new(k), Samples::new(n)))
 }
 
 /// `from + (to - from) * law(t)` in the unit's `f64`; a circular param takes
@@ -2392,8 +2393,12 @@ impl<F: Float> RefMode<F> {
                         moving: lane.is_some() || from != to,
                     };
                 };
-                let g =
-                    fade_gains::<F>(FadeLaw::EqualAmplitude, Samples(k), Samples(self.declick)).1;
+                let g = fade_gains::<F>(
+                    FadeLaw::EqualAmplitude,
+                    Samples::new(k),
+                    Samples::new(self.declick),
+                )
+                .1;
                 let wy = begin.0 + (target.0 - begin.0) * g;
                 let wx = begin.1 + (target.1 - begin.1) * g;
                 (self.y, self.x) = (wy, wx);

@@ -118,7 +118,7 @@ struct Pending<F: Float> {
 /// g.pipe_output(src); // mono → both channels
 ///
 /// let mut r = g
-///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 ///     .expect("builds");
 /// let out = r.render(100); // two 64-frame blocks, the second short
 /// assert_eq!(out.len(), 2);
@@ -156,7 +156,7 @@ struct Pending<F: Float> {
 /// g.connect(half, 0, gain, 0).connect_output(gain, 0, 1); // right = 2 × input
 ///
 /// let mut r = g
-///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 ///     .expect("builds");
 /// let out = r.render_input(Planes::new(&[&[1.0; 10]]).unwrap());
 /// assert_eq!(out, vec![vec![0.5; 10], vec![2.0; 10]]);
@@ -749,9 +749,9 @@ type TransportFn = Box<dyn FnMut(Frame) -> TransportPosition + Send>;
 /// g.chain(ForkByClone(Gain(1.0)));
 ///
 /// let mut r = g
-///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))))
+///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256))))
 ///     .expect("builds");
-/// r.set_block(Samples(200));
+/// r.set_block(Samples::new(200));
 /// let input: Vec<f32> = (0..500).map(|i| i as f32).collect();
 /// let out = r.render_input(Planes::new(&[&input]).unwrap());
 /// assert_eq!(out, vec![input.clone(), input]);
@@ -759,7 +759,7 @@ type TransportFn = Box<dyn FnMut(Frame) -> TransportPosition + Send>;
 /// // A rolling transport is a function of the block's first frame.
 /// r.set_transport_fn(|frame| {
 ///     // 120 BPM at 48 kHz: 24 000 frames a beat.
-///     TransportPosition::new(true, Bpm::of(120.0), Beat(frame.get() as f64 / 24_000.0), None)
+///     TransportPosition::new(true, Bpm::of(120.0), Beat::new(frame.get() as f64 / 24_000.0), None)
 /// });
 /// assert_eq!(r.render_interleaved(2), vec![0.0; 4]); // L R L R
 /// ```
@@ -990,7 +990,7 @@ impl<F: Float> Renderer<F> {
 /// #     }
 /// #     fn reset(&mut self) {}
 /// # }
-/// let mut solo = Solo::new(ForkByClone(Half), Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+/// let mut solo = Solo::new(ForkByClone(Half), Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// assert_eq!(solo.render_input(Planes::new(&[&[1.0; 3]]).unwrap()), vec![vec![0.5; 3]]);
 /// ```
 #[derive(Debug)]

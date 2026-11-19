@@ -139,8 +139,8 @@ const SYNTHS: usize = 8;
 const NOTES: usize = 16;
 const SAMPLER_TRACKS: usize = 4;
 const SAMPLER_VOICES: usize = 8;
-const WARM: Seconds = Seconds(1.0);
-const MEASURED: Seconds = Seconds(10.0);
+const WARM: Seconds = Seconds::new(1.0);
+const MEASURED: Seconds = Seconds::new(10.0);
 
 /// Holds `notes` notes on its event output: one note-on per block from the
 /// first, then nothing.
@@ -167,7 +167,7 @@ impl Node for Hold {
                     NoteVelocity::new(0xC000),
                 ),
             ));
-            let at = Offset::of(Samples(0), Samples(io.frames()));
+            let at = Offset::of(Samples::new(0), Samples::new(io.frames()));
             if io.event_out(0).push(Event::midi(at, note)).is_ok() {
                 self.sent += 1;
             }
@@ -189,7 +189,7 @@ fn noise(state: &mut u32) -> f32 {
 /// A 2 s exponentially decaying noise tail: a plain reverb IR.
 fn ir(seed: u32) -> Vec<f32> {
     let mut s = seed;
-    let len = Seconds(2.0).to_samples(SampleRate::of(RATE)).get();
+    let len = Seconds::new(2.0).to_samples(SampleRate::of(RATE)).get();
     (0..len)
         .map(|i| noise(&mut s) * (-6.9 * i as f32 / len as f32).exp() * 0.05)
         .collect()
@@ -230,7 +230,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let mut s = Session::builder()
         .render_workers(workers)
         .sample_rate(SampleRate::of(RATE))
-        .max_block(MaxBlock::of(Samples(block)))
+        .max_block(MaxBlock::of(Samples::new(block)))
         .build()
         .expect("builds");
 
@@ -241,10 +241,15 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
             polyphony: std::num::NonZeroUsize::new(NOTES).expect("at least one voice"),
             oscillator: OscillatorType::Saw,
             filter: FilterType::Moog {
-                cutoff: Hz(1_200.0),
-                resonance: Resonance(0.3),
+                cutoff: Hz::new(1_200.0),
+                resonance: Resonance::new(0.3),
             },
-            envelope: Adsr::new(Seconds(0.005), Seconds(0.2), Amplitude(0.7), Seconds(0.3)),
+            envelope: Adsr::new(
+                Seconds::new(0.005),
+                Seconds::new(0.2),
+                Amplitude::new(0.7),
+                Seconds::new(0.3),
+            ),
             ..Default::default()
         });
         let (synth, _) = s.graph().add(synth);
@@ -261,7 +266,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
 
     let mut tone = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     let mut seed = 0x1234_5678;
-    let frames = Seconds(20.0).to_samples(SampleRate::of(RATE)).get();
+    let frames = Seconds::new(20.0).to_samples(SampleRate::of(RATE)).get();
     for i in 0..frames {
         let t = i as f32 / RATE as f32;
         let x = (std::f32::consts::TAU * 220.0 * t).sin() * 0.3 + noise(&mut seed) * 0.05;
@@ -274,13 +279,13 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
         for v in 0..SAMPLER_VOICES {
             pool.insert(
                 SlotId(v as u128 + 1),
-                MemorySource::placed(Arc::clone(&tone), VoiceWindow::from(Beat(0.0)))
+                MemorySource::placed(Arc::clone(&tone), VoiceWindow::from(Beat::new(0.0)))
                     .expect("a placeable wave"),
                 {
                     let k = (t * SAMPLER_VOICES + v) as f64;
                     let interval = Cents::new(-350.0 + 25.0 * k + 3.0);
                     let play = Playback {
-                        gain: Amplitude(0.1),
+                        gain: Amplitude::new(0.1),
                         ..Default::default()
                     };
                     if variant.vocoder() {
@@ -311,7 +316,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
             connect_stereo(&mut s, strip, 0, src);
             if reverb {
                 let send = BusStripNode::stereo();
-                send.set_volume(Db(-12.0).to_amplitude());
+                send.set_volume(Db::new(-12.0).to_amplitude());
                 let (send, _) = s.graph().add(send);
                 connect_stereo(&mut s, send, 0, src);
                 sends.push(send);
@@ -324,7 +329,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     if reverb {
         let (l, r) = (ir(1), ir(2));
         let (conv, _) = s.graph().add(
-            ConvolverNode::per_channel(&[Mono::new(&l), Mono::new(&r)], Samples(PARTITION))
+            ConvolverNode::per_channel(&[Mono::new(&l), Mono::new(&r)], Samples::new(PARTITION))
                 .unwrap(),
         );
         for send in &sends {
@@ -340,8 +345,8 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
         add_stereo(&mut s, master, *strip);
     }
     let (limiter, _) = s.graph().add(LimiterNode::<f32>::stereo(LimiterControls {
-        threshold: Db(-1.0),
-        ceiling: Db(0.0),
+        threshold: Db::new(-1.0),
+        ceiling: Db::new(0.0),
         ..LimiterControls::DEFAULT
     }));
     connect_stereo(&mut s, limiter, 0, master);

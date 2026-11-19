@@ -453,7 +453,7 @@ impl GraphSpec {
                         sink: at(c),
                         from: Edge::Direct(source),
                     },
-                    Amplitude(gain),
+                    Amplitude::new(gain),
                 ));
             }
         }

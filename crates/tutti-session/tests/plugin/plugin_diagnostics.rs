@@ -20,7 +20,7 @@ const BLOCK: usize = 512;
 fn offline() -> Session {
     Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("an offline session builds")
 }
@@ -170,11 +170,11 @@ mod clap {
         let _ = s.update();
         let diag = s.plugin_view(node).unwrap().diagnostics();
         let own = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
-        assert_eq!(diag.reported_latency(), Samples(own));
-        assert_eq!(diag.latency(), Samples(own + BLOCK));
+        assert_eq!(diag.reported_latency(), Samples::new(own));
+        assert_eq!(diag.latency(), Samples::new(own + BLOCK));
         assert_eq!(
             diag.tail(),
-            tutti_units::Tail::Finite(Samples(8191)),
+            tutti_units::Tail::Finite(Samples::new(8191)),
             "the tail the probe's `clap.tail` reports, as the graph holds it"
         );
     }

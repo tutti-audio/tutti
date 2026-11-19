@@ -382,7 +382,7 @@ fn a_plugins_refreshes_and_invalidations_arrive_in_the_stream() {
     refresh.fire(PluginRefresh::ParamValues);
     refresh.fire(PluginRefresh::ParamTitles);
     invalidate.fire(PluginInvalidation::Latency {
-        samples: tutti_units::Samples(64),
+        samples: tutti_units::Samples::new(64),
     });
     invalidate.fire(PluginInvalidation::Tail {
         tail: PluginTail::Unbounded,

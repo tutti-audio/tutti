@@ -93,7 +93,7 @@ use tutti_rt::LockExt;
 /// consecutive graph blocks of at most this many frames, so it bounds the
 /// arena, not the device. 1024 frames covers every buffer size a DAW offers
 /// by default.
-pub const LIVE_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples(1024));
+pub const LIVE_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples::new(1024));
 
 /// The spec `kind` of a hosted plugin.
 #[cfg(feature = "plugin")]
@@ -570,7 +570,7 @@ impl<F: Float> Graph<F> {
             tempo,
             resumed: false,
             compensation: Arc::default(),
-            latency: Samples(0),
+            latency: Samples::new(0),
         }
     }
 
@@ -4000,7 +4000,7 @@ mod tail_tests {
             ChannelLayout::STEREO,
             2,
             rate,
-            MaxBlock::of(Samples(64)),
+            MaxBlock::of(Samples::new(64)),
             None,
             tutti_transport::TempoReader::fixed(Arc::new(map)),
         )
@@ -4019,9 +4019,9 @@ mod tail_tests {
             let latency_limit = MAX_NODE_LATENCY.to_samples_ceil(rate);
             // The two rates' limits, spelled out.
             let (want_tail, want_latency) = if rate == SampleRate::SR_48K {
-                (Samples(2_880_000), Samples(480_000))
+                (Samples::new(2_880_000), Samples::new(480_000))
             } else {
-                (Samples(5_760_000), Samples(960_000))
+                (Samples::new(5_760_000), Samples::new(960_000))
             };
             assert_eq!((tail_limit, latency_limit), (want_tail, want_latency));
 
@@ -4034,11 +4034,11 @@ mod tail_tests {
             };
             assert_eq!(tail_after(tail_limit), Tail::Finite(tail_limit), "{rate:?}");
             assert_eq!(
-                tail_after(Samples(tail_limit.get() + 1)),
+                tail_after(tail_limit + Samples::new(1)),
                 Tail::Unbounded,
                 "{rate:?}"
             );
-            let four_million = Samples(4_000_000);
+            let four_million = Samples::new(4_000_000);
             let finite_here = four_million <= tail_limit;
             assert_eq!(finite_here, rate == SampleRate::SR_96K);
             let want = if finite_here {
@@ -4060,7 +4060,7 @@ mod tail_tests {
             };
             assert_eq!(latency_after(latency_limit), latency_limit, "{rate:?}");
             assert_eq!(
-                latency_after(Samples(latency_limit.get() + 1)),
+                latency_after(latency_limit + Samples::new(1)),
                 latency_limit,
                 "{rate:?}"
             );
@@ -4078,7 +4078,7 @@ mod tail_tests {
         g.commit();
         assert!(!g.is_edited());
 
-        let new = Tail::Finite(Samples(500));
+        let new = Tail::Finite(Samples::new(500));
         assert!(g.refresh_node_tail(node, new), "a moved tail is taken");
         assert_eq!(g.node_tail(node), Ok(new));
         assert!(g.is_edited(), "the next commit moves the ceiling");
@@ -4090,7 +4090,7 @@ mod tail_tests {
         assert!(!g.is_edited());
 
         let limit = tutti_graph::MAX_NODE_TAIL.to_samples_ceil(g.editor.prepare().sample_rate());
-        let past = Tail::Finite(Samples(limit.get() + 1));
+        let past = Tail::Finite(limit + Samples::new(1));
         assert!(g.refresh_node_tail(node, past));
         assert_eq!(
             g.node_tail(node),
@@ -4132,7 +4132,7 @@ mod root_fade_tests {
             ChannelLayout::STEREO,
             2,
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(64)),
+            MaxBlock::of(Samples::new(64)),
             None,
             tutti_transport::TempoReader::fixed(Arc::new(map)),
         );
@@ -4169,7 +4169,7 @@ mod root_fade_tests {
         assert_eq!(plan.global_outputs(), 6);
         assert_eq!(
             (bank.fade.duration, bank.fade.law),
-            (Samples(240), FadeLaw::EqualAmplitude)
+            (Samples::new(240), FadeLaw::EqualAmplitude)
         );
 
         g.declare_root(Some(Bed::Stereo.topology()), true)

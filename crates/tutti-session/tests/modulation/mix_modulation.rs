@@ -118,7 +118,7 @@ fn a_route_onto_a_mix_modulates_around_the_base_the_mix_target_writes() {
 
     let mix = MixRef::of(node);
     let mut m = s.mods_mut();
-    m.range(mix, Mix(0.0)..Mix(1.0)).unwrap();
+    m.range(mix, Mix::new(0.0)..Mix::new(1.0)).unwrap();
     let source = m.macro_(0.5);
     let route = m
         .route(RouteSpec::new(source, mix, Depth::of(0.5)))
@@ -177,7 +177,7 @@ fn a_removed_node_takes_its_mix_route_with_it() {
     let node = rig(&mut s);
     let mix = MixRef::of(node);
     let mut m = s.mods_mut();
-    m.range(mix, Mix(0.0)..Mix(1.0)).unwrap();
+    m.range(mix, Mix::new(0.0)..Mix::new(1.0)).unwrap();
     let source = m.macro_(0.5);
     m.route(RouteSpec::new(source, mix, Depth::of(0.5)))
         .unwrap();
@@ -235,7 +235,7 @@ fn a_route_onto_the_mix_of_a_node_with_no_pass_is_refused() {
 
     let mix = MixRef::of(spread);
     let mut m = s.mods_mut();
-    m.range(mix, Mix(0.0)..Mix(1.0)).unwrap();
+    m.range(mix, Mix::new(0.0)..Mix::new(1.0)).unwrap();
     let source = m.macro_(0.5);
     m.route(RouteSpec::new(source, mix, Depth::of(0.5)))
         .unwrap();

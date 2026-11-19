@@ -117,7 +117,7 @@ impl<F: Float> TapWriter<F> {
         }
         let frames = block.frames().get();
         let start = self.next;
-        self.next = start + Samples(frames);
+        self.next = start + Samples::new(frames);
         let take = if block.layout() == self.layout() {
             self.room(frames).min(frames)
         } else {
@@ -148,7 +148,7 @@ impl<F: Float> TapWriter<F> {
     #[inline]
     pub fn skip(&mut self, frames: usize) {
         if self.lanes.first().is_some_and(is_open) {
-            self.next += Samples(frames);
+            self.next += Samples::new(frames);
             self.count_lost(frames);
         }
     }
@@ -343,7 +343,7 @@ impl<F: Float> TapReader<F> {
     /// others mid-block, and a read never goes past the shortest.
     #[must_use]
     pub fn available(&self) -> Samples {
-        Samples(self.lanes.iter().map(RingReader::len).min().unwrap_or(0))
+        Samples::new(self.lanes.iter().map(RingReader::len).min().unwrap_or(0))
     }
 
     /// Pops frames into `out`, as many as fit; returns the frame count. The
@@ -366,7 +366,7 @@ impl<F: Float> TapReader<F> {
             });
         }
         self.consume(frames);
-        Ok(Samples(frames))
+        Ok(Samples::new(frames))
     }
 
     /// Refuses a view of another width than the tap's.
@@ -402,7 +402,7 @@ impl<F: Float> TapReader<F> {
             debug_assert_eq!(popped, frames, "available counted every lane");
         }
         self.consume(frames);
-        Ok(Samples(frames))
+        Ok(Samples::new(frames))
     }
 
     /// The graph frame of the next frame this reader hands out: the clock a
@@ -434,16 +434,16 @@ impl<F: Float> TapReader<F> {
     /// never inside a read. At most [`available`](Self::available).
     #[must_use]
     pub fn contiguous(&self) -> Samples {
-        let mut end = self.at + Samples(self.left);
+        let mut end = self.at + Samples::new(self.left);
         let mut run = self.left;
         for next in self.runs.iter() {
             if run > 0 && next.start != end {
                 break;
             }
             run += next.frames;
-            end = next.start + Samples(next.frames);
+            end = next.start + Samples::new(next.frames);
         }
-        Samples(run.min(self.available().get()))
+        Samples::new(run).min(self.available())
     }
 
     /// Advances the clock over `frames` just handed out, across run
@@ -461,7 +461,7 @@ impl<F: Float> TapReader<F> {
                 self.left = run.frames;
             }
             let step = frames.min(self.left);
-            self.at += Samples(step);
+            self.at += Samples::new(step);
             self.left -= step;
             frames -= step;
         }
@@ -470,7 +470,7 @@ impl<F: Float> TapReader<F> {
     /// Frames the executor could not push since the last call, and clears the
     /// count: nonzero is a gap in what was read.
     pub fn take_lost(&self) -> Samples {
-        Samples(usize::try_from(self.lost.swap(0, Ordering::Relaxed)).unwrap_or(usize::MAX))
+        Samples::new(usize::try_from(self.lost.swap(0, Ordering::Relaxed)).unwrap_or(usize::MAX))
     }
 }
 
@@ -546,14 +546,14 @@ mod tests {
         // Not representable in `f32`: a narrowing would be visible.
         let block: Vec<f64> = (0..FRAMES).map(|i| 0.1 * (i + 1) as f64).collect();
         arena.slot_mut(0, FRAMES).copy_from_slice(&block);
-        let (mut reader, mut writer) = TapReader::<f64>::pair(1, Samples(1024));
+        let (mut reader, mut writer) = TapReader::<f64>::pair(1, Samples::new(1024));
         tap_op::<f64, _>(&mut writer, &arena, &[0], Frame::ZERO, FRAMES);
         let mut out = vec![0.0f64; FRAMES];
         assert_eq!(
             reader
                 .pop_into(InterleavedMut::new(&mut out, reader.layout()).unwrap())
                 .unwrap(),
-            Samples(FRAMES)
+            Samples::new(FRAMES)
         );
         assert_eq!(out, block);
         assert_ne!(f64::from(block[0] as f32), block[0]);
@@ -564,14 +564,18 @@ mod tests {
     /// and the fourth stays queued.
     #[test]
     fn a_stereo_pop_interleaves_in_lane_order_and_stops_at_the_view() {
-        let (mut reader, mut writer) = TapReader::<f32>::pair(2, Samples(16));
+        let (mut reader, mut writer) = TapReader::<f32>::pair(2, Samples::new(16));
         let block = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0];
         writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
         let mut out = [9.0f32; 6];
         let view = InterleavedMut::new(&mut out, reader.layout()).unwrap();
-        assert_eq!(reader.pop_into(view).unwrap(), Samples(3));
+        assert_eq!(reader.pop_into(view).unwrap(), Samples::new(3));
         assert_eq!(out, [1.0, -1.0, 2.0, -2.0, 3.0, -3.0]);
-        assert_eq!(reader.available(), Samples(1), "the fourth frame stays");
+        assert_eq!(
+            reader.available(),
+            Samples::new(1),
+            "the fourth frame stays"
+        );
     }
 
     /// A pop into a view of another width is refused with both widths, leaves
@@ -579,7 +583,7 @@ mod tests {
     /// still gets every frame.
     #[test]
     fn a_pop_into_another_width_is_refused_and_consumes_nothing() {
-        let (mut reader, mut writer) = TapReader::<f32>::pair(2, Samples(16));
+        let (mut reader, mut writer) = TapReader::<f32>::pair(2, Samples::new(16));
         let block = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
         writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
         let three = ChannelLayout::from(3u16);
@@ -595,14 +599,14 @@ mod tests {
         assert_eq!(wide, [9.0; 9], "the view is untouched");
         let mut out = [0.0f32; 6];
         let view = InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap();
-        assert_eq!(reader.pop_into(view), Ok(Samples(3)));
+        assert_eq!(reader.pop_into(view), Ok(Samples::new(3)));
         assert_eq!(out, block);
     }
 
     /// The same for planes: both widths named, nothing consumed.
     #[test]
     fn a_pop_into_planes_of_another_width_is_refused_and_consumes_nothing() {
-        let (mut reader, mut writer) = TapReader::<f32>::pair(2, Samples(16));
+        let (mut reader, mut writer) = TapReader::<f32>::pair(2, Samples::new(16));
         let block = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
         writer.push_interleaved(Interleaved::new(&block, writer.layout()).unwrap());
         let mut one = [vec![9.0f32; 3]];
@@ -616,7 +620,7 @@ mod tests {
         assert_eq!(one, [[9.0; 3]], "the view is untouched");
         let mut planes = [vec![0.0f32; 3], vec![0.0f32; 3]];
         let got = reader.pop_planes(PlanesMut::from_vecs(&mut planes).unwrap());
-        assert_eq!(got, Ok(Samples(3)));
+        assert_eq!(got, Ok(Samples::new(3)));
         assert_eq!(planes, [[1.0, 2.0, 3.0], [-1.0, -2.0, -3.0]]);
     }
 
@@ -624,11 +628,11 @@ mod tests {
     /// counted lost whole.
     #[test]
     fn a_block_of_another_width_is_counted_lost() {
-        let (reader, mut writer) = TapReader::<f32>::pair(2, Samples(16));
+        let (reader, mut writer) = TapReader::<f32>::pair(2, Samples::new(16));
         let block = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let mono_wide = Interleaved::new(&block, ChannelLayout::from(3u16)).unwrap();
         writer.push_interleaved(mono_wide);
-        assert_eq!(reader.available(), Samples(0));
-        assert_eq!(reader.take_lost(), Samples(2));
+        assert_eq!(reader.available(), Samples::new(0));
+        assert_eq!(reader.take_lost(), Samples::new(2));
     }
 }

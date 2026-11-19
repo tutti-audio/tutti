@@ -93,7 +93,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples(512)));
+        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(512)));
     t.nodes.insert(C, spec("gain", 1, 1));
     t.nodes.insert(D, spec("sum", 2, 1));
     edge(&mut t, at(B, 0), out(A, 0));
@@ -106,9 +106,9 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples(128)));
+        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(128)));
     t.nodes
-        .insert(C, spec("gain", 1, 1).with_latency(Samples(64)));
+        .insert(C, spec("gain", 1, 1).with_latency(Samples::new(64)));
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
     t.set_outputs(vec![Source::Node(out(C, 0))]);
@@ -156,10 +156,12 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes.insert(
         B,
-        spec("gain", 1, 1).with_tail(Tail::Finite(Samples(2_048))),
+        spec("gain", 1, 1).with_tail(Tail::Finite(Samples::new(2_048))),
     );
-    t.nodes
-        .insert(C, spec("gain", 1, 1).with_tail(Tail::Finite(Samples(256))));
+    t.nodes.insert(
+        C,
+        spec("gain", 1, 1).with_tail(Tail::Finite(Samples::new(256))),
+    );
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
     t.set_outputs(vec![Source::Node(out(C, 0))]);
@@ -168,7 +170,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples(999)));
+        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(999)));
     edge(&mut t, at(B, 0), out(A, 0));
     t.set_outputs(vec![Source::Node(out(A, 0))]);
     all.push(("orphan_branch", t));
@@ -407,9 +409,9 @@ fn a_diamond_of_3_and_7_delays_the_short_branch_by_4() {
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples(3)));
+        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(3)));
     t.nodes
-        .insert(C, spec("gain", 1, 1).with_latency(Samples(7)));
+        .insert(C, spec("gain", 1, 1).with_latency(Samples::new(7)));
     t.nodes.insert(D, spec("sum", 2, 1));
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(A, 0));
@@ -425,11 +427,11 @@ fn a_diamond_of_3_and_7_delays_the_short_branch_by_4() {
                 at: at(D, 0),
                 from: Source::Node(out(B, 0)),
             },
-            Samples(4)
+            Samples::new(4)
         )]
     );
-    assert_eq!(plan.total_latency().samples(), Samples(7));
-    assert_eq!(plan.compensation(), &[Samples(0)]);
+    assert_eq!(plan.total_latency().samples(), Samples::new(7));
+    assert_eq!(plan.compensation(), &[Samples::new(0)]);
 }
 
 /// The rings the plan inserts actually align the paths: rendered through the
@@ -546,12 +548,12 @@ fn feedback_edges_break_cycles() {
         at(A, 0),
         vec![Edge::Feedback(FeedbackFrom::one_block(
             out(B, 0),
-            Samples(PREP),
+            Samples::new(PREP),
         ))],
     );
     g.connect_events(
         EventIn { node: A, port: 0 },
-        EventEdge::feedback(EventOut { node: B, port: 0 }, Samples(PREP)),
+        EventEdge::feedback(EventOut { node: B, port: 0 }, Samples::new(PREP)),
     );
     let valid = g.validate().expect("feedback breaks the cycle");
     let (plan, _) =
@@ -848,7 +850,7 @@ fn a_global_input_merging_with_a_latent_path_is_delayed() {
     };
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes
-        .insert(B, spec("gain", 1, 1).with_latency(Samples(48)));
+        .insert(B, spec("gain", 1, 1).with_latency(Samples::new(48)));
     t.nodes.insert(C, spec("sum", 2, 1));
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
@@ -861,7 +863,7 @@ fn a_global_input_merging_with_a_latent_path_is_delayed() {
         at: at(C, 1),
         from: Source::Global(0),
     };
-    assert_eq!(plan.delay(key), Samples(48));
+    assert_eq!(plan.delay(key), Samples::new(48));
     // The pure pass agrees.
     assert_eq!(
         delays(&t, SampleRate::SR_48K).inputs(),
@@ -869,7 +871,7 @@ fn a_global_input_merging_with_a_latent_path_is_delayed() {
             node: C,
             port: 1,
             feed: Feed::Outside,
-            by: Samples(48)
+            by: Samples::new(48)
         }],
         "latency::delays aligns the global input as the plan does"
     );
@@ -879,7 +881,7 @@ fn a_global_input_merging_with_a_latent_path_is_delayed() {
         &GraphSpec::new(t.clone()).validate().unwrap(),
         &kinds_for(&t),
     );
-    assert_eq!(pair.reference.delay(key), Samples(48));
+    assert_eq!(pair.reference.delay(key), Samples::new(48));
     let mut frame = 0;
     for _ in 0..6 {
         let (a, b) = pair.block(100, &input_signal(frame, 100));
@@ -899,7 +901,7 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
     // A (64 frames latent, emits events) ─events─▶ C;  B (dry) ─audio─▶ C.
     let mut t = Topology::default();
     t.nodes
-        .insert(A, spec("emit", 0, 0).with_latency(Samples(64)));
+        .insert(A, spec("emit", 0, 0).with_latency(Samples::new(64)));
     t.nodes.insert(B, spec("dc", 0, 1));
     t.nodes.insert(C, spec("gain", 1, 1));
     edge(&mut t, at(C, 0), out(B, 0));
@@ -913,7 +915,7 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
     shapes.insert(
         A,
         Shape::EMPTY
-            .with_latency(Latency::new(Samples(64)))
+            .with_latency(Latency::new(Samples::new(64)))
             .with_tail(Tail::None)
             .with_events(0, 1),
     );
@@ -938,11 +940,11 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
     };
     assert_eq!(
         plan.delay(key),
-        Samples(64),
+        Samples::new(64),
         "the dry port waits for the events"
     );
     let comp = latency_plan(&g, SampleRate::SR_48K);
-    assert_eq!(comp.total(), Samples(64));
+    assert_eq!(comp.total(), Samples::new(64));
     assert_eq!(plan.total_latency().samples(), comp.total());
     assert_eq!(plan.compensation(), comp.channels());
     assert_eq!(
@@ -951,7 +953,7 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
             node: C,
             port: 0,
             feed: Feed::Node(B),
-            by: Samples(64)
+            by: Samples::new(64)
         }],
         "and the pass puts the delay on the same port"
     );
@@ -966,11 +968,11 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
 fn a_shape_disagreeing_on_latency_or_tail_is_refused() {
     let mut t = Topology::default();
     t.nodes
-        .insert(A, spec("gain", 1, 1).with_latency(Samples(10)));
+        .insert(A, spec("gain", 1, 1).with_latency(Samples::new(10)));
     let valid = GraphSpec::new(t).validate().unwrap();
     let late: Shapes = [(
         A,
-        Shape::through_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples(12))),
+        Shape::through_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples::new(12))),
     )]
     .into();
     assert!(matches!(
@@ -980,7 +982,7 @@ fn a_shape_disagreeing_on_latency_or_tail_is_refused() {
     let tailed: Shapes = [(
         A,
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples(10)))
+            .with_latency(Latency::new(Samples::new(10)))
             .with_tail(Tail::Unbounded),
     )]
     .into();

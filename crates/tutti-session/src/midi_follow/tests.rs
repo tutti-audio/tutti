@@ -18,7 +18,7 @@ fn rolling() -> Stand {
     Stand {
         rate: RATE,
         frame: Frame::new(96_000),
-        span: Samples(512),
+        span: Samples::new(512),
         seconds: Seconds::new(2.0),
         playing: true,
     }

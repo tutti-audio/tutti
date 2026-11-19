@@ -141,7 +141,9 @@ fn next_block_beat(found: &Found) -> Beat {
     let p = &found.playhead;
     assert!(p.playing());
     let seconds = found.before.seconds_at(p.beat()).get() + BLOCK as f64 / RATE;
-    found.before.beat_at_seconds(tutti_units::Seconds(seconds))
+    found
+        .before
+        .beat_at_seconds(tutti_units::Seconds::new(seconds))
 }
 
 fn approx(a: Beat, b: Beat) -> bool {
@@ -180,7 +182,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     assert_eq!(
         map.points(),
         [
-            TempoPoint::step(Beat(0.0), Bpm::of(120.0)),
+            TempoPoint::step(Beat::new(0.0), Bpm::of(120.0)),
             TempoPoint::step(beat, Bpm::of(75.0)),
         ],
         "the map before the beat is the project's; a step to the sent tempo after"
@@ -253,8 +255,8 @@ fn without_a_follow_a_flex_tempo_changes_nothing() {
 fn a_step_in_a_project_ramp_cuts_the_ramp() {
     let (mut s, fake) = rig();
     let ramp = TempoMap::builder(Bpm::of(60.0))
-        .ramp_time_to(Beat(8.0), Bpm::of(180.0))
-        .step_to(Beat(16.0), Bpm::of(90.0))
+        .ramp_time_to(Beat::new(8.0), Bpm::of(180.0))
+        .step_to(Beat::new(16.0), Bpm::of(90.0))
         .build()
         .unwrap();
     s.set(s.transport_handle().tempo().to(ramp.clone()))
@@ -279,7 +281,7 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
     assert_eq!(points.len(), 2, "{points:?}");
     assert_eq!(
         (points[0].beat, points[0].tempo),
-        (Beat(0.0), Bpm::of(60.0))
+        (Beat::new(0.0), Bpm::of(60.0))
     );
     assert_eq!(
         points[1].beat, beat,
@@ -296,8 +298,8 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
     assert_eq!(points[1].transition, Transition::Step, "ends on a step");
     for b in [0.0, beat.get() / 2.0, beat.get()] {
         let (a, n) = (
-            ramp.seconds_at(Beat(b)).get(),
-            map.seconds_at(Beat(b)).get(),
+            ramp.seconds_at(Beat::new(b)).get(),
+            map.seconds_at(Beat::new(b)).get(),
         );
         assert!((a - n).abs() < 1e-9, "beat {b}: {a} vs {n}");
     }
@@ -338,12 +340,16 @@ fn a_set_time_signature_lands_on_the_next_bar_line() {
         "still in the first bar: {:?}",
         found.playhead.beat()
     );
-    assert_eq!(beat, Beat(4.0), "the next bar line of 4/4 after beat ~0.1");
+    assert_eq!(
+        beat,
+        Beat::new(4.0),
+        "the next bar line of 4/4 after beat ~0.1"
+    );
     assert_eq!(
         s.get(project_meter).unwrap().changes(),
         [
-            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-            MeterChange::new(Beat(4.0), TimeSignature::of(3, 4)),
+            MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+            MeterChange::new(Beat::new(4.0), TimeSignature::of(3, 4)),
         ]
     );
     assert!(

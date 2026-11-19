@@ -71,7 +71,7 @@ fn smootherstep(j: usize, n: usize) -> f64 {
 }
 
 fn prepare(max: usize) -> Prepare {
-    Prepare::new(RATE, MaxBlock::of(Samples(max)))
+    Prepare::new(RATE, MaxBlock::of(Samples::new(max)))
 }
 
 /// A base cell, as a node's `Param<U>` would hand it out.
@@ -191,8 +191,8 @@ impl Node for Probe {
 /// A step of `param` to `value` (a zero-length ramp) at `offset`.
 fn step(offset: tutti_graph::Offset, param: UnitParam, value: f64) -> ParamEvent {
     let ramp = match param {
-        UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(value), Samples(0)),
-        _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(value), Samples(0)),
+        UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q::new(value), Samples::new(0)),
+        _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(value), Samples::new(0)),
     };
     ParamEvent::ramp(offset, ramp)
 }
@@ -286,7 +286,8 @@ impl Lag {
 
 impl Node for Lag {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples(self.n)))
+        Shape::through_unassigned(ChannelLayout::MONO)
+            .with_latency(Latency::new(Samples::new(self.n)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -350,8 +351,8 @@ impl Node for Ramps {
                 continue;
             }
             let ramp = match param {
-                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target), Samples(len)),
-                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
+                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q::new(target), Samples::new(len)),
+                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(target), Samples::new(len)),
             };
             let offset = io.offset((at - start) as usize).expect("inside");
             events.push(ParamEvent::ramp(offset, ramp));
@@ -715,7 +716,7 @@ fn a_fade_keeps_the_params_it_declares() {
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 512, 64);
 
-    let fade = tutti_graph::Fade::new(Samples(128), tutti_graph::FadeLaw::EqualAmplitude);
+    let fade = tutti_graph::Fade::new(Samples::new(128), tutti_graph::FadeLaw::EqualAmplitude);
     assert!(
         matches!(
             ed.replace(NodeKey(PROBE), Unforkable(CutoffOnly), fade),
@@ -982,7 +983,11 @@ fn a_delay_appearing_on_a_param_source_holds_its_last_value() {
             .iter()
             .find(|d| matches!(d.key, tutti_graph::DelayKey::ParamEvent { .. }))
             .map(|d| d.len);
-        assert_eq!(delay, Some(Samples(lag)), "the param source is delayed");
+        assert_eq!(
+            delay,
+            Some(Samples::new(lag)),
+            "the param source is delayed"
+        );
         let out = render(&mut exec, &mut ed, 512, 64);
         assert!(
             out[0].iter().all(|&x| x == 1.0),
@@ -1003,7 +1008,7 @@ impl Node for LatentHold {
     fn shape(&self) -> Shape {
         Hold { value: self.value }
             .shape()
-            .with_latency(Latency::new(Samples(self.latency)))
+            .with_latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -1037,10 +1042,10 @@ fn a_param_source_counts_toward_arrival_in_both_solves() {
         .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
     ed.commit().expect("commits");
     let plan = ed.base().expect("a plan");
-    assert_eq!(plan.total_latency(), Latency::new(Samples(37)));
+    assert_eq!(plan.total_latency(), Latency::new(Samples::new(37)));
     assert_eq!(
         tutti_graph::latency_plan(ed.spec(), RATE).total(),
-        Samples(37),
+        Samples::new(37),
         "the spec's own fold agrees"
     );
     assert!(
@@ -1317,16 +1322,16 @@ fn a_segment_hits_its_analytic_values_per_frame() {
     let segs = vec![
         (
             100,
-            ParamSegment::new(key, Hz(a.1), Hz(a.2), Samples(a.3), a.0),
+            ParamSegment::new(key, Hz::new(a.1), Hz::new(a.2), Samples::new(a.3), a.0),
         ),
         (
             1300,
-            ParamSegment::new(key, Hz(b.1), Hz(b.2), Samples(b.3), b.0),
+            ParamSegment::new(key, Hz::new(b.1), Hz::new(b.2), Samples::new(b.3), b.0),
         ),
         (
             1700,
-            ParamSegment::new(key, Hz(c.1), Hz(c.2), Samples(0), c.0)
-                .resumed(Samples(c.3), Samples(c.4)),
+            ParamSegment::new(key, Hz::new(c.1), Hz::new(c.2), Samples::new(0), c.0)
+                .resumed(Samples::new(c.3), Samples::new(c.4)),
         ),
     ];
     let want = |f: u64| -> f64 {
@@ -1369,9 +1374,9 @@ fn an_interrupted_segment_hands_over_on_the_frame() {
             100,
             ParamSegment::new(
                 key,
-                Hz(0.0),
-                Hz(1.0),
-                Samples(1000),
+                Hz::new(0.0),
+                Hz::new(1.0),
+                Samples::new(1000),
                 Law::PowerIn(Exponent::of(2.0)),
             ),
         ),
@@ -1379,9 +1384,9 @@ fn an_interrupted_segment_hands_over_on_the_frame() {
             437,
             ParamSegment::new(
                 key,
-                Hz(2.0),
-                Hz(3.0),
-                Samples(50),
+                Hz::new(2.0),
+                Hz::new(3.0),
+                Samples::new(50),
                 Law::PowerOut(Exponent::of(3.0)),
             ),
         ),
@@ -1441,7 +1446,7 @@ fn a_shaped_ramp_hits_its_analytic_values_per_frame() {
     const TOL: f64 = 1e-5;
     let key = ParamKey::<Hz>::CUTOFF;
     let ramp = |target: f64, len: usize, shape| {
-        ParamRamp::new(key, Hz(target), Samples(len)).with_shape(shape)
+        ParamRamp::new(key, Hz::new(target), Samples::new(len)).with_shape(shape)
     };
     let shaped = vec![
         (100, ramp(1.0, 4, Law::PowerIn(Exponent::of(2.0)))),
@@ -1494,22 +1499,30 @@ fn an_interrupted_shaped_ramp_hands_over_on_the_frame() {
     let shaped = vec![
         (
             100,
-            ParamRamp::new(key, Hz(1.0), Samples(100)).with_shape(Law::PowerIn(Exponent::of(2.0))),
+            ParamRamp::new(key, Hz::new(1.0), Samples::new(100))
+                .with_shape(Law::PowerIn(Exponent::of(2.0))),
         ),
-        (150, ParamRamp::new(key, Hz(0.0), Samples(10))),
+        (150, ParamRamp::new(key, Hz::new(0.0), Samples::new(10))),
         (
             300,
-            ParamRamp::new(key, Hz(2.0), Samples(100)).with_shape(Law::PowerOut(Exponent::of(2.0))),
+            ParamRamp::new(key, Hz::new(2.0), Samples::new(100))
+                .with_shape(Law::PowerOut(Exponent::of(2.0))),
         ),
         (
             500,
-            ParamRamp::new(key, Hz(0.0), Samples(20))
+            ParamRamp::new(key, Hz::new(0.0), Samples::new(20))
                 .with_shape(Law::PowerInOut(Exponent::of(2.0))),
         ),
     ];
     let segs = vec![(
         340,
-        ParamSegment::new(key, Hz(4.0), Hz(6.0), Samples(1000), Law::Linear),
+        ParamSegment::new(
+            key,
+            Hz::new(4.0),
+            Hz::new(6.0),
+            Samples::new(1000),
+            Law::Linear,
+        ),
     )];
     for blocks in segment_schedules(600) {
         let out = render_moves(Vec::new(), shaped.clone(), segs.clone(), &blocks);
@@ -1553,9 +1566,9 @@ fn a_range_clamps_a_segment_without_rewriting_it() {
     let shape = Law::PowerOut(Exponent::of(2.0));
     let seg = ParamSegment::new(
         ParamKey::<Hz>::CUTOFF,
-        Hz(0.0),
-        Hz(2.0),
-        Samples(640),
+        Hz::new(0.0),
+        Hz::new(2.0),
+        Samples::new(640),
         shape,
     );
     ed.insert(
@@ -1632,19 +1645,19 @@ impl Node for SegmentThenRamp {
         let block = start..start + io.frames() as u64;
         if let Some(at) = self.step_at.filter(|at| block.contains(at)) {
             let o = io.offset((at - start) as usize).expect("inside");
-            let step = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(7.0), Samples(0));
+            let step = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(7.0), Samples::new(0));
             let _ = io.event_out(0).push_param(ParamEvent::ramp(o, step));
         }
         if block.contains(&self.at) {
             let o = io.offset((self.at - start) as usize).expect("inside");
             let seg = ParamSegment::new(
                 ParamKey::<Hz>::CUTOFF,
-                Hz(5.0),
-                Hz(9.0),
-                Samples(20),
+                Hz::new(5.0),
+                Hz::new(9.0),
+                Samples::new(20),
                 Law::Linear,
             );
-            let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(0.0), Samples(4));
+            let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(0.0), Samples::new(4));
             let _ = io.event_out(0).push_param(ParamEvent::segment(o, seg));
             let _ = io.event_out(0).push_param(ParamEvent::ramp(o, ramp));
         }
@@ -1791,9 +1804,9 @@ fn a_segment_replaces_the_base() {
     let shape = Law::PowerInOut(Exponent::of(2.0));
     let seg = ParamSegment::new(
         ParamKey::<Hz>::CUTOFF,
-        Hz(0.0),
-        Hz(0.5),
-        Samples(200),
+        Hz::new(0.0),
+        Hz::new(0.5),
+        Samples::new(200),
         shape,
     );
     ed.insert(
@@ -1951,7 +1964,7 @@ fn a_range_move_reaches_a_unit_that_faded_in() {
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 128, 64);
 
-    let fade = tutti_graph::Fade::new(Samples(128), tutti_graph::FadeLaw::EqualAmplitude);
+    let fade = tutti_graph::Fade::new(Samples::new(128), tutti_graph::FadeLaw::EqualAmplitude);
     let (c2, q2) = (Cell::new(0.0), Cell::new(0.0));
     ed.replace(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
         .expect("the same params fade");
@@ -2083,10 +2096,10 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
     // The ramp's value at absolute frame `f`: `Ramp::step`'s arithmetic in
     // `f64`, from the base (the port's value before its first event),
     // crossing to the lane's `f32` once.
-    let target = f32::from_unit(Hz(TARGET));
+    let target = f32::from_unit(Hz::new(TARGET));
     let ramp = |f: u64| {
         let done = f as usize + 1;
-        f32::from_unit(Hz(if done >= LEN {
+        f32::from_unit(Hz::new(if done >= LEN {
             TARGET
         } else {
             f64::from(BASE) + (TARGET - f64::from(BASE)) * (done as f64 / LEN as f64)
@@ -2209,19 +2222,23 @@ fn gen_segment() -> impl Strategy<Value = (u64, ParamSegment)> {
         .prop_map(|(at, p, from, to, len, k, resumed)| {
             let shape = gen_shape(k);
             let seg = match PARAMS[p] {
-                UnitParam::Q => {
-                    ParamSegment::new(ParamKey::<Q>::Q, Q(from), Q(to), Samples(len), shape)
-                }
+                UnitParam::Q => ParamSegment::new(
+                    ParamKey::<Q>::Q,
+                    Q::new(from),
+                    Q::new(to),
+                    Samples::new(len),
+                    shape,
+                ),
                 _ => ParamSegment::new(
                     ParamKey::<Hz>::CUTOFF,
-                    Hz(from),
-                    Hz(to),
-                    Samples(len),
+                    Hz::new(from),
+                    Hz::new(to),
+                    Samples::new(len),
                     shape,
                 ),
             };
             let seg = match resumed {
-                Some((pos, l)) => seg.resumed(Samples(pos), Samples(l)),
+                Some((pos, l)) => seg.resumed(Samples::new(pos), Samples::new(l)),
                 None => seg,
             };
             (at, seg)
@@ -2233,8 +2250,8 @@ fn gen_shaped_ramp() -> impl Strategy<Value = (u64, ParamRamp)> {
     (0u64..500, 0usize..2, -3.0f64..3.0, 0usize..60, any::<u8>()).prop_map(
         |(at, p, target, len, k)| {
             let ramp = match PARAMS[p] {
-                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q(target), Samples(len)),
-                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
+                UnitParam::Q => ParamRamp::new(ParamKey::<Q>::Q, Q::new(target), Samples::new(len)),
+                _ => ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(target), Samples::new(len)),
             };
             (at, ramp.with_shape(gen_shape(k)))
         },
@@ -2584,9 +2601,21 @@ fn a_range_cell_handle_is_the_ports_own() {
 #[test]
 fn corners_skip_a_resend_at_any_block_size() {
     let key = ParamKey::<Hz>::CUTOFF;
-    let a = ParamSegment::new(key, Hz(100.0), Hz(500.0), Samples(40), Law::Linear);
-    let along = |frames: usize| a.resumed(a.position() + Samples(frames), a.length());
-    let b = ParamSegment::new(key, Hz(500.0), Hz(200.0), Samples(8), Law::Linear);
+    let a = ParamSegment::new(
+        key,
+        Hz::new(100.0),
+        Hz::new(500.0),
+        Samples::new(40),
+        Law::Linear,
+    );
+    let along = |frames: usize| a.resumed(a.position() + Samples::new(frames), a.length());
+    let b = ParamSegment::new(
+        key,
+        Hz::new(500.0),
+        Hz::new(200.0),
+        Samples::new(8),
+        Law::Linear,
+    );
     let source = || Ramps {
         plan: Vec::new(),
         segs: vec![

@@ -81,7 +81,7 @@ struct Graph {
 impl Graph {
     /// Renders `n` frames, in blocks.
     fn render(&mut self, n: usize) {
-        let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+        let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         let (mut left, mut right) = ([0.0f32; BLOCK], [0.0f32; BLOCK]);
         let mut left_over = n;
         while left_over > 0 {
@@ -113,7 +113,7 @@ fn pump_until_dry<I: Source, O: Sink<Sample = I::Sample>>(
 fn graph_tap(capacity: usize) -> (Graph, TapReader) {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { at: 0 }));
     let port = |port| {
@@ -128,7 +128,7 @@ fn graph_tap(capacity: usize) -> (Graph, TapReader) {
             TapId::of(1),
             vec![port(0), port(1)],
             TapAlign::ToOutput,
-            Samples(capacity),
+            Samples::new(capacity),
         )
         .expect("the sources exist");
     ed.commit().expect("compiles");
@@ -167,7 +167,7 @@ fn tapped_frames_reach_the_wav_in_order_through_the_whole_chain() {
     .expect("sink opens");
 
     let mut pump =
-        PumpLoop::new(src, sink, Samples(1024)).expect("stereo source into a stereo sink");
+        PumpLoop::new(src, sink, Samples::new(1024)).expect("stereo source into a stereo sink");
 
     // Fill the tap first so the pump has something to move, then drain it with
     // a bounded number of passes — never a sleep, and never "pump until it
@@ -176,7 +176,7 @@ fn tapped_frames_reach_the_wav_in_order_through_the_whole_chain() {
     let moved = pump_until_dry(&mut pump, 64);
     assert_eq!(
         moved,
-        Samples(FRAMES),
+        Samples::new(FRAMES),
         "every frame pushed must be moved, and counted in FRAMES — a pump that \
          returned samples here would report {}",
         FRAMES * 2
@@ -244,7 +244,7 @@ fn interleaved_pushes_and_pumps_lose_no_frames() {
     .expect("sink opens");
 
     let mut pump =
-        PumpLoop::new(src, sink, Samples(1024)).expect("stereo source into a stereo sink");
+        PumpLoop::new(src, sink, Samples::new(1024)).expect("stereo source into a stereo sink");
 
     const BURST: usize = 512;
     const BURSTS: usize = 6;
@@ -255,7 +255,7 @@ fn interleaved_pushes_and_pumps_lose_no_frames() {
     }
     assert_eq!(
         moved,
-        Samples(BURST * BURSTS),
+        Samples::new(BURST * BURSTS),
         "no frame may be lost between bursts"
     );
 
@@ -294,12 +294,16 @@ fn a_gap_in_a_take_is_counted_and_the_file_closes_up_over_it() {
         &path,
     )
     .expect("sink opens");
-    let mut pump = PumpLoop::new(src, sink, Samples(1024)).expect("pairs");
+    let mut pump = PumpLoop::new(src, sink, Samples::new(1024)).expect("pairs");
 
     graph.render(2048);
     let moved = pump_until_dry(&mut pump, 64);
-    assert_eq!(moved, Samples(512));
-    assert_eq!(pump.lost(), Samples(1536), "rendered = recorded + lost");
+    assert_eq!(moved, Samples::new(512));
+    assert_eq!(
+        pump.lost(),
+        Samples::new(1536),
+        "rendered = recorded + lost"
+    );
     pump.finalize().expect("finalizes");
 
     let reader = hound::WavReader::open(&path).expect("readable");

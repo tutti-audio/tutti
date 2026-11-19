@@ -127,12 +127,12 @@ fn land(ed: &mut Editor, exec: &mut Executor) {
 /// executor holds the old ceiling.
 #[test]
 fn a_tail_change_moves_the_park_time_at_the_next_commit() {
-    let long = Tail::Finite(Samples(7 * BLOCK));
+    let long = Tail::Finite(Samples::new(7 * BLOCK));
 
-    let (_ed, mut exec, calls) = graph(Tail::Finite(Samples(BLOCK)));
+    let (_ed, mut exec, calls) = graph(Tail::Finite(Samples::new(BLOCK)));
     assert_eq!(calls_over(&mut exec, &calls, 20), 1, "one block of ceiling");
 
-    let (mut ed, mut exec, calls) = graph(Tail::Finite(Samples(BLOCK)));
+    let (mut ed, mut exec, calls) = graph(Tail::Finite(Samples::new(BLOCK)));
     ed.set_tail(NODE, long).expect("sets");
     assert_eq!(ed.spec().topology.nodes[&NODE].tail, long);
     assert_eq!(
@@ -141,7 +141,7 @@ fn a_tail_change_moves_the_park_time_at_the_next_commit() {
         "before the commit the executor reads the old ceiling"
     );
 
-    let (mut ed, mut exec, calls) = graph(Tail::Finite(Samples(BLOCK)));
+    let (mut ed, mut exec, calls) = graph(Tail::Finite(Samples::new(BLOCK)));
     ed.set_tail(NODE, long).expect("sets");
     land(&mut ed, &mut exec);
     assert_eq!(
@@ -154,8 +154,8 @@ fn a_tail_change_moves_the_park_time_at_the_next_commit() {
 /// A shorter ceiling parks sooner, the same way round.
 #[test]
 fn a_shorter_tail_parks_sooner() {
-    let (mut ed, mut exec, calls) = graph(Tail::Finite(Samples(7 * BLOCK)));
-    ed.set_tail(NODE, Tail::Finite(Samples(BLOCK)))
+    let (mut ed, mut exec, calls) = graph(Tail::Finite(Samples::new(7 * BLOCK)));
+    ed.set_tail(NODE, Tail::Finite(Samples::new(BLOCK)))
         .expect("sets");
     land(&mut ed, &mut exec);
     assert_eq!(calls_over(&mut exec, &calls, 20), 1);
@@ -173,15 +173,15 @@ fn set_tail_refuses_and_never_clamps() {
         (SampleRate::SR_96K, 5_760_000),
     ] {
         let (mut ed, _exec, _calls) = graph_at(
-            Tail::Finite(Samples(BLOCK)),
-            Prepare::new(rate, MaxBlock::of(Samples(BLOCK))),
+            Tail::Finite(Samples::new(BLOCK)),
+            Prepare::new(rate, MaxBlock::of(Samples::new(BLOCK))),
         );
-        assert_eq!(MAX_NODE_TAIL.to_samples_ceil(rate), Samples(frames));
+        assert_eq!(MAX_NODE_TAIL.to_samples_ceil(rate), Samples::new(frames));
         assert!(matches!(
             ed.set_tail(NodeKey(99), Tail::None),
             Err(CommitError::NoSuchNode { node }) if node == NodeKey(99)
         ));
-        let (limit, over) = (Samples(frames), Samples(frames + 1));
+        let (limit, over) = (Samples::new(frames), Samples::new(frames + 1));
         assert!(
             matches!(
                 ed.set_tail(NODE, Tail::Finite(over)),
@@ -192,7 +192,7 @@ fn set_tail_refuses_and_never_clamps() {
         );
         assert_eq!(
             ed.spec().topology.nodes[&NODE].tail,
-            Tail::Finite(Samples(BLOCK)),
+            Tail::Finite(Samples::new(BLOCK)),
             "a refusal changes nothing"
         );
         ed.set_tail(NODE, Tail::Finite(limit))
@@ -209,7 +209,7 @@ fn set_tail_refuses_and_never_clamps() {
 /// is `replace.rs`'s).
 #[test]
 fn set_tail_does_not_cut_a_fade() {
-    let fade = Fade::new(Samples(1000), FadeLaw::EqualAmplitude);
+    let fade = Fade::new(Samples::new(1000), FadeLaw::EqualAmplitude);
     let gain = |g: f32| TestNode::new(Kind::Gain { gain: g, width: 1 });
     let (mut ed, mut exec, _) = graph(Tail::None);
     // A gain node at its own key: the fade needs a unit whose shape matches.
@@ -237,7 +237,7 @@ fn set_tail_does_not_cut_a_fade() {
     block(&mut exec, 1.0);
     assert_eq!(ed.fades_in_flight(), 1);
 
-    ed.set_tail(NodeKey(2), Tail::Finite(Samples(BLOCK)))
+    ed.set_tail(NodeKey(2), Tail::Finite(Samples::new(BLOCK)))
         .expect("sets");
     ed.commit().expect("commits");
     let out = block(&mut exec, 1.0);

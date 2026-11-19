@@ -29,8 +29,8 @@ fn detached() -> DetachedSession {
 /// A limiter's lookahead is the latency; the one the engine ships.
 fn limiter() -> LimiterNode<f32> {
     LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db(-1.0),
-        ceiling: Db(-0.3),
+        threshold: Db::new(-1.0),
+        ceiling: Db::new(-0.3),
         ..LimiterControls::DEFAULT
     })
 }
@@ -72,9 +72,12 @@ fn a_graph_with_no_latency_reports_none() {
         .unwrap();
     let _ = s.update();
 
-    assert_eq!(s.latency(), Samples(0));
+    assert_eq!(s.latency(), Samples::new(0));
     assert!(
-        s.compensation().to_vec().iter().all(|c| *c == Samples(0)),
+        s.compensation()
+            .to_vec()
+            .iter()
+            .all(|c| *c == Samples::new(0)),
         "no channel pre-rolls"
     );
 }
@@ -112,7 +115,7 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
     assert_eq!(sent.total(), lat, "and it is the limiter's lookahead");
     assert_eq!(
         s.compensation().to_vec().first().copied(),
-        Some(Samples(0)),
+        Some(Samples::new(0)),
         "the channel that defines the latency pre-rolls by zero"
     );
     assert_eq!(
@@ -140,7 +143,7 @@ fn an_update_with_no_edit_publishes_nothing() {
     skewed(&mut s);
     let _ = s.update();
     assert!(!s.graph_ref().is_edited());
-    let sentinel = vec![Samples(99)];
+    let sentinel = vec![Samples::new(99)];
     s.compensation().set(&sentinel);
 
     let _ = s.update();
@@ -182,7 +185,7 @@ fn the_latency_fold_and_the_compiled_plan_agree() {
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph().connect(a, Root).unwrap();
     let _ = s.update();
-    assert_eq!(figures(&s).1, Samples(0));
+    assert_eq!(figures(&s).1, Samples::new(0));
 }
 
 /// **A re-prepare to a new rate republishes the figures once it resumes**,

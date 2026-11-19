@@ -86,8 +86,8 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
 /// last one after reading `Instant::now()` into the return.
 fn render(stream: &ManualStream, blocks: usize, delay: Option<Duration>) -> Instant {
     let one = || match delay {
-        Some(delay) => stream.render_block_delayed(Samples(BLOCK), delay),
-        None => stream.render_block(Samples(BLOCK)),
+        Some(delay) => stream.render_block_delayed(Samples::new(BLOCK), delay),
+        None => stream.render_block(Samples::new(BLOCK)),
     };
     for _ in 1..blocks {
         one().expect("the stream is open");
@@ -137,9 +137,13 @@ fn an_output_offset_shifts_the_send_times() {
         let wire = Wire::default();
         let (mut s, stream) = rig(&wire);
         let target = s.midi().output_latency();
-        s.set(target.to(
-            OutputLatency::new(Seconds(0.0), OutputOffset::new(Seconds(offset)).unwrap()).unwrap(),
-        ))
+        s.set(
+            target.to(OutputLatency::new(
+                Seconds::new(0.0),
+                OutputOffset::new(Seconds::new(offset)).unwrap(),
+            )
+            .unwrap()),
+        )
         .unwrap();
         let last_block = render(&stream, 100, latency);
         let _ = s.update();
@@ -188,7 +192,7 @@ fn an_unreported_audio_latency_is_left_out_and_reported() {
 
     let last_block = render(&stream, 2, Some(Duration::from_millis(40)));
     let terms = s.midi().output_terms().unwrap();
-    assert_eq!(terms.audio_output, Some(Seconds(0.04)));
+    assert_eq!(terms.audio_output, Some(Seconds::new(0.04)));
     assert!(terms.is_complete());
     let _ = s.update();
     let scheduled: Vec<Instant> = wire
@@ -225,9 +229,11 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         .set(tutti_midi_runtime::SyncMessages::OFF);
     let target = s.midi().output_latency();
     s.set(
-        target.to(
-            OutputLatency::new(Seconds(0.005), OutputOffset::new(Seconds(0.0)).unwrap()).unwrap(),
-        ),
+        target.to(OutputLatency::new(
+            Seconds::new(0.005),
+            OutputOffset::new(Seconds::new(0.0)).unwrap(),
+        )
+        .unwrap()),
     )
     .unwrap();
     let note = |on: bool, at: Beat| {
@@ -239,8 +245,8 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         TimedMidiEvent::new(at, Message::midi2(MidiChannel::FIRST, voice)).unwrap()
     };
     let (clip, _) = s.graph().add(MidiClipNode::new([
-        note(true, Beat(1.0)),
-        note(false, Beat(2.0)),
+        note(true, Beat::new(1.0)),
+        note(false, Beat::new(2.0)),
     ]));
     let sink = s.midi_sink(&"out").expect("loaded");
     s.graph()

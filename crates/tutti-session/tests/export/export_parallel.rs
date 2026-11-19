@@ -136,7 +136,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
     let mut bounce = Bounce::project()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
-        .range(Range::Seconds(Seconds(0.0), Seconds(0.5)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(RATE)
         .clock(ExportClock::frozen())
         .tail(BounceTail::None);
@@ -206,7 +206,7 @@ fn the_stems_of_a_parallel_export_are_bit_identical_to_the_serial_ones() {
     assert_eq!(serial.len(), 1 + stems.len());
     assert_eq!(parallel.len(), serial.len());
     for (i, (a, b)) in serial.iter().zip(&parallel).enumerate() {
-        assert_eq!(a.frames(), Samples(24_000), "target {i}");
+        assert_eq!(a.frames(), Samples::new(24_000), "target {i}");
         assert_eq!(a.frames(), b.frames(), "target {i}");
         assert!(
             a.planes()[0].iter().any(|s| *s != 0.0),

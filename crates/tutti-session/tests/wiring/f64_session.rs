@@ -19,7 +19,7 @@ fn session(workers: Workers) -> Session<&'static str, Offline<f64>> {
         .float::<f64>()
         .outputs(ChannelLayout::MONO)
         .outputs_floor(ChannelLayout::MONO)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .render_workers(workers)
         .build()
         .expect("an f64 session builds")

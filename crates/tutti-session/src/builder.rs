@@ -51,7 +51,7 @@ use tutti_engine::BlockDates;
 ///
 /// let session = Session::builder()
 ///     .sample_rate(SampleRate::SR_44K1)
-///     .max_block(MaxBlock::of(Samples(512)))
+///     .max_block(MaxBlock::of(Samples::new(512)))
 ///     .outputs_floor(ChannelLayout::from_count(6)) // a 5.1 project renders six, whatever the device
 ///     .render_workers(Workers::SERIAL)
 ///     .build()
@@ -1146,7 +1146,7 @@ mod tests {
     #[test]
     fn the_setters_choose_the_rate_the_width_and_the_block() {
         let quad = ChannelLayout::from_count(4);
-        let block = MaxBlock::of(Samples(256));
+        let block = MaxBlock::of(Samples::new(256));
         let session = Session::builder()
             .sample_rate(SampleRate::SR_44K1)
             .outputs(quad)

@@ -55,7 +55,7 @@ fn rig() -> (Session, NodeKey) {
     let unit = SoundFontUnit::new(soundfont(), Settings::new()).expect("builds the unit");
     let mut s = Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(128)))
+        .max_block(MaxBlock::of(Samples::new(128)))
         .build()
         .expect("builds");
     let (synth, _) = s.graph().add(unit);
@@ -88,8 +88,8 @@ fn a_declared_note_produces_audio() {
     s.midi()
         .play_clip(
             synth,
-            Beat(0.0),
-            note(60, u16::MAX, Beat(0.0), BeatDuration(2.0)),
+            Beat::new(0.0),
+            note(60, u16::MAX, Beat::new(0.0), BeatDuration::new(2.0)),
         )
         .expect("a synth takes a clip");
     let _ = s.update();
@@ -115,8 +115,8 @@ fn the_note_waits_for_its_beat() {
     s.midi()
         .play_clip(
             synth,
-            Beat(0.0),
-            note(60, u16::MAX, Beat(4.0), BeatDuration(4.0)),
+            Beat::new(0.0),
+            note(60, u16::MAX, Beat::new(4.0), BeatDuration::new(4.0)),
         )
         .expect("a synth takes a clip");
     let _ = s.update();
@@ -152,8 +152,8 @@ fn preview_still_sounds_under_an_installed_clip() {
     s.midi()
         .play_clip(
             synth,
-            Beat(0.0),
-            note(60, u16::MAX, Beat(100.0), BeatDuration(1.0)),
+            Beat::new(0.0),
+            note(60, u16::MAX, Beat::new(100.0), BeatDuration::new(1.0)),
         )
         .expect("a synth takes a clip");
     let _ = s.update();

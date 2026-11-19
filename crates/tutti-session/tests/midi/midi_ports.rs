@@ -748,8 +748,8 @@ fn an_output_port_sends_what_its_node_is_fed_to_the_device() {
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
-        Beat(0.0),
-        BeatDuration(1.0),
+        Beat::new(0.0),
+        BeatDuration::new(1.0),
     )));
     s.graph()
         .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
@@ -909,8 +909,8 @@ fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
-        Beat(0.0),
-        BeatDuration(1.0),
+        Beat::new(0.0),
+        BeatDuration::new(1.0),
     )));
     s.graph()
         .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])

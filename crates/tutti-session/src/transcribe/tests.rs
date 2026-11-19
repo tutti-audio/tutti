@@ -13,10 +13,10 @@ fn map() -> TempoMap {
 fn note(cents: f64, start: usize, end: usize, level: f64) -> NoteEvent {
     NoteEvent {
         note: Note::C4,
-        cents: Cents(cents),
-        start: Samples(start),
-        end: Samples(end),
-        velocity: Db(level),
+        cents: Cents::new(cents),
+        start: Samples::new(start),
+        end: Samples::new(end),
+        velocity: Db::new(level),
     }
 }
 
@@ -46,7 +46,7 @@ fn events(notes: &[NoteEvent], mapping: NoteMapping) -> Vec<TimedMidiEvent> {
 fn a_note_at_one_second_at_120_bpm_lands_on_beat_two() {
     let e = events(&[note(0.0, SECOND, 2 * SECOND, -10.0)], fixed());
     assert!(matches!(voice(&e[0]).1, Voice2::NoteOn { .. }));
-    assert_eq!(e[0].beat(), Beat(2.0));
+    assert_eq!(e[0].beat(), Beat::new(2.0));
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn a_note_off_lands_at_the_notes_end() {
     let e = events(&[note(0.0, SECOND, 3 * SECOND, -10.0)], fixed());
     assert_eq!(e.len(), 2);
     assert!(matches!(voice(&e[1]).1, Voice2::NoteOff { .. }));
-    assert_eq!(e[1].beat(), Beat(6.0));
+    assert_eq!(e[1].beat(), Beat::new(6.0));
 }
 
 #[test]
@@ -193,14 +193,14 @@ fn a_chord_span_is_one_change_at_its_start_with_its_root_and_quality() {
         ChordSpan {
             root: PitchClass::A,
             quality: ChordQuality::Minor,
-            start: Samples(SECOND),
-            end: Samples(2 * SECOND),
+            start: Samples::new(SECOND),
+            end: Samples::new(2 * SECOND),
         },
         ChordSpan {
             root: PitchClass::C,
             quality: ChordQuality::Major,
-            start: Samples(2 * SECOND),
-            end: Samples(3 * SECOND),
+            start: Samples::new(2 * SECOND),
+            end: Samples::new(3 * SECOND),
         },
     ];
     let map = map();
@@ -208,10 +208,10 @@ fn a_chord_span_is_one_change_at_its_start_with_its_root_and_quality() {
     let [a, c] = changes.as_slice() else {
         panic!("one change per span: {changes:?}");
     };
-    assert_eq!(a.beat, Beat(2.0));
+    assert_eq!(a.beat, Beat::new(2.0));
     // A minor: root 69 (A4), root, minor third and fifth.
     assert_eq!(a.harmony, Harmony::chord(69, 69, 0b1000_1001));
-    assert_eq!(c.beat, Beat(4.0));
+    assert_eq!(c.beat, Beat::new(4.0));
     assert_eq!(c.harmony, Harmony::chord(60, 60, 0b1001_0001));
 }
 

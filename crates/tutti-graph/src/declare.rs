@@ -303,7 +303,7 @@ pub fn input<'a, F: Float>(
 ///     Q => Q = &n.q,
 /// });
 ///
-/// let filter = Filter { cutoff: Param::new(Hz(1_000.0)), q: Param::new(Q(0.7)) };
+/// let filter = Filter { cutoff: Param::new(Hz::new(1_000.0)), q: Param::new(Q::new(0.7)) };
 /// // The shape's ports, the node's `ParamSet` and the base of port 1:
 /// assert_eq!(filter.declared_ports().as_slice().len(), 2);
 /// assert!(filter.declared_set().set(tutti_units::UnitParam::Cutoff, 2_000.0));

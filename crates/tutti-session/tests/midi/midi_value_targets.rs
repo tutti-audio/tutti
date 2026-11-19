@@ -57,8 +57,8 @@ fn sounding() -> (Session, tutti_session::Key<MidiClipNode>, Seen) {
     s.midi()
         .play_clip(
             synth,
-            Beat(0.0),
-            note(60, MF, Beat(0.0), BeatDuration(1_000.0)),
+            Beat::new(0.0),
+            note(60, MF, Beat::new(0.0), BeatDuration::new(1_000.0)),
         )
         .expect("the tap takes MIDI");
     let clip = s.midi().clip(synth).expect("the target's clip");
@@ -77,13 +77,19 @@ fn a_clip_written_through_its_target_plays_from_the_next_block() {
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .play_clip(synth, Beat(0.0), note(60, MF, Beat(0.0), BeatDuration(1.0)))
+        .play_clip(
+            synth,
+            Beat::new(0.0),
+            note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)),
+        )
         .expect("the tap takes MIDI");
     let clip = s.midi().clip(synth).expect("the target's clip");
-    s.set(
-        clip.events()
-            .to(clip_of(note(64, MF, Beat(1.0 / 3.0), BeatDuration(1.0)))),
-    )
+    s.set(clip.events().to(clip_of(note(
+        64,
+        MF,
+        Beat::new(1.0 / 3.0),
+        BeatDuration::new(1.0),
+    ))))
     .unwrap();
     let _ = s.update();
     play(&s);
@@ -95,7 +101,12 @@ fn a_clip_written_through_its_target_plays_from_the_next_block() {
 #[test]
 fn a_clips_target_reads_the_clip_written() {
     let (s, clip, _) = sounding();
-    let next = Arc::new(clip_of(note(62, MF, Beat(0.0), BeatDuration(1.0))));
+    let next = Arc::new(clip_of(note(
+        62,
+        MF,
+        Beat::new(0.0),
+        BeatDuration::new(1.0),
+    )));
     s.set(clip.events().to(Arc::clone(&next))).unwrap();
     assert_eq!(s.get(clip.events()).unwrap(), next);
     assert_eq!(s.get(clip.events()).unwrap().len(), 2);
@@ -107,7 +118,7 @@ fn a_clips_target_reads_the_clip_written() {
 #[test]
 fn writing_an_equal_clip_cuts_no_note_and_a_different_one_does() {
     let (mut s, clip, seen) = sounding();
-    let mut again = note(60, MF, Beat(0.0), BeatDuration(1_000.0));
+    let mut again = note(60, MF, Beat::new(0.0), BeatDuration::new(1_000.0));
     again.reverse();
     s.set(clip.events().to(clip_of(again))).unwrap();
     let _ = s.update();
@@ -191,7 +202,7 @@ const G: Harmony = Harmony::chord(67, 67, 0b1001_0001);
 const C_MAJOR: Harmony = Harmony::scale(60, 0b1010_1011_0101);
 
 fn at(beat: f64, harmony: Harmony) -> TimedHarmony {
-    TimedHarmony::new(Beat(beat), harmony)
+    TimedHarmony::new(Beat::new(beat), harmony)
 }
 
 /// A harmony node with no changes, wired to a tap, and the transport rolling.
@@ -306,8 +317,8 @@ fn blocks_adopting_written_values_do_not_allocate() {
     s.midi()
         .play_clip(
             note_sink,
-            Beat(0.0),
-            note(60, MF, Beat(0.0), BeatDuration(1_000.0)),
+            Beat::new(0.0),
+            note(60, MF, Beat::new(0.0), BeatDuration::new(1_000.0)),
         )
         .expect("the sink takes MIDI");
     let clip = s.midi().clip(note_sink).expect("the clip");
@@ -323,8 +334,12 @@ fn blocks_adopting_written_values_do_not_allocate() {
     );
 
     s.set((
-        clip.events()
-            .to(clip_of(note(64, MF, Beat(0.1), BeatDuration(1_000.0)))),
+        clip.events().to(clip_of(note(
+            64,
+            MF,
+            Beat::new(0.1),
+            BeatDuration::new(1_000.0),
+        ))),
         harmony
             .changes()
             .to([at(0.0, C)].into_iter().collect::<HarmonyChanges>()),
@@ -356,8 +371,8 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
     let (clip, old) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
-        Beat(0.0),
-        BeatDuration(1.0),
+        Beat::new(0.0),
+        BeatDuration::new(1.0),
     )));
     s.graph()
         .set_feed(synth, Feeder::Declared, vec![clip.events_out()]);
@@ -367,20 +382,20 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
         .replace(
             clip,
             MidiClipNode::new([]),
-            tutti_units::Seconds(0.0),
+            tutti_units::Seconds::new(0.0),
             tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the clip is there");
     let _ = s.update();
 
-    let written = clip_of(note(64, MF, Beat(1.0 / 3.0), BeatDuration(1.0)));
+    let written = clip_of(note(64, MF, Beat::new(1.0 / 3.0), BeatDuration::new(1.0)));
     s.set(clip.events().to(written)).unwrap();
     let _ = s.update();
     assert_eq!(new.len(), 2, "the new node holds the written clip");
     assert_eq!(old.len(), 2);
     assert_eq!(
         *old.current(),
-        clip_of(note(60, MF, Beat(0.0), BeatDuration(1.0))),
+        clip_of(note(60, MF, Beat::new(0.0), BeatDuration::new(1.0))),
         "the replaced node's clip is as it was"
     );
     play(&s);
@@ -396,13 +411,19 @@ fn play_clip_after_the_clips_node_was_removed_directly_is_refused() {
     let mut s = offline();
     let (synth, _seen) = tap(&mut s);
     s.midi()
-        .play_clip(synth, Beat(0.0), note(60, MF, Beat(0.0), BeatDuration(1.0)))
+        .play_clip(
+            synth,
+            Beat::new(0.0),
+            note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)),
+        )
         .unwrap();
     let clip = s.midi().clip(synth).expect("the target's clip");
     s.graph().remove(clip).expect("the clip is there");
-    let again = s
-        .midi()
-        .play_clip(synth, Beat(0.0), note(62, MF, Beat(0.0), BeatDuration(1.0)));
+    let again = s.midi().play_clip(
+        synth,
+        Beat::new(0.0),
+        note(62, MF, Beat::new(0.0), BeatDuration::new(1.0)),
+    );
     assert!(
         matches!(
             again,
@@ -449,14 +470,19 @@ fn a_clip_written_is_pending_until_the_update_publishes_it() {
     let (clip, controls) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
-        Beat(0.0),
-        BeatDuration(1.0),
+        Beat::new(0.0),
+        BeatDuration::new(1.0),
     )));
     s.graph()
         .set_feed(synth, Feeder::Declared, vec![clip.events_out()]);
     let _ = s.update();
     let in_force = controls.current();
-    let written = Arc::new(clip_of(note(64, MF, Beat(0.0), BeatDuration(1.0))));
+    let written = Arc::new(clip_of(note(
+        64,
+        MF,
+        Beat::new(0.0),
+        BeatDuration::new(1.0),
+    )));
 
     s.set(clip.events().to(Arc::clone(&written))).unwrap();
     assert!(Arc::ptr_eq(&s.get(clip.events()).unwrap(), &written));
@@ -477,12 +503,17 @@ fn a_pending_clip_write_to_a_removed_node_never_publishes_and_is_freed() {
     let (clip, controls) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
-        Beat(0.0),
-        BeatDuration(1.0),
+        Beat::new(0.0),
+        BeatDuration::new(1.0),
     )));
     let _ = s.update();
     let in_force = controls.current();
-    let written = Arc::new(clip_of(note(64, MF, Beat(0.0), BeatDuration(1.0))));
+    let written = Arc::new(clip_of(note(
+        64,
+        MF,
+        Beat::new(0.0),
+        BeatDuration::new(1.0),
+    )));
     let gone = Arc::downgrade(&written);
 
     s.set(clip.events().to(written)).unwrap();

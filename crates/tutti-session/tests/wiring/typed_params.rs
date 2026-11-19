@@ -30,8 +30,8 @@ fn a_keys_param_methods_name_their_kind_and_index() {
     let mut s = detached();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     let cutoff = lp.cutoff();
     assert_eq!(cutoff.node(), lp.erase());
@@ -47,11 +47,11 @@ fn a_write_reaches_the_cell_the_key_names() {
     let mut s = detached();
     let (lp, controls) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
-    s.set(lp.cutoff().to(Hz(2_500.0))).unwrap();
-    s.set(lp.q().to(Q(1.5))).unwrap();
+    s.set(lp.cutoff().to(Hz::new(2_500.0))).unwrap();
+    s.set(lp.q().to(Q::new(1.5))).unwrap();
     assert_eq!(controls.get(UnitParam::Cutoff), Some(2_500.0));
     assert_eq!(controls.get(UnitParam::Q), Some(1.5));
     assert_eq!(controls.get(UnitParam::GainDb), Some(0.0), "the rest stays");
@@ -62,14 +62,14 @@ fn a_write_reaches_the_cell_the_key_names() {
         BusTopology::MONO,
         KeySource::Sidechain,
         CompressorControls {
-            threshold: Db(-20.0),
-            ratio: tutti_units::CompressionRatio(4.0),
-            attack: Seconds(0.01),
-            release: Seconds(0.1),
+            threshold: Db::new(-20.0),
+            ratio: tutti_units::CompressionRatio::new(4.0),
+            attack: Seconds::new(0.01),
+            release: Seconds::new(0.1),
             ..CompressorControls::DEFAULT
         },
     ));
-    s.set(comp.attack().to(Seconds(0.25))).unwrap();
+    s.set(comp.attack().to(Seconds::new(0.25))).unwrap();
     assert_eq!(controls.get(UnitParam::Attack), Some(0.25));
 }
 
@@ -82,13 +82,13 @@ fn a_write_to_a_missing_node_or_param_is_no_such_target() {
     let mut s = detached();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     let (bare, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     // `replace` addresses what the incoming node declares: an `Unforkable`
     // declares nothing, so the key's cutoff now reaches no param.
@@ -97,14 +97,14 @@ fn a_write_to_a_missing_node_or_param_is_no_such_target() {
             bare,
             Unforkable(SvfFilterNode::<f32>::new(
                 SvfType::LowPass,
-                Hz(1_000.0),
-                Q(0.7),
+                Hz::new(1_000.0),
+                Q::new(0.7),
             )),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualPower,
         )
         .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
-    let refused = s.set(bare.cutoff().to(Hz(5.0))).unwrap_err();
+    let refused = s.set(bare.cutoff().to(Hz::new(5.0))).unwrap_err();
     assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
     assert!(
         refused
@@ -115,7 +115,7 @@ fn a_write_to_a_missing_node_or_param_is_no_such_target() {
 
     let cutoff = lp.cutoff();
     s.graph().remove(lp).unwrap();
-    let refused = s.set(cutoff.to(Hz(5.0))).unwrap_err();
+    let refused = s.set(cutoff.to(Hz::new(5.0))).unwrap_err();
     assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
     assert_eq!(refused.at, 0);
     assert_eq!(
@@ -164,14 +164,14 @@ tutti_graph::declare_params!([] Mine, n { Cutoff => Hz = &n.cutoff });
 fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
     let mut s = detached();
     let (mine, controls) = s.graph().add(Params(Mine {
-        cutoff: Param::new(Hz(100.0)),
+        cutoff: Param::new(Hz::new(100.0)),
     }));
     s.graph()
         .set_sources_hard(tutti_session::Root::output(0), [mine.out(0)])
         .unwrap();
     let _ = s.update();
 
-    s.set(mine.cutoff().to(Hz(440.0))).unwrap();
+    s.set(mine.cutoff().to(Hz::new(440.0))).unwrap();
     assert_eq!(controls.get(UnitParam::Cutoff), Some(440.0));
     let mut live = [0.0f32];
     s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
@@ -182,7 +182,7 @@ fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
         .testing()
         .fork_live()
         .expect("a Params node forks");
-    s.set(mine.cutoff().to(Hz(880.0))).unwrap();
+    s.set(mine.cutoff().to(Hz::new(880.0))).unwrap();
     let mut forked = [0.0f32];
     fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
     assert_eq!(forked, [440.0], "the fork has the value set at the fork");

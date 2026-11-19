@@ -190,7 +190,7 @@ impl<N: ParamNode + Clone> IsolateRow<N> {
             let env = crate::node::Env {
                 frame: tutti_units::Frame::new(done as u64),
                 sample_rate: SAMPLE_RATE,
-                block_len: tutti_units::Samples(size),
+                block_len: tutti_units::Samples::new(size),
                 transport: crate::node::TransportPosition::default(),
                 changes: crate::node::TransportChanges::NONE,
                 play: crate::PlayClock {
