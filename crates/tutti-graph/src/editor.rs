@@ -58,9 +58,8 @@ use tutti_units::At;
 use crate::EdgeId;
 use crate::Fade;
 use crate::bus_edge::{BusError, BusFold, BusRef, BusSource, Lowering};
-use crate::command::{CommandId, ScheduleError, command_channel};
+use crate::command::{CommandId, ScheduleError, Scheduled, command_channel};
 use crate::compile::{CompileError, Shapes};
-use crate::event::EventKind;
 use crate::event_tap::EventTapWriter;
 use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager, channels};
 use crate::fork::{ForkHealth, ForkSource};
@@ -93,7 +92,7 @@ use lifecycle::Lifecycle;
 use link::Link;
 use outlets::Outlets;
 use placements::Placements;
-use tutti_types::MAX_CHANNELS;
+use tutti_buffers::MAX_CHANNELS;
 use tutti_units::Amplitude;
 pub use unwired::{Placed, Unwired};
 
@@ -177,11 +176,11 @@ impl Limits {
 /// # Examples
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status, TransportPosition};
 /// use tutti_graph::{Edge, InPort, OutPort, Source};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// use tutti_graph::NodeKey;
 ///
 /// #[derive(Clone)]
@@ -665,11 +664,13 @@ impl<F: Float> Editor<F> {
     pub(crate) fn event_capacity(&self) -> usize {
         self.event_capacity
     }
-    /// Delivers `kind` into event input `to` at time `at` — a note, a chord
-    /// — on its exact frame. A param ramp or segment is a
-    /// [`ParamEvent`](crate::ParamEvent), which a command does not carry. Control thread; the command crosses to the executor over a
-    /// preallocated ring of plain values, so nothing is freed on the audio
-    /// thread. The rules:
+    /// Delivers `payload` into event input `to` at time `at` on its exact
+    /// frame: an [`EventKind`](crate::EventKind) (a note, a chord) into the port's events, or a
+    /// [`ParamKind`](crate::ParamKind) (a ramp or a segment) into its param
+    /// events ([`SortedEvents::params`](crate::SortedEvents::params)), both
+    /// through [`Scheduled`]. Control thread; the command crosses to the
+    /// executor over a preallocated ring of plain values, so nothing is freed
+    /// on the audio thread. The rules:
     ///
     /// - **`at` is required.** [`At::NextBlock`] is the untimed case, and it
     ///   has to be spelled.
@@ -679,6 +680,12 @@ impl<F: Float> Editor<F> {
     ///   that block and is counted
     ///   ([`Executor::late_command_count`](crate::Executor::late_command_count)) —
     ///   never dropped. Beats follow a different rule; see below.
+    /// - A param ramp or segment goes only to a node that declares
+    ///   [`Shape::param_events`](crate::Shape::param_events); any other is
+    ///   refused ([`ScheduleError::NoParamEvents`]). It is merged into the
+    ///   port's param events by the order rules of the events: after the
+    ///   port's own at a tie, by timeline position, then by scheduling
+    ///   order. A bypassed node is sent none.
     /// - At most [`COMMAND_CAPACITY`](crate::COMMAND_CAPACITY) commands are
     ///   outstanding; past that this returns
     ///   [`ScheduleError::Backpressure`] and sends nothing. A command holds
@@ -701,25 +708,28 @@ impl<F: Float> Editor<F> {
     ///
     /// Nothing is sent on [`ScheduleError::NoPlan`] (nothing committed yet),
     /// [`ScheduleError::NoSuchPort`] (`to` is not an event input of the plan
-    /// sent last), [`ScheduleError::Backpressure`] or
-    /// [`ScheduleError::Poisoned`].
+    /// sent last), [`ScheduleError::NoParamEvents`] (a ramp or segment to a
+    /// node that does not declare param events),
+    /// [`ScheduleError::Backpressure`] or [`ScheduleError::Poisoned`].
     pub fn schedule(
         &mut self,
         at: At,
         to: EventIn,
-        kind: EventKind,
+        payload: impl Into<Scheduled>,
     ) -> Result<CommandId, ScheduleError> {
+        let payload = payload.into();
         if self.poison_cause().is_some() {
             return Err(ScheduleError::Poisoned);
         }
         let plan = self.life.plan().ok_or(ScheduleError::NoPlan)?;
-        if !plan
-            .unit(to.node)
-            .is_some_and(|u| to.port < u.shape.event_in)
-        {
+        let unit = plan.unit(to.node).filter(|u| to.port < u.shape.event_in);
+        let Some(unit) = unit else {
             return Err(ScheduleError::NoSuchPort { to });
+        };
+        if matches!(payload, Scheduled::Param(_)) && !unit.shape.param_events {
+            return Err(ScheduleError::NoParamEvents { to });
         }
-        self.link.schedule(at, to, kind)
+        self.link.schedule(at, to, payload)
     }
 
     /// Takes back scheduled command `id`, if it has not landed — freeing its

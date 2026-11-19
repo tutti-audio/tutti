@@ -21,12 +21,13 @@
 //! reads it through the same `f32` split.
 
 use std::sync::{Arc, Mutex};
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::MaxBlock;
 
 use crate::support;
 
 use support::{Change, beat_of_frame, model_beats, step_map};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
@@ -40,7 +41,6 @@ use tutti_transport::{
     FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Timeline,
     Transport, TransportCommand, render_graph,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;

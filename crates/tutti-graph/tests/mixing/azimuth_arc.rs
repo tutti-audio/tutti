@@ -8,6 +8,7 @@
 //!   and a value past the bound is clamped;
 //! - a bounded range of a circular param written crossed is refused.
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::testing as common;
 use tutti_graph::{
     CommitError, Cx, Editor, EventOut, Executor, FadeLaw, GraphInvalid, Io, Law, Node, NodeKey,
@@ -15,7 +16,6 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{ArcDegrees, Azimuth, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;

@@ -18,9 +18,10 @@
 use tutti_graph::testing as common;
 
 use std::collections::{BTreeMap, VecDeque};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use common::prepare;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Env, Executor, Io, Node, Offset, Prepare, Reference, Shape, Status,
@@ -28,7 +29,6 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_music::LoopRange;
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
 const MAX: usize = 64;

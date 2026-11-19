@@ -15,10 +15,10 @@
 //! that wants a different reverb, two units into one chorus or no chorus wires
 //! the unit's outputs itself, through [`Graph::connect`](crate::Graph::connect).
 
+use tutti_buffers::BusTopology;
 use tutti_graph::ParamSet;
 use tutti_nodes::{BusStripNode, FreeverbNode, ModDelayNode};
 use tutti_soundfont::SoundFontUnit;
-use tutti_types::BusTopology;
 use tutti_units::{Amplitude, UnitParam};
 
 use crate::instrument::AddedInstrument;

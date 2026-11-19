@@ -1,11 +1,11 @@
 //! `tutti_sampler::Clip`, a placed sample that is a graph node as it stands.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_sampler::Clip;
 use tutti_session::{OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;

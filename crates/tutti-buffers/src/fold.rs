@@ -1,11 +1,11 @@
 //! [`Fold`]: the one way a signal of one channel topology becomes another's.
 
 use crate::convert::same_frames;
+use crate::{AmbisonicNormalization, ChannelLayout, ChannelTopology, Speaker};
 use crate::{BufferError, Float, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use tutti_types::{AmbisonicNormalization, ChannelLayout, ChannelTopology, Speaker};
 
 mod ambisonic;
 mod compose;
@@ -28,7 +28,7 @@ pub enum FoldEnd {
 #[non_exhaustive]
 pub enum FoldError {
     /// A width is zero channels ([`BufferError::ZeroWidth`]) or does not fit a
-    /// channel layout ([`BufferError::Layout`], carrying a [`LayoutError`](tutti_types::LayoutError)).
+    /// channel layout ([`BufferError::Layout`], carrying a [`LayoutError`](crate::LayoutError)).
     #[error(transparent)]
     Buffer(#[from] BufferError),
     /// Source channel `channel` (speaker `speaker`) has no place in the
@@ -373,7 +373,7 @@ impl<F: Float> Row<F> {
 ///
 /// # Summing order
 ///
-/// For the topologies [`Bed::topology`](tutti_types::Bed::topology) gives, a fold to one or two channels sums
+/// For the topologies [`Bed::topology`](crate::Bed::topology) gives, a fold to one or two channels sums
 /// in a fixed order: the direct channel, then each folded channel in source
 /// order, `acc + gain·x`. With overhead speakers in the source (7.1.4) the
 /// −3 dB channels of a side are summed first and then scaled once; summing then
@@ -385,7 +385,7 @@ impl<F: Float> Row<F> {
 ///
 /// ```
 /// use tutti_buffers::{Float, Fold};
-/// use tutti_types::Bed;
+/// use tutti_buffers::Bed;
 /// use tutti_units::Real;
 ///
 /// let five_one = Bed::Surround51.topology();
@@ -1043,7 +1043,7 @@ impl<F: Float> Fold<F> {
     ///
     /// ```
     /// use tutti_buffers::{Float, Fold};
-    /// use tutti_types::Bed;
+    /// use tutti_buffers::Bed;
     /// use tutti_units::Real;
     ///
     /// let five_one = Bed::Surround51.topology();

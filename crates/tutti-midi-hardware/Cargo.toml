@@ -53,7 +53,7 @@ tutti-winmm-ffi = { version = "0.0.1", path = "../tutti-winmm-ffi" }
 
 [dev-dependencies]
 tutti-midi-hardware = { path = ".", features = ["testing"] }
-tutti-types = { path = "../tutti-types", default-features = false }
+tutti-buffers = { path = "../tutti-buffers" }
 
 serde_json = "1"
 assert_no_alloc = { version = "1", default-features = false }

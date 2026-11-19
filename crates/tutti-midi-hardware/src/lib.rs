@@ -233,6 +233,7 @@ mod ci;
 mod devices;
 mod endpoints;
 mod error;
+mod fault;
 // Only a native backend's callback runs through it; the stub has none.
 #[cfg_attr(
     midi_backend = "none",
@@ -274,11 +275,12 @@ pub use devices::{
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{MidiHardwareError, MidiThread, NotFound, Result};
+pub use fault::{Errno, ErrnoOutOfRange, InputFault};
 pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, Reporter};
 pub use profiles::{
     ChannelCount, ChannelSwitcher, NotAChannelCount, PeerProfiles, ProfileError, ProfileSwitch,
-    ProfilesChange, Switcher, Whole, WholeSwitcher,
+    ProfilesChange, Switcher, WholeSwitcher,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};

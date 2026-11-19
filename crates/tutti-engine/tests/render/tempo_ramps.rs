@@ -15,9 +15,10 @@
 //! equals offline), and those are also held to the arithmetic.
 
 use std::sync::{Arc, Mutex};
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::{
@@ -29,7 +30,6 @@ use tutti_transport::{
     FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Transport,
     render_graph,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{At, Beat, Bpm, SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;

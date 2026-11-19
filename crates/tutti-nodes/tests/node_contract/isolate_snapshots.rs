@@ -14,6 +14,7 @@
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
 use tutti_buffers::Mono;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
@@ -33,7 +34,6 @@ use tutti_nodes::{
     PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
     TiltFilterNode,
 };
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{
     Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples, Seconds,
     Semitones, StereoWidth, UnitAddr, UnitParam,

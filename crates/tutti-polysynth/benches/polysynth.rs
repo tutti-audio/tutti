@@ -48,7 +48,7 @@ use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
-use tutti_units::{Amplitude, Hz, Q, Resonance, SampleRate, Samples, Seconds};
+use tutti_units::{Amplitude, Hz, Normalized, Q, Resonance, SampleRate, Samples, Seconds};
 
 const SR: f64 = 48_000.0;
 /// The block every case renders: a constant here, not an axis (see the
@@ -77,12 +77,12 @@ fn config() -> SynthConfig {
 /// Raises the polyphony to `n`: at the default of 8 every case above 8 steals
 /// voices and measures the same work. Panics above 16, which is the synth's
 /// own hard ceiling — see the module header.
-fn held(cfg: SynthConfig, n: usize) -> Direct<PolySynth> {
+fn held(cfg: SynthConfig, n: usize) -> Direct<PolySynth<f32>> {
     let cfg = SynthConfig {
         polyphony: NonZeroUsize::new(n.max(cfg.polyphony.get())).unwrap(),
         ..cfg
     };
-    let mut synth = Direct::new(PolySynth::new(cfg), SampleRate::of(SR), BLOCK);
+    let mut synth = Direct::new(PolySynth::<f32>::new(cfg), SampleRate::of(SR), BLOCK);
     let at = Offset::of(Samples(0), Samples(BLOCK));
     let events: Vec<Event> = (0..n)
         .map(|i| {
@@ -109,7 +109,7 @@ fn held(cfg: SynthConfig, n: usize) -> Direct<PolySynth> {
     synth
 }
 
-fn drive(synth: &mut Direct<PolySynth>) {
+fn drive(synth: &mut Direct<PolySynth<f32>>) {
     synth.block();
     black_box(synth.output().plane(0).samples()[0]);
 }
@@ -134,7 +134,12 @@ fn bench_oscillator(c: &mut Criterion) {
     for (name, osc) in [
         ("sine", OscillatorType::Sine),
         ("saw", OscillatorType::Saw),
-        ("square", OscillatorType::Square { pulse_width: 0.5 }),
+        (
+            "square",
+            OscillatorType::Square {
+                pulse_width: Normalized::of(0.5),
+            },
+        ),
         ("triangle", OscillatorType::Triangle),
     ] {
         let mut synth = held(

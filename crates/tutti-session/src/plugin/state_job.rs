@@ -194,7 +194,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.loaded::<P, PluginEntry>(key)?;
+        self.pool.entries.loaded::<P, PluginEntry>(key)?;
         let pool_key = PoolKey::new(key);
         // At most one node links a key: `add_pooled_plugin` refuses a key a
         // node already holds (`AddPluginError::Installed`) and a swap keeps

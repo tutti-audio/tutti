@@ -1,5 +1,5 @@
 //! Timestamped commands: a scheduled
-//! event lands on its exact frame — across ragged blocks and
+//! event or param ramp or segment lands on its exact frame — across ragged blocks and
 //! across a block boundary — in the executor and the reference alike; late is
 //! counted and never dropped; the queue back-pressures instead of growing.
 
@@ -8,16 +8,17 @@ use tutti_graph::testing as common;
 use std::sync::{Arc, Mutex};
 
 use common::prepare;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    COMMAND_CAPACITY, Cx, Editor, EventIn, EventKind, Executor, Io, Node, Prepare, Reference,
-    ScheduleError, Shape, Status, TransportPosition, Unforkable,
+    COMMAND_CAPACITY, Cx, Editor, EventIn, EventKind, Executor, Io, Law, Node, ParamKind,
+    ParamRamp, ParamSegment, Prepare, Reference, ScheduleError, Scheduled, Shape, Status,
+    TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_music::LoopRange;
-use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
-use tutti_units::{At, Beat, Bpm, Frame, Samples, Tail};
+use tutti_units::{At, Beat, Bpm, Frame, ParamId, Samples, Tail};
 
 /// `(absolute frame, block start, offset, tag)` per event received.
 type Log = Arc<Mutex<Vec<(u64, u64, u32, u32)>>>;
@@ -25,9 +26,16 @@ type Log = Arc<Mutex<Vec<(u64, u64, u32, u32)>>>;
 const PROBE: NodeKey = NodeKey(7);
 const MAX: usize = 64;
 
+/// The param id every param command here addresses, and the tag bit of a
+/// param event in the log: its target, which is its tag, over a bit no event
+/// tag sets.
+const ID: ParamId = ParamId::new(0);
+const PARAM_TAG: u32 = 1 << 31;
+
 /// One event input, one audio output. Written against `Io::sub_blocks`: each
-/// chunk applies its events, then renders its range — so a chord's level
-/// shows on exactly its frame.
+/// chunk applies its events and param events, then renders its range — so a
+/// param's level (its target over 100) shows on exactly its frame. A param
+/// event logs as its target over [`PARAM_TAG`].
 struct Probe {
     log: Log,
     level: f32,
@@ -37,20 +45,32 @@ impl Node for Probe {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
             .with_events(1, 0)
+            .with_param_events()
             .with_tail(Tail::Unknown)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for (range, events) in io.sub_blocks(0) {
+            for p in events.params() {
+                let target = match p.kind {
+                    ParamKind::Ramp(r) => r.foreign_target(ID),
+                    ParamKind::Segment(s) => s.foreign_target(ID),
+                }
+                .expect("this test addresses its one id");
+                self.level = (target / 100.0) as f32;
+                self.log.lock().unwrap().push((
+                    cx.env.frame_at(p.offset).get(),
+                    cx.env.frame.get(),
+                    p.offset.get(),
+                    PARAM_TAG | target as u32,
+                ));
+            }
             for e in events {
                 let tag = match e.kind {
                     EventKind::Midi(Ump(w)) => w[0],
-                    EventKind::Harmony(h) => {
-                        // A chord whose root, over 100, is the level.
-                        self.level = f32::from(h.root()) / 100.0;
-                        u32::MAX
+                    EventKind::Harmony(_) | EventKind::Resync => {
+                        unreachable!("this test sends none")
                     }
-                    EventKind::Resync => unreachable!("this test sends none"),
                 };
                 self.log.lock().unwrap().push((
                     cx.env.frame_at(e.offset).get(),
@@ -68,6 +88,22 @@ impl Node for Probe {
 
 fn tag(t: u32) -> EventKind {
     EventKind::Midi(Ump([t, 0, 0, 0]))
+}
+
+/// A step of param `ID` to `target`, as a ramp.
+fn ramp(target: f64) -> ParamKind {
+    ParamKind::Ramp(ParamRamp::foreign(ID, target, Samples(0)))
+}
+
+/// The same as a zero-length segment.
+fn segment(target: f64) -> ParamKind {
+    ParamKind::Segment(ParamSegment::foreign(
+        ID,
+        target,
+        target,
+        Samples(0),
+        Law::Linear,
+    ))
 }
 
 fn to() -> EventIn {
@@ -129,9 +165,10 @@ fn rig() -> Rig {
 }
 
 impl Rig {
-    fn schedule(&mut self, at: At, kind: EventKind) {
-        self.ed.schedule(at, to(), kind).expect("room");
-        self.reference.schedule(at, to(), kind);
+    fn schedule(&mut self, at: At, payload: impl Into<Scheduled>) {
+        let payload = payload.into();
+        self.ed.schedule(at, to(), payload).expect("room");
+        self.reference.schedule(at, to(), payload);
     }
 
     /// Render `n` frames through both; return both outputs.
@@ -186,15 +223,12 @@ fn a_command_lands_on_its_exact_frame_across_ragged_blocks() {
     assert_eq!(rig.ed.commands_outstanding(), 0, "every credit came back");
 }
 
-/// A scheduled chord changes the output on exactly its frame: the node reads
+/// A scheduled ramp changes the output on exactly its frame: the node reads
 /// it through `sub_blocks`, so the step is at the sample, not the block.
 #[test]
-fn a_scheduled_chord_steps_the_output_on_its_frame() {
+fn a_scheduled_ramp_steps_the_output_on_its_frame() {
     let mut rig = rig();
-    rig.schedule(
-        At::Frame(Frame::new(90)),
-        EventKind::Harmony(tutti_graph::Harmony::chord(50, 50, 0x91)),
-    );
+    rig.schedule(At::Frame(Frame::new(90)), ramp(50.0));
     let (mut a, mut b) = (Vec::new(), Vec::new());
     for n in [64, 64] {
         let (x, y) = rig.block(n, &TransportPosition::default());
@@ -1207,4 +1241,229 @@ fn a_seek_out_of_a_loop_that_lines_up_with_wraps_is_a_seek() {
     assert_eq!(exec, vec![2], "only the beat crossed after the seek fires");
     assert_eq!(rig.exec.late_command_count(), 1);
     assert_eq!(rig.reference.late_command_count(), 1);
+}
+
+/// A node with one event input that declares no param events.
+struct Plain;
+
+impl Node for Plain {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(1, 0)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// The log of both interpreters, which must agree.
+fn logs(rig: &Rig) -> Vec<(u64, u64, u32, u32)> {
+    let exec = rig.exec_log.lock().unwrap().clone();
+    assert_eq!(exec, *rig.ref_log.lock().unwrap(), "the interpreters agree");
+    exec
+}
+
+/// **A scheduled param event lands on exactly its frame**, ramp or segment,
+/// under a ragged block schedule: the node sees it at offset
+/// `frame - block_start` of the block holding it, in both interpreters.
+#[test]
+fn a_scheduled_param_lands_on_its_exact_frame_across_ragged_blocks() {
+    let mut rig = rig();
+    let blocks = [64usize, 7, 1, 33, 64, 5, 64, 2];
+    let starts: Vec<u64> = blocks
+        .iter()
+        .scan(0u64, |at, &n| {
+            let s = *at;
+            *at += n as u64;
+            Some(s)
+        })
+        .collect();
+    let targets: Vec<u64> = vec![
+        0, 5, 63, 64, 70, 71, 72, 104, 105, 150, 168, 169, 173, 174, 238,
+    ];
+    for (i, &f) in targets.iter().enumerate() {
+        let kind = if i % 2 == 0 {
+            segment(i as f64)
+        } else {
+            ramp(i as f64)
+        };
+        rig.schedule(At::Frame(Frame::new(f)), kind);
+    }
+    let transport = TransportPosition::default();
+    for &n in &blocks {
+        rig.block(n, &transport);
+    }
+    let want: Vec<(u64, u64, u32, u32)> = targets
+        .iter()
+        .enumerate()
+        .map(|(i, &f)| {
+            let start = *starts.iter().rev().find(|&&s| s <= f).unwrap();
+            (f, start, (f - start) as u32, PARAM_TAG | i as u32)
+        })
+        .collect();
+    assert_eq!(logs(&rig), want);
+    assert_eq!(rig.exec.late_command_count(), 0);
+    assert_eq!(rig.ed.commands_outstanding(), 0, "every credit came back");
+}
+
+/// **A beat-timed param event fires when the playhead crosses the beat**, where
+/// the current tempo puts it: 120 BPM at 48 kHz is 24 000 frames a beat, so a
+/// block starting 10 frames short of beat 1.5 holds it at offset 10.
+#[test]
+fn a_beat_timed_param_fires_when_the_playhead_crosses_the_beat() {
+    let mut rig = rig();
+    rig.schedule(At::Beat(Beat(1.5)), segment(3.0));
+    let spb = 1.0 / 24_000.0;
+    rig.block(64, &at_beat(1.5 - 74.0 * spb, true, 120.0, None));
+    assert!(logs(&rig).is_empty(), "the block ends 10 frames short");
+    rig.block(64, &at_beat(1.5 - 10.0 * spb, true, 120.0, None));
+    assert_eq!(logs(&rig), vec![(74, 64, 10, PARAM_TAG | 3)]);
+    assert_eq!(rig.exec.late_command_count(), 0);
+    assert_eq!(rig.ed.commands_outstanding(), 0);
+}
+
+/// **A seek that jumps over the beat does not fire a param event**: it waits,
+/// holding its credit, until the playhead reaches the beat or it is cancelled.
+#[test]
+fn a_seek_over_the_beat_leaves_a_param_pending() {
+    let mut rig = rig();
+    rig.schedule(At::Beat(Beat(3.0)), ramp(9.0));
+    rig.block(64, &at_beat(1.0, true, 120.0, None));
+    rig.block(64, &at_beat(5.0, true, 120.0, None));
+    assert!(logs(&rig).is_empty(), "jumped over, not crossed");
+    assert_eq!(
+        rig.ed.commands_outstanding(),
+        1,
+        "it still holds its credit"
+    );
+    assert_eq!(rig.exec.late_command_count(), 0);
+    rig.block(64, &at_beat(2.9999, true, 120.0, None));
+    assert_eq!(logs(&rig).len(), 1, "reached by playing through it");
+}
+
+/// **A late frame lands at offset 0 of the next block and is counted**, not
+/// dropped, for a param event as for an event.
+#[test]
+fn a_late_param_frame_lands_at_offset_zero_and_is_counted() {
+    let mut rig = rig();
+    let t = TransportPosition::default();
+    rig.block(64, &t);
+    rig.block(64, &t);
+    rig.schedule(At::Frame(Frame::new(10)), segment(1.0)); // 118 frames ago
+    rig.schedule(At::NextBlock, ramp(2.0));
+    rig.block(32, &t);
+    assert_eq!(
+        logs(&rig),
+        vec![(128, 128, 0, PARAM_TAG | 1), (128, 128, 0, PARAM_TAG | 2)],
+        "both at offset 0 of the block starting at 128, in scheduling order"
+    );
+    assert_eq!(rig.exec.late_command_count(), 1);
+    assert_eq!(rig.reference.late_command_count(), 1);
+}
+
+/// **A param event and an event at one frame stay in their own lists**, and at
+/// one offset the param events keep their scheduling order.
+#[test]
+fn scheduled_params_and_events_share_a_frame_without_mixing() {
+    let mut rig = rig();
+    let at = At::Frame(Frame::new(5));
+    rig.schedule(at, tag(1));
+    rig.schedule(at, segment(20.0));
+    rig.schedule(at, ramp(10.0));
+    rig.schedule(at, tag(2));
+    rig.block(64, &TransportPosition::default());
+    assert_eq!(
+        logs(&rig),
+        vec![
+            (5, 0, 5, PARAM_TAG | 20),
+            (5, 0, 5, PARAM_TAG | 10),
+            (5, 0, 5, 1),
+            (5, 0, 5, 2),
+        ],
+        "the node reads params, then events: each list in scheduling order"
+    );
+}
+
+/// **Cancel takes a param command back**: a targeted cancel before it lands
+/// and `cancel_all` for the rest, the credit returning, the neighbour that
+/// was not named still landing.
+#[test]
+fn cancel_takes_a_param_command_back() {
+    let mut rig = rig();
+    let t = TransportPosition::default();
+    let gone = rig
+        .ed
+        .schedule(At::Frame(Frame::new(10)), to(), segment(7.0))
+        .expect("room");
+    rig.ed
+        .schedule(At::Frame(Frame::new(20)), to(), ramp(8.0))
+        .expect("room");
+    rig.ed.cancel(gone).expect("room");
+    rig.exec.process(64, &t, &[], &mut [&mut [0.0; 64][..]]);
+    assert_eq!(
+        rig.exec_log.lock().unwrap().clone(),
+        vec![(20, 0, 20, PARAM_TAG | 8)],
+        "only the one not cancelled landed"
+    );
+    assert_eq!(rig.exec.cancelled_command_count(), 1);
+    rig.ed
+        .schedule(At::Beat(Beat(9.0)), to(), ramp(1.0))
+        .expect("room");
+    rig.exec.process(64, &t, &[], &mut [&mut [0.0; 64][..]]);
+    assert_eq!(rig.ed.commands_outstanding(), 1, "waiting on its beat");
+    rig.ed.cancel_all().expect("room");
+    rig.exec.process(64, &t, &[], &mut [&mut [0.0; 64][..]]);
+    assert_eq!(rig.ed.commands_outstanding(), 0);
+    assert_eq!(rig.exec.cancelled_command_count(), 2);
+    assert_eq!(rig.exec_log.lock().unwrap().len(), 1, "nothing else landed");
+}
+
+/// **A param command to a node that declares no param events is refused at
+/// the call**, with a named error, and sends nothing: no credit is taken, so
+/// the full capacity of events is still schedulable. A node that stops
+/// declaring them before a command falls due counts it unrouted.
+#[test]
+fn a_param_command_to_a_node_without_param_events_is_refused() {
+    let (mut ed, mut exec) = Editor::new(prepare(MAX));
+    ed.insert(PROBE, "plain", Unforkable(Plain));
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    for kind in [segment(1.0), ramp(1.0)] {
+        assert_eq!(
+            ed.schedule(At::NextBlock, to(), kind),
+            Err(ScheduleError::NoParamEvents { to: to() })
+        );
+    }
+    assert_eq!(ed.commands_outstanding(), 0, "nothing was sent");
+    for i in 0..COMMAND_CAPACITY {
+        ed.schedule(At::Beat(Beat(9.0)), to(), tag(i as u32))
+            .expect("every credit is still free");
+    }
+    assert!(!ScheduleError::NoParamEvents { to: to() }.is_transient());
+    // A missing port is still a missing port, whatever the payload.
+    let port = EventIn {
+        node: PROBE,
+        port: 1,
+    };
+    assert_eq!(
+        ed.schedule(At::NextBlock, port, ramp(1.0)),
+        Err(ScheduleError::NoSuchPort { to: port })
+    );
+
+    // Declared at the check, gone when due: a replacement that declares none.
+    let mut rig = rig();
+    rig.ed
+        .schedule(At::Frame(Frame::new(100)), to(), ramp(4.0))
+        .expect("the probe declares param events");
+    rig.ed.insert(PROBE, "plain", Unforkable(Plain));
+    rig.ed.spec_mut().topology.outputs.clear();
+    rig.ed.commit().expect("commits");
+    let t = TransportPosition::default();
+    for _ in 0..4 {
+        rig.exec.process(64, &t, &[], &mut []);
+    }
+    assert_eq!(rig.exec.unrouted_command_count(), 1);
+    assert_eq!(rig.ed.commands_outstanding(), 0);
+    assert!(rig.exec_log.lock().unwrap().is_empty());
 }

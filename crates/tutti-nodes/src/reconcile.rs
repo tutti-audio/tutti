@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -25,7 +26,6 @@ use tutti_modulation::{
     SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl, TargetKey,
     compile,
 };
-use tutti_types::ChannelLayout;
 use tutti_types::ParamCell;
 use tutti_units::{At, ParamAddr, ParamId};
 
@@ -404,7 +404,7 @@ struct SourcePlan {
 /// on a filter's cutoff:
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use std::sync::Arc;
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_modulation::{

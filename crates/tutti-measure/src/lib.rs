@@ -120,7 +120,7 @@
 //! };
 //! use tutti_dsp::FftScratch;
 //! use tutti_units::{SampleRate, Samples};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_buffers::{Interleaved, Mono, StereoPlanes};
 //!
 //! let sample_rate = SampleRate::SR_44K1;
@@ -164,11 +164,11 @@
 //! whole reason these algorithms need no engine vocabulary.
 //!
 //! ```rust
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_measure::correlate;
 //! use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable};
 //! use tutti_graph::{OutPort, Source};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_units::{Beat, Bpm, SampleRate, Samples};
 //! use tutti_buffers::{PlanesMut, StereoPlanes};
 //! use tutti_graph::NodeKey;

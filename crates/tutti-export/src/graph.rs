@@ -8,9 +8,9 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_units::SampleRate;
 
+use tutti_buffers::{ChannelTopology, MaxBlock};
 use tutti_graph::GraphTail;
 use tutti_graph::{Editor, Executor, LogFilter, Pool, Prepare, RenderMode, RtLogReaders, RtRecord};
-use tutti_types::{ChannelTopology, MaxBlock};
 use tutti_units::Samples;
 
 use crate::{ConfigError, Result};
@@ -150,7 +150,7 @@ impl Setup {
 /// use tutti_export::{render_one, BufferTarget, Control, Job, Output, Produced, RenderGraph, Setup};
 /// use tutti_graph::GraphBuilder;
 /// use tutti_nodes::testing::Osc;
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// let rate = SampleRate::SR_48K;
 /// let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
@@ -290,7 +290,7 @@ impl<F: Float> RenderGraph<F> {
     /// # use tutti_graph::GraphBuilder;
     /// # use tutti_nodes::testing::Osc;
     /// # use tutti_units::Samples;
-    /// # use tutti_types::ChannelLayout;
+    /// # use tutti_buffers::ChannelLayout;
     /// # let rate = SampleRate::SR_48K;
     /// # let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     /// # let tone = g.add(Osc::sine(Hz(440.0)));
@@ -327,7 +327,7 @@ impl<F: Float> RenderGraph<F> {
     /// # use tutti_graph::GraphBuilder;
     /// # use tutti_nodes::testing::Osc;
     /// # use tutti_units::Samples;
-    /// # use tutti_types::ChannelLayout;
+    /// # use tutti_buffers::ChannelLayout;
     /// # let rate = SampleRate::SR_48K;
     /// # let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     /// # let tone = g.add(Osc::sine(Hz(440.0)));

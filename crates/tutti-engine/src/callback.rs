@@ -25,9 +25,9 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::time::Duration;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, InterleavedMut, Sample, convert};
 use tutti_rt::with_no_denormals;
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 use crate::Engine;
@@ -108,7 +108,7 @@ pub struct OutputBlock<F: Float = f32> {
     /// The device's true channel layout. The engine folds the graph root to
     /// this width (declared with [`Engine::support_output`](crate::Engine::support_output)
     /// when the block is built). A device wider than
-    /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) is refused when its config is
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) is refused when its config is
     /// read, never truncated.
     layout: ChannelLayout,
     /// The interleave stride for both the mix buffer and the device buffer,

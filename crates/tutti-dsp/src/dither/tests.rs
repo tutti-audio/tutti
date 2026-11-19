@@ -1,5 +1,5 @@
 use super::*;
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 
 /// `apply` over a mono run of samples.
 fn apply<F: Float>(n: &mut DitherNoise, shape: DitherShape, lsb: Amplitude, s: &mut [F]) {

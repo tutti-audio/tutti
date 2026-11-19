@@ -1,5 +1,8 @@
+use crate::SynthConfig;
 use crate::UnisonVoices;
-use crate::{PolySynth, SynthConfig};
+
+/// The synth at `f32`, the width these tests run at.
+type PolySynth = crate::PolySynth<f32>;
 
 /// **The ports and their bases.** A synth declares its volume, and with
 /// a unison engine its detune and spread too ,
@@ -41,8 +44,8 @@ fn the_shape_declares_volume_and_the_unison_params() {
 /// 48 000 at 96 kHz.
 #[test]
 fn the_release_tail_is_in_frames_at_the_prepared_rate() {
+    use tutti_buffers::MaxBlock;
     use tutti_graph::{Node, Prepare};
-    use tutti_types::MaxBlock;
     use tutti_units::{SampleRate, Samples, Tail};
 
     let mut synth = PolySynth::new(SynthConfig {

@@ -4,13 +4,13 @@
 use std::num::NonZeroUsize;
 use std::path::Path;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, Mono, Wave};
 use tutti_fixtures::signal;
 use tutti_measure::{
     ChromaConfig, FiniteLevel, FrequencyBand, Meter, PeakBlocks, PeakConfig, SilenceConfig,
     VectorscopeConfig,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples, Seconds};
 
 use super::{Analyze, AnalyzeError};
@@ -157,8 +157,8 @@ fn a_stereo_analysis_of_mono_audio_fails_with_the_widths() {
         matches!(
             failed,
             AnalyzeError::Width { needs, found }
-                if needs == tutti_types::ChannelLayout::STEREO
-                    && found == tutti_types::ChannelLayout::MONO
+                if needs == tutti_buffers::ChannelLayout::STEREO
+                    && found == tutti_buffers::ChannelLayout::MONO
         ),
         "{failed:?}"
     );

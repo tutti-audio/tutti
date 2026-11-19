@@ -590,7 +590,7 @@ fn a_per_note_bend_is_tuned_over_its_channels_range() {
         midi::registered(
             MidiChannel::of(3),
             tutti_ump::Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-            PitchBendSensitivity::of(24).to_rpn_bits(),
+            PitchBendSensitivity::from_semitones(U7::of(24)).to_rpn_bits(),
         ),
     );
     // The sensitivity is consumed (no RPN reaches the plugin), and the bend the

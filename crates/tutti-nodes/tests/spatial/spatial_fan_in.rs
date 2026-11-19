@@ -2,11 +2,11 @@
 //! sums the fan-in. These cases were the `build_vbap_mix` builder's tests and
 //! pin what the panners do through that wiring.
 
+use tutti_buffers::MaxBlock;
+use tutti_buffers::{Bed, ChannelLayout};
 use tutti_graph::{GraphBuilder, Prepare};
 use tutti_nodes::testing::{Const, vbap_mix};
 use tutti_nodes::{VbapError, VbapPannerNode};
-use tutti_types::MaxBlock;
-use tutti_types::{Bed, ChannelLayout};
 use tutti_units::{Azimuth, SampleRate, Samples};
 
 /// A panner per bearing (a DC `[1.0, 1.0]` source each), wired by

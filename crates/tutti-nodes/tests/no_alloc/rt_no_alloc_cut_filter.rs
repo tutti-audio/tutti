@@ -1,9 +1,9 @@
 //! The cut filter does not allocate per block, held and with its cutoff moved between
 //! blocks (a design into the held scratch and the coefficient glide).
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{ButterworthOrder, CutAlignment, CutFilterConfig, CutFilterNode, CutResponse};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, UnitParam};
 
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, the cutoff moved before each.

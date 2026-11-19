@@ -49,6 +49,7 @@ use std::vec::Vec;
 use super::handshake::Handshake;
 use super::link::Link;
 use super::{PEER_REPLY_TIMEOUT, TimeoutWait};
+use crate::deadline::Pending;
 
 use super::{
     CiDeviceId, CiHeader, CiMessage, DataControl, Decoded, Muid, Nak, ProcessFeatures, ReportScope,
@@ -125,7 +126,7 @@ enum Stage {
 struct Report {
     request: ReportRequest,
     stage: Stage,
-    deadline: Instant,
+    wait: Pending,
 }
 
 /// The Initiator of Process Inquiry with one peer.
@@ -197,7 +198,7 @@ impl ProcessInitiator {
         self.report = Some(Report {
             request,
             stage: Stage::AwaitingReply,
-            deadline: now + PEER_REPLY_TIMEOUT,
+            wait: Pending::after(now, PEER_REPLY_TIMEOUT),
         });
         let ReportRequest { control, scope } = request;
         Ok(vec![self.send(scope.address(), |header, to| {
@@ -220,11 +221,12 @@ impl ProcessInitiator {
     /// with nothing waiting.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        self.capabilities
-            .deadline()
-            .into_iter()
-            .chain(self.report.map(|report| report.deadline))
-            .min()
+        Pending::earliest(
+            self.capabilities
+                .wait()
+                .into_iter()
+                .chain(self.report.map(|report| report.wait)),
+        )
     }
 
     /// Time has passed: everything whose wait is over ends. Calling it early is
@@ -234,7 +236,7 @@ impl ProcessInitiator {
         if self.capabilities.expire(now) {
             actions.push(ProcessAction::CapabilitiesTimedOut);
         }
-        if self.report.is_some_and(|report| now >= report.deadline) {
+        if self.report.is_some_and(|report| report.wait.expired(now)) {
             self.report = None;
             actions.push(ProcessAction::ReportTimedOut);
         }
@@ -264,7 +266,7 @@ impl ProcessInitiator {
                     && scope.address() == report.request.scope.address()
                 {
                     report.stage = Stage::Reporting;
-                    report.deadline = now + PEER_REPLY_TIMEOUT;
+                    report.wait.restart(now, PEER_REPLY_TIMEOUT);
                     actions.push(ProcessAction::ReportBegan {
                         declared: scope.within(&report.request.scope),
                     });
@@ -295,8 +297,8 @@ impl ProcessInitiator {
     fn on_wait(&mut self, address: CiDeviceId, original: u8, wait: TimeoutWait) {
         match original {
             SUB_ID2_PROCESS_CAPABILITIES_INQUIRY if address == CiDeviceId::FunctionBlock => {
-                if let Some(deadline) = self.capabilities.deadline_mut() {
-                    wait.extend(deadline);
+                if let Some(pending) = self.capabilities.wait_mut() {
+                    wait.extend(pending);
                 }
             }
             SUB_ID2_MESSAGE_REPORT_INQUIRY => {
@@ -305,7 +307,7 @@ impl ProcessInitiator {
                     .as_mut()
                     .filter(|report| report.request.scope.address() == address)
                 {
-                    wait.extend(&mut report.deadline);
+                    wait.extend(&mut report.wait);
                 }
             }
             _ => {}

@@ -1,7 +1,7 @@
 //! [`IrLayout`]: which impulse response a [`ConvolverNode`](super::ConvolverNode) applies to
 //! which path from an input to an output.
 
-use tutti_types::{AmbisonicFormat, Bed, ChannelLayout, ChannelTopology};
+use tutti_buffers::{AmbisonicFormat, Bed, ChannelLayout, ChannelTopology};
 
 /// How a convolver's impulse responses lay over its channels.
 ///

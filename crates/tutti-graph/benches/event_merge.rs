@@ -16,11 +16,11 @@ use std::hint::black_box;
 use std::num::NonZeroU32;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::MaxBlock;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, Io, Law, Node, NodeKey, ParamEvent,
     ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_types::MaxBlock;
 use tutti_ump::Ump;
 use tutti_units::{ParamId, SampleRate, Samples};
 

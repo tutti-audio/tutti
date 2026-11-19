@@ -23,19 +23,19 @@ pub const BLOCK: usize = 64;
 /// A [`PolySynth`] driven by hand. Derefs to the synth, so its own methods
 /// (`set_volume`, `active_voice_count`, …) are reachable.
 pub struct Hand {
-    direct: Direct<PolySynth>,
+    direct: Direct<PolySynth<f32>>,
     queued: Vec<Event>,
 }
 
 impl Hand {
     /// `synth`, prepared at 48 kHz (the rate every test here builds it
     /// at) for [`BLOCK`]-frame blocks.
-    pub fn new(synth: PolySynth) -> Self {
+    pub fn new(synth: PolySynth<f32>) -> Self {
         Self::at(synth, SampleRate::SR_48K)
     }
 
     /// `synth`, prepared at `rate` for [`BLOCK`]-frame blocks.
-    pub fn at(synth: PolySynth, rate: SampleRate) -> Self {
+    pub fn at(synth: PolySynth<f32>, rate: SampleRate) -> Self {
         Self {
             direct: Direct::new(synth, rate, BLOCK),
             queued: Vec::with_capacity(HAND_EVENT_CAPACITY),
@@ -94,14 +94,14 @@ impl Hand {
 }
 
 impl Deref for Hand {
-    type Target = PolySynth;
-    fn deref(&self) -> &PolySynth {
+    type Target = PolySynth<f32>;
+    fn deref(&self) -> &PolySynth<f32> {
         &self.direct.node
     }
 }
 
 impl DerefMut for Hand {
-    fn deref_mut(&mut self) -> &mut PolySynth {
+    fn deref_mut(&mut self) -> &mut PolySynth<f32> {
         &mut self.direct.node
     }
 }

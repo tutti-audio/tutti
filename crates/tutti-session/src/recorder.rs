@@ -33,9 +33,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use thiserror::Error;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{FiniteSource, InterleavedMut, Pull, Sample, Sink, SinkFailed, Source};
 use tutti_rt::{FaultLatch, StopToken, ThreadHandle, spawn_named};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// How long a [`Recorder`] parks when a [`Starved`](Pull::Starved) source
@@ -210,7 +210,7 @@ pub enum PumpPass {
 /// use tutti_session::{PumpLoop, PumpPass};
 /// use tutti_graph::{OutPort, Source};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
-/// use tutti_types::{ChannelLayout, MaxBlock};
+/// use tutti_buffers::{ChannelLayout, MaxBlock};
 /// use tutti_buffers::Sink;
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{TapAlign, TapId};
@@ -442,7 +442,7 @@ where
 /// use tutti_codec::{FileOut, Format, Pcm, Spec};
 /// use tutti_session::Recorder;
 /// use tutti_units::SampleRate;
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// # fn go(reader: tutti_graph::TapReader) -> Result<(), Box<dyn std::error::Error>> {
 /// // A stereo tap and a stereo sink pair: a tap is a `Source` as it is.

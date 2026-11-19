@@ -3,11 +3,11 @@
 
 use std::sync::{Arc, Mutex};
 
+use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::MidiOut;
 use tutti_session::{LiveSession, Session, midi_sink};
-use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_units::{SampleRate, Samples};
 

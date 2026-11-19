@@ -6,9 +6,9 @@
 //! it ([`OutputLevels`]), whose changes ramp over
 //! the declick length ([`declick_frames`](tutti_graph::declick_frames)) instead of swapping folds.
 
+use tutti_buffers::{ChannelLayout, ChannelTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, Fold, FoldError, FoldLevels};
 use tutti_graph::fold_to_topology_with;
-use tutti_types::{ChannelLayout, ChannelTopology, MAX_CHANNELS};
 use tutti_units::Amplitude;
 
 /// The device channel each channel of what is heard goes to.
@@ -344,7 +344,7 @@ impl StageTargets {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::Bed;
+    use tutti_buffers::Bed;
 
     fn gains(levels: &OutputLevels) -> Vec<f64> {
         let t = levels.targets();

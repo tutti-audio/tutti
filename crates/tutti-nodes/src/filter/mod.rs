@@ -34,7 +34,7 @@ pub use tilt::{
     TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 
-use tutti_types::{BusTopology, ChannelLayout};
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_units::{Db, Hz, SampleRate};
 
 /// The lowest center a bell or tilt takes: 20 Hz.

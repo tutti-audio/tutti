@@ -46,13 +46,6 @@ crates/tutti-modulation/src/source/follower.rs  3  migrating: B2/B3
 crates/tutti-modulation/src/sources.rs  2  migrating: B2/B3
 crates/tutti-plugin-host/src/node/loader.rs  1  spec: f32 is the audio width every plugin format processes (CLAP, VST3, VST2, AU)
 crates/tutti-plugin-probe/src/measure.rs  2  migrating: plugins step 7
-crates/tutti-polysynth/src/bank.rs  17  migrating: dsp S7/instruments
-crates/tutti-polysynth/src/mpe.rs  2  migrating: dsp S7/instruments
-crates/tutti-polysynth/src/polysynth.rs  9  migrating: dsp S7/instruments
-crates/tutti-polysynth/src/polysynth/node.rs  1  migrating: dsp S7/instruments
-crates/tutti-polysynth/src/synth.rs  1  migrating: dsp S7/instruments
-crates/tutti-polysynth/src/synth_voice.rs  1  migrating: dsp S7/instruments
-crates/tutti-polysynth/src/unison.rs  1  migrating: dsp S7/instruments
 crates/tutti-sampler/src/lanes.rs  1  migrating: dsp S7/instruments
 crates/tutti-sampler/src/streamer/io/refill.rs  2  migrating: dsp S7/instruments
 crates/tutti-sampler/src/stretch/vocoder.rs  2  migrating: dsp S7/instruments
@@ -69,15 +62,9 @@ crates/tutti-session/src/general_midi.rs  2  migrating: dsp S7/instruments
 crates/tutti-session/src/modulation.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin/lost.rs  1  migrating: plugins step 7
-crates/tutti-soundfont/src/lfo.rs  3  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/modulation_envelope.rs  3  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/node.rs  1  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/oscillator.rs  10  migrating: dsp S7/instruments
 crates/tutti-soundfont/src/player.rs  5  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/region_ex.rs  1  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/region_pair.rs  21  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/soundfont_math.rs  6  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/voice.rs  23  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/volume_envelope.rs  3  migrating: dsp S7/instruments
+crates/tutti-soundfont/src/voice.rs  5  migrating: dsp S7/instruments
 crates/tutti-types/src/lib.rs  1  migrating: foundation
 crates/tutti-voicing/src/channel.rs  3  migrating: foundation

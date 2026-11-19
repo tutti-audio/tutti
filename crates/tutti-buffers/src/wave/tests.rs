@@ -1,6 +1,6 @@
 use super::*;
+use crate::Speaker;
 use crate::{I24, interleave};
-use tutti_types::Speaker;
 
 const STEREO: ChannelLayout = ChannelLayout::STEREO;
 
@@ -134,9 +134,9 @@ fn a_count_is_assumed_and_a_topology_is_kept_as_stated() {
             .unwrap(),
         [Speaker::FrontCenter]
     );
-    let quad = Wave::<f32>::with_topology(tutti_types::Bed::Quad.topology(), SampleRate::SR_48K);
+    let quad = Wave::<f32>::with_topology(crate::Bed::Quad.topology(), SampleRate::SR_48K);
     assert_eq!(quad.channels(), 4);
-    assert_eq!(quad.topology(), &tutti_types::Bed::Quad.topology());
+    assert_eq!(quad.topology(), &crate::Bed::Quad.topology());
     assert_eq!(quad.placement(), Placement::Stated);
 }
 

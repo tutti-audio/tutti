@@ -57,7 +57,7 @@
 use tutti_midi_protocol::{
     Addressed, MmcCommand, MmcCommandReassembler, MmcCommands, MmcFields, MmcGroup, MmcInfoField,
     MmcLocate, MmcMove, MmcPosition, MmcSegment, MmcSegmentError, MmcSegmentPlace, MmcSign,
-    MmcSpeed, Read, Recipient, SysexDeviceId, Universal, read,
+    MmcSpeed, Recipient, SysexDeviceId, Universal, UniversalRead, read,
 };
 use tutti_ump::{SysexAssembler, SysexStep, Ump};
 use tutti_units::Seconds;
@@ -112,7 +112,8 @@ const SYSEX_ROOM: usize = 2 * SYSEX_MAX + 8;
 fn seconds_of(position: MmcPosition) -> Seconds {
     let timecode = position.label.time_code().timecode();
     let subframes = f64::from(position.subframes.get()) / 100.0;
-    let seconds = timecode.to_seconds().get() + subframes / timecode.frame_rate().fps();
+    let (num, den) = timecode.frame_rate().ratio();
+    let seconds = timecode.to_seconds().get() + subframes * den as f64 / num as f64;
     Seconds::new(match position.label.sign() {
         MmcSign::Positive => seconds,
         MmcSign::Negative => -seconds,
@@ -209,7 +210,8 @@ impl MachineControlFollower {
         let SysexStep::Complete(done) = self.sysex.push(ump) else {
             return;
         };
-        let Read::Universal(Addressed { to, message }) = read(self.sysex.message(done)) else {
+        let UniversalRead::Universal(Addressed { to, message }) = read(self.sysex.message(done))
+        else {
             return;
         };
         match message {

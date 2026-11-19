@@ -10,12 +10,12 @@
 
 use crate::pooled::{LoadPlugin, Spec};
 use std::path::PathBuf;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, MainWork};
 use tutti_session::{DetachedSession, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;

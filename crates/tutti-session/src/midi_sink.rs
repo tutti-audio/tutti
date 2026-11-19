@@ -230,7 +230,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.handle::<P, MidiSinkEntry>(key)
+        self.pool.entries.handle::<P, MidiSinkEntry>(key)
     }
 }
 

@@ -1,8 +1,8 @@
 //! [`LadderBank`]: one four-stage ladder per channel, all channels at one
 //! [`LadderDesign`], over buffers views.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::Real;
 
 use super::kernel::{LadderCoefficients, ladder_step};

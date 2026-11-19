@@ -37,7 +37,6 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # `Beat` and `BeatDuration`: what a `transport-control` request carries.
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
 
 [dev-dependencies]
 # The reference plugin the wrapper tests load; Cargo builds its cdylib in the

@@ -10,15 +10,15 @@
 use crate::support;
 
 use support::Sine;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MAX_CHANNELS;
+use tutti_buffers::MaxBlock;
 use tutti_engine::{Engine, GraphEngineError};
 use tutti_graph::NodeKey;
 use tutti_graph::{CommitError, Editor, ForkByClone, Prepare};
 use tutti_graph::{OutPort, Source};
 use tutti_transport::Transport;
-use tutti_types::ChannelLayout;
-use tutti_types::MAX_CHANNELS;
-use tutti_types::MaxBlock;
 use tutti_units::{Hz, SampleRate, Samples};
 
 /// A graph whose root has `outputs` channels, with a sine at key 1 feeding

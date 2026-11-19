@@ -6,7 +6,7 @@ use std::num::{NonZeroU16, NonZeroUsize};
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_midi_protocol::{
-    Addressee, ChannelMask, GeneralMidi, Heard, KeyChange, KeyChanges, KeyTable, OctaveOffsets,
+    Addressee, ChannelMask, GeneralMidiMode, Heard, KeyChange, KeyChanges, KeyTable, OctaveOffsets,
     Timing, TuningFrequency, TuningMessage, TuningName, Universal,
 };
 use tutti_ump::{
@@ -256,9 +256,9 @@ fn universal_is_allocation_free() {
                 Universal::MasterCoarseTuning(U7::of((round % 128) as u8)),
                 Universal::IdentityRequest,
                 Universal::GeneralMidi(if round % 2 == 0 {
-                    GeneralMidi::On
+                    GeneralMidiMode::On
                 } else {
-                    GeneralMidi::Off
+                    GeneralMidiMode::Off
                 }),
             ] {
                 let to = if round % 3 == 0 {

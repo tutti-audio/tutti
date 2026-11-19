@@ -61,7 +61,7 @@
 //! Neither trait is invoked per sample on the audio thread. They move frames in
 //! blocks on a cold or background path (a capture pump, an offline render).
 
-use tutti_types::ChannelLayout;
+use crate::ChannelLayout;
 use tutti_units::Samples;
 
 use crate::{Interleaved, InterleavedMut, Sample};

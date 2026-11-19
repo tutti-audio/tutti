@@ -1,12 +1,12 @@
 //! Regression gate: the utility nodes (polarity, mid/side, stereo width) must
 //! not allocate per block, held and with a control moved between blocks.
 
+use tutti_buffers::{ChannelIndex, ChannelLayout};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
     MidSideConfig, MidSideNode, PolarityConfig, PolarityNode, StereoWidthConfig, StereoWidthNode,
 };
-use tutti_types::{ChannelIndex, ChannelLayout};
 use tutti_units::{SampleRate, UnitParam};
 
 /// `node` alone through `BlockRig`: an offset, asymmetric pair of channels, 16 warm-up

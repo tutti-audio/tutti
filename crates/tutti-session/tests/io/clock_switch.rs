@@ -5,6 +5,7 @@
 use std::time::{Duration, Instant};
 use tutti_buffers::InterleavedMut;
 
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_cpal::{DeviceId, DeviceSelector};
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::ForkByClone;
@@ -13,7 +14,6 @@ use tutti_rt::LockExt;
 use tutti_session::{
     Error, InPort, LiveSession, OutPort, Root, Session, SessionEvent, SystemSession,
 };
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 480;
@@ -370,9 +370,9 @@ fn a_switch_to_a_device_at_another_rate_reports_the_change() {
 /// policy is in force on the card.
 #[test]
 fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
+    use tutti_buffers::Bed;
     use tutti_engine::OutputMap;
     use tutti_session::OutputPolicy;
-    use tutti_types::Bed;
     let mut s = system_builder()
         .outputs(ChannelLayout::from(6u16))
         .build()

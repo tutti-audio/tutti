@@ -8,12 +8,12 @@
 
 use std::sync::Arc;
 use tutti_buffers::Float;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::{AudioCallbackState, Engine};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, OutPort, Prepare, Shape, Source, Status};
 use tutti_nodes::testing::Const;
 use tutti_transport::Transport;
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 pub const SAMPLE_RATE: f64 = 48_000.0;

@@ -29,6 +29,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tutti_buffers::BusTopology;
 use tutti_buffers::Float;
 use tutti_graph::{
     Cx, Env, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
@@ -38,7 +39,6 @@ use tutti_music::{Meter, MeterMap};
 use tutti_rt::{Loan, Reader, Setting, setting_word};
 use tutti_transport::{ProjectMeter, Transport};
 use tutti_types::AtomicF64;
-use tutti_types::BusTopology;
 use tutti_units::Tail;
 use tutti_units::{
     Amplitude, Beat, Hz, Phase, PhaseIncrement, PhaseStep, RunningPhase, Samples, Seconds,

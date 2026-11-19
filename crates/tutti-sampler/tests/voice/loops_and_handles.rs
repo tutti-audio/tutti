@@ -86,7 +86,7 @@ fn memory_node() -> (VoiceNode, VoiceNodeHandle) {
             source: VoiceSource::Memory(source),
             play: Playback::default(),
         },
-        tutti_types::ChannelLayout::MONO,
+        tutti_buffers::ChannelLayout::MONO,
     )
     .with_handle()
 }
@@ -170,7 +170,7 @@ fn render_with(node: &mut VoiceNode, frames: usize) -> Vec<f32> {
     use tutti_graph::Node;
     node.prepare(&tutti_graph::Prepare::new(
         RATE,
-        tutti_types::MaxBlock::of(Samples::new(BLOCK)),
+        tutti_buffers::MaxBlock::of(Samples::new(BLOCK)),
     ));
     play(node, &rolling(), RATE, frames, BLOCK).swap_remove(0)
 }
@@ -186,7 +186,7 @@ fn a_disk_voice_added_to_a_pool_keeps_its_loop_and_direction() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let (mut streamer, stream, reader) = streaming(dir.path());
         let voice = DiskVoice::from_reader(reader, window());
-        let (pool, handle) = VoicePool::with_channels(tutti_types::ChannelLayout::MONO)
+        let (pool, handle) = VoicePool::with_channels(tutti_buffers::ChannelLayout::MONO)
             .expect("mono is a width")
             .with_handle();
         let play = Playback {

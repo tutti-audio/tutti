@@ -93,7 +93,7 @@ fn device(key: &'static str, loads: &Arc<AtomicUsize>) -> Declared<&'static str,
 }
 
 fn life(session: &crate::DetachedSession, key: &'static str) -> Life {
-    session.pool.handle::<_, Device>(&key).unwrap()
+    session.pool.entries.handle::<_, Device>(&key).unwrap()
 }
 
 /// Declares `keys`, loads them, and takes a snapshot hold on each in order,
@@ -118,7 +118,12 @@ fn held(
     let lives = keys.iter().map(|key| life(s, key)).collect();
     let holds = keys
         .iter()
-        .map(|key| s.pool.hold(&PoolKey::new(key), HoldKind::Snapshot).unwrap())
+        .map(|key| {
+            s.pool
+                .entries
+                .hold(&PoolKey::new(key), HoldKind::Snapshot)
+                .unwrap()
+        })
         .collect();
     s.pool::<&'static str>(()).unwrap();
     (lives, holds)
@@ -200,7 +205,11 @@ fn a_node_hold_never_parks_however_old() {
     spawned.run_all();
     let _ = events(&mut s);
     let handle = life(&s, "a");
-    let _hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
+    let _hold = s
+        .pool
+        .entries
+        .hold(&PoolKey::new(&"a"), HoldKind::Node)
+        .unwrap();
     s.pool::<&'static str>(()).unwrap();
     let _ = events(&mut s);
     assert!(!handle.is_closed());
@@ -219,9 +228,10 @@ fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
     .unwrap();
     spawned.run_all();
     let _ = events(&mut s);
-    let handle = s.pool.handle::<_, Shared>(&"a").unwrap();
+    let handle = s.pool.entries.handle::<_, Shared>(&"a").unwrap();
     let _hold = s
         .pool
+        .entries
         .hold(&PoolKey::new(&"a"), HoldKind::Snapshot)
         .unwrap();
     s.pool::<&'static str>(()).unwrap();

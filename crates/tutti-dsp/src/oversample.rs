@@ -58,8 +58,8 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Mono, MonoMut, Sample};
-use tutti_types::MaxBlock;
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use crate::{FirDesign, FirError, FirResponse};

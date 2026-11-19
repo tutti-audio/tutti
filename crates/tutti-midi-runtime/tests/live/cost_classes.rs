@@ -3,9 +3,10 @@
 //! pool every event leaves on the frame the serial walk sends it on.
 
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use crate::common;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
 use tutti_graph::{
@@ -14,7 +15,6 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_midi_runtime::{HarmonyNode, MidiClipNode, MidiIngestNode, SyncOut, TimedMidiEvent};
-use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 

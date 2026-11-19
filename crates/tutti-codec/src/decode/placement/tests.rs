@@ -42,7 +42,7 @@ fn flags_become_speakers_in_sample_order() {
     let wav_six = Channels::Positioned(Position::from_bits_truncate(0x60F));
     assert_eq!(
         topology_of(&wav_six),
-        ChannelTopology::assumed(tutti_types::ChannelLayout::from(6u16))
+        ChannelTopology::assumed(tutti_buffers::ChannelLayout::from(6u16))
     );
 }
 
@@ -97,7 +97,7 @@ fn channels_without_positions_are_unassigned() {
 /// states nothing is assumed stereo.
 #[test]
 fn a_count_without_positions_is_assumed_and_says_so() {
-    use tutti_types::{Bed, ChannelLayout};
+    use tutti_buffers::{Bed, ChannelLayout};
     let basis = |c: &Channels| super::topology_of(Some(c)).1;
     assert_eq!(
         basis(&Channels::Positioned(
@@ -134,7 +134,7 @@ fn a_count_without_positions_is_assumed_and_says_so() {
 /// order keeps its width as unassigned channels.
 #[test]
 fn an_ambisonic_track_is_its_format() {
-    use tutti_types::{AmbisonicFormat, AmbisonicOrder};
+    use tutti_buffers::{AmbisonicFormat, AmbisonicOrder};
     for order in 1u8..=3 {
         let (t, p) = super::topology_of(Some(&Channels::Ambisonic(order)));
         assert_eq!(t, AmbisonicFormat::ambix(AmbisonicOrder::of(order)).into());

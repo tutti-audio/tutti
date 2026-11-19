@@ -61,8 +61,8 @@
 //! sample, so the product rounds by about `u` a trip whatever the form: a complement buys nothing
 //! there.
 
+use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::MAX_CHANNELS;
 use tutti_units::{
     Amplitude, Gain, Hz, Quantity, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail,
 };

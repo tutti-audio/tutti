@@ -3,7 +3,7 @@
 
 use tutti_buffers::Float;
 use tutti_buffers::{BufferError, Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_units::Samples;
 
 const M: f32 = <f32 as Float>::MINUS_3_DB;

@@ -41,7 +41,7 @@ use tutti_ump::{
     UNIVERSAL_REAL_TIME,
 };
 
-use super::{GeneralMidi, MtcFullMessage, Recipient, Universal, machine_control};
+use super::{GeneralMidiMode, MtcFullMessage, Recipient, Universal, machine_control};
 use crate::tuning::{
     ChannelMask, KeyChange, KeyChanges, KeyTable, MAX_KEY_CHANGES, OctaveOffsets, Timing,
     TuningFrequency, TuningMessage, TuningName,
@@ -104,8 +104,8 @@ fn general_midi(input: &mut &[u8]) -> Res<Universal> {
     preceded(
         literal(0x09_u8),
         alt((
-            literal(0x01_u8).value(GeneralMidi::On),
-            literal(0x02_u8).value(GeneralMidi::Off),
+            literal(0x01_u8).value(GeneralMidiMode::On),
+            literal(0x02_u8).value(GeneralMidiMode::Off),
         )),
     )
     .map(Universal::GeneralMidi)

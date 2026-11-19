@@ -8,6 +8,7 @@
 //! a known gain.
 
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, BusSource, Buses, Cx, FadeLaw, ForkByClone, Io, Node, NodeKey, Prepare, Shape,
     Status,
@@ -16,7 +17,6 @@ use tutti_nodes::testing::Const;
 use tutti_session::{
     BusSink, Edge, EventEdge, Feeder, InPort, OutPort, Root, Session, SessionEvent,
 };
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_units::{Amplitude, Seconds};
 
 const BLOCK: usize = 64;

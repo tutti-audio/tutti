@@ -133,7 +133,10 @@ fn load() -> Loaded {
 fn prepare_at(unit: &mut PluginNode<Vst2Loaded>, rate: SampleRate) {
     tutti_graph::Node::prepare(
         unit,
-        &tutti_graph::Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK))),
+        &tutti_graph::Prepare::new(
+            rate,
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
+        ),
     );
 }
 
@@ -150,7 +153,7 @@ fn drive_blocks(unit: &mut PluginNode<Vst2Loaded>, max: usize, frames: usize) {
     let rate = SampleRate::of(SAMPLE_RATE);
     Node::prepare(
         unit,
-        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(max))),
+        &Prepare::new(rate, tutti_buffers::MaxBlock::of(tutti_units::Samples(max))),
     );
     process_block(unit, frames);
 }
@@ -424,7 +427,10 @@ fn the_output_is_what_the_plugin_wrote() {
     let rate = SampleRate::of(SAMPLE_RATE);
     Node::prepare(
         &mut loaded.unit,
-        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK))),
+        &Prepare::new(
+            rate,
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
+        ),
     );
     let channels = usize::from(Node::shape(&loaded.unit).audio_in().count());
     assert_eq!(channels, 2, "the probe's default layout is stereo");
@@ -643,8 +649,8 @@ fn an_io_change_reaches_a_subscriber_and_the_shape() {
 /// Whether `shape` fills the buses at all is `chunked_node`'s test (this plugin states
 /// no placement, so the default buses are what it declares as well).
 fn the_shape_declares_the_plugins_buses() {
+    use tutti_buffers::Speaker;
     use tutti_graph::{BusRole, Node as _};
-    use tutti_types::Speaker;
 
     let _guard = lock_probe();
     let loaded = load();

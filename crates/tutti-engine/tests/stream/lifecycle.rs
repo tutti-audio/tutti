@@ -10,6 +10,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::SampleFormat;
 use tutti_engine::{
     AudioCallbackState, BackendErrorKind, ManualStreamDriver, OutputSpec, OutputStream, StartError,
@@ -17,7 +18,6 @@ use tutti_engine::{
 };
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_transport::Transport;
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 use tutti_units::Samples;
 
@@ -299,7 +299,7 @@ fn a_restart_runs_its_hook_between_the_stop_and_the_start() {
     let (d2, s2) = ManualStreamDriver::new();
     let new = OutputSpec::new(
         tutti_units::SampleRate::SR_96K,
-        tutti_types::ChannelLayout::from(6u16),
+        tutti_buffers::ChannelLayout::from(6u16),
         SampleFormat::F32,
     );
     let mut seen = None;

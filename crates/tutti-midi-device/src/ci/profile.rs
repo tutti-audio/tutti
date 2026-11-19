@@ -27,7 +27,8 @@ use std::vec::Vec;
 use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, U14, U28, Ump, first_non_seven_bit};
 
 use super::{
-    CI_VERSION, CiDeviceId, CiHeader, CiVersion, Destination, encode_preamble, read, sysex7_packets,
+    CI_VERSION, CiDeviceId, CiHeader, CiVersion, Destination, Whole, encode_preamble, read,
+    sysex7_packets,
 };
 
 /// Profile Inquiry, Sub-ID#2 `0x20` (§7.2).
@@ -609,6 +610,15 @@ pub enum ProfileTarget {
     Group,
     /// The whole Function Block (`0x7F`).
     FunctionBlock,
+}
+
+impl From<Whole> for ProfileTarget {
+    fn from(whole: Whole) -> Self {
+        match whole {
+            Whole::Group => Self::Group,
+            Whole::FunctionBlock => Self::FunctionBlock,
+        }
+    }
 }
 
 impl ProfileTarget {

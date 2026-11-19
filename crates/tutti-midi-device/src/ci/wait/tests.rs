@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use super::*;
 use tutti_ump::U7;
 
@@ -33,11 +35,11 @@ fn only_a_timeout_wait_ack_is_a_wait() {
 #[test]
 fn a_wait_is_added_to_the_time_left() {
     let now = Instant::now();
-    let mut deadline = now + Duration::from_secs(3);
-    TimeoutWait::of(0x3C).extend(&mut deadline);
-    assert_eq!(deadline, now + Duration::from_secs(9));
-    TimeoutWait::of(0x1E).extend(&mut deadline);
-    assert_eq!(deadline, now + Duration::from_secs(12));
-    TimeoutWait::of(0).extend(&mut deadline);
-    assert_eq!(deadline, now + Duration::from_secs(12));
+    let mut wait = Pending::after(now, Duration::from_secs(3));
+    TimeoutWait::of(0x3C).extend(&mut wait);
+    assert_eq!(wait.deadline(), now + Duration::from_secs(9));
+    TimeoutWait::of(0x1E).extend(&mut wait);
+    assert_eq!(wait.deadline(), now + Duration::from_secs(12));
+    TimeoutWait::of(0).extend(&mut wait);
+    assert_eq!(wait.deadline(), now + Duration::from_secs(12));
 }

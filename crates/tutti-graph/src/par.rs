@@ -78,8 +78,7 @@ use tutti_rt::{
 };
 
 use crate::arena::{Arena, Line};
-use crate::command::Deliveries;
-use crate::event::Event;
+use crate::command::{Deliveries, Overlay};
 use crate::exec::{
     Head, Inject, OpState, Ring, Unit, audio_ring, capture_op, delay_op, event_delay_op,
     event_merge_op, event_ring, global_in, node_dispatch, output_op, sum_op,
@@ -91,7 +90,7 @@ use crate::node::{Env, MAX_PORTS};
 use crate::plan::{Op, Plan, Span};
 use crate::rtlog::LogLane;
 use crate::slots::{ArenaView, EventSlot, EventSlots, EventsView, SharedFlags};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 /// A pool of threads that runs a job on several of them — what the parallel
 /// executor (and a CLAP plugin's `clap.thread-pool` request) asks of a
@@ -156,7 +155,7 @@ pub(crate) struct Worker {
     /// The event slots an op's view holds.
     held_events: Held,
     /// Where a node's scheduled events are merged into its inputs.
-    overlay: Vec<Event>,
+    overlay: Overlay,
     /// Events refused this block, and where.
     dropped: Dropped,
     /// Whether a crossfade ended this block.
@@ -253,7 +252,7 @@ impl Par {
                 .map(|_| Worker {
                     held_audio: Held::new(held),
                     held_events: Held::new(held),
-                    overlay: Vec::with_capacity(overlay),
+                    overlay: Overlay::with_capacity(overlay),
                     dropped: Dropped::new(),
                     fade_ended: false,
                 })

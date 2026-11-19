@@ -28,7 +28,7 @@
 //! never enters.
 
 use tutti_buffers::Float;
-use tutti_types::MAX_CHANNELS;
+use tutti_buffers::MAX_CHANNELS;
 use tutti_units::{Amplitude, SamplePosition};
 
 /// Frames of scratch a node holds before any `prepare` (its constructor's
@@ -275,7 +275,7 @@ mod tests {
     use super::*;
     use crate::VoiceWindow;
     use tutti_buffers::Interleaved;
-    use tutti_types::MaxBlock;
+    use tutti_buffers::MaxBlock;
 
     /// [`BlockScratch`]'s bytes a frame that do not depend on the width: a
     /// position, the gather's index, fraction, flag and four tap lanes.

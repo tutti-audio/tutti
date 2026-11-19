@@ -8,11 +8,11 @@
 //! the block the toggle lands on; each render below is longer, and only the
 //! frames after it are compared.
 
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::bits;
 use tutti_graph::{IntoNode, NodeMode, Prepare, Solo, declick_frames};
 use tutti_nodes::{BusStripNode, EqBandNode, SvfType};
-use tutti_types::MaxBlock;
 use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;

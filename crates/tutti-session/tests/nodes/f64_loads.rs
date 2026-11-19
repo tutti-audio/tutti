@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::wait_until;
 use tutti_graph::ForkByClone;
@@ -11,7 +12,6 @@ use tutti_sampler::Placement;
 use tutti_session::{
     AudioEntry, OutPort, PoolState, Root, SamplerEvent, Session, SessionEvent, audio_file,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, SampleRate};
 
 #[path = "../support/f64_nodes.rs"]

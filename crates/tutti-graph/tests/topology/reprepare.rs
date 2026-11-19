@@ -8,16 +8,16 @@ use tutti_graph::testing as common;
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use common::{Kind, TestNode};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, CompileError, Cx, CycleEdge, Editor, EventEdge, EventIn, EventKind, EventOut,
     Executor, Io, Node, Prepare, Reference, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
 use tutti_units::{Latency, SampleRate, Samples, Tail};
 

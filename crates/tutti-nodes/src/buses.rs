@@ -2,8 +2,8 @@
 //! where its input goes: the graph refuses one it
 //! would have to guess.
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::Buses;
-use tutti_types::{BusTopology, ChannelLayout};
 
 /// A main bus of `width` channels at the engine's speakers for that width
 /// (`ChannelTopology::assumed`), so the graph's mix and bypass fold a mono
