@@ -1152,12 +1152,36 @@ impl<F: Float> MemorySource<F> {
         Piece::Ready
     }
 
+    /// One reversed free-running output frame into `out`: the file read
+    /// mirrored at the cursor, which steps by `read_rate`; at the file's first
+    /// frame the cursor stops.
+    #[inline]
+    fn free_frame_reversed_into(&mut self, out: &mut [F]) {
+        if !self.playing.load(Ordering::Relaxed) {
+            out.fill(F::ZERO);
+            return;
+        }
+        let pos = self.position.load().get();
+        if pos >= self.wave.len().get() as f64 {
+            self.playing.store(false, Ordering::Relaxed);
+            out.fill(F::ZERO);
+            return;
+        }
+        self.read_placed_into(SamplePosition(pos), Direction::Reverse, out);
+        self.apply_gain(out);
+        let next = pos + self.read_rate().advance(Samples(1)).get();
+        self.position.store(SamplePosition::new(next));
+    }
+
     /// The free-running read of `frames` block frames into frames `0..frames`
     /// of the first `n` `head` lanes: each frame is the cursor's own step,
-    /// gained by the source's gain. [`Piece::Silent`] while the cursor is
-    /// stopped (nothing is written, and the cursor stays).
+    /// gained by the source's gain. Reversed, the cursor counts straight
+    /// positions and reads the file mirrored (the loop ignored, as a placed
+    /// read's is), stopping at the first frame. [`Piece::Silent`] while the
+    /// cursor is stopped (nothing is written, and the cursor stays).
     pub(crate) fn render_free<H: AsMut<[F]>>(
         &mut self,
+        direction: Direction,
         frames: usize,
         n: usize,
         head: &mut [H],
@@ -1167,7 +1191,10 @@ impl<F: Float> MemorySource<F> {
         }
         let mut frame = [F::ZERO; MAX_CHANNELS];
         for i in 0..frames {
-            self.free_frame_into(&mut frame[..n]);
+            match direction {
+                Direction::Forward => self.free_frame_into(&mut frame[..n]),
+                Direction::Reverse => self.free_frame_reversed_into(&mut frame[..n]),
+            }
             for (lane, &sample) in head.iter_mut().zip(&frame[..n]) {
                 lane.as_mut()[i] = sample;
             }
