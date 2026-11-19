@@ -2211,7 +2211,7 @@ impl<F: Float> Graph<F> {
 
     /// Removes the edge `from -> to`, its gain with it: whether it was there.
     /// With `hard` false an edge the plan has heard **fades out** first and
-    /// leaves the spec when the fade ends (`Editor::settle_fades`), and one
+    /// leaves the spec when the fade ends (`Editor::finish_fades`), and one
     /// already fading out is not there.
     pub(crate) fn remove_edge(&mut self, from: OutPort, to: InPort, hard: bool) -> bool {
         match Self::edge_id(Edge::new(from, to)) {
@@ -3119,8 +3119,8 @@ impl<F: Float> Graph<F> {
     /// Closes the taps whose readers were dropped, and returns how many.
     /// The session's [`Reclaim`](crate::Phase::Reclaim) phase runs it.
     pub(crate) fn reap_taps(&mut self) -> usize {
-        let reaped = self.editor.reap_taps();
-        if reaped > 0 {
+        let pruned = self.editor.prune_taps();
+        if pruned > 0 {
             let open = &self.editor.spec().topology.taps;
             self.output_taps.retain(|id, _| open.contains_key(id));
             // A held reader keeps its tap alive, and a claimed one has left the map.
@@ -3129,29 +3129,29 @@ impl<F: Float> Graph<F> {
                     RootReader::Tap(tap) => open.contains_key(tap),
                     RootReader::Meter(_) => true,
                 }),
-                "no held reader names a reaped tap"
+                "no held reader names a pruned tap"
             );
             self.edited = true;
         }
-        reaped
+        pruned
     }
 
     /// Closes the event taps whose readers were dropped, and returns how many.
     /// The session's [`Reclaim`](crate::Phase::Reclaim) phase runs it.
     pub(crate) fn reap_event_taps(&mut self) -> usize {
-        let reaped = self.editor.reap_event_taps();
-        if reaped > 0 {
+        let pruned = self.editor.prune_event_taps();
+        if pruned > 0 {
             let open = &self.editor.spec().topology.event_taps;
             self.event_taps.retain(|id, _| open.contains_key(id));
             self.edited = true;
         }
-        reaped
+        pruned
     }
 
     /// Closes the meters whose readers were dropped, and returns how many.
     /// The session's [`Reclaim`](crate::Phase::Reclaim) phase runs it.
     pub(crate) fn reap_meters(&mut self) -> usize {
-        let reaped = self.editor.reap_meters();
+        let reaped = self.editor.prune_meters();
         if reaped > 0 {
             let open = &self.editor.spec().topology.meters;
             // A held reader keeps its meter alive, and a claimed one has left the map.
@@ -3724,7 +3724,7 @@ impl<F: Float> Graph<F> {
         self.editor.collect();
         // An edge whose declick fade has ended leaves the spec (or forgets the
         // fade); the commit that follows compiles it away.
-        if self.editor.settle_fades() {
+        if self.editor.finish_fades() {
             self.edited = true;
         }
         self.apply_pending_root();

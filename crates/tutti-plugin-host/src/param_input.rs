@@ -114,7 +114,7 @@ pub fn take(
                 let ParamAddr::Id(id) = ramp.addr() else {
                     continue;
                 };
-                let Some(value) = ramp.foreign_target(id) else {
+                let Some(value) = ramp.target_by_id(id) else {
                     continue;
                 };
                 // Where the parameter stood at the end of the frame before
@@ -126,7 +126,7 @@ pub fn take(
                 match stands {
                     Some(stands) if ramp.duration() > Samples::new(0) => {
                         let seg =
-                            ParamSegment::foreign(id, stands, value, ramp.duration(), ramp.shape());
+                            ParamSegment::by_id(id, stands, value, ramp.duration(), ramp.shape());
                         segments.start(params, id, seg, abs(o), frame, false);
                     }
                     _ => {
@@ -262,16 +262,13 @@ mod tests {
             ParamEvent::ramp(Offset::of(Samples::new(i), Samples::new(len)), ramp)
         };
         let events = [
-            at(0, ParamRamp::foreign(ParamId::new(7), 0.0, Samples::new(8))),
+            at(0, ParamRamp::by_id(ParamId::new(7), 0.0, Samples::new(8))),
             at(
                 11,
-                ParamRamp::foreign(ParamId::new(7), 1.0, Samples::new(40))
+                ParamRamp::by_id(ParamId::new(7), 1.0, Samples::new(40))
                     .with_shape(Law::PowerIn(Exponent::of(2.0))),
             ),
-            at(
-                40,
-                ParamRamp::foreign(ParamId::new(7), 0.0, Samples::new(4)),
-            ),
+            at(40, ParamRamp::by_id(ParamId::new(7), 0.0, Samples::new(4))),
         ];
         take(
             &[],
@@ -333,23 +330,23 @@ mod tests {
         let events = [
             ParamEvent::ramp(
                 off(0),
-                ParamRamp::foreign(ParamId::new(7), 0.2, Samples::new(0)),
+                ParamRamp::by_id(ParamId::new(7), 0.2, Samples::new(0)),
             ),
             ParamEvent::ramp(
                 off(10),
-                ParamRamp::foreign(ParamId::new(7), 0.4, Samples::new(0)),
+                ParamRamp::by_id(ParamId::new(7), 0.4, Samples::new(0)),
             ),
             ParamEvent::ramp(
                 off(10),
-                ParamRamp::foreign(ParamId::new(7), 1.0, Samples::new(4)),
+                ParamRamp::by_id(ParamId::new(7), 1.0, Samples::new(4)),
             ),
             ParamEvent::segment(
                 off(20),
-                ParamSegment::foreign(ParamId::new(7), 0.9, 0.9, Samples::new(2), Law::Linear),
+                ParamSegment::by_id(ParamId::new(7), 0.9, 0.9, Samples::new(2), Law::Linear),
             ),
             ParamEvent::ramp(
                 off(20),
-                ParamRamp::foreign(ParamId::new(7), 0.0, Samples::new(2)),
+                ParamRamp::by_id(ParamId::new(7), 0.0, Samples::new(2)),
             ),
         ];
         take(
@@ -435,11 +432,11 @@ mod tests {
         let events = [
             ParamEvent::ramp(
                 off(10),
-                ParamRamp::foreign(ParamId::new(9), 0.4, Samples::new(0)),
+                ParamRamp::by_id(ParamId::new(9), 0.4, Samples::new(0)),
             ),
             ParamEvent::ramp(
                 off(10),
-                ParamRamp::foreign(ParamId::new(9), 1.0, Samples::new(4)),
+                ParamRamp::by_id(ParamId::new(9), 1.0, Samples::new(4)),
             ),
         ];
         walk(&events, 64, &mut segments, &mut params);
@@ -462,7 +459,7 @@ mod tests {
         let off = |i: usize| Offset::of(Samples::new(i), Samples::new(64));
         let step = [ParamEvent::ramp(
             off(10),
-            ParamRamp::foreign(ParamId::new(7), 0.2, Samples::new(0)),
+            ParamRamp::by_id(ParamId::new(7), 0.2, Samples::new(0)),
         )];
         walk(&step, 64, &mut segments, &mut params);
         params.handed_off(false);
@@ -470,7 +467,7 @@ mod tests {
         segments.begin(64);
         let ramp = [ParamEvent::ramp(
             off(10),
-            ParamRamp::foreign(ParamId::new(7), 1.0, Samples::new(4)),
+            ParamRamp::by_id(ParamId::new(7), 1.0, Samples::new(4)),
         )];
         walk(&ramp, 64, &mut segments, &mut params);
         let got = queue(&mut params, address);
@@ -514,8 +511,7 @@ mod tests {
         let events: Vec<ParamEvent> = (0..300)
             .map(|i| {
                 let v = if i % 2 == 0 { 0.25 } else { 0.75 };
-                let seg =
-                    ParamSegment::foreign(ParamId::new(7), v, v, Samples::new(2), Law::Linear);
+                let seg = ParamSegment::by_id(ParamId::new(7), v, v, Samples::new(2), Law::Linear);
                 ParamEvent::segment(Offset::of(Samples::new(i), Samples::new(len)), seg)
             })
             .collect();
@@ -557,7 +553,7 @@ mod tests {
         let step = |i: usize, v: f64| {
             ParamEvent::ramp(
                 off(i),
-                ParamRamp::foreign(ParamId::new(7), v, Samples::new(0)),
+                ParamRamp::by_id(ParamId::new(7), v, Samples::new(0)),
             )
         };
         let events = [note(5), note(10)];

@@ -76,7 +76,7 @@ use crate::spec::EventOut;
 /// weight its previous block ended on (a new lane has none: `In` starts at
 /// `0.0`, `Out` at the base). `In` runs to the base the lane reads, `Out` to
 /// `0.0` and stays there until the editor drops the edge
-/// ([`Editor::settle_fades`](crate::Editor::settle_fades)); both are then
+/// ([`Editor::finish_fades`](crate::Editor::finish_fades)); both are then
 /// reported to the editor once, and an edge with `None` is the lane's
 /// ordinary one-block ramp.
 ///

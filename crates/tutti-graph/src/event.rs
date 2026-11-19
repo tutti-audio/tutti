@@ -548,7 +548,7 @@ impl EventDensity {
     }
 }
 
-/// What one writer counted this block: events refused or withheld, and
+/// What one writer counted this block: events refused or skipped, and
 /// refused events a node later wrote (`EventWriter::recovered`).
 #[derive(Debug, Default)]
 pub(crate) struct PortCount {
@@ -572,8 +572,8 @@ pub(crate) struct PortCount {
 ///
 /// The writer does not pair: a note-on it refused leaves its note-off to
 /// whoever wrote it. A node that tracks the notes it starts (the clip node)
-/// keeps the pairing itself and reports the note-off it then withholds with
-/// [`withhold`](Self::withhold); a relay that does not track (hardware input,
+/// keeps the pairing itself and reports the note-off it then skips with
+/// [`count_skipped`](Self::count_skipped); a relay that does not track (hardware input,
 /// the queue) passes the note-off on, which a receiver treats as a no-op for
 /// a key that is not sounding.
 pub struct EventWriter<'a> {
@@ -710,11 +710,11 @@ impl<'a> EventWriter<'a> {
         Ok(())
     }
 
-    /// Counts one event the node withheld rather than wrote: it was not
+    /// Counts one event the node skipped rather than wrote: it was not
     /// refused by the port, but the node left it out because the event it
     /// belongs to was (a note-off whose note-on the port refused). Without
     /// it the port's count is short by the notes a refusal then unpaired.
-    pub fn withhold(&self) {
+    pub fn count_skipped(&self) {
         self.count_lost();
     }
 
@@ -1079,7 +1079,7 @@ mod tests {
     }
 
     /// A writer at its capacity refuses a note-on and takes a note-off, up
-    /// to `note_off_room`, and every refusal and every withheld event is
+    /// to `note_off_room`, and every refusal and every skipped event is
     /// counted once.
     #[test]
     fn a_writer_at_capacity_takes_note_offs_to_its_room() {
@@ -1095,7 +1095,7 @@ mod tests {
             assert_eq!(w.push(off(3 + k)), Ok(()), "note-off {k}");
         }
         assert_eq!(w.push(off(12)), Err(EventRejected::Full));
-        w.withhold();
+        w.count_skipped();
         w.recovered();
         assert_eq!((dropped.refused.get(), dropped.recovered.get()), (3, 1));
         assert_eq!(w.len(), 10);

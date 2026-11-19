@@ -322,7 +322,7 @@ the interpreter.
   the settings in force since, erring long. The figure is measured from the last non-quiet input
   frame, not from the call, and it matters only for a node **without event
   inputs** (one with event inputs parks on its own `Status::Idle`).
-  `contract::assert_honest_tail` checks the duty for an impulse in. Pinned by `tests/executor/executor.rs`
+  `contract::assert_declared_tail` checks the duty for an impulse in. Pinned by `tests/executor/executor.rs`
   (`a_reported_tail_shorter_than_the_ceiling_is_what_the_skip_waits`,
   `a_reported_tail_above_the_ceiling_is_clamped`,
   `a_call_that_reports_nothing_restores_the_ceiling`,
@@ -8303,7 +8303,7 @@ fourth.
 >
 > **The control lane:** `ControlLaneNode` sends a target's whole
 > `ControlProgram` on a 32-frame grid of the play clock plus every corner,
-> and `AutomationLaneNode::for_param` / `for_foreign` now build one (014
+> and `AutomationLaneNode::for_param` / `for_id` now build one (014
 > §12.2). The producer and the plugin delivery described under "Curve
 > segments" below are superseded where marked. It is built over the
 > shared point pool (014 §9's
@@ -8689,7 +8689,7 @@ the source stands ("Shaped ramps" below).
   segment's endpoints are never rewritten: a range that shrinks pins the
   value, and widening it releases the value onto the curve where the
   segment has run on to.
-- **The producer: `AutomationLaneNode::for_param` / `for_foreign`.**
+- **The producer: `AutomationLaneNode::for_param` / `for_id`.**
   **Superseded by doc 014's control lane (§12.2):** these return a `ControlLaneNode`; a
   piece with no segment shape goes on the play-clock grid, not at block
   edges; the capacity is 256 and past it the lane thins its grid and
@@ -8865,7 +8865,7 @@ a gated `WorkerPool`, and bit for bit serial against pools of 2, 3, 4 and
 end value on its frame, an interruption), and `tests/clap_nodes/clap_automation.rs`
 against the reference CLAP plugin's gain: a scheduled segment drives it
 through the curve to exactly its end value on its frame across four
-chunks, an interrupting ramp wins, and a `for_foreign` lane does the
+chunks, an interrupting ramp wins, and a `for_id` lane does the
 same along its envelope.
 
 **Deferred.** `LayeredCurve` and the automation `Recorder` answer

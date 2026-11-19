@@ -38,7 +38,7 @@
 //! Dropping the [`EventTapReader`] first is safe. The tap then finds no reader
 //! and writes nothing, and the ring is freed with the writer when the tap is
 //! closed ([`Editor::close_event_tap`](crate::Editor::close_event_tap)) or
-//! reaped ([`Editor::reap_event_taps`](crate::Editor::reap_event_taps)), on
+//! pruned ([`Editor::prune_event_taps`](crate::Editor::prune_event_taps)), on
 //! the control side. Dropping the reader last frees the ring on the reader's
 //! thread.
 
@@ -150,7 +150,7 @@ pub(crate) fn event_tap_op<E: EventSlots + ?Sized>(
 /// ```
 ///
 /// Drain it from a thread of your own. Dropping it leaves the tap open until
-/// the editor closes or reaps it; the audio thread then writes nothing for it.
+/// the editor closes or prunes it; the audio thread then writes nothing for it.
 /// It must not be dropped on the audio thread (debug builds panic there).
 pub struct EventTapReader {
     _control: ControlDrop<Self>,

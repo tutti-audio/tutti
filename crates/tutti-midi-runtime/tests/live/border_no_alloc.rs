@@ -493,7 +493,7 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
 /// A clip that overflows its port, refuses note-offs and retries them, in
 /// blocks the loss log and its ring are written in, without allocating: 300
 /// notes on a 64-frame block's port of 256 (44 note-ons refused, their
-/// note-offs withheld), then 200 notes ended and 200 started at once (104
+/// note-offs skipped), then 200 notes ended and 200 started at once (104
 /// note-offs refused, owed, retried on the next block).
 #[test]
 fn a_clip_overflowing_its_port_refuses_and_retries_without_allocating() {
@@ -551,7 +551,7 @@ fn a_clip_overflowing_its_port_refuses_and_retries_without_allocating() {
 }
 
 /// The ledger on every path, with a full table: 2,100 notes sound at once
-/// across two groups against 2,048 keys (the last 52 are withheld), all end
+/// across two groups against 2,048 keys (the last 52 are skipped), all end
 /// on one frame into a port that takes 584 of them (the rest are owed and
 /// paid over the next blocks), a seek (every held note ended again) and a
 /// stop. None allocates.

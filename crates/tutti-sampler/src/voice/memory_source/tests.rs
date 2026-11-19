@@ -1231,9 +1231,9 @@ fn six_channel_loop_crossfade_covers_every_channel() {
 /// controls `IntoNode` handed back.
 #[test]
 fn a_gain_change_reaches_the_rendering_node() {
-    use tutti_graph::Solo;
+    use tutti_graph::Standalone;
     let wave = ramp_wave(64, 44_100.0);
-    let mut solo = Solo::new(
+    let mut solo = Standalone::new(
         MemorySource::with_channels(wave, 1u16).expect("a placeable wave"),
         Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(64))),
     );
