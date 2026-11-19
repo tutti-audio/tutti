@@ -190,6 +190,13 @@ pub enum Error {
         /// The number given.
         id: u32,
     },
+    /// A value the spec reserves, which the sequencer's record has no way to
+    /// hold.
+    #[error("a reserved {what} cannot be recorded")]
+    Reserved {
+        /// Which field (`"protocol"`, `"MIDI 1.0 port"`).
+        what: &'static str,
+    },
     /// The sequencer did not give a queue's real time.
     #[error("the sequencer gave no real time for the queue's status")]
     NoQueueTime,

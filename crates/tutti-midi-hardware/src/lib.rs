@@ -227,7 +227,6 @@ mod backend;
     any(midi_backend = "none", midi_backend = "winmm"),
     allow(dead_code, reason = "only a UMP backend converts OS blocks")
 )]
-mod block;
 mod capability;
 mod ci;
 mod devices;
