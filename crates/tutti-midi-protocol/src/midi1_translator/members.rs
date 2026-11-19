@@ -4,10 +4,11 @@
 use core::cmp::Reverse;
 
 use tutti_ump::{
-    Address, CCNumber, Midi1Bytes, MidiChannel, MidiGroup, NoteNumber, U7, U14, Voice1, Voice2,
+    Address, CCNumber, ExtremeValues, Midi1Bytes, MidiChannel, MidiGroup, NoteNumber, U7, U14,
+    Voice1, Voice2,
 };
 
-use crate::{ExtremeValues, MpeZoneConfig, narrow_with};
+use crate::MpeZoneConfig;
 
 /// A note a member channel plays: the channel it was sent on and its number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,7 +138,7 @@ impl Members {
                     slid: false,
                     ..*slot
                 };
-                if let Ok(on) = narrow_with(extremes, voice) {
+                if let Ok(on) = Voice1::try_from_with(extremes, voice) {
                     send(member, on);
                 }
             }
@@ -146,7 +147,7 @@ impl Members {
                     let slot = &mut members[member.index()];
                     slot.held = None;
                     slot.released = self.tick;
-                    if let Ok(off) = narrow_with(extremes, voice) {
+                    if let Ok(off) = Voice1::try_from_with(extremes, voice) {
                         send(member, off);
                     }
                 }
@@ -154,7 +155,7 @@ impl Members {
             Voice2::PerNotePitchBend { note, value } => {
                 if let Some(member) = find(members, note) {
                     members[member.index()].bent = true;
-                    if let Ok(bend) = narrow_with(extremes, Voice2::PitchBend(value)) {
+                    if let Ok(bend) = Voice1::try_from_with(extremes, Voice2::PitchBend(value)) {
                         send(member, bend);
                     }
                 }
@@ -162,7 +163,9 @@ impl Members {
             Voice2::PolyPressure { note, value } => {
                 if let Some(member) = find(members, note) {
                     members[member.index()].pressed = true;
-                    if let Ok(pressure) = narrow_with(extremes, Voice2::ChannelPressure(value)) {
+                    if let Ok(pressure) =
+                        Voice1::try_from_with(extremes, Voice2::ChannelPressure(value))
+                    {
                         send(member, pressure);
                     }
                 }
@@ -181,7 +184,7 @@ impl Members {
                         controller: CCNumber::BRIGHTNESS,
                         value,
                     };
-                    if let Ok(slide) = narrow_with(extremes, slide) {
+                    if let Ok(slide) = Voice1::try_from_with(extremes, slide) {
                         send(member, slide);
                     }
                 }

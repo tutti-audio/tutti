@@ -54,9 +54,7 @@
 use alloc::vec::Vec;
 use core::num::{NonZeroU16, NonZeroUsize};
 
-use tutti_midi_protocol::{
-    GeneralMidiMode, Heard, KeyTable, Timing, TuningMessage, Universal, narrow_value,
-};
+use tutti_midi_protocol::{GeneralMidiMode, Heard, KeyTable, Timing, TuningMessage, Universal};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
     RegisteredData, Rpn, U7, Ump, Voice2,
@@ -788,7 +786,7 @@ impl Voicing {
                 self.note_off(channel, note, velocity.get(), patch, levels);
             }
             Voice2::ControlChange { controller, value } => {
-                let value = narrow_value(value);
+                let value = value.to_u7();
                 match Controller::effect(controller, value) {
                     Some(effect) => self.effect(channel, effect),
                     None => self.controller(channel, controller, value),
@@ -1711,11 +1709,11 @@ impl Voicing {
 mod tests {
     use super::*;
     use crate::LIVE_NOTES;
-    use tutti_midi_protocol::widen;
+    use tutti_rt::SplitMix64;
     use tutti_ump::BendValue;
     use tutti_ump::NoteVelocity;
     use tutti_ump::PerNoteManagement;
-    use tutti_ump::{Attribute, CCNumber, Pitch, RegisteredPerNoteController, U7, Voice1};
+    use tutti_ump::{Attribute, CCNumber, Pitch, RegisteredPerNoteController, U7, Voice1, Voice2};
     use tutti_units::Normalized;
 
     /// One voice per note, no group.
@@ -2269,13 +2267,13 @@ mod tests {
     // ---- velocity zero ---------------------------------------------------
 
     /// A MIDI 1.0 Note On at velocity 0 is a Note Off (MIDI 1.0 Detailed
-    /// Specification; `widen` makes it one); a MIDI 2.0 Note On at velocity 0
+    /// Specification; `Voice2::from` makes it one); a MIDI 2.0 Note On at velocity 0
     /// is a Note On (M2-104 section 7.4.2), played as quietly as there is.
     #[test]
     fn velocity_zero_is_an_off_in_midi1_and_an_on_in_midi2() {
         let mut s = Sim::new(POLY);
         s.on(0, 60);
-        let one = widen(Voice1::NoteOn {
+        let one = Voice2::from(Voice1::NoteOn {
             note: NoteNumber::of(60),
             velocity: U7::of(0),
         });
@@ -3480,14 +3478,9 @@ mod tests {
 
     // ---- random streams ------------------------------------------------
 
-    struct Rng(u64);
-    impl Rng {
-        fn below(&mut self, n: u64) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0 % n
-        }
+    /// A draw in `0..n` from the stream.
+    fn below(rng: &mut SplitMix64, n: u64) -> u64 {
+        rng.next_u64() % n
     }
 
     /// Random streams of notes (one and two layers), pedals, panics and
@@ -3502,8 +3495,9 @@ mod tests {
     #[test]
     fn random_streams_keep_their_invariants() {
         for stream in 0..400u64 {
-            let mut rng =
-                Rng(0x9E37_79B9_7F4A_7C15 ^ (stream + 1).wrapping_mul(0xD1B5_4A32_D192_ED03));
+            let mut rng = SplitMix64::new(
+                0x9E37_79B9_7F4A_7C15 ^ (stream + 1).wrapping_mul(0xD1B5_4A32_D192_ED03),
+            );
             let mode = [Mode::Poly, Mode::Mono, Mode::Legato][(stream % 3) as usize];
             let steal = [
                 Steal::By(Order::Oldest),
@@ -3530,13 +3524,13 @@ mod tests {
             let mut sost = [false; 2];
             let pair = Pair { group: 0, scope: 0 };
             for _ in 0..80 {
-                let c = rng.below(2) as u8;
+                let c = below(&mut rng, 2) as u8;
                 let cu = usize::from(c);
                 // More distinct keys than the held stack holds.
-                let k = 40 + rng.below(24) as u8;
+                let k = 40 + below(&mut rng, 24) as u8;
                 let before: Vec<VoiceId> = s.voices.iter().map(|v| v.id).collect();
                 let full = s.voices.len() >= 6;
-                let op = rng.below(16);
+                let op = below(&mut rng, 16);
                 let note_msg = op <= 8;
                 let cmds = match op {
                     0..=4 => {
@@ -3562,7 +3556,11 @@ mod tests {
                     }
                     10 => {
                         order[cu].clear();
-                        s.cc(c, [120, 123, 124, 125, 126, 127][rng.below(6) as usize], 0)
+                        s.cc(
+                            c,
+                            [120, 123, 124, 125, 126, 127][below(&mut rng, 6) as usize],
+                            0,
+                        )
                     }
                     11 => {
                         order[cu].clear();
@@ -3578,7 +3576,7 @@ mod tests {
                         // The instrument ends a voice by itself (a sample ran
                         // out): the core is told at the next note message.
                         if !s.voices.is_empty() {
-                            let at = rng.below(s.voices.len() as u64) as usize;
+                            let at = below(&mut rng, s.voices.len() as u64) as usize;
                             let gone = s.voices[at].id;
                             s.end(gone);
                         }
@@ -3697,22 +3695,23 @@ mod tests {
     #[test]
     fn random_bend_streams_match_the_model() {
         for stream in 0..200u64 {
-            let mut rng =
-                Rng(0xA5A5_1234_5678_9ABC ^ (stream + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            let mut rng = SplitMix64::new(
+                0xA5A5_1234_5678_9ABC ^ (stream + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+            );
             let mut s = Sim::new(POLY);
             let mut pos = [0.0f64; 16];
             let mut range = [2.0f64; 16];
             for _ in 0..40 {
-                let c = rng.below(16) as u8;
+                let c = below(&mut rng, 16) as u8;
                 let cu = usize::from(c);
-                let (cmds, bent) = match rng.below(4) {
+                let (cmds, bent) = match below(&mut rng, 4) {
                     0 | 1 => {
-                        let raw = (rng.below(1 << 32)) as u32;
+                        let raw = (below(&mut rng, 1 << 32)) as u32;
                         pos[cu] = (f64::from(raw) - 2147483648.0) / 2147483648.0;
                         (s.send(c, bend(raw), &One), true)
                     }
                     2 => {
-                        let r = rng.below(24) as f32;
+                        let r = below(&mut rng, 24) as f32;
                         range[cu] = f64::from(r);
                         (s.send(c, rpn0(r), &One), true)
                     }

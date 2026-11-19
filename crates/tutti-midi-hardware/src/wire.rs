@@ -73,7 +73,7 @@ impl Wire {
 
     /// Whether the device is in a Protocol that has no MIDI 2.0 Channel Voice:
     /// MIDI 1.0, and the reserved values, which nobody can speak.
-    fn narrows(&self) -> bool {
+    fn speaks_midi1(&self) -> bool {
         self.config.protocol != Protocol::Midi2
     }
 
@@ -82,7 +82,7 @@ impl Wire {
     pub(crate) fn convert(&mut self, events: &[Outgoing]) {
         self.out.clear();
         self.ends.clear();
-        let narrows = self.narrows();
+        let speaks_midi1 = self.speaks_midi1();
         let jr = self.config.rx_jr;
         // Whether the event before made a packet: a packet joined to the one
         // before it joins nothing when that event made none.
@@ -108,12 +108,12 @@ impl Wire {
                         self.out.push(packet(kept, first));
                     }
                 }
-                4 if narrows => {
+                4 if speaks_midi1 => {
                     if let Ok(message) = ump.decode() {
                         let out = &mut self.out;
                         let mut next = first;
-                        narrow_voice(&mut self.midi1_translator, message, |narrowed| {
-                            out.push(packet(narrowed, next));
+                        translate_voice(&mut self.midi1_translator, message, |translated| {
+                            out.push(packet(translated, next));
                             // The packets of one event are one message: a cut
                             // between a controller's select and its value
                             // leaves the receiver selected with no value.
@@ -149,7 +149,7 @@ impl Wire {
 /// with each MIDI 1.0 packet it becomes, in the order to send them; returns how
 /// many that was. Any other message, and one with no MIDI 1.0 form (a per-note
 /// controller, D.2.8), is none.
-pub(crate) fn narrow_voice(
+pub(crate) fn translate_voice(
     midi1_translator: &mut Midi1Translator,
     message: Message,
     mut out: impl FnMut(Ump),

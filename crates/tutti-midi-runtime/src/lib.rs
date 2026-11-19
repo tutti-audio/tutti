@@ -138,8 +138,7 @@
 //! use tutti_midi_runtime::MpeIngest;
 //! use tutti_fixtures::midi::{self, lower_zone};
 //! use tutti_graph::Offset;
-//! use tutti_midi_protocol::widen_velocity;
-//! use tutti_ump::{BendValue, Message, MidiChannel, U7, Voice2};
+//! use tutti_ump::{BendValue, Message, MidiChannel, NoteVelocity, U7, Voice2};
 //!
 //! let mut ingest = MpeIngest::new(lower_zone(7));
 //!
@@ -148,7 +147,7 @@
 //! // one per member channel, each handed to the closure.
 //! let member = MidiChannel::of(1);
 //! let mut sent = Vec::new();
-//! let on = midi::note_on(member, 60, widen_velocity(U7::of(100)).get());
+//! let on = midi::note_on(member, 60, NoteVelocity::from(U7::of(100)).get());
 //! ingest.translate(&(Offset::ZERO, on), |e| sent.push(e));
 //! assert_eq!(sent.len(), 1, "a note-on passes through");
 //!

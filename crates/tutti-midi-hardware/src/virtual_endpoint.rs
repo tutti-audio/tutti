@@ -25,14 +25,14 @@ use tutti_rt::LockExt;
 
 use tutti_midi_ci::EndpointName;
 use tutti_midi_device::FunctionBlock;
-use tutti_midi_protocol::{Midi1Translator, Midi2Translator, narrow_message};
+use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
 use tutti_ump::{Message, Ump};
 
 use crate::InputProducerHandle;
 use crate::backend;
 use crate::endpoints::InputConnection;
 use crate::error::Result;
-use crate::wire::narrow_voice;
+use crate::wire::translate_voice;
 
 /// The UMP protocol an endpoint carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -104,13 +104,13 @@ pub(crate) trait SourceBackend: Send + Sync {
 
 /// How a source brings a message to its protocol.
 enum Conversion {
-    /// A MIDI 1.0 endpoint: MIDI 2.0 voice messages narrow through the one
+    /// A MIDI 1.0 endpoint: MIDI 2.0 voice messages translate through the one
     /// [`Midi1Translator`] of the endpoint's life (M2-104 Appendix D.2).
-    Narrow(Box<Mutex<Midi1Translator>>),
-    /// A MIDI 2.0 endpoint: MIDI 1.0 voice messages widen, holding the
+    ToMidi1(Box<Mutex<Midi1Translator>>),
+    /// A MIDI 2.0 endpoint: MIDI 1.0 voice messages translate, holding the
     /// Registered and Assignable Controller runs a MIDI 1.0 stream spreads over
     /// several messages.
-    Widen(Box<Mutex<Midi2Translator>>),
+    ToMidi2(Box<Mutex<Midi2Translator>>),
 }
 
 /// An endpoint other applications read from.
@@ -144,10 +144,10 @@ impl VirtualSource {
         let (backend, protocol) = backend::open_virtual_source(spec)?;
         let conversion = match protocol {
             VirtualProtocol::Midi1 => {
-                Conversion::Narrow(Box::new(Mutex::new(Midi1Translator::new())))
+                Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new())))
             }
             VirtualProtocol::Midi2 => {
-                Conversion::Widen(Box::new(Mutex::new(Midi2Translator::new())))
+                Conversion::ToMidi2(Box::new(Mutex::new(Midi2Translator::new())))
             }
         };
         Ok(Self {
@@ -161,13 +161,13 @@ impl VirtualSource {
     /// Sends `ump` to everything connected to the endpoint, in the endpoint's
     /// [`protocol`](Self::protocol).
     ///
-    /// A MIDI 2.0 voice message narrows to its MIDI 1.0 messages on a MIDI 1.0
+    /// A MIDI 2.0 voice message translates to its MIDI 1.0 messages on a MIDI 1.0
     /// endpoint (M2-115, M2-104 Appendix D.2): a Program Change with a bank is
     /// the Bank Select controllers and the Program Change, and a Registered or
     /// Assignable Controller is its four Control Changes, the parameter select
-    /// sent every time. A MIDI 1.0 voice message widens on
+    /// sent every time. A MIDI 1.0 voice message translates on
     /// a MIDI 2.0 one; a MIDI 1.0 Registered or Assignable Controller is several
-    /// messages, so the widened controller is sent with the message that
+    /// messages, so the translated controller is sent with the message that
     /// completes it and the earlier ones send nothing. Any other message is
     /// sent as it is.
     ///
@@ -185,7 +185,7 @@ impl VirtualSource {
     /// the platform's error when the OS refuses the message.
     pub fn send(&self, ump: Ump) -> Result<()> {
         let ump = match &self.conversion {
-            Conversion::Narrow(midi1_translator) => {
+            Conversion::ToMidi1(midi1_translator) => {
                 // A packet no message is defined for, and any that is not MIDI 2.0
                 // voice, is forwarded as it is.
                 let Ok(message @ Message::Midi2(..)) = ump.decode() else {
@@ -195,23 +195,23 @@ impl VirtualSource {
                 // that what it emitted was sent before the next message.
                 let mut midi1_translator = midi1_translator.lock_recover();
                 let mut sent = Ok(());
-                let count = narrow_voice(&mut midi1_translator, message, |packet| {
+                let count = translate_voice(&mut midi1_translator, message, |packet| {
                     if sent.is_ok() {
                         sent = self.backend.send(&packet);
                     }
                 });
                 if count == 0 {
-                    // A MIDI 2.0 voice message with a MIDI 1.0 form narrows to at
+                    // A MIDI 2.0 voice message with a MIDI 1.0 form translates to at
                     // least one packet, so zero packets is a message with none:
-                    // `narrow_message` returns its `NoMidi1Form` here and its
+                    // `Message::try_to_midi1` returns its `NoMidi1Form` here and its
                     // `Ok` is not reached.
-                    narrow_message(message)?;
+                    message.try_to_midi1()?;
                 }
                 return sent;
             }
-            Conversion::Widen(translator) => {
-                let widened = translator.lock_recover().translate(ump);
-                match widened {
+            Conversion::ToMidi2(translator) => {
+                let translated = translator.lock_recover().translate(ump);
+                match translated {
                     Some(ump) => ump,
                     None => return Ok(()),
                 }
@@ -321,7 +321,7 @@ mod tests {
                 calls: AtomicUsize::new(0),
                 fail_at,
             }),
-            conversion: Conversion::Narrow(Box::new(Mutex::new(Midi1Translator::new()))),
+            conversion: Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new()))),
             name: EndpointName::new("recorder").unwrap(),
             protocol: VirtualProtocol::Midi1,
         };
@@ -377,9 +377,9 @@ mod tests {
     #[test]
     fn a_failed_send_keeps_an_mpe_notes_channel() {
         use tutti_midi_protocol::{
-            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+            MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
         };
-        use tutti_ump::{Address, Attribute, BendValue, NoteNumber, NoteVelocity};
+        use tutti_ump::{Address, Attribute, BendValue, ExtremeValues, NoteNumber, NoteVelocity};
         let zone = MpeZoneConfig::lower(
             2,
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
@@ -392,7 +392,7 @@ mod tests {
         });
         // Send 0 (the Note On) succeeds and send 1 (the RPN's CC 101) is refused.
         let (mut source, sent) = midi1_source(1);
-        source.conversion = Conversion::Narrow(Box::new(Mutex::new(midi1_translator)));
+        source.conversion = Conversion::ToMidi1(Box::new(Mutex::new(midi1_translator)));
         let address = Address {
             group: MidiGroup::FIRST,
             channel: MidiChannel::FIRST,

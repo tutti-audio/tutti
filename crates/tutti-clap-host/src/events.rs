@@ -41,9 +41,7 @@ use tutti_units::ParamId;
 use tutti_units::{Normalized, Semitones, Velocity};
 
 use crate::types::RtNoteExpressions;
-use tutti_midi_protocol::{
-    Midi1Translator, Midi2Translator, PitchBendSensitivity, narrow, narrow_velocity, widen,
-};
+use tutti_midi_protocol::{Midi1Translator, Midi2Translator, PitchBendSensitivity};
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn,
@@ -465,16 +463,14 @@ impl ClapEvent {
             }
             other => return Some(other),
         };
-        // The 16-bit velocity the event came from, narrowed by the shift of
+        // The 16-bit velocity the event came from, downscaled by the shift of
         // M2-115 section 3.4. A note-on at velocity 0 is a note-off in
         // MIDI 1.0, so the lowest audible note-on velocity is 1.
-        let narrowed = narrow_velocity(NoteVelocity::from_velocity(Velocity::new_clamped(
-            e.velocity,
-        )));
-        let velocity = if note_on && narrowed.get() == 0 {
+        let downscaled = NoteVelocity::from_velocity(Velocity::new_clamped(e.velocity)).to_u7();
+        let velocity = if note_on && downscaled.get() == 0 {
             U7::of(1)
         } else {
-            narrowed
+            downscaled
         };
         let (channel, key) = (u8::try_from(e.channel).ok()?, u8::try_from(e.key).ok()?);
         let (channel, note) = (MidiChannel::masked(channel), NoteNumber::masked(key));
@@ -843,7 +839,7 @@ impl InputRooms {
     }
 
     /// Room for the MIDI a node sent at most `event_input` events a block can
-    /// stage: each event is one UMP, and each UMP narrows to at most
+    /// stage: each event is one UMP, and each UMP translates to at most
     /// [`Midi1Translator::MAX_MESSAGES`] MIDI 1.0 messages, one event each, so no
     /// block the graph sends is refused.
     ///
@@ -1253,10 +1249,10 @@ impl InputEventList {
     fn add_message(&mut self, time: u32, message: Message) {
         match message {
             Message::Midi1(address, voice) => match voice {
-                // A note or poly pressure is widened and handled as MIDI 2.0;
+                // A note or poly pressure is translated and handled as MIDI 2.0;
                 // the rest keep their 7- and 14-bit bytes.
                 Voice1::NoteOn { .. } | Voice1::NoteOff { .. } | Voice1::PolyPressure { .. } => {
-                    self.add_voice2(time, address, widen(voice));
+                    self.add_voice2(time, address, Voice2::from(voice));
                 }
                 Voice1::ControlChange { .. }
                 | Voice1::ProgramChange(_)
@@ -1424,7 +1420,7 @@ impl InputEventList {
                     velocity.map_or(0.0, |v| v.velocity().get()),
                 )
                 .into_midi_dialect(port, None),
-                (Voice2::PolyPressure { .. }, _) => narrow(voice)
+                (Voice2::PolyPressure { .. }, _) => Voice1::try_from(voice)
                     .ok()
                     .map(|voice| ClapEvent::midi(time, port, voice.bytes(channel).padded())),
                 _ => None,
@@ -2347,7 +2343,7 @@ mod tests {
 
     use tutti_graph::Offset;
     use tutti_plugin_types::{MIDI_STACK_CAPACITY, RT_MIDI_CAPACITY};
-    use tutti_ump::{CCNumber, Sysex8StreamIds, System};
+    use tutti_ump::{CCNumber, ControlValue, NoteVelocity, Sysex8StreamIds, System};
     use tutti_units::Samples;
 
     /// The per-note bend range a plugin's emitted tuning is put at: the MPE
@@ -2495,7 +2491,7 @@ mod tests {
 
     // (`use super::*` is already in scope from the top of this module.)
     use tutti_fixtures::midi;
-    use tutti_midi_protocol::{widen_value, widen_velocity};
+
     use tutti_ump::{Bank, BendValue, Sysex7Packets, parse_exact};
     use tutti_units::Bipolar;
 
@@ -2588,7 +2584,7 @@ mod tests {
     }
 
     /// **The room `InputRooms::for_port` gives holds every message a full
-    /// port narrows to.** A port of 64 UMPs, each a Program Change with a bank
+    /// port translates to.** A port of 64 UMPs, each a Program Change with a bank
     /// (three MIDI 1.0 messages, so under `Midi1Translator::MAX_MESSAGES`), stages
     /// all 192 messages with none refused; one more UMP past the port's room
     /// is the only thing that would be.
@@ -2841,9 +2837,11 @@ mod tests {
     #[test]
     fn a_refused_message_keeps_an_mpe_notes_channel() {
         use tutti_midi_protocol::{
-            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+            MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
         };
-        use tutti_ump::{Attribute, BendValue, ControlValue, NoteNumber, NoteVelocity};
+        use tutti_ump::{
+            Attribute, BendValue, ControlValue, ExtremeValues, NoteNumber, NoteVelocity,
+        };
         let zone = MpeZoneConfig::lower(
             2,
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
@@ -2961,7 +2959,7 @@ mod tests {
         assert_eq!(staged_midi(&[0x20C3_2A00], false), at([0xC3, 0x2A, 0]));
         assert_eq!(staged_midi(&[0x20D3_2A00], false), at([0xD3, 0x2A, 0]));
         assert_eq!(staged_midi(&[0x20B3_072A], false), at([0xB3, 7, 0x2A]));
-        // MIDI 2.0 on channel 3, narrowed to 7 and 14 bits: bend 14-bit
+        // MIDI 2.0 on channel 3, downscaled to 7 and 14 bits: bend 14-bit
         // (0x05 << 7 | 0x2A) in the top bits, the rest low-bit noise.
         assert_eq!(
             staged_midi(&[0x40E3_0000, 0x0AAB_FFFF], false),
@@ -2982,7 +2980,7 @@ mod tests {
     }
 
     /// **Poly pressure on a MIDI-dialect note port** reaches the plugin as
-    /// `0xAn key pressure` at the packet's time, narrowed to 7 bits for MIDI 2.0.
+    /// `0xAn key pressure` at the packet's time, translated to 7 bits for MIDI 2.0.
     #[test]
     fn poly_pressure_on_a_midi_dialect_port_stages_exact_bytes() {
         assert_eq!(
@@ -2998,7 +2996,7 @@ mod tests {
     /// **A note on a MIDI-dialect note port is `clap_event_midi` bytes built
     /// from its typed message**: the status of its kind and channel, the key,
     /// and the velocity at 7 bits by rounding (not the truncation of
-    /// `narrow`), a Note On never below 1 (0 is a Note Off in MIDI 1.0), a
+    /// `Voice1::try_from`), a Note On never below 1 (0 is a Note Off in MIDI 1.0), a
     /// Note Off's own velocity kept.
     #[test]
     fn notes_on_a_midi_dialect_port_stage_exact_bytes() {
@@ -4203,7 +4201,7 @@ mod tests {
 
     #[test]
     fn from_midi_event_velocity_zero_note_on_becomes_note_off() {
-        // The MIDI velocity-0 NoteOn quirk: widening reads it as a NoteOff, so
+        // The MIDI velocity-0 NoteOn quirk: translation reads it as a NoteOff, so
         // a raw MIDI-1 velocity-0 NoteOn converts to a CLAP NoteOff.
         let midi = midi1_event(&[0x90, 60, 0]);
         match from_midi(&midi).events().first().expect("converts") {
@@ -4244,7 +4242,7 @@ mod tests {
             Message::Midi2(address, Voice2::ControlChange { controller, value }) => {
                 assert_eq!(address.channel.get(), 1);
                 assert_eq!(controller.get(), 74);
-                assert_eq!(value, widen_value(U7::of(100)));
+                assert_eq!(value, ControlValue::from(U7::of(100)));
             }
             other => panic!("expected CV2 ControlChange, got {other:?}"),
         }
@@ -4345,10 +4343,10 @@ mod tests {
     fn midi_dialect_sends_notes_as_midi_events() {
         let ch = MidiChannel::of(9);
         let on = (at(0), midi::note_on(ch, 60, 0xFFFF));
-        // 7-bit velocity 64, widened (M2-115).
+        // 7-bit velocity 64, upscaled (M2-115).
         let mid = (
             at(0),
-            midi::note_on(ch, 62, widen_velocity(U7::of(64)).get()),
+            midi::note_on(ch, 62, NoteVelocity::from(U7::of(64)).get()),
         );
         let quiet = (at(0), midi::note_on(ch, 61, 1));
         let off = (at(0), midi::note_off(ch, 60, 0));

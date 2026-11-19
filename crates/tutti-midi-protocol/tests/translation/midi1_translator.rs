@@ -2,12 +2,12 @@
 //! here from the spec, never read from the code under test.
 
 use tutti_midi_protocol::{
-    ExtremeValues, Midi1Translator, Midi2Translator, MpeZoneConfig, PerNoteTranslation,
-    PitchBendSensitivity, TranslationMode,
+    Midi1Translator, Midi2Translator, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity,
+    TranslationMode,
 };
 use tutti_ump::{
-    Address, Bank, CCNumber, Message, Midi1Bytes, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    U7, Ump, Voice1, Voice2,
+    Address, Bank, CCNumber, ExtremeValues, Message, Midi1Bytes, MidiChannel, MidiGroup,
+    NoteNumber, NoteVelocity, U7, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue, MpeChannels, MpeZoneSpan};
 
@@ -73,7 +73,7 @@ fn an_assignable_controller_selects_with_nrpn_controllers() {
             0x8000_0000,
         ),
     );
-    // Min-Center-Max centre (0x8000_0000) narrows by shift to 14-bit 0x2000.
+    // Min-Center-Max centre (0x8000_0000) downscales by shift to 14-bit 0x2000.
     assert_eq!(
         out,
         [
@@ -171,7 +171,7 @@ fn a_passing_select_or_reset_leaves_the_sequence_whole() {
 /// (rounds up to 1); 0xFFFF_FFFF would be 0x4000 and clamps to 0x3FFF.
 /// Spec: m2-115/4.1#1, m2-115/4.4#1, m2-115/4.4#2
 #[test]
-fn rpn_0_to_31_narrows_with_rounding() {
+fn rpn_0_to_31_translates_with_rounding() {
     for (bank, index) in [(0, 7), (0, 31), (1, 0), (1, 31), (127, 7)] {
         let data = |value| {
             let mut n = Midi1Translator::new();
@@ -184,13 +184,13 @@ fn rpn_0_to_31_narrows_with_rounding() {
     }
 }
 
-/// **Every other controller narrows by the plain shift** (M2-115 section 3.4):
+/// **Every other controller downscales by the plain shift** (M2-115 section 3.4):
 /// RPN index 32 and up, another bank, and every NRPN keep the top 14 bits,
 /// truncating where the zero-extended rule would round (0x0002_0000 is 0);
 /// index 32 is the first scaled one in every bank (M2-115 section 3.1).
 /// Spec: m2-115/2.2#2, m2-115/3.1#1
 #[test]
-fn other_controllers_narrow_by_shift() {
+fn other_controllers_translate_by_shift() {
     let data = |message: Message| {
         let mut n = Midi1Translator::new();
         let out = feed(&mut n, message);
@@ -243,7 +243,7 @@ fn a_program_change_with_a_bank_is_always_three_messages() {
     );
 }
 
-/// **D.2.1: a Note On whose velocity narrows to 0 is sent as 1**, and the
+/// **D.2.1: a Note On whose velocity downscales to 0 is sent as 1**, and the
 /// stateless messages pass as `midi1()` sends them.
 #[test]
 fn a_quiet_note_on_is_velocity_1() {
@@ -430,7 +430,7 @@ fn avoided_extremes_cover_velocity_bend_pressure_and_controller_data() {
 
 /// **A zero-extended Registered Controller is no scaled value** (D.1.5 names
 /// no property; M2-115 section 4.1 makes these fixed-point numbers or pairs of
-/// fields): both ends narrow as in the default. 1 rounds to 0 and 0xFFFF_FFFE
+/// fields): both ends downscale as in the default. 1 rounds to 0 and 0xFFFF_FFFE
 /// clamps to the 14-bit maximum, MSB 127, LSB 127.
 #[test]
 fn avoided_extremes_leave_zero_extended_registered_controllers() {

@@ -95,7 +95,7 @@ const CELL_GAINS: [f32; 8] = [
 ];
 
 /// The gain driven on the param port: negative, huge and not finite frames among ordinary ones.
-fn lane() -> Vec<f32> {
+fn signal() -> Vec<f32> {
     let corners = [
         0.5,
         f32::NAN,
@@ -121,7 +121,7 @@ fn sweep(name: &str, node: ConvolverNode<f32>, gains: &[Option<f32>], driven: bo
         }
     }
     if driven {
-        rig.feed(0, Some(&lane()));
+        rig.feed(0, Some(&signal()));
     }
     for &gain in gains {
         if let Some(g) = gain {
@@ -155,7 +155,7 @@ fn sweep(name: &str, node: ConvolverNode<f32>, gains: &[Option<f32>], driven: bo
 }
 
 /// Short responses (three taps, inside one partition) and long ones (past a partition, cut
-/// into levels), in every layout, at every cell gain and with the lane driven.
+/// into levels), in every layout, at every cell gain and with the control signal driven.
 #[test]
 fn the_convolver_corners_are_allocation_free_and_finite() {
     for len in [3usize, 4_000] {

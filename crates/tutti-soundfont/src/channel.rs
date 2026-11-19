@@ -2,8 +2,7 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
-use tutti_midi_protocol::widen_value;
-use tutti_ump::{Bank, CCNumber, U7, U14, Voice2};
+use tutti_ump::{Bank, CCNumber, ControlValue, U7, U14, Voice2};
 use tutti_units::Amplitude;
 
 /// The amount of the default modulators CC 91 to reverb send and CC 93 to
@@ -115,7 +114,7 @@ impl Channel {
         let fresh = Self::new(self.is_percussion_channel);
         let cc = |controller: CCNumber, value: u8| Voice2::ControlChange {
             controller,
-            value: widen_value(U7::masked(value)),
+            value: ControlValue::from(U7::masked(value)),
         };
         // What the receiver holds as Bank Select once the messages so far
         // are read: nothing, then the bank's MSB if a Program Change goes.
@@ -194,7 +193,7 @@ mod tests {
     use super::*;
     use tutti_ump::ControlValue;
 
-    /// A chased effect send is the 7-bit value widened Min-Center-Max (M2-115 section 3):
+    /// A chased effect send is the 7-bit value upscaled Min-Center-Max (M2-115 section 3):
     /// the centre 64 is exactly `0x8000_0000`, 127 is full scale, `0xFFFF_FFFF`, and a value
     /// below the centre shifts (1 is `1 << 25`). A plain shift would put 127 at
     /// `0xFE00_0000`. (0 is the fresh channel's value and is not chased.)

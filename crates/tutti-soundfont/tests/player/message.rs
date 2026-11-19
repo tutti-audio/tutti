@@ -128,11 +128,11 @@ fn a_midi_1_note_on_at_velocity_0_is_a_note_off() {
     assert!(after < held * 0.01, "{after} against {held}");
 }
 
-/// A 16-bit velocity below 0x0200, 0 included, narrows to 0, which MIDI 1.0
+/// A 16-bit velocity below 0x0200, 0 included, downscales to 0, which MIDI 1.0
 /// reads as a Note Off. A MIDI 2.0 Note On at any velocity is a Note On (M2-104
 /// section 7.4.2) and must be played as one. The evidence is the sustain pedal (SF2 2.04 section 9.2, CC
 /// 64): a Note Off on the held key would be stored and run when the pedal
-/// lifts, so the note keeps sounding; a Note On strikes the key again, which
+/// releases, so the note keeps sounding; a Note On strikes the key again, which
 /// releases the earlier strike whatever holds it (the retrigger rule), and the
 /// new note at that velocity is below what is rendered, so the note ends.
 #[test]

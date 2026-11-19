@@ -9,7 +9,7 @@ use tutti_dsp::{
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`DynamicEqNode`] is made from: its width, the band's centre and Q, and optionally
 /// the curve, the times, the range, the mode and the key.
@@ -257,17 +257,17 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        self.render_keyed(input, input, lanes, output);
+        self.render_keyed(input, input, signals, output);
     }
 
     fn render_keyed(
         &mut self,
         input: Planes<'_, F>,
         key: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(bank) = &mut self.bank {
@@ -309,7 +309,7 @@ mod tests {
         let mut y = vec![0.0f64; x.len()];
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::NONE,
+            ControlSignals::NONE,
             PlanesMut::new(&mut [&mut y[..]]).unwrap(),
         );
         assert_eq!(y, x);

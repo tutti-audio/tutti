@@ -16,7 +16,7 @@ use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, Io, Node, OutPort, Prepare, Shape, Source, Status,
     TransportPosition, declare_params,
 };
-use tutti_rt::{Setting, SettingWord, setting_word};
+use tutti_rt::{AtomicCell, AtomicWord, atomic_word};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
@@ -25,12 +25,12 @@ enum Mode {
     Slow = 3,
     Fast = 9,
 }
-setting_word!(Mode { Off, Slow, Fast });
+atomic_word!(Mode { Off, Slow, Fast });
 
 /// The cells the node and its host share.
 #[derive(Debug)]
 struct Cells {
-    mode: Setting<Mode>,
+    mode: AtomicCell<Mode>,
 }
 
 declare_params!([] Cells, settings CellsConfig { mode: Mode = Mode::Off });
@@ -38,7 +38,7 @@ declare_params!([] Cells, settings CellsConfig { mode: Mode = Mode::Off });
 impl From<CellsConfig> for Cells {
     fn from(config: CellsConfig) -> Self {
         Self {
-            mode: Setting::new(config.mode),
+            mode: AtomicCell::new(config.mode),
         }
     }
 }
@@ -54,7 +54,7 @@ impl Node for Probe {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let word = self.cells.mode.get().to_word();
+        let word = self.cells.mode.load().to_word();
         io.output(0).fill(word as f32);
         Status::Modified
     }
@@ -115,9 +115,9 @@ fn a_control_side_set_is_read_in_the_next_block() {
     let cells = Arc::new(Cells::from(CellsConfig::new()));
     let mut rig = Rig::new(&cells);
     assert!(rig.block().iter().all(|&x| x == 0.0));
-    cells.mode().set(Mode::Fast);
+    cells.mode().store(Mode::Fast);
     assert!(rig.block().iter().all(|&x| x == 9.0));
-    cells.mode().set(Mode::Slow);
+    cells.mode().store(Mode::Slow);
     assert!(rig.block().iter().all(|&x| x == 3.0));
-    assert_eq!(cells.mode().get(), Mode::Slow);
+    assert_eq!(cells.mode().load(), Mode::Slow);
 }

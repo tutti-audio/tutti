@@ -4,13 +4,13 @@
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorLanes, KeyFilter, KeySource,
+    COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorSignals, KeyFilter, KeySource,
     Lerp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A compressor: `channels = N` means N audio inputs, then (for a side-chain key) N key
 /// inputs, and N outputs, with one **linked** gain computed from the loudest key channel and
@@ -57,8 +57,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// [`ParamSet`](tutti_graph::ParamSet) or the graph's `set_param` (a knee under 0 reads as
 /// 0, a ratio under 1 as 1 and a time under 0 as 0: a compressor does not expand).
 ///
-/// **The threshold is read per frame** when the graph drives it: a lane on its port is the
-/// bank's own ([`CompressorLanes`]), and the cell is the base a frame nobody drives (or a
+/// **The threshold is read per frame** when the graph drives it: a control signal on its port is the
+/// bank's own ([`CompressorSignals`]), and the cell is the base a frame nobody drives (or a
 /// non-finite one) is compared against. **Every other control is on the stream grid** (16
 /// frames from the last reset, [`Kernel::GRID`]): a cell write or a driven port is sampled
 /// at the grid's solve frame, so it reaches the render within 16 frames and the render does
@@ -264,24 +264,24 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        self.render_keyed(input, input, lanes, output);
+        self.render_keyed(input, input, signals, output);
     }
 
     fn render_keyed(
         &mut self,
         input: Planes<'_, F>,
         key: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        let lanes = CompressorLanes {
-            threshold: lanes.get(CompressorSet::THRESHOLD_LANE),
+        let signals = CompressorSignals {
+            threshold: signals.get(CompressorSet::THRESHOLD_SIGNAL),
         };
         if let Some(bank) = &mut self.bank {
-            bank.process(lanes, key, input, output);
+            bank.process(signals, key, input, output);
         }
     }
 
@@ -291,8 +291,8 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
 }
 
 impl CompressorSet {
-    /// The lane of the threshold: the one [`fast`](crate::ControlRead::Fast) row.
-    const THRESHOLD_LANE: usize = 0;
+    /// The control signal of the threshold: the one [`fast`](crate::ControlRead::Fast) row.
+    const THRESHOLD_SIGNAL: usize = 0;
 }
 
 #[cfg(test)]
@@ -341,7 +341,7 @@ mod tests {
         ));
     }
 
-    /// A block longer than 64 frames renders whole: the gain lane is sized from the
+    /// A block longer than 64 frames renders whole: the gain control signal is sized from the
     /// prepared `MaxBlock`, not a constant.
     #[test]
     fn a_block_up_to_the_prepared_maximum_renders() {
@@ -669,19 +669,19 @@ mod tests {
     }
 
     /// A threshold that moves inside a block is read at the frame it moves on, not at the
-    /// stream grid's next solve (16 frames on): frame 5 of a block whose lane steps from
+    /// stream grid's next solve (16 frames on): frame 5 of a block whose control signal steps from
     /// 20 dB to -40 dB there is reduced, the frame before it is not.
     #[test]
     fn a_threshold_that_steps_inside_a_block_acts_on_that_frame() {
         let mut node = prepared_at(comp(-10.0, 4.0, 0.0, 0.0), RATE_44K);
         let n = 64;
         let (audio, key) = (vec![0.5f32; n], vec![0.5f32; n]);
-        let lane: Vec<f32> = (0..n).map(|i| if i < 5 { 20.0 } else { -40.0 }).collect();
+        let signal: Vec<f32> = (0..n).map(|i| if i < 5 { 20.0 } else { -40.0 }).collect();
         let out = drive(
             &mut node,
             RATE_44K,
             Planes::new(&[&audio, &key]).unwrap(),
-            &[Some(&lane)],
+            &[Some(&signal)],
         )
         .remove(0);
         assert_eq!(out[4], 0.5, "over the 20 dB threshold: no reduction");

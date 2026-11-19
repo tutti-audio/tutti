@@ -7,8 +7,8 @@
 //! [`MidiChannel`] for the first Group, or an [`Address`].
 //!
 //! A message with no builder is built with the library's constructors; a
-//! 7-bit value reaches a MIDI 2.0 field through `widen_velocity`,
-//! `widen_value` and `widen_bend`.
+//! 7-bit value reaches a MIDI 2.0 field through `NoteVelocity::from`,
+//! `ControlValue::from` and `BendValue::from`.
 
 use tutti_midi_protocol::{MpeMode, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 use tutti_ump::{

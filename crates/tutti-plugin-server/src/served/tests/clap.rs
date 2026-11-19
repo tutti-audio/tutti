@@ -11,11 +11,11 @@ use tutti_plugin_types::{
     NoteExpressionChanges, NoteExpressionType, NoteExpressionValue, ParameterChanges,
     ParameterQueue, TransportInfo,
 };
-use tutti_ump::MidiChannel;
+use tutti_ump::{MidiChannel, NoteVelocity};
 
 use tutti_clap_host::ClapLoaded as HostLoaded;
 use tutti_fixtures::midi;
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_plugin_types::ChannelLayout;
 use tutti_plugin_types::{EditorPresence, Features, PluginTail, RenderModeSupport, Request};
 use tutti_ump::U7;
@@ -1157,7 +1157,11 @@ fn test_clap_process_f32_with_note() {
     // First block: send a NoteOn event
     let note_on = [(
         tutti_graph::Offset::ZERO,
-        midi::note_on(MidiChannel::of(1), 60, widen_velocity(U7::of(100)).get()),
+        midi::note_on(
+            MidiChannel::of(1),
+            60,
+            NoteVelocity::from(U7::of(100)).get(),
+        ),
     )];
 
     let mut has_nonzero = false;
@@ -1338,7 +1342,11 @@ fn test_reference_process_f32_with_note() {
     let num_samples = 512;
     let note_on = [(
         tutti_graph::Offset::ZERO,
-        midi::note_on(MidiChannel::of(1), 60, widen_velocity(U7::of(100)).get()),
+        midi::note_on(
+            MidiChannel::of(1),
+            60,
+            NoteVelocity::from(U7::of(100)).get(),
+        ),
     )];
 
     // Process block with NoteOn + follow-up blocks.
@@ -1949,7 +1957,11 @@ fn test_clap_process_with_note_expression() {
 
     let note_on = [(
         tutti_graph::Offset::ZERO,
-        midi::note_on(MidiChannel::of(1), 60, widen_velocity(U7::of(100)).get()),
+        midi::note_on(
+            MidiChannel::of(1),
+            60,
+            NoteVelocity::from(U7::of(100)).get(),
+        ),
     )];
 
     let mut expr_changes = NoteExpressionChanges::new();

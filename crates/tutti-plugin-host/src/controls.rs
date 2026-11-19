@@ -94,14 +94,17 @@ pub struct NodeControls {
     /// transport the node sends. Empty until a host installs one; the node
     /// then reads 4/4 from bar 0. A nullable hot-swap slot: the node reads it
     /// once per block.
-    meter: crate::PluginMeter,
+    meter: crate::PluginTimeSignature,
     /// What the node's parameter and MIDI delivery has done.
     delivery: Arc<crate::DeliveryCounters>,
 }
 
 impl NodeControls {
     /// Handles on `meter` and `delivery`, the cells the node reads and writes.
-    pub(crate) fn new(meter: crate::PluginMeter, delivery: Arc<crate::DeliveryCounters>) -> Self {
+    pub(crate) fn new(
+        meter: crate::PluginTimeSignature,
+        delivery: Arc<crate::DeliveryCounters>,
+    ) -> Self {
         Self { meter, delivery }
     }
 
@@ -207,7 +210,7 @@ impl NodeControls {
     /// The node's meter cell, as a handle of its own: what a host keeps to
     /// install the meter through (the same cell as
     /// [`set_meter`](Self::set_meter)).
-    pub fn meter(&self) -> crate::PluginMeter {
+    pub fn meter(&self) -> crate::PluginTimeSignature {
         self.meter.clone()
     }
 }
@@ -280,7 +283,7 @@ impl PluginControls {
             latency,
             tail,
             pipeline: Arc::new(AtomicUsize::new(MAX_CHUNK)),
-            node: NodeControls::new(crate::PluginMeter::default(), Arc::default()),
+            node: NodeControls::new(crate::PluginTimeSignature::default(), Arc::default()),
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
             chunks,
         };

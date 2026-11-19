@@ -89,11 +89,11 @@ fn runner(c: &LimiterControls) -> LimiterBank<f32> {
 }
 
 /// `audio` (one slice per channel) through `bank` in blocks of `block`, with the threshold
-/// and ceiling lanes when given.
+/// and ceiling control signals when given.
 fn run_in(
     bank: &mut LimiterBank<f32>,
     audio: &[&[f32]],
-    lanes: [Option<&[f32]>; 2],
+    signals: [Option<&[f32]>; 2],
     block: usize,
 ) -> Vec<Vec<f32>> {
     let n = audio[0].len();
@@ -102,13 +102,13 @@ fn run_in(
     while at < n {
         let end = (at + block).min(n);
         let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
-        let lanes = LimiterLanes {
-            threshold: lanes[0].map(|l| Mono::new(&l[at..end])),
-            ceiling: lanes[1].map(|l| Mono::new(&l[at..end])),
+        let signals = LimiterSignals {
+            threshold: signals[0].map(|l| Mono::new(&l[at..end])),
+            ceiling: signals[1].map(|l| Mono::new(&l[at..end])),
         };
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
-            lanes,
+            signals,
             Planes::new(&a).unwrap(),
             PlanesMut::new(&mut outs).unwrap(),
         );
@@ -121,7 +121,7 @@ fn run(bank: &mut LimiterBank<f32>, audio: &[&[f32]]) -> Vec<Vec<f32>> {
     run_in(bank, audio, [None, None], CHUNK)
 }
 
-/// The same signal on both channels, run with no lane.
+/// The same signal on both channels, run with no control signal.
 fn run_mono(bank: &mut LimiterBank<f32>, audio: &[f32]) -> Vec<f32> {
     run(bank, &[audio, audio]).remove(0)
 }
@@ -501,18 +501,18 @@ fn the_attack_is_instant_and_the_release_is_one_pole() {
     }
 }
 
-/// A threshold and a ceiling lane are read at every frame, not once per block: a ceiling
+/// A threshold and a ceiling control signal are read at every frame, not once per block: a ceiling
 /// that alternates per frame bounds each output sample by its own frame's ceiling (the
-/// sample a lookahead ago, which that frame's gain was made for), and a frame the lane
+/// sample a lookahead ago, which that frame's gain was made for), and a frame the control signal
 /// leaves non-finite is bounded by the set ceiling and does not poison the gain.
 #[test]
-fn the_ceiling_lane_bounds_each_sample_by_its_own_frames_ceiling() {
+fn the_ceiling_signal_bounds_each_sample_by_its_own_frames_ceiling() {
     let n = 12_000;
     let x = noise(11, n, 1.5);
-    // The set ceiling is 0 dB, which the lane's -20 and -6 dB are under; a NaN frame
+    // The set ceiling is 0 dB, which the control signal's -20 and -6 dB are under; a NaN frame
     // is the set one.
     let c = controls(-30.0, 0.0, 0.01);
-    let lane: Vec<f32> = (0..n)
+    let signal: Vec<f32> = (0..n)
         .map(|i| match i % 8 {
             0..=2 => -20.0,
             3 => f32::NAN,
@@ -520,22 +520,22 @@ fn the_ceiling_lane_bounds_each_sample_by_its_own_frames_ceiling() {
         })
         .collect();
     let mut k = runner(&c);
-    let out = run_in(&mut k, &[&x, &x], [None, Some(&lane)], 100);
+    let out = run_in(&mut k, &[&x, &x], [None, Some(&signal)], 100);
     let mut reached = false;
     for i in 0..n - L {
-        let bound = if lane[i].is_nan() {
+        let bound = if signal[i].is_nan() {
             amplitude(0.0)
         } else {
-            amplitude(f64::from(lane[i]))
+            amplitude(f64::from(signal[i]))
         } * (1.0 + f64::from(CEILING_ULPS * f32::EPSILON));
         let got = f64::from(out[0][i + L]);
         assert!(got.is_finite(), "frame {i}: {got}");
         assert!(
             got.abs() <= bound,
             "frame {i} ({} dB): {got} over {bound}",
-            lane[i]
+            signal[i]
         );
-        reached |= lane[i] == -20.0 && got.abs() > 0.5 * amplitude(-20.0);
+        reached |= signal[i] == -20.0 && got.abs() > 0.5 * amplitude(-20.0);
     }
     assert!(
         reached,
@@ -543,12 +543,12 @@ fn the_ceiling_lane_bounds_each_sample_by_its_own_frames_ceiling() {
     );
 }
 
-/// The threshold lane is the threshold of its frame: a quiet signal is moved by the
-/// drive, so a lane at -30 dB and a base at -10 dB give a drive of 24 dB against 4 dB,
-/// and a lane that changes inside a block (not at a block's edge) changes the gain there.
-/// A frame the lane leaves non-finite is the set threshold.
+/// The threshold control signal is the threshold of its frame: a quiet signal is moved by the
+/// drive, so a control signal at -30 dB and a base at -10 dB give a drive of 24 dB against 4 dB,
+/// and a control signal that changes inside a block (not at a block's edge) changes the gain there.
+/// A frame the control signal leaves non-finite is the set threshold.
 #[test]
-fn the_threshold_lane_is_read_per_frame_and_a_non_finite_frame_is_the_members() {
+fn the_threshold_signal_is_read_per_frame_and_a_non_finite_frame_is_the_members() {
     let n = 12_000;
     let x = vec![0.01f32; n];
     // A 1 ms release settles within a few hundred frames: 40 time constants in 2000.
@@ -556,11 +556,11 @@ fn the_threshold_lane_is_read_per_frame_and_a_non_finite_frame_is_the_members() 
     let drive = |threshold: f64| amplitude(-6.0 - threshold);
     // -30 dB until frame 6000, then the member's -10 dB (as a NaN frame), in blocks of
     // 256: 6000 is not a multiple.
-    let lane: Vec<f32> = (0..n)
+    let signal: Vec<f32> = (0..n)
         .map(|i| if i < 6000 { -30.0 } else { f32::NAN })
         .collect();
     let mut k = runner(&c);
-    let out = run_in(&mut k, &[&x, &x], [Some(&lane), None], CHUNK);
+    let out = run_in(&mut k, &[&x, &x], [Some(&signal), None], CHUNK);
     for (i, want) in [(L + 5000, drive(-30.0)), (n - 1, drive(-10.0))] {
         let got = f64::from(out[0][i]) / 0.01;
         assert!(
@@ -568,7 +568,7 @@ fn the_threshold_lane_is_read_per_frame_and_a_non_finite_frame_is_the_members() 
             "frame {i}: gain {got} vs {want}"
         );
     }
-    // Both the lanes at once, over the loud noise: finite and under the lanes' ceiling.
+    // Both the control signals at once, over the loud noise: finite and under the control signals' ceiling.
     let loud = noise(12, n, 2.0);
     let ceiling = vec![-12.0f32; n];
     let thr = vec![-20.0f32; n];
@@ -725,7 +725,7 @@ fn the_reduction_begins_a_lookahead_before_the_peak_leaves() {
 }
 
 /// The render does not depend on how the stream is cut: calls of 1, 7, 33, 64, 100 and 255
-/// frames give the bits of one call, with both lanes and a moving release.
+/// frames give the bits of one call, with both control signals and a moving release.
 #[test]
 fn a_split_stream_renders_the_bits_of_the_whole() {
     let n = 4000;
@@ -789,27 +789,27 @@ fn every_reachable_limiter_stays_within_its_ceiling_bound() {
     }
 }
 
-/// A finite lane value of any size is a level and not an overflow: a ceiling lane of +-1e30 dB
-/// and a threshold lane of -1e3, -1e6 and -1e10 dB leave the render finite (an envelope that
+/// A finite control signal value of any size is a level and not an overflow: a ceiling control signal of +-1e30 dB
+/// and a threshold control signal of -1e3, -1e6 and -1e10 dB leave the render finite (an envelope that
 /// took an infinite target would keep it, `toward(inf, inf)` being NaN), and a threshold far
 /// under the ceiling still puts the output on the ceiling: the gain is the ceiling over the
 /// peak, not the difference of two enormous levels.
 #[test]
-fn a_hostile_lane_is_clamped_and_does_not_latch_or_lose_the_ceiling() {
+fn a_hostile_signal_is_clamped_and_does_not_latch_or_lose_the_ceiling() {
     let n = 4_000;
     let x = [noise(41, n, 1.5), noise(42, n, 1.0)];
     for ceiling in [1.0e30f32, -1.0e30] {
-        let lane = vec![ceiling; n];
+        let signal = vec![ceiling; n];
         let mut k = runner(&controls(-12.0, -6.0, 0.05));
-        let out = run_in(&mut k, &[&x[0], &x[1]], [None, Some(&lane)], 64);
+        let out = run_in(&mut k, &[&x[0], &x[1]], [None, Some(&signal)], 64);
         assert!(
             out.iter().flatten().all(|s| s.is_finite()),
-            "ceiling lane {ceiling}"
+            "ceiling signal {ceiling}"
         );
-        // The bank still works after it: a finite lane is limited to its own ceiling.
+        // The bank still works after it: a finite control signal is limited to its own ceiling.
         let sane = vec![-6.0f32; n];
         let after = run_in(&mut k, &[&x[0], &x[1]], [None, Some(&sane)], 64);
-        // The first `L` frames are the audio the hostile lane's gain was made for.
+        // The first `L` frames are the audio the hostile control signal's gain was made for.
         let peak = after
             .iter()
             .flat_map(|c| &c[L..])
@@ -821,9 +821,9 @@ fn a_hostile_lane_is_clamped_and_does_not_latch_or_lose_the_ceiling() {
         );
     }
     for threshold in [-1.0e3f32, -1.0e6, -1.0e10] {
-        let lane = vec![threshold; n];
+        let signal = vec![threshold; n];
         let mut k = runner(&controls(-12.0, -6.0, 0.05));
-        let out = run_in(&mut k, &[&x[0], &x[1]], [Some(&lane), None], 64);
+        let out = run_in(&mut k, &[&x[0], &x[1]], [Some(&signal), None], 64);
         let peak = out
             .iter()
             .flatten()
@@ -831,7 +831,7 @@ fn a_hostile_lane_is_clamped_and_does_not_latch_or_lose_the_ceiling() {
             .fold(0.0, f64::max);
         assert!(
             peak <= bound_of(-6.0) && peak > 0.95 * amplitude(-6.0),
-            "threshold lane {threshold}: peak {peak}, the ceiling {}",
+            "threshold signal {threshold}: peak {peak}, the ceiling {}",
             amplitude(-6.0)
         );
     }
@@ -900,11 +900,11 @@ fn an_infinite_sample_is_finite_on_its_own_frame_and_does_not_latch_the_envelope
     assert!(out.iter().all(|&s| s == 0.0), "a ceiling of -inf mutes it");
 }
 
-/// The set ceiling and threshold are held like a lane's: a ceiling cell of +inf or 1e30 dB
-/// with a threshold lane and no ceiling lane (the fallback path) leaves the render finite
+/// The set ceiling and threshold are held like a control signal's: a ceiling cell of +inf or 1e30 dB
+/// with a threshold control signal and no ceiling control signal (the fallback path) leaves the render finite
 /// and the next sane ceiling limited to itself; and the quiet signal's gain is not `inf * 0`.
 #[test]
-fn a_hostile_set_ceiling_read_with_a_lane_is_clamped_too() {
+fn a_hostile_set_ceiling_read_with_a_signal_is_clamped_too() {
     let n = 4_000;
     let x = [noise(45, n, 1.5), noise(46, n, 1.0)];
     let thr = vec![-20.0f32; n];
@@ -954,12 +954,12 @@ fn the_output_is_silent_a_lookahead_after_the_input_and_the_release_runs_on() {
     );
 }
 
-/// The set value a frame falls back to keeps its documented meaning with a lane driven: an
-/// set ceiling of `-inf` mutes exactly (a gain of 0, not the -300 dB a lane value is held
-/// to), an set threshold of `+inf` is a gain of 0 whatever the ceiling lane says, and one of
+/// The set value a frame falls back to keeps its documented meaning with a control signal driven: an
+/// set ceiling of `-inf` mutes exactly (a gain of 0, not the -300 dB a control signal value is held
+/// to), an set threshold of `+inf` is a gain of 0 whatever the ceiling control signal says, and one of
 /// `-inf` limits every signal to the ceiling.
 #[test]
-fn the_set_extremes_keep_their_meaning_on_the_lane_path() {
+fn the_set_extremes_keep_their_meaning_on_the_signal_path() {
     let n = 3_000;
     let x = [noise(47, n, 1.5), noise(48, n, 1.0)];
     let thr = vec![-20.0f32; n];
@@ -1000,7 +1000,7 @@ fn run_f64(c: &LimiterControls, x: &[f64]) -> Vec<f64> {
     bank.retarget(c);
     let mut out = vec![0.0f64; x.len()];
     bank.process(
-        LimiterLanes::default(),
+        LimiterSignals::default(),
         Planes::new(&[x]).unwrap(),
         PlanesMut::new(&mut [&mut out[..]]).unwrap(),
     );

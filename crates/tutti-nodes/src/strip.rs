@@ -383,7 +383,7 @@ impl BusStripNode {
     /// feeds it owns its continuity.
     #[inline(always)]
     fn fed_gain<F: Float>(volume: Option<&[F]>, balance: Option<&[F]>, i: usize, side: Side) -> F {
-        // The lanes are already the sample width: a fed value is used as it is, and the side
+        // The fed signals are already the sample width: a fed value is used as it is, and the side
         // gains are `Balance::gains`' arithmetic in that width (a NaN balance reads as unity).
         let fader = volume.map_or(F::ONE, |v| v[i]);
         if side == Side::Mid {

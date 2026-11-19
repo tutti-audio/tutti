@@ -2,8 +2,11 @@ use super::*;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{widen_bend, widen_value};
-use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteKeyEvent, Sysex7Packets, System, U7, U14};
+
+use tutti_ump::{
+    BendValue, CCNumber, ControlValue, MidiChannel, MidiGroup, NoteKeyEvent, Sysex7Packets, System,
+    U7, U14,
+};
 use tutti_units::Samples;
 
 /// A packet from its words, zero-padded to four, at offset 0.
@@ -66,7 +69,7 @@ fn cc_decodes_to_controller_and_normalized_value() {
         midi::cc(
             MidiChannel::of(2),
             CCNumber::BRIGHTNESS,
-            widen_value(U7::of(64)).get(),
+            ControlValue::from(U7::of(64)).get(),
         ),
     ))
     .unwrap();
@@ -83,7 +86,7 @@ fn channel_pressure_decodes_to_aftertouch() {
         value,
     } = mapped(&(
         Offset::ZERO,
-        midi::channel_pressure(MidiChannel::FIRST, widen_value(U7::of(127)).get()),
+        midi::channel_pressure(MidiChannel::FIRST, ControlValue::from(U7::of(127)).get()),
     ))
     .unwrap();
     assert_eq!(ch, MidiChannel::of(0));
@@ -99,7 +102,7 @@ fn pitch_bend_center_is_half() {
         value,
     } = mapped(&(
         Offset::ZERO,
-        midi::pitch_bend(MidiChannel::of(4), widen_bend(U14::of(8192)).get()),
+        midi::pitch_bend(MidiChannel::of(4), BendValue::from(U14::of(8192)).get()),
     ))
     .unwrap();
     assert_eq!(ch, MidiChannel::of(4));
@@ -166,7 +169,7 @@ fn route_cc_events_splits_mapped_cc_into_params() {
             midi::cc(
                 MidiChannel::FIRST,
                 CCNumber::MOD_WHEEL,
-                widen_value(U7::of(64)).get(),
+                ControlValue::from(U7::of(64)).get(),
             ),
         ),
         (at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
@@ -175,7 +178,7 @@ fn route_cc_events_splits_mapped_cc_into_params() {
             midi::cc(
                 MidiChannel::FIRST,
                 CCNumber::BRIGHTNESS,
-                widen_value(U7::of(100)).get(),
+                ControlValue::from(U7::of(100)).get(),
             ),
         ),
     ];
@@ -211,7 +214,7 @@ fn route_cc_events_preserves_host_params() {
         midi::cc(
             MidiChannel::FIRST,
             CCNumber::MOD_WHEEL,
-            widen_value(U7::of(127)).get(),
+            ControlValue::from(U7::of(127)).get(),
         ),
     )];
 
@@ -246,7 +249,7 @@ fn sort_param_points_orders_merged_host_and_cc_points() {
             midi::cc(
                 MidiChannel::FIRST,
                 CCNumber::MOD_WHEEL,
-                widen_value(U7::of(100)).get(),
+                ControlValue::from(U7::of(100)).get(),
             ),
         ),
         (
@@ -254,7 +257,7 @@ fn sort_param_points_orders_merged_host_and_cc_points() {
             midi::cc(
                 MidiChannel::FIRST,
                 CCNumber::MOD_WHEEL,
-                widen_value(U7::of(10)).get(),
+                ControlValue::from(U7::of(10)).get(),
             ),
         ),
     ];
@@ -382,7 +385,7 @@ fn cc_route_reserves_only_while_mapped() {
         midi::cc(
             MidiChannel::FIRST,
             CCNumber::MOD_WHEEL,
-            widen_value(U7::of(64)).get(),
+            ControlValue::from(U7::of(64)).get(),
         ),
     )];
     let mut host = ParameterChanges::reserved(1, 1);
@@ -413,7 +416,7 @@ fn a_following_route_uses_the_published_mapping() {
         midi::cc(
             MidiChannel::FIRST,
             CCNumber::MOD_WHEEL,
-            widen_value(U7::of(64)).get(),
+            ControlValue::from(U7::of(64)).get(),
         ),
     )];
 
@@ -447,7 +450,7 @@ fn cc_route_first_block_is_allocation_free_without_warmup() {
             midi::cc(
                 MidiChannel::FIRST,
                 CCNumber::MOD_WHEEL,
-                widen_value(U7::of(64)).get(),
+                ControlValue::from(U7::of(64)).get(),
             ),
         ),
         (at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
@@ -564,7 +567,7 @@ fn a_bridged_chunk_reaches_the_route_whole() {
         midi::cc(
             MidiChannel::FIRST,
             CCNumber::MOD_WHEEL,
-            widen_value(U7::of(64)).get(),
+            ControlValue::from(U7::of(64)).get(),
         ),
     );
     for events in [&[][..], &[mapped][..]] {
@@ -729,7 +732,7 @@ fn route_cc_events_is_allocation_free_after_warmup() {
             midi::cc(
                 MidiChannel::FIRST,
                 CCNumber::MOD_WHEEL,
-                widen_value(U7::of(64)).get(),
+                ControlValue::from(U7::of(64)).get(),
             ),
         ),
         (at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
@@ -739,7 +742,7 @@ fn route_cc_events_is_allocation_free_after_warmup() {
             midi::cc(
                 MidiChannel::FIRST,
                 CCNumber::BRIGHTNESS,
-                widen_value(U7::of(10)).get(),
+                ControlValue::from(U7::of(10)).get(),
             ),
         ),
     ];
@@ -790,7 +793,7 @@ fn a_mapped_route_passes_a_sysex_spanning_blocks_whole() {
         midi::cc(
             MidiChannel::FIRST,
             CCNumber::MOD_WHEEL,
-            widen_value(U7::of(64)).get(),
+            ControlValue::from(U7::of(64)).get(),
         ),
     );
     let first: Vec<UmpAt> = std::iter::once(cc)

@@ -1,15 +1,15 @@
-//! Construct the `(InProcClient<L, F>, PluginHandle)` pair for an in-process
+//! Construct the `(InProcessClient<L, F>, PluginHandle)` pair for an in-process
 //! plugin of format `L`.
 
 use std::path::Path;
 use std::sync::Arc;
 use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
-use tutti_rt::ParkedSampleRate;
+use tutti_rt::PendingSampleRate;
 
 use parking_lot::Mutex;
 
-use super::client::{Declared, InProcClient, Reload};
+use super::client::{Declared, InProcessClient, Reload};
 use super::control_backend::{ControlBackend, Reporting};
 use super::instance::Instance;
 use super::width_error::WidthError;
@@ -43,7 +43,7 @@ pub enum LoadClientError<L: Loaded + 'static> {
     /// activated at 32-bit: [`WidthError::into_inner`] returns it, with its
     /// handle, to host in a 32-bit graph (boxed, to keep the error small).
     #[error(transparent)]
-    Width(Box<WidthError<(InProcClient<L, f32>, PluginHandle)>>),
+    Width(Box<WidthError<(InProcessClient<L, f32>, PluginHandle)>>),
 }
 
 impl<L: Loaded + 'static> std::fmt::Debug for LoadClientError<L> {
@@ -78,9 +78,9 @@ impl<L: Loaded + 'static> LoadClientError<L> {
 ///
 /// `tutti-plugin`'s `Plugin::open` calls this for `.vst` files
 /// when the `vst2` feature is on; call it directly for another [`InProcess`]
-/// format, or to get the concrete [`InProcClient`] type. `load` names the
+/// format, or to get the concrete [`InProcessClient`] type. `load` names the
 /// plugin in a file that holds several. Insert the client's node
-/// ([`bind`](InProcClient::bind), then `Editor::insert`). The node and handle
+/// ([`bind`](InProcessClient::bind), then `Editor::insert`). The node and handle
 /// share the plugin
 /// instance; drop both to drop the plugin. Editors are opened through the
 /// handle, and audio runs on whatever thread the graph's executor runs on.
@@ -101,7 +101,7 @@ pub fn load_client<L, F>(
     path: &Path,
     load: &Load,
     sample_rate: impl Into<tutti_units::SampleRate>,
-) -> Result<(InProcClient<L, F>, PluginHandle), LoadClientError<L>>
+) -> Result<(InProcessClient<L, F>, PluginHandle), LoadClientError<L>>
 where
     L: InProcess + 'static,
     L::Processor: 'static,
@@ -127,7 +127,7 @@ pub fn load_client_restoring<L, F>(
     restore: Option<&mut dyn FnMut(&mut L) -> std::result::Result<(), StateError>>,
 ) -> Result<
     (
-        InProcClient<L, F>,
+        InProcessClient<L, F>,
         PluginHandle,
         Option<std::result::Result<(), StateError>>,
     ),
@@ -181,7 +181,7 @@ fn assemble<L, F>(
     rt: tutti_rt::Rt<L::Processor>,
     origin: Option<Reload>,
     sample_rate: tutti_units::SampleRate,
-) -> BridgeResult<(InProcClient<L, F>, PluginHandle)>
+) -> BridgeResult<(InProcessClient<L, F>, PluginHandle)>
 where
     L: InProcess + 'static,
     L::Processor: 'static,
@@ -232,12 +232,12 @@ where
 
 /// What [`wire`] builds around an activated plugin.
 struct Wired<L: Loaded, F: Float> {
-    client: InProcClient<L, F>,
+    client: InProcessClient<L, F>,
     /// The control side the client and a handle both reach.
     inner: Arc<Mutex<Instance<L>>>,
     /// Where the audio side parks a rate for the main thread's pump; drained
     /// by the handle's backend.
-    pending_sample_rate: Arc<ParkedSampleRate>,
+    pending_sample_rate: Arc<PendingSampleRate>,
     descriptor: PluginDescriptor,
     /// The wiring as the plugin reports it, with the presets it can list.
     loaded: LoadedPlugin,
@@ -289,16 +289,16 @@ where
     // backend's drain end are the same cell: the audio thread parks a rate in
     // it, `editor_idle` dispatches from it.
     //
-    // A parked rate change, and the re-reads of latency, tail and pin counts
+    // A pending rate change, and the re-reads of latency, tail and pin counts
     // (`Instance::pump`, raised as `PluginInvalidation` through the handle's
     // `on_invalidate`), run on the main thread's tick: `PluginHandle::editor_idle`
     // or the node's `Rebinder::tick`, which the session calls at each update.
-    let pending_sample_rate = Arc::new(ParkedSampleRate::new());
+    let pending_sample_rate = Arc::new(PendingSampleRate::new());
     // `loaded.features`, not a local copy, so the node gates its per-block
     // transport send on the exact value the handle reports. One value, read
     // twice, cannot drift into a declared-but-undelivered capability.
     let ids: Vec<ParamId> = parameters.iter().map(|p| p.id()).collect();
-    let client = InProcClient::new(
+    let client = InProcessClient::new(
         Arc::clone(&inner),
         rt,
         descriptor.clone(),
@@ -372,7 +372,7 @@ pub fn client_over<L, F>(
     parameters: impl IntoIterator<Item = ParamId>,
     spares: usize,
     controls: Option<PluginControls>,
-) -> Result<InProcClient<L, F>, ClientOverError>
+) -> Result<InProcessClient<L, F>, ClientOverError>
 where
     L: Loaded + 'static,
     L::Processor: 'static,
@@ -386,7 +386,7 @@ where
     }
     let declared = Declared::of(wiring)?;
     let (inner, rt) = Instance::<L>::adopt(processor, controller, prepare, wiring);
-    Ok(InProcClient::new(
+    Ok(InProcessClient::new(
         Arc::new(Mutex::new(inner)),
         rt,
         descriptor,
@@ -394,7 +394,7 @@ where
         declared,
         wiring.features,
         prepare.rate(),
-        Arc::new(ParkedSampleRate::new()),
+        Arc::new(PendingSampleRate::new()),
         None,
         parameters,
         spares,

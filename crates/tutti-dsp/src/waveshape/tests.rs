@@ -115,10 +115,10 @@ fn at_rest(kind: ShapeKind, drive: f64) -> WaveshaperBank<f32> {
     bank
 }
 
-/// `bank` over `channels` (each a plane), one block, with `lane` the drive per frame.
+/// `bank` over `channels` (each a plane), one block, with `signal` the drive per frame.
 fn run(
     bank: &mut WaveshaperBank<f32>,
-    lane: Option<&[f32]>,
+    signal: Option<&[f32]>,
     channels: &[Vec<f32>],
 ) -> Vec<Vec<f32>> {
     let refs: Vec<&[f32]> = channels.iter().map(Vec::as_slice).collect();
@@ -126,7 +126,7 @@ fn run(
     let planes = Planes::new(&refs).unwrap();
     let mut outs: Vec<&mut [f32]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     bank.process(
-        lane.map(Mono::new),
+        signal.map(Mono::new),
         planes,
         PlanesMut::new(&mut outs).unwrap(),
     );
@@ -152,21 +152,21 @@ fn a_held_block_is_the_curve_of_each_sample() {
     }
 }
 
-/// With a lane that moves every frame, every channel's sample is the curve at that frame's
+/// With a control signal that moves every frame, every channel's sample is the curve at that frame's
 /// drive, across the chunk boundary.
 #[test]
-fn a_lane_is_read_per_frame_on_every_channel() {
-    let lane: Vec<f32> = (0..150).map(|i| 1.0 + 0.125 * i as f32).collect();
+fn a_signal_is_read_per_frame_on_every_channel() {
+    let signal: Vec<f32> = (0..150).map(|i| 1.0 + 0.125 * i as f32).collect();
     for kind in KINDS {
         let mut bank = at_rest(kind, 1.0);
         let ins: Vec<Vec<f32>> = (0..3).map(|c| noise(c + 11, 150, 1.0)).collect();
-        for (c, (y, x)) in run(&mut bank, Some(&lane), &ins)
+        for (c, (y, x)) in run(&mut bank, Some(&signal), &ins)
             .iter()
             .zip(&ins)
             .enumerate()
         {
             for (i, (&y, &x)) in y.iter().zip(x).enumerate() {
-                let want = closed(kind, x, f64::from(lane[i]));
+                let want = closed(kind, x, f64::from(signal[i]));
                 assert!(
                     (f64::from(y) - want).abs() < TOL,
                     "{kind:?} ch{c} frame {i}: {y} vs {want}"
@@ -176,12 +176,12 @@ fn a_lane_is_read_per_frame_on_every_channel() {
     }
 }
 
-/// A lane frame that is not finite reads the drive in force, a finite one its own.
+/// A control signal frame that is not finite reads the drive in force, a finite one its own.
 #[test]
-fn a_non_finite_lane_frame_reads_the_drive_in_force() {
+fn a_non_finite_signal_frame_reads_the_drive_in_force() {
     let mut bank = at_rest(ShapeKind::HardClip, 2.0);
-    let lane = [f32::NAN, 4.0, f32::INFINITY, f32::NEG_INFINITY];
-    let out = run(&mut bank, Some(&lane), &[vec![0.25; 4]]);
+    let signal = [f32::NAN, 4.0, f32::INFINITY, f32::NEG_INFINITY];
+    let out = run(&mut bank, Some(&signal), &[vec![0.25; 4]]);
     assert_eq!(out[0], [0.5, 1.0, 0.5, 0.5]);
 }
 
@@ -235,19 +235,19 @@ fn settle_lands_on_the_target() {
     assert_eq!(out[0][0], 0.75);
 }
 
-/// A non-finite lane frame in the middle of a ramp reads the ramp's value at that frame:
+/// A non-finite control signal frame in the middle of a ramp reads the ramp's value at that frame:
 /// frame `i` of a hard clip of `0.2` is `0.2 (1 + 2 (i + 1) / n)`, and a finite frame in
-/// the lane (frame 5, drive 2) reads its own.
+/// the control signal (frame 5, drive 2) reads its own.
 #[test]
-fn a_non_finite_lane_frame_mid_ramp_reads_the_ramp() {
+fn a_non_finite_signal_frame_mid_ramp_reads_the_ramp() {
     let n = GAIN_RAMP.to_samples_ceil(RATE).get();
     let mut bank = at_rest(ShapeKind::HardClip, 1.0);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(3.0),
     });
-    let mut lane = vec![f32::NAN; 20];
-    lane[5] = 2.0;
-    let out = run(&mut bank, Some(&lane), &[vec![0.2; 20]]).remove(0);
+    let mut signal = vec![f32::NAN; 20];
+    signal[5] = 2.0;
+    let out = run(&mut bank, Some(&signal), &[vec![0.2; 20]]).remove(0);
     for (i, &y) in out.iter().enumerate() {
         let drive = if i == 5 {
             2.0
@@ -258,10 +258,10 @@ fn a_non_finite_lane_frame_mid_ramp_reads_the_ramp() {
     }
 }
 
-/// Drive below 0 shapes as 0 and a staircase's below 1 as 1, on the lane and on the ramp.
+/// Drive below 0 shapes as 0 and a staircase's below 1 as 1, on the control signal and on the ramp.
 #[test]
-fn the_drive_floors_hold_on_the_lane_and_the_ramp() {
-    // Lane: a hard clip at -2 is drive 0 (silence); a crush at 0.5 is one level per unit.
+fn the_drive_floors_hold_on_the_signal_and_the_ramp() {
+    // Control signal: a hard clip at -2 is drive 0 (silence); a crush at 0.5 is one level per unit.
     let mut clip = at_rest(ShapeKind::HardClip, 1.0);
     let out = run(&mut clip, Some(&[-2.0; 4]), &[vec![0.25; 4]]);
     assert_eq!(out[0], [0.0; 4]);
@@ -817,8 +817,8 @@ fn a_constant_input_is_the_curve() {
 /// drive the first frame at the new drive would be a mean over the segment from `0.2` to `0.8`.)
 #[test]
 fn a_drive_step_makes_no_step_beyond_the_curve() {
-    let mut lane = vec![1.0f32; 16];
-    lane[8..].fill(4.0);
+    let mut signal = vec![1.0f32; 16];
+    signal[8..].fill(4.0);
     for (kind, order) in [
         (ShapeKind::HardClip, Antialiasing::FirstOrder),
         (ShapeKind::HardClip, Antialiasing::SecondOrder),
@@ -826,8 +826,8 @@ fn a_drive_step_makes_no_step_beyond_the_curve() {
         (ShapeKind::Tanh, Antialiasing::FirstOrder),
     ] {
         let mut bank = antialiased(kind, 1.0, order);
-        let y = run(&mut bank, Some(&lane), &[vec![0.2; 16]]).remove(0);
-        for (i, (&y, &d)) in y.iter().zip(&lane).enumerate().skip(2) {
+        let y = run(&mut bank, Some(&signal), &[vec![0.2; 16]]).remove(0);
+        for (i, (&y, &d)) in y.iter().zip(&signal).enumerate().skip(2) {
             let want = closed(kind, 0.2, f64::from(d));
             assert!(
                 (f64::from(y) - want).abs() < 1e-6,

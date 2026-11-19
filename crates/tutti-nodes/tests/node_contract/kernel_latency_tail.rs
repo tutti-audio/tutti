@@ -10,7 +10,7 @@ use tutti_graph::{Buses, Node, ParamNode, Shape};
 use tutti_graph::{
     Env, PlayClock, Prepare, Standalone, Status, TransportChanges, TransportPosition,
 };
-use tutti_nodes::{ControlLanes, ControlSet, Kernel, KernelNode};
+use tutti_nodes::{ControlSet, ControlSignals, Kernel, KernelNode};
 use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -86,7 +86,7 @@ impl Kernel for Echo {
     fn render(
         &mut self,
         input: Planes<'_, f32>,
-        _: ControlLanes<'_, f32>,
+        _: ControlSignals<'_, f32>,
         mut output: PlanesMut<'_, '_, f32>,
     ) {
         let n = self.line.len();

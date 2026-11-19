@@ -23,7 +23,7 @@ use crate::support::Hand;
 use std::num::NonZeroUsize;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
@@ -36,7 +36,7 @@ fn note_on(channel: u8, note: u8, vel: u8) -> Ump {
     midi::note_on(
         MidiChannel::of(channel),
         note,
-        widen_velocity(U7::of(vel)).get(),
+        NoteVelocity::from(U7::of(vel)).get(),
     )
 }
 

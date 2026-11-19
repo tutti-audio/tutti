@@ -6,7 +6,7 @@
 //! [`AnyThread::set_render_mode`](tutti_plugin_types::AnyThread::set_render_mode)
 //! (the session's, through the handle) delivers it. Three of the four formats can only take the mode while the
 //! plugin is deactivated, so an announcement is a deactivate/reactivate cycle,
-//! and a host announces only when it must: [`needs_announcement`].
+//! and a host announces only when it must: [`needs_notify`].
 
 /// Whether a plugin needs telling the render mode, given whether the mode the
 /// host wants moved since its last announcement (`mode_changed`) and whether
@@ -16,7 +16,7 @@
 /// loading *during* a bounce arrives when the mode did not move, so a rule
 /// keyed only on the change would leave it rendering the rest of the file in
 /// whatever mode it defaulted to.
-pub const fn needs_announcement(mode_changed: bool, told: bool) -> bool {
+pub const fn needs_notify(mode_changed: bool, told: bool) -> bool {
     mode_changed || !told
 }
 
@@ -24,7 +24,7 @@ pub const fn needs_announcement(mode_changed: bool, told: bool) -> bool {
 mod tests {
     use super::*;
 
-    /// The complete truth table of `needs_announcement(mode_changed, told)`.
+    /// The complete truth table of `needs_notify(mode_changed, told)`.
     ///
     /// A two-argument predicate has exactly four inputs, so one table covers
     /// it exhaustively. Each row carries the reason it matters:
@@ -53,9 +53,9 @@ mod tests {
 
         for (mode_changed, told, expected, why) in cases {
             assert_eq!(
-                needs_announcement(mode_changed, told),
+                needs_notify(mode_changed, told),
                 expected,
-                "needs_announcement(mode_changed={mode_changed}, told={told}): {why}"
+                "needs_notify(mode_changed={mode_changed}, told={told}): {why}"
             );
         }
     }

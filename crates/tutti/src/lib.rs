@@ -284,7 +284,7 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
-        ControlLanes, ControlRead, ControlSet, ControlValid, CrossoverKernel, CutFilterKernel,
+        ControlRead, ControlSet, ControlSignals, ControlValid, CrossoverKernel, CutFilterKernel,
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
         EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
         LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
@@ -325,11 +325,12 @@ pub mod types {
         NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
-    pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_rt::{
-        Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
+        AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
+        LevelSpan, Panicked, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter,
+        Words,
     };
+    pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
@@ -731,8 +732,6 @@ pub mod midi {
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
-    #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_protocol::NoMidi1Form;
     pub use tutti_midi_protocol::{
         ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
         MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
@@ -746,6 +745,8 @@ pub mod midi {
         TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_ump::NoMidi1Form;
     pub use tutti_ump::{
         Accidental, Alteration, AlterationKind, ArticulationAttribute, Attribute, Bank, BarAccents,
         BendValue, BlockDirection, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch,
@@ -761,8 +762,8 @@ pub mod midi {
         SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
-        Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
-        MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
+        Address, CCNumber, DeviceIdentity, ExtremeValues, ManufacturerId, Message, Midi1Parser,
+        MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
         TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
     pub use tutti_ump::{

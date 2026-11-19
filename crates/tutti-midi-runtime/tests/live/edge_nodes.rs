@@ -18,7 +18,6 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::{
     MpeMode, MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
-    widen_velocity,
 };
 use tutti_midi_runtime::{
     CHANNELLESS_PORT, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
@@ -28,7 +27,7 @@ use tutti_midi_runtime::{
 use tutti_rt::Publisher;
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan, NoteKeyEvent,
-    NoteNumber, System, U7, U14, Ump, Voice2,
+    NoteNumber, NoteVelocity, System, U7, U14, Ump, Voice2,
 };
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
@@ -155,14 +154,14 @@ fn at(offset: usize, ump: Ump) -> UmpAt {
     (Offset::of(Samples::new(offset), Samples::new(1 << 20)), ump)
 }
 
-/// A note-on with 7-bit velocity 100, widened (M2-115), at `offset`.
+/// A note-on with 7-bit velocity 100, upscaled (M2-115), at `offset`.
 fn note(channel: u8, note: u8, offset: usize) -> UmpAt {
     at(
         offset,
         midi::note_on(
             MidiChannel::of(channel),
             note,
-            widen_velocity(U7::of(100)).get(),
+            NoteVelocity::from(U7::of(100)).get(),
         ),
     )
 }
@@ -211,7 +210,7 @@ fn a_groups_channels_leave_on_their_own_ports() {
             midi::note_on(
                 Address::new(MidiGroup::of(g), MidiChannel::of(channel)),
                 n,
-                widen_velocity(U7::of(100)).get(),
+                NoteVelocity::from(U7::of(100)).get(),
             ),
         )
     };
@@ -602,7 +601,7 @@ fn a_system_reset_ends_its_cables_notes_and_runs_and_is_not_echoed() {
         midi::note_on(
             Address::new(g2, MidiChannel::of(0)),
             70,
-            widen_velocity(U7::of(100)).get(),
+            NoteVelocity::from(U7::of(100)).get(),
         ),
     );
     let wire = Script::new(vec![vec![
@@ -649,7 +648,7 @@ fn a_system_reset_reaches_every_channel_of_its_group() {
         midi::note_on(
             Address::new(g2, MidiChannel::of(5)),
             70,
-            widen_velocity(U7::of(100)).get(),
+            NoteVelocity::from(U7::of(100)).get(),
         ),
     );
     let wire = Script::new(vec![vec![
@@ -691,7 +690,7 @@ fn a_requested_mpe_mode_is_adopted_once() {
     let wire = Script::new(vec![
         vec![at(
             0,
-            midi::note_on(member, 60, widen_velocity(U7::of(100)).get()),
+            midi::note_on(member, 60, NoteVelocity::from(U7::of(100)).get()),
         )],
         vec![bend],
         vec![bend],
@@ -1530,7 +1529,7 @@ fn a_mode_published_to_the_transforms_cell_is_adopted_once() {
     let bend = at(0, midi::pitch_bend(member, 0xC000_0000));
     let note = at(
         0,
-        midi::note_on(member, 60, widen_velocity(U7::of(100)).get()),
+        midi::note_on(member, 60, NoteVelocity::from(U7::of(100)).get()),
     );
     let cell = Publisher::new(MpeMode::Disabled);
     let (_ed, mut exec, _controls, seen) = transform(
@@ -1603,7 +1602,7 @@ fn a_fork_keeps_the_mode_it_was_forked_in() {
     let bend = at(0, midi::pitch_bend(member, 0xC000_0000));
     let note = at(
         0,
-        midi::note_on(member, 60, widen_velocity(U7::of(100)).get()),
+        midi::note_on(member, 60, NoteVelocity::from(U7::of(100)).get()),
     );
     let script = || Script::new(vec![vec![note, bend], vec![bend]]);
     let cell = Publisher::new(MpeMode::Disabled);

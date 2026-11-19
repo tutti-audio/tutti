@@ -33,7 +33,7 @@ tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, n {
 /// hands back its [`ParamSet`] ([`UnitParam::Azimuth`],
 /// [`Elevation`](tutti_units::UnitParam::Elevation) and [`Wet`](tutti_units::UnitParam::Wet)), which
 /// move the source lock-free while it renders, and a graph's control lanes
-/// may drive all three .
+/// may drive all three.
 /// Position changes are de-zippered over 50 ms, and each step of the ramp
 /// crossfades between the filters on either side of it. The filter for a
 /// direction is blended across the sphere face that direction crosses. A
@@ -130,11 +130,11 @@ impl<F: FftFloat> HrtfBinauralNode<F> {
     }
 
     /// The position cells, read once (`driven` is the block's azimuth and
-    /// elevation where a lane drives them): a non-finite coordinate held at
+    /// elevation where a control signal drives them): a non-finite coordinate held at
     /// the last finite one, the bearing wrapped and the height clamped.
     #[inline]
     fn placement(&mut self, [azimuth, elevation]: [Option<F>; 2]) -> Direction {
-        // A driven value is the graph's `F` lane; the angles are `f64`, so
+        // A driven value is the graph's `F` control signal; the angles are `f64`, so
         // it widens here, once per block.
         let azimuth = self
             .good
@@ -198,7 +198,7 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
 
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         // The cells are the one copy of the commanded position and blend; the
-        // renderer reads them here, once per block, a lane that drives one
+        // renderer reads them here, once per block, a control signal that drives one
         // overriding it at the block's last frame (`ParamInput::last_frame`).
         let target = self.placement([
             self.declared_param::<{ UnitParam::Azimuth as u16 }, _>(&io)

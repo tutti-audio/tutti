@@ -42,7 +42,7 @@
 //! - **Modulation effects** — `ModDelayNode` (chorus and flanger are
 //!   its two `Sweep` presets, a `KernelNode` over `ModDelayKernel`; the General MIDI chorus a third,
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
-//!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a lane's value and a cell's alike), both any width.
+//!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a control signal's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
 //! - **Bit crusher** — `BitCrusherNode`, a sample-and-hold and a quantizer, with no tail,
 //!   from a `BitCrusherConfig`.
@@ -366,7 +366,7 @@ pub use strip::BusStripNode;
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
 mod kernel;
-pub use kernel::{ControlLanes, Kernel, KernelNode, MAX_LANES};
+pub use kernel::{ControlSignals, Kernel, KernelNode, MAX_SIGNALS};
 
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, HasControl, Params};
 

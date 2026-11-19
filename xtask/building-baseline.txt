@@ -334,8 +334,8 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::Plugi
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_track_info
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::NodeControls::set_meter
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::PluginControls::set_pipeline
-tutti-plugin-host  setter  crates/tutti-plugin-host/src/in_process_erased.rs::InProcessClient::set_render_mode
-tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProcClient::set_render_mode
+tutti-plugin-host  setter  crates/tutti-plugin-host/src/in_process_erased.rs::AnyInProcessClient::set_render_mode
+tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProcessClient::set_render_mode
 tutti-plugin-host  option-arg  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
 
 # tutti-plugin-ipc
@@ -495,12 +495,14 @@ tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettin
 tutti-transport  ctor-result  crates/tutti-transport/src/tempo_reader.rs::TempoReader::constant
 
 # tutti-ump
+tutti-ump  chain-result  crates/tutti-ump/src/midi_translation.rs::Message::try_to_midi1
 tutti-ump  chain-result  crates/tutti-ump/src/mpe_zone.rs::MpeZoneSet::with
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::Articulation::from_parts
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::Classification::from_attribute_type
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::NoteArticulation::from_attribute
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::NoteArticulation::from_note_on
 tutti-ump  ctor-result  crates/tutti-ump/src/articulation.rs::NoteOffArticulation::from_attribute
+tutti-ump  ctor-result  crates/tutti-ump/src/midi_translation.rs::Voice1::try_from_with
 tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteMessage::from_voice
 tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteType::from_value
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::Sysex7Packets::from_payload

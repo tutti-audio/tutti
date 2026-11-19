@@ -2,6 +2,8 @@
 
 use tutti_units::Normalized;
 
+use crate::{U7, U14, scale};
+
 /// The 32-bit value of a MIDI 2.0 Control Change, Channel or Polyphonic
 /// Pressure, Registered or Assignable Controller, or Per-Note Controller
 /// (M2-104 section 7.4).
@@ -47,7 +49,7 @@ impl ControlValue {
     /// Value 0.
     pub const MIN: Self = Self(0);
 
-    /// The centre of the range, `0x8000_0000`: where a 7-bit 64 widens to.
+    /// The centre of the range, `0x8000_0000`: where a 7-bit 64 upscales to.
     pub const CENTER: Self = Self(0x8000_0000);
 
     /// Value `0xFFFF_FFFF`.
@@ -81,6 +83,46 @@ impl ControlValue {
     pub fn from_normalized(n: Normalized) -> Self {
         // `n` is on `0..=1`, so the rounded product fits the 32-bit wire word.
         Self(libm::round(n.get() * f64::from(u32::MAX)) as u32)
+    }
+}
+
+impl ControlValue {
+    /// The value as 7 bits: the top 7 bits, the downscale of M2-115 section 3.4
+    /// as a plain right shift.
+    #[inline]
+    #[must_use]
+    pub fn to_u7(self) -> U7 {
+        // `>> 25` leaves 7 bits: the mask removes nothing.
+        U7::masked((self.0 >> 25) as u8)
+    }
+}
+
+/// A 7-bit controller or pressure value as the 32-bit word of a MIDI 2.0
+/// Control Change or pressure message, scaled Min-Center-Max (M2-115 section
+/// 3): 0 stays 0, 64 is [`ControlValue::CENTER`] and 127 is
+/// [`ControlValue::MAX`]. [`to_u7`](ControlValue::to_u7) is its right shift
+/// back.
+///
+/// # Examples
+///
+/// ```
+/// use tutti_ump::{ControlValue, U7};
+///
+/// assert_eq!(ControlValue::from(U7::of(127)), ControlValue::MAX);
+/// ```
+impl From<U7> for ControlValue {
+    #[inline]
+    fn from(value: U7) -> Self {
+        Self(scale::upscale(u32::from(value.get()), 7, 32))
+    }
+}
+
+/// The 14-bit data of a MIDI 1.0 Registered or Assignable Controller as the
+/// 32-bit word, scaled Min-Center-Max (M2-115 section 3.1).
+impl From<U14> for ControlValue {
+    #[inline]
+    fn from(value: U14) -> Self {
+        Self(scale::upscale(u32::from(value.get()), 14, 32))
     }
 }
 

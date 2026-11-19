@@ -7,7 +7,7 @@ use tutti_units::{Db, Real, SampleRate};
 
 pub(crate) use tutti_fixtures::noise;
 
-use crate::kernel::{ControlLanes, Kernel};
+use crate::kernel::{ControlSignals, Kernel};
 use crate::params::ControlSet;
 
 /// The rate the node helpers below prepare and drive nodes at.
@@ -18,7 +18,7 @@ pub(crate) fn sample_gain(db: Db) -> f32 {
     db.to_amplitude().get() as f32
 }
 
-/// The amplitude of a fed `f32` lane value in dB, as a per-frame read computes it: `10^(db / 20)`
+/// The amplitude of a fed `f32` control signal value in dB, as a per-frame read computes it: `10^(db / 20)`
 /// in `f32` through `libm`.
 pub(crate) fn fed_sample_gain(db: f32) -> f32 {
     libm::powf(10.0, db / 20.0)
@@ -257,7 +257,7 @@ pub(crate) fn render_kernel<K: Kernel>(k: &mut K, input: &[Vec<K::Float>]) -> Ve
     let mut outs: Vec<&mut [K::Float]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     k.render(
         Planes::new(&ins).unwrap(),
-        ControlLanes::NONE,
+        ControlSignals::NONE,
         PlanesMut::new(&mut outs).unwrap(),
     );
     out
