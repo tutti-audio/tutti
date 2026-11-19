@@ -23,11 +23,11 @@ use tutti_rt::RequestWord;
 
 use crate::StateError;
 use crate::{
-    ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink, EditorError,
+    ChannelLayout, ContentScale, Control, Controller, EditReader, EditWriter, EditorError,
     EditorWindow, Layout, Loaded, LoadedPlugin, MainThreadMarker, ParamEdit, ParamFlags,
     ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult, PluginTail,
     Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
-    SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edits,
+    SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edit_slots,
 };
 use tutti_buffers::{Float, FloatWidth};
 use tutti_units::Normalized;
@@ -225,7 +225,6 @@ struct Shared {
     panic_in_deactivate: AtomicBool,
     panic_in_rebuild: AtomicBool,
     panic_in_latency: AtomicBool,
-    edit_capacity: AtomicUsize,
     latency: AtomicUsize,
     tail: AtomicUsize,
     outputs: AtomicU32,
@@ -323,7 +322,6 @@ impl FakePlugin {
             panic_in_deactivate: AtomicBool::new(false),
             panic_in_rebuild: AtomicBool::new(false),
             panic_in_latency: AtomicBool::new(false),
-            edit_capacity: AtomicUsize::new(64),
             latency: AtomicUsize::new(0),
             tail: AtomicUsize::new(0),
             outputs: AtomicU32::new(2),
@@ -409,11 +407,6 @@ impl FakePlugin {
     /// Makes `Controller::latency` panic.
     pub fn panic_in_latency(&self, panic: bool) {
         self.0.panic_in_latency.store(panic, Ordering::Relaxed);
-    }
-
-    /// How many parameter edits the next activation's ring holds.
-    pub fn edit_capacity(&self, capacity: usize) {
-        self.0.edit_capacity.store(capacity, Ordering::Relaxed);
     }
 
     /// The latency the plugin reports from now on.
@@ -559,7 +552,7 @@ pub struct FakeLoaded {
 pub struct FakeProcessor {
     shell: Arc<ActivationShell>,
     shared: Arc<Shared>,
-    drain: EditDrain,
+    drain: EditReader,
     /// Frames of the voice still to sound (`FakePlugin::ring_out`).
     sounding: usize,
 }
@@ -570,10 +563,8 @@ pub struct FakeController {
     shell: Arc<ActivationShell>,
     shared: Arc<Shared>,
     descriptor: PluginDescriptor,
-    sink: EditSink,
+    sink: EditWriter,
     values: Vec<(ParamId, Normalized)>,
-    /// Parameters whose latest value the full ring refused.
-    unsent: Vec<ParamId>,
 }
 
 /// What the two halves of one activation share, so a pair from two activations
@@ -817,24 +808,11 @@ fake_control!(FakeLoaded, |_, _, _| {}, |_, _| {});
 fake_control!(
     FakeController,
     |this, id, value| {
-        // The edit reaches the Processor at the head of its next block. A full
-        // ring is counted and the latest value stays in `values`, for `flush`.
-        if this.sink.send(crate::Edit::Param { id, value }).is_ok() {
-            this.unsent.retain(|&known| known != id);
-        } else if !this.unsent.contains(&id) {
-            this.unsent.push(id);
-        }
+        // The edit reaches the Processor at the head of its next block. The
+        // write policy refused an undeclared id before this call.
+        let _ = this.sink.write(id, value);
     },
-    |this, main| {
-        for id in std::mem::take(&mut this.unsent) {
-            let Some(value) = this.parameter(main, id) else {
-                continue;
-            };
-            if this.sink.send(crate::Edit::Param { id, value }).is_err() {
-                this.unsent.push(id);
-            }
-        }
-    }
+    |_, _| {}
 );
 
 impl Loaded for FakeLoaded {
@@ -875,7 +853,7 @@ impl Loaded for FakeLoaded {
             return Err(Refused { plugin, reason });
         }
         let shell = Arc::new(ActivationShell);
-        let (sink, drain) = edits(shared.edit_capacity.load(Ordering::Relaxed).max(1));
+        let (sink, drain) = edit_slots(shared.declared().into_iter().map(|(id, _)| id));
         Ok((
             FakeProcessor {
                 shell: shell.clone(),
@@ -889,7 +867,6 @@ impl Loaded for FakeLoaded {
                 descriptor: self.descriptor,
                 sink,
                 values: self.values,
-                unsent: Vec::new(),
             },
         ))
     }
@@ -978,11 +955,8 @@ impl Processor for FakeProcessor {
             FloatWidth::F64 => &self.shared.blocks_64,
         }
         .fetch_add(1, Ordering::Relaxed);
-        self.drain.drain(|edit| {
-            if let crate::Edit::Param { id, value } = edit {
-                log.push(Call::Edit(id, value));
-            }
-        });
+        self.drain
+            .drain(|id, value| log.push(Call::Edit(id, value)));
         let ring = self.shared.ring.load(Ordering::Relaxed);
         let frames = io.buffer.frames().get();
         io.buffer.output().silence();

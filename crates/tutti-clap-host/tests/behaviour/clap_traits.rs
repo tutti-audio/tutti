@@ -448,12 +448,10 @@ fn a_state_load_makes_queued_writes_stale() {
     assert!((writes[0] - 850.0).abs() < 1e-9, "100 + 0.75 * 1000");
 }
 
-/// **A full ring keeps the latest value per parameter and retries on the next
-/// tick.** Far more writes than the ring holds arrive before a block; the first
-/// block drains the ring, `flush_edits` sends what was kept, and the next block
-/// ends on the last value written.
+/// **A flood of writes to one parameter is its latest value in the next
+/// block**, once: the slot holds the last, and a block after it sends nothing.
 #[test]
-fn a_full_ring_keeps_the_latest_value_and_retries_on_flush() {
+fn a_flood_of_writes_is_the_latest_value_in_the_next_block() {
     let probe = Probe::acquire();
     let (mut processor, mut controller) = probe
         .load()
@@ -471,21 +469,29 @@ fn a_full_ring_keeps_the_latest_value_and_retries_on_flush() {
             )
             .expect("a declared, writable parameter");
     }
-    assert!(controller.refused_edits() > 0, "the ring filled");
 
     render(&mut processor, FloatWidth::F32).expect("block");
-    controller.flush_edits(main_thread());
+    let cap = process_capture();
+    let writes: Vec<f64> = cap.events[..cap.event_count as usize]
+        .iter()
+        .filter(|e| e.event_type == PARAM_VALUE && e.param_id == cutoff.id)
+        .map(|e| e.value)
+        .collect();
+    let wanted = cutoff.min + 0.999 * (cutoff.max - cutoff.min);
+    assert_eq!(writes.len(), 1, "one value for the flood: {writes:?}");
+    assert!(
+        (writes[0] - wanted).abs() < 1e-9,
+        "{} vs {wanted}",
+        writes[0]
+    );
+
     render(&mut processor, FloatWidth::F32).expect("block");
     let cap = process_capture();
-    let last = cap.events[..cap.event_count as usize]
-        .iter()
-        .rfind(|e| e.event_type == PARAM_VALUE && e.param_id == cutoff.id)
-        .expect("the retried write arrived");
-    let wanted = cutoff.min + 0.999 * (cutoff.max - cutoff.min);
     assert!(
-        (last.value - wanted).abs() < 1e-9,
-        "{} vs {wanted}",
-        last.value
+        !cap.events[..cap.event_count as usize]
+            .iter()
+            .any(|e| e.event_type == PARAM_VALUE && e.param_id == cutoff.id),
+        "a slot is given up once"
     );
 }
 
@@ -599,8 +605,8 @@ fn peek_param(id: u32) -> Option<f64> {
 }
 
 /// **Edits no block has drained survive a rejoin.** A restart before any block
-/// deactivates the plugin; the writes queued in the ring, and those a full ring
-/// had refused, are flushed into the inactive plugin and not lost with the ring.
+/// deactivates the plugin; the writes waiting in the slots are read on the
+/// control side and applied to the inactive plugin, not lost with the slots.
 #[test]
 fn queued_edits_survive_a_rejoin() {
     let probe = Probe::acquire();
@@ -618,7 +624,7 @@ fn queued_edits_survive_a_rejoin() {
     let loaded = ClapLoaded::deactivate(main_thread(), processor, controller).expect("a pair");
     assert_eq!(peek_param(cutoff.id), Some(350.0), "100 + 0.25 * 1000");
 
-    // More writes than the ring holds: the last is in `unsent`.
+    // Many writes to one slot: the rejoin applies the last.
     let (processor, mut controller) = loaded
         .activate(main_thread(), prepare())
         .expect("activates");

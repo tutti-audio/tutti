@@ -15,7 +15,7 @@ use super::controller::ClapController;
 use super::processor::{ClapProcessor, ProcessorParts};
 use super::thread_pool::PoolCell;
 use crate::error::{ClapError, LoadStage, Result};
-use crate::events::{EDIT_CAPACITY, InputRooms, OutputRooms};
+use crate::events::{InputRooms, OutputRooms};
 use crate::types::{ParameterChanges, ParameterQueue, PluginInfo};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -205,6 +205,7 @@ impl ClapLoaded {
             .in_note_expressions
             .reserve_exact(INPUT_NOTE_EXPRESSIONS);
 
+        let declared: Vec<_> = table.ranges.iter().map(|b| b.id).collect();
         let ranges = Publisher::new(table);
         let pools = Publisher::new(PoolCell(self.pool_snapshot()));
         let channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
@@ -216,8 +217,10 @@ impl ClapLoaded {
             .plugin
             .audio_side()
             .expect("an activated plugin has an audio half");
-        let (sink, drain) = tutti_plugin_types::edits(EDIT_CAPACITY);
-        let (reports, reported) = tutti_plugin_types::edits(REPORT_CAPACITY);
+        // One slot per declared parameter: the list changes only across a
+        // reactivation, so the table cannot go stale while this activation lasts.
+        let (sink, drain) = tutti_plugin_types::edit_slots(declared);
+        let (reports, reported) = tutti_plugin_types::reports(REPORT_CAPACITY);
         let reports_dropped = Arc::new(AtomicU64::new(0));
         let processor = ClapProcessor::new(ProcessorParts {
             audio_side,
@@ -296,7 +299,7 @@ impl ClapLoaded {
 /// plugin's parameters with a room of `ParameterQueue::chunk_room`: the
 /// chunk's pooled points, and one more in every queue for the value a skipped
 /// block carries, which the bridge prepends), and the edits the Controller
-/// can queue ([`EDIT_CAPACITY`]), the note expressions
+/// can have waiting (one per declared parameter), the note expressions
 /// ([`INPUT_NOTE_EXPRESSIONS`]) and the transport changes
 /// (`MAX_TRANSPORT_CHANGES`), each source with a room of its own that the
 /// MIDI and the parameter points do not count. So a chunk the host's pool
@@ -308,7 +311,7 @@ fn input_rooms(table: &RangeTable, max_frames: usize) -> InputRooms {
     InputRooms::for_port(MIDI_STACK_BOUND)
         .param_points(param_points)
         .sources(
-            EDIT_CAPACITY,
+            table.ranges.len(),
             INPUT_NOTE_EXPRESSIONS,
             tutti_graph::MAX_TRANSPORT_CHANGES,
         )
@@ -431,7 +434,7 @@ mod tests {
                     scratch.input_events.events.capacity()
                         >= MIDI_STACK_BOUND.get() as usize * Narrower::MAX_MESSAGES
                             + input
-                            + EDIT_CAPACITY
+                            + params as usize
                 );
                 assert!(3 * input < n * (room + 1));
                 assert_eq!(scratch.output_events.param_room, output);

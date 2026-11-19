@@ -8,8 +8,8 @@ use std::sync::atomic::AtomicU64;
 use tutti_plugin_types::MainThreadMarker;
 
 use tutti_plugin_types::{
-    Control, Controller, EditDrain, EditQueue, EditSink, Loaded, PluginError, PluginTail, Prepare,
-    Refused, RestartRules, Samples, Stuck, Widths,
+    Control, Controller, EditWriter, Loaded, PluginError, PluginTail, Prepare, Refused,
+    ReportDrain, RestartRules, Samples, Stuck, Widths,
 };
 use tutti_rt::Publisher;
 use tutti_units::Normalized;
@@ -41,9 +41,8 @@ use super::thread_pool::PoolCell;
 pub struct ClapController {
     /// The plugin. `None` only once `deactivate` has taken it.
     loaded: Option<ClapLoaded>,
-    /// The writes to the Processor, and those a full ring refused, retried on
-    /// the next tick ([`flush_edits`](tutti_plugin_types::Control::flush_edits)).
-    queue: EditQueue,
+    /// The writes to the Processor: one slot per declared parameter.
+    edits: EditWriter,
     /// The ranges the Processor denormalizes against, republished after a
     /// rescan that changed the parameters.
     pub(crate) ranges: Publisher<RangeTable>,
@@ -51,7 +50,7 @@ pub struct ClapController {
     pools: Publisher<PoolCell>,
     /// The plugin's own parameter edits, which the Processor queued from its
     /// output events ([`take_reported_edits`](Control::take_reported_edits)).
-    pub(crate) reported: EditDrain,
+    pub(crate) reported: ReportDrain,
     /// What the ring refused, counted by the Processor.
     pub(crate) reports_dropped: Arc<AtomicU64>,
     _not_sync: PhantomData<Cell<()>>,
@@ -60,7 +59,7 @@ pub struct ClapController {
 impl std::fmt::Debug for ClapController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClapController")
-            .field("queue", &self.queue)
+            .field("edits", &self.edits)
             .finish_non_exhaustive()
     }
 }
@@ -68,14 +67,14 @@ impl std::fmt::Debug for ClapController {
 impl ClapController {
     pub(crate) fn new(
         loaded: ClapLoaded,
-        edits: EditSink,
+        edits: EditWriter,
         ranges: Publisher<RangeTable>,
         pools: Publisher<PoolCell>,
-        (reported, reports_dropped): (EditDrain, Arc<AtomicU64>),
+        (reported, reports_dropped): (ReportDrain, Arc<AtomicU64>),
     ) -> Self {
         Self {
             loaded: Some(loaded),
-            queue: EditQueue::new(edits),
+            edits,
             ranges,
             pools,
             reported,
@@ -138,14 +137,6 @@ impl ClapController {
         self.pools.publish(PoolCell(snapshot));
         old
     }
-
-    /// Edits the ring refused for want of room, cumulatively. Each was kept and
-    /// retried; the count says the Processor was not draining as fast as the
-    /// Controller wrote.
-    #[must_use]
-    pub fn refused_edits(&self) -> u32 {
-        self.queue.refused()
-    }
 }
 
 impl Drop for ClapController {
@@ -179,23 +170,23 @@ impl Controller for ClapController {
 }
 
 impl ClapController {
-    /// Queues a parameter write to the Processor: applied at the head of its
-    /// next block, or kept for the next tick when the ring is full.
+    /// Writes a parameter to the Processor's slot: applied at the head of its
+    /// next block.
     pub(crate) fn queue_edit(&mut self, id: ParamId, value: Normalized) {
-        self.queue.queue(id, value);
+        // The write policy refused an id the plugin does not declare before
+        // this call, so the slot exists.
+        let _ = self.edits.write(id, value);
     }
 
-    /// Makes every write made so far stale (see [`EditQueue::reset`]).
+    /// Makes every write made so far stale (see [`EditWriter::reset`]).
     pub(crate) fn reset_edits(&mut self) {
-        self.queue.reset();
+        self.edits.reset();
     }
 
-    /// Retries what the ring refused, oldest first, and lets the parameter
-    /// ranges' and the pool's retired values go.
-    pub(crate) fn retry_edits(&mut self) {
+    /// Lets the parameter ranges' and the pool's retired values go.
+    pub(crate) fn reclaim(&mut self) {
         self.ranges.reclaim();
         self.pools.reclaim();
-        self.queue.retry(|_, _| {});
     }
 }
 
@@ -225,11 +216,10 @@ impl ClapLoaded {
             ));
         }
         processor.stop();
-        // Edits no block has drained would die with the ring. Older first: what
-        // the ring held, then what a full ring had refused.
+        // Writes no block has taken would die with the slots: read each slot
+        // once, nothing is rendering, so none is contended.
         let mut pending = Vec::new();
         processor.take_edits(&mut pending);
-        pending.append(&mut controller.queue.take_unsent());
         drop(processor);
         let mut loaded = controller
             .loaded

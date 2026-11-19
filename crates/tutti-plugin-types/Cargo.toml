@@ -41,6 +41,8 @@ testing = []
 arrayvec = "0.7"
 # Plugin capability flag set (`Features`) — wgpu-style bitflags.
 bitflags = "2"
+# `Pod` for the edit slot's cell, which the sequence cell copies as plain words.
+bytemuck = { version = "1.16", features = ["derive"] }
 # The engine's unit vocabulary (`Samples`, `Tail`).
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }

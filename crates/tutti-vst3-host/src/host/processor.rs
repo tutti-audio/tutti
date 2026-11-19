@@ -10,10 +10,10 @@ use vst3::Steinberg::Vst::ProcessSetup;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_plugin_types::{
-    ChannelTable, Edit, EditDrain, EditSink, ParamAccess, ParamWriteError, PluginError, PluginIo,
-    PluginResult, Processor, RtMidiEvents,
+    ChannelTable, EditReader, ParamAccess, ParamEdit, ParamWriteError, PluginError, PluginIo,
+    PluginResult, Processor, ReportSink, RtMidiEvents,
 };
-use tutti_rt::{DrainBeat, RtVec, TallyWriter, tally};
+use tutti_rt::{DrainBeat, TallyWriter, tally};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
@@ -31,9 +31,6 @@ use super::midi_learn::MidiLearnProducer;
 use super::midi_mapping::{CcRoute, midi_to_mapped_controller, stage_input_events};
 use super::sequencer::{SeqScratch, expr_ints_of, fill_chords, fill_expr_texts, fill_scales};
 use super::shell::{Hold, Shell};
-
-/// How many of the Controller's writes the ring holds between two blocks.
-pub(super) const EDIT_CAPACITY: usize = 256;
 
 /// The plugin's `process` (or the call that readies it) failed: the status it
 /// returned, or why the host did not make the call.
@@ -215,22 +212,19 @@ pub struct Vst3Processor<T: Vst3Sample> {
     /// What `getProcessContextRequirements` answered at activation; `None` when
     /// the plugin does not implement the interface.
     context_requirements: Option<ProcessContextRequirements>,
-    drain: EditDrain,
+    drain: EditReader,
     /// The plugin's `outputParameterChanges` on their way to the Controller:
     /// the last point of each emitted parameter, per block.
-    reports: EditSink,
+    reports: ReportSink,
     /// Counts the drains, for the Controller's record of what a block has taken.
     beat: DrainBeat,
     /// The writes taken for the block in hand, latest per parameter, and what
     /// a rejoin carried over from the last activation before the first block.
-    /// Holds the ring's room ([`EDIT_CAPACITY`]) and no more; a write past it is
-    /// refused and counted in `edits_dropped`.
-    ///
-    /// Boxed: at 4 KiB it would otherwise be copied by value with every move of the
-    /// Processor, and the debug frames of an activation add up.
-    pending: Box<RtVec<(ParamId, Normalized), EDIT_CAPACITY>>,
-    /// Edits the block could not hold, writes carried into the activation past
-    /// the ring's room, and writes to a read-only parameter, since activation.
+    /// Holds one write per declared parameter and no more: it is reserved at
+    /// activation and never grows on the audio thread.
+    pending: Vec<(ParamId, Normalized)>,
+    /// Writes to a parameter the plugin did not declare or declared read-only,
+    /// carried into the activation or drained from the slots, since activation.
     edits_dropped: u64,
     /// The parameters the plugin declared at activation and what each declares
     /// of its writability, sorted by id: the write policy
@@ -262,8 +256,8 @@ pub(super) struct ProcessorParts {
     pub audio: AudioIO,
     pub audio_side: AudioSide,
     pub context_requirements: Option<ProcessContextRequirements>,
-    pub drain: EditDrain,
-    pub reports: EditSink,
+    pub drain: EditReader,
+    pub reports: ReportSink,
     pub beat: DrainBeat,
     pub carried: Vec<(ParamId, Normalized)>,
     pub declared: Arc<[(ParamId, ParamAccess)]>,
@@ -282,11 +276,17 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             carried,
             declared,
         } = parts;
-        let mut pending = Box::new(RtVec::new());
-        let refused = carried
-            .into_iter()
-            .filter(|&write| !pending.push(write))
-            .count();
+        let mut pending = Vec::with_capacity(declared.len());
+        let mut refused = 0u64;
+        for (id, value) in carried {
+            if ParamWriteError::check_sorted(id, &declared).is_err() {
+                refused += 1;
+            } else if let Some(slot) = pending.iter_mut().find(|(known, _)| *known == id) {
+                *slot = (id, value);
+            } else {
+                pending.push((id, value));
+            }
+        }
         Self {
             _format: std::marker::PhantomData,
             audio,
@@ -298,7 +298,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             reports,
             beat,
             pending,
-            edits_dropped: refused as u64,
+            edits_dropped: refused,
             declared,
             processing: true,
             shell: Hold::new(shell),
@@ -337,12 +337,12 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         self.audio.output.emitted_stream.reset();
     }
 
-    /// Takes the parameter writes the Controller queued that no block has
-    /// drained, and those a rejoin carried in, oldest first, into `out`. Main
+    /// Takes the parameter writes the Controller made that no block has
+    /// taken, and those a rejoin carried in, latest per parameter, into `out`. Main
     /// thread, with the Processor held (nothing is rendering): for a caller
     /// that must not lose them, as a rejoin must not.
     pub fn take_edits(&mut self, out: &mut Vec<(ParamId, Normalized)>) {
-        self.drain_ring();
+        self.drain_slots();
         out.extend(self.pending.iter().copied());
         self.pending.clear();
     }
@@ -363,9 +363,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         self.edits_dropped
     }
 
-    /// Moves what the ring holds into `pending`, the latest write to each
-    /// parameter winning. Allocation-free: `pending` is inline.
-    fn drain_ring(&mut self) {
+    /// Moves what the slots hold into `pending`, the latest write to each
+    /// parameter winning. Allocation-free: `pending` is reserved for every
+    /// declared parameter.
+    fn drain_slots(&mut self) {
         let Self {
             drain,
             pending,
@@ -373,27 +374,14 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             declared,
             ..
         } = self;
-        drain.drain(|edit| {
-            let (id, value) = match edit {
-                Edit::Param { id, .. } if ParamWriteError::check_sorted(id, declared).is_err() => {
-                    *edits_dropped += 1;
-                    return;
-                }
-                Edit::Param { id, value } => (id, value),
-                // What came before is stale; what came after is not.
-                Edit::Reset => {
-                    pending.clear();
-                    return;
-                }
-                _ => return,
-            };
-            if let Some(slot) = pending
-                .as_mut_slice()
-                .iter_mut()
-                .find(|(waiting, _)| *waiting == id)
-            {
+        drain.drain(|id, value| {
+            if ParamWriteError::check_sorted(id, declared).is_err() {
+                *edits_dropped += 1;
+            } else if let Some(slot) = pending.iter_mut().find(|(waiting, _)| *waiting == id) {
                 slot.1 = value;
-            } else if !pending.push((id, value)) {
+            } else if pending.len() < declared.len() {
+                pending.push((id, value));
+            } else {
                 *edits_dropped += 1;
             }
         });
@@ -451,7 +439,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // block's automation below, so where both set one parameter the
         // automation has the last word.
         self.beat.begin();
-        self.drain_ring();
+        self.drain_slots();
 
         // MIDI learn (IMidiLearn): when armed, capture each incoming controller
         // from the *raw* MIDI — before CC routing can divert mapped CCs into
@@ -580,15 +568,15 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// ([`flush_edits`](tutti_plugin_types::Control::flush_edits)). The portal's
     /// "Processor and Controller" section has the host transmit them; a meter,
     /// a processor-driven parameter or a program change reaches the controller
-    /// no other way. A full ring drops the value (counted in the ring); the
+    /// no other way. A full ring drops the value; the
     /// next block's value for the parameter replaces it. Never allocates.
     fn report_emitted(&mut self) {
         for queue in &self.audio.output.emitted_param_changes.queues {
             if let Some(point) = queue.points.last() {
-                let _ = self.reports.send(Edit::Param {
-                    id: queue.param_id,
-                    value: Normalized::clamped(point.value.get()),
-                });
+                let _ = self.reports.send(ParamEdit::change(
+                    queue.param_id,
+                    Normalized::clamped(point.value.get()),
+                ));
             }
         }
     }
@@ -621,7 +609,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         if self.processing {
             return Ok(false);
         }
-        self.drain_ring();
+        self.drain_slots();
         if self.pending.is_empty() {
             return Ok(false);
         }

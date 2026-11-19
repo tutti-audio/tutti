@@ -135,9 +135,9 @@ pub trait Control: EditorWindow {
         ParamWriteError::check_info(id, self.parameters(main).iter().find(|p| p.id() == id))
     }
 
-    /// Sets a parameter. Loaded: applied now. Active: an edit queued to the
-    /// Processor, applied at the head of its next block
-    /// ([`Edit`](crate::Edit)).
+    /// Sets a parameter. Loaded: applied now. Active: a write to the
+    /// Processor's slot for the parameter, applied at the head of its next block
+    /// ([`edit_slots`](crate::edit_slots())).
     ///
     /// **The value is [`Normalized`], the shared seam's domain.** The four
     /// formats disagree on what a parameter value is: VST3 and VST2 speak
@@ -276,11 +276,11 @@ pub trait Control: EditorWindow {
         let _ = main;
     }
 
-    /// Retries the parameter edits an active plugin's full ring refused,
-    /// latest value per parameter. [`Lifecycle::drive`](crate::Lifecycle::drive)
-    /// calls it on every [`Event::Tick`](crate::Event::Tick), so the host must
-    /// keep ticking: with no ticks a refused edit is never retried and the
-    /// plugin keeps the older value.
+    /// The control-side tick of an active plugin: applies what its Processor
+    /// reported and lets retired published values go.
+    /// [`Lifecycle::drive`](crate::Lifecycle::drive) calls it on every
+    /// [`Event::Tick`](crate::Event::Tick), so the host must keep ticking: with
+    /// no ticks a plugin's reports are never applied to its controller.
     fn flush_edits(&mut self, main: MainThreadMarker) {
         let _ = main;
     }
@@ -542,7 +542,7 @@ pub trait Controller: Control + Send {
 /// An in-process format's [`Controller`] holds the [`Loaded`] it was split from
 /// and answers the whole control surface through it. What an activation adds is
 /// one concern: the Controller owns the pipeline of edits to and from the
-/// Processor (an [`EditQueue`](crate::EditQueue) for host writes, a drain for
+/// Processor ([`edit_slots`](crate::edit_slots()) for host writes, a report drain for
 /// what the plugin reported, the ranges the Processor denormalizes against).
 /// This trait names the plugin and the few points where that pipeline joins the
 /// plugin's answers; [`Control`] and [`EditorWindow`] are implemented once for
@@ -610,8 +610,8 @@ pub trait Wraps {
         let _ = main;
     }
 
-    /// The control-side tick (every [`Event::Tick`](crate::Event::Tick)): retry
-    /// or apply what the Processor owes, and let retired published values go.
+    /// The control-side tick (every [`Event::Tick`](crate::Event::Tick)): apply
+    /// what the Processor reported, and let retired published values go.
     fn tick(&mut self, main: MainThreadMarker) {
         let _ = main;
     }
