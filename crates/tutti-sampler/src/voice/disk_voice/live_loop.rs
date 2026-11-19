@@ -5,7 +5,7 @@
 //! clock as the memory tier does and reads its taps there by position
 //! (`live_read`), each block's transport from its `Env`. These tests drive a
 //! live `DiskVoice` from a hand-stepped
-//! streamer (`DiskStreamer::manual`, one cycle per block, as the streamer thread
+//! streamer (`DiskStreamer::by_hand`, one cycle per block, as the streamer thread
 //! stands to the audio callback) and compare it with a placed `MemorySource`
 //! on its own copy of the clock, given the same edits at the same blocks.
 //!
@@ -128,12 +128,12 @@ impl Setup {
 
 /// A live voice on a hand-stepped streamer, and the clock it is placed on.
 struct Live {
-    streamer: DiskStreamer<ByHand>,
-    voice: DiskVoice,
+    streamer: DiskStreamer<ByHand<f32>, f32>,
+    voice: DiskVoice<f32>,
     /// The voice's stream.
-    stream: Stream,
+    stream: Stream<f32>,
     /// The neighbours' streams and readers, held so their rings stay read.
-    _neighbours: Vec<(Stream, crate::StreamReader)>,
+    _neighbours: Vec<(Stream<f32>, crate::StreamReader<f32>)>,
     clock: Arc<MockTransport>,
 }
 
@@ -147,7 +147,7 @@ impl Live {
     /// a live voice placed at beat 0 from the first stream's reader.
     fn with(path: &Path, setup: Setup) -> Self {
         let config = DiskStreamerConfig::default();
-        let mut streamer = DiskStreamer::manual(SampleRate::of(SR), config).expect("builds");
+        let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), config).expect("builds");
         let start = crate::Placement::new(SamplePosition(setup.beat / 2.0 * SR))
             .expect("a position in the file");
         let openings: Vec<_> = (0..=setup.neighbours)
@@ -251,7 +251,7 @@ fn seeking(node: &mut dyn Node, clock: &MockTransport, at: usize, beat: f64) -> 
 /// A placed memory voice at `speed` from beat `from`, looped by `loop_`,
 /// on its own clock, rendered block by block like a [`Live`] one.
 struct Memory {
-    source: MemorySource,
+    source: MemorySource<f32>,
     clock: Arc<MockTransport>,
 }
 
@@ -939,9 +939,9 @@ fn a_seek_inside_a_block_is_a_jump_on_its_frame() {
 /// `stream`; and its handle.
 fn pool_with(
     id: crate::SlotId,
-    voice: DiskVoice,
-    stream: Stream,
-) -> (crate::VoicePool, crate::VoicePoolHandle) {
+    voice: DiskVoice<f32>,
+    stream: Stream<f32>,
+) -> (crate::VoicePool<f32>, crate::VoicePoolHandle<f32>) {
     let (mut pool, handle) = crate::VoicePool::new().with_handle();
     pool.prepare(&Prepare::new(
         SampleRate::of(SR),
@@ -955,9 +955,15 @@ fn pool_with(
 
 /// Streams `path` on a fresh hand-stepped streamer from frame 0, primed, and
 /// returns the streamer and the stream's handle and reader.
-fn streaming(path: &Path) -> (DiskStreamer<ByHand>, Stream, crate::StreamReader) {
+fn streaming(
+    path: &Path,
+) -> (
+    DiskStreamer<ByHand<f32>, f32>,
+    Stream<f32>,
+    crate::StreamReader<f32>,
+) {
     let mut streamer =
-        DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
+        DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
     let opening = streamer.open(path, crate::Placement::HEAD);
     let (stream, reader) = crate::testing::settle(&mut streamer, opening).expect("the file opens");
     assert!(
@@ -1019,7 +1025,7 @@ fn a_loop_set_on_one_pool_voice_leaves_the_other_voices_stream_alone() {
     write_ramp(&first, SR as u32, 10_000);
     write_ramp(&second, SR as u32, 12_000);
     let mut streamer =
-        DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
+        DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
     let mut open = |path: &Path| {
         let opening = streamer.open(path, crate::Placement::HEAD);
         crate::testing::settle(&mut streamer, opening).expect("the file opens")
@@ -1043,7 +1049,7 @@ fn a_loop_set_on_one_pool_voice_leaves_the_other_voices_stream_alone() {
             .expect("the command queue has room in a test");
     }
     let handle = &mut pool_handle.1;
-    let applied = |ring: &crate::streamer::SharedReader| ring.applied().loop_;
+    let applied = |ring: &crate::streamer::SharedReader<f32>| ring.applied().loop_;
     let send = |id, setting| {
         handle
             .set_loop(id, setting)
@@ -1077,8 +1083,8 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path, SR as u32, 10_000);
     let mut streamer =
-        DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
-    let open = |streamer: &mut DiskStreamer<ByHand>| {
+        DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
+    let open = |streamer: &mut DiskStreamer<ByHand<f32>, f32>| {
         let opening = streamer.open(&path, crate::Placement::HEAD);
         let (stream, reader) = crate::testing::settle(streamer, opening).expect("the file opens");
         (
@@ -1104,7 +1110,8 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
         a.shared_state.stretch_rate(),
         tutti_units::ReadRate::new(0.5)
     );
-    let direction = |voice: &mut DiskVoice| voice.inner.read.lent_control().map(|c| c.direction);
+    let direction =
+        |voice: &mut DiskVoice<f32>| voice.inner.read.lent_control().map(|c| c.direction);
     assert_eq!(direction(&mut a), Some(crate::Direction::Reverse));
 
     // And nothing of it on the other.

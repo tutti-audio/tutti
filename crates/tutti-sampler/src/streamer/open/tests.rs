@@ -30,8 +30,8 @@ fn write_constant(path: &Path, value: f32, frames: usize) {
     w.finalize().expect("writes");
 }
 
-fn manual() -> DiskStreamer<crate::ByHand> {
-    DiskStreamer::manual(SampleRate::of(RATE), Default::default()).expect("builds")
+fn manual() -> DiskStreamer<crate::ByHand<f32>, f32> {
+    DiskStreamer::by_hand(SampleRate::of(RATE), Default::default()).expect("builds")
 }
 
 /// A file of `value` in a temp dir.
@@ -43,7 +43,7 @@ fn constant_file(value: f32) -> (tempfile::TempDir, PathBuf) {
 }
 
 /// One block of the voice playing `reader` from beat 0, planar.
-fn first_block(reader: StreamReader) -> Vec<Vec<f32>> {
+fn first_block(reader: StreamReader<f32>) -> Vec<Vec<f32>> {
     let mut voice = prepared(
         DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0))),
         SampleRate::of(RATE),
@@ -279,7 +279,7 @@ fn a_loop_set_through_one_stream_leaves_the_other_unchanged() {
     let (mut a, reader_a) = settle(&mut streamer, opening).expect("the file opens");
     let opening = streamer.open(&path, Placement::HEAD);
     let (mut b, reader_b) = settle(&mut streamer, opening).expect("the file opens");
-    let loop_of = |reader: &StreamReader| reader.ring.applied().loop_;
+    let loop_of = |reader: &StreamReader<f32>| reader.ring.applied().loop_;
     let looped = |start, end| Some(loop_frames(start, end, 0));
 
     // B is opened second, so a command that went to "the newest" or to "the

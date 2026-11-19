@@ -5,14 +5,14 @@ const RATE: f64 = 44100.0;
 
 /// A 10 ms decaying 1 kHz burst at each of `times` (seconds), scaled by the
 /// paired gain, over `secs` seconds.
-fn burst_train(times: &[(f64, f32)], secs: f64) -> Vec<f32> {
-    let mut out = vec![0.0f32; (secs * RATE) as usize];
+fn burst_train(times: &[(f64, f64)], secs: f64) -> Vec<f64> {
+    let mut out = vec![0.0f64; (secs * RATE) as usize];
     for &(t, gain) in times {
         let start = (t * RATE).round() as usize;
         for i in 0..441 {
             if let Some(s) = out.get_mut(start + i) {
                 let phase = 2.0 * std::f64::consts::PI * 1000.0 * i as f64 / RATE;
-                *s += gain * (phase.sin() * (-(i as f64) / 100.0).exp()) as f32;
+                *s += gain * (phase.sin() * (-(i as f64) / 100.0).exp());
             }
         }
     }
@@ -20,7 +20,7 @@ fn burst_train(times: &[(f64, f32)], secs: f64) -> Vec<f32> {
 }
 
 /// Clicks at a constant tempo, the first at `offset` seconds.
-fn clicks(bpm: f64, offset: f64, secs: f64) -> Vec<f32> {
+fn clicks(bpm: f64, offset: f64, secs: f64) -> Vec<f64> {
     let period = 60.0 / bpm;
     let times: Vec<_> = (0..)
         .map(|k| offset + k as f64 * period)
@@ -59,7 +59,7 @@ fn miss(grid: &BeatGrid, clicks: &[f64]) -> Vec<f64> {
         .collect()
 }
 
-fn tempo_of(x: &[f32]) -> Tempo {
+fn tempo_of(x: &[f64]) -> Tempo {
     estimate_tempo(
         &TempoConfig::new(),
         Mono::new(x),
@@ -195,7 +195,7 @@ fn the_estimate_stays_inside_the_range() {
 /// the search stops at 120.
 #[test]
 fn a_refined_tempo_is_clamped_to_the_range() {
-    let mut curve = vec![0.0f32; 1500];
+    let mut curve = vec![0.0f64; 1500];
     let mut at = 3.0;
     while (at as usize) < curve.len() {
         curve[at as usize] = 1.0;
@@ -220,8 +220,8 @@ fn a_refined_tempo_is_clamped_to_the_range() {
 /// narrowing it, settles the first case either way.
 #[test]
 fn the_prior_settles_the_octave() {
-    let train = |soft: f32| {
-        let mut times: Vec<(f64, f32)> = (0..20).map(|k| (0.3 + k as f64, 1.0)).collect();
+    let train = |soft: f64| {
+        let mut times: Vec<(f64, f64)> = (0..20).map(|k| (0.3 + k as f64, 1.0)).collect();
         times.extend((0..19).map(|k| (0.8 + k as f64, soft)));
         burst_train(&times, 21.0)
     };
@@ -285,12 +285,12 @@ fn the_prior_settles_the_octave() {
 /// tracker off the grid and leave a tight one on it.
 #[test]
 fn tightness_holds_the_grid_against_distractors() {
-    let mut times: Vec<(f64, f32)> = (0..38).map(|k| (0.3 + 0.5 * k as f64, 1.0)).collect();
+    let mut times: Vec<(f64, f64)> = (0..38).map(|k| (0.3 + 0.5 * k as f64, 1.0)).collect();
     times.extend((0..12).map(|k| (0.5 + 1.5 * k as f64, 1.5)));
     let x = burst_train(&times, 20.0);
     let grid_clicks = click_samples(120.0, 0.3, 20.0);
     let hop = geometry().hop().get() as f64;
-    let run = |tightness: f32| {
+    let run = |tightness: f64| {
         let cfg = TempoConfig::new().tightness(Tightness::new(tightness).unwrap());
         track_beats(
             &cfg,
@@ -312,7 +312,7 @@ fn tightness_holds_the_grid_against_distractors() {
 fn a_signal_without_change_has_no_tempo() {
     let cfg = TempoConfig::new();
     let mut fft = FftScratch::new();
-    for x in [vec![0.0f32; 441_000], vec![0.5f32; 441_000]] {
+    for x in [vec![0.0f64; 441_000], vec![0.5f64; 441_000]] {
         assert_eq!(
             estimate_tempo(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft),
             Err(Error::NoSignal)
@@ -323,10 +323,10 @@ fn a_signal_without_change_has_no_tempo() {
         );
     }
     // A constant, and a constant with one ulp of rounding on every 7th value.
-    let flat = vec![0.3f32; 2000];
-    let mut ulp = vec![1.0f32; 2000];
+    let flat = vec![0.3f64; 2000];
+    let mut ulp = vec![1.0f64; 2000];
     for v in ulp.iter_mut().step_by(7) {
-        *v += f32::EPSILON;
+        *v += f64::EPSILON;
     }
     for curve in [flat, ulp] {
         assert_eq!(
@@ -341,7 +341,7 @@ fn a_signal_without_change_has_no_tempo() {
 fn non_finite_input_is_refused() {
     let cfg = TempoConfig::new();
     let mut fft = FftScratch::new();
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut x = clicks(120.0, 0.3, 10.0);
         x[20_000] = bad;
         assert_eq!(
@@ -352,7 +352,7 @@ fn non_finite_input_is_refused() {
             track_beats(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft),
             Err(Error::NonFiniteInput)
         );
-        let mut curve = vec![0.0f32; 1000];
+        let mut curve = vec![0.0f64; 1000];
         curve[10] = 1.0;
         curve[500] = bad;
         assert_eq!(
@@ -381,7 +381,7 @@ fn a_slow_drift_is_followed() {
     let mut t = 0.3;
     let mut times = Vec::new();
     while t < 19.9 {
-        times.push((t, 1.0f32));
+        times.push((t, 1.0f64));
         t += 60.0 / (120.0 + 2.0 * t / 20.0);
     }
     let x = burst_train(&times, 20.0);
@@ -403,8 +403,8 @@ fn the_result_does_not_depend_on_gain() {
     let mut fft = FftScratch::new();
     let reference = track_beats(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft).unwrap();
     let tempo = estimate_tempo(&cfg, Mono::new(&x), SampleRate::of(RATE), &mut fft).unwrap();
-    for gain in [0.01f32, 8.0] {
-        let y: Vec<f32> = x.iter().map(|s| s * gain).collect();
+    for gain in [0.01f64, 8.0] {
+        let y: Vec<f64> = x.iter().map(|s| s * gain).collect();
         let other = estimate_tempo(&cfg, Mono::new(&y), SampleRate::of(RATE), &mut fft).unwrap();
         assert!((other.bpm.get() - tempo.bpm.get()).abs() < 1e-3);
         assert!((other.confidence.get() - tempo.confidence.get()).abs() < 1e-3);
@@ -417,7 +417,7 @@ fn the_result_does_not_depend_on_gain() {
 /// 150 BPM. The beats sit on the impulses, `frame * hop` samples in.
 #[test]
 fn a_caller_curve_is_read_in_its_own_frames() {
-    let mut curve = vec![0.0f32; 1000];
+    let mut curve = vec![0.0f64; 1000];
     for i in (0..1000).step_by(40) {
         curve[i] = 1.0;
     }
@@ -475,7 +475,7 @@ fn a_caller_curve_is_read_in_its_own_frames() {
 fn noise_has_a_low_confidence() {
     use rand::{RngExt, SeedableRng, rngs::StdRng};
     let mut rng = StdRng::seed_from_u64(7);
-    let x: Vec<f32> = (0..441_000).map(|_| rng.random_range(-0.5..0.5)).collect();
+    let x: Vec<f64> = (0..441_000).map(|_| rng.random_range(-0.5..0.5)).collect();
     let tempo = tempo_of(&x);
     assert!(tempo.confidence.get() < 0.3, "{:?}", tempo.confidence);
 }
@@ -497,7 +497,7 @@ fn unusable_settings_are_refused() {
         assert!(Bpm::new(raw).is_none(), "{raw}");
     }
 
-    let curve = vec![0.0f32; 1000];
+    let curve = vec![0.0f64; 1000];
     assert_eq!(
         estimate_tempo_from_novelty(&cfg, &curve, SampleRate::of(RATE), Samples(0), &mut fft),
         Err(Error::ZeroHop)
@@ -506,13 +506,13 @@ fn unusable_settings_are_refused() {
     assert!(matches!(
         estimate_tempo(
             &cfg,
-            Mono::new(&[0.0f32; 100]),
+            Mono::new(&[0.0f64; 100]),
             SampleRate::of(RATE),
             &mut fft
         ),
         Err(Error::InsufficientInput { .. })
     ));
-    let mut short = vec![0.0f32; 100];
+    let mut short = vec![0.0f64; 100];
     short[3] = 1.0;
     assert!(matches!(
         estimate_tempo_from_novelty(&cfg, &short, SampleRate::of(RATE), Samples(512), &mut fft),
@@ -520,7 +520,7 @@ fn unusable_settings_are_refused() {
     ));
     // At a hop this wide no whole-frame lag falls in 100 to 101 BPM.
     let narrow = cfg.range(TempoRange::new(Bpm::of(100.0), Bpm::of(101.0)).unwrap());
-    let mut long = vec![0.0f32; 4000];
+    let mut long = vec![0.0f64; 4000];
     long[3] = 1.0;
     assert!(matches!(
         estimate_tempo_from_novelty(&narrow, &long, SampleRate::of(RATE), Samples(512), &mut fft),
@@ -555,9 +555,9 @@ fn a_wide_window_still_places_beats_within_a_hop() {
 /// at -100 dBFS is refused, at -80 dBFS it reads.
 #[test]
 fn near_silence_has_no_tempo() {
-    let quiet = |db: f64| -> Vec<f32> {
-        // The click train is `f32`: the gain narrows once.
-        let gain = Db(db).to_amplitude().get() as f32;
+    let quiet = |db: f64| -> Vec<f64> {
+        // The click train is `f64`: the gain narrows once.
+        let gain = Db(db).to_amplitude().get();
         clicks(120.0, 0.3, 20.0).iter().map(|s| s * gain).collect()
     };
     let cfg = TempoConfig::new();
@@ -595,7 +595,7 @@ fn near_silence_has_no_tempo() {
 /// an empty grid; a usable one tracks.
 #[test]
 fn a_supplied_tempo_must_fit_the_curve() {
-    let mut curve = vec![0.0f32; 1000];
+    let mut curve = vec![0.0f64; 1000];
     for i in (0..1000).step_by(40) {
         curve[i] = 1.0;
     }
@@ -652,7 +652,7 @@ fn an_absurd_range_is_refused() {
     }
     // The slowest range allowed needs 2 * (5168 + 2) frames of curve.
     let slow = cfg.range(TempoRange::new(Bpm::of(1.0), Bpm::of(200.0)).unwrap());
-    let curve: Vec<f32> = (0..2000).map(|i| (i % 43) as f32).collect();
+    let curve: Vec<f64> = (0..2000).map(|i| (i % 43) as f64).collect();
     assert!(matches!(
         estimate_tempo_from_novelty(
             &slow,

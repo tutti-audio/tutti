@@ -3,7 +3,7 @@
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_rt::Tally;
+use tutti_rt::{Counter, Tally};
 
 /// The largest chunk that crosses the process edge: the largest device
 /// callback a live plugin keeps in step with, and so the ceiling on the
@@ -75,7 +75,7 @@ pub struct ChunkCounters {
     /// Audio responses the bridge could not queue for the audio thread,
     /// counted by the bridge (set by
     /// [`attach_responses_lost`](Self::attach_responses_lost)).
-    responses_lost: OnceLock<Tally<u64>>,
+    responses_lost: OnceLock<Counter<u64>>,
     /// Parameter buffers the audio thread leaked rather than free, counted by
     /// the payload pool (set by [`attach_leaked_buffers`](Self::attach_leaked_buffers)).
     leaked_buffers: OnceLock<Tally<u64>>,
@@ -132,13 +132,13 @@ impl ChunkCounters {
     }
 
     /// Reads the bridge's count of lost audio responses (the node's bind).
-    pub fn attach_responses_lost(&self, lost: Tally<u64>) {
+    pub fn attach_responses_lost(&self, lost: Counter<u64>) {
         let _ = self.responses_lost.set(lost);
     }
 
     /// See `PluginControls::lost_responses`.
     pub fn responses_lost(&self) -> u64 {
-        self.responses_lost.get().map_or(0, Tally::get)
+        self.responses_lost.get().map_or(0, Counter::get)
     }
 
     /// Reads the payload pool's count of leaked buffers (the node's bind).

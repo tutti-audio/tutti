@@ -16,7 +16,7 @@ fn runs_are_whole_frames_that_join_to_the_converted_data() {
             assert!(!run.is_empty());
             joined.extend_from_slice(run);
         });
-        let want: Vec<f32> = data.iter().map(|s| s.convert_to::<f32>()).collect();
+        let want: Vec<f64> = data.iter().map(|s| s.convert_to::<f64>()).collect();
         assert_eq!(joined, want, "{channels} channels");
     }
 }

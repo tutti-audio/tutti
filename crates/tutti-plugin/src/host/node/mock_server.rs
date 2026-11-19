@@ -57,6 +57,7 @@ pub(super) type Record = Arc<Mutex<Vec<Vec<u8>>>>;
 pub(super) struct Rig {
     pub(super) bridge: Arc<PluginBridge>,
     pub(super) slab: SlabWriter,
+    pub(super) replies: tutti_plugin_ipc::Replies,
     pub(super) record: Record,
     pub(super) descriptor: PluginDescriptor,
     pub(super) loaded: LoadedPlugin,
@@ -131,7 +132,7 @@ fn serve_lane(
             HostMessage::GetPresetList => Some(BridgeMessage::PresetList {
                 presets: Vec::new(),
             }),
-            // What `PluginBridge::settle` asks, which a watched
+            // What `AudioBridge::settle` asks, which a watched
             // plugin's retune waits on.
             HostMessage::GetCurrentPreset => Some(BridgeMessage::CurrentPreset {
                 id: Some(PresetId::Number(PRESET)),
@@ -199,7 +200,7 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
         .unwrap();
     let slab = AudioSlab::create(shm.clone(), layout()).unwrap();
     let server_slab = AudioSlab::open(shm, layout()).unwrap();
-    let (bridge, thread) = PluginBridge::new(
+    let (bridge, thread, replies) = PluginBridge::new(
         path.clone(),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
@@ -240,6 +241,7 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
     Rig {
         bridge,
         slab,
+        replies,
         record,
         descriptor: PluginDescriptor {
             id: "test.plugin".into(),
@@ -322,6 +324,7 @@ pub(super) fn new_node(
         format: FloatWidth::F32,
         ceiling: CHUNK,
         slab: rig.slab,
+        replies: rig.replies,
         rate: SR,
         parameters: PARAMS.len(),
         timeout: Duration::from_secs(5),

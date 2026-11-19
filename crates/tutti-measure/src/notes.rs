@@ -72,7 +72,7 @@ use tutti_dsp::{FrameCount, rms};
 use tutti_music::Note;
 use tutti_units::{Amplitude, Cents, Db, SampleRate, Samples, Seconds};
 
-use crate::convert::to_f32;
+use crate::convert::widen;
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
 use crate::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
 use crate::sequence::{median, median_of_sorted};
@@ -428,10 +428,10 @@ pub fn transcribe<S: Sample>(
     cfg: &NoteConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<Vec<NoteEvent>> {
     let cfg = &cfg.plan(rate.into())?;
-    let samples = &to_f32(samples.samples());
+    let samples = &widen(samples.samples());
     cfg.check_hop()?;
     if samples.iter().any(|s| !s.is_finite()) {
         return Err(Error::NonFiniteInput);
@@ -443,8 +443,8 @@ pub fn transcribe<S: Sample>(
             got: Samples(samples.len()),
         });
     }
-    let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-    if f64::from(peak) < SILENCE_FLOOR.to_amplitude().get() {
+    let peak = samples.iter().fold(0.0f64, |m, s| m.max(s.abs()));
+    if peak < SILENCE_FLOOR.to_amplitude().get() {
         return Err(Error::NoSignal);
     }
     check_frame_count(cfg.framing().frames_for(Samples(samples.len())), MAX_FRAMES)?;
@@ -473,11 +473,11 @@ pub fn frame_levels<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Vec<Amplitude>> {
-    levels_at(&cfg.plan(rate.into())?, &to_f32(samples.samples()))
+    levels_at(&cfg.plan(rate.into())?, &widen(samples.samples()))
 }
 
-/// [`frame_levels`] over a resolved config and `f32` samples.
-fn levels_at(cfg: &NotePlan, samples: &[f32]) -> Result<Vec<Amplitude>> {
+/// [`frame_levels`] over a resolved config and `f64` samples.
+fn levels_at(cfg: &NotePlan, samples: &[f64]) -> Result<Vec<Amplitude>> {
     cfg.check_hop()?;
     let frame = cfg.frame().get();
     let frames = cfg.framing().frames_for(Samples(samples.len()));

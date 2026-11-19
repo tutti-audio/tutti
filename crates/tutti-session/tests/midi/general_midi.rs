@@ -273,7 +273,7 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
 /// A setup on a font of one zone with a 0.25 s release, its mix on the graph's
 /// outputs, and a function that renders a block of it and returns the peak of
 /// both channels.
-fn short_release_setup() -> (Session, GeneralMidi) {
+fn short_release_setup() -> (Session, GeneralMidi<f32>) {
     use tutti_fixtures::sf2::{Inst, Preset, bytes, generator};
     let font = Arc::new(
         SoundFont::from_reader(&mut std::io::Cursor::new(bytes(

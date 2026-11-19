@@ -75,7 +75,7 @@ pub enum StepOutcome {
 /// borrows nothing. Both the thread's loop and a test driver build one
 /// and call [`step`](Self::step) repeatedly; the only difference between them is
 /// what happens *between* the calls.
-pub(crate) struct StreamerCycle<F: RingFloat = f32> {
+pub(crate) struct StreamerCycle<F: RingFloat> {
     local: Local<F>,
     config: BufferConfig,
 }

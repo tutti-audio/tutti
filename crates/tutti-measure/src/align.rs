@@ -17,11 +17,11 @@ use tutti_buffers::{Mono, Sample};
 use tutti_units::{Confidence, SampleRate, Samples, Seconds};
 
 use crate::chroma::FrequencyBand;
-use crate::convert::to_f32;
+use crate::convert::widen;
 use crate::framing::check_nyquist;
 use crate::xcorr::{CrossCorrelation, cross_correlate_shaped};
 use crate::{Error, Result};
-use tutti_dsp::Complex32;
+use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::parabolic_peak;
 
@@ -33,10 +33,10 @@ use tutti_dsp::parabolic_peak;
 /// truncated sinusoid (about 50 dB down) is whitened into the result and
 /// biases the sub-sample lag; higher, and a hum 40 dB over the rest reduces
 /// the weighting to plain correlation.
-const PHAT_FLOOR: f32 = 1e-4;
+const PHAT_FLOOR: f64 = 1e-4;
 
 /// The share of the peak below which the peak's lobe is taken to have ended.
-const LOBE_FRACTION: f32 = 0.5;
+const LOBE_FRACTION: f64 = 0.5;
 
 /// What [`align`] searches and weights. Free of a sample rate: [`align`] takes
 /// it and checks the band against its Nyquist.
@@ -80,9 +80,9 @@ pub struct Alignment {
     /// A parabola through the peak and its two neighbours; zero when a
     /// neighbour is outside the overlap or the three do not bend down.
     ///
-    /// A bare `f32`: [`Samples`] is a whole-sample count, and a fraction of a
+    /// A bare `f64`: [`Samples`] is a whole-sample count, and a fraction of a
     /// sample has no unit type of its own.
-    pub offset: f32,
+    pub offset: f64,
     /// How distinct the peak is: `1 - second / peak`, where `second` is the
     /// strongest value in the search window outside the peak's own lobe (the
     /// run around it that stays above half its height, down to the next local
@@ -96,12 +96,11 @@ pub struct Alignment {
 impl Alignment {
     /// The delay in samples, `lag + offset`.
     ///
-    /// `f64` because the sum needs more digits than `f32` keeps for a long lag
-    /// (an `f32` resolves a quarter sample only up to about 2^22).
+    /// The sum is taken in `f64`, so a long lag keeps its sub-sample offset.
     #[inline]
     #[must_use]
     pub fn delay_samples(&self) -> f64 {
-        self.lag as f64 + f64::from(self.offset)
+        self.lag as f64 + self.offset
     }
 
     /// The delay in seconds at `sample_rate`.
@@ -117,8 +116,12 @@ impl Alignment {
 /// Finds how late `take` is against `reference`, by GCC-PHAT.
 ///
 /// The sub-sample [`Alignment::offset`] is a parabolic fit: on a signal that
-/// fills the band it is good to about a tenth of a sample, and it degrades as
-/// the signal narrows or noise rises. The lag is searched over
+/// fills the band (about one partial for every few bins of the spectrum, as
+/// noise or dense music does) it is good to about a tenth of a sample, and it
+/// degrades as the signal narrows or noise rises. A few exact tones do not
+/// fill it: the phase transform whitens their truncation leakage to the same
+/// weight as the tones, and the leakage does not move with the delay.
+/// [`cross_correlate`](crate::cross_correlate) is the tool for tonal material. The lag is searched over
 /// `-max_lag..=max_lag`, clamped to the overlap.
 ///
 /// # Errors
@@ -133,13 +136,13 @@ pub fn align<S: Sample>(
     take: Mono<'_, S>,
     config: &AlignConfig,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<Alignment> {
     let rate = rate.into();
     if let Some(band) = config.band {
         check_nyquist(band.max(), rate)?;
     }
-    let (reference, take) = (to_f32(reference.samples()), to_f32(take.samples()));
+    let (reference, take) = (widen(reference.samples()), widen(take.samples()));
     let (reference, take) = (&reference[..], &take[..]);
     for buffer in [reference, take] {
         if buffer.is_empty() {
@@ -168,7 +171,7 @@ pub fn align<S: Sample>(
         lag: peak.lag,
         offset: parabolic_offset(&correlation, peak.lag),
         confidence: distinctness(
-            |l| correlation.at(l).unwrap_or(f32::NEG_INFINITY),
+            |l| correlation.at(l).unwrap_or(f64::NEG_INFINITY),
             peak.lag,
             peak.value,
             window(&correlation, config.max_lag),
@@ -194,7 +197,7 @@ fn window(correlation: &CrossCorrelation, max_lag: Samples) -> (isize, isize) {
 /// below the band) does not set the level. Bins more than `PHAT_FLOOR` below
 /// the strongest are damped rather than boosted, so the whitening spans the
 /// source's dynamic range down to that level.
-fn phase_transform(bins: &mut [Complex32], band: Option<FrequencyBand>, rate: SampleRate) -> bool {
+fn phase_transform(bins: &mut [Complex64], band: Option<FrequencyBand>, rate: SampleRate) -> bool {
     // `bins` holds `size / 2 + 1` bins of a `size`-point transform.
     let size = (bins.len().saturating_sub(1) * 2).max(1);
     let in_band = |k: usize| {
@@ -208,9 +211,9 @@ fn phase_transform(bins: &mut [Complex32], band: Option<FrequencyBand>, rate: Sa
         .enumerate()
         .filter(|&(k, _)| in_band(k))
         .map(|(_, b)| b.norm())
-        .fold(0.0f32, f32::max);
+        .fold(0.0f64, f64::max);
     if strongest <= 0.0 {
-        bins.fill(Complex32::default());
+        bins.fill(Complex64::default());
         return false;
     }
     let floor = strongest * PHAT_FLOOR;
@@ -218,7 +221,7 @@ fn phase_transform(bins: &mut [Complex32], band: Option<FrequencyBand>, rate: Sa
         *bin = if in_band(k) {
             *bin / (bin.norm() + floor)
         } else {
-            Complex32::default()
+            Complex64::default()
         };
     }
     true
@@ -226,7 +229,7 @@ fn phase_transform(bins: &mut [Complex32], band: Option<FrequencyBand>, rate: Sa
 
 /// The parabola's vertex through `lag - 1`, `lag`, `lag + 1`, relative to
 /// `lag`; zero when a neighbour is outside the overlap.
-fn parabolic_offset(correlation: &CrossCorrelation, lag: isize) -> f32 {
+fn parabolic_offset(correlation: &CrossCorrelation, lag: isize) -> f64 {
     let (Some(l), Some(c), Some(r)) = (
         correlation.at(lag - 1),
         correlation.at(lag),
@@ -244,9 +247,9 @@ fn parabolic_offset(correlation: &CrossCorrelation, lag: isize) -> f32 {
 /// [`LOBE_FRACTION`] of the peak (so ripple or an exact tie at the top stays
 /// inside), then on down to the next local minimum.
 fn distinctness(
-    value: impl Fn(isize) -> f32,
+    value: impl Fn(isize) -> f64,
     lag: isize,
-    peak: f32,
+    peak: f64,
     (lo, hi): (isize, isize),
 ) -> Confidence {
     if peak <= 0.0 {
@@ -266,9 +269,9 @@ fn distinctness(
     (lo..left)
         .chain(right + 1..=hi)
         .map(value)
-        .reduce(f32::max)
+        .reduce(f64::max)
         .map_or(Confidence::NONE, |second| {
-            Confidence::new_clamped(f64::from(1.0 - second.max(0.0) / peak))
+            Confidence::new_clamped(1.0 - second.max(0.0) / peak)
         })
 }
 

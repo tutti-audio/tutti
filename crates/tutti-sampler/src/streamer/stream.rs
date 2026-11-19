@@ -27,7 +27,7 @@ use tutti_rt::RingFloat;
 /// fails once the streamer has gone (every receiver dropped: the thread's on
 /// its exit, a built streamer's on its drop).
 #[derive(Clone, Debug)]
-pub(crate) struct StreamerPort<F: RingFloat = f32> {
+pub(crate) struct StreamerPort<F: RingFloat> {
     tx: StreamerSender<F>,
 }
 
@@ -69,7 +69,7 @@ fn loop_command<F: RingFloat>(stream: StreamId, setting: Option<Loop>) -> Stream
 ///
 /// ```compile_fail
 /// # use tutti_sampler::Stream;
-/// # fn two(stream: Stream) {
+/// # fn two(stream: Stream<f32>) {
 /// let second = stream.clone(); // a stream has one handle
 /// # }
 /// ```
@@ -78,11 +78,11 @@ fn loop_command<F: RingFloat>(stream: StreamId, setting: Option<Loop>) -> Stream
 ///
 /// ```
 /// # use tutti_sampler::Stream;
-/// # fn one(stream: Stream) {
+/// # fn one(stream: Stream<f32>) {
 /// let _again = &stream;
 /// # }
 /// ```
-pub struct Stream<F: RingFloat = f32> {
+pub struct Stream<F: RingFloat> {
     id: StreamId,
     port: StreamerPort<F>,
     /// What the streamer publishes of the stream ([`status`](Self::status)).
@@ -301,7 +301,7 @@ mod tests {
     /// indefinitely and do nothing, indistinguishable from working playback.
     #[test]
     fn a_stream_on_a_gone_streamer_reports_it() {
-        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand>(8);
+        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand<f32>>(8);
         let mut stream = Stream::detached(StreamId::of(1), StreamerPort::new(tx));
         drop(queue);
         assert_eq!(stream.set_loop(None), Err(StreamerGone));
@@ -314,7 +314,7 @@ mod tests {
     /// their drop sends.
     #[test]
     fn a_stream_names_itself_in_every_command() {
-        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand>(16);
+        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand<f32>>(16);
         let port = StreamerPort::new(tx);
         let (mut a, mut b) = (
             Stream::detached(StreamId::of(1), port.clone()),
@@ -354,7 +354,7 @@ mod tests {
     /// setting nobody received.
     #[test]
     fn a_failed_send_leaves_the_stream_as_it_was() {
-        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand>(8);
+        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand<f32>>(8);
         let mut stream = Stream::detached(StreamId::of(3), StreamerPort::new(tx));
         assert_eq!(stream.loop_(), None);
         assert_eq!(stream.direction(), Direction::Forward);

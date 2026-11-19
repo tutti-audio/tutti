@@ -54,9 +54,19 @@ pub struct Name<const N: usize> {
     len: u8,
 }
 
+/// The bytes of an Endpoint Name (M2-104 §7.1.4), which is also the capacity
+/// of the assembler that reads one.
+pub(crate) const ENDPOINT_NAME_BYTES: usize = 98;
+
+/// The bytes of a Function Block Name (M2-104 §7.1.9).
+pub(crate) const BLOCK_NAME_BYTES: usize = 91;
+
+/// The bytes of a Product Instance Id (M2-104 §7.1.5).
+pub(crate) const INSTANCE_ID_BYTES: usize = 42;
+
 /// An Endpoint Name: at most 98 bytes, a Start, five Continue and an End
 /// packet of 14 bytes (M2-104 §7.1.4).
-pub type EndpointName = Name<98>;
+pub type EndpointName = Name<ENDPOINT_NAME_BYTES>;
 
 /// A Function Block Name: at most 91 bytes.
 ///
@@ -64,7 +74,7 @@ pub type EndpointName = Name<98>;
 /// message or a Start, up to five Continue messages and an End. A Function
 /// Block Name packet carries 13 bytes, and 7 x 13 = 91, one less than an
 /// Endpoint Name's 98 (7 x 14).
-pub type BlockName = Name<91>;
+pub type BlockName = Name<BLOCK_NAME_BYTES>;
 
 impl<const N: usize> Name<N> {
     /// The name, composed to NFC, or `None` when the composed text is longer
@@ -137,16 +147,10 @@ impl<const N: usize> Name<N> {
         Self::held(&text.as_bytes()[..end]).ok()
     }
 
-    /// A name read off the wire: UTF-8 bytes, read as [`FromStr`]
-    /// reads a text.
-    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        Self::parse(std::str::from_utf8(bytes).ok()?).ok()
-    }
-
     /// The text.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        // Checked UTF-8 in `from_bytes`, the only constructor.
+        // Held from a `&str` in `parse`, the only constructor.
         std::str::from_utf8(self.as_bytes()).unwrap_or("")
     }
 
@@ -219,7 +223,7 @@ impl<const N: usize> FromStr for Name<N> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
-pub struct ProductInstanceId(Name<42>);
+pub struct ProductInstanceId(Name<INSTANCE_ID_BYTES>);
 
 impl PartialOrd for ProductInstanceId {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {

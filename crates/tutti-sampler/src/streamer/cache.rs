@@ -27,7 +27,7 @@ use tutti_rt::LockExt;
 /// the lock is released. The control side never reads it (a stream's file is
 /// its own [`StreamFile`](super::control::StreamFile)), so a plain map behind
 /// one lock is all it takes.
-pub struct LruCache<F: Float = f32> {
+pub struct LruCache<F: Float> {
     inner: Mutex<Inner<F>>,
     max_entries: usize,
     max_bytes: u64,

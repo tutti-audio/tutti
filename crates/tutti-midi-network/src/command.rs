@@ -4,7 +4,9 @@
 use tutti_midi_device::{EndpointName, NameError, ProductInstanceId};
 use tutti_ump::{Ump, split_stream};
 
-use crate::{BoundedText, ByeText, Digest, NakText, Nonce, SequenceNumber, TextError, Username};
+use tutti_units::{Text, TextError};
+
+use crate::{ByeText, Digest, NakText, Nonce, SequenceNumber, Username};
 
 /// Command Codes (M2-124 Table 8).
 pub(crate) mod code {
@@ -571,7 +573,7 @@ pub enum Command {
     /// Invitation with Authentication, `0x02` (Client to Host).
     InvitationWithAuth(Digest),
     /// Invitation with User Authentication, `0x03` (Client to Host).
-    InvitationWithUserAuth(UserAuthentication),
+    InvitationWithUserAuth(Box<UserAuthentication>),
     /// Invitation Reply: Accepted, `0x10` (Host to Client).
     Accepted(EndpointIdentity),
     /// Invitation Reply: Pending, `0x11` (Host to Client).
@@ -594,9 +596,9 @@ pub enum Command {
     /// Session Reset Reply, `0x83`.
     SessionResetReply,
     /// NAK, `0x8F`.
-    Nak(Nak),
+    Nak(Box<Nak>),
     /// Bye, `0xF0`.
-    Bye(Bye),
+    Bye(Box<Bye>),
     /// Bye Reply, `0xF1`.
     ByeReply,
     /// UMP Data, `0xFF`.
@@ -706,13 +708,13 @@ fn read_identity(name: &[u8], id: &[u8]) -> Result<EndpointIdentity, ParseError>
 /// is not UTF-8 is cut at the last whole character before the bad byte, and an
 /// over-long one cannot occur (the field is the payload, which `MAX` covers).
 /// Constructors of the text types stay strict; only this wire reader is lenient.
-fn read_advisory_text<const MAX: usize>(field: &[u8]) -> BoundedText<0, MAX> {
+fn read_advisory_text<const MAX: usize>(field: &[u8]) -> Text<0, MAX> {
     let field = trimmed(field);
     let valid = match std::str::from_utf8(field) {
         Ok(text) => text,
         Err(e) => std::str::from_utf8(&field[..e.valid_up_to()]).unwrap_or_default(),
     };
-    BoundedText::new(valid).unwrap_or_default()
+    Text::new(valid).unwrap_or_default()
 }
 
 fn be16(bytes: &[u8]) -> u16 {
@@ -870,11 +872,11 @@ impl Command {
                 let digest = payload.get(..32).ok_or_else(bad_length)?;
                 let name =
                     std::str::from_utf8(trimmed(&payload[32..])).map_err(ParseError::Utf8)?;
-                let username = Username::new(name).map_err(ParseError::Text)?;
-                Ok(Self::InvitationWithUserAuth(UserAuthentication {
+                let username = Username::try_from(name).map_err(ParseError::Text)?;
+                Ok(Self::InvitationWithUserAuth(Box::new(UserAuthentication {
                     digest: read_digest(digest),
                     username,
-                }))
+                })))
             }
             code::ACCEPTED | code::PENDING => {
                 let (name, id) =
@@ -945,18 +947,18 @@ impl Command {
             code::SESSION_RESET_REPLY => Ok(Self::SessionResetReply),
             code::NAK => {
                 let (refused, text) = payload.split_at_checked(4).ok_or_else(bad_length)?;
-                Ok(Self::Nak(Nak {
+                Ok(Self::Nak(Box::new(Nak {
                     reason: NakReason::from_code(header.data1()),
                     refused: Header::from_word(u32::from_be_bytes([
                         refused[0], refused[1], refused[2], refused[3],
                     ])),
                     text: read_advisory_text(text),
-                }))
+                })))
             }
-            code::BYE => Ok(Self::Bye(Bye {
+            code::BYE => Ok(Self::Bye(Box::new(Bye {
                 reason: ByeReason::from_code(header.data1()),
                 text: read_advisory_text(payload),
-            })),
+            }))),
             code::BYE_REPLY => Ok(Self::ByeReply),
             code::UMP_DATA => {
                 if words > MAX_UMP_DATA_WORDS {

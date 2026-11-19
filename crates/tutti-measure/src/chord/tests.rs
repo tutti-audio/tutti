@@ -12,7 +12,7 @@ fn cfg() -> ChordConfig {
 }
 
 /// A triad's chroma: the three notes at 1.
-fn triad(root: usize, minor: bool) -> [f32; CLASSES] {
+fn triad(root: usize, minor: bool) -> [f64; CLASSES] {
     let mut x = [0.0; CLASSES];
     for n in if minor { MINOR } else { MAJOR } {
         x[(root + n) % CLASSES] = 1.0;
@@ -20,11 +20,11 @@ fn triad(root: usize, minor: bool) -> [f32; CLASSES] {
     x
 }
 
-fn grid(rows: &[[f32; CLASSES]]) -> Grid<f32> {
+fn grid(rows: &[[f64; CLASSES]]) -> Grid<f64> {
     Grid::new(rows.concat(), FrameCount(rows.len()), BinCount(CLASSES)).unwrap()
 }
 
-fn run(rows: &[[f32; CLASSES]], cfg: &ChordConfig) -> Vec<ChordSpan> {
+fn run(rows: &[[f64; CLASSES]], cfg: &ChordConfig) -> Vec<ChordSpan> {
     detect(&grid(rows), framing(4096, 1024), cfg).unwrap()
 }
 
@@ -41,7 +41,7 @@ fn every_triad_is_itself() {
             let x = triad(root, minor);
             let sims = similarities(&x);
             let own = if minor { root + CLASSES } else { root };
-            assert!((sims[own] - 1.0).abs() < 1e-6);
+            assert!((sims[own] - 1.0).abs() < 1e-12);
             let spans = run(&[x; 5], &cfg());
             let quality = if minor {
                 ChordQuality::Minor
@@ -66,10 +66,10 @@ fn silence_and_noise_are_no_chord() {
     assert!(run(&[[0.0; CLASSES]; 8], &cfg()).is_empty());
     assert!(run(&[[1.0; CLASSES]; 8], &cfg()).is_empty());
     let mut rng = StdRng::seed_from_u64(7);
-    let noise: Vec<[f32; CLASSES]> = (0..200)
+    let noise: Vec<[f64; CLASSES]> = (0..200)
         .map(|_| {
-            let mut x: [f32; CLASSES] = core::array::from_fn(|_| rng.random_range(0.3..1.0));
-            let max = x.iter().copied().fold(0.0, f32::max);
+            let mut x: [f64; CLASSES] = core::array::from_fn(|_| rng.random_range(0.3..1.0));
+            let max = x.iter().copied().fold(0.0, f64::max);
             x.iter_mut().for_each(|v| *v /= max);
             x
         })
@@ -88,7 +88,7 @@ fn a_lone_note_a_bass_line_and_a_fifth_are_no_chord() {
         x[class] = 1.0;
         x
     };
-    let best = |x: &[f32]| {
+    let best = |x: &[f64]| {
         similarities(x)[..NO_CHORD]
             .iter()
             .copied()
@@ -120,7 +120,7 @@ fn a_lone_note_a_bass_line_and_a_fifth_are_no_chord() {
 fn a_triad_over_a_realistic_floor_is_still_the_triad() {
     let mut rng = StdRng::seed_from_u64(5);
     for (root, minor, constant) in [(0, false, None), (9, true, None), (7, false, Some(0.4))] {
-        let rows: Vec<[f32; CLASSES]> = (0..30)
+        let rows: Vec<[f64; CLASSES]> = (0..30)
             .map(|_| {
                 let mut x = triad(root, minor);
                 for v in x.iter_mut().filter(|v| **v == 0.0) {
@@ -147,12 +147,12 @@ fn a_triad_over_a_realistic_floor_is_still_the_triad() {
 #[test]
 fn the_chords_do_not_depend_on_the_scale() {
     let mut rng = StdRng::seed_from_u64(9);
-    let mut rows: Vec<[f32; CLASSES]> = (0..40)
+    let mut rows: Vec<[f64; CLASSES]> = (0..40)
         .map(|_| core::array::from_fn(|_| rng.random_range(0.3..1.0)))
         .collect();
     rows.extend([triad(0, false); 10]);
     rows.extend([triad(9, true); 10]);
-    let at = |scale: f32| -> Vec<ChordSpan> {
+    let at = |scale: f64| -> Vec<ChordSpan> {
         let scaled: Vec<_> = rows.iter().map(|r| r.map(|v| v * scale)).collect();
         run(&scaled, &cfg())
     };
@@ -180,17 +180,15 @@ fn a_state_cannot_switch_into_itself() {
     assert_eq!(path, [0, NO_CHORD as u8]);
 }
 
-/// Long input keeps the stay prior exact. At the highest self-transition an
-/// `f32` holds (`1 - 6e-8`) a switch costs 19.8 and a stay nothing, so one
-/// odd frame (an F triad among 300000 C triads, worth `sharpness * 2/3`
-/// over C) is kept exactly when `sharpness * 2/3 > 2 * 19.8`. At a
-/// sharpness within 0.3 of that either side, 300000 frames of unshifted
-/// scores near 2e7 have no resolution left (one unit in the last place of
-/// an `f32` there is 2) and a margin of 0.3 vanishes.
+/// Long input keeps the stay prior exact. At a self-transition of `1 - 2^-24`
+/// a switch costs 19.8 and a stay nothing, so one odd frame (an F triad among
+/// 300000 C triads, worth `sharpness * 2/3` over C) is kept exactly when
+/// `sharpness * 2/3 > 2 * 19.8`. The margin either side is 0.3, which the
+/// scores must still resolve after 300000 frames.
 #[test]
 fn a_long_input_keeps_the_stay_prior() {
-    let p = f32::from_bits(1.0f32.to_bits() - 1);
-    let (stay, switch) = (f64::from(p).ln(), ((1.0 - f64::from(p)) / 24.0).ln());
+    let p = 1.0 - 2.0f64.powi(-24);
+    let (stay, switch) = (p.ln(), ((1.0 - p) / 24.0).ln());
     let cost = 2.0 * (stay - switch);
     let (c, f) = (triad(0, false), triad(5, false));
     let mut rows = vec![c; 300_000];
@@ -199,7 +197,7 @@ fn a_long_input_keeps_the_stay_prior() {
     let grid = grid(&rows);
     for (offset, kept) in [(0.3, true), (-0.3, false)] {
         // The F frame's margin over C is two thirds of the sharpness.
-        let sharpness = ((cost + offset) * 1.5) as f32;
+        let sharpness = (cost + offset) * 1.5;
         let config = cfg()
             .self_transition(SelfTransition::new(p).unwrap())
             .sharpness(Sharpness::new(sharpness).unwrap());
@@ -237,17 +235,16 @@ fn smoothing_removes_a_flicker_that_argmax_keeps() {
 #[test]
 fn viterbi_is_the_best_path() {
     let mut rng = StdRng::seed_from_u64(11);
-    for p in [0.9f32, 0.5, 0.02] {
+    for p in [0.9f64, 0.5, 0.02] {
         let config = cfg().self_transition(SelfTransition::new(p).unwrap());
         for _ in 0..3 {
-            let rows: Vec<[f32; CLASSES]> = (0..4)
+            let rows: Vec<[f64; CLASSES]> = (0..4)
                 .map(|_| core::array::from_fn(|_| rng.random_range(0.0..1.0)))
                 .collect();
-            let p = f64::from(p);
             let (stay, switch) = (p.ln(), ((1.0 - p) / 24.0).ln());
             let emit: Vec<[f64; STATES]> = rows
                 .iter()
-                .map(|r| similarities(r).map(|s| s * f64::from(config.sharpness.get())))
+                .map(|r| similarities(r).map(|s| s * config.sharpness.get()))
                 .collect();
             let mut best = (f64::MIN, [0usize; 4]);
             for code in 0..STATES.pow(4) {
@@ -321,13 +318,13 @@ fn no_chord_leaves_a_gap() {
 /// The shape, values and sizes of the input are validated.
 #[test]
 fn inputs_are_validated() {
-    let invalid = |g: &Grid<f32>| detect(g, framing(4096, 1024), &cfg()).unwrap_err();
+    let invalid = |g: &Grid<f64>| detect(g, framing(4096, 1024), &cfg()).unwrap_err();
     let wide = Grid::new(vec![0.0; 13], FrameCount(1), BinCount(13)).unwrap();
     assert_eq!(invalid(&wide), Error::NotTwelveClasses { columns: 13 });
     let mut x = [0.5; CLASSES];
-    x[4] = f32::NAN;
+    x[4] = f64::NAN;
     assert_eq!(invalid(&grid(&[x])), Error::NonFiniteInput);
-    x[4] = f32::NEG_INFINITY;
+    x[4] = f64::NEG_INFINITY;
     assert_eq!(invalid(&grid(&[x])), Error::NonFiniteInput);
     x[4] = -0.5;
     assert_eq!(invalid(&grid(&[x])), Error::NegativeInput);

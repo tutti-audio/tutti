@@ -1,75 +1,49 @@
 //! Keys held on an event output port, so an edge that ends can close them.
 //!
 //! The executor watches what a node writes to an event output port that
-//! carries notes and keeps the set of notes started and not ended, and the
-//! channels whose sustain pedal is down. When a commit removes an edge the port
-//! still holds keys on, the sink that loses the edge is sent the offs through
-//! the injection path that flushes a vanished delay. Nodes know nothing of
-//! this.
+//! carries notes and keeps what it started and has not ended: the notes down,
+//! and the hold pedals (CC 64, 66, 67, 69) and pitch bends off their normal
+//! position. When a commit removes an edge the port still holds something on,
+//! the sink that loses the edge is sent the offs, the pedal-ups and the
+//! centred bends through the injection path that flushes a vanished delay.
+//! Nodes know nothing of this.
 //!
-//! The set is a bitset over the 16-bit [`NoteKey`](tutti_ump::NoteKey), fixed at 8 KiB,
+//! The tables are [`tutti_ump::Held`]: a bitset over the 16-bit
+//! [`NoteKey`](tutti_ump::NoteKey) (8 KiB) and a word per lane (1 KiB),
 //! allocated on the control side with the commit that places the unit and never
 //! grown. A node's op writes only its own unit's
-//! sets, so a parallel block needs no new claim.
+//! tables, so a parallel block needs no new claim.
 //!
 //! A sink fed by several sources cannot tell whose note a key is: one source's
 //! close ends another's note on the same key. So can an owed close that follows a
 //! replacement: past about 72 held keys (what a block's slot takes) it can end a
 //! note the new unit started on the same key.
 
-use tutti_ump::{Address, KeyBitset, Lane, LaneSet, NoteKeyEvent, Protocol, Ump};
+use tutti_ump::Ump;
 
 use crate::event::{Event, EventKind};
 use crate::time::Offset;
 
+/// What a port has been told is held ([`tutti_ump::Held`]: the keys down, the
+/// hold pedals down and the bends off centre) and how it is closed into a block.
 #[derive(Clone, Debug)]
-pub(crate) struct Held {
-    keys: Box<KeyBitset>,
-    /// Sustain pedals down.
-    pedals: LaneSet,
-}
+pub(crate) struct Held(tutti_ump::Held);
 
 impl Held {
     pub(crate) fn new() -> Self {
-        Self {
-            keys: Box::default(),
-            pedals: LaneSet::new(),
-        }
+        Self(tutti_ump::Held::new())
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.keys.is_empty() && self.pedals.is_empty()
-    }
-
-    fn pedal(&mut self, protocol: Protocol, address: Address, down: bool) {
-        let Some(lane) = Lane::new(protocol, address) else {
-            return;
-        };
-        if down {
-            self.pedals.insert(lane);
-        } else {
-            self.pedals.remove(lane);
-        }
+        self.0.is_empty()
     }
 
     /// Fold in what a block wrote.
     #[inline]
     pub(crate) fn observe(&mut self, events: &[Event]) {
         for e in events {
-            let EventKind::Midi(u) = e.kind else { continue };
-            match u.note_key_event() {
-                Some(NoteKeyEvent::On(k)) => {
-                    self.keys.insert(k);
-                }
-                Some(NoteKeyEvent::Off(k)) => {
-                    self.keys.remove(k);
-                }
-                Some(NoteKeyEvent::Sustain {
-                    protocol,
-                    address,
-                    down,
-                }) => self.pedal(protocol, address, down),
-                None => {}
+            if let EventKind::Midi(u) = e.kind {
+                self.0.observe(u);
             }
         }
     }
@@ -83,14 +57,12 @@ impl Held {
 
     /// Forget everything held.
     pub(crate) fn clear(&mut self) {
-        self.keys.clear();
-        self.pedals.clear();
+        self.0.clear();
     }
 
     /// Add what `other` holds.
     pub(crate) fn merge(&mut self, other: &Held) {
-        self.keys.union_with(&other.keys);
-        self.pedals.union_with(&other.pedals);
+        self.0.union_with(&other.0);
     }
 
     /// Write the close of what is held ahead of `events` (at offset 0, so the
@@ -103,8 +75,8 @@ impl Held {
         events.rotate_right(added);
     }
 
-    /// Append the close of what is held to `events`, pedals up then note
-    /// offs, as many as its capacity takes, and forget those. Returns how
+    /// Append the close of what is held to `events`, controllers returned then
+    /// note offs, as many as its capacity takes, and forget those. Returns how
     /// many. Allocates nothing.
     pub(crate) fn drain_into(&mut self, events: &mut Vec<Event>) -> usize {
         self.drain_upto(events, usize::MAX)
@@ -114,43 +86,39 @@ impl Held {
     pub(crate) fn drain_upto(&mut self, events: &mut Vec<Event>, max: usize) -> usize {
         let start = events.len();
         let room = |e: &Vec<Event>| e.len() < e.capacity() && e.len() - start < max;
-        for lane in Lane::all() {
-            if !self.pedals.contains(lane) {
-                continue;
-            }
+        let lifted = self.0.controllers_mut().lift_while(None, |ump| {
             if !room(events) {
-                break;
+                return false;
             }
-            events.extend(pedal_up(lane).map(Self::event));
-            self.pedals.remove(lane);
+            events.push(Self::event(ump));
+            true
+        });
+        if !lifted {
+            return events.len() - start;
         }
+        let keys = self.0.keys_mut();
         let mut next = 0;
-        while let Some(key) = self.keys.next_from(next) {
+        while let Some(key) = keys.next_from(next) {
             if !room(events) {
                 break;
             }
             next = u32::from(key.index()) + 1;
-            self.keys.remove(key);
+            keys.remove(key);
             events.push(Self::event(Ump::note_off(key)));
         }
         events.len() - start
     }
 
     /// The next message that closes what is held, forgotten as it is taken:
-    /// a pedal up first, then the lowest key's note off, at offset 0. `None`
-    /// once nothing is held. Allocates nothing.
+    /// a controller's return first, then the lowest key's note off, at offset
+    /// 0. `None` once nothing is held. Allocates nothing.
     pub(crate) fn pop_close(&mut self) -> Option<Event> {
-        loop {
-            let Some(lane) = self.pedals.iter().next() else {
-                break;
-            };
-            self.pedals.remove(lane);
-            if let Some(up) = pedal_up(lane) {
-                return Some(Self::event(up));
-            }
+        if let Some(ump) = self.0.controllers_mut().pop() {
+            return Some(Self::event(ump));
         }
-        let key = self.keys.next_from(0)?;
-        self.keys.remove(key);
+        let keys = self.0.keys_mut();
+        let key = keys.next_from(0)?;
+        keys.remove(key);
         Some(Self::event(Ump::note_off(key)))
     }
 
@@ -161,27 +129,16 @@ impl Held {
         }
     }
 
-    /// Calls `f` with the messages that close everything held: pedals up,
-    /// then every note off, at offset 0 (ties keep this order).
-    pub(crate) fn close_each(&self, f: impl FnMut(Event)) {
-        self.for_each_close(f);
-    }
-
-    fn for_each_close(&self, mut f: impl FnMut(Event)) {
-        for lane in self.pedals.iter() {
-            if let Some(up) = pedal_up(lane) {
-                f(Self::event(up));
-            }
+    /// Calls `f` with the messages that close everything held: controllers
+    /// returned, then every note off, at offset 0 (ties keep this order).
+    pub(crate) fn close_each(&self, mut f: impl FnMut(Event)) {
+        for ump in self.0.controllers().closes() {
+            f(Self::event(ump));
         }
-        for key in self.keys.iter() {
+        for key in self.0.keys().iter() {
             f(Self::event(Ump::note_off(key)));
         }
     }
-}
-
-/// The sustain-pedal-up that closes `lane`'s pedal.
-fn pedal_up(lane: Lane) -> Option<Ump> {
-    Ump::sustain_up(lane.protocol(), lane.address())
 }
 
 /// One table per event output port of a unit; `None` for a port that carries

@@ -35,6 +35,7 @@ use tutti_units::SampleRate;
 fn handle_over(
     bridge: Arc<PluginBridge>,
     slab: tutti_plugin_ipc::SlabWriter,
+    replies: tutti_plugin_ipc::Replies,
     descriptor: PluginDescriptor,
     loaded: LoadedPlugin,
 ) -> PluginHandle {
@@ -49,6 +50,7 @@ fn handle_over(
         format: FloatWidth::F32,
         ceiling: 512,
         slab,
+        replies,
         rate: SampleRate::SR_48K,
         parameters: 0,
         timeout: std::time::Duration::from_secs(5),
@@ -160,7 +162,7 @@ fn handle_with_mock_server(
         },
     )
     .unwrap();
-    let (bridge, bridge_thread) = PluginBridge::new(
+    let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
@@ -213,7 +215,7 @@ fn handle_with_mock_server(
         probed: Features::EDITOR,
         ..LoadedPlugin::default()
     };
-    let plugin_handle = handle_over(bridge, slab, descriptor, loaded);
+    let plugin_handle = handle_over(bridge, slab, replies, descriptor, loaded);
 
     (plugin_handle, bridge_thread, server_thread)
 }
@@ -248,7 +250,7 @@ fn handle_with_multi_reply_server(
         },
     )
     .unwrap();
-    let (bridge, bridge_thread) = PluginBridge::new(
+    let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
@@ -302,7 +304,7 @@ fn handle_with_multi_reply_server(
         probed: Features::EDITOR,
         ..LoadedPlugin::default()
     };
-    let plugin_handle = handle_over(Arc::clone(&bridge), slab, descriptor, loaded);
+    let plugin_handle = handle_over(Arc::clone(&bridge), slab, replies, descriptor, loaded);
 
     (plugin_handle, bridge, bridge_thread, server_thread)
 }
@@ -353,21 +355,23 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
     {
         let latency_seen = Arc::clone(&latency_seen);
         let param_seen = Arc::clone(&param_seen);
-        bridge.set_listener(Some(Arc::new(move |ev| match ev {
-            BridgeEvent::LatencyChanged { samples } => {
-                latency_seen.store(samples.get(), Ordering::Release);
-            }
-            BridgeEvent::ParameterChanged { edit } => {
-                *param_seen.lock() = edit.value().map(|v| (edit.id().get(), v.get() as f32));
-            }
-            BridgeEvent::TailChanged { .. }
-            | BridgeEvent::Resync(_)
-            | BridgeEvent::IoLayout(_)
-            | BridgeEvent::RateRefusal(_)
-            | BridgeEvent::ProcessRequested
-            | BridgeEvent::Transport { .. }
-            | BridgeEvent::Crashed { .. } => {}
-        })));
+        bridge
+            .audio()
+            .set_listener(Some(Arc::new(move |ev| match ev {
+                BridgeEvent::LatencyChanged { samples } => {
+                    latency_seen.store(samples.get(), Ordering::Release);
+                }
+                BridgeEvent::ParameterChanged { edit } => {
+                    *param_seen.lock() = edit.value().map(|v| (edit.id().get(), v.get() as f32));
+                }
+                BridgeEvent::TailChanged { .. }
+                | BridgeEvent::Resync(_)
+                | BridgeEvent::IoLayout(_)
+                | BridgeEvent::RateRefusal(_)
+                | BridgeEvent::ProcessRequested
+                | BridgeEvent::Transport { .. }
+                | BridgeEvent::Crashed { .. } => {}
+            })));
     }
 
     // First request: receives `ParameterList`; the events that follow it are
@@ -428,7 +432,7 @@ fn a_tail_change_reaches_the_listener() {
     let tail_seen = Arc::new(parking_lot::Mutex::new(None::<PluginTail>));
     {
         let tail_seen = Arc::clone(&tail_seen);
-        bridge.set_listener(Some(Arc::new(move |ev| {
+        bridge.audio().set_listener(Some(Arc::new(move |ev| {
             if let BridgeEvent::TailChanged { tail } = ev {
                 *tail_seen.lock() = Some(tail);
             }

@@ -17,7 +17,7 @@ use tutti_music::Note;
 use tutti_units::{Cents, Confidence, Hz, SampleRate, Samples};
 
 use crate::chroma::FrequencyBand;
-use crate::convert::to_f32;
+use crate::convert::widen;
 use crate::framing::{Framing, check_nyquist};
 use crate::notes::PitchHop;
 use crate::pitch::PitchDetector;
@@ -249,7 +249,7 @@ pub fn yin<S: Sample>(
             got: samples.frames(),
         });
     }
-    Ok(estimate(&mut plan.detector(), &to_f32(samples.samples())))
+    Ok(estimate(&mut plan.detector(), &widen(samples.samples())))
 }
 
 /// Estimates the pitch at `hop` intervals across a buffer at `rate`.
@@ -266,13 +266,13 @@ pub fn yin_track<S: Sample>(
     hop: PitchHop,
 ) -> Result<Vec<PitchEstimate>> {
     let plan = cfg.plan(rate.into())?;
-    yin_track_at(&plan, &to_f32(samples.samples()), hop.get())
+    yin_track_at(&plan, &widen(samples.samples()), hop.get())
 }
 
-/// [`yin_track`] over a resolved config and `f32` samples.
+/// [`yin_track`] over a resolved config and `f64` samples.
 pub(crate) fn yin_track_at(
     plan: &YinPlan,
-    samples: &[f32],
+    samples: &[f64],
     hop: Samples,
 ) -> Result<Vec<PitchEstimate>> {
     let frame = plan.buffer_size();
@@ -295,7 +295,7 @@ pub(crate) fn yin_track_at(
         .collect())
 }
 
-fn estimate(detector: &mut PitchDetector, samples: &[f32]) -> PitchEstimate {
+fn estimate(detector: &mut PitchDetector, samples: &[f64]) -> PitchEstimate {
     let raw = detector.detect(samples);
     if !raw.is_voiced() {
         return PitchEstimate::Unvoiced;

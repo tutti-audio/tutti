@@ -73,7 +73,7 @@ fn write_wav(path: &Path) {
     tutti_fixtures::signal::write_wav_f32(path, SampleRate::of(SR), 2, &interleaved);
 }
 
-fn memory(w: &Arc<Wave>, start: f64) -> VoiceSource {
+fn memory(w: &Arc<Wave>, start: f64) -> VoiceSource<f32> {
     let mut s = MemorySource::placed(Arc::clone(w), VoiceWindow::from(Beat::new(start)))
         .expect("a placeable wave");
     s.set_render_rate(SampleRate::of(SR));
@@ -164,7 +164,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
 
     // Disk streams: 0..4 for the long-block pool, 4..8 for the
     // short-block one.
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let openings: Vec<_> = (0..8)
         .map(|_| streamer.open(&path, crate::Placement::HEAD))
@@ -201,7 +201,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
         ));
         let mut forked = disk(first_disk + 3).fork_copy();
         forked.set_render(SampleRate::of(SR), RenderMode::Offline);
-        let voices: Vec<(VoiceSource, Playback)> = vec![
+        let voices: Vec<(VoiceSource<f32>, Playback)> = vec![
             (memory(&stereo, 0.0), Playback::default()),
             (
                 memory(&stereo, 0.0),
