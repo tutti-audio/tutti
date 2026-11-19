@@ -1,6 +1,8 @@
 //! Per-command IPC choreography for the bridge thread.
 
-use super::channels::{Channels, Fate};
+use super::channels::{BridgeSide, Fate};
+#[cfg(test)]
+use super::channels::{Channels, response_ring};
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioResponse, Command, Unsolicited};
 use super::payload_pool::PayloadPool;
@@ -119,7 +121,7 @@ fn is_stale(seq: u64, newest: u64) -> bool {
 /// there is what paired a block with its predecessor's reply, and a query with
 /// a stale `AudioProcessed`.
 ///
-/// Owned by `pump` and passed in, rather than living in [`Channels`]: only the
+/// Owned by `pump` and passed in, rather than living in [`Channels`](super::channels::Channels): only the
 /// bridge thread ever reads or writes it, so an `Arc<AtomicU32>` would advertise
 /// a sharing that does not exist. The [`PartialFrame`] must have exactly this
 /// scope for a different reason — it describes a position in *this* connection's
@@ -252,11 +254,11 @@ impl Owed {
     /// rejects it) but its MIDI-out is the plugin's real output and the socket
     /// is its only path. Dropping it silently loses notes from any block whose
     /// reply ran late. Only a block's counts as late
-    /// ([`Channels::note_late`]): the counters are about blocks.
+    /// ([`Channels::note_late`](super::channels::Channels::note_late)): the counters are about blocks.
     ///
     /// A block's reply naming a block never sent is no owed reply: it is
     /// handed back as the answer, for the caller to refuse.
-    fn take(&mut self, msg: BridgeMessage, channels: &Channels) -> Option<BridgeMessage> {
+    fn take(&mut self, msg: BridgeMessage, channels: &mut BridgeSide) -> Option<BridgeMessage> {
         if matches!(msg, BridgeMessage::AudioProcessed { seq, .. } if !channels.sent(seq)) {
             return Some(msg);
         }
@@ -352,7 +354,7 @@ fn next_reply(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &Channels,
+    channels: &mut BridgeSide,
     budget: Duration,
 ) -> BridgeResult<Option<BridgeMessage>> {
     let deadline = Instant::now() + budget;
@@ -381,7 +383,7 @@ fn answer(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &Channels,
+    channels: &mut BridgeSide,
     budget: Duration,
     late: Late,
 ) -> BridgeResult<Option<BridgeMessage>> {
@@ -413,7 +415,7 @@ pub(super) struct Lanes {
 pub(super) fn handle(
     cmd: Command,
     lanes: &mut Lanes,
-    channels: &Channels,
+    channels: &mut BridgeSide,
     payloads: &PayloadPool,
     inbox: &mut Unsolicited,
     lifecycle: &Lifecycle,
@@ -927,7 +929,7 @@ fn ask(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &Channels,
+    channels: &mut BridgeSide,
     lifecycle: &Lifecycle,
     answers: fn(&BridgeMessage) -> bool,
 ) -> BridgeResult<Option<BridgeMessage>> {
@@ -967,7 +969,7 @@ fn recv_state(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &Channels,
+    channels: &mut BridgeSide,
     progress: &StateProgress,
 ) -> BridgeResult<std::result::Result<Vec<u8>, StateError>> {
     let mut acc = Reassembler::default();
@@ -1114,32 +1116,36 @@ mod tests {
     /// the answer.
     #[test]
     fn owed_frames_are_taken_in_order_before_the_answer() {
-        let channels = Channels::new(SampleRate::SR_48K, std::sync::Arc::default()).0;
+        let (writer, mut replies, _lost) = response_ring();
+        let mut channels = BridgeSide::new(
+            Channels::new(SampleRate::SR_48K, std::sync::Arc::default()).0,
+            writer,
+        );
         let mut owed = Owed::finishing(Timeouts::default().drain);
         channels.note_submitted(3);
         owed.owe(Late::Block);
         owed.owe(Late::Answer(is_value));
         owed.owe(Late::StateRest);
 
-        assert!(owed.take(processed(3), &channels).is_none());
+        assert!(owed.take(processed(3), &mut channels).is_none());
         assert!(matches!(
-            channels.pop_audio_response(),
+            replies.pop(),
             Some(AudioResponse::AudioProcessed { seq: 3, .. })
         ));
         assert_eq!(channels.block_counts().late, 1);
         let value = BridgeMessage::ParameterValue {
             value: Some(tutti_units::Normalized::of(0.25)),
         };
-        assert!(owed.take(value, &channels).is_none());
-        assert!(owed.take(chunk(0, false), &channels).is_none());
-        assert!(owed.take(chunk(1, true), &channels).is_none());
+        assert!(owed.take(value, &mut channels).is_none());
+        assert!(owed.take(chunk(0, false), &mut channels).is_none());
+        assert!(owed.take(chunk(1, true), &mut channels).is_none());
         assert!(owed.late.is_empty());
 
         let list = BridgeMessage::ParameterList {
             parameters: Vec::new(),
         };
         assert!(matches!(
-            owed.take(list, &channels),
+            owed.take(list, &mut channels),
             Some(BridgeMessage::ParameterList { .. })
         ));
         assert_eq!(
@@ -1154,7 +1160,10 @@ mod tests {
     /// against the next; the server's `Error` answers any request.
     #[test]
     fn a_frame_of_another_kind_lets_an_owed_answer_go() {
-        let channels = Channels::new(SampleRate::SR_48K, std::sync::Arc::default()).0;
+        let mut channels = BridgeSide::new(
+            Channels::new(SampleRate::SR_48K, std::sync::Arc::default()).0,
+            response_ring().0,
+        );
         let list = || BridgeMessage::ParameterList {
             parameters: Vec::new(),
         };
@@ -1163,7 +1172,7 @@ mod tests {
         owed.owe(Late::Answer(is_value));
         owed.owe(Late::StateRest);
         assert!(matches!(
-            owed.take(list(), &channels),
+            owed.take(list(), &mut channels),
             Some(BridgeMessage::ParameterList { .. })
         ));
         assert!(owed.late.is_empty());
@@ -1172,7 +1181,7 @@ mod tests {
         let error = BridgeMessage::Error {
             message: "refused".into(),
         };
-        assert!(owed.take(error, &channels).is_none());
+        assert!(owed.take(error, &mut channels).is_none());
         assert!(owed.late.is_empty());
     }
 

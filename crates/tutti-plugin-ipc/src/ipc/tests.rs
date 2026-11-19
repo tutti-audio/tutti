@@ -175,7 +175,7 @@ fn mock_with(
         .create_sync()
         .unwrap();
     let slab = AudioSlab::create(shm, layout).unwrap();
-    let (bridge, thread) = PluginBridge::new(
+    let (bridge, thread, replies) = PluginBridge::new(
         path.clone(),
         origin,
         format,
@@ -317,6 +317,7 @@ fn mock_with(
     });
     let ipc = Ipc::new(IpcParts {
         bridge,
+        replies,
         guard: Arc::new(ProcessGuard::for_test(
             crate::unique_socket_path().expect("the OS has a random source"),
         )),

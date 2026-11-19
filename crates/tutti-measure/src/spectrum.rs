@@ -475,7 +475,7 @@ impl SpectrumPlan {
 /// Pushing allocates nothing once the meter is built, but each frame is a
 /// transform and every output is smoothed, so it belongs on the consumer side of
 /// a tap, not in an audio callback.
-pub struct SpectrumMeter<S: Sample = f32> {
+pub struct SpectrumMeter<S: Sample> {
     cfg: SpectrumPlan,
     fft: FftScratch<f64>,
     window: Vec<f64>,

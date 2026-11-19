@@ -83,6 +83,8 @@ impl Submitted {
 
 use ask::ask;
 use channels::Channels;
+pub use channels::Replies;
+pub(crate) use channels::response_ring;
 pub(crate) use channels::{FATES, Fate};
 use lifecycle::Lifecycle;
 use messages::{AudioResponse, Command};
@@ -124,6 +126,8 @@ pub struct AudioBridge {
     payloads: PayloadPool,
     lifecycle: Lifecycle,
     listener: ListenerSlot,
+    /// The count of audio responses the response ring lost to being full.
+    responses_lost: tutti_rt::Counter<u64>,
 }
 
 impl std::fmt::Debug for AudioBridge {
@@ -131,6 +135,57 @@ impl std::fmt::Debug for AudioBridge {
         f.debug_struct("AudioBridge")
             .field("crashed", &self.is_crashed())
             .finish_non_exhaustive()
+    }
+}
+
+impl Replies {
+    /// Drain every reply the bridge has queued into `midi_out` (appended):
+    /// block `seq`'s MIDI-out at its own frame offsets, and any earlier
+    /// block's (a reply that missed its own collection) at offset 0, since it
+    /// is already late. Returns whether `seq`'s reply (processed or failed)
+    /// was among them.
+    ///
+    /// These carry only the plugin's MIDI-out: whether the *audio* is there
+    /// is settled by the slab's sequence numbers, not by a reply arriving.
+    /// Draining rather than taking one: a reply for an abandoned block can
+    /// still be sitting here, and leaving it would put the queue one behind
+    /// forever. Lock-free; `midi_out` is inline and capped (a full one drops
+    /// the rest).
+    ///
+    /// `status` is set to what the plugin said of itself at the end of block
+    /// `seq` when its reply was among them, and left as it was otherwise: an
+    /// earlier block's status is about an earlier block, and is dropped.
+    pub(crate) fn take(
+        &mut self,
+        seq: u64,
+        midi_out: &mut MidiEventVec,
+        status: &mut BlockStatus,
+    ) -> bool {
+        let mut answered = false;
+        while let Some(resp) = self.pop() {
+            match resp {
+                AudioResponse::AudioProcessed {
+                    seq: s,
+                    midi_out: events,
+                    status: said,
+                } => {
+                    answered |= s == seq;
+                    if s == seq {
+                        *status = said;
+                    }
+                    for mut e in events {
+                        if s != seq {
+                            e.offset = 0;
+                        }
+                        if midi_out.try_push(e).is_err() {
+                            break;
+                        }
+                    }
+                }
+                AudioResponse::Error { seq: s } => answered |= s.is_none_or(|s| s == seq),
+            }
+        }
+        answered
     }
 }
 
@@ -146,7 +201,7 @@ impl AudioBridge {
         sample_rate: SampleRate,
         watch: Arc<ServerWatch>,
         timeouts: Timeouts,
-    ) -> BridgeResult<(Self, BridgeThread)> {
+    ) -> BridgeResult<(Self, BridgeThread, Replies)> {
         // The rate lives on `Channels`, not here: the bridge thread sizes its
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
@@ -158,8 +213,10 @@ impl AudioBridge {
         );
         let lifecycle = Lifecycle::new(watch, timeouts);
         let listener: ListenerSlot = Arc::new(Mutex::new(None));
+        let (responses, replies, responses_lost) = response_ring();
         let thread = BridgeThread::spawn(
             channels.clone(),
+            responses,
             sleeper,
             payloads.clone(),
             lifecycle.clone(),
@@ -171,8 +228,9 @@ impl AudioBridge {
             payloads,
             lifecycle,
             listener,
+            responses_lost,
         };
-        Ok((bridge, thread))
+        Ok((bridge, thread, replies))
     }
 
     /// Reserve the buffers a block's parameter changes travel in, each with
@@ -309,8 +367,8 @@ impl AudioBridge {
 
     /// The count of audio responses the bridge thread could not queue for the
     /// audio thread, shared. See `commands_refused_cell`.
-    pub(crate) fn responses_lost_cell(&self) -> tutti_rt::Tally<u64> {
-        self.channels.responses_lost_cell()
+    pub(crate) fn responses_lost_cell(&self) -> tutti_rt::Counter<u64> {
+        self.responses_lost.clone()
     }
 
     /// The count of MIDI events the bridge thread did not send (a block it
@@ -428,55 +486,6 @@ impl AudioBridge {
 
     // --- RT submit (fire-and-forget) ---
 
-    /// Drain every reply the bridge has queued into `midi_out` (appended):
-    /// block `seq`'s MIDI-out at its own frame offsets, and any earlier
-    /// block's (a reply that missed its own collection) at offset 0, since it
-    /// is already late. Returns whether `seq`'s reply (processed or failed)
-    /// was among them.
-    ///
-    /// These carry only the plugin's MIDI-out: whether the *audio* is there
-    /// is settled by the slab's sequence numbers, not by a reply arriving.
-    /// Draining rather than taking one: a reply for an abandoned block can
-    /// still be sitting here, and leaving it would put the queue one behind
-    /// forever. Lock-free; `midi_out` is inline and capped (a full one drops
-    /// the rest).
-    ///
-    /// `status` is set to what the plugin said of itself at the end of block
-    /// `seq` when its reply was among them, and left as it was otherwise: an
-    /// earlier block's status is about an earlier block, and is dropped.
-    pub(crate) fn take_replies(
-        &self,
-        seq: u64,
-        midi_out: &mut MidiEventVec,
-        status: &mut BlockStatus,
-    ) -> bool {
-        let mut answered = false;
-        while let Some(resp) = self.channels.pop_audio_response() {
-            match resp {
-                AudioResponse::AudioProcessed {
-                    seq: s,
-                    midi_out: events,
-                    status: said,
-                } => {
-                    answered |= s == seq;
-                    if s == seq {
-                        *status = said;
-                    }
-                    for mut e in events {
-                        if s != seq {
-                            e.offset = 0;
-                        }
-                        if midi_out.try_push(e).is_err() {
-                            break;
-                        }
-                    }
-                }
-                AudioResponse::Error { seq: s } => answered |= s.is_none_or(|s| s == seq),
-            }
-        }
-        answered
-    }
-
     /// Hand block `seq` to the bridge thread and return **immediately**.
     ///
     /// Lock-free, allocation-free, and it never waits — see the module doc on
@@ -497,7 +506,7 @@ impl AudioBridge {
     /// value on its next chunk). An empty one is never swapped.
     ///
     /// What comes back through the queue, the plugin's MIDI-out, is taken
-    /// with the block's audio: [`take_replies`](Self::take_replies).
+    /// with the block's audio: [`Replies::take`].
     pub(crate) fn submit(
         &self,
         seq: u64,
@@ -973,6 +982,7 @@ mod tests {
             channels,
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
+            responses_lost: channels::response_ring().2,
         };
         let mut held = Vec::new();
         while let Some(payload) = bridge.payloads.acquire() {
@@ -1014,6 +1024,7 @@ mod tests {
             channels,
             lifecycle: Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default()),
             listener: Arc::new(Mutex::new(None)),
+            responses_lost: channels::response_ring().2,
         };
         while bridge.channels.push_command(Command::Reset) {}
 

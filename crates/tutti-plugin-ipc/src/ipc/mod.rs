@@ -45,7 +45,7 @@ mod tests;
 pub use processor::IpcProcessor;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 use tutti_rt::LockExt;
 
@@ -63,7 +63,8 @@ use tutti_units::ParamId;
 use crate::subprocess::swap_slab;
 use crate::{
     AudioSlab, Batcher, BridgeConfig, BridgeEvent, BridgeListener, EditorLoader, LoadRequest,
-    OfflineWait, PluginBridge, ProcessGuard, Restore, SlabWriter, launch, unique_socket_path,
+    OfflineWait, PluginBridge, ProcessGuard, Replies, Restore, SlabWriter, launch,
+    unique_socket_path,
 };
 
 /// Where a served plugin came from: what [`Ipc::reopen_restoring`] launches
@@ -138,6 +139,9 @@ pub struct IpcParts {
     pub ceiling: usize,
     /// The slab's input writer.
     pub slab: SlabWriter,
+    /// The consuming end of the bridge's response ring, which
+    /// [`PluginBridge::new`] returns beside the bridge.
+    pub replies: Replies,
     /// The rate the server was launched at.
     pub rate: SampleRate,
     /// How many parameters the plugin lists: what the bridge's parameter
@@ -420,6 +424,16 @@ pub(crate) struct Watch {
 pub struct Ipc {
     pub(crate) link: Arc<Link>,
     slab: SlabWriter,
+    /// The consuming end of the bridge's response ring, handed to each
+    /// activation's pipeline and back.
+    /// A `Mutex` only for `Ipc: Sync`, which `impl AnyThread for Ipc` (`Send + Sync`)
+    /// and the contract tests that call `Control` on an `Ipc` require, and a
+    /// ring reader is not `Sync`. Nothing locks it: an activation takes it by
+    /// value (`into_inner`).
+    /// Boxed, the one box of the reader: its cached indices are large, and an
+    /// `Ipc` is the `Ok` and `Err` payload of an activation
+    /// (`result_large_err`).
+    replies: Box<Mutex<Replies>>,
     /// The sequence the slab's next chunk carries: the slab outlives each
     /// activation's batcher, so the sequence does too.
     next_seq: u64,
@@ -460,6 +474,7 @@ impl Ipc {
             format,
             ceiling,
             slab,
+            replies,
             rate,
             parameters,
             timeout,
@@ -512,6 +527,7 @@ impl Ipc {
         Self {
             link: Arc::new(link),
             slab,
+            replies: Box::new(Mutex::new(replies)),
             next_seq: 1,
             slab_unsure: false,
         }
@@ -550,7 +566,7 @@ impl Ipc {
         // guard, which kills and reaps the child. The bridge shares the guard's
         // watch, so the stream's end and the process's end set one latch.
         let mut guard = server.server;
-        let (bridge, thread) = PluginBridge::new(
+        let (bridge, thread, replies) = PluginBridge::new(
             config.socket_path.clone(),
             origin.clone(),
             format,
@@ -573,6 +589,7 @@ impl Ipc {
             format: server.format,
             ceiling,
             slab: server.slab,
+            replies,
             rate,
             parameters,
             timeout,
@@ -816,9 +833,13 @@ impl Ipc {
         let Self {
             link,
             slab,
+            replies,
             next_seq,
             slab_unsure,
         } = self;
+        let replies = (*replies)
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner);
         // The one reading of the buses this activation lays out: the slab, the
         // pipeline's widths and (through `Control::wiring` at the same restart)
         // the node's ports follow it. A change after it is the next restart's.
@@ -844,6 +865,7 @@ impl Ipc {
                     plugin: Some(Self {
                         link,
                         slab,
+                        replies: Box::new(Mutex::new(replies)),
                         next_seq,
                         // The server may have taken the slab before the
                         // answer was lost.
@@ -865,6 +887,7 @@ impl Ipc {
             link.format,
             link.ceiling,
             slab,
+            replies,
         )
         .starting_at(next_seq)
         .with_counters(Arc::clone(&link.counters));
@@ -943,10 +966,11 @@ impl Loaded for Ipc {
                 ),
             });
         }
-        let (slab, next_seq) = processor.into_parts();
+        let (slab, next_seq, replies) = processor.into_parts();
         Ok(Self {
             link: controller.link,
             slab,
+            replies: Box::new(Mutex::new(replies)),
             next_seq,
             slab_unsure: false,
         })
