@@ -63,6 +63,7 @@ jobs:
       - run: cargo xtask check-paths tutti_session builder device error export graph instrument midi modulation node plugin session watch
       - run: cargo xtask check-paths tutti_ump cc_number decode encode field message midi1 midi_channel midi_group ump
       - run: cargo xtask check-paths tutti_midi_protocol midi1 narrow scale voice
+      - run: cargo xtask check-paths tutti_midi_ci articulation curve default_cc device discovery drawbar drum_map endpoint escape gm2 handshake initiate initiator link name pe process process_initiator profile read rotary status text two_state wait
       - run: cargo xtask check-paths tutti_midi_device id table
       - run: cargo xtask check-paths tutti_midi_network auth command config datagram discovery endpoint event link policy sequence session text udp
       # `test_support` is public and left out of the list.
@@ -300,7 +301,7 @@ jobs:
         run: >-
           cargo nextest run --locked --all-features
           -p tutti-cpal -p tutti-session -p tutti -p tutti-codec -p tutti-ump -p tutti-midi-protocol
-          -p tutti-midi-device -p tutti-tempo -p tutti-measure -p tutti-buffers -p tutti-plugin-types
+          -p tutti-midi-ci -p tutti-midi-device -p tutti-tempo -p tutti-measure -p tutti-buffers -p tutti-plugin-types
           -p tutti-plugin-db -p tutti-plugin-contract
 
       - name: Build plugin-server and plugin-probe

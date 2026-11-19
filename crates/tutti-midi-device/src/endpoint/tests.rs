@@ -6,8 +6,8 @@ use tutti_ump::{
 };
 
 use super::*;
-use crate::name::{BlockName, EndpointName, ProductInstanceId};
 use tutti_fixtures::midi;
+use tutti_midi_ci::{BlockName, EndpointName, ProductInstanceId};
 
 const ALL: DiscoveryFilter = DiscoveryFilter {
     endpoint_info: true,

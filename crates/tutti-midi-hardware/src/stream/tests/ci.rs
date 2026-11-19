@@ -4,11 +4,13 @@
 
 use super::*;
 use crate::{Answer, CiChange, PeerId, Polled, ReportEnd};
-use tutti_midi_device::Initiator;
-use tutti_midi_device::{
+use tutti_midi_ci::Initiator;
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
-    INQUIRY_TIMEOUT, MaxSysexSize, Muid,
+    MaxSysexSize,
 };
+use tutti_midi_device::INQUIRY_TIMEOUT;
 use tutti_ump::{MidiGroup, MpeChannels, MpeOverlap, MpeZoneSpan, U7};
 
 pub(super) const GROUP_0: MidiGroup = MidiGroup::of(0);
@@ -867,7 +869,7 @@ fn closing_an_input_without_midi_ci_sends_nothing() {
 /// which speaks for a Function Block, never replaces the device's.
 #[test]
 fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
-    use tutti_midi_device::{EndpointInfo, ProductInstanceId};
+    use tutti_midi_ci::{EndpointInfo, ProductInstanceId};
 
     let (mut wire, ours) = midi1_running();
     let mut data = peer_data();
@@ -917,8 +919,8 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 // --- Profile Configuration (M2-101 section 7, M2-102 section 2) -----------
 
 use crate::{ChannelCount, ProfileError, ProfilesChange, Switcher};
-use tutti_midi_device::Whole;
-use tutti_midi_device::{
+use tutti_midi_ci::Whole;
+use tutti_midi_ci::{
     PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileList, ProfileLists,
     ProfileOutcome, ProfileRequest, ProfileState, ProfileTarget, StandardProfile,
 };
@@ -1306,7 +1308,7 @@ fn an_mpe_zone_sharing_channels_with_a_lower_one_is_reported_refused() {
 /// data of another Profile, or one that is not a notification, is not one.
 #[test]
 fn a_channel_response_notification_is_read_off_the_specific_data() {
-    use tutti_midi_device::{Destination, ProfileSpecific, SpecificData};
+    use tutti_midi_ci::{Destination, ProfileSpecific, SpecificData};
     use tutti_midi_protocol::ChannelResponse;
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![ProfileId::MPE], vec![], vec![]);
@@ -1630,7 +1632,7 @@ fn a_channel_count_is_at_least_one_and_fits_fourteen_bits() {
 }
 
 use crate::{PeerError, ProcessChange};
-use tutti_midi_device::{
+use tutti_midi_ci::{
     ChannelControllers, DataControl, Nak, NoteData, ProcessFeatures, ReportRequest, ReportScope,
     SUB_ID2_MESSAGE_REPORT_INQUIRY, SystemMessages,
 };
@@ -1829,7 +1831,7 @@ fn a_nak_of_a_report_ends_it_and_is_reported() {
     let _ = polled(&mut wire, 110);
     let nak = Nak::new(
         U7::of(SUB_ID2_MESSAGE_REPORT_INQUIRY),
-        tutti_midi_device::NakStatus::Terminate(tutti_midi_device::PeTerminator::Responder),
+        tutti_midi_ci::NakStatus::Terminate(tutti_midi_ci::PeTerminator::Responder),
     );
     say(
         &wire,
@@ -1976,7 +1978,7 @@ fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
 // ---- Property Exchange ----
 
 use crate::{PropertyCall, PropertyChange};
-use tutti_midi_device::{
+use tutti_midi_ci::{
     BodyLimit, BufferLimit, PE_TIMEOUT, PeCapabilities, PeCapabilitiesFailure, PeCiMessage, PeData,
     PeLocalOn, PeReassemblyLimits, PeResource, PeSettings, ResourceEntry, ResourceEvent,
     ResourceGet, ResourceInitiator, ResourceResponder, ResourceStore, ResourceTarget,
@@ -2072,11 +2074,11 @@ impl Far {
         )
     }
 
-    fn sends_of(actions: Vec<tutti_midi_device::ResourceAction>) -> Vec<CiMessage> {
+    fn sends_of(actions: Vec<tutti_midi_ci::ResourceAction>) -> Vec<CiMessage> {
         actions
             .into_iter()
             .filter_map(|a| match a {
-                tutti_midi_device::ResourceAction::Send(m) => Some(m),
+                tutti_midi_ci::ResourceAction::Send(m) => Some(m),
                 _ => None,
             })
             .collect()
@@ -2090,14 +2092,14 @@ impl Far {
             .on_message(&mut self.store, &decoded, now)
             .into_iter()
             .filter_map(|a| match a {
-                tutti_midi_device::ResponderAction::Send(m) => Some(m),
+                tutti_midi_ci::ResponderAction::Send(m) => Some(m),
                 _ => None,
             })
             .collect();
         if let Some(init) = &mut self.init {
             let actions = init.on_message(&decoded, now);
             for action in &actions {
-                if let tutti_midi_device::ResourceAction::Event(e) = action {
+                if let tutti_midi_ci::ResourceAction::Event(e) = action {
                     self.events.push((**e).clone());
                 }
             }
@@ -2404,8 +2406,8 @@ fn a_subscription_starts_and_ends_through_the_session() {
 }
 
 /// The statuses of the Subscription replies the session sent.
-fn subscription_replies(wire: &Wire) -> Vec<tutti_midi_device::PeStatus> {
-    use tutti_midi_device::{PeHeader, PeMessageKind};
+fn subscription_replies(wire: &Wire) -> Vec<tutti_midi_ci::PeStatus> {
+    use tutti_midi_ci::{PeHeader, PeMessageKind};
     ci_sent(wire)
         .into_iter()
         .filter_map(|(_, message)| match message {
@@ -2433,9 +2435,7 @@ fn subscription_chunk(
     header: &str,
     data: &str,
 ) -> CiMessage {
-    use tutti_midi_device::{
-        ChunkNo, ChunkPosition, ChunkTotal, PeChunk, PeMessageKind, PeRequestId,
-    };
+    use tutti_midi_ci::{ChunkNo, ChunkPosition, ChunkTotal, PeChunk, PeMessageKind, PeRequestId};
     CiMessage::PropertyExchange {
         header: CiHeader::new(peer()),
         to: ours,
@@ -2454,7 +2454,7 @@ fn subscription_chunk(
 }
 
 /// A subscribed far end whose Subscription the session's Initiator holds.
-fn held_subscription() -> (Wire, Muid, Far, tutti_midi_device::SubscribeId) {
+fn held_subscription() -> (Wire, Muid, Far, tutti_midi_ci::SubscribeId) {
     let (mut wire, ours, mut far) = ready_property_peer(subscribable());
     let get = ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
@@ -2487,15 +2487,12 @@ fn an_update_of_a_held_subscription_is_answered_once_with_200_and_not_by_the_res
         )
         .expect("publishes");
     for action in actions {
-        if let tutti_midi_device::ResponderAction::Send(message) = action {
+        if let tutti_midi_ci::ResponderAction::Send(message) = action {
             say(&wire, GROUP_0, &message, 600);
         }
     }
     let _ = polled(&mut wire, 610);
-    assert_eq!(
-        subscription_replies(&wire),
-        [tutti_midi_device::PeStatus::Ok]
-    );
+    assert_eq!(subscription_replies(&wire), [tutti_midi_ci::PeStatus::Ok]);
 }
 
 /// An update in several chunks is the Initiator's from its first chunk to its last:
@@ -2524,10 +2521,7 @@ fn a_chunked_update_is_answered_once_by_the_initiator_and_not_by_the_responder()
         620,
     );
     let _ = polled(&mut wire, 630);
-    assert_eq!(
-        subscription_replies(&wire),
-        [tutti_midi_device::PeStatus::Ok]
-    );
+    assert_eq!(subscription_replies(&wire), [tutti_midi_ci::PeStatus::Ok]);
 }
 
 /// M2-103 section 11.3: the End of a Subscription the session holds, sent by the
@@ -2539,7 +2533,7 @@ fn the_peers_end_of_a_held_subscription_reaches_the_initiator() {
     let _ = ci_sent(&wire);
     let now = wire.at(600);
     for action in far.resp.end_subscription(&mut far.store, &id, now) {
-        if let tutti_midi_device::ResponderAction::Send(message) = action {
+        if let tutti_midi_ci::ResponderAction::Send(message) = action {
             say(&wire, GROUP_0, &message, 600);
         }
     }
@@ -2549,10 +2543,7 @@ fn the_peers_end_of_a_held_subscription_reaches_the_initiator() {
             if matches!(**e, ResourceEvent::SubscriptionEnded { .. }))
     });
     assert!(ended, "the Initiator reported the end");
-    assert_eq!(
-        subscription_replies(&wire),
-        [tutti_midi_device::PeStatus::Ok]
-    );
+    assert_eq!(subscription_replies(&wire), [tutti_midi_ci::PeStatus::Ok]);
 }
 
 /// The End of a Subscription the session does not hold is the Responder's: it
@@ -2577,7 +2568,7 @@ fn the_end_of_an_unheld_subscription_reaches_the_responder_and_is_answered_404()
     let _ = polled(&mut wire, 610);
     assert_eq!(
         subscription_replies(&wire),
-        [tutti_midi_device::PeStatus::NotFound]
+        [tutti_midi_ci::PeStatus::NotFound]
     );
 }
 
@@ -2665,10 +2656,7 @@ fn an_inquiry_of_a_peer_that_declared_no_property_exchange_is_nakked() {
     };
     assert_eq!(*to, peer());
     assert_eq!(nak.nak_sub_id2.get(), 0x30);
-    assert_eq!(
-        nak.status,
-        tutti_midi_device::NakStatus::MessageNotSupported
-    );
+    assert_eq!(nak.status, tutti_midi_ci::NakStatus::MessageNotSupported);
 }
 
 /// M2-101 section 5.9: when the device's MUID changes its Responder is for the
@@ -2739,7 +2727,7 @@ fn a_new_muid_renews_the_responder() {
 /// is not subscribable (status 405).
 #[test]
 fn a_served_resource_is_not_subscribable_and_a_subscription_start_is_refused() {
-    use tutti_midi_device::{PeAction, PeCall, PeGet, PeInitiator, PeOutcome, PeStatus};
+    use tutti_midi_ci::{PeAction, PeCall, PeGet, PeInitiator, PeOutcome, PeStatus};
     let (mut wire, ours, _) = property_peer();
     wire.session.serve_properties(subscribable());
     let _ = polled(&mut wire, 55);
@@ -2860,7 +2848,7 @@ fn endings(polled: &[Polled], category: CiCategories) -> Vec<Ending> {
 /// share one driver, which must not blur them.
 #[test]
 fn a_nak_a_silence_and_a_lost_peer_are_three_endings_of_every_first_inquiry() {
-    use tutti_midi_device::{
+    use tutti_midi_ci::{
         Nak, NakStatus, SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PROCESS_CAPABILITIES_INQUIRY,
         SUB_ID2_PROFILE_INQUIRY,
     };

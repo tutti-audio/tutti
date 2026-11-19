@@ -1,0 +1,37 @@
+[package]
+name = "tutti-midi-ci"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "MIDI-CI, MIDI 2.0's discovery, profile and property exchange protocol, as plain values and state machines"
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["midi", "midi-ci", "audio", "property-exchange"]
+categories = ["multimedia::audio"]
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# `Serialize`/`Deserialize` on the values an app stores: `SavedState` (with `MediaType`) and
+# `Name<N>`, `ProductInstanceId`; a checked type reads back through its check. The
+# exceptions hold no stored value: the CI messages and their numbers (`Muid`, `CiDeviceId`,
+# the limits), the Property Exchange Resource values, and the wire packets.
+serde = ["dep:serde", "tutti-ump/serde"]
+
+[dependencies]
+bitflags = "2"
+thiserror = { workspace = true, features = ["std"] }
+unicode-normalization = { workspace = true }
+tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
+tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+winnow = { workspace = true }
+miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"] }
+serde = { version = "1", optional = true, features = ["derive"] }
+
+[dev-dependencies]
+proptest = "1.9.0"
+serde_json = "1"
+tutti-fixtures = { path = "../../testing/tutti-fixtures" }
