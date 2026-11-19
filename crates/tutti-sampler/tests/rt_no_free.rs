@@ -19,9 +19,9 @@ use std::sync::Arc;
 use tutti_buffers::Wave;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
-use tutti_sampler::testing::settle;
+use tutti_sampler::testing::run_until_idle;
 use tutti_sampler::{
-    ByHand, DiskStreamer, DiskVoice, MemorySource, Placement, Playback, SlotId, Stream, VoicePool,
+    DiskStreamer, DiskVoice, Manual, MemorySource, Placement, Playback, SlotId, Stream, VoicePool,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
@@ -145,7 +145,7 @@ fn write_wav(path: &std::path::Path) {
 /// reader.
 fn stream() -> (
     tempfile::TempDir,
-    DiskStreamer<ByHand<f32>, f32>,
+    DiskStreamer<Manual<f32>, f32>,
     Stream<f32>,
     tutti_sampler::StreamReader<f32>,
 ) {
@@ -153,9 +153,9 @@ fn stream() -> (
     let path = dir.path().join("two_seconds.wav");
     write_wav(&path);
     let mut streamer =
-        DiskStreamer::by_hand(SampleRate::SR_48K, Default::default()).expect("builds");
+        DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
     let opening = streamer.open(&path, Placement::HEAD);
-    let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
     (dir, streamer, stream, reader)
 }
 
@@ -175,7 +175,7 @@ fn dropping_a_stream_frees_the_ring_in_the_streamers_step() {
         "dropping the handle freed a {biggest}-byte block: the ring, on the dropping thread"
     );
     let (_, biggest) = watch(|| {
-        let _ = streamer.step_once();
+        let _ = streamer.step();
     });
     assert!(
         biggest >= RING_BYTES,
@@ -199,7 +199,7 @@ fn a_block_that_ends_after_a_publish_frees_nothing() {
     stream
         .looping_cell()
         .publish(Some(loop_frames(1_000, 3_000, 0)));
-    let _ = streamer.step_once();
+    let _ = streamer.step();
 
     let frees = frees_during(|| drop(block));
     assert_eq!(
@@ -207,7 +207,7 @@ fn a_block_that_ends_after_a_publish_frees_nothing() {
         "ending the block freed {frees} time(s) on the audio thread"
     );
     let frees = frees_during(|| {
-        let _ = streamer.step_once();
+        let _ = streamer.step();
     });
     assert!(
         frees > 0,
@@ -219,7 +219,7 @@ fn a_block_that_ends_after_a_publish_frees_nothing() {
 /// closed, so the voice's reader is the ring's **last holder**: its drop
 /// frees the ring wherever it happens.
 fn pool_holding_the_last_holder(
-    streamer: DiskStreamer<ByHand<f32>, f32>,
+    streamer: DiskStreamer<Manual<f32>, f32>,
     stream: Stream<f32>,
     reader: tutti_sampler::StreamReader<f32>,
 ) -> (VoicePool<f32>, tutti_sampler::VoicePoolHandle<f32>) {

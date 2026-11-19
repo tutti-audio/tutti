@@ -485,7 +485,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-sampler/",
-        "DiskStreamer::by_hand",
+        "DiskStreamer::manual",
         CTOR,
         "the hand-stepped streamer: the OS can refuse its worker",
     ),

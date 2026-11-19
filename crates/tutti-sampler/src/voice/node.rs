@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
 use crate::nonempty;
-use crate::streamer::{SteerCell, Stream};
+use crate::streamer::{ControlCell, Stream};
 use crate::stretch;
 use tutti_buffers::MAX_CHANNELS;
 
@@ -161,9 +161,9 @@ impl<F: SamplerFloat> VoiceNode<F> {
             applied: Steering::default(),
             window: Publisher::new(window).reader(),
             applied_window: window,
-            looping: SteerCell::new(play.loop_).reader(),
+            looping: ControlCell::new(play.loop_).reader(),
             applied_loop: play.loop_,
-            direction: SteerCell::new(play.direction).reader(),
+            direction: ControlCell::new(play.direction).reader(),
             applied_direction: play.direction,
             speed: Publisher::new(play.speed).reader(),
             applied_speed: play.speed,
@@ -237,7 +237,10 @@ impl<F: SamplerFloat> VoiceNode<F> {
                 stream.looping_cell().clone(),
                 stream.direction_cell().clone(),
             ),
-            None => (SteerCell::new(play.loop_), SteerCell::new(play.direction)),
+            None => (
+                ControlCell::new(play.loop_),
+                ControlCell::new(play.direction),
+            ),
         };
         self.looping = looping.reader();
         self.applied_loop = *looping.current();
@@ -541,8 +544,8 @@ struct VoiceNodeFork<F: SamplerFloat> {
     steering: SteeringCell,
     /// The live node's window, loop, direction and speed cells, read the same way.
     window: Publisher<Option<VoiceWindow>>,
-    looping: SteerCell<Option<Loop>>,
-    direction: SteerCell<Direction>,
+    looping: ControlCell<Option<Loop>>,
+    direction: ControlCell<Direction>,
     speed: Publisher<PlaybackRate>,
     /// The node's params: a fork starts from the gain cell, which holds the
     /// gain last set (a modulation lane sends its composite to the
@@ -731,20 +734,21 @@ mod tests {
         let samples = vec![0.25f32; 4_800];
         tutti_fixtures::signal::write_wav_f32(&path, SampleRate::SR_48K, 1, &samples);
         let mut streamer =
-            crate::DiskStreamer::<_, f32>::by_hand(SampleRate::SR_48K, Default::default())
+            crate::DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default())
                 .expect("streamer builds");
         let opening = streamer.open(&path, crate::Placement::HEAD);
-        let (stream, reader) = crate::testing::settle(&mut streamer, opening).expect("opens");
+        let (stream, reader) =
+            crate::testing::run_until_idle(&mut streamer, opening).expect("opens");
         let served = Arc::clone(&reader.status);
         let voice = crate::DiskVoice::from_reader(reader, crate::VoiceWindow::default());
 
         let (node, handle) = VoiceNode::streaming(voice, stream, Playback::default()).with_handle();
         let second = handle.clone();
-        let _ = streamer.step_until_settled(1_000);
+        let _ = streamer.step_until_idle(1_000);
         assert!(!served.closed(), "the handle holds the stream");
 
         drop(handle);
-        let _ = streamer.step_until_settled(1_000);
+        let _ = streamer.step_until_idle(1_000);
         assert!(!served.closed(), "a clone of the handle still holds it");
         assert!(
             second.status().is_some(),
@@ -752,7 +756,7 @@ mod tests {
         );
 
         drop(second);
-        let _ = streamer.step_until_settled(1_000);
+        let _ = streamer.step_until_idle(1_000);
         assert!(served.closed(), "the last clone's drop ended the stream");
         drop(node);
     }

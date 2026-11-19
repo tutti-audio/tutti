@@ -180,7 +180,7 @@ fn offline_graph(start: Beat) -> Run {
 
 /// The pool driven by hand in [`HAND`]-frame blocks, its `Env` from a host frame
 /// clock (counted, as an engine's).
-fn by_hand(start: Beat) -> Run {
+fn manual(start: Beat) -> Run {
     let mut node = contract::prepared(pool(start), SampleRate::of(SR), HAND);
     let mut probe = Probe(Arc::default());
     let mut host = FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(SR));
@@ -239,7 +239,7 @@ fn a_clip_enters_on_its_frame_offline_through_the_graph() {
 
 #[test]
 fn a_clip_enters_on_its_frame_driven_by_hand() {
-    let run = by_hand(START);
+    let run = manual(START);
     assert_enters_at("by hand", &run, START_FRAME);
     assert_read_start_exactly("by hand", &run);
 }
@@ -258,5 +258,5 @@ fn a_start_an_ulp_after_the_frame_enters_on_it() {
     assert_enters_at("an ulp late", &offline_graph(start), START_FRAME);
     let later = Beat::new(START.get() + 1.0 / 32_000.0);
     assert_enters_at("a frame late", &offline_graph(later), START_FRAME + 1);
-    assert_enters_at("a frame late, by hand", &by_hand(later), START_FRAME + 1);
+    assert_enters_at("a frame late, by hand", &manual(later), START_FRAME + 1);
 }

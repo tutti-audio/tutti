@@ -5,7 +5,7 @@
 //! clock as the memory tier does and reads its taps there by position
 //! (`live_read`), each block's transport from its `Env`. These tests drive a
 //! live `DiskVoice` from a hand-stepped
-//! streamer (`DiskStreamer::by_hand`, one cycle per block, as the streamer thread
+//! streamer (`DiskStreamer::manual`, one cycle per block, as the streamer thread
 //! stands to the audio callback) and compare it with a placed `MemorySource`
 //! on its own copy of the clock, given the same edits at the same blocks.
 //!
@@ -34,7 +34,7 @@ use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate, Samples};
 
 use super::DiskVoice;
 use crate::testing::{MockTransport, block};
-use crate::{ByHand, DiskStreamer, DiskStreamerConfig, Loop, MemorySource, Stream};
+use crate::{DiskStreamer, DiskStreamerConfig, Loop, Manual, MemorySource, Stream};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -128,7 +128,7 @@ impl Setup {
 
 /// A live voice on a hand-stepped streamer, and the clock it is placed on.
 struct Live {
-    streamer: DiskStreamer<ByHand<f32>, f32>,
+    streamer: DiskStreamer<Manual<f32>, f32>,
     voice: DiskVoice<f32>,
     /// The voice's stream.
     stream: Stream<f32>,
@@ -147,16 +147,13 @@ impl Live {
     /// a live voice placed at beat 0 from the first stream's reader.
     fn with(path: &Path, setup: Setup) -> Self {
         let config = DiskStreamerConfig::default();
-        let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), config).expect("builds");
+        let mut streamer = DiskStreamer::manual(SampleRate::of(SR), config).expect("builds");
         let start = crate::Placement::new(SamplePosition::new(setup.beat / 2.0 * SR))
             .expect("a position in the file");
         let openings: Vec<_> = (0..=setup.neighbours)
             .map(|_| streamer.open(path, start))
             .collect();
-        assert!(
-            streamer.step_until_settled(1_000) < 1_000,
-            "the ring primes"
-        );
+        assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
         let mut readers: Vec<_> = openings
             .into_iter()
             .map(|opening| match opening.poll() {
@@ -167,10 +164,7 @@ impl Live {
         let (stream, reader) = readers.remove(0);
         if setup.loop_.is_some() {
             stream.looping_cell().publish(setup.loop_);
-            assert!(
-                streamer.step_until_settled(1_000) < 1_000,
-                "the ring primes"
-            );
+            assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
         }
         let clock = MockTransport::rolling(Beat::new(setup.beat), Bpm::of(120.0));
         let mut voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
@@ -193,7 +187,7 @@ impl Live {
     fn block(&mut self) -> Vec<f32> {
         let left = block(&mut self.voice, &self.clock, SampleRate::of(SR), BLOCK).swap_remove(0);
         self.clock.advance(BLOCK as i64, SampleRate::of(SR));
-        let _ = self.streamer.step_once();
+        let _ = self.streamer.step();
         left
     }
 
@@ -202,7 +196,7 @@ impl Live {
     /// where the seek leaves it at the block's end.
     fn block_seeking(&mut self, at: usize, beat: f64) -> Vec<f32> {
         let left = seeking(&mut self.voice, &self.clock, at, beat);
-        let _ = self.streamer.step_once();
+        let _ = self.streamer.step();
         left
     }
 
@@ -470,7 +464,7 @@ fn a_reversed_voice_ignores_its_loop_and_mirrors_the_file() {
         live.stream
             .direction_cell()
             .publish(crate::Direction::Reverse);
-        let _ = live.streamer.step_until_settled(1_000);
+        let _ = live.streamer.step_until_idle(1_000);
         live
     };
     const BLOCKS: usize = 420;
@@ -956,18 +950,16 @@ fn pool_with(
 fn streaming(
     path: &Path,
 ) -> (
-    DiskStreamer<ByHand<f32>, f32>,
+    DiskStreamer<Manual<f32>, f32>,
     Stream<f32>,
     crate::StreamReader<f32>,
 ) {
     let mut streamer =
-        DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
+        DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
     let opening = streamer.open(path, crate::Placement::HEAD);
-    let (stream, reader) = crate::testing::settle(&mut streamer, opening).expect("the file opens");
-    assert!(
-        streamer.step_until_settled(1_000) < 1_000,
-        "the ring primes"
-    );
+    let (stream, reader) =
+        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
+    assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     (streamer, stream, reader)
 }
 
@@ -989,14 +981,14 @@ fn a_loop_set_through_a_pool_reaches_the_streamer_and_the_voice_loops() {
     handle
         .set_loop(id, Some(loop_frames(1_000, 3_001, 0)))
         .expect("the command queue has room in a test");
-    assert!(streamer.step_until_settled(1_000) < 1_000, "the loop lands");
+    assert!(streamer.step_until_idle(1_000) < 1_000, "the loop lands");
 
     let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut left = Vec::new();
     for _ in 0..200 {
         left.extend(block(&mut pool, &clock, SampleRate::of(SR), BLOCK).swap_remove(0));
         clock.advance(BLOCK as i64, SampleRate::of(SR));
-        let _ = streamer.step_once();
+        let _ = streamer.step();
     }
     // The frame of the file each output sample is (`value` inverted).
     let frame = |s: f32| (s / 1e-5).round() as i64 - 1;
@@ -1023,10 +1015,10 @@ fn a_loop_set_on_one_pool_voice_leaves_the_other_voices_stream_alone() {
     write_ramp(&first, SR as u32, 10_000);
     write_ramp(&second, SR as u32, 12_000);
     let mut streamer =
-        DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
+        DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
     let mut open = |path: &Path| {
         let opening = streamer.open(path, crate::Placement::HEAD);
-        crate::testing::settle(&mut streamer, opening).expect("the file opens")
+        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens")
     };
     let (stream_a, reader_a) = open(&first);
     let (stream_b, reader_b) = open(&second);
@@ -1055,12 +1047,12 @@ fn a_loop_set_on_one_pool_voice_leaves_the_other_voices_stream_alone() {
     };
 
     send(ids[0], loop_on(1_000.0, 3_001.0, 0));
-    assert!(streamer.step_until_settled(1_000) < 1_000);
+    assert!(streamer.step_until_idle(1_000) < 1_000);
     assert_eq!(applied(&ring_a), loop_on(1_000.0, 3_001.0, 0));
     assert_eq!(applied(&ring_b), None, "B was not asked");
 
     send(ids[1], loop_on(500.0, 900.0, 0));
-    assert!(streamer.step_until_settled(1_000) < 1_000);
+    assert!(streamer.step_until_idle(1_000) < 1_000);
     assert_eq!(applied(&ring_b), loop_on(500.0, 900.0, 0));
     assert_eq!(
         applied(&ring_a),
@@ -1081,10 +1073,11 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path, SR as u32, 10_000);
     let mut streamer =
-        DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
-    let open = |streamer: &mut DiskStreamer<ByHand<f32>, f32>| {
+        DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
+    let open = |streamer: &mut DiskStreamer<Manual<f32>, f32>| {
         let opening = streamer.open(&path, crate::Placement::HEAD);
-        let (stream, reader) = crate::testing::settle(streamer, opening).expect("the file opens");
+        let (stream, reader) =
+            crate::testing::run_until_idle(streamer, opening).expect("the file opens");
         (
             stream,
             DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
@@ -1097,7 +1090,7 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
     a.set_speed(PlaybackRate::of(2.0));
     a.set_stretch_rate(tutti_units::ReadRate::new(0.5));
     stream_a.direction_cell().publish(crate::Direction::Reverse);
-    assert!(streamer.step_until_settled(1_000) < 1_000);
+    assert!(streamer.step_until_idle(1_000) < 1_000);
 
     // What was written, on the voice it was written to.
     assert_eq!(a.gain(), tutti_units::Amplitude::new(0.5));
@@ -1144,7 +1137,7 @@ fn direction_is_published_once_and_read_from_the_lent_control() {
     live.stream
         .direction_cell()
         .publish(crate::Direction::Reverse);
-    let _ = live.streamer.step_once();
+    let _ = live.streamer.step();
     let reversed = lent(&mut live);
     assert_eq!(reversed.direction, crate::Direction::Reverse);
     assert!(
@@ -1157,7 +1150,7 @@ fn direction_is_published_once_and_read_from_the_lent_control() {
     live.stream
         .direction_cell()
         .publish(crate::Direction::Forward);
-    let _ = live.streamer.step_once();
+    let _ = live.streamer.step();
     let back = lent(&mut live);
     assert_eq!(back.direction, crate::Direction::Forward);
     assert_eq!(back.map.epoch, reversed.map.epoch + 1);

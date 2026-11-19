@@ -12,9 +12,9 @@ use std::sync::Arc;
 use tutti_buffers::Interleaved;
 
 use tutti_buffers::Wave;
-use tutti_sampler::testing::{MockTransport, loop_frames, play, settle};
+use tutti_sampler::testing::{MockTransport, loop_frames, play, run_until_idle};
 use tutti_sampler::{
-    ByHand, Direction, DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, LoopError, MemorySource,
+    Direction, DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, LoopError, Manual, MemorySource,
     Placement, Playback, SlotId, Stream, VoiceNode, VoiceNodeHandle, VoicePool, VoiceSource,
     VoiceWindow,
 };
@@ -67,16 +67,16 @@ fn rolling() -> Arc<MockTransport> {
 fn streaming(
     dir: &Path,
 ) -> (
-    DiskStreamer<ByHand<f32>, f32>,
+    DiskStreamer<Manual<f32>, f32>,
     Stream<f32>,
     tutti_sampler::StreamReader<f32>,
 ) {
     let path = dir.join("ramp.wav");
     write_ramp(&path);
-    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let opening = streamer.open(&path, Placement::HEAD);
-    let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
     (streamer, stream, reader)
 }
 
@@ -166,7 +166,7 @@ fn a_looped_disk_voice_repeats_the_span() {
     handle
         .looping_cell()
         .publish(Some(loop_frames(300, 700, 0)));
-    let _ = streamer.step_until_settled(1_000);
+    let _ = streamer.step_until_idle(1_000);
     let got = render_with(&mut node, FRAMES);
     assert_frames("disk", &got, |n| looped_frame(n, 300, 700));
 }
@@ -203,7 +203,7 @@ fn a_disk_voice_added_to_a_pool_keeps_its_loop_and_direction() {
         handle
             .add_streaming(SlotId(1), voice, stream, play)
             .expect("the queue has room");
-        let _ = streamer.step_until_settled(1_000);
+        let _ = streamer.step_until_idle(1_000);
         let mut pool = tutti_sampler::testing::prepared(pool, RATE, BLOCK);
         let got = play_pool(&mut pool, &mut streamer);
         match direction {
@@ -229,14 +229,14 @@ fn a_disk_voice_added_to_a_pool_keeps_its_loop_and_direction() {
 
 /// `FRAMES` of `pool` from beat 0, the streamer stepped between blocks as a
 /// running one is, so a stream that turns or loops has its ring refilled.
-fn play_pool(pool: &mut VoicePool<f32>, streamer: &mut DiskStreamer<ByHand<f32>, f32>) -> Vec<f32> {
+fn play_pool(pool: &mut VoicePool<f32>, streamer: &mut DiskStreamer<Manual<f32>, f32>) -> Vec<f32> {
     let t = rolling();
     let mut out = Vec::new();
     while out.len() < FRAMES {
         let block = tutti_sampler::testing::block(pool, &t, RATE, BLOCK).swap_remove(0);
         out.extend(block);
         t.advance(BLOCK as i64, RATE);
-        let _ = streamer.step_until_settled(1_000);
+        let _ = streamer.step_until_idle(1_000);
     }
     out
 }

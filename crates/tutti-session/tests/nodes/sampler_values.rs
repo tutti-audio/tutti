@@ -264,7 +264,7 @@ struct Rig {
     s: Session,
     clip: tutti_session::Key<Clip<f32>>,
     handle: tutti_sampler::VoiceNodeHandle<f32>,
-    streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::ByHand<f32>, f32>>,
+    streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::Manual<f32>, f32>>,
     /// Frames rendered so far: the frame the next render starts at.
     at: usize,
     _dir: tempfile::TempDir,
@@ -279,11 +279,11 @@ impl Rig {
             let path = dir.path().join("ramp.wav");
             tutti_fixtures::signal::write_wav_f32(&path, SampleRate::of(RATE), 1, &samples);
             let mut streamer =
-                tutti_sampler::DiskStreamer::by_hand(SampleRate::of(RATE), Default::default())
+                tutti_sampler::DiskStreamer::manual(SampleRate::of(RATE), Default::default())
                     .expect("builds");
             let opening = streamer.open(&path, tutti_sampler::Placement::HEAD);
-            let (stream, reader) =
-                tutti_sampler::testing::settle(&mut streamer, opening).expect("the file opens");
+            let (stream, reader) = tutti_sampler::testing::run_until_idle(&mut streamer, opening)
+                .expect("the file opens");
             (Clip::streaming(reader, stream), Some(streamer))
         } else {
             let mut wave = Wave::new(1, SampleRate::of(RATE));
@@ -316,7 +316,7 @@ impl Rig {
     /// The streamer's work done: the ring holds what its cells ask for.
     fn settle(&mut self) {
         if let Some(streamer) = &mut self.streamer {
-            let _ = streamer.step_until_settled(1_000);
+            let _ = streamer.step_until_idle(1_000);
         }
     }
 

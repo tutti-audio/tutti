@@ -25,9 +25,9 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::FoldError;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract;
-use tutti_sampler::testing::{MockTransport, settle};
+use tutti_sampler::testing::{MockTransport, run_until_idle};
 use tutti_sampler::{
-    ByHand, Direction, DiskStreamer, DiskVoice, Loop, OpenError, PlaceError, Placement, Stream,
+    Direction, DiskStreamer, DiskVoice, Loop, Manual, OpenError, PlaceError, Placement, Stream,
     StreamReader,
 };
 use tutti_units::{Beat, Bpm, SampleRate};
@@ -82,21 +82,18 @@ fn open(
     path: &Path,
     width: Option<ChannelLayout>,
 ) -> (
-    DiskStreamer<ByHand<f32>, f32>,
+    DiskStreamer<Manual<f32>, f32>,
     Result<(Stream<f32>, StreamReader<f32>), OpenError>,
 ) {
     let mut streamer =
-        DiskStreamer::by_hand(SampleRate::of(SR), Default::default()).expect("builds");
+        DiskStreamer::manual(SampleRate::of(SR), Default::default()).expect("builds");
     let opening = match width {
         Some(width) => streamer.open_into(path, Placement::HEAD, width),
         None => streamer.open(path, Placement::HEAD),
     };
-    let reader = settle(&mut streamer, opening);
+    let reader = run_until_idle(&mut streamer, opening);
     if reader.is_ok() {
-        assert!(
-            streamer.step_until_settled(1_000) < 1_000,
-            "the ring primes"
-        );
+        assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     }
     (streamer, reader)
 }
@@ -104,7 +101,7 @@ fn open(
 /// A hand-stepped streamer and the handle of the stream it streams: both are
 /// held while the voice plays (dropping the handle ends the stream).
 struct Rig {
-    streamer: DiskStreamer<ByHand<f32>, f32>,
+    streamer: DiskStreamer<Manual<f32>, f32>,
     stream: Stream<f32>,
 }
 
@@ -230,12 +227,14 @@ fn a_five_one_file_into_a_five_wide_voice_is_refused() {
     );
     // Refused again, the same way: nothing the first refusal did changed it.
     let opening = streamer.open_into(&path, Placement::HEAD, ChannelLayout::from(5u16));
-    assert_eq!(settle(&mut streamer, opening).err(), refused);
+    assert_eq!(run_until_idle(&mut streamer, opening).err(), refused);
     let opening = streamer.open_into(&path, Placement::HEAD, ChannelLayout::STEREO);
-    let (_stereo_stream, stereo) = settle(&mut streamer, opening).expect("5.1 folds to stereo");
+    let (_stereo_stream, stereo) =
+        run_until_idle(&mut streamer, opening).expect("5.1 folds to stereo");
     assert_eq!(settled_block(voice_of(stereo)).len(), 2);
     let opening = streamer.open(&path, Placement::HEAD);
-    let (_own_stream, own) = settle(&mut streamer, opening).expect("and opens at its own width");
+    let (_own_stream, own) =
+        run_until_idle(&mut streamer, opening).expect("and opens at its own width");
     assert_eq!(settled_block(voice_of(own)).len(), 6);
 }
 
@@ -503,12 +502,12 @@ fn a_fork_places_every_read_path() {
             let (_dir, mut rig, reader) = stream_fixture(&f);
             if path == "looped" {
                 rig.stream.looping_cell().publish(loop_1000_3000());
-                assert!(rig.streamer.step_until_settled(1_000) < 1_000);
+                assert!(rig.streamer.step_until_idle(1_000) < 1_000);
             }
             let voice = voice_of(reader);
             if path == "reversed" {
                 rig.stream.direction_cell().publish(Direction::Reverse);
-                assert!(rig.streamer.step_until_settled(1_000) < 1_000);
+                assert!(rig.streamer.step_until_idle(1_000) < 1_000);
             }
             let mut node = fork(&voice);
             let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
@@ -536,7 +535,7 @@ fn a_fork_placed_read_is_allocation_free() {
             let (_dir, mut rig, reader) = stream_fixture(&f);
             if looped {
                 rig.stream.looping_cell().publish(loop_1000_3000());
-                assert!(rig.streamer.step_until_settled(1_000) < 1_000);
+                assert!(rig.streamer.step_until_idle(1_000) < 1_000);
             }
             let voice = voice_of(reader);
             let mut direct =
@@ -590,7 +589,7 @@ fn a_loop_edit_and_wrap_on_a_placed_stream_allocate_nothing() {
                 direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)))
             });
             clock.advance(BLOCK as i64, SampleRate::of(SR));
-            let _ = rig.streamer.step_once();
+            let _ = rig.streamer.step();
             if b >= 4 {
                 assert_near(
                     &lanes(&direct),
@@ -631,7 +630,7 @@ fn a_wide_file_at_its_own_width_is_allocation_free() {
             let (_dir, mut rig, reader) = stream(channels, mask);
             if looped {
                 rig.stream.looping_cell().publish(loop_1000_3000());
-                assert!(rig.streamer.step_until_settled(1_000) < 1_000);
+                assert!(rig.streamer.step_until_idle(1_000) < 1_000);
             }
             let voice = voice_of(reader);
             let mut direct = contract::Direct::new(voice, SampleRate::of(SR), BLOCK);

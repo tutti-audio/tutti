@@ -245,9 +245,10 @@ fn a_fork_closes_its_file_once_past_its_window() {
     }
     w.finalize().expect("writes");
     let mut streamer =
-        crate::DiskStreamer::by_hand(SampleRate::SR_48K, Default::default()).expect("builds");
+        crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
     let opening = streamer.open(&path, crate::Placement::HEAD);
-    let (_stream, reader) = crate::testing::settle(&mut streamer, opening).expect("the file opens");
+    let (_stream, reader) =
+        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
     // Beats [0, 1): 24 000 frames at 120 BPM.
     let voice = crate::DiskVoice::from_reader(
         reader,
@@ -295,9 +296,10 @@ fn a_fork_prepared_realtime_latches_instead_of_reading_its_file() {
     }
     w.finalize().expect("writes");
     let mut streamer =
-        crate::DiskStreamer::by_hand(SampleRate::SR_48K, Default::default()).expect("builds");
+        crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
     let opening = streamer.open(&path, crate::Placement::HEAD);
-    let (_stream, reader) = crate::testing::settle(&mut streamer, opening).expect("the file opens");
+    let (_stream, reader) =
+        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
     let voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     let clock = MockTransport::rolling(Beat::new(0.25), Bpm::of(120.0));
 
@@ -349,9 +351,10 @@ fn a_stopped_clock_silences_a_fork() {
     }
     w.finalize().expect("writes");
     let mut streamer =
-        crate::DiskStreamer::by_hand(SampleRate::SR_48K, Default::default()).expect("builds");
+        crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
     let opening = streamer.open(&path, crate::Placement::HEAD);
-    let (_stream, reader) = crate::testing::settle(&mut streamer, opening).expect("the file opens");
+    let (_stream, reader) =
+        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
     let voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
 
     for single in [false, true] {
@@ -1625,12 +1628,13 @@ fn streamer_fed(script: &Script, no_skip: bool) -> (Vec<Vec<u32>>, u64, usize) {
     }
     w.finalize().expect("finalize wav");
     let mut streamer =
-        DiskStreamer::<_, f32>::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
+        DiskStreamer::<_, f32>::manual(SampleRate::of(SR), DiskStreamerConfig::default())
             .expect("streamer builds");
     let opening = streamer.open(&path, crate::Placement::HEAD);
-    let (_stream, reader) = crate::testing::settle(&mut streamer, opening).expect("the file opens");
+    let (_stream, reader) =
+        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
     for _ in 0..4096 {
-        if streamer.step_once() != StepOutcome::Busy {
+        if streamer.step() != StepOutcome::Busy {
             break;
         }
     }
@@ -1667,7 +1671,7 @@ fn streamer_fed(script: &Script, no_skip: bool) -> (Vec<Vec<u32>>, u64, usize) {
             if rolling {
                 t.advance(BLOCK as i64, SampleRate::of(SR));
             }
-            streamer.step_once();
+            streamer.step();
         }
     }
     let underruns = voice.shared_state.take_underruns();

@@ -22,7 +22,7 @@ use super::decode::Seams;
 use super::status::StreamPhase;
 use super::thread::Built;
 use super::*;
-use crate::testing::settle_threaded;
+use crate::testing::run_until_idle_threaded;
 
 /// A session and file rate low enough that a 40 s file is 160 000 frames and
 /// its ring (30 s) is 120 000: smaller than the file, so the window can fall
@@ -73,7 +73,8 @@ fn primed(
     u64,
 ) {
     let (streamer, bell) = parked_streamer(Seams::default());
-    let (stream, reader) = settle_threaded(streamer.open(path, Placement::HEAD)).expect("opens");
+    let (stream, reader) =
+        run_until_idle_threaded(streamer.open(path, Placement::HEAD)).expect("opens");
     assert!(
         until(BOUND, || stream.status().phase != StreamPhase::Opening),
         "the stream never primed"
@@ -105,7 +106,7 @@ fn an_open_wakes_a_sleeping_streamer() {
     let path = long_file(dir.path());
     let (streamer, bell) = parked_streamer(Seams::default());
     until_asleep(&bell);
-    let _ = settle_threaded(streamer.open(&path, Placement::HEAD)).expect("opens");
+    let _ = run_until_idle_threaded(streamer.open(&path, Placement::HEAD)).expect("opens");
 }
 
 /// **A ring below its refill threshold wakes a sleeping streamer**: the
@@ -195,7 +196,7 @@ fn a_decode_reply_wakes_a_sleeping_streamer() {
     );
     until_asleep(&bell);
     gate.release();
-    let _ = settle_threaded(opening).expect("opens");
+    let _ = run_until_idle_threaded(opening).expect("opens");
 }
 
 /// **A voice's ring is allocation-free and wait-free on the audio thread**: a

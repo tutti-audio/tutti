@@ -13,9 +13,9 @@ use std::sync::Arc;
 use tutti_buffers::Wave;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Prepare, Solo, TransportPosition};
-use tutti_sampler::testing::settle;
+use tutti_sampler::testing::run_until_idle;
 use tutti_sampler::{
-    ByHand, Direction, DiskStreamer, DiskVoice, MemorySource, MemorySourceConfig, Placement,
+    Direction, DiskStreamer, DiskVoice, Manual, MemorySource, MemorySourceConfig, Placement,
     Playback, SlotId, Voice, VoiceNode, VoicePool, VoiceSource, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -176,7 +176,7 @@ fn a_reversed_memory_voice_in_an_f64_graph_reads_the_mirrored_frames() {
 /// running one is, so a ring that turned has its refill.
 fn render_stepped<C>(
     solo: &mut Solo<C, f64>,
-    streamer: &mut DiskStreamer<ByHand<f64>, f64>,
+    streamer: &mut DiskStreamer<Manual<f64>, f64>,
     frames: usize,
 ) -> Vec<Vec<f64>> {
     let mut out = vec![Vec::new(); 2];
@@ -184,7 +184,7 @@ fn render_stepped<C>(
         for (lane, block) in out.iter_mut().zip(solo.render(BLOCK)) {
             lane.extend(block);
         }
-        let _ = streamer.step_until_settled(1_000);
+        let _ = streamer.step_until_idle(1_000);
     }
     out
 }
@@ -195,19 +195,19 @@ fn disk(
     path: &Path,
     direction: Direction,
 ) -> (
-    DiskStreamer<ByHand<f64>, f64>,
+    DiskStreamer<Manual<f64>, f64>,
     tutti_sampler::Stream<f64>,
     DiskVoice<f64>,
 ) {
     let mut streamer =
-        DiskStreamer::<ByHand<f64>, f64>::by_hand(SampleRate::of(RATE), Default::default())
+        DiskStreamer::<Manual<f64>, f64>::manual(SampleRate::of(RATE), Default::default())
             .expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
-    let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
     if direction == Direction::Reverse {
         stream.direction_cell().publish(direction);
         assert!(
-            streamer.step_until_settled(1_000) < 1_000,
+            streamer.step_until_idle(1_000) < 1_000,
             "the ring follows the direction"
         );
     }
@@ -263,10 +263,10 @@ fn a_streamed_node_in_an_f64_graph_plays_the_files_values() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = write_file(dir.path());
     let mut streamer =
-        DiskStreamer::<ByHand<f64>, f64>::by_hand(SampleRate::of(RATE), Default::default())
+        DiskStreamer::<Manual<f64>, f64>::manual(SampleRate::of(RATE), Default::default())
             .expect("builds");
     let opening = streamer.open(&path, Placement::HEAD);
-    let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     let node = VoiceNode::streaming(voice, stream, Playback::default());
     let mut solo = Solo::<_, f64>::new(node, prepare());

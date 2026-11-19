@@ -431,7 +431,7 @@ struct Page<F> {
 }
 
 impl<F> Page<F> {
-    fn holds(&self, frame: usize) -> bool {
+    fn contains(&self, frame: usize) -> bool {
         frame >= self.start && frame < self.start + self.frames
     }
 }
@@ -479,7 +479,7 @@ impl<F: Float> Pages<F> {
     /// Frame `at` (`< len`), interleaved at the file's width, paging it in if
     /// neither resident page holds it.
     fn frame(&mut self, at: usize) -> &[F] {
-        let slot = match self.slots.iter().position(|page| page.holds(at)) {
+        let slot = match self.slots.iter().position(|page| page.contains(at)) {
             Some(slot) => slot,
             None => {
                 // Behind the page read last: the read is going backward.

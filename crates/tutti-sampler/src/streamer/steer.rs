@@ -1,4 +1,4 @@
-//! [`SteerCell`], a published value the control side asks the streamer for.
+//! [`ControlCell`], a published value the control side asks the streamer for.
 
 use std::sync::Arc;
 
@@ -16,13 +16,13 @@ use super::bell::Bell;
 /// The control side publishes and reclaims ([`reclaim`](Self::reclaim), from a
 /// tick it already has); every reader is lent the value once per block or
 /// cycle.
-pub struct SteerCell<T> {
+pub struct ControlCell<T> {
     cell: Publisher<T>,
     /// The streamer to wake after a publish; `None` for a resident voice's.
     bell: Option<Arc<Bell>>,
 }
 
-impl<T> SteerCell<T> {
+impl<T> ControlCell<T> {
     /// A cell holding `value`, wired to no streamer: a publish rings nothing.
     /// Only a stream's own cells ring its streamer.
     #[must_use]
@@ -74,7 +74,7 @@ impl<T> SteerCell<T> {
     }
 }
 
-impl<T> Clone for SteerCell<T> {
+impl<T> Clone for ControlCell<T> {
     fn clone(&self) -> Self {
         Self {
             cell: self.cell.clone(),
@@ -83,9 +83,9 @@ impl<T> Clone for SteerCell<T> {
     }
 }
 
-impl<T: std::fmt::Debug> std::fmt::Debug for SteerCell<T> {
+impl<T: std::fmt::Debug> std::fmt::Debug for ControlCell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SteerCell")
+        f.debug_struct("ControlCell")
             .field("cell", &self.cell)
             .field("wakes_streamer", &self.bell.is_some())
             .finish()
@@ -103,8 +103,8 @@ mod tests {
     #[test]
     fn a_publish_to_a_streamed_cell_wakes_the_streamer() {
         let (bell, _parker) = Bell::new();
-        let streamed = SteerCell::ringing(0u8, Arc::clone(&bell));
-        let resident = SteerCell::new(0u8);
+        let streamed = ControlCell::ringing(0u8, Arc::clone(&bell));
+        let resident = ControlCell::new(0u8);
         assert!(!bell.has_work());
         resident.publish(1);
         assert!(!bell.has_work(), "a resident voice's cell rings nothing");

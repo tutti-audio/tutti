@@ -8,7 +8,7 @@ use tutti_units::{Beat, Bpm, SamplePosition};
 use crate::streamer::StreamerPort;
 
 use super::*;
-use crate::testing::{MockTransport, play, prepared, settle};
+use crate::testing::{MockTransport, play, prepared, run_until_idle};
 use crate::{DiskStreamer, DiskVoice};
 
 const RATE: f64 = 48_000.0;
@@ -30,8 +30,8 @@ fn write_constant(path: &Path, value: f32, frames: usize) {
     w.finalize().expect("writes");
 }
 
-fn manual() -> DiskStreamer<crate::ByHand<f32>, f32> {
-    DiskStreamer::by_hand(SampleRate::of(RATE), Default::default()).expect("builds")
+fn manual() -> DiskStreamer<crate::Manual<f32>, f32> {
+    DiskStreamer::manual(SampleRate::of(RATE), Default::default()).expect("builds")
 }
 
 /// A file of `value` in a temp dir.
@@ -79,11 +79,11 @@ fn a_fractional_start_opens_at_its_frame() {
     let start = Placement::new(SamplePosition::new(4_000.7)).expect("a position");
     assert_eq!(start.frame(), 4_000);
     let opening = streamer.open(&path, start);
-    let (_stream, reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (_stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
     assert_eq!(reader.ring.play(), 4_000);
 }
 
-/// Before the streamer has run, an open is `Pending` and hands the `Opening`
+/// Before the streamer has run, an open is `Pending` and hands the `PendingOpen`
 /// back; after it has, the poll is `Ready`. The reader is the reply: there is
 /// nothing to poll for that was not asked for.
 #[test]
@@ -99,7 +99,7 @@ fn an_open_is_pending_until_the_streamer_answers() {
             other => panic!("answered before the streamer ran: {other:?}"),
         }
     };
-    let _ = streamer.step_once();
+    let _ = streamer.step();
     let Open::Ready(stream, reader) = opening.poll() else {
         panic!("the streamer ran and did not answer");
     };
@@ -116,7 +116,7 @@ fn a_ready_reader_has_registered_its_control_before_it_is_returned() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (_stream, reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (_stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
     assert_eq!(
         reader.ring.registered_readers(),
         1,
@@ -141,7 +141,7 @@ fn a_missing_file_fails_with_io() {
     let mut streamer = manual();
     let opening = streamer.open(&dir.path().join("nothing.wav"), Placement::HEAD);
     assert_eq!(
-        settle(&mut streamer, opening).err(),
+        run_until_idle(&mut streamer, opening).err(),
         Some(OpenError::Io(std::io::ErrorKind::NotFound))
     );
 }
@@ -156,7 +156,7 @@ fn a_file_that_is_not_audio_fails_with_format() {
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
     assert_eq!(
-        settle(&mut streamer, opening).err(),
+        run_until_idle(&mut streamer, opening).err(),
         Some(OpenError::Format)
     );
 }
@@ -183,7 +183,7 @@ fn an_open_on_a_gone_streamer_fails_with_streamer_gone() {
     panic!("a gone streamer left an open pending");
 }
 
-/// A caller that drops its `Opening` abandons the open: the streamer that
+/// A caller that drops its `PendingOpen` abandons the open: the streamer that
 /// answers into nobody closes the stream it opened, and keeps no record or
 /// region for it.
 #[test]
@@ -191,7 +191,7 @@ fn an_abandoned_open_is_closed() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     drop(streamer.open(&path, Placement::HEAD));
-    let _ = streamer.step_once();
+    let _ = streamer.step();
     assert!(
         streamer.driver.open_streams() == 0,
         "the streamer kept a stream nobody can read"
@@ -199,12 +199,12 @@ fn an_abandoned_open_is_closed() {
 }
 
 /// Two opens, the second made before
-/// the streamer has run for the first: each `Opening` yields the reader of its
+/// the streamer has run for the first: each `PendingOpen` yields the reader of its
 /// own open, the first is not the second, each plays its own file, and the
 /// first ring is not freed (it is fed) while its stream is open and is freed
 /// when its stream closes.
 ///
-/// How it passes: each `Opening` owns its own reply cell, written once by the
+/// How it passes: each `PendingOpen` owns its own reply cell, written once by the
 /// streamer for that open's id, so `A.poll` can only return A's reader.
 #[test]
 fn two_opens_each_yield_the_reader_of_their_own_stream() {
@@ -224,7 +224,7 @@ fn two_opens_each_yield_the_reader_of_their_own_stream() {
         panic!("answered before the streamer ran");
     };
 
-    let _ = streamer.step_until_settled(1_000);
+    let _ = streamer.step_until_idle(1_000);
     let Open::Ready(stream_a, a) = first.poll() else {
         panic!("the first open was not answered");
     };
@@ -260,7 +260,7 @@ fn two_opens_each_yield_the_reader_of_their_own_stream() {
     // it, and the streamer holds it until the stream closes.
     assert!(ring_a.upgrade().is_some(), "the first ring was freed early");
     drop(stream_a);
-    let _ = streamer.step_once();
+    let _ = streamer.step();
     assert!(
         ring_a.upgrade().is_none(),
         "the first ring outlived its stream"
@@ -276,21 +276,21 @@ fn a_loop_set_through_one_stream_leaves_the_other_unchanged() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (a, reader_a) = settle(&mut streamer, opening).expect("the file opens");
+    let (a, reader_a) = run_until_idle(&mut streamer, opening).expect("the file opens");
     let opening = streamer.open(&path, Placement::HEAD);
-    let (b, reader_b) = settle(&mut streamer, opening).expect("the file opens");
+    let (b, reader_b) = run_until_idle(&mut streamer, opening).expect("the file opens");
     let loop_of = |reader: &StreamReader<f32>| reader.ring.applied().loop_;
     let looped = |start, end| Some(loop_frames(start, end, 0));
 
     // B is opened second, so a command that went to "the newest" or to "the
     // first" would be A's or B's by accident; both directions are checked.
     a.looping_cell().publish(looped(1_000, 3_000));
-    let _ = streamer.step_until_settled(1_000);
+    let _ = streamer.step_until_idle(1_000);
     assert_eq!(loop_of(&reader_a), looped(1_000, 3_000));
     assert_eq!(loop_of(&reader_b), None, "B was not asked");
 
     b.looping_cell().publish(looped(500, 900));
-    let _ = streamer.step_until_settled(1_000);
+    let _ = streamer.step_until_idle(1_000);
     assert_eq!(loop_of(&reader_b), looped(500, 900));
     assert_eq!(loop_of(&reader_a), looped(1_000, 3_000), "A is as it was");
 }
@@ -306,14 +306,14 @@ fn a_stopped_streams_handle_commands_nothing() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (stopped, reader_a) = settle(&mut streamer, opening).expect("the file opens");
+    let (stopped, reader_a) = run_until_idle(&mut streamer, opening).expect("the file opens");
     let id_a = stopped.id();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (_b, reader_b) = settle(&mut streamer, opening).expect("the file opens");
+    let (_b, reader_b) = run_until_idle(&mut streamer, opening).expect("the file opens");
 
     drop(stopped);
     drop(reader_a);
-    let _ = streamer.step_once();
+    let _ = streamer.step();
     assert_eq!(streamer.driver.open_streams(), 1, "A is closed, B is open");
 
     // The handle of the stream that is gone: what a late command still
@@ -322,7 +322,7 @@ fn a_stopped_streams_handle_commands_nothing() {
     ghost
         .looping_cell()
         .publish(Some(loop_frames(1_000, 3_000, 0)));
-    let _ = streamer.step_until_settled(1_000);
+    let _ = streamer.step_until_idle(1_000);
     assert_eq!(
         reader_b.ring.applied().loop_,
         None,
@@ -330,7 +330,7 @@ fn a_stopped_streams_handle_commands_nothing() {
     );
     assert_eq!(streamer.driver.open_streams(), 1);
     drop(ghost);
-    let _ = streamer.step_once();
+    let _ = streamer.step();
     assert_eq!(
         streamer.driver.open_streams(),
         1,
@@ -374,8 +374,8 @@ fn i32_file() -> (tempfile::TempDir, PathBuf) {
 }
 
 /// A hand-stepped `f64` streamer.
-fn manual_f64() -> DiskStreamer<crate::ByHand<f64>, f64> {
-    DiskStreamer::<crate::ByHand<f64>, f64>::by_hand(SampleRate::of(RATE), Default::default())
+fn manual_f64() -> DiskStreamer<crate::Manual<f64>, f64> {
+    DiskStreamer::<crate::Manual<f64>, f64>::manual(SampleRate::of(RATE), Default::default())
         .expect("builds")
 }
 
@@ -388,13 +388,13 @@ fn an_f64_stream_reads_back_the_files_values_exactly() {
     let (_dir, path) = i32_file();
     let mut streamer = manual_f64();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (_stream, mut reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (_stream, mut reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
 
     let whole = Samples::new(0)..Samples::new(I32_FRAMES);
     let none = Samples::new(0)..Samples::new(0);
     let block = reader.block(Samples::new(0), [whole, none]);
     for i in 0..I32_FRAMES {
-        assert!(block.holds(i as u64), "frame {i} is in the window");
+        assert!(block.contains(i as u64), "frame {i} is in the window");
         let frame = block.frame(i as u64);
         assert_eq!(
             frame.get(0),
@@ -422,11 +422,11 @@ fn an_f64_stream_writes_a_loop_by_position() {
     let (_dir, path) = i32_file();
     let mut streamer = manual_f64();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (stream, mut reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (stream, mut reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
     stream
         .looping_cell()
         .publish(Some(loop_frames(1_000, 1_500, 0)));
-    let _ = streamer.step_until_settled(1_000);
+    let _ = streamer.step_until_idle(1_000);
 
     let play = 1_600usize;
     let reads = [
@@ -436,7 +436,7 @@ fn an_f64_stream_writes_a_loop_by_position() {
     let block = reader.block(Samples::new(play), reads);
     for k in 0..100 {
         let at = (play + k) as u64;
-        assert!(block.holds(at), "position {at} is in the window");
+        assert!(block.contains(at), "position {at} is in the window");
         let file_frame = 1_000 + (play + k - 1_000) % 500;
         assert_eq!(
             block.frame(at).get(0),

@@ -27,7 +27,7 @@ use super::open::{OpenError, Opened};
 use super::prefetch::RegionBuffer;
 use super::record::{Cmd, Record, Streams, step};
 use super::status::StatusCell;
-use super::steer::SteerCell;
+use super::steer::ControlCell;
 use crate::Loop;
 use crate::nonempty;
 use crate::voice::Direction;
@@ -262,7 +262,7 @@ fn begin<F: RingFloat>(
 /// else is built here, now. The stream is a record in the table from the
 /// moment it is built ([`Phase::Opening`](super::record::Phase)) and goes live
 /// before its reply is sent, so a handle never reads `Opening`. A caller that
-/// dropped its `Opening` before the answer abandoned the open, so the stream
+/// dropped its `PendingOpen` before the answer abandoned the open, so the stream
 /// is closed again rather than fed for nobody.
 ///
 /// The probe and the build run under `catch_unwind`: a decoder that panics on
@@ -438,8 +438,8 @@ fn build_stream<F: RingFloat>(
     let control = ring.control_cell();
     // The loop and direction the control side asks for: the record reads
     // them, the stream's handle (and the voice node, for a node) publishes.
-    let looping = SteerCell::ringing(None::<Loop>, Arc::clone(&shared.bell));
-    let direction = SteerCell::ringing(Direction::Forward, Arc::clone(&shared.bell));
+    let looping = ControlCell::ringing(None::<Loop>, Arc::clone(&shared.bell));
+    let direction = ControlCell::ringing(Direction::Forward, Arc::clone(&shared.bell));
     let record = Record::new(
         producer,
         Arc::clone(&cells),

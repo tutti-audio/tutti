@@ -7,7 +7,7 @@
 //! | Source | Rung by |
 //! |---|---|
 //! | a command (open, close, session rate) | [`StreamerSender::send`], after the push |
-//! | a loop or direction a stream's control side publishes | [`SteerCell::publish`](super::steer::SteerCell::publish), through [`Bell::ring_steer`] |
+//! | a loop or direction a stream's control side publishes | [`ControlCell::publish`](super::steer::ControlCell::publish), through [`Bell::ring_steer`] |
 //! | the decode lane's answer to an open | the same send (the lane holds a `StreamerSender`) |
 //! | a voice's ring below its refill threshold, or a jump outside the window | [`Bell::ring_refill`], from the audio thread (`RingReader::block`, through [`needs_refill`](super::io::refill::needs_refill)) |
 //! | shutdown | [`Bell::shut`] |

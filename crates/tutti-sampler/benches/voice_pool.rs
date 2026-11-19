@@ -34,7 +34,7 @@ use tutti_buffers::Wave;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
-    ByHand, DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, MemorySource, Open, Placement,
+    DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, Manual, MemorySource, Open, Placement,
     Playback, SlotId, StepOutcome, Stream, Voice, VoiceNode, VoicePool, VoicePoolHandle,
     VoiceSource,
 };
@@ -227,7 +227,7 @@ struct Pool64 {
     rig: Rig,
     /// Keeps the disk tier's streamer and the handle that owns its streams (and
     /// so their rings) alive.
-    _streamer: Option<(DiskStreamer<ByHand<f32>, f32>, VoicePoolHandle<f32>)>,
+    _streamer: Option<(DiskStreamer<Manual<f32>, f32>, VoicePoolHandle<f32>)>,
     _dir: tempfile::TempDir,
 }
 
@@ -326,11 +326,11 @@ fn pool_knobs(
                 }
             }
             w.finalize().expect("finalize wav");
-            let mut s = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
+            let mut s = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
                 .expect("streamer builds");
             let openings: Vec<_> = (0..n).map(|_| s.open(&path, Placement::HEAD)).collect();
             for _ in 0..4096 {
-                if s.step_once() != StepOutcome::Busy {
+                if s.step() != StepOutcome::Busy {
                     break;
                 }
             }

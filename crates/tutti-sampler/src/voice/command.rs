@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use crate::streamer::{SteerCell, Stream, StreamId};
+use crate::streamer::{ControlCell, Stream, StreamId};
 use crate::stretch;
 
 use super::disk_voice::DiskVoice;
@@ -331,7 +331,7 @@ pub enum PlayError {
 
 /// Publishes `value` to `cell` when it differs from the one in it: the
 /// request a stream's streamer reads.
-pub(super) fn ask<T: Copy + PartialEq>(cell: &SteerCell<T>, value: T) {
+pub(super) fn ask<T: Copy + PartialEq>(cell: &ControlCell<T>, value: T) {
     if *cell.current() != value {
         cell.publish(value);
     }
@@ -451,9 +451,9 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
     pub(crate) window: Publisher<Option<VoiceWindow>>,
     /// The voice's loop. A streamed voice's is its [`Stream`]'s cell, which the
     /// streamer reads too; a memory voice's is read by the node alone.
-    pub(crate) looping: SteerCell<Option<Loop>>,
+    pub(crate) looping: ControlCell<Option<Loop>>,
     /// The voice's direction, held as the loop is.
-    pub(crate) direction: SteerCell<Direction>,
+    pub(crate) direction: ControlCell<Direction>,
     /// The voice's varispeed: the cell the node reads once per block, on
     /// either tier (a streamed voice's node writes it into the stream's
     /// playback cells).
@@ -500,8 +500,8 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
     pub(crate) fn new(
         steering: SteeringCell,
         window: Publisher<Option<VoiceWindow>>,
-        looping: SteerCell<Option<Loop>>,
-        direction: SteerCell<Direction>,
+        looping: ControlCell<Option<Loop>>,
+        direction: ControlCell<Direction>,
         speed: Publisher<PlaybackRate>,
         gain: Param<Amplitude>,
         params: ParamSet,
@@ -559,13 +559,13 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
     /// ([`Stream::looping_cell`]), which the streamer reads and applies to the
     /// ring's layout, which the node reads. The session writes it
     /// (`sampler.looping()`); a host driving a node by hand publishes into it.
-    pub fn looping_cell(&self) -> &SteerCell<Option<Loop>> {
+    pub fn looping_cell(&self) -> &ControlCell<Option<Loop>> {
         &self.looping
     }
 
     /// The cell holding the voice's direction, held as the
     /// [loop](Self::looping_cell) is.
-    pub fn direction_cell(&self) -> &SteerCell<Direction> {
+    pub fn direction_cell(&self) -> &ControlCell<Direction> {
         &self.direction
     }
 
