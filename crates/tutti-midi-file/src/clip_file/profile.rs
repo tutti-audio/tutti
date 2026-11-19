@@ -2,7 +2,7 @@
 //! (M2-116 section 6.2) as SysEx7 packets: the framing only, the message is
 //! [`ProfileOnRequest`]'s.
 
-use tutti_midi_device::{NotSetProfileOn, ProfileOnRequest};
+use tutti_midi_ci::{NotSetProfileOn, ProfileOnRequest};
 use tutti_ump::{Message, MidiGroup, SysexStatus, Ump};
 
 /// `request` as the packets a header holds it in, on the first Group.

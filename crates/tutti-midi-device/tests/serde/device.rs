@@ -1,6 +1,7 @@
+use tutti_midi_ci::ProductInstanceId;
 use tutti_midi_device::{
     DeviceEvent, DeviceInfo, DeviceTable, EndpointId, Identity, OsChange, OsDevice, PortDirection,
-    ProductInstanceId, Resolved, WinMmDevice,
+    Resolved, WinMmDevice,
 };
 
 fn listed(identity: Identity, count: u64) -> (DeviceTable, Vec<DeviceInfo>) {

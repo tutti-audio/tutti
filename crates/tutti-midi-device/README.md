@@ -1,8 +1,8 @@
 # tutti-midi-device
 
-This crate holds the logic for keeping track of MIDI devices and for MIDI-CI, the MIDI 2.0 way for devices to discover each other and agree on profiles.
+This crate holds the logic for keeping track of MIDI devices and the UMP Endpoints they declare.
 
-It does no input or output itself: it takes in what the operating system reports and says what changed. It needs only `tutti-ump` and `tutti-units` of tutti's crates, so you can use it on its own.
+It does no input or output itself: it takes in what the operating system reports and says what changed. It needs only `tutti-midi-ci`, `tutti-ump` and `tutti-units` of tutti's crates, so you can use it on its own.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

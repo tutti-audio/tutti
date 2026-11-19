@@ -69,7 +69,7 @@
 //!   rule of sections 3.2 to 7.3 is one [`ClipFileError`] variant, read with the word it was found at ([`ReadError::Clip`]). A header Set
 //!   Tempo is the tempo from the sequence's first tick. The header's leading Set
 //!   Profile On messages are read typed as
-//!   [`ProfileOnRequest`](tutti_midi_device::ProfileOnRequest)s
+//!   [`ProfileOnRequest`](tutti_midi_ci::ProfileOnRequest)s
 //!   ([`Track::profiles`]) and written with [`Track::profile_on`]; one that does
 //!   not read is refused with [`ClipFileError::ProfileOn`].
 //! - **A clip's first bar starts at Start of Clip**, tick 0 of the sequence. A

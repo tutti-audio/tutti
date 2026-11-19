@@ -158,8 +158,8 @@ tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::sort
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
 
-# tutti-midi-device
-tutti-midi-device  range-macro  crates/tutti-midi-device/src/ci/pe/limits.rs::text_type
+# tutti-midi-ci
+tutti-midi-ci  range-macro  crates/tutti-midi-ci/src/pe/limits.rs::text_type
 
 # tutti-midi-file
 tutti-midi-file  chain-result  crates/tutti-midi-file/src/file.rs::Track::push

@@ -18,7 +18,7 @@
 use tutti_ump::DeviceIdentity;
 
 use crate::id::DeviceInfo;
-use crate::name::ProductInstanceId;
+use tutti_midi_ci::ProductInstanceId;
 
 /// Holds what a device has said about itself so far: either field is `None`
 /// until a message carries it.

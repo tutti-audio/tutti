@@ -1,9 +1,11 @@
 use std::time::Instant;
 
-use tutti_midi_device::{
-    CI_VERSION, Capabilities, CiMessage, Decoded, Endpoint, Initiator, Muid, ProfileChannels,
-    ProfileId, ProfileInitiator, ProfileTarget, Supports,
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
+    CI_VERSION, CiMessage, Decoded, Initiator, ProfileChannels, ProfileId, ProfileInitiator,
+    ProfileTarget,
 };
+use tutti_midi_device::{Capabilities, Endpoint, Supports};
 use tutti_ump::{FunctionBlockId, GroupSpan, MidiChannel};
 
 use super::*;

@@ -8,13 +8,12 @@
 //! payload split).
 //!
 //! This asserts the whole promotion chain: a Discovery encoded by
-//! `tutti_midi_device::CiMessage`, framed with `tutti_ump::frame` into the MIDI
+//! `tutti_midi_ci::CiMessage`, framed with `tutti_ump::frame` into the MIDI
 //! 1.0 byte stream, `Midi1Parser`, UMP SysEx7 packets, `SysexAssembler`, a typed
 //! `CiMessage` equal to the one sent.
 
-use tutti_midi_device::{
-    CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize, Muid,
-};
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize};
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
     DeviceIdentity, Message, Midi1Parser, MidiGroup, SoftwareRevision, SysexAssembler, SysexStep,

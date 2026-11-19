@@ -6,6 +6,4 @@
 mod device;
 mod endpoint;
 mod learned;
-mod media_type;
 mod product_id;
-mod saved_state;
