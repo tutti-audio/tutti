@@ -419,7 +419,7 @@ mod tests {
             DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default()).unwrap();
         let opening = sampler.open(&path, Placement::HEAD);
         let (stream, reader) =
-            crate::testing::run_until_idle(&mut sampler, opening).expect("the file opens");
+            crate::testing::wait_for_open(&mut sampler, opening).expect("the file opens");
         for fade in [0usize, 500] {
             stream
                 .looping_cell()
@@ -476,7 +476,7 @@ mod tests {
         let mut sampler = DiskStreamer::manual(SampleRate::SR_44K1, Default::default()).unwrap();
         let stream = |sampler: &mut DiskStreamer<Manual<f32>, f32>, path: &std::path::Path| {
             let opening = sampler.open(path, Placement::HEAD);
-            crate::testing::run_until_idle(sampler, opening).expect("the file opens")
+            crate::testing::wait_for_open(sampler, opening).expect("the file opens")
         };
 
         let (_first_stream, first) = stream(&mut sampler, &at_48);
@@ -535,7 +535,7 @@ mod tests {
             DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default()).unwrap();
         let opening = sampler.open(&path, Placement::HEAD);
         let (stream, reader) =
-            crate::testing::run_until_idle(&mut sampler, opening).expect("the file opens");
+            crate::testing::wait_for_open(&mut sampler, opening).expect("the file opens");
         let ring = Arc::downgrade(&reader.ring);
         drop(reader);
         assert!(ring.upgrade().is_some(), "setup: the writer holds the ring");

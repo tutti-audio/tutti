@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tutti_buffers::Interleaved;
 
 use tutti_buffers::Wave;
-use tutti_sampler::testing::{MockTransport, loop_frames, play, run_until_idle};
+use tutti_sampler::testing::{MockTransport, loop_frames, play, wait_for_open};
 use tutti_sampler::{
     Direction, DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, LoopError, Manual, MemorySource,
     Placement, Playback, SlotId, Stream, VoiceNode, VoiceNodeHandle, VoicePool, VoiceSource,
@@ -76,7 +76,7 @@ fn streaming(
     let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let opening = streamer.open(&path, Placement::HEAD);
-    let (stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     (streamer, stream, reader)
 }
 

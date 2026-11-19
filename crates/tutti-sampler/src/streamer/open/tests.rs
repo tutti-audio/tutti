@@ -8,7 +8,7 @@ use tutti_units::{Beat, Bpm, SamplePosition};
 use crate::streamer::StreamerPort;
 
 use super::*;
-use crate::testing::{MockTransport, play, prepared, run_until_idle};
+use crate::testing::{MockTransport, play, prepared, wait_for_open};
 use crate::{DiskStreamer, DiskVoice};
 
 const RATE: f64 = 48_000.0;
@@ -79,7 +79,7 @@ fn a_fractional_start_opens_at_its_frame() {
     let start = Placement::new(SamplePosition::new(4_000.7)).expect("a position");
     assert_eq!(start.frame(), 4_000);
     let opening = streamer.open(&path, start);
-    let (_stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (_stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     assert_eq!(reader.ring.play(), 4_000);
 }
 
@@ -116,7 +116,7 @@ fn a_ready_reader_has_registered_its_control_before_it_is_returned() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (_stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (_stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     assert_eq!(
         reader.ring.registered_readers(),
         1,
@@ -141,7 +141,7 @@ fn a_missing_file_fails_with_io() {
     let mut streamer = manual();
     let opening = streamer.open(&dir.path().join("nothing.wav"), Placement::HEAD);
     assert_eq!(
-        run_until_idle(&mut streamer, opening).err(),
+        wait_for_open(&mut streamer, opening).err(),
         Some(OpenError::Io(std::io::ErrorKind::NotFound))
     );
 }
@@ -156,7 +156,7 @@ fn a_file_that_is_not_audio_fails_with_format() {
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
     assert_eq!(
-        run_until_idle(&mut streamer, opening).err(),
+        wait_for_open(&mut streamer, opening).err(),
         Some(OpenError::Format)
     );
 }
@@ -276,9 +276,9 @@ fn a_loop_set_through_one_stream_leaves_the_other_unchanged() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (a, reader_a) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (a, reader_a) = wait_for_open(&mut streamer, opening).expect("the file opens");
     let opening = streamer.open(&path, Placement::HEAD);
-    let (b, reader_b) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (b, reader_b) = wait_for_open(&mut streamer, opening).expect("the file opens");
     let loop_of = |reader: &StreamReader<f32>| reader.ring.applied().loop_;
     let looped = |start, end| Some(loop_frames(start, end, 0));
 
@@ -306,10 +306,10 @@ fn a_stopped_streams_handle_commands_nothing() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (stopped, reader_a) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (stopped, reader_a) = wait_for_open(&mut streamer, opening).expect("the file opens");
     let id_a = stopped.id();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (_b, reader_b) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (_b, reader_b) = wait_for_open(&mut streamer, opening).expect("the file opens");
 
     drop(stopped);
     drop(reader_a);
@@ -388,7 +388,7 @@ fn an_f64_stream_reads_back_the_files_values_exactly() {
     let (_dir, path) = i32_file();
     let mut streamer = manual_f64();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (_stream, mut reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (_stream, mut reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
 
     let whole = Samples::new(0)..Samples::new(I32_FRAMES);
     let none = Samples::new(0)..Samples::new(0);
@@ -422,7 +422,7 @@ fn an_f64_stream_writes_a_loop_by_position() {
     let (_dir, path) = i32_file();
     let mut streamer = manual_f64();
     let opening = streamer.open(&path, Placement::HEAD);
-    let (stream, mut reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (stream, mut reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     stream
         .looping_cell()
         .publish(Some(loop_frames(1_000, 1_500, 0)));

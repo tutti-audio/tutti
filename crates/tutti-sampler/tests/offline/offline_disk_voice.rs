@@ -24,7 +24,7 @@ use tutti_buffers::MaxBlock;
 
 use tutti_graph::{Env, ForkHealth, ForkMode, IntoNode, Node, Prepare, TransportChanges, contract};
 use tutti_music::{FrameClock, LoopRange};
-use tutti_sampler::testing::run_until_idle;
+use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
     DiskStreamer, DiskVoice, Loop, Manual, Placement, Playback, Stream, StreamReader, Voice,
     VoiceNode, VoiceSource,
@@ -76,7 +76,7 @@ fn streamer_with(
 ) -> (Rig, StreamReader<f32>) {
     let mut streamer = DiskStreamer::manual(SampleRate::of(SR), config).expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
-    let (stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     (Rig { streamer, stream }, reader)
 }
 
@@ -738,7 +738,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
             write_ramp(&other, SR as u32, 1_000);
             let opening = rig.streamer.open(&other, Placement::HEAD);
             let (second, second_reader) =
-                run_until_idle(&mut rig.streamer, opening).expect("the file opens");
+                wait_for_open(&mut rig.streamer, opening).expect("the file opens");
             second
                 .looping_cell()
                 .publish(Some(loop_frames(500, 900, 100)));

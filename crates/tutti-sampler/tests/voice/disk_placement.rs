@@ -25,7 +25,7 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::FoldError;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract;
-use tutti_sampler::testing::{MockTransport, run_until_idle};
+use tutti_sampler::testing::{MockTransport, wait_for_open};
 use tutti_sampler::{
     Direction, DiskStreamer, DiskVoice, Loop, Manual, OpenError, PlaceError, Placement, Stream,
     StreamReader,
@@ -91,7 +91,7 @@ fn open(
         Some(width) => streamer.open_into(path, Placement::HEAD, width),
         None => streamer.open(path, Placement::HEAD),
     };
-    let reader = run_until_idle(&mut streamer, opening);
+    let reader = wait_for_open(&mut streamer, opening);
     if reader.is_ok() {
         assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     }
@@ -227,14 +227,14 @@ fn a_five_one_file_into_a_five_wide_voice_is_refused() {
     );
     // Refused again, the same way: nothing the first refusal did changed it.
     let opening = streamer.open_into(&path, Placement::HEAD, ChannelLayout::from(5u16));
-    assert_eq!(run_until_idle(&mut streamer, opening).err(), refused);
+    assert_eq!(wait_for_open(&mut streamer, opening).err(), refused);
     let opening = streamer.open_into(&path, Placement::HEAD, ChannelLayout::STEREO);
     let (_stereo_stream, stereo) =
-        run_until_idle(&mut streamer, opening).expect("5.1 folds to stereo");
+        wait_for_open(&mut streamer, opening).expect("5.1 folds to stereo");
     assert_eq!(settled_block(voice_of(stereo)).len(), 2);
     let opening = streamer.open(&path, Placement::HEAD);
     let (_own_stream, own) =
-        run_until_idle(&mut streamer, opening).expect("and opens at its own width");
+        wait_for_open(&mut streamer, opening).expect("and opens at its own width");
     assert_eq!(settled_block(voice_of(own)).len(), 6);
 }
 

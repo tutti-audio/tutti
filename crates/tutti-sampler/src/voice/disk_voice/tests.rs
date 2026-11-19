@@ -248,7 +248,7 @@ fn a_fork_closes_its_file_once_past_its_window() {
         crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
     let opening = streamer.open(&path, crate::Placement::HEAD);
     let (_stream, reader) =
-        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
+        crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     // Beats [0, 1): 24 000 frames at 120 BPM.
     let voice = crate::DiskVoice::from_reader(
         reader,
@@ -299,7 +299,7 @@ fn a_fork_prepared_realtime_latches_instead_of_reading_its_file() {
         crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
     let opening = streamer.open(&path, crate::Placement::HEAD);
     let (_stream, reader) =
-        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
+        crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     let voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     let clock = MockTransport::rolling(Beat::new(0.25), Bpm::of(120.0));
 
@@ -354,7 +354,7 @@ fn a_stopped_clock_silences_a_fork() {
         crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
     let opening = streamer.open(&path, crate::Placement::HEAD);
     let (_stream, reader) =
-        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
+        crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     let voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
 
     for single in [false, true] {
@@ -1632,7 +1632,7 @@ fn streamer_fed(script: &Script, no_skip: bool) -> (Vec<Vec<u32>>, u64, usize) {
             .expect("streamer builds");
     let opening = streamer.open(&path, crate::Placement::HEAD);
     let (_stream, reader) =
-        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
+        crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     for _ in 0..4096 {
         if streamer.step() != StepOutcome::Busy {
             break;

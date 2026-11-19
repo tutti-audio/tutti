@@ -958,7 +958,7 @@ fn streaming(
         DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
     let opening = streamer.open(path, crate::Placement::HEAD);
     let (stream, reader) =
-        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens");
+        crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
     assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     (streamer, stream, reader)
 }
@@ -1018,7 +1018,7 @@ fn a_loop_set_on_one_pool_voice_leaves_the_other_voices_stream_alone() {
         DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default()).expect("builds");
     let mut open = |path: &Path| {
         let opening = streamer.open(path, crate::Placement::HEAD);
-        crate::testing::run_until_idle(&mut streamer, opening).expect("the file opens")
+        crate::testing::wait_for_open(&mut streamer, opening).expect("the file opens")
     };
     let (stream_a, reader_a) = open(&first);
     let (stream_b, reader_b) = open(&second);
@@ -1077,7 +1077,7 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
     let open = |streamer: &mut DiskStreamer<Manual<f32>, f32>| {
         let opening = streamer.open(&path, crate::Placement::HEAD);
         let (stream, reader) =
-            crate::testing::run_until_idle(streamer, opening).expect("the file opens");
+            crate::testing::wait_for_open(streamer, opening).expect("the file opens");
         (
             stream,
             DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),

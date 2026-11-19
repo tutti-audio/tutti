@@ -738,7 +738,7 @@ mod tests {
                 .expect("streamer builds");
         let opening = streamer.open(&path, crate::Placement::HEAD);
         let (stream, reader) =
-            crate::testing::run_until_idle(&mut streamer, opening).expect("opens");
+            crate::testing::wait_for_open(&mut streamer, opening).expect("opens");
         let served = Arc::clone(&reader.status);
         let voice = crate::DiskVoice::from_reader(reader, crate::VoiceWindow::default());
 

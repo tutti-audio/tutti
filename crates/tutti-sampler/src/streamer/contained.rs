@@ -18,7 +18,7 @@ use super::command::StreamId;
 use super::decode::Seams;
 use super::status::{StreamFault, StreamPhase};
 use super::*;
-use crate::testing::{MockTransport, play, prepared, run_until_idle, run_until_idle_threaded};
+use crate::testing::{MockTransport, play, prepared, wait_for_open, wait_for_open_threaded};
 use crate::{DiskStreamerConfig, DiskVoice, OpenError};
 
 /// The frames `a..e`, as a block's claimed range.
@@ -85,10 +85,10 @@ impl Driver {
         let opened = match self {
             Self::Hand(s) => {
                 let opening = s.open(path, Placement::HEAD);
-                run_until_idle(s.as_mut(), opening).expect("the file opens")
+                wait_for_open(s.as_mut(), opening).expect("the file opens")
             }
             Self::Threaded(s) => {
-                run_until_idle_threaded(s.open(path, Placement::HEAD)).expect("the file opens")
+                wait_for_open_threaded(s.open(path, Placement::HEAD)).expect("the file opens")
             }
         };
         self.until("the stream to be primed", || {
@@ -168,7 +168,7 @@ fn a_decode_fault_is_faulted_and_the_voice_reads_silence() {
     let mut sampler =
         DiskStreamer::manual(SampleRate::of(rate), Default::default()).expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
-    let (stream, reader) = run_until_idle(&mut sampler, opening).expect("a cut file opens");
+    let (stream, reader) = wait_for_open(&mut sampler, opening).expect("a cut file opens");
     assert_eq!(
         stream.status().phase,
         StreamPhase::Faulted(StreamFault::Decode)
@@ -201,7 +201,7 @@ fn the_end_of_the_file_is_ended_and_a_loop_has_none() {
     let mut sampler =
         DiskStreamer::<_, f32>::manual(SampleRate::SR_8K, Default::default()).expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
-    let (stream, mut reader) = run_until_idle(&mut sampler, opening).expect("opens");
+    let (stream, mut reader) = wait_for_open(&mut sampler, opening).expect("opens");
     assert_eq!(
         stream.status().phase,
         StreamPhase::Live,
@@ -234,7 +234,7 @@ fn underruns_are_read_from_the_status() {
     let mut sampler =
         DiskStreamer::<_, f32>::manual(SampleRate::SR_8K, Default::default()).expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
-    let (stream, reader) = run_until_idle(&mut sampler, opening).expect("opens");
+    let (stream, reader) = wait_for_open(&mut sampler, opening).expect("opens");
     assert_eq!(stream.status().underruns, 0);
 
     for _ in 0..3 {
@@ -537,7 +537,7 @@ fn a_refused_decode_thread_fails_the_open() {
     .expect("builds");
     let dir = tempfile::tempdir().expect("a temp dir");
     let opening = sampler.open(&mp3(dir.path()), Placement::HEAD);
-    let answer = run_until_idle(&mut sampler, opening);
+    let answer = wait_for_open(&mut sampler, opening);
     assert!(
         matches!(&answer, Err(OpenError::Io(std::io::ErrorKind::Other))),
         "{:?}",
@@ -568,14 +568,14 @@ fn a_panicking_decode_fails_that_open_only() {
     )
     .expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
-    let answer = run_until_idle(&mut sampler, opening);
+    let answer = wait_for_open(&mut sampler, opening);
     assert!(
         matches!(&answer, Err(OpenError::Format)),
         "{:?}",
         answer.map(|_| ())
     );
     let opening = sampler.open(&path, Placement::HEAD);
-    run_until_idle(&mut sampler, opening).expect("the lane decodes the next file");
+    wait_for_open(&mut sampler, opening).expect("the lane decodes the next file");
 }
 
 // ---------------------------------------------------------------------------
@@ -600,7 +600,7 @@ fn a_fork_plays_the_loop_as_applied_not_as_asked() {
     )
     .expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
-    let (stream, reader) = run_until_idle(&mut sampler, opening).expect("a cut file opens");
+    let (stream, reader) = wait_for_open(&mut sampler, opening).expect("a cut file opens");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
 
     // The loop's fade leads in from just before its start, which is past the
@@ -645,7 +645,7 @@ fn a_stream_names_its_file() {
     let mut sampler =
         DiskStreamer::<_, f32>::manual(SampleRate::SR_8K, Default::default()).expect("builds");
     let opening = sampler.open(&wav, Placement::HEAD);
-    let (stream, reader) = run_until_idle(&mut sampler, opening).expect("opens");
+    let (stream, reader) = wait_for_open(&mut sampler, opening).expect("opens");
     assert_eq!(stream.file().path(), wav);
     assert_eq!(stream.file().file_rate(), SampleRate::SR_8K);
     assert!(stream.file().resident().is_none(), "read a piece at a time");
@@ -658,7 +658,7 @@ fn a_stream_names_its_file() {
         let mut sampler =
             DiskStreamer::<_, f32>::manual(wave.sample_rate(), Default::default()).expect("builds");
         let opening = sampler.open(&mp3, Placement::HEAD);
-        let (stream, _reader) = run_until_idle(&mut sampler, opening).expect("opens");
+        let (stream, _reader) = wait_for_open(&mut sampler, opening).expect("opens");
         assert_eq!(stream.file().path(), mp3);
         assert_eq!(stream.file().file_rate(), wave.sample_rate());
         let resident = stream
@@ -684,7 +684,7 @@ fn a_fork_of_a_closed_stream_fails_even_after_a_decode_fault() {
     )
     .expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
-    let (stream, reader) = run_until_idle(&mut sampler, opening).expect("a cut file opens");
+    let (stream, reader) = wait_for_open(&mut sampler, opening).expect("a cut file opens");
     assert_eq!(
         stream.status().phase,
         StreamPhase::Faulted(StreamFault::Decode),

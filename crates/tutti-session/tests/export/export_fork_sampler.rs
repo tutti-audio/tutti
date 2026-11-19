@@ -20,7 +20,7 @@ use tutti_session::Root;
 use tutti_buffers::ChannelLayout;
 use tutti_export::Produced;
 use tutti_graph::NodeKey;
-use tutti_sampler::testing::run_until_idle;
+use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
     DiskStreamer, DiskVoice, Manual, MemorySource, Placement, Playback, Stream, StreamReader,
     Voice, VoiceNode, VoiceSource, VoiceWindow,
@@ -218,7 +218,7 @@ fn streamer_on(
     let mut streamer =
         DiskStreamer::manual(SampleRate::of(RATE), Default::default()).expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
-    let (stream, reader) = run_until_idle(&mut streamer, opening).expect("the file opens");
+    let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     ((streamer, stream), reader)
 }

@@ -194,7 +194,7 @@ pub fn play<F: Float>(
 /// If the streamer has not answered within ten seconds: a hand-stepped
 /// streamer answers a seekable file on the first step, so that is a hang, not
 /// a slow machine.
-pub fn run_until_idle<F: tutti_rt::RingFloat>(
+pub fn wait_for_open<F: tutti_rt::RingFloat>(
     streamer: &mut crate::DiskStreamer<crate::Manual<F>, F>,
     mut opening: crate::PendingOpen<F>,
 ) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
@@ -224,7 +224,7 @@ pub fn run_until_idle<F: tutti_rt::RingFloat>(
 /// # Panics
 ///
 /// If the streamer has not answered by then.
-pub fn run_until_idle_threaded<F: tutti_rt::RingFloat>(
+pub fn wait_for_open_threaded<F: tutti_rt::RingFloat>(
     mut opening: crate::PendingOpen<F>,
 ) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);

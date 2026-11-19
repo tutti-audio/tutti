@@ -54,7 +54,7 @@ use tutti_fixtures::signal::rms_f64;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Node, contract};
-use tutti_sampler::testing::{MockTransport, run_until_idle};
+use tutti_sampler::testing::{MockTransport, wait_for_open};
 use tutti_sampler::{DiskStreamer, DiskStreamerConfig, Manual, Placement, StepOutcome, Stream};
 use tutti_sampler::{DiskVoice, MemorySource, VoiceWindow};
 use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate};
@@ -341,7 +341,7 @@ fn stream_at(
 
     let start = Placement::new(SamplePosition::new(at_sec * SR)).expect("a position in the file");
     let opening = streamer.open(path, start);
-    let (stream, reader) = run_until_idle(streamer, opening).unwrap_or_else(|e| {
+    let (stream, reader) = wait_for_open(streamer, opening).unwrap_or_else(|e| {
         panic!("the streamer could not open the file streaming from {at_sec}s: {e}")
     });
     prime(streamer);

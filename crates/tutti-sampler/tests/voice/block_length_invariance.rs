@@ -335,7 +335,7 @@ fn disk_voice(
         .expect("streamer builds");
     let opening = s.open(path, tutti_sampler::Placement::HEAD);
     let (stream, reader) =
-        tutti_sampler::testing::run_until_idle(&mut s, opening).expect("the file opens");
+        tutti_sampler::testing::wait_for_open(&mut s, opening).expect("the file opens");
     for _ in 0..4096 {
         if s.step() != StepOutcome::Busy {
             break;
