@@ -18,7 +18,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use tutti_rt::{SeqReader, SeqWriter};
-use tutti_units::{Beat, BeatDuration, Bpm, Frame, SampleRate, Samples, Seconds};
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples, Seconds};
 
 /// How many times a read retries a copy a write overlapped before it answers
 /// "nothing": a write is a few stores, so a reader that loses this many was
@@ -319,7 +319,7 @@ impl Playhead {
         let elapsed = Seconds::new(elapsed_ns.min(bound_ns) * 1e-9);
         // Beats per second is the tempo over sixty: the one place a time
         // becomes a beat span here, in `f64` as the beat is.
-        self.beat + BeatDuration::new(elapsed.get() * self.tempo.get() / 60.0)
+        self.beat + self.tempo.beats_in(elapsed)
     }
 }
 
