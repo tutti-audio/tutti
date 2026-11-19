@@ -5,7 +5,7 @@
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    CrossoverBank, CrossoverControls, CrossoverDesign, CrossoverError, CrossoverModel, Glide,
+    CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError, CrossoverModel, Glide,
     MAX_SPLITS, SimdLanes, fit_to_rate,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
@@ -142,8 +142,8 @@ pub struct CrossoverKernel<F: Float + SimdLanes> {
     input: BusTopology,
     bank: CrossoverBank<F>,
     model: CrossoverModel,
-    /// The coefficients in flight; the first design after `prepare` or `reset` lands at once.
-    coefficients: Glide<CrossoverDesign>,
+    /// The blend in flight; the first design after `prepare` or `reset` lands at once.
+    blend: Glide<CrossoverBlend>,
     landed: bool,
     rate: SampleRate,
 }
@@ -170,7 +170,7 @@ impl<F: Float + SimdLanes> CrossoverKernel<F> {
         Ok(Self {
             input,
             bank: CrossoverBank::new(input.layout()),
-            coefficients: Glide::landed(model.design()).by(GLIDE_STEPS),
+            blend: Glide::landed(model.blend()).by(GLIDE_STEPS),
             model,
             landed: false,
             rate,
@@ -208,16 +208,16 @@ impl<F: Float + SimdLanes> Kernel for CrossoverKernel<F> {
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
-        self.coefficients.settle();
+        self.blend.settle();
         self.landed = false;
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &CrossoverControls) {
         self.model.design_into(controls, self.rate);
-        self.coefficients.aim(self.model.design());
+        self.blend.aim(self.model.blend());
         if !self.landed {
-            self.coefficients.settle();
+            self.blend.settle();
             self.landed = true;
         }
     }
@@ -228,7 +228,7 @@ impl<F: Float + SimdLanes> Kernel for CrossoverKernel<F> {
         _: ControlLanes<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        self.bank.process(&mut self.coefficients, input, output);
+        self.bank.process(&mut self.blend, input, output);
     }
 
     /// An IIR's sections ring after the input stops, as long as the slowest split says,

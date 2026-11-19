@@ -3,14 +3,14 @@
 
 mod bands;
 mod bank;
+mod blend;
 mod controls;
-mod design;
 mod model;
 mod state;
 
 pub use bands::{CrossoverError, MAX_SPLITS, SOLVE_CEILING, fit_to_rate};
 pub use bank::CrossoverBank;
+pub use blend::CrossoverBlend;
 pub use controls::CrossoverControls;
-pub use design::CrossoverDesign;
 pub use model::CrossoverModel;
 pub(crate) use state::CrossoverState;

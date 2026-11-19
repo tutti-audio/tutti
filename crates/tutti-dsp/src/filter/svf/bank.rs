@@ -5,7 +5,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 
 use super::kernel::{SvfCoefficients, svf_step};
-use crate::control_rate::lane_group;
+use crate::channel_group::group_size;
 use crate::{Glide, SimdLanes};
 
 /// The state of an SVF per channel: Simper's trapezoidal integrator pair
@@ -58,7 +58,7 @@ impl<F: Float + SimdLanes> SvfBank<F> {
             .min(output.channels());
         let mut first = 0;
         while first < width {
-            let n = lane_group(width - first);
+            let n = group_size(width - first);
             macro_rules! group {
                 ($n:literal) => {
                     group::<F, $n>(

@@ -124,8 +124,8 @@ const GLIDE_STEPS: u32 = 16;
 pub struct LadderKernel<F: Float + SimdLanes> {
     input: BusTopology,
     bank: LadderBank<F>,
-    /// The design in flight; the first one after `prepare` lands at once.
-    design: Glide<LadderBlend<F>>,
+    /// The blend in flight; the first one after `prepare` lands at once.
+    blend: Glide<LadderBlend<F>>,
     rate: SampleRate,
     landed: bool,
 }
@@ -139,7 +139,7 @@ impl<F: Float + SimdLanes> LadderKernel<F> {
         Self {
             input,
             bank: LadderBank::new(input.layout()),
-            design: Glide::landed(Self::design(&LadderControls::DEFAULT, rate)),
+            blend: Glide::landed(Self::design(&LadderControls::DEFAULT, rate)),
             rate,
             landed: false,
         }
@@ -168,19 +168,19 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        self.design = Glide::landed(Self::design(&LadderControls::DEFAULT, rate)).by(GLIDE_STEPS);
+        self.blend = Glide::landed(Self::design(&LadderControls::DEFAULT, rate)).by(GLIDE_STEPS);
         self.landed = false;
     }
 
     fn reset(&mut self) {
-        self.design.settle();
+        self.blend.settle();
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &LadderControls) {
-        self.design.aim(Self::design(controls, self.rate));
+        self.blend.aim(Self::design(controls, self.rate));
         if !self.landed {
-            self.design.settle();
+            self.blend.settle();
             self.landed = true;
         }
     }
@@ -191,7 +191,7 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
         _: ControlLanes<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        self.bank.process(&mut self.design, input, output);
+        self.bank.process(&mut self.blend, input, output);
     }
 
     /// A resonant ladder rings on after its input stops, and at a resonance of 1 it does not

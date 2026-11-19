@@ -115,7 +115,7 @@
 //!   bands with equal ratios between neighbours.
 //! - **Control and small kernels**: [`Glide`], a value that moves to its target in steps
 //!   (with [`Lerp`] and [`Steps`]); [`smooth_toward`], the one-pole step; [`COEFF_INTERVAL`] and
-//!   [`LANES`], the solve interval and channel grouping of the filter banks; [`lerp`],
+//!   [`CHANNEL_GROUP`], the solve interval and channel grouping of the filter banks; [`lerp`],
 //!   [`cubic_hermite`] and [`parabolic_peak`]; [`rms`]; [`Xorshift32`], a seeded noise
 //!   source.
 //!
@@ -135,6 +135,7 @@
 mod bands;
 mod beat;
 mod bit_crush;
+mod channel_group;
 mod control_rate;
 mod convolver;
 mod dc_block;
@@ -180,7 +181,8 @@ mod xorshift;
 pub use bands::{log_band_edges, octave_band_edges};
 pub use beat::track_beat_frames;
 pub use bit_crush::{BitCrusher, BitCrusherControls, hold_frames, quantize};
-pub use control_rate::{COEFF_INTERVAL, LANES};
+pub use channel_group::CHANNEL_GROUP;
+pub use control_rate::COEFF_INTERVAL;
 pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError};
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub(crate) use delay::delay_step;
@@ -201,7 +203,7 @@ pub use dynamics::{
 };
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};
 pub use filter::{
-    Biquad, CrossoverBank, CrossoverControls, CrossoverDesign, CrossoverError, CrossoverModel,
+    Biquad, CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError, CrossoverModel,
     EnvelopeFilterBank, EnvelopeFilterControls, LadderBank, LadderBlend, LadderCoefficients,
     LadderControls, LadderDesign, LadderModel, LadderType, MAX_SPLITS, SOLVE_CEILING, SimdLanes,
     SvfBank, SvfCoefficients, SvfControls, SvfDesign, SvfModel, SvfType, fit_to_rate, ladder_step,

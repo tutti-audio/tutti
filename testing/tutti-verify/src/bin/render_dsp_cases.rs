@@ -169,9 +169,9 @@ fn ladder(dir: &Path, cases: &mut Cases) {
             };
             let name = format!("ladder_{label}_{freq}_{res}");
             let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
-            let mut design = Glide::landed(LadderBlend::from(&LadderModel::new(c, rate)));
+            let mut blend = Glide::landed(LadderBlend::from(&LadderModel::new(c, rate)));
             let out = blocks::<f64>(&impulse(amplitude), 1, |x, y| {
-                bank.process(&mut design, x, y);
+                bank.process(&mut blend, x, y);
             });
             wav(dir, &name, RATE, &out);
             cases.push(
@@ -196,7 +196,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         let c = CrossoverControls::new(&hz, rate).expect("controls");
         let model = CrossoverModel::designed(splits.len() + 1, &c, rate).expect("bands");
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
-        let mut coefficients = Glide::landed(model.design());
+        let mut coefficients = Glide::landed(model.blend());
         // One channel per band, band 0 first.
         let out = blocks::<f64>(&impulse(1.0), model.bands(), |x, y| {
             bank.process(&mut coefficients, x, y);

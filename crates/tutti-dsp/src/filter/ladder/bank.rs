@@ -7,7 +7,7 @@ use tutti_units::Real;
 
 use super::kernel::{LadderCoefficients, ladder_step};
 use super::{LadderModel, LadderType};
-use crate::control_rate::lane_group;
+use crate::channel_group::group_size;
 use crate::design::along;
 use crate::{Glide, Lerp, SimdLanes};
 
@@ -73,16 +73,16 @@ impl<F: Float + SimdLanes> LadderBank<F> {
         self.state.fill([F::ZERO; 4]);
     }
 
-    /// Runs `input` into `output`, frame `i` at `design.at(taken + 1 + i)`, then takes the
+    /// Runs `input` into `output`, frame `i` at `blend.at(taken + 1 + i)`, then takes the
     /// block's steps from the glide.
     ///
     /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's
     /// width, or past the narrower of the two views, is not touched. Channels run in groups
     /// of up to eight, each group's planes taken once per block; while the glide moves, a
-    /// group reads the design once per frame. No allocation.
+    /// group reads the blend once per frame. No allocation.
     pub fn process(
         &mut self,
-        design: &mut Glide<LadderBlend<F>>,
+        blend: &mut Glide<LadderBlend<F>>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -94,11 +94,11 @@ impl<F: Float + SimdLanes> LadderBank<F> {
             .min(output.channels());
         let mut first = 0;
         while first < width {
-            let n = lane_group(width - first);
+            let n = group_size(width - first);
             macro_rules! group {
                 ($n:literal) => {
                     group::<F, $n>(
-                        design,
+                        blend,
                         &mut self.state[first..first + $n],
                         first,
                         &input,
@@ -119,7 +119,7 @@ impl<F: Float + SimdLanes> LadderBank<F> {
             }
             first += n;
         }
-        design.advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        blend.advance(u32::try_from(frames).unwrap_or(u32::MAX));
     }
 }
 

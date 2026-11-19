@@ -18,15 +18,15 @@ fn model(freqs: &[f64]) -> CrossoverModel {
 const GLIDE: u32 = 16;
 
 /// A glide at rest on `model`.
-fn landed(model: &CrossoverModel) -> Glide<CrossoverDesign> {
-    Glide::landed(model.design()).by(GLIDE)
+fn landed(model: &CrossoverModel) -> Glide<CrossoverBlend> {
+    Glide::landed(model.blend()).by(GLIDE)
 }
 
 /// Runs `input` (one `Vec` per channel) through `bank` at the glide `at` in blocks of the
 /// lengths in `blocks`, cycled, and returns the output planes, `bands * channels` of them.
 fn run_glide(
     bank: &mut CrossoverBank<f64>,
-    glide: &mut Glide<CrossoverDesign>,
+    glide: &mut Glide<CrossoverBlend>,
     input: &[Vec<f64>],
     blocks: &[usize],
 ) -> Vec<Vec<f64>> {
@@ -239,7 +239,7 @@ fn any_split_renders_the_frames_of_the_whole() {
         let mut glide = landed(&models[0]);
         let mut out = vec![vec![0.0f64; 1_501]; 6];
         for (w, m) in cuts.windows(2).zip(&models) {
-            glide.aim(m.design());
+            glide.aim(m.blend());
             let ins: Vec<Vec<f64>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
             for (plane, piece) in out
                 .iter_mut()
@@ -276,7 +276,7 @@ fn a_step_in_the_splits_glides_linearly_in_the_gain_and_lands_exactly() {
         let mut x = vec![0.0f64; m + 1];
         x[m] = 1.0;
         let mut glide = landed(&from);
-        glide.aim(to.design());
+        glide.aim(to.blend());
         let out = run_glide(
             &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
             &mut glide,
@@ -295,7 +295,7 @@ fn a_step_in_the_splits_glides_linearly_in_the_gain_and_lands_exactly() {
     }
     let (low, all_pass) = (to.coeffs[0].low().b0, to.coeffs[1].all_pass().b0);
     let mut glide = landed(&from);
-    glide.aim(to.design());
+    glide.aim(to.blend());
     let mut x = vec![0.0f64; 40];
     x[39] = 1.0;
     let out = run_glide(
@@ -309,7 +309,7 @@ fn a_step_in_the_splits_glides_linearly_in_the_gain_and_lands_exactly() {
         "{}",
         out[0][39]
     );
-    assert_eq!(glide.now(), to.design());
+    assert_eq!(glide.now(), to.blend());
 }
 
 /// A glide through the bank keeps the sections inside the derived bound for a split that
@@ -330,7 +330,7 @@ fn a_split_gliding_between_the_extremes_stays_within_the_derived_bound() {
         let mut glide = landed(&lo);
         let mut peak = 0.0f64;
         for (period, chunk) in input.chunks(16).enumerate() {
-            glide.aim(if period.is_multiple_of(2) { &hi } else { &lo }.design());
+            glide.aim(if period.is_multiple_of(2) { &hi } else { &lo }.blend());
             let out = run_glide(&mut bank, &mut glide, &[chunk.to_vec()], &[chunk.len()]);
             peak = out.iter().flatten().fold(peak, |p, &s| p.max(s.abs()));
         }
