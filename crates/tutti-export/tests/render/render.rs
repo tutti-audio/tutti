@@ -68,7 +68,7 @@ fn config(format: Format, layout: ChannelLayout) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: RATE,
-            duration_seconds: Seconds::new(0.2),
+            duration_seconds: Seconds(0.2),
             ..Default::default()
         },
         encode: EncodeConfig {
@@ -193,7 +193,7 @@ fn a_latency_trim_preserves_the_output_length() {
     let mut s = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
     let untrimmed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
-    s.render.latency = tutti_units::Samples::new(512);
+    s.render.latency = tutti_units::Samples(512);
     let trimmed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
     assert_eq!(
@@ -215,7 +215,7 @@ fn a_tail_lengthens_the_output_by_exactly_the_tail() {
     let mut s = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
     let untailed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
-    let tail = tutti_units::Samples::new(4096);
+    let tail = tutti_units::Samples(4096);
     s.render.tail = tail;
     let tailed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
@@ -247,7 +247,7 @@ fn a_convolver_reports_its_ir_ring_out() {
 
     assert_eq!(
         built(g, RATE).reported_tail().samples(),
-        Some(tutti_units::Samples::new(4095)),
+        Some(tutti_units::Samples(4095)),
     );
 }
 
@@ -273,7 +273,7 @@ fn cascaded_convolvers_sum_their_tails() {
     // 1023 + 2047, which is the ring-out of the 3071-sample cascaded response.
     assert_eq!(
         built(g, RATE).reported_tail().samples(),
-        Some(tutti_units::Samples::new(3070)),
+        Some(tutti_units::Samples(3070)),
     );
 }
 
@@ -322,7 +322,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
     );
     assert_eq!(
         reported.known(),
-        tutti_units::Samples::new(4095),
+        tutti_units::Samples(4095),
         "but what the convolver reported is still available"
     );
 }
@@ -336,7 +336,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
 fn a_graph_of_stock_nodes_reports_a_spendable_tail() {
     let reported = dc(RATE).reported_tail();
     assert_eq!(reported.unknown_nodes(), 0);
-    assert_eq!(reported.samples(), Some(tutti_units::Samples::new(0)));
+    assert_eq!(reported.samples(), Some(tutti_units::Samples(0)));
 }
 
 /// A stereo integrator: `y[n] = y[n-1] + x[n]`, per channel.
@@ -388,7 +388,7 @@ fn resolving_an_unbounded_graph_spends_the_cap() {
         .pipe_output(rev);
 
     let reported = built(g, RATE).reported_tail();
-    let cap = tutti_units::Samples::new(384_000);
+    let cap = tutti_units::Samples(384_000);
     assert!(
         reported.is_unbounded(),
         "a unity-gain feedback loop never decays on its own"
@@ -414,8 +414,8 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
 
     let reported = built(g, RATE).reported_tail();
     assert_eq!(
-        reported.resolve(tutti_units::Samples::new(384_000)),
-        tutti_units::Samples::new(4095),
+        reported.resolve(tutti_units::Samples(384_000)),
+        tutti_units::Samples(4095),
         "the convolver's figure, not the cap"
     );
 }
@@ -463,7 +463,7 @@ fn a_caller_can_compose_normalization() {
     // Longer than R128's 400 ms gating block, or the meter reports nothing
     // passed the gate and there is no loudness to normalize toward.
     let mut long = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-    long.render.duration_seconds = Seconds::new(2.0);
+    long.render.duration_seconds = Seconds(2.0);
     let mut out = render_to_buffers(dc(RATE), &long, &FrozenClock).unwrap();
 
     let cfg = LoudnessConfig::new(Bed::Stereo.topology());
@@ -475,7 +475,7 @@ fn a_caller_can_compose_normalization() {
         rate,
     )
     .unwrap();
-    let gain = before.gain_to(Db::new(-14.0), Db::new(-1.0));
+    let gain = before.gain_to(Db(-14.0), Db(-1.0));
     out.apply_gain(gain);
     let flat = out.interleaved();
     let after = measure_loudness(
@@ -521,7 +521,7 @@ fn a_resample_request_reaches_the_file() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("r.wav");
     let mut s = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-    s.render.duration_seconds = Seconds::new(1.0);
+    s.render.duration_seconds = Seconds(1.0);
     s.resample = Some(Resample::to(SampleRate::SR_48K));
 
     render_to_file(dc(RATE), &s, &FrozenClock, &p).unwrap();
@@ -548,10 +548,10 @@ fn a_resample_request_reaches_the_file() {
 fn normalized_audio_can_be_written_to_every_format() {
     let d = tempfile::tempdir().unwrap();
     let mut s = config(Format::Wav(Pcm::Int24), ChannelLayout::STEREO);
-    s.render.duration_seconds = Seconds::new(1.0);
+    s.render.duration_seconds = Seconds(1.0);
 
     let mut audio = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
-    audio.apply_gain(tutti_units::Db::new(-6.0));
+    audio.apply_gain(tutti_units::Db(-6.0));
 
     for (format, ext) in [
         (Format::Wav(Pcm::Int24), "wav"),
@@ -590,7 +590,7 @@ fn normalized_audio_can_be_written_to_every_format() {
 fn a_resample_reaches_every_format_not_just_wav() {
     let d = tempfile::tempdir().unwrap();
     let mut s = config(Format::Wav(Pcm::Int24), ChannelLayout::STEREO);
-    s.render.duration_seconds = Seconds::new(1.0); // 44100 frames in, 48000 expected out
+    s.render.duration_seconds = Seconds(1.0); // 44100 frames in, 48000 expected out
     s.resample = Some(Resample::to(tutti_units::SampleRate::SR_48K));
 
     // WAV is the control: it was already correct.
@@ -641,7 +641,7 @@ fn write_buffers_resamples_from_the_frames_own_rate() {
     // Render at 96k...
     let mut render_cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
     render_cfg.render.sample_rate = tutti_units::SampleRate::SR_96K;
-    render_cfg.render.duration_seconds = Seconds::new(1.0);
+    render_cfg.render.duration_seconds = Seconds(1.0);
     let audio =
         render_to_buffers(dc(render_cfg.render.sample_rate), &render_cfg, &FrozenClock).unwrap();
     assert_eq!(audio.sample_rate().get(), 96_000.0);
@@ -692,7 +692,7 @@ fn normalized_export_lifts_the_level_toward_the_target() {
     let d = tempfile::tempdir().unwrap();
     // Longer than R128's 400 ms gating block, or nothing passes the gate.
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-    cfg.render.duration_seconds = Seconds::new(2.0);
+    cfg.render.duration_seconds = Seconds(2.0);
 
     let plain = d.path().join("plain.wav");
     render_to_file(dc(RATE), &cfg, &FrozenClock, &plain).unwrap();
@@ -702,7 +702,7 @@ fn normalized_export_lifts_the_level_toward_the_target() {
         dc(RATE),
         &cfg,
         &FrozenClock,
-        Normalize::lufs(Db::new(-14.0)),
+        Normalize::lufs(Db(-14.0)),
         &normalized,
     )
     .unwrap();
@@ -734,14 +734,14 @@ fn peak_normalization_lands_on_the_requested_dbtp() {
 
     let d = tempfile::tempdir().unwrap();
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
-    cfg.render.duration_seconds = Seconds::new(2.0);
+    cfg.render.duration_seconds = Seconds(2.0);
 
     let path = d.path().join("peak.wav");
     render_normalized_to_file(
         dc(RATE),
         &cfg,
         &FrozenClock,
-        Normalize::peak(Db::new(-1.0)),
+        Normalize::peak(Db(-1.0)),
         &path,
     )
     .unwrap();
@@ -821,7 +821,7 @@ fn a_sub_gating_block_render_cannot_be_loudness_normalized() {
     // 0.2 s — half the 400 ms gating block.
     let cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
     assert!(
-        cfg.render.duration_seconds < Seconds::new(0.4),
+        cfg.render.duration_seconds < Seconds(0.4),
         "this test is only meaningful under the gating block"
     );
 
@@ -830,7 +830,7 @@ fn a_sub_gating_block_render_cannot_be_loudness_normalized() {
         dc(RATE),
         &cfg,
         &FrozenClock,
-        Normalize::lufs(Db::new(-14.0)),
+        Normalize::lufs(Db(-14.0)),
         &path,
     )
     .expect_err("nothing passed the gate");
@@ -857,7 +857,7 @@ fn a_sub_gating_block_render_cannot_be_loudness_normalized() {
         dc(RATE),
         &cfg,
         &FrozenClock,
-        Normalize::peak(Db::new(-1.0)),
+        Normalize::peak(Db(-1.0)),
         &path,
     )
     .unwrap();
@@ -890,14 +890,14 @@ fn surround_normalizes_rather_than_falling_back_to_peak() {
     g.pipe_output(id);
 
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::from(6u16));
-    cfg.render.duration_seconds = Seconds::new(2.0);
+    cfg.render.duration_seconds = Seconds(2.0);
 
     let path = d.path().join("surround.wav");
     render_normalized_to_file(
         built(g, cfg.render.sample_rate),
         &cfg,
         &FrozenClock,
-        Normalize::lufs(Db::new(-14.0)),
+        Normalize::lufs(Db(-14.0)),
         &path,
     )
     .expect("5.1 normalization must not be rejected");
@@ -995,8 +995,8 @@ fn normalizing_silence_is_refused() {
     cfg.dither = Some(tutti_dsp::DitherShape::Triangular);
 
     for (normalize, want) in [
-        (Normalize::peak(Db::new(-1.0)), Unmeasured::Silent),
-        (Normalize::lufs(Db::new(-14.0)), Unmeasured::BelowGate),
+        (Normalize::peak(Db(-1.0)), Unmeasured::Silent),
+        (Normalize::lufs(Db(-14.0)), Unmeasured::BelowGate),
     ] {
         let err = render_normalized_to_file(silence(), &cfg, &FrozenClock, normalize, &path)
             .expect_err("silence has no reading");
@@ -1047,9 +1047,9 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
     // peak normalization divides it out.
     let square = || {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-        let tone = Osc::sine(Hz::new(11025.0))
-            .with_phase(tutti_units::Phase::new(0.546))
-            .with_amplitude(Amplitude::new(0.98))
+        let tone = Osc::sine(Hz(11025.0))
+            .with_phase(tutti_units::Phase(0.546))
+            .with_amplitude(Amplitude(0.98))
             .with_layout(ChannelLayout::STEREO);
         let id = g.add(tone);
         g.pipe_output(id);
@@ -1066,7 +1066,7 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
         square(),
         &cfg,
         &FrozenClock,
-        Normalize::peak(Db::new(-1.0)),
+        Normalize::peak(Db(-1.0)),
         &path,
     )
     .unwrap();
@@ -1108,13 +1108,13 @@ fn an_unmeasurable_rate_fails_rather_than_writing_un_normalized_audio() {
     // R128 accepts 16 Hz - 2.8 MHz; 4 MHz is outside it.
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::STEREO);
     cfg.render.sample_rate = tutti_units::SampleRate::of(4_000_000.0);
-    cfg.render.duration_seconds = Seconds::new(0.0005);
+    cfg.render.duration_seconds = Seconds(0.0005);
 
     let err = render_normalized_to_file(
         dc(cfg.render.sample_rate),
         &cfg,
         &FrozenClock,
-        Normalize::peak(Db::new(-1.0)),
+        Normalize::peak(Db(-1.0)),
         &path,
     )
     .expect_err("an unmeasurable rate must not report success");
@@ -1428,11 +1428,11 @@ struct Narrowing;
 impl Node for Narrowing {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_tail(tutti_units::Tail::Finite(tutti_units::Samples::new(4_000)))
+            .with_tail(tutti_units::Tail::Finite(tutti_units::Samples(4_000)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        io.report_tail(tutti_units::Tail::Finite(tutti_units::Samples::new(100)));
+        io.report_tail(tutti_units::Tail::Finite(tutti_units::Samples(100)));
         let (ins, mut outs) = io.split();
         outs.get(0).copy_from_slice(ins.get(0));
         Status::Modified
@@ -1457,7 +1457,7 @@ fn export_spends_the_ceiling_of_a_node_that_narrows_its_tail() {
     let graph = built(g, RATE);
 
     let reported = graph.reported_tail();
-    assert_eq!(reported.samples(), Some(tutti_units::Samples::new(4_000)));
+    assert_eq!(reported.samples(), Some(tutti_units::Samples(4_000)));
 
     let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::MONO);
     cfg.render.tail = reported.samples().expect("finite");

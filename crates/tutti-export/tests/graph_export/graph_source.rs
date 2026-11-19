@@ -54,7 +54,7 @@ fn config(bit_depth: Pcm, channels: ChannelLayout) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: RATE,
-            duration_seconds: Seconds::new(SECS),
+            duration_seconds: Seconds(SECS),
             ..Default::default()
         },
         encode: EncodeConfig {
@@ -80,7 +80,7 @@ fn built(g: GraphBuilder) -> RenderGraph {
 /// reset copy), and a reset unit renders what a fresh one does.
 fn forked(g: GraphBuilder) -> RenderGraph {
     let (live, _exec) = g
-        .build(Prepare::new(RATE, MaxBlock::of(Samples::new(256))))
+        .build(Prepare::new(RATE, MaxBlock::of(Samples(256))))
         .expect("builds");
     support::fork_offline(&live, RATE)
 }
@@ -116,8 +116,8 @@ fn assert_same(what: &str, a: &[Vec<f32>], b: &[Vec<f32>]) {
 fn sine(freq: f64) -> GraphBuilder {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let k = g.add(
-        Osc::sine(Hz::new(freq))
-            .with_amplitude(Amplitude::new(0.5))
+        Osc::sine(Hz(freq))
+            .with_amplitude(Amplitude(0.5))
             .with_layout(ChannelLayout::STEREO),
     );
     g.pipe_output(k);
@@ -144,14 +144,14 @@ fn dc(level: f32) -> GraphBuilder {
 fn limited() -> GraphBuilder {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let src = g.add(
-        Osc::sine(Hz::new(220.0))
-            .with_amplitude(Amplitude::new(0.9))
+        Osc::sine(Hz(220.0))
+            .with_amplitude(Amplitude(0.9))
             .with_layout(ChannelLayout::STEREO),
     );
     let (lim, _) = g.add_with_controls(tutti_nodes::LimiterNode::<f32>::stereo(
         tutti_nodes::LimiterControls {
-            threshold: Db::new(-6.0),
-            ceiling: Db::new(-1.0),
+            threshold: Db(-6.0),
+            ceiling: Db(-1.0),
             ..tutti_nodes::LimiterControls::DEFAULT
         },
     ));
@@ -167,7 +167,7 @@ fn ir() -> Vec<f32> {
 /// A tone through a convolver: a tail, a latency, and a block-oriented unit.
 fn convolved() -> GraphBuilder {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-    let src = g.add(Osc::sine(Hz::new(330.0)).with_amplitude(Amplitude::new(0.5)));
+    let src = g.add(Osc::sine(Hz(330.0)).with_amplitude(Amplitude(0.5)));
     let conv = g
         .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir())))
         .0;
@@ -198,8 +198,8 @@ fn quad_vbap() -> GraphBuilder {
         .into_iter()
         .map(|(az, f)| {
             let src = g.add(
-                Osc::sine(Hz::new(f))
-                    .with_amplitude(Amplitude::new(0.5))
+                Osc::sine(Hz(f))
+                    .with_amplitude(Amplitude(0.5))
                     .with_layout(ChannelLayout::STEREO),
             );
             (src, Azimuth::new(az))
@@ -340,8 +340,8 @@ fn a_resampled_export_writes_its_render() {
 #[test]
 fn a_peak_normalized_export_writes_its_normalized_render() {
     let mut cfg = config(Pcm::Float32, ChannelLayout::STEREO);
-    cfg.render.duration_seconds = Seconds::new(1.0);
-    let normalize = Normalize::peak(Db::new(-1.0));
+    cfg.render.duration_seconds = Seconds(1.0);
+    let normalize = Normalize::peak(Db(-1.0));
     let bytes = same_file(
         || sine(440.0),
         &cfg,
@@ -353,7 +353,7 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
             Ok(r)
         },
     );
-    let target = Db::new(-1.0).to_amplitude().get() as f32;
+    let target = Db(-1.0).to_amplitude().get() as f32;
     let peak = tutti_fixtures::signal::peak(&float_samples(&bytes));
     assert!(
         peak <= target + 1e-6 && peak > target * 0.99,
@@ -484,7 +484,7 @@ fn a_convolver_renders_the_direct_convolution_at_the_graph_block() {
 #[test]
 fn the_latency_trim_drops_the_lookahead() {
     let latency = built(limited()).reported_latency();
-    assert_eq!(latency, Samples::new(240), "5 ms at 48 kHz");
+    assert_eq!(latency, Samples(240), "5 ms at 48 kHz");
 
     let mut trimmed = config(Pcm::Float32, ChannelLayout::STEREO);
     trimmed.render.latency = latency;
@@ -549,7 +549,7 @@ fn the_tail_extends_the_render_by_the_ring_out() {
     let graph = built(convolved());
     assert_eq!(
         graph.reported_tail().samples(),
-        Some(Samples::new(2999)),
+        Some(Samples(2999)),
         "the IR's ring-out"
     );
     let mut cfg = config(Pcm::Float32, ChannelLayout::MONO);
@@ -607,7 +607,7 @@ fn a_graph_prepared_at_another_rate_is_refused() {
 fn the_graph_reads_the_render_clocks_transport() {
     let start = 4.0;
     let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat::new(start),
+        start_beat: Beat(start),
         tempo_map: Arc::new(TempoMap::constant(Bpm::of(120.0)).expect("a tempo")),
         sample_rate: RATE,
         loop_range: None,
@@ -679,7 +679,7 @@ fn tone_at(i: usize) -> f32 {
 /// An offline timeline at beat 0, 120 BPM, at the render's rate.
 fn timeline() -> Arc<OfflineTimeline> {
     Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat::new(0.0),
+        start_beat: Beat(0.0),
         tempo_map: Arc::new(TempoMap::constant(Bpm::of(120.0)).expect("a tempo")),
         sample_rate: RATE,
         loop_range: None,
@@ -692,7 +692,7 @@ fn timeline() -> Arc<OfflineTimeline> {
 fn placed_pool(cents: f64) -> tutti_sampler::VoicePool<f32> {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
     let source =
-        MemorySource::placed(tone(), VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+        MemorySource::placed(tone(), VoiceWindow::from(Beat(0.0))).expect("a placeable wave");
     let mut pool = VoicePool::new();
     pool.insert(
         SlotId(1),
@@ -822,15 +822,14 @@ fn a_forked_clip_reader_renders_the_tone_at_the_graph_block() {
     // Live, the voice plays on another transport, somewhere else.
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let (k, _params) = g.add_with_controls(
-        MemorySource::placed(tone(), VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave"),
+        MemorySource::placed(tone(), VoiceWindow::from(Beat(0.0))).expect("a placeable wave"),
     );
     g.pipe_output(k);
     let (live, mut exec) = g
-        .build(Prepare::new(RATE, MaxBlock::of(Samples::new(256))))
+        .build(Prepare::new(RATE, MaxBlock::of(Samples(256))))
         .expect("builds");
     exec.apply_pending();
-    let elsewhere =
-        tutti_graph::TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.25), None);
+    let elsewhere = tutti_graph::TransportPosition::new(true, Bpm::of(120.0), Beat(0.25), None);
     let mut sink = vec![0.0f32; 256];
     for _ in 0..8 {
         exec.process(256, &elsewhere, &[], &mut [&mut sink[..]]);

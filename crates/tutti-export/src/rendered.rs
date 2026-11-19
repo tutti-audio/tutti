@@ -112,8 +112,8 @@ impl<F: Float> Rendered<F> {
         {
             return Err(RenderedError::UnequalPlanes {
                 plane,
-                expected: Samples::new(first.len()),
-                found: Samples::new(other.len()),
+                expected: Samples(first.len()),
+                found: Samples(other.len()),
             });
         }
         Ok(Self {
@@ -174,7 +174,7 @@ impl<F: Float> Rendered<F> {
     /// Returns the frames per plane — the length of one channel, not the total
     /// sample count.
     pub fn frames(&self) -> Samples {
-        Samples::new(self.planes.first().map_or(0, |p| p.len()))
+        Samples(self.planes.first().map_or(0, |p| p.len()))
     }
 
     /// Returns the channel count — the interleave stride, and the number of

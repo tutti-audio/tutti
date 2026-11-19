@@ -34,7 +34,7 @@ fn names(dir: &std::path::Path) -> Vec<String> {
 /// at any reading of the render.
 fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, bool) {
     let path = dir.join("n.wav");
-    let job = Job::new(RATE, Samples::new(FRAMES), Samples::new(0), Samples::new(0)).unwrap();
+    let job = Job::new(RATE, Samples(FRAMES), Samples(0), Samples(0)).unwrap();
     let mut seen_spill = false;
     let mut watch = |_: &Progress| {
         seen_spill |= names(dir).iter().any(|n| n.ends_with(".spill"));
@@ -46,7 +46,7 @@ fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, 
         tutti_codec::Format::Wav(Pcm::Float32),
         ChannelLayout::STEREO,
     )
-    .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))));
+    .normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-6.0)))));
     let produced = render_outputs(
         &mut graph(),
         &job,
@@ -125,7 +125,7 @@ fn a_normalized_output_spills_past_the_budget_and_writes_what_it_would_in_memory
 fn a_cancelled_or_failed_render_removes_its_spill() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("n.wav");
-    let job = Job::new(RATE, Samples::new(FRAMES), Samples::new(0), Samples::new(0)).unwrap();
+    let job = Job::new(RATE, Samples(FRAMES), Samples(0), Samples(0)).unwrap();
     let target = || {
         Output::master(
             crate::FileTarget::new(
@@ -133,7 +133,7 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
                 tutti_codec::Format::Wav(Pcm::Float32),
                 ChannelLayout::STEREO,
             )
-            .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))))),
+            .normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-6.0))))),
         )
     };
 
@@ -188,9 +188,9 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
 #[test]
 fn planes_no_allocator_can_give_are_render_too_large() {
     let plan = RenderPlan {
-        total: Samples::new(usize::MAX / 2),
-        output_length: Samples::new(usize::MAX / 2),
-        latency: Samples::new(0),
+        total: Samples(usize::MAX / 2),
+        output_length: Samples(usize::MAX / 2),
+        latency: Samples(0),
     };
     let err = reserve_planes::<f32>(&plan, ChannelLayout::STEREO).unwrap_err();
     assert!(

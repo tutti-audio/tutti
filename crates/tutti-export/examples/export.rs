@@ -39,8 +39,8 @@ fn built(g: GraphBuilder) -> RenderGraph {
 fn tone() -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let id = g.add(
-        Osc::sine(Hz::new(440.0))
-            .with_amplitude(Amplitude::new(0.25))
+        Osc::sine(Hz(440.0))
+            .with_amplitude(Amplitude(0.25))
             .with_layout(ChannelLayout::STEREO),
     );
     g.pipe_output(id);
@@ -69,13 +69,8 @@ fn main() -> tutti_export::Result<()> {
     // and nothing else. Where it goes is a target: `FileTarget` names the
     // path, the format and the width, and its setters add a resample, a dither
     // or a normalize.
-    let job = Job::new(
-        RATE,
-        Seconds::new(2.0).to_samples(RATE),
-        Samples::new(0),
-        Samples::new(0),
-    )
-    .expect("a two-second render");
+    let job = Job::new(RATE, Seconds(2.0).to_samples(RATE), Samples(0), Samples(0))
+        .expect("a two-second render");
     let flac = Format::Flac {
         depth: IntDepth::Int24,
         level: FlacLevel::default(),
@@ -175,7 +170,7 @@ fn main() -> tutti_export::Result<()> {
         flac,
         ChannelLayout::STEREO,
     )
-    .normalize(Some(NormalizeSpec::own(Normalize::lufs(Db::new(-14.0)))));
+    .normalize(Some(NormalizeSpec::own(Normalize::lufs(Db(-14.0)))));
     let written = render_one(
         &mut tone(),
         &job,

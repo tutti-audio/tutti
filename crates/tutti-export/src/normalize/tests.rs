@@ -3,9 +3,9 @@ use tutti_measure::Loudness;
 
 fn reading(lufs: f64, true_peak: f64) -> Loudness {
     Loudness {
-        lufs: Db::new(lufs),
-        true_peak: Db::new(true_peak),
-        range: Db::new(0.0),
+        lufs: Db(lufs),
+        true_peak: Db(true_peak),
+        range: Db(0.0),
     }
 }
 
@@ -16,7 +16,7 @@ fn peak_moves_the_true_peak_to_the_target() {
     let m = reading(-20.0, -6.0);
     let gain = Reading::Peak {
         measured: PeakReading::Placed(m),
-        target: Db::new(-1.0),
+        target: Db(-1.0),
     }
     .gain();
     assert!(
@@ -32,8 +32,8 @@ fn lufs_respects_the_true_peak_ceiling() {
     let m = reading(-20.0, -2.0);
     let gain = Reading::Lufs {
         loudness: m,
-        target: Db::new(-14.0),
-        ceiling: Db::new(-1.0),
+        target: Db(-14.0),
+        ceiling: Db(-1.0),
     }
     .gain();
     assert!(
@@ -47,10 +47,10 @@ fn lufs_respects_the_true_peak_ceiling() {
 #[test]
 fn lufs_defaults_to_a_minus_one_dbtp_ceiling() {
     assert_eq!(
-        Normalize::lufs(Db::new(-14.0)),
+        Normalize::lufs(Db(-14.0)),
         Normalize::Lufs {
-            target: Db::new(-14.0),
-            ceiling: Db::new(-1.0)
+            target: Db(-14.0),
+            ceiling: Db(-1.0)
         }
     );
 }
@@ -66,7 +66,7 @@ mod headroom {
 
     /// dBFS of `1 - lsbs / 2^(bits - 1)`: `lsbs` LSBs below full scale.
     fn below_full_scale(bits: u32, lsbs: f64) -> f64 {
-        Db::from_amplitude(Amplitude::new(1.0 - lsbs / f64::from(1u32 << (bits - 1)))).get()
+        Db::from_amplitude(Amplitude(1.0 - lsbs / f64::from(1u32 << (bits - 1)))).get()
     }
 
     /// An integer format keeps one LSB plus the dither's amplitude below full
@@ -96,37 +96,37 @@ mod headroom {
     #[test]
     fn a_target_above_the_limit_is_pulled_to_it() {
         let int16 = config(Pcm::Int16, Some(DitherShape::Triangular));
-        let limit = Db::new(below_full_scale(16, 2.0));
+        let limit = Db(below_full_scale(16, 2.0));
         let near = |a: Db, b: Db| (a.get() - b.get()).abs() < 1e-12;
 
-        let Normalize::Peak { target } = Normalize::peak(Db::new(0.0)).within(&int16) else {
+        let Normalize::Peak { target } = Normalize::peak(Db(0.0)).within(&int16) else {
             unreachable!()
         };
         assert!(near(target, limit), "{target:?}");
         assert_eq!(
-            Normalize::peak(Db::new(-1.0)).within(&int16),
-            Normalize::peak(Db::new(-1.0))
+            Normalize::peak(Db(-1.0)).within(&int16),
+            Normalize::peak(Db(-1.0))
         );
 
         let Normalize::Lufs { target, ceiling } = Normalize::Lufs {
-            target: Db::new(-14.0),
-            ceiling: Db::new(0.5),
+            target: Db(-14.0),
+            ceiling: Db(0.5),
         }
         .within(&int16) else {
             unreachable!()
         };
-        assert_eq!(target, Db::new(-14.0));
+        assert_eq!(target, Db(-14.0));
         assert!(near(ceiling, limit), "{ceiling:?}");
         assert_eq!(
-            Normalize::lufs(Db::new(-14.0)).within(&int16),
-            Normalize::lufs(Db::new(-14.0)),
+            Normalize::lufs(Db(-14.0)).within(&int16),
+            Normalize::lufs(Db(-14.0)),
             "the default -1 dBTP ceiling is under the limit"
         );
 
         let float = config(Pcm::Float32, Some(DitherShape::Triangular));
         assert_eq!(
-            Normalize::peak(Db::new(0.0)).within(&float),
-            Normalize::peak(Db::new(0.0))
+            Normalize::peak(Db(0.0)).within(&float),
+            Normalize::peak(Db(0.0))
         );
     }
 }
@@ -146,12 +146,7 @@ mod measurer {
     /// wrong channel reads something else.
     fn sine(secs: usize, amp: f64) -> Rendered {
         let plane = |amp: f64| -> Vec<f32> {
-            tutti_fixtures::signal::sine(
-                Hz::new(1_000.0),
-                Amplitude::new(amp),
-                RATE,
-                Samples::new(secs * 48_000),
-            )
+            tutti_fixtures::signal::sine(Hz(1_000.0), Amplitude(amp), RATE, Samples(secs * 48_000))
         };
         Rendered::new(vec![plane(amp), plane(amp / 2.0)], RATE, 0).expect("equal planes")
     }
@@ -165,11 +160,11 @@ mod measurer {
     ) -> Outcome<Loudness> {
         let mut control = Control::new(token).on_progress(report);
         control.weigh(Weights::Normalized);
-        let outcome = Normalize::peak(Db::new(-1.0))
+        let outcome = Normalize::peak(Db(-1.0))
             .measure(
                 rendered,
                 &Bed::Stereo.topology(),
-                Samples::new(0),
+                Samples(0),
                 rendered.frames(),
                 &mut control,
             )
@@ -185,11 +180,11 @@ mod measurer {
     /// The chunk is one second of audio, at least a frame.
     #[test]
     fn a_chunk_is_at_most_a_second() {
-        assert_eq!(chunk_frames(RATE), Samples::new(48_000));
-        assert_eq!(chunk_frames(SampleRate::SR_44K1), Samples::new(44_100));
-        assert_eq!(chunk_frames(SampleRate::of(0.2)), Samples::new(1));
+        assert_eq!(chunk_frames(RATE), Samples(48_000));
+        assert_eq!(chunk_frames(SampleRate::SR_44K1), Samples(44_100));
+        assert_eq!(chunk_frames(SampleRate::of(0.2)), Samples(1));
         // A fractional rate rounds up: the second is held whole.
-        assert_eq!(chunk_frames(SampleRate::of(44_100.5)), Samples::new(44_101));
+        assert_eq!(chunk_frames(SampleRate::of(44_100.5)), Samples(44_101));
     }
 
     /// The chunked reading of a known sine is its analytic loudness, and the
@@ -211,8 +206,7 @@ mod measurer {
             .into_finished()
             .expect("not cancelled");
 
-        let analytic_lufs =
-            Db::from_amplitude(Amplitude::new(0.1)).get() + Db::from_power(0.625).get();
+        let analytic_lufs = Db::from_amplitude(Amplitude(0.1)).get() + Db::from_power(0.625).get();
         assert!(
             (chunked.lufs.get() - analytic_lufs).abs() < 0.1,
             "{:?} vs {analytic_lufs}",
@@ -248,12 +242,8 @@ mod measurer {
         let whole = measure(&rendered, &CancelToken::new(), &mut |_| {})
             .into_finished()
             .expect("not cancelled");
-        let mut fine = Measurer::new(
-            RATE,
-            &Bed::Stereo.topology(),
-            Normalize::peak(Db::new(-1.0)),
-        )
-        .expect("meterable");
+        let mut fine = Measurer::new(RATE, &Bed::Stereo.topology(), Normalize::peak(Db(-1.0)))
+            .expect("meterable");
         let frames = rendered.frames().get();
         let mut at = 0;
         while at < frames {
@@ -291,7 +281,7 @@ mod measurer {
     #[test]
     fn a_topology_of_another_width_is_refused_by_name() {
         let rendered = sine(1, 0.1);
-        let err = Normalize::peak(Db::new(-1.0))
+        let err = Normalize::peak(Db(-1.0))
             .gain_for_rendered(&rendered, &Bed::Surround51.topology())
             .expect_err("stereo audio is not 5.1");
         assert!(
@@ -309,7 +299,7 @@ mod measurer {
     fn lufs_refuses_an_unplaced_topology_and_peak_does_not() {
         let rendered = sine(2, 0.1);
         let unplaced = ChannelTopology::unassigned(rendered.layout());
-        let err = Normalize::lufs(Db::new(-23.0))
+        let err = Normalize::lufs(Db(-23.0))
             .gain_for_rendered(&rendered, &unplaced)
             .expect_err("two unassigned channels have no angles");
         assert!(
@@ -323,7 +313,7 @@ mod measurer {
             "{err:?}"
         );
         assert!(
-            Normalize::peak(Db::new(-1.0))
+            Normalize::peak(Db(-1.0))
                 .gain_for_rendered(&rendered, &unplaced)
                 .is_ok()
         );

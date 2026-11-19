@@ -20,7 +20,7 @@ fn config(pcm: Pcm, dither: Option<DitherShape>) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: RATE,
-            duration_seconds: Seconds::new(0.1),
+            duration_seconds: Seconds(0.1),
             ..Default::default()
         },
         encode: EncodeConfig {
@@ -50,7 +50,7 @@ fn dc(value: f32) -> RenderGraph {
 /// on full scale.
 fn quarter_rate_sine() -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-    let id = g.add(Osc::sine(Hz::new(RATE.get() / 4.0)));
+    let id = g.add(Osc::sine(Hz(RATE.get() / 4.0)));
     g.pipe_output(id);
     built(g)
 }
@@ -114,7 +114,7 @@ fn a_zero_dbtp_target_leaves_an_integer_format_its_headroom() {
                 quarter_rate_sine(),
                 &config(pcm, dither),
                 &FrozenClock,
-                Normalize::peak(Db::new(0.0)),
+                Normalize::peak(Db(0.0)),
                 &path,
             )
             .unwrap();
@@ -124,7 +124,7 @@ fn a_zero_dbtp_target_leaves_an_integer_format_its_headroom() {
                 max_code(&path) <= full,
                 "{pcm:?} {dither:?}: past the top code"
             );
-            let want = tutti_units::Db::from_amplitude(tutti_units::Amplitude::new(
+            let want = tutti_units::Db::from_amplitude(tutti_units::Amplitude(
                 1.0 - lsbs / f64::from(1u32 << (bits - 1)),
             ))
             .get();

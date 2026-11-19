@@ -62,11 +62,11 @@ fn the_bands_are_the_documented_ones() {
 /// is advanced, and not every frame.
 #[test]
 fn frames_are_delivered_on_the_cadence_and_at_every_stage_change() {
-    let total = Samples::new(3 * DELIVERY_FRAMES + 100);
+    let total = Samples(3 * DELIVERY_FRAMES + 100);
     let seen = delivered(Weights::Normalized, |c| {
         c.begin(Stage::Rendering, Some(total));
         for done in 1..=total.get() {
-            c.advance(Stage::Rendering, Samples::new(done), total);
+            c.advance(Stage::Rendering, Samples(done), total);
         }
         c.begin(Stage::Measuring, Some(total));
         c.advance(Stage::Measuring, total, total);
@@ -100,7 +100,7 @@ fn frames_are_delivered_on_the_cadence_and_at_every_stage_change() {
 /// behind, and a stage's end is its band's end exactly.
 #[test]
 fn the_fraction_never_falls() {
-    let total = Samples::new(1000);
+    let total = Samples(1000);
     let seen = delivered(Weights::Streaming, |c| {
         c.begin(Stage::Rendering, Some(total));
         c.advance(Stage::Rendering, total, total);
@@ -172,7 +172,7 @@ fn preparing_reports_steps_in_the_band_the_render_leaves() {
     ))];
     let normalized = [Output::master(
         FileTarget::new("n.wav", Format::Wav(Pcm::Int16), ChannelLayout::STEREO)
-            .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-1.0))))),
+            .normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-1.0))))),
     )];
     for (outputs, steps, end) in [
         (&streaming, [(2u32, 0.025f32), (4, 0.05)], 0.05f32),
@@ -185,7 +185,7 @@ fn preparing_reports_steps_in_the_band_the_render_leaves() {
         for (done, _) in steps {
             control.preparing(outputs.iter().map(Output::target), done, 4);
         }
-        control.begin(Stage::Rendering, Some(Samples::new(10)));
+        control.begin(Stage::Rendering, Some(Samples(10)));
         for (p, (_, want)) in seen.iter().zip(steps) {
             assert!((p.fraction() - want).abs() < 1e-6, "{p:?} want {want}");
             assert_eq!(

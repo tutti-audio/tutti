@@ -24,8 +24,8 @@ fn unequal_planes_are_refused() {
         err,
         RenderedError::UnequalPlanes {
             plane: 2,
-            expected: Samples::new(4),
-            found: Samples::new(5),
+            expected: Samples(4),
+            found: Samples(5),
         }
     );
 }
@@ -37,7 +37,7 @@ fn the_getters_read_back_what_was_given() {
     let rendered = Rendered::new(planes.clone(), RATE, 7).unwrap();
     assert_eq!(rendered.planes(), planes.as_slice());
     assert_eq!(rendered.channels(), 2);
-    assert_eq!(rendered.frames(), Samples::new(3));
+    assert_eq!(rendered.frames(), Samples(3));
     assert_eq!(rendered.sample_rate(), RATE);
     assert_eq!(rendered.dropped_events(), 7);
     assert_eq!(rendered.into_planes(), planes);
@@ -64,7 +64,7 @@ fn a_render_becomes_the_wave_of_its_planes() {
         Rendered::new(vec![vec![0.1, 0.2, 0.3], vec![-0.1, -0.2, -0.3]], RATE, 7).unwrap();
     let wave = tutti_buffers::Wave::from(rendered);
     assert_eq!(wave.channels(), 2);
-    assert_eq!(wave.len(), Samples::new(3));
+    assert_eq!(wave.len(), Samples(3));
     assert_eq!(wave.sample_rate(), RATE);
     assert_eq!(wave.channel(0).samples(), [0.1, 0.2, 0.3]);
     assert_eq!(wave.channel(1).samples(), [-0.1, -0.2, -0.3]);

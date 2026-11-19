@@ -56,8 +56,8 @@ fn built(g: GraphBuilder, rate: f64) -> RenderGraph {
 fn tone_graph(rate: f64) -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let id = g.add(
-        Osc::sine(Hz::new(440.0))
-            .with_amplitude(Amplitude::new(0.5))
+        Osc::sine(Hz(440.0))
+            .with_amplitude(Amplitude(0.5))
             .with_layout(ChannelLayout::STEREO),
     );
     g.pipe_output(id);
@@ -107,9 +107,9 @@ fn config(seconds: f64, rate: f64, channels: ChannelLayout, format: Format) -> C
     Case {
         job: Job::new(
             rate,
-            Seconds::new(seconds).to_samples(rate),
-            Samples::new(0),
-            Samples::new(0),
+            Seconds(seconds).to_samples(rate),
+            Samples(0),
+            Samples(0),
         )
         .expect("a render"),
         format,
@@ -265,9 +265,7 @@ fn bench_resample(c: &mut Criterion) {
                     black_box(to_file(
                         dc_graph(from),
                         cfg,
-                        Some(Normalize::Peak {
-                            target: Db::new(-1.0),
-                        }),
+                        Some(Normalize::Peak { target: Db(-1.0) }),
                         &path,
                     ))
                 })

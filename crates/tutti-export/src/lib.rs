@@ -100,13 +100,13 @@
 //! // A render borrows its graph; build one per render.
 //! let tone = || {
 //!     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-//!     let osc = g.add(Osc::sine(Hz::new(440.0)));
+//!     let osc = g.add(Osc::sine(Hz(440.0)));
 //!     g.pipe_output(osc);
 //!     let (editor, executor) = g.build(RenderGraph::prepare(rate)).expect("builds");
 //!     RenderGraph::assemble(editor, executor, Setup::new()).expect("built together")
 //! };
 //!
-//! let job = Job::new(rate, Seconds::new(0.5).to_samples(rate), Samples::new(0), Samples::new(0))
+//! let job = Job::new(rate, Seconds(0.5).to_samples(rate), Samples(0), Samples(0))
 //!     .expect("a half second");
 //!
 //! // To buffers: planar, one `Vec` per channel, and `frames()` is FRAMES per

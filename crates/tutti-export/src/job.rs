@@ -34,7 +34,7 @@ pub enum EventLossPolicy {
 /// to allocate well under it ([`Error::RenderTooLarge`](crate::Error::RenderTooLarge)),
 /// and one written to a file is under the WAV format's own size limit long
 /// before it.
-pub const MAX_FRAMES: Samples = Samples::new(u32::MAX as usize);
+pub const MAX_FRAMES: Samples = Samples(u32::MAX as usize);
 
 /// The frames a render covers and the rate it is rendered at ([`Job::new`]).
 ///
@@ -71,14 +71,14 @@ impl Job {
         latency: Samples,
         tail: Samples,
     ) -> Result<Self, JobError> {
-        if length == Samples::new(0) {
+        if length == Samples(0) {
             return Err(JobError::ZeroLength);
         }
         let total = latency
             .get()
             .checked_add(length.get())
             .and_then(|n| n.checked_add(tail.get()));
-        match total.map(Samples::new) {
+        match total.map(Samples) {
             Some(n) if n <= MAX_FRAMES => {}
             total => return Err(JobError::TooLong { total }),
         }
@@ -127,12 +127,12 @@ impl Job {
 
     /// The frames the render keeps: the audible span plus the tail.
     pub fn output_length(&self) -> Samples {
-        self.length + self.tail
+        Samples(self.length.get() + self.tail.get())
     }
 
     /// The frames the graph is pulled for: what is kept plus the trimmed head.
     pub fn total(&self) -> Samples {
-        self.latency + self.length + self.tail
+        Samples(self.latency.get() + self.length.get() + self.tail.get())
     }
 }
 

@@ -24,7 +24,7 @@ use crate::{ConfigError, Result};
 // (scratch sized from `Prepare::max_block`), and tutti-sampler's
 // `tests/voice/block_length_invariance.rs` pins that a voice's frames do not
 // depend on its blocks.
-pub const GRAPH_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples::new(1024));
+pub const GRAPH_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples(1024));
 
 /// How a [`RenderGraph`] is assembled beyond its pair: the pool the render
 /// spreads its blocks over, and what the graph's output channels are.
@@ -154,12 +154,12 @@ impl Setup {
 ///
 /// let rate = SampleRate::SR_48K;
 /// let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-/// let tone = g.add(Osc::sine(Hz::new(440.0)));
+/// let tone = g.add(Osc::sine(Hz(440.0)));
 /// g.pipe_output(tone);
 /// let (editor, executor) = g.build(RenderGraph::prepare(rate)).expect("builds");
 /// let mut graph = RenderGraph::assemble(editor, executor, Setup::new()).expect("built together, so paired");
 ///
-/// let job = Job::new(rate, Seconds::new(0.1).to_samples(rate), Samples::new(0), Samples::new(0)).expect("a render");
+/// let job = Job::new(rate, Seconds(0.1).to_samples(rate), Samples(0), Samples(0)).expect("a render");
 /// let out = render_one(
 ///     &mut graph,
 ///     &job,
@@ -293,12 +293,12 @@ impl<F: Float> RenderGraph<F> {
     /// # use tutti_buffers::ChannelLayout;
     /// # let rate = SampleRate::SR_48K;
     /// # let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-    /// # let tone = g.add(Osc::sine(Hz::new(440.0)));
+    /// # let tone = g.add(Osc::sine(Hz(440.0)));
     /// # g.pipe_output(tone);
     /// # let (editor, executor) = g.build(RenderGraph::prepare(rate)).unwrap();
     /// # let graph = RenderGraph::assemble(editor, executor, Setup::new()).unwrap();
     /// let latency = graph.reported_latency();
-    /// let job = Job::new(rate, Samples::new(4_800), latency, Samples::new(0));
+    /// let job = Job::new(rate, Samples(4_800), latency, Samples(0));
     /// # let _ = job;
     /// ```
     ///
@@ -330,16 +330,16 @@ impl<F: Float> RenderGraph<F> {
     /// # use tutti_buffers::ChannelLayout;
     /// # let rate = SampleRate::SR_48K;
     /// # let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-    /// # let tone = g.add(Osc::sine(Hz::new(440.0)));
+    /// # let tone = g.add(Osc::sine(Hz(440.0)));
     /// # g.pipe_output(tone);
     /// # let (editor, executor) = g.build(RenderGraph::prepare(rate)).unwrap();
     /// # let graph = RenderGraph::assemble(editor, executor, Setup::new()).unwrap();
     /// let reported = graph.reported_tail();
     /// let tail = reported.samples().unwrap_or_else(|| {
     ///     // This bounce stops four seconds into an unbounded tail.
-    ///     Seconds::new(4.0).to_samples(rate)
+    ///     Seconds(4.0).to_samples(rate)
     /// });
-    /// let job = Job::new(rate, Samples::new(4_800), Samples::new(0), tail);
+    /// let job = Job::new(rate, Samples(4_800), Samples(0), tail);
     /// # let _ = job;
     /// ```
     pub fn reported_tail(&self) -> GraphTail {

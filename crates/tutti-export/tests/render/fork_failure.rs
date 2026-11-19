@@ -108,7 +108,7 @@ fn config() -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: RATE,
-            duration_seconds: Seconds::new((BLOCKS * GRAPH_MAX_BLOCK.get()) as f64 / RATE.get()),
+            duration_seconds: Seconds((BLOCKS * GRAPH_MAX_BLOCK.get()) as f64 / RATE.get()),
             ..Default::default()
         },
         encode: EncodeConfig {
@@ -183,7 +183,7 @@ fn a_fork_that_dies_fails_the_buffer_and_normalized_renders() {
         graph,
         &config(),
         &FrozenClock,
-        Normalize::peak(Db::new(-1.0)),
+        Normalize::peak(Db(-1.0)),
         &path,
     )
     .expect_err("the unit died");

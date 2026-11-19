@@ -13,9 +13,7 @@ struct Case {
 
 impl Case {
     fn plan(&self) -> RenderPlan {
-        RenderPlan::of(
-            &Job::new(self.rate, Samples::new(8), Samples::new(0), Samples::new(0)).unwrap(),
-        )
+        RenderPlan::of(&Job::new(self.rate, Samples(8), Samples(0), Samples(0)).unwrap())
     }
 
     fn target(&self, path: &Path) -> FileTarget {
@@ -48,11 +46,11 @@ fn config(channels: u16, pcm: Pcm) -> Case {
 fn a_plan_that_cannot_fit_is_refused_before_the_file_is_touched() {
     let dir = tempfile::tempdir().unwrap();
     let config = config(1, Pcm::Int16);
-    let frames = Samples::new(1 << 32);
+    let frames = Samples(1 << 32);
     let plan = RenderPlan {
         total: frames,
         output_length: frames,
-        latency: Samples::new(0),
+        latency: Samples(0),
     };
     let rate = config.rate;
     let path = dir.path().join("keep.wav");
@@ -82,11 +80,11 @@ fn the_limit_is_judged_at_the_output_rate() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("out.wav");
     let mut config = config(1, Pcm::Int16);
-    let frames = Samples::new((1 << 31) - 1_000);
+    let frames = Samples((1 << 31) - 1_000);
     let plan = RenderPlan {
         total: frames,
         output_length: frames,
-        latency: Samples::new(0),
+        latency: Samples(0),
     };
     let rate = config.rate;
     open_file::<f32>(&config.target(&path), &plan, rate)

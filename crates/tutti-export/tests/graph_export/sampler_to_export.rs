@@ -97,7 +97,7 @@ fn tone(frames: usize) -> Arc<Wave> {
 /// renders at: see the module docs.
 fn voice_graph(stretch: f64, cents: f64) -> (RenderGraph, Arc<OfflineTimeline>) {
     let transport = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat::new(0.0),
+        start_beat: Beat(0.0),
         tempo_map: Arc::new(TempoMap::constant(Bpm::of(TEMPO)).expect("a tempo")),
         sample_rate: SampleRate::of(SR),
         loop_range: None,
@@ -139,7 +139,7 @@ fn config(format: Format) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: SampleRate::of(SR),
-            duration_seconds: Seconds::new(DUR_S),
+            duration_seconds: Seconds(DUR_S),
             ..Default::default()
         },
         encode: EncodeConfig {

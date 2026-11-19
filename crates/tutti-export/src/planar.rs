@@ -29,7 +29,7 @@ pub(crate) fn join<A: Sample, B: Sample>(
     staging: &mut Vec<B>,
     layout: ChannelLayout,
 ) -> Result<()> {
-    let frames = Samples::new(planes.first().map_or(0, Vec::len));
+    let frames = Samples(planes.first().map_or(0, Vec::len));
     staging.clear();
     staging.resize(layout.interleaved_len(frames), B::SILENCE);
     if planes.is_empty() {

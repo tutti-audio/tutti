@@ -70,7 +70,7 @@ impl<F: Float> Spill<F> {
 
     /// Frames kept so far.
     pub(crate) fn frames(&self) -> Samples {
-        Samples::new(self.frames)
+        Samples(self.frames)
     }
 
     /// Whether the audio is in a file.

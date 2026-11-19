@@ -57,7 +57,7 @@ fn config_of(format: Format, frames: usize) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: RATE,
-            duration_seconds: Seconds::new(frames as f64 / RATE.get()),
+            duration_seconds: Seconds(frames as f64 / RATE.get()),
             ..Default::default()
         },
         encode: EncodeConfig {
@@ -218,8 +218,8 @@ fn a_cancel_leaves_the_file_it_would_have_replaced() {
         let old = b"an earlier export, byte for byte".to_vec();
         for (normalize, stage) in [
             (None, Stage::Rendering),
-            (Some(Normalize::peak(Db::new(-6.0))), Stage::Rendering),
-            (Some(Normalize::peak(Db::new(-6.0))), Stage::Writing),
+            (Some(Normalize::peak(Db(-6.0))), Stage::Rendering),
+            (Some(Normalize::peak(Db(-6.0))), Stage::Writing),
         ] {
             std::fs::write(&path, &old).unwrap();
             let r = run(&config(format), normalize, &path, |p| {
@@ -312,12 +312,12 @@ fn the_writing_stage_of_a_normalized_export_stops() {
         let path = dir.path().join(format!("n.{ext}"));
         let r = run(
             &config(format),
-            Some(Normalize::peak(Db::new(-6.0))),
+            Some(Normalize::peak(Db(-6.0))),
             &path,
             |p| p.stage() == Stage::Writing && done(p) >= 4096,
         );
         assert_eq!(r.outcome, Outcome::Cancelled, "{ext}");
-        let total = Samples::new(BLOCKS * GRAPH_MAX_BLOCK.get());
+        let total = Samples(BLOCKS * GRAPH_MAX_BLOCK.get());
         let rendering_end = r
             .seen
             .iter()
@@ -340,7 +340,7 @@ fn cancelling_the_rendering_stage_of_a_normalized_export_never_measures() {
     let path = dir.path().join("n.wav");
     let r = run(
         &config(Format::Wav(Pcm::Int16)),
-        Some(Normalize::peak(Db::new(-6.0))),
+        Some(Normalize::peak(Db(-6.0))),
         &path,
         |p| p.stage() == Stage::Rendering && done(p) >= 4096,
     );
@@ -431,7 +431,7 @@ impl Shape {
     }
 
     fn normalize(self) -> Option<Normalize> {
-        self.normalize.then(|| Normalize::peak(Db::new(-6.0)))
+        self.normalize.then(|| Normalize::peak(Db(-6.0)))
     }
 }
 

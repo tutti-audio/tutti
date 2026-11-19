@@ -148,7 +148,7 @@ impl<S: Sample> EncoderSink<S> {
         Self {
             encoder,
             layout,
-            frames: Samples::new(0),
+            frames: Samples(0),
             error: None,
             format: std::marker::PhantomData,
         }
@@ -429,7 +429,7 @@ pub(crate) fn replay_through<F: FftFloat>(
     control: &mut Control<'_>,
 ) -> Result<Outcome<Samples>> {
     let layout = chain.layout;
-    let mut block = vec![F::ZERO; layout.interleaved_len(Samples::new(block_frames.max(1)))];
+    let mut block = vec![F::ZERO; layout.interleaved_len(Samples(block_frames.max(1)))];
     let mut block = InterleavedMut::new(&mut block, layout)?;
     let mut at = done.get();
     loop {
@@ -440,11 +440,11 @@ pub(crate) fn replay_through<F: FftFloat>(
         if n == 0 {
             break;
         }
-        chain.block(block.as_interleaved().slice(Samples::ZERO..Samples::new(n)))?;
+        chain.block(block.as_interleaved().slice(Samples::ZERO..Samples(n)))?;
         at += n;
-        control.advance(stage, Samples::new(at), total);
+        control.advance(stage, Samples(at), total);
     }
-    Ok(Outcome::Finished(Samples::new(at)))
+    Ok(Outcome::Finished(Samples(at)))
 }
 
 /// Replays `rendered` into a chain for `target` (the converter at the planes'
@@ -474,7 +474,7 @@ pub(crate) fn write_planes<F: FftFloat>(
     let plan = RenderPlan {
         total: frames,
         output_length: frames,
-        latency: Samples::new(0),
+        latency: Samples(0),
     };
     // The frames' OWN rate: these planes may have been rendered under a
     // different config entirely.
@@ -486,7 +486,7 @@ pub(crate) fn write_planes<F: FftFloat>(
         &mut chain,
         REPLAY_BLOCK,
         Stage::Writing,
-        Samples::new(0),
+        Samples(0),
         frames,
         control,
     )?;

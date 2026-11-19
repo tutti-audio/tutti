@@ -72,7 +72,7 @@ fn config(format: Format) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: tutti_units::SampleRate::of(SR),
-            duration_seconds: Seconds::new(DUR),
+            duration_seconds: Seconds(DUR),
             ..Default::default()
         },
         encode: EncodeConfig {
@@ -335,7 +335,7 @@ fn a_resampled_export_preserves_the_signal_not_just_the_frame_count() {
         cfg.resample = Some(tutti_export::Resample::to(tutti_units::SampleRate::of(
             target,
         )));
-        cfg.render.duration_seconds = Seconds::new(0.25);
+        cfg.render.duration_seconds = Seconds(0.25);
 
         render_to_file(dc_graph(0.4), &cfg, &FrozenClock, &path).unwrap();
 
@@ -375,7 +375,7 @@ fn written_frames_is_what_the_file_holds() {
     for target in [None, Some(48_000.0f64), Some(22_050.0)] {
         let path = d.path().join(format!("frames_{target:?}.wav"));
         let mut cfg = config(Format::Wav(Pcm::Int16));
-        cfg.render.duration_seconds = Seconds::new(0.25);
+        cfg.render.duration_seconds = Seconds(0.25);
         if let Some(rate) = target {
             cfg.resample = Some(tutti_export::Resample::to(tutti_units::SampleRate::of(
                 rate,

@@ -68,8 +68,8 @@ fn built(g: GraphBuilder) -> RenderGraph {
 fn sine_graph(freq: f64) -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let id = g.add(
-        Osc::sine(Hz::new(freq))
-            .with_amplitude(Amplitude::new(0.5))
+        Osc::sine(Hz(freq))
+            .with_amplitude(Amplitude(0.5))
             .with_layout(ChannelLayout::STEREO),
     );
     g.pipe_output(id);
@@ -80,7 +80,7 @@ fn config(freq_target: SampleRateTarget) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: tutti_units::SampleRate::of(IN_RATE),
-            duration_seconds: Seconds::new(1.0),
+            duration_seconds: Seconds(1.0),
             ..Default::default()
         },
         encode: EncodeConfig {

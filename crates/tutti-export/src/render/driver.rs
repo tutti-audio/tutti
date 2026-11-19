@@ -198,7 +198,7 @@ impl<'a, F: Float> GraphSource<'a, F> {
             outputs,
             root,
             max_block,
-            produced: Samples::new(0),
+            produced: Samples(0),
             before,
             rt_log,
         })
@@ -289,7 +289,7 @@ impl<F: Float> GraphSource<'_, F> {
         // as a host's control loop would free them.
         self.editor.collect();
         drain_rt_log(self.rt_log.as_ref());
-        self.produced += Samples::new(block_size);
+        self.produced = Samples(self.produced.get() + block_size);
         block_size
     }
 
@@ -407,7 +407,7 @@ impl<'a, F: Float> PlaneSource<'a, F> {
             planes,
             fold,
             silence: Vec::new(),
-            pos: Samples::new(0),
+            pos: Samples(0),
         }
     }
 }
@@ -422,9 +422,9 @@ impl<F: Float> Replay<F> for PlaneSource<'_, F> {
         if n == 0 {
             return Ok(0);
         }
-        let block = out.slice_mut(Samples::ZERO..Samples::new(n));
+        let block = out.slice_mut(Samples::ZERO..Samples(n));
         let pos = self.pos.get();
-        let span = Samples::new(pos)..Samples::new(pos + n);
+        let span = Samples(pos)..Samples(pos + n);
         // Both write every sample of every frame (rather than leaving whatever
         // the buffer held), which matters because the caller's block is reused
         // across iterations.
@@ -453,7 +453,7 @@ impl<F: Float> Replay<F> for PlaneSource<'_, F> {
                 interleave(Planes::new(&table)?, block)?;
             }
         }
-        self.pos += Samples::new(n);
+        self.pos = Samples(self.pos.get() + n);
         Ok(n)
     }
 }
@@ -499,7 +499,7 @@ where
     C: FnMut(&GraphSource<'_, F>, usize, Range<usize>) -> crate::Result<()>,
 {
     let max_block = src.max_block().max(1);
-    let mut kept = Samples::new(0);
+    let mut kept = Samples(0);
 
     control.begin(stage, Some(plan.total));
     while src.produced() < plan.total {
@@ -512,7 +512,7 @@ where
         let want = plan
             .total
             .remaining_after(src.produced())
-            .min(Samples::new(max_block));
+            .min(Samples(max_block));
         let block_start = src.produced();
         let n = src.render_block(want.get());
         if n == 0 {
@@ -525,10 +525,10 @@ where
             kept_so_far: kept,
             output_length: plan.output_length,
         };
-        let window = cursor.window(Samples::new(n));
+        let window = cursor.window(Samples(n));
         let kept_now = window.len();
         consume(src, n, window)?;
-        kept += Samples::new(kept_now);
+        kept = Samples(kept.get() + kept_now);
         control.advance(stage, src.produced(), plan.total);
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);

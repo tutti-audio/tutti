@@ -64,7 +64,7 @@ fn config(dither: Option<DitherShape>, bit_depth: Pcm) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: tutti_units::SampleRate::of(SR),
-            duration_seconds: Seconds::new(0.5),
+            duration_seconds: Seconds(0.5),
             ..Default::default()
         },
         encode: EncodeConfig {

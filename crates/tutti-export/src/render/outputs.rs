@@ -126,9 +126,9 @@ pub(crate) fn render_outputs<F: FftFloat>(
                         continue;
                     }
                     let frames = window.len();
-                    let samples = lane.layout.interleaved_len(Samples::new(frames));
+                    let samples = lane.layout.interleaved_len(Samples(frames));
                     let mut block = InterleavedMut::new(&mut lane.scratch[..samples], lane.layout)?;
-                    let span = Samples::new(window.start)..Samples::new(window.end);
+                    let span = Samples(window.start)..Samples(window.end);
                     lane.fold.fold_planar_to_interleaved(
                         Planes::from_vecs(planes)?.slice(span),
                         block.reborrow(),
@@ -296,7 +296,7 @@ fn open_lanes<F: FftFloat>(
             tap,
             layout,
             placement,
-            scratch: vec![F::ZERO; layout.interleaved_len(Samples::new(max_block))],
+            scratch: vec![F::ZERO; layout.interleaved_len(Samples(max_block))],
             sink,
         });
     }
@@ -333,7 +333,7 @@ fn drain_tap<F: Float>(output: usize, tap: &mut TapFeed<F>, n: usize) -> Result<
     let mut planes = PlanesMut::from_vecs(&mut tap.planes)?;
     let got = tap
         .reader
-        .pop_planes(planes.slice_mut(Samples::ZERO..Samples::new(n)))?;
+        .pop_planes(planes.slice_mut(Samples::ZERO..Samples(n)))?;
     let lost = tap.reader.take_lost();
     if lost.get() > 0 {
         return Err(Error::TapOverrun { output, lost });
@@ -377,7 +377,7 @@ fn finish<F: FftFloat>(
             .filter(|&i| waiting_of(&lanes[i]).spec.gain() == GainSource::Own)
             .collect();
         // Measuring: the outputs that choose their own gain, a spill each.
-        let total = Samples::new(
+        let total = Samples(
             own.iter()
                 .map(|&i| waiting_of(&lanes[i]).spill.frames().get())
                 .sum(),
@@ -387,7 +387,7 @@ fn finish<F: FftFloat>(
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
-        let mut done = Samples::new(0);
+        let mut done = Samples(0);
         for &i in &own {
             control.set_output(i);
             let w = waiting_of(&lanes[i]);
@@ -415,7 +415,7 @@ fn finish<F: FftFloat>(
 
         // Writing: every waiting output, read back through its chain with its
         // gain.
-        let total = Samples::new(
+        let total = Samples(
             waiting
                 .iter()
                 .map(|&i| waiting_of(&lanes[i]).spill.frames().get())
@@ -426,7 +426,7 @@ fn finish<F: FftFloat>(
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
-        let mut done = Samples::new(0);
+        let mut done = Samples(0);
         for &i in &waiting {
             control.set_output(i);
             let Sink::Spill { chain, waiting } = &mut lanes[i].sink else {
@@ -533,7 +533,7 @@ fn measure<F: FftFloat>(
     let mut staging: Vec<F> = Vec::new();
     let mut replay = waiting.spill.replay()?;
     let chunk = chunk_frames(rate).get();
-    let mut block = vec![F::ZERO; layout.interleaved_len(Samples::new(chunk))];
+    let mut block = vec![F::ZERO; layout.interleaved_len(Samples(chunk))];
     let mut block = InterleavedMut::new(&mut block, layout)?;
     loop {
         if control.is_cancelled() {
@@ -543,7 +543,7 @@ fn measure<F: FftFloat>(
         if n == 0 {
             break;
         }
-        let frames = block.as_interleaved().slice(Samples::ZERO..Samples::new(n));
+        let frames = block.as_interleaved().slice(Samples::ZERO..Samples(n));
         match resampler.as_mut() {
             Some((rs, planes, out)) => {
                 crate::planar::split(frames, planes)?;
@@ -552,7 +552,7 @@ fn measure<F: FftFloat>(
             }
             None => measurer.feed_interleaved(frames)?,
         }
-        done += Samples::new(n);
+        done = Samples(done.get() + n);
         control.advance(Stage::Measuring, done, total);
     }
     // The loop above ends on a read that found nothing left, after its check
