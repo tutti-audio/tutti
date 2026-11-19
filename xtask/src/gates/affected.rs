@@ -53,6 +53,8 @@ const IGNORED: &[&str] = &["docs/"];
 /// changed package instead of depending on it, an edge a manifest does not
 /// hold (`tutti_fixtures::plugin_server` and `plugin_probe` find the binary).
 /// A spawner is selected when any of `changed` is, and so is whatever reaches it.
+/// A suite that starts a binary, or loads a cdylib by name, without a
+/// dependency on its package adds a row here.
 const SPAWNS: &[(&[&str], &[&str])] = &[(
     &[
         "tutti-plugin-server",
