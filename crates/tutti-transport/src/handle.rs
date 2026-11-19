@@ -97,7 +97,7 @@ impl Transport {
             position_writeback: Some(Arc::clone(&self.settings.beat)),
             segment_generation: Some(Arc::clone(&self.settings.segment_generation)),
             steady_time: Some(Arc::clone(&self.settings.steady_time)),
-            tempo_in_force: Some(Arc::clone(&self.settings.tempo_in_force)),
+            current_tempo: Some(Arc::clone(&self.settings.current_tempo)),
         }
     }
 

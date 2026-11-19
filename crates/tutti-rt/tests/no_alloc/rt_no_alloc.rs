@@ -153,6 +153,26 @@ fn seq_cell_write_and_read_are_allocation_free() {
     });
 }
 
+/// `SeqSlotsWriter::write` and `new_epoch`, and `SeqSlotsReader::drain`, neither
+/// allocate nor free.
+#[test]
+fn seq_slots_write_and_drain_are_allocation_free() {
+    let (mut writer, mut reader) = tutti_rt::seq_slots::<f64>(64);
+    assert_no_alloc::assert_no_alloc(|| {
+        for round in 0..100u32 {
+            for slot in 0..64 {
+                writer.write(slot, f64::from(round));
+            }
+            if round % 10 == 0 {
+                writer.new_epoch();
+            }
+            let mut yielded = 0;
+            reader.drain(|_, _| yielded += 1);
+            assert_eq!(yielded, if round % 10 == 0 { 0 } else { 64 });
+        }
+    });
+}
+
 /// `PackedAtomic::store` and `load` neither allocate nor free.
 #[test]
 fn packed_atomic_store_and_load_are_allocation_free() {

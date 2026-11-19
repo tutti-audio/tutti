@@ -124,12 +124,7 @@ const ONLY: &[(&str, &[&str])] = &[
     ("tutti-rt", &["tutti-units", "tutti-buffers"]),
     (
         "tutti-midi-network",
-        &[
-            "tutti-ump",
-            "tutti-midi-ci",
-            "tutti-midi-device",
-            "tutti-units",
-        ],
+        &["tutti-ump", "tutti-midi-ci", "tutti-units"],
     ),
     ("tutti-metering", &["tutti-units"]),
     // The staged files' `Mint` and the encoders' worker threads (`spawn_named`).
@@ -220,7 +215,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-au-host",
         ],
     ),
-    ("tutti-dsp", &["tutti-units", "tutti-buffers"]),
+    ("tutti-dsp", &["tutti-units", "tutti-buffers", "tutti-rt"]),
     ("tutti-curve", &["tutti-units"]),
     ("tutti-buffers", &["tutti-units"]),
     (

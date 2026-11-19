@@ -342,7 +342,7 @@ impl ParamSegment {
         SamplePosition::new(self.span.get()).to_samples_ceil()
     }
 
-    /// The raw value `j` frames after the event's frame (`Samples(0)`: its
+    /// The raw value `j` frames after the event's frame (`Samples::new(0)`: its
     /// own), whatever the unit: the value a param port gives this source
     /// there, for a node that takes point values (a hosted plugin's
     /// parameter) or a test. Past `u32::MAX` frames it reads the value
@@ -353,7 +353,7 @@ impl ParamSegment {
 
     /// How many frames after the event's frame the segment arrives: the
     /// first `j` at which [`raw_value_after`](Self::raw_value_after) is the
-    /// end value (`Samples(0)` for a step). For a node that takes point values
+    /// end value (`Samples::new(0)` for a step). For a node that takes point values
     /// and must land the end value on its frame.
     pub fn arrives_after(&self) -> Samples {
         Samples::new(arrival(self.timing()) as usize)

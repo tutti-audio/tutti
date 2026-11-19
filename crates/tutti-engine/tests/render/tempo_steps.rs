@@ -22,7 +22,7 @@ use tutti_graph::{OutPort, Source};
 use tutti_music::{LoopRange, first_frame_at_or_after};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{
-    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Transport,
+    AfterLocate, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport,
     render_graph,
 };
 use tutti_units::{At, Beat, Bpm, SampleRate, Samples, Tail};
@@ -293,7 +293,7 @@ fn a_seek_seats_at_the_exact_beat_in_its_step() {
     let locate = |beat: f64| MotionEvent::Locate {
         beat: Beat::new(beat),
         fade: FadeOut::Immediate,
-        then: Then::Keep,
+        then: AfterLocate::Keep,
     };
     let mut at = 1_000;
     let mut check = |beat: f64, frames: usize, want: &dyn Fn(usize) -> f64| {

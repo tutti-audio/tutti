@@ -20,6 +20,7 @@
 mod control_handle;
 mod controls;
 mod fork_state;
+mod in_process_erased;
 mod listeners;
 mod liveness;
 mod meter;
@@ -39,6 +40,9 @@ mod walk_tests;
 pub use control_handle::{MainThreadControl, PluginHandle, PluginStatus};
 pub use controls::{ForkedSources, NodeControls, PluginControls, PluginReports};
 pub use fork_state::ForkState;
+pub use in_process_erased::{
+    Commit, InProcessClient, InProcessNode, InProcessRebinder, InProcessRebuilt,
+};
 pub use listeners::{
     InvalidateSink, Listener, ParameterChangeSink, PluginSignal, RefreshSink, Subscription,
     TransportSink,

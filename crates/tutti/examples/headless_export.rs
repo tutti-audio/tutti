@@ -39,8 +39,8 @@ fn session_with(node: impl Node + Clone + 'static) -> Session {
 /// A 440 Hz tone at -12 dBFS, in stereo.
 fn tone() -> Session {
     session_with(
-        Osc::sine(Hz(440.0))
-            .with_amplitude(Amplitude(0.25))
+        Osc::sine(Hz::new(440.0))
+            .with_amplitude(Amplitude::new(0.25))
             .with_layout(ChannelLayout::STEREO),
     )
 }
@@ -55,7 +55,7 @@ const FORMAT: Format = Format::Wav(Pcm::Int24);
 
 /// The first `seconds` of the project.
 fn first(seconds: f64) -> Bounce {
-    Bounce::project().range(Range::Seconds(Seconds(0.0), Seconds(seconds)))
+    Bounce::project().range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

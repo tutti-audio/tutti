@@ -930,7 +930,7 @@ fn setup(mut mods: Mods, scene: Res<Scene>) {
     let gain = ParamRef::unit(scene.pad, UnitParam::Volume);
     mods.range(cutoff, 0.0, 1_000.0);
     mods.range(gain, 0.0, 1.0);
-    let wobble = mods.lfo(Lfo::sine().rate(BeatDuration(0.5)));
+    let wobble = mods.lfo(Lfo::sine().rate(BeatDuration::new(0.5)));
     mods.route(wobble, cutoff, Depth(0.3));
     let kick = mods.follower(scene.kick_bus);
     mods.route(kick, gain, Depth(-0.6)); // sidechain

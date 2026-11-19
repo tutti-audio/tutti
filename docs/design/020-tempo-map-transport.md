@@ -29,7 +29,7 @@ built; see the as-built notes at §9. §11 (following an outside tempo, MIDI L7c
 
 | Piece | Where | What it does |
 |---|---|---|
-| `AtomicBpm` | `tutti-transport` `state.rs`, `settings.rs` | The one tempo. `TransportSettings::set_tempo` stores it; `tempo()` loads it. `tempo_in_force` is the clock's write-back for readers. |
+| `AtomicBpm` | `tutti-transport` `state.rs`, `settings.rs` | The one tempo. `TransportSettings::set_tempo` stores it; `tempo()` loads it. `current_tempo` is the clock's write-back for readers. |
 | `tempo_in_effect(asked, in_force)` | `clock.rs` | Hysteresis: a tempo within `TEMPO_EPSILON` (0.001 BPM) of the one in force is the one in force, so ULP noise from a control source does not restart the clock every block. |
 | `Control` | `clock.rs` | The untimed inputs, read once per block: `tempo`, `paused`, loop, `recording`. |
 | `FrameClock` / `TimelineSegment` | `tutti-types` `value/frame_clock.rs`, `timeline.rs` | A frame count on a constant-tempo segment `(origin_frame, origin_beat, tempo, rate)`; the beat is `origin_beat + frames x tempo / (60 x rate)` in closed form. `set_tempo` starts a segment only when the tempo differs; a seek, rate change or loop wrap also restarts. |
@@ -414,7 +414,7 @@ published. What landed:
   `t(b) = 4 ln(120 / (120 - 15 b))` of its test.
 - **Dense changes.** A 512-frame block of a ramp carries 3 to 5 changes and
   runs whole; a block that reaches the graph at 1 024 frames or more needs
-  more than 8, and the stage 3 cut (`TempoAhead::limit`) splits it where the
+  more than 8, and the stage 3 cut (`UpcomingTempo::limit`) splits it where the
   ninth would begin. The cut cannot change the render (`TempoView::chord_cell` does not
   depend on where blocks begin): the beats are the same to the bit at block
   sizes 1, 64, 100, 512, 1 000, 4 096 and ragged.
@@ -642,7 +642,7 @@ constant-tempo path is left beside it. What went, and what stands in for it:
 | Retired | Now |
 |---|---|
 | `TransportCommand::Tempo` | A point in the map (`TransportSettings::set_tempo_map`, or `set_tempo` for a constant one), taken at the next block start. |
-| `TransportSettings::tempo()` and its `AtomicBpm` mirror, and `ClockLinks::tempo` | Nothing: the audio side reads the map it lends (`TransportAudio` seeds the clock from its first point and keeps the block's constant tempo of a constant map). `tempo_in_force` stays: it is what the clock ran at, not an input. |
+| `TransportSettings::tempo()` and its `AtomicBpm` mirror, and `ClockLinks::tempo` | Nothing: the audio side reads the map it lends (`TransportAudio` seeds the clock from its first point and keeps the block's constant tempo of a constant map). `current_tempo` stays: it is what the clock ran at, not an input. |
 | `Transport::samples_per_beat` | `TempoView::frame_at_or_after(beat)` (no caller outside tests; a beat is not a constant number of frames under a map). |
 | `Timeline::tempo() -> Bpm` | `Timeline::tempo_map() -> Arc<TempoMap>`; a tempo is `tempo_map().tempo_at(beat)`. The live transport answers the published map, an `OfflineTimeline` the one it was built on. |
 | `OfflineTimelineConfig::tempo`, `OfflineTimeline::with_tempo_map`, `::tempo()`, `::beats_per_sample()` | `OfflineTimelineConfig::tempo_map: Arc<TempoMap>` (default: 120 BPM constant), one constructor, `new`. |

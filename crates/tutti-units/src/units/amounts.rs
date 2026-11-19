@@ -37,7 +37,7 @@ unit! {
     /// It is also a position on a `0..1` scale among a node's own settings,
     /// not only between dry and wet (a reverb's diffusion or size, which each
     /// algorithm maps onto its scale).
-    pub struct Mix(pub f64): Unit, Ordered, Bounded;
+    pub struct Mix(f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable` / `Additive`: see the type doc. Two blends
 // summing to 1.4 is off the end of the crossfade.
@@ -73,7 +73,7 @@ unit! {
     /// balance control on a stereo pair is [`Balance`].
     /// Distinct from [`Depth`]: a pan position and a modulation amount are
     /// different quantities that happen to share a range.
-    pub struct Pan(pub f64): Unit, Ordered, Bounded, Signed;
+    pub struct Pan(f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable`: half of a pan position is not a pan position — the
 // same argument `Mix` makes. Moving a source is `Azimuth::lerp_shortest`'s
@@ -106,7 +106,7 @@ unit! {
     /// side, and it holds no power constant. A [`Pan`] places a source with a
     /// panner's law, and [`StereoBalance`] is the engine's measured balance, a
     /// reading; there is no conversion between the three.
-    pub struct Balance(pub f64): Unit, Ordered, Bounded, Signed;
+    pub struct Balance(f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable` / `Additive`: a position on a segment, as `Pan` is; half a
 // balance is not a balance, and two do not sum.
@@ -148,7 +148,7 @@ unit! {
     /// Must stay below 1.0 or the loop it feeds grows without bound — a
     /// delay line at unity feedback never decays. [`MAX_STABLE`](Self::MAX_STABLE)
     /// is the one ceiling every consumer clamps against.
-    pub struct Feedback(pub f64): Unit, Ordered, Bounded;
+    pub struct Feedback(f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable`: scaling a coefficient walks it across the stability
 // bound with no check. `new_clamped` is the only way in.
@@ -466,7 +466,7 @@ unit! {
     /// because it is **not a multiplier on the signal**: it selects or
     /// parameterizes a shaping curve. Typing it as a gain would license
     /// `sample * drive`, which is meaningless for a curve selector.
-    pub struct Drive(pub f64): Unit, Ordered, Bounded;
+    pub struct Drive(f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable`: "twice the drive" is not twice anything — the curve's
 // response is nonlinear by construction.
@@ -484,7 +484,7 @@ unit! {
     /// Not a [`Mix`] — it blends no pair of signals; it is a geometric
     /// property of the panning solution, and the VBAP panner consumes it as
     /// such. Sharing `Mix`'s range is not sharing its meaning.
-    pub struct Spread(pub f64): Unit, Ordered, Bounded;
+    pub struct Spread(f64): Unit, Ordered, Bounded;
 }
 
 impl Spread {
@@ -509,7 +509,7 @@ unit! {
     /// component against the mid, so it reshapes the stereo image rather than
     /// making the signal louder. Typing it as a gain would invite it into
     /// signal multiplications where it does not belong.
-    pub struct StereoWidth(pub f64): Unit, Ordered, Bounded;
+    pub struct StereoWidth(f64): Unit, Ordered, Bounded;
 }
 
 impl StereoWidth {
@@ -539,7 +539,7 @@ unit! {
     ///
     /// Not an [`Amplitude`] or a [`Drive`]: it is a resolution, a count of bits and
     /// not a factor on a signal.
-    pub struct BitDepth(pub f64): Unit, Ordered, Bounded;
+    pub struct BitDepth(f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive`: two word lengths do not sum into a third; the bits a quantizer
 // keeps are chosen, not accumulated.

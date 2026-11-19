@@ -81,7 +81,7 @@ impl Lfo {
 
     /// Its rate: a [`BeatsPerCycle`] (one cycle per that many beats, bar-locked)
     /// or an `Hz` (cycles per second): `lfo.rate(BeatsPerCycle::of(4.0))`,
-    /// `lfo.rate(Hz(0.5))`.
+    /// `lfo.rate(Hz::new(0.5))`.
     #[must_use]
     pub fn rate(mut self, rate: impl Into<LfoRate>) -> Self {
         self.rate = rate.into();

@@ -6,10 +6,8 @@
 //! and spread are recomputed only when they change, so the audio thread does an
 //! array index rather than the trigonometry.
 
-use std::num::NonZeroU32;
 use tutti_buffers::Float;
-use tutti_dsp::Xorshift32;
-use tutti_rt::Param;
+use tutti_rt::{Param, SplitMix64};
 use tutti_units::{Amplitude, CentsSpan, Pan, Phase, Spread};
 
 pub(crate) const MAX_UNISON_VOICES: usize = UnisonVoices::MAX as usize;
@@ -113,7 +111,7 @@ pub struct UnisonConfig {
     /// `false` (the default) starts them all in phase, so every note begins
     /// with a brief transient spike as the copies reinforce before the detune
     /// pulls them apart. `true` trades that consistent attack for a softer,
-    /// note-to-note-varying one. The generator is a seeded xorshift, so a
+    /// note-to-note-varying one. The generator is a seeded [`SplitMix64`], so a
     /// render is reproducible.
     pub phase_randomize: bool,
 }
@@ -148,13 +146,13 @@ pub struct UnisonVoiceParams {
 }
 
 /// The seed of the phase scatter, so a render is reproducible.
-const PHASE_SEED: NonZeroU32 = NonZeroU32::new(12345).expect("the seed is nonzero");
+const PHASE_SEED: u64 = 12345;
 
 #[derive(Debug, Clone)]
 pub struct UnisonEngine {
     config: UnisonConfig,
     voices: [UnisonVoiceParams; MAX_UNISON_VOICES],
-    rng: Xorshift32,
+    rng: SplitMix64,
     /// Control-rate-modulatable mirrors of `config.detune_cents` /
     /// `config.stereo_spread`. A modulator writes these (through the
     /// synth's `ParamSet`); [`sync_from_atomics`](Self::sync_from_atomics),
@@ -172,7 +170,7 @@ impl UnisonEngine {
         let mut engine = Self {
             config,
             voices: [UnisonVoiceParams::default(); MAX_UNISON_VOICES],
-            rng: Xorshift32::new(PHASE_SEED),
+            rng: SplitMix64::new(PHASE_SEED),
             detune,
             spread,
         };
@@ -278,8 +276,7 @@ impl UnisonEngine {
         let count = usize::from(self.config.voice_count.get());
 
         for i in 0..count {
-            self.voices[i].phase_offset =
-                Phase::new(Xorshift32::to_unit::<f64>(self.rng.next_u32()));
+            self.voices[i].phase_offset = Phase::new(f64::from_fraction_bits(self.rng.next_u64()));
         }
         self.all_params()
     }

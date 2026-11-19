@@ -29,7 +29,7 @@
 //! // with its key; they set its parameters live.
 //! let (tone, _controls) = session
 //!     .graph()
-//!     .add(LfoNode::new(LfoShape::Sine).with_rate(Hz(440.0)));
+//!     .add(LfoNode::new(LfoShape::Sine).with_rate(Hz::new(440.0)));
 //! session.graph().connect(tone, Root).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
@@ -143,7 +143,9 @@ pub use tutti_graph::{
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_rt::PushError;
-pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, TransportCommand};
+pub use tutti_transport::{
+    AfterLocate, FadeOut, LoopRegion, MotionEvent, MotionState, TransportCommand,
+};
 
 // Units, channels, buffers and the musical meter.
 pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
@@ -416,9 +418,9 @@ pub mod session {
     pub use tutti_session::{
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError,
-        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen, Inlet,
-        InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened, Outlet,
-        OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError,
+        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, Inlet, InletError,
+        LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened, Outlet, OutputPlacement,
+        OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer, PeerError,
         Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, RemoveError,
         Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration, RootReader,
         RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError, Weighted, Wire,

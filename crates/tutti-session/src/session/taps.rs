@@ -5,7 +5,7 @@ use tutti_graph::MeterReader;
 use tutti_metering::LoadMeter;
 use tutti_units::Samples;
 
-use crate::{AppKey, Clock, HeardOpen, Session, SessionOutputTapError};
+use crate::{AppKey, Clock, OutputTapOpen, Session, SessionOutputTapError};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Opens the tap on **what the engine renders**: every output channel at
@@ -37,11 +37,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`SessionOutputTapError::Detached`] on a session without an engine,
     /// and [`SessionOutputTapError::Tap`]`(Busy)` while another reader is alive. While the
     /// audio thread has not taken the last installs it is not an error: the
-    /// call returns [`HeardOpen::Retry`] and opens nothing.
+    /// call returns [`OutputTapOpen::Retry`] and opens nothing.
     pub fn open_output_tap(
         &self,
         capacity: Samples,
-    ) -> Result<HeardOpen<C::Float>, SessionOutputTapError> {
+    ) -> Result<OutputTapOpen<C::Float>, SessionOutputTapError> {
         let (taps, layout) = self
             .output
             .taps

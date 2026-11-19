@@ -2412,7 +2412,7 @@ impl<F: Float> Graph<F> {
     }
 
     /// Connects `from` to `to` and returns the connection, which a gain can
-    /// follow: `g.connect(osc.out(0), lp.input(0))?.gain(Amplitude(0.5))?`.
+    /// follow: `g.connect(osc.out(0), lp.input(0))?.gain(Amplitude::new(0.5))?`.
     ///
     /// What the two ends are says what is connected:
     ///

@@ -145,7 +145,7 @@ impl OfflineTimeline {
         let mut walk = TempoWalk::default();
         let stepped = map.constant_tempo().is_none();
         if stepped {
-            walk.place(map, &mut clock);
+            walk.sync_tempo(map, &mut clock);
         }
         Self {
             current_beat: AtomicF64::new(config.start_beat.get()),
@@ -173,7 +173,7 @@ impl OfflineTimeline {
         // `LoopRange` is non-empty by construction, so no guard. Only a
         // crossing wraps, as for the clock (`LoopRange::advance`).
         if self.stepped {
-            walk.roll(
+            walk.advance(
                 &self.tempo_map,
                 clock,
                 samples.get(),
@@ -226,7 +226,7 @@ impl OfflineTimeline {
         let mut head = self.lock();
         let Head { clock, walk } = &mut *head;
         if self.stepped {
-            walk.seat(&self.tempo_map, clock, beat.into());
+            walk.seek(&self.tempo_map, clock, beat.into());
         } else {
             clock.seat(beat.into());
         }

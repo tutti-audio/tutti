@@ -261,7 +261,7 @@ the interpreter.
   drain) is built; a fork's node registers on its own new cell,
   and a control-side `&self` method keeps a mirror instead of reading a
   cell the audio thread reads. The plugin meter is one cell per node
-  (`MeterSlot`), which `ProjectMeter::set_meter` publishes into before it
+  (`TimeSignatureSlot`), which `ProjectMeter::set_meter` publishes into before it
   returns. `MidiIn::poll_block` takes `&mut self`. `debug_check_reclaiming`
   and `PARKED_LOAN_LIMIT` are gone: a node cannot park a `Loan` across
   blocks, and a `mem::forget` pins one value per reader. The per-channel
@@ -739,7 +739,7 @@ place that loses precision to be written out explicitly:
    `ParamRamp` can only be built from a `PerSample` key, so automating a
    block-rate knob is a compile error.
 3. **Commands must say when, for the graph and the transport.** Control-thread
-   commands take `At::{Frame(Frame), Beat(Beat), NextBlock}` (`tutti-types`,
+   commands take `At::{Frame(Frame), Beat::new(Beat), NextBlock}` (`tutti-types`,
    so the engine's transport commands share it), with no untimed overload.
    `NextBlock` stays available, but it is a visible, greppable choice.
    `Editor::schedule` sends a command over its own preallocated SPSC ring,
@@ -805,7 +805,7 @@ place that loses precision to be written out explicitly:
    The `Net` path (deleted with fundsp) rendered the pieces one after
    another instead, applying the commands between them. Beats resolved by
    the graph's rule on both paths (the Net path with the tempo its clock
-   actually ran at, `tempo_in_force`, after the clock's hysteresis). A command past the 8-cut bound, or already past
+   actually ran at, `current_tempo`, after the clock's hysteresis). A command past the 8-cut bound, or already past
    due, lands at the next block's first frame and is counted
    (`late_command_count`); an `At::NextBlock` needs no cut and is never late.
    Commands due on one frame apply in send order. On the Graph path the
@@ -1977,7 +1977,7 @@ behind them:
   graph has no control-side copy, so it drives the executor instead.
 
 For the native backend: `crossfade_audio_node` maps to
-`Editor::replace(key, unit, Fade::seconds(Seconds(0.005), rate, CrossfadeCurve::EqualAmplitude))`.
+`Editor::replace(key, unit, Fade::seconds(Seconds::new(0.005), rate, CrossfadeCurve::EqualAmplitude))`.
 **`set_latency` × fades:** a runtime latency
 change at a key that is mid-fade, running or queued, is a hard edit for the
 fade. The next commit carries the key in `Delta::cuts`; the executor retires
@@ -6467,7 +6467,7 @@ bits, as `ParamRange` is), the weighted kernel and ramp, the cell,
   whose only change is a base or a range sends nothing. A fork keeps the
   entries of the edges it keeps.
 - **`Amplitude` is a signed weight here.** Its docs name zero as its floor; a
-  negative edge weight (polarity) is representable (`Amplitude(-1.0)`) and
+  negative edge weight (polarity) is representable (`Amplitude::new(-1.0)`) and
   accepted, as the section above intends.
 - **Tests.** `tests/edge_gain.rs` (the fold, the wide chain, unity against the
   plain sum and the one-edge corner, the ramp, the carry across commits, the
@@ -10596,7 +10596,7 @@ updated; un-parking ports it.
   editor's return types and errors. The **heard tap is not a facet**: its
   writer is in the engine's output buffer, after the declick fader, which the
   graph does not own, so it stays `Session::open_heard_tap`. A busy audio
-  thread is the outcome `HeardOpen::Retry` there, not a `HeardTapError` (which
+  thread is the outcome `OutputTapOpen::Retry` there, not a `HeardTapError` (which
   keeps the refusals for good: `Detached`, `Busy`, `NotOpen`).
 - **Plumbing.** `take_audio_side`, `AudioSide` (`tick`, `render`,
   `set_transport`) and `Graph::testing()` (`prepared`, `is_repreparing`,
