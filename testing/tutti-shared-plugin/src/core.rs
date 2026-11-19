@@ -1105,7 +1105,9 @@ impl Core {
                 (u64::from(onset)..=u64::from(onset) + u64::from(length)).contains(&a)
             });
             for out in outs.iter_mut() {
-                // A xorshift32: deterministic, and never zero.
+                // A xorshift32: deterministic, and never zero. The C++ twin's
+                // `core.hpp` runs the same three shifts from the same seed, so both
+                // builds render the same hiss; a `tutti_rt` generator has no C++ twin.
                 dsp.noise ^= dsp.noise << 13;
                 dsp.noise ^= dsp.noise >> 17;
                 dsp.noise ^= dsp.noise << 5;
