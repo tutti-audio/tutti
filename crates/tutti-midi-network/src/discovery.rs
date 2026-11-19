@@ -9,7 +9,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent, ServiceInfo};
-use tutti_midi_device::NameError;
+use tutti_midi_device::{InstanceIdError, NameError};
 
 use crate::EndpointIdentity;
 
@@ -51,7 +51,7 @@ pub enum DiscoveryError {
     EndpointName(#[source] NameError),
     /// The Product Instance Id in the TXT record is not a valid Id.
     #[error("the ProductInstanceId is invalid")]
-    InstanceId(#[source] NameError),
+    InstanceId(#[source] InstanceIdError),
     /// A TXT value is empty, which M2-124 section 4.4 does not allow.
     #[error("the TXT value of {0} is empty")]
     Empty(&'static str),

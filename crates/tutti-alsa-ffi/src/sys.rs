@@ -480,6 +480,8 @@ unsafe extern "C" {
     pub fn snd_ump_endpoint_info_get_protocol_caps(info: *const snd_ump_endpoint_info_t) -> c_uint;
     pub fn snd_ump_endpoint_info_get_protocol(info: *const snd_ump_endpoint_info_t) -> c_uint;
     pub fn snd_ump_endpoint_info_get_num_blocks(info: *const snd_ump_endpoint_info_t) -> c_uint;
+    pub fn snd_ump_endpoint_info_get_version(info: *const snd_ump_endpoint_info_t) -> c_uint;
+    pub fn snd_ump_endpoint_info_get_flags(info: *const snd_ump_endpoint_info_t) -> c_uint;
     /// The endpoint's name: a pointer into `info`, valid until it is freed.
     pub fn snd_ump_endpoint_info_get_name(info: *const snd_ump_endpoint_info_t) -> *const c_char;
 }
@@ -504,6 +506,8 @@ unsafe extern "C" {
         caps: c_uint,
     );
     pub fn snd_ump_endpoint_info_set_protocol(info: *mut snd_ump_endpoint_info_t, protocol: c_uint);
+    pub fn snd_ump_endpoint_info_set_version(info: *mut snd_ump_endpoint_info_t, version: c_uint);
+    pub fn snd_ump_endpoint_info_set_flags(info: *mut snd_ump_endpoint_info_t, flags: c_uint);
     pub fn snd_ump_endpoint_info_set_num_blocks(info: *mut snd_ump_endpoint_info_t, n: c_uint);
     pub fn snd_ump_endpoint_info_set_name(info: *mut snd_ump_endpoint_info_t, name: *const c_char);
     pub fn snd_ump_block_info_set_block_id(info: *mut snd_ump_block_info_t, id: c_uint);

@@ -536,8 +536,11 @@ impl Batcher {
         // thread notifies as it queues each response, and the server's watch
         // as it is declared gone. Nothing wakes on the publish alone.
         let progress = bridge.progress();
+        // A refusal that lands while the wait runs ends it too: the plugin
+        // publishes nothing at a refused rate, and the bridge notifies the
+        // gate as the refusal is recorded.
         if !progress.wait_until(deadline, || {
-            bridge.is_crashed() || self.slab.has_output(seq)
+            bridge.is_crashed() || bridge.rate_refused() || self.slab.has_output(seq)
         }) {
             watch.give_up();
             // No reply is awaited past the live bound from here on: a
@@ -556,6 +559,13 @@ impl Batcher {
         // a render that ends before the next poll drops the bridge (with the
         // executor) before anyone asks.
         if bridge.is_crashed() {
+            return;
+        }
+        // Refused while this chunk was awaited: its silence is deliberate.
+        if bridge.rate_refused() && !self.slab.has_output(seq) {
+            if let Some(refusal) = bridge.rate_refusal() {
+                watch.latch_refusal(refusal);
+            }
             return;
         }
         // The server publishes a chunk's audio, then sends its reply: wait

@@ -502,12 +502,12 @@ fn a_fork_places_every_read_path() {
         for path in ["forward", "looped", "reversed"] {
             let (_dir, mut rig, reader) = stream_fixture(&f);
             if path == "looped" {
-                rig.stream.set_loop(loop_1000_3000()).expect("alive");
+                rig.stream.looping_cell().publish(loop_1000_3000());
                 assert!(rig.streamer.step_until_settled(1_000) < 1_000);
             }
             let voice = voice_of(reader);
             if path == "reversed" {
-                rig.stream.set_direction(Direction::Reverse).expect("alive");
+                rig.stream.direction_cell().publish(Direction::Reverse);
                 assert!(rig.streamer.step_until_settled(1_000) < 1_000);
             }
             let mut node = fork(&voice);
@@ -535,7 +535,7 @@ fn a_fork_placed_read_is_allocation_free() {
         for looped in [false, true] {
             let (_dir, mut rig, reader) = stream_fixture(&f);
             if looped {
-                rig.stream.set_loop(loop_1000_3000()).expect("alive");
+                rig.stream.looping_cell().publish(loop_1000_3000());
                 assert!(rig.streamer.step_until_settled(1_000) < 1_000);
             }
             let voice = voice_of(reader);
@@ -584,7 +584,7 @@ fn a_loop_edit_and_wrap_on_a_placed_stream_allocate_nothing() {
             // change near the playhead is crossfaded over, so the reader
             // crosses a switch (`cross_switch`).
             if b == 44 {
-                rig.stream.set_loop(loop_1000_3000()).expect("alive");
+                rig.stream.looping_cell().publish(loop_1000_3000());
             }
             assert_no_alloc::assert_no_alloc(|| {
                 direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)))
@@ -630,7 +630,7 @@ fn a_wide_file_at_its_own_width_is_allocation_free() {
         for looped in [false, true] {
             let (_dir, mut rig, reader) = stream(channels, mask);
             if looped {
-                rig.stream.set_loop(loop_1000_3000()).expect("alive");
+                rig.stream.looping_cell().publish(loop_1000_3000());
                 assert!(rig.streamer.step_until_settled(1_000) < 1_000);
             }
             let voice = voice_of(reader);

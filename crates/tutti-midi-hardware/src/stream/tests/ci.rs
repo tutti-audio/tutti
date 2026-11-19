@@ -80,7 +80,7 @@ fn endpoint_of(blocks: &[FunctionBlock]) -> Endpoint {
 /// which starts MIDI-CI.
 fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
     let mut wire = session_over_ci(
-        UmpCapability::midi2(),
+        midi2(),
         PortDirection::Duplex,
         endpoint_of(blocks),
         Some(identity()),
@@ -187,7 +187,7 @@ fn an_endpoint_with_no_blocks_or_no_answer_gets_discovery_on_group_0() {
 
     // Never answered: the Stream Discoveries are sent and dropped.
     let mut wire = session_over_ci(
-        UmpCapability::midi2(),
+        midi2(),
         PortDirection::Duplex,
         Endpoint::new(Supports::of(Capabilities {
             midi1: true,
@@ -511,7 +511,7 @@ fn after_giving_up_the_sysex_copy_stays_on_for_midi_ci_and_no_request_is_sent() 
 #[test]
 fn midi_ci_is_off_by_default() {
     let mut wire = session_over(
-        UmpCapability::midi2(),
+        midi2(),
         PortDirection::Duplex,
         endpoint_of(&[ci_block(0, 2, 2)]),
     );

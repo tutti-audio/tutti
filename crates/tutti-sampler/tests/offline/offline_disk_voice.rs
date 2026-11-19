@@ -81,12 +81,12 @@ fn streamer_with(
 }
 
 /// Turns the rig's stream to reverse and lets the streamer apply it: the
-/// direction is the stream's (`Stream::set_direction`), published with its
+/// direction is the stream's (`Stream::direction_cell`), published with its
 /// ring's control, where a fork reads it.
 fn reverse(rig: &mut Rig) {
     rig.stream
-        .set_direction(tutti_sampler::Direction::Reverse)
-        .expect("the streamer is alive");
+        .direction_cell()
+        .publish(tutti_sampler::Direction::Reverse);
     assert!(
         rig.streamer.step_until_settled(1_000) < 1_000,
         "the reversed ring settles"
@@ -302,8 +302,8 @@ fn a_fork_loops_as_the_stream_is_looped_when_it_is_taken() {
 
     for fade in [0usize, 100] {
         rig.stream
-            .set_loop(Some(loop_frames(1_000, 3_000, fade)))
-            .expect("the streamer is alive");
+            .looping_cell()
+            .publish(Some(loop_frames(1_000, 3_000, fade)));
         let _ = rig.streamer.step_until_settled(1_000);
 
         let clock = clock_at(SR);
@@ -382,8 +382,8 @@ fn a_forks_crossfaded_loop_is_continuous_at_its_wrap() {
         (0.0, 2_281.0, 256, false),
     ] {
         rig.stream
-            .set_loop(Some(loop_frames(start as usize, end as usize, fade)))
-            .expect("the streamer is alive");
+            .looping_cell()
+            .publish(Some(loop_frames(start as usize, end as usize, fade)));
         let _ = rig.streamer.step_until_settled(1_000);
 
         let clock = clock_at(SR);
@@ -726,9 +726,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         }
         let (mut rig, reader) = streamer_with(&path, config);
         if case.loop_.is_some() {
-            rig.stream
-                .set_loop(case.loop_)
-                .expect("the streamer is alive");
+            rig.stream.looping_cell().publish(case.loop_);
             let _ = rig.streamer.step_until_settled(1_000);
         }
         // The second stream's handle, held for the whole case.
@@ -739,11 +737,11 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
             let other = dir.path().join("other.wav");
             write_ramp(&other, SR as u32, 1_000);
             let opening = rig.streamer.open(&other, Placement::HEAD);
-            let (mut second, second_reader) =
+            let (second, second_reader) =
                 settle(&mut rig.streamer, opening).expect("the file opens");
             second
-                .set_loop(Some(loop_frames(500, 900, 100)))
-                .expect("the streamer is alive");
+                .looping_cell()
+                .publish(Some(loop_frames(500, 900, 100)));
             let _ = rig.streamer.step_until_settled(1_000);
             _second = Some((second, second_reader));
         }

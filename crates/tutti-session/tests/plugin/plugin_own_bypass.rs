@@ -16,7 +16,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin::PluginClient;
 use tutti_plugin::catalog::{Loadable, PluginRef};
-use tutti_session::{NodeMode, Session};
+use tutti_session::{ModeTarget, NodeMode, Session};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples, Seconds};
@@ -84,9 +84,9 @@ fn until_told(s: &mut Session, node: tutti_graph::NodeKey, want: f64) -> bool {
 fn setting_bypassed_writes_the_plugins_own_bypass_and_active_clears_it() {
     let (mut s, node) = session_with_plugin();
     assert_eq!(told(&s, node), Some(0.0), "the plugin starts processing");
-    s.graph().set_mode(node, NodeMode::Bypassed).unwrap();
+    s.set(ModeTarget::of(node).to(NodeMode::Bypassed)).unwrap();
     assert!(until_told(&mut s, node, 1.0), "bypassed was not told");
-    s.graph().set_mode(node, NodeMode::Active).unwrap();
+    s.set(ModeTarget::of(node).to(NodeMode::Active)).unwrap();
     assert!(until_told(&mut s, node, 0.0), "processing was not told");
 }
 
@@ -97,7 +97,7 @@ fn setting_bypassed_writes_the_plugins_own_bypass_and_active_clears_it() {
 #[test]
 fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
     let (mut s, node) = session_with_plugin();
-    s.graph().set_mode(node, NodeMode::Bypassed).unwrap();
+    s.set(ModeTarget::of(node).to(NodeMode::Bypassed)).unwrap();
     assert!(
         until_told(&mut s, node, 1.0),
         "the first plugin is bypassed"

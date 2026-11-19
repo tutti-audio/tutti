@@ -27,7 +27,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_plugin::catalog::PluginRef;
-use tutti_session::{InPort, NodeMode, OutPort, Root, Session};
+use tutti_session::{InPort, ModeTarget, NodeMode, OutPort, Root, Session};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -101,7 +101,8 @@ fn rig(mode: NodeMode) -> Rig {
         .unwrap();
     g.set_sources_hard(Root::output(0), [OutPort::new(plugin, 0)])
         .unwrap();
-    g.set_mode(plugin, mode).expect("the plugin node is there");
+    s.set(ModeTarget::of(plugin).to(mode))
+        .expect("the plugin node is there");
     let _ = s.update();
     Rig {
         s,
@@ -204,8 +205,7 @@ fn a_bypassed_plugin_is_not_called_and_comes_back() {
         "the server answered blocks while its node was bypassed"
     );
 
-    r.s.graph()
-        .set_mode(r.plugin, NodeMode::Active)
+    r.s.set(ModeTarget::of(r.plugin).to(NodeMode::Active))
         .expect("the plugin node is there");
     let _ = r.s.update();
     // The served pipeline is realtime here: a block whose reply is late plays

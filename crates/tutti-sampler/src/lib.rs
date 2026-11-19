@@ -212,17 +212,17 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 //
 pub use voice::{
     Direction, DiskVoice, DiskVoiceControls, Loop, LoopError, MemorySource, MemorySourceConfig,
-    Playback, PoolDrops, PoolTooWide, SendError, SlotId, StreamingAddError, Voice, VoiceNode,
-    VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, memory_voice,
+    PlayError, Playback, PoolDrops, PoolTooWide, SendError, SlotId, StreamingAddError, Voice,
+    VoiceNode, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, memory_voice,
     voice_width,
 };
 // The async disk-streaming engine (streamer thread + the `DiskStreamer` handle).
 pub(crate) mod streamer;
 
 pub use streamer::{
-    Block, DiskStreamer, DiskStreamerConfig, Open, OpenError, Opening, Placement, RefusedPlacement,
-    Running, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader, StreamStatus,
-    StreamerGone,
+    Block, DiskStreamer, DiskStreamerConfig, GUARD_FRAMES, Open, OpenError, Opening, Placement,
+    RefusedPlacement, Running, SteerCell, Stream, StreamFault, StreamFile, StreamId, StreamPhase,
+    StreamReader, StreamStatus,
 };
 
 // The hand-driven streamer cycle, alongside `DiskStreamer::by_hand`: its driver

@@ -48,6 +48,10 @@ pub(super) struct Channels {
     /// The settings the audio lane has written and the control lane has not
     /// taken: one slot per kind, the latest value, never a queue.
     settings: Arc<std::sync::Mutex<Settings>>,
+    /// What callers asked for, before the audio lane takes it up: a slot, never
+    /// a queue, so a full block queue (a producer racing a held lane) cannot
+    /// lose one.
+    requests: Arc<std::sync::Mutex<Requests>>,
     /// The newest block sequence the audio thread has submitted. Owned here
     /// rather than on the batcher because the *bridge* thread is what reads it,
     /// to decide whether a dequeued block is still worth sending.
@@ -244,6 +248,16 @@ struct Settings {
     fence: Option<Reply<()>>,
 }
 
+/// The settings a caller has requested and the audio lane has not taken, each
+/// with the newest block sequence submitted when it was requested: the blocks
+/// after it (a greater sequence) wait for it. A kind requested again replaces
+/// the one waiting: the latest value stands.
+#[derive(Default)]
+struct Requests {
+    rate: Option<(tutti_units::SampleRate, u64)>,
+    mode: Option<(tutti_plugin_types::RenderMode, u64)>,
+}
+
 /// The waits of the two lane threads, each moved to the thread that waits.
 pub(super) struct Waits {
     /// The audio lane's doorbell.
@@ -273,6 +287,7 @@ impl Channels {
             controls: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             owing: ControlSlot::default(),
             settings: Arc::default(),
+            requests: Arc::default(),
             newest_seq: Arc::new(AtomicU64::new(0)),
             bell,
             control_bell,
@@ -344,12 +359,61 @@ impl Channels {
     /// reads what whoever ends the loop publishes before calling
     /// [`wake`](Self::wake). `sleeper` is the one [`new`](Self::new) made.
     pub(super) fn wait_for_block(&self, sleeper: &mut Sleeper, stop: impl FnOnce() -> bool) {
-        sleeper.wait(|| !self.blocks.is_empty() || stop());
+        sleeper.wait(|| !self.blocks.is_empty() || self.requested() || stop());
+    }
+
+    /// Asks for `setting` to be applied, ordered against the blocks: the blocks
+    /// submitted after this call are held for it. Latest value per kind; never
+    /// refused. Wakes the audio lane's thread. Not for the audio thread (a lock).
+    pub(super) fn request_setting(&self, setting: Setting) {
+        let after = self.newest_submitted();
+        {
+            let mut slots = self.requests.lock_recover();
+            match setting {
+                Setting::SampleRate(rate) => slots.rate = Some((rate, after)),
+                Setting::RenderMode(mode) => slots.mode = Some((mode, after)),
+                // A fence rides the audio queue (`AudioCommand::Settle`), never
+                // a request.
+                Setting::Fence => {}
+            }
+        }
+        self.bell.ring();
+    }
+
+    /// Whether a requested setting waits for the audio lane.
+    fn requested(&self) -> bool {
+        let slots = self.requests.lock_recover();
+        slots.rate.is_some() || slots.mode.is_some()
+    }
+
+    /// The requested setting the block `before` must wait for (one requested
+    /// while a lesser sequence was the newest), or any with `None`; a rate
+    /// before a render mode.
+    pub(super) fn take_request(&self, before: Option<u64>) -> Option<Setting> {
+        let mut slots = self.requests.lock_recover();
+        let due = |after: u64| before.is_none_or(|seq| seq > after);
+        if let Some((rate, after)) = slots.rate
+            && due(after)
+        {
+            slots.rate = None;
+            return Some(Setting::SampleRate(rate));
+        }
+        if let Some((mode, after)) = slots.mode
+            && due(after)
+        {
+            slots.mode = None;
+            return Some(Setting::RenderMode(mode));
+        }
+        None
     }
 
     /// The control thread is reading the control connection for news.
     pub(super) fn set_news(&self) {
         self.news.store(true, Ordering::Release);
+        // Pairs with the fence after `bytes_waiting`'s poll: this flag is
+        // visible before the bytes it covers are taken off the connection, so
+        // a checker that saw the bytes gone and then fenced reads it set.
+        std::sync::atomic::fence(Ordering::SeqCst);
     }
 
     /// Whether [`set_news`](Self::set_news) was called since the last
@@ -369,12 +433,17 @@ impl Channels {
     }
 
     /// Whether the control connection has bytes the control thread has not read
-    /// (one `poll`, no wait). `false` with no probe.
+    /// (one `poll`, no wait). `false` with no probe. A fence follows the poll,
+    /// so a [`news_pending`](Self::news_pending) read after this sees a flag
+    /// the control thread set before it took the bytes.
     pub(super) fn bytes_waiting(&self) -> bool {
-        self.probe
+        let waiting = self
+            .probe
             .lock_recover()
             .as_ref()
-            .is_some_and(|watch| watch.wait_readable(Duration::ZERO))
+            .is_some_and(|watch| watch.wait_readable(Duration::ZERO));
+        std::sync::atomic::fence(Ordering::SeqCst);
+        waiting
     }
 
     /// The control thread has read the control connection dry and delivered

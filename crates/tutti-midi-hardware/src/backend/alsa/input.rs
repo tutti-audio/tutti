@@ -82,7 +82,7 @@ impl Drop for AlsaInput {
 /// sends natively.
 pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> UmpVersion {
     match endpoint {
-        Some(e) if e.protocol_caps & tutti_alsa_ffi::PROTO_MIDI2 != 0 => UmpVersion::Midi2,
+        Some(e) if e.offered.midi2 => UmpVersion::Midi2,
         _ => UmpVersion::Midi1,
     }
 }

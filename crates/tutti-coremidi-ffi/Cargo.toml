@@ -16,6 +16,7 @@ workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 coremidi-sys = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
+tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 block2 = { workspace = true }
 core-foundation = { workspace = true }
 mach2 = { workspace = true }

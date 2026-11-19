@@ -11,7 +11,7 @@ use crate::{Ring, System};
 ///
 /// [`need`](Self::need) measures one network.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct NetworkCapacity {
+pub(crate) struct NetworkCapacity {
     /// Delay lines in all.
     pub lines: usize,
     /// Stages.
@@ -37,7 +37,7 @@ pub struct NetworkCapacity {
 impl NetworkCapacity {
     /// The sizes `network` needs, its tail measured to `floor`.
     #[must_use]
-    pub fn need(network: &Network, floor: Db) -> Self {
+    pub(crate) fn need(network: &Network, floor: Db) -> Self {
         let mut b = NetworkCapacity {
             lines: 0,
             stages: network.stages.len(),

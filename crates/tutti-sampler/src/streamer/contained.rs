@@ -201,7 +201,7 @@ fn the_end_of_the_file_is_ended_and_a_loop_has_none() {
     let mut sampler =
         DiskStreamer::<_, f32>::by_hand(SampleRate::SR_8K, Default::default()).expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
-    let (mut stream, mut reader) = settle(&mut sampler, opening).expect("opens");
+    let (stream, mut reader) = settle(&mut sampler, opening).expect("opens");
     assert_eq!(
         stream.status().phase,
         StreamPhase::Live,
@@ -214,8 +214,8 @@ fn the_end_of_the_file_is_ended_and_a_loop_has_none() {
     assert_eq!(stream.status().phase, StreamPhase::Ended);
 
     stream
-        .set_loop(Some(loop_frames(1_000, 4_000, 0)))
-        .expect("the streamer lives");
+        .looping_cell()
+        .publish(Some(loop_frames(1_000, 4_000, 0)));
     let _ = sampler.step_until_settled(1_000);
     assert_eq!(
         stream.status().phase,
@@ -370,13 +370,13 @@ fn a_panic_while_a_loop_is_captured_faults_that_stream() {
         ..Seams::default()
     };
     let mut driver = Driver::start(8_000.0, false, seams);
-    let (mut first, _r1) = driver.open(&path);
+    let (first, _r1) = driver.open(&path);
     let (second, _r2) = driver.open(&path);
 
     armed.store(true, Ordering::SeqCst);
     first
-        .set_loop(Some(loop_frames(2000, 6000, 500)))
-        .expect("the streamer lives");
+        .looping_cell()
+        .publish(Some(loop_frames(2000, 6000, 500)));
     driver.until("the capture to fault its stream", || {
         first.status().phase == StreamPhase::Faulted(StreamFault::Panicked)
     });
@@ -600,14 +600,14 @@ fn a_fork_plays_the_loop_as_applied_not_as_asked() {
     )
     .expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
-    let (mut stream, reader) = settle(&mut sampler, opening).expect("a cut file opens");
+    let (stream, reader) = settle(&mut sampler, opening).expect("a cut file opens");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0)));
 
     // The loop's fade leads in from just before its start, which is past the
     // cut: unreadable.
     let (start, end) = (total as f64 * 0.95, total as f64);
     let asked = Some(loop_frames(start.floor() as usize, end as usize, 100));
-    stream.set_loop(asked).expect("the streamer lives");
+    stream.looping_cell().publish(asked);
     let _ = sampler.step_until_settled(1_000);
 
     let Some(applied) = stream.status().loop_ else {
