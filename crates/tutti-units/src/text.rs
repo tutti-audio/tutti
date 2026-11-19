@@ -55,12 +55,12 @@ pub enum TextError {
 /// let _ = tutti_units::Text::<0, 70_000>::new("");
 /// ```
 ///
-/// It orders and hashes as its string. It has no `From<&str>` (a conversion
+/// It is `Copy`, orders and hashes as its string. It has no `From<&str>` (a conversion
 /// can fail) and no `Deref`: [`as_str`](Self::as_str) is the way out.
 ///
 /// With the `serde` feature it serialises as a string and deserialises through
 /// [`TryFrom`], so a decoded string out of range is refused.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Text<const MIN: usize, const MAX: usize> {
     bytes: [u8; MAX],
     len: u16,
@@ -240,9 +240,8 @@ mod tests {
     use super::*;
 
     // `tutti_fixtures::check_range_contract` does not fit a string type: it
-    // takes a `Copy` value built by an `Option`-returning `new` and read back
-    // by `Into<raw>`, while a `Text` is `Clone`, built by a `Result` that says
-    // why, and leaves as `as_str`. The cases are pinned in the tests below.
+    // reads a value back through `Into<raw>`, and a `Text` leaves as
+    // `as_str`. The cases are pinned in the tests below.
     type Name = Text<1, 8>;
 
     #[test]
@@ -309,7 +308,7 @@ mod tests {
         // A shorter string sorts before a longer one it prefixes, as `str` does.
         assert!(Name::of("ab") < Name::of("abc"));
         let hasher = std::collections::hash_map::RandomState::new();
-        assert_eq!(hasher.hash_one(&a), hasher.hash_one("abc"));
+        assert_eq!(hasher.hash_one(a), hasher.hash_one("abc"));
     }
 
     #[test]

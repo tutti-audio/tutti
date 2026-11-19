@@ -57,7 +57,7 @@ fn bytes(len: usize) -> Vec<u8> {
 
 fn stored(len: usize) -> PeState {
     PeState::octets(bytes(len))
-        .revised(StateRev::new("buui890adj").unwrap())
+        .revised(StateRev::new("buui890adj"))
         .stamped(UnixSeconds::of(1_586_786_400))
 }
 
@@ -568,7 +568,7 @@ impl StateDevice for Device {
 
     fn stamp(&mut self, _: &StateId, _: &PeState) -> StateStamp {
         StateStamp {
-            rev: StateRev::new("fejwiofij2w"),
+            rev: Some(StateRev::new("fejwiofij2w")),
             timestamp: Some(UnixSeconds::of(1_586_786_400)),
         }
     }
@@ -642,7 +642,7 @@ fn the_set_reply_carries_the_state_rev_and_timestamp_the_device_gave() {
         })
         .unwrap();
     let expected = StateStamp {
-        rev: StateRev::new("fejwiofij2w"),
+        rev: Some(StateRev::new("fejwiofij2w")),
         timestamp: Some(UnixSeconds::of(1_586_786_400)),
     };
     assert_eq!(stamp, Some(expected.clone()));
