@@ -98,6 +98,8 @@ fn an_f64_synth_instrument_sounds_the_notes_frequency() {
     let second = render(&mut session, (RATE.get() as usize) / BLOCK);
     assert!(second.iter().all(|s| s.is_finite()), "finite output");
     assert!(peak(&second) > 0.0, "the note sounds");
+    // A window of exactly 1 s counts each crossing whole: where its ends fall
+    // moves the count by at most one, so 1 Hz; the bound is twice that.
     let crossings = rising_crossings(&second) as f64;
     let seconds = second.len() as f64 / RATE.get();
     assert!(
@@ -123,6 +125,9 @@ fn an_f64_instrument_gain_scales_a_held_sine_linearly() {
     handle.set_gain(Amplitude::new(0.5));
     let _settle = render(&mut session, 64);
     let half = peak(&render(&mut session, 16));
+    // A sampled peak of 440 Hz at 48 kHz is low by at most
+    // 1 - cos(pi * 440 / 48000), about 4.1e-4, in each window, so the ratio is
+    // off by at most about 8.4e-4.
     assert!((half / full - 0.5).abs() < 1e-3, "full {full}, half {half}");
 }
 
