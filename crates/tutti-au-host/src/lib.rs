@@ -18,7 +18,7 @@
 //! - `AuLoaded`: an AU that is instantiated and configured but not initialized:
 //!   parameters, presets, state, bus layouts, identity, MIDI mappings and the
 //!   editor all work. It implements `tutti_plugin_types::Loaded`, `Control`,
-//!   `InProc` and `OutOfProcess`.
+//!   `InProcess` and `OutOfProcess`.
 //! - `AuEditorInstance`: its `OutOfProcess::Editor`, an `AuLoaded` loaded for the
 //!   editor alone, in the host process while the audio instance runs in the server.
 //! - `AuProcessor` / `AuController`: the two halves `Loaded::activate`

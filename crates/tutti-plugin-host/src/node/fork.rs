@@ -6,7 +6,7 @@
 //!
 //! # Why not a clone of the node
 //!
-//! A clone of [`InProcClient`](super::InProcClient) would share the one plugin instance behind an
+//! A clone of [`InProcessClient`](super::InProcessClient) would share the one plugin instance behind an
 //! `Arc<Mutex<_>>`: a fork by clone would render through the live plugin's
 //! state from the render thread, interleaving its blocks with the live ones.
 //! So the node is not `Clone` at all.
@@ -27,7 +27,7 @@
 //!    as it does through a project save.
 //! 2. **Load a second instance** of the same file at the live node's rate,
 //!    from the live instance's [`Origin`] as `Reopen::reopen` does
-//!    (`InProc::load_in_process`; an active `Lifecycle` holds a Controller,
+//!    (`InProcess::load_in_process`; an active `Lifecycle` holds a Controller,
 //!    not the loaded plugin `reopen` borrows). For VST2 the second `dlopen` of
 //!    the path maps the image already loaded (one more reference to it), and
 //!    the plugin's entry point builds a second `AEffect`. The image is never
@@ -61,7 +61,7 @@
 //!
 //! # Threads
 //!
-//! Fork on the **main thread** — `InProc::load_in_process`'s rule. A fork
+//! Fork on the **main thread** — `InProcess::load_in_process`'s rule. A fork
 //! runs the plugin's entry point and dispatches its state, and a plugin may
 //! assume all of that is on its host's main thread. Through the graph's split
 //! fork (`Editor::fork_gather`, then `PendingFork::build` on a worker) the
@@ -103,7 +103,7 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use parking_lot::Mutex;
 use tutti_graph::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
-use tutti_plugin_types::{Control, Features, InProc, Origin, RenderMode, StateUse};
+use tutti_plugin_types::{Control, Features, InProcess, Origin, RenderMode, StateUse};
 
 use super::client::{PluginNode, RateDelivery, TransportFeed};
 use super::instance::Instance;
@@ -114,7 +114,7 @@ use tutti_plugin_types::StateError;
 
 /// An in-process node's [`ForkSource`]: everything a fork needs from the
 /// live node, and nothing that keeps the live plugin alive.
-pub(super) struct Fork<L: InProc, F: Float> {
+pub(super) struct Fork<L: InProcess, F: Float> {
     /// The live instance — asked for its state, nothing else. Weak: once every
     /// node and handle on it is gone, a fork answers
     /// [`PluginForkError::LiveGone`].
@@ -147,7 +147,7 @@ pub(super) struct Fork<L: InProc, F: Float> {
     width: PhantomData<fn() -> F>,
 }
 
-impl<L: InProc + 'static, F: Float> Fork<L, F>
+impl<L: InProcess + 'static, F: Float> Fork<L, F>
 where
     L::Processor: 'static,
 {
@@ -264,7 +264,7 @@ where
     }
 }
 
-impl<L: InProc + 'static, F: Float> ForkSource<F> for Fork<L, F>
+impl<L: InProcess + 'static, F: Float> ForkSource<F> for Fork<L, F>
 where
     L::Processor: 'static,
 {
@@ -290,7 +290,7 @@ where
     }
 }
 
-impl<L: InProc + 'static, F: Float> PluginNode<L, F>
+impl<L: InProcess + 'static, F: Float> PluginNode<L, F>
 where
     L::Processor: 'static,
 {
@@ -301,7 +301,7 @@ where
     /// graph ([`IntoNode`](tutti_graph::IntoNode)) hands the editor, so
     /// `Editor::fork` (an offline export) forks a graph holding it.
     ///
-    /// **Main thread only**, as `InProc::load_in_process` is: it runs the
+    /// **Main thread only**, as `InProcess::load_in_process` is: it runs the
     /// plugin's entry point a second time and dispatches its state. Drop the fork on
     /// the main thread too (dropping closes its instance); it may render on
     /// any thread.

@@ -6,5 +6,5 @@ mod spec;
 tutti_plugin_contract::contract!(
     tutti_plugin_contract::Vst3,
     gaps = 1,
-    hostings = [InProc, OutOfProcess]
+    hostings = [InProcess, OutOfProcess]
 );

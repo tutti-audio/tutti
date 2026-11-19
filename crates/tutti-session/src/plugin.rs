@@ -658,7 +658,7 @@ impl Outgoing {
 #[must_use = "a retired record goes to the graveyard or drops, through `settle`"]
 pub(crate) enum Retired {
     /// An in-process plugin's: its drop waits for the main thread.
-    InProcess(InProcRecord),
+    InProcess(InProcessRecord),
     /// A served plugin's, already dropped.
     Served,
 }
@@ -668,7 +668,7 @@ impl Retired {
     /// thread, a served one drops here.
     fn of(placement: Placement, held: impl std::any::Any + Send) -> Self {
         match placement {
-            Placement::InProcess => Self::InProcess(InProcRecord {
+            Placement::InProcess => Self::InProcess(InProcessRecord {
                 _held: Box::new(held),
             }),
             Placement::Served => Self::Served,
@@ -689,7 +689,7 @@ impl Retired {
 
 /// What an in-process plugin's retirement holds until the main thread drops
 /// it: the only thing the [`Graveyard`] takes.
-pub(crate) struct InProcRecord {
+pub(crate) struct InProcessRecord {
     /// The owner whose drop waits for the main thread.
     _held: Box<dyn std::any::Any + Send>,
 }
@@ -710,7 +710,7 @@ pub(crate) struct InProcRecord {
 pub(crate) struct Graveyard {
     /// Held to be dropped: a removed in-process plugin's record, or the handle
     /// a crossfade replaced.
-    retired: Vec<InProcRecord>,
+    retired: Vec<InProcessRecord>,
     /// The editors that are alive: those of a retired plugin are closed by
     /// [`exhume`](Self::exhume) before the drop, the open ones are serviced.
     pub(crate) editors: crate::editor::Editors,

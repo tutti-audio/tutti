@@ -5,7 +5,7 @@
 //!
 //! The plugin is a recording format of this file's own (`Rec`): it copies its
 //! input to its output and writes down what each `process` call was handed.
-//! `Rec` is `InProc` only to be loaded through `load_client`; the thread
+//! `Rec` is `InProcess` only to be loaded through `load_client`; the thread
 //! that loads it passes its `Rig` in a thread-local.
 
 use std::cell::RefCell;
@@ -23,13 +23,13 @@ use tutti_graph::{
     RtTarget, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::widen_velocity;
-use tutti_plugin_host::{InProcClient, NodeControls, PluginNode, load_client};
+use tutti_plugin_host::{InProcessClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
-    EditorWindow, Features, InProc, Load, Loaded, LoadedPlugin, MainThreadMarker, MainWorkHandle,
-    Origin, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult,
-    PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused, RenderModeSupport,
-    RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
+    EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
+    MainWorkHandle, Origin, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo,
+    PluginResult, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused,
+    RenderModeSupport, RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
@@ -319,7 +319,7 @@ impl Controller for RecController {
     }
 }
 
-impl InProc for Rec {
+impl InProcess for Rec {
     fn load_in_process(
         _: MainThreadMarker,
         work: &MainWorkHandle,
@@ -461,7 +461,7 @@ fn tempo(to_90: Option<f64>) -> TempoReader {
 /// The node over `rig`, prepared for blocks of up to `block`.
 fn node(rig: &Arc<Rig>, block: usize, map: TempoReader) -> (Direct<PluginNode<Rec>>, NodeControls) {
     ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
-    let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
+    let (client, _handle): (InProcessClient<Rec>, _) = load_client::<Rec, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         Path::new("rec"),
@@ -919,7 +919,7 @@ fn a_panicked_in_process_plugin_reads_dead_with_a_panicked_cause() {
 
     let rig = Rig::new(None, Features::TRANSPORT);
     ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
-    let (_client, handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
+    let (_client, handle): (InProcessClient<Rec>, _) = load_client::<Rec, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         Path::new("rec"),
@@ -1069,7 +1069,7 @@ fn a_chunked_processors_lost_midi_reaches_the_graphs_event_losses() {
     let rig = Rig::new(Some(64), Features::TRANSPORT);
     rig.lose.store(3, Ordering::Relaxed);
     ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
-    let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
+    let (client, _handle): (InProcessClient<Rec>, _) = load_client::<Rec, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
         Path::new("rec"),
@@ -1241,7 +1241,7 @@ fn the_shape_declares_the_plugins_buses_with_their_placement() {
         let rig = Rig::new(None, Features::empty());
         rig.key_bus.store(key_bus, Ordering::Relaxed);
         ROUTE.with(|r| *r.borrow_mut() = Some(rig));
-        let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec, f32>(
+        let (client, _handle): (InProcessClient<Rec>, _) = load_client::<Rec, f32>(
             main_thread(),
             &tutti_fixtures::detached_work(),
             Path::new("rec"),

@@ -9,7 +9,7 @@
 //! parameter changes it delivers, the host policy written once over a handle
 //! ([`Liveness`], [`PluginParamValues`], [`needs_notify`]), and the
 //! in-process node ([`PluginNode`], [`load_client`]) over any
-//! [`InProc`](tutti_plugin_types::InProc) format.
+//! [`InProcess`](tutti_plugin_types::InProcess) format.
 //!
 //! It names no format host, no wire and no server: the process edge is
 //! `tutti-plugin-ipc`'s, and `tutti-plugin` puts a served plugin behind these
@@ -20,7 +20,7 @@
 mod control_handle;
 mod controls;
 mod fork_state;
-mod in_proc_erased;
+mod in_process_erased;
 mod listeners;
 mod liveness;
 mod node;
@@ -40,14 +40,16 @@ mod walk_tests;
 pub use control_handle::{MainThreadControl, PluginHandle, PluginStatus};
 pub use controls::{ForkedSources, NodeControls, PluginControls, PluginReports};
 pub use fork_state::ForkState;
-pub use in_proc_erased::{AnyInProcClient, Commit, InProcNode, InProcRebinder, InProcRebuilt};
+pub use in_process_erased::{
+    AnyInProcessClient, Commit, InProcessNode, InProcessRebinder, InProcessRebuilt,
+};
 pub use listeners::{
     InvalidateSink, Listener, ParameterChangeSink, PluginSignal, RefreshSink, Subscription,
     TransportSink,
 };
 pub use liveness::{Liveness, LivenessVerdict};
 pub use node::{
-    ClientOverError, InProcClient, LoadClientError, Pending, PluginNode, RebindError, Rebinder,
+    ClientOverError, InProcessClient, LoadClientError, Pending, PluginNode, RebindError, Rebinder,
     Settlement, WidthError, client_over, load_client, load_client_restoring,
 };
 pub use node_losses::BlockLosses;

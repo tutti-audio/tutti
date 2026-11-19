@@ -3,7 +3,7 @@
 //! An editor is in one of two places, and [`EditorSite`] is the one place that
 //! knows which. CLAP, VST3 and AU keep an editor-only second instance in the
 //! host, which the host's [`EditorLoader`] loads on the first open
-//! (`InProcEditor`); a bridge made with no loader opens the editor on the
+//! (`InProcessEditor`); a bridge made with no loader opens the editor on the
 //! served instance in the server (`ServedEditor`). Every editor call is one
 //! `match` on the site.
 
@@ -34,14 +34,14 @@ pub struct EditorSite {
 /// `large_enum_variant` allows on Windows.
 #[derive(Debug)]
 enum Site {
-    InProc(Box<InProcEditor>),
+    InProcess(Box<InProcessEditor>),
     Served(Box<ServedEditor>),
 }
 
 /// The editor-only instance in this process: loaded with the [`EditorLoader`]
 /// on the first open, kept in step with the audio instance's state, and shown
 /// what the realtime setters wrote.
-pub(crate) struct InProcEditor {
+pub(crate) struct InProcessEditor {
     audio: AudioBridge,
     /// The file and the plugin in it, which the instance loads (the one the
     /// audio instance is).
@@ -67,9 +67,9 @@ pub(crate) struct ServedEditor {
     remote: Mutex<IpcEditor>,
 }
 
-impl std::fmt::Debug for InProcEditor {
+impl std::fmt::Debug for InProcessEditor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InProcEditor")
+        f.debug_struct("InProcessEditor")
             .field("plugin_path", &self.origin.path())
             .finish_non_exhaustive()
     }
@@ -91,7 +91,7 @@ impl EditorSite {
         loader: Option<EditorLoader>,
     ) -> Self {
         let site = match loader {
-            Some(loader) => Site::InProc(Box::new(InProcEditor {
+            Some(loader) => Site::InProcess(Box::new(InProcessEditor {
                 audio: audio.clone(),
                 origin,
                 format,
@@ -123,7 +123,7 @@ impl EditorSite {
         scale: ContentScale,
     ) -> std::result::Result<Size, EditorError> {
         match &self.site {
-            Site::InProc(site) => site.open_editor(main, parent, scale),
+            Site::InProcess(site) => site.open_editor(main, parent, scale),
             Site::Served(site) => site.open_editor(main, parent, scale),
         }
     }
@@ -142,7 +142,7 @@ impl EditorSite {
         main: MainThreadMarker,
     ) -> std::result::Result<(), EditorError> {
         match &self.site {
-            Site::InProc(site) => site.open_floating_editor(main),
+            Site::InProcess(site) => site.open_floating_editor(main),
             Site::Served(site) => site.open_floating_editor(main),
         }
     }
@@ -151,7 +151,7 @@ impl EditorSite {
     /// in it. `false` when no editor was open.
     pub fn close_editor(&self, main: MainThreadMarker) -> bool {
         match &self.site {
-            Site::InProc(site) => site.close_editor(main),
+            Site::InProcess(site) => site.close_editor(main),
             Site::Served(site) => site.close_editor(main),
         }
     }
@@ -160,7 +160,7 @@ impl EditorSite {
     /// wait on (its descriptors and timers, added to `out`). A served editor
     /// lives in the server, whose own loop waits on them: nothing here.
     pub fn wakeups(&self, main: MainThreadMarker, out: &mut tutti_plugin_types::Wakeups) {
-        if let Site::InProc(site) = &self.site {
+        if let Site::InProcess(site) = &self.site {
             site.wakeups(main, out);
         }
     }
@@ -173,7 +173,7 @@ impl EditorSite {
         ready: &[tutti_plugin_ipc_ffi::Ready],
         now: std::time::Instant,
     ) {
-        if let Site::InProc(site) = &self.site {
+        if let Site::InProcess(site) = &self.site {
             site.wake(main, ready, now);
         }
     }
@@ -182,7 +182,7 @@ impl EditorSite {
     /// for it and sends the audio instance the user's edits.
     pub fn editor_idle(&self, main: MainThreadMarker) {
         match &self.site {
-            Site::InProc(site) => site.editor_idle(main),
+            Site::InProcess(site) => site.editor_idle(main),
             Site::Served(site) => site.editor_idle(main),
         }
     }
@@ -190,7 +190,7 @@ impl EditorSite {
     /// The open editor's resize capabilities (the default when none is open).
     pub fn editor_capabilities(&self, main: MainThreadMarker) -> EditorCapabilities {
         match &self.site {
-            Site::InProc(site) => site.editor_capabilities(main),
+            Site::InProcess(site) => site.editor_capabilities(main),
             Site::Served(site) => site.editor_capabilities(main),
         }
     }
@@ -206,7 +206,7 @@ impl EditorSite {
         requested: Size,
     ) -> std::result::Result<Size, EditorError> {
         match &self.site {
-            Site::InProc(site) => site.set_editor_size(main, requested),
+            Site::InProcess(site) => site.set_editor_size(main, requested),
             Site::Served(site) => site.set_editor_size(main, requested),
         }
     }
@@ -223,7 +223,7 @@ impl EditorSite {
         scale: ContentScale,
     ) -> std::result::Result<(), EditorError> {
         match &self.site {
-            Site::InProc(site) => site.set_editor_scale(main, scale),
+            Site::InProcess(site) => site.set_editor_scale(main, scale),
             Site::Served(site) => site.set_editor_scale(main, scale),
         }
     }
@@ -231,7 +231,7 @@ impl EditorSite {
     /// A size the open editor asked its window to take since the last poll.
     pub fn poll_editor_resize_request(&self, main: MainThreadMarker) -> Option<Size> {
         match &self.site {
-            Site::InProc(site) => site.poll_editor_resize_request(main),
+            Site::InProcess(site) => site.poll_editor_resize_request(main),
             Site::Served(site) => site.poll_editor_resize_request(main),
         }
     }
@@ -241,21 +241,21 @@ impl EditorSite {
     /// `None` for a served editor, which has no mirror.
     pub fn mirror_refused_cell(&self) -> Option<Tally<u64>> {
         match &self.site {
-            Site::InProc(site) => Some(site.mirror.refused.clone()),
+            Site::InProcess(site) => Some(site.mirror.refused.clone()),
             Site::Served(_) => None,
         }
     }
 
     /// Queues a parameter write for the in-process editor to show.
     pub(crate) fn show_parameter(&self, id: ParamId, value: Normalized) {
-        if let Site::InProc(site) = &self.site {
+        if let Site::InProcess(site) = &self.site {
             site.mirror.push_param(id, value);
         }
     }
 
     /// Queues the host's automation mode for the in-process editor to show.
     pub(crate) fn show_automation(&self, mode: AutomationMode) {
-        if let Site::InProc(site) = &self.site {
+        if let Site::InProcess(site) = &self.site {
             site.mirror.push_automation(mode);
         }
     }
@@ -263,7 +263,7 @@ impl EditorSite {
     /// Loads `data` into the in-process editor so its display stays in step
     /// with the audio instance, best effort.
     pub(crate) fn mirror_state(&self, main: MainThreadMarker, data: &[u8]) {
-        if let Site::InProc(site) = &self.site
+        if let Site::InProcess(site) = &self.site
             && let Ok(mut guard) = site.gui.lock()
             && let Some(gui) = guard.as_mut()
         {
@@ -294,7 +294,7 @@ impl Drop for EditorSite {
         if let Some(main) = MainThreadMarker::new() {
             self.close_editor(main);
         }
-        if let Site::InProc(site) = &self.site
+        if let Site::InProcess(site) = &self.site
             && let Ok(mut guard) = site.gui.lock()
             && let Some(gui) = guard.take()
         {
@@ -379,7 +379,7 @@ impl ServedEditor {
     }
 }
 
-impl InProcEditor {
+impl InProcessEditor {
     /// The editor-only instance in `slot`, loaded with the [`EditorLoader`] if
     /// this is the first open.
     fn instance<'a>(

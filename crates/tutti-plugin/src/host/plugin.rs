@@ -2,7 +2,7 @@
 //!
 //! Loading returns one owned type rather than a `(node, PluginHandle)` pair
 //! because the hostings are different concrete node types
-//! (`PluginClient<Bound>` and `InProcClient`), and because a plugin is
+//! (`PluginClient<Bound>` and `InProcessClient`), and because a plugin is
 //! more than its node: it also takes per-block MIDI, chord/scale context and
 //! note expression, reached here through capability accessors.
 
@@ -12,7 +12,9 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_rt::LockExt;
 
 use crate::host::node::PluginClient;
-use tutti_plugin_host::{AnyInProcClient, Commit, InProcNode, InProcRebinder, PluginHandle};
+use tutti_plugin_host::{
+    AnyInProcessClient, Commit, InProcessNode, InProcessRebinder, PluginHandle,
+};
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::BridgeResult;
 #[cfg(any(
@@ -39,7 +41,7 @@ enum Placed {
     Served(Box<PluginClient>),
     /// Built only where a format feature is on.
     #[allow(dead_code)]
-    InProc(AnyInProcClient),
+    InProcess(AnyInProcessClient),
 }
 
 /// A loaded plugin: its audio node, its control surface, and the per-block
@@ -283,7 +285,7 @@ impl Plugin {
         state: Option<&[u8]>,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)>
     where
-        L: tutti_plugin_types::InProc + 'static,
+        L: tutti_plugin_types::InProcess + 'static,
         L::Processor: 'static,
     {
         let mut restore = state.map(|data| {
@@ -309,7 +311,7 @@ impl Plugin {
         let plugin = plugin.identified(&handle.descriptor().id);
         Ok((
             Self {
-                placed: Placed::InProc(AnyInProcClient::new(client)),
+                placed: Placed::InProcess(AnyInProcessClient::new(client)),
                 handle,
                 plugin,
             },
@@ -333,7 +335,7 @@ impl Plugin {
     pub fn hosting(&self) -> Hosting {
         match &self.placed {
             Placed::Served(_) => Hosting::OutOfProcess,
-            Placed::InProc(_) => Hosting::InProcess,
+            Placed::InProcess(_) => Hosting::InProcess,
         }
     }
 
@@ -415,7 +417,7 @@ impl Plugin {
         }
         match &self.placed {
             Placed::Served(c) => c.set_render_mode(mode),
-            Placed::InProc(c) => c.set_render_mode(mode),
+            Placed::InProcess(c) => c.set_render_mode(mode),
         }
     }
 
@@ -450,7 +452,7 @@ impl Plugin {
     pub fn meter(&self) -> tutti_plugin_host::PluginTimeSignature {
         match &self.placed {
             Placed::Served(c) => c.controls().meter(),
-            Placed::InProc(c) => c.meter(),
+            Placed::InProcess(c) => c.meter(),
         }
     }
 
@@ -461,7 +463,7 @@ impl Plugin {
     pub fn node_controls(&self) -> tutti_plugin_host::NodeControls {
         match &self.placed {
             Placed::Served(c) => (*c.controls()).clone(),
-            Placed::InProc(c) => c.controls(),
+            Placed::InProcess(c) => c.controls(),
         }
     }
 
@@ -474,7 +476,7 @@ impl Plugin {
     pub fn takes_harmony(&self) -> bool {
         match &self.placed {
             Placed::Served(c) => c.takes_harmony(),
-            Placed::InProc(_) => false,
+            Placed::InProcess(_) => false,
         }
     }
 
@@ -483,7 +485,7 @@ impl Plugin {
     /// Binds the plugin to the reader of the project's tempo map it tells the
     /// plugin the tempo from (and CLAP its slope), wherever it
     /// runs: [`PluginClient::bind`] for a subprocess plugin,
-    /// `InProcClient::bind` for an in-process one. The result is the graph
+    /// `InProcessClient::bind` for an in-process one. The result is the graph
     /// node ([`BoundPlugin`]); `Session::add_pooled_plugin` binds every plugin with
     /// the session's reader, and a host with no session passes a
     /// [`TempoReader::fixed`](tutti_transport::TempoReader::fixed) one.
@@ -506,10 +508,10 @@ impl Plugin {
                 let rebinder = PluginRebinder::served(&bound);
                 (BoundPlaced::Served(Box::new(bound)), rebinder)
             }
-            Placed::InProc(c) => {
+            Placed::InProcess(c) => {
                 let (node, rebinder) = c.bind(tempo);
                 (
-                    BoundPlaced::InProc(node),
+                    BoundPlaced::InProcess(node),
                     PluginRebinder::in_process(rebinder),
                 )
             }
@@ -539,7 +541,7 @@ impl Plugin {
     pub fn into_client(self) -> std::result::Result<Box<PluginClient>, Box<Self>> {
         match self.placed {
             Placed::Served(c) => Ok(c),
-            Placed::InProc(_) => Err(Box::new(self)),
+            Placed::InProcess(_) => Err(Box::new(self)),
         }
     }
 }
@@ -611,9 +613,9 @@ trait Rebind: Send {
 }
 
 /// An in-process plugin's rebinder, in any format.
-struct InProcRebind(InProcRebinder);
+struct InProcessRebind(InProcessRebinder);
 
-impl Rebind for InProcRebind {
+impl Rebind for InProcessRebind {
     fn layout(&self) -> Option<tutti_plugin_types::Layout> {
         self.0.layout()
     }
@@ -626,7 +628,7 @@ impl Rebind for InProcRebind {
         let rebuilt = self.0.prepare()?;
         Ok(Rebuilt {
             bound: BoundPlugin {
-                bound: BoundPlaced::InProc(rebuilt.node),
+                bound: BoundPlaced::InProcess(rebuilt.node),
             },
             controls: Some(rebuilt.controls),
             commit: rebuilt.commit,
@@ -675,9 +677,9 @@ impl std::fmt::Debug for PluginRebinder {
 
 impl PluginRebinder {
     /// The rebinder of an in-process plugin.
-    fn in_process(rebinder: InProcRebinder) -> Self {
+    fn in_process(rebinder: InProcessRebinder) -> Self {
         Self {
-            inner: std::sync::Arc::new(std::sync::Mutex::new(InProcRebind(rebinder))),
+            inner: std::sync::Arc::new(std::sync::Mutex::new(InProcessRebind(rebinder))),
         }
     }
 
@@ -742,7 +744,7 @@ enum BoundPlaced {
     ),
     /// Built only where a format feature is on.
     #[allow(dead_code)]
-    InProc(InProcNode),
+    InProcess(InProcessNode),
 }
 
 impl std::fmt::Debug for BoundPlugin {
@@ -778,7 +780,7 @@ impl tutti_graph::IntoNode for BoundPlugin {
             },
             // An in-process node has no `PluginControls` (its meter is reached
             // through `Plugin::meter`, taken before binding).
-            BoundPlaced::InProc(node) => {
+            BoundPlaced::InProcess(node) => {
                 let parts = node.into_parts();
                 tutti_graph::NodeParts {
                     node: parts.node,

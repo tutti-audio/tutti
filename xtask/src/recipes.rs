@@ -338,7 +338,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-hosting",
         "",
-        "every InProc/OutOfProcess impl is listed in the plugin contract",
+        "every InProcess/OutOfProcess impl is listed in the plugin contract",
     ),
     (
         "check-paths",
