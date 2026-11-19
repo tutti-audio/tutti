@@ -2,6 +2,9 @@
 
 use tutti_buffers::FloatWidth;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// The float widths a plugin processes audio in: 32-bit always, 64-bit only
 /// when the plugin declares it.
 ///
@@ -20,6 +23,7 @@ use tutti_buffers::FloatWidth;
 /// assert!(!Widths::F32.accepts(FloatWidth::F64));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Widths {
     f64: bool,
 }
