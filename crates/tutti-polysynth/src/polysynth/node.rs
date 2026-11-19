@@ -110,7 +110,7 @@ impl<F: SynthFloat> Node<F> for PolySynth<F> {
                     }
                     self.last_volume
                 },
-                |lane| Amplitude(lane.into()),
+                |lane| Amplitude::new(lane.into()),
             );
         let volume = Self::clamp_volume(volume);
         let (_, mut outputs) = io.split();

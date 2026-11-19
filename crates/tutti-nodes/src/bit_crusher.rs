@@ -235,7 +235,7 @@ mod tests {
             hold: HoldFactor::new(2.0),
         };
         let mut k = BitCrusherKernel::<f64>::new(ChannelLayout::MONO, controls);
-        k.prepare(RATE, MaxBlock::of(tutti_units::Samples(len)));
+        k.prepare(RATE, MaxBlock::of(tutti_units::Samples::new(len)));
         let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
         assert_close_f64(&y, &want, 0.0);
     }

@@ -101,7 +101,7 @@ fn walk<F: Float, N: Node<F>>(
             if i % 59 == 58 {
                 Node::<F>::prepare(
                     &mut *rig.node,
-                    &Prepare::new(rate, MaxBlock::of(Samples(FRAMES))),
+                    &Prepare::new(rate, MaxBlock::of(Samples::new(FRAMES))),
                 );
             }
             rig.set_block_len(BLOCKS[i % BLOCKS.len()]);
@@ -146,8 +146,8 @@ fn the_ladder_corners_are_allocation_free_with_every_control_moving() {
                         let node = LadderFilterNode::<$f>::with_channels(
                             ChannelLayout::from(width),
                             ty,
-                            Hz(1_000.0),
-                            Resonance(0.5),
+                            Hz::new(1_000.0),
+                            Resonance::new(0.5),
                         );
                         let set = node.param_set();
                         let mut rig = Direct::<_, $f>::with_format(node, SR, FRAMES);
@@ -193,8 +193,8 @@ fn the_ladder_at_a_held_extreme_cutoff_is_allocation_free_and_bounded() {
                 let node = LadderFilterNode::<f32>::with_channels(
                     ChannelLayout::STEREO,
                     ty,
-                    Hz(cutoff),
-                    Resonance(1.0),
+                    Hz::new(cutoff),
+                    Resonance::new(1.0),
                 );
                 let set = node.param_set();
                 let mut rig = Direct::new(node, SR, FRAMES);
@@ -249,8 +249,8 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
                 let node = LadderFilterNode::<f32>::with_channels(
                     ChannelLayout::STEREO,
                     ty,
-                    Hz(1_000.0),
-                    Resonance(0.5),
+                    Hz::new(1_000.0),
+                    Resonance::new(0.5),
                 );
                 let set = node.param_set();
                 let mut rig = Direct::new(node, rate, FRAMES);
@@ -281,7 +281,8 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
 /// cells), then walked with its own cells moving.
 #[test]
 fn a_forked_ladder_and_crossover_are_allocation_free() {
-    let ladder = LadderFilterNode::<f32>::new(LadderType::HP24, Hz(800.0), Resonance(0.9));
+    let ladder =
+        LadderFilterNode::<f32>::new(LadderType::HP24, Hz::new(800.0), Resonance::new(0.9));
     let fork = ladder.fork_fresh();
     let set = fork.param_set();
     let mut rig = Direct::new(fork, SR, FRAMES);
@@ -294,7 +295,8 @@ fn a_forked_ladder_and_crossover_are_allocation_free() {
     });
     assert!(peak.is_some_and(|p| p <= 16.0 * 1.001), "{peak:?}");
     let crossover =
-        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(2_000.0)]).unwrap();
+        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(200.0), Hz::new(2_000.0)])
+            .unwrap();
     let fork = crossover.fork_fresh();
     let set = fork.param_set();
     let mut rig = Direct::new(fork, SR, FRAMES);
@@ -353,7 +355,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
             }
             for shape in 0..=SHAPES {
                 let initial: Vec<Hz> = (0..bands - 1)
-                    .map(|i| Hz(150.0 * 3f64.powi(i as i32)))
+                    .map(|i| Hz::new(150.0 * 3f64.powi(i as i32)))
                     .collect();
                 let node = CrossoverNode::<f32>::new(ChannelLayout::from(width), &initial).unwrap();
                 let set = node.param_set();
@@ -396,7 +398,7 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
         [1.0, 1.0e9],
     ] {
         for shape in [1usize, 3, 4] {
-            let hz = [Hz(set[0]), Hz(set[1])];
+            let hz = [Hz::new(set[0]), Hz::new(set[1])];
             let node = CrossoverNode::<f32>::new(ChannelLayout::STEREO, &hz).unwrap();
             let cells = node.param_set();
             let mut rig = Direct::new(node, SR, FRAMES);

@@ -78,12 +78,12 @@ const CHANNELS: usize = MidiChannel::COUNT as usize;
 /// per-note sensitivity (RPN 0/7), whose fraction is binary.
 fn bend_sensitivity(value: u32) -> Semitones {
     let data = RegisteredData::from_word(value);
-    Semitones(f64::from(data.msb().get()) + f64::from(data.lsb().get()) / 100.0)
+    Semitones::new(f64::from(data.msb().get()) + f64::from(data.lsb().get()) / 100.0)
 }
 
 /// What a pitch wheel spans after General MIDI System On: the default
 /// Pitch Bend range is +-2 semitones (RP-003).
-const GENERAL_MIDI_BEND_RANGE: Semitones = Semitones(2.0);
+const GENERAL_MIDI_BEND_RANGE: Semitones = Semitones::new(2.0);
 
 /// The most voices one note may start. A patch that asks for more is cut short.
 const MAX_SPECS: usize = 32;
@@ -224,8 +224,8 @@ impl Rules {
             steal: Steal::By(Order::Oldest),
             exclusive_groups: false,
             sostenuto: true,
-            bend_range: Semitones(2.0),
-            per_note_bend_range: Semitones(48.0),
+            bend_range: Semitones::new(2.0),
+            per_note_bend_range: Semitones::new(48.0),
             percussion: None,
             tuning: TuningCapacity::DEFAULT,
         }
@@ -975,7 +975,7 @@ impl Voicing {
     /// percussion channel is key-based and takes none, like the master tuning.
     fn tune_of(&self, channel: MidiChannel, key: NoteNumber) -> Semitones {
         if self.rules.percussion == Some(channel) {
-            return Semitones(0.0);
+            return Semitones::new(0.0);
         }
         let state = &self.channels[channel.index()];
         self.tuning.offset(
@@ -1070,7 +1070,7 @@ impl Voicing {
             }
             Rpn::CHANNEL_FINE_TUNING => {
                 // 14 bits centred at 0x2000, a semitone over the half range.
-                let fine = Semitones(
+                let fine = Semitones::new(
                     f64::from(RegisteredData::from_word(value).fourteen().get()) / 8192.0 - 1.0,
                 );
                 self.bend(channel, |b| b.fine = fine);
@@ -1078,7 +1078,7 @@ impl Voicing {
             Rpn::CHANNEL_COARSE_TUNING => {
                 // The MSB, centred at 64, in semitones.
                 let coarse =
-                    Semitones(f64::from(RegisteredData::from_word(value).msb().get()) - 64.0);
+                    Semitones::new(f64::from(RegisteredData::from_word(value).msb().get()) - 64.0);
                 self.bend(channel, |b| b.coarse = coarse);
             }
             Rpn::MODULATION_DEPTH_RANGE => {
@@ -1809,7 +1809,7 @@ mod tests {
                         self.voices.retain(|v| Some(v.id) != steal);
                         self.voices.push(Sounding {
                             id,
-                            level: Amplitude(1.0),
+                            level: Amplitude::new(1.0),
                         });
                     }
                     Command::Cut(id) => self.voices.retain(|v| v.id != id),
@@ -1879,7 +1879,7 @@ mod tests {
             Rules::poly(NonZeroUsize::new(5).unwrap()).polyphony.get(),
             5
         );
-        assert_eq!(Rules::default().bend_range, Semitones(2.0));
+        assert_eq!(Rules::default().bend_range, Semitones::new(2.0));
         let r = Rules::default().with_sostenuto(false);
         assert_eq!(
             r,
@@ -2024,7 +2024,7 @@ mod tests {
         for k in 60..64 {
             s.on(0, k);
         }
-        s.voices[2].level = Amplitude(0.1);
+        s.voices[2].level = Amplitude::new(0.1);
         let c = s.on(0, 70);
         assert!(
             matches!(c[0], Command::Start { steal: Some(v), .. } if v == id(3)),
@@ -2036,7 +2036,7 @@ mod tests {
         }
         s.off(0, 60);
         s.off(0, 62);
-        s.voices[2].level = Amplitude(0.1);
+        s.voices[2].level = Amplitude::new(0.1);
         let c = s.on(0, 70);
         assert!(
             matches!(c[0], Command::Start { steal: Some(v), .. } if v == id(3)),
@@ -2202,7 +2202,7 @@ mod tests {
                 release(1),
                 Command::Retune {
                     channel: MidiChannel::of(0),
-                    bend: Semitones(0.0)
+                    bend: Semitones::new(0.0)
                 }
             ]
         );
@@ -2378,14 +2378,14 @@ mod tests {
                 Command::Retarget {
                     id: id(1),
                     key: NoteNumber::of(62),
-                    tune: Semitones(0.0),
+                    tune: Semitones::new(0.0),
                     velocity: 0x8000,
                     glide: None,
                 },
                 Command::Retarget {
                     id: id(2),
                     key: NoteNumber::of(62),
-                    tune: Semitones(0.0),
+                    tune: Semitones::new(0.0),
                     velocity: 0x8000,
                     glide: None,
                 },
@@ -2429,7 +2429,7 @@ mod tests {
                 Command::Retarget {
                     id: id(1),
                     key: NoteNumber::of(62),
-                    tune: Semitones(0.0),
+                    tune: Semitones::new(0.0),
                     velocity: 0x8000,
                     glide: None,
                 },
@@ -2509,7 +2509,7 @@ mod tests {
             [Command::Retarget {
                 id: id(1),
                 key: NoteNumber::of(60),
-                tune: Semitones(0.0),
+                tune: Semitones::new(0.0),
                 velocity: 0x3000,
                 glide: None,
             }]
@@ -2673,7 +2673,7 @@ mod tests {
     fn retunes(c: &[Command]) -> Vec<(u8, f64)> {
         c.iter()
             .filter_map(|x| match x {
-                Command::Retune { channel, bend } => Some((channel.get(), bend.0)),
+                Command::Retune { channel, bend } => Some((channel.get(), bend.get())),
                 _ => None,
             })
             .collect()
@@ -2694,10 +2694,16 @@ mod tests {
         s.send(2, bend(u32::MAX), &One);
         s.on(2, 60);
         s.core.forget_notes();
-        assert_eq!(s.core.channel_pitch(MidiChannel::of(2)), Semitones(2.0));
+        assert_eq!(
+            s.core.channel_pitch(MidiChannel::of(2)),
+            Semitones::new(2.0)
+        );
         assert!(s.core.holds(id(1)).is_none());
         s.core.reset();
-        assert_eq!(s.core.channel_pitch(MidiChannel::of(2)), Semitones(0.0));
+        assert_eq!(
+            s.core.channel_pitch(MidiChannel::of(2)),
+            Semitones::new(0.0)
+        );
     }
 
     /// RPN 0 is two fields, semitones then cents (RP-003, M2-115 section 4.1):
@@ -2723,7 +2729,7 @@ mod tests {
             assert!((retunes(&up)[0].1 - want).abs() < 1e-12, "{up:?} {want}");
             assert_eq!(
                 s.core.channel_pitch(MidiChannel::of(1)),
-                Semitones(retunes(&up)[0].1)
+                Semitones::new(retunes(&up)[0].1)
             );
         }
     }
@@ -3247,7 +3253,7 @@ mod tests {
         assert_eq!(glide.from, NoteNumber::of(60));
         // 400 cents at CC 5 = 0, the fastest rate of GM2 section 3.3.3's
         // figure (1,000 cent/msec): 0.4 ms.
-        assert_eq!(glide.time, Seconds(0.0004), "{glide:?}");
+        assert_eq!(glide.time, Seconds::new(0.0004), "{glide:?}");
         assert_eq!(glide_of(&s.on(0, 65)), None);
         // Another channel's note is not the one it is for.
         s.cc(0, 84, 60);
@@ -3310,7 +3316,7 @@ mod tests {
         s.cc(0, 5, 0);
         let g = glide_of(&s.on(0, 75)).expect("on");
         assert_eq!(g.from, NoteNumber::of(63));
-        assert_eq!(g.time, Seconds(0.0012), "{g:?}");
+        assert_eq!(g.time, Seconds::new(0.0012), "{g:?}");
     }
 
     /// RP-022: RPN 01 is Channel Fine Tuning and RPN 02 Channel Coarse Tuning;
@@ -3332,7 +3338,7 @@ mod tests {
         let r = retunes(&s.send(2, bend(u32::MAX), &One));
         assert_eq!(r[0].1, 3.5, "{r:?}");
         // Another channel is untouched.
-        assert!(s.core.channel_pitch(MidiChannel::of(3)).0 == 0.0);
+        assert!(s.core.channel_pitch(MidiChannel::of(3)).get() == 0.0);
     }
 
     /// Channel Coarse Tuning (RPN 2) carries its semitones in the top 7 bits of
@@ -3394,8 +3400,8 @@ mod tests {
             probe.cc(0, 10, 20);
             probe.core.channel(MidiChannel::of(0)).pan()
         });
-        assert_eq!(ch.modulation_range(), tutti_units::Cents(100.0));
-        assert_eq!(s.core.channel_pitch(MidiChannel::of(0)).0, 2.0);
+        assert_eq!(ch.modulation_range(), tutti_units::Cents::new(100.0));
+        assert_eq!(s.core.channel_pitch(MidiChannel::of(0)).get(), 2.0);
         // Channel 1 heard none of it.
         let other = s.core.channel(MidiChannel::of(1));
         assert_eq!(other.modulation(), position(100));

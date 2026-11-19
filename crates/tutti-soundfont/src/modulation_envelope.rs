@@ -42,11 +42,11 @@ impl ModulationEnvelope {
             attack_slope: 0.0,
             decay_slope: 0.0,
             release_slope: 0.0,
-            attack_start_time: Seconds(0.0),
-            hold_start_time: Seconds(0.0),
-            decay_start_time: Seconds(0.0),
-            decay_end_time: Seconds(0.0),
-            release_end_time: Seconds(0.0),
+            attack_start_time: Seconds::new(0.0),
+            hold_start_time: Seconds::new(0.0),
+            decay_start_time: Seconds::new(0.0),
+            decay_end_time: Seconds::new(0.0),
+            release_end_time: Seconds::new(0.0),
             sustain_level: Normalized::clamped(0.0),
             release_level: Normalized::clamped(0.0),
             processed_sample_count: 0,
@@ -86,7 +86,7 @@ impl ModulationEnvelope {
     }
 
     fn elapsed(&self) -> Seconds {
-        Seconds(self.processed_sample_count as f64 / f64::from(self.sample_rate))
+        Seconds::new(self.processed_sample_count as f64 / f64::from(self.sample_rate))
     }
 
     pub(crate) fn release(&mut self) {

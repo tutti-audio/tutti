@@ -118,12 +118,12 @@ impl Tick {
     /// use tutti_units::Beat;
     /// use tutti_ump::TicksPerQuarterNote;
     ///
-    /// assert_eq!(Tick(720).beats(TicksPerQuarterNote::of(480)), Beat(1.5));
+    /// assert_eq!(Tick(720).beats(TicksPerQuarterNote::of(480)), Beat::new(1.5));
     /// ```
     #[inline]
     #[must_use]
     pub fn beats(self, ticks_per_quarter: TicksPerQuarterNote) -> Beat {
-        Beat(self.0 as f64 / f64::from(ticks_per_quarter.get()))
+        Beat::new(self.0 as f64 / f64::from(ticks_per_quarter.get()))
     }
 
     /// The tick nearest `beat` in a file of division `ticks_per_quarter`: the
@@ -139,10 +139,10 @@ impl Tick {
     /// use tutti_units::Beat;
     /// use tutti_ump::TicksPerQuarterNote;
     ///
-    /// assert_eq!(Tick::from_beat(Beat(1.5), TicksPerQuarterNote::of(480)), Some(Tick(720)));
+    /// assert_eq!(Tick::from_beat(Beat::new(1.5), TicksPerQuarterNote::of(480)), Some(Tick(720)));
     /// // 0.5 tick at 128 ticks per quarter rounds up.
-    /// assert_eq!(Tick::from_beat(Beat(1.0 / 256.0), TicksPerQuarterNote::of(128)), Some(Tick(1)));
-    /// assert_eq!(Tick::from_beat(Beat(-1.0), TicksPerQuarterNote::of(480)), None);
+    /// assert_eq!(Tick::from_beat(Beat::new(1.0 / 256.0), TicksPerQuarterNote::of(128)), Some(Tick(1)));
+    /// assert_eq!(Tick::from_beat(Beat::new(-1.0), TicksPerQuarterNote::of(480)), None);
     /// ```
     #[inline]
     #[must_use]
@@ -1359,7 +1359,7 @@ impl Container {
 /// let again = MidiFile::from_bytes(&file.to_bytes())?;
 /// assert_eq!(again, file);
 /// let metrical = again.timebase().metrical().unwrap();
-/// assert_eq!(metrical.seconds_at(Tick(480)), Seconds(0.5));
+/// assert_eq!(metrical.seconds_at(Tick(480)), Seconds::new(0.5));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Debug)]
@@ -2022,8 +2022,8 @@ impl<'a> MetricalView<'a> {
     /// let file = MidiFile::smf(SmfDivision::per_quarter(480), Layout::Format0(LeadTrack::new(track)))?;
     /// let clip = file.timebase().metrical().unwrap().timeline();
     /// assert_eq!(clip.packets.len(), 2);
-    /// assert_eq!(clip.packets[0].0, Beat(1.0));
-    /// assert_eq!(clip.packets[1].0, Beat(2.0));
+    /// assert_eq!(clip.packets[0].0, Beat::new(1.0));
+    /// assert_eq!(clip.packets[1].0, Beat::new(2.0));
     /// assert!(clip.dropped.is_empty());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -2336,7 +2336,7 @@ fn smpte_seconds(fps: MtcRate, ticks_per_frame: SmfTicksPerFrame, tick: Tick) ->
     // drop frame", the 30 drop-frame rate being 30000/1001.
     let (frames, per) = fps.frame_rate().ratio();
     let ticks = frames * u64::from(ticks_per_frame.get());
-    Seconds(tick.0 as f64 * per as f64 / ticks as f64)
+    Seconds::new(tick.0 as f64 * per as f64 / ticks as f64)
 }
 
 /// Events as the packets a clip plays ([`MetricalView::timeline`]), and the events

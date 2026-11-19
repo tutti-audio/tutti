@@ -99,13 +99,13 @@ fn encode_hrir(azimuth: Option<Azimuth>) -> (Vec<f32>, Vec<f32>) {
 fn equator_azimuths() -> [Azimuth; 8] {
     [
         Azimuth::FRONT,
-        Azimuth(45.0),
-        Azimuth(90.0),
-        Azimuth(135.0),
-        Azimuth(180.0),
-        Azimuth(-135.0),
-        Azimuth(-90.0),
-        Azimuth(-45.0),
+        Azimuth::new(45.0),
+        Azimuth::new(90.0),
+        Azimuth::new(135.0),
+        Azimuth::new(180.0),
+        Azimuth::new(-135.0),
+        Azimuth::new(-90.0),
+        Azimuth::new(-45.0),
     ]
 }
 
@@ -205,7 +205,7 @@ fn ir_at(
 }
 
 fn peak_index(ir: &[f32]) -> Samples {
-    Samples(
+    Samples::new(
         ir.iter()
             .enumerate()
             .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
@@ -267,8 +267,8 @@ fn measured_vertex_ir_matches_the_encoded_hrir() {
 fn midway_azimuth_interpolates_between_neighbours() {
     let mut node = make_node();
     let (l0, r0) = ir_at(&mut node, Azimuth::FRONT, Elevation::LEVEL);
-    let (l45, r45) = ir_at(&mut node, Azimuth(45.0), Elevation::LEVEL);
-    let (lmid, rmid) = ir_at(&mut node, Azimuth(22.5), Elevation::LEVEL);
+    let (l45, r45) = ir_at(&mut node, Azimuth::new(45.0), Elevation::LEVEL);
+    let (lmid, rmid) = ir_at(&mut node, Azimuth::new(22.5), Elevation::LEVEL);
 
     assert_between(&lmid, &l0, &l45, "left");
     assert_between(&rmid, &r0, &r45, "right");
@@ -290,14 +290,14 @@ fn midway_azimuth_interpolates_between_neighbours() {
 #[test]
 fn itd_sign_follows_the_near_ear() {
     let mut node = make_node();
-    let expected = Samples((ITD_K).round() as usize);
+    let expected = Samples::new((ITD_K).round() as usize);
 
-    let (l_left, r_left) = ir_at(&mut node, Azimuth(90.0), Elevation::LEVEL);
+    let (l_left, r_left) = ir_at(&mut node, Azimuth::new(90.0), Elevation::LEVEL);
     let left_at_left = peak_index(&l_left);
     let right_at_left = peak_index(&r_left);
     assert_eq!(
         left_at_left,
-        Samples(0),
+        Samples::new(0),
         "+90deg (left): near (left) ear should peak at t=0, peaked at {left_at_left}"
     );
     assert_eq!(
@@ -305,12 +305,12 @@ fn itd_sign_follows_the_near_ear() {
         "+90deg (left): far (right) ear should be delayed by {expected}, peaked at {right_at_left}"
     );
 
-    let (l_right, r_right) = ir_at(&mut node, Azimuth(-90.0), Elevation::LEVEL);
+    let (l_right, r_right) = ir_at(&mut node, Azimuth::new(-90.0), Elevation::LEVEL);
     let left_at_right = peak_index(&l_right);
     let right_at_right = peak_index(&r_right);
     assert_eq!(
         right_at_right,
-        Samples(0),
+        Samples::new(0),
         "-90deg (right): near (right) ear should peak at t=0, peaked at {right_at_right}"
     );
     assert_eq!(
@@ -325,7 +325,7 @@ fn ild_sign_makes_the_near_ear_louder() {
     let mut node = make_node();
     let encoded_ratio = (1.0 + ILD) / (1.0 - ILD);
 
-    let (l_left, r_left) = ir_at(&mut node, Azimuth(90.0), Elevation::LEVEL);
+    let (l_left, r_left) = ir_at(&mut node, Azimuth::new(90.0), Elevation::LEVEL);
     let ratio_left = peak_value(&l_left) / peak_value(&r_left);
     assert_abs_diff_eq!(ratio_left, encoded_ratio, epsilon = 1e-5);
     assert!(
@@ -335,7 +335,7 @@ fn ild_sign_makes_the_near_ear_louder() {
         peak_value(&r_left)
     );
 
-    let (l_right, r_right) = ir_at(&mut node, Azimuth(-90.0), Elevation::LEVEL);
+    let (l_right, r_right) = ir_at(&mut node, Azimuth::new(-90.0), Elevation::LEVEL);
     let ratio_right = peak_value(&r_right) / peak_value(&l_right);
     assert_abs_diff_eq!(ratio_right, encoded_ratio, epsilon = 1e-5);
     assert!(
@@ -354,10 +354,10 @@ fn ild_sign_makes_the_near_ear_louder() {
 fn wrap_seam_is_continuous_and_poles_are_finite() {
     let mut node = make_node();
 
-    let (l_359, r_359) = ir_at(&mut node, Azimuth(359.0), Elevation::LEVEL);
-    let (l_m1, r_m1) = ir_at(&mut node, Azimuth(-1.0), Elevation::LEVEL);
-    let (l_1, r_1) = ir_at(&mut node, Azimuth(1.0), Elevation::LEVEL);
-    let (l_180, r_180) = ir_at(&mut node, Azimuth(180.0), Elevation::LEVEL);
+    let (l_359, r_359) = ir_at(&mut node, Azimuth::new(359.0), Elevation::LEVEL);
+    let (l_m1, r_m1) = ir_at(&mut node, Azimuth::new(-1.0), Elevation::LEVEL);
+    let (l_1, r_1) = ir_at(&mut node, Azimuth::new(1.0), Elevation::LEVEL);
+    let (l_180, r_180) = ir_at(&mut node, Azimuth::new(180.0), Elevation::LEVEL);
 
     assert_ir_eq(&l_359, &l_m1, "left 359 vs -1 (wrap identity)");
     assert_ir_eq(&r_359, &r_m1, "right 359 vs -1 (wrap identity)");
@@ -380,11 +380,11 @@ fn wrap_seam_is_continuous_and_poles_are_finite() {
 
     for (az, el, name) in [
         (Azimuth::FRONT, Elevation::UP, "up/front"),
-        (Azimuth(90.0), Elevation::UP, "up/left"),
-        (Azimuth(359.0), Elevation::UP, "up/359"),
+        (Azimuth::new(90.0), Elevation::UP, "up/left"),
+        (Azimuth::new(359.0), Elevation::UP, "up/359"),
         (Azimuth::FRONT, Elevation::DOWN, "down/front"),
-        (Azimuth(-90.0), Elevation::DOWN, "down/right"),
-        (Azimuth(180.0), Elevation::DOWN, "down/back"),
+        (Azimuth::new(-90.0), Elevation::DOWN, "down/right"),
+        (Azimuth::new(180.0), Elevation::DOWN, "down/back"),
     ] {
         let (l, r) = ir_at(&mut node, az, el);
         assert!(
@@ -436,7 +436,7 @@ fn azimuth_sweep_is_continuous_and_energy_bounded() {
 
     for deg in 1..=360 {
         // Integer degrees, then wrap via Azimuth — never compare bearings.
-        let cur = ir_at(&mut node, Azimuth(f64::from(deg)), Elevation::LEVEL);
+        let cur = ir_at(&mut node, Azimuth::new(f64::from(deg)), Elevation::LEVEL);
         let jump = max_abs_diff(&prev.0, &cur.0).max(max_abs_diff(&prev.1, &cur.1));
         if jump > worst_jump {
             worst_jump = jump;
@@ -513,7 +513,7 @@ fn a_direction_change_crossfades_without_a_jump() {
     // Round-off allowance: the FFT pair's error on a unit constant.
     let bound = [range(|s| s.0), range(|s| s.1)].map(|r| r / STEP as f32 + 1e-5);
 
-    let target = Azimuth(170.0);
+    let target = Azimuth::new(170.0);
     aim(&node.param_set(), target, Elevation::LEVEL);
     let (mut l, mut r) = (Vec::new(), Vec::new());
     // Half a second: ten time constants of the 50 ms glide.

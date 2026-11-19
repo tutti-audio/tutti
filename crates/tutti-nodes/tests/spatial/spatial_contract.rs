@@ -88,7 +88,7 @@ fn hrtf_row(ear: u16) -> Row {
         Detect::Threshold(1e-4),
     )
     .output(ear)
-    .with_expected_latency(Samples(LATENCY))
+    .with_expected_latency(Samples::new(LATENCY))
 }
 
 contract_tests!(audio hrtf_left => hrtf_row(0));

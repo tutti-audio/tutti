@@ -265,7 +265,7 @@ fn a_fork_places_the_file_as_the_live_voice_does() {
         .expect("forks");
     let mut node = forked.node;
     node.prepare(
-        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(BLOCK)))
+        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
             .with_render_mode(tutti_graph::RenderMode::Offline),
     );
     let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
@@ -473,7 +473,7 @@ fn fork(voice: &DiskVoice<f32>) -> Box<dyn tutti_graph::Node> {
     node.prepare(
         &tutti_graph::Prepare::new(
             SampleRate::of(SR),
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(BLOCK)),
         )
         .with_render_mode(tutti_graph::RenderMode::Offline),
     );
@@ -546,7 +546,7 @@ fn a_fork_placed_read_is_allocation_free() {
                 &mut *direct.node,
                 &tutti_graph::Prepare::new(
                     SampleRate::of(SR),
-                    tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
+                    tutti_buffers::MaxBlock::of(tutti_units::Samples::new(BLOCK)),
                 )
                 .with_render_mode(tutti_graph::RenderMode::Offline),
             );

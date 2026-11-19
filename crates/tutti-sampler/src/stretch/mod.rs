@@ -134,19 +134,19 @@ impl FftSize {
     /// The window length in samples.
     #[must_use]
     pub const fn size(self) -> Samples {
-        Samples(self.0)
+        Samples::new(self.0)
     }
 
     /// One quarter of the window: 75% overlap, the minimum Hann² COLA needs.
     #[must_use]
     pub const fn hop(self) -> Samples {
-        Samples(self.0 / 4)
+        Samples::new(self.0 / 4)
     }
 
     /// The delay this window imposes: one whole window must arrive before the
     /// first frame can be analyzed.
     pub fn latency(self, sample_rate: impl Into<SampleRate>) -> Seconds {
-        Seconds(self.0 as f64 / sample_rate.into().get())
+        Seconds::new(self.0 as f64 / sample_rate.into().get())
     }
 }
 

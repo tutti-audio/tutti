@@ -26,7 +26,7 @@ const BEAT: f64 = 24_000.0;
 
 /// A beat `frames` frames after beat `from`, at 120 BPM and 48 kHz.
 fn beat(from: f64, frames: usize) -> Beat {
-    Beat(from + frames as f64 / BEAT)
+    Beat::new(from + frames as f64 / BEAT)
 }
 
 fn stopped(at: Beat) -> TransportPosition {
@@ -81,7 +81,7 @@ impl Rig {
     ) -> Vec<(u64, Ump)> {
         let mut cuts = TransportChanges::NONE;
         for &(frame, to) in changes {
-            cuts.push(Offset::of(Samples(frame), Samples(len)), to)
+            cuts.push(Offset::of(Samples::new(frame), Samples::new(len)), to)
                 .unwrap();
         }
         self.seen.lock().unwrap().clear();
@@ -144,8 +144,12 @@ fn systems<T>(events: &[(u64, Ump)], pick: impl Fn(System) -> Option<T>) -> Vec<
 #[test]
 fn a_start_a_stop_and_a_continue_are_on_their_frames() {
     let mut rig = Rig::new(G, clock());
-    assert!(rig.block(2048, stopped(Beat(1.0)), &[]).is_empty());
-    let continued = rig.block(2048, stopped(Beat(1.0)), &[(100, rolling(Beat(1.0)))]);
+    assert!(rig.block(2048, stopped(Beat::new(1.0)), &[]).is_empty());
+    let continued = rig.block(
+        2048,
+        stopped(Beat::new(1.0)),
+        &[(100, rolling(Beat::new(1.0)))],
+    );
     let tick = system(G, System::TimingClock);
     assert_eq!(
         continued,
@@ -176,8 +180,12 @@ fn a_start_a_stop_and_a_continue_are_on_their_frames() {
 #[test]
 fn a_start_from_the_top_is_start() {
     let mut rig = Rig::new(G, clock());
-    rig.block(1024, stopped(Beat(0.0)), &[]);
-    let got = rig.block(1024, stopped(Beat(0.0)), &[(200, rolling(Beat(0.0)))]);
+    rig.block(1024, stopped(Beat::new(0.0)), &[]);
+    let got = rig.block(
+        1024,
+        stopped(Beat::new(0.0)),
+        &[(200, rolling(Beat::new(0.0)))],
+    );
     let tick = system(G, System::TimingClock);
     assert_eq!(got, [(1224, system(G, System::Start)), (1224, tick)]);
 }
@@ -198,7 +206,7 @@ fn the_quarter_frames_are_the_eight_nibbles_four_to_a_frame() {
             ..SyncMessages::OFF
         },
     );
-    let got = rig.block(3700, rolling(Beat(0.0)), &[]);
+    let got = rig.block(3700, rolling(Beat::new(0.0)), &[]);
     let pieces = systems(&got, |m| match m {
         System::TimeCode(piece) => Some(piece.get()),
         _ => None,
@@ -232,25 +240,25 @@ fn a_cue_a_jump_and_a_wrap_are_full_messages_on_their_frames() {
         },
     );
     // Cue: stopped at beat 2 (1 s: 00:00:01:00); standing still says nothing more.
-    let cue = sysex(&rig.block(BLOCK, stopped(Beat(2.0)), &[]));
+    let cue = sysex(&rig.block(BLOCK, stopped(Beat::new(2.0)), &[]));
     assert_eq!(cue, [(0, full_message(0x20, 1, 0))]);
-    assert!(sysex(&rig.block(BLOCK, stopped(Beat(2.0)), &[])).is_empty());
+    assert!(sysex(&rig.block(BLOCK, stopped(Beat::new(2.0)), &[])).is_empty());
     // Rolling on from the cued beat: no second message. A jump to beat 40
     // (20 s) on frame 300 of the next block is one on that frame.
-    let rolled = rig.block(BLOCK, rolling(Beat(2.0)), &[]);
+    let rolled = rig.block(BLOCK, rolling(Beat::new(2.0)), &[]);
     assert!(sysex(&rolled).is_empty());
     let from = 3 * BLOCK as u64;
     let jump = sysex(&rig.block(
         BLOCK,
         rolling(beat(2.0, BLOCK)),
-        &[(300, rolling(Beat(40.0)))],
+        &[(300, rolling(Beat::new(40.0)))],
     ));
     assert_eq!(jump, [(from + 300, full_message(0x20, 20, 0))]);
     // A loop of beats 2.0 to 2.1 (2 400 frames) wraps on frame 2 400 of a block
     // that starts at its start, a jump back from beat 40: a message of the
     // loop's start, 1 s, at the block's start and on the wrap.
-    let looping = Some(LoopRange::new(Beat(2.0), Beat(2.1)).expect("a loop"));
-    let start = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), looping);
+    let looping = Some(LoopRange::new(Beat::new(2.0), Beat::new(2.1)).expect("a loop"));
+    let start = TransportPosition::new(true, Bpm::of(120.0), Beat::new(2.0), looping);
     let wrap = sysex(&rig.block(BLOCK, start, &[]));
     let from = 4 * BLOCK as u64;
     assert_eq!(
@@ -279,11 +287,14 @@ fn mmc(rate: MtcRate) -> SyncMessages {
 #[test]
 fn a_start_and_a_stop_in_one_block_both_go() {
     let mut rig = Rig::new(G, mmc(MtcRate::Fps30));
-    assert!(rig.block(BLOCK, stopped(Beat(0.0)), &[]).is_empty());
+    assert!(rig.block(BLOCK, stopped(Beat::new(0.0)), &[]).is_empty());
     let got = sysex(&rig.block(
         BLOCK,
-        stopped(Beat(0.0)),
-        &[(100, rolling(Beat(0.0))), (300, stopped(beat(0.0, 200)))],
+        stopped(Beat::new(0.0)),
+        &[
+            (100, rolling(Beat::new(0.0))),
+            (300, stopped(beat(0.0, 200))),
+        ],
     ));
     assert_eq!(
         got,
@@ -310,8 +321,8 @@ fn mtc_and_an_mmc_locate_state_one_rate() {
             rate: MtcRate::Fps25,
         },
     );
-    rig.block(BLOCK, stopped(Beat(0.0)), &[]);
-    let at25 = sysex(&rig.block(BLOCK, stopped(Beat(4.0)), &[]));
+    rig.block(BLOCK, stopped(Beat::new(0.0)), &[]);
+    let at25 = sysex(&rig.block(BLOCK, stopped(Beat::new(4.0)), &[]));
     let locate = |hours: u8| vec![0x7F, 0x7F, 0x06, 0x44, 0x06, 0x01, hours, 0, 2, 0, 0];
     assert_eq!(
         at25,
@@ -324,7 +335,7 @@ fn mtc_and_an_mmc_locate_state_one_rate() {
         rate: MtcRate::Fps30,
         ..rig.controls.messages().get()
     });
-    let at30 = sysex(&rig.block(BLOCK, stopped(Beat(6.0)), &[]));
+    let at30 = sysex(&rig.block(BLOCK, stopped(Beat::new(6.0)), &[]));
     let locate = |hours: u8| vec![0x7F, 0x7F, 0x06, 0x44, 0x06, 0x01, hours, 0, 3, 0, 0];
     assert_eq!(
         at30,
@@ -350,8 +361,12 @@ fn every_message_is_on_the_nodes_group() {
             rate: MtcRate::Fps30,
         },
     );
-    rig.block(BLOCK, stopped(Beat(0.0)), &[]);
-    let got = rig.block(BLOCK, stopped(Beat(0.0)), &[(100, rolling(Beat(0.0)))]);
+    rig.block(BLOCK, stopped(Beat::new(0.0)), &[]);
+    let got = rig.block(
+        BLOCK,
+        stopped(Beat::new(0.0)),
+        &[(100, rolling(Beat::new(0.0)))],
+    );
     assert!(got.len() > 10, "{}", got.len());
     for (frame, ump) in got {
         assert_eq!(ump.group(), Some(group), "frame {frame}: {ump:?}");
@@ -366,7 +381,7 @@ fn every_message_is_on_the_nodes_group() {
 #[test]
 fn a_setting_lands_at_the_next_block() {
     let mut rig = Rig::new(G, SyncMessages::OFF);
-    assert!(rig.block(BLOCK, rolling(Beat(1.0)), &[]).is_empty());
+    assert!(rig.block(BLOCK, rolling(Beat::new(1.0)), &[]).is_empty());
     rig.controls.messages().set(clock());
     let got = rig.block(BLOCK, rolling(beat(1.0, BLOCK)), &[]);
     // 1 + 4 096 / 24 000 beats is 4.68 sixteenths: the nearest is 5.
@@ -377,7 +392,7 @@ fn a_setting_lands_at_the_next_block() {
     assert!(!got.iter().any(|e| e.1 == system(G, System::Start)));
 
     let mut rig = Rig::new(G, SyncMessages::OFF);
-    rig.block(BLOCK, rolling(Beat(1.0)), &[]);
+    rig.block(BLOCK, rolling(Beat::new(1.0)), &[]);
     rig.controls.messages().set(mmc(MtcRate::Fps30));
     assert!(rig.block(BLOCK, rolling(beat(1.0, BLOCK)), &[]).is_empty());
     let got = sysex(&rig.block(
@@ -411,7 +426,7 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
         .fork(ForkTarget::Master, ForkMode::Live, prepare)
         .expect("forks");
     let mut out = vec![0.0f32; 512];
-    exec.process(512, &rolling(Beat(0.0)), &[], &mut [&mut out[..]]);
+    exec.process(512, &rolling(Beat::new(0.0)), &[], &mut [&mut out[..]]);
     let got: Vec<_> = heard(&rig.seen).into_iter().map(|e| e.1).collect();
     assert_eq!(got[0], system(G, System::Start));
     assert_eq!(got[1], system(G, System::TimingClock));
@@ -426,7 +441,7 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
 fn flex_states_the_tempo_and_the_nodes_meter_once() {
     use tutti_music::{MeterChange, MeterMap, TimeSignature};
     let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
-        Beat(0.0),
+        Beat::new(0.0),
         TimeSignature::of(3, 4),
     )])));
     let mut rig = Rig::over(
@@ -446,7 +461,7 @@ fn flex_states_the_tempo_and_the_nodes_meter_once() {
             })
             .collect()
     };
-    let started = rig.block(BLOCK, rolling(Beat(0.0)), &[]);
+    let started = rig.block(BLOCK, rolling(Beat::new(0.0)), &[]);
     assert_eq!(
         flexes(&started),
         [
@@ -503,11 +518,11 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
     };
 
     let mut d = Direct::new(SyncOut::new(G).sending(both), SampleRate::SR_48K, 64);
-    assert!(!drive(&mut d, rolling(Beat(1.0))).is_empty());
+    assert!(!drive(&mut d, rolling(Beat::new(1.0))).is_empty());
     let run_on = drive(&mut d, rolling(beat(1.0, 64)));
     assert!(!continues(&run_on), "a run-on is no play edge");
     assert_no_alloc::assert_no_alloc(|| tutti_graph::Node::<f32>::reset(&mut *d.node));
-    let after = drive(&mut d, rolling(Beat(1.0 + 2.0 * step)));
+    let after = drive(&mut d, rolling(Beat::new(1.0 + 2.0 * step)));
     assert!(continues(&after), "a reset clock sees a play edge mid-song");
     assert!(!after.is_empty(), "the messages set are still set");
 
@@ -517,19 +532,19 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
         64,
     );
     assert!(
-        drive(&mut kept, stopped(Beat(0.0))).is_empty(),
+        drive(&mut kept, stopped(Beat::new(0.0))).is_empty(),
         "the first look sends nothing"
     );
-    assert!(plays(&drive(&mut kept, rolling(Beat(0.0)))));
+    assert!(plays(&drive(&mut kept, rolling(Beat::new(0.0)))));
     let mut reset = Direct::new(
         SyncOut::new(G).sending(mmc(MtcRate::Fps30)),
         SampleRate::SR_48K,
         64,
     );
-    assert!(drive(&mut reset, stopped(Beat(0.0))).is_empty());
+    assert!(drive(&mut reset, stopped(Beat::new(0.0))).is_empty());
     assert_no_alloc::assert_no_alloc(|| tutti_graph::Node::<f32>::reset(&mut *reset.node));
     assert!(
-        drive(&mut reset, rolling(Beat(0.0))).is_empty(),
+        drive(&mut reset, rolling(Beat::new(0.0))).is_empty(),
         "the look after a reset is a first"
     );
 }
@@ -545,9 +560,9 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
 #[test]
 fn an_mmc_locate_on_a_loop_wrap_is_on_the_next_blocks_first_frame() {
     use tutti_music::LoopRange;
-    let looping = Some(LoopRange::new(Beat(2.0), Beat(2.1)).expect("a loop"));
+    let looping = Some(LoopRange::new(Beat::new(2.0), Beat::new(2.1)).expect("a loop"));
     let mut rig = Rig::new(G, mmc(MtcRate::Fps30));
-    let first = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), looping);
+    let first = TransportPosition::new(true, Bpm::of(120.0), Beat::new(2.0), looping);
     assert!(
         sysex(&rig.block(BLOCK, first, &[])).is_empty(),
         "the first look"
@@ -569,7 +584,7 @@ fn an_mmc_locate_on_a_loop_wrap_is_on_the_next_blocks_first_frame() {
 #[test]
 fn a_44_1_khz_graph_ticks_every_918_75_frames() {
     let mut rig = Rig::at(44_100.0, SyncOut::new(G).sending(clock()));
-    let got = rig.block(BLOCK, rolling(Beat(0.0)), &[]);
+    let got = rig.block(BLOCK, rolling(Beat::new(0.0)), &[]);
     let ticks: Vec<u64> = systems(&got, |m| (m == System::TimingClock).then_some(()))
         .iter()
         .map(|t| t.0)
@@ -591,7 +606,11 @@ fn mtc_sends_without_the_beat_clock() {
             ..SyncMessages::OFF
         },
     );
-    let got = rig.block(1000, rolling(Beat(0.0)), &[(900, stopped(beat(0.0, 900)))]);
+    let got = rig.block(
+        1000,
+        rolling(Beat::new(0.0)),
+        &[(900, stopped(beat(0.0, 900)))],
+    );
     assert_eq!(sysex(&got), [(0, full_message(0x60, 0, 0))]);
     let pieces: Vec<u64> = systems(&got, |m| match m {
         System::TimeCode(_) => Some(()),
@@ -635,20 +654,20 @@ fn a_locate_or_a_wrap_with_mtc_and_no_clock_sends_no_song_position_and_no_stop()
             other => Some(other),
         })
     };
-    let first = rig.block(BLOCK, rolling(Beat(0.0)), &[]);
+    let first = rig.block(BLOCK, rolling(Beat::new(0.0)), &[]);
     assert!(not_time_code(&first).is_empty(), "{first:?}");
 
     let from = BLOCK as u64;
     let jump = rig.block(
         BLOCK,
         rolling(beat(0.0, BLOCK)),
-        &[(300, rolling(Beat(40.0)))],
+        &[(300, rolling(Beat::new(40.0)))],
     );
     assert_eq!(sysex(&jump), [(from + 300, full_message(0x60, 20, 0))]);
     assert!(not_time_code(&jump).is_empty(), "{jump:?}");
 
-    let looping = Some(LoopRange::new(Beat(2.0), Beat(2.1)).expect("a loop"));
-    let start = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), looping);
+    let looping = Some(LoopRange::new(Beat::new(2.0), Beat::new(2.1)).expect("a loop"));
+    let start = TransportPosition::new(true, Bpm::of(120.0), Beat::new(2.0), looping);
     let wrap = rig.block(BLOCK, start, &[]);
     let from = 2 * BLOCK as u64;
     assert_eq!(
@@ -669,7 +688,7 @@ fn a_fork_states_the_live_nodes_meter() {
     use tutti_graph::{ForkMode, ForkTarget};
     use tutti_music::{MeterChange, MeterMap, TimeSignature};
     let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
-        Beat(0.0),
+        Beat::new(0.0),
         TimeSignature::of(3, 4),
     )])));
     let mut rig = EventRig::new(RATE, BLOCK, 1);
@@ -691,7 +710,7 @@ fn a_fork_states_the_live_nodes_meter() {
         .fork(ForkTarget::Master, ForkMode::Live, prepare)
         .expect("forks");
     let mut out = vec![0.0f32; 512];
-    exec.process(512, &rolling(Beat(0.0)), &[], &mut [&mut out[..]]);
+    exec.process(512, &rolling(Beat::new(0.0)), &[], &mut [&mut out[..]]);
     let signatures: Vec<_> = heard(&rig.seen)
         .into_iter()
         .filter_map(|(frame, ump)| match ump.decode() {

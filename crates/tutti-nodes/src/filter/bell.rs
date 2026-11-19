@@ -11,7 +11,7 @@ use super::{eq_center, eq_gain, filter_bus};
 use crate::kernel::KernelNode;
 
 /// The quality factors a bell takes: 0.1 to 30.
-const Q_RANGE: (Q, Q) = (Q(0.1), Q(30.0));
+const Q_RANGE: (Q, Q) = (Q::new(0.1), Q::new(30.0));
 
 /// The controls of a [`BellFilterNode`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,7 +27,7 @@ pub struct BellFilterControls {
 impl BellFilterControls {
     /// 1 kHz, [`Q::BUTTERWORTH`] and 0 dB.
     pub const DEFAULT: Self = Self {
-        frequency: Hz(1_000.0),
+        frequency: Hz::new(1_000.0),
         q: Q::BUTTERWORTH,
         gain: Db::UNITY,
     };
@@ -182,9 +182,9 @@ mod tests {
     fn a_fork_shares_no_cell() {
         assert_param_fork(BellFilterNode::from(BellFilterConfig::new(
             2u16,
-            Hz(300.0),
-            Q(2.0),
-            Db(-6.0),
+            Hz::new(300.0),
+            Q::new(2.0),
+            Db::new(-6.0),
         )));
     }
 
@@ -192,7 +192,12 @@ mod tests {
     /// unbounded tail ceiling; the center starts at the configured one.
     #[test]
     fn the_shape_declares_its_controls_and_an_unbounded_ceiling() {
-        let n = node(BellFilterConfig::new(3u16, Hz(120.0), Q(4.0), Db(9.0)));
+        let n = node(BellFilterConfig::new(
+            3u16,
+            Hz::new(120.0),
+            Q::new(4.0),
+            Db::new(9.0),
+        ));
         let shape = n.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -212,11 +217,11 @@ mod tests {
     /// exactly the gain at the center: the analog bell's value, the point the design matches.
     #[test]
     fn a_rendered_sine_has_the_designed_magnitude_and_the_gain_at_the_center() {
-        let center = Hz(bin(171));
+        let center = Hz::new(bin(171));
         for (q, db) in [(0.7, 12.0), (3.0, -9.0), (12.0, 18.0), (0.4, -18.0)] {
             for f in [34, 120, 171, 240, 683, 2_400, 3_900].map(bin) {
-                let want = designed(center, Q(q), Db(db), f);
-                let got = gain_of(config(center, Q(q), Db(db)), f);
+                let want = designed(center, Q::new(q), Db::new(db), f);
+                let got = gain_of(config(center, Q::new(q), Db::new(db)), f);
                 assert!(
                     (got - want).abs() < 1e-4 * want,
                     "q {q} gain {db} at {f}: {got} vs {want}"
@@ -226,13 +231,13 @@ mod tests {
             // Nyquist (bin 4095), where the render is the analog magnitude.
             for f in [bin(1), center.get(), bin(4_095)] {
                 let want = analog(center.get(), q, db, f);
-                let got = gain_of(config(center, Q(q), Db(db)), f);
+                let got = gain_of(config(center, Q::new(q), Db::new(db)), f);
                 assert!(
                     (got - want).abs() < 2e-3 * want,
                     "q {q} gain {db} at {f}: {got} vs analog {want}"
                 );
             }
-            let at = gain_of(config(center, Q(q), Db(db)), center.get());
+            let at = gain_of(config(center, Q::new(q), Db::new(db)), center.get());
             let want = 10f64.powf(db / 20.0);
             assert!((at - want).abs() < 1e-4 * want, "q {q} gain {db}: {at}");
         }
@@ -242,7 +247,7 @@ mod tests {
     /// same however the host cuts its blocks, and settle on the design.
     #[test]
     fn a_glide_of_the_controls_stays_finite_and_settles_on_the_design() {
-        let make = || BellFilterNode::from(config(Hz(200.0), Q(1.0), Db::UNITY));
+        let make = || BellFilterNode::from(config(Hz::new(200.0), Q::new(1.0), Db::UNITY));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
         let mut node = assert_cell_glides(
             make,
@@ -270,7 +275,7 @@ mod tests {
         assert!(node.param_set().set(UnitParam::Q, 2.0));
         assert!(node.param_set().set(UnitParam::GainDb, 12.0));
         let settled = render(&mut node, &generate_sine(bin(256), 48_000.0, 24_576));
-        let want = designed(Hz(4_000.0), Q(2.0), Db(12.0), bin(256));
+        let want = designed(Hz::new(4_000.0), Q::new(2.0), Db::new(12.0), bin(256));
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4 * want);
     }
 
@@ -278,7 +283,12 @@ mod tests {
     #[test]
     fn controls_out_of_range_are_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f64, q: f64, db: f64| render(&mut node(config(Hz(hz), Q(q), Db(db))), &input);
+        let at = |hz: f64, q: f64, db: f64| {
+            render(
+                &mut node(config(Hz::new(hz), Q::new(q), Db::new(db))),
+                &input,
+            )
+        };
         assert_eq!(at(1.0, 1.0, 6.0), at(20.0, 1.0, 6.0));
         assert_eq!(
             at(90_000.0, 1.0, 6.0),
@@ -298,7 +308,7 @@ mod tests {
     #[test]
     fn the_tail_covers_the_tail_sum_of_the_impulse_response() {
         let mut kernel = BellFilterKernel::<f64>::new(filter_bus(1u16.into()));
-        kernel.prepare(RATE, MaxBlock::of(Samples(64)));
+        kernel.prepare(RATE, MaxBlock::of(Samples::new(64)));
         let frames = |t: Tail| match t {
             Tail::Finite(s) => s.get(),
             other => panic!("{other:?}"),
@@ -308,12 +318,14 @@ mod tests {
             for q in [0.1f64, 0.7, 4.0, 30.0] {
                 for db in [-24.0f64, -6.0, 6.0, 24.0] {
                     let controls = BellFilterControls {
-                        frequency: Hz(fc),
-                        q: Q(q),
-                        gain: Db(db),
+                        frequency: Hz::new(fc),
+                        q: Q::new(q),
+                        gain: Db::new(db),
                     };
                     let reported = frames(kernel.tail_of(&controls));
-                    let section = MatchedBell::new(Q(q), Db(db)).design(Hz(fc), RATE).unwrap();
+                    let section = MatchedBell::new(Q::new(q), Db::new(db))
+                        .design(Hz::new(fc), RATE)
+                        .unwrap();
                     let ring = ring_at(&section.sections()[0]);
                     let tag = format!("fc {fc} q {q} gain {db}: reported {reported}, ring {ring}");
                     assert!(ring <= reported, "{tag}");

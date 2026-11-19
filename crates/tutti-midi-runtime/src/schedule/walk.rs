@@ -70,14 +70,14 @@ impl Walk {
     ) {
         let t = seg.transport;
         let len = seg.block_len.get();
-        let at = |k: usize| Offset::new(Samples(start.index() + k), block.block_len);
+        let at = |k: usize| Offset::new(Samples::new(start.index() + k), block.block_len);
         let Some(fpb) = frames_per_beat(t.tempo, seg.sample_rate).filter(|_| t.playing) else {
             v.stop(at(0));
             self.expected = None;
             return;
         };
         let now = t.beat();
-        let frame = BeatDuration(1.0 / fpb);
+        let frame = BeatDuration::new(1.0 / fpb);
         // A jump is a start more than half a frame away from where the last
         // segment left off (a seek, a wrap at a block edge, a restart).
         let continuous = self
@@ -95,7 +95,7 @@ impl Walk {
         // however short the loop.
         let looping = t.looping.filter(|l| now < l.end());
         let mut clock = t.clock(seg.sample_rate);
-        let first = clock.advance_to_wrap(Samples(len), looping);
+        let first = clock.advance_to_wrap(Samples::new(len), looping);
         let wrap = first.map_or(len, Samples::get);
 
         // Up to the wrap: a beat less than a frame behind the playhead falls
@@ -119,7 +119,7 @@ impl Walk {
                 // The clock is on pass `k`'s first frame, at the beat it
                 // wrapped to; the pass runs to the next wrap.
                 let from = clock.beat();
-                let wrapped = clock.advance_to_wrap(Samples(len - k), Some(l));
+                let wrapped = clock.advance_to_wrap(Samples::new(len - k), Some(l));
                 let next = wrapped.map_or(len, |r| k + r.get());
                 v.wrap(at(k), from, fpb, events);
                 pass(in_loop, from, k, next, fpb, v, &at);
@@ -157,7 +157,7 @@ fn pass<T: Beated>(
     v: &mut impl Visit<T>,
     at: &impl Fn(usize) -> Option<Offset>,
 ) {
-    let frame = BeatDuration(1.0 / fpb);
+    let frame = BeatDuration::new(1.0 / fpb);
     let lo = from - frame;
     let hi = from + frame * ((next - k) as f64 + 1.0);
     let first = in_loop.partition_point(|e| e.beat() < lo);

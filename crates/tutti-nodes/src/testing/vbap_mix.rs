@@ -42,8 +42,8 @@ pub fn bass_send(g: &mut GraphBuilder, bed: Bed, sources: &[NodeKey]) {
     };
     let (low_pass, _) = g.add_with_controls(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(120.0),
-        Q(0.707),
+        Hz::new(120.0),
+        Q::new(0.707),
     ));
     for &source in sources {
         g.connect(source, 0, low_pass, 0);

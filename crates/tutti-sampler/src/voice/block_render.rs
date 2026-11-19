@@ -95,7 +95,7 @@ impl Host {
 
     fn advance(&mut self, frames: usize) {
         if self.playing {
-            self.clock.advance(Samples(frames), None);
+            self.clock.advance(Samples::new(frames), None);
         }
     }
 }
@@ -120,7 +120,7 @@ fn env(frame: u64, len: usize, transport: TransportPosition, changes: TransportC
     Env {
         frame: Frame::new(frame),
         sample_rate: SampleRate::of(SR),
-        block_len: Samples(len),
+        block_len: Samples::new(len),
         transport,
         changes,
         play: tutti_graph::PlayClock::ZERO,
@@ -197,7 +197,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
             VoicePool::with_channels(ChannelLayout::STEREO).expect("a width the sampler reads");
         pool.prepare(&Prepare::new(
             SampleRate::of(SR),
-            MaxBlock::of(Samples(256)),
+            MaxBlock::of(Samples::new(256)),
         ));
         let mut forked = disk(first_disk + 3).fork_copy();
         forked.set_render(SampleRate::of(SR), RenderMode::Offline);
@@ -292,7 +292,8 @@ fn the_block_read_is_the_same_at_any_block_length() {
                 apply(&mut walk, e);
                 changes
                     .push(
-                        Offset::new(Samples(k * 64), Samples(256)).expect("inside the block"),
+                        Offset::new(Samples::new(k * 64), Samples::new(256))
+                            .expect("inside the block"),
                         walk.transport(),
                     )
                     .expect("a change per piece");

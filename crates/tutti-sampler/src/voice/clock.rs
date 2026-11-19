@@ -177,7 +177,7 @@ impl Run {
             return self.clock.beat();
         }
         let mut c = self.clock;
-        c.advance(Samples(frame - self.start), None);
+        c.advance(Samples::new(frame - self.start), None);
         c.beat()
     }
 
@@ -197,7 +197,7 @@ impl Run {
         }
         if start > self.start {
             if self.rolling {
-                self.clock.advance(Samples(start - self.start), None);
+                self.clock.advance(Samples::new(start - self.start), None);
             }
             self.jump = false;
             self.wrap = self.wrap.and_then(|w| w.after(start - self.start));
@@ -230,7 +230,7 @@ fn continues(prev: Next, to: &TransportPosition, rate: SampleRate) -> bool {
 #[inline]
 fn beat_after(clock: &FrameClock, k: usize) -> Beat {
     let mut c = *clock;
-    c.advance(Samples(k), None);
+    c.advance(Samples::new(k), None);
     c.beat()
 }
 
@@ -355,7 +355,7 @@ fn continuation(run: &Run, t: &TransportPosition) -> Next {
         };
     }
     let mut c = run.clock;
-    c.advance(Samples(run.end - run.start), t.looping);
+    c.advance(Samples::new(run.end - run.start), t.looping);
     let wrapped = c.generation() != run.clock.generation();
     let wrap = if wrapped {
         t.looping
@@ -523,7 +523,7 @@ impl Iterator for Runs<'_> {
                 wrap: self.wrap,
             };
             if rolling {
-                self.clock.advance(Samples(stop - self.cur), region);
+                self.clock.advance(Samples::new(stop - self.cur), region);
             }
             self.wrap = match region.filter(|_| wrap.is_some()) {
                 Some(r) => Wrap::new(r, self.transport.tempo, self.env.sample_rate),
@@ -552,13 +552,13 @@ mod tests {
     fn env(transport: TransportPosition, changes: &[(usize, TransportPosition)]) -> Env {
         let mut c = TransportChanges::NONE;
         for &(at, to) in changes {
-            c.push(Offset::of(Samples(at), Samples(BLOCK)), to)
+            c.push(Offset::of(Samples::new(at), Samples::new(BLOCK)), to)
                 .expect("room");
         }
         Env {
             frame: Frame::new(0),
             sample_rate: SampleRate::SR_48K,
-            block_len: Samples(BLOCK),
+            block_len: Samples::new(BLOCK),
             transport,
             changes: c,
             play: tutti_graph::PlayClock::ZERO,
@@ -566,14 +566,14 @@ mod tests {
     }
 
     fn at(playing: bool, frame: f64) -> TransportPosition {
-        TransportPosition::new(playing, Bpm::of(120.0), Beat(frame / FPB), None)
+        TransportPosition::new(playing, Bpm::of(120.0), Beat::new(frame / FPB), None)
     }
 
     /// **A tempo too slow to count frames at has no frames per beat** (the
     /// run was `Some(inf)` before the one rule).
     #[test]
     fn the_slowest_tempo_has_no_frames_per_beat() {
-        let slow = TransportPosition::new(true, Bpm::of(f64::from_bits(1)), Beat(0.0), None);
+        let slow = TransportPosition::new(true, Bpm::of(f64::from_bits(1)), Beat::new(0.0), None);
         let mut clock = Clock::new();
         let run = clock.observe(&env(slow, &[])).runs().next().expect("a run");
         assert_eq!(run.frames_per_beat(), None);
@@ -659,15 +659,15 @@ mod tests {
         let block = clock.observe(&next);
         let run = block.runs().next().expect("a run");
         assert!(!run.jump, "the next block continues the seek's run");
-        assert_eq!(run.beat_at(0), Beat(10_032.0 / FPB));
+        assert_eq!(run.beat_at(0), Beat::new(10_032.0 / FPB));
     }
 
     /// A loop wrap inside a block is a jump on the wrap's frame, the
     /// run after it starting at the loop's start.
     #[test]
     fn a_loop_wrap_inside_a_block_is_a_jump_on_its_frame() {
-        let looping = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
-        let t = TransportPosition::new(true, Bpm::of(120.0), Beat(1.0 - 10.0 / FPB), looping);
+        let looping = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
+        let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(1.0 - 10.0 / FPB), looping);
         let mut clock = Clock::new();
         let e = env(t, &[]);
         let block = clock.observe(&e);
@@ -678,7 +678,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(0, 10, false, 0), (10, 64, true, 1)]
         );
-        assert_eq!(got[1].beat_at(10), Beat(0.0), "the loop's start");
+        assert_eq!(got[1].beat_at(10), Beat::new(0.0), "the loop's start");
     }
 
     /// `BlockClock::jumps` is whether any run of the block jumps: the
@@ -721,13 +721,13 @@ mod tests {
         assert_eq!(first, [(0, true)]);
         assert_eq!(later, [(16, false)]);
         let r = block.runs_in(16..32).next().expect("a run");
-        assert_eq!(r.beat_at(20), Beat(5_020.0 / FPB));
+        assert_eq!(r.beat_at(20), Beat::new(5_020.0 / FPB));
     }
 
     /// 120 BPM: a loop of one beat is 24 000 frames, and the fade 240.
     fn looping(from: f64) -> TransportPosition {
-        let looping = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
-        TransportPosition::new(true, Bpm::of(120.0), Beat(from / FPB), looping)
+        let looping = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
+        TransportPosition::new(true, Bpm::of(120.0), Beat::new(from / FPB), looping)
     }
 
     /// `(ago, len)` of the wrap crossfade at each run of the block.

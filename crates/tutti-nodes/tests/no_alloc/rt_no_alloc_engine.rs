@@ -36,14 +36,14 @@ fn build_engine_with_chain() -> Engine {
     let transport = Transport::new(SampleRate::of(sample_rate));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(sample_rate),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     let [osc, eq, strip, limiter] = [1, 2, 3, 4].map(NodeKey);
-    ed.insert(osc, "osc", Osc::sine(Hz(440.0)));
+    ed.insert(osc, "osc", Osc::sine(Hz::new(440.0)));
     ed.insert(
         eq,
         "eq",
-        EqBandNode::<f32>::new(SvfType::Bell, Hz(1_000.0), Q(1.0), Db(6.0)),
+        EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0), Db::new(6.0)),
     );
     ed.insert(strip, "strip", BusStripNode::stereo());
     // The limiter's lookahead ring is sized at the prepared rate, on the
@@ -52,8 +52,8 @@ fn build_engine_with_chain() -> Engine {
         limiter,
         "limiter",
         LimiterNode::<f32>::stereo(LimiterControls {
-            threshold: Db(-1.0),
-            ceiling: Db(-0.3),
+            threshold: Db::new(-1.0),
+            ceiling: Db::new(-0.3),
             ..LimiterControls::DEFAULT
         }),
     );

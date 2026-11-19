@@ -283,7 +283,7 @@ impl<F: RingFloat> RegionOut<F> {
     pub(crate) fn buffered(&self) -> Samples {
         let (from, to) = self.window();
         let play = self.play().max(from);
-        Samples(to.saturating_sub(play) as usize)
+        Samples::new(to.saturating_sub(play) as usize)
     }
 
     /// Slots, in frames.
@@ -350,7 +350,7 @@ impl<F: RingFloat> RegionOut<F> {
         #[cfg(codec)]
         if let Some(decoder) = self.decoder.as_mut() {
             let ch = usize::from(self.writer.layout().count());
-            if decoder.cursor() != Samples(at) && decoder.seek(Samples(at)).is_err() {
+            if decoder.cursor() != Samples::new(at) && decoder.seek(Samples::new(at)).is_err() {
                 out.fill(F::ZERO);
                 return false;
             }
@@ -544,7 +544,7 @@ mod tests {
         data.extend_from_slice(&[99.0, 99.0, 99.0]);
         assert_eq!(
             writer.push_interleaved(&data).expect("the ring\'s width"),
-            Samples(12)
+            Samples::new(12)
         );
         assert_eq!(ring.window(), (0, 12), "twelve whole frames");
         let claim = reader.claim(0, [(0, 12), (0, 0)]);

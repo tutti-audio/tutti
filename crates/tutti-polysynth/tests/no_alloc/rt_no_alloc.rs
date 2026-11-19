@@ -71,8 +71,8 @@ fn polysynth_process_with_active_voices_is_allocation_free() {
         polyphony: NonZeroUsize::new(8).unwrap(),
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
-            cutoff: Hz(2_000.0),
-            q: Q(0.707),
+            cutoff: Hz::new(2_000.0),
+            q: Q::new(0.707),
             mode: tutti_polysynth::SvfMode::Lowpass,
         },
         ..Default::default()
@@ -465,11 +465,11 @@ fn a_clip_into_a_synth_is_allocation_free() {
         } else {
             note_off(0, 48 + ((i - 1) % 24) as u8)
         };
-        TimedMidiEvent::new(Beat((i * 37) as f64 / 24_000.0), event).unwrap()
+        TimedMidiEvent::new(Beat::new((i * 37) as f64 / 24_000.0), event).unwrap()
     }));
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     ed.insert(NodeKey(1), "clip", clip);
     ed.insert(
@@ -499,7 +499,12 @@ fn a_clip_into_a_synth_is_allocation_free() {
     }));
     ed.commit().expect("commits");
     let at = |frame: usize, playing: bool| {
-        TransportPosition::new(playing, Bpm::of(120.0), Beat(frame as f64 / 24_000.0), None)
+        TransportPosition::new(
+            playing,
+            Bpm::of(120.0),
+            Beat::new(frame as f64 / 24_000.0),
+            None,
+        )
     };
     // Installs the plan (and its first-block setup) outside the gate.
     let (mut l, mut r) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);

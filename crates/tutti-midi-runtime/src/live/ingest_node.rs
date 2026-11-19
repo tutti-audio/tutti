@@ -248,7 +248,7 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 /// use tutti_midi_runtime::MidiIngestNode;
 /// use tutti_rt::Publisher;
 ///
-/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// // The inlet is not wired yet.
 /// let mode = Publisher::new(MpeMode::Disabled);
 /// let node = MidiIngestNode::new().with_mpe(&mode);

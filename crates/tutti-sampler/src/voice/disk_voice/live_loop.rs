@@ -148,7 +148,7 @@ impl Live {
     fn with(path: &Path, setup: Setup) -> Self {
         let config = DiskStreamerConfig::default();
         let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), config).expect("builds");
-        let start = crate::Placement::new(SamplePosition(setup.beat / 2.0 * SR))
+        let start = crate::Placement::new(SamplePosition::new(setup.beat / 2.0 * SR))
             .expect("a position in the file");
         let openings: Vec<_> = (0..=setup.neighbours)
             .map(|_| streamer.open(path, start))
@@ -173,10 +173,10 @@ impl Live {
             );
         }
         let clock = MockTransport::rolling(Beat::new(setup.beat), Bpm::of(120.0));
-        let mut voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0)));
+        let mut voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
         voice.prepare(&Prepare::new(
             SampleRate::of(SR),
-            MaxBlock::of(Samples(BLOCK)),
+            MaxBlock::of(Samples::new(BLOCK)),
         ));
         voice.set_speed(PlaybackRate::new(setup.speed));
         Self {
@@ -233,7 +233,7 @@ fn seeking(node: &mut dyn Node, clock: &MockTransport, at: usize, beat: f64) -> 
     let mut changes = TransportChanges::NONE;
     changes
         .push(
-            Offset::new(Samples(at), Samples(BLOCK)).expect("inside the block"),
+            Offset::new(Samples::new(at), Samples::new(BLOCK)).expect("inside the block"),
             MockTransport::rolling(Beat::new(beat), clock.tempo()).transport(),
         )
         .expect("one change");
@@ -256,13 +256,13 @@ struct Memory {
 impl Memory {
     fn new(wave: Arc<tutti_buffers::Wave>, loop_: Option<Loop>, speed: f64, from: f64) -> Self {
         let clock = MockTransport::rolling(Beat::new(from), Bpm::of(120.0));
-        let mut source =
-            MemorySource::placed(wave, VoiceWindow::from(Beat(0.0))).expect("a placeable wave");
+        let mut source = MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0)))
+            .expect("a placeable wave");
         source.set_speed(PlaybackRate::new(speed));
         source.set_loop(loop_);
         source.prepare(&Prepare::new(
             SampleRate::of(SR),
-            MaxBlock::of(Samples(BLOCK)),
+            MaxBlock::of(Samples::new(BLOCK)),
         ));
         Self { source, clock }
     }
@@ -726,7 +726,7 @@ fn a_fork_after_a_loop_edit_renders_the_edited_loop() {
     let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut fork = live.voice.fork_copy();
     fork.prepare(
-        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(BLOCK)))
+        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
             .with_render_mode(tutti_graph::RenderMode::Offline),
     );
     let mut forked = Vec::new();
@@ -943,7 +943,7 @@ fn pool_with(
     let (mut pool, handle) = crate::VoicePool::new().with_handle();
     pool.prepare(&Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     handle
         .add_streaming(id, voice, stream, crate::Playback::default())
@@ -983,7 +983,7 @@ fn a_loop_set_through_a_pool_reaches_the_streamer_and_the_voice_loops() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path, SR as u32, LEN);
     let (mut streamer, stream, reader) = streaming(&path);
-    let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0)));
+    let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     let id = crate::SlotId(1);
     let (mut pool, handle) = pool_with(id, voice, stream);
     handle
@@ -1040,7 +1040,7 @@ fn a_loop_set_on_one_pool_voice_leaves_the_other_voices_stream_alone() {
             .1
             .add_streaming(
                 id,
-                DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0))),
+                DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
                 stream,
                 crate::Playback::default(),
             )
@@ -1087,7 +1087,7 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
         let (stream, reader) = crate::testing::settle(streamer, opening).expect("the file opens");
         (
             stream,
-            DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0))),
+            DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
         )
     };
     let (stream_a, mut a) = open(&mut streamer);
