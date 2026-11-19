@@ -10,7 +10,7 @@
 //! so the smoothed pair contradicts the invariant the kernel guarantees.
 
 use tutti_buffers::{Sample, StereoPlanes};
-use tutti_dsp::Smoother;
+use tutti_dsp::smooth_toward;
 use tutti_units::{Amplitude, Ballistics, Correlation, Db, Seconds, StereoBalance, StereoWidth};
 
 /// Mid/side and per-channel levels.
@@ -212,9 +212,9 @@ impl StereoSmoother {
     /// smoothed correlation afterwards, so the two cannot disagree.
     pub fn push(&mut self, instant: StereoReading, dt: Seconds) -> StereoReading {
         let cfg = self.cfg;
-        let smooth = |old: f64, new: f64| Smoother::toward(old, new, cfg.coeff_over(new > old, dt));
+        let smooth = |old: f64, new: f64| smooth_toward(old, new, cfg.coeff_over(new > old, dt));
         let smooth_level = |old: Amplitude, new: Amplitude| {
-            Amplitude(Smoother::toward(
+            Amplitude(smooth_toward(
                 old.get(),
                 new.get(),
                 cfg.coeff_over(new > old, dt),

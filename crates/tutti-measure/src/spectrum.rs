@@ -74,8 +74,8 @@ use tutti_dsp::BinIndex;
 use tutti_dsp::Complex32;
 use tutti_dsp::FftScratch;
 use tutti_dsp::FrameCount;
-use tutti_dsp::Smoother;
 use tutti_dsp::StftGeometry;
+use tutti_dsp::smooth_toward;
 use tutti_units::ranged;
 
 /// The smallest and largest window accepted.
@@ -624,7 +624,7 @@ impl<S: Sample> SpectrumMeter<S> {
 
         // `4 |X|^2 / (g N)^2`: a sine of amplitude `a` on a bin reads `a^2`. DC,
         // and Nyquist of an even window, have no image: `|X|^2 / (g N)^2`.
-        let gain = f64::from(cfg.geometry.magnitude_gain());
+        let gain = cfg.geometry.magnitude_gain::<f64>();
         let scale = (4.0 / (gain * gain)) as f32;
         let size = self.ring.len();
         let power = |k: usize, bin: &Complex32| {
@@ -660,7 +660,7 @@ impl<S: Sample> SpectrumMeter<S> {
             let smoothed = if first || coefficient >= 1.0 {
                 raw
             } else {
-                Smoother::toward(self.power[i], raw, coefficient)
+                smooth_toward(self.power[i], raw, coefficient)
             };
             self.power[i] = if smoothed < POWER_EPSILON {
                 0.0
