@@ -301,10 +301,15 @@ fn control_loop(
     while live(lifecycle) {
         // A setting first: the audio lane's blocks wait for it.
         let result = if let Some((setting, applied)) = channels.take_setting() {
+            // A command's turn reads the news that comes during it too.
+            channels.set_news();
             handle_setting(setting, applied, &mut lane, channels, &mut inbox, lifecycle)
         } else {
             match channels.pop_control() {
-                Some(cmd) => handle_control(cmd, &mut lane, channels, &mut inbox, lifecycle),
+                Some(cmd) => {
+                    channels.set_news();
+                    handle_control(cmd, &mut lane, channels, &mut inbox, lifecycle)
+                }
                 None => match wait.wait(&lane.stream, None) {
                     Ok(woken) if woken.stream => {
                         channels.set_news();
