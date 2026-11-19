@@ -32,7 +32,7 @@ use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    LinearRange, ParamEdit, ParamMapping, RtMidiEvents, StableOrder, WireMidi,
+    LinearRange, ParamEdit, ParamMapping, PlainMap, RtMidiEvents, StableOrder, WireMidi,
     expression_of_per_note_controller, group_of_port, note_id_to_channel_note, per_note_message,
     per_note_tuning, plugin_note_id, push_sysex, sysex_assembler,
 };
@@ -106,9 +106,18 @@ impl ParamBounds {
             .map(|i| &table[i])
     }
 
-    /// The line between the declared bounds.
-    fn line(&self) -> LinearRange {
-        LinearRange::new(self.min, self.max)
+    /// The plain-value map of the declared bounds: the line between them, with a
+    /// stepped parameter's values on their integer. The one place the map is
+    /// built: this type's [`ParamMapping`] is it, and the parameter's
+    /// [`plain_map`](tutti_plugin_types::ParameterInfo::plain_map) is it.
+    #[must_use]
+    pub fn plain_map(&self) -> PlainMap {
+        let line = LinearRange::new(self.min, self.max);
+        if self.stepped {
+            PlainMap::Stepped(line)
+        } else {
+            PlainMap::Linear(line)
+        }
     }
 }
 
@@ -119,18 +128,11 @@ impl ParamBounds {
 /// names (and `plain(normalized(step))` is `step`).
 impl ParamMapping for ParamBounds {
     fn plain(&self, value: Normalized) -> f64 {
-        let plain = self.line().plain(value);
-        if self.stepped && self.min.is_finite() && self.max.is_finite() {
-            plain
-                .round()
-                .clamp(self.min.min(self.max), self.min.max(self.max))
-        } else {
-            plain
-        }
+        self.plain_map().plain(value)
     }
 
     fn normalized(&self, plain: f64) -> Normalized {
-        self.line().normalized(plain)
+        self.plain_map().normalized(plain)
     }
 }
 

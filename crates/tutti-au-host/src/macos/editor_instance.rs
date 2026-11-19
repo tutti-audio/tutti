@@ -140,7 +140,7 @@ mod tests {
     use super::*;
 
     /// **A mirrored write is denormalized against the declared range.**
-    /// `set_parameter_rt` hands the same normalized value to the audio path and
+    /// `PluginBridge::set_parameter_value` hands the same normalized value to the audio path and
     /// to this mirror, but `AudioUnitSetParameter` takes plain units. Writing
     /// `1.0` to AUDelay's "Lowpass Cutoff" (`[10, 22050]` Hz) once moved the
     /// editor's knob to 1 Hz while the audio path went to full scale. The unit's

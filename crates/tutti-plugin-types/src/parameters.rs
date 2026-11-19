@@ -30,7 +30,7 @@
 
 use bitflags::bitflags;
 
-use crate::{ControlRole, ParamUnit, PlainUnit};
+use crate::{ControlRole, ParamUnit, PlainMap, PlainUnit};
 use tutti_units::ParamId;
 
 #[cfg(feature = "serde")]
@@ -277,6 +277,10 @@ pub struct ParameterInfo {
     /// has no such list": VST3 and CLAP say nothing of it.
     #[cfg_attr(feature = "serde", serde(default))]
     overview: bool,
+    /// How the plain value follows from the normalized position, as the format
+    /// declares it. Read through [`plain_map`](Self::plain_map).
+    #[cfg_attr(feature = "serde", serde(default))]
+    plain_map: Option<PlainMap>,
 }
 
 impl ParameterInfo {
@@ -297,7 +301,28 @@ impl ParameterInfo {
             measures: None,
             role: None,
             overview: false,
+            plain_map: None,
         }
+    }
+
+    /// Sets how the plain value follows from the normalized position
+    /// ([`PlainMap`]); a format that fills it builds it from the map its own
+    /// conversions use.
+    #[must_use]
+    pub const fn with_plain_map(mut self, plain_map: PlainMap) -> Self {
+        self.plain_map = Some(plain_map);
+        self
+    }
+
+    /// How the plain value follows from the normalized position, as the format
+    /// declares it: a map to compute from here, or `None` when the plugin
+    /// defines the map (VST3, a VST2 parameter with no integer range), which is
+    /// asked through
+    /// [`AnyThread::parameter_plain`](crate::AnyThread::parameter_plain). A
+    /// parameter built without one reads `None`.
+    #[must_use]
+    pub const fn plain_map(&self) -> Option<PlainMap> {
+        self.plain_map
     }
 
     /// Sets what the number measures, if the declared [`range`](Self::range)

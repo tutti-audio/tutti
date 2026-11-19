@@ -12,7 +12,7 @@ use tutti_plugin_types::{
     ParameterChanges, PluginBus, PluginIo, PluginTail, Preset, PresetId, ProcessContext,
     ProcessOutput, Processor, Reopen, Samples, TransportChange, TransportInfo,
 };
-use tutti_plugin_types::{ParamEdit, Request};
+use tutti_plugin_types::{ParamEdit, ParamMapping, PlainMap, Request};
 use tutti_ump::{MidiChannel, MidiGroup, NoteVelocity};
 use tutti_units::Normalized;
 
@@ -290,6 +290,37 @@ pub fn parameters_listed<F: Format>() {
             assert_eq!(info.bounds(), tone.bounds, "tone bounds");
         } else {
             assert_eq!(info.default_value(), default, "{param:?} default");
+        }
+        // The plain map the format declares: its variant, and where it has a
+        // formula, the spec's plain figures for `tone` from that map.
+        let kind = if param == Param::Mode {
+            F::SURFACE.mode_plain_map
+        } else {
+            F::SURFACE.plain_map
+        };
+        assert_eq!(
+            match info.plain_map() {
+                Some(PlainMap::Linear(_)) => spec::MapKind::Linear,
+                Some(PlainMap::Stepped(_)) => spec::MapKind::Stepped,
+                None => spec::MapKind::PluginDefined,
+            },
+            kind,
+            "{param:?} plain map"
+        );
+        if param == Param::Tone
+            && let Some(map) = info.plain_map()
+        {
+            let plain = F::SURFACE
+                .tone
+                .plain
+                .expect("a format with a formula has figures");
+            for (n, want) in spec::TONE_AT.into_iter().zip(plain) {
+                assert_close::<F>(
+                    map.plain(Normalized::of(n)),
+                    want,
+                    "tone from the declared map",
+                );
+            }
         }
         // The access the spec gives each parameter: the meter alone is read-only
         // and never automatable; the others are writable. A format that reports

@@ -44,7 +44,7 @@
 
 use vst::api;
 
-use tutti_plugin_types::{LinearRange, MainThreadMarker, ParamMapping, read_c_str};
+use tutti_plugin_types::{LinearRange, MainThreadMarker, ParamMapping, PlainMap, read_c_str};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -152,18 +152,22 @@ impl IntegerRange {
 /// `0.0`.
 impl ParamMapping for IntegerRange {
     fn plain(&self, value: Normalized) -> f64 {
-        self.line().plain(value)
+        self.plain_map().plain(value)
     }
 
     fn normalized(&self, plain: f64) -> Normalized {
-        self.line().normalized(plain)
+        self.plain_map().normalized(plain)
     }
 }
 
 impl IntegerRange {
-    /// The line between the ends, backwards for an inverted range.
-    fn line(&self) -> LinearRange {
-        LinearRange::new(f64::from(self.min), f64::from(self.max))
+    /// The plain-value map of the range: the line between the ends, backwards
+    /// for an inverted range. The one place the map is built: this type's
+    /// [`ParamMapping`] is it, and the parameter's
+    /// [`plain_map`](tutti_plugin_types::ParameterInfo::plain_map) is it.
+    #[must_use]
+    pub fn plain_map(&self) -> PlainMap {
+        PlainMap::Linear(LinearRange::new(f64::from(self.min), f64::from(self.max)))
     }
 }
 

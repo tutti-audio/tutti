@@ -31,6 +31,21 @@ pub(crate) struct ParamTable {
     listed: Vec<ParameterInfo>,
 }
 
+impl ParamBounds {
+    /// The bounds `info` declares: the one reading of a `clap_param_info` that
+    /// the Processor's table and the shared [`ParameterInfo`] both come from.
+    pub(super) fn declared(info: &ClapParamInfo) -> Self {
+        Self {
+            // `clap_param_info.id` is the plugin's raw `clap_id`.
+            id: ParamId::new(info.id),
+            min: info.min_value,
+            max: info.max_value,
+            stepped: info.flags.contains(ClapParamFlags::STEPPED),
+            read_only: info.flags.contains(ClapParamFlags::READONLY),
+        }
+    }
+}
+
 impl ParamTable {
     /// The table of `plugin`'s parameters. Queries the plugin: main thread.
     pub(crate) fn read(main: MainThreadMarker, plugin: &Plugin) -> Self {
@@ -46,14 +61,7 @@ impl ParamTable {
             .iter()
             .map(|p| {
                 (
-                    ParamBounds {
-                        // `clap_param_info.id` is the plugin's raw `clap_id`.
-                        id: ParamId::new(p.id),
-                        min: p.min_value,
-                        max: p.max_value,
-                        stepped: p.flags.contains(ClapParamFlags::STEPPED),
-                        read_only: p.flags.contains(ClapParamFlags::READONLY),
-                    },
+                    ParamBounds::declared(p),
                     p.flags.contains(ClapParamFlags::REQUIRES_PROCESS),
                 )
             })

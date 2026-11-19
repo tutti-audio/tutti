@@ -10,7 +10,7 @@
 //! once, when the plugin loads, and again when it says its parameter list moved.
 
 use tutti_au_ffi::Unit;
-use tutti_plugin_types::{LinearRange, ParamMapping};
+use tutti_plugin_types::{LinearRange, ParamMapping, PlainMap};
 use tutti_units::Normalized;
 
 use std::sync::Arc;
@@ -32,9 +32,20 @@ pub(crate) struct ParamBounds {
 }
 
 impl ParamBounds {
-    /// The line between the bounds, in `f64`.
-    fn line(self) -> LinearRange {
-        LinearRange::new(f64::from(self.min), f64::from(self.max))
+    /// The bounds an AU declares, `min` and `max` of
+    /// `kAudioUnitProperty_ParameterInfo`: the one reading of them that the
+    /// range table and the shared [`ParameterInfo`](tutti_plugin_types::ParameterInfo)
+    /// both come from.
+    pub(crate) fn of(min: f32, max: f32) -> Self {
+        Self { min, max }
+    }
+
+    /// The plain-value map of the bounds, in `f64`: the line between them. The
+    /// one place the map is built: this type's [`ParamMapping`] is it (narrowed
+    /// to the `f32` the unit takes), and the parameter's
+    /// [`plain_map`](tutti_plugin_types::ParameterInfo::plain_map) is it.
+    pub(crate) fn plain_map(self) -> PlainMap {
+        PlainMap::Linear(LinearRange::new(f64::from(self.min), f64::from(self.max)))
     }
 }
 
@@ -53,14 +64,14 @@ impl ParamMapping for ParamBounds {
     /// `0.0` otherwise ([`LinearRange`]), so the result is always finite and
     /// inside `[min, max]` (both came from an `f32`).
     fn plain(&self, value: Normalized) -> f64 {
-        f64::from(self.line().plain(value) as f32)
+        f64::from(self.plain_map().plain(value) as f32)
     }
 
     /// The AU's plain value back onto `0..=1`, the read direction of the same
     /// boundary: clamped into the range, `0.0` for NaN and for a range with no
     /// span ([`LinearRange`]).
     fn normalized(&self, plain: f64) -> Normalized {
-        self.line().normalized(plain)
+        self.plain_map().normalized(plain)
     }
 }
 
@@ -100,15 +111,7 @@ impl RangeTable {
         read_only.sort_unstable();
         let mut ranges: Vec<(u32, ParamBounds)> = list
             .into_iter()
-            .map(|p| {
-                (
-                    p.id,
-                    ParamBounds {
-                        min: p.range.min,
-                        max: p.range.max,
-                    },
-                )
-            })
+            .map(|p| (p.id, ParamBounds::of(p.range.min, p.range.max)))
             .collect();
         ranges.sort_unstable_by_key(|&(id, _)| id);
         let ids: Vec<u32> = ranges.iter().map(|&(id, _)| id).collect();

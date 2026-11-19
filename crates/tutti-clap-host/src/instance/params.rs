@@ -311,6 +311,7 @@ pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::Par
     // passes through verbatim: splitting it here would impose a hierarchy the
     // shared vocabulary does not model, and three of the four hosted formats
     // could not fill.
+    let plain_map = crate::ParamBounds::declared(&info).plain_map();
     tutti_plugin_types::ParameterInfo::new(tutti_units::ParamId::new(info.id), info.name)
         .with_range(ParamRange::Plain {
             min: info.min_value,
@@ -318,6 +319,7 @@ pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::Par
             default: info.default_value,
         })
         .with_steps(steps)
+        .with_plain_map(plain_map)
         .with_flags(KNOWN, flags)
         .with_group(info.module)
         .with_measures(declared_measures(info.flags))

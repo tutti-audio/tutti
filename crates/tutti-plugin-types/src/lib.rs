@@ -344,7 +344,7 @@ pub use note_expression::{
 };
 pub use note_id::{note_id_to_channel_note, plugin_note_id};
 pub use param_edit::ParamEdit;
-pub use param_mapping::{LinearRange, ParamMapping};
+pub use param_mapping::{LinearRange, ParamMapping, PlainMap};
 pub use param_unit::{ParamUnit, PlainUnit};
 pub use parameters::{
     ParamAccess, ParamFlags, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
