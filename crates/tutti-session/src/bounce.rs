@@ -1209,6 +1209,14 @@ impl BounceState {
             drop(value);
         }
     }
+
+    /// The bounce's share of the collect: what an export left behind drops
+    /// here, on the main thread, and a bounce in flight too long is warned
+    /// about once.
+    pub(crate) fn collect(&mut self, now: Instant) {
+        self.drop_leftovers();
+        self.watch_stall(now);
+    }
 }
 
 /// `T`, sent back to the session wherever it is dropped, unless

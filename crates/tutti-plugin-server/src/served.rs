@@ -241,6 +241,7 @@ impl<L: OutOfProcess> Drop for Served<L> {
             tracing::error!(
                 "plugin-server: the render thread still holds the processor; leaking the plugin"
             );
+            crate::leak::note();
             std::mem::forget(std::mem::replace(&mut self.lifecycle, Lifecycle::Poisoned));
         }
     }

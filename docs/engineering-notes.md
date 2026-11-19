@@ -778,6 +778,39 @@ while anything else can go (a note that began does not hang), and a due event is
 never held up by later ones.
 `a_rate_change_keeps_the_note_on_its_frame` and the two cases after it pin it.
 
+## The plugin process: isolation, and how a server ends
+
+Out-of-process hosting gives **crash and hang isolation**. It is **not a security
+boundary**: the server runs as the host's user, so a plugin in it can do what
+that user can do, including `ptrace` the host or write its memory (a probe did,
+with `ptrace_scope` 0). Anything that needs a boundary needs a sandbox, which is
+a separate, opt-in piece.
+
+- **Linux host:** `BridgeConfig::protect_host_memory` clears the host's dumpable
+  flag (PR_SET_DUMPABLE 0) before its first server is spawned, which closes
+  that. It is opt-in because the flag also stops the host dumping core and a
+  same-user debugger or crash handler attaching to it; those are the app's to
+  give up. It is one call in `tutti-plugin-ipc-ffi`, and a no-op elsewhere.
+- **macOS host:** the hardened runtime of the app's signing gives the same
+  protection. It is the app's job; tutti does nothing for it.
+- **A server's end:** the guard's drop sends `Shutdown` and waits
+  `Timeouts::shutdown` on the OS's exit wake, then kills. The kill is `SIGKILL`
+  of the server's process group on unix (a server leads its own group, so the
+  helpers a plugin spawned go with it), and a Job Object with
+  kill-on-close on Windows (the kernel ends the server when the host does). A
+  server that is not told to shut down (a launch that failed) is killed at once.
+- **Windows binding fails open, with a gap:** if the Job Object cannot be made or
+  the server cannot be assigned to it, the load goes on (refusing every plugin
+  for it is worse) and logs a warning; the server's own watch on the host is
+  then what ends it. The assignment follows the spawn, so a process the server
+  started before it must stay outside the job. Closing that gap takes a
+  suspended spawn and a resume of its main thread, which std does not offer.
+- **The server's own teardown is bounded:** a stopped render thread is given
+  3 s, and one still inside the plugin ends the process outright (a plugin that
+  never returns from a block cannot be destroyed). A partial audio frame is
+  given 2 s past its first byte. A session that leaked a plugin exits with
+  `EXIT_PLUGIN_LEAKED`.
+
 ## A plugin's state is restored before it is activated
 
 Every format allows a state on a plugin that is open and not yet active (CLAP

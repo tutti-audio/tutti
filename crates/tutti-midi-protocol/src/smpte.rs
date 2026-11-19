@@ -79,6 +79,21 @@ impl MtcRate {
         self.frame_rate().labels_per_second() as u8
     }
 
+    /// The hours byte `0rrhhhhh` of `hours` at this rate (M1 p.53): the rate
+    /// code over the five hour bits. This pair is the one home of the layout.
+    #[must_use]
+    pub const fn hours_byte(self, hours: u8) -> u8 {
+        (self.code() << 5) | (hours & 0x1F)
+    }
+
+    /// The rate and the hours (0..=31 as written) of a hours byte `0rrhhhhh`:
+    /// the inverse of [`hours_byte`](Self::hours_byte). Bit 7 is not read; a
+    /// caller that reads a wire byte refuses it first.
+    #[must_use]
+    pub const fn from_hours_byte(hours_byte: u8) -> (Self, u8) {
+        (Self::masked(hours_byte >> 5), hours_byte & 0x1F)
+    }
+
     /// The two-bit code on the wire.
     #[must_use]
     pub const fn code(self) -> u8 {
@@ -184,7 +199,8 @@ impl SmpteFrameRate {
 }
 
 /// An assembled SMPTE position: `HH:MM:SS:FF` plus the rate that gives the frame
-/// count meaning.
+/// count meaning, at any [`SmpteFrameRate`] (29.97 non-drop included).
+/// [`MtcTimeCode`](crate::MtcTimeCode) is the one at a rate MTC has a code for.
 ///
 /// The fields are the timecode's own *labels*, not a duration — under
 /// [`SmpteFrameRate::Fps2997Df`] some frame numbers never occur, so arithmetic on
@@ -294,6 +310,24 @@ impl SmpteTimecode {
             })
         } else {
             None
+        }
+    }
+
+    /// The position counted at `frame_rate`, already checked by the caller to be
+    /// the labels [`new`](Self::new) accepts.
+    pub(crate) const fn counted(
+        hours: u8,
+        minutes: u8,
+        seconds: u8,
+        frames: u8,
+        frame_rate: SmpteFrameRate,
+    ) -> Self {
+        Self {
+            hours,
+            minutes,
+            seconds,
+            frames,
+            frame_rate,
         }
     }
 

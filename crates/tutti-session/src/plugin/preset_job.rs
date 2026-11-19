@@ -149,7 +149,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         }
         let (job, ticket) = self.jobs.new_job();
         ticket.waiting_for_main_thread();
-        self.work.defer(move |main| {
+        self.plugins.work.defer(move |main| {
             // A dropped job loads nothing.
             ticket.complete(|| {
                 // A node removed, or a plugin swapped out, since the call: the
