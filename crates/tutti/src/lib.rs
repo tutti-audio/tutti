@@ -418,9 +418,9 @@ pub mod session {
     pub use tutti_session::{
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError,
-        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
-        HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
-        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
+        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardTapError,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
         PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
         RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
         RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted, Wire, root_width,

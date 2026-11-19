@@ -201,7 +201,7 @@ pub struct Engine<F: Float = f32> {
     /// The tap after the fader, the audio thread's ends.
     hearing: AudioThreadCell<crate::hearing::Hearing<F>>,
     /// Its control side.
-    heard_taps: crate::HeardTaps<F>,
+    output_taps: crate::OutputTaps<F>,
     /// A reader of the block clock the graph render writes.
     clock_reader: BlockClockReader,
     /// The folds from the root to the device, published by
@@ -506,7 +506,7 @@ impl<F: Float> Engine<F> {
         // executor is always fresh at `Engine::new`.
         let dropped_seen = executor.dropped_event_count();
         let (recorder, meter) = LoadMeter::pair();
-        let (heard_taps, hearing) = crate::hearing::link();
+        let (output_taps, hearing) = crate::hearing::link();
         let clock = BlockClock::new();
         let clock_reader = clock.reader();
         // Every bare root width places into every bare device width up to
@@ -538,7 +538,7 @@ impl<F: Float> Engine<F> {
             load: AudioThreadCell::new(recorder),
             meter: Some(meter),
             hearing: AudioThreadCell::new(hearing),
-            heard_taps,
+            output_taps,
             clock_reader,
             output,
             folds,
@@ -648,9 +648,9 @@ impl<F: Float> Engine<F> {
     /// The control side of the tap after the fader ("what I'm hearing"): the
     /// device-width output of every [`process`](Self::process) and
     /// [`process_segment`](Self::process_segment) call, read through a
-    /// [`TapReader`](tutti_graph::TapReader). See [`HeardTaps`](crate::HeardTaps).
-    pub fn heard_taps(&self) -> crate::HeardTaps<F> {
-        self.heard_taps.clone()
+    /// [`TapReader`](tutti_graph::TapReader). See [`OutputTaps`](crate::OutputTaps).
+    pub fn output_taps(&self) -> crate::OutputTaps<F> {
+        self.output_taps.clone()
     }
 
     /// Renders the whole of `output` with no transport motion and no declick.
@@ -1761,7 +1761,7 @@ mod tests {
         let engine =
             Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
         let mut tap = engine
-            .heard_taps()
+            .output_taps()
             .open(ChannelLayout::STEREO, Samples::new(256))
             .expect("opens")
             .reader()
