@@ -379,7 +379,7 @@ fn a_set_under_a_lane_writes_the_knob() {
     }
 
     set_gain(&s, node, 0.5);
-    let knob = s.mod_state().lane(gain.key()).and_then(|(_, l)| l.knob());
+    let knob = s.mod_state().lane(gain.key()).and_then(|(_, l)| l.value());
     assert_eq!(knob, Some(0.5), "the knob is the set value, with no update");
     let read = s
         .plugin_view(node)
@@ -421,7 +421,7 @@ fn a_set_right_after_the_lane_is_added_writes_the_knob() {
     lane_of(&mut drive, &mut s, gain);
 
     set_gain(&s, node, 0.5);
-    let knob = s.mod_state().lane(gain.key()).and_then(|(_, l)| l.knob());
+    let knob = s.mod_state().lane(gain.key()).and_then(|(_, l)| l.value());
     assert_eq!(knob, Some(0.5), "the knob is the set value");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !near(gain_value(&s, node), 0.25) {
@@ -586,7 +586,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     let knob = s
         .mod_state()
         .lane(gain.key())
-        .and_then(|(_, lane)| lane.knob())
+        .and_then(|(_, lane)| lane.value())
         .expect("a plugin lane has a knob");
     assert!(
         (knob - 60.0 / 72.0).abs() < 1e-4,

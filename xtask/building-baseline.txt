@@ -228,7 +228,7 @@ tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_phase_off
 tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_rate
 tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_seed
 tutti-nodes  with-prefix  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::with_level
-tutti-nodes  setter  crates/tutti-nodes/src/automation/control_lane.rs::LaneControls::set_knob
+tutti-nodes  setter  crates/tutti-nodes/src/automation/control_lane.rs::LaneControls::set_value
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_config
 tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_mode
 tutti-nodes  setter  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::set_gain

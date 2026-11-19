@@ -25,7 +25,8 @@ use std::sync::Arc;
 use tutti_au_ffi::property::{BypassEffect, ClassInfo, ClassInfoFromDocument, Latency};
 use tutti_au_ffi::{AuEditor, Element, HostCallbacks, Scope, TransportState, Unit};
 use tutti_plugin_types::{
-    ChannelLayout, MainThreadMarker, MainWorkHandle, PluginDescriptor, RequestWord, TransportInfo,
+    AtomicRequestFlags, ChannelLayout, MainThreadMarker, MainWorkHandle, PluginDescriptor,
+    TransportInfo,
 };
 use tutti_units::Seconds;
 use tutti_units::{SampleRate, Samples};
@@ -76,7 +77,7 @@ pub struct AuLoaded {
     editor: Option<AuEditor>,
     /// What the property listener raised since the last
     /// [`take_requests`](tutti_plugin_types::Control::take_requests).
-    pub(crate) requests: Arc<RequestWord>,
+    pub(crate) requests: Arc<AtomicRequestFlags>,
     /// The edits the plugin's own editor made, as the listener heard them: what
     /// [`take_reported_edits`](tutti_plugin_types::Control::take_reported_edits)
     /// hands out.
@@ -217,7 +218,7 @@ impl AuLoaded {
             config,
             transport: None,
             editor: None,
-            requests: Arc::new(RequestWord::new()),
+            requests: Arc::new(AtomicRequestFlags::new()),
             edits: Arc::new(ReportedEdits::default()),
             ranges,
             retired_marks: Vec::new(),
@@ -266,9 +267,9 @@ impl AuLoaded {
         self.watch.is_some()
     }
 
-    /// The word the property listener raises, for a caller that needs to say a
+    /// The request flags the property listener raises, for a caller that needs to say a
     /// change no installed unit will make on request.
-    pub fn requests(&self) -> &Arc<RequestWord> {
+    pub fn requests(&self) -> &Arc<AtomicRequestFlags> {
         &self.requests
     }
 

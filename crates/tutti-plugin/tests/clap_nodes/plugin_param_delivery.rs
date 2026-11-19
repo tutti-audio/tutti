@@ -135,7 +135,7 @@ fn an_unchanged_value_is_not_sent_again() {
         "a value held still was sent again"
     );
 
-    assert!(knobs[3].set_knob(0.875));
+    assert!(knobs[3].set_value(0.875));
     assert!(until(
         SETTLE,
         || {
@@ -194,7 +194,7 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
         "a held host value overwrote the plugin-side edit"
     );
 
-    assert!(knobs[p].set_knob(0.5));
+    assert!(knobs[p].set_value(0.5));
     assert!(
         until(
             SETTLE,
