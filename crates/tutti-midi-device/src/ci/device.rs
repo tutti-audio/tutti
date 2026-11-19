@@ -93,7 +93,7 @@ use tutti_ump::{DeviceIdentity, U7};
 
 use super::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
-    EndpointInfo, EndpointStatus, MaxSysexSize, Muid, Nak, PeCiMessage, PeMessageKind,
+    EndpointInfo, EndpointStatus, MaxSysexSize, Muid, Nak, NakStatus, PeCiMessage, PeMessageKind,
     ProcessFeatures, ProfileLists, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
 };
 use tutti_ump::FunctionBlockId;
@@ -313,11 +313,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             }
             CiMessage::EndpointInquiry { header, to, .. } => {
                 if *to == self.muid {
-                    actions.push(self.nak(
-                        header.source,
-                        SUB_ID2_ENDPOINT_INQUIRY,
-                        Nak::STATUS_NAK,
-                    ));
+                    actions.push(self.nak(header.source, SUB_ID2_ENDPOINT_INQUIRY, NakStatus::Nak));
                 }
             }
             CiMessage::EndpointReply { header, to, info } => {
@@ -360,7 +356,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     let header = message.header();
                     let nak = Nak::new(
                         U7::new(message.sub_id2()).unwrap_or_default(),
-                        Nak::STATUS_PROFILE_NOT_SUPPORTED,
+                        NakStatus::ProfileNotSupported,
                     )
                     .with_details(profile.to_bytes().map(U7::masked));
                     actions.push(CiAction::Send(CiMessage::Nak {
@@ -398,7 +394,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     actions.push(self.nak(
                         header.source,
                         message.sub_id2(),
-                        Nak::STATUS_MESSAGE_NOT_SUPPORTED,
+                        NakStatus::MessageNotSupported,
                     ));
                 }
             }
@@ -429,14 +425,14 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             })
         };
         if !self.own.categories.contains(CiCategories::PROCESS_INQUIRY) {
-            actions.push(nak_on(asked.device_id, Nak::STATUS_MESSAGE_NOT_SUPPORTED));
+            actions.push(nak_on(asked.device_id, NakStatus::MessageNotSupported));
             return;
         }
         match message {
             CiMessage::MessageReportInquiry { scope, .. } => match scope.address() {
                 // Tutti has no Channel in use (§9.5).
                 address @ CiDeviceId::Channel(_) => {
-                    actions.push(nak_on(address, Nak::STATUS_NOT_IN_USE));
+                    actions.push(nak_on(address, NakStatus::NotInUse));
                 }
                 address => {
                     actions.push(CiAction::Send(CiMessage::MessageReportReply {
@@ -579,16 +575,16 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             self.nak_message(
                 header.source,
                 message.sub_id2(),
-                Nak::STATUS_MESSAGE_NOT_SUPPORTED,
+                NakStatus::MessageNotSupported,
             )
         })
     }
 
-    fn nak(&self, to: Muid, original: u8, status: U7) -> CiAction {
+    fn nak(&self, to: Muid, original: u8, status: NakStatus) -> CiAction {
         CiAction::Send(self.nak_message(to, original, status))
     }
 
-    fn nak_message(&self, to: Muid, original: u8, status: U7) -> CiMessage {
+    fn nak_message(&self, to: Muid, original: u8, status: NakStatus) -> CiMessage {
         CiMessage::Nak {
             header: self.header(),
             to,

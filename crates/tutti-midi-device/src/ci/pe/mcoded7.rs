@@ -80,7 +80,14 @@ pub fn encode(data: &[u8], out: &mut [u8]) -> Result<usize, Mcoded7Error> {
             have: out.len(),
         });
     }
-    for (group, wire) in data.chunks(GROUP).zip(out[..need].chunks_mut(GROUP + 1)) {
+    write_groups(data, &mut out[..need]);
+    Ok(need)
+}
+
+/// The Mcoded7 groups of `data` written over `out`, which is
+/// [`encoded_len`]`(data.len())` bytes.
+fn write_groups(data: &[u8], out: &mut [u8]) {
+    for (group, wire) in data.chunks(GROUP).zip(out.chunks_mut(GROUP + 1)) {
         if let Some((sign, lows)) = wire.split_first_mut() {
             *sign = 0;
             for (i, (&byte, low)) in group.iter().zip(lows).enumerate() {
@@ -89,7 +96,6 @@ pub fn encode(data: &[u8], out: &mut [u8]) -> Result<usize, Mcoded7Error> {
             }
         }
     }
-    Ok(need)
 }
 
 /// Decodes the Mcoded7 bytes `wire` into `out`, and returns the bytes written.
@@ -127,8 +133,7 @@ pub fn decode(wire: &[u8], out: &mut [u8]) -> Result<usize, Mcoded7Error> {
 #[must_use]
 pub fn encode_vec(data: &[u8]) -> Vec<u8> {
     let mut out = vec![0; encoded_len(data.len())];
-    // The vector is exactly as long as the result.
-    let _ = encode(data, &mut out);
+    write_groups(data, &mut out);
     out
 }
 

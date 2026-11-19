@@ -3,8 +3,8 @@
 use tutti_ump::{MidiChannel, U7};
 
 use super::{
-    Ack, CiAction, CiDeviceId, CiHeader, CiMessage, Decoded, Muid, Nak, ProcessAction,
-    ProfileAction, ProfileChannels, ProfileTarget, Unread,
+    Ack, AckStatus, CiAction, CiDeviceId, CiHeader, CiMessage, Decoded, Muid, Nak, NakStatus,
+    ProcessAction, ProfileAction, ProfileChannels, ProfileTarget, TimeoutWait, Unread,
 };
 
 /// The source of the messages a test decodes.
@@ -86,7 +86,12 @@ pub(super) fn unread(bytes: &[u8]) -> Unread {
 
 /// A NAK from [`PEER`] to [`OURS`] of `original`, on `address`, with
 /// `details`.
-pub(super) fn nak_with(address: CiDeviceId, original: u8, status: U7, details: [u8; 5]) -> Decoded {
+pub(super) fn nak_with(
+    address: CiDeviceId,
+    original: u8,
+    status: NakStatus,
+    details: [u8; 5],
+) -> Decoded {
     Decoded::Message(CiMessage::Nak {
         header: header_from(PEER, address),
         to: Muid::of(OURS),
@@ -95,7 +100,7 @@ pub(super) fn nak_with(address: CiDeviceId, original: u8, status: U7, details: [
 }
 
 /// A NAK from [`PEER`] to [`OURS`] of `original`, on `address`.
-pub(super) fn nak(address: CiDeviceId, original: u8, status: U7) -> Decoded {
+pub(super) fn nak(address: CiDeviceId, original: u8, status: NakStatus) -> Decoded {
     nak_with(address, original, status, [0; 5])
 }
 
@@ -110,9 +115,11 @@ pub(super) fn wait_with(
     Decoded::Message(CiMessage::Ack {
         header: header_from(PEER, address),
         to: Muid::of(OURS),
-        ack: Ack::new(U7::of(original), Ack::STATUS_TIMEOUT_WAIT)
-            .with_status_data(U7::of(tenths))
-            .with_details(details.map(U7::of)),
+        ack: Ack::new(
+            U7::of(original),
+            AckStatus::TimeoutWait(TimeoutWait::of(tenths)),
+        )
+        .with_details(details.map(U7::of)),
     })
 }
 

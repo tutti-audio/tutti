@@ -150,7 +150,7 @@ impl ResourceEntry {
     pub fn media_types(&self) -> Vec<MediaType> {
         self.media_types
             .clone()
-            .unwrap_or_else(|| MediaType::new("application/json").into_iter().collect())
+            .unwrap_or_else(|| vec![MediaType::JSON])
     }
 
     /// The encodings of the Property Data: ASCII unless the entry lists others.

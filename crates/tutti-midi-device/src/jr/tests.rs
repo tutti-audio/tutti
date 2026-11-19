@@ -42,7 +42,7 @@ impl Link {
 
     /// The sender's 16 bits at `t` seconds after the base.
     fn ticks(&self, t: f64) -> u16 {
-        let ticks = self.phase + t * (1.0 + self.drift) * f64::from(TICK_HZ);
+        let ticks = self.phase + t * (1.0 + self.drift) * TICK_RATE.get();
         (ticks.round() as u64 & 0xFFFF) as u16
     }
 
@@ -104,6 +104,7 @@ fn send_times_recovered_within_a_quarter_of_the_jitter_over_200_ppm_drift() {
             let JrTime::Sent { at, jitter: spread } = time else {
                 unreachable!()
             };
+            let spread = Duration::from_secs_f64(spread.get());
             assert!(at <= arrival, "a message is never sent after it arrives");
             assert!(spread <= jitter, "the spread is the jitter's at most");
         }
@@ -123,7 +124,7 @@ fn a_timestamp_past_the_wrap_is_the_next_wrap() {
     let mut link = Link::new(0.0, 65_000.0, Duration::ZERO);
     link.latency = Duration::ZERO;
     let mut rx = JrReceiver::new();
-    let tick = 1.0 / f64::from(TICK_HZ);
+    let tick = 1.0 / TICK_RATE.get();
     assert_eq!(link.clock(&mut rx, 0.0), ClockHeard::Taken);
     assert_eq!(link.clock(&mut rx, 500.0 * tick), ClockHeard::Taken);
     // 1 536 ticks after the first clock: tick 65 000 + 1 536 = 66 536 = 1 000.
@@ -234,7 +235,7 @@ fn a_late_or_repeated_clock_is_ignored() {
 #[test]
 fn render_time_is_after_every_arrival_within_the_observed_delays() {
     let jitter = 2 * MS;
-    let tick = Duration::from_secs_f64(1.0 / f64::from(TICK_HZ));
+    let tick = Duration::from_secs_f64(1.0 / TICK_RATE.get());
     let link = Link::new(0.0, 0.0, jitter);
     let delayed = |k: u32| {
         if k.is_multiple_of(2) {
@@ -257,6 +258,7 @@ fn render_time_is_after_every_arrival_within_the_observed_delays() {
         let JrTime::Sent { jitter: spread, .. } = time else {
             panic!("locked: {time:?}")
         };
+        let spread = Duration::from_secs_f64(spread.get());
         // The window holds both delays; a fitted slope adds a little.
         assert!(
             spread + tick >= jitter && spread <= jitter.mul_f64(1.25),
@@ -319,7 +321,7 @@ fn a_held_timestamp_is_dropped_by_a_restart_and_by_age() {
     );
     // A restart takes the stamp with the window.
     rx.timestamp(link.ticks(1.7), link.arrival(1.7));
-    link.phase += 0.5 * f64::from(TICK_HZ);
+    link.phase += 0.5 * TICK_RATE.get();
     assert_eq!(link.clock(&mut rx, 1.9), ClockHeard::Restarted);
     assert_eq!(rx.resolve_held(link.arrival(1.9)), none);
 }
@@ -348,7 +350,7 @@ fn assert_relocks_after_a_jump(jump: f64) {
         assert_eq!(link.clock(&mut rx, t), ClockHeard::Taken);
         t += 0.1;
     }
-    link.phase += jump * f64::from(TICK_HZ);
+    link.phase += jump * TICK_RATE.get();
     assert_eq!(
         link.clock(&mut rx, t),
         ClockHeard::Restarted,
@@ -415,9 +417,23 @@ fn the_interval_between_clocks_says_nothing_of_the_link() {
         panic!("locked");
     };
     let bound = Duration::from_micros(64);
-    assert!(jitter <= bound, "{jitter:?}");
+    assert!(jitter.get() <= bound.as_secs_f64(), "{jitter:?}");
     let error = at
         .duration_since(link.send(sent))
         .max(link.send(sent).duration_since(at));
     assert!(error <= bound, "{error:?}");
+}
+
+/// M2-104 §7.2.2.1: a JR tick is 1/31250 s, so 31250 ticks are one second and
+/// the 16-bit wrap, 65536 ticks, is 2.097152 s.
+#[test]
+fn a_tick_at_the_spec_rate_is_its_time_in_seconds() {
+    assert_eq!(TICK_RATE.get(), 31_250.0);
+    assert_eq!(tick_time(31_250), tutti_units::Seconds(1.0));
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-12;
+    assert!(near(tick_time(1).get(), 32e-6));
+    assert!(near(
+        tick_time(u16::MAX).get() + tick_time(1).get(),
+        2.097152
+    ));
 }

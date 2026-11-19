@@ -179,8 +179,12 @@ fn the_active_protocol_is_the_channel_voice_to_send() {
 
 #[test]
 fn a_reserved_active_protocol_is_no_dialect() {
+    // A peer's Stream Configuration Notification can name one, which a
+    // discovered Endpoint keeps as it was read.
+    let mut peer = speaking(Protocol::Midi2);
+    peer.active.protocol = midi::reserved_protocol(0x03);
     assert_eq!(
-        of(&speaking(midi::reserved_protocol(0x03)), &table(&[])),
+        of(&peer, &table(&[])),
         Err(NoDialect::UnspokenProtocol(midi::reserved_protocol(0x03)))
     );
 }

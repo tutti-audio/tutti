@@ -103,6 +103,18 @@ impl U14 {
         }
     }
 
+    /// The value of a length held to 14 bits: a length above [`MAX`](Self::MAX)
+    /// is [`MAX`](Self::MAX). For a collection whose type bounds its length
+    /// to 14 bits, which has no length to refuse.
+    #[inline]
+    #[must_use]
+    pub const fn saturating_from_len(len: usize) -> Self {
+        match Self::from_len(len) {
+            Some(value) => value,
+            None => Self::MAX,
+        }
+    }
+
     /// The value of two 7-bit wire bytes, least significant first, or `None`
     /// when a byte has its top bit set.
     #[inline]
@@ -396,6 +408,9 @@ mod tests {
     fn a_length_is_refused_above_the_width() {
         assert_eq!(U14::from_len(0x3FFF), Some(U14::MAX));
         assert_eq!(U14::from_len(0x4000), None);
+        assert_eq!(U14::saturating_from_len(0x3FFF), U14::MAX);
+        assert_eq!(U14::saturating_from_len(0x4000), U14::MAX);
+        assert_eq!(U14::saturating_from_len(5).get(), 5);
         assert_eq!(U28::from_len(0x0FFF_FFFF), Some(U28::MAX));
         assert_eq!(U28::from_len(0x1000_0000), None);
     }
