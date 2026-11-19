@@ -328,7 +328,7 @@ pub const fn cap_of(n: u32) -> NonZeroU32 {
 
 /// `shape`'s figures over these buses, its ports kept.
 #[allow(dead_code)]
-pub fn rebused(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses) -> Shape {
+pub fn with_buses(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses) -> Shape {
     let mut bused =
         Shape::buses(buses_in, buses_out).with_ports(shape.audio_in(), shape.audio_out());
     bused.event_in = shape.event_in;
@@ -354,7 +354,7 @@ impl<F: Float> Node<F> for TestNode<F> {
         }
         match self.buses {
             // The kind's figures over the buses the test declared.
-            Some((buses_in, buses_out)) => rebused(shape, buses_in, buses_out),
+            Some((buses_in, buses_out)) => with_buses(shape, buses_in, buses_out),
             None => shape,
         }
     }
@@ -1147,18 +1147,18 @@ pub fn workers_for(seed: u64) -> usize {
 
 /// A source that is `1.0` for its first `len` frames, then silent for good
 /// (and says so, `Status::Silent`).
-pub struct Pulse {
+pub struct Burst {
     pub len: usize,
     pub at: usize,
 }
 
-impl Pulse {
+impl Burst {
     pub fn new(len: usize) -> Self {
         Self { len, at: 0 }
     }
 }
 
-impl Node for Pulse {
+impl Node for Burst {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
     }
@@ -1182,11 +1182,11 @@ impl Node for Pulse {
     }
 }
 
-/// What a [`Ringer`] reports each block.
+/// What a [`RingingNode`] reports each block.
 pub const NO_REPORT: u64 = u64::MAX;
-/// A [`Ringer`] report of `Tail::Unbounded`.
+/// A [`RingingNode`] report of `Tail::Unbounded`.
 pub const REPORT_UNBOUNDED: u64 = u64::MAX - 1;
-/// A [`Ringer`] report of `Tail::Unknown`.
+/// A [`RingingNode`] report of `Tail::Unknown`.
 pub const REPORT_UNKNOWN: u64 = u64::MAX - 2;
 
 /// Passes its input and adds `0.25` for `ring - 1` frames after the last
@@ -1195,7 +1195,7 @@ pub const REPORT_UNKNOWN: u64 = u64::MAX - 2;
 /// rings `ring` frames, which is the honest report. Declares `ceiling` and
 /// reports what `report` holds: a frame count, or one of the `REPORT_*`
 /// words.
-pub struct Ringer {
+pub struct RingingNode {
     pub ceiling: Tail,
     pub ring: usize,
     pub report: Arc<std::sync::atomic::AtomicU64>,
@@ -1208,7 +1208,7 @@ pub struct Ringer {
     left: usize,
 }
 
-impl Ringer {
+impl RingingNode {
     pub fn new(ceiling: Tail, ring: usize, report: u64) -> Self {
         Self {
             ceiling,
@@ -1246,7 +1246,7 @@ impl Ringer {
     }
 }
 
-impl Node for Ringer {
+impl Node for RingingNode {
     fn shape(&self) -> Shape {
         let ch = ChannelLayout::try_from(self.width).expect("a width");
         let shape = Shape::through_unassigned(ch)

@@ -166,7 +166,7 @@ impl Rig {
         self.ed.collect(); // re-prepares them, sends them back
         self.exec.apply_pending(); // installs them
         self.ed.collect();
-        self.reference.reprepare(p);
+        self.reference.prepare(p);
         self.rate = rate;
         self.kept.clear();
     }

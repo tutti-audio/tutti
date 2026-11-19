@@ -974,7 +974,7 @@ impl<F: Float> Renderer<F> {
 /// ```
 /// # use tutti_buffers::Planes;
 /// use tutti_buffers::MaxBlock;
-/// use tutti_graph::{ForkByClone, Prepare, Solo};
+/// use tutti_graph::{ForkByClone, Prepare, Standalone};
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
 /// # use tutti_units::{SampleRate, Samples};
 /// # use tutti_buffers::ChannelLayout;
@@ -990,17 +990,17 @@ impl<F: Float> Renderer<F> {
 /// #     }
 /// #     fn reset(&mut self) {}
 /// # }
-/// let mut solo = Solo::new(ForkByClone(Half), Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// let mut solo = Standalone::new(ForkByClone(Half), Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// assert_eq!(solo.render_input(Planes::new(&[&[1.0; 3]]).unwrap()), vec![vec![0.5; 3]]);
 /// ```
 #[derive(Debug)]
-pub struct Solo<C, F: Float = f32> {
+pub struct Standalone<C, F: Float = f32> {
     renderer: Renderer<F>,
     key: NodeKey,
     controls: C,
 }
 
-impl<C, F: Float> Solo<C, F> {
+impl<C, F: Float> Standalone<C, F> {
     /// `node`, alone, prepared for `prepare`.
     ///
     /// # Panics

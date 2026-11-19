@@ -568,7 +568,7 @@ where
     fn bind_wake(&mut self, wake: tutti_graph::Wake) {
         let mut instance = self.client.inner.lock();
         if let Some(control) = instance.control() {
-            control.bind_wake(tutti_plugin_types::ProcessWake::new(move || wake.raise()));
+            control.bind_wake(tutti_plugin_types::ProcessWake::new(move || wake.notify()));
         }
     }
 }

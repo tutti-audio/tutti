@@ -236,7 +236,7 @@ struct RefFifo {
 /// pair without the queues: [`set_graph`](Self::set_graph) in place of a
 /// commit, [`process`](Self::process) to render a block,
 /// [`schedule`](Self::schedule) for timestamped commands, and
-/// [`reprepare`](Self::reprepare) for a rate or block-size change.
+/// [`prepare`](Self::prepare) for a rate or block-size change.
 pub struct Reference<F: Float = f32> {
     prepare: Prepare,
     graph: Option<ValidGraph>,
@@ -487,7 +487,7 @@ impl<F: Float> Reference<F> {
         self.cancelled
     }
 
-    /// The first half of [`reprepare`](Self::reprepare), as the executor
+    /// The first half of [`prepare`](Self::prepare), as the executor
     /// sees it when the editor's first commit lands: from here the
     /// interpreter renders silence and its clock keeps counting, and on a
     /// rate change the clock and every pending `At::Frame` are rescaled to
@@ -522,7 +522,7 @@ impl<F: Float> Reference<F> {
     }
 
     /// The second half: adopt the `Prepare`, re-prepare every unit, and
-    /// re-derive the delays (see [`reprepare`](Self::reprepare) for the
+    /// re-derive the delays (see [`prepare`](Self::prepare) for the
     /// state rule).
     ///
     /// # Panics
@@ -570,7 +570,7 @@ impl<F: Float> Reference<F> {
     ///
     /// Equivalent to [`suspend`](Self::suspend) then [`resume`](Self::resume)
     /// with no block between.
-    pub fn reprepare(&mut self, prepare: Prepare) {
+    pub fn prepare(&mut self, prepare: Prepare) {
         self.suspend(prepare);
         self.resume();
     }

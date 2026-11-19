@@ -165,7 +165,7 @@ impl Rig {
         self.exec.apply_pending(); // installs them
         assert_eq!(self.ed.in_flight(), 1, "the resume box is out");
         self.ed.collect();
-        self.reference.reprepare(p);
+        self.reference.prepare(p);
     }
 
     /// Render `blocks` through both on a constant 1.0 input; the executor's

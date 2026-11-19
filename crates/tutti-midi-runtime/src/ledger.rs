@@ -23,7 +23,7 @@
 //! A held key is in one of two states, `Sounding` or `Owing` (the port
 //! refused the off, so it goes out at the first frame of a later block).
 //! Independently, a key counts the note-ons the port refused: each such
-//! note's off is withheld and counted rather than written, so a note lost
+//! note's off is skipped and counted rather than written, so a note lost
 //! whole is two losses, its on and its off. An off the port refused is a loss
 //! that is given back when the off goes out. The count per key saturates at
 //! 255.
@@ -32,7 +32,7 @@
 //! port, and what the port owes.
 //!
 //! The table holds at most its capacity in keys, held or refused. A note-on
-//! that finds it full is withheld and counted ([`EventWriter::withhold`])
+//! that finds it full is skipped and counted ([`EventWriter::skip`])
 //! like one the port refused: the note does not start, so no off is owed. A
 //! note already started always has its row, so a full table never strands one.
 
@@ -86,7 +86,7 @@ struct Entry<T> {
     key: NoteKey,
     held: Option<Held>,
     /// How many note-ons of this key the port refused and whose offs have not
-    /// come by: each such off is withheld and counted. Saturates, so more than
+    /// come by: each such off is skipped and counted. Saturates, so more than
     /// 255 refused ons on one key with no off between them undercount.
     refused: u8,
     /// The note that owns the held key; `None` for an untagged source.
@@ -259,7 +259,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
 
     /// Writes `ump` at `at`. A note message is kept track of: a note-on the
     /// port took is sounding, one it refused marks its key so that note's off
-    /// is withheld, an off it refused is owed. `owner` says which note a
+    /// is skipped, an off it refused is owed. `owner` says which note a
     /// message belongs to; `None` is an untagged source's message.
     ///
     /// A note-on of a key that sounds ends the sounding note first, on the
@@ -280,7 +280,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
 
     fn on(&mut self, at: Offset, ump: Ump, key: NoteKey, owner: Option<T>) {
         let Some(i) = self.ledger.entry(key) else {
-            self.out.withhold();
+            self.out.skip();
             return;
         };
         if let Some(held) = self.ledger.entries[i].held {
@@ -289,7 +289,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
                 // start.
                 self.owe(i);
                 self.ledger.refuse(i);
-                self.out.withhold();
+                self.out.skip();
                 return;
             }
             if held == Held::Owing {
@@ -354,7 +354,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
     fn settle(&mut self, i: usize) {
         self.ledger.entries[i].refused -= 1;
         self.forget_if_idle(i);
-        self.out.withhold();
+        self.out.skip();
     }
 
     /// The off of held entry `i` was written (`taken`) or refused.
@@ -414,7 +414,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
             match (full, held) {
                 // The refused push counted itself.
                 (false, Held::Owing) => self.out.recovered(),
-                (true, Held::Sounding) => self.out.withhold(),
+                (true, Held::Sounding) => self.out.skip(),
                 _ => {}
             }
             full = true;
@@ -437,7 +437,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
             match (attempted, owed) {
                 // The refused push counted itself.
                 (true, true) => out.recovered(),
-                (false, false) => out.withhold(),
+                (false, false) => out.skip(),
                 _ => {}
             }
             full = true;

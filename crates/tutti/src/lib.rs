@@ -400,8 +400,8 @@ pub mod session {
         Unmeasured,
     };
     pub use tutti_graph::{
-        BusError, BusRef, BusSource, CloseError, CommitError, MissingSource, MixError, ModeError,
-        PassError, Placed, Rewired, Unwired, Wired,
+        BusError, BusRef, BusSource, CloseError, CommitError, Inserted, MissingSource, MixError,
+        ModeError, PassError, Rewired, Unwired, Wired,
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,

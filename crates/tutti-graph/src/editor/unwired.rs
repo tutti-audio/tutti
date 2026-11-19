@@ -16,7 +16,7 @@ use tutti_buffers::Float;
 /// Returned by [`Editor::insert`] and [`Editor::replace_or_swap`]: the
 /// node's typed controls, and the wiring the new unit's shape cannot carry.
 #[derive(Debug)]
-pub struct Placed<C> {
+pub struct Inserted<C> {
     /// The node's typed controls.
     pub controls: C,
     /// The wiring the placement removed from the spec.

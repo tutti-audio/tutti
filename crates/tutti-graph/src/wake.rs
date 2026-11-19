@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use tutti_rt::{RequestBit, RequestWord};
 
-/// The one request a wake raises.
+/// The one request a wake notifies.
 const WAKE: RequestBit = RequestBit::of(0);
 
 /// A handle that wakes one node the executor parked.
@@ -14,18 +14,18 @@ const WAKE: RequestBit = RequestBit::of(0);
 /// that will need to wake it (a plugin's host callback, a worker, a device
 /// thread). `Wake` is `Clone + Send + Sync`.
 ///
-/// [`raise`](Self::raise) is wait-free and never allocates or locks, so any
-/// thread may call it, an audio callback included. A raise **counts as input**:
+/// [`notify`](Self::notify) is wait-free and never allocates or locks, so any
+/// thread may call it, an audio callback included. A notify **counts as input**:
 /// a node parked on [`Status::Idle`](crate::Status::Idle) (or on its silent
-/// output) is called on the next block the executor runs after the raise. A
-/// raise while the node is running, or not parked, is harmless: the next
+/// output) is called on the next block the executor runs after the notify. A
+/// notify while the node is running, or not parked, is harmless: the next
 /// block consumes it and the node is called as it would have been. Several
-/// raises between two blocks wake the node once.
+/// notifies between two blocks wake the node once.
 ///
 /// The handle belongs to one placement of the node: a node that replaces it
 /// ([`Editor::replace`](crate::Editor::replace)) or a fork's copy of it
 /// ([`Editor::fork`](crate::Editor::fork)) is a different node with its own
-/// handle, and a raise on the old one wakes nothing of the new.
+/// handle, and a notify on the old one wakes nothing of the new.
 ///
 /// The flag's storage is shared by every clone and by the executor's copy;
 /// the executor's copy is dropped on the control side with the node
@@ -40,7 +40,7 @@ impl Wake {
     }
 
     /// Wakes the node on its next block, from any thread. See the type docs.
-    pub fn raise(&self) {
+    pub fn notify(&self) {
         self.0.raise(WAKE);
     }
 

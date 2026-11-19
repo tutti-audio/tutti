@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use tutti_buffers::Wave;
 use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_graph::{Prepare, Solo, TransportPosition};
+use tutti_graph::{Prepare, Standalone, TransportPosition};
 use tutti_sampler::testing::settle;
 use tutti_sampler::{
     ByHand, Direction, DiskStreamer, DiskVoice, MemorySource, MemorySourceConfig, Placement,
@@ -73,7 +73,7 @@ fn prepare() -> Prepare {
 
 /// The graph's transport: rolling from beat 0 at `TEMPO`, the beat following
 /// the frame the block starts on.
-fn roll<C>(solo: &mut Solo<C, f64>) {
+fn roll<C>(solo: &mut Standalone<C, f64>) {
     let beats_per_frame = TEMPO / 60.0 / RATE;
     let solo = solo.renderer_mut();
     solo.set_block(Samples::new(BLOCK));
@@ -126,7 +126,7 @@ fn a_memory_source_in_an_f64_graph_plays_the_files_values_exactly() {
     let wave: Wave<f64> = tutti_codec::read_wave(write_file(dir.path())).expect("decodes");
     let source = MemorySource::<f64>::new(Arc::new(wave)).expect("a stereo wave places");
     source.play();
-    let mut solo = Solo::<_, f64>::new(source, prepare());
+    let mut solo = Standalone::<_, f64>::new(source, prepare());
     let out = solo.render(RENDERED);
     assert_eq!(out.len(), 2);
     for (i, (&l, &r)) in out[0].iter().zip(&out[1]).enumerate() {
@@ -150,7 +150,7 @@ fn a_placed_memory_voice_in_an_f64_graph_plays_forward() {
         source: VoiceSource::Memory(memory(&write_file(dir.path()))),
         play: Playback::default(),
     });
-    let mut solo = Solo::<_, f64>::new(node, prepare());
+    let mut solo = Standalone::<_, f64>::new(node, prepare());
     roll(&mut solo);
     assert_plays(&solo.render(RENDERED), 0, |i| i, "forward");
 }
@@ -167,7 +167,7 @@ fn a_reversed_memory_voice_in_an_f64_graph_reads_the_mirrored_frames() {
             ..Playback::default()
         },
     });
-    let mut solo = Solo::<_, f64>::new(node, prepare());
+    let mut solo = Standalone::<_, f64>::new(node, prepare());
     roll(&mut solo);
     assert_plays(&solo.render(RENDERED), 0, |i| FRAMES - 1 - i, "reverse");
 }
@@ -175,7 +175,7 @@ fn a_reversed_memory_voice_in_an_f64_graph_reads_the_mirrored_frames() {
 /// `frames` rendered a block at a time, the streamer stepped after each as a
 /// running one is, so a ring that turned has its refill.
 fn render_stepped<C>(
-    solo: &mut Solo<C, f64>,
+    solo: &mut Standalone<C, f64>,
     streamer: &mut DiskStreamer<ByHand<f64>, f64>,
     frames: usize,
 ) -> Vec<Vec<f64>> {
@@ -221,7 +221,7 @@ fn disk(
 fn a_disk_voice_in_an_f64_graph_plays_the_files_values() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let (mut streamer, _stream, voice) = disk(&write_file(dir.path()), Direction::Forward);
-    let mut solo = Solo::<_, f64>::new(voice, prepare());
+    let mut solo = Standalone::<_, f64>::new(voice, prepare());
     roll(&mut solo);
     let got = render_stepped(&mut solo, &mut streamer, RENDERED);
     assert_plays(&got, 0, |i| i, "disk forward");
@@ -233,7 +233,7 @@ fn a_disk_voice_in_an_f64_graph_plays_the_files_values() {
 fn a_reversed_disk_voice_in_an_f64_graph_reads_the_mirrored_frames() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let (mut streamer, _stream, voice) = disk(&write_file(dir.path()), Direction::Reverse);
-    let mut solo = Solo::<_, f64>::new(voice, prepare());
+    let mut solo = Standalone::<_, f64>::new(voice, prepare());
     roll(&mut solo);
     let got = render_stepped(&mut solo, &mut streamer, TURNED + RENDERED);
     assert_plays(&got, TURNED, |i| FRAMES - 1 - i, "disk reverse");
@@ -244,7 +244,7 @@ fn a_reversed_disk_voice_in_an_f64_graph_reads_the_mirrored_frames() {
 #[test]
 fn a_pool_in_an_f64_graph_plays_a_voice_added_through_its_handle() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let mut solo = Solo::<_, f64>::new(VoicePool::<f64>::new(), prepare());
+    let mut solo = Standalone::<_, f64>::new(VoicePool::<f64>::new(), prepare());
     solo.controls()
         .add(
             SlotId(1),
@@ -269,7 +269,7 @@ fn a_streamed_node_in_an_f64_graph_plays_the_files_values() {
     let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     let node = VoiceNode::streaming(voice, stream, Playback::default());
-    let mut solo = Solo::<_, f64>::new(node, prepare());
+    let mut solo = Standalone::<_, f64>::new(node, prepare());
     roll(&mut solo);
     let got = render_stepped(&mut solo, &mut streamer, RENDERED);
     assert_plays(&got, 0, |i| i, "streamed node");

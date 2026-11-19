@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use common::{Kind, Pair, Ringer, SpecBehaviour, TestNode, bits, prepare};
+use common::{Kind, Pair, RingingNode, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::FoldError;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
@@ -734,7 +734,7 @@ fn a_bypassed_output_carries_its_inputs_flags() {
         let mut p = Probe::new(3.0);
         p.latency = latency;
         let mut s = Solo::new(0);
-        s.add(1, common::Pulse::new(3 * BLOCK));
+        s.add(1, common::Burst::new(3 * BLOCK));
         s.add(2, p);
         s.add(3, q.clone());
         s.wire(|t| {
@@ -1054,11 +1054,11 @@ fn a_bypassed_node_is_not_called_after_the_fade() {
     ] {
         let mut p = Probe::new(3.0);
         p.latency = latency;
-        let ringer = Ringer::honest(Tail::Finite(Samples::new(1)), 1);
+        let ringer = RingingNode::honest(Tail::Finite(Samples::new(1)), 1);
         let ring_calls = Arc::clone(&ringer.calls);
         let mut s = Solo::new(0);
         // A source that is loud for 5 blocks and then says it is silent.
-        s.add(1, common::Pulse::new(5 * len));
+        s.add(1, common::Burst::new(5 * len));
         s.add(2, p.clone());
         s.add(3, ringer);
         s.wire(|t| {
@@ -1210,7 +1210,7 @@ fn a_held_input_note_is_closed_on_an_idle_node() {
             calls: Arc::new(AtomicUsize::new(0)),
         },
     );
-    s.add(2, common::Pulse::new(BLOCK));
+    s.add(2, common::Burst::new(BLOCK));
     s.add(3, p.clone());
     s.wire(|t| {
         t.connect(at(3, 0), direct(2));

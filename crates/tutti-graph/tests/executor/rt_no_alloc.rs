@@ -1468,13 +1468,13 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
 /// transport.
 #[test]
 fn direct_driving_events_does_not_allocate() {
-    use tutti_graph::contract::{Direct, Emitter, Pulse};
+    use tutti_graph::contract::{Direct, Emitter, ImpulseSource};
     use tutti_graph::{Event, Offset};
     use tutti_units::{Bpm, SampleRate};
 
     let rate = SampleRate::SR_48K;
     let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
-    let mut pulse = Direct::new(Pulse::new(Latency::ZERO), rate, 64);
+    let mut pulse = Direct::new(ImpulseSource::new(Latency::ZERO), rate, 64);
     pulse.set_transport(rolling);
     let events: Vec<Event> = (0..64)
         .map(|k| {
@@ -1507,17 +1507,21 @@ fn direct_driving_events_does_not_allocate() {
 /// that narrow their ceiling every block, through the serial executor and a
 /// pool whose every participant runs inside the gate.
 fn reporting_nodes_are_allocation_free_on(workers: usize) {
-    use common::{Pulse, Ringer};
+    use common::{Burst, RingingNode};
     let (mut ed, mut exec) = Editor::new(prepare(64));
     use_pool(&mut exec, workers);
     let mut outputs = Vec::new();
     for i in 0..4u64 {
         let (src, fx) = (NodeKey(10 + i), NodeKey(20 + i));
-        ed.insert(src, "pulse", Unforkable(Pulse::new(100 + 40 * i as usize)));
+        ed.insert(src, "pulse", Unforkable(Burst::new(100 + 40 * i as usize)));
         ed.insert(
             fx,
             "ringer",
-            Unforkable(Ringer::new(Tail::Finite(Samples::new(4_000)), 200, 200)),
+            Unforkable(RingingNode::new(
+                Tail::Finite(Samples::new(4_000)),
+                200,
+                200,
+            )),
         );
         ed.spec_mut()
             .topology
@@ -1563,7 +1567,7 @@ fn parallel_reporting_nodes_are_allocation_free() {
 /// all-silent fill and the in-place form all run inside the gate, on the
 /// parallel executor's helpers too.
 fn fan_in_is_allocation_free_on(workers: usize) {
-    use common::Pulse;
+    use common::Burst;
     for n in [8u64, 64, 100] {
         for source in ["live", "silent", "pulses"] {
             for at_port in [false, true] {
@@ -1591,7 +1595,7 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                         _ => ed.insert(
                             NodeKey(k),
                             name,
-                            Unforkable(Pulse::new(300 + 17 * k as usize)),
+                            Unforkable(Burst::new(300 + 17 * k as usize)),
                         ),
                     };
                 }
@@ -1666,7 +1670,7 @@ fn parallel_fan_in_is_allocation_free() {
 /// them declaring latency, so the lanes behind them get event rings): each
 /// lane runs the param port's step, with its clamp and its values, per block.
 fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
-    use common::Pulse;
+    use common::Burst;
     use tutti_graph::{EdgeGain, EdgeId, Sink};
     use tutti_units::Amplitude;
     for n in [64u64, 100] {
@@ -1687,7 +1691,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                     ed.insert(
                         NodeKey(k),
                         "pulse",
-                        Unforkable(Pulse::new(300 + 17 * k as usize)),
+                        Unforkable(Burst::new(300 + 17 * k as usize)),
                     );
                 }
             }
@@ -2271,7 +2275,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
         "the gate runs the mode it names"
     );
     ed.collect();
-    assert!(ed.settle_fades(), "the ended fades were reported");
+    assert!(ed.finish_fades(), "the ended fades were reported");
 }
 
 #[test]

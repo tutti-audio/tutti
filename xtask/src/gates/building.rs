@@ -191,7 +191,7 @@ pub(super) const ALLOW: &[Allow] = &[
     },
     Allow {
         path: GRAPH,
-        owner: "Pulse",
+        owner: "ImpulseSource",
         rules: &[],
         reason: "the contract harness a node crate writes rows with: node-author test support",
     },
