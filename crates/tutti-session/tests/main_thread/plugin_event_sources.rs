@@ -42,7 +42,7 @@ fn session_with_open_editor(command: u32) -> (Session, Editor) {
     probe.thread_reset();
     probe.thread_command(command);
     let mut s = Session::builder()
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("an offline session builds");
     let plugin = PluginRef::file(clap_probe()).expect("a plugin file");

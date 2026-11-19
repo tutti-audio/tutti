@@ -94,13 +94,13 @@ impl RampEvery {
         match self.param {
             UnitParam::Cutoff => ParamRamp::new(
                 tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
-                tutti_units::Hz(v),
-                Samples(20),
+                tutti_units::Hz::new(v),
+                Samples::new(20),
             ),
             _ => ParamRamp::new(
                 tutti_units::ParamKey::<tutti_units::Q>::Q,
-                tutti_units::Q(v),
-                Samples(20),
+                tutti_units::Q::new(v),
+                Samples::new(20),
             ),
         }
     }
@@ -112,7 +112,7 @@ impl Node for RampEvery {
             .with_events(0, 1)
             .with_param_events()
             .with_event_capacity(tutti_graph::testing::cap_of(16))
-            .with_latency(Latency::new(Samples(self.latency)))
+            .with_latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -136,11 +136,11 @@ impl Node for RampEvery {
                             self.param,
                             (f % 3) as f64,
                             (f % 7) as f64,
-                            Samples(50),
+                            Samples::new(50),
                             shape,
                         );
                         let seg = if k == 2 {
-                            seg.resumed(Samples(3), Samples(41))
+                            seg.resumed(Samples::new(3), Samples::new(41))
                         } else {
                             seg
                         };
@@ -279,7 +279,10 @@ fn build(ed: &mut Editor) {
     t.edges.insert(at(41, 1), vec![from(5, 0)]);
     t.edges.insert(
         at(50, 1),
-        vec![Edge::Feedback(FeedbackFrom::new(out(51, 0), Samples(256)))],
+        vec![Edge::Feedback(FeedbackFrom::new(
+            out(51, 0),
+            Samples::new(256),
+        ))],
     );
     t.edges.insert(at(51, 0), vec![from(50, 0)]);
     t.set_outputs(vec![
@@ -324,7 +327,7 @@ fn build(ed: &mut Editor) {
 }
 
 fn prepare(max: usize) -> Prepare {
-    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max)))
+    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(max)))
 }
 
 /// The block schedules: one frame, odd lengths, the maximum, and a ragged
@@ -404,7 +407,7 @@ fn render_wide(
             ed.schedule(At::Frame(Frame::new(frame + 5)), consumer_in(1), kind)
                 .expect("room");
             ed.schedule(
-                At::Beat(Beat(frame as f64 / 24_000.0 + 0.01)),
+                At::Beat(Beat::new(frame as f64 / 24_000.0 + 0.01)),
                 consumer_in(0),
                 kind,
             )
@@ -422,8 +425,12 @@ fn render_wide(
         let mut chans = vec![vec![0.0f32; n]; outputs + extra];
         {
             let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
-            let t =
-                TransportPosition::new(true, Bpm::of(120.0), Beat(frame as f64 / 24_000.0), None);
+            let t = TransportPosition::new(
+                true,
+                Bpm::of(120.0),
+                Beat::new(frame as f64 / 24_000.0),
+                None,
+            );
             exec.process(n, &t, &[&input], &mut outs);
         }
         assert!(
@@ -540,7 +547,7 @@ fn the_graph_spreads() {
         plan.schedule(4),
         Schedule::Parallel {
             wake: 4,
-            from: Samples(1)
+            from: Samples::new(1)
         }
     );
 }
@@ -794,9 +801,9 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
     use common::{NO_REPORT, Pulse, Ringer};
     use tutti_units::Tail;
     const RINGERS: [(usize, usize, Tail, u64); 3] = [
-        (50, 300, Tail::Finite(Samples(1000)), 300),
-        (9, 120, Tail::Finite(Samples(120)), 120),
-        (200, 500, Tail::Finite(Samples(1000)), NO_REPORT),
+        (50, 300, Tail::Finite(Samples::new(1000)), 300),
+        (9, 120, Tail::Finite(Samples::new(120)), 120),
+        (200, 500, Tail::Finite(Samples::new(1000)), NO_REPORT),
     ];
     let build = |workers: usize| {
         let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));

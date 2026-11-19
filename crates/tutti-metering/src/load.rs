@@ -7,7 +7,7 @@ use tutti_units::Seconds;
 
 /// The time constant of [`LoadReading::mean`]'s exponential smoothing: a
 /// step in the load is 63% through after this long, whatever the block size.
-pub const LOAD_MEAN_TIME_CONSTANT: Seconds = Seconds(0.3);
+pub const LOAD_MEAN_TIME_CONSTANT: Seconds = Seconds::new(0.3);
 
 /// One reading of a [`LoadMeter`].
 ///
@@ -183,7 +183,7 @@ impl LoadRecorder {
     /// Record one block that took `elapsed` against a budget of `budget`. A
     /// block with no budget (no frames) records nothing.
     pub fn record(&mut self, elapsed: Seconds, budget: Seconds) {
-        if budget.0 <= 0.0 {
+        if budget.get() <= 0.0 {
             return;
         }
         let c = &*self.cells;
@@ -220,10 +220,10 @@ impl LoadRecorder {
 mod tests {
     use super::*;
 
-    const BLOCK: Seconds = Seconds(64.0 / 48_000.0);
+    const BLOCK: Seconds = Seconds::new(64.0 / 48_000.0);
 
     fn at(load: f32) -> Seconds {
-        Seconds(BLOCK.0 * f64::from(load))
+        BLOCK * f64::from(load)
     }
 
     /// A block over budget counts, one at it does not, and `last` is the
@@ -260,23 +260,23 @@ mod tests {
     #[test]
     fn the_mean_converges_to_a_constant_load_at_its_time_constant() {
         for frames in [64.0f64, 1024.0] {
-            let block = Seconds(frames / 48_000.0);
+            let block = Seconds::new(frames / 48_000.0);
             let (mut rec, mut m) = LoadMeter::pair();
-            rec.record(Seconds(block.0 * 0.2), block);
+            rec.record(block * 0.2, block);
             assert!((m.take().mean - 0.2).abs() < 1e-6, "seeded");
-            let blocks = (5.0 * LOAD_MEAN_TIME_CONSTANT.0 / block.0).ceil() as usize;
+            let blocks = (5.0 * (LOAD_MEAN_TIME_CONSTANT / block)).ceil() as usize;
             for _ in 0..blocks {
-                rec.record(Seconds(block.0 * 0.8), block);
+                rec.record(block * 0.8, block);
             }
             let mean = m.take().mean;
             let bound = 0.6 * (-5.0f32).exp() + 1e-4;
             assert!((mean - 0.8).abs() <= bound, "{frames}: {mean}");
             // And not already there a time constant in: it is smoothed.
             let (mut rec, mut m) = LoadMeter::pair();
-            rec.record(Seconds(block.0 * 0.2), block);
-            let one = (LOAD_MEAN_TIME_CONSTANT.0 / block.0).floor() as usize;
+            rec.record(block * 0.2, block);
+            let one = (LOAD_MEAN_TIME_CONSTANT / block).floor() as usize;
             for _ in 0..one {
-                rec.record(Seconds(block.0 * 0.8), block);
+                rec.record(block * 0.8, block);
             }
             let mean = m.take().mean;
             assert!(mean < 0.8 - 0.6 * 0.3, "{frames}: {mean}");
@@ -295,7 +295,7 @@ mod tests {
         m.reset();
         let r = m.take();
         assert_eq!((r.over_budget, r.blocks, r.peak), (0, 0, 0.0));
-        rec.record(Seconds(1.0), Seconds(0.0));
+        rec.record(Seconds::new(1.0), Seconds::new(0.0));
         assert_eq!(m.take().blocks, 0, "no budget, no block");
         rec.record(at(0.9), BLOCK);
         let r = m.take();
@@ -321,7 +321,7 @@ mod tests {
     fn an_infinite_load_leaves_the_mean_finite() {
         let (mut rec, mut m) = LoadMeter::pair();
         rec.record(at(0.5), BLOCK);
-        rec.record(Seconds(1.0), Seconds(1e-45));
+        rec.record(Seconds::new(1.0), Seconds::new(1e-45));
         rec.record(at(0.5), BLOCK);
         let r = m.take();
         assert!(r.mean.is_finite(), "{}", r.mean);

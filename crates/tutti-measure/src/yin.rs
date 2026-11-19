@@ -21,9 +21,9 @@ use crate::convert::widen;
 use crate::framing::{Framing, check_nyquist};
 use crate::notes::PitchHop;
 use crate::pitch::PitchDetector;
-use crate::sequence::median_of_sorted;
 use crate::{Error, Result};
 use tutti_dsp::FrameCount;
+use tutti_dsp::median_of_sorted;
 use tutti_units::ranged;
 
 ranged! {

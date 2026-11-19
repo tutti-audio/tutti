@@ -32,7 +32,7 @@ pub struct Rig {
 pub fn offline_session() -> Session {
     Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("an offline session builds")
 }
@@ -127,7 +127,7 @@ impl Rig {
             .keys()
             .clock()
             .expect("the queue is prepared")
-            .after(Samples(frame - self.frame()))
+            .after(Samples::new(frame - self.frame()))
     }
 
     /// Plays `ump` on this rig's frame `frame`, an absolute position on the

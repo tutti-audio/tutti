@@ -423,7 +423,7 @@ mod tests {
     }
 
     fn at(rate: f64) -> Prepare {
-        let block = MaxBlock::new(Samples(64)).expect("a block");
+        let block = MaxBlock::new(Samples::new(64)).expect("a block");
         Prepare::new(SampleRate::of(rate), block)
     }
 

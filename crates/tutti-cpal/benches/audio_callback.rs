@@ -32,8 +32,11 @@ use tutti_units::{Hz, Samples};
 const SR: f64 = 48_000.0;
 
 fn state(outputs: usize, tap_open: bool) -> (Arc<AudioCallbackState>, Option<TapReader>) {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
-    ed.insert(NodeKey(1), "sine", Osc::sine(Hz(440.0)));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(512)),
+    ));
+    ed.insert(NodeKey(1), "sine", Osc::sine(Hz::new(440.0)));
     ed.spec_mut().topology.set_outputs(vec![
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -50,8 +53,13 @@ fn state(outputs: usize, tap_open: bool) -> (Arc<AudioCallbackState>, Option<Tap
             .flatten()
             .copied()
             .collect();
-        ed.open_tap(TapId::of(1), sources, TapAlign::ToOutput, Samples(8192))
-            .expect("the sources exist")
+        ed.open_tap(
+            TapId::of(1),
+            sources,
+            TapAlign::ToOutput,
+            Samples::new(8192),
+        )
+        .expect("the sources exist")
     });
     ed.commit().expect("commits");
     let engine = Engine::new(

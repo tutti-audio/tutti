@@ -51,8 +51,8 @@ fn node(t: &mut Topology, k: NodeKey, ins: u16, lat: usize, tail: usize) {
     t.nodes.insert(
         k,
         spec(ins, 1)
-            .with_latency(Samples(lat))
-            .with_tail(Tail::Finite(Samples(tail))),
+            .with_latency(Samples::new(lat))
+            .with_tail(Tail::Finite(Samples::new(tail))),
     );
 }
 
@@ -106,17 +106,24 @@ fn each_source_of_a_fan_in_port_is_delayed_to_the_arrival() {
     t.set_outputs([Source::Node(out(SINK, 0))]);
 
     let d = delays(&t, SampleRate::SR_48K);
-    assert_eq!(d.arrival(SINK), Samples(300), "the latest of all sources");
-    assert_eq!(d.departure(SINK), Samples(300), "a sum has no latency");
+    assert_eq!(
+        d.arrival(SINK),
+        Samples::new(300),
+        "the latest of all sources"
+    );
+    assert_eq!(d.departure(SINK), Samples::new(300), "a sum has no latency");
     assert_eq!(
         sorted_inputs(&t),
         vec![
-            input(SINK, 0, Feed::Node(MID), Samples(200)),
-            input(SINK, 0, Feed::Node(DRY), Samples(300)),
-            input(SINK, 1, Feed::Node(MID), Samples(200)),
+            input(SINK, 0, Feed::Node(MID), Samples::new(200)),
+            input(SINK, 0, Feed::Node(DRY), Samples::new(300)),
+            input(SINK, 1, Feed::Node(MID), Samples::new(200)),
         ]
     );
-    assert_eq!(latency_plan(&t, SampleRate::SR_48K).total(), Samples(300));
+    assert_eq!(
+        latency_plan(&t, SampleRate::SR_48K).total(),
+        Samples::new(300)
+    );
 }
 
 /// A global input in a fan-in is aligned like any other source: it arrives at
@@ -131,7 +138,7 @@ fn a_global_source_of_a_fan_in_waits_for_the_slowest() {
 
     assert_eq!(
         sorted_inputs(&t),
-        vec![input(SINK, 0, Feed::Outside, Samples(100))]
+        vec![input(SINK, 0, Feed::Outside, Samples::new(100))]
     );
 }
 
@@ -139,14 +146,15 @@ fn a_global_source_of_a_fan_in_waits_for_the_slowest() {
 #[test]
 fn two_ports_of_one_node_into_a_port_are_one_delay() {
     let mut t = sources();
-    t.nodes.insert(MID, spec(0, 2).with_latency(Samples(100)));
+    t.nodes
+        .insert(MID, spec(0, 2).with_latency(Samples::new(100)));
     t.connect(at(SINK, 0), direct(SLOW));
     t.connect(at(SINK, 0), Edge::Direct(Source::Node(out(MID, 0))));
     t.connect(at(SINK, 0), Edge::Direct(Source::Node(out(MID, 1))));
 
     assert_eq!(
         sorted_inputs(&t),
-        vec![input(SINK, 0, Feed::Node(MID), Samples(200))]
+        vec![input(SINK, 0, Feed::Node(MID), Samples::new(200))]
     );
 }
 
@@ -158,10 +166,10 @@ fn a_feedback_addend_is_not_aligned_and_does_not_delay() {
     t.connect(at(SINK, 0), direct(MID));
     t.connect(
         at(SINK, 0),
-        Edge::Feedback(FeedbackFrom::new(out(SLOW, 0), Samples(BLOCK))),
+        Edge::Feedback(FeedbackFrom::new(out(SLOW, 0), Samples::new(BLOCK))),
     );
     let d = delays(&t, SampleRate::SR_48K);
-    assert_eq!(d.arrival(SINK), Samples(100));
+    assert_eq!(d.arrival(SINK), Samples::new(100));
     assert!(d.inputs().is_empty());
 }
 
@@ -180,13 +188,13 @@ fn each_source_of_a_fan_in_output_is_delayed_to_the_output_time() {
     assert_eq!(
         d.outputs(),
         &[
-            output(0, Feed::Node(DRY), Samples(300)),
-            output(1, Feed::Node(MID), Samples(200)),
+            output(0, Feed::Node(DRY), Samples::new(300)),
+            output(1, Feed::Node(MID), Samples::new(200)),
         ]
     );
     let c = d.compensation();
-    assert_eq!(c.total(), Samples(300));
-    assert_eq!(c.channels(), &[Samples(0), Samples(200)]);
+    assert_eq!(c.total(), Samples::new(300));
+    assert_eq!(c.channels(), &[Samples::new(0), Samples::new(200)]);
 }
 
 /// **A sum passes the longest tail among its sources**, not their sum, at a
@@ -203,7 +211,7 @@ fn the_tail_of_a_sum_is_the_longest_of_its_sources() {
     t.set_outputs([Source::Node(out(SINK, 0))]);
     assert_eq!(
         graph_tail(&t, SampleRate::SR_48K).samples(),
-        Some(Samples(3100))
+        Some(Samples::new(3100))
     );
 
     // The same two into one output channel.
@@ -211,7 +219,7 @@ fn the_tail_of_a_sum_is_the_longest_of_its_sources() {
     t.outputs[0].push(Source::Node(out(key(2), 0)));
     assert_eq!(
         graph_tail(&t, SampleRate::SR_48K).samples(),
-        Some(Samples(3000))
+        Some(Samples::new(3000))
     );
 }
 
@@ -315,7 +323,7 @@ fn the_sum_starts_from_positive_zero_and_one_source_is_an_alias() {
 /// An impulse into a latent path and straight into the sum: it arrives
 /// **once**, aligned, `LAG_FRAMES` late, including across a block boundary.
 fn impulse_input(frame: usize, blocks: usize) -> Vec<f32> {
-    tutti_fixtures::signal::impulse_at(Samples(BLOCK * blocks), Samples(frame))
+    tutti_fixtures::signal::impulse_at(Samples::new(BLOCK * blocks), Samples::new(frame))
 }
 
 fn lag_into_pass() -> (Topology, BTreeMap<NodeKey, Kind>) {
@@ -325,7 +333,7 @@ fn lag_into_pass() -> (Topology, BTreeMap<NodeKey, Kind>) {
     };
     let mut kinds = BTreeMap::new();
     t.nodes
-        .insert(LAG, spec(1, 1).with_latency(Samples(LAG_FRAMES)));
+        .insert(LAG, spec(1, 1).with_latency(Samples::new(LAG_FRAMES)));
     kinds.insert(
         LAG,
         Kind::Lag {
@@ -389,7 +397,7 @@ fn a_feedback_addend_is_summed_last() {
     kinds.insert(C, constant(1.0));
     t.connect(
         at(PASS, 0),
-        Edge::Feedback(FeedbackFrom::one_block(out(C, 0), Samples(BLOCK))),
+        Edge::Feedback(FeedbackFrom::one_block(out(C, 0), Samples::new(BLOCK))),
     );
     let got = render(t, kinds, &[], 2);
     let (first, second) = got.split_at(BLOCK);

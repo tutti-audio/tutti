@@ -77,11 +77,11 @@ tutti_rt::id! {
 /// use tutti_units::{At, Beat};
 ///
 /// // Beat 16 to beat 48.
-/// let punch = Punch::at(Beat(16.0)).until(Beat(48.0)).unwrap();
+/// let punch = Punch::at(Beat::new(16.0)).until(Beat::new(48.0)).unwrap();
 /// // Open-ended, from the next block.
 /// let _ = Punch::now();
 /// // Backwards is refused where it is made.
-/// assert!(Punch::at(Beat(16.0)).until(Beat(8.0)).is_err());
+/// assert!(Punch::at(Beat::new(16.0)).until(Beat::new(8.0)).is_err());
 /// # let _ = (punch, At::NextBlock);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -279,7 +279,7 @@ impl LatencyProbe {
     fn read(&self, rate: SampleRate) -> (Option<Samples>, Option<Samples>) {
         let frames = |cell: &StreamLatency| {
             cell.get()
-                .map(|delay| Seconds(delay.as_secs_f64()).to_samples(rate))
+                .map(|delay| Seconds::new(delay.as_secs_f64()).to_samples(rate))
         };
         (frames(&self.input), self.output.as_deref().and_then(frames))
     }
@@ -337,7 +337,7 @@ impl Terms {
         let at = i128::from(first.get()) - behind + self.offset.frames();
         match u64::try_from(at) {
             Ok(frame) => Start::At(Frame::new(frame)),
-            Err(_) => Start::BeforeOrigin(Samples(usize::try_from(-at).unwrap_or(usize::MAX))),
+            Err(_) => Start::BeforeOrigin(Samples::new(usize::try_from(-at).unwrap_or(usize::MAX))),
         }
     }
 }
@@ -412,7 +412,7 @@ impl Anchor {
         };
         let now = self.map.seconds_at(self.beat).get();
         self.map
-            .beat_at_seconds(Seconds(now + delta as f64 / self.rate.get()))
+            .beat_at_seconds(Seconds::new(now + delta as f64 / self.rate.get()))
     }
 
     /// The graph frame the transport reaches at `beat` if it rolls on from the
@@ -426,7 +426,7 @@ impl Anchor {
             .view(self.rate)
             .frames_between(self.beat, beat)
             .max(0) as u64;
-        Some(self.frame + Samples(usize::try_from(frames).unwrap_or(usize::MAX)))
+        Some(self.frame + Samples::new(usize::try_from(frames).unwrap_or(usize::MAX)))
     }
 }
 
@@ -936,8 +936,8 @@ struct Pump<F: Float> {
 impl<F: Float> Pump<F> {
     fn run(mut self, landings: &Landings<Started>) -> Result<Recorded, TakeError> {
         let layout = self.reader.layout();
-        let mut scratch = vec![F::ZERO; layout.interleaved_len(Samples(PASS_FRAMES))];
-        let silence = vec![F::ZERO; layout.interleaved_len(Samples(PASS_FRAMES))];
+        let mut scratch = vec![F::ZERO; layout.interleaved_len(Samples::new(PASS_FRAMES))];
+        let silence = vec![F::ZERO; layout.interleaved_len(Samples::new(PASS_FRAMES))];
         // A whole number of frames at the tap's width, so the view builds; a
         // zero-width tap has nothing to take.
         let Ok(silence) = Interleaved::new(&silence, layout) else {
@@ -967,9 +967,10 @@ impl<F: Float> Pump<F> {
             }
             let first = self.reader.next_frame();
             // `run` whole frames at the tap's width, so the view builds.
-            let Ok(window) =
-                InterleavedMut::new(&mut scratch[..layout.interleaved_len(Samples(run))], layout)
-            else {
+            let Ok(window) = InterleavedMut::new(
+                &mut scratch[..layout.interleaved_len(Samples::new(run))],
+                layout,
+            ) else {
                 failed = true;
                 break 'pump;
             };
@@ -978,7 +979,7 @@ impl<F: Float> Pump<F> {
                 break 'pump;
             };
             let popped = popped.get();
-            let past = first + Samples(popped);
+            let past = first + Samples::new(popped);
             // The window of this pass: [lo, hi).
             let lo = first.max(self.window.start);
             let hi = self.window.end.map_or(past, |end| past.min(end));
@@ -1005,13 +1006,14 @@ impl<F: Float> Pump<F> {
                 let from = lo.since(first).map_or(0, Samples::get);
                 let to = hi.since(first).map_or(0, Samples::get);
                 // `popped` whole frames at the tap's width, so the view builds.
-                let Ok(popped_view) =
-                    Interleaved::new(&scratch[..layout.interleaved_len(Samples(popped))], layout)
-                else {
+                let Ok(popped_view) = Interleaved::new(
+                    &scratch[..layout.interleaved_len(Samples::new(popped))],
+                    layout,
+                ) else {
                     failed = true;
                     break 'pump;
                 };
-                let kept = popped_view.slice(Samples(from)..Samples(to));
+                let kept = popped_view.slice(Samples::new(from)..Samples::new(to));
                 if self.sink.write(kept).is_err() {
                     failed = true;
                     break 'pump;
@@ -1050,8 +1052,8 @@ impl<F: Float> Pump<F> {
         Ok(Recorded {
             path: self.path,
             placement,
-            frames: Samples(written),
-            lost: Samples(lost),
+            frames: Samples::new(written),
+            lost: Samples::new(lost),
             end: if removed {
                 TakeEnd::InputRemoved
             } else {
@@ -1087,7 +1089,7 @@ fn write_silence<F: Float>(
     while left > 0 {
         let now = left.min(silence.frames().get());
         if sink
-            .write(silence.slice(Samples::ZERO..Samples(now)))
+            .write(silence.slice(Samples::ZERO..Samples::new(now)))
             .is_err()
         {
             return false;
@@ -1132,24 +1134,24 @@ mod tests {
     #[test]
     fn a_start_before_the_origin_is_stated_not_clamped() {
         let terms = Terms::new(
-            Some(Samples(240)),
-            Some(Samples(480)),
-            Samples(7),
+            Some(Samples::new(240)),
+            Some(Samples::new(480)),
+            Samples::new(7),
             Trim::NONE,
         );
         assert_eq!(terms.start(Frame::new(1_000)), Start::At(Frame::new(273)));
         assert_eq!(
             terms.start(Frame::new(100)),
-            Start::BeforeOrigin(Samples(627))
+            Start::BeforeOrigin(Samples::new(627))
         );
         assert!(terms.is_complete());
-        let partial = Terms::new(Some(Samples(240)), None, Samples(0), Trim::NONE);
+        let partial = Terms::new(Some(Samples::new(240)), None, Samples::new(0), Trim::NONE);
         assert!(!partial.is_complete());
     }
 
     #[test]
     fn a_lost_gap_is_silence_in_place_and_counted() {
-        let (reader, mut writer) = TapReader::pair(1, Samples(4096));
+        let (reader, mut writer) = TapReader::pair(1, Samples::new(4096));
         let ramp = |from: usize, to: usize| (from..to).map(|i| i as f32 + 1.0).collect::<Vec<_>>();
         writer.push_interleaved(Interleaved::new(&ramp(0, 100), writer.layout()).unwrap());
         writer.skip(50);
@@ -1165,10 +1167,10 @@ mod tests {
                 start: Frame::new(0),
                 end: Some(Frame::new(250)),
             },
-            terms: (Samples(0), Trim::NONE),
+            terms: (Samples::new(0), Trim::NONE),
             probe: LatencyProbe::new(Arc::default(), None),
             anchor: Anchor {
-                beat: Beat(0.0),
+                beat: Beat::new(0.0),
                 frame: Frame::new(0),
                 map,
                 rate: SampleRate::SR_48K,
@@ -1203,8 +1205,8 @@ mod tests {
             .expect("closed cleanly");
         let kept = kept.lock().unwrap();
         assert_eq!(kept.len(), 250);
-        assert_eq!(recorded.lost(), Samples(50));
-        assert_eq!(recorded.frames(), Samples(250));
+        assert_eq!(recorded.lost(), Samples::new(50));
+        assert_eq!(recorded.frames(), Samples::new(250));
         assert_eq!(kept[99], 100.0);
         assert!(
             kept[100..150].iter().all(|&s| s == 0.0),

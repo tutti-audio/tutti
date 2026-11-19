@@ -202,7 +202,7 @@ impl GraphTail {
     ///
     /// let tail = graph_tail(&g, SampleRate::SR_48K);
     /// assert_eq!(tail.samples(), None); // never decays
-    /// let eight_seconds = Samples(8 * 48_000);
+    /// let eight_seconds = Samples::new(8 * 48_000);
     /// assert_eq!(tail.resolve(eight_seconds), eight_seconds);
     /// ```
     #[must_use]
@@ -438,7 +438,7 @@ mod tests {
     }
 
     fn finite(n: usize) -> Tail {
-        Tail::Finite(Samples(n))
+        Tail::Finite(Samples::new(n))
     }
 
     /// Cascading convolves the two responses, so their ring-outs add. A chain
@@ -453,7 +453,7 @@ mod tests {
             ],
             outputs: vec![Some(2)],
         };
-        assert_eq!(graph_tail(&g, R).samples(), Some(Samples(5000)));
+        assert_eq!(graph_tail(&g, R).samples(), Some(Samples::new(5000)));
     }
 
     /// Summing two paths leaves the longer one's decay untouched, so a merge
@@ -470,7 +470,7 @@ mod tests {
             ],
             outputs: vec![Some(3)],
         };
-        assert_eq!(graph_tail(&g, R).samples(), Some(Samples(3000)));
+        assert_eq!(graph_tail(&g, R).samples(), Some(Samples::new(3000)));
     }
 
     /// A graph cannot decay faster than its slowest part: one unbounded node
@@ -506,7 +506,7 @@ mod tests {
         };
         let t = graph_tail(&g, R);
         assert!(!t.is_unbounded(), "an orphan must not make the graph ring");
-        assert_eq!(t.samples(), Some(Samples(3000)));
+        assert_eq!(t.samples(), Some(Samples::new(3000)));
     }
 
     /// A feedback loop re-enters a ringing node on every pass, so there is no
@@ -555,9 +555,9 @@ mod tests {
             (SampleRate::SR_48K, 2_880_000),
             (SampleRate::SR_96K, 5_760_000),
         ] {
-            assert_eq!(MAX_NODE_TAIL.to_samples_ceil(rate), Samples(bound));
+            assert_eq!(MAX_NODE_TAIL.to_samples_ceil(rate), Samples::new(bound));
             let alone = |frames: usize| Toy {
-                nodes: vec![(Tail::Finite(Samples(frames)), vec![])],
+                nodes: vec![(Tail::Finite(Samples::new(frames)), vec![])],
                 outputs: vec![Some(0)],
             };
 
@@ -568,7 +568,7 @@ mod tests {
 
             let t = graph_tail(&alone(bound), rate);
             assert!(!t.is_unbounded(), "{rate:?}");
-            assert_eq!(t.samples(), Some(Samples(bound)));
+            assert_eq!(t.samples(), Some(Samples::new(bound)));
         }
     }
 
@@ -578,12 +578,12 @@ mod tests {
     #[test]
     fn a_tail_is_judged_in_seconds_at_the_graphs_rate() {
         let g = Toy {
-            nodes: vec![(Tail::Finite(Samples(4_000_000)), vec![])],
+            nodes: vec![(Tail::Finite(Samples::new(4_000_000)), vec![])],
             outputs: vec![Some(0)],
         };
         assert!(graph_tail(&g, SampleRate::SR_48K).is_unbounded());
         let t = graph_tail(&g, SampleRate::SR_96K);
-        assert_eq!(t.samples(), Some(Samples(4_000_000)));
+        assert_eq!(t.samples(), Some(Samples::new(4_000_000)));
     }
 
     /// A node that was never asked has said nothing, which is not the same as
@@ -603,7 +603,7 @@ mod tests {
         assert_eq!(t.samples(), None, "an unknown node cannot be read as zero");
         assert_eq!(
             t.known(),
-            Samples(3000),
+            Samples::new(3000),
             "what the rest of the graph reported is still available"
         );
     }
@@ -638,7 +638,7 @@ mod tests {
             outputs: vec![Some(4)],
         };
         // Leg A: 1000 + 2000 = 3000. Leg B: 2500. The max is 3000.
-        assert_eq!(graph_tail(&g, R).samples(), Some(Samples(3000)));
+        assert_eq!(graph_tail(&g, R).samples(), Some(Samples::new(3000)));
     }
 
     /// A graph that never decays is spent at exactly the cap: that is what the
@@ -649,7 +649,7 @@ mod tests {
             nodes: vec![(Tail::None, vec![]), (Tail::Unbounded, vec![Some(0)])],
             outputs: vec![Some(1)],
         };
-        let cap = Samples(384_000);
+        let cap = Samples::new(384_000);
         assert_eq!(graph_tail(&g, R).resolve(cap), cap);
     }
 
@@ -669,8 +669,8 @@ mod tests {
         let t = graph_tail(&g, R);
         assert_eq!(t.samples(), None, "it cannot be spent without a decision");
         assert_eq!(
-            t.resolve(Samples(384_000)),
-            Samples(3000),
+            t.resolve(Samples::new(384_000)),
+            Samples::new(3000),
             "but the decision is not to believe the cap over the evidence"
         );
     }
@@ -683,7 +683,10 @@ mod tests {
             nodes: vec![(Tail::None, vec![]), (finite(100_000), vec![Some(0)])],
             outputs: vec![Some(1)],
         };
-        assert_eq!(graph_tail(&g, R).resolve(Samples(48_000)), Samples(48_000));
+        assert_eq!(
+            graph_tail(&g, R).resolve(Samples::new(48_000)),
+            Samples::new(48_000)
+        );
     }
 
     /// A fully-reported graph resolves to its own figure, untouched by a cap it
@@ -695,8 +698,8 @@ mod tests {
             outputs: vec![Some(1)],
         };
         let t = graph_tail(&g, R);
-        assert_eq!(t.samples(), Some(Samples(3000)));
-        assert_eq!(t.resolve(Samples(384_000)), Samples(3000));
+        assert_eq!(t.samples(), Some(Samples::new(3000)));
+        assert_eq!(t.resolve(Samples::new(384_000)), Samples::new(3000));
     }
 
     /// An empty graph has no tail rather than an unknown one.

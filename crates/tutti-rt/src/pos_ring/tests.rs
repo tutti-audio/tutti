@@ -458,7 +458,7 @@ fn round_trips<S: RingSample>(stride: usize, value: impl Fn(usize) -> S, bits: i
     let (mut writer, mut reader) = PosRing::<S>::new(16, layout, 0).expect("a non-empty layout");
     let data: Vec<S> = (0..9 * stride).map(&value).collect();
     let view = Interleaved::new(&data, layout).expect("whole frames");
-    assert_eq!(writer.push(view), Ok(Samples(9)));
+    assert_eq!(writer.push(view), Ok(Samples::new(9)));
     let claim = reader.claim(0, [(0, 9), (0, 0)]);
     for s in 0..9u64 {
         for c in 0..stride {

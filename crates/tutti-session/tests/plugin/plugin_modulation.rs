@@ -298,7 +298,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
         .crossfade_plugin(
             node,
             Box::new(incoming),
-            Seconds(0.005),
+            Seconds::new(0.005),
             tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");
@@ -579,7 +579,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
-        let lfo = m.lfo(Lfo::sine().rate(Hz(3.0)));
+        let lfo = m.lfo(Lfo::sine().rate(Hz::new(3.0)));
         m.route(RouteSpec::new(lfo, gain, Depth::of(0.1))).unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
@@ -598,7 +598,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
 
     let total = BLOCK * BLOCKS;
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(0.0),
+        start_beat: Beat::new(0.0),
         tempo_map: Arc::new(tutti_tempo::TempoMap::constant(Bpm::of(120.0)).expect("a tempo")),
         sample_rate: RATE,
         loop_range: None,
@@ -607,8 +607,8 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
-            Seconds(0.0),
-            Seconds(total as f64 / RATE.get()),
+            Seconds::new(0.0),
+            Seconds::new(total as f64 / RATE.get()),
         ))
         .sample_rate(RATE)
         .latency(BounceLatency::Keep)
@@ -631,7 +631,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
         side.set_transport(tutti_graph::TransportPosition::new(
             true,
             Bpm::of(120.0),
-            Beat(beat),
+            Beat::new(beat),
             None,
         ));
         let deadline = Instant::now() + Duration::from_secs(10);

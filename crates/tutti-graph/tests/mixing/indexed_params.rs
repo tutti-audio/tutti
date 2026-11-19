@@ -45,7 +45,7 @@ struct Bands {
 impl Bands {
     fn new(t0: f64, t1: f64) -> Self {
         Self {
-            thr: [Param::new(Db(t0)), Param::new(Db(t1))],
+            thr: [Param::new(Db::new(t0)), Param::new(Db::new(t1))],
         }
     }
 }
@@ -59,7 +59,7 @@ impl Node for Bands {
         for (k, thr) in self.thr.iter().enumerate() {
             match io.param(k) {
                 ParamInput::Base => {
-                    let base = thr.load().0;
+                    let base = thr.load().get();
                     io.output(k).fill(base as f32);
                 }
                 ParamInput::Frames { values: v, .. } => io.output(k).copy_from_slice(v),
@@ -69,7 +69,7 @@ impl Node for Bands {
     }
     fn reset(&mut self) {}
     fn param_base(&self, port: usize) -> Option<f64> {
-        self.thr.get(port).map(|p| p.load().0)
+        self.thr.get(port).map(|p| p.load().get())
     }
 }
 
@@ -114,7 +114,7 @@ impl Node for Steps {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let at = io.offset(0).expect("a block has a frame");
         for &(addr, v) in &self.to {
-            let seg = ParamSegment::unit(addr, v, v, Samples(0), Law::Linear);
+            let seg = ParamSegment::unit(addr, v, v, Samples::new(0), Law::Linear);
             let _ = io.event_out(0).push_param(ParamEvent::segment(at, seg));
         }
         Status::Silent
@@ -182,8 +182,8 @@ fn set_and_get_address_each_index_independently() {
     assert!(set.set(BAND1, -33.0));
     assert_eq!(set.get(BAND1), Some(-33.0));
     assert_eq!(set.get(BAND0), Some(-10.0), "index 0 did not move");
-    assert_eq!(b.thr[1].load(), Db(-33.0), "the node's own cell");
-    assert_eq!(b.thr[0].load(), Db(-10.0));
+    assert_eq!(b.thr[1].load(), Db::new(-33.0), "the node's own cell");
+    assert_eq!(b.thr[0].load(), Db::new(-10.0));
 
     // A bare `UnitParam` is index 0.
     assert!(set.set(UnitParam::Threshold, -6.0));
@@ -211,7 +211,10 @@ fn an_index_the_node_lacks_is_refused() {
     assert!(!set.set(band2, 0.0));
     assert_eq!(set.get(band2), None);
     assert!(set.cell(band2).is_none());
-    assert_eq!((b.thr[0].load(), b.thr[1].load()), (Db(-10.0), Db(-20.0)));
+    assert_eq!(
+        (b.thr[0].load(), b.thr[1].load()),
+        (Db::new(-10.0), Db::new(-20.0))
+    );
     // Another kind at an index the node has for `Threshold`.
     assert!(!set.set(UnitAddr::new(UnitParam::Ratio, 1), 0.0));
 }
@@ -219,9 +222,9 @@ fn an_index_the_node_lacks_is_refused() {
 /// The same kind at another index is accepted by the builder.
 #[test]
 fn the_same_kind_at_another_index_is_accepted() {
-    let a = Param::new(Db(0.0));
-    let b = Param::new(Db(1.0));
-    let c = Param::new(Db(2.0));
+    let a = Param::new(Db::new(0.0));
+    let b = Param::new(Db::new(1.0));
+    let c = Param::new(Db::new(2.0));
     let set = ParamSet::builder()
         .param(UnitParam::Threshold, a.as_atomic())
         .param(UnitAddr::new(UnitParam::Threshold, 1), b.as_atomic())
@@ -235,7 +238,7 @@ fn the_same_kind_at_another_index_is_accepted() {
 #[test]
 #[should_panic(expected = "twice")]
 fn a_duplicate_full_address_is_refused() {
-    let a = Param::new(Db(0.0));
+    let a = Param::new(Db::new(0.0));
     let _ = ParamSet::builder()
         .param(UnitAddr::new(UnitParam::Threshold, 1), a.as_atomic())
         .param(UnitAddr::new(UnitParam::Threshold, 1), a.as_atomic());
@@ -246,7 +249,7 @@ fn a_duplicate_full_address_is_refused() {
 #[test]
 #[should_panic(expected = "twice")]
 fn a_bare_param_is_index_zero_for_the_duplicate_check() {
-    let a = Param::new(Db(0.0));
+    let a = Param::new(Db::new(0.0));
     let _ = ParamSet::builder()
         .param(UnitParam::Threshold, a.as_atomic())
         .param(BAND0, a.as_atomic());

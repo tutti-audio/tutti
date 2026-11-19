@@ -310,8 +310,8 @@ mod tests {
     use tutti_units::{Hz, Q};
 
     fn set() -> (Param<Hz>, Param<Q>, ParamSet) {
-        let cutoff = Param::new(Hz(1000.0));
-        let q = Param::new(Q(0.7));
+        let cutoff = Param::new(Hz::new(1000.0));
+        let q = Param::new(Q::new(0.7));
         let set = ParamSet::builder()
             .param(UnitParam::Cutoff, cutoff.as_atomic())
             .param(UnitParam::Q, q.as_atomic())
@@ -324,7 +324,7 @@ mod tests {
     fn set_writes_the_cell_the_node_reads() {
         let (cutoff, _q, set) = set();
         assert!(set.set(UnitParam::Cutoff, 250.0));
-        assert_eq!(cutoff.load(), Hz(250.0));
+        assert_eq!(cutoff.load(), Hz::new(250.0));
         assert_eq!(set.get(UnitParam::Cutoff), Some(250.0));
     }
 
@@ -334,14 +334,14 @@ mod tests {
         let (cutoff, q, set) = set();
         assert!(!set.set(UnitParam::GainDb, 3.0));
         assert_eq!(set.get(UnitParam::GainDb), None);
-        assert_eq!((cutoff.load(), q.load()), (Hz(1000.0), Q(0.7)));
+        assert_eq!((cutoff.load(), q.load()), (Hz::new(1000.0), Q::new(0.7)));
     }
 
     /// Adding one address twice is a bug in the node, caught at build.
     #[test]
     #[should_panic(expected = "twice")]
     fn one_address_one_cell() {
-        let a = Param::new(Hz(1.0));
+        let a = Param::new(Hz::new(1.0));
         let _ = ParamSet::builder()
             .param(UnitParam::Cutoff, a.as_atomic())
             .param(UnitParam::Cutoff, a.as_atomic());

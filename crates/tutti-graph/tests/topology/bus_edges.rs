@@ -874,9 +874,9 @@ fn a_bus_edges_lanes_align_like_any_edges() {
     let got = delays(&rig.plan());
     let ring = |from: Source| DelayKey::Audio { at: at(2, 0), from };
     let expected = BTreeMap::from([
-        (ring(out_port(1, 0)), Samples(5)),
-        (ring(out_port(1, 1)), Samples(5)),
-        (ring(out_port(3, 0)), Samples(9)),
+        (ring(out_port(1, 0)), Samples::new(5)),
+        (ring(out_port(1, 1)), Samples::new(5)),
+        (ring(out_port(3, 0)), Samples::new(9)),
     ]);
     // Node 1 declares 4 frames and node 4 declares 9: a lane of node 1 is
     // 5 frames early.
@@ -885,7 +885,7 @@ fn a_bus_edges_lanes_align_like_any_edges() {
     let lowered = rig.lowering().unwrap().spec;
     assert_eq!(
         tutti_graph::latency_plan(&lowered, SampleRate::SR_48K).total(),
-        Samples(9),
+        Samples::new(9),
     );
     let unlowered = tutti_graph::latency_plan(&rig.spec, SampleRate::SR_48K);
     assert_ne!(

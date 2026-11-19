@@ -118,7 +118,7 @@ impl Source for Ramp {
             out[i * 2 + 1] = -(f / 100_000.0);
         }
         self.pos += n;
-        Pull::Frames(Samples(n))
+        Pull::Frames(Samples::new(n))
     }
 }
 
@@ -576,7 +576,7 @@ impl Source for Dead {
         }
         out[..n * 2].fill(0.25);
         self.left -= n;
-        Pull::Frames(Samples(n))
+        Pull::Frames(Samples::new(n))
     }
 }
 

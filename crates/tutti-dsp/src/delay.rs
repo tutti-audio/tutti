@@ -121,7 +121,7 @@ impl<F: Float> DelayLine<F> {
                 let floor = floor.get();
                 let s0 = self.read_whole(floor);
                 let s1 = self.read_whole(floor + 1);
-                s0 + frac * (s1 - s0)
+                crate::lerp(s0, s1, frac)
             }
             InterpolationMode::CubicHermite => {
                 let (floor, frac) = F::split_position(delay);

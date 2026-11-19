@@ -21,6 +21,7 @@ use super::super::reassemble::{BufferLimit, PeFlowControl, PeReassemblyLimits, S
 use super::super::tree::PeJson;
 use super::state::StateDevice;
 use super::*;
+use crate::Initiator;
 use crate::ci::testing::{OURS, PEER};
 use crate::{BodyLimit, CiHeader, CiMessage, Decoded, MaxSysexSize, Muid};
 

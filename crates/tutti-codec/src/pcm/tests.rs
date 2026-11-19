@@ -57,6 +57,6 @@ fn each_width_names_its_bits_and_integer_depth() {
 /// 2^-23.
 #[test]
 fn the_lsb_is_one_step_of_the_depth() {
-    assert_eq!(IntDepth::Int16.lsb().0, 1.0 / 32768.0);
-    assert_eq!(IntDepth::Int24.lsb().0, 1.0 / 8_388_608.0);
+    assert_eq!(IntDepth::Int16.lsb().get(), 1.0 / 32768.0);
+    assert_eq!(IntDepth::Int24.lsb().get(), 1.0 / 8_388_608.0);
 }

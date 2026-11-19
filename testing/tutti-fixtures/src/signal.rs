@@ -32,7 +32,7 @@ pub fn sine(hz: Hz, amplitude: Amplitude, rate: SampleRate, len: Samples) -> Vec
 ///
 /// An empty `len` gives an empty vector.
 pub fn impulse(len: Samples) -> Vec<f32> {
-    impulse_at(len, Samples(0))
+    impulse_at(len, Samples::new(0))
 }
 
 /// `len` samples of silence but for a single `1.0` at sample `at`.
@@ -229,14 +229,19 @@ mod tests {
     #[test]
     fn a_sine_is_the_analytic_one() {
         // 12 kHz at 48 kHz: four samples a period, 0, A, 0, -A.
-        let x = sine(Hz(12_000.0), Amplitude(0.5), SampleRate::SR_48K, Samples(8));
+        let x = sine(
+            Hz::new(12_000.0),
+            Amplitude::new(0.5),
+            SampleRate::SR_48K,
+            Samples::new(8),
+        );
         assert_eq!(x[0], 0.0);
         assert!((x[1] - 0.5).abs() < 1e-6 && (x[3] + 0.5).abs() < 1e-6);
         let y = sine(
-            Hz(1_000.0),
-            Amplitude(0.5),
+            Hz::new(1_000.0),
+            Amplitude::new(0.5),
             SampleRate::SR_48K,
-            Samples(48_000),
+            Samples::new(48_000),
         );
         assert!((rms(&y) - 0.5 / 2f32.sqrt()).abs() < 1e-6);
         assert!((peak(&y) - 0.5).abs() < 1e-6);
@@ -245,9 +250,12 @@ mod tests {
     /// An impulse is one `1.0` at the asked frame and nothing else.
     #[test]
     fn an_impulse_is_one_sample() {
-        assert_eq!(impulse(Samples(4)), [1.0, 0.0, 0.0, 0.0]);
-        assert_eq!(impulse_at(Samples(4), Samples(2)), [0.0, 0.0, 1.0, 0.0]);
-        assert!(impulse(Samples(0)).is_empty());
+        assert_eq!(impulse(Samples::new(4)), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(
+            impulse_at(Samples::new(4), Samples::new(2)),
+            [0.0, 0.0, 1.0, 0.0]
+        );
+        assert!(impulse(Samples::new(0)).is_empty());
     }
 
     /// The readings of a known buffer, the empty one included.
@@ -273,10 +281,10 @@ mod tests {
     #[test]
     fn a_full_scale_sine_reads_one_over_root_two_in_f64() {
         let x = sine(
-            Hz(1_000.0),
-            Amplitude(1.0),
+            Hz::new(1_000.0),
+            Amplitude::new(1.0),
             SampleRate::SR_48K,
-            Samples(48_000),
+            Samples::new(48_000),
         );
         let want = std::f64::consts::FRAC_1_SQRT_2;
         assert!((rms_f64(&x) - want).abs() < 1e-7, "{}", rms_f64(&x));

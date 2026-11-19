@@ -46,7 +46,7 @@ use tutti_units::Samples;
 pub const IDLE_PARK: Duration = Duration::from_millis(5);
 
 /// Frames moved per pump pass unless the caller names a capacity.
-const SCRATCH_FRAMES: Samples = Samples(1024);
+const SCRATCH_FRAMES: Samples = Samples::new(1024);
 
 /// Why a recording could not start or did not end cleanly.
 #[derive(Debug, Error)]
@@ -231,12 +231,12 @@ pub enum PumpPass {
 /// }
 ///
 /// // A tap on both of the graph's outputs, copied as the graph renders.
-/// let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+/// let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// editor.insert(NodeKey(1), "tone", Unforkable(Tone));
 /// let out = |port| Source::Node(OutPort { node: NodeKey(1), port });
 /// editor.spec_mut().topology.set_outputs([out(0), out(1)]);
 /// let reader = editor
-///     .open_tap(TapId::of(1), vec![out(0), out(1)], TapAlign::ToOutput, Samples(1024))
+///     .open_tap(TapId::of(1), vec![out(0), out(1)], TapAlign::ToOutput, Samples::new(1024))
 ///     .expect("the ports exist");
 /// editor.commit().expect("compiles");
 /// executor.apply_pending();
@@ -244,7 +244,7 @@ pub enum PumpPass {
 ///
 /// // The audio callback renders three frames.
 /// let (mut left, mut right) = ([0.0f32; 3], [0.0f32; 3]);
-/// let transport = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+/// let transport = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
 /// executor.process(3, &transport, &[], &mut [&mut left[..], &mut right[..]]);
 ///
 /// let dir = tempfile::tempdir().expect("temp dir");
@@ -252,8 +252,8 @@ pub enum PumpPass {
 /// let sink = FileOut::create(&spec, dir.path().join("take.wav")).expect("sink opens");
 ///
 /// // `new` checks the widths agree, before a frame moves.
-/// let mut pump = PumpLoop::new(reader, sink, Samples(1024)).expect("stereo into stereo");
-/// assert_eq!(pump.pump_once(), PumpPass::Wrote(Samples(3)));
+/// let mut pump = PumpLoop::new(reader, sink, Samples::new(1024)).expect("stereo into stereo");
+/// assert_eq!(pump.pump_once(), PumpPass::Wrote(Samples::new(3)));
 /// // An empty tap is a producer that has not caught up, not the end.
 /// assert_eq!(pump.pump_once(), PumpPass::Starved);
 ///
@@ -328,7 +328,7 @@ where
             });
         }
         let frames = if capacity.is_zero() {
-            Samples(1)
+            Samples::new(1)
         } else {
             capacity
         };
@@ -378,7 +378,7 @@ where
     /// over the passes run. A recording closes up over each gap.
     #[must_use]
     pub fn lost(&self) -> Samples {
-        Samples(usize::try_from(self.lost.load(Ordering::Relaxed)).unwrap_or(usize::MAX))
+        Samples::new(usize::try_from(self.lost.load(Ordering::Relaxed)).unwrap_or(usize::MAX))
     }
 
     /// Consumes the loop and closes the sink (for a file, back-patching its
@@ -687,7 +687,7 @@ impl<K> Recorder<K> {
     /// take. Readable after the take ends.
     #[must_use]
     pub fn lost(&self) -> Samples {
-        Samples(usize::try_from(self.lost.load(Ordering::Relaxed)).unwrap_or(usize::MAX))
+        Samples::new(usize::try_from(self.lost.load(Ordering::Relaxed)).unwrap_or(usize::MAX))
     }
 
     /// Whether the pump thread has stopped running passes, so

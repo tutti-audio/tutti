@@ -44,8 +44,8 @@ fn scene(
 /// beat 4.
 fn ramp(from: f64, to: f64) -> Trajectory<Hz> {
     let mut curve = Trajectory::new();
-    curve.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(from)));
-    curve.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(to)));
+    curve.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(from)));
+    curve.add_breakpoint(Breakpoint::new(Beat::new(4.0), Hz::new(to)));
     curve
 }
 
@@ -112,19 +112,24 @@ fn a_route_polarity_and_curve_land_at_the_update_as_the_shaped_offset() {
 #[test]
 fn a_get_before_the_update_is_the_pending_value() {
     let (mut s, mut side) = rig(1);
-    let (cutoff, lfo, route) = scene(&mut s, &mut side, |m| m.lfo(Lfo::sine().rate(Hz(2.0))), 0.5);
+    let (cutoff, lfo, route) = scene(
+        &mut s,
+        &mut side,
+        |m| m.lfo(Lfo::sine().rate(Hz::new(2.0))),
+        0.5,
+    );
     let before = program(&s, cutoff);
     assert_eq!(s.get(route.polarity()).unwrap(), Polarity::Bipolar);
     assert_eq!(s.get(route.curve()).unwrap(), Law::Linear);
-    assert_eq!(s.get(lfo.rate()).unwrap(), LfoRate::Hz(Hz(2.0)));
+    assert_eq!(s.get(lfo.rate()).unwrap(), LfoRate::Hz(Hz::new(2.0)));
 
     s.set((
         route.polarity().to(Polarity::Unipolar),
-        lfo.rate().to(LfoRate::Hz(Hz(5.0))),
+        lfo.rate().to(LfoRate::Hz(Hz::new(5.0))),
     ))
     .unwrap();
     assert_eq!(s.get(route.polarity()).unwrap(), Polarity::Unipolar);
-    assert_eq!(s.get(lfo.rate()).unwrap(), LfoRate::Hz(Hz(5.0)));
+    assert_eq!(s.get(lfo.rate()).unwrap(), LfoRate::Hz(Hz::new(5.0)));
     assert!(
         Arc::ptr_eq(&program(&s, cutoff), &before),
         "nothing is published before the update"
@@ -133,7 +138,7 @@ fn a_get_before_the_update_is_the_pending_value() {
     let _ = s.update();
     assert!(!Arc::ptr_eq(&program(&s, cutoff), &before), "published");
     assert_eq!(s.get(route.polarity()).unwrap(), Polarity::Unipolar);
-    assert_eq!(s.get(lfo.rate()).unwrap(), LfoRate::Hz(Hz(5.0)));
+    assert_eq!(s.get(lfo.rate()).unwrap(), LfoRate::Hz(Hz::new(5.0)));
 }
 
 /// **Two writes before an update publish the second, and a pair that ends
@@ -175,17 +180,22 @@ fn two_writes_before_an_update_publish_the_second_value_once() {
 #[test]
 fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
     let (mut s, mut side) = rig(1);
-    let (cutoff, lfo, _) = scene(&mut s, &mut side, |m| m.lfo(Lfo::sine().rate(Hz(2.0))), 0.5);
+    let (cutoff, lfo, _) = scene(
+        &mut s,
+        &mut side,
+        |m| m.lfo(Lfo::sine().rate(Hz::new(2.0))),
+        0.5,
+    );
     assert!(matches!(
         clock(&s, cutoff),
         Clock::Seconds {
-            rate: Hz(2.0),
+            rate,
             anchor: None,
             ..
-        }
+        } if rate == Hz::new(2.0)
     ));
 
-    s.set(lfo.rate().to(LfoRate::Hz(Hz(5.0)))).unwrap();
+    s.set(lfo.rate().to(LfoRate::Hz(Hz::new(5.0)))).unwrap();
     frame(&mut s, &mut side);
     let Clock::Seconds {
         rate,
@@ -195,8 +205,8 @@ fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
     else {
         panic!("the new rate is dated by an anchor");
     };
-    assert_eq!(rate, Hz(5.0));
-    assert_eq!(anchor.prev_rate, Hz(2.0));
+    assert_eq!(rate, Hz::new(5.0));
+    assert_eq!(anchor.prev_rate, Hz::new(2.0));
     let at = anchor.at.get() as f64;
     let played = 1_024.0; // rendered before the update that dates the anchor
     assert!(
@@ -214,8 +224,8 @@ fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
         layer
             .clock
             .cycles(&ProgramTime {
-                beat: Beat(0.0),
-                play: SamplePosition(frame),
+                beat: Beat::new(0.0),
+                play: SamplePosition::new(frame),
                 play_epoch: anchor.epoch,
                 rate: SampleRate::of(RATE),
             })
@@ -237,7 +247,7 @@ fn an_lfo_rate_in_beats_per_cycle_is_bar_locked() {
     let (cutoff, lfo, _) = scene(
         &mut s,
         &mut side,
-        |m| m.lfo(Lfo::sine().phase(tutti_units::PhaseIncrement(0.25))),
+        |m| m.lfo(Lfo::sine().phase(tutti_units::PhaseIncrement::new(0.25))),
         0.5,
     );
     s.set(lfo.rate().to(LfoRate::Beats(BeatsPerCycle::of(4.0))))
@@ -245,8 +255,8 @@ fn an_lfo_rate_in_beats_per_cycle_is_bar_locked() {
     let _ = s.update();
     let clock = clock(&s, cutoff);
     let at = |beat: f64| ProgramTime {
-        beat: Beat(beat),
-        play: SamplePosition(0.0),
+        beat: Beat::new(beat),
+        play: SamplePosition::new(0.0),
         play_epoch: 0,
         rate: SampleRate::of(RATE),
     };
@@ -275,8 +285,8 @@ fn an_lfo_beats_rate_change_is_bar_locked_with_no_anchor() {
         "no anchor on a beats clock"
     );
     let at = ProgramTime {
-        beat: Beat(3.0),
-        play: SamplePosition(0.0),
+        beat: Beat::new(3.0),
+        play: SamplePosition::new(0.0),
         play_epoch: 0,
         rate: SampleRate::of(RATE),
     };
@@ -315,7 +325,7 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
         r.err().expect("refused").kind
     }
     assert_eq!(
-        refused(s.set(knob.rate().to(LfoRate::Hz(Hz(1.0))))),
+        refused(s.set(knob.rate().to(LfoRate::Hz(Hz::new(1.0))))),
         ValueErrorKind::NoSuchTarget
     );
 
@@ -325,7 +335,7 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
         ValueErrorKind::NoSuchTarget,
         "no longer a macro"
     );
-    s.set(knob.rate().to(LfoRate::Hz(Hz(3.0)))).unwrap();
+    s.set(knob.rate().to(LfoRate::Hz(Hz::new(3.0)))).unwrap();
     let _ = s.update();
     assert!(matches!(
         program(&s, cutoff).layers()[0].wave,
@@ -333,7 +343,7 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
     ));
     assert!(matches!(
         clock(&s, cutoff),
-        Clock::Seconds { rate: Hz(3.0), .. }
+        Clock::Seconds { rate, .. } if rate == Hz::new(3.0)
     ));
 
     s.mods_mut().remove_route(route).unwrap();
@@ -343,7 +353,7 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
     );
     s.mods_mut().remove_source(knob).unwrap();
     assert_eq!(
-        refused(s.set(knob.rate().to(LfoRate::Hz(Hz(1.0))))),
+        refused(s.set(knob.rate().to(LfoRate::Hz(Hz::new(1.0))))),
         ValueErrorKind::NoSuchTarget
     );
 }
@@ -354,7 +364,7 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
 #[test]
 fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     let mut s = tutti_session::Session::builder()
-        .max_block(tutti_buffers::MaxBlock::of(tutti_units::Samples(128)))
+        .max_block(tutti_buffers::MaxBlock::of(tutti_units::Samples::new(128)))
         .build()
         .expect("builds");
     let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
@@ -368,7 +378,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     assert!(m.automate(cutoff, Arc::new(ramp(100.0, 900.0))));
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let route = m
         .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
         .unwrap();
@@ -388,7 +398,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     s.set((
         route.polarity().to(Polarity::Unipolar),
         route.curve().to(Law::Hold),
-        lfo.rate().to(LfoRate::Hz(Hz(7.0))),
+        lfo.rate().to(LfoRate::Hz(Hz::new(7.0))),
     ))
     .unwrap();
     s.set(probe.cutoff().automation().to(Arc::new(ramp(900.0, 100.0))))
@@ -447,7 +457,7 @@ fn an_automation_curve_set_lands_at_the_update_and_the_param_follows_it() {
         program
             .automation()
             .expect("automated")
-            .value_at(Beat(beat))
+            .value_at(Beat::new(beat))
     };
     assert_eq!(at(&s, 2.0), Some(500.0));
     assert_eq!(s.get(target).unwrap(), first);

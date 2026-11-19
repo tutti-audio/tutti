@@ -22,9 +22,9 @@ use tutti_units::Samples;
 /// use tutti_units::Samples;
 /// use tutti_buffers::MaxBlock;
 ///
-/// assert_eq!(MaxBlock::new(Samples(512)).map(MaxBlock::get), Some(512));
-/// assert_eq!(MaxBlock::new(Samples(0)), None);
-/// assert_eq!(MaxBlock::new(Samples(512)).map(MaxBlock::get_u32), Some(512));
+/// assert_eq!(MaxBlock::new(Samples::new(512)).map(MaxBlock::get), Some(512));
+/// assert_eq!(MaxBlock::new(Samples::new(0)), None);
+/// assert_eq!(MaxBlock::new(Samples::new(512)).map(MaxBlock::get_u32), Some(512));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -77,7 +77,7 @@ impl MaxBlock {
     /// The bound as a frame count.
     #[must_use]
     pub const fn samples(self) -> Samples {
-        Samples(self.0 as usize)
+        Samples::new(self.0 as usize)
     }
 }
 
@@ -107,18 +107,21 @@ mod tests {
     /// **A block holds from one frame to `u32::MAX`**; `of` panics outside it.
     #[test]
     fn a_block_holds_from_one_frame_to_u32_max() {
-        assert_eq!(MaxBlock::new(Samples(1)).map(MaxBlock::get), Some(1));
-        assert_eq!(MaxBlock::new(Samples(0)), None);
+        assert_eq!(MaxBlock::new(Samples::new(1)).map(MaxBlock::get), Some(1));
+        assert_eq!(MaxBlock::new(Samples::new(0)), None);
         assert_eq!(
-            MaxBlock::try_from(Samples(0)),
-            Err(InvalidMaxBlock(Samples(0)))
+            MaxBlock::try_from(Samples::new(0)),
+            Err(InvalidMaxBlock(Samples::new(0)))
         );
-        assert_eq!(Samples::from(MaxBlock::of(Samples(64))), Samples(64));
-        assert!(std::panic::catch_unwind(|| MaxBlock::of(Samples(0))).is_err());
+        assert_eq!(
+            Samples::from(MaxBlock::of(Samples::new(64))),
+            Samples::new(64)
+        );
+        assert!(std::panic::catch_unwind(|| MaxBlock::of(Samples::new(0))).is_err());
         assert_eq!(MaxBlock::MAX.get_u32(), u32::MAX);
-        assert_eq!(MaxBlock::of(Samples(64)).get_u32(), 64);
+        assert_eq!(MaxBlock::of(Samples::new(64)).get_u32(), 64);
         // `usize` holds `u32::MAX + 1` only where it is wider than 32 bits.
-        if let Some(over) = (u32::MAX as usize).checked_add(1).map(Samples) {
+        if let Some(over) = (u32::MAX as usize).checked_add(1).map(Samples::new) {
             assert_eq!(MaxBlock::new(over), None);
             assert_eq!(MaxBlock::try_from(over), Err(InvalidMaxBlock(over)));
             assert!(std::panic::catch_unwind(|| MaxBlock::of(over)).is_err());

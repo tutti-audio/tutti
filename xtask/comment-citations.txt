@@ -88,7 +88,6 @@
 2 crates/tutti-session/src/session/event.rs
 1 crates/tutti-session/src/session/mod.rs
 1 crates/tutti-session/src/take.rs
-1 crates/tutti-session/tests/export/dither_agrees.rs
 1 crates/tutti-session/tests/export/export_parallel.rs
 1 crates/tutti-session/tests/io/event_inlet.rs
 2 crates/tutti-session/tests/io/recorder_thread.rs

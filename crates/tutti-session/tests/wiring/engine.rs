@@ -50,7 +50,7 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
                 .schedule(
                     tutti_units::At::NextBlock,
                     MotionEvent::Locate {
-                        beat: tutti_units::Beat(0.75),
+                        beat: tutti_units::Beat::new(0.75),
                         fade: tutti_transport::FadeOut::Immediate,
                         then: tutti_transport::Then::Keep,
                     },
@@ -142,7 +142,7 @@ fn the_transport_converts_at_the_sessions_rate() {
     assert_eq!(s.sample_rate(), SampleRate::of(RATE));
     let beat = (s.tempo_map())
         .view(s.sample_rate())
-        .frame_at_or_after(Beat(1.0));
+        .frame_at_or_after(Beat::new(1.0));
     assert_eq!(beat.get(), 24_000, "one beat at 120 BPM and 48 kHz");
 }
 
@@ -162,8 +162,11 @@ fn voice(cents: f64) -> tutti_sampler::VoicePool<f32> {
         wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(tutti_units::Beat(0.0)))
-        .expect("a placeable wave");
+    let source = MemorySource::placed(
+        Arc::new(wave),
+        VoiceWindow::from(tutti_units::Beat::new(0.0)),
+    )
+    .expect("a placeable wave");
     let mut pool = VoicePool::new();
     pool.insert(
         SlotId(1),
@@ -315,7 +318,7 @@ fn an_offline_render_feeds_the_master_meter() {
     let r = meter.read();
     assert!((r[0].peak.get() - 0.5).abs() < 1e-6, "{r:?}");
     assert!((r[1].rms.get() - 0.5).abs() < 1e-6, "{r:?}");
-    assert_eq!(r[0].frames, Samples(128));
+    assert_eq!(r[0].frames, Samples::new(128));
 
     let mut detached = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
@@ -352,7 +355,7 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
     assert_eq!(
         s.graph()
             .taps()
-            .open(&[OutPort::new(a, 1)], TapAlign::Raw, Samples(64))
+            .open(&[OutPort::new(a, 1)], TapAlign::Raw, Samples::new(64))
             .err(),
         Some(MissingSource::Port {
             node: a.erase(),
@@ -389,7 +392,7 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
         .expect("it exists, uncommitted");
     s.graph()
         .taps()
-        .open_output(Samples(64))
+        .open_output(Samples::new(64))
         .expect("the outputs exist");
 }
 
@@ -517,7 +520,7 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
         "none was opened"
     );
     let tap = s
-        .open_heard_tap(Samples(64))
+        .open_heard_tap(Samples::new(64))
         .expect("an engine")
         .reader()
         .expect("the audio thread is not behind");
@@ -554,25 +557,25 @@ fn an_offline_render_feeds_an_output_tap() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples(1_024))
+        .open_output(Samples::new(1_024))
         .expect("the sources exist");
     assert_eq!(tap.width(), 2);
     let _ = s.update();
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
 
-    assert_eq!(tap.available(), Samples(64));
+    assert_eq!(tap.available(), Samples::new(64));
     let mut got = vec![f32::NAN; 64 * 2];
     assert_eq!(
         tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
             .unwrap(),
-        Samples(64)
+        Samples::new(64)
     );
     assert!(
         got.as_chunks::<2>().0.iter().all(|f| *f == [0.5, 0.0]),
         "{got:?}"
     );
-    assert_eq!(tap.take_lost(), Samples(0));
+    assert_eq!(tap.take_lost(), Samples::new(0));
 }
 
 /// An output tap follows the outputs when they are re-wired: lane 0 reads
@@ -588,7 +591,7 @@ fn an_output_tap_follows_a_rewired_output() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples(1_024))
+        .open_output(Samples::new(1_024))
         .expect("the sources exist");
     let _ = s.update();
     let mut block = vec![0.0f32; 64 * 2];
@@ -603,7 +606,7 @@ fn an_output_tap_follows_a_rewired_output() {
     assert_eq!(
         tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
             .unwrap(),
-        Samples(128)
+        Samples::new(128)
     );
     let left: Vec<f32> = got.iter().step_by(2).copied().collect();
     assert!(left[..64].iter().all(|&x| x == 0.5), "before: {left:?}");
@@ -628,7 +631,7 @@ fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
     let tap = s
         .graph()
         .taps()
-        .open_output(Samples(64))
+        .open_output(Samples::new(64))
         .expect("the sources exist");
     let _ = s.update();
     assert_eq!(taps(&s), 1, "one op a tap while it is open");
@@ -658,7 +661,7 @@ fn a_detached_render_feeds_a_tap() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples(16))
+        .open_output(Samples::new(16))
         .expect("the sources exist");
     let mut frame = [0.0f32];
     for _ in 0..3 {
@@ -668,7 +671,7 @@ fn a_detached_render_feeds_a_tap() {
     assert_eq!(
         tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
             .unwrap(),
-        Samples(3)
+        Samples::new(3)
     );
     assert_eq!(got, [0.5; 3]);
 }
@@ -727,7 +730,7 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples(16_384))
+        .open_output(Samples::new(16_384))
         .expect("the sources exist");
     let _ = s.update();
     let motion = s.transport_handle();
@@ -792,10 +795,10 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
     let mut plan = s
         .graph()
         .taps()
-        .open_output(Samples(16_384))
+        .open_output(Samples::new(16_384))
         .expect("the sources exist");
     let mut heard = s
-        .open_heard_tap(Samples(16_384))
+        .open_heard_tap(Samples::new(16_384))
         .expect("an engine")
         .reader()
         .expect("the audio thread is not behind");
@@ -819,7 +822,7 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
         heard
             .pop_into(InterleavedMut::new(&mut tapped, heard.layout()).unwrap())
             .unwrap(),
-        Samples(6_400)
+        Samples::new(6_400)
     );
     let bits = |x: &[f32]| x.iter().map(|s| s.to_bits()).collect::<Vec<_>>();
     assert_eq!(
@@ -861,33 +864,33 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
         .unwrap();
     let _ = s.update();
     let tap = s
-        .open_heard_tap(Samples(1_024))
+        .open_heard_tap(Samples::new(1_024))
         .expect("an engine")
         .reader()
         .expect("the audio thread is not behind");
     assert_eq!(
-        s.open_heard_tap(Samples(8)).err(),
+        s.open_heard_tap(Samples::new(8)).err(),
         Some(tutti_session::HeardTapError::Tap(
             tutti_engine::HeardTapError::Busy
         ))
     );
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
-    assert_eq!(tap.available(), Samples(64));
+    assert_eq!(tap.available(), Samples::new(64));
     // An export renders a fork, without the engine: nothing reaches the tap.
     let mut fork = s.graph_ref().testing().fork_live().expect("forks");
     let mut out = [0.0f32; 2];
     for _ in 0..64 {
         fork.tick(InterleavedMut::one_frame(&mut out).unwrap());
     }
-    assert_eq!(tap.available(), Samples(64), "the fork wrote nothing");
+    assert_eq!(tap.available(), Samples::new(64), "the fork wrote nothing");
     assert_eq!(out, [0.5, 0.5]);
     tap.take_lost();
     let detached = Session::builder()
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
     assert_eq!(
-        detached.open_heard_tap(Samples(8)).err(),
+        detached.open_heard_tap(Samples::new(8)).err(),
         Some(tutti_session::HeardTapError::Detached)
     );
 }
@@ -901,7 +904,7 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
 fn a_dropped_heard_reader_frees_the_tap() {
     let mut s = offline();
     let tap = s
-        .open_heard_tap(Samples(64))
+        .open_heard_tap(Samples::new(64))
         .expect("an engine")
         .reader()
         .expect("the audio thread is not behind");
@@ -909,7 +912,7 @@ fn a_dropped_heard_reader_frees_the_tap() {
     let _ = s.update();
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
-    assert!(s.open_heard_tap(Samples(64)).is_ok());
+    assert!(s.open_heard_tap(Samples::new(64)).is_ok());
 }
 
 /// A project the device has no place for is refused when the session is built,
@@ -923,7 +926,7 @@ fn a_project_the_device_cannot_take_is_refused_at_build() {
             .outputs_floor(ChannelLayout::clamped(floor))
             .sample_rate(SampleRate::of(RATE))
             .outputs(ChannelLayout::from(device))
-            .max_block(MaxBlock::of(Samples(256)))
+            .max_block(MaxBlock::of(Samples::new(256)))
             .build()
     };
     assert!(matches!(

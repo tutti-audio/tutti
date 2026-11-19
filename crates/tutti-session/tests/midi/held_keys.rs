@@ -67,10 +67,10 @@ fn retarget_with_a_held_clip_note() {
     s.midi()
         .play_clip(
             a,
-            Beat(0.0),
+            Beat::new(0.0),
             [
                 TimedMidiEvent::new(
-                    Beat(1.0 / 3.0),
+                    Beat::new(1.0 / 3.0),
                     Message::midi2(
                         MidiChannel::FIRST,
                         Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(MF)),
@@ -78,7 +78,7 @@ fn retarget_with_a_held_clip_note() {
                 )
                 .unwrap(),
                 TimedMidiEvent::new(
-                    Beat(1.0 / 3.0) + BeatDuration(8.0),
+                    Beat::new(1.0 / 3.0) + BeatDuration::new(8.0),
                     Message::midi2(
                         MidiChannel::FIRST,
                         Voice2::note_off(NoteNumber::of(60), NoteVelocity::MIN),

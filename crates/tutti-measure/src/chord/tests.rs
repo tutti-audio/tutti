@@ -177,7 +177,7 @@ fn a_state_cannot_switch_into_itself() {
     assert!(sim > 0.85 && sim < 0.939, "{sim}");
     let config = cfg().self_transition(SelfTransition::of(0.02));
     let path = viterbi(&grid(&[triad(0, false), second]), &config);
-    assert_eq!(path, [0, NO_CHORD as u8]);
+    assert_eq!(path, [0, NO_CHORD as u16]);
 }
 
 /// Long input keeps the stay prior exact. At a self-transition of `1 - 2^-24`
@@ -227,43 +227,6 @@ fn smoothing_removes_a_flicker_that_argmax_keeps() {
     );
     let change = [c, c, c, c, f, f, f, f, f];
     assert_eq!(run(&change, &cfg()).len(), 2);
-}
-
-/// The linear-time search finds the same best path as trying every path:
-/// all 25^4 over four random frames, at three self-transitions (one under
-/// the even share, where a state must not "switch" into itself).
-#[test]
-fn viterbi_is_the_best_path() {
-    let mut rng = StdRng::seed_from_u64(11);
-    for p in [0.9f64, 0.5, 0.02] {
-        let config = cfg().self_transition(SelfTransition::new(p).unwrap());
-        for _ in 0..3 {
-            let rows: Vec<[f64; CLASSES]> = (0..4)
-                .map(|_| core::array::from_fn(|_| rng.random_range(0.0..1.0)))
-                .collect();
-            let (stay, switch) = (p.ln(), ((1.0 - p) / 24.0).ln());
-            let emit: Vec<[f64; STATES]> = rows
-                .iter()
-                .map(|r| similarities(r).map(|s| s * config.sharpness.get()))
-                .collect();
-            let mut best = (f64::MIN, [0usize; 4]);
-            for code in 0..STATES.pow(4) {
-                let path: [usize; 4] =
-                    core::array::from_fn(|i| code / STATES.pow(i as u32) % STATES);
-                let mut score = emit[0][path[0]];
-                for t in 1..4 {
-                    score += if path[t] == path[t - 1] { stay } else { switch };
-                    score += emit[t][path[t]];
-                }
-                if score > best.0 {
-                    best = (score, path);
-                }
-            }
-            let found = viterbi(&grid(&rows), &config);
-            let found: Vec<usize> = found.iter().map(|&s| usize::from(s)).collect();
-            assert_eq!(found, best.1, "p {p}");
-        }
-    }
 }
 
 /// Span boundaries sit at the midpoints between frame centres, whatever

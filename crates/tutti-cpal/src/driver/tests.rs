@@ -25,7 +25,7 @@ fn a_plain_restart_refuses_a_new_rate_and_stays_stopped() {
     let transport = Transport::new(SampleRate::SR_44K1);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_44K1,
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("an empty graph");

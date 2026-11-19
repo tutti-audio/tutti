@@ -57,8 +57,8 @@ fn unequal_latency_diamond() -> Topology {
     t.nodes.insert(
         B,
         spec("lookahead", 1, 1)
-            .with_latency(Samples(512))
-            .with_tail(Tail::Finite(Samples(64))),
+            .with_latency(Samples::new(512))
+            .with_tail(Tail::Finite(Samples::new(64))),
     );
     t.nodes.insert(C, spec("mix", 2, 1));
     t.edges
@@ -89,13 +89,17 @@ fn latency_and_tail_are_folds_over_the_value() {
     t.validate().expect("well formed");
 
     let comp = latency_plan(&t, SampleRate::SR_48K);
-    assert_eq!(comp.total(), Samples(512), "graph latency is the slow path");
+    assert_eq!(
+        comp.total(),
+        Samples::new(512),
+        "graph latency is the slow path"
+    );
     // The un-delayed branch is the one that needs pre-roll; the compensation is
     // reported per output channel, and there is one.
-    assert_eq!(comp.channels(), [Samples(0)]);
+    assert_eq!(comp.channels(), [Samples::new(0)]);
 
     let tail = graph_tail(&t, SampleRate::SR_48K);
-    assert_eq!(tail.samples(), Some(Samples(64)));
+    assert_eq!(tail.samples(), Some(Samples::new(64)));
     assert_eq!(tail.unknown_nodes(), 0);
 
     // The trait view agrees with the structure: the mixer's port order is the
@@ -236,7 +240,7 @@ fn validate_refuses_a_stored_zero_alone_and_beside_others() {
     t.nodes.insert(C, spec("mix", 1, 1));
     let zero = Edge::Direct(Source::Zero);
     let from_a = Edge::Direct(Source::Node(out(A, 0)));
-    let fb = Edge::Feedback(FeedbackFrom::new(out(C, 0), Samples(64)));
+    let fb = Edge::Feedback(FeedbackFrom::new(out(C, 0), Samples::new(64)));
 
     t.edges.insert(at(C, 0), vec![]);
     t.outputs = vec![vec![]];
@@ -354,7 +358,7 @@ fn a_cycle_is_rejected_unless_feedback_breaks_it() {
         at(A, 0),
         vec![Edge::Feedback(FeedbackFrom::one_block(
             out(B, 0),
-            Samples(64),
+            Samples::new(64),
         ))],
     );
     let valid = broken.validate().expect("feedback breaks the cycle");
@@ -381,11 +385,11 @@ fn a_cycle_is_rejected_unless_feedback_breaks_it() {
     // With a real latency inside the loop, the fold still terminates on the
     // acyclic reading and counts the node once.
     let mut lat = broken.clone();
-    lat.nodes.get_mut(&A).unwrap().latency = Samples(128);
+    lat.nodes.get_mut(&A).unwrap().latency = Samples::new(128);
     let lat = lat.validate().expect("still acyclic");
     assert_eq!(
         latency_plan(lat.get(), SampleRate::SR_48K).total(),
-        Samples(128)
+        Samples::new(128)
     );
 }
 
@@ -431,8 +435,8 @@ fn insertion_order_does_not_change_the_value() {
     backward.nodes.insert(
         B,
         spec("lookahead", 1, 1)
-            .with_latency(Samples(512))
-            .with_tail(Tail::Finite(Samples(64))),
+            .with_latency(Samples::new(512))
+            .with_tail(Tail::Finite(Samples::new(64))),
     );
     backward.nodes.insert(D, spec("dc", 0, 1));
     backward.nodes.insert(A, spec("dc", 0, 1));

@@ -224,7 +224,7 @@ fn chain() -> GraphBuilder {
     let mix = g.add(Forkable(Kind::Sum { inputs: 2 }));
     let lp = g.add(Forkable(Kind::Smooth));
     g.connect(osc, 0, mix, 0)
-        .feedback(lp, 0, mix, 1, Samples(256))
+        .feedback(lp, 0, mix, 1, Samples::new(256))
         .connect(mix, 0, lp, 0)
         .pipe_output(lp);
     g
@@ -673,7 +673,7 @@ fn a_node_fork_holds_exactly_what_feeds_the_node() {
         InPort { node: a, port: 1 },
         vec![Edge::Feedback(FeedbackFrom::new(
             OutPort { node: fb, port: 0 },
-            Samples(64),
+            Samples::new(64),
         ))],
     );
     t.edges.insert(
@@ -789,7 +789,7 @@ fn the_live_graph_is_unaffected_while_a_fork_renders() {
 /// replace (a different width) changes nothing.
 #[test]
 fn a_replace_moves_forking_to_the_new_unit() {
-    let fade = Fade::new(Samples(64), FadeLaw::EqualPower);
+    let fade = Fade::new(Samples::new(64), FadeLaw::EqualPower);
     let key = NodeKey(1);
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(key, "consts", consts(1, 0.5));

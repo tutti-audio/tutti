@@ -22,8 +22,8 @@ fn offline() -> Session {
 /// A map with a step and a ramp: not what a constant tempo can say.
 fn ramped() -> TempoMap {
     TempoMap::builder(Bpm::of(90.0))
-        .ramp_time_to(Beat(4.0), Bpm::of(150.0))
-        .step_to(Beat(8.0), Bpm::of(100.0))
+        .ramp_time_to(Beat::new(4.0), Bpm::of(150.0))
+        .step_to(Beat::new(8.0), Bpm::of(100.0))
         .build()
         .expect("a map")
 }
@@ -102,7 +102,7 @@ fn the_clicks_accent_follows_the_transports_meter() {
         s.transport_handle()
             .meter()
             .to(MeterMap::new([MeterChange::new(
-                Beat(0.0),
+                Beat::new(0.0),
                 TimeSignature::of(3, 4),
             )])),
     )

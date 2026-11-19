@@ -377,7 +377,7 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    const MAX: Samples = Samples(256);
+    const MAX: Samples = Samples::new(256);
     const COPY: Work = Work {
         fixed: 50,
         per_frame: 1,

@@ -15,15 +15,15 @@
 //!
 //! // 4/4 for two bars, then 7/8.
 //! let map = MeterMap::new([
-//!     MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-//!     MeterChange::new(Beat(8.0), TimeSignature::of(7, 8)),
+//!     MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+//!     MeterChange::new(Beat::new(8.0), TimeSignature::of(7, 8)),
 //! ]);
 //!
-//! let pos = map.bar_at(Beat(9.0));
-//! assert_eq!(pos.bar, BarNumber(3));
+//! let pos = map.bar_at(Beat::new(9.0));
+//! assert_eq!(pos.bar, BarNumber::new(3));
 //! assert_eq!(pos.beat, BeatsPerBar::of(3)); // third eighth note of the bar
-//! assert_eq!(map.at(Beat(9.0)).bar_length(), BeatDuration(3.5));
-//! assert_eq!(map.bar_start(BarNumber(4)), Beat(11.5));
+//! assert_eq!(map.at(Beat::new(9.0)).bar_length(), BeatDuration::new(3.5));
+//! assert_eq!(map.bar_start(BarNumber::new(4)), Beat::new(11.5));
 //! ```
 //!
 //! # Value vs query
@@ -364,7 +364,9 @@ impl TimeSignature {
     #[inline]
     #[must_use]
     pub fn bar_length(self) -> BeatDuration {
-        BeatDuration(f64::from(self.beats_per_bar.get()) * 4.0 / f64::from(self.note_value.get()))
+        BeatDuration::new(
+            f64::from(self.beats_per_bar.get()) * 4.0 / f64::from(self.note_value.get()),
+        )
     }
 
     /// Returns one *notated* beat's length in quarter-note beats — 0.5 in 7/8.
@@ -374,7 +376,7 @@ impl TimeSignature {
     #[inline]
     #[must_use]
     pub fn beat_length(self) -> BeatDuration {
-        BeatDuration(4.0 / f64::from(self.note_value.get()))
+        BeatDuration::new(4.0 / f64::from(self.note_value.get()))
     }
 }
 
@@ -468,11 +470,11 @@ fn floor_div_rem(value: BeatDuration, unit: BeatDuration) -> (i64, BeatDuration)
     // position belongs to the unit below the boundary, at its last
     // representable offset.
     if rem >= unit {
-        (quotient as i64, BeatDuration(unit.get().next_down()))
-    } else if rem < BeatDuration(0.0) {
+        (quotient as i64, BeatDuration::new(unit.get().next_down()))
+    } else if rem < BeatDuration::new(0.0) {
         (
             (quotient - 1.0) as i64,
-            BeatDuration(unit.get().next_down()),
+            BeatDuration::new(unit.get().next_down()),
         )
     } else {
         (quotient as i64, rem)
@@ -513,7 +515,7 @@ fn bar_position_within(
     let bar_start = start_of(bars);
     // In `[0, bar_length)`: `bar_start <= beat < start_of(bars + 1)`, and a
     // difference that rounds up to the bar length is the bar's last offset.
-    let into_bar = (beat - bar_start).min(BeatDuration(bar_length.get().next_down()));
+    let into_bar = (beat - bar_start).min(BeatDuration::new(bar_length.get().next_down()));
 
     let (beat_index, fraction) = floor_div_rem(into_bar, signature.beat_length());
     // No clamp here. `into_bar` is in `[0, bar_length)` (above), and
@@ -529,7 +531,7 @@ fn bar_position_within(
     );
 
     BarPosition {
-        bar: origin_bar + BarCount(bars),
+        bar: origin_bar + BarCount::new(bars),
         beat: BeatsPerBar::clamped(beat_index as u32 + 1),
         bar_start,
         fraction,
@@ -547,12 +549,12 @@ impl Meter for TimeSignature {
 
     #[inline]
     fn bar_at(&self, beat: Beat) -> BarPosition {
-        bar_position_within(beat, Beat(0.0), BarNumber::FIRST, *self, None)
+        bar_position_within(beat, Beat::new(0.0), BarNumber::FIRST, *self, None)
     }
 
     #[inline]
     fn bar_start(&self, bar: BarNumber) -> Beat {
-        Beat(0.0) + self.bar_length() * bar.index() as f64
+        Beat::new(0.0) + self.bar_length() * bar.index() as f64
     }
 }
 
@@ -681,7 +683,10 @@ impl MeterMap {
         // without one.
         match changes.first() {
             Some(first) if first.beat.get() <= 0.0 => {}
-            _ => changes.insert(0, MeterChange::new(Beat(0.0), TimeSignature::default())),
+            _ => changes.insert(
+                0,
+                MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            ),
         }
 
         let starts = Self::bar_starts(&changes);
@@ -708,7 +713,7 @@ impl MeterMap {
             let span = pair[1].beat - pair[0].beat;
             let exact = span / pair[0].signature.bar_length();
             let bars = libm::ceil(exact - BAR_COUNT_EPSILON) as i64;
-            bar += BarCount(bars.max(1));
+            bar += BarCount::new(bars.max(1));
             starts.push(bar);
         }
         starts
@@ -751,7 +756,7 @@ impl MeterMap {
         if position.is_downbeat() {
             position.bar_start
         } else {
-            self.bar_start(position.bar + BarCount(1))
+            self.bar_start(position.bar + BarCount::new(1))
         }
     }
 
@@ -789,7 +794,7 @@ impl Default for MeterMap {
     /// Constant 4/4 — one change at beat 0.
     fn default() -> Self {
         Self {
-            changes: vec![MeterChange::new(Beat(0.0), TimeSignature::default())],
+            changes: vec![MeterChange::new(Beat::new(0.0), TimeSignature::default())],
             starts: vec![BarNumber::FIRST],
         }
     }
@@ -839,22 +844,22 @@ mod tests {
     fn a_position_just_before_a_bar_line_stays_in_the_bar_before() {
         let sig = TimeSignature::default();
         for tiny in [1e-20, 1e-17, 1e-16] {
-            let p = sig.bar_at(Beat(-tiny));
-            assert_eq!(p.bar, BarNumber(0), "{tiny:e}");
+            let p = sig.bar_at(Beat::new(-tiny));
+            assert_eq!(p.bar, BarNumber::new(0), "{tiny:e}");
             assert_eq!(p.beat, BeatsPerBar::of(4), "{tiny:e}");
             assert!(
-                p.fraction >= BeatDuration(0.0) && p.fraction < sig.beat_length(),
+                p.fraction >= BeatDuration::new(0.0) && p.fraction < sig.beat_length(),
                 "{tiny:e}: {:?}",
                 p.fraction
             );
         }
         // The same just before a later bar line, and in a compound meter.
-        let p = seven_eight().bar_at(Beat(3.5 - 1e-15));
-        assert_eq!((p.bar, p.beat), (BarNumber(1), BeatsPerBar::of(7)));
+        let p = seven_eight().bar_at(Beat::new(3.5 - 1e-15));
+        assert_eq!((p.bar, p.beat), (BarNumber::new(1), BeatsPerBar::of(7)));
         assert!(p.fraction < seven_eight().beat_length());
         // A position a hair under a beat line (a quotient that rounds up).
-        let p = sig.bar_at(Beat(3.0 - 1e-16));
-        assert!(p.fraction >= BeatDuration(0.0) && p.fraction < BeatDuration(1.0));
+        let p = sig.bar_at(Beat::new(3.0 - 1e-16));
+        assert!(p.fraction >= BeatDuration::new(0.0) && p.fraction < BeatDuration::new(1.0));
     }
 
     /// The `rem < 0` arm is reached by `-5e-324`: `v / 4` underflows to
@@ -862,10 +867,10 @@ mod tests {
     #[test]
     fn the_smallest_negative_position_is_the_last_instant_of_the_bar_before() {
         let sig = TimeSignature::default();
-        let p = sig.bar_at(Beat(-5e-324));
-        assert_eq!(p.bar, BarNumber(0));
+        let p = sig.bar_at(Beat::new(-5e-324));
+        assert_eq!(p.bar, BarNumber::new(0));
         assert_eq!(p.beat, BeatsPerBar::of(4));
-        assert!(p.fraction >= BeatDuration(0.0) && p.fraction < sig.beat_length());
+        assert!(p.fraction >= BeatDuration::new(0.0) && p.fraction < sig.beat_length());
     }
 
     /// `MAX_BEATS_PER_BAR` is 64, the figure the wire form and `clamped` share.
@@ -879,18 +884,24 @@ mod tests {
 
     #[test]
     fn bar_length_handles_compound_meter() {
-        assert_eq!(TimeSignature::default().bar_length(), BeatDuration(4.0));
-        assert_eq!(seven_eight().bar_length(), BeatDuration(3.5));
+        assert_eq!(
+            TimeSignature::default().bar_length(),
+            BeatDuration::new(4.0)
+        );
+        assert_eq!(seven_eight().bar_length(), BeatDuration::new(3.5));
         assert_eq!(
             TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER).bar_length(),
-            BeatDuration(3.0)
+            BeatDuration::new(3.0)
         );
     }
 
     #[test]
     fn beat_length_is_the_notated_beat() {
-        assert_eq!(TimeSignature::default().beat_length(), BeatDuration(1.0));
-        assert_eq!(seven_eight().beat_length(), BeatDuration(0.5));
+        assert_eq!(
+            TimeSignature::default().beat_length(),
+            BeatDuration::new(1.0)
+        );
+        assert_eq!(seven_eight().beat_length(), BeatDuration::new(0.5));
     }
 
     /// `BeatsPerBar::clamped` saturates; `new` refuses the same raws.
@@ -930,8 +941,8 @@ mod tests {
         // assertion hold for a reason unrelated to its name.
         let seven_eight = TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH);
         let eight_eighths = TimeSignature::new(BeatsPerBar::of(8), NoteValue::EIGHTH);
-        assert_eq!(seven_eight.bar_length(), BeatDuration(3.5));
-        assert_eq!(eight_eighths.bar_length(), BeatDuration(4.0));
+        assert_eq!(seven_eight.bar_length(), BeatDuration::new(3.5));
+        assert_eq!(eight_eighths.bar_length(), BeatDuration::new(4.0));
         assert_ne!(seven_eight.bar_length(), eight_eighths.bar_length());
     }
 
@@ -962,18 +973,18 @@ mod tests {
     #[test]
     fn constant_meter_counts_bars_from_one() {
         let m = TimeSignature::default();
-        let at = |b: f64| m.bar_at(Beat(b));
+        let at = |b: f64| m.bar_at(Beat::new(b));
 
-        assert_eq!(at(0.0).bar, BarNumber(1));
+        assert_eq!(at(0.0).bar, BarNumber::new(1));
         assert_eq!(at(0.0).beat, BeatsPerBar::of(1));
         assert!(at(0.0).is_downbeat());
 
-        assert_eq!(at(2.5).bar, BarNumber(1));
+        assert_eq!(at(2.5).bar, BarNumber::new(1));
         assert_eq!(at(2.5).beat, BeatsPerBar::of(3));
-        assert_eq!(at(2.5).fraction, BeatDuration(0.5));
+        assert_eq!(at(2.5).fraction, BeatDuration::new(0.5));
         assert!(!at(2.5).is_downbeat());
 
-        assert_eq!(at(4.0).bar, BarNumber(2));
+        assert_eq!(at(4.0).bar, BarNumber::new(2));
         assert_eq!(at(4.0).beat, BeatsPerBar::of(1));
         assert!(at(4.0).is_downbeat());
     }
@@ -982,12 +993,12 @@ mod tests {
     fn constant_meter_handles_compound_bars() {
         // A 7/8 bar is 3.5 quarter notes, and the notated beat is an eighth.
         let m = seven_eight();
-        assert_eq!(m.bar_at(Beat(0.0)).bar, BarNumber(1));
-        assert_eq!(m.bar_at(Beat(3.0)).bar, BarNumber(1));
-        assert_eq!(m.bar_at(Beat(3.0)).beat, BeatsPerBar::of(7));
+        assert_eq!(m.bar_at(Beat::new(0.0)).bar, BarNumber::new(1));
+        assert_eq!(m.bar_at(Beat::new(3.0)).bar, BarNumber::new(1));
+        assert_eq!(m.bar_at(Beat::new(3.0)).beat, BeatsPerBar::of(7));
         // The second bar starts at 3.5 quarters, not at 7.
-        assert_eq!(m.bar_at(Beat(3.5)).bar, BarNumber(2));
-        assert!(m.bar_at(Beat(3.5)).is_downbeat());
+        assert_eq!(m.bar_at(Beat::new(3.5)).bar, BarNumber::new(2));
+        assert!(m.bar_at(Beat::new(3.5)).is_downbeat());
     }
 
     #[test]
@@ -995,19 +1006,19 @@ mod tests {
         // Pre-roll: one quarter note before the start of bar 1 is the last beat
         // of bar 0 — NOT bar 0 beat -1, which is what truncating division gives.
         let m = TimeSignature::default();
-        assert_eq!(m.bar_at(Beat(-1.0)).bar, BarNumber(0));
-        assert_eq!(m.bar_at(Beat(-1.0)).beat, BeatsPerBar::of(4));
-        assert_eq!(m.bar_at(Beat(-4.0)).bar, BarNumber(0));
-        assert_eq!(m.bar_at(Beat(-4.0)).beat, BeatsPerBar::of(1));
-        assert!(m.bar_at(Beat(-4.0)).is_downbeat());
-        assert_eq!(m.bar_at(Beat(-5.0)).bar, BarNumber(-1));
+        assert_eq!(m.bar_at(Beat::new(-1.0)).bar, BarNumber::new(0));
+        assert_eq!(m.bar_at(Beat::new(-1.0)).beat, BeatsPerBar::of(4));
+        assert_eq!(m.bar_at(Beat::new(-4.0)).bar, BarNumber::new(0));
+        assert_eq!(m.bar_at(Beat::new(-4.0)).beat, BeatsPerBar::of(1));
+        assert!(m.bar_at(Beat::new(-4.0)).is_downbeat());
+        assert_eq!(m.bar_at(Beat::new(-5.0)).bar, BarNumber::new(-1));
     }
 
     #[test]
     fn bar_start_inverts_bar_at() {
         let m = seven_eight();
         for bar in [-2i64, 0, 1, 2, 7, 40] {
-            let bar = BarNumber(bar);
+            let bar = BarNumber::new(bar);
             let start = m.bar_start(bar);
             let round_trip = m.bar_at(start);
             assert_eq!(round_trip.bar, bar, "bar_start/bar_at disagree at {bar}");
@@ -1032,11 +1043,11 @@ mod tests {
         for origin in [0.1, 0.3, 1.0 / 3.0, 4.1, 64.1, 1000.7] {
             for second in signatures {
                 let map = MeterMap::new([
-                    MeterChange::new(Beat(0.0), TimeSignature::default()),
-                    MeterChange::new(Beat(origin), second),
+                    MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+                    MeterChange::new(Beat::new(origin), second),
                 ]);
                 for bar in 1..=400 {
-                    let bar = BarNumber(bar);
+                    let bar = BarNumber::new(bar);
                     let start = map.bar_start(bar);
                     let at = map.bar_at(start);
                     assert_eq!(at.bar, bar, "{second} @ {origin}: bar {bar} at {start:?}");
@@ -1060,12 +1071,12 @@ mod tests {
                     let rounded_start = first + signature.bar_length().get() * bars as f64;
                     let second = rounded_start.next_up();
                     let map = MeterMap::new([
-                        MeterChange::new(Beat(0.0), TimeSignature::default()),
-                        MeterChange::new(Beat(first), signature),
-                        MeterChange::new(Beat(second), TimeSignature::default()),
+                        MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+                        MeterChange::new(Beat::new(first), signature),
+                        MeterChange::new(Beat::new(second), TimeSignature::default()),
                     ]);
-                    let at_change = map.bar_at(Beat(second));
-                    let under = map.bar_at(Beat(rounded_start));
+                    let at_change = map.bar_at(Beat::new(second));
+                    let under = map.bar_at(Beat::new(rounded_start));
                     assert!(
                         under.bar < at_change.bar,
                         "{signature} @ {first}, {bars} bars: {rounded_start} is bar {} and the change bar {}",
@@ -1083,29 +1094,31 @@ mod tests {
     #[test]
     fn bars_after_a_change_at_beat_0_1_start_where_bar_start_says() {
         let four_four = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::default()),
-            MeterChange::new(Beat(0.1), TimeSignature::default()),
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(0.1), TimeSignature::default()),
         ]);
         assert_eq!(
-            four_four.bar_at(four_four.bar_start(BarNumber(3))).bar,
-            BarNumber(3)
+            four_four.bar_at(four_four.bar_start(BarNumber::new(3))).bar,
+            BarNumber::new(3)
         );
         assert_eq!(
-            four_four.bar_at(four_four.bar_start(BarNumber(18))).bar,
-            BarNumber(18)
+            four_four
+                .bar_at(four_four.bar_start(BarNumber::new(18)))
+                .bar,
+            BarNumber::new(18)
         );
         let sixty_fourth = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
             MeterChange::new(
-                Beat(0.1),
+                Beat::new(0.1),
                 TimeSignature::new(BeatsPerBar::of(1), NoteValue::of(64)),
             ),
         ]);
         assert_eq!(
             sixty_fourth
-                .bar_at(sixty_fourth.bar_start(BarNumber(5)))
+                .bar_at(sixty_fourth.bar_start(BarNumber::new(5)))
                 .bar,
-            BarNumber(5)
+            BarNumber::new(5)
         );
     }
 
@@ -1113,23 +1126,26 @@ mod tests {
     fn map_defaults_to_constant_four_four() {
         let map = MeterMap::default();
         assert_eq!(map.changes().len(), 1);
-        assert_eq!(map.at(Beat(1000.0)), TimeSignature::default());
+        assert_eq!(map.at(Beat::new(1000.0)), TimeSignature::default());
         // A default map must agree with the bare signature everywhere.
         let plain = TimeSignature::default();
         for b in [-3.5, 0.0, 1.0, 4.0, 17.25] {
-            assert_eq!(map.bar_at(Beat(b)), plain.bar_at(Beat(b)));
-            assert_eq!(map.at(Beat(b)), plain.at(Beat(b)));
+            assert_eq!(map.bar_at(Beat::new(b)), plain.bar_at(Beat::new(b)));
+            assert_eq!(map.at(Beat::new(b)), plain.at(Beat::new(b)));
         }
     }
 
     #[test]
     fn map_with_one_change_matches_the_bare_signature() {
         // The single-entry map the `SetTimeSignature` sugar builds.
-        let map = MeterMap::new([MeterChange::new(Beat(0.0), seven_eight())]);
+        let map = MeterMap::new([MeterChange::new(Beat::new(0.0), seven_eight())]);
         let plain = seven_eight();
         for b in [0.0, 1.75, 3.5, 10.0] {
-            assert_eq!(map.bar_at(Beat(b)), plain.bar_at(Beat(b)));
-            assert_eq!(map.bar_start(BarNumber(3)), plain.bar_start(BarNumber(3)));
+            assert_eq!(map.bar_at(Beat::new(b)), plain.bar_at(Beat::new(b)));
+            assert_eq!(
+                map.bar_start(BarNumber::new(3)),
+                plain.bar_start(BarNumber::new(3))
+            );
         }
     }
 
@@ -1137,38 +1153,38 @@ mod tests {
     fn map_numbers_bars_continuously_across_a_change() {
         // 4/4 for 2 bars (8 quarters), then 3/4.
         let map = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
             MeterChange::new(
-                Beat(8.0),
+                Beat::new(8.0),
                 TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER),
             ),
         ]);
 
-        assert_eq!(map.bar_at(Beat(0.0)).bar, BarNumber(1));
-        assert_eq!(map.bar_at(Beat(4.0)).bar, BarNumber(2));
+        assert_eq!(map.bar_at(Beat::new(0.0)).bar, BarNumber::new(1));
+        assert_eq!(map.bar_at(Beat::new(4.0)).bar, BarNumber::new(2));
         // The change lands exactly on bar 3's downbeat; numbering must not skip
         // or repeat.
-        assert_eq!(map.bar_at(Beat(8.0)).bar, BarNumber(3));
-        assert!(map.bar_at(Beat(8.0)).is_downbeat());
-        assert_eq!(map.at(Beat(8.0)).bar_length(), BeatDuration(3.0));
+        assert_eq!(map.bar_at(Beat::new(8.0)).bar, BarNumber::new(3));
+        assert!(map.bar_at(Beat::new(8.0)).is_downbeat());
+        assert_eq!(map.at(Beat::new(8.0)).bar_length(), BeatDuration::new(3.0));
         // Then 3-quarter bars.
-        assert_eq!(map.bar_at(Beat(11.0)).bar, BarNumber(4));
-        assert_eq!(map.bar_at(Beat(14.0)).bar, BarNumber(5));
+        assert_eq!(map.bar_at(Beat::new(11.0)).bar, BarNumber::new(4));
+        assert_eq!(map.bar_at(Beat::new(14.0)).bar, BarNumber::new(5));
     }
 
     #[test]
     fn map_bar_start_inverts_bar_at_across_changes() {
         let map = MeterMap::new([
-            MeterChange::new(Beat(0.0), seven_eight()),
-            MeterChange::new(Beat(14.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(0.0), seven_eight()),
+            MeterChange::new(Beat::new(14.0), TimeSignature::default()),
             MeterChange::new(
-                Beat(30.0),
+                Beat::new(30.0),
                 TimeSignature::new(BeatsPerBar::of(5), NoteValue::EIGHTH),
             ),
         ]);
 
         for bar in 1..=20i64 {
-            let bar = BarNumber(bar);
+            let bar = BarNumber::new(bar);
             let start = map.bar_start(bar);
             let back = map.bar_at(start);
             assert_eq!(
@@ -1183,26 +1199,26 @@ mod tests {
     fn map_normalizes_unsorted_and_origin_free_input() {
         // Out of order, and with nothing at the origin.
         let map = MeterMap::new([
-            MeterChange::new(Beat(16.0), seven_eight()),
-            MeterChange::new(Beat(4.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(16.0), seven_eight()),
+            MeterChange::new(Beat::new(4.0), TimeSignature::default()),
         ]);
 
         let beats: Vec<f64> = map.changes().iter().map(|c| c.beat.get()).collect();
         assert_eq!(beats, vec![0.0, 4.0, 16.0], "must sort and seed the origin");
         // The synthesized origin entry is the default meter.
-        assert_eq!(map.at(Beat(0.0)), TimeSignature::default());
+        assert_eq!(map.at(Beat::new(0.0)), TimeSignature::default());
         // Positions before the first supplied change still resolve.
-        assert_eq!(map.at(Beat(-100.0)), TimeSignature::default());
+        assert_eq!(map.at(Beat::new(-100.0)), TimeSignature::default());
     }
 
     #[test]
     fn map_dedupes_to_the_last_change_at_a_beat() {
         let map = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::default()),
-            MeterChange::new(Beat(0.0), seven_eight()),
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(0.0), seven_eight()),
         ]);
         assert_eq!(map.changes().len(), 1);
-        assert_eq!(map.at(Beat(0.0)), seven_eight());
+        assert_eq!(map.at(Beat::new(0.0)), seven_eight());
     }
 
     #[test]
@@ -1216,30 +1232,30 @@ mod tests {
         // there passes over the bug every other offset exposes.
         for offset in [0.5, 1.0, 2.0, 3.0, 3.5] {
             let map = MeterMap::new([
-                MeterChange::new(Beat(0.0), TimeSignature::default()),
+                MeterChange::new(Beat::new(0.0), TimeSignature::default()),
                 MeterChange::new(
-                    Beat(offset),
+                    Beat::new(offset),
                     TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER),
                 ),
             ]);
             assert_eq!(
-                map.bar_at(Beat(0.0)).bar,
-                BarNumber(1),
+                map.bar_at(Beat::new(0.0)).bar,
+                BarNumber::new(1),
                 "origin must be bar 1 (change at {offset})"
             );
             assert_eq!(
-                map.bar_at(Beat(offset)).bar,
-                BarNumber(2),
+                map.bar_at(Beat::new(offset)).bar,
+                BarNumber::new(2),
                 "the change must begin a new bar (change at {offset})"
             );
-            assert!(map.bar_at(Beat(offset)).is_downbeat());
+            assert!(map.bar_at(Beat::new(offset)).is_downbeat());
             // Bar 1 has exactly one downbeat: the origin, not the change.
-            assert_eq!(map.bar_start(BarNumber(1)), Beat(0.0));
-            assert_eq!(map.bar_start(BarNumber(2)), Beat(offset));
+            assert_eq!(map.bar_start(BarNumber::new(1)), Beat::new(0.0));
+            assert_eq!(map.bar_start(BarNumber::new(2)), Beat::new(offset));
             // And the following 3/4 bar lands one bar-length later.
             assert_eq!(
-                map.bar_at(Beat(offset + 3.0)).bar,
-                BarNumber(3),
+                map.bar_at(Beat::new(offset + 3.0)).bar,
+                BarNumber::new(3),
                 "3/4 bar after the change (change at {offset})"
             );
         }
@@ -1251,17 +1267,17 @@ mod tests {
     #[test]
     fn map_does_not_over_count_an_exact_segment() {
         let map = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
             // Exactly four 4/4 bars.
             MeterChange::new(
-                Beat(16.0),
+                Beat::new(16.0),
                 TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER),
             ),
         ]);
-        assert_eq!(map.bar_at(Beat(16.0)).bar, BarNumber(5));
-        assert_eq!(map.bar_start(BarNumber(5)), Beat(16.0));
+        assert_eq!(map.bar_at(Beat::new(16.0)).bar, BarNumber::new(5));
+        assert_eq!(map.bar_start(BarNumber::new(5)), Beat::new(16.0));
         // No gap: bar 4 is the last 4/4 bar and starts at 12.
-        assert_eq!(map.bar_start(BarNumber(4)), Beat(12.0));
+        assert_eq!(map.bar_start(BarNumber::new(4)), Beat::new(12.0));
     }
 
     /// Deserialization must route through the validating constructors.
@@ -1293,15 +1309,15 @@ mod tests {
     #[test]
     fn map_drops_non_finite_changes() {
         let map = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::default()),
-            MeterChange::new(Beat(f64::NAN), seven_eight()),
-            MeterChange::new(Beat(f64::INFINITY), seven_eight()),
-            MeterChange::new(Beat(8.0), seven_eight()),
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(f64::NAN), seven_eight()),
+            MeterChange::new(Beat::new(f64::INFINITY), seven_eight()),
+            MeterChange::new(Beat::new(8.0), seven_eight()),
         ]);
         assert_eq!(map.changes().len(), 2, "NaN and inf must be dropped");
         assert!(map.changes().iter().all(|c| c.beat.get().is_finite()));
         assert_eq!(map, map.clone(), "PartialEq must stay reflexive");
-        assert!(map.bar_at(Beat(4.0)).bar_start.get().is_finite());
+        assert!(map.bar_at(Beat::new(4.0)).bar_start.get().is_finite());
     }
 
     #[test]
@@ -1309,35 +1325,35 @@ mod tests {
         // Subtracting two positions gives a displacement; adding a displacement
         // to a position gives a position. `BarNumber + BarNumber` is deliberately
         // absent, exactly as `Beat + Beat` is.
-        assert_eq!(BarNumber(7) - BarNumber(3), BarCount(4));
-        assert_eq!(BarNumber(3) + BarCount(4), BarNumber(7));
-        assert_eq!(BarNumber(7) - BarCount(4), BarNumber(3));
+        assert_eq!(BarNumber::new(7) - BarNumber::new(3), BarCount::new(4));
+        assert_eq!(BarNumber::new(3) + BarCount::new(4), BarNumber::new(7));
+        assert_eq!(BarNumber::new(7) - BarCount::new(4), BarNumber::new(3));
 
         // `BarCount` composes with itself, negates, and scales by a whole number.
-        assert_eq!(BarCount(2) + BarCount(3), BarCount(5));
-        assert_eq!(BarCount(5) - BarCount(3), BarCount(2));
-        assert_eq!(-BarCount(4), BarCount(-4));
-        assert_eq!(BarCount(3) * 4, BarCount(12));
-        assert_eq!(4 * BarCount(3), BarCount(12));
+        assert_eq!(BarCount::new(2) + BarCount::new(3), BarCount::new(5));
+        assert_eq!(BarCount::new(5) - BarCount::new(3), BarCount::new(2));
+        assert_eq!(-BarCount::new(4), BarCount::new(-4));
+        assert_eq!(BarCount::new(3) * 4, BarCount::new(12));
+        assert_eq!(4 * BarCount::new(3), BarCount::new(12));
 
-        let mut c = BarCount(2);
-        c += BarCount(3);
-        assert_eq!(c, BarCount(5));
-        c -= BarCount(1);
-        assert_eq!(c, BarCount(4));
+        let mut c = BarCount::new(2);
+        c += BarCount::new(3);
+        assert_eq!(c, BarCount::new(5));
+        c -= BarCount::new(1);
+        assert_eq!(c, BarCount::new(4));
 
         // The constructors every other unit newtype in this crate also has.
         assert_eq!(BarNumber::new(3).get(), 3);
         assert_eq!(BarCount::new(3).get(), 3);
-        assert_eq!(BarNumber(2).to_string(), "2");
-        assert_eq!(BarCount(2).to_string(), "2");
+        assert_eq!(BarNumber::new(2).to_string(), "2");
+        assert_eq!(BarCount::new(2).to_string(), "2");
 
         let mut b = BarNumber::FIRST;
-        b -= BarCount(1);
-        assert_eq!(b, BarNumber(0), "pre-roll bars are legal");
-        b += BarCount(1);
-        b += BarCount(3);
-        assert_eq!(b, BarNumber(4));
+        b -= BarCount::new(1);
+        assert_eq!(b, BarNumber::new(0), "pre-roll bars are legal");
+        b += BarCount::new(1);
+        b += BarCount::new(3);
+        assert_eq!(b, BarNumber::new(4));
 
         // The 1-based/0-based conversion lives in one place.
         assert_eq!(BarNumber::FIRST.index(), 0);
@@ -1360,7 +1376,7 @@ mod tests {
         // And the widths the three plugin ABIs actually want.
         assert_eq!(u16::from(BeatsPerBar::of(7)), 7u16);
         assert_eq!(i32::from(NoteValue::EIGHTH), 8i32);
-        assert_eq!(i32::from(BarNumber(3)), 3i32);
+        assert_eq!(i32::from(BarNumber::new(3)), 3i32);
     }
 
     #[test]
@@ -1377,10 +1393,10 @@ mod tests {
     #[test]
     fn map_round_trips_and_rederives_its_cache() {
         let map = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::default()),
-            MeterChange::new(Beat(8.0), seven_eight()),
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(8.0), seven_eight()),
             MeterChange::new(
-                Beat(22.0),
+                Beat::new(22.0),
                 TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER),
             ),
         ]);
@@ -1393,7 +1409,10 @@ mod tests {
             "the derived cache must come back identical"
         );
         // And it answers lookups the same, which is what the cache is for.
-        assert_eq!(back.bar_at(Beat(22.0)).bar, map.bar_at(Beat(22.0)).bar);
+        assert_eq!(
+            back.bar_at(Beat::new(22.0)).bar,
+            map.bar_at(Beat::new(22.0)).bar
+        );
     }
 
     /// The wire form is the change list *and nothing else*.
@@ -1412,8 +1431,8 @@ mod tests {
     #[test]
     fn the_derived_cache_is_not_on_the_wire() {
         let changes = [
-            MeterChange::new(Beat(0.0), TimeSignature::default()),
-            MeterChange::new(Beat(8.0), seven_eight()),
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(8.0), seven_eight()),
         ];
         let json = serde_json::to_string(&MeterMap::new(changes)).unwrap();
 
@@ -1456,7 +1475,7 @@ mod tests {
         // Duplicate at beat 8 resolved last-wins, per `new`'s documented rule.
         assert_eq!(map.changes()[1].signature.beats_per_bar().get(), 5);
         // The origin change the file omitted is in force before the first entry.
-        assert_eq!(map.at(Beat(0.0)), TimeSignature::default());
+        assert_eq!(map.at(Beat::new(0.0)), TimeSignature::default());
         // And the cache matches the repaired list, not the file's ordering.
         assert_eq!(map.bar_numbers().len(), map.changes().len());
     }
@@ -1477,7 +1496,7 @@ mod tests {
             r#"[{"beat": 0.0, "signature": {"beats_per_bar": 7, "note_value": 8}}]"#,
         )
         .unwrap();
-        let sig = map.at(Beat(0.0));
+        let sig = map.at(Beat::new(0.0));
         assert_eq!(sig, seven_eight());
         assert!(
             sig.bar_length().get().is_finite(),
@@ -1493,25 +1512,25 @@ mod tests {
     fn next_bar_line_agrees_with_bar_at_and_bar_start_after_a_change_at_seven_thirds() {
         let at = 7.0 / 3.0;
         let map = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-            MeterChange::new(Beat(at), TimeSignature::of(3, 4)),
+            MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+            MeterChange::new(Beat::new(at), TimeSignature::of(3, 4)),
         ]);
-        assert_eq!(map.next_bar_line(Beat(0.0)), Beat(0.0));
-        assert_eq!(map.next_bar_line(Beat(0.5)), Beat(at));
+        assert_eq!(map.next_bar_line(Beat::new(0.0)), Beat::new(0.0));
+        assert_eq!(map.next_bar_line(Beat::new(0.5)), Beat::new(at));
         assert_eq!(
-            map.next_bar_line(Beat(at)),
-            Beat(at),
+            map.next_bar_line(Beat::new(at)),
+            Beat::new(at),
             "the change's own bar"
         );
         for k in 0..200u32 {
-            let line = Beat(at + 3.0 * f64::from(k));
-            assert_eq!(map.bar_start(BarNumber(2 + i64::from(k))), line);
+            let line = Beat::new(at + 3.0 * f64::from(k));
+            assert_eq!(map.bar_start(BarNumber::new(2 + i64::from(k))), line);
             assert_eq!(map.next_bar_line(line), line, "bar line {k}");
-            let mid = Beat(line.get() + 1.5);
-            let next = Beat(at + 3.0 * f64::from(k + 1));
+            let mid = Beat::new(line.get() + 1.5);
+            let next = Beat::new(at + 3.0 * f64::from(k + 1));
             assert_eq!(map.next_bar_line(mid), next, "mid-bar {k}");
             let position = map.bar_at(mid);
-            assert_eq!(map.bar_start(position.bar + BarCount(1)), next);
+            assert_eq!(map.bar_start(position.bar + BarCount::new(1)), next);
         }
     }
 
@@ -1519,14 +1538,14 @@ mod tests {
     #[test]
     fn next_bar_line_is_at_or_after_the_beat() {
         let m = MeterMap::default();
-        assert_eq!(m.next_bar_line(Beat(1.3)), Beat(4.0));
-        assert_eq!(m.next_bar_line(Beat(4.0)), Beat(4.0));
-        assert_eq!(m.next_bar_line(Beat(7.99)), Beat(8.0));
+        assert_eq!(m.next_bar_line(Beat::new(1.3)), Beat::new(4.0));
+        assert_eq!(m.next_bar_line(Beat::new(4.0)), Beat::new(4.0));
+        assert_eq!(m.next_bar_line(Beat::new(7.99)), Beat::new(8.0));
         let three_four = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-            MeterChange::new(Beat(4.0), TimeSignature::of(3, 4)),
+            MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+            MeterChange::new(Beat::new(4.0), TimeSignature::of(3, 4)),
         ]);
-        assert_eq!(three_four.next_bar_line(Beat(5.0)), Beat(7.0));
+        assert_eq!(three_four.next_bar_line(Beat::new(5.0)), Beat::new(7.0));
     }
 
     /// A change keeps the meter before its bar line, drops what came after,
@@ -1534,27 +1553,27 @@ mod tests {
     #[test]
     fn with_change_at_truncates_and_a_repeat_is_nothing() {
         let project = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-            MeterChange::new(Beat(16.0), TimeSignature::of(5, 4)),
+            MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+            MeterChange::new(Beat::new(16.0), TimeSignature::of(5, 4)),
         ]);
         let new = project
-            .with_change_at(Beat(8.0), TimeSignature::of(3, 4))
+            .with_change_at(Beat::new(8.0), TimeSignature::of(3, 4))
             .unwrap();
         assert_eq!(
             new.changes(),
             [
-                MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-                MeterChange::new(Beat(8.0), TimeSignature::of(3, 4)),
+                MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+                MeterChange::new(Beat::new(8.0), TimeSignature::of(3, 4)),
             ]
         );
         assert!(
             MeterMap::default()
-                .with_change_at(Beat(8.0), TimeSignature::of(4, 4))
+                .with_change_at(Beat::new(8.0), TimeSignature::of(4, 4))
                 .is_none()
         );
         assert!(
             project
-                .with_change_at(Beat(8.0), TimeSignature::of(4, 4))
+                .with_change_at(Beat::new(8.0), TimeSignature::of(4, 4))
                 .is_some(),
             "the change after it is dropped"
         );
@@ -1565,14 +1584,14 @@ mod tests {
     #[test]
     fn with_change_at_a_change_beat_replaces_it() {
         let project = MeterMap::new([
-            MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-            MeterChange::new(Beat(4.0), TimeSignature::of(3, 4)),
+            MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+            MeterChange::new(Beat::new(4.0), TimeSignature::of(3, 4)),
         ]);
         let new = project
-            .with_change_at(Beat(4.0), TimeSignature::of(5, 4))
+            .with_change_at(Beat::new(4.0), TimeSignature::of(5, 4))
             .unwrap();
-        assert_eq!(new.at(Beat(4.0)), TimeSignature::of(5, 4));
-        assert_eq!(new.bar_start(BarNumber(2)), Beat(4.0));
-        assert_eq!(new.bar_start(BarNumber(3)), Beat(9.0));
+        assert_eq!(new.at(Beat::new(4.0)), TimeSignature::of(5, 4));
+        assert_eq!(new.bar_start(BarNumber::new(2)), Beat::new(4.0));
+        assert_eq!(new.bar_start(BarNumber::new(3)), Beat::new(9.0));
     }
 }

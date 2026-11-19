@@ -108,7 +108,7 @@ struct Lag {
 impl Node for Lag {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples(self.latency)))
+            .with_latency(Latency::new(Samples::new(self.latency)))
             .with_tail(Tail::Unknown)
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -181,7 +181,7 @@ fn spec_of(ph: &Phase, emitters: &[(u32, u64)]) -> (GraphSpec, Shapes) {
             g.connect_events(
                 at,
                 if fb {
-                    EventEdge::feedback(from, Samples(MAX + 5))
+                    EventEdge::feedback(from, Samples::new(MAX + 5))
                 } else {
                     EventEdge::Direct(from)
                 },
@@ -669,7 +669,7 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
                         node: clock,
                         port: 0,
                     },
-                    Samples(DELAY),
+                    Samples::new(DELAY),
                 ))],
             );
             t.set_outputs(vec![Source::Node(OutPort { node: tap, port: 0 })]);
@@ -681,7 +681,7 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
                         node: clock,
                         port: 0,
                     },
-                    Samples(DELAY),
+                    Samples::new(DELAY),
                 ),
             );
             let valid = g.validate().unwrap();
@@ -757,7 +757,7 @@ fn a_feedback_delay_shorter_than_max_block_is_refused() {
                 node: clock,
                 port: 0,
             },
-            Samples(96),
+            Samples::new(96),
         ))],
     );
     let valid = GraphSpec::new(t).validate().unwrap();
@@ -767,8 +767,8 @@ fn a_feedback_delay_shorter_than_max_block_is_refused() {
         compile(&valid, &shapes, &prepare(128), None).err(),
         Some(tutti_graph::CompileError::FeedbackTooShort {
             edge: tutti_graph::CycleEdge::Audio(InPort { node: tap, port: 0 }),
-            delay: Samples(96),
-            max_block: Samples(128),
+            delay: Samples::new(96),
+            max_block: Samples::new(128),
         })
     );
 }

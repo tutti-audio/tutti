@@ -46,7 +46,7 @@ fn offline(builder: SessionBuilder, device: u16) -> Result<Session, Error> {
     builder
         .sample_rate(RATE)
         .outputs(ChannelLayout::from(device))
-        .max_block(MaxBlock::of(Samples(64)))
+        .max_block(MaxBlock::of(Samples::new(64)))
         .build()
 }
 
@@ -261,8 +261,8 @@ fn an_export_is_placed_from_the_declaration() {
             .master_buffers()
             .channels(ChannelLayout::from(6u16))
             .range(Range::Seconds(
-                tutti_units::Seconds(0.0),
-                tutti_units::Seconds(0.01),
+                tutti_units::Seconds::new(0.0),
+                tutti_units::Seconds::new(0.01),
             ))
             .sample_rate(RATE)
             .clock(ExportClock::frozen())

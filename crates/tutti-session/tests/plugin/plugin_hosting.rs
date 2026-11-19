@@ -13,7 +13,7 @@ use tutti_units::Samples;
 
 fn session() -> Session {
     Session::builder()
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("an offline session builds")
 }
@@ -76,7 +76,7 @@ fn holding() -> (Session, Arc<Mutex<Vec<Task>>>) {
     let held: Arc<Mutex<Vec<Task>>> = Arc::default();
     let spawned = Arc::clone(&held);
     let s = Session::builder()
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .spawn_with(move |job| spawned.lock().unwrap().push(job))
         .build()
         .expect("an offline session builds");

@@ -48,9 +48,9 @@ pub fn write_wave<S: Sample>(wave: &Wave<S>, path: impl AsRef<Path>, format: For
     let mut encoder = Encoder::create_file_planned(&spec, path, wave.len())?;
     let layout = wave.layout();
     let mut rest = wave.planes();
-    let mut chunk = vec![0.0f32; layout.interleaved_len(Samples(WRITE_CHUNK))];
+    let mut chunk = vec![0.0f32; layout.interleaved_len(Samples::new(WRITE_CHUNK))];
     while !rest.is_empty() {
-        let (head, tail) = rest.split_at(rest.frames().min(Samples(WRITE_CHUNK)));
+        let (head, tail) = rest.split_at(rest.frames().min(Samples::new(WRITE_CHUNK)));
         let len = layout.interleaved_len(head.frames());
         let mut out = InterleavedMut::new(&mut chunk[..len], layout)?;
         interleave(head, out.reborrow())?;

@@ -21,7 +21,7 @@ use super::super::value::{PeExtra, PeExtraError};
 use super::exchange::*;
 use super::*;
 use crate::ci::testing::{OURS, PEER};
-use crate::{CiHeader, CiMessage, Decoded, MaxSysexSize, Muid, TimeoutWait};
+use crate::{CiHeader, CiMessage, Decoded, Initiator, MaxSysexSize, Muid, TimeoutWait};
 
 fn from_initiator(message: CiMessage) -> Decoded {
     Decoded::Message(message)

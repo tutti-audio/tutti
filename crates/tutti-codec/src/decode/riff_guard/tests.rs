@@ -117,7 +117,7 @@ fn valid_mono_and_stereo_16_bit_files_pass_and_decode() {
         assert_eq!(cursor.position(), 0);
         let wave = read_wave_bytes::<f32>(bytes).expect("decodes");
         assert_eq!(wave.channels(), usize::from(channels));
-        assert_eq!(wave.len().0, 32 / usize::from(channels));
+        assert_eq!(wave.len().get(), 32 / usize::from(channels));
     }
 }
 

@@ -25,11 +25,12 @@
 //!
 //! The search is O(frames x states): with an even switch probability the best
 //! way into a state is a stay or a switch from the best other state, found
-//! from the two highest scores of the last frame, and the backpointers are one
-//! byte per frame and state. Scores are `f64` and each frame's are shifted so
-//! the best is 0, so a long input costs no precision: unshifted, they grow by
-//! the emission each frame, and a few million frames at a high sharpness would
-//! leave the stay cost under one unit in the last place.
+//! from the two highest scores of the last frame ([`sticky_viterbi`]), and the
+//! backpointers are two bytes per frame and state. Scores are `f64` and each
+//! frame's are shifted so the best is 0, so a long input costs no precision:
+//! unshifted, they grow by the emission each frame, and a few million frames
+//! at a high sharpness would leave the stay cost under one unit in the last
+//! place.
 //!
 //! The scoring is in `f64` and divides by the frame's own norm, so the result
 //! does not depend on the chroma's scale, to the extremes of `f64`.
@@ -62,16 +63,20 @@ use tutti_units::ranged;
 
 use crate::chroma::{CLASSES, Chroma};
 use crate::framing::{Framing, check_frame_count};
-use crate::sequence::median;
 use crate::{Error, Result};
-use tutti_dsp::{FrameCount, FrameIndex, Grid};
+use tutti_dsp::{FrameCount, FrameIndex, Grid, median, sticky_viterbi};
 
-/// The most frames one call smooths, bounding the backpointers (25 bytes a
+/// The most frames one call smooths, bounding the backpointers (50 bytes a
 /// frame).
 const MAX_FRAMES: FrameCount = FrameCount(1 << 19);
 
 /// The states: 12 major roots, 12 minor roots, and "no chord".
 const STATES: usize = 2 * CLASSES + 1;
+/// [`STATES`] as the `u16` [`sticky_viterbi`] counts states in.
+const STATE_COUNT: u16 = {
+    assert!(STATES <= u16::MAX as usize);
+    STATES as u16
+};
 const NO_CHORD: usize = 2 * CLASSES;
 
 /// What the Viterbi scores are held in; wide, because they are summed over
@@ -239,52 +244,25 @@ fn similarities(frame: &[f64]) -> [f64; STATES] {
 }
 
 /// The best state per frame under the emission and transition model.
-fn viterbi(chroma: &Grid<f64>, cfg: &ChordConfig) -> Vec<u8> {
-    let frames = chroma.frames().get();
+fn viterbi(chroma: &Grid<f64>, cfg: &ChordConfig) -> Vec<u16> {
     let stay = libm::log(Score::from(cfg.self_transition.get()));
     let switch = libm::log((1.0 - Score::from(cfg.self_transition.get())) / (STATES - 1) as Score);
-    let emit =
-        |frame: &[f64]| similarities(frame).map(|s| s as Score * Score::from(cfg.sharpness.get()));
-
-    let mut score = emit(chroma.row(FrameIndex::new(0)));
-    let mut back = vec![0u8; frames * STATES];
-    for t in 1..frames {
-        // The two best states, so a state can take the best of the others.
-        let (mut top, mut second) = (0usize, usize::MAX);
-        for s in 1..STATES {
-            if score[s] > score[top] {
-                (top, second) = (s, top);
-            } else if second == usize::MAX || score[s] > score[second] {
-                second = s;
+    sticky_viterbi(
+        STATE_COUNT,
+        chroma.frames().get(),
+        stay,
+        switch,
+        |t, row| {
+            let scores = similarities(chroma.row(FrameIndex::new(t)));
+            for (slot, s) in row.iter_mut().zip(scores) {
+                *slot = s as Score * Score::from(cfg.sharpness.get());
             }
-        }
-        let emission = emit(chroma.row(FrameIndex::new(t)));
-        let mut next = [0.0 as Score; STATES];
-        for s in 0..STATES {
-            let other = if s == top { second } else { top };
-            let (from, via) = if score[s] + stay >= score[other] + switch {
-                (s, score[s] + stay)
-            } else {
-                (other, score[other] + switch)
-            };
-            back[t * STATES + s] = from as u8;
-            next[s] = via + emission[s];
-        }
-        let best = next.iter().copied().fold(Score::MIN, Score::max);
-        score = next.map(|v| v - best);
-    }
-
-    let mut state = (0..STATES).fold(0, |b, s| if score[s] > score[b] { s } else { b });
-    let mut path = vec![0u8; frames];
-    for t in (0..frames).rev() {
-        path[t] = state as u8;
-        state = usize::from(back[t * STATES + state]);
-    }
-    path
+        },
+    )
 }
 
 /// Runs of one chord in `path`, placed on `framing`'s samples.
-fn spans(path: &[u8], framing: Framing) -> Result<Vec<ChordSpan>> {
+fn spans(path: &[u16], framing: Framing) -> Result<Vec<ChordSpan>> {
     let (window, hop) = (framing.window().get() as u128, framing.hop().get() as u128);
     let frames = path.len() as u128;
     let sample = |v: u128| usize::try_from(v).map_err(|_| Error::SpanBeyondSampleCount);

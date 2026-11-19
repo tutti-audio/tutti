@@ -28,7 +28,7 @@ use tutti_units::{SampleRate, Samples, Seconds};
 ///
 /// let mut wave = Wave::<f32>::new(2, SampleRate::SR_48K);
 /// wave.append(Interleaved::new(&[0.5, -0.5, 0.25, -0.25], ChannelLayout::STEREO)?)?;
-/// assert_eq!(wave.len(), Samples(2));
+/// assert_eq!(wave.len(), Samples::new(2));
 /// assert_eq!(wave.channel(1).samples(), &[-0.5, -0.25]);
 /// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
@@ -133,7 +133,7 @@ impl<S: Sample> Wave<S> {
         Self {
             vec: vec![vec![S::SILENCE; length]; channels],
             sample_rate,
-            len: Samples(length),
+            len: Samples::new(length),
             topology,
             placement,
         }
@@ -334,7 +334,7 @@ impl<S: Sample> Wave<S> {
     /// [`zero`](Self::zero) gives.
     #[inline]
     pub fn duration(&self) -> Seconds {
-        Seconds(self.len.get() as f64 / self.sample_rate.get())
+        Seconds::new(self.len.get() as f64 / self.sample_rate.get())
     }
 }
 

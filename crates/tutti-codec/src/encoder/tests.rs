@@ -310,7 +310,7 @@ fn a_planned_length_past_the_limit_is_refused_before_the_file_exists() {
     let spec = spec(format, 2);
     let limit = format.max_frames(spec.layout()).unwrap();
 
-    let err = Encoder::create_file_planned(&spec, &path, Samples(limit as usize + 1))
+    let err = Encoder::create_file_planned(&spec, &path, Samples::new(limit as usize + 1))
         .map(drop)
         .expect_err("one frame past the limit");
     assert!(
@@ -320,7 +320,7 @@ fn a_planned_length_past_the_limit_is_refused_before_the_file_exists() {
     assert_eq!(std::fs::read(&path).unwrap(), b"previous");
     assert_eq!(listing(dir.path()), ["take.wav"], "no temporary was made");
 
-    Encoder::create_file_planned(&spec, &path, Samples(limit as usize))
+    Encoder::create_file_planned(&spec, &path, Samples::new(limit as usize))
         .expect("the limit itself fits");
 }
 

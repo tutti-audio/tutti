@@ -171,7 +171,7 @@ pub enum BounceTail {
 
 impl BounceTail {
     /// The default cap: ten seconds.
-    pub const CAP: Seconds = Seconds(10.0);
+    pub const CAP: Seconds = Seconds::new(10.0);
 }
 
 impl Default for BounceTail {
@@ -266,7 +266,7 @@ impl Master for BufferMaster {
 /// # fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
 /// let done = session.bounce(
 ///     Bounce::project()
-///         .range(Range::Beats(Beat(0.0), Beat(16.0)))
+///         .range(Range::Beats(Beat::new(0.0), Beat::new(16.0)))
 ///         .master("out/master.wav", Format::Wav(Pcm::Int24))
 ///         .stem(drums, "out/drums.wav"),
 /// )?;
@@ -350,7 +350,7 @@ impl<N, F: Float> Bounce<N, NoMaster, F> {
     /// # use tutti_units::Db;
     /// let _ = Bounce::<tutti_graph::NodeKey>::project()
     ///     .master_buffers()
-    ///     .normalize(Normalize::Peak { target: Db(-1.0) });
+    ///     .normalize(Normalize::Peak { target: Db::new(-1.0) });
     /// ```
     pub fn master_buffers(self) -> Bounce<N, BufferMaster, F> {
         self.with_master(BufferMaster)
@@ -846,7 +846,7 @@ impl<M: Master, F: Float> Bounced<M, F> {
     /// # fn go(session: &mut Session, drums: NodeKey) -> Result<(), tutti_session::BounceError> {
     /// let done = session.bounce(
     ///     Bounce::project()
-    ///         .range(tutti_session::Range::Until(tutti_units::Beat(4.0)))
+    ///         .range(tutti_session::Range::Until(tutti_units::Beat::new(4.0)))
     ///         .master_buffers()
     ///         .stem_with(Stem::buffers(drums)),
     /// )?;
@@ -961,7 +961,7 @@ impl tutti_transport::OfflineClock for Stopped {}
 
 impl tutti_transport::Timeline for Stopped {
     fn beat(&self) -> tutti_units::Beat {
-        tutti_units::Beat(0.0)
+        tutti_units::Beat::new(0.0)
     }
     fn tempo_map(&self) -> Arc<TempoMap> {
         Arc::clone(&self.0)
@@ -1340,11 +1340,11 @@ impl Figures {
         let reported = graph.reported_latency();
         let latency = match self.latency {
             BounceLatency::Graph => reported,
-            BounceLatency::Keep => Samples(0),
+            BounceLatency::Keep => Samples::new(0),
             BounceLatency::Frames(n) => n,
         };
         let tail = match self.tail {
-            BounceTail::None => Samples(0),
+            BounceTail::None => Samples::new(0),
             BounceTail::Frames(n) => n,
             // `resolve`, not `samples().unwrap_or(cap)`: a node that never
             // said (`Tail::Unknown`) is spent at what the others reported,
@@ -1577,7 +1577,7 @@ fn open_stem_taps<F: Float>(
         .keys()
         .next_back()
         .map_or(1, |id| id.get() + 1);
-    let capacity = Samples(2 * GRAPH_MAX_BLOCK.get());
+    let capacity = GRAPH_MAX_BLOCK.samples() * 2;
     stems
         .iter()
         .map(|stem| {
@@ -1693,13 +1693,13 @@ fn span(
             let looped = loop_range.ok_or(BounceConfigError::NoRange)?;
             beats(looped.start(), looped.end())?
         }
-        Range::Until(end) => beats(Beat(0.0), end)?,
+        Range::Until(end) => beats(Beat::new(0.0), end)?,
         Range::Beats(a, b) => beats(a, b)?,
         Range::Seconds(a, b) => {
             if !a.get().is_finite() || !b.get().is_finite() || a.get() < 0.0 || b.get() < 0.0 {
                 return Err(BounceConfigError::InvalidRange);
             }
-            let long = Seconds((b.get() - a.get()).max(0.0)).to_samples(rate);
+            let long = (b - a).max(Seconds::new(0.0)).to_samples(rate);
             (map.beat_at_seconds(a), long.get() as u64)
         }
         Range::Frames(a, b) => (
@@ -1709,7 +1709,7 @@ fn span(
     };
     match usize::try_from(frames) {
         Ok(0) => Err(BounceConfigError::EmptyRange),
-        Ok(n) => Ok((start, Samples(n))),
+        Ok(n) => Ok((start, Samples::new(n))),
         Err(_) => Err(BounceConfigError::Job(JobError::TooLong { total: None })),
     }
 }
@@ -1919,11 +1919,11 @@ where
         figures.provisional(
             match latency {
                 BounceLatency::Frames(n) => n,
-                BounceLatency::Graph | BounceLatency::Keep => Samples(0),
+                BounceLatency::Graph | BounceLatency::Keep => Samples::new(0),
             },
             match tail {
                 BounceTail::Frames(n) => n,
-                BounceTail::Graph { .. } | BounceTail::None => Samples(0),
+                BounceTail::Graph { .. } | BounceTail::None => Samples::new(0),
             },
         )?;
 
@@ -2079,7 +2079,7 @@ mod tests {
     fn short() -> Bounce<NodeKey, BufferMaster, f32> {
         Bounce::project()
             .master_buffers()
-            .range(Range::Seconds(Seconds(0.0), Seconds(0.01)))
+            .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
     }
 
     /// A detached session whose outputs hear a dc node: something to bounce.
@@ -2159,12 +2159,12 @@ mod tests {
     #[test]
     fn a_rust_range_is_a_range() {
         assert_eq!(
-            Range::from(Beat(0.0)..Beat(8.0)),
-            Range::Beats(Beat(0.0), Beat(8.0))
+            Range::from(Beat::new(0.0)..Beat::new(8.0)),
+            Range::Beats(Beat::new(0.0), Beat::new(8.0))
         );
         assert_eq!(
-            Range::from(Seconds(1.0)..Seconds(2.0)),
-            Range::Seconds(Seconds(1.0), Seconds(2.0))
+            Range::from(Seconds::new(1.0)..Seconds::new(2.0)),
+            Range::Seconds(Seconds::new(1.0), Seconds::new(2.0))
         );
         assert_eq!(
             Range::from(Frame::new(0)..Frame::new(48_000)),
@@ -2176,12 +2176,12 @@ mod tests {
     fn stepped() -> TempoMap {
         TempoMap::new([
             TempoPoint {
-                beat: Beat(0.0),
+                beat: Beat::new(0.0),
                 tempo: Bpm::of(120.0),
                 transition: Transition::Step,
             },
             TempoPoint {
-                beat: Beat(4.0),
+                beat: Beat::new(4.0),
                 tempo: Bpm::of(60.0),
                 transition: Transition::Step,
             },
@@ -2198,12 +2198,22 @@ mod tests {
     #[test]
     fn a_range_in_beats_is_the_frames_the_map_puts_between_them() {
         let constant = TempoMap::constant(Bpm::of(120.0)).unwrap();
-        let (start, length) =
-            span(Range::Beats(Beat(1.0), Beat(3.0)), None, &constant, RATE).unwrap();
-        assert_eq!((start, length), (Beat(1.0), Samples(48_000)));
-        let (start, length) =
-            span(Range::Beats(Beat(3.0), Beat(6.0)), None, &stepped(), RATE).unwrap();
-        assert_eq!((start, length), (Beat(3.0), Samples(120_000)));
+        let (start, length) = span(
+            Range::Beats(Beat::new(1.0), Beat::new(3.0)),
+            None,
+            &constant,
+            RATE,
+        )
+        .unwrap();
+        assert_eq!((start, length), (Beat::new(1.0), Samples::new(48_000)));
+        let (start, length) = span(
+            Range::Beats(Beat::new(3.0), Beat::new(6.0)),
+            None,
+            &stepped(),
+            RATE,
+        )
+        .unwrap();
+        assert_eq!((start, length), (Beat::new(3.0), Samples::new(120_000)));
     }
 
     /// **Seconds and frames name the same span as the beats they are.** Two
@@ -2214,26 +2224,31 @@ mod tests {
     #[test]
     fn seconds_and_frames_are_the_span_they_name() {
         let map = TempoMap::constant(Bpm::of(120.0)).unwrap();
-        let by_seconds = span(Range::Seconds(Seconds(1.0), Seconds(3.0)), None, &map, RATE);
+        let by_seconds = span(
+            Range::Seconds(Seconds::new(1.0), Seconds::new(3.0)),
+            None,
+            &map,
+            RATE,
+        );
         let by_frames = span(
             Range::Frames(Frame::new(48_000), Frame::new(144_000)),
             None,
             &map,
             RATE,
         );
-        assert_eq!(by_seconds, Ok((Beat(2.0), Samples(96_000))));
+        assert_eq!(by_seconds, Ok((Beat::new(2.0), Samples::new(96_000))));
         assert_eq!(by_frames, by_seconds);
         let long = (2000.0f64 / 93.0) * 60.0;
         assert_eq!(
             span(
-                Range::Seconds(Seconds(0.0), Seconds(long)),
+                Range::Seconds(Seconds::new(0.0), Seconds::new(long)),
                 None,
                 &map,
                 RATE
             )
             .unwrap()
             .1,
-            Samples(61_935_484)
+            Samples::new(61_935_484)
         );
     }
 
@@ -2247,34 +2262,37 @@ mod tests {
         let go = |r| span(r, None, &map, RATE);
         for bad in [f64::NAN, f64::INFINITY, -1.0] {
             assert_eq!(
-                go(Range::Seconds(Seconds(0.0), Seconds(bad))),
+                go(Range::Seconds(Seconds::new(0.0), Seconds::new(bad))),
                 Err(BounceConfigError::InvalidRange),
                 "{bad}"
             );
             assert_eq!(
-                go(Range::Beats(Beat(0.0), Beat(bad))),
+                go(Range::Beats(Beat::new(0.0), Beat::new(bad))),
                 Err(BounceConfigError::InvalidRange),
                 "{bad}"
             );
         }
         assert_eq!(
-            go(Range::Beats(Beat(4.0), Beat(2.0))),
+            go(Range::Beats(Beat::new(4.0), Beat::new(2.0))),
             Err(BounceConfigError::EmptyRange)
         );
         assert_eq!(
-            go(Range::Seconds(Seconds(1.0), Seconds(1.0))),
+            go(Range::Seconds(Seconds::new(1.0), Seconds::new(1.0))),
             Err(BounceConfigError::EmptyRange)
         );
         // Under half a frame rounds to nothing.
         assert_eq!(
-            go(Range::Seconds(Seconds(0.0), Seconds(0.4 / 48_000.0))),
+            go(Range::Seconds(
+                Seconds::new(0.0),
+                Seconds::new(0.4 / 48_000.0)
+            )),
             Err(BounceConfigError::EmptyRange)
         );
         assert_eq!(go(Range::Loop), Err(BounceConfigError::NoRange));
-        let looped = tutti_music::LoopRange::new(Beat(2.0), Beat(4.0));
+        let looped = tutti_music::LoopRange::new(Beat::new(2.0), Beat::new(4.0));
         assert_eq!(
             span(Range::Loop, looped, &map, RATE),
-            Ok((Beat(2.0), Samples(48_000)))
+            Ok((Beat::new(2.0), Samples::new(48_000)))
         );
     }
 
@@ -2305,8 +2323,8 @@ mod tests {
     /// its end (two beats at 120 BPM and 48 kHz are 48 000 frames).
     #[test]
     fn the_range_is_named_then_the_loop() {
-        let looped = tutti_music::LoopRange::new(Beat(1.0), Beat(2.0));
-        let named = Range::Seconds(Seconds(0.0), Seconds(1.0));
+        let looped = tutti_music::LoopRange::new(Beat::new(1.0), Beat::new(2.0));
+        let named = Range::Seconds(Seconds::new(0.0), Seconds::new(1.0));
         assert_eq!(chosen(Some(named), looped), Ok(named));
         assert_eq!(chosen(None, looped), Ok(Range::Loop));
         assert_eq!(chosen(None, None), Err(BounceConfigError::NoRange));
@@ -2314,7 +2332,7 @@ mod tests {
         let mut session = session();
         let until = Bounce::project()
             .master_buffers()
-            .range(Range::Until(Beat(2.0)));
+            .range(Range::Until(Beat::new(2.0)));
         assert_eq!(planes(session.bounce(until))[0].len(), 48_000);
     }
 
@@ -2403,8 +2421,8 @@ mod tests {
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.25)));
         let (lim, _) = session.graph().add(tutti_nodes::LimiterNode::<f32>::mono(
             tutti_nodes::LimiterControls {
-                threshold: Db(-6.0),
-                ceiling: Db(-1.0),
+                threshold: Db::new(-6.0),
+                ceiling: Db::new(-1.0),
                 ..tutti_nodes::LimiterControls::DEFAULT
             },
         ));
@@ -2413,7 +2431,10 @@ mod tests {
             .set_sources(InPort::new(lim, 0), [crate::OutPort::new(dc, 0)])
             .unwrap();
         session.graph().connect(lim, Root).unwrap();
-        assert_eq!(session.graph_ref().node_latency(lim), Ok(Samples(LATENCY)));
+        assert_eq!(
+            session.graph_ref().node_latency(lim),
+            Ok(Samples::new(LATENCY))
+        );
 
         let request = || {
             Bounce::project()
@@ -2452,7 +2473,7 @@ mod tests {
             .expect("the bounce renders");
         let (rolling, beat) = seen.lock().unwrap().expect("the edit ran");
         assert!(!rolling, "a frozen bounce's timeline must not roll");
-        assert_eq!(beat, tutti_units::Beat(0.0));
+        assert_eq!(beat, tutti_units::Beat::new(0.0));
     }
 
     /// **The default clock is the project's tempo map from the range's first
@@ -2475,7 +2496,7 @@ mod tests {
             .bounce(
                 Bounce::project()
                     .master_buffers()
-                    .range(Range::Beats(Beat(3.0), Beat(4.0)))
+                    .range(Range::Beats(Beat::new(3.0), Beat::new(4.0)))
                     .edit(Box::new(move |prepared: PreparedGraph<'_>| {
                         *into.lock().unwrap() = Some((
                             prepared.ctx.beat(),
@@ -2486,7 +2507,7 @@ mod tests {
             .expect("renders");
         assert_eq!(
             seen.lock().unwrap().expect("the edit ran"),
-            (Beat(3.0), Bpm::of(90.0))
+            (Beat::new(3.0), Bpm::of(90.0))
         );
     }
 
@@ -2508,7 +2529,7 @@ mod tests {
             .bounce(
                 Bounce::project()
                     .master_buffers()
-                    .range(Range::Beats(Beat(0.0), Beat(1.0)))
+                    .range(Range::Beats(Beat::new(0.0), Beat::new(1.0)))
                     .edit(Box::new(move |prepared: PreparedGraph<'_>| {
                         *into.lock().unwrap() = Some(prepared.ctx.tempo_map().constant_tempo());
                     })),
@@ -2526,7 +2547,7 @@ mod tests {
     fn a_bounce_after_a_loop_set_renders_the_loop_without_an_update() {
         let mut session = session();
         let region = tutti_transport::LoopRegion::new(
-            tutti_music::LoopRange::new(Beat(0.0), Beat(2.0)).unwrap(),
+            tutti_music::LoopRange::new(Beat::new(0.0), Beat::new(2.0)).unwrap(),
             true,
         );
         session

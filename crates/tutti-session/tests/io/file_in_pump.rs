@@ -36,7 +36,7 @@ fn truncated_flac(dir: &std::path::Path) -> std::path::PathBuf {
 fn run_to_the_end(path: &std::path::Path) -> PumpPass {
     let src = FileIn::<f32>::open(path).expect("open");
     let sink = Discard(src.layout());
-    let mut pump = PumpLoop::new(src, sink, Samples(1024)).expect("widths agree");
+    let mut pump = PumpLoop::new(src, sink, Samples::new(1024)).expect("widths agree");
     loop {
         match pump.pump_once() {
             PumpPass::Wrote(_) => {}

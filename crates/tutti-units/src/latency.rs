@@ -15,7 +15,7 @@
 //! ```compile_fail
 //! use tutti_units::{Latency, Samples};
 //! fn declare(_: Latency) {}
-//! let echo_time = Samples(24_000);
+//! let echo_time = Samples::new(24_000);
 //! declare(echo_time); // a delay time is not a latency
 //! ```
 //!
@@ -45,10 +45,10 @@ use super::samples::Samples;
 /// ```
 /// use tutti_units::{Latency, Samples};
 ///
-/// let lookahead = Latency::new(Samples(128));
-/// let fft = Latency::new(Samples(64));
-/// assert_eq!(lookahead + fft, Latency::new(Samples(192))); // cascade
-/// assert_eq!(fft.gap_to(lookahead), Samples(64)); // compensation delay
+/// let lookahead = Latency::new(Samples::new(128));
+/// let fft = Latency::new(Samples::new(64));
+/// assert_eq!(lookahead + fft, Latency::new(Samples::new(192))); // cascade
+/// assert_eq!(fft.gap_to(lookahead), Samples::new(64)); // compensation delay
 /// ```
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -118,11 +118,11 @@ mod tests {
     /// count that saturates.
     #[test]
     fn latencies_cascade_merge_and_compensate() {
-        let a = Latency::new(Samples(128));
-        let b = Latency::new(Samples(64));
-        assert_eq!(a + b, Latency::new(Samples(192)));
+        let a = Latency::new(Samples::new(128));
+        let b = Latency::new(Samples::new(64));
+        assert_eq!(a + b, Latency::new(Samples::new(192)));
         assert_eq!(a.max(b), a);
-        assert_eq!(b.gap_to(a), Samples(64));
+        assert_eq!(b.gap_to(a), Samples::new(64));
         assert_eq!(a.gap_to(b), Samples::ZERO);
         assert!(Latency::ZERO.is_zero());
     }

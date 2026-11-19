@@ -24,7 +24,7 @@ fn pushed_frames_reach_the_outputs_in_order() {
     let mut s = offline();
     let (key, mut producer) = s
         .graph()
-        .open_inlet(ChannelLayout::STEREO, Samples(256), RATE)
+        .open_inlet(ChannelLayout::STEREO, Samples::new(256), RATE)
         .expect("the producer runs at the graph's rate");
     s.graph()
         .set_sources_hard(Root::output(0), [OutPort::new(key, 0)])
@@ -35,7 +35,7 @@ fn pushed_frames_reach_the_outputs_in_order() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples(1_024))
+        .open_output(Samples::new(1_024))
         .expect("the sources exist");
     let _ = s.update();
 
@@ -49,7 +49,7 @@ fn pushed_frames_reach_the_outputs_in_order() {
     assert_eq!(
         tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
             .unwrap(),
-        Samples(8)
+        Samples::new(8)
     );
     assert_eq!(
         got,
@@ -69,7 +69,11 @@ fn a_producer_at_another_rate_is_refused() {
     let _ = s.update();
     let err = s
         .graph()
-        .open_inlet(ChannelLayout::STEREO, Samples(256), SampleRate::SR_44K1)
+        .open_inlet(
+            ChannelLayout::STEREO,
+            Samples::new(256),
+            SampleRate::SR_44K1,
+        )
         .expect_err("an inlet does not resample");
     assert_eq!(
         err,
@@ -92,7 +96,8 @@ fn a_producer_at_another_rate_is_refused() {
 fn add_inlet_checks_the_rate_the_ring_carries() {
     let mut s = offline();
     let _ = s.update();
-    let (ring, _writer) = InletRing::pair(ChannelLayout::STEREO, Samples(64), SampleRate::SR_44K1);
+    let (ring, _writer) =
+        InletRing::pair(ChannelLayout::STEREO, Samples::new(64), SampleRate::SR_44K1);
     assert_eq!(
         s.graph().add_inlet(ring).expect_err("another rate"),
         InletError::RateMismatch {
@@ -102,7 +107,7 @@ fn add_inlet_checks_the_rate_the_ring_carries() {
     );
     assert!(!s.graph().is_edited(), "nothing was added");
 
-    let (ring, _writer) = InletRing::pair(ChannelLayout::STEREO, Samples(64), RATE);
+    let (ring, _writer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(64), RATE);
     s.graph().add_inlet(ring).expect("the graph's rate");
     assert!(s.graph().is_edited(), "the node was added");
 }
@@ -121,7 +126,7 @@ fn an_f64_inlet_carries_a_figure_f32_rounds_away() {
         .expect("an f64 session builds");
     let (key, mut producer) = s
         .graph()
-        .open_inlet(ChannelLayout::MONO, Samples(256), RATE)
+        .open_inlet(ChannelLayout::MONO, Samples::new(256), RATE)
         .expect("the producer runs at the graph's rate");
     s.graph()
         .set_sources_hard(Root::output(0), [OutPort::new(key, 0)])

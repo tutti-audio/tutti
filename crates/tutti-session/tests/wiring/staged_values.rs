@@ -13,7 +13,7 @@ use tutti_units::{Beat, Bpm, Samples};
 
 fn offline() -> Session {
     Session::builder()
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("builds")
 }
@@ -26,7 +26,10 @@ fn render(s: &Session, blocks: usize) {
 }
 
 fn region(start: f64, end: f64, armed: bool) -> LoopRegion {
-    LoopRegion::new(LoopRange::new(Beat(start), Beat(end)).unwrap(), armed)
+    LoopRegion::new(
+        LoopRange::new(Beat::new(start), Beat::new(end)).unwrap(),
+        armed,
+    )
 }
 
 /// **A loop written and updated is the transport's loop region once a block
@@ -108,7 +111,7 @@ fn blocks_adopting_published_tempo_meter_and_loop_do_not_allocate() {
             .tempo()
             .to(TempoMap::constant(Bpm::of(90.0)).unwrap()),
         handle.meter().to(Arc::new(MeterMap::new([MeterChange::new(
-            Beat(0.0),
+            Beat::new(0.0),
             TimeSignature::of(3, 4),
         )]))),
         handle.looping().to(region(0.0, 4.0, true)),

@@ -192,7 +192,7 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
     for residency in [false, true] {
         let clip = clip_of(&path, residency);
         assert_eq!(clip.is_streamed(), residency);
-        let heard = play(clip.at(Beat(0.0)), 3_000);
+        let heard = play(clip.at(Beat::new(0.0)), 3_000);
         // The transport starts on the render's next block, so the file begins
         // a block or so in, under the engine's start fade: over
         // `n = declick_frames(rate)` frames, frame `k` scales the output by the

@@ -399,7 +399,7 @@ fn a_late_lane_raises_the_output_time() {
     let mut rig = Rig::new(&[dc(1.0), driver(32)], &[1], Where::Output);
     rig.drive(1, 2);
     let plan = plan_of(&rig);
-    assert_eq!(plan.total_latency().samples(), Samples(32));
+    assert_eq!(plan.total_latency().samples(), Samples::new(32));
     assert_eq!(
         delay_of(
             &plan,

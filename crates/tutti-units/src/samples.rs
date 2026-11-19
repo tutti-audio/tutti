@@ -12,8 +12,8 @@
 //! `max()`, and which the float units cannot have.
 //!
 //! Like every `unit!` type it has no `From<usize>` and no `From<Samples> for
-//! usize`: a bare count becomes frames with `new` (or the tuple field) and
-//! leaves with `get`, named at the call site.
+//! usize`: a bare count becomes frames with `new` and leaves with `get`,
+//! named at the call site.
 
 // Serde `transparent`, which `unit!` gives every quantity: a `Samples` is `512`
 // on the wire, not `[512]`. Load-bearing for the latency path: the
@@ -117,7 +117,7 @@ impl Samples {
     /// nanosecond.
     #[inline]
     pub fn to_seconds(self, rate: impl Into<super::units::SampleRate>) -> super::units::Seconds {
-        super::units::Seconds(self.0 as f64 / rate.into().get())
+        super::units::Seconds::new(self.0 as f64 / rate.into().get())
     }
 }
 
@@ -210,11 +210,11 @@ mod tests {
     fn frames_convert_to_a_span_and_back() {
         use crate::units::{SampleRate, Seconds};
         let rate = SampleRate::of(48_000.0);
-        assert_eq!(Samples(48_000).to_seconds(rate), Seconds(1.0));
-        assert_eq!(Samples(0).to_seconds(rate), Seconds(0.0));
+        assert_eq!(Samples(48_000).to_seconds(rate), Seconds::new(1.0));
+        assert_eq!(Samples(0).to_seconds(rate), Seconds::new(0.0));
         // Round-trips through the forward direction it is the inverse of.
-        assert_eq!(Seconds(2.5).to_samples(rate), Samples(120_000));
-        assert_eq!(Samples(120_000).to_seconds(rate), Seconds(2.5));
+        assert_eq!(Seconds::new(2.5).to_samples(rate), Samples(120_000));
+        assert_eq!(Samples(120_000).to_seconds(rate), Seconds::new(2.5));
     }
 
     /// A long frame count keeps its frame through `Seconds` and back.
@@ -243,7 +243,7 @@ mod tests {
     ///   and [`checked_sub`](Samples::checked_sub).
     /// - `Samples * Samples` — frames squared is not a quantity.
     /// - `Samples + usize` — the bare operand could be a count, an index, or a
-    ///   channel number; make the caller say `Samples(n)`.
+    ///   channel number; make the caller say `Samples::new(n)`.
     ///
     /// The body is empty and this test cannot fail. It exists as documentation:
     /// the omission ledger above is the contract, and a `#[test]` is what keeps

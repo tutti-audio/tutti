@@ -14,7 +14,7 @@ use tutti_units::{Depth, Hz, Q, Samples};
 fn session() -> Session {
     Session::builder()
         .outputs(tutti_buffers::ChannelLayout::STEREO)
-        .max_block(MaxBlock::of(Samples(256)))
+        .max_block(MaxBlock::of(Samples::new(256)))
         .build()
         .expect("builds")
 }
@@ -22,8 +22,8 @@ fn session() -> Session {
 fn filter(s: &mut Session) -> ParamRef {
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     ParamRef::from(lp.cutoff())
 }
@@ -173,12 +173,12 @@ fn recording_where_nothing_is_automated_is_refused() {
     let mut s = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     let a = lp.cutoff();
     let mut m = s.mods_mut();
-    let take = || AutomationTake::record(RecordMode::Touch, Hz(0.0), Hz(1.0));
+    let take = || AutomationTake::record(RecordMode::Touch, Hz::new(0.0), Hz::new(1.0));
     assert_eq!(
         m.record(a, take()),
         Err(NoAutomation {

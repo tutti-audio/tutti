@@ -203,7 +203,7 @@ enum Topo {
 }
 
 fn executor_for(shape: &Topo) -> Executor {
-    let prepare = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(MAX_BLOCK)));
+    let prepare = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(MAX_BLOCK)));
     let (mut ed, mut exec) = Editor::new(prepare);
     let sine = || -> Box<dyn Node> {
         Box::new(Sine {
@@ -372,7 +372,7 @@ impl Node for FormNop {
 
 /// A chain of `n` [`FormNop`]s like `nop`, fed by as many global inputs.
 fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
-    let prepare = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(MAX_BLOCK)));
+    let prepare = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(MAX_BLOCK)));
     let (mut ed, mut exec) = Editor::new(prepare);
     let width = nop().width;
     ed.spec_mut().topology.inputs = ChannelLayout::from_count(width);

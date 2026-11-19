@@ -112,7 +112,7 @@ fn a_crossfade_hands_the_lane_the_incoming_nodes_cell() {
     let incoming = ProbeUnit::of(UnitParam::Drive, 3.0);
     let new = incoming.knob();
     s.graph()
-        .crossfade(node, incoming, Seconds(0.005), FadeLaw::EqualAmplitude)
+        .crossfade(node, incoming, Seconds::new(0.005), FadeLaw::EqualAmplitude)
         .expect("the crossfade starts");
     settle(&mut s);
     old.store(9.0, Ordering::Release);

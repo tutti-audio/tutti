@@ -525,8 +525,8 @@ pub trait Float: Real + Sample + bytemuck::Pod {
     /// use tutti_units::{ReadPosition, Samples};
     ///
     /// let p = ReadPosition::from_count((7_u64 << 32) | (1 << 31));
-    /// assert_eq!(f32::split_position(p), (Samples(7), 0.5));
-    /// assert_eq!(f64::split_position(p), (Samples(7), 0.5));
+    /// assert_eq!(f32::split_position(p), (Samples::new(7), 0.5));
+    /// assert_eq!(f64::split_position(p), (Samples::new(7), 0.5));
     /// ```
     #[must_use]
     fn split_position(p: ReadPosition) -> (Samples, Self);
@@ -728,7 +728,7 @@ mod tests {
     #[test]
     fn an_f32_read_phase_at_001_hz_and_192_khz_completes_three_periods_to_within_a_sample() {
         let rate = SampleRate::new(192_000.0).unwrap();
-        let step = PhaseStep::from(PhaseIncrement::per_sample(Hz(0.01), rate));
+        let step = PhaseStep::from(PhaseIncrement::per_sample(Hz::new(0.01), rate));
         let period = 19_200_000_u64;
         let mut p = RunningPhase::START;
         let mut wraps = 0_u32;
@@ -757,7 +757,7 @@ mod tests {
         for top in [0_u64, 1, 12_345, (1 << 23) + 1, (1 << 24) - 1] {
             // Garbage below the top 24 fraction bits must not change the value.
             let (whole, frac) = f32::split_position(position_at((7_u64 << 32) | (top << 8) | 0xff));
-            assert_eq!(whole, Samples(7));
+            assert_eq!(whole, Samples::new(7));
             assert_eq!(f64::from(frac), top as f64 / 16_777_216.0, "top {top}");
         }
     }
@@ -766,7 +766,7 @@ mod tests {
     fn the_split_is_the_whole_32_fraction_bits_over_two_to_the_32_at_f64() {
         for low in [0_u64, 1, 0x8000_0000, 0xffff_ffff] {
             let (whole, frac) = f64::split_position(position_at((1_900_800_u64 << 32) | low));
-            assert_eq!(whole, Samples(1_900_800));
+            assert_eq!(whole, Samples::new(1_900_800));
             assert_eq!(
                 frac,
                 low as f64 / ReadPosition::COUNTS_PER_FRAME,
@@ -778,7 +778,7 @@ mod tests {
     #[test]
     fn the_split_fraction_stays_below_one_for_the_largest_position_at_both_widths() {
         let (whole, f32_frac) = f32::split_position(ReadPosition::MAX);
-        assert_eq!(whole, Samples(u32::MAX as usize));
+        assert_eq!(whole, Samples::new(u32::MAX as usize));
         assert!(f32_frac < 1.0);
         assert!(f64::split_position(ReadPosition::MAX).1 < 1.0);
     }

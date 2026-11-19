@@ -782,7 +782,7 @@ mod audio {
         spawned.run_all();
         assert_eq!(events(&mut s), [("kick", "loaded".to_owned())]);
         let loaded = wave(&s, "kick");
-        assert_eq!(loaded.len().0, 100);
+        assert_eq!(loaded.len().get(), 100);
         assert_eq!(loaded.channels(), 2);
         assert_eq!(loaded.at(1, 50), -0.5, "the file's own samples");
         s.pool(audio_file("kick", &short)).unwrap();
@@ -790,8 +790,8 @@ mod audio {
         s.pool(audio_file("kick", &long)).unwrap();
         spawned.run_all();
         assert_eq!(events(&mut s), [("kick", "reloaded".to_owned())]);
-        assert_eq!(wave(&s, "kick").len().0, 250);
-        assert_eq!(loaded.len().0, 100, "a reader of the old wave keeps it");
+        assert_eq!(wave(&s, "kick").len().get(), 250);
+        assert_eq!(loaded.len().get(), 100, "a reader of the old wave keeps it");
     }
 
     #[test]
@@ -826,7 +826,7 @@ mod audio {
             panic!("a streamed entry reads as its header");
         };
         assert_eq!(info.path(), path);
-        assert_eq!(info.facts().frames.map(|frames| frames.0), Some(480));
+        assert_eq!(info.facts().frames.map(|frames| frames.get()), Some(480));
         assert_eq!(info.facts().layout.count(), 2);
         assert_eq!(info.facts().sample_rate, tutti_units::SampleRate::SR_48K);
     }
@@ -1205,7 +1205,7 @@ mod clock_switch {
         let mut live = err.into_session();
         assert!(live.device().is_running(), "still on the card");
         assert!(
-            stream.render_block(tutti_units::Samples(64)).is_some(),
+            stream.render_block(tutti_units::Samples::new(64)).is_some(),
             "and rendering"
         );
         spawned.run_all();

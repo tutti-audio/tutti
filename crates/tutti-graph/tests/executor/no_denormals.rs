@@ -73,7 +73,7 @@ enum Entry {
 fn render_probes(workers: usize, entry: Entry) {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::of(Samples(MAX_BLOCK)),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     if workers > 1 {
         exec.set_pool(Some(test_pool(workers)));

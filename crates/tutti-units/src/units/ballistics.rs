@@ -13,10 +13,10 @@ use super::*;
 /// ```
 /// use tutti_units::{Ballistics, SampleRate, Seconds};
 ///
-/// let meter = Ballistics::new(Seconds(0.01), Seconds(0.1)).unwrap();
+/// let meter = Ballistics::new(Seconds::new(0.01), Seconds::new(0.1)).unwrap();
 /// let (attack, release) = meter.coeffs(SampleRate::of(48_000.0));
 /// assert!(attack > release, "the shorter time closes more of the gap per sample");
-/// assert!(Ballistics::new(Seconds(-1.0), Seconds(0.1)).is_none());
+/// assert!(Ballistics::new(Seconds::new(-1.0), Seconds::new(0.1)).is_none());
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(
@@ -31,7 +31,7 @@ pub struct Ballistics {
 
 /// A time that is finite and not negative.
 fn valid(t: Seconds) -> bool {
-    t.0.is_finite() && t.0 >= 0.0
+    t.get().is_finite() && t.get() >= 0.0
 }
 
 impl Ballistics {
@@ -94,7 +94,7 @@ impl Ballistics {
 #[cfg(feature = "serde")]
 impl From<Ballistics> for (f64, f64) {
     fn from(b: Ballistics) -> Self {
-        (b.attack.0, b.release.0)
+        (b.attack.get(), b.release.get())
     }
 }
 
@@ -103,7 +103,7 @@ impl TryFrom<(f64, f64)> for Ballistics {
     type Error = &'static str;
 
     fn try_from((attack, release): (f64, f64)) -> Result<Self, Self::Error> {
-        Self::new(Seconds(attack), Seconds(release))
+        Self::new(Seconds::new(attack), Seconds::new(release))
             .ok_or("an attack and release must be finite and not negative")
     }
 }

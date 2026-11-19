@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::{Answer, CiChange, PeerId, Polled, ReportEnd};
+use tutti_midi_device::Initiator;
 use tutti_midi_device::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
     INQUIRY_TIMEOUT, MaxSysexSize, Muid,
@@ -2798,4 +2799,125 @@ fn a_served_resource_is_not_subscribable_and_a_subscription_start_is_refused() {
         }
     }
     assert_eq!(status, Some(PeStatus::NotAllowed));
+}
+
+// ---- The three ways a first inquiry ends ----
+
+/// How the first inquiry of a category (or the peer itself) ended, as the change
+/// the session reports for it.
+#[derive(Debug, PartialEq, Eq)]
+enum Ending {
+    Refused,
+    TimedOut,
+    Dropped,
+}
+
+/// The endings `polled` reports for the one category of `peer_declares`.
+fn endings(polled: &[Polled], category: CiCategories) -> Vec<Ending> {
+    if category == CiCategories::PROFILE_CONFIGURATION {
+        profile_events(polled)
+            .into_iter()
+            .filter_map(|c| match c {
+                ProfilesChange::InquiryRefused => Some(Ending::Refused),
+                ProfilesChange::InquiryTimedOut => Some(Ending::TimedOut),
+                ProfilesChange::Dropped => Some(Ending::Dropped),
+                _ => None,
+            })
+            .collect()
+    } else if category == CiCategories::PROCESS_INQUIRY {
+        process_events(polled)
+            .into_iter()
+            .filter_map(|c| match c {
+                ProcessChange::CapabilitiesRefused => Some(Ending::Refused),
+                ProcessChange::CapabilitiesTimedOut => Some(Ending::TimedOut),
+                ProcessChange::Dropped => Some(Ending::Dropped),
+                _ => None,
+            })
+            .collect()
+    } else {
+        property_events(polled)
+            .into_iter()
+            .filter_map(|c| match c {
+                PropertyChange::Event(event) => match **event {
+                    ResourceEvent::CapabilitiesFailed(PeCapabilitiesFailure::Refused(_)) => {
+                        Some(Ending::Refused)
+                    }
+                    ResourceEvent::CapabilitiesFailed(PeCapabilitiesFailure::TimedOut) => {
+                        Some(Ending::TimedOut)
+                    }
+                    _ => None,
+                },
+                PropertyChange::Dropped => Some(Ending::Dropped),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// A peer that NAKs the first inquiry of a category, one that never answers it
+/// and one that is lost before it does are three different changes, in each of
+/// Profile Configuration, Process Inquiry and Property Exchange: the Initiators
+/// share one driver, which must not blur them.
+#[test]
+fn a_nak_a_silence_and_a_lost_peer_are_three_endings_of_every_first_inquiry() {
+    use tutti_midi_device::{
+        Nak, NakStatus, SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PROCESS_CAPABILITIES_INQUIRY,
+        SUB_ID2_PROFILE_INQUIRY,
+    };
+    let silence = PEER_REPLY_TIMEOUT.max(PE_TIMEOUT).as_millis() as u64 + 100;
+    for (category, inquiry) in [
+        (CiCategories::PROFILE_CONFIGURATION, SUB_ID2_PROFILE_INQUIRY),
+        (
+            CiCategories::PROCESS_INQUIRY,
+            SUB_ID2_PROCESS_CAPABILITIES_INQUIRY,
+        ),
+        (
+            CiCategories::PROPERTY_EXCHANGE,
+            SUB_ID2_PE_CAPABILITIES_INQUIRY,
+        ),
+    ] {
+        let (mut wire, ours) = peer_declaring(category);
+        say(
+            &wire,
+            GROUP_0,
+            &CiMessage::Nak {
+                header: CiHeader {
+                    device_id: CiDeviceId::FunctionBlock,
+                    ..CiHeader::new(peer())
+                },
+                to: ours,
+                nak: Nak::new(U7::of(inquiry), NakStatus::MessageNotSupported),
+            },
+            60,
+        );
+        let refused = polled(&mut wire, 70);
+        assert_eq!(
+            endings(&refused, category),
+            [Ending::Refused],
+            "{category:?}"
+        );
+
+        let (mut wire, _) = peer_declaring(category);
+        let early = polled(&mut wire, silence - 200);
+        assert_eq!(endings(&early, category), [], "{category:?}");
+        let silent = polled(&mut wire, 50 + silence);
+        assert_eq!(
+            endings(&silent, category),
+            [Ending::TimedOut],
+            "{category:?}"
+        );
+
+        let (mut wire, _) = peer_declaring(category);
+        say(
+            &wire,
+            GROUP_0,
+            &CiMessage::InvalidateMuid {
+                header: CiHeader::new(peer()),
+                target: peer(),
+            },
+            60,
+        );
+        let lost = polled(&mut wire, 70);
+        assert_eq!(endings(&lost, category), [Ending::Dropped], "{category:?}");
+    }
 }
