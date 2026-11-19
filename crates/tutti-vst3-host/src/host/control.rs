@@ -51,7 +51,7 @@ pub(crate) fn plugin_error(error: Vst3Error) -> PluginError {
 /// to the same empty facet set as a plugin that declared none: both spell
 /// `PluginRole::Unknown`, which is the honest answer for either.
 #[must_use]
-pub fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> PluginDescriptor {
+pub(super) fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> PluginDescriptor {
     PluginDescriptor {
         id: info.id.clone(),
         name: info.name.clone(),

@@ -14,7 +14,7 @@ use super::RealFft;
 
 use crate::FftFloat;
 use rustfft::num_complex::Complex;
-use tutti_buffers::{Mono, MonoMut, Sample};
+use tutti_buffers::{Mono, MonoMut};
 
 /// The cached real-input plan plus the buffers a transform needs.
 ///
@@ -105,7 +105,7 @@ impl<F: FftFloat> FftScratch<F> {
         }
         fft.inverse(&mut self.half, MonoMut::new(out), &mut self.scratch);
 
-        let norm = F::ONE / <F as Sample>::from_f64(size as f64);
+        let norm = F::from_design(1.0 / size as f64);
         for slot in out.iter_mut() {
             *slot *= norm;
         }

@@ -1,7 +1,7 @@
 //! The measuring probe: activate a plugin and hold its
 //! claimed tail and latency against what it renders.
 //!
-//! [`measure_at`] is one experiment at one configuration, over any
+//! [`measure_within`] is one experiment at one configuration, over any
 //! [`Processor`]; [`measure`] loads a plugin by its descriptor, runs it at each
 //! of [`CONFIGS`] and keeps the one record [`Measured::merge`] makes of them.
 //!
@@ -24,7 +24,7 @@
 //! The figures: the first frame above the floor is the latency (an onset, so a
 //! disagreement with the report is recorded and never corrected); the last is
 //! the tail, counted from the impulse or the note-off and less the reported
-//! latency, since a tail excludes latency (doc 013). The impulse is 0.1 and not
+//! latency, since a tail excludes latency. The impulse is 0.1 and not
 //! 1.0 because a limiter or a saturator answers a full-scale impulse unlike
 //! program material, so a figure is a lower bound.
 
@@ -48,15 +48,15 @@ use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 /// plugins). **The probe measures at this
 /// level**: a figure is of that stimulus, not a bound for a nonlinear plugin (a
 /// gate or an expander may never open at 0.1, which reads as `Silent`).
-pub const IMPULSE: Amplitude = Amplitude(0.1);
+const IMPULSE: Amplitude = Amplitude(0.1);
 
 /// How long silence is rendered before the stimulus: what decides
 /// `NeverSettles`.
-pub const SILENCE: Seconds = Seconds(1.0);
+const SILENCE: Seconds = Seconds(1.0);
 
 /// How long the output must stay below the floor, after its last frame above
 /// it, for the plugin to count as settled.
-pub const SETTLE: Seconds = Seconds(1.0);
+const SETTLE: Seconds = Seconds(1.0);
 
 /// What the stimulus render runs past [`tutti_graph::MAX_NODE_TAIL`]: **the render
 /// budget is `MAX_NODE_TAIL` plus this**, a time converted at the configuration's
@@ -68,7 +68,7 @@ pub const SETTLE: Seconds = Seconds(1.0);
 ///   claim) and `Processing::ceiling` declares it `Unbounded`;
 /// - an **instrument** is `NotChecked(NeverReachedFloor)`: a held note has no
 ///   lower bound worth reporting.
-pub const BUDGET_MARGIN: Seconds = Seconds(5.0);
+const BUDGET_MARGIN: Seconds = Seconds(5.0);
 
 /// How long one plugin may render at one configuration before it loses its row
 /// ([`MeasureFailure::TimedOut`]): a plugin slower than real time over the
@@ -76,39 +76,38 @@ pub const BUDGET_MARGIN: Seconds = Seconds(5.0);
 /// returns from one is the host's deadline for the whole probe. A render is also
 /// bounded by what is left of the probe's run budget (see [`measure`]), so the
 /// sum over a file's plugins never passes the host's deadline.
-pub const RENDER_DEADLINE: Duration = Duration::from_secs(60);
+const RENDER_DEADLINE: Duration = Duration::from_secs(60);
 
 /// How long an instrument's note is held before its note-off.
-pub const NOTE_LENGTH: Seconds = Seconds(0.1);
+const NOTE_LENGTH: Seconds = Seconds(0.1);
 
 /// The key an instrument is played (middle C).
-pub const NOTE: u8 = 60;
+const NOTE: NoteNumber = NoteNumber::of(60);
 
-/// The note's velocity as a MIDI 2.0 value (0x8000 is the midpoint,
-/// M2-115 section 3).
-const VELOCITY: u16 = 0x8000;
+/// The note's velocity: the midpoint of the MIDI 2.0 range (M2-115 section 3).
+const VELOCITY: NoteVelocity = NoteVelocity::CENTER;
 
 /// The configurations the probe measures at, in order: a
 /// figure can depend on the rate and the block.
-pub const CONFIGS: [(SampleRate, MaxBlock); 2] = [
+const CONFIGS: [(SampleRate, MaxBlock); 2] = [
     (SampleRate::SR_48K, MaxBlock::of(Samples(512))),
     (SampleRate::SR_44K1, MaxBlock::of(Samples(64))),
 ];
 
 /// What the experiment needs to know about the plugin it runs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Subject {
+struct Subject {
     /// Input channels, all buses.
-    pub inputs: usize,
+    inputs: usize,
     /// Output channels, all buses.
-    pub outputs: usize,
+    outputs: usize,
     /// Whether the stimulus is a note, and the tail is measured from its
     /// note-off: the plugin has no audio input.
-    pub instrument: bool,
+    instrument: bool,
     /// The tail the plugin reports.
-    pub tail: PluginTail,
+    tail: PluginTail,
     /// The latency the plugin reports.
-    pub latency: Samples,
+    latency: Samples,
 }
 
 /// One block's buffers, rendered through a processor.
@@ -184,8 +183,8 @@ fn note(on: bool, offset: usize, block: usize) -> UmpAt {
         channel: MidiChannel::of(0),
     };
     let (note, velocity, attribute) = (
-        NoteNumber::of(NOTE),
-        NoteVelocity::new(if on { VELOCITY } else { 0 }),
+        NOTE,
+        if on { VELOCITY } else { NoteVelocity::MIN },
         Attribute::None,
     );
     let voice = if on {
@@ -206,26 +205,13 @@ fn note(on: bool, offset: usize, block: usize) -> UmpAt {
 }
 
 /// One experiment on an activated plugin, at the configuration `config` it was
-/// activated at, with no deadline.
-///
-/// # Errors
-///
-/// [`MeasureFailure::Render`] for a block the plugin failed to render.
-pub fn measure_at<P: Processor>(
-    processor: &mut P,
-    subject: Subject,
-    config: ProbeConfig,
-) -> Result<Measured, MeasureFailure> {
-    measure_within(processor, subject, config, Deadline::never())
-}
-
-/// [`measure_at`] that stops at `deadline`, read from the clock before each block.
+/// activated at, stopping at `deadline`, read from the clock before each block.
 ///
 /// # Errors
 ///
 /// [`MeasureFailure::Render`] for a block the plugin failed to render,
 /// [`MeasureFailure::TimedOut`] if `deadline` passed first.
-pub fn measure_within<P: Processor>(
+fn measure_within<P: Processor>(
     processor: &mut P,
     subject: Subject,
     config: ProbeConfig,
@@ -415,7 +401,7 @@ fn judge(
 /// load, take `state` ([`MeasureFailure::StateRefused`]: the caller asked for
 /// that state, so the probe refuses the file), save its state, activate, render
 /// or deactivate, it has no audio output, or a render passed its deadline.
-pub fn measure<L: InProcess>(
+pub(crate) fn measure<L: InProcess>(
     main: MainThreadMarker,
     path: &Path,
     descriptor: &PluginDescriptor,

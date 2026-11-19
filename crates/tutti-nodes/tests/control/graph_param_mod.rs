@@ -535,7 +535,7 @@ fn cases() -> Vec<Case> {
                         .expect("a test width fits a bus"),
                 );
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Balance, f64::from(v)));
+                    assert!(ParamNode::<f32>::param_set(&n).set(UnitParam::Balance, f64::from(v)));
                 }
                 parts_of(n)
             },

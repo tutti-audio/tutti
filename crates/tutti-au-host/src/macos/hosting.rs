@@ -4,7 +4,8 @@
 use std::path::Path;
 
 use tutti_plugin_types::{
-    InProcess, Load, MainThreadMarker, MainWorkHandle, Origin, OutOfProcess, PluginResult,
+    Describe, InProcess, Load, MainThreadMarker, MainWorkHandle, Origin, OutOfProcess,
+    PluginDescriptor, PluginResult,
 };
 
 use crate::editor_instance::AuEditorInstance;
@@ -26,6 +27,15 @@ impl InProcess for AuLoaded {
 
     fn main_work(&self) -> &MainWorkHandle {
         &self.work
+    }
+}
+
+impl Describe for AuLoaded {
+    /// Each unit the bundle declares, read from the registry's component, none
+    /// created: an editor is a property of an instance, so it is
+    /// [`EditorPresence::Unknown`](tutti_plugin_types::EditorPresence::Unknown).
+    fn describe(_main: MainThreadMarker, path: &Path) -> PluginResult<Vec<PluginDescriptor>> {
+        AuLoaded::describe_all(path)
     }
 }
 

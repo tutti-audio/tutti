@@ -13,7 +13,7 @@ use super::fft::Fft;
     reason = "`Unit` is referenced only by the intra-doc link on `clone_fresh` below; rustdoc needs the name in scope to resolve it"
 )]
 use super::{FftSize, Unit};
-use tutti_buffers::{Float, Sample};
+use tutti_buffers::Float;
 use tutti_dsp::{Complex, FftFloat, StftGeometry};
 use tutti_units::Radians;
 
@@ -295,16 +295,8 @@ pub(super) fn wrap_phase(phase: Radians) -> Radians {
 // as `tutti_measure::istft_transform` does. See that type's doc for why the two rings
 // are one struct.
 
-/// The analysis/synthesis window of `geometry` as data of the vocoder's width.
-///
-/// The coefficients are designed in `f32` by `StftGeometry` and cross to `F` here,
-/// so an `f64` vocoder has an `f32`-precision window (self-consistent: the
-/// overlap-add divides out this window's own sum) until the window is designed
-/// in `f64`.
+/// The analysis/synthesis window of `geometry` as data of the vocoder's width:
+/// designed in `f64` by `StftGeometry`, each coefficient crossing to `F` once.
 fn window<F: Float>(geometry: StftGeometry) -> Vec<F> {
-    geometry
-        .window_coefficients()
-        .into_iter()
-        .map(|w| w.convert_to::<F>())
-        .collect()
+    geometry.window_coefficients::<F>()
 }

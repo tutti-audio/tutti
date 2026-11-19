@@ -1,4 +1,5 @@
-//! The VST2 host against the shared traits, and its realtime safety, on the reference plugin.
+//! The VST2 host against the shared traits, its shell enumeration and its realtime safety, on the
+//! reference plugins.
 //!
 //! The binary's global allocator is armed (`AllocDisabler`), so its no-alloc gates bite.
 
@@ -12,4 +13,5 @@ mod active;
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 mod vst2_host_process_no_alloc;
+mod vst2_shell;
 mod vst2_traits;
