@@ -9,7 +9,7 @@
 //! stereo image does not move when one side is louder.
 //!
 //! The threshold is the one control read **per frame** when the graph drives it
-//! ([`CompressorLanes`]): it is a level to compare against, not a coefficient. The makeup
+//! ([`CompressorSignals`]): it is a level to compare against, not a coefficient. The makeup
 //! multiplies the output directly, so a step in it is a click: it is a ramp, a control moving
 //! to a target, and ramps over [`GAIN_RAMP`] as a [`Ramp`] read on the stream. The knee,
 //! the ratio and the times only move what the follower is smoothing toward, and the
@@ -160,11 +160,11 @@ impl<F: Float> Detector<F> {
     }
 }
 
-/// The per-frame lane a compressor reads beside its audio, in the bank's float, `None` where
-/// nothing drives it. A lane is at least as long as the frames a call renders; a frame past
+/// The per-frame control signal a compressor reads beside its audio, in the bank's float, `None` where
+/// nothing drives it. A control signal is at least as long as the frames a call renders; a frame past
 /// its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct CompressorLanes<'a, F: Float> {
+pub struct CompressorSignals<'a, F: Float> {
     /// The threshold in dB. A frame that is not finite is the set threshold.
     pub threshold: Option<Mono<'a, F>>,
 }
@@ -172,7 +172,7 @@ pub struct CompressorLanes<'a, F: Float> {
 /// A feed-forward compressor of any width: one gain from the loudest key channel, applied
 /// to every channel, with the follower that smooths it and the makeup that ramps.
 ///
-/// Built on the control side for one rate; the state, the views and the lane are `F`, the
+/// Built on the control side for one rate; the state, the views and the control signal are `F`, the
 /// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct CompressorBank<F: Float + SimdLanes> {
@@ -273,7 +273,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
     /// step `taken + 1 + i`, then the block's steps are taken. No allocation.
     pub fn process(
         &mut self,
-        lanes: CompressorLanes<'_, F>,
+        signals: CompressorSignals<'_, F>,
         key: Planes<'_, F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
@@ -301,7 +301,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
             }
             for (k, g) in gains.iter_mut().enumerate() {
                 let i = start + k;
-                let threshold = lanes
+                let threshold = signals
                     .threshold
                     .and_then(|l| l.samples().get(i))
                     .copied()

@@ -148,7 +148,7 @@ impl Default for SweepRange {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PhaserControls {
     /// The LFO's rate: how fast the notches sweep. Phaser rates are slow, typically 0.1 to
-    /// 2 Hz. **Floored at 0.01 Hz**, a lane's value and a cell's alike ([`MIN_RATE`](crate::MIN_RATE)): a
+    /// 2 Hz. **Floored at 0.01 Hz**, a control signal's value and a cell's alike ([`MIN_RATE`](crate::MIN_RATE)): a
     /// negative rate does not run the sweep backwards. A rate that is not finite is not
     /// taken: the node holds the last finite one (the default's before any).
     pub rate: Hz,
@@ -280,18 +280,18 @@ impl<F: Float + Lerp> PhaserChain<F> {
         });
         let fb_first = feedback.steps_taken().saturating_add(1);
         let mut complement = [F::ZERO; MAX_PHASER_CHANNELS];
-        let mut lane = [F::ZERO; MAX_PHASER_CHANNELS];
+        let mut frame = [F::ZERO; MAX_PHASER_CHANNELS];
         let mut step = 0u32;
         for i in 0..frames {
             let fb = feedback.at(fb_first.saturating_add(step));
             for c in 0..run {
                 complement[c] = complements[c].at(first[c].saturating_add(step));
-                lane[c] = xs[c][i] + self.last[c] * fb;
+                frame[c] = xs[c][i] + self.last[c] * fb;
             }
-            self.chain(&complement[..run], &mut lane[..run]);
+            self.chain(&complement[..run], &mut frame[..run]);
             for c in 0..run {
-                self.last[c] = lane[c];
-                ys[c][i] = lane[c];
+                self.last[c] = frame[c];
+                ys[c][i] = frame[c];
             }
             step = step.saturating_add(1);
         }
@@ -302,24 +302,24 @@ impl<F: Float + Lerp> PhaserChain<F> {
         feedback.advance(taken);
     }
 
-    /// Runs `lane` (one sample per channel) through the stages in turn, each stage across
+    /// Runs `frame` (one sample per channel) through the stages in turn, each stage across
     /// every channel in one inner loop, `coeffs` one coefficient per channel. Each stage's
-    /// output is the next stage's input, and the last is left in `lane`.
+    /// output is the next stage's input, and the last is left in `frame`.
     #[inline(always)]
-    fn chain(&mut self, coeffs: &[F], lane: &mut [F]) {
+    fn chain(&mut self, coeffs: &[F], frame: &mut [F]) {
         let w = self.width;
         for s in 0..self.stages.get() {
             let x1 = &mut self.x1[s * w..(s + 1) * w];
             let y1 = &mut self.y1[s * w..(s + 1) * w];
             for c in 0..coeffs.len() {
-                let input = lane[c];
+                let input = frame[c];
                 // `c (x - y1) + x1` with `c = a - 1`, the stage held as its complement
                 // `a`: the small terms add first, so a low centre (`a` near 0) keeps its
                 // precision.
                 let out = y1[c] + ((x1[c] - input) + coeffs[c] * (input - y1[c]));
                 x1[c] = input;
                 y1[c] = out;
-                lane[c] = out;
+                frame[c] = out;
             }
         }
     }

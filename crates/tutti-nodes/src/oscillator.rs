@@ -21,7 +21,7 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 ///
 /// Its params are the frequency ([`UnitParam::Frequency`], in [`Hz`]) and the level
 /// ([`UnitParam::Volume`], in [`Amplitude`], a linear gain on the unit-peak
-/// wave), both read per frame: a driven lane's every frame is heard, and a
+/// wave), both read per frame: a driven control signal's every frame is heard, and a
 /// non-finite driven value holds the last finite one. Inserted, its controls
 /// are a [`ParamSet`]; a fork starts from the values last set through it, at
 /// phase 0.
@@ -179,7 +179,7 @@ impl<F: Float> Node<F> for OscillatorNode {
         let level_cell = self.level.load().get();
         let out = io.output(0);
         // A frequency and a level that hold are read, and cross into `F`, once per block; a
-        // lane's value replaces them at each frame.
+        // control signal's value replaces them at each frame.
         let mut step = OscillatorStep::<F>::new(
             Hz::new(if frequency.is_none() {
                 self.good_frequency.read(frequency_cell)
@@ -194,15 +194,15 @@ impl<F: Float> Node<F> for OscillatorNode {
             F::ZERO
         };
         for (i, o) in out[..size].iter_mut().enumerate() {
-            if let Some(lane) = frequency {
-                let f = self.good_frequency.read(lane[i].into());
+            if let Some(signal) = frequency {
+                let f = self.good_frequency.read(signal[i].into());
                 step = OscillatorStep::new(Hz::new(f), rate);
             }
-            if let Some(lane) = level {
-                // A finite lane value is the level in `F` as it is.
-                let good = self.good_level.read(lane[i].into());
-                gain = if lane[i].is_finite() {
-                    lane[i]
+            if let Some(signal) = level {
+                // A finite control signal value is the level in `F` as it is.
+                let good = self.good_level.read(signal[i].into());
+                gain = if signal[i].is_finite() {
+                    signal[i]
                 } else {
                     F::from_unit(Amplitude::new(good))
                 };
@@ -334,10 +334,10 @@ mod tests {
     #[test]
     fn a_driven_frequency_changes_the_pitch_per_frame() {
         let mut d = Direct::new(OscillatorNode::sine(Hz::new(1_000.0)), RATE, 96);
-        let lane: Vec<f32> = (0..96)
+        let signal: Vec<f32> = (0..96)
             .map(|i| if i < 48 { 1_000.0 } else { 2_000.0 })
             .collect();
-        d.feed(0, Some(&lane));
+        d.feed(0, Some(&signal));
         d.block();
         let out = d.output().plane(0).samples();
         // 1 kHz for 48 samples is one cycle, so the 2 kHz half starts at phase 0
@@ -351,11 +351,11 @@ mod tests {
 
     #[test]
     fn a_non_finite_driven_value_holds_the_last_finite_one() {
-        let mut lane = vec![1_000.0f32; 16];
-        lane[8] = f32::NAN;
-        lane[9] = f32::INFINITY;
+        let mut signal = vec![1_000.0f32; 16];
+        signal[8] = f32::NAN;
+        signal[9] = f32::INFINITY;
         let mut d = Direct::new(OscillatorNode::sine(Hz::new(500.0)), RATE, 16);
-        d.feed(0, Some(&lane));
+        d.feed(0, Some(&signal));
         d.block();
         for (n, &y) in d.output().plane(0).iter().enumerate() {
             let exact = libm::sin(2.0 * core::f64::consts::PI * 1_000.0 * n as f64 / 48_000.0);

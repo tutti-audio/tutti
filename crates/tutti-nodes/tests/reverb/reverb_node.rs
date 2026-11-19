@@ -361,8 +361,8 @@ fn an_idle_reverb_wakes_as_a_fresh_one() {
     }
 }
 
-/// A port the graph drives is read on the stream's 32-frame grid, as the FDN's is: a lane
-/// held at 0.9 renders as a cell at 0.9, whatever the blocks, and a lane that rises through
+/// A port the graph drives is read on the stream's 32-frame grid, as the FDN's is: a control signal
+/// held at 0.9 renders as a cell at 0.9, whatever the blocks, and a control signal that rises through
 /// the stream renders the same cut into blocks of 32, 64 and 100 frames. And the tail is
 /// reported from the *longest* room the port takes in the block, so a decay that falls
 /// through the block is not reported short.
@@ -387,8 +387,8 @@ fn a_modulated_port_is_read_on_the_grid_and_its_peak_sets_the_tail() {
         let mut rig = Rig::new(live(controls(0.5, 0.5)));
         let mut out = vec![Vec::new(), Vec::new()];
         for (k, chunk) in x.chunks(block).enumerate() {
-            let lane = &rising[k * block..k * block + chunk.len()];
-            let params = [driven.then_some(lane), none];
+            let signal = &rising[k * block..k * block + chunk.len()];
+            let params = [driven.then_some(signal), none];
             for (all, more) in out.iter_mut().zip(rig.block(chunk, &params).audio) {
                 all.extend(more);
             }
@@ -396,7 +396,7 @@ fn a_modulated_port_is_read_on_the_grid_and_its_peak_sets_the_tail() {
         out
     };
     let whole = render(32, true);
-    assert_ne!(whole, render(32, false), "the lane is heard");
+    assert_ne!(whole, render(32, false), "the control signal is heard");
     for block in [64, 100] {
         assert_eq!(render(block, true), whole, "blocks of {block}");
     }

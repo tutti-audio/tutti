@@ -151,7 +151,7 @@ fn ladder_with_moving_cutoff_and_drive_is_allocation_free() {
 /// The SVF with its cutoff and Q ports fed per frame, at widths 1, 2, 6, 9 and 16: every
 /// grid point designs and retargets, every block is cut, and the bank runs its blended
 /// and held frames in one lane group and in several. Through `Direct`, which feeds a
-/// node's param ports (it copies the lane, so the same 64 frames play each block).
+/// node's param ports (it copies the control signal, so the same 64 frames play each block).
 #[test]
 fn an_svf_with_its_ports_fed_is_allocation_free() {
     for width in [1u16, 2, 6, 9, 16] {

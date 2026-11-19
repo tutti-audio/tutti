@@ -17,7 +17,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::{
     BandSettings, BankShape, COEFF_INTERVAL, CompressorControls, CrossoverControls, CrossoverError,
-    Lerp, MultibandBank, MultibandLanes, MultibandSettings, SimdLanes,
+    Lerp, MultibandBank, MultibandSettings, MultibandSignals, SimdLanes,
 };
 use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
@@ -188,15 +188,15 @@ impl Band {
     /// graph drives on the band's ports (the threshold is read per frame by the
     /// bank, so its cell is the base it falls back to). A non-finite value reads as
     /// the last finite one.
-    fn read<F: Float>(&mut self, lanes: &[Option<&[F]>; PER_BAND], at: usize) -> BandSettings {
-        let driven = |k: usize| lanes[k].map(|lane| lane[at].into());
+    fn read<F: Float>(&mut self, signals: &[Option<&[F]>; PER_BAND], at: usize) -> BandSettings {
+        let driven = |k: usize| signals[k].map(|signal| signal[at].into());
         let mut take = |k: usize, cell: f64| self.good[k].read(driven(k).unwrap_or(cell));
         let knee = take(KNEE, self.knee.load().get());
         let ratio = take(RATIO, self.ratio.load().get());
         let attack = take(ATTACK, self.attack.load().get());
         let release = take(RELEASE, self.release.load().get());
         let makeup = take(MAKEUP, self.makeup.load().get());
-        // The threshold's lane is the bank's own; only the base is read here.
+        // The threshold's control signal is the bank's own; only the base is read here.
         let threshold = self.good[THRESHOLD].read(self.threshold.load().get());
         BandSettings {
             compressor: CompressorControls {
@@ -217,7 +217,7 @@ impl Band {
 
 /// What the graph drives on the node's param ports for a block, by band and param, and
 /// by crossover: `None` for a port nothing drives.
-struct PortLanes<'a, F: Float> {
+struct PortSignals<'a, F: Float> {
     band: [[Option<&'a [F]>; PER_BAND]; BankShape::MAX_BANDS],
     cutoff: [Option<&'a [F]>; MAX_CROSSOVERS],
 }
@@ -257,7 +257,7 @@ struct PortLanes<'a, F: Float> {
 /// whole and the last good set stands.
 ///
 /// The toggles are cells with no port, as [`BusStripNode`](crate::BusStripNode)'s mute is:
-/// they are a block-rate on/off a lane would only flap, and with them the ports would pass
+/// they are a block-rate on/off a control signal would only flap, and with them the ports would pass
 /// the graph's 32.
 ///
 /// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next retarget lands
@@ -377,7 +377,7 @@ impl Rig {
     fn read<F: Float>(
         &mut self,
         rate: SampleRate,
-        lanes: &PortLanes<'_, F>,
+        signals: &PortSignals<'_, F>,
         at: usize,
     ) -> MultibandSettings {
         let nb = self.bands.len();
@@ -385,7 +385,7 @@ impl Rig {
         // above 0 is refused, and the last good one stands.
         let targets = self
             .splits
-            .read(rate, |i| lanes.cutoff[i].map(|l| l[at].into()));
+            .read(rate, |i| signals.cutoff[i].map(|l| l[at].into()));
         if let Ok(set) = CrossoverControls::new(&targets[..nb - 1], rate) {
             self.crossover = set;
         }
@@ -394,7 +394,7 @@ impl Rig {
             bands: [BandSettings::DEFAULT; BankShape::MAX_BANDS],
         };
         for (b, band) in self.bands.iter_mut().enumerate() {
-            settings.bands[b] = band.read(&lanes.band[b], at);
+            settings.bands[b] = band.read(&signals.band[b], at);
         }
         settings
     }
@@ -425,13 +425,13 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
         self.applied = Some(settings);
     }
 
-    /// Renders `frames` of the block through the bank, each band's threshold lane cut to
+    /// Renders `frames` of the block through the bank, each band's threshold control signal cut to
     /// them.
     fn render(
         &mut self,
         input: &[&[F]],
         output: &mut [&mut [F]],
-        lanes: &PortLanes<'_, F>,
+        signals: &PortSignals<'_, F>,
         frames: Range<usize>,
     ) {
         if frames.is_empty() {
@@ -445,9 +445,9 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
         ) else {
             return;
         };
-        let mut thresholds = MultibandLanes::default();
-        for (slot, lane) in thresholds.thresholds.iter_mut().zip(&lanes.band) {
-            *slot = lane[THRESHOLD].map(|l| Mono::new(&l[frames.clone()]));
+        let mut thresholds = MultibandSignals::default();
+        for (slot, signal) in thresholds.thresholds.iter_mut().zip(&signals.band) {
+            *slot = signal[THRESHOLD].map(|l| Mono::new(&l[frames.clone()]));
         }
         self.bank.process(thresholds, input, output);
     }
@@ -461,7 +461,7 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
         rig: &mut Rig,
         input: &[&[F]],
         output: &mut [&mut [F]],
-        lanes: &PortLanes<'_, F>,
+        signals: &PortSignals<'_, F>,
         position: u64,
     ) {
         let rate = self.rate;
@@ -474,11 +474,11 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
             },
             |_, _| None,
             |(tuned, rig, _), at, _| {
-                let target = rig.read(rate, lanes, at);
+                let target = rig.read(rate, signals, at);
                 (tuned.applied.as_ref() != Some(&target)).then_some(target)
             },
             |(tuned, ..), target| tuned.apply(target),
-            |(tuned, _, output), frames| tuned.render(input, output, lanes, frames),
+            |(tuned, _, output), frames| tuned.render(input, output, signals, frames),
         );
     }
 }
@@ -533,20 +533,20 @@ impl<F: Float + SimdLanes + Lerp> Node<F> for MultibandCompressorNode<F> {
 
         // What the graph drives on each port, taken before the split of `io`.
         let nb = self.rig.bands.len();
-        let mut lanes = PortLanes {
+        let mut signals = PortSignals {
             band: [[None; PER_BAND]; BankShape::MAX_BANDS],
             cutoff: [None; MAX_CROSSOVERS],
         };
-        for (i, c) in lanes.cutoff.iter_mut().enumerate().take(nb - 1) {
+        for (i, c) in signals.cutoff.iter_mut().enumerate().take(nb - 1) {
             *c = self
                 .declared_param_at::<{ UnitParam::Cutoff as u16 }, _>(&io, i as u8)
                 .frames();
         }
-        for (b, lane) in lanes.band[..nb].iter_mut().enumerate() {
+        for (b, signal) in signals.band[..nb].iter_mut().enumerate() {
             let band = b as u8;
             // In the order of `BAND_PARAMS`: `declared_param_at` takes its kind as a const
             // generic, which a loop over the array cannot supply.
-            *lane = [
+            *signal = [
                 self.declared_param_at::<{ UnitParam::Threshold as u16 }, _>(&io, band)
                     .frames(),
                 self.declared_param_at::<{ UnitParam::Knee as u16 }, _>(&io, band)
@@ -574,7 +574,7 @@ impl<F: Float + SimdLanes + Lerp> Node<F> for MultibandCompressorNode<F> {
         };
         let position = t.position;
         t.position += n as u64;
-        t.render_steps(rig, input, output, &lanes, position);
+        t.render_steps(rig, input, output, &signals, position);
 
         // Each band's deepest reduction in the block.
         let reading = t.bank.take_reading();
@@ -1634,11 +1634,11 @@ mod tests {
         let mut n = prepared(n);
         let port = PER_BAND + 5;
         let x = sine(10_000.0, FS, SETTLE + WINDOW);
-        let lane = [6.0f32; 512];
+        let signal = [6.0f32; 512];
         let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
         let mut y = Vec::new();
         for chunk in x.chunks(512) {
-            params[port] = Some(&lane[..chunk.len()]);
+            params[port] = Some(&signal[..chunk.len()]);
             y.extend_from_slice(&drive(&mut n, RATE, Planes::new(&[chunk]).unwrap(), &params)[0]);
         }
         let x4 = warp(10_000.0, 1_000.0).powi(4);
@@ -1663,10 +1663,10 @@ mod tests {
                 c.band(b).set_release(0.001);
             }
             let mut n = prepared(n);
-            let lane = [-30.0f32; 512];
+            let signal = [-30.0f32; 512];
             let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
             for _ in 0..SETTLE / 512 {
-                params[port] = Some(&lane);
+                params[port] = Some(&signal);
                 drive(
                     &mut n,
                     RATE,
@@ -1704,10 +1704,10 @@ mod tests {
         // 24000 frames: the block that follows begins on a grid point.
         render_chunked(&mut n, &[vec![0.5f32; SETTLE]], 512);
         let port = 2;
-        let mut lane = [1.0f32; 256];
-        lane[128..].fill(8.0);
+        let mut signal = [1.0f32; 256];
+        signal[128..].fill(8.0);
         let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
-        params[port] = Some(&lane);
+        params[port] = Some(&signal);
         let y = drive(
             &mut n,
             RATE,
@@ -1734,11 +1734,11 @@ mod tests {
         let mut n = prepared(n);
         let port = 2 * PER_BAND;
         let x = sine(2_000.0, FS, SETTLE + WINDOW);
-        let lane = [2_000.0f32; 512];
+        let signal = [2_000.0f32; 512];
         let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
         let mut y = Vec::new();
         for chunk in x.chunks(512) {
-            params[port] = Some(&lane[..chunk.len()]);
+            params[port] = Some(&signal[..chunk.len()]);
             y.extend_from_slice(&drive(&mut n, RATE, Planes::new(&[chunk]).unwrap(), &params)[0]);
         }
         let amp = amplitude_at(&y[SETTLE..], 2_000.0, FS);

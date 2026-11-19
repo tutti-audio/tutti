@@ -16,7 +16,7 @@ use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Depth, Feedback, Hz, PhaseIncrement, SampleRate, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// Phaser of any width: `N` audio inputs, `N` outputs.
 ///
@@ -51,7 +51,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// stream is cut into blocks; a driven port is read at the grid's solve frame.
 ///
 /// - The **rate** is how fast the notches sweep: phaser rates are slow, typically 0.1 to
-///   2 Hz. **Floored at 0.01 Hz, a lane's value and a cell's alike.** It lands whole, and the
+///   2 Hz. **Floored at 0.01 Hz, a control signal's value and a cell's alike.** It lands whole, and the
 ///   LFO's phase is continuous across it.
 /// - The **depth** is a fraction of the sweep range, `0..=1` (a chorus's is seconds of
 ///   delay): 1 sweeps the whole range, 0 parks the notches at its bottom. A cell that moves
@@ -130,7 +130,7 @@ pub struct PhaserSet;
 control_set! {
     PhaserSet(_s): PhaserControls = PhaserControls::DEFAULT;
     live: (all);
-    // How fast the notches sweep: floored at 0.01 Hz, a lane's value and a cell's alike.
+    // How fast the notches sweep: floored at 0.01 Hz, a control signal's value and a cell's alike.
     Rate => Hz = rate { whole },
     // A fraction of the sweep range.
     Depth => Depth = depth { whole },
@@ -310,7 +310,7 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
@@ -441,7 +441,7 @@ mod tests {
         (ni * dr - nr * di).atan2(nr * dr + ni * di)
     }
 
-    /// The rate is **floored at 0.01 Hz, a lane's value and a cell's alike**: a rate of -3 Hz,
+    /// The rate is **floored at 0.01 Hz, a control signal's value and a cell's alike**: a rate of -3 Hz,
     /// written to the cell or fed on the port, is the 0.01 Hz sweep, which after 0.1 s has
     /// moved the LFO a thousandth of a cycle, so the centre of a 4-stage phaser at full depth
     /// over 200 to 4000 Hz is `200 + 3800 (1 + sin(2 pi 0.001)) / 2`. A 1 kHz sine comes out
@@ -449,7 +449,7 @@ mod tests {
     /// stage, since the coefficient has barely moved). Running backwards at 3 Hz would have
     /// the centre near its trough, 0.3 of a cycle behind, and a different phase.
     #[test]
-    fn a_rate_below_the_floor_is_the_floor_in_a_cell_and_on_a_lane() {
+    fn a_rate_below_the_floor_is_the_floor_in_a_cell_and_on_a_signal() {
         let n = 4_800;
         let centre = 200.0 + 3_800.0 * 0.5 * (1.0 + (std::f64::consts::TAU * 0.001).sin());
         let wanted = 4.0 * stage_phase(centre, 1_000.0);
@@ -466,7 +466,7 @@ mod tests {
         let x: Vec<f32> = (0..n + 64)
             .map(|i| (std::f64::consts::TAU * 1_000.0 * i as f64 / RATE.get()).sin() as f32)
             .collect();
-        let render = |cell: Option<f32>, lane: Option<f32>| {
+        let render = |cell: Option<f32>, signal: Option<f32>| {
             let node = PhaserNode::<f32>::mono(Stages::of(4), controls);
             if let Some(v) = cell {
                 assert!(node.param_set().set(UnitParam::Rate, f64::from(v)));
@@ -474,7 +474,7 @@ mod tests {
             let mut node = prepared(node, RATE, 64);
             let mut y = Vec::new();
             for chunk in x.chunks(64) {
-                let rate = lane.map(|v| vec![v; chunk.len()]);
+                let rate = signal.map(|v| vec![v; chunk.len()]);
                 let params = [rate.as_deref(), None, None];
                 y.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0));
             }
@@ -482,7 +482,7 @@ mod tests {
         };
         for (what, y) in [
             ("cell", render(Some(-3.0), None)),
-            ("lane", render(None, Some(-3.0))),
+            ("signal", render(None, Some(-3.0))),
         ] {
             let w = std::f64::consts::TAU * 1_000.0 / RATE.get();
             let worst = (n - 256..n)
@@ -492,12 +492,12 @@ mod tests {
         }
     }
 
-    /// A depth lane past 1 sweeps the whole range and no further: at 0.01 Hz after 0.1 s the
+    /// A depth control signal past 1 sweeps the whole range and no further: at 0.01 Hz after 0.1 s the
     /// LFO is a thousandth of a cycle on, so a 1 kHz sine through four stages comes out with
     /// the phase of four stages tuned to `200 + 3800 (1 + sin(2 pi 0.001)) / 2` Hz, the
-    /// sweep at depth exactly 1 (a lane at 8 unclamped would put the centre at 15 kHz and more).
+    /// sweep at depth exactly 1 (a control signal at 8 unclamped would put the centre at 15 kHz and more).
     #[test]
-    fn a_depth_lane_past_one_sweeps_the_whole_range_and_no_further() {
+    fn a_depth_signal_past_one_sweeps_the_whole_range_and_no_further() {
         let n = 4_800;
         let centre = 200.0 + 3_800.0 * 0.5 * (1.0 + (std::f64::consts::TAU * 0.001).sin());
         let wanted = 4.0 * stage_phase(centre, 1_000.0);
@@ -514,8 +514,8 @@ mod tests {
             .collect();
         let mut y = Vec::new();
         for chunk in x.chunks(64) {
-            let lane = vec![8.0f32; chunk.len()];
-            let params = [None, Some(&lane[..]), None];
+            let signal = vec![8.0f32; chunk.len()];
+            let params = [None, Some(&signal[..]), None];
             y.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0));
         }
         let w = std::f64::consts::TAU * 1_000.0 / RATE.get();
@@ -527,12 +527,12 @@ mod tests {
 
     /// A control the graph drives is sampled on the stream's 16-frame grid, not at the block's
     /// last frame, so what is heard does not depend on how the stream is cut into blocks
-    /// (the node against itself under cuts, not a reference render); and the lane is heard,
+    /// (the node against itself under cuts, not a reference render); and the control signal is heard,
     /// since the cell it overrides is a different depth.
     #[test]
     fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
         let len = 4_096;
-        let lane: Vec<f32> = (0..len)
+        let signal: Vec<f32> = (0..len)
             .map(|n| 0.1 + 0.9 * n as f32 / len as f32)
             .collect();
         let x: Vec<f32> = (0..len)
@@ -547,7 +547,7 @@ mod tests {
             let mut out = Vec::new();
             for (n, chunk) in x.chunks(block).enumerate() {
                 let at = n * block;
-                let l = &lane[at..at + chunk.len()];
+                let l = &signal[at..at + chunk.len()];
                 let params = [None, driven.then_some(l), None];
                 out.extend(
                     drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0),
@@ -556,7 +556,7 @@ mod tests {
             out
         };
         let whole = render(1_024, true);
-        assert_ne!(whole, render(1_024, false), "the lane is heard");
+        assert_ne!(whole, render(1_024, false), "the signal is heard");
         for block in [1, 16, 64, 128] {
             assert_eq!(render(block, true), whole, "blocks of {block}");
         }

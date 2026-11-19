@@ -282,7 +282,7 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
-        ControlLanes, ControlRead, ControlSet, ControlValid, CrossoverKernel, CutFilterKernel,
+        ControlRead, ControlSet, ControlSignals, ControlValid, CrossoverKernel, CutFilterKernel,
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
         EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
         LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,

@@ -2,14 +2,14 @@
 //!
 //! A kernel writes a [`ControlSet`]: its addresses, and the conversion between its
 //! `Controls` and the `f64` cells. [`Params`] is the one reader over it,
-//! with one rule for every control: the lane's value at
-//! the solve frame when a lane drives it, else a ramp from the controls last
+//! with one rule for every control: the control signal's value at
+//! the solve frame when a control signal drives it, else a ramp from the controls last
 //! designed to the cell's value, each read through [`LastGood`]. Sanitising
 //! (floors, clamps, whole-set validation) is the design's, never the reader's.
 //!
 //! A control the kernel reads **per frame** is [`ControlRead::Fast`]: the
-//! kernel takes its port's frames from the [`ControlLanes`](crate::ControlLanes)
-//! (`Params::lanes`), and the reader sees only its cell, the base the member is
+//! kernel takes its port's frames from the [`ControlSignals`](crate::ControlSignals)
+//! (`Params::signals`), and the reader sees only its cell, the base the member is
 //! designed at.
 
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use tutti_dsp::{GAIN_RAMP, Ramp};
 use tutti_graph::{Io, ParamSetBuilder};
 use tutti_units::{SampleRate, UnitAddr};
 
-use crate::kernel::MAX_LANES;
+use crate::kernel::MAX_SIGNALS;
 use crate::ramp::LastGood;
 
 /// The most controls a kernel has: the compressor's six, the gate's five and the
@@ -73,13 +73,13 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
 pub enum ControlRead {
     /// A moved cell ramps on the stream clock over [`GAIN_RAMP`], from where the
     /// control stood on the first frame of the block that first sees the write, or its
-    /// port is read at the solve frame when a lane drives it.
+    /// port is read at the solve frame when a control signal drives it.
     Ramp,
     /// As [`Ramp`](Self::Ramp), but a moved cell lands whole: a control whose ramp
     /// is the kernel's own (a detector's) is not ramped by the reader.
     Whole,
     /// Read **per frame** by the kernel, from its port, into a
-    /// [`ControlLanes`](crate::ControlLanes) lane (the fast controls fill the lanes in row order).
+    /// [`ControlSignals`](crate::ControlSignals) control signal (the fast controls fill the control signals in row order).
     /// The reader takes only its cell, the base the member is designed at, and a
     /// frame nobody drives is clamped at that member. A fast control lands whole.
     Fast,
@@ -120,7 +120,7 @@ impl Control {
         }
     }
 
-    /// The row flag `fast`: read per frame from a [`ControlLanes`](crate::ControlLanes) lane.
+    /// The row flag `fast`: read per frame from a [`ControlSignals`](crate::ControlSignals) control signal.
     #[must_use]
     pub(crate) const fn fast(self) -> Self {
         Self {
@@ -148,7 +148,7 @@ impl Control {
     }
 
     /// How many of `controls` are [`ControlRead::Fast`]; `const`, for the macro's check
-    /// against [`MAX_LANES`].
+    /// against [`MAX_SIGNALS`].
     #[must_use]
     pub(crate) const fn fast_count(controls: &[Self]) -> usize {
         let (mut i, mut n) = (0, 0);
@@ -201,8 +201,8 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// `Kind[0] => Unit = field[0]` the first of several of a kind (`HasControls`),
 /// and `Kind[i]` with `i` above 0 the others. A row may end in flags, `{ .. }`, that
 /// say how the reader takes it ([`Control`]): `whole` (lands whole, no ramp), `fast`
-/// (read per frame into a [`ControlLanes`](crate::ControlLanes) lane, in row order; more fast rows
-/// than [`MAX_LANES`] do not compile) and `not_nan` (accepts `+-inf`). A flag that is
+/// (read per frame into a [`ControlSignals`](crate::ControlSignals) control signal, in row order; more fast rows
+/// than [`MAX_SIGNALS`] do not compile) and `not_nan` (accepts `+-inf`). A flag that is
 /// not one of these does not compile.
 macro_rules! control_set {
     (
@@ -229,8 +229,8 @@ macro_rules! control_set {
                     $crate::params::Control::RAMP $($(.$flag())*)?
                 ),+];
                 const _: () = assert!(
-                    $crate::params::Control::fast_count(ALL) <= $crate::MAX_LANES,
-                    "more fast controls than a ControlLanes has lanes",
+                    $crate::params::Control::fast_count(ALL) <= $crate::MAX_SIGNALS,
+                    "more fast controls than a ControlSignals has signals",
                 );
                 ALL[k]
             }
@@ -326,8 +326,8 @@ pub struct Params<S: ControlSet> {
     good: Vec<LastGood<f64>>,
     /// How each control is read, from [`ControlSet::control`].
     controls: [Control; MAX_CONTROLS],
-    /// The fast controls, by index, in the order of the lanes they fill.
-    fast: [usize; MAX_LANES],
+    /// The fast controls, by index, in the order of the control signals they fill.
+    fast: [usize; MAX_SIGNALS],
     /// How many of `fast` are filled.
     fast_len: usize,
     /// Each [`ControlRead::Ramp`] cell's ramp on the stream clock.
@@ -344,8 +344,8 @@ impl<S: ControlSet> Params<S> {
     ///
     /// # Panics
     ///
-    /// If `set` has more [`ControlRead::Fast`] controls than [`ControlLanes`](crate::ControlLanes) has
-    /// lanes ([`MAX_LANES`]): only a hand-written [`ControlSet`] can, since
+    /// If `set` has more [`ControlRead::Fast`] controls than [`ControlSignals`](crate::ControlSignals) has
+    /// control signals ([`MAX_SIGNALS`]): only a hand-written [`ControlSet`] can, since
     /// `control_set!` refuses it at compile time.
     #[must_use]
     pub fn new(set: S, initial: &S::Controls) -> Self {
@@ -355,13 +355,13 @@ impl<S: ControlSet> Params<S> {
         set.flatten(&set.defaults(), &mut fallback[..n]);
         let (mut cells, mut good) = (Vec::with_capacity(n), Vec::with_capacity(n));
         let mut controls = [Control::RAMP; MAX_CONTROLS];
-        let (mut fast, mut fast_len) = ([0; MAX_LANES], 0);
+        let (mut fast, mut fast_len) = ([0; MAX_SIGNALS], 0);
         for k in 0..n {
             controls[k] = set.control(k);
             if controls[k].read == ControlRead::Fast {
                 assert!(
-                    fast_len < MAX_LANES,
-                    "more fast controls than a ControlLanes has lanes"
+                    fast_len < MAX_SIGNALS,
+                    "more fast controls than a ControlSignals has signals"
                 );
                 fast[fast_len] = k;
                 fast_len += 1;
@@ -433,16 +433,17 @@ impl<S: ControlSet> Params<S> {
     }
 
     /// Each control's lowest and highest value in the block (the cell's where no
-    /// lane drives it), or `None` when no lane does.
+    /// control signal drives it), or `None` when no control signal does.
     fn extremes<G: Float>(&self, io: &Io<'_, G>) -> Option<[[f64; MAX_CONTROLS]; 2]> {
         let mut out = [[0.0; MAX_CONTROLS]; 2];
         let mut driven = false;
         for (k, cell) in self.cells.iter().enumerate() {
-            let lane = io.param(k).frames();
-            driven |= lane.is_some();
+            let signal = io.param(k).frames();
+            driven |= signal.is_some();
             let base = cell.load(Acquire);
             let fold = |pick: fn(f64, f64) -> f64| {
-                lane.into_iter()
+                signal
+                    .into_iter()
                     .flatten()
                     .map(|&v| -> f64 { v.into() })
                     .filter(|v| v.is_finite())
@@ -498,13 +499,13 @@ impl<S: ControlSet> Params<S> {
         let mut value = [0.0f64; MAX_CONTROLS];
         for (k, v) in value[..n].iter_mut().enumerate() {
             let control = self.controls[k];
-            let lane = match control.read {
+            let signal = match control.read {
                 ControlRead::Fast => None,
                 ControlRead::Ramp | ControlRead::Whole => io.param(k).frames(),
             };
-            *v = match (lane, control.read) {
-                (Some(lane), _) => {
-                    let x: f64 = lane[at.frame].into();
+            *v = match (signal, control.read) {
+                (Some(signal), _) => {
+                    let x: f64 = signal[at.frame].into();
                     self.good[k].read_if(x, control.accepts(x))
                 }
                 (None, ControlRead::Ramp) => {
@@ -542,16 +543,16 @@ impl<S: ControlSet> Params<S> {
             .min()
     }
 
-    /// The per-frame lanes of the [`ControlRead::Fast`] controls, for the
-    /// [`ControlLanes`](crate::ControlLanes): the port's frames in the port's own unit, `None` where
+    /// The per-frame control signals of the [`ControlRead::Fast`] controls, for the
+    /// [`ControlSignals`](crate::ControlSignals): the port's frames in the port's own unit, `None` where
     /// nothing drives it. They are the block's, so a caller slices them by the frames it
     /// renders.
-    pub(crate) fn lanes<'a, G: Float>(&self, io: &Io<'a, G>) -> [Option<&'a [G]>; MAX_LANES] {
-        let mut lanes = [None; MAX_LANES];
-        for (lane, &k) in lanes.iter_mut().zip(&self.fast[..self.fast_len]) {
-            *lane = io.param(k).frames();
+    pub(crate) fn signals<'a, G: Float>(&self, io: &Io<'a, G>) -> [Option<&'a [G]>; MAX_SIGNALS] {
+        let mut signals = [None; MAX_SIGNALS];
+        for (signal, &k) in signals.iter_mut().zip(&self.fast[..self.fast_len]) {
+            *signal = io.param(k).frames();
         }
-        lanes
+        signals
     }
 
     /// The controls that ring longest among the values a modulated port takes anywhere

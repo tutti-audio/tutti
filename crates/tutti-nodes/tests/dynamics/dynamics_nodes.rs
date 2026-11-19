@@ -1,5 +1,5 @@
 //! The compressor, gate, limiter and brickwall nodes as the graph runs them: what a node is
-//! across blocks (a moved cell lands on the grid, a driven lane is read per frame), resets,
+//! across blocks (a moved cell lands on the grid, a driven control signal is read per frame), resets,
 //! parks and clones, the key bus, the latency and the tail. Every figure is from the
 //! definition (the grid, the lookahead, the ceiling), never from another render.
 
@@ -28,12 +28,12 @@ fn noise(seed: u32, frames: usize, level: f32) -> Vec<f32> {
 }
 
 /// A node that renders `inputs` (one per input channel, the key's after the audio's) in blocks
-/// of `block` frames, `lanes[k]` driving param `k`, and `write` called with the node's
+/// of `block` frames, `signals[k]` driving param `k`, and `write` called with the node's
 /// `ParamSet` before the block that begins at frame `at`.
 fn render<N: Node + ParamNode>(
     node: N,
     inputs: &[&[f32]],
-    lanes: &[Option<&[f32]>],
+    signals: &[Option<&[f32]>],
     block: usize,
     at: usize,
     write: impl Fn(&tutti_graph::ParamSet),
@@ -49,7 +49,7 @@ fn render<N: Node + ParamNode>(
         }
         let end = (start + block).min(n);
         let ins: Vec<&[f32]> = inputs.iter().map(|c| &c[start..end]).collect();
-        let ps: Vec<Option<&[f32]>> = lanes.iter().map(|l| l.map(|l| &l[start..end])).collect();
+        let ps: Vec<Option<&[f32]>> = signals.iter().map(|l| l.map(|l| &l[start..end])).collect();
         let o = drive(&mut node, SR, Planes::new(&ins).unwrap(), &ps);
         out.resize(o.len(), Vec::new());
         for (all, more) in out.iter_mut().zip(o) {
@@ -196,10 +196,10 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
 }
 
 /// What a node is under cuts: a write between blocks at frame 1024 (a multiple of every
-/// block below) and a driven lane give the same render in blocks of 1, 16, 64, 128 and 1024,
-/// with the key bus fed, and the move and the lane are heard.
+/// block below) and a driven control signal give the same render in blocks of 1, 16, 64, 128 and 1024,
+/// with the key bus fed, and the move and the control signal are heard.
 #[test]
-fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
+fn a_moved_cell_and_a_driven_signal_render_the_same_bits_in_any_blocks() {
     const N: usize = 4_096;
     let audio = [noise(1, N, 0.9), noise(2, N, 0.9)];
     let key = [noise(3, N, 0.9), noise(4, N, 0.9)];
@@ -275,7 +275,7 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             }),
         ),
         (
-            // Nothing drives it per frame: the lane is not heard (see the loop).
+            // Nothing drives it per frame: the control signal is not heard (see the loop).
             "dynamic eq",
             Box::new(|block, moved, _| {
                 render(
@@ -348,7 +348,11 @@ fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
             "{name}: the move is heard"
         );
         if *name != "dynamic eq" {
-            assert_ne!(whole, make(1_024, true, false), "{name}: the lane is heard");
+            assert_ne!(
+                whole,
+                make(1_024, true, false),
+                "{name}: the signal is heard"
+            );
         }
         for block in [1, 16, 64, 128] {
             assert_eq!(make(block, true, true), whole, "{name}: blocks of {block}");
