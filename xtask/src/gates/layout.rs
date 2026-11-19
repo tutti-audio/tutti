@@ -215,7 +215,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-au-host",
         ],
     ),
-    ("tutti-dsp", &["tutti-units", "tutti-buffers"]),
+    ("tutti-dsp", &["tutti-units", "tutti-buffers", "tutti-rt"]),
     ("tutti-curve", &["tutti-units"]),
     ("tutti-buffers", &["tutti-units"]),
     (
