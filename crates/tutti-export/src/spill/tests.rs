@@ -59,7 +59,7 @@ fn a_spill_within_the_budget_stays_in_memory() {
     }
     spill.finish().unwrap();
     assert!(!spill.is_file());
-    assert_eq!(spill.frames(), Samples(1000));
+    assert_eq!(spill.frames(), Samples::new(1000));
     assert!(listing(dir.path()).is_empty(), "no file beside the target");
     for block in [7, 100, 5000] {
         assert_eq!(read_all(&spill, block), want, "blocks of {block}");
@@ -87,7 +87,7 @@ fn a_spill_past_the_budget_moves_to_a_file_beside_the_target_and_is_removed() {
     spill.finish().unwrap();
     assert!(spill.is_file());
     assert_eq!(budget.held, 0, "the memory it held went back to the budget");
-    assert_eq!(spill.frames(), Samples(1000));
+    assert_eq!(spill.frames(), Samples::new(1000));
     let files = listing(dir.path());
     assert_eq!(files.len(), 1, "{files:?}");
     assert!(

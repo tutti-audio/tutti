@@ -59,7 +59,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 
 fn graph() -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-    let tone = g.add(Osc::sine(Hz(440.0)));
+    let tone = g.add(Osc::sine(Hz::new(440.0)));
     let burst = g.add(tutti_graph::ForkByClone(Burst));
     let sink = g.add(tutti_graph::ForkByClone(Discard));
     g.connect_events(burst, 0, sink, 0);
@@ -72,7 +72,7 @@ fn config(policy: EventLossPolicy) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
             sample_rate: RATE,
-            duration_seconds: Seconds(2_048.0 / 48_000.0),
+            duration_seconds: Seconds::new(2_048.0 / 48_000.0),
             on_event_loss: policy,
             ..Default::default()
         },
@@ -145,7 +145,7 @@ fn a_render_that_lost_events_replaces_nothing() {
     assert_eq!(leftovers(), vec!["out.wav".to_string()], "no temporary");
 
     let normalize = tutti_export::Normalize::Peak {
-        target: tutti_units::Db(-1.0),
+        target: tutti_units::Db::new(-1.0),
     };
     let err = support::render_normalized_to_file(
         graph(),
