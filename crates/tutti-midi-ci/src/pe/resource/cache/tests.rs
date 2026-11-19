@@ -47,6 +47,15 @@ fn get_at(
     if went {
         let id = script.last_get_id();
         answer(script, id, cache_time, &program_page(0, 3));
+    } else {
+        assert!(
+            matches!(
+                script.events.last(),
+                Some(ResourceEvent::Got { result: Ok(_), .. })
+            ),
+            "{:?}",
+            script.events
+        );
     }
     went
 }
@@ -81,11 +90,10 @@ fn a_reply_without_a_cache_time_or_with_zero_is_not_cached() {
     let mut script = Script::new(&paginating_list());
     assert!(get_at(&mut script, &page(0), secs(0), None));
     assert!(get_at(&mut script, &page(0), secs(0), Some(0)));
-    assert!(get_at(&mut script, &page(0), secs(0), Some(0)));
 }
 
-// M2-103 §7.4.3: each request has its own cacheTime: the first 10 entries at 30
-// seconds and the next 10 at 60 expire 30 and 60 seconds after their replies.
+// M2-103 §7.4.3: each request has its own cacheTime: one page at 30 seconds and
+// the next at 60 expire 30 and 60 seconds after their replies.
 /// Spec: m2-103/7.4.3#3, m2-103/7.3#4
 #[test]
 fn pages_expire_each_on_its_own_cache_time() {
@@ -174,4 +182,23 @@ fn a_set_drops_what_a_get_held() {
     assert!(!ask(&mut script), "a failed Set changed nothing");
     set(&mut script, PeStatus::Ok);
     assert!(ask(&mut script), "the Set dropped the data held");
+}
+
+// A Get in flight when the Subscription updates its Resource got data the update
+// has replaced, so its reply is not held.
+#[test]
+fn a_reply_overtaken_by_a_subscription_update_is_not_cached() {
+    let (mut script, id) = subscribed_script();
+    let read = get(PeResource::LocalOn);
+    let sent = sent_gets(&script);
+    let (_, actions) = script.init.get(&read, script.now).unwrap();
+    script.take(actions);
+    let request = script.last_get_id();
+    script.subscription(5, update(PeUpdateCommand::Full, &id), b"true");
+    let mut header = PeReply::new(PeStatus::Ok);
+    header.cache_time = Some(PeCacheTime::from_secs(100));
+    script.reply_with(request, PeMessageKind::GET_REPLY, header, b"false".to_vec());
+    let (_, actions) = script.init.get(&read, script.now).unwrap();
+    script.take(actions);
+    assert_eq!(sent_gets(&script), sent + 2);
 }

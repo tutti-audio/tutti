@@ -233,6 +233,8 @@ enum Op {
         call: CallId,
         target: ResourceTarget,
         page: Option<PePage>,
+        /// The cache's drop count when the Get started.
+        drops: u64,
     },
     Walk(Walk),
     Set {
@@ -367,8 +369,10 @@ impl ResourceInitiator {
 
     /// Get Property Data. While the `cacheTime` of an earlier reply to the same
     /// request (Resource, entry and page) has not elapsed at `now`, the data is
-    /// that reply's, ends at once as [`ResourceEvent::Got`], and nothing is sent
-    /// (M2-103 §7.4.3). A Subscription update of the Resource drops what is held.
+    /// that reply's: the returned actions hold its [`ResourceEvent::Got`] and
+    /// nothing is sent (M2-103 §7.4.3). A Subscription update of the Resource
+    /// drops what is held for it (§7.4.3). A successful Set of it does too, which
+    /// the spec does not ask for: the data held is the data the Set replaced.
     ///
     /// # Errors
     ///
@@ -386,6 +390,7 @@ impl ResourceInitiator {
             get.check_get(entry)?;
         }
         let call = self.call_id();
+        self.cache.prune(now);
         if let Some(data) = self.cache.fresh(get.target(), get.page(), now) {
             let got = event(ResourceEvent::Got {
                 call,
@@ -398,6 +403,7 @@ impl ResourceInitiator {
             call,
             target: get.target().clone(),
             page: get.page(),
+            drops: self.cache.drops(),
         };
         let actions = self.start(PeCall::Get(pe_get(get)), op, now)?;
         Ok((call, actions))
@@ -408,7 +414,8 @@ impl ResourceInitiator {
     ///
     /// The walk asks for offset 0, then for the offset after the entries it has,
     /// until it has `totalCount` of them. A reply with no `totalCount`, or an
-    /// empty page before the end, fails the call.
+    /// empty page before the end, fails the call. A walk that paginates always
+    /// asks: it neither uses nor holds the data of [`get`](Self::get)'s cache.
     ///
     /// # Errors
     ///
@@ -600,16 +607,23 @@ impl ResourceInitiator {
             Op::List => match reply.and_then(|r| decode(&PeResource::ResourceList, &r)) {
                 Ok(PeData::ResourceList(list)) => {
                     self.list = Some(list.clone());
+                    self.cache.clear();
                     out.push(event(ResourceEvent::ResourceList(list)));
                 }
                 Ok(_) => {}
                 Err(failure) => out.push(event(ResourceEvent::ResourceListFailed(failure))),
             },
-            Op::Get { call, target, page } => {
+            Op::Get {
+                call,
+                target,
+                page,
+                drops,
+            } => {
                 let cache_time = reply.as_ref().ok().and_then(|r| r.header.cache_time);
                 let result = reply.and_then(|r| decode(target.resource(), &r));
                 if let (Ok(data), Some(time)) = (&result, cache_time) {
-                    self.cache.keep(&target, page, data.clone(), time, now);
+                    self.cache
+                        .keep(&target, page, data.clone(), time, drops, now);
                 }
                 out.push(event(ResourceEvent::Got {
                     call,
