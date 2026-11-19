@@ -100,7 +100,7 @@ fn lsb(bit_depth: Pcm) -> f32 {
         Pcm::Float32 | Pcm::Float64 => 1.0 / 8_388_608.0,
         // No `_` arm: `Pcm` is deliberately not `#[non_exhaustive]`, so a
         // fourth depth must fail to compile here rather than pick up a silent
-        // default. See the enum's docs in tutti-types::pcm.
+        // default. See the enum's docs.
     }
 }
 

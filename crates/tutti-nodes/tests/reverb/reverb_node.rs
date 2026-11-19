@@ -8,6 +8,7 @@
 use std::sync::Arc;
 use tutti_buffers::Planes;
 
+use atomic_float::AtomicF64;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbBank, FreeverbControls};
 use tutti_fixtures::Noise;
@@ -19,7 +20,6 @@ use tutti_graph::{
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{FdnNode, FreeverbNode};
-use tutti_types::AtomicF64;
 use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances

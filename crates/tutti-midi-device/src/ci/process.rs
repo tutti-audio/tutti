@@ -106,8 +106,6 @@ bitflags! {
 ///
 /// `0x02` to `0x7E` are reserved and a message carrying one is not read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
 pub enum DataControl {
     /// `0x00`: no data, the Reply and the End alone, which shows which messages
     /// the Responder can report.

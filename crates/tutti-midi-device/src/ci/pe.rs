@@ -132,6 +132,8 @@ pub use reassemble::{
     PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeStep,
     StreamLimit,
 };
+#[cfg(feature = "serde")]
+pub use resource::SavedStateError;
 pub use resource::{
     ActionError, Arrival, CallError, CallId, CanSet, CcIndex, ChangeKind, ClusterKind,
     ColumnSource, CommonState, ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind,

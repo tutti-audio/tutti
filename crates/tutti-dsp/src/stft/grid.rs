@@ -4,7 +4,7 @@
 //! its arguments transposed and a count of frames cannot stand in for a count of
 //! samples.
 //!
-//! Deliberately crate-local rather than in `tutti-types`: bins are STFT-grid
+//! Deliberately crate-local rather than in a shared crate: bins are STFT-grid
 //! vocabulary, and only this crate and the spectral view have them. The house
 //! rule is that a shared type earns its place by being shared.
 //!

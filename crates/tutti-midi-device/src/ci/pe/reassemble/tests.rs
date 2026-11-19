@@ -640,7 +640,6 @@ fn a_first_chunk_with_a_bad_header_is_malformed() {
     assert_eq!(r.buffered(), PeBuffered::default());
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_stream_and_buffer_limits_are_range_checked_values() {
     use tutti_fixtures::{RangeContract, check_range_contract};

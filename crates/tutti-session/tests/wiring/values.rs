@@ -11,10 +11,10 @@ use tutti_graph::{
 use tutti_nodes::{
     CompressorControls, CompressorNode, KeySource, MultibandCompressorNode, SvfFilterNode, SvfType,
 };
+use tutti_rt::Param;
 use tutti_session::{
     Assign, DetachedSession, Knobs, ParamTarget, Session, SetRefusal, TargetInfo, ValueErrorKind,
 };
-use tutti_types::Param;
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
 
 fn detached() -> DetachedSession {

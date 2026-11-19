@@ -419,8 +419,6 @@ fn check_no_std_builds_each_listed_crate_for_the_bare_metal_target() {
         [
             "cargo build --locked -p tutti-units --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-units --no-default-features --target aarch64-unknown-none --features serde",
-            "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none",
-            "cargo build --locked -p tutti-types --no-default-features --target aarch64-unknown-none --features serde",
             "cargo build --locked -p tutti-music --no-default-features --target aarch64-unknown-none",
             "cargo build --locked -p tutti-music --no-default-features --target aarch64-unknown-none --features serde",
             "cargo build --locked -p tutti-ump --no-default-features --target aarch64-unknown-none",

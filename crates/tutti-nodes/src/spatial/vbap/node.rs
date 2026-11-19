@@ -3,7 +3,7 @@ use tutti_buffers::{Bed, ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Elevation, SampleRate, Seconds, Spread, StereoWidth, Tail};
 

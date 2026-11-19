@@ -4,8 +4,8 @@
 use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_graph::{ForkByClone, Params};
+use tutti_rt::Param;
 use tutti_session::{Bounce, BounceTail, Range, Root, Session};
-use tutti_types::Param;
 use tutti_units::{Amplitude, SampleRate, Seconds};
 
 #[path = "../support/f64_nodes.rs"]

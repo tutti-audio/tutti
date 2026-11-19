@@ -22,13 +22,13 @@
 /// raw type there and converts with `new` and `get`.
 ///
 /// ```
-/// use tutti_types::Mint;
+/// use tutti_rt::Mint;
 ///
-/// tutti_types::id! {
+/// tutti_rt::id! {
 ///     /// One take.
 ///     pub struct TakeId;
 /// }
-/// tutti_types::id! {
+/// tutti_rt::id! {
 ///     /// A meter a caller names.
 ///     pub struct MeterId: named;
 /// }

@@ -56,7 +56,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-units",
         "tutti-plugin-ipc-ffi",
     ],
-    &["tutti-types", "tutti-music", "tutti-ump", "tutti-buffers"],
+    &["tutti-music", "tutti-ump", "tutti-buffers"],
     &["tutti-midi-protocol", "tutti-midi-device", "tutti-curve"],
     &["tutti-rt"],
     &[
@@ -109,7 +109,7 @@ const ONLY: &[(&str, &[&str])] = &[
     ),
     ("tutti-midi-device", &["tutti-ump", "tutti-units"]),
     ("tutti-ump", &["tutti-units"]),
-    // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`), the
+    // The unit vocabulary a `Gauge<U>` and a `Param<U>` hold (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
     // audio-shaped structures are generic over.
     ("tutti-rt", &["tutti-units", "tutti-buffers"]),
@@ -117,13 +117,9 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-midi-network",
         &["tutti-ump", "tutti-midi-device", "tutti-units"],
     ),
-    ("tutti-metering", &["tutti-types", "tutti-units"]),
-    // The encoders' worker threads (`spawn_named`), behind the `encode-flac` and
-    // `encode-vorbis` features.
-    (
-        "tutti-codec",
-        &["tutti-types", "tutti-units", "tutti-buffers", "tutti-rt"],
-    ),
+    ("tutti-metering", &["tutti-units"]),
+    // The staged files' `Mint` and the encoders' worker threads (`spawn_named`).
+    ("tutti-codec", &["tutti-units", "tutti-buffers", "tutti-rt"]),
     ("tutti-tempo", &["tutti-units", "tutti-music"]),
     (
         "tutti-voicing",
@@ -132,7 +128,6 @@ const ONLY: &[(&str, &[&str])] = &[
     (
         "tutti-transport",
         &[
-            "tutti-types",
             "tutti-music",
             "tutti-units",
             "tutti-buffers",
@@ -145,7 +140,6 @@ const ONLY: &[(&str, &[&str])] = &[
     (
         "tutti-plugin-ipc",
         &[
-            "tutti-types",
             "tutti-music",
             "tutti-units",
             "tutti-buffers",
@@ -163,7 +157,6 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-graph",
             "tutti-transport",
             "tutti-tempo",
-            "tutti-types",
             "tutti-music",
             "tutti-units",
             "tutti-rt",
@@ -223,7 +216,6 @@ const ONLY: &[(&str, &[&str])] = &[
     (
         "tutti-graph",
         &[
-            "tutti-types",
             "tutti-music",
             "tutti-units",
             "tutti-buffers",
@@ -693,7 +685,7 @@ mod tests {
     fn a_layered_workspace_passes() {
         let r = run(&base());
         assert!(r.passed(), "{:?}", r.findings);
-        assert_eq!(r.out[0], "check-layout: ok (6 members, 51 ranked)");
+        assert_eq!(r.out[0], "check-layout: ok (6 members, 50 ranked)");
     }
 
     #[test]
@@ -864,7 +856,7 @@ mod tests {
         ));
         let r = run(&v);
         assert!(r.findings.iter().any(|l| l.contains(
-            "tutti-metering may depend on [\"tutti-types\", \"tutti-units\"] only; it depends on {\"tutti-ump\"}"
+            "tutti-metering may depend on [\"tutti-units\"] only; it depends on {\"tutti-ump\"}"
         )));
     }
 

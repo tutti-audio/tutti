@@ -33,7 +33,7 @@ pub enum TempoSource {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Followed {
-    /// A tempo: Set Tempo, `6e9 / field` beats per minute ([`flex_tempo`]).
+    /// A tempo: Set Tempo, a beat of `field` 10-ns units ([`flex_tempo`]).
     Tempo(Bpm),
     /// A meter: Set Time Signature ([`flex_time_signature`]). Only where the
     /// follower was built to follow the meter.

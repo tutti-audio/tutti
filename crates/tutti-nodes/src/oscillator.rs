@@ -9,7 +9,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_dsp::{OscillatorStep, OscillatorWave};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 
 /// A band-limited oscillator: a source with no inputs and one (mono) output.

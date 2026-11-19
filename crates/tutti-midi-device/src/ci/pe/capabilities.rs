@@ -28,8 +28,6 @@ tutti_units::ranged! {
     /// request, the default (§8.4), reports 1. A device uses no more requests than
     /// the other reports (M2-103 §5.3).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     SimultaneousRequests(u8), NotASimultaneousRequests, "a simultaneous request count (1 to 127)",
     |raw| raw >= 1 && raw <= 127
 }

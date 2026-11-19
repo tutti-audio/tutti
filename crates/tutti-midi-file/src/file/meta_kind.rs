@@ -74,16 +74,22 @@ impl SmpteOffset {
         if hours & 0x80 != 0 {
             return None;
         }
-        let rate = MtcRate::masked(hours >> 5);
-        let time = SmpteTimecode::new(hours & 0x1F, minutes, seconds, frames, rate.frame_rate())?;
+        let (rate, hours) = MtcRate::from_hours_byte(hours);
+        let time = SmpteTimecode::new(hours, minutes, seconds, frames, rate.frame_rate())?;
         Self::new(time, SmpteFractionalFrames::new(fraction)?)
     }
 
     /// The five data bytes: the hour byte carries the rate's MTC code.
     pub(crate) fn to_wire(self) -> [u8; 5] {
-        let rate = self.time.frame_rate().mtc_rate().map_or(0, MtcRate::code);
+        // A rate MTC has no code for (29.97 non-drop) writes as code 0, the
+        // 24 fps code; the offset's rate is only what its hours byte names.
+        let hours_byte = self
+            .time
+            .frame_rate()
+            .mtc_rate()
+            .map_or(self.time.hours(), |rate| rate.hours_byte(self.time.hours()));
         [
-            rate << 5 | self.time.hours(),
+            hours_byte,
             self.time.minutes(),
             self.time.seconds(),
             self.time.frames(),

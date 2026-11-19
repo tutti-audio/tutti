@@ -14,8 +14,6 @@ tutti_units::ranged! {
     /// Channel of the first Group of the block and on across its Groups
     /// (M2-105 Table 10, M2-117 Table 5).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
     PeChannel(u16), NotAPeChannel, "a channel of a function block (1 to 256)",
     |raw| raw >= 1 && raw <= 256
 }
@@ -24,8 +22,6 @@ tutti_units::ranged! {
     /// The priority of a controller: 1, the most important, to 5, hidden
     /// (M2-117 §2.1.1.1).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     Priority(u8), NotAPriority, "a priority (1 to 5)", |raw| raw >= 1 && raw <= 5
 }
 
@@ -33,8 +29,6 @@ tutti_units::ranged! {
     /// The significant bits of a 32-bit controller value: 1 to 32 (M2-117
     /// Table 5).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     SignificantBits(u8), NotSignificantBits, "a count of significant bits (1 to 32)",
     |raw| raw >= 1 && raw <= 32
 }
@@ -42,8 +36,6 @@ tutti_units::ranged! {
 tutti_units::ranged! {
     /// The number of steps of a stepped controller (M2-117 Table 5): at least 1.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
     StepCount(u32), NotAStepCount, "a step count (at least 1)", |raw| raw >= 1
 }
 

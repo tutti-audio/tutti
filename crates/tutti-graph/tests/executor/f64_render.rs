@@ -9,7 +9,7 @@ use tutti_graph::{
     Cx, ForkByClone, ForkMode, ForkTarget, GraphBuilder, Io, Node, ParamNode, ParamSet, Params,
     Prepare, Renderer, Shape, Status,
 };
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Amplitude, SampleRate, Samples, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.

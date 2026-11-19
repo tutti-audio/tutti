@@ -2373,7 +2373,7 @@ fn a_midi1_and_a_midi2_note_on_claim_the_same_voice() {
         assert_eq!(slot.channel(), MidiChannel::of(3), "{message:?}");
         assert_eq!(
             slot.velocity(),
-            NoteVelocity::new(wide).normalized(),
+            NoteVelocity::new(wide).velocity(),
             "{message:?} sounds at the widened velocity"
         );
     }

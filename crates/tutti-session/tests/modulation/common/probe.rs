@@ -13,10 +13,10 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_session::SessionNode;
-use tutti_types::AtomicF64;
 use tutti_units::{Drive, Hz, UnitParam};
 
 // A probe's kind is chosen when it is built; its type declares the ones the
