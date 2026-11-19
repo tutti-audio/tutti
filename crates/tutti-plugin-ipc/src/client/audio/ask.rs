@@ -141,21 +141,32 @@ mod tests {
         );
     }
 
-    /// **A caller that finds the slot held waits for it** and takes it at the
-    /// release, in place of failing.
+    /// **A caller that finds the slot held waits its whole budget** before it
+    /// gives up: the wait is a lower bound (a condvar wait is never early), so a
+    /// caller refused at once fails this, whatever the machine's speed.
     #[test]
-    fn a_caller_waits_for_the_slot_and_takes_it_at_the_release() {
+    fn a_caller_waits_its_whole_budget_for_a_held_slot() {
+        let slot = ControlSlot::default();
+        let _held = slot.ask::<u8>(Duration::ZERO).expect("a free slot");
+        let budget = Duration::from_millis(200);
+        let began = std::time::Instant::now();
+        assert!(slot.ask::<u8>(budget).is_none(), "still held at the end");
+        assert!(
+            began.elapsed() >= budget,
+            "refused before its budget ran out"
+        );
+    }
+
+    /// **A caller that finds the slot held takes it at the release**, in place
+    /// of failing. Its budget is a hang guard only.
+    #[test]
+    fn a_caller_takes_the_slot_at_the_release() {
         let slot = ControlSlot::default();
         let (_first, reply) = slot.ask::<u8>(Duration::ZERO).expect("a free slot");
-        let (about_to_ask, started) = crossbeam_channel::bounded(1);
         let waiter = {
             let slot = slot.clone();
-            std::thread::spawn(move || {
-                about_to_ask.send(()).expect("the test listens");
-                slot.ask::<u8>(Duration::from_secs(60)).is_some()
-            })
+            std::thread::spawn(move || slot.ask::<u8>(Duration::from_secs(60)).is_some())
         };
-        started.recv().expect("the waiter started");
         drop(reply);
         assert!(waiter.join().expect("the waiter"), "taken at the release");
     }
