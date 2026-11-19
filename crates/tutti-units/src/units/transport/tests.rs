@@ -399,3 +399,27 @@ fn a_tempos_beat_period_is_sixty_over_its_bpm() {
         );
     }
 }
+
+/// **The beats over a span are the tempo times the span over 60.**
+///
+/// 2 s at 90 bpm is 180 / 60 = 3 beats, and one beat period at any tempo is
+/// one beat; each product here is exact in binary.
+#[test]
+fn the_beats_in_a_span_are_bpm_times_seconds_over_sixty() {
+    assert_eq!(
+        Bpm::of(90.0).beats_in(Seconds::new(2.0)),
+        BeatDuration::new(3.0)
+    );
+    assert_eq!(
+        Bpm::of(120.0).beats_in(Seconds::new(0.25)),
+        BeatDuration::new(0.5)
+    );
+    assert_eq!(
+        Bpm::of(120.0).beats_in(Seconds::new(-1.0)),
+        BeatDuration::new(-2.0)
+    );
+    for tempo in [30.0, 60.0, 120.0, 240.0] {
+        let tempo = Bpm::of(tempo);
+        assert_eq!(tempo.beats_in(tempo.beat_period()), BeatDuration::new(1.0));
+    }
+}

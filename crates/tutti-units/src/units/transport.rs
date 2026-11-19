@@ -124,6 +124,19 @@ impl Bpm {
         Seconds::new(60.0 / self.0)
     }
 
+    /// The beats that pass over `span` at this tempo: its beats per minute
+    /// times `span` over 60. A negative span gives a negative duration.
+    ///
+    /// ```
+    /// use tutti_units::{BeatDuration, Bpm, Seconds};
+    /// assert_eq!(Bpm::of(90.0).beats_in(Seconds::new(2.0)), BeatDuration::new(3.0));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn beats_in(self, span: Seconds) -> BeatDuration {
+        BeatDuration::new(span.get() * self.0 / 60.0)
+    }
+
     /// Whether this tempo differs from `other` by more than `epsilon`, a
     /// tolerance in beats per minute (the unit is the tolerance's, not a tempo
     /// that is played).
