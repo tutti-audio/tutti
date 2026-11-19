@@ -480,7 +480,6 @@ tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_pol
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode
-tutti-session  setter  crates/tutti-session/src/session/transport.rs::Session::set_loop
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite

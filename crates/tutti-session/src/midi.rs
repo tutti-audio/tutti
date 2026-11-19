@@ -1281,7 +1281,7 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// **A clip does not loop itself**: it plays on the transport's timeline,
     /// so a repeat is the transport's loop
-    /// ([`Session::set_loop`](crate::Session::set_loop)) over the beats it
+    /// (`session.transport_handle().looping()`) over the beats it
     /// occupies.
     ///
     /// # Examples
@@ -1795,7 +1795,22 @@ impl<F: Float> Midi<'_, F> {
             None => Follow::new(core, tap, self.settings.tempo_map(), self.meter.current()),
         });
         self.state.sync_following();
+        self.discard_staged_maps(follow.meter);
         Ok(())
+    }
+
+    /// Drops the tempo (and, with `meter`, the meter) a write staged and no
+    /// update has published: a follower owns the maps from here, and the
+    /// project's are the ones in force, so the staged ones must not publish
+    /// over what an unfollow restores.
+    fn discard_staged_maps(&self, meter: bool) {
+        use crate::value::SlotId;
+        let ids: &[SlotId] = if meter {
+            &[SlotId::Tempo, SlotId::Meter]
+        } else {
+            &[SlotId::Tempo]
+        };
+        self.graph.value_table().discard_pending(ids);
     }
 
     /// Stops following ([`follow_tempo`](Self::follow_tempo)): publishes the
@@ -1895,6 +1910,9 @@ impl<F: Float> Midi<'_, F> {
             self.meter.current(),
         ));
         self.state.sync_following();
+        if follow.kind == tutti_midi_runtime::ClockKind::BeatClock {
+            self.discard_staged_maps(true);
+        }
         Ok(())
     }
 

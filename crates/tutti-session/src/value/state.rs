@@ -145,6 +145,37 @@ impl ValueTable {
             .insert(id, slot::erase(slot));
     }
 
+    /// Registers the session's own staging value `id`, held in `slot`. Once,
+    /// as the session is built.
+    pub(crate) fn provide_staged<C: slot::Held>(
+        &self,
+        id: SlotId,
+        slot: Arc<slot::PublishedSlot<C>>,
+    ) {
+        self.params
+            .lock_recover()
+            .slots
+            .insert(id, slot::erase_staged(slot));
+    }
+
+    /// Drops what was written to the slots `ids` name and not yet published.
+    /// Control thread.
+    #[cfg(feature = "midi")]
+    pub(crate) fn discard_pending(&self, ids: &[SlotId]) {
+        if let Some(held) = self.enter() {
+            held.params().discard_pending(ids);
+        }
+    }
+
+    /// Publishes every value written since the last call and not yet
+    /// published ([`Slot::store`](slot::Slot::store) on a staging slot), all
+    /// together under the value lock. Control thread.
+    pub(crate) fn publish_pending(&self) {
+        if let Some(held) = self.enter() {
+            held.params().publish_pending();
+        }
+    }
+
     /// Registers the values of a node, from its [`NodeSlots`]. Control
     /// thread.
     pub(crate) fn provide_node(&self, slots: NodeSlots) {
@@ -231,6 +262,12 @@ impl<K: AppKey> ValueState<K> {
         assign.stage(&mut batch).map_err(error)?;
         batch.land();
         Ok(())
+    }
+
+    /// Publishes every value a write staged since the last call. Control
+    /// thread.
+    pub(crate) fn publish_pending(&self) {
+        self.table.publish_pending();
     }
 
     /// Reads `read`, in its own shape, under the value lock.

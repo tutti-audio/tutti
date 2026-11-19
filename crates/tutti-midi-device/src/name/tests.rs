@@ -193,3 +193,38 @@ fn product_instance_ids_order_by_their_text() {
     assert!(id("Z") < id("a"));
     assert_eq!(id("x").cmp(&id("x")), std::cmp::Ordering::Equal);
 }
+
+/// `truncated` keeps a name that fits whole and cuts a longer one at the last
+/// character boundary within the bound, so the cut text is valid UTF-8 and never
+/// longer than the type holds: a two-byte character that would straddle byte 91
+/// is dropped whole.
+#[test]
+fn a_truncated_name_is_cut_at_a_character_boundary() {
+    assert_eq!(BlockName::truncated("Keys").unwrap().as_str(), "Keys");
+    let fits = "a".repeat(91);
+    assert_eq!(BlockName::truncated(&fits).unwrap().as_str(), fits);
+    assert_eq!(
+        BlockName::truncated(&"a".repeat(200)).unwrap().as_str(),
+        fits
+    );
+    // 90 bytes, then an e-acute of two bytes across the bound.
+    let straddling = format!("{}é", "a".repeat(90));
+    assert_eq!(straddling.len(), 92);
+    assert_eq!(
+        BlockName::truncated(&straddling).unwrap().as_str(),
+        "a".repeat(90)
+    );
+    // 89 bytes, then the same character fits exactly.
+    let fitting = format!("{}é", "a".repeat(89));
+    assert_eq!(BlockName::truncated(&fitting).unwrap().as_str(), fitting);
+}
+
+/// What no name can hold is refused by `truncated` as by `new`: a NUL and a
+/// Byte Order Mark. Only the length is cut.
+#[test]
+fn a_truncated_name_still_refuses_a_nul_and_a_bom() {
+    assert_eq!(BlockName::truncated("a\0b"), None);
+    assert_eq!(BlockName::truncated("\u{FEFF}a"), None);
+    let long_with_nul = format!("{}\0", "a".repeat(200));
+    assert_eq!(BlockName::truncated(&long_with_nul), None);
+}
