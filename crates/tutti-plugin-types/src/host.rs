@@ -574,10 +574,22 @@ pub trait Wraps {
     }
 
     /// A state or a preset load is about to run: the writes queued before it
-    /// are stale, so they are voided first, and no block can put one over what
-    /// the load sets.
+    /// are stale, so they are voided first, before the plugin's own load.
+    ///
+    /// A block that began draining before this may still apply what it had
+    /// already collected: it overlapped the load, as a block overlaps any host
+    /// call. Every block that starts after this returns sees the new epoch and
+    /// applies no write from before it.
     fn before_restore(&mut self, main: MainThreadMarker) {
         let _ = main;
+    }
+
+    /// Whether a preset load of `id` reaches the plugin, or is refused up front
+    /// without touching it. [`before_restore`](Self::before_restore) runs only
+    /// for a load that reaches it, so a refused preset voids no write.
+    fn preset_reaches_plugin(&self, main: MainThreadMarker, id: &PresetId) -> bool {
+        let _ = (main, id);
+        true
     }
 
     /// A state or a preset load took: whatever it carried is owed to the
@@ -745,7 +757,9 @@ impl<W: Wraps> Control for W {
     }
 
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
-        self.before_restore(main);
+        if self.preset_reaches_plugin(main, id) {
+            self.before_restore(main);
+        }
         let loaded = self.plugin_mut().load_preset(main, id);
         if loaded {
             self.after_restore(main);
@@ -935,4 +949,87 @@ pub struct PluginIo<'a, S: Float> {
     pub ctx: &'a ProcessContext<'a>,
     /// What the plugin emitted: MIDI, parameter changes, note expression.
     pub out: &'a mut ProcessOutput,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StateUse;
+    use crate::fake::{Call, FakeLoaded, FakePlugin};
+
+    /// A [`Wraps`] over the fake that records, at each restore hook, how many
+    /// state loads the plugin had run.
+    struct Rig {
+        plugin: FakeLoaded,
+        handle: FakePlugin,
+        hooks: Vec<(&'static str, usize)>,
+        reaches: bool,
+    }
+
+    impl Rig {
+        fn new(reaches: bool) -> Self {
+            let (handle, plugin) = FakePlugin::new();
+            Self {
+                plugin,
+                handle,
+                hooks: Vec::new(),
+                reaches,
+            }
+        }
+
+        fn loads(&self) -> usize {
+            self.handle
+                .calls()
+                .iter()
+                .filter(|call| matches!(call, Call::LoadState(_)))
+                .count()
+        }
+    }
+
+    impl Wraps for Rig {
+        type Plugin = FakeLoaded;
+
+        fn plugin(&self) -> &FakeLoaded {
+            &self.plugin
+        }
+
+        fn plugin_mut(&mut self) -> &mut FakeLoaded {
+            &mut self.plugin
+        }
+
+        fn before_restore(&mut self, _main: MainThreadMarker) {
+            let loads = self.loads();
+            self.hooks.push(("before", loads));
+        }
+
+        fn after_restore(&mut self, _main: MainThreadMarker) {
+            let loads = self.loads();
+            self.hooks.push(("after", loads));
+        }
+
+        fn preset_reaches_plugin(&self, _main: MainThreadMarker, _id: &PresetId) -> bool {
+            self.reaches
+        }
+    }
+
+    /// **A state load voids before the plugin's load runs, and takes after.**
+    /// `before_restore` sees no load yet and `after_restore` sees it: moving the
+    /// void behind the load fails here.
+    #[test]
+    fn a_state_load_runs_before_restore_ahead_of_the_plugins_load() {
+        let main = tutti_fixtures::main_thread();
+        let mut rig = Rig::new(true);
+        Control::load_state(&mut rig, main, &[1, 2, 3], StateUse::Project).unwrap();
+        assert_eq!(rig.hooks, [("before", 0), ("after", 1)]);
+    }
+
+    /// **A preset the format refuses up front voids nothing**: no restore hook
+    /// runs, so the writes queued stay.
+    #[test]
+    fn a_refused_preset_runs_no_restore_hook() {
+        let main = tutti_fixtures::main_thread();
+        let mut rig = Rig::new(false);
+        assert!(!Control::load_preset(&mut rig, main, &PresetId::Number(1)));
+        assert!(rig.hooks.is_empty());
+    }
 }

@@ -11,8 +11,8 @@ use tutti_rt::{DrainMark, DrainWatch};
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Control, Controller, EditWriter, Loaded, ParamAccess, ParamEdit, ParamWriteError, PluginError,
-    PluginResult, PluginTail, Prepare, Processor, Refused, ReportDrain, Request, RestartRules,
-    Samples, Stuck, Widths, Wraps,
+    PluginResult, PluginTail, Prepare, PresetId, Processor, Refused, ReportDrain, Request,
+    RestartRules, Samples, Stuck, Widths, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -254,6 +254,15 @@ impl Wraps for Vst3Controller {
     /// to hear of it.
     fn queue_write(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {
         self.queue_edit(id, value);
+    }
+
+    /// What `load_preset` refuses up front: an id that is no program, or a
+    /// program parameter the plugin does not let the host write.
+    fn preset_reaches_plugin(&self, main: MainThreadMarker, id: &PresetId) -> bool {
+        let loaded = self.loaded();
+        loaded
+            .program_write(main, id)
+            .is_some_and(|(param, _)| loaded.parameter_writable(main, param).is_ok())
     }
 
     /// The writes queued before the load are stale, voided before it runs.

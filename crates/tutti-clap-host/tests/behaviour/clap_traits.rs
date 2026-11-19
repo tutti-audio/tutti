@@ -19,8 +19,8 @@ use tutti_clap_test_plugin::{
     PORTS_64BIT_INPUTS, PORTS_64BIT_OUTPUTS, ProcessCapture, Site, ThreadCapture,
 };
 use tutti_plugin_types::{
-    Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare,
-    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, Widths,
+    Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare, PresetId,
+    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, Widths, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -446,6 +446,68 @@ fn a_state_load_makes_queued_writes_stale() {
         .collect();
     assert_eq!(writes.len(), 1, "only the write after the load: {writes:?}");
     assert!((writes[0] - 850.0).abs() < 1e-9, "100 + 0.75 * 1000");
+}
+
+/// **A preset the format refuses up front voids no write.** A `Number` id never
+/// reaches a CLAP plugin; the write queued before it is still applied by the
+/// next block.
+#[test]
+fn a_refused_preset_keeps_the_queued_writes() {
+    let probe = Probe::acquire();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    let cutoff = &probe_params()[0];
+    let id = ParamId::new(cutoff.id);
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
+    assert!(!controller.load_preset(main_thread(), &PresetId::Number(3)));
+
+    render(&mut processor, FloatWidth::F32).expect("block");
+    let cap = process_capture();
+    let writes: Vec<f64> = cap.events[..cap.event_count as usize]
+        .iter()
+        .filter(|e| e.event_type == PARAM_VALUE && e.param_id == cutoff.id)
+        .map(|e| e.value)
+        .collect();
+    assert_eq!(writes.len(), 1, "the write survived: {writes:?}");
+    assert!((writes[0] - 350.0).abs() < 1e-9, "100 + 0.25 * 1000");
+}
+
+/// **The void belongs to `before_restore`, not `after_restore`.** `before_restore`
+/// makes a queued write stale; `after_restore` alone does not. Moving the reset
+/// behind the load fails here, since the load would run with the old writes live.
+#[test]
+fn the_reset_is_in_before_restore_not_after() {
+    let probe = Probe::acquire();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    let cutoff = &probe_params()[0];
+    let id = ParamId::new(cutoff.id);
+    let applied = |processor: &mut ClapProcessor| {
+        render(processor, FloatWidth::F32).expect("block");
+        let cap = process_capture();
+        cap.events[..cap.event_count as usize]
+            .iter()
+            .filter(|e| e.event_type == PARAM_VALUE && e.param_id == cutoff.id)
+            .count()
+    };
+
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
+    Wraps::after_restore(&mut controller, main_thread());
+    assert_eq!(applied(&mut processor), 1, "after_restore voids nothing");
+
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.5))
+        .expect("a declared, writable parameter");
+    Wraps::before_restore(&mut controller, main_thread());
+    assert_eq!(applied(&mut processor), 0, "before_restore voids the write");
 }
 
 /// **A flood of writes to one parameter is its latest value in the next
