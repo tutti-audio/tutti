@@ -74,11 +74,10 @@ pub use error::PluginRenderFault;
 pub use ipc::{Ipc, IpcController, IpcOrigin, IpcParts, IpcProcessor, Launched};
 pub use offline_wait::OfflineWait;
 pub use process_guard::ProcessGuard;
-pub(crate) use protocol::STATE_CHUNK_BYTES;
 pub use protocol::frame::{FrameBuf, read_frame, write_frame};
 pub use protocol::{
-    BridgeMessage, HostMessage, MAX_FRAME_BYTES, PROTOCOL_VERSION, ProcessAudioData, SlabLayout,
-    StagedState,
+    BridgeMessage, HostMessage, MAX_FRAME_BYTES, PROTOCOL_VERSION, ProcessAudioData,
+    STATE_CHUNK_BYTES, SlabLayout, StagedState,
 };
 pub use server_watch::ServerWatch;
 pub use subprocess::Reaped;
