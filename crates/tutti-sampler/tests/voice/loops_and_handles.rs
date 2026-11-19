@@ -286,3 +286,100 @@ fn a_node_handle_sets_speed_and_stops_and_resumes_a_free_running_voice() {
         );
     }
 }
+
+/// A free-running (unplaced) memory voice node over the ramp, built as `play`
+/// says.
+fn free_node(play: Playback) -> VoiceNode<f32> {
+    let mut source = MemorySource::new(ramp()).expect("a placeable wave");
+    source.set_loop(play.loop_);
+    VoiceNode::with_channels(
+        tutti_sampler::Voice {
+            source: VoiceSource::Memory(source),
+            play,
+        },
+        tutti_buffers::ChannelLayout::MONO,
+    )
+}
+
+/// **A reversed free-running voice plays the ramp backwards from its last
+/// frame**: output frame `n` is file frame `LEN - 1 - n`, and the voice is
+/// silent past the file's first frame.
+#[test]
+fn a_reversed_free_running_voice_plays_the_ramp_backwards() {
+    let mut node = free_node(Playback {
+        direction: Direction::Reverse,
+        ..Playback::default()
+    });
+    let got = render_with(&mut node, LEN + 128);
+    assert_frames("reversed", &got[..LEN], |n| LEN - 1 - n);
+    assert!(
+        got[LEN..].iter().all(|&g| g == 0.0),
+        "silent past the start"
+    );
+}
+
+/// **A looped free-running voice wraps its own cursor at the loop's end**:
+/// output frame `n` is file frame `looped_frame(n, 300, 700)`.
+#[test]
+fn a_looped_free_running_voice_wraps_at_the_loops_end() {
+    let mut node = free_node(Playback {
+        loop_: Some(loop_frames(300, 700, 0)),
+        ..Playback::default()
+    });
+    let got = render_with(&mut node, FRAMES);
+    assert_frames("looped", &got, |n| looped_frame(n, 300, 700));
+}
+
+/// **A pool refuses a stretch for a free-running voice at the call**, on the
+/// add and on a later stretch, and takes it once the voice is placed.
+#[test]
+fn a_free_running_voice_refuses_stretch_until_it_is_placed() {
+    use tutti_units::{Cents, StretchFactor};
+    let (_pool, handle) = VoicePool::new().with_handle();
+    let id = tutti_sampler::SlotId(1);
+    let stretched = Playback {
+        stretch: StretchFactor::new(2.0),
+        ..Playback::default()
+    };
+    let free = || MemorySource::new(ramp()).expect("a placeable wave");
+    assert_eq!(
+        handle.add(id, free(), stretched),
+        Err(tutti_sampler::SendError::FreeRunning)
+    );
+    handle
+        .add(id, free(), Playback::default())
+        .expect("a plain free-running voice");
+    assert_eq!(
+        handle.set_stretch(id, StretchFactor::new(2.0), Cents::new(0.0)),
+        Err(tutti_sampler::SendError::FreeRunning)
+    );
+    handle.set_window(id, window()).expect("room");
+    handle
+        .set_stretch(id, StretchFactor::new(2.0), Cents::new(0.0))
+        .expect("a placed voice stretches");
+}
+
+/// **`play` starts a free-running voice a reset left stopped**: after the
+/// node is reset (which rewinds and stops its cursor) it is silent until
+/// `play`, which sounds it from the ramp's first frame. The transport rolls on
+/// across the blocks, so nothing else flushes the voice.
+#[test]
+fn play_restarts_a_free_running_voice_after_a_reset() {
+    use tutti_graph::Node;
+    let (node, handle) = free_node(Playback::default()).with_handle();
+    let mut node = tutti_sampler::testing::prepared(node, RATE, BLOCK);
+    let t = rolling();
+    let block = |node: &mut VoiceNode<f32>| {
+        let out = tutti_sampler::testing::block(node, &t, RATE, BLOCK).swap_remove(0);
+        t.advance(BLOCK as i64, RATE);
+        out
+    };
+    assert_frames("before the reset", &block(&mut node), |n| n);
+    node.reset();
+    assert!(
+        block(&mut node).iter().all(|&g| g == 0.0),
+        "stopped by the reset"
+    );
+    handle.play().expect("a free-running voice");
+    assert_frames("after play", &block(&mut node), |n| n);
+}

@@ -115,30 +115,77 @@ fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
     assert_eq!(first_sound(&render(&s, 40_000)), Some(BEAT));
 }
 
-/// **`play` and `stop` refuse a placed voice and drive a free-running one**:
-/// a placed clip is `Placed` for both; once its window is `None` and
-/// published, `stop` silences the next block and `play` sounds it again, from
-/// frame 0 of the block.
+/// File frames of the ramp the free-running test plays. Frame `i` holds
+/// `i / 2^17`, exact in `f32`, so an output sample names the source frame it
+/// was read from.
+const RAMP_LEN: usize = 6_000;
+
+fn ramp_value(i: usize) -> f32 {
+    i as f32 / 131_072.0
+}
+
+/// A clip of the ramp at beat 0, wired to the output.
+fn placed_ramp(
+    s: &mut Session,
+) -> (
+    tutti_session::Key<Clip<f32>>,
+    tutti_sampler::VoiceNodeHandle<f32>,
+) {
+    let mut wave = Wave::new(1, SampleRate::of(RATE));
+    for i in 0..RAMP_LEN {
+        wave.append(Interleaved::new(&[ramp_value(i)], wave.layout()).unwrap())
+            .unwrap();
+    }
+    let clip = Clip::new(wave)
+        .and_then(|c| c.channels(ChannelLayout::STEREO))
+        .expect("a placeable wave");
+    let (key, handle) = s.graph().add(clip);
+    wire(s, key.erase());
+    let _ = s.update();
+    (key, handle)
+}
+
+/// The first output channel of `frames` frames.
+fn left(s: &Session, frames: usize) -> Vec<f32> {
+    render(s, frames).chunks(2).map(|f| f[0]).collect()
+}
+
+/// **`play` and `stop` refuse a placed voice and drive a free-running one,
+/// by its own cursor**: a placed ramp clip plays source frame `f` at frame
+/// `f` and is `Placed` for both verbs, until its window is `None` and
+/// published. Then the voice is free: `play` sounds the ramp from its frame 0
+/// (not from where the transport is: the placed to free transition), `stop`
+/// silences it, `play` resumes without rewinding, and it is silent from the
+/// ramp's end on.
 #[test]
-fn play_on_a_placed_voice_is_refused_and_on_a_free_running_one_sounds_at_the_next_block() {
+fn play_on_a_placed_voice_is_refused_and_a_free_running_one_plays_its_own_cursor() {
     let mut s = offline();
-    let (clip, handle) = placed(&mut s, Beat(0.0));
+    let (clip, handle) = placed_ramp(&mut s);
+    s.play().expect("room");
+    let placed: Vec<f32> = left(&s, 1_024);
+    assert!(placed.iter().enumerate().all(|(f, &x)| x == ramp_value(f)));
     assert_eq!(handle.play(), Err(PlayError::Placed));
     assert_eq!(handle.stop(), Err(PlayError::Placed));
 
     s.set(clip.window().to(None)).unwrap();
     assert_eq!(handle.play(), Err(PlayError::Placed), "until the update");
     let _ = s.update();
-    assert_eq!(handle.stop(), Ok(()));
-    assert_eq!(first_sound(&render(&s, 512)), None, "stopped");
     assert_eq!(handle.play(), Ok(()));
-    let out = render(&s, 512);
-    assert_eq!(
-        first_sound(&out),
-        Some(0),
-        "sounding from the block's first frame"
-    );
-    assert!(out.iter().all(|&x| x == 0.5), "at the wave's level");
+    let mut got = left(&s, 512);
+    assert_eq!(handle.stop(), Ok(()));
+    got.extend(left(&s, 512));
+    assert_eq!(handle.play(), Ok(()));
+    got.extend(left(&s, RAMP_LEN));
+
+    for (f, &x) in got.iter().enumerate() {
+        let want = match f {
+            0..512 => ramp_value(f),
+            512..1_024 => 0.0,
+            _ if f - 512 < RAMP_LEN => ramp_value(f - 512),
+            _ => 0.0,
+        };
+        assert_eq!(x.to_bits(), want.to_bits(), "frame {f}");
+    }
 }
 
 /// **Two windows written before an update publish once, and the second wins**:

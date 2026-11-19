@@ -359,6 +359,13 @@ pub enum SendError {
     /// dead pool distinguishable from a working one.
     #[error("voice pool is gone; the command was dropped")]
     Disconnected,
+    /// The voice is free-running (a memory voice with no window) and a
+    /// stretch or pitch shift was asked of it: a time-stretcher reads the
+    /// transport's clock, which a free-running voice does not have. Place the
+    /// voice ([`set_window`](VoicePoolHandle::set_window)) first. The
+    /// command was dropped.
+    #[error("the voice is free-running and cannot be stretched; the command was dropped")]
+    FreeRunning,
 }
 
 impl SendError {
@@ -480,7 +487,8 @@ pub(crate) struct Steering {
     /// Whether the handle has stopped the voice.
     pub(crate) stopped: bool,
     /// How many times the handle has played the voice: each one starts a
-    /// free-running memory voice's cursor, which a reset leaves stopped.
+    /// free-running memory voice's cursor, which a reset leaves stopped. A
+    /// wrapping count, compared only for equality.
     pub(crate) plays: u32,
 }
 
@@ -573,6 +581,15 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
     /// Starts a free-running voice, or resumes one [`stop`](Self::stop)ped:
     /// the voice sounds from the node's next block, from where its cursor is
     /// (a reset rewinds it).
+    ///
+    /// Placed means the published window ([`is_placed`](Self::is_placed)),
+    /// checked on the control thread before the steer: a window published
+    /// between the two is not seen by this call.
+    ///
+    /// A free-running voice has limits: it reads forwards, or backwards when
+    /// built reversed, on its own cursor, loops as built, and is never
+    /// stretched (the stretch setters refuse it,
+    /// [`SendError::FreeRunning`]).
     ///
     /// # Errors
     ///
@@ -685,6 +702,9 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
     /// was made is not in it, and the drain then refuses that slot's loops
     /// ([`PoolDrops::loops_not_forwarded`]).
     pub(crate) streams: SlotStreams<F>,
+    /// The slots the handle added as free-running memory voices and has not
+    /// placed since: a stretch is refused for them.
+    pub(crate) free: Arc<Mutex<std::collections::HashSet<SlotId>>>,
 }
 
 /// [`VoicePoolHandle::streams`]: the table is locked for a lookup or for
@@ -755,14 +775,22 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         source: MemorySource<F>,
         play: Playback,
     ) -> Result<(), SendError> {
-        self.send(VoiceCommand::AddVoice {
+        let free = !source.is_placed();
+        if free && stretch_wanted(&play) {
+            return Err(SendError::FreeRunning);
+        }
+        self.send_noting_free(
             id,
-            voice: Box::new(Voice {
-                source: VoiceSource::Memory(source),
-                play,
-            }),
-            stretch: None,
-        })
+            free,
+            VoiceCommand::AddVoice {
+                id,
+                voice: Box::new(Voice {
+                    source: VoiceSource::Memory(source),
+                    play,
+                }),
+                stretch: None,
+            },
+        )
     }
 
     /// Removes the voice at `id` (and ends its stream, if it streams). The
@@ -775,7 +803,9 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// [`SendError`]: a dropped remove is a voice that never stops.
     #[must_use = "a dropped remove is a voice that never stops"]
     pub fn remove(&self, id: SlotId) -> Result<(), SendError> {
-        self.send(VoiceCommand::Remove(id))
+        self.send(VoiceCommand::Remove(id))?;
+        self.free.lock_recover().remove(&id);
+        Ok(())
     }
 
     /// Points the in-memory voice at `id` at a different wave, keeping its
@@ -802,7 +832,9 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// [`SendError`], as [`add`](Self::add).
     #[must_use = "a dropped command changes nothing"]
     pub fn set_window(&self, id: SlotId, window: VoiceWindow) -> Result<(), SendError> {
-        self.send(VoiceCommand::UpdatePlacement { id, window })
+        self.send(VoiceCommand::UpdatePlacement { id, window })?;
+        self.free.lock_recover().remove(&id);
+        Ok(())
     }
 
     /// Sets the voice's gain, linear; a NaN or infinite gain is silence.
@@ -868,6 +900,9 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         factor: StretchFactor,
         pitch: Cents,
     ) -> Result<(), SendError> {
+        if stretch_values_want_filter(factor, pitch) && self.free.lock_recover().contains(&id) {
+            return Err(SendError::FreeRunning);
+        }
         self.send(VoiceCommand::UpdateStretch {
             id,
             stretch_factor: factor,
@@ -1026,6 +1061,24 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// The stream the handle holds for slot `id`, if any.
     pub(crate) fn stream_of(&self, id: SlotId) -> Option<Arc<Mutex<Stream<F>>>> {
         self.streams().get(&id).cloned()
+    }
+
+    /// Queues `cmd`, an add at `id`, and notes whether the slot is
+    /// free-running.
+    fn send_noting_free(
+        &self,
+        id: SlotId,
+        free: bool,
+        cmd: VoiceCommand<F>,
+    ) -> Result<(), SendError> {
+        self.send(cmd)?;
+        let mut set = self.free.lock_recover();
+        if free {
+            set.insert(id);
+        } else {
+            set.remove(&id);
+        }
+        Ok(())
     }
 
     /// The command ring's writer, locked.

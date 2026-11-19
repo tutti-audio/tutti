@@ -3,8 +3,9 @@
 //! Zero inputs, N outputs, and typed controls ([`VoiceNodeHandle`], what its
 //! `IntoNode` hands back): its gain, a scalar cell the node reads once per
 //! block, its window, a published cell it lends once per block, and its loop,
-//! speed and play state, published values it reads once per block. For resynth, preview and a single timeline clip,
-//! where a whole pool would be ceremony. It shares `PlaybackSlot` with
+//! speed and play state, published values it reads once per block. For
+//! resynth, preview and a single timeline clip, where a whole pool would be
+//! ceremony. It shares `PlaybackSlot` with
 //! [`VoicePool`](super::pool::VoicePool), so the per-voice read is the same
 //! code in both — a fix in one is a fix in both.
 

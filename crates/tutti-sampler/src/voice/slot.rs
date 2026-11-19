@@ -428,7 +428,7 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
         } = scratch;
         let positions = &mut positions[..frames];
         match (&mut self.voice.source, self.stretch.as_mut()) {
-            (VoiceSource::Memory(sampler), Some(unit)) if stretching => {
+            (VoiceSource::Memory(sampler), Some(unit)) if stretching && sampler.is_placed() => {
                 // The stretch rate must reach the origin, not only the
                 // step. A placed voice re-derives its origin from the
                 // playhead as the clock moves, and the playhead runs at wall
@@ -499,9 +499,10 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
                 Piece::Ready
             }
             // A free-running voice steps its own cursor (the transport is not
-            // its clock), unstretched and forwards.
+            // its clock), unstretched: stretch is refused where it is set
+            // ([`SendError::FreeRunning`]), and a loop is ignored in reverse.
             (VoiceSource::Memory(sampler), _) if !sampler.is_placed() => {
-                sampler.render_free(frames, n, out.lanes_mut())
+                sampler.render_free(direction, frames, n, out.lanes_mut())
             }
             (VoiceSource::Memory(sampler), _) => {
                 // Seated at the gate's origin (`window_rate`, varispeed

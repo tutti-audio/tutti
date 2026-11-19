@@ -453,6 +453,7 @@ impl<F: SamplerFloat> VoicePool<F> {
             rate: self.rate.clone(),
             counters: Arc::clone(&self.counters),
             streams: Arc::default(),
+            free: Arc::default(),
         };
         (self, handle)
     }

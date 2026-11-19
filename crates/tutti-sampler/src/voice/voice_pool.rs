@@ -2138,6 +2138,7 @@ fn send_builds_the_stretch_filter_not_the_drain() {
             rate: SharedRate::new(SampleRate::SR_44K1),
             counters: Default::default(),
             streams: Default::default(),
+            free: Default::default(),
         };
         probe
             .send(VoiceCommand::AddVoice {
