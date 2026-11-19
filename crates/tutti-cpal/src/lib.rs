@@ -1,9 +1,9 @@
 #![doc = include_str!("../README.md")]
-//! The CPAL device layer: the seam between Tutti's audio graph and a sound card.
+//! The CPAL device layer: it connects Tutti's audio graph to a sound card.
 //!
 //! Device enumeration, the device's output stream and microphone capture.
-//! `tutti-engine` knows how to render a block and owns the seam under every
-//! clock (`StreamDriver`, `OutputBlock`); this crate knows how to open a device,
+//! `tutti-engine` knows how to render a block and owns the block interface
+//! under every clock (`StreamDriver`, `OutputBlock`); this crate knows how to open a device,
 //! hand it blocks on time, and pull audio back in from a microphone. It is the
 //! only Tutti crate that links a platform audio API, so a headless render, an
 //! offline export or a test never pulls one in.
