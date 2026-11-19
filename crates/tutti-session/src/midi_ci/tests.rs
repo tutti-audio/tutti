@@ -1,16 +1,17 @@
 //! How the Initiator's outcome of a Property Exchange call reaches the app.
 
-use tutti_midi_device::{
+use tutti_midi_ci::{
     BodyLimit, PaginationFault, PeOutcome, PeReply, PeRequestId, PeResponse, PeSignal, PeStatus,
     PeTerminator, PeUnreadable, ResourceFailure,
 };
 
 use std::sync::Arc;
 
-use tutti_midi_device::{
-    DeviceId, Muid, PeData, PeJson, PeResource, PeResourceList, ResourceGet, ResourceTarget,
-    SubscribeId,
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
+    PeData, PeJson, PeResource, PeResourceList, ResourceGet, ResourceTarget, SubscribeId,
 };
+use tutti_midi_device::DeviceId;
 use tutti_midi_hardware::test_support::property_peer;
 use tutti_midi_hardware::{PeerId, PropertyCall};
 use tutti_ump::MidiGroup;

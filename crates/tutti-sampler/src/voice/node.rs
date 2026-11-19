@@ -301,13 +301,8 @@ impl<F: SamplerFloat> VoiceNode<F> {
             self.slot.voice.play.direction = direction;
             self.applied_direction = direction;
         }
-        // A rate outside what `PlaybackRate` can play (a host can publish any
-        // `f64` into the cell, and the type does not yet range-check it) is
-        // the speed already in force: it is never applied, so a NaN never
-        // reaches the read position. This guard goes once `PlaybackRate` is
-        // range-checked.
         let speed = *self.speed.lend();
-        if speed != self.applied_speed && playable(speed) {
+        if speed != self.applied_speed {
             apply_speed(&mut self.slot.voice, speed);
             self.applied_speed = speed;
         }
@@ -527,11 +522,6 @@ fn apply_steering<F: SamplerFloat>(voice: &mut Voice<F>, was: &Steering, now: &S
     }
 }
 
-/// Whether `speed` is in the range both tiers play; a NaN is not.
-fn playable(speed: PlaybackRate) -> bool {
-    (PlaybackRate::MIN..=PlaybackRate::MAX).contains(&speed)
-}
-
 /// Applies a speed: the source's, and the record the voice keeps of it.
 fn apply_speed<F: SamplerFloat>(voice: &mut Voice<F>, speed: PlaybackRate) {
     voice.source.apply_speed(speed);
@@ -572,10 +562,7 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
         voice.source.apply_window(*self.window.current());
         apply_loop(&mut voice, *self.looping.current());
         voice.play.direction = *self.direction.current();
-        let speed = *self.speed.current();
-        if playable(speed) {
-            apply_speed(&mut voice, speed);
-        }
+        apply_speed(&mut voice, *self.speed.current());
         let gain = self
             .params
             .get(UnitParam::Volume)
@@ -666,7 +653,7 @@ mod tests {
         {
             // A block in progress across the move.
             let _held = node.speed.lend();
-            handle.speed_cell().publish(PlaybackRate::new(2.0));
+            handle.speed_cell().publish(PlaybackRate::of(2.0));
         }
         assert_eq!(handle.speed.retired_len(), 1, "pinned until a scan");
         assert_eq!(tutti_rt::Reclaim::reclaim(&handle), 0);

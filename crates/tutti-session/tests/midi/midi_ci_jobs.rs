@@ -5,11 +5,11 @@
 
 use std::time::{Duration, Instant};
 
-use tutti_midi_device::{
-    ChannelControllers, CiHeader, CiMessage, DataControl, EndpointId, NakStatus, NoteData,
-    PEER_REPLY_TIMEOUT, PeTerminator, PortDirection, ProfileChannels, ProfileState, ReportRequest,
-    ReportScope, SystemMessages,
+use tutti_midi_ci::{
+    ChannelControllers, CiHeader, CiMessage, DataControl, NakStatus, NoteData, PEER_REPLY_TIMEOUT,
+    PeTerminator, ProfileChannels, ProfileState, ReportRequest, ReportScope, SystemMessages,
 };
+use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::ChannelCount;
 use tutti_midi_hardware::test_support::FakeCounters;
 use tutti_session::Peer as _;

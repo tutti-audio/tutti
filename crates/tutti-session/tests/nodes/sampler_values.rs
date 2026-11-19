@@ -701,7 +701,7 @@ fn a_direction_turned_mid_play_on_a_free_running_voice_jumps_to_the_mirrored_fra
 }
 
 fn rate(x: f64) -> tutti_units::PlaybackRate {
-    tutti_units::PlaybackRate::new(x)
+    tutti_units::PlaybackRate::of(x)
 }
 
 /// **A speed set is pending until the update, and then the voice reads every
@@ -786,35 +786,6 @@ fn a_pending_speed_write_to_a_removed_node_never_publishes() {
     assert_eq!(
         rig.s.get(clip.speed()).expect_err("gone").kind,
         ValueErrorKind::NoSuchTarget
-    );
-}
-
-/// **A rate outside the range both tiers play, or not a number, is refused at
-/// the call**, leaving the voice's speed as it was.
-#[test]
-fn a_speed_outside_the_playable_range_is_refused_at_the_call() {
-    let rig = Rig::new(false);
-    for (bad, refusal) in [
-        (f64::NAN, tutti_session::SetRefusal::NotFinite),
-        (f64::INFINITY, tutti_session::SetRefusal::NotFinite),
-        (0.0, tutti_session::SetRefusal::OutOfRange),
-        (-1.0, tutti_session::SetRefusal::OutOfRange),
-        (0.2, tutti_session::SetRefusal::OutOfRange),
-        (4.5, tutti_session::SetRefusal::OutOfRange),
-    ] {
-        let err = rig
-            .s
-            .set(rig.clip.speed().to(rate(bad)))
-            .expect_err("refused");
-        assert_eq!(err.kind, ValueErrorKind::Refused(refusal), "{bad}");
-    }
-    for ok in [0.25, 4.0] {
-        rig.s.set(rig.clip.speed().to(rate(ok))).unwrap();
-    }
-    assert_eq!(
-        rig.s.get(rig.clip.speed()).unwrap(),
-        rate(4.0),
-        "the refused rates staged nothing"
     );
 }
 

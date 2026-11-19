@@ -206,7 +206,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
             (
                 memory(&stereo, 0.0),
                 play(|p| {
-                    p.speed = PlaybackRate::new(1.37);
+                    p.speed = PlaybackRate::of(1.37);
                     p.gain = Amplitude::new(0.5);
                 }),
             ),
@@ -245,7 +245,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
             (VoiceSource::Disk(disk(first_disk)), Playback::default()),
             (
                 VoiceSource::Disk(disk(first_disk + 1)),
-                play(|p| p.speed = PlaybackRate::new(0.75)),
+                play(|p| p.speed = PlaybackRate::of(0.75)),
             ),
             (
                 VoiceSource::Disk(disk(first_disk + 2)),

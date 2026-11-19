@@ -23,7 +23,8 @@
 use std::sync::Mutex;
 use tutti_rt::LockExt;
 
-use tutti_midi_device::{EndpointName, FunctionBlock};
+use tutti_midi_ci::EndpointName;
+use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Narrower, Translator, narrow_message};
 use tutti_ump::{Message, Ump};
 
