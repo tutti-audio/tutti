@@ -24,8 +24,8 @@ use tutti_ump::{
     MpeZoneSpan, Protocol,
 };
 
-use crate::ci::{CiDeviceId, ProfileChannels, ProfileId, ProfileState, ProfileTable};
 use crate::endpoint::Endpoint;
+use tutti_midi_ci::{CiDeviceId, ProfileChannels, ProfileId, ProfileState, ProfileTable};
 
 /// How fast a block takes MIDI 1.0 messages (M2-104 §7.1.8, the MIDI 1.0 field
 /// of Function Block Info).
@@ -205,7 +205,7 @@ impl Dialect {
 /// makes no zone is an error. A caller that must know the peer is
 /// understood (building a [`Dialect`]) wants this reading; a caller that
 /// follows what a peer enabled and skips the rest wants
-/// [`ProfileTable::mpe_zones`](crate::ProfileTable::mpe_zones).
+/// [`ProfileTable::mpe_zones`](tutti_midi_ci::ProfileTable::mpe_zones).
 fn expression(table: &ProfileTable) -> Result<Expression, NoDialect> {
     let mut zones: Option<MpeZoneSet> = None;
     for address in table.addresses() {

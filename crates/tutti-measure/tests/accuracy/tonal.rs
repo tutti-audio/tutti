@@ -5,7 +5,7 @@
 
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use tutti_buffers::Mono;
-use tutti_dsp::{FftScratch, StftGeometry};
+use tutti_dsp::StftGeometry;
 use tutti_measure::{
     ChordConfig, ChordQuality, ChromaConfig, Harmonics, Key, KeyProfile, Mode, PitchClass, Tuning,
     TuningOffset, detect_chords, estimate_key,
@@ -62,19 +62,17 @@ fn config() -> ChromaConfig {
 }
 
 /// The chromagram of `x` at this file's rate.
-fn chroma(x: &[f32], cfg: &ChromaConfig, fft: &mut FftScratch<f64>) -> Result<Chroma> {
-    tutti_measure::chroma(cfg, Mono::new(x), SampleRate::of(SR), fft)
+fn chroma(x: &[f32], cfg: &ChromaConfig) -> Result<Chroma> {
+    tutti_measure::chroma(cfg, Mono::new(x), SampleRate::of(SR))
 }
 
 fn mean_chroma(x: &[f32], cfg: &ChromaConfig) -> [f64; 12] {
-    chroma(x, cfg, &mut FftScratch::<f64>::new())
-        .unwrap()
-        .mean()
+    chroma(x, cfg).unwrap().mean()
 }
 
 fn key_of(x: &[f32], cfg: &ChromaConfig) -> Key {
-    let c = chroma(x, cfg, &mut FftScratch::<f64>::new()).unwrap();
-    estimate_key(c.grid(), KeyProfile::Krumhansl).unwrap().key
+    let c = chroma(x, cfg).unwrap();
+    estimate_key(KeyProfile::Krumhansl, c.grid()).unwrap().key
 }
 
 /// The classes of the `n` largest columns, ascending.
@@ -130,16 +128,16 @@ fn a_triad_of_sines_is_the_chord_c_major() {
     let mut x = vec![0.0; SR as usize * 2];
     chord_tones(&mut x, 0, 2.0, 0, false, 1);
     let cfg = config();
-    let c = chroma(&x, &cfg, &mut FftScratch::<f64>::new()).unwrap();
-    let spans = detect_chords(&c, &ChordConfig::new()).unwrap();
+    let c = chroma(&x, &cfg).unwrap();
+    let spans = detect_chords(&ChordConfig::new(), &c).unwrap();
     assert_eq!(spans.len(), 1);
     assert_eq!(
         (spans[0].root, spans[0].quality),
         (PitchClass::C, ChordQuality::Major)
     );
-    assert_eq!(spans[0].start, Samples::new(0));
+    assert_eq!(spans[0].span.start(), Samples::new(0));
     assert_eq!(
-        spans[0].end,
+        spans[0].span.end(),
         Samples::new(geometry(4096, 1024).output_len(c.grid().frames()).get())
     );
 }
@@ -148,12 +146,11 @@ fn a_triad_of_sines_is_the_chord_c_major() {
 /// the key up exactly `k`, for every `k`.
 #[test]
 fn everything_rotates_by_the_transposition() {
-    let mut fft = FftScratch::<f64>::new();
     for k in 0..12 {
         let mut x = vec![0.0; SR as usize * 2];
         chord_tones(&mut x, 0, 2.0, k, true, 4);
         let cfg = config();
-        let c = chroma(&x, &cfg, &mut fft).unwrap();
+        let c = chroma(&x, &cfg).unwrap();
         let mut want = [
             k as usize % 12,
             (k as usize + 3) % 12,
@@ -161,7 +158,7 @@ fn everything_rotates_by_the_transposition() {
         ];
         want.sort_unstable();
         assert_eq!(top(&c.mean(), 3), want, "k {k}");
-        let spans = detect_chords(&c, &ChordConfig::new()).unwrap();
+        let spans = detect_chords(&ChordConfig::new(), &c).unwrap();
         assert_eq!(spans.len(), 1, "k {k}");
         assert_eq!(
             (spans[0].root.semitones_above_c(), spans[0].quality),
@@ -222,10 +219,10 @@ fn a_detuned_scale_resolves_and_its_tuning_is_read() {
     let interpolation = 1200.0 * (1.0 + 0.02 * width / C4).log2();
     for (partials, tolerance) in [(1, interpolation), (4, interpolation + 1.955)] {
         let x = melody(&C_MAJOR_SCALE, 0.5, partials, 30.0);
-        let c = chroma(&x, &cfg, &mut FftScratch::<f64>::new()).unwrap();
+        let c = chroma(&x, &cfg).unwrap();
         let tuning = c.tuning().get();
         assert!((tuning - 30.0).abs() <= tolerance, "{partials}: {tuning}");
-        let key = estimate_key(c.grid(), KeyProfile::Krumhansl).unwrap().key;
+        let key = estimate_key(KeyProfile::Krumhansl, c.grid()).unwrap().key;
         assert_eq!(
             key,
             Key {
@@ -236,12 +233,7 @@ fn a_detuned_scale_resolves_and_its_tuning_is_read() {
     }
     // Fixed tuning is reported as given.
     let fixed = cfg.tuning(Tuning::Fixed(TuningOffset::of(Cents::new(12.0))));
-    let c = chroma(
-        &melody(&[0], 0.5, 1, 0.0),
-        &fixed,
-        &mut FftScratch::<f64>::new(),
-    )
-    .unwrap();
+    let c = chroma(&melody(&[0], 0.5, 1, 0.0), &fixed).unwrap();
     assert_eq!(c.tuning(), Cents::new(12.0));
 }
 
@@ -268,7 +260,6 @@ fn a_progression_has_its_boundaries_where_the_chords_change() {
     for (i, &(root, _)) in progression.iter().enumerate() {
         chord_tones(&mut x, i * each, secs, root, false, 4);
     }
-    let mut fft = FftScratch::<f64>::new();
     for (window, hop) in [
         (2048, 512),
         (4096, 1024),
@@ -278,8 +269,8 @@ fn a_progression_has_its_boundaries_where_the_chords_change() {
     ] {
         let g = geometry(window, hop);
         let chroma_cfg = config().framing(Framing::new(Samples::new(window), Samples::new(hop)));
-        let c = chroma(&x, &chroma_cfg, &mut fft).unwrap();
-        let spans = detect_chords(&c, &ChordConfig::new()).unwrap();
+        let c = chroma(&x, &chroma_cfg).unwrap();
+        let spans = detect_chords(&ChordConfig::new(), &c).unwrap();
         let got: Vec<_> = spans.iter().map(|s| (s.root, s.quality)).collect();
         let want: Vec<_> = progression
             .iter()
@@ -287,16 +278,16 @@ fn a_progression_has_its_boundaries_where_the_chords_change() {
             .collect();
         assert_eq!(got, want, "{window}/{hop}");
         let tolerance = (window + hop) / 2 + 1;
-        assert_eq!(spans[0].start, Samples::new(0));
+        assert_eq!(spans[0].span.start(), Samples::new(0));
         assert_eq!(
-            spans[3].end,
+            spans[3].span.end(),
             Samples::new(g.output_len(c.grid().frames()).get())
         );
         // Frames that hold both chords may read neither, so the old chord's
         // end and the new one's start are each placed, with a gap between.
         for i in 1..4 {
-            assert!(spans[i - 1].end <= spans[i].start);
-            for at in [spans[i - 1].end.get(), spans[i].start.get()] {
+            assert!(spans[i - 1].span.end() <= spans[i].span.start());
+            for at in [spans[i - 1].span.end().get(), spans[i].span.start().get()] {
                 assert!(
                     at.abs_diff(i * each) <= tolerance,
                     "{window}/{hop}: {at} vs {}",
@@ -314,26 +305,25 @@ fn a_progression_has_its_boundaries_where_the_chords_change() {
 #[test]
 fn silence_noise_and_bad_input() {
     let cfg = config();
-    let mut fft = FftScratch::<f64>::new();
-    let silent = chroma(&vec![0.0; SR as usize], &cfg, &mut fft).unwrap();
+    let silent = chroma(&vec![0.0; SR as usize], &cfg).unwrap();
     assert!(silent.grid().as_slice().iter().all(|&v| v == 0.0));
     assert_eq!(
-        estimate_key(silent.grid(), KeyProfile::Temperley).unwrap_err(),
+        estimate_key(KeyProfile::Temperley, silent.grid()).unwrap_err(),
         Error::NoTonalContent
     );
     let chords = ChordConfig::new();
-    assert!(detect_chords(&silent, &chords).unwrap().is_empty());
+    assert!(detect_chords(&chords, &silent).unwrap().is_empty());
 
     let mut rng = StdRng::seed_from_u64(3);
     let noise: Vec<f32> = (0..SR as usize * 4)
         .map(|_| rng.random_range(-0.3..0.3))
         .collect();
-    let noisy = chroma(&noise, &cfg, &mut fft).unwrap();
+    let noisy = chroma(&noise, &cfg).unwrap();
     assert!(noisy.grid().as_slice().iter().all(|v| v.is_finite()));
-    assert!(detect_chords(&noisy, &chords).unwrap().is_empty());
+    assert!(detect_chords(&chords, &noisy).unwrap().is_empty());
     let sure = |x: &[f32]| {
-        let c = chroma(x, &cfg, &mut FftScratch::<f64>::new()).unwrap();
-        estimate_key(c.grid(), KeyProfile::Krumhansl)
+        let c = chroma(x, &cfg).unwrap();
+        estimate_key(KeyProfile::Krumhansl, c.grid())
             .unwrap()
             .confidence
             .get()
@@ -342,17 +332,11 @@ fn silence_noise_and_bad_input() {
 
     let mut bad = noise.clone();
     bad[5000] = f32::NAN;
-    assert_eq!(
-        chroma(&bad, &cfg, &mut fft).unwrap_err(),
-        Error::NonFiniteInput
-    );
+    assert_eq!(chroma(&bad, &cfg).unwrap_err(), Error::NonFiniteInput);
     bad[5000] = f32::INFINITY;
-    assert_eq!(
-        chroma(&bad, &cfg, &mut fft).unwrap_err(),
-        Error::NonFiniteInput
-    );
+    assert_eq!(chroma(&bad, &cfg).unwrap_err(), Error::NonFiniteInput);
     assert!(matches!(
-        chroma(&noise[..1000], &cfg, &mut fft),
+        chroma(&noise[..1000], &cfg),
         Err(Error::InsufficientInput { .. })
     ));
 }

@@ -20,9 +20,9 @@ use std::path::Path;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, Glide, LadderBank, LadderControls,
-    LadderDesign, LadderModel, LadderType, Lanes, PhaserChain, Stages, StreamingResampler, SvfBank,
-    SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_complement,
+    ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, Glide, LadderBank, LadderBlend,
+    LadderControls, LadderModel, LadderType, PhaserChain, SimdLanes, Stages, StreamingResampler,
+    SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_complement,
 };
 use tutti_fixtures::signal::write_wav_f32;
 use tutti_units::{Db, Drive, Hz, Q, Resonance, SampleRate};
@@ -55,7 +55,7 @@ fn blocks<F: Float>(
 }
 
 /// Runs an SVF in the float `F`, held at `controls`, over `input` in blocks of 512 frames.
-fn run_svf<F: Float + Lanes>(
+fn run_svf<F: Float + SimdLanes>(
     controls: &SvfControls,
     rate: SampleRate,
     input: &[f32],
@@ -175,9 +175,9 @@ fn ladder(dir: &Path, cases: &mut Cases) {
             };
             let name = format!("ladder_{label}_{freq}_{res}");
             let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
-            let mut design = Glide::landed(LadderDesign::from(&LadderModel::new(c, rate)));
+            let mut blend = Glide::landed(LadderBlend::from(&LadderModel::new(c, rate)));
             let out = blocks::<f64>(&impulse(amplitude), 1, |x, y| {
-                bank.process(&mut design, x, y);
+                bank.process(&mut blend, x, y);
             });
             wav(dir, &name, RATE, &out);
             cases.push(
@@ -202,7 +202,7 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         let c = CrossoverControls::new(&hz, rate).expect("controls");
         let model = CrossoverModel::designed(splits.len() + 1, &c, rate).expect("bands");
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
-        let mut coefficients = Glide::landed(model.coefficients());
+        let mut coefficients = Glide::landed(model.blend());
         // One channel per band, band 0 first.
         let out = blocks::<f64>(&impulse(1.0), model.bands(), |x, y| {
             bank.process(&mut coefficients, x, y);

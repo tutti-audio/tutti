@@ -45,7 +45,7 @@ use tutti_ump::{
 
 use super::{ClipFileError, ParsedClip, property_exchange};
 use crate::ReadError;
-use tutti_midi_device::is_set_profile_on;
+use tutti_midi_ci::is_set_profile_on;
 
 /// Why a rule refused, carried as winnow context and mapped to
 /// [`ClipFileError`] once, in [`error_of`].

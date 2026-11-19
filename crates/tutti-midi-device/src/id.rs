@@ -3,7 +3,7 @@
 
 use core::fmt;
 
-use crate::name::ProductInstanceId;
+use tutti_midi_ci::ProductInstanceId;
 
 /// The OS's handle to one endpoint, opaque and backend-owned.
 ///

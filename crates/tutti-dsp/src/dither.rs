@@ -50,7 +50,7 @@ impl DitherNoise {
     /// 32-bit word's top bits as a uniform value of `F` ([`Xorshift32::to_unit`]), scaled by
     /// the `lsb` crossed once with [`Real::from_unit`](tutti_units::Real::from_unit), so a block
     /// of `f32` has draws on a `2^-24` grid and one of `f64` on a `2^-32` grid.
-    pub fn apply<F: Float>(
+    pub fn process<F: Float>(
         &mut self,
         shape: DitherShape,
         lsb: Amplitude,

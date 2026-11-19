@@ -6,9 +6,12 @@ use std::time::{Duration, Instant};
 
 use crate::common::{MF, blocks, note, play};
 use tutti_graph::Losses;
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
+    CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointName, MaxSysexSize,
+};
 use tutti_midi_device::{
-    Capabilities, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, Endpoint, EndpointId,
-    EndpointName, MaxSysexSize, MidiIdentity, Muid, PortDirection, Supports,
+    Capabilities, Endpoint, EndpointId, MidiIdentity, PortDirection, Supports,
 };
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_hardware::{MidiHardwareOptions, ProfilesChange};

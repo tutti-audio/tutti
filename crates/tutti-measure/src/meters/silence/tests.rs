@@ -15,10 +15,18 @@ fn strip(c: &SilenceConfig, x: &[f32]) -> Vec<Region> {
 }
 
 fn r(start: usize, end: usize) -> Region {
-    Region {
-        start: Samples::new(start),
-        end: Samples::new(end),
-    }
+    Region::new(Samples::new(start), Samples::new(end)).expect("an ascending region")
+}
+
+/// A span whose end is before its start is no region, so a region's length
+/// never underflows; an equal start and end is the empty region.
+#[test]
+fn a_region_ends_no_earlier_than_it_starts() {
+    assert_eq!(Region::new(Samples::new(10), Samples::new(4)), None);
+    let empty = r(7, 7);
+    assert!(empty.is_empty());
+    assert_eq!(empty.len(), Samples::new(0));
+    assert_eq!(r(4, 10).len(), Samples::new(6));
 }
 
 /// tone(100) silence(300) tone(100) silence(50), with nothing padded: two

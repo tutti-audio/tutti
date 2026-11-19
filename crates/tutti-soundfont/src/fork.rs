@@ -24,24 +24,24 @@
 //! change, a CC) — the clip replays whatever of that it holds.
 
 use tutti_buffers::Float;
-use tutti_dsp::Lanes;
+use tutti_dsp::SimdLanes;
 use tutti_graph::{ForkCause, ForkMode, ForkSource, Forked};
 
 use crate::SoundFontUnit;
 
 /// The fork source a [`SoundFontUnit`] is inserted with: the template in the
 /// module docs.
-pub(crate) struct SoundFontFork<F: Float + Lanes> {
+pub(crate) struct SoundFontFork<F: Float + SimdLanes> {
     template: SoundFontUnit<F>,
 }
 
-impl<F: Float + Lanes> ForkSource<F> for SoundFontFork<F> {
+impl<F: Float + SimdLanes> ForkSource<F> for SoundFontFork<F> {
     fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(self.template.fork_instance())))
     }
 }
 
-impl<F: Float + Lanes> SoundFontUnit<F> {
+impl<F: Float + SimdLanes> SoundFontUnit<F> {
     /// Returns a fresh unit for a fork of the graph this one plays in (an
     /// offline export, for example).
     ///

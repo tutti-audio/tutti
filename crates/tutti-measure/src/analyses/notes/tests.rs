@@ -66,8 +66,8 @@ impl std::ops::Deref for Case {
 
 type NoteConfig = Case;
 
-fn transcribe(c: &Case, x: &[f64], fft: &mut FftScratch<f64>) -> Result<Vec<NoteEvent>> {
-    super::transcribe(&c.cfg, Mono::new(x), c.rate, fft)
+fn transcribe(c: &Case, x: &[f64]) -> Result<Vec<NoteEvent>> {
+    super::transcribe(&c.cfg, Mono::new(x), c.rate)
 }
 
 fn frame_levels(c: &Case, x: &[f64]) -> Result<Vec<Amplitude>> {
@@ -80,7 +80,7 @@ fn notes_from_track(
     levels: &[Amplitude],
     onsets: &[Samples],
 ) -> Result<Vec<NoteEvent>> {
-    super::notes_from_track(&c.cfg, c.rate, track, levels, onsets)
+    super::notes_from_track(&c.cfg, track, levels, onsets, c.rate)
 }
 
 fn yin_track(yin: &YinPlan, x: &[f64], hop: Samples) -> Result<Vec<PitchEstimate>> {
@@ -171,7 +171,7 @@ fn cents_up(hz: f64, cents: f64) -> f64 {
 }
 
 fn run(cfg: &NoteConfig, x: &[f64]) -> Vec<NoteEvent> {
-    transcribe(cfg, x, &mut FftScratch::new()).unwrap()
+    transcribe(cfg, x).unwrap()
 }
 
 fn secs(s: Samples) -> f64 {
@@ -236,7 +236,7 @@ fn a_melody_gives_its_notes_at_every_geometry() {
             .iter()
             .map(|&(a, b, hz, _)| tone(a, b, hz, 0.5))
             .collect();
-        let notes = transcribe(&c, &render(rate, &tones, 1.5), &mut FftScratch::new()).unwrap();
+        let notes = transcribe(&c, &render(rate, &tones, 1.5)).unwrap();
         assert_eq!(notes.len(), 3, "{notes:?} at {rate} {min_freq} {hop_div}");
         for (n, &(a, b, hz, midi)) in notes.iter().zip(&melody) {
             assert_eq!(u8::try_from(n.note), Ok(midi));
@@ -245,16 +245,20 @@ fn a_melody_gives_its_notes_at_every_geometry() {
             let period = Samples::new((rate / hz) as usize);
             // Never later than a hop and a period after the attack.
             let late = (a * rate) as usize + c.hop.get() + period.get();
-            assert!(n.start.get() <= late, "start {:?} vs {a}", n.start);
             assert!(
-                near(n.start, a, rate, tol),
-                "start {:?} vs {a} ({tol:?})",
-                n.start
+                n.span.start().get() <= late,
+                "start {:?} vs {a}",
+                n.span.start()
             );
             assert!(
-                near(n.end, b, rate, tol),
+                near(n.span.start(), a, rate, tol),
+                "start {:?} vs {a} ({tol:?})",
+                n.span.start()
+            );
+            assert!(
+                near(n.span.end(), b, rate, tol),
                 "end {:?} vs {b} ({tol:?})",
-                n.end
+                n.span.end()
             );
         }
     }
@@ -302,10 +306,10 @@ fn a_re_articulated_note_is_two_notes() {
     let notes = run(&c, &x);
     assert_eq!(notes.len(), 2, "{notes:?}");
     assert!(notes.iter().all(|n| u8::try_from(n.note) == Ok(69)));
-    assert!(notes[0].end <= notes[1].start);
+    assert!(notes[0].span.end() <= notes[1].span.start());
     let dip_start = 0.2 + 0.2; // the dip starts 0.2 s into the tone
     assert!(near(
-        notes[1].start,
+        notes[1].span.start(),
         dip_start + 0.03,
         RATE,
         timing_tolerance(&c)
@@ -356,12 +360,12 @@ fn pitch_changes_split_only_beyond_the_threshold() {
     assert_eq!(u8::try_from(notes[0].note), Ok(69));
     assert_eq!(u8::try_from(notes[1].note), Ok(70));
     // The onset the change makes cuts first, so the notes meet within a hop.
-    assert!(notes[0].end <= notes[1].start);
-    assert!(notes[1].start.get() - notes[0].end.get() <= c.hop.get());
+    assert!(notes[0].span.end() <= notes[1].span.start());
+    assert!(notes[1].span.start().get() - notes[0].span.end().get() <= c.hop.get());
     assert!(
-        near(notes[0].end, 0.4, RATE, timing_tolerance(&c)),
+        near(notes[0].span.end(), 0.4, RATE, timing_tolerance(&c)),
         "{:?}",
-        notes[0].end
+        notes[0].span.end()
     );
 }
 
@@ -386,7 +390,7 @@ fn a_fast_slide_splits_and_a_slow_one_does_not() {
     // 10..=50 and its middle is 30.
     let (hop, half) = (c.hop.get(), c.frame().get() / 2);
     let centre = |f: usize| f * hop + half / 2;
-    assert_eq!(fast[0].end.get(), (centre(29) + centre(30)) / 2);
+    assert_eq!(fast[0].span.end().get(), (centre(29) + centre(30)) / 2);
 
     // The split is the threshold: 80 cents over a span is under 200.
     let loose = c.pitch_split(PitchSplit::of(Cents::new(200.0)));
@@ -457,31 +461,24 @@ fn a_note_shorter_than_the_minimum_is_dropped() {
 #[test]
 fn silence_noise_and_bad_input_are_defined() {
     let c = cfg();
-    let mut fft = FftScratch::new();
-    assert_eq!(
-        transcribe(&c, &vec![0.0; 44100], &mut fft),
-        Err(Error::NoSignal)
-    );
-    assert_eq!(
-        transcribe(&c, &vec![1e-6; 44100], &mut fft),
-        Err(Error::NoSignal)
-    );
+    assert_eq!(transcribe(&c, &vec![0.0; 44100]), Err(Error::NoSignal));
+    assert_eq!(transcribe(&c, &vec![1e-6; 44100]), Err(Error::NoSignal));
     let mut rng = StdRng::seed_from_u64(7);
     let noise: Vec<f64> = (0..88200).map(|_| rng.random_range(-0.3..0.3)).collect();
-    assert_eq!(transcribe(&c, &noise, &mut fft), Ok(Vec::new()));
+    assert_eq!(transcribe(&c, &noise), Ok(Vec::new()));
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut x = render(RATE, &[tone(0.1, 0.5, 440.0, 0.5)], 0.7);
         x[10_000] = bad;
-        assert_eq!(transcribe(&c, &x, &mut fft), Err(Error::NonFiniteInput));
+        assert_eq!(transcribe(&c, &x), Err(Error::NonFiniteInput));
     }
     let n = c.frame().get() + 10 * c.hop.get() + c.hop.get() / 2;
     let mut tail: Vec<f64> = (0..n)
         .map(|i| (TAU * 440.0 * i as f64 / RATE).sin() * 0.5)
         .collect();
     *tail.last_mut().unwrap() = f64::NAN;
-    assert_eq!(transcribe(&c, &tail, &mut fft), Err(Error::NonFiniteInput));
+    assert_eq!(transcribe(&c, &tail), Err(Error::NonFiniteInput));
     assert!(matches!(
-        transcribe(&c, &[0.5; 100], &mut fft),
+        transcribe(&c, &[0.5; 100]),
         Err(Error::InsufficientInput { .. })
     ));
 }
@@ -579,8 +576,8 @@ fn gain_changes_only_the_level() {
         assert_eq!(got.len(), 2, "{gain}");
         for (g, w) in got.iter().zip(&want) {
             assert_eq!(
-                (g.note, g.cents, g.start, g.end),
-                (w.note, w.cents, w.start, w.end),
+                (g.note, g.cents, g.span.start(), g.span.end()),
+                (w.note, w.cents, w.span.start(), w.span.end()),
                 "{gain}"
             );
             assert!(
@@ -635,10 +632,13 @@ fn an_onset_splits_at_its_first_whole_frame() {
     let at = 17 * hop + 50;
     let notes = notes_from_track(&c, &t, &loud(40), &[Samples::new(at)]).unwrap();
     assert_eq!(notes.len(), 2);
-    assert_eq!(notes[0].start, Samples::new(0));
-    assert_eq!(notes[0].end, Samples::new(at));
-    assert_eq!(notes[1].start, Samples::new(18 * hop));
-    assert_eq!(notes[1].end, Samples::new(39 * hop + c.frame().get() / 2));
+    assert_eq!(notes[0].span.start(), Samples::new(0));
+    assert_eq!(notes[0].span.end(), Samples::new(at));
+    assert_eq!(notes[1].span.start(), Samples::new(18 * hop));
+    assert_eq!(
+        notes[1].span.end(),
+        Samples::new(39 * hop + c.frame().get() / 2)
+    );
 
     let extra = [
         Samples::new(30 * hop - 3),
@@ -685,7 +685,7 @@ fn a_pitch_step_splits_at_the_frame_midpoint_and_blips_do_not() {
     assert_eq!(notes.len(), 2);
     let boundary = ((19 * hop + half / 2) + (20 * hop + half / 2)) / 2;
     assert_eq!(
-        (notes[0].end.get(), notes[1].start.get()),
+        (notes[0].span.end().get(), notes[1].span.start().get()),
         (boundary, boundary)
     );
     assert_eq!(u8::try_from(notes[1].note), Ok(72));
@@ -769,7 +769,7 @@ fn settings_and_inputs_are_validated() {
         Err(Error::HopWiderThanWindow { .. })
     ));
     assert!(matches!(
-        transcribe(&hop(1), &vec![0.1; frame], &mut FftScratch::new()),
+        transcribe(&hop(1), &vec![0.1; frame]),
         Err(Error::TooManyOverlaps { .. })
     ));
 
@@ -831,7 +831,7 @@ fn too_many_frames_are_refused() {
     let c = c.hop(PitchHop::of(Samples::new(1)));
     let x = vec![0.1f64; MAX_FRAMES.get() + c.frame().get() + 1];
     assert_eq!(
-        transcribe(&c, &x, &mut FftScratch::new()),
+        transcribe(&c, &x),
         Err(Error::TooManyFrames {
             frames: FrameCount(MAX_FRAMES.get() + 2),
             max: MAX_FRAMES
@@ -875,8 +875,8 @@ fn a_note_at_the_end_of_the_buffer_stops_short_of_it() {
     let notes = run(&c, &x);
     assert_eq!(notes.len(), 1, "{notes:?}");
     let last = (n - frame) / hop;
-    assert_eq!(notes[0].end.get(), last * hop + frame / 2);
-    assert!(n - notes[0].end.get() >= frame / 2);
+    assert_eq!(notes[0].span.end().get(), last * hop + frame / 2);
+    assert!(n - notes[0].span.end().get() >= frame / 2);
 
     // A tone in the final half frame has no frame whose window holds it.
     let start = n - frame / 2 + 1;
@@ -886,21 +886,6 @@ fn a_note_at_the_end_of_the_buffer_stops_short_of_it() {
         n as f64 / RATE,
     );
     assert_eq!(run(&c, &late), Vec::new());
-}
-
-/// A note built by hand with its end before its start has no length rather
-/// than panicking or wrapping, and is empty.
-#[test]
-fn a_reversed_note_has_no_length() {
-    let n = NoteEvent {
-        note: Note::A4,
-        cents: Cents::new(0.0),
-        start: Samples::new(10),
-        end: Samples::new(4),
-        velocity: Db::new(-20.0),
-    };
-    assert_eq!(n.len(), Samples::new(0));
-    assert!(n.is_empty());
 }
 
 /// The default config's figures, and `secs` for reading them.

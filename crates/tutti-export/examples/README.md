@@ -41,6 +41,6 @@ Three things worth reading closely:
   silent; the non-zero `1e-7` is the dither floor. Copying mono into every
   channel would put program material in the LFE and both surrounds, and add
   6 dB on any downmix.
-- **Normalization lands on the target exactly**, because the gain is measured
+- **Normalization reaches the target exactly**, because the gain is measured
   and applied as two separate steps the caller composes — which is what lets the
   export itself stream.

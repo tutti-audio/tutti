@@ -19,7 +19,7 @@
 //!   failed `write`.
 //! - `FileOut` is the file sink, `FileIn`'s mirror: a `Sink` over an
 //!   `Encoder`, created from a `Spec` and a path, for any `Format` the build can
-//!   write. It keeps whole frames only, latches the first write error (later
+//!   write. It keeps whole frames only, keeps the first write error (later
 //!   writes are skipped and return `SinkFailed`) and `finalize` returns that
 //!   error, else the result of `finish`. It writes in place rather than staged,
 //!   because a recording cut short is worth keeping.

@@ -11,10 +11,10 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tutti_buffers::Mono;
-use tutti_dsp::FftScratch;
 use tutti_measure::PitchHop;
 use tutti_measure::{
-    DetectionFunction, OnsetConfig, StftRequest, YinConfig, detect_onsets, istft_transform, stft,
+    DetectionFunction, OnsetConfig, SampleRange, StftConfig, YinConfig, detect_onsets,
+    istft_transform, stft,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -45,18 +45,16 @@ fn benches(c: &mut Criterion) {
     g.sample_size(30);
 
     g.bench_function("stft_istft_2048_hop512", |b| {
-        let mut fft = FftScratch::<f64>::new();
-        let req = StftRequest::new(Samples::new(2048), Samples::new(512));
+        let req = StftConfig::new(Samples::new(2048), Samples::new(512));
         b.iter(|| {
-            let s = stft(req, Mono::new(black_box(&x)), SR, &mut fft).unwrap();
-            black_box(istft_transform::<f32>(&s, &mut fft))
+            let s = stft(&req, Mono::new(black_box(&x)), SampleRange::All, SR).unwrap();
+            black_box(istft_transform::<f32>(&s))
         });
     });
 
     g.bench_function("onsets_flux_2048_hop512", |b| {
-        let mut fft = FftScratch::<f64>::new();
         let cfg = OnsetConfig::new(DetectionFunction::SpectralFlux);
-        b.iter(|| black_box(detect_onsets(&cfg, Mono::new(black_box(&x)), SR, &mut fft).unwrap()));
+        b.iter(|| black_box(detect_onsets(&cfg, Mono::new(black_box(&x)), SR).unwrap()));
     });
 
     g.bench_function("yin_track_hop512", |b| {

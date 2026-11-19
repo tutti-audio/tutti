@@ -19,7 +19,7 @@ fn a_profile_names_its_own_key_with_full_confidence() {
         for mode in [Mode::Major, Mode::Minor] {
             for tonic in 0..CLASSES {
                 let est =
-                    estimate_key_from_mean(&profile_chroma(tonic, mode, profile), profile).unwrap();
+                    estimate_key_from_mean(profile, &profile_chroma(tonic, mode, profile)).unwrap();
                 assert_eq!(
                     est.key,
                     key_at(tonic + if mode == Mode::Minor { CLASSES } else { 0 })
@@ -38,9 +38,9 @@ fn a_profile_names_its_own_key_with_full_confidence() {
 #[test]
 fn rotating_the_chroma_rotates_the_key() {
     let base: [f64; CLASSES] = [0.9, 0.1, 0.5, 0.0, 0.6, 0.4, 0.1, 0.8, 0.0, 0.3, 0.1, 0.4];
-    let first = estimate_key_from_mean(&base, KeyProfile::Krumhansl).unwrap();
+    let first = estimate_key_from_mean(KeyProfile::Krumhansl, &base).unwrap();
     for k in 0..CLASSES {
-        let est = estimate_key_from_mean(&rotate(&base, k), KeyProfile::Krumhansl).unwrap();
+        let est = estimate_key_from_mean(KeyProfile::Krumhansl, &rotate(&base, k)).unwrap();
         let tonic = (usize::from(first.key.tonic.semitones_above_c()) + k) % CLASSES;
         assert_eq!(est.key.tonic.semitones_above_c() as usize, tonic);
         assert_eq!(est.key.mode, first.key.mode);
@@ -54,7 +54,7 @@ fn rotating_the_chroma_rotates_the_key() {
 #[test]
 fn the_confidence_is_the_documented_margin() {
     let x: [f64; CLASSES] = [0.9, 0.1, 0.5, 0.0, 0.6, 0.4, 0.1, 0.8, 0.0, 0.3, 0.1, 0.4];
-    let est = estimate_key_from_mean(&x, KeyProfile::Temperley).unwrap();
+    let est = estimate_key_from_mean(KeyProfile::Temperley, &x).unwrap();
     let pearson = |tonic: usize, mode: Mode| {
         let p = KeyProfile::Temperley.ratings(mode);
         let q: Vec<f64> = (0..CLASSES)
@@ -90,7 +90,7 @@ fn a_blurred_chroma_is_less_certain() {
     let other = profile_chroma(7, Mode::Major, KeyProfile::Krumhansl);
     let blend: [f64; CLASSES] = core::array::from_fn(|i| pure[i] + other[i]);
     let c = |x| {
-        estimate_key_from_mean(x, KeyProfile::Krumhansl)
+        estimate_key_from_mean(KeyProfile::Krumhansl, x)
             .unwrap()
             .confidence
     };
@@ -103,7 +103,7 @@ fn a_blurred_chroma_is_less_certain() {
 /// a chroma barely off flat is a key.
 #[test]
 fn silence_and_flat_chroma_are_errors() {
-    let bad = |x: [f64; CLASSES]| estimate_key_from_mean(&x, KeyProfile::Krumhansl).unwrap_err();
+    let bad = |x: [f64; CLASSES]| estimate_key_from_mean(KeyProfile::Krumhansl, &x).unwrap_err();
     assert_eq!(bad([0.0; CLASSES]), Error::NoTonalContent);
     assert_eq!(bad([0.3; CLASSES]), Error::NoTonalContent);
     assert_eq!(bad([1e-30; CLASSES]), Error::NoTonalContent);
@@ -113,10 +113,10 @@ fn silence_and_flat_chroma_are_errors() {
     assert_eq!(bad(ulp), Error::NoTonalContent);
     let mut tilted = [0.5f64; CLASSES];
     tilted[0] = 0.51;
-    assert!(estimate_key_from_mean(&tilted, KeyProfile::Krumhansl).is_ok());
+    assert!(estimate_key_from_mean(KeyProfile::Krumhansl, &tilted).is_ok());
     let none = Grid::new(Vec::new(), FrameCount(0), BinCount(CLASSES)).unwrap();
     assert_eq!(
-        estimate_key(&none, KeyProfile::Krumhansl).unwrap_err(),
+        estimate_key(KeyProfile::Krumhansl, &none).unwrap_err(),
         Error::NoTonalContent
     );
 }
@@ -126,7 +126,7 @@ fn silence_and_flat_chroma_are_errors() {
 fn bad_chroma_is_refused() {
     let mut x = [0.5f64; CLASSES];
     x[3] = f64::NAN;
-    let e = |x: &[f64; CLASSES]| estimate_key_from_mean(x, KeyProfile::Krumhansl).unwrap_err();
+    let e = |x: &[f64; CLASSES]| estimate_key_from_mean(KeyProfile::Krumhansl, x).unwrap_err();
     assert_eq!(e(&x), Error::NonFiniteInput);
     x[3] = f64::INFINITY;
     assert_eq!(e(&x), Error::NonFiniteInput);
@@ -134,7 +134,7 @@ fn bad_chroma_is_refused() {
     assert_eq!(e(&x), Error::NegativeInput);
     let wide = Grid::new(vec![0.5; 13], FrameCount(1), BinCount(13)).unwrap();
     assert_eq!(
-        estimate_key(&wide, KeyProfile::Krumhansl),
+        estimate_key(KeyProfile::Krumhansl, &wide),
         Err(Error::NotTwelveClasses { columns: 13 })
     );
 }
@@ -149,7 +149,7 @@ fn a_grid_is_read_as_its_mean() {
         let data = [first.as_slice(), second.as_slice(), second.as_slice()].concat();
         Grid::new(data, FrameCount(3), BinCount(CLASSES)).unwrap()
     };
-    let est = estimate_key(&rows(&a, &b), KeyProfile::Krumhansl).unwrap();
+    let est = estimate_key(KeyProfile::Krumhansl, &rows(&a, &b)).unwrap();
     assert_eq!(
         est.key,
         Key {
@@ -157,7 +157,7 @@ fn a_grid_is_read_as_its_mean() {
             mode: Mode::Minor
         }
     );
-    let swapped = estimate_key(&rows(&b, &a), KeyProfile::Krumhansl).unwrap();
+    let swapped = estimate_key(KeyProfile::Krumhansl, &rows(&b, &a)).unwrap();
     assert_eq!(
         swapped.key,
         Key {

@@ -18,7 +18,7 @@
 //! ```
 //! use std::net::SocketAddr;
 //! use std::time::Instant;
-//! use tutti_midi_device::{EndpointName, ProductInstanceId};
+//! use tutti_midi_ci::{EndpointName, ProductInstanceId};
 //! use tutti_midi_network::{
 //!     Client, Credentials, EndpointIdentity, Event, Host, HostConfig, NetworkEndpoint,
 //!     SessionConfig, SessionState,

@@ -48,8 +48,8 @@ use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 
 use super::curves::{FloatCurve, LimiterCurve, level_db, limiter_gain};
+use super::gain_pass::{CHUNK, level};
 use super::lookahead::{LookaheadRing, fold_peak};
-use super::shared::{CHUNK, level};
 use crate::follower::{Pole, Smoothed};
 use crate::{FirError, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan};
 

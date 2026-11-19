@@ -6,7 +6,7 @@
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{FdnBank, FdnControls, FdnGlides, FdnLayout, Lerp};
+use tutti_dsp::{FdnBank, FdnControls, FdnGlides, FdnLayout, FreezeMode, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
@@ -46,7 +46,7 @@ impl<F: Float + Lerp> FdnNode<F> {
     #[must_use]
     pub fn live(layout: FdnLayout, controls: FdnControls) -> Self {
         let set = FdnSet {
-            freezable: layout.freezable(),
+            freezable: layout.freeze_mode() == FreezeMode::Freezable,
         };
         Self::with_kernel(FdnKernel::new(layout), set, controls)
     }
@@ -218,7 +218,9 @@ mod tests {
         // Two identical input channels: the bank averages them, and the block has the stereo
         // width of the output the harness reads back.
         let render = |input: &[f64]| {
-            let mut k = FdnKernel::<f64>::new(FdnLayout::new(8, MaxDecay::DEFAULT, false).unwrap());
+            let mut k = FdnKernel::<f64>::new(
+                FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
+            );
             k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples::new(len)));
             drive_kernel(&mut k, &moves, &[input.to_vec(), input.to_vec()])
         };

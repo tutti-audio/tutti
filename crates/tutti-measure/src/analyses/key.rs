@@ -105,14 +105,14 @@ pub struct KeyEstimate {
 /// [`Error::NotTwelveClasses`] when the grid is not 12 columns wide;
 /// [`Error::NegativeInput`] when it holds a negative value; [`Error::NonFiniteInput`] for a NaN or infinity;
 /// [`Error::NoTonalContent`] when it has no frames, is silent or is flat.
-pub fn estimate_key(chroma: &Grid<f64>, profile: KeyProfile) -> Result<KeyEstimate> {
+pub fn estimate_key(profile: KeyProfile, chroma: &Grid<f64>) -> Result<KeyEstimate> {
     if chroma.bins().get() != CLASSES {
         return Err(Error::NotTwelveClasses {
             columns: chroma.bins().get(),
         });
     }
     let mean = mean_of_rows(chroma);
-    estimate_key_from_mean(&mean, profile)
+    estimate_key_from_mean(profile, &mean)
 }
 
 /// The key of one chroma vector, such as a mean read from a
@@ -121,7 +121,7 @@ pub fn estimate_key(chroma: &Grid<f64>, profile: KeyProfile) -> Result<KeyEstima
 /// # Errors
 ///
 /// As [`estimate_key`], for a vector.
-pub fn estimate_key_from_mean(mean: &[f64; CLASSES], profile: KeyProfile) -> Result<KeyEstimate> {
+pub fn estimate_key_from_mean(profile: KeyProfile, mean: &[f64; CLASSES]) -> Result<KeyEstimate> {
     if mean.iter().any(|v| !v.is_finite()) {
         return Err(Error::NonFiniteInput);
     }
