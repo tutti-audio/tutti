@@ -718,7 +718,7 @@ the model of §3 (an edit republishes the map) is all it uses.
 
 The audio thread never sees a map edit.
 
-- **What the follower hears.** An event tap (`Op::EventTap`, `Raw`) on the ingest
+- **What the follower hears.** An event tap (`Op::EventTap`, `Raw`) on the input
   node's channelless port of the followed Group, which carries that Group's Flex
   Data. It is drained in `Phase::Poll`, after the devices'.
 - **What the core decides.** `TempoFollower::step(Ump) -> Option<Followed>`

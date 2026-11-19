@@ -729,7 +729,7 @@ pub(crate) struct MidiState {
     /// The ports the pool's `midi_input` and `midi_output` entries opened.
     pub(crate) ports: crate::midi_port::Ports,
     /// The session's one MPE mode ([`MpeModeTarget`](crate::MpeModeTarget)),
-    /// the cell every ingest and clip transform reads.
+    /// the cell every input and clip transform reads.
     mpe: tutti_rt::Publisher<MpeMode>,
     /// The tempo the session follows, if it does ([`Midi::follow_tempo`]).
     follow: Option<Follow>,
