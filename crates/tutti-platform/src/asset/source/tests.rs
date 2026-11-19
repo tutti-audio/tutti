@@ -39,13 +39,15 @@ fn a_path_identity_changes_when_the_file_length_changes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("clip.bin");
     std::fs::write(&path, [0u8; 4]).unwrap();
-    let before = Asset::from(path.as_path());
-    assert_eq!(before.identity(), Asset::from(path.as_path()).identity());
+    let asset = Asset::from(path.as_path());
+    let before = asset.identity();
+    assert!(before.is_some());
+    assert_eq!(before, Asset::from(path.as_path()).identity());
     std::fs::write(&path, [0u8; 9]).unwrap();
-    let after = Asset::from(path.as_path());
-    assert_ne!(before.identity(), after.identity());
+    // The same asset: its key is taken at each call, from the file as it is now.
+    assert_ne!(before, asset.identity());
     let mut read = Vec::new();
-    after.open().unwrap().read_to_end(&mut read).unwrap();
+    asset.open().unwrap().read_to_end(&mut read).unwrap();
     assert_eq!(read.len(), 9);
 }
 

@@ -68,7 +68,7 @@ pub trait Open: Send + Sync {
 
     /// The source's file extension (`"wav"`), which a decoder uses to probe a
     /// container. `None`, the default, probes from the bytes alone.
-    fn hint(&self) -> Option<&str> {
+    fn extension(&self) -> Option<&str> {
         None
     }
 
@@ -92,7 +92,7 @@ impl Open for FileSource {
         Ok(Box::new(std::fs::File::open(&self.path)?))
     }
 
-    fn hint(&self) -> Option<&str> {
+    fn extension(&self) -> Option<&str> {
         self.path.extension().and_then(|e| e.to_str())
     }
 
@@ -152,18 +152,12 @@ impl Open for BytesSource {
 #[derive(Clone)]
 pub struct Asset {
     source: Arc<dyn Open>,
-    identity: Option<Identity>,
     hint: Option<Arc<str>>,
 }
 
 impl Asset {
     fn new(source: Arc<dyn Open>) -> Self {
-        let identity = source.identity();
-        Self {
-            source,
-            identity,
-            hint: None,
-        }
+        Self { source, hint: None }
     }
 
     /// Sets the file extension a decoder probes with, in place of the source's
@@ -187,7 +181,7 @@ impl Asset {
     /// the source's.
     #[must_use]
     pub fn extension(&self) -> Option<&str> {
-        self.hint.as_deref().or_else(|| self.source.hint())
+        self.hint.as_deref().or_else(|| self.source.extension())
     }
 
     /// The source's name, for an error message.
@@ -196,11 +190,12 @@ impl Asset {
         self.source.name()
     }
 
-    /// The cache key, fixed when the asset was made; `None` for a source that
-    /// is not cached.
+    /// The cache key, taken now; see [`Open::identity`]. A file's key is its path and
+    /// its current [`Stamp`], so a file changed since the last call has a new key;
+    /// `None` for a source that is not cached.
     #[must_use]
     pub fn identity(&self) -> Option<Identity> {
-        self.identity.clone()
+        self.source.identity()
     }
 }
 
@@ -208,7 +203,7 @@ impl fmt::Debug for Asset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Asset")
             .field("name", &self.source.name())
-            .field("identity", &self.identity)
+            .field("extension", &self.extension())
             .finish()
     }
 }
