@@ -7,7 +7,7 @@
 //! into SysEx payload bytes and back;
 //! it holds no state and no transport. [`CiDevice`] is the Management state
 //! machine over it (Discovery, MUID collisions, Invalidate MUID, NAK, Endpoint
-//! Inquiry), shaped as [`Connection`] is, and [`ProfileInitiator`] the Initiator of Profile
+//! Inquiry), shaped as [`EndpointDiscovery`] is, and [`ProfileInitiator`] the Initiator of Profile
 //! Configuration with one peer, and [`ProcessInitiator`] the Initiator of Process Inquiry.
 //!
 //! What a peer declares about itself becomes values the rest of tutti shares:
@@ -49,34 +49,34 @@
 //! ));
 //! ```
 
-//! The UMP [`Endpoint`] and [`Connection`] are the other half: an endpoint's declared
+//! The UMP [`Endpoint`] and [`EndpointDiscovery`] are the other half: an endpoint's declared
 //! state with its answers ([`Endpoint::reply`]), and the discoverer's steps over
 //! received messages and time as a value (M2-104 §7.1, M2-100 Table 4).
 //!
 //! ```
 //! use std::time::{Duration, Instant};
-//! use tutti_midi_device::{Action, Connection, Ending, STEP_TIMEOUT};
+//! use tutti_midi_device::{DiscoveryAction, EndpointDiscovery, DiscoveryEnding, STEP_TIMEOUT};
 //!
 //! let start = Instant::now();
-//! let (mut connection, first) = Connection::new(start);
-//! // `first` is `Action::Send(discovery)`: the driver loop handles it like any
+//! let (mut connection, first) = EndpointDiscovery::new(start);
+//! // `first` is `DiscoveryAction::Send(discovery)`: the driver loop handles it like any
 //! // other action. A peer that never answers is sent the discovery again after
 //! // each `STEP_TIMEOUT`, and is a MIDI 1.0 device after the third.
 //! assert_eq!(connection.on_timeout(start + STEP_TIMEOUT), first);
 //! connection.on_timeout(start + 2 * STEP_TIMEOUT);
 //! assert_eq!(
 //!     connection.on_timeout(start + 3 * STEP_TIMEOUT + Duration::from_millis(1)),
-//!     Action::Settled(Ending::Midi1Fallback)
+//!     DiscoveryAction::Settled(DiscoveryEnding::Midi1Fallback)
 //! );
 //! ```
 //!
 #![forbid(unsafe_code)]
 
 mod ci;
-mod connection;
 mod deadline;
 mod dialect;
 mod endpoint;
+mod endpoint_discovery;
 mod entropy;
 mod id;
 mod inquiry;
@@ -104,7 +104,7 @@ pub use ci::{
     NotAStateSize, NotAStepCount, NotAStreamLimit, NotASysexSize, NotATimeoutWait, NotAVersion,
     NotProfileChannels, NotSetProfileOn, NotSignificantBits, NotUnixSeconds, NotValid,
     NotVariationCount, NotVendorName, NoteData, ORGAN_HIGHEST_NOTE, ORGAN_LOWEST_NOTE,
-    ORGAN_REFERENCE_NOTE, OpaqueBody, OrganFeatures, OrganLevel, OrganOption, OrganValue, Outcome,
+    ORGAN_REFERENCE_NOTE, OpaqueBody, OrganFeatures, OrganLevel, OrganOption, OrganValue,
     PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT, PEER_REPLY_TIMEOUT,
     PaginationFault, ParamPath, PartialError, PartialUpdate, PartialValue, PeAction,
     PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
@@ -123,38 +123,41 @@ pub use ci::{
     PeUpdateCommand, PeVersion, Place, Priority, ProcessAction, ProcessError, ProcessFeatures,
     ProcessInitiator, ProfileAction, ProfileChange, ProfileChannels, ProfileDataError,
     ProfileEntry, ProfileId, ProfileInitiator, ProfileList, ProfileLists, ProfileOnRequest,
-    ProfileSpecific, ProfileState, ProfileTable, ProfileTarget, PropertyName, PublishError,
-    RefusedAt, ReportRequest, ReportScope, Request, RequestError, RequestRefused, ResIdUse,
-    ResourceAction, ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent,
-    ResourceFailure, ResourceGet, ResourceId, ResourceInitiator, ResourceName, ResourceResponder,
-    ResourceSet, ResourceStore, ResourceTarget, ResponderAction, ResponderEvent, ResponderSettings,
-    RestoreError, RoleName, RotaryControl, RotarySpeaker, RotaryValue, SUB_ID2_ACK,
-    SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
-    SUB_ID2_INVALIDATE_MUID, SUB_ID2_MESSAGE_REPORT_END, SUB_ID2_MESSAGE_REPORT_INQUIRY,
-    SUB_ID2_MESSAGE_REPORT_REPLY, SUB_ID2_NAK, SUB_ID2_PE_CAPABILITIES_INQUIRY,
-    SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SUB_ID2_PROCESS_CAPABILITIES_INQUIRY,
-    SUB_ID2_PROCESS_CAPABILITIES_REPLY, SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY,
-    SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED,
-    SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY,
-    SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SavedState,
-    SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, Sound, SoundSet,
-    SpecificData, StandardProfile, StateDevice, StateId, StateRev, StateSize, StateStamp,
+    ProfileOutcome, ProfileRequest, ProfileRequestError, ProfileSpecific, ProfileState,
+    ProfileTable, ProfileTarget, PropertyName, PublishError, RefusedAt, ReportRequest, ReportScope,
+    RequestRefused, ResIdUse, ResourceAction, ResourceDefaults, ResourceEntry,
+    ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
+    ResourceInitiator, ResourceName, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
+    ResponderAction, ResponderEvent, ResponderSettings, RestoreError, RoleName, RotaryControl,
+    RotarySpeaker, RotaryValue, SUB_ID2_ACK, SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY,
+    SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY, SUB_ID2_INVALIDATE_MUID,
+    SUB_ID2_MESSAGE_REPORT_END, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_MESSAGE_REPORT_REPLY,
+    SUB_ID2_NAK, SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY,
+    SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, SUB_ID2_PROCESS_CAPABILITIES_REPLY,
+    SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY,
+    SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY,
+    SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
+    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SavedState, SelectorAction, SetBody,
+    SignificantBits, SimpleAction, SimultaneousRequests, Sound, SoundSet, SpecificData,
+    StandardProfile, StateDevice, StateId, StateRev, StateSize, StateStamp, StateVerdict,
     StepCount, StoreError, StreamLimit, SubclassCounts, SubscribeId, SuggestedCc, SwitchMeaning,
     SystemMessages, TimeoutWait, TwoState, TypeHint, UnixSeconds, Unread, UnreadReason, UpdateKind,
-    VariationCount, Verdict, VibratoChorus, Whole, WrongDevice, decode_body, encode_body,
+    VariationCount, VibratoChorus, Whole, WrongDevice, decode_body, encode_body,
     is_property_exchange, is_set_profile_on, mcoded7, send_level, split_message, volume_gain,
 };
 
 #[cfg(feature = "serde")]
 pub use ci::SavedStateError;
-pub use connection::{Action, Connection, Ending, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT};
 pub use dialect::{ChannelVoice, Dialect, Expression, JrTimestamps, Midi1Rate, NoDialect};
 #[cfg(feature = "serde")]
 pub use endpoint::NotAnEndpoint;
 pub use endpoint::{
-    BlockError, Capabilities, ChangeError, Configuration, Endpoint, EndpointChange, FunctionBlock,
-    FunctionBlockBuilder, MAX_FUNCTION_BLOCKS, MidiIdentity, NoProtocol, Reply, Supports,
+    BlockError, Capabilities, ChangeError, Configuration, Endpoint, EndpointChange, EndpointReply,
+    FunctionBlock, FunctionBlockBuilder, MAX_FUNCTION_BLOCKS, MidiIdentity, NoProtocol, Supports,
     UMP_VERSION,
+};
+pub use endpoint_discovery::{
+    DiscoveryAction, DiscoveryEnding, EndpointDiscovery, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT,
 };
 pub use entropy::{EntropyError, EntropyWords, random_bytes};
 pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDevice};

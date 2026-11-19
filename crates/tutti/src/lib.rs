@@ -683,10 +683,10 @@ pub mod midi {
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
         DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
         MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError, NotADataControl, NotADeviceId,
-        NotAMuid, NotASysexSize, NotProfileChannels, NoteData, Outcome, PortDirection,
-        ProcessError, ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError,
-        ProfileEntry, ProfileState, ProfileTable, ReportRequest, ReportScope, Request,
-        RequestError, SpecificData, StandardProfile, SystemMessages, WinMmDevice,
+        NotAMuid, NotASysexSize, NotProfileChannels, NoteData, PortDirection, ProcessError,
+        ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
+        ProfileOutcome, ProfileRequest, ProfileRequestError, ProfileState, ProfileTable,
+        ReportRequest, ReportScope, SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,

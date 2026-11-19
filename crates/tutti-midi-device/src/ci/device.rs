@@ -1,7 +1,7 @@
 //! [`CiDevice`]: one MIDI-CI Device on one Group of one connection, and the
 //! Management messages it runs (M2-101 §3.3, §4, §5.5 to §5.9, Appendix E).
 //!
-//! It is a pure state machine in the shape of [`Connection`](crate::Connection):
+//! It is a pure state machine in the shape of [`EndpointDiscovery`](crate::EndpointDiscovery):
 //! every step returns the [`CiAction`]s to carry out, time comes in as an
 //! [`Instant`] argument, and nothing here reads a clock, sends a byte, draws from
 //! an OS random source or runs a thread. The caller routes to it the CI messages

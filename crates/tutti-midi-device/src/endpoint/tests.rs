@@ -220,7 +220,7 @@ fn a_discovery_of_a_lower_version_is_read_as_that_version_defines_it() {
         let reply = device().reply(Message::Stream(older), &mut out);
         assert_eq!(
             (reply, out.len()),
-            (Reply::Ignored, 0),
+            (EndpointReply::Ignored, 0),
             "version {major}.{minor}"
         );
     }
@@ -447,7 +447,10 @@ fn a_message_that_is_not_a_request_is_not_answered() {
         Message::Stream(Stream::StreamConfigurationNotification(e.active())),
         &mut out,
     );
-    assert_eq!((noop, notification), (Reply::Ignored, Reply::Ignored));
+    assert_eq!(
+        (noop, notification),
+        (EndpointReply::Ignored, EndpointReply::Ignored)
+    );
     assert!(out.is_empty());
 }
 
@@ -534,7 +537,7 @@ fn a_block_is_replaced_by_number_and_the_count_follows_the_highest() {
     assert!(e.function_block(id(0)).is_none());
 }
 
-fn replied(endpoint: &mut Endpoint, stream: Stream) -> Reply {
+fn replied(endpoint: &mut Endpoint, stream: Stream) -> EndpointReply {
     endpoint.reply(Message::Stream(stream), &mut Vec::new())
 }
 
@@ -555,13 +558,13 @@ fn a_request_is_reported_as_granted_or_reduced() {
     };
     assert_eq!(
         replied(&mut e, request(Protocol::Midi2, true, false)),
-        Reply::Configured(Configuration::Granted(granted))
+        EndpointReply::Configured(Configuration::Granted(granted))
     );
     let asked = StreamConfig {
         tx_jr: true,
         ..granted
     };
-    let reduced = Reply::Configured(Configuration::Reduced {
+    let reduced = EndpointReply::Configured(Configuration::Reduced {
         asked,
         active: granted,
     });
@@ -569,14 +572,14 @@ fn a_request_is_reported_as_granted_or_reduced() {
         replied(&mut e, request(Protocol::Midi2, true, true)),
         reduced
     );
-    let Reply::Configured(c) = reduced else {
+    let EndpointReply::Configured(c) = reduced else {
         unreachable!()
     };
     assert_eq!(c.active(), granted);
     // A reserved Protocol is a part not done.
     assert!(matches!(
         replied(&mut e, request(midi::reserved_protocol(7), true, false)),
-        Reply::Configured(Configuration::Reduced { .. })
+        EndpointReply::Configured(Configuration::Reduced { .. })
     ));
 }
 
@@ -584,13 +587,13 @@ fn a_request_is_reported_as_granted_or_reduced() {
 #[test]
 fn a_discovery_is_answered_even_for_a_block_that_is_absent() {
     let mut e = device();
-    assert_eq!(replied(&mut e, discovery(NONE)), Reply::Answered);
+    assert_eq!(replied(&mut e, discovery(NONE)), EndpointReply::Answered);
     assert_eq!(
         replied(
             &mut e,
             block_discovery(BlockSelect::One(id(30)), true, true)
         ),
-        Reply::Answered
+        EndpointReply::Answered
     );
 }
 

@@ -53,7 +53,7 @@ pub use state::SavedStateError;
 pub use state::{
     Arrival, CommonState, GetStateError, NotAStateSize, NotUnixSeconds, PeState, PeStateEntry,
     PeStateList, RefusedAt, RestoreError, SavedState, StateDevice, StateId, StateRev, StateSize,
-    StateStamp, UnixSeconds, Verdict, WrongDevice,
+    StateStamp, StateVerdict, UnixSeconds, WrongDevice,
 };
 pub use store::{ResourceStore, StoreError};
 

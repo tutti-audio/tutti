@@ -1616,7 +1616,8 @@ pub struct BlockFilter {
     pub name: bool,
 }
 
-/// A Function Block's connection direction (§7.1.8); `0b00` is reserved.
+/// A Function Block's connection direction (§7.1.8), from the device's own side; `0b00` is
+/// reserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BlockDirection {
