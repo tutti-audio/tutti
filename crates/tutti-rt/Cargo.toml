@@ -19,8 +19,6 @@ workspace = true
 [dependencies]
 # `Param<U>` wraps an `Arc<AtomicF64>`.
 atomic_float = { version = "1.1", default-features = false, features = ["atomic_f64"] }
-# `request_priority`: the OS thread-priority call, behind one outcome type.
-thread-priority = "3.1"
 # `Publisher`/`Loan`/`Reader`, re-exported at the root: the cell non-scalar state
 # reaches the audio thread through. A general-purpose crate that names no tutti
 # crate; it comes from crates.io.
@@ -38,25 +36,15 @@ bytemuck = { version = "1.16", features = ["derive"] }
 #
 # Nothing in this crate's dependency closure breaks under the flag. The one dependency that reacts to
 # it, `arc-lend`, does so by the same design (its atomics become loom's too).
-# `monotonic_ns`: the OS clock read, `clock_gettime` on Unix and
-# `QueryPerformanceCounter` on Windows.
 # The `Error` derive of the crate's error types.
 thiserror = { workspace = true, features = ["std"] }
+# `Instant`, the clock the waits and `BlockWaits` read (the web's `performance.now()` there).
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # `Sample`, the formats `PosRing` is generic over, and `ChannelLayout`, the width it is written in.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `Reading` for every `Unit`: a `Gauge<Db>` holds a unit, and the unit vocabulary is below this crate.
 # `ranged!`, which writes `RequestFlag`.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = [
-    "Win32_Foundation",
-    "Win32_System_Performance",
-    "Win32_System_Threading",
-] }
 
 [target.'cfg(loom)'.dependencies]
 loom = "0.7"
@@ -71,10 +59,3 @@ tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 # and sets their scheduling policy: `sched_setaffinity`, `pthread_setschedparam`.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc = "0.2"
-
-# `MainThreadMarker::new` against the process's real main thread: the default harness
-# runs every test on a spawned thread.
-[[test]]
-name = "main_thread"
-path = "tests/main_thread/main.rs"
-harness = false

@@ -87,7 +87,8 @@ jobs:
       - run: cargo xtask check-paths tutti_curve envelope law
       - run: cargo xtask check-paths tutti_buffers convert error i24 interleaved mono planes sample
       - run: cargo xtask check-paths tutti_voicing controller holds phase voicing
-      - run: cargo xtask check-paths tutti_rt atomic_cell cell denormals drain_clock job_gate level_cell packed_atomic parker pos_ring request_flags scope seq_cell spin split task_graph vec
+      - run: cargo xtask check-paths tutti_platform clock denormals main_thread priority sleep thread
+      - run: cargo xtask check-paths tutti_rt atomic_cell cell drain_clock job_gate level_cell packed_atomic parker pos_ring request_flags scope seq_cell spin split task_graph vec
       # Compares the SDK version the prose states against the commits the superproject records; a bumped submodule
       # otherwise shows as an unexplained C++ error in `audio-probe`.
       - run: cargo xtask check-submodule-pins
@@ -153,6 +154,10 @@ jobs:
           for f in vst2 vst3 clap; do
             cargo clippy --locked -p tutti-plugin-probe --no-default-features --features "$f" --all-targets -- -D warnings
           done
+      # The web target: `tutti-platform` and the umbrella must keep building for it. A build check; it does not run
+      # the code. The target comes from `rust-toolchain.toml`.
+      - name: clippy (wasm32)
+        run: cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti --lib -- -D warnings
 
   # Lints what the Linux job cannot see: `#[cfg(windows)]` blocks, and casts that differ by platform (the vst3
   # bindings type SDK enum constants `c_uint` on unix and `c_int` on Windows). A native runner, because

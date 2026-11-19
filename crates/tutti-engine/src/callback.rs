@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, InterleavedMut, Sample, convert};
-use tutti_rt::with_no_denormals;
+use tutti_platform::with_no_denormals;
 use tutti_units::Samples;
 
 use crate::Engine;
@@ -278,7 +278,7 @@ impl<F: Float> OutputBlock<F> {
 
     /// [`render_delayed_with`](Self::render_delayed_with) into a [`Sample`]
     /// buffer ([`render`](Self::render)) for a block due at `os_ns`, a
-    /// [`monotonic_ns`](tutti_rt::monotonic_ns) reading: the block clock dates
+    /// [`monotonic_ns`](tutti_platform::monotonic_ns) reading: the block clock dates
     /// the block by it, not by the time the render began
     /// ([`Engine::process_at`]). A driver that renders to a schedule calls this
     /// with the block's deadline. Wait-free like `render_with`, with the same

@@ -34,7 +34,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use tutti_buffers::{Interleaved, Sample};
-use tutti_rt::{ThreadHandle, spawn_named};
+use tutti_platform::{ThreadHandle, spawn_named};
 
 /// Frames per FLAC block, every block but the last.
 const BLOCK_SIZE: usize = 4096;

@@ -23,7 +23,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tutti_rt::{LockExt, Parker, StopToken, Unparker, parker};
+use tutti_platform::StopToken;
+use tutti_rt::{LockExt, Parker, Unparker, parker};
 
 use crate::main_loop::Bell;
 

@@ -72,10 +72,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use tutti_buffers::Float;
 
-use tutti_rt::{
-    BlockWaits, ClaimTable, Held, Participant, RtScope, SplitMut, SplitRw, TaskGraph,
-    with_no_denormals,
-};
+use tutti_platform::with_no_denormals;
+use tutti_rt::{BlockWaits, ClaimTable, Held, Participant, RtScope, SplitMut, SplitRw, TaskGraph};
 
 use crate::arena::{Arena, Line};
 use crate::command::{Deliveries, Overlay};

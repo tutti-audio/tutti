@@ -1,17 +1,17 @@
-//! The OS monotonic clock ([`tutti_rt::monotonic_ns`]) and the `Instant`s the
+//! The OS monotonic clock ([`tutti_platform::monotonic_ns`]) and the `Instant`s the
 //! backends stamp with are one timebase; this relates them.
 
 use std::time::{Duration, Instant};
 
 /// The one pairing of the two clocks, read once per process: an `Instant` and
-/// the [`tutti_rt::monotonic_ns`] reading taken with it.
+/// the [`tutti_platform::monotonic_ns`] reading taken with it.
 fn pairing() -> (Instant, i64) {
     use std::sync::OnceLock;
     static PAIRING: OnceLock<(Instant, i64)> = OnceLock::new();
-    *PAIRING.get_or_init(|| (Instant::now(), tutti_rt::monotonic_ns()))
+    *PAIRING.get_or_init(|| (Instant::now(), tutti_platform::monotonic_ns()))
 }
 
-/// The `Instant` of a reading of [`tutti_rt::monotonic_ns`]: the one pairing of
+/// The `Instant` of a reading of [`tutti_platform::monotonic_ns`]: the one pairing of
 /// the two clocks, so the conversion is an offset. `None` where it is beyond
 /// what an `Instant` holds.
 pub(crate) fn os_instant(ns: i64) -> Option<Instant> {

@@ -4,10 +4,11 @@
 //!
 //! The structures the engine's audio callback touches, allocation-free on the
 //! audio path (`tests/no_alloc/rt_no_alloc.rs` gates it), and the home of the
-//! engine's lock-free and `unsafe` runtime structures. It names two tutti
-//! crates, `tutti-units` (the units a [`Gauge`] and a [`Param`] hold, and [`RequestFlag`]'s range)
-//! and `tutti-buffers` (the `ChannelLayout` a [`PosRing`] is written in and the
-//! `Sample` formats it is generic over);
+//! engine's lock-free and `unsafe` runtime structures. It names three tutti
+//! crates, `tutti-units` (the units a [`Gauge`] and a [`Param`] hold, and [`RequestFlag`]'s range),
+//! `tutti-buffers` (the `ChannelLayout` a [`PosRing`] is written in and the
+//! `Sample` formats it is generic over) and `tutti-platform` (the `Instant` its
+//! waits read; the clock, threads, priority and OS calls are that crate's);
 //! its other dependencies are `arc-lend`, `atomic_float` and `bytemuck` (and `loom`
 //! under `--cfg loom`).
 //!
@@ -89,21 +90,10 @@
 //! - [`BlockWaits`] — how long the audio thread and a helper each wait inside a
 //!   parallel block before giving way.
 //!
-//! **Thread and OS**
+//! **Scope**
 //!
 //! - [`RtScope`] — a per-thread "inside a block" marker that a `Drop` impl
 //!   checks ([`RtScope::check_outside`]), or a [`ControlDrop`] field does.
-//! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
-//!   restores the mode after, unwinding included.
-//! - [`MainThreadMarker`] — proof that the holder is on the process's main
-//!   thread, made only where the OS says so (`!Send`, `!Sync`).
-//! - [`request_priority`] — asks the OS to raise the calling thread's priority
-//!   and returns what it granted (never real time on Linux), or the refusal.
-//! - [`spawn_named`] — starts a named, optionally prioritised control-side
-//!   thread whose body gets a [`StopToken`]; its [`ThreadHandle`] stops and
-//!   joins on drop (or within a bound, `stop_within`) and reports a panic once.
-//! - [`monotonic_ns`] / [`sleep_until_ns`] — the OS clock, and a sleep until an
-//!   absolute deadline on it.
 //!
 //! **The root is the API.** Every item is re-exported at the root
 //! (`tutti_rt::RtVec`); the modules are private.
@@ -118,7 +108,7 @@
 //! ## Safety
 //!
 //! Outside the `-ffi` crates (the plugin formats, the OS MIDI APIs, the plugin
-//! process edge), this crate holds all of the engine's `unsafe`, and the external `arc-lend`
+//! process edge) and `tutti-platform` (the OS calls), this crate holds all of the engine's `unsafe`, and the external `arc-lend`
 //! crate holds the publish cell's;
 //! every other library carries `#![forbid(unsafe_code)]`. Each site exists because the safe construct would
 //! have cost something on the audio thread:
@@ -146,15 +136,6 @@
 //! - `RtVec` (`vec.rs`): `N` inline `MaybeUninit` slots under a length, so
 //!   [`RtVec::boxed`] can build a large one in its box with no stack copy; the
 //!   slots `..len` are the initialised ones.
-//! - `with_no_denormals` (`denormals.rs`): saves, sets and restores the FPU
-//!   control register with `asm!`, which has no safe spelling; its `# Soundness`
-//!   docs say what it does and does not guarantee.
-//! - `monotonic_ns` (`clock.rs`): the OS clock calls.
-//! - `sleep_until_ns` (`sleep/absolute.rs`): the `clock_nanosleep` call on Linux and
-//!   Android.
-//! - `MainThreadMarker::new` (`main_thread/`): the OS's "is this the main thread" query,
-//!   one module per OS (on Windows, a `.CRT$XCU` initializer entry), and `MainThreadMarker::new_unchecked`, whose `# Safety` names the
-//!   caller's duty (a test harness's constructor).
 //!
 //! `arc-lend`'s `Publisher` (an external crate) holds the rest: an `AtomicPtr` to an `Arc::into_raw`
 //! pointer that a `Loan` dereferences under a hazard-slot protocol, so the audio
@@ -163,9 +144,8 @@
 //! What checks it: a loom model per lock-free structure, run against the shipped
 //! code (`tests/*_loom.rs` here, and arc-lend's own loom model for `Publisher`), and miri
 //! over this crate's unit tests (arc-lend's CI runs its own), in CI's `loom` and
-//! `miri` jobs (`cargo xtask loom`, `cargo xtask miri`). Miri executes no FFI and no x86 intrinsics,
-//! so the denormal register tests are skipped under it, and it perturbs libm
-//! results, so a green run says nothing about numerics. The plugin formats'
+//! `miri` jobs (`cargo xtask loom`, `cargo xtask miri`). Miri executes no FFI, so a green run
+//! says nothing about numerics. The plugin formats'
 //! `unsafe` is answered structurally instead: a plugin that corrupts memory
 //! takes down the out-of-process `plugin-server`, not the host.
 #![deny(missing_docs)]
@@ -177,8 +157,6 @@ mod capped_vec;
 mod cell;
 mod claim;
 mod claim_lock;
-mod clock;
-mod denormals;
 mod dirty_set;
 mod drain_clock;
 mod exclusive;
@@ -194,12 +172,10 @@ mod job_gate;
 mod last_out;
 mod level_cell;
 mod lock;
-mod main_thread;
 mod mint;
 mod packed_atomic;
 mod param;
 mod pos_ring;
-mod priority;
 mod reclaim;
 mod render_count;
 mod render_gate;
@@ -208,12 +184,10 @@ mod ring;
 mod scope;
 mod seq_cell;
 mod seq_slots;
-mod sleep;
 mod spin;
 mod split;
 mod splitmix;
 mod task_graph;
-mod thread;
 mod vec;
 
 pub use atomic_cell::{AtomicCell, AtomicWord};
@@ -221,8 +195,6 @@ pub use atomic_rate::{AtomicSampleRate, PendingSampleRate};
 pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use claim_lock::{Claim, ClaimGuard};
-pub use clock::monotonic_ns;
-pub use denormals::with_no_denormals;
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use exclusive::Exclusive;
@@ -236,7 +208,6 @@ pub use job_gate::JobGate;
 pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
 pub use lock::LockExt;
-pub use main_thread::MainThreadMarker;
 pub use mint::Mint;
 pub use packed_atomic::PackedAtomic;
 pub use param::{Param, Param64, ParamCell};
@@ -245,7 +216,6 @@ pub use pos_ring::{
     MAX_POS_RING_FRAMES, MAX_POS_RING_POSITION, PosClaim, PosFrame, PosReader, PosRing, PosWriter,
     RingFloat, RingSample, RingWindow,
 };
-pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;
 pub use render_count::{RenderCount, RenderGuard};
 pub use render_gate::{Closing, GateGuard, GateState, HeldClosed, Opening, RenderGate};
@@ -254,12 +224,10 @@ pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWrite
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
 pub use seq_slots::{SeqSlotsReader, SeqSlotsWriter, seq_slots};
-pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};
 pub use splitmix::SplitMix64;
 pub use task_graph::{Participant, TaskGraph};
-pub use thread::{Panicked, StopToken, ThreadHandle, spawn_named};
 pub use vec::RtVec;
 
 // The cell non-scalar state reaches the audio thread through: a control

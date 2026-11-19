@@ -771,7 +771,7 @@ fn host_routes_plugin_log_lines_at_every_severity() {
 ///
 /// What this test can pin is the second half: the thread that is not the main
 /// one is refused the proof. (That a `MainThreadMarker` cannot be moved over is the
-/// `compile_fail` doctest of `tutti_rt::MainThreadMarker`.)
+/// `compile_fail` doctest of `tutti_platform::MainThreadMarker`.)
 #[test]
 fn a_timer_thread_is_refused_the_proof_the_main_thread_methods_take() {
     let probe = Probe::acquire();

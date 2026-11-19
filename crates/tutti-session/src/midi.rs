@@ -81,11 +81,10 @@ pub(crate) fn input_lead(block: Samples, rate: tutti_units::SampleRate) -> std::
 
 /// The engine's block clock as the device threads read it
 /// ([`tutti_midi_runtime::ArrivalClock`]). The engine stamps with
-/// [`tutti_rt::monotonic_ns`], the OS's monotonic clock; the backends stamp
-/// arrivals with `Instant`, the same clock (`CLOCK_MONOTONIC` on Linux,
-/// `mach_absolute_time` on macOS, `QueryPerformanceCounter` on Windows). One
-/// pairing of the two, read once per process, relates them, so there is one
-/// timebase end to end and the conversion is an offset, never a second clock.
+/// [`tutti_platform::monotonic_ns`]; the backends stamp arrivals with `Instant`,
+/// the same clock on a native target. One pairing of the two, read once per
+/// process, relates them, so there is one timebase end to end and the
+/// conversion is an offset, never a second clock.
 #[cfg(feature = "midi-hardware")]
 pub(crate) fn arrival_clock(
     clock: tutti_engine::BlockClockReader,

@@ -13,7 +13,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tutti_rt::{Parker, PriorityRequest, StopToken, ThreadHandle};
+use tutti_platform::{PriorityRequest, StopToken, ThreadHandle};
+use tutti_rt::Parker;
 use tutti_units::SampleRate;
 
 use super::bell::{Bell, StreamerSender};

@@ -10,7 +10,7 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use tutti_rt::{ThreadHandle, spawn_named};
+use tutti_platform::{ThreadHandle, spawn_named};
 
 use crate::error::{Error, Result};
 
