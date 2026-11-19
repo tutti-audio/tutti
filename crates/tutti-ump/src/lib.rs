@@ -56,8 +56,9 @@
 //! field another field makes meaningless has its canonical value (attribute
 //! data under type 0, bank bytes under a clear Bank Valid bit, and a chord bass
 //! accidental under bass note 0, which is -8). A MIDI 1.0 Note On at velocity
-//! 0 is a Note On here; reading it as a Note Off is translation's, and the same for scaling between
-//! the two protocols.
+//! 0 is a Note On here: decoding never translates. Reading it as a Note Off, and
+//! scaling between the two protocols, is `Voice2::from(voice1)`,
+//! `Voice1::try_from(voice2)` and [`Message::to_midi2`].
 //!
 //! # Messages are values
 //!
@@ -104,6 +105,7 @@ mod messages;
 mod midi1;
 mod midi_channel;
 mod midi_group;
+mod midi_translation;
 mod mixed_data;
 mod mpe_zone;
 mod note_id;
@@ -159,6 +161,7 @@ pub use message::{
 pub use messages::{Join, PacketSpan, Spans, spans, spans_joined};
 pub use midi_channel::{MidiChannel, MidiChannelOutOfRange};
 pub use midi_group::{MidiGroup, MidiGroupOutOfRange};
+pub use midi_translation::{ExtremeValues, NoMidi1Form};
 pub use midi1::{Framed, Midi1Bytes, Midi1Parser, frame, parse_exact};
 pub use mixed_data::{
     MdsChunk, MdsChunkSize, MdsChunkUmps, MdsChunks, MdsIdentity, MixedDataAssembler,

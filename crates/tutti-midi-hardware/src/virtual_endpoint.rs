@@ -25,7 +25,7 @@ use tutti_rt::LockExt;
 
 use tutti_midi_ci::EndpointName;
 use tutti_midi_device::FunctionBlock;
-use tutti_midi_protocol::{Midi1Translator, Midi2Translator, narrow_message};
+use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
 use tutti_ump::{Message, Ump};
 
 use crate::InputProducerHandle;
@@ -203,9 +203,9 @@ impl VirtualSource {
                 if count == 0 {
                     // A MIDI 2.0 voice message with a MIDI 1.0 form narrows to at
                     // least one packet, so zero packets is a message with none:
-                    // `narrow_message` returns its `NoMidi1Form` here and its
+                    // `Message::try_to_midi1` returns its `NoMidi1Form` here and its
                     // `Ok` is not reached.
-                    narrow_message(message)?;
+                    message.try_to_midi1()?;
                 }
                 return sent;
             }
@@ -377,9 +377,9 @@ mod tests {
     #[test]
     fn a_failed_send_keeps_an_mpe_notes_channel() {
         use tutti_midi_protocol::{
-            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+            MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
         };
-        use tutti_ump::{Address, Attribute, BendValue, NoteNumber, NoteVelocity};
+        use tutti_ump::{Address, Attribute, BendValue, ExtremeValues, NoteNumber, NoteVelocity};
         let zone = MpeZoneConfig::lower(
             2,
             PitchBendSensitivity::MPE_MASTER_DEFAULT,

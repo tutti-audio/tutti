@@ -1480,9 +1480,11 @@ mod tests {
     #[test]
     fn a_refused_message_keeps_an_mpe_notes_channel() {
         use tutti_midi_protocol::{
-            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+            MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
         };
-        use tutti_ump::{Address, Attribute, BendValue, ControlValue, Message, NoteNumber};
+        use tutti_ump::{
+            Address, Attribute, BendValue, ControlValue, ExtremeValues, Message, NoteNumber,
+        };
         use tutti_ump::{NoteVelocity, Voice2};
         let zone = MpeZoneConfig::lower(
             2,

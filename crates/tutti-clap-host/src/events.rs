@@ -46,7 +46,7 @@ use tutti_units::{Normalized, Semitones, Velocity};
 pub(crate) const EDIT_CAPACITY: usize = 256;
 
 use crate::types::RtNoteExpressions;
-use tutti_midi_protocol::{Midi1Translator, Midi2Translator, PitchBendSensitivity, narrow, widen};
+use tutti_midi_protocol::{Midi1Translator, Midi2Translator, PitchBendSensitivity};
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn,
@@ -1257,7 +1257,7 @@ impl InputEventList {
                 // A note or poly pressure is widened and handled as MIDI 2.0;
                 // the rest keep their 7- and 14-bit bytes.
                 Voice1::NoteOn { .. } | Voice1::NoteOff { .. } | Voice1::PolyPressure { .. } => {
-                    self.add_voice2(time, address, widen(voice));
+                    self.add_voice2(time, address, Voice2::from(voice));
                 }
                 Voice1::ControlChange { .. }
                 | Voice1::ProgramChange(_)
@@ -1425,7 +1425,7 @@ impl InputEventList {
                     velocity.map_or(0.0, |v| v.velocity().get()),
                 )
                 .into_midi_dialect(port, None),
-                (Voice2::PolyPressure { .. }, _) => narrow(voice)
+                (Voice2::PolyPressure { .. }, _) => Voice1::try_from(voice)
                     .ok()
                     .map(|voice| ClapEvent::midi(time, port, voice.bytes(channel).padded())),
                 _ => None,
@@ -2861,9 +2861,11 @@ mod tests {
     #[test]
     fn a_refused_message_keeps_an_mpe_notes_channel() {
         use tutti_midi_protocol::{
-            ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+            MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
         };
-        use tutti_ump::{Attribute, BendValue, ControlValue, NoteNumber, NoteVelocity};
+        use tutti_ump::{
+            Attribute, BendValue, ControlValue, ExtremeValues, NoteNumber, NoteVelocity,
+        };
         let zone = MpeZoneConfig::lower(
             2,
             PitchBendSensitivity::MPE_MASTER_DEFAULT,

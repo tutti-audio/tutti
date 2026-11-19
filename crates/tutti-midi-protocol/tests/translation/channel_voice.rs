@@ -1,9 +1,9 @@
-//! `channel_voice` and `widen_message` against M2-104 Appendix D.3 and the
+//! `channel_voice` and `Message::to_midi2` against M2-104 Appendix D.3 and the
 //! message kinds: a MIDI 1.0 channel voice message reads as the MIDI 2.0 one
-//! `widen` gives, a MIDI 2.0 one as it came (its Note On at velocity 0 a Note
+//! `Message::to_midi2` gives, a MIDI 2.0 one as it came (its Note On at velocity 0 a Note
 //! On, M2-104 §7.4.2), and nothing else reads as channel voice.
 
-use tutti_midi_protocol::{channel_voice, widen, widen_bytes, widen_message};
+use tutti_midi_protocol::channel_voice;
 use tutti_ump::{
     Address, Attribute, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, System, U7, Ump,
     Voice1, Voice2,
@@ -17,7 +17,7 @@ fn address() -> Address {
 }
 
 #[test]
-fn a_midi_1_message_reads_widened() {
+fn a_midi_1_message_reads_as_midi_2() {
     let voices = [
         Voice1::NoteOn {
             note: NoteNumber::of(60),
@@ -32,7 +32,7 @@ fn a_midi_1_message_reads_widened() {
     ];
     for voice in voices {
         let ump = Ump::from(Message::Midi1(address(), voice));
-        assert_eq!(channel_voice(ump), Some((address(), widen(voice))));
+        assert_eq!(channel_voice(ump), Some((address(), Voice2::from(voice))));
     }
 }
 
@@ -50,8 +50,8 @@ fn a_midi_2_note_on_at_velocity_0_stays_a_note_on() {
 #[test]
 fn the_address_is_kept() {
     let voice = Voice1::ProgramChange(U7::of(3));
-    let widened = widen_message(Message::Midi1(address(), voice));
-    assert_eq!(widened, Message::Midi2(address(), widen(voice)));
+    let translated = Message::to_midi2(Message::Midi1(address(), voice));
+    assert_eq!(translated, Message::Midi2(address(), Voice2::from(voice)));
 }
 
 #[test]
@@ -63,9 +63,9 @@ fn other_messages_are_not_channel_voice() {
 }
 
 #[test]
-fn other_messages_pass_through_widen_message() {
+fn other_messages_pass_through_to_midi2() {
     let message = Message::System(MidiGroup::of(2), System::SongSelect(U7::of(7)));
-    assert_eq!(widen_message(message), message);
+    assert_eq!(message.to_midi2(), message);
 }
 
 /// A note-on at velocity 100 on channel 9 of group 5, padded as a plugin's
@@ -74,24 +74,24 @@ fn other_messages_pass_through_widen_message() {
 /// the System packet.
 /// Spec: m2-104/d.3.1#1, m2-104/d.3.1#2
 #[test]
-fn bytes_widen_to_a_packet() {
+fn bytes_become_a_midi_2_packet() {
     let group = MidiGroup::of(5);
-    let on = widen_bytes(group, &[0x99, 60, 100, 0]).unwrap();
+    let on = Ump::from_midi1_bytes(group, &[0x99, 60, 100, 0]).unwrap();
     assert_eq!(
         on,
         Ump::from(Message::Midi2(
             address(),
-            widen(Voice1::NoteOn {
+            Voice2::from(Voice1::NoteOn {
                 note: NoteNumber::of(60),
                 velocity: U7::of(100)
             })
         ))
     );
     assert_eq!(on.message_type(), 0x4);
-    let off = widen_bytes(group, &[0x99, 60, 0]).unwrap();
+    let off = Ump::from_midi1_bytes(group, &[0x99, 60, 0]).unwrap();
     assert_eq!(off.0[0], 0x4589_3C00);
     assert_eq!(off.0[1], 0x8000_0000);
-    let clock = widen_bytes(group, &[0xF8, 0, 0]).unwrap();
+    let clock = Ump::from_midi1_bytes(group, &[0xF8, 0, 0]).unwrap();
     assert_eq!(clock, Ump([0x15F8_0000, 0, 0, 0]));
 }
 
@@ -107,6 +107,6 @@ fn bytes_that_are_not_one_message_are_none() {
         &[0x90, 0xC0, 1],
         &[],
     ] {
-        assert_eq!(widen_bytes(group, bytes), None, "{bytes:02x?}");
+        assert_eq!(Ump::from_midi1_bytes(group, bytes), None, "{bytes:02x?}");
     }
 }

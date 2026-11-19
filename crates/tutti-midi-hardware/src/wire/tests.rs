@@ -283,9 +283,9 @@ fn the_accepted_count_is_in_the_callers_events() {
 #[test]
 fn a_change_of_protocol_drops_an_mpe_notes_channel() {
     use tutti_midi_protocol::{
-        ExtremeValues, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+        MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
     };
-    use tutti_ump::{Attribute, BendValue, NoteVelocity};
+    use tutti_ump::{Attribute, BendValue, ExtremeValues, NoteVelocity};
     let mpe = || {
         let zone = MpeZoneConfig::lower(
             2,

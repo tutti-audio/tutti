@@ -1709,11 +1709,11 @@ impl Voicing {
 mod tests {
     use super::*;
     use crate::LIVE_NOTES;
-    use tutti_midi_protocol::widen;
+
     use tutti_ump::BendValue;
     use tutti_ump::NoteVelocity;
     use tutti_ump::PerNoteManagement;
-    use tutti_ump::{Attribute, CCNumber, Pitch, RegisteredPerNoteController, U7, Voice1};
+    use tutti_ump::{Attribute, CCNumber, Pitch, RegisteredPerNoteController, U7, Voice1, Voice2};
     use tutti_units::Normalized;
 
     /// One voice per note, no group.
@@ -2273,7 +2273,7 @@ mod tests {
     fn velocity_zero_is_an_off_in_midi1_and_an_on_in_midi2() {
         let mut s = Sim::new(POLY);
         s.on(0, 60);
-        let one = widen(Voice1::NoteOn {
+        let one = Voice2::from(Voice1::NoteOn {
             note: NoteNumber::of(60),
             velocity: U7::of(0),
         });

@@ -1,7 +1,7 @@
 //! A UMP event to VST3 event and back.
 
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{PitchBendSensitivity, widen};
+use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_plugin_types::{
     NoteExpressionType, NoteExpressionValue, WireMidi, expression_of_per_note_controller,
     group_of_port, per_note_message, per_note_tuning, plugin_note_id,
@@ -207,7 +207,7 @@ impl MidiEncoder {
                 // Off of M2-104 App. D.3.1, which `voice2` encodes. `voice2`
                 // handles a MIDI 2.0 velocity of 0 itself.
                 Voice1::NoteOn { .. } | Voice1::NoteOff { .. } | Voice1::PolyPressure { .. } => {
-                    self.voice2(offset, address, widen(voice));
+                    self.voice2(offset, address, Voice2::from(voice));
                 }
                 Voice1::ControlChange { .. }
                 | Voice1::ProgramChange(_)

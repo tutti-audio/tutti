@@ -728,8 +728,6 @@ pub mod midi {
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
-    #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_protocol::NoMidi1Form;
     pub use tutti_midi_protocol::{
         ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
         MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
@@ -743,6 +741,8 @@ pub mod midi {
         TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_ump::NoMidi1Form;
     pub use tutti_ump::{
         Accidental, Alteration, AlterationKind, ArticulationAttribute, Attribute, Bank, BarAccents,
         BendValue, BlockDirection, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch,
@@ -758,8 +758,8 @@ pub mod midi {
         SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
-        Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
-        MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
+        Address, CCNumber, DeviceIdentity, ExtremeValues, ManufacturerId, Message, Midi1Parser,
+        MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
         TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
     pub use tutti_ump::{
