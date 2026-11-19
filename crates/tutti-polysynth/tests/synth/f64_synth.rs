@@ -4,9 +4,9 @@ use std::num::NonZeroUsize;
 use tutti_fixtures::midi;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Offset};
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
-use tutti_ump::{MidiChannel, U7};
+use tutti_ump::{MidiChannel, NoteVelocity, U7};
 use tutti_units::{Amplitude, SampleRate, Seconds};
 
 const BLOCK: usize = 64;
@@ -31,7 +31,11 @@ fn sine() -> PolySynth<f64> {
 fn play(note: u8, blocks: usize) -> Vec<f64> {
     let mut direct: Direct<PolySynth<f64>, f64> =
         Direct::with_format(sine(), SampleRate::SR_48K, BLOCK);
-    let on = midi::note_on(MidiChannel::FIRST, note, widen_velocity(U7::of(127)).get());
+    let on = midi::note_on(
+        MidiChannel::FIRST,
+        note,
+        NoteVelocity::from(U7::of(127)).get(),
+    );
     let mut out = Vec::new();
     for b in 0..blocks {
         let events = if b == 0 {

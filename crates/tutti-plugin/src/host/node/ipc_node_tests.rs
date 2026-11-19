@@ -23,8 +23,8 @@ use super::mock_server::{
     BEATS_PER_FRAME_120, CHUNK, PARAMS, Record, ReplyGate, SR, STEP_BEAT, STEP_FRAME, at, beat_at,
     new_node, rig, rig_gated, tempo,
 };
-use tutti_midi_protocol::widen_velocity;
-use tutti_ump::{Message, NoteNumber, U7, Voice2};
+
+use tutti_ump::{Message, NoteNumber, NoteVelocity, U7, Voice2};
 
 /// What the server was sent, in order.
 enum Sent {
@@ -187,7 +187,7 @@ fn note_on(o: Offset) -> Event {
         o,
         Message::midi2(
             MidiChannel::of(1),
-            Voice2::note_on(NoteNumber::of(60), widen_velocity(U7::of(100))),
+            Voice2::note_on(NoteNumber::of(60), NoteVelocity::from(U7::of(100))),
         ),
     )
 }

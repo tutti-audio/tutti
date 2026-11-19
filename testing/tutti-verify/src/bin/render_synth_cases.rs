@@ -21,11 +21,11 @@ use tutti_polysynth::UnisonVoices;
 use tutti_fixtures::midi;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Offset};
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_polysynth::{
     Adsr, FilterType, OscillatorType, PolySynth, SvfMode, SynthConfig, UnisonConfig,
 };
-use tutti_ump::{MidiChannel, U7, Ump};
+use tutti_ump::{MidiChannel, NoteVelocity, U7, Ump};
 use tutti_units::{Amplitude, CentsSpan, Hz, Normalized, Q, Samples, Seconds, Spread};
 
 const SR: f64 = 48_000.0;
@@ -52,7 +52,7 @@ fn render(cfg: SynthConfig, notes: &[u8]) -> (Vec<f32>, Vec<f32>) {
     let at = Offset::of(Samples::new(0), Samples::new(BLOCK));
     let events: Vec<Event> = notes
         .iter()
-        .map(|&n| midi::note_on(MidiChannel::FIRST, n, widen_velocity(U7::of(100)).get()))
+        .map(|&n| midi::note_on(MidiChannel::FIRST, n, NoteVelocity::from(U7::of(100)).get()))
         .map(|e: Ump| Event::midi(at, e))
         .collect();
     synth.events(0, &events);

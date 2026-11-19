@@ -1,84 +1,14 @@
 //! The stateless `Voice1` to `Voice2` widening, and reading a channel voice
 //! message through it.
 
-use crate::scale;
 use tutti_ump::{
-    Address, Attribute, BendValue, ControlValue, Message, MidiGroup, NoteVelocity, U7, U14, Ump,
-    Voice1, Voice2, parse_exact,
+    Address, Attribute, BendValue, ControlValue, Message, MidiGroup, NoteVelocity, Ump, Voice1,
+    Voice2, parse_exact,
 };
 
 /// The release velocity a MIDI 1.0 Note On at velocity 0 becomes (M2-104
 /// Appendix D.3.1).
 const NOTE_ON_ZERO_RELEASE: NoteVelocity = NoteVelocity::new(0x8000);
-
-/// A 7-bit velocity as the 16-bit field of a Note On or Note Off, scaled
-/// Min-Center-Max (M2-115 section 3.4): 0 stays 0, 64 is `0x8000` and 127 is
-/// `0xFFFF`. [`narrow_velocity`](crate::narrow_velocity) is its right shift
-/// back.
-///
-/// This is the named way from a MIDI 1.0 velocity to a MIDI 2.0 one:
-/// `NoteVelocity::new(100)` is a velocity of 100 out of 65535, not a MIDI 1.0
-/// 100.
-///
-/// # Examples
-///
-/// ```
-/// use tutti_midi_protocol::widen_velocity;
-/// use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Voice2};
-///
-/// let velocity = widen_velocity(U7::of(100));
-/// assert_eq!(velocity.get(), 51492);
-/// let on = Message::Midi2(MidiChannel::FIRST.into(), Voice2::note_on(NoteNumber::of(60), velocity));
-/// # let _ = on;
-/// ```
-#[inline]
-#[must_use]
-pub const fn widen_velocity(velocity: U7) -> NoteVelocity {
-    NoteVelocity::new(scale::upscale(velocity.get() as u32, 7, 16) as u16)
-}
-
-/// A 7-bit controller or pressure value as the 32-bit word of a MIDI 2.0
-/// Control Change or pressure message, scaled Min-Center-Max (M2-115 section
-/// 3): 0 stays 0, 64 is [`ControlValue::CENTER`] and 127 is
-/// [`ControlValue::MAX`]. [`narrow_value`](crate::narrow_value) is its right
-/// shift back.
-///
-/// # Examples
-///
-/// ```
-/// use tutti_midi_protocol::widen_value;
-/// use tutti_ump::{CCNumber, Message, MidiChannel, U7, Voice2};
-///
-/// let cc = Message::Midi2(
-///     MidiChannel::FIRST.into(),
-///     Voice2::ControlChange { controller: CCNumber::VOLUME, value: widen_value(U7::of(127)) },
-/// );
-/// # let _ = cc;
-/// ```
-#[inline]
-#[must_use]
-pub const fn widen_value(value: U7) -> ControlValue {
-    ControlValue::new(scale::value(value.get()))
-}
-
-/// A 14-bit pitch bend as the 32-bit word of a MIDI 2.0 Pitch Bend, scaled
-/// Min-Center-Max (M2-115 section 3): the 14-bit centre `0x2000` is
-/// [`BendValue::CENTER`]. [`narrow_bend`](crate::narrow_bend) is its right
-/// shift back.
-///
-/// # Examples
-///
-/// ```
-/// use tutti_midi_protocol::widen_bend;
-/// use tutti_ump::{BendValue, U14};
-///
-/// assert_eq!(widen_bend(U14::of(0x2000)), BendValue::CENTER);
-/// ```
-#[inline]
-#[must_use]
-pub const fn widen_bend(bend: U14) -> BendValue {
-    BendValue::new(scale::bend(bend.get()))
-}
 
 /// The MIDI 2.0 message that means what `voice` means (M2-104 Appendix D.3,
 /// M2-115 section 3). The caller keeps the [`Address`] unchanged.
@@ -96,28 +26,28 @@ pub fn widen(voice: Voice1) -> Voice2 {
         },
         Voice1::NoteOn { note, velocity } => Voice2::NoteOn {
             note,
-            velocity: widen_velocity(velocity),
+            velocity: NoteVelocity::from(velocity),
             attribute: Attribute::None,
         },
         Voice1::NoteOff { note, velocity } => Voice2::NoteOff {
             note,
-            velocity: widen_velocity(velocity),
+            velocity: NoteVelocity::from(velocity),
             attribute: Attribute::None,
         },
         Voice1::PolyPressure { note, pressure } => Voice2::PolyPressure {
             note,
-            value: widen_value(pressure),
+            value: ControlValue::from(pressure),
         },
         Voice1::ControlChange { controller, value } => Voice2::ControlChange {
             controller,
-            value: widen_value(value),
+            value: ControlValue::from(value),
         },
         Voice1::ProgramChange(program) => Voice2::ProgramChange {
             program,
             bank: None,
         },
-        Voice1::ChannelPressure(pressure) => Voice2::ChannelPressure(widen_value(pressure)),
-        Voice1::PitchBend(bend) => Voice2::PitchBend(widen_bend(bend)),
+        Voice1::ChannelPressure(pressure) => Voice2::ChannelPressure(ControlValue::from(pressure)),
+        Voice1::PitchBend(bend) => Voice2::PitchBend(BendValue::from(bend)),
     }
 }
 

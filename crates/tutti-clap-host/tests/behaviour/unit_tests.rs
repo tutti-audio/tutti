@@ -17,7 +17,9 @@ use tutti_clap_host::{
 };
 use tutti_graph::Offset;
 use tutti_midi_protocol::{channel_voice, midi1};
-use tutti_ump::{CCNumber, Message, MidiChannel, NoteKeyEvent, NoteNumber, Voice2};
+use tutti_ump::{
+    BendValue, CCNumber, ControlValue, Message, MidiChannel, NoteKeyEvent, NoteNumber, Voice2,
+};
 use tutti_units::Samples;
 
 /// A block long enough for every offset these tests use.
@@ -41,7 +43,7 @@ use support::main_thread;
 use support::raw::{HostRaw, InputListRaw, InputStreamRaw, OutputListRaw, OutputStreamRaw};
 use support::{midi_events, note_expressions, param_changes};
 use tutti_fixtures::midi;
-use tutti_midi_protocol::{widen_bend, widen_value};
+
 use tutti_ump::{U7, U14};
 
 // ── MIDI conversion via `(Offset, Ump)` and `WireMidi` ──
@@ -93,7 +95,7 @@ fn test_control_change_roundtrip() {
         midi::cc(
             MidiChannel::of(2),
             CCNumber::BRIGHTNESS,
-            widen_value(U7::of(100)).get(),
+            ControlValue::from(U7::of(100)).get(),
         ),
     );
     let list = first(&event);
@@ -116,7 +118,7 @@ fn test_pitch_bend_roundtrip() {
     // MIDI-1 center = 8192 (0x2000).
     let event = (
         at(0),
-        midi::pitch_bend(MidiChannel::FIRST, widen_bend(U14::of(8192)).get()),
+        midi::pitch_bend(MidiChannel::FIRST, BendValue::from(U14::of(8192)).get()),
     );
     let list = first(&event);
     let clap = list.events().first().expect("PitchBend should convert");

@@ -587,7 +587,7 @@ order, one PR per step, each deleting what it replaces. It supersedes tasks
     - `tutti_ump::NoteVelocity` is the M2 note velocity field, the whole `u16`, in
       `Voice2::NoteOn`/`NoteOff`, `Voice2::note_on`/`note_off`, `Message::note_on2`/`note_off2`,
       `MidiKeys::note_on`, `SoundFontUnit::note_on` and `PairedNote::velocity`;
-      `tutti_midi_protocol::widen_velocity(U7)` and `narrow_velocity(NoteVelocity)` are the
+      `tutti_midi_protocol::NoteVelocity::from(U7)` and `NoteVelocity.to_u7()` are the
       M2-115 scaling. `tutti-voicing`'s `Command`s and `Patch` keep their internal `u16`.
 13. **Test leftovers** (built, #641 by the DSP session): `tutti-nodes`'
     `width_generic_golden.rs` replaced by analytic properties per node.

@@ -2,9 +2,7 @@
 //! M2-115 section 3.4, the bit-level statement of the rule at the other widths,
 //! and the round trip through `widen` for every 7-bit and 14-bit value.
 
-use tutti_midi_protocol::{
-    narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity, widen,
-};
+use tutti_midi_protocol::widen;
 use tutti_ump::{BendValue, ControlValue};
 use tutti_ump::{CCNumber, NoteNumber, NoteVelocity, U7, U14, Voice1, Voice2};
 
@@ -21,7 +19,7 @@ fn m2_115_table_8_velocity() {
         (65535, 127),
         (0x15FF, 10),
     ] {
-        assert_eq!(narrow_velocity(NoteVelocity::new(v)).get(), want, "{v:#x}");
+        assert_eq!(NoteVelocity::new(v).to_u7().get(), want, "{v:#x}");
     }
 }
 
@@ -30,15 +28,15 @@ fn m2_115_table_8_velocity() {
 #[test]
 fn the_extremes_and_the_centre_keep_their_places() {
     assert_eq!(
-        [0, 0x8000, 0xFFFF].map(|v| narrow_velocity(NoteVelocity::new(v)).get()),
+        [0, 0x8000, 0xFFFF].map(|v| NoteVelocity::new(v).to_u7().get()),
         [0, 64, 127]
     );
     assert_eq!(
-        [0, 0x8000_0000, u32::MAX].map(|v| narrow_value(ControlValue::new(v)).get()),
+        [0, 0x8000_0000, u32::MAX].map(|v| ControlValue::new(v).to_u7().get()),
         [0, 64, 127]
     );
     assert_eq!(
-        [0, 0x8000_0000, u32::MAX].map(|v| narrow_bend(BendValue::new(v)).get()),
+        [0, 0x8000_0000, u32::MAX].map(|v| BendValue::new(v).to_u14().get()),
         [0, 8192, 16383]
     );
 }
@@ -50,26 +48,25 @@ fn the_extremes_and_the_centre_keep_their_places() {
 fn the_top_bits_are_kept() {
     for v in 0..=127u32 {
         let step = 1u32 << 9;
+        assert_eq!(NoteVelocity::new((v * step) as u16).to_u7().get(), v as u8);
         assert_eq!(
-            narrow_velocity(NoteVelocity::new((v * step) as u16)).get(),
-            v as u8
-        );
-        assert_eq!(
-            narrow_velocity(NoteVelocity::new((v * step + step - 1) as u16)).get(),
+            NoteVelocity::new((v * step + step - 1) as u16)
+                .to_u7()
+                .get(),
             v as u8
         );
         let step = 1u32 << 25;
-        assert_eq!(narrow_value(ControlValue::new(v * step)).get(), v as u8);
+        assert_eq!(ControlValue::new(v * step).to_u7().get(), v as u8);
         assert_eq!(
-            narrow_value(ControlValue::new(v * step + (step - 1))).get(),
+            ControlValue::new(v * step + (step - 1)).to_u7().get(),
             v as u8
         );
     }
     for v in 0..=16383u32 {
         let step = 1u32 << 18;
-        assert_eq!(narrow_bend(BendValue::new(v * step)).get(), v as u16);
+        assert_eq!(BendValue::new(v * step).to_u14().get(), v as u16);
         assert_eq!(
-            narrow_bend(BendValue::new(v * step + (step - 1))).get(),
+            BendValue::new(v * step + (step - 1)).to_u14().get(),
             v as u16
         );
     }
@@ -85,7 +82,7 @@ fn widen_then_narrow_returns_every_seven_bit_value() {
         let Voice2::NoteOff { velocity, .. } = off else {
             panic!("{off:?}")
         };
-        assert_eq!(narrow_velocity(velocity), U7::of(v), "velocity {v}");
+        assert_eq!(velocity.to_u7(), U7::of(v), "velocity {v}");
 
         let cc = widen(Voice1::ControlChange {
             controller: CCNumber::of(7),
@@ -94,7 +91,7 @@ fn widen_then_narrow_returns_every_seven_bit_value() {
         let Voice2::ControlChange { value, .. } = cc else {
             panic!("{cc:?}")
         };
-        assert_eq!(narrow_value(value), U7::of(v), "value {v}");
+        assert_eq!(value.to_u7(), U7::of(v), "value {v}");
     }
 }
 
@@ -105,7 +102,7 @@ fn widen_then_narrow_returns_every_fourteen_bit_bend() {
         let Voice2::PitchBend(wide) = widen(Voice1::PitchBend(bend)) else {
             panic!("{v}")
         };
-        assert_eq!(narrow_bend(wide), bend, "bend {v}");
+        assert_eq!(wide.to_u14(), bend, "bend {v}");
     }
 }
 
@@ -115,17 +112,13 @@ fn widen_then_narrow_returns_every_fourteen_bit_bend() {
 #[test]
 fn a_note_on_velocity_never_narrows_to_a_note_off() {
     for v in 1..0x0200 {
-        assert_eq!(narrow_velocity(NoteVelocity::new(v)).get(), 0, "{v:#x}");
-        assert_eq!(
-            narrow_note_on_velocity(NoteVelocity::new(v)).get(),
-            1,
-            "{v:#x}"
-        );
+        assert_eq!(NoteVelocity::new(v).to_u7().get(), 0, "{v:#x}");
+        assert_eq!(NoteVelocity::new(v).to_note_on_u7().get(), 1, "{v:#x}");
     }
     for v in [0x0200, 0x8000, 0xFFFF] {
         assert_eq!(
-            narrow_note_on_velocity(NoteVelocity::new(v)),
-            narrow_velocity(NoteVelocity::new(v)),
+            NoteVelocity::new(v).to_note_on_u7(),
+            NoteVelocity::new(v).to_u7(),
             "{v:#x}"
         );
     }
