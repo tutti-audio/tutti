@@ -1095,3 +1095,140 @@ fn a_lease_dropped_after_its_port_was_released_sends_nothing() {
     wire.run(5);
     assert_eq!(wire.peer.asked.len(), asked);
 }
+
+// --- A device's state: the fullState of its State resource (M2-111) ---
+
+#[cfg(feature = "plugin")]
+mod state {
+    use tutti_midi_ci::{
+        CallError, MediaType, OpaqueBody, PeData, PeResource, PeState, PeStateEntry, PeText,
+        RequestRefused, ResourceStore, ResourceTarget, StateId,
+    };
+    use tutti_midi_device::{Learned, SavedDevice};
+    use tutti_plugin_types::StateUse;
+    use tutti_session::Peer as _;
+    use tutti_session::{PeFailure, PeerError, PeerState, SavedPeer, StateJobFailed};
+
+    use super::{Wire, store};
+
+    fn full_state() -> StateId {
+        StateId::new("fullState").unwrap()
+    }
+
+    /// A store that serves `fullState` holding `bytes`.
+    fn serving(bytes: &[u8]) -> ResourceStore {
+        let mut store = store();
+        store.declare_states();
+        store
+            .put_state(
+                PeStateEntry::new(full_state(), PeText::new("Full state").unwrap()),
+                PeState::octets(bytes.to_vec()),
+            )
+            .expect("declared");
+        store
+    }
+
+    fn held(wire: &Wire) -> Vec<u8> {
+        let target = ResourceTarget::entry(PeResource::State, full_state().resource_id()).unwrap();
+        match wire.peer.store.get(&target) {
+            Some(PeData::State(state)) => match state.body() {
+                OpaqueBody::Binary { bytes, .. } => bytes.clone(),
+                OpaqueBody::Json(_) => panic!("binary expected"),
+            },
+            other => panic!("the device holds no state: {other:?}"),
+        }
+    }
+
+    fn peer(wire: &Wire) -> tutti_session::ListedPeer {
+        wire.port.info().peers()[0].clone()
+    }
+
+    /// **A device's state is its `fullState`, saved and restored through its
+    /// State resource** (M2-111 §3): a save lands the bytes the device holds with
+    /// the media type it declared, as the state of the device; a restore of other
+    /// bytes is a Set the device keeps, and a save after it reads them back.
+    #[test]
+    fn a_devices_full_state_is_saved_and_restored_through_its_state_resource() {
+        let mut wire = Wire::new(serving(&[1, 2, 3]));
+        let device = peer(&wire);
+        let save = device.save_state(StateUse::Project);
+        wire.run(60);
+        let state = wire.result(&save).expect("landed").expect("saved");
+        assert_eq!(state.bytes(), [1, 2, 3]);
+        assert_eq!(*state.media_type(), MediaType::OCTET_STREAM);
+        assert_eq!(*state.peer(), SavedPeer::Device(device.device().clone()));
+
+        let other = PeerState::new(state.peer().clone(), MediaType::OCTET_STREAM, vec![9, 8]);
+        let restore = device.restore_state(&other).expect("the same device");
+        wire.run(60);
+        assert!(matches!(wire.result(&restore), Some(Ok(()))));
+        assert_eq!(held(&wire), [9, 8], "the device keeps what was set");
+
+        let again = device.save_state(StateUse::Project);
+        wire.run(60);
+        let state = wire.result(&again).expect("landed").expect("saved");
+        assert_eq!(state.bytes(), [9, 8]);
+    }
+
+    /// **A state saved from another device is refused at the call**, whatever the
+    /// bytes: nothing is sent to the device.
+    #[test]
+    fn a_state_of_another_device_is_refused_and_nothing_is_set() {
+        let mut wire = Wire::new(serving(&[1, 2, 3]));
+        let device = peer(&wire);
+        let identity = device
+            .device()
+            .learned()
+            .identity()
+            .copied()
+            .expect("the device told its identity");
+        let mut other_identity = identity;
+        other_identity.model = [tutti_ump::U7::of(99); 2];
+        let other = SavedDevice::new(
+            device.device().info().clone(),
+            Learned::new().identified(other_identity),
+        );
+        let state = PeerState::new(SavedPeer::Device(other), MediaType::OCTET_STREAM, vec![7]);
+        assert!(device.restore_state(&state).is_err());
+        wire.run(60);
+        assert_eq!(held(&wire), [1, 2, 3]);
+        assert!(
+            !wire
+                .peer
+                .asked
+                .iter()
+                .any(|a| matches!(a, super::Asked::Set(_)))
+        );
+    }
+
+    /// **A device whose ResourceList has no State resource fails the save and the
+    /// restore with that**, named, as a call that was not sent.
+    #[test]
+    fn a_device_without_a_state_resource_fails_with_it_named() {
+        let mut wire = Wire::new(store());
+        let device = peer(&wire);
+        let named = StateJobFailed::Device(PeerError::Refused(PeFailure::NotSent(
+            CallError::Refused(RequestRefused::NotListed(PeResource::State)),
+        )));
+        let save = device.save_state(StateUse::Project);
+        let state = PeerState::new(
+            SavedPeer::Device(device.device().clone()),
+            MediaType::OCTET_STREAM,
+            vec![1],
+        );
+        let restore = device.restore_state(&state).expect("the same device");
+        wire.run(20);
+        assert_eq!(
+            wire.result(&save).expect("landed").unwrap_err().to_string(),
+            named.to_string()
+        );
+        assert!(matches!(
+            wire.result(&restore),
+            Some(Err(StateJobFailed::Device(PeerError::Refused(
+                PeFailure::NotSent(CallError::Refused(RequestRefused::NotListed(
+                    PeResource::State
+                )))
+            ))))
+        ));
+    }
+}

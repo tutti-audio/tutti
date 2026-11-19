@@ -132,6 +132,8 @@ mod rt_log;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
+#[cfg(any(feature = "plugin", feature = "midi-hardware"))]
+mod state_job;
 #[cfg(feature = "device")]
 mod switch;
 #[cfg(feature = "capture")]
@@ -230,8 +232,8 @@ pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 pub use plugin::{
     AddPluginError, AnyPlugin, LoadPreset, LoadedPlugin, Plugin, PluginCause, PluginChange,
     PluginDeclaration, PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginPorts,
-    PooledPlugin, PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
-    SaveState, StateJobError, StateJobFailed, StateRestore, StateView,
+    PooledPlugin, PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, StateJobError,
+    StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
@@ -246,6 +248,8 @@ pub use pool::{
 pub(crate) use pool::{Hold, HoldKind};
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};
+#[cfg(any(feature = "plugin", feature = "midi-hardware"))]
+pub use state_job::{RestoreState, SaveState, StateJobFailed};
 
 #[cfg(feature = "plugin")]
 use hang::HangDetector;

@@ -10,7 +10,7 @@
 //! calling [`update`](Session::update) on the main thread, and a save the
 //! main thread does not run within the off-main deadline
 //! (`tutti-plugin-host`'s `OFF_MAIN_DEADLINE`) ends
-//! as [`StateJobFailed::State`] with [`StateError::Unavailable`], as it does
+//! as [`StateJobFailed::Plugin`] with [`StateError::Unavailable`], as it does
 //! when the session's main work was never run.
 //!
 //! A restore is the plugin's main thread's (every format's `load_state` takes
@@ -31,8 +31,7 @@ use tutti_plugin_types::{PluginRefresh, StateUse};
 
 use super::entry::{Hosted, PluginEntry};
 use super::{PluginRef, PluginSignal, queue};
-use crate::job::job_kind;
-use crate::{HandleError, Job, PoolKey, Session, WaitError, WorkerError};
+use crate::{HandleError, Job, PoolKey, RestoreState, SaveState, Session, StateJobFailed};
 use crate::{OtherPeer, PeerState, SavedPeer};
 
 /// Why [`Session::save_state`] or [`Session::restore_state`] started no job.
@@ -71,33 +70,6 @@ impl<K: fmt::Debug> From<NodeLookup<K>> for StateJobError<K> {
     }
 }
 
-job_kind! {
-    /// A plugin's saved state ([`Session::save_state`]).
-    pub SaveState => PeerState, StateJobFailed
-}
-
-job_kind! {
-    /// A state put back into a plugin ([`Session::restore_state`]).
-    pub RestoreState => (), StateJobFailed
-}
-
-/// How a state job ended without its result.
-#[derive(Clone, Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum StateJobFailed {
-    /// The plugin's own refusal: it is gone, busy, refused, has no state route,
-    /// or an in-process save the main thread did not run in time
-    /// ([`StateError::Unavailable`]).
-    #[error(transparent)]
-    State(#[from] StateError),
-    /// The worker did not finish.
-    #[error(transparent)]
-    Worker(#[from] WorkerError),
-    /// The wait could not run ([`Job::wait`]).
-    #[error(transparent)]
-    Wait(#[from] WaitError),
-}
-
 /// `f32` because a plugin format is `f32` at its FFI.
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Saves the state of the plugin in the node over the entry under `key`,
@@ -105,7 +77,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// The round trip starts on the session's spawner and the state lands in a
     /// later [`update`](Self::update), or [`Job::wait`] returns it. An in-process plugin saves on the main
     /// thread, through the session's main work: keep calling `update` there,
-    /// or the save ends as [`StateJobFailed::State`] with
+    /// or the save ends as [`StateJobFailed::Plugin`] with
     /// [`StateError::Unavailable`] after the off-main deadline (see the module
     /// docs).
     /// The wait never lands once the session is dropped.
@@ -133,7 +105,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             move |_, done, ticket| {
                 ticket.land(match done {
                     Ok(Ok(bytes)) => Ok(PeerState::of_plugin(plugin, bytes)),
-                    Ok(Err(refused)) => Err(StateJobFailed::State(refused)),
+                    Ok(Err(refused)) => Err(StateJobFailed::Plugin(refused)),
                     Err(failed) => Err(StateJobFailed::Worker(failed)),
                 });
             },
@@ -180,7 +152,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 if applied.is_ok() {
                     queue(&notices, PluginSignal::Refresh(PluginRefresh::ParamValues));
                 }
-                applied.map_err(StateJobFailed::State)
+                applied.map_err(StateJobFailed::Plugin)
             });
         });
         Ok(job)

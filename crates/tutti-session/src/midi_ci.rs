@@ -36,6 +36,7 @@ use tutti_midi_ci::{
     PeStatus, PeTerminator, ProfileId, ProfileOutcome, ProfileRequest, ProfileState, ReportRequest,
     ResourceEntry, ResourceFailure, ResourceGet, ResourceSet, ResourceTarget,
 };
+use tutti_midi_device::SavedDevice;
 use tutti_midi_hardware::{
     Answer, ChannelCount, ChannelSwitcher as ListedChannel, CiPeerInfo, MidiSession, PeerId,
     PeerProfiles, ProfileSwitch, PropertyAsk, PropertyCall, PropertyPeer, ReportAsk, ReportEnd,
@@ -62,6 +63,8 @@ job_kind!(
     pub RequestReport => (), PeerError<Nak>
 );
 
+#[cfg(feature = "plugin")]
+mod state;
 mod subscription;
 
 pub(crate) use subscription::{EndSubscription, Subscriptions};
@@ -168,6 +171,29 @@ impl PortLink {
         job
     }
 
+    /// A job of kind `K` for `request`, whose answer is the request's own `J`
+    /// answer mapped by `map`: queued as [`submit`](Self::submit) does.
+    #[cfg(feature = "plugin")]
+    fn submit_mapped<J, K, R, E>(
+        &self,
+        request: R,
+        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+        make: impl FnOnce(R, Ticket<J>) -> InputRequest,
+        map: impl FnOnce(Result<J::Output, J::Error>) -> Result<K::Output, K::Error> + Send + 'static,
+    ) -> Job<K>
+    where
+        J: crate::JobKind<Error = PeerError<E>>,
+        K: crate::JobKind,
+    {
+        let (job, ticket) = Ticket::new(&self.outputs);
+        let ticket = Ticket::mapped(ticket, map);
+        match self.shared.upgrade() {
+            None => ticket.land(Err(PeerError::Disconnected)),
+            Some(shared) => shared.push(request, ticket, lists, make),
+        }
+        job
+    }
+
     /// A job that ended at the call, as `error`.
     fn failed<J: crate::JobKind>(&self, error: J::Error) -> Job<J> {
         let (job, ticket) = Ticket::new(&self.outputs);
@@ -187,20 +213,47 @@ impl std::fmt::Debug for PortLink {
 /// Discovery declared ([`info`](Self::info)) and the handles of what it offers,
 /// each `None` for a peer that did not declare it. It names its port and its
 /// [`PeerId`]; its requests go through the port's queue.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ListedPeer {
     id: ResourceId,
     port: ResourceId,
+    /// The device the peer is on, as the input said of it when the peer was
+    /// listed: whose state a [`PeerState`](crate::PeerState) of the peer is.
+    device: SavedDevice,
+    /// How the peer's requests reach its port.
+    #[cfg_attr(
+        not(feature = "plugin"),
+        expect(dead_code, reason = "the state jobs (feature `plugin`) are its user")
+    )]
+    link: PortLink,
     info: CiPeerInfo,
     profiles: Option<ProfilePeer>,
     report: Option<ReportPeer>,
     resources: Option<ResourcePeer>,
 }
 
+impl PartialEq for ListedPeer {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.port == other.port
+            && self.device == other.device
+            && self.info == other.info
+            && self.profiles == other.profiles
+            && self.report == other.report
+            && self.resources == other.resources
+    }
+}
+
 impl ListedPeer {
-    const fn new(
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the parts of a listed peer are of different kinds"
+    )]
+    pub(crate) fn new(
         id: ResourceId,
         port: ResourceId,
+        device: SavedDevice,
+        link: PortLink,
         info: CiPeerInfo,
         profiles: Option<ProfilePeer>,
         report: Option<ReportPeer>,
@@ -209,6 +262,8 @@ impl ListedPeer {
         Self {
             id,
             port,
+            device,
+            link,
             info,
             profiles,
             report,
@@ -228,6 +283,13 @@ impl ListedPeer {
     #[must_use]
     pub const fn port(&self) -> ResourceId {
         self.port
+    }
+
+    /// The device the peer is on, as its input said of it when the peer was
+    /// listed.
+    #[must_use]
+    pub const fn device(&self) -> &SavedDevice {
+        &self.device
     }
 
     /// The peer's Group and MUID.
@@ -737,7 +799,7 @@ impl Pending {
     }
 
     /// The id of `peer`: minted when the port first lists it.
-    fn peer_id(&self, peer: PeerId) -> ResourceId {
+    pub(crate) fn peer_id(&self, peer: PeerId) -> ResourceId {
         let mut ids = tutti_rt::LockExt::lock_recover(&self.peer_ids);
         *ids.entry(peer).or_insert_with(|| self.ids.mint())
     }
@@ -1143,24 +1205,6 @@ impl Pending {
     }
 
     /// What `peer`'s Subscriptions hold of its Resources.
-    pub(crate) fn listed(
-        &self,
-        port: ResourceId,
-        info: CiPeerInfo,
-        profiles: Option<ProfilePeer>,
-        report: Option<ReportPeer>,
-        resources: Option<ResourcePeer>,
-    ) -> ListedPeer {
-        ListedPeer::new(
-            self.peer_id(info.id()),
-            port,
-            info,
-            profiles,
-            report,
-            resources,
-        )
-    }
-
     pub(crate) fn bodies(&self, peer: PeerId) -> subscription::Bodies {
         self.subs.bodies(peer)
     }

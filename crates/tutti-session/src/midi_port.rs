@@ -872,6 +872,7 @@ fn input_info(
     link: &PortLink,
     pending: &Pending,
 ) -> MidiInputInfo {
+    let learned = io.learned(&device.id);
     let profiles = io.profiles(&device.id);
     let reporters = io.report_peers(&device.id);
     let properties = io.property_peers(&device.id);
@@ -880,8 +881,11 @@ fn input_info(
         .iter()
         .map(|info| {
             let id = info.id();
-            pending.listed(
+            ListedPeer::new(
+                pending.peer_id(id),
                 port,
+                SavedDevice::new(device.clone(), learned),
+                link.clone(),
                 info.clone(),
                 profiles
                     .iter()
@@ -901,7 +905,7 @@ fn input_info(
     MidiInputInfo {
         device: device.clone(),
         stream: io.stream(&device.id),
-        learned: io.learned(&device.id),
+        learned,
         peers,
     }
 }

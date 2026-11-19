@@ -160,7 +160,7 @@ pub use entry::{
     PluginPorts, PooledPlugin,
 };
 pub use preset_job::{LoadPreset, PresetJobError, PresetJobFailed};
-pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
+pub use state_job::StateJobError;
 
 use crate::jobs::{Landing, PluginLanding};
 use crate::plugin_diagnostics::Figures;
