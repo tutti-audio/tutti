@@ -23,6 +23,15 @@ struct Fake {
 
 const LEVEL: f32 = 0.1;
 
+/// One experiment with no deadline.
+fn measure_at<P: Processor>(
+    processor: &mut P,
+    subject: Subject,
+    config: ProbeConfig,
+) -> Result<Measured, MeasureFailure> {
+    measure_within(processor, subject, config, Deadline::never())
+}
+
 impl Fake {
     fn new(delay: usize, ring: usize) -> Self {
         Self {

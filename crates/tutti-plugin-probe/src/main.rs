@@ -1,10 +1,10 @@
 //! `plugin-probe <path> <result-file> [--as <format>] [--measure [--state <file>
-//! [--plugin <id>]] [--budget <seconds>]]`: load a plugin file just far enough to read the descriptor of
-//! every plugin it holds, write the outcome to the result file and exit.
+//! [--plugin <id>]] [--budget <seconds>]]`: load a plugin file just far enough to read the
+//! descriptor of every plugin it holds, write the outcome to the result file and exit. The
+//! flags come in any order, each at most once.
 //!
 //! With `--measure` the probe then activates each plugin and renders it: the
-//! tail and latency it reports against what it makes of an impulse
-//! (`tutti_plugin_probe::measure`). The figures are in each
+//! tail and latency it reports against what it makes of an impulse. The figures are in each
 //! descriptor's `measured`; a plugin that could not be measured is named in the
 //! result with why. A plugin that crashes or hangs while rendering is a probe that
 //! crashed or hung, to the host that spawned it. `--state <file>` puts one plugin
@@ -39,91 +39,48 @@
 
 #![forbid(unsafe_code)]
 
-use std::ffi::OsStr;
+mod args;
+
+use args::{Args, Measure, USAGE, Usage};
 use std::path::Path;
 use std::process::ExitCode;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tutti_plugin_probe::{StateFor, describe, describe_measured};
 use tutti_plugin_types::{
-    Deadline, MainThreadMarker, PluginFormat, ProbeExit, ProbeOutcome, ProbeRefusal, write_result,
+    Deadline, MainThreadMarker, ProbeExit, ProbeOutcome, ProbeRefusal, write_result,
 };
-
-const USAGE: &str = "usage: plugin-probe <plugin-path> <result-file> [--as <format>] \
-                     [--measure [--state <file> [--plugin <id>]] [--budget <seconds>]]";
-
-/// What the command line asks of the measuring step.
-#[derive(Default)]
-struct Measuring<'a> {
-    /// `--state`: the file of the state, and `--plugin`: whose it is.
-    state: Option<(&'a OsStr, Option<&'a str>)>,
-    /// `--budget`: how long the whole run may take.
-    budget: Option<Duration>,
-}
-
-/// The measuring flags after `--measure`: `--state <file>`, `--plugin <id>` (with
-/// `--state`) and `--budget <seconds>`, each once and in any order.
-fn measuring(flags: &[std::ffi::OsString]) -> Option<Measuring<'_>> {
-    let (mut state, mut plugin, mut budget) = (None, None, None);
-    let mut flags = flags.iter();
-    while let Some(flag) = flags.next() {
-        let value = flags.next()?;
-        match flag.to_str()? {
-            "--state" if state.is_none() => state = Some(value.as_os_str()),
-            "--plugin" if plugin.is_none() => plugin = Some(value.to_str()?),
-            "--budget" if budget.is_none() => {
-                budget = Some(Duration::from_secs(value.to_str()?.parse().ok()?));
-            }
-            _ => return None,
-        }
-    }
-    Some(Measuring {
-        state: match (state, plugin) {
-            (Some(file), plugin) => Some((file, plugin)),
-            (None, None) => None,
-            (None, Some(_)) => return None,
-        },
-        budget,
-    })
-}
 
 fn main() -> ExitCode {
     watch_host();
-    let mut args = std::env::args_os().skip(1);
-    let (Some(path), Some(result)) = (args.next(), args.next()) else {
-        // No result file is named, so nothing can say what was wrong.
-        eprintln!("{USAGE}");
-        return ExitCode::from(ProbeExit::ResultUnwritable.code());
+    let args = match args::parse(std::env::args_os().skip(1)) {
+        Ok(args) => args,
+        Err(Usage::NoResultFile) => {
+            // No result file is named, so nothing can say what was wrong.
+            eprintln!("{USAGE}");
+            return ExitCode::from(ProbeExit::ResultUnwritable.code());
+        }
+        Err(Usage::Wrong { result, cause }) => {
+            eprintln!("plugin-probe: {cause}");
+            return usage(&result);
+        }
     };
-    let mut rest: Vec<_> = args.collect();
-    let format = match rest.as_slice() {
-        [a, f, ..] if a == "--as" => match f.to_str().and_then(PluginFormat::from_extension_id) {
-            Some(format) => Some(format),
-            None => return usage(&result),
-        },
-        _ => None,
-    };
-    if format.is_some() {
-        rest.drain(..2);
-    }
-    let measuring = match rest.split_first() {
-        None => None,
-        Some((m, flags)) if m == "--measure" => match measuring(flags) {
-            Some(measuring) => Some(measuring),
-            None => return usage(&result),
-        },
-        Some(_) => return usage(&result),
-    };
+    let Args {
+        path,
+        result,
+        format,
+        measure,
+    } = args;
     // The deadline of the whole run, from here: the plugins of a file share it.
-    let run = measuring
+    let run = measure
         .as_ref()
         .and_then(|m| m.budget)
         .map_or(Deadline::never(), |budget| {
             Deadline::after(Instant::now(), budget)
         });
-    let state = match measuring
+    let state = match measure
         .as_ref()
-        .and_then(|m| m.state)
-        .map(|(file, plugin)| std::fs::read(file).map(|bytes| (bytes, plugin)))
+        .and_then(|m| m.state.as_ref())
+        .map(|s| std::fs::read(&s.file))
         .transpose()
     {
         Ok(state) => state,
@@ -139,15 +96,18 @@ fn main() -> ExitCode {
     let Some(main) = MainThreadMarker::new() else {
         return finish(&result, ProbeOutcome::Failed(ProbeRefusal::NotMainThread));
     };
-    let path = Path::new(&path);
-    let described = if measuring.is_some() {
-        let state = state.as_ref().map(|(bytes, plugin)| StateFor {
-            plugin: *plugin,
-            bytes,
-        });
-        describe_measured(main, path, format, state, run)
-    } else {
-        describe(main, path, format).map(|plugins| (plugins, Vec::new()))
+    let described = match &measure {
+        Some(Measure { state: named, .. }) => {
+            let state = state
+                .as_deref()
+                .zip(named.as_ref())
+                .map(|(bytes, named)| StateFor {
+                    plugin: named.plugin.as_deref(),
+                    bytes,
+                });
+            describe_measured(main, &path, format, state, run)
+        }
+        None => describe(main, &path, format).map(|plugins| (plugins, Vec::new())),
     };
     let outcome = match described {
         Ok((plugins, _)) if plugins.is_empty() => ProbeOutcome::Failed(ProbeRefusal::Empty),
@@ -174,20 +134,17 @@ fn watch_host() {
 }
 
 /// A command line that is wrong is a result, so it is not read as a crash.
-fn usage(result: &OsStr) -> ExitCode {
+fn usage(result: &Path) -> ExitCode {
     eprintln!("{USAGE}");
     finish(result, ProbeOutcome::Failed(ProbeRefusal::Usage))
 }
 
 /// Writes the outcome to the result file.
-fn finish(result: &OsStr, outcome: ProbeOutcome) -> ExitCode {
-    match write_result(Path::new(result), &outcome) {
+fn finish(result: &Path, outcome: ProbeOutcome) -> ExitCode {
+    match write_result(result, &outcome) {
         Ok(()) => ExitCode::from(ProbeExit::Written.code()),
         Err(e) => {
-            eprintln!(
-                "plugin-probe: cannot write {}: {e}",
-                Path::new(result).display()
-            );
+            eprintln!("plugin-probe: cannot write {}: {e}", result.display());
             ExitCode::from(ProbeExit::ResultUnwritable.code())
         }
     }

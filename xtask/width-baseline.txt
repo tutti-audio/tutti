@@ -57,7 +57,7 @@ crates/tutti-nodes/src/click.rs  3  migrating: R1/S7
 crates/tutti-nodes/src/lfo.rs  3  migrating: R1/S7
 crates/tutti-nodes/src/strip.rs  7  migrating: R1/S7
 crates/tutti-plugin-host/src/node/loader.rs  1  spec: f32 is the audio width every plugin format processes (CLAP, VST3, VST2, AU)
-crates/tutti-plugin-probe/src/measure.rs  2  migrating: plugins step 7
+crates/tutti-plugin-probe/src/hosted/measure.rs  2  migrating: plugins step 7
 crates/tutti-sampler/src/lanes.rs  1  migrating: dsp S7/instruments
 crates/tutti-sampler/src/streamer/io/refill.rs  2  migrating: dsp S7/instruments
 crates/tutti-sampler/src/stretch/vocoder.rs  2  migrating: dsp S7/instruments
