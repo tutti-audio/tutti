@@ -523,6 +523,20 @@ mod tests {
         ));
     }
 
+    /// An ordinary mixed-case suffix is accepted by the types that take one.
+    #[test]
+    fn a_mixed_case_name_is_accepted() {
+        assert_eq!(
+            PropertyName::new("x-uniqueKey").unwrap().as_str(),
+            "x-uniqueKey"
+        );
+        assert_eq!(
+            ResourceName::new("X-MyResource").unwrap().as_str(),
+            "X-MyResource"
+        );
+        assert_eq!(SubscribeId::new("abcdefgh").unwrap().as_str(), "abcdefgh");
+    }
+
     /// M2-103 Table 16: the literal media types are valid media types, and the
     /// one a Resource lists by default is JSON.
     #[test]

@@ -278,3 +278,20 @@ mod serde_text {
         );
     }
 }
+
+/// M2-104 §7.1.5 sets no minimum, so an empty Id is one.
+#[test]
+fn an_empty_instance_id_is_accepted() {
+    assert_eq!(ProductInstanceId::new("").unwrap().as_str(), "");
+}
+
+/// The character check runs before the length: text that is too long and also
+/// holds a non-printable byte is refused as `NotPrintableAscii`.
+#[test]
+fn an_instance_id_names_its_character_before_its_length() {
+    let both = format!("{}\u{7f}", "a".repeat(50));
+    assert_eq!(
+        ProductInstanceId::parse(&both),
+        Err(InstanceIdError::NotPrintableAscii)
+    );
+}
