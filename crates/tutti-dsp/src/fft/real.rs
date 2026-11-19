@@ -29,7 +29,7 @@
 use rustfft::{Fft as InnerFft, FftDirection, FftNum, FftPlannerScalar};
 use std::f64::consts::PI;
 use std::sync::Arc;
-use tutti_buffers::{Float, Mono, MonoMut, Sample};
+use tutti_buffers::{Float, Mono, MonoMut};
 
 /// num-complex 0.4's complex number, re-exported from rustfft beside
 /// [`Complex32`]: a spectrum bin over the float the transform runs in.
@@ -60,7 +60,7 @@ pub(crate) fn pass_twiddles<F: FftFloat>(size: usize, direction: FftDirection) -
             let angle = -2.0 * PI / size as f64 * k as f64;
             let w = twiddle(angle);
             match direction {
-                FftDirection::Forward => w * <F as Float>::from_f32(0.5),
+                FftDirection::Forward => w * F::lit(0.5),
                 FftDirection::Inverse => w.conj(),
             }
         })
@@ -70,8 +70,8 @@ pub(crate) fn pass_twiddles<F: FftFloat>(size: usize, direction: FftDirection) -
 /// `exp(i * angle)`, computed in f64 and narrowed once.
 pub(crate) fn twiddle<F: FftFloat>(angle: f64) -> Complex<F> {
     Complex::new(
-        <F as Sample>::from_f64(libm::cos(angle)),
-        <F as Sample>::from_f64(libm::sin(angle)),
+        F::from_design(libm::cos(angle)),
+        F::from_design(libm::sin(angle)),
     )
 }
 
@@ -322,7 +322,7 @@ pub(crate) fn forward_post_pass<F: FftFloat>(twiddles: &[Complex<F>], bins: &mut
 
     // The rest, two mirrored bins at a time. The mirror bin's twiddle is
     // this one's with the real part negated, which halves the multiplies.
-    let one_half = <F as Float>::from_f32(0.5);
+    let one_half = F::lit(0.5);
     let bins_len = bins.len();
     let (left, right) = bins.split_at_mut(bins_len / 2);
     let right_len = right.len();

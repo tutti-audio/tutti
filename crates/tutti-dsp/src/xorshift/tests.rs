@@ -28,17 +28,25 @@ fn the_recurrence_from_the_export_seed_is_marsaglias() {
     );
 }
 
-/// `to_unit` maps the end points to 0 and 1 and a word `w` to `w / (2^32 - 1)`:
-/// 0 is 0, `u32::MAX` is 1, and `2^31` is `2^31 / (2^32 - 1)`, just over a half
-/// (0.5 + 1.16e-10, which `f32` rounds to exactly 0.5).
+/// `to_unit` maps a word `w` to `w / 2^32` truncated to the width's resolution, so it is exact
+/// at `f64` (`2^-32` steps), the multiple of `2^-24` at or below `w / 2^32` at `f32`, and under
+/// 1 at both widths for the largest word.
 #[test]
-fn to_unit_maps_the_word_range_onto_zero_to_one() {
-    assert_eq!(Xorshift32::to_unit(0), 0.0);
-    assert_eq!(Xorshift32::to_unit(u32::MAX), 1.0);
-    let half = Xorshift32::to_unit(1 << 31);
-    assert!((f64::from(half) - 2_147_483_648.0 / 4_294_967_295.0).abs() < 1e-7);
-    let third = Xorshift32::to_unit(u32::MAX / 3);
-    assert!((f64::from(third) - 1.0 / 3.0).abs() < 1e-7, "{third}");
+fn to_unit_is_the_word_over_two_to_the_32_truncated_to_the_width() {
+    assert_eq!(Xorshift32::to_unit::<f64>(0), 0.0);
+    assert_eq!(Xorshift32::to_unit::<f64>(1 << 31), 0.5);
+    assert_eq!(Xorshift32::to_unit::<f64>(u32::MAX), 1.0 - 2f64.powi(-32));
+    assert_eq!(Xorshift32::to_unit::<f32>(0), 0.0);
+    assert_eq!(Xorshift32::to_unit::<f32>(u32::MAX), 1.0 - 2f32.powi(-24));
+    for w in [1_u32, 255, 256, 0x1234_5678, 2_274_908_837, u32::MAX / 3] {
+        let truncated = f64::from(w >> 8) * 2f64.powi(-24);
+        assert_eq!(f64::from(Xorshift32::to_unit::<f32>(w)), truncated, "{w}");
+        assert_eq!(
+            Xorshift32::to_unit::<f64>(w),
+            f64::from(w) * 2f64.powi(-32),
+            "{w}"
+        );
+    }
 }
 
 /// The generator's words are Marsaglia's recurrence (`x ^= x << 13; x ^= x >> 17;
@@ -56,15 +64,16 @@ fn a_thousand_words_follow_the_published_recurrence() {
     }
 }
 
-/// `to_bipolar` is `2 u - 1` of `to_unit`: the end words are -1 and 1, and the
-/// middle word `2^31` is `2^32 / (2^32 - 1) - 1`, a hair above zero (2.3e-10, which
-/// `f32` rounds to 0).
+/// `to_bipolar` is `2 u - 1` of `to_unit`: the word 0 is -1, `2^31` is 0 and `3 * 2^30` is a
+/// half, exactly, at both widths.
 #[test]
 fn to_bipolar_maps_the_word_range_onto_minus_one_to_one() {
-    assert_eq!(Xorshift32::to_bipolar(0), -1.0);
-    assert_eq!(Xorshift32::to_bipolar(u32::MAX), 1.0);
-    let mid = Xorshift32::to_bipolar(1 << 31);
-    assert!(f64::from(mid).abs() < 1e-7, "{mid}");
-    let quarter = Xorshift32::to_bipolar(u32::MAX / 4);
-    assert!((f64::from(quarter) + 0.5).abs() < 1e-7, "{quarter}");
+    assert_eq!(Xorshift32::to_bipolar::<f32>(0), -1.0);
+    assert_eq!(Xorshift32::to_bipolar::<f32>(1 << 31), 0.0);
+    assert_eq!(Xorshift32::to_bipolar::<f32>(3 << 30), 0.5);
+    assert_eq!(
+        Xorshift32::to_bipolar::<f64>(u32::MAX),
+        1.0 - 2f64.powi(-31)
+    );
+    assert_eq!(Xorshift32::to_bipolar::<f64>(1 << 30), -0.5);
 }
