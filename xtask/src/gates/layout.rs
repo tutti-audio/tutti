@@ -276,11 +276,11 @@ pub(super) const WINNOW_HOMES: &[(&str, &[&str])] = &[
 /// The crates that can reach a C library through `encode-vorbis`.
 const OGG_PACKAGES: &[&str] = &["tutti-session", "tutti"];
 
-struct Pkg {
-    name: String,
-    dir: String,
+pub(super) struct Pkg {
+    pub(super) name: String,
+    pub(super) dir: String,
     toml: Toml,
-    deps: Vec<(String, Kind)>,
+    pub(super) deps: Vec<(String, Kind)>,
 }
 
 fn layer_of(name: &str) -> Option<usize> {
@@ -288,7 +288,7 @@ fn layer_of(name: &str) -> Option<usize> {
 }
 
 /// The workspace members' manifests, from the root's `members` list.
-fn packages(tree: &dyn Tree, bad: &mut Vec<String>) -> Vec<Pkg> {
+pub(super) fn packages(tree: &dyn Tree, bad: &mut Vec<String>) -> Vec<Pkg> {
     let root = Toml::parse(&tree.read("Cargo.toml").unwrap_or_default());
     let members = root
         .value("workspace", "members")
