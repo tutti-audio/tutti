@@ -1635,8 +1635,8 @@ fn attach_depths(
     for (target, cells) in cells {
         if let Some(program) = compiled.programs.get_mut(&target) {
             let count = cells.len();
-            *program = std::mem::take(program)
-                .depths(cells)
+            program
+                .bind_depths(cells)
                 .map_err(|_| CompileError::TooManyLayers { target, count })?;
         }
     }

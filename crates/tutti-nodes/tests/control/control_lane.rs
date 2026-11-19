@@ -801,9 +801,10 @@ fn a_lane_sees_two_depths_stored_in_one_block_whatever_their_bits() {
         depth_by: None,
     };
     let (d1, d2) = (Param::new(Depth::of(0.125)), Param::new(Depth::of(0.125)));
-    let program = ControlProgram::new(None, vec![constant(1), constant(2)], vec![])
-        .expect("a valid program")
-        .depths([(LayerId(1), d1.handle()), (LayerId(2), d2.handle())])
+    let mut program =
+        ControlProgram::new(None, vec![constant(1), constant(2)], vec![]).expect("a valid program");
+    program
+        .bind_depths([(LayerId(1), d1.handle()), (LayerId(2), d2.handle())])
         .expect("two cells");
     let lane = native(&ed, 2, program, Some(500.0));
     wire(&mut ed, 1, lane, 2);

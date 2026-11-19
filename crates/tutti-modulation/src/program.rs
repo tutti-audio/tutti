@@ -39,7 +39,7 @@ pub const MAX_LANE_LAYERS: usize = 16;
 pub const MAX_LANE_INPUTS: usize = 8;
 
 /// Depth cells one program holds, at most: one per layer and per input.
-/// [`ControlProgram::depths`] refuses past it ([`ProgramError::TooManyDepths`]).
+/// [`ControlProgram::bind_depths`] refuses past it ([`ProgramError::TooManyDepths`]).
 pub const MAX_LANE_DEPTHS: usize = MAX_LANE_LAYERS + MAX_LANE_INPUTS;
 
 /// The depths a program's cells held at one moment: what a lane loads once per
@@ -492,7 +492,7 @@ impl ControlProgram {
         })
     }
 
-    /// The program with `depths` as the depth of the layers and inputs they
+    /// Makes `depths` the depth of the layers and inputs they
     /// name, each read from its cell when a lane takes a
     /// [snapshot](Self::depth_snapshot); an id no layer or input has is
     /// ignored.
@@ -500,10 +500,10 @@ impl ControlProgram {
     /// # Errors
     ///
     /// More than [`MAX_LANE_DEPTHS`] cells, or two cells for one id.
-    pub fn depths(
-        mut self,
+    pub fn bind_depths(
+        &mut self,
         depths: impl IntoIterator<Item = (LayerId, Param<Depth>)>,
-    ) -> Result<Self, ProgramError> {
+    ) -> Result<(), ProgramError> {
         let mut depths: Vec<_> = depths
             .into_iter()
             .filter(|(id, _)| {
@@ -520,7 +520,7 @@ impl ControlProgram {
             return Err(ProgramError::DuplicateLayer(w[0].0));
         }
         self.depths = depths.into_boxed_slice();
-        Ok(self)
+        Ok(())
     }
 
     /// The program with a cell of its own for every depth cell it holds, at
