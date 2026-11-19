@@ -103,8 +103,9 @@ mod source;
 mod sources;
 
 pub use compile::{
-    CompileError, Compiled, Declarations, RATE_ANCHOR_MARGIN, RouteDecl, RouteKey, RouteTarget,
-    SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey, compile, layer_id,
+    CompileError, Compiled, Declarations, MAX_CLOCK_PHASE, RATE_ANCHOR_MARGIN, RouteDecl, RouteKey,
+    RouteTarget, SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey, compile,
+    layer_id,
 };
 pub use curve::{Curve, CurveSegment};
 pub use program::{

@@ -130,7 +130,7 @@ impl From<Lfo> for Source {
 
 /// A constant the user moves: a raw value, saturating past ±1.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Macro(pub f32);
+pub struct Macro(pub f64);
 
 impl From<Macro> for Source {
     /// A [`Source::Macro`] at the value.

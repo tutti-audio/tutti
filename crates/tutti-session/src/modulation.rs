@@ -1546,7 +1546,7 @@ impl Mods<'_> {
     }
 
     /// A macro at `value`.
-    pub fn macro_(&mut self, value: f32) -> ModSourceId {
+    pub fn macro_(&mut self, value: f64) -> ModSourceId {
         self.source(Macro(value))
     }
 

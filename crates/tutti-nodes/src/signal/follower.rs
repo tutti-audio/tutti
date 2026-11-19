@@ -61,11 +61,10 @@ impl SourcePorts for LevelFollower {
     fn hear<F: Float>(&mut self, io: &Io<'_, F>, from: usize, to: usize) {
         let channels = io.input_count();
         for i in from..to {
-            let mut level = 0.0f32;
+            let mut level = 0.0f64;
             for c in 0..channels {
                 // `max` ignores a NaN operand: a NaN sample reads 0.
-                // The level is an `f32` lane word: a wide sample narrows once here.
-                level = level.max(io.input(c)[i].abs().convert_to::<f32>());
+                level = level.max(io.input(c)[i].abs().convert_to::<f64>());
             }
             self.follow(level);
         }
