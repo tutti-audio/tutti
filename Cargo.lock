@@ -3118,6 +3118,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "tutti-clap-test-plugin",
+ "tutti-fixtures",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",

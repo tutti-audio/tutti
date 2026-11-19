@@ -10,7 +10,7 @@ use tutti_buffers::Planes;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
-use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, Network, System};
+use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreezeMode, MaxDecay, Network, System};
 use tutti_graph::contract::{
     Driven, assert_honest_tail, assert_param_fork, drive, drive_input, prepared,
 };
@@ -33,7 +33,7 @@ fn plain() -> FdnLayout {
 }
 
 fn freezable() -> FdnLayout {
-    FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap()
+    FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap()
 }
 
 fn live(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
@@ -628,7 +628,8 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
         default.get() < 2_000_000,
         "nothing stretches the ceiling: {default:?}"
     );
-    let nineteen = FdnLayout::new(8, MaxDecay::of(Seconds::new(19.0)), false).unwrap();
+    let nineteen =
+        FdnLayout::new(8, MaxDecay::of(Seconds::new(19.0)), FreezeMode::Decaying).unwrap();
     let Tail::Finite(long) = at(nineteen, SampleRate::SR_48K) else {
         panic!("a finite ceiling")
     };
@@ -639,7 +640,7 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
     );
     // A 40 s room at 96 kHz is past 2.88 million frames (what bounded a tail at 48 kHz) and
     // within the sixty seconds the graph takes at that rate.
-    let forty = FdnLayout::new(8, MaxDecay::of(Seconds::new(40.0)), false).unwrap();
+    let forty = FdnLayout::new(8, MaxDecay::of(Seconds::new(40.0)), FreezeMode::Decaying).unwrap();
     let Tail::Finite(room) = at(forty, SampleRate::SR_96K) else {
         panic!("a finite ceiling")
     };
@@ -649,6 +650,11 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
         "{room:?}"
     );
     assert!(room.get() > 2_880_000, "{room:?}");
-    let cap = FdnLayout::new(16, MaxDecay::new(MaxDecay::CAP).unwrap(), false).unwrap();
+    let cap = FdnLayout::new(
+        16,
+        MaxDecay::new(MaxDecay::CAP).unwrap(),
+        FreezeMode::Decaying,
+    )
+    .unwrap();
     assert_eq!(at(cap, SampleRate::SR_192K), Tail::Unbounded);
 }

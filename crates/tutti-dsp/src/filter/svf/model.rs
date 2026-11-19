@@ -11,7 +11,7 @@ use core::f64::consts::PI;
 
 use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds};
 
-use super::{SvfCoeffs, SvfType};
+use super::{SvfDesign, SvfType};
 use crate::Biquad;
 use crate::filter::biquad::section_l1;
 use crate::{Complex64, Lti, Ring, System};
@@ -54,7 +54,7 @@ impl SvfControls {
     /// NaN is held off only until another control moves); a node reads its cells
     /// through `LastGood`, which does.
     #[must_use]
-    pub fn moved_from(&self, applied: &Self) -> bool {
+    pub fn differs_from(&self, applied: &Self) -> bool {
         const FREQ_EPS: f64 = 0.01;
         const Q_EPS: f64 = 0.0001;
         const GAIN_EPS: f64 = 0.01;
@@ -66,7 +66,7 @@ impl SvfControls {
 
     /// These controls with every non-finite figure replaced by the default's and
     /// `q` held in `0.01..=MAX_Q`. A cutoff and a gain out of range are
-    /// [`SvfCoeffs::new`]'s to clamp.
+    /// [`SvfDesign::new`]'s to clamp.
     fn sanitized(self) -> Self {
         let finite = |v: f64, d: f64| if v.is_finite() { v } else { d };
         Self {
@@ -86,7 +86,7 @@ impl SvfControls {
 /// section, an [`Lti`] with one input and one output.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SvfModel {
-    coeffs: SvfCoeffs,
+    design: SvfDesign,
     controls: SvfControls,
     rate: SampleRate,
 }
@@ -98,7 +98,7 @@ impl SvfModel {
     pub fn new(controls: SvfControls, rate: SampleRate) -> Self {
         let controls = controls.sanitized();
         Self {
-            coeffs: SvfCoeffs::new(controls.ty, controls.freq, controls.q, controls.gain, rate),
+            design: SvfDesign::new(controls.ty, controls.freq, controls.q, controls.gain, rate),
             controls,
             rate,
         }
@@ -113,8 +113,8 @@ impl SvfModel {
     /// The coefficients of the trapezoidal form, which carry `g`, `k` and the
     /// output weights.
     #[must_use]
-    pub(crate) fn coeffs(&self) -> &SvfCoeffs {
-        &self.coeffs
+    pub(crate) fn design(&self) -> &SvfDesign {
+        &self.design
     }
 
     /// The rate it is designed at.
@@ -131,9 +131,9 @@ impl SvfModel {
     /// `m2 g^2 (z + 1)^2`; both are divided by `d0`.
     #[must_use]
     pub fn biquad(&self) -> Biquad {
-        let SvfCoeffs {
+        let SvfDesign {
             g, k, m0, m1, m2, ..
-        } = self.coeffs;
+        } = self.design;
         let d0 = 1.0 + g * (g + k);
         let d1 = 2.0 * g * g - 2.0;
         let d2 = 1.0 - g * k + g * g;
@@ -151,7 +151,7 @@ impl SvfModel {
     /// form (a real pair `q` and `1 / q`).
     #[must_use]
     fn poles(&self) -> [Complex64; 2] {
-        let (g, k) = (self.coeffs.g, self.coeffs.k);
+        let (g, k) = (self.design.g, self.design.k);
         let map = |s: Complex64| (1.0 + g * s) / (1.0 - g * s);
         let disc = k * k - 4.0;
         if disc < 0.0 {
@@ -169,7 +169,7 @@ impl SvfModel {
     /// The slowest pole's `-ln |z|`, per frame, to full precision however close
     /// the pole is to the unit circle (`1 - |z|` is formed without cancelling).
     fn decay_rate(&self) -> f64 {
-        let (g, k) = (self.coeffs.g, self.coeffs.k);
+        let (g, k) = (self.design.g, self.design.k);
         let disc = k * k - 4.0;
         if disc < 0.0 {
             // |z|^2 = (1 - g k + g^2) / (1 + g k + g^2) for a conjugate pair.
@@ -189,7 +189,7 @@ impl SvfModel {
     /// `|H(e^jw)|` and the response itself, from the trapezoidal form (accurate
     /// down to DC: no cancellation between the polynomial's terms).
     fn at(&self, w: f64) -> Complex64 {
-        self.coeffs.response(w)
+        self.design.response(w)
     }
 
     /// `g_n`, the impulse response of the all-pole part `1 / (1 + a1 z^-1 + a2

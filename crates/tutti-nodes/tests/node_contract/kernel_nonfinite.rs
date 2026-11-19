@@ -4,7 +4,9 @@
 
 use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, LadderType, ShapeKind, Stages, SvfType};
+use tutti_dsp::{
+    FdnControls, FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType,
+};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
@@ -197,7 +199,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "fdn",
             Box::new(FdnNode::<f32>::live(
-                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, false).unwrap(),
+                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
                 FdnControls::DEFAULT,
             )),
         ),

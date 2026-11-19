@@ -809,7 +809,7 @@ fn lane_moves(
         }
     }
     for (k, c) in controls.iter().enumerate().skip(block % 7).step_by(7) {
-        c.set_knob(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
+        c.set_value(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
     }
     if block % 15 == 14 {
         for k in (block % 9..200).step_by(9) {

@@ -2,7 +2,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
-use tutti_dsp::{Lanes, Ring, Sos, SosError, Tilt};
+use tutti_dsp::{Ring, SimdLanes, Sos, SosError, Tilt};
 use tutti_units::{Db, Hz, SampleRate};
 
 use super::eq::sealed::Sealed;
@@ -66,7 +66,7 @@ pub type TiltFilterNode<F> = KernelNode<TiltFilterKernel<F>>;
 /// The tilt as a [`Kernel`](crate::Kernel).
 pub type TiltFilterKernel<F> = EqKernel<TiltFilterControls, F>;
 
-impl<F: Float + Lanes> From<TiltFilterConfig> for TiltFilterNode<F> {
+impl<F: Float + SimdLanes> From<TiltFilterConfig> for TiltFilterNode<F> {
     fn from(config: TiltFilterConfig) -> Self {
         Self::with_kernel(
             TiltFilterKernel::new(filter_bus(config.width)),

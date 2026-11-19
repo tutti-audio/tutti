@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use tutti_buffers::Float;
-use tutti_dsp::Lanes;
+use tutti_dsp::SimdLanes;
 use tutti_midi_protocol::{Universal, UniversalReader, narrow_value};
 use tutti_sf2::SoundFont;
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2};
@@ -158,7 +158,7 @@ fn rules(polyphony: NonZeroUsize) -> Rules {
 /// The player. Its voices are built against a rate and cannot be re-rated in
 /// place: [`rerated`](Self::rerated) builds another.
 #[derive(Debug, Clone)]
-pub(crate) struct Player<F: Float + Lanes> {
+pub(crate) struct Player<F: Float + SimdLanes> {
     font: Arc<SoundFont>,
     render: Render,
     settings: Settings,
@@ -189,7 +189,7 @@ pub(crate) struct Player<F: Float + Lanes> {
     audible_floor: F,
 }
 
-impl<F: Float + Lanes> Player<F> {
+impl<F: Float + SimdLanes> Player<F> {
     /// Builds a player over `font` at [`INITIAL_RATE`].
     /// Allocates the voices.
     ///

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn test_svf_coeffs_lowpass_m_values() {
-    let c = SvfCoeffs::new(
+    let c = SvfDesign::new(
         SvfType::LowPass,
         Hz::new(1000.0),
         Q::new(0.707),
@@ -17,7 +17,7 @@ fn test_svf_coeffs_lowpass_m_values() {
 
 #[test]
 fn test_svf_coeffs_highpass_m_values() {
-    let c = SvfCoeffs::new(
+    let c = SvfDesign::new(
         SvfType::HighPass,
         Hz::new(1000.0),
         Q::new(0.707),
@@ -78,7 +78,7 @@ fn rbj_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) -> f64 
 /// Steady-state gain (dB) of a unit sine at `f` through the filter's own
 /// recurrence, projected on the last whole second.
 fn measured_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) -> f64 {
-    let c = SvfCoefficients::<f64>::from(&SvfCoeffs::new(
+    let c = SvfCoefficients::<f64>::from(&SvfDesign::new(
         ty,
         Hz::new(fc),
         Q::new(q),
@@ -132,7 +132,7 @@ fn bell_and_shelves_match_the_rbj_cookbook() {
 fn an_absurd_gain_solves_finite_and_saturates() {
     for ty in [SvfType::Bell, SvfType::LowShelf, SvfType::HighShelf] {
         for db in [f64::NAN, -1e30, 1e30, f64::NEG_INFINITY, f64::INFINITY] {
-            let c = SvfCoeffs::new(
+            let c = SvfDesign::new(
                 ty,
                 Hz::new(1000.0),
                 Q::new(1.0),
@@ -143,14 +143,14 @@ fn an_absurd_gain_solves_finite_and_saturates() {
                 assert!(v.is_finite(), "{ty:?} at {db} dB: {c:?}");
             }
         }
-        let cap = SvfCoeffs::new(
+        let cap = SvfDesign::new(
             ty,
             Hz::new(1000.0),
             Q::new(1.0),
-            SvfCoeffs::MAX_GAIN,
+            SvfDesign::MAX_GAIN,
             SampleRate::SR_48K,
         );
-        let past = SvfCoeffs::new(
+        let past = SvfDesign::new(
             ty,
             Hz::new(1000.0),
             Q::new(1.0),
@@ -159,14 +159,14 @@ fn an_absurd_gain_solves_finite_and_saturates() {
         );
         assert_eq!((cap.m0, cap.m1, cap.m2), (past.m0, past.m1, past.m2));
     }
-    let nan = SvfCoeffs::new(
+    let nan = SvfDesign::new(
         SvfType::Bell,
         Hz::new(1000.0),
         Q::new(1.0),
         Db::new(f64::NAN),
         SampleRate::SR_48K,
     );
-    let flat = SvfCoeffs::new(
+    let flat = SvfDesign::new(
         SvfType::Bell,
         Hz::new(1000.0),
         Q::new(1.0),
@@ -178,7 +178,7 @@ fn an_absurd_gain_solves_finite_and_saturates() {
 
 #[test]
 fn test_svf_coeffs_bell_zero_gain_is_unity() {
-    let c = SvfCoeffs::new(
+    let c = SvfDesign::new(
         SvfType::Bell,
         Hz::new(1000.0),
         Q::new(1.0),
@@ -200,7 +200,7 @@ fn test_svf_coeffs_bell_zero_gain_is_unity() {
 /// make, so the two are never quietly given one type again.
 #[test]
 fn cutoff_and_q_are_not_interchangeable() {
-    let right = SvfCoeffs::new(
+    let right = SvfDesign::new(
         SvfType::LowPass,
         Hz::new(1000.0),
         Q::new(0.707),
@@ -208,7 +208,7 @@ fn cutoff_and_q_are_not_interchangeable() {
         SampleRate::SR_44K1,
     );
     // What the transposed call computes: a 0.707 Hz cutoff at Q 1000.
-    let swapped = SvfCoeffs::new(
+    let swapped = SvfDesign::new(
         SvfType::LowPass,
         Hz::new(0.707),
         Q::new(1000.0),
@@ -223,14 +223,14 @@ fn cutoff_and_q_are_not_interchangeable() {
 
 #[test]
 fn test_svf_coeffs_deterministic() {
-    let c1 = SvfCoeffs::new(
+    let c1 = SvfDesign::new(
         SvfType::LowPass,
         Hz::new(500.0),
         Q::new(0.707),
         Db::new(0.0),
         SampleRate::SR_44K1,
     );
-    let c2 = SvfCoeffs::new(
+    let c2 = SvfDesign::new(
         SvfType::LowPass,
         Hz::new(500.0),
         Q::new(0.707),

@@ -533,7 +533,7 @@ mod tests {
         outputs: u16,
     ) {
         fake.set_outputs(outputs);
-        assert!(Request::IoChanged.raise(fake.request_word()));
+        assert!(Request::IoChanged.raise(fake.request_flags()));
         let main = main_thread();
         // The pump asks for the Processor back, the old node returns it at its
         // block, and a later pump restarts the plugin and reads its layout.
@@ -694,7 +694,7 @@ mod tests {
         let (fake, rebinder, mut old, inner) = rig();
         block(&mut old, 0);
         fake.set_outputs(4);
-        assert!(Request::IoChanged.raise(fake.request_word()));
+        assert!(Request::IoChanged.raise(fake.request_flags()));
         inner.lock().pump(main_thread());
         assert_eq!(
             rebind(&rebinder).expect_err("parked"),
@@ -743,7 +743,7 @@ mod tests {
         block(&mut old, 0);
         let _new = rebind(&rebinder).expect("a node");
         fake.panic_in_latency(true);
-        assert!(Request::LatencyChanged.raise(fake.request_word()));
+        assert!(Request::LatencyChanged.raise(fake.request_flags()));
         let mut frame = BLOCK as u64;
         while rebinder.settled() != Settlement::Lost {
             block(&mut old, frame);
@@ -760,7 +760,7 @@ mod tests {
         block(&mut old, 0);
         assert!(rebinder.layout().is_some(), "alive, it reports its ports");
         fake.panic_in_latency(true);
-        assert!(Request::LatencyChanged.raise(fake.request_word()));
+        assert!(Request::LatencyChanged.raise(fake.request_flags()));
         let mut frame = BLOCK as u64;
         while rebinder.settled() != Settlement::Lost {
             block(&mut old, frame);
@@ -829,7 +829,7 @@ mod tests {
         rebinder.reporting = Some(reporting);
 
         fake.set_tail(Samples::new(77));
-        assert!(Request::TailChanged.raise(fake.request_word()));
+        assert!(Request::TailChanged.raise(fake.request_flags()));
         rebinder.tick(main_thread());
         let heard = heard.lock();
         assert!(
@@ -851,7 +851,7 @@ mod tests {
         let (fake, _rebinder, node, inner) = rig();
         let at_load = node.shape();
         fake.set_tail(Samples::new(77));
-        assert!(Request::TailChanged.raise(fake.request_word()));
+        assert!(Request::TailChanged.raise(fake.request_flags()));
         inner.lock().pump(main_thread());
         let free = node.shape();
         assert_ne!(free, at_load, "the tail moved");

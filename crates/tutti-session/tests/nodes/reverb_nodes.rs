@@ -3,7 +3,9 @@
 //! unbounded where it can freeze).
 
 use tutti_buffers::MaxBlock;
-use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay, PlateReverbConfig, PlateReverbNode};
+use tutti_nodes::{
+    FdnControls, FdnLayout, FdnNode, FreezeMode, MaxDecay, PlateReverbConfig, PlateReverbNode,
+};
 use tutti_session::{Session, ValueErrorKind};
 use tutti_units::{Mix, Samples, Seconds, Tail, UnitAddr, UnitParam};
 
@@ -20,7 +22,7 @@ fn session() -> Session {
 fn a_write_reaches_the_decay_it_names() {
     let mut s = session();
     let (node, cells) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
-        FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
         FdnControls::DEFAULT,
     ));
     let at = |i| UnitAddr::new(UnitParam::Decay, i);
@@ -52,7 +54,7 @@ fn the_graph_sees_each_reverbs_ceiling() {
         FdnControls::DEFAULT,
     ));
     let (frozen, _) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
-        FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
         FdnControls::DEFAULT,
     ));
     let _ = s.update();

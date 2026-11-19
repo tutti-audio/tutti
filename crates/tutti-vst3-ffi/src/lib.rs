@@ -19,7 +19,7 @@
 //! | `BusBuffers`, `BoundBuses`, `ProcessIo` | the per-bus `AudioBusBuffers` scratch, bound to one block's channel slices for exactly one `process` call; `SampleWidth` is the only width-specific type |
 //! | `EventList`, `ParameterChangesImpl` | `IEventList` and `IParameterChanges`, preallocated: nothing allocates on the audio thread, and staging past capacity is refused and counted |
 //! | `Event`, `Payload`, `EventKind` | the SDK's event union as an enum: plain-data payloads wrap the SDK struct, pointer-carrying ones index the list's storage. MIDI translation is `tutti-vst3-host`'s |
-//! | `ComponentHandler` | `IComponentHandler` (and 2, 3, bus activation, `IProgress`, `IUnitHandler`) onto a request word and a bounded notification queue |
+//! | `ComponentHandler` | `IComponentHandler` (and 2, 3, bus activation, `IProgress`, `IUnitHandler`) onto an atomic set of request flags and a bounded notification queue |
 //! | `Vst3Error` | `tresult` by name (`False`, `InvalidArgument`, `NotImplemented`, ...) |
 //!
 //! Not public: the `IBStream`, `IAttributeList`/`IMessage`, `IPlugFrame`,

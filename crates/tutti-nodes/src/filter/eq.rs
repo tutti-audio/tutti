@@ -3,7 +3,7 @@
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Lanes, Ring, Sos, SosError, TAIL_FLOOR};
+use tutti_dsp::{Ring, SimdLanes, Sos, SosError, TAIL_FLOOR};
 use tutti_graph::Shape;
 use tutti_units::{Db, SampleRate, Samples, Tail};
 
@@ -67,7 +67,7 @@ pub trait EqControls:
 /// Made through the node aliases ([`BellFilterNode`](crate::BellFilterNode),
 /// [`TiltFilterNode`](crate::TiltFilterNode)).
 #[derive(Clone, Debug)]
-pub struct EqKernel<C: EqControls, F: Float + Lanes> {
+pub struct EqKernel<C: EqControls, F: Float + SimdLanes> {
     input: BusTopology,
     sos: GlidedSos<F>,
     rate: SampleRate,
@@ -76,7 +76,7 @@ pub struct EqKernel<C: EqControls, F: Float + Lanes> {
     controls: core::marker::PhantomData<C>,
 }
 
-impl<C: EqControls, F: Float + Lanes> EqKernel<C, F> {
+impl<C: EqControls, F: Float + SimdLanes> EqKernel<C, F> {
     /// A kernel on the bus `input`, its output where it is; at a placeholder 48 kHz until
     /// `prepare`, which an unprepared node renders nothing before.
     pub(super) fn new(input: BusTopology) -> Self {
@@ -121,7 +121,7 @@ impl<C: EqControls, F: Float + Lanes> EqKernel<C, F> {
     }
 }
 
-impl<C: EqControls, F: Float + Lanes> Kernel for EqKernel<C, F> {
+impl<C: EqControls, F: Float + SimdLanes> Kernel for EqKernel<C, F> {
     type Float = F;
     type Set = C::Set;
 

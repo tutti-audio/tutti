@@ -171,7 +171,7 @@ pub use tutti_codec::{Format, Pcm};
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
 #[cfg(feature = "plugin")]
-pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
+pub use tutti_plugin_db::{Catalog, Hosting, PluginRef};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 #[cfg(all(feature = "session", feature = "midi-hardware"))]
@@ -236,9 +236,9 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 pub mod nodes {
     pub use tutti_dsp::{
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, Fdn, FirSummary,
-        Full, Gains, HrtfBinauralError, Inline, Lanes, Lerp, Line, LineModulation, LookaheadError,
-        Matrix, MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap,
-        ResampleError, Ring, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
+        Full, Gains, HrtfBinauralError, Inline, Lerp, Line, LineModulation, LookaheadError, Matrix,
+        MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap, ResampleError,
+        Ring, SimdLanes, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
@@ -266,7 +266,7 @@ pub mod nodes {
         DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig,
         DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
         EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnControls,
-        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, GateControls, GateNode,
+        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode,
         HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
         LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode,
         MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
@@ -625,7 +625,6 @@ pub mod soundfont {
 /// spawns; build it with `cargo build -p tutti-plugin-server`.
 #[cfg(feature = "plugin")]
 pub mod plugin {
-    pub use tutti_plugin::catalog::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin::{
         AutomationMode, BridgeConfig, MainThreadMarker, MainWork, MainWorkHandle,
         PluginRenderFault, Preset,
@@ -635,6 +634,7 @@ pub mod plugin {
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
         Mtime, PluginEntry, ProbeFailure, RowChange, ScanError, ScanProgress,
     };
+    pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
     pub use tutti_plugin_ipc::RandomSourceError;
     pub use tutti_plugin_types::PresetSupport;
@@ -660,11 +660,9 @@ pub mod plugin {
     /// The plugin catalog: scanning, the database and the descriptors it
     /// holds.
     pub mod catalog {
-        pub use tutti_plugin::catalog::{
-            AudioConfig, CatalogConfig, PluginDb, PluginDescriptor, PluginId, Scan, ScanPoll,
-            ScanResult,
-        };
-        pub use tutti_plugin_types::PluginRole;
+        pub use tutti_plugin::catalog::AudioConfig;
+        pub use tutti_plugin_db::{CatalogConfig, PluginDb, Scan, ScanPoll, ScanResult};
+        pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};
     }
 }
 

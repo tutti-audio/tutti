@@ -35,8 +35,8 @@
 //! The `Release`/`Acquire` pair orders what the setter wrote before marking
 //! (the state the flag stands for) before what the taker reads after taking.
 //! There is no store-then-load pair on either side, so no `SeqCst` fence is
-//! involved (the same shape as [`RequestWord`](crate::RequestWord), whose
-//! word is one `u32` of named requests; this set is sized at construction).
+//! involved (the same shape as [`AtomicRequestFlags`](crate::AtomicRequestFlags), whose
+//! flags are one `u32` of named requests; this set is sized at construction).
 //!
 //! # Who may call
 //!
@@ -46,7 +46,7 @@
 //! thread), but nothing breaks if it is not, so the set is shared as an
 //! `Arc<DirtySet>` rather than split into a `!Clone` writer and reader as
 //! [`ring`](crate::ring()) is: that split guards a slot whose
-//! hand-over needs exactly one writer and one reader, and a word of flags has
+//! hand-over needs exactly one writer and one reader, and a set of flags has
 //! no slot to guard.
 //!
 //! The model in `tests/dirty_set_loom.rs` runs this code.
