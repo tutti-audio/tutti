@@ -41,19 +41,21 @@ pub enum Phase {
     /// while an export is in flight, Realtime otherwise, each plugin told on
     /// a change or when it was never told.
     RenderMode,
-    /// Modulation's apply: the declarations (the
-    /// host's, `PhaseCx::mods`, or the session's own, `Session::mods_mut`)
-    /// onto the graph, staging what is new for the commit. A refusal is
-    /// `SessionEvent::Modulation`.
-    Modulation,
     /// The values written since the last update that wait for it published
     /// (the tempo map, the meter, the loop region, a clip's events, a
-    /// harmony node's changes), together and in a fixed order: the tempo,
-    /// the meter, the loop, then each node's by key. Then the output policy
-    /// staged since the last update, applied ([`Session::policy`]); then the
-    /// commit, iff the graph was edited since the last one, and the
-    /// compensation of the plan it sent (or of a re-prepare's resumed plan)
-    /// published.
+    /// harmony node's changes, a modulation route's polarity and curve, an
+    /// LFO's rate, a macro's value), together and in a fixed order: the
+    /// tempo, the meter, the loop, then the rest by what they are on. Then
+    /// modulation's apply: the declarations (the host's, `PhaseCx::mods`,
+    /// or the session's own, `Session::mods_mut`, with the published values
+    /// in them) onto the graph, staging what is new for the commit, so a
+    /// program value lands as one republish in the update that wrote it. A
+    /// refusal is `SessionEvent::Modulation`.
+    Modulation,
+    /// The output policy staged since the last update, applied
+    /// ([`Session::policy`]); then the commit, iff the graph was edited since
+    /// the last one, and the compensation of the plan it sent (or of a
+    /// re-prepare's resumed plan) published.
     Commit,
     /// Modulation's re-apply and resyncs: while a
     /// target is unresolved (its node was new before the commit), the
@@ -221,9 +223,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.jobs.report_landed(out);
             }
             Phase::Commit => {
-                // First: the plan this phase sends and the blocks after it
-                // read the values this update publishes.
-                self.values.publish_pending();
                 self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
                 self.graph.report_commit(out);
@@ -232,9 +231,14 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     self.graph.publish_sent();
                 }
             }
-            Phase::Modulation => self
-                .mods
-                .modulation_phase(&mut self.graph, cx.mods, cx.now, out),
+            Phase::Modulation => {
+                // First: the apply reads the program values this update
+                // publishes, and the plan the commit sends and the blocks
+                // after it read the rest.
+                self.values.publish_pending();
+                self.mods
+                    .modulation_phase(&mut self.graph, cx.mods, cx.now, out);
+            }
             Phase::AfterCommit => {
                 // The re-apply's commit, as the update's own: published
                 // on `Sent`.
