@@ -487,7 +487,7 @@ fn lay(
             0.0
         };
         match position {
-            ClockPosition::Beat(beat) => Beat::new(beat.get() + lag * tempo.get() / 60.0),
+            ClockPosition::Beat(beat) => beat + tempo.beats_in(Seconds::new(lag)),
             ClockPosition::Time(time) => map.beat_at_seconds(Seconds::new(time.get() + lag)),
         }
     };
