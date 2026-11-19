@@ -15,7 +15,8 @@
 //! | `underruns` | the voice (audio thread) | the stream's handle, which drains it |
 //!
 //! What is not here: the direction and the applied loop are the ring's
-//! published `RingControl` (the streamer is their one writer, on a command), and
+//! published `RingControl` (the streamer is their one writer, when it takes
+//! the loop or direction the stream's control side publishes), and
 //! the ring's occupancy is `refill_one`'s return, not a shared cell.
 //!
 //! Where a stream stands and how to read it is the ring's, not this cell's

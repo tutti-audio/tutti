@@ -329,6 +329,14 @@ pub enum PlayError {
     Placed,
 }
 
+/// Publishes `value` to `cell` when it differs from the one in it: the
+/// request a stream's streamer reads.
+pub(super) fn ask<T: Copy + PartialEq>(cell: &Publisher<T>, value: T) {
+    if *cell.current() != value {
+        cell.publish(value);
+    }
+}
+
 /// A command never reached the pool, and the work it carried is gone.
 ///
 /// Modelled on `tutti_transport::TimedError`: the two failures are told apart
@@ -434,6 +442,11 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
     /// The voice's window: `Some` places it on the transport, `None` leaves it
     /// free-running. The cell the node reads once per block.
     pub(crate) window: Publisher<Option<VoiceWindow>>,
+    /// The voice's loop. A streamed voice's is its [`Stream`]'s cell, which the
+    /// streamer reads too; a memory voice's is read by the node alone.
+    pub(crate) looping: Publisher<Option<Loop>>,
+    /// The voice's direction, held as the loop is.
+    pub(crate) direction: Publisher<Direction>,
     /// The latest steering, which the setters edit under the lock and
     /// publish: two handles racing never lose each other's field.
     latest: Arc<Mutex<Steering>>,
@@ -461,8 +474,6 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
 /// last, and nothing else rides with it to be ordered against.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Steering {
-    /// The memory tier's loop; a disk voice's is its stream's.
-    pub(crate) loop_: Option<Option<Loop>>,
     pub(crate) speed: Option<PlaybackRate>,
     /// Whether the handle has stopped the voice.
     pub(crate) stopped: bool,
@@ -477,6 +488,8 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
     pub(crate) fn new(
         steering: SteeringCell,
         window: Publisher<Option<VoiceWindow>>,
+        looping: Publisher<Option<Loop>>,
+        direction: Publisher<Direction>,
         gain: Param<Amplitude>,
         params: ParamSet,
         stream: Option<Stream<F>>,
@@ -485,6 +498,8 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
             latest: Arc::new(Mutex::new(*steering.current())),
             steering,
             window,
+            looping,
+            direction,
             gain,
             params,
             stream: stream.map(|s| Arc::new(Mutex::new(s))),
@@ -522,39 +537,21 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
         self.stream.is_some() || self.window.current().is_some()
     }
 
-    /// Sets the voice's loop, or clears it with `None`, from the node's next
-    /// block on.
+    /// The cell holding the voice's loop: `None` plays once.
     ///
-    /// A disk voice's loop is its [`Stream`]'s, which this handle owns, so it
-    /// is set there, and waits while the streamer's queue is full (a stream's
-    /// commands do: control thread, never from a graph node).
-    ///
-    /// # Errors
-    ///
-    /// [`StreamerGone`](crate::StreamerGone): the streamer thread behind a
-    /// disk voice has exited, and the loop is as it was. Permanent. A memory
-    /// voice never fails.
-    #[must_use = "a discarded loop is a loop that never plays"]
-    pub fn set_loop(&self, setting: Option<Loop>) -> Result<(), crate::StreamerGone> {
-        match &self.stream {
-            Some(stream) => stream.lock_recover().set_loop(setting),
-            None => {
-                self.steer(|s| s.loop_ = Some(setting));
-                Ok(())
-            }
-        }
+    /// The node lends it once per block and applies a change to a resident
+    /// source. A streamed voice's is its [`Stream`]'s cell
+    /// ([`Stream::looping_cell`]), which the streamer reads and applies to the
+    /// ring's layout, which the node reads. The session writes it
+    /// (`sampler.looping()`); a host driving a node by hand publishes into it.
+    pub fn looping_cell(&self) -> &Publisher<Option<Loop>> {
+        &self.looping
     }
 
-    /// The loop as last set through this handle: a disk voice's is the
-    /// stream's request (what the streamer applied is the stream's
-    /// [`status`](Stream::status)); a memory voice's is the published one, or
-    /// `None` until one is set (the node plays the loop it was built with
-    /// until then).
-    pub fn loop_(&self) -> Option<Loop> {
-        match &self.stream {
-            Some(stream) => stream.lock_recover().loop_(),
-            None => self.latest.lock_recover().loop_.flatten(),
-        }
+    /// The cell holding the voice's direction, held as the
+    /// [loop](Self::looping_cell) is.
+    pub fn direction_cell(&self) -> &Publisher<Direction> {
+        &self.direction
     }
 
     /// What the streamer reports of a disk voice's stream (whether it is
@@ -830,23 +827,11 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
 
     /// Sets the voice's loop, or clears it with `None`; on either tier.
     ///
-    /// A streaming voice's loop is set on its [`Stream`], which this handle
-    /// holds ([`add_streaming`](Self::add_streaming)): the queue is tried
-    /// first, so a full queue refuses the call before the stream hears of it
-    /// and `Err` leaves both as they were. A stream that cannot take it (its
-    /// streamer has exited: permanent) is counted
-    /// ([`PoolDrops::loops_streamer_gone`]) and the voice's record is put back
-    /// to what the stream has; the call returns `Ok`.
-    ///
-    /// # Blocking
-    ///
-    /// Setting a streaming voice's loop waits while the streamer's queue is
-    /// full, as a [`Stream`]'s commands do: as long as a stalled streamer
-    /// stalls, and for good on a streamer nobody drains (a controller never
-    /// started, or a `DiskStreamer::by_hand` stepped on this thread). While it
-    /// waits, another thread's command for *that voice* through a clone of
-    /// this handle waits with it, so its stream and the pool see them in one
-    /// order. Every other command never waits on another thread's stream.
+    /// A streaming voice's loop is published to its [`Stream`]'s loop cell,
+    /// which this handle holds ([`add_streaming`](Self::add_streaming)) and
+    /// the streamer reads: the queue is tried first, so a full queue refuses
+    /// the call before the stream hears of it and `Err` leaves both as they
+    /// were.
     ///
     /// # Errors
     ///
@@ -857,8 +842,8 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     }
 
     /// Plays the voice forwards or backwards. A streaming voice's direction
-    /// is its stream's, set as [`set_loop`](Self::set_loop) sets a loop
-    /// (counted: [`PoolDrops::directions_dropped`]).
+    /// is its stream's, published as [`set_loop`](Self::set_loop) publishes a
+    /// loop.
     ///
     /// # Errors
     ///
@@ -936,16 +921,11 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// an add at the same id). `voice` is the one built from the stream's own
     /// reader.
     ///
-    /// `play`'s loop and direction are set on the stream first, if they differ
-    /// from what it has, and the add is queued only after: a loop the stream
-    /// could not take is dropped from the add and counted
-    /// ([`PoolDrops::loops_streamer_gone`]), as a direction is
-    /// ([`PoolDrops::directions_dropped`]), so the voice's `Playback` never
-    /// claims one its stream was not told. A stretch filter the voice needs is
-    /// built here.
+    /// `play`'s loop and direction are published to the stream first, if they
+    /// differ from what it has, and the add is queued only after. A stretch
+    /// filter the voice needs is built here.
     ///
-    /// Control thread. Setting the loop waits while the streamer's queue is
-    /// full ([`set_loop`](Self::set_loop), "Blocking").
+    /// Control thread.
     ///
     /// # Errors
     ///
@@ -977,8 +957,8 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     fn add_stream_voice(
         &self,
         id: SlotId,
-        mut voice: Box<Voice<F>>,
-        mut stream: Stream<F>,
+        voice: Box<Voice<F>>,
+        stream: Stream<F>,
         stretch: Option<stretch::Unit<F>>,
     ) -> Result<(), Box<StreamingAddError<F>>> {
         if self.writer().is_full() {
@@ -987,18 +967,8 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         }
         // What the stream had, to put back if the add cannot be queued.
         let (was_loop, was_direction) = (stream.loop_(), stream.direction());
-        if voice.play.loop_ != was_loop && stream.set_loop(voice.play.loop_).is_err() {
-            DrainCounters::bump(&self.counters.loops_streamer_gone);
-            voice.play.loop_ = was_loop;
-        }
-        if voice.play.direction != was_direction
-            && stream.set_direction(voice.play.direction).is_err()
-        {
-            DrainCounters::bump(&self.counters.directions_dropped);
-            voice.play.direction = was_direction;
-        }
-        // The slot holds what the stream was given (or kept): a loop it could
-        // not take is not claimed.
+        ask(stream.looping_cell(), voice.play.loop_);
+        ask(stream.direction_cell(), voice.play.direction);
         let queued = {
             let mut streams = self.streams();
             let cmd = VoiceCommand::AddVoice { id, voice, stretch };
@@ -1015,46 +985,27 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 Ok(())
             }
             // Another thread filled the queue meanwhile: the stream goes back
-            // as it came (best effort: a streamer that is gone has nothing
-            // left to undo).
-            Err((error, mut stream)) => {
-                if stream.loop_() != was_loop {
-                    let _ = stream.set_loop(was_loop);
-                }
-                if stream.direction() != was_direction {
-                    let _ = stream.set_direction(was_direction);
-                }
+            // as it came.
+            Err((error, stream)) => {
+                ask(stream.looping_cell(), was_loop);
+                ask(stream.direction_cell(), was_direction);
                 Err(Box::new(StreamingAddError { error, stream }))
             }
         }
     }
 
-    /// Queues the loop command setting `setting` on slot `id`, and sets it on
-    /// the slot's stream when the handle holds one. The queue first: a full one
-    /// refuses the command with nothing changed; a stream that cannot take it
-    /// (its streamer is gone) is counted and the voice's record is put back.
+    /// Queues the loop command setting `setting` on slot `id`, and publishes
+    /// it to the slot's stream when the handle holds one. The queue first: a
+    /// full one refuses the command with nothing changed.
     fn send_loop(&self, id: SlotId, setting: Option<Loop>) -> Result<(), SendError> {
         let cmd = VoiceCommand::UpdateLoop { id, setting };
         let Some(entry) = self.stream_of(id) else {
             // An in-memory (or unknown) slot: nothing to set it on.
             return self.queue(cmd, None);
         };
-        let mut stream = entry.lock_recover();
-        let previous = stream.loop_();
+        let stream = entry.lock_recover();
         self.queue(cmd, Some(stream.id()))?;
-        if stream.set_loop(setting).is_err() {
-            DrainCounters::bump(&self.counters.loops_streamer_gone);
-            // The one undo: the voice's record goes back to the loop the stream
-            // has. A full queue leaves it; a streamer that is gone plays
-            // nothing either way.
-            let _ = self.queue(
-                VoiceCommand::UpdateLoop {
-                    id,
-                    setting: previous,
-                },
-                Some(stream.id()),
-            );
-        }
+        ask(stream.looping_cell(), setting);
         Ok(())
     }
 
@@ -1066,19 +1017,9 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             // without a stream here is counted by the drain.
             return self.queue(cmd, None);
         };
-        let mut stream = entry.lock_recover();
-        let previous = stream.direction();
+        let stream = entry.lock_recover();
         self.queue(cmd, Some(stream.id()))?;
-        if stream.set_direction(direction).is_err() {
-            DrainCounters::bump(&self.counters.directions_dropped);
-            let _ = self.queue(
-                VoiceCommand::UpdateReverse {
-                    id,
-                    direction: previous,
-                },
-                Some(stream.id()),
-            );
-        }
+        ask(stream.direction_cell(), direction);
         Ok(())
     }
 
@@ -1158,18 +1099,22 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
 /// (the placement windows a replacement left behind); control thread, from the owner's tick.
 impl<F: SamplerFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
     fn reclaim(&self) -> usize {
-        self.steering.reclaim() + self.window.reclaim()
+        self.steering.reclaim()
+            + self.window.reclaim()
+            + self.looping.reclaim()
+            + self.direction.reclaim()
     }
 }
 
 /// Frees the slots the pool's audio side retired
 /// ([`collect_retired`](VoicePoolHandle::collect_retired)), so the pool's
-/// owner's tick keeps the retire ring from filling; control thread only. Nothing a
-/// reader pins is left over: it returns 0.
+/// owner's tick keeps the retire ring from filling, and the loops and
+/// directions its streams' control side replaced; control thread only.
 impl<F: SamplerFloat> tutti_rt::Reclaim for VoicePoolHandle<F> {
     fn reclaim(&self) -> usize {
         self.collect_retired();
-        0
+        let streams: Vec<_> = self.streams().values().cloned().collect();
+        streams.iter().map(|s| s.lock_recover().reclaim()).sum()
     }
 }
 

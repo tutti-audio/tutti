@@ -17,12 +17,13 @@ use crate::stretch;
 use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
-use super::command::{Steering, SteeringCell, VoiceNodeHandle};
+use super::command::{Steering, SteeringCell, VoiceNodeHandle, ask};
 use super::disk_voice::DiskVoice;
 use super::disk_voice::VoiceHealth;
+use super::loop_span::Loop;
 use super::memory_source::VoiceWindow;
 use super::slot::{PlaybackSlot, stretch_wanted};
-use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
+use super::types::{Direction, Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
@@ -85,6 +86,14 @@ pub struct VoiceNode<F: SamplerFloat> {
     window: Reader<Option<VoiceWindow>>,
     /// The window last applied.
     applied_window: Option<VoiceWindow>,
+    /// A reader of the loop the handle publishes, lent once per block.
+    looping: Reader<Option<Loop>>,
+    /// The loop last applied.
+    applied_loop: Option<Loop>,
+    /// A reader of the direction the handle publishes, lent once per block.
+    direction: Reader<Direction>,
+    /// The direction last applied.
+    applied_direction: Direction,
     /// The disk stream of a streaming node, until [`with_handle`](Self::with_handle)
     /// hands it to the handle: a stream is control-thread only (its drop
     /// sends on a bounded queue), so the node never keeps one it plays with.
@@ -136,6 +145,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
         });
         let gain = Param::new(voice.play.gain);
         let window = voice.source.window();
+        let play = voice.play;
         let mut slot =
             PlaybackSlot::with_channels(SlotId(0), Box::new(voice), sample_rate, channels);
         slot.stretch = stretch;
@@ -146,6 +156,10 @@ impl<F: SamplerFloat> VoiceNode<F> {
             applied: Steering::default(),
             window: Publisher::new(window).reader(),
             applied_window: window,
+            looping: Publisher::new(play.loop_).reader(),
+            applied_loop: play.loop_,
+            direction: Publisher::new(play.direction).reader(),
+            applied_direction: play.direction,
             stream: None,
             gain,
             clock: Clock::new(),
@@ -158,22 +172,17 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// A node over a streaming voice, and the [`Stream`] that feeds it: the
     /// handle ([`with_handle`](Self::with_handle), or the graph's insert)
     /// takes the stream, so the voice sounds for as long as the handle lives,
-    /// and its loop is set through the handle. `play`'s loop and direction are
-    /// set on the stream first, as [`VoicePoolHandle::add_streaming`](super::VoicePoolHandle::add_streaming)
-    /// sets them; one the stream could not take (its streamer has exited) is
-    /// not claimed by the voice's `Playback`. `voice` is the one built from the
-    /// stream's own reader.
+    /// and its loop and direction are the stream's cells, through the handle.
+    /// `play`'s loop and direction are published to the stream first, as
+    /// [`VoicePoolHandle::add_streaming`](super::VoicePoolHandle::add_streaming)
+    /// publishes them. `voice` is the one built from the stream's own reader.
     ///
     /// A node never handed to a handle keeps the stream until it is dropped:
     /// built by hand, drop it on the control thread.
     #[must_use]
-    pub fn streaming(mut voice: DiskVoice<F>, mut stream: Stream<F>, mut play: Playback) -> Self {
-        if play.loop_ != stream.loop_() && stream.set_loop(play.loop_).is_err() {
-            play.loop_ = stream.loop_();
-        }
-        if play.direction != stream.direction() && stream.set_direction(play.direction).is_err() {
-            play.direction = stream.direction();
-        }
+    pub fn streaming(mut voice: DiskVoice<F>, stream: Stream<F>, play: Playback) -> Self {
+        ask(stream.looping_cell(), play.loop_);
+        ask(stream.direction_cell(), play.direction);
         voice.set_gain(play.gain);
         voice.set_speed(play.speed);
         let width = ChannelLayout::from_count(voice.width() as u16);
@@ -213,10 +222,26 @@ impl<F: SamplerFloat> VoiceNode<F> {
         let window = Publisher::new(self.slot.voice.source.window());
         self.window = window.reader();
         self.applied_window = self.slot.voice.source.window();
+        // A streamed voice's loop and direction are its stream's cells, which
+        // the streamer reads; a memory voice's are the node's alone.
+        let play = self.slot.voice.play;
+        let (looping, direction) = match &self.stream {
+            Some(stream) => (
+                stream.looping_cell().clone(),
+                stream.direction_cell().clone(),
+            ),
+            None => (Publisher::new(play.loop_), Publisher::new(play.direction)),
+        };
+        self.looping = looping.reader();
+        self.applied_loop = *looping.current();
+        self.direction = direction.reader();
+        self.applied_direction = *direction.current();
         let params = self.param_set();
         let handle = VoiceNodeHandle::new(
             steering,
             window,
+            looping,
+            direction,
             self.gain.handle(),
             params,
             self.stream.take(),
@@ -254,6 +279,16 @@ impl<F: SamplerFloat> VoiceNode<F> {
         if window != self.applied_window {
             self.slot.voice.source.apply_window(window);
             self.applied_window = window;
+        }
+        let looping = *self.looping.lend();
+        if looping != self.applied_loop {
+            apply_loop(&mut self.slot.voice, looping);
+            self.applied_loop = looping;
+        }
+        let direction = *self.direction.lend();
+        if direction != self.applied_direction {
+            self.slot.voice.play.direction = direction;
+            self.applied_direction = direction;
         }
         // Both halves of the gain: `Playback` is what the memory tier's read
         // scales by, the source's own cell what the disk tier's does.
@@ -450,18 +485,20 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
     }
 }
 
+/// Applies a loop: a memory voice takes it, and a disk voice's is its stream's,
+/// which the streamer applies to the ring (the voice's record follows it).
+fn apply_loop<F: SamplerFloat>(voice: &mut Voice<F>, setting: Option<Loop>) {
+    if let VoiceSource::Memory(source) = &mut voice.source {
+        source.set_loop(setting);
+    }
+    voice.play.loop_ = setting;
+}
+
 /// Applies what `now` publishes over what `was` already had applied, a field
 /// at a time and only the ones that changed (a loop set again would restart
 /// the free-running cursor's lap). A disk voice's loop is its stream's, so
 /// only a memory voice takes one here.
 fn apply_steering<F: SamplerFloat>(voice: &mut Voice<F>, was: &Steering, now: &Steering) {
-    if now.loop_ != was.loop_
-        && let Some(setting) = now.loop_
-        && let VoiceSource::Memory(source) = &mut voice.source
-    {
-        source.set_loop(setting);
-        voice.play.loop_ = setting;
-    }
     if now.plays != was.plays
         && let VoiceSource::Memory(source) = &voice.source
     {
@@ -486,8 +523,10 @@ struct VoiceNodeFork<F: SamplerFloat> {
     /// The live node's steering cell, read with `current` when a fork is
     /// taken (an owning read on the control side, never a lend).
     steering: SteeringCell,
-    /// The live node's window cell, read the same way.
+    /// The live node's window, loop and direction cells, read the same way.
     window: Publisher<Option<VoiceWindow>>,
+    looping: Publisher<Option<Loop>>,
+    direction: Publisher<Direction>,
     /// The node's params: a fork starts from the gain cell, which holds the
     /// gain last set (a modulation lane sends its composite to the
     /// port and never writes the cell).
@@ -504,6 +543,8 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
         // (two copies kept in sync by hand is how a fork reaches the wrong
         // one), so there is exactly one write.
         voice.source.apply_window(*self.window.current());
+        apply_loop(&mut voice, *self.looping.current());
+        voice.play.direction = *self.direction.current();
         let gain = self
             .params
             .get(UnitParam::Volume)
@@ -532,6 +573,8 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             channels: node.channels,
             steering: handle.steering.clone(),
             window: handle.window.clone(),
+            looping: handle.looping.clone(),
+            direction: handle.direction.clone(),
             params: handle.params.clone(),
             tempo: node.tempo.clone(),
         };

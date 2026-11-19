@@ -10,8 +10,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_rt::RingFloat;
 
 use super::open::Opened;
-use crate::voice::Direction;
-use crate::{Loop, OpenError};
+use crate::OpenError;
 
 tutti_rt::id! {
     /// One open stream's identity: minted on the control side when the open is
@@ -65,26 +64,6 @@ pub(crate) enum StreamerCommand<F: RingFloat> {
     /// step that handles this. Sent by `Drop for Stream`. A stream the
     /// streamer no longer holds ignores it.
     Close { stream: StreamId },
-
-    /// Enable looping on a stream. The streamer captures the loop (range and
-    /// crossfade, plus the fade's lead-in, read once) into the stream's ring
-    /// mapping and records the loop as applied (`handle_loop`). A stream the
-    /// streamer no longer holds ignores it.
-    SetStreamLoop { stream: StreamId, looped: Loop },
-    /// Clear looping on a stream, so it plays through to the end without
-    /// wrapping, repositioned as a loop change is. A stream the streamer no
-    /// longer holds ignores it.
-    ClearStreamLoop { stream: StreamId },
-
-    /// Turn a stream to `direction`. Reverse is a mapping (the file mirrored,
-    /// the loop ignored), so the change is the streamer's: a switch the reader
-    /// crossfades across just past the block it is in. The direction is
-    /// published in the stream's `RingControl`, where the voice and a fork read
-    /// it. A stream the streamer no longer holds ignores it.
-    SetDirection {
-        stream: StreamId,
-        direction: Direction,
-    },
 
     /// The session rate moved (`DiskStreamer::set_sample_rate` stored it before
     /// sending this): re-derive every open stream's conversion ratio against

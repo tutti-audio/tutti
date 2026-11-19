@@ -18,7 +18,7 @@
 //! record of an open, capturing a loop) is the driver's, before and after.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::cache::StreamPin;
 use super::cells::Cells;
@@ -29,7 +29,7 @@ use super::prefetch::RegionOut;
 use super::status::{Served, StatusCell, StreamFault};
 use crate::Loop;
 use crate::voice::Direction;
-use tutti_rt::RingFloat;
+use tutti_rt::{LockExt, Reader, RingFloat};
 use tutti_units::{SampleRate, Samples, SrcRatio};
 
 /// Where a stream is in its life. A closed stream has no record, so there is
@@ -74,6 +74,17 @@ pub(super) struct Record<F: RingFloat> {
     /// Its work panicked: faulted, and removed at the end of the cycle
     /// ([`Streams::reap`]).
     dead: bool,
+    /// The loop the control side asks for, lent on each cycle. Behind a lock
+    /// only so the streamer stays `Sync` (a reader is `Send`, not `Sync`):
+    /// the streamer's thread is its one user, so it is never contended.
+    looping: Mutex<Reader<Option<Loop>>>,
+    /// The loop the stream was last asked for, so a cycle applies a request
+    /// once, when it changes.
+    asked_loop: Option<Loop>,
+    /// The direction the control side asks for, held as the loop is.
+    direction: Mutex<Reader<Direction>>,
+    /// The direction the stream was last asked for.
+    asked_direction: Direction,
 }
 
 impl<F: RingFloat> Record<F> {
@@ -84,6 +95,8 @@ impl<F: RingFloat> Record<F> {
         file_frames: Samples,
         pin: StreamPin,
         status: Arc<StatusCell>,
+        looping: Reader<Option<Loop>>,
+        direction: Reader<Direction>,
     ) -> Self {
         Self {
             phase: Phase::Opening,
@@ -95,7 +108,31 @@ impl<F: RingFloat> Record<F> {
             status,
             fill: 0.0,
             dead: false,
+            looping: Mutex::new(looping),
+            asked_loop: None,
+            direction: Mutex::new(direction),
+            asked_direction: Direction::Forward,
         }
+    }
+
+    /// The loop the control side now asks for, when it differs from the one
+    /// last asked. A stream starts asked for no loop.
+    pub(super) fn loop_asked(&mut self) -> Option<Option<Loop>> {
+        let ask = *self.looping.lock_recover().lend();
+        (ask != self.asked_loop).then(|| {
+            self.asked_loop = ask;
+            ask
+        })
+    }
+
+    /// The direction the control side now asks for, when it differs from the
+    /// one last asked. A stream starts asked for forwards.
+    pub(super) fn direction_asked(&mut self) -> Option<Direction> {
+        let ask = *self.direction.lock_recover().lend();
+        (ask != self.asked_direction).then(|| {
+            self.asked_direction = ask;
+            ask
+        })
     }
 
     /// Runs `work` on this stream under `catch_unwind`. A panic is this stream's
@@ -189,10 +226,6 @@ pub(super) enum Cmd<F: RingFloat> {
     Opened(StreamId),
     /// End the stream.
     Close(StreamId),
-    /// Set (`Some`) or clear (`None`) the stream's loop.
-    Loop(StreamId, Option<Loop>),
-    /// Turn the stream to a direction.
-    Direction(StreamId, Direction),
 }
 
 /// What the driver does after a step. Nothing here is the table's own change:
@@ -203,12 +236,6 @@ pub(super) enum Effect {
     Live(StreamId),
     /// The stream's record is gone, and its region with it.
     Freed(StreamId),
-    /// Capture this loop into the stream's ring and record it as applied
-    /// (`handle_loop`): it reads the file.
-    Loop(StreamId, Option<Loop>),
-    /// Turn the stream's ring to this direction (`handle_direction`): a
-    /// mapping change, which reads the file for the fade's record.
-    Direction(StreamId, Direction),
 }
 
 /// Every open stream, one [`Record`] each, found by id.
@@ -244,6 +271,7 @@ impl<F: RingFloat> Streams<F> {
         self.records.iter().position(|r| r.id() == id)
     }
 
+    #[cfg(test)]
     pub(super) fn get(&self, id: StreamId) -> Option<&Record<F>> {
         self.records.iter().find(|r| r.id() == id)
     }
@@ -302,16 +330,6 @@ pub(super) fn step<F: RingFloat>(streams: &mut Streams<F>, cmd: Cmd<F>) -> &[Eff
                 // Dropping the record is the free.
                 streams.records.swap_remove(at);
                 streams.effects.push(Effect::Freed(id));
-            }
-        }
-        Cmd::Loop(id, ask) => {
-            if streams.get(id).is_some_and(Record::is_live) {
-                streams.effects.push(Effect::Loop(id, ask));
-            }
-        }
-        Cmd::Direction(id, direction) => {
-            if streams.get(id).is_some_and(Record::is_live) {
-                streams.effects.push(Effect::Direction(id, direction));
             }
         }
     }

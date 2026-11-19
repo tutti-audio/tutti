@@ -5,7 +5,9 @@
 //! shared with the test driver. What lives here is the sleeping: when a cycle
 //! finds nothing urgent the thread parks on the [`Bell`]
 //! until a source rings it (a command, a voice's ring wanting a refill,
-//! shutdown) or the backstop passes. Nothing polls.
+//! shutdown) or the backstop passes. Nothing polls; a loop or direction the
+//! control side publishes is taken by the next cycle, whichever of these
+//! starts it.
 
 use std::thread;
 use std::time::Duration;

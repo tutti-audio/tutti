@@ -417,12 +417,12 @@ mod tests {
         let mut sampler =
             DiskStreamer::<_, f32>::by_hand(SampleRate::SR_48K, Default::default()).unwrap();
         let opening = sampler.open(&path, Placement::HEAD);
-        let (mut stream, reader) =
+        let (stream, reader) =
             crate::testing::settle(&mut sampler, opening).expect("the file opens");
         for fade in [0usize, 500] {
             stream
-                .set_loop(Some(loop_frames(10_000, 20_000, fade)))
-                .expect("the streamer is alive");
+                .looping_cell()
+                .publish(Some(loop_frames(10_000, 20_000, fade)));
             let _ = sampler.step_until_settled(1_000);
         }
         let window = reader.ring.window();

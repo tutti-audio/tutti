@@ -28,8 +28,9 @@ use super::loops::RingControl;
 use super::prefetch::SharedReader;
 use super::status::StatusCell;
 use super::stream::{Stream, StreamerPort};
-use crate::PlaceError;
+use crate::voice::Direction;
 use crate::voice::interp::Place;
+use crate::{Loop, PlaceError};
 use tutti_rt::RingFloat;
 
 /// Where in the file a stream's reader starts, in file frames.
@@ -128,6 +129,10 @@ pub(crate) struct Opened<F: RingFloat> {
     pub(crate) file: Arc<StreamFile<F>>,
     /// The ring's control cell, which the handle reads the applied loop from.
     pub(crate) control: Publisher<RingControl<F>>,
+    /// The loop and direction the control side asks for, which the streamer
+    /// reads: the handle holds the publishing ends.
+    pub(crate) looping: Publisher<Option<Loop>>,
+    pub(crate) direction: Publisher<Direction>,
     pub(crate) place: Place<F>,
     pub(crate) width: ChannelLayout,
     /// What the reader rings when its ring wants the streamer.
@@ -239,6 +244,8 @@ impl<F: RingFloat> Opening<F> {
                 Arc::clone(&opened.cells),
                 Arc::clone(&opened.file),
                 opened.control.clone(),
+                opened.looping.clone(),
+                opened.direction.clone(),
             ),
             StreamReader::new(opened),
         )

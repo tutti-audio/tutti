@@ -398,6 +398,28 @@ impl<F: tutti_polysynth::SynthFloat> SessionNode<F> for tutti_polysynth::PolySyn
     }
 }
 
+/// The values of a voice node that the session's verbs reach: its window,
+/// loop and direction, each a published cell of its handle.
+#[cfg(feature = "sampler")]
+fn voice_slots<F: tutti_sampler::SamplerFloat>(
+    node: NodeKey,
+    controls: &tutti_sampler::VoiceNodeHandle<F>,
+) -> NodeSlots {
+    use crate::value::{PublishedSlot, SlotId};
+    NodeSlots::of(
+        SlotId::Window(node),
+        PublishedSlot::new(controls.window_cell().clone()),
+    )
+    .and(
+        SlotId::Looping(node),
+        PublishedSlot::new(controls.looping_cell().clone()),
+    )
+    .and(
+        SlotId::Direction(node),
+        PublishedSlot::new(controls.direction_cell().clone()),
+    )
+}
+
 /// A voice as a graph node: its params (the gain) addressed by its set, so a
 /// param write reaches the cell the node reads and a fork starts from the
 /// gain as set; the placements it replaced freed by its reclaimer.
@@ -412,10 +434,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode
     }
 
     fn slots(node: NodeKey, controls: &tutti_sampler::VoiceNodeHandle<F>) -> NodeSlots {
-        NodeSlots::of(
-            crate::value::SlotId::Window(node),
-            crate::value::PublishedSlot::new(controls.window_cell().clone()),
-        )
+        voice_slots(node, controls)
     }
 
     fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Reclaims {
@@ -467,10 +486,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
     }
 
     fn slots(node: NodeKey, controls: &tutti_sampler::VoiceNodeHandle<F>) -> NodeSlots {
-        NodeSlots::of(
-            crate::value::SlotId::Window(node),
-            crate::value::PublishedSlot::new(controls.window_cell().clone()),
-        )
+        voice_slots(node, controls)
     }
 
     fn reclaimer(controls: &tutti_sampler::VoiceNodeHandle<F>) -> Reclaims {

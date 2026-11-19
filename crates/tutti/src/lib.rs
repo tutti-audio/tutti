@@ -178,8 +178,6 @@ pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
-#[cfg(all(feature = "session", feature = "sampler"))]
-pub use tutti_session::WindowTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
@@ -211,6 +209,8 @@ pub use tutti_session::{
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
+#[cfg(all(feature = "session", feature = "sampler"))]
+pub use tutti_session::{DirectionTarget, LoopingTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,

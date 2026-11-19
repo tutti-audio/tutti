@@ -11,6 +11,7 @@ use super::*;
 use crate::streamer::cache::LruCache;
 use crate::streamer::prefetch::RegionBuffer;
 use crate::streamer::prefetch::{Ring, SharedReader};
+use tutti_rt::Publisher;
 
 /// A record on a fresh ring of `capacity` frames of `channels`, with the ring
 /// and the reader's half: what a stream's open builds, minus the file.
@@ -36,10 +37,31 @@ fn record_with_status(
     tutti_rt::PosReader,
     Arc<StatusCell>,
 ) {
+    let (record, ring, pos, status, _, _) = record_with_cells(id, path, capacity, channels);
+    (record, ring, pos, status)
+}
+
+/// [`record_with_status`], and the cells the control side asks its loop and
+/// direction through.
+fn record_with_cells(
+    id: StreamId,
+    path: PathBuf,
+    capacity: usize,
+    channels: impl Into<ChannelLayout>,
+) -> (
+    Record<f32>,
+    SharedReader<f32>,
+    tutti_rt::PosReader,
+    Arc<StatusCell>,
+    Publisher<Option<Loop>>,
+    Publisher<Direction>,
+) {
     let (out, ring, pos) = RegionBuffer::with_capacity(id, path.clone(), capacity, channels);
     let cache = Arc::new(LruCache::<f32>::new(4, 1 << 20));
     let pin = cache.pin(&path);
     let status = Arc::new(StatusCell::new());
+    let looping = Publisher::new(None);
+    let direction = Publisher::new(Direction::Forward);
     let record = Record::new(
         out,
         Arc::new(Cells::new()),
@@ -47,8 +69,10 @@ fn record_with_status(
         Samples::new(1_000),
         pin,
         Arc::clone(&status),
+        looping.reader(),
+        direction.reader(),
     );
-    (record, ring, pos, status)
+    (record, ring, pos, status, looping, direction)
 }
 
 fn open(streams: &mut Streams<f32>, id: u64) -> (Weak<Ring<f32>>, Arc<StatusCell>) {
@@ -69,8 +93,8 @@ fn ask(start: u64, end: u64) -> Option<Loop> {
     Some(crate::testing::loop_frames(start as usize, end as usize, 0))
 }
 
-/// An open is a record in `Opening`, which a refill leaves alone and a loop
-/// does not reach; its reader's delivery makes it `Live`, once.
+/// An open is a record in `Opening`, which a refill leaves alone; its
+/// reader's delivery makes it `Live`, once.
 #[test]
 fn an_open_is_opening_until_its_reader_is_delivered() {
     let mut streams = Streams::new();
@@ -79,20 +103,12 @@ fn an_open_is_opening_until_its_reader_is_delivered() {
     assert_eq!(streams.len(), 1);
     assert_eq!(streams.get(id).unwrap().phase(), Phase::Opening);
     assert!(!streams.get(id).unwrap().is_live());
-    assert!(
-        step(&mut streams, Cmd::Loop(id, ask(0, 10))).is_empty(),
-        "a stream whose reader was not delivered takes no loop"
-    );
 
     assert_eq!(step(&mut streams, Cmd::Opened(id)), &[Effect::Live(id)]);
     assert_eq!(streams.get(id).unwrap().phase(), Phase::Live);
     assert!(
         step(&mut streams, Cmd::Opened(id)).is_empty(),
         "delivered once"
-    );
-    assert_eq!(
-        step(&mut streams, Cmd::Loop(id, ask(0, 10))),
-        &[Effect::Loop(id, ask(0, 10))]
     );
 }
 
@@ -135,46 +151,24 @@ fn a_command_for_an_unknown_stream_reaches_no_other() {
     let (ring_b, _) = live(&mut streams, 2);
 
     assert!(
-        step(&mut streams, Cmd::Loop(StreamId::of(1), ask(0, 10))).is_empty(),
-        "a loop for the closed stream is dropped"
-    );
-    assert!(
-        step(&mut streams, Cmd::Loop(StreamId::of(1), None)).is_empty(),
-        "and so is a clear"
-    );
-    assert!(
         step(&mut streams, Cmd::Close(StreamId::of(1))).is_empty(),
         "closing twice frees nothing more"
     );
     assert!(step(&mut streams, Cmd::Opened(StreamId::of(1))).is_empty());
     assert_eq!(streams.len(), 1);
     assert!(ring_b.upgrade().is_some(), "the new stream is untouched");
-    assert_eq!(
-        step(&mut streams, Cmd::Loop(StreamId::of(2), ask(5, 9))),
-        &[Effect::Loop(StreamId::of(2), ask(5, 9))],
-        "its own id reaches it"
-    );
 }
 
-/// Streams are independent: a loop for one asks for that one only, and
-/// closing one leaves the other held, found by its own id after the
-/// `swap_remove` has moved it.
+/// Streams are independent: closing one leaves the others held, found by
+/// their own ids after the `swap_remove` has moved one.
 #[test]
 fn streams_are_independent() {
     let mut streams = Streams::new();
     let rings: Vec<_> = (1..=3).map(|i| live(&mut streams, i).0).collect();
-    assert_eq!(
-        step(&mut streams, Cmd::Loop(StreamId::of(2), ask(1, 2))),
-        &[Effect::Loop(StreamId::of(2), ask(1, 2))]
-    );
     let _ = step(&mut streams, Cmd::Close(StreamId::of(1)));
     assert!(rings[0].upgrade().is_none());
     assert!(rings[1].upgrade().is_some() && rings[2].upgrade().is_some());
     assert!(streams.get(StreamId::of(3)).is_some() && streams.get(StreamId::of(2)).is_some());
-    assert_eq!(
-        step(&mut streams, Cmd::Loop(StreamId::of(3), None)),
-        &[Effect::Loop(StreamId::of(3), None)]
-    );
 }
 
 /// An open whose id the table already holds is dropped, and freed, rather than
@@ -190,47 +184,37 @@ fn a_duplicate_open_does_not_shadow() {
     assert!(second.upgrade().is_none(), "the duplicate is freed");
 }
 
-/// A direction reaches a live stream only, by its id, and no other: the step
-/// asks the driver to turn that stream's ring and nothing else.
+/// **A loop or direction the control side publishes is taken once.** A stream
+/// starts asked for no loop and forwards; a published value that differs is
+/// taken on the next look, and a look at the same value (published again or
+/// not) takes nothing; a clear and a turn back are changes too.
 #[test]
-fn a_direction_asks_for_a_live_stream_only() {
-    let mut streams = Streams::new();
-    let (_ring, _status) = open(&mut streams, 1);
-    assert!(
-        step(
-            &mut streams,
-            Cmd::Direction(StreamId::of(1), Direction::Reverse)
-        )
-        .is_empty(),
-        "a stream whose reader was not delivered takes no direction"
-    );
-    let _ = step(&mut streams, Cmd::Opened(StreamId::of(1)));
-    assert_eq!(
-        step(
-            &mut streams,
-            Cmd::Direction(StreamId::of(1), Direction::Reverse)
-        ),
-        &[Effect::Direction(StreamId::of(1), Direction::Reverse)]
-    );
+fn a_published_request_is_taken_once_when_it_changes() {
+    let (mut rec, _ring, _pos, _status, looping, direction) =
+        record_with_cells(StreamId::of(1), PathBuf::from("t.wav"), 1024, 1u16);
+    assert_eq!(rec.loop_asked(), None, "no loop asked at the start");
+    assert_eq!(rec.direction_asked(), None, "forwards at the start");
 
-    let _ = live(&mut streams, 2);
-    let _ = step(&mut streams, Cmd::Close(StreamId::of(1)));
-    assert!(
-        step(
-            &mut streams,
-            Cmd::Direction(StreamId::of(1), Direction::Reverse)
-        )
-        .is_empty(),
-        "a direction for the closed stream is dropped, and reaches no other"
-    );
+    looping.publish(ask(0, 10));
+    assert_eq!(rec.loop_asked(), Some(ask(0, 10)));
+    assert_eq!(rec.loop_asked(), None, "taken once");
+    looping.publish(ask(0, 10));
     assert_eq!(
-        step(
-            &mut streams,
-            Cmd::Direction(StreamId::of(2), Direction::Forward)
-        ),
-        &[Effect::Direction(StreamId::of(2), Direction::Forward)],
-        "its own id reaches it"
+        rec.loop_asked(),
+        None,
+        "the same loop again changes nothing"
     );
+    looping.publish(ask(1, 2));
+    looping.publish(ask(5, 9));
+    assert_eq!(rec.loop_asked(), Some(ask(5, 9)), "the latest of two");
+    looping.publish(None);
+    assert_eq!(rec.loop_asked(), Some(None), "a clear is a request");
+
+    direction.publish(Direction::Reverse);
+    assert_eq!(rec.direction_asked(), Some(Direction::Reverse));
+    assert_eq!(rec.direction_asked(), None, "taken once");
+    direction.publish(Direction::Forward);
+    assert_eq!(rec.direction_asked(), Some(Direction::Forward));
 }
 
 /// A rate event re-derives each stream's own ratio from its own file's rate:
@@ -255,6 +239,8 @@ fn a_rate_event_re_derives_each_streams_own_ratio() {
                 Samples::new(1_000),
                 cache.pin(&PathBuf::new()),
                 Arc::new(StatusCell::new()),
+                Publisher::new(None).reader(),
+                Publisher::new(Direction::Forward).reader(),
             );
             let _ = step(&mut streams, Cmd::Open(Box::new(record)));
             cells
