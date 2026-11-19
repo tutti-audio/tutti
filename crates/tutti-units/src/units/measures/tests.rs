@@ -87,7 +87,10 @@ fn correlation_derives_width_rather_than_storing_it() {
         Correlation::UNCORRELATED.to_stereo_width(),
         StereoWidth::NATURAL
     );
-    assert_eq!(Correlation::INVERTED.to_stereo_width(), StereoWidth(2.0));
+    assert_eq!(
+        Correlation::INVERTED.to_stereo_width(),
+        StereoWidth::new(2.0)
+    );
 
     // Phase trouble is a named threshold, not a bare comparison at the
     // call site.

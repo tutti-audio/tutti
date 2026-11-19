@@ -48,7 +48,7 @@ impl BarNumber {
         self.0
     }
 
-    /// Returns how many whole bars precede this one — `BarNumber(1)` yields `0`.
+    /// Returns how many whole bars precede this one — `BarNumber::new(1)` yields `0`.
     ///
     /// The 1-based/0-based conversion, in one place, so callers indexing from a
     /// bar number do not each re-derive the off-by-one.

@@ -67,7 +67,7 @@ impl Db {
 unit! {
     /// A linear gain multiplier.
     ///
-    /// **Not** a 0..1 quantity: a +6 dB peak is `Amplitude(2.0)`, and the
+    /// **Not** a 0..1 quantity: a +6 dB peak is `Amplitude::new(2.0)`, and the
     /// dynamics detectors routinely see values above unity. The only floor is
     /// zero — [`SILENT`](Self::SILENT).
     pub struct Amplitude(pub f64): Unit, Ordered, Bounded, Scalable;

@@ -17,8 +17,8 @@ unit! {
     /// A bearing on the horizontal circle, in degrees. 0 = front, positive =
     /// counter-clockwise, canonical range `-180..180`.
     ///
-    /// A *wrapping* coordinate. There is no ordering (`Azimuth(170) <
-    /// Azimuth(-170)` is a meaningless question — they are 20 degrees apart)
+    /// A *wrapping* coordinate. There is no ordering (`Azimuth::new(170) <
+    /// Azimuth::new(-170)` is a meaningless question — they are 20 degrees apart)
     /// and no `clamp` (constraining a bearing to a range is what
     /// [`wrap`](Self::wrap) does correctly and what a saturating clamp does
     /// wrongly). Displacements are [`ArcDegrees`].
@@ -253,7 +253,7 @@ impl Phase {
 
     /// `sin(2·pi·phase)`: the one sine of a phase. The turn is multiplied by
     /// `2·pi` in f64 and the sine is `libm`'s, so the value is the same on
-    /// every target and `Phase(0.25).sin()` is exactly `1.0`.
+    /// every target and `Phase::new(0.25).sin()` is exactly `1.0`.
     #[inline]
     #[must_use]
     pub fn sin(self) -> f64 {
@@ -288,7 +288,7 @@ impl PhaseIncrement {
     /// At 20 Hz against 192 kHz the step is ~1.04e-4.
     #[inline]
     pub fn per_sample(frequency: Hz, sample_rate: impl Into<SampleRate>) -> PhaseIncrement {
-        PhaseIncrement(frequency.0 / sample_rate.into().get())
+        PhaseIncrement::new(frequency.get() / sample_rate.into().get())
     }
 }
 

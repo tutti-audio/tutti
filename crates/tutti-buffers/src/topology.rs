@@ -639,10 +639,10 @@ mod tests {
             for s in NAMED {
                 let Some(d) = bed.direction(s) else { continue };
                 if s.is_left() {
-                    assert!(d.azimuth.0 > 0.0, "{bed:?}: {s:?} at {:?}", d.azimuth);
+                    assert!(d.azimuth.get() > 0.0, "{bed:?}: {s:?} at {:?}", d.azimuth);
                     checked += 1;
                 } else if s.is_right() {
-                    assert!(d.azimuth.0 < 0.0, "{bed:?}: {s:?} at {:?}", d.azimuth);
+                    assert!(d.azimuth.get() < 0.0, "{bed:?}: {s:?} at {:?}", d.azimuth);
                     checked += 1;
                 }
             }
@@ -678,8 +678,12 @@ mod tests {
                     continue;
                 };
                 let Some(dm) = bed.direction(m) else { continue };
-                assert_eq!(dm.azimuth.0, -d.azimuth.0, "{bed:?}: {s:?} / {m:?}");
-                assert_eq!(dm.elevation.0, d.elevation.0, "{bed:?}: {s:?} / {m:?}");
+                assert_eq!(dm.azimuth.get(), -d.azimuth.get(), "{bed:?}: {s:?} / {m:?}");
+                assert_eq!(
+                    dm.elevation.get(),
+                    d.elevation.get(),
+                    "{bed:?}: {s:?} / {m:?}"
+                );
                 checked += 1;
             }
         }
