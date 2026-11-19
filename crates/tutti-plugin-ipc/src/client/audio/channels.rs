@@ -54,6 +54,12 @@ pub(super) struct Channels {
     blocks: Arc<ArrayQueue<AudioCommand>>,
     /// What rides the control lane: every other request.
     controls: Arc<ArrayQueue<Stamped<ControlCommand>>>,
+    /// The newest block sequence **pushed** (queued, not merely submitted):
+    /// stored after a push succeeds, so a refused push never advances it and a
+    /// block counted here is already in the queue. A control command is stamped
+    /// with it and the idle lane publishes it; `newest_seq`, which
+    /// `note_submitted` sets before the push, only judges staleness.
+    pushed: Arc<AtomicU64>,
     /// The newest block sequence the audio lane has dealt with: answered by the
     /// server (or abandoned at its budget), or skipped as stale. A control command stamped with a sequence
     /// waits for it ([`Stamped`]), so it never reaches the server ahead of a
@@ -302,6 +308,7 @@ impl Channels {
             blocks: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             controls: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             handled: Arc::new(AtomicU64::new(0)),
+            pushed: Arc::new(AtomicU64::new(0)),
             owing: ControlSlot::default(),
             settings: Arc::default(),
             requests: Arc::default(),
@@ -652,14 +659,32 @@ impl Channels {
     /// Pushes a control-lane command and rings the control lane's bell: at most
     /// one non-blocking write, no lock, no allocation. A refused command is
     /// counted.
+    ///
+    /// **The order against blocks is one way, by design.** A command never
+    /// overtakes a block pushed before it: it is stamped with the newest block
+    /// pushed and the control lane sends it only after the audio lane has dealt
+    /// with that block. A command pushed before a block may still reach the
+    /// server after it: holding the block for the command would let a stuck
+    /// control request stall audio.
     pub(super) fn push_control(&self, cmd: ControlCommand) -> bool {
-        let after = self.newest_submitted();
+        let after = self.pushed();
         if self.controls.push(Stamped { after, cmd }).is_err() {
             self.note_command_refused();
             return false;
         }
         self.control_bell.ring();
         true
+    }
+
+    /// Records that block `seq` is in the block queue. Called after the push
+    /// succeeds, by whoever pushed it.
+    pub(super) fn note_pushed(&self, seq: u64) {
+        self.pushed.fetch_max(seq, Ordering::Release);
+    }
+
+    /// The newest block sequence pushed.
+    pub(super) fn pushed(&self) -> u64 {
+        self.pushed.load(Ordering::Acquire)
     }
 
     /// Records that the audio lane has dealt with block `seq` (sent or skipped),
@@ -819,6 +844,21 @@ mod tests {
         }
         assert_eq!(Fate::from_code(0), None, "an empty word holds no fate");
         assert_eq!(unpack(0), (0, 0));
+    }
+
+    /// **A control command is stamped with the blocks pushed, not the blocks
+    /// submitted**: a block counted by `note_submitted` and not yet queued is
+    /// not one the idle audio lane could have dealt with, so a command must not
+    /// wait on it as if it were, nor be let through ahead of it.
+    #[test]
+    fn a_control_command_is_stamped_with_the_newest_block_pushed() {
+        let (c, _sleeper) = channels();
+        c.note_submitted(5);
+        assert!(c.push_control(ControlCommand::CloseEditor));
+        assert_eq!(c.pop_control().map(|s| s.after), Some(0), "5 is not queued");
+        c.note_pushed(5);
+        assert!(c.push_control(ControlCommand::CloseEditor));
+        assert_eq!(c.pop_control().map(|s| s.after), Some(5));
     }
 
     fn channels() -> (Channels, Sleeper) {
