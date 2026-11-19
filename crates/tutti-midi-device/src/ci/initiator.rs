@@ -162,7 +162,7 @@ pub enum Outcome {
     },
     /// A Details Inquiry was answered with this data.
     Details(DetailsData),
-    /// The peer sent a NAK: [`Nak::status`] says why ([`NakStatus::ProfileNotSupported`]
+    /// The peer sent a NAK: [`Nak::status`] says why ([`NakStatus::ProfileNotSupported`](super::NakStatus::ProfileNotSupported)
     /// for a Profile it does not have at that address).
     Refused(Nak),
     /// [`PEER_REPLY_TIMEOUT`] passed with no answer.
