@@ -4,7 +4,9 @@
 use tutti_midi_device::{EndpointName, NameError, ProductInstanceId};
 use tutti_ump::{Ump, split_stream};
 
-use crate::{BoundedText, ByeText, Digest, NakText, Nonce, SequenceNumber, TextError, Username};
+use tutti_units::{Text, TextError};
+
+use crate::{ByeText, Digest, NakText, Nonce, SequenceNumber, Username};
 
 /// Command Codes (M2-124 Table 8).
 pub(crate) mod code {
@@ -706,13 +708,13 @@ fn read_identity(name: &[u8], id: &[u8]) -> Result<EndpointIdentity, ParseError>
 /// is not UTF-8 is cut at the last whole character before the bad byte, and an
 /// over-long one cannot occur (the field is the payload, which `MAX` covers).
 /// Constructors of the text types stay strict; only this wire reader is lenient.
-fn read_advisory_text<const MAX: usize>(field: &[u8]) -> BoundedText<0, MAX> {
+fn read_advisory_text<const MAX: usize>(field: &[u8]) -> Text<0, MAX> {
     let field = trimmed(field);
     let valid = match std::str::from_utf8(field) {
         Ok(text) => text,
         Err(e) => std::str::from_utf8(&field[..e.valid_up_to()]).unwrap_or_default(),
     };
-    BoundedText::new(valid).unwrap_or_default()
+    Text::new(valid).unwrap_or_default()
 }
 
 fn be16(bytes: &[u8]) -> u16 {

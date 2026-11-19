@@ -192,7 +192,6 @@ tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::Comma
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::UmpData::new
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::Advertisement::start
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::FoundHost::from_service
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/text.rs::BoundedText::new
 
 # tutti-midi-protocol
 tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/mpe/zone.rs::MpeZoneConfig::with_channel_response
@@ -526,6 +525,9 @@ tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteMessage::from_vo
 tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteType::from_value
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::Sysex7Packets::from_payload
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::SysexMessage::from_framed
+
+# tutti-units
+tutti-units  ctor-result  crates/tutti-units/src/text.rs::Text::new
 
 # tutti-voicing
 tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_bend_range

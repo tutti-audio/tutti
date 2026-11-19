@@ -81,7 +81,7 @@ enum Phase {
 /// How a Host admits, and the one thing a Host needs that is not data.
 #[derive(Clone, Debug)]
 pub(crate) enum Role {
-    Client(Credentials),
+    Client(Box<Credentials>),
     Host {
         admission: Arc<Admission>,
         nonce_source: fn() -> Result<Nonce, EntropyError>,

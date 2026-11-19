@@ -635,6 +635,14 @@ fn texts_refuse_a_nul_and_overlong_input() {
     assert!(Username::new(&"u".repeat(988)).is_ok());
 }
 
+/// The digest hashes the peer's bytes, so a username keeps the bytes it was
+/// given: a decomposed "e" and accent is not composed.
+#[test]
+fn a_username_is_not_normalised() {
+    let decomposed = "Cafe\u{301}";
+    assert_eq!(Username::new(decomposed).unwrap().as_str(), decomposed);
+}
+
 /// Advisory text: what is UTF-8 is kept.
 /// Spec: m2-124/6.15#2, m2-124/6.16#5
 #[test]
