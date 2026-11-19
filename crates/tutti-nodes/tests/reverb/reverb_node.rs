@@ -12,7 +12,7 @@ use atomic_float::AtomicF64;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbBank, FreeverbControls};
 use tutti_fixtures::Noise;
-use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive_input, prepared};
+use tutti_graph::contract::{assert_declared_tail, assert_param_fork, drive_input, prepared};
 use tutti_graph::{
     Env, GraphBuilder, IntoNode, Node, ParamFork, ParamIn, ParamNode, Prepare, Status,
     TransportChanges, TransportPosition,
@@ -229,12 +229,12 @@ fn a_live_node_reports_the_tail_of_its_current_network() {
 /// also looks past the ceiling).
 #[test]
 fn the_reported_tail_is_honest() {
-    assert_honest_tail(
+    assert_declared_tail(
         &mut prepared(FreeverbNode::<f32>::general_midi(), SR, BLOCK),
         SR,
     );
-    assert_honest_tail(&mut live(controls(0.1, 0.5)), SR);
-    assert_honest_tail(&mut live(controls(0.9, 0.2)), SR);
+    assert_declared_tail(&mut live(controls(0.1, 0.5)), SR);
+    assert_declared_tail(&mut live(controls(0.9, 0.2)), SR);
 }
 
 /// What the node cuts off at the tail is under the floor: the bank alone, left to ring, is

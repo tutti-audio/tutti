@@ -2,7 +2,7 @@
 //! `Out` moves its weight over `DECLICK` along the smootherstep, at the
 //! position `(j + 1) / (n + 1)` of frame `j` of an `n`-frame fade, counted from
 //! its first block under the fade and across blocks, and the editor learns when
-//! it ended (`Editor::settle_fades`). `Editor` itself fades nothing unless
+//! it ended (`Editor::finish_fades`). `Editor` itself fades nothing unless
 //! asked.
 //!
 //! Every figure is analytic: the smootherstep `x³(6x² − 15x + 10)` written out
@@ -153,9 +153,9 @@ fn a_fade_out_ends_inside_the_span_and_the_edge_leaves_the_spec() {
         rig.ed.spec().has_edge(output_edge(1)),
         "held until reported"
     );
-    assert!(rig.ed.settle_fades(), "the ended fade changed the spec");
+    assert!(rig.ed.finish_fades(), "the ended fade changed the spec");
     assert!(!rig.ed.spec().has_edge(output_edge(1)), "and took the edge");
-    assert!(!rig.ed.settle_fades(), "reported once");
+    assert!(!rig.ed.finish_fades(), "reported once");
     rig.commit();
     assert!(rig.blocks(1).iter().all(|&x| x == 0.0));
 }
@@ -170,7 +170,7 @@ fn an_ended_fade_in_leaves_a_plain_edge() {
         .expect("the edge exists");
     rig.commit();
     rig.blocks(5);
-    assert!(rig.ed.settle_fades());
+    assert!(rig.ed.finish_fades());
     assert!(
         !rig.ed.spec().gains.contains_key(&output_edge(1)),
         "no entry: the edge is plain again"

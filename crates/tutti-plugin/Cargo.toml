@@ -108,7 +108,7 @@ tutti-graph = { path = "../tutti-graph", features = ["contract"] }
 # tutti-plugin. The test renders to buffers, so no encoder.
 tutti-export = { path = "../tutti-export", default-features = false }
 # `tutti_nodes::testing` stimulus nodes for tests, examples and doctests, and
-# the control lane (`ControlLaneNode::for_foreign`) that drives a plugin's
+# the control lane (`ControlLaneNode::by_id`) that drives a plugin's
 # parameters through its event input: what replaced the crate's own
 # automation node. Dev-only: the node itself names no lane.
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }

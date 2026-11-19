@@ -704,14 +704,14 @@ fn a_held_sustain_pedal_is_released() {
     assert_eq!(sink_words(&logs[0], 2), vec![on60(), down, off60(), up]);
 }
 
-/// **A cut edge lifts every pedal and centres the bend**: a source holds a key,
+/// **A cut edge releases every pedal and centres the bend**: a source holds a key,
 /// the four hold pedals (CC 64 Sustain, 66 Sostenuto, 67 Soft, 69 Hold 2, MIDI
 /// 1.0 Control Change messages) and an off-centre bend, in MIDI 1.0 and in MIDI
 /// 2.0. The cut sends the sink, message by message, each pedal at 0 and the bend
 /// at its centre (0x2000 in MIDI 1.0, 0x80000000 in MIDI 2.0) in the protocol it
 /// was sent in, MIDI 1.0 lanes first, and the key's Note Off after them.
 #[test]
-fn a_cut_edge_lifts_every_pedal_and_centres_the_bend() {
+fn a_cut_edge_releases_every_pedal_and_centres_the_bend() {
     let pedals = [64, 66, 67, 69].map(CCNumber::of);
     let m2_cc = |cc: CCNumber, value: ControlValue| {
         let address = Address::first(MidiChannel::FIRST);

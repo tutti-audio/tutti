@@ -370,10 +370,10 @@ fn a_non_finite_control_reads_as_unchanged() {
 /// through it reaches the running node, which the graph owns.
 #[test]
 fn the_inserted_params_move_the_running_node() {
-    use tutti_graph::Solo;
+    use tutti_graph::Standalone;
     use tutti_units::Samples;
 
-    let mut solo = Solo::new(
+    let mut solo = Standalone::new(
         VbapPannerNode::<f32>::stereo(),
         Prepare::new(RATE, MaxBlock::of(Samples::new(64))),
     );

@@ -74,7 +74,7 @@ pub struct SampleFacts {
 }
 
 impl SampleFacts {
-    /// This file's length in frames, or `Samples(0)` when unknown.
+    /// This file's length in frames, or `Samples::new(0)` when unknown.
     ///
     /// A convenience for the common "how big is it" question. Deliberately does
     /// not hide the `None`: a caller deciding residency must distinguish

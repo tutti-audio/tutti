@@ -32,7 +32,7 @@ use tutti_engine::Engine;
 use tutti_graph::{Editor, Executor, NodeKey, Prepare};
 use tutti_midi_runtime::{SyncMessages, SyncOut};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_transport::{FadeOut, MotionEvent, Then, Transport};
+use tutti_transport::{AfterLocate, FadeOut, MotionEvent, Transport};
 use tutti_ump::{Message, System, U14};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -375,7 +375,7 @@ fn a_locate_inside_a_ramp_sends_one_song_position_then_the_maps_ticks() {
     rig.send(MotionEvent::Locate {
         beat: Beat::new(3.0),
         fade: FadeOut::Immediate,
-        then: Then::Keep,
+        then: AfterLocate::Keep,
     });
     rig.render(96_000, 512, &mut sent);
 

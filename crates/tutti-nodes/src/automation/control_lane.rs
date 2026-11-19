@@ -444,7 +444,7 @@ impl ControlLaneNode {
     /// its own normalisation: a knob of its own starting at `knob` (`None`:
     /// no knob), and a range of its own, `range` (`(min, max)`), which the
     /// lane clamps to. Never exact mode.
-    pub fn for_foreign(
+    pub fn by_id(
         id: ParamId,
         program: ControlProgram,
         knob: Option<f64>,
@@ -456,7 +456,7 @@ impl ControlLaneNode {
             RangeSource::Own(Publisher::new(ParamRange::new(range.0, range.1))),
             None,
             Arc::new(move |from, to, shape| {
-                ParamSegment::foreign(id, from, to, Samples::new(0), shape)
+                ParamSegment::by_id(id, from, to, Samples::new(0), shape)
             }),
             false,
         )
@@ -546,8 +546,8 @@ impl Input {
         let since = base.get() as f64 + at - self.recv.get() as f64;
         let id = ParamId::new(self.source);
         let (from, to) = (
-            self.seg.foreign_start(id).unwrap_or(0.0),
-            self.seg.foreign_target(id).unwrap_or(0.0),
+            self.seg.start_by_id(id).unwrap_or(0.0),
+            self.seg.target_by_id(id).unwrap_or(0.0),
         );
         if since.fract() == 0.0 && since >= 0.0 {
             self.seg.raw_value_after(Samples::new(since as usize))
@@ -1239,12 +1239,8 @@ mod tests {
     /// by the next `reclaim`**, with no further publish.
     #[test]
     fn reclaim_frees_a_program_a_block_held_across_its_replacement() {
-        let mut node = ControlLaneNode::for_foreign(
-            ParamId::new(0),
-            ControlProgram::default(),
-            None,
-            (0.0, 1.0),
-        );
+        let mut node =
+            ControlLaneNode::by_id(ParamId::new(0), ControlProgram::default(), None, (0.0, 1.0));
         let controls = node.controls();
         let first = program();
         let gone = Arc::downgrade(&first);
@@ -1263,12 +1259,8 @@ mod tests {
     /// by the lane's next `reclaim`**, with no further set.
     #[test]
     fn reclaim_frees_a_range_a_block_held_across_its_replacement() {
-        let mut node = ControlLaneNode::for_foreign(
-            ParamId::new(0),
-            ControlProgram::default(),
-            None,
-            (0.0, 1.0),
-        );
+        let mut node =
+            ControlLaneNode::by_id(ParamId::new(0), ControlProgram::default(), None, (0.0, 1.0));
         let controls = node.controls();
         let RangeSource::Own(cell) = &controls.0.range else {
             panic!("a plugin lane owns its range cell");
@@ -1290,7 +1282,7 @@ mod tests {
     /// unranged lane (and a native one, whose range is its port's) refuses it.
     #[test]
     fn set_range_is_a_plugin_lanes_own() {
-        let plugin = ControlLaneNode::for_foreign(
+        let plugin = ControlLaneNode::by_id(
             ParamId::new(1),
             ControlProgram::default(),
             Some(0.25),

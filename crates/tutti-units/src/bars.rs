@@ -15,12 +15,12 @@ unit! {
     /// A position, not a count: `BarNumber + BarNumber` has no meaning without an
     /// origin, exactly as `Beat + Beat` does not. Subtracting two gives a
     /// [`BarCount`].
-    pub struct BarNumber(pub i64): Display, Affine(BarCount);
+    pub struct BarNumber(i64): Display, Affine(BarCount);
 }
 
 unit! {
     /// A number of bars — the displacement between two [`BarNumber`]s.
-    pub struct BarCount(pub i64): Display, Additive, Signed;
+    pub struct BarCount(i64): Display, Additive, Signed;
 }
 
 // Both fields are public: a bar number has no range invariant for a

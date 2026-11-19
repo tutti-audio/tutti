@@ -6,7 +6,7 @@
 //! (the device's thread stamps it, `tutti-graph`'s event inlet holds it until
 //! its block); the node has one event input, so what it reads is what the
 //! inlet emitted. Each block it translates the device's events,
-//! MIDI 1.0 to MIDI 2.0 ([`Translator`]: RPN and NRPN runs, Bank Select,
+//! MIDI 1.0 to MIDI 2.0 ([`Midi2Translator`]: RPN and NRPN runs, Bank Select,
 //! widening), and rewrites classic MPE into native per-note messages
 //! ([`MpeIngest`]), then sends every event out of the port for its address
 //! ([`MidiInputPorts`]). **The translator and the MPE state are the
@@ -79,7 +79,7 @@ use tutti_graph::{
     Cx, Event, EventDensity, EventKind, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io,
     Node, NodeParts, Offset, Prepare, Shape, Status,
 };
-use tutti_midi_protocol::Translator;
+use tutti_midi_protocol::Midi2Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
 use tutti_rt::{Counter, CounterWriter, LockExt, Publisher, Reader, counter};
 use tutti_ump::{Held, Message, MidiChannel, MidiGroup, System, Ump};
@@ -315,7 +315,7 @@ const NO_PROFILES: GroupProfiles = [None; MidiGroup::COUNT as usize];
 /// What the device keeps between blocks: its MIDI 1.0 assembler and its
 /// classic-MPE state.
 struct Device {
-    translator: Translator,
+    translator: Midi2Translator,
     mpe: MpeIngest,
     /// The MPE mode in force.
     mode: MpeMode,
@@ -336,7 +336,7 @@ struct Device {
 impl Device {
     fn new(mode: MpeMode) -> Self {
         Self {
-            translator: Translator::new(),
+            translator: Midi2Translator::new(),
             mpe: MpeIngest::new(mode),
             mode,
             epoch: 0,

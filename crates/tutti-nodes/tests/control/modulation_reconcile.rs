@@ -967,7 +967,7 @@ fn a_foreign_target_takes_a_lane_on_its_event_input() {
         let log = log.lock().expect("unpoisoned");
         let (_, seg) = log.last().copied().expect("a segment");
         assert_eq!(seg.addr(), ParamAddr::Id(ParamId::new(7)));
-        seg.foreign_target(ParamId::new(7)).expect("its id")
+        seg.target_by_id(ParamId::new(7)).expect("its id")
     };
     assert!((last(&log) - 0.75).abs() < 1e-6, "{}", last(&log));
 

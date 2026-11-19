@@ -224,7 +224,7 @@ impl KeyBitset {
 /// messages (p. 24), so the individual offs are what every receiver
 /// understands. The notes come first and the controllers after, because a pedal
 /// that is down holds a note through a Note Off or All Notes Off until it is
-/// lifted (Appendix A-5), so the pedal-up lets go of the notes just ended;
+/// released (Appendix A-5), so the pedal-up lets go of the notes just ended;
 /// p. 31 (Stop) and RP-015 (Reset All Controllers) name the pedals and the
 /// pitch wheel as what returns to its normal position.
 ///
@@ -284,7 +284,7 @@ impl Held {
         &self.controllers
     }
 
-    /// The controllers off their normal position, for a caller that lifts them
+    /// The controllers off their normal position, for a caller that releases them
     /// itself.
     pub fn controllers_mut(&mut self) -> &mut HeldControllers {
         &mut self.controllers
@@ -349,7 +349,7 @@ impl Held {
             }
             self.keys.remove(key);
         }
-        self.controllers.lift_while(group, accept)
+        self.controllers.release_while(group, accept)
     }
 }
 
@@ -571,7 +571,7 @@ mod tests {
     /// Damper Pedal (Sustain), Sostenuto, Soft Pedal, Hold 2) and the bend at its
     /// centre (0x2000 in MIDI 1.0, 0x80000000 in MIDI 2.0), as these words.
     #[test]
-    fn a_release_lifts_every_pedal_and_centres_the_bend_message_by_message() {
+    fn a_release_frees_every_pedal_and_centres_the_bend_message_by_message() {
         let address = Address::new(MidiGroup::of(3), MidiChannel::of(6));
         let mut held = Held::new();
         for cc in [64, 66, 67, 69] {
@@ -654,12 +654,12 @@ mod tests {
         assert!(held.is_empty());
     }
 
-    /// **A refused lift is owed until it is paid, and a new value forgets it**:
+    /// **A refused release is owed until it is paid, and a new value forgets it**:
     /// three controllers held, the second refused, so it and the third are owed
     /// and still held; a pay that takes one and refuses the next leaves the last
-    /// owed; a lift the source then supersedes is no longer owed.
+    /// owed; a release the source then supersedes is no longer owed.
     #[test]
-    fn a_refused_lift_is_owed_until_paid_and_a_new_value_forgets_it() {
+    fn a_refused_release_is_owed_until_paid_and_a_new_value_forgets_it() {
         let address = Address::first(MidiChannel::of(0));
         let mut held = HeldControllers::new();
         for cc in [64, 66, 67] {
@@ -672,7 +672,7 @@ mod tests {
             );
         }
         let mut offered = Vec::new();
-        held.lift_all(|_, owed| {
+        held.release_all(|_, owed| {
             offered.push(owed);
             offered.len() < 2
         });

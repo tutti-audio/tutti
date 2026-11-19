@@ -4,7 +4,7 @@ use super::*;
 
 unit! {
     /// Amplitude in decibels. Used for thresholds, gains, makeup, ceilings.
-    pub struct Db(pub f64): Unit, Ordered, Bounded, Additive, Signed;
+    pub struct Db(f64): Unit, Ordered, Bounded, Additive, Signed;
 }
 // dB is logarithmic, so cascaded gain stages ADD — unlike `Beat + Beat`, this
 // is meaningful. `Neg` inverts a gain (cut <-> boost).
@@ -70,7 +70,7 @@ unit! {
     /// **Not** a 0..1 quantity: a +6 dB peak is `Amplitude::new(2.0)`, and the
     /// dynamics detectors routinely see values above unity. The only floor is
     /// zero — [`SILENT`](Self::SILENT).
-    pub struct Amplitude(pub f64): Unit, Ordered, Bounded, Scalable;
+    pub struct Amplitude(f64): Unit, Ordered, Bounded, Scalable;
 }
 // NOT `Additive`: cascading two gain stages MULTIPLIES them. Summing
 // amplitudes is what mixing two signals does, and that is the signals' job,
@@ -133,7 +133,7 @@ unit! {
     ///
     /// The signed multiplier: an all-pass coefficient, a polarity, a routing
     /// weight. A delay's bounded feedback amount is [`Feedback`], not a `Gain`.
-    pub struct Gain(pub f64): Unit, Ordered, Bounded, Additive, Signed;
+    pub struct Gain(f64): Unit, Ordered, Bounded, Additive, Signed;
 }
 // NOT `Scalable`: `Amplitude * f64` scales the amplitude, so a `Gain * f64`
 // that applied it to a sample would read differently for the same `x * 0.5`.

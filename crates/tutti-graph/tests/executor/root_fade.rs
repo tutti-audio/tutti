@@ -296,7 +296,7 @@ fn a_commit_at_the_block_the_fade_ends_on_leaves_only_the_new_root() {
             step(&mut r, BLOCK);
         }
         if settled {
-            r.editor_mut().settle_fades();
+            r.editor_mut().finish_fades();
         }
         r.editor_mut().insert(
             key(9),
@@ -485,13 +485,13 @@ fn a_carried_fade_reports_its_end_once_and_settling_drops_the_bank() {
     r.editor_mut().commit().expect("commits");
     step(&mut r, BLOCK);
     assert!(
-        !r.editor_mut().settle_fades(),
+        !r.editor_mut().finish_fades(),
         "the fade has a block to run"
     );
     step(&mut r, BLOCK);
     assert_eq!(r.executor().root_fade(), None);
-    assert!(r.editor_mut().settle_fades(), "reported once");
-    assert!(!r.editor_mut().settle_fades(), "and not again");
+    assert!(r.editor_mut().finish_fades(), "reported once");
+    assert!(!r.editor_mut().finish_fades(), "and not again");
     r.editor_mut().commit().expect("commits");
     let block = step(&mut r, BLOCK);
     assert_eq!(r.executor().plan().expect("plan").rendered_outputs(), 1);
@@ -732,7 +732,7 @@ fn root_fade_running_is_true_while_the_bank_runs_and_false_after_settling_or_a_c
         r.editor().root_fade_running(),
         "rendered through, but not reported until settled"
     );
-    assert!(r.editor_mut().settle_fades());
+    assert!(r.editor_mut().finish_fades());
     assert!(!r.editor().root_fade_running(), "settled");
 
     let mut r = rig();

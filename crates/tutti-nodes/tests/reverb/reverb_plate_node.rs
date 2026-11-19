@@ -5,7 +5,7 @@
 
 use tutti_buffers::Planes;
 use tutti_dsp::{Network, PlateControls, Ring, System};
-use tutti_graph::contract::{Driven, assert_honest_tail, drive, drive_input, prepared};
+use tutti_graph::contract::{Driven, assert_declared_tail, drive, drive_input, prepared};
 use tutti_graph::{
     Env, MAX_NODE_TAIL, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition,
 };
@@ -133,7 +133,7 @@ fn the_reported_tail_is_the_networks_and_honest() {
         );
         assert!(reported.get() > last, "a longer decay is a longer tail");
         last = reported.get();
-        assert_honest_tail(&mut node(c), SR);
+        assert_declared_tail(&mut node(c), SR);
     }
 }
 

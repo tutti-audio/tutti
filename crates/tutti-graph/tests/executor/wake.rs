@@ -6,7 +6,7 @@ use tutti_graph::testing as common;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use common::{Pulse, WORKERS, bits, prepare, test_pool};
+use common::{Burst, WORKERS, bits, prepare, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, Io, Node, NodeKey, OutPort, Prepare,
@@ -88,14 +88,14 @@ fn one_napper() -> (Editor, Executor, Placements) {
 
 fn raise_from_another_thread(wake: &Wake) {
     let wake = wake.clone();
-    std::thread::spawn(move || wake.raise())
+    std::thread::spawn(move || wake.notify())
         .join()
         .expect("the raiser");
 }
 
-/// **A raise from another thread between blocks calls the parked node on
+/// **A notify from another thread between blocks calls the parked node on
 /// exactly the next block**, and not on the one after: it returns `Idle`
-/// again with no raise, so it parks again.
+/// again with no notify, so it parks again.
 #[test]
 fn a_raise_from_another_thread_calls_a_parked_node_on_exactly_the_next_block() {
     let (_ed, mut exec, placements) = one_napper();
@@ -109,20 +109,20 @@ fn a_raise_from_another_thread_calls_a_parked_node_on_exactly_the_next_block() {
 
     raise_from_another_thread(&wake);
     render(&mut exec, 1);
-    assert_eq!(calls(), 2, "called on the block after the raise");
+    assert_eq!(calls(), 2, "called on the block after the notify");
     render(&mut exec, 1);
     render(&mut exec, 1);
-    assert_eq!(calls(), 2, "Idle again with no raise: parked again");
+    assert_eq!(calls(), 2, "Idle again with no notify: parked again");
 
-    wake.raise();
-    wake.raise();
+    wake.notify();
+    wake.notify();
     render(&mut exec, 1);
     assert_eq!(calls(), 3, "two raises before a block wake it once");
     render(&mut exec, 1);
     assert_eq!(calls(), 3);
 }
 
-/// **With no raise, a parked node is never called**: the control that makes
+/// **With no notify, a parked node is never called**: the control that makes
 /// the wake test able to fail.
 #[test]
 fn a_parked_node_nobody_wakes_is_never_called_again() {
@@ -134,24 +134,24 @@ fn a_parked_node_nobody_wakes_is_never_called_again() {
     assert_eq!(calls.load(Ordering::Relaxed), 1, "called once, then parked");
 }
 
-/// **A raise on a node that is not parked is consumed by the block that
+/// **A notify on a node that is not parked is consumed by the block that
 /// calls it**: it does not wake the node again when it parks afterwards.
 #[test]
 fn a_raise_on_an_unparked_node_does_not_wake_it_after_it_parks() {
     let (_ed, mut exec, placements) = one_napper();
     let (wake, calls) = placed(&placements, 0);
     // Raised before the first block: the node has never parked.
-    wake.raise();
+    wake.notify();
     render(&mut exec, 1);
     assert_eq!(calls.load(Ordering::Relaxed), 1);
     for _ in 0..5 {
         render(&mut exec, 1);
     }
-    assert_eq!(calls.load(Ordering::Relaxed), 1, "the raise did not leak");
+    assert_eq!(calls.load(Ordering::Relaxed), 1, "the notify did not leak");
 }
 
-/// **A fork's node has a `Wake` of its own**: a raise on the live node's wakes
-/// the live node alone, and a raise on the fork's wakes the fork's alone.
+/// **A fork's node has a `Wake` of its own**: a notify on the live node's wakes
+/// the live node alone, and a notify on the fork's wakes the fork's alone.
 #[test]
 fn a_raise_on_the_live_wake_does_not_wake_the_forks_node() {
     let (live_ed, mut live, placements) = one_napper();
@@ -169,26 +169,26 @@ fn a_raise_on_the_live_wake_does_not_wake_the_forks_node() {
     render(&mut fork, 1);
     assert_eq!((calls(&live_calls), calls(&fork_calls)), (1, 1));
 
-    live_wake.raise();
+    live_wake.notify();
     render(&mut live, 1);
     render(&mut fork, 1);
     assert_eq!(
         (calls(&live_calls), calls(&fork_calls)),
         (2, 1),
-        "the live raise woke the live node only"
+        "the live notify woke the live node only"
     );
 
-    fork_wake.raise();
+    fork_wake.notify();
     render(&mut live, 1);
     render(&mut fork, 1);
     assert_eq!(
         (calls(&live_calls), calls(&fork_calls)),
         (2, 2),
-        "the fork's raise woke the fork's node only"
+        "the fork's notify woke the fork's node only"
     );
 }
 
-/// The raise schedule of the parallel test: before which blocks each of the
+/// The notify schedule of the parallel test: before which blocks each of the
 /// three nappers is raised.
 const RAISES: [&[usize]; 3] = [&[3, 4, 9], &[1, 6], &[]];
 const BLOCKS: usize = 14;
@@ -207,7 +207,7 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
         ed.insert(key, "napper", Unforkable(Napper::new(&placements)));
     }
     let pulse = NodeKey(20);
-    ed.insert(pulse, "pulse", Unforkable(Pulse::new(5)));
+    ed.insert(pulse, "pulse", Unforkable(Burst::new(5)));
     let outputs: Vec<Source> = keys
         .iter()
         .chain([&pulse])
@@ -225,7 +225,7 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
     for block in 0..BLOCKS {
         for (n, (wake, _)) in nappers.iter().enumerate() {
             if RAISES[n].contains(&block) {
-                wake.raise();
+                wake.notify();
             }
         }
         let mut bufs = vec![vec![0.0f32; BLOCK]; 4];
@@ -248,7 +248,7 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
 fn serial_and_parallel_renders_with_raises_between_blocks_are_bit_identical() {
     let (serial_audio, serial_calls) = run(1);
     // Block 0 calls every napper; then only a raised one, on the block
-    // after its raise.
+    // after its notify.
     let expect: Vec<[usize; 3]> = (0..BLOCKS)
         .map(|b| std::array::from_fn(|n| usize::from(b == 0 || RAISES[n].contains(&b))))
         .collect();

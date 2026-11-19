@@ -335,7 +335,7 @@ mod tests {
     use super::*;
     use crate::test_support::drive_kernel;
     use tutti_buffers::ChannelLayout;
-    use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
+    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{
         Bipolar, Latency, Phase, PhaseIncrement, PhaseStep, Real, RunningPhase, Samples, Tail,
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(node.param_base(2), Some(0.5));
         assert_eq!(node.param_base(3), None, "no fourth param");
         let mut node = node;
-        assert_honest_tail(&mut node, RATE);
+        assert_declared_tail(&mut node, RATE);
     }
 
     /// A stagger that names an offset per channel must name the bus's.

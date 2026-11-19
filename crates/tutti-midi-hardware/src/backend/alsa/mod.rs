@@ -15,7 +15,7 @@
 //! MIDI 1.0 itself**: an input on a source that can only speak
 //! MIDI 1.0 (a legacy client, or an Endpoint offering no MIDI 2.0 Protocol) is a
 //! MIDI 1.0 UMP client, so the kernel hands it type 2 packets and the ingest
-//! node's `Translator` widens them (RPN and NRPN runs, Bank Select, velocity-0
+//! node's `Midi2Translator` widens them (RPN and NRPN runs, Bank Select, velocity-0
 //! Note On, the M2-115 scaling). An input on an Endpoint that offers MIDI 2.0 is
 //! a MIDI 2.0 client, since the session negotiates that Protocol. An output is
 //! always a MIDI 2.0 client; the wire narrows for a MIDI 1.0 endpoint.

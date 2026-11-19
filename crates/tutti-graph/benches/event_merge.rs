@@ -62,7 +62,7 @@ impl Node for Source {
             }
             if matches!(self.mix, Mix::Params | Mix::Mixed) {
                 let seg =
-                    ParamSegment::foreign(ParamId::new(1), 0.0, 1.0, Samples::new(32), Law::Linear);
+                    ParamSegment::by_id(ParamId::new(1), 0.0, 1.0, Samples::new(32), Law::Linear);
                 let _ = out.push_param(ParamEvent::segment(at, seg));
             }
         }

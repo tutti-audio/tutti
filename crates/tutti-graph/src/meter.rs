@@ -197,9 +197,9 @@ impl MeterWriter {
 /// Not `Clone`, and reads take `&mut self`: one consumer per meter (see the
 /// module docs). Switched **off** until [`enable`](Self::enable): the
 /// op then skips its pass entirely. Dropping it leaves the meter in the plan,
-/// measuring nothing anyone reads, until the editor closes or reaps it
+/// measuring nothing anyone reads, until the editor closes or prunes it
 /// ([`Editor::close_meter`](crate::Editor::close_meter),
-/// [`Editor::reap_meters`](crate::Editor::reap_meters)). It must not be
+/// [`Editor::prune_meters`](crate::Editor::prune_meters)). It must not be
 /// dropped on the audio thread in a debug build.
 #[derive(Debug)]
 pub struct MeterReader {

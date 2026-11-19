@@ -38,11 +38,11 @@
 use crate::kernel::{self, MAX_INCREMENT};
 use crate::lane::{Lane, SynthFloat};
 use crate::{Adsr, FilterType, OscillatorType, SvfMode, UnisonVoices};
-use core::num::NonZeroU32;
 use tutti_dsp::{
     LadderCoefficients, LadderDesign, LadderType, SimdLanes, SvfCoefficients, SvfDesign, SvfType,
     ladder_step, svf_step,
 };
+use tutti_rt::SplitMix64;
 use tutti_units::{
     Amplitude, Db, Hz, Normalized, Phase, PhaseIncrement, Q, Resonance, SampleRate, Seconds,
 };
@@ -363,14 +363,14 @@ impl<F: SynthFloat> VoiceBank<F> {
         self.phase_err = vec![zero; groups];
         self.inc = vec![zero; groups];
         self.inc_target = vec![zero; groups];
-        // Distinct nonzero seeds per lane: xorshift cannot leave zero, and two
-        // lanes with one seed would play the same noise in both ears.
-        let mut counter = 0u32;
+        // A distinct seed per lane: two lanes with one seed would play the same noise in
+        // both ears.
+        let mut counter = 0u64;
         self.rng = (0..groups)
             .map(|_| {
                 V::<F>::seed_rng(|| {
                     counter += 1;
-                    seed_from(counter).get()
+                    seed_from(counter)
                 })
             })
             .collect();
@@ -683,7 +683,7 @@ impl<F: SynthFloat> VoiceBank<F> {
             Osc::Pulse { width } => V::<F>::splat(F::from_unit(width)),
             _ => V::<F>::lit(0.5),
         };
-        let mut rng = self.rng[g];
+        let mut rng = self.rng[g].clone();
         let mut pink = self.pink[g];
 
         let mut z = self.z[g];
@@ -832,20 +832,10 @@ impl<F: SynthFloat> VoiceBank<F> {
 /// that no single sample steps by more than 4% of the change at 48 kHz.
 const GAIN_TIME_CONSTANT: Seconds = Seconds::new(0.0005);
 
-/// The seed the one counter that mixes to zero gets instead.
-const ZERO_SEED: NonZeroU32 = match NonZeroU32::new(0x6D2B_79F5) {
-    Some(seed) => seed,
-    None => panic!("the zero-seed stand-in is nonzero"),
-};
-
-/// The `n`th noise seed: a bijective mix (odd multiply, xorshift) of the
-/// counter, so distinct counters give distinct seeds, forced nonzero.
-fn seed_from(n: u32) -> NonZeroU32 {
-    let mut x = n.wrapping_mul(0x9E37_79B9);
-    x ^= x >> 16;
-    x = x.wrapping_mul(0x85EB_CA6B);
-    x ^= x >> 13;
-    NonZeroU32::new(x).unwrap_or(ZERO_SEED)
+/// The `n`th noise seed: [`SplitMix64::mix`] of the counter, a bijection, so distinct counters
+/// give distinct seeds and no stream is another's shifted copy.
+fn seed_from(n: u64) -> u64 {
+    SplitMix64::mix(n)
 }
 
 /// Group and lane-within-group of a flat lane index.

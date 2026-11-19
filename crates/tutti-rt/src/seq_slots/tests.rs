@@ -1,0 +1,85 @@
+use super::*;
+
+fn drained(reader: &mut SeqSlotsReader<f64>) -> Vec<(usize, f64)> {
+    let mut out = Vec::new();
+    reader.drain(|slot, value| out.push((slot, value)));
+    out
+}
+
+/// **Many writes to one slot before a drain are one value, the last**, given up
+/// once.
+#[test]
+fn writes_before_a_drain_coalesce_to_the_last() {
+    let (mut writer, mut reader) = seq_slots::<f64>(2);
+    for step in 0..100 {
+        writer.write(1, f64::from(step));
+    }
+    assert_eq!(drained(&mut reader), [(1, 99.0)]);
+    assert!(drained(&mut reader).is_empty());
+}
+
+/// **A new epoch makes the writes before it stale; a write after it is not.**
+#[test]
+fn a_new_epoch_voids_the_writes_before_it() {
+    let (mut writer, mut reader) = seq_slots::<f64>(2);
+    writer.write(0, 1.0);
+    writer.new_epoch();
+    assert!(drained(&mut reader).is_empty());
+    writer.write(1, 2.0);
+    assert_eq!(drained(&mut reader), [(1, 2.0)]);
+    assert!(
+        drained(&mut reader).is_empty(),
+        "the stale cell is not given up later"
+    );
+    writer.write(0, 3.0);
+    assert_eq!(drained(&mut reader), [(0, 3.0)]);
+}
+
+/// **A new epoch between the reads and the epoch load drops what was read.**
+#[test]
+fn a_new_epoch_inside_a_drain_voids_what_it_had_read() {
+    let (mut writer, mut reader) = seq_slots::<f64>(2);
+    writer.write(0, 1.0);
+    writer.write(1, 2.0);
+    reader.collect();
+    writer.new_epoch();
+    let mut applied = Vec::new();
+    reader.finish(|slot, value| applied.push((slot, value)));
+    assert!(applied.is_empty(), "{applied:?}");
+}
+
+/// **Epochs compare as serial numbers across the 32-bit wrap.**
+#[test]
+fn epochs_compare_across_the_wrap() {
+    assert!(before(u32::MAX, 0));
+    assert!(before(u32::MAX - 5, 3));
+    assert!(!before(0, u32::MAX));
+    assert!(!before(3, u32::MAX - 5));
+    assert!(!before(7, 7));
+    assert!(before(6, 7));
+    assert!(!before(7, 6));
+}
+
+/// **A drain over slots no write has touched skips the sweep.** Only the
+/// generation keeps it off once the slot's own record is forgotten.
+#[test]
+fn an_unchanged_generation_skips_the_sweep() {
+    let (mut writer, mut reader) = seq_slots::<f64>(1);
+    assert!(drained(&mut reader).is_empty());
+    writer.write(0, 1.0);
+    assert_eq!(drained(&mut reader), [(0, 1.0)]);
+    reader.seen[0] = 0;
+    assert!(drained(&mut reader).is_empty(), "the sweep was skipped");
+    writer.write(0, 2.0);
+    assert_eq!(drained(&mut reader), [(0, 2.0)]);
+}
+
+/// **A value of any size round-trips whole**, with its epoch beside it.
+#[test]
+fn a_wide_value_round_trips() {
+    let (mut writer, mut reader) = seq_slots::<[u32; 3]>(1);
+    writer.write(0, [1, 2, 3]);
+    let mut got = Vec::new();
+    reader.drain(|slot, value| got.push((slot, value)));
+    assert_eq!(got, [(0, [1, 2, 3])]);
+}

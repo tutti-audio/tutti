@@ -90,7 +90,7 @@ impl<F: Float + SimdLanes + Lerp> GateNode<F> {
     /// 0 dB, a gate that passes everything (what a non-finite control falls back to), where
     /// the gate this node has always been built as closes to **-80 dB**, effectively
     /// silent. A caller that wants a gate writes the range:
-    /// `GateControls { threshold, range: Db(-80.0), ..GateControls::DEFAULT }`. A gentler
+    /// `GateControls { threshold, range: Db::new(-80.0), ..GateControls::DEFAULT }`. A gentler
     /// `-12.0` ducks the signal without removing it, which sounds more natural on drums and
     /// room mics.
     ///
