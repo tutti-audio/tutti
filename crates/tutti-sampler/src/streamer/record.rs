@@ -12,7 +12,7 @@
 //! Work on one record runs under [`Record::contained`]: a panic faults that
 //! stream and no other.
 //!
-//! [`step`] is the Voicing mould: no thread, no clock, no file, no channel. A
+//! [`step`] is the VoiceAllocator mould: no thread, no clock, no file, no channel. A
 //! command arrives as a [`Cmd`], the table changes, and what the driver has to
 //! do about it comes back as [`Effect`]s. What touches a file (building the
 //! record of an open, capturing a loop) is the driver's, before and after.
