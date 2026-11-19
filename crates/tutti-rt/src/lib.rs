@@ -135,6 +135,8 @@
 //!   tail index; the one writer writes a slot only after the reader's `Release` store of `tail`
 //!   freed it, and the one reader reads it only after the writer's `Release` store of `head`
 //!   published it.
+//! - `Exclusive` (`exclusive.rs`): `unsafe impl Sync` for a `T: Send` that no `&self`
+//!   method reaches, so a shared borrow grants nothing (std's `core::sync::Exclusive`).
 //! - `handoff` (`handoff.rs`): one `MaybeUninit` slot moved between the two ends
 //!   under a state word.
 //! - `RtVec` (`vec.rs`): `N` inline `MaybeUninit` slots under a length, so
@@ -176,6 +178,7 @@ mod denormals;
 mod dirty_set;
 mod doorbell;
 mod drain_clock;
+mod exclusive;
 mod fault_latch;
 mod gauge;
 mod handoff;
@@ -216,6 +219,7 @@ pub use denormals::with_no_denormals;
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
 pub use doorbell::{Doorbell, Sleeper, doorbell};
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
+pub use exclusive::Exclusive;
 pub use fault_latch::{Cause, Drained, FaultLatch};
 pub use gauge::{
     Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, Tally, TallyWriter, Words, counter,
