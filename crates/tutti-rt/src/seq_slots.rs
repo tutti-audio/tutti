@@ -15,15 +15,17 @@
 //! it has read every slot, and drops a copy from an earlier epoch. Epochs are
 //! 32 bits and compare as serial numbers, so they wrap.
 //!
-//! # The store-load pair
+//! # The two fences
 //!
 //! A slot is a [`SeqWriter`] and [`SeqReader`] pair, so the copy protocol is
 //! theirs (loom-checked in `tests/seq_cell_loom.rs`); this module adds the
 //! epoch and the generation around it.
 //!
 //! The reader's `SeqCst` fence, between its slot reads and its epoch load,
-//! pairs with the epoch store in [`new_epoch`](SeqSlotsWriter::new_epoch) and
-//! the `SeqCst` fence that ends it. The pair orders the epoch store before
+//! synchronises with the `SeqCst` fence that ends
+//! [`new_epoch`](SeqSlotsWriter::new_epoch), after its epoch store. This is
+//! fence-to-fence ordering for a relaxed observation, not a store-then-load
+//! pair: the reader's side is a load then a load. The pair orders the epoch store before
 //! whatever the caller does after `new_epoch` returns (a plugin's `set_state`
 //! the stale writes must not overwrite): a drain that observes that work
 //! loads the new epoch, so a copy it read before the work is dropped, never
@@ -134,7 +136,7 @@ impl<T: Pod> SeqSlotsWriter<T> {
     pub fn new_epoch(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
         self.epoch_word.store(self.epoch, Ordering::Release);
-        // A store-load pair with the reader's epoch load.
+        // Synchronises with the reader's fence before its epoch load.
         fence(Ordering::SeqCst);
     }
 }
@@ -179,7 +181,8 @@ impl<T: Pod> SeqSlotsReader<T> {
                         self.scratch.push((slot, stamped));
                     }
                 }
-                // Never written is not contention; a torn copy is.
+                // Never written is not contention; a torn copy is. `try_read`
+                // does not say which, so a second attempt tells them apart.
                 None => contended |= !matches!(cell.read(0), Ok(None)),
             }
         }
@@ -194,7 +197,7 @@ impl<T: Pod> SeqSlotsReader<T> {
         if self.scratch.is_empty() {
             return;
         }
-        // A store-load pair with the fence in `new_epoch`: the reads are
+        // Synchronises with the fence that ends `new_epoch`: the reads are
         // ordered before the epoch load.
         fence(Ordering::SeqCst);
         let epoch = self.epoch.load(Ordering::Acquire);
