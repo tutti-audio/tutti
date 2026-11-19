@@ -10,12 +10,6 @@
 
 use std::path::PathBuf;
 
-/// The built `plugin-server`. Panics, naming the command that builds it,
-/// when there is none: a suite that needs it fails rather than skips.
-pub fn plugin_server() -> PathBuf {
-    tutti_fixtures::plugin_server()
-}
-
 /// The reference CLAP cdylib, published under a `.clap` name: the server
 /// picks the loader by extension, and reads a bare `.so` as VST2.
 pub fn clap_probe() -> PathBuf {

@@ -137,13 +137,9 @@ fn an_output_offset_shifts_the_send_times() {
         let wire = Wire::default();
         let (mut s, stream) = rig(&wire);
         let target = s.midi().output_latency();
-        s.set(
-            target.to(OutputLatency::new(
-                Duration::ZERO,
-                OutputOffset::new(Seconds(offset)).unwrap(),
-            )
-            .unwrap()),
-        )
+        s.set(target.to(
+            OutputLatency::new(Seconds(0.0), OutputOffset::new(Seconds(offset)).unwrap()).unwrap(),
+        ))
         .unwrap();
         let last_block = render(&stream, 100, latency);
         let _ = s.update();
@@ -192,7 +188,7 @@ fn an_unreported_audio_latency_is_left_out_and_reported() {
 
     let last_block = render(&stream, 2, Some(Duration::from_millis(40)));
     let terms = s.midi().output_terms().unwrap();
-    assert_eq!(terms.audio_output, Some(Duration::from_millis(40)));
+    assert_eq!(terms.audio_output, Some(Seconds(0.04)));
     assert!(terms.is_complete());
     let _ = s.update();
     let scheduled: Vec<Instant> = wire
@@ -229,11 +225,9 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         .set(tutti_midi_runtime::SyncMessages::OFF);
     let target = s.midi().output_latency();
     s.set(
-        target.to(OutputLatency::new(
-            Duration::from_millis(5),
-            OutputOffset::new(Seconds(0.0)).unwrap(),
-        )
-        .unwrap()),
+        target.to(
+            OutputLatency::new(Seconds(0.005), OutputOffset::new(Seconds(0.0)).unwrap()).unwrap(),
+        ),
     )
     .unwrap();
     let note = |on: bool, at: Beat| {

@@ -10,7 +10,7 @@ use std::time::Duration;
 use tutti_ump::{U7, U14};
 
 use super::chunk::{ChunkNo, PeRequestId};
-use crate::{Ack, Nak, TimeoutWait};
+use crate::{Ack, AckStatus, Nak, NakStatus, TimeoutWait};
 
 /// The time that may pass between the chunks of a message, and before a reply to
 /// an inquiry: under 3 seconds (M2-103 §12.2).
@@ -210,36 +210,20 @@ impl PeSignal {
             let [lo, hi] = chunk.map_or([0, 0], ChunkNo::to_le7);
             [self.request_id().get(), lo, hi, 0, 0].map(u7)
         };
-        let ack = |code: U7, data: u8, chunk| {
-            PeAnswer::Ack(
-                Ack::new(sub_id2, code)
-                    .with_status_data(u7(data))
-                    .with_details(detail(chunk)),
-            )
+        let ack = |status: AckStatus, chunk| {
+            PeAnswer::Ack(Ack::new(sub_id2, status).with_details(detail(chunk)))
         };
-        let nak = |code: U7, data: u8, chunk| {
-            PeAnswer::Nak(
-                Nak::new(sub_id2, code)
-                    .with_status_data(u7(data))
-                    .with_details(detail(chunk)),
-            )
+        let nak = |status: NakStatus, chunk| {
+            PeAnswer::Nak(Nak::new(sub_id2, status).with_details(detail(chunk)))
         };
         match self {
-            Self::TimeoutWait { wait, chunk, .. } => {
-                ack(Ack::STATUS_TIMEOUT_WAIT, wait.tenths(), chunk)
-            }
-            Self::SendNext { chunk, .. } => {
-                ack(Ack::STATUS_FLOW_CONTROL_NEXT_CHUNKS, 0, Some(chunk))
-            }
-            Self::Resend { last_good, .. } => nak(Nak::STATUS_RESEND_LAST_CHUNK, 0, last_good),
-            Self::Terminate { by, .. } => nak(
-                Nak::STATUS_TERMINATE,
-                u8::from(by == PeTerminator::Initiator),
-                None,
-            ),
-            Self::OutOfSequence { .. } => nak(Nak::STATUS_CHUNKS_OUT_OF_SEQUENCE, 0, None),
-            Self::Malformed { .. } => nak(Nak::STATUS_MALFORMED, 0, None),
-            Self::TimedOut { .. } => nak(Nak::STATUS_TIMEOUT, 0, None),
+            Self::TimeoutWait { wait, chunk, .. } => ack(AckStatus::TimeoutWait(wait), chunk),
+            Self::SendNext { chunk, .. } => ack(AckStatus::FlowControlNextChunks, Some(chunk)),
+            Self::Resend { last_good, .. } => nak(NakStatus::ResendLastChunk, last_good),
+            Self::Terminate { by, .. } => nak(NakStatus::Terminate(by), None),
+            Self::OutOfSequence { .. } => nak(NakStatus::ChunksOutOfSequence, None),
+            Self::Malformed { .. } => nak(NakStatus::Malformed, None),
+            Self::TimedOut { .. } => nak(NakStatus::Timeout, None),
         }
     }
 
@@ -249,13 +233,13 @@ impl PeSignal {
     pub fn from_ack(ack: &Ack) -> Option<(PeTransaction, Self)> {
         let transaction = PeTransaction::from_inquiry_sub_id2(ack.ack_sub_id2.get())?;
         let (request_id, chunk) = details(&ack.details)?;
-        let signal = match ack.status_code {
-            Ack::STATUS_TIMEOUT_WAIT => Self::TimeoutWait {
+        let signal = match ack.status {
+            AckStatus::TimeoutWait(wait) => Self::TimeoutWait {
                 request_id,
-                wait: TimeoutWait::from_ack(ack)?,
+                wait,
                 chunk,
             },
-            Ack::STATUS_FLOW_CONTROL_NEXT_CHUNKS => Self::SendNext {
+            AckStatus::FlowControlNextChunks => Self::SendNext {
                 request_id,
                 chunk: chunk?,
             },
@@ -270,22 +254,15 @@ impl PeSignal {
     pub fn from_nak(nak: &Nak) -> Option<(PeTransaction, Self)> {
         let transaction = PeTransaction::from_inquiry_sub_id2(nak.nak_sub_id2.get())?;
         let (request_id, chunk) = details(&nak.details)?;
-        let signal = match nak.status_code {
-            Nak::STATUS_RESEND_LAST_CHUNK => Self::Resend {
+        let signal = match nak.status {
+            NakStatus::ResendLastChunk => Self::Resend {
                 request_id,
                 last_good: chunk,
             },
-            Nak::STATUS_TERMINATE => Self::Terminate {
-                request_id,
-                by: match nak.status_data.get() {
-                    0 => PeTerminator::Responder,
-                    1 => PeTerminator::Initiator,
-                    _ => return None,
-                },
-            },
-            Nak::STATUS_CHUNKS_OUT_OF_SEQUENCE => Self::OutOfSequence { request_id },
-            Nak::STATUS_MALFORMED => Self::Malformed { request_id },
-            Nak::STATUS_TIMEOUT => Self::TimedOut { request_id },
+            NakStatus::Terminate(by) => Self::Terminate { request_id, by },
+            NakStatus::ChunksOutOfSequence => Self::OutOfSequence { request_id },
+            NakStatus::Malformed => Self::Malformed { request_id },
+            NakStatus::Timeout => Self::TimedOut { request_id },
             _ => return None,
         };
         Some((transaction, signal))

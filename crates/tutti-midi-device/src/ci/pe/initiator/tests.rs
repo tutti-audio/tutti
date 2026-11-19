@@ -10,7 +10,7 @@ use super::super::*;
 use super::RequestIds;
 use crate::MaxSysexSize;
 use crate::ci::testing::{OTHER, OURS, PEER};
-use crate::ci::{Ack, CiHeader, CiMessage, Decoded, Muid, Nak, TimeoutWait};
+use crate::ci::{Ack, CiHeader, CiMessage, Decoded, Muid, Nak, NakStatus, TimeoutWait};
 
 const SECOND: Duration = Duration::from_secs(1);
 const MAX: u32 = 128;
@@ -278,7 +278,7 @@ fn the_capabilities_inquiry_times_out_at_three_seconds_and_a_nak_refuses_it() {
     assert_eq!(i.deadline(), None);
 
     let (mut i, _) = PeInitiator::new(Muid::of(OURS), Muid::of(PEER), settings(), now);
-    let nak = Nak::new(U7::of(0x30), Nak::STATUS_MESSAGE_NOT_SUPPORTED);
+    let nak = Nak::new(U7::of(0x30), NakStatus::MessageNotSupported);
     let refusal = Decoded::Message(CiMessage::Nak {
         header: CiHeader::new(Muid::of(PEER)),
         to: Muid::of(OURS),
@@ -479,7 +479,7 @@ fn a_get_under_flow_control_acknowledges_every_chunk_including_the_last() {
             panic!("chunk {}: one ACK, got {actions:?}", n + 1);
         };
         assert_eq!(ack.ack_sub_id2.get(), 0x34);
-        assert_eq!(ack.status_code.get(), 0x11);
+        assert_eq!(ack.status.code().get(), 0x11);
         assert_eq!(raw(&ack.details), [request.get(), (n + 1) as u8, 0, 0, 0]);
         assert_eq!(finished(&actions).len(), usize::from(n + 1 == count));
     }
@@ -502,7 +502,7 @@ fn a_request_times_out_at_three_seconds_and_its_id_is_free() {
         panic!("one NAK");
     };
     assert_eq!(nak.nak_sub_id2.get(), 0x34);
-    assert_eq!(nak.status_code, Nak::STATUS_TIMEOUT);
+    assert_eq!(nak.status, NakStatus::Timeout);
     assert_eq!(raw(&nak.details)[0], request.get());
     assert_eq!(
         one_finished(&actions),
@@ -830,8 +830,7 @@ fn a_resend_nak_sends_the_chunk_again_and_the_fourth_ends_the_transaction() {
     let [nak] = naks(&actions)[..] else {
         panic!("one NAK, got {actions:?}");
     };
-    assert_eq!(nak.status_code, Nak::STATUS_TERMINATE);
-    assert_eq!(nak.status_data.get(), 1);
+    assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Initiator));
     assert_eq!(nak.nak_sub_id2.get(), 0x36);
     assert_eq!(
         one_finished(&actions).2,
@@ -881,8 +880,7 @@ fn a_chunk_with_no_ack_is_sent_again_after_three_seconds_and_given_up_after_thre
     let [nak] = naks(&actions)[..] else {
         panic!("one NAK, got {actions:?}");
     };
-    assert_eq!(nak.status_code, Nak::STATUS_TERMINATE);
-    assert_eq!(nak.status_data.get(), 1);
+    assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Initiator));
     assert_eq!(
         one_finished(&actions),
         (request, PeKind::Set, PeOutcome::TimedOut)
@@ -1515,7 +1513,7 @@ fn a_notify_terminate_drops_a_subscription_message_the_peer_was_sending() {
     assert!(
         naks(&told)
             .iter()
-            .all(|nak| nak.status_code == Nak::STATUS_CHUNKS_OUT_OF_SEQUENCE),
+            .all(|nak| nak.status == NakStatus::ChunksOutOfSequence),
         "{told:?}"
     );
 }

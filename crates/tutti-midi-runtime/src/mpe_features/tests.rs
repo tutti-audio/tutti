@@ -1,7 +1,8 @@
 use std::time::Instant;
 
 use tutti_midi_device::{
-    CiDeviceId, CiHeader, CiMessage, Decoded, DetailsData, Muid, Nak, ProfileAction, ProfileId,
+    CiDeviceId, CiHeader, CiMessage, Decoded, DetailsData, Muid, Nak, NakStatus, ProfileAction,
+    ProfileId,
 };
 use tutti_midi_protocol::{ControllerSupport, PitchBendSupport};
 
@@ -96,7 +97,7 @@ fn an_unreadable_refused_or_unanswered_reply_is_a_typed_error() {
             Err(MpeFeaturesError::Unreadable(data))
         );
     }
-    let nak = Nak::new(tutti_ump::U7::of(0x28), Nak::STATUS_PROFILE_NOT_SUPPORTED);
+    let nak = Nak::new(tutti_ump::U7::of(0x28), NakStatus::ProfileNotSupported);
     assert_eq!(
         mpe_features(&Outcome::Refused(nak.clone())),
         Err(MpeFeaturesError::Refused(nak))

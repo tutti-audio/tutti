@@ -15,7 +15,7 @@
 //! [`Phase::MidiOut`]: crate::Phase::MidiOut
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 
@@ -23,9 +23,9 @@ use std::sync::Arc;
 use tutti_graph::{EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
-    ClipEvents, ClockMap, MidiClipNode, MidiInputPorts, MidiKeys, MpeTransformControls,
-    MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement, RouteRule,
-    SendAt, TimedMidiEvent, compile_routes,
+    ClipEvents, ClockMap, MidiClipNode, MidiInputPorts, MidiKeys, MpeTransformNode, Outgoing,
+    OutputLatency, OutputPlan, OutputTerms, Placement, RouteRule, SendAt, TimedMidiEvent,
+    compile_routes,
 };
 use tutti_music::MeterMap;
 use tutti_rt::Mint;
@@ -75,8 +75,8 @@ pub(crate) const MIDI_INPUT_INLET_CAPACITY: tutti_graph::EventCapacity =
 /// not late. The spacing between events is kept; the
 /// whole is that much later than the OS delivered it.
 #[cfg(feature = "midi-hardware")]
-pub(crate) fn input_lead(block: Samples, rate: tutti_units::SampleRate) -> Duration {
-    Duration::from_secs_f64(block.to_seconds(rate).get())
+pub(crate) fn input_lead(block: Samples, rate: tutti_units::SampleRate) -> std::time::Duration {
+    std::time::Duration::from_secs_f64(block.to_seconds(rate).get())
 }
 
 /// The engine's block clock as the device threads read it
@@ -120,9 +120,12 @@ impl OutputClockSource {
     }
 
     /// The audio output's latency as the device reports it now: read on every
-    /// drain, for it can arrive or change after a restart.
-    fn audio_output(&self) -> Option<Duration> {
-        self.audio_latency.get()
+    /// drain, for it can arrive or change after a restart. The OS reports a
+    /// `Duration`; this is the one place it becomes `Seconds`.
+    fn audio_output(&self) -> Option<tutti_units::Seconds> {
+        self.audio_latency
+            .get()
+            .map(|latency| tutti_units::Seconds(latency.as_secs_f64()))
     }
 
     /// The timing of a drain at `now`: the latest block's map, `now` and the
@@ -684,7 +687,6 @@ struct Clip {
     /// The transform node, which is part of the clip's wiring: it goes with
     /// the clip.
     transform: NodeKey,
-    mpe: MpeTransformControls,
     target: NodeKey,
 }
 
@@ -728,8 +730,9 @@ pub(crate) struct MidiState {
     pub(crate) sinks: crate::midi_sink::Sinks,
     /// The ports the pool's `midi_input` and `midi_output` entries opened.
     pub(crate) ports: crate::midi_port::Ports,
-    /// The session's one MPE mode ([`Midi::set_mpe`]).
-    mpe: MpeMode,
+    /// The session's one MPE mode ([`MpeModeTarget`](crate::MpeModeTarget)),
+    /// the cell every ingest and clip transform reads.
+    mpe: tutti_rt::Publisher<MpeMode>,
     /// The tempo the session follows, if it does ([`Midi::follow_tempo`]).
     follow: Option<Follow>,
     /// Whether a live tempo owns the map, as `follow` and `clock` left it:
@@ -791,12 +794,12 @@ impl MidiState {
 
     /// The state with the session's MPE mode as the builder declared it.
     pub(crate) fn with_mpe(mut self, mpe: MpeMode) -> Self {
-        self.mpe = mpe;
+        self.mpe = tutti_rt::Publisher::new(mpe);
         self
     }
 
-    /// The session's MPE mode.
-    pub(crate) fn mpe(&self) -> &MpeMode {
+    /// The cell holding the session's MPE mode.
+    pub(crate) fn mpe(&self) -> &tutti_rt::Publisher<MpeMode> {
         &self.mpe
     }
 
@@ -1278,7 +1281,7 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// **A clip does not loop itself**: it plays on the transport's timeline,
     /// so a repeat is the transport's loop
-    /// ([`Session::set_loop`](crate::Session::set_loop)) over the beats it
+    /// (`session.transport_handle().looping()`) over the beats it
     /// occupies.
     ///
     /// # Examples
@@ -1320,21 +1323,14 @@ impl<F: Float> Midi<'_, F> {
                 let clip = clip.erase();
                 // The clip's MIDI is classic MPE until the transform says
                 // otherwise: it is the one holder of the zones.
-                let (transform, mpe) = self.graph.add(MpeTransformNode::new(self.state.mpe));
+                let (transform, _) = self.graph.add(MpeTransformNode::new(self.state.mpe()));
                 let transform = transform.erase();
                 self.graph.set_feed(
                     transform,
                     Feeder::Sequencer,
                     vec![EventOutPort::new(clip, 0)],
                 );
-                self.state.clips.insert(
-                    clip,
-                    Clip {
-                        transform,
-                        mpe,
-                        target,
-                    },
-                );
+                self.state.clips.insert(clip, Clip { transform, target });
                 clip
             }
         };
@@ -1658,46 +1654,6 @@ impl<F: Float> Midi<'_, F> {
         );
     }
 
-    // --- MPE ---
-
-    /// The session's one MPE mode: how the hardware input is ingested and how
-    /// the clips' MIDI is. Begins as the builder's
-    /// ([`SessionBuilder::mpe_mode`](crate::SessionBuilder::mpe_mode)),
-    /// `Disabled` by default.
-    #[must_use]
-    pub fn mpe(&self) -> MpeMode {
-        *self.state.mpe()
-    }
-
-    /// Sets the session's MPE mode, once for everything that follows it.
-    ///
-    /// - The hardware input ingests classic MPE in `mode` from the next block
-    ///   ([`MidiIngestControls::set_mpe_mode`](tutti_midi_runtime::MidiIngestControls::set_mpe_mode)),
-    ///   on a session that has the input node.
-    /// - Every clip's transform (the MPE transform [`play_clip`](Self::play_clip)
-    ///   wires between the clip and its target) takes `mode` from its next block,
-    ///   and a clip played after this starts in it.
-    ///
-    /// The transforms are the one holder of the zones: an instrument, whenever
-    /// it was added, reads per-note and per-channel messages and no zone, so
-    /// nothing else needs the mode. A MIDI source played into an instrument by
-    /// hand (`InstrumentHandle::keys_mut`) is not classic MPE and is not
-    /// transformed.
-    ///
-    /// A device that enables the MIDI-CI MPE Profile (M2-120) is not under this
-    /// mode: its input follows the Profile's zones and rules, in the Groups it
-    /// enabled them on, until it disables the Profile or goes. The session
-    /// does that from the peer's Profile reports
-    /// (`MidiReport::CiProfiles`).
-    pub fn set_mpe(&mut self, mode: MpeMode) {
-        self.state.mpe = mode;
-        #[cfg(feature = "midi-hardware")]
-        self.state.ports.set_mpe_mode(mode);
-        for clip in self.state.clips.values() {
-            clip.mpe.set_mode(mode);
-        }
-    }
-
     // --- Recording a take ---
 
     /// Records what is played into `target`: an event tap on the event output
@@ -1839,7 +1795,22 @@ impl<F: Float> Midi<'_, F> {
             None => Follow::new(core, tap, self.settings.tempo_map(), self.meter.current()),
         });
         self.state.sync_following();
+        self.discard_staged_maps(follow.meter);
         Ok(())
+    }
+
+    /// Drops the tempo (and, with `meter`, the meter) a write staged and no
+    /// update has published: a follower owns the maps from here, and the
+    /// project's are the ones in force, so the staged ones must not publish
+    /// over what an unfollow restores.
+    fn discard_staged_maps(&self, meter: bool) {
+        use crate::value::SlotId;
+        let ids: &[SlotId] = if meter {
+            &[SlotId::Tempo, SlotId::Meter]
+        } else {
+            &[SlotId::Tempo]
+        };
+        self.graph.value_table().discard_pending(ids);
     }
 
     /// Stops following ([`follow_tempo`](Self::follow_tempo)): publishes the
@@ -1939,6 +1910,9 @@ impl<F: Float> Midi<'_, F> {
             self.meter.current(),
         ));
         self.state.sync_following();
+        if follow.kind == tutti_midi_runtime::ClockKind::BeatClock {
+            self.discard_staged_maps(true);
+        }
         Ok(())
     }
 
@@ -2108,6 +2082,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
     use tutti_fixtures::midi;
     use tutti_units::SampleRate;
 
@@ -2353,9 +2328,9 @@ mod tests {
         };
         let base = sent_with(OutputTerms::default());
         let terms = OutputTerms {
-            audio_output: Some(Duration::from_millis(30)),
+            audio_output: Some(tutti_units::Seconds(0.03)),
             latency: OutputLatency::new(
-                Duration::from_millis(5),
+                tutti_units::Seconds(0.005),
                 tutti_midi_runtime::OutputOffset::new(tutti_units::Seconds(0.25)).unwrap(),
             )
             .unwrap(),

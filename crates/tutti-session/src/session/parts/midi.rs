@@ -95,12 +95,16 @@ impl MidiPart {
             SlotId::OutputLatency,
             self.state.output_latency_cell() as SlotCell<tutti_midi_runtime::OutputLatency>,
         );
+        table.provide_staged(
+            SlotId::MpeMode,
+            crate::value::PublishedSlot::new(self.state.mpe().clone()),
+        );
     }
 
     /// The cells the audio thread published to, scanned and what no block holds
     /// freed: how many retired values are still held.
     pub(crate) fn reclaim(&self) -> usize {
-        self.hardware.reclaim()
+        self.hardware.reclaim() + self.state.mpe().reclaim()
     }
 
     /// `node` left the graph: what the session held of it goes. A clip's

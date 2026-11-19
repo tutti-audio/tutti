@@ -579,13 +579,13 @@ fn a_malformed_profile_message_is_unread_and_nakked_0x41_on_its_address() {
     };
     assert_eq!(header.device_id, channel(5));
     assert_eq!(nak.nak_sub_id2, U7::of(0x22));
-    assert_eq!(nak.status_code, Nak::STATUS_MALFORMED);
+    assert_eq!(nak.status, NakStatus::Malformed);
 }
 
 #[test]
 fn a_nak_for_an_unsupported_profile_carries_status_04_and_the_profile_id() {
     // §5.11.3: for Profile Configuration the 5 detail bytes are the Profile Id.
-    let nak = Nak::new(U7::of(0x22), Nak::STATUS_PROFILE_NOT_SUPPORTED)
+    let nak = Nak::new(U7::of(0x22), NakStatus::ProfileNotSupported)
         .with_details(piano().to_bytes().map(U7::of));
     let message = CiMessage::Nak {
         header: header_on(channel(1)),

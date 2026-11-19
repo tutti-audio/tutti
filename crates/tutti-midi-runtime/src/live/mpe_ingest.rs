@@ -603,8 +603,8 @@ impl MpeIngest {
     }
 
     /// Reconfigure every Group to a new zone layout. Allocates nothing, so the
-    /// ingest node calls it on the audio thread when
-    /// [`MidiIngestControls::set_mpe_mode`](crate::MidiIngestControls::set_mpe_mode)
+    /// ingest node calls it on the audio thread when the cell it follows
+    /// ([`MidiIngestNode::with_mpe`](crate::MidiIngestNode::with_mpe))
     /// publishes a new mode.
     ///
     /// What a channel held or was told is kept where the channel is what it

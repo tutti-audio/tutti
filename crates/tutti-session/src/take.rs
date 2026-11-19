@@ -522,7 +522,7 @@ impl Recorded {
     /// [`Error::Place`](crate::Error::Place) for a wave the sampler cannot
     /// place.
     #[cfg(all(feature = "sampler", codec))]
-    pub fn clip<F: tutti_rt::RingFloat>(&self) -> crate::Result<tutti_sampler::Clip<F>> {
+    pub fn clip<F: tutti_sampler::SamplerFloat>(&self) -> crate::Result<tutti_sampler::Clip<F>> {
         let path = self.path().ok_or(TakeError::NoFile)?;
         let wave = tutti_codec::read_wave::<F>(path)?;
         Ok(tutti_sampler::Clip::new(wave)?.at(self.placement.start_beat))

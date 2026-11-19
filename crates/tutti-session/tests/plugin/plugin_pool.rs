@@ -27,7 +27,7 @@ use tutti_units::{SampleRate, Samples, Tail};
 
 const BLOCK: usize = 512;
 
-use crate::support::{clap_probe, plugin_server};
+use crate::support::clap_probe;
 
 fn first_id() -> PluginId {
     PluginId::new(
@@ -72,7 +72,7 @@ fn servers() {
         layout("0");
         // SAFETY: nextest runs each test in its own process; see above.
         unsafe {
-            std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server());
+            std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
             std::env::set_var("TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE", layout_file());
         }
     });

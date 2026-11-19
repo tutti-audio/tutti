@@ -6,16 +6,15 @@
 //! transform allocates nothing.
 
 use tutti_buffers::{Mono, MonoMut};
-pub(crate) use tutti_dsp::Complex32;
-use tutti_dsp::RealFft;
+use tutti_dsp::{Complex, FftFloat, RealFft};
 
 /// Forward and inverse plans for one window length, and the scratch both use.
-pub(super) struct Fft {
-    plan: RealFft,
-    scratch: Vec<Complex32>,
+pub(super) struct Fft<F: FftFloat> {
+    plan: RealFft<F>,
+    scratch: Vec<Complex<F>>,
 }
 
-impl Fft {
+impl<F: FftFloat> Fft<F> {
     /// Plans for a window of `size` samples (an even length, which every
     /// [`FftSize`](super::FftSize) is).
     pub(super) fn new(size: usize) -> Self {
@@ -31,14 +30,14 @@ impl Fft {
         Self::from_plan(self.plan.clone())
     }
 
-    fn from_plan(plan: RealFft) -> Self {
+    fn from_plan(plan: RealFft<F>) -> Self {
         let scratch = plan.new_scratch();
         Self { plan, scratch }
     }
 
     /// `real` (`size` samples) to `bins` (`size / 2 + 1`), `DC..=Nyquist`.
     /// DC's and Nyquist's imaginary parts are zero.
-    pub(super) fn forward(&mut self, real: &[f32], bins: &mut [Complex32]) {
+    pub(super) fn forward(&mut self, real: &[F], bins: &mut [Complex<F>]) {
         self.plan.forward(Mono::new(real), bins, &mut self.scratch);
     }
 
@@ -48,7 +47,7 @@ impl Fft {
     ///
     /// The imaginary parts of DC and Nyquist do not belong to a real signal and
     /// are ignored.
-    pub(super) fn inverse(&mut self, bins: &mut [Complex32], real: &mut [f32]) {
+    pub(super) fn inverse(&mut self, bins: &mut [Complex<F>], real: &mut [F]) {
         self.plan
             .inverse(bins, MonoMut::new(real), &mut self.scratch);
     }

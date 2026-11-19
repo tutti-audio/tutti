@@ -46,9 +46,13 @@ pub enum Phase {
     /// onto the graph, staging what is new for the commit. A refusal is
     /// `SessionEvent::Modulation`.
     Modulation,
-    /// The output policy staged since the last update, applied
-    /// ([`Session::policy`]); then the commit, iff the graph was edited since
-    /// the last one, and the compensation of the plan it sent (or of a re-prepare's resumed plan)
+    /// The values written since the last update that wait for it published
+    /// (the tempo map, the meter, the loop region, a clip's events, a
+    /// harmony node's changes), together and in a fixed order: the tempo,
+    /// the meter, the loop, then each node's by key. Then the output policy
+    /// staged since the last update, applied ([`Session::policy`]); then the
+    /// commit, iff the graph was edited since the last one, and the
+    /// compensation of the plan it sent (or of a re-prepare's resumed plan)
     /// published.
     Commit,
     /// Modulation's re-apply and resyncs: while a
@@ -66,8 +70,8 @@ pub enum Phase {
     /// Frees, here, what the audio thread let go of in every cell the
     /// session publishes to (`Publisher::reclaim`): the project meter and the
     /// plugin slots following it, the graph's param ranges, the modulation
-    /// lanes' programs, the session's clips, the hardware input's MPE
-    /// request and port set. A value a block still held when it was
+    /// lanes' programs, the session's clips, the session's MPE mode, the
+    /// hardware input's Profile zones and port set. A value a block still held when it was
     /// replaced stays retired until a scan after the block ends; a cell
     /// that is not published again gets that scan here. A lock and a
     /// length check per cell when nothing is retired. It also closes the
@@ -217,6 +221,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.jobs.report_landed(out);
             }
             Phase::Commit => {
+                // First: the plan this phase sends and the blocks after it
+                // read the values this update publishes.
+                self.values.publish_pending();
                 self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
                 self.graph.report_commit(out);

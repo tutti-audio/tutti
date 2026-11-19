@@ -18,15 +18,6 @@
 crates/tutti-buffers/src/fold.rs  1  migrating: foundation
 crates/tutti-buffers/src/fold/ambisonic.rs  1  migrating: foundation
 crates/tutti-codec/src/format.rs  2  migrating: foundation
-crates/tutti-dsp/src/dither.rs  2  migrating: R1/S7
-crates/tutti-dsp/src/fft/real.rs  4  migrating: R1/S7
-crates/tutti-dsp/src/fft/scratch.rs  1  migrating: R1/S7
-crates/tutti-dsp/src/oversample.rs  2  migrating: R1/S7
-crates/tutti-dsp/src/resample/fft.rs  10  migrating: R1/S7
-crates/tutti-dsp/src/smoother.rs  6  migrating: R1/S7
-crates/tutti-dsp/src/stft/geometry.rs  3  migrating: R1/S7
-crates/tutti-dsp/src/stft/window.rs  8  migrating: R1/S7
-crates/tutti-dsp/src/xorshift.rs  4  migrating: R1/S7
 crates/tutti-export/src/control.rs  5  migrating: foundation
 crates/tutti-export/src/encode/mod.rs  2  migrating: foundation
 crates/tutti-export/src/render/outputs.rs  2  migrating: foundation
@@ -53,29 +44,14 @@ crates/tutti-modulation/src/program.rs  6  migrating: B2/B3
 crates/tutti-modulation/src/shape.rs  2  migrating: B2/B3
 crates/tutti-modulation/src/source/follower.rs  3  migrating: B2/B3
 crates/tutti-modulation/src/sources.rs  2  migrating: B2/B3
-crates/tutti-nodes/src/click.rs  3  migrating: R1/S7
-crates/tutti-nodes/src/lfo.rs  3  migrating: R1/S7
-crates/tutti-nodes/src/strip.rs  7  migrating: R1/S7
 crates/tutti-plugin-host/src/node/loader.rs  1  spec: f32 is the audio width every plugin format processes (CLAP, VST3, VST2, AU)
-crates/tutti-plugin-probe/src/measure.rs  2  migrating: plugins step 7
-crates/tutti-sampler/src/lanes.rs  1  migrating: dsp S7/instruments
-crates/tutti-sampler/src/streamer/io/refill.rs  2  migrating: dsp S7/instruments
-crates/tutti-sampler/src/stretch/vocoder.rs  2  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/interp.rs  1  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/live_read.rs  2  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/loop_span.rs  2  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/memory_source.rs  4  migrating: dsp S7/instruments
-crates/tutti-sampler/src/voice/node.rs  1  migrating: dsp S7/instruments
+crates/tutti-plugin-probe/src/hosted/measure.rs  2  migrating: plugins step 7
 crates/tutti-session/src/bounce.rs  1  migrating: B2/B3
 crates/tutti-session/src/builder.rs  1  migrating: B2/B3
 crates/tutti-session/src/clock.rs  3  migrating: B2/B3
 crates/tutti-session/src/device.rs  1  migrating: B2/B3
-crates/tutti-session/src/general_midi.rs  2  migrating: dsp S7/instruments
+crates/tutti-session/src/general_midi.rs  5  migrating: B2/B3
 crates/tutti-session/src/modulation.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin/lost.rs  1  migrating: plugins step 7
-crates/tutti-soundfont/src/node.rs  1  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/oscillator.rs  10  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/player.rs  5  migrating: dsp S7/instruments
-crates/tutti-soundfont/src/voice.rs  5  migrating: dsp S7/instruments
 crates/tutti-voicing/src/channel.rs  3  migrating: foundation

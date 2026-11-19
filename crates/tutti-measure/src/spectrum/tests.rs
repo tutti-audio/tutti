@@ -166,8 +166,8 @@ fn frames_land_on_the_hop_grid_for_every_size_and_hop() {
         signal[impulse_at] = 1.0;
 
         let mut state = meter(&cfg);
-        let window = geometry(size, hop).window_coefficients();
-        let gain = f64::from(geometry(size, hop).magnitude_gain());
+        let window = geometry(size, hop).window_coefficients::<f32>();
+        let gain = geometry(size, hop).magnitude_gain::<f64>();
         for (i, s) in signal.iter().enumerate() {
             let ready = push_frames(&mut state, &[*s]);
             let fed = i + 1;

@@ -764,8 +764,11 @@ mod tests {
     #[test]
     fn the_named_crossings_are_no_site() {
         assert!(
-            forms("fn d() { let g = F::from_design(k.tan()); let c = F::from_unit(hz); }")
-                .is_empty()
+            forms(
+                "fn d() { let g = F::from_design(k.tan()); let c = F::from_unit(hz); \
+                 let t = F::from_count((i + 1) as u32); }"
+            )
+            .is_empty()
         );
     }
 

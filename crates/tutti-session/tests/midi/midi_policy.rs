@@ -165,7 +165,8 @@ impl Clock {
                             to: header.source,
                             data,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 if matches!(
