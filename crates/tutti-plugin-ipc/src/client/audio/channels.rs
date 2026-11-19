@@ -91,10 +91,9 @@ pub(super) struct Channels {
     commands_refused: Tally<u64>,
     /// The writer of `commands_refused`, minted in `new`.
     commands_refused_writer: TallyWriter<u64>,
-    /// Render-mode and rate changes the audio lane gave up on, ever: the control
-    /// queue stayed full, or the plugin did not apply the change within its
-    /// deadline. The change may still land; the blocks after it were not held
-    /// for it.
+    /// Render-mode and rate changes the audio lane gave up on, ever: the plugin
+    /// did not apply the change within the fence deadline. The change may still
+    /// land; the blocks after it were not held for it.
     unapplied: Tally<u64>,
     /// The audio lane's writer of `unapplied`, minted in `new`.
     unapplied_writer: TallyWriter<u64>,
@@ -570,24 +569,23 @@ impl Channels {
     /// one non-blocking write, no lock, no allocation. A refused command is
     /// counted.
     pub(super) fn push_control(&self, cmd: ControlCommand) -> bool {
-        if self.try_push_control(cmd).is_err() {
+        if self.controls.push(cmd).is_err() {
             self.note_command_refused();
             return false;
         }
-        true
-    }
-
-    /// [`push_control`](Self::push_control), handing a refused command back
-    /// uncounted, for a caller that retries.
-    pub(super) fn try_push_control(&self, cmd: ControlCommand) -> Result<(), ControlCommand> {
-        self.controls.push(cmd)?;
         self.control_bell.ring();
-        Ok(())
+        true
     }
 
     /// Writes `setting` into its slot and rings the control lane's bell: no
     /// queue, so no setting is refused. `applied` is answered once the control
     /// lane has applied it.
+    ///
+    /// **A setting jumps the control queue**: the control lane takes the slots
+    /// before it pops a queued command, so a `SetParameter` queued before a
+    /// render mode is sent after it. Across kinds the lane takes a rate before a
+    /// render mode, which is also the order the audio lane's given-up settings
+    /// are applied in.
     pub(super) fn put_setting(&self, setting: Setting, applied: Reply<()>) {
         {
             let mut slots = self.settings.lock_recover();
