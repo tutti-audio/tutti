@@ -579,10 +579,10 @@ pub enum Command {
     /// Invitation Reply: Pending, `0x11` (Host to Client).
     Pending(EndpointIdentity),
     /// Invitation Reply: Authentication Required, `0x12` (Host to Client).
-    AuthRequired(AuthChallenge),
+    AuthRequired(Box<AuthChallenge>),
     /// Invitation Reply: User Authentication Required, `0x13` (Host to
     /// Client).
-    UserAuthRequired(UserAuthChallenge),
+    UserAuthRequired(Box<UserAuthChallenge>),
     /// Ping, `0x20`.
     Ping(PingId),
     /// Ping Reply, `0x21`.
@@ -900,11 +900,11 @@ impl Command {
                         1 => AuthState::DigestWrong,
                         _ => return Err(ParseError::Reserved),
                     };
-                    Ok(Self::AuthRequired(AuthChallenge {
+                    Ok(Self::AuthRequired(Box::new(AuthChallenge {
                         state,
                         nonce,
                         identity,
-                    }))
+                    })))
                 } else {
                     let state = match header.data2() {
                         0 => UserAuthState::First,
@@ -912,11 +912,11 @@ impl Command {
                         2 => UserAuthState::UserNotFound,
                         _ => return Err(ParseError::Reserved),
                     };
-                    Ok(Self::UserAuthRequired(UserAuthChallenge {
+                    Ok(Self::UserAuthRequired(Box::new(UserAuthChallenge {
                         state,
                         nonce,
                         identity,
-                    }))
+                    })))
                 }
             }
             code::PING | code::PING_REPLY => {

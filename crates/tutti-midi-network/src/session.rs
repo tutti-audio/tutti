@@ -864,15 +864,15 @@ fn challenge_command(
     identity: EndpointIdentity,
 ) -> Command {
     match kind {
-        Challenge::SharedSecret => Command::AuthRequired(AuthChallenge {
+        Challenge::SharedSecret => Command::AuthRequired(Box::new(AuthChallenge {
             state: match because {
                 Because::Invited => AuthState::First,
                 Because::DigestWrong | Because::UserNotFound => AuthState::DigestWrong,
             },
             nonce,
             identity,
-        }),
-        Challenge::User => Command::UserAuthRequired(UserAuthChallenge {
+        })),
+        Challenge::User => Command::UserAuthRequired(Box::new(UserAuthChallenge {
             state: match because {
                 Because::Invited => UserAuthState::First,
                 Because::DigestWrong => UserAuthState::DigestWrong,
@@ -880,6 +880,6 @@ fn challenge_command(
             },
             nonce,
             identity,
-        }),
+        })),
     }
 }
