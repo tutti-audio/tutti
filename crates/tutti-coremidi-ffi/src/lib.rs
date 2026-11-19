@@ -20,16 +20,18 @@
 //! | `UmpDestination` | a native-UMP virtual destination: it hands its callback each UMP message of each packet with its time as an `Option<Duration>` since the host clock's origin, and counts a truncated tail it drops |
 //! | `ump_endpoints` | the UMP Endpoints and Function Blocks CoreMIDI reports (macOS 15's `MIDIUMPEndpoint`, Objective-C classes bound through `objc2-core-midi`), as `tutti-ump` values; `UmpEndpointsError::Unsupported` before macOS 15, where the classes do not exist, and `Exception` for an Objective-C exception CoreMIDI raises (as seen when no MIDI server is reachable) |
 //! | `UniqueId`, `OsStatus` | CoreMIDI's `kMIDIPropertyUniqueID` and the `OSStatus` of a failed call |
-//! | `SharedClient` | the process's one CoreMIDI client: only `SharedClient::start` makes it (a second start fails with `Error::ClientExists`), it retries the status CoreMIDI returns while its server exits, for a bounded time, delivers each `Notification` to the closure it was started with, and is what a virtual endpoint is created on |
+//! | `SharedClient` | the process's one CoreMIDI client: only `SharedClient::start` makes it (a second start fails with `Error::ClientExists`), it retries the status CoreMIDI returns while its server exits, for a bounded time, delivers each `Notification` to the closure it was started with, and is what the virtual endpoints and ports are created on, so the process has this one client |
 //! | `Notification`, `changes_devices` | a client notification by its `messageID`, and whether it changes the device list |
 //! | `sources`, `destinations`, `find_source`, `find_destination`, `Endpoint` | the sources and destinations CoreMIDI lists now, each owning its object reference privately with its `UniqueId` read from that same object, its name and its protocol; `find_*` takes one by `UniqueId` and checks the object's type and id (`FindError`), so a list that shifted fails and never yields another device |
-//! | `create_client` | client creation that retries the status CoreMIDI returns while its server exits, for a bounded time; the interim path of `tutti-midi-hardware`'s port client until the ports move here, after which `SharedClient` is the one client every caller takes |
+//! | `InputPort` | a native-UMP input port connected to an `Endpoint` (a source) on the `SharedClient`: it hands its callback each UMP message of each packet with its time as an `Option<Duration>` since the host clock's origin, as `UmpDestination` does, counts a truncated tail it drops, and disconnects on drop |
+//! | `OutputPort` | an output port on the `SharedClient` that sends a list of `(Option<Duration>, Ump)` to an `Endpoint` (a destination) in one event list in a `tutti_ump::Protocol`; `None` is delivery now, a time is held until then, and a packet that does not fit the list is `Error::EventListFull` |
+//! | `run_notifications` | runs the calling thread's run loop, which is where the `SharedClient` started on that thread receives its notifications, with a `CFRunLoopTimer` that calls a closure every period, so the loop never returns for want of a source |
 //! | `Timebase`, `host_ticks` | the Mach host clock CoreMIDI timestamps its packets with, and the ratio from its ticks to nanoseconds |
 //!
 //! Each `unsafe` block carries one `// SAFETY:` argument where it is introduced;
-//! `undocumented_unsafe_blocks` and `missing_safety_doc` are denied. What the safe
-//! `coremidi` crate still wraps (ports, the run loop, sending) stays in the
-//! backend until it moves here.
+//! `undocumented_unsafe_blocks` and `missing_safety_doc` are denied. An event list
+//! is built over a zeroed word buffer and passed to CoreMIDI by pointer, never as a
+//! reference to a partly written `MIDIEventList`.
 // Every `unsafe` block says why it is sound, and every `unsafe fn` what it
 // asks of its caller.
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]

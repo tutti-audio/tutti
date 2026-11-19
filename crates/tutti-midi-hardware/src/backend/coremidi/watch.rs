@@ -16,11 +16,12 @@
 //! (13 fires in a few seconds); with another client created first, on the
 //! calling thread, it never fired in four seconds, and fired when that thread
 //! ran its own run loop. So the hub starts before any other client the backend
-//! creates (`hub_first`, called by both creation sites, starts it), and a host
-//! that creates a client of its own earlier still takes the notifications. The hub thread therefore also looks
-//! again once a second whenever its loop has nothing to wait for (a loop with no
-//! source returns at once), which finds a hot-plug in about a second in that
-//! case. Nothing here has been run on a Mac with a main run loop.
+//! creates (`hub_first` starts it, and every endpoint and port is created on it),
+//! and a host that creates a client of its own earlier still takes the
+//! notifications. The hub thread therefore also looks again once a second passes
+//! with no notification, on a timer of the loop it runs
+//! (`tutti_coremidi_ffi::run_notifications`), which finds a hot-plug in about a
+//! second in that case. Nothing here has been run on a Mac with a main run loop.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -29,30 +30,22 @@ use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
-use core_foundation::runloop::CFRunLoop;
-
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::{NoWatch, Watch};
 use crate::error::{MidiHardwareError, MidiThread, Result};
-use tutti_coremidi_ffi::SharedClient;
+use tutti_coremidi_ffi::{SharedClient, run_notifications};
 use tutti_midi_device::OsDevice;
 use tutti_platform::spawn_named;
 
-/// A run loop that returns sooner than this had nothing to wait for. A loop that
-/// has a source but was stopped (`CFRunLoopStop`, which nothing here sends)
-/// would look the same; the cost is a rest and one extra look, which is
-/// harmless because a look reports only a difference.
-const IDLE_RETURN: Duration = Duration::from_millis(50);
-/// How long the hub thread rests before it runs the loop again after such a
-/// return, so a loop with no source is four wakes a second and not a spin.
-const IDLE_REST: Duration = Duration::from_millis(250);
-/// How often a hub whose run loop has no source looks again by itself: the
+/// How often the hub's timer asks whether a look is due.
+const IDLE_CHECK: Duration = Duration::from_millis(250);
+/// How long without a notification before a hub looks again by itself: the
 /// fallback for a process whose first CoreMIDI client was not the hub's.
 const IDLE_LOOK: Duration = Duration::from_secs(1);
 
-/// When a hub whose run loop has no source looks by itself: every method takes
-/// the time it is given.
+/// When a hub looks by itself, as a function of the time it is given: a look is due
+/// once [`IDLE_LOOK`] has passed since the last look or notification.
 struct IdleLooks {
     looked: Instant,
 }
@@ -62,12 +55,7 @@ impl IdleLooks {
         Self { looked: now }
     }
 
-    /// Whether a run of the loop that lasted `ran` had nothing to wait for.
-    fn is_idle(ran: Duration) -> bool {
-        ran < IDLE_RETURN
-    }
-
-    /// Whether a look is due at `now`, after a rest; when it is, it is taken.
+    /// Whether a look is due at `now`; when it is, it is taken.
     fn look_due(&mut self, now: Instant) -> bool {
         let due = now.saturating_duration_since(self.looked) >= IDLE_LOOK;
         if due {
@@ -76,9 +64,9 @@ impl IdleLooks {
         due
     }
 
-    /// The loop waited for a source and returned at `now`: notifications reach
-    /// it, so the timer starts over.
-    fn waited(&mut self, now: Instant) {
+    /// A notification arrived at `now`: they reach the loop, so the interval starts
+    /// over.
+    fn notified(&mut self, now: Instant) {
         self.looked = now;
     }
 }
@@ -170,31 +158,27 @@ fn start_hub() -> Result<(&'static Hub, SharedClient)> {
         let (ready, started) = mpsc::channel();
         // The hub thread lives as long as the process: no owner stops it.
         spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
+            let looks = Arc::new(Mutex::new(IdleLooks::new(Instant::now())));
+            let heard = Arc::clone(&looks);
             let client = SharedClient::start("tutti-midi-watch", move |notification| {
+                heard.lock_recover().notified(Instant::now());
                 if notification.changes_devices() {
                     hub.notify();
                 }
             });
             let _ = ready.send(client);
             // The client lives as long as the process.
-            if client.is_err() {
+            let Ok(client) = client else {
                 return;
-            }
-            let mut looks = IdleLooks::new(Instant::now());
-            loop {
-                let started = Instant::now();
-                CFRunLoop::run_current();
-                if IdleLooks::is_idle(started.elapsed()) {
-                    // The loop had nothing to wait for: no notification
-                    // can reach it, so look on a timer instead.
-                    std::thread::sleep(IDLE_REST);
-                    if looks.look_due(Instant::now()) {
-                        hub.notify();
-                    }
-                } else {
-                    looks.waited(Instant::now());
+            };
+            // The loop runs for the thread's life: a timer on it looks when no
+            // notification has come.
+            run_notifications(client, IDLE_CHECK, move || {
+                let due = looks.lock_recover().look_due(Instant::now());
+                if due {
+                    hub.notify();
                 }
-            }
+            });
         })
         .map_err(|source| MidiHardwareError::Spawn {
             thread: MidiThread::DeviceWatch,

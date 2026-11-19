@@ -134,10 +134,8 @@ getrandom = "0.4.3"
 mdns-sd = "0.21.7"
 # NFC composition for text written into UMP messages (M2-104 section 1.8).
 unicode-normalization = { version = "0.1", default-features = false }
-coremidi = "0.9"
-# `coremidi` does not wrap `MIDISourceCreateWithProtocol` or the UMP endpoint
-# classes: `coremidi-sys` (at the version `coremidi` pulls) and the objc2
-# bindings below reach them.
+# CoreMIDI's C API (`tutti-coremidi-ffi`'s ports, endpoints and clients) and the
+# objc2 bindings below, which reach the UMP endpoint classes.
 coremidi-sys = "3.2"
 core-foundation = "0.10"
 # The Objective-C blocks CoreMIDI and AudioUnit callbacks take, and the Mach clock.

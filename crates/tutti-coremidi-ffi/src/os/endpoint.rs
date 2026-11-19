@@ -58,6 +58,11 @@ impl Endpoint {
         })
     }
 
+    /// The endpoint's object reference, for a call that takes an endpoint.
+    pub(crate) fn reference(&self) -> MIDIEndpointRef {
+        self.reference
+    }
+
     /// Its `kMIDIPropertyUniqueID`, read when it was listed or taken.
     #[must_use]
     pub fn id(&self) -> UniqueId {

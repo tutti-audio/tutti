@@ -80,18 +80,17 @@ impl ClientRetry {
 /// Runs `create` until it succeeds, fails with a status other than
 /// the server's exit, or `RETRY_BOUND` passes; returns the last status then.
 ///
-/// The interim path of the ports' client in `tutti-midi-hardware`, which moves here
-/// with the ports; every new caller takes [`SharedClient`](crate::SharedClient)
-/// instead, which retries through this.
-///
-/// Every client creation in the process goes through here. A window that ends
+/// [`SharedClient::start`](crate::SharedClient::start) creates the process's client
+/// through here. A window that ends
 /// in failure is remembered process-wide: creations within `RETRY_BOUND` after
 /// it make one attempt each, so a persistent failure costs one wait per window.
 ///
 /// # Errors
 ///
 /// The status of the last attempt.
-pub fn create_client<T>(mut create: impl FnMut() -> Result<T, OsStatus>) -> Result<T, OsStatus> {
+pub(crate) fn create_client<T>(
+    mut create: impl FnMut() -> Result<T, OsStatus>,
+) -> Result<T, OsStatus> {
     static GAVE_UP: Mutex<Option<Instant>> = Mutex::new(None);
     let gave_up = *GAVE_UP.lock().unwrap_or_else(|p| p.into_inner());
     let mut rule = ClientRetry::new(Instant::now(), gave_up);

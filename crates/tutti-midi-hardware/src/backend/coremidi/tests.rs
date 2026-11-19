@@ -36,7 +36,7 @@ fn an_unknown_id_does_not_open() {
 
 /// Capability must be *read from the endpoint*, not assumed.
 ///
-/// The trap this guards: inputs open with `Protocol::Midi20` so CoreMIDI
+/// The trap this guards: inputs open with `Protocol::Midi2` so CoreMIDI
 /// up-converts MIDI-1.0 traffic. If `endpoint_capability` returned that
 /// choice rather than reading `kMIDIPropertyProtocolID`, every endpoint
 /// would claim MIDI 2.0 and the capability would be vestigial.
@@ -49,22 +49,16 @@ fn an_unknown_id_does_not_open() {
 /// so.
 #[test]
 fn capability_is_read_from_the_endpoint_not_assumed() {
-    // A MIDI-1.0-protocol virtual source: the safe wrapper's plain
-    // `virtual_source` is MIDI 1.0 by construction.
-    let client = match tutti_coremidi_ffi::create_client(|| {
-        Client::new("tutti-cap-test").map_err(OsStatus::new)
-    }) {
-        Ok(c) => c,
+    // A MIDI-1.0-protocol virtual source, found as the OS lists it.
+    let name = format!("tutti-cap-midi1-{}", std::process::id());
+    let Ok(_source) = UmpVirtualSource::new(&name, VirtualProtocol::Midi1) else {
         // No CoreMIDI here (sandbox/headless) — nothing to test against.
-        Err(_) => return,
-    };
-    let Ok(source) = client.virtual_source("tutti-cap-midi1") else {
         return;
     };
-
-    // The ffi reads the capability from the endpoint taken by its unique id.
-    let id = UniqueId::new(source.unique_id().expect("a unique id").cast_signed());
-    let endpoint = tutti_coremidi_ffi::find_source(id).expect("the source is listed");
+    let endpoint = tutti_coremidi_ffi::sources()
+        .into_iter()
+        .find(|source| source.name().as_deref() == Some(name.as_str()))
+        .expect("the source is listed");
     let cap = endpoint_capability(&endpoint, None);
     assert_eq!(
         cap.active().protocol,
@@ -79,7 +73,7 @@ fn capability_is_read_from_the_endpoint_not_assumed() {
 /// (every endpoint on this machine reports MIDI 2.0), so a hardcoded
 /// `midi1()` would fail *there*. Pinning it here too would need a
 /// MIDI-2.0-protocol endpoint to hand `endpoint_capability` as a
-/// `coremidi::Object` — `UmpVirtualSource` keeps its `MIDIEndpointRef`
+/// `Endpoint` — `UmpVirtualSource` keeps its `MIDIEndpointRef`
 /// private, and widening that API purely for a test is the wrong trade.
 /// Between the two, neither constant survives.
 #[test]
