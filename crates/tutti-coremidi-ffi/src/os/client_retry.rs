@@ -80,6 +80,10 @@ impl ClientRetry {
 /// Runs `create` until it succeeds, fails with a status other than
 /// the server's exit, or `RETRY_BOUND` passes; returns the last status then.
 ///
+/// The interim path of the ports' client in `tutti-midi-hardware`, which moves here
+/// with the ports; every new caller takes [`SharedClient`](crate::SharedClient)
+/// instead, which retries through this.
+///
 /// Every client creation in the process goes through here. A window that ends
 /// in failure is remembered process-wide: creations within `RETRY_BOUND` after
 /// it make one attempt each, so a persistent failure costs one wait per window.

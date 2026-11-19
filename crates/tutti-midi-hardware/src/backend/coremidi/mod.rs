@@ -67,8 +67,9 @@ mod watch;
 pub(crate) use virtual_destination::UmpVirtualDestination;
 pub(crate) use virtual_source::UmpVirtualSource;
 
-/// The process-wide CoreMIDI client every backend and virtual destination
-/// shares.
+/// The CoreMIDI client the ports of every backend share: the interim second client
+/// of the process (the first is `SharedClient`, which the watch and the virtual
+/// endpoints use), until the ports move to `tutti-coremidi-ffi`.
 ///
 /// coremidi 0.9 never disposes a [`Client`] on drop (Apple: disposing the last
 /// client may make the MIDI server exit and fail every later client creation),
@@ -238,6 +239,9 @@ impl CoreMidiEndpoints {
         })
     }
 
+    /// A `FindError` is `NotFound::Endpoint` to the caller, so a list shift and a
+    /// removal look alike.
+    ///
     /// The source `id` names, as the endpoint the OS lists and as the object a port
     /// connects to. The id is resolved by `kMIDIPropertyUniqueID`, and the object
     /// taken is checked to read it, so a list that shifted since the listing fails.
@@ -246,7 +250,9 @@ impl CoreMidiEndpoints {
         let endpoint = tutti_coremidi_ffi::find_source(unique)
             .inspect_err(|error| tracing::debug!(%error, "CoreMIDI source not taken"))
             .ok()?;
-        // The port connects to the safe wrapper's `Source`, found by the same id.
+        // Interim until the ports move to `tutti-coremidi-ffi`: the port connects
+        // to the safe wrapper's `Source`, taken again by the same id; a removal
+        // in between is `NotFound`.
         let source = Source::from_unique_id(unique.get().cast_unsigned())?;
         Some((endpoint, source))
     }
@@ -257,9 +263,10 @@ impl CoreMidiEndpoints {
         tutti_coremidi_ffi::find_destination(unique)
             .inspect_err(|error| tracing::debug!(%error, "CoreMIDI destination not taken"))
             .ok()?;
-        // The safe wrapper takes a destination by position only, so the object
-        // is the one whose own id reads `unique`: the id is read from the object
-        // taken, never from a position read earlier.
+        // Interim until the ports move to `tutti-coremidi-ffi`: the safe wrapper
+        // takes a destination by position only, so the object is the one whose
+        // own id reads `unique`, read from the object taken and never from a
+        // position read earlier; a removal in between is `NotFound`.
         let wanted = unique.get().cast_unsigned();
         (0..Destinations::count()).find_map(|index| {
             let destination = coremidi::Destination::from_index(index)?;

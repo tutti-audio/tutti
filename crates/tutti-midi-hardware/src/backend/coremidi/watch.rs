@@ -1,10 +1,9 @@
 //! Watching CoreMIDI for devices that come and go.
 //!
 //! CoreMIDI delivers a client's notifications on the run loop of the thread
-//! that created it. One process-wide client on one thread, started on first use
-//! and never ended, serves every watch: coremidi 0.9 never disposes a `Client`
-//! on drop (its `Drop` is commented out), so a client per `Devices` would leak
-//! one, and the block it holds, for each open. A watch is a registration with
+//! that created it. One `SharedClient` on one thread, started on first use and
+//! never ended, serves every watch: a client per `Devices` would accumulate,
+//! since a CoreMIDI client is never disposed. A watch is a registration with
 //! that hub, and dropping it removes the registration.
 //!
 //! On a notification that the device setup changed, each registered watch

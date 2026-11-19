@@ -23,7 +23,7 @@
 //! | `SharedClient` | the process's one CoreMIDI client: only `SharedClient::start` makes it (a second start fails with `Error::ClientExists`), it retries the status CoreMIDI returns while its server exits, for a bounded time, delivers each `Notification` to the closure it was started with, and is what a virtual endpoint is created on |
 //! | `Notification`, `changes_devices` | a client notification by its `messageID`, and whether it changes the device list |
 //! | `sources`, `destinations`, `find_source`, `find_destination`, `Endpoint` | the sources and destinations CoreMIDI lists now, each owning its object reference privately with its `UniqueId` read from that same object, its name and its protocol; `find_*` takes one by `UniqueId` and checks the object's type and id (`FindError`), so a list that shifted fails and never yields another device |
-//! | `create_client` | client creation that retries the status CoreMIDI returns while its server exits, for a bounded time |
+//! | `create_client` | client creation that retries the status CoreMIDI returns while its server exits, for a bounded time; the interim path of `tutti-midi-hardware`'s port client until the ports move here, after which `SharedClient` is the one client every caller takes |
 //! | `Timebase`, `host_ticks` | the Mach host clock CoreMIDI timestamps its packets with, and the ratio from its ticks to nanoseconds |
 //!
 //! Each `unsafe` block carries one `// SAFETY:` argument where it is introduced;

@@ -40,7 +40,8 @@ impl UniqueId {
 ///
 /// It owns its object reference privately and has no list position. The
 /// reference is CoreMIDI's, valid until the endpoint is removed; a read after
-/// that returns `None`.
+/// that returns `None`, or the value of another object if CoreMIDI reuses the
+/// reference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Endpoint {
     reference: MIDIEndpointRef,
@@ -174,8 +175,9 @@ fn find(id: UniqueId, kind: Kind) -> Result<Endpoint, FindError> {
 mod tests {
     use super::*;
 
-    /// A reference no object has reads no id, so a take of it is `Changed`, and a
-    /// listing never yields it.
+    /// The null reference has no id, so no endpoint is made of it (a listing never
+    /// yields it), and a take that finds no object (`find` gives `Missing`) never
+    /// reaches the id check.
     #[test]
     fn the_null_reference_has_no_endpoint() {
         assert_eq!(Endpoint::of(0), None);
