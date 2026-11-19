@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 use std::time::{Duration, Instant};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
-use tutti_rt::ParkedSampleRate;
+use tutti_rt::PendingSampleRate;
 
 use parking_lot::Mutex;
 
@@ -57,7 +57,7 @@ pub(crate) struct ControlBackend<L: InProcess> {
     /// The cell the audio unit parks a rate change in, shared with the
     /// node. Drained here because telling a plugin its rate deactivates and
     /// activates it, which allocates.
-    pub(crate) pending_sample_rate: Arc<ParkedSampleRate>,
+    pub(crate) pending_sample_rate: Arc<PendingSampleRate>,
     /// Where what a pump finds is delivered: a re-read that found the
     /// plugin's latency, tail or pins moved, what it asked of the transport
     /// (`PluginHandle::subscribe`).

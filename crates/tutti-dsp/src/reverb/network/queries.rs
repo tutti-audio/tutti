@@ -2,7 +2,7 @@
 
 use tutti_units::{Amplitude, Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
-use crate::{Ring, System};
+use crate::{DecayTime, System};
 
 use super::gain::decay_seconds;
 use super::{AllPass, AllPassForm, Band, Fdn, Matrix, Network, Stage, energy};
@@ -324,7 +324,7 @@ impl Network {
     ///
     /// **Exact** for a diagonal `A`, or when every line is set from one RT60;
     /// **an estimate** for a mixing `A` with lines of different decay (see
-    /// [`Fdn::rt60`]); [`tail`](Self::tail) is the figure that covers the ring.
+    /// [`Fdn::rt60`]); [`tail`](Self::tail) is the figure that covers the decay time.
     #[must_use]
     pub fn rt60(&self, band: Band) -> Seconds {
         let rate = self.rate;
@@ -456,11 +456,11 @@ impl System for Network {
     /// not the estimate, so it never undercuts a mixing network whose lines
     /// differ.
     ///
-    /// [`Ring::Unbounded`] when a loop never settles (lossless, or a gain at 1
+    /// [`DecayTime::Unbounded`] when a loop never settles (lossless, or a gain at 1
     /// or above), or when `floor` is NaN. A positive `floor` is read as 0 dB.
-    fn tail(&self, floor: Db) -> Ring {
+    fn tail(&self, floor: Db) -> DecayTime {
         if floor.get().is_nan() {
-            return Ring::Unbounded;
+            return DecayTime::Unbounded;
         }
         let floor = Db::new(floor.get().min(0.0));
         let depth = -floor.get();
@@ -481,7 +481,7 @@ impl System for Network {
                 Stage::Fdn(f) => {
                     frames += f.transit();
                     if f.is_lossless() {
-                        return Ring::Unbounded;
+                        return DecayTime::Unbounded;
                     }
                     for band in Band::ALL {
                         let seconds = f.rt60_bound(band, self.rate).get() * depth / 60.0
@@ -493,9 +493,9 @@ impl System for Network {
             }
         }
         if !frames.is_finite() || !decay.is_finite() {
-            return Ring::Unbounded;
+            return DecayTime::Unbounded;
         }
-        Ring::Finite(Seconds::new(frames / self.rate.get() + decay))
+        DecayTime::Finite(Seconds::new(frames / self.rate.get() + decay))
     }
 }
 

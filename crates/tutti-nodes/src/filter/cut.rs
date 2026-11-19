@@ -4,8 +4,8 @@
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    Butterworth, ButterworthOrder, CutResponse, LinkwitzRiley, Ring, SimdLanes, SosCoefficients,
-    System, TAIL_FLOOR,
+    Butterworth, ButterworthOrder, CutResponse, DecayTime, LinkwitzRiley, SimdLanes,
+    SosCoefficients, System, TAIL_FLOOR,
 };
 use tutti_graph::Shape;
 use tutti_units::{Hz, SampleRate, Samples, Tail};
@@ -195,10 +195,10 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
         for rung in 0..LADDER {
             let _ = self.design(rung_cutoff(rung).min(top));
             self.ladder[rung] = match self.sos.scratch().tail(TAIL_FLOOR) {
-                Ring::Finite(s) => {
+                DecayTime::Finite(s) => {
                     Tail::Finite(Samples::new((s.get() * rate.get()).ceil() as usize))
                 }
-                Ring::Unbounded => Tail::Unbounded,
+                DecayTime::Unbounded => Tail::Unbounded,
             };
         }
     }

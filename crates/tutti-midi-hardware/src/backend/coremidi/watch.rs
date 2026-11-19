@@ -38,7 +38,7 @@ use crate::endpoints::{NoWatch, Watch};
 use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_coremidi_ffi::{Operation, OsStatus};
 use tutti_midi_device::OsDevice;
-use tutti_rt::spawn_named;
+use tutti_platform::spawn_named;
 
 /// A run loop that returns sooner than this had nothing to wait for. A loop that
 /// has a source but was stopped (`CFRunLoopStop`, which nothing here sends)

@@ -107,7 +107,7 @@ pub struct Catalog {
     persist: Persist,
     unreported: Unreported,
     /// The write a finished rescan started on its own thread.
-    pending_save: Option<tutti_rt::ThreadHandle<()>>,
+    pending_save: Option<tutti_platform::ThreadHandle<()>>,
 }
 
 impl std::fmt::Debug for Catalog {
@@ -460,7 +460,7 @@ impl Catalog {
             Arc::clone(&self.persist),
             Arc::clone(&self.unreported),
         );
-        let spawned = tutti_rt::spawn_named("plugin-db-save", None, move |_| {
+        let spawned = tutti_platform::spawn_named("plugin-db-save", None, move |_| {
             let (copy, persist, unreported) = for_thread;
             let _ = persist_unattended(&persist, &unreported, &copy);
         });

@@ -59,7 +59,7 @@ use tutti_alsa_ffi::{
     Announced, Blocking, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::{EndpointId, OsDevice};
-use tutti_rt::{ThreadHandle, spawn_named};
+use tutti_platform::{ThreadHandle, spawn_named};
 
 /// Looks a settle takes before it reports the last one.
 const MAX_SETTLE: usize = 8;

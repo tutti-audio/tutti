@@ -25,8 +25,9 @@ use crate::transport::control::{self as ipc, ControlStream, ControlWait};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tutti_platform::ThreadHandle;
 use tutti_plugin_types::{BridgeError, PluginFailure};
-use tutti_rt::{Parker, ThreadHandle};
+use tutti_rt::Parker;
 
 /// The bridge's audio lane thread of an `AudioBridge`, which owns the control
 /// lane's: it speaks to the server for the queues. Dropping it shuts both down
@@ -62,9 +63,9 @@ impl BridgeThread {
         // server, bridge, next callback), and the OS elevates only the audio
         // callback's own thread, so a default-priority bridge delays the
         // reply. A refusal is an outcome on the handle, not an error.
-        let handle = tutti_rt::spawn_named(
+        let handle = tutti_platform::spawn_named(
             "plugin-bridge",
-            Some(tutti_rt::PriorityRequest::Highest),
+            Some(tutti_platform::PriorityRequest::Highest),
             move |_| {
                 run_thread(
                     thread_channels,
@@ -157,7 +158,7 @@ fn run_thread(
             stream: control,
             owed: Owed::control(lifecycle.timeouts().drain),
         };
-        tutti_rt::spawn_named("plugin-control", None, move |_| {
+        tutti_platform::spawn_named("plugin-control", None, move |_| {
             control_loop(&channels, &control_wait, &lifecycle, &listener, lane);
         })
     };

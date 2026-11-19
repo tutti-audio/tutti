@@ -35,7 +35,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{FiniteSource, InterleavedMut, Pull, Sample, Sink, SinkFailed, Source};
-use tutti_rt::{FaultLatch, StopToken, ThreadHandle, spawn_named};
+use tutti_platform::{StopToken, ThreadHandle, spawn_named};
+use tutti_rt::FaultLatch;
 use tutti_units::Samples;
 
 /// How long a [`Recorder`] parks when a [`Starved`](Pull::Starved) source
@@ -94,7 +95,7 @@ pub enum RecorderError {
 
     /// The recording thread panicked.
     #[error(transparent)]
-    Panicked(#[from] tutti_rt::Panicked),
+    Panicked(#[from] tutti_platform::Panicked),
 }
 
 /// Why [`PumpLoop::finalize`] did not end cleanly.

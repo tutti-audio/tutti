@@ -4,7 +4,7 @@
 //! other than the real-time audio path (the editor, state, parameter
 //! enumeration, timers and the run loop) run on the host's main/UI thread. The
 //! rule is in the types: an entry that must run there takes a
-//! [`MainThreadMarker`], `tutti_rt`'s proof that the holder is on the OS's main
+//! [`MainThreadMarker`], `tutti_platform`'s proof that the holder is on the OS's main
 //! thread, by value, and runs no check of its own.
 //!
 //! A `Drop` cannot take a token. One that releases something the formats close
@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-pub use tutti_rt::MainThreadMarker;
+pub use tutti_platform::MainThreadMarker;
 
 /// Work a thread that is not the main thread hands to it.
 ///

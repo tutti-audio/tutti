@@ -35,7 +35,7 @@ mod relative;
 /// return late, by the OS's scheduling and timer granularity.
 ///
 /// ```
-/// use tutti_rt::{monotonic_ns, sleep_until_ns};
+/// use tutti_platform::{monotonic_ns, sleep_until_ns};
 ///
 /// let deadline = monotonic_ns() + 1_000_000;
 /// sleep_until_ns(deadline);

@@ -785,7 +785,7 @@ impl<F: Float> Engine<F> {
 
     /// [`process`](Self::process) for a call whose start the caller dates:
     /// the block clock ([`block_clock`](Self::block_clock)) records `os_ns`,
-    /// a [`monotonic_ns`](tutti_rt::monotonic_ns) reading, as the time the
+    /// a [`monotonic_ns`](tutti_platform::monotonic_ns) reading, as the time the
     /// call began, where `process` reads the clock itself.
     ///
     /// A caller that renders to a schedule passes the instant the block was

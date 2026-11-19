@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use tutti_buffers::Float;
 use tutti_buffers::MaxBlock;
-use tutti_rt::{
+use tutti_platform::{
     PriorityRequest, StopToken, ThreadHandle, monotonic_ns, sleep_until_ns, spawn_named,
 };
 use tutti_units::Samples;
@@ -51,7 +51,7 @@ pub const DEFAULT_BLOCK: MaxBlock = MaxBlock::of(Samples::new(256));
 ///
 /// The block is the stream's [`quantum`](OutputSpec::quantum), or
 /// [`DEFAULT_BLOCK`] when the spec has none. The thread asks the OS for its
-/// highest ordinary priority ([`tutti_rt::spawn_named`]); a refusal leaves
+/// highest ordinary priority ([`tutti_platform::spawn_named`]); a refusal leaves
 /// it at the default.
 ///
 /// Pass it to [`OutputStream::start_with`](crate::OutputStream::start_with) or

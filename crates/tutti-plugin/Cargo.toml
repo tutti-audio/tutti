@@ -77,7 +77,7 @@ tutti-vst3-host = { version = "0.0.1", path = "../tutti-vst3-host", optional = t
 tutti-clap-host = { version = "0.0.1", path = "../tutti-clap-host", optional = true }
 tutti-vst2-host = { version = "0.0.1", path = "../tutti-vst2-host", optional = true }
 
-# `spawn_named`: the catalog's background save and the probe's tests' threads.
+# `LockExt` and `tally`: the plugin's locks and loss counts.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -85,6 +85,8 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
 
 [dev-dependencies]
+# `request_priority`, `PriorityRequest`: the pressure suite's priority probe.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-midi-runtime = { path = "../tutti-midi-runtime" }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 # A size for `set_editor_size`.

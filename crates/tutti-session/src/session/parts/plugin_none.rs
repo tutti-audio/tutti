@@ -2,7 +2,7 @@
 //! nothing. `plugin` is this module's twin when plugins are built.
 
 use tutti_buffers::Float;
-use tutti_rt::MainThreadMarker;
+use tutti_platform::MainThreadMarker;
 
 use crate::graph::Graph;
 use crate::pool::Defer;

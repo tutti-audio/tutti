@@ -57,7 +57,7 @@
 //!    one offline).
 //!
 //! The fork's `prepare` tells the plugin its rate itself, under the lock
-//! ([`RateDelivery::InPrepare`]): nothing pumps a fork's editor, so a parked
+//! ([`RateDelivery::InPrepare`]): nothing pumps a fork's editor, so a pending
 //! rate would never reach it.
 //!
 //! # Threads

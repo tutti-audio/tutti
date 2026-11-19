@@ -170,7 +170,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     let peak = env.iter().copied().fold(0.0, f64::max);
     let last = env.iter().rposition(|&v| v >= peak * 1e-3).unwrap();
     let took = ((last + 1) * win) as f64 / RATE.get();
-    let Ring::Finite(tail) = m.tail(Db::new(-60.0)) else {
+    let DecayTime::Finite(tail) = m.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
     assert!(

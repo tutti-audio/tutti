@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
-use tutti_rt::ParkedSampleRate;
+use tutti_rt::PendingSampleRate;
 
 use parking_lot::Mutex;
 
@@ -235,7 +235,7 @@ struct Wired<L: Loaded, F: Float> {
     inner: Arc<Mutex<Instance<L>>>,
     /// Where the audio side parks a rate for the main thread's pump; drained
     /// by the handle's backend.
-    pending_sample_rate: Arc<ParkedSampleRate>,
+    pending_sample_rate: Arc<PendingSampleRate>,
     descriptor: PluginDescriptor,
     /// The wiring as the plugin reports it, with the presets it can list.
     loaded: LoadedPlugin,
@@ -287,11 +287,11 @@ where
     // backend's drain end are the same cell: the audio thread parks a rate in
     // it, `editor_idle` dispatches from it.
     //
-    // A parked rate change, and the re-reads of latency, tail and pin counts
+    // A pending rate change, and the re-reads of latency, tail and pin counts
     // (`Instance::pump`, raised as `PluginInvalidation` through the handle's
     // `on_invalidate`), run on the main thread's tick: `PluginHandle::editor_idle`
     // or the node's `Rebinder::tick`, which the session calls at each update.
-    let pending_sample_rate = Arc::new(ParkedSampleRate::new());
+    let pending_sample_rate = Arc::new(PendingSampleRate::new());
     // `loaded.features`, not a local copy, so the node gates its per-block
     // transport send on the exact value the handle reports. One value, read
     // twice, cannot drift into a declared-but-undelivered capability.
@@ -392,7 +392,7 @@ where
         declared,
         wiring.features,
         prepare.rate(),
-        Arc::new(ParkedSampleRate::new()),
+        Arc::new(PendingSampleRate::new()),
         None,
         parameters,
         spares,

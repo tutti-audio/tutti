@@ -352,7 +352,7 @@ fn a_rate_change_keeps_the_render_mode() {
 
     assert!(loaded.handle.announce_render_mode(RenderMode::Offline));
     drive_blocks_at(&mut loaded.unit, 44_100.0, BLOCK, BLOCK);
-    // The drain point of the rate the audio side parked.
+    // The drain point of the rate the audio side left pending.
     loaded.handle.editor_idle(main_thread());
     drive_blocks_at(&mut loaded.unit, 44_100.0, BLOCK, BLOCK);
     let cap = read_capture(&loaded.path);

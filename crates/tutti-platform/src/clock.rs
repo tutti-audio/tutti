@@ -8,6 +8,9 @@
 //!   `AudioConvertHostTimeToNanos`) is that clock.
 //! - Windows: `QueryPerformanceCounter`, scaled to nanoseconds by its
 //!   frequency (fixed at boot).
+//! - The web (`wasm32`): nanoseconds since the first call, from [`Instant`](crate::Instant)
+//!   (`performance.now()`). No plugin runs and no second process exists
+//!   there, so an origin at the first call is enough.
 //!
 //! The OS's epoch, not one this process started: a plugin in another process
 //! (a plugin server) reads the same timebase without being handed an origin,
@@ -29,6 +32,7 @@ pub fn monotonic_ns() -> i64 {
 
 #[cfg_attr(unix, path = "clock/unix.rs")]
 #[cfg_attr(windows, path = "clock/windows.rs")]
+#[cfg_attr(target_arch = "wasm32", path = "clock/wasm.rs")]
 mod os;
 
 #[cfg(test)]

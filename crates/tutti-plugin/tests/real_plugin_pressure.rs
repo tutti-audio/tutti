@@ -757,7 +757,7 @@ fn answering_plugins_carry_audio_beside_stalled_ones() {
 ///
 /// What "raised" means is derived, not restated: a scratch thread of this
 /// process makes the same call `request_audio_priority` makes
-/// (`tutti_rt::request_priority(PriorityRequest::Highest)`), under the same
+/// (`tutti_platform::request_priority(PriorityRequest::Highest)`), under the same
 /// limits the server inherits from it, and the server must match what it
 /// got. Where the OS refuses (an unprivileged CI runner: `RLIMIT_NICE` 0 and
 /// no `CAP_SYS_NICE`), both stay where they started, and this checks only
@@ -786,7 +786,8 @@ fn plugin_server_audio_thread_is_raised_where_the_os_allows() {
 
     let _machine = machine_lock();
     let (raised, expected) = std::thread::spawn(|| {
-        let raised = tutti_rt::request_priority(tutti_rt::PriorityRequest::Highest).is_granted();
+        let raised =
+            tutti_platform::request_priority(tutti_platform::PriorityRequest::Highest).is_granted();
         (raised, sched("/proc/thread-self/stat"))
     })
     .join()

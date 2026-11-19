@@ -54,6 +54,8 @@ tutti-codec = { version = "0.0.1", path = "../tutti-codec", optional = true }
 
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
+# `spawn_named`: the device-listing and poller threads.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 
 [dev-dependencies]

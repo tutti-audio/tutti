@@ -6,7 +6,7 @@
 //! there.
 //!
 //! - **Every crate root forbids `unsafe`**, `src/lib.rs` and `src/main.rs`
-//!   alike, except the crates in [`HOMES`]: the `-ffi` crates, `tutti-rt`,
+//!   alike, except the crates in [`HOMES`]: the `-ffi` crates, `tutti-rt`, `tutti-platform`,
 //!   `tutti-plugin-types` (which denies it and allows one
 //!   constructor). This subsumes the old host
 //!   crates' scans, `plugin-server`'s loaders and the VST2 caller pins. A home
@@ -37,6 +37,11 @@ pub(super) const HOMES: &[(&str, &str, Option<&str>)] = &[
     (
         "tutti-rt",
         "the lock-free and unsafe runtime structure",
+        None,
+    ),
+    (
+        "tutti-platform",
+        "the OS calls' unsafe (clock, thread priority, main thread, denormal control)",
         None,
     ),
     ("tutti-alsa-ffi", "all ALSA unsafe", None),
@@ -260,7 +265,7 @@ mod tests {
         let r = check(&clean());
         assert!(r.passed(), "{:?}", r.findings);
         assert!(
-            r.out[0].starts_with("check-ffi: ok (31 crates"),
+            r.out[0].starts_with("check-ffi: ok (32 crates"),
             "{:?}",
             r.out
         );

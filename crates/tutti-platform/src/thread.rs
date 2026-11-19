@@ -22,12 +22,18 @@ use std::any::Any;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::{Builder, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::LockExt;
+use crate::Instant;
 use crate::priority::{PriorityOutcome, PriorityRequest, request_priority};
+
+/// A `Mutex`'s guard whether or not a panicking holder poisoned it. Each lock here guards
+/// a flag or `()` that no panic can leave half-written.
+fn lock_recover<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// A thread's body panicked.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -58,13 +64,13 @@ struct Ended {
 
 impl Ended {
     fn set(&self) {
-        *self.ended.lock_recover() = true;
+        *lock_recover(&self.ended) = true;
         self.wake.notify_all();
     }
 
     /// Waits at most `timeout` for [`set`](Self::set); returns whether it came.
     fn wait(&self, timeout: Duration) -> bool {
-        let ended = self.ended.lock_recover();
+        let ended = lock_recover(&self.ended);
         *self
             .wake
             .wait_timeout_while(ended, timeout, |ended| !*ended)
@@ -127,7 +133,7 @@ impl StopToken {
     pub fn stop(&self) {
         // The flag is set under the gate, so a waiter that checked it before
         // the store is already parked on the condvar when the notify comes.
-        let _gate = self.state.gate.lock_recover();
+        let _gate = lock_recover(&self.state.gate);
         self.state.stopped.store(true, Ordering::Release);
         self.state.wake.notify_all();
     }
@@ -137,7 +143,7 @@ impl StopToken {
     #[must_use = "true means the body should return"]
     pub fn wait(&self, timeout: Duration) -> bool {
         let deadline = Deadline::after(Instant::now(), timeout);
-        let mut gate = self.state.gate.lock_recover();
+        let mut gate = lock_recover(&self.state.gate);
         loop {
             if self.is_stopped() {
                 return true;

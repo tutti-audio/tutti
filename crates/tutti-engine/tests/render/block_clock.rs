@@ -67,12 +67,12 @@ fn each_call_publishes_where_it_began() {
         let reader = engine.block_clock();
         assert_eq!(reader.read(), None, "nothing before the first call");
 
-        let before = tutti_rt::monotonic_ns();
+        let before = tutti_platform::monotonic_ns();
         render(&engine, 256, segment);
         let first = reader.read().expect("published by the first call");
         assert_eq!(first.frame, Frame::new(0));
         assert_eq!(first.rate, SampleRate::of(RATE));
-        assert!(first.os_ns >= before && first.os_ns <= tutti_rt::monotonic_ns());
+        assert!(first.os_ns >= before && first.os_ns <= tutti_platform::monotonic_ns());
 
         render(&engine, 512, segment);
         let second = reader.read().expect("published by the second call");

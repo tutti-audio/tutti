@@ -16,7 +16,7 @@ use tutti_rt::LockExt;
 
 use tutti_graph::Offset;
 use tutti_midi_runtime::ActiveSensingSender;
-use tutti_rt::{StopToken, ThreadHandle, spawn_named};
+use tutti_platform::{StopToken, ThreadHandle, spawn_named};
 use tutti_ump::{MidiGroup, Protocol, Ump};
 
 use crate::endpoints::DeviceOut;

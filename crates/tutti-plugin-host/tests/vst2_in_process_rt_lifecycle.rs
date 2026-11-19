@@ -298,7 +298,7 @@ fn set_sample_rate_parks_the_rate_instead_of_dispatching_it() {
     drop(loaded.handle);
 }
 
-/// The parked rate is not dropped: the main-thread drain delivers it, once
+/// The pending rate is not dropped: the main-thread drain delivers it, once
 /// the audio thread has handed the Processor back.
 ///
 /// This is the positive half of the test above. Without it, "nothing was
@@ -309,7 +309,7 @@ fn set_sample_rate_parks_the_rate_instead_of_dispatching_it() {
 /// The drain recalls the Processor, which is on the audio thread; the next
 /// block hands it back (and renders silence), and the next drain runs the
 /// change.
-fn the_parked_rate_reaches_the_plugin_on_the_main_thread_drain() {
+fn the_pending_rate_reaches_the_plugin_on_the_main_thread_drain() {
     let _guard = lock_probe();
     let mut loaded = load();
 
@@ -333,7 +333,7 @@ fn the_parked_rate_reaches_the_plugin_on_the_main_thread_drain() {
     let after = read_capture(&loaded.path);
     assert_eq!(
         after.sample_rate, 96_000.0,
-        "the rate parked by prepare never reached the plugin"
+        "the rate left pending by prepare never reached the plugin"
     );
     // And it arrived through the bracket, which is what makes it safe to
     // deliver at all: one suspend and one resume, on the main thread.
@@ -385,12 +385,12 @@ fn a_prepare_on_the_main_thread_tells_the_plugin_at_once() {
     drop(loaded.handle);
 }
 
-/// A second drain with nothing parked must dispatch nothing.
+/// A second drain with nothing pending must dispatch nothing.
 ///
 /// `effMainsChanged` is not documented as idempotent and the probe counts each
 /// direction, so a drain that fired unconditionally would suspend and resume a
 /// running plugin on every editor frame.
-fn a_drain_with_nothing_parked_dispatches_nothing() {
+fn a_drain_with_nothing_pending_dispatches_nothing() {
     let _guard = lock_probe();
     let loaded = load();
 
@@ -713,9 +713,9 @@ fn main() {
         reset_dispatches_no_mains_changed_to_the_plugin,
         blocks_past_64_frames_reach_the_plugin_after_a_prepare,
         set_sample_rate_parks_the_rate_instead_of_dispatching_it,
-        the_parked_rate_reaches_the_plugin_on_the_main_thread_drain,
+        the_pending_rate_reaches_the_plugin_on_the_main_thread_drain,
         a_prepare_on_the_main_thread_tells_the_plugin_at_once,
-        a_drain_with_nothing_parked_dispatches_nothing,
+        a_drain_with_nothing_pending_dispatches_nothing,
         the_output_is_what_the_plugin_wrote,
         a_plugin_wider_than_a_block_is_refused_at_load,
         the_handle_counts_lost_parameter_reports,
