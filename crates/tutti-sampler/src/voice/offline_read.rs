@@ -241,7 +241,7 @@ impl<F: Float> OfflineRead<F> {
             }
             (Direction::Forward, Some(span)) => {
                 let (p, looped) = span.place(pos.get());
-                open.read_looped_into(&span, SamplePosition(p), looped, place, out);
+                open.read_looped_into(&span, SamplePosition::new(p), looped, place, out);
             }
             (Direction::Forward, None) => open.read_into(pos, place, out),
         }
@@ -358,7 +358,7 @@ impl<F: Float> Open<F> {
     /// Interpolate position `p` into `out` as `read_frame` would from the
     /// whole file resident: silence at and past the end.
     fn read_into(&mut self, p: SamplePosition, place: &Place<F>, out: &mut [F]) {
-        if p >= SamplePosition(0.0).advanced_by(Samples(self.len())) {
+        if p >= SamplePosition::new(0.0).advanced_by(Samples::new(self.len())) {
             out.fill(F::ZERO);
             return;
         }
@@ -380,7 +380,7 @@ impl<F: Float> Open<F> {
         place: &Place<F>,
         out: &mut [F],
     ) {
-        if p >= SamplePosition(0.0).advanced_by(Samples(self.len())) {
+        if p >= SamplePosition::new(0.0).advanced_by(Samples::new(self.len())) {
             out.fill(F::ZERO);
             return;
         }
@@ -515,15 +515,15 @@ impl<F: Float> Pages<F> {
         page.frames = frames;
         page.data.clear();
         page.data
-            .resize(self.layout.interleaved_len(Samples(frames)), F::ZERO);
+            .resize(self.layout.interleaved_len(Samples::new(frames)), F::ZERO);
         #[cfg(codec)]
         {
             let fail = |what: ReadFault| OfflineReadError {
                 path: self.path.clone(),
                 what,
             };
-            if self.decoder.cursor() != Samples(start)
-                && let Err(source) = self.decoder.seek(Samples(start))
+            if self.decoder.cursor() != Samples::new(start)
+                && let Err(source) = self.decoder.seek(Samples::new(start))
             {
                 self.fault.latch(fail(ReadFault::Seek {
                     frame: start,
@@ -604,7 +604,12 @@ mod tests {
             let mut read = reader(path.clone());
             let mut out = [0.0f32; 1];
             for k in 0..LEN {
-                read.read_into(SamplePosition(k as f64), direction, &Place::FAN, &mut out);
+                read.read_into(
+                    SamplePosition::new(k as f64),
+                    direction,
+                    &Place::FAN,
+                    &mut out,
+                );
                 let want = match direction {
                     Direction::Forward => value(k),
                     Direction::Reverse => value(LEN - 1 - k),
@@ -641,7 +646,7 @@ mod tests {
         let mut out = [0.0f32; 1];
         let mut at = |pos: f64| {
             read.read_into(
-                SamplePosition(pos),
+                SamplePosition::new(pos),
                 Direction::Forward,
                 &Place::FAN,
                 &mut out,
@@ -664,14 +669,14 @@ mod tests {
         let mut read = reader(ramp_file(dir.path()));
         let mut out = [0.0f32; 1];
         read.read_into(
-            SamplePosition(10.0),
+            SamplePosition::new(10.0),
             Direction::Forward,
             &Place::FAN,
             &mut out,
         );
         assert!(read.is_open());
         read.read_into(
-            SamplePosition((LEN + 10) as f64),
+            SamplePosition::new((LEN + 10) as f64),
             Direction::Forward,
             &Place::FAN,
             &mut out,
@@ -679,7 +684,7 @@ mod tests {
         assert_eq!(out[0], 0.0);
         assert!(!read.is_open(), "the file is still open past its end");
         read.read_into(
-            SamplePosition((LEN + 20) as f64),
+            SamplePosition::new((LEN + 20) as f64),
             Direction::Forward,
             &Place::FAN,
             &mut out,
@@ -707,7 +712,7 @@ mod tests {
         );
         let mut out = [0.0f32; 2];
         read.read_into(
-            SamplePosition(100.0),
+            SamplePosition::new(100.0),
             Direction::Forward,
             &Place::FAN,
             &mut out,
@@ -737,7 +742,7 @@ mod tests {
                         Arc::default(),
                     );
                     let mut out = [1.0f32; 2];
-                    read.read_into(SamplePosition(pos), direction, &Place::FAN, &mut out);
+                    read.read_into(SamplePosition::new(pos), direction, &Place::FAN, &mut out);
                     assert_eq!(out, [0.0; 2], "{loop_:?} {direction:?} at {pos}");
                 }
             }
@@ -786,7 +791,7 @@ mod tests {
         let mut out = [F::ZERO; 2];
         for k in (0..FRAMES).step_by(7).chain([FRAMES - 1]) {
             read.read_into(
-                SamplePosition(k as f64),
+                SamplePosition::new(k as f64),
                 Direction::Forward,
                 &Place::FAN,
                 &mut out,
@@ -834,7 +839,7 @@ mod tests {
             let mut out = [0.0f64; 2];
             for k in 0..16 {
                 read.read_into(
-                    SamplePosition(k as f64),
+                    SamplePosition::new(k as f64),
                     Direction::Forward,
                     &Place::FAN,
                     &mut out,

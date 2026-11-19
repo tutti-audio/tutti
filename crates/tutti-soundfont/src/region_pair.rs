@@ -103,15 +103,15 @@ impl<'a> RegionPair<'a> {
     }
 
     pub(crate) fn modulation_lfo_to_pitch(&self) -> Cents {
-        Cents(f64::from(self.gs(SummedGenerator::ModulationLfoToPitch)))
+        Cents::new(f64::from(self.gs(SummedGenerator::ModulationLfoToPitch)))
     }
 
     pub(crate) fn vibrato_lfo_to_pitch(&self) -> Cents {
-        Cents(f64::from(self.gs(SummedGenerator::VibratoLfoToPitch)))
+        Cents::new(f64::from(self.gs(SummedGenerator::VibratoLfoToPitch)))
     }
 
     pub(crate) fn modulation_envelope_to_pitch(&self) -> Cents {
-        Cents(f64::from(
+        Cents::new(f64::from(
             self.gs(SummedGenerator::ModulationEnvelopeToPitch),
         ))
     }
@@ -122,23 +122,23 @@ impl<'a> RegionPair<'a> {
 
     /// The resonance, the height of the filter's peak above its DC gain.
     pub(crate) fn initial_filter_q(&self) -> Db {
-        Db(self.tenths(SummedGenerator::InitialFilterQ))
+        Db::new(self.tenths(SummedGenerator::InitialFilterQ))
     }
 
     pub(crate) fn modulation_lfo_to_filter_cutoff_frequency(&self) -> Cents {
-        Cents(f64::from(
+        Cents::new(f64::from(
             self.gs(SummedGenerator::ModulationLfoToFilterCutoffFrequency),
         ))
     }
 
     pub(crate) fn modulation_envelope_to_filter_cutoff_frequency(&self) -> Cents {
-        Cents(f64::from(self.gs(
-            SummedGenerator::ModulationEnvelopeToFilterCutoffFrequency,
-        )))
+        Cents::new(f64::from(
+            self.gs(SummedGenerator::ModulationEnvelopeToFilterCutoffFrequency),
+        ))
     }
 
     pub(crate) fn modulation_lfo_to_volume(&self) -> Db {
-        Db(self.tenths(SummedGenerator::ModulationLfoToVolume))
+        Db::new(self.tenths(SummedGenerator::ModulationLfoToVolume))
     }
 
     /// The chorus send generator's sum over both zones, in tenths of a percent
@@ -158,7 +158,7 @@ impl<'a> RegionPair<'a> {
     /// The zone's pan, `-1` hard left to `1` hard right: the generator's tenths of a
     /// percent over its 500.
     pub(crate) fn pan(&self) -> Pan {
-        Pan(f64::from(self.gs(SummedGenerator::Pan)) / 500.0)
+        Pan::new(f64::from(self.gs(SummedGenerator::Pan)) / 500.0)
     }
 
     pub(crate) fn delay_modulation_lfo(&self) -> Seconds {
@@ -229,7 +229,7 @@ impl<'a> RegionPair<'a> {
 
     /// How far the volume envelope's decay falls below its peak.
     pub(crate) fn sustain_volume_envelope(&self) -> Db {
-        Db(self.tenths(SummedGenerator::SustainVolumeEnvelope))
+        Db::new(self.tenths(SummedGenerator::SustainVolumeEnvelope))
     }
 
     pub(crate) fn release_volume_envelope(&self) -> Seconds {
@@ -239,7 +239,7 @@ impl<'a> RegionPair<'a> {
     /// The volume envelope's release as a voice starts it: never
     /// below the 10 ms that avoids a pop.
     pub(crate) fn release_time(&self) -> Seconds {
-        self.release_volume_envelope().max(Seconds(0.01))
+        self.release_volume_envelope().max(Seconds::new(0.01))
     }
 
     pub(crate) fn key_number_to_volume_envelope_hold(&self) -> i32 {
@@ -252,7 +252,7 @@ impl<'a> RegionPair<'a> {
 
     /// The attenuation generator 48 asks for.
     pub(crate) fn initial_attenuation(&self) -> Db {
-        Db(self.tenths(SummedGenerator::InitialAttenuation))
+        Db::new(self.tenths(SummedGenerator::InitialAttenuation))
     }
 
     pub(crate) fn coarse_tune(&self) -> i32 {
@@ -359,9 +359,9 @@ mod tests {
             "{release}"
         );
         let font = both(generator::INITIAL_ATTENUATION, 1000);
-        assert_eq!(with(&font, |p| p.initial_attenuation()), Db(144.0));
+        assert_eq!(with(&font, |p| p.initial_attenuation()), Db::new(144.0));
         let font = both(17, -400);
-        assert_eq!(with(&font, |p| p.pan()), Pan(-1.0));
+        assert_eq!(with(&font, |p| p.pan()), Pan::new(-1.0));
         let font = pair(
             vec![(generator::RELEASE_VOL_ENV, 1200)],
             vec![(generator::RELEASE_VOL_ENV, 1200)],
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn a_release_is_at_least_ten_milliseconds() {
         let default = pair(vec![], vec![]);
-        assert_eq!(with(&default, |p| p.release_time()), Seconds(0.01));
+        assert_eq!(with(&default, |p| p.release_time()), Seconds::new(0.01));
         let long = pair(vec![], vec![(generator::RELEASE_VOL_ENV, 1200)]);
         assert!((with(&long, |p| p.release_time()).get() - 2.0).abs() < 1e-14);
     }
@@ -393,7 +393,7 @@ mod tests {
         const PAN: u16 = 17;
         const REVERB_SEND: u16 = 16;
         let font = pair(vec![], vec![(PAN, -500), (REVERB_SEND, 250)]);
-        assert_eq!(with(&font, |p| p.pan()), Pan(-1.0));
+        assert_eq!(with(&font, |p| p.pan()), Pan::new(-1.0));
         assert_eq!(with(&font, |p| p.reverb_effects_send()), 250);
     }
 

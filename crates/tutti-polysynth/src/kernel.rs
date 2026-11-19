@@ -19,7 +19,7 @@ use tutti_units::{PhaseIncrement, Real};
 /// of a discontinuity. Past half a cycle per sample those two regions overlap
 /// and the correction double-counts, so a pitch above Nyquist is clamped just
 /// below it rather than rendered as garbage.
-pub(crate) const MAX_INCREMENT: PhaseIncrement = PhaseIncrement(0.49);
+pub(crate) const MAX_INCREMENT: PhaseIncrement = PhaseIncrement::new(0.49);
 
 /// The coefficients of `sin(y) / y` in `y²`: `(-1)^n / (2n + 1)!`.
 const SIN_TERMS: [f64; 11] = {

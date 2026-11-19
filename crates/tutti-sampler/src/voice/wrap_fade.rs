@@ -110,7 +110,7 @@ impl Rig {
                 let mut pool = VoicePool::with_channels(ChannelLayout::STEREO).expect("stereo");
                 pool.prepare(&Prepare::new(
                     SampleRate::of(SR),
-                    MaxBlock::of(Samples(max_block)),
+                    MaxBlock::of(Samples::new(max_block)),
                 ));
                 Hosted::Pool(pool)
             }
@@ -170,7 +170,7 @@ impl Rig {
                 });
                 node.prepare(&Prepare::new(
                     SampleRate::of(SR),
-                    MaxBlock::of(Samples(self.max_block)),
+                    MaxBlock::of(Samples::new(self.max_block)),
                 ));
                 *slot = Some(node);
             }
@@ -179,7 +179,7 @@ impl Rig {
                 source.set_loop(play.loop_);
                 source.prepare(&Prepare::new(
                     SampleRate::of(SR),
-                    MaxBlock::of(Samples(self.max_block)),
+                    MaxBlock::of(Samples::new(self.max_block)),
                 ));
                 *node = source;
             }
@@ -214,20 +214,23 @@ impl Rig {
         let mut changes = TransportChanges::NONE;
         if let Some((at, to)) = change {
             changes
-                .push(Offset::new(Samples(at), Samples(len)).expect("inside"), to)
+                .push(
+                    Offset::new(Samples::new(at), Samples::new(len)).expect("inside"),
+                    to,
+                )
                 .expect("room");
         }
         let env = Env {
             frame: Frame::new(self.frame),
             sample_rate: SampleRate::of(SR),
-            block_len: Samples(len),
+            block_len: Samples::new(len),
             transport: self.transport(true),
             changes,
             play: tutti_graph::PlayClock::ZERO,
         };
         let out = self.drive(&env);
         self.frame += len as u64;
-        self.clock.advance(Samples(len), self.looping);
+        self.clock.advance(Samples::new(len), self.looping);
         out
     }
 
@@ -241,7 +244,7 @@ impl Rig {
         looping: Option<LoopRange>,
     ) -> Vec<Vec<f32>> {
         let mut here = self.clock;
-        here.advance(Samples(at), self.looping);
+        here.advance(Samples::new(at), self.looping);
         let to = TransportPosition::new(
             true,
             Bpm::of(tempo),
@@ -251,7 +254,7 @@ impl Rig {
         let out = self.block(len, Some((at, to)));
         self.clock = to.clock(SampleRate::of(SR));
         self.looping = looping;
-        self.clock.advance(Samples(len - at), looping);
+        self.clock.advance(Samples::new(len - at), looping);
         out
     }
 
@@ -295,10 +298,10 @@ fn step_bound(freq: f64, fade: usize) -> f32 {
 /// The fade in frames at 48 kHz.
 #[test]
 fn the_fade_is_five_milliseconds() {
-    assert_eq!(declick_frames(SampleRate::of(SR)), Samples(FADE));
+    assert_eq!(declick_frames(SampleRate::of(SR)), Samples::new(FADE));
     assert_eq!(
         declick_frames(SampleRate::SR_96K),
-        Samples(2 * FADE),
+        Samples::new(2 * FADE),
         "a time, not a frame count"
     );
 }
@@ -462,7 +465,7 @@ fn a_seek_or_a_stop_during_the_fade_ends_it(host: Host) {
     rig.place(1, &w, 0.0, None);
     rig.run(WRAP - 100, 1000);
     // Block of 400: the wrap is at frame 100, a seek to beat 2 at 150.
-    let to = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), None);
+    let to = TransportPosition::new(true, Bpm::of(120.0), Beat::new(2.0), None);
     let out = rig.block(400, Some((150, to)));
     for k in 0..250 {
         assert_eq!(
@@ -475,7 +478,7 @@ fn a_seek_or_a_stop_during_the_fade_ends_it(host: Host) {
     let mut rig = Rig::new(host, Some(region(LOOP_START_BEATS, LOOP_BEATS)), 1000);
     rig.place(1, &w, 0.0, None);
     rig.run(WRAP - 100, 1000);
-    let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(0.01), None);
+    let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.01), None);
     let out = rig.block(400, Some((150, stopped)));
     assert!(out[0][150..].iter().all(|&s| s == 0.0));
     // Rolling again where it stands: the loop's start alone.
@@ -484,7 +487,7 @@ fn a_seek_or_a_stop_during_the_fade_ends_it(host: Host) {
     let env = Env {
         frame: Frame::new(rig.frame),
         sample_rate: SampleRate::of(SR),
-        block_len: Samples(64),
+        block_len: Samples::new(64),
         transport: restart,
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,
@@ -504,7 +507,7 @@ fn a_non_finite_gain_renders_silence(host: Host) {
         let w = wave(1, 4 * FPB, tone);
         let mut rig = Rig::new(host, Some(region(LOOP_START_BEATS, LOOP_BEATS)), 1000);
         let play = Playback {
-            gain: tutti_units::Amplitude(gain),
+            gain: tutti_units::Amplitude::new(gain),
             ..Playback::default()
         };
         rig.place_with(1, &w, 100.0 / FPB as f64, None, play);

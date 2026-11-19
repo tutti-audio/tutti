@@ -162,7 +162,7 @@ impl<F: Float + FftFloat> Unit<F> {
         let first = Vocoder::<F>::new(geometry);
         let mut vocoders: Vec<Vocoder<F>> = (1..n).map(|_| first.clone_fresh()).collect();
         vocoders.push(first);
-        Self::from_vocoders(vocoders, width, StretchFactor::UNITY, Cents(0.0), true)
+        Self::from_vocoders(vocoders, width, StretchFactor::UNITY, Cents::new(0.0), true)
     }
 
     /// A unit over `vocoders` (one per channel of `width`), its block scratch
@@ -446,7 +446,7 @@ impl<F: Float + FftFloat> Unit<F> {
         if !self.is_processing() {
             return ReadRate::UNITY;
         }
-        ReadRate(1.0 / self.stretch_factor().get())
+        ReadRate::new(1.0 / self.stretch_factor().get())
     }
 }
 
@@ -456,9 +456,9 @@ const STRETCH_EPSILON: f64 = 0.001;
 /// Half a cent — beneath the threshold of hearing.
 const PITCH_EPSILON_CENTS: f64 = 0.5;
 /// Two octaves down.
-pub(super) const MIN_PITCH: Cents = Cents(-2400.0);
+pub(super) const MIN_PITCH: Cents = Cents::new(-2400.0);
 /// Two octaves up.
-pub(super) const MAX_PITCH: Cents = Cents(2400.0);
+pub(super) const MAX_PITCH: Cents = Cents::new(2400.0);
 
 /// `cents` within [`MIN_PITCH`]..=[`MAX_PITCH`]; a non-finite value is no
 /// transposition. `Cents::clamp` alone passes NaN through, and a NaN
@@ -467,7 +467,7 @@ pub(super) fn clamp_pitch(cents: Cents) -> Cents {
     if cents.get().is_finite() {
         cents.clamp(MIN_PITCH, MAX_PITCH)
     } else {
-        Cents(0.0)
+        Cents::new(0.0)
     }
 }
 

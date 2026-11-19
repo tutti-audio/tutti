@@ -109,7 +109,7 @@ pub(crate) struct SynthVoice {
 fn channel_level(channel: &ChannelState) -> Amplitude {
     let relative = f64::from(channel.volume()) * f64::from(channel.expression())
         / f64::from(ChannelState::DEFAULT_LEVEL);
-    Amplitude(relative * relative)
+    Amplitude::new(relative * relative)
 }
 
 /// The cutoff factor of a control `x` off its centre: `4^x`, two octaves per unit.
@@ -134,16 +134,16 @@ fn unity_centre_pan(pan: Pan) -> (Amplitude, Amplitude) {
     let p = pan.get();
     let p = if p.is_nan() { 0.0 } else { p.clamp(-1.0, 1.0) };
     if p <= -1.0 {
-        return (Amplitude(std::f64::consts::SQRT_2), Amplitude::SILENT);
+        return (Amplitude::new(std::f64::consts::SQRT_2), Amplitude::SILENT);
     }
     if p >= 1.0 {
-        return (Amplitude::SILENT, Amplitude(std::f64::consts::SQRT_2));
+        return (Amplitude::SILENT, Amplitude::new(std::f64::consts::SQRT_2));
     }
     // `sqrt(2) cos(Pi/4 + d)` is `cos d - sin d` and `sqrt(2) sin(Pi/4 + d)` is
     // `cos d + sin d`, with `d` the angle off the centre: written so, the centre
     // is 1 exactly, where `SQRT_2 * FRAC_PI_4.cos()` is one ulp off.
     let (sin, cos) = (std::f64::consts::FRAC_PI_4 * p).sin_cos();
-    (Amplitude(cos - sin), Amplitude(cos + sin))
+    (Amplitude::new(cos - sin), Amplitude::new(cos + sin))
 }
 
 impl SynthVoice {
@@ -180,7 +180,7 @@ impl SynthVoice {
         index: usize,
         channel: &ChannelState,
     ) -> Amplitude {
-        Amplitude(bank.envelope(bank.lane(index, 0)).get() * self.voice_gain(channel).get())
+        Amplitude::new(bank.envelope(bank.lane(index, 0)).get() * self.voice_gain(channel).get())
     }
 
     /// Whether this voice is silent, so a note-on would start it fresh.
@@ -221,7 +221,7 @@ impl SynthVoice {
         let (base_filter_cutoff, base_filter_resonance) = match config.filter {
             FilterType::Moog { cutoff, resonance } => (cutoff, resonance),
             FilterType::Svf { cutoff, .. } => (cutoff, Resonance::NONE),
-            FilterType::None => (Hz(20000.0), Resonance::NONE),
+            FilterType::None => (Hz::new(20000.0), Resonance::NONE),
         };
 
         Self {
@@ -435,15 +435,15 @@ impl SynthVoice {
                 }
                 None => (1.0, Pan::CENTER, Amplitude::UNITY),
             };
-            bank.set_pitch(lane, Hz(freq * ratio));
+            bank.set_pitch(lane, Hz::new(freq * ratio));
             // Constant-power pan law, then the unison voice's own gain and the
             // voice's. Evaluated per control step, not per sample.
             let (left, right) = pan_gains(pan, PanLaw::SquareRoot);
             let g = amplitude.get() * gain.get();
             bank.set_gains(
                 lane,
-                Amplitude(left.get() * g * pan_left.get()),
-                Amplitude(right.get() * g * pan_right.get()),
+                Amplitude::new(left.get() * g * pan_left.get()),
+                Amplitude::new(right.get() * g * pan_right.get()),
             );
             if self.snap_tone {
                 bank.snap_tone(lane);
@@ -461,7 +461,7 @@ impl SynthVoice {
     /// channel's Volume and Expression, combined.
     fn voice_gain(&self, channel: &ChannelState) -> Amplitude {
         let factors = self.mpe.gain_factors(channel.pressure());
-        Amplitude(
+        Amplitude::new(
             self.velocity.get()
                 * factors.pressure.get()
                 * factors.note.get()
@@ -533,7 +533,7 @@ impl SynthVoice {
         }
         let base = self.base_filter_resonance.get();
         let max_res = 0.95;
-        Resonance(base + self.cc_resonance_value.get() * (max_res - base))
+        Resonance::new(base + self.cc_resonance_value.get() * (max_res - base))
     }
 
     /// CC 74 and CC 71 positions. Observability for tests.
