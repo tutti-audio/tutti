@@ -131,10 +131,13 @@ impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
 
     /// The text.
     #[must_use]
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         // `new` is the only constructor and it stores whole `&str` bytes, so
         // this is valid UTF-8; the fallback is unreachable.
-        core::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("")
+        match core::str::from_utf8(self.bytes.split_at(self.len as usize).0) {
+            Ok(text) => text,
+            Err(_) => "",
+        }
     }
 }
 

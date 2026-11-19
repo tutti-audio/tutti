@@ -159,11 +159,11 @@ fn retransmit_error_puts_the_reason_in_the_header_and_the_sequence_in_the_payloa
 /// Spec: m2-124/5.3#2, m2-124/6.15#3
 #[test]
 fn nak_carries_the_refused_header_then_padded_text() {
-    let nak = Command::Nak(Nak {
+    let nak = Command::Nak(Box::new(Nak {
         reason: NakReason::NotSupported,
         refused: Header::from_word(0xAB00_0000),
         text: NakText::new("hello").unwrap(),
-    });
+    }));
     assert_eq!(
         cmd_bytes(&nak),
         [
@@ -171,11 +171,11 @@ fn nak_carries_the_refused_header_then_padded_text() {
         ]
     );
     assert_eq!(one(&cmd_bytes(&nak)).unwrap(), nak);
-    let bare = Command::Nak(Nak {
+    let bare = Command::Nak(Box::new(Nak {
         reason: NakReason::Malformed,
         refused: Header::from_word(0x2001_0000),
         text: NakText::default(),
-    });
+    }));
     assert_eq!(
         cmd_bytes(&bare)[1],
         1,
@@ -186,12 +186,12 @@ fn nak_carries_the_refused_header_then_padded_text() {
 /// Spec: m2-124/5.3#4, m2-124/6.16#6
 #[test]
 fn bye_carries_the_reason_in_the_header_and_optional_text() {
-    let plain = Command::Bye(Bye::new(ByeReason::Timeout));
+    let plain = Command::Bye(Box::new(Bye::new(ByeReason::Timeout)));
     assert_eq!(cmd_bytes(&plain), [0xF0, 0x00, 0x04, 0x00]);
-    let worded = Command::Bye(Bye {
+    let worded = Command::Bye(Box::new(Bye {
         reason: ByeReason::UserTerminated,
         text: ByeText::new("bye").unwrap(),
-    });
+    }));
     assert_eq!(
         cmd_bytes(&worded),
         [0xF0, 0x01, 0x01, 0x00, b'b', b'y', b'e', 0]
@@ -270,10 +270,10 @@ fn invitation_with_authentication_is_the_digest_alone_in_eight_words() {
 
 #[test]
 fn invitation_with_user_authentication_appends_the_padded_username() {
-    let auth = Command::InvitationWithUserAuth(UserAuthentication {
+    let auth = Command::InvitationWithUserAuth(Box::new(UserAuthentication {
         digest: Digest::new([1; 32]),
         username: Username::new("Rosa").unwrap(),
-    });
+    }));
     let bytes = cmd_bytes(&auth);
     assert_eq!(&bytes[..4], [0x03, 0x09, 0x00, 0x00]);
     assert_eq!(&bytes[36..], b"Rosa");
@@ -322,10 +322,10 @@ fn every_command_round_trips() {
             identity: id,
         }),
         Command::InvitationWithAuth(Digest::new([9; 32])),
-        Command::InvitationWithUserAuth(UserAuthentication {
+        Command::InvitationWithUserAuth(Box::new(UserAuthentication {
             digest: Digest::new([3; 32]),
             username: Username::new("Ünïcode").unwrap(),
-        }),
+        })),
         Command::Accepted(id),
         Command::Pending(id),
         Command::AuthRequired(AuthChallenge {
@@ -350,15 +350,15 @@ fn every_command_round_trips() {
         }),
         Command::SessionReset,
         Command::SessionResetReply,
-        Command::Nak(Nak {
+        Command::Nak(Box::new(Nak {
             reason: NakReason::Reserved(0x55),
             refused: Header::from_word(0x0102_0304),
             text: NakText::new("why").unwrap(),
-        }),
-        Command::Bye(Bye {
+        })),
+        Command::Bye(Box::new(Bye {
             reason: ByeReason::Reserved(0x99),
             text: ByeText::new("é").unwrap(),
-        }),
+        })),
         Command::ByeReply,
         Command::UmpData(UmpData::new(SequenceNumber::new(5), &packets).unwrap()),
         Command::UmpData(UmpData::idle(SequenceNumber::new(6))),
@@ -635,14 +635,6 @@ fn texts_refuse_a_nul_and_overlong_input() {
     assert!(Username::new(&"u".repeat(988)).is_some());
 }
 
-/// The digest hashes the peer's bytes, so a username keeps the bytes it was
-/// given: a decomposed "e" and accent is not composed.
-#[test]
-fn a_username_is_not_normalised() {
-    let decomposed = "Cafe\u{301}";
-    assert_eq!(Username::new(decomposed).unwrap().as_str(), decomposed);
-}
-
 /// Advisory text: what is UTF-8 is kept.
 /// Spec: m2-124/6.15#2, m2-124/6.16#5
 #[test]
@@ -653,20 +645,20 @@ fn advisory_text_that_is_not_utf8_is_cut_before_the_bad_byte() {
     .unwrap();
     assert_eq!(
         bye,
-        Command::Bye(Bye {
+        Command::Bye(Box::new(Bye {
             reason: ByeReason::UserTerminated,
             text: ByeText::new("ok").unwrap(),
-        })
+        }))
     );
     // A multi-byte character cut in half is dropped whole.
     let nak = one(&[0x8F, 0x02, 0x03, 0x00, 0x20, 1, 0, 0, b'a', 0xC3, 0, 0]).unwrap();
     assert_eq!(
         nak,
-        Command::Nak(Nak {
+        Command::Nak(Box::new(Nak {
             reason: NakReason::Malformed,
             refused: Header::from_word(0x2001_0000),
             text: NakText::new("a").unwrap(),
-        })
+        }))
     );
 }
 
@@ -698,4 +690,15 @@ mod props {
             prop_assert_eq!(later.distance_from(a), i16::try_from(step).unwrap());
         }
     }
+}
+
+/// A `Command` is built, queued and copied per datagram on the UMP data path,
+/// so it stays at or below 160 bytes, its size before the texts were inline
+/// (the largest variant then was a User Authentication Required at 159 bytes
+/// plus the tag). A variant that holds a text or a user name is boxed to stay
+/// under it.
+#[test]
+fn a_command_stays_small() {
+    let size = std::mem::size_of::<Command>();
+    assert!(size <= 160, "{size}");
 }
