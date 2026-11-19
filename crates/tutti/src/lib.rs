@@ -651,8 +651,8 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin::catalog::{
-            AudioConfig, CatalogConfig, NO_SCAN_DIRS, PluginDb, PluginDescriptor, PluginId, Scan,
-            ScanPoll, ScanResult,
+            AudioConfig, CatalogConfig, PluginDb, PluginDescriptor, PluginId, Scan, ScanPoll,
+            ScanResult,
         };
         pub use tutti_plugin_types::PluginRole;
     }

@@ -5,7 +5,7 @@
 use super::control::{ControlStream, back_off};
 use interprocess::local_socket::{GenericNamespaced, Name, Stream, ToNsName as _};
 use std::os::windows::io::{AsHandle, OwnedHandle};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Converts a host-chosen socket path into the local-socket name for this
@@ -55,6 +55,12 @@ fn bytes_available(stream: &ControlStream) -> std::io::Result<u32> {
     // that reason: a wildcard arm would be unreachable code.
     let Stream::NamedPipe(pipe) = stream;
     tutti_plugin_ipc_ffi::pipe_bytes_available(pipe.as_handle())
+}
+
+/// `name` in `temp`: the pipe is named by `name` alone ([`socket_name`]), so
+/// whatever the directory's length, it is the one the user chose.
+pub fn socket_path_in(temp: &Path, name: &str) -> PathBuf {
+    temp.join(name)
 }
 
 /// Whether `stream` has something to read now, asked without blocking or
