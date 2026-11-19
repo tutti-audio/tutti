@@ -424,7 +424,7 @@ fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
         .unwrap();
     let _ = s.update();
     assert_eq!(
-        s.mod_state().resyncs_owed(),
+        s.mod_state().pending_resyncs(),
         0,
         "the resync went with the update's commit"
     );

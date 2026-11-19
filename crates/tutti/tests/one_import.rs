@@ -28,7 +28,7 @@ fn one_import_renders_a_block() {
         .graph()
         .connect(tone, Root)
         .expect("both ends exist")
-        .hard();
+        .unfaded();
     assert!(session.update().is_empty(), "the commit raised no event");
 
     let mut out = vec![0.0f32; 256 * 2];
@@ -78,7 +78,7 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
         .graph()
         .connect(node, Root)
         .expect("both ends exist")
-        .hard();
+        .unfaded();
     let planes = session
         .bounce(
             Bounce::project()

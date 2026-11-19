@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 
 use tutti_rt::{LockExt, ThreadHandle};
 
-use crate::job::{Cancel, Job, JobKind, LandedQueue, Ticket};
+use crate::job::{Cancel, Job, JobKind, JobOutputQueue, Ticket};
 use crate::{Clock, Session, SessionEvent, WorkerError};
 
 /// How long dropping the session waits for its job threads to stop.
@@ -237,7 +237,7 @@ pub(crate) struct Jobs {
     /// The default spawner's threads, until they end.
     threads: Vec<ThreadHandle<()>>,
     /// What typed jobs landed, until the collect phase reports it.
-    landed: LandedQueue,
+    landed: JobOutputQueue,
     /// Events a [`Job::wait`] updated through, for the app's next update.
     held: Vec<SessionEvent>,
 }
@@ -357,7 +357,7 @@ impl Jobs {
             next: tutti_rt::Mint::new(),
             closed: Arc::new(AtomicBool::new(false)),
             threads: Vec::new(),
-            landed: LandedQueue::default(),
+            landed: JobOutputQueue::default(),
             held: Vec::new(),
         }
     }
@@ -365,7 +365,7 @@ impl Jobs {
     /// Where the typed jobs land: a handle that makes jobs without the session
     /// in hand makes its tickets on it.
     #[cfg(feature = "midi-hardware")]
-    pub(crate) fn queue(&self) -> LandedQueue {
+    pub(crate) fn queue(&self) -> JobOutputQueue {
         Arc::clone(&self.landed)
     }
 
@@ -413,7 +413,7 @@ impl Jobs {
     /// Reports what typed jobs landed, in landing order.
     pub(crate) fn report_landed(&mut self, out: &mut Vec<SessionEvent>) {
         let landed = std::mem::take(&mut *self.landed.lock_recover());
-        out.extend(landed.into_iter().map(SessionEvent::Landed));
+        out.extend(landed.into_iter().map(SessionEvent::JobDone));
     }
 
     /// Hands `task` to the spawner.

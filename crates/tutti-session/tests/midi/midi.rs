@@ -1202,7 +1202,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         for event in update_at(&mut s, now) {
             match event {
                 SessionEvent::Midi(MidiReport::CiProfiles { change, .. }) => seen.push(change),
-                SessionEvent::Landed(mut landed) => {
+                SessionEvent::JobDone(mut landed) => {
                     enabled = enable.as_ref().and_then(|job| landed.take(job)).or(enabled);
                 }
                 _ => {}
@@ -1698,7 +1698,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     play(&s);
     let start = Instant::now();
     let clock = std::cell::Cell::new(0u64);
-    let landed = std::cell::RefCell::new(Vec::<tutti_session::Landed>::new());
+    let landed = std::cell::RefCell::new(Vec::<tutti_session::JobOutput>::new());
     // Runs the session and the peer for `ms` milliseconds; the profile
     // changes the session reported.
     let mut run = |s: &mut Session, ms: u64| {
@@ -1711,7 +1711,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
                     SessionEvent::Midi(MidiReport::CiProfiles { device, change, .. }) => {
                         changes.push((device, change));
                     }
-                    SessionEvent::Landed(l) => landed.borrow_mut().push(l),
+                    SessionEvent::JobDone(l) => landed.borrow_mut().push(l),
                     _ => {}
                 }
             }
@@ -1895,7 +1895,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         for event in update_at(&mut s, now) {
             match event {
                 SessionEvent::Midi(MidiReport::CiProcess { change, .. }) => seen.push(change),
-                SessionEvent::Landed(mut landed) => {
+                SessionEvent::JobDone(mut landed) => {
                     ended = request.as_ref().and_then(|job| landed.take(job)).or(ended);
                 }
                 _ => {}

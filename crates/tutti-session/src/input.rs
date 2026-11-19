@@ -65,7 +65,7 @@ pub struct InputConfig {
     /// The manual trim of a take's placement, for a device that misreports its
     /// latency: set once per input and kept across restarts, so it is on the
     /// config and not on the [`Input`] (a plain value naming a node). It is one
-    /// of the terms a take states ([`Terms::offset`](crate::Terms::offset)).
+    /// of the terms a take states ([`TakeLatency::offset`](crate::TakeLatency::offset)).
     pub offset: Trim,
 }
 
@@ -202,7 +202,7 @@ pub struct OpenedInput<F: Float = f32> {
     /// the producer prefills). A ring that is not prefilled has none: `0` is
     /// that statement, not a missing figure; the capture's own delay is
     /// [`Device::latency`](crate::Device::latency)'s `input`. A take states it
-    /// as [`Terms::inlet_lead`](crate::Terms::inlet_lead).
+    /// as [`TakeLatency::inlet_lead`](crate::TakeLatency::inlet_lead).
     pub lead: Samples,
 }
 

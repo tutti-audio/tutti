@@ -308,7 +308,7 @@ pub struct Graph<F: Float = f32> {
     local: Option<Local<F>>,
     nodes: BTreeMap<NodeKey, Entry>,
     /// What each node's params are written through: the session's value
-    /// table, which the session's `Knobs` share.
+    /// table, which the session's `Values` share.
     values: Arc<ValueTable>,
     /// Edited since the last commit: what `update()` commits on, and what a
     /// local render commits first.
@@ -2151,7 +2151,7 @@ impl<F: Float> Graph<F> {
     /// edited only then). A new edge **fades in** over
     /// [`DECLICK`](tutti_graph::DECLICK), and an edge that
     /// is fading out is brought back (and counts as new): see
-    /// [`Connection::hard`](crate::Connection::hard).
+    /// [`Connection::unfaded`](crate::Connection::unfaded).
     pub(crate) fn add_edge(&mut self, from: OutPort, to: InPort) -> Result<bool, ConnectError> {
         self.check_wire(from, to)?;
         let source = Self::raw_source(from).expect("checked: the port fits");
@@ -2184,7 +2184,7 @@ impl<F: Float> Graph<F> {
 
     /// Makes the edge `edge` a plain, unfaded connection: no fade in or out
     /// (and no entry, when the fade was all it carried). The step
-    /// [`Connection::hard`](crate::Connection::hard) takes.
+    /// [`Connection::unfaded`](crate::Connection::unfaded) takes.
     pub(crate) fn harden_edge(&mut self, edge: Edge) {
         let Some(id) = Self::edge_id(edge) else {
             return;
@@ -2338,13 +2338,13 @@ impl<F: Float> Graph<F> {
 
     /// [`set_sources`](Self::set_sources) with no fades: what is added steps
     /// in and what is taken out is cut, at the next block boundary (as
-    /// [`Connection::hard`](crate::Connection::hard) and
-    /// [`disconnect_hard`](Self::disconnect_hard)).
+    /// [`Connection::unfaded`](crate::Connection::unfaded) and
+    /// [`disconnect_unfaded`](Self::disconnect_unfaded)).
     ///
     /// # Errors
     ///
     /// As [`set_sources`](Self::set_sources).
-    pub fn set_sources_hard<P: Fanin>(
+    pub fn set_sources_unfaded<P: Fanin>(
         &mut self,
         to: P,
         from: impl IntoIterator<Item = P::Source>,
@@ -2439,7 +2439,7 @@ impl<F: Float> Graph<F> {
     /// - an [`EventOutPort`] into an [`EventInPort`] (`key.events_out()`,
     ///   `key.events_in()`): **an event edge**. Events merge by offset at the
     ///   sink, and an event edge is never faded (a note-off is a message, not
-    ///   a level), so `.hard()` and [`disconnect_hard`](Self::disconnect_hard)
+    ///   a level), so `.unfaded()` and [`disconnect_unfaded`](Self::disconnect_unfaded)
     ///   change nothing for it.
     ///
     /// It **adds**: what already feeds the sink stays (the graph sums them),
@@ -2475,7 +2475,7 @@ impl<F: Float> Graph<F> {
     /// ([`sources`](Self::sources)), and connecting it again brings it back
     /// from where the fade has got to. An edge no plan has heard (connected
     /// since the last commit) has nothing to fade and goes at once.
-    /// [`disconnect_hard`](Self::disconnect_hard) cuts at a block boundary.
+    /// [`disconnect_unfaded`](Self::disconnect_unfaded) cuts at a block boundary.
     ///
     /// # Errors
     ///
@@ -2498,7 +2498,7 @@ impl<F: Float> Graph<F> {
     ///
     /// As [`disconnect`](Self::disconnect).
     #[must_use = "the call refuses a node or port that does not exist"]
-    pub fn disconnect_hard<O: Outlet, T: Inlet<O::Wire>>(
+    pub fn disconnect_unfaded<O: Outlet, T: Inlet<O::Wire>>(
         &mut self,
         from: O,
         to: T,
@@ -3118,9 +3118,9 @@ impl<F: Float> Graph<F> {
 
     /// Closes the taps whose readers were dropped, and returns how many.
     /// The session's [`Reclaim`](crate::Phase::Reclaim) phase runs it.
-    pub(crate) fn reap_taps(&mut self) -> usize {
-        let reaped = self.editor.prune_taps();
-        if reaped > 0 {
+    pub(crate) fn prune_taps(&mut self) -> usize {
+        let pruned = self.editor.prune_taps();
+        if pruned > 0 {
             let open = &self.editor.spec().topology.taps;
             self.output_taps.retain(|id, _| open.contains_key(id));
             // A held reader keeps its tap alive, and a claimed one has left the map.
@@ -3129,30 +3129,30 @@ impl<F: Float> Graph<F> {
                     RootReader::Tap(tap) => open.contains_key(tap),
                     RootReader::Meter(_) => true,
                 }),
-                "no held reader names a reaped tap"
+                "no held reader names a pruned tap"
             );
             self.edited = true;
         }
-        reaped
+        pruned
     }
 
     /// Closes the event taps whose readers were dropped, and returns how many.
     /// The session's [`Reclaim`](crate::Phase::Reclaim) phase runs it.
-    pub(crate) fn reap_event_taps(&mut self) -> usize {
-        let reaped = self.editor.prune_event_taps();
-        if reaped > 0 {
+    pub(crate) fn prune_event_taps(&mut self) -> usize {
+        let pruned = self.editor.prune_event_taps();
+        if pruned > 0 {
             let open = &self.editor.spec().topology.event_taps;
             self.event_taps.retain(|id, _| open.contains_key(id));
             self.edited = true;
         }
-        reaped
+        pruned
     }
 
     /// Closes the meters whose readers were dropped, and returns how many.
     /// The session's [`Reclaim`](crate::Phase::Reclaim) phase runs it.
-    pub(crate) fn reap_meters(&mut self) -> usize {
-        let reaped = self.editor.prune_meters();
-        if reaped > 0 {
+    pub(crate) fn prune_meters(&mut self) -> usize {
+        let pruned = self.editor.prune_meters();
+        if pruned > 0 {
             let open = &self.editor.spec().topology.meters;
             // A held reader keeps its meter alive, and a claimed one has left the map.
             debug_assert!(
@@ -3160,11 +3160,11 @@ impl<F: Float> Graph<F> {
                     RootReader::Meter(meter) => open.contains_key(meter),
                     RootReader::Tap(_) => true,
                 }),
-                "no held reader names a reaped meter"
+                "no held reader names a pruned meter"
             );
             self.edited = true;
         }
-        reaped
+        pruned
     }
 
     // --- Shape ---

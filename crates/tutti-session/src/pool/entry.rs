@@ -80,8 +80,8 @@ pub trait PoolEntry<S: Float = f32>: Send + 'static {
 
     /// What the pool does with a loaded value that only snapshots hold, past
     /// the depth ([`PoolConfig::live_holds`](crate::PoolConfig::live_holds)):
-    /// [`Parking::Keep`] it, as a data kind does (a shared `Arc` costs
-    /// memory, not a process or a device), or [`Parking::Release`] it, as a
+    /// [`Retention::Keep`] it, as a data kind does (a shared `Arc` costs
+    /// memory, not a process or a device), or [`Retention::Release`] it, as a
     /// kind with something live behind it does (a plugin's process, a capture's
     /// device). The default keeps.
     ///
@@ -91,15 +91,15 @@ pub trait PoolEntry<S: Float = f32>: Send + 'static {
     /// [`load`](Self::load): the recall of a parked hold reloads. A kind that
     /// saves state before it releases and restores it on that load does so
     /// through its own load.
-    fn park(loaded: Self::Loaded) -> Parking<Self::Loaded> {
-        Parking::Keep(loaded)
+    fn park(loaded: Self::Loaded) -> Retention<Self::Loaded> {
+        Retention::Keep(loaded)
     }
 }
 
 /// What [`PoolEntry::park`] decides for a loaded value.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum Parking<T> {
+pub enum Retention<T> {
     /// The value stays loaded, held.
     Keep(T),
     /// The value is dropped; the entry stays held, unloaded.
@@ -620,8 +620,8 @@ where
 fn park<E: PoolEntry<S>, S: Float>(value: Value) -> Option<Value> {
     match value.downcast::<E::Loaded>() {
         Ok(loaded) => match E::park(*loaded) {
-            Parking::Keep(loaded) => Some(Box::new(loaded) as Value),
-            Parking::Release => None,
+            Retention::Keep(loaded) => Some(Box::new(loaded) as Value),
+            Retention::Release => None,
         },
         Err(value) => Some(value),
     }

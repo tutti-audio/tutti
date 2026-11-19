@@ -190,15 +190,15 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, Knobs,
-    LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Moved, OutputPolicyTarget,
+    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, LoopTarget,
+    MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Modulatable, OutputPolicyTarget,
     ParamTarget, PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget,
-    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, CrossfadeControls, Edge, EventInPort, EventOutPort,
-    InPort, Job, JobId, JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession,
+    InPort, Job, JobId, JobKind, JobOutput, JobStatus, Key, NoSuchNode, Offline, OfflineSession,
     OutPort, Playhead, RealTime, Root, Session, SessionBuilder, SessionEvent, SessionFloat,
     SystemClock, SystemSession, TransportHandle, WaitError, Workers,
 };
@@ -416,12 +416,13 @@ pub mod session {
     pub use tutti_session::{
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError,
-        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
-        HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
-        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
-        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
-        RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted, Wire, root_width,
+        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen, Inlet,
+        InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened, Outlet,
+        OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError,
+        Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, RemoveError,
+        Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration, RootReader,
+        RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError, Weighted, Wire,
+        root_width,
     };
     pub use tutti_transport::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -430,10 +431,10 @@ pub mod session {
     // The pool.
     pub use tutti_session::Load as PoolLoad;
     pub use tutti_session::{
-        Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, Parking, PoolConfig,
-        PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome,
-        PoolReport, PoolSet, PoolState, RefreshPool, RefreshReport, RetryError, Sharing,
-        WhenLoadedError, stranded_loads,
+        Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
+        PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
+        PoolState, RefreshPool, RefreshReport, Retention, RetryError, Sharing, WhenLoadedError,
+        stranded_loads,
     };
     pub use tutti_session::{Task, WorkerError};
 
@@ -453,7 +454,7 @@ pub mod session {
     #[cfg(feature = "capture")]
     pub use tutti_session::{
         Armed, InFlight, InputOpener, OpenedInput, Placement as RecordedPlacement, PunchError,
-        Rolling, Start, TakeEnd, TakeId, Terms, Window,
+        Rolling, Start, TakeEnd, TakeId, TakeLatency, Window,
     };
     // The `audio_file` entry decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]

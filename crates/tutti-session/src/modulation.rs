@@ -778,7 +778,7 @@ impl ModState {
     }
 
     /// Note-envelope resyncs owed to the next `AfterCommit`.
-    pub fn resyncs_owed(&self) -> usize {
+    pub fn pending_resyncs(&self) -> usize {
         self.modulation.resyncs_owed()
     }
 

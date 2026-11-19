@@ -77,7 +77,7 @@ pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
 pub use entry::{
-    Declared, IntoPool, Life, Load, LoadError, Owned, Parking, PoolEntry, PoolSet, Sharing,
+    Declared, IntoPool, Life, Load, LoadError, Owned, PoolEntry, PoolSet, Retention, Sharing,
     stranded_loads,
 };
 pub(crate) use entry::{Defer, Staged};

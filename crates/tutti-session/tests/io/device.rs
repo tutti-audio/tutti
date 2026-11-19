@@ -42,7 +42,7 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
         .graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();
     let mut tap = session
         .graph()
@@ -112,13 +112,13 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         ..LimiterControls::DEFAULT
     }));
     s.graph()
-        .set_sources_hard(InPort::new(lim, 0), [OutPort::new(osc, 0)])
+        .set_sources_unfaded(InPort::new(lim, 0), [OutPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(osc, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(1), [OutPort::new(lim, 0)])
+        .set_sources_unfaded(Root::output(1), [OutPort::new(lim, 0)])
         .unwrap();
     let _ = s.update();
     old.render_block(Samples::new(480)).expect("open");
@@ -219,7 +219,7 @@ fn policy() -> DevicePolicy {
         backoff: Backoff {
             base: Duration::from_millis(500),
             max: Duration::from_secs(4),
-            settle: Duration::from_secs(10),
+            quiet: Duration::from_secs(10),
         },
         ..DevicePolicy::default()
     }
@@ -641,12 +641,12 @@ fn a_host_can_hold_restarts() {
         Some(id("A")),
     );
     let base = Instant::now();
-    session.hold_device_restarts(true);
+    session.pause_device_restarts(true);
     fake.show(&["A", "B"], Some("A"));
     poll(&mut session, base, 0);
     fake.show(&["A", "B"], Some("B"));
     assert!(wants(&poll(&mut session, base, 100)).is_empty());
-    session.hold_device_restarts(false);
+    session.pause_device_restarts(false);
     assert_eq!(wants(&poll(&mut session, base, 200)).len(), 1);
 }
 
@@ -764,7 +764,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let across = s
-        .open_heard_tap(Samples::new(1_024))
+        .open_output_tap(Samples::new(1_024))
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
@@ -791,7 +791,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
 
     drop(across);
     let after = s
-        .open_heard_tap(Samples::new(1_024))
+        .open_output_tap(Samples::new(1_024))
         .expect("reopens")
         .reader()
         .expect("the audio thread is not behind");
@@ -999,7 +999,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
     session
         .graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();
     let _ = session.update();
     session.declare_root_topology(Some(stereo.clone())).unwrap();
@@ -1082,7 +1082,7 @@ fn a_panic_in_the_render_is_a_device_fault_event() {
     let (node, _) = session.graph().add(ForkByClone(AlwaysPanics));
     session
         .graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
     let _ = session.update();
 

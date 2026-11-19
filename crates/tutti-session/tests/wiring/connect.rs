@@ -25,7 +25,7 @@ fn first_frame(s: &mut Session) -> [f32; 2] {
 fn feed_root(s: &mut Session, node: NodeKey) {
     for c in 0..2 {
         s.graph()
-            .set_sources_hard(Root::output(c), [OutPort::new(node, c)])
+            .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
             .unwrap();
     }
 }
@@ -43,7 +43,7 @@ fn connect_wires_each_channel_to_its_own() {
     s.graph()
         .connect(src, through)
         .expect("both are stereo")
-        .hard();
+        .unfaded();
     feed_root(&mut s, through.erase());
     assert_eq!(first_frame(&mut s), [0.25, 0.5]);
 }
@@ -81,8 +81,8 @@ fn connect_adds_to_what_feeds_the_input() {
     let (sink, _) = s
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
-    s.graph().connect(one, sink).unwrap().hard();
-    s.graph().connect(two, sink).unwrap().hard();
+    s.graph().connect(one, sink).unwrap().unfaded();
+    s.graph().connect(two, sink).unwrap().unfaded();
     feed_root(&mut s, sink.erase());
     assert_eq!(first_frame(&mut s), [0.75, 0.375]);
 }

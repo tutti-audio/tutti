@@ -52,10 +52,10 @@ fn a_write_reaches_the_index_it_names() {
     let mut s = offline();
     let (node, _) = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(1), [OutPort::new(node, 1)])
+        .set_sources_unfaded(Root::output(1), [OutPort::new(node, 1)])
         .unwrap();
     let _ = s.update();
 
@@ -116,10 +116,10 @@ fn a_route_to_index_1_does_not_touch_index_0() {
     let mut s = offline();
     let (node, _) = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(1), [OutPort::new(node, 1)])
+        .set_sources_unfaded(Root::output(1), [OutPort::new(node, 1)])
         .unwrap();
 
     let band1 = ParamRef::unit_at(node, UnitParam::Threshold, 1);

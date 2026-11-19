@@ -14,7 +14,7 @@ use tutti_midi_hardware::ChannelCount;
 use tutti_midi_hardware::test_support::FakeCounters;
 use tutti_session::Peer as _;
 use tutti_session::{
-    ChannelProfile, Job, JobKind, JobStatus, Landed, ListedProfile, MidiInput, MidiRouteRule,
+    ChannelProfile, Job, JobKind, JobOutput, JobStatus, ListedProfile, MidiInput, MidiRouteRule,
     PeerError, ReportPeer, Session, SessionEvent,
 };
 use tutti_ump::{DeviceIdentity, ManufacturerId, Message, MidiGroup, U7, Voice2};
@@ -32,7 +32,7 @@ struct Wire {
     seen: Seen,
     start: Instant,
     ms: u64,
-    landed: Vec<Landed>,
+    landed: Vec<JobOutput>,
 }
 
 impl Wire {
@@ -81,7 +81,7 @@ impl Wire {
         self.ms += by;
         let now = self.start + Duration::from_millis(self.ms);
         for event in update_at(&mut self.s, now) {
-            if let SessionEvent::Landed(landed) = event {
+            if let SessionEvent::JobDone(landed) = event {
                 self.landed.push(landed);
             }
         }

@@ -25,7 +25,7 @@ fn feed<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     for c in 0..values.len() {
         session
             .graph()
-            .set_sources_hard(Root::output(c), [OutPort::new(node, c)])
+            .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
             .unwrap();
     }
 }
@@ -91,7 +91,7 @@ fn a_declared_surround_root_folds_by_the_surround_rules() {
         Speaker::SideRight,
     ])
     .unwrap();
-    s.declare_root_topology(Some(swapped)).unwrap().hard();
+    s.declare_root_topology(Some(swapped)).unwrap().unfaded();
     assert_eq!(
         heard(&mut s, 2),
         [
@@ -189,7 +189,7 @@ fn a_declaration_sets_the_roots_width_and_the_width_cannot_leave_it() {
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Refused(err));
     assert_eq!(s.graph_ref().outputs(), 4);
 
-    s.declare_root_topology(None).unwrap().hard();
+    s.declare_root_topology(None).unwrap().unfaded();
     assert_eq!(s.root_topology(), None);
     assert_eq!(s.graph_ref().outputs(), 4);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
@@ -374,10 +374,10 @@ fn a_commit_with_no_fold_into_the_device_is_refused_by_name() {
 fn a_root_declared_after_the_build_folds_from_the_plan_that_carries_it() {
     let mut s = offline(Session::builder(), 6).unwrap();
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
-    s.declare_root_topology(Some(buses(4))).unwrap().hard();
+    s.declare_root_topology(Some(buses(4))).unwrap().unfaded();
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
     // Back to the bare root (the root is four wide now): quad, rears on 4, 5.
-    s.declare_root_topology(None).unwrap().hard();
+    s.declare_root_topology(None).unwrap().unfaded();
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
 }
 

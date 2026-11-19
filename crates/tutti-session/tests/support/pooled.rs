@@ -309,7 +309,7 @@ impl<J: tutti_session::JobKind> LandOn<J> for tutti_session::Job<J> {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             for event in s.update_on(main) {
-                if let SessionEvent::Landed(mut landed) = event
+                if let SessionEvent::JobDone(mut landed) = event
                     && let Some(result) = landed.take(&self)
                 {
                     return result;

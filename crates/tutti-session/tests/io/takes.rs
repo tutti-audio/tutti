@@ -314,7 +314,7 @@ fn placement_is_the_formula_with_each_term_stated() {
         .expect("armed");
     rig.run_until(finished);
     let done = recorded(&rig.events);
-    let terms = *done.terms();
+    let terms = *done.latency();
     assert_eq!(terms.in_latency, Some(Samples::new(240)));
     assert_eq!(terms.out_latency, Some(Samples::new(480)));
     assert_eq!(terms.inlet_lead, Samples::new(7));
@@ -345,7 +345,7 @@ fn an_unreported_latency_is_stated_unknown_not_zero() {
         .expect("armed");
     rig.run_until(finished);
     let done = recorded(&rig.events);
-    let terms = *done.terms();
+    let terms = *done.latency();
     assert_eq!((terms.in_latency, terms.out_latency), (None, None));
     assert!(!terms.is_complete());
     assert_eq!(

@@ -33,12 +33,12 @@ fn first_frame(s: &mut Session) -> [f32; 2] {
 fn a_main_bus_feeds_the_roots_channels_in_order() {
     let mut s = offline();
     let (stereo, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
-    s.graph().connect(stereo, Root).unwrap().hard();
+    s.graph().connect(stereo, Root).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.25, 0.5]);
 
     let mut s = offline();
     let (mono, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
-    s.graph().connect(mono, Root).unwrap().hard();
+    s.graph().connect(mono, Root).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.5, 0.5]);
 }
 
@@ -50,7 +50,7 @@ fn a_mono_bus_feeds_both_channels_of_a_declared_stereo_root() {
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
         .expect("a stereo root");
     let (mono, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
-    s.graph().connect(mono, Root).unwrap().hard();
+    s.graph().connect(mono, Root).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.5, 0.5]);
 }
 
@@ -129,7 +129,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
     s.graph()
         .connect(src.out(0), Root::output(0))
         .unwrap()
-        .hard()
+        .unfaded()
         .gain(Amplitude::new(0.5))
         .unwrap();
     assert_eq!(first_frame(&mut s), [0.25, 0.0]);
@@ -151,7 +151,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
         s.graph()
             .connect(other.out(0), Root::output(1))
             .unwrap()
-            .hard()
+            .unfaded()
             .gain(Amplitude::new(f64::NAN))
             .err(),
         Some(DeclarationError::NotFinite)
@@ -170,13 +170,13 @@ fn disconnect_removes_one_edge_and_disconnect_all_the_rest() {
     let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let (b, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     let sink = Root::output(0);
-    s.graph().connect(a.out(0), sink).unwrap().hard();
-    s.graph().connect(b.out(0), sink).unwrap().hard();
+    s.graph().connect(a.out(0), sink).unwrap().unfaded();
+    s.graph().connect(b.out(0), sink).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.75, 0.0]);
 
-    assert!(s.graph().disconnect_hard(a.out(0), sink).unwrap());
+    assert!(s.graph().disconnect_unfaded(a.out(0), sink).unwrap());
     assert!(
-        !s.graph().disconnect_hard(a.out(0), sink).unwrap(),
+        !s.graph().disconnect_unfaded(a.out(0), sink).unwrap(),
         "already gone"
     );
     assert_eq!(s.graph_ref().sources(sink).unwrap(), [b.out(0)]);
@@ -201,17 +201,17 @@ fn a_main_bus_disconnects_what_it_connected() {
     let (through, _) = s
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
-    s.graph().connect(src, through).unwrap().hard();
+    s.graph().connect(src, through).unwrap().unfaded();
     assert_eq!(
         s.graph_ref().sources(through.input(1)).unwrap(),
         [src.out(1)],
         "channel by channel"
     );
-    assert!(s.graph().disconnect_hard(src, through).unwrap());
+    assert!(s.graph().disconnect_unfaded(src, through).unwrap());
     assert!(s.graph_ref().sources(through.input(0)).unwrap().is_empty());
     assert!(s.graph_ref().sources(through.input(1)).unwrap().is_empty());
     assert!(
-        !s.graph().disconnect_hard(src, through).unwrap(),
+        !s.graph().disconnect_unfaded(src, through).unwrap(),
         "nothing left to take out"
     );
 }
@@ -222,13 +222,13 @@ fn a_main_bus_disconnects_what_it_connected() {
 fn a_key_and_its_erasure_are_one_node() {
     let mut s = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
-    s.graph().connect(src, Root).unwrap().hard();
+    s.graph().connect(src, Root).unwrap().unfaded();
     let _ = s.update();
-    s.graph().connect(src.erase(), Root).unwrap().hard();
+    s.graph().connect(src.erase(), Root).unwrap().unfaded();
     s.graph()
         .connect(OutPort::new(src.erase(), 0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     assert!(!s.graph_ref().is_edited(), "the same edge, three spellings");
     assert_eq!(
         s.graph_ref().sources(Root::output(0)).unwrap(),

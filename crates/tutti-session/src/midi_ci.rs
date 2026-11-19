@@ -9,7 +9,7 @@
 //! and `disable` return a [`Job<SwitchProfile>`](Job), [`ReportPeer::request`]
 //! a [`Job<RequestReport>`](Job). The job lands in the [`update`](crate::Session::update)
 //! after the poll that reads the peer's answer, as
-//! [`SessionEvent::Landed`].
+//! [`SessionEvent::JobDone`].
 //!
 //! A peer's Property Exchange Resources
 //! ([`MidiInputInfo::resource_peers`](crate::MidiInputInfo::resource_peers)) are
@@ -44,7 +44,7 @@ use tutti_midi_hardware::{
 use tutti_ump::MidiChannel;
 
 use crate::SessionEvent;
-use crate::job::{LandedQueue, Ticket, job_kind};
+use crate::job::{JobOutputQueue, Ticket, job_kind};
 use crate::midi_port::{Ended, InputRequest, InputShared};
 use crate::peer::ResourceIds;
 use crate::{Job, PeerError};
@@ -139,11 +139,11 @@ impl PeFailure {
 #[derive(Clone)]
 pub(crate) struct PortLink {
     shared: Weak<InputShared>,
-    landed: LandedQueue,
+    landed: JobOutputQueue,
 }
 
 impl PortLink {
-    pub(crate) fn new(shared: Weak<InputShared>, landed: LandedQueue) -> Self {
+    pub(crate) fn new(shared: Weak<InputShared>, landed: JobOutputQueue) -> Self {
         Self { shared, landed }
     }
 

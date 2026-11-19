@@ -3,8 +3,8 @@
 //! A [`Session`] call that cannot answer at once (a plugin's state, a pool
 //! check) returns a [`Job<J>`](Job). Its kind `J` names the answer: `J::Output`
 //! on success, `J::Error` on failure. The answer lands once, in an
-//! [`update`](Session::update), as a [`SessionEvent::Landed`] the app reads
-//! with [`Landed::take`]; or [`Job::wait`] runs updates until it lands and
+//! [`update`](Session::update), as a [`SessionEvent::JobDone`] the app reads
+//! with [`JobOutput::take`]; or [`Job::wait`] runs updates until it lands and
 //! returns it, the one blocking door. Dropping the job cancels it: its result,
 //! if the work still finishes, is discarded.
 //!
@@ -84,11 +84,11 @@ pub(crate) use job_kind;
 pub struct Job<J: JobKind> {
     id: JobId,
     cell: Arc<Cell>,
-    queue: LandedQueue,
+    queue: JobOutputQueue,
     _kind: PhantomData<fn() -> J>,
 }
 
-/// One job's identity, unique in the process: a [`Landed`] is keyed by it, and
+/// One job's identity, unique in the process: a [`JobOutput`] is keyed by it, and
 /// its result is type-erased, so two sessions never share an id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct JobId(u64);
@@ -122,7 +122,7 @@ pub enum WaitError {
     #[error("the job waits for the main thread and the caller is not on it")]
     NeedsMainThread,
     /// The job's result already landed and was taken: by the app from its
-    /// [`SessionEvent::Landed`], or by an earlier `wait`.
+    /// [`SessionEvent::JobDone`], or by an earlier `wait`.
     #[error("the job's result was already taken")]
     AlreadyLanded,
 }
@@ -181,7 +181,7 @@ impl Cancel {
 }
 
 impl<J: JobKind> Job<J> {
-    /// This job's identity: [`Landed::id`] of its landing.
+    /// This job's identity: [`JobOutput::id`] of its landing.
     #[must_use]
     pub fn id(&self) -> JobId {
         self.id
@@ -211,9 +211,9 @@ impl<J: JobKind> Job<J> {
     /// is [`WaitingForMainThread`](JobStatus::WaitingForMainThread), it
     /// answers [`WaitError::NeedsMainThread`] and the job runs on.
     ///
-    /// The result is taken: a later [`Landed::take`] of the job answers `None`,
+    /// The result is taken: a later [`JobOutput::take`] of the job answers `None`,
     /// and a second `wait`, or one after the app took the job's
-    /// [`SessionEvent::Landed`], answers [`WaitError::AlreadyLanded`]. A worker
+    /// [`SessionEvent::JobDone`], answers [`WaitError::AlreadyLanded`]. A worker
     /// that panicked lands as [`WorkerError::Panicked`], so a wait never hangs
     /// on it, nor on a job the spawner dropped or whose session side ended
     /// unanswered ([`WorkerError::Dropped`]).
@@ -237,11 +237,11 @@ impl<J: JobKind> Job<J> {
             }
             let mut events = session.update();
             let landed = events.iter_mut().find_map(|event| match event {
-                SessionEvent::Landed(landed) => landed.take(self),
+                SessionEvent::JobDone(landed) => landed.take(self),
                 _ => None,
             });
             // The landing is consumed: the app's next update does not see it.
-            events.retain(|event| !matches!(event, SessionEvent::Landed(l) if l.id == self.id));
+            events.retain(|event| !matches!(event, SessionEvent::JobDone(l) if l.id == self.id));
             if let Some(result) = landed {
                 session.jobs.hold(events);
                 return result;
@@ -291,15 +291,15 @@ impl<J: JobKind> fmt::Debug for Job<J> {
     }
 }
 
-/// The result of a job, as [`SessionEvent::Landed`] reports it, once. The
+/// The result of a job, as [`SessionEvent::JobDone`] reports it, once. The
 /// result is type-erased and keyed by [`JobId`]: only [`take`](Self::take) with
 /// the job it belongs to returns it.
-pub struct Landed {
+pub struct JobOutput {
     id: JobId,
     result: Option<Box<dyn Any + Send>>,
 }
 
-impl Landed {
+impl JobOutput {
     /// The job that landed.
     #[must_use]
     pub fn id(&self) -> JobId {
@@ -324,9 +324,9 @@ impl Landed {
     }
 }
 
-impl fmt::Debug for Landed {
+impl fmt::Debug for JobOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Landed")
+        f.debug_struct("JobOutput")
             .field("id", &self.id)
             .field("taken", &self.result.is_none())
             .finish()
@@ -334,19 +334,19 @@ impl fmt::Debug for Landed {
 }
 
 /// What landed since the last update: the session's end of every job's
-/// result, drained into [`SessionEvent::Landed`] by the collect phase.
-pub(crate) type LandedQueue = Arc<Mutex<Vec<Landed>>>;
+/// result, drained into [`SessionEvent::JobDone`] by the collect phase.
+pub(crate) type JobOutputQueue = Arc<Mutex<Vec<JobOutput>>>;
 
 /// The session's end of a [`Job`]: lands its result once.
 pub(crate) struct Ticket<J: JobKind> {
     id: JobId,
     cell: Arc<Cell>,
-    queue: LandedQueue,
+    queue: JobOutputQueue,
     _kind: PhantomData<fn() -> J>,
 }
 
 impl<J: JobKind> Ticket<J> {
-    pub(crate) fn new(queue: &LandedQueue) -> (Job<J>, Self) {
+    pub(crate) fn new(queue: &JobOutputQueue) -> (Job<J>, Self) {
         let id = JobId(NEXT_ID.mint().get());
         let cell = Arc::new(Cell {
             status: AtomicU8::new(PENDING),
@@ -417,7 +417,7 @@ impl<J: JobKind> Ticket<J> {
             return;
         }
         self.cell.status.store(DONE, Ordering::Release);
-        queue.push(Landed {
+        queue.push(JobOutput {
             id: self.id,
             result: Some(Box::new(result)),
         });

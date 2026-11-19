@@ -76,7 +76,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 ///     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(64))).build()
 ///     .unwrap();
 /// let (dc, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
-/// session.graph().set_sources_hard(Root::output(0), [OutPort::new(dc, 0)]).unwrap();
+/// session.graph().set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)]).unwrap();
 /// session.update();
 ///
 /// let mut block = [0.0f32; 64];
@@ -87,7 +87,7 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 #[derive(Debug)]
 pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// The value lock and the table every node's params are written through,
-    /// shared with the graph and the session's [`Knobs`](crate::Knobs).
+    /// shared with the graph and the session's [`Values`](crate::Values).
     pub(crate) values: Arc<ValueState<K>>,
     /// Runs the work other threads handed to the main thread when the session
     /// drops on it, before anything else drops (the plugins then close, and

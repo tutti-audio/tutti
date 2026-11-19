@@ -17,7 +17,7 @@ use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::FakeCounters;
 use tutti_session::Peer as _;
 use tutti_session::{
-    Job, JobKind, JobStatus, Landed, ListedResource, MidiInput, PeFailure, PeerError, Presence,
+    Job, JobKind, JobOutput, JobStatus, ListedResource, MidiInput, PeFailure, PeerError, Presence,
     Resource as _, ResourceFact, ResourceId, Session, SessionEvent, Subscription,
     SubscriptionCause,
 };
@@ -220,7 +220,7 @@ struct Wire {
     peer: PePeer,
     start: Instant,
     ms: u64,
-    landed: Vec<Landed>,
+    landed: Vec<JobOutput>,
     /// What the updates noticed of resources, in order.
     changed: Vec<(ResourceId, ResourceFact)>,
 }
@@ -268,7 +268,7 @@ impl Wire {
         let now = self.start + Duration::from_millis(self.ms);
         for event in update_at(&mut self.s, now) {
             match event {
-                SessionEvent::Landed(landed) => self.landed.push(landed),
+                SessionEvent::JobDone(landed) => self.landed.push(landed),
                 SessionEvent::ResourceChanged { id, fact } => self.changed.push((id, fact)),
                 _ => {}
             }
