@@ -19,23 +19,15 @@ pub struct AudioFile {
 }
 
 /// What tells one declared asset from another, as [`PoolEntry::Identity`]: its
-/// [`Identity`] as it was when the entry was declared (a file's carries its stamp, so a file rewritten
-/// since is another entry), or, for an asset with no identity, its
-/// [`name`](Asset::name).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AssetKey {
-    /// The asset's identity.
-    Identity(Identity),
-    /// The asset's name, for one with no identity.
-    Name(String),
-}
+/// [`Identity`] as it was when the entry was declared (a file's carries its
+/// stamp, so a file rewritten since is another entry) and its
+/// [`name`](Asset::name), which alone tells apart assets with no identity.
+#[cfg(any(feature = "soundfont", all(feature = "sampler", codec)))]
+type Declaration = (Option<Identity>, String);
 
-impl AssetKey {
-    fn of(asset: &Asset) -> Self {
-        asset
-            .identity()
-            .map_or_else(|| Self::Name(asset.name()), Self::Identity)
-    }
+#[cfg(any(feature = "soundfont", all(feature = "sampler", codec)))]
+fn declaration(asset: &Asset) -> Declaration {
+    (asset.identity(), asset.name())
 }
 
 /// Where a file's samples are read from: half of [`AudioFile`]'s identity.
@@ -165,12 +157,12 @@ impl<K, M> Declared<K, AudioFile, M> {
 
 #[cfg(all(feature = "sampler", codec))]
 impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
-    type Identity = (AssetKey, Tier);
+    type Identity = (Declaration, Tier);
     type Loaded = AudioEntry<S>;
     type Handle = AudioEntry<S>;
 
     fn identity(&self) -> Self::Identity {
-        (AssetKey::of(&self.asset), self.tier)
+        (declaration(&self.asset), self.tier)
     }
 
     fn load(&self) -> Load<Self::Loaded, S> {
@@ -257,12 +249,12 @@ pub fn soundfont<K>(key: K, asset: impl Into<Asset>) -> Declared<K, SoundFontFil
 
 #[cfg(feature = "soundfont")]
 impl<S: tutti_buffers::Float> PoolEntry<S> for SoundFontFile {
-    type Identity = AssetKey;
+    type Identity = Declaration;
     type Loaded = Arc<tutti_sf2::SoundFont>;
     type Handle = Arc<tutti_sf2::SoundFont>;
 
-    fn identity(&self) -> AssetKey {
-        AssetKey::of(&self.asset)
+    fn identity(&self) -> Declaration {
+        declaration(&self.asset)
     }
 
     fn load(&self) -> Load<Self::Loaded, S> {

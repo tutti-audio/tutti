@@ -114,7 +114,7 @@ use tutti_units::SampleRate;
 ///
 /// // The streamer opens the file on its own thread; the reply is polled, and
 /// // a poll that is not ready hands the `PendingOpen` back.
-/// let mut opening = streamer.open("take_1.wav".as_ref(), Placement::HEAD);
+/// let mut opening = streamer.open("take_1.wav", Placement::HEAD);
 /// let (stream, reader) = loop {
 ///     match opening.poll() {
 ///         Open::Ready(stream, reader) => break (stream, reader),

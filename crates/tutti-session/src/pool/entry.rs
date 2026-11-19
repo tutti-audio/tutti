@@ -52,7 +52,7 @@ pub trait PoolEntry<S: Float = f32>: Send + 'static {
 
     /// The asset the load reads, for a kind whose value comes from one.
     ///
-    /// The worker that runs the load takes the asset's [`Identity`] (a file's
+    /// The worker that runs the load takes the asset's [`Identity`](tutti_platform::Identity) (a file's
     /// path and stamp) before the load reads it, and
     /// [`Session::refresh_pool`](crate::Session::refresh_pool) compares it
     /// with the asset's now and loads the entry again when they differ. An
