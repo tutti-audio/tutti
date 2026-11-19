@@ -38,11 +38,11 @@ pub enum TextError {
 /// type Name = Text<1, 8>;
 ///
 /// assert_eq!(Name::new("Rosa").unwrap().as_str(), "Rosa");
-/// assert_eq!(Name::new(""), Err(TextError::TooShort { min: 1 }));
+/// assert_eq!(Name::try_from(""), Err(TextError::TooShort { min: 1 }));
 /// assert_eq!(Name::try_from("123456789"), Err(TextError::TooLong { max: 8 }));
 /// // "é" is two bytes, so four of them are eight and five are ten.
-/// assert!(Name::new("éééé").is_ok());
-/// assert!(Name::new("ééééé").is_err());
+/// assert!(Name::new("éééé").is_some());
+/// assert!(Name::new("ééééé").is_none());
 /// ```
 ///
 /// A bound that cannot hold is a compile error:
