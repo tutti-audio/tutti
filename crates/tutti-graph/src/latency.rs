@@ -65,7 +65,7 @@
 //! let mut g = Topology::default();
 //! g.nodes.insert(a, NodeSpec::new("src", ChannelLayout::EMPTY, mono));
 //! g.nodes.insert(b, NodeSpec::new("src", ChannelLayout::EMPTY, mono));
-//! g.nodes.insert(limiter, NodeSpec::new("limiter", mono, mono).with_latency(Samples(512)));
+//! g.nodes.insert(limiter, NodeSpec::new("limiter", mono, mono).with_latency(Samples::new(512)));
 //! g.nodes.insert(mixer, NodeSpec::new("mixer", stereo, mono));
 //! g.connect(InPort { node: limiter, port: 0 }, out(a));
 //! g.connect(InPort { node: mixer, port: 0 }, out(limiter));
@@ -74,9 +74,9 @@
 //!
 //! let d = delays(&g, SampleRate::SR_48K);
 //! // The mixer's port 1 waits 512 frames for the limiter on port 0.
-//! let wait = InputDelay { node: mixer, port: 1, feed: Feed::Node(b), by: Samples(512) };
+//! let wait = InputDelay { node: mixer, port: 1, feed: Feed::Node(b), by: Samples::new(512) };
 //! assert_eq!(d.inputs(), &[wait]);
-//! assert_eq!(d.compensation().total(), Samples(512));
+//! assert_eq!(d.compensation().total(), Samples::new(512));
 //! ```
 //!
 //! [`other_sources`]: LatencyGraph::other_sources
@@ -386,7 +386,7 @@ pub fn delays<G: LatencyGraph>(g: &G, rate: SampleRate) -> Delays<G::Node> {
         for PortFeed { port, feed } in g.inputs(node) {
             let dep = match feed {
                 Feed::Node(src) => departure(src, &arrival, &latency),
-                Feed::Outside => Samples(0),
+                Feed::Outside => Samples::new(0),
                 Feed::None => continue,
             };
             let by = dep.align_to(at);
@@ -406,10 +406,10 @@ pub fn delays<G: LatencyGraph>(g: &G, rate: SampleRate) -> Delays<G::Node> {
     let sources: Vec<ChannelFeed<G::Node>> = g.outputs().collect();
     let feed_departure = |feed: Feed<G::Node>| match feed {
         Feed::Node(src) => departure(src, &arrival, &latency),
-        Feed::Outside | Feed::None => Samples(0),
+        Feed::Outside | Feed::None => Samples::new(0),
     };
     let width = sources.iter().map(|s| s.channel + 1).max().unwrap_or(0);
-    let mut channel_arrivals = vec![Samples(0); width];
+    let mut channel_arrivals = vec![Samples::new(0); width];
     for &ChannelFeed { channel, feed } in &sources {
         channel_arrivals[channel] = channel_arrivals[channel].max(feed_departure(feed));
     }
@@ -555,7 +555,7 @@ mod tests {
             Self {
                 nodes: nodes
                     .into_iter()
-                    .map(|(lat, ins)| (Samples(lat), ins))
+                    .map(|(lat, ins)| (Samples::new(lat), ins))
                     .collect(),
                 others,
                 outputs,
@@ -650,7 +650,7 @@ mod tests {
         );
 
         let reported = plan(&g, R);
-        assert_eq!(reported.total(), Samples(512));
+        assert_eq!(reported.total(), Samples::new(512));
         let d = delays(&g, R);
         assert_eq!(d.compensation(), &reported);
         assert!(!d.inputs().is_empty());
@@ -665,9 +665,9 @@ mod tests {
 
         assert!(d.inputs().is_empty());
         assert!(d.outputs().is_empty());
-        assert_eq!(d.compensation().total(), Samples(512));
+        assert_eq!(d.compensation().total(), Samples::new(512));
         // Single output: it *is* the worst case, so nothing to pre-roll.
-        assert_eq!(d.compensation().channels(), &[Samples(0)]);
+        assert_eq!(d.compensation().channels(), &[Samples::new(0)]);
     }
 
     #[test]
@@ -685,8 +685,8 @@ mod tests {
         );
         let d = delays(&g, R);
 
-        assert_eq!(d.inputs(), &[input(3, 1, Feed::Node(1), Samples(512))]);
-        assert_eq!(d.compensation().total(), Samples(512));
+        assert_eq!(d.inputs(), &[input(3, 1, Feed::Node(1), Samples::new(512))]);
+        assert_eq!(d.compensation().total(), Samples::new(512));
     }
 
     #[test]
@@ -706,7 +706,7 @@ mod tests {
 
         assert_eq!(
             delays(&g, R).inputs(),
-            &[input(3, 1, Feed::Node(2), Samples(512))]
+            &[input(3, 1, Feed::Node(2), Samples::new(512))]
         );
     }
 
@@ -720,11 +720,11 @@ mod tests {
         let d = delays(&g, R);
         let c = d.compensation();
 
-        assert_eq!(d.outputs(), &[output(1, Feed::Node(1), Samples(512))]);
-        assert_eq!(c.total(), Samples(512));
+        assert_eq!(d.outputs(), &[output(1, Feed::Node(1), Samples::new(512))]);
+        assert_eq!(c.total(), Samples::new(512));
         // ch0 already arrives at the worst case; ch1's source must pre-roll.
-        assert_eq!(c.channels(), &[Samples(0), Samples(512)]);
-        assert_eq!(c.for_channel(1), Samples(512));
+        assert_eq!(c.channels(), &[Samples::new(0), Samples::new(512)]);
+        assert_eq!(c.for_channel(1), Samples::new(512));
     }
 
     #[test]
@@ -733,7 +733,7 @@ mod tests {
             vec![(0, vec![]), (0, vec![]), (512, vec![Some(0)])],
             vec![Some(2), Some(1)],
         );
-        assert_eq!(plan(&g, R).for_channel(99), Samples(0));
+        assert_eq!(plan(&g, R).for_channel(99), Samples::new(0));
     }
 
     #[test]
@@ -752,8 +752,8 @@ mod tests {
         );
         let d = delays(&g, R);
 
-        assert_eq!(d.inputs(), &[input(4, 1, Feed::Node(3), Samples(150))]);
-        assert_eq!(d.compensation().total(), Samples(150));
+        assert_eq!(d.inputs(), &[input(4, 1, Feed::Node(3), Samples::new(150))]);
+        assert_eq!(d.compensation().total(), Samples::new(150));
     }
 
     #[test]
@@ -774,8 +774,8 @@ mod tests {
         assert_eq!(
             sorted_inputs(&delays(&g, R)),
             vec![
-                input(3, 1, Feed::Node(1), Samples(200)),
-                input(3, 2, Feed::Node(2), Samples(300))
+                input(3, 1, Feed::Node(1), Samples::new(200)),
+                input(3, 2, Feed::Node(2), Samples::new(300))
             ]
         );
     }
@@ -787,7 +787,7 @@ mod tests {
         let d = delays(&g, R);
 
         assert!(d.inputs().is_empty());
-        assert_eq!(d.compensation().total(), Samples(512));
+        assert_eq!(d.compensation().total(), Samples::new(512));
     }
 
     /// A global input arrives at zero and is **aligned** where it meets a
@@ -801,7 +801,7 @@ mod tests {
         );
         assert_eq!(
             delays(&g, R).inputs(),
-            &[input(1, 1, Feed::Outside, Samples(48))]
+            &[input(1, 1, Feed::Outside, Samples::new(48))]
         );
         // Alone, a global input has nothing to align against.
         let alone = Toy::with_feeds(vec![(48, vec![Feed::Outside])], vec![Some(0)]);
@@ -820,8 +820,8 @@ mod tests {
         );
         g.others[2] = vec![0];
         let d = delays(&g, R);
-        assert_eq!(d.inputs(), &[input(2, 0, Feed::Node(1), Samples(64))]);
-        assert_eq!(d.compensation().total(), Samples(64));
+        assert_eq!(d.inputs(), &[input(2, 0, Feed::Node(1), Samples::new(64))]);
+        assert_eq!(d.compensation().total(), Samples::new(64));
     }
 
     /// The bound is ten seconds at the graph's rate: 480 000 frames at
@@ -832,19 +832,23 @@ mod tests {
     fn reported_latency_is_clamped_to_ten_seconds_at_the_rate() {
         let one = |frames: usize| Toy::new(vec![(frames, vec![])], vec![Some(0)]);
         for (rate, bound) in [(SampleRate::SR_48K, 480_000), (SampleRate::SR_96K, 960_000)] {
-            assert_eq!(MAX_NODE_LATENCY.to_samples_ceil(rate), Samples(bound));
-            assert_eq!(plan(&one(bound), rate).total(), Samples(bound), "{rate:?}");
+            assert_eq!(MAX_NODE_LATENCY.to_samples_ceil(rate), Samples::new(bound));
+            assert_eq!(
+                plan(&one(bound), rate).total(),
+                Samples::new(bound),
+                "{rate:?}"
+            );
             assert_eq!(
                 plan(&one(bound + 1), rate).total(),
-                Samples(bound),
+                Samples::new(bound),
                 "{rate:?}: one past is clamped"
             );
         }
         assert_eq!(
             plan(&one(960_000), SampleRate::SR_48K).total(),
-            Samples(480_000)
+            Samples::new(480_000)
         );
-        assert_eq!(plan(&one(usize::MAX), R).total(), Samples(480_000));
+        assert_eq!(plan(&one(usize::MAX), R).total(), Samples::new(480_000));
     }
 
     #[test]

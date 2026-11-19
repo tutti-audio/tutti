@@ -158,7 +158,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
             node: NodeKey(4),
             port: 1,
         },
-        EventEdge::feedback(ev(3, 0), Samples(256)),
+        EventEdge::feedback(ev(3, 0), Samples::new(256)),
     );
     let t = &mut spec.topology;
     t.edges
@@ -173,7 +173,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
                 node: NodeKey(9),
                 port: 0,
             },
-            Samples(256),
+            Samples::new(256),
         ))],
     );
     t.edges.insert(at(8, 0), vec![from(7, 0)]);
@@ -210,7 +210,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
             ParamKind::Ramp(ParamRamp::foreign(
                 tutti_units::ParamId::new(1),
                 0.5,
-                Samples(16),
+                Samples::new(16),
             ))
             .into()
         } else {
@@ -241,7 +241,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     )
     .expect("under capacity");
     ed.schedule(
-        At::Beat(Beat(4.0)),
+        At::Beat(Beat::new(4.0)),
         consumer(0),
         EventKind::Midi(Ump([0; 4])),
     )
@@ -422,7 +422,7 @@ fn crossfades_are_allocation_free_on(workers: usize) {
     ed.collect();
 
     // A long fade, one queued behind it, and one on the event node.
-    let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
+    let fade = |n| Fade::new(Samples::new(n), FadeLaw::EqualPower);
     ed.replace(NodeKey(1), Unforkable(gain(2.0)), fade(3_000))
         .expect("fits");
     ed.commit().expect("commits");
@@ -534,7 +534,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
         exec.process(64, &transport, &[], &mut slices);
     };
     block(&mut exec);
-    let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
+    let fade = |n| Fade::new(Samples::new(n), FadeLaw::EqualPower);
     for k in 0..KEYS {
         ed.replace(
             NodeKey(k + 1),
@@ -635,8 +635,8 @@ impl Node for LateEvents {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
-            .with_latency(Latency::new(Samples(141)))
-            .with_tail(Tail::Finite(Samples(141)))
+            .with_latency(Latency::new(Samples::new(141)))
+            .with_tail(Tail::Finite(Samples::new(141)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -699,7 +699,7 @@ fn declared_event_capacities_are_allocation_free_on(workers: usize) {
     for from in [1, 2, 3] {
         spec.connect_events(tally(0), EventEdge::Direct(ev(from)));
     }
-    spec.connect_events(tally(1), EventEdge::feedback(ev(1), Samples(300)));
+    spec.connect_events(tally(1), EventEdge::feedback(ev(1), Samples::new(300)));
     ed.commit().expect("commits");
     apply(&mut exec);
     ed.collect();
@@ -846,8 +846,8 @@ impl Node for RampEvery {
                         o,
                         ParamRamp::new(
                             tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
-                            tutti_units::Hz((f % 5) as f64),
-                            Samples(20),
+                            tutti_units::Hz::new((f % 5) as f64),
+                            Samples::new(20),
                         ),
                     ),
                     // A curve segment spanning the next event: interrupted.
@@ -860,13 +860,13 @@ impl Node for RampEvery {
                         ][(f / 111) as usize % 4];
                         let seg = ParamSegment::new(
                             tutti_units::ParamKey::<tutti_units::Hz>::CUTOFF,
-                            tutti_units::Hz((f % 3) as f64),
-                            tutti_units::Hz((f % 7) as f64),
-                            Samples(50),
+                            tutti_units::Hz::new((f % 3) as f64),
+                            tutti_units::Hz::new((f % 7) as f64),
+                            Samples::new(50),
                             shape,
                         );
                         let seg = if k == 2 {
-                            seg.resumed(Samples(3), Samples(41))
+                            seg.resumed(Samples::new(3), Samples::new(41))
                         } else {
                             seg
                         };
@@ -1068,7 +1068,7 @@ fn param_events_are_allocation_free_on(workers: usize) {
         port(1),
         EventEdge::Feedback {
             from: out(6),
-            delay: Samples(256),
+            delay: Samples::new(256),
         },
     );
     ed.commit().expect("commits");
@@ -1146,13 +1146,13 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
     let id = tutti_units::ParamId::new(1);
     for k in 0..200u64 {
         let kind: ParamKind = if k % 2 == 0 {
-            ParamKind::Ramp(ParamRamp::foreign(id, 0.5, Samples(16)))
+            ParamKind::Ramp(ParamRamp::foreign(id, 0.5, Samples::new(16)))
         } else {
             ParamKind::Segment(ParamSegment::foreign(
                 id,
                 0.0,
                 1.0,
-                Samples(50),
+                Samples::new(50),
                 Law::Linear,
             ))
         };
@@ -1174,13 +1174,13 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
     ed.schedule(
         At::Frame(Frame::new(0)),
         consumer(0),
-        ParamKind::Ramp(ParamRamp::foreign(id, 0.25, Samples(0))),
+        ParamKind::Ramp(ParamRamp::foreign(id, 0.25, Samples::new(0))),
     )
     .expect("under capacity");
     ed.schedule(
-        At::Beat(Beat(4.0)),
+        At::Beat(Beat::new(4.0)),
         consumer(1),
-        ParamKind::Ramp(ParamRamp::foreign(id, 0.25, Samples(0))),
+        ParamKind::Ramp(ParamRamp::foreign(id, 0.25, Samples::new(0))),
     )
     .expect("under capacity");
     assert_eq!(
@@ -1276,7 +1276,7 @@ impl Node for SeamEvery {
                     tutti_units::UnitParam::Azimuth,
                     from,
                     to,
-                    Samples(40),
+                    Samples::new(40),
                     shape,
                 );
                 let _ = io
@@ -1321,7 +1321,7 @@ fn an_azimuth_param_port_is_allocation_free() {
     let transport = TransportPosition::default();
     let mut out = vec![0.0f32; 256];
     let ranges = [
-        ParamRange::arc(Azimuth(180.0), ArcDegrees(30.0)),
+        ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(30.0)),
         ParamRange::new(-180.0, 180.0),
         ParamRange::UNBOUNDED,
     ];
@@ -1382,8 +1382,11 @@ fn a_range_published_while_blocks_render_is_allocation_free() {
             let mut k = 0u32;
             while !stop.load(Ordering::Acquire) {
                 let half = 10.0 + f64::from(k % 160);
-                ed.set_param_range(azimuth, ParamRange::arc(Azimuth(180.0), ArcDegrees(half)))
-                    .expect("a bearing's range");
+                ed.set_param_range(
+                    azimuth,
+                    ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(half)),
+                )
+                .expect("a bearing's range");
                 if k.is_multiple_of(8) {
                     let _ = ed.reclaim();
                 }
@@ -1435,8 +1438,11 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     let transport = TransportPosition::default();
     let mut out = vec![0.0f32; 256];
     for half in [30.0, 60.0, 90.0] {
-        ed.set_param_range(azimuth, ParamRange::arc(Azimuth(180.0), ArcDegrees(half)))
-            .expect("a bearing's range");
+        ed.set_param_range(
+            azimuth,
+            ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(half)),
+        )
+        .expect("a bearing's range");
         assert_no_alloc::assert_no_alloc(|| {
             exec.process(64, &transport, &[], &mut [&mut out[..64]]);
         });
@@ -1467,13 +1473,13 @@ fn direct_driving_events_does_not_allocate() {
     use tutti_units::{Bpm, SampleRate};
 
     let rate = SampleRate::SR_48K;
-    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut pulse = Direct::new(Pulse::new(Latency::ZERO), rate, 64);
     pulse.set_transport(rolling);
     let events: Vec<Event> = (0..64)
         .map(|k| {
             Event::midi(
-                Offset::of(Samples(k), Samples(64)),
+                Offset::of(Samples::new(k), Samples::new(64)),
                 Message::midi1(
                     MidiChannel::FIRST,
                     Voice1::note_on(NoteNumber::of(60), U7::of(100)),
@@ -1511,7 +1517,7 @@ fn reporting_nodes_are_allocation_free_on(workers: usize) {
         ed.insert(
             fx,
             "ringer",
-            Unforkable(Ringer::new(Tail::Finite(Samples(4_000)), 200, 200)),
+            Unforkable(Ringer::new(Tail::Finite(Samples::new(4_000)), 200, 200)),
         );
         ed.spec_mut()
             .topology
@@ -1835,7 +1841,7 @@ impl Node for Wire {
         let main = ch(self.ins.min(self.outs));
         Shape::buses(Buses::unassigned(main), Buses::unassigned(main))
             .with_ports(ch(self.ins), ch(self.outs))
-            .with_latency(Latency::new(Samples(self.latency)))
+            .with_latency(Latency::new(Samples::new(self.latency)))
             .with_events(self.ein, self.eout)
             .with_tail(Tail::None)
     }
@@ -2355,7 +2361,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
             Unforkable(Chaser {
                 seen: Arc::clone(second),
             }),
-            Fade::new(Samples(0), FadeLaw::EqualPower),
+            Fade::new(Samples::new(0), FadeLaw::EqualPower),
         )
         .expect("fits");
     }
@@ -2624,7 +2630,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     let first = pdc_pair(&mut ed, 1, 40);
     let out_of = |node: NodeKey| Source::Node(OutPort { node, port: 0 });
     ed.spec_mut().topology.set_outputs(vec![out_of(first)]);
-    let cap = Samples(1 << 16);
+    let cap = Samples::new(1 << 16);
     let mut tap = ed
         .open_tap(TapId::of(1), vec![out_of(first)], TapAlign::ToOutput, cap)
         .expect("the source exists");
@@ -2717,7 +2723,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     // An event FIFO whose bound grows, and one whose bound shrinks; a tap
     // opened again wins over the one carried.
     let lag = NodeKey(22);
-    ed.set_latency(lag, Latency::new(Samples(400)))
+    ed.set_latency(lag, Latency::new(Samples::new(400)))
         .expect("fits");
     let reopened = ed
         .open_tap(TapId::of(1), vec![out_of(first)], TapAlign::ToOutput, cap)
@@ -2727,7 +2733,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     applied(&mut exec);
     blocks(&mut exec, 24, 64);
     ed.collect();
-    ed.set_latency(lag, Latency::new(Samples(3))).expect("fits");
+    ed.set_latency(lag, Latency::new(Samples::new(3)))
+        .expect("fits");
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 24, 64);
@@ -2755,7 +2762,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
                 node: gain,
                 port: 0,
             },
-            Samples(delay),
+            Samples::new(delay),
         ))]
     };
     {
@@ -2783,7 +2790,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
             Unforkable(TestNode::new(kind)),
         );
     }
-    let efb = |delay: usize| EventEdge::feedback(ev(311, 0), Samples(delay));
+    let efb = |delay: usize| EventEdge::feedback(ev(311, 0), Samples::new(delay));
     ed.spec_mut()
         .connect_events(sink(311, 0), EventEdge::Direct(ev(310, 0)));
     ed.spec_mut()
@@ -2852,7 +2859,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.replace(
         NodeKey(25),
         Unforkable(Holder::new(0)),
-        Fade::new(Samples(0), FadeLaw::EqualPower),
+        Fade::new(Samples::new(0), FadeLaw::EqualPower),
     )
     .expect("fits");
     ed.commit().expect("commits");
@@ -2928,7 +2935,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.replace(
         NodeKey(700),
         Unforkable(Holder::paced(0, 64)),
-        Fade::new(Samples(0), FadeLaw::EqualPower),
+        Fade::new(Samples::new(0), FadeLaw::EqualPower),
     )
     .expect("fits");
     ed.commit().expect("commits");
@@ -2985,7 +2992,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     applied(&mut exec);
     blocks(&mut exec, 4, 64);
     ed.collect();
-    let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
+    let fade = |n| Fade::new(Samples::new(n), FadeLaw::EqualPower);
     ed.replace(NodeKey(500), Unforkable(chaser(1)), fade(1_000))
         .expect("fits");
     ed.commit().expect("commits");
@@ -3001,7 +3008,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     // A re-prepare: suspend and resume, at the same rate and at another.
     for next in [
         prepare(64),
-        tutti_graph::Prepare::new(SampleRate::SR_44K1, MaxBlock::of(Samples(64))),
+        tutti_graph::Prepare::new(SampleRate::SR_44K1, MaxBlock::of(Samples::new(64))),
     ] {
         ed.reprepare(next).expect("accepted");
         applied(&mut exec);
@@ -3155,7 +3162,7 @@ fn closing_pedals_and_bends_allocates_nothing_on(workers: usize) {
     apply(&mut exec);
     blocks(&mut exec, 4);
     ed.collect();
-    let fade = Fade::new(Samples(128), FadeLaw::EqualPower);
+    let fade = Fade::new(Samples::new(128), FadeLaw::EqualPower);
     ed.replace(NodeKey(1), Unforkable(Latch { sent: false }), fade)
         .expect("fits");
     ed.commit().expect("commits");
@@ -3258,7 +3265,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
         .topology
         .set_outputs(vec![port(0), port(1), port(2)]);
     let mut wide = ed
-        .open_output_tap(TapId::of(1), 3, Samples(1024))
+        .open_output_tap(TapId::of(1), 3, Samples::new(1024))
         .expect("the outputs exist");
     ed.commit().expect("commits");
     apply(&mut exec);
@@ -3281,7 +3288,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
     // The root narrows to one channel and its tap is opened again.
     ed.spec_mut().topology.set_outputs(vec![port(0)]);
     let mut narrow = ed
-        .open_output_tap(TapId::of(1), 1, Samples(1024))
+        .open_output_tap(TapId::of(1), 1, Samples::new(1024))
         .expect("the outputs exist");
     ed.commit().expect("commits");
     apply(&mut exec);

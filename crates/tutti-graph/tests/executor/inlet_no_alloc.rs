@@ -18,7 +18,7 @@ use tutti_units::{SampleRate, Samples};
 /// Blocks with the ring full, then running dry (both branches of the pop).
 #[test]
 fn inlet_process_is_allocation_free() {
-    let (node, mut prod) = InletNode::pair(ChannelLayout::STEREO, Samples(4096));
+    let (node, mut prod) = InletNode::pair(ChannelLayout::STEREO, Samples::new(4096));
     let mut node = Direct::new(node, SampleRate::SR_48K, 64);
 
     for _ in 0..2048 {

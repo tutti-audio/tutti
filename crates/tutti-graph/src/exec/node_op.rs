@@ -264,7 +264,8 @@ pub(super) fn fading_node_op<
         let y = st.arena.slot_mut(s, frames);
         let out = x.scratch.slot(c, frames);
         for (i, (y, &o)) in y[..n].iter_mut().zip(&out[..n]).enumerate() {
-            let (g_out, g_in) = fade_gains::<F>(x.law, Samples(x.done + i), Samples(x.len));
+            let (g_out, g_in) =
+                fade_gains::<F>(x.law, Samples::new(x.done + i), Samples::new(x.len));
             *y = *y * g_in + o * g_out;
         }
         st.flags.set(s, 0);

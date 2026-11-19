@@ -51,7 +51,7 @@ impl<F: Float> Node<F> for Half {
 }
 
 fn prepare() -> Prepare {
-    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(16)))
+    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(16)))
 }
 
 /// Two equal sources summed at an output port is exactly twice `FINE`, and

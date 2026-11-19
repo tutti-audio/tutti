@@ -92,7 +92,7 @@ fn tag(t: u32) -> EventKind {
 
 /// A step of param `ID` to `target`, as a ramp.
 fn ramp(target: f64) -> ParamKind {
-    ParamKind::Ramp(ParamRamp::foreign(ID, target, Samples(0)))
+    ParamKind::Ramp(ParamRamp::foreign(ID, target, Samples::new(0)))
 }
 
 /// The same as a zero-length segment.
@@ -101,7 +101,7 @@ fn segment(target: f64) -> ParamKind {
         ID,
         target,
         target,
-        Samples(0),
+        Samples::new(0),
         Law::Linear,
     ))
 }
@@ -268,21 +268,21 @@ fn a_late_command_lands_at_the_next_block_and_is_counted() {
 #[test]
 fn a_beat_command_lands_where_the_transport_reaches_it() {
     let mut rig = rig();
-    rig.schedule(At::Beat(Beat(1.5)), tag(3));
+    rig.schedule(At::Beat(Beat::new(1.5)), tag(3));
     let rate = 48_000.0;
     let mut frame = 0u64;
     // First blocks at 60 BPM (48 000 frames a beat), then 120: the beat is
     // reached where the *current* tempo puts it.
     let mut beat = 0.0f64;
     for n in [64usize; 4] {
-        let t = TransportPosition::new(true, Bpm::of(60.0), Beat(beat), None);
+        let t = TransportPosition::new(true, Bpm::of(60.0), Beat::new(beat), None);
         rig.block(n, &t);
         beat += n as f64 * 60.0 / (60.0 * rate); // 60 BPM: beats per frame
         frame += n as u64;
     }
     // Jump to just before beat 1.5 at 120 BPM: 10 frames short.
     let spb = 120.0 / (60.0 * rate); // beats per frame
-    let t = TransportPosition::new(true, Bpm::of(120.0), Beat(1.5 - 10.0 * spb), None);
+    let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(1.5 - 10.0 * spb), None);
     rig.block(64, &t);
     for log in [&rig.exec_log, &rig.ref_log] {
         assert_eq!(
@@ -301,11 +301,16 @@ fn a_beat_command_lands_where_the_transport_reaches_it() {
 #[cfg(not(debug_assertions))]
 fn a_beat_passed_in_a_refused_block_lands_late() {
     let mut rig = rig();
-    rig.schedule(At::Beat(Beat(1.5)), tag(3));
+    rig.schedule(At::Beat(Beat::new(1.5)), tag(3));
     // 120 BPM at 48 kHz: a frame is 1 / 24 000 beat.
     let f = 1.0 / 24_000.0;
     let at = |frames_from_beat: f64| {
-        TransportPosition::new(true, Bpm::of(120.0), Beat(1.5 + frames_from_beat * f), None)
+        TransportPosition::new(
+            true,
+            Bpm::of(120.0),
+            Beat::new(1.5 + frames_from_beat * f),
+            None,
+        )
     };
     rig.block(64, &at(-100.0));
     // Crosses beat 1.5, with no output slice for a one-output plan.
@@ -491,7 +496,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     ed.collect();
     assert_eq!(
         exec.plan().unwrap().unit(A).unwrap().arrival.samples(),
-        Samples(20)
+        Samples::new(20)
     );
     let mut reference = Reference::new(prepare(MAX));
     reference.set_graph(
@@ -657,7 +662,7 @@ fn cancel_takes_commands_back_and_frees_their_credit() {
 
     for i in 0..COMMAND_CAPACITY as u32 {
         rig.ed
-            .schedule(At::Beat(Beat(1.0 + f64::from(i))), to(), tag(i))
+            .schedule(At::Beat(Beat::new(1.0 + f64::from(i))), to(), tag(i))
             .expect("under capacity");
     }
     rig.block(64, &stopped);
@@ -684,8 +689,9 @@ fn at_beat(beat: f64, playing: bool, tempo: f64, looping: Option<(f64, f64)>) ->
     TransportPosition::new(
         playing,
         Bpm::of(tempo),
-        Beat(beat),
-        looping.map(|(start, end)| LoopRange::new(Beat(start), Beat(end)).expect("a loop")),
+        Beat::new(beat),
+        looping
+            .map(|(start, end)| LoopRange::new(Beat::new(start), Beat::new(end)).expect("a loop")),
     )
 }
 
@@ -992,9 +998,9 @@ fn beat_resolution_matches_a_hand_computed_table() {
         let silence = [0.0f32; 500];
         for (i, tr) in case.transports.iter().enumerate() {
             if i == case.sched_at {
-                ed.schedule(At::Beat(Beat(case.beat)), to, tag(9))
+                ed.schedule(At::Beat(Beat::new(case.beat)), to, tag(9))
                     .expect("room");
-                reference.schedule(At::Beat(Beat(case.beat)), to, tag(9));
+                reference.schedule(At::Beat(Beat::new(case.beat)), to, tag(9));
             }
             exec.process(500, tr, &[&silence[..]], &mut []);
             reference.process(500, tr, &[&silence[..]], &mut []);
@@ -1197,8 +1203,8 @@ fn a_seek_out_of_a_loop_that_lines_up_with_wraps_is_a_seek() {
         TransportPosition::new(
             true,
             Bpm::of(120.0),
-            Beat(beat),
-            Some(LoopRange::new(Beat(start), Beat(end)).expect("a loop")),
+            Beat::new(beat),
+            Some(LoopRange::new(Beat::new(start), Beat::new(end)).expect("a loop")),
         )
     };
     let step = |b: f64| {
@@ -1226,8 +1232,8 @@ fn a_seek_out_of_a_loop_that_lines_up_with_wraps_is_a_seek() {
         rig.block(1, &at(now));
         now = step(now);
     }
-    let ahead_again = tutti_units::At::Beat(Beat(3.99995));
-    let crossed = tutti_units::At::Beat(Beat(seek + 2.5 * frame_beat));
+    let ahead_again = tutti_units::At::Beat(Beat::new(3.99995));
+    let crossed = tutti_units::At::Beat(Beat::new(seek + 2.5 * frame_beat));
     for (when, t) in [(ahead_again, 1), (crossed, 2)] {
         rig.schedule(when, tag(t));
     }
@@ -1313,7 +1319,7 @@ fn a_scheduled_param_lands_on_its_exact_frame_across_ragged_blocks() {
 #[test]
 fn a_beat_timed_param_fires_when_the_playhead_crosses_the_beat() {
     let mut rig = rig();
-    rig.schedule(At::Beat(Beat(1.5)), segment(3.0));
+    rig.schedule(At::Beat(Beat::new(1.5)), segment(3.0));
     let spb = 1.0 / 24_000.0;
     rig.block(64, &at_beat(1.5 - 74.0 * spb, true, 120.0, None));
     assert!(logs(&rig).is_empty(), "the block ends 10 frames short");
@@ -1328,7 +1334,7 @@ fn a_beat_timed_param_fires_when_the_playhead_crosses_the_beat() {
 #[test]
 fn a_seek_over_the_beat_leaves_a_param_pending() {
     let mut rig = rig();
-    rig.schedule(At::Beat(Beat(3.0)), ramp(9.0));
+    rig.schedule(At::Beat(Beat::new(3.0)), ramp(9.0));
     rig.block(64, &at_beat(1.0, true, 120.0, None));
     rig.block(64, &at_beat(5.0, true, 120.0, None));
     assert!(logs(&rig).is_empty(), "jumped over, not crossed");
@@ -1408,7 +1414,7 @@ fn cancel_takes_a_param_command_back() {
     );
     assert_eq!(rig.exec.cancelled_command_count(), 1);
     rig.ed
-        .schedule(At::Beat(Beat(9.0)), to(), ramp(1.0))
+        .schedule(At::Beat(Beat::new(9.0)), to(), ramp(1.0))
         .expect("room");
     rig.exec.process(64, &t, &[], &mut [&mut [0.0; 64][..]]);
     assert_eq!(rig.ed.commands_outstanding(), 1, "waiting on its beat");
@@ -1437,7 +1443,7 @@ fn a_param_command_to_a_node_without_param_events_is_refused() {
     }
     assert_eq!(ed.commands_outstanding(), 0, "nothing was sent");
     for i in 0..COMMAND_CAPACITY {
-        ed.schedule(At::Beat(Beat(9.0)), to(), tag(i as u32))
+        ed.schedule(At::Beat(Beat::new(9.0)), to(), tag(i as u32))
             .expect("every credit is still free");
     }
     assert!(!ScheduleError::NoParamEvents { to: to() }.is_transient());

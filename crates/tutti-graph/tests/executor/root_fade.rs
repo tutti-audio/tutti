@@ -88,7 +88,7 @@ fn rig_with(nodes: &[(u64, Kind)], outputs: &[u64]) -> Renderer {
         .set_outputs(outputs.iter().map(|&n| source(n)).collect::<Vec<_>>());
     ed.commit().expect("commits");
     let mut r = Renderer::new(ed, exec);
-    r.set_block(Samples(BLOCK));
+    r.set_block(Samples::new(BLOCK));
     r
 }
 
@@ -139,7 +139,7 @@ fn host_mix(block: &Block) -> Vec<(f32, f32, f32)> {
         .map(|i| {
             let (go, gn) = match block.fade {
                 Some(f) if f.done.get() + i < f.fade.duration.get() => {
-                    f.fade.law.gains(f.done + Samples(i), f.fade.duration)
+                    f.fade.law.gains(f.done + Samples::new(i), f.fade.duration)
                 }
                 _ => (Amplitude::SILENT, Amplitude::UNITY),
             };
@@ -187,7 +187,7 @@ fn check_fade(law: FadeLaw, n: usize, first: usize, mixed: &[(f32, f32, f32)], f
 
 /// The fade's length: [`DECLICK`] frames, three blocks.
 fn fade(law: FadeLaw) -> Fade {
-    Fade::new(Samples(declick()), law)
+    Fade::new(Samples::new(declick()), law)
 }
 
 const LAWS: [FadeLaw; 2] = [FadeLaw::EqualAmplitude, FadeLaw::EqualPower];
@@ -535,7 +535,7 @@ fn a_carried_commit_that_removes_an_old_source_drops_it_from_the_bank_and_keeps_
     r.editor_mut()
         .spec_mut()
         .gains
-        .insert(weighted, EdgeGain::new(Amplitude(0.5)));
+        .insert(weighted, EdgeGain::new(Amplitude::new(0.5)));
     r.editor_mut().commit().expect("commits");
     step(&mut r, BLOCK);
     r.editor_mut().spec_mut().gains.remove(&weighted);
@@ -647,7 +647,7 @@ fn a_carried_commit_that_changes_an_old_sources_latency_keeps_the_banks_alignmen
     };
     heard(&mut r, &mut t);
     r.editor_mut()
-        .set_latency(key(2), Latency::new(Samples(96)))
+        .set_latency(key(2), Latency::new(Samples::new(96)))
         .expect("sets");
     r.editor_mut().commit().expect("commits");
     let block = heard(&mut r, &mut t);

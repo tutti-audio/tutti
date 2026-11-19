@@ -29,7 +29,7 @@ fn tap_lanes(c: &mut Criterion) {
     group.throughput(Throughput::Elements((FRAMES * WIDTH) as u64));
 
     // Two blocks of room: a write finds space and a read finds a block.
-    let capacity = Samples(FRAMES * 4);
+    let capacity = Samples::new(FRAMES * 4);
 
     group.bench_function("write_512x2", |b| {
         let (mut reader, mut writer) = TapReader::pair(WIDTH, capacity);

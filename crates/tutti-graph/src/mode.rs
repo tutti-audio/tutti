@@ -495,7 +495,13 @@ impl<F: Float> MixRun<F> {
         } else if self.is_static() {
             self.to
         } else {
-            ramp_in(None, self.from, self.to, Samples(i), Samples(self.frames))
+            ramp_in(
+                None,
+                self.from,
+                self.to,
+                Samples::new(i),
+                Samples::new(self.frames),
+            )
         }
     }
 
@@ -593,7 +599,12 @@ impl<F: Float> Segments<F> {
 
 /// The incoming gain of frame `k` of the `declick`-frame fade.
 fn gain<F: Float>(k: usize, declick: usize) -> F {
-    fade_gains::<F>(FadeLaw::EqualAmplitude, Samples(k), Samples(declick)).1
+    fade_gains::<F>(
+        FadeLaw::EqualAmplitude,
+        Samples::new(k),
+        Samples::new(declick),
+    )
+    .1
 }
 
 /// The aligned-input path of a latent node: one ring of its declared latency
@@ -1050,7 +1061,8 @@ mod tests {
     const DECLICK_FRAMES: usize = 240;
 
     fn shape(latency: usize) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples(latency)))
+        Shape::through_unassigned(ChannelLayout::MONO)
+            .with_latency(Latency::new(Samples::new(latency)))
     }
 
     /// A unit of `shape` at `mix`, steady Active, after the block's snapshot.

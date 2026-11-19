@@ -108,7 +108,7 @@ impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::EMPTY
             .with_events(0, 1)
-            .with_latency(Latency::new(Samples(self.latency)))
+            .with_latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -188,7 +188,7 @@ impl Rig {
         seen: &Seen,
     ) -> (Vec<(u64, u32, u16, u32)>, u64) {
         seen.lock().unwrap().clear();
-        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max)));
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(max)));
         let (valid, shapes) = self.spec();
         let transport = TransportPosition::default();
         let dropped = if executor {
@@ -304,7 +304,7 @@ fn an_event_reaches_downstream_in_the_block_it_was_emitted() {
         events,
     };
     let (valid, shapes) = rig.spec();
-    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
+    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
     let (p, _) = compile(&valid, &shapes, &prep, None).expect("compiles");
     assert!(
         !p.ops().iter().any(|op| matches!(op, Op::EventDelay { .. })),
@@ -432,11 +432,11 @@ fn pdc_shifts_events_across_blocks_and_drops_none() {
         events,
     };
     let (valid, shapes) = rig.spec();
-    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128)));
+    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(128)));
     let (p, _) = compile(&valid, &shapes, &prep, None).expect("compiles");
     assert_eq!(
         p.unit(NodeKey(1)).expect("sink").arrival,
-        Latency::new(Samples(LATE))
+        Latency::new(Samples::new(LATE))
     );
     let total = 511 + LATE as u64 + 64;
     for blocks in [
@@ -474,7 +474,7 @@ fn an_event_feedback_edge_delays_by_its_declared_delay() {
     events.insert(at(1, 0), vec![EventEdge::Direct(out(2, 0))]);
     events.insert(
         at(1, 1),
-        vec![EventEdge::feedback(out(2, 0), Samples(DELAY))],
+        vec![EventEdge::feedback(out(2, 0), Samples::new(DELAY))],
     );
     let rig = Rig {
         nodes: vec![
@@ -588,7 +588,7 @@ fn declared_capacities_size_merges_and_delays_so_nothing_is_lost() {
         events,
     };
     let (valid, shapes) = rig.spec();
-    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
+    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
     let (p, _) = compile(&valid, &shapes, &prep, None).expect("compiles");
     // The sink's merge: both chord sources, 8 declared each.
     let sink_merge = p
@@ -664,7 +664,7 @@ fn a_delay_delivers_what_came_due_across_its_sources_blocks() {
     );
     events.insert(
         at(1, 1),
-        vec![EventEdge::feedback(out(2, 0), Samples(FEEDBACK))],
+        vec![EventEdge::feedback(out(2, 0), Samples::new(FEEDBACK))],
     );
     let rig = Rig {
         nodes: vec![
@@ -739,7 +739,7 @@ fn a_fifo_whose_bound_a_swap_lowered_delivers_its_backlog_on_time() {
         .flat_map(|b| (0..PER_BLOCK).map(move |i| b * 64 + i))
         .map(|f| (f, 0, f as u32))
         .collect();
-    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
+    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
     // A default of 1, so nothing is sized by accident from the default.
     let (mut ed, mut exec) = Editor::with_event_capacity(prep, 1);
     ed.insert(
@@ -795,7 +795,7 @@ fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
     let refused = Arc::new(AtomicUsize::new(0));
     // One event a frame for the first 640 frames.
     let plan: Vec<(u64, u16, u32)> = (0..LEN as u64).map(|f| (f, 0, f as u32)).collect();
-    let small = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(16)));
+    let small = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(16)));
     let (mut ed, mut exec) = Editor::with_event_capacity(small, 1);
     ed.insert(
         NodeKey(1),
@@ -810,7 +810,7 @@ fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
     let g = ed.spec_mut();
     g.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)));
     g.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)));
-    g.connect_events(at(1, 1), EventEdge::feedback(out(2, 0), Samples(LEN)));
+    g.connect_events(at(1, 1), EventEdge::feedback(out(2, 0), Samples::new(LEN)));
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
     for _ in 0..LEN / 16 {
@@ -818,8 +818,11 @@ fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
     }
     assert!(seen.lock().unwrap().is_empty(), "nothing is due before 640");
     // Bound 16 × (⌈640/512⌉ + 2) + 64/4 + 8 = 88, against 640 queued.
-    ed.reprepare(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))))
-        .expect("reprepares");
+    ed.reprepare(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ))
+    .expect("reprepares");
     exec.apply_pending();
     ed.collect();
     exec.apply_pending();
@@ -877,7 +880,7 @@ fn a_flush_into_a_port_a_lowered_bound_widened_drops_nothing() {
         .collect();
     // B: three events, still queued (due from 456) when it goes.
     let b_plan = [(200u64, 0u16, 9_001u32), (201, 0, 9_002), (202, 0, 9_003)];
-    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
+    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
     let (mut ed, mut exec) = Editor::with_event_capacity(prep, 1);
     ed.insert(
         NodeKey(1),

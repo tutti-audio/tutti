@@ -1281,7 +1281,7 @@ mod tests {
     fn ring(channel: u16, from: Source, len: usize) -> DelaySpec {
         DelaySpec {
             key: DelayKey::Output { channel, from },
-            len: Samples(len),
+            len: Samples::new(len),
         }
     }
 
@@ -1335,7 +1335,7 @@ mod tests {
                 at,
                 from: source(1),
             },
-            len: Samples(40),
+            len: Samples::new(40),
         }];
         assert!(ring_by_source(&delays).is_empty());
     }
