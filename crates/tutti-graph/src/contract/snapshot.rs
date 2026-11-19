@@ -60,7 +60,7 @@ type Write<N> = Box<dyn Fn(&N)>;
 /// use tutti_graph::contract::IsolateRow;
 /// # use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 /// # use tutti_units::{Amplitude, UnitParam};
-/// # use tutti_types::Param;
+/// # use tutti_rt::Param;
 /// # use tutti_buffers::ChannelLayout;
 /// # #[derive(Clone)]
 /// # struct Gain(Param<Amplitude>);
@@ -246,7 +246,7 @@ mod tests {
     use super::*;
     use crate::{Cx, Io, Node, ParamSet, Prepare, Shape, Status};
     use tutti_buffers::ChannelLayout;
-    use tutti_types::Param;
+    use tutti_rt::Param;
     use tutti_units::{Amplitude, UnitParam};
 
     /// A gain with two cells: `addressed` in its `ParamSet`, `trim` not.

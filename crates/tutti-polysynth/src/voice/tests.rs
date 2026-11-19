@@ -1,7 +1,7 @@
 use super::*;
 use tutti_ump::BendValue;
 use tutti_ump::{MidiChannel, NoteId, NoteNumber};
-use tutti_units::Normalized;
+use tutti_units::Velocity;
 
 #[test]
 fn test_basic_allocation() {
@@ -16,7 +16,7 @@ fn test_basic_allocation() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     assert!(matches!(
@@ -30,7 +30,7 @@ fn test_basic_allocation() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
     assert!(matches!(
@@ -54,14 +54,14 @@ fn test_voice_stealing_oldest() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
 
@@ -70,7 +70,7 @@ fn test_voice_stealing_oldest() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(67)),
         NoteNumber::of(67),
         MidiChannel::of(0),
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
     assert!(matches!(result, AllocationResult::Stolen { slot_index: 0 }));
@@ -85,7 +85,7 @@ fn test_release() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     assert_eq!(alloc.active_count(), 1);
@@ -112,7 +112,7 @@ fn test_sustain_pedal() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.sustain_pedal(MidiChannel::of(0), true);
@@ -144,7 +144,7 @@ fn test_mono_mode() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     assert!(matches!(
@@ -159,7 +159,7 @@ fn test_mono_mode() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
     assert!(matches!(
@@ -205,7 +205,7 @@ fn test_legato_mode() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     assert!(matches!(result1, AllocationResult::Allocated { .. }));
@@ -215,7 +215,7 @@ fn test_legato_mode() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
     assert!(matches!(result2, AllocationResult::LegatoRetrigger { .. }));
@@ -238,14 +238,14 @@ fn test_no_steal() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
 
@@ -254,7 +254,7 @@ fn test_no_steal() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(67)),
         NoteNumber::of(67),
         MidiChannel::of(0),
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
     assert!(matches!(result, AllocationResult::Unavailable));
@@ -274,7 +274,7 @@ fn test_voice_stealing_quietest() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     let slot_1 = match result1 {
@@ -286,7 +286,7 @@ fn test_voice_stealing_quietest() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
     let slot_2 = match result2 {
@@ -303,7 +303,7 @@ fn test_voice_stealing_quietest() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(67)),
         NoteNumber::of(67),
         MidiChannel::of(0),
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
     match result {
@@ -328,14 +328,14 @@ fn test_voice_stealing_highest_note() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     ); // slot 0
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(67)),
         NoteNumber::of(67),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     ); // slot 1 - higher note
 
@@ -344,7 +344,7 @@ fn test_voice_stealing_highest_note() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(72)),
         NoteNumber::of(72),
         MidiChannel::of(0),
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
     match result {
@@ -369,14 +369,14 @@ fn test_voice_stealing_lowest_note() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     ); // slot 0 - lower note
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(67)),
         NoteNumber::of(67),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     ); // slot 1
 
@@ -385,7 +385,7 @@ fn test_voice_stealing_lowest_note() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(72)),
         NoteNumber::of(72),
         MidiChannel::of(0),
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
     match result {
@@ -409,14 +409,14 @@ fn test_voice_stealing_newest() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     ); // slot 0 - older
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     ); // slot 1 - newer
 
@@ -425,7 +425,7 @@ fn test_voice_stealing_newest() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(67)),
         NoteNumber::of(67),
         MidiChannel::of(0),
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
     match result {
@@ -446,7 +446,7 @@ fn test_sostenuto_pedal() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.sostenuto_pedal(MidiChannel::of(0), true);
@@ -464,7 +464,7 @@ fn test_sostenuto_pedal() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
     assert!(
@@ -499,7 +499,7 @@ fn test_sostenuto_key_still_held() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.sostenuto_pedal(MidiChannel::of(0), true);
@@ -521,21 +521,21 @@ fn test_all_notes_off() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(1), NoteNumber::of(67)),
         NoteNumber::of(67),
         MidiChannel::of(1),
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
 
@@ -561,14 +561,14 @@ fn test_all_sound_off() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
 
@@ -591,14 +591,14 @@ fn test_reset() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
     alloc.sustain_pedal(MidiChannel::of(0), true);
@@ -615,7 +615,7 @@ fn test_reset() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.release(
@@ -636,7 +636,7 @@ fn test_retrigger_same_note() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     assert!(alloc.slots()[0].is_active());
@@ -646,7 +646,7 @@ fn test_retrigger_same_note() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
     match result {
@@ -672,14 +672,14 @@ fn test_prefer_stealing_releasing_voices() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(60)),
         NoteNumber::of(60),
         MidiChannel::of(0),
-        Normalized::of(0.8),
+        Velocity::new(0.8),
         tutti_ump::Attribute::None,
     );
     alloc.allocate(
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(64)),
         NoteNumber::of(64),
         MidiChannel::of(0),
-        Normalized::of(0.7),
+        Velocity::new(0.7),
         tutti_ump::Attribute::None,
     );
     alloc.release(
@@ -692,7 +692,7 @@ fn test_prefer_stealing_releasing_voices() {
         NoteId::from_channel_note(MidiChannel::of(0), NoteNumber::of(67)),
         NoteNumber::of(67),
         MidiChannel::of(0),
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
     match result {
@@ -798,7 +798,7 @@ fn random_streams_keep_their_invariants() {
                         id,
                         NoteNumber::of(k),
                         ch,
-                        Normalized::of(0.5),
+                        Velocity::new(0.5),
                         tutti_ump::Attribute::None,
                     );
                     held[usize::from(c)].retain(|&x| x != k);
@@ -1001,7 +1001,7 @@ fn a_return_after_the_voice_ended_starts_a_fresh_one() {
                 NoteId::from_channel_note(ch, NoteNumber::of(k)),
                 NoteNumber::of(k),
                 ch,
-                Normalized::of(0.5),
+                Velocity::new(0.5),
                 tutti_ump::Attribute::None,
             );
         }
@@ -1040,14 +1040,14 @@ fn a_velocity_is_quantised_to_the_nearest_word() {
         id(60),
         NoteNumber::of(60),
         ch,
-        Normalized::of(0.5),
+        Velocity::new(0.5),
         tutti_ump::Attribute::None,
     );
     alloc.allocate(
         id(64),
         NoteNumber::of(64),
         ch,
-        Normalized::of(0.9),
+        Velocity::new(0.9),
         tutti_ump::Attribute::None,
     );
     alloc.take_gates();
@@ -1057,5 +1057,5 @@ fn a_velocity_is_quantised_to_the_nearest_word() {
         Gate::Start { key, velocity, .. } if *key == NoteNumber::of(60) => Some(*velocity),
         _ => None,
     });
-    assert_eq!(back, Some(Normalized::of(32768.0 / 65535.0)), "{gates:?}");
+    assert_eq!(back, Some(Velocity::new(32768.0 / 65535.0)), "{gates:?}");
 }

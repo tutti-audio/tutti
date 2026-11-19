@@ -4,6 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use atomic_float::AtomicF64;
 use tutti_buffers::Float;
 use tutti_curve::Piece;
 use tutti_graph::{
@@ -14,8 +15,8 @@ use tutti_graph::{
 use tutti_modulation::{
     CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
 };
+use tutti_rt::ParamCell;
 use tutti_rt::{Publisher, Reader};
-use tutti_types::{AtomicF64, ParamCell};
 use tutti_units::{
     Beat, Frame, Normalized, ParamAddr, ParamId, SamplePosition, Samples, Tail, UnitAddr, UnitParam,
 };

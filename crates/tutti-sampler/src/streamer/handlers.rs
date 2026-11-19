@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use std::sync::atomic::Ordering;
-use tutti_types::AtomicSampleRate;
+use tutti_rt::AtomicSampleRate;
 use tutti_units::{SampleRate, Samples, SrcRatio};
 
 use super::StreamerSender;

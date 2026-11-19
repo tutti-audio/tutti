@@ -1,8 +1,8 @@
 //! Render-deadline telemetry: how long each block took against its budget.
 
 use alloc::sync::Arc;
+use atomic_float::AtomicF32;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use tutti_types::AtomicF32;
 use tutti_units::Seconds;
 
 /// The time constant of [`LoadReading::mean`]'s exponential smoothing: a

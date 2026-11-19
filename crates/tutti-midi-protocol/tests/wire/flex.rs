@@ -72,7 +72,7 @@ fn what_the_meter_cannot_hold_is_refused() {
     );
 }
 
-/// Section 7.5.3: the field written for a tempo is `6e9 / bpm` units, 120 bpm
+/// Section 7.5.3: the field written for a tempo is its beat period in 10 ns units, 120 bpm
 /// 50,000,000 and 60 bpm 100,000,000, and `flex_tempo` reads it back; the
 /// slowest and fastest the field holds are its two ends.
 #[test]
@@ -86,6 +86,8 @@ fn a_tempo_writes_its_ten_ns_units_per_quarter() {
         let bpm = Bpm::of(bpm);
         let back = flex_tempo(flex_tempo_field(bpm)).unwrap().get();
         assert!((back - bpm.get()).abs() < 1e-6, "{bpm:?} -> {back}");
+        // The tempo read back writes the same field: within one field step.
+        assert_eq!(flex_tempo_field(Bpm::of(back)), flex_tempo_field(bpm));
     }
 }
 

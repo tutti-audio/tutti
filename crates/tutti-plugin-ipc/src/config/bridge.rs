@@ -58,7 +58,7 @@ pub fn unique_socket_path() -> Result<PathBuf, RandomSourceError> {
 ///
 /// The operating system's random source cannot be read.
 pub(crate) fn unique_name(stem: &str) -> Result<String, RandomSourceError> {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
+    static COUNTER: tutti_rt::Mint = tutti_rt::Mint::new();
     Ok(format!(
         "{stem}-{}-{}-{}",
         std::process::id(),

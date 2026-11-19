@@ -28,8 +28,8 @@ use tutti_midi_runtime::{
     SendAt, TimedMidiEvent, compile_routes,
 };
 use tutti_music::MeterMap;
+use tutti_rt::Mint;
 use tutti_tempo::TempoMap;
-use tutti_types::Mint;
 use tutti_ump::{MidiChannel, MidiGroup, Ump};
 use tutti_units::{Beat, BeatDuration, Frame, Samples};
 
@@ -586,7 +586,7 @@ impl TakePlacement {
     }
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// An id [`Midi::route`] returns, for [`Midi::unroute`].
     pub struct MidiRouteId;
 }
@@ -1105,7 +1105,7 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
     }
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// A file load a [`Midi`] started, named so the event that lands it can be
     /// matched to the call: [`Midi::load_file`] returns one, and
     /// [`MidiReport::FileLoaded`] carries it. The session mints it; it names

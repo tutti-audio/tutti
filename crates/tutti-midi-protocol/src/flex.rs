@@ -5,15 +5,15 @@
 
 use tutti_music::{BeatsPerBar, NoteValue};
 use tutti_ump::FlexTimeSignature;
-use tutti_units::Bpm;
+use tutti_units::{Bpm, Seconds};
 
-/// 10-nanosecond units in one minute: 60 s is 6e9 of them, so a tempo of
-/// `bpm` is `6e9 / bpm` units per quarter note.
-const TEN_NS_UNITS_PER_MINUTE: f64 = 6_000_000_000.0;
+/// 10-nanosecond units in one second: the Set Tempo field counts them per
+/// quarter note (M2-104 section 7.5.3).
+const TEN_NS_UNITS_PER_SECOND: f64 = 100_000_000.0;
 
 /// The tempo a Set Tempo field declares: the field is 10 ns units per quarter
-/// note (section 7.5.3), so `6e9 / field` beats per minute. `None` for `0`, no
-/// valid tempo. The slowest the field holds is 1.39698 bpm.
+/// note (section 7.5.3), so a beat lasts `field / 1e8` seconds. `None` for `0`,
+/// no valid tempo. The slowest the field holds is 1.39698 bpm.
 ///
 /// ```
 /// use tutti_midi_protocol::flex_tempo;
@@ -26,12 +26,12 @@ const TEN_NS_UNITS_PER_MINUTE: f64 = 6_000_000_000.0;
 #[must_use]
 pub fn flex_tempo(field: u32) -> Option<Bpm> {
     (field != 0)
-        .then(|| Bpm::new(TEN_NS_UNITS_PER_MINUTE / f64::from(field)))
+        .then(|| Bpm::from_beat_period(Seconds::new(f64::from(field) / TEN_NS_UNITS_PER_SECOND)))
         .flatten()
 }
 
 /// The Set Tempo field that declares `bpm`: 10 ns units per quarter note,
-/// `6e9 / bpm` rounded to the nearest unit, the inverse of [`flex_tempo`]. A
+/// the beat period in 10 ns units, rounded to the nearest unit, the inverse of [`flex_tempo`]. A
 /// tempo too slow for the 32-bit field (under 1.39698 bpm) is the slowest the
 /// field holds, and one too fast for a unit (over 6e9 bpm) is one unit.
 ///
@@ -47,7 +47,7 @@ pub fn flex_tempo(field: u32) -> Option<Bpm> {
 pub fn flex_tempo_field(bpm: Bpm) -> u32 {
     // `as` saturates the float into the field; `max(1)` keeps a field that
     // `flex_tempo` reads as a tempo.
-    (libm::round(TEN_NS_UNITS_PER_MINUTE / bpm.get()) as u32).max(1)
+    (libm::round(bpm.beat_period().get() * TEN_NS_UNITS_PER_SECOND) as u32).max(1)
 }
 
 /// The meter a Set Time Signature message declares: the numerator field is the
