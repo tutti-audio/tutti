@@ -1,6 +1,8 @@
 //! Writing a [`Wave`] as a file.
 
+use crate::encoder::check_planned;
 use crate::{Encoder, Format, Result, Spec};
+use std::io::{Seek, Write};
 use std::path::Path;
 use tutti_buffers::{InterleavedMut, Sample, Wave, interleave};
 use tutti_units::Samples;
@@ -24,6 +26,8 @@ const WRITE_CHUNK: usize = 8192;
 /// [`Error::WavTooLarge`](crate::Error::WavTooLarge) for a WAV too long for its
 /// 32-bit sizes, and the encoder's other errors.
 ///
+/// [`write_wave_to`] writes to a sink that is not a file.
+///
 /// # Examples
 ///
 /// ```
@@ -45,7 +49,53 @@ const WRITE_CHUNK: usize = 8192;
 /// ```
 pub fn write_wave<S: Sample>(wave: &Wave<S>, path: impl AsRef<Path>, format: Format) -> Result<()> {
     let spec = Spec::new(format, wave.topology().clone(), wave.sample_rate());
-    let mut encoder = Encoder::create_file_planned(&spec, path, wave.len())?;
+    write_all(wave, Encoder::create_file_planned(&spec, path, wave.len())?).map(drop)
+}
+
+/// Writes `wave` as a file of `format` into `sink` (a `Cursor` over a `Vec`,
+/// say), as [`write_wave`] writes one at a path: its own rate and topology,
+/// nothing resampled, dithered or normalized. The sink is returned, positioned
+/// at the end of the file.
+///
+/// Nothing is staged: a failure leaves the sink holding what was written
+/// before it.
+///
+/// # Errors
+///
+/// As [`write_wave`], and [`Error::Io`](crate::Error::Io) when the sink fails.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(all(feature = "encode-wav", feature = "decode-wav"))] {
+/// use std::io::Cursor;
+/// use tutti_buffers::{Mono, Wave};
+/// use tutti_codec::{Format, Pcm, read_wave_bytes, write_wave_to};
+/// use tutti_units::SampleRate;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let wave = Wave::from_mono(SampleRate::SR_48K, Mono::new(&[0.0f32, 0.25, 0.5, -0.5]));
+/// let bytes = write_wave_to(&wave, Cursor::new(Vec::new()), Format::Wav(Pcm::Float32))?;
+/// assert_eq!(read_wave_bytes::<f32>(bytes.into_inner())?, wave);
+/// # Ok(())
+/// # }
+/// # }
+/// ```
+pub fn write_wave_to<S: Sample, W: Write + Seek + Send + 'static>(
+    wave: &Wave<S>,
+    sink: W,
+    format: Format,
+) -> Result<W> {
+    let spec = Spec::new(format, wave.topology().clone(), wave.sample_rate());
+    check_planned(&spec, wave.len())?;
+    write_all(wave, Encoder::create(&spec, sink)?)
+}
+
+/// Feeds `wave` to `encoder` in chunks and finishes it.
+fn write_all<S: Sample, W: Write + Seek + Send + 'static>(
+    wave: &Wave<S>,
+    mut encoder: Encoder<W>,
+) -> Result<W> {
     let layout = wave.layout();
     let mut rest = wave.planes();
     let mut chunk = vec![0.0f32; layout.interleaved_len(Samples::new(WRITE_CHUNK))];
@@ -57,7 +107,7 @@ pub fn write_wave<S: Sample>(wave: &Wave<S>, path: impl AsRef<Path>, format: For
         encoder.write(out.as_interleaved())?;
         rest = tail;
     }
-    encoder.finish().map(drop)
+    encoder.finish()
 }
 
 #[cfg(all(test, feature = "encode-wav", decode))]

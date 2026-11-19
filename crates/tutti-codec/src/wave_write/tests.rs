@@ -96,3 +96,23 @@ fn an_integer_wave_writes_the_integers_it_holds() {
         );
     }
 }
+
+/// A 16-bit integer wave written to memory as 16-bit WAV reads back as the
+/// same integers: no scaling is in the path, so the round trip is exact, past
+/// one write chunk and for an odd length.
+#[cfg(all(feature = "encode-wav", decode))]
+#[test]
+fn an_integer_wave_written_to_a_sink_reads_back_exactly() {
+    use crate::{Pcm, read_wave_bytes};
+    use std::io::Cursor;
+    use tutti_buffers::{Mono, Wave};
+    let samples: Vec<i16> = (0..20_001i32)
+        .map(|i| ((i * 7919) % 65_536 - 32_768) as i16)
+        .collect();
+    let wave = Wave::from_mono(SampleRate::SR_48K, Mono::new(&samples));
+    let sink = write_wave_to(&wave, Cursor::new(Vec::new()), Format::Wav(Pcm::Int16)).unwrap();
+    let back = read_wave_bytes::<i16>(sink.into_inner()).unwrap();
+    assert!(back.channel(0).iter().eq(samples.iter()));
+    assert_eq!(back.sample_rate(), wave.sample_rate());
+    assert_eq!(back.topology(), wave.topology());
+}

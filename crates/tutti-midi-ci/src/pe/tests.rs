@@ -94,12 +94,12 @@ fn total_count_is_an_unsigned_integer() {
 #[test]
 fn cache_time_is_a_non_negative_integer() {
     assert_eq!(
-        reply(r#"{"status":200,"cacheTime":30}"#).cache_time_secs,
-        Some(30)
+        reply(r#"{"status":200,"cacheTime":30}"#).cache_time,
+        Some(PeCacheTime::from_secs(30))
     );
     assert_eq!(
-        reply(r#"{"status":200,"cacheTime":0}"#).cache_time_secs,
-        Some(0)
+        reply(r#"{"status":200,"cacheTime":0}"#).cache_time,
+        Some(PeCacheTime::from_secs(0))
     );
     assert!(parse(r#"{"status":200,"cacheTime":-5}"#).is_err());
     assert!(parse(r#"{"status":200,"cacheTime":"30"}"#).is_err());
@@ -519,7 +519,7 @@ fn everything() -> Vec<PeHeader> {
     let mut answer = PeReply::new(PeStatus::Terminate);
     answer.message = PeMessage::new("hint: \u{266a}");
     answer.mutual_encoding = Some(PeEncoding::Mcoded7);
-    answer.cache_time_secs = Some(u32::MAX);
+    answer.cache_time = Some(PeCacheTime::from_secs(u32::MAX));
     answer.total_count = Some(0);
     answer.subscribe_id = SubscribeId::new("s_1");
     answer.media_type = MediaType::new("audio/midi");

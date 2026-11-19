@@ -351,7 +351,7 @@ fn a_get_reply_of_many_chunks_is_decoded_by_its_mutual_encoding() {
     let body: Vec<u8> = (0..=255).cycle().take(300).collect();
     let mut reply = ok(PeStatus::Ok);
     reply.mutual_encoding = Some(PeEncoding::Mcoded7);
-    reply.cache_time_secs = Some(30);
+    reply.cache_time = Some(PeCacheTime::from_secs(30));
     let wire = encode_body(PeEncoding::Mcoded7, &body).unwrap();
     let chunks = reply_chunks(request, reply.clone(), &wire);
     assert!(chunks.len() > 2);
