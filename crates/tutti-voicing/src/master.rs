@@ -120,7 +120,7 @@ impl Master {
     pub(crate) fn gain(&self) -> MasterGain {
         let volume: f64 = self.volume.iter().map(|&v| volume_gain(v)).product();
         let side = |balanced: fn(U14) -> f64| -> Amplitude {
-            Amplitude(volume * self.balance.iter().map(|&b| balanced(b)).product::<f64>())
+            Amplitude::new(volume * self.balance.iter().map(|&b| balanced(b)).product::<f64>())
         };
         MasterGain {
             left: side(left_gain),
@@ -131,7 +131,7 @@ impl Master {
     /// The displacement from A440: the coarse and the fine tuning.
     pub(crate) fn tuning(&self) -> Semitones {
         let fine = (f64::from(self.fine.get()) - f64::from(CENTRE_14)) / f64::from(CENTRE_14);
-        Semitones(f64::from(self.coarse.get()) - f64::from(CENTRE_7) + fine)
+        Semitones::new(f64::from(self.coarse.get()) - f64::from(CENTRE_7) + fine)
     }
 }
 

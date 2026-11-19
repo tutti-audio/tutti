@@ -22,7 +22,7 @@ use tutti_units::{Bipolar, Cents, Normalized, Pan, Seconds, Semitones};
 /// What a full Modulation Wheel spans until RPN 5 says otherwise: General MIDI
 /// 2 section 3.4.4, default 00H/40H (+/-50 cents) (MSB semitones, LSB
 /// 100/128 cent: 64 of them).
-pub const DEFAULT_MODULATION_RANGE: Cents = Cents(50.0);
+pub const DEFAULT_MODULATION_RANGE: Cents = Cents::new(50.0);
 
 const MOD_WHEEL_LSB: CCNumber = CCNumber::MOD_WHEEL.lsb().unwrap();
 const PORTAMENTO_TIME_LSB: CCNumber = CCNumber::PORTAMENTO_TIME.lsb().unwrap();
@@ -121,8 +121,8 @@ impl ChannelState {
             bend: Bend {
                 position: Bipolar::ZERO,
                 range: bend_range,
-                coarse: Semitones(0.0),
-                fine: Semitones(0.0),
+                coarse: Semitones::new(0.0),
+                fine: Semitones::new(0.0),
             },
             portamento: false,
             portamento_time: U14::of(0),
@@ -182,7 +182,7 @@ impl ChannelState {
     pub(crate) fn set_modulation_range(&mut self, value: u32) {
         let data = RegisteredData::from_word(value);
         let (semitones, eighths) = (f64::from(data.msb().get()), f64::from(data.lsb().get()));
-        self.modulation_range = Cents(semitones * 100.0 + eighths * 100.0 / 128.0);
+        self.modulation_range = Cents::new(semitones * 100.0 + eighths * 100.0 / 128.0);
     }
 
     /// Writes what this value holds that `fresh` does not, as the messages
@@ -373,7 +373,7 @@ impl ChannelState {
     pub fn pan(&self) -> Pan {
         const STEPS: f64 = 126.0 * 128.0;
         let along = (f64::from(self.pan.get().saturating_sub(128)) / STEPS).min(1.0);
-        Pan(2.0 * along - 1.0)
+        Pan::new(2.0 * along - 1.0)
     }
 
     /// Where the channel's pitch stands: the wheel over its sensitivity, and the
@@ -418,8 +418,8 @@ impl ChannelState {
     /// portamento rate: the interval in cents (100 to the key) over
     /// [`glide_rate`](Self::glide_rate).
     pub(crate) fn glide_time(&self, from: NoteNumber, to: NoteNumber) -> Seconds {
-        let interval = Cents::from(Semitones(f64::from(from.get().abs_diff(to.get()))));
-        Seconds(interval.get() / (self.glide_rate() * 1000.0))
+        let interval = Cents::from(Semitones::new(f64::from(from.get().abs_diff(to.get()))));
+        Seconds::new(interval.get() / (self.glide_rate() * 1000.0))
     }
 }
 
@@ -442,7 +442,7 @@ mod tests {
     use super::*;
 
     fn pan_at(controller: u8) -> Pan {
-        let mut c = ChannelState::new(Semitones(2.0));
+        let mut c = ChannelState::new(Semitones::new(2.0));
         c.control(CCNumber::PAN, U7::of(controller));
         c.pan()
     }
@@ -451,7 +451,7 @@ mod tests {
     /// 127 is hard right; the default, 64, is the centre.
     #[test]
     fn pan_64_is_true_centre_and_0_and_1_are_hard_left() {
-        assert_eq!(ChannelState::new(Semitones(2.0)).pan(), Pan::CENTER);
+        assert_eq!(ChannelState::new(Semitones::new(2.0)).pan(), Pan::CENTER);
         assert_eq!(pan_at(64), Pan::CENTER);
         assert_eq!(pan_at(0), Pan::LEFT);
         assert_eq!(pan_at(1), Pan::LEFT);
@@ -475,14 +475,14 @@ mod tests {
     /// glide of `n` keys takes `100 n / rate` ms.
     #[test]
     fn the_glide_rate_is_the_geometric_mean_halfway_along_a_segment() {
-        let mut c = ChannelState::new(Semitones(2.0));
+        let mut c = ChannelState::new(Semitones::new(2.0));
         // CC 5 = 20 is halfway from the curve's (8, 30) to its (32, 8) cent/msec.
         c.control(CCNumber::PORTAMENTO_TIME, U7::of(20));
         let expected = (30.0f64 * 8.0).sqrt();
         // `pow` rounds: a few ulps from the exact mean.
         assert!((c.glide_rate() - expected).abs() < 1e-12 * expected);
         let time = c.glide_time(NoteNumber::of(60), NoteNumber::of(72));
-        assert!((time.0 - 1200.0 / expected / 1000.0).abs() < 1e-12 * time.0);
+        assert!((time.get() - 1200.0 / expected / 1000.0).abs() < 1e-12 * time.get());
         // The curve's own end points: CC 5 = 0 and 127.
         c.control(CCNumber::PORTAMENTO_TIME, U7::of(0));
         assert_eq!(c.glide_rate(), 1000.0);
@@ -495,7 +495,7 @@ mod tests {
     /// 100 * 128, not 100 * 128 + 64.
     #[test]
     fn an_msb_sets_the_lsb_to_zero() {
-        let mut c = ChannelState::new(Semitones(2.0));
+        let mut c = ChannelState::new(Semitones::new(2.0));
         c.control(CCNumber::VOLUME, U7::of(100));
         c.control(VOLUME_LSB, U7::of(64));
         c.control(CCNumber::VOLUME, U7::of(100));
@@ -507,15 +507,15 @@ mod tests {
     /// semitone. A full wheel reaches the range.
     #[test]
     fn the_modulation_depth_range_follows_gm2() {
-        let mut c = ChannelState::new(Semitones(2.0));
-        assert_eq!(c.modulation_range(), Cents(50.0));
+        let mut c = ChannelState::new(Semitones::new(2.0));
+        assert_eq!(c.modulation_range(), Cents::new(50.0));
         c.set_modulation_range(8u32 << 18);
-        assert_eq!(c.modulation_range(), Cents(6.25));
+        assert_eq!(c.modulation_range(), Cents::new(6.25));
         c.set_modulation_range(1 << 25);
-        assert_eq!(c.modulation_range(), Cents(100.0));
+        assert_eq!(c.modulation_range(), Cents::new(100.0));
         c.control(CCNumber::MOD_WHEEL, U7::of(127));
         c.control(MOD_WHEEL_LSB, U7::of(127));
-        assert_eq!(c.modulation_depth(), Cents(100.0));
+        assert_eq!(c.modulation_depth(), Cents::new(100.0));
     }
 
     /// GM2 section 3.3.3's figure: the rate falls from 1,000 cent/msec at 0 to
@@ -523,7 +523,7 @@ mod tests {
     #[test]
     fn the_portamento_rate_falls_from_the_figures_ends() {
         let rate = |time: u8| {
-            let mut c = ChannelState::new(Semitones(2.0));
+            let mut c = ChannelState::new(Semitones::new(2.0));
             c.control(CCNumber::PORTAMENTO_TIME, U7::of(time));
             c.glide_rate()
         };

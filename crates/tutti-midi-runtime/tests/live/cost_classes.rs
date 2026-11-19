@@ -75,7 +75,7 @@ impl Node for Recorder {
 fn clip(k: u64) -> MidiClipNode {
     MidiClipNode::new((0..20).map(|i| {
         TimedMidiEvent::new(
-            Beat(0.02 * i as f64 + 0.000_3 * k as f64),
+            Beat::new(0.02 * i as f64 + 0.000_3 * k as f64),
             Message::midi2(
                 MidiChannel::FIRST,
                 Voice2::note_on(NoteNumber::of((36 + k + i) as u8), NoteVelocity::MAX),
@@ -92,7 +92,7 @@ fn clip(k: u64) -> MidiClipNode {
 fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Seen>) {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(MAX_BLOCK)),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     if workers > 1 {
         exec.set_pool(Some(Arc::new(
@@ -140,7 +140,7 @@ fn render(exec: &mut Executor) {
         let mut chunk = vec![vec![0.0f32; n]; HEAVY as usize];
         let mut outs: Vec<&mut [f32]> = chunk.iter_mut().map(Vec::as_mut_slice).collect();
         let beat = frame as f64 * BPM / 60.0 / SR;
-        let t = TransportPosition::new(true, Bpm::of(BPM), Beat(beat), None);
+        let t = TransportPosition::new(true, Bpm::of(BPM), Beat::new(beat), None);
         exec.process(n, &t, &[], &mut outs);
         frame += n;
     }
@@ -209,7 +209,7 @@ fn light_lanes_pack_and_send_on_the_serial_frames() {
     // From a one-frame block: every ragged block below is spread, so the
     // comparison is never a serial walk against itself.
     assert!(
-        matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples(1)),
+        matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples::new(1)),
         "{:?}",
         plan.schedule(4)
     );

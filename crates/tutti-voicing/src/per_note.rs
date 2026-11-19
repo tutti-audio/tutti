@@ -525,7 +525,7 @@ mod tests {
     }
 
     fn state() -> PerNoteState {
-        PerNoteState::new(2, Semitones(48.0))
+        PerNoteState::new(2, Semitones::new(48.0))
     }
 
     fn pitch_of(s: &mut PerNoteState, a: Address, n: u8, value: u32) -> Vec<NoteEvent> {
