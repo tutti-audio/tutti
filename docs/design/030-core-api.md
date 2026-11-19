@@ -255,7 +255,7 @@ take reports the real `F`.
 ```rust
 let input = s.add_input(InputConfig::default().channels(&[0, 1]))?; // S1: MicIn + inlet, reopened on restart
 s.graph().connect(input.node(), eq)?;                              // monitoring is ordinary wiring
-let take = s.record(&input, Punch::at(Beat(16.0)).until(Beat(48.0)), "take1.wav")?; // Take<Armed>
+let take = s.record(&input, Punch::at(Beat::new(16.0)).until(Beat::new(48.0)), "take1.wav")?; // Take<Armed>
 // update() reports SessionEvent::Take(TakeEvent::{Started, Finished, Failed}) for it
 let done = take.finish()?;                       // Recorded: path, start, the terms, lost frames
 s.graph().replace(input.node(), done.clip()?)?;  // the take, where it was played; a bounce can fork it

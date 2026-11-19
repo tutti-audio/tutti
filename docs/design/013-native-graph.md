@@ -739,7 +739,7 @@ place that loses precision to be written out explicitly:
    `ParamRamp` can only be built from a `PerSample` key, so automating a
    block-rate knob is a compile error.
 3. **Commands must say when, for the graph and the transport.** Control-thread
-   commands take `At::{Frame(Frame), Beat(Beat), NextBlock}` (`tutti-types`,
+   commands take `At::{Frame(Frame), Beat::new(Beat), NextBlock}` (`tutti-types`,
    so the engine's transport commands share it), with no untimed overload.
    `NextBlock` stays available, but it is a visible, greppable choice.
    `Editor::schedule` sends a command over its own preallocated SPSC ring,
@@ -1977,7 +1977,7 @@ behind them:
   graph has no control-side copy, so it drives the executor instead.
 
 For the native backend: `crossfade_audio_node` maps to
-`Editor::replace(key, unit, Fade::seconds(Seconds(0.005), rate, CrossfadeCurve::EqualAmplitude))`.
+`Editor::replace(key, unit, Fade::seconds(Seconds::new(0.005), rate, CrossfadeCurve::EqualAmplitude))`.
 **`set_latency` × fades:** a runtime latency
 change at a key that is mid-fade, running or queued, is a hard edit for the
 fade. The next commit carries the key in `Delta::cuts`; the executor retires
@@ -6467,7 +6467,7 @@ bits, as `ParamRange` is), the weighted kernel and ramp, the cell,
   whose only change is a base or a range sends nothing. A fork keeps the
   entries of the edges it keeps.
 - **`Amplitude` is a signed weight here.** Its docs name zero as its floor; a
-  negative edge weight (polarity) is representable (`Amplitude(-1.0)`) and
+  negative edge weight (polarity) is representable (`Amplitude::new(-1.0)`) and
   accepted, as the section above intends.
 - **Tests.** `tests/edge_gain.rs` (the fold, the wide chain, unity against the
   plain sum and the one-edge corner, the ramp, the carry across commits, the

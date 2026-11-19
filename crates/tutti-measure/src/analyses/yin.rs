@@ -159,7 +159,7 @@ impl YinPlan {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct PitchResult {
-    /// The detected pitch in [`Hz`]; `Hz(0.0)` if unvoiced.
+    /// The detected pitch in [`Hz`]; `Hz::new(0.0)` if unvoiced.
     pub frequency: Hz,
     /// Detection strength as a [`Confidence`] reading, `0.0..=1.0`. A
     /// measurement, not a blend — deliberately not `Mix`.
@@ -430,7 +430,7 @@ impl PitchEstimate {
         }
     }
 
-    /// The frequency in [`Hz`], or `Hz(0.0)` when unvoiced — field-read
+    /// The frequency in [`Hz`], or `Hz::new(0.0)` when unvoiced — field-read
     /// ergonomics for callers that treat silence as zero.
     #[inline]
     pub fn frequency(&self) -> Hz {
