@@ -63,7 +63,7 @@ use tutti_units::ranged;
 
 use crate::framing::{Framing, check_frame_count};
 use crate::meters::chroma::{CLASSES, Chroma};
-use crate::{Error, Result};
+use crate::{Error, Region, Result};
 use tutti_dsp::{FrameCount, FrameIndex, Grid, median, sticky_viterbi};
 
 /// The most frames one call smooths, bounding the backpointers (50 bytes a
@@ -110,10 +110,8 @@ pub struct ChordSpan {
     pub root: PitchClass,
     /// Whether it is major or minor.
     pub quality: ChordQuality,
-    /// The first sample of the span, in [`Samples`].
-    pub start: Samples,
-    /// The sample after the last, in [`Samples`].
-    pub end: Samples,
+    /// The samples the chord sounds over.
+    pub span: Region,
 }
 
 ranged! {
@@ -185,7 +183,7 @@ impl Default for ChordConfig {
 /// [`Error::TooManyFrames`] for more than 524288 frames;
 /// [`Error::SpanBeyondSampleCount`] when a span lies beyond the range of a
 /// sample count; [`Error::NonFiniteInput`] for a NaN or infinity.
-pub fn detect_chords(chroma: &Chroma, cfg: &ChordConfig) -> Result<Vec<ChordSpan>> {
+pub fn detect_chords(cfg: &ChordConfig, chroma: &Chroma) -> Result<Vec<ChordSpan>> {
     detect(chroma.grid(), chroma.framing(), cfg)
 }
 
@@ -287,16 +285,19 @@ fn spans(path: &[u16], framing: Framing) -> Result<Vec<ChordSpan>> {
             out.push(ChordSpan {
                 root: PitchClass::from_semitones_above_c(root as u8),
                 quality,
-                start: Samples::new(if start == 0 {
-                    0
-                } else {
-                    sample(boundary(start))?
-                }),
-                end: Samples::new(if t == path.len() {
-                    sample(end)?
-                } else {
-                    sample(boundary(t))?
-                }),
+                span: Region::new(
+                    Samples::new(if start == 0 {
+                        0
+                    } else {
+                        sample(boundary(start))?
+                    }),
+                    Samples::new(if t == path.len() {
+                        sample(end)?
+                    } else {
+                        sample(boundary(t))?
+                    }),
+                )
+                .expect("boundaries ascend with the frame"),
             });
         }
         start = t;

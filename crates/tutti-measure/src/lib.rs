@@ -86,8 +86,10 @@
 //! does not fix it.
 //!
 //! Every analysis reads its input in whatever format the caller holds and runs
-//! at `f64`: spectra, statistics and readings are `f64`, and the transform
-//! scratch is a `FftScratch<f64>`. A reading is never narrowed on the way out.
+//! at `f64`: spectra, statistics and readings are `f64`. A reading is never
+//! narrowed on the way out. The transform scratch (`tutti_dsp::FftScratch<f64>`)
+//! is never an argument: a meter owns its own, and a one-shot makes one for the
+//! call.
 //!
 //! | Analysis | Config | One-shot | Meter | Context | Input | Item | Output | Audio thread |
 //! |---|---|---|---|---|---|---|---|---|
@@ -122,14 +124,12 @@
 //!     correlate, detect_onsets, summarize, yin, DetectionFunction,
 //!     OnsetConfig, PeakConfig, YinConfig,
 //! };
-//! use tutti_dsp::FftScratch;
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_buffers::ChannelLayout;
 //! use tutti_buffers::{Interleaved, Mono, StereoPlanes};
 //!
 //! let sample_rate = SampleRate::SR_44K1;
 //! let samples: Vec<f32> = vec![0.0; 44100];
-//! let mut fft = FftScratch::new();
 //!
 //! // Waveform blocks for display — one series per channel.
 //! let blocks = summarize(
@@ -146,7 +146,6 @@
 //!     &OnsetConfig::new(DetectionFunction::SpectralFlux),
 //!     Mono::new(&samples),
 //!     sample_rate,
-//!     &mut fft,
 //! )?;
 //!
 //! // Pitch. A band above Nyquist is refused here, not silently unvoiced later.
@@ -262,8 +261,9 @@
 //!   framed configs ([`OnsetConfig`], [`SpectrumConfig`], [`ChromaConfig`],
 //!   [`TempoConfig`], [`ChordConfig`]).
 //! - Transform: [`stft`], [`stft_magnitude`], [`stft_polar`] and
-//!   [`istft_transform`], over a [`StftRequest`] with a
-//!   [`CosineWindow`](tutti_dsp::CosineWindow), producing [`Stft`],
+//!   [`istft_transform`], over a [`StftConfig`] with a
+//!   [`CosineWindow`](tutti_dsp::CosineWindow) and a [`SampleRange`] of the
+//!   buffer, producing [`Stft`],
 //!   [`StftMagnitude`] or [`StftPolar`].
 //! - Pitch: [`yin()`] and [`yin_track`] with a [`YinConfig`], returning
 //!   [`PitchEstimate`] and [`Pitch`]; [`median_filter`] and [`penalize_jumps`]
@@ -341,8 +341,8 @@ pub use analyses::tempo::{
     estimate_tempo_from_novelty, track_beats, track_beats_from_novelty,
 };
 pub use analyses::transform::{
-    HopPolicy, NormalizedMagnitudes, RawMagnitudes, SampleRange, Stft, StftMagnitude, StftPolar,
-    StftRequest, istft as istft_transform, stft, stft_magnitude, stft_polar,
+    HopPolicy, NormalizedMagnitudes, RawMagnitudes, SampleRange, Stft, StftConfig, StftMagnitude,
+    StftPolar, istft as istft_transform, stft, stft_magnitude, stft_polar,
 };
 pub use analyses::xcorr::{CorrelationPeak, CrossCorrelation, cross_correlate};
 pub use analyses::yin::{

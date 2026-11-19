@@ -15,8 +15,8 @@ fn flux() -> OnsetConfig {
     OnsetConfig::new(DetectionFunction::SpectralFlux)
 }
 
-fn detect_at(cfg: &OnsetConfig, samples: &[f64], fft: &mut FftScratch<f64>) -> Vec<Onset> {
-    detect_onsets(cfg, Mono::new(samples), rate(), fft).unwrap()
+fn detect_at(cfg: &OnsetConfig, samples: &[f64]) -> Vec<Onset> {
+    detect_onsets(cfg, Mono::new(samples), rate()).unwrap()
 }
 
 fn amplitude(a: f64) -> OnsetThreshold {
@@ -79,9 +79,8 @@ fn signal(seconds: f64, onsets: &[f64]) -> Vec<f64> {
 fn a_meter_fed_in_chunks_equals_the_one_shot() {
     let cfg = flux().threshold(amplitude(0.2)).sensitivity(gain(2.0));
     let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
-    let mut fft = FftScratch::new();
 
-    let batch = detect_at(&cfg, &samples, &mut fft);
+    let batch = detect_at(&cfg, &samples);
     assert_eq!(batch.len(), 4);
 
     for chunk in [1usize, 7, 511, 2048, 3001, samples.len()] {
@@ -174,7 +173,6 @@ fn the_spectrum_buffer_is_reused_across_frames() {
 fn onsets_land_near_the_known_spikes() {
     let truth = [0.1f64, 0.3, 0.5, 0.7];
     let samples = signal(1.0, &truth);
-    let mut fft = FftScratch::new();
 
     for function in [
         DetectionFunction::SpectralFlux,
@@ -184,7 +182,7 @@ fn onsets_land_near_the_known_spikes() {
         let cfg = OnsetConfig::new(function)
             .threshold(amplitude(0.2))
             .sensitivity(gain(2.0));
-        let onsets = detect_at(&cfg, &samples, &mut fft);
+        let onsets = detect_at(&cfg, &samples);
 
         assert_eq!(onsets.len(), truth.len(), "{function:?}: wrong count");
 
@@ -210,9 +208,8 @@ fn energy_misses_short_decaying_spikes() {
         .threshold(amplitude(0.2))
         .sensitivity(gain(2.0));
     let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
-    let mut fft = FftScratch::new();
 
-    assert!(detect_at(&cfg, &samples, &mut fft).is_empty());
+    assert!(detect_at(&cfg, &samples).is_empty());
 }
 
 /// The defaults a config documents: a 0.3 threshold multiplier, unity
@@ -243,10 +240,9 @@ fn the_gap_is_expressed_in_seconds() {
 fn a_wide_gap_suppresses_close_onsets() {
     let cfg = flux().threshold(amplitude(0.2)).sensitivity(gain(2.0));
     let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
-    let mut fft = FftScratch::new();
 
-    let baseline = detect_at(&cfg, &samples, &mut fft).len();
-    let widened = detect_at(&cfg.min_gap(gap(0.5)), &samples, &mut fft);
+    let baseline = detect_at(&cfg, &samples).len();
+    let widened = detect_at(&cfg.min_gap(gap(0.5)), &samples);
 
     assert!(widened.len() < baseline);
 }
@@ -259,17 +255,17 @@ fn suppression_keeps_the_stronger_of_a_close_pair() {
     };
 
     let mut onsets = vec![onset(100, 0.4), onset(150, 0.9), onset(9000, 0.5)];
-    suppress_close_onsets(&mut onsets, Samples::new(1000));
+    suppress_close_onsets(Samples::new(1000), &mut onsets);
     assert_eq!(onsets.len(), 2);
     assert_eq!(onsets[0].strength, Amplitude::new(0.9));
 
     let mut onsets = vec![onset(100, 0.9), onset(150, 0.4), onset(9000, 0.5)];
-    suppress_close_onsets(&mut onsets, Samples::new(1000));
+    suppress_close_onsets(Samples::new(1000), &mut onsets);
     assert_eq!(onsets[0].strength, Amplitude::new(0.9));
 
     // Degenerate inputs are no-ops.
     let mut single = vec![onset(100, 0.5)];
-    suppress_close_onsets(&mut single, Samples::new(1000));
+    suppress_close_onsets(Samples::new(1000), &mut single);
     assert_eq!(single.len(), 1);
 }
 
@@ -283,7 +279,7 @@ fn suppression_measures_from_the_last_kept_onset() {
         strength: Amplitude::new(s),
     };
     let mut onsets = vec![at(0, 1.0), at(600, 0.9), at(1200, 0.8), at(1800, 0.7)];
-    suppress_close_onsets(&mut onsets, Samples::new(1000));
+    suppress_close_onsets(Samples::new(1000), &mut onsets);
     let kept: Vec<usize> = onsets.iter().map(|o| o.position.get()).collect();
     assert_eq!(kept, [0, 1200]);
 }
@@ -302,19 +298,18 @@ fn suppression_handles_unsorted_input() {
     };
 
     let mut descending = vec![onset(9000, 0.4), onset(100, 0.9)];
-    suppress_close_onsets(&mut descending, Samples::new(1000));
+    suppress_close_onsets(Samples::new(1000), &mut descending);
     assert_eq!(descending.len(), 2, "far apart in either direction");
 
     let mut close = vec![onset(150, 0.4), onset(100, 0.9)];
-    suppress_close_onsets(&mut close, Samples::new(1000));
+    suppress_close_onsets(Samples::new(1000), &mut close);
     assert_eq!(close.len(), 1);
     assert_eq!(close[0].strength, Amplitude::new(0.9));
 }
 
 #[test]
 fn input_shorter_than_a_window_yields_nothing() {
-    let mut fft = FftScratch::new();
-    assert!(detect_at(&flux(), &[0.0; 100], &mut fft).is_empty());
+    assert!(detect_at(&flux(), &[0.0; 100]).is_empty());
     let mut meter = flux().measure(rate()).unwrap();
     meter
         .push(Mono::new(&[0.0f64; 100]), &mut Vec::new())
@@ -336,12 +331,7 @@ fn a_zero_framing_is_refused_where_the_rate_binds() {
             Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
         ));
         assert!(matches!(
-            detect_onsets(
-                &cfg,
-                Mono::new(&[0.0f64; 4096]),
-                rate(),
-                &mut FftScratch::new()
-            ),
+            detect_onsets(&cfg, Mono::new(&[0.0f64; 4096]), rate()),
             Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
         ));
     }
@@ -353,7 +343,7 @@ fn a_zero_framing_is_refused_where_the_rate_binds() {
 fn the_trait_fold_over_uneven_chunks_equals_detect_onsets_with_the_curve_as_items() {
     let cfg = flux().threshold(amplitude(0.2)).sensitivity(gain(2.0));
     let samples = signal(1.0, &[0.1, 0.3, 0.5, 0.7]);
-    let batch = detect_at(&cfg, &samples, &mut FftScratch::new());
+    let batch = detect_at(&cfg, &samples);
     assert_eq!(batch.len(), 4);
     let (items, onsets) = fold_uneven(&cfg, rate(), samples.len(), |meter, at, out| {
         meter.push(Mono::new(&samples[at]), out)

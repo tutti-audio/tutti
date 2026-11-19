@@ -554,7 +554,7 @@ fn estimate(detector: &mut PitchDetector, samples: &[f64]) -> PitchEstimate {
 /// The count is frames, not samples: an FFT window size passed here would
 /// smooth over three orders of magnitude too much, which is why the parameter
 /// is a [`FrameCount`].
-pub fn median_filter(pitches: &[PitchEstimate], window: FrameCount) -> Vec<PitchEstimate> {
+pub fn median_filter(window: FrameCount, pitches: &[PitchEstimate]) -> Vec<PitchEstimate> {
     let w = window.get();
     if w <= 1 || pitches.len() < w {
         return pitches.to_vec();
@@ -593,7 +593,7 @@ pub fn median_filter(pitches: &[PitchEstimate], window: FrameCount) -> Vec<Pitch
 /// what confidence is enough.
 ///
 /// `jump_penalty` scales the attenuation: 0 leaves the track untouched.
-pub fn penalize_jumps(pitches: &[PitchEstimate], jump_penalty: Confidence) -> Vec<PitchEstimate> {
+pub fn penalize_jumps(jump_penalty: Confidence, pitches: &[PitchEstimate]) -> Vec<PitchEstimate> {
     if pitches.len() < 2 {
         return pitches.to_vec();
     }
