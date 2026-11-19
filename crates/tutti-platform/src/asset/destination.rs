@@ -61,8 +61,23 @@ impl From<PathBuf> for Destination<'_> {
     }
 }
 
+impl<'a> From<&'a str> for Destination<'a> {
+    fn from(path: &'a str) -> Self {
+        Self::Path(Cow::Borrowed(Path::new(path)))
+    }
+}
+
+impl<'a> From<&'a mut dyn Write> for Destination<'a> {
+    fn from(writer: &'a mut dyn Write) -> Self {
+        Self::Writer(writer)
+    }
+}
+
 impl<'a, W: Write> From<&'a mut W> for Destination<'a> {
     fn from(writer: &'a mut W) -> Self {
         Self::Writer(writer)
     }
 }
+
+#[cfg(test)]
+mod tests;
