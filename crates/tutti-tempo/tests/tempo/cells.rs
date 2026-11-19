@@ -1,6 +1,6 @@
 //! A ramp as constant-tempo cells on one fixed frame grid.
 
-use crate::common::{Lcg, R, pt};
+use crate::common::{R, Rng, pt};
 use std::collections::BTreeMap;
 use tutti_tempo::{Cell, CellGrid, TempoMap, Transition};
 use tutti_units::{Beat, Bpm, Frame};
@@ -53,7 +53,7 @@ fn cells_do_not_depend_on_the_block_layout() {
         "a long ramp: {} cells",
         reference.len()
     );
-    let mut rng = Lcg(5);
+    let mut rng = Rng::new(5);
     let irregular: Vec<u64> = (0..64).map(|_| 1 + (rng.next() * 3000.0) as u64).collect();
     for layout in [
         vec![32],
@@ -396,7 +396,7 @@ fn cells_over_sub_frame_segments_stay_inside_the_map() {
     assert_eq!(c.end, Frame::new(110_251));
     assert!((51.0..=189.0).contains(&c.tempo.get()), "{c:?}");
     // Random maps with gaps from 1e-7 to 10 beats, at several grids.
-    let mut rng = Lcg(21);
+    let mut rng = Rng::new(21);
     for case in 0..300 {
         let n = 2 + (rng.next() * 5.0) as usize;
         let mut beat = 0.0;

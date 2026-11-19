@@ -1,4 +1,5 @@
 use super::*;
+use tutti_rt::SplitMix64;
 use tutti_ump::BendValue;
 use tutti_ump::{MidiChannel, NoteId, NoteNumber};
 use tutti_units::Velocity;
@@ -705,14 +706,9 @@ fn test_prefer_stealing_releasing_voices() {
 
 // ---- random streams -------------------------------------------------------
 
-struct Rng(u64);
-impl Rng {
-    fn below(&mut self, n: u64) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0 % n
-    }
+/// A value in `0..n` from the next word of `rng`.
+fn below(rng: &mut SplitMix64, n: u64) -> u64 {
+    rng.next_u64() % n
 }
 
 /// What the allocator holds for each live slot: `(voice, key, gated)`.
@@ -761,7 +757,7 @@ fn random_streams_keep_their_invariants() {
         VoiceMode::Legato,
     ];
     for stream in 0..600u64 {
-        let mut rng = Rng(0x2545_F491_4F6C_DD1D ^ (stream + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let mut rng = SplitMix64::new(stream);
         let strategy = strategies[(stream % 6) as usize];
         let mode = modes[((stream / 6) % 4) as usize];
         let max = 4;
@@ -776,17 +772,17 @@ fn random_streams_keep_their_invariants() {
         let mut pedal = [false; 2];
         let mut sostenuto = [false; 2];
         for _ in 0..80 {
-            let c = rng.below(2) as u8;
+            let c = below(&mut rng, 2) as u8;
             let ch = MidiChannel::of(c);
-            let k = 60 + rng.below(8) as u8;
+            let k = 60 + below(&mut rng, 8) as u8;
             // Real envelope levels, set before the message as the render would.
             for i in 0..max {
                 if !alloc.slots()[i].is_idle() {
-                    let level = Amplitude::new(rng.below(100) as f64 / 100.0);
+                    let level = Amplitude::new(below(&mut rng, 100) as f64 / 100.0);
                     alloc.update_envelope_level(i, level);
                 }
             }
-            let op = rng.below(14);
+            let op = below(&mut rng, 14);
             match op {
                 0..=4 => {
                     let id = NoteId::from_channel_note(ch, NoteNumber::of(k));
@@ -848,7 +844,7 @@ fn random_streams_keep_their_invariants() {
                 }
                 11 => {
                     held[usize::from(c)].clear();
-                    if rng.below(2) == 0 {
+                    if below(&mut rng, 2) == 0 {
                         alloc.all_notes_off(ch);
                     } else {
                         alloc.all_sound_off(ch);
@@ -867,7 +863,7 @@ fn random_streams_keep_their_invariants() {
                     }
                     alloc.message(
                         ch,
-                        &Voice2::PitchBend(BendValue::new(rng.below(1 << 32) as u32)),
+                        &Voice2::PitchBend(BendValue::new(below(&mut rng, 1 << 32) as u32)),
                     );
                 }
             }

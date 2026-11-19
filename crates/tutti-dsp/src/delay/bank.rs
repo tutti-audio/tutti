@@ -1,5 +1,5 @@
 //! [`DelayBank`]: one feedback delay line per channel, over buffers views, with the
-//! delay and the feedbacks it reads as [`Glide`]s.
+//! delay and the feedbacks it reads as [`Ramp`]s.
 //!
 //! One frame of an uncoupled channel is [`delay_step`]: the feedback tap is read at
 //! `max(d, 1) - 1` before the push, the line takes `x + fb * tap`, and the output is read
@@ -13,7 +13,7 @@
 //! ([`ChannelTimes::each`](crate::ChannelTimes::each)). A
 //! lane drives the time and the feedback **per frame** ([`DelayLanes`]): a delay time
 //! moved at audio rate is a flanger, a lane frame that is not finite falls back to the
-//! glided value, and a lane frame is the trajectory itself, not glided. The time glides at
+//! ramped value, and a lane frame is the trajectory itself, not ramped. The time ramps at
 //! most [`DELAY_SLEW`] frames of delay per frame (a moving delay is a pitch bend, so its
 //! speed is bounded and not its duration), the feedback and the cross-feedback over a
 //! length the caller sets.
@@ -25,46 +25,46 @@ use tutti_units::{Feedback, ReadPosition, SampleRate, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 use super::routing::Routing;
-use crate::{DelayLine, Glide, InterpolationMode, Lerp, Steps, delay_step};
+use crate::{DelayLine, InterpolationMode, Lerp, Ramp, Steps, delay_step};
 
 /// What a delay reads while it runs: the delay as a [`ReadPosition`], and the two feedbacks
-/// in the bank's float `F`, each aimed by [`DelayBank::aim`] and stepped by
+/// in the bank's float `F`, each retargeted by [`DelayBank::retarget`] and stepped by
 /// [`DelayBank::process`].
 ///
-/// The time glides at [`DELAY_SLEW`] frames of delay per frame; the channels past the
+/// The time ramps at [`DELAY_SLEW`] frames of delay per frame; the channels past the
 /// first that hold a time of their own hold it whole.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DelayGlides<F: Float> {
-    time: Glide<ReadPosition>,
+pub struct DelayRamps<F: Float> {
+    time: Ramp<ReadPosition>,
     own: [ReadPosition; MAX_DELAY_CHANNELS],
-    feedback: Glide<F>,
-    cross: Glide<F>,
-    /// The steps a feedback glide takes.
+    feedback: Ramp<F>,
+    cross: Ramp<F>,
+    /// The steps a feedback ramp takes.
     steps: u32,
 }
 
-impl<F: Float + Lerp> DelayGlides<F> {
+impl<F: Float + Lerp> DelayRamps<F> {
     /// A delay at rest on no delay and no feedback, whose feedbacks take `gain_steps`
     /// steps to a new value.
     #[must_use]
-    pub fn landed(gain_steps: u32) -> Self {
+    pub fn new(gain_steps: u32) -> Self {
         Self {
-            time: Glide::landed(ReadPosition::START),
+            time: Ramp::new(ReadPosition::START),
             own: [ReadPosition::START; MAX_DELAY_CHANNELS],
-            feedback: Glide::landed(F::ZERO),
-            cross: Glide::landed(F::ZERO),
+            feedback: Ramp::new(F::ZERO),
+            cross: Ramp::new(F::ZERO),
             steps: gain_steps,
         }
     }
 
-    /// Lands on the targets now.
-    pub fn settle(&mut self) {
-        self.time.settle();
-        self.feedback.settle();
-        self.cross.settle();
+    /// Jumps to the targets now.
+    pub fn jump_to_target(&mut self) {
+        self.time.jump_to_target();
+        self.feedback.jump_to_target();
+        self.cross.jump_to_target();
     }
 
-    /// Takes `frames` steps of each glide.
+    /// Takes `frames` steps of each ramp.
     fn advance(&mut self, frames: u32) {
         self.time.advance(frames);
         self.feedback.advance(frames);
@@ -170,41 +170,41 @@ impl<F: Float + Lerp> DelayBank<F> {
         position_of(secs.finite_or(Seconds::ZERO), self.max, self.rate, self.cap)
     }
 
-    /// Aims `glides` at `controls`: a time past the longest reads as the longest and one that
+    /// Aims `ramps` at `controls`: a time past the longest reads as the longest and one that
     /// is not finite as none, and a feedback that is not finite as none (the pair is
     /// bounded where it is read, [`Feedback::stable_pair`]). No allocation.
-    pub fn aim(&self, glides: &mut DelayGlides<F>, controls: &DelayControls) {
+    pub fn retarget(&self, ramps: &mut DelayRamps<F>, controls: &DelayControls) {
         let first = self.position(controls.time);
-        glides.time.aim_position(first, Steps::Rate(DELAY_SLEW));
-        for (c, own) in glides.own.iter_mut().enumerate() {
+        ramps.time.retarget_position(first, Steps::Rate(DELAY_SLEW));
+        for (c, own) in ramps.own.iter_mut().enumerate() {
             *own = if c == 0 || self.linked {
                 first
             } else {
                 self.position(self.own[c])
             };
         }
-        let steps = Steps::Fixed(glides.steps);
+        let steps = Steps::Fixed(ramps.steps);
         let fb = F::from_unit(controls.feedback.finite_or(Feedback::NONE));
         let cross = if self.routing.is_none() {
             F::ZERO
         } else {
             F::from_unit(controls.cross_feedback.finite_or(Feedback::NONE))
         };
-        glides.feedback.aim_by(fb, steps);
-        glides.cross.aim_by(cross, steps);
+        ramps.feedback.retarget_by(fb, steps);
+        ramps.cross.retarget_by(cross, steps);
     }
 
-    /// Runs `input` into `output`, frame `i` at the glides' step `taken + 1 + i`, then
+    /// Runs `input` into `output`, frame `i` at the ramps' step `taken + 1 + i`, then
     /// takes the block's steps from them.
     ///
     /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's width,
     /// or past the narrower of the two views, is not touched. A time lane frame is clamped
-    /// into the line, and one that is not finite is the glided delay; a feedback lane frame
-    /// is clamped into the stable range, and one that is not finite is the glided feedback.
+    /// into the line, and one that is not finite is the ramped delay; a feedback lane frame
+    /// is clamped into the stable range, and one that is not finite is the ramped feedback.
     /// No allocation.
     pub fn process(
         &mut self,
-        glides: &mut DelayGlides<F>,
+        ramps: &mut DelayRamps<F>,
         lanes: DelayLanes<'_, F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
@@ -227,7 +227,7 @@ impl<F: Float + Lerp> DelayBank<F> {
             let plane = if c < width { outs.next() } else { None };
             plane.map_or_else(Default::default, |p| &mut p.into_samples_mut()[..frames])
         });
-        let g = *glides;
+        let g = *ramps;
         let bound = F::from_unit(Feedback::MAX_STABLE);
         let (time, feedback) = (
             lanes.time.map(|l| l.samples()),
@@ -235,18 +235,18 @@ impl<F: Float + Lerp> DelayBank<F> {
         );
         let cf = g.cross.now();
         let coupled = !self.routing.is_none() && (cf != F::ZERO || g.cross.target() != F::ZERO);
-        let moving = g.time.blended(frames) > 0
-            || g.feedback.blended(frames) > 0
-            || g.cross.blended(frames) > 0;
+        let moving = g.time.blended_frames(frames) > 0
+            || g.feedback.blended_frames(frames) > 0
+            || g.cross.blended_frames(frames) > 0;
         // The step of frame `i` of the block: the one after the steps taken.
         let step = |taken: u32, i: usize| {
             taken
                 .saturating_add(1)
                 .saturating_add(u32::try_from(i).unwrap_or(u32::MAX))
         };
-        // The glided value at frame `i` of the block.
-        let at = |glide: &Glide<F>, i: usize| glide.at(step(glide.taken(), i));
-        let time_at = |i: usize| g.time.at(step(g.time.taken(), i));
+        // The ramped value at frame `i` of the block.
+        let at = |ramp: &Ramp<F>, i: usize| ramp.at(step(ramp.steps_taken(), i));
+        let time_at = |i: usize| g.time.at(step(g.time.steps_taken(), i));
         let linked = self.linked;
         let (rate, cap) = (self.rate, self.cap);
         // The rate crosses into the data's float once per block.
@@ -269,13 +269,13 @@ impl<F: Float + Lerp> DelayBank<F> {
                 |c, _| base(c, delay),
             );
         } else {
-            // A feedback lane is clamped, and a frame that is not finite is the glided
+            // A feedback lane is clamped, and a frame that is not finite is the ramped
             // feedback; self- and cross-feedback feed the same loop, so they are bounded as
             // a pair whatever drives them.
             let gain = |i: usize| -> (F, F) {
-                let glided = at(&g.feedback, i);
-                let fb = feedback.and_then(|s| s.get(i)).map_or(glided, |&x| {
-                    if x.is_finite() { x } else { glided }.clamp(F::ZERO, bound)
+                let ramped = at(&g.feedback, i);
+                let fb = feedback.and_then(|s| s.get(i)).map_or(ramped, |&x| {
+                    if x.is_finite() { x } else { ramped }.clamp(F::ZERO, bound)
                 });
                 stable_pair(fb, at(&g.cross, i), bound)
             };
@@ -299,7 +299,7 @@ impl<F: Float + Lerp> DelayBank<F> {
                 delay_at,
             );
         }
-        glides.advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        ramps.advance(u32::try_from(frames).unwrap_or(u32::MAX));
     }
 
     /// The block, `gain(i)` the bounded `(fb, cf)` pair at frame `i` and `delay_at(c, i)`

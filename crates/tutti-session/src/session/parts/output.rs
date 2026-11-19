@@ -32,7 +32,7 @@ pub(crate) struct OutputPart<F: Float> {
     pub(crate) policy: Arc<Cell<OutputPolicy>>,
     /// The engine's tap after the fader and the device width it was built
     /// for; `None` detached.
-    pub(crate) heard: Option<(OutputTaps<F>, ChannelLayout)>,
+    pub(crate) taps: Option<(OutputTaps<F>, ChannelLayout)>,
     /// The engine's load meter, offline or on a device; `None` detached.
     pub(crate) load: Option<LoadMeter>,
     /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced) as
@@ -50,7 +50,7 @@ impl<F: Float> OutputPart<F> {
             root_request,
             root_refusal: None,
             policy,
-            heard: None,
+            taps: None,
             load: None,
             silenced_seen: 0,
         }
@@ -110,7 +110,7 @@ impl<F: Float> OutputPart<F> {
 
     /// The device width the heard tap opens at, after a device change.
     pub(crate) fn set_device_width(&mut self, width: ChannelLayout) {
-        if let Some((_, layout)) = &mut self.heard {
+        if let Some((_, layout)) = &mut self.taps {
             *layout = width;
         }
     }
@@ -131,7 +131,7 @@ impl<F: Float> OutputPart<F> {
 
     /// Frees what the audio thread let go of in the heard tap.
     pub(crate) fn reclaim(&self) {
-        if let Some((taps, _)) = &self.heard {
+        if let Some((taps, _)) = &self.taps {
             taps.reclaim();
         }
     }

@@ -164,13 +164,13 @@ fn the_block_read_is_the_same_at_any_block_length() {
 
     // Disk streams: 0..4 for the long-block pool, 4..8 for the
     // short-block one.
-    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let openings: Vec<_> = (0..8)
         .map(|_| streamer.open(&path, crate::Placement::HEAD))
         .collect();
     assert!(
-        streamer.step_until_settled(512) < 512,
+        streamer.step_until_idle(512) < 512,
         "the rings never primed"
     );
     // Each stream's handle is held for the whole render: dropping it would end
@@ -343,7 +343,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
                 heard[c] |= want[c][i].abs() > 0.1;
             }
         }
-        let _ = streamer.step_once();
+        let _ = streamer.step();
     }
     assert_eq!(heard, [true, true], "silence proves nothing");
 }

@@ -14,9 +14,9 @@ use tutti_rt::LockExt;
 use assert_no_alloc::assert_no_alloc;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare,
+    Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare, PresetId,
     ProcessContext, ProcessOutput, Processor, RenderMode, Request, RescanScope, SampleRate,
-    Samples,
+    Samples, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -312,10 +312,10 @@ fn automation_in_the_block_overrides_a_queued_write() {
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
 }
 
-/// **A full ring keeps the latest write and the next tick retries it.** The
-/// writes the ring refused are not lost, and are not replayed stale.
+/// **A flood of writes to one parameter reaches the plugin as its latest
+/// value.** The slot holds the last write, not an older one replayed.
 #[test]
-fn a_full_ring_keeps_the_latest_write_and_retries_it() {
+fn a_flood_of_writes_reaches_the_plugin_as_the_latest_value() {
     let probe = Probe::behaving();
     let (mut processor, mut controller) = probe
         .load()
@@ -337,19 +337,16 @@ fn a_full_ring_keeps_the_latest_write_and_retries_it() {
             )
             .expect("a declared, writable parameter");
     }
-    assert!(controller.refused_edits() > 0, "the ring filled");
-    render_f32(&mut processor);
-    controller.flush_edits(main_thread());
     let rendered = render_f32(&mut processor);
     assert!(
         (rendered - 0.599).abs() < 1e-6,
-        "the last write arrived after the retry: {rendered}"
+        "the last write arrived: {rendered}"
     );
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
 }
 
 /// **A write no block took survives the rejoin**, and reaches the plugin in
-/// the first block of the next activation: the ring dies with its Processor,
+/// the first block of the next activation: the slots die with their Processor,
 /// and the probe's component never heard of the write any other way.
 #[test]
 fn a_write_survives_a_rejoin() {
@@ -368,7 +365,7 @@ fn a_write_survives_a_rejoin() {
     controller
         .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.4))
         .expect("a declared, writable parameter");
-    // No block has run: both writes are still in the ring.
+    // No block has run: both writes are still in their slots.
     let loaded = Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
     let (mut processor, controller) = loaded
         .activate(main_thread(), prepare())
@@ -812,6 +809,75 @@ fn a_state_load_makes_the_queued_writes_stale() {
         .expect("a declared, writable parameter");
     let rendered = render_f32(&mut processor);
     assert!((rendered - 0.6).abs() < 1e-6, "{rendered}");
+    Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
+}
+
+/// **A preset the format refuses up front voids no write, and keeps what a save
+/// adds.** A `Number` id is no VST3 program; the write queued before it still
+/// reaches the plugin.
+#[test]
+fn a_refused_preset_keeps_the_queued_writes() {
+    let probe = Probe::behaving();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3))
+        .expect("a declared, writable parameter");
+    assert!(!Control::load_preset(
+        &mut controller,
+        main_thread(),
+        &PresetId::Number(3)
+    ));
+    let rendered = render_f32(&mut processor);
+    assert!((rendered - 0.3).abs() < 1e-6, "{rendered}");
+    Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
+}
+
+/// **The void belongs to `before_restore`, not `after_restore`.** `before_restore`
+/// makes a queued write stale; `after_restore` alone does not. Moving the reset
+/// behind the load fails here, since the load would run with the old writes live.
+#[test]
+fn the_reset_is_in_before_restore_not_after() {
+    let probe = Probe::behaving();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3))
+        .expect("a declared, writable parameter");
+    Wraps::after_restore(&mut controller, main_thread());
+    let rendered = render_f32(&mut processor);
+    assert!(
+        (rendered - 0.3).abs() < 1e-6,
+        "after_restore voids nothing: {rendered}"
+    );
+
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.6))
+        .expect("a declared, writable parameter");
+    Wraps::before_restore(&mut controller, main_thread());
+    let rendered = render_f32(&mut processor);
+    assert!(
+        (rendered - 0.3).abs() < 1e-6,
+        "before_restore voided the write, so the render keeps 0.3: {rendered}"
+    );
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
 }
 

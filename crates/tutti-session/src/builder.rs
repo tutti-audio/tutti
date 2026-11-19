@@ -390,14 +390,14 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
-        let heard = engine.output_taps();
+        let taps = engine.output_taps();
         let mut engine = engine;
         let load = engine.take_load_meter();
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
         session.output.load = load;
         session.transport.handle.set_clock(clock);
-        session.output.heard = Some((heard, layout));
+        session.output.taps = Some((taps, layout));
         Ok(session)
     }
 
@@ -488,7 +488,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let load = engine.take_load_meter();
-        let heard = engine.output_taps();
+        let taps = engine.output_taps();
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT).with_quantum(max_block);
         let mut host = tutti_engine::StreamHost::new(
@@ -507,7 +507,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             true,
         )?;
         session.output.load = load;
-        session.output.heard = Some((heard, layout));
+        session.output.taps = Some((taps, layout));
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, which the timer reports as zero.
         #[cfg(feature = "midi")]
@@ -601,7 +601,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             true,
         )?;
         session.output.load = engine.take_load_meter();
-        session.output.heard = Some((engine.output_taps(), spec.channels));
+        session.output.taps = Some((engine.output_taps(), spec.channels));
         let clock = engine.block_clock();
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, read on every drain.
@@ -1136,7 +1136,7 @@ mod tests {
         assert_eq!(session.graph_ref().outputs(), 2);
         assert_eq!(session.sample_rate(), SampleRate::SR_48K);
         assert_eq!(
-            session.output.heard.as_ref().map(|(_, layout)| *layout),
+            session.output.taps.as_ref().map(|(_, layout)| *layout),
             Some(ChannelLayout::STEREO)
         );
     }
@@ -1157,6 +1157,6 @@ mod tests {
         assert_eq!(prepared.sample_rate(), SampleRate::SR_44K1);
         assert_eq!(prepared.max_block(), block);
         assert_eq!(session.graph_ref().outputs(), 4);
-        assert_eq!(session.output.heard.as_ref().map(|(_, l)| *l), Some(quad));
+        assert_eq!(session.output.taps.as_ref().map(|(_, l)| *l), Some(quad));
     }
 }

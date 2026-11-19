@@ -30,7 +30,7 @@ fn bounced(
     let (dc, _) = session
         .graph()
         .add(ForkByClone(Const::new(LEVEL, ChannelLayout::STEREO)));
-    session.graph().connect(dc, Root).unwrap().hard();
+    session.graph().connect(dc, Root).unwrap().unfaded();
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("out.wav");
     let bounce = Bounce::project()

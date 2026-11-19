@@ -22,11 +22,14 @@ fn session() -> tutti_session::DetachedSession<&'static str, f64> {
         .expect("an f64 session builds");
     let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
     let (gain, _) = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
-    s.graph().connect(dc.out(0), gain.input(0)).unwrap().hard();
+    s.graph()
+        .connect(dc.out(0), gain.input(0))
+        .unwrap()
+        .unfaded();
     s.graph()
         .connect(gain.out(0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     let _ = s.update();
     s.set(gain.volume().to(Amplitude::new(0.75))).unwrap();
     s

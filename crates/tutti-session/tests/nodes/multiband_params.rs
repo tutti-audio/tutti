@@ -236,8 +236,8 @@ fn the_meter_of_band_1_follows_its_threshold() {
 ///
 /// The lane steps every 32 frames, so `g1` is within 0.2 dB (2.4%) of the
 /// sine; the tolerance is 4%, and the swing (a 24 dB span) is asserted
-/// whole. A make-up is sampled on the 16-frame grid and glides over 5 ms
-/// (`GAIN_GLIDE`), re-aimed at each grid point: that is a first-order lag of
+/// whole. A make-up is sampled on the 16-frame grid and ramps over 5 ms
+/// (`GAIN_RAMP`), re-aimed at each grid point: that is a first-order lag of
 /// time constant 5 ms, so the swing is the sine through it, `1 / sqrt(1 +
 /// (w tau)^2)` of its depth and `atan(w tau)` late (0.992 and 0.125 rad at 4 Hz).
 #[test]

@@ -22,7 +22,7 @@ pub use curves::{
     LimiterCurve, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use dynamic_eq::{DynamicEqBank, DynamicEqControls, DynamicMode};
-pub use gain_pass::GAIN_GLIDE;
+pub use gain_pass::GAIN_RAMP;
 pub(crate) use gain_pass::{floored, key_levels};
 pub use gate::{GateBank, GateControls, GateLanes};
 pub use key_filter::KeyFilter;

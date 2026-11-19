@@ -1,9 +1,9 @@
 //! The session's value verbs: [`Session::set`], [`Session::get`] and
-//! [`Session::knobs`].
+//! [`Session::values`].
 
 use super::batch::{IntoAssign, IntoRead};
 use super::error::ValueError;
-use super::state::Knobs;
+use super::state::Values;
 use crate::{AppKey, Clock, Session};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
@@ -63,7 +63,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// The session's values for any control-side thread: `Clone + Send`,
     /// borrowing nothing. Never for an audio or MIDI callback.
-    pub fn knobs(&self) -> Knobs<K> {
-        Knobs::of(&self.values)
+    pub fn values(&self) -> Values<K> {
+        Values::of(&self.values)
     }
 }

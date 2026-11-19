@@ -71,7 +71,7 @@ impl TransientShaperConfig {
 ///
 /// The two amounts are live [`Db`] cells, both [`UnitParam::GainDb`](tutti_units::UnitParam::GainDb): index 0 is the
 /// attack and index 1 the sustain, each read within [`TransientControls::MAX_AMOUNT`]. They are
-/// sampled on the stream grid (16 frames) and glide over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE).
+/// sampled on the stream grid (16 frames) and ramp over [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP).
 /// The two envelope times are the build's.
 ///
 /// No latency and no tail: the gain only scales, so a silent input is a silent output. A
@@ -117,8 +117,8 @@ pub struct TransientShaperKernel<F: Float + Lerp> {
     slow: Seconds,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<TransientBank<F>>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> TransientShaperKernel<F> {
@@ -129,7 +129,7 @@ impl<F: Float + Lerp> TransientShaperKernel<F> {
             fast: config.fast,
             slow: config.slow,
             bank: None,
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -151,7 +151,7 @@ impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = Some(TransientBank::new(rate, self.fast, self.slow));
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
@@ -162,10 +162,10 @@ impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
 
     fn retarget(&mut self, controls: &TransientControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
-        if !self.landed {
-            bank.settle();
-            self.landed = true;
+        bank.retarget(controls);
+        if !self.applied {
+            bank.jump_to_target();
+            self.applied = true;
         }
     }
 

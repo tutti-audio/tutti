@@ -41,9 +41,6 @@ wide = { version = "1.6", default-features = false }
 thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-# Reproducible noise for the reverb's tests. Seeded, so an assertion is not
-# flaky.
-rand = "0.10"
 # `check_range_contract` for the range-checked types.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 

@@ -116,7 +116,7 @@ impl<F: Float> Kernel for RingModKernel<F> {
     }
 
     fn retarget(&mut self, controls: &RingModControls) {
-        self.modulator.aim(controls);
+        self.modulator.retarget(controls);
     }
 
     fn render(

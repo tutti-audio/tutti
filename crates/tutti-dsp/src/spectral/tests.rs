@@ -1,6 +1,7 @@
 use super::*;
 use crate::FftScratch;
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use crate::testing::uniform;
+use tutti_rt::SplitMix64;
 
 const RATE: f64 = 48_000.0;
 
@@ -44,13 +45,13 @@ fn rolloff_sits_at_the_energy_share_and_the_band_edge() {
 /// off at its band edge at 99 %.
 #[test]
 fn band_limited_noise_rolls_off_at_the_edge() {
-    let mut rng = StdRng::seed_from_u64(9);
+    let mut rng = SplitMix64::new(9);
     let mut fft = FftScratch::new();
     let size = 16_384;
     let edge_bin = 1000usize; // 5859 Hz at 48 kHz / 16384
     let mut bins = vec![crate::Complex64::default(); size / 2 + 1];
     for b in bins.iter_mut().take(edge_bin).skip(1) {
-        *b = crate::Complex64::from_polar(1.0, rng.random_range(0.0..core::f64::consts::TAU));
+        *b = crate::Complex64::from_polar(1.0, uniform(&mut rng, 0.0, core::f64::consts::TAU));
     }
     let mut x = vec![0.0f64; size];
     fft.inverse(&bins, tutti_buffers::MonoMut::new(&mut x));
@@ -69,8 +70,8 @@ fn band_limited_noise_rolls_off_at_the_edge() {
 /// a tonal frame do not make it depend on the bin count.
 #[test]
 fn flatness_is_level_independent_and_a_zero_bin_tonal_frame_is_near_zero() {
-    let mut rng = StdRng::seed_from_u64(1);
-    let row: Vec<f64> = (0..1025).map(|_| rng.random_range(0.2..1.0)).collect();
+    let mut rng = SplitMix64::new(1);
+    let row: Vec<f64> = (0..1025).map(|_| uniform(&mut rng, 0.2, 1.0)).collect();
     let quiet: Vec<f64> = row.iter().map(|m| m * 1e-12).collect();
     let (loud, soft) = (spectral_flatness(&row), spectral_flatness(&quiet));
     assert!(loud > 0.5 && (loud - soft).abs() < 1e-4, "{loud} vs {soft}");

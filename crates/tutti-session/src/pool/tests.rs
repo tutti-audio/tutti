@@ -22,7 +22,7 @@ fn took<J: JobKind>(
     job: &Job<J>,
 ) -> Option<Result<J::Output, J::Error>> {
     events.iter_mut().find_map(|event| match event {
-        SessionEvent::Landed(landed) => landed.take(job),
+        SessionEvent::JobDone(output) => output.take(job),
         _ => None,
     })
 }

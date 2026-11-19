@@ -1,10 +1,10 @@
 //! The streamer's drivers, as a typestate: a streamer is [`Built`], then
-//! either [`Running`] on its own thread or `ByHand`, stepped on the caller's.
+//! either [`Running`] on its own thread or `Manual`, stepped on the caller's.
 //!
 //! The two drivers own the same streamer-local state (`Local`: the stream
 //! table and the scratch), so a streamer is one or the other for its whole
 //! life, and the type says which. Handing the state to a thread consumes the
-//! `Built`; stepping by hand needs a `ByHand`, which has no thread to race.
+//! `Built`; stepping by hand needs a `Manual`, which has no thread to race.
 //! What was two runtime flags, two asserts and a `should_panic` test is a
 //! method that exists on one type and not the other.
 //!
@@ -34,7 +34,7 @@ use tutti_rt::RingFloat;
 /// A streamer that is built and drives nothing yet: its queue, its shared
 /// handles and the state a driver will own.
 ///
-/// Consumed by [`start`](Self::start) (a thread) or `by_hand` (the caller).
+/// Consumed by [`start`](Self::start) (a thread) or `manual` (the caller).
 /// Dropping it drops the queue's one receiver, so a sender is told the
 /// streamer is gone.
 pub(super) struct Built<F: RingFloat> {
@@ -155,10 +155,10 @@ impl<F: RingFloat> Built<F> {
         })
     }
 
-    /// The caller drives: its cycle is stepped by `ByHand::step_once`.
+    /// The caller drives: its cycle is stepped by `Manual::step`.
     #[cfg(any(test, feature = "testing"))]
-    pub(super) fn by_hand(self) -> ByHand<F> {
-        ByHand {
+    pub(super) fn manual(self) -> Manual<F> {
+        Manual {
             rx: Some(self.rx),
             cycle: StreamerCycle::new(self.config, self.tx),
             shared: self.shared,
@@ -209,31 +209,31 @@ impl Drop for Running {
 }
 
 /// The streamer driven by the caller, a cycle at a time: what
-/// `DiskStreamer::by_hand` builds. Requires the
+/// `DiskStreamer::manual` builds. Requires the
 /// `testing` feature.
 ///
 /// There is no thread to race, so a test can say "after this many cycles the
 /// ring holds audio"; it is the same `StreamerCycle::step` the thread runs.
 #[cfg(any(test, feature = "testing"))]
-pub struct ByHand<F: RingFloat> {
+pub struct Manual<F: RingFloat> {
     rx: Option<Receiver<StreamerCommand<F>>>,
     cycle: StreamerCycle<F>,
     shared: Handles<F>,
 }
 
 #[cfg(any(test, feature = "testing"))]
-impl<F: RingFloat> std::fmt::Debug for ByHand<F> {
+impl<F: RingFloat> std::fmt::Debug for Manual<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ByHand").finish_non_exhaustive()
+        f.debug_struct("Manual").finish_non_exhaustive()
     }
 }
 
 #[cfg(any(test, feature = "testing"))]
-impl<F: RingFloat> ByHand<F> {
+impl<F: RingFloat> Manual<F> {
     /// One cycle on the calling thread: drain every queued command, then apply
     /// directions and refills. Returns once that work is done, reporting what
     /// the loop *would* have done next.
-    pub(super) fn step_once(&mut self) -> StepOutcome {
+    pub(super) fn step(&mut self) -> StepOutcome {
         let queue = self.rx.as_ref();
         self.cycle
             .step(&self.shared, || queue.and_then(|rx| rx.try_recv().ok()))
@@ -267,7 +267,7 @@ mod tests {
     const _: () = {
         fn sync<T: Sync>() {}
         let _ = sync::<Running>;
-        let _ = sync::<ByHand<f32>>;
+        let _ = sync::<Manual<f32>>;
     };
 
     /// A backstop far longer than any test waits: a streamer that wakes inside

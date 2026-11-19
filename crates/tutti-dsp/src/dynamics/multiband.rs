@@ -8,12 +8,12 @@
 //! A band may be **bypassed** (its gain goes to unity, the makeup with it, while its
 //! compressor keeps running so a release finds it warm) and **soloed** (while any band is
 //! soloed the output is the sum of the soloed bands, the others muted but still metering).
-//! Both are weights of 0 or 1 that glide over [`GAIN_GLIDE`], like a makeup: a step in
+//! Both are weights of 0 or 1 that ramp over [`GAIN_RAMP`], like a makeup: a step in
 //! either multiplies the output directly, so it would click.
 //!
-//! The crossover glides to each design over a grid period of [`COEFF_INTERVAL`] frames, as
+//! The crossover ramps to each design over a grid period of [`COEFF_INTERVAL`] frames, as
 //! [`CrossoverBank`]'s does; each compressor's detector lands whole, and the makeups and the
-//! two weights glide over [`GAIN_GLIDE`]. Each band's threshold is a per-frame lane
+//! two weights ramp over [`GAIN_RAMP`]. Each band's threshold is a per-frame lane
 //! ([`MultibandLanes`]).
 //!
 //! The controls are `MultibandSettings` and `BandSettings`, not `*Controls`: the node's
@@ -29,10 +29,10 @@ use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use super::compressor::{CompressorBank, CompressorControls, CompressorLanes};
-use super::gain_pass::{CHUNK, GAIN_GLIDE};
+use super::gain_pass::{CHUNK, GAIN_RAMP};
 use crate::{
     COEFF_INTERVAL, CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError,
-    CrossoverModel, Glide, Lerp, SimdLanes, Steps,
+    CrossoverModel, Lerp, Ramp, SimdLanes, Steps,
 };
 
 /// The most bands.
@@ -103,7 +103,7 @@ impl Default for MultibandSettings {
 /// its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MultibandLanes<'a, F: Float> {
-    /// Band `b`'s threshold in dB. A frame that is not finite is the aimed threshold.
+    /// Band `b`'s threshold in dB. A frame that is not finite is the set threshold.
     pub thresholds: [Option<Mono<'a, F>>; MAX_BANDS],
 }
 
@@ -223,18 +223,18 @@ pub struct MultibandBank<F: Float + SimdLanes + Lerp> {
     /// The model the controls design, in place.
     model: CrossoverModel,
     /// The blend in flight over one grid period.
-    blend: Glide<CrossoverBlend>,
+    blend: Ramp<CrossoverBlend>,
     compressors: [CompressorBank<F>; MAX_BANDS],
-    /// 1 while the band is bypassed, else 0, gliding over [`GAIN_GLIDE`]: a per-sample weight
+    /// 1 while the band is bypassed, else 0, ramping over [`GAIN_RAMP`]: a per-sample weight
     /// in `F`.
-    bypass: [Glide<F>; MAX_BANDS],
-    /// 1 while the band is heard, else 0, gliding over [`GAIN_GLIDE`]: a per-sample weight in
+    bypass: [Ramp<F>; MAX_BANDS],
+    /// 1 while the band is heard, else 0, ramping over [`GAIN_RAMP`]: a per-sample weight in
     /// `F`.
-    audible: [Glide<F>; MAX_BANDS],
-    /// The steps a weight glide takes: [`GAIN_GLIDE`] at the rate.
+    audible: [Ramp<F>; MAX_BANDS],
+    /// The steps a weight ramp takes: [`GAIN_RAMP`] at the rate.
     steps: u32,
-    /// Whether the first aim since the last reset has landed.
-    landed: bool,
+    /// Whether the first `retarget` since the last reset has been applied.
+    applied: bool,
     /// Each band's deepest reduction since the last reading, in dB.
     deepest: [Db; MAX_BANDS],
     scratch: Scratch<F>,
@@ -242,7 +242,7 @@ pub struct MultibandBank<F: Float + SimdLanes + Lerp> {
 
 impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
     /// A multiband of `bands` bands over `width` at `rate`, splitting and summing until it
-    /// is aimed. Allocates: build it on the control side.
+    /// is set. Allocates: build it on the control side.
     ///
     /// # Errors
     ///
@@ -270,19 +270,19 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             .expect("a shape's bands are 2 to 4, inside a crossover's 2 to 6");
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
         // than panic, since a prepare must not.
-        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
             width: channels,
             bands,
             rate,
             crossover: CrossoverBank::new(width),
-            blend: Glide::landed(model.blend()).by(COEFF_INTERVAL as u32),
+            blend: Ramp::new(model.blend()).steps(COEFF_INTERVAL as u32),
             model,
             compressors: core::array::from_fn(|_| CompressorBank::new(rate)),
-            bypass: [Glide::landed(F::ZERO); MAX_BANDS],
-            audible: [Glide::landed(F::ONE); MAX_BANDS],
+            bypass: [Ramp::new(F::ZERO); MAX_BANDS],
+            audible: [Ramp::new(F::ONE); MAX_BANDS],
             steps,
-            landed: false,
+            applied: false,
             deepest: [Db::UNITY; MAX_BANDS],
             scratch: Scratch::new(channels, bands),
         }
@@ -296,43 +296,43 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
 
     /// Back to a fresh bank: silent, splitting and summing at the octave splits, every band
     /// a compressor that does nothing, the weights at 0 (bypass) and 1 (audible), the meters
-    /// at none, and the next [`aim`](Self::aim) landing at once. No allocation.
+    /// at none, and the next [`retarget`](Self::retarget) landing at once. No allocation.
     pub fn reset(&mut self) {
         self.crossover.reset();
         self.model
             .design_into(&CrossoverControls::octaves(self.rate), self.rate);
-        self.blend = Glide::landed(self.model.blend()).by(COEFF_INTERVAL as u32);
+        self.blend = Ramp::new(self.model.blend()).steps(COEFF_INTERVAL as u32);
         self.compressors = core::array::from_fn(|_| CompressorBank::new(self.rate));
-        self.bypass = [Glide::landed(F::ZERO); MAX_BANDS];
-        self.audible = [Glide::landed(F::ONE); MAX_BANDS];
+        self.bypass = [Ramp::new(F::ZERO); MAX_BANDS];
+        self.audible = [Ramp::new(F::ONE); MAX_BANDS];
         self.deepest = [Db::UNITY; MAX_BANDS];
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Aims at `controls`: the crossover is designed in place (total: a set out of order is
-    /// solved with its splits no lower than the one before) and glides to the design over a
-    /// grid period, each band's compressor is aimed as [`CompressorBank::aim`] does, and the
-    /// bypass and solo weights glide over [`GAIN_GLIDE`]. The first aim after
+    /// solved with its splits no lower than the one before) and ramps to the design over a
+    /// grid period, each band's compressor is set as [`CompressorBank::retarget`] does, and the
+    /// bypass and solo weights ramp over [`GAIN_RAMP`]. The first `retarget` after
     /// [`new`](Self::new) or [`reset`](Self::reset) lands whole. No allocation.
-    pub fn aim(&mut self, controls: &MultibandSettings) {
+    pub fn retarget(&mut self, controls: &MultibandSettings) {
         self.model.design_into(&controls.crossover, self.rate);
-        self.blend.aim(self.model.blend());
+        self.blend.retarget(self.model.blend());
         let bands = &controls.bands[..self.bands];
         let any_solo = bands.iter().any(|b| b.solo);
         let steps = Steps::Fixed(self.steps);
         for (b, band) in bands.iter().enumerate() {
-            self.compressors[b].aim(&band.compressor);
-            self.bypass[b].aim_by(flag(band.bypass), steps);
-            self.audible[b].aim_by(flag(!any_solo || band.solo), steps);
+            self.compressors[b].retarget(&band.compressor);
+            self.bypass[b].retarget_by(flag(band.bypass), steps);
+            self.audible[b].retarget_by(flag(!any_solo || band.solo), steps);
         }
-        if !self.landed {
-            self.blend.settle();
+        if !self.applied {
+            self.blend.jump_to_target();
             for b in 0..self.bands {
-                self.compressors[b].settle();
-                self.bypass[b].settle();
-                self.audible[b].settle();
+                self.compressors[b].jump_to_target();
+                self.bypass[b].jump_to_target();
+                self.audible[b].jump_to_target();
             }
-            self.landed = true;
+            self.applied = true;
         }
     }
 
@@ -350,7 +350,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
     /// Channel `c` of `input` feeds channel `c` of `output`; an input channel the bank is
     /// wider than reads as silence, an output channel past the bank's width is not touched,
     /// and the frames rendered are the fewer of the two views'. Frame `i` reads the
-    /// weights at the glide's step `taken + 1 + i`, then the block's steps are taken. No
+    /// weights at the ramp's step `taken + 1 + i`, then the block's steps are taken. No
     /// allocation.
     pub fn process(
         &mut self,
@@ -434,7 +434,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             // The meter counts a band unless the whole chunk is bypassed.
             let deepest = self.compressors[b].take_deepest();
             let bypass = &self.bypass[b];
-            if bypass.blended(n) != 0 || bypass.target() < F::ONE {
+            if bypass.blended_frames(n) != 0 || bypass.target() < F::ONE {
                 self.deepest[b] = self.deepest[b].max(deepest);
             }
             weights(bypass, &mut by[..n]);
@@ -483,17 +483,17 @@ fn flag<F: Float>(on: bool) -> F {
     if on { F::ONE } else { F::ZERO }
 }
 
-/// The weight of `glide` at each of the next frames: its blend while it moves, then its
+/// The weight of `ramp` at each of the next frames: its blend while it moves, then its
 /// target.
 #[inline]
-fn weights<F: Float + Lerp>(glide: &Glide<F>, out: &mut [F]) {
-    let blended = glide.blended(out.len());
-    let taken = glide.taken();
+fn weights<F: Float + Lerp>(ramp: &Ramp<F>, out: &mut [F]) {
+    let blended = ramp.blended_frames(out.len());
+    let taken = ramp.steps_taken();
     for (i, w) in out.iter_mut().enumerate() {
         *w = if i < blended {
-            glide.at(taken.saturating_add(1).saturating_add(i as u32))
+            ramp.at(taken.saturating_add(1).saturating_add(i as u32))
         } else {
-            glide.target()
+            ramp.target()
         };
     }
 }

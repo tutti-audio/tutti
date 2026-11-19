@@ -1,11 +1,12 @@
 use super::*;
 use crate::cross_correlate;
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use crate::test_rng::uniform;
+use tutti_rt::SplitMix64;
 use tutti_units::Hz;
 
 fn noise(len: usize, seed: u64) -> Vec<f64> {
-    let mut rng = StdRng::seed_from_u64(seed);
-    (0..len).map(|_| rng.random_range(-1.0..1.0)).collect()
+    let mut rng = SplitMix64::new(seed);
+    (0..len).map(|_| uniform(&mut rng, -1.0, 1.0)).collect()
 }
 
 /// `x` delayed by `delay` samples (negative: advanced), same length.
@@ -55,13 +56,13 @@ fn band(low: f64, high: f64) -> FrequencyBand {
 /// A signal that fills the band, evaluable at fractional times: four
 /// hundred sines with seeded frequencies below 0.4 cycles per sample.
 fn sines(len: usize, delay: f64) -> Vec<f64> {
-    let mut rng = StdRng::seed_from_u64(9);
+    let mut rng = SplitMix64::new(9);
     let partials: Vec<(f64, f64, f64)> = (0..400)
         .map(|_| {
             (
-                rng.random_range(0.02..0.4),
-                rng.random_range(0.0..core::f64::consts::TAU),
-                rng.random_range(0.5..1.0),
+                uniform(&mut rng, 0.02, 0.4),
+                uniform(&mut rng, 0.0, core::f64::consts::TAU),
+                uniform(&mut rng, 0.5, 1.0),
             )
         })
         .collect();
@@ -104,11 +105,11 @@ fn band_noise(len: usize, seed: u64, low: f64, high: f64) -> Vec<f64> {
 /// Noise through two one-pole lowpasses: a spectrum falling 12 dB per
 /// octave, some 70 dB from the lowest bins to the highest.
 fn tilted_noise(len: usize, seed: u64) -> Vec<f64> {
-    let mut rng = StdRng::seed_from_u64(seed);
+    let mut rng = SplitMix64::new(seed);
     let (mut a, mut b) = (0.0f64, 0.0f64);
     (0..len)
         .map(|_| {
-            a = 0.95 * a + rng.random_range(-1.0..1.0);
+            a = 0.95 * a + uniform(&mut rng, -1.0, 1.0);
             b = 0.95 * b + a;
             b
         })
@@ -209,12 +210,12 @@ fn phat_keeps_the_delay_of_a_steeply_tilted_source_under_a_hum() {
 #[test]
 fn a_band_limit_leaves_out_what_does_not_correlate() {
     let n = 2048;
-    let mut rng = StdRng::seed_from_u64(31);
+    let mut rng = SplitMix64::new(31);
     let partials: Vec<(f64, f64)> = (0..12)
         .map(|_| {
             (
-                rng.random_range(0.04..0.08),
-                rng.random_range(0.0..core::f64::consts::TAU),
+                uniform(&mut rng, 0.04, 0.08),
+                uniform(&mut rng, 0.0, core::f64::consts::TAU),
             )
         })
         .collect();

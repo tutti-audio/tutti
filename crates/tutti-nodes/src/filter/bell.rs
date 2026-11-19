@@ -58,7 +58,7 @@ impl BellFilterConfig {
 /// the band keeps its shape where a bilinear bell is cramped. The center, [`Q`] and gain
 /// are live cells (`UnitParam::Cutoff`, `Q` and `GainDb`), designed in closed form on a
 /// 16-frame grid and reached along a line in the section's coefficients over the next 16
-/// frames with the state kept, so an automated control glides and the section stays stable.
+/// frames with the state kept, so an automated control ramps and the section stays stable.
 ///
 /// The declared tail is unbounded: the matched cut's poles have no closed-form bound over the
 /// ranges. Each block narrows it to [`MatchedBell::ring_out`] at the controls in force, the
@@ -142,7 +142,7 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
-    use crate::test_support::{RATE, assert_cell_glides, prepared};
+    use crate::test_support::{RATE, assert_cell_ramps, prepared};
     use tutti_buffers::MaxBlock;
     use tutti_graph::Cost;
     use tutti_graph::contract::assert_param_fork;
@@ -246,10 +246,10 @@ mod tests {
     /// The controls moved across their ranges mid-sine stay finite and bounded, render the
     /// same however the host cuts its blocks, and settle on the design.
     #[test]
-    fn a_glide_of_the_controls_stays_finite_and_settles_on_the_design() {
+    fn a_ramp_of_the_controls_stays_finite_and_settles_on_the_design() {
         let make = || BellFilterNode::from(config(Hz::new(200.0), Q::new(1.0), Db::UNITY));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
-        let mut node = assert_cell_glides(
+        let mut node = assert_cell_ramps(
             make,
             |n: &BellFilterNode<f32>| {
                 assert!(n.param_set().set(UnitParam::Cutoff, 4_000.0));

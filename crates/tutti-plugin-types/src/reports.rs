@@ -2,7 +2,7 @@
 //!
 //! The Processor sends each [`ParamEdit`] the plugin made from its audio
 //! thread; the Controller drains them on the control side. It is the direction
-//! opposite to the host's writes, which are queued ([`EditQueue`](crate::EditQueue)):
+//! opposite to the host's writes, which are slots ([`edit_slots`](crate::edit_slots())):
 //! a report is an event (a gesture's `Begin` and `End` must all arrive, in
 //! order), so it is a ring.
 

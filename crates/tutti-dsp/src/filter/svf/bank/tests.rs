@@ -27,7 +27,7 @@ fn coefficients(ty: SvfType, fc: f64, q: f64, gain: f64) -> SvfCoefficients<f64>
 /// `blocks`, cycled, and returns the output per channel.
 fn run(
     bank: &mut SvfBank<f64>,
-    glide: &mut Glide<SvfCoefficients<f64>>,
+    ramp: &mut Ramp<SvfCoefficients<f64>>,
     input: &[Vec<f64>],
     blocks: &[usize],
 ) -> Vec<Vec<f64>> {
@@ -42,7 +42,7 @@ fn run(
         let ins: Vec<&[f64]> = input.iter().map(|c| &c[at..end]).collect();
         let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
-            glide,
+            ramp,
             Planes::new(&ins).expect("equal planes"),
             PlanesMut::new(&mut outs).expect("equal planes"),
         );
@@ -64,10 +64,10 @@ fn the_held_response_is_the_rbj_closed_form() {
     for ty in TYPES {
         for (fc, q, gain) in [(1_000.0f64, 0.707f64, 9.0f64), (250.0, 4.0, -12.0)] {
             let mut bank = SvfBank::new(ChannelLayout::MONO);
-            let mut glide = Glide::landed(coefficients(ty, fc, q, gain));
+            let mut ramp = Ramp::new(coefficients(ty, fc, q, gain));
             let mut x = vec![0.0f64; N];
             x[0] = 1.0;
-            let y = run(&mut bank, &mut glide, &[x], &[N]).remove(0);
+            let y = run(&mut bank, &mut ramp, &[x], &[N]).remove(0);
             let l1 = y.iter().map(|v| v.abs()).sum::<f64>();
             let rounding = 16.0 * 2f64.powi(-53) * l1 * l1;
             let want = rbj(ty, fc, q, gain, RATE.get());
@@ -95,7 +95,7 @@ fn the_held_response_is_the_rbj_closed_form() {
     }
 }
 
-/// Block independence: a glide in flight, rendered in uneven blocks, gives the same
+/// Block independence: a ramp in flight, rendered in uneven blocks, gives the same
 /// frames bit for bit as one block, because frame `i` reads step `taken + 1 + i` however
 /// the frames are cut.
 #[test]
@@ -109,9 +109,9 @@ fn any_split_renders_the_frames_of_one_block() {
         .collect();
     let render = |blocks: &[usize]| {
         let mut bank = SvfBank::new(ChannelLayout::from(3u16));
-        let mut glide = Glide::landed(coefficients(SvfType::LowPass, 300.0, 0.707, 0.0)).by(16);
-        glide.aim(coefficients(SvfType::LowPass, 6_000.0, 2.0, 0.0));
-        run(&mut bank, &mut glide, &input, blocks)
+        let mut ramp = Ramp::new(coefficients(SvfType::LowPass, 300.0, 0.707, 0.0)).steps(16);
+        ramp.retarget(coefficients(SvfType::LowPass, 6_000.0, 2.0, 0.0));
+        run(&mut bank, &mut ramp, &input, blocks)
     };
     let whole = render(&[997]);
     for blocks in [&[1usize][..], &[5, 3, 64], &[15, 1, 1, 200], &[16]] {
@@ -119,14 +119,14 @@ fn any_split_renders_the_frames_of_one_block() {
     }
 }
 
-/// A blended block lands on the new set at its last step: an impulse on the glide's 16th
+/// A blended block lands on the new set at its last step: an impulse on the ramp's 16th
 /// frame, through a bank with no state, comes out as the new set's `a3` (with no state a
-/// low-pass's output is `a3 x`), and the glide has no steps left.
+/// low-pass's output is `a3 x`), and the ramp has no steps left.
 #[test]
-fn a_glide_arrives_on_the_new_set_at_its_last_frame() {
+fn a_ramp_arrives_on_the_new_set_at_its_last_frame() {
     let new = coefficients(SvfType::LowPass, 5_000.0, 0.707, 0.0);
-    let mut blended = Glide::landed(coefficients(SvfType::LowPass, 500.0, 0.707, 0.0)).by(16);
-    blended.aim(new);
+    let mut blended = Ramp::new(coefficients(SvfType::LowPass, 500.0, 0.707, 0.0)).steps(16);
+    blended.retarget(new);
     let mut x = vec![0.0f64; 16];
     x[15] = 1.0;
     let mut bank = SvfBank::new(ChannelLayout::MONO);
@@ -137,7 +137,7 @@ fn a_glide_arrives_on_the_new_set_at_its_last_frame() {
 }
 
 /// Channels are independent: a bank of any width gives each channel exactly what a
-/// one-channel bank gives it, held or gliding, whatever group the width falls into.
+/// one-channel bank gives it, held or ramping, whatever group the width falls into.
 #[test]
 fn each_channel_is_its_own_filter() {
     for width in [1u16, 2, 5, 8, 9, 16] {
@@ -148,16 +148,16 @@ fn each_channel_is_its_own_filter() {
                     .collect()
             })
             .collect();
-        let glide = || {
-            let mut g = Glide::landed(coefficients(SvfType::Bell, 800.0, 1.5, 6.0)).by(16);
-            g.aim(coefficients(SvfType::Bell, 2_000.0, 0.8, -9.0));
+        let ramp = || {
+            let mut g = Ramp::new(coefficients(SvfType::Bell, 800.0, 1.5, 6.0)).steps(16);
+            g.retarget(coefficients(SvfType::Bell, 2_000.0, 0.8, -9.0));
             g
         };
         let mut bank = SvfBank::new(ChannelLayout::from(width));
-        let all = run(&mut bank, &mut glide(), &input, &[300]);
+        let all = run(&mut bank, &mut ramp(), &input, &[300]);
         for (c, ch) in input.iter().enumerate() {
             let mut one = SvfBank::new(ChannelLayout::MONO);
-            let alone = run(&mut one, &mut glide(), std::slice::from_ref(ch), &[300]).remove(0);
+            let alone = run(&mut one, &mut ramp(), std::slice::from_ref(ch), &[300]).remove(0);
             assert_eq!(all[c], alone, "width {width}, channel {c}");
         }
     }
@@ -167,27 +167,22 @@ fn each_channel_is_its_own_filter() {
 #[test]
 fn a_reset_bank_is_silent() {
     let mut bank = SvfBank::new(ChannelLayout::STEREO);
-    let mut glide = Glide::landed(coefficients(SvfType::BandPass, 300.0, 50.0, 0.0));
+    let mut ramp = Ramp::new(coefficients(SvfType::BandPass, 300.0, 50.0, 0.0));
     let noise: Vec<f64> = (0..512)
         .map(|i| ((i * 31) % 17) as f64 / 8.0 - 1.0)
         .collect();
-    run(&mut bank, &mut glide, &[noise.clone(), noise], &[512]);
+    run(&mut bank, &mut ramp, &[noise.clone(), noise], &[512]);
     bank.reset();
-    let out = run(
-        &mut bank,
-        &mut glide,
-        &[vec![0.0; 64], vec![0.0; 64]],
-        &[64],
-    );
+    let out = run(&mut bank, &mut ramp, &[vec![0.0; 64], vec![0.0; 64]], &[64]);
     assert!(out.iter().flatten().all(|&s| s == 0.0));
 }
 
-/// A glide's midpoint between two reachable designs is itself stable: an impulse
+/// A ramp's midpoint between two reachable designs is itself stable: an impulse
 /// through the half-way coefficients decays (the last thousand frames of 150,000 peak
 /// below half of the first thousand's). A biquad's stable region in `(a1, a2)` is convex,
-/// so a blend of two stable sets stays inside; a glide that extrapolated would leave it.
+/// so a blend of two stable sets stays inside; a ramp that extrapolated would leave it.
 #[test]
-fn a_glides_midpoint_is_stable() {
+fn a_ramps_midpoint_is_stable() {
     const FRAMES: usize = 150_000;
     let mut designs = Vec::new();
     for ty in TYPES {
@@ -202,11 +197,11 @@ fn a_glides_midpoint_is_stable() {
     for a in &designs {
         for b in &designs {
             let mid = a.lerp(b, 8, 16);
-            let mut glide = Glide::landed(mid);
+            let mut ramp = Ramp::new(mid);
             let mut bank = SvfBank::new(ChannelLayout::MONO);
             let mut x = vec![0.0f64; FRAMES];
             x[0] = 1.0;
-            let y = run(&mut bank, &mut glide, &[x], &[FRAMES]).remove(0);
+            let y = run(&mut bank, &mut ramp, &[x], &[FRAMES]).remove(0);
             let peak = |r: core::ops::Range<usize>| y[r].iter().fold(0.0f64, |m, v| m.max(v.abs()));
             let (first, last) = (peak(0..1_000), peak(FRAMES - 1_000..FRAMES));
             assert!(

@@ -7,8 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
-    Edit, EditDrain, NoteExpressionChanges, PluginError, PluginIo, PluginResult, Processor,
-    ReportSink,
+    EditReader, NoteExpressionChanges, PluginError, PluginIo, PluginResult, Processor, ReportSink,
 };
 use tutti_rt::Reader;
 use tutti_units::Normalized;
@@ -31,7 +30,7 @@ pub(crate) struct ProcessorParts {
     pub max_frames: u32,
     pub scratch: Box<AudioScratch>,
     pub ranges: Reader<RangeTable>,
-    pub drain: EditDrain,
+    pub drain: EditReader,
     pub reports: ReportSink,
     pub reports_dropped: Arc<AtomicU64>,
 }
@@ -53,7 +52,7 @@ pub struct ClapProcessor {
     /// Boxed (several KiB): a Processor moves by value through activation.
     pub(crate) scratch: Box<AudioScratch>,
     pub(crate) ranges: Reader<RangeTable>,
-    pub(crate) drain: EditDrain,
+    pub(crate) drain: EditReader,
     /// The plugin's own parameter edits (its output `PARAM_VALUE` and gesture
     /// events), on their way to the Controller's `take_reported_edits`.
     pub(crate) reports: ReportSink,
@@ -152,16 +151,12 @@ impl ClapProcessor {
         self.scratch.out_translator.reset();
     }
 
-    /// Takes the parameter edits the Controller queued that no block has
-    /// drained, oldest first, into `out`. Main thread, with the Processor held
-    /// (nothing is rendering): for a caller that must not lose them, as a
-    /// rejoin must not.
+    /// Takes the parameter writes the Controller made that no block has
+    /// taken, latest per parameter, into `out`, skipping the stale. Main
+    /// thread, with the Processor held (nothing is rendering): for a caller
+    /// that must not lose them, as a rejoin must not.
     pub fn take_edits(&mut self, out: &mut Vec<(ParamId, Normalized)>) {
-        self.drain.drain(|edit| match edit {
-            Edit::Param { id, value } => out.push((id, value)),
-            Edit::Reset => out.clear(),
-            _ => {}
-        });
+        self.drain.drain(|id, value| out.push((id, value)));
     }
 
     /// Ends processing (`stop_processing`) if it started, under the audio

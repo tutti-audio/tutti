@@ -179,7 +179,7 @@ pub const MAX_SPHERE_RATE: u32 = 384_000;
 /// sized each vertex's spectrum at 2^26 values and aborted on allocation.
 /// 768 kHz is twice the highest rate audio hardware runs at. Above it the
 /// HRIR is applied time-compressed by `rate / 768 kHz`, which shifts its
-/// spectral cues up by that factor; the de-zipper still glides in the
+/// spectral cues up by that factor; the de-zipper still ramps in the
 /// graph's own time.
 pub const MAX_PREPARED_RATE: u32 = 768_000;
 

@@ -342,7 +342,7 @@ impl<U: crate::Scalar> sealed::Sealed for AutomationTarget<U> {
 impl<U: crate::Scalar> Target for AutomationTarget<U> {
     type Value = Arc<Trajectory<U>>;
 }
-impl<U: crate::Scalar> sealed::Land for AutomationTarget<U> {
+impl<U: crate::Scalar> sealed::Store for AutomationTarget<U> {
     type Cell = SlotCell<Arc<Trajectory<U>>>;
 
     fn resolve(self, params: &Params) -> Option<(Self::Cell, Self::Value)> {
@@ -355,7 +355,7 @@ impl<U: crate::Scalar> sealed::Land for AutomationTarget<U> {
         cell.check(value)
     }
 
-    fn land(cell: &Self::Cell, value: &Self::Value) {
+    fn store(cell: &Self::Cell, value: &Self::Value) {
         cell.store(value);
     }
 }

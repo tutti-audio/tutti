@@ -45,7 +45,7 @@ fn wire_constant<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>
     let (node, _) = s.graph().add(ForkByClone(Const::mono(level)));
     for port in 0..2 {
         s.graph()
-            .set_sources_hard(Root::output(port), [OutPort::new(node, 0)])
+            .set_sources_unfaded(Root::output(port), [OutPort::new(node, 0)])
             .unwrap();
     }
     let _ = s.update();
@@ -122,7 +122,7 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
     let limit = Instant::now() + Duration::from_secs(10);
     let mut tap = loop {
         let _ = s.update();
-        if let Some(tap) = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
+        if let Some(tap) = s.open_output_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
             break tap;
         }
         assert!(
@@ -712,7 +712,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
         inside: Default::default(),
     }));
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
     let _ = s.update();
     wait_until("the timer never rendered", || {

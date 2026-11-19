@@ -15,8 +15,9 @@
 //! (integer periods instead of interpolated ones; the global minimum instead of
 //! the first local one below threshold) before being committed.
 
-use tutti_buffers::Mono;
+use tutti_buffers::{Float, Mono};
 use tutti_measure::{FrequencyBand, PitchEstimate, PitchHop, Result, YinConfig};
+use tutti_rt::SplitMix64;
 use tutti_units::{Hz, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -157,18 +158,13 @@ fn detection_is_independent_of_level() {
 /// Noise must not be reported as pitched.
 ///
 /// A confident wrong answer is worse than no answer: anything downstream
-/// (tuning, transcription, correction) would act on it. Deterministic LCG so
+/// (tuning, transcription, correction) would act on it. Seeded `SplitMix64` so
 /// this cannot be flaky.
 #[test]
 fn noise_is_not_confidently_pitched() {
-    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut rng = SplitMix64::new(1);
     let samples: Vec<f32> = (0..(SR * 0.5) as usize)
-        .map(|_| {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (((state >> 33) as f64 / (1u64 << 31) as f64) - 1.0) as f32 * 0.5
-        })
+        .map(|_| (f32::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0) * 0.5)
         .collect();
 
     let cfg = YinConfig::new();

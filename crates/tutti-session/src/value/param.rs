@@ -12,7 +12,7 @@ use tutti_units::{ParamAddr, UnitAddr};
 use super::batch::Describe;
 use super::error::{SetRefusal, ValueErrorKind};
 use super::state::Params;
-use super::target::{Info, Moved, ScalarTarget, Target, TargetId, sealed, target_builders};
+use super::target::{Info, Modulatable, ScalarTarget, Target, TargetId, sealed, target_builders};
 
 /// One native param of a node in the session's graph, with the unit its value
 /// is in: what `key.cutoff()` returns. The typed sibling of
@@ -114,12 +114,12 @@ impl<U: ParamUnit> sealed::Sealed for ParamTarget<U> {
 impl<U: ParamUnit> Target for ParamTarget<U> {
     type Value = U;
 }
-impl<U: ParamUnit> Moved for ParamTarget<U> {}
+impl<U: ParamUnit> Modulatable for ParamTarget<U> {}
 impl<U: crate::Scalar> ScalarTarget for ParamTarget<U> {
     type Unit = U;
 }
 
-impl<U: ParamUnit> sealed::Land for ParamTarget<U> {
+impl<U: ParamUnit> sealed::Store for ParamTarget<U> {
     type Cell = ParamCell;
 
     fn resolve(self, params: &Params) -> Option<(ParamCell, U)> {
@@ -135,7 +135,7 @@ impl<U: ParamUnit> sealed::Land for ParamTarget<U> {
         Ok(())
     }
 
-    fn land(cell: &ParamCell, value: &U) {
+    fn store(cell: &ParamCell, value: &U) {
         cell.store(value.to_cell(), Ordering::Release);
     }
 }

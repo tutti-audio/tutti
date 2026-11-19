@@ -1,5 +1,5 @@
 //! The dynamic EQ band does not allocate per block, held and with its centre and threshold
-//! moved between blocks (a bell design every grid period and the glide of both filters).
+//! moved between blocks (a bell design every grid period and the ramp of both filters).
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;

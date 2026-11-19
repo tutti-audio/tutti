@@ -276,7 +276,7 @@ fn the_held_input_is_quantized_after_the_hold() {
     let mut c = crusher(4.0, 4.0);
     let first = run(&mut c, &[vec![0.3, 0.9]]);
     assert_eq!(first[0], [0.25, 0.25]);
-    c.aim(&BitCrusherControls {
+    c.retarget(&BitCrusherControls {
         bits: BitDepth::MIN,
         hold: HoldFactor::new(4.0),
     });
@@ -297,7 +297,7 @@ fn a_longer_hold_waits_for_the_new_count() {
     let mut out = run(&mut c, &[x[..3].to_vec()]).remove(0);
     // Captures at frames 0 and 2.
     assert_eq!(out, [0.0, 0.0, 2.0 / 16.0]);
-    c.aim(&BitCrusherControls {
+    c.retarget(&BitCrusherControls {
         bits: BitDepth::MAX,
         hold: HoldFactor::new(6.0),
     });
@@ -318,7 +318,7 @@ fn a_longer_hold_waits_for_the_new_count() {
 fn a_shorter_hold_and_a_reset_capture_at_once() {
     let mut c = crusher(32.0, 8.0);
     assert_eq!(run(&mut c, &[vec![0.5, 0.25, 0.125, 0.0625]])[0], [0.5; 4]);
-    c.aim(&BitCrusherControls {
+    c.retarget(&BitCrusherControls {
         bits: BitDepth::MAX,
         hold: HoldFactor::new(2.0),
     });

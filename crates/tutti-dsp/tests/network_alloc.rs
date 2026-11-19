@@ -1,4 +1,4 @@
-//! The reverbs' audio-thread paths allocate nothing: the banks' `aim`, `process` and
+//! The reverbs' audio-thread paths allocate nothing: the banks' `retarget`, `process` and
 //! `tail_of`, and the network design in place.
 //!
 //! The crate carries no `assert_no_alloc` dev-dependency,
@@ -10,16 +10,16 @@ use tutti_units::{Mix, SampleRate, Seconds};
 #[global_allocator]
 static A: ThreadCounting = ThreadCounting;
 
-/// Freeverb's `aim`, `process` and `tail_of` allocate nothing, with a different room every
+/// Freeverb's `retarget`, `process` and `tail_of` allocate nothing, with a different room every
 /// block (hostile controls among them), after the one `FreeverbBank::new` that sizes it.
 #[test]
-fn freeverb_aims_and_renders_without_allocating() {
+fn freeverb_retargets_and_renders_without_allocating() {
     use tutti_buffers::{Planes, PlanesMut};
     use tutti_dsp::{FreeverbBank, FreeverbControls};
 
     for rate in [44_100.0, 48_000.0, 192_000.0] {
         let mut bank = FreeverbBank::<f32>::new(SampleRate::of(rate));
-        let mut glides = bank.glides();
+        let mut ramps = bank.ramps();
         let input = vec![0.25f32; 64];
         let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
         for block in 0..64u32 {
@@ -31,9 +31,9 @@ fn freeverb_aims_and_renders_without_allocating() {
                 ),
             };
             let n = allocations(|| {
-                bank.aim(&mut glides, &c);
+                bank.retarget(&mut ramps, &c);
                 bank.process(
-                    &mut glides,
+                    &mut ramps,
                     Planes::new(&[&input]).unwrap(),
                     PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
                 );
@@ -45,12 +45,12 @@ fn freeverb_aims_and_renders_without_allocating() {
     }
 }
 
-/// The FDN bank's `aim` and `process` allocate nothing, with a different network every block
+/// The FDN bank's `retarget` and `process` allocate nothing, with a different network every block
 /// (a decay, a size, a diffusion, a pre-delay, a width, a wet gain and a freeze all move),
-/// after the one `FdnBank::new` that sizes it. The ramps the glides start are the work of the
+/// after the one `FdnBank::new` that sizes it. The ramps the ramps start are the work of the
 /// following blocks, which allocate nothing either.
 #[test]
-fn the_fdn_aims_and_renders_without_allocating() {
+fn the_fdn_retargets_and_renders_without_allocating() {
     use tutti_buffers::{Planes, PlanesMut};
     use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeMode, MaxDecay};
     use tutti_units::{Db, Depth, Hz, StereoWidth};
@@ -58,7 +58,7 @@ fn the_fdn_aims_and_renders_without_allocating() {
     let rate = SampleRate::SR_48K;
     let layout = FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap();
     let mut bank = FdnBank::<f32>::new(&layout, rate);
-    let mut glides = bank.glides();
+    let mut ramps = bank.ramps();
     let input = vec![0.25f32; 64];
     let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
     for block in 0..200u32 {
@@ -79,13 +79,13 @@ fn the_fdn_aims_and_renders_without_allocating() {
             freeze: block % 11 == 0,
         };
         let n = allocations(|| {
-            bank.aim(&mut glides, &c);
+            bank.retarget(&mut ramps, &c);
             bank.process(
-                &mut glides,
+                &mut ramps,
                 Planes::new(&[&input]).unwrap(),
                 PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
             );
-            std::hint::black_box(bank.tail_of(&glides, &c));
+            std::hint::black_box(bank.tail_of(&ramps, &c));
         });
         assert_eq!(n, 0, "the block allocated");
     }

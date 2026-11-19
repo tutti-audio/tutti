@@ -27,10 +27,10 @@ fn pushed_frames_reach_the_outputs_in_order() {
         .open_inlet(ChannelLayout::STEREO, Samples::new(256), RATE)
         .expect("the producer runs at the graph's rate");
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(key, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(key, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(1), [OutPort::new(key, 1)])
+        .set_sources_unfaded(Root::output(1), [OutPort::new(key, 1)])
         .unwrap();
     let mut tap = s
         .graph()
@@ -129,7 +129,7 @@ fn an_f64_inlet_carries_a_figure_f32_rounds_away() {
         .open_inlet(ChannelLayout::MONO, Samples::new(256), RATE)
         .expect("the producer runs at the graph's rate");
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(key, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(key, 0)])
         .unwrap();
     let _ = s.update();
 

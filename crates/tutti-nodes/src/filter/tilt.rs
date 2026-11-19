@@ -52,7 +52,7 @@ impl TiltFilterConfig {
 ///
 /// The pivot and the gain are live cells (`UnitParam::Cutoff` and `GainDb`), designed in
 /// closed form on a 16-frame grid and reached along a line in the section's coefficients
-/// over the next 16 frames with the state kept, so an automated control glides.
+/// over the next 16 frames with the state kept, so an automated control ramps.
 ///
 /// The tail is the tail-sum bound over every pivot and gain ([`Tilt::ring_out_over`]), the
 /// ceiling; each block narrows it to the bound of the controls in force ([`Tilt::ring_out`]). No latency. A [`KernelNode`]. Made from a
@@ -127,7 +127,7 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
-    use crate::test_support::{RATE, assert_cell_glides, prepared};
+    use crate::test_support::{RATE, assert_cell_ramps, prepared};
     use tutti_buffers::MaxBlock;
     use tutti_graph::Cost;
     use tutti_graph::contract::assert_param_fork;
@@ -206,10 +206,10 @@ mod tests {
     /// The pivot and the gain moved mid-sine stay finite and bounded, render the same
     /// however the host cuts its blocks, and settle on the design.
     #[test]
-    fn a_glide_of_the_controls_stays_finite_and_settles_on_the_design() {
+    fn a_ramp_of_the_controls_stays_finite_and_settles_on_the_design() {
         let make = || TiltFilterNode::from(config(Hz::new(200.0), Db::UNITY));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
-        let mut node = assert_cell_glides(
+        let mut node = assert_cell_ramps(
             make,
             |n: &TiltFilterNode<f32>| {
                 assert!(n.param_set().set(UnitParam::Cutoff, 4_000.0));

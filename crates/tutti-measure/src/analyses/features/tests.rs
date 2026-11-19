@@ -1,7 +1,8 @@
 use super::*;
+use crate::test_rng::uniform;
 use crate::{SampleRange, StftConfig, stft_magnitude};
-use rand::{RngExt, SeedableRng, rngs::StdRng};
 use tutti_buffers::Mono;
+use tutti_rt::SplitMix64;
 use tutti_units::SampleRate;
 use tutti_units::Samples;
 
@@ -55,8 +56,8 @@ fn a_sine_centroid_is_its_frequency_within_a_bin() {
 /// White noise is flat and a sine is not.
 #[test]
 fn noise_is_flat_a_sine_is_not() {
-    let mut rng = StdRng::seed_from_u64(42);
-    let noise: Vec<f64> = (0..65_536).map(|_| rng.random_range(-1.0..1.0)).collect();
+    let mut rng = SplitMix64::new(42);
+    let noise: Vec<f64> = (0..65_536).map(|_| uniform(&mut rng, -1.0, 1.0)).collect();
     let flat = spectral_features(0.85, &magnitudes_of(&noise));
     let mean: f64 = flat.iter().map(|f| f.flatness).sum::<f64>() / flat.len() as f64;
     // The geometric mean of an exponential power distribution sits at
