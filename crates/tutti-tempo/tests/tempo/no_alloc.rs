@@ -33,7 +33,7 @@ fn queries_do_not_allocate() {
             acc += map.beat_at_seconds(secs).get() + view.beat_at_seconds(secs).get();
             acc += map.tempo_at(beat).get() + view.tempo_at(beat).get();
             acc += map.tempo_at_seconds(secs).get() + view.tempo_at_seconds(secs).get();
-            acc += view.tempo_slope(secs, Seconds::new(secs.get() + 0.1));
+            acc += view.tempo_slope(secs, secs + Seconds::new(0.1));
             acc += view.tempo_at_frame(frame).get();
             acc += view.beat_at_frame(frame).get();
             acc += view.frame_at_or_after(beat).get() as f64;

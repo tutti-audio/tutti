@@ -161,7 +161,7 @@ impl TempoMap {
     /// A [`TempoError`] when the result cannot be held (a tempo so small that a
     /// segment's duration overflows).
     pub fn stepped_to(&self, beat: Beat, tempo: Bpm) -> Result<Option<Self>, TempoError> {
-        let beat = Beat::new(beat.get().max(0.0));
+        let beat = beat.max(Beat::new(0.0));
         let points = self.points();
         if points
             .last()
