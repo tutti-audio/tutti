@@ -17,7 +17,7 @@ use tutti_nodes::testing::Const;
 use tutti_plugin_host::{PluginHandle, RefreshSink};
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Health, ParamFlags, ParamUnit, ParameterInfo,
-    PluginFailure, PluginRefresh, RenderMode, UnknownParam,
+    PluginFailure, PluginRefresh, RenderMode,
 };
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
@@ -633,6 +633,18 @@ fn a_gesture_on_a_parameter_the_rescan_dropped_is_refused() {
     );
 }
 
+/// Whether `result` failed as `NoSuchTarget`, naming the target.
+fn no_such_target(result: Result<(), ValueError<&'static str>>) -> bool {
+    matches!(
+        result,
+        Err(ValueError {
+            target: Some(_),
+            kind: ValueErrorKind::NoSuchTarget,
+            ..
+        })
+    )
+}
+
 /// The refusal a value call carries, or a panic naming what it did instead.
 fn refusal(result: Result<(), ValueError<&'static str>>) -> PluginParamRefusal {
     match result {
@@ -663,29 +675,28 @@ fn a_set_reads_back_from_the_mirror_before_the_plugin_has_it() {
     assert_eq!(fake.sets(), [(CUTOFF, 0.8)]);
 }
 
-/// **A write to an id the plugin does not declare is refused at the call**,
-/// naming the id, and reaches nothing.
+/// **An id the plugin does not declare is no target, for `set` or `get`**: both
+/// fail at the call with `NoSuchTarget` naming the target, and nothing reaches
+/// the plugin.
 #[test]
-fn an_undeclared_id_is_refused_with_its_name() {
+fn an_undeclared_id_is_no_target_for_set_or_get() {
     let (mut s, key, fake, _) = session_keyed();
     let _ = update(&mut s);
-    let unknown = ParamId::new(99);
-    assert_eq!(
-        refusal(s.set(key.param(unknown).to(Normalized::of(0.5)))),
-        PluginParamRefusal::UnknownParam(UnknownParam(unknown))
-    );
+    let unknown = key.param(ParamId::new(99));
+    assert!(no_such_target(s.set(unknown.to(Normalized::of(0.5)))));
+    assert!(no_such_target(s.get(unknown).map(drop)));
     assert!(fake.sets().is_empty());
 }
 
-/// **A write before the parameters are read is `NotRead`**, and after the
-/// read it goes through.
+/// **A parameter is no target before the declaration is read**, for `set` or
+/// `get`; once the read lands it is one.
 #[test]
-fn a_write_before_the_parameters_are_read_is_not_read() {
+fn a_parameter_is_no_target_before_the_declaration_is_read() {
     let (mut s, key, fake, _) = session_keyed();
-    assert_eq!(
-        refusal(s.set(key.param(CUTOFF).to(Normalized::of(0.5)))),
-        PluginParamRefusal::NotRead
-    );
+    assert!(no_such_target(
+        s.set(key.param(CUTOFF).to(Normalized::of(0.5)))
+    ));
+    assert!(no_such_target(s.get(key.param(CUTOFF)).map(drop)));
     assert!(fake.sets().is_empty());
     let _ = update(&mut s);
     s.set(key.param(CUTOFF).to(Normalized::of(0.5))).unwrap();

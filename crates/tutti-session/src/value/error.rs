@@ -85,13 +85,6 @@ pub enum SetRefusal {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum PluginParamRefusal {
-    /// The plugin's parameters have not been read yet: the session reads them
-    /// after the plugin loads and lands the read in a later update.
-    #[error("the plugin's parameters have not been read yet")]
-    NotRead,
-    /// The plugin declares no parameter with this id.
-    #[error(transparent)]
-    UnknownParam(#[from] tutti_plugin_types::UnknownParam),
     /// The parameter is declared read-only.
     #[error("parameter {0} is read-only")]
     ReadOnly(tutti_units::ParamId),

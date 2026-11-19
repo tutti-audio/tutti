@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use tutti_graph::NodeKey;
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginParamValues};
-use tutti_plugin_types::{AutomationMode, ParamAccess, UnknownParam};
+use tutti_plugin_types::{AutomationMode, ParamAccess};
 use tutti_rt::LockExt;
 use tutti_units::{Normalized, ParamId};
 
@@ -20,10 +20,11 @@ use crate::plugin_params::Driven;
 /// One parameter of the plugin hosted at a node, written and read as a position
 /// on `0..=1`: what `key.param(id)` returns.
 ///
-/// A plain reference that checks nothing when it is made. `session.set` refuses
-/// it where it is written, with [`SetRefusal::Plugin`]: before the plugin's
-/// parameters are read, for an id the plugin does not declare, and for a
-/// read-only parameter. A write lands in the session's mirror under the value
+/// A plain reference that checks nothing when it is made. A plugin's parameter
+/// is a target once the plugin's declaration is read: before that, and for an id
+/// the plugin does not declare, `set` and `get` fail with
+/// [`ValueErrorKind::NoSuchTarget`](crate::ValueErrorKind::NoSuchTarget). A
+/// read-only parameter refuses a write with [`SetRefusal::Plugin`]. A write lands in the session's mirror under the value
 /// lock, so a read answers it at once, and is then sent to the plugin. A write
 /// the plugin's transport cannot take (a served plugin's full command queue, an
 /// in-process plugin busy in an editor call) is counted in
@@ -91,7 +92,7 @@ impl sealed::Store for PluginParamTarget {
 
     fn resolve(self, params: &Params) -> Option<(PluginCell, Normalized)> {
         let entry = params.plugin(self.node)?;
-        let base = entry.load(self.id);
+        let base = entry.load(self.id)?;
         Some((PluginCell { entry, id: self.id }, base))
     }
 
@@ -149,27 +150,24 @@ impl PluginEntry {
         }
     }
 
-    fn param(&self, id: ParamId) -> Result<&Declared, PluginParamRefusal> {
-        self.declared
-            .as_ref()
-            .ok_or(PluginParamRefusal::NotRead)?
-            .get(&id)
-            .ok_or(PluginParamRefusal::UnknownParam(UnknownParam(id)))
+    /// The parameter `id`, when the plugin's read has landed and declares it.
+    fn param(&self, id: ParamId) -> Option<&Declared> {
+        self.declared.as_ref()?.get(&id)
     }
 
-    /// The position the mirror holds, or the start of the range for a
-    /// parameter that is not declared.
-    fn load(&self, id: ParamId) -> Normalized {
-        self.param(id).map_or(Normalized::of(0.0), |declared| {
+    /// The position the mirror holds of `id`, or `None` for a parameter that
+    /// is not declared (or not read yet).
+    fn load(&self, id: ParamId) -> Option<Normalized> {
+        self.param(id).map(|declared| {
             Normalized::clamped(f64::from_bits(declared.value.load(Ordering::Relaxed)))
         })
     }
 
     /// Whether the host may write `id`.
     fn writable(&self, id: ParamId) -> Result<(), PluginParamRefusal> {
-        match self.param(id)?.access {
-            ParamAccess::ReadOnly => Err(PluginParamRefusal::ReadOnly(id)),
-            ParamAccess::Writable | ParamAccess::Unreported => Ok(()),
+        match self.param(id).map(|declared| declared.access) {
+            Some(ParamAccess::ReadOnly) => Err(PluginParamRefusal::ReadOnly(id)),
+            _ => Ok(()),
         }
     }
 
@@ -186,7 +184,7 @@ impl PluginEntry {
 
     /// Records the position the mirror holds of `id`.
     pub(crate) fn note(&self, id: ParamId, value: Normalized) {
-        if let Ok(declared) = self.param(id) {
+        if let Some(declared) = self.param(id) {
             declared
                 .value
                 .store(value.get().to_bits(), Ordering::Relaxed);
