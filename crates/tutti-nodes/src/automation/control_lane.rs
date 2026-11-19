@@ -13,7 +13,8 @@ use tutti_graph::{
     Prepare, Shape, Status, TransportPosition,
 };
 use tutti_modulation::{
-    CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
+    CONTROL_GRID, Clock, ControlProgram, CurveSegment, DepthSnapshot, MAX_LANE_INPUTS, ProgramTime,
+    Waveform,
 };
 use tutti_rt::ParamCell;
 use tutti_rt::{Publisher, Reader};
@@ -283,8 +284,8 @@ struct Seen {
     seq: Option<u64>,
     knob: Option<u64>,
     range: (u64, u64),
-    /// The program's depth cells, bit for bit (`ControlProgram::depth_bits`).
-    depths: u64,
+    /// The program's depths at the last block's start.
+    depths: DepthSnapshot,
     /// The frame after the last block, the transport and play clock at its
     /// last frame: how a seek between blocks is told from a roll.
     end: Option<(Frame, TransportPosition, PlayReading)>,
@@ -373,7 +374,7 @@ fn fresh_seen() -> Seen {
         seq: None,
         knob: None,
         range: (0, 0),
-        depths: 0,
+        depths: DepthSnapshot::EMPTY,
         end: None,
     }
 }
@@ -580,6 +581,8 @@ struct Block<'b> {
     /// Thinning failed already: drop past the capacity instead.
     truncate: bool,
     seconds: bool,
+    /// The program's depths, loaded once for the block.
+    depths: DepthSnapshot,
 }
 
 impl Block<'_> {
@@ -609,13 +612,13 @@ impl Block<'_> {
     /// The program's value at `time`, for the lane's param.
     fn value_at(&self, time: &ProgramTime, ins: &[Option<f64>]) -> Option<f64> {
         self.program
-            .value_at(self.unit, self.knob, time, self.span, ins)
+            .value_at_in(self.unit, self.knob, time, self.span, ins, &self.depths)
     }
 
     /// The program's left limit at `time`, for the lane's param.
     fn value_before(&self, time: &ProgramTime, ins: &[Option<f64>]) -> Option<f64> {
         self.program
-            .value_before(self.unit, self.knob, time, self.span, ins)
+            .value_before_in(self.unit, self.knob, time, self.span, ins, &self.depths)
     }
 
     /// The earliest arrival of an input still moving at `at`, in frames.
@@ -1045,7 +1048,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             s.unranged.fetch_add(1, Ordering::Relaxed);
         }
         let range_bits = (range.0.to_bits(), range.1.to_bits());
-        let depths = program.depth_bits();
+        let depths = program.depth_snapshot();
         if seq != self.seen.seq {
             // A new program: forget every input it does not read, so a
             // source id a later program reuses starts from nothing, never from the
@@ -1091,6 +1094,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             stride: u64::from(CONTROL_GRID.stride()),
             truncate: false,
             seconds: has_seconds(program),
+            depths,
         };
         let mut thinned = false;
         loop {

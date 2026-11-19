@@ -131,7 +131,8 @@ fn a_layer_offsets_by_depth_times_span() {
 fn a_layer_reads_its_depth_from_a_cell() {
     let cell = Param::new(Depth::of(0.25));
     let p = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.5))])
-        .depths([(LayerId(1), cell.handle()), (LayerId(9), cell.handle())]);
+        .depths([(LayerId(1), cell.handle()), (LayerId(9), cell.handle())])
+        .unwrap();
     let value = |p: &ControlProgram, beat: f64| {
         p.value_at(None, Some(1000.0), &at_beat(beat), 800.0, &[])
             .unwrap()
@@ -149,9 +150,79 @@ fn a_layer_reads_its_depth_from_a_cell() {
     let plain = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.5))]);
     assert_eq!(value(&plain, 1.0), 1400.0);
     assert_eq!(
-        plain.clone().depths([(LayerId(9), cell)]),
+        plain.clone().depths([(LayerId(9), cell)]).unwrap(),
         plain,
         "an id no layer has is ignored"
+    );
+}
+
+/// **A block evaluates at one depth, whatever is stored while it runs.** A
+/// snapshot is each cell loaded once; evaluating at two times from it gives
+/// both at the depth the snapshot holds, and a store after it reaches only the
+/// next snapshot. A square at depth 0.25 on a span of 800 is `1000 +- 200`;
+/// stored to 0.5 between the two evaluations, the first would be 1200 and the
+/// second 600 if each loaded the cell again.
+#[test]
+fn an_evaluation_from_a_snapshot_never_splits_its_depth() {
+    let cell = Param::new(Depth::of(0.25));
+    let p = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.0))])
+        .depths([(LayerId(1), cell.handle())])
+        .unwrap();
+    let snapshot = p.depth_snapshot();
+    let at = |beat| {
+        p.value_at_in(None, Some(1000.0), &at_beat(beat), 800.0, &[], &snapshot)
+            .unwrap()
+    };
+    assert_eq!(at(1.0), 1200.0);
+    cell.store(Depth::of(0.5));
+    assert_eq!(at(3.0), 800.0, "the same depth after the store");
+    assert_eq!(at(1.0), 1200.0);
+    let next = p.depth_snapshot();
+    assert_ne!(snapshot, next, "the next snapshot has it");
+    assert_eq!(
+        p.value_at_in(None, Some(1000.0), &at_beat(1.0), 800.0, &[], &next),
+        Some(1400.0)
+    );
+}
+
+/// **Snapshots differ when any depth does, bit for bit**, however the bits
+/// combine: two cells that each flip one mantissa bit, chosen so that a fold
+/// of their bits would cancel, still differ.
+#[test]
+fn snapshots_compare_every_depth() {
+    let (a, b) = (Param::new(Depth::of(0.125)), Param::new(Depth::of(0.125)));
+    let p = program(vec![
+        layer(1, beats(4.0), LfoShape::Square, amount(0.0)),
+        layer(2, beats(4.0), LfoShape::Square, amount(0.0)),
+    ])
+    .depths([(LayerId(1), a.handle()), (LayerId(2), b.handle())])
+    .unwrap();
+    let before = p.depth_snapshot();
+    assert_eq!(before, p.depth_snapshot());
+    a.store(Depth::of(0.125 + 2.0f64.powi(-11)));
+    b.store(Depth::of(0.1875));
+    assert_ne!(before, p.depth_snapshot());
+    assert_eq!(DepthSnapshot::EMPTY, program(vec![]).depth_snapshot());
+}
+
+/// **A program holds at most `MAX_LANE_DEPTHS` depth cells, one per id**: more
+/// are refused with the count, and two for one id with that id; nothing is
+/// built.
+#[test]
+fn depth_cells_are_bounded_and_one_per_layer() {
+    let p = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.5))]);
+    let cell = Param::new(Depth::of(0.1));
+    let many = (0..=MAX_LANE_DEPTHS).map(|_| (LayerId(1), cell.handle()));
+    assert_eq!(
+        p.clone().depths(many).unwrap_err(),
+        ProgramError::TooManyDepths {
+            count: MAX_LANE_DEPTHS + 1
+        }
+    );
+    let twice = [(LayerId(1), cell.handle()), (LayerId(1), cell.handle())];
+    assert_eq!(
+        p.depths(twice).unwrap_err(),
+        ProgramError::DuplicateLayer(LayerId(1))
     );
 }
 
