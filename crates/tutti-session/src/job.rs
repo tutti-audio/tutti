@@ -198,7 +198,7 @@ impl<J: JobKind> Job<J> {
         }
     }
 
-    /// Calls `session.update()` until this job lands, and returns its result.
+    /// Calls `session.update()` until this job finishes, and returns its result.
     /// The events of those updates stay queued for the app's next `update()`,
     /// in order: a wait delays them, it loses none.
     ///
