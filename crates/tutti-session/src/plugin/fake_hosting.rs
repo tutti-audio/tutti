@@ -36,6 +36,7 @@ pub(super) fn host<K: crate::AppKey, C: Clock<Float = f32>>(
         .plugins
         .insert(node, HostedPlugin::new(handle, plugin, (*controls).clone()));
     assert!(previous.is_none(), "{node:?} hosts one plugin");
+    session.graph.provide_plugin(node);
     session.graph.write_own_bypass(node);
     Key::new(node)
 }
@@ -56,6 +57,7 @@ pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
         .plugins
         .insert(node, HostedPlugin::served(handle, plugin, controls));
     assert!(previous.is_none(), "{node:?} hosts one plugin");
+    session.graph.provide_plugin(node);
     session.graph.write_own_bypass(node);
     Key::new(node)
 }

@@ -41,6 +41,9 @@ pub struct Params {
     pub(super) slots: BTreeMap<SlotId, slot::Erased>,
     /// Each node's mode and mix, which its two targets share.
     controls: BTreeMap<NodeKey, Arc<NodeControl>>,
+    /// Each hosted plugin, by its node.
+    #[cfg(feature = "plugin")]
+    plugins: BTreeMap<NodeKey, Arc<super::PluginEntry>>,
 }
 
 impl Params {
@@ -48,6 +51,12 @@ impl Params {
     pub fn cell(&self, node: NodeKey, addr: UnitAddr, owner: TypeId) -> Option<ParamCell> {
         let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
         node.set.cell(addr)
+    }
+
+    /// The plugin hosted at `node`.
+    #[cfg(feature = "plugin")]
+    pub(super) fn plugin(&self, node: NodeKey) -> Option<Arc<super::PluginEntry>> {
+        self.plugins.get(&node).cloned()
     }
 
     /// `addr`'s value on `node` when the node was last addressed, when the
@@ -314,18 +323,65 @@ impl ValueTable {
         self.queue.take()
     }
 
+    /// Registers the plugin hosted at `node`, replacing the entry it had: its
+    /// parameter targets, and its automation mode where the plugin takes one
+    /// (`mode`). Control thread.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn provide_plugin(
+        &self,
+        node: NodeKey,
+        entry: super::PluginEntry,
+        mode: Option<SlotCell<tutti_plugin_types::AutomationMode>>,
+    ) {
+        let mut params = self.params.lock_recover();
+        let slot = SlotId::automation_mode(node);
+        let old = (
+            params.plugins.insert(node, Arc::new(entry)),
+            match mode {
+                Some(mode) => params.slots.insert(slot, slot::erase(mode)),
+                None => params.slots.remove(&slot),
+            },
+        );
+        drop(params);
+        drop(old);
+    }
+
+    /// Records the values the plugin at `node` reported or the host set, in
+    /// order, as the host mirror holds them. Control thread.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn note_plugin_values(
+        &self,
+        node: NodeKey,
+        values: &[(tutti_units::ParamId, tutti_units::Normalized)],
+    ) {
+        if values.is_empty() {
+            return;
+        }
+        if let Some(held) = self.enter()
+            && let Some(entry) = held.params().plugin(node)
+        {
+            for &(id, value) in values {
+                entry.note(id, value);
+            }
+        }
+    }
+
     /// Forgets `node`'s params and slots: its targets are gone.
     pub(crate) fn retire(&self, node: NodeKey) {
-        let (gone, slots) = {
+        let (gone, slots, plugin) = {
             let mut params = self.params.lock_recover();
+            #[cfg(feature = "plugin")]
+            let plugin = params.plugins.remove(&node);
+            #[cfg(not(feature = "plugin"))]
+            let plugin = ();
             let gone = params.nodes.remove(&node);
             let slots: Vec<_> = params
                 .slots
                 .extract_if(.., |id, _| id.node() == Some(node))
                 .collect();
-            (gone, slots)
+            (gone, slots, plugin)
         };
-        drop((gone, slots));
+        drop((gone, slots, plugin));
     }
 
     /// `addr`'s cell on `node`, whatever its type, for the graph's own use.

@@ -34,12 +34,11 @@
 //! ```compile_fail
 //! # use tutti_session::Session;
 //! # use tutti_graph::NodeKey;
-//! # use tutti_units::Normalized;
 //! # use tutti_units::ParamId;
 //! # fn rescan(session: &mut Session, node: NodeKey) {
 //! let level = session.plugin_view(node).unwrap().params().get(ParamId::new(0)).unwrap();
 //! let _events = session.update();
-//! let _ = level.set(Normalized::of(0.5));
+//! let _ = level.normalized();
 //! # }
 //! ```
 //!
@@ -72,9 +71,7 @@ use std::marker::PhantomData;
 use tutti_graph::NodeKey;
 
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginSignal};
-use tutti_plugin_types::{
-    AutomationMode, AutomationModeError, ParamEdit, ParamUnit, ParameterInfo, PlainUnit,
-};
+use tutti_plugin_types::{ParamEdit, ParamUnit, ParameterInfo, PlainUnit};
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -297,20 +294,6 @@ impl<'a> Params<'a> {
         })
     }
 
-    /// Announces the host's [`AutomationMode`] to the plugin so its editor can
-    /// show it (a knob ring that glows while the host records). An advisory:
-    /// `Ok` means it was handed over, not that the plugin reacted.
-    ///
-    /// # Errors
-    ///
-    /// [`AutomationModeError::Unsupported`] where the hosting carries no such
-    /// channel (every in-process format), [`Dropped`](AutomationModeError::Dropped)
-    /// when the push found the command queue full (the next change lands), and
-    /// [`PluginDead`](AutomationModeError::PluginDead).
-    pub fn set_automation_mode(&self, mode: AutomationMode) -> Result<(), AutomationModeError> {
-        self.hosted.handle.set_automation_mode(mode)
-    }
-
     /// The plugin's node.
     #[must_use]
     pub fn node(&self) -> NodeKey {
@@ -358,11 +341,10 @@ impl<'a> Param<'a> {
         self.params.hosted.mirror.value_at(self.position)
     }
 
-    /// The reference that targets this parameter in a modulation route: the
-    /// one a native node's param method gives, so a route targets a plugin's
-    /// parameter and a native one through one type.
+    /// The target of this parameter: what `session.set` writes and a
+    /// modulation route targets, the one `key.param(id)` gives.
     #[must_use]
-    pub fn target(&self) -> crate::ParamRef {
+    pub fn target(&self) -> crate::PluginParamTarget {
         crate::Key::<crate::AnyPlugin>::new(self.params.node).param(self.id())
     }
 
@@ -392,18 +374,6 @@ impl<'a> Param<'a> {
             hosted.handle.send_parameter(self.id(), value);
         }
         hosted.mirror.report(self.id(), value);
-    }
-
-    /// Sets the parameter. Not a gesture: use [`edit`](Self::edit) for a value
-    /// that moves under a hand.
-    ///
-    /// # Errors
-    ///
-    /// [`PluginParamError::ReadOnly`] for a parameter declared read-only.
-    pub fn set(&self, value: Normalized) -> Result<(), PluginParamError> {
-        self.writable()?;
-        self.send(value);
-        Ok(())
     }
 
     /// The plugin's own text for the value now ("-6.0 dB"); `None` when the

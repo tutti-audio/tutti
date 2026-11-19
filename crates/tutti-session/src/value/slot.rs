@@ -83,6 +83,9 @@ pub enum SlotId {
     Gain(Edge),
     /// The range declared on a modulation target.
     Range(ModTarget),
+    /// The automation mode the host tells a plugin.
+    #[cfg(feature = "plugin")]
+    PluginAutomationMode(NodeKey),
     /// The depth of the route from a source into a target.
     RouteDepth((ModSourceId, ModTarget)),
 }
@@ -98,6 +101,8 @@ impl SlotId {
             | Self::Looping(node)
             | Self::Direction(node)
             | Self::Speed(node) => Some(node),
+            #[cfg(feature = "plugin")]
+            Self::PluginAutomationMode(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
