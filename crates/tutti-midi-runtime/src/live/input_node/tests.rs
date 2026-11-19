@@ -9,7 +9,7 @@ fn the_node_adopts_the_mode_last_published() {
     let lower = tutti_fixtures::midi::lower_zone(15);
     let upper = tutti_fixtures::midi::upper_zone(7);
     let cell = Publisher::new(MpeMode::Disabled);
-    let mut node = MidiInputNode::new().with_mpe(&cell);
+    let mut node = MidiInputNode::new().mpe(&cell);
     assert_eq!(node.device.mode, MpeMode::Disabled);
     cell.publish(lower);
     cell.publish(upper);

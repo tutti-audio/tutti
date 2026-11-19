@@ -23,13 +23,13 @@
 //!   writes are skipped and return `SinkFailed`) and `finalize` returns that
 //!   error, else the result of `finish`. It writes in place rather than staged,
 //!   because a recording cut short is worth keeping.
-//! - `write_wave(&wave, path, format)` saves a `Wave` at its own rate and topology.
+//! - `write_wave(&wave, dest, format)` saves a `Wave` at its own rate and topology, to
+//!   a path (staged) or into a borrowed writer.
 //! - Decoding is plain functions and types of our own, no trait: `read_wave`
-//!   decodes a file into a `Wave` (a resident, planar sample buffer),
+//!   decodes a path or bytes (any `impl Into<tutti_platform::Asset>`) into a `Wave` (a resident, planar sample buffer),
 //!   `Wave::topology` and `FileIn::topology` say which speaker each channel feeds,
 //!   `read_wave_metadata` reads a header (and the sample format the file holds
-//!   its samples in), `read_wave_bytes` decodes a file held in memory, and
-//!   `FileIn` streams a file as a `Source` with a sample-accurate `seek`. Both
+//!   its samples in), and `FileIn` streams a file as a `Source` with a sample-accurate `seek`. Both
 //!   are generic over the sample format `S` they hand back: the file's own
 //!   (`WaveMetadata::format`) is exact, so an app matches on it once at open. A failure is a `DecodeError`. `symphonia` does the
 //!   work behind them, in `src/decode/` alone, and none of its types is in a
@@ -87,9 +87,7 @@ mod writer;
 #[cfg(feature = "encode-aiff")]
 pub use aiff::AiffWriter;
 #[cfg(decode)]
-pub use decode::{
-    FileIn, WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata, read_wave_metadata_from,
-};
+pub use decode::{FileIn, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
 pub use encoder::{Encoder, Finalized};
@@ -105,5 +103,5 @@ pub use vorbis::VorbisWriter;
 #[cfg(feature = "encode-wav")]
 pub use wav::WavWriter;
 #[cfg(encode)]
-pub use wave_write::{write_wave, write_wave_to};
+pub use wave_write::write_wave;
 pub use writer::FormatWriter;
