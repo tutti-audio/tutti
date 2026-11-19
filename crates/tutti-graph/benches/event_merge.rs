@@ -62,7 +62,7 @@ impl Node for Source {
             }
             if matches!(self.mix, Mix::Params | Mix::Mixed) {
                 let seg =
-                    ParamSegment::foreign(ParamId::new(1), 0.0, 1.0, Samples(32), Law::Linear);
+                    ParamSegment::foreign(ParamId::new(1), 0.0, 1.0, Samples::new(32), Law::Linear);
                 let _ = out.push_param(ParamEvent::segment(at, seg));
             }
         }
@@ -88,7 +88,7 @@ impl Node for Sink {
 fn rig(k: u64, n: u32, mix: Mix) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     ed.insert(NodeKey(100), "sink", Unforkable(Sink));
     for i in 0..k {

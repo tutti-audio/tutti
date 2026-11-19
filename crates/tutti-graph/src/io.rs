@@ -678,7 +678,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// }
     /// ```
     pub fn sub_blocks(&self, p: usize) -> SubBlocks<'a> {
-        self.events_in[p].sub_blocks(Samples(self.frames))
+        self.events_in[p].sub_blocks(Samples::new(self.frames))
     }
 
     /// What declared param `k` ([`Shape::params`](crate::Shape::params))
@@ -693,7 +693,7 @@ impl<'a, F: Float> Io<'a, F> {
 
     /// Frame `index` of this block as an [`Offset`], when it is inside it.
     pub fn offset(&self, index: usize) -> Option<Offset> {
-        Offset::new(Samples(index), Samples(self.frames))
+        Offset::new(Samples::new(index), Samples::new(self.frames))
     }
 }
 
@@ -946,7 +946,7 @@ mod tests {
         {
             let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
             let io = Io::new(
-                MaxBlock::of(Samples(FRAMES)),
+                MaxBlock::of(Samples::new(FRAMES)),
                 FRAMES,
                 &in_refs,
                 &mut out_refs,

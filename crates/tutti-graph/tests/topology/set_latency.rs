@@ -51,7 +51,7 @@ impl Plugin {
 impl Node for Plugin {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples(self.probed)))
+            .with_latency(Latency::new(Samples::new(self.probed)))
     }
     fn prepare(&mut self, _: &Prepare) {
         self.probed = self.reported.load(Ordering::Relaxed);
@@ -150,7 +150,7 @@ fn block(exec: &mut Executor, reference: &mut Reference, input: &[f32]) -> [Vec<
 
 /// A one at `at`, zeros elsewhere.
 fn impulse(n: usize, at: usize) -> Vec<f32> {
-    tutti_fixtures::signal::impulse_at(Samples(n), Samples(at))
+    tutti_fixtures::signal::impulse_at(Samples::new(n), Samples::new(at))
 }
 
 fn peak_at(v: &[f32]) -> Option<usize> {
@@ -195,11 +195,11 @@ fn a_latency_change_moves_the_other_paths_compensation() {
 
     // The plugin's latency atomic moves; the host tells the editor.
     reported.store(TRUE_LATENCY, Ordering::Relaxed);
-    ed.set_latency(PLUGIN, Latency::new(Samples(TRUE_LATENCY)))
+    ed.set_latency(PLUGIN, Latency::new(Samples::new(TRUE_LATENCY)))
         .expect("the node exists");
     assert_eq!(
         ed.spec().topology.nodes[&PLUGIN].latency,
-        Samples(TRUE_LATENCY)
+        Samples::new(TRUE_LATENCY)
     );
     ed.commit().expect("recompiles");
     reference.set_graph(&ed.spec().validate().expect("valid"), BTreeMap::new());
@@ -233,7 +233,9 @@ fn a_latency_change_moves_the_other_paths_compensation() {
     );
     let plan = exec.plan().expect("applied");
     assert!(
-        plan.delays().iter().any(|d| d.len == Samples(TRUE_LATENCY)),
+        plan.delays()
+            .iter()
+            .any(|d| d.len == Samples::new(TRUE_LATENCY)),
         "a PDC delay of the new latency"
     );
 }
@@ -244,19 +246,21 @@ fn a_latency_change_moves_the_other_paths_compensation() {
 #[test]
 fn set_latency_refuses_what_it_cannot_honour() {
     for (rate, frames) in [(SampleRate::SR_48K, 480_000), (SampleRate::SR_96K, 960_000)] {
-        let (mut ed, _exec) =
-            graph_at(Plugin::new(), Prepare::new(rate, MaxBlock::of(Samples(64))));
+        let (mut ed, _exec) = graph_at(
+            Plugin::new(),
+            Prepare::new(rate, MaxBlock::of(Samples::new(64))),
+        );
         ed.commit().expect("commits");
-        assert_eq!(MAX_NODE_LATENCY.to_samples_ceil(rate), Samples(frames));
+        assert_eq!(MAX_NODE_LATENCY.to_samples_ceil(rate), Samples::new(frames));
         assert_eq!(
-            ed.set_latency(NodeKey(99), Latency::new(Samples(4))),
+            ed.set_latency(NodeKey(99), Latency::new(Samples::new(4))),
             Err(CommitError::NoSuchNode { node: NodeKey(99) })
         );
         // At the limit is fine; one past it is refused, not clamped, and
         // nothing is written.
-        let limit = Latency::new(Samples(frames));
+        let limit = Latency::new(Samples::new(frames));
         ed.set_latency(PLUGIN, limit).expect("at the limit");
-        let past = Latency::new(Samples(frames + 1));
+        let past = Latency::new(Samples::new(frames + 1));
         assert_eq!(
             ed.set_latency(PLUGIN, past),
             Err(CommitError::LatencyTooLong {
@@ -268,7 +272,7 @@ fn set_latency_refuses_what_it_cannot_honour() {
         );
         assert_eq!(
             ed.spec().topology.nodes[&PLUGIN].latency,
-            Samples(frames),
+            Samples::new(frames),
             "{rate:?}"
         );
     }
@@ -276,7 +280,7 @@ fn set_latency_refuses_what_it_cannot_honour() {
     ed.commit().expect("commits");
     ed.reprepare(prepare(128)).expect("re-prepares");
     assert_eq!(
-        ed.set_latency(PLUGIN, Latency::new(Samples(4))),
+        ed.set_latency(PLUGIN, Latency::new(Samples::new(4))),
         Err(CommitError::Repreparing)
     );
 }

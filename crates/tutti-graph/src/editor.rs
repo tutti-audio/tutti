@@ -200,7 +200,7 @@ impl Limits {
 ///     fn reset(&mut self) {}
 /// }
 ///
-/// let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+/// let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// let half = NodeKey(1);
 /// editor.insert(half, "half", ForkByClone(Half));
 /// let topology = &mut editor.spec_mut().topology;
@@ -212,7 +212,7 @@ impl Limits {
 /// // On the audio thread:
 /// let input = [1.0_f32; 64];
 /// let mut output = [0.0_f32; 64];
-/// let transport = TransportPosition::new(false, Bpm::of(120.0), Beat(0.0), None);
+/// let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
 /// executor.process(64, &transport, &[&input], &mut [&mut output]);
 /// assert_eq!(output[0], 0.5);
 /// ```

@@ -75,9 +75,9 @@ impl From<LevelSpan> for Level {
             (span.sum_sq / span.frames as f64).sqrt()
         };
         Self {
-            peak: Amplitude(span.peak),
-            rms: Amplitude(rms),
-            frames: Samples(usize::try_from(span.frames).unwrap_or(usize::MAX)),
+            peak: Amplitude::new(span.peak),
+            rms: Amplitude::new(rms),
+            frames: Samples::new(usize::try_from(span.frames).unwrap_or(usize::MAX)),
         }
     }
 }

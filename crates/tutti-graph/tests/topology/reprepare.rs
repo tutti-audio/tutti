@@ -22,7 +22,7 @@ use tutti_ump::Ump;
 use tutti_units::{Latency, SampleRate, Samples, Tail};
 
 fn prep(rate: f64, max: usize) -> Prepare {
-    Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(max)))
+    Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(max)))
 }
 
 const LAG: NodeKey = NodeKey(1);
@@ -324,7 +324,7 @@ fn a_feedback_edge_shorter_than_the_new_block_is_refused_first() {
         at,
         vec![Edge::Feedback(FeedbackFrom::new(
             OutPort { node: LAG, port: 0 },
-            Samples(96),
+            Samples::new(96),
         ))],
     );
     ed.commit().expect("96 >= 64");
@@ -334,8 +334,8 @@ fn a_feedback_edge_shorter_than_the_new_block_is_refused_first() {
         ed.reprepare(prep(48_000.0, 128)),
         Err(CommitError::Compile(CompileError::FeedbackTooShort {
             edge: CycleEdge::Audio(at),
-            delay: Samples(96),
-            max_block: Samples(128),
+            delay: Samples::new(96),
+            max_block: Samples::new(128),
         }))
     );
     assert_eq!(ed.in_flight(), 0, "nothing was sent");
@@ -355,7 +355,7 @@ struct RateLatency {
 impl Node for RateLatency {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples(self.latency)))
+            .with_latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, p: &Prepare) {
         self.latency = (p.sample_rate().get() / 1000.0) as usize;
@@ -391,7 +391,10 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    assert_eq!(exec.plan().unwrap().total_latency().samples(), Samples(48));
+    assert_eq!(
+        exec.plan().unwrap().total_latency().samples(),
+        Samples::new(48)
+    );
 
     // Uncommitted: inserted and wired, then the rate changes.
     ed.insert(SUM, "look", Unforkable(unit(&log)));
@@ -419,11 +422,11 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     let plan = exec.plan().unwrap();
     assert_eq!(
         plan.total_latency().samples(),
-        Samples(192),
+        Samples::new(192),
         "two 1 ms lookaheads"
     );
-    assert_eq!(ed.spec().topology.nodes[&LAG].latency, Samples(96));
-    assert_eq!(ed.spec().topology.nodes[&SUM].latency, Samples(96));
+    assert_eq!(ed.spec().topology.nodes[&LAG].latency, Samples::new(96));
+    assert_eq!(ed.spec().topology.nodes[&SUM].latency, Samples::new(96));
     ed.commit().expect("and commits flow again");
 }
 

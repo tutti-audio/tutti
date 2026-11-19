@@ -328,7 +328,7 @@ fn a_feedback_addend_sums_last() {
                     node: key(2),
                     port: 0,
                 },
-                Samples(BLOCK),
+                Samples::new(BLOCK),
             )),
             direct(3),
             direct(1),
@@ -400,7 +400,7 @@ fn each_source_is_aligned_before_the_sum() {
             kinds.remove(&key(4));
         }
         let plan = plan_of(&t, &kinds);
-        assert_eq!(plan.total_latency().samples(), Samples(L));
+        assert_eq!(plan.total_latency().samples(), Samples::new(L));
         let got = render_both(&t, &kinds, 2);
         for (i, &x) in got[0].iter().enumerate() {
             let want = if i < L { 0.0 } else { 1.0 };

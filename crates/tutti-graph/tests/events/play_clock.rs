@@ -35,7 +35,8 @@ struct Latent(usize);
 
 impl Node for Latent {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples(self.0)))
+        Shape::source_unassigned(ChannelLayout::MONO)
+            .with_latency(Latency::new(Samples::new(self.0)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -71,13 +72,13 @@ impl Node for Probe {
 }
 
 fn transport(playing: bool, beat: f64) -> TransportPosition {
-    TransportPosition::new(playing, Bpm::of(120.0), Beat(beat), None)
+    TransportPosition::new(playing, Bpm::of(120.0), Beat::new(beat), None)
 }
 
 fn changes(list: &[(usize, TransportPosition)]) -> TransportChanges {
     let mut c = TransportChanges::NONE;
     for &(at, t) in list {
-        c.push(Offset::of(Samples(at), Samples(MAX)), t)
+        c.push(Offset::of(Samples::new(at), Samples::new(MAX)), t)
             .expect("fits");
     }
     c
@@ -159,7 +160,7 @@ fn readings(play: &[f32], epoch: &[f32]) -> Vec<PlayReading> {
 
 /// `n` readings counting on from `from`.
 fn run(from: PlayReading, n: usize) -> Vec<PlayReading> {
-    (0..n).map(|i| from.after(Samples(i))).collect()
+    (0..n).map(|i| from.after(Samples::new(i))).collect()
 }
 
 /// The clock counts while stopped, restarts at 0 in a new epoch on a start
@@ -174,7 +175,7 @@ fn the_clock_restarts_on_each_play_start_and_nowhere_else() {
 
     let b1 = r.block(64, transport(false, 0.0), &[]);
     assert_eq!(b1, run(first, 64), "stopped, it counts");
-    assert_eq!(r.ed.play_reading(), first.after(Samples(64)));
+    assert_eq!(r.ed.play_reading(), first.after(Samples::new(64)));
 
     // A start between blocks: 0 on the block's first frame, a new epoch.
     let b2 = r.block(64, transport(true, 0.0), &[]);
@@ -193,7 +194,7 @@ fn the_clock_restarts_on_each_play_start_and_nowhere_else() {
 
     // A seek between blocks and one inside: neither restarts.
     let b3 = r.block(64, transport(true, 40.0), &[(5, transport(true, 3.0))]);
-    assert_eq!(b3, run(b2[0].after(Samples(64)), 64));
+    assert_eq!(b3, run(b2[0].after(Samples::new(64)), 64));
 
     // A stop at 10 and a start at 30, inside one block.
     let b4 = r.block(
@@ -201,7 +202,7 @@ fn the_clock_restarts_on_each_play_start_and_nowhere_else() {
         transport(true, 3.5),
         &[(10, transport(false, 3.6)), (30, transport(true, 0.0))],
     );
-    assert_eq!(b4[..30], run(b3[0].after(Samples(64)), 30)[..]);
+    assert_eq!(b4[..30], run(b3[0].after(Samples::new(64)), 30)[..]);
     let e2 = b4[30].epoch;
     assert!(e2 != e1 && e2 != first.epoch, "another epoch: {e2}");
     assert_eq!(
@@ -224,7 +225,7 @@ fn the_clock_restarts_on_each_play_start_and_nowhere_else() {
     assert_eq!(r.exec.play_reading(), r.ed.play_reading());
     // And on from there.
     let b5 = r.block(64, transport(true, 4.0), &[]);
-    assert_eq!(b5, run(b4[63].after(Samples(1)), 64));
+    assert_eq!(b5, run(b4[63].after(Samples::new(1)), 64));
 }
 
 /// Behind a 100-frame path, the probe reads the clock its input was
@@ -241,10 +242,10 @@ fn a_latent_node_reads_the_clock_at_its_input_time() {
     // Starts at frame 256, a block start.
     let a = r.block(64, transport(true, 0.0), &[]);
     // Frames 256..320 read 156..220: the stopped epoch, still counting.
-    assert_eq!(a, run(first.after(Samples(256 - LAT)), 64));
+    assert_eq!(a, run(first.after(Samples::new(256 - LAT)), 64));
     let b = r.block(64, transport(true, 0.5), &[]);
     // Frames 320..384 read 220..284: the start at 256 lands at frame 36.
-    assert_eq!(b[..36], run(first.after(Samples(320 - LAT)), 36)[..]);
+    assert_eq!(b[..36], run(first.after(Samples::new(320 - LAT)), 36)[..]);
     let e = b[36].epoch;
     assert_ne!(e, first.epoch);
     assert_eq!(

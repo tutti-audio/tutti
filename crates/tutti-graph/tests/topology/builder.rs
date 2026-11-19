@@ -261,7 +261,7 @@ mod net_rule {
 #[test]
 fn builder_builds_what_a_hand_written_spec_builds() {
     let pre = prepare(64);
-    let fb_delay = Samples(64);
+    let fb_delay = Samples::new(64);
 
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
     let mix = g.add(Unforkable(TestNode::new(Kind::Sum { inputs: 2 })));
@@ -549,7 +549,7 @@ fn an_out_of_range_port_panics_at_the_call() {
 fn build_returns_the_editors_error() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let a = g.add(node(1, 1));
-    g.feedback(a, 0, a, 0, Samples(16)).pipe_output(a);
+    g.feedback(a, 0, a, 0, Samples::new(16)).pipe_output(a);
     assert!(matches!(
         g.build(prepare(64)),
         Err(tutti_graph::CommitError::Compile(
@@ -567,7 +567,7 @@ fn renderer_drives_blocks_and_interleaves() {
     let key = g.add(node(0, 2));
     g.pipe_output(key);
     let mut r = g.renderer(prepare(256)).expect("builds");
-    r.set_block(Samples(100));
+    r.set_block(Samples::new(100));
     let seen = Arc::new(Mutex::new(Vec::new()));
     let log = Arc::clone(&seen);
     r.set_transport_fn(move |frame| {
@@ -575,7 +575,7 @@ fn renderer_drives_blocks_and_interleaves() {
         TransportPosition::new(
             true,
             tutti_units::Bpm::of(120.0),
-            Beat(frame.get() as f64),
+            Beat::new(frame.get() as f64),
             None,
         )
     });
@@ -719,7 +719,7 @@ fn connect_adds_and_set_source_replaces() {
     let one = g.add(node(0, 1));
     let sink = g.add(node(1, 1));
     g.connect(one, 0, sink, 0)
-        .feedback(sink, 0, sink, 0, Samples(64));
+        .feedback(sink, 0, sink, 0, Samples::new(64));
     let at = InPort {
         node: sink,
         port: 0,

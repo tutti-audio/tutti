@@ -27,7 +27,7 @@ const EMPTY: Piece = Piece {
     transport: TransportPosition::new(
         false,
         tutti_units::Bpm::of(120.0),
-        tutti_units::Beat(0.0),
+        tutti_units::Beat::new(0.0),
         None,
     ),
     play: PlayReading {
@@ -156,7 +156,7 @@ impl TransportHistory {
     #[must_use]
     pub fn checkpoint(rate: SampleRate) -> Samples {
         let scaled = (CHECKPOINT_AT_48K as f64 * rate.get() / 48_000.0).ceil() as usize;
-        Samples(scaled.max(CHECKPOINT_AT_48K))
+        Samples::new(scaled.max(CHECKPOINT_AT_48K))
     }
 
     /// An empty history. Nothing is allocated, now or later.
@@ -315,7 +315,7 @@ impl Env {
         history: &TransportHistory,
     ) -> TransportPosition {
         let back = back.samples();
-        let here = Samples(offset.index());
+        let here = Samples::new(offset.index());
         match here.checked_sub(back) {
             Some(earlier) => self.transport_at(Offset::raw(earlier.get() as u32)),
             None => {
@@ -344,7 +344,7 @@ impl Env {
         history: &TransportHistory,
     ) -> PlayReading {
         let back = back.samples();
-        let here = Samples(offset.index());
+        let here = Samples::new(offset.index());
         match here.checked_sub(back) {
             Some(earlier) => self.play_at(Offset::raw(earlier.get() as u32)),
             None => {
@@ -383,7 +383,7 @@ mod tests {
         Env {
             frame: Frame::new(frame),
             sample_rate: rate,
-            block_len: Samples(len),
+            block_len: Samples::new(len),
             transport,
             changes,
             play: crate::PlayClock::ZERO,
@@ -391,7 +391,7 @@ mod tests {
     }
 
     fn rolling(beat: f64) -> TransportPosition {
-        TransportPosition::new(true, Bpm::of(120.0), Beat(beat), None)
+        TransportPosition::new(true, Bpm::of(120.0), Beat::new(beat), None)
     }
 
     /// A host that counts frames, at `beat` (its segment's first frame).
@@ -404,7 +404,7 @@ mod tests {
             true,
             Bpm::of(120.0),
             SegmentOrigin {
-                beat: Beat(beat),
+                beat: Beat::new(beat),
                 frame: Frame::new(0),
                 sample_rate: rate,
             },
@@ -416,7 +416,7 @@ mod tests {
     /// the next block.
     fn end_of(e: &Env) -> TransportPosition {
         let longer = Env {
-            block_len: Samples(e.block_len.get() + 1),
+            block_len: Samples::new(e.block_len.get() + 1),
             ..*e
         };
         longer.transport_at(off(e.block_len.get()))
@@ -427,7 +427,7 @@ mod tests {
     }
 
     fn lat(n: usize) -> Latency {
-        Latency::new(Samples(n))
+        Latency::new(Samples::new(n))
     }
 
     /// The blocks a host played, kept so a test can ask what the block that
@@ -463,12 +463,15 @@ mod tests {
         for k in [0, 1, 40] {
             let t = bare.transport_at(off(k));
             assert_eq!(t.origin(), None, "offset {k}");
-            assert_eq!(t.beat(), Beat(2.0 + k as f64 / FPB), "offset {k}");
+            assert_eq!(t.beat(), Beat::new(2.0 + k as f64 / FPB), "offset {k}");
         }
         let host = env(0, 64, counted(2.0, None), TransportChanges::NONE);
         let t = host.transport_at(off(40));
         let origin = t.origin().expect("still the host's count");
-        assert_eq!((origin.beat, origin.frame), (Beat(2.0), Frame::new(40)));
+        assert_eq!(
+            (origin.beat, origin.frame),
+            (Beat::new(2.0), Frame::new(40))
+        );
     }
 
     /// Inside the block, `transport_before` is `transport_at` of the earlier
@@ -501,8 +504,8 @@ mod tests {
         let loop_t = TransportPosition::new(
             true,
             Bpm::of(120.0),
-            Beat(8.0),
-            Some(LoopRange::new(Beat(8.0), Beat(8.0 + 50.0 / FPB)).expect("a loop")),
+            Beat::new(8.0),
+            Some(LoopRange::new(Beat::new(8.0), Beat::new(8.0 + 50.0 / FPB)).expect("a loop")),
         );
         let mut mid_seek = TransportChanges::NONE;
         mid_seek.push(off(20), rolling(32.0)).expect("inside");
@@ -510,7 +513,7 @@ mod tests {
         tempo
             .push(
                 off(10),
-                TransportPosition::new(true, Bpm::of(90.0), Beat(40.0), None),
+                TransportPosition::new(true, Bpm::of(90.0), Beat::new(40.0), None),
             )
             .expect("inside");
         let scenes = [
@@ -528,7 +531,7 @@ mod tests {
             ),
             (rolling(40.0), tempo),
             (
-                TransportPosition::new(false, Bpm::of(90.0), Beat(41.0), None),
+                TransportPosition::new(false, Bpm::of(90.0), Beat::new(41.0), None),
                 TransportChanges::NONE,
             ),
             (rolling(41.0), TransportChanges::NONE),
@@ -556,12 +559,13 @@ mod tests {
     /// (inside the loop) cannot tell a wrap from a start, the history can.
     #[test]
     fn a_loop_wrap_before_the_block_is_unwound() {
-        let looping = Some(LoopRange::new(Beat(4.0), Beat(4.0 + 32.0 / FPB)).expect("a loop"));
+        let looping =
+            Some(LoopRange::new(Beat::new(4.0), Beat::new(4.0 + 32.0 / FPB)).expect("a loop"));
         let mut p = Played::default();
         let first = env(
             0,
             64,
-            TransportPosition::new(true, Bpm::of(120.0), Beat(4.0), looping),
+            TransportPosition::new(true, Bpm::of(120.0), Beat::new(4.0), looping),
             TransportChanges::NONE,
         );
         p.play(first);
@@ -597,7 +601,7 @@ mod tests {
     fn a_counting_host_keeps_only_the_jumps_whatever_the_reach() {
         const REACH: usize = 480_000;
         const BLOCK: usize = 256;
-        let looping = LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop");
+        let looping = LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop");
         let mut p = Played::default();
         let mut next = counted(0.0, Some(looping));
         let mut checked = 0;
@@ -733,7 +737,8 @@ mod tests {
                         t.tempo,
                         origin,
                         Some(
-                            LoopRange::new(Beat(b - 0.001), Beat(b + 40.0 / FPB)).expect("a loop"),
+                            LoopRange::new(Beat::new(b - 0.001), Beat::new(b + 40.0 / FPB))
+                                .expect("a loop"),
                         ),
                     )
                 }

@@ -123,7 +123,7 @@ fn render(exec: &mut Executor, inputs: usize, outputs: usize, blocks: &[usize]) 
         let mut chunk = vec![vec![0.0f32; n]; outputs];
         {
             let mut outs: Vec<&mut [f32]> = chunk.iter_mut().map(Vec::as_mut_slice).collect();
-            let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+            let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
             exec.process(n, &t, &ins, &mut outs);
         }
         for (a, c) in all.iter_mut().zip(chunk) {
@@ -193,7 +193,7 @@ fn a_wide_plan_spreads() {
     match plan.schedule(4) {
         Schedule::Parallel { wake, from } => {
             assert_eq!(wake, 4);
-            assert!(from <= Samples(64), "from {from:?}");
+            assert!(from <= Samples::new(64), "from {from:?}");
         }
         s => panic!("{s:?}"),
     }
@@ -298,13 +298,13 @@ fn blocks_shorter_than_from_run_serially() {
         panic!("{:?}", plan.schedule(4));
     };
     assert!(
-        from > Samples(1) && from <= Samples(MAX_BLOCK),
+        from > Samples::new(1) && from <= Samples::new(MAX_BLOCK),
         "from {from:?}"
     );
     assert!(exec.is_parallel());
     let runs = || pool.runs.load(std::sync::atomic::Ordering::Relaxed);
-    render(&mut exec, 1, 1, &[from.0 - 1]);
+    render(&mut exec, 1, 1, &[from.get() - 1]);
     assert_eq!(runs(), 0, "a block shorter than `from` reached the pool");
-    render(&mut exec, 1, 1, &[from.0]);
+    render(&mut exec, 1, 1, &[from.get()]);
     assert_eq!(runs(), 1, "a block of `from` frames was not spread");
 }
