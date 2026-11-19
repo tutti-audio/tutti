@@ -185,7 +185,7 @@ fn main() {
         &cfg,
         Mono::new(&sweep),
         SampleRate::of(SR),
-        PitchHop::new(tutti_units::Samples(frame)).expect("a hop of at least one sample"),
+        PitchHop::new(tutti_units::Samples::new(frame)).expect("a hop of at least one sample"),
     )
     .expect("track");
     for (i, est) in tracked.iter().enumerate() {

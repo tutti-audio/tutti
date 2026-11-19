@@ -507,7 +507,7 @@ thread and hands `Done` back to the session on the control thread.
 let mut s = Session::builder()
     .outputs_floor(2)                                  // TuttiPlugin::outputs today
     .render_workers(0)                                 // one per core
-    .build_offline(SampleRate::SR_48K, ChannelLayout::STEREO, MaxBlock::of(Samples(512)))?;
+    .build_offline(SampleRate::SR_48K, ChannelLayout::STEREO, MaxBlock::of(Samples::new(512)))?;
 
 // With the sound card (`device`): two halves.
 let (mut s, mut device) = Session::builder()
@@ -530,10 +530,10 @@ device.stop(); device.start()?;
 
 ```rust
 let (pad, _) = s.graph().add(PolySynth::new(SynthConfig::default())?);
-let (filter, _) = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)));
+let (filter, _) = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)));
 s.graph().connect(pad.out(0), filter.input(0))?;
 s.graph().connect(filter, Root)?;
-s.graph().crossfade(filter, other_filter, Seconds(0.005))?;  // retried by update() while Busy
+s.graph().crossfade(filter, other_filter, Seconds::new(0.005))?;  // retried by update() while Busy
 ```
 
 **Params.** The units rule wants a typed setter. `ParamKey<U>` already
@@ -541,7 +541,7 @@ exists (`tutti-types` `unit_param.rs:204`), with one constant per
 `UnitParam`, so:
 
 ```rust
-s.graph().set(filter, ParamKey::<Hz>::CUTOFF, Hz(800.0));  // through the node's ParamSet
+s.graph().set(filter, ParamKey::<Hz>::CUTOFF, Hz::new(800.0));  // through the node's ParamSet
 ```
 
 The untyped `set_param(node, impl Into<UnitAddr>, f32)` stays for plugin and dynamic
@@ -551,7 +551,7 @@ addresses.
 it mints. The full example is §5.1.
 
 ```rust
-let lfo = s.mods().lfo(Lfo::sine().rate(BeatDuration(0.5)));    // a SourceKey; builders from tutti-modulation
+let lfo = s.mods().lfo(Lfo::sine().rate(BeatDuration::new(0.5)));    // a SourceKey; builders from tutti-modulation
 s.mods().range(ParamRef::unit(filter, UnitParam::Cutoff), 0.0, 1_000.0);
 s.mods().route(lfo, ParamRef::unit(filter, UnitParam::Cutoff), Depth(0.3));
 ```
@@ -884,7 +884,7 @@ The other host ids stay in the host: `ExportError::NotForkable` names an
 use tutti::prelude::*;
 
 let (mut s, _device) = Session::builder().build_device(DeviceSelector::Default)?;
-let (filter, _) = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)));
+let (filter, _) = s.graph().add(SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)));
 let (pad, _) = s.graph().add(PolySynth::new(SynthConfig::default())?);
 let (kick_bus, _) = s.graph().add(BusStripNode::stereo());
 s.graph().connect(pad.out(0), filter.input(0))?;
@@ -895,7 +895,7 @@ let gain = ParamRef::unit(pad, UnitParam::Volume);
 let mut m = s.mods();
 m.range(cutoff, 0.0, 1_000.0);
 m.range(gain, 0.0, 1.0);
-let wobble = m.lfo(Lfo::sine().rate(BeatDuration(0.5)));
+let wobble = m.lfo(Lfo::sine().rate(BeatDuration::new(0.5)));
 m.route(wobble, cutoff, Depth(0.3));
 let kick = m.follower(Follower::default(), kick_bus);
 m.route(kick, gain, Depth(-0.6)); // sidechain
@@ -922,7 +922,7 @@ loop { for e in s.update() { log(e) } sleep(frame) }
 use tutti::prelude::*;
 
 let mut s = Session::builder()
-    .build_offline(SampleRate::SR_48K, ChannelLayout::STEREO, MaxBlock::of(Samples(512)))?;
+    .build_offline(SampleRate::SR_48K, ChannelLayout::STEREO, MaxBlock::of(Samples::new(512)))?;
 
 let job = s.plugin_load(PluginLoadRequest::new(PluginRef::file("Synth.clap").ok_or("not a plugin")?));
 let synth = s.add_plugin(job.run())?;
@@ -948,7 +948,7 @@ let job = s.export(
             ..Default::default()
         })))
         .trim_reported_latency()                         // RenderConfig::latency, from the plan
-        .with_reported_tail(Samples(48_000 * 10)),       // RenderConfig::tail, the plugin's declared tail
+        .with_reported_tail(Samples::new(48_000 * 10)),       // RenderConfig::tail, the plugin's declared tail
 )?;                                                      // the plugin hears Offline from here
 s.finish_export(job.run())?;                             // and Realtime from here
 ```
@@ -1212,7 +1212,7 @@ Each step is green alone, `bevy-tutti`'s full suite included.
   compare: a clip's `iter()` keeps its Flex Data, a Set Tempo or time
   signature, while an SMF's meta events are not MIDI messages and are not
   in it.)
-- A note-on at tick 480 of a 480-ppq file lands at `Beat(1.0)`.
+- A note-on at tick 480 of a 480-ppq file lands at `Beat::new(1.0)`.
 - The route compile is total over the rule set, and its fallback holds only
   unrouted channels.
 - The existing `voice_width` and memory-voice tests move with their code.
