@@ -420,7 +420,7 @@ fn a_channels_speaker_skips_the_lfe() {
     }
 }
 
-/// The ports a lane can drive are the params the node declares, each with
+/// The ports a control signal can drive are the params the node declares, each with
 /// its cell as the base the graph's modulation rides on.
 #[test]
 fn the_panner_declares_its_params() {
@@ -446,20 +446,20 @@ fn the_panner_declares_its_params() {
     );
 }
 
-/// A lane that drives a param is heard as the cell would be: a node whose
-/// lane holds the value, over a cell at another, settles on the render of a
+/// A control signal that drives a param is heard as the cell would be: a node whose
+/// control signal holds the value, over a cell at another, settles on the render of a
 /// node whose cell holds it, for each of the four ports.
 ///
-/// The cell and the lane are told apart by the default: a render at the
+/// The cell and the control signal are told apart by the default: a render at the
 /// value differs from one at the default (else the row would pass on a node
 /// that ignored both).
 #[test]
 fn a_lane_drives_each_param_as_its_cell_would() {
     let (left, right) = ([0.5f32; 64], [-0.25f32; 64]);
-    let settle = |node: &mut VbapPannerNode<f32>, lane: Option<(usize, f32)>| {
-        let held = lane.map(|(_, v)| [v; 64]);
+    let settle = |node: &mut VbapPannerNode<f32>, signal: Option<(usize, f32)>| {
+        let held = signal.map(|(_, v)| [v; 64]);
         let mut params: [Option<&[f32]>; 4] = [None; 4];
-        if let Some((k, _)) = lane {
+        if let Some((k, _)) = signal {
             params[k] = held.as_ref().map(|v| &v[..]);
         }
         // Ten ramp lengths of blocks.
@@ -491,18 +491,18 @@ fn a_lane_drives_each_param_as_its_cell_would() {
             "{param:?}: the value does not change the render, so the row proves nothing"
         );
 
-        let mut lane = fresh();
-        let at_lane = settle(&mut lane, Some((k, value)));
-        for (ch, (a, b)) in at_lane.iter().zip(&at_cell).enumerate() {
+        let mut signal = fresh();
+        let at_signal = settle(&mut signal, Some((k, value)));
+        for (ch, (a, b)) in at_signal.iter().zip(&at_cell).enumerate() {
             assert!(
                 (a - b).abs() < 1e-3,
-                "{param:?}, channel {ch}: the lane settled at {a}, the cell at {b}"
+                "{param:?}, channel {ch}: the signal settled at {a}, the cell at {b}"
             );
         }
     }
 }
 
-/// A lane-driven bearing that crosses the seam takes the short arc: 170 degrees
+/// A control signal-driven bearing that crosses the seam takes the short arc: 170 degrees
 /// driven to 190 (which is -170) is followed to -170, and the gains chord
 /// between the two rear-pair vectors, so the speakers silent at both ends (the
 /// front pair of a quad) stay silent along the way. The long way round,
@@ -540,7 +540,7 @@ fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
     let mut node = prep(VbapPannerNode::<f32>::quad());
     node.azimuth.store(Azimuth::new(170.0));
     Node::reset(&mut node);
-    let lane = [190.0f32; 64];
+    let signal = [190.0f32; 64];
     let mut loudest_front = 0.0f32;
     let mut last = Vec::new();
     // Ten ramp lengths: the ramp is over.
@@ -549,7 +549,7 @@ fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
             &mut node,
             RATE,
             Planes::new(&[&ones, &ones]).unwrap(),
-            &[Some(&lane)],
+            &[Some(&signal)],
         );
         for &c in &front {
             loudest_front = last[c].iter().fold(loudest_front, |m, s| m.max(s.abs()));
@@ -683,10 +683,10 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
     );
 }
 
-/// A lane is followed, not smoothed: at each grid point the direction solved is
-/// the lane's value at that frame, so the last frame of the segment plays those
-/// gains however fast the lane moves, with no lag beyond the grid period. The
-/// lane runs at 0.3 degrees a frame, through the rear and across the seam, on a
+/// A control signal is followed, not smoothed: at each grid point the direction solved is
+/// the control signal's value at that frame, so the last frame of the segment plays those
+/// gains however fast the control signal moves, with no lag beyond the grid period. The
+/// control signal runs at 0.3 degrees a frame, through the rear and across the seam, on a
 /// quad whose gains change along the way; a 50 ms smoothing would trail it by
 /// tens of degrees.
 #[test]
@@ -694,19 +694,19 @@ fn a_lane_driven_bearing_is_followed_to_the_grid_period() {
     let mut node = prep(VbapPannerNode::<f32>::quad());
     node.param_set().set(UnitParam::StereoWidth, 0.0);
     let ones = [1.0f32; GRID];
-    // The lane is the graph's `f32`: the bearing narrows into it.
-    let lane_at = |frame: usize| Azimuth::new(100.0 + 0.3 * frame as f64).wrap().get() as f32;
+    // The control signal is the graph's `f32`: the bearing narrows into it.
+    let signal_at = |frame: usize| Azimuth::new(100.0 + 0.3 * frame as f64).wrap().get() as f32;
     let mut crossed = false;
     for j in 0..60 {
-        let lane: Vec<f32> = (0..GRID).map(|i| lane_at(j * GRID + i)).collect();
-        crossed |= lane[0] > lane[GRID - 1];
+        let signal: Vec<f32> = (0..GRID).map(|i| signal_at(j * GRID + i)).collect();
+        crossed |= signal[0] > signal[GRID - 1];
         let out = drive(
             &mut node,
             RATE,
             Planes::new(&[&ones, &ones]).unwrap(),
-            &[Some(&lane), None, None, None],
+            &[Some(&signal), None, None, None],
         );
-        let want = solve(Bed::Quad, Azimuth::new(f64::from(lane[0])));
+        let want = solve(Bed::Quad, Azimuth::new(f64::from(signal[0])));
         for c in 0..4 {
             let want = want[c].get() as f32;
             assert!(
@@ -716,7 +716,7 @@ fn a_lane_driven_bearing_is_followed_to_the_grid_period() {
             );
         }
     }
-    assert!(crossed, "the lane never crossed the seam");
+    assert!(crossed, "the signal never crossed the seam");
 }
 
 /// In an `f64` graph the panner is linear in its input to the rounding of `f64`: the gains are

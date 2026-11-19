@@ -458,7 +458,7 @@ fn the_ramp_has_a_50_ms_time_constant_in_audio_time() {
     );
 }
 
-/// The ports a lane can drive are the params the node declares, each with
+/// The ports a control signal can drive are the params the node declares, each with
 /// its cell as the base the graph's modulation rides on.
 #[test]
 fn the_renderer_declares_its_params() {
@@ -478,19 +478,19 @@ fn the_renderer_declares_its_params() {
     );
 }
 
-/// A lane that drives a param is heard as the cell would be: a node whose
-/// lane holds the value, over a cell at another, settles on the render of a
+/// A control signal that drives a param is heard as the cell would be: a node whose
+/// control signal holds the value, over a cell at another, settles on the render of a
 /// node whose cell holds it, for each of the three ports.
 ///
 /// The value must change the render from the default's, else the row would
-/// pass on a node that ignored both the lane and the cell.
+/// pass on a node that ignored both the control signal and the cell.
 #[test]
 fn a_lane_drives_each_param_as_its_cell_would() {
     let input = [0.5f32; BLOCK];
-    let settle = |node: &mut HrtfBinauralNode<f32>, lane: Option<(usize, f32)>| {
-        let held = lane.map(|(_, v)| [v; BLOCK]);
+    let settle = |node: &mut HrtfBinauralNode<f32>, signal: Option<(usize, f32)>| {
+        let held = signal.map(|(_, v)| [v; BLOCK]);
         let mut params: [Option<&[f32]>; 3] = [None; 3];
-        if let Some((k, _)) = lane {
+        if let Some((k, _)) = signal {
             params[k] = held.as_ref().map(|v| &v[..]);
         }
         // Ten 50 ms time constants of blocks.
@@ -520,12 +520,12 @@ fn a_lane_drives_each_param_as_its_cell_would() {
             "{param:?}: the value does not change the render, so the row proves nothing"
         );
 
-        let mut lane = make_node();
-        let at_lane = settle(&mut lane, Some((k, value)));
-        for (ch, (a, b)) in at_lane.iter().zip(&at_cell).enumerate() {
+        let mut signal = make_node();
+        let at_signal = settle(&mut signal, Some((k, value)));
+        for (ch, (a, b)) in at_signal.iter().zip(&at_cell).enumerate() {
             assert!(
                 (a - b).abs() < 1e-3,
-                "{param:?}, channel {ch}: the lane settled at {a}, the cell at {b}"
+                "{param:?}, channel {ch}: the signal settled at {a}, the cell at {b}"
             );
         }
     }
