@@ -20,15 +20,15 @@ fn detect_at(cfg: &OnsetConfig, samples: &[f64], fft: &mut FftScratch<f64>) -> V
 }
 
 fn amplitude(a: f64) -> OnsetThreshold {
-    OnsetThreshold::of(Amplitude(a))
+    OnsetThreshold::of(Amplitude::new(a))
 }
 
 fn gain(a: f64) -> OnsetSensitivity {
-    OnsetSensitivity::of(Amplitude(a))
+    OnsetSensitivity::of(Amplitude::new(a))
 }
 
 fn gap(seconds: f64) -> OnsetGap {
-    OnsetGap::of(Seconds(seconds))
+    OnsetGap::of(Seconds::new(seconds))
 }
 
 /// The curve has one entry per frame, at the frame's start sample, scaled by
@@ -46,7 +46,7 @@ fn the_novelty_curve_is_readable_per_frame_and_scaled_by_sensitivity() {
     };
     let (one, three) = (run(1.0), run(3.0));
     for (i, n) in one.novelty().iter().enumerate() {
-        assert_eq!(n.frame, Samples(i * 512));
+        assert_eq!(n.frame, Samples::new(i * 512));
     }
     for (a, b) in one.novelty().iter().zip(three.novelty()) {
         assert!((b.value - 3.0 * a.value).abs() <= 1e-12 * a.value.max(1.0));
@@ -222,20 +222,20 @@ fn the_defaults_are_the_documented_ones() {
     let p = plan(flux());
     assert_eq!(p.threshold, 0.3);
     assert_eq!(p.sensitivity, 1.0);
-    assert_eq!(p.min_gap, Samples(2205));
-    assert_eq!(p.geometry().window(), Samples(2048));
-    assert_eq!(p.geometry().hop(), Samples(512));
+    assert_eq!(p.min_gap, Samples::new(2205));
+    assert_eq!(p.geometry().window(), Samples::new(2048));
+    assert_eq!(p.geometry().hop(), Samples::new(512));
 }
 
 #[test]
 fn the_gap_is_expressed_in_seconds() {
     let cfg = flux().min_gap(gap(0.05));
-    assert_eq!(plan(cfg).min_gap, Samples(2205));
-    assert_eq!(plan(cfg.min_gap(gap(0.5))).min_gap, Samples(22050));
+    assert_eq!(plan(cfg).min_gap, Samples::new(2205));
+    assert_eq!(plan(cfg.min_gap(gap(0.5))).min_gap, Samples::new(22050));
     // The same seconds are twice the samples at twice the rate.
     assert_eq!(
         cfg.plan(SampleRate::of(88200.0)).unwrap().min_gap,
-        Samples(4410)
+        Samples::new(4410)
     );
 }
 
@@ -254,22 +254,22 @@ fn a_wide_gap_suppresses_close_onsets() {
 #[test]
 fn suppression_keeps_the_stronger_of_a_close_pair() {
     let onset = |pos: usize, strength: f64| Onset {
-        position: Samples(pos),
-        strength: Amplitude(strength),
+        position: Samples::new(pos),
+        strength: Amplitude::new(strength),
     };
 
     let mut onsets = vec![onset(100, 0.4), onset(150, 0.9), onset(9000, 0.5)];
-    suppress_close_onsets(&mut onsets, Samples(1000));
+    suppress_close_onsets(&mut onsets, Samples::new(1000));
     assert_eq!(onsets.len(), 2);
-    assert_eq!(onsets[0].strength, Amplitude(0.9));
+    assert_eq!(onsets[0].strength, Amplitude::new(0.9));
 
     let mut onsets = vec![onset(100, 0.9), onset(150, 0.4), onset(9000, 0.5)];
-    suppress_close_onsets(&mut onsets, Samples(1000));
-    assert_eq!(onsets[0].strength, Amplitude(0.9));
+    suppress_close_onsets(&mut onsets, Samples::new(1000));
+    assert_eq!(onsets[0].strength, Amplitude::new(0.9));
 
     // Degenerate inputs are no-ops.
     let mut single = vec![onset(100, 0.5)];
-    suppress_close_onsets(&mut single, Samples(1000));
+    suppress_close_onsets(&mut single, Samples::new(1000));
     assert_eq!(single.len(), 1);
 }
 
@@ -279,11 +279,11 @@ fn suppression_keeps_the_stronger_of_a_close_pair() {
 #[test]
 fn suppression_measures_from_the_last_kept_onset() {
     let at = |p: usize, s: f64| Onset {
-        position: Samples(p),
-        strength: Amplitude(s),
+        position: Samples::new(p),
+        strength: Amplitude::new(s),
     };
     let mut onsets = vec![at(0, 1.0), at(600, 0.9), at(1200, 0.8), at(1800, 0.7)];
-    suppress_close_onsets(&mut onsets, Samples(1000));
+    suppress_close_onsets(&mut onsets, Samples::new(1000));
     let kept: Vec<usize> = onsets.iter().map(|o| o.position.get()).collect();
     assert_eq!(kept, [0, 1200]);
 }
@@ -297,18 +297,18 @@ fn suppression_measures_from_the_last_kept_onset() {
 #[test]
 fn suppression_handles_unsorted_input() {
     let onset = |pos: usize, strength: f64| Onset {
-        position: Samples(pos),
-        strength: Amplitude(strength),
+        position: Samples::new(pos),
+        strength: Amplitude::new(strength),
     };
 
     let mut descending = vec![onset(9000, 0.4), onset(100, 0.9)];
-    suppress_close_onsets(&mut descending, Samples(1000));
+    suppress_close_onsets(&mut descending, Samples::new(1000));
     assert_eq!(descending.len(), 2, "far apart in either direction");
 
     let mut close = vec![onset(150, 0.4), onset(100, 0.9)];
-    suppress_close_onsets(&mut close, Samples(1000));
+    suppress_close_onsets(&mut close, Samples::new(1000));
     assert_eq!(close.len(), 1);
-    assert_eq!(close[0].strength, Amplitude(0.9));
+    assert_eq!(close[0].strength, Amplitude::new(0.9));
 }
 
 #[test]
@@ -327,8 +327,8 @@ fn input_shorter_than_a_window_yields_nothing() {
 #[test]
 fn a_zero_framing_is_refused_where_the_rate_binds() {
     for framing in [
-        Framing::new(Samples(0), Samples(512)),
-        Framing::new(Samples(2048), Samples(0)),
+        Framing::new(Samples::new(0), Samples::new(512)),
+        Framing::new(Samples::new(2048), Samples::new(0)),
     ] {
         let cfg = flux().framing(framing);
         assert!(matches!(
@@ -379,7 +379,7 @@ fn a_long_novelty_curve_keeps_its_spread_at_a_large_level() {
     for level in [1.0e4, 1.0e8, 1.0e10] {
         let novelty: Vec<Novelty> = (0..FRAMES)
             .map(|i| Novelty {
-                frame: Samples(i * 512),
+                frame: Samples::new(i * 512),
                 value: if i % 2 == 0 { level + 1.0 } else { level - 1.0 },
             })
             .collect();

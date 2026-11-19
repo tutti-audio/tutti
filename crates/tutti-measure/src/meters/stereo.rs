@@ -40,11 +40,11 @@ impl StereoLevels {
         // The three early returns cover every non-positive input, so the
         // conversion never sees one — the clamp bounds the finite range, not
         // the silent case.
-        const FLOOR: Db = Db(-60.0);
-        const CEILING: Db = Db(60.0);
+        const FLOOR: Db = Db::new(-60.0);
+        const CEILING: Db = Db::new(60.0);
 
         if self.mid.get() <= 0.0 && self.side.get() <= 0.0 {
-            return Db(0.0);
+            return Db::new(0.0);
         }
         if self.side.get() <= 0.0 {
             return CEILING;
@@ -52,7 +52,7 @@ impl StereoLevels {
         if self.mid.get() <= 0.0 {
             return FLOOR;
         }
-        Db::from_amplitude(Amplitude(self.mid.get() / self.side.get())).clamp(FLOOR, CEILING)
+        Db::from_amplitude(Amplitude::new(self.mid.get() / self.side.get())).clamp(FLOOR, CEILING)
     }
 }
 
@@ -91,7 +91,7 @@ impl StereoReading {
     #[inline]
     #[must_use]
     pub fn is_mono(&self) -> bool {
-        self.correlation > Correlation(0.95)
+        self.correlation > Correlation::new(0.95)
     }
 }
 
@@ -127,7 +127,7 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
     }
 
     let count = n as f64;
-    let rms = |sum: f64| Amplitude((sum / count).sqrt());
+    let rms = |sum: f64| Amplitude::new((sum / count).sqrt());
 
     let denominator = (sum_ll * sum_rr).sqrt();
     let correlation = if denominator > 1e-20 {
@@ -183,7 +183,8 @@ impl StereoSmoother {
     #[must_use]
     pub fn standard() -> Self {
         Self::new(
-            Ballistics::new(Seconds(0.01), Seconds(0.1)).expect("10 ms and 100 ms are valid times"),
+            Ballistics::new(Seconds::new(0.01), Seconds::new(0.1))
+                .expect("10 ms and 100 ms are valid times"),
         )
     }
 
@@ -214,7 +215,7 @@ impl StereoSmoother {
         let cfg = self.cfg;
         let smooth = |old: f64, new: f64| smooth_toward(old, new, cfg.coeff_over(new > old, dt));
         let smooth_level = |old: Amplitude, new: Amplitude| {
-            Amplitude(smooth_toward(
+            Amplitude::new(smooth_toward(
                 old.get(),
                 new.get(),
                 cfg.coeff_over(new > old, dt),

@@ -32,7 +32,7 @@ fn true_peak_pins_silence_and_stays_wide() {
     assert!(true_peak_db(0.0).get().is_finite());
 
     // Agrees with the shared conversion everywhere above silence.
-    let want = Db::from_amplitude(Amplitude(0.5));
+    let want = Db::from_amplitude(Amplitude::new(0.5));
     assert!((true_peak_db(0.5).get() - want.get()).abs() < 1e-5);
     assert!((true_peak_db(1.0).get() - 0.0).abs() < 1e-6);
 
@@ -51,21 +51,21 @@ fn true_peak_pins_silence_and_stays_wide() {
 #[test]
 fn silent_render_yields_a_finite_normalization_gain() {
     let m = Loudness {
-        lufs: Db(-70.0),
+        lufs: Db::new(-70.0),
         true_peak: true_peak_db(0.0),
-        range: Db(0.0),
+        range: Db::new(0.0),
     };
-    assert!(m.gain_to(Db(-14.0), Db(-1.0)).get().is_finite());
+    assert!(m.gain_to(Db::new(-14.0), Db::new(-1.0)).get().is_finite());
 }
 
 /// Interleaved stereo sine at `amp`, `secs` long.
 fn sine(rate: f64, secs: f64, freq: f64, amp: f64) -> Vec<f32> {
     let n = (rate * secs) as usize;
     tutti_fixtures::signal::sine(
-        tutti_units::Hz(freq),
-        tutti_units::Amplitude(amp),
+        tutti_units::Hz::new(freq),
+        tutti_units::Amplitude::new(amp),
         SampleRate::of(rate),
-        tutti_units::Samples(n),
+        tutti_units::Samples::new(n),
     )
     .into_iter()
     .flat_map(|s| [s, s])
@@ -170,7 +170,7 @@ fn a_reading_is_always_finite_even_below_the_gate() {
     );
     assert!(m.range.get().is_finite());
     assert!(
-        m.gain_to(Db(-14.0), Db(-1.0)).get().is_finite(),
+        m.gain_to(Db::new(-14.0), Db::new(-1.0)).get().is_finite(),
         "a gain derived from a sub-gate reading must not be NaN"
     );
 }
@@ -211,35 +211,35 @@ fn a_chunk_of_the_wrong_width_is_refused() {
 #[test]
 fn gain_to_targets_the_requested_loudness() {
     let m = Loudness {
-        lufs: Db(-20.0),
-        true_peak: Db(-12.0),
-        range: Db(0.0),
+        lufs: Db::new(-20.0),
+        true_peak: Db::new(-12.0),
+        range: Db::new(0.0),
     };
     // −20 → −14 is +6 dB; the peak lands at −6, under a −1 ceiling.
-    assert!((m.gain_to(Db(-14.0), Db(-1.0)).get() - 6.0).abs() < 1e-5);
+    assert!((m.gain_to(Db::new(-14.0), Db::new(-1.0)).get() - 6.0).abs() < 1e-5);
 }
 
 /// …and is pulled back by exactly the overshoot when it is.
 #[test]
 fn gain_to_respects_the_true_peak_ceiling() {
     let m = Loudness {
-        lufs: Db(-20.0),
-        true_peak: Db(-2.0),
-        range: Db(0.0),
+        lufs: Db::new(-20.0),
+        true_peak: Db::new(-2.0),
+        range: Db::new(0.0),
     };
     // +6 dB would put the peak at +4, which is 5 dB over a −1 ceiling.
-    assert!((m.gain_to(Db(-14.0), Db(-1.0)).get() - 1.0).abs() < 1e-5);
+    assert!((m.gain_to(Db::new(-14.0), Db::new(-1.0)).get() - 1.0).abs() < 1e-5);
 }
 
 /// A signal already under the ceiling must not be pushed *up* to meet it.
 #[test]
 fn gain_to_never_amplifies_to_reach_the_ceiling() {
     let m = Loudness {
-        lufs: Db(-20.0),
-        true_peak: Db(-40.0),
-        range: Db(0.0),
+        lufs: Db::new(-20.0),
+        true_peak: Db::new(-40.0),
+        range: Db::new(0.0),
     };
-    assert!((m.gain_to(Db(-20.0), Db(-1.0)).get()).abs() < 1e-5);
+    assert!((m.gain_to(Db::new(-20.0), Db::new(-1.0)).get()).abs() < 1e-5);
 }
 
 /// Read-out tolerance for a steady tone, in LU: EBU Tech 3341's `±0.1 LU`
@@ -542,10 +542,10 @@ fn tone_on(bed: Bed, index: usize) -> Loudness {
     let width = usize::from(bed.width().count());
     let rate = SampleRate::SR_48K;
     let tone = tutti_fixtures::signal::sine(
-        tutti_units::Hz(TONE_HZ),
-        Amplitude(TONE_AMP),
+        tutti_units::Hz::new(TONE_HZ),
+        Amplitude::new(TONE_AMP),
         rate,
-        tutti_units::Samples(2 * 48_000),
+        tutti_units::Samples::new(2 * 48_000),
     );
     let mut buf = vec![0.0f32; tone.len() * width];
     for (frame, v) in tone.iter().enumerate() {
@@ -604,7 +604,12 @@ fn a_speaker_weighs_what_table_5_lists_for_its_system() {
                     );
                 }
                 None => {
-                    assert_eq!(read.lufs, Db(-70.0), "{bed:?} LFE counted: {:?}", read.lufs);
+                    assert_eq!(
+                        read.lufs,
+                        Db::new(-70.0),
+                        "{bed:?} LFE counted: {:?}",
+                        read.lufs
+                    );
                     // The LFE is unweighted, not unmetered: the file's peak
                     // is still the tone's amplitude, 20 log10 0.1 = -20 dBTP.
                     assert!(
@@ -663,10 +668,10 @@ fn the_weight_follows_the_speaker_in_a_reordered_topology() {
     .unwrap();
     let c = Rated(LoudnessConfig::new(reordered), SampleRate::SR_48K);
     let tone = tutti_fixtures::signal::sine(
-        tutti_units::Hz(TONE_HZ),
-        Amplitude(TONE_AMP),
+        tutti_units::Hz::new(TONE_HZ),
+        Amplitude::new(TONE_AMP),
         SampleRate::SR_48K,
-        tutti_units::Samples(2 * 48_000),
+        tutti_units::Samples::new(2 * 48_000),
     );
     let read = |channel: usize| {
         let mut buf = vec![0.0f32; tone.len() * 6];
@@ -723,10 +728,10 @@ fn the_windowed_meter_weighs_by_placement() {
         SampleRate::SR_48K,
     );
     let tone = tutti_fixtures::signal::sine(
-        tutti_units::Hz(TONE_HZ),
-        Amplitude(TONE_AMP),
+        tutti_units::Hz::new(TONE_HZ),
+        Amplitude::new(TONE_AMP),
         SampleRate::SR_48K,
-        tutti_units::Samples(48_000),
+        tutti_units::Samples::new(48_000),
     );
     let momentary = |channel: usize| {
         let mut buf = vec![0.0f32; tone.len() * 6];
@@ -759,8 +764,8 @@ fn weighs_141(label: Channel) -> bool {
 fn table_4_edges_are_closed_on_azimuth_and_open_on_elevation() {
     let at = |azimuth: f64, elevation: f64| {
         weighs_141(label_at(Direction::new(
-            Azimuth(azimuth),
-            Elevation(elevation),
+            Azimuth::new(azimuth),
+            Elevation::new(elevation),
         )))
     };
     for sign in [1.0f64, -1.0] {
@@ -813,11 +818,11 @@ fn the_true_peak_meter_reads_the_inter_sample_peak() {
         )
         .unwrap();
     let peak = state.finish().get();
-    let analytic = Db::from_amplitude(Amplitude(0.5)).get();
+    let analytic = Db::from_amplitude(Amplitude::new(0.5)).get();
     // The 4x oversampling filter reads 0.1 dB high at this phase.
     assert!((peak - analytic).abs() < 0.15, "{peak} vs {analytic}");
     assert!(
-        peak > Db::from_amplitude(Amplitude(f64::from(sample_peak))).get() + 2.9,
+        peak > Db::from_amplitude(Amplitude::new(f64::from(sample_peak))).get() + 2.9,
         "{peak}"
     );
 }
@@ -886,7 +891,7 @@ fn the_true_peak_meter_reads_the_same_figure_at_i16() {
     .unwrap()
     .get();
     assert!(
-        (peak - Db::from_amplitude(Amplitude(0.5)).get()).abs() < 0.15,
+        (peak - Db::from_amplitude(Amplitude::new(0.5)).get()).abs() < 0.15,
         "{peak}"
     );
 }
@@ -940,7 +945,7 @@ fn the_true_peak_trait_fold_over_uneven_chunks_equals_measure_true_peak() {
     assert_eq!(peak, batch);
     // The samples reach 0.5 / sqrt 2 (-9.03 dB); the sine between them 0.5.
     assert!(
-        (peak.get() - Db::from_amplitude(Amplitude(0.5)).get()).abs() < 0.15,
+        (peak.get() - Db::from_amplitude(Amplitude::new(0.5)).get()).abs() < 0.15,
         "{peak:?}"
     );
 }
@@ -968,7 +973,7 @@ fn the_windowed_trait_fold_yields_one_reading_per_push_and_ends_on_the_whole_str
     assert_eq!(last, reading);
     assert_eq!(
         reading.frame,
-        Samples(buf.len() / 2),
+        Samples::new(buf.len() / 2),
         "the reading names its end frame"
     );
     assert!(reading.momentary.get() > -30.0, "{reading:?}");
@@ -1026,7 +1031,7 @@ fn the_true_peak_of_a_channel_does_not_depend_on_the_layout_width() {
         assert_eq!(peak, mono, "{width} channels");
     }
     assert!(
-        (mono.get() - Db::from_amplitude(Amplitude(0.4)).get()).abs() < 0.3,
+        (mono.get() - Db::from_amplitude(Amplitude::new(0.4)).get()).abs() < 0.3,
         "{mono:?}"
     );
 }

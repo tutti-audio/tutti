@@ -28,10 +28,10 @@ fn istft(transform: &Stft, fft: &mut FftScratch<f64>) -> Vec<f64> {
 
 fn tone(len: usize, freq: f64, sample_rate: f64) -> Vec<f64> {
     tutti_fixtures::signal::sine(
-        tutti_units::Hz(freq),
-        tutti_units::Amplitude(0.5),
+        tutti_units::Hz::new(freq),
+        tutti_units::Amplitude::new(0.5),
         tutti_units::SampleRate::of(sample_rate),
-        tutti_units::Samples(len),
+        tutti_units::Samples::new(len),
     )
     .into_iter()
     .map(f64::from)
@@ -126,7 +126,7 @@ fn a_decimated_request_is_refused_by_the_invertible_path() {
 /// which is the shape of failure that leaves an analysis quietly on Hann.
 #[test]
 fn a_requests_window_shape_reaches_its_geometry() {
-    let len = Samples(200_000);
+    let len = Samples::new(200_000);
     let request = StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
         .window_fn(CosineWindow::HAMMING);
 

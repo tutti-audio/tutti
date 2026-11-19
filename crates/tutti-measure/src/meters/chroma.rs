@@ -75,7 +75,7 @@ pub(crate) const CLASSES: usize = 12;
 
 /// The smallest and largest window accepted. The FFT works on the window, so
 /// an absurd one would ask for gigabytes, and a tiny one resolves no pitch.
-const WINDOWS: RangeInclusive<Samples> = Samples(64)..=Samples(1 << 18);
+const WINDOWS: RangeInclusive<Samples> = Samples::new(64)..=Samples::new(1 << 18);
 
 /// The most frames one call analyses, bounding the output (48 bytes a frame).
 pub(crate) const MAX_FRAMES: FrameCount = FrameCount(1 << 19);
@@ -115,7 +115,7 @@ ranged! {
 
 impl TuningOffset {
     /// In tune: no offset.
-    pub const NONE: TuningOffset = TuningOffset(Cents(0.0));
+    pub const NONE: TuningOffset = TuningOffset(Cents::new(0.0));
 }
 
 /// The frequencies a peak may sit between: `min` below `max`, both finite and
@@ -132,8 +132,8 @@ pub struct FrequencyBand {
 impl FrequencyBand {
     /// The 50 to 2000 Hz vocal and instrument range.
     pub(crate) const VOICE: Self = Self {
-        min: Hz(50.0),
-        max: Hz(2000.0),
+        min: Hz::new(50.0),
+        max: Hz::new(2000.0),
     };
 
     /// The band `min..=max`, or `None` where [`TryFrom`] would refuse it.
@@ -204,11 +204,11 @@ impl ChromaConfig {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            framing: Framing::new(Samples(4096), Samples(1024)),
+            framing: Framing::new(Samples::new(4096), Samples::new(1024)),
             band: None,
             harmonics: Harmonics::of(4),
             harmonic_decay: HarmonicDecay::of(0.6),
-            peak_floor: PeakFloor::of(Db(-40.0)),
+            peak_floor: PeakFloor::of(Db::new(-40.0)),
             tuning: Tuning::Estimate,
         }
     }
@@ -278,7 +278,7 @@ impl ChromaConfig {
         check_overlap(geometry.window(), geometry.hop())?;
         let (min_freq, max_freq) = match self.band {
             Some(band) => (band.min, band.max),
-            None => (Hz(100.0), Hz(5000.0).min(rate.nyquist())),
+            None => (Hz::new(100.0), Hz::new(5000.0).min(rate.nyquist())),
         };
         let plan = ChromaPlan {
             geometry,
@@ -436,7 +436,7 @@ impl TuningSums {
     /// within a half turn, so the offset is within a half semitone.
     fn offset(self) -> TuningOffset {
         let turns = libm::atan2(self.sin, self.cos) / std::f64::consts::TAU;
-        TuningOffset::new(Semitones(turns).to_cents()).unwrap_or(TuningOffset::NONE)
+        TuningOffset::new(Semitones::new(turns).to_cents()).unwrap_or(TuningOffset::NONE)
     }
 
     fn cents(self) -> Cents {
@@ -668,7 +668,7 @@ impl<S: Sample> ChromaMeter<S> {
         let hop = fold.plan.geometry.hop().get();
         cutter.feed(block, |index, samples| {
             each(ChromaFrame {
-                frame: Samples(index * hop),
+                frame: Samples::new(index * hop),
                 bins: fold.fold_frame(samples, fft),
             });
         });
@@ -760,11 +760,11 @@ pub fn chroma<S: Sample>(
     let window = plan.geometry.window().get();
     if samples.len() < window {
         return Err(Error::InsufficientInput {
-            needed: Samples(window),
-            got: Samples(samples.len()),
+            needed: Samples::new(window),
+            got: Samples::new(samples.len()),
         });
     }
-    let frames = plan.geometry.frames_for(Samples(samples.len()));
+    let frames = plan.geometry.frames_for(Samples::new(samples.len()));
     check_frame_count(frames, MAX_FRAMES)?;
     let frame_at = |i: usize| {
         let at = i * plan.geometry.hop().get();

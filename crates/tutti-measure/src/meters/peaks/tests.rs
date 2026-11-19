@@ -20,7 +20,7 @@ fn summarize(cfg: &PeakConfig, buffer: Interleaved<'_, f64>) -> PeakBlocks {
 }
 
 fn mono(block: usize) -> PeakConfig {
-    PeakConfig::new(Samples(block))
+    PeakConfig::new(Samples::new(block))
 }
 
 /// Channel `ch`'s blocks, for tests that know the channel exists.
@@ -53,7 +53,7 @@ fn block_values_are_exact_for_a_ramp() {
         let lo = (i * 100) as f64;
         assert_eq!(block.min, lo);
         assert_eq!(block.max, lo + 99.0);
-        assert_eq!(block.peak(), Amplitude(lo + 99.0));
+        assert_eq!(block.peak(), Amplitude::new(lo + 99.0));
     }
 }
 
@@ -78,7 +78,7 @@ fn streaming_matches_batch_at_every_chunk_size_and_layout() {
         let samples: Vec<f64> = (0..500 * channels).map(|i| i as f64).collect();
 
         for block in [1usize, 3, 100] {
-            let cfg = PeakConfig::new(Samples(block));
+            let cfg = PeakConfig::new(Samples::new(block));
             let batch = summarize(&cfg, Interleaved::new(&samples, layout).unwrap());
 
             for chunk in [1usize, 3, 7, 33, 100, 250, 333, 501, 1024] {
@@ -97,7 +97,7 @@ fn streaming_matches_batch_at_every_chunk_size_and_layout() {
 /// pending blocks are `cfg.layout` wide.
 #[test]
 fn a_chunk_of_the_wrong_width_is_refused() {
-    let cfg = PeakConfig::new(Samples(1));
+    let cfg = PeakConfig::new(Samples::new(1));
     let mut meter = cfg.measure(ChannelLayout::STEREO).unwrap();
 
     assert_eq!(
@@ -136,7 +136,7 @@ fn a_trailing_partial_block_is_kept_on_every_channel() {
     // 250 stereo frames at block 100: two whole blocks and a 50-frame tail.
     let samples: Vec<f64> = (0..250).flat_map(|i| [i as f64, -(i as f64)]).collect();
     let blocks = summarize(
-        &PeakConfig::new(Samples(100)),
+        &PeakConfig::new(Samples::new(100)),
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
     );
 
@@ -155,7 +155,7 @@ fn a_phase_inverted_pair_does_not_cancel() {
     // L ramps up, R is its exact negation.
     let samples: Vec<f64> = (0..200).flat_map(|i| [i as f64, -(i as f64)]).collect();
     let blocks = summarize(
-        &PeakConfig::new(Samples(100)),
+        &PeakConfig::new(Samples::new(100)),
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
     );
 
@@ -187,13 +187,13 @@ fn a_hard_panned_pair_keeps_the_loud_channel_at_full_scale() {
         .flat_map(|i| [0.0, if i % 2 == 0 { 1.0 } else { -1.0 }])
         .collect();
     let blocks = summarize(
-        &PeakConfig::new(Samples(100)),
+        &PeakConfig::new(Samples::new(100)),
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
     );
 
     assert_eq!(ch(&blocks, 0)[0].min, 0.0, "silent channel is silent");
     assert_eq!(ch(&blocks, 0)[0].max, 0.0);
-    assert_eq!(ch(&blocks, 1)[0].peak(), Amplitude(1.0), "not halved");
+    assert_eq!(ch(&blocks, 1)[0].peak(), Amplitude::new(1.0), "not halved");
 }
 
 /// Every channel is blocked, including ones the downmix matrices weight to
@@ -207,7 +207,7 @@ fn surround_keeps_every_channel_separately() {
         .flat_map(|_| [0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
         .collect();
     let blocks = summarize(
-        &PeakConfig::new(Samples(50)),
+        &PeakConfig::new(Samples::new(50)),
         Interleaved::new(&samples, layout).unwrap(),
     );
 
@@ -243,7 +243,7 @@ fn to_mono_on_mono_input_is_the_channel_itself() {
 fn as_flat_is_channel_major() {
     let samples: Vec<f64> = (0..200).flat_map(|i| [i as f64, -(i as f64)]).collect();
     let blocks = summarize(
-        &PeakConfig::new(Samples(100)),
+        &PeakConfig::new(Samples::new(100)),
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
     );
 
@@ -316,7 +316,7 @@ fn an_empty_summary_has_no_channels_until_a_width_is_measured() {
 fn summarize_is_exact_across_its_chunks() {
     let frames = 20_000;
     let samples: Vec<f64> = (0..frames).flat_map(|i| [i as f64, -(i as f64)]).collect();
-    let cfg = PeakConfig::new(Samples(3_000));
+    let cfg = PeakConfig::new(Samples::new(3_000));
     let blocks = summarize(
         &cfg,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
@@ -333,7 +333,7 @@ fn summarize_is_exact_across_its_chunks() {
 /// An empty buffer still has the view's width.
 #[test]
 fn summarizing_nothing_keeps_the_layout() {
-    let cfg = PeakConfig::new(Samples(64));
+    let cfg = PeakConfig::new(Samples::new(64));
     let blocks = summarize(&cfg, Interleaved::new(&[], ChannelLayout::STEREO).unwrap());
     assert_eq!(blocks.layout(), ChannelLayout::STEREO);
     assert!(blocks.is_empty());
@@ -370,7 +370,7 @@ fn reset_returns_to_a_fresh_meter() {
 /// onto the new one.
 #[test]
 fn reset_clears_every_channel_carry() {
-    let mut meter = PeakConfig::new(Samples(100))
+    let mut meter = PeakConfig::new(Samples::new(100))
         .measure(ChannelLayout::STEREO)
         .unwrap();
 
@@ -407,19 +407,23 @@ fn merge_unions_the_range_and_takes_the_quadratic_mean() {
     let a = PeakBlock {
         min: -1.0,
         max: 0.5,
-        rms: Amplitude(0.0),
+        rms: Amplitude::new(0.0),
     };
     let b = PeakBlock {
         min: -0.25,
         max: 2.0,
-        rms: Amplitude(1.0),
+        rms: Amplitude::new(1.0),
     };
     let m = a.merge(b);
 
     assert_eq!(m.min, -1.0, "the lower of the two mins");
     assert_eq!(m.max, 2.0, "the upper of the two maxes");
     // sqrt((0² + 1²) / 2), not (0 + 1) / 2.
-    assert!((m.rms.0 - 0.5f64.sqrt()).abs() < 1e-6, "got {}", m.rms.0);
+    assert!(
+        (m.rms.get() - 0.5f64.sqrt()).abs() < 1e-6,
+        "got {}",
+        m.rms.get()
+    );
 }
 
 /// The trait fold over uneven chunks (1, 7, 64 frames and the rest) yields
@@ -456,7 +460,7 @@ fn the_trait_fold_over_uneven_chunks_equals_summarize_with_whole_blocks_as_items
             .filter(|item| item.channel.get() == channel)
             .map(|item| item.frame)
             .collect();
-        let starts: Vec<Samples> = (0..15).map(|i| Samples(i * 16)).collect();
+        let starts: Vec<Samples> = (0..15).map(|i| Samples::new(i * 16)).collect();
         assert_eq!(frames, starts, "each block names the frame it starts at");
     }
 }
@@ -478,7 +482,7 @@ fn an_odd_and_a_wide_layout_keep_every_sample_on_its_channel() {
             assert!(
                 ch(&blocks, c)
                     .iter()
-                    .all(|b| b.min == want && b.max == want && b.rms.0 == want),
+                    .all(|b| b.min == want && b.max == want && b.rms.get() == want),
                 "channel {c} of {channels}"
             );
         }

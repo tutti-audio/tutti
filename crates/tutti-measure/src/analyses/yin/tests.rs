@@ -15,16 +15,16 @@ fn pitch_of(cfg: &YinConfig, x: &[f32]) -> Result<PitchEstimate> {
 }
 
 fn track_of(cfg: &YinConfig, x: &[f32], hop: usize) -> Result<Vec<PitchEstimate>> {
-    yin_track(cfg, Mono::new(x), SR, PitchHop::of(Samples(hop)))
+    yin_track(cfg, Mono::new(x), SR, PitchHop::of(Samples::new(hop)))
 }
 
 fn sine(sample_rate: f64, freq: f64, seconds: f64) -> Vec<f32> {
     let n = (sample_rate * seconds) as usize;
     tutti_fixtures::signal::sine(
-        tutti_units::Hz(freq),
-        tutti_units::Amplitude(0.5),
+        tutti_units::Hz::new(freq),
+        tutti_units::Amplitude::new(0.5),
         tutti_units::SampleRate::of(sample_rate),
-        tutti_units::Samples(n),
+        tutti_units::Samples::new(n),
     )
 }
 
@@ -33,14 +33,17 @@ fn sine(sample_rate: f64, freq: f64, seconds: f64) -> Vec<f32> {
 #[test]
 fn an_inverted_range_is_not_a_band() {
     assert_eq!(
-        FrequencyBand::try_from(Hz(2000.0)..=Hz(50.0)),
+        FrequencyBand::try_from(Hz::new(2000.0)..=Hz::new(50.0)),
         Err(Error::EmptyFrequencyRange {
-            min: Hz(2000.0),
-            max: Hz(50.0),
+            min: Hz::new(2000.0),
+            max: Hz::new(50.0),
         })
     );
     for (lo, hi) in [(50.0, 50.0), (-10.0, 2000.0), (f64::NAN, 2000.0)] {
-        assert!(FrequencyBand::new(Hz(lo), Hz(hi)).is_none(), "{lo} {hi}");
+        assert!(
+            FrequencyBand::new(Hz::new(lo), Hz::new(hi)).is_none(),
+            "{lo} {hi}"
+        );
     }
 }
 
@@ -48,13 +51,13 @@ fn an_inverted_range_is_not_a_band() {
 fn a_maximum_above_nyquist_is_refused() {
     assert_eq!(
         yin(
-            &YinConfig::new().band(FrequencyBand::new(Hz(50.0), Hz(5000.0)).unwrap()),
+            &YinConfig::new().band(FrequencyBand::new(Hz::new(50.0), Hz::new(5000.0)).unwrap()),
             Mono::new(&[0.0f32; 4096]),
             SampleRate::SR_8K,
         ),
         Err(Error::AboveNyquist {
-            freq: Hz(5000.0),
-            nyquist: Hz(4000.0),
+            freq: Hz::new(5000.0),
+            nyquist: Hz::new(4000.0),
         })
     );
 }
@@ -69,7 +72,7 @@ fn a_short_buffer_reports_why() {
         pitch_of(&cfg, &samples),
         Err(Error::InsufficientInput {
             needed: cfg.buffer_size(SR).unwrap(),
-            got: Samples(64),
+            got: Samples::new(64),
         })
     );
 }
@@ -81,7 +84,7 @@ fn silence_is_unvoiced() {
 
     let estimate = pitch_of(&cfg, &samples).unwrap();
     assert!(!estimate.is_voiced());
-    assert_eq!(estimate.frequency(), Hz(0.0));
+    assert_eq!(estimate.frequency(), Hz::new(0.0));
     assert_eq!(estimate.confidence(), Confidence::NONE);
     assert!(estimate.pitch().is_none());
 }
@@ -159,22 +162,22 @@ fn a_track_is_voiced_throughout_a_steady_tone() {
 #[test]
 fn periods_derive_from_the_range_and_cannot_contradict_it() {
     let cfg = YinConfig::new()
-        .band(FrequencyBand::new(Hz(100.0), Hz(1000.0)).unwrap())
+        .band(FrequencyBand::new(Hz::new(100.0), Hz::new(1000.0)).unwrap())
         .plan(SR)
         .unwrap();
-    assert_eq!(cfg.min_period(), Samples(44)); // 44100 / 1000
-    assert_eq!(cfg.max_period(), Samples(441)); // 44100 / 100
-    assert_eq!(cfg.buffer_size(), Samples(882));
+    assert_eq!(cfg.min_period(), Samples::new(44)); // 44100 / 1000
+    assert_eq!(cfg.max_period(), Samples::new(441)); // 44100 / 100
+    assert_eq!(cfg.buffer_size(), Samples::new(882));
     assert!(cfg.min_period() < cfg.max_period());
 }
 
 #[test]
 fn note_names_use_both_spellings() {
     let pitch = Pitch {
-        frequency: Hz(277.18),
-        confidence: Confidence(0.9),
+        frequency: Hz::new(277.18),
+        confidence: Confidence::new(0.9),
         note: Note::new(tutti_music::PitchClass::CSharp, 4),
-        cents_offset: Cents(0.0),
+        cents_offset: Cents::new(0.0),
     };
     assert_eq!(pitch.note_name(), "C#4");
     assert_eq!(pitch.note_name_flat(), "Db4");
@@ -184,10 +187,10 @@ fn note_names_use_both_spellings() {
 fn median_filter_removes_a_lone_outlier() {
     let voiced = |f: f64| {
         PitchEstimate::Voiced(Pitch {
-            frequency: Hz(f),
-            confidence: Confidence(0.9),
+            frequency: Hz::new(f),
+            confidence: Confidence::new(0.9),
             note: Note::A4,
-            cents_offset: Cents(0.0),
+            cents_offset: Cents::new(0.0),
         })
     };
     let track = vec![
@@ -199,7 +202,7 @@ fn median_filter_removes_a_lone_outlier() {
     ];
 
     let smoothed = median_filter(&track, FrameCount(3));
-    assert_eq!(smoothed[2].frequency(), Hz(440.0), "outlier replaced");
+    assert_eq!(smoothed[2].frequency(), Hz::new(440.0), "outlier replaced");
 
     // A window of 1 or wider than the track is a no-op.
     assert_eq!(median_filter(&track, FrameCount(1)), track);
@@ -231,7 +234,7 @@ fn tracks_frequencies_across_the_range() {
 /// soprano C. Both need the range widened past the standard default.
 #[test]
 fn reaches_the_ends_of_a_widened_range() {
-    let cfg = YinConfig::new().band(FrequencyBand::new(Hz(40.0), Hz(2000.0)).unwrap());
+    let cfg = YinConfig::new().band(FrequencyBand::new(Hz::new(40.0), Hz::new(2000.0)).unwrap());
 
     // E2, the guitar's low string.
     let low = pitch_of(&cfg, &sine(44100.0, 82.41, 0.2)).unwrap();
@@ -257,17 +260,17 @@ fn reaches_the_ends_of_a_widened_range() {
 #[test]
 fn penalize_jumps_attenuates_implausible_leaps() {
     let voiced = |f: f64, c: f64| {
-        let (note, cents) = Note::nearest_to(Hz(f)).unwrap();
+        let (note, cents) = Note::nearest_to(Hz::new(f)).unwrap();
         PitchEstimate::Voiced(Pitch {
-            frequency: Hz(f),
-            confidence: Confidence(c),
+            frequency: Hz::new(f),
+            confidence: Confidence::new(c),
             note,
             cents_offset: cents,
         })
     };
 
     let track = vec![voiced(440.0, 0.9), voiced(880.0, 0.9), voiced(440.0, 0.9)];
-    let smoothed = penalize_jumps(&track, Confidence(1.0));
+    let smoothed = penalize_jumps(&track, Confidence::new(1.0));
 
     // The octave leap loses confidence; the frames around it do not.
     assert!(smoothed[1].confidence() < track[1].confidence());
@@ -278,5 +281,5 @@ fn penalize_jumps_attenuates_implausible_leaps() {
     // A zero penalty is the identity, and a steady track is untouched.
     assert_eq!(penalize_jumps(&track, Confidence::NONE), track);
     let steady = vec![voiced(440.0, 0.9), voiced(445.0, 0.9)];
-    assert_eq!(penalize_jumps(&steady, Confidence(1.0)), steady);
+    assert_eq!(penalize_jumps(&steady, Confidence::new(1.0)), steady);
 }

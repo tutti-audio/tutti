@@ -109,7 +109,7 @@ impl Alignment {
     #[inline]
     #[must_use]
     pub fn delay(&self, sample_rate: impl Into<SampleRate>) -> Seconds {
-        Seconds(self.delay_samples() / sample_rate.into().get())
+        Seconds::new(self.delay_samples() / sample_rate.into().get())
     }
 }
 
@@ -147,8 +147,8 @@ pub fn align<S: Sample>(
     for buffer in [reference, take] {
         if buffer.is_empty() {
             return Err(Error::InsufficientInput {
-                needed: Samples(1),
-                got: Samples(0),
+                needed: Samples::new(1),
+                got: Samples::new(0),
             });
         }
         if !buffer.iter().all(|v| v.is_finite()) {

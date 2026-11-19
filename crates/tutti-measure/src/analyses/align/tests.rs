@@ -22,7 +22,7 @@ fn shifted(x: &[f64], delay: isize) -> Vec<f64> {
 }
 
 fn find(reference: &[f64], take: &[f64], max_lag: usize) -> Alignment {
-    let cfg = AlignConfig::new(Samples(max_lag));
+    let cfg = AlignConfig::new(Samples::new(max_lag));
     align(reference, take, &cfg, &mut FftScratch::new()).unwrap()
 }
 
@@ -33,7 +33,7 @@ fn plain_lag(reference: &[f64], take: &[f64], max_lag: usize) -> isize {
         Mono::new(reference),
         &mut FftScratch::new(),
     )
-    .peak_within(Samples(max_lag))
+    .peak_within(Samples::new(max_lag))
     .unwrap()
     .lag
 }
@@ -59,7 +59,7 @@ fn align_at(
 }
 
 fn band(low: f64, high: f64) -> FrequencyBand {
-    FrequencyBand::new(Hz(low), Hz(high)).unwrap()
+    FrequencyBand::new(Hz::new(low), Hz::new(high)).unwrap()
 }
 
 /// A signal that fills the band, evaluable at fractional times: four
@@ -241,11 +241,11 @@ fn a_band_limit_leaves_out_what_does_not_correlate() {
         .collect();
 
     let mut fft = FftScratch::new();
-    let open = AlignConfig::new(Samples(500));
+    let open = AlignConfig::new(Samples::new(500));
     let banded = open.band(band(0.03, 0.09));
     assert_eq!(
         banded.band.map(|b| (b.min(), b.max())),
-        Some((Hz(0.03), Hz(0.09)))
+        Some((Hz::new(0.03), Hz::new(0.09)))
     );
     // A rate of one sample per second: the band is cycles per sample.
     let rate = SampleRate::of(1.0);
@@ -268,7 +268,7 @@ fn out_of_band_energy_does_not_set_the_level() {
     // 9 bins of a 16-point transform; at rate 16, bin `k` is `k` Hz.
     let mut bins = vec![Complex64::new(3.0, -4.0); 9];
     bins[1] = Complex64::new(5.0e6, 0.0);
-    let band = AlignConfig::new(Samples(1)).band(band(4.0, 6.0)).band;
+    let band = AlignConfig::new(Samples::new(1)).band(band(4.0, 6.0)).band;
     assert!(phase_transform(&mut bins, band, SampleRate::of(16.0)));
     for (k, bin) in bins.iter().enumerate() {
         if (4..=6).contains(&k) {
@@ -321,7 +321,7 @@ fn the_max_lag_bound_is_respected() {
 /// still reads as clear: the flanks of its lobe are not a second peak.
 #[test]
 fn a_wide_peak_is_not_its_own_runner_up() {
-    let cfg = AlignConfig::new(Samples(300)).band(band(1000.0, 4000.0));
+    let cfg = AlignConfig::new(Samples::new(300)).band(band(1000.0, 4000.0));
     let x = band_noise(4096, 5, 1000.0 / 48_000.0, 4000.0 / 48_000.0);
     let mut fft = FftScratch::new();
     let clean = align(&x, &shifted(&x, 40), &cfg, &mut fft).unwrap();
@@ -422,7 +422,7 @@ fn delay_converts_and_bad_input_is_refused() {
     assert!((a.delay(SampleRate::SR_48K).get() - 48.25 / 48_000.0).abs() < 1e-9);
 
     let mut fft = FftScratch::new();
-    let cfg = AlignConfig::new(Samples(10));
+    let cfg = AlignConfig::new(Samples::new(10));
     assert_eq!(cfg.band, None);
     let one = [1.0f64];
     assert!(matches!(
@@ -451,12 +451,12 @@ fn delay_converts_and_bad_input_is_refused() {
     assert_eq!(
         align(&x, &x, &high, &mut fft),
         Err(Error::AboveNyquist {
-            freq: Hz(30_000.0),
-            nyquist: Hz(24_000.0)
+            freq: Hz::new(30_000.0),
+            nyquist: Hz::new(24_000.0)
         })
     );
     assert!(matches!(
-        FrequencyBand::try_from(Hz(500.0)..=Hz(100.0)),
+        FrequencyBand::try_from(Hz::new(500.0)..=Hz::new(100.0)),
         Err(Error::EmptyFrequencyRange { .. })
     ));
 }
