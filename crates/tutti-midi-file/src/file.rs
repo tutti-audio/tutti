@@ -2165,7 +2165,7 @@ impl<'a> MetricalSequence<'a> {
         meter_of(self.events()).0
     }
 
-    /// The Time Signature events of the timeline that
+    /// The Time Signature events of the track that
     /// [`meter_map`](Self::meter_map) leaves out, in order.
     #[must_use]
     pub fn refused_time_signatures(self) -> Vec<RefusedTimeSignature> {

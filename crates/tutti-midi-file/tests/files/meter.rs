@@ -71,3 +71,22 @@ fn a_time_signature_no_meter_holds_is_listed_and_makes_no_change() {
     assert_eq!(refused.len(), 1);
     assert_eq!((refused[0].beat, refused[0].numerator), (Beat(2.0), 0));
 }
+
+/// A change that is not on a bar line starts a bar there: the bar before it is
+/// short (`MeterMap`'s rule). 4/4 from beat 0 and 3/4 from beat 5, a beat into
+/// bar 2: bar 2 is one beat long and bar 3 starts at beat 5.
+#[test]
+fn a_change_off_a_bar_line_leaves_the_bar_before_it_short() {
+    // Delta 2400 (`92 60`) is tick 2400, beat 5 of 480 ticks a quarter.
+    let file = smf(
+        0,
+        &[&[
+            0, 0xFF, 0x58, 4, 4, 2, 24, 8, 0x92, 0x60, 0xFF, 0x58, 4, 3, 2, 24, 8,
+        ]],
+    );
+    let map = metrical(&file).meter_map();
+    assert_eq!(map.bar_start(BarNumber(2)), Beat(4.0));
+    assert_eq!(map.bar_start(BarNumber(3)), Beat(5.0));
+    assert_eq!(map.bar_start(BarNumber(4)), Beat(8.0));
+    assert_eq!(map.bar_at(Beat(5.0)).bar, BarNumber(3));
+}

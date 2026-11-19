@@ -1288,9 +1288,13 @@ impl<F: Float> Midi<'_, F> {
             }
             None => {
                 let (clip, _) = self.graph.add(MidiClipNode::new([]));
-                // A clip that cannot take its events is not left in the graph.
+                // A clip that cannot take its events is not left in the
+                // graph.
                 if let Err(refused) = self.publish_clip(clip, events) {
-                    let _ = self.graph.remove(clip);
+                    // `remove` fails only for a key not in the graph, and
+                    // this one was added above.
+                    let removed = self.graph.remove(clip);
+                    debug_assert!(removed.is_ok(), "the clip just added is in the graph");
                     return Err(refused);
                 }
                 let clip = clip.erase();
@@ -1320,7 +1324,8 @@ impl<F: Float> Midi<'_, F> {
 
     /// Plays a loaded track on `target` through its clip: its events from
     /// the transport's beat 0, with [`play_clip`](Self::play_clip)'s clip,
-    /// looping and bounce behaviour. The track is the one
+    /// looping and bounce behaviour. The clip starts at its own beats; a
+    /// caller who wants an offset rebuilds the events and uses `play_clip`. The track is the one
     /// [`load_midi`](Self::load_midi) landed
     /// ([`LoadedMidi::track`](crate::LoadedMidi::track)); its events are built
     /// already, so this publishes a shared value and converts nothing.

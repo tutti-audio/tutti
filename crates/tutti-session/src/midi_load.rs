@@ -138,7 +138,9 @@ impl LoadReport {
 enum Timeline {
     /// One tempo map and meter: a format 0 or 1 file's.
     Common(Arc<TempoMap>, Arc<ProjectMeter>),
+    /// Format 2: each track has its own tempo map and meter.
     PerTrack,
+    /// A file in SMPTE time: no beats, so no tempo map or meter.
     Smpte,
 }
 
