@@ -10,8 +10,8 @@ use vst3::Steinberg::Vst::ProcessSetup;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_plugin_types::{
-    ChannelTable, Edit, EditDrain, EditSink, ParamAccess, ParamWriteError, PluginError, PluginIo,
-    PluginResult, Processor, RtMidiEvents,
+    ChannelTable, Edit, EditDrain, ParamAccess, ParamEdit, ParamWriteError, PluginError, PluginIo,
+    PluginResult, Processor, ReportSink, RtMidiEvents,
 };
 use tutti_rt::{DrainBeat, RtVec, TallyWriter, tally};
 use tutti_units::Normalized;
@@ -218,7 +218,7 @@ pub struct Vst3Processor<T: Vst3Sample> {
     drain: EditDrain,
     /// The plugin's `outputParameterChanges` on their way to the Controller:
     /// the last point of each emitted parameter, per block.
-    reports: EditSink,
+    reports: ReportSink,
     /// Counts the drains, for the Controller's record of what a block has taken.
     beat: DrainBeat,
     /// The writes taken for the block in hand, latest per parameter, and what
@@ -263,7 +263,7 @@ pub(super) struct ProcessorParts {
     pub audio_side: AudioSide,
     pub context_requirements: Option<ProcessContextRequirements>,
     pub drain: EditDrain,
-    pub reports: EditSink,
+    pub reports: ReportSink,
     pub beat: DrainBeat,
     pub carried: Vec<(ParamId, Normalized)>,
     pub declared: Arc<[(ParamId, ParamAccess)]>,
@@ -585,10 +585,10 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     fn report_emitted(&mut self) {
         for queue in &self.audio.output.emitted_param_changes.queues {
             if let Some(point) = queue.points.last() {
-                let _ = self.reports.send(Edit::Param {
-                    id: queue.param_id,
-                    value: Normalized::clamped(point.value.get()),
-                });
+                let _ = self.reports.send(ParamEdit::change(
+                    queue.param_id,
+                    Normalized::clamped(point.value.get()),
+                ));
             }
         }
     }

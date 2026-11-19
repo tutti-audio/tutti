@@ -8,8 +8,8 @@ use std::sync::atomic::AtomicU64;
 use tutti_plugin_types::MainThreadMarker;
 
 use tutti_plugin_types::{
-    Control, Controller, EditDrain, EditQueue, EditSink, Loaded, PluginError, PluginTail, Prepare,
-    Refused, RestartRules, Samples, Stuck, Widths,
+    Control, Controller, EditQueue, EditSink, Loaded, PluginError, PluginTail, Prepare, Refused,
+    ReportDrain, RestartRules, Samples, Stuck, Widths,
 };
 use tutti_rt::Publisher;
 use tutti_units::Normalized;
@@ -51,7 +51,7 @@ pub struct ClapController {
     pools: Publisher<PoolCell>,
     /// The plugin's own parameter edits, which the Processor queued from its
     /// output events ([`take_reported_edits`](Control::take_reported_edits)).
-    pub(crate) reported: EditDrain,
+    pub(crate) reported: ReportDrain,
     /// What the ring refused, counted by the Processor.
     pub(crate) reports_dropped: Arc<AtomicU64>,
     _not_sync: PhantomData<Cell<()>>,
@@ -71,7 +71,7 @@ impl ClapController {
         edits: EditSink,
         ranges: Publisher<RangeTable>,
         pools: Publisher<PoolCell>,
-        (reported, reports_dropped): (EditDrain, Arc<AtomicU64>),
+        (reported, reports_dropped): (ReportDrain, Arc<AtomicU64>),
     ) -> Self {
         Self {
             loaded: Some(loaded),
