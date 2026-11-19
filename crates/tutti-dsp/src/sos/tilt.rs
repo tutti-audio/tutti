@@ -124,7 +124,7 @@ impl Tilt {
     ) -> Result<Ring, SosError> {
         let (lo, hi) = (check_cutoff(lowest, rate)?, check_cutoff(highest, rate)?);
         let (lo, hi) = (lo.min(hi), lo.max(hi));
-        let a_max = gain_root(check_gain(Db(largest.get().abs()))?);
+        let a_max = gain_root(check_gain(Db::new(largest.get().abs()))?);
         let g = |fc: Hz| prewarp(fc, rate);
         let eps = floor.to_amplitude();
         let nepers = |x: f64| libm::log((x + 1.0) / (x - 1.0).abs());

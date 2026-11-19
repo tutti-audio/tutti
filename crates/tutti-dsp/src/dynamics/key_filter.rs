@@ -33,7 +33,7 @@ pub enum KeyFilter {
 
 impl KeyFilter {
     /// The default cutoff of a key filter: 100 Hz.
-    pub const DEFAULT_CUTOFF: Hz = Hz(100.0);
+    pub const DEFAULT_CUTOFF: Hz = Hz::new(100.0);
 
     /// The default Q of a key filter: Butterworth, the flattest high-pass.
     pub const DEFAULT_Q: Q = Q::BUTTERWORTH;

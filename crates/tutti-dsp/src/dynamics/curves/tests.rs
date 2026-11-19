@@ -41,8 +41,8 @@ fn the_floor_keeps_a_detected_level_usable() {
 
     // And it stays ordered against a real threshold, so envelope
     // comparisons behave.
-    assert!(level < Db(-60.0));
-    assert_eq!(level.clamp(Db(-90.0), Db::UNITY), Db(-90.0));
+    assert!(level < Db::new(-60.0));
+    assert_eq!(level.clamp(Db::new(-90.0), Db::UNITY), Db::new(-90.0));
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn test_compressor_gain_reduction_soft_knee() {
 fn test_compute_limiter_gain() {
     // Below threshold: gain = ceiling - threshold offset
     let gain = compute_limiter_gain(Db::new(-20.0), Db::new(-6.0), Db::new(-0.3)).get();
-    assert_eq!(gain, Db(-0.3 - (-6.0)).to_amplitude().get());
+    assert_eq!(gain, Db::new(-0.3 - (-6.0)).to_amplitude().get());
     // Above threshold: reduces gain
     let gain = compute_limiter_gain(Db::new(0.0), Db::new(-6.0), Db::new(-0.3)).get();
     assert!(gain < 1.0);
@@ -125,7 +125,7 @@ fn test_compute_limiter_gain() {
 /// and the block's linear form.
 #[test]
 fn the_curve_is_the_input_plus_the_drive_up_to_the_ceiling() {
-    let (threshold, ceiling) = (Db(-6.0), Db(-0.3));
+    let (threshold, ceiling) = (Db::new(-6.0), Db::new(-0.3));
     let curve = LimiterCurve::new(threshold, ceiling);
     for (input, want) in [
         (-60.0f64, -54.3f64),
@@ -135,7 +135,7 @@ fn the_curve_is_the_input_plus_the_drive_up_to_the_ceiling() {
         (0.0, -0.3),
         (12.0, -0.3),
     ] {
-        let peak = Db(input).to_amplitude();
+        let peak = Db::new(input).to_amplitude();
         let block = amplitude_to_db(peak * curve.gain(peak).get()).get();
         let fed = amplitude_to_db(
             peak * compute_limiter_gain(amplitude_to_db(peak), threshold, ceiling).get(),
@@ -157,12 +157,12 @@ fn the_block_and_fed_forms_are_one_curve() {
         (-3.0, -9.0),
         (-6.0, -6.0),
     ] {
-        let curve = LimiterCurve::new(Db(t), Db(c));
+        let curve = LimiterCurve::new(Db::new(t), Db::new(c));
         let mut peak_db = -80.0f64;
         while peak_db <= 12.0 {
-            let peak = Db(peak_db).to_amplitude();
+            let peak = Db::new(peak_db).to_amplitude();
             let block = curve.gain(peak).get();
-            let fed = compute_limiter_gain(amplitude_to_db(peak), Db(t), Db(c)).get();
+            let fed = compute_limiter_gain(amplitude_to_db(peak), Db::new(t), Db::new(c)).get();
             assert!(
                 (block - fed).abs() <= 1e-12 * fed,
                 "({t}, {c}) at {peak_db}: {block} against {fed}"
@@ -175,9 +175,9 @@ fn the_block_and_fed_forms_are_one_curve() {
 /// A NaN peak takes `below`, not `over / NaN`.
 #[test]
 fn a_nan_peak_takes_the_below_gain() {
-    let curve = LimiterCurve::new(Db(-6.0), Db(-3.0));
-    assert_eq!(curve.gain(Amplitude(f64::NAN)), curve.below);
-    assert!(curve.below > Amplitude(1.0));
+    let curve = LimiterCurve::new(Db::new(-6.0), Db::new(-3.0));
+    assert_eq!(curve.gain(Amplitude::new(f64::NAN)), curve.below);
+    assert!(curve.below > Amplitude::new(1.0));
 }
 
 /// A threshold past the clamp (under -758 dB, or `-inf`) and a peak down to the smallest
@@ -187,10 +187,10 @@ fn a_nan_peak_takes_the_below_gain() {
 fn a_threshold_past_the_clamp_never_overshoots_the_ceiling() {
     for threshold in [f64::NEG_INFINITY, -800.0, -758.0, -2_000.0] {
         for ceiling in [-6.0, 0.0, 12.0, 20.0] {
-            let curve = LimiterCurve::new(Db(threshold), Db(ceiling));
-            let bound = Db(ceiling).to_amplitude().get() * (1.0 + 1e-12);
+            let curve = LimiterCurve::new(Db::new(threshold), Db::new(ceiling));
+            let bound = Db::new(ceiling).to_amplitude().get() * (1.0 + 1e-12);
             for peak in [0.0, 5e-324, 1e-320, 1e-308, 1e-300, 1e-100, 1e-3, 1.0, 1e30] {
-                let gain = curve.gain(Amplitude(peak)).get();
+                let gain = curve.gain(Amplitude::new(peak)).get();
                 assert!(
                     gain.is_finite(),
                     "({threshold}, {ceiling}) at {peak}: {gain}"
@@ -228,7 +228,7 @@ fn the_generic_db_helpers_are_the_converters_at_f64_and_the_closed_forms_at_f32(
         let want = if x <= 0.0 {
             Db::FLOOR
         } else {
-            Db::from_amplitude(Amplitude(x))
+            Db::from_amplitude(Amplitude::new(x))
         };
         assert_eq!(level_db::<f64>(x), want.get(), "level {x}");
         let narrow = x as f32;
@@ -247,7 +247,7 @@ fn the_generic_db_helpers_are_the_converters_at_f64_and_the_closed_forms_at_f32(
         f64::INFINITY,
     ]);
     for d in dbs {
-        assert_eq!(db_gain::<f64>(d), Db(d).to_amplitude().get(), "{d} dB");
+        assert_eq!(db_gain::<f64>(d), Db::new(d).to_amplitude().get(), "{d} dB");
         let narrow = d as f32;
         assert_eq!(
             db_gain::<f32>(narrow),

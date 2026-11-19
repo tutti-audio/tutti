@@ -41,7 +41,7 @@
 /// The most a lane's level may say, in dB either way: past it a lane value reads as this.
 /// 300 dB is 1e15 as an amplitude, so a gain from a lane's ceiling and threshold, and from
 /// the peak (floored at -144 dB), stays finite in `f32`, and so at any width.
-const LANE_DB_LIMIT: Db = Db(300.0);
+const LANE_DB_LIMIT: Db = Db::new(300.0);
 
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
@@ -95,7 +95,7 @@ pub enum PeakDetection {
 
 /// The input of the true-peak detector, held to this magnitude (2^100): the half-band sums
 /// of a sample this large stay finite, and a larger one reads as it.
-const TRUE_PEAK_INPUT_LIMIT: Amplitude = Amplitude(1.267_650_600_228_229_4e30);
+const TRUE_PEAK_INPUT_LIMIT: Amplitude = Amplitude::new(1.267_650_600_228_229_4e30);
 
 /// What [`LimiterBank::detecting`] refused.
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
@@ -143,13 +143,13 @@ impl LimiterControls {
     /// 5.7 dB, and the output reaches -0.3 dB when the input reaches -6 dB. What a
     /// non-finite control falls back to.
     pub const DEFAULT: Self = Self {
-        threshold: Db(-6.0),
-        ceiling: Db(-0.3),
-        release: Seconds(0.1),
+        threshold: Db::new(-6.0),
+        ceiling: Db::new(-0.3),
+        release: Seconds::new(0.1),
     };
 
     /// The shortest release a limiter has: 1 ms.
-    pub const MIN_RELEASE: Seconds = Seconds(0.001);
+    pub const MIN_RELEASE: Seconds = Seconds::new(0.001);
 }
 
 impl Default for LimiterControls {
@@ -174,10 +174,10 @@ tutti_units::ranged! {
 impl Lookahead {
     /// The lookahead of a limiter built without one: 5 ms, which catches peaks
     /// transparently for a delay a mix tolerates.
-    pub const DEFAULT: Self = Self(Seconds(0.005));
+    pub const DEFAULT: Self = Self(Seconds::new(0.005));
     /// The longest lookahead [`new`](Self::new) accepts: one second, far past any
     /// limiter's (a mastering limiter looks a few to a few tens of milliseconds ahead).
-    pub const CAP: Seconds = Seconds(1.0);
+    pub const CAP: Seconds = Seconds::new(1.0);
 }
 
 impl Default for Lookahead {
@@ -245,7 +245,7 @@ impl<F: Float> Design<F> {
             ceiling: F::from_unit(ceiling),
             lane_limit: F::from_unit(LANE_DB_LIMIT),
             release: Pole::of(
-                Seconds(release.get().max(LimiterControls::MIN_RELEASE.get())),
+                Seconds::new(release.get().max(LimiterControls::MIN_RELEASE.get())),
                 rate,
             ),
         }
@@ -321,7 +321,7 @@ impl<F: Float> LimiterBank<F> {
     /// is 0.5539 dB, from the 4x grid's largest offset of an eighth of a frame. The two up
     /// stages' passband ripple, each about `10^(-100 / 20)` (the oversampler's documented
     /// figure for its default attenuation), adds 0.0002 dB; the sum rounds up to 0.56 dB.
-    pub const TRUE_PEAK_MARGIN: Db = Db(0.56);
+    pub const TRUE_PEAK_MARGIN: Db = Db::new(0.56);
 
     /// A silent limiter `width` channels wide at `rate`, looking `lookahead` ahead, aimed
     /// at [`LimiterControls::DEFAULT`]. Allocates: build it on the control side.
@@ -373,7 +373,7 @@ impl<F: Float> LimiterBank<F> {
         let frames = lookahead_frames(lookahead, rate);
         let needed = 1 + delay / 4;
         if frames < needed {
-            let shortest = Lookahead::new(Seconds(needed as f64 / rate.get()))
+            let shortest = Lookahead::new(Seconds::new(needed as f64 / rate.get()))
                 .unwrap_or(Lookahead(Lookahead::CAP));
             return Err(TruePeakError::Lookahead {
                 lookahead: Samples(frames),

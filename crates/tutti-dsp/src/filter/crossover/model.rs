@@ -18,7 +18,7 @@ use crate::{Complex64, Lti, Ring, System};
 /// The sections' coefficients of the split at `hz` against `rate`, the frequency held under
 /// [`SOLVE_CEILING`] of the rate.
 fn solve_split(hz: Hz, rate: SampleRate) -> Tpt {
-    let hz = Hz(hz.get().min(SOLVE_CEILING * rate.get()));
+    let hz = Hz::new(hz.get().min(SOLVE_CEILING * rate.get()));
     Tpt::new(prewarp(hz, rate))
 }
 
@@ -86,7 +86,7 @@ impl CrossoverModel {
         let mut floor = 1.0f64;
         for (f, hz) in self.freqs.iter_mut().zip(&controls.frequencies) {
             floor = hz.get().max(floor).min(cap);
-            *f = Hz(floor);
+            *f = Hz::new(floor);
         }
         self.solve();
     }
@@ -94,11 +94,11 @@ impl CrossoverModel {
     /// A model of `bands` bands at `rate` before any design: every split at 1 kHz, with
     /// the coefficients of 1 kHz at 48 kHz. [`design_into`](Self::design_into) is what sets them.
     fn empty(bands: usize, rate: SampleRate) -> Self {
-        let split = solve_split(Hz(1_000.0), SampleRate::SR_48K);
+        let split = solve_split(Hz::new(1_000.0), SampleRate::SR_48K);
         Self {
             rate,
             bands,
-            freqs: [Hz(1_000.0); MAX_SPLITS],
+            freqs: [Hz::new(1_000.0); MAX_SPLITS],
             coeffs: [split; MAX_SPLITS],
         }
     }

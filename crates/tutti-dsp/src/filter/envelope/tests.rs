@@ -63,11 +63,11 @@ fn measured_gain(x: &[f32], y: &[f32]) -> f64 {
 
 fn controls(base: f64, depth: f64, q: f64) -> EnvelopeFilterControls {
     EnvelopeFilterControls {
-        base: Hz(base),
-        depth: Semitones(depth),
-        q: Q(q),
-        attack: Seconds(0.05),
-        release: Seconds(0.05),
+        base: Hz::new(base),
+        depth: Semitones::new(depth),
+        q: Q::new(q),
+        attack: Seconds::new(0.05),
+        release: Seconds::new(0.05),
     }
 }
 
@@ -89,7 +89,7 @@ fn the_settled_cutoff_is_base_times_two_to_depth_times_the_mean_level() {
             (900.0, -12.0, 0.8),
             (400.0, 12.0, 0.25),
         ] {
-            let q = Q(2.0);
+            let q = Q::new(2.0);
             let mut b = bank(ty, &controls(base, depth, q.get()));
             let x = sine(TONE, amplitude, 96_000);
             let y = run(&mut b, &x, 480);
@@ -115,7 +115,7 @@ fn the_settled_cutoff_is_base_times_two_to_depth_times_the_mean_level() {
 /// analytic magnitude at two amplitudes.
 #[test]
 fn zero_depth_is_a_fixed_svf_at_base() {
-    let q = Q(2.0);
+    let q = Q::new(2.0);
     for amplitude in [0.1, 0.9] {
         let mut b = bank(SvfType::LowPass, &controls(700.0, 0.0, q.get()));
         let x = sine(TONE, amplitude, 48_000);
@@ -162,7 +162,7 @@ fn the_controls_are_held_in_range() {
         wide.cutoff_at(1.0),
         RATE.nyquist_scaled(crate::filter::NYQUIST_MARGIN)
     );
-    assert_eq!(wide.cutoff_at(0.0), Hz(1_000.0));
+    assert_eq!(wide.cutoff_at(0.0), Hz::new(1_000.0));
 }
 
 /// A tone over full scale reads as 1 in the envelope: `min(|x|, 1)` of a sine of amplitude 2
@@ -172,7 +172,7 @@ fn the_controls_are_held_in_range() {
 /// settled test's.
 #[test]
 fn a_level_over_full_scale_reads_as_one() {
-    let q = Q(2.0);
+    let q = Q::new(2.0);
     let sqrt3 = 3.0f64.sqrt();
     let env =
         (4.0 * (1.0 - sqrt3 / 2.0) + 2.0 * core::f64::consts::PI / 3.0) / core::f64::consts::PI;
@@ -222,18 +222,18 @@ fn square(levels: &[(usize, f64)]) -> Vec<f32> {
 /// only through the glide.
 #[test]
 fn the_attack_and_the_release_are_told_apart() {
-    let (attack, release) = (Seconds(0.005), Seconds(0.2));
+    let (attack, release) = (Seconds::new(0.005), Seconds::new(0.2));
     let (high, low) = (0.8, 0.2);
     let (rise, fall) = (14_400, 9_600);
     let pole = |tau: Seconds| (-1.0 / (tau.get() * RATE.get())).exp();
-    let q = Q(2.0);
+    let q = Q::new(2.0);
     for ty in [SvfType::LowPass, SvfType::BandPass] {
         let (base, depth) = (400.0, 36.0);
         let mut b = bank(
             ty,
             &EnvelopeFilterControls {
-                base: Hz(base),
-                depth: Semitones(depth),
+                base: Hz::new(base),
+                depth: Semitones::new(depth),
                 q,
                 attack,
                 release,

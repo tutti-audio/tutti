@@ -4,9 +4,9 @@ fn model(ty: SvfType, freq: f64, q: f64, gain: f64, rate: f64) -> SvfModel {
     SvfModel::new(
         SvfControls {
             ty,
-            freq: Hz(freq),
-            q: Q(q),
-            gain: Db(gain),
+            freq: Hz::new(freq),
+            q: Q::new(q),
+            gain: Db::new(gain),
         },
         SampleRate::of(rate),
     )
@@ -99,9 +99,9 @@ fn the_response_is_the_rbj_closed_form() {
         ] {
             let want = rbj(ty, fc, q, gain, rate);
             let m = model(ty, fc, q, gain, rate);
-            let mut freqs = vec![Hz::ZERO, Hz(fc), Hz(24_000.0)];
+            let mut freqs = vec![Hz::ZERO, Hz::new(fc), Hz::new(24_000.0)];
             freqs.extend(
-                (0..40).map(|i| Hz(libm::exp(libm::log(10.0) + 7.0 * f64::from(i) / 39.0))),
+                (0..40).map(|i| Hz::new(libm::exp(libm::log(10.0) + 7.0 * f64::from(i) / 39.0))),
             );
             let mut got = vec![Complex64::new(0.0, 0.0); freqs.len()];
             m.frequency_response(0, &freqs, &mut got);
@@ -177,7 +177,7 @@ fn the_svf_model_is_the_prewarped_bilinear_image_of_the_analog_prototype() {
             let mut got = vec![Complex64::new(0.0, 0.0); freqs.len()];
             m.frequency_response(
                 0,
-                &freqs.iter().map(|&f| Hz(f)).collect::<Vec<_>>(),
+                &freqs.iter().map(|&f| Hz::new(f)).collect::<Vec<_>>(),
                 &mut got,
             );
             for (f, got) in freqs.iter().zip(&got) {
@@ -204,7 +204,7 @@ fn the_direct_form_is_the_same_response() {
         let b = m.biquad();
         for f in [30.0f64, 500.0, 1_500.0, 9_000.0, 20_000.0] {
             let mut g = [Complex64::new(0.0, 0.0)];
-            m.frequency_response(0, &[Hz(f)], &mut g);
+            m.frequency_response(0, &[Hz::new(f)], &mut g);
             let h = b.response(2.0 * PI * f / 44_100.0);
             assert!(
                 (g[0] - h).norm() <= 1e-9,
@@ -264,9 +264,9 @@ fn a_hostile_control_still_gives_a_stable_model() {
         let m = SvfModel::new(
             SvfControls {
                 ty: SvfType::Bell,
-                freq: Hz(f),
-                q: Q(q),
-                gain: Db(g),
+                freq: Hz::new(f),
+                q: Q::new(q),
+                gain: Db::new(g),
             },
             rate,
         );
@@ -286,9 +286,9 @@ fn a_hostile_control_still_gives_a_stable_model() {
 fn a_control_moves_the_design_only_past_its_dead_band() {
     let controls = |ty, freq, q, gain| SvfControls {
         ty,
-        freq: Hz(freq),
-        q: Q(q),
-        gain: Db(gain),
+        freq: Hz::new(freq),
+        q: Q::new(q),
+        gain: Db::new(gain),
     };
     let base = controls(SvfType::Bell, 1_000.0, 1.0, 3.0);
     assert!(!controls(SvfType::Bell, 1_000.005, 1.0, 3.0).moved_from(&base));

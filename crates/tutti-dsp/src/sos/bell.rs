@@ -105,7 +105,7 @@ impl MatchedBell {
         let fc = check_cutoff(center, rate)?;
         let q = self.checked_q()?;
         let db = check_gain(self.gain)?;
-        let boost = matched(fc, q, Db(db.get().abs()), rate);
+        let boost = matched(fc, q, Db::new(db.get().abs()), rate);
         Ok(if db.get() < 0.0 {
             inverse(boost)
         } else {

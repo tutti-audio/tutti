@@ -8,16 +8,16 @@ use crate::testing::noise;
 // the `f64` banks have their own tests below.
 
 const RATE: SampleRate = SampleRate::SR_48K;
-const FAST: Seconds = Seconds(0.001);
-const SLOW: Seconds = Seconds(0.02);
+const FAST: Seconds = Seconds::new(0.001);
+const SLOW: Seconds = Seconds::new(0.02);
 const LEVEL: f64 = 0.5;
 
 /// A shaper at `RATE` at rest on the amounts `attack` and `sustain` dB.
 fn shaper(attack: f64, sustain: f64) -> TransientBank<f32> {
     let mut bank = TransientBank::<f32>::new(RATE, FAST, SLOW);
     bank.aim(&TransientControls {
-        attack: Db(attack),
-        sustain: Db(sustain),
+        attack: Db::new(attack),
+        sustain: Db::new(sustain),
     });
     bank.settle();
     bank
@@ -222,7 +222,7 @@ fn an_aimed_amount_glides_along_the_linear_ramp() {
     let x = vec![LEVEL as f32; 1_200];
     let mut y = run(&mut bank, &[&x[..cut]], 64).remove(0);
     bank.aim(&TransientControls {
-        attack: Db(a1),
+        attack: Db::new(a1),
         sustain: Db::UNITY,
     });
     y.extend(run(&mut bank, &[&x[cut..]], 64).remove(0));
@@ -254,8 +254,8 @@ fn the_render_does_not_depend_on_where_blocks_fall() {
         let mut bank = shaper(6.0, -3.0);
         let mut y = run(&mut bank, &[&x[..cut]], block).remove(0);
         bank.aim(&TransientControls {
-            attack: Db(18.0),
-            sustain: Db(9.0),
+            attack: Db::new(18.0),
+            sustain: Db::new(9.0),
         });
         y.extend(run(&mut bank, &[&x[cut..]], block).remove(0));
         y

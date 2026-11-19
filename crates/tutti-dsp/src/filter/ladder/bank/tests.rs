@@ -19,9 +19,9 @@ const TYPES: [LadderType; 4] = [
 fn design<F: Float + Lanes>(ty: LadderType, fc: f64, res: f64, drive: f64) -> LadderDesign<F> {
     let controls = LadderControls {
         ty,
-        freq: Hz(fc),
-        res: Resonance(res),
-        drive: Drive(drive),
+        freq: Hz::new(fc),
+        res: Resonance::new(res),
+        drive: Drive::new(drive),
     };
     LadderDesign::from(&LadderModel::new(controls, RATE))
 }
@@ -240,12 +240,12 @@ fn just_below_k_four_the_oscillation_decays_at_the_poles_modulus() {
 fn the_resonance_ceiling_is_k_four() {
     for res in [1.0f64, 1.5, 2.0, 1e30, f64::INFINITY] {
         assert_eq!(
-            LadderCoeffs::new(Hz(1_000.0), Resonance(res), RATE).k,
+            LadderCoeffs::new(Hz::new(1_000.0), Resonance::new(res), RATE).k,
             4.0,
             "{res}"
         );
     }
-    assert!(LadderCoeffs::new(Hz(1_000.0), Resonance(0.999), RATE).k < 4.0);
+    assert!(LadderCoeffs::new(Hz::new(1_000.0), Resonance::new(0.999), RATE).k < 4.0);
 }
 
 /// Past the knee the loop is bounded whatever the controls. The saturator limits the loop
@@ -528,8 +528,8 @@ fn a_five_hz_low_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
     let whole = FS as usize;
     let controls = LadderControls {
         ty: LadderType::LP24,
-        freq: Hz(FC),
-        res: Resonance(0.0),
+        freq: Hz::new(FC),
+        res: Resonance::new(0.0),
         drive: Drive::UNITY,
     };
     let w = 2.0 * PI * FC / FS;
