@@ -22,7 +22,7 @@ use std::hint::black_box;
 use tutti_buffers::MaxBlock;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{BusTopology, ChannelLayout, Float};
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
@@ -31,19 +31,19 @@ use tutti_nodes::{
     GateNode, InterpolationMode, KeySource, LimiterControls, LimiterNode, Lookahead, MaxDelay,
     ShapeKind,
 };
+use tutti_rt::SplitMix64;
 use tutti_units::{CompressionRatio, Db, Drive, Feedback, SampleRate, Samples, Seconds};
 
 const BLOCKS: [usize; 2] = [64, 1024];
 const SR: SampleRate = SampleRate::SR_48K;
 
-/// Broadband input from a cheap LCG, so the bench needs no `rand`.
+/// Broadband input from a seeded `SplitMix64`.
 fn fill_noise<N: Node>(d: &mut Direct<N>) {
-    let mut state = 0x2545_f491_u32;
+    let mut rng = SplitMix64::new(1);
     for ch in d.inputs_mut().iter_mut() {
         let ch = ch.into_samples_mut();
         for s in ch.iter_mut() {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            *s = (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+            *s = f32::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0;
         }
     }
 }
@@ -110,14 +110,11 @@ fn channel_sum(c: &mut Criterion) {
             exec.apply_pending();
             ed.collect();
 
-            let mut state = 0x2545_f491_u32;
+            let mut rng = SplitMix64::new(1);
             let input: Vec<Vec<f32>> = (0..sources * width)
                 .map(|_| {
                     (0..block)
-                        .map(|_| {
-                            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                            (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
-                        })
+                        .map(|_| f32::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0)
                         .collect()
                 })
                 .collect();

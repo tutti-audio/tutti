@@ -418,9 +418,10 @@ fn a_caller_curve_is_read_in_its_own_frames() {
 /// does not rest on the seed.
 #[test]
 fn noise_has_a_low_confidence() {
-    use rand::{RngExt, SeedableRng, rngs::StdRng};
-    let mut rng = StdRng::seed_from_u64(7);
-    let x: Vec<f64> = (0..441_000).map(|_| rng.random_range(-0.5..0.5)).collect();
+    use crate::test_rng::uniform;
+    use tutti_rt::SplitMix64;
+    let mut rng = SplitMix64::new(7);
+    let x: Vec<f64> = (0..441_000).map(|_| uniform(&mut rng, -0.5, 0.5)).collect();
     let tempo = tempo_of(&x);
     assert!(tempo.confidence.get() < 0.3, "{:?}", tempo.confidence);
 }

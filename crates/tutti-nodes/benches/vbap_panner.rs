@@ -20,24 +20,24 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::Bed;
-use tutti_buffers::PlanesMut;
+use tutti_buffers::{Float, PlanesMut};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
+use tutti_rt::SplitMix64;
 use tutti_units::{ArcDegrees, Azimuth, Elevation, SampleRate};
 
 /// Warmup before measuring, in frames: two seconds at 48 kHz, 40 glide
 /// lengths, so a held source has landed.
 const WARMUP_FRAMES: usize = 96_000;
 
-/// Deterministic broadband input: a cheap LCG, so the bench needs no `rand`.
+/// Deterministic broadband input from a seeded `SplitMix64`.
 fn fill_noise(mut channels: PlanesMut<'_, '_>) {
-    let mut state = 0x2545_f491_u32;
+    let mut rng = SplitMix64::new(1);
     for mut c in channels.iter_mut() {
         for x in c.samples_mut() {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            *x = (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+            *x = f32::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0;
         }
     }
 }
