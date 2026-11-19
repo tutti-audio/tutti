@@ -483,7 +483,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn advanced_by(self, frames: Samples) -> SamplePosition {
-        SamplePosition(self.0 + frames.0 as f64)
+        SamplePosition::new(self.0 + frames.get() as f64)
     }
 
     /// Whole frames fully elapsed before this position — rounds **down**.
@@ -498,7 +498,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn to_samples_floor(self) -> Samples {
-        Samples(libm::floor(self.0).max(0.0) as usize)
+        Samples::new(libm::floor(self.0).max(0.0) as usize)
     }
 
     /// Whole frames needed to *contain* this position — rounds **up**.
@@ -514,7 +514,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn to_samples_ceil(self) -> Samples {
-        Samples(libm::ceil(self.0).max(0.0) as usize)
+        Samples::new(libm::ceil(self.0).max(0.0) as usize)
     }
 }
 
@@ -547,9 +547,9 @@ impl BeatDuration {
     pub fn to_seconds(self, tempo: Bpm) -> Seconds {
         // A tempo too slow for a finite seconds-per-beat reads as zero, not inf.
         if !(60.0 / tempo.0).is_finite() {
-            return Seconds(0.0);
+            return Seconds::new(0.0);
         }
-        Seconds(self.0 * 60.0 / tempo.0)
+        Seconds::new(self.0 * 60.0 / tempo.get())
     }
 
     /// Magnitude, discarding direction.

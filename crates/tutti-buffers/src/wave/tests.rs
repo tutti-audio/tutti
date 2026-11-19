@@ -11,7 +11,7 @@ fn append_deinterleaves_frame_major_samples() {
     let mut w = Wave::<f32>::new(2, SampleRate::SR_48K);
     w.append(Interleaved::new(&[1.0, 2.0, 3.0, 4.0], STEREO).unwrap())
         .unwrap();
-    assert_eq!(w.len(), Samples(2));
+    assert_eq!(w.len(), Samples::new(2));
     assert_eq!(w.channel(0).samples(), &[1.0, 3.0]);
     assert_eq!(w.channel(1).samples(), &[2.0, 4.0]);
     assert_eq!((w.at(0, 1), w.at(1, 0)), (3.0, 2.0));
@@ -65,7 +65,7 @@ fn append_planes_refuses_the_wrong_width() {
 #[test]
 fn zero_rounds_the_duration_to_the_nearest_frame() {
     let w = Wave::<f32>::zero(1, SampleRate::of(2.0), Seconds::new(0.75));
-    assert_eq!(w.len(), Samples(2));
+    assert_eq!(w.len(), Samples::new(2));
     assert!(w.channel(0).iter().all(|&s| s == 0.0));
 }
 
@@ -162,5 +162,5 @@ fn a_wave_without_channels_has_empty_planes() {
 #[test]
 fn duration_is_frames_over_rate() {
     let w = Wave::<f32>::zero(1, SampleRate::of(4.0), Seconds::new(1.5));
-    assert_eq!(w.duration(), Seconds(1.5));
+    assert_eq!(w.duration(), Seconds::new(1.5));
 }

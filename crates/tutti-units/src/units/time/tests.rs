@@ -44,22 +44,22 @@ fn seconds_to_samples_names_its_rounding() {
     // 0.5 s at 44100 is exactly 22050 frames — every variant agrees.
     assert_eq!(
         Seconds(0.5).to_samples(SampleRate::SR_44K1),
-        Samples(22_050)
+        Samples::new(22_050)
     );
     assert_eq!(
         Seconds(0.5).to_samples_floor(SampleRate::SR_44K1),
-        Samples(22_050)
+        Samples::new(22_050)
     );
     assert_eq!(
         Seconds(0.5).to_samples_ceil(SampleRate::SR_44K1),
-        Samples(22_050)
+        Samples::new(22_050)
     );
 
     // 10 ms at 44100 is 441.0; nudge it so the three diverge.
     let odd = Seconds(0.010_5);
-    assert_eq!(odd.to_samples_floor(SampleRate::SR_44K1), Samples(463));
-    assert_eq!(odd.to_samples_ceil(SampleRate::SR_44K1), Samples(464));
-    assert_eq!(odd.to_samples(SampleRate::SR_44K1), Samples(463));
+    assert_eq!(odd.to_samples_floor(SampleRate::SR_44K1), Samples::new(463));
+    assert_eq!(odd.to_samples_ceil(SampleRate::SR_44K1), Samples::new(464));
+    assert_eq!(odd.to_samples(SampleRate::SR_44K1), Samples::new(463));
 
     // Allocation must never under-size: ceil is >= nearest, always.
     for ms in 1..200 {
@@ -89,7 +89,10 @@ fn seconds_to_samples_computes_wide_enough_for_a_long_render() {
     // f32 cannot represent frame counts past 2^24 (~6 min at 48k), which
     // is why the arithmetic widens to f64 before rounding.
     let hour = Seconds(3600.0);
-    assert_eq!(hour.to_samples(SampleRate::SR_48K), Samples(172_800_000));
+    assert_eq!(
+        hour.to_samples(SampleRate::SR_48K),
+        Samples::new(172_800_000)
+    );
 }
 
 #[test]
@@ -176,17 +179,23 @@ fn one_pole_zero_time_is_instant_and_bad_input_is_defined() {
 fn seconds_to_samples_takes_the_typed_rate() {
     // The converter the DSP nodes call: it takes the typed rate, so an
     // untyped rate in a node field has to justify itself at the call.
-    assert_eq!(Seconds(1.0).to_samples(SampleRate::SR_48K), Samples(48_000));
+    assert_eq!(
+        Seconds(1.0).to_samples(SampleRate::SR_48K),
+        Samples::new(48_000)
+    );
     // Raw floats still infer through `impl Into`.
-    assert_eq!(Seconds(1.0).to_samples(SampleRate::SR_48K), Samples(48_000));
+    assert_eq!(
+        Seconds(1.0).to_samples(SampleRate::SR_48K),
+        Samples::new(48_000)
+    );
     // And the rounding split holds through the typed form.
     assert_eq!(
         Seconds(0.5).to_samples_floor(SampleRate::of(3.0)),
-        Samples(1)
+        Samples::new(1)
     );
     assert_eq!(
         Seconds(0.5).to_samples_ceil(SampleRate::of(3.0)),
-        Samples(2)
+        Samples::new(2)
     );
 }
 
@@ -220,7 +229,8 @@ fn nyquist_scaled_refuses_to_exceed_nyquist() {
 #[test]
 fn a_seconds_round_trip_is_exact_for_every_frame_a_project_holds() {
     for rate in [SampleRate::SR_48K, SampleRate::SR_96K, SampleRate::SR_192K] {
-        let round_trips = |n: usize| Samples(n).to_seconds(rate).to_samples(rate) == Samples(n);
+        let round_trips =
+            |n: usize| Samples::new(n).to_seconds(rate).to_samples(rate) == Samples::new(n);
         let day = (86_400.0 * rate.get()) as usize;
         for n in (0..=day).step_by(9_973) {
             assert!(round_trips(n), "{n} frames at {rate:?}");
@@ -321,10 +331,10 @@ fn frame_offset_of_nonsense_is_zero_and_huge_saturates() {
 
 #[test]
 fn one_second_holds_the_rate_rounded_up_and_at_least_one_frame() {
-    assert_eq!(SampleRate::SR_44K1.one_second(), Samples(44_100));
-    assert_eq!(SampleRate::SR_48K.one_second(), Samples(48_000));
-    assert_eq!(SampleRate::of(44_100.5).one_second(), Samples(44_101));
-    assert_eq!(SampleRate::of(0.2).one_second(), Samples(1));
+    assert_eq!(SampleRate::SR_44K1.one_second(), Samples::new(44_100));
+    assert_eq!(SampleRate::SR_48K.one_second(), Samples::new(48_000));
+    assert_eq!(SampleRate::of(44_100.5).one_second(), Samples::new(44_101));
+    assert_eq!(SampleRate::of(0.2).one_second(), Samples::new(1));
 }
 
 /// `one_pole_coeff` is the closed form `1 - exp(-1 / (tau * rate))` to `1e-15` relative and

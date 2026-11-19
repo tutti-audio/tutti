@@ -39,9 +39,9 @@ fn check(len: usize, layout: ChannelLayout) -> Result<(), BufferError> {
 ///
 /// let data = [0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]; // three stereo frames
 /// let buf = Interleaved::new(&data, ChannelLayout::STEREO)?;
-/// assert_eq!(buf.frames(), Samples(3));
-/// assert_eq!(buf.frame(Samples(1)), &[0.3, 0.4]);
-/// assert_eq!(buf.slice(Samples(1)..Samples(3)).samples(), &[0.3, 0.4, 0.5, 0.6]);
+/// assert_eq!(buf.frames(), Samples::new(3));
+/// assert_eq!(buf.frame(Samples::new(1)), &[0.3, 0.4]);
+/// assert_eq!(buf.slice(Samples::new(1)..Samples::new(3)).samples(), &[0.3, 0.4, 0.5, 0.6]);
 /// assert_eq!(buf.iter().len(), 3);
 /// assert!(Interleaved::new(&data[..5], ChannelLayout::STEREO).is_err());
 /// # Ok::<(), tutti_buffers::BufferError>(())
@@ -140,8 +140,8 @@ impl<'a, S: Sample> Interleaved<'a, S> {
 
     /// The sub-run of an in-bounds frame range.
     fn run(&self, r: &Range<usize>) -> Interleaved<'a, S> {
-        let start = self.layout.interleaved_len(Samples(r.start));
-        let end = self.layout.interleaved_len(Samples(r.end));
+        let start = self.layout.interleaved_len(Samples::new(r.start));
+        let end = self.layout.interleaved_len(Samples::new(r.end));
         Interleaved {
             data: &self.data[start..end],
             layout: self.layout,
@@ -158,7 +158,9 @@ impl<'a, S: Sample> Interleaved<'a, S> {
     #[track_caller]
     pub fn split_at(&self, at: Samples) -> (Interleaved<'a, S>, Interleaved<'a, S>) {
         let at = bounds::split(at, self.frames().get());
-        let (a, b) = self.data.split_at(self.layout.interleaved_len(Samples(at)));
+        let (a, b) = self
+            .data
+            .split_at(self.layout.interleaved_len(Samples::new(at)));
         let layout = self.layout;
         (
             Interleaved { data: a, layout },
@@ -176,7 +178,7 @@ impl<'a, S: Sample> Interleaved<'a, S> {
     #[track_caller]
     pub fn frame(&self, i: Samples) -> &'a [S] {
         let i = bounds::index(i, self.frames().get());
-        let start = self.layout.interleaved_len(Samples(i));
+        let start = self.layout.interleaved_len(Samples::new(i));
         &self.data[start..start + self.channels()]
     }
 
@@ -378,8 +380,8 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
 
     /// The writable sub-run of an in-bounds frame range.
     fn run_mut(&mut self, r: &Range<usize>) -> InterleavedMut<'_, S> {
-        let start = self.layout.interleaved_len(Samples(r.start));
-        let end = self.layout.interleaved_len(Samples(r.end));
+        let start = self.layout.interleaved_len(Samples::new(r.start));
+        let end = self.layout.interleaved_len(Samples::new(r.end));
         InterleavedMut {
             data: &mut self.data[start..end],
             layout: self.layout,
@@ -397,7 +399,9 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
     pub fn split_at_mut(&mut self, at: Samples) -> (InterleavedMut<'_, S>, InterleavedMut<'_, S>) {
         let at = bounds::split(at, self.frames().get());
         let layout = self.layout;
-        let (a, b) = self.data.split_at_mut(layout.interleaved_len(Samples(at)));
+        let (a, b) = self
+            .data
+            .split_at_mut(layout.interleaved_len(Samples::new(at)));
         (
             InterleavedMut { data: a, layout },
             InterleavedMut { data: b, layout },
@@ -433,7 +437,7 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
     #[track_caller]
     pub fn frame_mut(&mut self, i: Samples) -> &mut [S] {
         let i = bounds::index(i, self.frames().get());
-        let start = self.layout.interleaved_len(Samples(i));
+        let start = self.layout.interleaved_len(Samples::new(i));
         let channels = self.channels();
         &mut self.data[start..start + channels]
     }

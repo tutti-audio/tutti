@@ -247,7 +247,7 @@ impl UnitParam {
     #[must_use]
     pub fn wrap(self, value: f64) -> f64 {
         if self.is_circular() {
-            Azimuth(value).wrap().0
+            Azimuth::new(value).wrap().get()
         } else {
             value
         }
@@ -261,7 +261,7 @@ impl UnitParam {
     #[must_use]
     pub fn arc(self, from: f64, to: f64) -> f64 {
         if self.is_circular() {
-            Azimuth(from).shortest_arc_to(Azimuth(to)).0
+            Azimuth::new(from).shortest_arc_to(Azimuth::new(to)).get()
         } else {
             to - from
         }

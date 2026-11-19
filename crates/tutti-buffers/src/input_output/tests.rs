@@ -9,7 +9,7 @@ fn an_input_shorter_than_the_block_is_refused_with_both_counts() {
     let mut out = [0.0f32; 4];
     let mut output = [&mut out[..]];
     let refused = InputOutput::new(
-        Samples(4),
+        Samples::new(4),
         Planes::new(&input).expect("one plane"),
         PlanesMut::new(&mut output).expect("one plane"),
     )
@@ -18,8 +18,8 @@ fn an_input_shorter_than_the_block_is_refused_with_both_counts() {
         refused,
         BufferError::BlockLengthMismatch {
             side: BlockSide::Input,
-            block: Samples(4),
-            found: Samples(3)
+            block: Samples::new(4),
+            found: Samples::new(3)
         }
     );
 }
@@ -33,7 +33,7 @@ fn an_output_longer_than_the_block_is_refused() {
     let mut long = [0.0f32; 5];
     let mut output = [&mut long[..]];
     let refused = InputOutput::new(
-        Samples(4),
+        Samples::new(4),
         Planes::new(&input).expect("one plane"),
         PlanesMut::new(&mut output).expect("one plane"),
     )
@@ -42,8 +42,8 @@ fn an_output_longer_than_the_block_is_refused() {
         refused,
         BufferError::BlockLengthMismatch {
             side: BlockSide::Output,
-            block: Samples(4),
-            found: Samples(5)
+            block: Samples::new(4),
+            found: Samples::new(5)
         }
     );
 }
@@ -52,9 +52,9 @@ fn an_output_longer_than_the_block_is_refused() {
 /// processor with no audio still learns the block length.
 #[test]
 fn a_block_with_no_audio_keeps_its_frame_count() {
-    let block = InputOutput::<f32>::new(Samples(512), Planes::default(), PlanesMut::default())
+    let block = InputOutput::<f32>::new(Samples::new(512), Planes::default(), PlanesMut::default())
         .expect("empty views fit any block");
-    assert_eq!(block.frames(), Samples(512));
+    assert_eq!(block.frames(), Samples::new(512));
     let mut block = block;
     assert_eq!(block.output().channels(), 0);
 }
@@ -66,7 +66,7 @@ fn an_empty_input_still_checks_the_output() {
     let mut out = [0.0f32; 6];
     let mut output = [&mut out[..]];
     let refused = InputOutput::new(
-        Samples(7),
+        Samples::new(7),
         Planes::default(),
         PlanesMut::new(&mut output).expect("one plane"),
     )
@@ -75,8 +75,8 @@ fn an_empty_input_still_checks_the_output() {
         refused,
         BufferError::BlockLengthMismatch {
             side: BlockSide::Output,
-            block: Samples(7),
-            found: Samples(6)
+            block: Samples::new(7),
+            found: Samples::new(6)
         }
     );
 }
@@ -90,7 +90,7 @@ fn the_input_is_checked_first_and_named_in_the_text() {
     let mut out = [0.0f32; 3];
     let mut output = [&mut out[..]];
     let refused = InputOutput::new(
-        Samples(4),
+        Samples::new(4),
         Planes::new(&input).expect("one plane"),
         PlanesMut::new(&mut output).expect("one plane"),
     )
@@ -99,16 +99,16 @@ fn the_input_is_checked_first_and_named_in_the_text() {
         refused,
         BufferError::BlockLengthMismatch {
             side: BlockSide::Input,
-            block: Samples(4),
-            found: Samples(2)
+            block: Samples::new(4),
+            found: Samples::new(2)
         }
     );
     assert_eq!(
         refused.to_string(),
         format!(
             "the block is {} frames and its input holds {}",
-            Samples(4),
-            Samples(2)
+            Samples::new(4),
+            Samples::new(2)
         )
     );
 }
@@ -119,12 +119,12 @@ fn an_empty_input_takes_any_block_length() {
     let mut out = [0.0f32; 7];
     let mut output = [&mut out[..]];
     let block = InputOutput::new(
-        Samples(7),
+        Samples::new(7),
         Planes::default(),
         PlanesMut::new(&mut output).expect("one plane"),
     )
     .expect("no input is any length");
-    assert_eq!(block.frames(), Samples(7));
+    assert_eq!(block.frames(), Samples::new(7));
     assert_eq!(block.input().channels(), 0);
 }
 
@@ -137,7 +137,7 @@ fn split_writes_the_output_from_the_input() {
     let mut out = [0.0f32; 3];
     let mut output = [&mut out[..]];
     let mut block = InputOutput::new(
-        Samples(3),
+        Samples::new(3),
         Planes::new(&input).expect("one plane"),
         PlanesMut::new(&mut output).expect("one plane"),
     )
@@ -161,7 +161,7 @@ fn write_twice<S: Sample>(io: &mut InputOutput<'_, S>, first: S, second: S) {
         plane.samples_mut().fill(first);
     }
     let mut out = io.output();
-    out.slice_mut(Samples(2)..Samples(4))
+    out.slice_mut(Samples::new(2)..Samples::new(4))
         .iter_mut()
         .for_each(|mut plane| plane.samples_mut().fill(second));
 }
@@ -176,7 +176,7 @@ fn a_block_over_a_local_table_is_writable_twice_through_one_lifetime() {
     {
         let mut output = [&mut l[..], &mut r[..]];
         let mut io = InputOutput::new(
-            Samples(4),
+            Samples::new(4),
             Planes::new(&input).expect("one plane"),
             PlanesMut::new(&mut output).expect("two planes"),
         )
@@ -191,8 +191,8 @@ fn a_block_over_a_local_table_is_writable_twice_through_one_lifetime() {
 #[test]
 fn from_slices_with_no_output_channel_keeps_the_frames() {
     let mut none: [&mut [f32]; 0] = [];
-    let io = InputOutput::from_slices(Samples(96), &[], &mut none).expect("no channels");
-    assert_eq!(io.frames(), Samples(96));
+    let io = InputOutput::from_slices(Samples::new(96), &[], &mut none).expect("no channels");
+    assert_eq!(io.frames(), Samples::new(96));
 }
 
 /// Channels of unequal length, and a direction that does not hold the frames,
@@ -202,8 +202,8 @@ fn from_slices_refuses_ragged_channels_and_short_directions() {
     let (long, short) = ([0.0f32; 4], [0.0f32; 3]);
     let ragged = [&long[..], &short[..]];
     let mut none: [&mut [f32]; 0] = [];
-    assert!(InputOutput::from_slices(Samples(4), &ragged, &mut none).is_err());
+    assert!(InputOutput::from_slices(Samples::new(4), &ragged, &mut none).is_err());
     let mut l = [0.0f32; 4];
     let mut outputs = [&mut l[..]];
-    assert!(InputOutput::from_slices(Samples(8), &[], &mut outputs).is_err());
+    assert!(InputOutput::from_slices(Samples::new(8), &[], &mut outputs).is_err());
 }

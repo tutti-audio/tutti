@@ -112,8 +112,8 @@ fn an_applier_over_a_slice_of_views_folds_only_those_frames() {
     let mut to = InterleavedMut::new(&mut dst, ChannelLayout::STEREO).unwrap();
     five_one_to_stereo()
         .fold(
-            from.slice(Samples(5)..Samples(15)),
-            to.slice_mut(Samples(0)..Samples(10)),
+            from.slice(Samples::new(5)..Samples::new(15)),
+            to.slice_mut(Samples::new(0)..Samples::new(10)),
         )
         .unwrap();
     assert_eq!(&dst[..2], stereo_of(&frame(5)));
@@ -215,8 +215,8 @@ fn every_applier_refuses_a_width_or_length_mismatch_and_writes_nothing() {
 
     // Frame counts that differ.
     let want = BufferError::LengthMismatch {
-        src: Samples(4),
-        dst: Samples(3),
+        src: Samples::new(4),
+        dst: Samples::new(3),
     };
     let mut short = vec![7.0f32; 6];
     assert_eq!(

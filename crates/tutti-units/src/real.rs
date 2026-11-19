@@ -78,9 +78,9 @@ pub trait Real:
     /// ```
     /// use tutti_units::{Hz, Real};
     ///
-    /// assert_eq!(f32::from_unit(Hz(440.0)), 440.0f32);
-    /// assert_eq!(f32::from_unit(Hz(1e300)), f32::MAX);
-    /// assert_eq!(f64::from_unit(Hz(440.0)), 440.0);
+    /// assert_eq!(f32::from_unit(Hz::new(440.0)), 440.0f32);
+    /// assert_eq!(f32::from_unit(Hz::new(1e300)), f32::MAX);
+    /// assert_eq!(f64::from_unit(Hz::new(440.0)), 440.0);
     /// ```
     #[must_use]
     fn from_unit<Q: Quantity>(q: Q) -> Self;
@@ -398,26 +398,26 @@ mod tests {
 
     #[test]
     fn from_unit_saturates_a_finite_quantity_to_a_finite_f32() {
-        assert_eq!(f32::from_unit(Hz(1e300)), f32::MAX);
-        assert_eq!(f32::from_unit(Hz(-1e300)), -f32::MAX);
-        assert!(f32::from_unit(Hz(f64::NAN)).is_nan());
-        assert_eq!(f32::from_unit(Hz(440.0)), 440.0f32);
+        assert_eq!(f32::from_unit(Hz::new(1e300)), f32::MAX);
+        assert_eq!(f32::from_unit(Hz::new(-1e300)), -f32::MAX);
+        assert!(f32::from_unit(Hz::new(f64::NAN)).is_nan());
+        assert_eq!(f32::from_unit(Hz::new(440.0)), 440.0f32);
     }
 
     #[test]
     fn from_unit_at_f64_is_the_raw_value_when_finite() {
         for x in [0.1, 1e300, -1e-300, 48_000.0] {
-            assert_eq!(f64::from_unit(Hz(x)), x);
+            assert_eq!(f64::from_unit(Hz::new(x)), x);
         }
     }
 
     #[test]
     fn from_unit_saturates_an_infinite_quantity_at_both_widths() {
-        assert_eq!(f32::from_unit(Hz(f64::INFINITY)), f32::MAX);
-        assert_eq!(f32::from_unit(Hz(f64::NEG_INFINITY)), -f32::MAX);
-        assert_eq!(f64::from_unit(Hz(f64::INFINITY)), f64::MAX);
-        assert_eq!(f64::from_unit(Hz(f64::NEG_INFINITY)), -f64::MAX);
-        assert!(f64::from_unit(Hz(f64::NAN)).is_nan());
+        assert_eq!(f32::from_unit(Hz::new(f64::INFINITY)), f32::MAX);
+        assert_eq!(f32::from_unit(Hz::new(f64::NEG_INFINITY)), -f32::MAX);
+        assert_eq!(f64::from_unit(Hz::new(f64::INFINITY)), f64::MAX);
+        assert_eq!(f64::from_unit(Hz::new(f64::NEG_INFINITY)), -f64::MAX);
+        assert!(f64::from_unit(Hz::new(f64::NAN)).is_nan());
     }
 
     #[test]
@@ -439,7 +439,7 @@ mod tests {
         use crate::{Normalized, Quantity};
         let n = Normalized::of(0.25);
         assert_eq!(n.value(), n.get());
-        assert_eq!(Hz(440.0).value(), 440.0);
+        assert_eq!(Hz::new(440.0).value(), 440.0);
         assert_eq!(f32::from_unit(n), 0.25_f32);
     }
 

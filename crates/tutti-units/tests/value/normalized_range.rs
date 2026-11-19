@@ -62,23 +62,23 @@ fn a_plain_value_cannot_masquerade_as_a_normalized_one() {
 fn progress_is_done_over_of_pinned_onto_the_unit_interval() {
     use tutti_units::Samples;
     assert_eq!(
-        Normalized::progress(Samples(1), Samples(4)),
+        Normalized::progress(Samples::new(1), Samples::new(4)),
         Normalized::of(0.25)
     );
     assert_eq!(
-        Normalized::progress(Samples(4), Samples(4)),
+        Normalized::progress(Samples::new(4), Samples::new(4)),
         Normalized::of(1.0)
     );
     assert_eq!(
-        Normalized::progress(Samples(9), Samples(4)),
+        Normalized::progress(Samples::new(9), Samples::new(4)),
         Normalized::of(1.0)
     );
     assert_eq!(
-        Normalized::progress(Samples(3), Samples(0)),
+        Normalized::progress(Samples::new(3), Samples::new(0)),
         Normalized::of(1.0)
     );
     assert_eq!(
-        Normalized::progress(Samples(0), Samples(0)),
+        Normalized::progress(Samples::new(0), Samples::new(0)),
         Normalized::of(0.0)
     );
 }

@@ -82,7 +82,10 @@ const fn at(speaker: Speaker, label: &'static str, azimuth: f64, elevation: f64)
     Row {
         speaker,
         label,
-        direction: Some(Direction::new(Azimuth(azimuth), Elevation(elevation))),
+        direction: Some(Direction::new(
+            Azimuth::new(azimuth),
+            Elevation::new(elevation),
+        )),
     }
 }
 
@@ -267,7 +270,7 @@ mod tests {
             b'B' => -30.0,
             other => panic!("label {label} has layer {other}"),
         };
-        Direction::new(Azimuth(sign * azimuth), Elevation(elevation))
+        Direction::new(Azimuth::new(sign * azimuth), Elevation::new(elevation))
     }
 
     /// Every row of every bed is at the nominal figure of its own label.

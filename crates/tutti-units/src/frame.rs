@@ -36,7 +36,7 @@
 //! - `Frame + Frame` — two positions do not add.
 //! - `Frame - Frame` — see [`since`](Frame::since).
 //! - `Frame + u64` / `Frame + usize` — a bare operand could be a count, an
-//!   offset or a channel; make the caller say `Samples(n)`.
+//!   offset or a channel; make the caller say `Samples::new(n)`.
 //! - `Frame * k` — scaling a position depends on where zero is.
 
 use core::ops::{Add, AddAssign};
@@ -72,8 +72,8 @@ unit! {
     /// ```
     /// use tutti_units::{Frame, Samples};
     /// let start = Frame::new(48_000);
-    /// let later = start + Samples(512);
-    /// assert_eq!(later.since(start), Some(Samples(512)));
+    /// let later = start + Samples::new(512);
+    /// assert_eq!(later.since(start), Some(Samples::new(512)));
     /// assert_eq!(start.since(later), None); // not a count: it is in the past
     /// ```
     pub struct Frame(u64): Display;
@@ -169,7 +169,7 @@ impl Frame {
     #[inline]
     pub fn since(self, earlier: Frame) -> Option<Samples> {
         let d = self.0.checked_sub(earlier.0)?;
-        usize::try_from(d).ok().map(Samples)
+        usize::try_from(d).ok().map(Samples::new)
     }
 }
 
@@ -189,7 +189,7 @@ impl Add<Samples> for Frame {
         // is the saturation the operator promises anyway.
         Frame(
             self.0
-                .saturating_add(u64::try_from(rhs.0).unwrap_or(u64::MAX)),
+                .saturating_add(u64::try_from(rhs.get()).unwrap_or(u64::MAX)),
         )
     }
 }
@@ -213,7 +213,7 @@ impl AddAssign<Samples> for Frame {
 /// ```
 /// use tutti_units::{Frame, Moment, SampleRate, Samples};
 /// let m = Moment::new(Frame::new(48_000), SampleRate::of(48_000.0));
-/// let later = m.after(Samples(480));
+/// let later = m.after(Samples::new(480));
 /// assert_eq!((later.frame(), later.rate()), (Frame::new(48_480), SampleRate::of(48_000.0)));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -303,12 +303,12 @@ mod tests {
     use super::*;
 
     /// **A frame or a beat is the time it names**: `Frame::new(n)` is `At::Frame`
-    /// and `Beat(b)` is `At::Beat`. (`At` has no `Moment` variant: a moment
+    /// and `Beat::new(b)` is `At::Beat`. (`At` has no `Moment` variant: a moment
     /// carries its own rate and is a `Stamp::Moment`.)
     #[test]
     fn a_frame_or_a_beat_is_an_at() {
         assert_eq!(At::from(Frame::new(48_000)), At::Frame(Frame::new(48_000)));
-        assert_eq!(At::from(Beat(2.5)), At::Beat(Beat(2.5)));
+        assert_eq!(At::from(Beat::new(2.5)), At::Beat(Beat::new(2.5)));
     }
 
     /// **A frame is its count over the rate**: 24 000 frames at 48 kHz is half a second.
@@ -322,17 +322,20 @@ mod tests {
     /// Advancing adds the count, and saturates instead of wrapping.
     #[test]
     fn advancing_adds_and_saturates() {
-        assert_eq!(Frame::new(100) + Samples(28), Frame::new(128));
+        assert_eq!(Frame::new(100) + Samples::new(28), Frame::new(128));
         let mut f = Frame::new(u64::MAX - 1);
-        f += Samples(5);
+        f += Samples::new(5);
         assert_eq!(f, Frame::new(u64::MAX));
     }
 
     /// `since` is a checked distance: a later frame is not "some frames ago".
     #[test]
     fn since_is_checked() {
-        assert_eq!(Frame::new(600).since(Frame::new(88)), Some(Samples(512)));
-        assert_eq!(Frame::new(88).since(Frame::new(88)), Some(Samples(0)));
+        assert_eq!(
+            Frame::new(600).since(Frame::new(88)),
+            Some(Samples::new(512))
+        );
+        assert_eq!(Frame::new(88).since(Frame::new(88)), Some(Samples::new(0)));
         assert_eq!(Frame::new(88).since(Frame::new(600)), None);
     }
 

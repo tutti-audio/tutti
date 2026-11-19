@@ -87,11 +87,11 @@ impl From<ParamCell> for Arc<AtomicF64> {
 /// use tutti_units::Hz;
 /// use tutti_rt::Param;
 ///
-/// let cutoff = Param::new(Hz(1_000.0)); // control thread: allocates
+/// let cutoff = Param::new(Hz::new(1_000.0)); // control thread: allocates
 /// let on_audio_thread = cutoff.handle(); // shares the cell
 ///
-/// cutoff.store(Hz(2_000.0));
-/// assert_eq!(on_audio_thread.load(), Hz(2_000.0));
+/// cutoff.store(Hz::new(2_000.0));
+/// assert_eq!(on_audio_thread.load(), Hz::new(2_000.0));
 /// ```
 pub struct Param<U: Unit<Raw = f64>> {
     inner: Arc<AtomicF64>,
@@ -322,33 +322,41 @@ mod tests {
     #[test]
     fn an_f64_param_keeps_its_width_and_its_cell_is_shared() {
         use tutti_units::Seconds;
-        let long = Seconds(3600.0 + 1.0e-9); // not an f32
-        let a = Param::new(Seconds(0.0));
+        let long = Seconds::new(3600.0 + 1.0e-9); // not an f32
+        let a = Param::new(Seconds::new(0.0));
         let b = a.handle();
         a.store(long);
-        assert_eq!(b.load().0.to_bits(), long.0.to_bits());
+        assert_eq!(b.load().get().to_bits(), long.get().to_bits());
 
         let cell = a.cell();
-        assert_eq!(cell.load(Ordering::Acquire).to_bits(), long.0.to_bits());
+        assert_eq!(cell.load(Ordering::Acquire).to_bits(), long.get().to_bits());
         cell.store(0.25, Ordering::Release);
-        assert_eq!(b.load(), Seconds(0.25));
+        assert_eq!(b.load(), Seconds::new(0.25));
         assert!(cell.ptr_eq(&b.cell()));
     }
 
     /// `detach` keeps the value and cuts the cell both ways.
     #[test]
     fn detach_keeps_the_value_and_severs_the_cell() {
-        let live = Param::new(Hz(440.0));
+        let live = Param::new(Hz::new(440.0));
         let mut copy = live.handle();
         copy.detach();
-        assert_eq!(copy.load(), Hz(440.0), "detach keeps the current value");
+        assert_eq!(
+            copy.load(),
+            Hz::new(440.0),
+            "detach keeps the current value"
+        );
 
-        live.store(Hz(880.0));
-        assert_eq!(copy.load(), Hz(440.0), "a live write must not reach it");
-        copy.store(Hz(110.0));
+        live.store(Hz::new(880.0));
+        assert_eq!(
+            copy.load(),
+            Hz::new(440.0),
+            "a live write must not reach it"
+        );
+        copy.store(Hz::new(110.0));
         assert_eq!(
             live.load(),
-            Hz(880.0),
+            Hz::new(880.0),
             "its write must not reach the live cell"
         );
     }
@@ -356,16 +364,16 @@ mod tests {
     /// A tap, a routing weight: a driven, signed cell that reads back as written.
     #[test]
     fn a_gain_is_a_param() {
-        let tap = Param::new(Gain(-0.5));
+        let tap = Param::new(Gain::new(-0.5));
         let on_audio_thread = tap.handle();
-        assert_eq!(on_audio_thread.load(), Gain(-0.5));
+        assert_eq!(on_audio_thread.load(), Gain::new(-0.5));
         tap.store(Gain::INVERTING);
         assert_eq!(on_audio_thread.load(), Gain::INVERTING);
 
         // The cell a modulation lane writes keeps the sign.
         tap.cell()
             .store(0.75, core::sync::atomic::Ordering::Relaxed);
-        assert_eq!(tap.load(), Gain(0.75));
+        assert_eq!(tap.load(), Gain::new(0.75));
     }
 
     /// A driven delay time: the cell holds a span at full `f64` width, a write

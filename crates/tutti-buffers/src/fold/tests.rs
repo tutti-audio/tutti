@@ -1653,7 +1653,7 @@ fn the_default_levels_are_bs775_minus_3_db() {
     use tutti_units::Amplitude;
     let m = f32::MINUS_3_DB;
     let levels = FoldLevels::default();
-    let minus_3_db = Amplitude(f64::MINUS_3_DB);
+    let minus_3_db = Amplitude::new(f64::MINUS_3_DB);
     assert_eq!(
         (levels.centre, levels.surround, levels.height, levels.lfe),
         (minus_3_db, minus_3_db, minus_3_db, None)
@@ -1675,7 +1675,7 @@ fn a_level_that_is_not_a_gain_is_refused() {
         let base = FoldLevels::default();
         assert_eq!(
             spec(FoldLevels {
-                centre: Amplitude(bad),
+                centre: Amplitude::new(bad),
                 ..base
             }),
             Err(FoldError::NotAGain {
@@ -1684,7 +1684,7 @@ fn a_level_that_is_not_a_gain_is_refused() {
         );
         assert_eq!(
             spec(FoldLevels {
-                lfe: Some(Amplitude(bad)),
+                lfe: Some(Amplitude::new(bad)),
                 ..base
             }),
             Err(FoldError::NotAGain {
@@ -1695,7 +1695,7 @@ fn a_level_that_is_not_a_gain_is_refused() {
     assert!(
         Fold::<f32>::spec(&five_one, &stereo)
             .levels(FoldLevels {
-                height: Amplitude(0.0),
+                height: Amplitude::new(0.0),
                 ..FoldLevels::default()
             })
             .build()
@@ -1711,9 +1711,9 @@ fn levels_state_the_centre_the_surround_and_the_height_gains() {
     use crate::Bed;
     use tutti_units::Amplitude;
     let levels = FoldLevels {
-        centre: Amplitude(0.5),
-        surround: Amplitude(0.25),
-        height: Amplitude(0.125),
+        centre: Amplitude::new(0.5),
+        surround: Amplitude::new(0.25),
+        height: Amplitude::new(0.125),
         lfe: None,
     };
     let five_one = Bed::Surround51.topology();
@@ -1749,7 +1749,7 @@ fn a_level_applies_only_where_the_speaker_folds() {
     use crate::Bed;
     use tutti_units::Amplitude;
     let levels = FoldLevels {
-        surround: Amplitude(0.25),
+        surround: Amplitude::new(0.25),
         ..FoldLevels::default()
     };
     // 5.1 to quad: the side pair is repositioned to the back pair, at unity.
@@ -1780,7 +1780,7 @@ fn the_lfe_level_feeds_the_front_pair_or_the_mono_channel() {
     use tutti_units::Amplitude;
     let five_one = Bed::Surround51.topology();
     let with = FoldLevels {
-        lfe: Some(Amplitude(0.5)),
+        lfe: Some(Amplitude::new(0.5)),
         ..FoldLevels::default()
     };
     let stereo = Bed::Stereo.topology();
