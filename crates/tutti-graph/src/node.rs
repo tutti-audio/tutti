@@ -201,6 +201,12 @@ pub struct Shape {
     /// can close them at its sink (see
     /// [`with_no_note_events`](Self::with_no_note_events)). `true` unless set
     /// otherwise: a node that declares nothing is assumed to carry them.
+    ///
+    /// The tracking costs about 9 KiB (8 KiB of keys and 1 KiB of controllers)
+    /// for each of the unit's event output ports, in each of the tables it
+    /// keeps: the running one, the one that owes closes, and, while a replace
+    /// waits behind a fade, the waiting unit's. A node that never carries notes
+    /// declares [`with_no_note_events`](Self::with_no_note_events).
     pub note_events: bool,
     /// The most events this node writes into its successor's first event
     /// input when it is replaced (see [`Node::chase`] and
