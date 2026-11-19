@@ -317,6 +317,6 @@ pub use value::{
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(feature = "sampler")]
-pub use value::{DirectionTarget, LoopingTarget, WindowTarget};
+pub use value::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

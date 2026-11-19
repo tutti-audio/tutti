@@ -241,14 +241,14 @@ fn play_pool(pool: &mut VoicePool<f32>, streamer: &mut DiskStreamer<ByHand<f32>,
     out
 }
 
-/// **The handle sets a memory voice's speed, and stops and resumes a
+/// **The handle's speed cell sets a memory voice's speed, and stops and resumes a
 /// free-running one.** At speed 2 the voice reads every second file frame; a
 /// placed voice refuses `stop` and `play`; a free-running one, stopped, is
 /// silent and reads nothing, and resumes where its cursor stopped.
 #[test]
 fn a_node_handle_sets_speed_and_stops_and_resumes_a_free_running_voice() {
     let (mut node, handle) = memory_node();
-    handle.set_speed(PlaybackRate::new(2.0));
+    handle.speed_cell().publish(PlaybackRate::new(2.0));
     let got = render_with(&mut node, 400);
     assert_frames("speed 2", &got, |n| 2 * n);
     assert_eq!(handle.stop(), Err(tutti_sampler::PlayError::Placed));
