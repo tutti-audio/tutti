@@ -1,4 +1,4 @@
-use super::super::read::probe_path;
+use super::super::read::probe_asset;
 use super::*;
 use crate::{DecodeError, read_wave};
 use symphonia::core::errors::Error;
@@ -305,7 +305,7 @@ fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
         let reader = std::mem::replace(
             &mut dec.reader,
             Box::new(FailAfter {
-                inner: probe_path(&path).expect("probe"),
+                inner: probe_asset(&path.as_path().into()).expect("probe"),
                 left,
             }),
         );

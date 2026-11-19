@@ -1,7 +1,7 @@
 use std::io::{self, Cursor};
 
 use super::*;
-use crate::{DecodeError, read_wave, read_wave_bytes, read_wave_metadata};
+use crate::{DecodeError, read_wave, read_wave_metadata};
 
 const PCM: u16 = 1;
 const FLOAT: u16 = 3;
@@ -72,7 +72,7 @@ fn pcm_of_65535_channels_after_a_prefix_is_refused_not_a_panic() {
     let bytes = wav(&junk, &basic_fmt(PCM, 65_535, 16));
     assert!(matches!(guard(&bytes), Err(Error::Unsupported(_))));
     assert!(matches!(
-        read_wave_bytes::<f32>(bytes),
+        read_wave::<f32>(bytes),
         Err(DecodeError::Unsupported(_))
     ));
 }
@@ -115,7 +115,7 @@ fn valid_mono_and_stereo_16_bit_files_pass_and_decode() {
         let mut cursor = Cursor::new(bytes.as_slice());
         assert!(check(&mut cursor).is_ok());
         assert_eq!(cursor.position(), 0);
-        let wave = read_wave_bytes::<f32>(bytes).expect("decodes");
+        let wave = read_wave::<f32>(bytes).expect("decodes");
         assert_eq!(wave.channels(), usize::from(channels));
         assert_eq!(wave.len().get(), 32 / usize::from(channels));
     }
@@ -394,5 +394,5 @@ fn a_second_bad_fmt_chunk_after_a_good_one_is_refused() {
 fn a_fmt_chunk_shorter_than_16_bytes_passes_the_guard_and_the_decoder_refuses_it() {
     let bytes = wav(&[], &basic_fmt(PCM, 65_535, 16)[..12]);
     assert!(guard(&bytes).is_ok());
-    assert!(read_wave_bytes::<f32>(bytes).is_err());
+    assert!(read_wave::<f32>(bytes).is_err());
 }

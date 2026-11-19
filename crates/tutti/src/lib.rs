@@ -326,7 +326,7 @@ pub mod types {
         NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
-    pub use tutti_platform::Panicked;
+    pub use tutti_platform::{Asset, Destination, Identity, Open, Panicked, ReadSeek, Stamp};
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
         LevelSpan, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter, Words,
@@ -525,7 +525,7 @@ pub mod codec {
         feature = "decode-mp3",
         feature = "decode-ogg"
     ))]
-    pub use tutti_codec::{WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata};
+    pub use tutti_codec::{WaveMetadata, read_wave, read_wave_metadata};
 }
 
 /// Sample playback (`tutti-sampler`): voices and their loops, the placement

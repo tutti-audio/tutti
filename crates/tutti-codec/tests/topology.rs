@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker::*};
-use tutti_codec::{DecodeError, FileIn, read_wave, read_wave_bytes};
+use tutti_codec::{DecodeError, FileIn, read_wave};
 
 fn asset(name: &str) -> PathBuf {
     tutti_fixtures::asset(&format!("audio/{name}"))
@@ -50,7 +50,7 @@ fn extensible(channels: u16, mask: u32) -> Vec<u8> {
 }
 
 fn topology_of_mask(channels: u16, mask: u32) -> ChannelTopology {
-    read_wave_bytes::<f32>(extensible(channels, mask))
+    read_wave::<f32>(extensible(channels, mask))
         .expect("decodes")
         .topology()
         .clone()
@@ -96,7 +96,7 @@ fn a_wave_mask_names_each_channels_speaker() {
 #[test]
 fn a_mask_bit_past_the_standard_speakers_is_refused() {
     assert!(matches!(
-        read_wave_bytes::<f32>(extensible(2, 0x0200_0001)),
+        read_wave::<f32>(extensible(2, 0x0200_0001)),
         Err(DecodeError::Unsupported(_))
     ));
 }
@@ -105,7 +105,7 @@ fn a_mask_bit_past_the_standard_speakers_is_refused() {
 /// fourth plane, whatever order the speakers were declared in.
 #[test]
 fn channel_n_of_the_samples_is_entry_n_of_the_topology() {
-    let wave = read_wave_bytes::<f32>(extensible(6, 0x3F)).expect("decodes");
+    let wave = read_wave::<f32>(extensible(6, 0x3F)).expect("decodes");
     let at = wave.topology().index_of(LowFrequency).unwrap();
     assert_eq!(at, 3);
     assert!((wave.at(at, 0) - 0.04).abs() < 1e-6);
@@ -197,7 +197,7 @@ fn a_vorbis_six_decodes_in_the_topologys_order() {
     enc.encode_audio_block(&planes).unwrap();
     enc.finish().unwrap();
 
-    let wave = read_wave_bytes::<f32>(out).expect("decodes");
+    let wave = read_wave::<f32>(out).expect("decodes");
     assert_eq!(wave.channels(), 6);
     // Rising zero crossings in the middle half second: `hz / 2` of them.
     let crossings = |c: usize| {

@@ -20,8 +20,8 @@ fn a_missing_file_is_an_io_error() {
 /// Bytes that are no container are refused, not decoded as silence.
 #[test]
 fn bytes_that_are_no_audio_are_an_error() {
-    assert!(read_wave_bytes::<f32>(vec![0x5a; 4096]).is_err());
-    assert!(read_wave_bytes::<f32>(Vec::new()).is_err());
+    assert!(read_wave::<f32>(vec![0x5a; 4096]).is_err());
+    assert!(read_wave::<f32>(Vec::new()).is_err());
 }
 
 /// A track that states no sample rate is refused with `NoSampleRate`, never
@@ -75,7 +75,7 @@ fn a_data_length_far_past_the_source_decodes_the_frames_present() {
     bytes.extend(b"data");
     bytes.extend(0x4500_0040u32.to_le_bytes());
     bytes.extend([0u8; 32]);
-    let wave = read_wave_bytes::<f32>(bytes).expect("decodes");
+    let wave = read_wave::<f32>(bytes).expect("decodes");
     assert_eq!(wave.channels(), 1);
     assert_eq!(wave.len().get(), 16);
 }
