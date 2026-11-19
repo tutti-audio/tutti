@@ -6,9 +6,9 @@
 //! `MAX_FRAMES` ceiling. The offset-binary formats' gate is beside the driver.
 
 use crate::support::dc_state;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Sample;
 use tutti_engine::{MAX_FRAMES, OutputBlock};
-use tutti_types::ChannelLayout;
 
 /// Every native device sample type, rendered after a warm-up, allocates nothing
 /// and carries the signal (a DC of 0.5 is not the format's silence), so the gate

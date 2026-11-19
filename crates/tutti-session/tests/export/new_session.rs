@@ -1,10 +1,10 @@
 //! `Session::new`: the full build, with the engine, bounces what it holds.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{Bounce, BounceLatency, BounceTail, Range, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Seconds};
 
 /// **A session from `Session::new` is a full session.** A constant wired to

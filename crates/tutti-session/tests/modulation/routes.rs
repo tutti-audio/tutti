@@ -2,15 +2,15 @@
 //! the keys are minted, `routes()` / `routes_to()` / `sources()` read what is
 //! declared, and polarity and curve are part of declaring a route.
 
+use tutti_buffers::MaxBlock;
 use tutti_modulation::{Law, Lfo, Polarity, Source};
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_session::{ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec, Session};
-use tutti_types::MaxBlock;
 use tutti_units::{Depth, Hz, Q, Samples};
 
 fn session() -> Session {
     Session::builder()
-        .outputs(tutti_types::ChannelLayout::STEREO)
+        .outputs(tutti_buffers::ChannelLayout::STEREO)
         .max_block(MaxBlock::of(Samples(256)))
         .build()
         .expect("builds")

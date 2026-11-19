@@ -8,7 +8,7 @@
 //! and inferred tempo) is [`MidiClockDecoder`](crate::MidiClockDecoder). A device sends one or the
 //! other, and which you decode is decided by the source, not by preference.
 
-use tutti_midi_protocol::{MtcTimeCode, SmpteTimecode};
+use tutti_midi_protocol::{MtcTimeCode, QuarterFrame, SmpteTimecode};
 use tutti_ump::{Message, System, Ump};
 
 /// Frames the eight pieces of a cycle take to send, and so how old the
@@ -97,13 +97,13 @@ impl MtcDecoder {
         let Ok(Message::System(_, System::TimeCode(code))) = (*ump).decode() else {
             return false;
         };
-        self.piece(code.get());
+        self.piece(QuarterFrame::from_data(code));
         true
     }
 
-    fn piece(&mut self, quarter_frame: u8) {
-        let piece = (quarter_frame >> 4) & 0x07;
-        let nibble = quarter_frame & 0x0F;
+    fn piece(&mut self, quarter_frame: QuarterFrame) {
+        let piece = quarter_frame.piece.get();
+        let nibble = quarter_frame.nibble.get();
 
         // The step from the piece before: one up is forward, one down is
         // reverse (modulo 8: 7 to 0 starts the next forward cycle).

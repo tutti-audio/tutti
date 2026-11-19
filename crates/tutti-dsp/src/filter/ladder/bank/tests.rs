@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::{Drive, Hz, Resonance, SampleRate};
 
 use super::*;

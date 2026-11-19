@@ -5,7 +5,7 @@
 use std::num::NonZeroUsize;
 
 use crate::support::{note_on, step};
-use tutti_midi_protocol::{Addressee, GeneralMidi, Heard, Universal};
+use tutti_midi_protocol::{Addressee, GeneralMidiMode, Heard, Universal};
 use tutti_ump::{Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, Rpn, U7, U14, Voice2};
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::Semitones;
@@ -191,7 +191,7 @@ fn general_midi_on_mutes_and_returns_every_channel_to_its_defaults() {
     let on = say(
         &mut core,
         Addressee::All,
-        Universal::GeneralMidi(GeneralMidi::On),
+        Universal::GeneralMidi(GeneralMidiMode::On),
     );
     assert_eq!(
         on.iter().filter(|c| matches!(c, Command::Cut(_))).count(),
@@ -236,7 +236,7 @@ fn general_midi_off_returns_to_the_instruments_own_status() {
     say(
         &mut core,
         Addressee::All,
-        Universal::GeneralMidi(GeneralMidi::Off),
+        Universal::GeneralMidi(GeneralMidiMode::Off),
     );
     let bend = step(&mut core, 0, Voice2::PitchBend(BendValue::MAX));
     assert!((retunes(&bend)[0].1 - 12.0).abs() < 1e-3);
@@ -262,7 +262,7 @@ fn general_midi_resets_the_master_but_not_the_own_knob() {
     let on = say(
         &mut core,
         Addressee::All,
-        Universal::GeneralMidi(GeneralMidi::On),
+        Universal::GeneralMidi(GeneralMidiMode::On),
     );
     assert!(retunes(&on).iter().all(|&(_, b)| b == 0.0), "A440 again");
     let quarter = (8192.0_f64 / 16383.0).powi(2);

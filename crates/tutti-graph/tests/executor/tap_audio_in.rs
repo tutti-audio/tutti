@@ -1,6 +1,8 @@
 //! A tap's reader is a `Source` (`impl Source for TapReader`), so a pump
 //! or a recorder takes it as it is.
 
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TapReader, TransportPosition,
@@ -8,8 +10,6 @@ use tutti_graph::{
 };
 use tutti_graph::{NodeKey, TapAlign, TapId};
 use tutti_graph::{OutPort, Source as Origin};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 /// A stereo source that plays `frames` in order, then silence: the graph the

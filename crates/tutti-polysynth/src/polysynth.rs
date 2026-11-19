@@ -14,6 +14,7 @@
 use crate::SynthConfig;
 use crate::UnisonVoices;
 use crate::bank::{CONTROL_BLOCK, VoiceBank};
+use crate::lane::SynthFloat;
 use crate::mpe::MpeControl;
 use crate::synth_voice::SynthVoice;
 use crate::tuning::{A4_FREQ, key_freq};
@@ -28,14 +29,15 @@ use tutti_ump::NoteId;
 use tutti_ump::{
     Attribute, CCNumber, MidiChannel, NoteNumber, RegisteredPerNoteController, Ump, Voice2,
 };
-use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Semitones, Tail};
+use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Samples, Semitones, Tail};
 use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 
 /// A polyphonic subtractive synthesizer: a MIDI-driven voice allocator over a
 /// SIMD voice bank.
 ///
-/// Construct one from a [`SynthConfig`] with [`PolySynth::new`]. It is a
-/// graph node (`tutti_graph::Node`) with no audio input, stereo output and
+/// Construct one from a [`SynthConfig`] with [`PolySynth::new`]. It is generic over
+/// the float it renders in (`f32` or `f64`: its voice bank runs `f32x8` or `f64x4`
+/// lanes) and, for either, a graph node (`tutti_graph::Node<F>`) with no audio input, stereo output and
 /// one MIDI event input; each event is applied on its own frame. Inserting it
 /// hands back a `tutti_graph::ParamSet` over its live params, by
 /// `UnitParam`: `Volume` (master gain, linear), and with a unison engine
@@ -56,12 +58,12 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 ///
 /// ```
 /// use std::num::NonZeroUsize;
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Hz, Resonance, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Solo};
 /// use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 ///
-/// let synth = PolySynth::new(SynthConfig {
+/// let synth = PolySynth::<f32>::new(SynthConfig {
 ///     oscillator: OscillatorType::Saw,
 ///     polyphony: NonZeroUsize::new(8).unwrap(),
 ///     filter: FilterType::Moog { cutoff: Hz(2_000.0), resonance: Resonance(0.5) },
@@ -75,7 +77,7 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// assert_eq!(out.len(), 2); // stereo
 /// ```
 #[derive(Debug)]
-pub struct PolySynth {
+pub struct PolySynth<F: SynthFloat> {
     config: SynthConfig,
     /// The rate the voices are built for: [`PolySynth::INITIAL_RATE`] until the
     /// graph prepares the synth (`Node::prepare`).
@@ -83,7 +85,7 @@ pub struct PolySynth {
     allocator: VoiceAllocator,
     voices: Vec<SynthVoice>,
     /// Every sub-voice's oscillator, filter and envelope state, in SIMD lanes.
-    bank: VoiceBank,
+    bank: VoiceBank<F>,
     /// The key frequency last struck: where a glide the config asks for leaves
     /// from (the glides themselves are the voices').
     last_freq: Hz,
@@ -108,7 +110,7 @@ pub struct PolySynth {
     finished_indices: Vec<usize>,
 }
 
-impl PolySynth {
+impl<F: SynthFloat> PolySynth<F> {
     /// The rate a synth renders at until its graph prepares it: 44.1 kHz. The
     /// rate is the graph's, not the config's (`Node::prepare`).
     pub const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
@@ -172,7 +174,7 @@ impl PolySynth {
         config: &SynthConfig,
         sample_rate: SampleRate,
         unison_count: UnisonVoices,
-    ) -> VoiceBank {
+    ) -> VoiceBank<F> {
         VoiceBank::new(
             config.oscillator,
             &config.filter,
@@ -438,15 +440,13 @@ impl PolySynth {
             CCNumber::RESONANCE => {
                 self.voices
                     .iter_mut()
-                    .for_each(|v| v.set_filter_resonance(value.get()));
+                    .for_each(|v| v.set_filter_resonance(value));
             }
             // CC74 (Brightness). Under MPE a member-channel CC74 is rewritten to a
             // native per-note controller at the input edge (routed per-voice via
             // the `AssignablePerNoteController` arm above), so a channel-wide CC74
             // reaching here is a plain global brightness/cutoff.
             CCNumber::BRIGHTNESS => {
-                // A voice's cutoff controller is `f32` DSP state: narrowed once here.
-                let value = value.get() as f32;
                 self.voices.iter_mut().for_each(|v| v.set_cc_cutoff(value));
             }
             _ => {}
@@ -543,8 +543,6 @@ impl PolySynth {
                 voice.set_start_phases(unison.randomize_phases());
             }
         }
-        // The voice's velocity is `f32` DSP state: narrowed once here.
-        let vel_norm = vel_norm.get() as f32;
         voice.set_velocity_mod(vel_norm);
         voice.set_tune(tune);
         if is_legato {
@@ -620,7 +618,7 @@ impl PolySynth {
         start: usize,
         frames: usize,
         volume: Amplitude,
-        emit: &mut impl FnMut(usize, f32, f32),
+        emit: &mut impl FnMut(usize, F, F),
     ) {
         let mut done = 0;
         while done < frames {
@@ -632,13 +630,14 @@ impl PolySynth {
             // ended to where the Universal messages have put it: at unity
             // throughout it is the identity.
             let (from, to) = (self.master_applied, self.allocator.master_gain());
-            // The output is `f32`: the volume and the ramp's ends narrow once per step and the
-            // ramp runs in `f32`.
-            let volume = volume.get() as f32;
-            let (from_left, to_left) = (from.left.get() as f32, to.left.get() as f32);
-            let (from_right, to_right) = (from.right.get() as f32, to.right.get() as f32);
-            let ramp =
-                |from: f32, to: f32, i: usize| tutti_dsp::lerp(from, to, (i + 1) as f32 / n as f32);
+            // The volume and the ramp's ends cross once per step, into the output's float.
+            let volume = F::from_unit(volume);
+            let (from_left, to_left) = (F::from_unit(from.left), F::from_unit(to.left));
+            let (from_right, to_right) = (F::from_unit(from.right), F::from_unit(to.right));
+            let ramp = |from: F, to: F, i: usize| {
+                let along = F::from_unit(Normalized::progress(Samples(i + 1), Samples(n)));
+                tutti_dsp::lerp(from, to, along)
+            };
             for (i, (&l, &r)) in left.iter().zip(right).enumerate() {
                 emit(
                     start + done + i,
@@ -686,7 +685,7 @@ impl PolySynth {
         &mut self,
         blocks: SubBlocks<'_>,
         volume: Amplitude,
-        emit: &mut impl FnMut(usize, f32, f32),
+        emit: &mut impl FnMut(usize, F, F),
     ) {
         for (range, events) in blocks {
             for event in events {
@@ -699,7 +698,7 @@ impl PolySynth {
     }
 }
 
-impl PolySynth {
+impl<F: SynthFloat> PolySynth<F> {
     /// Silence every voice and forget the glide: a freshly prepared synth's
     /// state. Its `Param` cells and MPE mode are untouched.
     pub(crate) fn reset_voices(&mut self) {
@@ -734,7 +733,7 @@ impl PolySynth {
     }
 }
 
-impl Clone for PolySynth {
+impl<F: SynthFloat> Clone for PolySynth<F> {
     fn clone(&self) -> Self {
         // The clone's MIDI scratch is its own (a clone is a fork's template,
         // and later a fork: it plays only its own event input).
@@ -759,7 +758,7 @@ impl Clone for PolySynth {
 #[cfg(test)]
 mod tests;
 
-impl PolySynth {
+impl<F: SynthFloat> PolySynth<F> {
     /// The amplitude envelope's release stage, as the node's tail.
     ///
     /// This node takes no audio input — it is driven by MIDI — so "after the

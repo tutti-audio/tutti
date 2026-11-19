@@ -10,7 +10,7 @@
 use crate::param_reads::ParamReads as _;
 use crate::pooled::{LoadPlugin, Spec};
 use std::time::Duration;
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 
 use tutti_plugin::catalog::PluginRef;
 use tutti_session::Session;

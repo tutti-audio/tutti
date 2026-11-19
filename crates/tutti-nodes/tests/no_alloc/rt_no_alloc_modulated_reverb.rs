@@ -3,12 +3,12 @@
 //! and 6 for the swept delay, with the output finite and within the bound the feedback sets
 //! and no allocation on the audio thread.
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ParamNode;
 use tutti_nodes::{
     FreeverbControls, FreeverbNode, ModDelayControls, ModDelayNode, PlateReverbConfig,
     PlateReverbNode, Stagger, Sweep,
 };
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::PhaseIncrement;
 use tutti_units::UnitParam::{
     Cutoff, Damping, Decay, DelayTime, Depth, Diffusion, Feedback, Rate, RoomSize,

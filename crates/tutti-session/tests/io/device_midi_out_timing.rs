@@ -9,11 +9,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
 use tutti_session::{EventInPort, LiveSession, Session, midi_sink};
-use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, SampleRate, Samples, Seconds};

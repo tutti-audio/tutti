@@ -6,13 +6,13 @@
 //! sound, a flanger at a short one (1 ms) so the copy combs against the original and the sweep
 //! moves the notches: the same node at different numbers ([`Sweep`]), at any width.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, DELAY_SLEW, GAIN_GLIDE, Glide, Lerp, ModDelayBank, ModDelayControls,
     ModDelayLayout, Stagger, StaggerError, Steps, Sweep,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
@@ -324,10 +324,10 @@ mod tests {
     // format, so their tolerances are `f32`'s.
     use super::*;
     use crate::test_support::drive_kernel;
+    use tutti_buffers::{ChannelLayout, MaxBlock};
     use tutti_dsp::MaxDelay;
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::{ChannelLayout, MaxBlock};
     use tutti_units::{Latency, Samples, UnitParam};
     use tutti_units::{Phase, PhaseIncrement, RunningPhase};
 

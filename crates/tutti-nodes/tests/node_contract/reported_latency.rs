@@ -9,8 +9,10 @@
 //! the output with an impulse, because the number alone cannot fail on a node
 //! whose DSP drifted away from it.
 
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Mono;
 use tutti_buffers::Planes;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
@@ -18,8 +20,6 @@ use tutti_nodes::{
     ChannelTimes, CrossoverNode, DelayControls, DelayLayout, DelayNode, InterpolationMode,
     MaxDelay, ModDelayNode, MultibandCompressorNode,
 };
-use tutti_types::MaxBlock;
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::Latency;
 use tutti_units::{Feedback, Hz, Mix, Seconds};
 use tutti_units::{SampleRate, Samples};
@@ -263,10 +263,10 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
 /// exactly that frame.
 #[test]
 fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
+    use tutti_buffers::ChannelLayout;
     use tutti_graph::Source;
     use tutti_graph::{GraphBuilder, Prepare};
     use tutti_nodes::{LimiterControls, LimiterNode};
-    use tutti_types::ChannelLayout;
     use tutti_units::Latency;
     use tutti_units::{Db, Samples, Seconds};
 

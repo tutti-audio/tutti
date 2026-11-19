@@ -32,8 +32,8 @@ use crate::nonempty;
 use crate::voice::Direction;
 use crate::voice::interp::Place;
 use crate::voice_width;
+use tutti_buffers::ChannelLayout;
 use tutti_rt::RingFloat;
-use tutti_types::ChannelLayout;
 
 /// Arc'd handles shared between the control side and the streamer loop.
 /// `Clone` is cheap — every field is an `Arc`.

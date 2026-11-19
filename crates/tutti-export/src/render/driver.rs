@@ -24,10 +24,10 @@ use crate::render::BlockCursor;
 use crate::{ConfigError, RenderGraph, RtLogSink};
 use std::ops::Range;
 use std::sync::Arc;
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Fold, InterleavedMut, Planes, PlanesMut, Sample, interleave};
 use tutti_graph::{RtLogReaders, fold_to_width};
 use tutti_transport::RenderClock;
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::Samples;
 
 /// What a target's channels are, for the fold from the graph's outputs or a

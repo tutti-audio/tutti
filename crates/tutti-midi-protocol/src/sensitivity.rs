@@ -10,8 +10,8 @@ use tutti_units::Semitones;
 /// fixed-point value, not a bare `u8`, is what lets it round-trip through UMP.
 ///
 /// Every `u32` is a sensitivity (§7.4.13.3: just under 128 semitones; the top
-/// words round to 128.0 in `f32`), so the bits have no refused value; only a
-/// whole-semitone count can be out of range ([`new`](Self::new), [`of`](Self::of)).
+/// words round to 128.0 in `f32`), so the bits have no refused value, and a
+/// whole-semitone count ([`from_semitones`](Self::from_semitones)) is a `U7`.
 /// Serde carries the bits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -42,35 +42,13 @@ impl PitchBendSensitivity {
     /// and every Member: 48 semitones (M2-120 section 3.5).
     pub const MPE_PROFILE_DEFAULT: Self = Self(48 << Self::FRAC_BITS);
 
-    /// The widest whole-semitone sensitivity: 7 integer bits.
-    pub(crate) const MAX_SEMITONES: u8 = 127;
-
-    /// Whole-semitone sensitivity (the common MPE case, e.g. 48), or `None`
-    /// above `MAX_SEMITONES`. A `u8` count, not
-    /// `Semitones`: this is an exact integer count.
+    /// Whole-semitone sensitivity (the common MPE case, e.g. 48). A seven-bit
+    /// count, not `Semitones`: this is an exact integer count, and 7 integer
+    /// bits is every count the word holds.
     #[inline]
     #[must_use]
-    pub const fn new(semitones: u8) -> Option<Self> {
-        if semitones <= Self::MAX_SEMITONES {
-            Some(Self((semitones as u32) << Self::FRAC_BITS))
-        } else {
-            None
-        }
-    }
-
-    /// [`new`](Self::new) for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// Above `MAX_SEMITONES`.
-    #[inline]
-    #[must_use]
-    #[track_caller]
-    pub const fn of(semitones: u8) -> Self {
-        match Self::new(semitones) {
-            Some(s) => s,
-            None => panic!("a pitch bend sensitivity is at most 127 semitones"),
-        }
+    pub const fn from_semitones(semitones: U7) -> Self {
+        Self((semitones.get() as u32) << Self::FRAC_BITS)
     }
 
     /// The raw 32-bit RPN data field.

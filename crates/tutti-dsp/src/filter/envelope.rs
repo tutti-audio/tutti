@@ -27,8 +27,8 @@
 //! says, at the lowest cutoff the controls reach), so the node over it declares
 //! [`Tail::Unknown`](tutti_units::Tail::Unknown).
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds, Semitones};
 
 use super::SvfBank;

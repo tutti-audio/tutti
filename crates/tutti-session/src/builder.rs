@@ -4,13 +4,12 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use tutti_buffers::MAX_CHANNELS;
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::NodeKey;
-use tutti_graph::PrerollTable;
 use tutti_nodes::{ClickNode, ClickSettings};
 use tutti_transport::Transport;
-use tutti_types::MAX_CHANNELS;
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
-use tutti_units::{SampleRate, Samples};
+use tutti_units::SampleRate;
 
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
 use tutti_buffers::Float;
@@ -47,7 +46,7 @@ use tutti_engine::BlockDates;
 ///
 /// ```
 /// use tutti_units::{SampleRate, Samples};
-/// use tutti_types::{ChannelLayout, MaxBlock};
+/// use tutti_buffers::{ChannelLayout, MaxBlock};
 /// use tutti_session::{Session, Workers};
 ///
 /// let session = Session::builder()
@@ -245,7 +244,6 @@ struct Parts<F: Float> {
     transport: Transport,
     click: Option<NodeKey>,
     click_settings: Arc<ClickSettings>,
-    compensation: Arc<PrerollTable>,
     #[cfg(feature = "midi")]
     midi: Option<crate::MidiNodes>,
     #[cfg(feature = "midi-hardware")]
@@ -407,9 +405,9 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         let load = engine.take_load_meter();
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
-        session.load = load;
-        session.transport_handle.set_clock(clock);
-        session.heard = Some((heard, layout));
+        session.output.load = load;
+        session.transport.handle.set_clock(clock);
+        session.output.heard = Some((heard, layout));
         Ok(session)
     }
 
@@ -452,7 +450,6 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
                 transport,
                 click: None,
                 click_settings: Arc::new(ClickSettings::new()),
-                compensation: Arc::default(),
                 #[cfg(feature = "midi")]
                 midi: None,
                 #[cfg(feature = "midi-hardware")]
@@ -519,8 +516,8 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             },
             true,
         )?;
-        session.load = load;
-        session.heard = Some((heard, layout));
+        session.output.load = load;
+        session.output.heard = Some((heard, layout));
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, which the timer reports as zero.
         #[cfg(feature = "midi")]
@@ -529,7 +526,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             .set_output_clock(crate::midi::OutputClockSource::new(clock.clone(), latency));
         #[cfg(not(feature = "midi"))]
         let _ = latency;
-        session.transport_handle.set_clock(clock);
+        session.transport.handle.set_clock(clock);
         Ok(session)
     }
 }
@@ -612,8 +609,8 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             crate::device::DeviceHandle::vacant(self.opts.host),
             true,
         )?;
-        session.load = engine.take_load_meter();
-        session.heard = Some((engine.heard_taps(), spec.channels));
+        session.output.load = engine.take_load_meter();
+        session.output.heard = Some((engine.heard_taps(), spec.channels));
         let clock = engine.block_clock();
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, read on every drain.
@@ -624,7 +621,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
                 clock.clone(),
                 audio_engine.latency(),
             ));
-        session.transport_handle.set_clock(clock);
+        session.transport.handle.set_clock(clock);
         #[cfg(feature = "capture")]
         session.inputs.set_output_latency(audio_engine.latency());
         let state = Arc::new(tutti_engine::AudioCallbackState::new(engine));
@@ -638,7 +635,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             chosen,
             input_latency,
         );
-        session.faults_seen = device.faults().count();
+        session.reports.faults_restarted(device.faults().count());
         session.running.fill(device);
         Ok(session)
     }
@@ -692,7 +689,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// speaker. Without it the device is taken to be the engine's order for
     /// its width ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1,
     /// 7.1.4, and independent channels at any other width) and is read back as
-    /// [`Placement::Assumed`](tutti_types::Placement::Assumed)
+    /// [`Placement::Assumed`](tutti_buffers::Placement::Assumed)
     /// ([`Session::output_device`]).
     ///
     /// The statement is the device's width: a build whose device has another
@@ -969,7 +966,6 @@ impl<C: Clock> SessionBuilder<C> {
             transport,
             click: Some(click.erase()),
             click_settings,
-            compensation: Arc::default(),
             #[cfg(feature = "midi")]
             midi,
             #[cfg(feature = "midi-hardware")]
@@ -1012,22 +1008,15 @@ impl<C: Clock> SessionBuilder<C> {
             _early_work: crate::session::EarlyWork(main_work.clone()),
             running,
             graph: parts.graph,
-            resource_ids: crate::peer::ResourceIds::new(),
-            pool: crate::Pool::new(self.opts.pool),
+            pool: crate::session::parts::PoolPart::new(self.opts.pool),
             #[cfg(feature = "plugin")]
             pooled_swaps: std::collections::BTreeSet::new(),
-            transport_handle: crate::TransportHandle::new(parts.transport.clone()),
-            transport: parts.transport,
-            load: None,
-            heard: None,
-            root_request: self.opts.root.clone(),
-            root_refusal: None,
-            output_policy: crate::policy::output_cell(table.output_facts()),
-            click: parts.click,
-            compensation: parts.compensation,
-            latency: Samples(0),
-            resumed: false,
-            silenced_seen: 0,
+            transport: crate::session::parts::TransportPart::new(parts.transport, parts.click),
+            output: crate::session::parts::OutputPart::new(
+                self.opts.root.clone(),
+                crate::policy::output_cell(table.output_facts()),
+            ),
+            reports: Default::default(),
             #[cfg(feature = "midi")]
             midi: parts.midi,
             #[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
@@ -1046,7 +1035,6 @@ impl<C: Clock> SessionBuilder<C> {
             sampler_opens: tutti_types::Mint::new(),
             #[cfg(feature = "sampler")]
             sampler_streams: Default::default(),
-            faults_seen: 0,
             #[cfg(feature = "device")]
             output_listing: None,
             #[cfg(feature = "device")]
@@ -1070,7 +1058,6 @@ impl<C: Clock> SessionBuilder<C> {
             work,
             #[cfg(feature = "plugin")]
             main_work,
-            carried_events: Vec::new(),
         };
         session.provide_values(&table, click_settings);
         Ok(session)
@@ -1180,7 +1167,7 @@ pub fn root_width(project: ChannelLayout, device: ChannelLayout) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use tutti_types::{ChannelLayout, MaxBlock};
+    use tutti_buffers::{ChannelLayout, MaxBlock};
     use tutti_units::{SampleRate, Samples};
 
     use super::LIVE_MAX_BLOCK;
@@ -1199,7 +1186,7 @@ mod tests {
         assert_eq!(session.graph_ref().outputs(), 2);
         assert_eq!(session.sample_rate(), SampleRate::SR_48K);
         assert_eq!(
-            session.heard.as_ref().map(|(_, layout)| *layout),
+            session.output.heard.as_ref().map(|(_, layout)| *layout),
             Some(ChannelLayout::STEREO)
         );
     }
@@ -1220,6 +1207,6 @@ mod tests {
         assert_eq!(prepared.sample_rate(), SampleRate::SR_44K1);
         assert_eq!(prepared.max_block(), block);
         assert_eq!(session.graph_ref().outputs(), 4);
-        assert_eq!(session.heard.as_ref().map(|(_, l)| *l), Some(quad));
+        assert_eq!(session.output.heard.as_ref().map(|(_, l)| *l), Some(quad));
     }
 }

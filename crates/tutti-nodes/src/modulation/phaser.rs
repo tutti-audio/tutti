@@ -6,13 +6,13 @@
 //! cancellation, which is why its notches are fewer and unevenly spaced compared with a
 //! flanger's.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, GAIN_GLIDE, Glide, Lerp, MAX_PHASER_CHANNELS, MIN_RATE, PhaserChain,
     PhaserControls, Stages, Stagger, StaggerError, Steps, SweepRange, allpass_complement, sweep_hz,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Depth, Feedback, Hz, PhaseIncrement, SampleRate, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
@@ -332,9 +332,9 @@ mod tests {
     // format, so their tolerances are `f32`'s.
     use super::*;
     use crate::test_support::drive_kernel;
+    use tutti_buffers::ChannelLayout;
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::ChannelLayout;
     use tutti_units::{
         Bipolar, Latency, Phase, PhaseIncrement, PhaseStep, Real, RunningPhase, Samples, Tail,
         UnitParam,

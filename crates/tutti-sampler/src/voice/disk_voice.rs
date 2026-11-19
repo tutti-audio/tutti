@@ -18,11 +18,11 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::SamplerFloat;
+use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_graph::{
     Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
     NodeParts, Prepare, RenderMode, Shape, Status, declick_frames,
 };
-use tutti_types::{ChannelLayout, MAX_CHANNELS};
 use tutti_units::{Amplitude, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail};
 
 use super::clock::{BlockClock, Clock};

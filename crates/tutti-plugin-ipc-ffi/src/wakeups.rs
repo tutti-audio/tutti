@@ -10,10 +10,12 @@
 pub struct FdId(i32);
 
 impl FdId {
-    /// The registration of the descriptor numbered `raw`.
+    /// The registration of the descriptor numbered `raw`; `None` for a
+    /// negative number, which names no descriptor (`-1` is the format's "no
+    /// descriptor", and borrowing it is a fault).
     #[must_use]
-    pub const fn new(raw: i32) -> Self {
-        Self(raw)
+    pub const fn new(raw: i32) -> Option<Self> {
+        if raw < 0 { None } else { Some(Self(raw)) }
     }
 
     /// The descriptor's number.
@@ -86,6 +88,15 @@ pub struct Ready {
 
 #[cfg(test)]
 mod tests {
+    /// A negative number names no descriptor: `-1` would fault in a borrow.
+    #[test]
+    fn an_fd_id_refuses_every_negative_number() {
+        assert!(FdId::new(-1).is_none());
+        assert!(FdId::new(i32::MIN).is_none());
+        assert_eq!(FdId::new(0).map(FdId::get), Some(0));
+        assert_eq!(FdId::new(i32::MAX).map(FdId::get), Some(i32::MAX));
+    }
+
     use super::*;
 
     /// **Interest is a set of three events** with the set algebra.

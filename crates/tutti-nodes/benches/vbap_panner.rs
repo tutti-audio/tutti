@@ -19,12 +19,12 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::Bed;
 use tutti_buffers::PlanesMut;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::Bed;
 use tutti_units::{ArcDegrees, Azimuth, Elevation, SampleRate};
 
 /// Warmup before measuring, in frames: two seconds at 48 kHz, 40 glide

@@ -8,11 +8,11 @@
 
 use std::path::{Path, PathBuf};
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, FoldError};
 use tutti_codec::Format;
 use tutti_dsp::DitherShape;
 use tutti_graph::TapReader;
-use tutti_types::{ChannelLayout, ChannelTopology};
 
 use crate::Resample;
 use crate::normalize::Normalize;
@@ -194,10 +194,10 @@ impl FileTarget {
     /// Whether the file's speakers are stated ([`topology`](Self::topology))
     /// or assumed from its width ([`ChannelTopology::assumed`]).
     #[must_use]
-    pub(crate) fn placement(&self) -> tutti_types::Placement {
+    pub(crate) fn placement(&self) -> tutti_buffers::Placement {
         match self.width {
-            Width::Placed(_) => tutti_types::Placement::Stated,
-            Width::Count(_) => tutti_types::Placement::Assumed,
+            Width::Placed(_) => tutti_buffers::Placement::Stated,
+            Width::Count(_) => tutti_buffers::Placement::Assumed,
         }
     }
 

@@ -1,10 +1,10 @@
 //! The envelope filter does not allocate per block, with its base cutoff and depth moved between
 //! blocks.
 
+use tutti_buffers::ChannelLayout;
 use tutti_dsp::SvfType;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{EnvelopeFilterConfig, EnvelopeFilterNode};
-use tutti_types::ChannelLayout;
 use tutti_units::{Hz, SampleRate, Semitones, UnitParam};
 
 fn feed(rig: &mut BlockRig) {

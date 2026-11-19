@@ -22,7 +22,7 @@ use tutti_buffers::{Planes, PlanesMut};
 
 use std::sync::Arc;
 use std::time::Duration;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use param_probe::{extra, knob, knobs, load_param_probe, until};

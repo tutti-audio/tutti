@@ -1,8 +1,8 @@
 //! The root's declared topology: [`RootTopologyStatus`] says whether the root is as it was asked
 //! to be, and the `Session` calls declare it, read it back and place it on the output device.
 
+use tutti_buffers::ChannelTopology;
 use tutti_graph::RootError;
-use tutti_types::ChannelTopology;
 
 use crate::{AppKey, Clock, RootDeclaration, Session};
 
@@ -78,25 +78,14 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// # Errors
     ///
     /// [`Error::Output`](crate::Error::Output) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)), or the
+    /// renders ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)), or the
     /// device cannot place it (an unassigned root wider than the device, a channel
     /// no speaker names). Nothing is changed.
     pub fn declare_root_topology(
         &mut self,
         root: Option<ChannelTopology>,
     ) -> crate::Result<RootDeclaration<'_, C::Float>> {
-        self.sync_root_refusal();
-        // The same request again, in force, is nothing to do.
-        if !(root == self.root_request && self.root_refusal.is_none()) {
-            self.root_request = root.clone();
-            match self.graph.declare_root(root, false) {
-                Ok(()) => self.root_refusal = None,
-                Err(e) => {
-                    self.root_refusal = Some(e);
-                    return Err(e.into());
-                }
-            }
-        }
+        self.output.declare(&mut self.graph, root)?;
         Ok(RootDeclaration {
             graph: &mut self.graph,
         })
@@ -105,9 +94,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// Takes the refusal of a declaration that waited and could not be
     /// applied into `root_refusal`, where a device restart re-attempts it.
     pub(crate) fn sync_root_refusal(&mut self) {
-        if let Some(e) = self.graph.take_apply_refusal() {
-            self.root_refusal = Some(e);
-        }
+        self.output.sync_refusal(&mut self.graph);
     }
 
     /// The topology last asked for with
@@ -116,7 +103,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// whether or not it is in force: see
     /// [`root_topology_status`](Self::root_topology_status).
     pub fn requested_root_topology(&self) -> Option<&ChannelTopology> {
-        self.root_request.as_ref()
+        self.output.root_request.as_ref()
     }
 
     /// Whether the root is as it was asked to be. A refusal is a value here,
@@ -146,6 +133,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// refused at its call drops nothing, so a waiting one still applies.
     pub fn root_topology_status(&self) -> RootTopologyStatus {
         match self
+            .output
             .root_refusal
             .or(self.graph.apply_refusal())
             .or(self.graph.widen_refusal())
@@ -164,15 +152,15 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// What the output device's channels are as the session folds the root
     /// into them, and whether that was
-    /// [`Stated`](tutti_types::Placement::Stated)
+    /// [`Stated`](tutti_buffers::Placement::Stated)
     /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
     /// `DeviceRestart::topology`) or
-    /// [`Assumed`](tutti_types::Placement::Assumed) from the device's width
+    /// [`Assumed`](tutti_buffers::Placement::Assumed) from the device's width
     /// alone ([`ChannelTopology::assumed`]). `None` for a session with no
     /// engine (a detached one).
     #[must_use]
     pub fn output_device(&self) -> Option<crate::OutputPlacement> {
-        let (_, layout) = self.heard.as_ref()?;
+        let (_, layout) = self.output.heard.as_ref()?;
         self.graph.output_placement(*layout)
     }
 }

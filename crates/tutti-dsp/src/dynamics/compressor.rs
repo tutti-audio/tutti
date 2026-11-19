@@ -19,8 +19,8 @@
 //! of them) and no tail (the gain only scales, so a silent signal is a silent output
 //! whatever the follower is doing).
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gain_reduction, level_db};

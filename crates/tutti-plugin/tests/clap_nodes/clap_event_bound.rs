@@ -7,10 +7,10 @@
 use crate::clap_probe::SAMPLE_RATE;
 use tutti_fixtures::{machine_lock, main_thread};
 
+use tutti_buffers::MaxBlock;
 use tutti_clap_host::ClapLoaded;
 use tutti_graph::{Node, Prepare};
 use tutti_plugin_types::Load;
-use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
 /// The node's declared bound after a `prepare` at a graph block of `frames`.

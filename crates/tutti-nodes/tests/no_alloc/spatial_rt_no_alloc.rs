@@ -4,13 +4,13 @@
 //! The gate lives in the crate that owns the panners: `assert_no_alloc`
 //! installs a global allocator, which only a test binary of that crate may do.
 
+use tutti_buffers::Bed;
+use tutti_buffers::MaxBlock;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::Bed;
-use tutti_types::MaxBlock;
 use tutti_units::Elevation;
 use tutti_units::SampleRate;
 use tutti_units::{Azimuth, UnitParam};
@@ -188,8 +188,8 @@ fn check_block(
 /// unit power of its gains.
 #[test]
 fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bounded() {
+    use tutti_buffers::{MaxBlock, Speaker};
     use tutti_graph::Prepare;
-    use tutti_types::{MaxBlock, Speaker};
     use tutti_units::Samples;
 
     const FRAMES: usize = 64;
@@ -206,7 +206,7 @@ fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bo
         };
         let lfe = bed.topology().index_of(Speaker::LowFrequency);
         let channels = bed.width().count() as usize;
-        assert!(channels <= tutti_types::MAX_CHANNELS);
+        assert!(channels <= tutti_buffers::MAX_CHANNELS);
         let controls = node.param_set();
         let fork = node.fork_fresh();
         let mut rig = Direct::new(Gated(node), SampleRate::SR_48K, FRAMES);
@@ -424,7 +424,7 @@ fn hrtf_binaural_same_rate_prepare_is_allocation_free() {
         HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
     let prepare = Prepare::new(
         SampleRate::SR_48K,
-        tutti_types::MaxBlock::of(tutti_units::Samples(256)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples(256)),
     );
     assert_no_alloc::assert_no_alloc(|| node.prepare(&prepare));
 }

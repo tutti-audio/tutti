@@ -21,6 +21,7 @@ use std::time::Instant;
 
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, FadeLaw, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{
@@ -34,7 +35,6 @@ use tutti_session::{
     ModTarget, NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef, PhaseCx, Problem, Root,
     RouteSpec, Session, SessionEvent, TargetName, declare_targets,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{
     Amplitude, Beat, Bpm, Depth, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
 };
@@ -934,7 +934,7 @@ fn a_bus_strips_volume_and_pan_take_lanes() {
 fn a_chorus_rate_and_a_phaser_mix_take_lanes() {
     let (mut s, _side) = rig(2);
     let (chorus, _) = s.graph().add(tutti_nodes::ModDelayNode::<f32>::chorus(
-        tutti_types::BusTopology::STEREO,
+        tutti_buffers::BusTopology::STEREO,
     ));
     let (phaser, _) = s.graph().add(tutti_nodes::PhaserNode::<f32>::stereo(
         tutti_nodes::Stages::of(4),

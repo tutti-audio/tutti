@@ -43,7 +43,7 @@ use crate::schedule::CLIP_EVENT_DENSITY;
 /// The MPE transform of one event stream as a graph node. See the module docs.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{SampleRate, Samples};
 /// use tutti_graph::{Editor, NodeKey, Prepare};
 /// use tutti_midi_protocol::MpeMode;

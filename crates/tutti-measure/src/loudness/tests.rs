@@ -1,7 +1,7 @@
 use super::*;
 use crate::fold_uneven;
 use std::f32::consts::TAU;
-use tutti_types::{AmbisonicFormat, AmbisonicOrder, Bed, Speaker};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, Speaker};
 use tutti_units::{Amplitude, Azimuth, Elevation};
 
 /// Pushes one chunk to a windowed meter and returns the reading it yields.

@@ -12,6 +12,7 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use tutti_buffers::Planes;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode, ParamSet};
 use tutti_nodes::{
@@ -19,7 +20,6 @@ use tutti_nodes::{
     ModDelayControls, ModDelayNode, PhaserControls, PhaserNode, Stages, Stagger, SvfFilterNode,
     SvfType, Sweep, SweepRange,
 };
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{Feedback, Hz, PhaseIncrement, Q, Resonance, SampleRate, Seconds, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;

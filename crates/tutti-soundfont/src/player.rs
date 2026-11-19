@@ -594,7 +594,7 @@ impl Player {
                 let instrument = &self.font.instruments()[preset_zone.instrument_id()];
                 for instrument_zone in instrument.regions() {
                     let pair = crate::region_pair::RegionPair::new(preset_zone, instrument_zone);
-                    longest = longest.max(f64::from(pair.release_time()));
+                    longest = longest.max(pair.release_time().get());
                 }
             }
         }
@@ -612,7 +612,7 @@ fn write_block(
     destination: &mut [f32],
     inverse_block_size: f32,
 ) -> bool {
-    if SoundFontMath::max(previous_gain, current_gain) < SoundFontMath::NON_AUDIBLE {
+    if f64::from(previous_gain.max(current_gain)) < SoundFontMath::NON_AUDIBLE.get() {
         return false;
     }
 

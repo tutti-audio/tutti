@@ -1,8 +1,8 @@
 //! [`SvfBank`]: one state-variable filter per channel, all channels at one set of
 //! coefficients, over buffers views.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 
 use super::kernel::{SvfCoefficients, svf_step};
 use crate::control::lane_group;

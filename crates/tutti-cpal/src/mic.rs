@@ -34,7 +34,7 @@
 //! # Which inputs
 //!
 //! A device's inputs are numbered, not placed: cpal reports a count and no
-//! channel map, so they are [`Speaker::Unassigned`](tutti_types::Speaker::Unassigned)
+//! channel map, so they are [`Speaker::Unassigned`](tutti_buffers::Speaker::Unassigned)
 //! and never go through a surround matrix (a 6-input interface is six
 //! microphones, not 5.1). The mic delivers the inputs it was opened with:
 //! [`MicConfig::inputs`] defaults to the first two (a mono device's one input on
@@ -46,11 +46,11 @@ use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, StreamTrait};
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_graph::{InletRing, TapReader, TapWriter};
 use tutti_rt::Drained;
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::Samples;
 use tutti_units::{SampleRate, Seconds};
 
@@ -430,7 +430,7 @@ impl<F: Float> MicIn<F> {
     }
 
     /// Which speaker each delivered channel feeds: none, they are numbered
-    /// device inputs ([`Speaker::Unassigned`](tutti_types::Speaker::Unassigned)).
+    /// device inputs ([`Speaker::Unassigned`](tutti_buffers::Speaker::Unassigned)).
     /// [`Fold::between`] this to the topology a mic should be placed in.
     #[must_use]
     pub fn topology(&self) -> ChannelTopology {

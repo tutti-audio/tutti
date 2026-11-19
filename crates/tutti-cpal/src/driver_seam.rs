@@ -11,11 +11,11 @@ use std::sync::Arc;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use std::time::Duration;
 
+use tutti_buffers::{ChannelLayout, MAX_CHANNELS, MaxBlock};
 use tutti_buffers::{Float, Sample, SampleFormat};
 use tutti_engine::{
     MAX_FRAMES, OutputBlock, OutputSpec, RunningStream, StreamDriver, StreamFaults,
 };
-use tutti_types::{ChannelLayout, MAX_CHANNELS, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 use crate::edge::{self, OffsetBinary};

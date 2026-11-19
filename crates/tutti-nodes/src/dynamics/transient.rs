@@ -1,9 +1,9 @@
 //! [`TransientShaperNode`]: raises or lowers a signal's attacks and its sustain apart.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, Lerp, TransientBank, TransientControls};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{Db, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

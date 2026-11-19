@@ -10,10 +10,10 @@ use crate::host::{ClapHost, HostState};
 use crate::types::PluginInfo;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tutti_buffers::LayoutError;
 use tutti_clap_ffi::{AudioPortInfo, Bundle, DescriptorInfo, LoadError, PortKind, Stage};
 use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence, PluginVersion};
 use tutti_plugin_types::{Load, MainThreadMarker, MainWorkHandle, Origin};
-use tutti_types::LayoutError;
 
 /// What to load: which library of a bundle and which plugin of the library.
 #[derive(Debug, Clone, Default)]

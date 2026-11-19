@@ -3,6 +3,7 @@
 //! effect `KernelNode` runs and the multiband compressor that runs kernels.
 
 use tutti_buffers::Planes;
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, LadderType, ShapeKind, Stages, SvfType};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
@@ -20,7 +21,6 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, TiltFilterConfig, TiltFilterNode,
     TransientShaperConfig, TransientShaperNode,
 };
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{
     BitDepth, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Samples,
     Seconds, Semitones,
@@ -305,6 +305,7 @@ mod logged {
     //! per reset, at the earliest non-finite frame, naming its channel (the lowest on a tie).
 
     use super::{BLOCK, POISONED, SR};
+    use tutti_buffers::{ChannelLayout, MaxBlock};
     use tutti_graph::{
         Cx, Edge, Editor, Executor, InPort, IntoNode, Io, LogFilter, Node, NodeKey, OutPort,
         Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Source, Status,
@@ -313,7 +314,6 @@ mod logged {
     use tutti_nodes::{
         CompressorControls, CompressorNode, DcBlockerConfig, DcBlockerNode, MultibandCompressorNode,
     };
-    use tutti_types::{ChannelLayout, MaxBlock};
     use tutti_units::{Frame, Samples, Tail};
 
     const MESSAGE: &str = "non-finite output; the node's state resets";

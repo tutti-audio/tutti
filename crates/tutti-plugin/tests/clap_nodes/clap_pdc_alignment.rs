@@ -40,17 +40,17 @@
 // the CLAP harness (and its `tutti-clap-test-plugin` dev-dependency) at all.
 use crate::clap_probe;
 use clap_probe::{ProbeEnv, load_probe, render};
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_fixtures::machine_lock;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
 use tutti_graph::{OutPort, Source};
 use tutti_nodes::testing::Through;
 use tutti_plugin::{Bound, PluginClient};
 use tutti_plugin_host::PluginControls;
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;

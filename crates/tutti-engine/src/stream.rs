@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, SampleFormat};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::SampleRate;
 
 use crate::callback::{AudioCallbackState, OutputBlock};

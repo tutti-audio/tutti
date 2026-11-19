@@ -12,12 +12,12 @@
 //! A caller who holds planes and wants the reading for itself uses
 //! [`Normalize::gain_for_rendered`] and [`Rendered::apply_gain`](crate::Rendered::apply_gain).
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Interleaved, InterleavedMut, Planes, Sample, convert, interleave};
 use tutti_dsp::DitherShape;
 use tutti_measure::{
     Loudness, LoudnessConfig, LoudnessMeter, Measure, Meter as _, TruePeakConfig, TruePeakMeter,
 };
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
 use crate::Result;
@@ -46,7 +46,7 @@ use crate::output::FileTarget;
 /// The placement is the file's [`topology`](crate::FileTarget::topology). A
 /// file that states none is taken to be [`ChannelTopology::assumed`] for its
 /// width (1, 2, 4, 6, 8 or 12 channels) and its [`Written`] reports
-/// [`Placement::Assumed`](tutti_types::Placement::Assumed). Any other width
+/// [`Placement::Assumed`](tutti_buffers::Placement::Assumed). Any other width
 /// has no assumed placement, so a `Lufs` output of it is refused when the
 /// render starts ([`TargetError::UnplacedLoudness`](crate::TargetError)):
 /// state a topology. [`Peak`](Self::Peak) needs no placement; true peak folds

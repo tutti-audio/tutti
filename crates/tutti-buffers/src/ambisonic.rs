@@ -65,7 +65,7 @@ pub enum AmbisonicNormalization {
 /// The width is `(order + 1)²`, derived, never stored.
 ///
 /// ```
-/// use tutti_types::{AmbisonicFormat, AmbisonicOrder, ChannelLayout};
+/// use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, ChannelLayout};
 ///
 /// let first = AmbisonicFormat::ambix(AmbisonicOrder::of(1));
 /// assert_eq!(first.width(), ChannelLayout::QUAD);

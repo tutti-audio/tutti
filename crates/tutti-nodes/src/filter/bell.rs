@@ -1,8 +1,8 @@
 //! [`BellFilterNode`]: a matched peaking equalizer, run as one state-variable section.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_dsp::{Lanes, MatchedBell, Ring, Sos, SosError};
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::eq::sealed::Sealed;
@@ -143,10 +143,10 @@ mod tests {
     use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
     use crate::test_support::{RATE, assert_cell_glides, prepared};
+    use tutti_buffers::MaxBlock;
     use tutti_graph::Cost;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::MaxBlock;
     use tutti_units::UnitParam;
     use tutti_units::{Samples, Tail};
 

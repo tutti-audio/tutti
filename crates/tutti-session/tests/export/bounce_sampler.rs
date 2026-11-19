@@ -6,11 +6,11 @@
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::ForkError;
 use tutti_sampler::{Clip, Loop, MemorySource, Playback, SlotId, VoicePool};
 use tutti_session::{Bounce, BounceError, BounceTail, DetachedSession, Range, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, PlaybackRate, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;

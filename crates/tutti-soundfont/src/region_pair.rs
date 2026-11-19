@@ -4,6 +4,8 @@
 
 use tutti_sf2::{InstrumentRegion, LoopMode, PresetRegion, SummedGenerator};
 
+use tutti_units::{Cents, Db, Hz, Normalized, Pan, Seconds};
+
 use crate::soundfont_math::SoundFontMath;
 
 #[non_exhaustive]
@@ -78,6 +80,12 @@ impl<'a> RegionPair<'a> {
             + i32::from(self.instrument.generator(generator.into()))
     }
 
+    /// A generator in tenths of its unit (centibels, tenths of a percent), as a
+    /// fraction-free `f64`: the unit's own value is the figure over ten.
+    fn tenths(&self, generator: SummedGenerator) -> f64 {
+        0.1 * f64::from(self.gs(generator))
+    }
+
     pub(crate) fn sample_start(&self) -> i32 {
         self.instrument.sample_start().get() as i32
     }
@@ -94,36 +102,43 @@ impl<'a> RegionPair<'a> {
         self.instrument.sample_end_loop().get() as i32
     }
 
-    pub(crate) fn modulation_lfo_to_pitch(&self) -> i32 {
-        self.gs(SummedGenerator::ModulationLfoToPitch)
+    pub(crate) fn modulation_lfo_to_pitch(&self) -> Cents {
+        Cents(f64::from(self.gs(SummedGenerator::ModulationLfoToPitch)))
     }
 
-    pub(crate) fn vibrato_lfo_to_pitch(&self) -> i32 {
-        self.gs(SummedGenerator::VibratoLfoToPitch)
+    pub(crate) fn vibrato_lfo_to_pitch(&self) -> Cents {
+        Cents(f64::from(self.gs(SummedGenerator::VibratoLfoToPitch)))
     }
 
-    pub(crate) fn modulation_envelope_to_pitch(&self) -> i32 {
-        self.gs(SummedGenerator::ModulationEnvelopeToPitch)
+    pub(crate) fn modulation_envelope_to_pitch(&self) -> Cents {
+        Cents(f64::from(
+            self.gs(SummedGenerator::ModulationEnvelopeToPitch),
+        ))
     }
 
-    pub(crate) fn initial_filter_cutoff_frequency(&self) -> f32 {
-        SoundFontMath::cents_to_hertz(self.gs(SummedGenerator::InitialFilterCutoffFrequency) as f32)
+    pub(crate) fn initial_filter_cutoff_frequency(&self) -> Hz {
+        SoundFontMath::cents_to_hertz(self.gs(SummedGenerator::InitialFilterCutoffFrequency))
     }
 
-    pub(crate) fn initial_filter_q(&self) -> f32 {
-        0.1_f32 * self.gs(SummedGenerator::InitialFilterQ) as f32
+    /// The resonance, the height of the filter's peak above its DC gain.
+    pub(crate) fn initial_filter_q(&self) -> Db {
+        Db(self.tenths(SummedGenerator::InitialFilterQ))
     }
 
-    pub(crate) fn modulation_lfo_to_filter_cutoff_frequency(&self) -> i32 {
-        self.gs(SummedGenerator::ModulationLfoToFilterCutoffFrequency)
+    pub(crate) fn modulation_lfo_to_filter_cutoff_frequency(&self) -> Cents {
+        Cents(f64::from(
+            self.gs(SummedGenerator::ModulationLfoToFilterCutoffFrequency),
+        ))
     }
 
-    pub(crate) fn modulation_envelope_to_filter_cutoff_frequency(&self) -> i32 {
-        self.gs(SummedGenerator::ModulationEnvelopeToFilterCutoffFrequency)
+    pub(crate) fn modulation_envelope_to_filter_cutoff_frequency(&self) -> Cents {
+        Cents(f64::from(self.gs(
+            SummedGenerator::ModulationEnvelopeToFilterCutoffFrequency,
+        )))
     }
 
-    pub(crate) fn modulation_lfo_to_volume(&self) -> f32 {
-        0.1_f32 * self.gs(SummedGenerator::ModulationLfoToVolume) as f32
+    pub(crate) fn modulation_lfo_to_volume(&self) -> Db {
+        Db(self.tenths(SummedGenerator::ModulationLfoToVolume))
     }
 
     /// The chorus send generator's sum over both zones, in tenths of a percent
@@ -140,52 +155,52 @@ impl<'a> RegionPair<'a> {
         self.sum(SummedGenerator::ReverbEffectsSend)
     }
 
-    pub(crate) fn pan(&self) -> f32 {
-        0.1_f32 * self.gs(SummedGenerator::Pan) as f32
+    /// The zone's pan, `-1` hard left to `1` hard right: the generator's tenths of a
+    /// percent over its 500.
+    pub(crate) fn pan(&self) -> Pan {
+        Pan(f64::from(self.gs(SummedGenerator::Pan)) / 500.0)
     }
 
-    pub(crate) fn delay_modulation_lfo(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayModulationLfo) as f32)
+    pub(crate) fn delay_modulation_lfo(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayModulationLfo))
     }
 
-    pub(crate) fn frequency_modulation_lfo(&self) -> f32 {
-        SoundFontMath::cents_to_hertz(self.gs(SummedGenerator::FrequencyModulationLfo) as f32)
+    pub(crate) fn frequency_modulation_lfo(&self) -> Hz {
+        SoundFontMath::cents_to_hertz(self.gs(SummedGenerator::FrequencyModulationLfo))
     }
 
-    pub(crate) fn delay_vibrato_lfo(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayVibratoLfo) as f32)
+    pub(crate) fn delay_vibrato_lfo(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayVibratoLfo))
     }
 
-    pub(crate) fn frequency_vibrato_lfo(&self) -> f32 {
-        SoundFontMath::cents_to_hertz(self.gs(SummedGenerator::FrequencyVibratoLfo) as f32)
+    pub(crate) fn frequency_vibrato_lfo(&self) -> Hz {
+        SoundFontMath::cents_to_hertz(self.gs(SummedGenerator::FrequencyVibratoLfo))
     }
 
-    pub(crate) fn delay_modulation_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayModulationEnvelope) as f32)
+    pub(crate) fn delay_modulation_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayModulationEnvelope))
     }
 
-    pub(crate) fn attack_modulation_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(
-            self.gs(SummedGenerator::AttackModulationEnvelope) as f32
-        )
+    pub(crate) fn attack_modulation_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::AttackModulationEnvelope))
     }
 
-    pub(crate) fn hold_modulation_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::HoldModulationEnvelope) as f32)
+    pub(crate) fn hold_modulation_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::HoldModulationEnvelope))
     }
 
-    pub(crate) fn decay_modulation_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DecayModulationEnvelope) as f32)
+    pub(crate) fn decay_modulation_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DecayModulationEnvelope))
     }
 
-    pub(crate) fn sustain_modulation_envelope(&self) -> f32 {
-        0.1_f32 * self.gs(SummedGenerator::SustainModulationEnvelope) as f32
+    /// The level the modulation envelope's decay falls to: one less the generator's
+    /// tenths of a percent over a thousand.
+    pub(crate) fn sustain_modulation_envelope(&self) -> Normalized {
+        Normalized::clamped(1.0 - self.tenths(SummedGenerator::SustainModulationEnvelope) / 100.0)
     }
 
-    pub(crate) fn release_modulation_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(
-            self.gs(SummedGenerator::ReleaseModulationEnvelope) as f32
-        )
+    pub(crate) fn release_modulation_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::ReleaseModulationEnvelope))
     }
 
     pub(crate) fn key_number_to_modulation_envelope_hold(&self) -> i32 {
@@ -196,34 +211,35 @@ impl<'a> RegionPair<'a> {
         self.gs(SummedGenerator::KeyNumberToModulationEnvelopeDecay)
     }
 
-    pub(crate) fn delay_volume_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayVolumeEnvelope) as f32)
+    pub(crate) fn delay_volume_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DelayVolumeEnvelope))
     }
 
-    pub(crate) fn attack_volume_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::AttackVolumeEnvelope) as f32)
+    pub(crate) fn attack_volume_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::AttackVolumeEnvelope))
     }
 
-    pub(crate) fn hold_volume_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::HoldVolumeEnvelope) as f32)
+    pub(crate) fn hold_volume_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::HoldVolumeEnvelope))
     }
 
-    pub(crate) fn decay_volume_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DecayVolumeEnvelope) as f32)
+    pub(crate) fn decay_volume_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::DecayVolumeEnvelope))
     }
 
-    pub(crate) fn sustain_volume_envelope(&self) -> f32 {
-        0.1_f32 * self.gs(SummedGenerator::SustainVolumeEnvelope) as f32
+    /// How far the volume envelope's decay falls below its peak.
+    pub(crate) fn sustain_volume_envelope(&self) -> Db {
+        Db(self.tenths(SummedGenerator::SustainVolumeEnvelope))
     }
 
-    pub(crate) fn release_volume_envelope(&self) -> f32 {
-        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::ReleaseVolumeEnvelope) as f32)
+    pub(crate) fn release_volume_envelope(&self) -> Seconds {
+        SoundFontMath::timecents_to_seconds(self.gs(SummedGenerator::ReleaseVolumeEnvelope))
     }
 
-    /// The volume envelope's release in seconds, as a voice starts it: never
+    /// The volume envelope's release as a voice starts it: never
     /// below the 10 ms that avoids a pop.
-    pub(crate) fn release_time(&self) -> f32 {
-        SoundFontMath::max(self.release_volume_envelope(), 0.01_f32)
+    pub(crate) fn release_time(&self) -> Seconds {
+        self.release_volume_envelope().max(Seconds(0.01))
     }
 
     pub(crate) fn key_number_to_volume_envelope_hold(&self) -> i32 {
@@ -234,8 +250,9 @@ impl<'a> RegionPair<'a> {
         self.gs(SummedGenerator::KeyNumberToVolumeEnvelopeDecay)
     }
 
-    pub(crate) fn initial_attenuation(&self) -> f32 {
-        0.1_f32 * self.gs(SummedGenerator::InitialAttenuation) as f32
+    /// The attenuation generator 48 asks for.
+    pub(crate) fn initial_attenuation(&self) -> Db {
+        Db(self.tenths(SummedGenerator::InitialAttenuation))
     }
 
     pub(crate) fn coarse_tune(&self) -> i32 {
@@ -266,6 +283,7 @@ impl<'a> RegionPair<'a> {
 mod tests {
     use super::RegionPair;
     use tutti_fixtures::sf2::{self as font, Inst, Preset, generator};
+    use tutti_units::{Db, Pan, Seconds};
 
     /// The first pair of a font whose preset zone has `preset` generators and
     /// whose instrument zone has `instrument`.
@@ -305,7 +323,7 @@ mod tests {
             vec![(generator::INITIAL_ATTENUATION, 50)],
         );
         let attenuation = with(&font, |p| p.initial_attenuation());
-        assert!((attenuation - 15.0).abs() < 1e-4, "{attenuation}");
+        assert!((attenuation.get() - 15.0).abs() < 1e-12, "{attenuation}");
     }
 
     /// 9.4 with 9.3: times add in timecents and are converted once. A delay of
@@ -318,10 +336,10 @@ mod tests {
         const DELAY_VOL_ENV: u16 = 33;
         let font = pair(vec![(DELAY_VOL_ENV, -1200)], vec![(DELAY_VOL_ENV, 1200)]);
         let delay = with(&font, |p| p.delay_volume_envelope());
-        assert!((delay - 1.0).abs() < 1e-6, "{delay}");
+        assert!((delay.get() - 1.0).abs() < 1e-14, "{delay}");
         let default = pair(vec![], vec![]);
         let delay = with(&default, |p| p.delay_volume_envelope());
-        assert!((delay - 2f32.powf(-10.0)).abs() < 1e-6, "{delay}");
+        assert!((delay.get() - 2f64.powf(-10.0)).abs() < 1e-14, "{delay}");
     }
 
     /// SF2 2.04 sections 9.4 and 10.5: a sum of a preset and an instrument value
@@ -337,19 +355,22 @@ mod tests {
         let font = both(generator::RELEASE_VOL_ENV, 8000);
         let release = with(&font, |p| p.release_time());
         assert!(
-            (release - 2f32.powf(8000.0 / 1200.0)).abs() < 1e-2,
+            (release.get() - 2f64.powf(8000.0 / 1200.0)).abs() < 1e-10,
             "{release}"
         );
         let font = both(generator::INITIAL_ATTENUATION, 1000);
-        assert_eq!(with(&font, |p| p.initial_attenuation()), 144.0);
+        assert_eq!(with(&font, |p| p.initial_attenuation()), Db(144.0));
         let font = both(17, -400);
-        assert_eq!(with(&font, |p| p.pan()), -50.0);
+        assert_eq!(with(&font, |p| p.pan()), Pan(-1.0));
         let font = pair(
             vec![(generator::RELEASE_VOL_ENV, 1200)],
             vec![(generator::RELEASE_VOL_ENV, 1200)],
         );
         let release = with(&font, |p| p.release_time());
-        assert!((release - 4.0).abs() < 1e-4, "inside the range: {release}");
+        assert!(
+            (release.get() - 4.0).abs() < 1e-14,
+            "inside the range: {release}"
+        );
     }
 
     /// The release is never shorter than 10 ms, whatever the generators sum to
@@ -358,9 +379,9 @@ mod tests {
     #[test]
     fn a_release_is_at_least_ten_milliseconds() {
         let default = pair(vec![], vec![]);
-        assert_eq!(with(&default, |p| p.release_time()), 0.01);
+        assert_eq!(with(&default, |p| p.release_time()), Seconds(0.01));
         let long = pair(vec![], vec![(generator::RELEASE_VOL_ENV, 1200)]);
-        assert!((with(&long, |p| p.release_time()) - 2.0).abs() < 1e-5);
+        assert!((with(&long, |p| p.release_time()).get() - 2.0).abs() < 1e-14);
     }
 
     /// 9.3, absolute percent: pan and the effect sends are in 0.1% units, so a
@@ -372,7 +393,7 @@ mod tests {
         const PAN: u16 = 17;
         const REVERB_SEND: u16 = 16;
         let font = pair(vec![], vec![(PAN, -500), (REVERB_SEND, 250)]);
-        assert!((with(&font, |p| p.pan()) + 50.0).abs() < 1e-4);
+        assert_eq!(with(&font, |p| p.pan()), Pan(-1.0));
         assert_eq!(with(&font, |p| p.reverb_effects_send()), 250);
     }
 

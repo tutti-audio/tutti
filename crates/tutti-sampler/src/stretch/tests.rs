@@ -5,10 +5,10 @@
 use super::unit::*;
 use super::vocoder::*;
 use super::*;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Sample};
 use tutti_dsp::{Complex32, FftFloat};
 use tutti_fixtures::signal::rms;
-use tutti_types::ChannelLayout;
 use tutti_units::{
     Amplitude, Cents, Hz, Phase, PhaseIncrement, Radians, ReadRate, SampleRate, Samples,
     StretchFactor,

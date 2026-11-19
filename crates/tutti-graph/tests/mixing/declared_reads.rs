@@ -11,12 +11,13 @@
 use tutti_graph::testing as common;
 
 use common::prepare;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, EventOut, Executor, IntoNode, Io, Law, Node, NodeKey, NodeParts, OutPort,
     ParamEvent, ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, Prepare, Shape, Source,
     Status, TransportPosition, declare_params, param_parts,
 };
-use tutti_types::{ChannelLayout, Param};
+use tutti_types::Param;
 use tutti_units::{Amplitude, Db, Hz, Q, Samples, UnitAddr, UnitParam};
 
 #[derive(Clone)]

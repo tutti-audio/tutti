@@ -6,12 +6,12 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{ForkByClone, Losses, NodeKey};
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::{ParamDelivery, PluginControls, PluginHandle};
 use tutti_plugin_types::PluginTail;
 use tutti_plugin_types::fake::FakePlugin;
-use tutti_types::ChannelLayout;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 

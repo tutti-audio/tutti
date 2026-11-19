@@ -1,6 +1,6 @@
 use super::*;
+use tutti_buffers::{ChannelIndex, MAX_CHANNELS};
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::{ChannelIndex, MAX_CHANNELS};
 
 fn run(flips: &Polarity, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
     let mut out = vec![vec![9.0f32; input[0].len()]; input.len()];

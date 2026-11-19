@@ -41,10 +41,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::fault::FirstError;
+use tutti_buffers::ChannelLayout;
 #[cfg(codec)]
 use tutti_buffers::Source;
 use tutti_buffers::{Float, Wave};
-use tutti_types::ChannelLayout;
 use tutti_units::{SamplePosition, Samples};
 
 use super::Loop;

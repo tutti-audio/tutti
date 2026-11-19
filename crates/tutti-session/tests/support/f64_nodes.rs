@@ -1,9 +1,10 @@
 //! Two nodes in any sample format and a figure `f32` cannot hold: what the
 //! `f64` session tests render.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{Cx, Io, Node, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::{ChannelLayout, Param};
+use tutti_types::Param;
 use tutti_units::{Amplitude, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.

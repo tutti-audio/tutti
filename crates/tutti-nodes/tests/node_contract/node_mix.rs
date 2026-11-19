@@ -15,7 +15,9 @@
 //! Each render is preceded by one block of silence, the block the mix's ramp from
 //! the unit's `WET` start lands on, and only the frames after it are compared.
 
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls};
 use tutti_fixtures::noise;
 use tutti_fixtures::signal::bits;
@@ -26,8 +28,6 @@ use tutti_nodes::{
     DelayNode, FdnNode, FreeverbNode, GateControls, GateNode, InterpolationMode, KeySource,
     MaxDelay, ModDelayNode, PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, Stages,
 };
-use tutti_types::MaxBlock;
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{CompressionRatio, Db, Feedback, Hz, Mix, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;

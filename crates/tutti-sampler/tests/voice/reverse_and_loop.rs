@@ -26,10 +26,10 @@ use tutti_sampler::testing::loop_frames;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
 use tutti_sampler::{Direction, MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, Bpm, Frame, SamplePosition, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

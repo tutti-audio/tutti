@@ -115,7 +115,9 @@
 //!   transport has no negative rate, so the follower stops it, unlocks, and takes
 //!   no position until the pieces ascend again, when it locks afresh.
 
-use tutti_midi_protocol::{Addressed, Read, SmpteFrameRate, SmpteTimecode, Universal, read};
+use tutti_midi_protocol::{
+    Addressed, SmpteFrameRate, SmpteTimecode, Universal, UniversalRead, read,
+};
 use tutti_ump::{Message, SysexAssembler, SysexStep, System, Ump};
 use tutti_units::{Beat, Bpm, Seconds};
 
@@ -719,7 +721,7 @@ impl MtcFollower {
     fn step(&mut self, ump: Ump, at: Seconds, out: &mut impl FnMut(ClockEvent)) {
         self.sysex.begin_block();
         if let SysexStep::Complete(done) = self.sysex.push(ump) {
-            if let Read::Universal(Addressed {
+            if let UniversalRead::Universal(Addressed {
                 message: Universal::MtcFullMessage(full),
                 ..
             }) = read(self.sysex.message(done))

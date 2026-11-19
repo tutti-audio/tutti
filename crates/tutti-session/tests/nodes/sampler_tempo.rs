@@ -5,9 +5,9 @@
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_session::{OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 const RATE: f64 = 48_000.0;

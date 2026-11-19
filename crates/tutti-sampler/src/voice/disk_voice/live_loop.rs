@@ -27,7 +27,7 @@ use crate::testing::loop_frames;
 
 use std::path::Path;
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_graph::{Node, Offset, Prepare, TransportChanges};
 use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate, Samples};

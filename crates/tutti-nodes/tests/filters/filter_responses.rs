@@ -6,13 +6,13 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive_input, prepared};
 use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition};
 use tutti_nodes::{
     CrossoverNode, EqBandNode, LadderFilterNode, LadderType, SvfControls, SvfFilterNode, SvfType,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, Frame, Hz, Q, Resonance, SampleRate, Samples};
 
 const BLOCK: usize = 256;

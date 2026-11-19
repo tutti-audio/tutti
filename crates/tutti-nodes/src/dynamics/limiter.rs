@@ -4,13 +4,13 @@
 //! latency and sounds transparent. For a hard clip that costs nothing and distorts,
 //! a safety catch, see [`BrickwallLimiterNode`](super::BrickwallLimiterNode).
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterLanes, Lookahead, PeakDetection,
     TruePeakError,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Db, SampleRate, Samples, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -255,9 +255,9 @@ mod tests {
     use super::*;
     use crate::test_support::drive_kernel;
     use crate::test_support::{RATE_44K, prepared_at, sample_gain, tick, tick_fed};
+    use tutti_buffers::{ChannelLayout, MaxBlock};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode, Prepare};
-    use tutti_types::{ChannelLayout, MaxBlock};
     use tutti_units::{Amplitude, Latency, Samples, Tail, UnitParam};
 
     // The nodes under test are `f32` (the session's audio format), so their tolerances are

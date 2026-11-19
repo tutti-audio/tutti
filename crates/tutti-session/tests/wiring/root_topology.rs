@@ -6,12 +6,12 @@
 //! rules (`MINUS_3_DB`), not read from another render.
 
 use tutti_buffers::Float;
+use tutti_buffers::MaxBlock;
+use tutti_buffers::{ChannelLayout, ChannelTopology, Placement, Speaker};
 use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::{ForkByClone, RootError};
 use tutti_nodes::testing::Const;
 use tutti_session::{Committed, Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder};
-use tutti_types::MaxBlock;
-use tutti_types::{ChannelLayout, ChannelTopology, Placement, Speaker};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -142,7 +142,7 @@ fn an_unplaceable_declaration_is_refused() {
         FoldError::Unnamed { .. }
     ));
     // Wider than the engine renders.
-    let wide = buses(tutti_types::MAX_CHANNELS as u16 + 1);
+    let wide = buses(tutti_buffers::MAX_CHANNELS as u16 + 1);
     assert!(matches!(
         refused(offline(Session::builder().root_topology(wide), 32)),
         FoldError::Unplaced { .. }
@@ -219,7 +219,7 @@ fn a_refusal_is_a_status_not_a_log_line() {
 
     // A root wider than the engine renders is widened as far as it goes, and the
     // excess is a refusal.
-    let max = tutti_types::MAX_CHANNELS;
+    let max = tutti_buffers::MAX_CHANNELS;
     let err = s.graph().widen_outputs(max + 8).unwrap_err();
     assert_eq!(s.graph_ref().outputs(), max);
     assert!(matches!(

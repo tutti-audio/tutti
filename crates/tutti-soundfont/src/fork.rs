@@ -73,8 +73,8 @@ impl SoundFontUnit {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use tutti_buffers::MaxBlock;
     use tutti_buffers::Planes;
-    use tutti_types::MaxBlock;
 
     use tutti_graph::contract::drive_input;
     use tutti_graph::{

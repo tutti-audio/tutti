@@ -21,11 +21,11 @@
 
 use std::ops::Range;
 use std::sync::Arc;
+use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, MonoMut, Planes, Sample, Wave};
 use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
 use tutti_music::{TimelineSegment, first_frame_at_or_after, snap_to_whole_frame};
-use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_units::{
     Beat, BeatDuration, Bpm, Frame, ReadPosition, ReadRate, SamplePosition, SampleRate, Samples,
 };
@@ -544,7 +544,7 @@ pub(crate) fn read_looped_frame<S: Sample, F: Float>(
 /// has no centre to name, so the sample goes to every channel, as it always
 /// did; so does a width of one or two, where the rule is exactly that, and a
 /// frame of any width other than the one the spread was built for. A width past
-/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) is built for that many, the most a reader writes.
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) is built for that many, the most a reader writes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MonoSpread<F: Float = f32> {
     /// `None`: to every channel. Otherwise the fold of one channel into the
@@ -652,9 +652,9 @@ impl<F: Float> MonoSpread<F> {
 }
 
 /// The stack a wave's channels are gathered into when a fold reads them: twice
-/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS), and more than the 20 speakers
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), and more than the 20 speakers
 /// the vocabulary names, so any placed wave fits.
-pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_types::MAX_CHANNELS;
+pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
 
 /// Where the channels of a wave go in a frame of some width.
 ///
@@ -666,7 +666,7 @@ pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_types::MAX_CHANNELS;
 /// can refuse); the per-frame and per-block writes are allocation-free.
 ///
 /// The frame is the one a reader writes: its width is the node's, at most
-/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) (a wider node's remaining channels are silent).
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) (a wider node's remaining channels are silent).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Place<F: Float = f32> {
     /// A mono wave placed by its spread, or a wave read channel for channel.
@@ -695,7 +695,7 @@ impl<F: Float> Place<F> {
     /// The placement of `wave` into a frame of `width` channels.
     ///
     /// Control side: it allocates. `width` is capped at
-    /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS), the most a reader writes.
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), the most a reader writes.
     ///
     /// # Errors
     ///
@@ -838,9 +838,9 @@ pub(crate) fn interpolate_taps<F: Float>(
 mod tests {
     use super::*;
     use tutti_buffers::Interleaved;
+    use tutti_buffers::MAX_CHANNELS;
     use tutti_graph::{Env, Offset, TransportChanges, TransportPosition};
     use tutti_music::LoopRange;
-    use tutti_types::MAX_CHANNELS;
     use tutti_units::{PlaybackRate, Seconds, SrcRatio};
 
     /// [`super::read_frame`] with the placement a reader of `out`'s width has.
@@ -1294,7 +1294,7 @@ mod tests {
 
     /// A wave of `topology` with `frames` copies of `frame`, so an interpolated
     /// read at any position is the frame itself (a cubic through equal taps).
-    fn constant_wave(topology: tutti_types::ChannelTopology, frame: &[f32]) -> Wave {
+    fn constant_wave(topology: tutti_buffers::ChannelTopology, frame: &[f32]) -> Wave {
         let mut w = Wave::with_topology(topology, SampleRate::SR_48K);
         for _ in 0..16 {
             w.append(Interleaved::new(frame, w.layout()).unwrap())
@@ -1308,7 +1308,7 @@ mod tests {
     /// source and a voice over it are refused too.
     #[test]
     fn a_file_with_an_unnamed_channel_is_refused() {
-        use tutti_types::{ChannelTopology, Speaker::*};
+        use tutti_buffers::{ChannelTopology, Speaker::*};
         let lfe2 =
             ChannelTopology::new([FrontLeft, FrontRight, FrontCenter, LowFrequency, Unknown(5)])
                 .unwrap();
@@ -1346,7 +1346,7 @@ mod tests {
     /// straight.
     #[test]
     fn a_wav_seven_one_is_permuted_to_the_engines_order() {
-        use tutti_types::{ChannelTopology, Speaker::*};
+        use tutti_buffers::{ChannelTopology, Speaker::*};
         let wav = ChannelTopology::new([
             FrontLeft,
             FrontRight,
@@ -1379,7 +1379,7 @@ mod tests {
     /// order to fold to) is `Unplaced`.
     #[test]
     fn a_named_file_wider_than_the_cap_is_refused() {
-        use tutti_types::Speaker::*;
+        use tutti_buffers::Speaker::*;
         let twenty = ChannelTopology::new([
             FrontLeft,
             FrontRight,
@@ -1418,7 +1418,7 @@ mod tests {
         let mut frame = [0.0f32; 12];
         frame[8] = 1.0; // top front left
         let w = Arc::new(constant_wave(
-            tutti_types::ChannelTopology::assumed(ChannelLayout::from(12u16)),
+            tutti_buffers::ChannelTopology::assumed(ChannelLayout::from(12u16)),
             &frame,
         ));
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
@@ -1470,7 +1470,7 @@ mod tests {
                 .err(),
             Some(PlaceError::Fold(FoldError::Unplaced {
                 channel: 5,
-                speaker: tutti_types::Speaker::Unassigned
+                speaker: tutti_buffers::Speaker::Unassigned
             }))
         );
         assert!(
