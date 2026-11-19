@@ -1582,6 +1582,18 @@ pub enum Protocol {
     Reserved(Reserved),
 }
 
+impl Protocol {
+    /// The Protocol a byte reads as: `0x01` MIDI 1.0, `0x02` MIDI 2.0, any
+    /// other value the reserved raw as read.
+    pub(crate) const fn from_raw(raw: u8) -> Self {
+        match raw {
+            0x01 => Self::Midi1,
+            0x02 => Self::Midi2,
+            n => Self::Reserved(Reserved::wire(n)),
+        }
+    }
+}
+
 /// The payload of Stream Configuration Request and Notification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1631,6 +1643,19 @@ pub enum BlockDirection {
     Reserved(Reserved),
 }
 
+impl BlockDirection {
+    /// The direction a value reads as: `0b01` input, `0b10` output, `0b11`
+    /// bidirectional, any other value the reserved raw as read.
+    pub(crate) const fn from_raw(raw: u8) -> Self {
+        match raw {
+            0b01 => Self::Input,
+            0b10 => Self::Output,
+            0b11 => Self::Bidirectional,
+            n => Self::Reserved(Reserved::wire(n)),
+        }
+    }
+}
+
 /// The primary role a Function Block declares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1657,6 +1682,19 @@ pub enum Midi1Port {
     Restricted,
     /// The reserved `0x03`, as read.
     Reserved(Reserved),
+}
+
+impl Midi1Port {
+    /// The port status a value reads as: `0` not a port, `1` unrestricted, `2`
+    /// restricted, any other value the reserved raw as read.
+    pub(crate) const fn from_raw(raw: u8) -> Self {
+        match raw {
+            0 => Self::No,
+            1 => Self::Unrestricted,
+            2 => Self::Restricted,
+            n => Self::Reserved(Reserved::wire(n)),
+        }
+    }
 }
 
 /// A Function Block Info Notification (§7.1.8).

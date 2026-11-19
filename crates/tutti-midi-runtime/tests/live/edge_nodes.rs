@@ -45,7 +45,7 @@ use tutti_fixtures::{EventRig, Seen};
 
 /// A sync node on the first Group, sending `messages`.
 fn sync(messages: SyncMessages) -> SyncOut {
-    SyncOut::new(G).messages(messages)
+    SyncOut::new(G).sending(messages)
 }
 
 /// A source at key 1 whose `ports` event outputs each feed the sink's input

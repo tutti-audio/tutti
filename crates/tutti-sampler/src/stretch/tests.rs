@@ -2,12 +2,12 @@
 //! [`Unit`] end to end, and several reach the private buffers and [`Vocoder`]
 //! beneath it.
 
-use super::buffers::*;
-use super::fft::{Complex32, Fft};
 use super::unit::*;
 use super::vocoder::*;
 use super::*;
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::{Float, Sample};
+use tutti_dsp::{Complex32, FftFloat};
 use tutti_fixtures::signal::rms;
 use tutti_units::{
     Amplitude, Cents, Hz, Phase, PhaseIncrement, Radians, ReadRate, SampleRate, Samples,
@@ -16,6 +16,14 @@ use tutti_units::{
 
 use std::sync::Arc;
 use tutti_dsp::CosineWindow;
+
+// The tests run the `f32` instantiation unless one names its own width: the
+// width every constant below was derived at.
+type Unit = super::Unit<f32>;
+type Vocoder = super::vocoder::Vocoder<f32>;
+type Fft = super::fft::Fft<f32>;
+type SampleFifo = super::buffers::SampleFifo<f32>;
+type OverlapAdd = super::buffers::OverlapAdd<f32>;
 
 /// `size` frames of planar `input` through `Unit::process` into `output`.
 fn planar(u: &mut Unit, size: usize, input: &[Vec<f32>], output: &mut [Vec<f32>]) {
@@ -1733,18 +1741,28 @@ fn a_rate_change_keeps_a_non_default_fft_size() {
 /// FFT), and a flush clears that.
 #[test]
 fn a_nan_source_does_not_panic_and_a_reset_recovers() {
+    a_nan_source_recovers::<f32>();
+}
+
+#[test]
+fn an_f64_nan_source_does_not_panic_and_a_reset_recovers() {
+    a_nan_source_recovers::<f64>();
+}
+
+fn a_nan_source_recovers<F: Float + FftFloat>() {
     let sr = 48_000.0f64;
-    let u = Unit::with_channels(SampleRate::of(sr), 1u16);
+    let u = super::Unit::<F>::with_channels(SampleRate::of(sr), 1u16);
     u.set_stretch_factor(StretchFactor::new(1.5));
     u.set_pitch_cents(Cents::new(300.0));
     let mut au = u.clone();
-    let mut o = [0.0f32];
-    let tone = |i: usize| ((core::f64::consts::TAU * 440.0 * i as f64 / sr).sin() * 0.5) as f32;
+    let mut o = [F::ZERO];
+    let tone =
+        |i: usize| F::from_design((core::f64::consts::TAU * 440.0 * i as f64 / sr).sin() * 0.5);
 
     for i in 0..4096 {
         au.tick(&[tone(i)], &mut o);
     }
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [F::NAN, F::INFINITY, -F::INFINITY] {
         for _ in 0..4096 {
             au.tick(&[bad], &mut o);
         }
@@ -1754,12 +1772,96 @@ fn a_nan_source_does_not_panic_and_a_reset_recovers() {
     let mut out = Vec::new();
     for i in 0..16_384 {
         au.tick(&[tone(i)], &mut o);
-        out.push(o[0]);
+        out.push(o[0].convert_to::<f32>());
     }
     assert!(out.iter().all(|x| x.is_finite()), "reset did not recover");
     assert!(
         rms(&out[8192..]) > 0.05,
         "recovered output is silent: {}",
         rms(&out[8192..])
+    );
+}
+
+/// Two tones and a DC offset through the vocoder at `hop == hop`, as a relative
+/// RMS error against the input itself over the settled interior. The tones are
+/// built in `f64` and cross to `F` once.
+fn unity_reconstruction_error<F: Float + FftFloat>() -> f64 {
+    let sample_rate = 44_100.0;
+    let fft = FftSize::N1024;
+    let size = fft.size().get();
+    let hop = fft.hop().get();
+    let mut v = super::vocoder::Vocoder::<F>::new(Unit::geometry(SampleRate::of(sample_rate), fft));
+    let len = size * 8;
+    let input: Vec<F> = (0..len)
+        .map(|i| {
+            let t = i as f64 / sample_rate;
+            F::from_design(
+                0.4 * (core::f64::consts::TAU * 440.0 * t).sin()
+                    + 0.2 * (core::f64::consts::TAU * 3000.0 * t).sin()
+                    + 0.1,
+            )
+        })
+        .collect();
+    let mut out = vec![F::ZERO; len];
+    let mut written = 0usize;
+    for chunk in input.chunks(hop) {
+        v.input.push(chunk);
+        v.process(hop, hop);
+        written += v.output.drain(&mut out[written..]);
+    }
+    let (mut num, mut den) = (0.0f64, 0.0f64);
+    for i in size..written {
+        let want: f64 = input[i].into();
+        let got: f64 = out[i].into();
+        num += (got - want) * (got - want);
+        den += want * want;
+    }
+    (num / den).sqrt()
+}
+
+/// The vocoder in `f64` reconstructs its input to `f64` round-off. A
+/// transform that narrowed to `f32` anywhere would leave its `f32` round-off,
+/// about 1e-7 relative, so the bound separates the two: the 1024-point
+/// forward and inverse transforms accumulate `log2(1024) = 10` stages of a few
+/// `2^-53`, and the overlap-add sums four frames, which puts the figure near
+/// 1e-14. The bound, 1e-12, is two orders above that and five below `f32`'s.
+#[test]
+fn the_f64_vocoder_reconstructs_its_input_to_f64_round_off() {
+    let error = unity_reconstruction_error::<f64>();
+    assert!(
+        error < 1e-12,
+        "relative error {error:e}, wanted f64 round-off"
+    );
+}
+
+/// The `f32` instantiation at the same figure: ten transform stages of a few
+/// `2^-24` put the round-off near 1e-7, and the bound is 1e-6.
+#[test]
+fn the_f32_vocoder_reconstructs_its_input_to_f32_round_off() {
+    let error = unity_reconstruction_error::<f32>();
+    assert!(error < 1e-6, "relative error {error:e}");
+}
+
+/// A unit in `f64` transposes a tone by the requested interval: +1200 cents
+/// moves 440 Hz to 880 Hz, read off the settled output to within one bin of the
+/// 8192-sample analysis (`48000 / 8192` = 5.9 Hz).
+#[test]
+fn an_f64_unit_transposes_a_tone_an_octave() {
+    let sr = 48_000.0f64;
+    let mut unit = super::Unit::<f64>::with_channels(SampleRate::of(sr), 1u16);
+    unit.set_pitch_cents(Cents::new(1200.0));
+    let mut out = Vec::with_capacity(48_000);
+    for i in 0..48_000 {
+        let mut o = [0.0f64];
+        unit.tick(
+            &[(core::f64::consts::TAU * 440.0 * i as f64 / sr).sin()],
+            &mut o,
+        );
+        out.push(o[0].convert_to::<f32>());
+    }
+    let got = dominant_hz(&out[24_000..24_000 + 8192], sr);
+    assert!(
+        (got - 880.0).abs() < sr / 8192.0,
+        "wanted 880 Hz, got {got:.1} Hz"
     );
 }

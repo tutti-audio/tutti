@@ -38,27 +38,13 @@
 
 use crate::held::Controllers;
 use tutti_graph::{Event, EventWriter, Offset};
-use tutti_ump::{
-    Address, Message, MidiChannel, MidiGroup, NoteKeyEvent, NoteNumber, NoteVelocity, Ump, Voice2,
-};
+use tutti_ump::{Message, NoteKey, NoteKeyEvent, NoteVelocity, Protocol, Ump, Voice2};
 
-/// A note's place on the wire: its Group, Channel and Note Number.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct NoteKey {
-    group: MidiGroup,
-    channel: MidiChannel,
-    note: NoteNumber,
-}
-
-impl NoteKey {
-    fn off(self, at: Offset) -> Event {
-        let address = Address {
-            group: self.group,
-            channel: self.channel,
-        };
-        let off = Voice2::note_off(self.note, NoteVelocity::MIN);
-        Event::midi(at, Message::Midi2(address, off))
-    }
+/// The off a ledger owes `key`: a MIDI 2.0 Note Off at velocity 0 on its Group,
+/// Channel and Note Number.
+fn owed_off(key: NoteKey, at: Offset) -> Event {
+    let off = Voice2::note_off(key.note(), NoteVelocity::MIN);
+    Event::midi(at, Message::Midi2(key.address(), off))
 }
 
 /// A note message, read once. A MIDI 1.0 Note On at velocity 0 ends a note; a
@@ -74,14 +60,12 @@ impl Class {
         let (Some(address), Some(event)) = (ump.address(), ump.note_key_event()) else {
             return Self::Other;
         };
-        let key = |key: tutti_ump::NoteKey| NoteKey {
-            group: address.group,
-            channel: address.channel,
-            note: key.note(),
-        };
+        // A note is one key whichever protocol carried it: a MIDI 1.0 On is
+        // ended by a MIDI 2.0 Off of the same Group, Channel and Note Number.
+        let key = |key: NoteKey| NoteKey::new(Protocol::Midi2, address, key.note());
         match event {
-            NoteKeyEvent::On(k) => Self::On(key(k)),
-            NoteKeyEvent::Off(k) => Self::Off(key(k)),
+            NoteKeyEvent::On(k) => key(k).map_or(Self::Other, Self::On),
+            NoteKeyEvent::Off(k) => key(k).map_or(Self::Other, Self::Off),
             NoteKeyEvent::Sustain { .. } => Self::Other,
         }
     }
@@ -245,7 +229,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
             if full || !e.owing() {
                 return true;
             }
-            let taken = self.out.push(e.key.off(at)).is_ok();
+            let taken = self.out.push(owed_off(e.key, at)).is_ok();
             self.out.recovered();
             full = !taken;
             if taken {
@@ -287,7 +271,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
             return;
         };
         if let Some(held) = self.ledger.entries[i].held {
-            if self.out.push(key.off(at)).is_err() {
+            if self.out.push(owed_off(key, at)).is_err() {
                 // The old note stays, its off owed, and the new one does not
                 // start.
                 self.owe(i);
@@ -408,7 +392,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
             // What was refused belongs to the pass that is ending.
             e.refused = 0;
             let Some(held) = e.held else { return false };
-            if !full && self.out.push(e.key.off(at)).is_ok() {
+            if !full && self.out.push(owed_off(e.key, at)).is_ok() {
                 if held == Held::Owing {
                     self.out.recovered();
                 }

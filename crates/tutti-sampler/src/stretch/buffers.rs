@@ -4,6 +4,12 @@
 //! [`OverlapAdd`] is the output side (accumulate overlapping synthesis frames,
 //! drain what has fully summed). Neither knows what a spectrum is.
 
+use tutti_buffers::Float;
+
+/// What the overlap-add accumulator snaps to zero below: `f32`'s smallest
+/// normal, far under any audio's noise floor in either width.
+const FLUSH: f64 = 1.175_494_350_822_287_5e-38;
+
 /// The wrap arithmetic both rings below share.
 ///
 /// A power-of-two capacity plus two monotonic cursors. The cursors never wrap,
@@ -16,17 +22,17 @@
 /// genuinely different interfaces ([`SampleFifo`], [`OverlapAdd`]), and exposing
 /// the union of their operations is what let the original code index one ring
 /// with the other's cursor.
-pub(super) struct Ring {
-    pub(super) data: Vec<f32>,
+pub(super) struct Ring<F: Float> {
+    pub(super) data: Vec<F>,
     pub(super) write: usize,
     pub(super) read: usize,
 }
 
-impl Ring {
+impl<F: Float> Ring<F> {
     /// `capacity` is rounded up to a power of two so wrapping is a mask.
     pub(super) fn new(capacity: usize) -> Self {
         Self {
-            data: vec![0.0; capacity.next_power_of_two()],
+            data: vec![F::ZERO; capacity.next_power_of_two()],
             write: 0,
             read: 0,
         }
@@ -65,7 +71,7 @@ impl Ring {
     }
 
     pub(super) fn reset(&mut self) {
-        self.data.fill(0.0);
+        self.data.fill(F::ZERO);
         self.write = 0;
         self.read = 0;
     }
@@ -78,9 +84,9 @@ impl Ring {
 /// so a frame is read four times over at 75% overlap. That is why this reads
 /// through [`peek`](Self::peek) and advances separately, rather than popping:
 /// the data outlives any single read.
-pub(super) struct SampleFifo(pub(super) Ring);
+pub(super) struct SampleFifo<F: Float>(pub(super) Ring<F>);
 
-impl SampleFifo {
+impl<F: Float> SampleFifo<F> {
     pub(super) fn new(capacity: usize) -> Self {
         Self(Ring::new(capacity))
     }
@@ -91,7 +97,7 @@ impl SampleFifo {
     }
 
     #[inline]
-    pub(super) fn push(&mut self, samples: &[f32]) {
+    pub(super) fn push(&mut self, samples: &[F]) {
         for &s in samples {
             let i = self.0.mask(self.0.write);
             self.0.data[i] = s;
@@ -101,7 +107,7 @@ impl SampleFifo {
 
     /// Sample at `offset` past the read cursor, without consuming it.
     #[inline]
-    pub(super) fn peek(&self, offset: usize) -> f32 {
+    pub(super) fn peek(&self, offset: usize) -> F {
         self.0.data[self.0.mask(self.0.read + offset)]
     }
 
@@ -141,13 +147,13 @@ impl SampleFifo {
 /// The two rings share every cursor operation, which is why they are one type:
 /// a `window_sum` that advanced independently of `data` would divide by a
 /// neighbour's denominator, and nothing would error.
-pub(super) struct OverlapAdd {
-    data: Ring,
+pub(super) struct OverlapAdd<F: Float> {
+    data: Ring<F>,
     /// `Σw²` per sample, accumulated in lockstep with `data`.
-    window_sum: Ring,
+    window_sum: Ring<F>,
 }
 
-impl OverlapAdd {
+impl<F: Float> OverlapAdd<F> {
     pub(super) fn new(capacity: usize) -> Self {
         Self {
             data: Ring::new(capacity),
@@ -177,15 +183,18 @@ impl OverlapAdd {
     /// denominator, which would read as a gain bug rather than as a missing
     /// accumulation.
     ///
-    /// Flushes subnormals: this accumulator is IIR-like, so on a silent tail it
-    /// decays into the subnormal range where x86 FPUs trap into microcode and
-    /// spike. Snapping to zero never changes audible output — subnormals are
-    /// below ~1.2e-38, far under the noise floor of 32-bit audio.
+    /// Flushes what is below [`FLUSH`]. This accumulator is IIR-like, so on a
+    /// silent tail it decays into the subnormal range where x86 FPUs trap into
+    /// microcode and spike. Snapping to zero never changes audible output.
     #[inline]
-    pub(super) fn add_at(&mut self, offset: usize, value: f32, weight: f32) {
+    pub(super) fn add_at(&mut self, offset: usize, value: F, weight: F) {
         let i = self.data.mask(self.data.write + offset);
         let sum = self.data.data[i] + value;
-        self.data.data[i] = if sum.is_subnormal() { 0.0 } else { sum };
+        self.data.data[i] = if sum.abs() < F::from_design(FLUSH) {
+            F::ZERO
+        } else {
+            sum
+        };
 
         // The window sum needs no subnormal flush: it is a sum of squares of a
         // window that is zero only at its endpoints, so it does not decay
@@ -199,8 +208,8 @@ impl OverlapAdd {
     #[inline]
     pub(super) fn clear_at(&mut self, offset: usize) {
         let i = self.data.mask(self.data.write + offset);
-        self.data.data[i] = 0.0;
-        self.window_sum.data[i] = 0.0;
+        self.data.data[i] = F::ZERO;
+        self.window_sum.data[i] = F::ZERO;
     }
 
     /// Advance the write cursor by one synthesis hop, publishing that many
@@ -220,15 +229,15 @@ impl OverlapAdd {
     /// normalize meaningfully, and dividing would amplify whatever is there by
     /// an unbounded factor.
     #[inline]
-    pub(super) fn drain(&mut self, out: &mut [f32]) -> usize {
+    pub(super) fn drain(&mut self, out: &mut [F]) -> usize {
         let count = out.len().min(self.available());
         for (i, slot) in out.iter_mut().take(count).enumerate() {
             let at = self.data.mask(self.data.read + i);
             let sum = self.window_sum.data[at];
-            *slot = if sum > 1e-8 {
+            *slot = if sum > F::lit(1e-8) {
                 self.data.data[at] / sum
             } else {
-                0.0
+                F::ZERO
             };
         }
         self.data.read += count;

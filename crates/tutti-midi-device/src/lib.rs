@@ -152,9 +152,9 @@ pub use dialect::{ChannelVoice, Dialect, Expression, JrTimestamps, Midi1Rate, No
 #[cfg(feature = "serde")]
 pub use endpoint::NotAnEndpoint;
 pub use endpoint::{
-    BlockError, Capabilities, ChangeError, Configuration, Endpoint, EndpointChange, EndpointReply,
-    FunctionBlock, FunctionBlockBuilder, MAX_FUNCTION_BLOCKS, MidiIdentity, NoProtocol, Supports,
-    UMP_VERSION,
+    BlockError, BlockField, Capabilities, ChangeError, Configuration, Endpoint, EndpointChange,
+    EndpointReply, FunctionBlock, FunctionBlockBuilder, MAX_FUNCTION_BLOCKS, MidiIdentity,
+    NoProtocol, Supports, UMP_VERSION,
 };
 pub use endpoint_discovery::{
     DiscoveryAction, DiscoveryEnding, EndpointDiscovery, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT,

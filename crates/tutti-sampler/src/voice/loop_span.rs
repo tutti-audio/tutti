@@ -332,7 +332,7 @@ impl LoopSpan {
         let k = frame - fade_start;
         Some((
             self.resume - self.fade + k,
-            F::from_f64((k + 1) as f64) / F::from_f64((self.fade + 1) as f64),
+            F::from_design((k + 1) as f64 / (self.fade + 1) as f64),
         ))
     }
 
@@ -459,6 +459,33 @@ mod tests {
         assert_eq!(span.fade_at::<f32>(20), None);
         assert_eq!(span.resume(), 10);
         assert_eq!(span.place(20.0), (10.0, true));
+    }
+
+    /// A long fade's weight is the closed form `(k + 1) / (fade + 1)` rounded
+    /// once: within half a unit in the last place of the width (`2^-25` in `f32`
+    /// and `2^-54` in `f64` for a weight in `[0.5, 1)`). The fade is 30 million
+    /// frames, past `2^24`, where `f32` holds only even counts: a weight formed
+    /// from the two counts as `f32` rounds three times and lands `1.45 * 2^-24`
+    /// off at this frame, three times the bound.
+    #[test]
+    fn a_long_fades_weight_is_its_closed_form_rounded_once() {
+        let fade = 30_000_000usize;
+        let span = LoopSpan::unbounded(40_000_000, 80_000_000, fade).expect("a loop");
+        let k = 25_000_002usize;
+        let frame = 80_000_000 - fade + k;
+        let exact = (k + 1) as f64 / (fade + 1) as f64;
+        let (_, w32) = span.fade_at::<f32>(frame).expect("inside the fade");
+        assert!((f64::from(w32) - exact).abs() <= 2.0_f64.powi(-25) + 2.0_f64.powi(-54));
+        let (_, w64) = span.fade_at::<f64>(frame).expect("inside the fade");
+        // The `f64` weight in `[0.5, 1)` is `m * 2^-53` for an integer `m`; it is the
+        // closed form to half a step when `|m (fade + 1) - (k + 1) 2^53|` is at most
+        // `(fade + 1) 2^52`, an integer comparison with no division to share.
+        let m = (w64 * 2.0_f64.powi(53)) as i128;
+        let off = (m * (fade as i128 + 1) - (k as i128 + 1) * (1_i128 << 53)).abs();
+        assert!(
+            off <= (fade as i128 + 1) * (1_i128 << 52),
+            "f64 weight {w64}"
+        );
     }
 
     /// With too little before `start`, the fade goes into the loop's head

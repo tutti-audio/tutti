@@ -15,7 +15,7 @@
 //! [`Phase::MidiOut`]: crate::Phase::MidiOut
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 
@@ -75,8 +75,8 @@ pub(crate) const MIDI_INPUT_INLET_CAPACITY: tutti_graph::EventCapacity =
 /// not late. The spacing between events is kept; the
 /// whole is that much later than the OS delivered it.
 #[cfg(feature = "midi-hardware")]
-pub(crate) fn input_lead(block: Samples, rate: tutti_units::SampleRate) -> Duration {
-    Duration::from_secs_f64(block.to_seconds(rate).get())
+pub(crate) fn input_lead(block: Samples, rate: tutti_units::SampleRate) -> std::time::Duration {
+    std::time::Duration::from_secs_f64(block.to_seconds(rate).get())
 }
 
 /// The engine's block clock as the device threads read it
@@ -120,9 +120,12 @@ impl OutputClockSource {
     }
 
     /// The audio output's latency as the device reports it now: read on every
-    /// drain, for it can arrive or change after a restart.
-    fn audio_output(&self) -> Option<Duration> {
-        self.audio_latency.get()
+    /// drain, for it can arrive or change after a restart. The OS reports a
+    /// `Duration`; this is the one place it becomes `Seconds`.
+    fn audio_output(&self) -> Option<tutti_units::Seconds> {
+        self.audio_latency
+            .get()
+            .map(|latency| tutti_units::Seconds(latency.as_secs_f64()))
     }
 
     /// The timing of a drain at `now`: the latest block's map, `now` and the
@@ -1278,7 +1281,7 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// **A clip does not loop itself**: it plays on the transport's timeline,
     /// so a repeat is the transport's loop
-    /// ([`Session::set_loop`](crate::Session::set_loop)) over the beats it
+    /// (`session.transport_handle().looping()`) over the beats it
     /// occupies.
     ///
     /// # Examples
@@ -1792,7 +1795,22 @@ impl<F: Float> Midi<'_, F> {
             None => Follow::new(core, tap, self.settings.tempo_map(), self.meter.current()),
         });
         self.state.sync_following();
+        self.discard_staged_maps(follow.meter);
         Ok(())
+    }
+
+    /// Drops the tempo (and, with `meter`, the meter) a write staged and no
+    /// update has published: a follower owns the maps from here, and the
+    /// project's are the ones in force, so the staged ones must not publish
+    /// over what an unfollow restores.
+    fn discard_staged_maps(&self, meter: bool) {
+        use crate::value::SlotId;
+        let ids: &[SlotId] = if meter {
+            &[SlotId::Tempo, SlotId::Meter]
+        } else {
+            &[SlotId::Tempo]
+        };
+        self.graph.value_table().discard_pending(ids);
     }
 
     /// Stops following ([`follow_tempo`](Self::follow_tempo)): publishes the
@@ -1892,6 +1910,9 @@ impl<F: Float> Midi<'_, F> {
             self.meter.current(),
         ));
         self.state.sync_following();
+        if follow.kind == tutti_midi_runtime::ClockKind::BeatClock {
+            self.discard_staged_maps(true);
+        }
         Ok(())
     }
 
@@ -2061,6 +2082,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
     use tutti_fixtures::midi;
     use tutti_units::SampleRate;
 
@@ -2306,9 +2328,9 @@ mod tests {
         };
         let base = sent_with(OutputTerms::default());
         let terms = OutputTerms {
-            audio_output: Some(Duration::from_millis(30)),
+            audio_output: Some(tutti_units::Seconds(0.03)),
             latency: OutputLatency::new(
-                Duration::from_millis(5),
+                tutti_units::Seconds(0.005),
                 tutti_midi_runtime::OutputOffset::new(tutti_units::Seconds(0.25)).unwrap(),
             )
             .unwrap(),

@@ -301,7 +301,7 @@ fn machine_control_follows_beside_a_beat_clock_and_owns_no_tempo() {
         .expect("follows the clock");
     follow(&mut s);
     assert_eq!(
-        crate::tempo::set_tempo(&s, tutti_units::Bpm::of(100.0))
+        crate::tempo::set_tempo(&mut s, tutti_units::Bpm::of(100.0))
             .unwrap_err()
             .kind,
         ValueErrorKind::Refused(SetRefusal::Following)
