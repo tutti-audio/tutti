@@ -584,7 +584,8 @@ pub mod modulation {
         SignalKind, TargetDecl,
     };
     pub use tutti_modulation::{
-        Clock, LayerId, Leg, PlayGrid, ProgramTime, RateAnchor, RouteKey, SourceKey, TargetKey,
+        Clock, LayerId, Leg, LiveDepth, PlayGrid, ProgramTime, RateAnchor, RouteKey, SourceKey,
+        TargetKey,
     };
 }
 
