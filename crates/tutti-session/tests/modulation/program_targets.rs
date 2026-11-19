@@ -354,7 +354,6 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
 #[test]
 fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     let mut s = tutti_session::Session::builder()
-        .outputs_floor(tutti_buffers::ChannelLayout::MONO)
         .max_block(tutti_buffers::MaxBlock::of(tutti_units::Samples(128)))
         .build()
         .expect("builds");
@@ -376,10 +375,10 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     for _ in 0..4 {
         let _ = s.update();
     }
-    let mut block = vec![0.0f32; 128];
+    let mut block = vec![0.0f32; 2 * 128];
     let render = |s: &tutti_session::Session, block: &mut Vec<f32>| {
         s.render(
-            &mut tutti_buffers::InterleavedMut::new(block, tutti_buffers::ChannelLayout::MONO)
+            &mut tutti_buffers::InterleavedMut::new(block, tutti_buffers::ChannelLayout::STEREO)
                 .unwrap(),
         );
     };
@@ -398,14 +397,24 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..8 {
             render(&s, &mut block);
+            eprintln!("DBG {} {}", block[0], block[127]);
         }
     });
-    let gap = (block[127] - before[127]).abs();
+    eprintln!("DBG before {} {}", before[0], before[127]);
+    // The probe is on output 0 of a stereo mix: the last frame's left sample.
+    // The transport is stopped at beat 0. The route is `Hold`, which offsets
+    // nothing below full scale, so the cutoff is the new ramp's first value,
+    // 900, within the `f32` the block holds.
+    let want = 900.0f64;
+    let got = f64::from(block[2 * 127]);
     assert!(
-        gap > 100.0,
-        "the republished program and curve were adopted: {} against {}",
-        block[127],
-        before[127]
+        (got - want).abs() < 4.0 * f64::from(f32::EPSILON) * want,
+        "the republished curve and program are adopted: {got} is not {want}"
+    );
+    // The program before the update read at most 100 + 0.5 * 1000 there.
+    assert!(
+        f64::from(before[2 * 127]) <= 600.0 + 1e-3,
+        "the block before the update is on the old program"
     );
 }
 
