@@ -395,12 +395,16 @@ pub fn gain_reaches_the_output<S: Subject>() {
     rig.at(rig.t(STAMP), note_on(0, 60, 100));
     rig.render_to(rig.t(STAMP) + 4_000);
     assert!(rig.peak(rig.t(STAMP) + 3_000..rig.t(STAMP) + 4_000) > 1e-4);
-    rig.handle.set_gain(Amplitude(0.0));
+    rig.session
+        .set(rig.handle.gain().to(Amplitude(0.0)))
+        .unwrap();
     let at = rig.frame();
     rig.render_to(at + 3 * BLOCK);
     let p = rig.peak(at + 2 * BLOCK..at + 3 * BLOCK);
     assert_eq!(p, 0.0, "gain 0 still sounds {p}");
-    rig.handle.set_gain(Amplitude(1.0));
+    rig.session
+        .set(rig.handle.gain().to(Amplitude(1.0)))
+        .unwrap();
     let at = rig.frame();
     rig.render_to(at + 4 * BLOCK);
     assert!(

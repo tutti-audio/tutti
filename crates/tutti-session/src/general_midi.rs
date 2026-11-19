@@ -16,13 +16,12 @@
 //! the unit's outputs itself, through [`Graph::connect`](crate::Graph::connect).
 
 use tutti_buffers::BusTopology;
-use tutti_graph::ParamSet;
 use tutti_nodes::{BusStripNode, FreeverbNode, ModDelayNode};
 use tutti_soundfont::SoundFontUnit;
-use tutti_units::{Amplitude, UnitParam};
+use tutti_units::Amplitude;
 
 use crate::instrument::AddedInstrument;
-use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session};
+use crate::{InstrumentHandle, Key, OutPort, ParamTarget, RemoveError, Session};
 
 /// A SoundFont unit wired to its chorus and reverb, and what they sum to.
 ///
@@ -34,9 +33,9 @@ use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session};
 /// The [`instrument`](Self::instrument) is the unit's handle as any
 /// instrument has it: MIDI is sent through it, and its gain is the **dry
 /// level** (a strip on the dry pair only, before the sum). The setup's own
-/// fader, [`set_gain`](Self::set_gain), is after the sum and so takes the
+/// fader, [`gain`](Self::gain), is after the sum and so takes the
 /// effects with it; so does muting it, which is the graph's, not a method
-/// here: `Graph::set_mode(gm.out(), NodeMode::Muted)`. A send's level is the font's
+/// here: `session.set(gm.out().mode().to(NodeMode::Muted))`. A send's level is the font's
 /// and the channel's (CC 91 and CC 93), not a gain's.
 #[derive(Debug)]
 pub struct GeneralMidi {
@@ -44,7 +43,6 @@ pub struct GeneralMidi {
     chorus: Key<ModDelayNode<f32>>,
     reverb: Key<FreeverbNode<f32>>,
     strip: Key<BusStripNode>,
-    strip_params: ParamSet,
 }
 
 impl GeneralMidi {
@@ -78,11 +76,12 @@ impl GeneralMidi {
         self.strip
     }
 
-    /// Sets the gain of the whole mix, a linear amplitude: the dry pair and
-    /// both effects. A store into the strip's cell, read once per block.
-    pub fn set_gain(&self, gain: Amplitude) {
-        // The param cell is an `f32` word: the gain narrows once.
-        self.strip_params.set(UnitParam::Volume, gain.get());
+    /// The gain of the whole mix, a linear amplitude: the dry pair and both
+    /// effects, the fader's volume. `session.set(gm.gain().to(Amplitude::new(0.5)))`
+    /// writes it.
+    #[must_use]
+    pub fn gain(&self) -> ParamTarget<Amplitude> {
+        self.strip.volume()
     }
 
     /// Takes the whole setup out of the graph: the unit with its queue and
@@ -140,7 +139,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             BusTopology::STEREO,
         ));
         let (reverb, _) = graph.add(FreeverbNode::<f32>::general_midi());
-        let (strip, strip_params) = graph.add(BusStripNode::stereo());
+        let (strip, _) = graph.add(BusStripNode::stereo());
         // The unit's outputs: dry L/R, chorus send L/R, reverb send.
         graph.connect(OutPort::new(unit, 2), chorus.input(0))?;
         graph.connect(OutPort::new(unit, 3), chorus.input(1))?;
@@ -158,7 +157,6 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             chorus,
             reverb,
             strip,
-            strip_params,
         })
     }
 }

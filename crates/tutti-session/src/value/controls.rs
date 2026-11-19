@@ -12,18 +12,21 @@ use std::sync::{Arc, Mutex};
 
 use tutti_graph::{NodeKey, NodeMode, PassError};
 use tutti_rt::LockExt;
-use tutti_units::Mix;
+use tutti_units::{Amplitude, Mix};
 
 use super::error::SetRefusal;
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
-use super::target::{Target, TargetId, sealed, target_builders};
+use super::target::{Effective, Moved, ScalarTarget, Target, TargetId, sealed, target_builders};
+use crate::{Edge, Graph, InPort, OutPort};
+use tutti_buffers::Float;
 
 /// A control written and not yet handed to the editor.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Write {
     Mode(NodeKey, NodeMode),
     Mix(NodeKey, Mix),
+    Gain(Edge, Amplitude),
 }
 
 impl Write {
@@ -31,6 +34,7 @@ impl Write {
     fn same_control(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Mode(a, _), Self::Mode(b, _)) | (Self::Mix(a, _), Self::Mix(b, _)) => a == b,
+            (Self::Gain(a, _), Self::Gain(b, _)) => a == b,
             _ => false,
         }
     }
@@ -53,7 +57,15 @@ impl Queue {
     pub(crate) fn forget_node(&self, node: NodeKey) {
         self.0.lock_recover().retain(|w| match w {
             Write::Mode(n, _) | Write::Mix(n, _) => *n != node,
+            Write::Gain(..) => true,
         });
+    }
+
+    /// Drops the writes to `edge`'s gain.
+    pub(crate) fn forget_edge(&self, edge: Edge) {
+        self.0
+            .lock_recover()
+            .retain(|w| !matches!(w, Write::Gain(e, _) if *e == edge));
     }
 
     /// Every write since the last call, in the order each control was first
@@ -162,6 +174,41 @@ impl Slot<Mix> for MixSlot {
     }
 }
 
+/// One edge's gain lane: the [`Slot`] of its [`GainTarget`].
+pub(crate) struct GainSlot {
+    edge: Edge,
+    value: Mutex<Amplitude>,
+    queue: Arc<Queue>,
+}
+
+impl GainSlot {
+    pub(crate) fn new(edge: Edge, seed: Amplitude, queue: Arc<Queue>) -> Arc<Self> {
+        Arc::new(Self {
+            edge,
+            value: Mutex::new(seed),
+            queue,
+        })
+    }
+}
+
+impl Slot<Amplitude> for GainSlot {
+    fn load(&self) -> Amplitude {
+        *self.value.lock_recover()
+    }
+
+    fn check(&self, value: &Amplitude) -> Result<(), SetRefusal> {
+        if !value.get().is_finite() {
+            return Err(SetRefusal::NotFinite);
+        }
+        Ok(())
+    }
+
+    fn store(&self, value: &Amplitude) {
+        *self.value.lock_recover() = *value;
+        self.queue.push(Write::Gain(self.edge, *value));
+    }
+}
+
 keyed_slot_target!(
     /// A node's [`NodeMode`], as [`Key::mode`](crate::Key::mode) names it:
     /// [`Active`](NodeMode::Active) runs the node,
@@ -242,4 +289,72 @@ impl MixTarget {
     pub const fn node(self) -> NodeKey {
         self.0
     }
+}
+
+keyed_slot_target!(
+    /// The gain of one audio edge, a weight of the sum its sink holds, as
+    /// [`GainTarget::of`] names it: `1.0` is the plain sum, `0.0` mutes the
+    /// edge and a negative gain inverts it. A route onto the edge
+    /// ([`Edge`]) moves the gain around this value.
+    ///
+    /// Stored and landed as [`ModeTarget`] is, and a move ramps over one
+    /// block. NaN and infinity are refused with [`SetRefusal::NotFinite`].
+    /// The edge has the target while it has a gain lane; a call that names
+    /// an edge whose lane is gone fails with `NoSuchTarget`.
+    GainTarget,
+    Amplitude,
+    Edge,
+    Gain
+);
+
+impl Moved for GainTarget {}
+impl ScalarTarget for GainTarget {
+    type Unit = Amplitude;
+}
+
+impl GainTarget {
+    /// The value the audio thread uses, which a route onto the edge may have
+    /// moved from the base.
+    pub fn effective(self) -> Effective<Self> {
+        Effective { target: self }
+    }
+
+    /// The gain of the wire `from -> to` in `graph`: the edge has a target
+    /// once it has a gain lane, which only its declaration adds
+    /// ([`Connection::gain`](crate::Connection::gain)).
+    ///
+    /// # Errors
+    ///
+    /// [`GainTargetError::NoLane`] when the wire is not in the graph or has no
+    /// gain lane, and [`GainTargetError::BusLane`] for a lane a bus edge lowers
+    /// to.
+    pub fn of<F: Float>(
+        graph: &Graph<F>,
+        from: OutPort,
+        to: InPort,
+    ) -> Result<Self, GainTargetError> {
+        graph.gain_target(Edge::new(from, to))
+    }
+
+    /// The edge the gain is of.
+    #[must_use]
+    pub const fn edge(self) -> Edge {
+        self.0
+    }
+}
+
+/// Why [`GainTarget::of`] named no gain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum GainTargetError {
+    /// The edge is not in the graph, or has no gain lane: a lane comes from
+    /// the wire's declaration ([`Connection::gain`](crate::Connection::gain))
+    /// and is never added by a write.
+    #[error("no gain lane on {0:?}")]
+    NoLane(Edge),
+    /// The edge is a lane a bus edge lowers to
+    /// ([`Graph::connect`](crate::Graph::connect) between buses): its weight is
+    /// the fold's, and a bus edge carries no gain of its own.
+    #[error("the edge is a lane of a bus edge: {0:?}")]
+    BusLane(Edge),
 }

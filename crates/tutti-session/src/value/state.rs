@@ -15,7 +15,7 @@ use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Fail, IntoAssign, IntoRead, Readable, Stageable};
-use super::controls::{MixSlot, ModeSlot, NodeControl, Queue, Write};
+use super::controls::{GainSlot, MixSlot, ModeSlot, NodeControl, Queue, Write};
 use super::error::{ValueError, ValueErrorKind};
 use super::slot::{self, NodeSlots, SlotCell, SlotId};
 use super::target::AnyTarget;
@@ -254,6 +254,36 @@ impl ValueTable {
             )
         };
         self.queue.forget_node(node);
+        drop(gone);
+    }
+
+    /// Gives `edge` a gain target holding `seed`, unless it has one. Control
+    /// thread.
+    pub(crate) fn provide_gain(&self, edge: crate::Edge, seed: tutti_units::Amplitude) {
+        let mut params = self.params.lock_recover();
+        params.slots.entry(SlotId::Gain(edge)).or_insert_with(|| {
+            slot::erase(GainSlot::new(edge, seed, Arc::clone(&self.queue)) as SlotCell<_>)
+        });
+    }
+
+    /// The edges that have a gain target.
+    pub(crate) fn gain_edges(&self) -> Vec<crate::Edge> {
+        self.params
+            .lock_recover()
+            .slots
+            .keys()
+            .filter_map(|id| match id {
+                SlotId::Gain(edge) => Some(*edge),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Forgets the gain target of `edge`, and what was written to it and not
+    /// yet handed to the editor. Control thread.
+    pub(crate) fn retire_gain(&self, edge: crate::Edge) {
+        let gone = self.params.lock_recover().slots.remove(&SlotId::Gain(edge));
+        self.queue.forget_edge(edge);
         drop(gone);
     }
 
