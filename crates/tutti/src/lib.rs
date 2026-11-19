@@ -226,6 +226,8 @@ pub use tutti_session::{
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
 pub use tutti_session::{ParamRef, RouteSpec};
+#[cfg(all(feature = "session", feature = "plugin"))]
+pub use tutti_session::{PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{SamplerEvent, SamplerLoad};
 
@@ -649,8 +651,8 @@ pub mod plugin {
         InvalidContentScale, KeyEvent, KeyUse, LatencyVerdict, Load, Locator, Measured, NotChecked,
         ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainUnit, PluginClass,
         PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig, StateError,
-        StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType,
-        Vst3SubCategories,
+        StateHash, TailVerdict, UnknownExtension, UnknownParam, Verdict, VersionText, Vst2Category,
+        Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
     pub use tutti_plugin_types::{
